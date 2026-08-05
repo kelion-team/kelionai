@@ -127,7 +127,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
    **NU prin Kelion**: `secret_pune` refuză din construcție orice arată a card
    (13-19 cifre + Luhn) și rămâne așa. Și nu mi-l scrie mie în chat — un număr
    de card scris într-o conversație e un card compromis, indiferent cine citește.
-4. **Reconectarea Google**, dacă vrem Photos/YouTube personal (D3).
+4. **Reconectarea Google**, dacă vrem Photos/YouTube personal (D3 - actualizat în cod cu noile scope-uri `youtube`, `youtube.upload`, `photospicker.mediaitems.readonly`; cerere de consent/re-login necesară utilizatorilor existenți).
 5. **Permisiunile de cameră și locație** pe telefon.
 
 ---

@@ -61,6 +61,9 @@ const FULL_SCOPES = [
   // dead scope here would only promise Photos on the consent screen and never
   // deliver it.
   'https://www.googleapis.com/auth/youtube.readonly',
+  'https://www.googleapis.com/auth/youtube',
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/photospicker.mediaitems.readonly',
   // GEMINI ENTERPRISE (Adrian, 4 aug: „rezolvă real — agenții în consolă"):
   // crearea agenților în Discovery Engine cere scope-ul cloud-platform ȘI o
   // LICENȚĂ de USER (contul de serviciu al aplicației e refuzat de Google,
