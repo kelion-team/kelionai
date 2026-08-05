@@ -93,6 +93,7 @@ export const isOwnerEmail = (email: string): boolean => email.toLowerCase() === 
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
+import { neagaUneltele } from '../services/negareUnelte.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
@@ -2306,7 +2307,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             // instead of showing/saying garbage or nothing. `sawVisible` here =
             // a SURFACE a tool already pushed this turn (map/doc/build frame) —
             // the instant ack no longer flips it (conteazaCaVizibil).
-            if (stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim() || textFlowed || sawVisible) { r = cand; break }
+            const textCurat = stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim()
+            // GARDUL DETERMINIST ANTI-NEGARE (Adrian, 5 aug: „kelion îmi zice
+            // că nu are unelte"; „asta e un soft — ce cablezi, aia face").
+            // Un răspuns care NEAGĂ uneltele, când tura chiar i le-a oferit,
+            // e marfă stricată: NU pleacă la om — rotim, ca la răspunsul gol.
+            // Doar dacă nu a curs deja text (streaming) — ce-a plecat, a plecat.
+            if (!textFlowed && textCurat && neagaUneltele(textCurat)) {
+              console.error(`[CHAT NEGARE] ${orchestratorModel} și-a negat uneltele — nu trimit minciuna, reîncerc`)
+              noteazaEsuare(orchestratorModel)
+            } else if (textCurat || textFlowed || sawVisible) { r = cand; break }
             console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
             noteazaEsuare(orchestratorModel)
           } catch (ge) {
