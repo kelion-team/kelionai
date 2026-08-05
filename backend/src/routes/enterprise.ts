@@ -154,7 +154,7 @@ function paginaAdmin(total: number): string {
 </style></head><body>
 <h1>Agenții lui Kelion → consola Google Enterprise</h1>
 <p>Pas 1: apasă <b>Conectează Google (Enterprise)</b> și loghează-te — dai permisiunea o singură dată (rămâne salvată).<br>
-Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ — apoi serverul duce TOT, singur, oricât ar dura. ADEVĂRUL măsurat în documentația Google: ediția <b>Standard permite ~1 agent NOU pe zi</b> în consolă (Plus: 10/zi) — deci oglinda din consolă se umple zilnic, automat. <b>TOȚI agenții lucrează DEJA în aplicație</b> (/api/a2a, chat, piețe); consola e doar vitrina. Cine e confirmat iese din listă; pagina arată viu „instalați X | rămași Y".</p>
+Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ — apoi serverul duce TOT, singur, oricât ar dura. Onest, MĂSURAT (nu din documentație): Google taie crearea cu 429 la un plafon de <b>abonament</b> al cărui număr nu-l publică — pe proiectul ăsta au intrat 2 în prima zi și 1 a doua. Serverul <b>veghează la 15 minute, non-stop</b>: ia fiecare loc în clipa în care fereastra se deschide (cotele Google se resetează la miezul nopții ora Pacificului, ~10:00 la noi) și nu mai bombardează cu cereri refuzate (umplu paharul). <b>TOȚI agenții lucrează DEJA în aplicație</b> (/api/a2a, chat, piețe); consola e doar vitrina. Cine e confirmat iese din listă; pagina arată viu „instalați X | rămași Y".</p>
 <a class="btn" href="/auth/google/connect">🔗 Conectează Google (Enterprise)</a>
 <button id="b">🚀 Creează cei ${total} în Enterprise</button>
 <pre id="out">—</pre>
