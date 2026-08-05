@@ -64,11 +64,13 @@ const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
 // formatul exact al constructorului (functionCall ok). Suprascriibil din env
 // fără deploy (`CONSTRUCTOR_GEMINI_MODEL`) dacă vrei alt model.
 const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.6-flash'
-// 40, nu 24 (Adrian, 5 aug: „ca el să nu mai pice"): un ordin mare (tabelă nouă
-// + cale de detectare + panou + teste — ex. plasa banilor M2) are nevoie de
-// mulți pași CU UNELTE (clone, citește config+servicii, scrie migrare+cod+teste,
-// build, test, repară, PR). Cu 24 rămânea fără pași și ieșea NETERMINAT → picat.
-const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 40)
+// PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
+// rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
+// 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
+// limita: un ordin mare (tabelă + detectare + panou + teste — ex. plasa banilor
+// M2) merge până la capătul bugetului, nu iese neterminat fiindcă „s-au gătat
+// pașii". Suprascriibil din env fără deploy (CONSTRUCTOR_MAX_STEPS).
+const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 120)
 // Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
 // contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
 // construcție, dar nici să ne țină la nesfârșit.
@@ -76,7 +78,10 @@ const MAX_STERILE = Number(env.CONSTRUCTOR_MAX_STERILE || 8)
 // Runde de reparație după un build/test roșu (promise în system prompt, dar
 // niciodată acordate de codul vechi — vezi bucla din main()).
 const MAX_REPAIR = Number(env.CONSTRUCTOR_MAX_REPAIR || 2)
-const MAX_TOKENS = Number(env.CONSTRUCTOR_MAX_TOKENS || 900_000)
+// Ridicat la 2M odată cu pașii (5 aug): cu 120 de pași, bugetul de tokeni nu mai
+// trebuie să fie el frâna înainte de cel de TIMP. Fereastra glisantă
+// (KEEP_VERBATIM) ține contextul per-tură mărginit, deci ăsta e doar cumulul.
+const MAX_TOKENS = Number(env.CONSTRUCTOR_MAX_TOKENS || 2_000_000)
 // FEREASTRA DE CONTEXT (audit 27 iul — cauza EȘECULUI pe ORICE model): bucla
 // re-trimitea TOT istoricul la fiecare pas, cu citiri de până la 120k caractere
 // păstrate pe veci → un job trivial ajungea la ~794k tokeni, unul greu spărgea
@@ -89,7 +94,7 @@ const READ_CAP = 6_000 // plafon pe REZULTATUL oricărei unelte în istoric (era
 // constructorul edita pe orb și cădea. 20k acoperă majoritatea fișierelor
 // întregi; ce e mai mare se cere pe interval de linii. Fereastra glisantă
 // (KEEP_VERBATIM) comprimă oricum citirile vechi, deci nu sparge contextul.
-const READ_CAP_FISIER = Number(env.CONSTRUCTOR_READ_CAP || 20_000)
+const READ_CAP_FISIER = Number(env.CONSTRUCTOR_READ_CAP || 40_000)
 
 // BUGETUL DE TIMP AL RULĂRII. constructor-worker.sh ne dă `timeout 1800`; dacă
 // ne prinde acolo, procesul moare SIGKILL/SIGTERM fără să raporteze, ordinul
