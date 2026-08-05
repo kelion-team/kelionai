@@ -3374,7 +3374,12 @@ export async function reportBuildJob(
 export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
   if (!dbEnabled()) return null
   try {
-    const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
+    const r = await getPool().query<BuildJobDbRow>(
+      `SELECT * FROM build_jobs 
+       WHERE NOT (status = 'failed' AND id <= 28)
+       ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    )
     return r.rows.map(rowToBuildJob)
   } catch {
     return null
