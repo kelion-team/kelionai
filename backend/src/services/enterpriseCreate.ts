@@ -48,6 +48,29 @@ function mesajEroare(j: Record<string, unknown>): string {
   return String(err?.message ?? JSON.stringify(j)).slice(0, 300)
 }
 
+/** DETALIILE MĂSURATE ale unui 429 (Rule #1: nu ghicesc cota, o CITESC). Google
+ *  pune adevărul în `error.details[]`: un `QuotaFailure` cu `quotaId`/descrierea
+ *  cotei lovite (ex. „No-code agent building tools - create", documentată la
+ *  docs.cloud.google.com/gemini/enterprise/docs/quotas — Standard 1/zi, Plus
+ *  10/zi) și, uneori, un `RetryInfo` cu `retryDelay`. Din ele se vede NUMELE și
+ *  VALOAREA cotei reale — dovada că nu e o rată de viteză, ci un plafon zilnic. */
+function detaliiCota(j: Record<string, unknown>): string {
+  const det = (j.error as { details?: Record<string, unknown>[] } | undefined)?.details
+  if (!Array.isArray(det)) return ''
+  const bucati: string[] = []
+  for (const d of det) {
+    const tip = String(d['@type'] ?? '')
+    if (tip.includes('QuotaFailure')) {
+      const v = (d.violations as { quotaId?: string; quotaValue?: string; description?: string }[] | undefined)?.[0]
+      if (v) bucati.push(`cotă=${v.quotaId ?? '?'} valoare=${v.quotaValue ?? '?'} (${String(v.description ?? '').slice(0, 90)})`)
+    } else if (tip.includes('RetryInfo')) {
+      const rd = (d as { retryDelay?: string }).retryDelay
+      if (rd) bucati.push(`retryDelay=${rd}`)
+    }
+  }
+  return bucati.join(' | ')
+}
+
 /** Nucleul comun de HTTP+JSON (folosit și de Discovery Engine și de Vertex AI):
  *  fetch cu bearer, corp JSON opțional, parsare tolerantă la corp gol. */
 async function fetchJson(token: string, method: string, url: string, body?: unknown): Promise<RespApi> {
@@ -125,46 +148,45 @@ function noteazaInJurnal(ce: string): void {
   void persistaMasuratori()
 }
 
-/** CONDIȚIA DE UNICAT (ownerul, 4 aug: „să compare permanent lista și să ia
- *  doar care nu e"): citește lista din consolă ACUM și spune dacă numele
- *  există deja. Citirile nu stau sub quota de creare — sunt ieftine și dese. */
-async function existaInConsola(T: string, nume: string): Promise<boolean> {
-  const r = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
-  if (r.status !== 200) return false // necitibil ACUM → decizia o ia POST-ul (Google e ultimul arbitru)
-  return (((r.j.agents as { displayName?: string }[] | undefined) ?? []).some((x) => x.displayName === nume))
-}
-
 /** Creează UN agent — O SINGURĂ încercare (fără reîncercări în ocol: la 429
- *  fereastra abonamentului e închisă, iar cererile refuzate umplu paharul;
- *  vegherea de 15 min reia singură). ÎNAINTE de încercare compară lista din
- *  consolă — dacă agentul a apărut între timp, NU-l mai pune (unicatul
- *  ownerului: zero dubluri, orice s-ar fi întâmplat pe drum). */
-async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) => void): Promise<RezCreare> {
+ *  cota zilnică de creare e epuizată, iar cererile refuzate n-o deschid;
+ *  vegherea reia singură când cota se resetează). Condiția de unicat (ownerul,
+ *  4 aug: „să compare permanent lista și să ia doar care nu e") se ține ACUM
+ *  ÎN MEMORIE, din setul `cunoscuti`: la boot îl umplem cu lista din consolă,
+ *  iar la fiecare reușită adăugăm numele. NU mai facem un GET pe consolă înainte
+ *  de FIECARE agent — ăla dubla cererile pe endpoint (exact „mitraliera" pe care
+ *  o reclamă Adrian, 5 aug); o singură citire la început e destul, restul e
+ *  in-memory. */
+async function creeazaUnAgent(T: string, ag: AgentKelion, cunoscuti: Set<string | undefined>, anunta: (pas: string) => void): Promise<RezCreare> {
+  if (cunoscuti.has(ag.nume)) {
+    anunta(`„${ag.nume}" e DEJA în consolă — îl sar (condiția de unicat)`)
+    return { ok: true }
+  }
   const corp = {
     displayName: ag.nume,
     description: ag.rol,
     a2aAgentDefinition: { jsonAgentCard: JSON.stringify(carteAgent(ag)) },
   }
-  if (await existaInConsola(T, ag.nume)) {
-    anunta(`„${ag.nume}" e DEJA în consolă — îl sar (condiția de unicat)`)
-    return { ok: true }
-  }
   cereriTrimise += 1
   const res = await api(T, 'POST', `${ASST}/agents`, corp)
   if (res.status === 200) {
+    cunoscuti.add(ag.nume) // intrat → nu-l mai încercăm în rundele următoare
     ultimaReusita = `${ag.nume} (${new Date().toISOString().slice(11, 19)} UTC)`
     noteazaInJurnal(`REUȘIT: ${ag.nume}`)
     return { ok: true }
   }
   if (res.status === 429) {
-    // 429 = LIMITĂ DE RATĂ, nu „fereastră zilnică" (Adrian, 5 aug — dovadă din
-    // Gemini: crearea de agenți e NELIMITATĂ pe zi pe ambele abonamente; 429-ul
-    // e viteza, nu un plafon zilnic). Ducem Retry-After sus, ca apelantul să
-    // aștepte EXACT cât cere Google și să CONTINUE — nu să abandoneze 15 minute.
-    // Prindem MESAJUL REAL al lui Google (Adrian, 5 aug: „nu mai ghici") — nu
-    // doar „429", ci CE spune (cotă epuizată? ce cotă? ce fereastră?). Din el se
-    // citește limita adevărată, în loc s-o presupun a treia oară.
-    noteazaInJurnal(`429 la ${ag.nume}: ${mesajEroare(res.j).slice(0, 150)}${res.retryAfter ? ` (retry ${res.retryAfter}s)` : ''}`)
+    // 429 = COTĂ ZILNICĂ de creare epuizată — DOCUMENTAT, nu ghicit (Rule #1).
+    // Cota se numește verbatim „No-code agent building tools - create": Standard
+    // 1 agent/zi, Plus 10/zi, comună pe (proiect, locație), NE-mărită manual
+    // (se scalează cu locurile). Dovada: docs.cloud.google.com/gemini/enterprise
+    // /docs/quotas. Nu e o rată de viteză care se limpezește dacă insiști —
+    // MĂSURAT: 48 de cereri cu backoff (#770) au dat 0 reușite. De-aceea la 429
+    // OPRIM runda și predăm vegherii, care prinde resetul zilnic (miezul nopții
+    // ora Pacificului, ~10:00 la noi). Notăm DETALIILE reale ale cotei din
+    // error.details (numele + valoarea cotei, retryDelay) — dovada în jurnal.
+    const det = detaliiCota(res.j)
+    noteazaInJurnal(`429 la ${ag.nume}: ${mesajEroare(res.j).slice(0, 120)}${det ? ` [${det}]` : ''}${res.retryAfter ? ` (retry ${res.retryAfter}s)` : ''}`)
     return { ok: false, err: `HTTP 429: ${mesajEroare(res.j)}`, quota: true, retryAfter: res.retryAfter }
   }
   noteazaInJurnal(`EȘEC ${res.status} la ${ag.nume}`)
@@ -242,7 +264,7 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
     const instalati = existau + rezultate.filter((x) => x.ok).length
     const eticheta = `instalați: ${instalati}/${roster.length} | rămași: ${roster.length - instalati}`
     anunta(`${eticheta} | acum îl pun pe: ${ag.nume}`)
-    const rez = await creeazaUnAgent(T, ag, (pas) => anunta(`${eticheta} | ${pas}`))
+    const rez = await creeazaUnAgent(T, ag, cunoscuti, (pas) => anunta(`${eticheta} | ${pas}`))
     rezultate.push(rez)
     if (rez.ok) {
       await zabava(PAUZA_INTRE_MS) // fereastra e deschisă — drenăm cu următorul
@@ -289,7 +311,11 @@ async function asiguraLicenta(token: string, email: string): Promise<string> {
   if (configs.length === 0) {
     return 'NICIUN ABONAMENT Gemini Enterprise găsit — nici pe proiect, nici pe contul de facturare (011729-7DA3DA-87ED94). Ce ai activat ieri e alt produs (probabil Google AI Pro — planul de consumator din aplicația Gemini), nu Gemini Enterprise. Verifică: console.cloud.google.com/billing.'
   }
-  const activ = configs.find((c) => c.state === 'ACTIVE') ?? configs[0]
+  // PREFERĂ PLUS (10 agenți/zi) peste Standard (1/zi) dacă ownerul are ambele —
+  // cota de creare se scalează cu tierul licenței (docs Google, cele 6 iscoade,
+  // 5 aug). Dacă e un singur abonament, cade pe el (comportamentul de până acum).
+  const active = configs.filter((c) => c.state === 'ACTIVE')
+  const activ = active.find((c) => /PLUS/i.test(c.subscriptionTier ?? '')) ?? active[0] ?? configs[0]
   if (!activ?.name) return `abonamente găsite (${configs.length}) dar niciunul cu nume valid`
 
   // Locul poate fi DEJA al lui — MĂSURAT (4 aug, a doua apăsare): realocarea
@@ -425,7 +451,13 @@ async function incarcaMasuratori(): Promise<void> {
 // e confirmat": fiecare ocol RE-CITEȘTE lista din consolă și îi sare pe cei
 // intrați — de-creat rămâne mereu doar restul (măsurat: „existau: 2").
 const CHEIA_CREARE = 'enterprise-creare-in-mers'
-const REIA_MIN = 5
+// VEGHE RARĂ (60 min), nu deasă (5 min a fost tot mitralieră). DOCUMENTAT
+// (Rule #1, cele 6 iscoade, 5 aug): cota „No-code agent building tools - create"
+// se resetează O DATĂ pe zi (miezul nopții ora Pacificului) — Standard 1/zi,
+// Plus 10/zi. O veghe la 5 min lovea zidul de ~288 ori/zi degeaba (fix ce
+// reclama Adrian). La 60 min tot prindem fereastra zilnică în ≤1h de la reset,
+// dar fără rafală. Dovada cotei: docs.cloud.google.com/gemini/enterprise/docs/quotas
+const REIA_MIN = 60
 let ceasReluare: NodeJS.Timeout | null = null
 
 /** Starea creării din fundal — pagina de admin o citește la câteva secunde. */
@@ -455,12 +487,13 @@ export function pornesteCrearea(email: string): StareEnterprise {
         // Toți în consolă — steagul jos, nimic de reluat.
         void memoriePune(CHEIA_CREARE, '').catch(() => {})
       } else if (!r.motiv) {
-        // Ocol parțial — vegherea continuă MEREU la REIA_MIN minute, non-stop.
-        // LECȚIA (5 aug, ownerul a prins-o): povestea „~1/zi din documentație"
-        // era neverificată — pe ea dormea 6 ORE la ocol gol și rata ferestrele
-        // (resetul cotelor Google e la miezul nopții ORA PACIFICULUI, ~10:00 la
-        // noi). Un ocol închis pe 429 costă O SINGURĂ cerere refuzată, deci
-        // veghea deasă nu umple paharul; tiparul real se citește din jurnal.
+        // Ocol parțial — vegherea continuă la REIA_MIN (60 min), non-stop.
+        // ADEVĂRUL, DOCUMENTAT (5 aug, cele 6 iscoade + docs Google): „~1/zi" NU
+        // era o poveste — e cota reală „No-code agent building tools - create"
+        // (Standard 1 agent/zi, Plus 10/zi), care se resetează O DATĂ pe zi, la
+        // miezul nopții ORA PACIFICULUI (~10:00 la noi). Deci NU insistăm la 5
+        // min (rafală degeaba pe o cotă care se umple o dată pe zi); veghem rar
+        // și prindem fereastra zilnică. Tiparul real rămâne în jurnal (măsurat).
         ceasReluare = setTimeout(() => {
           ceasReluare = null
           pornesteCrearea(email)
