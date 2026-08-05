@@ -34,7 +34,7 @@ import { config } from '../config.js'
 // de 4 aug; plângerea de-atunci era despre alfabet, adică PRODUCEA text). Un
 // model nou intră DOAR după o probă care confirmă `inputTranscription` real, nu
 // doar conectarea. DOAR urechea — creierul (BRAIN_*/GEMINI_MODEL) nu se atinge.
-const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'
+const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-flash-latest'
 
 // CÂINELE DE PAZĂ AL MUȚENIEI (5 aug — muțenia MĂSURATĂ: Live se conectează,
 // primește 180+ cadre (16s), întoarce ZERO transcriere, FĂRĂ nicio eroare, deci
