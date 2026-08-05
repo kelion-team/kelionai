@@ -56,14 +56,13 @@ import { googleServiceAccount } from '../services/googleCreds.js'
 import { pcm16InWav, transcrieGemini } from '../services/urecheGemini.js'
 import { deschideUrecheaLive, urecheLiveDisponibila, type UrecheLive } from '../services/urecheLiveGemini.js'
 
-// URECHEA PRINCIPALĂ = MODELUL SCUMP ÎN RAFALE (Adrian, 5 aug: „pune modelul
-// scump pe ureche" — Gemini 3 Pro, precizie maximă „ca la Google, fără erori").
-// Pro NU e model native-audio, deci NU poate face streaming full-duplex (codul
-// urecheLiveGemini are dovada din producție că 3.x pe streaming iese MUT). Așa
-// că urechea principală devine transcrierea în RAFALE (bucăți de ~3s) cu modelul
-// GREU. Streaming-ul Live (partiale instant, native-audio 2.5) rămâne o treaptă
-// restaurabilă instant prin env `URECHE_MOD=live`, fără să atingem creierul.
-const URECHE_RAFALE_PRO = (process.env.URECHE_MOD || 'rafale') !== 'live'
+// URECHEA PRINCIPALĂ = STREAMING NATIVE-AUDIO LIVE (pornire INSTANT). MĂSURAT
+// (5 aug, jurnalul serverului): Gemini 3 Pro pus pe ureche PICĂ — „urechea Gemini
+// a refuzat o rafală: gemini_503 «high demand»" + „operation aborted due to
+// timeout", 698 cadre audio (59,5s) → ZERO transcriere. Un model de GÂNDIRE nu
+// poate transcrie în timp real (Pro face 5–8s/apel; urechea are timeout 20s). De
+// aceea urechea rămâne pe modelul RAPID: native-audio Live (instant) ca principal
+// + rafale flash ca rezervă. Creierul e SEPARAT și rămâne pe Pro.
 
 let client: v2.SpeechClient | null = null
 let projectId = ''
@@ -146,8 +145,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       }
       return
     }
-    const numeUreche = geminiPrimar ? (URECHE_RAFALE_PRO ? 'gemini-pro-rafale' : 'gemini-live') : 'chirp'
-    app.log.info(`asr-stream: WS conectat (sesiune OK, ureche=${numeUreche}) — aștept audio`)
+    app.log.info(`asr-stream: WS conectat (sesiune OK, ureche=${geminiPrimar ? 'gemini-live' : 'chirp'}) — aștept audio`)
 
     // DIAGNOSTIC (Adrian, Aug 2 — „urechea NU PORNEȘTE deloc", live): the
     // browser's watchdog fired «silent» (audio left the browser) while the
@@ -441,8 +439,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
             app.log.info(
               `asr-stream: limbă = ${langHint || 'auto'} (rol=${user.role}, hint client='${raw}', stocat='${userLangFallback}')`,
             )
-            if (geminiPrimar && URECHE_RAFALE_PRO) pornesteUrecheaGemini()
-            else if (geminiPrimar) pornesteUrecheaLive()
+            if (geminiPrimar) pornesteUrecheaLive()
             else startGoogle()
           } else if (m.type === 'stop') {
             if (urecheLive) {
@@ -476,13 +473,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         return
       }
       if (geminiPrimar) {
-        // clientul a sărit peste 'start' — pornim leneș urechea corectă
-        if (URECHE_RAFALE_PRO) {
-          pornesteUrecheaGemini()
-          bufferGemini.push(Buffer.from(data))
-          octetiGemini += data.length
-          return
-        }
+        // clientul a sărit peste 'start' — pornim leneș urechea Live
         pornesteUrecheaLive()
         if (urecheLive) {
           ;(urecheLive as UrecheLive).scrieAudio(Buffer.from(data))
