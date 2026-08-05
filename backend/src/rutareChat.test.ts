@@ -53,10 +53,13 @@ describe('ack-ul instant NU e răspunsul (cauza exactă a „am preluat sarcina"
     expect(conteazaCaVizibil('Am preluat sarcina. ', true)).toBe(false)
   })
 
-  it('interceptorul aplică regula: în zborul ack-ului nu se contorizează vizibilitate', () => {
+  it('interceptorul de vizibilitate rămâne (ack-ul „Am preluat sarcina" scos — Adrian, 5 aug)', () => {
+    // Ack-ul instant „Am preluat sarcina" a fost ELIMINAT la cererea lui Adrian
+    // (5 aug: „scoate-i «am preluat sarcina»"). Infrastructura de vizibilitate
+    // (conteazaCaVizibil în interceptor) rămâne — un răspuns gol tot nu poate fi
+    // acceptat ca „văzut".
     expect(sursaChat).toMatch(/let ackInstantZbor = false/)
     expect(sursaChat).toMatch(/sawVisible = conteazaCaVizibil\(chunk, ackInstantZbor\)/)
-    expect(sursaChat).toMatch(/ackInstantZbor = true\s*\n\s*reply\.raw\.write\(ackText\)\s*\n\s*ackInstantZbor = false/)
   })
 
   it('reîncercarea NU mai poate accepta un răspuns gol doar pentru că a ieșit ack-ul', () => {
@@ -149,11 +152,4 @@ describe('vocea și scrisul ajung în ACELAȘI punct (fluxUnic al creierului)', 
     expect(sursaRealtime).toContain('/api/chat')
   })
 
-  it('ack-ul instant intră și în voce prin aceeași tură — fix-ul acoperă ambele căi', () => {
-    // voice.feed(ackText) e ÎN ACELAȘI bloc cu scrierea ack-ului: o singură
-    // tură, un singur handler, scris și voce.
-    expect(sursaChat).toMatch(
-      /ackInstantZbor = false\s*\n\s*voice\.feed\(ackText\)/,
-    )
-  })
 })
