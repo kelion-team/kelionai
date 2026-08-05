@@ -100,11 +100,12 @@ function socoteste(rezultate: RezCreare[]): { creati: number; esuati: number; pr
 //      88 în zid (cererile refuzate umplu paharul degeaba).
 //   4. Fiecare încercare intră în JURNAL cu ora ei — tiparul real al cotei se
 //      învață din date, nu din documentație.
-// Pauză SCURTĂ între reușite (era 60s — inutil de lung, făcea 87 de agenți să
-// dureze >1h chiar fără 429). Crearea e nelimitată pe zi; singurul frâu real e
-// rata, iar de rată se ocupă backoff-ul pe Retry-After din buclă. 3s = ritm
-// bun fără să provocăm rata degeaba.
-const PAUZA_INTRE_MS = 3_000
+// PICURAT RAR, NU RAFALĂ (Adrian, 5 aug: „nu ai făcut mitraliera?" — avea
+// dreptate, EU am făcut-o). Cererile trase repede (3s, ba chiar retry la 15s din
+// #770) au declanșat frâul lui Google. Google NU blochează crearea — codul meu o
+// trăgea ca o mitralieră. Deci: 60s între agenți, un picur liniștit. Fără rafală,
+// fără hămăit. Durează, dar intră.
+const PAUZA_INTRE_MS = 60_000
 const zabava = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 // JURNALUL COTEI (măsurat, nu ghicit): ultimele încercări cu ora și rezultatul
@@ -424,7 +425,7 @@ async function incarcaMasuratori(): Promise<void> {
 // e confirmat": fiecare ocol RE-CITEȘTE lista din consolă și îi sare pe cei
 // intrați — de-creat rămâne mereu doar restul (măsurat: „existau: 2").
 const CHEIA_CREARE = 'enterprise-creare-in-mers'
-const REIA_MIN = 15
+const REIA_MIN = 5
 let ceasReluare: NodeJS.Timeout | null = null
 
 /** Starea creării din fundal — pagina de admin o citește la câteva secunde. */
