@@ -1,5 +1,5 @@
 # KELIONAI — DOCUMENT COMPLET DE PRELUARE PENTRU ORICE AI
-*(actualizat 11 iulie 2026 — dacă deschizi acest fișier ca AI nou, aici ai TOT ce trebuie ca să lucrezi imediat, fără să mai explorezi de la zero)*
+*(actualizat 12 august 2026 — sarcina K17 tratată: clarificare privind accesul la fișiere locale de pe desktop)*
 
 > **DOCUMENT VIU — regulă obligatorie:** dacă schimbi cod, arhitectură, reguli sau
 > starea proiectului, **actualizează secțiunea relevantă de aici (și §13 Starea)
