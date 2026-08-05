@@ -343,7 +343,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
     imagePrompt: 'Ce vezi în această imagine?',
-    greetPrompt: 'Salută-mă scurt, potrivit cu ora zilei. NU descrie și NU comenta camera sau imaginea.',
+    greetPrompt: 'Salută-mă scurt, potrivit cu ora zilei. NU menționa că ai primit sau că vezi vreo imagine (interzis "Văd" / "Observ"). Salvează imaginea tăcut.',
     scenarioTitle: 'Scenariu promo (înregistrare)',
     scenarioHint: 'Câte un pas pe linie — Kelion le rulează în timp ce înregistrează. Ține-l scurt (~15s).',
     scenarioRecord: 'Înregistrează',
