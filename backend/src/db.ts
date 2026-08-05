@@ -3979,6 +3979,104 @@ export async function memoriePune(cheie: string, continut: string): Promise<stri
   return r ? `scris: ${k} (${continut.length} caractere)` : 'scrierea a picat'
 }
 
+export interface CodNeplatit {
+  code: string
+  email: string
+  amount: number
+  currency: string
+  status: string
+  createdAt: string
+  expirata: boolean
+}
+
+export async function listeazaCoduriNeplatite(): Promise<CodNeplatit[] | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query(
+      `SELECT code, user_email, amount, currency, status, created_at
+       FROM payment_codes
+       WHERE status IN ('pending', 'expired')
+       ORDER BY created_at DESC LIMIT 100`
+    )
+    const nowMs = Date.now()
+    return (r.rows as Record<string, unknown>[]).map((x) => {
+      const createdAt = String(x.created_at ?? '')
+      const createdMs = new Date(createdAt).getTime()
+      const status = String(x.status ?? 'pending')
+      const expirata = status === 'expired' || (status === 'pending' && !isNaN(createdMs) && (nowMs - createdMs > 2 * 3600 * 1000))
+      return {
+        code: String(x.code ?? ''),
+        email: String(x.user_email ?? ''),
+        amount: Number(x.amount ?? 0),
+        currency: String(x.currency ?? config.billing.currency),
+        status,
+        createdAt,
+        expirata,
+      }
+    })
+  } catch {
+    return null
+  }
+}
+
+export interface PlataIncasata {
+  code: string
+  email: string
+  amount: number
+  currency: string
+  paidAt: string
+  bankRef: string
+}
+
+export async function listeazaPlatiIncasate(): Promise<PlataIncasata[] | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query(
+      `SELECT code, user_email, amount, currency, paid_at, bank_ref
+       FROM payment_codes
+       WHERE status = 'paid'
+       ORDER BY paid_at DESC NULLS LAST LIMIT 100`
+    )
+    return (r.rows as Record<string, unknown>[]).map((x) => ({
+      code: String(x.code ?? ''),
+      email: String(x.user_email ?? ''),
+      amount: Number(x.amount ?? 0),
+      currency: String(x.currency ?? config.billing.currency),
+      paidAt: String(x.paid_at ?? ''),
+      bankRef: String(x.bank_ref ?? ''),
+    }))
+  } catch {
+    return null
+  }
+}
+
+export interface TotaluriPlati {
+  totalAzi: number
+  totalLunaAsta: number
+  moneda: string
+}
+
+export async function totaluriPlati(): Promise<TotaluriPlati | null> {
+  if (!dbEnabled()) return null
+  try {
+    const rAzi = await getPool().query(
+      `SELECT COALESCE(SUM(amount), 0)::numeric AS sum_azi FROM payment_codes WHERE status = 'paid' AND paid_at >= CURRENT_DATE`
+    )
+    const rLuna = await getPool().query(
+      `SELECT COALESCE(SUM(amount), 0)::numeric AS sum_luna FROM payment_codes WHERE status = 'paid' AND paid_at >= date_trunc('month', CURRENT_DATE)`
+    )
+    const sumAzi = Number((rAzi.rows[0] as { sum_azi?: number | string })?.sum_azi ?? 0)
+    const sumLuna = Number((rLuna.rows[0] as { sum_luna?: number | string })?.sum_luna ?? 0)
+    return {
+      totalAzi: sumAzi,
+      totalLunaAsta: sumLuna,
+      moneda: config.billing.currency || 'EUR',
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Read one memory entry, whole. */
 export async function memorieIa(cheie: string): Promise<string> {
   if (!dbEnabled()) return 'baza de date nu e configurată'

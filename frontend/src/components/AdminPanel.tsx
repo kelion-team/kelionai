@@ -1422,70 +1422,91 @@ export default function AdminPanel({
                         ))}
                       </span>
                     )}
-                    {/* THE PAYMENTS PANEL (M3, Aug 2): until today `payment_codes`
-                    was written and matched but the admin could not see one row of
-                    it, and the net's table did not exist at all. Every figure is
-                    a database read; a failed read is SAID, never shown as zeros. */}
+                    {/* Tablou Plăți & Încasări */}
                     {plati !== 'necitit' && (
                       <span className="or-wallet-sub">
-                        💳 {A.payHead}:{' '}
-                        {plati === null || !plati.rezumat ? (
-                          <i>{A.payReadFail}</i>
-                        ) : (
-                          <>
-                            {A.payTotals
-                              .replace('{emise}', String(plati.rezumat.emise))
-                              .replace('{platite}', String(plati.rezumat.platite))
-                              .replace('{pending}', String(plati.rezumat.inAsteptare))
-                              .replace('{net}', String(plati.rezumat.neatribuite))}
-                            {plati.rezumat.recente.slice(0, 8).map((c) => (
-                              <span key={c.code} style={{ display: 'block', paddingLeft: 12, opacity: c.status === 'paid' ? 1 : 0.7 }}>
-                                {c.status === 'paid' ? '✅' : '⏳'} <b>{c.code}</b> · {c.email} · £{c.amount}
-                                {c.paidAt ? ` · ${new Date(c.paidAt).toLocaleDateString()}` : ''}
-                              </span>
-                            ))}
-                          </>
-                        )}
-                      </span>
-                    )}
-                    {plati !== 'necitit' && plati !== null && (
-                      <span className="or-wallet-sub">
-                        🕸 {A.payNetHead}:{' '}
-                        {/* PLASA TRI-VALENTĂ (auditul admin, 3 aug): null = citirea
-                        plasei a EȘUAT (nu mai e mascată în []) — banii nepotriviti
-                        de nimeni nu se raportează „zero" pe o citire picată. */}
-                        {plati.neatribuite === null ? (
-                          <i>{A.payReadFail}</i>
-                        ) : plati.neatribuite.length === 0 ? (
-                          A.payNetEmpty
-                        ) : (
-                          plati.neatribuite.map((p) => (
-                            <span key={p.id} style={{ display: 'block', paddingLeft: 12 }}>
-                              £{p.amount} · „{p.referinta || '—'}” · {new Date(p.seenAt).toLocaleString()}{' '}
-                              <button
-                                type="button"
-                                className="ghost"
-                                onClick={() => {
-                                  const email = window.prompt(A.payAssignPrompt.replace('{amount}', `£${p.amount}`))
-                                  if (!email) return
-                                  void atribuiePlata(p.id, email).then((rezultat) => {
-                                    window.alert(rezultat)
-                                    void fetchPlati().then(setPlati)
-                                  })
-                                }}
-                              >
-                                {A.payAssign}
-                              </button>{' '}
-                              <button
-                                type="button"
-                                className="ghost"
-                                onClick={() => void ignoraPlata(p.id).then(() => void fetchPlati().then(setPlati))}
-                              >
-                                {A.payIgnore}
-                              </button>
+                        💳 <b>Tablou Plăți & Încasări:</b>
+                        
+                        {/* 1. TOTALURI */}
+                        <span style={{ display: 'block', marginTop: 8, marginBottom: 8 }}>
+                          <b>💰 Totaluri Încasate:</b>{' '}
+                          {plati === null || !plati.totaluri ? (
+                            <i style={{ color: 'red' }}>nu pot verifica</i>
+                          ) : (
+                            <span>
+                              Azi: <b>{plati.totaluri.totalAzi} {plati.totaluri.moneda}</b> · Luna asta: <b>{plati.totaluri.totalLunaAsta} {plati.totaluri.moneda}</b>
                             </span>
-                          ))
-                        )}
+                          )}
+                        </span>
+
+                        {/* 2. CODURI EMISE ȘI NEPLĂTITE */}
+                        <span style={{ display: 'block', marginTop: 8, marginBottom: 8 }}>
+                          <b>⏳ Coduri Emise și Neplătite:</b>
+                          {plati === null || plati.coduriNeplatite === null ? (
+                            <span style={{ display: 'block', paddingLeft: 12, color: 'red' }}><i>nu pot verifica</i></span>
+                          ) : plati.coduriNeplatite.length === 0 ? (
+                            <span style={{ display: 'block', paddingLeft: 12, opacity: 0.8 }}>Niciun cod neplătit în așteptare.</span>
+                          ) : (
+                            plati.coduriNeplatite.map((c) => (
+                              <span key={c.code} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
+                                {c.expirata ? '🔴 [Expirat]' : '⏳ [În așteptare]'} <b>{c.code}</b> · User: {c.email} · Sumă: {c.amount} {c.currency} · De când: {new Date(c.createdAt).toLocaleString()}
+                              </span>
+                            ))
+                          )}
+                        </span>
+
+                        {/* 3. PLĂȚI ÎNCASATE ȘI CREDITATE */}
+                        <span style={{ display: 'block', marginTop: 8, marginBottom: 8 }}>
+                          <b>✅ Plăți Încasate și Creditate:</b>
+                          {plati === null || plati.platiIncasate === null ? (
+                            <span style={{ display: 'block', paddingLeft: 12, color: 'red' }}><i>nu pot verifica</i></span>
+                          ) : plati.platiIncasate.length === 0 ? (
+                            <span style={{ display: 'block', paddingLeft: 12, opacity: 0.8 }}>Nicio plată încasată.</span>
+                          ) : (
+                            plati.platiIncasate.map((p) => (
+                              <span key={p.code} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
+                                ✅ <b>{p.code}</b> · User: {p.email} · Sumă: {p.amount} {p.currency} · Data: {new Date(p.paidAt).toLocaleString()} · Ref bancară: {p.bankRef || '—'}
+                              </span>
+                            ))
+                          )}
+                        </span>
+
+                        {/* 4. PLĂȚI NEATRIBUITE (PLASA) */}
+                        <span style={{ display: 'block', marginTop: 8, marginBottom: 8 }}>
+                          <b>🕸 Plăți Neatribuite (în plasă):</b>
+                          {plati === null || plati.neatribuite === null ? (
+                            <span style={{ display: 'block', paddingLeft: 12, color: 'red' }}><i>nu pot verifica</i></span>
+                          ) : plati.neatribuite.length === 0 ? (
+                            <span style={{ display: 'block', paddingLeft: 12, opacity: 0.8 }}>Nimic în plasă (nicio plată neatribuită).</span>
+                          ) : (
+                            plati.neatribuite.map((p) => (
+                              <span key={p.id} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
+                                £{p.amount} · „{p.referinta || p.bankRef || '—'}” · Văzut la: {new Date(p.seenAt).toLocaleString()}{' '}
+                                <button
+                                  type="button"
+                                  className="ghost"
+                                  onClick={() => {
+                                    const email = window.prompt(`Atribuie plata de £${p.amount} userului (email):`)
+                                    if (!email) return
+                                    void atribuiePlata(p.id, email).then((rezultat) => {
+                                      window.alert(`Rezultat: ${rezultat}`)
+                                      void fetchPlati().then(setPlati)
+                                    })
+                                  }}
+                                >
+                                  atribuie userului X
+                                </button>{' '}
+                                <button
+                                  type="button"
+                                  className="ghost"
+                                  onClick={() => void ignoraPlata(p.id).then(() => void fetchPlati().then(setPlati))}
+                                >
+                                  {A.payIgnore}
+                                </button>
+                              </span>
+                            ))
+                          )}
+                        </span>
                       </span>
                     )}
                   </div>
