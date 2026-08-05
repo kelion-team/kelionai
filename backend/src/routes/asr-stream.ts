@@ -4,6 +4,7 @@ import { getSessionUser } from '../session.js'
 import { recordCost, getSpeechLang } from '../db.js'
 import { ASR_USD_PER_CALL } from '../services/cost.js'
 import { normalizeLang } from '../services/tts.js'
+import { isPhantomTranscript } from '../services/asr.js'
 import {
   CADRU_LINISTE,
   KEEPALIVE_CHECK_MS,
@@ -234,7 +235,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         void transcrieGemini(wav.toString('base64'), 'audio/wav', langHint || undefined)
           .then((r) => {
             if (closed) return
-            if (r.ok && r.transcript) {
+            if (r.ok && r.transcript && !isPhantomTranscript(r.transcript)) {
               send({ type: 'final', transcript: r.transcript, lang: langHint || null })
               void recordCost(user.email, 'asr', ASR_USD_PER_CALL)
             } else if (!r.ok) {
@@ -325,7 +326,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         else if (ev === 'SPEECH_ACTIVITY_END' || ev === 3) send({ type: 'speech_end' })
         for (const r of resp.results ?? []) {
           const transcript = r.alternatives?.[0]?.transcript ?? ''
-          if (!transcript) continue
+          if (!transcript || isPhantomTranscript(transcript)) continue
           if (r.isFinal) {
             send({ type: 'final', transcript, lang: r.languageCode ?? null })
             void recordCost(user.email, 'asr', ASR_USD_PER_CALL)
