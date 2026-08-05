@@ -173,6 +173,13 @@ export function WalletButton({
     }
   }, [])
 
+  // Fast polling while waiting for payment code confirmation
+  useEffect(() => {
+    if (!payCode) return
+    const interval = window.setInterval(() => void refresh(), 3000)
+    return () => clearInterval(interval)
+  }, [payCode])
+
   // Discreet, escalating low-credit reminder: a small pill that appears briefly,
   // more often the lower the credit gets (30% → rare, 10% → frequent). Never a
   // blocking popup.
