@@ -41,7 +41,7 @@ interface RespApi {
 /** Rezultatul unei creări de agent: reușit sau eroarea verbatim (măsurat).
  *  `quota` = refuz 429 (fereastra abonamentului e închisă) — apelantul oprește
  *  ocolul întreg, nu mai trimite restul în zid. */
-type RezCreare = { ok: true } | { ok: false; err: string; quota?: boolean }
+type RezCreare = { ok: true } | { ok: false; err: string; quota?: boolean; retryAfter?: number }
 
 function mesajEroare(j: Record<string, unknown>): string {
   const err = j.error as { message?: string } | undefined
@@ -100,7 +100,20 @@ function socoteste(rezultate: RezCreare[]): { creati: number; esuati: number; pr
 //      88 în zid (cererile refuzate umplu paharul degeaba).
 //   4. Fiecare încercare intră în JURNAL cu ora ei — tiparul real al cotei se
 //      învață din date, nu din documentație.
-const PAUZA_INTRE_MS = 60_000
+// Pauză SCURTĂ între reușite (era 60s — inutil de lung, făcea 87 de agenți să
+// dureze >1h chiar fără 429). Crearea e nelimitată pe zi; singurul frâu real e
+// rata, iar de rată se ocupă backoff-ul pe Retry-After din buclă. 3s = ritm
+// bun fără să provocăm rata degeaba.
+const PAUZA_INTRE_MS = 3_000
+// Cât așteptăm la un 429 de rată: EXACT Retry-After de la Google, mărginit între
+// 5 și 90 secunde (dacă Google nu-l trimite, 15s). Apoi CONTINUĂM aceeași rulare.
+const BACKOFF_MIN_S = 5
+const BACKOFF_MAX_S = 90
+const BACKOFF_IMPLICIT_S = 15
+// Câte 429-uri de rată LA RÂND (fără nicio reușită) până predăm vegherii — ca să
+// nu batem la infinit dacă chiar s-a închis ceva. Cu reușite între ele, se
+// resetează: o rulare poate crea zeci de agenți, oprindu-se doar la un zid real.
+const MAX_429_LA_RAND = 8
 const zabava = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 // JURNALUL COTEI (măsurat, nu ghicit): ultimele încercări cu ora și rezultatul
@@ -152,8 +165,12 @@ async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) 
     return { ok: true }
   }
   if (res.status === 429) {
-    noteazaInJurnal(`429 la ${ag.nume} (fereastra închisă)`)
-    return { ok: false, err: `HTTP 429: ${mesajEroare(res.j)}`, quota: true }
+    // 429 = LIMITĂ DE RATĂ, nu „fereastră zilnică" (Adrian, 5 aug — dovadă din
+    // Gemini: crearea de agenți e NELIMITATĂ pe zi pe ambele abonamente; 429-ul
+    // e viteza, nu un plafon zilnic). Ducem Retry-After sus, ca apelantul să
+    // aștepte EXACT cât cere Google și să CONTINUE — nu să abandoneze 15 minute.
+    noteazaInJurnal(`429 (rată) la ${ag.nume}${res.retryAfter ? ` — retry ${res.retryAfter}s` : ''}`)
+    return { ok: false, err: `HTTP 429: ${mesajEroare(res.j)}`, quota: true, retryAfter: res.retryAfter }
   }
   noteazaInJurnal(`EȘEC ${res.status} la ${ag.nume}`)
   return rezultatCreare(res)
@@ -218,26 +235,46 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   const deCreat = roster.filter((ag) => !cunoscuti.has(ag.nume))
   const existau = roster.length - deCreat.length
   const rezultate: RezCreare[] = []
-  for (const ag of deCreat) {
-    // Raportul cerut de owner (4 aug, de două ori: „trebuie să văd"): cifrele
-    // stau PERMANENT în față — și pe mesajele de așteptare la quota, nu doar
-    // când trecem la următorul (altfel, într-o seară cu 429 lung, nu se vedeau).
+  // CREARE CU RETRY PRIN LIMITA DE RATĂ (Adrian, 5 aug: „îi vreau urgent sus pe
+  // toți" + dovada Gemini că nu există plafon zilnic de creare). Strategia veche
+  // oprea TOATĂ runda la primul 429 și aștepta 15 minute — de-aia se târa (2 la
+  // 15 min). Bug-ul era la MINE, nu la Google. Acum: la un 429, aștept EXACT
+  // Retry-After (mărginit 5–90s) și reîncerc ACELAȘI agent; o reușită resetează
+  // contorul. Predau vegherii DOAR dacă iau MAX_429_LA_RAND refuzuri LA RÂND,
+  // fără nicio reușită între ele (zid real). O rulare poate crea zeci de agenți.
+  let i = 0
+  let esec429LaRand = 0
+  while (i < deCreat.length) {
+    const ag = deCreat[i]
     const instalati = existau + rezultate.filter((x) => x.ok).length
     const eticheta = `instalați: ${instalati}/${roster.length} | rămași: ${roster.length - instalati}`
     anunta(`${eticheta} | acum îl pun pe: ${ag.nume}`)
     const rez = await creeazaUnAgent(T, ag, (pas) => anunta(`${eticheta} | ${pas}`))
-    rezultate.push(rez)
     if (rez.ok) {
-      await zabava(PAUZA_INTRE_MS) // respiro după reușită, apoi DRENĂM fereastra cu următorul
+      rezultate.push(rez)
+      esec429LaRand = 0
+      i += 1
+      await zabava(PAUZA_INTRE_MS) // pauză scurtă, apoi următorul
       continue
     }
-    if (!rez.ok && rez.quota) {
-      // Fereastra abonamentului s-a închis — ocolul se OPREȘTE aici. Nu-i mai
-      // trimitem pe ceilalți în zid (cererile refuzate umplu paharul); vegherea
-      // de REIA_MIN minute reia singură și prinde următoarea deschidere.
-      anunta(`${eticheta} | fereastra Google s-a închis (429) — veghez la ${REIA_MIN} min și continui SINGUR`)
-      break
+    if (rez.quota) {
+      esec429LaRand += 1
+      if (esec429LaRand >= MAX_429_LA_RAND) {
+        // Zid real: prea multe refuzuri de rată la rând, fără nicio reușită.
+        // Predau vegherii (REIA_MIN) — nu mai bat degeaba.
+        rezultate.push(rez)
+        anunta(`${eticheta} | ${esec429LaRand} refuzuri de rată la rând — predau vegherii (${REIA_MIN} min)`)
+        break
+      }
+      const asteapta = Math.min(BACKOFF_MAX_S, Math.max(BACKOFF_MIN_S, rez.retryAfter ?? BACKOFF_IMPLICIT_S))
+      anunta(`${eticheta} | 429 de rată — aștept ${asteapta}s și CONTINUI (nu abandonez)`)
+      await zabava(asteapta * 1000)
+      continue // reîncerc ACELAȘI agent (i neschimbat)
     }
+    // Alt eșec (nu 429): îl notăm și trecem mai departe — nu blocăm restul.
+    rezultate.push(rez)
+    esec429LaRand = 0
+    i += 1
   }
   const { creati, esuati, primaEroare } = socoteste(rezultate)
 
