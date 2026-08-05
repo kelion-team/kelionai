@@ -37,6 +37,25 @@ function getAudioContextCtor(): typeof AudioContext | null {
   )
 }
 
+/** DEBLOCAJ PE GEST (5 aug, „kelion nu aude" pe telefon) — cauza rădăcină:
+ *  pe iOS/Android `AudioContext` pornește în starea 'suspended' și NU se
+ *  activează fără un GEST de utilizator. Cât rămâne suspendat, `onaudioprocess`
+ *  nu rulează NICIODATĂ → microfonul e SURD deși becul de „ascult" e aprins.
+ *  `resume()` fără gest (fire-and-forget) nu ajută. Aici: încercăm resume ACUM
+ *  și, dacă nu prinde, îl reluăm la PRIMUL gest (tap/touch/tastă) — apoi ne
+ *  retragem singuri. Un singur tap al ownerului deblochează urechea. */
+function deblocheazaAudioLaGest(ctx: AudioContext): void {
+  void ctx.resume().catch(() => {})
+  const evenimente = ['pointerdown', 'touchstart', 'touchend', 'click', 'keydown']
+  const reia = (): void => {
+    void ctx.resume().catch(() => {})
+    if (ctx.state === 'running') {
+      for (const ev of evenimente) window.removeEventListener(ev, reia, true)
+    }
+  }
+  for (const ev of evenimente) window.addEventListener(ev, reia, { capture: true, passive: true })
+}
+
 /**
  * Opens the microphone and prepares the audio context.
  *
@@ -79,5 +98,9 @@ export async function openMicGraph(
     onError('unsupported')
     return null
   }
-  return { stream, ctx: new AC() }
+  const ctx = new AC()
+  // Pe mobil contextul e 'suspended' până la un gest — fără deblocaj, urechea e
+  // surdă (vezi deblocheazaAudioLaGest). Îl armăm ca să prindă primul tap.
+  if (ctx.state !== 'running') deblocheazaAudioLaGest(ctx)
+  return { stream, ctx }
 }
