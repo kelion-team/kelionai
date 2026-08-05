@@ -94,6 +94,7 @@ import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
 import { neagaUneltele } from '../services/negareUnelte.js'
+import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
@@ -2315,6 +2316,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             // Doar dacă nu a curs deja text (streaming) — ce-a plecat, a plecat.
             if (!textFlowed && textCurat && neagaUneltele(textCurat)) {
               console.error(`[CHAT NEGARE] ${orchestratorModel} și-a negat uneltele — nu trimit minciuna, reîncerc`)
+              noteazaEsuare(orchestratorModel)
+            } else if (!textFlowed && textCurat && deflecteazaConstructor(textCurat) && !aAlocatConstructie(toolNamesThisTurn)) {
+              // GARDUL ANTI-DEFLECTARE (Adrian, 5 aug: „kelion nu alocă
+              // constructorului cererile — spune că echipa de dezvoltare repară.
+              // Care e echipa de dezvoltare?"). Nu există niciuna — el e
+              // constructorul. Dacă amână spre o „echipă" FĂRĂ să fi chemat o
+              // unealtă de construcție, e marfă stricată: aruncă + reîncearcă
+              // (promptul deja îi spune să construiască; codul îl forțează).
+              console.error(`[CHAT DEFLECTARE] ${orchestratorModel} a amânat spre o „echipă" inexistentă fără să aloce la constructor — reîncerc`)
               noteazaEsuare(orchestratorModel)
             } else if (textCurat || textFlowed || sawVisible) { r = cand; break }
             console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
