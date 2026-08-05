@@ -3303,9 +3303,19 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
   return Number(r.rows[0]?.id ?? 0)
 }
 
+// Cât timp de TĂCERE (fără nicio raportare de progres) până când un ordin
+// „running" e considerat BLOCAT — worker-ul lui a murit (omorât de `timeout
+// 1800` din constructor-worker.sh) și nimeni nu-l mai duce. Era 40 de minute
+// (Adrian, 5 aug: „pleacă enorm de greu să rezolve orice cerere" — un job agățat
+// ținea coada blocată 40 de minute). E scăzut la 15: worker-ul viu trimite
+// progres la fiecare pas, iar pasul cel mai lung fără bătaie de inimă e un `npm`
+// cu timeout de 10 min — deci 15 min de tăcere = worker mort, sigur. Flock-ul de
+// pe VPS (un singur worker odată) apără oricum de dubla-execuție.
+const MIN_JOB_BLOCAT = 15
+
 // The worker takes ONE order: the oldest "queued", or a stuck "running"
-// (>40 min — the agent was killed by timeout). Over 2 attempts → failed, so an
-// impossible order doesn't block the queue forever.
+// (>15 min silent — the agent was killed by timeout). Over 2 attempts → failed,
+// so an impossible order doesn't block the queue forever.
 export async function claimNextBuildJob(): Promise<BuildJob | null> {
   if (!dbEnabled()) return null
   const client = await getPool().connect()
@@ -3313,13 +3323,13 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
     await client.query('BEGIN')
     await client.query(
       `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandoned: 3 attempts exhausted]', updated_at = now()
-       WHERE status='running' AND updated_at < now() - interval '40 minutes' AND attempts >= 3`,
+       WHERE status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND attempts >= 3`,
     )
     const r = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
        WHERE id = (
          SELECT id FROM build_jobs
-         WHERE status='queued' OR (status='running' AND updated_at < now() - interval '40 minutes')
+         WHERE status='queued' OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes')
          ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
        )
        RETURNING *`,
@@ -3458,9 +3468,16 @@ export async function deleteBuildJobsByScope(
 }
 
 /** Reia un ordin (îl repune în coadă). Opțional cu textul REFORMULAT — asta e
- *  „modificarea": schimbă comanda și o repornește curat (attempts=0). Merge doar
- *  pe ordine care NU sunt deja în curs ('failed'/'done'/'queued'); un 'running'
- *  nu se rescrie sub picioarele lucrătorului. Întoarce jobul actualizat sau null. */
+ *  „modificarea": schimbă comanda și o repornește curat (attempts=0). Întoarce
+ *  jobul actualizat sau null.
+ *
+ *  ACCEPTĂ ȘI 'running' (Adrian, 5 aug: „dacă apăs reia reparația nu face nimic"
+ *  — ordinul #94 era agățat în 'running', worker-ul lui murise, dar butonul
+ *  „reia" chema retryBuildJob care ignora 'running' → 409 → buton mort). Când
+ *  OMUL apasă reia, e o comandă explicită: „ăsta e blocat, repornește-l". Un
+ *  worker cu adevărat viu ar fi trimis progres în ultimele 15 min; dacă totuși
+ *  mai raportează după reluare, e cazul de graniță acceptat — ordinul rulează o
+ *  dată, nu se pierde. Nu mai lăsăm un job mort să țină coada blocată. */
 export async function retryBuildJob(id: number, newOrderText?: string): Promise<BuildJob | null> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return null
   const text = (newOrderText ?? '').trim()
@@ -3471,7 +3488,7 @@ export async function retryBuildJob(id: number, newOrderText?: string): Promise<
              order_text = CASE WHEN $2 <> '' THEN $2 ELSE order_text END,
              log = COALESCE(log,'') || E'\\n[repus în coadă de owner${text ? ' cu ordin reformulat' : ''}]',
              updated_at = now()
-       WHERE id=$1 AND status IN ('failed','done','queued')
+       WHERE id=$1 AND status IN ('failed','done','queued','running')
        RETURNING *`,
       [id, text.slice(0, 4000)],
     )
