@@ -36,6 +36,16 @@ import { config } from '../config.js'
 // doar conectarea. DOAR urechea — creierul (BRAIN_*/GEMINI_MODEL) nu se atinge.
 const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'
 
+// CÂINELE DE PAZĂ AL MUȚENIEI (5 aug — muțenia MĂSURATĂ: Live se conectează,
+// primește 180+ cadre (16s), întoarce ZERO transcriere, FĂRĂ nicio eroare, deci
+// nimeni nu declara urechea moartă și clientul murea „silent" după 15s, iar
+// auzul nu cădea pe rezervă). Acum: dacă a curs audio REAL (≥ MUT_CADRE cadre)
+// pe o fereastră de MUT_MS și n-a venit NICIO transcriere, urechea Live e MUTĂ
+// → eroare NUMITĂ, iar asr-stream cade pe rezerva Gemini (rafale). O ureche care
+// a produs măcar o transcriere e considerată VIE și nu e atinsă niciodată.
+const MUT_MS = 8_000
+const MUT_CADRE = 40
+
 export interface UrecheLive {
   /** PCM16 mono 16kHz, exact ce trimite browserul pe /api/asr-stream. */
   scrieAudio(pcm: Buffer): void
@@ -78,6 +88,29 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
   let inchisa = false
   let transcrierePartiala = ''
   const coadaAudio: Buffer[] = [] // audio sosit înainte de setupComplete
+  // Starea câinelui de pază (vezi MUT_MS/MUT_CADRE sus).
+  let transcriereVreodata = false // a venit VREODATĂ o transcriere? (dacă da, urechea e vie)
+  let audioScris = 0 // câte cadre de audio REAL au plecat spre Live (după setup)
+  let primulAudioLa = 0 // când a plecat primul cadru real (ms)
+  let watchdog: ReturnType<typeof setInterval> | null = null
+  const opresteWatchdog = (): void => {
+    if (watchdog) {
+      clearInterval(watchdog)
+      watchdog = null
+    }
+  }
+  const declaraMuta = (): void => {
+    if (inchisa) return
+    opresteWatchdog()
+    inchisa = true // oprește re-firing pe 'close'
+    try {
+      ws.close()
+    } catch {
+      /* deja închis */
+    }
+    const sec = primulAudioLa ? Math.round((Date.now() - primulAudioLa) / 1000) : 0
+    ev.onEroare(`mut: ${audioScris} cadre audio, zero transcriere în ${sec}s — urechea Live nu aude`)
+  }
 
   ws.on('open', () => {
     ws.send(
@@ -124,12 +157,21 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
     if (m.setupComplete !== undefined) {
       gata = true
       for (const b of coadaAudio.splice(0)) trimite(b)
+      // Pornește câinele de pază: dacă audio curge dar nu vine nicio transcriere
+      // pe fereastra MUT_MS, urechea Live e mută → cădem pe rafale (onEroare).
+      if (!watchdog) {
+        watchdog = setInterval(() => {
+          if (inchisa || transcriereVreodata) return
+          if (primulAudioLa && audioScris >= MUT_CADRE && Date.now() - primulAudioLa >= MUT_MS) declaraMuta()
+        }, 2_000)
+      }
       return
     }
     const sc = m.serverContent
     if (!sc) return
     const bucata = sc.inputTranscription?.text ?? ''
     if (bucata) {
+      transcriereVreodata = true // urechea a produs text → e VIE; câinele nu mai latră
       if (!transcrierePartiala) ev.onVorbireIncepe()
       transcrierePartiala += bucata
       // Nu arătăm în bandă transcrierea în alfabet străin (greacă/chirilic/arabă
@@ -148,9 +190,11 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
   })
 
   ws.on('error', (e: Error) => {
+    opresteWatchdog()
     if (!inchisa) ev.onEroare(`live_ws: ${String(e?.message ?? e).slice(0, 200)}`)
   })
   ws.on('close', (cod: number, motiv: Buffer) => {
+    opresteWatchdog()
     if (inchisa) return
     // Închiderea neanunțată (cotă, model inexistent, cheie) e o eroare NUMITĂ —
     // asr-stream decide plasa (rafale), nu murim tăcut.
@@ -158,6 +202,8 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
   })
 
   const trimite = (pcm: Buffer): void => {
+    audioScris += 1 // câinele de pază numără audio-ul REAL trimis
+    if (!primulAudioLa) primulAudioLa = Date.now()
     try {
       ws.send(
         JSON.stringify({
@@ -181,6 +227,7 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
     },
     inchide(): void {
       inchisa = true
+      opresteWatchdog()
       try {
         ws.close()
       } catch {
