@@ -169,7 +169,10 @@ async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) 
     // Gemini: crearea de agenți e NELIMITATĂ pe zi pe ambele abonamente; 429-ul
     // e viteza, nu un plafon zilnic). Ducem Retry-After sus, ca apelantul să
     // aștepte EXACT cât cere Google și să CONTINUE — nu să abandoneze 15 minute.
-    noteazaInJurnal(`429 (rată) la ${ag.nume}${res.retryAfter ? ` — retry ${res.retryAfter}s` : ''}`)
+    // Prindem MESAJUL REAL al lui Google (Adrian, 5 aug: „nu mai ghici") — nu
+    // doar „429", ci CE spune (cotă epuizată? ce cotă? ce fereastră?). Din el se
+    // citește limita adevărată, în loc s-o presupun a treia oară.
+    noteazaInJurnal(`429 la ${ag.nume}: ${mesajEroare(res.j).slice(0, 150)}${res.retryAfter ? ` (retry ${res.retryAfter}s)` : ''}`)
     return { ok: false, err: `HTTP 429: ${mesajEroare(res.j)}`, quota: true, retryAfter: res.retryAfter }
   }
   noteazaInJurnal(`EȘEC ${res.status} la ${ag.nume}`)
