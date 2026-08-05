@@ -11,7 +11,7 @@
 // The owner's rule #1, applied to my own evidence: nothing here gets checked
 // off on anyone's word. A missing proof is a missing proof, not "it probably
 // works".
-import { listBuildJobs, listeazaCerinte, loadKv, getCapabilityGaps } from '../db.js'
+import { listBuildJobs, listeazaCerinte, loadKv, saveKv, getCapabilityGaps } from '../db.js'
 
 export interface Dovada {
   /** 1..8 — the scale from the 30-31 Jul discussion. */
@@ -126,11 +126,34 @@ export async function dovezileAutonomiei(): Promise<{ dovedite: number; din: num
     },
   ]
 
-  // What wasn't found stays empty — but we say AT LEAST whether the loop
-  // is alive, so "hasn't got here yet" can be told apart from "doesn't work
-  // at all".
+  // O DOVADĂ ÎNTÂMPLATĂ NU SE „DEZ-ÎNTÂMPLĂ" (Adrian, 5 aug: „a avut 3 bifate,
+  // acum are doar 1"). Recitirea vie se uită într-o FEREASTRĂ (ultimele 200 de
+  // ordine / 50 de cerințe) — când urma iese din fereastră sau curățenia de
+  // ordine vechi o șterge, bifa cădea singură, deși faptul fusese MĂSURAT.
+  // De-acum: în clipa în care o dovadă e găsită, o CONSEMNĂM permanent (nivel +
+  // urma + data) în kv. La afișările următoare, un nivel fără urmă vie dar cu
+  // consemnare rămâne DOVEDIT, cu urma salvată și data consemnării — cinstit:
+  // arătăm exact ce s-a măsurat și când, nu o bifă goală.
   for (const x of d) {
-    if (!x.dovedit && !x.dovada) {
+    const cheia = `autonomie:dovada:${x.nivel}`
+    if (x.dovedit) {
+      // Urmă vie → împrospătăm consemnarea (cea mai nouă urmă reală).
+      void saveKv(cheia, JSON.stringify({ dovada: x.dovada, cand: x.cand, consemnat: new Date().toISOString() })).catch(() => {})
+      continue
+    }
+    const consemnat = await loadKv(cheia).catch(() => null)
+    if (consemnat) {
+      try {
+        const c = JSON.parse(consemnat) as { dovada?: string; cand?: string | null; consemnat?: string }
+        x.dovedit = true
+        x.dovada = `${c.dovada ?? ''} (urmă consemnată la ${String(c.consemnat ?? '').slice(0, 10)}; originalul a ieșit din fereastra de citire)`
+        x.cand = c.cand ?? null
+        continue
+      } catch {
+        /* consemnare coruptă → cade pe drumul „nedovedit" de mai jos */
+      }
+    }
+    if (!x.dovada) {
       x.dovada = trecereBucla ? 'încă nedovedit — bucla merge, dar n-a ajuns aici' : 'încă nedovedit'
     }
   }
