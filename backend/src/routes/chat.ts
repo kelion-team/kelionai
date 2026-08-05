@@ -799,20 +799,43 @@ function createVoiceStream(
   let pending = '' // arrived text, not yet sent to synthesis
   let spoken = 0 // characters already spoken (the 4000 ceiling)
   let any = false
+  let plafonRaportat = false // the 4000 ceiling was hit and logged once
   let chain: Promise<void> = Promise.resolve()
   const speak = (text: string): void => {
-    if (!text || spoken >= 4000) return
+    // PLAFONUL DE 4000 (Adrian, 10 iul: „audio măcar un minut") NU mai e o
+    // tăcere oarbă (Adrian, 5 aug: „audio se oprește la jumate dar scrisul e
+    // tot"). Când chiar îl atingem, o spunem în log O DATĂ — ca truncarea să
+    // NU mai fie invizibilă (regula #1: ce nu se măsoară nu se afirmă).
+    if (spoken >= 4000) {
+      if (!plafonRaportat) {
+        plafonRaportat = true
+        console.error('[VOCE] plafon 4000 caractere atins — restul răspunsului rămâne doar în scris')
+      }
+      return
+    }
+    if (!text) return
     const t = text.slice(0, 4000 - spoken)
     spoken += t.length
     chain = chain.then(async () => {
-      try {
-        // The user-chosen voice, so the written reply sounds like the live voice (C4).
-        const r = await synthesize(t, lang, { voice: voicePref })
-        if (r.ok) {
-          reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+      // DOUĂ ÎNCERCĂRI, apoi LOG (Adrian, 5 aug: vocea se tăia la jumate iar
+      // eșecul de sinteză era înghițit tăcut — `catch {}` + `if (r.ok)` fără
+      // altceva — deci o bucată picată lăsa vocea ciuntită FĂRĂ nicio urmă). Un
+      // hopa de rețea spre Google nu mai omoară o frază întreagă; un eșec real
+      // se VEDE acum în log, ca data viitoare să nu mai fie „nu pot verifica".
+      for (let incercare = 1; incercare <= 2; incercare++) {
+        try {
+          // The user-chosen voice, so the written reply sounds like the live voice (C4).
+          const r = await synthesize(t, lang, { voice: voicePref })
+          if (r.ok) {
+            reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+            return
+          }
+          if (incercare === 2)
+            console.error(`[VOCE] bucată nesintetizată (${r.status} ${r.error}) — vocea rămâne ciuntită aici`)
+        } catch (e) {
+          if (incercare === 2)
+            console.error(`[VOCE] sinteza a crăpat: ${String((e as { message?: string })?.message ?? e).slice(0, 120)}`)
         }
-      } catch {
-        /* one lost piece doesn't stop the rest of the voice */
       }
     })
   }
