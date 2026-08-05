@@ -188,9 +188,15 @@ interface StarePas {
   gata?: boolean
   /** PARCAT (Adrian, 4 aug: „tot ce pică și nu mai e de actualitate să nu mai
    *  rămână"): după LIMITA_INCERCARI eșecuri, oprim reluarea la nesfârșit —
-   *  nu mai umplem auditul cu același ordin căzut de 18 ori. Se poate relua
-   *  DOAR dacă owner-ul reformulează (reset explicit). */
+   *  nu mai umplem auditul cu același ordin căzut de 18 ori. NU mai e „pe veci":
+   *  se de-parchează SINGUR când se schimbă lumea (vezi `semnatura` + fix #2). */
   blocat?: boolean
+  /** SEMNĂTURA LUMII la clipa parcării (versiune publicată + chei + reușite).
+   *  Cât rămâne aceeași, parcarea ține (o reîncercare ar da exact același eșec).
+   *  Când se schimbă (deploy nou / cheie nouă / o reușită), pasul se de-parchează
+   *  și primește O încercare nouă, cu abordare schimbată. Lipsă = parcat înainte
+   *  de fix → se de-parchează o dată. */
+  semnatura?: string
 }
 
 // Câte reîncercări dăm unei sarcini înainte s-o PARCĂM (nu abandonăm de tot —
@@ -615,7 +621,7 @@ async function citesteStare(cod: string): Promise<StarePas> {
   if (!raw) return { job: 0, incercari: 0 }
   try {
     const v = JSON.parse(raw) as Partial<StarePas>
-    return { job: Number(v.job ?? 0) || 0, incercari: Number(v.incercari ?? 0) || 0, gata: v.gata, blocat: v.blocat }
+    return { job: Number(v.job ?? 0) || 0, incercari: Number(v.incercari ?? 0) || 0, gata: v.gata, blocat: v.blocat, semnatura: v.semnatura }
   } catch {
     return { job: 0, incercari: 0 }
   }
@@ -1108,8 +1114,24 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   // forever; and so a heavy step doesn't starve the rest, tasks are taken in
   // "who was tried the fewest times" order. So it both insists and advances.
   const cuStare = await Promise.all(brute.map(async (x) => ({ x, st: await citesteStare(x.cod) })))
+  // ── FIX #2 (Adrian, 5 aug: „ca el să nu mai pice ȘI să nu mai stea") ────────
+  // Un pas PARCAT nu mai e blocat pe veci. Se de-parchează SINGUR când s-a
+  // schimbat lumea (versiune nouă publicată / cheie nouă / o reușită) — exact
+  // regula zidului: cât lumea e la fel, o reîncercare ar da același eșec, deci
+  // parcarea ține; când lumea chiar s-a schimbat, primește O încercare nouă, cu
+  // abordarea schimbată (`escaladare` intră singur, incercari=0 la re-armare).
+  // Un pas parcat ÎNAINTE de fix (fără semnătură) se de-parchează o dată.
+  for (const e of cuStare) {
+    if (e.st.blocat && (!e.st.semnatura || e.st.semnatura !== acum)) {
+      e.st = { job: 0, incercari: 0 }
+      await scrieStare(e.x.cod, e.st)
+      await saveKv(`autonomie:parcat:${e.x.cod}`, '').catch(() => {})
+      console.log(`[AUTONOM] ${e.x.cod} DE-PARCAT — lumea s-a schimbat, primește o încercare nouă cu abordare schimbată`)
+    }
+  }
   // Sar peste cele GATA și peste cele PARCATE (4 aug) — parcatele nu mai intră
-  // în rotație, deci nu mai nasc ordine căzute la infinit.
+  // în rotație, deci nu mai nasc ordine căzute la infinit (dar se de-parchează la
+  // schimbarea lumii, mai sus).
   const sarcini = cuStare.filter((e) => !e.st.gata && !e.st.blocat).sort((a, b) => a.st.incercari - b.st.incercari)
 
   for (const { x: s, st } of sarcini) {
@@ -1162,13 +1184,25 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     }
 
     // PLAFONUL (4 aug): dacă sarcina asta a picat deja de LIMITA_INCERCARI ori,
-    // n-o mai relansăm — o PARCĂM. Altfel același ordin cade la infinit (owner:
-    // #78-#89, încercarea 15-18) și umple auditul. Se relansează doar dacă
-    // owner-ul o reformulează (cod nou / reset).
+    // n-o mai relansăm ACUM — o PARCĂM cu semnătura lumii. Altfel același ordin
+    // cade la infinit (owner: #78-#89, încercarea 15-18) și umple auditul. NU mai
+    // e pe veci: se de-parchează singur când se schimbă lumea (fix #2, sus).
     if (st.incercari >= LIMITA_INCERCARI) {
-      await scrieStare(s.cod, { ...st, job: 0, blocat: true })
+      // FIX #3 (măsurare, 5 aug): salvăm DE CE a picat — cauza comună din
+      // jurnalele buclei — ca să NU dispară cu curățarea ordinelor vechi (până
+      // acum, a doua zi nu se mai vedea de ce s-a parcat un pas). Persistat în kv,
+      // vizibil în panou și în raportul de dimineață.
+      const picateBuclei = aleBuclei(jobs).filter((j) => j.status === 'failed')
+      const cauza =
+        cauzaComuna(picateBuclei) ||
+        (st.job ? ((dupaId.get(st.job)?.log ?? '').split('\n').filter((r) => r.trim()).slice(-1)[0] ?? '').slice(0, 200) : '')
+      await saveKv(
+        `autonomie:parcat:${s.cod}`,
+        JSON.stringify({ titlu: s.titlu, cauza, incercari: st.incercari, cand: new Date().toISOString() }),
+      ).catch(() => {})
+      await scrieStare(s.cod, { ...st, job: 0, blocat: true, semnatura: acum })
       console.log(
-        `[AUTONOM] ${s.cod} PARCAT după ${st.incercari} încercări eșuate — nu mai reia (owner o reformulează dacă mai e de actualitate)`,
+        `[AUTONOM] ${s.cod} PARCAT după ${st.incercari} încercări — cauza: ${cauza.slice(0, 120)} (se de-parchează la schimbarea lumii)`,
       )
       continue
     }

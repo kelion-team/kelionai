@@ -64,7 +64,11 @@ const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
 // formatul exact al constructorului (functionCall ok). Suprascriibil din env
 // fără deploy (`CONSTRUCTOR_GEMINI_MODEL`) dacă vrei alt model.
 const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.6-flash'
-const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 24)
+// 40, nu 24 (Adrian, 5 aug: „ca el să nu mai pice"): un ordin mare (tabelă nouă
+// + cale de detectare + panou + teste — ex. plasa banilor M2) are nevoie de
+// mulți pași CU UNELTE (clone, citește config+servicii, scrie migrare+cod+teste,
+// build, test, repară, PR). Cu 24 rămânea fără pași și ieșea NETERMINAT → picat.
+const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 40)
 // Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
 // contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
 // construcție, dar nici să ne țină la nesfârșit.
@@ -79,7 +83,13 @@ const MAX_TOKENS = Number(env.CONSTRUCTOR_MAX_TOKENS || 900_000)
 // plafonul. Acum: rezultatele uneltelor vechi se comprimă la un ciot; doar
 // ultimele KEEP_VERBATIM schimburi rămân întregi. Liniar, nu pătratic.
 const KEEP_VERBATIM = Number(env.CONSTRUCTOR_KEEP_VERBATIM || 6)
-const READ_CAP = 6_000 // caractere pe o citire (era 120k — sursa exploziei)
+const READ_CAP = 6_000 // plafon pe REZULTATUL oricărei unelte în istoric (era 120k — sursa exploziei)
+// Plafon SEPARAT, mai mare, DOAR pentru citirea unui fișier (Adrian, 5 aug: „să
+// nu mai pice"): 6k tăia fișiere mari (config.ts, db.ts) la jumătate →
+// constructorul edita pe orb și cădea. 20k acoperă majoritatea fișierelor
+// întregi; ce e mai mare se cere pe interval de linii. Fereastra glisantă
+// (KEEP_VERBATIM) comprimă oricum citirile vechi, deci nu sparge contextul.
+const READ_CAP_FISIER = Number(env.CONSTRUCTOR_READ_CAP || 20_000)
 
 // BUGETUL DE TIMP AL RULĂRII. constructor-worker.sh ne dă `timeout 1800`; dacă
 // ne prinde acolo, procesul moare SIGKILL/SIGTERM fără să raporteze, ordinul
@@ -182,8 +192,8 @@ function toolRead(p, from, to) {
   const a = Number.isFinite(from) && from > 0 ? Math.floor(from) : 1
   const b = Number.isFinite(to) && to >= a ? Math.floor(to) : lines.length
   const slice = lines.slice(a - 1, b).map((l, i) => `${a + i}\t${l}`).join('\n')
-  if (slice.length > READ_CAP)
-    return `${slice.slice(0, READ_CAP)}\n...[trunchiat la ${READ_CAP} caractere — cere un interval de linii (from/to) pentru restul; fișierul are ${lines.length} linii]`
+  if (slice.length > READ_CAP_FISIER)
+    return `${slice.slice(0, READ_CAP_FISIER)}\n...[trunchiat la ${READ_CAP_FISIER} caractere — cere un interval de linii (from/to) pentru restul; fișierul are ${lines.length} linii]`
   return slice
 }
 // GREP peste atelier (audit: fără căutare, modelul „spelunca" prin ls/read pas
@@ -344,9 +354,12 @@ const RUN_ALLOWED = new Set([
   'npm --prefix backend ci',
   'npm --prefix backend run build',
   'npm --prefix backend run typecheck',
+  'npm --prefix backend run lint',
   'npm --prefix backend test',
   'npm --prefix frontend ci',
   'npm --prefix frontend run build',
+  'npm --prefix frontend run typecheck',
+  'npm --prefix frontend run lint',
   'git status --porcelain',
   'git diff --stat',
   // Porțile CASEI (măsurat pe ordinul #44, 3 aug 21:33: lucrătorul a vrut să
@@ -1012,8 +1025,12 @@ async function main() {
               `pas ${pasiUtili + 1}/${MAX_STEPS}: ${c.function.name} ${String(args.path ?? args.cmd ?? args.dir ?? args.pattern ?? '').slice(0, 80)}` +
                 (RE_REFUZ.test(result) ? ` → ${result.slice(0, 90)}` : ''),
             )
-          // Plafon per-rezultat mic (era 100k — sursa exploziei de context).
-          messages.push({ role: 'tool', tool_call_id: c.id, content: result.slice(0, READ_CAP) })
+          // Plafon per-rezultat: o CITIRE de fișier are voie mai mult (ca să
+          // vadă fișierul întreg, nu jumătate — altfel edita pe orb și cădea);
+          // restul uneltelor rămân la plafonul mic (era 100k — sursa exploziei).
+          // Fereastra glisantă de mai jos comprimă oricum rezultatele vechi.
+          const capRezultat = c.function.name === 'read' ? READ_CAP_FISIER : READ_CAP
+          messages.push({ role: 'tool', tool_call_id: c.id, content: result.slice(0, capRezultat) })
         }
         if (aLucrat) pasiUtili++
         else pasiSterili++
