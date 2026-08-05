@@ -386,11 +386,15 @@ export async function initDb(): Promise<void> {
       -- Without it, a hard task started on a small model, burned turns
       -- rambling, and failed.
       dificultate INT NOT NULL DEFAULT 3,
+      arhivat BOOLEAN NOT NULL DEFAULT false,
+      arhivat_la TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS prioritate INT NOT NULL DEFAULT 5;
     ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS dificultate INT NOT NULL DEFAULT 3;
+    ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS arhivat_la TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_cerinte_stare ON cerinte (stare, prioritate, created_at);
 
     CREATE TABLE IF NOT EXISTS capability_gaps (
@@ -517,10 +521,19 @@ export async function initDb(): Promise<void> {
       pr_url TEXT,
       tokens BIGINT NOT NULL DEFAULT 0,
       log TEXT,
+      progress TEXT,
+      progress_at TIMESTAMPTZ,
+      ci TEXT,
+      brain TEXT,
+      cost_usd NUMERIC(10, 6),
+      arhivat BOOLEAN NOT NULL DEFAULT false,
+      arhivat_la TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_build_jobs_status ON build_jobs (status, created_at);
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat_la TIMESTAMPTZ;
     -- LIVE PROGRESS (autonomy Stage 4, 29 Jul): the builder's current step
     -- (cloned → editing X → build → opening PR...) so it appears on the monitor
     -- and Kelion can NARRATE it. Updated along the way by
@@ -2358,6 +2371,8 @@ export interface Cerinta {
   dovada: string | null
   job_id: number | null
   pr_url: string | null
+  arhivat?: boolean
+  arhivat_la?: Date | string | null
   created_at: Date
   updated_at: Date
 }
@@ -2390,34 +2405,48 @@ export async function adaugaCerinta(
   }
 }
 
-export async function listeazaCerinte(stare?: string, limit = 100): Promise<Cerinta[]> {
+export async function listeazaCerinte(stare?: string, limit = 100, includeArhivat = false): Promise<Cerinta[]> {
   if (!dbEnabled()) return []
   try {
+    const filterArhivat = includeArhivat ? '' : 'AND (arhivat = false OR arhivat IS NULL)'
     const r = stare
       ? await getPool().query<Cerinta>(
-          'SELECT * FROM cerinte WHERE stare = $1 ORDER BY prioritate ASC, created_at ASC LIMIT $2',
+          `SELECT * FROM cerinte WHERE stare = $1 ${filterArhivat} ORDER BY prioritate ASC, created_at ASC LIMIT $2`,
           [stare, limit],
         )
-      : await getPool().query<Cerinta>('SELECT * FROM cerinte ORDER BY created_at DESC LIMIT $1', [limit])
+      : await getPool().query<Cerinta>(
+          `SELECT * FROM cerinte WHERE 1=1 ${filterArhivat} ORDER BY created_at DESC LIMIT $1`,
+          [limit],
+        )
     return r.rows
   } catch {
     return []
   }
 }
 
+const STARI_INCHISE_CERINTE = ['verificata', 'respinsa', 'inchisa', 'finalizata', 'rezolvata']
+
 /** Move the requirement along its journey. Only the given fields are touched
- *  — the rest stay. */
+ *  — the rest stay. When closed, it is automatically archived to prevent clutter. */
 export async function actualizeazaCerinta(
   id: number,
-  p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url' | 'prioritate' | 'dificultate'>> & { job_id?: number },
+  p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url' | 'prioritate' | 'dificultate' | 'arhivat'>> & { job_id?: number },
 ): Promise<void> {
   if (!dbEnabled() || !id) return
+  const pCloned = { ...p }
+  if (pCloned.stare && STARI_INCHISE_CERINTE.includes(pCloned.stare.toLowerCase()) && pCloned.arhivat === undefined) {
+    pCloned.arhivat = true
+  }
+
   const campuri: string[] = []
   const val: unknown[] = [id]
-  for (const [k, v] of Object.entries(p)) {
+  for (const [k, v] of Object.entries(pCloned)) {
     if (v === undefined) continue
     val.push(v)
     campuri.push(`${k} = $${val.length}`)
+  }
+  if (pCloned.arhivat) {
+    campuri.push(`arhivat_la = now()`)
   }
   if (!campuri.length) return
   try {
@@ -3252,6 +3281,8 @@ export interface BuildJob {
   // as measured from OpenRouter (null = not reported by the provider).
   brain: string | null
   costUsd: number | null
+  arhivat?: boolean
+  arhivatLa?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -3270,6 +3301,8 @@ interface BuildJobDbRow {
   ci?: string | null
   brain?: string | null
   cost_usd?: string | number | null
+  arhivat?: boolean
+  arhivat_la?: Date | string | null
   created_at: Date
   updated_at: Date
 }
@@ -3289,6 +3322,8 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     ci: r.ci ?? null,
     brain: r.brain ?? null,
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
+    arhivat: Boolean(r.arhivat),
+    arhivatLa: r.arhivat_la ? new Date(r.arhivat_la).toISOString() : null,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -3349,9 +3384,12 @@ export async function reportBuildJob(
   fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number },
 ): Promise<void> {
   if (!dbEnabled()) return
+  const isFinished = fields.status === 'done' || fields.status === 'failed'
   await getPool().query(
     `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
        tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
+       arhivat = ${isFinished ? 'true' : 'arhivat'},
+       arhivat_la = ${isFinished ? 'COALESCE(arhivat_la, now())' : 'arhivat_la'},
        updated_at = now() WHERE id = $1`,
     [
       id,
@@ -3371,13 +3409,42 @@ export async function reportBuildJob(
 // coada apărea „goală" deși nu fusese citită. null la eșec; consumatorii
 // best-effort (audit, health, dovezi) cad explicit pe `?? []`, iar ruta
 // panoului răspunde 500 ca UI-ul să scrie „nu pot citi coada".
-export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
+export async function listBuildJobs(limit = 40, includeArhivat = false): Promise<BuildJob[] | null> {
   if (!dbEnabled()) return null
   try {
-    const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
+    const filter = includeArhivat ? '' : 'WHERE (arhivat = false OR arhivat IS NULL)'
+    const r = await getPool().query<BuildJobDbRow>(`SELECT * FROM build_jobs ${filter} ORDER BY created_at DESC LIMIT $1`, [limit])
     return r.rows.map(rowToBuildJob)
   } catch {
     return null
+  }
+}
+
+/**
+ * Curăță/arhivează cerințele și joburile finalizate/închise, mutându-le în arhivă
+ * pentru a nu lăsa gunoiul la vedere în lista de lucru activă.
+ */
+export async function arhiveazaCerinteSiJoburiInchise(): Promise<{ cerinteArhivate: number; joburiArhivate: number }> {
+  if (!dbEnabled()) return { cerinteArhivate: 0, joburiArhivate: 0 }
+  try {
+    const resCerinte = await getPool().query(
+      `UPDATE cerinte
+       SET arhivat = true, arhivat_la = now(), updated_at = now()
+       WHERE LOWER(stare) IN ('verificata', 'respinsa', 'inchisa', 'finalizata', 'rezolvata')
+         AND (arhivat = false OR arhivat IS NULL)`
+    )
+    const resJoburi = await getPool().query(
+      `UPDATE build_jobs
+       SET arhivat = true, arhivat_la = now(), updated_at = now()
+       WHERE LOWER(status) IN ('done', 'failed', 'cancelled')
+         AND (arhivat = false OR arhivat IS NULL)`
+    )
+    return {
+      cerinteArhivate: resCerinte.rowCount ?? 0,
+      joburiArhivate: resJoburi.rowCount ?? 0,
+    }
+  } catch {
+    return { cerinteArhivate: 0, joburiArhivate: 0 }
   }
 }
 

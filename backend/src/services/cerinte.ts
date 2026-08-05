@@ -157,7 +157,7 @@ export async function evalueazaCerinta(c: Cerinta): Promise<{ ok: boolean; detal
  *  If something comes out, it becomes a NEW requirement, linked to the first
  *  — not a silent rewrite of history. */
 export async function imbunatatireContinua(limita = 5): Promise<{ propuneri: number; detaliu: string }> {
-  const livrate = (await listeazaCerinte('verificata', 50)).slice(0, limita)
+  const livrate = (await listeazaCerinte('verificata', 50, true)).slice(0, limita)
   if (!livrate.length) return { propuneri: 0, detaliu: 'nimic livrat încă de reanalizat' }
 
   const lista = livrate.map((c) => `#${c.id}: "${c.text}" — rezolvat prin: ${c.aleasa ?? '(nescris)'}`).join('\n')
