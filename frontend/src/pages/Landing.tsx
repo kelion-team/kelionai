@@ -189,15 +189,15 @@ export default function Landing({ error }: { error?: string | null }) {
 
           <div className="landing-lead">
             {leadSent ? (
-              <p className="landing-lead-done">Thanks — we'll get back to you soon.</p>
+              <p className="landing-lead-done">{PT.leadThanks}</p>
             ) : (
               <>
-                <h3 className="landing-lead-title">Leave your email and we'll reach out</h3>
+                <h3 className="landing-lead-title">{PT.leadTitle}</h3>
                 <div className="landing-lead-row">
                   <input
                     className="landing-lead-input"
                     type="email"
-                    placeholder="email@example.com"
+                    placeholder={PT.emailPlaceholder}
                     value={leadEmail}
                     onChange={(e) => setLeadEmail(e.target.value)}
                   />
@@ -207,13 +207,13 @@ export default function Landing({ error }: { error?: string | null }) {
                     onClick={() => void submitLead()}
                     disabled={leadBusy || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadEmail)}
                   >
-                    {leadBusy ? 'Sending…' : 'Send'}
+                    {leadBusy ? PT.leadSending : PT.leadSend}
                   </button>
                 </div>
                 <input
                   className="landing-lead-input landing-lead-note"
                   type="text"
-                  placeholder="Short message (optional)"
+                  placeholder={PT.leadNotePlaceholder}
                   value={leadNote}
                   onChange={(e) => setLeadNote(e.target.value)}
                 />
@@ -237,7 +237,7 @@ export default function Landing({ error }: { error?: string | null }) {
               .exe self-updates. Store targets get swapped in the moment a
               listing goes public (MS Store, Play, App Store). */}
           <div className="landing-qr">
-            <span className="landing-qr-hint">Tap a code to install — or scan it (🔍 enlarges)</span>
+            <span className="landing-qr-hint">{PT.qrHint}</span>
             <div className="landing-qr-row">
               {QR_CODES.map((q) => (
                 <figure key={q.key}>
@@ -245,15 +245,15 @@ export default function Landing({ error }: { error?: string | null }) {
                   win code the win app installs... each according to his system”).
                   Click/tap on the code → installs that platform; the enlarge-for-scanning
                   stays on the 🔍 button. */}
-                  <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={`Install — ${q.label}`}>
-                    <img src={q.img} alt={`QR — ${q.label}`} width="96" height="96" />
+                  <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={PT.qrInstallLabel(q.label)}>
+                    <img src={q.img} alt={PT.qrAlt(q.label)} width="96" height="96" />
                   </a>
                   <figcaption>{q.label}</figcaption>
                   {/* The watermark number, under EVERY code — the same as in the browser;
                   it proves the installed app is exactly the live version. */}
                   <span className="qr-version">{versionLabel(srv)}</span>
                   <a className="qr-install" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
-                    Install
+                    {PT.installBtn}
                   </a>
                   <button type="button" className="qr-zoom-btn" onClick={() => setQrZoom(q)} title={PT.zoomQr}>
                     🔍
@@ -265,7 +265,7 @@ export default function Landing({ error }: { error?: string | null }) {
 
           <p className="landing-legal">
             <button type="button" className="landing-contact-link" onClick={() => setContactOpen(true)}>
-              Contact
+              {PT.contactLink}
             </button>{' '}
             · <a href="/privacy">{t.privacyLabel}</a> · <a href="/terms">{t.termsLabel}</a>
             <br />
@@ -285,10 +285,10 @@ export default function Landing({ error }: { error?: string | null }) {
           }}
         >
           <figure className="qr-zoom">
-            <img src={qrZoom.img} alt={`QR — ${qrZoom.label}`} />
+            <img src={qrZoom.img} alt={PT.qrAlt(qrZoom.label)} />
             <figcaption>
               {qrZoom.label}
-              <span className="qr-zoom-hint">Scan with your phone — tap anywhere to close</span>
+              <span className="qr-zoom-hint">{PT.qrZoomHint}</span>
             </figcaption>
           </figure>
         </div>

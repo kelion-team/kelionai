@@ -64,7 +64,7 @@ export const PUBLIC_TEXT = {
   // THE PAYMENT CODE, SHOWN (M4, Aug 2) — the /credite page used to navigate
   // to Revolut without ever showing the code the matching depends on.
   payCodeTitle: 'Your payment code',
-  payCodeHint: 'Introdu acest cod în câmpul Referință / Notă în pagina Revolut înainte de a plăti. Fără cod, plata NU se poate asocia automat contului tău!',
+  payCodeHint: 'Add this code to the Reference / Note field on the Revolut page before paying. Without this code, payment CANNOT be automatically matched to your account!',
   payCodeCopy: 'Copy the code',
   payCodeCopied: 'Copied ✓',
   payCodeOpen: 'Open Revolut and pay ↗',
@@ -93,6 +93,16 @@ export const PUBLIC_TEXT = {
   vchatSendFailed: "Your message didn't go through — please try again.",
   vchatOffline: "We can't reach the server right now — replies may be delayed.",
 
-  // (The old updateAvailable/updateNow lived here too — dead: App.tsx renders
-  // the update banner from i18n's updateReady/updateNow. Removed Aug 2.)
+  // Landing page: lead form, QR, install, contact (Audit Aug 2 / I5)
+  leadThanks: "Thanks — we'll get back to you soon.",
+  leadTitle: "Leave your email and we'll reach out",
+  leadSending: 'Sending…',
+  leadSend: 'Send',
+  leadNotePlaceholder: 'Short message (optional)',
+  qrHint: 'Tap a code to install — or scan it (🔍 enlarges)',
+  qrInstallLabel: (label: string): string => `Install — ${label}`,
+  qrAlt: (label: string): string => `QR — ${label}`,
+  installBtn: 'Install',
+  contactLink: 'Contact',
+  qrZoomHint: 'Scan with your phone — tap anywhere to close',
 } as const
