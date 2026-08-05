@@ -135,11 +135,13 @@ describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier
   const voce = sursa('../../frontend/src/lib/realtimeVoice.ts')
   const server = sursa('./routes/realtime.ts')
 
-  it('vocea PROPRIETARULUI verificat ajunge la creier fără „Kelion" de fiecare dată', () => {
-    // Adrian, 3 aug: „vocea actuală la creier fără să eșueze". Poarta lasă vocea
-    // la creier pe semnalul POZITIV `holder` (proprietar verificat), nu doar pe nume.
-    expect(/verdict\?\.holder === true/.test(voce)).toBe(true)
-    expect(/if \(named \|\| answering \|\| holder\)/.test(voce)).toBe(true)
+  it('poarta de TREZIRE: tura merge la creier DOAR pe „Kelion/Kei" ca prim cuvânt (Adrian, 5 aug — retractează full-duplex-ul fără nume)', () => {
+    // Adrian, 5 aug: „dacă nu aude primul cuvânt «Kelion» sau «Kei», să nu
+    // vorbească neîntrebat, să stea fără să zică nimic." Retractează regula din
+    // 3 aug (proprietar fără „Kelion"): acum CHIAR ȘI proprietarul trezește cu
+    // numele. Excepția: răspunsul la propria întrebare a lui Kelion (fereastra).
+    expect(/const trezit = TREZIRE_RE\.test\(t\.trim\(\)\)/.test(voce)).toBe(true)
+    expect(/if \(trezit \|\| answering\)/.test(voce)).toBe(true)
   })
 
   it('serverul dă semnalul POZITIV doar când e chiar proprietarul contului', () => {

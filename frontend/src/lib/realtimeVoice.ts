@@ -198,11 +198,14 @@ export async function startRealtimeVoice(
     // gura pe loc, iar poarta de NUME decide per rostire dacă tura ajunge la
     // creier (proprietarul verificat trece FĂRĂ „Kelion" — full-duplex real).
     const REPLY_WINDOW_MS = 12_000
-    // Fereastra e DESCHISĂ la start (userul tocmai a pornit microfonul — evident
-    // i se adresează lui Kelion). Dacă tace 15s, tăcerea redevine implicită.
-    let replyUntil = Date.now() + 15_000
-    // Regex TOLERANT la transcriere reală („Kelion, ce faci" → „Elioncevaci").
-    const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
+    // Adrian, 5 aug: „dacă nu aude primul cuvânt «Kelion» sau «Kei», să nu
+    // vorbească neîntrebat, să stea fără să zică nimic." Poarta pornește ÎNCHISĂ
+    // — nu mai răspunde la orice imediat ce pornește microfonul; se deschide DOAR
+    // când prima vorbă e cuvântul de trezire (sau când chiar Kelion a întrebat).
+    let replyUntil = 0
+    // Cuvântul de trezire DOAR ca PRIM cuvânt, ancorat la început, tolerant la
+    // transcriere reală („Kelion, ce faci" → „Elion…", „Chelion", „Kei").
+    const TREZIRE_RE = /^\W*(?:[ckg]h?e?l[iy]?[oae]n|elion|eleon|kei|kay)\b/i
     // Ultima limbă detectată — folosită ca hint pentru urechea Chirp (getLang).
     let anchoredLang = ''
     const poartaDupaTranscript = (t: string, vf: VoiceFeatures | null, audio?: string): void => {
@@ -233,14 +236,15 @@ export async function startRealtimeVoice(
           return
         }
         if (!t.trim()) return
-        // POARTA DE NUME + full-duplex pentru proprietarul VERIFICAT: dacă e
-        // numit, dacă răspunde în fereastră, SAU dacă serverul a confirmat vocea
-        // proprietarului (`holder`), tura merge la creier. TV/străinii sunt deja
-        // opriți mai sus (foreignVoice).
-        const named = NAME_RE.test(t)
+        // POARTA DE TREZIRE (Adrian, 5 aug): tura merge la creier DOAR dacă prima
+        // vorbă e cuvântul de trezire („Kelion"/„Kei"), SAU dacă Kelion tocmai a
+        // pus o întrebare și userul răspunde în fereastră. Altfel — TĂCERE: Kelion
+        // nu mai vorbește neîntrebat, nici măcar proprietarului (retractează
+        // full-duplex-ul fără nume din 3 aug). Vocea străină/TV e deja oprită mai
+        // sus (foreignVoice), deci trezirea nu lasă străinii înăuntru.
+        const trezit = TREZIRE_RE.test(t.trim())
         const answering = Date.now() < replyUntil
-        const holder = verdict?.holder === true
-        if (named || answering || holder) {
+        if (trezit || answering) {
           replyUntil = 0
           onAddressed?.(t, vf, speaker, audio)
         }

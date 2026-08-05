@@ -2203,31 +2203,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           deviceLoc,
         )
       }
-      // FIRST WORD UNDER 1s ON ACTION TURNS TOO (Adrian, Jul 27, live proof:
-      // 37s until the first word — the deed gate made it execute ALL tools
-      // before saying a word). On the admin's action turn, the acknowledgment
-      // leaves INSTANTLY; the tools run immediately after.
-      if (isAdmin && heavyTurn) {
-        // The wording requested by Adrian (Jul 30, second time): "task taken
-        // on", not "getting on it — checking and executing". The first says the
-        // job is IN his hands; the second described what he was about to do,
-        // which is not what the human cares about.
-        const ackText = ro ? 'Am preluat sarcina. ' : 'Task taken on. '
-        noteFirstWord()
-        // PLAIN text only — the write interceptor above frames EVERY chunk as
-        // SSE (appendTurn). Passing appendTurn() output here DOUBLE-framed it:
-        // the human saw „id: 5 data: Am preluat sarcina." (Adrian, Aug 1,
-        // live screenshot) instead of the sentence.
-        // A RECEIPT, NOT THE REPLY (Aug 2): the ack must not count as
-        // "something visible" for this turn — otherwise an empty brain answer
-        // behind it is accepted as success and the human gets the pickup
-        // phrase, then the void (see conteazaCaVizibil above).
-        ackInstantZbor = true
-        reply.raw.write(ackText)
-        ackInstantZbor = false
-        voice.feed(ackText)
-        assistantText += ackText
-      }
+      // FĂRĂ ACK-UL „Am preluat sarcina" (Adrian, 5 aug: „scoate-i «am preluat
+      // sarcina»"). Pe tura de acțiune a adminului nu mai plecă nicio frază de
+      // preluare — răspunsul e direct rezultatul real (sau un mesaj onest). Kelion
+      // nu mai vorbește ca să anunțe că se apucă; execută și răspunde.
       // GEMINI-ONLY (3 aug — extirparea totală OpenRouter): nu mai există niciun
       // „secundar" pe alt furnizor. Modelul turei e treapta Gemini aleasă de
       // selectedBrainModel; pe tura ușoară e deja gemini-2.5-flash (măsurat pe

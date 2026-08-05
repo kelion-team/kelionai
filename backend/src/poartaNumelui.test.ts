@@ -31,15 +31,19 @@ describe('poarta numelui se judecă per frază, nu pe ceas', () => {
     expect(voce).not.toContain('GATE_WINDOW_MS')
   })
 
-  it('răspunde dacă numele e în FRAZA curentă (SAU e proprietarul verificat — Adrian, 3 aug)', () => {
-    expect(voce).toMatch(/const named = NAME_RE\.test\(t\)/)
-    // Poarta lasă la creier pe nume, pe fereastra de răspuns SAU pe proprietarul
-    // verificat de amprentă (`holder`) — full-duplex fără „Kelion" la fiecare tură.
-    expect(voce).toMatch(/if \(named \|\| answering \|\| holder\)/)
+  it('răspunde DOAR dacă primul cuvânt e trezirea „Kelion/Kei" (Adrian, 5 aug: fără vorbit neîntrebat)', () => {
+    // Adrian a RETRACTAT pe 5 aug full-duplex-ul fără nume (3 aug): „dacă nu aude
+    // primul cuvânt «Kelion» sau «Kei», să nu vorbească neîntrebat". Trezirea e
+    // ancorată la ÎNCEPUT (primul cuvânt), nu oriunde în frază.
+    expect(voce).toMatch(/const TREZIRE_RE = \/\^\\W\*/)
+    expect(voce).toMatch(/const trezit = TREZIRE_RE\.test\(t\.trim\(\)\)/)
+    // Poarta lasă la creier DOAR pe trezire SAU pe fereastra de răspuns (când
+    // Kelion tocmai a întrebat). Nici proprietarul nu mai trece fără nume.
+    expect(voce).toMatch(/if \(trezit \|\| answering\)/)
   })
 
-  it('replica fără nume SE CONSUMĂ — nu poate deschide următoarea', () => {
-    expect(voce).toMatch(/if \(named \|\| answering \|\| holder\) \{\s*\n\s*replyUntil = 0/)
+  it('replica fără trezire SE CONSUMĂ — nu poate deschide următoarea', () => {
+    expect(voce).toMatch(/if \(trezit \|\| answering\) \{\s*\n\s*replyUntil = 0/)
   })
 })
 
