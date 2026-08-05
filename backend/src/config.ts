@@ -81,15 +81,18 @@ export const config = {
   julesKey: env(...ENV_ALIASES.julesKey),
   // Creierul DIRECT (chat + VEDERE + AUDIO — Gemini e multimodal, un singur
   // model face tot). 4 aug 2026: trecut de la 'gemini-2.5-flash' (gen. veche) la
-  // 'gemini-3.1-pro-preview' — creierul PUTERNIC cerut de owner (5 aug: „pune
-  // creier Gemini 3 Pro peste tot"). MĂSURAT pe cheia lui: `gemini-3-pro-preview`
-  // dă 404 (nu-i deschis pe cheie), dar `gemini-3.1-pro-preview` răspunde 200 pe
-  // v1beta — ĂSTA e Gemini 3 Pro disponibil. E multimodal (vede imagini), deci
-  // acoperă creier+chat+agenți+vedere+memorie. ATENȚIE: Pro „gândește" (thinking
-  // tokens incluse în maxOutputTokens) → plafoanele de output trebuie MARI, altfel
-  // răspunsul iese gol. Vocea Live (native-audio) rămâne separată (Pro nu face
-  // bidi). Suprascriibil din env (GEMINI_MODEL) — pe VPS trebuie pus la fel.
-  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-3.1-pro-preview',
+  // HIBRIDUL CREIERULUI (Adrian, 5 aug: „leagă hibridul, maximă precizie și
+  // calitate"). DOUĂ modele, alese per-tură de clasificatorul `heavy` din chat.ts:
+  //  • geminiModel = modelul UȘOR (flash) — vorbă simplă: rapid, ieftin, spre <1s.
+  //  • geminiModelGreu = Gemini 3 Pro — tot ce cere PRECIZIE: gândire, vedere,
+  //    acțiuni, memorie-sinteză. MĂSURAT pe cheia lui: `gemini-3-pro-preview` dă
+  //    404 (nu-i deschis), dar `gemini-3.1-pro-preview` răspunde 200 pe v1beta →
+  //    ĂSTA e Gemini 3 Pro disponibil (multimodal, vede imagini). geminiDirect
+  //    ridică plafonul de output pe 3.x (thinking-ul intră în maxOutputTokens).
+  // Vocea Live (native-audio) e separată — Pro nu face transcriere bidi.
+  // Suprascriibile din env (GEMINI_MODEL / GEMINI_MODEL_GREU).
+  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+  geminiModelGreu: process.env.GEMINI_MODEL_GREU ?? 'gemini-3.1-pro-preview',
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
   // VIDEO_ALLOW_PAID=1, ca la constructor: nimic plătit din greșeală.
