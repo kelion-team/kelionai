@@ -1290,11 +1290,18 @@ export default function Stage({ user }: { user: User }) {
                     : adminStrings().gemPillDead.replace('{why}', brainCredit.gemini?.reason ?? 'necunoscut')
                 })()}
               >
-                {brainCredit.gemini?.creditGbp != null
-                  ? `Gemini £${brainCredit.gemini.creditGbp.toFixed(2)}${brainCredit.gemini.serving ? '' : ' ⚠'}`
+                {/* CREDITUL REAL, NU CEL STĂTUT (Adrian, 5 aug: „afișezi creditul real"):
+                    cifra £ spusă de owner o arătăm DOAR când proba live zice că mai e
+                    credit (serving). Când Google spune „prepayment credits depleted",
+                    contul e GOL — arătăm £0 MĂSURAT, nu £11.58 stătut lângă un ⚠ (fix
+                    „valoare veche prezentată ca stare reală", regula #1). */}
+                {brainCredit.gemini?.serving && brainCredit.gemini?.creditGbp != null
+                  ? `Gemini £${brainCredit.gemini.creditGbp.toFixed(2)}`
                   : brainCredit.gemini?.serving
                     ? 'Gemini ✓'
-                    : 'Gemini ⚠'}
+                    : brainCredit.gemini?.reason === 'depleted'
+                      ? 'Gemini £0 ⚠'
+                      : 'Gemini ⚠'}
               </button>
             ))}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
