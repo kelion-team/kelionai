@@ -51,22 +51,19 @@ Revolut, cu numele tău.
 
 ---
 
-## 3. CHEILE DE CITIRE A CONTULUI — 5 minute
+## 3. CHEILE DE CITIRE A CONTULUI (ENABLE BANKING) — 5 minute
 
-**Cine:** tu (cere identitatea și acordul tău — nimeni altcineva nu poate).
+**Cine:** tu (înregistrarea cere reCAPTCHA cu imagini și datele titularului — nu se poate face automat).
 
-Portalul e **bankaccountdata.gocardless.com**. Atenție la capcană: `manage.` și
-`developer.` sunt ALTE produse (plăți prin Direct Debit, respectiv documentație).
-Ce ne trebuie e portalul de **Bank Account Data**, gratuit, care doar citește.
+Aplicația folosește **Enable Banking** (https://enablebanking.com), un serviciu gratuit pentru citirea propriilor conturi (Restricted Production mode / AIS - account information service).
 
-1. Intri pe **https://bankaccountdata.gocardless.com/**
-2. La login: **pornește întâi comutatorul** „I agree to … Terms & Conditions" —
-   până nu-l pornești, butoanele (inclusiv „Log in with Google") rămân moarte.
-3. După login: **Developers → User Secrets → Create new**.
-4. Copiază `Secret ID` și `Secret Key`.
-
-**Cum știi că ești unde trebuie:** în bara de adresă scrie
-`bankaccountdata.gocardless.com`, nu `manage.` și nu `developer.`.
+1. Intri pe **https://enablebanking.com/** și îți creezi cont.
+2. În Control Panel (sau Applications), creezi o aplicație nouă:
+   - **Application Name:** Kelion AI (sau orice nume dorești)
+   - **Redirect URI:** `https://kelionai.app/admin`
+   - **Public Key:** Introduci cheia publică RSA generată de aplicație pe server (disponibilă în panoul Admin → Bani sau extrasă din cheia privată existentă).
+3. Salvezi aplicația. Se va genera un **App ID** (ex: UUID sau șir unic).
+4. Copiază **App ID**-ul obținut.
 
 ---
 
@@ -74,38 +71,26 @@ Ce ne trebuie e portalul de **Bank Account Data**, gratuit, care doar citește.
 
 **Cine:** tu (consimțământul bancar e al tău, prin lege).
 
-În același portal:
-
-1. **Bank connections** (sau „Requisitions") → **Add / Connect a bank**.
-2. Alegi **Revolut** din listă (id-ul lui e `REVOLUT_REVOGB21`).
-3. Te duce pe pagina Revolut, unde **aprobi accesul de CITIRE**. Confirmi în
-   aplicația de pe telefon.
-4. La final îți dă un **Account ID** — un șir lung. Copiază-l.
-
-**Cum știi că a mers:** contul apare în listă cu starea `LINKED`, iar Account
-ID-ul e vizibil.
-
-> **De reținut, ca să nu te ia prin surprindere:** consimțământul ăsta **expiră**
-> (regula europeană PSD2 — între 30 și 90 de zile) și trebuie reînnoit de tine,
-> cu aceiași pași. Aplicația **te anunță** când nu mai poate citi — vezi §6.
+1. În panoul Admin Kelion (`https://kelionai.app/admin` → secțiunea Bani), apeși pe **„Conectează cont Revolut (Enable Banking)”**.
+2. Vei fi redirecționat către Enable Banking / Revolut pentru autorizare PSD2.
+3. Selectezi Revolut, te autentifici în aplicația Revolut pe telefon și aprobi accesul de **citire** (AIS).
+4. La final, ești redirecționat înapoi în `https://kelionai.app/admin`, iar ID-ul contului (`eb_account_uid`) se salvează automat în sistem.
 
 ---
 
-## 5. CHEILE ÎN GITHUB — 2 minute
+## 5. CHEILE ÎN GITHUB / VPS — 2 minute
 
-**Cine:** de pe 30 iul, **Kelion** — vezi §9. Îi spui cheia, o pune el, criptat,
-și ți-o confirmă cu numele și lungimea, niciodată cu valoarea. Ce urmează aici e
-calea manuală, dacă vrei s-o faci tu.
+**Cine:** tu sau Kelion (îi furnizezi App ID-ul).
 
-Intri pe **https://github.com/kelion-team/kelionai/settings/secrets/actions**
-→ **New repository secret**, de patru ori, cu numele **exact** de mai jos:
+Secretele folosite pentru plățile prin Open Banking cu Enable Banking sunt:
 
 | Numele secretului | Ce pui în el |
 |---|---|
-| `REVOLUT_PAY_LINK` | linkul de la §2 |
-| `GOCARDLESS_SECRET_ID` | de la §3 |
-| `GOCARDLESS_SECRET_KEY` | de la §3 |
-| `GOCARDLESS_ACCOUNT_ID` | de la §4 |
+| `REVOLUT_PAY_LINK` | linkul de la §2 (`https://revolut.me/...`) |
+| `ENABLE_BANKING_APP_ID` | App ID-ul obținut de la Enable Banking (§3) |
+| `ENABLE_BANKING_KEY_B64` | Cheia privată RSA asociată în format base64 (deja configurată pe server) |
+
+După setarea `ENABLE_BANKING_APP_ID`, sistemul poate efectua citiri automate din 5 în 5 minute.
 
 **Numele trebuie scrise identic** — codul caută cheia sub numele ăla.
 
