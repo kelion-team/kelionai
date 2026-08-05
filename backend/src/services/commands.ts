@@ -216,3 +216,69 @@ export function gestureAck(label: GestureLabel, ro: boolean): string {
       return 'Dansez!'
   }
 }
+
+// ── GESTUL PE SITUAȚIE (Adrian, 5 aug: „folosește gesturile greșit, fără
+// logică — implementează o logică clară pe subiect/situație") ────────────────
+//
+// Până acum gestul autonom îl ALEGEA creierul (unealta play_avatar_gesture),
+// liber, dintr-o paletă de 15 emoții, cu un prompt „moale". Un model slab
+// (Gemini 2.5-flash, pinuit) nimerea des greșit — „victorie"/„uimire" pe o
+// replică neutră. Ăsta era „fără logică". Acum gestul NU se mai ghicește: îl
+// decide DETERMINIST situația REALĂ a turei — ce face Kelion ACUM. O situație →
+// un gest, previzibil și testabil. Numele întors = vocabularul semantic
+// (salut/arata-inainte/…), pe care frontend-ul îl mapează la clipul RPM
+// (GESTURE_TO_CLIP), exact ca la comenzile directe de mai sus. Comenzile
+// directe („dansează", „salută") rămân neatinse (interpretGestureCommand).
+export interface SituatieGest {
+  /** Ultimul mesaj primit de la om. */
+  userText: string
+  /** Textul răspunsului lui Kelion (fără markup de unelte). */
+  replyText: string
+  /** A pus ceva vizibil pe monitor în tura asta (hartă/doc/card/imagine). */
+  aAratat: boolean
+}
+
+// Deschideri de salut — comparate pe PRIMUL cuvânt (un salut e la început).
+const SALUTURI_DESCHIDERE = new Set([
+  'bună', 'buna', 'salut', 'salutare', 'noroc', 'hei', 'hey', 'hello', 'hi', 'neața', 'neata',
+])
+// Rămas-bun / „stai puțin" / reușită / scuză / mulțumire — Unicode-safe (cuvinte()).
+const RE_RAMAS_BUN = cuvinte('pa|la revedere|noapte bun[ăa]|ne auzim|ne vedem|bye|goodbye|see you|take care')
+const RE_ASTEAPTA = cuvinte('o secund[ăa]|o clip[ăa]|stai pu[țt]in|imediat|un moment|hold on|one moment|just a second')
+const RE_SUCCES = cuvinte('gata|am reu[șs]it|am terminat|s-a f[ăa]cut|s-a rezolvat|rezolvat|finalizat|done')
+const RE_SCUZA = cuvinte('[îi]mi pare r[ăa]u|regret|din p[ăa]cate|n-am reu[șs]it|nu am reu[șs]it|nu am putut|a e[șs]uat|sorry|unfortunately')
+const RE_MULTUMESC = cuvinte('mul[țt]umesc|mersi|thank you|thanks')
+
+function primulCuvant(text: string): string {
+  return text.toLowerCase().split(/[^\p{L}]+/u).filter(Boolean)[0] ?? ''
+}
+function scurt(text: string): boolean {
+  return text.split(/\s+/).filter(Boolean).length <= 6
+}
+
+/** O logică clară: situația turei → un singur gest (sau niciunul). Numele
+ *  întors e din vocabularul semantic; `null` înseamnă „nimic" (gentleman
+ *  compus — pe replici neutre, informative, NU gesticulează). */
+export function gestPentruSituatie(s: SituatieGest): string | null {
+  const u = (s.userText ?? '').trim()
+  const r = (s.replyText ?? '').trim()
+  // 1. Arată ceva pe ecran → arată cu mâna spre monitor (cel mai obiectiv semn).
+  if (s.aAratat) return 'arata-inainte'
+  // 2. Rămas-bun (în mesajul omului SAU în replica lui Kelion) → salut de mână.
+  if (RE_RAMAS_BUN.test(u) || RE_RAMAS_BUN.test(r)) return 'salut'
+  // 3. Salut de deschidere (omul salută scurt, sau Kelion începe cu un salut).
+  if ((scurt(u) && SALUTURI_DESCHIDERE.has(primulCuvant(u))) || SALUTURI_DESCHIDERE.has(primulCuvant(r)))
+    return 'salut'
+  // 4. Kelion cere să aștepți → „stai puțin".
+  if (RE_ASTEAPTA.test(r)) return 'stai-putin'
+  // 5. Se scuză / n-a reușit → dezamăgire ușoară. ÎNAINTEA reușitei: „n-am
+  // reușit" conține „am reușit", deci scuza trebuie prinsă prima, altfel un
+  // eșec ar declanșa entuziasm (bug prins de test).
+  if (RE_SCUZA.test(r)) return 'dezamagire'
+  // 6. A reușit / veste bună → entuziasm discret.
+  if (RE_SUCCES.test(r)) return 'entuziasm'
+  // 7. Omul mulțumește → mulțumire.
+  if (scurt(u) && RE_MULTUMESC.test(u)) return 'multumire'
+  // 8. Replică neutră, informativă → NIMIC.
+  return null
+}
