@@ -53,7 +53,6 @@ import { keepScreenOn } from '../lib/wakelock'
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
 import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
 import { pornesteDansPeMuzica } from '../lib/dansMuzica'
-import { type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 
@@ -263,10 +262,6 @@ export default function ChatPanel({
   // Joins the VOX pieces cut at a thinking pause (not an end-of-sentence one)
   // into a single thought, before sending it to the brain. Rebuilt on every
   // (re)start of the microphone — see ensureMic below.
-  // Rămâne DOAR ca no-op de curățenie (cancel) pe căile vechi — dictarea batch a
-  // dispărut, deci nu se mai umple niciodată; păstrat ca să nu ating 8 puncte de
-  // cleanup care îl apelează defensiv.
-  const coalescerRef = useRef<UtteranceCoalescer | null>(null)
   // TURA VOCALĂ CURENTĂ (Adrian, 5 aug — voce unificată): fără transcript, o frază
   // vocală pleacă la creier ca AUDIO, cu o bulă-substituent „🎙️". Ținem ts-urile
   // bulei userului și ale răspunsului ca handleControl să le poată: (a) umple bula
@@ -1299,6 +1294,13 @@ export default function ChatPanel({
   //     looked exactly like a working one that ignores you.
   const lastAsrLostAckRef = useRef(0)
   const micTerminalAckedRef = useRef(false)
+  // Reprogramează pornirea microfonului cu backoff (evită bucla strânsă) — o
+  // SINGURĂ definiție, folosită pe toate căile de reîncercare (fără clonă jscpd).
+  const reprogrameazaMic = (): void => {
+    if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+    micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
+    micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
+  }
   const onMicErr = (reason: string): void => {
     // A lost TRANSCRIPTION is not a dead microphone: the mic keeps listening,
     // the human hears the truth and repeats the sentence — not into a void.
@@ -1311,7 +1313,6 @@ export default function ChatPanel({
       return
     }
     micRef.current = null
-    coalescerRef.current?.cancel()
     setListening(false)
     setLiveVoice('')
     if (reason === 'not-allowed' || reason === 'unsupported') {
@@ -1329,8 +1330,7 @@ export default function ChatPanel({
       micTerminalAckedRef.current = true
       ack(t.micNoDevice)
     }
-    micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
-    micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
+    reprogrameazaMic()
   }
 
   async function ensureMic(preWarmedStream?: MediaStream): Promise<void> {
@@ -1456,9 +1456,7 @@ export default function ChatPanel({
                   // BACKOFF, not a tight loop (Aug 2 — 57 restarts in 24h came
                   // from this instant re-entry): the restart waits on the same
                   // backoff as the STT path's onMicErr.
-                  if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
-                  micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
-                  micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
+                  reprogrameazaMic()
                 }
               }
             },
@@ -1607,9 +1605,7 @@ export default function ChatPanel({
       // de start): NU cădem pe niciun STT — reîncercăm calea unică mai târziu, cu
       // backoff (veghea permanentă și revenirea în tab o repornesc oricum).
       if (!micManualOffRef.current && !micRef.current) {
-        if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
-        micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
-        micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
+        reprogrameazaMic()
       }
     } finally {
       micStartingRef.current = false
@@ -1634,7 +1630,6 @@ export default function ChatPanel({
       micRef.current?.stop()
       micRef.current = null
       // intentional stop: a stuck fragment must NOT be sent after teardown
-      coalescerRef.current?.cancel()
       setListening(false)
       return
     }
@@ -1714,7 +1709,6 @@ export default function ChatPanel({
       if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
       micRef.current?.stop()
       micRef.current = null
-      coalescerRef.current?.cancel()
       stopVoice()
     }
   }, [])
@@ -1815,7 +1809,6 @@ export default function ChatPanel({
       }
       micRef.current?.stop()
       micRef.current = null
-      coalescerRef.current?.cancel()
       setListening(false)
       setLiveVoice('')
     }
@@ -2360,7 +2353,6 @@ export default function ChatPanel({
                 // Typed text has PRIORITY over the pending voice (Adrian, Jul 11: typed
                 // messages lost — don't let a voice fragment jump ahead of the text).
                 // The coalescer is cancelled, not flushed.
-                coalescerRef.current?.cancel()
                 void send(input)
               }
             }}
@@ -2398,7 +2390,6 @@ export default function ChatPanel({
             onClick={() => {
               // Typed text has PRIORITY: we cancel the pending voice,
               // we don't send it ahead of the text (lost typed messages bug).
-              coalescerRef.current?.cancel()
               void send(input)
             }}
             // Active while you have something TYPED to send. Empty field (audio chat) → it stays
