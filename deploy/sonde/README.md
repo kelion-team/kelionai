@@ -9,10 +9,13 @@ bloc lung s-a **corupt în transmisie** (un caracter chirilic `Б`/`С` intra pe
 pe VPS (`/root/kelion/repo`, timer la 5 min) și se rulează **pe cale**, nu pe base64:
 
 ```bash
-# în vps-run.yml (inputs.cmd) — scurt, zero base64:
-docker cp /root/kelion/repo/deploy/sonde/autonomie.mjs kelionai-app:/tmp/s.mjs \
-  && docker exec -w /app/backend kelionai-app node /tmp/s.mjs 2>&1 \
-  ; docker exec kelionai-app rm -f /tmp/s.mjs
+# în vps-run.yml (inputs.cmd) — scurt, zero base64.
+# ATENȚIE: copiază fișierul ÎN /app/backend (unde e node_modules), NU în /tmp —
+# Node ESM rezolvă `import pg` din folderul FIȘIERULUI, nu din `-w`. Din /tmp dă
+# ERR_MODULE_NOT_FOUND.
+docker cp /root/kelion/repo/deploy/sonde/autonomie.mjs kelionai-app:/app/backend/s.mjs \
+  && docker exec -w /app/backend kelionai-app node s.mjs 2>&1 \
+  ; docker exec kelionai-app rm -f /app/backend/s.mjs
 ```
 
 Scriptul citește secretele din env-ul containerului (DATABASE_URL etc.) — la fel
