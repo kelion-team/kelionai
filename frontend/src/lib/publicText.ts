@@ -64,7 +64,7 @@ export const PUBLIC_TEXT = {
   // THE PAYMENT CODE, SHOWN (M4, Aug 2) — the /credite page used to navigate
   // to Revolut without ever showing the code the matching depends on.
   payCodeTitle: 'Your payment code',
-  payCodeHint: 'Write this code in the payment reference (note) — it ties the money to your account.',
+  payCodeHint: 'Introdu acest cod în câmpul Referință / Notă în pagina Revolut înainte de a plăti. Fără cod, plata NU se poate asocia automat contului tău!',
   payCodeCopy: 'Copy the code',
   payCodeCopied: 'Copied ✓',
   payCodeOpen: 'Open Revolut and pay ↗',

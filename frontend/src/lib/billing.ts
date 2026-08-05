@@ -82,6 +82,7 @@ export interface PurchaseRecord {
   credits: number
   status: string
   created_at: string
+  code?: string
 }
 export async function fetchHistory(): Promise<PurchaseRecord[] | null> {
   try {

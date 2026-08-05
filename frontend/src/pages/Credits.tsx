@@ -1,43 +1,87 @@
-// THE PUBLIC CREDITS PAGE (Adrian, Jul 26: "dedicated page for... buying
-// credits... including being able to create and buy"). Visible EVEN without
-// an account — transparent prices before registration. "Buy" → if not logged
-// in, we take them to /login; if logged in, it starts payment through
-// /api/billing/checkout (the same path as the wallet pill in the app —
-// Revolut link + unique code).
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
-import { startCheckout, type CheckoutStart } from '../lib/billing'
+import { startCheckout, fetchBalance, fetchHistory, type CheckoutStart, type PurchaseRecord, type WalletStatus } from '../lib/billing'
 import BackLink from '../components/BackLink'
 
 const CREDITS_PER_POUND = 7.5
-// The first top-up has a £20 minimum on the server — the packs start at £20 so
-// no public button should fall on this rule.
-const PACKS = [20, 30, 50]
 
 export default function Credits(): React.JSX.Element {
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
+  const [balance, setBalance] = useState<WalletStatus | null>(null)
+  const [history, setHistory] = useState<PurchaseRecord[] | null>(null)
   const [err, setErr] = useState('')
+  const [successMsg, setSuccessMsg] = useState('')
   const [busy, setBusy] = useState(0)
-  // AUTO TOP-UP at payment time (Adrian, Aug 1: "auto-pay selectable with a
-  // checkbox when the user pays — can he also set the payment value?"). The
-  // same preference as in Settings; saved through the same route.
+
+  // Custom amount state
+  const [customInput, setCustomInput] = useState('')
+
+  // Auto-topup settings
   const [ar, setAr] = useState<{ enabled: boolean; threshold: number; topupAmount: number } | null>(null)
   const [arSaved, setArSaved] = useState(false)
+
+  // Payment code state
+  const [payCode, setPayCode] = useState<CheckoutStart | null>(null)
+  const [codeCopied, setCodeCopied] = useState(false)
+
+  const prevCreditsRef = useRef<number | null>(null)
+
+  const loadUserData = async (): Promise<void> => {
+    const [b, h] = await Promise.all([fetchBalance(), fetchHistory()])
+    if (b) {
+      if (prevCreditsRef.current !== null && b.credits > prevCreditsRef.current) {
+        setPayCode(null)
+        setSuccessMsg('Plată primită cu succes! Creditele au fost adăugate în cont.')
+      }
+      prevCreditsRef.current = b.credits
+      setBalance(b)
+    }
+    if (h) setHistory(h)
+  }
 
   useEffect(() => {
     void fetch('/auth/me', { credentials: 'include' })
       .then((r) => {
         setSignedIn(r.ok)
-        if (r.ok)
+        if (r.ok) {
+          void loadUserData()
           void fetch('/api/billing/autorecharge', { credentials: 'include' })
             .then((x) => (x.ok ? x.json() : null))
             .then((a) => {
               if (a) setAr({ enabled: !!a.enabled, threshold: Number(a.threshold ?? 20), topupAmount: Number(a.topupAmount ?? 10) })
             })
             .catch(() => {})
+        }
       })
       .catch(() => setSignedIn(false))
   }, [])
+
+  // Fast poll while waiting for payment code confirmation
+  useEffect(() => {
+    if (!payCode) return
+    const interval = window.setInterval(() => {
+      void loadUserData()
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [payCode])
+
+  const firstTopUp = balance ? (balance.firstTopUp ?? true) : true
+  const minAmount = firstTopUp ? 20 : 5
+  const PACKS = firstTopUp ? [20, 30, 50] : [10, 20, 50]
+
+  const customVal = Number(customInput)
+  const isCustomFilled = customInput.trim() !== ''
+  let customErr = ''
+  if (isCustomFilled) {
+    if (!Number.isFinite(customVal) || customVal <= 0) {
+      customErr = 'Introdu o sumă validă.'
+    } else if (customVal % 5 !== 0) {
+      customErr = 'Suma trebuie să fie un multiplu de £5.'
+    } else if (customVal < minAmount) {
+      customErr = firstTopUp ? 'Prima reîncărcare trebuie să fie de minim £20.' : 'Suma minimă este £5.'
+    }
+  }
+  const isCustomValid = isCustomFilled && !customErr
 
   const saveAr = (patch: Partial<{ enabled: boolean; topupAmount: number }>): void => {
     if (!ar) return
@@ -58,12 +102,6 @@ export default function Credits(): React.JSX.Element {
       .catch(() => {})
   }
 
-  // THE PAYMENT CODE, SHOWN (M4, Aug 2): this page used to navigate straight
-  // to Revolut and throw away the code the whole matching depends on — a
-  // payment made that way could never be tied back to the account.
-  const [payCode, setPayCode] = useState<CheckoutStart | null>(null)
-  const [codeCopied, setCodeCopied] = useState(false)
-
   const buy = async (amount: number): Promise<void> => {
     if (!signedIn) {
       window.location.href = '/login'
@@ -71,6 +109,7 @@ export default function Credits(): React.JSX.Element {
     }
     setBusy(amount)
     setErr('')
+    setSuccessMsg('')
     try {
       const r = await startCheckout(amount)
       if (r.ok) {
@@ -93,18 +132,65 @@ export default function Credits(): React.JSX.Element {
         <p className="credits-blurb">
           {T.creditsBlurb} {T.creditsRate(CREDITS_PER_POUND)}
         </p>
-        {PACKS.map((p) => (
-          <button key={p} type="button" className="credits-pack" disabled={busy === p} onClick={() => void buy(p)}>
-            <span className="credits-pack-n">{T.creditsUnit(Math.floor(p * CREDITS_PER_POUND))}</span>
-            <span className="credits-pack-price">£{p}</span>
-          </button>
-        ))}
-        {/* THE CODE, before the money leaves (M4). */}
+
+        {balance !== null && (
+          <div className="login-note" style={{ marginBottom: 16 }}>
+            Sold curent: <strong>{balance.credits} credite</strong>
+          </div>
+        )}
+
+        {/* PRESET PACKS */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {PACKS.map((p) => (
+            <button key={p} type="button" className="credits-pack" disabled={busy === p} onClick={() => void buy(p)}>
+              <span className="credits-pack-n">{T.creditsUnit(Math.floor(p * CREDITS_PER_POUND))}</span>
+              <span className="credits-pack-price">£{p}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* CUSTOM AMOUNT / SUMĂ LIBERĂ */}
+        <div className="custom-amount-box" style={{ marginBottom: 16, padding: '12px', border: '1px solid var(--border-color, #e0e0e0)', borderRadius: 8 }}>
+          <label style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
+            Altă sumă (sumă liberă)
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="number"
+              placeholder={`£${minAmount}+ (multiplu de £5)`}
+              value={customInput}
+              min={minAmount}
+              step={5}
+              onChange={(e) => setCustomInput(e.target.value)}
+              style={{ flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc' }}
+            />
+            <button
+              type="button"
+              className="credits-pack"
+              style={{ width: 'auto', padding: '8px 16px', margin: 0 }}
+              disabled={!isCustomValid || busy > 0}
+              onClick={() => void buy(customVal)}
+            >
+              Cumpără £{isCustomValid ? customVal : ''}
+            </button>
+          </div>
+          {customErr && <div className="login-note" style={{ color: '#d32f2f', marginTop: 6 }}>{customErr}</div>}
+          {!customErr && (
+            <div className="login-note" style={{ fontSize: 12, marginTop: 4 }}>
+              * Minim £{minAmount}, multiplu de £5 ({Math.floor(minAmount * CREDITS_PER_POUND)} credite = £{minAmount}).
+            </div>
+          )}
+        </div>
+
+        {/* SUCCESS MESSAGE */}
+        {successMsg && <div className="login-note" style={{ color: '#2e7d32', fontWeight: 600, marginBottom: 12 }}>✓ {successMsg}</div>}
+
+        {/* THE REVOLUT CODE DISPLAY & WAITING FOR PAYMENT */}
         {payCode && (
           <div className="pay-code-panel">
             <h3 style={{ margin: '10px 0 4px' }}>{T.payCodeTitle}</h3>
             <div className="pay-code-big">{payCode.code}</div>
-            <p className="login-note">{T.payCodeHint}</p>
+            <p className="login-note" style={{ fontWeight: 600, color: '#000' }}>{T.payCodeHint}</p>
             <div className="pay-code-actions">
               <button
                 type="button"
@@ -123,10 +209,10 @@ export default function Credits(): React.JSX.Element {
             <p className="login-note">⏳ {T.payCodeWaiting}</p>
           </div>
         )}
-        {/* AUTO TOP-UP, chosen at payment time: the checkbox + the refill
-        value. Only for signed-in users (the preference is per account). */}
+
+        {/* AUTO TOP-UP */}
         {signedIn === true && ar && (
-          <div className="credits-autopay">
+          <div className="credits-autopay" style={{ marginTop: 16 }}>
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left', fontSize: 14 }}>
               <input type="checkbox" checked={ar.enabled} onChange={(e) => saveAr({ enabled: e.target.checked })} />
               <span>{T.autoTopUpLabel}</span>
@@ -146,6 +232,27 @@ export default function Credits(): React.JSX.Element {
             {arSaved && <div className="login-note">{T.autoTopUpSaved}</div>}
           </div>
         )}
+
+        {/* TRANSACTION HISTORY */}
+        {signedIn === true && history && history.length > 0 && (
+          <div style={{ marginTop: 24, textAlign: 'left' }}>
+            <h3 style={{ fontSize: 16, marginBottom: 8 }}>Istoric tranzacții</h3>
+            <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', borderRadius: 6, fontSize: 13 }}>
+              {history.map((h) => (
+                <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid #eee' }}>
+                  <div>
+                    <div><strong>£{h.amount}</strong> ({h.credits} credite)</div>
+                    <div style={{ fontSize: 11, color: '#666' }}>{new Date(h.created_at).toLocaleString('ro-RO')} {h.code ? `• ${h.code}` : ''}</div>
+                  </div>
+                  <div style={{ alignSelf: 'center', fontWeight: 600, color: h.status === 'completed' ? '#2e7d32' : '#f57c00' }}>
+                    {h.status === 'completed' ? 'Finalizată' : h.status}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {err && <div className="login-note">{err}</div>}
         {signedIn === false && (
           <div className="login-note">{T.creditsSignInFirst}</div>
