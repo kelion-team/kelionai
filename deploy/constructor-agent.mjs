@@ -476,6 +476,30 @@ const UNELTE_PRIN_APLICATIE = new Set(
   TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)),
 )
 
+// ── ANTI-RĂTĂCIRE (5 aug 2026 — cauza MĂSURATĂ a joburilor picate) ────────────
+// Din jurnalul buclei: joburi cu 40 de grep-uri LA RÂND, zero editări, care au
+// ars tot bugetul MAX_STEPS fără să producă (job 96: „40 pași cu unelte, 0
+// sterili"). Cauza: un grep care „lucrează" numără ca pas UTIL exact ca un edit
+// (aLucrat=true), deci explorarea pură golește bugetul de construcție. Owner-ul,
+// 5 aug: „constructorul se pierde". Fixul: numărăm explorările CONSECUTIVE fără
+// nicio producție; la prag, un ghiont TARE spre editare. Pur, exportat, probat.
+export const UNELTE_EXPLORARE = new Set(['grep', 'ls', 'read'])
+export const UNELTE_PRODUCTIE = new Set(['write', 'edit', 'edit_lines', 'delete_file'])
+export const PRAG_EXPLORARE = 8
+
+/** Actualizează contorul de explorare-fără-producție pentru o tură.
+ *  `numeUnelte` = numele uneltelor folosite în tură; `aProdus` = a lucrat vreo
+ *  unealtă de PRODUCȚIE (edit/write/edit_lines/delete_file). Întoarce
+ *  {contor, ghiont}: contorul nou și dacă se cuvine ghiontul anti-rătăcire
+ *  (prea multă explorare fără nicio editare). PURĂ — nicio atingere de disc. */
+export function pasExplorare(numeUnelte, aProdus, contorVechi) {
+  if (aProdus) return { contor: 0, ghiont: false }
+  const aExplorat = numeUnelte.some((n) => UNELTE_EXPLORARE.has(n))
+  const contor = aExplorat ? contorVechi + 1 : contorVechi
+  if (contor >= PRAG_EXPLORARE) return { contor: 0, ghiont: true }
+  return { contor, ghiont: false }
+}
+
 const SYSTEM = `You are KELIONAI'S BUILDER — the autonomous coding worker on the project's server.
 Repo: backend/ (Node+Fastify+TS), frontend/ (React+Vite+TS), deploy/ (VPS scripts).
 
@@ -920,6 +944,8 @@ async function main() {
     let pasiUtili = 0
     let pasiSterili = 0
     let reparatii = 0
+    let explorareFaraProductie = 0 // explorări CONSECUTIVE fără nicio editare (anti-rătăcire)
+    const greppuriVazute = new Set() // pattern-uri deja căutate — nu le repetăm în gol
     // Rezultate care înseamnă „unealta a REFUZAT", nu „unealta a lucrat".
     const RE_REFUZ = /^(EROARE|REFUZAT|unealtă necunoscută|comandă nepermisă|pattern gol)/
     // BUCLA MARE = ordinul întreg, cu rundele lui de reparație. Bucla mică
@@ -987,6 +1013,7 @@ async function main() {
           continue
         }
         let aLucrat = false
+        let aProductie = false // a lucrat vreo unealtă de PRODUCȚIE în tura asta? (edit/write/...)
         for (const c of calls) {
           let args = {}
           try {
@@ -997,7 +1024,15 @@ async function main() {
           let result = ''
           try {
             if (c.function.name === 'ls') result = toolLs(String(args.dir ?? '.'))
-            else if (c.function.name === 'grep') result = toolGrep(String(args.pattern ?? ''))
+            else if (c.function.name === 'grep') {
+              const pat = String(args.pattern ?? '')
+              if (greppuriVazute.has(pat))
+                result = `(deja ai căutat „${pat}" — rezultatul e mai sus. NU repeta căutări; folosește ce ai și EDITEAZĂ acum, sau finish.)`
+              else {
+                greppuriVazute.add(pat)
+                result = toolGrep(pat)
+              }
+            }
             else if (c.function.name === 'read') result = toolRead(String(args.path ?? ''), Number(args.from), Number(args.to))
             else if (c.function.name === 'write') result = toolWrite(String(args.path ?? ''), String(args.content ?? ''))
             else if (c.function.name === 'edit') result = toolEdit(String(args.path ?? ''), String(args.old ?? ''), String(args.new ?? ''))
@@ -1024,7 +1059,10 @@ async function main() {
           }
           // Unealta care a REFUZAT (cale greșită, comandă nepermisă, write tăiat)
           // nu e progres — tura rămâne sterilă și nu costă buget de construcție.
-          if (!RE_REFUZ.test(result)) aLucrat = true
+          if (!RE_REFUZ.test(result)) {
+            aLucrat = true
+            if (UNELTE_PRODUCTIE.has(c.function.name)) aProductie = true // editare reală
+          }
           if (c.function.name !== 'read')
             log(
               `pas ${pasiUtili + 1}/${MAX_STEPS}: ${c.function.name} ${String(args.path ?? args.cmd ?? args.dir ?? args.pattern ?? '').slice(0, 80)}` +
@@ -1039,6 +1077,17 @@ async function main() {
         }
         if (aLucrat) pasiUtili++
         else pasiSterili++
+        // ANTI-RĂTĂCIRE: dacă modelul explorează întruna (grep/ls/read) fără nicio
+        // editare, la PRAG_EXPLORARE îl ghiontim TARE spre producție — altfel
+        // arde tot bugetul pe explorare (job 96: 40 grep-uri, 0 editări).
+        const ghiontExpl = pasExplorare(calls.map((c) => c.function.name), aProductie, explorareFaraProductie)
+        explorareFaraProductie = ghiontExpl.contor
+        if (ghiontExpl.ghiont) {
+          messages.push({
+            role: 'user',
+            content: `You have explored ${PRAG_EXPLORARE}+ times (grep/ls/read) WITHOUT a single edit. You have enough context — STOP exploring. Make an edit NOW (edit/edit_lines/write) or call finish. Do NOT grep/read again.`,
+          })
+        }
         // FEREASTRA GLISANTĂ (fixul structural, audit 27 iul): comprimă
         // rezultatele uneltelor VECHI la un ciot de o linie — modelul păstrează
         // firul (ce a făcut) fără să care conținutul integral al fiecărei citiri
