@@ -38,8 +38,10 @@ interface RespApi {
   retryAfter?: number
 }
 
-/** Rezultatul unei creări de agent: reușit sau eroarea verbatim (măsurat). */
-type RezCreare = { ok: true } | { ok: false; err: string }
+/** Rezultatul unei creări de agent: reușit sau eroarea verbatim (măsurat).
+ *  `quota` = refuz 429 (fereastra abonamentului e închisă) — apelantul oprește
+ *  ocolul întreg, nu mai trimite restul în zid. */
+type RezCreare = { ok: true } | { ok: false; err: string; quota?: boolean }
 
 function mesajEroare(j: Record<string, unknown>): string {
   const err = j.error as { message?: string } | undefined
@@ -83,19 +85,32 @@ function socoteste(rezultate: RezCreare[]): { creati: number; esuati: number; pr
   return { creati, esuati, primaEroare }
 }
 
-// MĂSURAT (4 aug, seara): rafala de 33 → 2 creați; scara deasă de reîncercări
-// (15/30/45/60s) → ORE fără niciun 200, dar cei 3 care AU intrat au intrat
-// fix după perioade de LINIȘTE (paharul plin la prima apăsare; al 3-lea la
-// 19:45, imediat după ~10 min de pauză forțată de deploy). Concluzia + ideea
-// ownerului („poate trebuie pus câte unul la 5 minute"): și cererile refuzate
-// countează la contor — rafala noastră ținea paharul gol. RITM NOU: o
-// încercare, apoi 5 minute de liniște (CREARE_ASTEPTARE_MIN), maxim 2
-// reîncercări pe agent pe ocol, un minut de respiro după fiecare reușită.
+// STRATEGIA VEGHERII (5 aug, după ce ownerul a prins povestea falsă „~1/zi"):
+// limita de creare NU e o cotă de proiect (măsurat cu serviceusage: pe
+// discoveryengine există doar cote de căutare/întrebări) — e un plafon de
+// ABONAMENT, nedocumentat ca număr. Măsurat pe zilele trecute: ziua 1 → 2
+// agenți, ziua 2 → 1; reușitele au venit după LINIȘTE, iar rafalele de cereri
+// refuzate țin paharul plin (observația ownerului). Cotele Google se resetează
+// la miezul nopții ORA PACIFICULUI (~10:00 ora României). De aici regulile:
+//   1. VEGHE non-stop la REIA_MIN (15 min) — o singură încercare ușoară pe
+//      ocol când fereastra e închisă; prindem orice deschidere în ≤15 min.
+//   2. La reușită DRENĂM fereastra: următorul agent după un minut de respiro,
+//      până Google închide iar.
+//   3. La primul 429 ocolul se OPREȘTE întreg — nu mai trimitem și ceilalți
+//      88 în zid (cererile refuzate umplu paharul degeaba).
+//   4. Fiecare încercare intră în JURNAL cu ora ei — tiparul real al cotei se
+//      învață din date, nu din documentație.
 const PAUZA_INTRE_MS = 60_000
-const ASTEPTARE_429_S = Math.max(60, (Number(process.env.CREARE_ASTEPTARE_MIN) || 5) * 60)
-const ASTEPTARI_429_S = [ASTEPTARE_429_S, ASTEPTARE_429_S]
-const TERMEN_TOTAL_MS = 60 * 60_000
 const zabava = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+// JURNALUL COTEI (măsurat, nu ghicit): ultimele încercări cu ora și rezultatul
+// lor — dovada vie a tiparului (când se deschide fereastra, câte lasă Google).
+const JURNAL_MAX = 60
+const jurnalCote: string[] = []
+function noteazaInJurnal(ce: string): void {
+  jurnalCote.push(`${new Date().toISOString().slice(0, 19)}Z ${ce}`)
+  if (jurnalCote.length > JURNAL_MAX) jurnalCote.shift()
+}
 
 /** CONDIȚIA DE UNICAT (ownerul, 4 aug: „să compare permanent lista și să ia
  *  doar care nu e"): citește lista din consolă ACUM și spune dacă numele
@@ -106,30 +121,34 @@ async function existaInConsola(T: string, nume: string): Promise<boolean> {
   return (((r.j.agents as { displayName?: string }[] | undefined) ?? []).some((x) => x.displayName === nume))
 }
 
-/** Creează UN agent, cu răbdare la quota de ritm: la 429 așteaptă și reîncearcă;
- *  orice alt răspuns se întoarce imediat (verbatim la eroare). ÎNAINTE de
- *  fiecare încercare (prima și fiecare reîncercare de după așteptare) compară
- *  lista din consolă — dacă agentul a apărut între timp, NU-l mai pune
- *  (unicatul ownerului: zero dubluri, orice s-ar fi întâmplat pe drum). */
+/** Creează UN agent — O SINGURĂ încercare (fără reîncercări în ocol: la 429
+ *  fereastra abonamentului e închisă, iar cererile refuzate umplu paharul;
+ *  vegherea de 15 min reia singură). ÎNAINTE de încercare compară lista din
+ *  consolă — dacă agentul a apărut între timp, NU-l mai pune (unicatul
+ *  ownerului: zero dubluri, orice s-ar fi întâmplat pe drum). */
 async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) => void): Promise<RezCreare> {
   const corp = {
     displayName: ag.nume,
     description: ag.rol,
     a2aAgentDefinition: { jsonAgentCard: JSON.stringify(carteAgent(ag)) },
   }
-  for (let i = 0; ; i++) {
-    if (await existaInConsola(T, ag.nume)) {
-      anunta(`„${ag.nume}" e DEJA în consolă — îl sar (condiția de unicat)`)
-      return { ok: true }
-    }
-    cereriTrimise += 1
-    const res = await api(T, 'POST', `${ASST}/agents`, corp)
-    if (res.status === 200) ultimaReusita = `${ag.nume} (${new Date().toISOString().slice(11, 19)} UTC)`
-    if (res.status !== 429 || i >= ASTEPTARI_429_S.length) return rezultatCreare(res)
-    const s = res.retryAfter ?? ASTEPTARI_429_S[i] ?? 60
-    anunta(`quota Google (429) la „${ag.nume}" — aștept ${s}s și reîncerc (${i + 1}/${ASTEPTARI_429_S.length})`)
-    await zabava(s * 1000)
+  if (await existaInConsola(T, ag.nume)) {
+    anunta(`„${ag.nume}" e DEJA în consolă — îl sar (condiția de unicat)`)
+    return { ok: true }
   }
+  cereriTrimise += 1
+  const res = await api(T, 'POST', `${ASST}/agents`, corp)
+  if (res.status === 200) {
+    ultimaReusita = `${ag.nume} (${new Date().toISOString().slice(11, 19)} UTC)`
+    noteazaInJurnal(`REUȘIT: ${ag.nume}`)
+    return { ok: true }
+  }
+  if (res.status === 429) {
+    noteazaInJurnal(`429 la ${ag.nume} (fereastra închisă)`)
+    return { ok: false, err: `HTTP 429: ${mesajEroare(res.j)}`, quota: true }
+  }
+  noteazaInJurnal(`EȘEC ${res.status} la ${ag.nume}`)
+  return rezultatCreare(res)
 }
 
 /** Creează assistant-ul (dacă lipsește) + cei 33 de agenți, cu tokenul Google al
@@ -191,12 +210,7 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   const deCreat = roster.filter((ag) => !cunoscuti.has(ag.nume))
   const existau = roster.length - deCreat.length
   const rezultate: RezCreare[] = []
-  const start = Date.now()
-  for (const [i, ag] of deCreat.entries()) {
-    if (Date.now() - start > TERMEN_TOTAL_MS) {
-      rezultate.push({ ok: false, err: `neîncercat: termenul total (${TERMEN_TOTAL_MS / 60_000} min) s-a epuizat — apasă din nou, continui de unde am rămas` })
-      continue
-    }
+  for (const ag of deCreat) {
     // Raportul cerut de owner (4 aug, de două ori: „trebuie să văd"): cifrele
     // stau PERMANENT în față — și pe mesajele de așteptare la quota, nu doar
     // când trecem la următorul (altfel, într-o seară cu 429 lung, nu se vedeau).
@@ -205,7 +219,17 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
     anunta(`${eticheta} | acum îl pun pe: ${ag.nume}`)
     const rez = await creeazaUnAgent(T, ag, (pas) => anunta(`${eticheta} | ${pas}`))
     rezultate.push(rez)
-    if (rez.ok) await zabava(PAUZA_INTRE_MS)
+    if (rez.ok) {
+      await zabava(PAUZA_INTRE_MS) // respiro după reușită, apoi DRENĂM fereastra cu următorul
+      continue
+    }
+    if (!rez.ok && rez.quota) {
+      // Fereastra abonamentului s-a închis — ocolul se OPREȘTE aici. Nu-i mai
+      // trimitem pe ceilalți în zid (cererile refuzate umplu paharul); vegherea
+      // de REIA_MIN minute reia singură și prinde următoarea deschidere.
+      anunta(`${eticheta} | fereastra Google s-a închis (429) — veghez la ${REIA_MIN} min și continui SINGUR`)
+      break
+    }
   }
   const { creati, esuati, primaEroare } = socoteste(rezultate)
 
@@ -313,6 +337,9 @@ interface StareEnterprise {
    *  reușită cu ora ei. Chiar și când Google refuză, `cereri` crește. */
   cereri?: number
   ultimaReusita?: string
+  /** JURNALUL MĂSURAT al încercărilor (oră + rezultat) — de aici se citește
+   *  tiparul REAL al cotei de abonament, nu din documentație. */
+  jurnal?: string[]
 }
 const stare: StareEnterprise = { ruleaza: false, pas: 'nepornit' }
 let cereriTrimise = 0
@@ -331,7 +358,7 @@ let ceasReluare: NodeJS.Timeout | null = null
 
 /** Starea creării din fundal — pagina de admin o citește la câteva secunde. */
 export function stareCreare(): StareEnterprise {
-  return { ...stare, cereri: cereriTrimise, ultimaReusita: ultimaReusita || undefined }
+  return { ...stare, cereri: cereriTrimise, ultimaReusita: ultimaReusita || undefined, jurnal: [...jurnalCote] }
 }
 
 /** Pornește crearea în fundal (dacă nu rulează deja) și întoarce starea.
@@ -356,16 +383,16 @@ export function pornesteCrearea(email: string): StareEnterprise {
         // Toți în consolă — steagul jos, nimic de reluat.
         void memoriePune(CHEIA_CREARE, '').catch(() => {})
       } else if (!r.motiv) {
-        // Ocol parțial — următorul pornește singur. ADEVĂRUL GĂSIT în doc
-        // (4 aug, noaptea): ediția Standard permite ~1 agent NOU/ZI în consolă
-        // (Plus: 10/zi) — deci când un ocol n-a putut crea NIMIC (ziua e
-        // consumată), următorul vine peste 6 ORE, nu peste 15 minute; când a
-        // creat măcar unul, mai încercăm curând (poate ziua mai lasă).
-        const pauzaMin = r.creati === 0 ? 360 : REIA_MIN
+        // Ocol parțial — vegherea continuă MEREU la REIA_MIN minute, non-stop.
+        // LECȚIA (5 aug, ownerul a prins-o): povestea „~1/zi din documentație"
+        // era neverificată — pe ea dormea 6 ORE la ocol gol și rata ferestrele
+        // (resetul cotelor Google e la miezul nopții ORA PACIFICULUI, ~10:00 la
+        // noi). Un ocol închis pe 429 costă O SINGURĂ cerere refuzată, deci
+        // veghea deasă nu umple paharul; tiparul real se citește din jurnal.
         ceasReluare = setTimeout(() => {
           ceasReluare = null
           pornesteCrearea(email)
-        }, pauzaMin * 60_000)
+        }, REIA_MIN * 60_000)
       }
       // r.motiv (ne-conectat, listă necitibilă...) = nu reluăm orbește pe timer;
       // steagul rămâne, deci un restart sau o apăsare reiau când e cazul.
