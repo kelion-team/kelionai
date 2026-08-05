@@ -48,6 +48,9 @@ describe('micStream: urechea Chirp dă tot ce poarta cere', () => {
   it('speech_begin ajunge la client (barge-in în full-duplex)', () => {
     expect(mic).toMatch(/opts\.onSpeechBegin\?\.\(\)/)
   })
+  it('barge-in STT streaming permite stream-ul de audio chiar și pe muted la detectarea de voce', () => {
+    expect(mic).toMatch(/rmsMut <= VOICE_RMS/)
+  })
 })
 
 describe('server: fără proxy OpenAI, doar Google + Gemini', () => {

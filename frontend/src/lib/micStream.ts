@@ -602,7 +602,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       } else {
         bargeSince = 0
       }
-      return
+      // BARGE-IN STT STREAMING (AEC mode): keep streaming audio frames to /api/asr-stream
+      // so Google STT detects speech_begin during playback if browser AEC is active,
+      // but only if RMS exceeds local speech threshold to prevent streaming ambient silence.
+      if (rmsMut <= VOICE_RMS) return
     }
     mutedSince = 0
     bargeSince = 0
