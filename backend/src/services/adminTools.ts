@@ -100,7 +100,16 @@ export async function execSharedAdminTool(
     case 'repo_write': return repoWrite(String(args.branch ?? ''), String(args.path ?? ''), String(args.content ?? ''), String(args.message ?? ''))
     case 'repo_open_pr': return repoOpenPR(String(args.branch ?? ''), String(args.title ?? ''), String(args.body ?? ''))
     case 'repo_merge_pr': return repoMergePR(Number(args.pr ?? 0))
-    case 'run_runbook': return runRunbook(String(args.name ?? ''))
+    case 'run_runbook': {
+      const inputs: Record<string, string> = {}
+      if (args.pachet) inputs.pachet = String(args.pachet)
+      if (args.pkg) inputs.pkg = String(args.pkg)
+      if (args.inputs && typeof args.inputs === 'object') {
+        Object.assign(inputs, args.inputs)
+      }
+      const name = String(args.name ?? '')
+      return Object.keys(inputs).length > 0 ? runRunbook(name, inputs) : runRunbook(name)
+    }
     case 'runbook_status': return runbookStatus(args.name ? String(args.name) : undefined)
     case 'runbook_log': return runbookLog(Number(args.run_id ?? 0))
     case 'request_repair': return requestRepair(String(args.title ?? ''), String(args.details ?? ''))

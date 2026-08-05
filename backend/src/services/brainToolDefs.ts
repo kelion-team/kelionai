@@ -617,11 +617,12 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
 export const RUN_RUNBOOK_TOOL: Tool = {
   name: 'run_runbook',
   description:
-    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'curata-zombi'. You are fully autonomous — run these freely whenever the owner's request calls for them. If the result carries a 'warning' about a failure LOOP: do NOT retry the same fix — run 'diagnostic', read the facts, change strategy (the owner is alerted by email automatically). Special owner commands: 'pauza-autonomie' freezes all autonomous actions, 'reia-autonomia' resumes them — call these when the owner says stop/resume. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
+    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'curata-zombi', 'instaleaza-pachet-sistem'. You are fully autonomous — run these freely whenever the owner's request calls for them. For 'instaleaza-pachet-sistem', specify the system package name in 'pachet' (e.g. ffmpeg, htop). If the result carries a 'warning' about a failure LOOP: do NOT retry the same fix — run 'diagnostic', read the facts, change strategy (the owner is alerted by email automatically). Special owner commands: 'pauza-autonomie' freezes all autonomous actions, 'reia-autonomia' resumes them — call these when the owner says stop/resume. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
   input_schema: {
     type: 'object',
     properties: {
-      name: { type: 'string', description: "Runbook name, exactly one of: diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, curata-zombi." },
+      name: { type: 'string', description: "Runbook name: diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, curata-zombi, instaleaza-pachet-sistem." },
+      pachet: { type: 'string', description: "Optional system package name for instaleaza-pachet-sistem (e.g. htop, ffmpeg)." },
     },
     required: ['name'],
   },
