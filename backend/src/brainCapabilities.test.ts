@@ -109,7 +109,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // THE STATE MEASURED TODAY — any change to the brain's surface must pass
   // through HERE (otherwise the test falls), so the registry can't fall behind.
   it('numărul de capabilități pe fiecare cale e cel documentat', () => {
-    expect(chatCapabilityNames().length).toBe(76) // 5 aug: play_avatar_gesture SCOS (gesturile = deterministe pe situație, nu unealtă de creier)
+    expect(chatCapabilityNames().length).toBe(88) // 5 aug: +12 unelte legate la creier (cheama_agent, panou_cod, constructor_manage, jules_*, admin_vezi/schimba, memorie_pune/ia/lista, stare_masurata) — erau oferite dar lipseau din registru
     expect(voiceCapabilityNames().length).toBe(0) // 1 aug: sesiunea de voce = urechi+gură, ZERO unelte directe
   })
 
