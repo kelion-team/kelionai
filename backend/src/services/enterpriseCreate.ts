@@ -1,4 +1,4 @@
-import { getGoogleRefreshToken, memoriePune, memorieIa } from '../db.js'
+import { getGoogleRefreshToken, memoriePune, memorieIa, saveKv, loadKv } from '../db.js'
 import { refreshGoogleAccessToken } from './google.js'
 import { rosterViu, carteAgent, type AgentKelion } from './agentiKelion.js'
 
@@ -105,11 +105,19 @@ const zabava = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, m
 
 // JURNALUL COTEI (măsurat, nu ghicit): ultimele încercări cu ora și rezultatul
 // lor — dovada vie a tiparului (când se deschide fereastra, câte lasă Google).
+// PERSISTAT ÎN DB (Adrian, 5 aug: „bagă-l"): jurnalul + contoarele stăteau DOAR
+// în memorie, deci se ștergeau la fiecare deploy și tiparul real al lui 429 nu
+// se putea citi din afară a doua zi (raportul de dimineață îl GHICEA). Acum
+// fiecare notare se scrie și în `kv_state` — chei publice, fără secrete (doar
+// nume de agenți + rezultat), ca raportul să aibă 429-ul MĂSURAT.
 const JURNAL_MAX = 60
+const KV_JURNAL = 'enterprise:jurnal-cote'
+const KV_MASURATORI = 'enterprise:masuratori-creare'
 const jurnalCote: string[] = []
 function noteazaInJurnal(ce: string): void {
   jurnalCote.push(`${new Date().toISOString().slice(0, 19)}Z ${ce}`)
   if (jurnalCote.length > JURNAL_MAX) jurnalCote.shift()
+  void persistaMasuratori()
 }
 
 /** CONDIȚIA DE UNICAT (ownerul, 4 aug: „să compare permanent lista și să ia
@@ -345,6 +353,53 @@ const stare: StareEnterprise = { ruleaza: false, pas: 'nepornit' }
 let cereriTrimise = 0
 let ultimaReusita = ''
 
+// PERSISTAREA MĂSURĂTORILOR (5 aug, „bagă-l"): jurnalul cotei + contoarele,
+// scrise în `kv_state` best-effort la fiecare notare — supraviețuiesc
+// deploy-urilor și se pot citi din DB FĂRĂ sesiunea ownerului (raportul de
+// dimineață măsoară 429-ul real, nu îl ghicește). Chei publice: doar nume de
+// agenți + rezultat, ZERO secrete. Best-effort: dacă DB pică, crearea merge mai
+// departe.
+async function persistaMasuratori(): Promise<void> {
+  try {
+    await saveKv(KV_JURNAL, JSON.stringify(jurnalCote))
+    await saveKv(
+      KV_MASURATORI,
+      JSON.stringify({
+        cereri: cereriTrimise,
+        ultimaReusita: ultimaReusita || null,
+        pas: stare.pas,
+        actualizat: new Date().toISOString(),
+      }),
+    )
+  } catch {
+    /* măsurătoarea e best-effort — nu oprește crearea dacă DB pică */
+  }
+}
+
+// La boot: reîncarcă jurnalul + contoarele persistate, ca `stareCreare()` și
+// raportul de dimineață să arate ISTORIA de dinainte de deploy, nu o pagină
+// goală (memoria procesului s-a șters la repornire).
+async function incarcaMasuratori(): Promise<void> {
+  try {
+    const j = await loadKv(KV_JURNAL)
+    if (j) {
+      const arr: unknown = JSON.parse(j)
+      if (Array.isArray(arr)) {
+        jurnalCote.length = 0
+        for (const x of arr.slice(-JURNAL_MAX)) if (typeof x === 'string') jurnalCote.push(x)
+      }
+    }
+    const s = await loadKv(KV_MASURATORI)
+    if (s) {
+      const o = JSON.parse(s) as { cereri?: number; ultimaReusita?: string | null }
+      if (typeof o.cereri === 'number' && Number.isFinite(o.cereri)) cereriTrimise = o.cereri
+      if (o.ultimaReusita) ultimaReusita = String(o.ultimaReusita)
+    }
+  } catch {
+    /* dacă nu se pot reîncărca, pornim de la zero — nu blocăm bootul */
+  }
+}
+
 // „REMEDIAZĂ ERR ASTA CU RELUAREA DE LA 0" (Adrian, 4 aug seara): crearea nu
 // mai depinde de apăsări repetate și nu mai moare la restart. Steagul din
 // memorie (memorie_proiect) supraviețuiește repornirii → la boot reluăm
@@ -410,6 +465,7 @@ export function pornesteCrearea(email: string): StareEnterprise {
 /** La boot: dacă un restart a tăiat o creare în mers (steagul e sus), o reluăm
  *  singuri — ownerul nu mai apasă nimic după deploy-uri. */
 export async function reiaCreareaDupaRepornire(): Promise<void> {
+  await incarcaMasuratori() // reîncarcă jurnalul + contoarele de dinainte de deploy
   const v = await memorieIa(CHEIA_CREARE)
   const m = /\]\s*(\S+@\S+)\s*$/.exec(v.trim())
   if (m?.[1]) pornesteCrearea(m[1])
