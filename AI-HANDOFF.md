@@ -405,6 +405,11 @@ node --check bridge/kelion-bridge-linux.mjs
   4. **Istoric tranzacții**: Istoricul plăților este afișat în contul utilizatorului (atât pe pagina `/credite`, cât și în setări).
   5. **Fără Stripe pe drumul userului**: Verificat că nu există nicio referință vizibilă la Stripe în fluxul clientului.
 
+- 🗓️ **6 AUG — TRADUCERI I18N COMPLETATE (I3):**
+  1. **Dicționar i18n completat**: Adăugate/actualizate traducerile în `es`, `fr`, `de`, `it`, `pt` în `frontend/src/lib/i18n.ts` pentru toate cheile noi (~60 chei: promo, voce onestă, constructor, unlock, monitor, etc.).
+  2. **Fallback curat pe engleză**: Asigurat că structura `dict` folosește fallback automat pe engleză pentru orice cheie necompletată.
+  3. **Test dedicat**: Adăugat `backend/src/i18n.test.ts` pentru apărarea completitudinii și coerenței dicționarului de traduceri.
+
 - 🗓️ **25 IUL (ramura `claude/reia-l9l2qx`, rebazată peste valurile de autonomie 4–8) — PARITATE VOCE↔SCRIS + PLAYGROUND + POȘTĂ + FIȘIERE:**
   1. **Poșta contact@ — răspuns în limba primită + organizare pe foldere** (`mailbox.ts`): limba e detectată și dată EXPLICIT modelului (`langLabel`) → răspunsul iese garantat în limba clientului. Organizare automată (`MAIL_ORGANIZE`, implicit pornit): fiecare mesaj procesat e mutat în folder IMAP — `Kelion-Answered` (răspuns automat trimis, +`\Answered`), `Kelion-ToAnswer` (om real fără răspuns → admin), `Kelion-Automated` (mail-mașină). Best-effort, reversibil, oprit din env.
   2. **Voce: comutare verbală cameră/ecran** (paritate cu scrisul): `/api/realtime/transcript` rulează ACELAȘI `interpretDeviceCommand` pe transcriptul userului și întoarce `{device}`; clientul îl execută prin `handleControl` (comută camera față/spate/switch, închide monitorul). Înainte mergea DOAR în chatul scris.
