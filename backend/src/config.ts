@@ -80,18 +80,15 @@ export const config = {
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
   julesKey: env(...ENV_ALIASES.julesKey),
   // Creierul DIRECT (chat + VEDERE + AUDIO — Gemini e multimodal, un singur
-  // model face tot). 4 aug 2026: trecut de la 'gemini-2.5-flash' (gen. veche) la
-  // HIBRIDUL CREIERULUI (Adrian, 5 aug: „leagă hibridul, maximă precizie și
-  // calitate"). DOUĂ modele, alese per-tură de clasificatorul `heavy` din chat.ts:
-  //  • geminiModel = modelul UȘOR (flash) — vorbă simplă: rapid, ieftin, spre <1s.
-  //  • geminiModelGreu = Gemini 3 Pro — tot ce cere PRECIZIE: gândire, vedere,
-  //    acțiuni, memorie-sinteză. MĂSURAT pe cheia lui: `gemini-3-pro-preview` dă
-  //    404 (nu-i deschis), dar `gemini-3.1-pro-preview` răspunde 200 pe v1beta →
-  //    ĂSTA e Gemini 3 Pro disponibil (multimodal, vede imagini). geminiDirect
-  //    ridică plafonul de output pe 3.x (thinking-ul intră în maxOutputTokens).
-  // Vocea Live (native-audio) e separată — Pro nu face transcriere bidi.
-  // Suprascriibile din env (GEMINI_MODEL / GEMINI_MODEL_GREU).
-  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+  // model face tot). 5 aug 2026: Adrian a RETRACTAT hibridul — „peste tot în
+  // aplicație pui modelul avansat". UN SINGUR creier = Gemini 3 Pro
+  // (`gemini-3.1-pro-preview`; `gemini-3-pro-preview` dă 404 — nu-i pe cheie).
+  // AMBELE câmpuri = Pro: NU mai citim GEMINI_MODEL (era treapta ușoară a
+  // hibridului retras — altfel env-ul vechi GEMINI_MODEL=flash de pe VPS ar
+  // readuce flash-ul pe chat). geminiDirect ridică plafonul de output pe 3.x
+  // (gândirea intră în maxOutputTokens). Vocea live rulează Pro prin CREIER
+  // (ureche→Pro→voce), deci „modelul avansat" e și pe voce. Un singur creier.
+  geminiModel: process.env.GEMINI_MODEL_GREU ?? 'gemini-3.1-pro-preview',
   geminiModelGreu: process.env.GEMINI_MODEL_GREU ?? 'gemini-3.1-pro-preview',
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
@@ -113,13 +110,12 @@ export const config = {
     // — cea mai nouă, mai rapidă, mai ieftină, și măsurat multimodală (text +
     // apel de unealtă + imagine + audio, toate 200✓ pe cheia ownerului). „Tot pe
     // cel mai evoluat" (ordinul ownerului, 4 aug). Rămâne Gemini direct (lacătul).
-    chatDefault: (process.env.BRAIN_CHAT_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
-    workDefault: (process.env.BRAIN_WORK_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
-    // Treapta 'top' — TOT 'gemini-3.6-flash'. Ownerul (4 aug): „dacă e bun, ieftin
-    // și face tot, de ce 2 trepte?". Corect: un singur model multimodal, rapid și
-    // ieftin acoperă toate treptele; nu inventăm o treaptă „pro" mai scumpă degeaba.
-    // Rămâne suprascriibil din env dacă vreodată vrei o escaladare pe alt model.
-    topDefault: (process.env.BRAIN_TOP_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
+    chatDefault: (process.env.BRAIN_CHAT_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
+    workDefault: (process.env.BRAIN_WORK_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
+    // 5 aug: Adrian a RETRACTAT hibridul — „peste tot modelul avansat". Toate
+    // treptele = Gemini 3 Pro (`gemini-3.1-pro-preview`), un singur creier, cel
+    // mai puternic; fără split flash/pro. Suprascriibil din env.
+    topDefault: (process.env.BRAIN_TOP_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
   },
   // ── COLLECTING MONEY THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
   // completely and Pro comes in") ────────────────────────────────────────────
