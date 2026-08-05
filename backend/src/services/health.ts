@@ -196,7 +196,11 @@ export async function systemHealth(): Promise<string> {
   // 500s or hangs. Probed from inside, without a session: alive endpoints
   // answer 401 (no auth) — 404/500/timeout means the button lies to the admin.
   try {
-    const port = Number(process.env.PORT ?? 3000)
+    // FALLBACK ALINIAT LA SERVER (5 aug, auditul de onestitate): serverul
+    // ascultă pe `PORT ?? 8080` (config.ts:57). Aici era `?? 3000` — dacă PORT
+    // nu e setat, sonda lovea portul greșit și RAPORTA toate butoanele admin ca
+    // „nu răspunde" (roșu FALS — o citire eșuată prezentată ca fapt, regula #1).
+    const port = Number(process.env.PORT ?? 8080)
     const BUTOANE: [string, string][] = [
       ['Finanțe', '/api/admin/finance'],
       ['Circuitul banilor', '/api/admin/money-circuit'],
