@@ -10,10 +10,11 @@ import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { vectorDistance } from '../db.js'
 
-// ── LIVE VOICE — GOOGLE + GEMINI (OpenAI scos complet, Adrian 3 aug) ──────────
-// Sesiunea vocală rulează integral pe Google Chirp 3 (urechi, /api/asr-stream)
-// + Gemini (creierul unic /api/chat) + Chirp 3 HD (gura, sintetizată de server
-// și trimisă ca {audio}). NU mai există proxy SDP către OpenAI.
+// ── LIVE VOICE — CREIERUL UNIC (OpenAI scos 3 aug; STT scos total 5 aug) ──────
+// Sesiunea vocală: urechea e VAD LOCAL pe client (fără STT), fraza brută (audio)
+// merge la creierul unic Gemini 3 Pro (/api/chat), care AUDE și decide singur
+// adresarea; gura e Chirp 3 HD (sintetizată de server, trimisă ca {audio}). Ruta
+// asta rămâne DOAR pentru verdictul de timbru + facturare (transcript/tick).
 //
 // Endpoints left, each with a single job:
 //   /api/realtime/session    : DEZACTIVAT — întoarce 410. Clientul nu mai
@@ -200,7 +201,10 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         if (committed) void setSpeechLangPref(user.email, committed)
         if (committed) return reply.send({ ok: true, lang: committed.slice(0, 2).toLowerCase(), foreignVoice, guest, guestPending, holder })
       }
-      return reply.send({ ok: true, foreignVoice, guest, guestPending, holder })
+      // FĂRĂ TEXT (voce ambientală — clientul nu mai trimite transcript, doar
+      // amprenta): tot întoarcem verdictul de timbru COMPLET, inclusiv
+      // adminUnlocked, ca butonul de admin să se aprindă și pe calea nouă.
+      return reply.send({ ok: true, foreignVoice, adminUnlocked, guest, guestPending, holder })
     },
   )
 }

@@ -32,7 +32,6 @@ import {
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import {
-  startMic,
   playVoice,
   stopVoice,
   isVoicePlaying,
@@ -44,16 +43,17 @@ import {
   getVoiceVolume,
   setVoiceVolume,
   type MicHandle,
-  type VoiceFeatures,
 } from '../lib/audioIO'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { setRealLatency, getRealLatency, subscribeRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
-import { startMicStream } from '../lib/micStream'
+// VOCE UNIFICATĂ (Adrian, 5 aug): urechea STT a fost scoasă TOTAL — o singură cale
+// vocală (startRealtimeVoice → micStream local-VAD → audio la creierul unic).
+// Dictarea batch (/api/asr) și streamingul standalone (STT) au dispărut.
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
 import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
 import { pornesteDansPeMuzica } from '../lib/dansMuzica'
-import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
+import { type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 
@@ -227,9 +227,6 @@ export default function ChatPanel({
     const words = s.trim().split(/\s+/).filter(Boolean)
     return words.length <= maxWords ? s.trim() : `${words.slice(0, maxWords).join(' ')}…`
   }
-  // Modul microfon: true = dictare live (streaming WS); cade pe batch dovedit
-  // if the WS drops or goes silent, so the voice never breaks.
-  const streamModeRef = useRef(true)
   const micRef = useRef<MicHandle | null>(null)
   // VOCE = OpenAI Realtime `cedar` — chat FULL-DUPLEX nativ cu escaladare, pe
   // cele 2 chei (Adrian, 24 iul: „chat fullduplex realtime cu escaladare").
@@ -266,20 +263,16 @@ export default function ChatPanel({
   // Joins the VOX pieces cut at a thinking pause (not an end-of-sentence one)
   // into a single thought, before sending it to the brain. Rebuilt on every
   // (re)start of the microphone — see ensureMic below.
+  // Rămâne DOAR ca no-op de curățenie (cancel) pe căile vechi — dictarea batch a
+  // dispărut, deci nu se mai umple niciodată; păstrat ca să nu ating 8 puncte de
+  // cleanup care îl apelează defensiv.
   const coalescerRef = useRef<UtteranceCoalescer | null>(null)
-  // COALESCER DE VOCE (Adrian, 3 aug — „trecerea spre creier nu se face"): pe
-  // voce, o rostire se taie de Chirp în mai multe fraze (pauze de respirație).
-  // Fără unire, FIECARE frază pornea un send() nou care ANULA (barge-in) tura
-  // precedentă → nicio tură nu ajungea completă la creier (dovadă live: /api/chat
-  // anulat la 0,19s, zero [TIMP]). Acum unim frazele apropiate (fereastră scurtă)
-  // într-o SINGURĂ tură. Audio nativ se păstrează DOAR când e o singură frază.
-  const voceMergeRef = useRef<{
-    parts: string[]
-    vf: VoiceFeatures | null
-    speaker: string | null
-    audio: string | null
-    timer: number | null
-  }>({ parts: [], vf: null, speaker: null, audio: null, timer: null })
+  // TURA VOCALĂ CURENTĂ (Adrian, 5 aug — voce unificată): fără transcript, o frază
+  // vocală pleacă la creier ca AUDIO, cu o bulă-substituent „🎙️". Ținem ts-urile
+  // bulei userului și ale răspunsului ca handleControl să le poată: (a) umple bula
+  // userului cu ce a auzit creierul ({heard}), (b) le ȘTEARGĂ dacă nu i se vorbea
+  // ({ignored}). Nul pe turele scrise.
+  const voiceTurnRef = useRef<{ userTs: number; asstTs: number } | null>(null)
   // The voiceprint — restricts the permanent microphone to Adrian's
   // voice. Without a UI entry point, hasVoiceprint() stays false forever: the button
   // below is the only place where the profile can be enrolled/reset.
@@ -410,10 +403,27 @@ export default function ChatPanel({
       window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: c.nav }))
       return
     }
+    // VOCE UNIFICATĂ: creierul a decis că NU i se vorbea → ștergem bulele optimiste
+    // (userul substituent „🎙️…" + răspunsul gol) și nu se redă nimic. Tura se
+    // stinge curat, ca și cum n-ar fi fost (Adrian: „să nu vorbească neîntrebat").
+    if (c.ignored) {
+      const vt = voiceTurnRef.current
+      voiceTurnRef.current = null
+      stopVoice()
+      if (vt) setMessages((prev) => prev.filter((m) => m.ts !== vt.userTs && m.ts !== vt.asstTs))
+      return
+    }
     // The brain-input ticker: the server says EXACTLY what text it hands
     // to the brain — shown on the dedicated ticker until the next turn.
     if (c.heard !== undefined) {
       setHeard(c.heard)
+      // VOCE: creierul a confirmat ce a auzit → umplem bula-substituent a userului
+      // cu transcriptul PRECIS (din voce, nu dintr-un STT stâlcit).
+      const vt = voiceTurnRef.current
+      if (vt && c.heard) {
+        const auzit = c.heard
+        setMessages((prev) => prev.map((m) => (m.ts === vt.userTs ? { ...m, content: auzit } : m)))
+      }
       return
     }
     // THE BRAIN'S VOICE: MP3 pre-synthesized on the server (Chirp 3) — we ONLY play it.
@@ -974,9 +984,14 @@ export default function ChatPanel({
     // vision gate does not attach the frame → no narration. The frame still
     // leaves silently (camFrames / faceDescriptor / facePhoto) for the
     // faceprint↔voiceprint security binding the server saves without a word.
-    const base =
-      msg || (docBlock ? t.docPrompt : attached ? t.imagePrompt : t.greetPrompt)
-    const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
+    // VOCE UNIFICATĂ (Adrian, 5 aug): o tură vocală vine cu AUDIO și FĂRĂ text —
+    // NU o transformăm în „salut" (greetPrompt); creierul aude fraza brută. Textul
+    // trimis creierului rămâne GOL; UI-ul arată o bulă-substituent (mai jos).
+    const isVoiceTurn = !!pendingAudioRef.current
+    const base = isVoiceTurn
+      ? ''
+      : msg || (docBlock ? t.docPrompt : attached ? t.imagePrompt : t.greetPrompt)
+    const outgoing = docBlock && !isVoiceTurn ? `${docBlock}\n\n${base}` : base
     // CONTINUOUS VISION (Adrian, Jul 11): with the camera on, the LAST 8 FRAMES leave
     // (≈2s of motion at 4 fps), not a single one — the brain sees MOTION, not a
     // frozen blink. The same for ALL users (rule no. 9): the frames go through
@@ -996,12 +1011,18 @@ export default function ChatPanel({
     // face). Instant — it waits for no inference, it doesn't slow down the send.
     const face = getPendingFaceDescriptor()
 
-    const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: Date.now() }]
+    const userTs = Date.now()
+    // Creierul primește textul GOL pe voce (aude audio-ul); `next` e payload-ul.
+    const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: userTs }]
     // STABLE ts for THIS turn's in-progress reply — the functional updater
     // below recognizes and replaces it, without deleting the messages
     // (e.g. voice transcripts) that arrived meanwhile.
     const turnTs = Date.now()
-    setMessages([...next, { role: 'assistant', content: '', ts: turnTs }])
+    // UI: pe voce arătăm o bulă-substituent „🎙️…" până creierul confirmă ce a auzit
+    // ({heard} o umple) sau decide că nu i se vorbea ({ignored} o șterge).
+    const uiUser: ChatMessage = { role: 'user', content: isVoiceTurn ? '🎙️…' : outgoing, ts: userTs }
+    voiceTurnRef.current = isVoiceTurn ? { userTs, asstTs: turnTs } : null
+    setMessages([...messages, uiUser, { role: 'assistant', content: '', ts: turnTs }])
     setChatImage(null) // a new turn clears any previously shown image
     // The abort controller of THIS turn — "stop" aborts it on the spot.
     const ac = new AbortController()
@@ -1085,6 +1106,9 @@ export default function ChatPanel({
         // AUDIO NATIV → CREIER: vocea brută a frazei (WAV), pentru creierul care
         // aude nativ (Gemini). Gol pe turele scrise.
         nativeAudio,
+        // VOCE AMBIENTALĂ: creierul unic decide singur, din audio, dacă i se vorbea
+        // (altfel tace — {ignored}). Doar pe turele vocale.
+        isVoiceTurn || undefined,
       )) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
@@ -1259,19 +1283,9 @@ export default function ChatPanel({
   const muzicaActivaRef = useRef(false)
   const dansLiberRef = useRef(true)
   const dansIdxRef = useRef(0)
+  // (upgradeTimerRef rămâne DOAR ca no-op de cleanup — „urcarea" din STT înapoi la
+  // full-duplex a dispărut odată cu STT-ul: calea vocală e una singură acum.)
   const upgradeTimerRef = useRef<number | null>(null)
-  const armVoiceUpgrade = (): void => {
-    if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
-    upgradeTimerRef.current = window.setTimeout(() => {
-      upgradeTimerRef.current = null
-      if (voceAiureaRef.current) return
-      if (micManualOffRef.current || micStartingRef.current) return
-      streamModeRef.current = true // streaming dictation becomes a candidate again
-      micRef.current?.stop() // release the batch ear so ensureMic's guard opens
-      micRef.current = null
-      void ensureMicRef.current()
-    }, REALTIME_RECOVER_MS + 10_000) // 100s > ear cooldown (60s) and > latch (90s)
-  }
   // "VOICE PER SENTENCE" — TRIED AND ROLLED BACK (Jul 25): it closed the paid session
   // after every exchange + reopened it by itself on local speech detection
   // (`speechWake.ts`). Two real regressions on the same day (it cut the sentence after 2
@@ -1374,36 +1388,16 @@ export default function ChatPanel({
             // (speaker check, like on the STT dictation path); the second
             // argument marks the turn as spoken so the server shapes the reply
             // for speech (clean sentences, no markdown tables).
-            onAddressed: (text, vf, speaker, audio) => {
-              // UNIM frazele apropiate într-o singură tură (vezi voceMergeRef).
-              // Fereastra scurtă (VOCE_MERGE_MS) prinde pauzele de respirație din
-              // mijlocul unei rostiri, dar nu întârzie simțitor răspunsul.
-              const VOCE_MERGE_MS = 650
-              const m = voceMergeRef.current
-              const t = (text ?? '').trim()
-              if (t) m.parts.push(t)
-              if (vf) m.vf = vf
-              m.speaker = speaker ?? m.speaker
-              // Audio nativ DOAR la o singură frază; la unire (mai multe fraze)
-              // trimitem doar textul (payload mic → upload instant, nu se mai taie).
-              m.audio = m.parts.length === 1 ? (audio ?? null) : null
-              if (m.timer !== null) window.clearTimeout(m.timer)
-              m.timer = window.setTimeout(() => {
-                const merged = m.parts.join(' ').trim()
-                const vfSnap = m.vf
-                const spSnap = m.speaker
-                const auSnap = m.audio
-                m.parts = []
-                m.vf = null
-                m.speaker = null
-                m.audio = null
-                m.timer = null
-                if (!merged) return
-                setPendingVoiceFeatures(vfSnap)
-                pendingSpeakerRef.current = spSnap
-                pendingAudioRef.current = auSnap
-                void sendRef.current(merged, true)
-              }, VOCE_MERGE_MS)
+            onAddressed: (_text, vf, speaker, audio) => {
+              // VOCE UNIFICATĂ (Adrian, 5 aug): fără transcript de unit — fraza
+              // pleacă DIRECT la creier ca AUDIO. Poarta de timbru (realtimeVoice) a
+              // filtrat deja străinii; creierul unic aude fraza și decide singur
+              // dacă i se vorbește (altfel tace). Fără audio nu are ce trimite.
+              if (!audio) return
+              setPendingVoiceFeatures(vf)
+              pendingSpeakerRef.current = speaker ?? null
+              pendingAudioRef.current = audio
+              void sendRef.current('', true)
             },
             // NO onToolCall (Aug 1 — one brain): the voice session has NO tools
             // at all. Every action the user asks for by voice goes through
@@ -1563,6 +1557,14 @@ export default function ChatPanel({
           return
         } catch (e) {
           const err = e as Error & { code?: string; retryable?: boolean }
+          // MICROFON REFUZAT/ABSENT (DOMException de la getUserMedia): mesaj clar, o
+          // singură dată, prin onMicErr (care reprogramează și retry-ul) — nu-l
+          // tratăm ca un eșec de „voce" (n-are rost să numărăm 3 rateuri pentru o
+          // permisiune lipsă). Singura cale vocală rămâne cea unică; nu există STT.
+          if (e instanceof DOMException && /NotAllowed|NotFound|NotReadable|Security|Permission/i.test(e.name)) {
+            onMicErr(/NotFound|NotReadable/i.test(e.name) ? 'no-device' : 'not-allowed')
+            return
+          }
           if (err?.code === 'need_login' || err?.code === 'need_credit') {
             // NOT transient (audit Aug 2): retrying can't sign a session in or
             // refill a wallet — before, a user out of credit burned the 3
@@ -1596,90 +1598,18 @@ export default function ChatPanel({
         }
       }
 
-      // ── LIVE DICTATION (streaming): every word appears on the ticker instantly, gets
-      // validated when confirmed, and on a PAUSE > 3s the sentence leaves for the brain
-      // (Adrian's order, Jul 10). If the WS drops or goes silent, we fall back ONCE
-      // to the proven batch path — the voice never breaks.
-      if (streamModeRef.current) {
-        const sh = await startMicStream({
-          preWarmedStream,
-          onLive: (t) => setLiveVoice(t),
-          onPhrase: (t) => {
-            setLiveVoice('')
-            void sendRef.current(t)
-          },
-          onError: (reason) => {
-            if (reason === 'ws' || reason === 'failed' || reason === 'silent' || reason === 'unsupported') {
-              // streaming doesn't work → switch to batch for the rest of the session
-              streamModeRef.current = false
-              // …but NOT forever (4 Aug): after the cooldowns pass, try to come
-              // back to the full voice by itself — see armVoiceUpgrade above.
-              armVoiceUpgrade()
-              micRef.current?.stop()
-              micRef.current = null
-              setListening(false)
-              setLiveVoice('')
-              micStartingRef.current = false
-              void ensureMicRef.current()
-              return
-            }
-            onMicErr(reason)
-          },
-          getLang: () => speechLangRef.current,
-          onBargeIn: () => {
-            stopVoice()
-            micRef.current?.setMuted(false)
-          },
-        })
-        if (sh) {
-          // STOP pressed while I was starting, or another start already installed a
-          // microphone — respect the existing state, don't install over it.
-          if (micManualOffRef.current || micRef.current) {
-            sh.stop()
-            return
-          }
-          micRef.current = sh
-          micBackoffRef.current = 1000
-          setListening(true)
-          if (isVoicePlaying()) sh.setMuted(true)
-          // Dictarea e tot VOCE: anunță taburile-frate să tacă (o singură voce).
-          canalVoceRef.current?.postMessage({ takeover: tabVoceIdRef.current })
-        }
-        return
-      }
-
-      // ── BATCH (proven): records the sentence, transcribes it at /api/asr. ──
-      coalescerRef.current = createUtteranceCoalescer((text) => void sendRef.current(text))
-      const h = await startMic(
-        (text) => coalescerRef.current?.push(text),
-        onMicErr,
-        () => speechLangRef.current,
-        // BARGE-IN (Adrian's order): when his voice is heard over Kelion,
-        // Kelion's voice is cut ON THE SPOT and the microphone comes back to listen to him.
-        () => {
-          stopVoice()
-          micRef.current?.setMuted(false)
-        },
-        // "only my voice or my writing, no other is accepted" — admin is the only
-        // role restricted to its own calibrated voice; demo (visitors) stays unchanged.
-        isAdmin,
-        preWarmedStream,
-      )
-      if (h) {
-        // STOP pressed while I was starting, or another start already installed a
-        // microphone — respect the existing state, don't install over it.
-        if (micManualOffRef.current || micRef.current) {
-          h.stop()
-          return
-        }
-        micRef.current = h
-        micBackoffRef.current = 1000
-        setListening(true)
-        // Restarted while the brain is still speaking: it starts muted (anti-echo); it comes back
-        // by itself at the end of the playback, as with any reply.
-        if (isVoicePlaying()) h.setMuted(true)
-        // Dictarea batch e tot VOCE: taburile-frate tac (o singură voce, 4 aug).
-        canalVoceRef.current?.postMessage({ takeover: tabVoceIdRef.current })
+      // ── VOCE UNIFICATĂ — O SINGURĂ CALE (Adrian, 5 aug: „urechea o scoți total
+      // ca modelul are tot; tot decis de creierul unic"). STT-ul a DISPĂRUT complet:
+      // nici streaming (WS /api/asr-stream), nici batch (/api/asr). Singura cale
+      // vocală e startRealtimeVoice de mai sus — microfon → micStream (VAD local) →
+      // AUDIO brut la creierul unic, care aude și decide singur dacă i se vorbește.
+      // Dacă am ajuns aici, calea vocală nu s-a instalat (microfon refuzat / eroare
+      // de start): NU cădem pe niciun STT — reîncercăm calea unică mai târziu, cu
+      // backoff (veghea permanentă și revenirea în tab o repornesc oricum).
+      if (!micManualOffRef.current && !micRef.current) {
+        if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+        micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
+        micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
       }
     } finally {
       micStartingRef.current = false
