@@ -81,10 +81,15 @@ export const config = {
   julesKey: env(...ENV_ALIASES.julesKey),
   // Creierul DIRECT (chat + VEDERE + AUDIO — Gemini e multimodal, un singur
   // model face tot). 4 aug 2026: trecut de la 'gemini-2.5-flash' (gen. veche) la
-  // 'gemini-3.6-flash' — generația cea mai nouă, măsurat pe cheia ownerului că
-  // acceptă imagine ȘI audio (IMAGINE 200✓ | AUDIO 200✓), deci nu strică
-  // vederea/vocea. Suprascriibil din env (GEMINI_MODEL).
-  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-3.6-flash',
+  // 'gemini-3.1-pro-preview' — creierul PUTERNIC cerut de owner (5 aug: „pune
+  // creier Gemini 3 Pro peste tot"). MĂSURAT pe cheia lui: `gemini-3-pro-preview`
+  // dă 404 (nu-i deschis pe cheie), dar `gemini-3.1-pro-preview` răspunde 200 pe
+  // v1beta — ĂSTA e Gemini 3 Pro disponibil. E multimodal (vede imagini), deci
+  // acoperă creier+chat+agenți+vedere+memorie. ATENȚIE: Pro „gândește" (thinking
+  // tokens incluse în maxOutputTokens) → plafoanele de output trebuie MARI, altfel
+  // răspunsul iese gol. Vocea Live (native-audio) rămâne separată (Pro nu face
+  // bidi). Suprascriibil din env (GEMINI_MODEL) — pe VPS trebuie pus la fel.
+  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-3.1-pro-preview',
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
   // VIDEO_ALLOW_PAID=1, ca la constructor: nimic plătit din greșeală.
