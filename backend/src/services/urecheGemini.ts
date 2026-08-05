@@ -13,8 +13,10 @@
 
 import { config } from '../config.js'
 
-// Modelul urechii: flash — ieftin și rapid; transcrierea nu cere raționament.
-const MODEL_URECHE = 'gemini-2.5-flash'
+// Modelul urechii: implicit modelul GREU (Gemini 3 Pro) — Adrian, 5 aug: „pune
+// modelul scump pe ureche", pentru precizie maximă la dictare („ca la Google,
+// fără erori"). Suprascriibil prin MODEL_URECHE, fără să atingem creierul.
+const MODEL_URECHE = process.env.MODEL_URECHE || config.geminiModelGreu
 
 /** Îmbracă PCM16 mono într-un antet WAV minim — Gemini acceptă audio/wav, nu
  *  PCM gol. Funcție pură (testată în urecheGemini.test.ts). */
@@ -46,7 +48,17 @@ export async function transcrieGemini(audioBase64: string, mime: string, limba?:
   const instructiune =
     'Transcribe the speech in this audio EXACTLY as spoken' +
     (limba ? ` (language: ${limba})` : '') +
-    '. Return ONLY the transcribed words, no quotes, no commentary. If there is no speech, return an empty string.'
+    // BIASING (Adrian, 5 aug — „Kelion" a fost auzit „te rugăm"): numim explicit
+    // vocabularul așteptat, ca modelul să nu stâlcească numele asistentului.
+    '. The AI assistant is named "Kelion" (a proper noun) — whenever you hear that name, write it EXACTLY as "Kelion", never as similar-sounding words. ' +
+    'Return ONLY the transcribed words, no quotes, no commentary. If there is no speech, return an empty string.'
+  // Gemini 3.x: gândirea consumă din maxOutputTokens → fără plafon + podea de
+  // output, transcrierea vine GOALĂ (aceeași capcană ca pe creier). La transcriere
+  // nu ne trebuie gândire: o ținem la minim și dăm podeaua de output.
+  const este3x = /gemini-3/.test(MODEL_URECHE)
+  const generationConfig: Record<string, unknown> = este3x
+    ? { temperature: 0, thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 2048 }
+    : { temperature: 0 }
   let r: Response
   try {
     r = await fetch(
@@ -60,7 +72,7 @@ export async function transcrieGemini(audioBase64: string, mime: string, limba?:
               parts: [{ text: instructiune }, { inlineData: { mimeType: mime, data: audioBase64 } }],
             },
           ],
-          generationConfig: { temperature: 0 },
+          generationConfig,
         }),
         signal: AbortSignal.timeout(20_000),
       },

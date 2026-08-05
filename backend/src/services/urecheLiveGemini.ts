@@ -129,6 +129,9 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
               {
                 text:
                   'You are a transcription-only listener. NEVER reply, NEVER comment. Stay silent.' +
+                  // BIASING (Adrian, 5 aug — „Kelion" auzit „te rugăm"): numele
+                  // asistentului e „Kelion"; scrie-l exact, nu cuvinte asemănătoare.
+                  ' The AI assistant is named "Kelion" (a proper noun) — whenever you hear that name, transcribe it EXACTLY as "Kelion", never as similar-sounding words.' +
                   (langHint
                     ? ` The speaker speaks ${langHint}. Transcribe STRICTLY in ${langHint}, using its native alphabet (for Romanian: the Latin alphabet with ă â î ș ț). NEVER transliterate or output Greek, Cyrillic, Arabic, Hebrew, or Han characters.`
                     : ''),
