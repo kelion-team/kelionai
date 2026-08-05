@@ -145,6 +145,23 @@ export const CAPABILITIES: readonly Capability[] = [
   // Miscellaneous
   { name: 'log_unsupported_request', category: 'diverse', does: 'notează o cerință imposibilă acum', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'set_active_role', category: 'diverse', does: 'schimbă rolul activ', chat: true, voice: false, voiceViaBrain: true, admin: false },
+
+  // LEGATE DAR NEÎNREGISTRATE (5 aug, ordinul „leagă tot la creier"): astea 15
+  // erau OFERITE creierului și funcționale, dar lipseau din registru — deci
+  // `inventarulMeu()` nu le număra și creierul „nu știa că le are" (cauza „nu am
+  // unelte"). Acum sunt în sursa unică, deci intră în inventar.
+  { name: 'cheama_agent', category: 'cod', does: 'deleagă o sarcină unui agent specialist (din cei 91)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'panou_cod', category: 'cod', does: 'deschide panoul constructorului cu un ordin de build', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'constructor_manage', category: 'cod', does: 'gestionează ordinele constructorului (reia/oprește/curăță)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'jules_repos', category: 'cod', does: 'listează repo-urile legate la Jules (agentul async Google)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'jules_task', category: 'cod', does: 'dă o sarcină lui Jules (lucrează în VM Google, deschide PR)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'jules_status', category: 'cod', does: 'starea unei sesiuni Jules', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'admin_vezi', category: 'ops', does: 'citește o secțiune din admin (finance/users/money-circuit...)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'admin_schimba', category: 'ops', does: 'modifică ceva din admin din conversație', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'memorie_pune', category: 'memorie', does: 'scrie o cheie în memoria de proiect (persistentă)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'memorie_ia', category: 'memorie', does: 'citește o cheie din memoria de proiect', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'memorie_lista', category: 'memorie', does: 'listează memoria de proiect', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'stare_masurata', category: 'cod', does: 'observabilitatea completă măsurată (starea reală a sistemului)', chat: true, voice: false, voiceViaBrain: true, admin: true },
 ] as const
 
 /** The names of all capabilities (the single source). */
