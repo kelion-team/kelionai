@@ -479,11 +479,15 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(doi.motiv).toContain('M1')
   })
 
-  it('când legea cere apăsarea ownerului, NU e eșecul lui — nu se arde o încercare', async () => {
+  it('când legea cere apăsarea ownerului: nu arde o încercare ȘI nu reia la 2 min', async () => {
     spuseCreierul = 'AȘTEPT APROBAREA: aprobă accesul în aplicația Revolut de pe telefon'
     const r = await poateSaLucreze()
 
-    expect(r.pornit).toBe(true)
+    // `pornit: false` (auditul de cost, 5 aug): un pas care așteaptă apăsarea
+    // ownerului NU e „a lucrat" — altfel relua o tură plătită la 2 min la
+    // nesfârșit. Cade pe cadența lungă (1h), iar `incercari` rămâne 0.
+    expect(r.pornit).toBe(false)
+    expect(urmatoareaPauzaMs(r)).toBe(PAUZA_NIMIC_MS)
     expect(r.motiv).toContain('așteaptă o apăsare de la tine')
     expect(JSON.parse(kv.get('autonomie:pas:M0')!).incercari).toBe(0)
   })
