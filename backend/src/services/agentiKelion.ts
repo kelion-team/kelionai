@@ -1,8 +1,44 @@
 import { config } from '../config.js'
-import { listaAgentiCustom, searchMemories } from '../db.js'
+import { formatNowContext } from './timeContext.js'
+import { listaAgentiCustom, searchMemories, getGoogleRefreshToken } from '../db.js'
 import { geminiDirectChat } from './geminiDirect.js'
-import { webSearch } from './google.js'
+import { webSearch, googleTools, runGoogleTool, refreshGoogleAccessToken } from './google.js'
 import type { OrMessage, AnthropicTool } from './brainContract.js'
+
+// ── ARSENALUL COMPLET (5 aug, ownerul: „nu are uneltele pentru tot ce are
+// nevoie... instalează-i tot") ───────────────────────────────────────────────
+// Până azi agenții aveau DOAR 3 unelte (căutare/pagină/amintiri) — creierul are
+// ~76. De-acum agenții pleacă cu TOATE skill-urile Google, prin ACEEAȘI sursă
+// unică pe care merge chat-ul (googleTools + runGoogleTool — zero duplicare):
+//   • PUBLICE (vreme, hărți, rute, adresă, YouTube, traduceri, Wikipedia,
+//     valute, oră) — pentru ORICINE cheamă un agent; nu ating date personale.
+//   • PERSONALE (Gmail, Calendar, Drive, Tasks, Contacte) — DOAR pe căile
+//     ownerului (caAdmin), cu tokenul lui Google; endpointul A2A e public și
+//     datele lui nu ies pe el.
+const GOOGLE_PUBLICE = new Set([
+  'get_weather', 'maps_search', 'maps_directions', 'lookup_address', 'youtube_search',
+  'translate_text', 'wikipedia_lookup', 'convert_currency', 'get_time',
+])
+// web_search din googleTools NU se re-oferă — căutarea e deja UNEALTA_CAUTARE.
+const caAnthropic = (t: { name: string; description?: string; input_schema: unknown }): AnthropicTool => ({
+  name: t.name,
+  description: t.description ?? '',
+  input_schema: t.input_schema as Record<string, unknown>,
+})
+const GOOGLE_TOOLS_PUBLICE: AnthropicTool[] = googleTools.filter((t) => GOOGLE_PUBLICE.has(t.name)).map(caAnthropic)
+const GOOGLE_TOOLS_PERSONALE: AnthropicTool[] = googleTools
+  .filter((t) => !GOOGLE_PUBLICE.has(t.name) && t.name !== 'web_search')
+  .map(caAnthropic)
+const NUME_GOOGLE = new Set(googleTools.map((t) => t.name))
+
+/** Tokenul Google al ownerului — DOAR pe căile admin, pentru uneltele personale.
+ *  Lipsă/expirat → runGoogleTool întoarce semnalul cinstit google_not_connected. */
+async function tokenGoogleOwner(): Promise<string> {
+  const refresh = await getGoogleRefreshToken(config.adminEmail).catch(() => null)
+  if (!refresh) return ''
+  const tok = await refreshGoogleAccessToken(refresh).catch(() => null)
+  return tok?.accessToken ?? ''
+}
 
 // ── AGENȚII LUI KELION: SURSA UNICĂ ─────────────────────────────────────────
 //
@@ -179,14 +215,20 @@ export function carteAgent(a: AgentKelion): Record<string, unknown> {
 }
 
 /** Instrucțiunea de sistem care face din creierul lui Kelion ACEST specialist. */
+// ANCORA DE TIMP (5 aug, prinsă de PROBA VIE pe /api/a2a: agentul „adevar" a
+// căutat corect cursul BNR dar a zis „azi e 4 august" — dată din memoria
+// modelului, nu din realitate). Chat-ul are formatNowContext; agenții NU aveau.
+// Fără ancoră, orice agent care vorbește despre „azi" minte fără să știe.
 function instructiune(a: AgentKelion): string {
+  const acum = formatNowContext(null, null)
   return (
     `Ești „${a.nume}", un agent specialist al lui Kelion (asistentul personal al lui Adrian).\n` +
-    `Specialitatea ta: ${a.rol}\n\n` +
+    `Specialitatea ta: ${a.rol}\n` +
+    `ACUM este: ${acum.human} (${acum.tzName}). Asta e data reală — n-o lua din memoria ta.\n\n` +
     `Reguli, mereu:\n` +
     `- Răspunzi scurt, concret, în limba în care ți se scrie (implicit română).\n` +
     `- Ce nu poți proba spui „nu pot verifica" — nu inventezi cifre, verdicte sau surse.\n` +
-    `- Ai unealta cauta_web (Google real): folosește-o pentru fapte proaspete și citează linkurile.\n` +
+    `- Ești BLINDAT cu unelte reale: cauta_web (Google real), citeste_pagina, vreme, hărți și rute, adresă din coordonate, YouTube, traduceri, Wikipedia, valute, oră — FOLOSEȘTE-LE pentru orice fapt proaspăt sau verificabil și citează sursele. Nu răspunde din memorie ce poți afla cu unealta.\n` +
     `- Rămâi strict în specialitatea ta; dacă cererea e pentru alt specialist, spune care.`
   )
 }
@@ -271,10 +313,16 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
     { role: 'system', content: instructiune(a) },
     { role: 'user', content: sarcina },
   ]
-  // BLINDAJUL (4 aug, owner: „când pornește un agent pleacă blindat cu unelte"):
-  // toți primesc căutarea + cititul paginilor; memoria lui Kelion se aprinde
-  // DOAR pe căile ownerului (caAdmin) — endpointul A2A e public, amintirile nu.
-  const unelte = caAdmin ? [UNEALTA_CAUTARE, UNEALTA_PAGINA, UNEALTA_AMINTIRI] : [UNEALTA_CAUTARE, UNEALTA_PAGINA]
+  // BLINDAJUL COMPLET (5 aug, owner: „nu are uneltele pentru tot ce are
+  // nevoie... instalează-i tot"): toți primesc căutarea + cititul paginilor +
+  // TOATE skill-urile Google publice; pe căile ownerului (caAdmin) se adaugă
+  // memoria lui Kelion + skill-urile personale (Gmail/Calendar/Drive/Tasks/
+  // Contacte, cu tokenul lui). Endpointul A2A e public — datele lui nu ies pe el.
+  const unelte = caAdmin
+    ? [UNEALTA_CAUTARE, UNEALTA_PAGINA, UNEALTA_AMINTIRI, ...GOOGLE_TOOLS_PUBLICE, ...GOOGLE_TOOLS_PERSONALE]
+    : [UNEALTA_CAUTARE, UNEALTA_PAGINA, ...GOOGLE_TOOLS_PUBLICE]
+  // Tokenul ownerului se aduce O DATĂ, leneș, la prima unealtă personală.
+  let tokenOwner: string | null = null
   // Superputerea de raționament (4 aug): agentul cu efort 'high' primește buget
   // de gândire mare + plafon dublu (la gemini-2.5 maxOutputTokens INCLUDE
   // tokenii de gândire — vezi măsurătoarea din antet — deci plafonul crește
@@ -307,6 +355,18 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
         rezultat = gasite.length
           ? gasite.map((m) => m.content).join('\n')
           : JSON.stringify({ info: 'nimic in memorie pe cautarea asta' })
+      } else if (NUME_GOOGLE.has(tc.function.name)) {
+        // Arsenalul Google — ACEEAȘI execuție ca în chat (runGoogleTool, sursă
+        // unică). Uneltele publice merg fără token; cele personale primesc
+        // tokenul ownerului DOAR pe căile admin (altfel token gol → semnalul
+        // cinstit google_not_connected, nu date scurse).
+        const ePublica = GOOGLE_PUBLICE.has(tc.function.name)
+        if (!ePublica && !caAdmin) {
+          rezultat = JSON.stringify({ error: 'unealta_personala_doar_pentru_owner' })
+        } else {
+          if (!ePublica && tokenOwner === null) tokenOwner = await tokenGoogleOwner()
+          rezultat = await runGoogleTool(tc.function.name, arg, ePublica ? '' : (tokenOwner ?? ''))
+        }
       } else {
         rezultat = JSON.stringify({ error: 'unealta_necunoscuta_sau_argumente_goale' })
       }
