@@ -2362,6 +2362,21 @@ export interface Cerinta {
   updated_at: Date
 }
 
+/** Normalizes a requirement text for deduplication: lowercase, strip diacritics/punctuation/extra spaces. */
+export function normalizeazaTextCerinta(raw: string): string {
+  const deaccented = raw
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+  return deaccented
+    .replace(/^((imbunatatire|cerinta|sarcina|task|ordin|nota)\s*(la|pentru)?\s*(cerinta|ordin)?\s*#?\d*:?\s*)*/i, '')
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /** Write a requirement. Duplicates are not added: same request, same row —
  *  otherwise the list would fill with variations of the same thing and it
  *  would stop being management and become noise. */
@@ -2374,12 +2389,18 @@ export async function adaugaCerinta(
   if (!dbEnabled()) return 0
   const t = text.trim().slice(0, 4000)
   if (!t) return 0
+  const normalized = normalizeazaTextCerinta(t)
+  if (!normalized) return 0
   try {
-    const dej = await getPool().query<{ id: string | number }>(
-      `SELECT id FROM cerinte WHERE lower(text) = lower($1) AND stare <> 'respinsa' LIMIT 1`,
-      [t],
+    // 1. Direct exact or lower match
+    const dej = await getPool().query<{ id: string | number; text: string }>(
+      `SELECT id, text FROM cerinte WHERE stare <> 'respinsa'`,
     )
-    if (dej.rows[0]) return Number(dej.rows[0].id)
+    for (const r of dej.rows) {
+      if (normalizeazaTextCerinta(r.text) === normalized) {
+        return Number(r.id)
+      }
+    }
     const r = await getPool().query<{ id: string | number }>(
       'INSERT INTO cerinte (text, sursa, criteriu, prioritate) VALUES ($1,$2,$3,$4) RETURNING id',
       [t, sursa, criteriu ?? null, Math.max(1, Math.min(9, Math.round(prioritate) || 5))],

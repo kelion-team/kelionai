@@ -339,7 +339,7 @@ poate citi). Runbook-ul e scris, corect și sub test. Se rulează când revin.
 | K13 | Sistem automat de curățare care **arhivează** când e gata | 🔧 | De construit: la închiderea unei cerințe/job, mută în arhivă în loc să lase gunoiul la vedere. |
 | K14 | Sistem de rezolvări care **anunță adminul** că sunt cereri | 🔧 | De construit: când apare o cerere nouă (scris/voce/plată neatribuită), notificare la admin. |
 | K15 | „ceva toacă creditul OpenRouter, caută soluții, că e faliment curat" | 🔎 | MĂSURAT: constructorul pe **Fable 5 plătit** = ~$4-5 per ordin de build (30 apeluri azi = $5.04; ora 02 = $4.21 doar pentru cei 24 de pași ai ordinului #28). Ultimul apel al constructorului: 03:23 — deci scurgerea mică de acum (chat/analiză) e alta. Soluții de decis (mai jos). |
-| K16 | „de ce sistemul nu monitorizează cerințele până la capăt? se ajung la dubluri, timp și bani" | 🔧 | Gaură reală: captarea cerințelor nu deduplică după text, iar bucla re-analizează → dubluri. De reparat: dedup la captare + urmărire clară până la „verificat", ca o cerință dusă la capăt să nu fie reluată. |
+| K16 | „de ce sistemul nu monitorizează cerințele până la capăt? se ajung la dubluri, timp și bani" | ✅ | REZOLVAT: `db.ts` deduplică cerințele după text normalizat la captare (`normalizeazaTextCerinta`), iar `autonomie.ts` urmărește cerințele până la statusul `verificata`. |
 | K17 | iOS: user/pass în fișierul „kei" de pe desktop | ⛔ | **Nu am acces la desktopul tău** — rulez într-un container izolat care vede doar repo-ul, VPS-ul și site-ul live. Nu pot citi un fișier de pe Windows-ul tău. Dacă e nevoie, mi-l dai tu (dar parolele nu în chat dacă nu e musai). |
 
 ### Soluțiile pentru arderea de credit (K15) — decizia ta, cu cifre
