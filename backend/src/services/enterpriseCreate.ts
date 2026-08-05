@@ -105,15 +105,6 @@ function socoteste(rezultate: RezCreare[]): { creati: number; esuati: number; pr
 // rata, iar de rată se ocupă backoff-ul pe Retry-After din buclă. 3s = ritm
 // bun fără să provocăm rata degeaba.
 const PAUZA_INTRE_MS = 3_000
-// Cât așteptăm la un 429 de rată: EXACT Retry-After de la Google, mărginit între
-// 5 și 90 secunde (dacă Google nu-l trimite, 15s). Apoi CONTINUĂM aceeași rulare.
-const BACKOFF_MIN_S = 5
-const BACKOFF_MAX_S = 90
-const BACKOFF_IMPLICIT_S = 15
-// Câte 429-uri de rată LA RÂND (fără nicio reușită) până predăm vegherii — ca să
-// nu batem la infinit dacă chiar s-a închis ceva. Cu reușite între ele, se
-// resetează: o rulare poate crea zeci de agenți, oprindu-se doar la un zid real.
-const MAX_429_LA_RAND = 8
 const zabava = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 // JURNALUL COTEI (măsurat, nu ghicit): ultimele încercări cu ora și rezultatul
@@ -238,46 +229,31 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   const deCreat = roster.filter((ag) => !cunoscuti.has(ag.nume))
   const existau = roster.length - deCreat.length
   const rezultate: RezCreare[] = []
-  // CREARE CU RETRY PRIN LIMITA DE RATĂ (Adrian, 5 aug: „îi vreau urgent sus pe
-  // toți" + dovada Gemini că nu există plafon zilnic de creare). Strategia veche
-  // oprea TOATĂ runda la primul 429 și aștepta 15 minute — de-aia se târa (2 la
-  // 15 min). Bug-ul era la MINE, nu la Google. Acum: la un 429, aștept EXACT
-  // Retry-After (mărginit 5–90s) și reîncerc ACELAȘI agent; o reușită resetează
-  // contorul. Predau vegherii DOAR dacă iau MAX_429_LA_RAND refuzuri LA RÂND,
-  // fără nicio reușită între ele (zid real). O rulare poate crea zeci de agenți.
-  let i = 0
-  let esec429LaRand = 0
-  while (i < deCreat.length) {
-    const ag = deCreat[i]
+  // STRATEGIE BLÂNDĂ, DOVEDITĂ (Adrian, 5 aug — după ce am prins mesajul REAL al
+  // lui Google: „Agent creation quota exceeded"). E o COTĂ de creare, nu o rată
+  // care se limpezește dacă insiști: MĂSURAT, hămăitul (48 de cereri, backoff de
+  // 15s) a dat 0 reușite — cota epuizată rămâne epuizată. Owner-ul avea dreptate
+  // de la început: „cererile refuzate umplu paharul". Deci: cât fereastra e
+  // deschisă, creăm la rând (pauză scurtă, drenăm); la PRIMUL 429 OPRIM runda și
+  // predăm vegherii (REIA_MIN min), care prinde fereastra următoare, când cota
+  // s-a reumplut. Nu mai batem în zid pe banii/cota ownerului.
+  for (const ag of deCreat) {
     const instalati = existau + rezultate.filter((x) => x.ok).length
     const eticheta = `instalați: ${instalati}/${roster.length} | rămași: ${roster.length - instalati}`
     anunta(`${eticheta} | acum îl pun pe: ${ag.nume}`)
     const rez = await creeazaUnAgent(T, ag, (pas) => anunta(`${eticheta} | ${pas}`))
+    rezultate.push(rez)
     if (rez.ok) {
-      rezultate.push(rez)
-      esec429LaRand = 0
-      i += 1
-      await zabava(PAUZA_INTRE_MS) // pauză scurtă, apoi următorul
+      await zabava(PAUZA_INTRE_MS) // fereastra e deschisă — drenăm cu următorul
       continue
     }
     if (rez.quota) {
-      esec429LaRand += 1
-      if (esec429LaRand >= MAX_429_LA_RAND) {
-        // Zid real: prea multe refuzuri de rată la rând, fără nicio reușită.
-        // Predau vegherii (REIA_MIN) — nu mai bat degeaba.
-        rezultate.push(rez)
-        anunta(`${eticheta} | ${esec429LaRand} refuzuri de rată la rând — predau vegherii (${REIA_MIN} min)`)
-        break
-      }
-      const asteapta = Math.min(BACKOFF_MAX_S, Math.max(BACKOFF_MIN_S, rez.retryAfter ?? BACKOFF_IMPLICIT_S))
-      anunta(`${eticheta} | 429 de rată — aștept ${asteapta}s și CONTINUI (nu abandonez)`)
-      await zabava(asteapta * 1000)
-      continue // reîncerc ACELAȘI agent (i neschimbat)
+      // Cota s-a epuizat (429) — OPRIM. Veghea reia la REIA_MIN și prinde
+      // fereastra următoare. Nu mai trimitem restul în zid.
+      anunta(`${eticheta} | cotă de creare epuizată (429) — veghez la ${REIA_MIN} min și prind fereastra următoare`)
+      break
     }
-    // Alt eșec (nu 429): îl notăm și trecem mai departe — nu blocăm restul.
-    rezultate.push(rez)
-    esec429LaRand = 0
-    i += 1
+    // Alt eșec (nu 429): trecem mai departe — nu blocăm restul.
   }
   const { creati, esuati, primaEroare } = socoteste(rezultate)
 
