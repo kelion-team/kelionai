@@ -94,7 +94,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 
 | # | Ce | Stare |
 |---|---|---|
-| D1 | `prepare_promo_clip` | singura capabilitate la care vocea nu ajunge (din 69). Cere butonul Rec din interfață — legată fizic de client. |
+| D1 | `prepare_promo_clip` | ✅ **închis**: capabilitate integrată prin `buildPromo` și `voiceViaBrain: true`, cadru `{promo}` recepționat pe client armând butonul Rec; teste adăugate în `promo.test.ts`. |
 | D2 | **Testul de raționament pe creier plătit** | nefăcut. Cât timp punga OpenRouter e goală, creierul merge pe modele gratuite slabe. |
 | D3 | **Google Photos, YouTube personal** | cer scope-uri OAuth NOI → trebuie să reconectezi Google. Decizia ta. |
 | D4 | **Etapa 5b — instalări de sistem ca runbook** | constructorul poate instala pachete npm, dar nu unelte de sistem (apt). Operație privilegiată pe VPS, de făcut cu grijă. |
