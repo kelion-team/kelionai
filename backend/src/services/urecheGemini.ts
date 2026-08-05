@@ -13,10 +13,13 @@
 
 import { config } from '../config.js'
 
-// Modelul urechii: implicit modelul GREU (Gemini 3 Pro) — Adrian, 5 aug: „pune
-// modelul scump pe ureche", pentru precizie maximă la dictare („ca la Google,
-// fără erori"). Suprascriibil prin MODEL_URECHE, fără să atingem creierul.
-const MODEL_URECHE = process.env.MODEL_URECHE || config.geminiModelGreu
+// Modelul urechii de REZERVĂ (rafale, când Live pică): un model RAPID. MĂSURAT
+// (5 aug, jurnalul serverului): Gemini 3 Pro pe ureche PICĂ — `gemini_503 «high
+// demand»` + timeout >20s pe fiecare rafală, ZERO transcriere. Un model de
+// gândire (Pro face 5–8s/apel) nu poate transcrie în timp real. Rezerva rămâne
+// pe flash rapid; precizia numelui vine din biasing-ul „Kelion" de mai jos.
+// Creierul e SEPARAT (Pro). Suprascriibil prin MODEL_URECHE.
+const MODEL_URECHE = process.env.MODEL_URECHE || 'gemini-2.5-flash'
 
 /** Îmbracă PCM16 mono într-un antet WAV minim — Gemini acceptă audio/wav, nu
  *  PCM gol. Funcție pură (testată în urecheGemini.test.ts). */
