@@ -161,11 +161,18 @@ async function fisierDinRepo(rel: string): Promise<string | null> {
 async function plasaRaspunde(): Promise<boolean> {
   return (await rezumatPlati().catch(() => null)) !== null
 }
-/** M3: the data layer answers AND the panel actually renders it. */
+/** M3: the data layer answers AND the panel actually renders it.
+ *  MARKER CORECTAT (5 aug, auditul „autonomia nu mai vine"): verifica
+ *  `'payNetHead'` — dar ăsta e doar NUMELE unei chei i18n în adminText.ts, NU
+ *  apare în AdminPanel.tsx (panoul afișează hardcodat „🕸 Plăți Neatribuite",
+ *  AdminPanel.tsx:1476). Din cauza asta M3 nu devenea NICIODATĂ `gata`, deși
+ *  panoul e livrat și LIVE — iar M3 ne-gata ținea `misiuneGata` false, deci
+ *  bucla nu ajungea niciodată la lista ownerului. Marker → string care CHIAR
+ *  există în panou. */
 async function panoulPlatilorExista(): Promise<boolean> {
   if (!(await plasaRaspunde())) return false
   const panou = await fisierDinRepo('frontend/src/components/AdminPanel.tsx')
-  return panou !== null && panou.includes('payNetHead')
+  return panou !== null && panou.includes('Neatribuite')
 }
 /** M4: the payment code is truly SHOWN to the user (both payment surfaces). */
 async function codulSeArata(): Promise<boolean> {
@@ -1251,7 +1258,13 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
         const asteapta = /AȘTEPT APROBAREA:?\s*(.{0,160})/i.exec(spus)?.[1]?.trim()
         if (asteapta) {
           await scrieStare(s.cod, { job: 0, incercari: st.incercari })
-          return { pornit: true, motiv: `${s.cod}: așteaptă o apăsare de la tine — ${asteapta}` }
+          // `pornit: false` (5 aug, auditul de cost): un pas care AȘTEAPTĂ o
+          // apăsare de la owner NU e „a lucrat" — dacă întorceam `pornit: true`,
+          // cadența era PAUZA_A_LUCRAT_MS (2 min), iar `incercari` nu creștea, deci
+          // pasul nu se parca niciodată → relua o tură plătită de creier (cu
+          // unelte browser) la fiecare 2 min, la nesfârșit, pe banii ownerului,
+          // pentru ceva ce nu poate avansa fără el. Acum cade pe cadența de 1h.
+          return { pornit: false, motiv: `${s.cod}: așteaptă o apăsare de la tine — ${asteapta}` }
         }
         // Didn't work this time either → retried on the next pass. No abandonment.
         await scrieStare(s.cod, { job: 0, incercari })

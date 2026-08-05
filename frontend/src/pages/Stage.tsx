@@ -533,6 +533,13 @@ export default function Stage({ user }: { user: User }) {
   // în loc să rămână verzi pe valori înghețate prezentate ca actuale.
   const [brainLocked, setBrainLocked] = useState(false)
   const [brainFails, setBrainFails] = useState(0)
+  // EDITARE CREDIT GEMINI INLINE (Adrian, 5 aug: „vreau să dispară asa ceva cu
+  // înghețare aiurea"). Vechiul click deschidea `window.prompt()` — dialog nativ
+  // care ÎNGHEAȚĂ toată pagina (pe mobil bloca și pornirea microfonului). Acum e
+  // un câmp inline, non-blocant: Enter salvează, Esc/click-afară renunță, eroarea
+  // apare ca text mic lângă câmp, nu ca `window.alert` (alt freeze).
+  const [creditEdit, setCreditEdit] = useState(false)
+  const [creditErr, setCreditErr] = useState('')
   const brainOkAtRef = useRef<number | null>(null)
   // The padlock state at entry + the unlock coming from voice (the voiceprint
   // matched → realtimeVoice emits `kelion:admin-unlock`).
@@ -1209,66 +1216,56 @@ export default function Stage({ user }: { user: User }) {
             REALĂ pe luna curentă, din jurnalul nostru (cost_events kind='gemini').
             DB necitibil → „Gemini ⚠", niciodată „$0.00"; live cu 0 = zero real
             (nimic cheltuit încă luna asta). Click → Google AI Studio. */}
-            {brainCredit && !brainLocked && (
+            {brainCredit && !brainLocked && (creditEdit ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="ghost"
+                  autoFocus
+                  style={{ width: 96 }}
+                  defaultValue={brainCredit.gemini?.creditGbp != null ? String(brainCredit.gemini.creditGbp) : ''}
+                  placeholder="ex: 10.88"
+                  title={creditErr || 'Enter=salvează · gol=pagina Google · „-”=șterge · Esc=renunț'}
+                  onBlur={() => setCreditEdit(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setCreditEdit(false); setCreditErr(''); return }
+                    if (e.key !== 'Enter') return
+                    // Gol → pagina Google; „-" → șterge; număr → salvează. Fără
+                    // window.prompt/alert: totul inline, non-blocant (nu îngheață).
+                    const val = (e.currentTarget.value || '').trim()
+                    if (val === '') { window.open('https://aistudio.google.com/billing', '_blank', 'noopener'); setCreditEdit(false); setCreditErr(''); return }
+                    const clear = val === '-'
+                    const gbp = clear ? null : Number(val.replace(',', '.'))
+                    if (!clear && (!Number.isFinite(gbp) || (gbp as number) < 0)) { setCreditErr(adminStrings().gemCreditInvalid); return }
+                    setCreditEdit(false); setCreditErr('')
+                    void fetch('/api/admin/gemini-credit', {
+                      method: 'POST',
+                      headers: { 'content-type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ gbp }),
+                    })
+                      .then((r) => (r.ok ? (r.json() as Promise<{ ok?: boolean; gbp?: number; at?: string; cleared?: boolean }>) : null))
+                      .then((j) => {
+                        // Starea se scrie DOAR din răspunsul serverului (nu pe null).
+                        if (!j?.ok) { setCreditErr(adminStrings().gemCreditSaveFailed); setCreditEdit(true); return }
+                        setBrainCredit((prev) =>
+                          prev && prev.gemini
+                            ? { ...prev, gemini: { ...prev.gemini, creditGbp: j.cleared ? undefined : j.gbp, creditAt: j.cleared ? undefined : j.at } }
+                            : prev,
+                        )
+                      })
+                      .catch(() => { setCreditErr(adminStrings().gemCreditSaveFailed); setCreditEdit(true) })
+                  }}
+                />
+                {creditErr && <span style={{ color: '#e5484d', fontSize: 12 }}>{creditErr}</span>}
+              </span>
+            ) : (
               <button
                 type="button"
                 className={`ghost ${brainCredit.gemini && !brainCredit.gemini.serving ? 'blink-red' : ''}`}
                 style={brainStale ? { opacity: 0.55 } : undefined}
-                onClick={() => {
-                  // Click = pui/actualizezi creditul pe care-l vezi în AI Studio.
-                  // Google nu-l dă prin API, deci îl arăt ca fiind SPUS DE TINE, cu
-                  // data. Gol → deschide pagina Google; „-" → șterge cifra.
-                  // Textele vin din adminText (auditul admin, 3 aug: erau
-                  // hardcodate în română — regresie față de auditul i18n din 2 aug).
-                  const g = brainCredit.gemini
-                  const curent = g?.creditGbp != null ? String(g.creditGbp) : ''
-                  const raspuns = window.prompt(adminStrings().gemCreditPrompt, curent)
-                  if (raspuns == null) return
-                  const val = raspuns.trim()
-                  if (val === '') {
-                    window.open('https://aistudio.google.com/billing', '_blank', 'noopener')
-                    return
-                  }
-                  const clear = val === '-'
-                  const gbp = clear ? null : Number(val.replace(',', '.'))
-                  // NEGATIVUL ȘI NE-NUMERICUL SE RESPING CU MESAJ (auditul admin,
-                  // 3 aug): „-5" ar fi fost tratat de server ca ȘTERGERE, iar
-                  // „abc" era ignorat complet — buton mut.
-                  if (!clear && (!Number.isFinite(gbp) || (gbp as number) < 0)) {
-                    window.alert(adminStrings().gemCreditInvalid)
-                    return
-                  }
-                  void fetch('/api/admin/gemini-credit', {
-                    method: 'POST',
-                    headers: { 'content-type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({ gbp }),
-                  })
-                    .then((r) => (r.ok ? (r.json() as Promise<{ ok?: boolean; gbp?: number; at?: string; cleared?: boolean }>) : null))
-                    .then((j) => {
-                      // STAREA SE SCRIE DOAR DIN RĂSPUNSUL SERVERULUI (auditul
-                      // admin, 3 aug): vechiul lanț rula .then-ul de afișare și
-                      // pe null — la 500/423 pastila arăta creditul tastat ca
-                      // „salvat", fals până la următorul poll.
-                      if (!j?.ok) {
-                        window.alert(adminStrings().gemCreditSaveFailed)
-                        return
-                      }
-                      setBrainCredit((prev) =>
-                        prev && prev.gemini
-                          ? {
-                              ...prev,
-                              gemini: {
-                                ...prev.gemini,
-                                creditGbp: j.cleared ? undefined : j.gbp,
-                                creditAt: j.cleared ? undefined : j.at,
-                              },
-                            }
-                          : prev,
-                      )
-                    })
-                    .catch(() => window.alert(adminStrings().gemCreditSaveFailed))
-                }}
+                onClick={() => { setCreditErr(''); setCreditEdit(true) }}
                 title={(() => {
                   // {spend} = măsurătoarea reușită SAU declararea eșecului —
                   // niciodată „$0.00 (măsurat)" fabricat dintr-un ?? 0 (auditul
@@ -1299,7 +1296,7 @@ export default function Stage({ user }: { user: User }) {
                     ? 'Gemini ✓'
                     : 'Gemini ⚠'}
               </button>
-            )}
+            ))}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
             permanently on the interface in the top bar”). Two figures, because they
             answer two different questions: RAM = does anything else FIT on the
