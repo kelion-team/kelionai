@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest'
 // cu tot cu furnizorul. Singura sursă rămasă e tabelul static ETICHETAT
 // `static_estimate` — testele pinuiează exact eticheta, ca o estimare să nu
 // poată fi prezentată vreodată drept măsurătoare.)
-const { brainCostUsd, costFromPrice, TTS_USD_PER_CHAR, ASR_USD_PER_CALL, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } =
+const { brainCostUsd, costFromPrice, TTS_USD_PER_CHAR, ASR_USD_PER_CALL, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE, isDailyBudgetExceeded, DEFAULT_DAILY_BUDGET_CAP_USD } =
   await import('./cost.js')
 
 describe('cost.ts — prețul modelului e o estimare ETICHETATĂ, niciodată „real"', () => {
@@ -42,5 +42,19 @@ describe('cost.ts — ratele reziduale sunt estimări etichetate, nu măsurător
     expect(SERPER_USD_PER_CALL).toBeCloseTo(0.001, 12)
     expect(IMAGE_USD_PER_CALL).toBeCloseTo(0.04, 12)
     expect(VOICE_USD_PER_MINUTE).toBeCloseTo(0.35, 12)
+  })
+})
+
+describe('cost.ts — daily budget cap safeguard (K15)', () => {
+  it('isDailyBudgetExceeded correctly evaluates spending vs cap', () => {
+    expect(DEFAULT_DAILY_BUDGET_CAP_USD).toBeGreaterThan(0)
+    expect(isDailyBudgetExceeded(5.0, 10.0)).toBe(false)
+    expect(isDailyBudgetExceeded(10.0, 10.0)).toBe(true)
+    expect(isDailyBudgetExceeded(12.5, 10.0)).toBe(true)
+  })
+
+  it('disabled or 0 cap allows unlimited spent without exceeding', () => {
+    expect(isDailyBudgetExceeded(100.0, 0)).toBe(false)
+    expect(isDailyBudgetExceeded(100.0, -1)).toBe(false)
   })
 })

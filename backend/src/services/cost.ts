@@ -97,3 +97,17 @@ export const IMAGE_USD_PER_CALL = Number(process.env.IMAGE_USD_PER_CALL ?? 0.04)
 // The ledger marks `voice_minutes` as an estimate (db.ts COSTURI_MASURATE).
 // Editable from env.
 export const VOICE_USD_PER_MINUTE = Number(process.env.VOICE_USD_PER_MINUTE ?? 0.35)
+
+// ── DAILY BUDGET CAP SAFEGUARD (K15 — prevent runaway AI spending) ─────────
+// Default daily cap in USD for paid AI calls (e.g. $10.00/day default).
+// Configurable via process.env.DAILY_AI_BUDGET_CAP_USD.
+export const DEFAULT_DAILY_BUDGET_CAP_USD = Number(process.env.DAILY_AI_BUDGET_CAP_USD ?? 10.0)
+
+/**
+ * Returns true if the daily spent amount in USD exceeds or equals the cap.
+ * Protects against unexpected high credit usage ("faliment curat").
+ */
+export function isDailyBudgetExceeded(dailyCostUsd: number, capUsd = DEFAULT_DAILY_BUDGET_CAP_USD): boolean {
+  if (capUsd <= 0) return false // 0 or negative means unlimited / disabled cap
+  return dailyCostUsd >= capUsd
+}
