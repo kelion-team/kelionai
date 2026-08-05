@@ -73,13 +73,13 @@ export interface AgentKelion {
 
 export const ROSTER: AgentKelion[] = [
   // ── NIVEL 1 — CREIERUL SI SIMTURILE lui Kelion (fara ele aplicatia nu exista) ──
-  { id: 'inginer-sef', nume: 'Inginer-sef', rol: 'Orchestreaza: sparge cererea in pasi si deleaga agentului potrivit.' },
+  { id: 'inginer-sef', nume: 'Inginer-sef', rol: 'Orchestreaza: sparge cererea in pasi si deleaga agentului potrivit.', efort: 'high' },
   { id: 'adevar', nume: 'Paznicul adevarului', rol: 'Anti-fabulatie: ce nu se poate proba = nu pot verifica.' },
   { id: 'senzorial', nume: 'Vaz Auz Memorie Gandire', rol: 'Gestioneaza vederea, auzul, memoria si gandirea lui Kelion.' },
   { id: 'gandire', nume: 'Agent Gandire Profunda', rol: 'Superputerea de rationament: probleme grele desfacute pas cu pas, ipoteze puse la incercare, concluzie verificata. Gandeste mult inainte sa raspunda.', efort: 'high' },
-  { id: 'critic', nume: 'Agent Critic', rol: 'A doua opinie: cauta greselile intr-un plan sau raspuns INAINTE sa plece; spune si ce e bun.' },
-  { id: 'planificator', nume: 'Agent Planificator', rol: 'Sparge teluri mari in planuri pe zile: pasi, dependinte, termene realiste, ce se poate paraleliza.' },
-  { id: 'solutii', nume: 'Designer de solutii', rol: 'Arhitect: 2-3 solutii cu compromisuri, alege una, o desface in pasi.' },
+  { id: 'critic', nume: 'Agent Critic', rol: 'A doua opinie: cauta greselile intr-un plan sau raspuns INAINTE sa plece; spune si ce e bun.', efort: 'high' },
+  { id: 'planificator', nume: 'Agent Planificator', rol: 'Sparge teluri mari in planuri pe zile: pasi, dependinte, termene realiste, ce se poate paraleliza.', efort: 'high' },
+  { id: 'solutii', nume: 'Designer de solutii', rol: 'Arhitect: 2-3 solutii cu compromisuri, alege una, o desface in pasi.', efort: 'high' },
   // ── NIVEL 2 — CAPACITATILE DE ZI CU ZI (ce foloseste omul cel mai des) ──
   { id: 'cautator', nume: 'Cautator pe net', rol: 'Cautare web: surse multiple, citate, linkuri.' },
   { id: 'viziune', nume: 'Agent Viziune', rol: 'Analizeaza imagini si capturi ca un soim; spune si ce NU distinge.' },
@@ -308,7 +308,12 @@ async function citestePagina(url: string): Promise<string> {
  *  că la gemini-2.5 maxOutputTokens INCLUDE și tokenii de gândire (~512 la
  *  reasoning 'low'), deci textul util rămânea sub ~500 de tokeni). */
 export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = false): Promise<RaspunsAgent> {
-  const model = config.geminiModel
+  // HIBRID (Adrian, 5 aug: „leagă hibridul, maximă precizie și calitate";
+  // „orchestrator e clar pe greu"): agenții de GÂNDIRE reală (efort explicit
+  // 'high' — orchestrator, gândire profundă, piețe, matematician…) merg pe Gemini
+  // 3 Pro (precizie); restul, de rutină, pe flash (rapid, ieftin). Așa calitatea
+  // e unde contează, fără să ardem Pro pe toți cei ~92 (cost).
+  const model = a.efort === 'high' ? config.geminiModelGreu : config.geminiModel
   const messages: OrMessage[] = [
     { role: 'system', content: instructiune(a) },
     { role: 'user', content: sarcina },

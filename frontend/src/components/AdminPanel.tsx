@@ -2159,7 +2159,11 @@ export default function AdminPanel({
                   <span>
                     <strong>#{j.id}</strong>{' '}
                     <span className={`vis-badge ${j.status === 'done' ? 'human' : j.status === 'failed' ? 'kind-demo' : ''}`}>
-                      {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'GATA' : 'eșuat'}
+                      {/* ONESTITATE (Adrian, 5 aug): un job „done" = PR DESCHIS, NU
+                          pe live. „GATA" sugera fals că e publicat. Un job al cărui
+                          PR nu e merge-uit în master arată „în așteptare" (PR gata,
+                          dar așteaptă publicarea) — orice, dar nu „GATA". */}
+                      {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'în așteptare' : 'eșuat'}
                     </span>{' '}
                     {/* FABLE 5 BADGE — DOAR pe raportul lucrătorului (auditul
                         admin, 3 aug): ramura veche pe regex peste orderText

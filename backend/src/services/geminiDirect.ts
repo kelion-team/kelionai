@@ -174,8 +174,14 @@ export function toGeminiPayload(
     contents.push({ role, parts })
   }
 
+  // GEMINI 3.x „gândește" cu tokeni care INTRĂ în maxOutputTokens (măsurat 5 aug:
+  // gemini-3.1-pro la maxTok=200 → finish=MAX_TOKENS, text tăiat; la 2048 → STOP,
+  // complet). Deci pe 3.x ridicăm PODEAUA de output la 2048, ca gândirea să nu
+  // înfometeze textul (altfel răspunsul iese GOL — exact ce trebuie evitat când
+  // creierul e Pro peste tot).
+  const este3x = /gemini-3/.test(model)
   const generationConfig: Record<string, unknown> = {
-    maxOutputTokens: opts.maxTokens ?? 1024,
+    maxOutputTokens: este3x ? Math.max(opts.maxTokens ?? 1024, 2048) : (opts.maxTokens ?? 1024),
     temperature: opts.temperature ?? 0.7,
   }
   // gemini-2.5's internal thinking: small budget by default so the first word
@@ -188,6 +194,11 @@ export function toGeminiPayload(
     generationConfig.thinkingConfig = {
       thinkingBudget: opts.reasoning === 'high' ? 4096 : opts.reasoning === 'medium' ? 1024 : opts.reasoning === 'low' ? 512 : 0,
     }
+  } else if (este3x) {
+    // Gemini 3.x nu acceptă thinkingBudget (400), DAR acceptă thinkingLevel
+    // (măsurat 5 aug: thinkingLevel:'low' → HTTP 200). 'low' ține latența jos și
+    // lasă bugetul de output pentru text; 'high' doar când se cere raționament greu.
+    generationConfig.thinkingConfig = { thinkingLevel: opts.reasoning === 'high' ? 'high' : 'low' }
   }
   const body: Record<string, unknown> = { contents, generationConfig }
   if (sys.length) body.systemInstruction = { parts: [{ text: sys.join('\n\n') }] }

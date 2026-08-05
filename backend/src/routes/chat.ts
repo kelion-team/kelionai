@@ -284,14 +284,19 @@ async function selectedBrainModel(
   // (sel.work) stays respected; the fall to the secondary on exhausted quota is
   // at the call site (retry in the handler). Voice does NOT go through here —
   // it stays as it is.
-  const geminiWork = !sel.work && geminiDirectAvailable()
-  const model = top
-    ? await resolveModel('top')
-    : heavy
-      ? geminiWork
-        ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
-        : await resolveModel('work', sel.work)
-      : await resolveModel('chat', sel.chat)
+  // HIBRIDUL (Adrian, 5 aug: „leagă hibridul, maximă precizie și calitate"):
+  // greu/top → Gemini 3 Pro (geminiModelGreu) unde contează precizia (gândire,
+  // vedere, acțiuni, mesaje lungi/analiză/cod); ușor → flash (geminiModel), rapid
+  // și ieftin pe vorbă simplă. Ambele prin Gemini direct. Dacă Gemini nu e
+  // disponibil, cade pe vechea scară (resolveModel).
+  const geminiOK = !sel.work && geminiDirectAvailable()
+  const model = geminiOK
+    ? `${GEMINI_DIRECT_PREFIX}${heavy || top ? config.geminiModelGreu : config.geminiModel}`
+    : top
+      ? await resolveModel('top')
+      : heavy
+        ? await resolveModel('work', sel.work)
+        : await resolveModel('chat', sel.chat)
   return { model, heavy: heavy || top }
 }
 
