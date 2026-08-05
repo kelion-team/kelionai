@@ -2264,11 +2264,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // internally before answering; the thinking does not flow into text —
           // only the final reply. On the light turn: none, so the first word
           // stays instant (under 1s, the latency rule).
-          // THE FREE BRAIN FREEZE (Adrian, Jul 27: "I asked it for an action and
-          // it freezes"): the :free model thinks IN SILENCE for tens of seconds
-          // before the first word → it looks dead. On :free/gemini we force
-          // SHORT thinking ('low'); on paid models it stays 'medium'.
-          reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) || orchestratorModel.endsWith(':free') ? 'low' : 'medium') : undefined,
+          // EXTENDED THINKING (Adrian, 5 aug: „la creier adaugi Extended Thinking").
+          // Pe turele GRELE (analiză, cod, mate, raționament lung), creierul Pro
+          // gândește ADÂNC: reasoning 'high' → thinkingLevel:'high' + podea de
+          // output 8192 (geminiDirect). Pe turele ușoare rămâne fără gândire
+          // extinsă, ca prima vorbă să fie rapidă. (:free/OpenRouter nu mai există.)
+          reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) ? 'high' : 'medium') : undefined,
           // THE DEED GATE (Adrian, Jul 27): on the admin's turns, if Kelion
           // ASSERTS a deed without calling the tool, it is mechanically obliged
           // to execute or retract — it no longer stays at the declarative stage.

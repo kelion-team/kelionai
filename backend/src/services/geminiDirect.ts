@@ -180,8 +180,13 @@ export function toGeminiPayload(
   // înfometeze textul (altfel răspunsul iese GOL — exact ce trebuie evitat când
   // creierul e Pro peste tot).
   const este3x = /gemini-3/.test(model)
+  // EXTENDED THINKING (Adrian, 5 aug): pe raționament greu, thinkingLevel:'high'
+  // (mai jos) gândește ADÂNC — dar gândirea extinsă consumă și mai mulți tokeni
+  // din maxOutputTokens, deci podeaua urcă la 8192 pe 3.x când reasoning='high'
+  // (altfel textul iese tăiat/gol). Pe restul, 2048 (rapid).
+  const podea3x = opts.reasoning === 'high' ? 8192 : 2048
   const generationConfig: Record<string, unknown> = {
-    maxOutputTokens: este3x ? Math.max(opts.maxTokens ?? 1024, 2048) : (opts.maxTokens ?? 1024),
+    maxOutputTokens: este3x ? Math.max(opts.maxTokens ?? 1024, podea3x) : (opts.maxTokens ?? 1024),
     temperature: opts.temperature ?? 0.7,
   }
   // gemini-2.5's internal thinking: small budget by default so the first word
