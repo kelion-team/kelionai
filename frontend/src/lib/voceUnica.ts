@@ -55,7 +55,10 @@ export function judecaMesajVoce(
 ): 'zavoraste' | 'inima' | 'reia' | 'nimic' {
   if (!m) return 'nimic'
   if (m.takeover && m.takeover !== eu) return 'zavoraste'
-  if (m.inima && m.inima !== eu) return 'inima'
+  if (m.inima && m.inima !== eu) {
+    // Dacă primim inimă de la alt tab și noi nu eram zăvorâți, înseamnă că altul e activ -> ne zăvorâm
+    return zavorat ? 'inima' : 'zavoraste'
+  }
   if (m.ramasBun && m.ramasBun !== eu && zavorat) return 'reia'
   return 'nimic'
 }
@@ -64,3 +67,19 @@ export function judecaMesajVoce(
 export function inimaAMurit(ultimaInimaLa: number, acum: number): boolean {
   return acum - ultimaInimaLa > INIMA_MOARTA_MS
 }
+
+/** Emite mesaj de preluare voce pe tot canalul */
+export function emiteTakeover(bc: BroadcastChannel | null, eu: string): void {
+  bc?.postMessage({ takeover: eu })
+}
+
+/** Emite bătaie de inimă pentru tabul activ */
+export function emiteInima(bc: BroadcastChannel | null, eu: string): void {
+  bc?.postMessage({ inima: eu })
+}
+
+/** Emite rămas bun la închiderea tabului activ */
+export function emiteRamasBun(bc: BroadcastChannel | null, eu: string): void {
+  bc?.postMessage({ ramasBun: eu })
+}
+
