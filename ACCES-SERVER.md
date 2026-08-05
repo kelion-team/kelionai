@@ -1,7 +1,7 @@
 # ACCES SERVER & DATE — harta completă (Kelionai)
 
 > **Scop:** un singur loc din care ajungi la TOT — server (VPS), baze de date,
-> Railway, GitHub, Google, cheile. **Nu conține valori secrete** (parole/token-uri) —
+> GitHub, Google, cheile. **Nu conține valori secrete** (parole/token-uri) —
 > acelea rămân doar în locurile lor sigure (le deții tu). Aici scrie **unde stă
 > fiecare cheie și cum o folosești**. Fișier de referință; se ține la zi manual.
 
@@ -43,7 +43,7 @@ ssh -i /cale/spre/kelion-vps root@164.68.120.87
 |---|---|
 | `/root/kelion/repo/` | clona git (ținută la zi cu `master` la 5 min de timer-ul `kelion-repo-sync`) |
 | `/root/kelion/claude.env` | auth CLI (token-urile de abonament ale creierului worker) |
-| `/root/kelion/bridge-secret.txt` | secretul comun cu backendul (28 car., = `BRIDGE_SECRET` din Railway) |
+| `/root/kelion/bridge-secret.txt` | secretul comun cu backendul (28 car., = `BRIDGE_SECRET` din env-ul VPS) |
 | `/root/kelion/kimi-key.txt` | cheia Kimi (creier primar) — pusă prin `vps-keys.yml` |
 | `/root/kelion/glm-key.txt` | cheia GLM (creier rezervă) — pusă prin `vps-keys.yml` |
 | `/root/kelion/github-token.txt` | token GitHub pentru `bridge/kelion-github` (PR/merge/deploy/api) |
@@ -67,12 +67,12 @@ cat /root/kelion/repo/AI-HANDOFF.md      # tot ce știe Kelion
 
 ---
 
-## 3. BAZA DE DATE (Postgres pe Railway)
+## 3. BAZA DE DATE (Postgres)
 
-- **Conexiune:** `DATABASE_URL` (în Railway → serviciul `web` → Variables). Valoarea = string-ul de conexiune Postgres.
-- **Acces direct:** din Railway (butonul de connect al bazei) sau:
+- **Conexiune:** `DATABASE_URL` — variabilă în env-ul backendului pe VPS (pusă prin `vps-set-env` din secretul GitHub omonim). Valoarea = string-ul de conexiune Postgres.
+- **Acces direct:** de pe VPS, cu `DATABASE_URL` din mediul containerului:
   ```bash
-  psql "$DATABASE_URL"          # având DATABASE_URL din Railway
+  psql "$DATABASE_URL"          # rulat pe VPS (sau cu string-ul copiat din env)
   ```
 - **Tabele (toate datele) — schema din `db.ts`:**
   `messages`, `user_prefs`, `memories`, `notes`, `shared_memory`, `wallets`,
@@ -84,9 +84,10 @@ cat /root/kelion/repo/AI-HANDOFF.md      # tot ce știe Kelion
 
 ---
 
-## 4. RAILWAY (backendul live)
+## 4. MEDIUL BACKENDULUI (pe VPS — fost Railway, scos 22 iul 2026)
 
-- Proiect **Kelionai**, serviciul **`web`** (production). Deploy din `master`.
+- Gazda: **VPS propriu** (`164.68.120.87`), container `kelionai-app`. Cod din `master`, publicat pe VPS. Railway a fost SCOS — nu mai există serviciu, proiect sau deploy pe railway.app.
+- **Variabilele de mediu** se pun pe VPS prin `vps-set-env.yml` (din secretele GitHub) și se citesc de container.
 - **Toate variabilele de mediu** (nume, nu valori) — citite în `backend/src/config.ts`:
   `NODE_ENV, PORT, ADMIN_EMAIL, ALLOWLIST, ANTHROPIC_API_KEY, GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, GOOGLE_API_KEY, GOOGLE_MAPS_KEY,
@@ -98,7 +99,7 @@ cat /root/kelion/repo/AI-HANDOFF.md      # tot ce știe Kelion
   USER_SHARE, DEMO_CAP_PER_DAY, DEMO_SECONDS, OPEN_SIGNUP, AUTONOMY_DAILY_MAX,
   FRONTEND_DIST, FRONTEND_ORIGIN, KELION_FAST_MODEL, KELION_TOP_MODEL,
   KIMI_API_KEY, GLM_API_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET`
-- `RAILWAY_TOKEN` — **doar în GitHub Secrets**, nu în Railway.
+- `RAILWAY_TOKEN` — **secret MORT.** Niciun workflow și niciun cod nu-l mai folosește (Railway scos). Rămâne doar ca intrare în GitHub → Settings → Secrets → Actions; **poți să-l ștergi liniștit** (Claude nu poate șterge secrete). Apare în logul workflow-urilor doar fiindcă pasul de diagnostic listează *numele* tuturor secretelor.
 
 ---
 
@@ -108,7 +109,7 @@ cat /root/kelion/repo/AI-HANDOFF.md      # tot ce știe Kelion
 - Token pe VPS: `/root/kelion/github-token.txt`; în CI: secretul `VPS_GITHUB_TOKEN`.
 - **Regula #5 (importantă):** GitHub NU se accesează prin browser (repo privat → 404 + zid de login). Orice citire/operațiune trece prin `bridge/kelion-github`: `pr`, `merge`, `deploy`, `runs`, `api <cale>`.
 - **GitHub → Settings → Secrets → Actions** (cheile care dau putere reală):
-  `VPS_ROOT_PASS`, `KIMI_KEY`, `GLM_KEY`, `VPS_GITHUB_TOKEN`, `RAILWAY_TOKEN`.
+  `VPS_ROOT_PASS`, `KIMI_KEY`, `GLM_KEY`, `VPS_GITHUB_TOKEN`. (`RAILWAY_TOKEN` mai e listat acolo, dar e MORT — vezi §4; se poate șterge.)
 - Workflow-uri de operațiuni pe server (`.github/workflows/`): `bridge-deploy.yml`,
   `vps-restart.yml`, `vps-auto-restart.yml`, `vps-keys.yml`, `vps-repo-sync.yml`,
   `vps-tier-test.yml`, `vps-diag.yml`, `vps-livekit-install.yml`,
@@ -120,7 +121,7 @@ cat /root/kelion/repo/AI-HANDOFF.md      # tot ce știe Kelion
 
 **Nu e mutilare — e o barieră de siguranță pusă intenționat („autonomie în lesă", regula #11 din AI-HANDOFF).** Concret:
 
-1. **Cheile care dau putere de root/deploy stau DOAR în GitHub Secrets, în afara VPS-ului** unde rulează Kelion: `VPS_ROOT_PASS` (parola root), `RAILWAY_TOKEN`. Kelion nu le are pe disc → **nu poate face SSH ca root, nu poate rula `railway up`, nu poate publica singur.**
+1. **Cheile care dau putere de root/deploy stau DOAR în GitHub Secrets, în afara VPS-ului** unde rulează Kelion: `VPS_ROOT_PASS` (parola root). Kelion nu le are pe disc → **nu poate face SSH ca root, nu poate publica singur** pe lângă pipeline.
 2. **Kelion rulează DEJA pe VPS** (ca worker de chat + constructor), deci nu-i trebuie SSH către el însuși ca să citească/scrie cod: constructorul are `Bash` + repo-ul local. Ce NU are e **parola root** și dreptul de a face operațiuni privilegiate nesupravegheat.
 3. **Operațiunile de root (restart servicii, instalare pachete, scriere chei, deploy) le atinge INDIRECT:** Kelion *declanșează* un workflow determinist (`vps-*.yml`) prin token-ul GitHub, iar acel workflow face SSH cu secretul din GitHub Secrets. Așa fiecare acțiune privilegiată e o **procedură numită, logată, repetabilă** — nu o comandă liberă a unui LLM. (Principiul din §14.b: operațiuni exacte = unealtă deterministă, nu „LLM care interpretează".)
 4. **Creierul din CHAT** are, în plus, uneltele scoase complet (doar `Read`, și doar când atașezi o poză) — tăiate pentru **viteză** (cei 31s veneau din `--add-dir /root/kelion` + unelte). Execuția reală se predă constructorului prin eticheta `[EXECUT]`.
@@ -150,25 +151,29 @@ ssh -i "C:\Users\adria\Kelionai-secrets\kelion-vps" root@164.68.120.87 ^
 ```
 Îți dă: secretul punții, cheia Kimi, cheia GLM, tokenul GitHub și tot `claude.env` (auth CLI).
 
-### 7.b Valorile din Railway (DB, Google, Stripe, mail, LiveKit etc.)
-`railway.app` → proiectul **Kelionai** → serviciul **`web`** → tab **Variables**.
-Fiecare variabilă are valoarea vizibilă (click pe „reveal"/copy). Aici stau:
-`DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GEMINI_API_KEY`, `SERPER_API_KEY`,
+### 7.b Valorile de mediu de pe VPS (DB, Google, Stripe, mail, LiveKit etc.)
+Env-ul backendului stă pe **VPS** (fost Railway). Valorile se pun prin `vps-set-env.yml`
+(din secretele GitHub) și se citesc de container. Ca să le vezi pe VPS:
+```bash
+ssh -i "C:\Users\adria\Kelionai-secrets\kelion-vps" root@164.68.120.87 \
+  "docker exec kelionai-app printenv | sort"   # numele + valorile din container
+```
+Aici stau: `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GEMINI_API_KEY`, `SERPER_API_KEY`,
 `STRIPE_SECRET_KEY`, `MAIL_PASS`, `SESSION_SECRET`, `BRIDGE_SECRET`,
 `LIVEKIT_API_KEY/SECRET` ș.a.m.d.
-- **Stringul bazei de date:** de acolo `DATABASE_URL`, sau Railway → serviciul **Postgres** → **Connect**.
+- **Stringul bazei de date:** `DATABASE_URL` din env-ul containerului (comanda de mai sus).
 
 ### 7.c GitHub Secrets — ATENȚIE
-`VPS_ROOT_PASS`, `KIMI_KEY`, `GLM_KEY`, `VPS_GITHUB_TOKEN`, `RAILWAY_TOKEN` **NU se pot
+`VPS_ROOT_PASS`, `KIMI_KEY`, `GLM_KEY`, `VPS_GITHUB_TOKEN` **NU se pot
 citi înapoi** din GitHub (așa e proiectat GitHub — după ce salvezi un secret, nu-l mai
 arată niciodată; îl poți doar **suprascrie**). Dacă ai nevoie de valoarea lor:
 - **Parola root VPS:** nu-ți trebuie de fapt — ai deja acces root cu **cheia SSH** (`kelion-vps`). Dacă vrei totuși parola și n-o mai știi, o resetezi de la providerul VPS.
 - **Kimi/GLM/GitHub token:** valorile reale sunt pe VPS (7.a) — aceleași care sunt și în GitHub Secrets.
-- **`RAILWAY_TOKEN`:** îl regenerezi din `railway.app` → Account → Tokens.
+- **`RAILWAY_TOKEN`:** MORT, nu-l mai regenera — șterge-l din GitHub Secrets (§4).
 
 ### 7.d Google Cloud (skill-uri Gmail/Calendar/Drive/TTS)
 Consola: `console.cloud.google.com`, proiect **`gen-lang-client-0460348646`**.
-Service account JSON = valoarea `GOOGLE_SERVICE_ACCOUNT_JSON` din Railway (7.b).
+Service account JSON = valoarea `GOOGLE_SERVICE_ACCOUNT_JSON` din env-ul VPS (7.b).
 
 ---
 
