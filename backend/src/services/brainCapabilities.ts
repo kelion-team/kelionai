@@ -189,7 +189,14 @@ export function inventarulMeu(doarAdmin = true): string {
     `toate ACTIVE și apelabile direct, chiar acum):\n${randuri.join('\n')}\n` +
     `Nu ceri voie ca să folosești ce e în lista asta și nu spui „nu pot" pentru ` +
     `ceva ce e aici. Dacă îți lipsește ceva ce NU e în listă, notează-l cu log_unsupported_request ` +
-    `sau cere-ți unealta cu propose_tool — nu te opri la „nu am".`
+    `sau cere-ți unealta cu propose_tool — nu te opri la „nu am".\n` +
+    // ANTI-NEGARE (Adrian, 5 aug: „kelion îmi zice că nu are unelte" — creierul
+    // își nega propriul inventar). Regula e ABSOLUTĂ și pe negativ, pentru că
+    // modelul o încălca pe cea pozitivă de mai sus:
+    `INTERZIS, sub orice formă: să spui „nu am unelte", „nu am acces la internet", ` +
+    `„nu pot căuta", „sunt doar un model de limbaj" sau orice negare a inventarului de mai sus. ` +
+    `Ai ${vizibile.length} unelte REALE, conectate — negarea lor e o MINCIUNĂ către om. ` +
+    `Când ești întrebat ce poți, enumeri din inventar; când sarcina cere o unealtă, O CHEMI, nu vorbești despre ea.`
   )
 }
 

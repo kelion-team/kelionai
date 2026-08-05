@@ -44,4 +44,15 @@ describe('agenți — lacătul arsenalului complet', () => {
     expect(SRC).toContain('formatNowContext')
     expect(SRC).toContain('ACUM este:')
   })
+
+  it('creierul NU are voie să-și nege inventarul („kelion îmi zice că nu are unelte")', () => {
+    // Regula anti-negare din inventarulMeu — cine o scoate pică poarta.
+    const cap = readFileSync(
+      fileURLToPath(new URL('./services/brainCapabilities.ts', import.meta.url)),
+      'utf8',
+    )
+    expect(cap).toContain('INTERZIS')
+    expect(cap).toContain('nu am unelte')
+    expect(cap).toContain('negarea lor e o MINCIUNĂ')
+  })
 })
