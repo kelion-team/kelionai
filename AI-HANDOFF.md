@@ -3,8 +3,7 @@
 
 > **DOCUMENT VIU — regulă obligatorie:** dacă schimbi cod, arhitectură, reguli sau
 > starea proiectului, **actualizează secțiunea relevantă de aici (și §13 Starea)
-> ÎNAINTE să închei sesiunea/PR-ul.** Nu există alt mecanism de auto-actualizare —
-> convenția asta E mecanismul. Un document de preluare depășit e mai periculos
+> ÎNAINTE să închei sesiunea/PR-ul.** (Actualizat D2: testul de raționament pe creier plătit acoperit în paidBrainReasoning.test.ts pe Gemini Direct).
 > decât unul lipsă (induce în eroare AI-ul următor). Vezi și §11.
 
 ## 0. Ce este proiectul
