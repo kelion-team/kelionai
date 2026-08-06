@@ -856,7 +856,13 @@ export default function ChatPanel({
   async function send(text: string, spoken = false): Promise<void> {
     const msg = text.trim()
     const atts = attachments
-    if (!msg && atts.length === 0) return
+    // O tură PUR VOCALĂ vine cu text GOL și fără atașamente — audio-ul brut al frazei
+    // e DOAR în pendingAudioRef (setat de onAddressed chiar înainte de send('', true)).
+    // Fără să-l verificăm aici, guardul „nimic de trimis" arunca TĂCUT fraza vocală
+    // ÎNAINTE de orice fetch → exact „nu aude" (6 aug: consolă goală, zero request la
+    // /api/chat). Cu pendingAudioRef, tura vocală trece spre isVoiceTurn (mai jos) și
+    // pleacă la creier ca AUDIO. (Scrisul nu era afectat: msg ne-gol trecea guardul.)
+    if (!msg && atts.length === 0 && !pendingAudioRef.current) return
     // Admin recorder commands — handled locally, never sent to the brain.
     if (msg && isAdmin) {
       // Mid-take cut: something changed — stop everything; the rec-stopped
@@ -939,7 +945,10 @@ export default function ChatPanel({
       // it: the queue BLOCKED full-duplex (the second message didn't reach the brain
       // until the first finished). The backend + worker already accept concurrent
       // turns. No text (attachment only) → we leave the current turn alone, we don't cut it.
-      if (!msg) return
+      // O FRAZĂ VOCALĂ rostită cât Kelion lucrează = barge-in, NU o pierdem: audio-ul
+      // e în pendingAudioRef chiar dacă msg e gol (altfel o tură vocală în timpul alteia
+      // era aruncată tăcut — aceeași cauză ca la linia ~865).
+      if (!msg && !pendingAudioRef.current) return
       stopVoice() // cut the old turn's remaining voice, so it doesn't talk over it
       rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
