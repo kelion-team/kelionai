@@ -1099,6 +1099,21 @@ function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
   return out
 }
 
+// TURA VOCALĂ = AUDIO cu text GOL (voce unificată, 6 aug — „urechea o scoți
+// total, creierul unic aude"). Fraza vocală vine în câmpul `audio`, iar mesajul
+// user are text '' — sanitizeHistory tocmai l-a scos. FĂRĂ o tură user la coadă
+// care să poarte fraza, o tură vocală pica: pe istoric gol → 400 „no usable
+// messages" (iar clientul arată ORICE 400 ca „Eroare la creier"), cu istoric →
+// audio-ul se lipea de o tură user VECHE și conversația se termina cu assistant,
+// deci creierul eșua. Garantăm purtătorul: creierul AUDE fraza (blocul audio_url
+// se atașează pe ultima tură user), iar textul e legitim gol. Exportat = testabil.
+export function asiguraPurtatorAudio(messages: ChatMessage[], audioPrezent: boolean): ChatMessage[] {
+  if (!audioPrezent) return messages
+  const ultim = messages.at(-1)
+  if (!ultim || ultim.role !== 'user') return [...messages, { role: 'user', content: '' }]
+  return messages
+}
+
 // (PUNGA DE REZERVĂ a fost EXTIRPATĂ DE TOT, 3 aug — întâi ÎNCHISĂ definitiv
 // („deschisă → false"; Adrian, cu mailurile „sold scăzut $-0.20" în mână:
 // rotația aluneca pe modele OpenRouter PLĂTITE), apoi ștearsă cu tot cu
@@ -1287,6 +1302,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       messages = messages.slice(-MAX_HISTORY)
       while (messages.length > 0 && messages[0].role !== 'user') messages.shift()
     }
+    // Tura vocală vine ca AUDIO cu text GOL — garantăm un purtător user la coadă
+    // (altfel: 400 „no usable messages" → „Eroare la creier", sau audio lipit de o
+    // tură veche). Vezi asiguraPurtatorAudio.
+    messages = asiguraPurtatorAudio(messages, !!audio)
     if (messages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'no usable messages' })
     }
