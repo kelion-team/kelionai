@@ -2859,7 +2859,9 @@ export async function saveVoiceprint(
 ): Promise<void> {
   if (!dbEnabled() || !v.email) return
   try {
-    let vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 64)
+    // Plafon 256 (Adrian, 6 aug): amprenta NEURALĂ (wespeaker) are 256 de valori —
+    // vechiul cap de 64 o tăia și o rupea. Cele vechi (9/64) încap în continuare.
+    let vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 256)
     let gender = v.gender
     let featureMeta: VoiceFeatureMeta = v.featureMeta
     // ADAPTATION, NOT OVERWRITE (Adrian, Aug 1: his print flip-flopped
