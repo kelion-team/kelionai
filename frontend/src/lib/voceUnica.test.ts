@@ -1,18 +1,33 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
   judecaMesajVoce,
   inimaAMurit,
+  potRostiVoce,
   idTabVoce,
   INIMA_MOARTA_MS,
   emiteTakeover,
   emiteInima,
   emiteRamasBun,
+  CHEIE_TAB_ACTIV_VOCE,
+  CHEIE_ULTIMA_INIMA_VOCE,
   type MesajVoce,
 } from './voceUnica'
 
 describe('voceUnica - reguli pure zăvor voce între taburi', () => {
   const eu = 'tab-123'
   const altul = 'tab-456'
+
+  beforeEach(() => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.clear()
+    }
+  })
+
+  afterEach(() => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.clear()
+    }
+  })
 
   it('generează un id unic de tab', () => {
     const id1 = idTabVoce()
@@ -57,12 +72,25 @@ describe('voceUnica - reguli pure zăvor voce între taburi', () => {
     expect(inimaAMurit(acum - INIMA_MOARTA_MS - 1, acum)).toBe(true)
   })
 
-  it('trimite mesaje pe broadcast channel la apelul funcțiilor ajutătoare', () => {
+  it('evaluează corect dreptul de a rosti voce', () => {
+    expect(potRostiVoce(eu, eu, false)).toBe(true)
+    expect(potRostiVoce(eu, null, false)).toBe(true)
+    expect(potRostiVoce(eu, altul, false)).toBe(false)
+    expect(potRostiVoce(eu, eu, true)).toBe(false)
+  })
+
+  it('trimite mesaje pe broadcast channel și sincronizează localStorage', () => {
     const msgs: unknown[] = []
     const fakeBc = { postMessage: (m: unknown) => msgs.push(m) } as unknown as BroadcastChannel
     emiteTakeover(fakeBc, 't1')
+    expect(localStorage.getItem(CHEIE_TAB_ACTIV_VOCE)).toBe('t1')
+
     emiteInima(fakeBc, 't1')
+    expect(localStorage.getItem(CHEIE_TAB_ACTIV_VOCE)).toBe('t1')
+
     emiteRamasBun(fakeBc, 't1')
+    expect(localStorage.getItem(CHEIE_TAB_ACTIV_VOCE)).toBeNull()
+
     expect(msgs).toEqual([
       { takeover: 't1' },
       { inima: 't1' },
@@ -70,3 +98,4 @@ describe('voceUnica - reguli pure zăvor voce între taburi', () => {
     ])
   })
 })
+
