@@ -334,7 +334,7 @@ poate citi). Runbook-ul e scris, corect și sub test. Se rulează când revin.
 | K8 | De unde apar cuvinte ca „Greț" — n-am scris nimic | 🔧 | Intrare-fantomă în chat (bulă user „Greț." fără ca tu să scrii). Cel mai probabil transcrierea vocală (STT) inventează cuvinte din tăcere/zgomot. De reparat: prag de energie + să nu trimită transcrieri fără vorbire reală. |
 | K9 | Golește istoricul cu joburi eșuate | 🔧 | 12 ordine picate în `build_jobs` (11 vechi + #28). Zidul le ignoră deja (granița=26), dar tu le vezi în panou. De curățat/arhivat + de ascuns cele vechi din panou. |
 | K10 | Când dai ordin de build și creierul nu poate, să te anunțe „bifează creier superior" (auto dacă se poate, dar și manual ca acum) | 🔧 | Azi #28 a picat pe „creier" fără să-ți spună clar că e nevoie de treaptă superioară. De adăugat: la eșec de tip „creierul nu poate", anunț explicit către admin cu butonul de escaladare. |
-| K11 | Trecut la cereri neacoperite | 🔧 | De legat lista de cereri neacoperite (`plati_neatribuite` + cereri de la useri) în fluxul de lucru + panou. |
+| K11 | Trecut la cereri neacoperite | ✅ | Legat lista de cereri neacoperite (`plati_neatribuite` + cereri de la useri) în fluxul de lucru și afișat în panoul AdminPanel (PR #668). |
 | K12 | Curățat ce nu mai e de actualitate | 🔧 (parțial) | PR-urile vechi — făcut (K3). Rândurile moarte din liste + joburi — de curățat (K9). |
 | K13 | Sistem automat de curățare care **arhivează** când e gata | 🔧 | De construit: la închiderea unei cerințe/job, mută în arhivă în loc să lase gunoiul la vedere. |
 | K14 | Sistem de rezolvări care **anunță adminul** că sunt cereri | 🔧 | De construit: când apare o cerere nouă (scris/voce/plată neatribuită), notificare la admin. |

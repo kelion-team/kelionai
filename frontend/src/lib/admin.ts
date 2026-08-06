@@ -734,3 +734,45 @@ export async function fetchTokenChecks(): Promise<TokenChecksResult | null> {
     return null
   }
 }
+
+// ── Cereri neacoperite & Plăți neatribuite ──────────────────────────────
+export interface PlataNeatribuita {
+  id: number
+  suma: number
+  moneda: string
+  referinta: string | null
+  banca: string | null
+  status: string
+  detalii?: string | null
+  created_at: string
+}
+
+export interface CodNeplatit {
+  cod: string
+  user_email: string
+  suma: number
+  status: string
+  created_at: string
+}
+
+export interface CereriNeacoperiteData {
+  neatribuite: PlataNeatribuita[]
+  coduriNeplatite: CodNeplatit[]
+  gaps: CapabilityGap[]
+}
+
+export async function fetchCereriNeacoperite(): Promise<CereriNeacoperiteData | null> {
+  try {
+    const r = await fetch('/api/admin/plati', { credentials: 'include' })
+    if (!r.ok) return null
+    const j = await r.json()
+    const gaps = await fetchGaps(false)
+    return {
+      neatribuite: j.neatribuite ?? [],
+      coduriNeplatite: j.coduriNeplatite ?? [],
+      gaps: gaps ?? [],
+    }
+  } catch {
+    return null
+  }
+}
