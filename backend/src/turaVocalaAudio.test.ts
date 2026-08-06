@@ -12,6 +12,8 @@
 // modelul (gemini-3.1-pro-preview) răspund (pastila „Gemini ✓" probează chiar
 // generateContent pe model). `asiguraPurtatorAudio` garantează purtătorul turei.
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { asiguraPurtatorAudio } from './routes/chat.js'
 
 type M = { role: 'user' | 'assistant'; content: string }
@@ -46,5 +48,25 @@ describe('asiguraPurtatorAudio — tura vocală (audio + text gol) nu mai rămâ
       { role: 'assistant', content: 'Bună!' },
     ]
     expect(asiguraPurtatorAudio(istoric, false)).toBe(istoric)
+  })
+})
+
+// ── PURTĂTORUL NU MAI E ARUNCAT LA CONSTRUIREA PAYLOAD-ULUI (Adrian, 6 aug) ───
+// `asiguraPurtatorAudio` adaugă purtătorul {user, ''}, DAR bucla care construia
+// `orMsgs` arunca tăcut mesajele cu text gol (`if (p.content)`), deci purtătorul
+// dispărea și audio-ul se lipea de o tură VECHE — creierul nu auzea fraza →
+// `<TAC/>` → tăcere. Reparația: audio-ul se leagă GARANTAT de o tură user
+// PROASPĂTĂ la coada payload-ului (ori pe ultima dacă e user, ori una nouă).
+// Testul păzește exact invariantul, ca regresia să cadă în CI, nu live.
+describe('audio-ul se leagă de o tură user PROASPĂTĂ la coadă (nu de una veche)', () => {
+  const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
+
+  it('când ultima tură NU e user, împinge o tură user nouă doar cu audio', () => {
+    expect(chat).toMatch(/const ultim = orMsgs\[orMsgs\.length - 1\]/)
+    expect(chat).toMatch(/orMsgs\.push\(\{ role: 'user', content: \[audioBloc\]/)
+  })
+
+  it('NU mai caută înapoi un tur user oarecare (bucla care lega audio-ul de un tur vechi a dispărut)', () => {
+    expect(chat).not.toMatch(/for \(let i = orMsgs\.length - 1; i >= 0; i--\)[\s\S]{0,120}audioBloc/)
   })
 })
