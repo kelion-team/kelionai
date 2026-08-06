@@ -2300,18 +2300,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // (toGeminiPayload → inline_data audio); transcriptul Chirp rămâne în
       // mesaj ca text — același orMsgs, creier unic.
       if (audio) {
-        for (let i = orMsgs.length - 1; i >= 0; i--) {
-          if (orMsgs[i].role !== 'user') continue
-          const audioBloc = { type: 'audio_url', audio_url: { url: audio } }
-          const c = orMsgs[i].content
-          const nou =
+        // AUDIO PE O TURĂ USER PROASPĂTĂ LA COADĂ (Adrian, 6 aug — „nu mă aude",
+        // măsurat live: scrisul mergea, vocea nu). BUG-ul: `asiguraPurtatorAudio`
+        // adaugă purtătorul {user, ''}, dar bucla de mai sus (linia cu
+        // `if (p.content)`) ARUNCĂ TĂCUT mesajele cu text gol — deci purtătorul
+        // dispărea, iar audio-ul se lipea de o tură user VECHE (sau de niciuna),
+        // conversația se termina cu ASSISTANT, și creierul nu auzea fraza →
+        // `<TAC/>` → tură stinsă, fără răspuns, fără eroare. Reparăm exact aici:
+        // dacă ULTIMA tură din payload e user, atașăm audio-ul pe ea; altfel
+        // ÎMPINGEM o tură user nouă DOAR cu audio. Așa creierul aude MEREU fraza
+        // curentă la coadă, iar payload-ul se termină pe user. (Bucla înapoi
+        // veche lega audio-ul de un tur vechi — de-aia părea „surd".)
+        const audioBloc = { type: 'audio_url', audio_url: { url: audio } }
+        const ultim = orMsgs[orMsgs.length - 1]
+        if (ultim && ultim.role === 'user') {
+          const c = ultim.content
+          ultim.content = (
             typeof c === 'string'
               ? c
                 ? [audioBloc, { type: 'text', text: c }]
                 : [audioBloc]
               : [audioBloc, ...(c as { type: string; [k: string]: unknown }[])]
-          orMsgs[i] = { ...orMsgs[i], content: nou as OrMessage['content'] }
-          break
+          ) as OrMessage['content']
+        } else {
+          orMsgs.push({ role: 'user', content: [audioBloc] as unknown as OrMessage['content'] })
         }
       }
       let textFlowed = false
