@@ -1,5 +1,5 @@
 # KELIONAI — DOCUMENT COMPLET DE PRELUARE PENTRU ORICE AI
-*(actualizat 3 august 2026 — unificate dicționarele paralele i18n în i18n.ts)*
+*(actualizat 3 august 2026 — implementat sistem notificări admin K14 pentru cereri noi scris/voce/plată neatribuită)*
 
 > **DOCUMENT VIU — regulă obligatorie:** dacă schimbi cod, arhitectură, reguli sau
 > starea proiectului, **actualizează secțiunea relevantă de aici (și §13 Starea)
