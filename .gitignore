@@ -17,3 +17,4 @@ deploy/last-updates.txt
 
 # Claude Code agent worktrees (schele temporare, nu cod)
 .claude/worktrees/
+backend/models/*.onnx
