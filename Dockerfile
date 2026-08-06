@@ -18,10 +18,14 @@ WORKDIR /app
 # Panoul îl detectează la rulare, spune că lipsește, și merge mai departe cu
 # ceilalți doi. Se adaugă aici după ce comanda e probată pe VPS.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip curl git \
+    && apt-get install -y --no-install-recommends python3 python3-pip curl git libgomp1 \
     && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' aider-chat \
     && npm install -g cline @google/gemini-cli \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+# libgomp1: runtime OpenMP pentru binarul nativ sherpa-onnx (amprentă vocală
+# neurală, services/voiceEmbedding.ts). Fără el, `require('sherpa-onnx-node')` ar
+# arunca la ÎNCĂRCARE — dar serviciul e lazy și cade grațios; îl punem oricum ca
+# recunoașterea neurală să meargă real în prod, nu pe fallback.
 
 # --- frontend build ---
 COPY frontend/package.json frontend/package-lock.json ./frontend/
@@ -62,6 +66,17 @@ RUN cd backend && npm run build
 # build) devine canalul lui de update. Stratul e ultimul → nu strică cache-ul
 # build-urilor de mai sus.
 COPY . .
+
+# AMPRENTĂ VOCALĂ NEURALĂ (Adrian, 6 aug: „instalează soft specializat, să mă
+# recunoască și răgușit"): modelul wespeaker ResNet34 (26MB, licență curată
+# comercial) NU e în git (gitignore, ca să nu îngroașe repo-ul) — îl aducem AICI,
+# la build, direct în imagine. `|| echo` ca o descărcare eșuată să NU rupă build-ul:
+# fără model, voiceEmbedding.ts cade grațios pe fallback (regula #1), deci deploy-ul
+# rămâne sănătos; cu model, recunoașterea neurală merge real.
+RUN mkdir -p /app/backend/models \
+    && (curl -fsSL -o /app/backend/models/wespeaker_en_voxceleb_resnet34.onnx \
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx" \
+        || echo "model voce: descărcare eșuată la build — voiceEmbedding cade grațios (fallback)")
 
 ENV NODE_ENV=production
 ENV FRONTEND_DIST=/app/frontend/dist
