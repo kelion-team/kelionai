@@ -194,10 +194,15 @@ describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier
     expect(/holder = hasRef && isHolder/.test(server)).toBe(true)
   })
 
-  it('SIGURANȚA rămâne: vocea străină (TV/necunoscuți) NU ajunge la creier', () => {
-    // Cerința obligatorie: doar vocea user/admin. Poarta de amprentă care aruncă
-    // vocea străină trebuie să rămână — dacă dispare, testul cade.
-    expect(/if \(verdict\?\.foreignVoice && !guest\)/.test(voce)).toBe(true)
+  it('vocea nevalidată nu mai e aruncată tăcut — ajunge la creier ca „nevalidat", fără admin', () => {
+    // SCHIMBAT (Adrian, 6 aug: „amprenta e 9 numere, nu ADN; nu merge nici să audă").
+    // Un semnal de timbru SLAB (9 dim) NU mai are voie să blocheze tăcut proprietarul
+    // cu amprenta „derapată" (răgușeală, zgomot). Vocea nevalidată AJUNGE la creier
+    // (decide pe „Kelion"), marcată `nevalidat` → serverul îi scoate puterile de admin;
+    // card/bani rămân pe potrivirea reală holder (voce+față+recent). Recunoașterea
+    // SOLIDĂ (embedding specializat, robust la răgușeală/ochelari) se instalează separat.
+    expect(/nevalidat = !!verdict\?\.foreignVoice && !guest/.test(voce)).toBe(true)
+    expect(/ignorată complet/.test(voce)).toBe(false)
   })
 })
 

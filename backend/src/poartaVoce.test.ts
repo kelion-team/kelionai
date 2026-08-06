@@ -27,7 +27,7 @@ describe('verdictul de timbru se așteaptă înainte de creier', () => {
   it('tura așteaptă verdictul serverului (timbru din voiceFeatures, fără text)', () => {
     // VOCE UNIFICATĂ (5 aug): verdictul de timbru se cere FĂRĂ text (amprenta e
     // din voiceFeatures) — creierul unic decide adresarea, nu un transcript.
-    expect(voce).toMatch(/await transcriptVerdict\('', vf\)/)
+    expect(voce).toMatch(/await transcriptVerdict\('', vf, audio\)/)
   })
 
   it('onAddressed primește și eticheta de vorbitor (oaspete) + audio, fără text', () => {
@@ -41,10 +41,17 @@ describe('verdictul de timbru se așteaptă înainte de creier', () => {
   })
 })
 
-describe('vocea străină este ignorată COMPLET', () => {
-  it('fără guest și fără guestPending, tura moare în client', () => {
-    expect(voce).toMatch(/verdict\?\.foreignVoice && !guest/)
-    expect(voce).toMatch(/ignorată complet/)
+describe('vocea nevalidată ajunge la creier, dar FĂRĂ drepturi de admin', () => {
+  // SCHIMBAT (Adrian, 6 aug: „amprenta e un vector de 9 numere, nu ADN; nu merge
+  // nici măcar să audă; la altcineva merge"). Un semnal de timbru SLAB (9 dim
+  // z-score per rostire) NU mai are voie să arunce TĂCUT vocea proprietarului cu
+  // amprenta „derapată". Vocea nevalidată AJUNGE la creier (care decide pe „Kelion")
+  // dar e marcată `nevalidat` → serverul îi scoate puterile de admin; operațiile
+  // sensibile (card/bani) rămân gardate de potrivirea reală holder (voce+față+recent).
+  it('fără guest, vocea nevalidată NU mai e aruncată — merge la creier ca „nevalidat"', () => {
+    expect(voce).toMatch(/nevalidat = !!verdict\?\.foreignVoice && !guest/)
+    expect(voce).toMatch(/\? 'nevalidat'/)
+    expect(voce).not.toMatch(/ignorată complet/)
   })
 
   it('NU mai există vechiul avertisment injectat în sesiune (Kelion răspundea televizorului)', () => {
@@ -53,9 +60,9 @@ describe('vocea străină este ignorată COMPLET', () => {
   })
 })
 
-describe('oaspetele are ZERO drepturi de admin', () => {
-  it('tura de oaspete dezactivează isAdmin chiar în sesiunea titularului', () => {
-    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch/)
+describe('oaspetele și vocea nevalidată au ZERO drepturi de admin', () => {
+  it('tura de oaspete SAU nevalidată dezactivează isAdmin chiar în sesiunea titularului', () => {
+    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch && !nevalidat/)
   })
 
   it('creierul primește nota de oaspete cu interdicții explicite', () => {

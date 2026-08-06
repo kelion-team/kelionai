@@ -91,15 +91,24 @@ export interface TranscriptVerdict {
   guest?: { id: number; name: string; relation: string }
   guestPending?: { id: number; name: string; relation: string }
 }
-async function transcriptVerdict(text: string, vf: VoiceFeatures | null): Promise<TranscriptVerdict | null> {
+async function transcriptVerdict(
+  text: string,
+  vf: VoiceFeatures | null,
+  audio?: string,
+): Promise<TranscriptVerdict | null> {
   const t = text.trim()
-  if (!t) return null
+  // AMPRENTĂ NEURALĂ (Adrian, 6 aug): pe VOCE fraza n-are text (t gol), dar are
+  // AUDIO brut — îl trimitem oricum, ca SERVERUL să calculeze amprenta neurală
+  // (înrolare + recunoaștere robustă la răgușeală). Înainte ieșea aici pe text gol,
+  // deci verdictul de timbru nici nu se cerea pe voce. Trimitem dacă avem ORICE:
+  // text, audio sau amprenta clasică.
+  if (!t && !audio && !vf?.vector?.length) return null
   try {
     const r = await fetch('/api/realtime/transcript', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ role: 'user', text: t, voiceFeatures: vf ?? undefined }),
+      body: JSON.stringify({ role: 'user', text: t, voiceFeatures: vf ?? undefined, audio: audio || undefined }),
     })
     return (await r.json().catch(() => null)) as TranscriptVerdict | null
   } catch {
@@ -205,23 +214,28 @@ export async function startRealtimeVoice(
       void (async () => {
         // Verificarea vorbitorului merge FĂRĂ text (amprenta e din voiceFeatures) —
         // serverul întoarce holder/foreignVoice/guest/adminUnlocked din timbru.
-        const verdict = await transcriptVerdict('', vf)
+        const verdict = await transcriptVerdict('', vf, audio)
         if (verdict?.lang && verdict.lang !== anchoredLang) anchoredLang = verdict.lang
         // LACĂTUL DE ADMIN: amprenta s-a potrivit → serverul a pus cookie-ul de
         // unlock; anunțăm UI-ul să aprindă butonul Admin.
         if (verdict?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
-        // POARTA STRICTĂ DE TIMBRU: o voce care nu e nici proprietarul, nici un
-        // invitat permis e ignorată COMPLET (nu se cheamă creierul degeaba).
+        // NU MAI ARUNCĂM TĂCUT O VOCE „STRĂINĂ" (Adrian, 6 aug: „nu merge nici măcar
+        // să audă; la altcineva merge foarte bine"). CAUZA: o amprentă vocală VECHE a
+        // proprietarului care nu se mai potrivește îl clasifica `foreignVoice` și-i
+        // arunca fraza ÎNAINTE de creier — la un om NOU (fără amprentă) mergea, la el
+        // NU. Acum vocea nevalidată AJUNGE la creier (care oricum decide pe „Kelion"/
+        // „Kei"), dar marcată `nevalidat` → serverul îi PROTEJEAZĂ datele sensibile
+        // (fără puteri de admin; cardul rămâne gardat de potrivirea reală holder). Un
+        // invitat aprobat/în așteptare merge pe eticheta lui de guest, ca înainte.
         const guest = verdict?.guest ?? verdict?.guestPending
-        if (verdict?.foreignVoice && !guest) {
-          console.info('[voce] voce străină — ignorată complet (nu ajunge la creier)')
-          return
-        }
+        const nevalidat = !!verdict?.foreignVoice && !guest
         const speaker = verdict?.guest
           ? `guest:${verdict.guest.id}:${verdict.guest.name}${verdict.guest.relation ? ` (${verdict.guest.relation})` : ''}`
           : verdict?.guestPending
             ? `guest-pending:${verdict.guestPending.id}:${verdict.guestPending.name}${verdict.guestPending.relation ? ` (${verdict.guestPending.relation})` : ''}`
-            : undefined
+            : nevalidat
+              ? 'nevalidat'
+              : undefined
         // La creier pleacă AUDIO-ul; creierul decide adresarea. Fără audio nu are
         // ce decide, deci nu-l chemăm.
         if (!audio) return

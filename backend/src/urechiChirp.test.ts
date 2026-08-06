@@ -24,7 +24,7 @@ describe('client: urechile live sunt Chirp 3 (Google), fără OpenAI', () => {
     expect(voce).toMatch(/onAddressed\?\.\('', vf, speaker, audio\)/)
   })
   it('fraza trece prin poarta de TIMBRU → creier (verdict din voiceFeatures, fără text)', () => {
-    expect(voce).toMatch(/poartaDupaFraza[\s\S]{0,600}transcriptVerdict\('', vf\)/)
+    expect(voce).toMatch(/poartaDupaFraza[\s\S]{0,600}transcriptVerdict\('', vf, audio\)/)
   })
   it('fără microfon NU se deschide OpenAI, NU există STT de rezervă — se aruncă', () => {
     expect(voce).toMatch(/throw new Error\('chirp_ear_unavailable'\)/)

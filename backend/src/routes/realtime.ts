@@ -6,7 +6,8 @@ import { grantUnlock, isArmed, hasUnlock, marcheazaVoce } from '../services/admi
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang } from '../services/lang.js'
 import { matchApprovedGuest, activeGuestWindow } from '../services/guestVoices.js'
-import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
+import { VOICE_MATCH_THRESHOLD, esteAmprentaNeurala, sameSpeakerNeural } from '../services/voiceMatch.js'
+import { amprentaNeuralaGata, voiceEmbedding, pcm16kDinWavDataUri } from '../services/voiceEmbedding.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { vectorDistance } from '../db.js'
 
@@ -80,7 +81,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
   //     in the Realtime session (no more "random language");
   //   • the voiceprint check → the admin padlock (unlock by voice) and the
   //     foreign-voice flag.
-  app.post<{ Body: { role?: string; text?: string; voiceFeatures?: VoiceFeatures; save?: boolean } }>(
+  app.post<{ Body: { role?: string; text?: string; voiceFeatures?: VoiceFeatures; save?: boolean; audio?: string } }>(
     '/api/realtime/transcript',
     async (req, reply) => {
       const user = getSessionUser(req)
@@ -118,18 +119,33 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       let holder: boolean | undefined
       const isAdmin = user.email.toLowerCase() === config.adminEmail
       const vf = req.body?.voiceFeatures
+      // AMPRENTĂ VOCALĂ NEURALĂ (Adrian, 6 aug: „amprenta e ADN, nu 9 numere; să mă
+      // recunoască și răgușit"): dacă avem audio brut + modelul încărcat, calculăm
+      // embedding-ul de 256 (robust la variația vocii) și decidem pe COSINUS.
+      const audioIn = typeof req.body?.audio === 'string' && req.body.audio.startsWith('data:audio') ? req.body.audio : ''
+      let neuralEmb: number[] | null = null
+      if (role === 'user' && audioIn && amprentaNeuralaGata()) {
+        const pcm = pcm16kDinWavDataUri(audioIn)
+        if (pcm) neuralEmb = voiceEmbedding(pcm)
+      }
       if (role === 'user' && vf?.vector?.length && vf?.meta) {
         try {
           const stored = await getVoiceprint(user.email)
-          const hasRef = !!stored?.features?.length
-          const dist = hasRef ? vectorDistance(vf.vector, stored!.features) : Infinity
-          // ONE threshold for holder and guests alike (services/voiceMatch.ts).
-          const isHolder = dist < VOICE_MATCH_THRESHOLD
+          const storedFeat = stored?.features ?? []
+          // Amprenta stocată e NEURALĂ (256) sau VECHE (9/64, incompatibilă)? O
+          // amprentă veche pe calea neurală = ca și lipsă → RE-ÎNROLARE cu embedding-ul
+          // neural (așa se vindecă „nu mă mai recunoaște / merge la altcineva").
+          const refNeural = esteAmprentaNeurala(storedFeat)
+          const useNeural = !!neuralEmb
+          const hasRef = useNeural ? refNeural : storedFeat.length > 0
+          const isHolder = useNeural
+            ? refNeural && sameSpeakerNeural(neuralEmb!, storedFeat)
+            : hasRef && vectorDistance(vf.vector, storedFeat) < VOICE_MATCH_THRESHOLD
           // HOLE CLOSED (the security audit, Jul 27): with the padlock ARMED, the
           // first enrolment of the admin REFERENCE is accepted ONLY from an
           // already unlocked session (typed secret) or with the padlock unarmed.
           const enrolAllowed = !isAdmin || !(await isArmed()) || hasUnlock(req, user.email)
-          if ((!hasRef && enrolAllowed) || (hasRef && isHolder)) {
+          if ((!hasRef && enrolAllowed) || isHolder) {
             void saveVoiceprint(
               {
                 email: user.email,
@@ -138,12 +154,13 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
                 // stored gender wins inside saveVoiceprint.
                 gender: inferGender(vf.meta.pitchMedian ?? vf.meta.pitchMean),
                 isAdmin,
-                features: vf.vector,
+                // Neural când îl avem (256, robust); altfel vectorul vechi de 9.
+                features: useNeural ? neuralEmb! : vf.vector,
                 featureMeta: vf.meta,
                 audioClip: '',
               },
-              // First enrolment = fresh reference; a matching voice = gentle
-              // adaptation (blend, stable gender).
+              // Prima înrolare = referință proaspătă; voce potrivită = adaptare
+              // (medie de embedding-uri — îmbunătățește referința, gen stabil).
               { adapt: hasRef && isHolder },
             )
           }

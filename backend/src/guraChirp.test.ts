@@ -53,7 +53,7 @@ describe('sesiunea vocală rulează pe Google/Gemini și e marcată guraChirp', 
   })
   it('fraza trece prin poarta de TIMBRU → creier (fără transcript, doar audio)', () => {
     expect(voce).toMatch(/onPhrase: \(_t, vf, audio\) => \{[\s\S]{0,300}poartaDupaFraza\(vf, audio\)/)
-    expect(voce).toMatch(/poartaDupaFraza[\s\S]{0,600}transcriptVerdict\('', vf\)/)
+    expect(voce).toMatch(/poartaDupaFraza[\s\S]{0,600}transcriptVerdict\('', vf, audio\)/)
   })
   it('urechea moartă marchează și închide (fără OpenAI, fără buclă)', () => {
     expect(voce).toMatch(/marcheazaUrechiChirpMoarte\(\)/)
