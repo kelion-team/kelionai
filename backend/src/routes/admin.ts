@@ -603,8 +603,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // back, and accounting is not rewritten. Requires an admin session, like
   // everything here.
   app.post('/api/admin/reset-vps', async (req, reply) => {
-    const admin = await adminSiId(req)
-    if (!admin) return reply.status(403).send({ error: 'forbidden' })
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const { runRunbook } = await import('../services/runbooks.js')
     await runRunbook('restart-app')
     await runRunbook('restart-caddy')
