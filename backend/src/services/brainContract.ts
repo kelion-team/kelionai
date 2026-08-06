@@ -1,4 +1,4 @@
-import { config } from '../config.js'
+import { config, modelUnicDirect } from '../config.js'
 
 // ── CONTRACTUL CREIERULUI — tipuri + reguli PURE, fără rețea ─────────────────
 // (Extirparea totală OpenRouter + OpenAI, 3 aug — ordinul repetat al ownerului:
@@ -91,22 +91,22 @@ export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: 
 /** Defaultul treptei, garantat Gemini: dacă cineva pune în env un model care NU
  *  e google-direct/*, nu-l lăsăm să deraieze creierul — cădem pe defaultul din
  *  cod (lacătul Gemini, 3 aug). */
-function fallbackTreapta(tier: ModelTier): string {
-  const dinConfig =
-    tier === 'chat' ? config.brain.chatDefault : tier === 'top' ? config.brain.topDefault : config.brain.workDefault
-  if (dinConfig.startsWith('google-direct/')) return dinConfig
-  return tier === 'top' ? 'google-direct/gemini-2.5-pro' : 'google-direct/gemini-2.5-flash'
+function fallbackTreapta(_tier: ModelTier): string {
+  // SIGILAT (6 aug, regula ultra-decisă a ownerului): UN SINGUR model unic pe TOATE
+  // treptele — niciodată 2.5/flash. Sursa unică e config (modelUnicDirect), fără env.
+  return modelUnicDirect()
 }
 
 export async function resolveModelChecked(
   tier: ModelTier,
   wanted?: string | null,
 ): Promise<{ model: string; fellBack: boolean }> {
-  const fallback = fallbackTreapta(tier)
-  if (!wanted) return { model: fallback, fellBack: false }
-  return wanted.startsWith('google-direct/')
-    ? { model: wanted, fellBack: false }
-    : { model: fallback, fellBack: true }
+  // SIGILAT: modelul creierului e UNIC și BLOCAT — orice „wanted" (alegere salvată
+  // în KV, selector UI, id vechi din env) e IGNORAT; se întoarce mereu modelul unic.
+  // `fellBack=true` semnalează doar că s-a cerut altceva (pentru telemetrie/onestitate).
+  const model = fallbackTreapta(tier)
+  const fellBack = !!wanted && wanted !== model
+  return { model, fellBack }
 }
 
 export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {

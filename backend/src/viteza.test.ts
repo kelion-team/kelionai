@@ -30,13 +30,12 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
   })
 
   it('creierul de LUCRU = Gemini direct (regula lui Adrian, 3 aug; măsurat 1,2s + 1,0s cu apel de unealtă corect)', () => {
-    // Adrian, 3 aug: „creierul de LUCRU e Gemini PERMANENT". Turele trec prin
-    // orchestrator, care acceptă DOAR prefixul google-direct/ și le duce la
-    // geminiDirect CU unelte (orchestrator.ts). 5 aug: „peste tot modelul
-    // avansat" → toate treptele pe Gemini 3 Pro.
-    expect(config).toContain(
-      "BRAIN_WORK_MODEL ?? 'google-direct/gemini-3.1-pro-preview'",
-    )
+    // Adrian, 3 aug: „creierul de LUCRU e Gemini PERMANENT"; 5 aug: „peste tot
+    // modelul avansat"; 6 aug (ultra-decis): un SINGUR model unic, sigilat, FĂRĂ
+    // env — toate treptele = getteri pe sursa unică (modelUnicDirect).
+    expect(config).toMatch(/get workDefault\(\)/)
+    expect(config).toMatch(/modelUnicDirect\(\)/)
+    expect(config).not.toContain('BRAIN_WORK_MODEL')
   })
 
   it('uneltele dintr-o rundă pleacă ÎN PARALEL, cu rezultatele în ordinea apelurilor', () => {
