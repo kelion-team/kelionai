@@ -172,6 +172,9 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let phraseTimer: ReturnType<typeof setTimeout> | null = null
   let framesSent = 0
   let maxRms = 0
+  // Diagnostic de captare (Adrian, 6 aug — „nu preia audio"): un log rar din
+  // onAudioProcess ca să se vadă la runtime dacă procesarea rulează + starea ctx.
+  let diagCadre = 0
 
   // Pre-roll ring: păstrează ultimele ~400ms de audio CHIAR ÎNAINTE ca VAD-ul să
   // declare „voce". La declanșare, aceste cadre intră primele în frază — fixează
@@ -284,6 +287,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
 
   const onAudioProcess = (e: AudioProcessingEvent): void => {
     if (closed) return
+    // ~1 log/secundă: dacă NU apare deloc când vorbești → procesarea nu rulează
+    // (context suspendat / graf mort); dacă apare cu muted:true mereu → mut blocat;
+    // dacă apare cu ctx:'running', muted:false, dar fraza nu se deschide → prag/semnal.
+    if (diagCadre++ % 12 === 0) console.info('[captare]', { ctx: ctx.state, muted, frazaDeschisa: phraseOpen })
     // BARGE-IN cât Kelion vorbește: cât e MUT (anti-ecou) NU acumulăm audio (ar fi
     // ecoul lui), dar calculăm volumul și, la voce clară SUSȚINUTĂ (peste garda de
     // onset), îl întrerupem prin onBargeIn. Calea normală (dezmuțit) rămâne neatinsă.
@@ -425,9 +432,21 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
 
   wireGraph(firstGraph)
 
+  // DEBLOCAJ CONTINUU AL CONTEXTULUI (Adrian, 6 aug: „se deschide să preia dar nu
+  // se preia nimic audio"). Cauza rădăcină: AudioContext poate rămâne 'suspended'
+  // (pornit fără gest) și atunci `onaudioprocess` NU rulează NICIODATĂ → microfonul
+  // e SURD deși becul „ascult" e aprins. Trezirea pe gest (deblocheazaAudioLaGest)
+  // NU acoperă VORBIREA (nu e gest). Aici forțăm `resume()` periodic cât urechea e
+  // activă — un context deja 'running' îl ignoră (no-op), deci zero risc.
+  const resumeTimer = setInterval(() => {
+    if (closed) return
+    if (ctx.state !== 'running') void ctx.resume().catch(() => {})
+  }, 1200)
+
   const stop = (): void => {
     if (closed) return
     closed = true
+    clearInterval(resumeTimer)
     if (phraseTimer) clearTimeout(phraseTimer)
     try {
       proc.disconnect()
