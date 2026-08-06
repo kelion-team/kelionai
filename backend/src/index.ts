@@ -32,6 +32,7 @@ import { startMailbox } from './services/mailbox.js'
 import { startCitirePlati } from './services/openBanking.js'
 import { startPlatiEmail } from './services/platiEmail.js'
 import { startAutonomie } from './services/autonomie.js'
+import { incarcaModelUnic, startAutoUpgradeModel } from './services/modelAutoUpgrade.js'
 import { startAutoInvatare } from './services/autoInvatare.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { runSelfHeal } from './services/selfHeal.js'
@@ -302,6 +303,9 @@ const distPath = path.resolve(__dirname, '..', config.frontendDist)
 try {
   await initDb()
   await initAppFiles() // load installer masters (uploaded from Linux) into cache
+  // MODELUL UNIC (sigilat) — reia din KV un eventual auto-upgrade validat de dinainte,
+  // ÎNAINTE ca vreo rută să folosească creierul (altfel prima tură pornește pe default).
+  await incarcaModelUnic().catch(() => {})
 } catch (err) {
   if (config.databaseUrl) {
     app.log.error({ err }, 'initDb FAILED with DB configured — exiting (money protection requires the full schema)')
@@ -386,6 +390,9 @@ try {
   // from RAMAS-DE-FACUT.md and sends it to the builder. Without waiting for
   // anyone.
   startAutonomie()
+  // Veghea de auto-upgrade a modelului unic (validat, doar Pro mai nou) — decizia
+  // permanentă a ownerului „mereu cel mai bun, preluat automat, peste tot".
+  startAutoUpgradeModel()
   // AUTO-ÎNVĂȚARE DIN TIMPI (Adrian, 3 aug): în spate, invizibil, citește
   // registrul task_timings și învață tiparele (lent/eșec) ca să nu le repete.
   startAutoInvatare()

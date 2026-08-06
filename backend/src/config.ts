@@ -52,6 +52,37 @@ function required(name: string): string {
 
 const isProd = process.env.NODE_ENV === 'production'
 
+// ── MODELUL UNIC AL CREIERULUI — SIGILAT (Adrian, 6 aug, regulă ultra-decisă:
+// „modelul decis de mine să nu se poată modifica accidental sau de altcineva fără
+// decizia mea; mereu cel mai performant model complet; când apare ceva nou, preluat
+// prin update automat, peste tot"). O SINGURĂ sursă de adevăr, în COD, FĂRĂ env
+// (nici GEMINI_MODEL_GREU, nici BRAIN_*) — ca nimic (autonomie, env pe VPS, UI) să
+// nu-l poată schimba din greșeală. Se schimbă DOAR prin auto-upgrade VALIDAT
+// (services/modelAutoUpgrade) — probă reală + doar la un Pro mai nou, niciodată la
+// flash/experimental. Config-ul îl expune prin GETTERI, deci se aplică AUTOMAT
+// peste tot (chat, agenți, memorie, fallback, scară) — schimbi într-un loc, se
+// schimbă peste tot.
+export const MODEL_UNIC_DEFAULT = 'gemini-3.1-pro-preview'
+let modelUnicActiv = MODEL_UNIC_DEFAULT
+/** Codul modelului unic (ex: „gemini-3.1-pro-preview"). Sursa de adevăr, live. */
+export function modelUnicCod(): string {
+  return modelUnicActiv
+}
+/** Modelul unic cu prefix google-direct/ (forma treptelor creierului). */
+export function modelUnicDirect(): string {
+  return `google-direct/${modelUnicActiv}`
+}
+/** Setează modelul unic — DOAR din auto-upgrade-ul validat. Acceptă NUMAI un
+ *  Gemini *Pro* (niciodată flash/lite/experimental), altfel refuză (false). Poarta
+ *  care ține „mereu cel mai performant, dar niciodată degradat de o schimbare
+ *  greșită". */
+export function setModelUnicValidat(m: string): boolean {
+  const cod = String(m || '').replace(/^google-direct\//, '').trim()
+  if (!/^gemini-\d+(?:\.\d+)?-pro(?:-|$)/.test(cod)) return false
+  modelUnicActiv = cod
+  return true
+}
+
 export const config = {
   isProd,
   port: Number(process.env.PORT ?? 8080),
@@ -88,8 +119,14 @@ export const config = {
   // readuce flash-ul pe chat). geminiDirect ridică plafonul de output pe 3.x
   // (gândirea intră în maxOutputTokens). Vocea live rulează Pro prin CREIER
   // (ureche→Pro→voce), deci „modelul avansat" e și pe voce. Un singur creier.
-  geminiModel: process.env.GEMINI_MODEL_GREU ?? 'gemini-3.1-pro-preview',
-  geminiModelGreu: process.env.GEMINI_MODEL_GREU ?? 'gemini-3.1-pro-preview',
+  // GETTERI pe sursa unică (fără env): se aplică AUTOMAT peste tot; auto-upgrade-ul
+  // validat schimbă modelul într-un singur loc → se schimbă peste tot.
+  get geminiModel(): string {
+    return modelUnicCod()
+  },
+  get geminiModelGreu(): string {
+    return modelUnicCod()
+  },
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
   // VIDEO_ALLOW_PAID=1, ca la constructor: nimic plătit din greșeală.
@@ -110,12 +147,18 @@ export const config = {
     // — cea mai nouă, mai rapidă, mai ieftină, și măsurat multimodală (text +
     // apel de unealtă + imagine + audio, toate 200✓ pe cheia ownerului). „Tot pe
     // cel mai evoluat" (ordinul ownerului, 4 aug). Rămâne Gemini direct (lacătul).
-    chatDefault: (process.env.BRAIN_CHAT_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
-    workDefault: (process.env.BRAIN_WORK_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
-    // 5 aug: Adrian a RETRACTAT hibridul — „peste tot modelul avansat". Toate
-    // treptele = Gemini 3 Pro (`gemini-3.1-pro-preview`), un singur creier, cel
-    // mai puternic; fără split flash/pro. Suprascriibil din env.
-    topDefault: (process.env.BRAIN_TOP_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
+    // 6 aug: SIGILAT pe sursa unică, FĂRĂ env — toate treptele = același model unic
+    // (cel mai performant Pro). Nu mai există split flash/pro, nici suprascriere din
+    // env. Getteri → auto-upgrade-ul se aplică peste tot instant.
+    get chatDefault(): string {
+      return modelUnicDirect()
+    },
+    get workDefault(): string {
+      return modelUnicDirect()
+    },
+    get topDefault(): string {
+      return modelUnicDirect()
+    },
   },
   // ── COLLECTING MONEY THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
   // completely and Pro comes in") ────────────────────────────────────────────

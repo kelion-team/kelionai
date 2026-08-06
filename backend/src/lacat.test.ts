@@ -56,15 +56,58 @@ describe('LACĂT — creier (regula Gemini, fără plătit din greșeală)', () 
     expect(SEMNE_PLATIT.test(config.brain.topDefault)).toBe(false)
   })
 
-  it('DEFAULT-ul din COD (nu din env) e Gemini free — dacă env se golește, nu revine la plătit', () => {
-    // Lacătul adevărat e în cod: chiar dacă un env de pe server ar suprascrie
-    // valoarea la runtime, sursa TREBUIE să aibă un default sigur (free/Gemini).
+  it('modelul unic e SIGILAT în cod, FĂRĂ env — nimic nu-l poate schimba din env', () => {
+    // 6 aug (regulă ultra-decisă): sursa unică e MODEL_UNIC_DEFAULT (în cod, nu env);
+    // dacă cineva pune GEMINI_MODEL_GREU/BRAIN_*_MODEL pe VPS, NU mai contează.
     const s = sursa('./config.ts')
-    const m = /workDefault:\s*\(process\.env\.\w+\s*\?\?\s*'([^']+)'/.exec(s)
-    expect(m, 'nu am găsit default-ul workDefault în config.ts').toBeTruthy()
+    const m = /MODEL_UNIC_DEFAULT = '([^']+)'/.exec(s)
+    expect(m, 'nu am găsit MODEL_UNIC_DEFAULT în config.ts').toBeTruthy()
     const def = m![1]
-    expect(eGratuit(def)).toBe(true)
     expect(SEMNE_PLATIT.test(def)).toBe(false)
+    expect(/pro/i.test(def)).toBe(true)
+    expect(/process\.env\.(GEMINI_MODEL_GREU|BRAIN_CHAT_MODEL|BRAIN_WORK_MODEL|BRAIN_TOP_MODEL)/.test(s)).toBe(false)
+  })
+})
+
+describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: „modelul decis de mine să nu se poată modifica accidental sau de altcineva fără decizia mea")', () => {
+  it('config: o SINGURĂ sursă (MODEL_UNIC_DEFAULT), Pro, prin getteri, fără env', () => {
+    const s = sursa('./config.ts')
+    expect(/MODEL_UNIC_DEFAULT = 'gemini-\d/.test(s)).toBe(true)
+    expect(/get geminiModel\(\): string/.test(s)).toBe(true)
+    expect(/get chatDefault\(\): string/.test(s)).toBe(true)
+    expect(/get workDefault\(\): string/.test(s)).toBe(true)
+    expect(/get topDefault\(\): string/.test(s)).toBe(true)
+    expect(/process\.env\.(GEMINI_MODEL_GREU|BRAIN_CHAT_MODEL|BRAIN_WORK_MODEL|BRAIN_TOP_MODEL)/.test(s)).toBe(false)
+  })
+
+  it('brainContract: fallback = modelul unic (niciodată 2.5/flash); resolveModel IGNORĂ „wanted"', () => {
+    const s = sursa('./services/brainContract.ts')
+    expect(/return modelUnicDirect\(\)/.test(s)).toBe(true)
+    // niciun `return …gemini-2.5…` (fallback-ul vechi spre 2.5 a dispărut; comentariile pot menționa)
+    expect(/return\b[^\n]*gemini-2\.5/.test(s)).toBe(false)
+    // resolveModelChecked NU mai întoarce `wanted` ca model (era escape-ul din KV/UI).
+    expect(/\{ model: wanted, fellBack: false \}/.test(s)).toBe(false)
+  })
+
+  it('brain.ts: scara de experți = un singur model, fără trepte din env', () => {
+    const s = sursa('./services/brain.ts')
+    expect(/process\.env\.BRAIN_EXPERT_FALLBACKS/.test(s)).toBe(false)
+    expect(/return \[config\.brain\.workDefault\]/.test(s)).toBe(true)
+  })
+
+  it('ruta /api/models: PUT selection BLOCAT (423 model_locked) — UI nu poate schimba modelul', () => {
+    const s = sursa('./routes/models.ts')
+    expect(/model_locked/.test(s)).toBe(true)
+    expect(/saveKv\(/.test(s)).toBe(false) // nu mai salvează nicio alegere de model
+  })
+
+  it('auto-upgrade: se schimbă DOAR spre un Pro mai nou ȘI validat cu probă reală', () => {
+    const cfg = sursa('./config.ts')
+    expect(/export function setModelUnicValidat/.test(cfg)).toBe(true)
+    expect(cfg).toContain('-pro(?:-|$)') // poarta: acceptă DOAR gemini-*-pro
+    const up = sursa('./services/modelAutoUpgrade.ts')
+    expect(/probeazaModel/.test(up)).toBe(true) // probă reală înainte să comute
+    expect(/maiNou/.test(up)).toBe(true) // doar mai nou (nu retrogradează)
   })
 })
 
