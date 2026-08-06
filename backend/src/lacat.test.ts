@@ -194,14 +194,15 @@ describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier
     expect(/holder = hasRef && isHolder/.test(server)).toBe(true)
   })
 
-  it('vocea nevalidată nu mai e aruncată tăcut — ajunge la creier ca „nevalidat", fără admin', () => {
-    // SCHIMBAT (Adrian, 6 aug: „amprenta e 9 numere, nu ADN; nu merge nici să audă").
-    // Un semnal de timbru SLAB (9 dim) NU mai are voie să blocheze tăcut proprietarul
-    // cu amprenta „derapată" (răgușeală, zgomot). Vocea nevalidată AJUNGE la creier
-    // (decide pe „Kelion"), marcată `nevalidat` → serverul îi scoate puterile de admin;
-    // card/bani rămân pe potrivirea reală holder (voce+față+recent). Recunoașterea
-    // SOLIDĂ (embedding specializat, robust la răgușeală/ochelari) se instalează separat.
-    expect(/nevalidat = !!verdict\?\.foreignVoice && !guest/.test(voce)).toBe(true)
+  it('vocea pleacă DIRECT la creier — clientul nu mai etichetează timbrul, nimic n-o blochează', () => {
+    // INTERMEDIARI SCOȘI (Adrian, 6 aug: „elimină intermediarii, îl pui direct pe
+    // Kelion să primească; scoate orice urmă de limitare a audio, scoate-i și din
+    // soft"). Clientul NU mai calculează `nevalidat`/`foreignVoice` pe voce și nu mai
+    // face al doilea upload — fraza brută pleacă direct, creierul decide adresarea.
+    // Gardul de admin din chat.ts (isAdmin && !nevalidat) rămâne (dormant pe voce);
+    // card/bani rămân pe potrivirea reală holder, server-side.
+    expect(/nevalidat/.test(voce)).toBe(false)
+    expect(/foreignVoice/.test(voce)).toBe(false)
     expect(/ignorată complet/.test(voce)).toBe(false)
   })
 })
