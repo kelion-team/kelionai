@@ -982,7 +982,11 @@ export default function ChatPanel({
     // VOCE UNIFICATĂ (Adrian, 5 aug): o tură vocală vine cu AUDIO și FĂRĂ text —
     // NU o transformăm în „salut" (greetPrompt); creierul aude fraza brută. Textul
     // trimis creierului rămâne GOL; UI-ul arată o bulă-substituent (mai jos).
-    const isVoiceTurn = !!pendingAudioRef.current
+    // O tură vocală = fraza vine ca AUDIO și FĂRĂ text tastat. Dacă omul a SCRIS
+    // ceva (msg ne-gol), e o tură SCRISĂ chiar dacă un audio a rămas pending —
+    // altfel textul lui era golit („outgoing=''") și se pierdea (Adrian, 6 aug:
+    // „textul scris nu merge la creier"). Textul tastat are prioritate.
+    const isVoiceTurn = !!pendingAudioRef.current && !msg
     const base = isVoiceTurn
       ? ''
       : msg || (docBlock ? t.docPrompt : attached ? t.imagePrompt : t.greetPrompt)
@@ -999,8 +1003,9 @@ export default function ChatPanel({
     // The guest label set by the voice gate (null for the holder / typed turns).
     const speaker = pendingSpeakerRef.current ?? undefined
     pendingSpeakerRef.current = null
-    // Vocea brută a acestei ture (dacă a venit pe voce cu audio nativ).
-    const nativeAudio = pendingAudioRef.current ?? undefined
+    // Vocea brută a acestei ture (DOAR pe o tură vocală). Pe o tură SCRISĂ nu
+    // cărăm un audio rătăcit — l-ar auzi creierul peste textul tastat.
+    const nativeAudio = isVoiceTurn ? (pendingAudioRef.current ?? undefined) : undefined
     pendingAudioRef.current = null
     // The facial descriptor READY in the background (if the camera is on and it caught a
     // face). Instant — it waits for no inference, it doesn't slow down the send.
