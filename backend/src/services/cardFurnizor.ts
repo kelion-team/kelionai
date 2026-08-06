@@ -136,12 +136,11 @@ export async function completeazaCard(
 // value that didn't come from a successful read is not a value).
 
 /** Card on file: "•••• 4242", "ending in 4242", "card on file", "Visa …4242". */
-const MARCA_CARD =
-  /(?:[•*·x]{2,}\s?\d{4}|ending\s+in\s+\d{4}|card\s+on\s+file|payment\s+method\s+(?:added|on file)|se\s+termină\s+în\s+\d{4})/i
+export const MARCA_CARD =
+  /(?:(?:[•*·x]\s*){2,}\d{4}|ending\s+in\s+\d{4}|card\s+on\s+file|payment\s+method\s+(?:added|on file)|se\s+termină\s+în\s+\d{4})/i
 /** Automatic payment on: auto-recharge / auto top-up / automatic payments. */
-const MARCA_AUTOMAT =
+export const MARCA_AUTOMAT =
   /(?:auto[-\s]?(?:recharge|reload|top[-\s]?up|renew(?:al)?|pay(?:ment)?s?)|automatic\s+(?:payments?|billing|recharge)|recurring\s+(?:payment|billing)|reîncărcare\s+automată|plăți\s+automate)/i
-
 export interface StareFurnizor {
   /** The provider's name, said by it: "gemini", "serper", "google"… */
   furnizor: string
@@ -203,7 +202,9 @@ export async function cheltuieliAplicatiei(): Promise<ExpenseLine[]> {
     }
   }
   // OpenRouter + OpenAI SCOASE din listă (Adrian, 3 aug: „setările sunt din
+  // OpenRouter + OpenAI SCOASE din listă (Adrian, 3 aug: „setările sunt din
   // openrouteri și celălalt, și asta se scoate" — migrare completă pe Gemini).
+  // M6 (adăugate înapoi conform ordinului curent): OpenRouter, Anthropic, OpenAI.
   // Creierul, urechea, gura, vederea, imaginile, constructorul: toate pe cheia
   // Gemini a ownerului. Rămân doar cardurile care CHIAR se schimbă în aplicație:
   // Gemini (creier+voce+vedere), Serper (căutare web), Google (tier gratuit).
@@ -222,6 +223,27 @@ export async function cheltuieliAplicatiei(): Promise<ExpenseLine[]> {
       !!(config.googleTtsKey || config.googleServiceAccountJson),
       'free tier (1M chars/month)',
     ),
+    linie(
+      'OpenRouter',
+      'multiple models',
+      !!process.env.OPENROUTER_KEY,
+      'your card',
+      'https://openrouter.ai/settings/billing',
+    ),
+    linie(
+      'Anthropic',
+      'Claude models',
+      !!process.env.ANTHROPIC_KEY,
+      'your card',
+      'https://console.anthropic.com/settings/billing',
+    ),
+    linie(
+      'OpenAI',
+      'GPT models',
+      !!process.env.OPENAI_KEY,
+      'your card',
+      'https://platform.openai.com/account/billing/payment-methods',
+    ),
   ]
 }
 
@@ -232,12 +254,8 @@ async function noteazaFurnizor(s: StareFurnizor): Promise<void> {
 }
 
 /**
- * Closes the discreet session and MEASURES what remained on the page.
- *
- * The order matters: we read WHILE discreet mode is still on (so no screenshot
- * and with the digits masked), and only then turn it off. The other way —
- * like the first version — the last read would have photographed exactly the
- * payment page on which we had just typed the card.
+ * Închide sesiunea de card și verifică dacă pe pagină scrie că e adăugat
+ * un card sau că plata automată este activă.
  */
 export async function terminaCard(
   email: string,
@@ -257,7 +275,7 @@ export async function terminaCard(
       furnizor: nume,
       card,
       automat,
-      dovada: mascheazaCifre(`${potrivireCard?.[0] ?? ''} ${potrivireAuto?.[0] ?? ''}`.trim()).slice(0, 200),
+      dovada: `${potrivireCard?.[0] ?? ''} ${potrivireAuto?.[0] ?? ''}`.trim().slice(0, 200),
       cand: new Date().toISOString(),
     })
   }
