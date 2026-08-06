@@ -152,13 +152,17 @@ echo "== 6. Backup criptat zilnic (cron) =="
 install -m 700 "$REPO/deploy/backup.sh" /root/kelion/backup.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' ; echo '15 3 * * * /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
 
-echo "== 6c. Auto-publicarea de pe server (cron la 3 min — master ajunge live SINGUR) =="
+echo "== 6c. Auto-publicarea de pe server (cron la 1 min — master ajunge live SINGUR) =="
 # Adrian, 26 iul („de ce nu le publici? de ce trebuie să-ți zic eu?"), în plină
 # pană GitHub Actions: serverul își compară singur live-ul cu vârful lui master
 # (API GitHub, nu runneri) și, dacă e în urmă, rulează CHIAR acest deploy.sh.
 # GitHub Actions nu mai e pe drumul critic al publicării.
+# CRON LA 1 MINUT (Adrian, 6 aug: „5 minute e maximul, oricât de mare ar fi").
+# Era la 3 min → până la 3 min pierdute DOAR pe așteptarea tick-ului. flock-ul din
+# auto-publicare.sh + publicare.lock previn suprapunerea, deci 1 min e sigur:
+# un ciclu care prinde un deploy în curs iese imediat pe flock, fără muncă dublă.
 install -m 700 "$REPO/deploy/auto-publicare.sh" /root/kelion/auto-publicare.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/auto-publicare.sh' ; echo '*/3 * * * * /root/kelion/auto-publicare.sh >> /root/kelion/auto-publicare.log 2>&1' ) | crontab -
+( crontab -l 2>/dev/null | grep -v '/root/kelion/auto-publicare.sh' ; echo '* * * * * /root/kelion/auto-publicare.sh >> /root/kelion/auto-publicare.log 2>&1' ) | crontab -
 
 echo "== 6f. Materializarea punctelor de recuperare pe VPS (cron la 10 min) =="
 # Adrian, 27 iul: „salvarea trebuie pe serverul Linux". Fiecare tag backup-*
