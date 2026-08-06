@@ -164,7 +164,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let muted = false
   let lastVoiceAt = 0
   // BARGE-IN: de când e mut (gardă de onset) și de când ține vocea de întrerupere.
-  let mutedSince = 0
+  let mutedSince = -1
   let bargeSince = 0
   let noiseFloor = 0.006 // podeaua de zgomot adaptivă (pentru dominanță)
   let voicedRun = 0 // câte cadre de voce consecutive (anti-poc)
@@ -293,11 +293,12 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       for (let i = 0; i < inp.length; i++) s2 += inp[i] * inp[i]
       const rmsMut = Math.sqrt(s2 / inp.length)
       const tNow = performance.now()
-      if (mutedSince === 0) mutedSince = tNow
+      if (mutedSince === -1) mutedSince = tNow
       if (tNow - mutedSince > BARGE_GUARD_MS && rmsMut > BARGE_RMS) {
         if (bargeSince === 0) bargeSince = tNow
         else if (tNow - bargeSince >= BARGE_HOLD_MS) {
           bargeSince = 0
+          opts.onSpeechBegin?.()
           opts.onBargeIn?.()
         }
       } else {
@@ -305,7 +306,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       }
       return
     }
-    mutedSince = 0
+    mutedSince = -1
     bargeSince = 0
     const input = e.inputBuffer.getChannelData(0)
     let sum = 0
