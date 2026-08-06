@@ -840,10 +840,10 @@ export default function ChatPanel({
     for (const step of steps) {
       if (!scenarioRunningRef.current) break
       await sendRef.current(step) // waits for Kelion's full reply to stream in
-      await new Promise((r) => globalThis.setTimeout(r, 1200))
+
     }
     // Let the final sentence finish speaking, then stop + save.
-    await new Promise((r) => globalThis.setTimeout(r, 2500))
+
     handle.stop()
   }
   function stopScenario(): void {
