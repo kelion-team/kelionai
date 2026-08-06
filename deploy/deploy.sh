@@ -74,6 +74,16 @@ systemctl daemon-reload 2>/dev/null || true
 #    trimitea alertele-fantomă de la alerts@ — buclă cu auto-reply-ul din contact@).
 pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux|kelion-voice-agent' 2>/dev/null || true
 
+# 5) CONSTRUCTORUL — PAUZAT PE DURATA PUBLICĂRII (Adrian, 6 aug: publicare blocată
+#    ORE — constructorul rula build-uri în paralel la FIECARE 2 min și sufoca CPU-ul,
+#    iar `docker build`-ul publicării nu se mai termina; live rămânea în urmă cu zeci
+#    de commituri, iar reboot-ul nu ajuta pe termen lung fiindcă cronul îl reînvia).
+#    Îl scoatem din cron ACUM + îi omorâm procesele în curs, ca build-ul publicării
+#    să aibă serverul pentru el. NU-i pierdem funcția: pasul 6d îl REPUNE în cron la
+#    finalul publicării — doar tăcem gălăgia cât se publică.
+crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' | crontab - 2>/dev/null || true
+pkill -9 -f 'constructor-worker|constructor-agent' 2>/dev/null || true
+
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
 git fetch origin --prune
