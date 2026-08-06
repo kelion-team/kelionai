@@ -44,10 +44,10 @@ describe('o singură ușă spre creier: POST /api/chat', () => {
 
 describe('același text, același traseu — dovada de paritate', () => {
   it('fraza vocală (AUDIO) ajunge la aceeași funcție send() ca textul tastat', () => {
-    // VOCE UNIFICATĂ (5 aug): fără transcript de dus — poarta de timbru trece
-    // fraza ca AUDIO la aceeași send() (marcată spoken=true); creierul unic aude
-    // și decide adresarea. Nu mai există unire de fraze (transcriptul dispărut).
-    expect(feVoice).toMatch(/onAddressed\?\.\('', vf, speaker, audio\)/)
+    // DIRECT LA CREIER (6 aug): fără transcript și fără verdict de timbru în cale —
+    // fraza brută pleacă ca AUDIO la aceeași send() (marcată spoken=true); creierul
+    // unic aude și decide adresarea. `speaker` e undefined (clientul nu mai etichetează).
+    expect(feVoice).toMatch(/onAddressed\?\.\('', vf, undefined, audio\)/)
     // The panel wires onAddressed into the SAME send() the input box uses.
     expect(fePanel).toMatch(/async function send\(text: string, spoken = false\)/)
     const idxAddressed = fePanel.indexOf('onAddressed: (_text, vf, speaker, audio)')
