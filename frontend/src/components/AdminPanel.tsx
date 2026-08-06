@@ -33,6 +33,7 @@ import {
   replyVisitorChat,
   type VisitorConvo,
   type VisitorMsg,
+  fetchCereriNeacoperite,
   fetchDemos,
   fetchActivity,
   resolveGap,
@@ -514,6 +515,8 @@ export default function AdminPanel({
       if (g) setGaps(g)
       setGapsFailed(!g)
     })
+    // Legătură cereri neacoperite (plăți neatribuite + cereri useri)
+    void fetchCereriNeacoperite()
     void fetchFinance().then((f) => {
       if (f) setFinance(f)
       setFinanceFailed(!f)
