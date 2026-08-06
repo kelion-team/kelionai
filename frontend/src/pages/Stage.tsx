@@ -431,6 +431,8 @@ interface BrainCredit {
       procesoare: number
       incarcare: [number, number, number]
       incarcarePct: number
+      pragMemoriePct?: number
+      pragIncarcarePct?: number
     } | null
     // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
     // desena, iar tipul lui mințea: loaded/remaining erau forma moartă a
@@ -1315,7 +1317,7 @@ export default function Stage({ user }: { user: User }) {
               <button
                 type="button"
                 className={`ghost ${
-                  brainCredit.vps && (brainCredit.vps.liberPct <= 10 || brainCredit.vps.incarcarePct >= 200)
+                  brainCredit.vps && (brainCredit.vps.liberPct <= (brainCredit.vps.pragMemoriePct ?? 10) || brainCredit.vps.incarcarePct >= (brainCredit.vps.pragIncarcarePct ?? 200))
                     ? 'blink-red'
                     : ''
                 }`}
