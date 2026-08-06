@@ -2372,12 +2372,15 @@ export default function ChatPanel({
           >
             {listening ? '●' : '🎤'}
           </button>
-          {/* THE VOICE VOLUME (Jul 25 — Adrian: „uncontrollable audio volume”):
-          a single control for ALL of Kelion's voice (Realtime + TTS), persisted;
-          until today there was no volume control in the app. */}
+          {/* VOLUMUL VOCII — ASCUNS din compozitor (Adrian, 6 aug: „ascunde-l că
+          nu-și are rostul aici"). Păstrăm starea și logica (volumul persistat se
+          aplică în continuare la redare prin getVoiceVolume/setVoiceVolume), doar
+          controlul din bară nu se mai arată. `hidden` îl scoate din layout fără să
+          rupă legăturile de stare (voiceVol/setVoiceVolState rămân folosite). */}
           <input
             type="range"
             className="composer-volume"
+            hidden
             min={0}
             max={100}
             value={Math.round(voiceVol * 100)}
