@@ -73,10 +73,19 @@ COPY . .
 # la build, direct în imagine. `|| echo` ca o descărcare eșuată să NU rupă build-ul:
 # fără model, voiceEmbedding.ts cade grațios pe fallback (regula #1), deci deploy-ul
 # rămâne sănătos; cu model, recunoașterea neurală merge real.
+# TIMEOUT OBLIGATORIU (Adrian, 6 aug: „durează prea mult, identifică de ce — în 5
+# min trebuia live prin PR"). Cauza găsită: curl-ul de mai jos NU avea limită de
+# timp. Dacă VPS-ul nu ajunge la CDN-ul GitHub (release download), curl AȘTEAPTĂ
+# LA NESFÂRȘIT → build-ul Docker atârnă → deploy-ul nu se termină NICIODATĂ (live
+# blocat 45+ min pe build-ul vechi, exact ce s-a întâmplat). `--connect-timeout`
+# taie conexiunea moartă în 15s, `--max-time` taie descărcarea agățată în 180s,
+# `--retry 2` reîncearcă o eroare trecătoare. La eșec → `|| echo` → build sănătos,
+# voiceEmbedding.ts cade grațios pe fallback (regula #1). Build-ul NU mai atârnă.
 RUN mkdir -p /app/backend/models \
-    && (curl -fsSL -o /app/backend/models/wespeaker_en_voxceleb_resnet34.onnx \
+    && (curl -fsSL --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 3 \
+        -o /app/backend/models/wespeaker_en_voxceleb_resnet34.onnx \
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx" \
-        || echo "model voce: descărcare eșuată la build — voiceEmbedding cade grațios (fallback)")
+        || echo "model voce: descărcare eșuată/expirată la build — voiceEmbedding cade grațios (fallback)")
 
 ENV NODE_ENV=production
 ENV FRONTEND_DIST=/app/frontend/dist
