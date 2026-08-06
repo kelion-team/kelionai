@@ -1597,8 +1597,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `you actually heard, verbatim, then a newline. After that newline, give your normal ` +
         `spoken reply. The "AUZIT:" line is how the screen shows what you heard — never skip it ` +
         `and never put anything before it.\n` +
-        `Be strict: when in doubt whether it was truly meant for you, prefer <TAC/> — the owner ` +
-        `asked you not to speak unprompted.`
+        `WAKE WORD IS DECISIVE (Adrian, 6 aug — „nu aude"): if you clearly hear ` +
+        `"Kelion" or "Kei" as, or near, the FIRST word, you ARE addressed — you MUST ` +
+        `answer with the "AUZIT:" line and your reply, NEVER <TAC/>. A direct question ` +
+        `right after your name is ALWAYS for you. Use <TAC/> ONLY when the speech is ` +
+        `clearly aimed at someone else or is background chatter AND your name was NOT ` +
+        `called. When your name is heard, staying silent is WRONG — do not be ` +
+        `over-cautious. (The owner asked you not to speak UNPROMPTED — but being ` +
+        `called by name IS the prompt.)`
     }
     // ACCOUNT STATE — Kelion must KNOW naturally who the user is (Adrian,
     // Jul 24: "during the audit it doesn't see that I'm logged into the Google
