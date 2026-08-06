@@ -69,6 +69,25 @@ function regulaFaraEnvModel() {
   }
 }
 
+// CONSTRUCTORUL (autonomia) rulează pe ACELAȘI model unic (Adrian, 6 aug: „un
+// singur model, peste tot"). Fără asta, worker-ul a fugit pe 'gemini-3.6-flash',
+// care întorcea „200 gol/blocat" → autonomia pica. Lacătul cere ca modelul
+// implicit al constructorului să fie tot Gemini Pro (nu flash/2.5/1.5).
+function regulaConstructorModelUnic() {
+  return {
+    nume: 'Constructorul (autonomia) = model unic Gemini Pro',
+    fisier: 'deploy/constructor-agent.mjs',
+    verifica(src) {
+      const m = /CONSTRUCTOR_GEMINI_MODEL\s*\|\|\s*'([^']+)'/.exec(src)
+      if (!m) return 'nu am găsit modelul implicit al constructorului (structura s-a schimbat)'
+      const model = m[1]
+      if (!/^gemini-\d+(?:\.\d+)?-pro(?:-|$)/.test(model))
+        return `modelul constructorului NU mai e Gemini Pro: „${model}" (autonomia trebuie pe modelul unic, nu pe flash)`
+      return null
+    },
+  }
+}
+
 // Fiecare regulă: unde caută, ce trebuie să rămână, și mesajul dacă s-a schimbat.
 const REGULI = [
   regulaModelUnic(),
@@ -76,6 +95,7 @@ const REGULI = [
   regulaTreaptaGetter('workDefault'),
   regulaTreaptaGetter('topDefault'),
   regulaFaraEnvModel(),
+  regulaConstructorModelUnic(),
 ]
 
 const erori = []
