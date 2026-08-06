@@ -27,6 +27,21 @@ RUN apt-get update \
 # arunca la ÎNCĂRCARE — dar serviciul e lazy și cade grațios; îl punem oricum ca
 # recunoașterea neurală să meargă real în prod, nu pe fallback.
 
+# AMPRENTĂ VOCALĂ NEURALĂ — DESCĂRCATĂ DEVREME, CA SĂ SE CACHE-UIASCĂ (Adrian, 6 aug:
+# „5 minute e maximul, oricât de mare ar fi"). Modelul wespeaker ResNet34 (26MB,
+# licență curată comercial) NU e în git (gitignore). ÎNAINTE stătea DUPĂ `COPY . .`,
+# deci ORICE commit invalida cache-ul și curl-ul re-descărca 26MB la FIECARE build.
+# Aici e devreme, pe un strat STABIL (depinde doar de apt-ul de sus): se descarcă O
+# DATĂ și se refolosește din cache la fiecare deploy următor. `--connect-timeout` taie
+# conexiunea moartă în 15s, `--max-time` descărcarea agățată în 180s. La eșec → `|| echo`
+# → build sănătos, voiceEmbedding.ts cade grațios pe fallback (regula #1). Straturile
+# COPY de mai jos DOAR adaugă fișiere — modelul din /app/backend/models supraviețuiește.
+RUN mkdir -p /app/backend/models \
+    && (curl -fsSL --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 3 \
+        -o /app/backend/models/wespeaker_en_voxceleb_resnet34.onnx \
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx" \
+        || echo "model voce: descărcare eșuată/expirată la build — voiceEmbedding cade grațios (fallback)")
+
 # --- frontend build ---
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN cd frontend && npm ci
@@ -66,26 +81,9 @@ RUN cd backend && npm run build
 # build) devine canalul lui de update. Stratul e ultimul → nu strică cache-ul
 # build-urilor de mai sus.
 COPY . .
-
-# AMPRENTĂ VOCALĂ NEURALĂ (Adrian, 6 aug: „instalează soft specializat, să mă
-# recunoască și răgușit"): modelul wespeaker ResNet34 (26MB, licență curată
-# comercial) NU e în git (gitignore, ca să nu îngroașe repo-ul) — îl aducem AICI,
-# la build, direct în imagine. `|| echo` ca o descărcare eșuată să NU rupă build-ul:
-# fără model, voiceEmbedding.ts cade grațios pe fallback (regula #1), deci deploy-ul
-# rămâne sănătos; cu model, recunoașterea neurală merge real.
-# TIMEOUT OBLIGATORIU (Adrian, 6 aug: „durează prea mult, identifică de ce — în 5
-# min trebuia live prin PR"). Cauza găsită: curl-ul de mai jos NU avea limită de
-# timp. Dacă VPS-ul nu ajunge la CDN-ul GitHub (release download), curl AȘTEAPTĂ
-# LA NESFÂRȘIT → build-ul Docker atârnă → deploy-ul nu se termină NICIODATĂ (live
-# blocat 45+ min pe build-ul vechi, exact ce s-a întâmplat). `--connect-timeout`
-# taie conexiunea moartă în 15s, `--max-time` taie descărcarea agățată în 180s,
-# `--retry 2` reîncearcă o eroare trecătoare. La eșec → `|| echo` → build sănătos,
-# voiceEmbedding.ts cade grațios pe fallback (regula #1). Build-ul NU mai atârnă.
-RUN mkdir -p /app/backend/models \
-    && (curl -fsSL --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 3 \
-        -o /app/backend/models/wespeaker_en_voxceleb_resnet34.onnx \
-        "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx" \
-        || echo "model voce: descărcare eșuată/expirată la build — voiceEmbedding cade grațios (fallback)")
+# (Modelul vocal neural se descarcă DEVREME, sus — vezi blocul de după apt — ca să se
+# cache-uiască; nu se mai re-descarcă la fiecare commit. `COPY . .` doar adaugă fișiere,
+# nu șterge — modelul din /app/backend/models rămâne.)
 
 ENV NODE_ENV=production
 ENV FRONTEND_DIST=/app/frontend/dist
