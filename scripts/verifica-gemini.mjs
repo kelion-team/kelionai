@@ -23,29 +23,59 @@ function citeste(p) {
   }
 }
 
-// O regulă per treaptă de creier — TOATE pe Gemini (Adrian, 3 aug, repetat:
-// „openrouter și open ai scos din toată aplicația" → chat, work și top pornesc
-// toate pe Gemini direct; nu doar work).
-function regulaTreapta(camp) {
+// MODELUL UNIC — SIGILAT (Adrian, 6 aug, regulă ultra-decisă: „modelul decis de
+// mine să nu se poată modifica accidental sau de altcineva fără decizia mea").
+// Sursa unică e MODEL_UNIC_DEFAULT (în cod), iar treptele (chat/work/top) sunt
+// GETTERI pe ea (modelUnicDirect) — deci un singur model, peste tot. Lacătul
+// verifică: (1) sursa unică e Gemini Pro; (2) treptele sunt getteri pe sursa
+// unică; (3) NU se citește niciun env de model (nimic nu-l poate schimba din env).
+
+function regulaModelUnic() {
   return {
-    nume: `Creierul (${camp}) = Gemini`,
+    nume: 'Sursa unică (MODEL_UNIC_DEFAULT) = Gemini Pro',
     fisier: 'backend/src/config.ts',
     verifica(src) {
-      const m = new RegExp(`${camp}:\\s*\\(process\\.env\\.\\w+\\s*\\?\\?\\s*'([^']+)'`).exec(src)
-      if (!m) return `nu am găsit linia ${camp} — structura config.ts s-a schimbat`
+      const m = /MODEL_UNIC_DEFAULT = '([^']+)'/.exec(src)
+      if (!m) return 'nu am găsit MODEL_UNIC_DEFAULT — sursa unică a modelului a dispărut'
       const model = m[1]
-      const eGemini = model.startsWith('google-direct/') || /gemini/i.test(model)
-      if (!eGemini) return `${camp} NU mai e Gemini: „${model}"`
-      return null // OK
+      if (!/gemini/i.test(model)) return `MODEL_UNIC_DEFAULT NU mai e Gemini: „${model}"`
+      if (!/pro/i.test(model)) return `MODEL_UNIC_DEFAULT NU mai e Pro (cel mai performant): „${model}"`
+      return null
     },
   }
 }
 
-// Fiecare regulă: unde caută, ce trebuie să fie Gemini, și mesajul dacă nu e.
+function regulaTreaptaGetter(camp) {
+  return {
+    nume: `Creierul (${camp}) = sursa unică (Gemini)`,
+    fisier: 'backend/src/config.ts',
+    verifica(src) {
+      const m = new RegExp(`get ${camp}\\(\\): string \\{\\s*return modelUnicDirect\\(\\)`).exec(src)
+      if (!m) return `${camp} nu mai e getter pe sursa unică (modelUnicDirect) — structura config.ts s-a schimbat`
+      return null
+    },
+  }
+}
+
+function regulaFaraEnvModel() {
+  return {
+    nume: 'Modelul NU se poate schimba din env',
+    fisier: 'backend/src/config.ts',
+    verifica(src) {
+      if (/process\.env\.(GEMINI_MODEL_GREU|BRAIN_CHAT_MODEL|BRAIN_WORK_MODEL|BRAIN_TOP_MODEL)/.test(src))
+        return 'a reapărut un env de model (GEMINI_MODEL_GREU/BRAIN_*_MODEL) — modelul trebuie să fie DOAR din sursa unică, fără env'
+      return null
+    },
+  }
+}
+
+// Fiecare regulă: unde caută, ce trebuie să rămână, și mesajul dacă s-a schimbat.
 const REGULI = [
-  regulaTreapta('workDefault'),
-  regulaTreapta('chatDefault'),
-  regulaTreapta('topDefault'),
+  regulaModelUnic(),
+  regulaTreaptaGetter('chatDefault'),
+  regulaTreaptaGetter('workDefault'),
+  regulaTreaptaGetter('topDefault'),
+  regulaFaraEnvModel(),
 ]
 
 const erori = []
