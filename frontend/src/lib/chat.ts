@@ -302,6 +302,7 @@ export async function* streamChat(
             image,
             images,
             imageIsAttachment,
+            imageSource: imageIsAttachment ? 'chat' : 'camera',
             coords,
             screen,
             voiceFeatures,
