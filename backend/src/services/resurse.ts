@@ -42,6 +42,8 @@ export interface ResurseGazda {
    * 100% = exactly as many waiting processes as there are cores. Above = queue.
    */
   incarcarePct: number
+  pragMemoriePct: number
+  pragIncarcarePct: number
 }
 
 /** Below this much free memory, the kernel starts killing processes. */
@@ -109,6 +111,8 @@ export async function resurseGazda(): Promise<ResurseGazda | null> {
     procesoare,
     incarcare: load,
     incarcarePct: Math.round((load[2] / procesoare) * 100),
+    pragMemoriePct: PRAG_MEMORIE_PCT,
+    pragIncarcarePct: PRAG_INCARCARE_PCT,
   }
 }
 
