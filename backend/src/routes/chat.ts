@@ -1970,6 +1970,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // confirmation. Parsed BEFORE the save, so everything below (the brain
     // note, the admin strip) uses it.
     const speakerRaw = typeof req.body?.speaker === 'string' ? req.body.speaker : ''
+    // VOCE NEVALIDATĂ (Adrian, 6 aug): o voce care nu s-a potrivit cu amprenta
+    // proprietarului (ex. amprenta veche „derapată") NU mai e aruncată pe client —
+    // ajunge la creier ca să fie AUZITĂ, dar marcată `nevalidat`. Aici o tratăm ca pe
+    // un invitat pentru DREPTURI: ZERO puteri de admin, datele sensibile protejate
+    // (cardul cere oricum potrivirea reală holder, deci rămâne închis).
+    const nevalidat = speakerRaw === 'nevalidat'
     const guestMatch = /^guest(-pending)?:(\d+):(.+)$/.exec(speakerRaw)
     const guestPending = guestMatch?.[1] === '-pending'
     const guestId = guestMatch ? Number(guestMatch[2]) : 0
@@ -2024,7 +2030,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // GUEST runs inside the holder's session, but the person at the microphone
     // is NOT the holder — so this turn gets ZERO admin powers, whoever is
     // logged in. (guestMatch is parsed above, before the save.)
-    const isAdmin = user.role === 'admin' && !guestMatch
+    const isAdmin = user.role === 'admin' && !guestMatch && !nevalidat
 
     // The turn's model is chosen HERE (before the tool list): on the CHAT step,
     // the model also gets the ask_brain tool so it can escalate whatever it
