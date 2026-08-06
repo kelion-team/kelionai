@@ -11,89 +11,7 @@ import {
 } from '../lib/prefs'
 import { fetchBalance, fetchHistory, type WalletStatus, type PurchaseRecord } from '../lib/billing'
 import { LANGS } from '../lib/languages'
-
-// CLIENT SETTINGS (paying). A client has less access than the admin — doesn't
-// see the admin panel — but has their own ⚙ button with three sections:
-//   1. Basic preferences — the language Kelion listens and speaks to them in.
-//   2. Credit / wallet    — balance, top-up, AND the 25% platform share note.
-//   3. Account            — email, logout, account deletion (GDPR).
-// BYOK-provider a fost SCOS complet (Adrian, 12 iul: „scoatem vechiul provider") —
-// creierul e Gemini DIRECT (google-direct; OpenRouter/OpenAI extirpate, 3 aug —
-// comentariul vechi „the brain is on Kimi/GLM" era fals), all users go through
-// the credit above.
-// The backend (prefs + billing + me/delete) is already verified live. It does NOT
-// duplicate code: it uses exactly the same routes the rest of the app uses.
-// Fereastra se deschide și de ADMIN (din panoul Admin → ⚙ Setări): pentru el,
-// nota de alimentare din pastila „＋" și auto-reîncărcarea se ASCUND — bara
-// adminului nu are pastila de credit, iar fluxul de reîncărcare e al clienților
-// (auditul admin, 3 aug: instrucțiunea trimitea ownerul la un buton inexistent).
-
-// Labels in the client's language (ro for Romanian speakers, otherwise English —
-// clients can be from any language). Only the UI texts; values come from the server.
-interface L {
-  title: string
-  prefs: string
-  langLabel: string
-  voiceLabel: string
-  voiceDefault: string
-  voiceNote: string
-  wallet: string
-  credits: string
-  topUp: string
-  account: string
-  signedInAs: string
-  loggingOut: string
-  logout: string
-  deleteAcc: string
-  deleteConfirm: string
-  deleting: string
-  cancel: string
-  close: string
-}
-const RO: L = {
-  title: 'Setări',
-  prefs: 'Preferințe de bază',
-  langLabel: 'Limba în care Kelion te ascultă și îți vorbește',
-  voiceLabel: 'Vocea cu care îți vorbește Kelion',
-  voiceDefault: 'Implicită (a aplicației)',
-  voiceNote: 'Se ține minte doar pentru contul tău. Se aplică de la următoarea pornire a vocii.',
-  wallet: 'Credit / portofel',
-  credits: 'credite disponibile',
-  topUp: 'Reîncarcă',
-  account: 'Cont',
-  signedInAs: 'Conectat ca',
-  loggingOut: 'Se deloghează…',
-  logout: 'Deconectare',
-  deleteAcc: 'Șterge contul',
-  deleteConfirm:
-    'Sigur ștergi contul? Se șterg definitiv mesajele, preferințele, memoria și portofelul. Ireversibil.',
-  deleting: 'Se șterge…',
-  cancel: 'Anulează',
-  close: 'Închide',
-}
-const EN: L = {
-  title: 'Settings',
-  prefs: 'Basic preferences',
-  langLabel: 'The language Kelion hears you in and speaks',
-  voiceLabel: 'The voice Kelion speaks to you with',
-  voiceDefault: 'Default (the app’s)',
-  voiceNote: 'Remembered for your account only. It applies the next time voice starts.',
-  wallet: 'Credit / wallet',
-  credits: 'credits available',
-  topUp: 'Top up',
-  account: 'Account',
-  signedInAs: 'Signed in as',
-  loggingOut: 'Signing out…',
-  logout: 'Sign out',
-  deleteAcc: 'Delete account',
-  deleteConfirm:
-    'Delete your account? Your messages, preferences, memory and wallet are permanently erased. Irreversible.',
-  deleting: 'Deleting…',
-  cancel: 'Cancel',
-  close: 'Close',
-}
-
-// How much you get per pound. The same value as at purchase (WalletButton) —
+import { resolveLang, strings } from '../lib/i18n'
 // the user never sees pounds anywhere on their screen, only the resulting credits.
 const CREDITE_PE_LIRA = 7.5
 
@@ -118,29 +36,17 @@ export default function CustomerSettings({
   readonly user: User
   readonly onClose: () => void
 }): React.JSX.Element {
-  // Default ENGLISH until language identification (not the browser language).
-  const base = (loadLocalLang() ?? 'en')
-    .slice(0, 2)
-    .toLowerCase()
-  const t = base === 'ro' ? RO : EN
-
-  const [lang, setLang] = useState<string>('en-US')
-  // The voice chosen by this person ('' = the app's default) + the allowed list,
-  // both from the server.
+  const [lang, setLang] = useState<string>(loadLocalLang() ?? 'en')
+  const base = lang.slice(0, 2).toLowerCase()
+  const ro = base === 'ro'
+  const t = strings(resolveLang(lang))
   const [voice, setVoice] = useState<string>('')
   const [voices, setVoices] = useState<string[]>([])
-  // Tri-stat ca istoricul de mai jos (auditul admin, 3 aug): 'necitit' = „…";
-  // null = citirea portofelului a PICAT (se spune, nu „…" pe veci).
   const [wallet, setWallet] = useState<WalletStatus | null | 'necitit'>('necitit')
-  // Nota „NU s-a salvat" a comutatoarelor (auditul admin, 3 aug): salvările
-  // optimiste fără verificare lăsau ecranul să afirme o stare nesalvată.
   const [saveErr, setSaveErr] = useState('')
-  // THE HISTORY (M4 „istoric", Aug 2): the person's own top-ups. `null` =
-  // could not read (shown as such), `[]` = truly no purchases yet.
   const [istoric, setIstoric] = useState<PurchaseRecord[] | null | 'necitit'>('necitit')
   const [busy, setBusy] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
-  // Selectable models (OpenRouter) + automatic reload.
   const [catalog, setCatalog] = useState<{ chat: CatModel[]; work: CatModel[] }>({ chat: [], work: [] })
   const [sel, setSel] = useState<{ chat: string; work: string }>({ chat: '', work: '' })
   const [ar, setAr] = useState<{ enabled: boolean; threshold: number; topupAmount: number }>({
@@ -148,8 +54,6 @@ export default function CustomerSettings({
     threshold: 20,
     topupAmount: 10,
   })
-  const ro = base === 'ro'
-
   useEffect(() => {
     void (async () => {
       const [p, b, h] = await Promise.all([loadServerPrefs(), fetchBalance(), fetchHistory()])

@@ -167,8 +167,24 @@ export interface Strings {
   // diagnozaConexiune in lib/chat.ts) ──────────────────────────────────────
   serverDown: string
   requestLost: string
+  // ── CUSTOMER SETTINGS ───────────────────────────────────────────────────
+  title: string
+  close: string
+  prefs: string
+  langLabel: string
+  voiceLabel: string
+  voiceDefault: string
+  voiceNote: string
+  wallet: string
+  account: string
+  signedInAs: string
+  loggingOut: string
+  logout: string
+  deleteAcc: string
+  deleteConfirm: string
+  cancel: string
+  deleting: string
 }
-
 // ── ENGLEZA E BAZA, PE FIECARE CHEIE ────────────────────────────────────────
 // Adrian's rule (Jul 30): "100% English in the whole app; then the per-user
 // language rule applies, including admin".
@@ -332,6 +348,22 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     serverDown:
       'The server isn’t answering right now — it is NOT your internet. I keep checking and will pick this up by myself the moment it returns.',
     requestLost: 'The request broke on the way (your internet and the server are fine) — please send it again.',
+    title: 'Client Settings',
+    close: 'Close',
+    prefs: 'Language & Voice Preferences',
+    langLabel: 'Language Kelion speaks to you',
+    voiceLabel: 'Voice used for synthesis',
+    voiceDefault: 'Default voice (set by server)',
+    voiceNote: 'This setting controls how Kelion hears and responds to you vocally.',
+    wallet: 'Wallet & Credits',
+    account: 'Your Account',
+    signedInAs: 'Signed in as:',
+    loggingOut: 'Logging out...',
+    logout: 'Log out',
+    deleteAcc: 'Delete account from server',
+    deleteConfirm: 'Are you sure you want to delete your account? All your data will be permanently removed!',
+    cancel: 'Cancel',
+    deleting: 'Deleting...',
   },
   ro: {
     signIn: 'Conectează-te cu Google',
@@ -482,6 +514,22 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     serverDown:
       'Serverul nu răspunde momentan — NU e internetul tău. Verific întruna și reiau singur în clipa în care revine.',
     requestLost: 'Cererea s-a rupt pe drum (netul tău și serverul sunt bune) — mai trimite o dată.',
+    title: 'Setări Client',
+    close: 'Închide',
+    prefs: 'Preferințe limbi & voce',
+    langLabel: 'Limba în care îți vorbește Kelion',
+    voiceLabel: 'Vocea folosită pentru sinteză',
+    voiceDefault: 'Vocea implicită (stabilită de server)',
+    voiceNote: 'Această opțiune controlează cum te aude și cum îți răspunde Kelion vocal.',
+    wallet: 'Portofel & Credite',
+    account: 'Contul tău',
+    signedInAs: 'Autentificat ca:',
+    loggingOut: 'Deconectare...',
+    logout: 'Deconectare',
+    deleteAcc: 'Șterge contul de pe server',
+    deleteConfirm: 'Sigur vrei să-ți ștergi contul? Toate datele tale vor fi șterse definitiv!',
+    cancel: 'Anulează',
+    deleting: 'Se șterge...',
   },
   es: {
     signIn: 'Iniciar sesión con Google',
