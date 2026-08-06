@@ -28,7 +28,7 @@ function env(...names: string[]): string {
 export const ENV_ALIASES: Record<string, string[]> = {
   databaseUrl: ['DATABASE_URL', 'POSTGRES_URL'],
   googleServiceAccountJson: ['GOOGLE_SERVICE_ACCOUNT_JSON', 'GOOGLE_SERVICE_ACCOUNT', 'GCP_SERVICE_ACCOUNT_JSON'],
-  googleTtsKey: ['GOOGLE_TTS_API_KEY', 'GOOGLE_TTS_KEY', 'GOOGLE_API_KEY'],
+  googleTtsKey: ['GOOGLE_TTS_API_KEY', 'GOOGLE_TTS_KEY'],
   serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
   // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
   // de la fostul câmp config.googleMapsKey de mai jos.)
