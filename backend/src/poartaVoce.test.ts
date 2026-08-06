@@ -24,12 +24,14 @@ const oaspeti = readFileSync(fileURLToPath(new URL('./services/guestVoices.ts', 
 const health = readFileSync(fileURLToPath(new URL('./services/health.ts', import.meta.url)), 'utf8')
 
 describe('verdictul de timbru se așteaptă înainte de creier', () => {
-  it('tura așteaptă verdictul serverului', () => {
-    expect(voce).toMatch(/await transcriptVerdict\(t, vf\)/)
+  it('tura așteaptă verdictul serverului (timbru din voiceFeatures, fără text)', () => {
+    // VOCE UNIFICATĂ (5 aug): verdictul de timbru se cere FĂRĂ text (amprenta e
+    // din voiceFeatures) — creierul unic decide adresarea, nu un transcript.
+    expect(voce).toMatch(/await transcriptVerdict\('', vf\)/)
   })
 
-  it('onAddressed primește și eticheta de vorbitor (oaspete)', () => {
-    expect(voce).toMatch(/onAddressed\?\.\(t, vf, speaker, audio\)/)
+  it('onAddressed primește și eticheta de vorbitor (oaspete) + audio, fără text', () => {
+    expect(voce).toMatch(/onAddressed\?\.\('', vf, speaker, audio\)/)
   })
 
   it('serverul calculează guest / guestPending înainte de răspuns', () => {

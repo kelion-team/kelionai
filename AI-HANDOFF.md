@@ -60,8 +60,7 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 | `billing.ts` | Credite Stripe, webhook 75/25 |
 | `me.ts` | Auto-ștergere cont (GDPR) |
 | `demo.ts` | Pornire probă gratuită + leads + chat vizitator |
-| `asr.ts` | Transcriere batch (Google STT v2, `chirp_3`, regiune `eu`) — costă bani |
-| `asr-stream.ts` | Transcriere live WebSocket, start/stop vorbire pentru barge-in |
+| `asr.ts` | Transcriere batch (Google STT v2, `chirp_3`, regiune `eu`) — costă bani; DOAR dictarea /api/asr (STT-ul streaming a fost șters 5 aug) |
 | `tts.ts` | Sinteză Chirp 3 HD, plafon 5000 car. — costă bani |
 | `correct.ts` | Corectare STT via Gemini (doar la încredere scăzută) — costă bani |
 | `image.ts` | Servește bytes-ii imaginilor generate |

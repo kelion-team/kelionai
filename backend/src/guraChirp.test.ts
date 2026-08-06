@@ -46,15 +46,14 @@ describe('sesiunea vocală rulează pe Google/Gemini și e marcată guraChirp', 
     expect(voce).toMatch(/onSpeechBegin: \(\) => \{[\s\S]{0,120}stopVoice\(\)[\s\S]{0,60}onSpeechStart/)
     expect(voce).toMatch(/onBargeIn: \(\) => \{[\s\S]{0,120}stopVoice\(\)[\s\S]{0,60}onSpeechStart/)
   })
-  it('STOP-ul vorbit taie gura serverului pe loc (stopVoice) și închide fereastra', () => {
-    expect(voce).toMatch(/replyUntil = 0\s*\n\s*stopVoice\(\)/)
-  })
-  it('mute-ul ajunge la urechea Chirp (nu există senderi WebRTC de mutat)', () => {
+  // (STOP-ul vorbit pe transcript a DISPĂRUT — fără STT nu mai există transcript
+  // pe client; „stop" rostit peste Kelion îl taie oricum prin barge-in-ul local.)
+  it('mute-ul ajunge la urechea locală (nu există senderi WebRTC de mutat)', () => {
     expect(voce).toMatch(/chirpEar\?\.setMuted\(muted\)/)
   })
-  it('finalurile Chirp trec prin poarta comună (timbru → stop → nume)', () => {
-    expect(voce).toMatch(/onPhrase: \(t, vf, audio\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf, audio\)/)
-    expect(voce).toMatch(/poartaDupaTranscript[\s\S]{0,600}transcriptVerdict\(t, vf\)/)
+  it('fraza trece prin poarta de TIMBRU → creier (fără transcript, doar audio)', () => {
+    expect(voce).toMatch(/onPhrase: \(_t, vf, audio\) => \{[\s\S]{0,300}poartaDupaFraza\(vf, audio\)/)
+    expect(voce).toMatch(/poartaDupaFraza[\s\S]{0,600}transcriptVerdict\('', vf\)/)
   })
   it('urechea moartă marchează și închide (fără OpenAI, fără buclă)', () => {
     expect(voce).toMatch(/marcheazaUrechiChirpMoarte\(\)/)

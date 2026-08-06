@@ -20,16 +20,17 @@ describe('client: urechile live sunt Chirp 3 (Google), fără OpenAI', () => {
     expect(voce).not.toMatch(/RTCPeerConnection|addTransceiver|addTrack/)
   })
   it('vocea BRUTĂ a frazei ajunge NATIV la creierul Gemini (audio în onPhrase → onAddressed)', () => {
-    expect(voce).toMatch(/onPhrase: \(t, vf, audio\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf, audio\)/)
-    expect(voce).toMatch(/onAddressed\?\.\(t, vf, speaker, audio\)/)
+    expect(voce).toMatch(/onPhrase: \(_t, vf, audio\) => \{[\s\S]{0,300}poartaDupaFraza\(vf, audio\)/)
+    expect(voce).toMatch(/onAddressed\?\.\('', vf, speaker, audio\)/)
   })
-  it('finalurile Chirp trec prin ACEEAȘI poartă (timbru → stop → nume)', () => {
-    expect(voce).toMatch(/poartaDupaTranscript[\s\S]{0,600}transcriptVerdict\(t, vf\)/)
+  it('fraza trece prin poarta de TIMBRU → creier (verdict din voiceFeatures, fără text)', () => {
+    expect(voce).toMatch(/poartaDupaFraza[\s\S]{0,600}transcriptVerdict\('', vf\)/)
   })
-  it('fără ureche Chirp NU se deschide OpenAI — se aruncă, panoul cade pe dictarea nativă', () => {
-    expect(voce).toMatch(/marcheazaUrechiChirpMoarte\(\)/)
+  it('fără microfon NU se deschide OpenAI, NU există STT de rezervă — se aruncă', () => {
     expect(voce).toMatch(/throw new Error\('chirp_ear_unavailable'\)/)
-    expect(mic).toMatch(/streamingAsrAvailable = false/)
+    // Nu mai există sondă de capabilitate STT / WebSocket la asr-stream în micStream.
+    expect(mic).not.toMatch(/asr-stream/)
+    expect(mic).not.toMatch(/new WebSocket/)
   })
   it('mute-ul ajunge la urechea Chirp (nu există sender de mic WebRTC)', () => {
     expect(voce).toMatch(/chirpEar\?\.setMuted\(muted\)/)
@@ -37,9 +38,9 @@ describe('client: urechile live sunt Chirp 3 (Google), fără OpenAI', () => {
 })
 
 describe('micStream: urechea Chirp dă tot ce poarta cere', () => {
-  it('onPhrase duce și amprenta frazei (poarta de timbru are nevoie direct)', () => {
+  it('onPhrase duce și amprenta frazei (poarta de timbru are nevoie direct), fără text', () => {
     expect(mic).toMatch(/onPhrase: \(text: string, features: VoiceFeatures \| null, audio\?: string\) => void/)
-    expect(mic).toMatch(/opts\.onPhrase\(text, features, audio\)/)
+    expect(mic).toMatch(/opts\.onPhrase\('', features, audio\)/)
   })
   it('full-duplex NU murdărește depozitul partajat de features', () => {
     expect(mic).toMatch(/storePendingFeatures/)
@@ -48,8 +49,9 @@ describe('micStream: urechea Chirp dă tot ce poarta cere', () => {
   it('speech_begin ajunge la client (barge-in în full-duplex)', () => {
     expect(mic).toMatch(/opts\.onSpeechBegin\?\.\(\)/)
   })
-  it('barge-in STT streaming permite stream-ul de audio chiar și pe muted la detectarea de voce', () => {
-    expect(mic).toMatch(/rmsMut <= VOICE_RMS/)
+  it('fraza se închide pe VAD LOCAL (pauză), nu pe transcript de server — fără STT', () => {
+    expect(mic).toMatch(/PAUZA_FRAZA_MS/)
+    expect(mic).toMatch(/const closePhrase = \(\): void =>/)
   })
 })
 

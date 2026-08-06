@@ -192,32 +192,26 @@ export async function startRealtimeVoice(
     let chirpEar: MicStreamHandle | null = null
     cleanups.push(() => chirpEar?.stop())
 
-    // ── THE GATE (timbru → stop → nume) ─────────────────────────────────────
-    // Fiecare final Chirp trece pe aici: poarta de TIMBRU e AȘTEPTATĂ (o voce
-    // străină fără aprobare de invitat e ignorată COMPLET), STOP-ul vorbit taie
-    // gura pe loc, iar poarta de NUME decide per rostire dacă tura ajunge la
-    // creier (proprietarul verificat trece FĂRĂ „Kelion" — full-duplex real).
-    const REPLY_WINDOW_MS = 12_000
-    // Adrian, 5 aug: „dacă nu aude primul cuvânt «Kelion» sau «Kei», să nu
-    // vorbească neîntrebat, să stea fără să zică nimic." Poarta pornește ÎNCHISĂ
-    // — nu mai răspunde la orice imediat ce pornește microfonul; se deschide DOAR
-    // când prima vorbă e cuvântul de trezire (sau când chiar Kelion a întrebat).
-    let replyUntil = 0
-    // Cuvântul de trezire DOAR ca PRIM cuvânt, ancorat la început, tolerant la
-    // transcriere reală („Kelion, ce faci" → „Elion…", „Chelion", „Kei").
-    const TREZIRE_RE = /^\W*(?:[ckg]h?e?l[iy]?[oae]n|elion|eleon|kei|kay)\b/i
-    // Ultima limbă detectată — folosită ca hint pentru urechea Chirp (getLang).
+    // ── POARTA (doar TIMBRU → creier) ───────────────────────────────────────
+    // Fără STT: fraza vine ca AUDIO brut. Aici rămâne DOAR poarta de TIMBRU (o voce
+    // străină neaprobată e ignorată COMPLET — nu ajunge la creier, nu răspunde la
+    // TV/străini). Poarta de NUME („Kelion"/„Kei") și fereastra de răspuns au
+    // DISPĂRUT de pe client: creierul unic (Gemini 3 Pro) aude fraza și decide
+    // SINGUR dacă i se vorbește — sau tace (Adrian, 5 aug: „tot decis de creierul
+    // unic; dacă nu aude «Kelion»/«Kei», să nu vorbească neîntrebat"). Un „stop"
+    // rostit peste Kelion îl oprește prin barge-in-ul local (mai jos).
     let anchoredLang = ''
-    const poartaDupaTranscript = (t: string, vf: VoiceFeatures | null, audio?: string): void => {
+    const poartaDupaFraza = (vf: VoiceFeatures | null, audio?: string): void => {
       void (async () => {
-        const verdict = await transcriptVerdict(t, vf)
-        // Limba detectată de server ancorează hint-ul urechii Chirp (per rostire).
+        // Verificarea vorbitorului merge FĂRĂ text (amprenta e din voiceFeatures) —
+        // serverul întoarce holder/foreignVoice/guest/adminUnlocked din timbru.
+        const verdict = await transcriptVerdict('', vf)
         if (verdict?.lang && verdict.lang !== anchoredLang) anchoredLang = verdict.lang
         // LACĂTUL DE ADMIN: amprenta s-a potrivit → serverul a pus cookie-ul de
         // unlock; anunțăm UI-ul să aprindă butonul Admin.
         if (verdict?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
-        // POARTA STRICTĂ: o voce care nu e nici proprietarul, nici un invitat
-        // permis e ignorată COMPLET — asta oprește răspunsul la TV.
+        // POARTA STRICTĂ DE TIMBRU: o voce care nu e nici proprietarul, nici un
+        // invitat permis e ignorată COMPLET (nu se cheamă creierul degeaba).
         const guest = verdict?.guest ?? verdict?.guestPending
         if (verdict?.foreignVoice && !guest) {
           console.info('[voce] voce străină — ignorată complet (nu ajunge la creier)')
@@ -228,26 +222,10 @@ export async function startRealtimeVoice(
           : verdict?.guestPending
             ? `guest-pending:${verdict.guestPending.id}:${verdict.guestPending.name}${verdict.guestPending.relation ? ` (${verdict.guestPending.relation})` : ''}`
             : undefined
-        // „STOP" vorbit SINGUR: taie pe loc gura serverului și închide fereastra.
-        // Doar proprietar/invitat — „stop"-ul unui străin e deja ignorat mai sus.
-        if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
-          replyUntil = 0
-          stopVoice()
-          return
-        }
-        if (!t.trim()) return
-        // POARTA DE TREZIRE (Adrian, 5 aug): tura merge la creier DOAR dacă prima
-        // vorbă e cuvântul de trezire („Kelion"/„Kei"), SAU dacă Kelion tocmai a
-        // pus o întrebare și userul răspunde în fereastră. Altfel — TĂCERE: Kelion
-        // nu mai vorbește neîntrebat, nici măcar proprietarului (retractează
-        // full-duplex-ul fără nume din 3 aug). Vocea străină/TV e deja oprită mai
-        // sus (foreignVoice), deci trezirea nu lasă străinii înăuntru.
-        const trezit = TREZIRE_RE.test(t.trim())
-        const answering = Date.now() < replyUntil
-        if (trezit || answering) {
-          replyUntil = 0
-          onAddressed?.(t, vf, speaker, audio)
-        }
+        // La creier pleacă AUDIO-ul; creierul decide adresarea. Fără audio nu are
+        // ce decide, deci nu-l chemăm.
+        if (!audio) return
+        onAddressed?.('', vf, speaker, audio)
       })()
     }
 
@@ -260,9 +238,10 @@ export async function startRealtimeVoice(
     const ear = await startMicStream({
       preWarmedStream: mic,
       onLive: (t) => onUserTranscript?.(t, false),
-      onPhrase: (t, vf, audio) => {
-        onUserTranscript?.(t, true)
-        poartaDupaTranscript(t, vf, audio)
+      onPhrase: (_t, vf, audio) => {
+        // Fără transcript — fraza pleacă la creier ca AUDIO; poarta de timbru decide
+        // dacă ajunge acolo, apoi creierul decide dacă i se vorbește.
+        poartaDupaFraza(vf, audio)
       },
       onError: (reason) => {
         if (closed) return
@@ -309,11 +288,10 @@ export async function startRealtimeVoice(
       },
       // Barge-in manual: taie redarea Chirp a serverului acum.
       interrupt: () => stopVoice(),
-      // Vocea o rostește serverul ({audio}). speak() doar deschide fereastra de
-      // un răspuns când Kelion pune o ÎNTREBARE (ca .done al gurii vechi).
-      speak: (text: string) => {
-        if (/\?/.test(text)) replyUntil = Date.now() + REPLY_WINDOW_MS
-      },
+      // Vocea o rostește serverul ({audio}). Fereastra de răspuns a dispărut —
+      // creierul unic decide singur, din audio, dacă i se răspunde. speak() rămâne
+      // no-op (ChatPanel îl cheamă pe calea veche a gurii; nu mai are ce urmări).
+      speak: (_text: string) => {},
       stopSpeaking: () => stopVoice(),
     }
   } catch (e) {

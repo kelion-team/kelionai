@@ -65,7 +65,7 @@ describe('o tură înlocuită nu mai scrie peste tura nouă', () => {
     // and has nothing to clobber. All the others, first of all the ⚠️ one in
     // the catch, must be functional. That's why the test doesn't forbid the
     // pattern wholesale, but exactly the error write.
-    const instantanee = panou.match(/setMessages\(\[\.\.\.next,[\s\S]{0,120}?\]\)/g) ?? []
+    const instantanee = panou.match(/setMessages\(\[[\s\S]{0,140}?\]\)/g) ?? []
     expect(instantanee.length).toBe(1)
     expect(instantanee[0]).toContain("content: ''")
     expect(instantanee[0]).not.toContain('⚠️')

@@ -111,21 +111,17 @@ describe('LACĂT — voce (masculină în orice limbă)', () => {
   })
 })
 
-describe('LACĂT — auz (chirp_3 peste tot, regiunea eu)', () => {
-  it('modelul STT rămâne cel mai avansat — chirp_3, în regiunea eu', () => {
+describe('LACĂT — auz batch (chirp_3, regiunea eu) — streamingul STT a fost SCOS', () => {
+  it('modelul STT batch rămâne cel mai avansat — chirp_3, în regiunea eu', () => {
     expect(GOOGLE_STT_MODEL).toBe('chirp_3')
     expect(GOOGLE_STT_REGION).toBe('eu')
   })
 
-  it('calea streaming/full-duplex folosește ACEEAȘI sursă unică — nu poate drifta', () => {
-    // Adrian, 3 aug: „sistemul de auzit sper să nu se mai schimbe niciodată".
-    // asr-stream.ts (streaming) importă modelul/regiunea din asr.ts — nu are
-    // copie locală care să dea alt model pe tăcute.
-    const stream = sursa('./routes/asr-stream.ts')
-    expect(/GOOGLE_STT_MODEL/.test(stream)).toBe(true)
-    expect(/GOOGLE_STT_REGION/.test(stream)).toBe(true)
-    expect(/from '\.\.\/services\/asr\.js'/.test(stream)).toBe(true)
-    // Iar cererea către Google trimite CHIAR constanta, nu un model hardcodat.
+  it('dictarea batch /api/asr folosește CHIAR constanta, dintr-o sursă unică', () => {
+    // VOCE UNIFICATĂ (5 aug): STT-ul STREAMING (asr-stream) a fost eliminat total
+    // — vocea live merge la creierul unic ca AUDIO, nu prin transcript. Rămâne
+    // DOAR dictarea batch /api/asr, care trimite CHIAR constanta chirp_3, nu un
+    // model hardcodat — o singură sursă, nu poate drifta.
     const asr = sursa('./services/asr.ts')
     expect(/model:\s*GOOGLE_STT_MODEL/.test(asr)).toBe(true)
   })
@@ -135,13 +131,18 @@ describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier
   const voce = sursa('../../frontend/src/lib/realtimeVoice.ts')
   const server = sursa('./routes/realtime.ts')
 
-  it('poarta de TREZIRE: tura merge la creier DOAR pe „Kelion/Kei" ca prim cuvânt (Adrian, 5 aug — retractează full-duplex-ul fără nume)', () => {
-    // Adrian, 5 aug: „dacă nu aude primul cuvânt «Kelion» sau «Kei», să nu
-    // vorbească neîntrebat, să stea fără să zică nimic." Retractează regula din
-    // 3 aug (proprietar fără „Kelion"): acum CHIAR ȘI proprietarul trezește cu
-    // numele. Excepția: răspunsul la propria întrebare a lui Kelion (fereastra).
-    expect(/const trezit = TREZIRE_RE\.test\(t\.trim\(\)\)/.test(voce)).toBe(true)
-    expect(/if \(trezit \|\| answering\)/.test(voce)).toBe(true)
+  it('CREIERUL UNIC decide adresarea din AUDIO — poarta de nume (regex) a fost scoasă de pe client', () => {
+    // Adrian, 5 aug: „urechea o scoți total ca modelul are tot; tot decis de
+    // creierul unic; dacă nu aude «Kelion»/«Kei», să nu vorbească neîntrebat."
+    // Poarta de nume NU mai stă pe client, pe un transcript stâlcit — creierul
+    // aude fraza brută (audio) și decide singur. Sigilat: dacă revine TREZIRE_RE
+    // pe client, sau dispare poarta creierului, testul cade.
+    expect(/TREZIRE_RE/.test(voce)).toBe(false)
+    expect(/poartaDupaFraza/.test(voce)).toBe(true)
+    const chat = sursa('./routes/chat.ts')
+    expect(/voceAmbianta/.test(chat)).toBe(true)
+    expect(chat.includes('<TAC/>')).toBe(true)
+    expect(chat.includes('AMBIENT VOICE MODE')).toBe(true)
   })
 
   it('serverul dă semnalul POZITIV doar când e chiar proprietarul contului', () => {
@@ -186,11 +187,60 @@ describe('LACĂT — Gemini-only: la eșec, mesaj ONEST, nu alt furnizor (3 aug)
   })
 })
 
-describe('LACĂT — vocea unește frazele într-o singură tură (nu se auto-anulează)', () => {
-  it('coalescer de voce: frazele apropiate → o singură tură spre creier', () => {
-    const panel = sursa('../../frontend/src/components/ChatPanel.tsx')
-    expect(panel.includes('voceMergeRef')).toBe(true)
-    // onAddressed NU mai trimite direct fiecare frază; le unește apoi trimite o dată.
-    expect(/onAddressed: \(text, vf, speaker, audio\)[\s\S]{0,2400}sendRef\.current\(merged, true\)/.test(panel)).toBe(true)
+describe('LACĂT — voce unificată: fraza pleacă DIRECT la creierul unic ca audio (5 aug)', () => {
+  const panel = sursa('../../frontend/src/components/ChatPanel.tsx')
+  const mic = sursa('../../frontend/src/lib/micStream.ts')
+
+  it('onAddressed trimite fraza (audio) la aceeași send(), marcată voce ambientală', () => {
+    // Fără unire de fraze (transcriptul a dispărut): fiecare frază pleacă direct
+    // la creier ca audio; creierul decide adresarea. voceMergeRef a dispărut.
+    expect(panel.includes('voceMergeRef')).toBe(false)
+    expect(/onAddressed: \(_text, vf, speaker, audio\)[\s\S]{0,600}sendRef\.current\('', true\)/.test(panel)).toBe(true)
+    // Tura vocală e marcată (isVoiceTurn) și dusă la creier ca voce ambientală.
+    expect(/isVoiceTurn/.test(panel)).toBe(true)
+    // Flagul voceAmbianta trece prin transportul unic de chat (lib/chat.ts).
+    const feChat = sursa('../../frontend/src/lib/chat.ts')
+    expect(/voceAmbianta/.test(feChat)).toBe(true)
+  })
+
+  it('microfonul e VAD LOCAL — fără WebSocket la STT, fără transcript de server', () => {
+    // Sigilat: dacă cineva recablează asr-stream / un WebSocket STT în micStream,
+    // sau readuce transcriptul în onPhrase, testul cade.
+    expect(/asr-stream/.test(mic)).toBe(false)
+    expect(/new WebSocket/.test(mic)).toBe(false)
+    expect(/PAUZA_FRAZA_MS/.test(mic)).toBe(true)
+    expect(/const closePhrase = \(\): void =>/.test(mic)).toBe(true)
+    expect(/opts\.onPhrase\('', features, audio\)/.test(mic)).toBe(true)
+  })
+
+  it('nu mai există cale STT streaming pe backend (asr-stream a fost șters)', () => {
+    // Sigilat: ruta streaming STT nu mai există; dacă reapare, testul cade.
+    let existaStream = true
+    try {
+      sursa('./routes/asr-stream.ts')
+    } catch {
+      existaStream = false
+    }
+    expect(existaStream).toBe(false)
+  })
+})
+
+describe('LACĂT — creier Pro + Extended Thinking (Adrian, 5 aug: „la creier adaugi Gemini Pro + Extended Thinking")', () => {
+  it('creierul de bază e Gemini 3 Pro (modelul avansat), din config', () => {
+    const s = sursa('./config.ts')
+    expect(/gemini-3\.1-pro-preview/.test(s)).toBe(true)
+    // Pe toate treptele creierului (chat/work/top), nu doar una.
+    expect(config.brain.chatDefault).toContain('gemini-3.1-pro-preview')
+    expect(config.brain.workDefault).toContain('gemini-3.1-pro-preview')
+    expect(config.brain.topDefault).toContain('gemini-3.1-pro-preview')
+  })
+
+  it('Extended Thinking pe turele grele: reasoning «high» pe creierul direct → thinkingLevel «high»', () => {
+    const chat = sursa('./routes/chat.ts')
+    expect(/reasoning: heavyTurn \?[\s\S]{0,90}'high'/.test(chat)).toBe(true)
+    const gd = sursa('./services/geminiDirect.ts')
+    expect(/thinkingLevel:\s*opts\.reasoning === 'high' \? 'high'/.test(gd)).toBe(true)
+    // Podeaua de output urcă pe gândirea extinsă, altfel răspunsul iese tăiat.
+    expect(/podea3x = opts\.reasoning === 'high' \? 8192/.test(gd)).toBe(true)
   })
 })
