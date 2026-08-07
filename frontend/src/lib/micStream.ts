@@ -28,7 +28,7 @@ import {
   type VoiceFeatures,
 } from './audioIO.js'
 
-const TARGET_RATE = 16000
+import { TARGET_RATE, downsample, float32ToPcm16 } from './pcm'
 // PAUZA care ÎNCHIDE fraza (Adrian, 3 aug — latența „nu mă aude"): o tăcere mai
 // lungă de-atât = sfârșit de rostire → fraza pleacă la creier. Nu prea scurt
 // (ar tăia o propoziție la o respirație), nu prea lung (ar întârzia răspunsul).
@@ -89,14 +89,7 @@ function wavDataUri16k(chunks: Float32Array[]): string {
   let total = 0
   for (const c of chunks) total += c.length
   if (total < TARGET_RATE / 10) return '' // sub ~0.1s = nimic util
-  const pcm = new Int16Array(total)
-  let o = 0
-  for (const c of chunks) {
-    for (let i = 0; i < c.length; i++) {
-      const s = Math.max(-1, Math.min(1, c[i]))
-      pcm[o++] = s < 0 ? s * 0x8000 : s * 0x7fff
-    }
-  }
+  const pcm = float32ToPcm16(chunks)
   const bytes = new Uint8Array(44 + pcm.byteLength)
   const dv = new DataView(bytes.buffer)
   const wr = (off: number, s: string): void => {
@@ -124,16 +117,6 @@ function wavDataUri16k(chunks: Float32Array[]): string {
     bin += String.fromCharCode(...bytes.subarray(i, i + CH))
   }
   return `data:audio/wav;base64,${btoa(bin)}`
-}
-
-// eșantionare liniară în jos (ctx.sampleRate → 16kHz) — suficient pentru voce
-function downsample(input: Float32Array, inRate: number): Float32Array {
-  if (inRate === TARGET_RATE) return input
-  const ratio = inRate / TARGET_RATE
-  const outLen = Math.floor(input.length / ratio)
-  const out = new Float32Array(outLen)
-  for (let i = 0; i < outLen; i++) out[i] = input[Math.floor(i * ratio)]
-  return out
 }
 
 export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHandle | null> {
