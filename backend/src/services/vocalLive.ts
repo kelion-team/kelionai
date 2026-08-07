@@ -23,7 +23,24 @@ import { config } from '../config.js'
 // native-audio (dec. 2025): voce NATURALĂ (emoție/ton) + apel de unealtă
 // NON_BLOCKING (Kelion vorbește în timp ce unealta rulează). Pe variabilă
 // (VOCAL_LIVE_MODEL) → o linie de schimbat când Google scoate un Live mai nou.
-export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'
+export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-3.1-flash-live-preview'
+// MĂSURAT 7 aug pe cheia ownerului, de pe VPS (scripts/proba-modele.py, faza 3 —
+// sesiune bidi reală, cu AUDIO cerut corect; „KB" = voce chiar emisă, nu doar o
+// conexiune deschisă):
+//   gemini-3.1-flash-live-preview                  90 ms handshake |  491 ms primul răspuns | unelte DA | 66 KB
+//   gemini-2.5-flash-native-audio-preview-12-2025  77 ms handshake |  775 ms primul răspuns | unelte DA | 65 KB
+//   gemini-2.5-flash-native-audio-preview-09-2025  92 ms handshake |  871 ms primul răspuns | unelte DA | 65 KB
+//   gemini-2.5-flash-native-audio-latest           92 ms handshake |  915 ms primul răspuns | unelte DA | 65 KB
+// Adrian a ales 3.1 pe cifra asta (284 ms mai repede la primul cuvânt), ridicând
+// explicit refuzul lui din 4 aug („fără 3.1").
+//
+// CE NU AM MĂSURAT, și trebuie spus: proba a măsurat LATENȚA și faptul că iese
+// voce cu unelte — NU cât de natural SUNĂ. Familiile diferă prin construcție:
+// `native-audio` scoate vocea direct din model (intonație/emoție) și cheamă
+// uneltele NON_BLOCKING (vorbește în timp ce unealta rulează), pe când familia
+// `live` trece prin sinteză, deci sună mai plat. Diferența aia se judecă doar cu
+// urechea, pe live — de-aia modelul stă pe env (`VOCAL_LIVE_MODEL`): o valoare
+// schimbată și o repornire, fără atins codul, dacă vocea nu-i place.
 // Voce MASCULINĂ implicită (măsurat: acceptată). Owner o poate schimba din env
 // (Puck / Charon / Fenrir / Orus sunt toate acceptate) după ce o ascultă.
 export const VOCAL_LIVE_VOICE = process.env.VOCAL_LIVE_VOICE || 'Charon'
