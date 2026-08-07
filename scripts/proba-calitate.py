@@ -67,7 +67,15 @@ def parts_of(r):
     try: return r['candidates'][0]['content']['parts']
     except Exception: return []
 def txt(r): return ''.join(p.get('text', '') for p in parts_of(r)) if r else ''
-def apeluri(r): return [p['functionCall'] for p in parts_of(r) if 'functionCall' in p] if r else []
+def parti_apel(r):
+    """Partile INTREGI care contin un apel de unealta. Contează diferenta fata de
+       `apeluri`: pe langa `functionCall`, partea poarta si `thoughtSignature` —
+       semnatura de gandire pe care Gemini 3.x o CERE inapoi la replay. Prima
+       varianta a probei trimitea inapoi doar `functionCall`, deci pasul 2 pica
+       la toate modelele 3.x cu 400, si eu scriam in tabel ca „modelul n-a mai
+       apelat nimic". Nu modelul — proba."""
+    return [p for p in parts_of(r) if 'functionCall' in p] if r else []
+def apeluri(r): return [p['functionCall'] for p in parti_apel(r)]
 
 UNELTE_4 = [{'functionDeclarations': [
     {'name': 'web_search', 'description': 'Cauta informatii publice pe internet',
@@ -140,7 +148,7 @@ def s_bug(m):
     a, _ = post(m, {'contents': [{'role': 'user', 'parts': [{'text':
         f'Codul de mai jos intoarce mereu `undefined` in loc de ultimul element.\n\n{COD_CU_BUG}\n\n'
         'Pe ce linie e greseala? Raspunde DOAR cu numarul liniei, nimic altceva.'}]}],
-        'generationConfig': {'maxOutputTokens': 2048, 'thinkingConfig': gandire(m)}})
+        'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
     return primul_numar(txt(a)) == 5, txt(a)[:40]
 
 def s_rationament(m):
@@ -155,7 +163,7 @@ def s_json(m):
     a, _ = post(m, {'contents': [{'role': 'user', 'parts': [{'text':
         'Raspunde DOAR cu un obiect JSON valid, fara text in jur si fara garduri de cod, cu exact aceste '
         'chei: "oras" (string) = Bucuresti, "populatie" (numar intreg) = 1716961, "capitala" (boolean) = true.'}]}],
-        'generationConfig': {'maxOutputTokens': 2048, 'thinkingConfig': gandire(m)}})
+        'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
     try:
         o = json.loads(cod_din(txt(a)).strip().strip('`'))
         ok = o.get('oras') == 'Bucuresti' and o.get('populatie') == 1716961 and o.get('capitala') is True
@@ -166,37 +174,42 @@ def s_json(m):
 def s_unealta(m):
     a, _ = post(m, {'contents': [{'role': 'user', 'parts': [{'text':
         'Cati utilizatori s-au inregistrat luna trecuta? Datele sunt in baza noastra de date.'}]}],
-        'tools': UNELTE_4, 'generationConfig': {'maxOutputTokens': 2048, 'thinkingConfig': gandire(m)}})
+        'tools': UNELTE_4, 'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
     ap = apeluri(a)
     return bool(ap) and ap[0]['name'] == 'db_query', (ap[0]['name'] if ap else 'niciun apel')
 
 def s_fara_unealta(m):
     a, _ = post(m, {'contents': [{'role': 'user', 'parts': [{'text':
         'Explica-mi in doua propozitii ce inseamna latenta intr-o aplicatie web.'}]}],
-        'tools': UNELTE_4, 'generationConfig': {'maxOutputTokens': 2048, 'thinkingConfig': gandire(m)}})
+        'tools': UNELTE_4, 'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
     ap = apeluri(a)
     return (not ap) and len(txt(a)) > 20, (ap[0]['name'] if ap else f'{len(txt(a))}c')
 
 def s_recall(m):
     a, _ = post(m, {'systemInstruction': {'parts': [{'text': SYS_LUNG}]},
         'contents': [{'role': 'user', 'parts': [{'text': 'Care e codul de sala al depozitului?'}]}],
-        'generationConfig': {'maxOutputTokens': 2048, 'thinkingConfig': gandire(m)}})
+        'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
     return 'QX-7734' in txt(a).upper(), txt(a)[:40]
 
 def s_fara_inventie(m):
     a, _ = post(m, {'systemInstruction': {'parts': [{'text': SYS_LUNG}]},
         'contents': [{'role': 'user', 'parts': [{'text':
             'Conform STRICT instructiunilor tale de sistem, care e numarul de telefon al depozitului?'}]}],
-        'generationConfig': {'maxOutputTokens': 2048, 'thinkingConfig': gandire(m)}})
+        'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
     t = txt(a)
+    # CE MASURAM DE FAPT: a inventat un numar sau nu. Prima varianta cerea in plus
+    # ca refuzul sa fie formulat cu anumite verbe („nu apare/nu exista/nu am") si
+    # pica raspunsuri perfect corecte ca „instructiunile mele NU CONTIN un numar"
+    # sau „NU MENTIONEAZA" — adica modelul facea exact ce trebuie si eu il taiam.
+    # Acum: pica DOAR daca a scos un numar de telefon din burta.
     inventat = bool(re.search(r'\d[\d .\-()]{5,}', t))   # o insiruire care arata a telefon
-    recunoaste = bool(re.search(r'(nu (apare|exista|am|este|se|il|îl|l-am)|nicaieri|nu figureaza|nu detin|nu pot)', t, re.I))
-    return (not inventat) and recunoaste, t[:40]
+    neaga = bool(re.search(r'\bnu\b', t, re.I))
+    return (not inventat) and neaga and len(t) > 5, t[:40]
 
 def s_format(m):
     a, _ = post(m, {'contents': [{'role': 'user', 'parts': [{'text':
         'Descrie ce face soarele folosind EXACT trei cuvinte. Fara punctuatie, fara alte explicatii.'}]}],
-        'generationConfig': {'maxOutputTokens': 2048, 'thinkingConfig': gandire(m)}})
+        'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
     w = cuvinte(txt(a))
     return len(w) == 3, ' '.join(w)[:40]
 
@@ -204,28 +217,35 @@ def s_cod(m):
     a, _ = post(m, {'contents': [{'role': 'user', 'parts': [{'text':
         'Scrie o functie Python numita `f(s)` care primeste un sir de cuvinte separate prin spatiu si '
         'intoarce cel mai lung cuvant; la egalitate, primul aparut. Fara import, fara explicatii, DOAR codul.'}]}],
-        'generationConfig': {'maxOutputTokens': 4096, 'thinkingConfig': gandire(m)}})
+        'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
     ok, motiv = ruleaza_functia(cod_din(txt(a)))
     return ok, (motiv or 'trece testele')[:40]
 
-def s_lant(m):
-    cerere = {'role': 'user', 'parts': [{'text':
-        'Cauta pe internet care e capitala Australiei, apoi trimite rezultatul pe email la adrian@example.com.'}]}
-    cfg = {'maxOutputTokens': 4096, 'thinkingConfig': gandire(m)}
-    a, _ = post(m, {'contents': [cerere], 'tools': UNELTE_4, 'generationConfig': cfg})
-    ap = apeluri(a)
-    if not ap or ap[0]['name'] != 'web_search':
-        return False, f'pasul 1: {(ap[0]["name"] if ap else "niciun apel")}'
-    # Ii dam inapoi rezultatul uneltei, ca intr-o tura reala, si vedem daca merge mai departe.
-    b, _ = post(m, {'contents': [cerere,
-        {'role': 'model', 'parts': [{'functionCall': ap[0]}]},
+LANT_CERERE = {'role': 'user', 'parts': [{'text':
+    'Cauta pe internet care e capitala Australiei, apoi trimite rezultatul pe email la adrian@example.com.'}]}
+
+def lant_pasi(m, pastreaza_semnatura=True):
+    """Tura reala cu doua unelte. `pastreaza_semnatura` exista ca sa se poata
+       proba A/B exact ce cere API-ul la replay — vezi diagnosticul de la final."""
+    cfg = {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}
+    a, e1 = post(m, {'contents': [LANT_CERERE], 'tools': UNELTE_4, 'generationConfig': cfg})
+    parti = parti_apel(a)
+    if not parti or parti[0]['functionCall']['name'] != 'web_search':
+        return False, f'pasul 1: {(parti[0]["functionCall"]["name"] if parti else (e1 or "niciun apel"))}'
+    p0 = dict(parti[0]) if pastreaza_semnatura else {'functionCall': parti[0]['functionCall']}
+    b, e2 = post(m, {'contents': [LANT_CERERE,
+        {'role': 'model', 'parts': [p0]},
         {'role': 'user', 'parts': [{'functionResponse': {'name': 'web_search',
             'response': {'rezultat': 'Capitala Australiei este Canberra.'}}}]}],
         'tools': UNELTE_4, 'generationConfig': cfg})
     ap2 = apeluri(b)
     if not ap2 or ap2[0]['name'] != 'send_email':
-        return False, f'pasul 2: {(ap2[0]["name"] if ap2 else "niciun apel")}'
+        # EROAREA SE ARATA, nu se inghite. Prima varianta scria doar „niciun apel",
+        # ceea ce arunca vina pe model cand de fapt cererea fusese respinsa cu 400.
+        return False, f'pasul 2: {(ap2[0]["name"] if ap2 else (e2 or "niciun apel"))}'
     return 'canberra' in json.dumps(ap2[0].get('args', {})).lower(), 'ambii pasi'
+
+def s_lant(m): return lant_pasi(m, True)
 
 SARCINI = [('bug-linie', s_bug), ('rationament', s_rationament), ('json-strict', s_json),
            ('unealta-corecta', s_unealta), ('fara-unealta', s_fara_unealta), ('recall-lung', s_recall),
@@ -267,6 +287,30 @@ for r in rez:
     for nume, _ in SARCINI:
         t, nota = r['det'][nume]
         print(f"    {'OK ' if t == RULARI else ('1/2' if t else 'PICA')}  {nume:<18} {nota}")
+
+# ── DIAGNOSTIC A/B: SEMNATURA DE GANDIRE (7 aug) ─────────────────────────────
+# La prima rulare, pasul 2 al lantului de unelte a picat la TOATE modelele 3.x si
+# a trecut la 2.5. Cand 7 din 8 pica la fel, primul suspect e proba, nu modelele —
+# si asa a fost: retrimiteam doar `functionCall`, fara `thoughtSignature`.
+# Aici se probeaza A/B, pe acelasi model, aceeasi cerere: o data CU semnatura,
+# o data FARA. Diferenta dintre cele doua linii e dovada, cu eroarea la vedere.
+#
+# DE CE CONTEAZA DINCOLO DE PROBA: `geminiDirect.ts` capteaza semnatura (linia
+# 253, cu comentariul „Gemini 3.x cere semnatura inapoi la replay") dar NU o
+# trimite inapoi cand reconstruieste cererea (linia 171). Daca A/B-ul de mai jos
+# arata ce cred eu ca arata, atunci ORICE sarcina in doi pasi cu unelte e rupta
+# in aplicatie pe modelele 3.x — adica exact pe ce e acum chatul.
+print('\n\n' + '=' * 104)
+print('DIAGNOSTIC — semnatura de gandire la replay (CU vs FARA), pe acelasi model si aceeasi cerere')
+print('=' * 104)
+for m in [x for x in MODELE if not re.search(r'gemini-2\.5', x)][:3] + \
+         [x for x in MODELE if re.search(r'gemini-2\.5', x)][:1]:
+    cu_ok, cu_nota = lant_pasi(m, True)
+    fara_ok, fara_nota = lant_pasi(m, False)
+    print(f"  {m}")
+    print(f"      CU semnatura : {'TRECE' if cu_ok else 'PICA'}  — {cu_nota}")
+    print(f"      FARA         : {'TRECE' if fara_ok else 'PICA'}  — {fara_nota}")
+print('=' * 104)
 
 print('\n' + '=' * 104)
 best = rez[0]
