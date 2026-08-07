@@ -265,8 +265,8 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
     const eticheta = `instalați: ${instalati}/${roster.length} | rămași: ${roster.length - instalati}`
     anunta(`${eticheta} | acum îl pun pe: ${ag.nume}`)
     const rez = await creeazaUnAgent(T, ag, cunoscuti, (pas) => anunta(`${eticheta} | ${pas}`))
-    rezultate.push(rez)
     if (rez.ok) {
+      rezultate.push(rez)
       await zabava(PAUZA_INTRE_MS) // fereastra e deschisă — drenăm cu următorul
       continue
     }
@@ -276,6 +276,7 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
       anunta(`${eticheta} | cotă de creare epuizată (429) — veghez la ${REIA_MIN} min și prind fereastra următoare`)
       break
     }
+    rezultate.push(rez)
     // Alt eșec (nu 429): trecem mai departe — nu blocăm restul.
   }
   const { creati, esuati, primaEroare } = socoteste(rezultate)
