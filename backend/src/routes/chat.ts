@@ -208,10 +208,26 @@ async function selectedBrainModel(
     // IF he ever wants to pick by hand again, this block comes out — but only at
     // HIS request, not because some future AI thinks "the user should decide".
     // He already decided: he doesn't want to decide every time.
+    // ── DOUĂ SLOTURI ȘI PE CALEA OWNERULUI (Adrian, 7 aug) ───────────────────
+    // AICI era blocajul care ar fi făcut inutilă toată separarea: ambele ramuri
+    // de mai jos cereau necondiționat treapta `work` (= Pro), iar `return`-ul de
+    // la finalul blocului iese ÎNAINTE de bifurcația rapid/greu de mai jos. Deci
+    // ownerul — singurul care testează live — ar fi rămas pe Pro și n-ar fi văzut
+    // NICIO diferență, oricât am fi separat config-ul. Găsit la verificarea
+    // dinaintea implementării, exact ca să nu-i raportez „e rapid" și el să
+    // măsoare iar 18 secunde.
+    //
+    // Acum treapta se alege din `heavy` (calculat mai sus, la fel pentru toți):
+    // tura ușoară („ce faci", „cât e ceasul") → slotul RAPID; tura grea (vedere,
+    // dificultate ≥ prag, intenție de acțiune) → Pro. NU e o retrogradare tăcută
+    // — regula §14 păzea împotriva coborârii pe o sarcină GREA, iar aici greul
+    // rămâne pe Pro. Iar dacă modelul rapid întâlnește totuși ceva peste el, are
+    // unealta `ask_brain` (dată doar pe tura ușoară) care escaladează la Pro.
+    const treaptaOwner: 'chat' | 'work' = heavy ? 'work' : 'chat'
     let ownerModel: string | null = null
     if (sel.work) {
       console.log(`[BRAIN] owner: ignoring the saved selection (${sel.work}) — the "I don't do manual" order; keeping the default`)
-      ownerModel = await resolveModel('work', null)
+      ownerModel = await resolveModel(treaptaOwner, null)
     } else {
       // ── HIS BRAIN, CHOSEN BY HIM (Adrian, Jul 31: "set
       // nvidia/nemotron-3-ultra-550b-a55b:free as the brain") ──────────────────
@@ -238,7 +254,7 @@ async function selectedBrainModel(
       // better". He asked for it, in writing, and switching to paid is one env
       // variable away (OPENROUTER_WORK_MODEL) or a choice in Settings → Model,
       // which still takes priority over everything.
-      ownerModel = await resolveModel('work', null)
+      ownerModel = await resolveModel(treaptaOwner, null)
     }
     // ── ESCALATION CLIMBS FROM HIS CHOICE TOO (Adrian, Jul 31) ───────────────
     //

@@ -1,4 +1,4 @@
-import { config, modelUnicDirect } from '../config.js'
+import { config, modelUnicDirect, modelRapidDirect } from '../config.js'
 
 // ── CONTRACTUL CREIERULUI — tipuri + reguli PURE, fără rețea ─────────────────
 // (Extirparea totală OpenRouter + OpenAI, 3 aug — ordinul repetat al ownerului:
@@ -91,9 +91,13 @@ export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: 
 /** Defaultul treptei, garantat Gemini: dacă cineva pune în env un model care NU
  *  e google-direct/*, nu-l lăsăm să deraieze creierul — cădem pe defaultul din
  *  cod (lacătul Gemini, 3 aug). */
-function fallbackTreapta(_tier: ModelTier): string {
-  // SIGILAT (6 aug, regula ultra-decisă a ownerului): UN SINGUR model unic pe TOATE
-  // treptele — niciodată 2.5/flash. Sursa unică e config (modelUnicDirect), fără env.
+function fallbackTreapta(tier: ModelTier): string {
+  // DOUĂ SLOTURI, SIGILATE (7 aug — măsurat de owner pe cheia lui: chat pe Pro =
+  // 3,6s…45s; pe flash-lite = 0,6s, cu unelte+vedere+auz intacte). Treapta de CHAT
+  // merge pe modelul RAPID; `work` și `top` rămân pe Pro, unde se face gândirea
+  // grea (agenți, autonomie, și escaladarea `ask_brain` chemată din chat).
+  // Sursa rămâne config-ul, în cod, FĂRĂ env — fiecare slot cu poarta lui de familie.
+  if (tier === 'chat') return modelRapidDirect()
   return modelUnicDirect()
 }
 

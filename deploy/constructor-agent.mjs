@@ -65,7 +65,18 @@ const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
 // MODEL_UNIC_DEFAULT), dovedit că răspunde. Suprascriibil din env
 // (`CONSTRUCTOR_GEMINI_MODEL`) DOAR pentru testare punctuală — implicit rămâne
 // modelul unic, ca autonomia să nu fugă pe alt model decât restul aplicației.
-const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.1-pro-preview'
+// 7 AUG — CONSTRUCTORUL TRECE PE FLASH (Adrian, opțiunea 1: „îl păstrezi, dar îl
+// pui pe modelul rapid"). Motivul măsurat: pe Pro un ordin ținea până la 30 min,
+// rula la fiecare 2 min și SUFOCA CPU-ul VPS-ului — atât de tare încât `docker
+// build`-ul publicării nu se mai termina și live-ul a stat blocat ore (6-7 aug).
+// Măsurat pe cheia ownerului, de pe VPS: Pro = 3,6s…45s (a și EXPIRAT o dată) vs
+// gemini-3.5-flash = 1,1s, cu unelte + vedere + auz intacte.
+//
+// DE CE `gemini-3.5-flash` ȘI NU `-flash-lite` (care e cu ~0,5s mai rapid): aici
+// se SCRIE COD, iar lite e cel mai mic model din familie. Flash întreg rămâne de
+// 5-15× mai rapid decât Pro, dar păstrează raționamentul de care are nevoie o
+// reparație reală. Viteza nu ajută dacă produce cod prost mai repede.
+const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.5-flash'
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
 // rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
 // 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei

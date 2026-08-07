@@ -45,13 +45,34 @@ function regulaModelUnic() {
   }
 }
 
-function regulaTreaptaGetter(camp) {
+// DOUĂ SLOTURI SIGILATE (7 aug): fiecare treaptă trebuie să rămână getter pe UNA
+// din cele două surse din cod — `modelUnicDirect()` (Pro, gândirea grea) sau
+// `modelRapidDirect()` (flash-lite, conversația). Lacătul NU s-a relaxat: în
+// continuare nimeni nu poate pune un model liber, din env sau din UI — doar că
+// acum sunt două sloturi în loc de unul, fiecare cu poarta lui de familie.
+function regulaTreaptaGetter(camp, sursa) {
   return {
-    nume: `Creierul (${camp}) = sursa unică (Gemini)`,
+    nume: `Creierul (${camp}) = sursa sigilată (${sursa})`,
     fisier: 'backend/src/config.ts',
     verifica(src) {
-      const m = new RegExp(`get ${camp}\\(\\): string \\{\\s*return modelUnicDirect\\(\\)`).exec(src)
-      if (!m) return `${camp} nu mai e getter pe sursa unică (modelUnicDirect) — structura config.ts s-a schimbat`
+      const m = new RegExp(`get ${camp}\\(\\): string \\{\\s*return ${sursa}\\(\\)`).exec(src)
+      if (!m) return `${camp} nu mai e getter pe ${sursa} — structura config.ts s-a schimbat`
+      return null
+    },
+  }
+}
+
+function regulaModelRapid() {
+  return {
+    nume: 'Slotul rapid (MODEL_RAPID_DEFAULT) = Gemini flash/flash-lite',
+    fisier: 'backend/src/config.ts',
+    verifica(src) {
+      const m = /MODEL_RAPID_DEFAULT = '([^']+)'/.exec(src)
+      if (!m) return 'nu am găsit MODEL_RAPID_DEFAULT — slotul rapid al conversației a dispărut'
+      const model = m[1]
+      if (!/gemini/i.test(model)) return `MODEL_RAPID_DEFAULT NU mai e Gemini: „${model}"`
+      if (!/flash/i.test(model))
+        return `MODEL_RAPID_DEFAULT NU mai e din familia flash: „${model}" (chatul trebuie să rămână rapid — măsurat 7 aug: Pro pe chat = 3,6s…45s)`
       return null
     },
   }
@@ -75,14 +96,18 @@ function regulaFaraEnvModel() {
 // implicit al constructorului să fie tot Gemini Pro (nu flash/2.5/1.5).
 function regulaConstructorModelUnic() {
   return {
-    nume: 'Constructorul (autonomia) = model unic Gemini Pro',
+    nume: 'Constructorul (autonomia) = Gemini, model rapid (nu Pro)',
     fisier: 'deploy/constructor-agent.mjs',
     verifica(src) {
       const m = /CONSTRUCTOR_GEMINI_MODEL\s*\|\|\s*'([^']+)'/.exec(src)
       if (!m) return 'nu am găsit modelul implicit al constructorului (structura s-a schimbat)'
       const model = m[1]
-      if (!/^gemini-\d+(?:\.\d+)?-pro(?:-|$)/.test(model))
-        return `modelul constructorului NU mai e Gemini Pro: „${model}" (autonomia trebuie pe modelul unic, nu pe flash)`
+      // 7 aug (Adrian, opțiunea 1): constructorul NU mai are voie pe Pro — pe Pro
+      // un ordin ținea 30 min, sufoca CPU-ul VPS-ului și bloca publicarea ore.
+      // Trebuie flash (rapid), dar NU flash-lite: acolo se scrie cod și lite e
+      // prea mic. Poarta cere exact familia din mijloc.
+      if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(model))
+        return `modelul constructorului trebuie să fie Gemini flash (nu Pro, nu lite): „${model}"`
       return null
     },
   }
@@ -91,9 +116,10 @@ function regulaConstructorModelUnic() {
 // Fiecare regulă: unde caută, ce trebuie să rămână, și mesajul dacă s-a schimbat.
 const REGULI = [
   regulaModelUnic(),
-  regulaTreaptaGetter('chatDefault'),
-  regulaTreaptaGetter('workDefault'),
-  regulaTreaptaGetter('topDefault'),
+  regulaModelRapid(),
+  regulaTreaptaGetter('chatDefault', 'modelRapidDirect'),
+  regulaTreaptaGetter('workDefault', 'modelUnicDirect'),
+  regulaTreaptaGetter('topDefault', 'modelUnicDirect'),
   regulaFaraEnvModel(),
   regulaConstructorModelUnic(),
 ]
