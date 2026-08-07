@@ -83,6 +83,50 @@ export function setModelUnicValidat(m: string): boolean {
   return true
 }
 
+// ── AL DOILEA SLOT: MODELUL RAPID (Adrian, 7 aug — MĂSURAT pe cheia lui, de pe
+// VPS, cu payload real) ──────────────────────────────────────────────────────
+// Dovada care a impus separarea (rulată de owner, 3 măsurători/model):
+//   gemini-3.5-flash-lite    508–713 ms   unelte DA · vede DA · aude DA
+//   gemini-3.1-pro-preview   3.622 ms … 45.026 ms (EXPIRAT)  ← ce rula pe chat
+// Adică modelul de chat era cel mai lent DIN TOATE și, mai rău, imprevizibil
+// (3,6s → 45s pe aceeași cerere). „18 secunde să-mi spună cât e ceasul?" —
+// întrebarea ownerului, care a pornit studiul; răspunsul a fost: da, și nici
+// măcar nu știa ora.
+//
+// DE CE `gemini-3.5-flash-lite` și NU `gemini-flash-lite-latest` (care măsura
+// 511 ms, cu 100 ms mai puțin): aliasul `-latest` nu se potrivește NICIUNEIA din
+// ramurile de configurare a gândirii din geminiDirect.ts (`/gemini-2\.5/` sau
+// `/gemini-3/`) → ar pleca fără `thinkingLevel` și fără podeaua de output, exact
+// capcana din 6 aug în care 3.x consumă tot bugetul pe gândire și întoarce
+// răspuns GOL. `3.5-flash-lite` intră pe ramura `gemini-3`, primește configul
+// corect, e cel mai NOU lite, și e la 100 ms de vârf. Corectitudine peste 100 ms.
+//
+// CE RĂMÂNE PE PRO (nu s-a atins nimic): `geminiModelGreu`, `workDefault`,
+// `topDefault` — deci gândirea grea, agenții cu efort înalt și autonomia. Iar
+// unealta `ask_brain` (oferită de chat.ts DOAR pe tura ușoară) escaladează
+// singură de pe slotul rapid pe Pro când sarcina chiar cere gândire. Supapa era
+// deja cablată în cod; separarea doar o face reală.
+export const MODEL_RAPID_DEFAULT = 'gemini-3.5-flash-lite'
+let modelRapidActiv = MODEL_RAPID_DEFAULT
+/** Codul modelului rapid de conversație (ex: „gemini-3.5-flash-lite"). */
+export function modelRapidCod(): string {
+  return modelRapidActiv
+}
+/** Modelul rapid cu prefix google-direct/ (forma treptelor creierului). */
+export function modelRapidDirect(): string {
+  return `google-direct/${modelRapidActiv}`
+}
+/** Setează modelul rapid — DOAR din auto-upgrade validat. Acceptă NUMAI un Gemini
+ *  flash/flash-lite (niciodată Pro — ăla e slotul greu, niciodată experimental).
+ *  Simetric cu poarta Pro de mai sus: fiecare slot se poate muta doar în familia
+ *  lui, deci un upgrade nu poate face chatul lent, nici greul prost. */
+export function setModelRapidValidat(m: string): boolean {
+  const cod = String(m || '').replace(/^google-direct\//, '').trim()
+  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-lite)?(?:-|$)/.test(cod)) return false
+  modelRapidActiv = cod
+  return true
+}
+
 export const config = {
   isProd,
   port: Number(process.env.PORT ?? 8080),
@@ -121,8 +165,12 @@ export const config = {
   // (ureche→Pro→voce), deci „modelul avansat" e și pe voce. Un singur creier.
   // GETTERI pe sursa unică (fără env): se aplică AUTOMAT peste tot; auto-upgrade-ul
   // validat schimbă modelul într-un singur loc → se schimbă peste tot.
+  // DOUĂ SLOTURI (7 aug): `geminiModel` = conversația (RAPID, ~0,6s), iar
+  // `geminiModelGreu` = gândirea grea (Pro, neatins). Bifurcația care le folosește
+  // există de mult în chat.ts (`heavy ? Greu : geminiModel`) — până azi ambele
+  // ramuri dădeau același model, deci era o bifurcație moartă. Acum e vie.
   get geminiModel(): string {
-    return modelUnicCod()
+    return modelRapidCod()
   },
   get geminiModelGreu(): string {
     return modelUnicCod()
@@ -150,8 +198,11 @@ export const config = {
     // 6 aug: SIGILAT pe sursa unică, FĂRĂ env — toate treptele = același model unic
     // (cel mai performant Pro). Nu mai există split flash/pro, nici suprascriere din
     // env. Getteri → auto-upgrade-ul se aplică peste tot instant.
+    // 7 aug: treapta de CHAT trece pe modelul RAPID (măsurat: 0,6s vs 3,6–45s pe
+    // Pro), iar `work`/`top` rămân pe Pro — acolo se face gândirea grea, agenții
+    // cu efort înalt, autonomia și escaladarea `ask_brain` din chat.
     get chatDefault(): string {
-      return modelUnicDirect()
+      return modelRapidDirect()
     },
     get workDefault(): string {
       return modelUnicDirect()

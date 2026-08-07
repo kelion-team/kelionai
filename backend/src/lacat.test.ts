@@ -275,13 +275,42 @@ describe('LACĂT — voce unificată: fraza pleacă DIRECT la creierul unic ca a
 })
 
 describe('LACĂT — creier Pro + Extended Thinking (Adrian, 5 aug: „la creier adaugi Gemini Pro + Extended Thinking")', () => {
-  it('creierul de bază e Gemini 3 Pro (modelul avansat), din config', () => {
+  // SCHIMBAT 7 AUG — DOUĂ SLOTURI, pe dovadă măsurată de owner pe cheia lui, de pe
+  // VPS: chatul rula pe Pro și făcea 3.622 ms … 45.026 ms (a și EXPIRAT) la o
+  // întrebare banală, în timp ce `gemini-3.5-flash-lite` face 508–713 ms cu unelte
+  // + vedere + auz intacte. Întrebarea ownerului („18 secunde să-mi spună cât e
+  // ceasul?") a pornit studiul; măsurătoarea i-a dat dreptate.
+  // Lacătul NU s-a slăbit: gândirea GREA (work/top) rămâne bătută în cuie pe Pro,
+  // iar conversația e bătută în cuie pe familia flash. Ce se păzește acum e
+  // împerecherea corectă — nu se poate strecura Pro pe chat (lent), nici flash pe
+  // work/top (prost la gândire grea).
+  it('două sloturi sigilate: conversația pe flash (rapid), gândirea grea pe Pro', () => {
     const s = sursa('./config.ts')
     expect(/gemini-3\.1-pro-preview/.test(s)).toBe(true)
-    // Pe toate treptele creierului (chat/work/top), nu doar una.
-    expect(config.brain.chatDefault).toContain('gemini-3.1-pro-preview')
+    expect(/MODEL_RAPID_DEFAULT = 'gemini-[\d.]+-flash/.test(s)).toBe(true)
+    // CHAT = rapid, din familia flash, NICIODATĂ Pro (altfel revine lentoarea).
+    expect(config.brain.chatDefault).toMatch(/flash/)
+    expect(config.brain.chatDefault).not.toMatch(/pro/i)
+    // GREUL = Pro, neatins — aici se face raționamentul, agenții, autonomia.
     expect(config.brain.workDefault).toContain('gemini-3.1-pro-preview')
     expect(config.brain.topDefault).toContain('gemini-3.1-pro-preview')
+  })
+
+  it('poarta fiecărui slot acceptă DOAR familia lui (un upgrade nu poate încrucișa sloturile)', () => {
+    const cfg = sursa('./config.ts')
+    // Slotul Pro refuză flash; slotul rapid refuză Pro. Simetric, în cod.
+    expect(cfg).toContain('-pro(?:-|$)')
+    expect(/setModelRapidValidat/.test(cfg)).toBe(true)
+    expect(/flash(?:-lite)\?\(\?:-\|\$\)/.test(cfg) || cfg.includes('-flash(?:-lite)?(?:-|$)')).toBe(true)
+  })
+
+  it('escaladarea din chatul rapid spre Pro rămâne cablată (ask_brain doar pe tura ușoară)', () => {
+    // Supapa: dacă modelul rapid întâlnește ceva peste el, cheamă `ask_brain`,
+    // care merge pe workDefault = Pro. Fără asta, separarea ar fi o retrogradare.
+    const chat = sursa('./routes/chat.ts')
+    expect(/escalationTools = heavyTurn \? \[\] : \[ASK_BRAIN_TOOL\]/.test(chat)).toBe(true)
+    const brain = sursa('./services/brain.ts')
+    expect(/return \[config\.brain\.workDefault\]/.test(brain)).toBe(true)
   })
 
   it('Extended Thinking pe turele grele: reasoning «high» pe creierul direct → thinkingLevel «high»', () => {
