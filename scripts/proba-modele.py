@@ -109,3 +109,95 @@ for r in bun[:5]:
     print(f"    {r['ms']:>6} ms simplu | {r['hard_ms']:>6} ms greu | {r['name']:<30} ctx={r['ctx']}")
 if bun: print(f"\n>>> CASTIGATOR: {bun[0]['name']} — {bun[0]['ms']} ms simplu, {bun[0]['hard_ms']} ms greu, 0 raspunsuri goale")
 else: print('    NICIUNUL — toate dau gol pe payload-ul real (asta ar fi descoperirea)')
+
+# ── FAZA 3: LIVE FULL-DUPLEX (Adrian, 7 aug: „vreau toate măsurătorile pe
+# versiunea completă") ────────────────────────────────────────────────────────
+# Familia `native-audio` NU are `generateContent` — are DOAR `bidiGenerateContent`,
+# deci nu apare în tabelul de sus (care testează calea de chat) și nu poate fi
+# creier de chat. E altă cale: WebSocket, conversație în timp real.
+# Măsurăm ce contează pentru voce: cât durează HANDSHAKE-ul (conexiune + setup)
+# și cât până la PRIMUL RĂSPUNS — plus dacă acceptă UNELTE prin sesiunea live
+# (fără unelte, modelul live poate vorbi, dar nu poate căuta/plăti/deschide nimic).
+# WebSocket scris de mână (socket+ssl), ca proba să nu depindă de biblioteci
+# instalate pe server — regula casei: proba nu trebuie să ceară pregătiri.
+import socket, ssl, os, base64 as b64
+
+def ws_live(model, cu_unelte):
+    host = 'generativelanguage.googleapis.com'
+    path = f'/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={K}'
+    t0 = time.time()
+    try:
+        raw = socket.create_connection((host, 443), timeout=25)
+        s = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
+        key = b64.b64encode(os.urandom(16)).decode()
+        s.send((f'GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\n'
+                f'Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n'
+                f'Sec-WebSocket-Version: 13\r\n\r\n').encode())
+        head = b''
+        while b'\r\n\r\n' not in head:
+            c = s.recv(4096)
+            if not c: break
+            head += c
+        if b'101' not in head.split(b'\r\n')[0]:
+            return None, None, 'nu', head.split(b'\r\n')[0].decode('utf8', 'ignore')[:40]
+        hs = int((time.time() - t0) * 1000)
+
+        def trimite(obj):
+            p = json.dumps(obj).encode()
+            n, m = len(p), os.urandom(4)
+            h = b'\x81'
+            if n < 126: h += bytes([0x80 | n])
+            elif n < 65536: h += b'\xfe' + n.to_bytes(2, 'big')
+            else: h += b'\xff' + n.to_bytes(8, 'big')
+            s.send(h + m + bytes(b ^ m[i % 4] for i, b in enumerate(p)))
+
+        def citeste(lim=25):
+            s.settimeout(lim)
+            d = s.recv(65536)
+            if not d or len(d) < 2: return ''
+            ln = d[1] & 127; off = 2
+            if ln == 126: ln = int.from_bytes(d[2:4], 'big'); off = 4
+            elif ln == 127: ln = int.from_bytes(d[2:10], 'big'); off = 10
+            return d[off:off + ln].decode('utf8', 'ignore')
+
+        setup = {'model': f'models/{model}', 'generationConfig': {'responseModalities': ['TEXT']}}
+        if cu_unelte:
+            setup['tools'] = [{'functionDeclarations': [{'name': 'cauta', 'description': 'Cauta pe internet',
+                'parameters': {'type': 'object', 'properties': {'q': {'type': 'string'}}, 'required': ['q']}}]}]
+        trimite({'setup': setup})
+        ack = citeste(20)
+        if 'setupComplete' not in ack:
+            s.close()
+            return hs, None, 'nu', ('unelte respinse' if cu_unelte else ack[:40])
+        t1 = time.time()
+        trimite({'clientContent': {'turns': [{'role': 'user', 'parts': [{'text':
+            'Cauta vremea in Bucuresti.' if cu_unelte else 'Salut! Raspunde scurt.'}]}], 'turnComplete': True}})
+        prim, gasit = None, ''
+        for _ in range(12):
+            try: r = citeste(20)
+            except Exception: break
+            if not r: break
+            if prim is None and ('"text"' in r or 'functionCall' in r):
+                prim = int((time.time() - t1) * 1000)
+            if 'functionCall' in r: gasit = 'unealta'
+            if 'turnComplete' in r or 'generationComplete' in r: break
+        s.close()
+        return hs, prim, ('DA' if (cu_unelte and gasit) else 'nu'), ''
+    except Exception as e:
+        return None, None, 'nu', str(e)[:40]
+
+LIVE_M = [m['name'].replace('models/', '') for m in ml
+          if 'bidiGenerateContent' in m.get('supportedGenerationMethods', [])]
+print('\n\n' + '=' * 104)
+print('FAZA 3 — LIVE FULL-DUPLEX (WebSocket). Alta cale: NU are generateContent, deci nu poate fi creier de chat.')
+print('=' * 104)
+print(f"{'MODEL':<42}{'HANDSHAKE':<12}{'PRIM RASPUNS':<15}{'UNELTE':<9}{'nota'}")
+print('-' * 104)
+for m in LIVE_M:
+    hs, pr, un, er = ws_live(m, False)
+    _, _, un2, _ = ws_live(m, True) if hs else (None, None, 'nu', '')
+    print(f"{m:<42}{(str(hs)+' ms' if hs else 'PICAT'):<12}"
+          f"{(str(pr)+' ms' if pr else ('fara raspuns' if hs else '-')):<15}{un2:<9}{er}")
+print('=' * 104)
+print('\nNOTA: „live" si „creier de chat" sunt DOUA componente, nu una. Modelul live')
+print('vorbeste in timp real; creierul de chat foloseste unelte, vede si aude.')
