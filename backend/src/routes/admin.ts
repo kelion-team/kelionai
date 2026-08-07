@@ -62,6 +62,7 @@ import { envCheck, envOrphans, envSummary, processStartedAt } from '../services/
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox, deleteInboxMessages } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
+import { uitaToateSesiunile } from '../services/stareSesiune.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
 // Live checks against the four public install locations. Cached 5 minutes so
@@ -576,6 +577,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const list = Array.isArray(req.body?.disabled) ? req.body.disabled : []
     await setDisabledGestures(list)
+    // Gesturile sunt o setare GLOBALĂ, dar de la 7 aug fiecare sesiune își ține
+    // lista în memorie (stareSesiune, TTL 10 min) ca să nu recitească DB-ul la
+    // fiecare tură. Fără linia asta, un gest debifat din panou ar fi rămas activ
+    // până la 10 minute pentru oricine e deja logat — exact tiparul „valoare
+    // veche servită după ce s-a schimbat". Uităm TOT: următoarea tură recitește.
+    uitaToateSesiunile()
     return reply.send({ ok: true, disabled: await getDisabledGestures() })
   })
 
