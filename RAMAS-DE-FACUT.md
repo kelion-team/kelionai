@@ -19,6 +19,20 @@
 > care le descriau au fost extirpate. Se taie DOAR după merge + verificare live,
 > conform regulii; până atunci rămân, cu nota asta drept context.
 
+> **7 aug 2026 — DEPLOY DEBLOCAT + VOCEA REPARATĂ (măsurat).** Live `9cbf29e` ==
+> master, 0 commituri nepublicate, `/api/health` 200. Vocea „nu aude" (6 aug)
+> reparată și LIVE: audio-ul ajunge la creier pe o tură user proaspătă, iar
+> intermediarul de timbru a fost scos din cale (audio DIRECT la creier, viteză).
+> Publicarea stătuse blocată ore (constructorul, cron la 2 min, sufoca CPU-ul →
+> `docker build` agățat ținea lacătul); deblocată manual + `deploy.sh` întărit
+> (trap de restaurare a constructorului + kill pe grupul de procese/atelier +
+> `timeout 1200` pe build). **CE RĂMÂNE:** (1) comportamentul live al vocii sub 1s
+> + adresarea corectă — „nu pot verifica", proba e testul ownerului (trezirea e
+> acum 100% judecata creierului pe audio; un fals `<TAC/>` poate înghiți tăcut o
+> frază adresată); (2) **SECRETE EXPUSE** într-o captură (root/SSH/tokenuri
+> GitHub/chei API) → **rotire necesară**, GitHub + SSH întâi; (3) cod mort:
+> `/api/realtime/transcript` + `/api/realtime/session` fără apelant din frontend.
+
 > **3 aug 2026 (mai târziu) — REPARAȚIA TOTALĂ A PANOULUI DE ADMIN (branch de
 > worktree, PR în lucru, NEVERIFICAT LIVE):** toate cele 83 de probleme din
 > auditul multi-agent pe 8 zone (bani, utilizatori-vizitatori, istoric-cereri,

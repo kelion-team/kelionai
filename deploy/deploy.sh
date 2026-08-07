@@ -37,6 +37,16 @@ CADDY_DIR=/root/kelion-caddy
 exec 8>/root/kelion/publicare.lock
 flock 8
 
+# TRAP DE RESTAURARE A CONSTRUCTORULUI (Adrian, 7 aug — audit: pasul 0 scoate
+# constructorul din cron, dar dacă build-ul PICĂ sub `set -e`, scriptul moare
+# ÎNAINTE de pasul 6d care-l repune → constructorul rămâne oprit până la următorul
+# deploy verde). Trap-ul pe EXIT îl repune la ORICE ieșire (succes sau eșec),
+# idempotent (grep -v scoate linia existentă, apoi adaugă exact una).
+restore_constructor() {
+  ( crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' ; echo '*/2 * * * * /root/kelion/constructor-worker.sh >> /root/kelion/constructor.log 2>&1' ) | crontab - 2>/dev/null || true
+}
+trap restore_constructor EXIT
+
 echo "== 0. Blochez ecosistemul-zombie (puntea/constructorul, șters din cod pe 23 iul) =="
 # Lanț complet descoperit la audit (24 iul): serviciile kelion-bridge/builder/
 # paznic/deployer loveau endpointuri șterse și ardeau abonamentul cu procese
@@ -82,7 +92,18 @@ pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux|keli
 #    să aibă serverul pentru el. NU-i pierdem funcția: pasul 6d îl REPUNE în cron la
 #    finalul publicării — doar tăcem gălăgia cât se publică.
 crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' | crontab - 2>/dev/null || true
-pkill -9 -f 'constructor-worker|constructor-agent' 2>/dev/null || true
+# Omoară TOT arborele constructorului, nu doar părintele (Adrian, 7 aug — audit:
+# `constructor-agent.mjs` lansează prin execSync copii CPU-grei — npm/tsc/vite/
+# esbuild în /root/kelion/atelier; un `pkill` simplu prinde doar procesul-părinte,
+# iar copiii orfani ard CPU și sufocă `docker build`-ul publicării). Kill pe GRUPUL
+# de procese (kill -PGID, PID negativ) îi ia pe toți descendenții. Best-effort.
+{
+  for pid in $(pgrep -f 'constructor-worker|constructor-agent' 2>/dev/null || true); do
+    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
+    [ -n "$pgid" ] && kill -9 "-$pgid" 2>/dev/null || true
+  done
+  pkill -9 -f 'constructor-worker|constructor-agent|/root/kelion/atelier' 2>/dev/null || true
+} || true
 
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
@@ -121,7 +142,12 @@ echo "== 2b. Canalul de update al lui Kelion (ce primește la ACEST deploy) =="
 } > "$REPO/deploy/last-updates.txt"
 
 echo "== 3. Construiesc imaginea =="
-docker build -t kelionai:latest "$REPO"
+# TIMEOUT PE BUILD (Adrian, 7 aug — audit: `docker build` n-avea limită; dacă
+# atârna, ținea lacătul de publicare la infinit → totul îngheța, exact ce s-a
+# întâmplat 6 aug). `timeout 1200` (20 min) taie un build agățat → scriptul iese
+# non-zero, lacătul se eliberează, trap-ul repune constructorul, iar auto-publicarea
+# reîncearcă la ciclul următor. Un build sănătos e sub ~8 min, deci pragul e larg.
+timeout 1200 docker build -t kelionai:latest "$REPO"
 
 echo "== 4. Pornesc aplicația (:8080, network host, env-file) =="
 docker rm -f kelionai-app 2>/dev/null || true
