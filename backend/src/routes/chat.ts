@@ -1858,7 +1858,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     //   2. THE CAMERA (continuous sight) — frames go out ONLY when the user
     //      asks something visual (VISION_INTENT: "can you see me", "what do
     //      you see", "describe", etc.).
-    const reqImageSource = req.body?.imageSource || (imageIsAttachment ? 'chat' : 'camera')
+    const reqImageSource = (req.body as any)?.imageSource || (imageIsAttachment ? 'chat' : 'camera')
     const attachedPhoto = imageIsAttachment && image ? [image] : []
     const camView = camFrames.length > 0 ? camFrames : !imageIsAttachment && image ? [image] : []
     // Read by selectedBrainModel — forces the step with real sight (see there).
