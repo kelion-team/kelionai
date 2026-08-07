@@ -168,7 +168,19 @@ export function toGeminiPayload(
       } catch {
         /* corrupted arguments — we go with {} */
       }
-      parts.push({ functionCall: { name: c.function.name, args } })
+      // SEMNĂTURA DE GÂNDIRE, RETRIMISĂ (7 aug — bug găsit prin măsurare, nu prin
+      // citit: era CAPTATĂ mai jos (din răspuns) și aruncată aici, la replay.
+      // Gemini 3.x o cere înapoi; fără ea, PASUL 2 al oricărei ture cu unelte
+      // pica cu HTTP 400 „Function call is missing a thought_signature in
+      // functionCall parts". Adică: „caută X, apoi trimite-mi rezultatul" se
+      // oprea tăcut după primul pas — pe TOATE modelele 3.x, deci pe chatul de
+      // acum. DOVADA A/B (scripts/proba-calitate.py, rulată de owner pe VPS):
+      //   gemini-3.1-pro-preview  CU semnătură: TRECE | FĂRĂ: 400 (mesajul de mai sus)
+      //   gemini-pro-latest       CU semnătură: TRECE | FĂRĂ: 400
+      //   gemini-2.5-pro          CU semnătură: TRECE | FĂRĂ: TRECE (2.5 n-are semnături)
+      const partApel: GPart = { functionCall: { name: c.function.name, args } }
+      if (c.thoughtSignature) partApel.thoughtSignature = c.thoughtSignature
+      parts.push(partApel)
     }
     if (!parts.length) continue
     contents.push({ role, parts })

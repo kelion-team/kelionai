@@ -112,8 +112,10 @@ def cuvinte(t):
     return [w for w in re.sub(r'[^\wăâîșşțţĂÂÎȘŞȚŢ ]', ' ', (t or '')).split() if w]
 
 def cod_din(t):
-    """Scoate codul dintre ``` daca modelul a pus garduri; altfel textul brut."""
-    m = re.search(r'```(?:python)?\s*(.*?)```', t or '', re.S)
+    """Scoate codul dintre ``` daca modelul a pus garduri; altfel textul brut.
+       Eticheta de limbaj era prinsa doar pentru 'python' — la ```json ramanea
+       cuvantul 'json' lipit de continut. Acum se accepta orice eticheta."""
+    m = re.search(r'```[a-zA-Z0-9_+-]*\s*(.*?)```', t or '', re.S)
     return (m.group(1) if m else (t or '')).strip()
 
 def ruleaza_functia(cod):
@@ -164,12 +166,16 @@ def s_json(m):
         'Raspunde DOAR cu un obiect JSON valid, fara text in jur si fara garduri de cod, cu exact aceste '
         'chei: "oras" (string) = Bucuresti, "populatie" (numar intreg) = 1716961, "capitala" (boolean) = true.'}]}],
         'generationConfig': {'maxOutputTokens': 8192, 'thinkingConfig': gandire(m)}})
+    # STRICT, INTENTIONAT: cererea spune „fara garduri de cod". Deci se parseaza
+    # textul BRUT — cine pune ``` a incalcat instructiunea, si exact asta masoara
+    # sarcina. (Prima varianta scotea gardurile inainte de parsare, adica ierta
+    # fix greseala pe care o testa — si o ierta inconsecvent, doar la ```python.)
     try:
-        o = json.loads(cod_din(txt(a)).strip().strip('`'))
+        o = json.loads(txt(a).strip())
         ok = o.get('oras') == 'Bucuresti' and o.get('populatie') == 1716961 and o.get('capitala') is True
         return ok, str(o)[:40]
     except Exception:
-        return False, txt(a)[:40]
+        return False, txt(a)[:40].replace('\n', '\\n')
 
 def s_unealta(m):
     a, _ = post(m, {'contents': [{'role': 'user', 'parts': [{'text':
