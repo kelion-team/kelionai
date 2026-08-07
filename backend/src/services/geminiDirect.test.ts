@@ -69,7 +69,61 @@ describe('gemini direct (creierul principal gratuit)', () => {
     }
     expect(audio.inline_data.mime_type).toBe('audio/wav')
     expect(audio.inline_data.data).toBe('QUJDRA==')
-    const text = parts.find((p) => 'text' in p) as { text: string }
+    const text = parts.find((p) => 'text' in p) as { type?: string; text: string }
     expect(text.text).toBe('ce am spus?')
+  })
+
+  // SEMNĂTURA DE GÂNDIRE LA REPLAY (7 aug) — regresia care a existat cu adevărat:
+  // semnătura era CAPTATĂ din răspuns (partsToResult) și ARUNCATĂ la reconstrucția
+  // cererii, deci Gemini 3.x refuza pasul 2 al oricărei ture cu unelte cu HTTP 400
+  // („Function call is missing a thought_signature in functionCall parts").
+  // Măsurat A/B de owner pe VPS: CU semnătură trece, FĂRĂ pică — pe 3.1-pro-preview
+  // și pro-latest; pe 2.5-pro trece oricum (familia 2.5 n-are semnături).
+  // Testul ăsta e plasa: dacă cineva scoate iar linia, aici se face roșu.
+  it('retrimite thoughtSignature pe apelul de unealtă (Gemini 3.x o cere înapoi)', () => {
+    const messages: OrMessage[] = [
+      { role: 'user', content: 'caută vremea, apoi trimite-mi-o pe mail' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'g_0_abc',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{"q":"vremea"}' },
+            thoughtSignature: 'SEMNATURA-DE-PROBA',
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'g_0_abc', content: 'e soare' },
+    ]
+    const body = toGeminiPayload(messages, [], {}, 'gemini-3.5-flash') as {
+      contents: { role: string; parts: Record<string, unknown>[] }[]
+    }
+    const apel = body.contents
+      .flatMap((c) => c.parts)
+      .find((p) => 'functionCall' in p) as { functionCall: { name: string }; thoughtSignature?: string }
+    expect(apel.functionCall.name).toBe('web_search')
+    expect(apel.thoughtSignature).toBe('SEMNATURA-DE-PROBA')
+  })
+
+  // Reversul: pe familia 2.5 nu există semnătură, iar partea NU trebuie să capete
+  // un câmp gol/undefined — se trimite exact ce a venit, nimic inventat.
+  it('fără semnătură (familia 2.5) nu adaugă câmpul deloc', () => {
+    const messages: OrMessage[] = [
+      { role: 'user', content: 'caută vremea' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'g_0_xyz', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+        ],
+      },
+    ]
+    const body = toGeminiPayload(messages, [], {}, 'gemini-2.5-flash') as {
+      contents: { role: string; parts: Record<string, unknown>[] }[]
+    }
+    const apel = body.contents.flatMap((c) => c.parts).find((p) => 'functionCall' in p) as Record<string, unknown>
+    expect('thoughtSignature' in apel).toBe(false)
   })
 })

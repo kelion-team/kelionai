@@ -13,6 +13,7 @@
 // în imagine). Extractorul se încarcă O SINGURĂ DATĂ (lazy singleton).
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { cosine } from './embeddings.js'
 
 const require = createRequire(import.meta.url)
 
@@ -130,14 +131,12 @@ export function pcm16kDinWavDataUri(dataUri: string): Float32Array | null {
  *  atât mai aceeași voce (1 = identic). Întoarce -1 la intrări invalide. */
 export function cosineSim(a: number[] | null | undefined, b: number[] | null | undefined): number {
   if (!a || !b || a.length !== b.length || a.length === 0) return -1
-  let dot = 0
-  let na = 0
-  let nb = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    na += a[i] * a[i]
-    nb += b[i] * b[i]
-  }
-  if (na === 0 || nb === 0) return -1
-  return dot / (Math.sqrt(na) * Math.sqrt(nb))
+  // Bucla trăiește O SINGURĂ dată, în embeddings.ts (`cosine`) — era copiată
+  // aici identic. Ce rămâne aici e DOAR contractul propriu al vocii: lungimi
+  // egale obligatoriu, iar „nu pot compara" se spune cu -1, nu cu 0 (0 e o
+  // similaritate perfect validă — vectori perpendiculari). Suma pătratelor e 0
+  // doar când toate valorile sunt 0, deci verificarea de mai jos e exact
+  // condiția de normă zero din formulă, nu o aproximare.
+  if (a.every((x) => x === 0) || b.every((x) => x === 0)) return -1
+  return cosine(a, b)
 }

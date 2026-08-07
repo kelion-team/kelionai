@@ -62,7 +62,21 @@ const isProd = process.env.NODE_ENV === 'production'
 // flash/experimental. Config-ul îl expune prin GETTERI, deci se aplică AUTOMAT
 // peste tot (chat, agenți, memorie, fallback, scară) — schimbi într-un loc, se
 // schimbă peste tot.
-export const MODEL_UNIC_DEFAULT = 'gemini-3.1-pro-preview'
+// SCHIMBAT 7 aug, PE MĂSURĂTOARE, cu acordul explicit al ownerului: slotul greu
+// pleacă de pe Pro pe `gemini-3.5-flash`. Proba de calitate (scripts/proba-calitate.py,
+// 10 sarcini cu verificare AUTOMATĂ × 2 rulări × 8 modele, gândire 'high', rulată
+// de owner pe VPS-ul lui):
+//   gemini-3.5-flash        20/20   median 2620 ms   cel mai lent  6,3 s
+//   gemini-3-flash-preview  20/20   median 2093 ms   cel mai lent  6,4 s
+//   gemini-3.1-pro-preview  20/20   median 4713 ms   cel mai lent 73,3 s
+//   gemini-pro-latest       20/20   median 4818 ms   cel mai lent 72,2 s
+//   gemini-2.5-pro          18/20   median 6553 ms   cel mai lent 75,3 s
+// La CALITATE sunt egale (20/20). Diferența e că Pro e de două ori mai lent la
+// mediană și, mai grav, are cazuri de 72-75 SECUNDE. S-a ales `3.5-flash` și nu
+// `3-flash-preview` (cu 527 ms mai rapid) fiindcă „preview" e un nume pe care
+// Google îl poate retrage; iar 3.5-flash e din aceeași familie ca slotul rapid
+// (3.5-flash-lite), deci intră pe aceeași ramură de configurare a gândirii.
+export const MODEL_UNIC_DEFAULT = 'gemini-3.5-flash'
 let modelUnicActiv = MODEL_UNIC_DEFAULT
 /** Codul modelului unic (ex: „gemini-3.1-pro-preview"). Sursa de adevăr, live. */
 export function modelUnicCod(): string {
@@ -78,7 +92,11 @@ export function modelUnicDirect(): string {
  *  greșită". */
 export function setModelUnicValidat(m: string): boolean {
   const cod = String(m || '').replace(/^google-direct\//, '').trim()
-  if (!/^gemini-\d+(?:\.\d+)?-pro(?:-|$)/.test(cod)) return false
+  // Poarta familiei slotului GREU: `gemini-*-flash`, dar NICIODATĂ `-lite`
+  // (lite e slotul de conversație — dacă ar putea intra aici, cele două sloturi
+  // s-ar prăbuși într-unul și gândirea grea ar rămâne fără treaptă). Pro nu mai
+  // e acceptat: măsurat 7 aug, la aceeași calitate (20/20) avea cazuri de 72-75 s.
+  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(cod) || /-lite(?:-|$)/.test(cod)) return false
   modelUnicActiv = cod
   return true
 }
@@ -117,12 +135,14 @@ export function modelRapidDirect(): string {
   return `google-direct/${modelRapidActiv}`
 }
 /** Setează modelul rapid — DOAR din auto-upgrade validat. Acceptă NUMAI un Gemini
- *  flash/flash-lite (niciodată Pro — ăla e slotul greu, niciodată experimental).
- *  Simetric cu poarta Pro de mai sus: fiecare slot se poate muta doar în familia
- *  lui, deci un upgrade nu poate face chatul lent, nici greul prost. */
+ *  `flash-lite`. STRÂNS pe 7 aug: până acum accepta și flash simplu, ceea ce n-a
+ *  contat cât timp slotul greu era Pro — dar de când GREUL e flash, o poartă largă
+ *  aici ar fi lăsat AMBELE sloturi pe același model, adică o singură treaptă
+ *  deghizată în două. Acum sunt disjuncte prin construcție: conversația = lite,
+ *  gândirea grea = flash fără lite. */
 export function setModelRapidValidat(m: string): boolean {
   const cod = String(m || '').replace(/^google-direct\//, '').trim()
-  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-lite)?(?:-|$)/.test(cod)) return false
+  if (!/^gemini-\d+(?:\.\d+)?-flash-lite(?:-|$)/.test(cod)) return false
   modelRapidActiv = cod
   return true
 }

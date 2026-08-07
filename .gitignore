@@ -18,3 +18,7 @@ deploy/last-updates.txt
 # Claude Code agent worktrees (schele temporare, nu cod)
 .claude/worktrees/
 backend/models/*.onnx
+
+# Python bytecode (proba-modele.py rulează pe VPS; cache-ul nu are ce căuta în git)
+__pycache__/
+*.pyc
