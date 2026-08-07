@@ -69,6 +69,7 @@ import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck,
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
 import { getVoicePref } from '../db.js'
+import { stareSesiune, pastreazaStareSesiune, actualizeazaStareSesiune } from '../services/stareSesiune.js'
 import { splitForSpeech } from '../services/speech-chunk.js'
 import {
   browserOpen,
@@ -1340,21 +1341,45 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
       new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
     ])
-    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures, modelChoiceKv] = await Promise.all([
-      getSpeechLang(user.email),
-      getMeserieActiva(user.email),
+    // ── PREFERINȚELE SE CITESC O DATĂ PE SESIUNE, NU LA FIECARE ÎNTREBARE ────
+    // (Adrian, 7 aug: „verificarile de plati etc securitate se fac la logare si
+    // atit, e clar nu se repeta deloc pe intrebari"). Limba, meseria, gesturile,
+    // alegerea de model și preferința de voce NU depind de ce a întrebat omul —
+    // depind de CONT. Prima tură a sesiunii le citește o dată; următoarele le iau
+    // din memorie (`services/stareSesiune.ts`), fără niciun drum la DB. Memoria
+    // semantică (recall) și continuitatea rămân per-tură — ALEA depind de tura
+    // curentă. Securitatea (isAdmin, oaspete, unelte) se recalculează oricum mai
+    // jos, la fiecare cerere: viteza nu se ia din securitate.
+    const acumMs = Date.now()
+    const cache = stareSesiune(user.email, acumMs)
+    const [prefs, memRecall, lastSavedRow] = await Promise.all([
+      cache
+        ? Promise.resolve(cache)
+        : Promise.all([
+            getSpeechLang(user.email),
+            getMeserieActiva(user.email),
+            // GESTURES disabled by Adrian from the admin panel — anything NOT
+            // checked does NOT appear at all (Adrian, Jul 13).
+            getDisabledGestures().catch(() => [] as string[]),
+            loadKv(`model_choice:${userKey(user.email)}`).catch(() => null),
+            getVoicePref(user.email).catch(() => null),
+          ]).then(([speechLang, mId, gestures, mKv, vPref]) => {
+            const stare = {
+              speechLang, meserieId: mId, disabledGestures: gestures,
+              modelChoiceKv: mKv, voicePref: vPref, balance: null,
+            }
+            pastreazaStareSesiune(user.email, stare, acumMs)
+            return { ...stare, laMs: acumMs }
+          }),
       recallWithDeadline,
       // Continuity between sessions (#20): the timestamp of the last saved
       // message — pure DB, in parallel with the rest (zero added latency).
       getRecentHistory(user.email, 1).catch(() => []),
-      // GESTURES disabled by Adrian from the admin panel — anything NOT checked
-      // does NOT appear at all (Adrian, Jul 13): we filter the tool + prompt
-      // with this list.
-      getDisabledGestures().catch(() => [] as string[]),
-      // FLUENCY (A5): the user's model choice read HERE, in parallel — not as
-      // yet another serial DB trip right before the brain call.
-      loadKv(`model_choice:${userKey(user.email)}`).catch(() => null),
     ])
+    const storedPref = prefs.speechLang
+    const meserieId = prefs.meserieId
+    const disabledGestures = prefs.disabledGestures
+    const modelChoiceKv = prefs.modelChoiceKv
     // GESTURILE DEZACTIVATE de Adrian din Admin → Gesturi: gestul ales de
     // situație (mai jos, la finalul turei) e verificat față de setul ăsta și
     // nu se joacă dacă e debifat. „Ce nu e bifat nu apare în aplicație."
@@ -1384,7 +1409,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         : trackSpeechLang(user.email, lastIncomingText, storedPref)
     // FLUENCY (B4): fire-and-forget DB write — nothing downstream reads its
     // result, so it has no business on the first word's path.
-    if (committedLang) void setSpeechLangPref(user.email, committedLang)
+    if (committedLang) {
+      void setSpeechLangPref(user.email, committedLang)
+      // Limba s-a schimbat CHIAR ACUM → actualizăm starea ținută în memorie, ca
+      // următoarea întrebare să nu servească limba veche (și nici să nu recitească).
+      actualizeazaStareSesiune(user.email, { speechLang: committedLang })
+    }
     // The client is only told about the detected switch (the recognizer follows
     // it).
     const speechPref = committedLang ?? storedPref
@@ -2152,7 +2182,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const voice =
       req.body?.serverVoiceOff === true
         ? { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
-        : createVoiceStream(reply, userLang, await getVoicePref(user.email).catch(() => null))
+        // Preferința de voce vine din starea sesiunii (citită o dată) — era A
+        // TREIA interogare pe `user_prefs` în ACEEAȘI tură, serială, chiar
+        // înainte de apelul la creier. Zero drumuri la DB aici acum.
+        : createVoiceStream(reply, userLang, prefs.voicePref)
     let assistantText = ''
     // CE A VĂZUT DEJA OMUL PE ECRAN (agenții de debug, 3 aug, verdict REAL):
     // când un model pică DUPĂ ce a curs text, catch-ul lipea „Încearcă din nou"
