@@ -58,12 +58,25 @@ const GHTOKEN = env.GITHUB_TOKEN ?? ''
 // creier și nu inventează succes. Request/response shaping mirrors
 // backend/src/services/geminiDirect.ts. See llmGemini().
 const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
-// CREIERUL CONSTRUCTORULUI (4 aug 2026, măsurat pe cheia ownerului): trecut de la
-// 'gemini-2.5-pro' (generație veche) la 'gemini-3.6-flash' — generația cea mai
-// nouă, mai rapid și mai ieftin, iar apelul de UNELTE confirmat că merge pe
-// formatul exact al constructorului (functionCall ok). Suprascriibil din env
-// fără deploy (`CONSTRUCTOR_GEMINI_MODEL`) dacă vrei alt model.
-const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.6-flash'
+// CREIERUL CONSTRUCTORULUI = MODELUL UNIC (Adrian, 6 aug — regulă ultra-decisă:
+// „un SINGUR model, peste tot"). Trecut de la 'gemini-3.6-flash' (care întorcea
+// „200 gol/blocat" — răspuns gol pe cheie, 6 aug) la modelul unic al aplicației,
+// 'gemini-3.1-pro-preview' — ACELAȘI care servește tot creierul (config.ts
+// MODEL_UNIC_DEFAULT), dovedit că răspunde. Suprascriibil din env
+// (`CONSTRUCTOR_GEMINI_MODEL`) DOAR pentru testare punctuală — implicit rămâne
+// modelul unic, ca autonomia să nu fugă pe alt model decât restul aplicației.
+// 7 AUG — CONSTRUCTORUL TRECE PE FLASH (Adrian, opțiunea 1: „îl păstrezi, dar îl
+// pui pe modelul rapid"). Motivul măsurat: pe Pro un ordin ținea până la 30 min,
+// rula la fiecare 2 min și SUFOCA CPU-ul VPS-ului — atât de tare încât `docker
+// build`-ul publicării nu se mai termina și live-ul a stat blocat ore (6-7 aug).
+// Măsurat pe cheia ownerului, de pe VPS: Pro = 3,6s…45s (a și EXPIRAT o dată) vs
+// gemini-3.5-flash = 1,1s, cu unelte + vedere + auz intacte.
+//
+// DE CE `gemini-3.5-flash` ȘI NU `-flash-lite` (care e cu ~0,5s mai rapid): aici
+// se SCRIE COD, iar lite e cel mai mic model din familie. Flash întreg rămâne de
+// 5-15× mai rapid decât Pro, dar păstrează raționamentul de care are nevoie o
+// reparație reală. Viteza nu ajută dacă produce cod prost mai repede.
+const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.5-flash'
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
 // rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
 // 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
@@ -637,7 +650,18 @@ function toGeminiBody(messages) {
     if (!parts.length) continue // Gemini rejects a content with no parts
     contents.push({ role, parts })
   }
-  const body = { contents, tools: geminiToolDeclarations(), toolConfig: { functionCallingConfig: { mode: 'AUTO' } } }
+  // GENERATION CONFIG — OBLIGATORIU pe modelele 3.x (6 aug, cauza „200 gol/blocat"):
+  // Gemini 3.x „gândește" cu tokeni care INTRĂ în maxOutputTokens; fără o podea de
+  // output, gândirea consumă tot bugetul implicit → răspuns GOL (finish=MAX_TOKENS,
+  // fără parts). Oglindim calea dovedită (backend/src/services/geminiDirect.ts):
+  // podea 8192 + `thinkingLevel` (3.x REFUZĂ `thinkingBudget` cu 400). Pe generația
+  // veche 2.5 s-ar folosi `thinkingBudget` — păstrat pentru compat dacă cineva
+  // suprascrie modelul din env.
+  const este3x = /gemini-3/.test(GEMINI_MODEL)
+  const generationConfig = { maxOutputTokens: 8192, temperature: 0.7 }
+  if (este3x) generationConfig.thinkingConfig = { thinkingLevel: 'high' }
+  else if (/gemini-2\.5/.test(GEMINI_MODEL)) generationConfig.thinkingConfig = { thinkingBudget: 4096 }
+  const body = { contents, generationConfig, tools: geminiToolDeclarations(), toolConfig: { functionCallingConfig: { mode: 'AUTO' } } }
   if (sys.length) body.systemInstruction = { parts: [{ text: sys.join('\n\n') }] }
   return body
 }

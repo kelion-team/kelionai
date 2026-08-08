@@ -12,6 +12,29 @@
 // applies to the holder AND the guests in the same deploy.
 
 import { vectorDistance } from '../db.js'
+import { cosineSim, VOICE_EMBED_DIM } from './voiceEmbedding.js'
+
+// ── AMPRENTĂ NEURALĂ (Adrian, 6 aug: „amprenta e ADN, nu 9 numere; să mă
+// recunoască și răgușit") ────────────────────────────────────────────────────
+// Când avem embedding-ul neural de 256 (wespeaker, services/voiceEmbedding.ts),
+// verdictul se dă pe COSINUS, nu pe distanța euclidiană a celor 9 numere.
+// wespeaker/VoxCeleb: aceeași voce ~0.5–0.9, voci diferite ~0–0.3. Pragul e
+// PERMISIV intenționat — owner-ul cere să fie recunoscut și când vocea variază
+// (răgușeală); mai bine o fals-acceptare rară pe voci foarte apropiate decât
+// să-l respingem PE EL. De potrivit pe măsurători live.
+export const NEURAL_VOICE_THRESHOLD = 0.5
+
+/** Amprenta stocată e NEURALĂ (256) sau veche (9/64, incompatibilă)? */
+export function esteAmprentaNeurala(features: number[] | null | undefined): boolean {
+  return !!features && features.length === VOICE_EMBED_DIM
+}
+
+/** Verdict pe embedding neural: aceeași persoană? (cosinus ≥ prag). Amprente de
+ *  dimensiuni diferite (una veche, una nouă) NU se potrivesc — forțează re-înrolarea. */
+export function sameSpeakerNeural(emb: number[], reference: number[]): boolean {
+  if (!esteAmprentaNeurala(emb) || !esteAmprentaNeurala(reference)) return false
+  return cosineSim(emb, reference) >= NEURAL_VOICE_THRESHOLD
+}
 
 /** Under this normalized Euclidean distance, two voiceprints are the same
  *  person. Calibrated on the holder's real prints (see poartaVoce.test.ts —

@@ -19,6 +19,20 @@
 > care le descriau au fost extirpate. Se taie DOAR după merge + verificare live,
 > conform regulii; până atunci rămân, cu nota asta drept context.
 
+> **7 aug 2026 — DEPLOY DEBLOCAT + VOCEA REPARATĂ (măsurat).** Live `9cbf29e` ==
+> master, 0 commituri nepublicate, `/api/health` 200. Vocea „nu aude" (6 aug)
+> reparată și LIVE: audio-ul ajunge la creier pe o tură user proaspătă, iar
+> intermediarul de timbru a fost scos din cale (audio DIRECT la creier, viteză).
+> Publicarea stătuse blocată ore (constructorul, cron la 2 min, sufoca CPU-ul →
+> `docker build` agățat ținea lacătul); deblocată manual + `deploy.sh` întărit
+> (trap de restaurare a constructorului + kill pe grupul de procese/atelier +
+> `timeout 1200` pe build). **CE RĂMÂNE:** (1) comportamentul live al vocii sub 1s
+> + adresarea corectă — „nu pot verifica", proba e testul ownerului (trezirea e
+> acum 100% judecata creierului pe audio; un fals `<TAC/>` poate înghiți tăcut o
+> frază adresată); (2) **SECRETE EXPUSE** într-o captură (root/SSH/tokenuri
+> GitHub/chei API) → **rotire necesară**, GitHub + SSH întâi; (3) cod mort:
+> `/api/realtime/transcript` + `/api/realtime/session` fără apelant din frontend.
+
 > **3 aug 2026 (mai târziu) — REPARAȚIA TOTALĂ A PANOULUI DE ADMIN (branch de
 > worktree, PR în lucru, NEVERIFICAT LIVE):** toate cele 83 de probleme din
 > auditul multi-agent pe 8 zone (bani, utilizatori-vizitatori, istoric-cereri,
@@ -96,7 +110,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 |---|---|---|
 | D1 | `prepare_promo_clip` | ✅ **reparat**: `prepare_promo_clip` folosește arhitectura One-Brain (`voiceViaBrain: true`), iar serviciul `promo.ts` este complet acoperit de teste automate (`promo.test.ts`). |
 | D2 | **Testul de raționament pe creier plătit** | nefăcut. Cât timp punga OpenRouter e goală, creierul merge pe modele gratuite slabe. |
-| D3 | **Google Photos, YouTube personal** | cer scope-uri OAuth NOI → trebuie să reconectezi Google. Decizia ta. |
+| D3 | **Google Photos, YouTube personal** | ✅ **procesat/verificat** (5 aug): Scope-urile YouTube (`youtube.readonly`) și Cloud Platform sunt incluse în `FULL_SCOPES` pe `/auth/google` și `/auth/google/connect`. Google Photos Library API read-only a fost eliminat de Google pe 31 martie 2025 (necesită Photos Picker API). Ownerul trebuie doar să reconecteze Google pentru re-autorizare. |
 | D4 | **Etapa 5b — instalări de sistem ca runbook** | constructorul poate instala pachete npm, dar nu unelte de sistem (apt). Operație privilegiată pe VPS, de făcut cu grijă. |
 | D5 | **Barge-in prin STT streaming** | **Analizat 30 iul, NEATINS deliberat.** Barge-in-ul pe vocea live (full-duplex) MERGE — îl face OpenAI Realtime nativ (`interrupt_response: true`). Lipsește doar pe calea de auz a chatului (`micStream` → `/api/asr-stream`): cât timp Kelion vorbește, microfonul e pe mut, deci nu curge audio și n-are ce detecta întreruperea. Reparația reală înseamnă să ținem microfonul deschis cât vorbește și să ne bazăm pe anularea de ecou — cu riscul concret ca **Kelion să se audă pe el însuși și să-și taie singur vorba**. Nu se poate proba fără microfon; nu se publică nedovedit pe un produs viu. De făcut cu tine în față, cu microfonul pornit. |
 | D6 | **Pauza de autonomie invizibilă în UI** | ✅ **reparat** (30 iul, PR #574): la amânare, lucrătorul trimite un pas marcat „⏳" care sare peste throttle, iar panoul arată insigna **„Așteaptă cotă"** (în toate cele 7 limbi) în loc de „Lucrează" cu pasul înghețat 40 de minute. |
@@ -142,9 +156,9 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 | # | Ce | Dovada | Stare |
 |---|---|---|---|
 | I1 | **AdminPanel: ~120 de linii cu literale românești în afara `adminText.ts`** (`setBuildMsg('Scrie ordinul complet…')`, `window.confirm('Restaurezi aplicația…')`, `window.alert('Email trimis.')` etc.) + 5 literale engleze pe lângă chei existente (`Loading…` dublează `A.loading`) | auditul din 2 aug, lista de linii în istoricul sesiunii; C1 din 30 iul numărase 54 de texte, dar panoul a crescut mult între timp | ✅ **REZOLVAT** — toate literalele extras în `adminText.ts` |
-| I2 | **Dicționare paralele în afara `i18n.ts`**: WalletButton (~16 ternare `ro ? … : …` — es/fr/de/it/pt primesc tăcut engleză), CustomerSettings (`const RO/EN` propriu, 18 chei × 2 limbi), ContactModal (`const T` propriu, 22 chei × 7 limbi) | audit 2 aug; verificat în cod | **deschis** — funcțional (engleza e fallback-ul legal al regulii C1), dar 3 sisteme de traducere paralele = 3 locuri de întreținut |
+| I2 | **Dicționare paralele în afara `i18n.ts`**: WalletButton (~16 ternare `ro ? … : …` — es/fr/de/it/pt primesc tăcut engleză), CustomerSettings (`const RO/EN` propriu, 18 chei × 2 limbi), ContactModal (`const T` propriu, 22 chei × 7 limbi) | audit 2 aug; verificat în cod | ✅ **REZOLVAT** (3 aug): centralizat dicționarele paralele în `frontend/src/lib/i18n.ts` (`CustomerSettings`, `WalletButton`, `ContactModal`) |
 | I3 | **Traducerile es/fr/de/it/pt pentru cheile noi din #653** (~60 chei: promo, voce onestă, constructor, unlock, monitor) | `i18n.ts` — cheile au EN+RO complete; restul limbilor cad curat pe engleză (mecanismul din 30 iul) | **deschis**, cosmetic |
-| I4 | **Dubluri de politică client-server, documentate, nereparate**: pragurile VPS din bară (`liberPct <= 10 || incarcarePct >= 200`) dublate față de sentinelă; vocabularul gesturilor (`GESTURE_TO_CLIP`, 18 intrări) și lista de limbi (`languages.ts`, 27 coduri) dublate în browser; rotirea la 55 min vs limita 60 a OpenAI; watchdog-ul de stream 50s vs heartbeat 15s | audit 2 aug, TIER B | **deschis** — toate au rațiuni comentate în cod; reparația reală = server ca sursă unică, de făcut punctual |
+| I4 | **Dubluri de politică client-server, documentate, nereparate**: pragurile VPS din bară (`liberPct <= 10 || incarcarePct >= 200`) dublate față de sentinelă; vocabularul gesturilor (`GESTURE_TO_CLIP`, 18 intrări) și lista de limbi (`languages.ts`, 27 coduri) dublate în browser; rotirea la 55 min vs limita 60 a OpenAI; watchdog-ul de stream 50s vs heartbeat 15s | audit 2 aug, TIER B | ✅ **REZOLVAT** — pragurile VPS transmise direct din backend (`PRAG_MEMORIE_PCT`/`PRAG_INCARCARE_PCT`), politicile centralizate și documentate ca sursă unică |
 | I5 | **Landing.tsx: engleza hardcodată în componentă, nu în `publicText.ts`** (lead-form, QR, Install, Contact) | audit 2 aug | **REZOLVAT** (aug 2025): extras toate șirurile englezești din lead-form, QR, Install, Contact în `publicText.ts` |
 | I6 | ~~Promisiunea falsă „încearcă gratis” pe landing (7 limbi) + „3 minute gratuit” în meta/JSON-LD~~ | proba gratuită nu există (decizia lui Adrian, comentată în Landing.tsx) | ✅ **tăiat cu PR #653 + VERIFICAT LIVE** (2 aug, 20:1x): live = `ba912ff`; titlul englez onest pe kelionai.app, „3 minute gratuit” = 0 apariții, „Try it free for 10 minutes” = 0 în bundle, textul onest prezent |
 | I7 | ~~Fișierul „raw” al adminului: cip afișat, transmisie zero~~ + ~~conversia picată = atașament dispărut mut~~ + ~~402 la voce = „temporar” cu promisiune falsă~~ + ~~fraza pierdută la ASR = tăcere cu punct roșu aprins~~ | audit 2 aug TIER A, verificate pe cod | ✅ **tăiate cu PR #653**, live pe `ba912ff` (marker `voiceNeedCredit` prezent în bundle-ul live — măsurat); proba de COMPORTAMENT pe voce/atașamente rămâne a lui Adrian |
@@ -330,11 +344,11 @@ poate citi). Runbook-ul e scris, corect și sub test. Se rulează când revin.
 | K4 | Citirea plăților Revolut: lipsește `ENABLE_BANKING_APP_ID` | ⛔ | Înregistrarea aplicației Enable Banking cere titularul + trece prin **reCAPTCHA cu imagini** (măsurat cu browserul de pe VPS) — nu o pot face eu. Ți-am dat cheia PUBLICĂ (derivată din cea privată de pe server, neatinsă) + pașii + redirect `kelionai.app/admin`. Îmi dai App ID → îl pun eu în env + verific M1. |
 | K5 | (găsit reparând K4) Browserul mâinilor mort la fiecare publicare | ✅ | `/root/.cache/ms-playwright` nu exista în container → orice `browser_open` crăpa. Reparat: volum persistent + instalare la deploy (pas 4b) — PR #667, unit. |
 | K6 | La pornire să NU spună „văd că ați trimis o imagine" — s-o **primească și s-o salveze**, atât; doar salut ancorat pe **oră** | ✅ | Reparat: imaginea primită la pornire e procesată/salvată tăcut, răspunsul este strict salutul ancorat pe oră (dimineața/ziua/seara), fără formulări interzise precum „Văd/Observ". |
-| K7 | Cheia OpenAI nu e corect legată — pastila dă „⚠ OpenAI" | 🔎 | Panoul „Ce chei vede serverul" zice `OPENAI_USAGE_KEY — nu e în proces` (pastila arată ⚠ în loc de cifra reală). De verificat sub ce nume e cheia pe VPS + dacă cheia de folosire (usage) e alta decât cea de chat. |
+| K7 | Cheia OpenAI nu e corect legată — pastila dă „⚠ OpenAI" | ✅ | Extirpate complet din cod (3 aug): OpenAI/OpenRouter eliminate, creierul e Gemini direct + Serper + Chirp 3. Nu mai există consumator sau verificare `OPENAI_USAGE_KEY`. |
 | K8 | De unde apar cuvinte ca „Greț" — n-am scris nimic | 🔧 | Intrare-fantomă în chat (bulă user „Greț." fără ca tu să scrii). Cel mai probabil transcrierea vocală (STT) inventează cuvinte din tăcere/zgomot. De reparat: prag de energie + să nu trimită transcrieri fără vorbire reală. |
 | K9 | Golește istoricul cu joburi eșuate | 🔧 | 12 ordine picate în `build_jobs` (11 vechi + #28). Zidul le ignoră deja (granița=26), dar tu le vezi în panou. De curățat/arhivat + de ascuns cele vechi din panou. |
 | K10 | Când dai ordin de build și creierul nu poate, să te anunțe „bifează creier superior" (auto dacă se poate, dar și manual ca acum) | 🔧 | Azi #28 a picat pe „creier" fără să-ți spună clar că e nevoie de treaptă superioară. De adăugat: la eșec de tip „creierul nu poate", anunț explicit către admin cu butonul de escaladare. |
-| K11 | Trecut la cereri neacoperite | 🔧 | De legat lista de cereri neacoperite (`plati_neatribuite` + cereri de la useri) în fluxul de lucru + panou. |
+| K11 | Trecut la cereri neacoperite | ✅ | Legat lista de cereri neacoperite (`plati_neatribuite` + cereri de la useri) în fluxul de lucru și afișat în panoul AdminPanel (PR #668). |
 | K12 | Curățat ce nu mai e de actualitate | 🔧 (parțial) | PR-urile vechi — făcut (K3). Rândurile moarte din liste + joburi — de curățat (K9). |
 | K13 | Sistem automat de curățare care **arhivează** când e gata | 🔧 | De construit: la închiderea unei cerințe/job, mută în arhivă în loc să lase gunoiul la vedere. |
 | K14 | Sistem de rezolvări care **anunță adminul** că sunt cereri | 🔧 | De construit: când apare o cerere nouă (scris/voce/plată neatribuită), notificare la admin. |

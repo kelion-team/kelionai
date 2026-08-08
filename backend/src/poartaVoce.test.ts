@@ -2,36 +2,37 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── POARTA DE TIMBRU (Adrian, Aug 1) ────────────────────────────────────────
-// „dacă nu-mi identifică vocea trebuie să ignore ce aude — femei, bărbați, tv,
-// radio" + „titularul poate cere EXPLICIT să vorbească și cu alta persoană" +
-// „salvează amprenta și poza oaspetelui + relația, dar sub aprobarea
-// titularului" + „la fiecare upgrade să țină minte timbrul".
+// ── VOCEA MERGE DIRECT LA CREIER (Adrian, 6 aug) ────────────────────────────
+// SCHIMBARE MAJORĂ (Adrian, 6 aug: „elimină intermediarii, îl pui direct pe Kelion
+// să primească; scoate orice urmă de limitare a audio, scoate-i și din soft").
+// Poarta de TIMBRU de pe CLIENT (al doilea upload al frazei + un await serial
+// înainte de creier) a fost SCOASĂ — adăuga secunde pe fiecare tură. Fraza brută
+// pleacă acum DIRECT la creierul unic (Gemini 3 Pro), care decide singur adresarea.
 //
-// REGULI de neîncălcat, păzite aici:
-//   1. Verdictul de timbru se AȘTEAPTĂ — nimic nu ajunge la creier înainte.
-//   2. Voce străină fără oaspete = ignorată COMPLET (fără răspuns, fără
-//      avertisment, fără urmă în chat).
-//   3. Oaspetele (chiar aprobat) primește ZERO drepturi de admin, oricine ar
-//      fi logat în sesiune.
-//   4. Fereastra de oaspete se deschide NUMAI prin unealta creierului, la
-//      cererea titularului.
-//   5. Pragul de potrivire al oaspetelui = pragul titularului (0.38).
+// CE RĂMÂNE (server-side, NU în calea vocii):
+//   • uneltele de oaspeți + înrolarea amprentei din panou (guestVoices, /transcript);
+//   • gardul de admin din chat.ts (isAdmin && !nevalidat) — dormant pe voce acum,
+//     dar păzit ca să nu fie scos „din greșeală";
+//   • operațiile sensibile (card/bani) rămân gardate de potrivirea reală holder.
+// Testele de mai jos păzesc noul contract: NIMIC în calea vocii nu blochează audio-ul.
 const voce = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/realtimeVoice.ts', import.meta.url)), 'utf8')
 const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 const realtime = readFileSync(fileURLToPath(new URL('./routes/realtime.ts', import.meta.url)), 'utf8')
 const oaspeti = readFileSync(fileURLToPath(new URL('./services/guestVoices.ts', import.meta.url)), 'utf8')
 const health = readFileSync(fileURLToPath(new URL('./services/health.ts', import.meta.url)), 'utf8')
 
-describe('verdictul de timbru se așteaptă înainte de creier', () => {
-  it('tura așteaptă verdictul serverului (timbru din voiceFeatures, fără text)', () => {
-    // VOCE UNIFICATĂ (5 aug): verdictul de timbru se cere FĂRĂ text (amprenta e
-    // din voiceFeatures) — creierul unic decide adresarea, nu un transcript.
-    expect(voce).toMatch(/await transcriptVerdict\('', vf\)/)
+describe('calea vocii merge DIRECT la creier (fără verdict de timbru în cale)', () => {
+  it('fraza pleacă DIRECT la creier — NICIUN verdict de timbru în cale (Adrian, 6 aug)', () => {
+    // INTERMEDIARI SCOȘI (Adrian, 6 aug: „elimină intermediarii, îl pui direct pe
+    // Kelion să primească; scoate orice urmă de limitare a audio, scoate-i și din
+    // soft"). Verdictul de timbru era un al DOILEA upload al frazei + un await serial
+    // înainte de creier. A fost SCOS DE TOT. Dacă cineva îl re-adaugă, testul cade.
+    expect(voce).not.toMatch(/transcriptVerdict/)
+    expect(voce).not.toMatch(/realtime\/transcript/)
   })
 
-  it('onAddressed primește și eticheta de vorbitor (oaspete) + audio, fără text', () => {
-    expect(voce).toMatch(/onAddressed\?\.\('', vf, speaker, audio\)/)
+  it('onAddressed duce fraza brută DIRECT la creier (speaker undefined — fără verdict)', () => {
+    expect(voce).toMatch(/onAddressed\?\.\('', vf, undefined, audio\)/)
   })
 
   it('serverul calculează guest / guestPending înainte de răspuns', () => {
@@ -41,10 +42,16 @@ describe('verdictul de timbru se așteaptă înainte de creier', () => {
   })
 })
 
-describe('vocea străină este ignorată COMPLET', () => {
-  it('fără guest și fără guestPending, tura moare în client', () => {
-    expect(voce).toMatch(/verdict\?\.foreignVoice && !guest/)
-    expect(voce).toMatch(/ignorată complet/)
+describe('clientul nu mai etichetează timbrul — fraza pleacă direct, negată de nimic', () => {
+  // INTERMEDIARI SCOȘI (Adrian, 6 aug). Clientul NU mai calculează pe voce niciun
+  // `nevalidat`/`foreignVoice` și nu mai face al doilea upload — fraza brută pleacă
+  // DIRECT la creier, care decide adresarea. Gardul de admin din chat.ts rămâne
+  // (isAdmin && !nevalidat) — dormant pe voce acum, dar păzit mai jos; operațiile
+  // sensibile (card/bani) rămân gardate SERVER-side de potrivirea reală holder.
+  it('clientul nu mai etichetează vocea (nevalidat/foreignVoice au dispărut din calea vocii)', () => {
+    expect(voce).not.toMatch(/nevalidat/)
+    expect(voce).not.toMatch(/foreignVoice/)
+    expect(voce).not.toMatch(/ignorată complet/)
   })
 
   it('NU mai există vechiul avertisment injectat în sesiune (Kelion răspundea televizorului)', () => {
@@ -53,9 +60,9 @@ describe('vocea străină este ignorată COMPLET', () => {
   })
 })
 
-describe('oaspetele are ZERO drepturi de admin', () => {
-  it('tura de oaspete dezactivează isAdmin chiar în sesiunea titularului', () => {
-    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch/)
+describe('oaspetele și vocea nevalidată au ZERO drepturi de admin', () => {
+  it('tura de oaspete SAU nevalidată dezactivează isAdmin chiar în sesiunea titularului', () => {
+    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch && !nevalidat/)
   })
 
   it('creierul primește nota de oaspete cu interdicții explicite', () => {

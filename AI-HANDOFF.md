@@ -1,5 +1,5 @@
 # KELIONAI — DOCUMENT COMPLET DE PRELUARE PENTRU ORICE AI
-*(actualizat 11 iulie 2026 — dacă deschizi acest fișier ca AI nou, aici ai TOT ce trebuie ca să lucrezi imediat, fără să mai explorezi de la zero)*
+*(actualizat 3 august 2026 — implementat sistem notificări admin K14 pentru cereri noi scris/voce/plată neatribuită)*
 
 > **DOCUMENT VIU — regulă obligatorie:** dacă schimbi cod, arhitectură, reguli sau
 > starea proiectului, **actualizează secțiunea relevantă de aici (și §13 Starea)
@@ -119,6 +119,32 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 Servicii systemd pe VPS: `kelion-bridge`, `kelion-paznic`, `kelion-builder`, `kelion-deployer`.
 
 ## 3. RUTAREA CREIERULUI (cine răspunde cui) — chat.ts
+> **ACTUALIZAT 7 aug 2026 — DOUĂ SLOTURI, AMÂNDOUĂ FLASH, DISJUNCTE (măsurat de
+> owner pe cheia lui, de pe VPS).** Descrierea de mai jos („chat/work =
+> gemini-2.5-flash, top = gemini-2.5-pro") e ISTORIE. Acum:
+> - **`chat`** → `MODEL_RAPID_DEFAULT = gemini-3.5-flash-lite` (`modelRapidDirect()`).
+>   Măsurat: 496 ms median pe payload real, cel mai bun caz-limită din tot tabelul
+>   (3,4 s), 19/20 la proba de calitate.
+> - **`work` + `top`** → `MODEL_UNIC_DEFAULT = gemini-3.5-flash` (`modelUnicDirect()`).
+>   Măsurat: **20/20** la proba de calitate, median 2620 ms, cel mai lent 6,3 s.
+>   Pro a IEȘIT de aici: aceeași calitate (20/20), dar median 4713 ms și ture de
+>   **72-75 SECUNDE**.
+> - **Sloturile sunt disjuncte prin construcție:** poarta slotului greu cere
+>   `gemini-*-flash` și REFUZĂ `-lite`; poarta slotului rapid cere `-flash-lite`.
+>   Fără asta, ambele trepte ar fi putut ajunge pe același model — o singură
+>   treaptă deghizată în două.
+> - **Supapa rămâne cablată:** `ask_brain` (oferit de `chat.ts` DOAR pe tura
+>   ușoară) escaladează de pe slotul rapid pe cel greu.
+> - **Auto-upgrade cu POARTĂ (7 aug, ordinul ownerului „dacă nu se respectă tot
+>   să nu se facă upgrade"):** un model intră DOAR cu **10/10** pe bateria de
+>   admitere (`services/probaModel.ts`), iar scorul candidatului ȘI al modelului
+>   activ, probate în aceeași trecere, se scriu în KV `model_upgrade_dovada` (se
+>   văd în `/api/admin/models`). Motivul măsurat: `gemini-3.6-flash` e mai NOU,
+>   răspunde cu text (deci trecea proba veche „200 cu text"), dar face 17/20 și
+>   pică lanțul de unelte — s-ar fi instalat singur și ar fi degradat creierul.
+> - **Lacătul** (`scripts/verifica-gemini.mjs`) are acum **10 reguli**, le
+>   TIPĂREȘTE rând cu rând, și e probat cu stricăciune intenționată pe fiecare.
+>
 > **ACTUALIZAT 3 aug 2026 — EXTIRPAREA TOTALĂ OpenRouter + OpenAI (ordinul repetat
 > al lui Adrian: „openrouter și open ai scos din toată aplicația"):** creierul e
 > **Gemini direct, UNIC** (`services/geminiDirect.ts`, cheia `GEMINI_API_KEY`),
@@ -522,7 +548,9 @@ node --check bridge/kelion-bridge-linux.mjs
   4. `lib/realtimeVoice.ts` + `ChatPanel.tsx`: erorile benigne (`cancel`/`active_response`) doar se loghează; cele fatale cheamă `stop()` ÎNAINTE de `onState('error')` — nu mai rămânea sesiunea vie (mic capturat, facturare) + al 2-lea microfon în paralel; ChatPanel curăță și el handle-ul cu `stop()`.
   5. Mimetype pe calea batch ASR: `audioIO.ts` trimite `mime`-ul real al MediaRecorder-ului la `/api/asr` (Safari = audio/mp4), `routes/asr.ts` îl relayează, `services/asr.ts` alege extensia fișierului pentru OpenAI după el; eșecul `/api/asr` nu mai moare tăcut (console.error → F12 → Kelion).
   6. `lib/realtimeVoice.ts`: apel de unealtă cu nume nerezolvabil primește acum `function_call_output` `{"error":"unknown_tool"}` + `response.create` — modelul nu mai rămâne agățat.
-- 🗓️ **24 IUL — VAL DE FIXURI LIVE (PR #341, #342, #343, #344 — toate merge-uite + deployate pe VPS):**
+- 🗓️ **AUG 2025 — UNIFICARE POLITICI CLIENT-SERVER (I4):**
+  1. Pragurile VPS din bară (`liberPct <= PRAG_MEMORIE_PCT`, `incarcarePct >= PRAG_INCARCARE_PCT`) sunt transmise acum direct din server în payload-ul `resurseGazda()` (`pragMemoriePct`, `pragIncarcarePct`), serverul fiind sursa unică de adevăr.
+  2. Documentat și centralizat starea politicilor shared client-server în `RAMAS-DE-FACUT.md`.
   1. **Unelte false SCOASE (PR #341):** `code_execution` + `delegate` mințeau (sandbox inexistent, delegare no-op) — șterse complet (unelte, registru AGENTS, prompt „YOUR TEAM/SANDBOX"). Adrian: „nimic hardcodat, totul real din funcții".
   2. **Bară + alimentare (PR #341):** rotița ⚙ și „Connect Google" SCOASE din bară (păreau re-login); `WalletButton` (credit + „＋") pentru ORICE user logat; Setări + „Conectează Gmail & Calendar" în meniul portofelului. **Alimentare într-un SINGUR loc**: prima alimentare **£20 minim** (pornește creierul), apoi **multipli de £5** — validat pe server (`validateTopUp` în `billing.ts`; `/api/billing/balance` întoarce `firstTopUp`); auto-recharge constrâns la ×5. Stripe în spate, UI se reîmprospătează la `/?topup=success`.
   3. **Ruta pe hartă (PR #341):** `/api/route` — `following=false` implicit (GPS-ul nu mai acoperă traseul; „Urmărește mașina" e opt-in). Monitorul se ÎNCHIDE singur la schimbarea subiectului (instrucțiune MONITOR STATE: `show_on_screen` cu url gol).
@@ -622,6 +650,7 @@ prin aprobarea lui Adrian; munca rulează pe Kimi/GLM, niciodată pe Max.
 > - **A (auto-restart la deploy) + F (publicare ca pipeline fix): ✅ FĂCUTE** — workflow-ul **`deploy.yml`** publică automat la fiecare push pe master și verifică anti-fantoma pe SHA (vezi §1.4/§7). Decalajul „cod în master, proces viu vechi" nu mai poate exista tăcut.
 > - **B (colector de diagnostic): ✅ FĂCUT** — `vps-diag.yml` rescris pentru stack-ul real (cel vechi era mort: parolă SSH dezactivată + verifica servicii dispărute).
 > - **C (registru de runbook-uri): ✅ FĂCUT** — `deploy/RUNBOOKS.md`: proceduri numite cu comenzi exacte; sarcina LLM-ului = recunoaște runbook-ul, nu ghicește comenzile.
+> - **D3 (5 aug 2026): ✅ procesat** — Scope-urile Google OAuth (`youtube.readonly`, `cloud-platform` etc.) sunt configurate în `FULL_SCOPES` (`backend/src/routes/auth.ts`). Suita de teste a fost blindată cu `authScopesD3.test.ts` și `auth_scopes.test.ts`. Owner-ul trebuie să reconecteze Google pe `/auth/google` pentru re-autorizare cu noile permisiuni.
 > - **D (liveness pe trepte): ✅ acoperit ÎN APLICAȚIE** — `verifyModels` (§13, 25 iul) probează real modelele OpenRouter; alerte sold OpenRouter/OpenAI există (`openrouterAlert`/`openaiAlert`).
 > - **E (probe de sănătate proactive): ✅ FĂCUT** — `sentinel.yml` la 30 min, din afară; alertează prin issue deduplicat, se închide singur la revenire. FĂRĂ reporniri automate (neautorizate de Adrian).
 > - **G (unealta de capabilitate) + H (pool de reparatori): ✝ MOARTE** — trăiau în `bridge/` (șters 23 iul; procesele-zombie omorâte 25 iul). Spiritul lui G trăiește azi în **auto-extinderea din aplicație**: `propose_tool` + unelte dinamice aprobate de owner (`services/dynamicTools.ts`, tabelul `kelion_tools`, aprobare prin `GET/POST /api/admin/kelion-tools` — buton în AdminPanel încă NU există, doar API-ul).

@@ -26,15 +26,10 @@ export function isTransientBrainError(err: unknown): boolean {
 // google-direct/* — anything else (an old OpenRouter id left in env) is
 // silently dropped, so the ladder can never route to a dead provider.
 export function expertModelLadder(): string[] {
-  const extra = (process.env.BRAIN_EXPERT_FALLBACKS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.startsWith(GEMINI_DIRECT_PREFIX))
-  const out: string[] = []
-  for (const m of [config.brain.workDefault, config.brain.topDefault, ...extra]) {
-    if (m && !out.includes(m)) out.push(m)
-  }
-  return out
+  // SIGILAT (6 aug, regula ultra-decisă): UN SINGUR model unic — fără trepte din env
+  // (BRAIN_EXPERT_FALLBACKS a fost scos: nimeni nu mai injectează alt model). Toate
+  // treptele config = același model unic, deci scara are exact o treaptă.
+  return [config.brain.workDefault]
 }
 
 // The one call every rung goes through: strips the google-direct/ prefix and

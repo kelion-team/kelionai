@@ -1,4 +1,4 @@
-import { config } from '../config.js'
+import { config, modelUnicDirect, modelRapidDirect } from '../config.js'
 
 // ── CONTRACTUL CREIERULUI — tipuri + reguli PURE, fără rețea ─────────────────
 // (Extirparea totală OpenRouter + OpenAI, 3 aug — ordinul repetat al ownerului:
@@ -92,21 +92,25 @@ export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: 
  *  e google-direct/*, nu-l lăsăm să deraieze creierul — cădem pe defaultul din
  *  cod (lacătul Gemini, 3 aug). */
 function fallbackTreapta(tier: ModelTier): string {
-  const dinConfig =
-    tier === 'chat' ? config.brain.chatDefault : tier === 'top' ? config.brain.topDefault : config.brain.workDefault
-  if (dinConfig.startsWith('google-direct/')) return dinConfig
-  return tier === 'top' ? 'google-direct/gemini-2.5-pro' : 'google-direct/gemini-2.5-flash'
+  // DOUĂ SLOTURI, SIGILATE (7 aug — măsurat de owner pe cheia lui: chat pe Pro =
+  // 3,6s…45s; pe flash-lite = 0,6s, cu unelte+vedere+auz intacte). Treapta de CHAT
+  // merge pe modelul RAPID; `work` și `top` rămân pe Pro, unde se face gândirea
+  // grea (agenți, autonomie, și escaladarea `ask_brain` chemată din chat).
+  // Sursa rămâne config-ul, în cod, FĂRĂ env — fiecare slot cu poarta lui de familie.
+  if (tier === 'chat') return modelRapidDirect()
+  return modelUnicDirect()
 }
 
 export async function resolveModelChecked(
   tier: ModelTier,
   wanted?: string | null,
 ): Promise<{ model: string; fellBack: boolean }> {
-  const fallback = fallbackTreapta(tier)
-  if (!wanted) return { model: fallback, fellBack: false }
-  return wanted.startsWith('google-direct/')
-    ? { model: wanted, fellBack: false }
-    : { model: fallback, fellBack: true }
+  // SIGILAT: modelul creierului e UNIC și BLOCAT — orice „wanted" (alegere salvată
+  // în KV, selector UI, id vechi din env) e IGNORAT; se întoarce mereu modelul unic.
+  // `fellBack=true` semnalează doar că s-a cerut altceva (pentru telemetrie/onestitate).
+  const model = fallbackTreapta(tier)
+  const fellBack = !!wanted && wanted !== model
+  return { model, fellBack }
 }
 
 export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {

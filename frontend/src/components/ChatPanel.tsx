@@ -51,6 +51,7 @@ import { keepScreenOn } from '../lib/wakelock'
 // vocală (startRealtimeVoice → micStream local-VAD → audio la creierul unic).
 // Dictarea batch (/api/asr) și streamingul standalone (STT) au dispărut.
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
+import { deschideVocalLive, vocalLiveDisponibila, type VocalLiveHandle } from '../lib/vocalLive'
 import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
 import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
@@ -317,6 +318,11 @@ export default function ChatPanel({
   // The LIVE voice session (if any) — used by the location tools to
   // refresh its position exactly when needed (updateCoords, on demand).
   const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
+  // VOCEA LIVE FULL-DUPLEX (7 aug) — CALE EXCLUSIVĂ, PE OPȚIUNE. Nu înlocuiește
+  // tăcut calea care merge azi: se aprinde doar cu `localStorage.kelion_voce_live
+  // = '1'`, ca ownerul s-o poată ASCULTA înainte s-o facem implicită. Ruta
+  // avertizează „vei avea 2 voci în același timp" — de-aia e SAU una, SAU alta.
+  const vlRef = useRef<VocalLiveHandle | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
   // The abort controller of the current turn — "stop" aborts it on the spot.
@@ -840,10 +846,10 @@ export default function ChatPanel({
     for (const step of steps) {
       if (!scenarioRunningRef.current) break
       await sendRef.current(step) // waits for Kelion's full reply to stream in
-      await new Promise((r) => globalThis.setTimeout(r, 1200))
+
     }
     // Let the final sentence finish speaking, then stop + save.
-    await new Promise((r) => globalThis.setTimeout(r, 2500))
+
     handle.stop()
   }
   function stopScenario(): void {
@@ -856,7 +862,13 @@ export default function ChatPanel({
   async function send(text: string, spoken = false): Promise<void> {
     const msg = text.trim()
     const atts = attachments
-    if (!msg && atts.length === 0) return
+    // O tură PUR VOCALĂ vine cu text GOL și fără atașamente — audio-ul brut al frazei
+    // e DOAR în pendingAudioRef (setat de onAddressed chiar înainte de send('', true)).
+    // Fără să-l verificăm aici, guardul „nimic de trimis" arunca TĂCUT fraza vocală
+    // ÎNAINTE de orice fetch → exact „nu aude" (6 aug: consolă goală, zero request la
+    // /api/chat). Cu pendingAudioRef, tura vocală trece spre isVoiceTurn (mai jos) și
+    // pleacă la creier ca AUDIO. (Scrisul nu era afectat: msg ne-gol trecea guardul.)
+    if (!msg && atts.length === 0 && !pendingAudioRef.current) return
     // Admin recorder commands — handled locally, never sent to the brain.
     if (msg && isAdmin) {
       // Mid-take cut: something changed — stop everything; the rec-stopped
@@ -939,7 +951,10 @@ export default function ChatPanel({
       // it: the queue BLOCKED full-duplex (the second message didn't reach the brain
       // until the first finished). The backend + worker already accept concurrent
       // turns. No text (attachment only) → we leave the current turn alone, we don't cut it.
-      if (!msg) return
+      // O FRAZĂ VOCALĂ rostită cât Kelion lucrează = barge-in, NU o pierdem: audio-ul
+      // e în pendingAudioRef chiar dacă msg e gol (altfel o tură vocală în timpul alteia
+      // era aruncată tăcut — aceeași cauză ca la linia ~865).
+      if (!msg && !pendingAudioRef.current) return
       stopVoice() // cut the old turn's remaining voice, so it doesn't talk over it
       rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
@@ -982,7 +997,11 @@ export default function ChatPanel({
     // VOCE UNIFICATĂ (Adrian, 5 aug): o tură vocală vine cu AUDIO și FĂRĂ text —
     // NU o transformăm în „salut" (greetPrompt); creierul aude fraza brută. Textul
     // trimis creierului rămâne GOL; UI-ul arată o bulă-substituent (mai jos).
-    const isVoiceTurn = !!pendingAudioRef.current
+    // O tură vocală = fraza vine ca AUDIO și FĂRĂ text tastat. Dacă omul a SCRIS
+    // ceva (msg ne-gol), e o tură SCRISĂ chiar dacă un audio a rămas pending —
+    // altfel textul lui era golit („outgoing=''") și se pierdea (Adrian, 6 aug:
+    // „textul scris nu merge la creier"). Textul tastat are prioritate.
+    const isVoiceTurn = !!pendingAudioRef.current && !msg
     const base = isVoiceTurn
       ? ''
       : msg || (docBlock ? t.docPrompt : attached ? t.imagePrompt : t.greetPrompt)
@@ -999,8 +1018,9 @@ export default function ChatPanel({
     // The guest label set by the voice gate (null for the holder / typed turns).
     const speaker = pendingSpeakerRef.current ?? undefined
     pendingSpeakerRef.current = null
-    // Vocea brută a acestei ture (dacă a venit pe voce cu audio nativ).
-    const nativeAudio = pendingAudioRef.current ?? undefined
+    // Vocea brută a acestei ture (DOAR pe o tură vocală). Pe o tură SCRISĂ nu
+    // cărăm un audio rătăcit — l-ar auzi creierul peste textul tastat.
+    const nativeAudio = isVoiceTurn ? (pendingAudioRef.current ?? undefined) : undefined
     pendingAudioRef.current = null
     // The facial descriptor READY in the background (if the camera is on and it caught a
     // face). Instant — it waits for no inference, it doesn't slow down the send.
@@ -1360,6 +1380,38 @@ export default function ChatPanel({
         realtimeOffRef.current = false
         realtimeFailCountRef.current = 0
       }
+      // ── VOCEA LIVE FULL-DUPLEX, DACĂ E APRINSĂ (7 aug) ────────────────────
+      // Un singur model AUDE + GÂNDEȘTE + VORBEȘTE + CHEAMĂ UNELTE, într-o
+      // sesiune. Măsurat de owner pe VPS: 90 ms handshake, 491 ms primul
+      // răspuns, 66 KB de audio real. Lanțul de mai jos face trei drumuri
+      // separate (ureche → creier → gură).
+      // OPȚIUNE, nu implicit: `localStorage.kelion_voce_live = '1'`. Motivul e
+      // regula casei — nu se schimbă tăcut o cale care merge, pe ceva ce încă
+      // n-a fost ASCULTAT. Când ownerul confirmă vocea, mutăm implicitul.
+      if (localStorage.getItem('kelion_voce_live') === '1' && !vlRef.current) {
+        const cap = await vocalLiveDisponibila()
+        if (cap?.disponibil) {
+          const vl = await deschideVocalLive({
+            onGata: () => setListening(true),
+            onUser: (text, final) => setLiveVoice(final ? '' : text),
+            onKelion: (text, final) => setLiveVoice(final ? '' : text),
+            onEroare: (motiv) => {
+              // Eroarea urcă la om cu numele ei și cade ÎNAPOI pe calea veche —
+              // niciun „merge" prefăcut, și nicio sesiune rămasă mută.
+              console.warn(`[vocalLive] ${motiv}`)
+              vlRef.current?.inchide()
+              vlRef.current = null
+              setListening(false)
+            },
+          })
+          if (vl) {
+            vlRef.current = vl
+            console.info(`[vocalLive] pornit pe ${cap.model} (voce ${cap.voce}) — calea veche NU pornește`)
+            return
+          }
+        }
+        console.info('[vocalLive] indisponibil pe server — rămân pe calea vocală obișnuită')
+      }
       if (!realtimeOffRef.current) {
         try {
           const rv = await startRealtimeVoice({
@@ -1627,6 +1679,8 @@ export default function ChatPanel({
       // manualOff at the end and stops by itself; if the flag was stuck from an
       // old error, the button heals here instead of staying dead.
       micStartingRef.current = false
+      vlRef.current?.inchide()
+      vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       // intentional stop: a stuck fragment must NOT be sent after teardown
@@ -1707,6 +1761,8 @@ export default function ChatPanel({
       document.removeEventListener('visibilitychange', onVisible)
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
+      vlRef.current?.inchide()
+      vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       stopVoice()
@@ -1807,6 +1863,8 @@ export default function ChatPanel({
         window.clearTimeout(upgradeTimerRef.current)
         upgradeTimerRef.current = null
       }
+      vlRef.current?.inchide()
+      vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       setListening(false)
@@ -2367,12 +2425,15 @@ export default function ChatPanel({
           >
             {listening ? '●' : '🎤'}
           </button>
-          {/* THE VOICE VOLUME (Jul 25 — Adrian: „uncontrollable audio volume”):
-          a single control for ALL of Kelion's voice (Realtime + TTS), persisted;
-          until today there was no volume control in the app. */}
+          {/* VOLUMUL VOCII — ASCUNS din compozitor (Adrian, 6 aug: „ascunde-l că
+          nu-și are rostul aici"). Păstrăm starea și logica (volumul persistat se
+          aplică în continuare la redare prin getVoiceVolume/setVoiceVolume), doar
+          controlul din bară nu se mai arată. `hidden` îl scoate din layout fără să
+          rupă legăturile de stare (voiceVol/setVoiceVolState rămân folosite). */}
           <input
             type="range"
             className="composer-volume"
+            hidden
             min={0}
             max={100}
             value={Math.round(voiceVol * 100)}

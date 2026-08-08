@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { saveKv, loadKv, userKey } from '../db.js'
+import { loadKv, userKey } from '../db.js'
 import { config } from '../config.js'
-import { resolveModel, type ModelTier } from '../services/brainContract.js'
+import { resolveModel } from '../services/brainContract.js'
 
 // ── SELECTABLE MODELS — GEMINI-ONLY (extirparea OpenRouter, 3 aug) ──────────
 // Catalogul viu OpenRouter a dispărut odată cu furnizorul. Ce rămâne e lista
@@ -65,24 +65,14 @@ export async function modelRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await readSelection(user.email))
   })
 
-  app.put<{ Body: { tier?: ModelTier; model?: string } }>(
-    '/api/models/selection',
-    async (req, reply) => {
-      const user = getSessionUser(req)
-      if (!user) return reply.code(401).send({ error: 'unauthorized' })
-      const tier = req.body?.tier
-      const model = String(req.body?.model ?? '').trim()
-      if ((tier !== 'chat' && tier !== 'work') || !model) {
-        return reply.code(400).send({ error: 'bad_request' })
-      }
-      // We only accept a model that exists in the requested tier (otherwise garbage would be saved).
-      const resolved = await resolveModel(tier, model)
-      if (resolved !== model) return reply.code(400).send({ error: 'model_not_in_tier' })
-
-      const current = await readSelection(user.email)
-      const next: Selection = { ...current, [tier]: model }
-      await saveKv(KEY(user.email), JSON.stringify(next))
-      return reply.send(next)
-    },
-  )
+  // SIGILAT (Adrian, 6 aug, regulă ultra-decisă: „modelul decis de mine să nu se
+  // poată modifica accidental sau de altcineva fără decizia mea"). Selectorul de
+  // model din UI/API e BLOCAT: nu se mai salvează nicio alegere. Modelul creierului
+  // e UNIC și se schimbă DOAR prin auto-upgrade-ul validat (decizia permanentă a
+  // ownerului), niciodată dintr-o cerere de client. Întoarcem 423 + modelul curent.
+  app.put('/api/models/selection', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    return reply.code(423).send({ error: 'model_locked', selection: await readSelection(user.email) })
+  })
 }

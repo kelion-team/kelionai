@@ -68,44 +68,14 @@ export interface RealtimeVoiceOpts {
   signal?: AbortSignal
 }
 
-// ── THE VOICE VERDICT (one POST per utterance) ──────────────────────────────
-// Serverul compară amprenta rostirii cu referința proprietarului și spune CINE
-// vorbește:
-//   • holder          → tura merge la creier (și lacătul de admin se poate
-//                       deschide — kelion:admin-unlock);
-//   • foreign + guest → invitat APROBAT (recunoscut după timbru): permis, cu
-//                       drepturi de invitat — `speaker` merge la /api/chat;
-//   • foreign + guestPending → proprietarul tocmai a deschis o fereastră: permis,
-//                       creierul cere proprietarului să confirme păstrarea amprentei;
-//   • foreign singur  → IGNORAT COMPLET (femei, bărbați, tv, radio): tura NU
-//                       ajunge la creier, nu se spune nimic, nu se arată nimic.
-// Tura AȘTEAPTĂ acest verdict — înainte de el, nimic nu pleacă la creier.
-export interface TranscriptVerdict {
-  lang?: string
-  foreignVoice?: boolean
-  adminUnlocked?: boolean
-  // PROPRIETAR VERIFICAT: serverul a confirmat că vocea CHIAR e a proprietarului
-  // acestui cont (referință + potrivire). Doar atunci lăsăm vocea la creier FĂRĂ
-  // „Kelion" (full-duplex real, doar pentru user/admin).
-  holder?: boolean
-  guest?: { id: number; name: string; relation: string }
-  guestPending?: { id: number; name: string; relation: string }
-}
-async function transcriptVerdict(text: string, vf: VoiceFeatures | null): Promise<TranscriptVerdict | null> {
-  const t = text.trim()
-  if (!t) return null
-  try {
-    const r = await fetch('/api/realtime/transcript', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ role: 'user', text: t, voiceFeatures: vf ?? undefined }),
-    })
-    return (await r.json().catch(() => null)) as TranscriptVerdict | null
-  } catch {
-    return null
-  }
-}
+// ── FĂRĂ INTERMEDIARI ÎNTRE MICROFON ȘI CREIER (Adrian, 6 aug: „elimină
+// intermediarii, îl pui direct pe Kelion să primească; scoate orice urmă de
+// limitare a audio, scoate-i și din soft") ─────────────────────────────────────
+// Verdictul de timbru (un al DOILEA upload al frazei + un await serial, embedding
+// neural pe server fără timeout, ÎNAINTE de creier) a fost SCOS DE TOT din calea
+// vocii — adăuga secunde pe fiecare tură. Acum fraza brută pleacă DIRECT la creierul
+// unic (Gemini 3 Pro), care aude și decide singur dacă i se vorbește. Înrolarea
+// amprentei rămâne o unealtă de panou pe server, dar NU mai e în calea vocii.
 
 // ── ONE SINGLE VOICE SESSION, ACROSS ALL TABS ────────────────────────────────
 // Două sesiuni în paralel (un tab vechi lăsat deschis, un restart într-o cursă)
@@ -200,33 +170,12 @@ export async function startRealtimeVoice(
     // SINGUR dacă i se vorbește — sau tace (Adrian, 5 aug: „tot decis de creierul
     // unic; dacă nu aude «Kelion»/«Kei», să nu vorbească neîntrebat"). Un „stop"
     // rostit peste Kelion îl oprește prin barge-in-ul local (mai jos).
-    let anchoredLang = ''
     const poartaDupaFraza = (vf: VoiceFeatures | null, audio?: string): void => {
-      void (async () => {
-        // Verificarea vorbitorului merge FĂRĂ text (amprenta e din voiceFeatures) —
-        // serverul întoarce holder/foreignVoice/guest/adminUnlocked din timbru.
-        const verdict = await transcriptVerdict('', vf)
-        if (verdict?.lang && verdict.lang !== anchoredLang) anchoredLang = verdict.lang
-        // LACĂTUL DE ADMIN: amprenta s-a potrivit → serverul a pus cookie-ul de
-        // unlock; anunțăm UI-ul să aprindă butonul Admin.
-        if (verdict?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
-        // POARTA STRICTĂ DE TIMBRU: o voce care nu e nici proprietarul, nici un
-        // invitat permis e ignorată COMPLET (nu se cheamă creierul degeaba).
-        const guest = verdict?.guest ?? verdict?.guestPending
-        if (verdict?.foreignVoice && !guest) {
-          console.info('[voce] voce străină — ignorată complet (nu ajunge la creier)')
-          return
-        }
-        const speaker = verdict?.guest
-          ? `guest:${verdict.guest.id}:${verdict.guest.name}${verdict.guest.relation ? ` (${verdict.guest.relation})` : ''}`
-          : verdict?.guestPending
-            ? `guest-pending:${verdict.guestPending.id}:${verdict.guestPending.name}${verdict.guestPending.relation ? ` (${verdict.guestPending.relation})` : ''}`
-            : undefined
-        // La creier pleacă AUDIO-ul; creierul decide adresarea. Fără audio nu are
-        // ce decide, deci nu-l chemăm.
-        if (!audio) return
-        onAddressed?.('', vf, speaker, audio)
-      })()
+      // DIRECT LA CREIER, ZERO INTERMEDIARI (Adrian, 6 aug — vezi nota de sus).
+      // Fraza brută pleacă IMEDIAT la creier: nicio poartă de timbru, niciun al
+      // doilea upload, nimic în cale. Fără audio nu are ce decide creierul.
+      if (!audio) return
+      onAddressed?.('', vf, undefined, audio)
     }
 
     // ── THE ONE CHIRP EAR ────────────────────────────────────────────────────
@@ -239,8 +188,8 @@ export async function startRealtimeVoice(
       preWarmedStream: mic,
       onLive: (t) => onUserTranscript?.(t, false),
       onPhrase: (_t, vf, audio) => {
-        // Fără transcript — fraza pleacă la creier ca AUDIO; poarta de timbru decide
-        // dacă ajunge acolo, apoi creierul decide dacă i se vorbește.
+        // Fără transcript și fără poartă de timbru — fraza brută pleacă DIRECT la
+        // creier, care decide singur dacă i se vorbește (pe „Kelion"/„Kei").
         poartaDupaFraza(vf, audio)
       },
       onError: (reason) => {
@@ -250,7 +199,7 @@ export async function startRealtimeVoice(
         stop()
         onState?.('error', `urechi-chirp-${reason}`)
       },
-      getLang: () => anchoredLang || opts.language || '',
+      getLang: () => opts.language || '',
       // Barge-in: vocea ta taie redarea Chirp a serverului pe loc + trezește UI-ul.
       onSpeechBegin: () => {
         stopVoice()

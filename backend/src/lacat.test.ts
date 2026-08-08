@@ -56,15 +56,69 @@ describe('LACĂT — creier (regula Gemini, fără plătit din greșeală)', () 
     expect(SEMNE_PLATIT.test(config.brain.topDefault)).toBe(false)
   })
 
-  it('DEFAULT-ul din COD (nu din env) e Gemini free — dacă env se golește, nu revine la plătit', () => {
-    // Lacătul adevărat e în cod: chiar dacă un env de pe server ar suprascrie
-    // valoarea la runtime, sursa TREBUIE să aibă un default sigur (free/Gemini).
+  it('modelul unic e SIGILAT în cod, FĂRĂ env — nimic nu-l poate schimba din env', () => {
+    // 6 aug (regulă ultra-decisă): sursa unică e MODEL_UNIC_DEFAULT (în cod, nu env);
+    // dacă cineva pune GEMINI_MODEL_GREU/BRAIN_*_MODEL pe VPS, NU mai contează.
     const s = sursa('./config.ts')
-    const m = /workDefault:\s*\(process\.env\.\w+\s*\?\?\s*'([^']+)'/.exec(s)
-    expect(m, 'nu am găsit default-ul workDefault în config.ts').toBeTruthy()
+    const m = /MODEL_UNIC_DEFAULT = '([^']+)'/.exec(s)
+    expect(m, 'nu am găsit MODEL_UNIC_DEFAULT în config.ts').toBeTruthy()
     const def = m![1]
-    expect(eGratuit(def)).toBe(true)
     expect(SEMNE_PLATIT.test(def)).toBe(false)
+    // 7 aug: slotul greu a plecat de pe Pro pe familia flash, PE MĂSURĂTOARE și cu
+    // acordul explicit al ownerului (aceeași calitate — 20/20 amândouă — dar Pro
+    // avea ture de 72-75 s față de 6,3 s). `-lite` rămâne INTERZIS aici: e slotul
+    // de conversație, iar dacă ar intra și pe treapta grea s-ar prăbuși într-unul.
+    expect(/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(def)).toBe(true)
+    expect(/-lite(?:-|$)/.test(def)).toBe(false)
+    expect(/process\.env\.(GEMINI_MODEL_GREU|BRAIN_CHAT_MODEL|BRAIN_WORK_MODEL|BRAIN_TOP_MODEL)/.test(s)).toBe(false)
+  })
+})
+
+describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: „modelul decis de mine să nu se poată modifica accidental sau de altcineva fără decizia mea")', () => {
+  it('config: o SINGURĂ sursă (MODEL_UNIC_DEFAULT), familia flash, prin getteri, fără env', () => {
+    const s = sursa('./config.ts')
+    expect(/MODEL_UNIC_DEFAULT = 'gemini-\d/.test(s)).toBe(true)
+    expect(/get geminiModel\(\): string/.test(s)).toBe(true)
+    expect(/get chatDefault\(\): string/.test(s)).toBe(true)
+    expect(/get workDefault\(\): string/.test(s)).toBe(true)
+    expect(/get topDefault\(\): string/.test(s)).toBe(true)
+    expect(/process\.env\.(GEMINI_MODEL_GREU|BRAIN_CHAT_MODEL|BRAIN_WORK_MODEL|BRAIN_TOP_MODEL)/.test(s)).toBe(false)
+  })
+
+  it('brainContract: fallback = modelul unic (niciodată 2.5/flash); resolveModel IGNORĂ „wanted"', () => {
+    const s = sursa('./services/brainContract.ts')
+    expect(/return modelUnicDirect\(\)/.test(s)).toBe(true)
+    // niciun `return …gemini-2.5…` (fallback-ul vechi spre 2.5 a dispărut; comentariile pot menționa)
+    expect(/return\b[^\n]*gemini-2\.5/.test(s)).toBe(false)
+    // resolveModelChecked NU mai întoarce `wanted` ca model (era escape-ul din KV/UI).
+    expect(/\{ model: wanted, fellBack: false \}/.test(s)).toBe(false)
+  })
+
+  it('brain.ts: scara de experți = un singur model, fără trepte din env', () => {
+    const s = sursa('./services/brain.ts')
+    expect(/process\.env\.BRAIN_EXPERT_FALLBACKS/.test(s)).toBe(false)
+    expect(/return \[config\.brain\.workDefault\]/.test(s)).toBe(true)
+  })
+
+  it('ruta /api/models: PUT selection BLOCAT (423 model_locked) — UI nu poate schimba modelul', () => {
+    const s = sursa('./routes/models.ts')
+    expect(/model_locked/.test(s)).toBe(true)
+    expect(/saveKv\(/.test(s)).toBe(false) // nu mai salvează nicio alegere de model
+  })
+
+  // Adrian, 7 aug: „pune condiție la orice auto upgrade să respecte toate aceste
+  // condiții, clar cu dovadă" + „dacă nu se respectă tot să nu se facă upgrade,
+  // doar când apare modelul corespunzător să treacă tot".
+  it('auto-upgrade: DOAR mai nou, DOAR familia flash, DOAR cu TOATE probele trecute, CU dovadă', () => {
+    const cfg = sursa('./config.ts')
+    expect(/export function setModelUnicValidat/.test(cfg)).toBe(true)
+    expect(cfg).toContain('-flash(?:-|$)') // poarta de familie a slotului greu
+    expect(cfg).toContain('-lite(?:-|$)') // …și interdicția pe lite
+    const up = sursa('./services/modelAutoUpgrade.ts')
+    expect(/maiNou/.test(up)).toBe(true) // doar mai nou (nu retrogradează)
+    expect(/probeazaModelComplet/.test(up)).toBe(true) // bateria COMPLETĂ, nu un smoke
+    expect(/p\.scor !== p\.total/.test(up)).toBe(true) // un punct pierdut = nu se comută
+    expect(/KV_DOVADA/.test(up)).toBe(true) // dovada se scrie, nu se declară
   })
 })
 
@@ -151,10 +205,16 @@ describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier
     expect(/holder = hasRef && isHolder/.test(server)).toBe(true)
   })
 
-  it('SIGURANȚA rămâne: vocea străină (TV/necunoscuți) NU ajunge la creier', () => {
-    // Cerința obligatorie: doar vocea user/admin. Poarta de amprentă care aruncă
-    // vocea străină trebuie să rămână — dacă dispare, testul cade.
-    expect(/if \(verdict\?\.foreignVoice && !guest\)/.test(voce)).toBe(true)
+  it('vocea pleacă DIRECT la creier — clientul nu mai etichetează timbrul, nimic n-o blochează', () => {
+    // INTERMEDIARI SCOȘI (Adrian, 6 aug: „elimină intermediarii, îl pui direct pe
+    // Kelion să primească; scoate orice urmă de limitare a audio, scoate-i și din
+    // soft"). Clientul NU mai calculează `nevalidat`/`foreignVoice` pe voce și nu mai
+    // face al doilea upload — fraza brută pleacă direct, creierul decide adresarea.
+    // Gardul de admin din chat.ts (isAdmin && !nevalidat) rămâne (dormant pe voce);
+    // card/bani rămân pe potrivirea reală holder, server-side.
+    expect(/nevalidat/.test(voce)).toBe(false)
+    expect(/foreignVoice/.test(voce)).toBe(false)
+    expect(/ignorată complet/.test(voce)).toBe(false)
   })
 })
 
@@ -226,13 +286,53 @@ describe('LACĂT — voce unificată: fraza pleacă DIRECT la creierul unic ca a
 })
 
 describe('LACĂT — creier Pro + Extended Thinking (Adrian, 5 aug: „la creier adaugi Gemini Pro + Extended Thinking")', () => {
-  it('creierul de bază e Gemini 3 Pro (modelul avansat), din config', () => {
+  // SCHIMBAT 7 AUG — DOUĂ SLOTURI, pe dovadă măsurată de owner pe cheia lui, de pe
+  // VPS: chatul rula pe Pro și făcea 3.622 ms … 45.026 ms (a și EXPIRAT) la o
+  // întrebare banală, în timp ce `gemini-3.5-flash-lite` face 508–713 ms cu unelte
+  // + vedere + auz intacte. Întrebarea ownerului („18 secunde să-mi spună cât e
+  // ceasul?") a pornit studiul; măsurătoarea i-a dat dreptate.
+  // Lacătul NU s-a slăbit: gândirea GREA (work/top) rămâne bătută în cuie pe Pro,
+  // iar conversația e bătută în cuie pe familia flash. Ce se păzește acum e
+  // împerecherea corectă — nu se poate strecura Pro pe chat (lent), nici flash pe
+  // work/top (prost la gândire grea).
+  // 7 aug — DOUĂ SLOTURI, AMÂNDOUĂ DIN FAMILIA FLASH, dar DISJUNCTE:
+  // conversația pe `flash-lite`, gândirea grea pe `flash` fără lite. Pro a ieșit
+  // de pe treapta grea pe măsurătoare (proba de 10 sarcini cu verificare automată:
+  // flash 20/20 la fel ca Pro, dar Pro cu ture de 72-75 s față de 6,3 s).
+  it('două sloturi sigilate și DISJUNCTE: conversația pe flash-lite, gândirea grea pe flash', () => {
     const s = sursa('./config.ts')
-    expect(/gemini-3\.1-pro-preview/.test(s)).toBe(true)
-    // Pe toate treptele creierului (chat/work/top), nu doar una.
-    expect(config.brain.chatDefault).toContain('gemini-3.1-pro-preview')
-    expect(config.brain.workDefault).toContain('gemini-3.1-pro-preview')
-    expect(config.brain.topDefault).toContain('gemini-3.1-pro-preview')
+    expect(/MODEL_UNIC_DEFAULT = 'gemini-[\d.]+-flash'/.test(s)).toBe(true)
+    expect(/MODEL_RAPID_DEFAULT = 'gemini-[\d.]+-flash-lite'/.test(s)).toBe(true)
+    // CHAT = lite. NICIODATĂ Pro (de-acolo venea lentoarea).
+    expect(config.brain.chatDefault).toMatch(/flash-lite/)
+    expect(config.brain.chatDefault).not.toMatch(/pro/i)
+    // GREUL = flash, dar NU lite — altfel cele două trepte ar fi una singură.
+    expect(config.brain.workDefault).toMatch(/flash/)
+    expect(config.brain.workDefault).not.toMatch(/-lite/)
+    expect(config.brain.topDefault).toMatch(/flash/)
+    expect(config.brain.topDefault).not.toMatch(/-lite/)
+    // Și, explicit: cele două trepte NU pot ajunge pe același model.
+    expect(config.brain.chatDefault).not.toBe(config.brain.workDefault)
+  })
+
+  it('poarta fiecărui slot acceptă DOAR familia lui (un upgrade nu poate încrucișa sloturile)', () => {
+    const cfg = sursa('./config.ts')
+    // Slotul greu: flash, dar refuză lite. Slotul rapid: DOAR lite (strâns 7 aug —
+    // de când greul e flash, o poartă largă aici ar fi lăsat ambele sloturi pe
+    // același model, adică o singură treaptă deghizată în două).
+    expect(cfg).toContain('-flash(?:-|$)')
+    expect(cfg).toContain('-lite(?:-|$)')
+    expect(/setModelRapidValidat/.test(cfg)).toBe(true)
+    expect(cfg).toContain('-flash-lite(?:-|$)')
+  })
+
+  it('escaladarea din chatul rapid spre Pro rămâne cablată (ask_brain doar pe tura ușoară)', () => {
+    // Supapa: dacă modelul rapid întâlnește ceva peste el, cheamă `ask_brain`,
+    // care merge pe workDefault = Pro. Fără asta, separarea ar fi o retrogradare.
+    const chat = sursa('./routes/chat.ts')
+    expect(/escalationTools = heavyTurn \? \[\] : \[ASK_BRAIN_TOOL\]/.test(chat)).toBe(true)
+    const brain = sursa('./services/brain.ts')
+    expect(/return \[config\.brain\.workDefault\]/.test(brain)).toBe(true)
   })
 
   it('Extended Thinking pe turele grele: reasoning «high» pe creierul direct → thinkingLevel «high»', () => {

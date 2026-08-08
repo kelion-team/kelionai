@@ -28,7 +28,7 @@ import {
   type VoiceFeatures,
 } from './audioIO.js'
 
-const TARGET_RATE = 16000
+import { TARGET_RATE, downsample, float32ToPcm16 } from './pcm'
 // PAUZA care ÎNCHIDE fraza (Adrian, 3 aug — latența „nu mă aude"): o tăcere mai
 // lungă de-atât = sfârșit de rostire → fraza pleacă la creier. Nu prea scurt
 // (ar tăia o propoziție la o respirație), nu prea lung (ar întârzia răspunsul).
@@ -89,14 +89,7 @@ function wavDataUri16k(chunks: Float32Array[]): string {
   let total = 0
   for (const c of chunks) total += c.length
   if (total < TARGET_RATE / 10) return '' // sub ~0.1s = nimic util
-  const pcm = new Int16Array(total)
-  let o = 0
-  for (const c of chunks) {
-    for (let i = 0; i < c.length; i++) {
-      const s = Math.max(-1, Math.min(1, c[i]))
-      pcm[o++] = s < 0 ? s * 0x8000 : s * 0x7fff
-    }
-  }
+  const pcm = float32ToPcm16(chunks)
   const bytes = new Uint8Array(44 + pcm.byteLength)
   const dv = new DataView(bytes.buffer)
   const wr = (off: number, s: string): void => {
@@ -124,16 +117,6 @@ function wavDataUri16k(chunks: Float32Array[]): string {
     bin += String.fromCharCode(...bytes.subarray(i, i + CH))
   }
   return `data:audio/wav;base64,${btoa(bin)}`
-}
-
-// eșantionare liniară în jos (ctx.sampleRate → 16kHz) — suficient pentru voce
-function downsample(input: Float32Array, inRate: number): Float32Array {
-  if (inRate === TARGET_RATE) return input
-  const ratio = inRate / TARGET_RATE
-  const outLen = Math.floor(input.length / ratio)
-  const out = new Float32Array(outLen)
-  for (let i = 0; i < outLen; i++) out[i] = input[Math.floor(i * ratio)]
-  return out
 }
 
 export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHandle | null> {
@@ -172,6 +155,9 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let phraseTimer: ReturnType<typeof setTimeout> | null = null
   let framesSent = 0
   let maxRms = 0
+  // Diagnostic de captare (Adrian, 6 aug — „nu preia audio"): un log rar din
+  // onAudioProcess ca să se vadă la runtime dacă procesarea rulează + starea ctx.
+  let diagCadre = 0
 
   // Pre-roll ring: păstrează ultimele ~400ms de audio CHIAR ÎNAINTE ca VAD-ul să
   // declare „voce". La declanșare, aceste cadre intră primele în frază — fixează
@@ -284,6 +270,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
 
   const onAudioProcess = (e: AudioProcessingEvent): void => {
     if (closed) return
+    // ~1 log/secundă: dacă NU apare deloc când vorbești → procesarea nu rulează
+    // (context suspendat / graf mort); dacă apare cu muted:true mereu → mut blocat;
+    // dacă apare cu ctx:'running', muted:false, dar fraza nu se deschide → prag/semnal.
+    if (diagCadre++ % 12 === 0) console.info('[captare]', { ctx: ctx.state, muted, frazaDeschisa: phraseOpen })
     // BARGE-IN cât Kelion vorbește: cât e MUT (anti-ecou) NU acumulăm audio (ar fi
     // ecoul lui), dar calculăm volumul și, la voce clară SUSȚINUTĂ (peste garda de
     // onset), îl întrerupem prin onBargeIn. Calea normală (dezmuțit) rămâne neatinsă.
@@ -425,9 +415,21 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
 
   wireGraph(firstGraph)
 
+  // DEBLOCAJ CONTINUU AL CONTEXTULUI (Adrian, 6 aug: „se deschide să preia dar nu
+  // se preia nimic audio"). Cauza rădăcină: AudioContext poate rămâne 'suspended'
+  // (pornit fără gest) și atunci `onaudioprocess` NU rulează NICIODATĂ → microfonul
+  // e SURD deși becul „ascult" e aprins. Trezirea pe gest (deblocheazaAudioLaGest)
+  // NU acoperă VORBIREA (nu e gest). Aici forțăm `resume()` periodic cât urechea e
+  // activă — un context deja 'running' îl ignoră (no-op), deci zero risc.
+  const resumeTimer = setInterval(() => {
+    if (closed) return
+    if (ctx.state !== 'running') void ctx.resume().catch(() => {})
+  }, 1200)
+
   const stop = (): void => {
     if (closed) return
     closed = true
+    clearInterval(resumeTimer)
     if (phraseTimer) clearTimeout(phraseTimer)
     try {
       proc.disconnect()

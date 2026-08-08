@@ -24,7 +24,9 @@ describe('transcrierea: fără model OpenAI (Chirp detectează limba per rostire
   it('clientul nu mai are model de transcriere OpenAI — urechea Chirp folosește getLang', () => {
     expect(voce).not.toContain('x-transcribe-model')
     expect(voce).not.toContain('transcribeModel')
-    expect(voce).toMatch(/getLang: \(\) => anchoredLang \|\| opts\.language/)
+    // Limba = preferința persistată (opts.language). Fostul `anchoredLang` (dedus din
+    // verdictul de timbru) a dispărut odată cu scoaterea intermediarului (6 aug).
+    expect(voce).toMatch(/getLang: \(\) => opts\.language/)
   })
 })
 

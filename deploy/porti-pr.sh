@@ -198,8 +198,23 @@ while read -r NUMAR SHA; do
   PAYLOAD=$(scrie_raportul "$SHA" | python3 -c 'import json,sys; print(json.dumps({"body": sys.stdin.read()}))')
   gh -X POST -H 'content-type: application/json' -d "$PAYLOAD" "$GH/issues/$NUMAR/comments" >/dev/null
 
+  # ── VERDICTUL DEVINE UN CHECK PE PR, nu doar un comentariu (Adrian, 7 aug:
+  # „aceleași fantome… nu repari?") ──────────────────────────────────────────
+  # Până acum, singurele checkuri de pe PR erau cele două joburi GitHub Actions
+  # care NU pornesc niciodată: măsurat pe run 31223561134 — `runner_id: 0`,
+  # `runner_name` gol, job creat și terminat în 3 secunde, loguri 404. Nu e o
+  # eroare de cod: niciun runner nu i s-a alocat vreodată (repo privat, minute
+  # blocate). Rezultatul: PR-ul arăta ROȘU la fiecare push, cu notificări pe
+  # telefonul ownerului, în timp ce verdictul ADEVĂRAT stătea într-un comentariu
+  # mai jos. Acum verdictul real urcă și ca stare de commit, deci PR-ul arată
+  # ce e — verde când porțile trec, roșu când chiar pică ceva.
+  if [ "$VERDICT" = TRECE ]; then STARE_GH=success; else STARE_GH=failure; fi
+  gh -X POST -H 'content-type: application/json' \
+    -d "{\"state\":\"$STARE_GH\",\"context\":\"porti-vps\",\"description\":\"Porți rulate pe VPS: $VERDICT\",\"target_url\":\"https://github.com/kelion-team/kelionai/pull/$NUMAR\"}" \
+    "$GH/statuses/$SHA" >/dev/null
+
   echo "$SHA" >> "$STARE"
-  echo "PR #$NUMAR: $VERDICT (comentat)"
+  echo "PR #$NUMAR: $VERDICT (comentat + stare $STARE_GH pe commit)"
 done <<<"$PRURI"
 
 # Fișierul de stare rămâne mic: ultimele 200 de sha-uri sunt mai mult decât destul.

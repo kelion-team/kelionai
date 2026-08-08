@@ -37,6 +37,16 @@ CADDY_DIR=/root/kelion-caddy
 exec 8>/root/kelion/publicare.lock
 flock 8
 
+# TRAP DE RESTAURARE A CONSTRUCTORULUI (Adrian, 7 aug — audit: pasul 0 scoate
+# constructorul din cron, dar dacă build-ul PICĂ sub `set -e`, scriptul moare
+# ÎNAINTE de pasul 6d care-l repune → constructorul rămâne oprit până la următorul
+# deploy verde). Trap-ul pe EXIT îl repune la ORICE ieșire (succes sau eșec),
+# idempotent (grep -v scoate linia existentă, apoi adaugă exact una).
+restore_constructor() {
+  ( crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' ; echo '*/2 * * * * /root/kelion/constructor-worker.sh >> /root/kelion/constructor.log 2>&1' ) | crontab - 2>/dev/null || true
+}
+trap restore_constructor EXIT
+
 echo "== 0. Blochez ecosistemul-zombie (puntea/constructorul, șters din cod pe 23 iul) =="
 # Lanț complet descoperit la audit (24 iul): serviciile kelion-bridge/builder/
 # paznic/deployer loveau endpointuri șterse și ardeau abonamentul cu procese
@@ -74,10 +84,57 @@ systemctl daemon-reload 2>/dev/null || true
 #    trimitea alertele-fantomă de la alerts@ — buclă cu auto-reply-ul din contact@).
 pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux|kelion-voice-agent' 2>/dev/null || true
 
+# 5) CONSTRUCTORUL — PAUZAT PE DURATA PUBLICĂRII (Adrian, 6 aug: publicare blocată
+#    ORE — constructorul rula build-uri în paralel la FIECARE 2 min și sufoca CPU-ul,
+#    iar `docker build`-ul publicării nu se mai termina; live rămânea în urmă cu zeci
+#    de commituri, iar reboot-ul nu ajuta pe termen lung fiindcă cronul îl reînvia).
+#    Îl scoatem din cron ACUM + îi omorâm procesele în curs, ca build-ul publicării
+#    să aibă serverul pentru el. NU-i pierdem funcția: pasul 6d îl REPUNE în cron la
+#    finalul publicării — doar tăcem gălăgia cât se publică.
+crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' | crontab - 2>/dev/null || true
+# Omoară TOT arborele constructorului, nu doar părintele (Adrian, 7 aug — audit:
+# `constructor-agent.mjs` lansează prin execSync copii CPU-grei — npm/tsc/vite/
+# esbuild în /root/kelion/atelier; un `pkill` simplu prinde doar procesul-părinte,
+# iar copiii orfani ard CPU și sufocă `docker build`-ul publicării). Kill pe GRUPUL
+# de procese (kill -PGID, PID negativ) îi ia pe toți descendenții. Best-effort.
+{
+  for pid in $(pgrep -f 'constructor-worker|constructor-agent' 2>/dev/null || true); do
+    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
+    [ -n "$pgid" ] && kill -9 "-$pgid" 2>/dev/null || true
+  done
+  pkill -9 -f 'constructor-worker|constructor-agent|/root/kelion/atelier' 2>/dev/null || true
+} || true
+
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
 git fetch origin --prune
-git checkout -B deploy "origin/$BRANCH"
+# ── ARBORELE DE PUBLICARE NU E SPAȚIU DE LUCRU (8 aug 2026) ──────────────────
+# CE S-A ÎNTÂMPLAT, MĂSURAT: publicarea a stat oprită PESTE OPT ORE (live
+# `ee283ef` la 16:48Z, master `c4e0402`), fără niciun proces agățat, fără lacăt
+# blocat, cu mașina la load 0,68 și cu cronul rulând în fiecare minut. În
+# `auto-publicare.log`, aceeași eroare la fiecare minut:
+#     error: Your local changes to the following files would be overwritten by checkout:
+#         scripts/proba-modele.py · backend/src/routes/chat.ts ·
+#         backend/src/services/geminiDirect.ts · frontend/src/lib/micStream.ts
+#     Aborting
+# `git checkout` refuza să suprascrie modificări locale, deploy-ul renunța la
+# pasul 1, cronul relua peste un minut — LA INFINIT. Nimic nu se agăța: renunța
+# de fiecare dată, tăcut pentru oricine nu deschidea exact logul ăla.
+#
+# `/root/kelion/repo` e o copie de PUBLICARE, nu un loc unde se lucrează: ce e de
+# păstrat trăiește în git, nu acolo. Deci arborele se curăță — dar NU orbește:
+# se salvează întâi un petic cu tot ce se aruncă, și se scrie în log ce anume.
+# Un „am curățat" fără listă e exact verdictul nemăsurat pe care-l interzicem.
+if ! git diff --quiet HEAD 2>/dev/null; then
+  PETIC="/root/kelion/repo-modificari-$(date -u +%Y%m%d-%H%M%S).patch"
+  git diff HEAD > "$PETIC" 2>/dev/null || true
+  echo "!! Arborele de publicare avea modificări locale — salvate în $PETIC, apoi aruncate:"
+  git diff HEAD --stat | sed 's/^/     /'
+  git reset --hard >/dev/null 2>&1 || true
+fi
+# `-f`: chiar dacă a mai rămas ceva (fișier neurmărit care se ciocnește), publicarea
+# nu se mai oprește. Codul care ajunge la om e cel din master, întotdeauna.
+git checkout -f -B deploy "origin/$BRANCH"
 git log --oneline -1
 # Ieșire devreme sub lacăt: dacă alt publicator tocmai a dus live EXACT sha-ul
 # țintă cât am așteptat la flock, nu mai reconstruim nimic — verde, gata.
@@ -111,7 +168,12 @@ echo "== 2b. Canalul de update al lui Kelion (ce primește la ACEST deploy) =="
 } > "$REPO/deploy/last-updates.txt"
 
 echo "== 3. Construiesc imaginea =="
-docker build -t kelionai:latest "$REPO"
+# TIMEOUT PE BUILD (Adrian, 7 aug — audit: `docker build` n-avea limită; dacă
+# atârna, ținea lacătul de publicare la infinit → totul îngheța, exact ce s-a
+# întâmplat 6 aug). `timeout 1200` (20 min) taie un build agățat → scriptul iese
+# non-zero, lacătul se eliberează, trap-ul repune constructorul, iar auto-publicarea
+# reîncearcă la ciclul următor. Un build sănătos e sub ~8 min, deci pragul e larg.
+timeout 1200 docker build -t kelionai:latest "$REPO"
 
 echo "== 4. Pornesc aplicația (:8080, network host, env-file) =="
 docker rm -f kelionai-app 2>/dev/null || true
@@ -152,13 +214,17 @@ echo "== 6. Backup criptat zilnic (cron) =="
 install -m 700 "$REPO/deploy/backup.sh" /root/kelion/backup.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' ; echo '15 3 * * * /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
 
-echo "== 6c. Auto-publicarea de pe server (cron la 3 min — master ajunge live SINGUR) =="
+echo "== 6c. Auto-publicarea de pe server (cron la 1 min — master ajunge live SINGUR) =="
 # Adrian, 26 iul („de ce nu le publici? de ce trebuie să-ți zic eu?"), în plină
 # pană GitHub Actions: serverul își compară singur live-ul cu vârful lui master
 # (API GitHub, nu runneri) și, dacă e în urmă, rulează CHIAR acest deploy.sh.
 # GitHub Actions nu mai e pe drumul critic al publicării.
+# CRON LA 1 MINUT (Adrian, 6 aug: „5 minute e maximul, oricât de mare ar fi").
+# Era la 3 min → până la 3 min pierdute DOAR pe așteptarea tick-ului. flock-ul din
+# auto-publicare.sh + publicare.lock previn suprapunerea, deci 1 min e sigur:
+# un ciclu care prinde un deploy în curs iese imediat pe flock, fără muncă dublă.
 install -m 700 "$REPO/deploy/auto-publicare.sh" /root/kelion/auto-publicare.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/auto-publicare.sh' ; echo '*/3 * * * * /root/kelion/auto-publicare.sh >> /root/kelion/auto-publicare.log 2>&1' ) | crontab -
+( crontab -l 2>/dev/null | grep -v '/root/kelion/auto-publicare.sh' ; echo '* * * * * /root/kelion/auto-publicare.sh >> /root/kelion/auto-publicare.log 2>&1' ) | crontab -
 
 echo "== 6f. Materializarea punctelor de recuperare pe VPS (cron la 10 min) =="
 # Adrian, 27 iul: „salvarea trebuie pe serverul Linux". Fiecare tag backup-*

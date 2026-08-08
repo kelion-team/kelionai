@@ -33,6 +33,7 @@ import {
   replyVisitorChat,
   type VisitorConvo,
   type VisitorMsg,
+  fetchCereriNeacoperite,
   fetchDemos,
   fetchActivity,
   resolveGap,
@@ -170,10 +171,10 @@ export default function AdminPanel({
   initialTab,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
   >(initialTab ?? 'finance')
   // GESTURES (Adrian, Jul 13): the disabled list — what is NOT checked is NOT used.
   // Tri-stat (auditul admin, 3 aug): pe o citire EȘUATĂ nu desenăm „toate
@@ -514,6 +515,8 @@ export default function AdminPanel({
       if (g) setGaps(g)
       setGapsFailed(!g)
     })
+    // Legătură cereri neacoperite (plăți neatribuite + cereri useri)
+    void fetchCereriNeacoperite()
     void fetchFinance().then((f) => {
       if (f) setFinance(f)
       setFinanceFailed(!f)
@@ -1163,6 +1166,13 @@ export default function AdminPanel({
               onClick={() => setTab('recuperare')}
             >
               {A.tabRecovery}
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'sistem' ? 'sel' : ''}`}
+              onClick={() => setTab('sistem')}
+            >
+              Sistem (VPS)
             </button>
           </div>
           {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
@@ -2086,6 +2096,35 @@ export default function AdminPanel({
                 nimic nu se pierde din istoric) și republică automat pe server. Rezerve manuale:
                 bundle-urile din <code>/root/kelion/backups/</code>.
               </div>
+            </div>
+          </section>
+        )}
+        {tab === 'sistem' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">Sistem (VPS)</div>
+              <p className="chat-hint" style={{ marginTop: 8 }}>
+                Declanșează fluxurile de restart pentru aplicație și Caddy. Durează câteva secunde.
+              </p>
+              <button
+                className="ghost"
+                style={{ marginTop: 12 }}
+                onClick={async () => {
+                  if (!confirm('Ești sigur că vrei să resetezi VPS-ul (aplicația și serverul web)?')) return
+                  try {
+                    const res = await fetch('/api/admin/reset-vps', {
+                      method: 'POST',
+                      credentials: 'include'
+                    })
+                    if (res.ok) alert('Comanda de resetare VPS a fost trimisă cu succes.')
+                    else alert('Eroare la trimiterea comenzii de resetare.')
+                  } catch (e) {
+                    alert('Eroare rețea la trimiterea comenzii.')
+                  }
+                }}
+              >
+                Reset VPS
+              </button>
             </div>
           </section>
         )}

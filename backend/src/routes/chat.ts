@@ -69,6 +69,7 @@ import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck,
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
 import { getVoicePref } from '../db.js'
+import { stareSesiune, pastreazaStareSesiune, actualizeazaStareSesiune } from '../services/stareSesiune.js'
 import { splitForSpeech } from '../services/speech-chunk.js'
 import {
   browserOpen,
@@ -207,10 +208,26 @@ async function selectedBrainModel(
     // IF he ever wants to pick by hand again, this block comes out — but only at
     // HIS request, not because some future AI thinks "the user should decide".
     // He already decided: he doesn't want to decide every time.
+    // ── DOUĂ SLOTURI ȘI PE CALEA OWNERULUI (Adrian, 7 aug) ───────────────────
+    // AICI era blocajul care ar fi făcut inutilă toată separarea: ambele ramuri
+    // de mai jos cereau necondiționat treapta `work` (= Pro), iar `return`-ul de
+    // la finalul blocului iese ÎNAINTE de bifurcația rapid/greu de mai jos. Deci
+    // ownerul — singurul care testează live — ar fi rămas pe Pro și n-ar fi văzut
+    // NICIO diferență, oricât am fi separat config-ul. Găsit la verificarea
+    // dinaintea implementării, exact ca să nu-i raportez „e rapid" și el să
+    // măsoare iar 18 secunde.
+    //
+    // Acum treapta se alege din `heavy` (calculat mai sus, la fel pentru toți):
+    // tura ușoară („ce faci", „cât e ceasul") → slotul RAPID; tura grea (vedere,
+    // dificultate ≥ prag, intenție de acțiune) → Pro. NU e o retrogradare tăcută
+    // — regula §14 păzea împotriva coborârii pe o sarcină GREA, iar aici greul
+    // rămâne pe Pro. Iar dacă modelul rapid întâlnește totuși ceva peste el, are
+    // unealta `ask_brain` (dată doar pe tura ușoară) care escaladează la Pro.
+    const treaptaOwner: 'chat' | 'work' = heavy ? 'work' : 'chat'
     let ownerModel: string | null = null
     if (sel.work) {
       console.log(`[BRAIN] owner: ignoring the saved selection (${sel.work}) — the "I don't do manual" order; keeping the default`)
-      ownerModel = await resolveModel('work', null)
+      ownerModel = await resolveModel(treaptaOwner, null)
     } else {
       // ── HIS BRAIN, CHOSEN BY HIM (Adrian, Jul 31: "set
       // nvidia/nemotron-3-ultra-550b-a55b:free as the brain") ──────────────────
@@ -237,7 +254,7 @@ async function selectedBrainModel(
       // better". He asked for it, in writing, and switching to paid is one env
       // variable away (OPENROUTER_WORK_MODEL) or a choice in Settings → Model,
       // which still takes priority over everything.
-      ownerModel = await resolveModel('work', null)
+      ownerModel = await resolveModel(treaptaOwner, null)
     }
     // ── ESCALATION CLIMBS FROM HIS CHOICE TOO (Adrian, Jul 31) ───────────────
     //
@@ -895,6 +912,14 @@ export const SYSTEM_PROMPT = `You are Kelion — a brilliant personal AI assista
 
 WHO YOU ARE: You were created by AE Studio. Your owner and creator is Adrian Enciulescu — both the application and the original idea are his. If the user asks who made you, who owns you, or whose idea you are, answer clearly and with respect (created by AE Studio; owner and creator Adrian Enciulescu). Do not bring this up unprompted.
 
+MĂSOARĂ, NU DECLARA (regula de fier a lui Adrian, 8 aug: „va trebui să folosească OBLIGATORIU toate testele și să măsoare orice răspuns"). Orice afirmație despre STAREA sistemului — merge / nu merge, cât durează, cât costă, câte sunt, e verde / e roșu — trebuie să vină dintr-o măsurătoare pe care ai făcut-o TU, în tura asta, cu o unealtă. Reguli, fără excepție:
+  • O CITIRE CARE A PICAT NU E O VALOARE. Dacă unealta n-a răspuns, spune „nu pot verifica" și motivul. Niciodată 0, niciodată „necreat", niciodată „pare în regulă" — exact astea l-au costat pe Adrian o zi întreagă.
+  • „NU ȘTIU" NU E „E BINE". Dacă o verificare n-a putut rula, raportul e INCOMPLET, nu „trece".
+  • ÎNAINTE SĂ SCHIMBI COD: rulează ruleaza_portile (tipuri, teste, lacăt, exporturi, sintaxă, build). Aia e starea de plecare.
+  • DUPĂ CE AI SCHIMBAT: rulează-le din nou și compară. Fără a doua rulare nu ai dovadă că n-ai stricat nimic.
+  • repo_open_pr și repo_merge_pr REFUZĂ dacă porțile n-au fost rulate complet și recent, cu verdict TRECE. Nu e o formalitate de ocolit: e poarta care te oprește să publici pe încredere.
+  • CÂND SPUI CEVA DESPRE SISTEM, poți fi întrebat „de unde știi". Răspunsul corect e o măsurătoare din jurnal_masuratori. Dacă nu e acolo, n-ai măsurat-o — spune asta.
+
 WHEN YOU CAN'T DO SOMETHING YET: If the user asks you to do something you genuinely cannot do because no tool or capability exists for it (e.g. book a taxi, send a WhatsApp, control smart-home devices, place a phone call), tell them honestly you can't do that yet — AND silently call log_unsupported_request to record it for the owner. Never pretend you did it; never call that tool for things you actually can do. EXCEPTION — THE OWNER: when talking to your owner you carry real builder and operations tools (source reading, code writing, PR merge, runbooks), so for him almost nothing is "impossible" — follow the OWNER section and ACT with those tools instead of declaring inability.
 
 Bring your full intelligence to every reply: work out what the user truly means, reason it through, and give the best, most correct answer — then say it simply.
@@ -1099,6 +1124,21 @@ function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
   return out
 }
 
+// TURA VOCALĂ = AUDIO cu text GOL (voce unificată, 6 aug — „urechea o scoți
+// total, creierul unic aude"). Fraza vocală vine în câmpul `audio`, iar mesajul
+// user are text '' — sanitizeHistory tocmai l-a scos. FĂRĂ o tură user la coadă
+// care să poarte fraza, o tură vocală pica: pe istoric gol → 400 „no usable
+// messages" (iar clientul arată ORICE 400 ca „Eroare la creier"), cu istoric →
+// audio-ul se lipea de o tură user VECHE și conversația se termina cu assistant,
+// deci creierul eșua. Garantăm purtătorul: creierul AUDE fraza (blocul audio_url
+// se atașează pe ultima tură user), iar textul e legitim gol. Exportat = testabil.
+export function asiguraPurtatorAudio(messages: ChatMessage[], audioPrezent: boolean): ChatMessage[] {
+  if (!audioPrezent) return messages
+  const ultim = messages.at(-1)
+  if (!ultim || ultim.role !== 'user') return [...messages, { role: 'user', content: '' }]
+  return messages
+}
+
 // (PUNGA DE REZERVĂ a fost EXTIRPATĂ DE TOT, 3 aug — întâi ÎNCHISĂ definitiv
 // („deschisă → false"; Adrian, cu mailurile „sold scăzut $-0.20" în mână:
 // rotația aluneca pe modele OpenRouter PLĂTITE), apoi ștearsă cu tot cu
@@ -1287,6 +1327,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       messages = messages.slice(-MAX_HISTORY)
       while (messages.length > 0 && messages[0].role !== 'user') messages.shift()
     }
+    // Tura vocală vine ca AUDIO cu text GOL — garantăm un purtător user la coadă
+    // (altfel: 400 „no usable messages" → „Eroare la creier", sau audio lipit de o
+    // tură veche). Vezi asiguraPurtatorAudio.
+    messages = asiguraPurtatorAudio(messages, !!audio)
     if (messages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'no usable messages' })
     }
@@ -1321,21 +1365,45 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
       new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
     ])
-    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures, modelChoiceKv] = await Promise.all([
-      getSpeechLang(user.email),
-      getMeserieActiva(user.email),
+    // ── PREFERINȚELE SE CITESC O DATĂ PE SESIUNE, NU LA FIECARE ÎNTREBARE ────
+    // (Adrian, 7 aug: „verificarile de plati etc securitate se fac la logare si
+    // atit, e clar nu se repeta deloc pe intrebari"). Limba, meseria, gesturile,
+    // alegerea de model și preferința de voce NU depind de ce a întrebat omul —
+    // depind de CONT. Prima tură a sesiunii le citește o dată; următoarele le iau
+    // din memorie (`services/stareSesiune.ts`), fără niciun drum la DB. Memoria
+    // semantică (recall) și continuitatea rămân per-tură — ALEA depind de tura
+    // curentă. Securitatea (isAdmin, oaspete, unelte) se recalculează oricum mai
+    // jos, la fiecare cerere: viteza nu se ia din securitate.
+    const acumMs = Date.now()
+    const cache = stareSesiune(user.email, acumMs)
+    const [prefs, memRecall, lastSavedRow] = await Promise.all([
+      cache
+        ? Promise.resolve(cache)
+        : Promise.all([
+            getSpeechLang(user.email),
+            getMeserieActiva(user.email),
+            // GESTURES disabled by Adrian from the admin panel — anything NOT
+            // checked does NOT appear at all (Adrian, Jul 13).
+            getDisabledGestures().catch(() => [] as string[]),
+            loadKv(`model_choice:${userKey(user.email)}`).catch(() => null),
+            getVoicePref(user.email).catch(() => null),
+          ]).then(([speechLang, mId, gestures, mKv, vPref]) => {
+            const stare = {
+              speechLang, meserieId: mId, disabledGestures: gestures,
+              modelChoiceKv: mKv, voicePref: vPref, balance: null,
+            }
+            pastreazaStareSesiune(user.email, stare, acumMs)
+            return { ...stare, laMs: acumMs }
+          }),
       recallWithDeadline,
       // Continuity between sessions (#20): the timestamp of the last saved
       // message — pure DB, in parallel with the rest (zero added latency).
       getRecentHistory(user.email, 1).catch(() => []),
-      // GESTURES disabled by Adrian from the admin panel — anything NOT checked
-      // does NOT appear at all (Adrian, Jul 13): we filter the tool + prompt
-      // with this list.
-      getDisabledGestures().catch(() => [] as string[]),
-      // FLUENCY (A5): the user's model choice read HERE, in parallel — not as
-      // yet another serial DB trip right before the brain call.
-      loadKv(`model_choice:${userKey(user.email)}`).catch(() => null),
     ])
+    const storedPref = prefs.speechLang
+    const meserieId = prefs.meserieId
+    const disabledGestures = prefs.disabledGestures
+    const modelChoiceKv = prefs.modelChoiceKv
     // GESTURILE DEZACTIVATE de Adrian din Admin → Gesturi: gestul ales de
     // situație (mai jos, la finalul turei) e verificat față de setul ăsta și
     // nu se joacă dacă e debifat. „Ce nu e bifat nu apare în aplicație."
@@ -1365,7 +1433,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         : trackSpeechLang(user.email, lastIncomingText, storedPref)
     // FLUENCY (B4): fire-and-forget DB write — nothing downstream reads its
     // result, so it has no business on the first word's path.
-    if (committedLang) void setSpeechLangPref(user.email, committedLang)
+    if (committedLang) {
+      void setSpeechLangPref(user.email, committedLang)
+      // Limba s-a schimbat CHIAR ACUM → actualizăm starea ținută în memorie, ca
+      // următoarea întrebare să nu servească limba veche (și nici să nu recitească).
+      actualizeazaStareSesiune(user.email, { speechLang: committedLang })
+    }
     // The client is only told about the detected switch (the recognizer follows
     // it).
     const speechPref = committedLang ?? storedPref
@@ -1578,8 +1651,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `you actually heard, verbatim, then a newline. After that newline, give your normal ` +
         `spoken reply. The "AUZIT:" line is how the screen shows what you heard — never skip it ` +
         `and never put anything before it.\n` +
-        `Be strict: when in doubt whether it was truly meant for you, prefer <TAC/> — the owner ` +
-        `asked you not to speak unprompted.`
+        `WAKE WORD IS DECISIVE (Adrian, 6 aug — „nu aude"): if you clearly hear ` +
+        `"Kelion" or "Kei" as, or near, the FIRST word, you ARE addressed — you MUST ` +
+        `answer with the "AUZIT:" line and your reply, NEVER <TAC/>. A direct question ` +
+        `right after your name is ALWAYS for you. Use <TAC/> ONLY when the speech is ` +
+        `clearly aimed at someone else or is background chatter AND your name was NOT ` +
+        `called. When your name is heard, staying silent is WRONG — do not be ` +
+        `over-cautious. (The owner asked you not to speak UNPROMPTED — but being ` +
+        `called by name IS the prompt.)`
     }
     // ACCOUNT STATE — Kelion must KNOW naturally who the user is (Adrian,
     // Jul 24: "during the audit it doesn't see that I'm logged into the Google
@@ -1833,6 +1912,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     //   2. THE CAMERA (continuous sight) — frames go out ONLY when the user
     //      asks something visual (VISION_INTENT: "can you see me", "what do
     //      you see", "describe", etc.).
+    const reqImageSource = (req.body as any)?.imageSource || (imageIsAttachment ? 'chat' : 'camera')
     const attachedPhoto = imageIsAttachment && image ? [image] : []
     const camView = camFrames.length > 0 ? camFrames : !imageIsAttachment && image ? [image] : []
     // Read by selectedBrainModel — forces the step with real sight (see there).
@@ -1850,6 +1930,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         if (toSend.length > 0) {
           turnHasImage = true
           const strip = (s: string): string => (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s)
+          const isChatImage = attachedPhoto.length > 0 || reqImageSource === 'chat'
+          const imagePrefix = isChatImage ? '[Imagine trimisă de utilizator în chat]' : '[Cadru preluat automat de cameră]'
           params[lastIdx] = {
             role: 'user',
             content: [
@@ -1857,7 +1939,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
                 type: 'image' as const,
                 source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: strip(f) },
               })),
-              { type: 'text', text: lm.content },
+              { type: 'text', text: imagePrefix + '\n' + lm.content },
             ],
           }
         }
@@ -1951,6 +2033,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // confirmation. Parsed BEFORE the save, so everything below (the brain
     // note, the admin strip) uses it.
     const speakerRaw = typeof req.body?.speaker === 'string' ? req.body.speaker : ''
+    // VOCE NEVALIDATĂ (Adrian, 6 aug): o voce care nu s-a potrivit cu amprenta
+    // proprietarului (ex. amprenta veche „derapată") NU mai e aruncată pe client —
+    // ajunge la creier ca să fie AUZITĂ, dar marcată `nevalidat`. Aici o tratăm ca pe
+    // un invitat pentru DREPTURI: ZERO puteri de admin, datele sensibile protejate
+    // (cardul cere oricum potrivirea reală holder, deci rămâne închis).
+    const nevalidat = speakerRaw === 'nevalidat'
     const guestMatch = /^guest(-pending)?:(\d+):(.+)$/.exec(speakerRaw)
     const guestPending = guestMatch?.[1] === '-pending'
     const guestId = guestMatch ? Number(guestMatch[2]) : 0
@@ -2005,7 +2093,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // GUEST runs inside the holder's session, but the person at the microphone
     // is NOT the holder — so this turn gets ZERO admin powers, whoever is
     // logged in. (guestMatch is parsed above, before the save.)
-    const isAdmin = user.role === 'admin' && !guestMatch
+    const isAdmin = user.role === 'admin' && !guestMatch && !nevalidat
 
     // The turn's model is chosen HERE (before the tool list): on the CHAT step,
     // the model also gets the ask_brain tool so it can escalate whatever it
@@ -2118,7 +2206,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const voice =
       req.body?.serverVoiceOff === true
         ? { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
-        : createVoiceStream(reply, userLang, await getVoicePref(user.email).catch(() => null))
+        // Preferința de voce vine din starea sesiunii (citită o dată) — era A
+        // TREIA interogare pe `user_prefs` în ACEEAȘI tură, serială, chiar
+        // înainte de apelul la creier. Zero drumuri la DB aici acum.
+        : createVoiceStream(reply, userLang, prefs.voicePref)
     let assistantText = ''
     // CE A VĂZUT DEJA OMUL PE ECRAN (agenții de debug, 3 aug, verdict REAL):
     // când un model pică DUPĂ ce a curs text, catch-ul lipea „Încearcă din nou"
@@ -2269,18 +2360,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // (toGeminiPayload → inline_data audio); transcriptul Chirp rămâne în
       // mesaj ca text — același orMsgs, creier unic.
       if (audio) {
-        for (let i = orMsgs.length - 1; i >= 0; i--) {
-          if (orMsgs[i].role !== 'user') continue
-          const audioBloc = { type: 'audio_url', audio_url: { url: audio } }
-          const c = orMsgs[i].content
-          const nou =
+        // AUDIO PE O TURĂ USER PROASPĂTĂ LA COADĂ (Adrian, 6 aug — „nu mă aude",
+        // măsurat live: scrisul mergea, vocea nu). BUG-ul: `asiguraPurtatorAudio`
+        // adaugă purtătorul {user, ''}, dar bucla de mai sus (linia cu
+        // `if (p.content)`) ARUNCĂ TĂCUT mesajele cu text gol — deci purtătorul
+        // dispărea, iar audio-ul se lipea de o tură user VECHE (sau de niciuna),
+        // conversația se termina cu ASSISTANT, și creierul nu auzea fraza →
+        // `<TAC/>` → tură stinsă, fără răspuns, fără eroare. Reparăm exact aici:
+        // dacă ULTIMA tură din payload e user, atașăm audio-ul pe ea; altfel
+        // ÎMPINGEM o tură user nouă DOAR cu audio. Așa creierul aude MEREU fraza
+        // curentă la coadă, iar payload-ul se termină pe user. (Bucla înapoi
+        // veche lega audio-ul de un tur vechi — de-aia părea „surd".)
+        const audioBloc = { type: 'audio_url', audio_url: { url: audio } }
+        const ultim = orMsgs[orMsgs.length - 1]
+        if (ultim && ultim.role === 'user') {
+          const c = ultim.content
+          ultim.content = (
             typeof c === 'string'
               ? c
                 ? [audioBloc, { type: 'text', text: c }]
                 : [audioBloc]
               : [audioBloc, ...(c as { type: string; [k: string]: unknown }[])]
-          orMsgs[i] = { ...orMsgs[i], content: nou as OrMessage['content'] }
-          break
+          ) as OrMessage['content']
+        } else {
+          orMsgs.push({ role: 'user', content: [audioBloc] as unknown as OrMessage['content'] })
         }
       }
       let textFlowed = false

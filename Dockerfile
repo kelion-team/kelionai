@@ -18,10 +18,29 @@ WORKDIR /app
 # Panoul îl detectează la rulare, spune că lipsește, și merge mai departe cu
 # ceilalți doi. Se adaugă aici după ce comanda e probată pe VPS.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip curl git \
+    && apt-get install -y --no-install-recommends python3 python3-pip curl git libgomp1 \
     && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' aider-chat \
     && npm install -g cline @google/gemini-cli \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+# libgomp1: runtime OpenMP pentru binarul nativ sherpa-onnx (amprentă vocală
+# neurală, services/voiceEmbedding.ts). Fără el, `require('sherpa-onnx-node')` ar
+# arunca la ÎNCĂRCARE — dar serviciul e lazy și cade grațios; îl punem oricum ca
+# recunoașterea neurală să meargă real în prod, nu pe fallback.
+
+# AMPRENTĂ VOCALĂ NEURALĂ — DESCĂRCATĂ DEVREME, CA SĂ SE CACHE-UIASCĂ (Adrian, 6 aug:
+# „5 minute e maximul, oricât de mare ar fi"). Modelul wespeaker ResNet34 (26MB,
+# licență curată comercial) NU e în git (gitignore). ÎNAINTE stătea DUPĂ `COPY . .`,
+# deci ORICE commit invalida cache-ul și curl-ul re-descărca 26MB la FIECARE build.
+# Aici e devreme, pe un strat STABIL (depinde doar de apt-ul de sus): se descarcă O
+# DATĂ și se refolosește din cache la fiecare deploy următor. `--connect-timeout` taie
+# conexiunea moartă în 15s, `--max-time` descărcarea agățată în 180s. La eșec → `|| echo`
+# → build sănătos, voiceEmbedding.ts cade grațios pe fallback (regula #1). Straturile
+# COPY de mai jos DOAR adaugă fișiere — modelul din /app/backend/models supraviețuiește.
+RUN mkdir -p /app/backend/models \
+    && (curl -fsSL --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 3 \
+        -o /app/backend/models/wespeaker_en_voxceleb_resnet34.onnx \
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx" \
+        || echo "model voce: descărcare eșuată/expirată la build — voiceEmbedding cade grațios (fallback)")
 
 # --- frontend build ---
 COPY frontend/package.json frontend/package-lock.json ./frontend/
@@ -62,6 +81,9 @@ RUN cd backend && npm run build
 # build) devine canalul lui de update. Stratul e ultimul → nu strică cache-ul
 # build-urilor de mai sus.
 COPY . .
+# (Modelul vocal neural se descarcă DEVREME, sus — vezi blocul de după apt — ca să se
+# cache-uiască; nu se mai re-descarcă la fiecare commit. `COPY . .` doar adaugă fișiere,
+# nu șterge — modelul din /app/backend/models rămâne.)
 
 ENV NODE_ENV=production
 ENV FRONTEND_DIST=/app/frontend/dist

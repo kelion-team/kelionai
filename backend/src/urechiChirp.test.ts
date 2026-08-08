@@ -21,10 +21,11 @@ describe('client: urechile live sunt Chirp 3 (Google), fără OpenAI', () => {
   })
   it('vocea BRUTĂ a frazei ajunge NATIV la creierul Gemini (audio în onPhrase → onAddressed)', () => {
     expect(voce).toMatch(/onPhrase: \(_t, vf, audio\) => \{[\s\S]{0,300}poartaDupaFraza\(vf, audio\)/)
-    expect(voce).toMatch(/onAddressed\?\.\('', vf, speaker, audio\)/)
+    expect(voce).toMatch(/onAddressed\?\.\('', vf, undefined, audio\)/)
   })
-  it('fraza trece prin poarta de TIMBRU → creier (verdict din voiceFeatures, fără text)', () => {
-    expect(voce).toMatch(/poartaDupaFraza[\s\S]{0,600}transcriptVerdict\('', vf\)/)
+  it('fraza pleacă DIRECT la creier din poartă (fără verdict de timbru în cale)', () => {
+    expect(voce).toMatch(/poartaDupaFraza[\s\S]{0,500}onAddressed\?\.\('', vf, undefined, audio\)/)
+    expect(voce).not.toMatch(/transcriptVerdict/)
   })
   it('fără microfon NU se deschide OpenAI, NU există STT de rezervă — se aruncă', () => {
     expect(voce).toMatch(/throw new Error\('chirp_ear_unavailable'\)/)

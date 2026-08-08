@@ -62,6 +62,8 @@ import { envCheck, envOrphans, envSummary, processStartedAt } from '../services/
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox, deleteInboxMessages } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
+import { uitaToateSesiunile } from '../services/stareSesiune.js'
+import { dovadaUltimuluiUpgrade } from '../services/modelAutoUpgrade.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
 // Live checks against the four public install locations. Cached 5 minutes so
@@ -512,7 +514,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await verifyModels())
+    // DOVADA ULTIMULUI AUTO-UPGRADE (Adrian, 7 aug: „clar cu dovadă"). Scorul
+    // candidatului ȘI al modelului activ, probate în aceeași trecere, plus ce
+    // sarcini a picat. `null` când nu s-a verificat încă — „nu pot verifica",
+    // nu o cifră liniștitoare inventată.
+    return reply.send({ ...(await verifyModels()), dovadaUpgrade: await dovadaUltimuluiUpgrade() })
   })
 
   // Verify the brain key live (admin only): pings the Gemini chat default
@@ -576,6 +582,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const list = Array.isArray(req.body?.disabled) ? req.body.disabled : []
     await setDisabledGestures(list)
+    // Gesturile sunt o setare GLOBALĂ, dar de la 7 aug fiecare sesiune își ține
+    // lista în memorie (stareSesiune, TTL 10 min) ca să nu recitească DB-ul la
+    // fiecare tură. Fără linia asta, un gest debifat din panou ar fi rămas activ
+    // până la 10 minute pentru oricine e deja logat — exact tiparul „valoare
+    // veche servită după ce s-a schimbat". Uităm TOT: următoarea tură recitește.
+    uitaToateSesiunile()
     return reply.send({ ok: true, disabled: await getDisabledGestures() })
   })
 
@@ -602,6 +614,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // and the purchase history stay UNTOUCHED — consumed credits are not given
   // back, and accounting is not rewritten. Requires an admin session, like
   // everything here.
+  app.post('/api/admin/reset-vps', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const { runRunbook } = await import('../services/runbooks.js')
+    await runRunbook('restart-app')
+    await runRunbook('restart-caddy')
+    return { ok: true }
+  })
+
   app.post('/api/admin/reset-counters', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })

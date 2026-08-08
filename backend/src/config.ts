@@ -28,7 +28,7 @@ function env(...names: string[]): string {
 export const ENV_ALIASES: Record<string, string[]> = {
   databaseUrl: ['DATABASE_URL', 'POSTGRES_URL'],
   googleServiceAccountJson: ['GOOGLE_SERVICE_ACCOUNT_JSON', 'GOOGLE_SERVICE_ACCOUNT', 'GCP_SERVICE_ACCOUNT_JSON'],
-  googleTtsKey: ['GOOGLE_TTS_API_KEY', 'GOOGLE_TTS_KEY', 'GOOGLE_API_KEY'],
+  googleTtsKey: ['GOOGLE_TTS_API_KEY', 'GOOGLE_TTS_KEY'],
   serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
   // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
   // de la fostul câmp config.googleMapsKey de mai jos.)
@@ -51,6 +51,101 @@ function required(name: string): string {
 }
 
 const isProd = process.env.NODE_ENV === 'production'
+
+// ── MODELUL UNIC AL CREIERULUI — SIGILAT (Adrian, 6 aug, regulă ultra-decisă:
+// „modelul decis de mine să nu se poată modifica accidental sau de altcineva fără
+// decizia mea; mereu cel mai performant model complet; când apare ceva nou, preluat
+// prin update automat, peste tot"). O SINGURĂ sursă de adevăr, în COD, FĂRĂ env
+// (nici GEMINI_MODEL_GREU, nici BRAIN_*) — ca nimic (autonomie, env pe VPS, UI) să
+// nu-l poată schimba din greșeală. Se schimbă DOAR prin auto-upgrade VALIDAT
+// (services/modelAutoUpgrade) — probă reală + doar la un Pro mai nou, niciodată la
+// flash/experimental. Config-ul îl expune prin GETTERI, deci se aplică AUTOMAT
+// peste tot (chat, agenți, memorie, fallback, scară) — schimbi într-un loc, se
+// schimbă peste tot.
+// SCHIMBAT 7 aug, PE MĂSURĂTOARE, cu acordul explicit al ownerului: slotul greu
+// pleacă de pe Pro pe `gemini-3.5-flash`. Proba de calitate (scripts/proba-calitate.py,
+// 10 sarcini cu verificare AUTOMATĂ × 2 rulări × 8 modele, gândire 'high', rulată
+// de owner pe VPS-ul lui):
+//   gemini-3.5-flash        20/20   median 2620 ms   cel mai lent  6,3 s
+//   gemini-3-flash-preview  20/20   median 2093 ms   cel mai lent  6,4 s
+//   gemini-3.1-pro-preview  20/20   median 4713 ms   cel mai lent 73,3 s
+//   gemini-pro-latest       20/20   median 4818 ms   cel mai lent 72,2 s
+//   gemini-2.5-pro          18/20   median 6553 ms   cel mai lent 75,3 s
+// La CALITATE sunt egale (20/20). Diferența e că Pro e de două ori mai lent la
+// mediană și, mai grav, are cazuri de 72-75 SECUNDE. S-a ales `3.5-flash` și nu
+// `3-flash-preview` (cu 527 ms mai rapid) fiindcă „preview" e un nume pe care
+// Google îl poate retrage; iar 3.5-flash e din aceeași familie ca slotul rapid
+// (3.5-flash-lite), deci intră pe aceeași ramură de configurare a gândirii.
+export const MODEL_UNIC_DEFAULT = 'gemini-3.5-flash'
+let modelUnicActiv = MODEL_UNIC_DEFAULT
+/** Codul modelului unic (ex: „gemini-3.1-pro-preview"). Sursa de adevăr, live. */
+export function modelUnicCod(): string {
+  return modelUnicActiv
+}
+/** Modelul unic cu prefix google-direct/ (forma treptelor creierului). */
+export function modelUnicDirect(): string {
+  return `google-direct/${modelUnicActiv}`
+}
+/** Setează modelul unic — DOAR din auto-upgrade-ul validat. Acceptă NUMAI un
+ *  Gemini *Pro* (niciodată flash/lite/experimental), altfel refuză (false). Poarta
+ *  care ține „mereu cel mai performant, dar niciodată degradat de o schimbare
+ *  greșită". */
+export function setModelUnicValidat(m: string): boolean {
+  const cod = String(m || '').replace(/^google-direct\//, '').trim()
+  // Poarta familiei slotului GREU: `gemini-*-flash`, dar NICIODATĂ `-lite`
+  // (lite e slotul de conversație — dacă ar putea intra aici, cele două sloturi
+  // s-ar prăbuși într-unul și gândirea grea ar rămâne fără treaptă). Pro nu mai
+  // e acceptat: măsurat 7 aug, la aceeași calitate (20/20) avea cazuri de 72-75 s.
+  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(cod) || /-lite(?:-|$)/.test(cod)) return false
+  modelUnicActiv = cod
+  return true
+}
+
+// ── AL DOILEA SLOT: MODELUL RAPID (Adrian, 7 aug — MĂSURAT pe cheia lui, de pe
+// VPS, cu payload real) ──────────────────────────────────────────────────────
+// Dovada care a impus separarea (rulată de owner, 3 măsurători/model):
+//   gemini-3.5-flash-lite    508–713 ms   unelte DA · vede DA · aude DA
+//   gemini-3.1-pro-preview   3.622 ms … 45.026 ms (EXPIRAT)  ← ce rula pe chat
+// Adică modelul de chat era cel mai lent DIN TOATE și, mai rău, imprevizibil
+// (3,6s → 45s pe aceeași cerere). „18 secunde să-mi spună cât e ceasul?" —
+// întrebarea ownerului, care a pornit studiul; răspunsul a fost: da, și nici
+// măcar nu știa ora.
+//
+// DE CE `gemini-3.5-flash-lite` și NU `gemini-flash-lite-latest` (care măsura
+// 511 ms, cu 100 ms mai puțin): aliasul `-latest` nu se potrivește NICIUNEIA din
+// ramurile de configurare a gândirii din geminiDirect.ts (`/gemini-2\.5/` sau
+// `/gemini-3/`) → ar pleca fără `thinkingLevel` și fără podeaua de output, exact
+// capcana din 6 aug în care 3.x consumă tot bugetul pe gândire și întoarce
+// răspuns GOL. `3.5-flash-lite` intră pe ramura `gemini-3`, primește configul
+// corect, e cel mai NOU lite, și e la 100 ms de vârf. Corectitudine peste 100 ms.
+//
+// CE RĂMÂNE PE PRO (nu s-a atins nimic): `geminiModelGreu`, `workDefault`,
+// `topDefault` — deci gândirea grea, agenții cu efort înalt și autonomia. Iar
+// unealta `ask_brain` (oferită de chat.ts DOAR pe tura ușoară) escaladează
+// singură de pe slotul rapid pe Pro când sarcina chiar cere gândire. Supapa era
+// deja cablată în cod; separarea doar o face reală.
+export const MODEL_RAPID_DEFAULT = 'gemini-3.5-flash-lite'
+let modelRapidActiv = MODEL_RAPID_DEFAULT
+/** Codul modelului rapid de conversație (ex: „gemini-3.5-flash-lite"). */
+export function modelRapidCod(): string {
+  return modelRapidActiv
+}
+/** Modelul rapid cu prefix google-direct/ (forma treptelor creierului). */
+export function modelRapidDirect(): string {
+  return `google-direct/${modelRapidActiv}`
+}
+/** Setează modelul rapid — DOAR din auto-upgrade validat. Acceptă NUMAI un Gemini
+ *  `flash-lite`. STRÂNS pe 7 aug: până acum accepta și flash simplu, ceea ce n-a
+ *  contat cât timp slotul greu era Pro — dar de când GREUL e flash, o poartă largă
+ *  aici ar fi lăsat AMBELE sloturi pe același model, adică o singură treaptă
+ *  deghizată în două. Acum sunt disjuncte prin construcție: conversația = lite,
+ *  gândirea grea = flash fără lite. */
+export function setModelRapidValidat(m: string): boolean {
+  const cod = String(m || '').replace(/^google-direct\//, '').trim()
+  if (!/^gemini-\d+(?:\.\d+)?-flash-lite(?:-|$)/.test(cod)) return false
+  modelRapidActiv = cod
+  return true
+}
 
 export const config = {
   isProd,
@@ -88,8 +183,18 @@ export const config = {
   // readuce flash-ul pe chat). geminiDirect ridică plafonul de output pe 3.x
   // (gândirea intră în maxOutputTokens). Vocea live rulează Pro prin CREIER
   // (ureche→Pro→voce), deci „modelul avansat" e și pe voce. Un singur creier.
-  geminiModel: process.env.GEMINI_MODEL_GREU ?? 'gemini-3.1-pro-preview',
-  geminiModelGreu: process.env.GEMINI_MODEL_GREU ?? 'gemini-3.1-pro-preview',
+  // GETTERI pe sursa unică (fără env): se aplică AUTOMAT peste tot; auto-upgrade-ul
+  // validat schimbă modelul într-un singur loc → se schimbă peste tot.
+  // DOUĂ SLOTURI (7 aug): `geminiModel` = conversația (RAPID, ~0,6s), iar
+  // `geminiModelGreu` = gândirea grea (Pro, neatins). Bifurcația care le folosește
+  // există de mult în chat.ts (`heavy ? Greu : geminiModel`) — până azi ambele
+  // ramuri dădeau același model, deci era o bifurcație moartă. Acum e vie.
+  get geminiModel(): string {
+    return modelRapidCod()
+  },
+  get geminiModelGreu(): string {
+    return modelUnicCod()
+  },
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
   // VIDEO_ALLOW_PAID=1, ca la constructor: nimic plătit din greșeală.
@@ -110,12 +215,21 @@ export const config = {
     // — cea mai nouă, mai rapidă, mai ieftină, și măsurat multimodală (text +
     // apel de unealtă + imagine + audio, toate 200✓ pe cheia ownerului). „Tot pe
     // cel mai evoluat" (ordinul ownerului, 4 aug). Rămâne Gemini direct (lacătul).
-    chatDefault: (process.env.BRAIN_CHAT_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
-    workDefault: (process.env.BRAIN_WORK_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
-    // 5 aug: Adrian a RETRACTAT hibridul — „peste tot modelul avansat". Toate
-    // treptele = Gemini 3 Pro (`gemini-3.1-pro-preview`), un singur creier, cel
-    // mai puternic; fără split flash/pro. Suprascriibil din env.
-    topDefault: (process.env.BRAIN_TOP_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
+    // 6 aug: SIGILAT pe sursa unică, FĂRĂ env — toate treptele = același model unic
+    // (cel mai performant Pro). Nu mai există split flash/pro, nici suprascriere din
+    // env. Getteri → auto-upgrade-ul se aplică peste tot instant.
+    // 7 aug: treapta de CHAT trece pe modelul RAPID (măsurat: 0,6s vs 3,6–45s pe
+    // Pro), iar `work`/`top` rămân pe Pro — acolo se face gândirea grea, agenții
+    // cu efort înalt, autonomia și escaladarea `ask_brain` din chat.
+    get chatDefault(): string {
+      return modelRapidDirect()
+    },
+    get workDefault(): string {
+      return modelUnicDirect()
+    },
+    get topDefault(): string {
+      return modelUnicDirect()
+    },
   },
   // ── COLLECTING MONEY THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
   // completely and Pro comes in") ────────────────────────────────────────────

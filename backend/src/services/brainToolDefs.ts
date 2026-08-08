@@ -584,9 +584,42 @@ export const JULES_STATUS_TOOL: Tool = {
   },
 }
 
+// ── MĂSURAREA (Adrian, 8 aug: „să știe să-și ruleze testele cum îmi dai tu mie
+// să-ți rulez — el trebuie singur să poată, și DOAR după să implementeze") ────
+// Uneltele astea nu-i dau lui Kelion o părere despre starea softului: îi dau
+// aceleași comenzi pe care le rulează omul. Iar rezultatul are TREI stări, nu
+// două — „trece", „pică" și „nu pot verifica" — fiindcă a treia confundată cu a
+// doua e exact greșeala care a costat o zi întreagă.
+export const RULEAZA_PORTILE_TOOL: Tool = {
+  name: 'ruleaza_portile',
+  description:
+    "ADMIN ONLY. Rulează PE SERVER porțile reale ale proiectului și întoarce rezultatul MĂSURAT: tipuri (tsc), teste (vitest), lacătul Gemini, exporturi fără utilizator, sintaxă, build frontend. FOLOSEȘTE-O DE DOUĂ ORI la orice schimbare: o dată ÎNAINTE (starea de plecare) și o dată DUPĂ (dovada că n-ai stricat nimic). Verdictul are TREI stări: TRECE, PICĂ și NU POT VERIFICA — o poartă care n-a pornit NU e nici trecută, nici picată, iar raportul devine INCOMPLET, nu 'e bine'. Nu raporta niciodată o stare pe care unealta asta nu ți-a întors-o.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      porti: {
+        type: 'array',
+        items: { type: 'string' },
+        description: "Ce porți să ruleze (tipuri, teste, lacat-gemini, exporturi, sintaxa, build-frontend). Gol = toate. Rulează-le pe toate înainte de orice publicare.",
+      },
+    },
+  },
+}
+
+export const JURNAL_MASURATORI_TOOL: Tool = {
+  name: 'jurnal_masuratori',
+  description:
+    "ADMIN ONLY. Ultimele măsurători făcute de tine, cu metoda folosită, ora, durata și ce a ieșit (sau motivul pentru care n-a ieșit). Folosește-o când vrei să spui ceva despre starea sistemului: dacă afirmația ta nu se regăsește aici, înseamnă că n-ai măsurat-o — spune 'nu pot verifica', nu o cifră. Jurnal gol = n-ai măsurat nimic, NU 'totul e bine'.",
+  input_schema: {
+    type: 'object',
+    properties: { cate: { type: 'number', description: 'Câte rânduri (implicit 30).' } },
+  },
+}
+
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
   DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
+  RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL,
   // repo_* and runbook_* are still defined in routes/chat.ts (the migration to
   // the single source is incremental). They are added in autonomie.ts, from there.
   SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,

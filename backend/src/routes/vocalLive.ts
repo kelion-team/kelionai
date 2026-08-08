@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import type { RawData } from 'ws'
 import { getSessionUser } from '../session.js'
 import { deschideVocalLive, vocalLiveDisponibila, VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, type VocalLive } from '../services/vocalLive.js'
+import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
+import { execSharedAdminTool } from '../services/adminTools.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -67,16 +69,25 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Deschide sesiunea Live unică: aude + gândește + vorbește, un singur glas.
-    const live: VocalLive | null = deschideVocalLive(PERSONA_KELION, [], {
+    const live: VocalLive | null = deschideVocalLive(PERSONA_KELION, TOATE_UNELTELE_ADMIN as any[], {
       onGata: () => trimite({ type: 'gata' }),
       onAudioIesire: (data) => trimite({ type: 'audio', data }),
       onTranscriereUser: (text, final) => trimite({ type: 'user', text, final }),
       onTranscriereKelion: (text, final) => trimite({ type: 'kelion', text, final }),
-      onUnealta: (apel) => {
-        // Uneltele se leagă în pasul următor; până atunci răspundem gol ca modelul
-        // să nu aștepte la nesfârșit dacă a cerut totuși una.
-        live?.raspundeUnealta(apel.id, apel.name, { nelegat: true })
+      onUnealta: async (apel) => {
+        try {
+          const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
+          if (rezultat !== null) {
+            live?.raspundeUnealta(apel.id, apel.name, { rezultat })
+          } else {
+            live?.raspundeUnealta(apel.id, apel.name, { rezultat: "Unealtă nesuportată în voce." })
+          }
+        } catch (err: any) {
+          app.log.error(`Eroare unealtă ${apel.name}: ${err.message}`)
+          live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
+        }
       },
+
       onIntrerupt: () => trimite({ type: 'intrerupt' }),
       onTuraGata: () => trimite({ type: 'tura_gata' }),
       onEroare: (motiv) => {

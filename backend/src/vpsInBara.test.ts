@@ -80,10 +80,9 @@ describe('bara și mailul spun același lucru', () => {
   it('pragurile din bară sunt cele din services/resurse.ts', () => {
     expect(resurse).toMatch(/PRAG_MEMORIE_PCT = 10/)
     expect(resurse).toMatch(/PRAG_INCARCARE_PCT = 200/)
-    expect(bara).toMatch(/liberPct <= 10/)
-    expect(bara).toMatch(/incarcarePct >= 200/)
+    expect(bara).toMatch(/liberPct <= (\(brainCredit\.vps\.pragMemoriePct \?\? )?10/)
+    expect(bara).toMatch(/incarcarePct >= (\(brainCredit\.vps\.pragIncarcarePct \?\? )?200/)
   })
-
   it('sentinela folosește aceleași constante, nu numere copiate', () => {
     const sentinela = sursa('./routes/ops.ts')
     expect(sentinela).toContain('PRAG_MEMORIE_PCT')

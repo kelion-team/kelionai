@@ -177,13 +177,13 @@ async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promis
 
   const a = getAuth()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  let url = GOOGLE_TTS_URL
+  const url = GOOGLE_TTS_URL
   if (a) {
     const token = await a.getAccessToken().catch(() => null)
     if (!token) return { ok: false, status: 502, error: 'tts_auth_failed' }
     headers.Authorization = `Bearer ${token}`
   } else {
-    url = `${GOOGLE_TTS_URL}?key=${config.googleTtsKey}`
+    headers['x-goog-api-key'] = config.googleTtsKey
   }
 
   const encoding = opts.encoding ?? 'MP3'

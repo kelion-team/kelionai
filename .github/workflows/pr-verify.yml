@@ -12,6 +12,12 @@ on:
 
 jobs:
   verify:
+    # OPRIT PÂNĂ SE DEBLOCHEAZĂ ACTIONS — vezi explicația măsurată din
+    # gemini-lock.yml (run 31223561134: `runner_id: 0`, 3 secunde, loguri 404 —
+    # niciun runner alocat). Aceleași porți rulează pe VPS (deploy/porti-pr.sh) și
+    # de acum urcă verdictul și ca stare de commit („porti-vps"), deci PR-ul arată
+    # ce e cu adevărat. Reaprindere: variabila de repo ACTIONS_PORNIT = true.
+    if: ${{ vars.ACTIONS_PORNIT == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
