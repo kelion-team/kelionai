@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { LANG_OPTIONS } from '../lib/langList'
 
 // The public contact form. A language selector offers EVERY language; the
 // chosen one is the language Kelion replies in. The form's own labels are
@@ -191,7 +190,45 @@ const T: Record<Lang, Strings> = {
 // Every major world language — the reply comes in the selected one. Full form
 // translations exist for en/ro/fr/es/de/it/pt; the rest show the English UI but
 // still get a reply in their language.
-const LANGS: { code: Lang; label: string }[] = LANG_OPTIONS as { code: Lang; label: string }[]
+const LANGS: { code: Lang; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'ro', label: 'Română' },
+  { code: 'fr', label: 'Français' },
+  { code: 'es', label: 'Español' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'it', label: 'Italiano' },
+  { code: 'pt', label: 'Português' },
+  { code: 'nl', label: 'Nederlands' },
+  { code: 'pl', label: 'Polski' },
+  { code: 'uk', label: 'Українська' },
+  { code: 'ru', label: 'Русский' },
+  { code: 'tr', label: 'Türkçe' },
+  { code: 'el', label: 'Ελληνικά' },
+  { code: 'sv', label: 'Svenska' },
+  { code: 'no', label: 'Norsk' },
+  { code: 'da', label: 'Dansk' },
+  { code: 'fi', label: 'Suomi' },
+  { code: 'cs', label: 'Čeština' },
+  { code: 'sk', label: 'Slovenčina' },
+  { code: 'hu', label: 'Magyar' },
+  { code: 'bg', label: 'Български' },
+  { code: 'sr', label: 'Srpski' },
+  { code: 'hr', label: 'Hrvatski' },
+  { code: 'ar', label: 'العربية' },
+  { code: 'he', label: 'עברית' },
+  { code: 'fa', label: 'فارسی' },
+  { code: 'hi', label: 'हिन्दी' },
+  { code: 'bn', label: 'বাংলা' },
+  { code: 'ur', label: 'اردو' },
+  { code: 'zh', label: '中文' },
+  { code: 'ja', label: '日本語' },
+  { code: 'ko', label: '한국어' },
+  { code: 'th', label: 'ไทย' },
+  { code: 'vi', label: 'Tiếng Việt' },
+  { code: 'id', label: 'Bahasa Indonesia' },
+  { code: 'ms', label: 'Bahasa Melayu' },
+  { code: 'sw', label: 'Kiswahili' },
+]
 
 export default function ContactModal({ onClose }: { readonly onClose: () => void }) {
   const [lang, setLang] = useState<Lang>('en')

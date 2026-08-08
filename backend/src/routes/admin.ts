@@ -1,15 +1,16 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
-import { getSessionUser, adminSiId } from '../session.js'
-import { pollVisitorChat } from './demo.js' // visitor chat polling from the common source
+import { getSessionUser } from '../session.js'
 import {
-  citesteTranzactii,
-  citesteUtilizatori,
-  citesteIstoric,
-  citesteRezumatCost,
+  listAllTransactions,
+  listUsers,
+  getHistory,
+  getCostSummary,
   getCapabilityGaps,
   setGapResolved,
-  deleteCapabilityGap,
+  getAdminAccount,
+  loadAdminPool,
+  withdrawAdminPool,
   blockUser,
   unblockUser,
   grantCredit,
@@ -18,6 +19,7 @@ import {
   listContactMessages,
   markLeadContacted,
   listVisitorConvos,
+  getVisitorMessages,
   addVisitorMessage,
   getDemoStats,
   getUserActivity,
@@ -27,43 +29,18 @@ import {
   setDisabledGestures,
   listKelionTools,
   decideKelionTool,
-  listBuildJobs,
-  listClientErrorGroups,
-  resetCostCounters,
-  rezumatPlati,
-  listeazaPlatiNeatribuite,
-  atribuiePlataNeatribuita,
-  ignoraPlataNeatribuita,
-  listeazaCoduriNeplatite,
-  listeazaPlatiIncasate,
-  totaluriPlati,
-  getGeminiMonthUsd,
-  loadKv,
-  saveKv,
 } from '../db.js'
-import { systemHealth } from '../services/health.js'
-import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
-import { stareCitirePlati, incepeLegaturaPlati, finalizeazaLegaturaPlati } from '../services/openBanking.js'
-import { starePlatiEmail } from '../services/platiEmail.js'
-import { stareAutonomie } from '../services/autonomie.js'
-import { cheltuieliAplicatiei } from '../services/cardFurnizor.js'
-import { isOpsPaused, setOpsPaused } from '../services/runbooks.js'
-import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
-import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
-import { geminiLive } from '../services/geminiDirect.js'
-import { getSerperBalance } from '../services/serperBalance.js'
-import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
-import { resurseGazda } from '../services/resurse.js'
+import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
-import { envCheck, envOrphans, envSummary, processStartedAt } from '../services/envCheck.js'
+import { screenshotUrl } from '../services/browser.js'
+import { geminiVision } from '../services/google.js'
+import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
-import { fetchRecentInbox, deleteInboxMessages } from '../services/mailbox.js'
+import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
-import { uitaToateSesiunile } from '../services/stareSesiune.js'
-import { dovadaUltimuluiUpgrade } from '../services/modelAutoUpgrade.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
 // Live checks against the four public install locations. Cached 5 minutes so
@@ -108,12 +85,11 @@ async function checkStores(): Promise<StoreCheck[]> {
 }
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
-  // ── THE ADMIN LOCK (Adrian, 27 Jul) — the unlock routes. The global gate in
-  // index.ts exempts /api/admin/unlock*; everything else here requires an
-  // admin session. The secret is chosen by Adrian in Admin→Security and lives
-  // only as a scrypt hash in kv; a matching voiceprint unlocks automatically
-  // (see routes/realtime.ts). The state — the client decides what to show on
-  // the button.
+  // ── LACĂTUL ADMIN (Adrian, 27 iul) — rutele de deblocare. Gate-ul global din
+  // index.ts scutește /api/admin/unlock*; tot ce e aici cere însă sesiune de
+  // admin. Secretul e ales de Adrian în Admin→Securitate și trăiește doar ca
+  // hash scrypt în kv; amprenta vocală potrivită deblochează automat (vezi
+  // routes/realtime.ts). Starea — clientul decide ce arată pe buton.
   app.get('/api/admin/unlock/status', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -131,8 +107,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // Setting/changing the secret. Unarmed → anytime (first arming); armed →
-  // only from an ALREADY unlocked session (an open panel implies that).
+  // Setarea/schimbarea secretului. Nearmat → oricând (prima armare); armat →
+  // doar dintr-o sesiune DEJA deblocată (panoul deschis implică asta).
   app.post<{ Body: { secret?: string } }>('/api/admin/unlock/secret', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -141,39 +117,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const secret = String(req.body?.secret ?? '').trim()
     if (secret.length < 4) return reply.code(400).send({ error: 'secret_prea_scurt' })
     await setLockSecret(secret)
-    grantUnlock(reply, user.email, 'secret') // the browser that arms stays unlocked
+    grantUnlock(reply, user.email, 'secret') // browserul care armează rămâne deblocat
     return reply.send({ ok: true })
-  })
-
-  // RECOVERY POINTS (Adrian, 27 Jul): the "Recovery" menu in admin — the saved
-  // versions (git tags, mirrored on the VPS as .bundle/.tar.gz) with clear
-  // details, + a button to save the current version.
-  app.get('/api/admin/backups', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // AUDIT ADMIN (3 aug): citirea picată (token lipsă / GitHub ne-ok) NU mai
-    // e servită ca listă goală — 503, iar panoul scrie „nu pot citi
-    // versiunile", distinct de „nicio versiune salvată încă".
-    const points = await listRecoveryPoints()
-    if (!points) return reply.code(503).send({ error: 'recovery_unreadable' })
-    return reply.send({ points })
-  })
-  app.post<{ Body: { note?: string } }>('/api/admin/backups', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const r = await createRecoveryPoint(String(req.body?.note ?? ''))
-    if (!r.ok) return reply.code(500).send(r)
-    return reply.send(r)
-  })
-  // RESTORING from a saved point (Adrian, 27 Jul: selection buttons in admin).
-  // Brings master to the tag's state with a new commit → publishing to the VPS
-  // starts by itself. Heavy action → confirmation is in the UI, double.
-  app.post<{ Body: { tag?: string } }>('/api/admin/backups/restore', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const r = await restoreToPoint(String(req.body?.tag ?? ''))
-    if (!r.ok) return reply.code(500).send(r)
-    return reply.send(r)
   })
 
   // ROW 19 — inbound contact@ emails + the Secretary's auto-replies (admin only).
@@ -183,30 +128,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ emails: await listInboundEmails(50) })
   })
 
-  // LIVE INBOX (Adrian, 10 Jul) — reads the REAL contact@kelionai.app mailbox
-  // over IMAP (latest messages, read or not), so the admin sees everything in
-  // the mailbox, not just the new mail the poller caught. Read-only, admin
-  // only.
+  // INBOX LIVE (Adrian, 10 iul) — citește cutia REALĂ contact@kelionai.app prin
+  // IMAP (ultimele mesaje, citite sau nu), ca adminul să vadă tot ce e în cutie,
+  // nu doar mailul nou pe care l-a prins poller-ul. Doar-citire, admin only.
   app.get('/api/admin/mailbox-live', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // AUDIT ADMIN (3 aug): răspunsul spune și DE CE e goală lista — `ok:false`
-    // + `motiv` deosebește „cutia e goală" de „IMAP a picat" / „MAIL_PASS
-    // lipsă"; UI-ul desenează trei texte diferite, nu unul ambiguu.
-    return reply.send(await fetchRecentInbox(40))
-  })
-
-  // ȘTERGEREA DIN INBOX (Adrian, 3 aug: „să șterg de aici câte una sau prin
-  // selecție toate"). UID-uri exacte din panou; serviciul mută în coșul REAL al
-  // serverului când există (recuperabil), altfel șterge definitiv — și spune
-  // care din ele s-a întâmplat. Întoarce câte s-au șters DE FAPT.
-  app.post<{ Body: { uids?: number[] } }>('/api/admin/mailbox-delete', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const uids = Array.isArray(req.body?.uids) ? req.body.uids.map(Number) : []
-    if (!uids.length) return reply.code(400).send({ error: 'uids_lipsa' })
-    const r = await deleteInboxMessages(uids)
-    return reply.send({ ok: r.sterse > 0, ...r })
+    return reply.send({ emails: await fetchRecentInbox(40) })
   })
 
   // Market control: live store presence + direct-download counts + WHO
@@ -223,12 +151,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/users', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const u = await citesteUtilizatori()
-    // 0 UTILIZATORI ≠ NU POT CITI (M7b, 8 aug). `listUsers()` întorcea `[]` și
-    // când baza nu răspundea — panoul desena „niciun utilizator" peste o citire
-    // imposibilă. Acum eșecul iese 503 cu motivul, nu ca listă goală.
-    if (!u.citit) return reply.code(503).send({ error: 'utilizatori_necititi', motiv: u.motiv })
-    return reply.send({ users: u.valoare })
+    return reply.send({ users: await listUsers() })
   })
 
   // Full chat history for one user (admin only).
@@ -237,34 +160,26 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const email = req.query.email
     if (!email) return reply.code(400).send({ error: 'bad_request', message: 'email required' })
-    const h = await citesteIstoric(email)
-    if (!h.citit) return reply.code(503).send({ error: 'istoric_necitit', motiv: h.motiv })
-    return reply.send({ history: h.valoare })
+    return reply.send({ history: await getHistory(email) })
   })
 
-  // Batch-translate a conversation's messages into Romanian (the "Translate
-  // into Romanian" button in the chat viewer — testers write in any language).
-  // Admin only. `failed` tells the admin how many messages came back as
-  // UNTRANSLATED ORIGINAL (the translation service failed for them) — so a
-  // half-translated conversation is never mistaken for a full one.
+  // Traduce în bloc mesajele unei conversații în română (buton „Tradu în română"
+  // din vizualizarea chaturilor — testerii scriu în orice limbă). Admin only.
   app.post<{ Body: { texts?: unknown; target?: unknown } }>('/api/admin/translate', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const raw = req.body?.texts
     const texts = Array.isArray(raw) ? raw.slice(0, 300).map((t) => String(t ?? '')) : []
-    if (texts.length === 0) return reply.send({ translations: [], failed: 0 })
+    if (texts.length === 0) return reply.send({ translations: [] })
     const target = typeof req.body?.target === 'string' && req.body.target ? req.body.target : 'Romanian'
-    return reply.send(await translateMany(texts, target))
+    return reply.send({ translations: await translateMany(texts, target) })
   })
 
   // Live real-cost / credit monitor (admin only) — total, today, per-AI breakdown.
-  // M7b (8 aug): o citire picată NU mai iese ca „total: 0" — iese 503 cu motivul.
   app.get('/api/admin/costs', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const c = await citesteRezumatCost()
-    if (!c.citit) return reply.code(503).send({ error: 'costuri_necitibile', motiv: c.motiv })
-    return reply.send(c.valoare)
+    return reply.send(await getCostSummary())
   })
 
   // Capability gaps — what users asked for that Kelion can't do yet (admin only).
@@ -274,41 +189,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ gaps: await getCapabilityGaps(req.query.all === '1') })
   })
 
-  // THE COMPLETE AUDIT OF FAILURES (Adrian, 27 Jul: "here you must see all the
-  // audits and all the failures"): the Uncovered requests tab shows, besides
-  // gaps, EVERYTHING that failed — server errors (the server F12), client
-  // errors (the browser F12), failed build orders and health problems (live vs
-  // master, red runs, disk, DB, brain balance).
-  app.get('/api/admin/audit', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [healthRaw, jobs, clientErrors] = await Promise.all([
-      systemHealth().catch(() => '{}'),
-      // listBuildJobs întoarce null la eșec (auditul admin, 3 aug); aici e
-      // best-effort — auditul restului rămâne chiar dacă coada nu se citește.
-      listBuildJobs(12).then((j) => j ?? []).catch(() => []),
-      listClientErrorGroups(48, 30).catch(() => []),
-    ])
-    let health: unknown = {}
-    try {
-      health = JSON.parse(healthRaw)
-    } catch {
-      /* health unavailable — the rest of the audit stays */
-    }
-    return reply.send({
-      health,
-      serverErrors: recentLogs(40, 60),
-      clientErrors,
-      failedJobs: jobs
-        .filter((j) => j.status === 'failed')
-        .map((j) => ({ id: j.id, order: j.orderText.slice(0, 160), updated: j.updatedAt })),
-    })
-  })
-
-  // AUTONOMOUS TRIAGE (Adrian, 24 Jul): Kelion decides by itself on each gap —
-  // valuable (stays, "TO IMPLEMENT") or automatically closed with a reason.
-  // The admin button only triggers; the same function also runs daily,
-  // autonomously.
+  // TRIAJUL AUTONOM (Adrian, 24 iul): Kelion decide singur pe fiecare gap —
+  // valoros (rămâne, „DE IMPLEMENTAT") sau închis automat cu motiv. Butonul din
+  // admin doar declanșează; aceeași funcție rulează și zilnic, autonom.
   app.post('/api/admin/gaps/triage', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -325,182 +208,83 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // ȘTERGEREA DEFINITIVĂ a unei cereri neacoperite (Adrian, 3 aug: „trebuie să
-  // aibă butoane de ștergere, sau rezolvate și arhivate"). Rezolvarea de mai
-  // sus e arhivarea; asta e pentru zgomot/duplicate — rândul dispare de tot.
-  app.delete<{ Params: { id: string } }>('/api/admin/gaps/:id', async (req, reply) => {
-    const id = adminSiId(req, reply, req.params.id)
-    if (id === null) return
-    return reply.send({ ok: await deleteCapabilityGap(id) })
-  })
-
-  // (Ruta GET /api/admin/pool a fost ȘTEARSĂ DE-ADEVĂRATELEA — auditul admin,
-  // 3 aug: trăia aici deși comentariul de mai jos, „was DELETED (Adrian, 30
-  // Jul)", jura contrariul, n-o chema nimeni din frontend, iar getAdminAccount
-  // — sursa ei — inventa {spent:0, profit:0} la orice eșec de DB. Funcția a
-  // fost ștearsă din db.ts odată cu ruta.)
-
-  // The brain is 100% Gemini direct (OpenRouter/OpenAI extirpate, 3 aug). The
-  // bar polls this route: the Gemini live state + real month spend, the Serper
-  // search credit and the VPS resources. STRICTLY admin (users don't see it).
-  // ── CREDITUL RĂMAS, PE FIECARE AI (Adrian, 8 aug) ────────────────────────
-  // `/api/admin/brain-credit` de mai jos e pastila din bară: Gemini + Serper,
-  // în formă scurtă. Asta e RAPORTUL: un rând pe furnizor, cu ce s-a putut citi
-  // de la el, ce s-a cheltuit la noi, și — acolo unde furnizorul nu dă sold —
-  // motivul scris pe față, nu un zero care arată liniștitor.
-  app.get('/api/admin/credit-ai', async (req, reply) => {
+  // The owner's REAL-money view: provider pool loaded, remaining, spent, profit
+  // (admin only). This is what the admin sees instead of the users' credits.
+  app.get('/api/admin/pool', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const { crediteAI } = await import('../services/creditAI.js')
-    return reply.send({ furnizori: await crediteAI() })
+    return reply.send(await getAdminAccount())
   })
 
+  // Creierul e 100% OpenRouter (0 Kimi, 0 GLM). Butonul de fond din bara de admin:
+  // arată SOLDUL REAL, EXACT din contul OpenRouter — „punga lui Kelion" din care
+  // se alimentează creierul CENTRAL (Adrian, 24 iul: „OpenRouter = valoarea
+  // exactă din OpenRouter"). Plus fondul intern al adminului (loaded − cost real)
+  // și un semnal `low` când e nevoie să depună bani. STRICT admin (userii nu văd).
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [vps, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
-      resurseGazda(),
-      // THE SERPER PILL: the REAL remaining search credit read from Serper's
-      // /account endpoint. Cached 5 min in the service.
-      getSerperBalance(),
-      // THE GEMINI PILL (Adrian, 3 aug: „vreau să văd că am bani la gemini").
-      // Creditul promoțional (£10.88) NU e expus de niciun API Google (nici
-      // Cloud Billing nu are „credit balance") — deci nu-l pot CITI, nu-l pot
-      // inventa (regula #1). Ce arăt sunt DOUĂ măsurători + o valoare pe care o
-      // spui TU: (1) starea LIVE — un ping mic zice dacă cheia Tier 2 servește
-      // (200 = ai credit + merge; „depleted" = epuizat); (2) cheltuiala REALĂ pe
-      // luna curentă (cost_events kind='gemini'); (3) `creditGbp` — cifra pe care
-      // o vezi în AI Studio și mi-o dai o dată (kv 'gemini:credit'), afișată ca
-      // ATARE, cu data, fiindcă Google n-o dă automat. A ta, nu inventată de mine.
-      getGeminiMonthUsd(),
-      geminiLive(),
-      // GARDAT (auditul admin, 3 aug): loadKv era singura citire NEgardată din
-      // acest Promise.all — un sughiț de DB pe KV respingea tot lanțul, ruta
-      // dădea 500 și TOATE pastilele se stingeau, deși Serper/VPS/Gemini se
-      // măsuraseră cu succes. Eșecul se declară per câmp, nu omoară răspunsul.
-      loadKv('gemini:credit').catch(() => null),
+    const [pool, orBalance, stripeBal] = await Promise.all([
+      getAdminAccount(),
+      getOpenRouterBalance(),
+      getStripeBalance(),
     ])
-    // Creditul „spus de owner" — citit onest din kv. Dacă lipsește sau e stricat,
-    // rămâne undefined (pastila arată ✓/⚠, nu o cifră falsă).
-    let geminiCreditGbp: number | undefined
-    let geminiCreditAt: string | undefined
-    try {
-      const c = geminiCreditRaw ? (JSON.parse(geminiCreditRaw) as { gbp?: number; at?: string }) : null
-      if (c && Number.isFinite(c.gbp) && (c.gbp as number) >= 0) {
-        geminiCreditGbp = c.gbp
-        geminiCreditAt = typeof c.at === 'string' ? c.at : undefined
-      }
-    } catch {
-      /* kv stricat → „nu știu", niciodată un zero fals */
-    }
     return reply.send({
-      // (Câmpurile `openrouter` și `openai` au fost SCOASE din răspuns, 3 aug —
-      // furnizorii au fost extirpați; pastilele lor au dispărut din bară.)
-      active: 'gemini',
-      // ── THE VPS, PERMANENTLY IN THE BAR (Adrian, 31 Jul: "permanently show
-      // VPS on the interface in the top bar") ───────────────────────────────
-      // It rides on this route, not a new one: the bar polls it every 30s
-      // anyway (usePolledJson, intervalul implicit — cifra corectată la audit,
-      // 3 aug: comentariul vechi jura „15s"), and reading /proc costs
-      // microseconds. An extra poller would have been cost with no gain.
-      // `null` when it can't be measured — the bar writes "⚠ VPS", NOT zeros.
-      // A "0.0 GB / 0%" would look identical to a dead server and would be
-      // exactly the error he keeps complaining about: a failed reading
-      // presented as real state.
-      vps,
-      // The REAL Serper search credit (searches left). `live: false` means
-      // UNREADABLE (key missing or read failed) — the bar writes "Serper ⚠",
-      // NEVER "Serper 0" (regula de onestitate #1).
-      serper: {
-        live: serperBalance.ok,
-        balance: serperBalance.ok ? serperBalance.balance : undefined,
-        rateLimit: serperBalance.ok ? serperBalance.rateLimit : undefined,
-        error: serperBalance.error,
+      active: 'openrouter',
+      openrouter: {
+        ok: Boolean(config.openrouter.key),
+        topup: 'https://openrouter.ai/credits',
+        // Soldul REAL din OpenRouter (USD), exact ca pe pagina lor.
+        balance: orBalance.balance,
+        totalCredits: orBalance.totalCredits,
+        totalUsage: orBalance.totalUsage,
+        currency: orBalance.currency,
+        low: orBalance.low,
+        threshold: orBalance.threshold,
+        live: orBalance.ok,
+        error: orBalance.error,
       },
-      // THE GEMINI PILL. `serving` = the live ping (Tier 2 key returned 200 →
-      // green "Gemini ✓": credit present + working; false → red "Gemini ⚠" with
-      // the reason: 'depleted' (prepay credit gone), 'quota', 'error'/network).
-      // `checked: false` = the ping itself couldn't run (no key / network) — a
-      // "⚠", never a fake "OK". `monthUsd` = REAL month-to-date Gemini spend from
-      // our journal (tooltip detail). Nothing fabricated — the £11.58 prepay
-      // credit is not exposed by any Google API (verified), so we show the honest
-      // signal that reflects it: green while it serves, red the moment it can't.
-      gemini: {
-        checked: geminiState.ok,
-        serving: geminiState.serving,
-        reason: geminiState.reason,
-        monthUsd: geminiCost.ok ? geminiCost.monthUsd : undefined,
-        // Creditul spus de owner (GBP) + când. Afișat ca ATARE pe pastilă.
-        creditGbp: geminiCreditGbp,
-        creditAt: geminiCreditAt,
-      },
-      // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
-      // desena, tipul din frontend mințea (loaded/remaining nu mai existau),
-      // iar sursa lui, getAdminAccount, rula două SUM-uri la fiecare poll
-      // pentru o valoare nefolosită și întorcea zerouri fabricate la eșec.)
+      // PUNGA STRIPE în bară (Adrian, 24 iul: „după OpenRouter, banii în
+      // Stripe, reali") — disponibil + în tranzit, doar pentru admin.
+      stripe: stripeBal
+        ? { available: stripeBal.available, pending: stripeBal.pending, currency: stripeBal.currency }
+        : null,
+      pool,
     })
   })
 
-  // ── CREDITUL GEMINI SPUS DE OWNER (Adrian, 3 aug: „gemini nu e afișată
-  //    valoarea pe aplicație", cu poza £10.88 din AI Studio) ─────────────────
-  // Google NU expune creditul promoțional prin niciun API — deci nu-l pot citi
-  // și n-am voie să-l inventez (regula #1). Soluția onestă: îl spui O DATĂ (aici
-  // sau prin Kelion în chat), se salvează cu data, și pastila îl arată ca ATARE
-  // — cifra TA, nu o măsurătoare. `gbp` gol/negativ/absent → șterge ancora
-  // (pastila revine la ✓/⚠), niciodată un zero fals.
-  app.post<{ Body: { gbp?: number | string | null } }>('/api/admin/gemini-credit', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const raw = req.body?.gbp
-    const n = typeof raw === 'string' ? Number(raw.replace(',', '.').trim()) : raw
-    if (raw == null || raw === '' || !Number.isFinite(n) || (n as number) < 0) {
-      await saveKv('gemini:credit', '').catch(() => {})
-      return reply.send({ ok: true, cleared: true })
-    }
-    const at = new Date().toISOString()
-    await saveKv('gemini:credit', JSON.stringify({ gbp: n, at, by: user.email }))
-    return reply.send({ ok: true, gbp: n, at })
-  })
-
-  // (Ruta /api/admin/openai-costs a fost ȘTEARSĂ, 3 aug — OpenAI extirpat:
-  // nu mai există nicio cheltuială OpenAI de citit.)
-
-  // The REAL picture of the owner's money (admin only): the real cost consumed
-  // at providers and the real profit. No hand-written figure. (Stripe is fully
-  // out — 31 Jul; OpenRouter/OpenAI extirpate — 3 aug, împreună cu „punga"
-  // care era soldul OpenRouter.)
+  // The owner's REAL money picture (admin only): live Stripe balance (revenue
+  // held at Stripe), real provider cost consumed, real profit, and the per-AI
+  // cost breakdown. No hand-typed figures.
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // M7b (8 aug): banii nu se desenează din zerouri inventate — dacă jurnalul
-    // de cost nu se poate citi, pagina primește 503 cu motivul, nu „£0.00".
-    const citire = await citesteRezumatCost()
-    if (!citire.citit) return reply.code(503).send({ error: 'costuri_necitibile', motiv: citire.motiv })
-    const costs = citire.valoare
+    const [stripe, account, costs, orBalance] = await Promise.all([
+      getStripeBalance(),
+      getAdminAccount(),
+      getCostSummary(),
+      getOpenRouterBalance(),
+    ])
     return reply.send({
-      // (Câmpurile `spent` și `profit` au fost SCOASE — auditul admin, 3 aug:
-      // tabul Bani nu le desena (citește spentUsd/masurat/estimat/today), iar
-      // sursa lor, getAdminAccount, dubla SELECT-ul din getCostSummary și
-      // inventa zerouri la eșec. Funcția a fost ștearsă din db.ts.)
-      // The cost journal is kept in USD end to end (cost_events.cost_usd) —
-      // the Money tab never mixes "total £" with "azi $".
-      spentUsd: costs.total,
-      currency: config.billing.currency,
+      stripe,
+      loaded: account.loaded,
+      remaining: account.remaining,
+      spent: account.spent,
+      profit: account.profit,
+      currency: stripe?.currency ?? 'gbp',
       byKind: costs.byKind,
-      // Consumed TODAY (USD, real) — for the "Consumed today" card in the
-      // Money tab.
+      // Consumat AZI (USD, real) — pentru cardul „Consumat azi" din tabul Bani.
       today: costs.today,
-      // ── REAL vs ESTIMATE, WRITTEN ON EVERY ROW ────────────────────────────
-      // Only brain calls carry the provider's own figure. Everything else —
-      // the voice minutes especially — is a fixed rate × a quantity, OUR
-      // estimate. The tab labels each row from `felul`; an unlabeled estimate
-      // presented as cost is exactly the "voice_minutes $204.52" fabrication
-      // this change removes.
-      masurat: costs.masurat,
-      estimat: costs.estimat,
-      felul: costs.felul,
-      // (Câmpurile `punga`, `openrouter` și `openai` au fost SCOASE, 3 aug —
-      // furnizorii au fost extirpați; nu mai există sold OpenRouter de citit.)
+      // „Punga lui Kelion" = soldul REAL, EXACT din contul OpenRouter (USD) din
+      // care se alimentează creierul CENTRAL (Adrian: „valoarea exactă din
+      // OpenRouter"). Doar adminul vede acest tab; userii nu ajung aici.
+      openrouter: {
+        balance: orBalance.balance,
+        low: orBalance.low,
+        threshold: orBalance.threshold,
+        live: orBalance.ok,
+        topup: orBalance.topup,
+      },
     })
   })
 
@@ -508,9 +292,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/transactions', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const t = await citesteTranzactii(200)
-    if (!t.citit) return reply.code(503).send({ error: 'tranzactii_necitite', motiv: t.motiv })
-    return reply.send({ transactions: t.valoare })
+    return reply.send({ transactions: await listAllTransactions(200) })
   })
 
   // Per-USER activity (admin only): who signed in, last IP/place/device, how
@@ -518,11 +300,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/activity', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // AUDIT ADMIN (3 aug): DB picat NU mai răspunde 200 cu liste goale („nu
-    // s-a strâns activitate" nemăsurat) — 500, iar panoul scrie „nu pot citi".
-    const activity = await getUserActivity()
-    if (!activity) return reply.code(500).send({ error: 'db_unreadable' })
-    return reply.send(activity)
+    return reply.send(await getUserActivity())
   })
 
   // Free-trial visitor analytics (admin only): where trials come from — country,
@@ -530,38 +308,29 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/demos', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // AUDIT ADMIN (3 aug): zerourile fabricate de vechiul `empty` nu mai ies
-    // pe ușă — o citire picată e 500, nu „Vizite 0/0".
-    const demos = await getDemoStats()
-    if (!demos) return reply.code(500).send({ error: 'db_unreadable' })
-    return reply.send(demos)
+    return reply.send(await getDemoStats())
   })
 
-  // Which brain models actually serve right now (admin only): a real 1-token
-  // ping of the default chat + work models through Gemini direct (services/brain.ts).
+  // Which brain models actually serve right now (admin only): live ping of
+  // Kimi (primar) și GLM (rezervă). Vechiul provider scos complet (Adrian, 12 iul).
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // DOVADA ULTIMULUI AUTO-UPGRADE (Adrian, 7 aug: „clar cu dovadă"). Scorul
-    // candidatului ȘI al modelului activ, probate în aceeași trecere, plus ce
-    // sarcini a picat. `null` când nu s-a verificat încă — „nu pot verifica",
-    // nu o cifră liniștitoare inventată.
-    return reply.send({ ...(await verifyModels()), dovadaUpgrade: await dovadaUltimuluiUpgrade() })
+    return reply.send(await verifyModels())
   })
 
-  // Verify the brain key live (admin only): pings the Gemini chat default
-  // with a 1-token call; reports ok/fail without ever exposing the key value.
+  // Verify the brain keys live (admin only): Kimi (primar) + GLM (rezervă). Pings
+  // each with a 1-token call; reports ok/fail without ever exposing the key value.
   app.get('/api/admin/keys', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyKeys())
   })
 
-  // VERIFY ALL PRIVILEGED TOKENS (Adrian, 14 Jul): verifies LIVE all the
-  // keys/tokens with access to external services and reports status without
-  // exposing secret values. Includes the Gemini brain, Google
-  // (service account/TTS/OAuth), Mail (SMTP+IMAP), PostgreSQL
-  // and SESSION_SECRET.
+  // VERIFICARE TOATE TOKENURILE CU DREPTURI (Adrian, 14 iul): verifică LIVE toate
+  // cheile/tokenurile cu acces la servicii externe și raportează statusul fără să
+  // expună valori secrete. Include OpenRouter, OpenAI, Stripe, Google (service
+  // account/TTS/OAuth), Gemini, Mail (SMTP+IMAP), LiveKit, PostgreSQL și SESSION_SECRET.
   app.get('/api/admin/token-checks', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -572,34 +341,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok, notConfigured, failed, total: checks.length, checks })
   })
 
-  // ── WHICH KEYS THE SERVER SEES RIGHT NOW (Adrian, 30 Jul: "all the keys
-  // have been written dozens of times") ─────────────────────────────────────
-  // The panel said "(not configured)" while the man said "I wrote them". Both
-  // can be true: a WRITTEN key doesn't automatically reach the running process
-  // — it may be in a different file than the one given to docker, written
-  // AFTER the container started (so unloaded until a restart), or set as a
-  // GitHub secret without running `vps-set-env`. This route asks the PROCESS,
-  // not the man. It returns NO values — only the name, whether present, and
-  // the length.
-  app.get('/api/admin/env-check', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({
-      vars: envCheck(),
-      summary: envSummary(),
-      // Keys you HAVE in the process, but under a name the code didn't read.
-      // That's the answer to "I wrote it dozens of times": you wrote it, I was
-      // looking elsewhere. Only NAMES, never values.
-      orphans: envOrphans(),
-      // The process start time: answers the question that actually matters —
-      // "did I write the key BEFORE or AFTER the app started?"
-      startedAt: processStartedAt(),
-    })
-  })
-
-  // GESTURES (Adrian, 13 Jul): the admin panel reads/writes which gestures
-  // Kelion is allowed to use contextually. Admin only (403 otherwise). We
-  // store the DISABLED list (default: all active).
+  // GESTURI (Adrian, 13 iul): panoul admin citește/scrie ce gesturi are voie
+  // Kelion să folosească contextual. Doar admin (403 altfel). Stocăm lista
+  // DEZACTIVATĂ (default: toate active).
   app.get('/api/admin/gestures', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -610,19 +354,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const list = Array.isArray(req.body?.disabled) ? req.body.disabled : []
     await setDisabledGestures(list)
-    // Gesturile sunt o setare GLOBALĂ, dar de la 7 aug fiecare sesiune își ține
-    // lista în memorie (stareSesiune, TTL 10 min) ca să nu recitească DB-ul la
-    // fiecare tură. Fără linia asta, un gest debifat din panou ar fi rămas activ
-    // până la 10 minute pentru oricine e deja logat — exact tiparul „valoare
-    // veche servită după ce s-a schimbat". Uităm TOT: următoarea tură recitește.
-    uitaToateSesiunile()
     return reply.send({ ok: true, disabled: await getDisabledGestures() })
   })
 
-  // KELION'S SELF-EXPANSION (Adrian, 25 Jul): the tools Kelion PROPOSED by
-  // itself. The owner sees them and approves/rejects with ONE CLICK — an
-  // approved tool becomes active instantly, no redeploy. "Independent up to
-  // deploy, with my approval" — exactly the requested gate.
+  // AUTO-EXTINDEREA LUI KELION (Adrian, 25 iul): uneltele pe care Kelion și le-a
+  // PROPUS singur. Owner-ul le vede și aprobă/respinge cu UN CLICK — o unealtă
+  // aprobată devine activă instant, fără redeploy. „Independent până la deploy,
+  // cu aprobarea mea" — exact poarta cerută.
   app.get('/api/admin/kelion-tools', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -637,216 +375,102 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok, tools: await listKelionTools() })
   })
 
-  // RESETTING THE CONSUMPTION COUNTERS (Adrian, 30 Jul). Deletes ONLY the
-  // journal of our costs at providers. The users' wallets, the payments ledger
-  // and the purchase history stay UNTOUCHED — consumed credits are not given
-  // back, and accounting is not rewritten. Requires an admin session, like
-  // everything here.
-  // ── „TRIMISĂ CU SUCCES" ERA O MINCIUNĂ (măsurat, 8 aug 2026) ──────────────
-  // Ruta chema cele două runbook-uri și le ARUNCA răspunsul, apoi întorcea
-  // `{ok:true}` orice s-ar fi întâmplat. Probat pe o instanță fără GITHUB_TOKEN:
-  //
-  //     POST /api/admin/reset-vps  →  200 {"ok":true}
-  //
-  // în timp ce `runRunbook` întorsese `{"error":"github_token_missing"}`. Adică
-  // butonul „Reset VPS" scria „Comanda a fost trimisă cu succes" fără să fi
-  // trimis nimic — și s-ar fi purtat identic cu autonomia pusă pe pauză
-  // („paused_by_owner"), cu workflow-ul șters sau cu un dispatch refuzat de
-  // GitHub. A patra oară aceeași familie, după „£0.00", „Cardul: necreat" și
-  // „0 creați, 0 eșuați": o operație REFUZATĂ, raportată ca fapt împlinit.
-  // Acum răspunsul POARTĂ rezultatul fiecărui pas, iar un refuz e 502.
-  app.post('/api/admin/reset-vps', async (req, reply) => {
+  // VERIFICARE VIZUALĂ din ADMIN (Adrian, 13 iul: „nu se dă la admin dacă nu e
+  // 200"): admin-ul poate rula visual-check prin SESIUNE (nu prin secretul VPS)
+  // — screenshot + Gemini judecă dacă rezultatul cerut se vede. 403 dacă nu-i admin.
+  app.post<{ Body: { url?: string; criteria?: string; fullPage?: boolean } }>(
+    '/api/admin/visual-check',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const url = String(req.body?.url ?? 'https://kelionai.app').trim()
+      const criteria = String(req.body?.criteria ?? '').trim()
+      if (!criteria) return reply.code(400).send({ error: 'bad_request', note: 'criteria required' })
+      const shot = await screenshotUrl(url, { fullPage: req.body?.fullPage === true })
+      if ('error' in shot) return reply.send({ ok: false, verdict: 'necunoscut', note: `screenshot: ${shot.error}` })
+      const question =
+        `Verifici VIZUAL un screenshot al aplicației web kelionai.app. Rezultatul cerut: "${criteria}". ` +
+        `Răspunde STRICT: prima linie "VIZUAL: DA" dacă se vede clar, sau "VIZUAL: NU" dacă nu. Apoi o propoziție cu ce vezi.`
+      const answer = await geminiVision(shot.jpegBase64, question)
+      if (!answer) return reply.send({ ok: false, verdict: 'necunoscut', note: 'gemini_vision_indisponibil' })
+      const m = answer.match(/VIZUAL:\s*(DA|NU)/i)
+      return reply.send({ ok: true, verdict: m ? (m[1].toUpperCase() === 'DA' ? 'DA' : 'NU') : 'necunoscut', detail: answer.slice(0, 800) })
+    },
+  )
+
+  // Record money the owner ADDS to or WITHDRAWS from the provider-credit pool
+  // (admin only). direction 'withdraw' takes money out; anything else adds.
+  app.post<{ Body: { amount?: number; direction?: string } }>('/api/admin/pool', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const { runRunbook, citesteRaspunsRunbook } = await import('../services/runbooks.js')
-    const pasi = []
-    for (const nume of ['restart-app', 'restart-caddy']) {
-      const pas = citesteRaspunsRunbook(nume, await runRunbook(nume))
-      pasi.push(pas)
-      // Primul pas refuzat înseamnă că al doilea primește exact același „nu":
-      // nu mai punem încă o cerere pe drum ca să adunăm aceeași eroare.
-      if (!pas.ok) break
-    }
-    const ok = pasi.length === 2 && pasi.every((p) => p.ok)
-    if (!ok) return reply.code(502).send({ ok: false, error: 'repornire_nepornita', pasi })
-    return reply.send({ ok: true, pasi })
+    const amount = Number(req.body?.amount)
+    if (!(amount > 0)) return reply.code(400).send({ error: 'bad_request' })
+    if (req.body?.direction === 'withdraw') await withdrawAdminPool(amount)
+    else await loadAdminPool(amount)
+    return reply.send(await getAdminAccount())
   })
 
-  app.post('/api/admin/reset-counters', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const r = await resetCostCounters()
-    // ȘTERGEREA PICATĂ răspundea 200 cu `{ok:false, sterse:0}`, iar panoul se
-    // uita DOAR la statusul HTTP (`r?.ok`) — deci scria „Resetat ✓" peste niște
-    // contoare neatinse. Măsurat 8 aug pe o instanță fără bază de date.
-    if (!r.ok) return reply.code(502).send({ ...r, error: 'resetare_esuata' })
-    return reply.send(r)
-  })
-
-  // The /api/admin/pool route was DELETED (Adrian, 30 Jul): it hand-wrote how
-  // much the man thought he had in his pocket, and the panel displayed that
-  // figure as fact. How much money you have is read from the bank account
-  // (Enable Banking).
-
-  // THE MONEY CIRCUIT from the Kelionai admin (Adrian, 24 Jul): the live state
-  // of each payment→AI link. STRICTLY admin.
+  // CIRCUITUL BANILOR din adminul Kelionai (Adrian, 24 iul): starea live a
+  // fiecărei verigi Stripe→AI + crearea cardului virtual prin API. STRICT admin.
   app.get('/api/admin/money-circuit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // M7b (8 aug): costul e o CITIRE — picată, se spune cu motiv (costRealMotiv),
-    // nu se maschează în zerouri și nu doboară restul panoului.
-    const cost = await citesteRezumatCost()
-    // `citirePlati` = the state of the Revolut transaction reader. Without it,
-    // the panel couldn't tell "nobody paid" apart from "I can't read the
-    // account" — exactly the confusion that cost a whole day on 30 Jul.
-    return reply.send({
-      // `expenses` DIED SILENTLY with Stripe (#624) — it was built in
-      // stripe.ts — and the panel's whole status block was gated on it, so
-      // "Citirea plăților", the autonomy row, the proofs and the pause were
-      // ALL invisible since Aug 1 ("mai jos nu mai e nimic", Adrian, Aug 2).
-      // Rebuilt in cardFurnizor.ts, from config keys + what card_gata measured.
-      expenses: await cheltuieliAplicatiei().catch(() => []),
-      citirePlati: stareCitirePlati(),
-      // `citirePlatiEmail` = the Revolut-email reader (Pro path, Aug 3): reads
-      // "Ai primit …" mails from the owner's Gmail and credits. Shown next to
-      // `citirePlati` so the panel says whether THIS path is working — a read,
-      // not a claim.
-      citirePlatiEmail: starePlatiEmail(),
-      // `autonomie` = the last pass of the loop that gives Kelion work WITHOUT
-      // anyone asking (Adrian, 30 Jul: "make it autonomous"). Shown for the
-      // same reason as the rest: so that "the loop is working" is a reading,
-      // not a claim of mine.
-      autonomie: stareAutonomie(),
-      // THE COST IN SIGHT (Adrian, 30 Jul: "I need to see, not brakes"). It
-      // existed as a tool — you had to ASK to find out. Now it's in the panel,
-      // next to the money: total, today, and what it went on. It cuts nothing;
-      // it shows.
-      costReal: cost.citit ? cost.valoare : null,
-      costRealMotiv: cost.citit ? undefined : cost.motiv,
-      // The voice rate the estimate is computed with — read by the panel so
-      // the figure next to the explanation is ALWAYS the live one (it can be
-      // changed from env, and a hand-written copy in the frontend would lie).
-      voiceUsdPerMin: VOICE_USD_PER_MINUTE,
-      // THE BRAKE IS YOURS, AND IT SHOWS. "pauza-autonomie" existed for a long
-      // time, but only as a command you had to know by heart. A limit you
-      // choose is not a barrier; one I impose on you is.
-      autonomiaOprita: await isOpsPaused().catch(() => false),
-    })
+    return reply.send(await getMoneyCircuit())
   })
-  // YOUR BRAKE, ONE CLICK AWAY (Adrian, 30 Jul: "the 6 are needed, but no
-  // brakes" — this is not a brake I put over him, it's the lever YOU hold).
-  // "pauza-autonomie" existed since 27 Jul, but only as a command you had to
-  // know by heart and say to Kelion. Now it's a button, in plain sight.
-  // THE EIGHT PROOFS (Adrian, 31 Jul: "we need 8 out of 8 proofs"). The
-  // autonomy level is no longer a claim of mine in a chat that gets lost: it's
-  // a READING from the database. Each level looks for its concrete trace — an
-  // order, a PR, a measurement — and says "proven" only if it found it.
-  // Otherwise it says what exactly the proof would be. Rule #1, applied to our
-  // own evidence.
-  app.get('/api/admin/autonomie/dovezi', async (req, reply) => {
+  app.post('/api/admin/money-circuit/card', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await dovezileAutonomiei())
-  })
-
-  app.post<{ Body: { oprit?: boolean } }>('/api/admin/autonomie/pauza', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const oprit = req.body?.oprit === true
-    await setOpsPaused(oprit)
-    return reply.send({ oprit })
-  })
-
-  // ── LINKING THE REVOLUT ACCOUNT (PSD2 consent, Enable Banking) ────────────
-  // Two routes that take the owner through consent without SSH:
-  //   1. start  → the URL to open in the browser (approval is given in the
-  //      Revolut app)
-  //   2. finalizeaza → with the code from the return URL, we save the linked
-  //      account
-  // Consent expires in max. 90 days (PSD2) — the same routes renew it.
-  // `redirect_url` must be declared in the Enable Banking Control Panel.
-  app.post('/api/admin/plati/legatura/start', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const redirectUrl = `https://${req.headers.host ?? 'kelionai.app'}/admin`
-    const r = await incepeLegaturaPlati(redirectUrl)
+    const r = await createKelionCard(user.email)
     if ('error' in r) return reply.code(502).send(r)
-    return reply.send(r)
+    return reply.send({ ok: true, ...r })
   })
 
-  app.post<{ Body: { code?: string } }>('/api/admin/plati/legatura/finalizeaza', async (req, reply) => {
+  // DEPUNEREA OWNERULUI (Adrian, 24 iul: „de unde din admin depun bani să
+  // ajungă în Stripe și din Stripe în OpenRouter?"): checkout marcat
+  // owner_deposit — bani în pungă FĂRĂ credite; transferul automat îi duce
+  // spre card → AI. STRICT admin.
+  app.post<{ Body: { pounds?: number } }>('/api/admin/deposit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const r = await finalizeazaLegaturaPlati(String(req.body?.code ?? ''))
+    const pounds = Math.round(Number(req.body?.pounds ?? 0))
+    if (!(pounds > 0) || pounds > 2000) return reply.code(400).send({ error: 'bad_amount' })
+    const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
+    const r = await createOwnerDeposit(user.email, pounds, baseUrl)
     if ('error' in r) return reply.code(502).send(r)
-    return reply.send(r)
+    return reply.send({ ok: true, url: r.url, pounds })
   })
 
-  // ── THE PAYMENTS PANEL (M3, Aug 2) ────────────────────────────────────────
-  // Codes issued / paid / pending + the NET (unattributed inflows). Until
-  // today none of this had a window: `payment_codes` was written and matched,
-  // but the admin could not see a single row of it, and the net's table did
-  // not even exist. Every figure is a database read; a failed read arrives as
-  // null, never as zeros (rule no. 1).
-  app.get('/api/admin/plati', async (req, reply) => {
+  // PAYOUT ADMIN (Adrian, 24 iul: „să scrie clar PAYOUT admin, către cardul
+  // declarat REAL"): declanșează payout-ul Stripe din admin — merge prin design
+  // DOAR către contul bancar/cardul real din Settings→Payouts, niciodată către
+  // cardul virtual. Pe extras: „PAYOUT ADMIN". STRICT admin.
+  app.post<{ Body: { pounds?: number } }>('/api/admin/payout', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({
-      rezumat: await rezumatPlati(),
-      neatribuite: await listeazaPlatiNeatribuite(),
-      coduriNeplatite: await listeazaCoduriNeplatite(),
-      platiIncasate: await listeazaPlatiIncasate(),
-      totaluri: await totaluriPlati(),
-    })
+    const pounds = Number(req.body?.pounds ?? 0)
+    if (!(pounds > 0) || pounds > 10_000) return reply.code(400).send({ error: 'bad_amount' })
+    const r = await createAdminPayout(pounds)
+    if ('error' in r) return reply.code(502).send(r)
+    return reply.send({ ok: true, ...r })
   })
 
-  app.get('/api/admin/plati/coduri-neplatite', async (req, reply) => {
+  // VÂNZARE DE CREDITE (Adrian, 24 iul: „se vând X credite pe bani; butonul de
+  // credite e doar la admin"). Adminul alege userul + X credite → primește
+  // linkul de plată Stripe pe care i-l trimite userului. La plată, userul
+  // primește EXACT X credite (webhook/reconciliere pe metadata sale_credits),
+  // cu tranzacția în registru. Userii NU au buton de cumpărare — doar afișare.
+  app.post<{ Body: { email?: string; credits?: number } }>('/api/admin/sell-credits', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ ok: true, coduri: await listeazaCoduriNeplatite() })
+    const email = String(req.body?.email ?? '').trim().toLowerCase()
+    const credits = Math.floor(Number(req.body?.credits ?? 0))
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return reply.code(400).send({ error: 'bad_email' })
+    if (!(credits > 0) || credits > 100_000) return reply.code(400).send({ error: 'bad_credits' })
+    const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
+    const r = await createSaleCheckout(email, credits, baseUrl)
+    if ('error' in r) return reply.code(502).send(r)
+    return reply.send({ ok: true, url: r.url, pounds: r.pounds, credits, email })
   })
-
-  app.get('/api/admin/plati/incasate', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ ok: true, plati: await listeazaPlatiIncasate() })
-  })
-
-  app.get('/api/admin/plati/totaluri', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ ok: true, totaluri: await totaluriPlati() })
-  })
-
-  // The admin ties a netted inflow to a person (credits through the same
-  // idempotent path as automatic matching — the bank id is the reference, so
-  // a double credit is refused by the unique index, not by anyone's care).
-  app.post<{ Body: { id?: number; email?: string } }>('/api/admin/plati/neatribuite/atribuie', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const id = Number(req.body?.id ?? 0)
-    const email = String(req.body?.email ?? '').trim()
-    if (!(id > 0) || !email.includes('@')) return reply.code(400).send({ error: 'bad_request' })
-    const rezultat = await atribuiePlataNeatribuita(id, email)
-    if (rezultat === 'creditat') return reply.send({ ok: true, rezultat })
-    const cod = rezultat === 'negasit' ? 404 : rezultat === 'deja' ? 409 : 502
-    return reply.code(cod).send({ ok: false, rezultat })
-  })
-
-  app.post<{ Body: { id?: number } }>('/api/admin/plati/neatribuite/ignora', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const id = Number(req.body?.id ?? 0)
-    if (!(id > 0)) return reply.code(400).send({ error: 'bad_request' })
-    const ok = await ignoraPlataNeatribuita(id)
-    return ok ? reply.send({ ok: true }) : reply.code(404).send({ ok: false })
-  })
-
-  // Here used to live the Stripe virtual card routes, the Stripe
-  // deposit/payout and the credit selling with a Stripe payment link. Deleted
-  // together with Stripe (31 Jul): credit selling now happens through a unique
-  // code + Revolut transfer, and manual crediting stays on /api/admin/user
-  // (action: 'credit').
 
   // ── User management (admin only) ──────────────────────────────────────────
   // Block/unblock, grant credit, or delete a user. The ADMIN is hard-protected:
@@ -872,7 +496,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           const amount = Number(req.body?.amount)
           if (!Number.isFinite(amount) || amount === 0)
             return reply.code(400).send({ error: 'bad_amount' })
-          await grantCredit(email, amount, config.billing.currency)
+          await grantCredit(email, amount, config.stripe.currency)
           break
         }
         case 'delete':
@@ -890,15 +514,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/leads', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // AUDIT ADMIN (3 aug): eșec de DB → 500, nu „Niciun contact încă".
-    const leads = await listLeads()
-    if (!leads) return reply.code(500).send({ error: 'db_unreadable' })
-    return reply.send({ leads })
+    return reply.send({ leads: await listLeads() })
   })
 
-  // The messages from the "Contact" form — ALWAYS saved in the DB, so the
-  // owner sees them here even if email is not configured (the "contact doesn't
-  // send" bug).
+  // Mesajele din formularul „Contact" — salvate MEREU în DB, deci owner-ul le
+  // vede aici chiar dacă emailul nu e configurat (bug „contactul nu se trimite").
   app.get('/api/admin/contact-messages', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -933,11 +553,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/visitor-chats', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // AUDIT ADMIN (3 aug): DB picat → 500, nu „Nicio conversație încă" — pot
-    // exista vizitatori care scriu chiar atunci.
-    const convos = await listVisitorConvos()
-    if (!convos) return reply.code(500).send({ error: 'db_unreadable' })
-    return reply.send({ convos })
+    return reply.send({ convos: await listVisitorConvos() })
   })
 
   app.get<{ Querystring: { conv?: string; after?: string } }>(
@@ -945,9 +561,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-      // The body is shared with the public route (single source in demo.ts);
-      // only the admin gate above is added here.
-      return pollVisitorChat(req, reply)
+      const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
+      const after = Number(req.query?.after ?? 0) || 0
+      if (!conv) return reply.code(400).send({ error: 'bad_request' })
+      return reply.send({ messages: await getVisitorMessages(conv, after) })
     },
   )
 
@@ -960,10 +577,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       const text = String(req.body?.text ?? '')
       if (!conv || !text.trim()) return reply.code(400).send({ error: 'bad_request' })
       const id = await addVisitorMessage(conv, 'owner', text)
-      // AUDIT ADMIN (3 aug): INSERT picat = 502, nu 200 cu {ok:false} —
-      // un răspuns „salvat" pe care vizitatorul nu-l va vedea niciodată.
-      if (!(id > 0)) return reply.code(502).send({ ok: false, error: 'save_failed', id: 0 })
-      return reply.send({ ok: true, id })
+      return reply.send({ ok: id > 0, id })
     },
   )
 }

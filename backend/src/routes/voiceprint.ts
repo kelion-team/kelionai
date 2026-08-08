@@ -1,34 +1,60 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
+import { config } from '../config.js'
 import {
+  saveVoiceprint,
   getVoiceprint,
   getVoiceprintAudio,
+  identifyVoiceprint,
   listVoiceprints,
   deleteVoiceprint,
   type VoiceFeatureMeta,
 } from '../db.js'
 
-// Speaker identification system by voice timbre.
-// The frontend extracts features 100% client-side (zero cost) from each
-// recorded phrase; the backend compares them with the voiceprints saved in
-// Postgres and adds the context (name, gender, admin-verified voice) to the
-// brain's prompt.
+// Sistem de identificare a vorbitorului după timbru vocal.
+// Frontul extrage features 100% client-side (zero cost) din fiecare frază
+// înregistrată; backendul le compară cu amprentele salvate în Postgres și
+// adaugă contextul (nume, gen, voce verificată admin) în promptul creierului.
 
 export interface VoiceFeatures {
-  /** The normalized vector used for comparison. */
+  /** Vectorul normalizat folosit la comparare. */
   vector: number[]
-  /** Interpretable metadata (Hz, ratios etc.). */
+  /** Metadate interpretabile (Hz, proporții etc.). */
   meta: VoiceFeatureMeta
-  /** A short audio sample (webm/opus data-URL) of the phrase — for the "play" button in admin. */
+  /** Mostră audio scurtă (data-URL webm/opus) a frazei — pentru butonul „play" din admin. */
   clip?: string
 }
 
-// The /save and /identify routes were REMOVED (the 27 Jul audit: zero
-// callers — enrolment and matching happen inline on the server, in chat.ts
-// and realtime.ts).
+const IDENTIFY_THRESHOLD = 0.38 // distanță euclidiană normalizată sub care e considerat match
 
 export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
-  // Returns the logged-in user's voiceprint (or null if not enrolled yet).
+  // Salvează / actualizează amprenta vocală a userului logat.
+  app.post<{ Body: { name?: string; features?: VoiceFeatures } }>(
+    '/api/voiceprint/save',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const features = req.body?.features
+      if (!features?.vector?.length || !features?.meta) {
+        return reply.code(400).send({ error: 'bad_request' })
+      }
+      const name = (req.body?.name ?? user.name ?? user.email.split('@')[0]).slice(0, 120)
+      const gender = inferGender(features.meta.pitchMean)
+      const isAdmin = user.email.toLowerCase() === config.adminEmail.toLowerCase()
+      await saveVoiceprint({
+        email: user.email,
+        name,
+        gender,
+        isAdmin,
+        features: features.vector,
+        featureMeta: features.meta,
+        audioClip: typeof features.clip === 'string' ? features.clip : '',
+      })
+      return reply.send({ ok: true, gender, isAdmin })
+    },
+  )
+
+  // Întoarce amprenta userului logat (sau null dacă nu s-a înrolat încă).
   app.get('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
@@ -36,7 +62,31 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ voiceprint: v })
   })
 
-  // The list of all voiceprints — admin only.
+  // Identifică un speaker după features primite.
+  app.post<{ Body: { features?: VoiceFeatures } }>('/api/voiceprint/identify', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const features = req.body?.features
+    if (!features?.vector?.length || !features?.meta) {
+      return reply.code(400).send({ error: 'bad_request' })
+    }
+    const match = await identifyVoiceprint(features.vector, IDENTIFY_THRESHOLD)
+    const gender = inferGender(features.meta.pitchMean)
+    return reply.send({
+      gender,
+      match: match
+        ? {
+            email: match.email,
+            name: match.name,
+            gender: match.gender,
+            isAdmin: match.isAdmin,
+            distance: match.distance,
+          }
+        : null,
+    })
+  })
+
+  // Lista tuturor amprentelor — doar admin.
   app.get('/api/voiceprint/list', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -44,9 +94,8 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ rows })
   })
 
-  // The audio sample of a voiceprint — admin only. Returns the saved
-  // data-URL so it can be played with the panel's "play" button (Adrian,
-  // 14 Jul).
+  // Mostra audio a unei amprente — doar admin. Întoarce data-URL-ul salvat ca să
+  // poată fi redat cu butonul „play" din panou (Adrian, 14 iul).
   app.get<{ Querystring: { email?: string } }>('/api/voiceprint/audio', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -57,18 +106,13 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ clip })
   })
 
-  // Deletes the logged-in user's voiceprint (or another user's, admin only).
+  // Șterge amprenta vocală a userului logat (sau a altui user, doar pentru admin).
   app.delete<{ Body: { email?: string } }>('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     const targetEmail =
       user.role === 'admin' && req.body?.email ? req.body.email.toLowerCase() : user.email.toLowerCase()
     const ok = await deleteVoiceprint(targetEmail)
-    // 200 cu `{ok:false}` însemna „ștergere reușită" pentru orice apelant care
-    // se uită la status (panoul se uită și la corp, dar uneltele lui Kelion și
-    // scripturile nu). `deleteVoiceprint` întoarce `true` și când n-a găsit
-    // rândul, deci `false` = ștergerea chiar a picat. Măsurat 8 aug.
-    if (!ok) return reply.code(502).send({ ok: false, error: 'stergere_esuata' })
     return reply.send({ ok })
   })
 }

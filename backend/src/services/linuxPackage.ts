@@ -1,14 +1,13 @@
 // ══════════════════════════════════════════════════════════════════════════
-// THE LINUX PACKAGE (Adrian, 9 Jul: "build Linux too (.zip), it must return
-// 200"). Kelionai is a web app; the "Linux app" is a native LAUNCHER that
-// opens kelionai.app in a dedicated window (app mode), plus an installer
-// that puts it in the applications menu. We build it DYNAMICALLY, in memory,
-// at /dl/Kelionai-linux.zip → always 200, always the live version (nothing
-// to rebuild, it can never 404).
+// PACHETUL LINUX (Adrian, 9 iul: „construiește și Linux (.zip), să întoarcă 200").
+// Kelionai e o aplicație web; „app-ul de Linux" e un LANSATOR nativ care deschide
+// kelionai.app într-o fereastră dedicată (mod app), plus un instalator care-l pune
+// în meniul de aplicații. Îl construim DINAMIC, în memorie, la /dl/Kelionai-linux.zip
+// → mereu 200, mereu versiunea live (nimic de rebuild-uit, nu poate 404 niciodată).
 //
-// Own ZIP encoder (STORE method, no compression): the production Docker
-// image (node slim) does NOT have the `zip` binary, and the package is small
-// (text files + an icon), so store is enough and adds no dependencies.
+// Encoder ZIP propriu (metoda STORE, fără compresie): imaginea Docker de producție
+// (node slim) NU are binarul `zip`, iar pachetul e mic (fișiere text + o iconiță),
+// deci store e suficient și fără dependențe noi.
 // ══════════════════════════════════════════════════════════════════════════
 
 import fs from 'node:fs'
@@ -33,7 +32,7 @@ function crc32(buf: Buffer): number {
 interface ZipEntry {
   name: string
   data: Buffer
-  mode: number // unix permissions (e.g. 0o755 for an executable)
+  mode: number // permisiuni unix (ex. 0o755 pentru executabil)
 }
 
 function buildZip(entries: ZipEntry[]): Buffer {
@@ -41,7 +40,7 @@ function buildZip(entries: ZipEntry[]): Buffer {
   const centralParts: Buffer[] = []
   let offset = 0
   const DOS_TIME = 0
-  const DOS_DATE = 0x21 // 1980-01-01, fixed date → deterministic zip
+  const DOS_DATE = 0x21 // 1980-01-01, dată fixă → zip determinist
 
   for (const e of entries) {
     const name = Buffer.from(e.name, 'utf8')
@@ -50,22 +49,22 @@ function buildZip(entries: ZipEntry[]): Buffer {
     const size = data.length
 
     const lh = Buffer.alloc(30)
-    lh.writeUInt32LE(0x04034b50, 0) // local file header signature
-    lh.writeUInt16LE(20, 4) // version needed
-    lh.writeUInt16LE(0, 6) // flags
-    lh.writeUInt16LE(0, 8) // method: STORE
+    lh.writeUInt32LE(0x04034b50, 0) // semnătură local file header
+    lh.writeUInt16LE(20, 4) // versiune necesară
+    lh.writeUInt16LE(0, 6) // flaguri
+    lh.writeUInt16LE(0, 8) // metoda: STORE
     lh.writeUInt16LE(DOS_TIME, 10)
     lh.writeUInt16LE(DOS_DATE, 12)
     lh.writeUInt32LE(crc, 14)
-    lh.writeUInt32LE(size, 18) // compressed size
-    lh.writeUInt32LE(size, 22) // uncompressed size
+    lh.writeUInt32LE(size, 18) // dimensiune comprimată
+    lh.writeUInt32LE(size, 22) // dimensiune necomprimată
     lh.writeUInt16LE(name.length, 26)
-    lh.writeUInt16LE(0, 28) // extra length
+    lh.writeUInt16LE(0, 28) // lungime extra
     localParts.push(lh, name, data)
 
     const ch = Buffer.alloc(46)
-    ch.writeUInt32LE(0x02014b50, 0) // central directory signature
-    ch.writeUInt16LE(0x031e, 4) // made by: unix (3), zip 3.0
+    ch.writeUInt32LE(0x02014b50, 0) // semnătură central directory
+    ch.writeUInt16LE(0x031e, 4) // făcut de: unix (3), zip 3.0
     ch.writeUInt16LE(20, 6)
     ch.writeUInt16LE(0, 8)
     ch.writeUInt16LE(0, 10)
@@ -76,12 +75,12 @@ function buildZip(entries: ZipEntry[]): Buffer {
     ch.writeUInt32LE(size, 24)
     ch.writeUInt16LE(name.length, 28)
     ch.writeUInt16LE(0, 30) // extra
-    ch.writeUInt16LE(0, 32) // comment
-    ch.writeUInt16LE(0, 34) // disk
-    ch.writeUInt16LE(0, 36) // internal attributes
-    // external attributes: the unix mode in the upper 16 bits (bit 0o100000 = regular file)
+    ch.writeUInt16LE(0, 32) // comentariu
+    ch.writeUInt16LE(0, 34) // disc
+    ch.writeUInt16LE(0, 36) // atribute interne
+    // atribute externe: modul unix în cei 16 biți superiori (bit 0o100000 = fișier normal)
     ch.writeUInt32LE(((((e.mode & 0xfff) | 0o100000) & 0xffff) << 16) >>> 0, 38)
-    ch.writeUInt32LE(offset, 42) // the local header's offset
+    ch.writeUInt32LE(offset, 42) // offset-ul local header-ului
     centralParts.push(ch, name)
 
     offset += lh.length + name.length + data.length
@@ -95,7 +94,7 @@ function buildZip(entries: ZipEntry[]): Buffer {
   eocd.writeUInt16LE(entries.length, 8)
   eocd.writeUInt16LE(entries.length, 10)
   eocd.writeUInt32LE(central.length, 12)
-  eocd.writeUInt32LE(offset, 16) // the central directory's offset
+  eocd.writeUInt32LE(offset, 16) // offset-ul central directory
   eocd.writeUInt16LE(0, 20)
 
   return Buffer.concat([...localParts, central, eocd])
@@ -151,8 +150,8 @@ Aplicația se actualizează singură — încarcă mereu ultima versiune live.
 
 let cached: Buffer | null = null
 
-// Builds (once, then cached) the .zip package for Linux. `distPath` = the
-// served frontend folder, from where we take the icon if it exists.
+// Construiește (o dată, apoi cache) pachetul .zip pentru Linux. `distPath` = folderul
+// frontend-ului servit, de unde luăm iconița dacă există.
 export function buildLinuxZip(distPath: string): Buffer {
   if (cached) return cached
   const entries: ZipEntry[] = [
@@ -166,7 +165,7 @@ export function buildLinuxZip(distPath: string): Buffer {
       entries.push({ name: 'kelionai.png', data: fs.readFileSync(logo), mode: 0o644 })
     }
   } catch {
-    /* no icon — the launcher falls back to the theme icon */
+    /* fără iconiță — lansatorul cade pe iconița temei */
   }
   cached = buildZip(entries)
   return cached

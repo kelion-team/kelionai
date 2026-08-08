@@ -19,12 +19,12 @@ export interface WorkspaceTask {
   readonly card: SkillCard | null
   readonly text?: string // a readable text deliverable (agent result), rendered as a panel
   readonly html?: string // a complete web page Kelion WROTE, run live in a sandboxed frame ('app')
-  // THE REAL RENDER STATE (Adrian, Jul 27: "Kelion must natively see for real
-  // what the monitor actually displays, and fix it before what he says appears").
-  // 'loading' = started, not yet confirmed; 'ok' = it really rendered;
-  // 'error' = it failed (inaccessible file, site refusing embedding…).
-  // The renderer in Stage sets it from onLoad/onError; get_monitor reads it, so
-  // Kelion FACTUALLY sees what's on screen, not just what he asked for.
+  // STAREA REALĂ DE RANDARE (Adrian, 27 iul: „Kelion trebuie să vadă nativ real
+  // ce afișează monitorul faptic, și să repare până apare ce zice că face").
+  // 'loading' = pornit, încă nu s-a confirmat; 'ok' = chiar s-a randat;
+  // 'error' = a picat (fișier inaccesibil, site care refuză încorporarea…).
+  // Randorul din Stage o setează din onLoad/onError; get_monitor o citește, deci
+  // Kelion vede FAPTIC ce e pe ecran, nu doar ce a cerut.
   readonly status?: 'loading' | 'ok' | 'error'
 }
 
@@ -67,7 +67,7 @@ function setTasks(tasks: WorkspaceTask[], activeId: string): void {
   emit()
 }
 
-// The renderer (Stage) confirms a surface's REAL state after onLoad/onError.
+// Randorul (Stage) confirmă starea REALĂ a unei suprafețe după onLoad/onError.
 export function setTaskStatus(id: string, status: 'loading' | 'ok' | 'error'): void {
   const tasks = state.tasks.map((t) => (t.id === id ? { ...t, status } : t))
   setTasks(tasks, state.activeId)
@@ -100,13 +100,13 @@ export function isMonitorWorking(): boolean {
   return working
 }
 
-// Classify a URL/data into a task kind so the monitor RENDERS ANY DATA TYPE
-// natively (Adrian, Jul 27: "on the monitor you must be able to open absolutely
-// any data type — xls, pdf, youtube, code, archives, anything"). Each type has
-// its renderer in Stage: image→<img>, pdf→viewer, video→<video>, audio→
+// Classify a URL/data into a task kind so the monitor RANDEAZĂ ORICE TIP DE
+// DATĂ nativ (Adrian, 27 iul: „pe monitor trebuie să poți deschide absolut
+// orice tip de date — xls, pdf, youtube, cod, arhive, orice"). Fiecare tip are
+// randorul lui în Stage: imagine→<img>, pdf→vizor, video→<video>, audio→
 // <audio>, office(xls/doc/ppt)→vizor Office online, cod/text/json/csv→text,
-// markdown→rendered doc, .html→sandboxed frame, archives/binaries→download
-// panel. Same kind = same tab (a new pdf replaces the old one).
+// arhive→panou de descărcare. Același kind = același tab (un pdf nou îl
+// înlocuiește pe cel vechi).
 const EXT_KIND: Record<string, string> = {
   // imagini
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image', avif: 'image', ico: 'image',
@@ -118,36 +118,23 @@ const EXT_KIND: Record<string, string> = {
   mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio', flac: 'audio', aac: 'audio', opus: 'audio',
   // office
   xls: 'office', xlsx: 'office', doc: 'office', docx: 'office', ppt: 'office', pptx: 'office', ods: 'office', odt: 'office', odp: 'office',
-  // PAGINI HTML salvate (Aug 2): they run sandboxed like the playground 'app',
-  // not framed as external sites (a raw .html in an <iframe src> can fight the
-  // app's own session through allow-same-origin).
-  html: 'htmlfile', htm: 'htmlfile',
-  // MARKDOWN (Aug 2): rendered formatted, not shown as raw text.
-  md: 'markdown',
   // cod / text / date
-  txt: 'textfile', json: 'textfile', csv: 'textfile', tsv: 'textfile', xml: 'textfile', yml: 'textfile', yaml: 'textfile', log: 'textfile',
+  txt: 'textfile', md: 'textfile', json: 'textfile', csv: 'textfile', tsv: 'textfile', xml: 'textfile', yml: 'textfile', yaml: 'textfile', log: 'textfile',
   js: 'textfile', ts: 'textfile', tsx: 'textfile', jsx: 'textfile', py: 'textfile', java: 'textfile', c: 'textfile', cpp: 'textfile', h: 'textfile',
   go: 'textfile', rs: 'textfile', rb: 'textfile', php: 'textfile', sh: 'textfile', sql: 'textfile', css: 'textfile', ini: 'textfile', conf: 'textfile',
   // arhive
   zip: 'archive', rar: 'archive', '7z': 'archive', tar: 'archive', gz: 'archive', bz2: 'archive', xz: 'archive', tgz: 'archive',
-  // BINARE fără vizor în browser (Aug 2): honest download panel instead of a
-  // dead iframe — epub/exe/apk/dmg/iso/fonts can't render in a page.
-  epub: 'file', exe: 'file', msi: 'file', apk: 'file', ipa: 'file', dmg: 'file', iso: 'file', bin: 'file', woff: 'file', woff2: 'file', ttf: 'file', otf: 'file',
 }
 
-function kindForUrl(raw: string): string {
+export function kindForUrl(raw: string): string {
   const s = String(raw ?? '').trim()
-  // data: URI → we classify by the MIME in the header itself.
+  // data: URI → clasificăm după MIME-ul din chiar antet.
   if (s.startsWith('data:')) {
     const mime = (s.slice(5).match(/^[^;,]*/)?.[0] ?? '').toLowerCase()
     if (mime.startsWith('image/')) return 'image'
     if (mime === 'application/pdf') return 'pdf'
     if (mime.startsWith('video/')) return 'video'
     if (mime.startsWith('audio/')) return 'audio'
-    // text/html runs sandboxed like the playground ('app') — a dead "this page
-    // cannot be displayed here" panel was the old outcome (isEmbeddable refused data:).
-    if (mime === 'text/html') return 'htmlfile'
-    if (mime.startsWith('text/markdown') || mime === 'text/x-markdown') return 'markdown'
     if (mime.startsWith('text/') || mime.includes('json') || mime.includes('csv')) return 'textfile'
     return 'web'
   }
@@ -159,7 +146,7 @@ function kindForUrl(raw: string): string {
     if (u.pathname.startsWith('/api/image')) return 'image'
     if (u.pathname.startsWith('/api/route')) return 'map'
     if (host.includes('openstreetmap') || u.pathname.includes('/maps')) return 'map'
-    // By file extension (works even with a ?query after it).
+    // După extensia fișierului (funcționează și cu ?query după ea).
     const ext = (u.pathname.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
     if (ext && EXT_KIND[ext]) return EXT_KIND[ext]
   } catch {
@@ -176,10 +163,9 @@ function upsert(task: WorkspaceTask): void {
 
 export function openWorkspace(title: string, url = ''): void {
   const kind = kindForUrl(url)
-  // Archives and raw binaries render a download panel (always ok); the rest
-  // start 'loading' and confirm from onLoad/onError — so Kelion factually
-  // sees if it appeared.
-  const status = kind === 'archive' || kind === 'file' ? 'ok' : 'loading'
+  // Arhiva randează un panou de descărcare (mereu ok); restul pornesc 'loading'
+  // și se confirmă din onLoad/onError — așa Kelion vede faptic dacă a apărut.
+  const status = kind === 'archive' ? 'ok' : 'loading'
   upsert({ id: kind, kind, title, url, card: null, status })
 }
 
@@ -195,22 +181,13 @@ export function openWorkspaceDoc(title: string, text: string): void {
   upsert({ id: 'doc', kind: 'doc', title, url: '', card: null, text, status: 'ok' })
 }
 
-// CODE PLAYGROUND (Adrian, Jul 25: "Kelion must test the written software in
-// the browser, be able to save it"). Kelion writes a COMPLETE web page (HTML +
-// CSS + inline JS) and RUNS it live on the monitor, in an isolated iframe (srcdoc,
-// sandbox), with no external host — so no X-Frame-Options and no "this page
-// cannot be displayed here". The user sees it running and can save it (button on the monitor).
+// PLAYGROUND DE COD (Adrian, 25 iul: „Kelion trebuie să testeze în browser
+// softul scris, să-l poată salva"). Kelion scrie o pagină web COMPLETĂ (HTML +
+// CSS + JS inline) și o RULEAZĂ live pe monitor, într-un iframe izolat (srcdoc,
+// sandbox), fără gazdă externă — deci fără X-Frame-Options și fără „pagina nu
+// poate fi afișată aici". Userul o vede rulând și o poate salva (buton pe monitor).
 export function openWorkspaceApp(title: string, html: string): void {
   upsert({ id: 'app', kind: 'app', title, url: '', card: null, html, status: 'ok' })
-}
-
-// THE CONSTRUCTOR PANEL (Stage 4b, Adrian: "monitor display of requirement
-// resolution"). A separate surface (kind 'build') with NO url/text/html — it's
-// rendered with its own poller in Stage, subscribed to /api/constructor/live, and
-// shows each order: Taken→current step→Done/Failed. Dedup on kind: a single
-// tab de constructor, mereu cel curent.
-export function openWorkspaceBuild(title = 'Constructor'): void {
-  upsert({ id: 'build', kind: 'build', title, url: '', card: null, status: 'ok' })
 }
 
 // Close the ACTIVE task (back-compat for the single-close / voice-command paths).

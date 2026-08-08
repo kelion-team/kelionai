@@ -44,13 +44,8 @@ jobs:
           umask 077
           printf '%s\n' "$KEY" > /tmp/vps_key
           chmod 600 /tmp/vps_key
-          # ServerAliveInterval=30 + ServerAliveCountMax=10 → 5 minute toleranță fără output
-          # previne "Broken pipe" în timpul docker build (care durează 4-5 min și e silent)
-          ssh -i /tmp/vps_key \
-              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=25 -o BatchMode=yes \
-              -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-              root@164.68.120.87 'bash -s' <<'EOS'
+          ssh -i /tmp/vps_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=25 -o BatchMode=yes root@164.68.120.87 'bash -s' <<'EOS'
           set -euo pipefail
           cd /root/kelion/repo
           git fetch origin master

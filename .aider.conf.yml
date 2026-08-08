@@ -1,92 +1,34 @@
-# Configurație Aider — Kelionai
-#
-# Adrian, 31 iul 2026. Fișierul exista din 12 iulie, configurat pe Kimi
-# (`openai/kimi-k2-thinking` + `KIMI_API_KEY`) — cheie plătită. Mutat pe
-# OpenRouter, model gratuit, cu cheia pe care o ai deja.
+# Configurație Aider — Kimi (primar)
+# Locație: .aider.conf.yml în repo
 
-# ── DOUĂ CREIERE, FIECARE LA CE E BUN (mod architect/editor) ────────────────
-#
-# Adrian, 31 iul: „există free și mai performant?"
-#
-# Da, și nu ținând de model — ținând de cum îl folosești. Aider poate lucra cu
-# DOUĂ modele: unul care GÂNDEȘTE ce trebuie schimbat, altul care SCRIE
-# diff-urile. Sunt două meserii diferite, iar un model bun la una nu e automat
-# bun la cealaltă. Modul ăsta e recomandat tocmai fiindcă taie 30-40% din
-# consum la utilizare normală — dar aici câștigul nu e banul (ambele sunt
-# gratuite), ci că fiecare pas e făcut de cine se pricepe.
-architect: true
+# Model
+model: openai/kimi-k2-thinking
 
-# GÂNDEȘTE: Nemotron 3 Ultra, 550 de miliarde de parametri, un milion de
-# context. Cel mai mare model gratuit din catalogul live OpenRouter (măsurat
-# 31 iul: 365 de modele, 14 gratuite — dimineață erau 17; lista se schimbă
-# de la o zi la alta, deci verific-o, nu o crede din comentariu:
-#   curl -s https://openrouter.ai/api/v1/models | grep -o '"id":"[^"]*:free"'
-# ). Vede tot proiectul deodată și decide ce se schimbă și de ce.
-# N-are vedere — la Kelion asta l-a exclus din listă; la un agent care lucrează
-# cu fișiere text nu contează deloc.
-model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+# API base pentru Kimi (compatibil OpenAI)
+openai-api-base: https://api.kimi.com/coding/v1
 
-# SCRIE: Poolside Laguna, construit anume pentru agenți de programare. Nu
-# trebuie să judece arhitectura — trebuie să producă diff-uri corecte din
-# planul primit, și la asta e mai bun decât un model generalist mare.
-editor-model: openrouter/poolside/laguna-s-2.1:free
+# API key — citit din fișier pe VPS
+openai-api-key: ${KIMI_API_KEY}
 
-# Sarcini mărunte (titluri de commit, rezumate). Nu merită modelul mare.
-weak-model: openrouter/poolside/laguna-xs-2.1:free
-
-# ── CUM SCRIE: EDITĂRI PUNCTUALE, NICIODATĂ FIȘIERUL ÎNTREG ─────────────────
-#
-# 31 iul, 12:36 — lecția plătită azi. Kelion a vrut să scoată un model dintr-o
-# listă (două rânduri) și a golit `deploy/constructor-agent.mjs`: 1049 de
-# rânduri → 14. Cauza n-a fost raționamentul, care era corect, ci FORMA în care
-# scrie: unealta lui cere fișierul COMPLET, iar ieșirea modelului e plafonată.
-# Pe un fișier mare răspunsul se taie și se scrie ciotul — cu commit și mesaj
-# care sună perfect corect.
-#
-# Aider are ambele forme: `whole` (retrimite tot fișierul — aceeași primejdie)
-# și `diff` / `editor-diff` (blocuri căutare→înlocuire, doar bucata schimbată).
-# În modul architect implicitul E `editor-diff`, DAR implicitul se alege după
-# model, iar `poolside/laguna` e prea nou ca Aider să-l aibă în registru — deci
-# ar putea cădea pe `whole` fără să spună nimeni nimic.
-# Îl fixăm explicit. Un răspuns tăiat trebuie să NU se aplice, nu să golească
-# fișierul.
-editor-edit-format: editor-diff
-
-# Cheia: OPENROUTER_API_KEY în mediu. Aceeași pe care o folosește Kelion.
-# NU se scrie aici. Un fișier de configurare ajunge în git; o cheie din el, la fel.
-
+# Fereastra de context
 max-chat-history-tokens: 262144
 
-# ── PROTECȚIA CARE A LIPSIT ─────────────────────────────────────────────────
-# `auto-commits` era `true`. Adică: modifica și comitea singur, fără ca omul
-# să vadă diff-ul. Pe 31 iulie exact asta a costat — cod intrat în istoric
-# fără ca cineva să se fi uitat la el, inclusiv un commit al meu care conținea
-# mai mult decât scria în mesajul lui.
-# Acum: modifică, îți arată, comiți TU.
-auto-commits: false
+# Comportament
+auto-commits: true
 dirty-commits: false
+watch-files: true
+
+# Unelte
+code-theme: monokai
 show-diffs: true
 
-# ── PLASA ───────────────────────────────────────────────────────────────────
-# Backendul are 353 de teste. Rulează-le după fiecare modificare și dă-i
-# erorile înapoi ca să repare singur. Contează dublu acum, când CI-ul de pe
-# GitHub e blocat pe facturare — astea sunt singura plasă rămasă.
-test-cmd: cd backend && npx vitest run
-auto-test: true
+# Lint/check la salvare
+lint-cmd: "npx eslint --fix"
 
-# `npx eslint --fix` (vechea valoare) nu e poarta acestui proiect. TypeScript e.
-lint-cmd: cd backend && npx tsc --noEmit
-
-# ── CONTEXTUL PROIECTULUI ───────────────────────────────────────────────────
-# Citite la fiecare pornire, ca să nu-i explici de fiecare dată unde e.
-read:
-  - CLAUDE.md
-  - AI-HANDOFF.md
-  - RAMAS-DE-FACUT.md
-
+# Repo
 git: true
 gitignore: true
-stream: true
-code-theme: monokai
+
+# Output
 verbose: false
-analytics-disable: true
+stream: true

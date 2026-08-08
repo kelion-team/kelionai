@@ -1,5 +1,6 @@
 import type { Tool } from './brain-types.js'
 import { config } from '../config.js'
+import { openrouterComplete, openrouterWebSearch } from './openrouter.js'
 
 // Google skills exposed to the brain as tools. The brain decides when to call them;
 // the backend executes the Google REST API with the user's OAuth access token
@@ -40,21 +41,9 @@ export const googleTools: Tool[] = [
     },
   },
   {
-    name: 'read_email',
-    description:
-      "Read the FULL BODY of one Gmail message — the best match for a search. Use when the user wants to know what an email actually SAYS (not just the subject list from get_recent_emails): 'read me the email from X', 'what does the message about Y say'. Pass a Gmail search in `query` (e.g. from:john, subject:invoice, is:unread). Returns sender, subject, date and the full text.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Gmail search to pick the message, e.g. "from:john subject:invoice".' },
-      },
-      required: ['query'],
-    },
-  },
-  {
     name: 'web_search',
     description:
-      'Search the live web for current, real information (news, facts, prices, anything recent). Use it whenever the answer depends on up-to-date or external information you do not already know. The engine (source:"serper") returns not just result snippets but also a direct answer, a knowledge-graph fact box, "people also ask" questions, fresh news, and related searches. On error:"search_unavailable" the search engine failed — admit you could not search, never invent results.',
+      'Search the live web for current, real information (news, facts, prices, anything recent). Returns not just result snippets but also a direct answer, a knowledge-graph fact box, "people also ask" questions, fresh news, and related searches — use it whenever the answer depends on up-to-date or external information you do not already know.',
     input_schema: {
       type: 'object',
       properties: {
@@ -111,18 +100,6 @@ export const googleTools: Tool[] = [
     },
   },
   {
-    name: 'delete_calendar_event',
-    description:
-      "Delete an event from the user's Google Calendar. First call get_calendar_events to get the event's `id`, then pass it here. Use for 'cancel my 3pm', 'delete the meeting with X'. Confirm which event if there is any ambiguity.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'The calendar event id (from get_calendar_events).' },
-      },
-      required: ['id'],
-    },
-  },
-  {
     name: 'get_drive_files',
     description:
       "Search or list the user's Google Drive files. Use for questions about their documents, files, or to find something on Drive.",
@@ -132,18 +109,6 @@ export const googleTools: Tool[] = [
         query: { type: 'string', description: 'Optional name search, e.g. "budget".' },
         max_results: { type: 'number', description: 'How many files (default 10, max 25).' },
       },
-    },
-  },
-  {
-    name: 'read_drive_file',
-    description:
-      "Read the CONTENT of one Google Drive file — the best match for a name search. Use when the user wants what a document SAYS, not just the file list: 'read me the doc about X', 'what's in the budget sheet'. Google Docs and Sheets are exported to text; text files are read directly; binary files (pdf/images) return a link instead.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Name search to pick the file, e.g. "budget 2026".' },
-      },
-      required: ['query'],
     },
   },
   {
@@ -166,18 +131,6 @@ export const googleTools: Tool[] = [
         due: { type: 'string', description: 'Optional due date, ISO 8601 (e.g. 2026-07-05).' },
       },
       required: ['title'],
-    },
-  },
-  {
-    name: 'complete_task',
-    description:
-      "Mark a Google Task as done. First call get_tasks to get the task's `id`, then pass it here. Use for 'mark X as done', 'I finished Y'.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'The task id (from get_tasks).' },
-      },
-      required: ['id'],
     },
   },
   {
@@ -228,19 +181,6 @@ export const googleTools: Tool[] = [
         destination: { type: 'string', description: 'Destination place or address.' },
       },
       required: ['origin', 'destination'],
-    },
-  },
-  {
-    name: 'lookup_address',
-    description:
-      'Resolve EXACT coordinates (latitude/longitude) to the real address and POSTCODE at that point (reverse geocoding). Use whenever the user gives coordinates and wants the address or postcode, or asks "what is the postcode here / of this place". For the user\'s CURRENT location, pass the GPS coordinates injected in your context (no other tool gives them — if they are not in the context, say honestly you do not have the location).',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lat: { type: 'number', description: 'Latitude, e.g. 51.7859.' },
-        lon: { type: 'number', description: 'Longitude, e.g. -1.4851.' },
-      },
-      required: ['lat', 'lon'],
     },
   },
   {
@@ -335,82 +275,38 @@ export async function refreshGoogleAccessToken(
   }
 }
 
-// Best-effort reverse geocode (device GPS → human place name + POSTCODE) so the
-// brain knows where "here" is. Keyless OpenStreetMap Nominatim; short timeout,
-// never throws. Cached by ~100 m (3 decimals); failures are negative-cached
-// briefly so an outage can't cause a lookup storm.
-
-/** The address fields Nominatim returns with addressdetails=1 (only what we use). */
-export interface NominatimAddress {
-  road?: string
-  neighbourhood?: string
-  suburb?: string
-  village?: string
-  town?: string
-  city?: string
-  county?: string
-  postcode?: string
-  country?: string
-}
-
-/** The pair Kelion needs: a SHORT human place + the postcode of the exact point. */
-export interface GeoPlace {
-  place: string
-  postcode: string
-}
-
-/** THE COORDINATES ↔ POSTCODE PAIRING (Adrian, Aug 1: "it can't see the link
- *  from the exact coordinates and pair them with the postcode"). Pure and
- *  exported, so the rules are tested without network: the place is the short
- *  "street, settlement, county, country" form (the raw display_name is a
- *  mouthful), the postcode comes from the address parts — never guessed. */
-export function composePlace(addr: NominatimAddress | undefined, displayName: string): GeoPlace {
-  const postcode = (addr?.postcode ?? '').trim()
-  if (!addr) return { place: displayName, postcode }
-  const settlement = addr.city ?? addr.town ?? addr.village ?? addr.suburb ?? addr.neighbourhood ?? ''
-  const county = addr.county && addr.county !== settlement ? addr.county : ''
-  const short = [addr.road, settlement, county, addr.country].filter(Boolean).join(', ')
-  return { place: short || displayName, postcode }
-}
-
-const geoCache = new Map<string, GeoPlace>()
+// Best-effort reverse geocode (device GPS → human place name) so the brain knows
+// where "here" is. Keyless OpenStreetMap Nominatim; short timeout, never throws.
+// Cached by ~100 m (3 decimals); failures are negative-cached briefly so an
+// outage can't cause a lookup storm.
+const geoCache = new Map<string, string>()
 const geoRetryAt = new Map<string, number>()
-
-/** Structured variant (the address tool uses it): null = couldn't resolve. */
-export async function reverseGeocodeInfo(lat: number, lon: number): Promise<GeoPlace | null> {
+export async function reverseGeocode(lat: number, lon: number): Promise<string> {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`
   const hit = geoCache.get(key)
   if (hit !== undefined) return hit
-  if ((geoRetryAt.get(key) ?? 0) > Date.now()) return null
+  if ((geoRetryAt.get(key) ?? 0) > Date.now()) return ''
   try {
     const u = new URL('https://nominatim.openstreetmap.org/reverse')
     u.searchParams.set('lat', String(lat))
     u.searchParams.set('lon', String(lon))
     u.searchParams.set('format', 'json')
-    // Building-level zoom + the address breakdown: below this the postcode
-    // often doesn't come at all — exactly the "coordinates have no postcode"
-    // gap Adrian hit.
-    u.searchParams.set('zoom', '18')
-    u.searchParams.set('addressdetails', '1')
+    u.searchParams.set('zoom', '14')
     const res = await tfetch(u, {
       headers: { 'User-Agent': 'KelionAI/1.0 (kelionai.app)' },
       signal: AbortSignal.timeout(4000),
     })
     if (!res.ok) {
       geoRetryAt.set(key, Date.now() + 60_000)
-      return null
+      return ''
     }
-    const j = (await res.json()) as { display_name?: string; address?: NominatimAddress }
-    const info = composePlace(j.address, j.display_name ?? '')
-    if (!info.place) {
-      geoRetryAt.set(key, Date.now() + 60_000)
-      return null
-    }
-    geoCache.set(key, info)
-    return info
+    const j = (await res.json()) as { display_name?: string }
+    const name = j.display_name ?? ''
+    geoCache.set(key, name)
+    return name
   } catch {
     geoRetryAt.set(key, Date.now() + 60_000)
-    return null
+    return ''
   }
 }
 
@@ -419,19 +315,13 @@ export async function reverseGeocodeInfo(lat: number, lon: number): Promise<GeoP
 // The GPS place name must NEVER delay a reply — the raw lat/lon (which the
 // skills use directly) is always injected regardless.
 const geoInFlight = new Set<string>()
-
-/** One place, one text: the cached info → the string the context injects. */
-function placeText(info: GeoPlace): string {
-  return info.postcode ? `${info.place} — postcode ${info.postcode}` : info.place
-}
-
 export function reverseGeocodeCached(lat: number, lon: number): string {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`
   const hit = geoCache.get(key)
-  if (hit !== undefined) return placeText(hit)
+  if (hit !== undefined) return hit
   if (!geoInFlight.has(key)) {
     geoInFlight.add(key)
-    void reverseGeocodeInfo(lat, lon).finally(() => geoInFlight.delete(key))
+    void reverseGeocode(lat, lon).finally(() => geoInFlight.delete(key))
   }
   return ''
 }
@@ -459,7 +349,6 @@ async function fetchRetry(url: string | URL, tries = 3): Promise<Response | null
 }
 
 interface CalendarItem {
-  id?: string
   summary?: string
   location?: string
   start?: { dateTime?: string; date?: string }
@@ -480,7 +369,6 @@ async function calendarEvents(max: number, token: string): Promise<string> {
   if (!res.ok) return JSON.stringify({ error: `calendar_http_${res.status}` })
   const j = (await res.json()) as { items?: CalendarItem[] }
   const events = (j.items ?? []).map((e) => ({
-    id: e.id ?? '', // needed for delete_calendar_event
     summary: e.summary ?? '(no title)',
     start: e.start?.dateTime ?? e.start?.date ?? '',
     end: e.end?.dateTime ?? e.end?.date ?? '',
@@ -489,43 +377,17 @@ async function calendarEvents(max: number, token: string): Promise<string> {
   return JSON.stringify({ events })
 }
 
-// DELETE AN EVENT (SINGLE BRAIN §2.2). EXISTING calendar scope (the same as
-// create_calendar_event) — no re-authentication. The id comes from get_calendar_events.
-async function deleteCalendarEvent(id: string, token: string): Promise<string> {
-  if (!id) return JSON.stringify({ error: 'missing_event_id', hint: 'Cheamă întâi get_calendar_events ca să iei id-ul.' })
-  const res = await tfetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  // Calendar returns 204 on a successful delete; 410 = already deleted (still success).
-  if (res.status === 204 || res.status === 410) return JSON.stringify({ deleted: true, id })
-  return JSON.stringify({ error: `calendar_delete_http_${res.status}` })
-}
-
-// Lists the Gmail message ids for a search (shared by get_recent_emails and
-// read_email). Returns {ids} or {err} — a JSON string ready to hand back.
-// Single source (the permanent principle: one, no duplicates).
-async function gmailListMessageIds(
-  query: string,
-  max: number,
-  token: string,
-): Promise<{ ids: string[] } | { err: string }> {
-  const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages')
-  listUrl.searchParams.set('maxResults', String(max))
-  if (query) listUrl.searchParams.set('q', query)
-  const listRes = await tfetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
-  if (!listRes.ok) return { err: JSON.stringify({ error: `gmail_http_${listRes.status}` }) }
-  const list = (await listRes.json()) as { messages?: { id: string }[] }
-  return { ids: (list.messages ?? []).map((m) => m.id) }
-}
-
 async function recentEmails(query: string, max: number, token: string): Promise<string> {
   const n = Math.min(Math.max(max, 1), 10)
-  const listed = await gmailListMessageIds(query, n, token)
-  if ('err' in listed) return listed.err
-  const ids = listed.ids.slice(0, n)
+  const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages')
+  listUrl.searchParams.set('maxResults', String(n))
+  if (query) listUrl.searchParams.set('q', query)
+  const listRes = await tfetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
+  if (!listRes.ok) return JSON.stringify({ error: `gmail_http_${listRes.status}` })
+  const list = (await listRes.json()) as { messages?: { id: string }[] }
+  const ids = (list.messages ?? []).slice(0, n)
   const emails: { from: string; subject: string; date: string; snippet: string }[] = []
-  for (const id of ids) {
+  for (const { id } of ids) {
     const mUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`
     const mRes = await tfetch(mUrl, { headers: { Authorization: `Bearer ${token}` } })
     if (!mRes.ok) continue
@@ -537,166 +399,132 @@ async function recentEmails(query: string, max: number, token: string): Promise<
   return JSON.stringify({ emails })
 }
 
-// THE FULL BODY OF AN EMAIL (SINGLE BRAIN §2.2): get_recent_emails gives only
-// the header; this reads what the message SAYS. Uses the SAME Gmail scope (no
-// re-authentication). Picks the best match for the search, extracts the body
-// (prefers text/plain, otherwise cleans html), capped so it doesn't fill the
-// context.
-function decodeGmailB64(data: string): string {
-  try {
-    return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
-  } catch {
-    return ''
-  }
-}
-interface GmailPart {
-  mimeType?: string
-  body?: { data?: string }
-  parts?: GmailPart[]
-}
-function extractGmailBody(payload: GmailPart | undefined, prefer: string): string {
-  if (!payload) return ''
-  if (payload.mimeType === prefer && payload.body?.data) return decodeGmailB64(payload.body.data)
-  for (const p of payload.parts ?? []) {
-    const r = extractGmailBody(p, prefer)
-    if (r) return r
-  }
-  return ''
-}
-async function readEmail(query: string, token: string): Promise<string> {
-  const listed = await gmailListMessageIds(query, 1, token)
-  if ('err' in listed) return listed.err
-  const id = listed.ids[0]
-  if (!id) return JSON.stringify({ found: false, note: 'Niciun email pentru această căutare.' })
-  const mRes = await tfetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!mRes.ok) return JSON.stringify({ error: `gmail_http_${mRes.status}` })
-  const m = (await mRes.json()) as { snippet?: string; payload?: GmailPart & { headers?: GmailHeader[] } }
-  const h = (name: string): string => m.payload?.headers?.find((x) => x.name === name)?.value ?? ''
-  let body = extractGmailBody(m.payload, 'text/plain') || extractGmailBody(m.payload, 'text/html')
-  if (/<[a-z][\s\S]*>/i.test(body)) body = body.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')
-  body = body.replace(/&nbsp;/g, ' ').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 6000)
-  return JSON.stringify({ found: true, from: h('From'), subject: h('Subject'), date: h('Date'), body: body || m.snippet || '' })
-}
-// ── SERPER (google.serper.dev) — the PRIMARY web search ──────────────────────
-// The key existed in config (SERPER_API_KEY/SERPER_KEY) since Jul 30 but NO code
-// read it — web_search went only through the OpenRouter `web` plugin, whose free
-// model returns content:null (degenerate reasoning loop, live-proven Aug 2026)
-// → the user always got search_unavailable while a paid Serper key sat unused.
-// Serper gives REAL Google results: answerBox + knowledgeGraph + peopleAlsoAsk +
-// organic links + fresh news + relatedSearches. On ANY failure (missing/invalid
-// key, quota, network) we answer an honest `search_unavailable` — Serper is the
-// ONLY engine (OpenRouter extirpat, 3 aug).
-interface SerperHit {
+interface SerperResult {
   title?: string
   link?: string
   snippet?: string
   date?: string
-  source?: string
-}
-interface SerperJson {
-  answerBox?: { answer?: string; snippet?: string; title?: string; link?: string }
-  knowledgeGraph?: { title?: string; type?: string; description?: string; descriptionLink?: string }
-  peopleAlsoAsk?: { question?: string; snippet?: string; link?: string }[]
-  relatedSearches?: { query?: string }[]
-  topStories?: SerperHit[]
-  news?: SerperHit[]
-  organic?: SerperHit[]
 }
 
-// Exported so the shape/merge rules are testable without network (same pattern
-// as composePlace above): one JSON string for the brain, never guessed fields.
-export function composeSerperResult(j: SerperJson, n: number): string | null {
-  const results = (j.organic ?? [])
-    .filter((o) => o.link)
-    .slice(0, n)
-    .map((o) => ({ title: o.title ?? '', link: o.link ?? '', snippet: o.snippet ?? '' }))
-  const answer = j.answerBox?.answer ?? j.answerBox?.snippet ?? ''
-  if (!answer && results.length === 0) return null // empty page → let the fallback try
-  const kg = j.knowledgeGraph?.title
-    ? {
-        title: j.knowledgeGraph.title,
-        type: j.knowledgeGraph.type ?? '',
-        description: j.knowledgeGraph.description ?? '',
-        link: j.knowledgeGraph.descriptionLink ?? '',
-      }
-    : undefined
-  const news = [...(j.topStories ?? []), ...(j.news ?? [])]
-    .filter((s) => s.link)
-    .slice(0, 5)
-    .map((s) => ({ title: s.title ?? '', link: s.link ?? '', source: s.source ?? '', date: s.date ?? '' }))
-  return JSON.stringify({
-    answer,
-    results,
-    knowledge_graph: kg,
-    people_also_ask: (j.peopleAlsoAsk ?? [])
-      .filter((p) => p.question)
-      .slice(0, 4)
-      .map((p) => ({ question: p.question, answer: p.snippet ?? '', link: p.link ?? '' })),
-    news,
-    related_searches: (j.relatedSearches ?? []).map((r) => r.query ?? '').filter(Boolean).slice(0, 6),
-    source: 'serper',
-  })
+// Live web search via Gemini's built-in Google Search grounding. Uses the
+// GEMINI_API_KEY (no Serper key needed). Returns a grounded answer plus the
+// real source pages Google used. Returns null on any failure so callers can
+// fall back.
+interface GeminiGroundResult {
+  text: string
+  sources: { title: string; link: string }[]
 }
 
-// UN SINGUR apel Serper (jscpd, 3 aug): search și videos difereau DOAR prin
-// endpoint — cererea (cheie, headere, num plafonat 1..12, timeout) e una.
-async function serperPost(endpoint: 'search' | 'videos', query: string, n: number): Promise<Response> {
-  return tfetch(
-    `https://google.serper.dev/${endpoint}`,
-    {
-      method: 'POST',
-      headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query, num: Math.min(Math.max(n, 1), 12) }),
-    },
-    15_000,
-  )
-}
-
-async function serperSearch(query: string, n: number): Promise<string | null> {
-  if (!config.serperKey) return null
+async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult | null> {
+  if (!config.geminiKey) return null
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
+  let res: Response
   try {
-    const res = await serperPost('search', query, n)
-    // 401/403/429 = cheie rea / fără credit → null → search_unavailable, onest.
-    if (!res.ok) return null
-    return composeSerperResult((await res.json()) as SerperJson, n)
+    res = await tfetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+      }),
+    })
   } catch {
     return null
   }
-}
-
-// YouTube videos through Serper's dedicated /videos endpoint — REAL Google video
-// results (title + link), no OpenRouter dependency. Same failure contract as
-// serperSearch: missing/invalid key, quota, non-ok or network → [] so
-// youtube_search can honestly report "search_unavailable" instead of "no videos".
-async function serperVideos(query: string, n: number): Promise<{ title: string; url: string }[]> {
-  if (!config.serperKey) return []
-  try {
-    const res = await serperPost('videos', query, n)
-    if (!res.ok) return []
-    const j = (await res.json()) as { videos?: { title?: string; link?: string }[] }
-    return (j.videos ?? [])
-      .filter((v): v is { title?: string; link: string } => Boolean(v.link))
-      .map((v) => ({ title: v.title ?? '', url: v.link }))
-  } catch {
-    return []
+  if (!res.ok) return null
+  const j = (await res.json()) as {
+    candidates?: {
+      content?: { parts?: { text?: string }[] }
+      groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] }
+    }[]
   }
+  const cand = j.candidates?.[0]
+  const text = (cand?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
+  const seen = new Set<string>()
+  const sources: { title: string; link: string }[] = []
+  for (const c of cand?.groundingMetadata?.groundingChunks ?? []) {
+    const link = c.web?.uri ?? ''
+    if (!link || seen.has(link)) continue
+    seen.add(link)
+    sources.push({ title: c.web?.title ?? '', link })
+  }
+  if (!text && sources.length === 0) return null
+  return { text, sources }
 }
 
-// (composeOpenrouterFallback a fost ȘTERS aici, 3 aug — extirparea totală
-// OpenRouter: nu mai există niciun fallback de căutare pe alt furnizor.
-// Serper e SINGURUL motor; dacă pică, spunem cinstit `search_unavailable`.)
+// VEDERE (Adrian, 13 iul: „Kelion să VADĂ app-ul"): dă lui Kelion OCHI — un model
+// cu vedere se uită la un screenshot și răspunde la o întrebare despre ce se vede.
+// Folosit de verificarea vizuală din admin. MIGRAT PE OPENROUTER (audit 24 iul:
+// `GEMINI_API_KEY` lipsea pe VPS → ruta pica MEREU cu `gemini_vision_indisponibil`);
+// acum folosește ACEEAȘI cheie OpenRouter ca tot creierul (regula „o singură
+// cheie") — Gemini direct rămâne DOAR fallback dacă cheia lui există.
+export async function geminiVision(jpegBase64: string, question: string): Promise<string | null> {
+  // 1) OpenRouter (cheia unică a creierului) — modelul de chat are vedere.
+  if (config.openrouter.key) {
+    try {
+      const { openrouterChat } = await import('./openrouter.js')
+      const r = await openrouterChat(
+        config.openrouter.chatDefault,
+        [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: question },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpegBase64}` } },
+            ],
+          },
+        ],
+        [],
+        { maxTokens: 600, temperature: 0.1 },
+      )
+      if (r.text.trim()) return r.text.trim()
+    } catch {
+      /* cade pe Gemini mai jos */
+    }
+  }
+  // 2) Fallback: Gemini direct (doar dacă cheia lui e configurată).
+  if (!config.geminiKey) return null
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
+  let res: Response
+  try {
+    res = await tfetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: question },
+              { inline_data: { mime_type: 'image/jpeg', data: jpegBase64 } },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
+      }),
+    })
+  } catch {
+    return null
+  }
+  if (!res.ok) return null
+  const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+  const text = (j.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
+  return text || null
+}
 
-export async function webSearch(query: string, max: number): Promise<string> {
+async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
-  // SERPER ONLY (Adrian, 3 aug: OpenRouter scos TOTAL din aplicație). Serper dă
-  // rezultate Google reale; dacă pică (cheie lipsă / cotă / rețea), spunem cinstit
-  // că nu putem căuta acum — NU mai cădem pe pluginul web OpenRouter (eliminat).
-  const viaSerper = await serperSearch(query, n)
-  if (viaSerper) return viaSerper
-  return JSON.stringify({ error: 'search_unavailable' })
+  // Căutare web prin OpenRouter (plugin `web`) — aceeași cheie ca creierul, fără
+  // Serper/Gemini. Întoarce răspuns concis + sursele reale (citări).
+  const r = await openrouterWebSearch(query)
+  if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
+  return JSON.stringify({
+    answer: r.text,
+    results: r.sources.slice(0, n).map((s) => ({ title: s.title, link: s.url, snippet: '' })),
+    source: 'openrouter',
+  })
 }
 
 const WEATHER_CODES: Record<number, string> = {
@@ -838,7 +666,7 @@ async function createCalendarEvent(
 async function driveFiles(query: string, max: number, token: string): Promise<string> {
   const url = new URL('https://www.googleapis.com/drive/v3/files')
   url.searchParams.set('pageSize', String(Math.min(Math.max(max, 1), 25)))
-  url.searchParams.set('fields', 'files(id,name,mimeType,modifiedTime,webViewLink)')
+  url.searchParams.set('fields', 'files(name,mimeType,modifiedTime,webViewLink)')
   url.searchParams.set('orderBy', 'modifiedTime desc')
   if (query) {
     const safe = query.replaceAll("'", String.raw`\'`)
@@ -849,43 +677,9 @@ async function driveFiles(query: string, max: number, token: string): Promise<st
   const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `drive_http_${res.status}` })
   const j = (await res.json()) as {
-    files?: { id?: string; name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
+    files?: { name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
   }
   return JSON.stringify({ files: j.files ?? [] })
-}
-
-// READ A DRIVE FILE'S CONTENT (SINGLE BRAIN §2.2). EXISTING Drive scope (the
-// same as get_drive_files) — no re-authentication. Picks the best match for
-// the search; Google Docs → text export, Sheets → csv, text files → raw
-// content; binaries (pdf/images) can't be read as text → link.
-async function readDriveFile(query: string, token: string): Promise<string> {
-  const listUrl = new URL('https://www.googleapis.com/drive/v3/files')
-  listUrl.searchParams.set('pageSize', '1')
-  listUrl.searchParams.set('fields', 'files(id,name,mimeType,webViewLink)')
-  listUrl.searchParams.set('orderBy', 'modifiedTime desc')
-  const safe = (query || '').replaceAll("'", String.raw`\'`)
-  listUrl.searchParams.set('q', safe ? `name contains '${safe}' and trashed = false` : 'trashed = false')
-  const listRes = await tfetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
-  if (!listRes.ok) return JSON.stringify({ error: `drive_http_${listRes.status}` })
-  const list = (await listRes.json()) as { files?: { id?: string; name?: string; mimeType?: string; webViewLink?: string }[] }
-  const f = list.files?.[0]
-  if (!f?.id) return JSON.stringify({ found: false, note: 'Niciun fișier pentru această căutare.' })
-  const mime = f.mimeType ?? ''
-  const auth = { headers: { Authorization: `Bearer ${token}` } }
-  let contentUrl: string
-  if (mime === 'application/vnd.google-apps.document') {
-    contentUrl = `https://www.googleapis.com/drive/v3/files/${f.id}/export?mimeType=text/plain`
-  } else if (mime === 'application/vnd.google-apps.spreadsheet') {
-    contentUrl = `https://www.googleapis.com/drive/v3/files/${f.id}/export?mimeType=text/csv`
-  } else if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
-    contentUrl = `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`
-  } else {
-    return JSON.stringify({ found: true, name: f.name, mimeType: mime, note: 'Fișier binar (pdf/imagine/etc.) — nu se poate citi ca text.', link: f.webViewLink ?? '' })
-  }
-  const cRes = await tfetch(contentUrl, auth)
-  if (!cRes.ok) return JSON.stringify({ error: `drive_read_http_${cRes.status}` })
-  const text = (await cRes.text()).slice(0, 8000)
-  return JSON.stringify({ found: true, name: f.name, mimeType: mime, content: text, link: f.webViewLink ?? '' })
 }
 
 async function getTasks(max: number, token: string): Promise<string> {
@@ -894,22 +688,9 @@ async function getTasks(max: number, token: string): Promise<string> {
   url.searchParams.set('showCompleted', 'false')
   const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `tasks_http_${res.status}` })
-  const j = (await res.json()) as { items?: { id?: string; title?: string; due?: string; status?: string }[] }
-  const tasks = (j.items ?? []).map((t) => ({ id: t.id ?? '', title: t.title ?? '', due: t.due ?? '', status: t.status ?? '' }))
+  const j = (await res.json()) as { items?: { title?: string; due?: string; status?: string }[] }
+  const tasks = (j.items ?? []).map((t) => ({ title: t.title ?? '', due: t.due ?? '', status: t.status ?? '' }))
   return JSON.stringify({ tasks })
-}
-
-// TICK A TASK AS DONE (SINGLE BRAIN §2.2). EXISTING tasks scope (the same as
-// add_task) — no re-authentication. The id comes from get_tasks.
-async function completeTask(id: string, token: string): Promise<string> {
-  if (!id) return JSON.stringify({ error: 'missing_task_id', hint: 'Cheamă întâi get_tasks ca să iei id-ul.' })
-  const res = await tfetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'completed' }),
-  })
-  if (!res.ok) return JSON.stringify({ error: `tasks_complete_http_${res.status}` })
-  return JSON.stringify({ completed: true, id })
 }
 
 async function addTask(title: string, due: string, token: string): Promise<string> {
@@ -969,12 +750,6 @@ async function addContact(name: string, email: string, phone: string, token: str
 
 const OSM_UA = 'KelionAI/1.0 (kelionai.app)'
 
-// Wikimedia blocks datacenter IPs (our VPS is Contabo) UNLESS the User-Agent
-// carries real contact info, per https://meta.wikimedia.org/wiki/User-Agent_policy.
-// The bare "(kelionai.app)" form gets a hard 403 ("Contabo networks are
-// forbidden due to abuse") → wikipedia_lookup always answered not_found.
-const WIKIPEDIA_UA = 'KelionAI/1.0 (https://kelionai.app; contact@kelion.ai)'
-
 interface NominatimPlace {
   display_name?: string
   lat?: string
@@ -1008,10 +783,9 @@ async function mapsSearch(query: string, max: number): Promise<string> {
     lon: p.lon ?? '',
     type: p.type ?? '',
   }))
-  // Screen URL: the map gets DISPLAYED from a single tool call (the brain
-  // doesn't always make the second show_on_screen). OpenStreetMap embed centred
-  // on the first result, with a marker. runGoogleTool → default-case writes
-  // {monitor} from it.
+  // URL de ecran: harta se AFIȘEAZĂ dintr-un singur apel de unealtă (creierul nu
+  // face mereu al doilea show_on_screen). Embed OpenStreetMap centrat pe primul
+  // rezultat, cu marker. runGoogleTool → default-case scrie {monitor} din el.
   const f = places[0]
   const la = Number(f?.lat)
   const lo = Number(f?.lon)
@@ -1020,33 +794,6 @@ async function mapsSearch(query: string, max: number): Promise<string> {
       ? `https://www.openstreetmap.org/export/embed.html?bbox=${lo - 0.05}%2C${la - 0.03}%2C${lo + 0.05}%2C${la + 0.03}&layer=mapnik&marker=${la}%2C${lo}`
       : undefined
   return JSON.stringify({ places, screen_url })
-}
-
-// EXACT COORDINATES → ADDRESS + POSTCODE (Adrian, Aug 1: "it can't pair the
-// exact coordinates with the postcode"). The same Nominatim reverse geocode as
-// the GPS context, but callable BY THE BRAIN for any point — the user's or an
-// arbitrary one. Never guesses: no postcode in the address → postcode: null.
-async function lookupAddress(lat: number, lon: number): Promise<string> {
-  if (!Number.isFinite(lat) || !Number.isFinite(lon))
-    return JSON.stringify({
-      error: 'missing_coordinates',
-      hint: 'Ask the user for the coordinates, or use the device GPS injected in your context for their current spot (there is no get_location tool — it does not exist).',
-    })
-  const info = await reverseGeocodeInfo(lat, lon)
-  if (!info)
-    return JSON.stringify({
-      error: 'geocode_unavailable',
-      hint: 'The address service did not answer right now — try again shortly.',
-    })
-  return JSON.stringify({
-    lat,
-    lon,
-    address: info.place,
-    postcode: info.postcode || null,
-    note: info.postcode
-      ? undefined
-      : 'No postcode is mapped for this exact point (open field, road between addresses, or incomplete map data) — the address above is still real.',
-  })
 }
 
 // Build a ready-to-embed monitor URL for a promo-clip scene (map or weather) —
@@ -1151,59 +898,34 @@ async function mapsDirections(origin: string, destination: string): Promise<stri
   })
 }
 
-// Watch/short link → embed URL for the monitor (playable in an iframe).
-// autoplay=1: the clip STARTS on its own on the monitor (Adrian, Jul 27:
-// "play doesn't work" — the player opened STOPPED). enablejsapi=1: the client
-// can lower its volume while Kelion speaks (postMessage).
+// Link watch/short → URL de embed pentru monitor (redabil în iframe).
 function ytEmbed(link: string): string | undefined {
   const m = (link || '').match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/)
-  return m ? `https://www.youtube.com/embed/${m[1]}?autoplay=1&enablejsapi=1` : undefined
+  return m ? `https://www.youtube.com/embed/${m[1]}` : undefined
 }
 
-// The REAL playability check (Adrian, Jul 27: "play doesn't work on
-// youtube"): web search can return invented/dead ids, and official music
-// clips often have embedding FORBIDDEN — both ended up on the monitor as a
-// dead player. YouTube's oEmbed answers 200 ONLY for clips that exist AND
-// allow embedding → we filter on it.
-async function ytPlayable(link: string): Promise<boolean> {
-  try {
-    const r = await fetch(
-      `https://www.youtube.com/oembed?url=${encodeURIComponent(link)}&format=json`,
-      { signal: AbortSignal.timeout(4000) },
-    )
-    return r.ok
-  } catch {
-    return false
-  }
-}
-
-export interface YoutubeCandidate {
-  title: string
-  link: string
-}
-
-// Exported so the parsing rules are testable without network (the same pure-
-// composer pattern as composeSerperResult): real YouTube links from the search
-// answer — citations first (the safest), then any labelled/bare link in the
-// text — deduplicated, nothing invented here.
-export function extractYoutubeCandidates(
-  text: string,
-  sources: { title: string; url: string }[],
-): YoutubeCandidate[] {
+async function youtubeSearch(query: string, max: number): Promise<string> {
+  if (!query) return JSON.stringify({ error: 'empty_query' })
+  const n = Math.min(Math.max(max, 1), 10)
+  // Prin OpenRouter (plugin web) — cerem linkuri REALE de watch. Fără Serper.
+  const r = await openrouterWebSearch(
+    `${query} — best YouTube videos`,
+    'Search YouTube. Reply ONLY as a list, one per line: Title — https://www.youtube.com/watch?v=ID , using real, currently-available videos.',
+  )
   const seen = new Set<string>()
-  const videos: YoutubeCandidate[] = []
-  // From the real sources (citations) — the safest.
-  for (const s of sources) {
+  const videos: { title: string; link: string }[] = []
+  // Din sursele reale (citări) — cele mai sigure.
+  for (const s of r.sources) {
     if (ytEmbed(s.url) && !seen.has(s.url)) {
       seen.add(s.url)
       videos.push({ title: s.title, link: s.url })
     }
   }
-  // Plus any youtube link in the text (Title — URL / bare URL).
+  // Plus orice link youtube din text (Title — URL / URL simplu).
   const ytUrl = '(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?v=[\\w-]+|youtu\\.be\\/[\\w-]+)'
   const labelled = new RegExp(`(?:\\[([^\\]]+)\\]\\((${ytUrl})\\)|([^\\n—\\-]+?)\\s*[—-]\\s*(${ytUrl}))`, 'g')
   let m: RegExpExecArray | null
-  while ((m = labelled.exec(text)) !== null) {
+  while ((m = labelled.exec(r.text)) !== null) {
     const title = (m[1] ?? m[3] ?? '').trim()
     let link = (m[2] ?? m[4] ?? '').trim()
     if (!link.startsWith('http')) link = `https://${link}`
@@ -1211,40 +933,53 @@ export function extractYoutubeCandidates(
     seen.add(link)
     videos.push({ title, link })
   }
-  return videos
-}
-
-// Exported for the honesty tests (search-backend-down vs. no-videos-found are
-// different answers and the tests pin them apart).
-export async function youtubeSearch(query: string, max: number): Promise<string> {
-  if (!query) return JSON.stringify({ error: 'empty_query' })
-  const n = Math.min(Math.max(max, 1), 10)
-  // Through Serper's /videos endpoint — REAL Google video results, no OpenRouter.
-  const sources = await serperVideos(query, 10)
-  // The search backend itself failed (missing key, quota, non-ok or network →
-  // no sources). "I could not search" and "no videos exist" are different truths
-  // — the old code merged them into not_found, and the brain would tell the user
-  // there are no videos when in fact the search never ran.
-  if (sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
-  const videos = extractYoutubeCandidates('', sources)
   if (videos.length > 0) {
-    // Only clips that can ACTUALLY play on the monitor (checked in parallel,
-    // a single network round) — a dead player never gets displayed again.
-    const cand = videos.slice(0, 6)
-    const flags = await Promise.all(cand.map((v) => ytPlayable(v.link)))
-    const playable = cand.filter((_, i) => flags[i])
-    if (playable.length > 0) {
-      return JSON.stringify({ videos: playable.slice(0, n), screen_url: ytEmbed(playable[0].link) })
-    }
+    return JSON.stringify({ videos: videos.slice(0, n), screen_url: ytEmbed(videos[0].link) })
   }
   return JSON.stringify({ videos: [], not_found: true })
 }
+
+// Real YouTube resolver for the [YT query] bridge tag: searches (Serper first,
+// Gemini fallback) and returns the top playable video as an embeddable URL.
+// The brain must NEVER guess a video ID — it emits [YT query] and the server
+// resolves a real, currently-available ID so the embed always plays.
+export async function youtubeFirstEmbed(
+  query: string,
+): Promise<{ embed: string; watch: string; title: string } | null> {
+  const raw = await youtubeSearch(query, 1)
+  let parsed: { videos?: { title?: string; link?: string }[] }
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const link = parsed.videos?.[0]?.link ?? ''
+  const title = parsed.videos?.[0]?.title ?? ''
+  const m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,})/.exec(link)
+  if (!m) return null
+  const id = m[1]
+  return { embed: `https://www.youtube.com/embed/${id}?autoplay=1`, watch: link, title }
+}
+
 async function translateText(text: string, target: string): Promise<string> {
   if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
-  // GEMINI-ONLY (3 aug — ramura de rezervă OpenRouter a fost extirpată): fără
-  // cheie Gemini nu există traducător, și o spunem cinstit (regula #1 — nu
-  // simulăm un serviciu care nu e configurat).
-  if (!config.geminiKey) return JSON.stringify({ error: 'translate_not_configured' })
+  // Fără cheie Gemini: traducem prin OpenRouter (aceeași cheie ca creierul), ca
+  // butonul „Tradu în română" din admin să meargă mereu. Gemini rămâne calea
+  // întâi dacă are cheie.
+  if (!config.geminiKey) {
+    try {
+      const r = await openrouterComplete(
+        config.openrouter.searchModel,
+        [{ role: 'user', content: `Translate to ${target}. Reply ONLY with the translation:\n${text}` }],
+        { temperature: 0 },
+      )
+      const out = r.text.trim()
+      if (!out) return JSON.stringify({ error: 'translate_not_configured' })
+      return JSON.stringify({ translation: out, target })
+    } catch {
+      return JSON.stringify({ error: 'translate_failed' })
+    }
+  }
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
   const res = await tfetch(url, {
     method: 'POST',
@@ -1263,42 +998,27 @@ async function translateText(text: string, target: string): Promise<string> {
   if (!res.ok) return JSON.stringify({ error: `translate_http_${res.status}` })
   const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
   const out = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-  // An EMPTY answer is NOT a translation — the old code returned
-  // { translation: "" }, which the caller could not tell apart from success.
-  if (!out) return JSON.stringify({ error: 'translate_empty' })
-  return JSON.stringify({ translation: out, target })
+  return JSON.stringify({ translation: out ?? '', target })
 }
 
-// BULK TRANSLATION (Adrian, Jul 10: "a button that translates into Romanian
-// instantly from any language" — in the admin conversation viewer). Translates
-// a LIST of messages into `target`, in parallel; if one translation fails
-// (Gemini unconfigured or an error), it returns the ORIGINAL text for that
-// message — nothing is lost — and counts it in `failed`, so the admin SEES
-// that part of the "translation" is actually untranslated original, instead
-// of silently believing everything was translated.
-export interface TranslateManyResult {
-  /** Aligned 1:1 with the input; a failed message keeps its ORIGINAL text. */
-  translations: string[]
-  /** How many messages could NOT be translated (their text is the original). */
-  failed: number
-}
-
-export async function translateMany(texts: string[], target: string): Promise<TranslateManyResult> {
-  const results = await Promise.all(
+// TRADUCERE ÎN BLOC (Adrian, 10 iul: „buton care traduce în română instant din
+// orice limbă" — în vizualizarea conversațiilor din admin). Traduce un ȘIR de
+// mesaje în `target`, în paralel; dacă o traducere eșuează (Gemini neconfigurat
+// sau eroare), întoarce textul ORIGINAL pentru acel mesaj, nu se pierde nimic.
+export async function translateMany(texts: string[], target: string): Promise<string[]> {
+  return Promise.all(
     texts.map(async (t) => {
       const s = (t ?? '').trim()
-      if (!s) return { text: t ?? '', ok: true } // nothing to translate — not a failure
+      if (!s) return t ?? ''
       try {
         const r = await translateText(s, target)
         const j = JSON.parse(r) as { translation?: string }
-        if (j.translation && j.translation.trim()) return { text: j.translation, ok: true }
-        return { text: t ?? '', ok: false }
+        return j.translation && j.translation.trim() ? j.translation : (t ?? '')
       } catch {
-        return { text: t ?? '', ok: false }
+        return t ?? ''
       }
     }),
   )
-  return { translations: results.map((r) => r.text), failed: results.filter((r) => !r.ok).length }
 }
 
 // Knowledge lookup — keyless Wikipedia REST API (search → page summary). Gives
@@ -1319,7 +1039,7 @@ async function wikipediaLookup(query: string): Promise<string> {
       const s = new URL(`https://${ed}.wikipedia.org/w/rest.php/v1/search/page`)
       s.searchParams.set('q', query)
       s.searchParams.set('limit', '3')
-      const sr = await tfetch(s, { headers: { 'User-Agent': WIKIPEDIA_UA } })
+      const sr = await tfetch(s, { headers: { 'User-Agent': OSM_UA } })
       if (!sr.ok) continue
       const sj = (await sr.json()) as { pages?: { key?: string; title?: string }[] }
       for (const p of sj.pages ?? []) if (p.key) candidates.push({ ed, key: p.key, title: p.title ?? '' })
@@ -1337,7 +1057,7 @@ async function wikipediaLookup(query: string): Promise<string> {
       }
     }
     const u = `https://${best.ed}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(best.key)}`
-    const r = await tfetch(u, { headers: { 'User-Agent': WIKIPEDIA_UA } })
+    const r = await tfetch(u, { headers: { 'User-Agent': OSM_UA } })
     if (!r.ok) return JSON.stringify({ error: `wiki_http_${r.status}` })
     const j = (await r.json()) as {
       title?: string
@@ -1406,7 +1126,6 @@ export async function runGoogleTool(
     if (name === 'maps_search') return await mapsSearch(str(args.query), num(args.max_results, 5))
     if (name === 'maps_directions')
       return await mapsDirections(str(args.origin), str(args.destination))
-    if (name === 'lookup_address') return await lookupAddress(num(args.lat, Number.NaN), num(args.lon, Number.NaN))
     if (name === 'youtube_search') return await youtubeSearch(str(args.query), num(args.max_results, 5))
     if (name === 'translate_text') return await translateText(str(args.text), str(args.target))
     if (name === 'wikipedia_lookup') return await wikipediaLookup(str(args.query))
@@ -1429,15 +1148,11 @@ export async function runGoogleTool(
     if (name === 'get_calendar_events') result = await calendarEvents(num(args.max_results, 10), token)
     else if (name === 'get_recent_emails')
       result = await recentEmails(str(args.query), num(args.max_results, 5), token)
-    else if (name === 'read_email') result = await readEmail(str(args.query), token)
     else if (name === 'send_email')
       result = await sendEmail(str(args.to), str(args.subject), str(args.body), token)
     else if (name === 'create_calendar_event')
       result = await createCalendarEvent(str(args.summary), str(args.start), str(args.end), str(args.location), token)
-    else if (name === 'delete_calendar_event') result = await deleteCalendarEvent(str(args.id), token)
-    else if (name === 'complete_task') result = await completeTask(str(args.id), token)
     else if (name === 'get_drive_files') result = await driveFiles(str(args.query), num(args.max_results, 10), token)
-    else if (name === 'read_drive_file') result = await readDriveFile(str(args.query), token)
     else if (name === 'get_tasks') result = await getTasks(num(args.max_results, 20), token)
     else if (name === 'add_task') result = await addTask(str(args.title), str(args.due), token)
     else if (name === 'search_contacts')

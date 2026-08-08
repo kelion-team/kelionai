@@ -4,8 +4,7 @@
 # TOATE drumurile spre VPS treceau prin Actions și totul stătea nepublicat).
 #
 # Regula casei: PRODUCTION = MASTER, 100%, MEREU. Scriptul ăsta o face fizic:
-# la fiecare rulare (cron, 1 min — Adrian, 6 aug: „5 min e maximul") întreabă
-# GitHub CE e pe master (un apel de
+# la fiecare rulare (cron, 3 min) întreabă GitHub CE e pe master (un apel de
 # API — NU depinde de runnerii Actions) și, dacă live-ul e în urmă, rulează
 # ACELAȘI deploy.sh de la publicarea normală, cu aceeași verificare anti-
 # fantomă (v == sha). Nu poate publica NICIODATĂ cod mai vechi decât master —

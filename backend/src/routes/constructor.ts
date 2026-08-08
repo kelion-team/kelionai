@@ -1,25 +1,23 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
-import { getSessionUser, adminSiId } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob } from '../db.js'
+import { getSessionUser } from '../session.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
-import { uneltele } from '../services/autonomie.js'
-import { procentDinProgres } from '../services/progresOrdin.js'
 
-// ── THE CONSTRUCTOR — the "order → code → PR" pipeline (Adrian, Jul 27:
-// "Kelion must be able to create any software the admin asks for, any change,
-// any improvement") ──────────────────────────────────────────────────────────
-// The order enters here (from chat/voice through the build_software tool or
-// from the Admin→Constructor panel); the EXECUTION is on the VPS:
-// deploy/constructor-worker.sh (cron every 2 min, flock, short jobs with
-// timeouts — NOT permanent daemons, the lesson of the old ecosystem that
-// burned the subscription) calls deploy/constructor-agent.mjs — the agentic
-// loop on the Gemini API (the owner's key, hard caps), which works in a
-// separate clone (the workshop), runs build + tests and opens the PR. THE
-// MERGE STAYS WITH ADRIAN (his rule, Jul 27: "me doing the merge is ok").
+// ── CONSTRUCTORUL — conducta „ordin → cod → PR" (Adrian, 27 iul: „Kelion
+// trebuie să poată crea orice soft îi cere admin, orice modificare, orice
+// îmbunătățire") ─────────────────────────────────────────────────────────────
+// Ordinul intră aici (din chat/voce prin unealta build_software sau din
+// panoul Admin→Constructor); EXECUȚIA e pe VPS: deploy/constructor-worker.sh
+// (cron la 2 min, flock, job-uri scurte cu timeout — NU demoni permanenți,
+// lecția ecosistemului vechi care ardea abonamentul) cheamă
+// deploy/constructor-agent.mjs — bucla agentică pe API-ul OpenRouter (plată
+// per-folosire, plafoane dure), care lucrează într-o clonă separată (atelier),
+// rulează build + teste și deschide PR-ul. MERGE-UL RĂMÂNE LA ADRIAN (regula
+// lui, 27 iul: „modalitatea de a da eu merged e ok").
 export async function constructorRoutes(app: FastifyInstance): Promise<void> {
-  // The admin (or Kelion through a tool) queues an order.
+  // Adminul (sau Kelion prin unealtă) pune un ordin în coadă.
   app.post<{ Body: { order?: string } }>('/api/admin/constructor', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -33,77 +31,12 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/constructor', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // AUDIT ADMIN (3 aug): coada necitibilă (DB picat) → 500, nu 200 cu [] —
-    // panoul scria „Niciun ordin încă" fără nicio măsurătoare reușită.
-    const raw = await listBuildJobs(40)
-    if (!raw) return reply.code(500).send({ error: 'db_unreadable' })
-    // BARA 0–100% (Adrian, 3 aug): `pct` e harta etapei REALE raportate de
-    // lucrător (progresOrdin.ts) — bara din panou o afișează lângă textul
-    // etapei, ca cifra să poată fi confruntată oricând cu sursa ei.
-    const jobs = raw.map((j) => ({
-      ...j,
-      pct: procentDinProgres(j.status, j.progress),
-    }))
-    // `paused` (auditul admin, 3 aug): pauza de autonomie oprea și lucrătorul
-    // (/api/constructor/next nu predă nimic), dar Constructorul n-o arăta
-    // nicăieri — ordinul stătea „în coadă · 0%" la nesfârșit după promisiunea
-    // „max. 2 minute". Panoul afișează bannerul și corectează promisiunea.
-    return reply.send({ jobs, paused: await isOpsPaused().catch(() => false) })
+    return reply.send({ jobs: await listBuildJobs(40) })
   })
 
-  // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
-  // ștergere" + „scoate 30/31 dacă nu le poate face, ai funcțiile făcute") ─────
-  // Funcțiile existau demult în db.ts (deleteBuildJob / deleteBuildJobsByScope /
-  // retryBuildJob) și erau folosite DOAR de unealta `constructor_manage` a lui
-  // Kelion din chat. Panoul n-avea nicio rută spre ele → niciun buton. Le expun
-  // aici, admin-only ca restul panoului. Ștergerea nu atinge un ordin 'running'
-  // decât la scope='all' — un ordin viu nu piere din greșeală.
-  app.delete<{ Params: { id: string } }>('/api/admin/constructor/:id', async (req, reply) => {
-    const id = adminSiId(req, reply, req.params.id)
-    if (id === null) return
-    const sters = await deleteBuildJob(id)
-    return reply.send({ ok: sters })
-  })
-
-  // Ștergere în GRUP: scope=failed|done|failed_done|all (implicit failed_done —
-  // curăță istoricul „eșuat/GATA", lasă cele vii). Întoarce câte a șters.
-  app.post<{ Body: { scope?: string } }>('/api/admin/constructor/curata', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const scope = ['failed', 'done', 'failed_done', 'all'].includes(String(req.body?.scope))
-      ? (String(req.body?.scope) as 'failed' | 'done' | 'failed_done' | 'all')
-      : 'failed_done'
-    // AUDIT ADMIN (3 aug): eroarea de DB devenea „Curățat: 0 ordine șterse."
-    // — zero fals. null = eșec → 500 („Nu s-a putut curăța." în panou);
-    // 0 rămâne posibil doar ca număr real.
-    const sterse = await deleteBuildJobsByScope(scope)
-    if (sterse === null) return reply.code(500).send({ error: 'db_unreadable' })
-    return reply.send({ ok: true, sterse })
-  })
-
-  // ANULAREA unui ordin viu (auditul admin, 3 aug): cancelBuildJob exista în
-  // db.ts din 3 aug, dar era legat DOAR de unealta constructor_manage din chat
-  // — un ordin 'running' nu putea fi oprit din panou (✕ e ascuns pe running).
-  // Aici e ruta pe care o cheamă butonul „oprește" de pe rândurile în curs.
-  app.post<{ Params: { id: string } }>('/api/admin/constructor/:id/anuleaza', async (req, reply) => {
-    const id = adminSiId(req, reply, req.params.id)
-    if (id === null) return
-    const oprit = await cancelBuildJob(id)
-    return reply.send({ ok: oprit })
-  })
-
-  // Reia un ordin (îl repune în coadă, attempts=0), opțional cu textul reformulat.
-  app.post<{ Params: { id: string }; Body: { order?: string } }>('/api/admin/constructor/:id/reia', async (req, reply) => {
-    const id = adminSiId(req, reply, req.params.id)
-    if (id === null) return
-    const job = await retryBuildJob(id, req.body?.order)
-    if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
-    return reply.send({ ok: true, job })
-  })
-
-  // ── The VPS worker's endpoint (x-bridge-secret auth, like ops/pulse) ─────
-  // Adrian's "autonomy pause" stops the constructor too: while paused, no
-  // orders are handed to the worker (queued ones wait, they aren't lost).
+  // ── Capătul lucrătorului de pe VPS (auth x-bridge-secret, ca ops/pulse) ──
+  // „pauza-autonomie" a lui Adrian oprește și constructorul: cât e pauză, nu
+  // se mai dau ordine lucrătorului (cele din coadă așteaptă, nu se pierd).
   app.get('/api/constructor/next', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
@@ -113,121 +46,30 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post<{
-    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }
+    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string }
   }>('/api/constructor/report', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
     const id = Number(req.body?.id ?? 0)
     const status = req.body?.status === 'done' ? 'done' : 'failed'
     if (!id) return reply.code(400).send({ error: 'id_lipsa' })
-    // THE INDEPENDENT VERIFICATION VERDICT (Stage 6): 'verde' = CI re-ran
-    // build+tests on a clean machine and it passed; 'roșu' = it failed;
-    // 'în curs' = it couldn't be confirmed within the worker's budget (the
-    // workshop had passed anyway).
-    const ci = ['verde', 'roșu', 'în curs'].includes(String(req.body?.ci)) ? String(req.body?.ci) : undefined
-    // THE BRAIN USED (Adrian, Aug 2: "Everything FREE. The admin can EXPRESSLY
-    // request the paid Fable 5 brain for the CONSTRUCTOR only"): only two
-    // honest labels are accepted — 'fable-5' (paid, expressly marked in the
-    // order — istoric; agentul e Gemini-only din 3 aug) or 'free'. The cost is
-    // the one MEASURED by the worker from the provider's usage; anything
-    // non-numeric/negative is dropped, so the Money views never show a
-    // fabricated figure. Marcajul 'fable-5' rămâne ACCEPTAT în API (un worker
-    // vechi nu trebuie să pice pe raport), dar UI-ul nu-l mai oferă.
-    const brain = ['fable-5', 'free'].includes(String(req.body?.brain)) ? String(req.body?.brain) : undefined
-    const costRaw = Number(req.body?.costUsd)
-    const costUsd = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : undefined
     await reportBuildJob(id, {
       status,
       branch: req.body?.branch,
       prUrl: req.body?.prUrl,
       tokens: Number(req.body?.tokens ?? 0),
       log: req.body?.log,
-      ci,
-      brain,
-      costUsd,
     })
-    // The report to Adrian — by email, with the PR to press (the merge is his).
-    const dovadaCI =
-      ci === 'verde'
-        ? 'Verificare INDEPENDENTĂ: CI verde pe o mașină curată (build + teste re-rulate). ✅'
-        : ci === 'în curs'
-          ? 'Verificare independentă (CI): încă rulează pe PR — atelierul trecuse deja build + teste.'
-          : 'Build + teste verificate în atelier.'
+    // Raportul către Adrian — pe email, cu PR-ul de apăsat (merge-ul e al lui).
     const subject =
       status === 'done'
         ? `[Kelion] Constructorul a terminat ordinul #${id} — PR gata de merge`
         : `[Kelion] Constructorul a EȘUAT la ordinul #${id}`
-    // The brain is stated in the email too (Aug 2 rule: the model choice must
-    // be VISIBLE everywhere the order is reported). A Fable order says what it
-    // cost — measured, or honestly "not reported by the provider".
-    const linieCreier =
-      brain === 'fable-5'
-        ? `Creier: Fable 5 (marcaj istoric — agentul e Gemini-only) — ${costUsd != null ? `cost măsurat: $${costUsd.toFixed(4)}` : 'cost neraportat de furnizor'}.\n\n`
-        : brain === 'free'
-          ? `Creier: gratuit (:free).\n\n`
-          : ''
     const body =
       status === 'done'
-        ? `Ordinul #${id} e construit. ${dovadaCI}\n\n${linieCreier}PR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
-        : ci === 'roșu'
-          ? `Ordinul #${id}: verificarea INDEPENDENTĂ (CI) a picat pe PR, deși atelierul trecuse.\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nNU da merge până nu e verde — ordinul rămâne în panou.`
-          : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`
+        ? `Ordinul #${id} e construit, cu build + teste verificate în atelier.\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
+        : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`
     void sendMail({ to: config.adminEmail, subject, html: body.replace(/\n/g, '<br>'), text: body }).catch(() => {})
     return reply.send({ ok: true })
-  })
-
-  // ── LIVE PROGRESS (autonomy Stage 4, Jul 29) ─────────────────────────────
-  // The VPS worker sends its current step HERE (cloned → editing X → build →
-  // opening PR...) as it works — the mirror of /report, same x-bridge-secret
-  // auth. It does NOT change the terminal status (updateBuildJobProgress only
-  // writes on `running` jobs). That way the state is no longer a black box
-  // between "Picked up" and "Done": the monitor can show it, and Kelion can
-  // NARRATE it.
-  app.post<{ Body: { id?: number; progress?: string } }>('/api/constructor/progress', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    const id = Number(req.body?.id ?? 0)
-    const progress = String(req.body?.progress ?? '').trim()
-    if (!id || !progress) return reply.code(400).send({ error: 'bad_request' })
-    await updateBuildJobProgress(id, progress)
-    return reply.send({ ok: true })
-  })
-
-  // ── THE HEAVY TOOLS, IN THE CONSTRUCTOR'S HAND (Adrian, Jul 30: "I asked
-  // for fully equipped agents and you gave them only trinkets") ──────────────
-  // He was right. The constructor had 7 tools — ls/grep/read/write/edit/run/
-  // finish — so it could write code, but it couldn't open a site and couldn't
-  // set a key. An order asking for a portal was impossible for it, and it
-  // would have failed three times on the owner's money.
-  //
-  // Here it gets the browser (the 9 real tools, Playwright in-process) and the
-  // secrets (secret_pune/lista/publica). The dispatch is THE SAME as the
-  // autonomous loop's — a single implementation, imported, not copied.
-  //
-  // The gate: `x-bridge-secret`, like the rest of the worker endpoint. Beyond
-  // it sit tools that touch the internet and the keys — so no other access
-  // path.
-  app.post<{ Body: { name?: string; args?: Record<string, unknown> } }>('/api/constructor/tool', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    const name = String(req.body?.name ?? '')
-    if (!name) return reply.code(400).send({ error: 'bad_request' })
-    const rezultat = await uneltele(name, req.body?.args ?? {}).catch((e: Error) =>
-      JSON.stringify({ error: e.message }),
-    )
-    return reply.send({ rezultat })
-  })
-
-  // The jobs to show on the monitor (active + recently finished) + their
-  // current step — for the live panel in the frontend (admin session; Stage
-  // 4b). Also includes `done`/`failed` from the last minutes, so the panel
-  // shows the ENDING (Done/Failed), not just the road to it.
-  app.get('/api/constructor/live', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const jobs = await listMonitorBuildJobs()
-    return reply.send({
-      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
-    })
   })
 }

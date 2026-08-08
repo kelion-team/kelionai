@@ -9,11 +9,11 @@
 // a reply it isn't confident about.
 
 const STOPWORDS: Record<string, string[]> = {
-  // ROMANIAN WITHOUT DIACRITICS (26 Jul, the mail test: "Buna ziua...
-  // multumesc" came out null → English fallback, breaking the "reply in the
-  // received language" rule). Romanians frequently write without diacritics —
-  // we add the sign-less variants that are NOT confused with other languages
-  // here (not "si"/"la"/"in", which are also Spanish/Italian/French/English).
+  // ROMÂNA FĂRĂ DIACRITICE (26 iul, testul poștei: „Buna ziua… multumesc" a
+  // ieșit null → fallback engleză, încălcând regula „răspuns în limba primită").
+  // Românii scriu frecvent fără diacritice — adăugăm variantele fără semne care
+  // NU se confundă cu alte limbi de aici (nu „si"/„la"/„in", care sunt și
+  // spaniolă/italiană/franceză/engleză).
   ro: ['și', 'este', 'sunt', 'pentru', 'nu', 'că', 'cu', 'la', 'în', 'te', 'să', 'ție', 'poți', 'mulțumesc', 'bună', 'salut', 'acum', 'aici', 'ești', 'așa', 'către', 'dumneavoastră', 'buna', 'ziua', 'multumesc', 'stiu', 'poti', 'esti', 'catre', 'dumneavoastra', 'dori', 'rog', 'incepe', 'servicii'],
   es: ['el', 'la', 'los', 'las', 'que', 'para', 'con', 'una', 'por', 'usted', 'gracias', 'hola', 'está', 'puedo', 'ahora', 'aquí', 'buenos', 'días', 'tarea', 'listo', 'desarrollador'],
   pt: ['você', 'não', 'para', 'com', 'uma', 'obrigado', 'olá', 'está', 'agora', 'aqui', 'bom', 'dia', 'posso', 'coisa', 'então', 'boa', 'noite'],
@@ -26,7 +26,7 @@ const STOPWORDS: Record<string, string[]> = {
 // Strong single-word language signals. When a short utterance contains one of
 // these, we commit immediately instead of waiting for a full sentence.
 const CLEAR_KEYWORDS: Record<string, string[]> = {
-  // + the diacritic-less variants that stay clearly Romanian (see the note above).
+  // + variantele fără diacritice care rămân clar românești (vezi nota de sus).
   ro: ['bună', 'salut', 'mulțumesc', 'noroc', 'salutare', 'ție', 'poți', 'ești', 'așa', 'către', 'buna', 'multumesc', 'ziua', 'poti', 'esti'],
   es: ['hola', 'gracias', 'claro', 'buenos', 'días', 'está', 'puedo', 'listo', 'tarea'],
   pt: ['olá', 'obrigado', 'bom', 'dia', 'boa', 'noite', 'você', 'então', 'coisa'],
@@ -52,11 +52,9 @@ export function primaryLang(tag: string | undefined | null): string | null {
   return m ? m[1].toLowerCase() : null
 }
 
-// Language names in English, for instructions to the models (e.g. "reply in
-// Romanian"). Shared between chat and voice so we don't duplicate the map in
-// two places. Exported: chat.ts had an identical copy ("LANG_NAMES") — it
-// uses this one (the permanent principle: unique, no duplicates).
-export const LANG_LABELS: Record<string, string> = {
+// Nume de limbă în engleză, pentru instrucțiuni către modele (ex: „reply in
+// Romanian"). Partajat între chat și voce ca să nu dublăm harta în două locuri.
+const LANG_LABELS: Record<string, string> = {
   ro: 'Romanian', en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese',
   it: 'Italian', de: 'German', nl: 'Dutch', pl: 'Polish', ru: 'Russian',
   uk: 'Ukrainian', tr: 'Turkish', ar: 'Arabic', zh: 'Chinese', ja: 'Japanese',
@@ -173,12 +171,11 @@ export function detectSpeechLang(text: string, previousLang?: string | null): st
   return two ? (BCP47[two] ?? null) : null
 }
 
-// The languages the app actually SUPPORTS (i18n + voice persona). We NEVER
-// persist a language outside this set: the live proof (24 Jul) — Romanian
-// speech was heard as RUSSIAN, and a blind commit would have pinned "ru" for
-// the user and poisoned all sessions. A nonsense transcription (Russian,
-// Ukrainian etc.) is ignored; the established language stays the real one
-// (or English by default).
+// Limbile pe care aplicația le SUPORTĂ efectiv (i18n + persona vocii). NICIODATĂ
+// nu persistăm o limbă în afara acestui set: dovada live (24 iul) — vorbirea
+// românească era auzită ca RUSĂ, iar o comitere oarbă ar fi fixat „ru" pentru
+// user și ar fi otrăvit toate sesiunile. O transcriere aiurea (rusă, ucraineană
+// etc.) e ignorată; limba stabilită rămâne cea reală (sau engleza default).
 const SUPPORTED_LANGS = new Set(['en', 'ro', 'fr', 'es', 'pt', 'it', 'de'])
 
 // Per-user "pending switch" state: a NEW language seen once, waiting for its
@@ -199,9 +196,8 @@ export function trackSpeechLang(
   const seed = detectSpeechLang(text, current)
   if (!seed) return null
   const base = (c: string): string => c.toLowerCase().split('-')[0]
-  // GUARD: we NEVER commit a language outside the supported set (a wrong
-  // transcription — e.g. Romanian heard as Russian — must not become the
-  // preference).
+  // GARDĂ: nu comitem NICIODATĂ o limbă în afara setului suportat (o transcriere
+  // greșită — ex. română auzită ca rusă — nu are voie să devină preferința).
   if (!SUPPORTED_LANGS.has(base(seed))) return null
   if (current && base(seed) === base(current)) {
     pendingSwitch.delete(email) // matches the established language — no switch

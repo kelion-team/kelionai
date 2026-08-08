@@ -1,29 +1,25 @@
 import crypto from 'node:crypto'
-import { recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs } from '../db.js'
+import { recurringClientErrors, createBuildJob, loadKv, saveKv } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
-import { geminiLive } from './geminiDirect.js'
 
-// ── KELION'S SELF-HEALING (Adrian, 27 Jul: "Kelion must be able to gather
-// errors appearing under each user automatically and remedy them, delivering
-// the fixed version to all users afterwards") ──────────────────────────────
-// The proactive loop, without being asked: at an interval, it takes the
-// RECURRENT client errors (many occurrences, several users), and for each NEW
-// signature it places an order in the constructor's queue. The constructor
-// finds the cause in the source, fixes it, runs build+tests and opens a PR;
-// on merge, auto-publishing brings the fixed version to ALL users. The merge
-// stays with Adrian (the human gate) — that is why we file a PR, not push
-// directly into master.
+// ── AUTO-VINDECAREA LUI KELION (Adrian, 27 iul: „Kelion trebuie să poată culege
+// err apărute sub fiecare user automat și să le remedieze, dând versiunea
+// reparată pentru toți userii ulterior") ────────────────────────────────────
+// Bucla proactivă, fără să i se ceară: la interval, ia erorile de client
+// RECURENTE (multe apariții, mai mulți utilizatori), și pentru fiecare semnătură
+// NOUĂ pune un ordin în coada constructorului. Constructorul găsește cauza în
+// sursă, o repară, rulează build+teste și deschide un PR; la merge, auto-
+// publicarea duce versiunea reparată la TOȚI userii. Merge-ul rămâne al lui
+// Adrian (poarta umană) — de aceea depunem un PR, nu împingem direct în master.
 //
-// Guards: (1) only real recurrent errors (the thresholds in
-// recurringClientErrors); (2) dedup by signature in kv (`selfheal:<hash>`,
-// 7 days) — we don't file the same error twice; (3) respects the autonomy
-// pause; (4) max 3 orders per run, so a wave of errors doesn't flood the
-// queue.
+// Gărzi: (1) doar erori recurente reale (pragurile din recurringClientErrors);
+// (2) dedup pe semnătură în kv (`selfheal:<hash>`, 7 zile) — nu depunem de două
+// ori aceeași eroare; (3) respectă „pauza-autonomie"; (4) max 3 ordine pe rulare,
+// ca un val de erori să nu inunde coada.
 
 function signature(message: string): string {
-  // A stable signature from the message, without variable numbers/addresses
-  // — so the same error (with another line:col or another id) is recognized
-  // as the same.
+  // Semnătură stabilă din mesaj, fără numere/adrese variabile — ca aceeași
+  // eroare (cu alt line:col sau alt id) să fie recunoscută ca aceeași.
   const norm = message
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, '')
@@ -36,22 +32,6 @@ function signature(message: string): string {
 
 export async function runSelfHeal(): Promise<{ filed: number }> {
   if (await isOpsPaused()) return { filed: 0 }
-
-  // HEALING THE ORDERS THAT FELL ON MONEY (Adrian, 27 Jul: "why doesn't the
-  // healing system see, repair? — automatically?"): if the brain (Gemini)
-  // SERVES again — the honest live signal, since Google exposes no readable
-  // balance — the constructor orders failed on 402/credit are put BACK in the
-  // queue BY THEMSELVES (only once per order — a mark in the log).
-  try {
-    const g = await geminiLive()
-    if (g.ok && g.serving) {
-      const requeued = await requeueMoneyFailedBuildJobs()
-      if (requeued) console.log(`[self-heal] ${requeued} ordin(e) eșuat(e) pe lipsă de credit, repus(e) în coadă — Gemini servește din nou`)
-    }
-  } catch {
-    /* live signal unavailable — we try again on the next run */
-  }
-
   const errors = await recurringClientErrors(24, 5, 2)
   if (!errors.length) return { filed: 0 }
 
@@ -60,7 +40,7 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     if (filed >= 3) break
     const sig = signature(e.message)
     const key = `selfheal:${sig}`
-    if (await loadKv(key)) continue // already filed — we don't duplicate
+    if (await loadKv(key)) continue // deja depusă — nu dublăm
 
     const order =
       `AUTO-VINDECARE: repară o eroare de client RECURENTĂ (apărută de ${e.count} ori, ` +

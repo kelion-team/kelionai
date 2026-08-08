@@ -1,0 +1,61 @@
+# TEST LIVE al chatului PUBLIC (demo). Doar-citire pe producție: pornește o
+# sesiune demo reală (IP-ul runnerului e proaspăt), trimite un mesaj și
+# cronometrează PRIMUL CUVÂNT. Nu modifică nimic. (Pasul care scotea jurnalele
+# deployment-ului din Railway a fost scos pe 22 iul 2026, odată cu Railway.)
+name: public-latency-test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/chat-instant-delay-em5gjf]
+    paths: ['.github/workflows/public-latency-test.yml']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Măsoară primul cuvânt pe chatul public (sesiune demo reală)
+        run: |
+          python3 - <<'PY'
+          import json, sys, time, uuid, urllib.request, http.cookiejar
+          BASE = "https://kelionai.app"; CTRL = "\x1f"
+          UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36", "Content-Type": "application/json"}
+          cj = http.cookiejar.CookieJar()
+          op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+          req = urllib.request.Request(BASE + "/api/demo/start", data=json.dumps({"fp": uuid.uuid4().hex}).encode(), headers=UA)
+          try:
+              r = op.open(req, timeout=20); print("demo/start:", r.status, r.read().decode()[:100])
+          except Exception as e:
+              print("demo/start FAILED:", e); sys.exit(1)
+          for msg in ["salut", "ce ora e la Londra acum?"]:
+              req = urllib.request.Request(BASE + "/api/chat", data=json.dumps({"messages":[{"role":"user","content":msg}]}).encode(), headers=UA)
+              t0 = time.time()
+              try:
+                  r = op.open(req, timeout=90)
+              except Exception as e:
+                  print(f"{msg!r}: /api/chat FAILED: {e}"); continue
+              first_text = None; buf = ""; shown = ""
+              while True:
+                  chunk = r.read(1)  # octet cu octet -> cronometru corect
+                  if not chunk: break
+                  now = time.time(); buf += chunk.decode(errors="replace")
+                  clean = ""; i = 0
+                  while i < len(buf):
+                      if buf[i] == CTRL:
+                          j = buf.find(CTRL, i + 1)
+                          if j == -1: buf = buf[i:]; break
+                          i = j + 1
+                      else:
+                          clean += buf[i]; i += 1
+                  else:
+                      buf = ""
+                  if clean.strip():
+                      first_text = now - t0; shown = clean.strip()[:100]; break
+              if first_text is not None:
+                  verdict = "SUB 1s ✅" if first_text < 1.0 else ("sub 3s ⚠️" if first_text < 3.0 else "LENT ❌")
+                  print(f"{msg!r}: PRIMUL CUVANT dupa {first_text:.2f}s [{verdict}] -> {shown!r}")
+              else:
+                  print(f"{msg!r}: FARA TEXT (conexiune inchisa fara continut)")
+              time.sleep(2)
+          PY
+

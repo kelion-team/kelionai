@@ -25,10 +25,20 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      # (Pasul vechi de diagnostic care tipărea NUMELE tuturor secretelor a fost
-      # scos — problema pe care o depana, `VPS_SSH_KEY` gol, e demult rezolvată,
-      # iar dump-ul umplea logul cu nume de secrete moarte, ex. `RAILWAY_TOKEN`.
-      # Verificarea cheii goale a rămas mai jos, în pasul propriu-zis.)
+      # Diagnostic: rulările 1-5 au primit cheia GOALĂ deși Adrian a pus-o —
+      # deci e sub alt nume sau în alt loc. Pasul ăsta tipărește DOAR NUMELE
+      # secretelor/variabilelor vizibile (valorile nu apar; GitHub le și maschează),
+      # ca să vedem exact sub ce nume a fost salvată cheia.
+      - name: Ce chei vede workflow-ul (doar numele)
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_VARS: ${{ toJSON(vars) }}
+        run: |
+          echo "— Secrets vizibile (nume):"
+          echo "$ALL_SECRETS" | jq -r 'keys[]' 2>/dev/null || echo "(niciunul)"
+          echo "— Variables vizibile (nume):"
+          echo "$ALL_VARS" | jq -r 'keys[]' 2>/dev/null || echo "(niciuna)"
+
       - name: Rulează comanda pe VPS (SSH cu cheie)
         env:
           # Citim cheia și din Secrets și din Variables — pusă din greșeală la

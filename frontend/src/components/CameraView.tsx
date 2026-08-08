@@ -58,9 +58,9 @@ export default function CameraView({
         // Lift exposure/gain after the stream is alive — the browser may have
         // started conservatively in dim light.
         await boostLowLight(stream).catch(() => undefined)
-        // Face sampling in the BACKGROUND (owner vs. someone else recognition).
-        // Starts only now (live camera), runs decoupled from chat, stops at
-        // cleanup. It blocks nothing on the reply path.
+        // Eșantionarea feței în FUNDAL (recunoaștere titular vs. altcineva).
+        // Pornește doar acum (camera vie), rulează decuplat de chat, se oprește
+        // la cleanup. Nu blochează nimic din calea de răspuns.
         if (videoRef.current && !faceStopRef.current) {
           faceStopRef.current = startFaceSampling(
             videoRef.current,
@@ -86,11 +86,7 @@ export default function CameraView({
       stopStream(streamRef.current)
       streamRef.current = null
     }
-    // `captureRef` lipsea din listă. E un ref (identitate stabilă), deci
-    // adăugarea NU schimbă când rulează efectul — dar oprește avertismentul și,
-    // mai important, ține lista sinceră: dacă mâine devine altceva decât un ref,
-    // efectul chiar trebuie să reacționeze la el.
-  }, [active, facing, onError, retryNonce, captureRef])
+  }, [active, facing, onError, retryNonce])
 
   // If the page regains focus or comes back online, try to recover from a
   // transient failure (camera busy, permission prompt dismissed, etc.).
@@ -114,42 +110,6 @@ export default function CameraView({
   // Register a frame grabber (latest frame as a downscaled JPEG data URL).
   useEffect(() => {
     if (!captureRef) return
-    // ── CANVASURI REFOLOSITE + SONDĂ MICĂ (măsurat 8 aug, consola ownerului) ──
-    // Vechea captare făcea, la FIECARE tick de 250 ms: un canvas NOU, drawImage
-    // la 768px, apoi getImageData(768) — o citire GPU→CPU sincronă — uneori de
-    // DOUĂ ori (a doua oară pentru boost-ul de lumină). Ceasul cu nume a prins-o
-    // în flagrant: „captare cadre cameră a ținut firul 2312 ms (vârf 6341 ms)"
-    // — iar cererea de chat a așteptat EXACT 6334 ms în spatele ei. Alea erau
-    // secundele de întârziere reclamate.
-    // Acum: lumina se măsoară pe o sondă de 48×27 (getImageData de ~500× mai
-    // ieftin), canvasurile se refolosesc, iar citirea mare (768px) nu se mai
-    // face deloc — cadrul mare doar se desenează și se împachetează JPEG.
-    const panzaMare = document.createElement('canvas')
-    const sonda = document.createElement('canvas')
-    sonda.width = 48
-    sonda.height = 27
-
-    /** Fracția de pixeli „aprinși" din sondă (sub filtrul dat), sau null dacă
-     *  sonda nu se poate citi (canvas pătat — atunci avem încredere în cadru). */
-    const masoaraLumina = (v: HTMLVideoElement, filtru: string): number | null => {
-      const pctx = sonda.getContext('2d', { willReadFrequently: true })
-      if (!pctx) return null
-      pctx.filter = filtru
-      pctx.drawImage(v, 0, 0, sonda.width, sonda.height)
-      try {
-        const d = pctx.getImageData(0, 0, sonda.width, sonda.height).data
-        let lit = 0
-        let total = 0
-        for (let i = 0; i < d.length; i += 16) {
-          total++
-          if (d[i] + d[i + 1] + d[i + 2] > 36) lit++ // peste aproape-negru
-        }
-        return total > 0 ? lit / total : 0
-      } catch {
-        return null
-      }
-    }
-
     captureRef.current = () => {
       const v = videoRef.current
       // The frame is only real once the camera has actually decoded a picture.
@@ -160,29 +120,61 @@ export default function CameraView({
       const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight))
       const w = Math.round(v.videoWidth * scale)
       const h = Math.round(v.videoHeight * scale)
-      if (panzaMare.width !== w) panzaMare.width = w
-      if (panzaMare.height !== h) panzaMare.height = h
-      const ctx = panzaMare.getContext('2d')
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
       if (!ctx) return null
 
-      const lit = masoaraLumina(v, 'none')
-      let filtru = 'none'
-      if (lit !== null) {
-        if (lit === 0) return null // niciun pixel măsurabil — lentila acoperită
-        if (lit < 0.08) {
-          // Scenă întunecată dar nu moartă: boost, ca Kelion să primească un
-          // cadru utilizabil în lumină slabă. Garda pe negru pur rămâne.
-          const boost = lit < 0.02 ? 2.8 : lit < 0.04 ? 2.2 : 1.8
-          filtru = `brightness(${boost}) contrast(${Math.min(1.4, 1 + boost * 0.15)})`
-          const litBoost = masoaraLumina(v, filtru)
-          // Dacă și boostat rămâne practic negru, senzorul nu produce imagine.
-          if (litBoost !== null && litBoost < 0.02) return null
+      // Helper: sample luminance and return fraction of "lit" pixels.
+      const measureLit = (imageData?: ImageData): number => {
+        const data = imageData?.data
+        if (!data || data.length === 0) return 0
+        let lit = 0
+        let total = 0
+        // Sample roughly every 64th pixel (stride = 256 bytes = 64 pixels × 4).
+        for (let i = 0; i < data.length; i += 256) {
+          total++
+          if (data[i] + data[i + 1] + data[i + 2] > 36) lit++ // above near-black
         }
+        return total > 0 ? lit / total : 0
       }
-      // Cadrul mare: DOAR desen + JPEG — nicio citire de pixeli pe 768px.
-      ctx.filter = filtru
+
+      // First pass: draw normally so we can measure the real sensor output.
+      ctx.filter = 'none'
       ctx.drawImage(v, 0, 0, w, h)
-      return panzaMare.toDataURL('image/jpeg', 0.6)
+      let imageData: ImageData | undefined
+      try {
+        imageData = ctx.getImageData(0, 0, w, h)
+      } catch {
+        // Tainted canvas — can't sample, so trust the frame rather than dropping it.
+        return canvas.toDataURL('image/jpeg', 0.6)
+      }
+      const lit = measureLit(imageData)
+
+      // Second pass: if the scene is dim but not dead-black, boost it on the
+      // canvas so Kelion still receives a usable frame in low light. We keep
+      // the guard against pure black frames (lens covered / not ready).
+      if (lit > 0 && lit < 0.08) {
+        const boost = lit < 0.02 ? 2.8 : lit < 0.04 ? 2.2 : 1.8
+        ctx.filter = `brightness(${boost}) contrast(${Math.min(1.4, 1 + boost * 0.15)})`
+        ctx.drawImage(v, 0, 0, w, h)
+        try {
+          imageData = ctx.getImageData(0, 0, w, h)
+        } catch {
+          // Tainted canvas after boost — ship the boosted frame.
+          return canvas.toDataURL('image/jpeg', 0.6)
+        }
+        const litBoosted = measureLit(imageData)
+        // If even a heavy boost leaves the frame virtually black, the lens is
+        // covered or the sensor is not producing data — don't ship it.
+        if (litBoosted < 0.02) return null
+      } else if (lit === 0) {
+        // No measurable pixels at all — reject.
+        return null
+      }
+
+      return canvas.toDataURL('image/jpeg', 0.6)
     }
     return () => {
       captureRef.current = null
