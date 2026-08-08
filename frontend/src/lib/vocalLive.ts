@@ -43,11 +43,11 @@ export interface VocalLiveOpts {
   onControl?(frame: unknown): void
   /** Orice eroare, NUMITĂ. Niciun „merge" prefăcut. */
   onEroare(motiv: string): void
-  /** Coordonatele device-ului, la cerere (8 aug: „nu are acces la gps, meteo").
-   *  Chatul scris trimite coords cu fiecare tură; sesiunea live nu trimitea
-   *  NIMIC — meteo/hărțile din ușa creierului rămâneau fără loc. Se citește la
-   *  `gata` și periodic; null = nu avem (serverul declară lipsa, nu inventează). */
-  coordonate?(): { lat: number; lon: number } | null
+  /** Coordonatele device-ului, la cerere (8 aug: „nu are acces la gps, meteo"
+   *  + „îi trebuiesc date de la gps real"). `acc` = precizia MĂSURATĂ a fixului
+   *  (±metri, raportată de senzor) — pleacă și ea, ca serverul să spună
+   *  modelului cât de bun e locul. null = nu avem (lipsa se declară). */
+  coordonate?(): { lat: number; lon: number; acc?: number } | null
   /** Cadrele camerei, LA CEREREA serverului (8 aug: „hai și cu vedere") —
    *  când ușa cere_creierului se deschide, tura escaladată pleacă cu ochii.
    *  Gol/absent = fără cameră; tura pleacă fără imagini, nu se blochează. */
@@ -294,6 +294,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
           type: 'coords',
           lat: c?.lat,
           lon: c?.lon,
+          acc: c?.acc,
           now: new Date().toISOString(),
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),

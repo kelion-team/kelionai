@@ -277,7 +277,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // 600 ms și o coace în instrucțiune. GPS-ul rămâne viu (reîmprospătat la
     // 2 min) pentru ușa creierului.
     let coords: { lat: number; lon: number } | null = null
-    let ancora: { nowIso?: string; tz?: string; lat?: number; lon?: number } = {}
+    let ancora: { nowIso?: string; tz?: string; lat?: number; lon?: number; acc?: number } = {}
     let ancoraSosita: (() => void) | null = null
     // VEDEREA LA CERERE (8 aug: „hai și cu vedere"): când ușa se deschide,
     // serverul cere browserului cadrele camerei ({type:'cere_cadre'}) și
@@ -291,6 +291,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             type?: string
             lat?: number
             lon?: number
+            acc?: number
             now?: string
             tz?: string
             cadre?: unknown
@@ -304,6 +305,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               tz: typeof m.tz === 'string' ? m.tz : ancora.tz,
               lat: coords?.lat,
               lon: coords?.lon,
+              // precizia MĂSURATĂ a fixului GPS (±m), raportată de senzor
+              acc: Number.isFinite(m.acc) ? Math.round(m.acc as number) : ancora.acc,
             }
             ancoraSosita?.()
             ancoraSosita = null
