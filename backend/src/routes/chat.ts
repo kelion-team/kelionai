@@ -98,6 +98,7 @@ import { recentClientErrors } from './clientErrors.js'
 import { neagaUneltele } from '../services/negareUnelte.js'
 import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
+import { numeStrigat } from '../services/numeStrigat.js'
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL } from '../services/brainToolDefs.js'
@@ -117,6 +118,7 @@ async function selectedBrainModel(
   text: string,
   kvRaw?: string | null,
   needsVision = false,
+  decideAdresarea = false,
 ): Promise<{ model: string; heavy: boolean } | null> {
   // Null doar pentru „chiar n-am niciun creier" — creierul e Gemini-only.
   if (!geminiDirectAvailable()) return null
@@ -164,7 +166,20 @@ async function selectedBrainModel(
   // (OpenRouter went negative on Jul 27) and that's not what he asked for. The
   // top only on extreme difficulty.
   const isOwner = roleFor(email) === 'admin'
-  const heavy = needsVision || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
+  // ── DE CE `decideAdresarea` (măsurat 8 aug, din jurnalul de pe VPS) ───────
+  // Adrian: „vorbesc și nu se întâmplă nimic". În jurnal:
+  //     [CHAT-IN] audio=da „"
+  //     [TIMP] tura …: creier=google-direct/gemini-3.5-flash-lite, total=1619ms
+  //     [VOCE] tura …: creierul a decis că NU i se vorbea — tăcere
+  // Cauza NU e o părere despre modele — e structurală: linia de mai jos judecă
+  // greutatea din TEXT, iar o tură de voce ambientală n-are text deloc (fraza e
+  // audio brut, în alt câmp). `difficulty('')` e mic, `hasActionIntent('')` e
+  // fals, `needsVision` e fals → `heavy` iese MEREU fals. Adică cea mai
+  // consecventă decizie binară din aplicație — „mi se vorbește mie sau nu" — nu
+  // putea ajunge NICIODATĂ pe modelul bun; cădea automat pe cel ieftin.
+  // Nu se atinge sigiliul: alegerea rămâne între cele două trepte deja sigilate.
+  const heavy =
+    needsVision || decideAdresarea || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
   // ── THE OWNER'S BRAIN = POWERFUL AGENT, ALWAYS (iron rule §14, AI-HANDOFF:
   // "on the owner's path, the model IS the agent... NO classifier to demote him
   // to a cheap model"). The cause of "the paid brain is as dumb as the free
@@ -1648,9 +1663,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `• NOT ADDRESSED = the speaker is talking to someone else, thinking aloud, background ` +
         `speech, or the audio is not clearly meant for you.\n` +
         `RULES (exactly):\n` +
-        `1. If NOT addressed: output EXACTLY the token <TAC/> and NOTHING else — no words, no ` +
-        `tools, no punctuation. This is the ONE case where you stay silent (it overrides the ` +
-        `"never end silently" rule). Do not explain; just <TAC/>.\n` +
+        `1. If NOT addressed: output the token <TAC/> on the first line, then a newline, then ` +
+        `one line "AUZIT: " followed by what you actually heard, verbatim. Nothing else — no ` +
+        `words of your own, no tools, no explanation. You still stay SILENT (the <TAC/> overrides ` +
+        `the "never end silently" rule); the AUZIT line is not spoken — it exists so a wrong ` +
+        `silence can be SEEN in the log instead of vanishing. If you truly heard nothing ` +
+        `intelligible, write "AUZIT: (neinteligibil)".\n` +
         `2. If addressed: your VERY FIRST line must be exactly "AUZIT: " followed by the words ` +
         `you actually heard, verbatim, then a newline. After that newline, give your normal ` +
         `spoken reply. The "AUZIT:" line is how the screen shows what you heard — never skip it ` +
@@ -2103,7 +2121,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // the model also gets the ask_brain tool so it can escalate whatever it
     // judges heavy itself; on the WORK step it does not (that would be
     // recursive — it IS the brain).
-    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage)
+    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage, voceAmbianta)
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
 
@@ -2417,8 +2435,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         if (SENTINELA_TAC.startsWith(capat)) {
           if (trimmed.length < SENTINELA_TAC.length) return '' // prefix parțial, mai vine
           if (capat === SENTINELA_TAC) {
+            // O TĂCERE TREBUIE SĂ SPUNĂ CE A AUZIT (Adrian, 8 aug, din jurnalul
+            // lui): înainte, `<TAC/>` stingea tura fără nicio urmă, deci un fals
+            // „nu mi se vorbea" arăta EXACT ca zgomot de fond ignorat corect.
+            // Restul bufferului poartă acum linia AUZIT; o culegem, n-o rostim.
             taced = true
             gateDecided = true
+            const dupa = trimmed.slice(SENTINELA_TAC.length)
+            const mt = /AUZIT:\s*(.*)/i.exec(dupa)
+            if (mt) userEcho = mt[1].split('\n')[0].trim()
             return ''
           }
         }
@@ -2622,9 +2647,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Creierul a hotărât că NU i se vorbea → tura se stinge: {ignored}, fără
       // rostire (poarta a reținut tot), fără salvare. Clientul șterge bulele.
       if (voceAmbianta && taced) {
+        // Dacă în ce-a auzit e numele lui, tăcerea e GREȘITĂ — și trebuie să se
+        // vadă ca atare în jurnal, nu îngropată printre tăcerile corecte.
+        // (Poarta deterministă de nume a fost scoasă de pe client pe 7 aug, cu
+        // avertismentul scris în handoff că „un fals <TAC/> poate înghiți tăcut
+        // o frază adresată". Măsurătoarea ownerului din 8 aug l-a confirmat.)
+        const gresita = numeStrigat(userEcho)
         reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
         reply.raw.end()
-        console.log(`[VOCE] tura ${turnId.slice(0, 8)}: creierul a decis că NU i se vorbea — tăcere`)
+        console.log(
+          gresita
+            ? `[VOCE] tura ${turnId.slice(0, 8)}: TĂCERE GREȘITĂ — a auzit numele și tot a tăcut. AUZIT: „${userEcho}"`
+            : `[VOCE] tura ${turnId.slice(0, 8)}: tăcere — nu i se vorbea. AUZIT: „${userEcho || '(n-a spus ce a auzit)'}"`,
+        )
         return
       }
       // Voce adresată: salvăm mesajul userului = ce a auzit creierul (ecou precis,
