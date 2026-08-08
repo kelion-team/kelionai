@@ -333,11 +333,15 @@ describe('LACĂT — creier Pro + Extended Thinking (Adrian, 5 aug: „la creier
     expect(cfg).toContain('-flash-lite(?:-|$)')
   })
 
-  it('escaladarea din chatul rapid spre Pro rămâne cablată (ask_brain doar pe tura ușoară)', () => {
-    // Supapa: dacă modelul rapid întâlnește ceva peste el, cheamă `ask_brain`,
-    // care merge pe workDefault = Pro. Fără asta, separarea ar fi o retrogradare.
+  it('escaladarea rămâne cablată (ask_brain pe faza de vorbire, cu deschiderea inventarului)', () => {
+    // Supapa, RESCRISĂ pe ordinul ownerului din 8 aug („nu știe să escaladeze
+    // să ceară acces la unelte… dacă nu are acces intră în blocaj"): cu modelul
+    // unic, „spre Pro" nu mai însemna nimic — escaladarea reală e ACCESUL LA
+    // UNELTE. Ușa se oferă pe faza de vorbire (inclusiv turele vocale) și
+    // comută lista turei pe inventarul plin. Fără ea, faza ușoară ar fi o cușcă.
     const chat = sursa('./routes/chat.ts')
-    expect(/escalationTools = heavyTurn \? \[\] : \[ASK_BRAIN_TOOL\]/.test(chat)).toBe(true)
+    expect(/escalationTools = incarcatura\.faza === 'vorbire' \? \[ASK_BRAIN_TOOL\] : \[\]/.test(chat)).toBe(true)
+    expect(chat.includes('tools.push(...uneltePline)')).toBe(true)
     const brain = sursa('./services/brain.ts')
     expect(/return \[config\.brain\.workDefault\]/.test(brain)).toBe(true)
   })
