@@ -208,7 +208,7 @@ export const googleTools: Tool[] = [
   {
     name: 'maps_search',
     description:
-      'Find places, addresses or points of interest on the map and their coordinates. Use for "where is X", addresses, or locating a place.',
+      'Find ONE place, address or point of interest and show it on the monitor map with a marker. Use for "where is X", addresses, or locating a single place. NOT for routes or directions — anything "from A to B", "route", "directions", "how do I get to" MUST go to maps_directions, which draws the actual route on the map.',
     input_schema: {
       type: 'object',
       properties: {
@@ -220,7 +220,12 @@ export const googleTools: Tool[] = [
   },
   {
     name: 'maps_directions',
-    description: 'Get driving distance and travel time between two places.',
+    // MĂSURAT 8 aug: cerut de 15 ori „show on map the route from Witney to
+    // Rollright Stones", creierul a chemat de fiecare dată maps_search (singura
+    // descriere care pomenea harta) și n-a desenat NICIODATĂ traseul. Descrierea
+    // trebuie să spună că unealta ASTA pune traseul pe monitor.
+    description:
+      'Show the DRIVEN ROUTE between two places ON the monitor map (a live Leaflet map with the route line drawn), plus driving distance, travel time and turn-by-turn directions. This is THE tool for any route/directions/"from A to B"/"show me the way" request — never maps_search for those.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1009,15 +1014,16 @@ async function mapsSearch(query: string, max: number): Promise<string> {
     type: p.type ?? '',
   }))
   // Screen URL: the map gets DISPLAYED from a single tool call (the brain
-  // doesn't always make the second show_on_screen). OpenStreetMap embed centred
-  // on the first result, with a marker. runGoogleTool → default-case writes
-  // {monitor} from it.
+  // doesn't always make the second show_on_screen). PE DOMENIUL NOSTRU, nu pe
+  // openstreetmap.org (8 aug: iframe-ul OSM apărea „întotdeauna" ca pagină
+  // prăbușită în Chrome-ul ownerului — un cadru de pe alt domeniu poate fi ucis
+  // de blocante; al nostru nu). runGoogleTool → default-case writes {monitor}.
   const f = places[0]
   const la = Number(f?.lat)
   const lo = Number(f?.lon)
   const screen_url =
     Number.isFinite(la) && Number.isFinite(lo)
-      ? `https://www.openstreetmap.org/export/embed.html?bbox=${lo - 0.05}%2C${la - 0.03}%2C${lo + 0.05}%2C${la + 0.03}&layer=mapnik&marker=${la}%2C${lo}`
+      ? `/api/route?punct=${la},${lo}&nume=${encodeURIComponent((f?.name ?? '').slice(0, 120))}`
       : undefined
   return JSON.stringify({ places, screen_url })
 }
@@ -1063,9 +1069,9 @@ export async function promoSceneUrl(kind: 'map' | 'weather', query: string): Pro
       `&zoom=8&level=surface&overlay=temp&marker=true&type=map&location=coordinates&metricTemp=%C2%B0C`
     )
   }
-  const d = 0.02
-  const bbox = `${lon - d},${lat - d},${lon + d},${lat + d}`
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${lat}%2C${lon}`
+  // Harta NOASTRĂ same-origin, nu openstreetmap.org (8 aug: cadrul străin
+  // apărea „întotdeauna" ca pagină prăbușită — vezi mapsSearch).
+  return `/api/route?punct=${lat},${lon}&nume=${encodeURIComponent((p.display_name ?? '').slice(0, 120))}`
 }
 
 // OSRM servers, tried in order: the classic demo (rate-limited under load — the

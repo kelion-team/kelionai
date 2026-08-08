@@ -86,11 +86,10 @@ describe('auto-preview-ul de sfârșit de tură — EXACT un vizual, sau nimic',
     expect(autoPreviewFrame('Iată: https://www.google.com/search?q=test — rezultatele.')).toBeNull()
   })
 
-  it('coordonate din proză devin hartă OSM', () => {
+  it('coordonate din proză devin harta NOASTRĂ same-origin (nu un iframe străin)', () => {
     const f = autoPreviewFrame('Suntem chiar acum la 44.4268, 26.1025, lângă piață.')
-    expect(f?.monitor?.url).toContain('openstreetmap.org')
-    expect(f?.monitor?.url).toContain('mlat=44.4268')
-    expect(f?.monitor?.url).toContain('mlon=26.1025')
+    expect(f?.monitor?.url).toContain('/api/route?punct=44.4268,26.1025')
+    expect(f?.monitor?.url).not.toContain('openstreetmap.org')
   })
 
   it('un tabel markdown devine card (un rând = un item)', () => {

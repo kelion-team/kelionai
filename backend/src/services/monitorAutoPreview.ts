@@ -163,7 +163,10 @@ export function autoPreviewFrame(raw: string): MonitorPreview | null {
   const pageUrl = urls.find((u) => !refusesIframe(u))
   if (pageUrl) return { monitor: { url: pageUrl, title: '' } }
 
-  // 2. Map coordinates in prose ("sunt la 44.4268, 26.1025") → an OSM map.
+  // 2. Map coordinates in prose ("sunt la 44.4268, 26.1025") → harta NOASTRĂ
+  // same-origin (8 aug: iframe-ul openstreetmap.org apărea „întotdeauna" ca
+  // pagină prăbușită în Chrome-ul ownerului — cadrele de pe alt domeniu pot fi
+  // ucise de blocante; /api/route nu poate).
   const m = COORDS_RE.exec(text)
   if (m) {
     const lat = Number(m[1])
@@ -171,7 +174,7 @@ export function autoPreviewFrame(raw: string): MonitorPreview | null {
     if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
       return {
         monitor: {
-          url: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=12/${lat}/${lon}`,
+          url: `/api/route?punct=${lat},${lon}`,
           title: 'Map',
         },
       }
