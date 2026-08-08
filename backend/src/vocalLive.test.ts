@@ -77,3 +77,40 @@ describe('vocalLive — interpreteazaCadru', () => {
     expect(interpreteazaCadru({ ceva: 'altceva' })).toEqual([])
   })
 })
+
+// ── MEMORIA SESIUNII LIVE (8 aug, „execută cu Gemini") ──────────────────────
+// Sesiunea Live pornește de la zero la fiecare deschidere — fără instrucțiunea
+// care cară istoricul, Kelion ar fi un străin politicos la fiecare apăsare de
+// microfon. Funcția e pură, deci se probează aici, nu se ia pe încredere.
+import { construiesteInstructiune } from './services/vocalLive.js'
+
+describe('vocalLive — instrucțiunea cară memoria omului', () => {
+  const persona = 'Ești Kelion.'
+
+  it('fără istoric: persona + numele, fără bloc de context inventat', () => {
+    const i = construiesteInstructiune(persona, 'Adrian', [])
+    expect(i).toContain('Ești Kelion.')
+    expect(i).toContain('Adrian')
+    expect(i, 'fără istoric nu există „ultimele schimburi" — nu se inventează').not.toContain('ULTIMELE')
+  })
+
+  it('cu istoric: ultimele schimburi intră, cu numele omului pe replicile lui', () => {
+    const i = construiesteInstructiune(persona, 'Adrian', [
+      { role: 'user', content: 'cât e ceasul?' },
+      { role: 'assistant', content: 'E ora trei.' },
+    ])
+    expect(i).toContain('ULTIMELE VOASTRE SCHIMBURI')
+    expect(i).toContain('Adrian: cât e ceasul?')
+    expect(i).toContain('Kelion: E ora trei.')
+  })
+
+  it('istoricul lung se taie: ultimele 12 schimburi, replici de max 200, bloc de max 2400', () => {
+    const lung = Array.from({ length: 40 }, (_, k) => ({ role: 'user', content: `mesajul ${k} ${'x'.repeat(500)}` }))
+    const i = construiesteInstructiune(persona, 'Adrian', lung)
+    expect(i, 'mesajul 27 e al 13-lea de la coadă — nu are ce căuta').not.toContain('mesajul 27 ')
+    expect(i).toContain('mesajul 39 ')
+    expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
+      persona.length + 2600,
+    )
+  })
+})

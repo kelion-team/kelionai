@@ -1,9 +1,17 @@
 import type { FastifyInstance } from 'fastify'
 import type { RawData } from 'ws'
 import { getSessionUser } from '../session.js'
-import { deschideVocalLive, vocalLiveDisponibila, VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, type VocalLive } from '../services/vocalLive.js'
+import {
+  deschideVocalLive,
+  vocalLiveDisponibila,
+  construiesteInstructiune,
+  VOCAL_LIVE_MODEL,
+  VOCAL_LIVE_VOICE,
+  type VocalLive,
+} from '../services/vocalLive.js'
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
+import { saveMessage, getRecentHistory } from '../db.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -12,6 +20,15 @@ import { execSharedAdminTool } from '../services/adminTools.js'
 // creier /api/chat → gură Chirp 3 HD), NU se adaugă peste el. Frontendul pornește
 // FIE calea veche, FIE asta — niciodată amândouă. Aici, un singur glas: modelul
 // Live aude, gândește ȘI vorbește el însuși (gura veche Chirp nu intră deloc).
+//
+// 8 AUG („execută cu Gemini") — două lucruri care lipseau ca să fie drum întreg:
+//   1. MEMORIA: sesiunea pornea de la zero — Kelion era un străin politicos la
+//      fiecare apăsare de microfon. Acum instrucțiunea de setup cară ultimele
+//      schimburi (construiesteInstructiune, pură, probată).
+//   2. ISTORICUL: nimic din ce se vorbea nu se salva — conversația vocală
+//      dispărea fără urmă. Acum transcrierile finale intră în același istoric ca
+//      mesajele scrise (saveMessage), deci următoarea sesiune le are drept
+//      memorie. Cercul se închide.
 //
 // Contractul WS (browser ↔ server):
 //   client → server:  cadre BINARE = PCM16 mono 16kHz de la microfon.
@@ -23,9 +40,6 @@ import { execSharedAdminTool } from '../services/adminTools.js'
 //     { type:'intrerupt' }                         barge-in: oprește redarea ACUM
 //     { type:'tura_gata' }                         Kelion a terminat de vorbit
 //     { type:'eroare', motiv }                     eroare NUMITĂ (nu murim tăcut)
-//
-// Persona = aceeași identitate a lui Kelion, în română, scurt. UNELTELE se
-// leagă în pasul următor (căutare/skill-uri); acum e conversație vocală curată.
 
 const PERSONA_KELION =
   'Ești Kelion, asistentul lui Adrian. Vorbești firesc, cald și SCURT, în română. ' +
@@ -59,6 +73,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     }
 
     let inchis = false
+    let live: VocalLive | null = null
+    // Microfonul clientului pornește imediat după deschiderea WS-ului, dar
+    // sesiunea Live se deschide DUPĂ citirea istoricului (mai jos). Cadrele din
+    // fereastra aia nu se aruncă — se țin aici și se varsă la deschidere,
+    // altfel primele cuvinte ale omului ar dispărea exact ca în bugul vechi
+    // „nu mă aude la prima frază".
+    const preCoada: Buffer[] = []
+
     const trimite = (o: unknown): void => {
       if (inchis) return
       try {
@@ -68,58 +90,101 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Deschide sesiunea Live unică: aude + gândește + vorbește, un singur glas.
-    const live: VocalLive | null = deschideVocalLive(PERSONA_KELION, TOATE_UNELTELE_ADMIN as any[], {
-      onGata: () => trimite({ type: 'gata' }),
-      onAudioIesire: (data) => trimite({ type: 'audio', data }),
-      onTranscriereUser: (text, final) => trimite({ type: 'user', text, final }),
-      onTranscriereKelion: (text, final) => trimite({ type: 'kelion', text, final }),
-      onUnealta: async (apel) => {
-        try {
-          const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
-          if (rezultat !== null) {
-            live?.raspundeUnealta(apel.id, apel.name, { rezultat })
-          } else {
-            live?.raspundeUnealta(apel.id, apel.name, { rezultat: "Unealtă nesuportată în voce." })
-          }
-        } catch (err: any) {
-          app.log.error(`Eroare unealtă ${apel.name}: ${err.message}`)
-          live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
-        }
-      },
-
-      onIntrerupt: () => trimite({ type: 'intrerupt' }),
-      onTuraGata: () => trimite({ type: 'tura_gata' }),
-      onEroare: (motiv) => {
-        trimite({ type: 'eroare', motiv })
-        app.log.warn(`vocal-live: ${motiv}`)
-      },
-    })
-    if (!live) {
-      try {
-        socket.close(1011, 'vocal_live_indisponibil')
-      } catch {
-        /* deja închis */
-      }
-      return
+    // ── ISTORICUL SESIUNII VOCALE ────────────────────────────────────────────
+    // Transcrierile vin în bucăți; se adună aici și se salvează la sfârșit de
+    // tură — aceleași rânduri de istoric ca la chatul scris, deci următoarea
+    // sesiune (vocală SAU scrisă) continuă conversația, n-o ia de la zero.
+    let bufUser = ''
+    let bufKelion = ''
+    const salveazaTura = (): void => {
+      const u = bufUser.trim()
+      const k = bufKelion.trim()
+      bufUser = ''
+      bufKelion = ''
+      if (u) void saveMessage(user.email, 'user', u).catch(() => {})
+      if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
     }
-    app.log.info(`vocal-live: WS conectat (user=${user.role}, model=${VOCAL_LIVE_MODEL}, voce=${VOCAL_LIVE_VOICE})`)
 
     socket.on('message', (data: RawData, isBinary: boolean) => {
-      if (isBinary) {
-        // Cadru de microfon: PCM16 16kHz → direct în sesiunea Live.
-        live.scrieAudio(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer))
+      if (!isBinary) return
+      const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
+      if (live) live.scrieAudio(buf)
+      else {
+        preCoada.push(buf)
+        if (preCoada.length > 200) preCoada.shift() // plafon ~20s, ca în motor
       }
-      // (Cadrele text/control se pot adăuga la nevoie — deocamdată doar audio.)
     })
     socket.on('close', () => {
       inchis = true
-      live.inchide()
+      salveazaTura() // o tură neterminată la închidere nu se pierde
+      live?.inchide()
       app.log.info('vocal-live: WS închis')
     })
     socket.on('error', () => {
       inchis = true
-      live.inchide()
+      live?.inchide()
     })
+
+    void (async () => {
+      // Memoria: ultimele schimburi din istoric intră în instrucțiunea de setup.
+      // O citire picată NU blochează vocea — sesiunea pornește fără memorie și
+      // spune asta în jurnal (mai bine o voce uitucă decât niciuna).
+      let istoric: Array<{ role: string; content: string }> = []
+      try {
+        istoric = await getRecentHistory(user.email, 12)
+      } catch {
+        app.log.warn('vocal-live: istoricul nu s-a putut citi — sesiunea pornește fără memorie')
+      }
+      const nume = user.name || user.email.split('@')[0]
+      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric)
+
+      if (inchis) return
+      live = deschideVocalLive(instructiune, TOATE_UNELTELE_ADMIN as any[], {
+        onGata: () => trimite({ type: 'gata' }),
+        onAudioIesire: (data) => trimite({ type: 'audio', data }),
+        onTranscriereUser: (text, final) => {
+          bufUser += text
+          trimite({ type: 'user', text, final })
+        },
+        onTranscriereKelion: (text, final) => {
+          bufKelion += text
+          trimite({ type: 'kelion', text, final })
+        },
+        onUnealta: async (apel) => {
+          try {
+            const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
+            if (rezultat !== null) {
+              live?.raspundeUnealta(apel.id, apel.name, { rezultat })
+            } else {
+              live?.raspundeUnealta(apel.id, apel.name, { rezultat: 'Unealtă nesuportată în voce.' })
+            }
+          } catch (err: any) {
+            app.log.error(`Eroare unealtă ${apel.name}: ${err.message}`)
+            live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
+          }
+        },
+        onIntrerupt: () => trimite({ type: 'intrerupt' }),
+        onTuraGata: () => {
+          salveazaTura()
+          trimite({ type: 'tura_gata' })
+        },
+        onEroare: (motiv) => {
+          trimite({ type: 'eroare', motiv })
+          app.log.warn(`vocal-live: ${motiv}`)
+        },
+      })
+      if (!live) {
+        try {
+          socket.close(1011, 'vocal_live_indisponibil')
+        } catch {
+          /* deja închis */
+        }
+        return
+      }
+      for (const b of preCoada.splice(0)) live.scrieAudio(b)
+      app.log.info(
+        `vocal-live: WS conectat (user=${user.role}, model=${VOCAL_LIVE_MODEL}, voce=${VOCAL_LIVE_VOICE}, memorie=${istoric.length} rânduri)`,
+      )
+    })()
   })
 }
