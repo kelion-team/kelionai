@@ -1267,7 +1267,12 @@ export default function Stage({ user }: { user: User }) {
                 type="button"
                 className={`ghost ${brainCredit.gemini && !brainCredit.gemini.serving ? 'blink-red' : ''}`}
                 style={brainStale ? { opacity: 0.55 } : undefined}
-                onClick={() => { setCreditErr(''); setCreditEdit(true) }}
+                // CLICK = ALIMENTARE DIRECT (Adrian, 8 aug, pe pastila „17.8":
+                // „când dau clic aici să mă ducă la alimentare direct"). Pagina
+                // e cea de facturare AI Studio — aceeași pe care a indicat-o
+                // suportul Google (Manage auto-reload / top-up). Editarea
+                // creditului declarat s-a mutat pe creionul de alături.
+                onClick={() => window.open('https://aistudio.google.com/billing', '_blank', 'noopener')}
                 title={(() => {
                   // {spend} = măsurătoarea reușită SAU declararea eșecului —
                   // niciodată „$0.00 (măsurat)" fabricat dintr-un ?? 0 (auditul
@@ -1306,6 +1311,20 @@ export default function Stage({ user }: { user: User }) {
                       : 'Gemini ⚠'}
               </button>
             ))}
+            {/* Creionul: editarea creditului DECLARAT (cifra spusă de owner) a
+                stat până azi chiar pe pastilă — acum pastila duce la alimentare
+                (ordinul de mai sus), deci editarea primește propriul buton. */}
+            {brainCredit && !brainLocked && !creditEdit && (
+              <button
+                type="button"
+                className="ghost"
+                style={{ padding: '0 6px' }}
+                onClick={() => { setCreditErr(''); setCreditEdit(true) }}
+                title="Editează creditul declarat (cifra din AI Studio) / Edit declared credit"
+              >
+                ✎
+              </button>
+            )}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
             permanently on the interface in the top bar”). Two figures, because they
             answer two different questions: RAM = does anything else FIT on the
