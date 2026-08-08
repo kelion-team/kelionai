@@ -176,9 +176,17 @@ Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ — apoi serverul du
  let ceas=null;
  function opreste(){ if(ceas){clearInterval(ceas); ceas=null;} b.disabled=false; }
  function final(j){
-   let s=(j.licenta?'Licență: '+j.licenta+'\\n\\n':'')+(j.motiv?'Motiv: '+j.motiv+'\\n\\n':'')+'Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
+   let s=(j.licenta?'Licență: '+j.licenta+'\\n\\n':'')+(j.motiv?'Motiv: '+j.motiv+'\\n\\n':'')+'Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+(typeof j.ramasi==='number'?' | RĂMAȘI de creat: '+j.ramasi:'')+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
    if(j.primaEroare) s+='\\n\\nPrima eroare (verbatim): '+j.primaEroare;
-   out.innerHTML=(j.ok?'<span class=ok>✅ GATA — toți cei ${total} sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — serverul continuă SINGUR (reîncearcă la 15 min, cei intrați ies din listă). Poți închide pagina.</span>\\n')+s;
+   // DE CE S-A OPRIT, la vedere (8 aug). Înainte, o rundă oprită de Google cu 429
+   // arăta identic cu una în care nu s-a întâmplat nimic: „creați 0, eșuați 0" și
+   // un text vag despre „continuă singur". Refuzul se NUMEȘTE acum, primul pe pagină.
+   const capul = j.ok
+     ? '<span class=ok>✅ GATA — toți cei ${total} sunt în Google Enterprise.</span>\\n'
+     : (j.oprit
+         ? '<span class=rau>OPRIT DE GOOGLE: '+j.oprit+'</span>\\n'
+         : '<span class=rau>Nu toți au intrat încă — serverul continuă SINGUR (reîncearcă la 15 min, cei intrați ies din listă). Poți închide pagina.</span>\\n');
+   out.innerHTML=capul+s;
  }
  function arata(st, prima){
    if(typeof st.total==='number' && st.total>0) b.textContent='🚀 Creează cei '+st.total+' în Enterprise';
