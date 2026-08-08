@@ -147,9 +147,13 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
     if (!adminul(req, reply)) return { error: 'forbidden' }
     const b = req.body as { simbol?: string; interval?: string } | null
     const d = await dateSimbol(String(b?.simbol ?? 'BTCUSDT'), String(b?.interval ?? '1h'))
-    if ('error' in d) return d
+    // STATUS PE MĂSURA ADEVĂRULUI (măsurat 8 aug): cele trei ieșiri de mai jos
+    // răspundeau 200 cu `{error:…}` — un apelant care se uită la `res.ok`
+    // primea „a mers" pentru o analiză care nu există. Al cincilea caz din
+    // aceeași familie; acum eșecul se vede și din status, nu doar din corp.
+    if ('error' in d) return reply.code(502).send(d)
     const agent = gasesteAgent('tranzactii')
-    if (!agent) return { error: 'agentul tranzactii lipsește din roster' }
+    if (!agent) return reply.code(503).send({ error: 'agentul tranzactii lipsește din roster' })
     const vechi = await searchMemories(config.adminEmail, 'tranzactii', [d.simbol], 3)
     const istoria = vechi.length
       ? `\nANALIZELE TALE ANTERIOARE pe ${d.simbol} (cu prețul de atunci în paranteza [pret ...]) — judecă-le scurt față de prețul de ACUM (${d.pret}): ce ai nimerit, ce ai ratat, ce înveți:\n` +
@@ -170,7 +174,9 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
       await addMemory(config.adminEmail, `[tranzactii ${zi}] ${d.simbol} [pret ${d.pret}, ${d.interval}]: ${r.text.slice(0, 900)}`, 'tranzactii')
       return { analiza: r.text, simbol: d.simbol, pret: d.pret, sursa: d.sursa }
     } catch (e) {
-      return { error: `agentul n-a răspuns: ${e instanceof Error ? e.message.slice(0, 150) : String(e)}` }
+      return reply
+        .code(502)
+        .send({ error: `agentul n-a răspuns: ${e instanceof Error ? e.message.slice(0, 150) : String(e)}` })
     }
   })
 }

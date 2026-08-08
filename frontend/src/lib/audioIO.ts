@@ -804,6 +804,15 @@ export function getVoiceLevel(): number {
   return voiceLevel
 }
 
+/** ── GURA CĂII LIVE (8 aug) ────────────────────────────────────────────────
+ *  Calea full-duplex redă prin WebAudio (bufere PCM), nu prin <audio>, deci
+ *  analizatorul de mai jos n-o vede și avatarul ar vorbi cu gura închisă.
+ *  Sesiunea live își împinge singură nivelul aici; același `getVoiceLevel()`
+ *  hrănește gura, indiferent pe ce drum vine vocea. */
+export function alimenteazaNivelVoce(v: number): void {
+  voiceLevel = Math.max(0, Math.min(1, v))
+}
+
 function stopLevelLoop(): void {
   if (levelRaf) cancelAnimationFrame(levelRaf)
   levelRaf = 0

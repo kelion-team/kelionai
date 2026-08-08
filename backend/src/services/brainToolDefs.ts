@@ -606,6 +606,16 @@ export const RULEAZA_PORTILE_TOOL: Tool = {
   },
 }
 
+export const VANEAZA_BUGURI_TOOL: Tool = {
+  name: 'vaneaza_buguri',
+  description:
+    'ADMIN ONLY. Caută AUTOMAT ce se poate căuta automat: erorile REALE ale utilizatorilor (adunate din browser), tiparele de bug ale analizorului, tipurile, testele, codul abandonat, sintaxa. Întoarce ce a găsit ȘI ce n-a putut căuta. ATENȚIE la citire: „0 erori de la utilizatori” apare DOAR dacă baza a răspuns — altfel scrie NU POT VERIFICA, fiindcă o listă goală de la o bază căzută nu înseamnă „curat”. Nu declara niciodată că nu sunt buguri pe baza ei: bugul de logică pe care niciun test nu-l acoperă NU se caută automat, se prinde măsurând comportamentul.',
+  input_schema: {
+    type: 'object',
+    properties: { ore: { type: 'number', description: 'Câte ore în urmă să se uite după erorile utilizatorilor (implicit 48).' } },
+  },
+}
+
 export const JURNAL_MASURATORI_TOOL: Tool = {
   name: 'jurnal_masuratori',
   description:
@@ -619,7 +629,7 @@ export const JURNAL_MASURATORI_TOOL: Tool = {
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
   DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
-  RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL,
+  RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL,
   // repo_* and runbook_* are still defined in routes/chat.ts (the migration to
   // the single source is incremental). They are added in autonomie.ts, from there.
   SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,

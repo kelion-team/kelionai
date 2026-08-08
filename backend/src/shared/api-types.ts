@@ -125,6 +125,9 @@ export interface MoneyCircuit {
     estimat: number
     felul: Record<string, 'masurat' | 'estimat'>
   } | null
+  /** M7b (8 aug): când costReal e null, AICI scrie DE CE (citirea a picat) —
+   *  panoul arată motivul, nu ascunde blocul în tăcere. */
+  costRealMotiv?: string
   /** The fixed voice rate ($/min) the estimate above is computed with — sent
    *  by the server so the panel never shows a hand-written figure that has
    *  drifted from the one actually used (env: VOICE_USD_PER_MINUTE). */

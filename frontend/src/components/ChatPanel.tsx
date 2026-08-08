@@ -10,6 +10,8 @@ import {
   type DragEvent as ReactDragEvent,
 } from 'react'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
+import { ceas } from '../lib/ceas'
+import { frazaInchisa, gata as contorGata } from '../lib/contorFraza'
 import { strings, resolveLang, uiStrings, type Lang } from '../lib/i18n'
 import CameraView from './CameraView'
 import { WorkClock } from './WorkClock'
@@ -186,6 +188,11 @@ export default function ChatPanel({
   // BRAIN-INPUT TICKER (Adrian, Jul 10): the EXACT text handed
   // to the brain on the current turn — it comes from the SERVER ({heard}), not a local echo.
   const [heard, setHeard] = useState('')
+  // Banda-teletext a rulat DEJA răspunsul ăsta? (Adrian, 8 aug: „repetă scris,
+  // baleind mesajul la infinit" — orice re-montare a benzii repornea animația
+  // one-shot, deci același text mătura ecranul iar și iar.) Ținem minte ts-ul
+  // răspunsului deja baleiat: o trecere pe răspuns, apoi banda tace.
+  const [tickerDoneTs, setTickerDoneTs] = useState<number | null>(null)
   // THE VISIBLE CONVERSATION (Aug 1): the chat log stays pinned to the newest
   // bubble — auto-scroll on every new message and on every streaming update.
   const chatLogRef = useRef<HTMLDivElement | null>(null)
@@ -323,6 +330,14 @@ export default function ChatPanel({
   // = '1'`, ca ownerul s-o poată ASCULTA înainte s-o facem implicită. Ruta
   // avertizează „vei avea 2 voci în același timp" — de-aia e SAU una, SAU alta.
   const vlRef = useRef<VocalLiveHandle | null>(null)
+  // Contorul de minute al sesiunii live + steagul „live a căzut de tot în tabul
+  // ăsta" (după 3 reluări picate se coboară pe calea veche și nu se mai insistă
+  // până la un refresh — altfel am pendula între cele două căi la nesfârșit).
+  const vlTickRef = useRef<number | null>(null)
+  const vlCazutRef = useRef(false)
+  /** Sonda de ÎNTOARCERE pe live după o cădere (restart de publicare = 1006):
+   *  bate capabilitatea la 5s și, când serverul revine, repune vocea live. */
+  const vlSondaRef = useRef<number | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
   // The abort controller of the current turn — "stop" aborts it on the spot.
@@ -408,10 +423,25 @@ export default function ChatPanel({
     // (userul substituent „🎙️…" + răspunsul gol) și nu se redă nimic. Tura se
     // stinge curat, ca și cum n-ar fi fost (Adrian: „să nu vorbească neîntrebat").
     if (c.ignored) {
+      // NU SE MAI ARUNCĂ CE S-A AUZIT (Adrian, 8 aug: „nu ignora ce aude când
+      // nu apare Kelion"). Înainte, tura stinsă ștergea AMBELE bule — ce ai
+      // spus dispărea fără urmă, iar „m-a auzit și a tăcut" arăta identic cu
+      // „nu m-a auzit deloc". Acum: răspunsul gol pleacă, dar bula ta RĂMÂNE
+      // dacă serverul a confirmat ce a auzit ({heard} vine înaintea {ignored}),
+      // marcată că n-a primit răspuns. Se șterge doar substituentul fără text.
       const vt = voiceTurnRef.current
       voiceTurnRef.current = null
       stopVoice()
-      if (vt) setMessages((prev) => prev.filter((m) => m.ts !== vt.userTs && m.ts !== vt.asstTs))
+      if (vt)
+        setMessages((prev) =>
+          prev
+            .filter((m) => m.ts !== vt.asstTs)
+            .flatMap((m) => {
+              if (m.ts !== vt.userTs) return [m]
+              const auzit = m.content && m.content !== '🎙️…' ? m.content : ''
+              return auzit ? [{ ...m, content: `${auzit}  · (am auzit, dar nu mi se adresa)` }] : []
+            }),
+        )
       return
     }
     // The brain-input ticker: the server says EXACTLY what text it hands
@@ -437,6 +467,11 @@ export default function ChatPanel({
       // {audio} frames are dropped. A net too for frames already synthesized by a
       // turn started before the flag (serverVoiceOff stops the source, this drains the rest).
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
+      // Aceeași regulă pentru sesiunea LIVE (8 aug): cât timp modelul live e
+      // glasul lui Kelion, vocea Chirp a chatului scris nu se redă peste el —
+      // și, la fel de important, microfonul live nu o aude ca „voce străină".
+      if (vlRef.current) return
+      contorGata('primul sunet (gura a pornit)')
       playVoice(
         c.audio,
         () => micRef.current?.setMuted(true),
@@ -496,6 +531,13 @@ export default function ChatPanel({
     }
     if (c.card && c.card.items.length > 0) {
       openWorkspaceCard(c.card.title, c.card)
+      return
+    }
+    if (c.golesteMonitor) {
+      // Mâna care șterge (8 aug): închide și workspace-ul (pagini/aplicații),
+      // și imaginea generată — până acum doar X-ul omului putea.
+      closeWorkspace()
+      setChatImage(null)
       return
     }
     if (!c.monitor) return
@@ -1224,7 +1266,7 @@ export default function ChatPanel({
           retryTextRef.current = msg
           if (healthPollRef.current) window.clearInterval(healthPollRef.current)
           let incercari = 0
-          healthPollRef.current = window.setInterval(() => {
+          healthPollRef.current = ceas('sondă sănătate voce', () => {
             incercari++
             if (incercari > 24) {
               window.clearInterval(healthPollRef.current!)
@@ -1239,6 +1281,9 @@ export default function ChatPanel({
                 const retry = retryTextRef.current
                 retryTextRef.current = null
                 console.error('[CONEXIUNE] serverul a revenit — reiau mesajul singur')
+                // Serverul a înviat după restart → vocea live primește iar
+                // dreptul de a porni (căderea ei fusese restartul, nu ea).
+                vlCazutRef.current = false
                 if (retry) void sendRef.current(retry)
               })
               .catch(() => {})
@@ -1380,33 +1425,126 @@ export default function ChatPanel({
         realtimeOffRef.current = false
         realtimeFailCountRef.current = 0
       }
-      // ── VOCEA LIVE FULL-DUPLEX, DACĂ E APRINSĂ (7 aug) ────────────────────
+      // ── VOCEA LIVE FULL-DUPLEX — DRUMUL IMPLICIT (8 aug: „execută cu Gemini") ──
       // Un singur model AUDE + GÂNDEȘTE + VORBEȘTE + CHEAMĂ UNELTE, într-o
-      // sesiune. Măsurat de owner pe VPS: 90 ms handshake, 491 ms primul
-      // răspuns, 66 KB de audio real. Lanțul de mai jos face trei drumuri
-      // separate (ureche → creier → gură).
-      // OPȚIUNE, nu implicit: `localStorage.kelion_voce_live = '1'`. Motivul e
-      // regula casei — nu se schimbă tăcut o cale care merge, pe ceva ce încă
-      // n-a fost ASCULTAT. Când ownerul confirmă vocea, mutăm implicitul.
-      if (localStorage.getItem('kelion_voce_live') === '1' && !vlRef.current) {
+      // sesiune (măsurat pe cheia ownerului: 90 ms handshake, 491 ms primul
+      // răspuns). Ownerul a ales azi drumul ăsta ca implicit — dispar prin
+      // construcție VAD-ul local, frazele împachetate, pauza de 1,4 s și tot
+      // lanțul ureche→creier→gură care a produs întârzierile măsurate azi.
+      // Ieșirea de siguranță a rămas: `localStorage.kelion_voce_live = '0'`
+      // repune calea veche, fără deploy.
+      // RECONECTARE: sesiunile Live au limită de durată la Google — o cădere
+      // mid-sesiune NU înseamnă „vocea a murit", ci „redeschide". Se reia
+      // singură de câteva ori; abia dacă și reluarea pică se coboară pe calea
+      // veche, cu motivul scris.
+      if (localStorage.getItem('kelion_voce_live') !== '0' && !vlRef.current && !vlCazutRef.current) {
         const cap = await vocalLiveDisponibila()
         if (cap?.disponibil) {
-          const vl = await deschideVocalLive({
-            onGata: () => setListening(true),
-            onUser: (text, final) => setLiveVoice(final ? '' : text),
-            onKelion: (text, final) => setLiveVoice(final ? '' : text),
-            onEroare: (motiv) => {
-              // Eroarea urcă la om cu numele ei și cade ÎNAPOI pe calea veche —
-              // niciun „merge" prefăcut, și nicio sesiune rămasă mută.
-              console.warn(`[vocalLive] ${motiv}`)
-              vlRef.current?.inchide()
-              vlRef.current = null
-              setListening(false)
-            },
-          })
-          if (vl) {
-            vlRef.current = vl
+          let reluari = 0
+          const porneste = async (): Promise<boolean> => {
+            const vl = await deschideVocalLive({
+              onGata: () => {
+                reluari = 0 // sesiune sănătoasă → contorul de reluări se șterge
+                setLiveVoice('') // orice eroare veche de pe bandă se șterge
+                setListening(true)
+              },
+              onUser: (text, final) => setLiveVoice(final ? '' : text),
+              onKelion: (text, final) => setLiveVoice(final ? '' : text),
+              onEroare: (motiv) => {
+                // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
+                // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).
+                setLiveVoice(`⚠ voce live: ${motiv}`.slice(0, 140))
+                console.warn(`[vocalLive] ${motiv}`)
+                vlRef.current?.inchide()
+                vlRef.current = null
+                setListening(false)
+                // Oprirea manuală nu se „repară" — doar căderile.
+                if (micManualOffRef.current) return
+                if (reluari < 90) {
+                  reluari++
+                  // LA SECUNDĂ, nu în 3 încercări rare (8 aug, ownerul: „15-20
+                  // sec este criminal pentru chat… chiar dacă se întrerupe 1
+                  // sec, e suficient să se redeschidă și să continue logic").
+                  // Prima reluare la 400 ms (sughițurile se sting sub secundă),
+                  // apoi la fiecare secundă până la 90 — în clipa în care
+                  // serverul respiră după o publicare, sesiunea e înapoi, iar
+                  // handle-ul persistat pe server îi redă conversația întreagă.
+                  // Banda apare abia de la a 5-a ratare, ca un sughiț de-o
+                  // secundă să rămână invizibil pe ecran.
+                  const pauza = reluari === 1 ? 400 : 1000
+                  if (reluari < 5) setLiveVoice('')
+                  console.info(`[vocalLive] reluare ${reluari}/90 în ${pauza} ms`)
+                  window.setTimeout(() => {
+                    if (!micManualOffRef.current && !vlRef.current) void porneste()
+                  }, pauza)
+                } else {
+                  // Coborârea pe calea veche NU trece iar prin blocul live (am
+                  // pica în aceeași groapă în buclă): se marchează sesiunea asta
+                  // de tab ca „live căzut" și ensureMic pornește lanțul vechi.
+                  console.error('[vocalLive] 3 reluări picate — cobor pe calea vocală veche')
+                  setLiveVoice('⚠ vocea live a picat de 3 ori — trec pe calea veche')
+                  vlCazutRef.current = true
+                  void ensureMic()
+                  // ÎNTOARCEREA PE LIVE (8 aug: „trimite err 1006 pe live… și
+                  // moare, nu mă mai aude"). Până acum, după cădere rămâneai pe
+                  // calea veche până la reîncărcarea paginii — vocea live revenea
+                  // doar dacă pica un mesaj SCRIS (sonda aia trăia în trimitere).
+                  // Acum sondăm chiar capabilitatea live la 5s: când serverul
+                  // revine, oprim calea veche și repornim lanțul — live-ul își ia
+                  // locul înapoi singur.
+                  if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                  vlSondaRef.current = window.setInterval(() => {
+                    if (micManualOffRef.current) {
+                      // Omul a închis microfonul cu mâna — nu pornim nimic peste el.
+                      if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                      vlSondaRef.current = null
+                      return
+                    }
+                    void vocalLiveDisponibila()
+                      .then((c) => {
+                        if (!c?.disponibil || vlRef.current) return
+                        if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                        vlSondaRef.current = null
+                        console.info('[vocalLive] serverul a revenit — mă întorc pe vocea live')
+                        vlCazutRef.current = false
+                        reluari = 0
+                        micRef.current?.stop()
+                        micRef.current = null
+                        void ensureMic()
+                      })
+                      .catch(() => {})
+                  }, 5000)
+                }
+              },
+            })
+            if (vl) {
+              vlRef.current = vl
+              setListening(true)
+              return true
+            }
+            return false
+          }
+          if (await porneste()) {
             console.info(`[vocalLive] pornit pe ${cap.model} (voce ${cap.voce}) — calea veche NU pornește`)
+            // Contorul de minute: vocea live se taxează ca orice voce (adminul e
+            // scutit pe server). Bate cât timp sesiunea trăiește.
+            if (vlTickRef.current) window.clearInterval(vlTickRef.current)
+            let ultimulTick = Date.now()
+            vlTickRef.current = ceas('puls minute voce live', () => {
+              if (!vlRef.current) {
+                if (vlTickRef.current) window.clearInterval(vlTickRef.current)
+                vlTickRef.current = null
+                return
+              }
+              const secs = Math.round((Date.now() - ultimulTick) / 1000)
+              ultimulTick = Date.now()
+              void fetch('/api/realtime/tick', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ seconds: secs }),
+              }).catch(() => {})
+            }, 60_000)
             return
           }
         }
@@ -1446,6 +1584,7 @@ export default function ChatPanel({
               // filtrat deja străinii; creierul unic aude fraza și decide singur
               // dacă i se vorbește (altfel tace). Fără audio nu are ce trimite.
               if (!audio) return
+              frazaInchisa() // contor: zero
               setPendingVoiceFeatures(vf)
               pendingSpeakerRef.current = speaker ?? null
               pendingAudioRef.current = audio
@@ -1568,7 +1707,7 @@ export default function ChatPanel({
           // an earlier change stopped the pulse in Chirp mode and silently
           // made voice FREE for every user — reverted. The wallet side is in
           // routes/realtime.ts (admin exempt — the owner doesn't pay himself).
-          const voiceTick = window.setInterval(() => {
+          const voiceTick = ceas('puls minute voce', () => {
             const secs = Math.round((Date.now() - lastTick) / 1000)
             lastTick = Date.now()
             void fetch('/api/realtime/tick', {
@@ -1865,6 +2004,10 @@ export default function ChatPanel({
       }
       vlRef.current?.inchide()
       vlRef.current = null
+      if (vlSondaRef.current) {
+        window.clearInterval(vlSondaRef.current)
+        vlSondaRef.current = null
+      }
       micRef.current?.stop()
       micRef.current = null
       setListening(false)
@@ -1884,7 +2027,7 @@ export default function ChatPanel({
       }
     }
     bc.addEventListener('message', onMesaj)
-    const puls = window.setInterval(() => {
+    const puls = ceas('puls interfață', () => {
       if (micRef.current) bc.postMessage({ inima: tabVoceIdRef.current })
       else if (voceAiureaRef.current && inimaAMurit(ultimaInimaRef.current, Date.now())) {
         // Tabul care ținea vocea a murit fără rămas-bun → vocea revine AICI.
@@ -2032,7 +2175,7 @@ export default function ChatPanel({
     }
     const arm = (): void => {
       if (timer) globalThis.clearInterval(timer)
-      timer = globalThis.setInterval(tick, Math.round(1000 / fps))
+      timer = ceas('captare cadre cameră', tick, Math.round(1000 / fps))
     }
     arm()
 
@@ -2273,7 +2416,7 @@ export default function ChatPanel({
               <span className="speech-tail-text">…</span>
             </span>
           </div>
-        ) : (lastAssistant?.content && !idleBandHidden && (busy || monitorMode)) || busy ? (
+        ) : ((lastAssistant?.content && !idleBandHidden && (busy || monitorMode)) || busy) && lastAssistant?.ts !== tickerDoneTs ? (
           <div className="heard-band kelion-band" aria-live="polite">
             <span className="heard-band-label kelion-k" title={t.heardKelionTitle}>K</span>
             {busy ? (
@@ -2288,6 +2431,7 @@ export default function ChatPanel({
                   className="ticker-text"
                   key={lastAssistant?.ts ?? 'empty'}
                   style={{ '--ticker-dur': tickerDur(cleanMsg(lastAssistant?.content ?? '')) } as CSSProperties}
+                  onAnimationEnd={() => setTickerDoneTs(lastAssistant?.ts ?? null)}
                 >
                   {cleanMsg(lastAssistant?.content ?? '')}
                 </span>

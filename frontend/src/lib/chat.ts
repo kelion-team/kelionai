@@ -76,6 +76,7 @@ export interface ChatControl {
   // VOCE AMBIENTALĂ: creierul a decis că NU i se vorbea → tura se stinge; clientul
   // șterge bulele optimiste și nu redă nimic (Adrian: „să nu vorbească neîntrebat").
   ignored?: boolean
+  golesteMonitor?: boolean
   // THE BRAIN'S VOICE: MP3 (base64) synthesized on the server (Chirp 3) and sent over
   // the bridge. The app only decodes + plays it — it synthesizes nothing locally.
   audio?: string
@@ -94,6 +95,7 @@ export interface ChatControl {
 }
 
 import type { VoiceFeatures } from './audioIO.js'
+import { moment as contorMoment } from './contorFraza'
 
 // U+001F (unit separator) brackets a JSON control frame in the text stream.
 const CTRL = String.fromCharCode(31)
@@ -297,7 +299,7 @@ export async function* streamChat(
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           signal,
-          body: JSON.stringify({
+          body: (voceAmbianta && contorMoment('cerere trimisă'), JSON.stringify({
             messages,
             image,
             images,
@@ -315,7 +317,7 @@ export async function* streamChat(
             voceAmbianta: voceAmbianta || undefined,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          }),
+          })),
         })
       }
     } catch (e) {
@@ -346,6 +348,7 @@ export async function* streamChat(
       throw new Error(code)
     }
 
+    if (voceAmbianta) contorMoment('server a răspuns (headere)')
     reader = res.body.getReader()
     decoder = new TextDecoder()
   }
@@ -393,6 +396,7 @@ export async function* streamChat(
       if (await resume()) continue
       throw new Error(await diagnozaConexiune())
     } finally {
+      if (voceAmbianta) contorMoment('primul semn în stream')
       window.clearTimeout(watchdog)
     }
     if (chunk.done) break

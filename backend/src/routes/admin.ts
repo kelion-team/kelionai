@@ -3,10 +3,10 @@ import { config } from '../config.js'
 import { getSessionUser, adminSiId } from '../session.js'
 import { pollVisitorChat } from './demo.js' // visitor chat polling from the common source
 import {
-  listAllTransactions,
-  listUsers,
-  getHistory,
-  getCostSummary,
+  citesteTranzactii,
+  citesteUtilizatori,
+  citesteIstoric,
+  citesteRezumatCost,
   getCapabilityGaps,
   setGapResolved,
   deleteCapabilityGap,
@@ -223,7 +223,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/users', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ users: await listUsers() })
+    const u = await citesteUtilizatori()
+    // 0 UTILIZATORI ≠ NU POT CITI (M7b, 8 aug). `listUsers()` întorcea `[]` și
+    // când baza nu răspundea — panoul desena „niciun utilizator" peste o citire
+    // imposibilă. Acum eșecul iese 503 cu motivul, nu ca listă goală.
+    if (!u.citit) return reply.code(503).send({ error: 'utilizatori_necititi', motiv: u.motiv })
+    return reply.send({ users: u.valoare })
   })
 
   // Full chat history for one user (admin only).
@@ -232,7 +237,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const email = req.query.email
     if (!email) return reply.code(400).send({ error: 'bad_request', message: 'email required' })
-    return reply.send({ history: await getHistory(email) })
+    const h = await citesteIstoric(email)
+    if (!h.citit) return reply.code(503).send({ error: 'istoric_necitit', motiv: h.motiv })
+    return reply.send({ history: h.valoare })
   })
 
   // Batch-translate a conversation's messages into Romanian (the "Translate
@@ -251,10 +258,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Live real-cost / credit monitor (admin only) — total, today, per-AI breakdown.
+  // M7b (8 aug): o citire picată NU mai iese ca „total: 0" — iese 503 cu motivul.
   app.get('/api/admin/costs', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await getCostSummary())
+    const c = await citesteRezumatCost()
+    if (!c.citit) return reply.code(503).send({ error: 'costuri_necitibile', motiv: c.motiv })
+    return reply.send(c.valoare)
   })
 
   // Capability gaps — what users asked for that Kelion can't do yet (admin only).
@@ -333,6 +343,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // The brain is 100% Gemini direct (OpenRouter/OpenAI extirpate, 3 aug). The
   // bar polls this route: the Gemini live state + real month spend, the Serper
   // search credit and the VPS resources. STRICTLY admin (users don't see it).
+  // ── CREDITUL RĂMAS, PE FIECARE AI (Adrian, 8 aug) ────────────────────────
+  // `/api/admin/brain-credit` de mai jos e pastila din bară: Gemini + Serper,
+  // în formă scurtă. Asta e RAPORTUL: un rând pe furnizor, cu ce s-a putut citi
+  // de la el, ce s-a cheltuit la noi, și — acolo unde furnizorul nu dă sold —
+  // motivul scris pe față, nu un zero care arată liniștitor.
+  app.get('/api/admin/credit-ai', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const { crediteAI } = await import('../services/creditAI.js')
+    return reply.send({ furnizori: await crediteAI() })
+  })
+
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -450,7 +472,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const costs = await getCostSummary()
+    // M7b (8 aug): banii nu se desenează din zerouri inventate — dacă jurnalul
+    // de cost nu se poate citi, pagina primește 503 cu motivul, nu „£0.00".
+    const citire = await citesteRezumatCost()
+    if (!citire.citit) return reply.code(503).send({ error: 'costuri_necitibile', motiv: citire.motiv })
+    const costs = citire.valoare
     return reply.send({
       // (Câmpurile `spent` și `profit` au fost SCOASE — auditul admin, 3 aug:
       // tabul Bani nu le desena (citește spentUsd/masurat/estimat/today), iar
@@ -482,7 +508,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/transactions', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ transactions: await listAllTransactions(200) })
+    const t = await citesteTranzactii(200)
+    if (!t.citit) return reply.code(503).send({ error: 'tranzactii_necitite', motiv: t.motiv })
+    return reply.send({ transactions: t.valoare })
   })
 
   // Per-USER activity (admin only): who signed in, last IP/place/device, how
@@ -614,19 +642,45 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // and the purchase history stay UNTOUCHED — consumed credits are not given
   // back, and accounting is not rewritten. Requires an admin session, like
   // everything here.
+  // ── „TRIMISĂ CU SUCCES" ERA O MINCIUNĂ (măsurat, 8 aug 2026) ──────────────
+  // Ruta chema cele două runbook-uri și le ARUNCA răspunsul, apoi întorcea
+  // `{ok:true}` orice s-ar fi întâmplat. Probat pe o instanță fără GITHUB_TOKEN:
+  //
+  //     POST /api/admin/reset-vps  →  200 {"ok":true}
+  //
+  // în timp ce `runRunbook` întorsese `{"error":"github_token_missing"}`. Adică
+  // butonul „Reset VPS" scria „Comanda a fost trimisă cu succes" fără să fi
+  // trimis nimic — și s-ar fi purtat identic cu autonomia pusă pe pauză
+  // („paused_by_owner"), cu workflow-ul șters sau cu un dispatch refuzat de
+  // GitHub. A patra oară aceeași familie, după „£0.00", „Cardul: necreat" și
+  // „0 creați, 0 eșuați": o operație REFUZATĂ, raportată ca fapt împlinit.
+  // Acum răspunsul POARTĂ rezultatul fiecărui pas, iar un refuz e 502.
   app.post('/api/admin/reset-vps', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const { runRunbook } = await import('../services/runbooks.js')
-    await runRunbook('restart-app')
-    await runRunbook('restart-caddy')
-    return { ok: true }
+    const { runRunbook, citesteRaspunsRunbook } = await import('../services/runbooks.js')
+    const pasi = []
+    for (const nume of ['restart-app', 'restart-caddy']) {
+      const pas = citesteRaspunsRunbook(nume, await runRunbook(nume))
+      pasi.push(pas)
+      // Primul pas refuzat înseamnă că al doilea primește exact același „nu":
+      // nu mai punem încă o cerere pe drum ca să adunăm aceeași eroare.
+      if (!pas.ok) break
+    }
+    const ok = pasi.length === 2 && pasi.every((p) => p.ok)
+    if (!ok) return reply.code(502).send({ ok: false, error: 'repornire_nepornita', pasi })
+    return reply.send({ ok: true, pasi })
   })
 
   app.post('/api/admin/reset-counters', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await resetCostCounters())
+    const r = await resetCostCounters()
+    // ȘTERGEREA PICATĂ răspundea 200 cu `{ok:false, sterse:0}`, iar panoul se
+    // uita DOAR la statusul HTTP (`r?.ok`) — deci scria „Resetat ✓" peste niște
+    // contoare neatinse. Măsurat 8 aug pe o instanță fără bază de date.
+    if (!r.ok) return reply.code(502).send({ ...r, error: 'resetare_esuata' })
+    return reply.send(r)
   })
 
   // The /api/admin/pool route was DELETED (Adrian, 30 Jul): it hand-wrote how
@@ -639,6 +693,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/money-circuit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    // M7b (8 aug): costul e o CITIRE — picată, se spune cu motiv (costRealMotiv),
+    // nu se maschează în zerouri și nu doboară restul panoului.
+    const cost = await citesteRezumatCost()
     // `citirePlati` = the state of the Revolut transaction reader. Without it,
     // the panel couldn't tell "nobody paid" apart from "I can't read the
     // account" — exactly the confusion that cost a whole day on 30 Jul.
@@ -664,7 +721,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // existed as a tool — you had to ASK to find out. Now it's in the panel,
       // next to the money: total, today, and what it went on. It cuts nothing;
       // it shows.
-      costReal: await getCostSummary().catch(() => null),
+      costReal: cost.citit ? cost.valoare : null,
+      costRealMotiv: cost.citit ? undefined : cost.motiv,
       // The voice rate the estimate is computed with — read by the panel so
       // the figure next to the explanation is ALWAYS the live one (it can be
       // changed from env, and a hand-written copy in the frontend would lie).

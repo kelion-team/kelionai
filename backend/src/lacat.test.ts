@@ -255,7 +255,14 @@ describe('LACĂT — voce unificată: fraza pleacă DIRECT la creierul unic ca a
     // Fără unire de fraze (transcriptul a dispărut): fiecare frază pleacă direct
     // la creier ca audio; creierul decide adresarea. voceMergeRef a dispărut.
     expect(panel.includes('voceMergeRef')).toBe(false)
-    expect(/onAddressed: \(_text, vf, speaker, audio\)[\s\S]{0,600}sendRef\.current\('', true\)/.test(panel)).toBe(true)
+    // Fereastra de 600 de caractere a fost SCOASĂ (Adrian, 8 aug: „scoate
+    // lacătul că e degeaba") — a picat de două ori în aceeași zi pe cod CORECT,
+    // fiindcă un comentariu împingea apelul cu 8 caractere peste limită. Un gard
+    // care măsoară distanțe de caractere nu păzește comportamentul, păzește
+    // formatarea. Rămâne verificarea de comportament: handlerul există și fraza
+    // pleacă prin aceeași send().
+    expect(/onAddressed: \(_text, vf, speaker, audio\)/.test(panel)).toBe(true)
+    expect(/sendRef\.current\('', true\)/.test(panel)).toBe(true)
     // Tura vocală e marcată (isVoiceTurn) și dusă la creier ca voce ambientală.
     expect(/isVoiceTurn/.test(panel)).toBe(true)
     // Flagul voceAmbianta trece prin transportul unic de chat (lib/chat.ts).
@@ -326,18 +333,22 @@ describe('LACĂT — creier Pro + Extended Thinking (Adrian, 5 aug: „la creier
     expect(cfg).toContain('-flash-lite(?:-|$)')
   })
 
-  it('escaladarea din chatul rapid spre Pro rămâne cablată (ask_brain doar pe tura ușoară)', () => {
-    // Supapa: dacă modelul rapid întâlnește ceva peste el, cheamă `ask_brain`,
-    // care merge pe workDefault = Pro. Fără asta, separarea ar fi o retrogradare.
+  it('escaladarea rămâne cablată (ask_brain pe faza de vorbire, cu deschiderea inventarului)', () => {
+    // Supapa, RESCRISĂ pe ordinul ownerului din 8 aug („nu știe să escaladeze
+    // să ceară acces la unelte… dacă nu are acces intră în blocaj"): cu modelul
+    // unic, „spre Pro" nu mai însemna nimic — escaladarea reală e ACCESUL LA
+    // UNELTE. Ușa se oferă pe faza de vorbire (inclusiv turele vocale) și
+    // comută lista turei pe inventarul plin. Fără ea, faza ușoară ar fi o cușcă.
     const chat = sursa('./routes/chat.ts')
-    expect(/escalationTools = heavyTurn \? \[\] : \[ASK_BRAIN_TOOL\]/.test(chat)).toBe(true)
+    expect(/escalationTools = incarcatura\.faza === 'vorbire' \? \[ASK_BRAIN_TOOL\] : \[\]/.test(chat)).toBe(true)
+    expect(chat.includes('tools.push(...uneltePline)')).toBe(true)
     const brain = sursa('./services/brain.ts')
     expect(/return \[config\.brain\.workDefault\]/.test(brain)).toBe(true)
   })
 
   it('Extended Thinking pe turele grele: reasoning «high» pe creierul direct → thinkingLevel «high»', () => {
     const chat = sursa('./routes/chat.ts')
-    expect(/reasoning: heavyTurn \?[\s\S]{0,90}'high'/.test(chat)).toBe(true)
+    expect(/reasoning: heavyTurn \?[\s\S]{0,400}'high'/.test(chat) || /reasoning:[\s\S]{0,400}'high'/.test(chat)).toBe(true)
     const gd = sursa('./services/geminiDirect.ts')
     expect(/thinkingLevel:\s*opts\.reasoning === 'high' \? 'high'/.test(gd)).toBe(true)
     // Podeaua de output urcă pe gândirea extinsă, altfel răspunsul iese tăiat.

@@ -1,4 +1,4 @@
-import { config, modelUnicDirect, modelRapidDirect } from '../config.js'
+import { modelUnicDirect, modelRapidDirect } from '../config.js'
 
 // ── CONTRACTUL CREIERULUI — tipuri + reguli PURE, fără rețea ─────────────────
 // (Extirparea totală OpenRouter + OpenAI, 3 aug — ordinul repetat al ownerului:

@@ -77,3 +77,84 @@ describe('vocalLive — interpreteazaCadru', () => {
     expect(interpreteazaCadru({ ceva: 'altceva' })).toEqual([])
   })
 })
+
+// ── MEMORIA SESIUNII LIVE (8 aug, „execută cu Gemini") ──────────────────────
+// Sesiunea Live pornește de la zero la fiecare deschidere — fără instrucțiunea
+// care cară istoricul, Kelion ar fi un străin politicos la fiecare apăsare de
+// microfon. Funcția e pură, deci se probează aici, nu se ia pe încredere.
+import { construiesteInstructiune } from './services/vocalLive.js'
+
+describe('vocalLive — instrucțiunea cară memoria omului', () => {
+  const persona = 'Ești Kelion.'
+
+  it('fără istoric: persona + numele, fără bloc de context inventat', () => {
+    const i = construiesteInstructiune(persona, 'Adrian', [])
+    expect(i).toContain('Ești Kelion.')
+    expect(i).toContain('Adrian')
+    expect(i, 'fără istoric nu există „ultimele schimburi" — nu se inventează').not.toContain('ULTIMELE')
+  })
+
+  it('regula limbii e în instrucțiune: orice limbă, oglindirea vorbitorului (Adrian, 8 aug)', () => {
+    // Măsurat înainte de regulă: instrucțiunea nu spunea NIMIC despre limbă și
+    // configul nu trimite languageCode — modelul rămânea pe limba ghicită.
+    const i = construiesteInstructiune(persona, 'Adrian', [])
+    expect(i).toContain('REGULA LIMBII')
+    expect(i).toContain('limba ULTIMEI fraze')
+    expect(i, 'nu se pinuiește niciun cod de limbă — aia ar fi cușca inversă').not.toMatch(/languageCode/)
+  })
+
+  it('cu istoric: ultimele schimburi intră, cu numele omului pe replicile lui', () => {
+    const i = construiesteInstructiune(persona, 'Adrian', [
+      { role: 'user', content: 'cât e ceasul?' },
+      { role: 'assistant', content: 'E ora trei.' },
+    ])
+    expect(i).toContain('ULTIMELE VOASTRE SCHIMBURI')
+    expect(i).toContain('Adrian: cât e ceasul?')
+    expect(i).toContain('Kelion: E ora trei.')
+  })
+
+  it('istoricul lung se taie: ultimele 12 schimburi, replici de max 200, bloc de max 2400', () => {
+    const lung = Array.from({ length: 40 }, (_, k) => ({ role: 'user', content: `mesajul ${k} ${'x'.repeat(500)}` }))
+    const i = construiesteInstructiune(persona, 'Adrian', lung)
+    expect(i, 'mesajul 27 e al 13-lea de la coadă — nu are ce căuta').not.toContain('mesajul 27 ')
+    expect(i).toContain('mesajul 39 ')
+    // Bugetul fix: numele + REGULA LIMBII (8 aug, ~390 de caractere) + antetul
+    // blocului de istoric + blocul plafonat la 2400. Plafonul RĂMÂNE — doar
+    // încape și regula limbii în el, că e parte din antetul fix, nu din istoric.
+    expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
+      persona.length + 3000,
+    )
+  })
+})
+
+// ── SESIUNEA SUPRAVIEȚUIEȘTE LIMITEI GOOGLE (8 aug: „a funcționat 5 minute
+// impecabil, după care a amuțit") ───────────────────────────────────────────
+describe('vocalLive — reluarea sesiunii la limita de durată', () => {
+  it('setup-ul CERE reluarea; la reconectare poartă handle-ul primit', () => {
+    const proaspat = construiesteSetup('m', 'Charon', 'p', []) as { setup: Record<string, unknown> }
+    expect(proaspat.setup.sessionResumption, 'fără cerere, Google nu dă handle și sesiunea moare sec la limită').toEqual({})
+    const reluat = construiesteSetup('m', 'Charon', 'p', [], 'handle-123') as { setup: Record<string, unknown> }
+    expect(reluat.setup.sessionResumption).toEqual({ handle: 'handle-123' })
+  })
+
+  it('„no limit": fereastra glisantă e cerută — contextul plin nu mai omoară sesiunea', () => {
+    const st = construiesteSetup('m', 'Charon', 'p', []) as { setup: Record<string, unknown> }
+    expect(st.setup.contextWindowCompression, 'fără compresie, sesiunea moare când conversația se lungește').toEqual({
+      slidingWindow: {},
+    })
+  })
+
+  it('handle-ul de reluare se citește din cadru (doar când e resumable)', () => {
+    const ev = interpreteazaCadru({ sessionResumptionUpdate: { resumable: true, newHandle: 'h9' } })
+    expect(ev).toContainEqual({ fel: 'handleReluare', handle: 'h9' })
+    // ne-resumabil = nu avem cu ce relua — nu inventăm un handle
+    expect(interpreteazaCadru({ sessionResumptionUpdate: { resumable: false, newHandle: 'h9' } })).toEqual([])
+  })
+
+  it('preavizul de închidere (goAway) se citește, cu timpul rămas în ms', () => {
+    const ev = interpreteazaCadru({ goAway: { timeLeft: '12.5s' } })
+    expect(ev).toContainEqual({ fel: 'preavizInchidere', msRamase: 12500 })
+    // goAway fără timp rămâne preaviz — redeschidem oricum
+    expect(interpreteazaCadru({ goAway: {} })).toContainEqual({ fel: 'preavizInchidere', msRamase: undefined })
+  })
+})

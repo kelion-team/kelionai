@@ -314,7 +314,6 @@ export function creeazaFakePg(): FakePg {
       return gol
     }
 
-    let m: RegExpMatchArray | null
 
     if (/^SELECT 1 FROM billing_events WHERE ref = \$1$/i.test(q)) {
       const n = baza.billing.filter((r) => r.ref === p[0]).length

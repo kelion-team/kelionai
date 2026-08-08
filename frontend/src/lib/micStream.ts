@@ -44,7 +44,10 @@ const PRE_ROLL_MS = 400 // buffer înainte de declanșare — primele cadre voca
 // microfon, dar un reziduu prin difuzor poate rămâne — cerem semnal clar,
 // susținut, după o gardă de onset, ca să nu se taie singur.
 const BARGE_RMS = 0.024 // dublul pragului normal: doar voce apropiată, clară
-const BARGE_HOLD_MS = 180 // vocea trebuie să țină atât ca să taie (nu un poc)
+const BARGE_HOLD_MS = 300 // vocea trebuie să țină atât ca să taie (nu un poc).
+// 180 ms tăia vocea lui Kelion pe zgomot de fond susținut (Adrian, 8 aug: „nu
+// dă audio toată fraza — se oprește") — pragul devine și RELATIV la podeaua de
+// zgomot (vezi mai jos), iar tăierea se scrie în consolă, ca să nu mai fie mută.
 const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe muțenia (onset redare)
 
 export interface MicStreamHandle {
@@ -158,6 +161,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   // Diagnostic de captare (Adrian, 6 aug — „nu preia audio"): un log rar din
   // onAudioProcess ca să se vadă la runtime dacă procesarea rulează + starea ctx.
   let diagCadre = 0
+  // Starea de la ultimul rând scris + momentul ultimului puls: împreună fac
+  // diferența între „nu s-a schimbat nimic" și „nu mai rulează nimic".
+  let ultimaStare = ''
+  let ultimulPuls = 0
 
   // Pre-roll ring: păstrează ultimele ~400ms de audio CHIAR ÎNAINTE ca VAD-ul să
   // declare „voce". La declanșare, aceste cadre intră primele în frază — fixează
@@ -249,16 +256,29 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     lastVoiceAt = 0
     opts.onLive('') // golește banda la sfârșit de frază
     const features = finalizeFeatures()
+    // ── O FRAZĂ ARUNCATĂ TREBUIE SĂ SE VADĂ (Adrian, 8 aug, din consola lui) ──
+    // Aici fraza pleca doar `if (audio)`, iar `catch { audio = undefined }`
+    // înghițea și motivul. Adică: omul vorbea, vedea în consolă doar
+    // `frazaDeschisa: true → false`, și NIMIC după. N-avea cum să distingă
+    // „fraza n-a plecat" de „a plecat și creierul n-a răspuns" — două defecte
+    // complet diferite, arătând identic. Aceeași familie ca „£0.00": o operație
+    // care n-a avut loc, raportată ca tăcere.
+    const durataMs = Math.round((phrasePcmLen / 16000) * 1000)
     let audio: string | undefined
+    let motivAruncare = ''
     try {
       audio = wavDataUri16k(phrasePcm) || undefined
-    } catch {
+      if (!audio) motivAruncare = `fără audio util (${phrasePcmLen} eșantioane, ${durataMs} ms, ${phraseFrames} cadre)`
+    } catch (e) {
       audio = undefined
+      motivAruncare = `împachetarea WAV a picat: ${e instanceof Error ? e.message : String(e)}`
     }
-    // O frază fără audio util (prea scurtă) nu pleacă — nimic de decis pentru creier.
     if (audio) {
       if (features && opts.storePendingFeatures !== false) setPendingVoiceFeatures(features)
+      console.info('[frază] plec la creier', { ms: durataMs, cadre: phraseFrames, octeti: audio.length, amprenta: !!features })
       opts.onPhrase('', features, audio)
+    } else {
+      console.warn('[frază] ARUNCATĂ, nu ajunge la creier —', motivAruncare)
     }
     resetPhrase()
   }
@@ -270,10 +290,22 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
 
   const onAudioProcess = (e: AudioProcessingEvent): void => {
     if (closed) return
-    // ~1 log/secundă: dacă NU apare deloc când vorbești → procesarea nu rulează
-    // (context suspendat / graf mort); dacă apare cu muted:true mereu → mut blocat;
-    // dacă apare cu ctx:'running', muted:false, dar fraza nu se deschide → prag/semnal.
-    if (diagCadre++ % 12 === 0) console.info('[captare]', { ctx: ctx.state, muted, frazaDeschisa: phraseOpen })
+    // ── DIAGNOSTICUL NU MAI ÎNEACĂ CONSOLA (Adrian, 8 aug, consola lui) ──────
+    // Scria un rând pe secundă, la nesfârșit, cu aceleași trei valori. În
+    // captura lui, 45 de rânduri identice `[captare]` acopereau complet orice
+    // alt semnal — inclusiv rândul care ar fi spus dacă fraza a plecat sau nu.
+    // Un diagnostic care ascunde diagnosticul e mai rău decât niciunul.
+    // Acum scrie DOAR la SCHIMBARE de stare (asta e informația) + un puls rar,
+    // ca „liniște" să rămână distinctibil de „graful e mort".
+    diagCadre++
+    const stareAcum = `${ctx.state}|${muted}|${phraseOpen}`
+    const acumMs = performance.now()
+    if (stareAcum !== ultimaStare || acumMs - ultimulPuls > 15000) {
+      if (stareAcum !== ultimaStare) console.info('[captare]', { ctx: ctx.state, muted, frazaDeschisa: phraseOpen })
+      else console.info('[captare] puls', { ctx: ctx.state, muted, frazaDeschisa: phraseOpen, cadre: diagCadre })
+      ultimaStare = stareAcum
+      ultimulPuls = acumMs
+    }
     // BARGE-IN cât Kelion vorbește: cât e MUT (anti-ecou) NU acumulăm audio (ar fi
     // ecoul lui), dar calculăm volumul și, la voce clară SUSȚINUTĂ (peste garda de
     // onset), îl întrerupem prin onBargeIn. Calea normală (dezmuțit) rămâne neatinsă.
@@ -284,10 +316,15 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       const rmsMut = Math.sqrt(s2 / inp.length)
       const tNow = performance.now()
       if (mutedSince === 0) mutedSince = tNow
-      if (tNow - mutedSince > BARGE_GUARD_MS && rmsMut > BARGE_RMS) {
+      // Prag dublu: absolut ȘI peste podeaua de zgomot — altfel un fond
+      // constant peste 0.024 tăia fraza lui Kelion la fiecare răspuns.
+      if (tNow - mutedSince > BARGE_GUARD_MS && rmsMut > Math.max(BARGE_RMS, noiseFloor * 3)) {
         if (bargeSince === 0) bargeSince = tNow
         else if (tNow - bargeSince >= BARGE_HOLD_MS) {
           bargeSince = 0
+          // Tăierea se NUMEȘTE: fără rândul ăsta, „audio-ul se oprește la
+          // jumătate" era indistinctibil de orice altă cauză.
+          console.info(`[barge-in] am tăiat vocea lui Kelion: semnal ${rmsMut.toFixed(4)} peste prag ${Math.max(BARGE_RMS, noiseFloor * 3).toFixed(4)}`)
           opts.onBargeIn?.()
         }
       } else {
@@ -307,7 +344,28 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     // absolut ȘI dominând podeaua de-atâtea ori. Fără asta, orice zgomot > 0.012
     // ar deschide o frază fantomă.
     const voiced = rms > VOICE_RMS && rms > noiseFloor * DOMINANCE
-    if (!voiced) noiseFloor = noiseFloor * 0.97 + rms * 0.03
+    // Decăderea normală poartă aceeași țintă sub nivel (×0,7) și același plafon:
+    // altfel media cadrelor de zgomot trăgea podeaua înapoi LA zgomot — adică
+    // înapoi în starea surdă din care recalibrarea tocmai ne-a scos.
+    if (!voiced) noiseFloor = Math.min(0.03, Math.max(0.004, noiseFloor * 0.97 + rms * 0.7 * 0.03))
+    // ── DEBLOCAREA VAD-ULUI (măsurat 8 aug, consola ownerului) ──────────────
+    // Rândul de deasupra adapta podeaua DOAR când nu e voce. Cu zgomot ambiental
+    // peste prag, fiecare cadru era „voce" → podeaua nu se mai mișca NICIODATĂ →
+    // voce continuă pentru totdeauna. Dovada, de 4 ori la rând în consola lui:
+    //     [frază] plec la creier {ms: 20048, octeti: 855482}
+    // Fiecare „frază" = fix plafonul de 20 s / 855 KB, identică — fraza nu se
+    // închidea la pauza lui de 1,4 s (pauza nu se VEDEA), ci doar la plafon.
+    // Alea erau secundele lui de așteptare.
+    // Deblocarea: după 8 s de „voce" neîntreruptă (nicio frază vorbită normal
+    // n-are 8 s fără NICIO pauză de 1,4 s), podeaua începe să urce încet spre
+    // nivelul curent — zgomotul constant devine podea, vocea reală rămâne peste.
+    else if (phraseOpen && phrasePcmLen > TARGET_RATE * 8) {
+      // Ținta e SUB nivelul curent (×0,45): cu ținta chiar la rms, pragul de
+      // voce (podea × 2,2) sărea PESTE vocea omului și microfonul surzea —
+      // măsurat de owner („nu primește nimic de la microfon"). 0,45 × 2,2 ≈ 1:
+      // pragul rezultat ≈ nivelul zgomotului; ce-l depășește cât de puțin trece.
+      noiseFloor = Math.min(0.03, Math.max(0.004, noiseFloor * 0.99 + rms * 0.55 * 0.01))
+    }
 
     // Pre-roll: păstrăm mereu ultimele cadre, chiar înainte ca VAD-ul să declare voce.
     pushPreRoll(input)
@@ -346,8 +404,31 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       phrasePcmLen += ds.length
       framesSent++
     } else {
-      // depășit capul de ~20s → închidem fraza acum (nu o lăsăm să crească la infinit)
-      closePhrase()
+      // ── PLAFONUL DE 20 s ATINS = ZGOMOT CONTINUU, NU O FRAZĂ ──────────────
+      // Înainte, aici se chema closePhrase() — adică cele 20 s / 855 KB de
+      // zgomot PLECAU la creier: urcare de aproape 1 s, creierul asculta 20 s
+      // de fond și (corect) tăcea, iar banii și secundele se duceau degeaba.
+      // O rostire adresată nu ține 20 s fără NICIO pauză de 1,4 s. Se aruncă,
+      // cu motivul scris, iar podeaua se recalibrează la nivelul zgomotului ca
+      // VAD-ul să se deblocheze pe loc. Ce se pierde, pe față: o dictare
+      // neîntreruptă mai lungă de 20 s ar fi și ea aruncată — dacă apare cazul
+      // real, se vede în jurnal exact pe linia asta.
+      // ── A DOUA LECȚIE, din logul ownerului: „recalibrată la 0.0002" ────────
+      // Recalibram pe RMS-ul CADRULUI CURENT — dar plafonul se atinge adesea în
+      // coada de tăcere a frazei, deci „nivelul zgomotului" era de fapt liniște
+      // aproape totală (0.00045) și podeaua ieșea absurd de joasă: următorul
+      // blocaj devenea MAI ușor. Corect e pe ENERGIA MEDIE A FRAZEI (aceeași
+      // scară RMS, măsurată pe toată durata blocajului), cu factor 0,55: pragul
+      // rezultat ≈ 1,2 × nivelul susținut — îl închide, fără să surzească vocea
+      // care îl depășește. Podeaua e mărginită [0.004, 0.03] ca NICIO adaptare
+      // să nu mai poată produce nici 0.0002, nici surzenie.
+      const medieFraza = phraseFrames > 0 ? phraseEnergySum / phraseFrames : rms
+      noiseFloor = Math.min(0.03, Math.max(0.004, noiseFloor, medieFraza * 0.55))
+      console.warn(
+        `[frază] ARUNCATĂ — 20 s fără nicio pauză = zgomot continuu (VAD blocat); energia medie ${medieFraza.toFixed(4)} → podeaua recalibrată la ${noiseFloor.toFixed(4)}`,
+      )
+      opts.onLive('')
+      resetPhrase()
     }
   }
 

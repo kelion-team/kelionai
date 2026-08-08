@@ -1046,9 +1046,9 @@ export default function AdminPanel({
       <div className="admin-panel">
         <header className="admin-head">
           <div className="admin-tabs">
-            {/* Butonul cerut de owner („pui în admin buton, eu loghez și
-                continui"): deschide pagina care creează cei 33 de agenți în
-                consola Google Enterprise, cu tokenul lui (services/enterpriseCreate). */}
+            {/* Deschide pagina de adăugat agenți manual (+ temele iscoadelor).
+                Crearea în consola Google Enterprise a fost SCOASĂ pe ordinul
+                ownerului (8 aug) — agenții lucrează în aplicație, la /api/a2a. */}
             <button
               type="button"
               className="admin-tab"
@@ -1355,6 +1355,13 @@ export default function AdminPanel({
                       </span>
                       </>
                     )}
+                    {/* M7b (8 aug): costul necitit se SPUNE, nu se ascunde — înainte,
+                    costReal null făcea blocul să dispară tăcut, fix „£0.00"-ul invers. */}
+                    {circuit && !circuit.costReal && (
+                      <span className="or-wallet-sub">
+                        💷 nu pot citi jurnalul de cost{circuit.costRealMotiv ? `: ${circuit.costRealMotiv}` : ''}
+                      </span>
+                    )}
                     {/* YOUR LEVER (Adrian: „the 6 are needed, but not brakes”). The
                     „pauza-autonomie” command existed since Jul 27, but you had to know
                     it by heart. A limit YOU choose is not a barrier; one I impose on
@@ -1548,7 +1555,18 @@ export default function AdminPanel({
                         // butonul ieșea tăcut din „…" și adminul nu afla că
                         // resetarea NU s-a făcut.
                         const r = await fetch('/api/admin/reset-counters', { method: 'POST', credentials: 'include' }).catch(() => null)
-                        setResetMsg(r?.ok ? 'Resetat ✓' : 'Nu s-a putut reseta — reîncearcă.')
+                        // ȘI CORPUL (măsurat 8 aug): un DELETE picat răspundea
+                        // 200 cu `{ok:false, sterse:0}`, deci `r.ok` era true și
+                        // aici scria „Resetat ✓" peste contoare neatinse. Acum
+                        // serverul dă 502 la eșec, iar aici se citește cifra.
+                        const j = (await r?.json().catch(() => null)) as
+                          | { ok?: boolean; sterse?: number; error?: string }
+                          | null
+                        setResetMsg(
+                          r?.ok && j?.ok === true
+                            ? `Resetat ✓ (${j.sterse ?? 0} înregistrări șterse)`
+                            : `Nu s-a putut reseta${j?.error ? ` — ${j.error}` : ''} — reîncearcă.`,
+                        )
                         await fetchFinance().then((f) => { if (f) setFinance(f) }).catch(() => {})
                         setResetBusy(false)
                       }}
@@ -2116,10 +2134,26 @@ export default function AdminPanel({
                       method: 'POST',
                       credentials: 'include'
                     })
-                    if (res.ok) alert('Comanda de resetare VPS a fost trimisă cu succes.')
-                    else alert('Eroare la trimiterea comenzii de resetare.')
+                    // CORPUL, nu doar statusul (măsurat 8 aug): serverul întorcea
+                    // `{ok:true}` chiar și când GitHub refuzase declanșarea, deci
+                    // aici scria „trimisă cu succes" pentru o repornire care nu
+                    // pornise. Acum răspunsul poartă fiecare pas, cu motivul lui.
+                    const j = (await res.json().catch(() => null)) as
+                      | { ok?: boolean; pasi?: { runbook: string; ok: boolean; detaliu: string }[] }
+                      | null
+                    if (res.ok && j?.ok === true) {
+                      alert(`Repornire pornită: ${(j.pasi ?? []).map((p) => p.runbook).join(', ')}`)
+                    } else {
+                      const motiv = (j?.pasi ?? []).find((p) => !p.ok)?.detaliu ?? `HTTP ${res.status}`
+                      alert(`Resetarea NU a pornit: ${motiv}`)
+                    }
                   } catch (e) {
-                    alert('Eroare rețea la trimiterea comenzii.')
+                    // Eroarea era PRINSĂ și ARUNCATĂ: omul vedea „eroare de rețea"
+                    // orice s-ar fi întâmplat, iar cauza reală dispărea. Acum
+                    // motivul ajunge la el și în consolă, ca să se poată repara.
+                    const motiv = e instanceof Error ? e.message : String(e)
+                    console.error('[reset-vps]', e)
+                    alert(`Eroare la trimiterea comenzii de resetare: ${motiv}`)
                   }
                 }}
               >

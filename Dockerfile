@@ -42,9 +42,32 @@ RUN mkdir -p /app/backend/models \
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx" \
         || echo "model voce: descărcare eșuată/expirată la build — voiceEmbedding cade grațios (fallback)")
 
-# --- frontend build ---
+# ── DEPENDENȚELE AMÂNDUROR CAPETELOR, ÎNAINTE DE ORICE SURSĂ (8 aug 2026) ────
+# Adrian: „identifică de ce e așa de mare timpul de construcție și publicare".
+# Cache-ul Docker e SECVENȚIAL: dacă un strat se invalidează, TOT ce vine după el
+# se reconstruiește — chiar dacă fișierele lui n-au fost atinse. Înainte, ordinea
+# era: [copiez sursele frontend] → [build frontend] → [copiez package.json backend]
+# → [npm install backend]. Adică ORICE virgulă schimbată în frontend invalida
+# stratul cu dependențele backend și le reinstala pe toate, deși `package.json` nu
+# fusese atins de luni de zile. Iar PR-urile care ating ambele capete — cazul
+# obișnuit — plăteau de fiecare dată.
+#
+# Acum amândouă instalările stau pe straturi STABILE, care depind doar de
+# fișierele de dependențe. O schimbare de cod invalidează doar BUILD-urile, nu și
+# instalările.
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN cd frontend && npm ci
+COPY backend/package.json backend/package-lock.json ./backend/
+# npm install (nu ci) ca să repare singur o derivă de lock; doar dependențe de producție.
+# RETRY pe eroarea TRECĂTOARE `esbuild ETXTBSY` (3 aug: deploy-ul 96437bc a picat
+# aici — esbuild rulează `esbuild --version` imediat după ce-și scrie binarul, iar
+# uneori fișierul e încă „busy"). O a doua încercare după o scurtă pauză trece de
+# cursa asta; fără ea, publicarea moare tăcut și live-ul rămâne pe build-ul vechi.
+# Nu ascunde erori reale: dacă pică și a doua oară (lipsă modul, lock stricat),
+# build-ul tot cade.
+RUN cd backend && (npm install || (echo "npm install: reîncerc după eroare trecătoare (ex. esbuild ETXTBSY)" && sleep 5 && npm install))
+
+# --- frontend build ---
 COPY frontend ./frontend
 # CONTRACTUL HTTP COMUN (Lotul A): tipurile care circulă prin API sunt declarate
 # o SINGURĂ dată, în backend/src/shared, și importate de ambele capete. Aici
@@ -55,15 +78,6 @@ COPY backend/src/shared ./backend/src/shared
 RUN cd frontend && npm run build
 
 # --- backend build ---
-COPY backend/package.json backend/package-lock.json ./backend/
-# npm install (not ci) to auto-heal any lock drift; production deps only.
-# RETRY pe eroarea TRECĂTOARE `esbuild ETXTBSY` (3 aug: deploy-ul 96437bc a
-# picat aici — esbuild rulează `esbuild --version` imediat după ce-și scrie
-# binarul, iar uneori fișierul e încă „busy"). O a doua încercare după o scurtă
-# pauză trece de cursa asta; fără ea, publicarea moare tăcut și live-ul rămâne
-# pe build-ul vechi (exact ce s-a întâmplat). Nu ascunde erori reale: dacă pică
-# și a doua oară (lipsă modul, lock stricat), build-ul tot cade.
-RUN cd backend && (npm install || (echo "npm install: reîncerc după eroare trecătoare (ex. esbuild ETXTBSY)" && sleep 5 && npm install))
 # Playwright browsers are NOT in the image (the VPS image builder often fails
 # on system deps installation). They are installed by deploy.sh step 4b right
 # after the container starts, into the persistent /root/kelion/pw-cache volume

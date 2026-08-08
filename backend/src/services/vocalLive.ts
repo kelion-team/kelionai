@@ -45,6 +45,39 @@ export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-3.1-flas
 // (Puck / Charon / Fenrir / Orus sunt toate acceptate) după ce o ascultă.
 export const VOCAL_LIVE_VOICE = process.env.VOCAL_LIVE_VOICE || 'Charon'
 
+/** ── INSTRUCȚIUNEA SESIUNII LIVE, CU MEMORIA OMULUI (8 aug, „execută cu
+ *  Gemini") ─────────────────────────────────────────────────────────────────
+ *  Sesiunea Live pornește de la zero la fiecare deschidere — fără blocul ăsta,
+ *  Kelion ar fi un străin politicos la fiecare apăsare de microfon. PURĂ și
+ *  exportată: contractul cu memoria se probează, nu se ia pe încredere. */
+export function construiesteInstructiune(
+  persona: string,
+  numeUser: string,
+  istoric: Array<{ role: string; content: string }>,
+): string {
+  let instructiune = `${persona}\nVorbești cu ${numeUser}.`
+  // REGULA LIMBII pe sesiunea VIE (Adrian, 8 aug: „trebuie să vorbească în
+  // orice limbă Kelion"). Măsurat înainte: instrucțiunea nu spunea NIMIC
+  // despre limbă și nici configul nu trimite languageCode — modelul rămânea
+  // pe ce ghicea (de regulă limba personei), indiferent în ce limbă i se
+  // vorbea. Nu pinuim niciun cod de limbă (aia ar fi cușca inversă): regula
+  // e OGLINDIREA vorbitorului, în orice limbă, cu comutare instant.
+  instructiune +=
+    `\nREGULA LIMBII — PRIMA REGULĂ: vorbește în LIMBA în care ți se vorbește, oricare ar fi ea. ` +
+    `Răspunzi în limba ULTIMEI fraze a omului; dacă el comută limba, comuți și tu INSTANT, fără să comentezi comutarea. ` +
+    `Nu amesteci limbile în același răspuns și nu traduci nechemat.`
+  if (istoric.length) {
+    const randuri = istoric
+      .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
+      .map((r) => `${r.role === 'user' ? numeUser : 'Kelion'}: ${String(r.content).slice(0, 200)}`)
+      .join('\n')
+    instructiune +=
+      `\n\nULTIMELE VOASTRE SCHIMBURI (context, nu de recitat — continuă natural de unde ați rămas):\n` +
+      randuri.slice(0, 2400)
+  }
+  return instructiune
+}
+
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent'
 
 /** O unealtă pe care modelul o poate chema în timpul conversației vocale. */
@@ -71,6 +104,13 @@ export interface VocalLiveEvenimente {
   onTuraGata?(): void
   /** Orice eroare, NUMITĂ. */
   onEroare(motiv: string): void
+  /** Informații de mers (varianta de setup acceptată, degradări) — pentru jurnal. */
+  onInfo?(msg: string): void
+  /** Google a împins un handle de reluare proaspăt — apelantul îl poate
+   *  PERSISTA, ca o repornire a serverului să reia ACEEAȘI sesiune (8 aug,
+   *  ownerul: „chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
+   *  și să continue chatul logic"). */
+  onHandleReluare?(handle: string): void
 }
 
 export interface VocalLive {
@@ -94,9 +134,25 @@ export function construiesteSetup(
   voce: string,
   instructiune: string,
   unelte: UnealtaVocala[],
+  reluareHandle?: string,
 ): Record<string, unknown> {
   const setup: Record<string, unknown> = {
     model: `models/${model}`,
+    // ── RELUAREA SESIUNII (8 aug: „a funcționat 5 minute impecabil, după care
+    // a amuțit") ─────────────────────────────────────────────────────────────
+    // Sesiunile Live au limită de durată la Google. Fără blocul ăsta, la limită
+    // sesiunea moare sec, reluările de la zero pot fi refuzate, iar vocea cade
+    // pe calea veche. Cu el, serverul primește un HANDLE de reluare
+    // (sessionResumptionUpdate) și un preaviz de închidere (goAway) — și
+    // redeschide sesiunea CU CONTEXT, transparent pentru browser.
+    sessionResumption: reluareHandle ? { handle: reluareHandle } : {},
+    // „SĂ FIE NO LIMIT" (Adrian, 8 aug): a doua limită, pe lângă durata
+    // conexiunii, e umplerea contextului — sesiunea moare când conversația
+    // devine prea lungă. Fereastra glisantă e mecanismul oficial Google pentru
+    // sesiuni de durată NELIMITATĂ: contextul vechi se comprimă din mers, în
+    // loc să omoare sesiunea. Împreună cu reluarea pe handle, singurele limite
+    // rămase sunt cele fizice (rețeaua ta, cheia ta).
+    contextWindowCompression: { slidingWindow: {} },
     generationConfig: {
       // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat: cu
       // TEXT dau cod 1007). Vocea = prebuiltVoiceConfig.voiceName (masculină).
@@ -124,9 +180,23 @@ export function interpreteazaCadru(m: Record<string, unknown>): Array<
   | { fel: 'unealta'; id: string; name: string; args: Record<string, unknown> }
   | { fel: 'intrerupt' }
   | { fel: 'turaGata' }
+  | { fel: 'handleReluare'; handle: string }
+  | { fel: 'preavizInchidere'; msRamase?: number }
 > {
   const ev: ReturnType<typeof interpreteazaCadru> = []
   if (m.setupComplete !== undefined) ev.push({ fel: 'gata' })
+
+  // Handle-ul de reluare: Google îl împinge periodic; îl ținem pe cel mai nou
+  // ca redeschiderea să continue ACEEAȘI conversație, nu una de la zero.
+  const sru = m.sessionResumptionUpdate as { resumable?: boolean; newHandle?: string } | undefined
+  if (sru?.resumable && sru.newHandle) ev.push({ fel: 'handleReluare', handle: sru.newHandle })
+
+  // Preavizul de închidere: Google spune CÂND taie. Redeschidem ÎNAINTE.
+  const ga = m.goAway as { timeLeft?: string } | undefined
+  if (ga !== undefined) {
+    const ms = ga?.timeLeft ? Math.max(0, Math.round(parseFloat(ga.timeLeft) * 1000)) : undefined
+    ev.push({ fel: 'preavizInchidere', msRamase: ms })
+  }
 
   const sc = m.serverContent as
     | {
@@ -163,72 +233,161 @@ export function deschideVocalLive(
   instructiune: string,
   unelte: UnealtaVocala[],
   ev: VocalLiveEvenimente,
+  /** Handle de reluare PERSISTAT dintr-o viață anterioară a procesului: o
+   *  repornire de publicare nu mai omoară conversația — sesiunea Google se
+   *  reia cu tot contextul ei. Un handle stătut nu strică nimic: setup-ul cu
+   *  el pică înainte de `gata`, iar degradarea măsurată reia curat, fără el. */
+  reluareInitial?: string,
+  /** Setul DOVEDIT de rezervă: dacă setup-ul cu inventarul plin e refuzat
+   *  (moarte înainte de `gata` chiar și fără extensii), sesiunea coboară pe
+   *  setul ăsta mic în loc să moară — și spune în jurnal pe ce a rămas. */
+  unelteRezerva?: UnealtaVocala[],
 ): VocalLive | null {
   if (!config.geminiKey) return null
-  const ws = new WebSocket(`${WS_URL}?key=${config.geminiKey}`)
+  let unelteActive = unelte
+
+  // ── SESIUNEA CARE SUPRAVIEȚUIEȘTE LIMITEI (8 aug: „a funcționat 5 minute
+  // impecabil, după care a amuțit") ─────────────────────────────────────────
+  // Google închide sesiunile Live la limită de durată. Înainte, închiderea aia
+  // urca drept EROARE, browserul relua de la zero de 3 ori și cădea pe calea
+  // veche. Acum reconectarea e AICI, în motor: ținem handle-ul de reluare pe
+  // care Google îl împinge periodic, iar la preaviz (goAway) sau la închidere
+  // redeschidem cu ACELAȘI handle — conversația continuă de unde era, browserul
+  // nu află nimic. Doar când și reluarea pică de 3 ori la rând urcă eroarea.
+  let ws: WebSocket | null = null
   let gata = false
   let inchisa = false
-  const coada: Buffer[] = [] // audio sosit înainte de setupComplete
+  let handleReluare: string | undefined = reluareInitial
+  let reconectari = 0
+  // ── DEGRADARE MĂSURATĂ (8 aug: „a crăpat chatul... după ce ai scos limitarea
+  // de 5 minute") ──────────────────────────────────────────────────────────
+  // Extensiile „no limit" (sessionResumption + contextWindowCompression) au
+  // fost dovedite doar pe FORMĂ, nu pe acceptare — și un model preview le
+  // poate refuza LA SETUP, adică sesiunea nu se mai deschide deloc: mai rău
+  // decât limita pe care o scoteam. De-aia: prima încercare cere extensiile;
+  // dacă sesiunea moare ÎNAINTE de `gata`, următoarea încearcă FĂRĂ ele —
+  // modelul care le știe primește „no limit", cel care nu le știe rămâne pe
+  // varianta care a mers 5 minute impecabil. Varianta acceptată se scrie în
+  // jurnal, ca data viitoare să nu mai ghicim.
+  let aFostGataVreodata = false
+  let faraExtensii = false
+  const coada: Buffer[] = [] // audio strâns cât sesiunea nu e gata (și în reconectări)
 
   const trimiteAudio = (pcm: Buffer): void => {
     try {
-      ws.send(JSON.stringify({ realtimeInput: { audio: { data: pcm.toString('base64'), mimeType: 'audio/pcm;rate=16000' } } }))
+      ws?.send(JSON.stringify({ realtimeInput: { audio: { data: pcm.toString('base64'), mimeType: 'audio/pcm;rate=16000' } } }))
     } catch {
       /* eroarea reală vine pe canalul 'error' */
     }
   }
 
-  ws.on('open', () => {
-    try {
-      ws.send(JSON.stringify(construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelte)))
-    } catch (e) {
-      ev.onEroare(`setup: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
-    }
-  })
-
-  ws.on('message', (data: Buffer) => {
-    let m: Record<string, unknown>
-    try {
-      m = JSON.parse(data.toString('utf8'))
-    } catch {
-      return
-    }
-    for (const e of interpreteazaCadru(m)) {
-      switch (e.fel) {
-        case 'gata':
-          gata = true
-          for (const b of coada.splice(0)) trimiteAudio(b)
-          ev.onGata?.()
-          break
-        case 'audio':
-          ev.onAudioIesire(e.data)
-          break
-        case 'user':
-          ev.onTranscriereUser(e.text, e.final)
-          break
-        case 'kelion':
-          ev.onTranscriereKelion(e.text, e.final)
-          break
-        case 'unealta':
-          ev.onUnealta({ id: e.id, name: e.name, args: e.args })
-          break
-        case 'intrerupt':
-          ev.onIntrerupt?.()
-          break
-        case 'turaGata':
-          ev.onTuraGata?.()
-          break
-      }
-    }
-  })
-
-  ws.on('error', (e: Error) => {
-    if (!inchisa) ev.onEroare(`vocal_ws: ${String(e?.message ?? e).slice(0, 200)}`)
-  })
-  ws.on('close', (cod: number, motiv: Buffer) => {
+  const conecteaza = (): void => {
     if (inchisa) return
-    ev.onEroare(`vocal_inchis: cod ${cod} ${motiv.toString('utf8').slice(0, 160)}`)
-  })
+    gata = false
+    const socket = new WebSocket(`${WS_URL}?key=${config.geminiKey}`)
+    ws = socket
+
+    socket.on('open', () => {
+      try {
+        const st = construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelteActive, handleReluare) as {
+          setup: Record<string, unknown>
+        }
+        if (faraExtensii) {
+          delete st.setup.sessionResumption
+          delete st.setup.contextWindowCompression
+        }
+        socket.send(JSON.stringify(st))
+      } catch (e) {
+        ev.onEroare(`setup: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
+      }
+    })
+
+    socket.on('message', (data: Buffer) => {
+      let m: Record<string, unknown>
+      try {
+        m = JSON.parse(data.toString('utf8'))
+      } catch {
+        return
+      }
+      for (const e of interpreteazaCadru(m)) {
+        switch (e.fel) {
+          case 'gata':
+            gata = true
+            if (!aFostGataVreodata) {
+              aFostGataVreodata = true
+              ev.onInfo?.(faraExtensii ? 'sesiune acceptată FĂRĂ extensiile no-limit (modelul le-a refuzat)' : 'sesiune acceptată CU extensiile no-limit (reluare + fereastră glisantă)')
+            }
+            reconectari = 0 // sesiune vie → contorul intern se șterge
+            for (const b of coada.splice(0)) trimiteAudio(b)
+            ev.onGata?.()
+            break
+          case 'handleReluare':
+            handleReluare = e.handle
+            ev.onHandleReluare?.(e.handle)
+            break
+          case 'preavizInchidere':
+            // Google taie curând. Nu așteptăm tăierea: închidem noi și
+            // redeschidem cu handle-ul — drumul de reconectare e unul singur,
+            // prin handlerul de 'close'.
+            try {
+              socket.close()
+            } catch {
+              /* deja închis */
+            }
+            break
+          case 'audio':
+            ev.onAudioIesire(e.data)
+            break
+          case 'user':
+            ev.onTranscriereUser(e.text, e.final)
+            break
+          case 'kelion':
+            ev.onTranscriereKelion(e.text, e.final)
+            break
+          case 'unealta':
+            ev.onUnealta({ id: e.id, name: e.name, args: e.args })
+            break
+          case 'intrerupt':
+            ev.onIntrerupt?.()
+            break
+          case 'turaGata':
+            ev.onTuraGata?.()
+            break
+        }
+      }
+    })
+
+    socket.on('error', (e: Error) => {
+      if (!inchisa && reconectari >= 3) ev.onEroare(`vocal_ws: ${String(e?.message ?? e).slice(0, 200)}`)
+    })
+    socket.on('close', (cod: number, motiv: Buffer) => {
+      if (inchisa || ws !== socket) return
+      // Moarte ÎNAINTE de primul `gata` = setup-ul e suspectul: următoarea
+      // încercare merge fără extensii, nu repetă orbește aceeași cerere.
+      if (!aFostGataVreodata && !faraExtensii) {
+        faraExtensii = true
+        // Un handle stătut (dintr-o viață anterioară) poate fi chiar EL motivul
+        // refuzului — reluarea curată pleacă fără el, nu-l târăște mai departe.
+        handleReluare = undefined
+        ev.onInfo?.(`setup cu extensii respins (cod ${cod}) — reîncerc fără ele, cu sesiune curată`)
+      } else if (!aFostGataVreodata && unelteRezerva && unelteActive !== unelteRezerva) {
+        // A doua moarte înainte de `gata`, deja fără extensii → suspectul
+        // următor e INVENTARUL PLIN de unelte (nedovedit pe Live). Coborâm pe
+        // setul mic dovedit — o voce cu 6 unelte bate o voce moartă cu 58.
+        unelteActive = unelteRezerva
+        ev.onInfo?.(`setul plin de unelte respins la setup (cod ${cod}) — cobor pe setul dovedit (${unelteRezerva.length} unelte)`)
+      }
+      if (reconectari < 3) {
+        reconectari++
+        setTimeout(conecteaza, 300 * reconectari)
+        return
+      }
+      // Trei reluări interne picate la rând — abia ASTA e o eroare adevărată.
+      ev.onEroare(`vocal_inchis: cod ${cod} ${motiv.toString('utf8').slice(0, 160)} (după ${reconectari} reluări interne)`)
+    })
+  }
+
+  conecteaza()
 
   return {
     scrieAudio(pcm: Buffer): void {
@@ -243,7 +402,7 @@ export function deschideVocalLive(
     raspundeUnealta(id: string, name: string, rezultat: unknown): void {
       if (inchisa) return
       try {
-        ws.send(JSON.stringify({ toolResponse: { functionResponses: [{ id, name, response: { result: rezultat } }] } }))
+        ws?.send(JSON.stringify({ toolResponse: { functionResponses: [{ id, name, response: { result: rezultat } }] } }))
       } catch {
         /* eroarea reală vine pe canalul 'error' */
       }
@@ -251,7 +410,7 @@ export function deschideVocalLive(
     inchide(): void {
       inchisa = true
       try {
-        ws.close()
+        ws?.close()
       } catch {
         /* deja închis */
       }

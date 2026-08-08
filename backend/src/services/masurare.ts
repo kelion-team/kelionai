@@ -133,6 +133,17 @@ export const PORTI: Poarta[] = [
   { nume: 'exporturi', comanda: 'node', argumente: ['scripts/verifica-exporturi.mjs'], in: '.' },
   { nume: 'sintaxa', comanda: 'node', argumente: ['scripts/verifica-sintaxa.mjs'], in: '.' },
   { nume: 'build-frontend', comanda: 'npm', argumente: ['run', 'build'], in: 'frontend' },
+  // ── DE CE SUNT ASTEA DOUĂ AICI (Adrian, 8 aug: „nimic din calculele făcute și
+  // afișate nu se regăsesc în chat") ────────────────────────────────────────
+  // Avea dreptate, și cauza era în lista asta. Am probat 125 de rute și am
+  // raportat cifrele ÎN TERMINALUL MEU. `PORTI` avea 6 intrări, niciuna fiind
+  // probele de rute — deci când el îl întreabă pe Kelion „ce ai măsurat",
+  // Kelion citește un jurnal în care munca mea nu există. Numerele existau
+  // într-un loc unde el nu trăiește.
+  // Acum trec prin `masoara`, deci intră în jurnalul KV pe care Kelion îl
+  // citește cu unealta `jurnal_masuratori`, ca orice altă poartă.
+  { nume: 'rute-citire', comanda: 'node', argumente: ['scripts/proba-rute.mjs'], in: '.' },
+  { nume: 'rute-scriere', comanda: 'node', argumente: ['scripts/proba-scriere.mjs'], in: '.' },
 ]
 
 /** Rădăcina repo-ului în imagine (aplicația pornește din /app). Pe env pentru
@@ -279,4 +290,73 @@ export function compara(inainte: Masuratoare<number>, dupa: Masuratoare<number>)
   const semn = d > 0 ? '+' : ''
   const procent = inainte.valoare !== 0 ? ` (${semn}${((d / inainte.valoare) * 100).toFixed(1)}%)` : ''
   return `${inainte.cum}: ${inainte.valoare} → ${dupa.valoare} (${semn}${d}${procent})`
+}
+
+// ── VÂNĂTOAREA DE BUGURI (Adrian, 8 aug: „nu se pot căuta automat toate bugurile
+// și err? să le rezolvi și să le remăsori?") ─────────────────────────────────
+//
+// Răspunsul cinstit: o parte DA, complet automat; restul nu, și e important să
+// se știe care e care.
+//
+// SE POATE AUTOMAT: erorile reale ale utilizatorilor (adunate din browser în
+// `client_errors`), tipurile (tsc), tiparele de bug din analizor (oxlint), codul
+// abandonat, duplicatul, testele picate. Alea se caută, se numără și se remăsoară
+// după reparație.
+//
+// NU SE POATE AUTOMAT: bugul de LOGICĂ pe care niciun test nu-l acoperă și
+// niciun analizor nu-l vede — „face ce i s-a cerut?". Ăla se prinde doar
+// măsurând comportamentul, nu citind codul. De-aia vânătoarea nu spune niciodată
+// „nu sunt buguri": spune ce a găsit ȘI ce n-a putut căuta.
+//
+// CAPCANA EVITATĂ AICI, EXPLICIT: `listClientErrorGroups` întoarce listă goală
+// și când baza e căzută. Adică exact tiparul „£0.00" — zero care înseamnă „n-am
+// putut citi". De-aia se verifică ÎNTÂI că baza răspunde; dacă nu, erorile sunt
+// „NU POT VERIFICA", niciodată „0".
+
+export interface Vanatoare {
+  /** Erori reale de la utilizatori — sau motivul pentru care nu se pot citi. */
+  eroriUtilizatori: Masuratoare<{ grupuri: number; total: number; exemple: string[] }>
+  /** Tiparele de bug găsite de analizor. */
+  analizor: RezultatPoarta
+  /** Porțile obișnuite (tipuri, teste, exporturi, sintaxă). */
+  porti: RezultatPoarta[]
+}
+
+export async function vaneazaBuguri(oreInapoi = 48): Promise<Vanatoare> {
+  const eroriUtilizatori = await masoara(`erori reale din browser, ultimele ${oreInapoi}h`, async () => {
+    // ÎNTÂI dovada că baza răspunde. Fără ea, o listă goală nu înseamnă nimic.
+    const { loadKv: ping } = await import('../db.js')
+    await ping('__ping_vanatoare__')
+    const { listClientErrorGroups } = await import('../db.js')
+    const g = await listClientErrorGroups(oreInapoi, 30)
+    return {
+      grupuri: g.length,
+      total: g.reduce((s, x) => s + (Number(x.n) || 0), 0),
+      exemple: g.slice(0, 5).map((x) => `${x.n}× ${x.message}`),
+    }
+  })
+  const analizor = await ruleazaPoarta(
+    { nume: 'analizor', comanda: 'npx', argumente: ['oxlint', '--deny', 'no-unused-vars'], in: 'backend' },
+    300,
+  )
+  const porti = await ruleazaPortile(['tipuri', 'teste', 'exporturi', 'sintaxa'])
+  return { eroriUtilizatori, analizor, porti }
+}
+
+/** Raportul vânătorii. Nu spune NICIODATĂ „nu sunt buguri" — spune ce a găsit ȘI
+ *  ce n-a putut căuta, ca omul să știe cât din tablou lipsește. */
+export function raportVanatoare(v: Vanatoare): string {
+  const l: string[] = ['VÂNĂTOARE DE BUGURI:']
+  l.push(
+    v.eroriUtilizatori.masurat
+      ? v.eroriUtilizatori.valoare.grupuri === 0
+        ? '  ✓ erori de la utilizatori: 0 (baza a răspuns — deci chiar zero)'
+        : `  ✗ erori de la utilizatori: ${v.eroriUtilizatori.valoare.grupuri} feluri, ${v.eroriUtilizatori.valoare.total} apariții\n${v.eroriUtilizatori.valoare.exemple.map((e) => `      ${e}`).join('\n')}`
+      : `  ?  erori de la utilizatori: NU POT VERIFICA — ${v.eroriUtilizatori.motiv}`,
+  )
+  l.push(raportPorti([v.analizor, ...v.porti]))
+  l.push('')
+  l.push('CE NU S-A CĂUTAT: bugul de logică pe care niciun test nu-l acoperă.')
+  l.push('Automatizarea găsește ce se poate număra; restul se prinde măsurând comportamentul.')
+  return l.join('\n')
 }

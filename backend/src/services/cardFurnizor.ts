@@ -27,7 +27,7 @@
 // anything that looks like a card, and stays that way. For the most sensitive
 // value in the system, a manual step is preferable to an automation that can
 // err.
-import { browserType, setModDiscret, browserRead, mascheazaCifre } from './browser.js'
+import { browserType, setModDiscret, browserRead } from './browser.js'
 import type { BrowserResult } from './browser.js'
 import { voceRecenta, fataRecenta } from './adminLock.js'
 import { loadKv, saveKv } from '../db.js'
