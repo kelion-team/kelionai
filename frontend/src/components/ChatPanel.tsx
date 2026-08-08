@@ -322,6 +322,9 @@ export default function ChatPanel({
   // isn't continuous"). Circular buffer; on every turn ALL 4 leave.
   const frameBufRef = useRef<string[]>([])
   const coordsRef = useRef<Coords | null>(null)
+  // Precizia MĂSURATĂ a fixului GPS (±metri, de la senzor) — merge împreună cu
+  // coordonatele în sesiunea vocală, ca modelul să știe cât de bun e locul.
+  const precizieRef = useRef<number | null>(null)
   // The LIVE voice session (if any) — used by the location tools to
   // refresh its position exactly when needed (updateCoords, on demand).
   const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
@@ -1473,9 +1476,13 @@ export default function ChatPanel({
               // ACELAȘI handleControl ca la chatul scris — monitorul, cardurile
               // și documentele arată identic, indiferent cine le-a cerut.
               onControl: (frame) => handleControl(frame as ChatControl),
-              // GPS-ul device-ului către sesiunea live (8 aug: „nu are acces la
-              // gps, meteo") — meteo/hărțile din ușa creierului au acum locul real.
-              coordonate: () => coordsRef.current,
+              // GPS-ul REAL al device-ului către sesiunea live (8 aug: „nu are
+              // acces la gps" + „îi trebuiesc date de la gps real") — fixul
+              // satelitar al paznicului + precizia măsurată (±m, de la senzor).
+              coordonate: () =>
+                coordsRef.current
+                  ? { ...coordsRef.current, acc: precizieRef.current ?? undefined }
+                  : null,
               // Ochii ușii creierului (8 aug: „hai și cu vedere"): un cadru
               // captat PE LOC + ultimele din tampon. Fără captură proaspătă
               // (camera oprită/negata) NU se trimit cadre stătute — mai bine o
@@ -2154,14 +2161,22 @@ export default function ChatPanel({
   // The ON-THE-SPOT read below stays, for precision on explicit location turns.
   useEffect(() => {
     if (!navigator.geolocation) return
+    // GPS REAL (8 aug, ownerul: „îi trebuiesc date de la gps real"): paznicul
+    // permanent cere precizie ÎNALTĂ (satelit). Lecția din 26 iul rămâne
+    // respectată prin construcție: pana de atunci era citirea LA RECE cu
+    // timeout de 5s — un paznic continuu ține fixul cald, primul fix poate
+    // dura, dar odată prins se împrospătează singur. Precizia MĂSURATĂ
+    // (±metri, ce raportează chiar senzorul) se ține lângă coordonate, ca
+    // sesiunea vocală și creierul să știe cât de bun e fixul — nu să presupună.
     const id = navigator.geolocation.watchPosition(
       (pos) => {
         coordsRef.current = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+        precizieRef.current = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null
       },
       // Refusal/failure → the last known position stays (may be null); the
       // server DECLARES the void instead of inventing a place (LOCATION_NONE).
       () => {},
-      { enableHighAccuracy: false, maximumAge: 120_000, timeout: 15_000 },
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 30_000 },
     )
     return () => navigator.geolocation.clearWatch(id)
   }, [])
@@ -2172,16 +2187,17 @@ export default function ChatPanel({
         (pos) => {
           const c = { lat: pos.coords.latitude, lon: pos.coords.longitude }
           coordsRef.current = c
+          precizieRef.current = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null
           resolve(c)
         },
         // Refusal/failure → we stay on the last known position (may be null).
         () => resolve(coordsRef.current),
-        // THE "GPS inaccessible" OUTAGE (Jul 26): the first variant asked for HIGH
-        // (satellite) precision with a 5s timeout — on a COLD read, with no permanent watcher,
-        // the GPS fix takes well over 5s → it failed most of the time. Now: standard
-        // precision (network/wifi — answers in 1-3s, enough for weather/
-        // maps/"where am I"), 10s timeout, 2 min cache.
-        { enableHighAccuracy: false, maximumAge: 120_000, timeout: 10_000 },
+        // GPS REAL (8 aug: „îi trebuiesc date de la gps real"). Pana din 26 iul
+        // era precizie înaltă LA RECE cu timeout de 5s, fără paznic permanent —
+        // de-atunci paznicul de mai sus ține fixul satelitar CALD, deci citirea
+        // pe loc nu mai pornește de la zero: precizie înaltă, 12s, cache 30s;
+        // la eșec rămâne ultimul fix bun al paznicului, nu un gol.
+        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 12_000 },
       )
     })
 

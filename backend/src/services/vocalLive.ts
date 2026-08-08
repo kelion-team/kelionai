@@ -85,6 +85,8 @@ export interface AncoraRealitate {
   tz?: string
   lat?: number
   lon?: number
+  /** Precizia MĂSURATĂ a fixului GPS, în metri (raportată de senzor). */
+  acc?: number
 }
 
 export function construiesteInstructiune(
@@ -115,7 +117,10 @@ export function construiesteInstructiune(
       parti.push(`acum e ${oraText}${ancora.tz ? ` (fusul ${ancora.tz})` : ''}`)
     }
     if (Number.isFinite(ancora?.lat) && Number.isFinite(ancora?.lon)) {
-      parti.push(`te afli cu omul la coordonatele GPS ${ancora?.lat}, ${ancora?.lon}`)
+      // Precizia e MĂSURATĂ (±m, de la senzor) — se spune când există, ca
+      // modelul să știe cât de bun e fixul, nu să presupună.
+      const prec = Number.isFinite(ancora?.acc) ? ` (fix GPS real, precizie ±${ancora?.acc} m)` : ''
+      parti.push(`te afli cu omul la coordonatele GPS ${ancora?.lat}, ${ancora?.lon}${prec}`)
     }
     if (parti.length) {
       instructiune +=

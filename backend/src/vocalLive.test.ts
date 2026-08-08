@@ -268,3 +268,17 @@ describe('vocalLive — mânerul de reluare poartă generația uneltelor', () =>
     expect(ruta).toContain('handle din ALTĂ generație de unelte')
   })
 })
+
+// ── GPS REAL (8 aug: „îi trebuiesc date de la gps real") ─────────────────────
+describe('vocalLive — precizia GPS măsurată intră în ancoră', () => {
+  it('cu acc, ancora spune fixul real și ±metri', () => {
+    const i = construiesteInstructiune('p', 'Adrian', [], { lat: 51.5, lon: -0.12, acc: 8 })
+    expect(i).toContain('fix GPS real, precizie ±8 m')
+  })
+
+  it('fără acc, coordonatele apar fără o precizie inventată', () => {
+    const i = construiesteInstructiune('p', 'Adrian', [], { lat: 51.5, lon: -0.12 })
+    expect(i).toContain('51.5')
+    expect(i).not.toContain('precizie ±')
+  })
+})
