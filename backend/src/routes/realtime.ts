@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, saveMessage, getBalance, debitWallet, recordCost, loadKv, saveKv, getVoiceprint, saveVoiceprint, saveGuestVoice, latestPendingGuest } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, saveMessage, citesteSold, debitWallet, recordCost, loadKv, saveKv, getVoiceprint, saveVoiceprint, saveGuestVoice, latestPendingGuest } from '../db.js'
 import { grantUnlock, isArmed, hasUnlock, marcheazaVoce } from '../services/adminLock.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang } from '../services/lang.js'
@@ -53,7 +53,10 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         last > 0 && serverGap > 0 && serverGap <= 90_000
           ? Math.min(60, Math.round(serverGap / 1000))
           : Math.max(0, Math.min(60, Number(req.body?.seconds ?? 0)))
-      if (billSec <= 0) return reply.send({ ok: true, charged: 0, balance: await getBalance(user.email) })
+      if (billSec <= 0) {
+        const s0 = await citesteSold(user.email)
+        return reply.send({ ok: true, charged: 0, ...(s0.citit ? { balance: s0.sold } : { soldNecitit: s0.motiv }) })
+      }
       const cost = (billSec / 60) * VOICE_USD_PER_MINUTE
       void recordCost(user.email, 'voice_minutes', cost)
       // THE OWNER DOESN'T PAY HIMSELF (Adrian, Aug 2 — his £10 vanished during
@@ -65,10 +68,17 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // price is the product, the free provider tier is the owner's margin.
       const isOwner = user.email.toLowerCase() === config.adminEmail
       if (!isOwner) void debitWallet(user.email, cost, `voice_min:${billSec}s`)
-      const bal = await getBalance(user.email)
+      // `stop` TAIE vocea. Un sold necitit nu are voie s-o taie — înainte,
+      // `getBalance` picat întorcea 0 și vocea se oprea „fiindcă n-ai bani".
+      const sold = await citesteSold(user.email)
       // We signal the client if it ran out of credit → it stops the voice.
       // `charged` reports what was ACTUALLY debited (0 for the owner).
-      return reply.send({ ok: true, charged: isOwner ? 0 : cost, balance: bal, stop: Boolean(config.revolut.payLink) && user.role !== 'admin' && bal <= 0 })
+      return reply.send({
+        ok: true,
+        charged: isOwner ? 0 : cost,
+        ...(sold.citit ? { balance: sold.sold } : { soldNecitit: sold.motiv }),
+        stop: Boolean(config.revolut.payLink) && user.role !== 'admin' && sold.citit && sold.sold <= 0,
+      })
     },
   )
 

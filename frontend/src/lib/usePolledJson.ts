@@ -1,3 +1,4 @@
+import { ceas } from './ceas'
 // ── PERIODIC POLLING OF AN ENDPOINT — once only ───────────────────────────
 //
 // WHY (Batch E of PROCEDURA-REFACERE-CLONE.md; Adrian: "everything must go to 0"):
@@ -51,7 +52,7 @@ export function usePolledJson<T>(
         })
     }
     load()
-    const id = window.setInterval(load, everyMs)
+    const id = ceas(`sondaj ${url}`, load, everyMs)
     return () => {
       alive = false
       window.clearInterval(id)

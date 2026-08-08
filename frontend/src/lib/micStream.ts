@@ -158,6 +158,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   // Diagnostic de captare (Adrian, 6 aug — „nu preia audio"): un log rar din
   // onAudioProcess ca să se vadă la runtime dacă procesarea rulează + starea ctx.
   let diagCadre = 0
+  // Starea de la ultimul rând scris + momentul ultimului puls: împreună fac
+  // diferența între „nu s-a schimbat nimic" și „nu mai rulează nimic".
+  let ultimaStare = ''
+  let ultimulPuls = 0
 
   // Pre-roll ring: păstrează ultimele ~400ms de audio CHIAR ÎNAINTE ca VAD-ul să
   // declare „voce". La declanșare, aceste cadre intră primele în frază — fixează
@@ -249,16 +253,29 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     lastVoiceAt = 0
     opts.onLive('') // golește banda la sfârșit de frază
     const features = finalizeFeatures()
+    // ── O FRAZĂ ARUNCATĂ TREBUIE SĂ SE VADĂ (Adrian, 8 aug, din consola lui) ──
+    // Aici fraza pleca doar `if (audio)`, iar `catch { audio = undefined }`
+    // înghițea și motivul. Adică: omul vorbea, vedea în consolă doar
+    // `frazaDeschisa: true → false`, și NIMIC după. N-avea cum să distingă
+    // „fraza n-a plecat" de „a plecat și creierul n-a răspuns" — două defecte
+    // complet diferite, arătând identic. Aceeași familie ca „£0.00": o operație
+    // care n-a avut loc, raportată ca tăcere.
+    const durataMs = Math.round((phrasePcmLen / 16000) * 1000)
     let audio: string | undefined
+    let motivAruncare = ''
     try {
       audio = wavDataUri16k(phrasePcm) || undefined
-    } catch {
+      if (!audio) motivAruncare = `fără audio util (${phrasePcmLen} eșantioane, ${durataMs} ms, ${phraseFrames} cadre)`
+    } catch (e) {
       audio = undefined
+      motivAruncare = `împachetarea WAV a picat: ${e instanceof Error ? e.message : String(e)}`
     }
-    // O frază fără audio util (prea scurtă) nu pleacă — nimic de decis pentru creier.
     if (audio) {
       if (features && opts.storePendingFeatures !== false) setPendingVoiceFeatures(features)
+      console.info('[frază] plec la creier', { ms: durataMs, cadre: phraseFrames, octeti: audio.length, amprenta: !!features })
       opts.onPhrase('', features, audio)
+    } else {
+      console.warn('[frază] ARUNCATĂ, nu ajunge la creier —', motivAruncare)
     }
     resetPhrase()
   }
@@ -270,10 +287,22 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
 
   const onAudioProcess = (e: AudioProcessingEvent): void => {
     if (closed) return
-    // ~1 log/secundă: dacă NU apare deloc când vorbești → procesarea nu rulează
-    // (context suspendat / graf mort); dacă apare cu muted:true mereu → mut blocat;
-    // dacă apare cu ctx:'running', muted:false, dar fraza nu se deschide → prag/semnal.
-    if (diagCadre++ % 12 === 0) console.info('[captare]', { ctx: ctx.state, muted, frazaDeschisa: phraseOpen })
+    // ── DIAGNOSTICUL NU MAI ÎNEACĂ CONSOLA (Adrian, 8 aug, consola lui) ──────
+    // Scria un rând pe secundă, la nesfârșit, cu aceleași trei valori. În
+    // captura lui, 45 de rânduri identice `[captare]` acopereau complet orice
+    // alt semnal — inclusiv rândul care ar fi spus dacă fraza a plecat sau nu.
+    // Un diagnostic care ascunde diagnosticul e mai rău decât niciunul.
+    // Acum scrie DOAR la SCHIMBARE de stare (asta e informația) + un puls rar,
+    // ca „liniște" să rămână distinctibil de „graful e mort".
+    diagCadre++
+    const stareAcum = `${ctx.state}|${muted}|${phraseOpen}`
+    const acumMs = performance.now()
+    if (stareAcum !== ultimaStare || acumMs - ultimulPuls > 15000) {
+      if (stareAcum !== ultimaStare) console.info('[captare]', { ctx: ctx.state, muted, frazaDeschisa: phraseOpen })
+      else console.info('[captare] puls', { ctx: ctx.state, muted, frazaDeschisa: phraseOpen, cadre: diagCadre })
+      ultimaStare = stareAcum
+      ultimulPuls = acumMs
+    }
     // BARGE-IN cât Kelion vorbește: cât e MUT (anti-ecou) NU acumulăm audio (ar fi
     // ecoul lui), dar calculăm volumul și, la voce clară SUSȚINUTĂ (peste garda de
     // onset), îl întrerupem prin onBargeIn. Calea normală (dezmuțit) rămâne neatinsă.

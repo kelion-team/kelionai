@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getWalletStatus, listTransactionsForUser, creeazaCodPlata, codPlataInAsteptare, getAutoRecharge, setAutoRecharge, type AutoRechargePrefs } from '../db.js'
+import { citestePortofel, listTransactionsForUser, creeazaCodPlata, codPlataInAsteptare, getAutoRecharge, setAutoRecharge, type AutoRechargePrefs } from '../db.js'
 
 // AUTO TOP-UP validation — pure, so the rule is testable without a database.
 // The checkbox means: "when my credit drops below the threshold, PREPARE my
@@ -26,11 +26,15 @@ export function validateAutoRecharge(input: unknown): AutoRechargePrefs | null {
 // activation), then any multiple of £5. The numbers are the owner's settings
 // (config.billing), validated on the server, not just in the UI. Exported so
 // the rule is testable without booting a server.
-export async function validateTopUp(getWalletStatusFn: typeof getWalletStatus, email: string, amount: number): Promise<string | null> {
+export async function validateTopUp(citestePortofelFn: typeof citestePortofel, email: string, amount: number): Promise<string | null> {
   const { firstTopupMin, topupMin, topupStep } = config.billing
   if (!Number.isFinite(amount) || amount <= 0) return 'bad_amount'
   if (amount % topupStep !== 0) return 'must_be_multiple_of_5'
-  const { topupRef } = await getWalletStatusFn(email)
+  const portofel = await citestePortofelFn(email)
+  // O ALIMENTARE NU SE VALIDEAZĂ PE UN PORTOFEL NECITIT: `topupRef` picat pe 0
+  // ar fi zis „prima alimentare, minim £20" unui om care alimentase deja.
+  if (!portofel.citit) return 'sold_necitit'
+  const { topupRef } = portofel
   const min = topupRef <= 0 ? firstTopupMin : topupMin
   if (amount < min) return topupRef <= 0 ? 'first_topup_min_20' : 'min_5'
   return null
@@ -42,7 +46,13 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/billing/balance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    const { balance, topupRef } = await getWalletStatus(user.email)
+    const portofel = await citestePortofel(user.email)
+    // NU POT CITI ≠ AI 0 CREDITE (măsurat 8 aug). Câmpul `credits` LIPSEȘTE
+    // când citirea a picat; clientul verifică deja `typeof j.credits === 
+    // 'number'`, deci nu mai aprinde „fără credit" pe o eroare de-a noastră.
+    if (!portofel.citit)
+      return reply.code(503).send({ error: 'sold_necitit', motiv: portofel.motiv, currency: config.billing.currency })
+    const { balance, topupRef } = portofel
     const credits = Math.floor(balance / config.billing.creditValue)
     const percent = topupRef > 0 ? Math.max(0, Math.min(100, (balance / topupRef) * 100)) : 100
     // firstTopUp = the user has never topped up (topup_ref is 0). The first
@@ -92,7 +102,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // The top-up rule moved next to validateAutoRecharge (exported, top of
   // file): one place for the money rules, both testable without a server.
   const checkTopUp = (email: string, amount: number): Promise<string | null> =>
-    validateTopUp(getWalletStatus, email, amount)
+    validateTopUp(citestePortofel, email, amount)
 
   // ── PAYMENT GOES THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
   // completely and Pro comes in", "a link to replace everywhere") ───────────

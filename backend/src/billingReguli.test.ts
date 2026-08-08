@@ -36,12 +36,21 @@ const { config } = await import('./config.js')
 const { validateAutoRecharge, validateTopUp } = await import('./routes/billing.js')
 const { getAutoRecharge } = await import('./db.js')
 
-const portofel = (topupRef: number) => async () => ({ balance: 0, topupRef })
+const portofel = (topupRef: number) => async () => ({ citit: true as const, balance: 0, topupRef })
+/** Portofel NECITIT — validarea nu are voie să treacă peste o citire picată. */
+const portofelNecitit = async () => ({ citit: false as const, motiv: 'baza de date nu răspunde' })
 
 describe('regula de alimentare urmează config.billing, nu constante din cod', () => {
   it('prima alimentare cere minimul ownerului (firstTopupMin)', async () => {
     expect(await validateTopUp(portofel(0), 'ion@test.ro', 15)).toBe('first_topup_min_20')
     expect(await validateTopUp(portofel(0), 'ion@test.ro', 20)).toBeNull()
+  })
+
+  it('portofel NECITIT: nu se validează nimic — nu i se cere „minim £20" unuia care alimentase deja', async () => {
+    // `topupRef` picat pe 0 însemna „prima alimentare" pentru oricine, la orice
+    // sughiț de bază de date. Măsurat 8 aug, pe familia „£0.00".
+    expect(await validateTopUp(portofelNecitit, 'ion@test.ro', 20)).toBe('sold_necitit')
+    expect(await validateTopUp(portofelNecitit, 'ion@test.ro', 5)).toBe('sold_necitit')
   })
 
   it('după prima alimentare: minimul și pasul ownerului (topupMin/topupStep)', async () => {

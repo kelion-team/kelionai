@@ -10,6 +10,7 @@ import {
   type DragEvent as ReactDragEvent,
 } from 'react'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
+import { ceas } from '../lib/ceas'
 import { strings, resolveLang, uiStrings, type Lang } from '../lib/i18n'
 import CameraView from './CameraView'
 import { WorkClock } from './WorkClock'
@@ -1224,7 +1225,7 @@ export default function ChatPanel({
           retryTextRef.current = msg
           if (healthPollRef.current) window.clearInterval(healthPollRef.current)
           let incercari = 0
-          healthPollRef.current = window.setInterval(() => {
+          healthPollRef.current = ceas('sondă sănătate voce', () => {
             incercari++
             if (incercari > 24) {
               window.clearInterval(healthPollRef.current!)
@@ -1568,7 +1569,7 @@ export default function ChatPanel({
           // an earlier change stopped the pulse in Chirp mode and silently
           // made voice FREE for every user — reverted. The wallet side is in
           // routes/realtime.ts (admin exempt — the owner doesn't pay himself).
-          const voiceTick = window.setInterval(() => {
+          const voiceTick = ceas('puls minute voce', () => {
             const secs = Math.round((Date.now() - lastTick) / 1000)
             lastTick = Date.now()
             void fetch('/api/realtime/tick', {
@@ -1884,7 +1885,7 @@ export default function ChatPanel({
       }
     }
     bc.addEventListener('message', onMesaj)
-    const puls = window.setInterval(() => {
+    const puls = ceas('puls interfață', () => {
       if (micRef.current) bc.postMessage({ inima: tabVoceIdRef.current })
       else if (voceAiureaRef.current && inimaAMurit(ultimaInimaRef.current, Date.now())) {
         // Tabul care ținea vocea a murit fără rămas-bun → vocea revine AICI.
@@ -2032,7 +2033,7 @@ export default function ChatPanel({
     }
     const arm = (): void => {
       if (timer) globalThis.clearInterval(timer)
-      timer = globalThis.setInterval(tick, Math.round(1000 / fps))
+      timer = ceas('captare cadre cameră', tick, Math.round(1000 / fps))
     }
     arm()
 

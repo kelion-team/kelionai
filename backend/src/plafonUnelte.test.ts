@@ -20,8 +20,22 @@ describe('plafonul de unelte al furnizorului e garantat structural', () => {
     // Adrian, 3 aug: „nu are unelte complete". 64 era limita API-ului vechi
     // (OpenRouter); Gemini acceptă 128 de declarații → pe google-direct intră
     // TOT inventarul adminului. Testul pinuiește AMBELE cifre și condiția.
-    expect(chat).toMatch(/MAX_PROVIDER_TOOLS = orChatModel\?\.startsWith\(GEMINI_DIRECT_PREFIX\) \? 128 : 64/)
+    // 8 aug: plafonul furnizorului a rămas EXACT ăsta, dar s-a mutat într-o
+    // constantă proprie, fiindcă tura conversațională are acum plafonul ei (12).
+    // Ambele cifre rămân pinuite — cea de furnizor NU are voie să scadă tăcut.
+    expect(chat).toMatch(/PLAFON_FURNIZOR = orChatModel\?\.startsWith\(GEMINI_DIRECT_PREFIX\) \? 128 : 64/)
     expect(chat).toMatch(/baseTools\.slice\(0, MAX_PROVIDER_TOOLS\)/)
+  })
+
+  it('tura de LUCRU primește tot inventarul; doar cea conversațională e subțiată', () => {
+    // Adrian, 8 aug: „chatul este doar chat, decizia ce unealtă se face cu
+    // creierul". Tăierea la 12 e DOAR pe tura ușoară; când se cere o acțiune
+    // (sau modelul escaladează), plafonul redevine cel al furnizorului.
+    expect(chat).toMatch(/MAX_PROVIDER_TOOLS = turaUsoara \? PLAFON_UNELTE_USOR : PLAFON_FURNIZOR/)
+    expect(chat).toMatch(/cereActiune = hasActionIntent\(lastUserText\)/)
+    // `ask_brain` trebuie să supraviețuiască tăierii — fără ea, ce nu încape în
+    // cele 12 n-ar mai putea fi cerut deloc.
+    expect(chat).toMatch(/baseTools\.filter\(\(t\) => t\.name === 'ask_brain'\)/)
   })
 
   it('lista e deduplicată pe NUME înainte de trimitere', () => {

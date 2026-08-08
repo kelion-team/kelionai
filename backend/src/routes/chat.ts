@@ -16,7 +16,7 @@ import {
   saveMessage,
   recordCost,
   recordTiming,
-  getBalance,
+  citesteSold,
   debitWallet,
   getSpeechLang,
   setSpeechLangPref,
@@ -98,6 +98,7 @@ import { recentClientErrors } from './clientErrors.js'
 import { neagaUneltele } from '../services/negareUnelte.js'
 import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
+import { numeStrigat } from '../services/numeStrigat.js'
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL } from '../services/brainToolDefs.js'
@@ -117,6 +118,7 @@ async function selectedBrainModel(
   text: string,
   kvRaw?: string | null,
   needsVision = false,
+  decideAdresarea = false,
 ): Promise<{ model: string; heavy: boolean } | null> {
   // Null doar pentru „chiar n-am niciun creier" — creierul e Gemini-only.
   if (!geminiDirectAvailable()) return null
@@ -164,7 +166,20 @@ async function selectedBrainModel(
   // (OpenRouter went negative on Jul 27) and that's not what he asked for. The
   // top only on extreme difficulty.
   const isOwner = roleFor(email) === 'admin'
-  const heavy = needsVision || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
+  // ── DE CE `decideAdresarea` (măsurat 8 aug, din jurnalul de pe VPS) ───────
+  // Adrian: „vorbesc și nu se întâmplă nimic". În jurnal:
+  //     [CHAT-IN] audio=da „"
+  //     [TIMP] tura …: creier=google-direct/gemini-3.5-flash-lite, total=1619ms
+  //     [VOCE] tura …: creierul a decis că NU i se vorbea — tăcere
+  // Cauza NU e o părere despre modele — e structurală: linia de mai jos judecă
+  // greutatea din TEXT, iar o tură de voce ambientală n-are text deloc (fraza e
+  // audio brut, în alt câmp). `difficulty('')` e mic, `hasActionIntent('')` e
+  // fals, `needsVision` e fals → `heavy` iese MEREU fals. Adică cea mai
+  // consecventă decizie binară din aplicație — „mi se vorbește mie sau nu" — nu
+  // putea ajunge NICIODATĂ pe modelul bun; cădea automat pe cel ieftin.
+  // Nu se atinge sigiliul: alegerea rămâne între cele două trepte deja sigilate.
+  const heavy =
+    needsVision || decideAdresarea || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
   // ── THE OWNER'S BRAIN = POWERFUL AGENT, ALWAYS (iron rule §14, AI-HANDOFF:
   // "on the owner's path, the model IS the agent... NO classifier to demote him
   // to a cheap model"). The cause of "the paid brain is as dumb as the free
@@ -1478,11 +1493,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // when payments aren't configured (no Revolut link) the app stays
     // free/ungated. Clean binary stop in the user's language + a paywall frame
     // so the UI shows the top-up link.
-    if (
-      config.revolut.payLink &&
-      user.role !== 'admin' &&
-      (await getBalance(user.email)) <= 0
-    ) {
+    // POARTA SE ÎNCHIDE DOAR PE UN SOLD CITIT (măsurat 8 aug). Înainte,
+    // `getBalance` întorcea 0 și când citirea PICA — deci un sughiț de bază de
+    // date îi spunea unui om cu credit plătit „Ai rămas fără credit" și îl
+    // bloca. Acum, dacă nu pot citi, NU ridic zidul: eroarea noastră nu se
+    // plătește din buzunarul lui. Rămâne zgomotoasă în jurnal, ca s-o vedem.
+    const soldPoarta = config.revolut.payLink && user.role !== 'admin' ? await citesteSold(user.email) : null
+    if (soldPoarta && !soldPoarta.citit)
+      console.error('[paywall] sold NECITIT, las trecerea liberă:', soldPoarta.motiv)
+    if (soldPoarta?.citit && soldPoarta.sold <= 0) {
       reply.hijack()
       reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' })
       const paywallTurnId = randomUUID()
@@ -1644,13 +1663,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `• NOT ADDRESSED = the speaker is talking to someone else, thinking aloud, background ` +
         `speech, or the audio is not clearly meant for you.\n` +
         `RULES (exactly):\n` +
-        `1. If NOT addressed: output EXACTLY the token <TAC/> and NOTHING else — no words, no ` +
-        `tools, no punctuation. This is the ONE case where you stay silent (it overrides the ` +
-        `"never end silently" rule). Do not explain; just <TAC/>.\n` +
-        `2. If addressed: your VERY FIRST line must be exactly "AUZIT: " followed by the words ` +
-        `you actually heard, verbatim, then a newline. After that newline, give your normal ` +
-        `spoken reply. The "AUZIT:" line is how the screen shows what you heard — never skip it ` +
-        `and never put anything before it.\n` +
+        `1. If NOT addressed: output the token <TAC/> on the first line, then a newline, then ` +
+        `one line "AUZIT: " followed by what you actually heard, verbatim. Nothing else — no ` +
+        `words of your own, no tools, no explanation. You still stay SILENT (the <TAC/> overrides ` +
+        `the "never end silently" rule); the AUZIT line is not spoken — it exists so a wrong ` +
+        `silence can be SEEN in the log instead of vanishing. If you truly heard nothing ` +
+        `intelligible, write "AUZIT: (neinteligibil)".\n` +
+        `2. If addressed: START YOUR SPOKEN REPLY IMMEDIATELY, with the very first word. Do NOT ` +
+        `write anything before it — no echo, no preamble, no label. Then, only AFTER you have ` +
+        `finished speaking, put on a new line "AUZIT: " followed by the words you actually heard, ` +
+        `verbatim. That echo is for the screen, it is never spoken, and it must come LAST.\n` +
+        `WHY IT COMES LAST (this is the point): nothing can be said out loud until your first ` +
+        `characters arrive. An echo written first makes the person wait for a whole transcription ` +
+        `before hearing a single word from you. First the answer, then the echo.\n` +
         `WAKE WORD IS DECISIVE (Adrian, 6 aug — „nu aude"): if you clearly hear ` +
         `"Kelion" or "Kei" as, or near, the FIRST word, you ARE addressed — you MUST ` +
         `answer with the "AUZIT:" line and your reply, NEVER <TAC/>. A direct question ` +
@@ -2099,7 +2124,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // the model also gets the ask_brain tool so it can escalate whatever it
     // judges heavy itself; on the WORK step it does not (that would be
     // recursive — it IS the brain).
-    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage)
+    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage, voceAmbianta)
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
 
@@ -2173,7 +2198,33 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // ~16 unelte din coada adminului LA FIECARE TURĂ. Gemini acceptă 128 de
     // declarații de funcții — pe creierul google-direct intră TOT inventarul,
     // netăiat. Plafonul 64 rămâne doar pentru drumul OpenRouter (rezerva).
-    const MAX_PROVIDER_TOOLS = orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
+    // ── FAZELE (Adrian, 8 aug): „chatul este doar chat, depistarea cerinței
+    // este depistarea cerinței, decizia ce unealtă se face cu creierul" ───────
+    //
+    // MĂSURAT înainte de tăietura asta: la FIECARE tură plecau ~3.900 tokeni de
+    // prompt + până la 128 de scheme de unelte (~11.300 tokeni) — adică ~15.000
+    // de tokeni ÎNAINTE ca omul să spună un cuvânt. Se vede direct în cifre:
+    // Gemini singur răspunde în 482 ms (măsurat pe cheia lui, pe VPS), dar tura
+    // aplicației a durat 1619 ms. Restul e citit degeaba. Și nu doar încetinea:
+    // decizia „mi se vorbește mie?" stătea îngropată printre 128 de scheme.
+    //
+    // Acum tura CONVERSAȚIONALĂ (inclusiv cea care decide adresarea pe voce)
+    // primește doar uneltele de aur — lista e DEJA ordonată mai jos, cu cele
+    // fără de care zice „nu pot" în față și ocazionalele la coadă. Când chiar se
+    // cere o acțiune, sau când modelul escaladează singur prin `ask_brain`,
+    // tura de lucru primește TOT inventarul, netăiat, ca până acum.
+    //
+    // Ce se pierde, spus pe față: dacă ceri prin conversație ceva ce cere o
+    // unealtă rară, ea vine în runda a doua — acolo e mai lent, în rest e mai
+    // rapid peste tot. E schimbul pe care l-a ales ownerul, cu cifrele în față.
+    const PLAFON_UNELTE_USOR = 12
+    const cereActiune = hasActionIntent(lastUserText) || turnHasImage
+    const PLAFON_FURNIZOR = orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
+    // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
+    // dar rămâne UȘOARĂ ca unelte: n-are de executat nimic, are de hotărât dacă
+    // i se vorbește. Cele două axe sunt independente și e important să rămână așa.
+    const turaUsoara = !cereActiune && !(heavyTurn && !voceAmbianta)
+    const MAX_PROVIDER_TOOLS = turaUsoara ? PLAFON_UNELTE_USOR : PLAFON_FURNIZOR
     const seenNames = new Set<string>()
     const baseTools: Tool[] = []
     for (const t of rawTools) {
@@ -2181,8 +2232,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       seenNames.add(t.name)
       baseTools.push(t)
     }
-    const tools: Tool[] = baseTools.slice(0, MAX_PROVIDER_TOOLS)
-    if (baseTools.length > MAX_PROVIDER_TOOLS) {
+    // PE TURA UȘOARĂ, `ask_brain` MERGE PRIMUL. În ordinea de mai sus stă după
+    // uneltele Google — la plafon 12 ar fi fost tăiat exact unealta care face
+    // tura ușoară sigură (fără ea, ce nu încape în cele 12 n-ar mai avea cum să
+    // fie cerut deloc, și am fi construit chiar defectul „zice că nu poate").
+    const tools: Tool[] = turaUsoara
+      ? [
+          ...baseTools.filter((t) => t.name === 'ask_brain'),
+          ...baseTools.filter((t) => t.name !== 'ask_brain').slice(0, MAX_PROVIDER_TOOLS - 1),
+        ]
+      : baseTools.slice(0, MAX_PROVIDER_TOOLS)
+    console.log(
+      `[UNELTE] tura ${turaUsoara ? 'UȘOARĂ' : 'de LUCRU'}: ${tools.length} din ${baseTools.length} unelte` +
+        `${voceAmbianta ? ' (voce: decide adresarea)' : ''}`,
+    )
+    if (!turaUsoara && baseTools.length > MAX_PROVIDER_TOOLS) {
       // Numim EXACT ce s-a tăiat — după reordonare astea trebuie să fie doar
       // ocazionalele din coadă (rol/cost/promo/secrete/cerințe/card/invitați),
       // niciodată uneltele de aur. Dacă apar aici repo/db/health, ordinea s-a stricat.
@@ -2398,6 +2462,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       let gateDecided = !voceAmbianta
       let taced = false
       let userEcho = ''
+      // Coada reținută cât timp mai poate fi începutul marcajului de ecou.
+      let coadaEcou = ''
+      let ecouInchis = false
+      /** Câte caractere de la sfârșitul lui `s` sunt un început valid al lui
+       *  `marcaj`. Zero dacă niciunul — atunci nu se reține nimic. */
+      const potrivirePartiala = (s: string, marcaj: string): number => {
+        const max = Math.min(s.length, marcaj.length - 1)
+        for (let n = max; n > 0; n--) {
+          if (marcaj.slice(0, n).toLowerCase() === s.slice(s.length - n).toLowerCase()) return n
+        }
+        return 0
+      }
       const emitHeard = (txt: string): void => {
         reply.raw.write(`${CTRL}${JSON.stringify({ heard: txt.slice(0, 500) })}${CTRL}`)
       }
@@ -2413,31 +2489,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         if (SENTINELA_TAC.startsWith(capat)) {
           if (trimmed.length < SENTINELA_TAC.length) return '' // prefix parțial, mai vine
           if (capat === SENTINELA_TAC) {
+            // O TĂCERE TREBUIE SĂ SPUNĂ CE A AUZIT (Adrian, 8 aug, din jurnalul
+            // lui): înainte, `<TAC/>` stingea tura fără nicio urmă, deci un fals
+            // „nu mi se vorbea" arăta EXACT ca zgomot de fond ignorat corect.
+            // Restul bufferului poartă acum linia AUZIT; o culegem, n-o rostim.
             taced = true
             gateDecided = true
+            const dupa = trimmed.slice(SENTINELA_TAC.length)
+            const mt = /AUZIT:\s*(.*)/i.exec(dupa)
+            if (mt) userEcho = mt[1].split('\n')[0].trim()
             return ''
           }
         }
-        // Nu e sentinela. Așteptăm prima linie „AUZIT: …" (până la newline).
-        const nl = trimmed.indexOf('\n')
-        if (nl === -1) {
-          if (trimmed.length < 240) return '' // mai așteptăm newline-ul
-          // creierul n-a respectat formatul → tratăm tot ca răspuns, fără ecou
-          gateDecided = true
-          emitHeard('')
-          return trimmed
-        }
-        const primaLinie = trimmed.slice(0, nl)
-        const rest = trimmed.slice(nl + 1)
-        const m = /^\s*AUZIT:\s*(.*)$/i.exec(primaLinie)
+        // ── AICI STĂTEA ÎNTÂRZIEREA PÂNĂ LA PRIMUL SUNET (Adrian, 8 aug:
+        // „există o întârziere nejustificată de la întrebare la primul sunet") ──
+        //
+        // Vechiul protocol cerea creierului să scrie PRIMA linia
+        // „AUZIT: <tot ce ai spus>", și poarta aștepta newline-ul ei (sau 240 de
+        // caractere) ca să se deschidă. Adică nimic nu se putea rosti până nu
+        // termina de transcris ce-ai zis — o frază întreagă de așteptare, la
+        // FIECARE tură, degeaba: ecoul e pentru ecran, nu se rostește niciodată.
+        //
+        // Acum ecoul vine ULTIMUL, iar poarta se deschide în clipa în care
+        // bufferul nu mai poate fi `<TAC/>` — adică după 1-2 caractere. Primul
+        // cuvânt pleacă spre gură imediat ce creierul îl scrie.
         gateDecided = true
-        if (m) {
-          userEcho = m[1].trim()
-          emitHeard(userEcho)
-          return rest
-        }
-        // fără prefix AUZIT → tot bufferul e răspuns
-        emitHeard('')
+        emitHeard('') // ecoul REAL vine la sfârșit; ecranul îl primește atunci
         return trimmed
       }
       // FAKE TOOL-CALL MARKUP, NEVER SHOWN NOR SPOKEN (Adrian, Aug 1 —
@@ -2491,6 +2568,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           onText: (txt) => {
             let clean = markupStrip.push(txt)
             if (!clean) return
+            // ECOUL DE LA SFÂRȘIT NU SE ROSTEȘTE. Vine ultimul (vezi poarta), pe
+            // linia lui. Reținem coada cât timp încă poate fi începutul lui
+            // „\nAUZIT:" — cel mult 7 caractere de întârziere, nu o frază.
+            if (voceAmbianta && gateDecided && !taced) {
+              coadaEcou += clean
+              const p = coadaEcou.search(/\n\s*AUZIT\s*:/i)
+              if (p !== -1) {
+                userEcho = coadaEcou.slice(p).replace(/^\s*\n?\s*AUZIT\s*:\s*/i, '').split('\n')[0].trim()
+                clean = coadaEcou.slice(0, p)
+                coadaEcou = ''
+                ecouInchis = true
+              } else {
+                const tine = potrivirePartiala(coadaEcou, '\nAUZIT:')
+                clean = tine > 0 ? coadaEcou.slice(0, coadaEcou.length - tine) : coadaEcou
+                coadaEcou = tine > 0 ? coadaEcou.slice(coadaEcou.length - tine) : ''
+              }
+              if (ecouInchis && !clean) return
+              if (!clean) return
+            }
             // POARTA DE ADRESARE (voce ambientală): reținem primele caractere până
             // creierul decide. Dacă tace (<TAC/>) nu se scurge nimic; dacă e
             // adresat, emitem doar RĂSPUNSUL (fără linia AUZIT, dusă deja în {heard}).
@@ -2613,14 +2709,40 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           emitHeard(''); textFlowed = true; ecranPartial += trimmed; reply.raw.write(trimmed)
         }
       }
+      // ── SFÂRȘIT DE TURĂ VOCALĂ: coada reținută + ecoul real ─────────────
+      // Dacă marcajul de ecou n-a mai venit (creierul n-a scris „AUZIT:"),
+      // coada reținută e text normal și TREBUIE scrisă — altfel s-ar pierde
+      // ultimele caractere ale răspunsului, tăcut. Iar dacă ecoul a venit, îl
+      // trimitem ACUM la ecran; până aici ecranul a arătat gol, dar omul a auzit
+      // răspunsul din prima secundă — schimbul e exact ăsta.
+      if (voceAmbianta && gateDecided && !taced) {
+        if (coadaEcou) {
+          textFlowed = true
+          ecranPartial += coadaEcou
+          reply.raw.write(coadaEcou)
+          voice.feed(coadaEcou)
+          coadaEcou = ''
+        }
+        if (userEcho) emitHeard(userEcho)
+      }
       // Pe voce, corpul rostit e în ecranPartial (poarta l-a scos curat).
       if (voceAmbianta && !taced) assistantText = ecranPartial
       // Creierul a hotărât că NU i se vorbea → tura se stinge: {ignored}, fără
       // rostire (poarta a reținut tot), fără salvare. Clientul șterge bulele.
       if (voceAmbianta && taced) {
+        // Dacă în ce-a auzit e numele lui, tăcerea e GREȘITĂ — și trebuie să se
+        // vadă ca atare în jurnal, nu îngropată printre tăcerile corecte.
+        // (Poarta deterministă de nume a fost scoasă de pe client pe 7 aug, cu
+        // avertismentul scris în handoff că „un fals <TAC/> poate înghiți tăcut
+        // o frază adresată". Măsurătoarea ownerului din 8 aug l-a confirmat.)
+        const gresita = numeStrigat(userEcho)
         reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
         reply.raw.end()
-        console.log(`[VOCE] tura ${turnId.slice(0, 8)}: creierul a decis că NU i se vorbea — tăcere`)
+        console.log(
+          gresita
+            ? `[VOCE] tura ${turnId.slice(0, 8)}: TĂCERE GREȘITĂ — a auzit numele și tot a tăcut. AUZIT: „${userEcho}"`
+            : `[VOCE] tura ${turnId.slice(0, 8)}: tăcere — nu i se vorbea. AUZIT: „${userEcho || '(n-a spus ce a auzit)'}"`,
+        )
         return
       }
       // Voce adresată: salvăm mesajul userului = ce a auzit creierul (ecou precis,

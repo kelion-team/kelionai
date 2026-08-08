@@ -133,6 +133,17 @@ export const PORTI: Poarta[] = [
   { nume: 'exporturi', comanda: 'node', argumente: ['scripts/verifica-exporturi.mjs'], in: '.' },
   { nume: 'sintaxa', comanda: 'node', argumente: ['scripts/verifica-sintaxa.mjs'], in: '.' },
   { nume: 'build-frontend', comanda: 'npm', argumente: ['run', 'build'], in: 'frontend' },
+  // ── DE CE SUNT ASTEA DOUĂ AICI (Adrian, 8 aug: „nimic din calculele făcute și
+  // afișate nu se regăsesc în chat") ────────────────────────────────────────
+  // Avea dreptate, și cauza era în lista asta. Am probat 125 de rute și am
+  // raportat cifrele ÎN TERMINALUL MEU. `PORTI` avea 6 intrări, niciuna fiind
+  // probele de rute — deci când el îl întreabă pe Kelion „ce ai măsurat",
+  // Kelion citește un jurnal în care munca mea nu există. Numerele existau
+  // într-un loc unde el nu trăiește.
+  // Acum trec prin `masoara`, deci intră în jurnalul KV pe care Kelion îl
+  // citește cu unealta `jurnal_masuratori`, ca orice altă poartă.
+  { nume: 'rute-citire', comanda: 'node', argumente: ['scripts/proba-rute.mjs'], in: '.' },
+  { nume: 'rute-scriere', comanda: 'node', argumente: ['scripts/proba-scriere.mjs'], in: '.' },
 ]
 
 /** Rădăcina repo-ului în imagine (aplicația pornește din /app). Pe env pentru

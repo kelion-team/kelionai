@@ -49,7 +49,15 @@ vi.mock('./config.js', () => ({
 const motor = creeazaFakePg()
 pgFals.motor = motor
 
-const { topUpUser, debitWallet, getBalance, getWalletStatus, userKey } = await import('./db.js')
+const { topUpUser, debitWallet, citesteSold, citestePortofel, userKey } = await import('./db.js')
+
+/** Soldul CITIT. Aruncă dacă citirea a picat — un test care ia „n-am putut
+ *  citi" drept „zero" e fix minciuna pe care o vânăm (8 aug 2026). */
+const soldCitit = async (email: string): Promise<number> => {
+  const r = await citesteSold(email)
+  if (!r.citit) throw new Error(`soldul nu s-a putut citi: ${r.motiv}`)
+  return r.sold
+}
 
 const sold = (email: string): number => motor.baza.wallets.get(email.toLowerCase())?.balance ?? 0
 const refPortofel = (email: string): number => motor.baza.wallets.get(email.toLowerCase())?.topup_ref ?? 0
@@ -163,16 +171,17 @@ describe('bani — citirea soldului nu depinde de cum e scris emailul', () => {
     // the user pays and sees "0 credits" — exactly the bug class already fixed
     // twice in this file, left open on the READ path.
     await topUpUser('Ion@Test.RO', 10, 'gbp', 'tr_c')
-    expect(await getBalance('Ion@Test.RO')).toBeCloseTo(7.5, 6)
-    expect(await getBalance('ion@test.ro')).toBeCloseTo(7.5, 6)
-    expect((await getWalletStatus('Ion@Test.RO')).balance).toBeCloseTo(7.5, 6)
+    expect(await soldCitit('Ion@Test.RO')).toBeCloseTo(7.5, 6)
+    expect(await soldCitit('ion@test.ro')).toBeCloseTo(7.5, 6)
+    const p1 = await citestePortofel('Ion@Test.RO')
+    expect(p1.citit && p1.balance).toBeCloseTo(7.5, 6)
   })
 
   it('taxarea lovește ACELAȘI portofel, nu creează unul paralel', async () => {
     await topUpUser('Ion@Test.RO', 10, 'gbp', 'tr_c2')
     await debitWallet('Ion@Test.RO', 2.5, 'voce')
     expect(motor.baza.wallets.size).toBe(1) // NOT two rows for the same person
-    expect(await getBalance('Ion@Test.RO')).toBeCloseTo(5, 6)
+    expect(await soldCitit('Ion@Test.RO')).toBeCloseTo(5, 6)
   })
 
   it('preferințele folosesc ACEEAȘI cheie ca portofelul', async () => {
@@ -187,7 +196,8 @@ describe('bani — citirea soldului nu depinde de cum e scris emailul', () => {
   })
 
   it('fără portofel, soldul e 0 (nu crapă)', async () => {
-    expect(await getBalance('nimeni@test.ro')).toBe(0)
-    expect(await getWalletStatus('nimeni@test.ro')).toEqual({ balance: 0, topupRef: 0 })
+    // Fără rând = zero REAL, citit — nu „n-am putut citi".
+    expect(await soldCitit('nimeni@test.ro')).toBe(0)
+    expect(await citestePortofel('nimeni@test.ro')).toEqual({ citit: true, balance: 0, topupRef: 0 })
   })
 })
