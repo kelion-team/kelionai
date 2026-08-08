@@ -63,15 +63,16 @@ export async function startRecording(
 
   let display: MediaStream
   try {
-    // "AUTOMATIC SELECTION" (Adrian, Jul 11): the browser preselects the
-    // CURRENT TAB (the app, with the audio chat) instead of Adrian hunting through the list
-    // — one single confirmation click remains, a browser security
-    // browserului care nu se poate ocoli.
+    // ALEGEREA E A OMULUI (Adrian, 8 aug: „când apăs Rec trebuie să mă lase să
+    // înregistrez SELECȚIA"). Decizia veche din 11 iul („selecție automată")
+    // punea `preferCurrentTab: true`, care îngusta dialogul browserului la
+    // tabul curent — nu se mai putea alege fereastră sau ecran. Acum se
+    // deschide alegătorul ÎNTREG (tab / fereastră / tot ecranul); tabul
+    // aplicației rămâne în listă (selfBrowserSurface), audio-ul de sistem la fel.
     const opts = {
       // The size is SPECIFIED (1080p/30) — the browser no longer decides on its own.
       video: { frameRate: FRAME_RATE, ...VIDEO_SIZE },
       audio: true, // tab/system audio → captures Kelion's voice
-      preferCurrentTab: true,
       selfBrowserSurface: 'include',
       systemAudio: 'include',
     }
