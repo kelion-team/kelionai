@@ -264,6 +264,15 @@ export function construiesteSetup(
     // loc să omoare sesiunea. Împreună cu reluarea pe handle, singurele limite
     // rămase sunt cele fizice (rețeaua ta, cheia ta).
     contextWindowCompression: { slidingWindow: {} },
+    // ZGOMOTUL NU DESCHIDE TURA (8 aug, ownerul, în timpul filmării: „atenție
+    // la zgomot că bagă bălării" — măsurat în arhivă: foșnete transcrise ca
+    // „Fahrradbahn", „Tequilón", „la picana"). Reglajul OFICIAL al Live API:
+    // pragul de START al vorbirii pe sensibilitate JOASĂ — modelul cere vorbire
+    // clară ca să deschidă tura, nu orice foșnet. Sfârșitul rămâne pe implicit
+    // (o replică tăiată ar fi mai rea decât bălăriile).
+    realtimeInputConfig: {
+      automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' },
+    },
     generationConfig: {
       // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat: cu
       // TEXT dau cod 1007). Vocea = prebuiltVoiceConfig.voiceName (masculină).
@@ -416,6 +425,9 @@ export function deschideVocalLive(
         if (faraExtensii) {
           delete st.setup.sessionResumption
           delete st.setup.contextWindowCompression
+          // Aceeași plasă și pentru reglajul anti-zgomot: un model care l-ar
+          // refuza la setup primește varianta fără el, nu o sesiune moartă.
+          delete st.setup.realtimeInputConfig
         }
         socket.send(JSON.stringify(st))
       } catch (e) {
