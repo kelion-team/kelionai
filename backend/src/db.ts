@@ -1315,6 +1315,31 @@ export async function getDownloadStats(): Promise<{
 export const userKey = (email: string): string => String(email ?? '').trim().toLowerCase()
 const walletKey = userKey
 
+/** ── O CITIRE CARE SPUNE DACĂ A REUȘIT (M7b, 8 aug 2026) ───────────────────
+ *
+ *  Adrian: „le faci corect, măsurat și rezolvat". Continuarea lui M7a (soldul).
+ *  Aceleași două capcane, în toate citirile de mai jos:
+ *
+ *      if (!dbEnabled()) return []      →  „nu e nicio bază"  citit ca „0 rânduri"
+ *      catch { return [] }              →  „interogarea a crăpat" citit la fel
+ *
+ *  Panoul desena apoi „0 utilizatori", „£0.00", „nicio tranzacție" — adică
+ *  exact minciuna din regula #1, fix în minutul în care ai nevoie de adevăr.
+ *
+ *  Un singur înveliș, ca să nu se repete tiparul de cinci ori (și ca poarta de
+ *  dubluri să nu aibă ce reclama). O listă GOALĂ citită cu succes rămâne o
+ *  listă goală — ăla e un fapt. Doar imposibilitatea de a citi se numește. */
+export type Citire<T> = { citit: true; valoare: T } | { citit: false; motiv: string }
+
+async function citireDb<T>(ce: string, fn: () => Promise<T>): Promise<Citire<T>> {
+  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
+  try {
+    return { citit: true, valoare: await fn() }
+  } catch (e) {
+    return { citit: false, motiv: `${ce} a picat: ${e instanceof Error ? e.message.slice(0, 140) : String(e)}` }
+  }
+}
+
 /** ── SOLDUL: „N-AM PUTUT CITI" NU E „AI ZERO" (8 aug 2026) ─────────────────
  *
  *  `getBalance` întorcea `0` și când baza nu era configurată, și când
@@ -1477,18 +1502,15 @@ export async function listTransactionsForUser(email: string, limit = 50): Promis
 }
 
 /** All transactions (admin panel). */
-export async function listAllTransactions(limit = 200): Promise<Transaction[]> {
-  if (!dbEnabled()) return []
-  try {
+export async function citesteTranzactii(limit = 200): Promise<Citire<Transaction[]>> {
+  return citireDb('citirea tranzacțiilor', async () => {
     const r = await getPool().query<Transaction>(
       `SELECT id, user_id, amount, credits, status, payment_ref, created_at::text
        FROM transactions ORDER BY created_at DESC LIMIT $1`,
       [Math.max(1, Math.min(500, limit))],
     )
     return r.rows
-  } catch {
-    return []
-  }
+  })
 }
 
 /** Wallet balance + the last-top-up reference, for the low-credit % alerts. */
@@ -2200,17 +2222,14 @@ export interface UserSummary {
   last: string
 }
 
-export async function listUsers(): Promise<UserSummary[]> {
-  if (!dbEnabled()) return []
-  try {
+export async function citesteUtilizatori(): Promise<Citire<UserSummary[]>> {
+  return citireDb('citirea utilizatorilor', async () => {
     const r = await getPool().query<UserSummary>(
       `SELECT user_email AS email, COUNT(*)::int AS count, MAX(created_at) AS last
        FROM messages GROUP BY user_email ORDER BY last DESC`,
     )
     return r.rows
-  } catch {
-    return []
-  }
+  })
 }
 
 export interface HistoryRow {
@@ -2219,18 +2238,15 @@ export interface HistoryRow {
   created_at: string
 }
 
-export async function getHistory(email: string, limit = 1000): Promise<HistoryRow[]> {
-  if (!dbEnabled()) return []
-  try {
+export async function citesteIstoric(email: string, limit = 1000): Promise<Citire<HistoryRow[]>> {
+  return citireDb('citirea istoricului', async () => {
     const r = await getPool().query<HistoryRow>(
       `SELECT role, content, created_at FROM messages
        WHERE user_email = $1 ORDER BY created_at ASC LIMIT $2`,
       [email, limit],
     )
     return r.rows
-  } catch {
-    return []
-  }
+  })
 }
 
 // The LAST n messages (chronological) — what the chat panel reloads at start

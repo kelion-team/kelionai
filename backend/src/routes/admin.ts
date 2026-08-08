@@ -3,9 +3,9 @@ import { config } from '../config.js'
 import { getSessionUser, adminSiId } from '../session.js'
 import { pollVisitorChat } from './demo.js' // visitor chat polling from the common source
 import {
-  listAllTransactions,
-  listUsers,
-  getHistory,
+  citesteTranzactii,
+  citesteUtilizatori,
+  citesteIstoric,
   getCostSummary,
   getCapabilityGaps,
   setGapResolved,
@@ -223,7 +223,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/users', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ users: await listUsers() })
+    const u = await citesteUtilizatori()
+    // 0 UTILIZATORI ≠ NU POT CITI (M7b, 8 aug). `listUsers()` întorcea `[]` și
+    // când baza nu răspundea — panoul desena „niciun utilizator" peste o citire
+    // imposibilă. Acum eșecul iese 503 cu motivul, nu ca listă goală.
+    if (!u.citit) return reply.code(503).send({ error: 'utilizatori_necititi', motiv: u.motiv })
+    return reply.send({ users: u.valoare })
   })
 
   // Full chat history for one user (admin only).
@@ -232,7 +237,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const email = req.query.email
     if (!email) return reply.code(400).send({ error: 'bad_request', message: 'email required' })
-    return reply.send({ history: await getHistory(email) })
+    const h = await citesteIstoric(email)
+    if (!h.citit) return reply.code(503).send({ error: 'istoric_necitit', motiv: h.motiv })
+    return reply.send({ history: h.valoare })
   })
 
   // Batch-translate a conversation's messages into Romanian (the "Translate
@@ -494,7 +501,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/transactions', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ transactions: await listAllTransactions(200) })
+    const t = await citesteTranzactii(200)
+    if (!t.citit) return reply.code(503).send({ error: 'tranzactii_necitite', motiv: t.motiv })
+    return reply.send({ transactions: t.valoare })
   })
 
   // Per-USER activity (admin only): who signed in, last IP/place/device, how

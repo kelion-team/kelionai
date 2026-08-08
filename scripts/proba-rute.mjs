@@ -106,6 +106,16 @@ if (!server.ok) {
   process.exit(2)
 }
 
+// Starea bazei e un FAPT pe care-l controlez (ce i-am dat serverului la
+// pornire), nu o deducție dintr-un răspuns — o rută care întoarce „0 rânduri"
+// pentru o citire imposibilă ar minți chiar despre asta.
+const bazaVie = Boolean(server.env.DATABASE_URL)
+console.log(
+  bazaVie
+    ? 'BAZA DE DATE: pornită cu DATABASE_URL — o citire picată e defect, nu scuză.\n'
+    : 'BAZA DE DATE: serverul de probă a pornit FĂRĂ DATABASE_URL — citirile din ea se raportează „nu pot verifica".\n',
+)
+
 const rez = []
 for (const r of rute) {
   const url = `http://127.0.0.1:${PORT}${concret(r)}`
@@ -126,7 +136,17 @@ const clasa = (x) => {
   // „recovery_unreadable". ALEA NU SUNT DEFECTE — sunt chiar comportamentul
   // corect (ruta spune „nu pot citi", nu „0 rânduri"). Le-am raportat o dată ca
   // „crapă" și era alarmă falsă: nu pot verifica rutele de bază de date de aici.
-  if (x.status >= 500 && /db_unreadable|recovery_unreadable|no_db|database/i.test(x.corp)) {
+  // Din 8 aug, rutele care citeau din bază NU mai răspund cu liste goale: spun
+  // `..._necitit` + motivul (M7b). Deci markerul nu mai e doar `db_unreadable`.
+  // ATENȚIE la capcana în care am căzut deja o dată: nu lărgesc tiparul ca să
+  // fac roșul verde. Iertarea se dă DOAR fiindcă `bazaVie` e fals — un fapt pe
+  // care-l controlez (i-am dat sau nu `DATABASE_URL` la pornire). Cu baza vie,
+  // exact aceleași răspunsuri ar fi defecte adevărate și ar ieși roșu.
+  if (
+    x.status >= 500 &&
+    !bazaVie &&
+    /db_unreadable|db_indisponibil|recovery_unreadable|no_db|database|necitit|necitite|baza de date nu e configurată/i.test(x.corp)
+  ) {
     return 'NU POT VERIFICA (fără bază de date aici)'
   }
   if (x.status >= 500) return 'CRAPĂ'
