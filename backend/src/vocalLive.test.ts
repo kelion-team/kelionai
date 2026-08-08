@@ -114,3 +114,35 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     )
   })
 })
+
+// ── SESIUNEA SUPRAVIEȚUIEȘTE LIMITEI GOOGLE (8 aug: „a funcționat 5 minute
+// impecabil, după care a amuțit") ───────────────────────────────────────────
+describe('vocalLive — reluarea sesiunii la limita de durată', () => {
+  it('setup-ul CERE reluarea; la reconectare poartă handle-ul primit', () => {
+    const proaspat = construiesteSetup('m', 'Charon', 'p', []) as { setup: Record<string, unknown> }
+    expect(proaspat.setup.sessionResumption, 'fără cerere, Google nu dă handle și sesiunea moare sec la limită').toEqual({})
+    const reluat = construiesteSetup('m', 'Charon', 'p', [], 'handle-123') as { setup: Record<string, unknown> }
+    expect(reluat.setup.sessionResumption).toEqual({ handle: 'handle-123' })
+  })
+
+  it('„no limit": fereastra glisantă e cerută — contextul plin nu mai omoară sesiunea', () => {
+    const st = construiesteSetup('m', 'Charon', 'p', []) as { setup: Record<string, unknown> }
+    expect(st.setup.contextWindowCompression, 'fără compresie, sesiunea moare când conversația se lungește').toEqual({
+      slidingWindow: {},
+    })
+  })
+
+  it('handle-ul de reluare se citește din cadru (doar când e resumable)', () => {
+    const ev = interpreteazaCadru({ sessionResumptionUpdate: { resumable: true, newHandle: 'h9' } })
+    expect(ev).toContainEqual({ fel: 'handleReluare', handle: 'h9' })
+    // ne-resumabil = nu avem cu ce relua — nu inventăm un handle
+    expect(interpreteazaCadru({ sessionResumptionUpdate: { resumable: false, newHandle: 'h9' } })).toEqual([])
+  })
+
+  it('preavizul de închidere (goAway) se citește, cu timpul rămas în ms', () => {
+    const ev = interpreteazaCadru({ goAway: { timeLeft: '12.5s' } })
+    expect(ev).toContainEqual({ fel: 'preavizInchidere', msRamase: 12500 })
+    // goAway fără timp rămâne preaviz — redeschidem oricum
+    expect(interpreteazaCadru({ goAway: {} })).toContainEqual({ fel: 'preavizInchidere', msRamase: undefined })
+  })
+})
