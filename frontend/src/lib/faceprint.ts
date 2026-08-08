@@ -26,10 +26,18 @@ async function ensureApi(): Promise<FaceApi | null> {
     // Performance, 8 aug: 55–77 ms per task). WebGL mută greul pe GPU; dacă
     // browserul nu-l poate da, rămânem pe ce alege el singur (fail-open), dar
     // spunem în consolă pe ce backend chiar rulăm — nu presupunem.
+    // Accesul la `tf` e DINAMIC, nu prin tipuri: declarațiile lui face-api
+    // 1.7.15 nu expun getBackend/setBackend/ready pe `typeof tf`, deși la
+    // rulare există (tfjs-ul împachetat e întreg) — cu tipuri, `tsc -b` din
+    // imaginea Docker pică și publicarea se oprește (măsurat 8 aug: exact așa
+    // a stat masterul 20 de minute nepublicat).
+    const tfx = (mod as unknown as {
+      tf?: { getBackend?: () => string; setBackend?: (b: string) => Promise<boolean>; ready?: () => Promise<void> }
+    }).tf
     try {
-      if (mod.tf.getBackend() !== 'webgl') {
-        await mod.tf.setBackend('webgl')
-        await mod.tf.ready()
+      if (tfx?.setBackend && tfx.getBackend?.() !== 'webgl') {
+        await tfx.setBackend('webgl')
+        await tfx.ready?.()
       }
     } catch {
       /* backendul rămâne cel implicit */
@@ -41,7 +49,7 @@ async function ensureApi(): Promise<FaceApi | null> {
     api = mod
     modelsReady = true
     // eslint-disable-next-line no-console
-    console.info(`[fața] backend inferență: ${mod.tf.getBackend()}`)
+    console.info(`[fața] backend inferență: ${tfx?.getBackend?.() ?? 'necunoscut (tf neexpus)'}`)
     return mod
   } catch {
     // Without face recognition — chat works exactly as before (fail-open).
