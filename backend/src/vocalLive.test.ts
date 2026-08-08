@@ -94,6 +94,15 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     expect(i, 'fără istoric nu există „ultimele schimburi" — nu se inventează').not.toContain('ULTIMELE')
   })
 
+  it('regula limbii e în instrucțiune: orice limbă, oglindirea vorbitorului (Adrian, 8 aug)', () => {
+    // Măsurat înainte de regulă: instrucțiunea nu spunea NIMIC despre limbă și
+    // configul nu trimite languageCode — modelul rămânea pe limba ghicită.
+    const i = construiesteInstructiune(persona, 'Adrian', [])
+    expect(i).toContain('REGULA LIMBII')
+    expect(i).toContain('limba ULTIMEI fraze')
+    expect(i, 'nu se pinuiește niciun cod de limbă — aia ar fi cușca inversă').not.toMatch(/languageCode/)
+  })
+
   it('cu istoric: ultimele schimburi intră, cu numele omului pe replicile lui', () => {
     const i = construiesteInstructiune(persona, 'Adrian', [
       { role: 'user', content: 'cât e ceasul?' },
