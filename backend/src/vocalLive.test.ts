@@ -319,6 +319,42 @@ describe('mapview — niciun oraș bătut în cod', () => {
   })
 })
 
+// ── HARTA PE DOMENIUL NOSTRU (8 aug: iframe-ul openstreetmap.org apărea
+// „întotdeauna" ca pagină prăbușită în Chrome-ul ownerului, iar traseul cerut
+// de 15 ori n-a fost desenat niciodată — creierul alegea maps_search pentru că
+// doar descrierea ei pomenea harta). Sigiliile țin hărțile same-origin și
+// descrierea traseului pe unealta care chiar îl desenează. ─────────────────
+describe('hărțile — same-origin, nu cadre străine care mor în browser', () => {
+  const mapview = readFileSync(new URL('./routes/mapview.ts', import.meta.url), 'utf8')
+  const google = readFileSync(new URL('./services/google.ts', import.meta.url), 'utf8')
+  const preview = readFileSync(new URL('./services/monitorAutoPreview.ts', import.meta.url), 'utf8')
+
+  it('pagina hărții își ia Leaflet de la noi, nu de pe unpkg', () => {
+    expect(mapview).toContain('/leaflet/leaflet.js')
+    expect(mapview).toContain('/leaflet/leaflet.css')
+    expect(mapview).not.toContain('unpkg.com')
+  })
+
+  it('pagina hărții are modul punct (maps_search) cu numele ca TEXT, nu HTML', () => {
+    expect(mapview).toContain('punct=')
+    expect(mapview).toContain('el.textContent=nume')
+  })
+
+  it('maps_search și scena promo trimit pe ecran harta noastră, nu openstreetmap.org', () => {
+    expect(google).toContain('/api/route?punct=')
+    expect(google).not.toContain('export/embed.html')
+  })
+
+  it('descrierea maps_directions spune că EA desenează traseul pe monitor', () => {
+    expect(google).toMatch(/maps_directions[\s\S]{0,600}ROUTE between two places ON the monitor map/)
+  })
+
+  it('auto-preview-ul din coordonate folosește tot harta noastră', () => {
+    expect(preview).toContain('/api/route?punct=')
+    expect(preview).not.toContain('openstreetmap.org/?mlat')
+  })
+})
+
 // ── UNELTELE PRIN UȘĂ + ANUNȚUL LA TERMINARE (8 aug: „a oferit soluții dar nu
 // poate să implementeze... dă-i uneltele să poată, și să anunțe când e gata") ─
 describe('vocalLive — ușa dă faza de ACȚIUNE și anunță ordinele terminate', () => {
