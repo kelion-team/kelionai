@@ -154,6 +154,16 @@ export function construiesteInstructiune(
     `\nREGULA LIMBII — PRIMA REGULĂ: vorbește în LIMBA în care ți se vorbește, oricare ar fi ea. ` +
     `Răspunzi în limba ULTIMEI fraze a omului; dacă el comută limba, comuți și tu INSTANT, fără să comentezi comutarea. ` +
     `Nu amesteci limbile în același răspuns și nu traduci nechemat.`
+  // ANCORA LIMBII PE ZGOMOT (8 aug, ownerul: „cât vorbesc cu el se folosește
+  // doar română" — măsurat în arhivă: urechea îi eticheta româna vorbită drept
+  // „Fahrradbahn"/„Tequilón"/„la picana" pe foșnete, iar frânturile străine
+  // intrau în conversație). Nu contrazice regula de mai sus — o apără de
+  // erorile urechii: comutarea rămâne, dar doar pe vorbire REALĂ susținută.
+  instructiune +=
+    `\nANCORA LIMBII: limba conversației cu ${numeUser} e ROMÂNA. Dacă o transcriere pare în altă ` +
+    `limbă fără ca el să fi trecut REAL și susținut la limba aia, e o eroare a urechii pe zgomot: ` +
+    `NU răspunzi frânturii străine — interpretezi ce a vrut să spună în română sau, dacă nu se ` +
+    `înțelege, taci ori întrebi scurt. Comuți limba DOAR când omul chiar vorbește fraze întregi în alta.`
   // REGULA TĂCERII LA DESCHIDERE (8 aug, ownerul, cu captura „Pa!" → „Bună
   // seara, Adrian.": „trebuie oprită bâlbâiala permanentă a salutului").
   // Modelul Live vorbește PRIMUL la fiecare deschidere de sesiune — iar scara
