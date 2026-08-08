@@ -118,11 +118,13 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     const i = construiesteInstructiune(persona, 'Adrian', lung)
     expect(i, 'mesajul 27 e al 13-lea de la coadă — nu are ce căuta').not.toContain('mesajul 27 ')
     expect(i).toContain('mesajul 39 ')
-    // Bugetul fix: numele + REGULA LIMBII (8 aug, ~390 de caractere) + antetul
-    // blocului de istoric + blocul plafonat la 2400. Plafonul RĂMÂNE — doar
-    // încape și regula limbii în el, că e parte din antetul fix, nu din istoric.
+    // Bugetul fix: numele + REGULA LIMBII (~390) + REGULA TĂCERII + ANCORA
+    // REALITĂȚII (8 aug seara, ~450 împreună — antet FIX, scris o dată, nu
+    // crește cu istoricul) + antetul blocului de istoric + blocul plafonat la
+    // 2400. Plafonul pe ISTORIC rămâne neatins — bugetul total s-a ridicat
+    // conștient doar cât să încapă cele două reguli noi ordonate de owner.
     expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
-      persona.length + 3000,
+      persona.length + 3700,
     )
   })
 })
@@ -215,5 +217,34 @@ describe('vocalLive — ușa cere_creierului', () => {
     const p = usa.parameters as { required?: string[]; properties?: Record<string, unknown> }
     expect(p.required).toEqual(['cerere'])
     expect(p.properties?.cerere).toBeTruthy()
+  })
+})
+
+// ── ANCORA + TĂCEREA LA DESCHIDERE (8 aug: „nu e ancorat în realitate" +
+// „trebuie oprită bâlbâiala permanentă a salutului") ─────────────────────────
+describe('vocalLive — ancora realității și tăcerea la deschidere', () => {
+  it('instrucțiunea poartă REGULA TĂCERII (salutul nu se repetă la reluări)', () => {
+    const i = construiesteInstructiune('persona', 'Adrian', [])
+    expect(i).toContain('REGULA TĂCERII LA DESCHIDERE')
+    expect(i).toContain('Saluți DOAR dacă el te salută primul')
+  })
+
+  it('cu oră+fus+GPS, ancora e coaptă în instrucțiune cu valorile reale', () => {
+    const i = construiesteInstructiune('p', 'Adrian', [], {
+      nowIso: '2026-08-08T18:30:00.000Z',
+      tz: 'Europe/London',
+      lat: 51.5,
+      lon: -0.12,
+    })
+    expect(i).toContain('ANCORA REALITĂȚII')
+    expect(i).toContain('51.5')
+    expect(i).toContain('-0.12')
+    expect(i).toContain('Europe/London')
+  })
+
+  it('fără ancoră, lipsa se DECLARĂ — nu se inventează loc sau oră', () => {
+    const i = construiesteInstructiune('p', 'Adrian', [])
+    expect(i).toContain('nu ai primit nici ora, nici locul')
+    expect(i).toContain('nu inventezi')
   })
 })

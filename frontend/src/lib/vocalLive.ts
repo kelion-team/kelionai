@@ -48,6 +48,10 @@ export interface VocalLiveOpts {
    *  NIMIC — meteo/hărțile din ușa creierului rămâneau fără loc. Se citește la
    *  `gata` și periodic; null = nu avem (serverul declară lipsa, nu inventează). */
   coordonate?(): { lat: number; lon: number } | null
+  /** Cadrele camerei, LA CEREREA serverului (8 aug: „hai și cu vedere") —
+   *  când ușa cere_creierului se deschide, tura escaladată pleacă cu ochii.
+   *  Gol/absent = fără cameră; tura pleacă fără imagini, nu se blochează. */
+  cadre?(): string[]
 }
 
 export interface VocalLiveHandle {
@@ -279,10 +283,21 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // trimit la `gata` și apoi la fiecare 2 minute (ritmul watcher-ului din
   // ChatPanel) — cadru JSON text, distinct de cadrele binare de microfon.
   const trimiteCoords = (): void => {
+    if (inchis || ws.readyState !== WebSocket.OPEN) return
     const c = opts.coordonate?.()
-    if (!c || inchis || ws.readyState !== WebSocket.OPEN) return
     try {
-      ws.send(JSON.stringify({ type: 'coords', lat: c.lat, lon: c.lon }))
+      // ANCORA REALITĂȚII (8 aug: „nu e ancorat în realitate"): pe lângă GPS
+      // pleacă și ORA + FUSUL device-ului — serverul le coace în instrucțiunea
+      // sesiunii. Fără coordonate, ancora pleacă doar cu timpul (real, nu gol).
+      ws.send(
+        JSON.stringify({
+          type: 'coords',
+          lat: c?.lat,
+          lon: c?.lon,
+          now: new Date().toISOString(),
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      )
     } catch {
       /* socket picat — close-ul curăță */
     }
@@ -305,6 +320,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       case 'control':
         if (m.frame) opts.onControl?.(m.frame)
         break
+      case 'cere_cadre': {
+        // Serverul deschide ușa creierului și vrea ochii: trimitem cadrele
+        // camerei ACUM (gol = fără cameră — serverul nu așteaptă degeaba).
+        try {
+          ws.send(JSON.stringify({ type: 'cadre', cadre: opts.cadre?.() ?? [] }))
+        } catch {
+          /* socket picat — close-ul curăță */
+        }
+        break
+      }
       case 'audio':
         if (m.data) redaCadru(m.data)
         break
@@ -349,7 +374,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // Microfonul pornește DUPĂ ce socketul e deschis: altfel primele cadre s-ar
   // pierde în gol și primele cuvinte ale omului ar dispărea.
   await new Promise<void>((gata, esec) => {
-    ws.onopen = () => gata()
+    ws.onopen = () => {
+      // Ancora realității pleacă PRIMA, chiar la deschidere — serverul o
+      // așteaptă puțin înainte să construiască instrucțiunea sesiunii.
+      trimiteCoords()
+      gata()
+    }
     setTimeout(() => esec(new Error('timeout la deschiderea sesiunii')), 10_000)
   }).catch((e: Error) => {
     urcaEroarea(e.message)
