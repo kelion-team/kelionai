@@ -1299,6 +1299,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // If the key is missing, the streaming safety net returns a clear error in
     // the user's language — which is why there is no longer a 503
     // "brain_not_configured" guard here.
+    const tSosire = Date.now() // contorul serverului: sosire → creier
     const rawMessages = req.body?.messages
     const image = req.body?.image
     // Multiple frames (max 4, real images only) — fall back to the singular
@@ -2351,6 +2352,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // many rounds. Together with the per-round [TIMP] lines in the
     // orchestrator, a slow turn is decomposed, not guessed.
     const tCreier = Date.now()
+    // Segmentul INVIZIBIL până azi: cât a costat pregătirea turei (sesiune, KV,
+    // amprente, prompt, unelte) ÎNAINTE ca creierul să fie chemat. [TIMP] măsoară
+    // doar creierul; fără linia asta, o pregătire lentă nu se vedea nicăieri.
+    if (voceAmbianta) console.log(`[CONTOR-SERVER] sosire → creier: ${tCreier - tSosire} ms (pregătirea turei)`)
     try {
       if (!orChatModel) throw new Error('brain_not_configured: GEMINI_API_KEY missing')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]

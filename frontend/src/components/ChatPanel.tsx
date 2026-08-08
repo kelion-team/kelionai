@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
 import { ceas } from '../lib/ceas'
+import { frazaInchisa, gata as contorGata } from '../lib/contorFraza'
 import { strings, resolveLang, uiStrings, type Lang } from '../lib/i18n'
 import CameraView from './CameraView'
 import { WorkClock } from './WorkClock'
@@ -438,6 +439,7 @@ export default function ChatPanel({
       // {audio} frames are dropped. A net too for frames already synthesized by a
       // turn started before the flag (serverVoiceOff stops the source, this drains the rest).
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
+      contorGata('primul sunet (gura a pornit)')
       playVoice(
         c.audio,
         () => micRef.current?.setMuted(true),
@@ -1447,6 +1449,7 @@ export default function ChatPanel({
               // filtrat deja străinii; creierul unic aude fraza și decide singur
               // dacă i se vorbește (altfel tace). Fără audio nu are ce trimite.
               if (!audio) return
+              frazaInchisa() // contor: zero
               setPendingVoiceFeatures(vf)
               pendingSpeakerRef.current = speaker ?? null
               pendingAudioRef.current = audio
