@@ -2019,10 +2019,12 @@ export async function resetCostCounters(): Promise<{ ok: boolean; sterse: number
   }
 }
 
-export async function getCostSummary(): Promise<CostSummary> {
-  const empty: CostSummary = { total: 0, today: 0, byKind: {}, masurat: 0, estimat: 0, felul: {} }
-  if (!dbEnabled()) return empty
-  try {
+/** Rezumatul costurilor, ca CITIRE (M7b, 8 aug — ultima rămasă): `getCostSummary`
+ *  întorcea zerouri și când baza era picată — fix tiparul „£0.00" din 30 iul,
+ *  o citire eșuată prezentată ca fapt. Acum: ori cifrele măsurate, ori
+ *  `{citit:false, motiv}` — iar consumatorii spun „nu pot citi", nu „0". */
+export async function citesteRezumatCost(): Promise<Citire<CostSummary>> {
+  return citireDb('citirea jurnalului de cost', async () => {
     const pool = getPool()
     const totals = await pool.query<{ total: string | null; today: string | null }>(
       `SELECT
@@ -2053,9 +2055,7 @@ export async function getCostSummary(): Promise<CostSummary> {
       estimat,
       felul,
     }
-  } catch {
-    return empty
-  }
+  })
 }
 
 // Per-user speech language — persists across sessions for as long as the user

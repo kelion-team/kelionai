@@ -256,6 +256,16 @@ echo "== 6b. Sentinela locală (cron la 3 min — pulsul lui Kelion, zero cost) 
 install -m 700 "$REPO/deploy/sentinela-locala.sh" /root/kelion/sentinela-locala.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/sentinela-locala.sh' ; echo '*/3 * * * * /root/kelion/sentinela-locala.sh >> /root/kelion/sentinela.log 2>&1' ) | crontab -
 
+echo "== 6g. Veghea publicării (cron la 10 min — divergența master↔live nu mai TACE) =="
+# 7 aug, măsurat: master a stat 7+ ore înaintea live-ului și niciun semnal
+# (lacătul ținut → auto-publicare ieșea tăcut la fiecare minut). Veghea se uită
+# din AFARA lacătului: >15 min divergență → deschide issue cu diagnosticul de
+# pe mașină; la vindecare îl închide singură. Scrisă pe 7 aug dar NEinstalată
+# de nimeni (linia de cron era doar în comentariul ei — găsit 8 aug); de-aia
+# instalarea e AICI, idempotentă, ca tot restul.
+install -m 700 "$REPO/deploy/veghe-publicare.sh" /root/kelion/veghe-publicare.sh
+( crontab -l 2>/dev/null | grep -v '/root/kelion/veghe-publicare.sh' ; echo '*/10 * * * * /root/kelion/veghe-publicare.sh >> /root/kelion/veghe-publicare.log 2>&1' ) | crontab -
+
 echo "== 6f. Porțile pe VPS (cron la 10 min — verdictul PR-urilor, zero cost) =="
 # Adrian, 31 iul: „nu poți corecta modul de lucru, pică de fiecare dată" —
 # `pr-verify.yml` a picat de 31 de ori la rând, în 3-11 secunde, cu runner_id 0

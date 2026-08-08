@@ -6,7 +6,7 @@ import {
   citesteTranzactii,
   citesteUtilizatori,
   citesteIstoric,
-  getCostSummary,
+  citesteRezumatCost,
   getCapabilityGaps,
   setGapResolved,
   deleteCapabilityGap,
@@ -258,10 +258,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Live real-cost / credit monitor (admin only) — total, today, per-AI breakdown.
+  // M7b (8 aug): o citire picată NU mai iese ca „total: 0" — iese 503 cu motivul.
   app.get('/api/admin/costs', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await getCostSummary())
+    const c = await citesteRezumatCost()
+    if (!c.citit) return reply.code(503).send({ error: 'costuri_necitibile', motiv: c.motiv })
+    return reply.send(c.valoare)
   })
 
   // Capability gaps — what users asked for that Kelion can't do yet (admin only).
@@ -469,7 +472,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const costs = await getCostSummary()
+    // M7b (8 aug): banii nu se desenează din zerouri inventate — dacă jurnalul
+    // de cost nu se poate citi, pagina primește 503 cu motivul, nu „£0.00".
+    const citire = await citesteRezumatCost()
+    if (!citire.citit) return reply.code(503).send({ error: 'costuri_necitibile', motiv: citire.motiv })
+    const costs = citire.valoare
     return reply.send({
       // (Câmpurile `spent` și `profit` au fost SCOASE — auditul admin, 3 aug:
       // tabul Bani nu le desena (citește spentUsd/masurat/estimat/today), iar
@@ -686,6 +693,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/money-circuit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    // M7b (8 aug): costul e o CITIRE — picată, se spune cu motiv (costRealMotiv),
+    // nu se maschează în zerouri și nu doboară restul panoului.
+    const cost = await citesteRezumatCost()
     // `citirePlati` = the state of the Revolut transaction reader. Without it,
     // the panel couldn't tell "nobody paid" apart from "I can't read the
     // account" — exactly the confusion that cost a whole day on 30 Jul.
@@ -711,7 +721,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // existed as a tool — you had to ASK to find out. Now it's in the panel,
       // next to the money: total, today, and what it went on. It cuts nothing;
       // it shows.
-      costReal: await getCostSummary().catch(() => null),
+      costReal: cost.citit ? cost.valoare : null,
+      costRealMotiv: cost.citit ? undefined : cost.motiv,
       // The voice rate the estimate is computed with — read by the panel so
       // the figure next to the explanation is ALWAYS the live one (it can be
       // changed from env, and a hand-written copy in the frontend would lie).

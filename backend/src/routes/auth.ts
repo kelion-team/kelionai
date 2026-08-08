@@ -61,14 +61,11 @@ const FULL_SCOPES = [
   // dead scope here would only promise Photos on the consent screen and never
   // deliver it.
   'https://www.googleapis.com/auth/youtube.readonly',
-  // GEMINI ENTERPRISE (Adrian, 4 aug: „rezolvă real — agenții în consolă"):
-  // crearea agenților în Discovery Engine cere scope-ul cloud-platform ȘI o
-  // LICENȚĂ de USER (contul de serviciu al aplicației e refuzat de Google,
-  // măsurat verbatim de 4 ori). Cu acest scope, login-ul OWNERULUI dă serverului
-  // un token pe identitatea LUI (licențiată) — și serverul creează cei 33 în
-  // consolă fără Cloud Shell. E cerut chiar de owner: „când loghez în Google se
-  // loghează peste tot".
-  'https://www.googleapis.com/auth/cloud-platform',
+  // (`cloud-platform` — cerut pe 4 aug DOAR pentru crearea agenților în consola
+  // Gemini Enterprise — a fost SCOS pe 8 aug odată cu toată calea consolei,
+  // pe ordinul ownerului: niciun consumator rămas, deci consimțământul nu mai
+  // cere acces la tot Google Cloud. TTS/ASR folosesc CONTUL DE SERVICIU cu
+  // scope-ul lor propriu — neatinse de lista asta, care e a OMULUI logat.)
 ].join(' ')
 
 // The shared header of both Google OAuth flows (login + connect): generates

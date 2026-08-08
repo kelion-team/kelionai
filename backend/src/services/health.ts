@@ -67,7 +67,7 @@ export async function systemHealth(): Promise<string> {
         fetch(`${GH}/actions/runs?status=failure&per_page=15`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
         fetch(`${GH}/actions/runs?per_page=40`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
       ])
-      const fail = (await rFail.json()) as { workflow_runs?: { name?: string; run_number?: number; created_at?: string }[] }
+      const fail = (await rFail.json()) as { workflow_runs?: { name?: string; run_number?: number; created_at?: string; updated_at?: string }[] }
       const all = (await rAll.json()) as { workflow_runs?: { name?: string; status?: string; conclusion?: string | null; created_at?: string }[] }
       // The LATEST COMPLETED run of each workflow (the list comes descending).
       const latest = new Map<string, string>()
@@ -83,13 +83,28 @@ export async function systemHealth(): Promise<string> {
         (w) => Date.parse(w.created_at ?? '') > cutoff && latest.get(w.name ?? '') !== 'failure',
       ).length
       info.rosiiIstorice = historic // visible in the audit as history, not as problems
-      if (red.length)
+      if (red.length) {
+        // CAUZA, MĂSURATĂ din durata rulărilor, nu ghicită (8 aug: deploy +
+        // sentinel roșii din 6 aug; fiecare job murea în 1-3s, 0 ms facturate,
+        // runner_id=0, fără nicio schimbare în workflows — blocaj de CONT
+        // GitHub, nu de cod). Semnătura: un job care nici nu pornește se
+        // „termină" în câteva secunde; unul real durează minute.
+        const toateInstant = red.every((w) => {
+          const t0 = Date.parse(w.created_at ?? '')
+          const t1 = Date.parse(w.updated_at ?? '')
+          return Number.isFinite(t0) && Number.isFinite(t1) && t1 - t0 <= 20_000
+        })
         problems.push({
           id: 'rulari_rosii',
           grav: 'mediu',
-          desc: `${red.length} workflow-uri stricate ACUM (ultima rulare roșie): ${red.map((w) => `${w.name} #${w.run_number}`).join(', ')}`,
-          reparabil: 'vindecătorul rerulează deploy-urile singur; pe celelalte investighează cu runbook_log/server_logs',
+          desc:
+            `${red.length} workflow-uri stricate ACUM (ultima rulare roșie): ${red.map((w) => `${w.name} #${w.run_number}`).join(', ')}` +
+            (toateInstant ? ' — TOATE mor în ≤20s fără să pornească pe vreun runner (măsurat din durata rulărilor): blocaj de cont GitHub (minute/facturare Actions), nu de cod' : ''),
+          reparabil: toateInstant
+            ? 'nu se repară din cod: ownerul → github.com/organizations/kelion-team/settings/billing (minute Actions / limită / plată); publicarea pe site NU depinde de Actions (veghea VPS publică singură)'
+            : 'vindecătorul rerulează deploy-urile singur; pe celelalte investighează cu runbook_log/server_logs',
         })
+      }
     }
   } catch {
     /* same */
