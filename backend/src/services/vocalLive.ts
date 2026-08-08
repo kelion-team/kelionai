@@ -106,6 +106,11 @@ export interface VocalLiveEvenimente {
   onEroare(motiv: string): void
   /** Informații de mers (varianta de setup acceptată, degradări) — pentru jurnal. */
   onInfo?(msg: string): void
+  /** Google a împins un handle de reluare proaspăt — apelantul îl poate
+   *  PERSISTA, ca o repornire a serverului să reia ACEEAȘI sesiune (8 aug,
+   *  ownerul: „chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
+   *  și să continue chatul logic"). */
+  onHandleReluare?(handle: string): void
 }
 
 export interface VocalLive {
@@ -228,6 +233,11 @@ export function deschideVocalLive(
   instructiune: string,
   unelte: UnealtaVocala[],
   ev: VocalLiveEvenimente,
+  /** Handle de reluare PERSISTAT dintr-o viață anterioară a procesului: o
+   *  repornire de publicare nu mai omoară conversația — sesiunea Google se
+   *  reia cu tot contextul ei. Un handle stătut nu strică nimic: setup-ul cu
+   *  el pică înainte de `gata`, iar degradarea măsurată reia curat, fără el. */
+  reluareInitial?: string,
 ): VocalLive | null {
   if (!config.geminiKey) return null
 
@@ -242,7 +252,7 @@ export function deschideVocalLive(
   let ws: WebSocket | null = null
   let gata = false
   let inchisa = false
-  let handleReluare: string | undefined
+  let handleReluare: string | undefined = reluareInitial
   let reconectari = 0
   // ── DEGRADARE MĂSURATĂ (8 aug: „a crăpat chatul... după ce ai scos limitarea
   // de 5 minute") ──────────────────────────────────────────────────────────
@@ -308,6 +318,7 @@ export function deschideVocalLive(
             break
           case 'handleReluare':
             handleReluare = e.handle
+            ev.onHandleReluare?.(e.handle)
             break
           case 'preavizInchidere':
             // Google taie curând. Nu așteptăm tăierea: închidem noi și
@@ -350,7 +361,10 @@ export function deschideVocalLive(
       // încercare merge fără extensii, nu repetă orbește aceeași cerere.
       if (!aFostGataVreodata && !faraExtensii) {
         faraExtensii = true
-        ev.onInfo?.(`setup cu extensii respins (cod ${cod}) — reîncerc fără ele`)
+        // Un handle stătut (dintr-o viață anterioară) poate fi chiar EL motivul
+        // refuzului — reluarea curată pleacă fără el, nu-l târăște mai departe.
+        handleReluare = undefined
+        ev.onInfo?.(`setup cu extensii respins (cod ${cod}) — reîncerc fără ele, cu sesiune curată`)
       }
       if (reconectari < 3) {
         reconectari++
