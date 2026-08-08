@@ -235,6 +235,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // Motivele numite ale serverului urcă la om, nu mor în consolă.
     if (ev.code === 1008) opts.onEroare('sesiune vocală: nu ești autentificat')
     else if (ev.code === 1011) opts.onEroare('sesiune vocală indisponibilă pe server (lipsește cheia?)')
+    // ORICE altă închidere neinițiată de noi era MOARTE TĂCUTĂ (8 aug: „salută
+    // și moare"): cod 1000/1006 → niciun mesaj, nicio reluare, iar vlRef rămas
+    // setat bloca ȘI audio-ul căii vechi — bec aprins, totul mort. Acum urcă la
+    // ChatPanel: 3 reluări, apoi coboară singur pe calea veche — orice cauză ar
+    // avea serverul/Google, vocea se întoarce în secunde, cu motivul pe bandă.
+    else opts.onEroare(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
     inchide()
   }
 
