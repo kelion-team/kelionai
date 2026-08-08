@@ -188,6 +188,11 @@ export default function ChatPanel({
   // BRAIN-INPUT TICKER (Adrian, Jul 10): the EXACT text handed
   // to the brain on the current turn — it comes from the SERVER ({heard}), not a local echo.
   const [heard, setHeard] = useState('')
+  // Banda-teletext a rulat DEJA răspunsul ăsta? (Adrian, 8 aug: „repetă scris,
+  // baleind mesajul la infinit" — orice re-montare a benzii repornea animația
+  // one-shot, deci același text mătura ecranul iar și iar.) Ținem minte ts-ul
+  // răspunsului deja baleiat: o trecere pe răspuns, apoi banda tace.
+  const [tickerDoneTs, setTickerDoneTs] = useState<number | null>(null)
   // THE VISIBLE CONVERSATION (Aug 1): the chat log stays pinned to the newest
   // bubble — auto-scroll on every new message and on every streaming update.
   const chatLogRef = useRef<HTMLDivElement | null>(null)
@@ -415,10 +420,25 @@ export default function ChatPanel({
     // (userul substituent „🎙️…" + răspunsul gol) și nu se redă nimic. Tura se
     // stinge curat, ca și cum n-ar fi fost (Adrian: „să nu vorbească neîntrebat").
     if (c.ignored) {
+      // NU SE MAI ARUNCĂ CE S-A AUZIT (Adrian, 8 aug: „nu ignora ce aude când
+      // nu apare Kelion"). Înainte, tura stinsă ștergea AMBELE bule — ce ai
+      // spus dispărea fără urmă, iar „m-a auzit și a tăcut" arăta identic cu
+      // „nu m-a auzit deloc". Acum: răspunsul gol pleacă, dar bula ta RĂMÂNE
+      // dacă serverul a confirmat ce a auzit ({heard} vine înaintea {ignored}),
+      // marcată că n-a primit răspuns. Se șterge doar substituentul fără text.
       const vt = voiceTurnRef.current
       voiceTurnRef.current = null
       stopVoice()
-      if (vt) setMessages((prev) => prev.filter((m) => m.ts !== vt.userTs && m.ts !== vt.asstTs))
+      if (vt)
+        setMessages((prev) =>
+          prev
+            .filter((m) => m.ts !== vt.asstTs)
+            .flatMap((m) => {
+              if (m.ts !== vt.userTs) return [m]
+              const auzit = m.content && m.content !== '🎙️…' ? m.content : ''
+              return auzit ? [{ ...m, content: `${auzit}  · (am auzit, dar nu mi se adresa)` }] : []
+            }),
+        )
       return
     }
     // The brain-input ticker: the server says EXACTLY what text it hands
@@ -2335,7 +2355,7 @@ export default function ChatPanel({
               <span className="speech-tail-text">…</span>
             </span>
           </div>
-        ) : (lastAssistant?.content && !idleBandHidden && (busy || monitorMode)) || busy ? (
+        ) : ((lastAssistant?.content && !idleBandHidden && (busy || monitorMode)) || busy) && lastAssistant?.ts !== tickerDoneTs ? (
           <div className="heard-band kelion-band" aria-live="polite">
             <span className="heard-band-label kelion-k" title={t.heardKelionTitle}>K</span>
             {busy ? (
@@ -2350,6 +2370,7 @@ export default function ChatPanel({
                   className="ticker-text"
                   key={lastAssistant?.ts ?? 'empty'}
                   style={{ '--ticker-dur': tickerDur(cleanMsg(lastAssistant?.content ?? '')) } as CSSProperties}
+                  onAnimationEnd={() => setTickerDoneTs(lastAssistant?.ts ?? null)}
                 >
                   {cleanMsg(lastAssistant?.content ?? '')}
                 </span>
