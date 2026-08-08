@@ -305,3 +305,16 @@ describe('vocalLive — camera intră în sesiune, cu costul estimat pe față',
     expect(ruta).toContain('camera e oprită — o spui, nu inventezi o vedere')
   })
 })
+
+// ── FĂRĂ LOC INVENTAT (8 aug: „fără date hardcodate gps, doar real") ─────────
+// Harta de traseu cădea tăcut pe București [44.43,26.10] când nu avea
+// coordonate. Sigiliul ține hardcodul afară pentru totdeauna.
+describe('mapview — niciun oraș bătut în cod', () => {
+  const sursa = readFileSync(new URL('./routes/mapview.ts', import.meta.url), 'utf8')
+
+  it('fără traseu: lumea + centrare pe fixul GPS real, nu pe un oraș', () => {
+    expect(sursa).not.toMatch(/setView\(\[44\.4/)
+    expect(sursa).toContain('map.setView([20,0],2)')
+    expect(sursa).toContain('primulFix&&!dest')
+  })
+})

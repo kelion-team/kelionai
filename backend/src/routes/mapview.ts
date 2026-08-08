@@ -43,7 +43,13 @@ if(c.length>1){
   dest=c[c.length-1];
   L.marker(dest).addTo(map).bindPopup('Destinație');
   map.fitBounds(line.getBounds(),{padding:[30,30]});
-}else{map.setView([44.43,26.10],6);}
+}else{
+  /* FĂRĂ LOC INVENTAT (8 aug, ownerul: „fără date hardcodate gps, doar real")
+     — aici stătea un setView pe București [44.43,26.10]: o hartă fără traseu
+     arăta tăcut România, oriunde ai fi fost. Acum: lumea întreagă până vine
+     fixul GPS REAL (watchPosition, mai jos), apoi centrare pe el. */
+  map.setView([20,0],2);
+}
 
 // ── Live position: a blue dot for the car + a remaining-distance readout.
 // BY DEFAULT we show the WHOLE route (fitBounds above), NOT a zoom on the car —
@@ -61,9 +67,12 @@ map.on('dragstart',function(){following=false;});
 btn.onclick=function(){following=true;if(carDot)map.setView(carDot.getLatLng(),15);};
 function onPos(p){
   var pos=[p.coords.latitude,p.coords.longitude];
+  var primulFix=!carDot;
   if(!carDot){
     carDot=L.circleMarker(pos,{radius:9,color:'#fff',weight:3,fillColor:'#2b6cff',fillOpacity:1}).addTo(map);
   }else{carDot.setLatLng(pos);}
+  /* Fără traseu, primul fix REAL centrează harta — locul tău, nu unul scris în cod. */
+  if(primulFix&&!dest){map.setView(pos,14);}
   if(dest){var km=haversineKm(pos,dest);
     hud.style.display='block';
     hud.textContent=(km<1?Math.round(km*1000)+' m':km.toFixed(1)+' km')+' până la destinație';}
