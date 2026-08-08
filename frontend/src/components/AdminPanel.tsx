@@ -1355,6 +1355,13 @@ export default function AdminPanel({
                       </span>
                       </>
                     )}
+                    {/* M7b (8 aug): costul necitit se SPUNE, nu se ascunde — înainte,
+                    costReal null făcea blocul să dispară tăcut, fix „£0.00"-ul invers. */}
+                    {circuit && !circuit.costReal && (
+                      <span className="or-wallet-sub">
+                        💷 nu pot citi jurnalul de cost{circuit.costRealMotiv ? `: ${circuit.costRealMotiv}` : ''}
+                      </span>
+                    )}
                     {/* YOUR LEVER (Adrian: „the 6 are needed, but not brakes”). The
                     „pauza-autonomie” command existed since Jul 27, but you had to know
                     it by heart. A limit YOU choose is not a barrier; one I impose on

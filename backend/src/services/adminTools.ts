@@ -103,13 +103,13 @@ export async function execSharedAdminTool(
       const [sanatate, resurse, cost] = await Promise.all([
         systemHealth().catch(() => 'nu pot citi sănătatea'),
         resurseGazda().catch(() => null),
-        getCostSummary().catch(() => null),
+        citesteRezumatCost().catch(() => null),
       ])
       return JSON.stringify(
         {
           sanatate,
           resurse: resurse ?? 'nu pot citi /proc (memorie/încărcare)',
-          costAzi: cost ?? 'nu pot citi jurnalul de cost',
+          costAzi: cost?.citit ? cost.valoare : `nu pot citi jurnalul de cost${cost && !cost.citit ? `: ${cost.motiv}` : ''}`,
           citirePlati: stareCitirePlati() ?? 'cititorul de plăți n-a rulat încă în procesul ăsta',
           autonomie: stareAutonomie() ?? 'bucla n-a trecut încă în procesul ăsta',
         },
@@ -245,7 +245,7 @@ export async function execSharedAdminTool(
 import { updatesList } from './updates.js'
 import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
-import { getMemories, deleteMemory, logCapabilityGap, getCostSummary, proposeKelionTool } from '../db.js'
+import { getMemories, deleteMemory, logCapabilityGap, citesteRezumatCost, proposeKelionTool } from '../db.js'
 import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
 import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor, vaneazaBuguri, raportVanatoare } from './masurare.js'
 
@@ -292,7 +292,9 @@ export async function execUserScopedTool(
     }
     case 'get_real_cost': {
       if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
-      return JSON.stringify(await getCostSummary())
+      // M7b (8 aug): o citire picată se SPUNE, nu se maschează în zerouri.
+      const c = await citesteRezumatCost()
+      return JSON.stringify(c.citit ? c.valoare : { error: 'nu pot citi jurnalul de cost', motiv: c.motiv })
     }
     case 'list_memories': {
       const memories = await getMemories(email)
