@@ -248,3 +248,23 @@ describe('vocalLive — ancora realității și tăcerea la deschidere', () => {
     expect(i).toContain('nu inventezi')
   })
 })
+
+// ── GENERAȚIA MÂNERULUI DE RELUARE (8 aug: „calea către unelte e ruptă") ─────
+// Măsurat în jurnal: reluarea cu handle resuscita sesiunea VECHE de la Google,
+// cu uneltele dinaintea ușii — modelul „zicea că are alte unelte" pentru că
+// chiar le avea pe cele vechi. Amprenta generației invalidează mânerul când
+// inventarul se schimbă. Testul pinuiește PREZENȚA mecanismului în rută.
+import { readFileSync } from 'node:fs'
+
+describe('vocalLive — mânerul de reluare poartă generația uneltelor', () => {
+  const ruta = readFileSync(new URL('./routes/vocalLive.ts', import.meta.url), 'utf8')
+
+  it('mânerul se salvează cu generația (gen) lângă handle', () => {
+    expect(ruta).toMatch(/saveKv\(KV_RELUARE, JSON\.stringify\(\{ h: handle, t: acum, gen: genUnelte \}\)/)
+  })
+
+  it('un mâner din altă generație se ARUNCĂ — sesiunea pornește cu uneltele de azi', () => {
+    expect(ruta).toContain('j.gen === genUnelte')
+    expect(ruta).toContain('handle din ALTĂ generație de unelte')
+  })
+})
