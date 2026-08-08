@@ -99,6 +99,7 @@ import { neagaUneltele } from '../services/negareUnelte.js'
 import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { numeStrigat } from '../services/numeStrigat.js'
+import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeChat.js'
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL } from '../services/brainToolDefs.js'
@@ -1602,7 +1603,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       const ultim = messages.at(-1)
       return ultim?.role === 'user' ? String(ultim.content ?? '') : ''
     })()
-    const turaCurata = !hasActionIntent(textulTurei) && !image && camFrames.length === 0
+    // O SINGURĂ SURSĂ pentru faza turei: `services/fazeChat.ts`. Nici promptul,
+    // nici uneltele nu mai decid fiecare pe cont propriu ce cară — se întreabă
+    // amândouă în același loc, iar locul ăla e o funcție pură, probabilă.
+    const incarcatura = fazaTurei({
+      text: textulTurei,
+      areAudio: !!audio,
+      areImagine: !!image || camFrames.length > 0,
+      cereActiune: hasActionIntent(textulTurei),
+    })
+    const turaCurata = !incarcatura.instructiuniDeLucru
     let systemPrompt = `${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
@@ -2252,27 +2262,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Ce NU e aici se poate cere oricând: modelul cheamă `ask_brain` și tura de
     // lucru primește tot inventarul. Costul e o rundă în plus, DOAR când chiar e
     // nevoie — nu 8 secunde la fiecare frază.
-    const UNELTE_CONVERSATIE = new Set([
-      'ask_brain', // scara spre tot restul — fără ea, tura ușoară ar fi o cușcă
-      'get_time',
-      'get_weather',
-      'web_search',
-      'show_on_screen',
-      'show_document',
-      'open_app_view',
-      'save_note',
-      'list_notes',
-      'list_memories',
-      'memorie_ia',
-      'cheama_agent',
-    ])
-    const PLAFON_UNELTE_USOR = UNELTE_CONVERSATIE.size
+    // Lista uneltelor de pe faza de vorbire vine din `fazeChat.ts`, împreună cu
+    // motivul pentru care fiecare intrare e acolo. Aici nu se mai scrie nicio
+    // listă: două liste ar diverge, iar prima care ar diverge tăcut ar fi cea
+    // care lasă `system_health` să calce iar pe drumul unei fraze.
+    const PLAFON_UNELTE_USOR = UNELTE_VORBIRE.length
     const cereActiune = hasActionIntent(lastUserText) || turnHasImage
     const PLAFON_FURNIZOR = orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
     // dar rămâne UȘOARĂ ca unelte: n-are de executat nimic, are de hotărât dacă
     // i se vorbește. Cele două axe sunt independente și e important să rămână așa.
-    const turaUsoara = !cereActiune && !(heavyTurn && !voceAmbianta)
+    const turaUsoara = incarcatura.faza === 'vorbire'
     const MAX_PROVIDER_TOOLS = turaUsoara ? PLAFON_UNELTE_USOR : PLAFON_FURNIZOR
     const seenNames = new Set<string>()
     const baseTools: Tool[] = []
@@ -2285,12 +2285,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // uneltele Google — la plafon 12 ar fi fost tăiat exact unealta care face
     // tura ușoară sigură (fără ea, ce nu încape în cele 12 n-ar mai avea cum să
     // fie cerut deloc, și am fi construit chiar defectul „zice că nu poate").
+    // Gardul de rulare (`permisaLaVorbire`) e al DOILEA filtru, intenționat: dacă
+    // cineva adaugă mâine o unealtă scumpă în lista de vorbire, tot nu trece.
     const tools: Tool[] = turaUsoara
-      ? baseTools.filter((t) => UNELTE_CONVERSATIE.has(t.name))
+      ? baseTools.filter((t) => permisaLaVorbire(t.name))
       : baseTools.slice(0, MAX_PROVIDER_TOOLS)
     console.log(
-      `[UNELTE] tura ${turaUsoara ? 'UȘOARĂ' : 'de LUCRU'}: ${tools.length} din ${baseTools.length} unelte` +
-        `${voceAmbianta ? ' (voce: decide adresarea)' : ''}`,
+      `[FAZĂ] ${incarcatura.faza.toUpperCase()}: ${tools.length}/${baseTools.length} unelte, ` +
+        `instrucțiuni de lucru: ${incarcatura.instructiuniDeLucru ? 'da' : 'nu'} — ${incarcatura.motiv}`,
     )
     if (!turaUsoara && baseTools.length > MAX_PROVIDER_TOOLS) {
       // Numim EXACT ce s-a tăiat — după reordonare astea trebuie să fie doar

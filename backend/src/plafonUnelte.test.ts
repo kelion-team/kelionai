@@ -33,38 +33,12 @@ describe('plafonul de unelte al furnizorului e garantat structural', () => {
     // (sau modelul escaladează), plafonul redevine cel al furnizorului.
     expect(chat).toMatch(/MAX_PROVIDER_TOOLS = turaUsoara \? PLAFON_UNELTE_USOR : PLAFON_FURNIZOR/)
     expect(chat).toMatch(/cereActiune = hasActionIntent\(lastUserText\)/)
-    expect(chat).toMatch(/baseTools\.filter\(\(t\) => UNELTE_CONVERSATIE\.has\(t\.name\)\)/)
+    expect(chat).toMatch(/baseTools\.filter\(\(t\) => permisaLaVorbire\(t\.name\)\)/)
   })
 
-  it('VERIFICAREA SISTEMULUI NU E PE TURA DE CONVERSAȚIE (8 aug: „îmi bagă 8 secunde")', () => {
-    // `system_health` face 2 apeluri la GitHub (timeout 10 s) ȘI sondează
-    // endpointul fiecărui buton din Admin (timeout 8 s, în paralel) — ~8 s în
-    // cel mai rău caz, exact cifra reclamată de owner. N-are ce căuta pe drumul
-    // unei fraze rostite. Ordinul lui, verbatim: „se scoate din chat".
-    const set = /const UNELTE_CONVERSATIE = new Set\(\[([\s\S]*?)\]\)/.exec(chat)?.[1] ?? ''
-    expect(set.length, 'lista de unelte pentru conversație a dispărut').toBeGreaterThan(50)
-    for (const scump of [
-      'system_health',
-      'stare_masurata',
-      'db_query',
-      'db_tables',
-      'constructor_status',
-      'build_software',
-      'repo_write',
-      'repo_merge_pr',
-      'run_runbook',
-      'runbook_status',
-      'jules_task',
-      'ruleaza_portile',
-      'server_logs',
-    ]) {
-      expect(set.includes(`'${scump}'`), `„${scump}" s-a întors pe tura de conversație — acolo costă secunde`).toBe(
-        false,
-      )
-    }
-    // …dar scara spre ele TREBUIE să existe, altfel tura ușoară e o cușcă.
-    expect(set.includes("'ask_brain'"), 'fără ask_brain, ce nu e în listă nu mai poate fi cerut deloc').toBe(true)
-  })
+  // (Testul detaliat al listei de vorbire s-a mutat în fazeChat.test.ts —
+  // lista însăși s-a mutat în services/fazeChat.ts, sursa unică a fazelor.)
+
 
   it('lista e deduplicată pe NUME înainte de trimitere', () => {
     expect(chat).toMatch(/seenNames\.has\(t\.name\)/)
