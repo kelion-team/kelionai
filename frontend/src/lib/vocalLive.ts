@@ -213,6 +213,10 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         opts.onKelion?.(m.text ?? '', !!m.final)
         break
       case 'intrerupt':
+        // SE SCRIE, nu se face mut (8 aug: „audio lui se oprește la jumătatea
+        // frazei" — fără rândul ăsta, o tăiere venită de la model era
+        // indistinctibilă de orice altă cauză).
+        console.info('[vocalLive] modelul și-a tăiat vorba (barge-in) — a auzit voce peste el')
         taieRedarea()
         break
       case 'tura_gata':
@@ -265,6 +269,17 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   proc.onaudioprocess = (ev: AudioProcessingEvent): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
     const brut = ev.inputBuffer.getChannelData(0)
+    // ── GARDA DE ECOU (8 aug: „audio lui se oprește la jumătatea frazei") ────
+    // Redarea live e prin WebAudio, pe care anularea de ecou a browserului n-o
+    // acoperă sigur — microfonul aude vocea lui Kelion din difuzor, modelul o
+    // ia drept „omul vorbește peste" și își taie singur vorba. Cât timp Kelion
+    // vorbește, cadrele SLABE (ecoul rezidual) nu se trimit; vocea adevărată,
+    // apropiată, trece — barge-in-ul real rămâne.
+    if (surseActive.length > 0) {
+      let s2 = 0
+      for (let i = 0; i < brut.length; i++) s2 += brut[i] * brut[i]
+      if (Math.sqrt(s2 / brut.length) < 0.028) return
+    }
     const la16k = downsample(brut, ctxIn!.sampleRate)
     const pcm = float32ToPcm16([la16k])
     // `.buffer` e exact bufferul acestui Int16Array proaspăt creat — nu o felie
