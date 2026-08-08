@@ -34,6 +34,10 @@ import { julesSurse, julesSarcina, julesStare } from './jules.js'
 export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'list_source', 'read_source', 'search_source',
   'db_tables', 'db_query', 'system_health',
+  // MĂSURAREA (8 aug, ordinul ownerului): Kelion își rulează SINGUR porțile, cu
+  // aceleași comenzi ca omul, și își poate citi jurnalul propriilor măsurători —
+  // ca o afirmație despre starea softului să poată fi CONFRUNTATĂ cu ce a măsurat.
+  'ruleaza_portile', 'jurnal_masuratori',
   'repo_write', 'repo_open_pr', 'repo_merge_pr',
   'run_runbook', 'runbook_status', 'runbook_log', 'request_repair',
   'secret_pune', 'secret_lista', 'secret_publica',
@@ -68,6 +72,22 @@ export async function execSharedAdminTool(
     case 'db_tables': return dbTablesOverview()
     case 'db_query': return dbQuery(String(args.sql ?? ''))
     case 'system_health': return systemHealth()
+    // MĂSURAREA (8 aug) — Kelion își rulează singur porțile, exact cele pe care
+    // le rulează omul, și primește înapoi un verdict cu TREI stări. Raportul e
+    // formatat aici, nu de model: „NU POT VERIFICA" nu se poate rescrie în
+    // „trece" pe drum.
+    case 'ruleaza_portile': {
+      const cerute = Array.isArray(args.porti) ? (args.porti as unknown[]).map(String) : undefined
+      const rez = await ruleazaPortile(cerute)
+      return raportPorti(rez)
+    }
+    case 'jurnal_masuratori': {
+      const randuri = await jurnalMasuratori(Number(args.cate ?? 30) || 30)
+      if (!randuri.length) return 'Jurnalul e GOL — nu ai măsurat nimic încă. Asta NU înseamnă că totul e bine; înseamnă că nu știi.'
+      return randuri
+        .map((r) => `${r.la}  ${r.masurat ? 'MĂSURAT' : 'NU POT VERIFICA'}  ${r.cum} (${r.ms} ms) → ${r.rezumat}`)
+        .join('\n')
+    }
     // KELION'S PROJECT MEMORY (his own request, Aug 2): keyed, persistent,
     // queryable — survives every deploy, unlike the conversation window.
     case 'memorie_pune': return memoriePune(String(args.cheie ?? ''), String(args.continut ?? ''))
@@ -97,9 +117,23 @@ export async function execSharedAdminTool(
     case 'jules_repos': return julesSurse()
     case 'jules_task': return julesSarcina(String(args.prompt ?? ''), String(args.sursa ?? ''), args.ramura ? String(args.ramura) : 'master')
     case 'jules_status': return julesStare(String(args.sesiune ?? ''))
+    // ── POARTA OBLIGATORIE (Adrian, 8 aug: „va trebui să folosească OBLIGATORIU
+    // toate testele și să măsoare orice răspuns") ──────────────────────────────
+    // Uneltele care SCHIMBĂ softul nu pornesc fără o rulare COMPLETĂ de porți,
+    // recentă, cu verdict TRECE. Nu e o rugăminte în prompt — e o poartă în cod,
+    // exact ca să nu se poată uita. „Am rulat testele" nu mai e o vorbă: se
+    // citește din jurnalul măsurătorilor sau nu se întâmplă nimic.
+    case 'repo_open_pr':
+    case 'repo_merge_pr': {
+      const d = await dovadaPortilor()
+      if (!d.poateImplementa) {
+        return `REFUZAT — nu implementez fără măsurătoare: ${d.motiv}\n\nProcedura: 1) ruleaza_portile  2) repari ce pică  3) abia apoi ${name}.`
+      }
+      return name === 'repo_open_pr'
+        ? repoOpenPR(String(args.branch ?? ''), String(args.title ?? ''), String(args.body ?? ''))
+        : repoMergePR(Number(args.pr ?? 0))
+    }
     case 'repo_write': return repoWrite(String(args.branch ?? ''), String(args.path ?? ''), String(args.content ?? ''), String(args.message ?? ''))
-    case 'repo_open_pr': return repoOpenPR(String(args.branch ?? ''), String(args.title ?? ''), String(args.body ?? ''))
-    case 'repo_merge_pr': return repoMergePR(Number(args.pr ?? 0))
     case 'run_runbook': {
       const inputs: Record<string, string> = {}
       if (args.pachet) inputs.pachet = String(args.pachet)
@@ -209,6 +243,7 @@ import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
 import { getMemories, deleteMemory, logCapabilityGap, getCostSummary, proposeKelionTool } from '../db.js'
 import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
+import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor } from './masurare.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',
