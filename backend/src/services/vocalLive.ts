@@ -223,6 +223,10 @@ export interface VocalLive {
    *  Cadrele sunt efemere prin natură: cât sesiunea nu e gata se ARUNCĂ (un
    *  cadru stătut livrat târziu ar fi o vedere falsă), nu se pun la coadă. */
   scrieCadru(jpegBase64: string): void
+  /** Injectează un ANUNȚ în conversație (8 aug: „să anunțe când e gata") —
+   *  un rând text către model, pe care el îl SPUNE cu vocea lui. Folosit de
+   *  rută când un ordin de constructor pornit din sesiune se termină. */
+  anunta(text: string): void
   /** Răspunde la un apel de unealtă, cu rezultatul (obiect JSON). */
   raspundeUnealta(id: string, name: string, rezultat: unknown): void
   /** Închide sesiunea. */
@@ -521,6 +525,20 @@ export function deschideVocalLive(
       // FALSĂ a lui „acum" — mai bine sare un cadru decât să mintă unul.
       if (inchisa || !gata || !jpegBase64) return
       trimiteCadru(jpegBase64)
+    },
+    anunta(text: string): void {
+      if (inchisa || !gata || !text.trim()) return
+      try {
+        // clientContent cu turnComplete: modelul primește rândul ca pe o
+        // intervenție în conversație și răspunde — adică ANUNȚĂ cu vocea lui.
+        ws?.send(
+          JSON.stringify({
+            clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true },
+          }),
+        )
+      } catch {
+        /* eroarea reală vine pe canalul 'error' */
+      }
     },
     raspundeUnealta(id: string, name: string, rezultat: unknown): void {
       if (inchisa) return

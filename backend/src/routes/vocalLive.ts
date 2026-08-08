@@ -16,7 +16,7 @@ import {
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost, listBuildJobs } from '../db.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -124,6 +124,11 @@ export async function turaCreierului(
         // Glasul e al modelului live — Chirp-ul chatului rămâne stins (regula
         // vocii unice) și nu plătim o sinteză pe care n-o redă nimeni.
         serverVoiceOff: true,
+        // Ușa = acțiune prin definiție: creierul primește inventarul PLIN, nu
+        // faza de vorbire (8 aug: „a oferit soluții dar nu poate să implementeze"
+        // — cererea „trimite lista constructorului" pica pe faza de conversație
+        // și creierul povestea în loc să cheme build_software).
+        usaCreierului: true,
         coords: coords ?? undefined,
         // VEDEREA (8 aug: „hai și cu vedere, să închidem un capitol"): cadrele
         // camerei, cerute browserului LA CERERE (nu flux continuu) — ruta de
@@ -282,6 +287,33 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     }
     const ceasCost = setInterval(varsaCostul, 60_000)
 
+    // ── ANUNȚUL „CÂND E GATA" (8 aug, ownerul: „să anunțe când e gata") ──────
+    // Ordinele de constructor pornite PRIN UȘĂ din sesiunea asta se țin minte
+    // (id-ul din „Am preluat cerința (ordin #N)"), iar la fiecare 30s se
+    // citește starea lor. Terminat (gata sau eșuat) → un anunț injectat în
+    // sesiune, pe care Kelion îl SPUNE cu vocea lui. Fără ordine urmărite,
+    // bătaia nu costă nimic (iese din prima).
+    const ordineUrmarite = new Set<number>()
+    const ceasOrdine = setInterval(() => {
+      if (!ordineUrmarite.size || inchis) return
+      void (async () => {
+        const jobs = await listBuildJobs(24).catch(() => null)
+        if (!jobs) return // coada necitibilă — încercăm la bătaia următoare
+        for (const j of jobs) {
+          if (!ordineUrmarite.has(j.id)) continue
+          if (j.status === 'done' || j.status === 'failed') {
+            ordineUrmarite.delete(j.id)
+            live?.anunta(
+              `[ANUNȚ DE SISTEM — nu e vocea omului] Ordinul de construcție #${j.id} ` +
+                `(„${j.orderText.slice(0, 80)}") s-a terminat: ${j.status === 'done' ? 'GATA' : 'A EȘUAT'}` +
+                `${j.prUrl ? `, PR: ${j.prUrl}` : ''}${j.ci ? `, verificare CI: ${j.ci}` : ''}. ` +
+                `Anunță-l pe Adrian într-o propoziție scurtă, cu numărul ordinului.`,
+            )
+          }
+        }
+      })()
+    }, 30_000)
+
     // ANCORA REALITĂȚII (8 aug: „nu e ancorat în realitate, după coordonatele
     // gps"): browserul trimite {type:'coords', lat, lon, now, tz} chiar la
     // deschiderea socketului; deschiderea sesiunii Google o așteaptă maxim
@@ -349,6 +381,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     socket.on('close', () => {
       inchis = true
       clearInterval(ceasCost)
+      clearInterval(ceasOrdine)
       varsaCostul() // restul de sub un minut nu se pierde
       salveazaTura() // o tură neterminată la închidere nu se pierde
       live?.inchide()
@@ -357,6 +390,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     socket.on('error', () => {
       inchis = true
       clearInterval(ceasCost)
+      clearInterval(ceasOrdine)
       varsaCostul()
       live?.inchide()
     })
@@ -479,6 +513,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
             })
             if (r.ok) {
+              // Ordinele de constructor pornite prin ușă intră sub urmărire —
+              // la terminare, Kelion anunță cu vocea lui (ceasOrdine, mai sus).
+              const ordin = r.text.match(/ordin\s*#(\d+)/i)
+              if (ordin) {
+                ordineUrmarite.add(Number(ordin[1]))
+                app.log.info(`vocal-live: urmăresc ordinul de construcție #${ordin[1]} — anunț la terminare`)
+              }
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
             } else {
               app.log.warn(`vocal-live: ușa creierului a picat: ${r.motiv}`)

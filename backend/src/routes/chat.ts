@@ -1267,6 +1267,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // synthesize Chirp (not only would it not play: we don't pay synthesis
       // for discarded audio either).
       serverVoiceOff?: boolean
+      // UȘA CREIERULUI (8 aug, ownerul: „a oferit soluții dar nu poate să
+      // implementeze"): tura vine din sesiunea vocală live prin unealta
+      // cere_creierului — modelul live a DECIS deja că e nevoie de unelte,
+      // deci tura primește direct faza de ACȚIUNE (inventarul plin), nu faza
+      // de vorbire cu 13 unelte de conversație în care creierul „oferă
+      // soluții" în loc să execute. Sigur: cererea e autentificată ca userul
+      // însuși, iar uneltele rămân filtrate pe rol exact ca până acum.
+      usaCreierului?: boolean
       // SPOKEN TURN (the ONE-brain voice architecture, Aug 1): this turn came
       // from the microphone and its reply will be SPOKEN ALOUD verbatim by the
       // Realtime voice. The brain answers the same way (same tools, same
@@ -1622,7 +1630,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       text: textulTurei,
       areAudio: !!audio,
       areImagine: !!image || camFrames.length > 0,
-      cereActiune: hasActionIntent(textulTurei),
+      // Ușa creierului = acțiune prin definiție: modelul live a decis DEJA că
+      // cererea are nevoie de unelte — fără asta, „trimite lista
+      // constructorului" pica pe faza de vorbire și creierul doar POVESTEA.
+      cereActiune: hasActionIntent(textulTurei) || req.body?.usaCreierului === true,
     })
     const turaCurata = !incarcatura.instructiuniDeLucru
     let systemPrompt = `${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
