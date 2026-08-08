@@ -188,3 +188,32 @@ describe('vocalLive — costul sesiunii, din octeții retransmiși', () => {
     expect(octetiDinBase64('')).toBe(0)
   })
 })
+
+// ── UȘA SPRE CREIERUL ÎNTREG (8 aug: „kelion nu are acces la unelte, vocea
+// merge, și atât") — sigiliul care ține ușa deschisă pe toate drumurile. ─────
+import { unelteleSesiuniiLive, unelteleDovedite } from './routes/vocalLive.js'
+
+describe('vocalLive — ușa cere_creierului', () => {
+  it('adminul are ușa PRIMA + inventarul de administrare după ea', () => {
+    const nume = unelteleSesiuniiLive('admin').map((u) => u.name)
+    expect(nume[0]).toBe('cere_creierului')
+    expect(nume.length, 'inventarul plin, nu doar ușa').toBeGreaterThan(10)
+  })
+
+  it('userul obișnuit are ușa PRIMA + setul mic de citit', () => {
+    const nume = unelteleSesiuniiLive('user').map((u) => u.name)
+    expect(nume[0]).toBe('cere_creierului')
+    expect(nume).toContain('get_real_cost')
+  })
+
+  it('REZERVA păstrează ușa — degradarea taie administrarea, nu accesul la lume', () => {
+    expect(unelteleDovedite().map((u) => u.name)[0]).toBe('cere_creierului')
+  })
+
+  it('ușa are schemă reală (cerere obligatorie), nu un obiect gol', () => {
+    const usa = unelteleDovedite()[0]
+    const p = usa.parameters as { required?: string[]; properties?: Record<string, unknown> }
+    expect(p.required).toEqual(['cerere'])
+    expect(p.properties?.cerere).toBeTruthy()
+  })
+})

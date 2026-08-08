@@ -37,8 +37,17 @@ export interface VocalLiveOpts {
   onKelion?(text: string, final: boolean): void
   /** Kelion a început/terminat de vorbit — pentru animația avatarului. */
   onVorbeste?(activ: boolean): void
+  /** Cadru de ECRAN venit de la creierul complet prin ușa cere_creierului
+   *  (8 aug: „kelion nu are acces la unelte"): monitor/doc/app/card — se dă
+   *  aceluiași handleControl ca la chatul scris. Vocea NU vine pe aici. */
+  onControl?(frame: unknown): void
   /** Orice eroare, NUMITĂ. Niciun „merge" prefăcut. */
   onEroare(motiv: string): void
+  /** Coordonatele device-ului, la cerere (8 aug: „nu are acces la gps, meteo").
+   *  Chatul scris trimite coords cu fiecare tură; sesiunea live nu trimitea
+   *  NIMIC — meteo/hărțile din ușa creierului rămâneau fără loc. Se citește la
+   *  `gata` și periodic; null = nu avem (serverul declară lipsa, nu inventează). */
+  coordonate?(): { lat: number; lon: number } | null
 }
 
 export interface VocalLiveHandle {
@@ -160,6 +169,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let cursorRedare = 0
   let surseActive: AudioBufferSourceNode[] = []
   let aec: BuclaAEC | null = null
+  let ceasCoords: ReturnType<typeof setInterval> | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -167,6 +177,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
     if (resumeTimer) clearInterval(resumeTimer)
+    if (ceasCoords) clearInterval(ceasCoords)
     try {
       proc?.disconnect()
     } catch {
@@ -263,9 +274,23 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     }
   }
 
+  // GPS-ul CĂTRE sesiune (8 aug: „nu are acces la gps, meteo"): serverul ține
+  // ultimele coordonate și le dă creierului la fiecare trecere prin ușă. Se
+  // trimit la `gata` și apoi la fiecare 2 minute (ritmul watcher-ului din
+  // ChatPanel) — cadru JSON text, distinct de cadrele binare de microfon.
+  const trimiteCoords = (): void => {
+    const c = opts.coordonate?.()
+    if (!c || inchis || ws.readyState !== WebSocket.OPEN) return
+    try {
+      ws.send(JSON.stringify({ type: 'coords', lat: c.lat, lon: c.lon }))
+    } catch {
+      /* socket picat — close-ul curăță */
+    }
+  }
+
   ws.onmessage = (ev: MessageEvent): void => {
     if (typeof ev.data !== 'string') return
-    let m: { type?: string; data?: string; text?: string; final?: boolean; motiv?: string }
+    let m: { type?: string; data?: string; text?: string; final?: boolean; motiv?: string; frame?: unknown }
     try {
       m = JSON.parse(ev.data) as typeof m
     } catch {
@@ -273,7 +298,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     }
     switch (m.type) {
       case 'gata':
+        trimiteCoords()
+        if (!ceasCoords) ceasCoords = setInterval(trimiteCoords, 120_000)
         opts.onGata?.()
+        break
+      case 'control':
+        if (m.frame) opts.onControl?.(m.frame)
         break
       case 'audio':
         if (m.data) redaCadru(m.data)

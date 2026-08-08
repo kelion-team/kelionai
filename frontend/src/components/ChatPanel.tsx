@@ -1469,6 +1469,13 @@ export default function ChatPanel({
               },
               onUser: (text, final) => setLiveVoice(final ? '' : text),
               onKelion: (text, final) => setLiveVoice(final ? '' : text),
+              // Cadrele de ECRAN din ușa creierului (cere_creierului) intră în
+              // ACELAȘI handleControl ca la chatul scris — monitorul, cardurile
+              // și documentele arată identic, indiferent cine le-a cerut.
+              onControl: (frame) => handleControl(frame as ChatControl),
+              // GPS-ul device-ului către sesiunea live (8 aug: „nu are acces la
+              // gps, meteo") — meteo/hărțile din ușa creierului au acum locul real.
+              coordonate: () => coordsRef.current,
               onEroare: (motiv) => {
                 // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
                 // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).
@@ -2181,7 +2188,18 @@ export default function ChatPanel({
     let fps = 4
     let last: { lat: number; lon: number; t: number } | null = null
 
+    let ultimaCaptura = 0
     const tick = (): void => {
+      // ÎN VOCEA LIVE, CAPTAREA SE RĂREȘTE (măsurat 8 aug, consola ownerului:
+      // „[ceas lent] captare cadre cameră a ținut firul 51–92 ms" în timpul
+      // sesiunii live). Împachetarea JPEG (toDataURL = citire sincronă GPU→CPU
+      // + encode la 768px) rula la 4–8 fps degeaba: sesiunea live nu trimite
+      // cadre (contractul WS e doar audio) — cadrele pleacă doar cu turele de
+      // chat. Cât e live activ și nicio tură în zbor, un cadru pe secundă
+      // ajunge (proaspăt pentru faceprint și pentru o tură scrisă pornită);
+      // firul rămâne liber pentru redarea vocii.
+      if (vlRef.current && !busyRef.current && performance.now() - ultimaCaptura < 950) return
+      ultimaCaptura = performance.now()
       const f = captureRef.current?.()
       if (f) {
         latestFrameRef.current = f
