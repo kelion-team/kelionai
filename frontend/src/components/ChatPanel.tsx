@@ -51,6 +51,7 @@ import { keepScreenOn } from '../lib/wakelock'
 // vocală (startRealtimeVoice → micStream local-VAD → audio la creierul unic).
 // Dictarea batch (/api/asr) și streamingul standalone (STT) au dispărut.
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
+import { deschideVocalLive, vocalLiveDisponibila, type VocalLiveHandle } from '../lib/vocalLive'
 import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
 import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
@@ -317,6 +318,11 @@ export default function ChatPanel({
   // The LIVE voice session (if any) — used by the location tools to
   // refresh its position exactly when needed (updateCoords, on demand).
   const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
+  // VOCEA LIVE FULL-DUPLEX (7 aug) — CALE EXCLUSIVĂ, PE OPȚIUNE. Nu înlocuiește
+  // tăcut calea care merge azi: se aprinde doar cu `localStorage.kelion_voce_live
+  // = '1'`, ca ownerul s-o poată ASCULTA înainte s-o facem implicită. Ruta
+  // avertizează „vei avea 2 voci în același timp" — de-aia e SAU una, SAU alta.
+  const vlRef = useRef<VocalLiveHandle | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
   // The abort controller of the current turn — "stop" aborts it on the spot.
@@ -1374,6 +1380,38 @@ export default function ChatPanel({
         realtimeOffRef.current = false
         realtimeFailCountRef.current = 0
       }
+      // ── VOCEA LIVE FULL-DUPLEX, DACĂ E APRINSĂ (7 aug) ────────────────────
+      // Un singur model AUDE + GÂNDEȘTE + VORBEȘTE + CHEAMĂ UNELTE, într-o
+      // sesiune. Măsurat de owner pe VPS: 90 ms handshake, 491 ms primul
+      // răspuns, 66 KB de audio real. Lanțul de mai jos face trei drumuri
+      // separate (ureche → creier → gură).
+      // OPȚIUNE, nu implicit: `localStorage.kelion_voce_live = '1'`. Motivul e
+      // regula casei — nu se schimbă tăcut o cale care merge, pe ceva ce încă
+      // n-a fost ASCULTAT. Când ownerul confirmă vocea, mutăm implicitul.
+      if (localStorage.getItem('kelion_voce_live') === '1' && !vlRef.current) {
+        const cap = await vocalLiveDisponibila()
+        if (cap?.disponibil) {
+          const vl = await deschideVocalLive({
+            onGata: () => setListening(true),
+            onUser: (text, final) => setLiveVoice(final ? '' : text),
+            onKelion: (text, final) => setLiveVoice(final ? '' : text),
+            onEroare: (motiv) => {
+              // Eroarea urcă la om cu numele ei și cade ÎNAPOI pe calea veche —
+              // niciun „merge" prefăcut, și nicio sesiune rămasă mută.
+              console.warn(`[vocalLive] ${motiv}`)
+              vlRef.current?.inchide()
+              vlRef.current = null
+              setListening(false)
+            },
+          })
+          if (vl) {
+            vlRef.current = vl
+            console.info(`[vocalLive] pornit pe ${cap.model} (voce ${cap.voce}) — calea veche NU pornește`)
+            return
+          }
+        }
+        console.info('[vocalLive] indisponibil pe server — rămân pe calea vocală obișnuită')
+      }
       if (!realtimeOffRef.current) {
         try {
           const rv = await startRealtimeVoice({
@@ -1641,6 +1679,8 @@ export default function ChatPanel({
       // manualOff at the end and stops by itself; if the flag was stuck from an
       // old error, the button heals here instead of staying dead.
       micStartingRef.current = false
+      vlRef.current?.inchide()
+      vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       // intentional stop: a stuck fragment must NOT be sent after teardown
@@ -1721,6 +1761,8 @@ export default function ChatPanel({
       document.removeEventListener('visibilitychange', onVisible)
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
+      vlRef.current?.inchide()
+      vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       stopVoice()
@@ -1821,6 +1863,8 @@ export default function ChatPanel({
         window.clearTimeout(upgradeTimerRef.current)
         upgradeTimerRef.current = null
       }
+      vlRef.current?.inchide()
+      vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       setListening(false)
