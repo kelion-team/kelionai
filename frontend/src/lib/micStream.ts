@@ -33,6 +33,14 @@ import { TARGET_RATE, downsample, float32ToPcm16 } from './pcm'
 // lungă de-atât = sfârșit de rostire → fraza pleacă la creier. Nu prea scurt
 // (ar tăia o propoziție la o respirație), nu prea lung (ar întârzia răspunsul).
 const PAUZA_FRAZA_MS = 1400
+// PLAFONUL DE LIVRARE (Adrian, 8 aug: „vreau ce pleacă de la mic să ajungă
+// DIRECT audio în creier"). Măsurat în consola lui: fraza se DESCHIDEA
+// (frazaDeschisa: true) și nu se mai închidea niciodată — pe microfonul lui
+// slab, zgomotul ≈ vocea, deci „pauza" nu se mai găsea, iar audio-ul stătea
+// captiv în ambalator. De-acum: din clipa în care fraza se deschide, PLEACĂ
+// la creier în cel mult atâtea ms, cu sau fără pauză găsită. O vorbire mai
+// lungă ajunge în felii — dar AJUNGE, mereu.
+const LIVRARE_MAX_MS = 5000
 // Prag ABSOLUT de voce (0.012 — valoarea dovedită live: mai sus taie microfoanele
 // liniștite). Protecția anti-zgomot reală stă în DOMINANCE + amprenta de pe server.
 const VOICE_RMS = 0.012
@@ -232,7 +240,13 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     )
   }
 
+  let plafonLivrare: ReturnType<typeof setTimeout> | null = null
+
   const resetPhrase = (): void => {
+    if (plafonLivrare) {
+      clearTimeout(plafonLivrare)
+      plafonLivrare = null
+    }
     phrasePcm = []
     phrasePcmLen = 0
     phraseF0.length = 0
@@ -383,6 +397,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       if (!phraseOpen) {
         phraseOpen = true
         opts.onLive('🎙️')
+        // Plafonul de livrare pornește O DATĂ, la deschidere — nu se re-armează
+        // pe fiecare cadru (aia ar fi tot ostatec, doar cu alt nume).
+        if (plafonLivrare) clearTimeout(plafonLivrare)
+        plafonLivrare = setTimeout(closePhrase, LIVRARE_MAX_MS)
       }
       opts.onSpeechBegin?.()
       flushPreRoll()
