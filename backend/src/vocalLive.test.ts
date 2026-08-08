@@ -119,12 +119,12 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     expect(i, 'mesajul 27 e al 13-lea de la coadă — nu are ce căuta').not.toContain('mesajul 27 ')
     expect(i).toContain('mesajul 39 ')
     // Bugetul fix: numele + REGULA LIMBII (~390) + REGULA TĂCERII + ANCORA
-    // REALITĂȚII (8 aug seara, ~450 împreună — antet FIX, scris o dată, nu
-    // crește cu istoricul) + antetul blocului de istoric + blocul plafonat la
-    // 2400. Plafonul pe ISTORIC rămâne neatins — bugetul total s-a ridicat
-    // conștient doar cât să încapă cele două reguli noi ordonate de owner.
+    // REALITĂȚII + ANCORA LIMBII (8 aug seara, antet FIX — reguli ordonate de
+    // owner una câte una, scrise o dată, nu cresc cu istoricul) + antetul
+    // blocului de istoric + blocul plafonat la 2400. Plafonul pe ISTORIC
+    // rămâne neatins — bugetul total urcă conștient cu fiecare regulă nouă.
     expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
-      persona.length + 3700,
+      persona.length + 4200,
     )
   })
 })

@@ -176,9 +176,32 @@ function MonitorHtmlFile({ url, taskId }: { url: string; taskId: string }) {
 // swaps in a plain explanation + the open/download link, and get_monitor hears
 // the truth through setTaskStatus('error').
 function MediaFailed({ url }: { url: string }) {
+  // CAUZA REALĂ, NU „CODEC" DIN OFICIU (8 aug, capturile ownerului: imaginea
+  // pierdută la restart — un 404 — era afișată drept „format sau codec
+  // neacceptat", un diagnostic mincinos). La eșec întrebăm serverul CE s-a
+  // întâmplat: 404/410 = fișierul nu mai există; alt cod = codul; abia când
+  // fișierul chiar EXISTĂ și tot nu se redă, vina e a formatului/codecului.
+  const [cauza, setCauza] = useState<string | null>(null)
+  useEffect(() => {
+    let viu = true
+    void fetch(url, { method: 'GET', credentials: 'include', cache: 'no-store' })
+      .then((r) => {
+        void r.body?.cancel()
+        if (viu) setCauza(r.ok ? null : `HTTP ${r.status}${r.status === 404 || r.status === 410 ? ' — fișierul nu mai există' : ''}`)
+      })
+      .catch(() => {
+        if (viu) setCauza('rețea')
+      })
+    return () => {
+      viu = false
+    }
+  }, [url])
   return (
     <div className="workspace-blocked">
-      <p>{uiStrings().wsMediaFailed}</p>
+      <p>
+        {uiStrings().wsMediaFailed}
+        {cauza ? ` (${cauza})` : ''}
+      </p>
       <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
     </div>
   )

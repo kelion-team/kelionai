@@ -154,6 +154,16 @@ export function construiesteInstructiune(
     `\nREGULA LIMBII — PRIMA REGULĂ: vorbește în LIMBA în care ți se vorbește, oricare ar fi ea. ` +
     `Răspunzi în limba ULTIMEI fraze a omului; dacă el comută limba, comuți și tu INSTANT, fără să comentezi comutarea. ` +
     `Nu amesteci limbile în același răspuns și nu traduci nechemat.`
+  // ANCORA LIMBII PE ZGOMOT (8 aug, ownerul: „cât vorbesc cu el se folosește
+  // doar română" — măsurat în arhivă: urechea îi eticheta româna vorbită drept
+  // „Fahrradbahn"/„Tequilón"/„la picana" pe foșnete, iar frânturile străine
+  // intrau în conversație). Nu contrazice regula de mai sus — o apără de
+  // erorile urechii: comutarea rămâne, dar doar pe vorbire REALĂ susținută.
+  instructiune +=
+    `\nANCORA LIMBII: limba conversației cu ${numeUser} e ROMÂNA. Dacă o transcriere pare în altă ` +
+    `limbă fără ca el să fi trecut REAL și susținut la limba aia, e o eroare a urechii pe zgomot: ` +
+    `NU răspunzi frânturii străine — interpretezi ce a vrut să spună în română sau, dacă nu se ` +
+    `înțelege, taci ori întrebi scurt. Comuți limba DOAR când omul chiar vorbește fraze întregi în alta.`
   // REGULA TĂCERII LA DESCHIDERE (8 aug, ownerul, cu captura „Pa!" → „Bună
   // seara, Adrian.": „trebuie oprită bâlbâiala permanentă a salutului").
   // Modelul Live vorbește PRIMUL la fiecare deschidere de sesiune — iar scara
@@ -264,6 +274,15 @@ export function construiesteSetup(
     // loc să omoare sesiunea. Împreună cu reluarea pe handle, singurele limite
     // rămase sunt cele fizice (rețeaua ta, cheia ta).
     contextWindowCompression: { slidingWindow: {} },
+    // ZGOMOTUL NU DESCHIDE TURA (8 aug, ownerul, în timpul filmării: „atenție
+    // la zgomot că bagă bălării" — măsurat în arhivă: foșnete transcrise ca
+    // „Fahrradbahn", „Tequilón", „la picana"). Reglajul OFICIAL al Live API:
+    // pragul de START al vorbirii pe sensibilitate JOASĂ — modelul cere vorbire
+    // clară ca să deschidă tura, nu orice foșnet. Sfârșitul rămâne pe implicit
+    // (o replică tăiată ar fi mai rea decât bălăriile).
+    realtimeInputConfig: {
+      automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' },
+    },
     generationConfig: {
       // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat: cu
       // TEXT dau cod 1007). Vocea = prebuiltVoiceConfig.voiceName (masculină).
@@ -416,6 +435,9 @@ export function deschideVocalLive(
         if (faraExtensii) {
           delete st.setup.sessionResumption
           delete st.setup.contextWindowCompression
+          // Aceeași plasă și pentru reglajul anti-zgomot: un model care l-ar
+          // refuza la setup primește varianta fără el, nu o sesiune moartă.
+          delete st.setup.realtimeInputConfig
         }
         socket.send(JSON.stringify(st))
       } catch (e) {
