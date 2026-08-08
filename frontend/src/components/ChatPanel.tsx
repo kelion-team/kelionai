@@ -1278,6 +1278,9 @@ export default function ChatPanel({
                 const retry = retryTextRef.current
                 retryTextRef.current = null
                 console.error('[CONEXIUNE] serverul a revenit — reiau mesajul singur')
+                // Serverul a înviat după restart → vocea live primește iar
+                // dreptul de a porni (căderea ei fusese restartul, nu ea).
+                vlCazutRef.current = false
                 if (retry) void sendRef.current(retry)
               })
               .catch(() => {})

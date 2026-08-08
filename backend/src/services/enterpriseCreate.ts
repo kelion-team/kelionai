@@ -36,6 +36,11 @@ export interface RaportEnterprise {
   /** Câți RĂMÂN de creat, măsurat (roster − cei din consolă). Zero aici înseamnă
    *  cu adevărat „gata"; orice altceva înseamnă că runda n-a terminat. */
   ramasi?: number
+  /** SOCOTEALA PE FAȚĂ (8 aug: „nu merge procedura agenți enterprise" — ba
+   *  merge, măsurat: 12 dimineața → 14 acum, exact cu viteza cotei. Ce nu
+   *  spunea nimeni e CÂT înseamnă viteza aia în ZILE, și care sunt pârghiile
+   *  adevărate). Calculată din cota măsurată, nu din speranță. */
+  socoteala?: string
 }
 
 interface RespApi {
@@ -147,8 +152,8 @@ function socoteste(rezultate: RezCreare[]): { creati: number; esuati: number; pr
 // agenți, ziua 2 → 1; reușitele au venit după LINIȘTE, iar rafalele de cereri
 // refuzate țin paharul plin (observația ownerului). Cotele Google se resetează
 // la miezul nopții ORA PACIFICULUI (~10:00 ora României). De aici regulile:
-//   1. VEGHE non-stop la REIA_MIN (15 min) — o singură încercare ușoară pe
-//      ocol când fereastra e închisă; prindem orice deschidere în ≤15 min.
+//   1. VEGHE care DOARME cât fereastra e măsurat închisă și încearcă la
+//      resetarea reală a cotei (miezul nopții Pacific), nu pe un ceas orb.
 //   2. La reușită DRENĂM fereastra: următorul agent după un minut de respiro,
 //      până Google închide iar.
 //   3. La primul 429 ocolul se OPREȘTE întreg — nu mai trimitem și ceilalți
@@ -178,6 +183,88 @@ function noteazaInJurnal(ce: string): void {
   jurnalCote.push(`${new Date().toISOString().slice(0, 19)}Z ${ce}`)
   if (jurnalCote.length > JURNAL_MAX) jurnalCote.shift()
   void persistaMasuratori()
+}
+
+// ── CEASUL COTEI, MĂSURAT (8 aug, jurnalul citit de Kelion) ──────────────────
+//
+// Dovada resetului: 07:09:28Z și 07:10:29Z REUȘIT (= 00:09/00:10 ora
+// Pacificului, imediat după miezul nopții), apoi 429 la 07:11:30Z. Deci
+// fereastra se deschide la miezul nopții America/Los_Angeles — 07:00 UTC vara
+// (PDT), 08:00 UTC iarna (PST). Calculăm din fusul REAL, nu dintr-o oră UTC
+// bătută în cuie care ar minți jumătate de an.
+//
+// Și dovada mitralierei: toate cele 8 rafale de 429 din 8 aug (07:28, 07:42,
+// 07:58, 08:51, 09:11, 09:28, 09:43) au venit la ~7-9 min după câte un merge
+// pe master (07:21, 07:35, 07:51, 08:42, 09:04, 09:19, 09:34 — orele din git).
+// Adică REPORNIREA de la deploy trăgea imediat o rundă într-o fereastră DEJA
+// măsurată închisă, iar fiecare pornire ștergea ceasul de veghe. Funcțiile de
+// mai jos sunt pure ca să fie PROBATE pe jurnalul real, nu doar citite.
+
+function piesePacific(acum: Date): { zi: string; h: number; mi: number; s: number } {
+  const parti = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(acum)
+  const ia = (tip: string): string => parti.find((p) => p.type === tip)?.value ?? '00'
+  return { zi: `${ia('year')}-${ia('month')}-${ia('day')}`, h: Number(ia('hour')), mi: Number(ia('minute')), s: Number(ia('second')) }
+}
+
+/** Ziua de COTĂ a unui moment = data calendaristică în ora Pacificului. */
+export function ziuaPacific(acum: Date): string {
+  return piesePacific(acum).zi
+}
+
+/** Câte ms mai sunt până la resetarea cotei (următorul miez de noapte Pacific).
+ *  În zilele de schimbare a orei poate ieși cu ±1h — nu-i bai: o trezire prea
+ *  devreme ia un singur 429, recalculează și doarme restul. */
+export function msPanaLaResetulCotei(acum: Date): number {
+  const p = piesePacific(acum)
+  const scurse = ((p.h * 60 + p.mi) * 60 + p.s) * 1000
+  return Math.max(60_000, 24 * 3_600_000 - scurse)
+}
+
+function timpulLiniei(linie: string): number {
+  const sp = linie.indexOf(' ')
+  return sp > 0 ? Date.parse(linie.slice(0, sp)) : NaN
+}
+const esteReusita = (linie: string): boolean => linie.slice(linie.indexOf(' ') + 1).startsWith('REUȘIT')
+const esteRefuzDeCota = (linie: string): boolean => linie.slice(linie.indexOf(' ') + 1).startsWith('429 ')
+
+/** Ritmul MĂSURAT al cotei: REUȘIT-urile din jurnal, grupate pe zile de cotă
+ *  (granița = miezul nopții Pacific); întoarce ultima zi cu reușite. `undefined`
+ *  înseamnă cinstit „nu pot măsura încă" — NU cade pe cifra din documentație
+ *  (aia a mai mințit o dată: zicea 1/zi, jurnalul a măsurat 2 pe 8 aug). */
+export function ritmMasurat(jurnal: string[]): { peZi: number; zi: string } | undefined {
+  const peZile = new Map<string, number>()
+  for (const linie of jurnal) {
+    if (!esteReusita(linie)) continue
+    const t = timpulLiniei(linie)
+    if (!Number.isFinite(t)) continue
+    const zi = ziuaPacific(new Date(t))
+    peZile.set(zi, (peZile.get(zi) ?? 0) + 1)
+  }
+  if (peZile.size === 0) return undefined
+  const zi = [...peZile.keys()].sort().at(-1) as string
+  return { peZi: peZile.get(zi) ?? 1, zi }
+}
+
+/** Fereastra e MĂSURAT închisă acum: ultima veste de creare din ziua de cotă
+ *  curentă e un 429. Atunci o rundă nouă e bătut în zid cu bună știință —
+ *  boot-ul după restart NU mai are voie s-o tragă (dovada de sus: 8/8 rafale
+ *  din 8 aug erau reporniri de deploy). O reușită ca ultimă veste = fereastra
+ *  era deschisă când ne-a tăiat restartul → reluăm imediat. */
+export function fereastraInchisa(jurnal: string[], acum: Date): boolean {
+  const azi = ziuaPacific(acum)
+  for (let i = jurnal.length - 1; i >= 0; i--) {
+    const linie = jurnal[i]
+    const t = timpulLiniei(linie)
+    if (!Number.isFinite(t)) continue
+    if (ziuaPacific(new Date(t)) !== azi) return false
+    if (esteReusita(linie)) return false
+    if (esteRefuzDeCota(linie)) return true
+  }
+  return false
 }
 
 /** Creează UN agent — O SINGURĂ încercare (fără reîncercări în ocol: la 429
@@ -313,7 +400,8 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
       // raportul ieșea „creați: 0 | existau: 12 | eșuați: 0" — adică un REFUZ
       // raportat ca LINIȘTE, fără niciun motiv la vedere. Exact tiparul interzis
       // de regula #1. Acum oprirea se NUMEȘTE, cu mesajul măsurat al lui Google.
-      oprit = `Google a refuzat cu 429 la „${ag.nume}" (cotă de creare epuizată): ${rez.err ?? 'fără mesaj'}${rez.retryAfter ? ` — cere reîncercare peste ${rez.retryAfter}s` : ''}. Runda s-a oprit aici; veghea reia la ${REIA_MIN} min.`
+      const oreReset = Math.round((msPanaLaResetulCotei(new Date()) / 3_600_000) * 10) / 10
+      oprit = `Google a refuzat cu 429 la „${ag.nume}" (cotă de creare epuizată): ${rez.err ?? 'fără mesaj'}${rez.retryAfter ? ` — cere reîncercare peste ${rez.retryAfter}s` : ''}. Runda s-a oprit aici; veghea doarme până la resetarea cotei (miezul nopții ora Pacificului, ~${oreReset} h de acum) — nu mai bate în zid.`
       anunta(`${eticheta} | ${oprit}`)
       break
     }
@@ -328,7 +416,17 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   const lista = ((fin.j.agents as { displayName?: string }[] | undefined) ?? []).map((x) => String(x.displayName ?? ''))
 
   const v = verdictRunda({ esuati, oprit, inConsola: lista.length, inRoster: roster.length })
-  return { ...v, creati, existau, esuati, lista, primaEroare, licenta, oprit }
+  // Socoteala în ZILE, din ritmul MĂSURAT în jurnal — nu din documentație
+  // (8 aug, ownerul: „kelion trebuie sa dea tot masurat"; docs ziceau Standard
+  // 1/zi, jurnalul a măsurat 2 pe 8 aug — documentația a mințit, jurnalul nu).
+  const ritm = ritmMasurat(jurnalCote)
+  const socoteala =
+    v.ramasi > 0
+      ? ritm
+        ? `Ritm MĂSURAT din jurnal: ${ritm.peZi}/zi de cotă (ultima zi cu reușite: ${ritm.zi}; granița = miezul nopții ora Pacificului). Cei ${v.ramasi} rămași ≈ ${Math.ceil(v.ramasi / ritm.peZi)} zile în ritmul ăsta. Cota NU se mărește manual; pârghiile reale: upgrade de tier sau agenții din aplicație (fără cotă, deja activi). Veghea doarme până la resetarea cotei și încearcă atunci.`
+        : `Jurnalul n-are încă NICIO reușită notată — nu pot măsura ritmul și nu-l ghicesc din documentație. Cei ${v.ramasi} rămași intră în ritmul pe care îl vor măsura următoarele ferestre; veghea încearcă la fiecare resetare a cotei (miezul nopții ora Pacificului).`
+      : undefined
+  return { ...v, creati, existau, esuati, lista, primaEroare, licenta, oprit, socoteala }
 }
 
 /** Asigură ownerului un LOC de licență Gemini Enterprise: listează abonamentele
@@ -494,13 +592,16 @@ async function incarcaMasuratori(): Promise<void> {
 // e confirmat": fiecare ocol RE-CITEȘTE lista din consolă și îi sare pe cei
 // intrați — de-creat rămâne mereu doar restul (măsurat: „existau: 2").
 const CHEIA_CREARE = 'enterprise-creare-in-mers'
-// VEGHE RARĂ (60 min), nu deasă (5 min a fost tot mitralieră). DOCUMENTAT
-// (Rule #1, cele 6 iscoade, 5 aug): cota „No-code agent building tools - create"
-// se resetează O DATĂ pe zi (miezul nopții ora Pacificului) — Standard 1/zi,
-// Plus 10/zi. O veghe la 5 min lovea zidul de ~288 ori/zi degeaba (fix ce
-// reclama Adrian). La 60 min tot prindem fereastra zilnică în ≤1h de la reset,
-// dar fără rafală. Dovada cotei: docs.cloud.google.com/gemini/enterprise/docs/quotas
+// CEASUL VEGHERII (rescris 8 aug, pe jurnalul măsurat de Kelion): după un 429
+// cota zilei e CONSUMATĂ — orice reîncercare până la miezul nopții Pacific e
+// bătut în zid (jurnalul a numărat 8 lovituri degeaba pe 8 aug). Deci veghea
+// DOARME până la resetul real (+ o margine) și încearcă atunci. REIA_MIN (60
+// min) rămâne doar pentru rundele care s-au oprit din alte motive (eșec 5xx,
+// listă necitibilă, token expirat) — alea nu țin de cotă și merită reîncercate.
 const REIA_MIN = 60
+/** Marginea de după miezul nopții Pacific — reușitele măsurate au venit la
+ *  00:09/00:10; intrăm în fereastră comod, nu pe muchie. */
+const MARGINE_RESET_MS = 7 * 60_000
 let ceasReluare: NodeJS.Timeout | null = null
 
 /** Starea creării din fundal — pagina de admin o citește la câteva secunde. */
@@ -529,21 +630,23 @@ export function pornesteCrearea(email: string): StareEnterprise {
       if (r.ok) {
         // Toți în consolă — steagul jos, nimic de reluat.
         void memoriePune(CHEIA_CREARE, '').catch(() => {})
-      } else if (!r.motiv) {
-        // Ocol parțial — vegherea continuă la REIA_MIN (60 min), non-stop.
-        // ADEVĂRUL, DOCUMENTAT (5 aug, cele 6 iscoade + docs Google): „~1/zi" NU
-        // era o poveste — e cota reală „No-code agent building tools - create"
-        // (Standard 1 agent/zi, Plus 10/zi), care se resetează O DATĂ pe zi, la
-        // miezul nopții ORA PACIFICULUI (~10:00 la noi). Deci NU insistăm la 5
-        // min (rafală degeaba pe o cotă care se umple o dată pe zi); veghem rar
-        // și prindem fereastra zilnică. Tiparul real rămâne în jurnal (măsurat).
+      } else {
+        // Rundă neterminată → veghea se RE-ARMEAZĂ întotdeauna, dar pe ceasul
+        // potrivit CAUZEI măsurate:
+        //  - oprit (429) = cota zilei e consumată → dormim până la resetul real
+        //    (miezul nopții Pacific + margine). Înainte reîncerca orbește la 60
+        //    min — jurnalul din 8 aug a numărat loviturile în zid.
+        //  - altceva (eșec 5xx, listă necitibilă, token expirat) → REIA_MIN.
+        //    Înainte rundele cu `motiv` NU armau nimic: un singur eșec trecător
+        //    omora veghea în tăcere până la un restart — care, cu deploy-urile
+        //    oprite, nu mai vine. O veghe „perpetuă" care poate muri dintr-un
+        //    5xx nu e perpetuă.
+        const ms = r.oprit ? msPanaLaResetulCotei(new Date()) + MARGINE_RESET_MS : REIA_MIN * 60_000
         ceasReluare = setTimeout(() => {
           ceasReluare = null
           pornesteCrearea(email)
-        }, REIA_MIN * 60_000)
+        }, ms)
       }
-      // r.motiv (ne-conectat, listă necitibilă...) = nu reluăm orbește pe timer;
-      // steagul rămâne, deci un restart sau o apăsare reiau când e cazul.
     })
     .catch((e: unknown) => {
       stare.raport = { ok: false, creati: 0, existau: 0, esuati: 0, lista: [], motiv: `prăbușit: ${String(e).slice(0, 200)}` }
@@ -556,10 +659,27 @@ export function pornesteCrearea(email: string): StareEnterprise {
 }
 
 /** La boot: dacă un restart a tăiat o creare în mers (steagul e sus), o reluăm
- *  singuri — ownerul nu mai apasă nimic după deploy-uri. */
+ *  singuri — ownerul nu mai apasă nimic după deploy-uri.
+ *
+ *  DAR NU ÎN ZIDUL MĂSURAT (bugul dovedit pe 8 aug: toate cele 8 rafale de 429
+ *  au venit la ~7-9 min după câte un merge pe master — adică FIX boot-ul ăsta,
+ *  care trăgea o rundă imediat, deși jurnalul persistat spunea deja „azi e
+ *  429"). Acum boot-ul citește întâi jurnalul: fereastră măsurat închisă →
+ *  doarme până la reset, ca orice veghe cu cap. Apăsarea manuală din admin
+ *  rămâne neatinsă — aia e voința ownerului și rulează pe loc. */
 export async function reiaCreareaDupaRepornire(): Promise<void> {
   await incarcaMasuratori() // reîncarcă jurnalul + contoarele de dinainte de deploy
   const v = await memorieIa(CHEIA_CREARE)
   const m = /\]\s*(\S+@\S+)\s*$/.exec(v.trim())
-  if (m?.[1]) pornesteCrearea(m[1])
+  const email = m?.[1]
+  if (!email) return
+  if (fereastraInchisa(jurnalCote, new Date())) {
+    if (ceasReluare) clearTimeout(ceasReluare)
+    ceasReluare = setTimeout(() => {
+      ceasReluare = null
+      pornesteCrearea(email)
+    }, msPanaLaResetulCotei(new Date()) + MARGINE_RESET_MS)
+    return
+  }
+  pornesteCrearea(email)
 }

@@ -347,7 +347,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     // Decăderea normală poartă aceeași țintă sub nivel (×0,7) și același plafon:
     // altfel media cadrelor de zgomot trăgea podeaua înapoi LA zgomot — adică
     // înapoi în starea surdă din care recalibrarea tocmai ne-a scos.
-    if (!voiced) noiseFloor = Math.min(0.03, noiseFloor * 0.97 + rms * 0.7 * 0.03)
+    if (!voiced) noiseFloor = Math.min(0.03, Math.max(0.004, noiseFloor * 0.97 + rms * 0.7 * 0.03))
     // ── DEBLOCAREA VAD-ULUI (măsurat 8 aug, consola ownerului) ──────────────
     // Rândul de deasupra adapta podeaua DOAR când nu e voce. Cu zgomot ambiental
     // peste prag, fiecare cadru era „voce" → podeaua nu se mai mișca NICIODATĂ →
@@ -364,7 +364,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       // voce (podea × 2,2) sărea PESTE vocea omului și microfonul surzea —
       // măsurat de owner („nu primește nimic de la microfon"). 0,45 × 2,2 ≈ 1:
       // pragul rezultat ≈ nivelul zgomotului; ce-l depășește cât de puțin trece.
-      noiseFloor = Math.min(0.03, noiseFloor * 0.99 + rms * 0.45 * 0.01)
+      noiseFloor = Math.min(0.03, Math.max(0.004, noiseFloor * 0.99 + rms * 0.55 * 0.01))
     }
 
     // Pre-roll: păstrăm mereu ultimele cadre, chiar înainte ca VAD-ul să declare voce.
@@ -413,11 +413,19 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       // VAD-ul să se deblocheze pe loc. Ce se pierde, pe față: o dictare
       // neîntreruptă mai lungă de 20 s ar fi și ea aruncată — dacă apare cazul
       // real, se vede în jurnal exact pe linia asta.
-      // ×0,45, NU ×0,9 (lecția surzeniei): la 0,9, pragul = 2,2 × 0,9 ≈ dublul
-      // zgomotului — vocea liniștită nu-l mai trecea niciodată. Plafon dur 0.03.
-      noiseFloor = Math.min(0.03, Math.max(noiseFloor, rms * 0.45))
+      // ── A DOUA LECȚIE, din logul ownerului: „recalibrată la 0.0002" ────────
+      // Recalibram pe RMS-ul CADRULUI CURENT — dar plafonul se atinge adesea în
+      // coada de tăcere a frazei, deci „nivelul zgomotului" era de fapt liniște
+      // aproape totală (0.00045) și podeaua ieșea absurd de joasă: următorul
+      // blocaj devenea MAI ușor. Corect e pe ENERGIA MEDIE A FRAZEI (aceeași
+      // scară RMS, măsurată pe toată durata blocajului), cu factor 0,55: pragul
+      // rezultat ≈ 1,2 × nivelul susținut — îl închide, fără să surzească vocea
+      // care îl depășește. Podeaua e mărginită [0.004, 0.03] ca NICIO adaptare
+      // să nu mai poată produce nici 0.0002, nici surzenie.
+      const medieFraza = phraseFrames > 0 ? phraseEnergySum / phraseFrames : rms
+      noiseFloor = Math.min(0.03, Math.max(0.004, noiseFloor, medieFraza * 0.55))
       console.warn(
-        `[frază] ARUNCATĂ — 20 s fără nicio pauză = zgomot continuu (VAD blocat); podeaua de zgomot recalibrată la ${noiseFloor.toFixed(4)}`,
+        `[frază] ARUNCATĂ — 20 s fără nicio pauză = zgomot continuu (VAD blocat); energia medie ${medieFraza.toFixed(4)} → podeaua recalibrată la ${noiseFloor.toFixed(4)}`,
       )
       opts.onLive('')
       resetPhrase()
