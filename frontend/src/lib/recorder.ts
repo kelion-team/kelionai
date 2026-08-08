@@ -98,13 +98,34 @@ export async function startRecording(
   let mixedTrack: MediaStreamTrack | null = null
   const displayAudio = display.getAudioTracks()
   if (AC) {
-    // The mixer ALWAYS exists: tab/system audio (if shared) + the mic — one
-    // clean track regardless of what was ticked in the picker.
     ctx = new AC()
+    // FILMAREA MUTĂ (8 aug, ownerul: „am făcut o înregistrare dar nu s-a
+    // înregistrat sunetul"). Contextul audio se creează DUPĂ două await-uri
+    // (alegătorul de ecran + microfonul) — gestul de click e demult consumat,
+    // iar browserul are voie să-l pornească 'suspended'. Un context suspendat
+    // nu procesează NIMIC: destinația mixerului scoate tăcere perfectă și
+    // filmarea iese mută chiar cu microfonul acordat. resume() îl pornește.
+    if (ctx.state === 'suspended') await ctx.resume().catch(() => undefined)
     const dest = ctx.createMediaStreamDestination()
-    if (displayAudio.length > 0) ctx.createMediaStreamSource(new MediaStream(displayAudio)).connect(dest)
-    if (mic) ctx.createMediaStreamSource(mic).connect(dest)
-    mixedTrack = dest.stream.getAudioTracks()[0] ?? null
+    let surseAudio = 0
+    if (displayAudio.length > 0) {
+      ctx.createMediaStreamSource(new MediaStream(displayAudio)).connect(dest)
+      surseAudio++
+    }
+    if (mic) {
+      ctx.createMediaStreamSource(mic).connect(dest)
+      surseAudio++
+    }
+    // Un mixer FĂRĂ nicio sursă e doar o pistă de tăcere — nu o punem în
+    // filmare (ex.: „Fereastră" în Chrome n-are audio de sistem, iar micul a
+    // fost refuzat). Lipsa se SPUNE, nu se maschează cu liniște.
+    mixedTrack = surseAudio > 0 ? (dest.stream.getAudioTracks()[0] ?? null) : null
+    if (surseAudio === 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[rec] filmarea pornește FĂRĂ sunet: nici audio de sistem (bifează „Distribuie audio" în dialogul de alegere), nici microfon',
+      )
+    }
   }
 
   const tracks: MediaStreamTrack[] = [...display.getVideoTracks()]
