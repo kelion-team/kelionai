@@ -45,6 +45,34 @@ export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-3.1-flas
 // (Puck / Charon / Fenrir / Orus sunt toate acceptate) după ce o ascultă.
 export const VOCAL_LIVE_VOICE = process.env.VOCAL_LIVE_VOICE || 'Charon'
 
+/** ── COSTUL SESIUNII LIVE, DIN OCTEȚII RETRANSMIȘI (8 aug, „se consumă cu
+ *  viteza luminii" + pastila care scade) ─────────────────────────────────────
+ *
+ *  Sesiunea Live nu trecea prin recordCost DELOC — creditul se ducea la
+ *  Google, iar jurnalul nostru (deci și pastila din bară) rămânea ORB la
+ *  voce: scădea mai puțin decât realitatea. Nu ne bazăm pe usageMetadata
+ *  (documentația nu spune dacă e pe tură sau cumulat, iar forumul Google
+ *  confirmă nepotriviri cu facturarea); măsurăm ce retransmitem NOI:
+ *  octeții de microfon (PCM16 mono 16 kHz, contractul WS) și octeții de glas
+ *  (PCM16 24 kHz), la tariful oficial PE MINUT al modelului live (pagina de
+ *  prețuri Google, citită 8 aug 2026): intrare $0.005/min, ieșire $0.018/min.
+ *  E o ESTIMARE declarată (kind 'gemini' e deja etichetat estimare în
+ *  jurnal, nu măsurătoare de bani) — factura adevărată e doar la Google. */
+export const USD_MIN_AUDIO_INTRARE = 0.005
+export const USD_MIN_AUDIO_IESIRE = 0.018
+export function estimareCostAudioUsd(octetiIntrare: number, octetiIesire: number): number {
+  const minIntrare = octetiIntrare / (2 * 16_000) / 60
+  const minIesire = octetiIesire / (2 * 24_000) / 60
+  return minIntrare * USD_MIN_AUDIO_INTRARE + minIesire * USD_MIN_AUDIO_IESIRE
+}
+
+/** Octeții REALI dintr-un șir base64, fără decodare (aritmetică pură). */
+export function octetiDinBase64(b64: string): number {
+  if (!b64) return 0
+  const umplutura = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0
+  return Math.floor((b64.length / 4) * 3) - umplutura
+}
+
 /** ── INSTRUCȚIUNEA SESIUNII LIVE, CU MEMORIA OMULUI (8 aug, „execută cu
  *  Gemini") ─────────────────────────────────────────────────────────────────
  *  Sesiunea Live pornește de la zero la fiecare deschidere — fără blocul ăsta,
