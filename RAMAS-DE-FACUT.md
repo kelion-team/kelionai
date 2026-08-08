@@ -436,8 +436,13 @@ producția.
 
 ### M7. GĂSIT ȘI **NEREPARAT** — familia „citire picată → 0/gol" din `db.ts`
 
-Măsurat pe 8 aug: din 129 de funcții exportate în `backend/src/db.ts`, **36**
-întorc o valoare goală/zero la `!dbEnabled()` și **49** fac la fel în `catch`.
+CORECȚIE LA PROPRIA MEA CIFRĂ (8 aug, aceeași zi): am scris întâi „36 + 49"
+într-un fel care sugera 85 de locuri distincte. **Nu e adevărat** — 28 dintre
+funcții apar în ambele liste. Numărat din nou, cu scriptul de față: din **130**
+de funcții exportate în `backend/src/db.ts`, **35** întorc gol/zero la
+`!dbEnabled()` și **49** în `catch`, iar reuniunea e de **56 de funcții
+distincte**. Umflasem breadth-ul cu 50%; o cifră dată din cap, într-un document
+despre cifre date din cap.
 Adică o citire IMPOSIBILĂ iese pe sârmă ca un fapt: `listUsers()` → `[]`
 („0 utilizatori"), `getBalance()` → `0` („£0.00"), `getCostSummary()` → totul pe
 zero. E exact familia care te-a costat ziua de 30 iulie.
@@ -459,7 +464,8 @@ date** — adică exact în minutul în care ai nevoie de adevăr, panoul ar ar�
 
 | # | Ce | Stare |
 |---|---|---|
-| M7 | Cele 6 citiri de bani/numărători trecute pe `Masuratoare<T>`, ca o pică de DB să scrie „nu pot citi", nu un zero | **de făcut** |
+| M7a | **Soldul** — `getBalance`/`getWalletStatus` înlocuite cu `citesteSold`/`citestePortofel`, care spun `citit:false` + motiv. Consecința reparată nu era cosmetică: `chat.ts` ridica **paywall-ul** („Ai rămas fără credit") pe un sold necitit, `realtime.ts` **tăia vocea** (`stop`), iar `/api/billing/balance` afișa 0 credite — deci un sughiț de bază de date îi spunea unui om cu credit plătit că n-are bani, și îl bloca. Acum: citirea picată **nu ridică zidul** (eroarea noastră nu se plătește din buzunarul lui), ruta dă **503 `sold_necitit`**, iar `validateTopUp` refuză să valideze pe un portofel necitit (înainte `topupRef=0` însemna „prima alimentare, minim £20" pentru oricine, la orice sughiț) | ✅ reparat, 999 teste verzi |
+| M7b | Restul: `getCostSummary`, `listUsers`, `listAllTransactions`, `getHistory` — aceeași trecere pe o citire care spune „nu pot" | **de făcut** |
 
 ### M8. Creditul rămas pe fiecare AI (cerut 8 aug)
 

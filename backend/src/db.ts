@@ -1315,16 +1315,36 @@ export async function getDownloadStats(): Promise<{
 export const userKey = (email: string): string => String(email ?? '').trim().toLowerCase()
 const walletKey = userKey
 
-export async function getBalance(email: string): Promise<number> {
-  if (!dbEnabled()) return 0
+/** ── SOLDUL: „N-AM PUTUT CITI" NU E „AI ZERO" (8 aug 2026) ─────────────────
+ *
+ *  `getBalance` întorcea `0` și când baza nu era configurată, și când
+ *  interogarea crăpa. Consecința nu era cosmetică — soldul e ZID:
+ *
+ *    chat.ts     : `getBalance(...) <= 0` → paywall („Ai rămas fără credit")
+ *    realtime.ts : `bal <= 0` → `stop` → i se TAIE vocea
+ *    billing.ts  : £0.00 pe ecran
+ *
+ *  Adică un sughiț de bază de date îi spunea unui om care ȘI-A PLĂTIT creditul
+ *  că a rămas fără bani, și îl bloca. Familia „£0.00", în forma ei cea mai
+ *  scumpă.
+ *
+ *  Aici citirea spune ce s-a întâmplat. Zero RĂMÂNE zero când chiar nu există
+ *  rând (utilizator nou, portofel gol) — ăla e un fapt citit, nu o presupunere.
+ *  Doar imposibilitatea de a citi se numește pe nume. */
+export type CitireSold = { citit: true; sold: number } | { citit: false; motiv: string }
+
+export async function citesteSold(email: string): Promise<CitireSold> {
+  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
   try {
     const r = await getPool().query<{ balance: string }>(
       'SELECT balance FROM wallets WHERE user_email = $1',
       [walletKey(email)],
     )
-    return Number(r.rows[0]?.balance ?? 0)
-  } catch {
-    return 0
+    // Fără rând = portofel inexistent = zero REAL, citit. Nu e același lucru
+    // cu „n-am ajuns la bază".
+    return { citit: true, sold: Number(r.rows[0]?.balance ?? 0) }
+  } catch (e) {
+    return { citit: false, motiv: `citirea portofelului a picat: ${e instanceof Error ? e.message.slice(0, 120) : String(e)}` }
   }
 }
 
@@ -1472,16 +1492,20 @@ export async function listAllTransactions(limit = 200): Promise<Transaction[]> {
 }
 
 /** Wallet balance + the last-top-up reference, for the low-credit % alerts. */
-export async function getWalletStatus(email: string): Promise<{ balance: number; topupRef: number }> {
-  if (!dbEnabled()) return { balance: 0, topupRef: 0 }
+/** Ca `citesteSold`, dar cu referința ultimei alimentări (procentul rămas).
+ *  Aceeași regulă: o citire imposibilă NU se scrie ca „0 credite". */
+export type CitirePortofel = { citit: true; balance: number; topupRef: number } | { citit: false; motiv: string }
+
+export async function citestePortofel(email: string): Promise<CitirePortofel> {
+  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
   try {
     const r = await getPool().query<{ balance: string; topup_ref: string }>(
       'SELECT balance, topup_ref FROM wallets WHERE user_email = lower($1)',
       [email],
     )
-    return { balance: Number(r.rows[0]?.balance ?? 0), topupRef: Number(r.rows[0]?.topup_ref ?? 0) }
-  } catch {
-    return { balance: 0, topupRef: 0 }
+    return { citit: true, balance: Number(r.rows[0]?.balance ?? 0), topupRef: Number(r.rows[0]?.topup_ref ?? 0) }
+  } catch (e) {
+    return { citit: false, motiv: `citirea portofelului a picat: ${e instanceof Error ? e.message.slice(0, 120) : String(e)}` }
   }
 }
 

@@ -16,7 +16,7 @@ import {
   saveMessage,
   recordCost,
   recordTiming,
-  getBalance,
+  citesteSold,
   debitWallet,
   getSpeechLang,
   setSpeechLangPref,
@@ -1478,11 +1478,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // when payments aren't configured (no Revolut link) the app stays
     // free/ungated. Clean binary stop in the user's language + a paywall frame
     // so the UI shows the top-up link.
-    if (
-      config.revolut.payLink &&
-      user.role !== 'admin' &&
-      (await getBalance(user.email)) <= 0
-    ) {
+    // POARTA SE ÎNCHIDE DOAR PE UN SOLD CITIT (măsurat 8 aug). Înainte,
+    // `getBalance` întorcea 0 și când citirea PICA — deci un sughiț de bază de
+    // date îi spunea unui om cu credit plătit „Ai rămas fără credit" și îl
+    // bloca. Acum, dacă nu pot citi, NU ridic zidul: eroarea noastră nu se
+    // plătește din buzunarul lui. Rămâne zgomotoasă în jurnal, ca s-o vedem.
+    const soldPoarta = config.revolut.payLink && user.role !== 'admin' ? await citesteSold(user.email) : null
+    if (soldPoarta && !soldPoarta.citit)
+      console.error('[paywall] sold NECITIT, las trecerea liberă:', soldPoarta.motiv)
+    if (soldPoarta?.citit && soldPoarta.sold <= 0) {
       reply.hijack()
       reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' })
       const paywallTurnId = randomUUID()
