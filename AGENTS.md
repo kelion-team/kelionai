@@ -38,7 +38,7 @@ Google), în producție la **kelionai.app**. Ownerul: Adrian
 ## Verificări OBLIGATORII înainte de orice commit
 ```bash
 cd backend  && npx tsc --noEmit && npx vitest run   # totul verde
-cd frontend && npx tsc --noEmit
+cd frontend && npx tsc -b --force   # NU --noEmit: tsconfig.json e „solution" (files:[]) — --noEmit nu verifică NIMIC; Docker rulează tsc -b (măsurat 8 aug: --noEmit verde local, tsc -b roșu în deploy, publicarea blocată 20 min)
 node scripts/verifica-sintaxa.mjs                    # din rădăcină; pică pe markere de conflict
 ```
 
