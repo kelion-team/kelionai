@@ -1492,6 +1492,11 @@ export default function ChatPanel({
                 if (!proaspat) return []
                 return [...frameBufRef.current.slice(-3), proaspat]
               },
+              // VEDEREA CONTINUĂ (8 aug: „trebuie să poată folosi camera"):
+              // sesiunea live primește un cadru proaspăt la ~2,5s cât camera
+              // e pornită — captura întoarce null când camera e oprită, deci
+              // nu pleacă nimic stătut.
+              cadruLive: () => captureRef.current?.() ?? null,
               onEroare: (motiv) => {
                 // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
                 // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).

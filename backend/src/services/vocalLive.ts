@@ -66,6 +66,18 @@ export function estimareCostAudioUsd(octetiIntrare: number, octetiIesire: number
   return minIntrare * USD_MIN_AUDIO_INTRARE + minIesire * USD_MIN_AUDIO_IESIRE
 }
 
+/** Costul cadrelor de cameră trimise în sesiunea live (8 aug: „trebuie să
+ *  poată folosi camera"). Google tokenizează o imagine la ~258 de tokeni pe
+ *  dală (cifra publicată pentru modelele Gemini); cadrul nostru de 768px
+ *  intră în ~2 dale → ~516 tokeni, la tariful de INTRARE text al modelului
+ *  live ($0.75/1M, pagina de prețuri, 8 aug). ESTIMARE declarată — numărul
+ *  de cadre e măsurat la noi, tokenizarea exactă o știe doar Google. */
+export const TOKENI_PE_CADRU_EST = 516
+export const USD_1M_TOKENI_INTRARE = 0.75
+export function estimareCostCadreUsd(nrCadre: number): number {
+  return (nrCadre * TOKENI_PE_CADRU_EST * USD_1M_TOKENI_INTRARE) / 1_000_000
+}
+
 /** Octeții REALI dintr-un șir base64, fără decodare (aritmetică pură). */
 export function octetiDinBase64(b64: string): number {
   if (!b64) return 0
@@ -205,6 +217,12 @@ export interface VocalLiveEvenimente {
 export interface VocalLive {
   /** Trimite audio de la microfon: PCM16 mono 16kHz (base64 sau Buffer). */
   scrieAudio(pcm: Buffer): void
+  /** Trimite UN cadru de la cameră (JPEG base64 BRUT, fără prefix data:).
+   *  8 aug, ownerul: „trebuie să poată folosi camera" — sesiunea Live acceptă
+   *  video în flux exact ca audio-ul; modelul VEDE în timp ce vorbește.
+   *  Cadrele sunt efemere prin natură: cât sesiunea nu e gata se ARUNCĂ (un
+   *  cadru stătut livrat târziu ar fi o vedere falsă), nu se pun la coadă. */
+  scrieCadru(jpegBase64: string): void
   /** Răspunde la un apel de unealtă, cu rezultatul (obiect JSON). */
   raspundeUnealta(id: string, name: string, rezultat: unknown): void
   /** Închide sesiunea. */
@@ -370,6 +388,16 @@ export function deschideVocalLive(
     }
   }
 
+  // Cadrul de cameră pleacă pe ACELAȘI canal realtimeInput ca audio-ul —
+  // oglinda lui trimiteAudio, doar cu video (JPEG).
+  const trimiteCadru = (jpegBase64: string): void => {
+    try {
+      ws?.send(JSON.stringify({ realtimeInput: { video: { data: jpegBase64, mimeType: 'image/jpeg' } } }))
+    } catch {
+      /* eroarea reală vine pe canalul 'error' */
+    }
+  }
+
   const conecteaza = (): void => {
     if (inchisa) return
     gata = false
@@ -487,6 +515,12 @@ export function deschideVocalLive(
         return
       }
       trimiteAudio(pcm)
+    },
+    scrieCadru(jpegBase64: string): void {
+      // Fără coadă: un cadru vechi livrat după reconectare ar fi o vedere
+      // FALSĂ a lui „acum" — mai bine sare un cadru decât să mintă unul.
+      if (inchisa || !gata || !jpegBase64) return
+      trimiteCadru(jpegBase64)
     },
     raspundeUnealta(id: string, name: string, rezultat: unknown): void {
       if (inchisa) return

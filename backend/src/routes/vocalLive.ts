@@ -7,6 +7,7 @@ import {
   vocalLiveDisponibila,
   construiesteInstructiune,
   estimareCostAudioUsd,
+  estimareCostCadreUsd,
   octetiDinBase64,
   VOCAL_LIVE_MODEL,
   VOCAL_LIVE_VOICE,
@@ -38,7 +39,10 @@ import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost } from '../db
 //   client → server:  cadre BINARE = PCM16 mono 16kHz de la microfon;
 //                     JSON { type:'coords', lat, lon } = GPS-ul device-ului
 //                     (8 aug: „nu are acces la gps, meteo" — fără el, ușa
-//                     creierului rula meteo/hărți fără loc).
+//                     creierului rula meteo/hărți fără loc);
+//                     JSON { type:'cadru', data } = UN cadru de cameră (JPEG
+//                     base64 brut) → intră DIRECT în sesiunea Live ca video
+//                     (8 aug: „trebuie să poată folosi camera").
 //   server → client:  JSON —
 //     { type:'gata' }                              sesiunea Live e deschisă
 //     { type:'audio', data:<base64 PCM 24kHz> }    glasul lui Kelion, de redat
@@ -193,7 +197,10 @@ const PERSONA_KELION =
   'știri, METEO, muzică, YouTube, hărți, unde mă aflu, e-mail, calendar, imagini, deschis ceva pe ' +
   'monitor — chemi unealta cere_creierului cu cererea omului formulată complet, apoi spui pe scurt ' +
   'rezultatul. NU refuza niciodată pe motiv că n-ai unealta sau accesul: ușa e cere_creierului. ' +
-  'Ce apare pe monitor NU se citește cu voce tare — o propoziție scurtă și atât.'
+  'Ce apare pe monitor NU se citește cu voce tare — o propoziție scurtă și atât. ' +
+  'VEDEREA: când camera omului e pornită primești CADRELE ei în timp real — aia e ce VEZI acum; la ' +
+  '„ce vezi", „uită-te", „citește ce e aici" răspunzi DIN ele, direct. Nu comentezi imaginea ' +
+  'nechemat, niciodată. Dacă nu primești cadre, camera e oprită — o spui, nu inventezi o vedere.'
 
 export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
   // Sonda: frontendul întreabă întâi dacă modul unificat e disponibil (are cheie
@@ -263,10 +270,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // cel mult ultimul minut, nu sesiunea întreagă.
     let octetiIn = 0
     let octetiOut = 0
+    // Cadrele de cameră trimise în sesiune (8 aug: „trebuie să poată folosi
+    // camera") — numărate aici, estimate în varsaCostul.
+    let cadreTrimise = 0
     const varsaCostul = (): void => {
-      const usd = estimareCostAudioUsd(octetiIn, octetiOut)
+      const usd = estimareCostAudioUsd(octetiIn, octetiOut) + estimareCostCadreUsd(cadreTrimise)
       octetiIn = 0
       octetiOut = 0
+      cadreTrimise = 0
       if (usd > 0) void recordCost(user.email, 'gemini', usd)
     }
     const ceasCost = setInterval(varsaCostul, 60_000)
@@ -314,6 +325,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             const cadre = Array.isArray(m.cadre) ? m.cadre.filter((c): c is string => typeof c === 'string') : []
             primesteCadre?.(cadre)
             primesteCadre = null
+          } else if (m.type === 'cadru' && typeof (m as { data?: unknown }).data === 'string') {
+            // OCHII SESIUNII (8 aug: „trebuie să poată folosi camera"): cadrul
+            // intră DIRECT în sesiunea Live, ca video în flux — modelul vede
+            // în timp ce vorbește, fără să treacă prin ușă.
+            live?.scrieCadru((m as { data: string }).data)
+            cadreTrimise++
           }
         } catch {
           /* cadru text neînțeles — îl ignorăm, audio rămâne pe binar */
