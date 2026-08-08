@@ -29,6 +29,13 @@ export interface RaportEnterprise {
   primaEroare?: string
   /** Ce s-a întâmplat cu LICENȚA (măsurat): abonament găsit? loc alocat? */
   licenta?: string
+  /** DE CE s-a oprit runda, dacă s-a oprit (429 măsurat, cu mesajul lui Google).
+   *  Fără câmpul ăsta, o rundă oprită de cotă arăta identic cu una în care nu s-a
+   *  întâmplat nimic: „creați 0, eșuați 0" — un refuz raportat ca liniște. */
+  oprit?: string
+  /** Câți RĂMÂN de creat, măsurat (roster − cei din consolă). Zero aici înseamnă
+   *  cu adevărat „gata"; orice altceva înseamnă că runda n-a terminat. */
+  ramasi?: number
 }
 
 interface RespApi {
@@ -101,6 +108,31 @@ function rezultatCreare(res: RespApi): RezCreare {
 }
 
 /** Adună rezultatele creărilor paralele: câți creați, câți eșuați, prima eroare. */
+/**
+ * VERDICTUL RUNDEI — funcție PURĂ, ca să poată fi PROBATĂ, nu doar citită.
+ *
+ * Adrian, 8 aug: „ar fi bine să repari, să măsori și să dovedești că merge".
+ * Un gard care verifică doar că textul reparației există în cod nu dovedește
+ * comportamentul. Aici verdictul e o funcție cu intrări și ieșiri, deci se poate
+ * rula pe cazul REAL din captura ownerului (12 în consolă, 91 în roster, Google
+ * refuză cu 429 la primul) și se poate vedea negru pe alb ce iese.
+ *
+ * Regula pe care o impune: „gata" înseamnă TOȚI în consolă ȘI fără eșecuri ȘI
+ * fără oprire din cotă. O rundă oprită de Google NU e „ok", oricâte eșecuri
+ * numărate ar avea (poate avea zero — exact bugul reparat).
+ */
+export function verdictRunda(x: {
+  esuati: number
+  oprit?: string
+  inConsola: number
+  inRoster: number
+}): { ok: boolean; ramasi: number } {
+  return {
+    ok: x.esuati === 0 && !x.oprit && x.inConsola >= x.inRoster,
+    ramasi: Math.max(0, x.inRoster - x.inConsola),
+  }
+}
+
 function socoteste(rezultate: RezCreare[]): { creati: number; esuati: number; primaEroare?: string } {
   const creati = rezultate.filter((r) => r.ok).length
   const esuati = rezultate.length - creati
@@ -252,6 +284,7 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   const deCreat = roster.filter((ag) => !cunoscuti.has(ag.nume))
   const existau = roster.length - deCreat.length
   const rezultate: RezCreare[] = []
+  let oprit: string | undefined
   // STRATEGIE BLÂNDĂ, DOVEDITĂ (Adrian, 5 aug — după ce am prins mesajul REAL al
   // lui Google: „Agent creation quota exceeded"). E o COTĂ de creare, nu o rată
   // care se limpezește dacă insiști: MĂSURAT, hămăitul (48 de cereri, backoff de
@@ -273,7 +306,15 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
     if (rez.quota) {
       // Cota s-a epuizat (429) — OPRIM. Veghea reia la REIA_MIN și prinde
       // fereastra următoare. Nu mai trimitem restul în zid.
-      anunta(`${eticheta} | cotă de creare epuizată (429) — veghez la ${REIA_MIN} min și prind fereastra următoare`)
+      //
+      // BUG REPARAT (8 aug, Adrian: „analizează și măsoară de ce nu funcționează
+      // creierea automată de agenți"): `break` ieșea FĂRĂ să pună rezultatul în
+      // listă. Când Google refuza de la PRIMUL agent, `rezultate` rămânea gol și
+      // raportul ieșea „creați: 0 | existau: 12 | eșuați: 0" — adică un REFUZ
+      // raportat ca LINIȘTE, fără niciun motiv la vedere. Exact tiparul interzis
+      // de regula #1. Acum oprirea se NUMEȘTE, cu mesajul măsurat al lui Google.
+      oprit = `Google a refuzat cu 429 la „${ag.nume}" (cotă de creare epuizată): ${rez.err ?? 'fără mesaj'}${rez.retryAfter ? ` — cere reîncercare peste ${rez.retryAfter}s` : ''}. Runda s-a oprit aici; veghea reia la ${REIA_MIN} min.`
+      anunta(`${eticheta} | ${oprit}`)
       break
     }
     rezultate.push(rez)
@@ -286,7 +327,8 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   const fin = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
   const lista = ((fin.j.agents as { displayName?: string }[] | undefined) ?? []).map((x) => String(x.displayName ?? ''))
 
-  return { ok: esuati === 0 && lista.length >= roster.length, creati, existau, esuati, lista, primaEroare, licenta }
+  const v = verdictRunda({ esuati, oprit, inConsola: lista.length, inRoster: roster.length })
+  return { ...v, creati, existau, esuati, lista, primaEroare, licenta, oprit }
 }
 
 /** Asigură ownerului un LOC de licență Gemini Enterprise: listează abonamentele
