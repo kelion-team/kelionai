@@ -117,9 +117,18 @@ export function construiesteSetup(
   voce: string,
   instructiune: string,
   unelte: UnealtaVocala[],
+  reluareHandle?: string,
 ): Record<string, unknown> {
   const setup: Record<string, unknown> = {
     model: `models/${model}`,
+    // ── RELUAREA SESIUNII (8 aug: „a funcționat 5 minute impecabil, după care
+    // a amuțit") ─────────────────────────────────────────────────────────────
+    // Sesiunile Live au limită de durată la Google. Fără blocul ăsta, la limită
+    // sesiunea moare sec, reluările de la zero pot fi refuzate, iar vocea cade
+    // pe calea veche. Cu el, serverul primește un HANDLE de reluare
+    // (sessionResumptionUpdate) și un preaviz de închidere (goAway) — și
+    // redeschide sesiunea CU CONTEXT, transparent pentru browser.
+    sessionResumption: reluareHandle ? { handle: reluareHandle } : {},
     generationConfig: {
       // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat: cu
       // TEXT dau cod 1007). Vocea = prebuiltVoiceConfig.voiceName (masculină).
@@ -147,9 +156,23 @@ export function interpreteazaCadru(m: Record<string, unknown>): Array<
   | { fel: 'unealta'; id: string; name: string; args: Record<string, unknown> }
   | { fel: 'intrerupt' }
   | { fel: 'turaGata' }
+  | { fel: 'handleReluare'; handle: string }
+  | { fel: 'preavizInchidere'; msRamase?: number }
 > {
   const ev: ReturnType<typeof interpreteazaCadru> = []
   if (m.setupComplete !== undefined) ev.push({ fel: 'gata' })
+
+  // Handle-ul de reluare: Google îl împinge periodic; îl ținem pe cel mai nou
+  // ca redeschiderea să continue ACEEAȘI conversație, nu una de la zero.
+  const sru = m.sessionResumptionUpdate as { resumable?: boolean; newHandle?: string } | undefined
+  if (sru?.resumable && sru.newHandle) ev.push({ fel: 'handleReluare', handle: sru.newHandle })
+
+  // Preavizul de închidere: Google spune CÂND taie. Redeschidem ÎNAINTE.
+  const ga = m.goAway as { timeLeft?: string } | undefined
+  if (ga !== undefined) {
+    const ms = ga?.timeLeft ? Math.max(0, Math.round(parseFloat(ga.timeLeft) * 1000)) : undefined
+    ev.push({ fel: 'preavizInchidere', msRamase: ms })
+  }
 
   const sc = m.serverContent as
     | {
@@ -188,70 +211,110 @@ export function deschideVocalLive(
   ev: VocalLiveEvenimente,
 ): VocalLive | null {
   if (!config.geminiKey) return null
-  const ws = new WebSocket(`${WS_URL}?key=${config.geminiKey}`)
+
+  // ── SESIUNEA CARE SUPRAVIEȚUIEȘTE LIMITEI (8 aug: „a funcționat 5 minute
+  // impecabil, după care a amuțit") ─────────────────────────────────────────
+  // Google închide sesiunile Live la limită de durată. Înainte, închiderea aia
+  // urca drept EROARE, browserul relua de la zero de 3 ori și cădea pe calea
+  // veche. Acum reconectarea e AICI, în motor: ținem handle-ul de reluare pe
+  // care Google îl împinge periodic, iar la preaviz (goAway) sau la închidere
+  // redeschidem cu ACELAȘI handle — conversația continuă de unde era, browserul
+  // nu află nimic. Doar când și reluarea pică de 3 ori la rând urcă eroarea.
+  let ws: WebSocket | null = null
   let gata = false
   let inchisa = false
-  const coada: Buffer[] = [] // audio sosit înainte de setupComplete
+  let handleReluare: string | undefined
+  let reconectari = 0
+  const coada: Buffer[] = [] // audio strâns cât sesiunea nu e gata (și în reconectări)
 
   const trimiteAudio = (pcm: Buffer): void => {
     try {
-      ws.send(JSON.stringify({ realtimeInput: { audio: { data: pcm.toString('base64'), mimeType: 'audio/pcm;rate=16000' } } }))
+      ws?.send(JSON.stringify({ realtimeInput: { audio: { data: pcm.toString('base64'), mimeType: 'audio/pcm;rate=16000' } } }))
     } catch {
       /* eroarea reală vine pe canalul 'error' */
     }
   }
 
-  ws.on('open', () => {
-    try {
-      ws.send(JSON.stringify(construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelte)))
-    } catch (e) {
-      ev.onEroare(`setup: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
-    }
-  })
-
-  ws.on('message', (data: Buffer) => {
-    let m: Record<string, unknown>
-    try {
-      m = JSON.parse(data.toString('utf8'))
-    } catch {
-      return
-    }
-    for (const e of interpreteazaCadru(m)) {
-      switch (e.fel) {
-        case 'gata':
-          gata = true
-          for (const b of coada.splice(0)) trimiteAudio(b)
-          ev.onGata?.()
-          break
-        case 'audio':
-          ev.onAudioIesire(e.data)
-          break
-        case 'user':
-          ev.onTranscriereUser(e.text, e.final)
-          break
-        case 'kelion':
-          ev.onTranscriereKelion(e.text, e.final)
-          break
-        case 'unealta':
-          ev.onUnealta({ id: e.id, name: e.name, args: e.args })
-          break
-        case 'intrerupt':
-          ev.onIntrerupt?.()
-          break
-        case 'turaGata':
-          ev.onTuraGata?.()
-          break
-      }
-    }
-  })
-
-  ws.on('error', (e: Error) => {
-    if (!inchisa) ev.onEroare(`vocal_ws: ${String(e?.message ?? e).slice(0, 200)}`)
-  })
-  ws.on('close', (cod: number, motiv: Buffer) => {
+  const conecteaza = (): void => {
     if (inchisa) return
-    ev.onEroare(`vocal_inchis: cod ${cod} ${motiv.toString('utf8').slice(0, 160)}`)
-  })
+    gata = false
+    const socket = new WebSocket(`${WS_URL}?key=${config.geminiKey}`)
+    ws = socket
+
+    socket.on('open', () => {
+      try {
+        socket.send(JSON.stringify(construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelte, handleReluare)))
+      } catch (e) {
+        ev.onEroare(`setup: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
+      }
+    })
+
+    socket.on('message', (data: Buffer) => {
+      let m: Record<string, unknown>
+      try {
+        m = JSON.parse(data.toString('utf8'))
+      } catch {
+        return
+      }
+      for (const e of interpreteazaCadru(m)) {
+        switch (e.fel) {
+          case 'gata':
+            gata = true
+            reconectari = 0 // sesiune vie → contorul intern se șterge
+            for (const b of coada.splice(0)) trimiteAudio(b)
+            ev.onGata?.()
+            break
+          case 'handleReluare':
+            handleReluare = e.handle
+            break
+          case 'preavizInchidere':
+            // Google taie curând. Nu așteptăm tăierea: închidem noi și
+            // redeschidem cu handle-ul — drumul de reconectare e unul singur,
+            // prin handlerul de 'close'.
+            try {
+              socket.close()
+            } catch {
+              /* deja închis */
+            }
+            break
+          case 'audio':
+            ev.onAudioIesire(e.data)
+            break
+          case 'user':
+            ev.onTranscriereUser(e.text, e.final)
+            break
+          case 'kelion':
+            ev.onTranscriereKelion(e.text, e.final)
+            break
+          case 'unealta':
+            ev.onUnealta({ id: e.id, name: e.name, args: e.args })
+            break
+          case 'intrerupt':
+            ev.onIntrerupt?.()
+            break
+          case 'turaGata':
+            ev.onTuraGata?.()
+            break
+        }
+      }
+    })
+
+    socket.on('error', (e: Error) => {
+      if (!inchisa && reconectari >= 3) ev.onEroare(`vocal_ws: ${String(e?.message ?? e).slice(0, 200)}`)
+    })
+    socket.on('close', (cod: number, motiv: Buffer) => {
+      if (inchisa || ws !== socket) return
+      if (reconectari < 3) {
+        reconectari++
+        setTimeout(conecteaza, 300 * reconectari)
+        return
+      }
+      // Trei reluări interne picate la rând — abia ASTA e o eroare adevărată.
+      ev.onEroare(`vocal_inchis: cod ${cod} ${motiv.toString('utf8').slice(0, 160)} (după ${reconectari} reluări interne)`)
+    })
+  }
+
+  conecteaza()
 
   return {
     scrieAudio(pcm: Buffer): void {
@@ -266,7 +329,7 @@ export function deschideVocalLive(
     raspundeUnealta(id: string, name: string, rezultat: unknown): void {
       if (inchisa) return
       try {
-        ws.send(JSON.stringify({ toolResponse: { functionResponses: [{ id, name, response: { result: rezultat } }] } }))
+        ws?.send(JSON.stringify({ toolResponse: { functionResponses: [{ id, name, response: { result: rezultat } }] } }))
       } catch {
         /* eroarea reală vine pe canalul 'error' */
       }
@@ -274,7 +337,7 @@ export function deschideVocalLive(
     inchide(): void {
       inchisa = true
       try {
-        ws.close()
+        ws?.close()
       } catch {
         /* deja închis */
       }
