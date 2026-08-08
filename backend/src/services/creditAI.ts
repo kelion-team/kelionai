@@ -1,7 +1,8 @@
 import { config } from '../config.js'
-import { cheltuialaLunaPeKinduri, loadKv } from '../db.js'
+import { cheltuialaDeLaPeKinduri, cheltuialaLunaPeKinduri, loadKv } from '../db.js'
 import { getSerperBalance } from './serperBalance.js'
 import { geminiLive } from './geminiDirect.js'
+import { cursUsdGbp } from './fx.js'
 import type { Masuratoare } from './masurare.js'
 
 // ── CÂT CREDIT A MAI RĂMAS, PE FIECARE AI (Adrian, 8 aug 2026) ──────────────
@@ -72,6 +73,40 @@ async function cheltuiala(kinds: string[]): Promise<Masuratoare<{ usd: number }>
   return reusit(cum, { usd: r.usd }, Date.now() - t0)
 }
 
+/** Toate felurile de cost care se plătesc la Google prin cheia Gemini. Lista e
+ *  scrisă O DATĂ și exportată, ca pastila din bară și raportul pe furnizori să
+ *  scadă EXACT aceleași rânduri — două liste ar fi divergat în tăcere. */
+export const FELURI_GEMINI = ['gemini', 'chat', 'memory', 'memory_est', 'image', 'image_est', 'video']
+
+/** ── CE-A MAI RĂMAS DIN CREDITUL DECLARAT (Adrian, 8 aug: „asta trebuie să
+ *  scadă real cum e afișat la ei pe site") ───────────────────────────────────
+ *
+ *  Creditul declarat e soldul din MOMENTUL declarării, deci din el se scade
+ *  DOAR cheltuiala de DUPĂ acel moment — nu luna întreagă (prima variantă
+ *  scădea luna, adică și banii arși înainte de declarare: pastila ar fi mințit
+ *  în jos). Iar cheltuiala e în USD și creditul în GBP: conversia se face pe
+ *  cursul CITIT de la BCE (fx.ts), nu scăzând USD din GBP ca și cum ar fi
+ *  aceeași monedă (a doua greșeală a primei variante). Orice verigă picată →
+ *  `ok:false` cu motiv, niciodată o cifră cârpită. */
+export async function ramasDinDeclarat(declarat: {
+  gbp: number
+  at?: string
+}): Promise<{ ok: true; ramasGbp: number; scazutUsd: number; curs: number } | { ok: false; motiv: string }> {
+  if (!declarat.at) return { ok: false, motiv: 'creditul declarat nu are dată — nu știu de când să scad' }
+  const [scazut, curs] = await Promise.all([
+    cheltuialaDeLaPeKinduri(declarat.at, FELURI_GEMINI),
+    cursUsdGbp(),
+  ])
+  if (!scazut.ok) return { ok: false, motiv: 'jurnalul de costuri nu se poate citi (baza de date)' }
+  if (!curs.ok) return { ok: false, motiv: `cursul USD→GBP nu s-a putut citi (${curs.motiv})` }
+  return {
+    ok: true,
+    ramasGbp: Math.max(0, Number((declarat.gbp - scazut.usd * curs.rate).toFixed(2))),
+    scazutUsd: Number(scazut.usd.toFixed(2)),
+    curs: curs.rate,
+  }
+}
+
 /** Creditul pe care l-a declarat ownerul pentru Gemini (kv `gemini:credit`). */
 async function creditDeclaratGemini(): Promise<{ gbp: number; at?: string } | null> {
   try {
@@ -88,16 +123,16 @@ async function creditDeclaratGemini(): Promise<{ gbp: number; at?: string } | nu
 async function randGemini(): Promise<CreditAI> {
   const cheieConfigurata = Boolean(config.geminiKey)
   const [cheltuitLuna, declarat, live] = await Promise.all([
-    // Toate felurile care se plătesc la Google prin cheia Gemini. Le enumăr aici
-    // ca să se poată AUDITA suma — nu „costul AI", ci exact rândurile astea.
-    cheltuiala(['gemini', 'chat', 'memory', 'memory_est', 'image', 'image_est', 'video']),
+    // Lista auditabilă a felurilor e FELURI_GEMINI (exportată, folosită și de
+    // pastila din bară — aceeași sumă peste tot, nu două liste divergente).
+    cheltuiala(FELURI_GEMINI),
     creditDeclaratGemini(),
     geminiLive().catch(() => null),
   ])
 
   const cumRamas =
     'Google nu expune sold prin API (nici Gemini API, nici Cloud Billing): ' +
-    'cifra e creditul spus de tine minus cheltuiala măsurată a lunii'
+    'cifra e creditul spus de tine minus cheltuiala măsurată de la declarare, pe cursul BCE'
 
   let ramas: Masuratoare<{ cantitate: number; unitate: string }>
   if (!declarat) {
@@ -105,14 +140,19 @@ async function randGemini(): Promise<CreditAI> {
       cumRamas,
       'nu mi-ai spus niciun credit (Admin → „Credit Gemini"), iar Google nu-l dă automat — nu inventez o cifră',
     )
-  } else if (!cheltuitLuna.masurat) {
-    ramas = picat(cumRamas, `am creditul spus de tine (£${declarat.gbp}), dar ${cheltuitLuna.motiv}`)
   } else {
-    ramas = reusit(
-      `${cumRamas} — spus de tine: £${declarat.gbp}${declarat.at ? ` la ${declarat.at.slice(0, 10)}` : ''}; cheltuit luna asta: $${cheltuitLuna.valoare.usd.toFixed(2)}`,
-      { cantitate: Number((declarat.gbp - cheltuitLuna.valoare.usd).toFixed(2)), unitate: 'GBP (aproximativ, cheltuiala e în USD)' },
-      0,
-    )
+    const t0 = Date.now()
+    const r = await ramasDinDeclarat(declarat)
+    if (!r.ok) {
+      ramas = picat(cumRamas, `am creditul spus de tine (£${declarat.gbp}), dar ${r.motiv}`, Date.now() - t0)
+    } else {
+      ramas = reusit(
+        `${cumRamas} — spus de tine: £${declarat.gbp}${declarat.at ? ` la ${declarat.at.slice(0, 10)}` : ''}; ` +
+          `cheltuit de atunci: $${r.scazutUsd.toFixed(2)} × curs ${r.curs.toFixed(4)}`,
+        { cantitate: r.ramasGbp, unitate: 'GBP' },
+        Date.now() - t0,
+      )
+    }
   }
 
   const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = !live

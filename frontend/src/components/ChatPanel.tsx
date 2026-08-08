@@ -325,10 +325,10 @@ export default function ChatPanel({
   // The LIVE voice session (if any) — used by the location tools to
   // refresh its position exactly when needed (updateCoords, on demand).
   const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
-  // VOCEA LIVE FULL-DUPLEX (7 aug) — CALE EXCLUSIVĂ, PE OPȚIUNE. Nu înlocuiește
-  // tăcut calea care merge azi: se aprinde doar cu `localStorage.kelion_voce_live
-  // = '1'`, ca ownerul s-o poată ASCULTA înainte s-o facem implicită. Ruta
-  // avertizează „vei avea 2 voci în același timp" — de-aia e SAU una, SAU alta.
+  // VOCEA LIVE FULL-DUPLEX (7 aug) — din 8 aug seara e calea IMPLICITĂ (ownerul:
+  // „asta nu e chat live, e semiduplex... pui [modelul live] în locul acestuia").
+  // `localStorage.kelion_voce_live = '0'` repune calea clasică, fără deploy.
+  // Rămâne SAU una, SAU alta — două voci în același timp = numărat dublu (#894).
   const vlRef = useRef<VocalLiveHandle | null>(null)
   // Contorul de minute al sesiunii live + steagul „live a căzut de tot în tabul
   // ăsta" (după 3 reluări picate se coboară pe calea veche și nu se mai insistă
@@ -1445,12 +1445,18 @@ export default function ChatPanel({
       // mid-sesiune NU înseamnă „vocea a murit", ci „redeschide". Se reia
       // singură de câteva ori; abia dacă și reluarea pică se coboară pe calea
       // veche, cu motivul scris.
-      // CALEA CLASICĂ E IMPLICITĂ (8 aug, ownerul, după ziua vocii live: „vezi
-      // ce făcea [în iulie] și trebuie să facă la fel, dar cu Gemini"). Lanțul
-      // ureche→creier→gură de mai jos E fix comportamentul din iulie, cu
-      // creierul mutat pe Gemini încă din 3 aug. Vocea live rămâne DOAR la
-      // cerere: localStorage.kelion_voce_live = '1' — nu mai e implicită.
-      if (localStorage.getItem('kelion_voce_live') === '1' && !vlRef.current && !vlCazutRef.current) {
+      // LIVE E DIN NOU IMPLICITĂ (8 aug seara, ownerul, pe calea clasică:
+      // „asta nu e chat live, e semiduplex — modelul anterior rapid avea chat
+      // live; ți-am dat solicitarea să-l pui în locul acestuia, dar
+      // funcționalitățile să le păstrezi"). Are dreptate pe fapt: lanțul
+      // ureche→creier→gură de mai jos e semiduplex prin construcție (ascultă,
+      // împachetează, așteaptă răspunsul), pe când sesiunea Live aude continuu.
+      // Funcționalitățile SUNT păstrate pe live: inventarul complet de unelte
+      // (#893), reluarea după cădere (#892), regula limbii (#890), AEC (#889).
+      // Ieșirea de siguranță s-a întors la forma din 8 aug dimineața:
+      // localStorage.kelion_voce_live = '0' repune calea clasică, fără deploy —
+      // iar la căderi repetate coborârea pe clasic + sonda de întoarcere rămân.
+      if (localStorage.getItem('kelion_voce_live') !== '0' && !vlRef.current && !vlCazutRef.current) {
         const cap = await vocalLiveDisponibila()
         if (cap?.disponibil) {
           let reluari = 0

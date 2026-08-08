@@ -1983,6 +1983,36 @@ export async function cheltuialaLunaPeKinduri(kinds: string[]): Promise<{ ok: bo
   }
 }
 
+/** ── CHELTUIALA DE LA UN MOMENT DAT (Adrian, 8 aug: „asta trebuie să scadă
+ *  real cum e afișat la ei pe site") ──────────────────────────────────────────
+ *
+ *  Creditul declarat de owner e soldul DIN MOMENTUL declarării. Ca pastila să
+ *  scadă corect, din el se scade DOAR ce s-a cheltuit DUPĂ acel moment — nu
+ *  luna întreagă (luna ar include și banii arși ÎNAINTE de declarare, iar
+ *  pastila ar minți în jos). Aceeași semantică a felurilor ca la sora ei de
+ *  mai sus: exact = exact, `*` la coadă = prefix. */
+export async function cheltuialaDeLaPeKinduri(
+  deLaIso: string,
+  kinds: string[],
+): Promise<{ ok: boolean; usd: number }> {
+  if (!dbEnabled() || kinds.length === 0) return { ok: false, usd: 0 }
+  if (!Number.isFinite(Date.parse(deLaIso))) return { ok: false, usd: 0 }
+  const exacte = kinds.filter((k) => !k.endsWith('*'))
+  const prefixe = kinds.filter((k) => k.endsWith('*')).map((k) => `${k.slice(0, -1)}%`)
+  try {
+    const r = await getPool().query<{ s: string | null }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS s
+         FROM cost_events
+        WHERE created_at >= $3::timestamptz
+          AND (kind = ANY($1::text[]) OR kind LIKE ANY($2::text[]))`,
+      [exacte, prefixe, deLaIso],
+    )
+    return { ok: true, usd: Number(r.rows[0]?.s ?? 0) }
+  } catch {
+    return { ok: false, usd: 0 }
+  }
+}
+
 export async function getGeminiMonthUsd(): Promise<{ ok: boolean; monthUsd: number }> {
   const r = await cheltuialaLunaPeKinduri(['gemini'])
   return { ok: r.ok, monthUsd: r.usd }

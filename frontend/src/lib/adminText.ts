@@ -72,6 +72,10 @@ export interface AdminStrings {
    *  2 aug; clickul deschide promptul, NU direct pagina Google. */
   gemCreditPrompt: string
   gemCreditTitle: string
+  /** Varianta cu SCĂDEREA măsurată (8 aug: „asta trebuie să scadă real"):
+   *  declarat − cheltuiala de la declarare, pe cursul BCE. Se folosește DOAR
+   *  când serverul chiar a putut calcula (creditRamasGbp prezent). */
+  gemCreditLeftTitle: string
   gemCreditSaveFailed: string
   gemCreditInvalid: string
   /** Pastila unică 🔒 când lacătul admin (423) blochează măsurătorile. */
@@ -233,12 +237,13 @@ const en: AdminStrings = {
   // promptul de tastat creditul; pagina Google se deschide doar pe câmp gol —
   // vechiul „Click to see the real balance on Google’s billing page" descria
   // comportamentul dispărut. {spend} = gemSpendMeasured SAU gemSpendUnreadable.
-  gemPillLive: 'Gemini Tier 2 is live — the key is serving, so you have credit and it works. {spend}. Click: type the credit you see in AI Studio so the pill shows it; leave empty to open Google’s billing page; „-” clears the figure.',
-  gemPillDead: 'Gemini is not serving right now ({why}) — if the prepay credit ran out, top it up. Click: type the credit you see in AI Studio; leave empty to open Google’s billing page. (The exact credit is only on Google’s page — no API exposes it.)',
+  gemPillLive: 'Gemini Tier 2 is live — the key is serving, so you have credit and it works. {spend}. Click opens Google’s top-up page; the pencil next to the pill sets the credit you see in AI Studio.',
+  gemPillDead: 'Gemini is not serving right now ({why}) — if the prepay credit ran out, top it up. Click opens Google’s top-up page; the pencil sets the credit you see in AI Studio. (The exact credit is only on Google’s page — no API exposes it.)',
   gemSpendMeasured: '${n} spent this month (measured)',
   gemSpendUnreadable: 'the month’s spend is unreadable right now (the journal read failed) — not $0',
   gemCreditPrompt: 'The Gemini credit you see in AI Studio (£).\nGoogle does not expose it via any API, so it is shown as stated by you, with the date.\n\nType the amount (e.g. 10.88) · empty = open Google’s page · „-” = clear the figure.',
-  gemCreditTitle: 'Gemini credit: £{gbp} — stated by you{date} (Google does not expose it via API). {spend}. Click to update it.',
+  gemCreditTitle: 'Gemini credit: £{gbp} — stated by you{date} (Google does not expose it via API). {spend}. Click opens the top-up page; the pencil updates the figure.',
+  gemCreditLeftTitle: 'Gemini credit left: £{ramas} — your stated £{gbp}{date} minus ${usd} measured spend since then, at the ECB USD→GBP rate. The exact figure is on Google’s page. {spend}. Click opens the top-up page; the pencil updates the stated figure.',
   gemCreditSaveFailed: 'The credit was NOT saved — the server refused. Try again.',
   gemCreditInvalid: 'Not a valid amount — type e.g. 10.88 (negatives are not a credit; use „-” to clear).',
   pillsLocked: '🔒 measurements locked — unlock the admin (the lock blocks /api/admin/*). Click to enter the code.',
@@ -386,12 +391,13 @@ const ro: AdminStrings = {
   // cu furnizorii; starea creierului trăiește pe pastila Gemini.)
   serperPillLive: 'Serper (căutarea web): {n} credite reale · click pentru dashboard',
   serperPillDead: 'Nu pot citi creditul Serper (SERPER_API_KEY lipsește sau citirea a picat)',
-  gemPillLive: 'Gemini Tier 2 activ — cheia servește, deci ai credit și merge. {spend}. Click: scrii creditul din AI Studio ca să apară pe pastilă; gol = pagina de facturare Google; „-” șterge cifra.',
-  gemPillDead: 'Gemini nu servește acum ({why}) — dacă s-a epuizat creditul prepay, reîncarcă-l. Click: scrii creditul din AI Studio; gol = pagina de facturare Google. (Creditul exact e doar pe pagina Google — niciun API nu-l expune.)',
+  gemPillLive: 'Gemini Tier 2 activ — cheia servește, deci ai credit și merge. {spend}. Click: pagina de alimentare Google; creionul de lângă pastilă scrie creditul din AI Studio.',
+  gemPillDead: 'Gemini nu servește acum ({why}) — dacă s-a epuizat creditul prepay, reîncarcă-l. Click: pagina de alimentare Google; creionul scrie creditul din AI Studio. (Creditul exact e doar pe pagina Google — niciun API nu-l expune.)',
   gemSpendMeasured: '${n} cheltuiți luna asta (măsurat)',
   gemSpendUnreadable: 'cheltuiala lunii e necitibilă acum (citirea jurnalului a picat) — nu $0',
   gemCreditPrompt: 'Creditul Gemini pe care îl vezi în AI Studio (£).\nGoogle nu-l expune prin API, așa că-l arăt ca fiind spus de tine, cu data.\n\nScrie suma (ex: 10.88) · gol = deschide pagina Google · „-” = șterge cifra.',
-  gemCreditTitle: 'Credit Gemini: £{gbp} — spus de tine{date} (Google nu-l dă prin API). {spend}. Click ca să-l actualizezi.',
+  gemCreditTitle: 'Credit Gemini: £{gbp} — spus de tine{date} (Google nu-l dă prin API). {spend}. Click: pagina de alimentare; creionul actualizează cifra.',
+  gemCreditLeftTitle: 'Credit Gemini rămas: £{ramas} — cifra ta £{gbp}{date} minus ${usd} cheltuiți măsurat de atunci, pe cursul BCE USD→GBP. Cifra exactă e pe pagina Google. {spend}. Click: pagina de alimentare; creionul actualizează cifra declarată.',
   gemCreditSaveFailed: 'Creditul NU s-a salvat — serverul a refuzat. Reîncearcă.',
   gemCreditInvalid: 'Suma nu e validă — scrie de ex. 10.88 (negativul nu e credit; „-” șterge cifra).',
   pillsLocked: '🔒 măsurători blocate — deblochează adminul (lacătul blochează /api/admin/*). Click pentru cod.',

@@ -22,12 +22,26 @@ async function ensureApi(): Promise<FaceApi | null> {
   loading = true
   try {
     const mod = (await import('@vladmandic/face-api')) as FaceApi
+    // Pe CPU o singură inferență ține firul principal zeci de ms (măsurat în
+    // Performance, 8 aug: 55–77 ms per task). WebGL mută greul pe GPU; dacă
+    // browserul nu-l poate da, rămânem pe ce alege el singur (fail-open), dar
+    // spunem în consolă pe ce backend chiar rulăm — nu presupunem.
+    try {
+      if (mod.tf.getBackend() !== 'webgl') {
+        await mod.tf.setBackend('webgl')
+        await mod.tf.ready()
+      }
+    } catch {
+      /* backendul rămâne cel implicit */
+    }
     // The models are served from /models (copied from the package at build).
     await mod.nets.tinyFaceDetector.loadFromUri('/models')
     await mod.nets.faceLandmark68Net.loadFromUri('/models')
     await mod.nets.faceRecognitionNet.loadFromUri('/models')
     api = mod
     modelsReady = true
+    // eslint-disable-next-line no-console
+    console.info(`[fața] backend inferență: ${mod.tf.getBackend()}`)
     return mod
   } catch {
     // Without face recognition — chat works exactly as before (fail-open).
@@ -52,23 +66,53 @@ export function startFaceSampling(
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
 
+  // ── PÂNZĂ MICĂ DE INFERENȚĂ (măsurat 8 aug, Performance în consola ownerului) ──
+  // Vechiul drum dădea rețelelor elementul <video> întreg (ex. 1280×720): fiecare
+  // din cele 3 rețele urcă intrarea ca textură pe GPU, deci plăteam uploadul
+  // cadrului mare de 3 ori pe eșantion — task-uri de 55–77 ms pe firul principal.
+  // Acum cadrul se desenează o dată (drawImage ieftin) pe o pânză refolosită de
+  // max 320px — analiza a cerut chiar „160x120 or 320x240" — și rețelele văd doar
+  // pânza mică (~6% din pixeli). Detectorul coboară și el la inputSize 160
+  // (redimensionează intern oricum; 160 e o treaptă validă a tiny_face_detector).
+  const INTRARE_MAX = 320
+  const panzaInferenta = document.createElement('canvas')
+
   void (async () => {
     const face = await ensureApi()
     if (!face || stopped) return
-    const opts = new face.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+    const opts = new face.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 })
+    let primaMasurata = false
     const tick = async (): Promise<void> => {
       if (stopped) return
       try {
         if (video.videoWidth > 0 && video.readyState >= 2) {
-          const det = await face
-            .detectSingleFace(video, opts)
-            .withFaceLandmarks()
-            .withFaceDescriptor()
-          if (det?.descriptor && det.descriptor.length >= 64) {
-            latest = {
-              descriptor: Array.from(det.descriptor as Float32Array),
-              photo: capture() || '',
-              at: Date.now(),
+          const scara = Math.min(1, INTRARE_MAX / Math.max(video.videoWidth, video.videoHeight))
+          const w = Math.max(2, Math.round(video.videoWidth * scara))
+          const h = Math.max(2, Math.round(video.videoHeight * scara))
+          if (panzaInferenta.width !== w) panzaInferenta.width = w
+          if (panzaInferenta.height !== h) panzaInferenta.height = h
+          const pctx = panzaInferenta.getContext('2d')
+          if (pctx) {
+            pctx.drawImage(video, 0, 0, w, h)
+            const t0 = performance.now()
+            const det = await face
+              .detectSingleFace(panzaInferenta, opts)
+              .withFaceLandmarks()
+              .withFaceDescriptor()
+            if (!primaMasurata) {
+              primaMasurata = true
+              // O singură cifră, o singură dată — dovada că reparația a lucrat,
+              // fără să înece consola. (Durata totală, nu blocajul de fir —
+              // blocajul se vede în Performance, ca la măsurarea inițială.)
+              // eslint-disable-next-line no-console
+              console.info(`[fața] prima inferență: ${Math.round(performance.now() - t0)} ms (intrare ${w}×${h}, detector 160)`)
+            }
+            if (det?.descriptor && det.descriptor.length >= 64) {
+              latest = {
+                descriptor: Array.from(det.descriptor as Float32Array),
+                photo: capture() || '',
+                at: Date.now(),
+              }
             }
           }
         }

@@ -420,6 +420,14 @@ interface BrainCredit {
        *  nu o măsurătoare. Absent → pastila arată „Gemini ✓/⚠". */
       creditGbp?: number
       creditAt?: string
+      /** CE-A MAI RĂMAS (8 aug: „asta trebuie să scadă real"): declarat minus
+       *  cheltuiala măsurată DE LA declarare, pe cursul BCE. Absent = serverul
+       *  n-a putut calcula (motivul în `scadereMotiv`) — pastila cade atunci pe
+       *  `creditGbp`, cifra declarată, nu pe un calcul cârpit. */
+      creditRamasGbp?: number
+      /** Cât s-a scăzut (USD măsurat de la declarare) — pentru tooltip/audit. */
+      scazutUsd?: number
+      scadereMotiv?: string
     }
     /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
      *  in the top bar"). `null` = they couldn't be measured — the bar writes "⚠ VPS",
@@ -1253,7 +1261,19 @@ export default function Stage({ user }: { user: User }) {
                         if (!j?.ok) { setCreditErr(adminStrings().gemCreditSaveFailed); setCreditEdit(true); return }
                         setBrainCredit((prev) =>
                           prev && prev.gemini
-                            ? { ...prev, gemini: { ...prev.gemini, creditGbp: j.cleared ? undefined : j.gbp, creditAt: j.cleared ? undefined : j.at } }
+                            ? {
+                                ...prev,
+                                gemini: {
+                                  ...prev.gemini,
+                                  creditGbp: j.cleared ? undefined : j.gbp,
+                                  creditAt: j.cleared ? undefined : j.at,
+                                  // Scăderea veche NU mai e valabilă pentru cifra nouă —
+                                  // se șterge; următorul poll o recalculează pe server.
+                                  creditRamasGbp: undefined,
+                                  scazutUsd: undefined,
+                                  scadereMotiv: undefined,
+                                },
+                              }
                             : prev,
                         )
                       })
@@ -1281,16 +1301,26 @@ export default function Stage({ user }: { user: User }) {
                     brainCredit.gemini?.monthUsd != null
                       ? adminStrings().gemSpendMeasured.replace('{n}', brainCredit.gemini.monthUsd.toFixed(2))
                       : adminStrings().gemSpendUnreadable
-                  if (brainCredit.gemini?.creditGbp != null) {
-                    return adminStrings()
-                      .gemCreditTitle.replace('{gbp}', brainCredit.gemini.creditGbp.toFixed(2))
-                      .replace(
-                        '{date}',
-                        brainCredit.gemini.creditAt
-                          ? ' · ' + new Date(brainCredit.gemini.creditAt).toLocaleDateString('ro-RO')
-                          : '',
-                      )
-                      .replace('{spend}', spend)
+                  const gem = brainCredit.gemini
+                  if (gem?.creditGbp != null) {
+                    const data = gem.creditAt ? ' · ' + new Date(gem.creditAt).toLocaleDateString('ro-RO') : ''
+                    // Varianta care SCADE: doar când serverul chiar a calculat
+                    // (rămas + cât s-a scăzut vin împreună). Altfel, cifra
+                    // declarată ca atare + de ce nu s-a putut scădea.
+                    if (gem.creditRamasGbp != null && gem.scazutUsd != null) {
+                      return adminStrings()
+                        .gemCreditLeftTitle.replace('{ramas}', gem.creditRamasGbp.toFixed(2))
+                        .replace('{gbp}', gem.creditGbp.toFixed(2))
+                        .replace('{date}', data)
+                        .replace('{usd}', gem.scazutUsd.toFixed(2))
+                        .replace('{spend}', spend)
+                    }
+                    return (
+                      adminStrings()
+                        .gemCreditTitle.replace('{gbp}', gem.creditGbp.toFixed(2))
+                        .replace('{date}', data)
+                        .replace('{spend}', spend) + (gem.scadereMotiv ? ` (${gem.scadereMotiv})` : '')
+                    )
                   }
                   return brainCredit.gemini?.serving
                     ? adminStrings().gemPillLive.replace('{spend}', spend)
@@ -1301,9 +1331,12 @@ export default function Stage({ user }: { user: User }) {
                     cifra £ spusă de owner o arătăm DOAR când proba live zice că mai e
                     credit (serving). Când Google spune „prepayment credits depleted",
                     contul e GOL — arătăm £0 MĂSURAT, nu £11.58 stătut lângă un ⚠ (fix
-                    „valoare veche prezentată ca stare reală", regula #1). */}
+                    „valoare veche prezentată ca stare reală", regula #1).
+                    Din 8 aug pastila SCADE („asta trebuie să scadă real"): întâi
+                    `creditRamasGbp` (declarat − cheltuiala măsurată de la declarare,
+                    pe cursul BCE); dacă serverul n-a putut calcula, cifra declarată. */}
                 {brainCredit.gemini?.serving && brainCredit.gemini?.creditGbp != null
-                  ? `Gemini £${brainCredit.gemini.creditGbp.toFixed(2)}`
+                  ? `Gemini £${(brainCredit.gemini.creditRamasGbp ?? brainCredit.gemini.creditGbp).toFixed(2)}`
                   : brainCredit.gemini?.serving
                     ? 'Gemini ✓'
                     : brainCredit.gemini?.reason === 'depleted'

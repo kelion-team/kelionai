@@ -393,6 +393,25 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     } catch {
       /* kv stricat → „nu știu", niciodată un zero fals */
     }
+    // ── PASTILA SCADE (Adrian, 8 aug: „asta trebuie să scadă real cum e afișat
+    // la ei pe site") ────────────────────────────────────────────────────────
+    // Din creditul declarat se scade cheltuiala măsurată de DUPĂ declarare, pe
+    // cursul USD→GBP citit de la BCE (services/fx.ts). Orice verigă picată →
+    // câmpul lipsește și pastila cade pe cifra declarată, cu motivul alături —
+    // nu pe un calcul cârpit.
+    let geminiCreditRamasGbp: number | undefined
+    let geminiScazutUsd: number | undefined
+    let geminiScadereMotiv: string | undefined
+    if (geminiCreditGbp !== undefined) {
+      const { ramasDinDeclarat } = await import('../services/creditAI.js')
+      const r = await ramasDinDeclarat({ gbp: geminiCreditGbp, at: geminiCreditAt })
+      if (r.ok) {
+        geminiCreditRamasGbp = r.ramasGbp
+        geminiScazutUsd = r.scazutUsd
+      } else {
+        geminiScadereMotiv = r.motiv
+      }
+    }
     return reply.send({
       // (Câmpurile `openrouter` și `openai` au fost SCOASE din răspuns, 3 aug —
       // furnizorii au fost extirpați; pastilele lor au dispărut din bară.)
@@ -433,6 +452,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         // Creditul spus de owner (GBP) + când. Afișat ca ATARE pe pastilă.
         creditGbp: geminiCreditGbp,
         creditAt: geminiCreditAt,
+        // Ce-a mai rămas din el: declarat − cheltuiala măsurată DE LA declarare,
+        // pe cursul BCE. Lipsește când o verigă a picat (motivul în
+        // `scadereMotiv`) — pastila cade atunci pe `creditGbp`, nu pe o cifră
+        // cârpită. `scazutUsd` = cât s-a scăzut, pentru tooltip/audit.
+        creditRamasGbp: geminiCreditRamasGbp,
+        scazutUsd: geminiScazutUsd,
+        scadereMotiv: geminiScadereMotiv,
       },
       // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
       // desena, tipul din frontend mințea (loaded/remaining nu mai existau),
