@@ -530,6 +530,13 @@ export default function ChatPanel({
       openWorkspaceCard(c.card.title, c.card)
       return
     }
+    if (c.golesteMonitor) {
+      // Mâna care șterge (8 aug): închide și workspace-ul (pagini/aplicații),
+      // și imaginea generată — până acum doar X-ul omului putea.
+      closeWorkspace()
+      setChatImage(null)
+      return
+    }
     if (!c.monitor) return
     if (c.monitor.url) openWorkspace(c.monitor.title || t.monitorTitle, c.monitor.url)
     else closeWorkspace()
