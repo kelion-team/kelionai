@@ -378,14 +378,33 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // stătut nu strică: setup-ul cu el pică înainte de `gata`, iar degradarea
       // măsurată din motor reia curat, fără el.
       const KV_RELUARE = `vocal-live:reluare:${user.email.toLowerCase()}`
+      // ── GENERAȚIA SESIUNII (8 aug, ownerul, după ușă: „calea către unelte e
+      // ruptă — nu gps, nu hărți, nu youtube") ───────────────────────────────
+      // MĂSURAT în jurnal: toate sesiunile de după publicarea ușii au fost
+      // RELUATE cu handle persistat — iar reluarea resuscitează sesiunea VECHE
+      // de la Google, cu uneltele și instrucțiunea din ziua nașterii ei. Ușa
+      // exista în setup-ul nou, dar sesiunea reluată n-o vedea: „zice că are
+      // alte unelte" — chiar le avea pe cele vechi. De-aia mânerul poartă acum
+      // AMPRENTA capabilităților (numele uneltelor + persona): când inventarul
+      // sau regulile se schimbă, mânerul din altă generație se ARUNCĂ și
+      // sesiunea pornește proaspăt — cu memoria din istoric (instrucțiunea o
+      // cară oricum), dar cu uneltele de AZI. O repornire de publicare fără
+      // schimbare de unelte reia în continuare conversația, ca până acum.
+      const genUnelte = `${unelteleSesiuniiLive(user.role)
+        .map((u) => u.name)
+        .join(',')}|${PERSONA_KELION.length}`
       let reluareInitial: string | undefined
       try {
         const brut = await loadKv(KV_RELUARE)
         if (brut) {
-          const j = JSON.parse(brut) as { h?: string; t?: number }
+          const j = JSON.parse(brut) as { h?: string; t?: number; gen?: string }
           if (j.h && typeof j.t === 'number' && Date.now() - j.t < 10 * 60_000) {
-            reluareInitial = j.h
-            app.log.info('vocal-live: reiau sesiunea Google cu handle persistat (conversația continuă)')
+            if (j.gen === genUnelte) {
+              reluareInitial = j.h
+              app.log.info('vocal-live: reiau sesiunea Google cu handle persistat (conversația continuă)')
+            } else {
+              app.log.info('vocal-live: handle din ALTĂ generație de unelte — sesiune proaspătă, cu uneltele de azi')
+            }
           }
         }
       } catch {
@@ -473,7 +492,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           const acum = Date.now()
           if (acum - ultimaSalvareHandle < 5_000) return
           ultimaSalvareHandle = acum
-          void saveKv(KV_RELUARE, JSON.stringify({ h: handle, t: acum })).catch(() => {})
+          // Mânerul se salvează CU generația lui de unelte — la următoarea
+          // schimbare de capabilități, un mâner din altă generație se aruncă.
+          void saveKv(KV_RELUARE, JSON.stringify({ h: handle, t: acum, gen: genUnelte })).catch(() => {})
         },
       }, reluareInitial, user.role === 'admin' ? unelteleDovedite() : undefined)
       if (!live) {
