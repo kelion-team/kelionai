@@ -5,6 +5,8 @@ import {
   deschideVocalLive,
   vocalLiveDisponibila,
   construiesteInstructiune,
+  estimareCostAudioUsd,
+  octetiDinBase64,
   VOCAL_LIVE_MODEL,
   VOCAL_LIVE_VOICE,
   type VocalLive,
@@ -12,7 +14,7 @@ import {
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost } from '../db.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -151,23 +153,45 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
     }
 
+    // ── CONTABILIZAREA VOCII (8 aug: „creditul se consumă cu viteza luminii") ─
+    // Până azi sesiunea live nu scria NIMIC în cost_events — pastila scădea
+    // orbește pe lângă voce. Numărăm octeții chiar aici, la punctele de
+    // trecere, și vărsăm estimarea (vezi estimareCostAudioUsd) sub kind
+    // 'gemini' la fiecare 60s + la închidere — un restart de publicare pierde
+    // cel mult ultimul minut, nu sesiunea întreagă.
+    let octetiIn = 0
+    let octetiOut = 0
+    const varsaCostul = (): void => {
+      const usd = estimareCostAudioUsd(octetiIn, octetiOut)
+      octetiIn = 0
+      octetiOut = 0
+      if (usd > 0) void recordCost(user.email, 'gemini', usd)
+    }
+    const ceasCost = setInterval(varsaCostul, 60_000)
+
     socket.on('message', (data: RawData, isBinary: boolean) => {
       if (!isBinary) return
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
-      if (live) live.scrieAudio(buf)
-      else {
+      if (live) {
+        live.scrieAudio(buf)
+        octetiIn += buf.length
+      } else {
         preCoada.push(buf)
         if (preCoada.length > 200) preCoada.shift() // plafon ~20s, ca în motor
       }
     })
     socket.on('close', () => {
       inchis = true
+      clearInterval(ceasCost)
+      varsaCostul() // restul de sub un minut nu se pierde
       salveazaTura() // o tură neterminată la închidere nu se pierde
       live?.inchide()
       app.log.info('vocal-live: WS închis')
     })
     socket.on('error', () => {
       inchis = true
+      clearInterval(ceasCost)
+      varsaCostul()
       live?.inchide()
     })
 
@@ -211,7 +235,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       if (inchis) return
       live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
         onGata: () => trimite({ type: 'gata' }),
-        onAudioIesire: (data) => trimite({ type: 'audio', data }),
+        onAudioIesire: (data) => {
+          octetiOut += octetiDinBase64(data)
+          trimite({ type: 'audio', data })
+        },
         onTranscriereUser: (text, final) => {
           bufUser += text
           trimite({ type: 'user', text, final })
@@ -258,7 +285,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         }
         return
       }
-      for (const b of preCoada.splice(0)) live.scrieAudio(b)
+      for (const b of preCoada.splice(0)) {
+        live.scrieAudio(b)
+        octetiIn += b.length
+      }
       app.log.info(
         `vocal-live: WS conectat (user=${user.role}, model=${VOCAL_LIVE_MODEL}, voce=${VOCAL_LIVE_VOICE}, memorie=${istoric.length} rânduri)`,
       )

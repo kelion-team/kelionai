@@ -158,3 +158,33 @@ describe('vocalLive — reluarea sesiunii la limita de durată', () => {
     expect(interpreteazaCadru({ goAway: {} })).toContainEqual({ fel: 'preavizInchidere', msRamase: undefined })
   })
 })
+
+// ── COSTUL SESIUNII LIVE (8 aug: „creditul se consumă cu viteza luminii") ────
+// Ruta vocii live nu scria NIMIC în cost_events — pastila scădea orbește pe
+// lângă voce. Estimarea e pură și se probează aici pe cifre de mână.
+import { estimareCostAudioUsd, octetiDinBase64 } from './services/vocalLive.js'
+
+describe('vocalLive — costul sesiunii, din octeții retransmiși', () => {
+  it('un minut de microfon (PCM16 16kHz) costă exact tariful de intrare', () => {
+    // 60s × 16000 mostre/s × 2 octeți = 1.920.000 octeți → $0.005
+    expect(estimareCostAudioUsd(60 * 16_000 * 2, 0)).toBeCloseTo(0.005, 10)
+  })
+
+  it('un minut de glas (PCM16 24kHz) costă exact tariful de ieșire', () => {
+    // 60s × 24000 mostre/s × 2 octeți = 2.880.000 octeți → $0.018
+    expect(estimareCostAudioUsd(0, 60 * 24_000 * 2)).toBeCloseTo(0.018, 10)
+  })
+
+  it('zero octeți = zero dolari — nu se inventează un cost pe sesiune goală', () => {
+    expect(estimareCostAudioUsd(0, 0)).toBe(0)
+  })
+
+  it('octeții din base64 se socotesc fără decodare, cu umplutura scăzută', () => {
+    // 'abc' → 'YWJj' (4 caractere, fără =) → 3 octeți
+    expect(octetiDinBase64(Buffer.from('abc').toString('base64'))).toBe(3)
+    // 'ab' → 'YWI=' → 2 octeți; 'a' → 'YQ==' → 1 octet; gol → 0
+    expect(octetiDinBase64(Buffer.from('ab').toString('base64'))).toBe(2)
+    expect(octetiDinBase64(Buffer.from('a').toString('base64'))).toBe(1)
+    expect(octetiDinBase64('')).toBe(0)
+  })
+})
