@@ -96,3 +96,39 @@ describe('tura de voce ajunge pe modelul bun, iar tăcerea se explică', () => {
     expect(/numeStrigat\(userEcho\)/.test(chat), 'verdictul nu se calculează pe ce a auzit').toBe(true)
   })
 })
+
+// ── ÎNTÂRZIEREA PÂNĂ LA PRIMUL SUNET (Adrian, 8 aug) ────────────────────────
+// „există o întârziere nejustificată de la întrebare la primul sunet".
+// Cauza structurală: protocolul cerea creierului să scrie PRIMA linia
+// „AUZIT: <tot ce ai spus>", iar poarta aștepta newline-ul ei (sau 240 de
+// caractere) ca să lase ceva să iasă. Adică nimic nu se putea rosti până nu se
+// termina de transcris ce-ai zis — o frază întreagă de așteptare, la fiecare
+// tură, pentru un ecou care nu se rostește niciodată (e pentru ecran).
+
+describe('primul sunet nu mai așteaptă o transcriere întreagă', () => {
+  const chat = src('routes/chat.ts')
+
+  it('promptul cere răspunsul ÎNTÂI, ecoul la sfârșit', () => {
+    const bloc = chat.slice(chat.indexOf('AMBIENT VOICE MODE'), chat.indexOf('AMBIENT VOICE MODE') + 2800)
+    expect(/START YOUR SPOKEN REPLY IMMEDIATELY/.test(bloc), 'creierul scrie iar ecoul primul').toBe(true)
+    expect(/it must come LAST/.test(bloc)).toBe(true)
+  })
+
+  it('poarta NU mai așteaptă newline-ul sau 240 de caractere', () => {
+    expect(
+      /trimmed\.length < 240/.test(chat),
+      'a rămas așteptarea de 240 de caractere — exact întârzierea reclamată',
+    ).toBe(false)
+    expect(
+      /Așteptăm prima linie/.test(chat),
+      'a rămas așteptarea liniei AUZIT înainte de a lăsa vocea să iasă',
+    ).toBe(false)
+  })
+
+  it('ecoul de la sfârșit e reținut, nu rostit — și coada nu se pierde', () => {
+    expect(/coadaEcou/.test(chat), 'ecoul final ar fi rostit în gura mare').toBe(true)
+    expect(/potrivirePartiala/.test(chat), 'fără potrivire parțială, marcajul tăiat între pachete ar scăpa').toBe(true)
+    // Dacă marcajul nu vine deloc, coada e text normal și TREBUIE scrisă.
+    expect(/if \(coadaEcou\) \{/.test(chat), 'coada reținută s-ar pierde tăcut la sfârșit de tură').toBe(true)
+  })
+})
