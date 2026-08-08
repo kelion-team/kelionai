@@ -44,7 +44,10 @@ const PRE_ROLL_MS = 400 // buffer înainte de declanșare — primele cadre voca
 // microfon, dar un reziduu prin difuzor poate rămâne — cerem semnal clar,
 // susținut, după o gardă de onset, ca să nu se taie singur.
 const BARGE_RMS = 0.024 // dublul pragului normal: doar voce apropiată, clară
-const BARGE_HOLD_MS = 180 // vocea trebuie să țină atât ca să taie (nu un poc)
+const BARGE_HOLD_MS = 300 // vocea trebuie să țină atât ca să taie (nu un poc).
+// 180 ms tăia vocea lui Kelion pe zgomot de fond susținut (Adrian, 8 aug: „nu
+// dă audio toată fraza — se oprește") — pragul devine și RELATIV la podeaua de
+// zgomot (vezi mai jos), iar tăierea se scrie în consolă, ca să nu mai fie mută.
 const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe muțenia (onset redare)
 
 export interface MicStreamHandle {
@@ -313,10 +316,15 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       const rmsMut = Math.sqrt(s2 / inp.length)
       const tNow = performance.now()
       if (mutedSince === 0) mutedSince = tNow
-      if (tNow - mutedSince > BARGE_GUARD_MS && rmsMut > BARGE_RMS) {
+      // Prag dublu: absolut ȘI peste podeaua de zgomot — altfel un fond
+      // constant peste 0.024 tăia fraza lui Kelion la fiecare răspuns.
+      if (tNow - mutedSince > BARGE_GUARD_MS && rmsMut > Math.max(BARGE_RMS, noiseFloor * 3)) {
         if (bargeSince === 0) bargeSince = tNow
         else if (tNow - bargeSince >= BARGE_HOLD_MS) {
           bargeSince = 0
+          // Tăierea se NUMEȘTE: fără rândul ăsta, „audio-ul se oprește la
+          // jumătate" era indistinctibil de orice altă cauză.
+          console.info(`[barge-in] am tăiat vocea lui Kelion: semnal ${rmsMut.toFixed(4)} peste prag ${Math.max(BARGE_RMS, noiseFloor * 3).toFixed(4)}`)
           opts.onBargeIn?.()
         }
       } else {
@@ -336,7 +344,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     // absolut ȘI dominând podeaua de-atâtea ori. Fără asta, orice zgomot > 0.012
     // ar deschide o frază fantomă.
     const voiced = rms > VOICE_RMS && rms > noiseFloor * DOMINANCE
-    if (!voiced) noiseFloor = noiseFloor * 0.97 + rms * 0.03
+    // Decăderea normală poartă aceeași țintă sub nivel (×0,7) și același plafon:
+    // altfel media cadrelor de zgomot trăgea podeaua înapoi LA zgomot — adică
+    // înapoi în starea surdă din care recalibrarea tocmai ne-a scos.
+    if (!voiced) noiseFloor = Math.min(0.03, noiseFloor * 0.97 + rms * 0.7 * 0.03)
     // ── DEBLOCAREA VAD-ULUI (măsurat 8 aug, consola ownerului) ──────────────
     // Rândul de deasupra adapta podeaua DOAR când nu e voce. Cu zgomot ambiental
     // peste prag, fiecare cadru era „voce" → podeaua nu se mai mișca NICIODATĂ →
@@ -349,7 +360,11 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     // n-are 8 s fără NICIO pauză de 1,4 s), podeaua începe să urce încet spre
     // nivelul curent — zgomotul constant devine podea, vocea reală rămâne peste.
     else if (phraseOpen && phrasePcmLen > TARGET_RATE * 8) {
-      noiseFloor = noiseFloor * 0.99 + rms * 0.01
+      // Ținta e SUB nivelul curent (×0,45): cu ținta chiar la rms, pragul de
+      // voce (podea × 2,2) sărea PESTE vocea omului și microfonul surzea —
+      // măsurat de owner („nu primește nimic de la microfon"). 0,45 × 2,2 ≈ 1:
+      // pragul rezultat ≈ nivelul zgomotului; ce-l depășește cât de puțin trece.
+      noiseFloor = Math.min(0.03, noiseFloor * 0.99 + rms * 0.45 * 0.01)
     }
 
     // Pre-roll: păstrăm mereu ultimele cadre, chiar înainte ca VAD-ul să declare voce.
@@ -398,7 +413,9 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       // VAD-ul să se deblocheze pe loc. Ce se pierde, pe față: o dictare
       // neîntreruptă mai lungă de 20 s ar fi și ea aruncată — dacă apare cazul
       // real, se vede în jurnal exact pe linia asta.
-      noiseFloor = Math.max(noiseFloor, rms * 0.9)
+      // ×0,45, NU ×0,9 (lecția surzeniei): la 0,9, pragul = 2,2 × 0,9 ≈ dublul
+      // zgomotului — vocea liniștită nu-l mai trecea niciodată. Plafon dur 0.03.
+      noiseFloor = Math.min(0.03, Math.max(noiseFloor, rms * 0.45))
       console.warn(
         `[frază] ARUNCATĂ — 20 s fără nicio pauză = zgomot continuu (VAD blocat); podeaua de zgomot recalibrată la ${noiseFloor.toFixed(4)}`,
       )

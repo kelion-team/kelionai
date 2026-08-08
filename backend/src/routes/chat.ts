@@ -2789,6 +2789,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // avertismentul scris în handoff că „un fals <TAC/> poate înghiți tăcut
         // o frază adresată". Măsurătoarea ownerului din 8 aug l-a confirmat.)
         const gresita = numeStrigat(userEcho)
+        // Ce s-a auzit pleacă la ecran ÎNAINTE de stingere — clientul păstrează
+        // bula omului cu textul auzit (Adrian: „nu ignora ce aude").
+        if (userEcho) emitHeard(userEcho)
         reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
         reply.raw.end()
         console.log(
