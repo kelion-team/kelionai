@@ -184,7 +184,7 @@ Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ — apoi serverul du
    const capul = j.ok
      ? '<span class=ok>✅ GATA — toți cei ${total} sunt în Google Enterprise.</span>\\n'
      : (j.oprit
-         ? '<span class=rau>OPRIT DE GOOGLE: '+j.oprit+'</span>\\n'
+         ? '<span class=rau>OPRIT DE GOOGLE: '+j.oprit+'</span>\\n'+(j.socoteala?'<span class=nota>'+j.socoteala+'</span>\\n':'')
          : '<span class=rau>Nu toți au intrat încă — serverul continuă SINGUR (reîncearcă la 15 min, cei intrați ies din listă). Poți închide pagina.</span>\\n');
    out.innerHTML=capul+s;
  }

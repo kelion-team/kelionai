@@ -36,6 +36,11 @@ export interface RaportEnterprise {
   /** Câți RĂMÂN de creat, măsurat (roster − cei din consolă). Zero aici înseamnă
    *  cu adevărat „gata"; orice altceva înseamnă că runda n-a terminat. */
   ramasi?: number
+  /** SOCOTEALA PE FAȚĂ (8 aug: „nu merge procedura agenți enterprise" — ba
+   *  merge, măsurat: 12 dimineața → 14 acum, exact cu viteza cotei. Ce nu
+   *  spunea nimeni e CÂT înseamnă viteza aia în ZILE, și care sunt pârghiile
+   *  adevărate). Calculată din cota măsurată, nu din speranță. */
+  socoteala?: string
 }
 
 interface RespApi {
@@ -328,7 +333,15 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   const lista = ((fin.j.agents as { displayName?: string }[] | undefined) ?? []).map((x) => String(x.displayName ?? ''))
 
   const v = verdictRunda({ esuati, oprit, inConsola: lista.length, inRoster: roster.length })
-  return { ...v, creati, existau, esuati, lista, primaEroare, licenta, oprit }
+  // Socoteala în ZILE, din cota documentată și măsurată în QuotaFailure
+  // (Standard: 1 agent/zi, Plus: 10/zi, comună pe proiect, NEmărită manual).
+  // Fără rândul ăsta, „veghea reia la 60 min" suna a reparație — când de fapt
+  // ritmul maxim posibil e cel al cotei, orice ar face veghea.
+  const socoteala =
+    v.ramasi > 0
+      ? `La cota măsurată a licenței (Standard: 1 agent/zi, Plus: 10/zi), cei ${v.ramasi} rămași înseamnă ~${v.ramasi} zile pe Standard sau ~${Math.ceil(v.ramasi / 10)} zile pe Plus. Cota NU se mărește manual. Pârghiile reale: upgrade la Plus, sau agenții din aplicație (fără cotă, deja activi). Veghea continuă singură în ritmul cotei — nu e stricată, e plafonată.`
+      : undefined
+  return { ...v, creati, existau, esuati, lista, primaEroare, licenta, oprit, socoteala }
 }
 
 /** Asigură ownerului un LOC de licență Gemini Enterprise: listează abonamentele
