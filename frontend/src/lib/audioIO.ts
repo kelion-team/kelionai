@@ -1,4 +1,5 @@
 import { openMicGraph } from './audioGraph'
+import { inscrieVoceaLuiKelion } from './vociKelion'
 // AUDIO I/O — the gate to the brain (Adrian, Jul 4). The app does NOT synthesize and
 // does NOT recognize anything locally: the microphone captures → sends to the server (STT), and
 // the brain's voice arrives ready-synthesized from the server (Chirp 3) as an
@@ -834,6 +835,13 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
       levelAnalyser.fftSize = 256
       levelAnalyser.smoothingTimeConstant = 0.5
       levelBuf = new Uint8Array(levelAnalyser.frequencyBinCount)
+      // VOCEA LUI PE FILMARE (8 aug: „să se audă pe înregistrare vocea lui
+      // Kelion"): gura Chirp trece oricum prin analizorul ăsta — un robinet
+      // spre registrul vocilor, iar recorder.ts o amestecă direct în pistă.
+      // O dată pe viața paginii; nu se radiază (gura clasică e permanentă).
+      const destInreg = levelCtx.createMediaStreamDestination()
+      levelAnalyser.connect(destInreg)
+      inscrieVoceaLuiKelion(destInreg.stream)
     }
     if (levelCtx.state === 'suspended') void levelCtx.resume().catch(() => {})
     if (!levelAnalyser || !levelBuf) return

@@ -1,5 +1,6 @@
 import { downsample, float32ToPcm16, base64ToBytes, pcm16ToFloat32 } from './pcm'
 import { alimenteazaNivelVoce } from './audioIO'
+import { inscrieVoceaLuiKelion } from './vociKelion'
 
 // ── VOCEA LIVE FULL-DUPLEX — PARTEA DIN BROWSER (7 aug 2026) ─────────────────
 //
@@ -180,6 +181,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let aec: BuclaAEC | null = null
   let ceasCoords: ReturnType<typeof setInterval> | null = null
   let ceasCadre: ReturnType<typeof setInterval> | null = null
+  // Radierea vocii din registrul de înregistrare (vezi mai jos, la analizor).
+  let radiazaVocea: (() => void) | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -189,6 +192,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (resumeTimer) clearInterval(resumeTimer)
     if (ceasCoords) clearInterval(ceasCoords)
     if (ceasCadre) clearInterval(ceasCadre)
+    radiazaVocea?.() // vocea iese din registrul de înregistrare odată cu sesiunea
     try {
       proc?.disconnect()
     } catch {
@@ -429,6 +433,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   analizor = ctxOut.createAnalyser()
   analizor.fftSize = 256
   bufAnalizor = new Uint8Array(analizor.fftSize)
+  // VOCEA LUI PE FILMARE (8 aug, ownerul: „trebuie când se înregistrează să se
+  // audă vocea lui Kelion" — MĂSURAT de el: bifa „Distribuie audio" era PUSĂ
+  // și tot nu se auzea decât microfonul lui). Cauza: vocea trece prin bucla
+  // WebRTC a AEC-ului, iar captura de tab EXCLUDE audio-ul sosit prin WebRTC.
+  // De-aia gura se înscrie în registrul vocilor: recorder.ts o amestecă
+  // DIRECT în pistă, ocolind complet captura de tab.
+  const destInregistrare = ctxOut.createMediaStreamDestination()
+  analizor.connect(destInregistrare)
+  radiazaVocea = inscrieVoceaLuiKelion(destInregistrare.stream)
   try {
     aec = await pornesteBuclaAEC(ctxOut, analizor)
     console.info('[vocalLive] AEC activ — redarea trece prin bucla WebRTC locală; browserul scade vocea lui Kelion din microfon')

@@ -4,6 +4,8 @@
 // and saves an MP4 (the format those platforms accept) to the Downloads folder.
 // Falls back to WebM only if the browser can't record MP4.
 
+import { vocileLuiKelion } from './vociKelion'
+
 export interface RecordingHandle {
   stop(): void
 }
@@ -115,6 +117,21 @@ export async function startRecording(
     if (mic) {
       ctx.createMediaStreamSource(mic).connect(dest)
       surseAudio++
+    }
+    // VOCEA LUI KELION PRIN CONSTRUCȚIE (8 aug, ownerul a măsurat: „bifa era
+    // pusă dar nu se auzea în înregistrare decât a mea de la microfon").
+    // Captura de tab a Chrome EXCLUDE audio-ul care circulă prin WebRTC — și
+    // exact așa se redă vocea live (bucla AEC pc1↔pc2). Bifa „Distribuie
+    // audio" nu poate aduce ce browserul nu dă. De-aia luăm vocea DIRECT de la
+    // sursă: fiecare gură a lui Kelion și-a înscris fluxul în registru, iar
+    // aici îl vărsăm în mixer — vocea e pe filmare orice ar alege omul.
+    for (const s of vocileLuiKelion()) {
+      try {
+        ctx.createMediaStreamSource(s).connect(dest)
+        surseAudio++
+      } catch {
+        /* flux mort (sesiune închisă între timp) — restul surselor rămân */
+      }
     }
     // Un mixer FĂRĂ nicio sursă e doar o pistă de tăcere — nu o punem în
     // filmare (ex.: „Fereastră" în Chrome n-are audio de sistem, iar micul a
