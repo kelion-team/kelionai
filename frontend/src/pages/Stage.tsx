@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
+import { AVATAR_ORBIT } from '../lib/avatarCamera'
 import AvatarModel from '../components/AvatarModel'
 import AvatarLoading from '../components/AvatarLoading'
 import ChatPanel from '../components/ChatPanel'
@@ -10,8 +11,10 @@ import CustomerSettings from '../components/CustomerSettings'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
+import { usePolledJson } from '../lib/usePolledJson'
 import { logout, startGoogleConnect } from '../lib/api'
-import { resolveLang, strings } from '../lib/i18n'
+import { resolveLang, strings, uiStrings } from '../lib/i18n'
+import { adminStrings } from '../lib/adminText'
 import {
   getWorkspace,
   subscribeWorkspace,
@@ -27,9 +30,11 @@ import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
+import { renderMarkdown } from '../lib/markdown'
+import { themeBg, currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
 
-// SALVAREA CONȚINUTULUI DE PE MONITOR (Adrian, 25 iul: „nu se poate salva ce e pe
-// monitor"). Descarcă un text/HTML ca fișier local — un nume curat din titlu.
+// SAVING THE MONITOR CONTENT (Adrian, Jul 25: "you can't save what's on the
+// monitor"). Downloads a text/HTML as a local file — a clean name from the title.
 function downloadContent(name: string, content: string, mime: string): void {
   try {
     const blob = new Blob([content], { type: mime })
@@ -42,25 +47,49 @@ function downloadContent(name: string, content: string, mime: string): void {
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 4000)
   } catch {
-    /* best-effort — descărcarea nu trebuie să spargă monitorul */
+    /* best-effort — the download must not break the monitor */
   }
 }
 
-// Vizor de cod/text pe monitor (Adrian, 27 iul): aduce conținutul fișierului
-// (cod, json, csv, log…) și-l afișează citibil, monospațiat. Fetch simplu; la
-// eșec (cross-origin / fișier privat) oferă linkul de deschidere.
-function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
-  const [text, setText] = useState<string | null>(null)
+// Code/text viewer on the monitor (Adrian, Jul 27): fetches the file's content
+// (code, json, csv, log…) and shows it readable, monospaced. Simple fetch; on
+// failure (cross-origin / private file) it offers the open link.
+// ── One document on the monitor, once only (unique, no duplicates) ─────────
+// The PDF (served directly) and Office files (through the online viewer) were shown through
+// TWO identical frames — same class, same white background, same state
+// reporting (`ok` / `error`, which Kelion reads with get_monitor). They differed only
+// by `src`. Now: one component, two calls — if the state reporting changes,
+// no stale half can remain.
+function DocFrame({ title, src, taskId }: { title: string; src: string; taskId: string }): React.JSX.Element {
+  return (
+    <iframe
+      title={title}
+      src={src}
+      className="workspace-frame"
+      style={{ background: '#fff' }}
+      onLoad={() => setTaskStatus(taskId, 'ok')}
+      onError={() => setTaskStatus(taskId, 'error')}
+    />
+  )
+}
+
+// ── One road from URL to content for EVERY file on the monitor ─────────────
+// Text, markdown and saved-html all did the same dance — fetch, keep-alive
+// guard, `ok`/`error` reported to get_monitor, identical failure screen —
+// copied three times. Now the dance lives ONCE here; each format keeps only
+// what really differs: its transform and its rendering.
+function useMonitorFile(url: string, taskId: string, transform: (t: string) => string): { data: string | null; failed: boolean } {
+  const [data, setData] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     let alive = true
-    setText(null)
+    setData(null)
     setFailed(false)
     fetch(url)
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
       .then((t) => {
         if (alive) {
-          setText(t.slice(0, 500_000))
+          setData(transform(t))
           setTaskStatus(taskId, 'ok')
         }
       })
@@ -73,24 +102,270 @@ function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; tas
     return () => {
       alive = false
     }
+    // transform stays OUT of the deps on purpose: callers pass it inline, so
+    // its identity changes every render — including it would refetch forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, taskId])
-  if (failed)
-    return (
-      <div className="workspace-blocked">
-        <p>Nu am putut aduce conținutul fișierului aici.</p>
-        <a href={url} target="_blank" rel="noreferrer" className="composer-send">Deschide fișierul ↗</a>
-      </div>
-    )
+  return { data, failed }
+}
+
+function MonitorFileBlocked({ url }: { url: string }): React.JSX.Element {
+  return (
+    <div className="workspace-blocked">
+      <p>{uiStrings().wsFileFailed}</p>
+      <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
+    </div>
+  )
+}
+
+function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
+  const { data: text, failed } = useMonitorFile(url, taskId, (t) => t.slice(0, 500_000))
+  if (failed) return <MonitorFileBlocked url={url} />
   return (
     <div className="workspace-doc">
       <pre className="doc-text" style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: `${0.92 * zoom}em` }}>
-        {text ?? 'Se încarcă…'}
+        {text ?? uiStrings().buildLoading}
       </pre>
     </div>
   )
 }
 
-// Nume de fișier sigur din titlul panoului (diacritice/spații → cratime).
+// MARKDOWN on the monitor (Aug 2 — "the monitor must run every format the
+// skills provide"): fetched like any text file, then rendered FORMATTED with
+// the mini safe renderer (source escaped first — nothing injected executes).
+function MonitorMarkdown({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
+  const { data: html, failed } = useMonitorFile(url, taskId, (t) => renderMarkdown(t.slice(0, 500_000)))
+  if (failed) return <MonitorFileBlocked url={url} />
+  return (
+    <div className="workspace-doc">
+      {html === null ? (
+        <pre className="doc-text">{uiStrings().buildLoading}</pre>
+      ) : (
+        // eslint-disable-next-line react/no-danger -- renderMarkdown escapes the source first
+        <div className="doc-text md-view" style={{ fontSize: `${zoom}em` }} dangerouslySetInnerHTML={{ __html: html }} />
+      )}
+    </div>
+  )
+}
+
+// A SAVED .html PAGE on the monitor (Aug 2): runs like the playground 'app' —
+// fetched, then srcDoc in a sandbox WITHOUT allow-same-origin, so the page can
+// never reach the app's session (a plain <iframe src> could, same-origin).
+function MonitorHtmlFile({ url, taskId }: { url: string; taskId: string }) {
+  const { data: doc, failed } = useMonitorFile(url, taskId, (t) => t)
+  if (failed) return <MonitorFileBlocked url={url} />
+  if (doc === null)
+    return (
+      <div className="workspace-doc">
+        <pre className="doc-text">{uiStrings().buildLoading}</pre>
+      </div>
+    )
+  return (
+    <iframe
+      title={url}
+      srcDoc={doc}
+      className="workspace-frame"
+      sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
+    />
+  )
+}
+
+// MEDIA WITH AN HONEST FALLBACK (Aug 2): a failed <img>/<video>/<audio> (a
+// codec the browser lacks — .mkv/.avi — or an inaccessible file) used to leave
+// a DEAD black box while Kelion claimed "it's on the monitor". Now the error
+// swaps in a plain explanation + the open/download link, and get_monitor hears
+// the truth through setTaskStatus('error').
+function MediaFailed({ url }: { url: string }) {
+  return (
+    <div className="workspace-blocked">
+      <p>{uiStrings().wsMediaFailed}</p>
+      <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
+    </div>
+  )
+}
+
+function MonitorImage({ url, title, taskId }: { url: string; title: string; taskId: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <MediaFailed url={url} />
+  return (
+    <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--panel-solid)' }}>
+      <img
+        src={url}
+        alt={title}
+        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+        onLoad={() => setTaskStatus(taskId, 'ok')}
+        onError={() => {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }}
+      />
+    </div>
+  )
+}
+
+function MonitorVideo({ url, taskId }: { url: string; taskId: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <MediaFailed url={url} />
+  return (
+    <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+      <video
+        src={url}
+        controls
+        style={{ maxWidth: '100%', maxHeight: '100%' }}
+        onLoadedData={() => setTaskStatus(taskId, 'ok')}
+        onError={() => {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }}
+      />
+    </div>
+  )
+}
+
+function MonitorAudio({ url, taskId }: { url: string; taskId: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <MediaFailed url={url} />
+  return (
+    <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <audio
+        src={url}
+        controls
+        style={{ width: '100%', maxWidth: 520 }}
+        onLoadedData={() => setTaskStatus(taskId, 'ok')}
+        onError={() => {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }}
+      />
+    </div>
+  )
+}
+
+// PANOUL CONSTRUCTORULUI pe monitor (Etapa 4b, Adrian: „sistem performant cu
+// monitor display of requirement resolution"). It subscribes to
+// /api/constructor/live (admin session) and shows each build order:
+// the state ("În coadă" / "Lucrează" / "Gata" / "Eșuat"), the CURRENT STEP sent by the worker
+// on the VPS (Stage 4), the attempts and the PR. No longer a black box between
+// "Preluat" and "Gata": you see the road, step by step. Light 2.5s poll, stopped
+// cleanly on unmount (no leaks, no polling while the panel is closed).
+interface BuildLiveJob {
+  id: number
+  status: string
+  order: string
+  progress: string | null
+  ci?: string | null
+  prUrl: string | null
+  attempts: number
+  updatedAt?: string
+}
+// The status labels come from i18n (audit Aug 2 — they were Romanian for
+// every user); built as a function so the CURRENT language is read per render.
+const buildLabel = (status: string): string => {
+  const t = uiStrings()
+  const map: Record<string, string> = {
+    queued: t.buildQueued,
+    running: t.buildRunning,
+    done: t.buildDone,
+    failed: t.buildFailed,
+  }
+  return map[status] ?? status
+}
+function BuildSurface({ zoom }: { zoom: number }) {
+  const [jobs, setJobs] = useState<BuildLiveJob[]>([])
+  const [note, setNote] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => {
+    let alive = true
+    let timer: number | undefined
+    async function tick(): Promise<void> {
+      try {
+        const r = await fetch('/api/constructor/live', { credentials: 'include' })
+        if (!alive) return
+        if (r.status === 403) {
+          setNote(uiStrings().buildOnlyAdmin)
+          setJobs([])
+        } else if (!r.ok) {
+          setNote(uiStrings().buildUnavailable)
+        } else {
+          const j = (await r.json()) as { jobs?: BuildLiveJob[] }
+          if (!alive) return
+          setNote('')
+          setJobs(Array.isArray(j.jobs) ? j.jobs : [])
+        }
+        setLoaded(true)
+      } catch {
+        if (alive) {
+          setNote(uiStrings().buildNoServer)
+          setLoaded(true)
+        }
+      } finally {
+        if (alive) timer = window.setTimeout(() => void tick(), 2500)
+      }
+    }
+    void tick()
+    return () => {
+      alive = false
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [])
+  return (
+    <div className="workspace-doc build-surface" style={{ fontSize: `${zoom}em` }}>
+      <div className="build-head">{uiStrings().buildHead}</div>
+      {!loaded ? (
+        <p className="build-empty">{uiStrings().buildLoading}</p>
+      ) : note ? (
+        <p className="build-empty">{note}</p>
+      ) : jobs.length === 0 ? (
+        <p className="build-empty">{uiStrings().buildEmpty}</p>
+      ) : (
+        <ul className="build-list">
+          {jobs.map((j) => (
+            <li key={j.id} className={`build-item build-${j.status}`}>
+              <div className="build-row">
+                {/* THE QUOTA PAUSE, VISIBLE (D6): a postponed order stays „running” in
+                the database — correct, it's not lost — but on screen it looked identical
+                to a working one, with the step frozen for 40 minutes. The worker marks
+                the pause with „⏳”; here it becomes its own badge. */}
+                {j.progress?.startsWith('⏳') ? (
+                  <span className="build-badge build-badge-queued">{uiStrings().buildThrottled}</span>
+                ) : (
+                  <span className={`build-badge build-badge-${j.status}`}>{buildLabel(j.status)}</span>
+                )}
+                {/* The INDEPENDENT verification's verdict (Stage 6): „Gata” proven by CI. */}
+                {j.ci === 'verde' ? (
+                  <span className="build-ci build-ci-ok" title={uiStrings().buildCiOk}>CI ✓</span>
+                ) : j.ci === 'roșu' ? (
+                  <span className="build-ci build-ci-bad" title={uiStrings().buildCiFailed}>CI ✗</span>
+                ) : j.ci === 'în curs' ? (
+                  <span className="build-ci build-ci-wait" title={uiStrings().buildCiRunning}>CI…</span>
+                ) : null}
+                <span className="build-order">#{j.id} — {j.order}</span>
+              </div>
+              {j.progress ? (
+                <div className="build-progress">
+                  {j.status === 'running' && <span className="build-spin" aria-hidden>●</span>}
+                  {j.progress}
+                </div>
+              ) : j.status === 'queued' ? (
+                <div className="build-progress build-progress-dim">{uiStrings().buildWaiting}</div>
+              ) : null}
+              {(j.attempts > 1 || j.prUrl) && (
+                <div className="build-meta">
+                  {j.attempts > 1 && <span>{uiStrings().buildAttempt.replace('{n}', String(j.attempts))}</span>}
+                  {j.prUrl && (
+                    <a href={j.prUrl} target="_blank" rel="noreferrer" className="build-pr">{uiStrings().buildSeePr}</a>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// Safe file name from the panel title (diacritics/spaces → dashes).
 function safeFileName(title: string, ext: string): string {
   const base = (title || 'kelion')
     .toLowerCase()
@@ -102,75 +377,174 @@ function safeFileName(title: string, ext: string): string {
   return `${base}.${ext}`
 }
 
+// ── THE SERPER CREDIT FORMAT ───────────────────────────────────────────────
+// Thousands collapse to one-decimal "k" (49 875 → "49.9k"); under 1000 the raw
+// number stays as-is. The tooltip always carries the EXACT figure, with the
+// thousands separator of the BROWSER's locale (toLocaleString fără argument) —
+// comentariul vechi promitea „separatorul românesc", fals față de cod
+// (corectat la auditul admin, 3 aug).
+function formatSerperK(credits: number): string {
+  return credits >= 1000 ? `${(credits / 1000).toFixed(1)}k` : String(credits)
+}
+
+// The shape of the /api/admin/brain-credit response — named, so the shared polling
+// (usePolledJson) can type it.
+interface BrainCredit {
+    // (Câmpurile `openrouter` și `openai` au fost SCOASE din răspuns și din
+    // tipul ăsta, 3 aug — furnizorii au fost extirpați; creierul e Gemini.)
+    active: string | null
+    /** The REAL Serper search credit (searches left), from the provider's
+     *  /account endpoint. `live: false` = the read failed or SERPER_API_KEY is
+     *  missing — the bar writes "Serper ⚠", NEVER "Serper 0": a failed read is
+     *  not an empty account (regula de onestitate #1). */
+    serper?: {
+      live: boolean
+      balance?: number
+      rateLimit?: number
+      error?: string
+    }
+    /** The Gemini pill. The prepaid credit (£11.58) is NOT exposed by any Google
+     *  API (verified 3 aug) — so we show the honest signal that reflects it:
+     *  `serving` = a live ping returned 200 → the Tier 2 key is working AND has
+     *  credit (a depleted prepay account errors), shown GREEN "Gemini ✓"; false →
+     *  RED "Gemini ⚠" with `reason` ('depleted' / 'quota' / 'error'). `checked:
+     *  false` = the ping itself couldn't run (no key / network) — also "⚠", never
+     *  a fake OK. `monthUsd` = REAL month-to-date Gemini spend (tooltip detail). */
+    gemini?: {
+      checked: boolean
+      serving: boolean
+      reason?: 'depleted' | 'quota' | 'error' | 'no_key'
+      monthUsd?: number
+      /** Creditul pe care ownerul îl VEDE în AI Studio și-l spune o dată (Google
+       *  nu-l expune prin API). Afișat ca ATARE pe pastilă, cu data — cifra lui,
+       *  nu o măsurătoare. Absent → pastila arată „Gemini ✓/⚠". */
+      creditGbp?: number
+      creditAt?: string
+    }
+    /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
+     *  in the top bar"). `null` = they couldn't be measured — the bar writes "⚠ VPS",
+     *  NEVER zeros: "0.0 GB / 0%" would look identical to a dead server. */
+    vps?: {
+      totalGb: number
+      liberGb: number
+      liberPct: number
+      procesoare: number
+      incarcare: [number, number, number]
+      incarcarePct: number
+      pragMemoriePct?: number
+      pragIncarcarePct?: number
+    } | null
+    // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
+    // desena, iar tipul lui mințea: loaded/remaining erau forma moartă a
+    // „pungii" OpenRouter, extirpată; backend-ul nu-l mai trimite.)
+  }
+
 export default function Stage({ user }: { user: User }) {
-  // OWNER-ul primește MEREU română (regula proiectului); restul după locale.
-  // LIMBA UI (regula finală, Adrian 24 iul: „default ENGLEZĂ pentru toți; după
-  // identificarea limbii se aplică procedura existentă"). Fără forțare pe rol,
-  // fără locale de browser/cont: oglinda locală a limbii IDENTIFICATE de server
-  // (scrisă de frame-ul {lang} → mirrorLang), altfel engleză.
+  // The OWNER always gets Romanian (the project rule); the rest by locale.
+  // THE UI LANGUAGE (the final rule, Adrian Jul 24: "default ENGLISH for everyone; after
+  // language identification the existing procedure applies"). No role forcing,
+  // no browser/account locale: the local mirror of the server-IDENTIFIED language
+  // (written by the {lang} frame → mirrorLang), otherwise English.
   const lang = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
-  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'>('finance')
-  // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul: „dacă amprenta nu corespunde, nici
-  // butonul admin nu trebuie să se activeze"). armed = secretul e setat (în
-  // Admin→Amprente vocale); unlocked = amprenta vocală s-a potrivit în sesiunea
-  // asta SAU s-a tastat secretul. Încuiat → butonul deschide fereastra de cod,
-  // nu panoul; serverul blochează oricum tot /api/admin/* (423) — butonul e
-  // doar oglinda, lacătul real e pe server.
+  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
+  // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
+  // admin button must not activate either"). armed = the secret is set (in
+  // Admin→Voiceprints); unlocked = the voiceprint matched in this session
+  // OR the secret was typed. Locked → the button opens the code window,
+  // not the panel; the server blocks all /api/admin/* anyway (423) — the button is
+  // only the mirror, the real padlock is on the server.
   const [adminLock, setAdminLock] = useState<{ armed: boolean; unlocked: boolean } | null>(null)
   const adminLockRef = useRef(adminLock)
   adminLockRef.current = adminLock
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [unlockCode, setUnlockCode] = useState('')
   const [unlockErr, setUnlockErr] = useState('')
-  // „Salvează" pe documentele de pe monitor (Adrian, 27 iul: „butonul salvează
-  // nu e funcțional" — descărca tăcut un fișier, fără urmă în Kelion). Acum:
-  // documentul intră în STOCAREA PERMANENTĂ (notes, DB — Kelion îl regăsește
-  // cu uneltele lui) + descărcare locală + confirmare vizibilă pe buton.
+  // "Save" on the monitor documents (Adrian, Jul 27: "the save button
+  // isn't functional" — it silently downloaded a file, no trace in Kelion). Now:
+  // the document enters PERMANENT STORAGE (notes, DB — Kelion finds it again
+  // with his tools) + local download + visible confirmation on the button.
   const [docSaved, setDocSaved] = useState(false)
+  // BUTOANE CARE RĂSPUND LA APĂSARE (Adrian, 3 aug: „butoanele salvează sau
+  // copiază nu sunt active"). Nu erau moarte — erau MUTE: „Copiază" nu confirma
+  // nimic (și pica tăcut când browserul refuza clipboard-ul), iar „Salvează"
+  // arăta „Salvat ✓" doar dacă reușea POST-ul de rețea. Acum: eticheta se
+  // schimbă LA CLIC (fapta locală — descărcarea/copierea — chiar s-a întâmplat),
+  // iar copierea are plasă (textarea + execCommand) când clipboard-ul modern e
+  // refuzat. POST-ul spre notițe rămâne best-effort, nu condiționează feedback-ul.
+  const [docCopied, setDocCopied] = useState(false)
+  const copyDocText = (text: string): void => {
+    const arata = (): void => {
+      setDocCopied(true)
+      window.setTimeout(() => setDocCopied(false), 2000)
+    }
+    const fallback = (): void => {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+        arata()
+      } catch {
+        /* nici plasa n-a mers — eticheta rămâne, omul vede că nu s-a confirmat */
+      }
+    }
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(arata).catch(fallback)
+    else fallback()
+  }
   const saveDocToKelion = (title: string, content: string, fileName: string, mime: string): void => {
     downloadContent(fileName, content, mime)
+    // Descărcarea e fapta vizibilă și LOCALĂ → confirmarea vine imediat, nu
+    // după rețea. Nota în Kelion rămâne best-effort, în fundal.
+    setDocSaved(true)
+    window.setTimeout(() => setDocSaved(false), 3000)
     void fetch('/api/notes', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ title, content }),
-    })
-      .then((r) => {
-        if (r.ok) {
-          setDocSaved(true)
-          window.setTimeout(() => setDocSaved(false), 3000)
-        }
-      })
-      .catch(() => {})
+    }).catch(() => {})
   }
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // THE THEME TOGGLE (Aug 2 — the lighter background): the light palette is the
+  // default; this top-bar moon/sun flips back to the original dark identity
+  // (persisted by lib/theme). Held in state so the click re-renders — which
+  // also re-reads themeBg() for the avatar canvas behind.
+  const [theme, setTheme] = useState<ThemeName>(currentTheme())
   const [recording, setRecording] = useState(false)
-  // Zoom/potrivire pentru textul de pe monitor (cererea #27): A− / A+ scalează
-  // conținutul citibil (doc + consola live) ca să fie încadrat și lizibil.
+  // Motivul pentru care înregistrarea NU a pornit (auditul admin, 3 aug) —
+  // 3 secunde de „Rec ⚠" cu title, în loc de un buton care pare mort.
+  const [recErr, setRecErr] = useState('')
+  // Zoom/fit for the monitor text (request #27): A− / A+ scales the
+  // readable content (doc + live console) so it's framed and legible.
   const [monZoom, setMonZoom] = useState(1)
   const zoomOut = (): void => setMonZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(2)))
   const zoomIn = (): void => setMonZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))
-  // Creierul e 100% OpenRouter (Kimi/GLM scoase). Un singur indicator: cheia e
-  // configurată + fondul REAL al adminului (loaded − cost real), nu nelimitat.
-  const [brainCredit, setBrainCredit] = useState<{
-    active: string | null
-    openrouter: {
-      ok: boolean
-      topup: string
-      // Soldul REAL, exact din contul OpenRouter (USD) — „punga lui Kelion".
-      balance?: number
-      low?: boolean
-      live?: boolean
-    }
-    // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
-    stripe?: { available: number; pending: number; currency: string } | null
-    pool: { loaded: number; remaining: number; spent: number; profit: number }
-  } | null>(null)
-  // Starea lacătului la intrare + deblocarea venită din voce (amprenta
-  // potrivită → realtimeVoice emite `kelion:admin-unlock`).
+  // Creierul e 100% Gemini direct (OpenRouter/OpenAI extirpate, 3 aug). Pastilele
+  // din bară: Gemini (starea live) + Serper + VPS.
+  const [brainCredit, setBrainCredit] = useState<BrainCredit | null>(null)
+  // EȘECUL POLLING-ULUI SE DECLARĂ (auditul admin, 3 aug): brainLocked = 423
+  // (lacătul admin blochează /api/admin/*) → pastila unică 🔒; brainFails =
+  // eșecuri consecutive — de la 3 (~90s) pastilele trec pe ⚠ „citire veche",
+  // în loc să rămână verzi pe valori înghețate prezentate ca actuale.
+  const [brainLocked, setBrainLocked] = useState(false)
+  const [brainFails, setBrainFails] = useState(0)
+  // EDITARE CREDIT GEMINI INLINE (Adrian, 5 aug: „vreau să dispară asa ceva cu
+  // înghețare aiurea"). Vechiul click deschidea `window.prompt()` — dialog nativ
+  // care ÎNGHEAȚĂ toată pagina (pe mobil bloca și pornirea microfonului). Acum e
+  // un câmp inline, non-blocant: Enter salvează, Esc/click-afară renunță, eroarea
+  // apare ca text mic lângă câmp, nu ca `window.alert` (alt freeze).
+  const [creditEdit, setCreditEdit] = useState(false)
+  const [creditErr, setCreditErr] = useState('')
+  const brainOkAtRef = useRef<number | null>(null)
+  // The padlock state at entry + the unlock coming from voice (the voiceprint
+  // matched → realtimeVoice emits `kelion:admin-unlock`).
   useEffect(() => {
     if (user.role !== 'admin') return
     fetch('/api/admin/unlock/status', { credentials: 'include' })
@@ -184,8 +558,8 @@ export default function Stage({ user }: { user: User }) {
     window.addEventListener('kelion:admin-unlock', onUnlock)
     return () => window.removeEventListener('kelion:admin-unlock', onUnlock)
   }, [user.role])
-  // Poarta UNICĂ spre panoul de admin: toate drumurile (buton, navigare din
-  // voce/chat, punga Stripe) trec pe aici — încuiat → fereastra de cod.
+  // The SINGLE gate to the admin panel: all roads (button, navigation from
+  // voice/chat, the Stripe bag) pass through here — locked → the code window.
   const openAdmin = (tab?: typeof adminTab): void => {
     if (tab) setAdminTab(tab)
     const l = adminLockRef.current
@@ -209,32 +583,33 @@ export default function Stage({ user }: { user: User }) {
           setAdminLock((s) => (s ? { ...s, unlocked: true } : { armed: true, unlocked: true }))
           setUnlockOpen(false)
           setAdminOpen(true)
-        } else setUnlockErr(r.status === 401 ? 'Cod greșit — mai încearcă.' : 'Eroare — reîncearcă.')
+        } else setUnlockErr(r.status === 401 ? uiStrings().unlockWrongCode : uiStrings().unlockRetryError)
       })
-      .catch(() => setUnlockErr('Eroare de rețea — reîncearcă.'))
+      .catch(() => setUnlockErr(uiStrings().unlockNetError))
   }
-  useEffect(() => {
-    if (user.role !== 'admin') return
-    let alive = true
-    const load = (): void => {
-      fetch('/api/admin/brain-credit', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (alive && j && j.openrouter && j.pool) setBrainCredit(j)
-        })
-        .catch(() => {})
+  // Polling from the shared source (lib/usePolledJson) — the `alive` guard and the
+  // interval stop are guaranteed there, once only.
+  // Gardul e pe `active` (auditul admin, 3 aug): vechiul `j.pool` verifica un
+  // câmp pe care backend-ul nu-l mai trimite — pastilele n-ar mai fi apărut.
+  usePolledJson<BrainCredit>('/api/admin/brain-credit', user.role === 'admin', (j) => {
+    if (j && j.active === 'gemini') {
+      setBrainCredit(j)
+      setBrainLocked(false)
+      setBrainFails(0)
+      brainOkAtRef.current = Date.now()
     }
-    load()
-    const id = window.setInterval(load, 30_000)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [user.role])
-  // ACCES REAL LA APLICAȚIE PRIN VOCE/CHAT (Adrian, 24 iul: „Kelion trebuie să
-  // poată intra în orice tab al aplicației, real"). Kelion cheamă unealta
+  }, 30_000, (status) => {
+    setBrainLocked(status === 423)
+    setBrainFails((n) => n + 1)
+  })
+  // Vechimea ultimei citiri bune, pentru titlul ⚠ (minute întregi).
+  const brainStaleMin =
+    brainOkAtRef.current != null ? Math.max(1, Math.round((Date.now() - brainOkAtRef.current) / 60_000)) : null
+  const brainStale = brainFails >= 3 && brainCredit != null
+  // REAL APP ACCESS VIA VOICE/CHAT (Adrian, Jul 24: "Kelion must be able to
+  // enter any app tab, for real"). Kelion calls the tool
   // `open_app_view` → ChatPanel emite `kelion:navigate` → aici deschidem chiar
-  // panoul cerut. Adminul e gate-uit: un user obișnuit NU poate deschide adminul.
+  // the requested panel. Admin is gated: an ordinary user CANNOT open the admin.
   useEffect(() => {
     const onNav = (e: Event): void => {
       const d = (e as CustomEvent).detail as { view?: string; section?: string } | undefined
@@ -251,10 +626,10 @@ export default function Stage({ user }: { user: User }) {
           break
         case 'admin':
           if (user.role === 'admin') {
-            // Secțiune VALIDATĂ (audit 24 iul): un string liber de la model
-            // („bani", „finanțe") seta un tab inexistent → panou gol. Doar
-            // secțiunile reale trec; altfel rămâne tabul curent.
-            const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor'] as const
+            // VALIDATED section (Jul 24 audit): a free string from the model
+            // ("bani", "finanțe") set a nonexistent tab → empty panel. Only
+            // real sections pass; otherwise the current tab stays.
+            const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'] as const
             const sec = String(d?.section ?? '')
             if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
             openAdmin()
@@ -270,35 +645,20 @@ export default function Stage({ user }: { user: User }) {
     window.addEventListener('kelion:navigate', onNav)
     return () => window.removeEventListener('kelion:navigate', onNav)
   }, [user.role])
-  // CREDIT USER pe CERCUL-logo (Adrian, 13 iul): clientul își dă seama din cerc
-  // — verde = are credit, ROȘU PULSÂND = i s-a terminat creditul. Doar clienți.
+  // USER CREDIT on the logo CIRCLE (Adrian, Jul 13): the client tells from the circle
+  // — green = has credit, PULSING RED = out of credit. Clients only.
   const [userCreditOut, setUserCreditOut] = useState<boolean | null>(null)
-  useEffect(() => {
-    if (user.role !== 'customer') return
-    let alive = true
-    const load = (): void => {
-      fetch('/api/billing/balance', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (alive && j && typeof j.credits === 'number') setUserCreditOut(j.credits <= 0)
-        })
-        .catch(() => {})
-    }
-    load()
-    const id = window.setInterval(load, 30_000)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [user.role])
-  // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
-  // colțului, editate cu dublu-click pe avatar. SALVATĂ PE SERVER per
-  // utilizator (11 iul seara: „salvează mărimea actuală a lui Kelion") —
-  // localStorage rămâne doar oglinda pentru primul paint, sursa de adevăr
-  // e /api/prefs, ca aranjarea să supraviețuiască oricărei curățări de browser.
-  // Aranjarea manuală e DEZACTIVATĂ (Adrian, 24 iul) — rămâne doar starea
-  // vizuală (fals mereu); poziția vine de pe server.
-  const avatarEdit = false
+  usePolledJson<{ credits?: number }>('/api/billing/balance', user.role === 'customer', (j) => {
+    if (typeof j.credits === 'number') setUserCreditOut(j.credits <= 0)
+  })
+  // THE AVATAR ARRANGEMENT by Adrian (Jul 11): the corner position (vw/vh) and scale,
+  // edited by double-clicking the avatar. SAVED ON THE SERVER per
+  // user (Jul 11 evening: "save Kelion's current size") —
+  // localStorage stays only the mirror for first paint, the source of truth
+  // is /api/prefs, so the arrangement survives any browser cleanup.
+  // Manual arrangement is DISABLED (Adrian, Jul 24); the position comes from
+  // the server. (The `avatarEdit=false` flag + its 'editing' CSS class were
+  // dead weight since then — removed in the Aug 2 dead-code audit.)
   const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>({ x: 58, y: 58, s: 0.42 })
   // Fix hydration: localStorage is client-only; read it after hydration.
   useEffect(() => {
@@ -310,11 +670,11 @@ export default function Stage({ user }: { user: User }) {
       }
       if (typeof v?.x === 'number' && typeof v?.y === 'number' && typeof v?.s === 'number') {
         let s = v.s
-        // MIGRARE INVERSĂ (11 iul noaptea): „avatar v2.3" mutase mărimea lui
-        // Adrian din containerul CSS în scala modelului 3D (localStorage
-        // kelion-avatar-scale) și resetase s la 0.42 — dar scalarea 3D taie
-        // capul/tălpile din cadru la mărimi mari. Mărimea aleasă se aduce
-        // ÎNAPOI în container și cheia veche se șterge.
+        // REVERSE MIGRATION (Jul 11, night): "avatar v2.3" had moved Adrian's size
+        // from the CSS container into the 3D model scale (localStorage
+        // kelion-avatar-scale) and had reset s to 0.42 — but 3D scaling cuts
+        // the head/soles out of frame at large sizes. The chosen size is brought
+        // BACK into the container and the old key is deleted.
         try {
           const old = Number(localStorage.getItem('kelion-avatar-scale'))
           if (Number.isFinite(old) && old > 0 && Math.abs(old - 1.65) > 0.01) {
@@ -322,18 +682,18 @@ export default function Stage({ user }: { user: User }) {
             localStorage.removeItem('kelion-avatar-scale')
           }
         } catch {
-          /* fără cheia veche — nimic de migrat */
+          /* no old key — nothing to migrate */
         }
         setAvatarBox({ x: v.x, y: v.y, s })
       }
     } catch {
-      /* fără preferință salvată — folosim așezarea implicită */
+      /* no saved preference — we use the default placement */
     }
   }, [])
   // RING DE DANS (Adrian, 12 iul, prin Kelion: „la dansuri, avatarul se
-  // repoziționează automat mai spre centrul ecranului cât durează clipul"):
-  // pe un gest de dans, colțul se mută lin spre centru și crește; la finalul
-  // clipului (kelion-gesture-done) revine exact în aranjarea lui Adrian.
+  // automatically repositions toward the center of the screen while the clip lasts"):
+  // on a dance gesture, the corner glides toward the center and grows; at the end
+  // of the clip (kelion-gesture-done) it returns exactly to Adrian's arrangement.
   const [dancing, setDancing] = useState(false)
   useEffect(() => {
     const onGest = (e: Event): void => {
@@ -348,8 +708,8 @@ export default function Stage({ user }: { user: User }) {
       window.removeEventListener('kelion-gesture-done', onDone)
     }
   }, [])
-  // Nu scriem la server ÎNAINTE să fi citit de la el — altfel implicitul local
-  // ar călca peste aranjarea salvată. 'ready' abia după primul GET /api/prefs.
+  // We don't write to the server BEFORE reading from it — otherwise the local default
+  // would trample the saved arrangement. 'ready' only after the first GET /api/prefs.
   const avatarSyncRef = useRef<'pending' | 'ready'>('pending')
   const avatarBoxRef = useRef(avatarBox)
   useEffect(() => {
@@ -361,8 +721,8 @@ export default function Stage({ user }: { user: User }) {
       if (b && typeof b.x === 'number' && typeof b.y === 'number' && typeof b.s === 'number') {
         setAvatarBox({ x: b.x, y: b.y, s: b.s })
       } else if (prefs) {
-        // Prima sincronizare: aranjarea CURENTĂ (cea din browserul lui Adrian)
-        // devine cea salvată pe server — exact „salvează mărimea actuală".
+        // First sync: the CURRENT arrangement (the one in Adrian's browser)
+        // becomes the one saved on the server — exactly "save the current size".
         void saveAvatarBox(avatarBoxRef.current)
       }
       avatarSyncRef.current = 'ready'
@@ -376,11 +736,11 @@ export default function Stage({ user }: { user: User }) {
     try {
       localStorage.setItem('avatar-box', JSON.stringify(avatarBox))
     } catch {
-      /* stocarea locală poate lipsi — aranjarea rămâne doar pe sesiunea asta */
+      /* local storage may be missing — the arrangement stays only for this session */
     }
     if (avatarSyncRef.current !== 'ready') return
-    // Debounce: în timpul tragerii/rotiței vin zeci de valori pe secundă —
-    // pe server pleacă doar așezarea finală, la 800ms după ultima mișcare.
+    // Debounce: during drag/wheel dozens of values arrive per second —
+    // only the final placement goes to the server, 800ms after the last movement.
     const t = window.setTimeout(() => void saveAvatarBox(avatarBox), 800)
     return () => window.clearTimeout(t)
   }, [avatarBox])
@@ -441,7 +801,18 @@ export default function Stage({ user }: { user: User }) {
         // Clip finished — promo scenes still pending get cancelled, stage cleared.
         window.dispatchEvent(new Event('kelion:rec-stopped'))
       },
-      () => setRecording(false),
+      (reason) => {
+        // FEEDBACK LA REFUZ (auditul admin, 3 aug): recording era deja false,
+        // deci pe ecran nu se întâmpla NIMIC — pe mobil (fără getDisplayMedia)
+        // „● Rec" părea buton mort. Eticheta devine „Rec ⚠" 3s, cu motivul.
+        setRecording(false)
+        setRecErr(
+          reason === 'unsupported'
+            ? 'Browserul nu suportă captura de ecran (getDisplayMedia/MediaRecorder lipsesc).'
+            : 'Înregistrarea a fost refuzată (ai închis fereastra de alegere sau ai blocat permisiunea).',
+        )
+        window.setTimeout(() => setRecErr(''), 3000)
+      },
       recNameRef.current ?? undefined,
     )
     if (handle) {
@@ -472,9 +843,9 @@ export default function Stage({ user }: { user: User }) {
     return () => window.removeEventListener('kelion:rec', onRec)
   }, [recording])
 
-  // VERSIUNE NOUĂ — NEintruziv (Adrian, 10 iul: „chat distrus, audio și scris").
-  // App.tsx afișează bara „Update now" (watchForUpdate) și TU apeși când ești
-  // gata — resetul dur rămâne, dar la comanda ta, nu peste chat.
+  // NEW VERSION — NON-intrusive (Adrian, Jul 10: "chat destroyed, audio and written").
+  // App.tsx shows the "Update now" bar (watchForUpdate) and YOU press when you're
+  // ready — the hard reset stays, but at your command, not over the chat.
 
   // Presence ping (every 60s): feeds the owner's per-USER analytics — who is
   // signed in, from what IP/place/device, and for how long they stayed.
@@ -500,12 +871,29 @@ export default function Stage({ user }: { user: User }) {
       window.clearInterval(id)
     }
   }, [])
-  // Monitorul (suprafața din spatele avatarului) e deschis DOAR de o sarcină reală
-  // (hartă, pagină, doc, imagine) — avatarul se micșorează în colț cât timp e ceva
+  // The monitor (the surface behind the avatar) is opened ONLY by a real task
+  // (map, page, doc, image) — the avatar shrinks into the corner while something's up
   // pe ecran, altfel e prim-plan.
   const monitorOn = ws.open
+  // CLOSING IN SYNC WITH THE FADE (fluidity #7, Jul 27: "the content disappears
+  // instantly, the black panel persists 500ms more"): during the fade (500ms in
+  // CSS) we render A SNAPSHOT of the last state — the panel fades WITH the content in it,
+  // not empty. Sound sources aren't rendered from the snapshot (would restart the clip).
+  const lastWsRef = useRef(ws)
+  if (ws.open) lastWsRef.current = ws
+  const [wsFading, setWsFading] = useState(false)
+  useEffect(() => {
+    if (ws.open) {
+      setWsFading(false)
+      return
+    }
+    setWsFading(true)
+    const id = window.setTimeout(() => setWsFading(false), 520)
+    return () => window.clearTimeout(id)
+  }, [ws.open])
+  const wsv = ws.open ? ws : lastWsRef.current
   // Tell the chat when the monitor is busy so it collapses to the slim black
-  // speech bar (Adrian's rule) când e o suprafață deschisă.
+  // speech bar (Adrian's rule) when a surface is open.
   useEffect(() => {
     setMonitorWorking(monitorOn)
   }, [monitorOn])
@@ -516,15 +904,15 @@ export default function Stage({ user }: { user: User }) {
       {recording && <div className="rec-watermark">kelionai.app</div>}
       {/* Skill monitor mode: the workspace surface behind the avatar. */}
       <div className={`workspace-bg ${monitorOn ? 'open' : ''}`}>
-        {ws.open && (
+        {(wsv.open || wsFading) && (
           <div className="workspace-inner">
             <div className="workspace-head">
               <div className="workspace-tabs">
-                {ws.tasks.map((task) => (
+                {wsv.tasks.map((task) => (
                   <button
                     key={task.id}
                     type="button"
-                    className={`ws-tab ${task.id === ws.activeId ? 'active' : ''}`}
+                    className={`ws-tab ${task.id === wsv.activeId ? 'active' : ''}`}
                     onClick={() => switchToId(task.id)}
                     title={task.title}
                   >
@@ -532,7 +920,7 @@ export default function Stage({ user }: { user: User }) {
                     <span
                       className="ws-tab-x"
                       role="button"
-                      aria-label="Închide"
+                      aria-label={t.wsClose}
                       onClick={(e) => {
                         e.stopPropagation()
                         closeTask(task.id)
@@ -543,178 +931,174 @@ export default function Stage({ user }: { user: User }) {
                   </button>
                 ))}
               </div>
-              <div className="ws-zoom" title="Potrivește textul (zoom)">
-                <button type="button" className="ghost" onClick={zoomOut} aria-label="Micșorează">
+              <div className="ws-zoom" title={t.wsZoomFit}>
+                <button type="button" className="ghost" onClick={zoomOut} aria-label={t.wsZoomOut}>
                   A−
                 </button>
                 <span className="ws-zoom-val">{Math.round(monZoom * 100)}%</span>
-                <button type="button" className="ghost" onClick={zoomIn} aria-label="Mărește">
+                <button type="button" className="ghost" onClick={zoomIn} aria-label={t.wsZoomIn}>
                   A+
                 </button>
               </div>
-              {ws.tasks.length > 1 && (
+              {wsv.tasks.length > 1 && (
                 <button
                   type="button"
                   className="ghost"
                   onClick={closeAllTasks}
-                  title="Închide tot"
+                  title={t.wsCloseAll}
                 >
-                  Închide tot
+                  {t.wsCloseAll}
                 </button>
               )}
             </div>
-            {ws.html ? (
-              // PLAYGROUND: pagina scrisă de Kelion rulează live într-un iframe
-              // izolat (srcdoc + sandbox, fără same-origin → nu poate atinge
-              // sesiunea/aplicația). Butonul salvează pagina ca .html pe disc.
-              <div className="workspace-doc">
-                <button
-                  type="button"
-                  className="doc-copy"
-                  onClick={() => saveDocToKelion(ws.title, ws.html ?? '', safeFileName(ws.title, 'html'), 'text/html')}
-                  title="Salvează în memoria lui Kelion + descarcă (.html)"
-                >
-                  {docSaved ? 'Salvat ✓' : 'Salvează'}
-                </button>
-                <iframe
-                  title={ws.title}
-                  srcDoc={ws.html}
-                  className="workspace-frame"
-                  sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
-                />
-              </div>
-            ) : ws.text ? (
-              <div className="workspace-doc">
-                <button
-                  type="button"
-                  className="doc-copy"
-                  onClick={() => void navigator.clipboard?.writeText(ws.text ?? '')}
-                  title="Copiază"
-                >
-                  Copiază
-                </button>
-                <button
-                  type="button"
-                  className="doc-copy"
-                  style={{ right: '6.5rem' }}
-                  onClick={() => saveDocToKelion(ws.title, ws.text ?? '', safeFileName(ws.title, 'txt'), 'text/plain')}
-                  title="Salvează în memoria lui Kelion + descarcă (.txt)"
-                >
-                  {docSaved ? 'Salvat ✓' : 'Salvează'}
-                </button>
-                <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{ws.text}</pre>
-              </div>
-            ) : ws.card ? (
-              <CardView card={ws.card} />
-            ) : ws.url && ws.kind === 'image' ? (
-              // ORICE IMAGINE (Adrian, 27 iul: „pe monitor orice tip de date").
-              // onLoad/onError → starea reală, ca Kelion s-o vadă faptic.
-              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0d12' }}>
-                <img
-                  src={ws.url}
-                  alt={ws.title}
-                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                  onLoad={() => setTaskStatus(ws.activeId, 'ok')}
-                  onError={() => setTaskStatus(ws.activeId, 'error')}
-                />
-              </div>
-            ) : ws.url && ws.kind === 'video' ? (
-              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-                <video
-                  src={ws.url}
-                  controls
-                  style={{ maxWidth: '100%', maxHeight: '100%' }}
-                  onLoadedData={() => setTaskStatus(ws.activeId, 'ok')}
-                  onError={() => setTaskStatus(ws.activeId, 'error')}
-                />
-              </div>
-            ) : ws.url && ws.kind === 'audio' ? (
-              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-                <audio
-                  src={ws.url}
-                  controls
-                  style={{ width: '100%', maxWidth: 520 }}
-                  onLoadedData={() => setTaskStatus(ws.activeId, 'ok')}
-                  onError={() => setTaskStatus(ws.activeId, 'error')}
-                />
-              </div>
-            ) : ws.url && ws.kind === 'pdf' ? (
-              // PDF: vizorul nativ al browserului, în cadru.
-              <iframe
-                title={ws.title}
-                src={ws.url}
-                className="workspace-frame"
-                style={{ background: '#fff' }}
-                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
-                onError={() => setTaskStatus(ws.activeId, 'error')}
-              />
-            ) : ws.url && ws.kind === 'office' ? (
-              // XLS/DOC/PPT: vizorul Microsoft Office online (fișierul trebuie
-              // să fie la un URL public — cele servite de kelionai.app sunt).
-              <iframe
-                title={ws.title}
-                src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(ws.url)}`}
-                className="workspace-frame"
-                style={{ background: '#fff' }}
-                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
-                onError={() => setTaskStatus(ws.activeId, 'error')}
-              />
-            ) : ws.url && ws.kind === 'textfile' ? (
-              // Cod / text / json / csv: aducem conținutul și-l afișăm citibil.
-              <MonitorTextFile url={ws.url} zoom={monZoom} taskId={ws.activeId} />
-            ) : ws.url && ws.kind === 'archive' ? (
-              // Arhive: browserul nu le poate deschide în pagină — oferim
-              // descărcarea, cinstit (conținutul unui zip nu se randează nativ).
-              <div className="workspace-blocked">
-                <p>Arhivă ({ws.title}) — conținutul nu se poate previzualiza în pagină. O poți descărca:</p>
-                <a href={ws.url} download className="composer-send">Descarcă arhiva ↓</a>
-              </div>
-            ) : ws.url && isEmbeddable(ws.url) ? (
-              <iframe
-                title={ws.title}
-                src={normalizeEmbedUrl(ws.url)}
-                className="workspace-frame"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
-                onError={() => setTaskStatus(ws.activeId, 'error')}
-                // ONE voice — Kelion's. Surfaces stay SILENT (no autoplay audio):
-                // only a YouTube clip the user chose to watch may play sound. The
-                // route map gets geolocation (no audio) so it can follow the car.
-                allow={
-                  ws.kind === 'youtube'
-                    ? 'autoplay; encrypted-media; picture-in-picture; fullscreen'
-                    : ws.kind === 'map'
-                      ? 'geolocation'
-                      : ''
-                }
-              />
-            ) : ws.url ? (
-              <div className="workspace-blocked">
-                <p>Această pagină nu poate fi afișată aici.</p>
-                {/^https?:\/\//i.test(ws.url) && (
-                  <a href={ws.url} target="_blank" rel="noreferrer" className="composer-send">
-                    Deschide într-un tab nou ↗
-                  </a>
-                )}
-              </div>
-            ) : null}
+            {/* LIVE TABS (fluidity #6, Jul 27: „the monitor tabs reload the page
+            from scratch on every switch”): all surfaces stay MOUNTED — switching
+            only hides/shows them, no reload, no lost scroll/state. EXCEPTION:
+            SOUND sources (youtube/video/audio) mount ONLY when active, otherwise
+            a hidden clip would play over Kelion's voice. */}
+            {wsv.tasks.map((task) => {
+              const active = task.id === wsv.activeId
+              const sonor = task.kind === 'youtube' || task.kind === 'video' || task.kind === 'audio'
+              if (sonor && (!active || !ws.open)) return null
+              return (
+                <div key={task.id} style={active ? { display: 'contents' } : { display: 'none' }}>
+                {task.kind === 'build' ? (
+                  // THE CONSTRUCTOR PANEL (Stage 4b) — own poller, no url/text.
+                  <BuildSurface zoom={monZoom} />
+                ) : task.html ? (
+                  // PLAYGROUND: the page written by Kelion runs live in an isolated
+                  // iframe (srcdoc + sandbox, no same-origin → it can't reach
+                  // the session/app). The button saves the page as .html on disc.
+                  <div className="workspace-doc">
+                    <button
+                      type="button"
+                      className="doc-copy"
+                      onClick={() => saveDocToKelion(task.title, task.html ?? '', safeFileName(task.title, 'html'), 'text/html')}
+                      title={t.wsSaveHtml}
+                    >
+                      {docSaved ? t.wsSaved : t.wsSave}
+                    </button>
+                    <iframe
+                      title={task.title}
+                      srcDoc={task.html}
+                      className="workspace-frame"
+                      sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
+                    />
+                  </div>
+                ) : task.text ? (
+                  <div className="workspace-doc">
+                    <button
+                      type="button"
+                      className="doc-copy"
+                      onClick={() => copyDocText(task.text ?? '')}
+                      title={t.wsCopy}
+                    >
+                      {docCopied ? '✓' : t.wsCopy}
+                    </button>
+                    <button
+                      type="button"
+                      className="doc-copy"
+                      style={{ right: '6.5rem' }}
+                      onClick={() => saveDocToKelion(task.title, task.text ?? '', safeFileName(task.title, 'txt'), 'text/plain')}
+                      title={t.wsSaveTxt}
+                    >
+                      {docSaved ? t.wsSaved : t.wsSave}
+                    </button>
+                    <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{task.text}</pre>
+                  </div>
+                ) : task.card ? (
+                  <CardView card={task.card} />
+                ) : task.url && task.kind === 'image' ? (
+                  // ORICE IMAGINE (Adrian, 27 iul: „pe monitor orice tip de date").
+                  // onLoad/onError → the real state, so Kelion factually sees it.
+                  <MonitorImage url={task.url} title={task.title} taskId={task.id} />
+                ) : task.url && task.kind === 'video' ? (
+                  <MonitorVideo url={task.url} taskId={task.id} />
+                ) : task.url && task.kind === 'audio' ? (
+                  <MonitorAudio url={task.url} taskId={task.id} />
+                ) : task.url && task.kind === 'pdf' ? (
+                  // PDF: the browser's native viewer, in a frame.
+                  <DocFrame title={task.title} src={task.url} taskId={task.id} />
+                ) : task.url && task.kind === 'office' ? (
+                  // XLS/DOC/PPT: the Microsoft Office online viewer (the file must
+                  // be at a public URL — the ones served by kelionai.app are).
+                  <DocFrame
+                    title={task.title}
+                    src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(task.url)}`}
+                    taskId={task.id}
+                  />
+                ) : task.url && task.kind === 'markdown' ? (
+                  // MARKDOWN (Aug 2): rendered formatted, not raw text.
+                  <MonitorMarkdown url={task.url} zoom={monZoom} taskId={task.id} />
+                ) : task.url && task.kind === 'htmlfile' ? (
+                  // A saved .html page: runs sandboxed like the playground 'app'.
+                  <MonitorHtmlFile url={task.url} taskId={task.id} />
+                ) : task.url && task.kind === 'textfile' ? (
+                  // Code / text / json / csv: we fetch the content and show it readable.
+                  <MonitorTextFile url={task.url} zoom={monZoom} taskId={task.id} />
+                ) : task.url && task.kind === 'archive' ? (
+                  // Archives: the browser can't open them in page — we offer
+                  // the download, honestly (a zip's content doesn't render natively).
+                  <div className="workspace-blocked">
+                    <p>{t.wsArchiveNote.replace('{name}', task.title)}</p>
+                    <a href={task.url} download className="composer-send">{t.wsDownloadArchive}</a>
+                  </div>
+                ) : task.url && task.kind === 'file' ? (
+                  // BINARIES without an in-page viewer (Aug 2 — epub/exe/apk/dmg/
+                  // fonts): an honest panel + download instead of a dead frame.
+                  <div className="workspace-blocked">
+                    <p>{task.title} — {t.wsFileNoPreview}</p>
+                    <a href={task.url} download className="composer-send">{t.wsDownloadFile}</a>
+                  </div>
+                ) : task.url && isEmbeddable(task.url) ? (
+                  <iframe
+                    title={task.title}
+                    src={normalizeEmbedUrl(task.url)}
+                    className="workspace-frame"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                    onLoad={() => setTaskStatus(task.id, 'ok')}
+                    onError={() => setTaskStatus(task.id, 'error')}
+                    // ONE voice — Kelion's. Surfaces stay SILENT (no autoplay audio):
+                    // only a YouTube clip the user chose to watch may play sound. The
+                    // route map gets geolocation (no audio) so it can follow the car.
+                    allow={
+                      task.kind === 'youtube'
+                        ? 'autoplay; encrypted-media; picture-in-picture; fullscreen'
+                        : task.kind === 'map'
+                          ? 'geolocation'
+                          : ''
+                    }
+                  />
+                ) : task.url ? (
+                  <div className="workspace-blocked">
+                    <p>{t.wsPageBlocked}</p>
+                    {/^https?:\/\//i.test(task.url) && (
+                      <a href={task.url} target="_blank" rel="noreferrer" className="composer-send">
+                        {t.wsOpenTab}
+                      </a>
+                    )}
+                  </div>
+                ) : null}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
-      {/* Avatar canvas — shrinks to the corner in monitor mode. ARANJAREA LUI
-          ADRIAN (11 iul: „vreau acces să rescalez eu avatarul și să-l
-          poziționez cum cred eu, dând dublu click pe el"): dublu-click pe
-          avatar = mod de aranjare — tragi ca să-l muți, rotița ca să-l
-          scalezi, dublu-click din nou = gata; se ține minte PE SERVER
-          (/api/prefs, per utilizator) cu oglindă în localStorage. */}
+      {/* Avatar canvas — shrinks to the corner in monitor mode. ADRIAN'S
+      LAYOUT (Jul 11: „I want access to rescale the avatar myself and position
+      it as I see fit, by double-clicking it”): double-click on the avatar =
+      layout mode — drag to move it, the wheel to scale it, double-click again
+      = done; remembered ON THE SERVER (/api/prefs, per user) with a
+      localStorage mirror. */}
       <div
         ref={stageRef}
-        className={`stage-canvas ${monitorOn ? 'pip' : ''} ${avatarEdit ? 'editing' : ''}`}
+        className={`stage-canvas ${monitorOn ? 'pip' : ''}`}
         style={
           monitorOn
             ? {
-                // În timpul unui dans, ringul e centrul ecranului (mai mare,
-                // vizibil); altfel, exact aranjarea salvată a lui Adrian.
+                // During a dance, the ring is the center of the screen (bigger,
+                // visible); otherwise, exactly Adrian's saved arrangement.
                 transform: dancing
                   ? `translate(calc(30vw - 14px), calc(30vh - 180px)) scale(${Math.max(avatarBox.s, 0.62)})`
                   : `translate(calc(${avatarBox.x}vw - 14px), calc(${avatarBox.y}vh - 180px)) scale(${avatarBox.s})`,
@@ -722,25 +1106,25 @@ export default function Stage({ user }: { user: User }) {
             : undefined
         }
       >
-      {/* MODUL DE ARANJARE MANUALĂ DEZACTIVAT (Adrian, 24 iul: „dezactivează
-          fereastra din rotiță pentru mutări și ajustări manuale") — dublu-click
-          nu mai deschide fereastra de tras/scalat cu rotița; aranjarea salvată
-          pe server rămâne exact cum e. */}
-      {/* Adrian, 11 iul: „avatarul trebuie să se vadă complet" + „picioarele nu
-          i se văd complet" — clipurile de mișcare leagănă șoldurile, deci sub
-          tălpi (−1.65) trebuie aer real: camera centrată la y −0.25, distanța
-          4.6 → cadrul acoperă −1.93…+1.43. Mărimea finală o decide Adrian cu
-          dublu-click (modul de aranjare de mai jos). */}
+      {/* MANUAL LAYOUT MODE DISABLED (Adrian, Jul 24: „disable the wheel
+      window for manual moves and adjustments”) — double-click no longer
+      opens the drag/scale-with-wheel window; the layout saved on the server
+      stays exactly as it is. */}
+      {/* Adrian, Jul 11: „the avatar must be fully visible” + „his feet are
+      not fully seen” — the motion clips sway the hips, so below the soles
+      (−1.65) there must be real air: camera centered at y −0.25, distance
+      4.6 → the frame covers −1.93…+1.43. The final size is decided by Adrian
+      with a double-click (the layout mode below). */}
       <Canvas shadows="percentage" camera={{ position: [0, -0.25, 4.6], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
         {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
             Kelion floats over the monitor content instead of sitting in a black box. */}
-        {!monitorOn && <color attach="background" args={['#0b0d12']} />}
+        {!monitorOn && <color attach="background" args={[themeBg()]} />}
         {/* Self-contained lighting (key + cool fill + rim) — NO remote HDR.
             `<Environment preset="city">` fetched a ~1MB HDR from an external CDN
             (githack/pmndrs) INSIDE the avatar's Suspense: on a fresh phone with a
             slow or blocked network that fetch could hang, so the Suspense never
-            resolved and the avatar stayed BLACK forever (Adrian, 8 iul: „aplicația
-            publicată și defectă"). The landing already dropped HDR for this exact
+            resolved and the avatar stayed BLACK forever (Adrian, Jul 8: „the app
+            published and broken”). The landing already dropped HDR for this exact
             reason; the in-app stage now matches — same look, zero external deps. */}
         <ambientLight intensity={0.75} />
         <directionalLight position={[2, 3, 2]} intensity={1.6} castShadow />
@@ -748,16 +1132,9 @@ export default function Stage({ user }: { user: User }) {
         <Suspense fallback={null}>
           <AvatarModel />
         </Suspense>
-        <OrbitControls
-          enablePan={false}
-          enableZoom={false}
-          minPolarAngle={Math.PI / 2.3}
-          maxPolarAngle={Math.PI / 1.95}
-          // Kelion may only be turned ±3° around its axis (left/right).
-          minAzimuthAngle={-Math.PI / 60}
-          maxAzimuthAngle={Math.PI / 60}
-          target={[0, 0.7, 0]}
-        />
+        {/* The camera limits come from the shared source (lib/avatarCamera) —
+        the same on the landing and in the app, so Kelion is framed identically. */}
+        <OrbitControls {...AVATAR_ORBIT} />
       </Canvas>
       <AvatarLoading />
       </div>
@@ -776,9 +1153,9 @@ export default function Stage({ user }: { user: User }) {
             title={
               user.role === 'customer'
                 ? userCreditOut
-                  ? 'Credit epuizat — reîncarcă pentru a continua'
+                  ? uiStrings().creditOut
                   : userCreditOut === false
-                    ? 'Ai credit'
+                    ? uiStrings().creditOk
                     : ''
                 : ''
             }
@@ -792,50 +1169,211 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
-            {/* PUNGA LUI KELION în bară (Adrian, 24 iul: „arată adminului
-                realitatea"): SOLDUL REAL, exact din contul OpenRouter (USD) —
-                creierul central. Roșu când e sub prag. Click → alimentare. */}
-            {brainCredit && (
+            {/* LACĂTUL SPUS, NU BARĂ GOALĂ (auditul admin, 3 aug): cu lacătul
+            armat, 423 pe /api/admin/* lăsa bara fără NICIO pastilă și fără
+            explicație. Pastila unică 🔒 duce la fereastra de cod. */}
+            {brainLocked && (
+              <button type="button" className="ghost" onClick={() => openAdmin()} title={adminStrings().pillsLocked}>
+                🔒 admin
+              </button>
+            )}
+            {/* CITIRE VECHE ≠ CITIRE ACTUALĂ (auditul admin, 3 aug): după ≥3
+            polluri picate (~90s), pastilele se estompează și marcajul ⚠ spune
+            de când sunt cifrele — nu mai stau verzi la nesfârșit. */}
+            {brainStale && !brainLocked && (
+              <span
+                className="ghost"
+                style={{ opacity: 0.9, color: '#e6a23c' }}
+                title={adminStrings().pillsStale.replace('{min}', String(brainStaleMin ?? '?'))}
+              >
+                ⚠ {brainStaleMin != null ? `${brainStaleMin}m` : ''}
+              </span>
+            )}
+            {/* THE SERPER PILL (same "REAL everywhere" rule): the REAL
+            remaining search credit read
+            from Serper's own /account endpoint — the wallet the web search
+            skill spends from. Key missing or read failed → "Serper ⚠", never
+            "Serper 0": a failed read is not an empty account. Click → the
+            provider's dashboard. */}
+            {brainCredit && !brainLocked && (
               <button
                 type="button"
-                className={`ghost ${brainCredit.openrouter.low ? 'blink-red' : ''}`}
-                onClick={() => window.open(brainCredit.openrouter.topup, '_blank', 'noopener')}
+                className="ghost"
+                style={brainStale ? { opacity: 0.55 } : undefined}
+                onClick={() => window.open('https://serper.dev/dashboard', '_blank', 'noopener')}
                 title={
-                  brainCredit.openrouter.live
-                    ? `OpenRouter (creierul central): $${(brainCredit.openrouter.balance ?? 0).toFixed(2)} real${brainCredit.openrouter.low ? ' — depune bani!' : ''} · click pentru alimentare`
-                    : 'Nu pot citi soldul OpenRouter (cheie lipsă sau cont inaccesibil)'
+                  brainCredit.serper?.live
+                    ? adminStrings().serperPillLive.replace('{n}', (brainCredit.serper.balance ?? 0).toLocaleString())
+                    : adminStrings().serperPillDead
                 }
               >
-                {brainCredit.openrouter.live
-                  ? `OpenRouter $${(brainCredit.openrouter.balance ?? 0).toFixed(2)}`
-                  : '⚠ OpenRouter'}
+                {brainCredit.serper?.live
+                  ? `Serper ${formatSerperK(brainCredit.serper.balance ?? 0)}`
+                  : 'Serper ⚠'}
               </button>
             )}
-            {/* PUNGA STRIPE (Adrian, 24 iul: „după OpenRouter — banii în Stripe,
-                reali"): disponibil acum + în tranzit. Roșu pulsând sub zero.
-                Click → tabul Bani din admin (circuitul complet). */}
-            {brainCredit?.stripe && (
+            {/* THE GEMINI PILL (Adrian, 3 aug: „vreau să văd și aici creditul de la
+            gemini"), lângă restul: creierul de LUCRU e Gemini Tier 2 (plătit pe
+            contul Google al ownerului). N-are sold de citit → arătăm cheltuiala
+            REALĂ pe luna curentă, din jurnalul nostru (cost_events kind='gemini').
+            DB necitibil → „Gemini ⚠", niciodată „$0.00"; live cu 0 = zero real
+            (nimic cheltuit încă luna asta). Click → Google AI Studio. */}
+            {brainCredit && !brainLocked && (creditEdit ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="ghost"
+                  autoFocus
+                  style={{ width: 96 }}
+                  defaultValue={brainCredit.gemini?.creditGbp != null ? String(brainCredit.gemini.creditGbp) : ''}
+                  placeholder="ex: 10.88"
+                  title={creditErr || 'Enter=salvează · gol=pagina Google · „-”=șterge · Esc=renunț'}
+                  onBlur={() => setCreditEdit(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setCreditEdit(false); setCreditErr(''); return }
+                    if (e.key !== 'Enter') return
+                    // Gol → pagina Google; „-" → șterge; număr → salvează. Fără
+                    // window.prompt/alert: totul inline, non-blocant (nu îngheață).
+                    const val = (e.currentTarget.value || '').trim()
+                    if (val === '') { window.open('https://aistudio.google.com/billing', '_blank', 'noopener'); setCreditEdit(false); setCreditErr(''); return }
+                    const clear = val === '-'
+                    const gbp = clear ? null : Number(val.replace(',', '.'))
+                    if (!clear && (!Number.isFinite(gbp) || (gbp as number) < 0)) { setCreditErr(adminStrings().gemCreditInvalid); return }
+                    setCreditEdit(false); setCreditErr('')
+                    void fetch('/api/admin/gemini-credit', {
+                      method: 'POST',
+                      headers: { 'content-type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ gbp }),
+                    })
+                      .then((r) => (r.ok ? (r.json() as Promise<{ ok?: boolean; gbp?: number; at?: string; cleared?: boolean }>) : null))
+                      .then((j) => {
+                        // Starea se scrie DOAR din răspunsul serverului (nu pe null).
+                        if (!j?.ok) { setCreditErr(adminStrings().gemCreditSaveFailed); setCreditEdit(true); return }
+                        setBrainCredit((prev) =>
+                          prev && prev.gemini
+                            ? { ...prev, gemini: { ...prev.gemini, creditGbp: j.cleared ? undefined : j.gbp, creditAt: j.cleared ? undefined : j.at } }
+                            : prev,
+                        )
+                      })
+                      .catch(() => { setCreditErr(adminStrings().gemCreditSaveFailed); setCreditEdit(true) })
+                  }}
+                />
+                {creditErr && <span style={{ color: '#e5484d', fontSize: 12 }}>{creditErr}</span>}
+              </span>
+            ) : (
               <button
                 type="button"
-                className={`ghost ${brainCredit.stripe.available <= 0 ? 'blink-red' : ''}`}
-                onClick={() => openAdmin('finance')}
-                title={`Punga Stripe (banii userilor): disponibil £${brainCredit.stripe.available.toFixed(2)}, în tranzit £${brainCredit.stripe.pending.toFixed(2)} · click pentru circuitul banilor`}
+                className={`ghost ${brainCredit.gemini && !brainCredit.gemini.serving ? 'blink-red' : ''}`}
+                style={brainStale ? { opacity: 0.55 } : undefined}
+                onClick={() => { setCreditErr(''); setCreditEdit(true) }}
+                title={(() => {
+                  // {spend} = măsurătoarea reușită SAU declararea eșecului —
+                  // niciodată „$0.00 (măsurat)" fabricat dintr-un ?? 0 (auditul
+                  // admin, 3 aug; tiparul „£0.00" din 30 iul).
+                  const spend =
+                    brainCredit.gemini?.monthUsd != null
+                      ? adminStrings().gemSpendMeasured.replace('{n}', brainCredit.gemini.monthUsd.toFixed(2))
+                      : adminStrings().gemSpendUnreadable
+                  if (brainCredit.gemini?.creditGbp != null) {
+                    return adminStrings()
+                      .gemCreditTitle.replace('{gbp}', brainCredit.gemini.creditGbp.toFixed(2))
+                      .replace(
+                        '{date}',
+                        brainCredit.gemini.creditAt
+                          ? ' · ' + new Date(brainCredit.gemini.creditAt).toLocaleDateString('ro-RO')
+                          : '',
+                      )
+                      .replace('{spend}', spend)
+                  }
+                  return brainCredit.gemini?.serving
+                    ? adminStrings().gemPillLive.replace('{spend}', spend)
+                    : adminStrings().gemPillDead.replace('{why}', brainCredit.gemini?.reason ?? 'necunoscut')
+                })()}
               >
-                Stripe £{brainCredit.stripe.available.toFixed(2)}
-                {brainCredit.stripe.pending > 0 && ` (+£${brainCredit.stripe.pending.toFixed(2)} în tranzit)`}
+                {/* CREDITUL REAL, NU CEL STĂTUT (Adrian, 5 aug: „afișezi creditul real"):
+                    cifra £ spusă de owner o arătăm DOAR când proba live zice că mai e
+                    credit (serving). Când Google spune „prepayment credits depleted",
+                    contul e GOL — arătăm £0 MĂSURAT, nu £11.58 stătut lângă un ⚠ (fix
+                    „valoare veche prezentată ca stare reală", regula #1). */}
+                {brainCredit.gemini?.serving && brainCredit.gemini?.creditGbp != null
+                  ? `Gemini £${brainCredit.gemini.creditGbp.toFixed(2)}`
+                  : brainCredit.gemini?.serving
+                    ? 'Gemini ✓'
+                    : brainCredit.gemini?.reason === 'depleted'
+                      ? 'Gemini £0 ⚠'
+                      : 'Gemini ⚠'}
+              </button>
+            ))}
+            {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
+            permanently on the interface in the top bar”). Two figures, because they
+            answer two different questions: RAM = does anything else FIT on the
+            machine, CPU = can it still COPE. Red when memory drops under 10% free
+            or the load passes 200% — the same thresholds as the sentinel's email
+            alarm, so the bar and the mail never contradict. When it can't be
+            measured it writes „⚠ VPS”, not zeros (see the type). */}
+            {brainCredit && !brainLocked && (
+              <button
+                type="button"
+                className={`ghost ${
+                  brainCredit.vps && (brainCredit.vps.liberPct <= (brainCredit.vps.pragMemoriePct ?? 10) || brainCredit.vps.incarcarePct >= (brainCredit.vps.pragIncarcarePct ?? 200))
+                    ? 'blink-red'
+                    : ''
+                }`}
+                style={brainStale ? { opacity: 0.55 } : undefined}
+                onClick={() => openAdmin()}
+                title={
+                  brainCredit.vps
+                    ? adminStrings()
+                        .vpsPillLive.replace('{free}', brainCredit.vps.liberGb.toFixed(1))
+                        .replace('{total}', brainCredit.vps.totalGb.toFixed(1))
+                        .replace('{load}', String(brainCredit.vps.incarcarePct))
+                        .replace('{cpus}', String(brainCredit.vps.procesoare))
+                        .replace('{avg}', brainCredit.vps.incarcare.map((n) => n.toFixed(2)).join(' / '))
+                    : adminStrings().vpsPillDead
+                }
+              >
+                {brainCredit.vps
+                  ? `VPS ${brainCredit.vps.liberGb.toFixed(1)}GB · ${brainCredit.vps.incarcarePct}%`
+                  : '⚠ VPS'}
               </button>
             )}
+            {/* HERE STOOD THE „Stripe £0.00” PILL from the top bar. Removed on
+            Jul 30, together with Stripe: the users' money no longer passes through
+            it — they pay on the Revolut link, straight into Adrian's account. The
+            figure left there would have never shown anything but zero — exactly
+            the kind of „0” that means nothing and scares for no reason. (Pastila
+            de sold OpenRouter a murit și ea, 3 aug — furnizorul a fost extirpat;
+            starea creierului se vede pe pastila Gemini.) */}
           </>
         )}
-        {/* Credit + reîncărcare pentru ORICE user logat (Adrian, 24 iul). Din
-            meniul portofelului se ajunge și la Setări și la conectarea Gmail —
-            bara nu mai are rotița ⚙ separată, nici butonul „Connect Google". */}
-        <WalletButton
-          onOpenSettings={() => setSettingsOpen(true)}
-          googleConnected={user.googleConnected}
-          onConnectGoogle={startGoogleConnect}
-          isAdmin={user.role === 'admin'}
-        />
+        {/* Credit + top-up for regular users (Adrian, Jul 24). From the
+        wallet menu you also reach Settings and the Gmail connection — the bar
+        no longer has the separate ⚙ wheel, nor the „Connect Google” button.
+        THE ADMIN NO LONGER HAS THE „⚙ Setări" PILL HERE (Adrian's order):
+        his settings live in the Admin panel now, so the header keeps only
+        measurements (Gemini / Serper / VPS). */}
+        {user.role !== 'admin' && (
+          <WalletButton
+            onOpenSettings={() => setSettingsOpen(true)}
+            googleConnected={user.googleConnected}
+            onConnectGoogle={startGoogleConnect}
+          />
+        )}
+        {/* „Add credits" for regular users (Adrian's order — the exact label,
+        English for all users): opens the existing credits panel (the wallet
+        menu with the 75/150/375 packs + custom amount ×5). */}
+        {user.role !== 'admin' && (
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => window.dispatchEvent(new Event('kelion:wallet-open'))}
+            title="Add credits — pick a pack or type an amount"
+          >
+            Add credits
+          </button>
+        )}
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,
               click-to-enlarge. The topbar stays clean for signed-in users. */}
@@ -850,9 +1388,9 @@ export default function Stage({ user }: { user: User }) {
                 setRecArmed(false)
                 void toggleRecording()
               }}
-              title={recording ? 'Stop recording' : 'Record a promo clip'}
+              title={recErr || (recording ? t.recStopTitle : t.recStartTitle)}
             >
-              {recording ? '■ Rec' : '● Rec'}
+              {recErr ? 'Rec ⚠' : recording ? '■ Rec' : '● Rec'}
             </button>
           )}
           {user.role === 'admin' && (
@@ -860,11 +1398,7 @@ export default function Stage({ user }: { user: User }) {
               type="button"
               className="ghost"
               onClick={() => openAdmin()}
-              title={
-                adminLock?.armed && !adminLock.unlocked
-                  ? 'Încuiat — vorbește cu Kelion (amprenta ta îl deschide) sau tastează secretul'
-                  : undefined
-              }
+              title={adminLock?.armed && !adminLock.unlocked ? t.lockedTitle : undefined}
             >
               {adminLock?.armed && !adminLock.unlocked ? '🔒 Admin' : 'Admin'}
             </button>
@@ -874,13 +1408,22 @@ export default function Stage({ user }: { user: User }) {
               type="button"
               className="ghost"
               onClick={startGoogleConnect}
-              title="Grant Gmail, Calendar & Drive access so Kelion can act on them"
+              title={t.connectGoogleTitle}
             >
-              Connect Google
+              {t.connectGoogle}
             </button>
           )}
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setTheme(toggleTheme())}
+            title={theme === 'light' ? t.themeToDark : t.themeToLight}
+            aria-label={theme === 'light' ? t.themeToDark : t.themeToLight}
+          >
+            {theme === 'light' ? '☾' : '☀'}
+          </button>
           <button type="button" className="ghost" onClick={() => setContactOpen(true)}>
-            Contact
+            {t.contactLabel}
           </button>
           <button type="button" className="ghost" onClick={() => void logout()}>
             {t.signOut}
@@ -893,8 +1436,8 @@ export default function Stage({ user }: { user: User }) {
       {unlockOpen && (
         <div className="unlock-overlay" onClick={() => setUnlockOpen(false)}>
           <div className="unlock-card" onClick={(e) => e.stopPropagation()}>
-            <h3>Panoul Admin e încuiat 🔒</h3>
-            <p>Vorbește cu Kelion — amprenta ta vocală îl deschide singură — sau tastează secretul de activare.</p>
+            <h3>{t.adminLocked}</h3>
+            <p>{t.adminLockedHint}</p>
             <form
               onSubmit={(e) => {
                 e.preventDefault()
@@ -906,17 +1449,20 @@ export default function Stage({ user }: { user: User }) {
                 autoFocus
                 value={unlockCode}
                 onChange={(e) => setUnlockCode(e.target.value)}
-                placeholder="Secretul de activare"
+                placeholder={t.unlockPlaceholder}
                 autoComplete="current-password"
               />
-              <button type="submit">Deblochează</button>
+              <button type="submit">{t.adminUnlock}</button>
             </form>
             {unlockErr && <p className="unlock-err">{unlockErr}</p>}
           </div>
         </div>
       )}
       {adminOpen && (
-        <AdminPanel initialTab={adminTab} onClose={() => setAdminOpen(false)} />
+        <AdminPanel
+          initialTab={adminTab}
+          onClose={() => setAdminOpen(false)}
+        />
       )}
 
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}

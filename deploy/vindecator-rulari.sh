@@ -55,7 +55,61 @@ for r in data.get("workflow_runs", []):
         pass
 ' 2>/dev/null | head -15)
 
+# ── JOBUL N-A PORNIT NICIODATĂ ≠ JOBUL A PICAT ──────────────────────────────
+#
+# Adrian, 31 iul: „care factură git? de ce am factură git?" — și pe bună
+# dreptate. Toată ziua i-am tot spus „e blocată facturarea", fără s-o fi
+# măsurat vreodată; am dedus-o dintr-un simptom. Iar sentinela îi trimitea
+# email după email cu „Rulare deploy ROȘIE și după 2 rerulări", ceea ce sună a
+# problemă de cod — deși ea însăși scria în același email „live == master".
+#
+# CE E MĂSURAT (34 din 34 de rulări azi, verificat prin API):
+#   jobul se termină în 3-11 secunde, `runner_id: 0` (niciun executant nu i-a
+#   fost atribuit vreodată) și logurile dau 404 (n-a produs nicio linie).
+# Asta NU e un test picat. E GitHub care nu pornește jobul deloc.
+#
+# CE NU E MĂSURAT: DE CE. Poate fi facturare, Actions dezactivat, limită de
+# cheltuială, politică de organizație — nu pot alege între ele de aici, deci
+# nici emailul n-o mai face. Spune ce se vede și unde să se uite omul.
+#
+# Rerularea unui job care n-a pornit e garantat inutilă: se rerulează același
+# nimic. Deci nici nu-l mai rerulăm, nici nu mai dăm câte un email pe rulare —
+# UNUL singur, cu cauza reală.
+jobul_nu_a_pornit() {
+  gh "$API/actions/runs/$1/jobs?per_page=20" | python3 -c '
+import sys, json, datetime
+try:
+    jobs = json.load(sys.stdin).get("jobs", [])
+except Exception:
+    sys.exit(1)
+if not jobs:
+    sys.exit(1)
+def sec(j):
+    try:
+        a = datetime.datetime.fromisoformat(j["started_at"].replace("Z", "+00:00"))
+        b = datetime.datetime.fromisoformat(j["completed_at"].replace("Z", "+00:00"))
+        return (b - a).total_seconds()
+    except Exception:
+        return 999
+# TOATE joburile: fără executant atribuit ȘI moarte în sub 20 de secunde.
+sys.exit(0 if all(not j.get("runner_id") and sec(j) < 20 for j in jobs) else 1)
+' 2>/dev/null
+}
+
 for RID in $RUNS; do
+  if jobul_nu_a_pornit "$RID"; then
+    echo "[vindecator] $(date -u +%H:%M) $RID: niciun executant atribuit — GitHub nu pornește jobul; nu rerulez"
+    # Un singur email pentru TOATĂ starea asta (cheie fixă, nu per rulare):
+    # serverul are throttle pe cheie, deci nu se mai transformă în torent.
+    if ! grep -q '^actions-nu-porneste:' "$STATE"; then
+      echo "actions-nu-porneste:$(date -u +%F)" >> "$STATE"
+      [ -n "$BRIDGE" ] && curl -s -m 10 -X POST -H "x-bridge-secret: $BRIDGE" \
+        -H 'content-type: application/json' \
+        -d "{\"key\":\"actions_nu_porneste\",\"subject\":\"[Kelion] GitHub nu porneste joburile deloc (nu e cod)\",\"body\":\"MASURAT: joburile se termina in 3-11 secunde, cu runner_id 0 (niciun executant atribuit) si loguri 404 (nicio linie produsa). Un job care nu porneste NU e un test picat, si rerularea lui e inutila — am oprit rerularile si emailurile pe fiecare rulare.\\n\\nNU AM PUTUT MASURA DE CE: facturare, Actions dezactivat, limita de cheltuiala sau politica de organizatie — nu pot distinge de aici. Uita-te la GitHub -> Settings -> Billing and plans, si la tab-ul Actions (de obicei apare un banner cu motivul).\\n\\nPublicarea NU e afectata: live == master ($SHORT). Merge prin cron pe VPS, independent de Actions. Verificarea PR-urilor merge tot pe VPS (porti-pr.sh).\"}" \
+        http://127.0.0.1:8080/api/ops/alert > /dev/null || true
+    fi
+    continue
+  fi
   N=$(grep -c "^$RID:" "$STATE" || true)
   if [ "$N" -ge 2 ]; then
     if ! grep -q "^$RID:alerted" "$STATE"; then

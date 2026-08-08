@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { validateRunbook, RUNBOOKS } from './runbooks.js'
+import { validateRunbook, RUNBOOKS, isValidSysPackageName, runRunbook } from './runbooks.js'
 import { isValidBranch, normalizeBranch } from './github.js'
 
-// FĂRĂ RESTRICȚII (ordinul lui Adrian, 25 iul): nu există aprobare, plafoane
-// sau blocări — gărzile rămase sunt pur TEHNICE (nume valide), nu de politică.
+// NO RESTRICTIONS (Adrian's order, Jul 25): there is no approval, no
+// ceilings and no blocks — the remaining guards are purely TECHNICAL (valid
+// names), not policy.
 describe('validateRunbook', () => {
   it('refuză un runbook necunoscut și listează ce există', () => {
     const r = validateRunbook('sterge-tot')
@@ -23,6 +24,27 @@ describe('validateRunbook', () => {
   it('registrul conține doar workflow-uri reale, cu comenzi fixe', () => {
     const allowed = new Set(['deploy.yml', 'vps-diag.yml', 'sentinel.yml', 'vps-run.yml'])
     for (const rb of Object.values(RUNBOOKS)) expect(allowed.has(rb.workflow)).toBe(true)
+  })
+
+  // THE RESTORE DRILL (Adrian, Jul 30). An untested backup is not a net, it's
+  // an assumption. The drill MUST stay non-destructive: if someone ever lets
+  // the restore slip over the LIVE database, they lose everything exactly on
+  // the day they needed the net. That's why the command is kept under test,
+  // not just recited.
+  it('proba de restaurare e NEDISTRUCTIVĂ: bază temporară, ștearsă la final', () => {
+    const cmd = RUNBOOKS['proba-restaurare']?.inputs?.cmd ?? ''
+    expect(cmd).toBeTruthy()
+    // It restores INTO A DRILL DATABASE, not over the live one.
+    expect(cmd).toContain('CREATE DATABASE $BAZA')
+    expect(cmd).toContain('kelion_proba_restaurare')
+    // And it drops it after counting.
+    expect(cmd).toContain('DROP DATABASE $BAZA')
+    // It stops at the first error — a "half" restore is not allowed to pass
+    // as a success.
+    expect(cmd).toContain('ON_ERROR_STOP=1')
+    expect(cmd.startsWith('set -e;')).toBe(true)
+    // It is NOT allowed to write into the live database.
+    expect(cmd).not.toContain('psql "$PGURL" -f')
   })
 })
 
@@ -52,3 +74,39 @@ describe('isValidBranch (gardă tehnică git, nu politică)', () => {
     expect(isValidBranch('')).toBe(false)
   })
 })
+
+describe('isValidSysPackageName', () => {
+  it('validează pachete Debian/Ubuntu valide', () => {
+    expect(isValidSysPackageName('curl')).toBe(true)
+    expect(isValidSysPackageName('htop')).toBe(true)
+    expect(isValidSysPackageName('build-essential')).toBe(true)
+    expect(isValidSysPackageName('python3.10')).toBe(true)
+    expect(isValidSysPackageName('libssl-dev')).toBe(true)
+  })
+
+  it('respinge nume de pachete invalide sau periculoase', () => {
+    expect(isValidSysPackageName('')).toBe(false)
+    expect(isValidSysPackageName('curl; rm -rf /')).toBe(false)
+    expect(isValidSysPackageName('htop && reboot')).toBe(false)
+    expect(isValidSysPackageName('pkg|sh')).toBe(false)
+    expect(isValidSysPackageName('$(whoami)')).toBe(false)
+    expect(isValidSysPackageName('pachet cu spatii')).toBe(false)
+  })
+})
+
+describe('runbook instaleaza-pachet-sistem', () => {
+  it('este un runbook valid în registrul de runbooks', () => {
+    expect(RUNBOOKS['instaleaza-pachet-sistem']).toBeDefined()
+    expect(RUNBOOKS['instaleaza-pachet-sistem'].workflow).toBe('vps-run.yml')
+    expect(validateRunbook('instaleaza-pachet-sistem').ok).toBe(true)
+  })
+
+  it('refuză instalarea dacă numele pachetului este lipsă sau invalid', async () => {
+    const r1 = await runRunbook('instaleaza-pachet-sistem')
+    expect(r1).toContain('nume_pachet_invalid')
+
+    const r2 = await runRunbook('instaleaza-pachet-sistem', { pachet: 'curl; rm -rf /' })
+    expect(r2).toContain('nume_pachet_invalid')
+  })
+})
+

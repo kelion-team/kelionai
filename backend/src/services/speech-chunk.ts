@@ -1,12 +1,13 @@
-// Împarte textul de rostit în BUCĂȚI la graniță de frază, ca sinteza (TTS) să
-// curgă pe bucăți: Kelion începe să vorbească din PRIMA frază (time-to-first-
-// audio mic), în loc să aștepte sinteza întregii replici. Bucăți scurte → prima
-// voce iese repede; restul se sintetizează cât se redă prima. Funcție PURĂ,
-// testabilă separat.
+// Splits the text to speak into CHUNKS at sentence boundaries, so the
+// synthesis (TTS) flows in pieces: Kelion starts speaking from the FIRST
+// sentence (small time-to-first-audio), instead of waiting for the whole
+// reply to be synthesized. Short chunks → the first voice comes out fast;
+// the rest is synthesized while the first plays. PURE function, separately
+// testable.
 export function splitForSpeech(text: string, maxLen = 200): string[] {
   const clean = text.replace(/\s+/g, ' ').trim()
   if (!clean) return []
-  // fraze: rup DUPĂ . ! ? … (păstrând punctuația); ultima poate fi fără punct.
+  // sentences: split AFTER . ! ? … (keeping the punctuation); the last one may have no full stop.
   const sentences =
     clean.match(/[^.!?…]*[.!?…]+|[^.!?…]+$/g)?.map((s) => s.trim()).filter(Boolean) ?? [clean]
 
@@ -20,7 +21,7 @@ export function splitForSpeech(text: string, maxLen = 200): string[] {
   }
   for (const s of sentences) {
     if (s.length > maxLen) {
-      // frază uriașă (fără punctuație): golește tamponul, apoi taie dur pe spații
+      // huge sentence (no punctuation): flush the buffer, then cut hard on spaces
       flush()
       let rest = s
       while (rest.length > maxLen) {
@@ -33,7 +34,7 @@ export function splitForSpeech(text: string, maxLen = 200): string[] {
     } else if (!buf) {
       buf = s
     } else if (buf.length + 1 + s.length <= maxLen) {
-      buf += ' ' + s // împachetează fraze scurte împreună (dar ≤ maxLen)
+      buf += ' ' + s // packs short sentences together (but ≤ maxLen)
     } else {
       flush()
       buf = s

@@ -13,29 +13,36 @@
     <meta name="apple-mobile-web-app-title" content="Kelionai" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#0b0d12" />
-    <title>Kelionai — asistentul tău AI care vede, aude și vorbește</title>
-    <!-- SEO: descriere + Open Graph + date structurate pentru crawlere (Google, Bing, GPTBot…) -->
+    <!-- PRELOAD AVATAR (auditul de fluiditate 27 iul): modelul 3D (~9MB) pornea
+         abia DUPĂ parsarea bundle-ului JS → ecranul de încărcare stătea mult la
+         prima deschidere. Preload = descărcarea începe odată cu pagina. -->
+    <link rel="preload" href="/kelion-rpm.glb" as="fetch" type="model/gltf-binary" crossorigin />
+    <!-- SEO (rescris 2 aug, auditul de onestitate): era în ROMÂNĂ pe o
+         suprafață publică în engleză prin regulă, și promitea „Încearcă 3
+         minute gratuit” — proba gratuită NU există (decizia lui Adrian, vezi
+         Landing.tsx: „Nobody gets free minutes anymore”). Engleză + adevăr. -->
+    <title>Kelionai — your AI assistant that sees, hears and speaks</title>
     <meta
       name="description"
-      content="Kelionai — asistent AI personal cu avatar 3D și voce, care vede prin cameră, aude și vorbește. Hărți, imagini, web live, în orice limbă. Încearcă 3 minute gratuit."
+      content="Kelionai — a personal AI assistant with a 3D avatar and voice. It sees through your camera, hears and speaks. Maps, images, live web, in any language."
     />
     <meta name="author" content="AE Studio" />
     <link rel="canonical" href="https://kelionai.app/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Kelionai" />
-    <meta property="og:title" content="Kelionai — asistentul tău AI care vede, aude și vorbește" />
+    <meta property="og:title" content="Kelionai — your AI assistant that sees, hears and speaks" />
     <meta
       property="og:description"
-      content="Asistent AI personal cu avatar 3D și voce. Vede, aude, vorbește. Încearcă 3 minute gratuit."
+      content="A personal AI assistant with a 3D avatar and voice. It sees, hears and speaks — in any language."
     />
     <meta property="og:url" content="https://kelionai.app/" />
     <meta property="og:image" content="https://kelionai.app/kelion-logo.png" />
-    <meta property="og:locale" content="ro_RO" />
+    <meta property="og:locale" content="en_US" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Kelionai — asistentul tău AI care vede, aude și vorbește" />
+    <meta name="twitter:title" content="Kelionai — your AI assistant that sees, hears and speaks" />
     <meta
       name="twitter:description"
-      content="Asistent AI personal cu avatar 3D și voce. Încearcă 3 minute gratuit."
+      content="A personal AI assistant with a 3D avatar and voice. It sees, hears and speaks — in any language."
     />
     <meta name="twitter:image" content="https://kelionai.app/kelion-logo.png" />
     <script type="application/ld+json">
@@ -46,9 +53,8 @@
         "applicationCategory": "BusinessApplication",
         "operatingSystem": "Web, Windows, Android, iOS",
         "url": "https://kelionai.app/",
-        "description": "Asistent AI personal cu avatar 3D și voce, care vede prin cameră, aude și vorbește, în orice limbă.",
-        "author": { "@type": "Organization", "name": "AE Studio" },
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "GBP", "description": "3 minute gratuit" }
+        "description": "A personal AI assistant with a 3D avatar and voice. It sees through your camera, hears and speaks, in any language.",
+        "author": { "@type": "Organization", "name": "AE Studio" }
       }
     </script>
   </head>

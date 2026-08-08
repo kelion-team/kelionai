@@ -1,9 +1,9 @@
-// RUTINA DE VERSIUNE (ordinul lui Adrian, 10 iul): „la ORICE deploy nou se
-// actualizează filigranul, browserul repornește curat ca la prima logare —
-// memoriile și restul nu se pierd (stau pe server), dar totul revine la
-// default." Urmărim VERSIUNEA DEPLOY-ULUI de pe server (/api/version — se
-// schimbă la orice publicare, chiar dacă interfața n-a fost atinsă), nu doar
-// numele bundle-ului. Când se schimbă → reset dur automat.
+// THE VERSION ROUTINE (Adrian's order, Jul 10): "on EVERY new deploy it
+// updates the watermark, the browser restarts clean like at first login —
+// memories and the rest are not lost (they live on the server), but everything
+// returns to default." We track the server's DEPLOY VERSION (/api/version — it
+// changes on every publish, even if the interface wasn't touched), not just
+// the bundle name. When it changes → automatic hard reset.
 
 export interface ServerVersion {
   v: string
@@ -14,18 +14,18 @@ export interface ServerVersion {
 declare const __APP_VERSION__: string
 declare const __BUILD_DATE__: string
 
-// ETICHETA DE VERSIUNE — O SINGURĂ SURSĂ (Adrian, 10 iul: „sub fiecare cod QR
-// numărul din filigram, ACELAȘI din browser; nu dubla codul"). Folosită și de
-// filigranul din App.tsx, și sub codurile QR din Landing.tsx. Partea `deploy …
-// UTC` vine din /api/version, deci se schimbă AUTOMAT la orice publicare — la
-// fel ca aplicațiile instalate (aceeași web app), care se „recompilează" cu
+// THE VERSION LABEL — ONE SINGLE SOURCE (Adrian, Jul 10: "under each QR code
+// the number from the watermark, THE SAME as in the browser; don't duplicate
+// the code"). Used both by the App.tsx watermark and under the QR codes in
+// Landing.tsx. The `deploy … UTC` part comes from /api/version, so it changes
+// AUTOMATICALLY on every publish — just like the installed apps (the same web
 // noile date singure.
-export function deployStamp(srv: ServerVersion | null): string {
+function deployStamp(srv: ServerVersion | null): string {
   if (!srv?.at) return ''
-  // ORA LONDREI PESTE TOT ÎN PRODUCȚIE (Adrian, 11 iul): orice marcaj de sistem
-  // (versiunea de sub QR, filigranul) arată ora Londrei, cu comutare automată
-  // vară/iarnă. Ora către UTILIZATOR rămâne a utilizatorului (clientul trimite
-  // `now`/`tz` la fiecare tură — neatins aici).
+  // LONDON TIME EVERYWHERE IN PRODUCTION (Adrian, Jul 11): every system stamp
+  // (the version under the QR, the watermark) shows London time, with automatic
+  // summer/winter switching. The time shown TO THE USER stays the user's (the client sends
+  // `now`/`tz` on every turn — untouched here).
   const d = new Date(srv.at)
   const stamp = Number.isFinite(d.getTime())
     ? new Intl.DateTimeFormat('en-GB', {
@@ -64,22 +64,22 @@ function currentBundle(): string | null {
   return m ? m[0] : null
 }
 
-// RESET DUR LA ULTIMA VERSIUNE: golește TOT (cache-uri, service worker,
-// localStorage, sessionStorage) și reîncarcă anti-cache — browserul pornește
-// curat, ca la prima logare (cookie-ul de sesiune RĂMÂNE — nu te deloghează;
-// memoriile și istoricul stau pe server și revin singure).
+// HARD RESET TO THE LATEST VERSION: empties EVERYTHING (caches, service worker,
+// localStorage, sessionStorage) and reloads anti-cache — the browser starts
+// clean, like at first login (the session cookie REMAINS — it doesn't log you out;
+// memories and history live on the server and come back by themselves).
 let resetting = false
 export async function hardResetToLatest(): Promise<void> {
   if (resetting) return
   resetting = true
-  // ANTI-BUCLĂ de reload (supraviețuiește reîncărcării): dacă am resetat în
-  // ultimele 30s, NU mai reîncărcăm încă o dată — o buclă de reload ar face
-  // aplicația inutilizabilă.
+  // Reload ANTI-LOOP (survives the reload): if we reset within the
+  // last 30s, we do NOT reload again — a reload loop would make
+  // the app unusable.
   try {
     const last = Number(sessionStorage.getItem('kelion_last_reset') || 0)
     if (Date.now() - last < 30_000) return
   } catch {
-    /* storage indisponibil — continuăm cu resetul */
+    /* storage unavailable — we continue with the reset */
   }
   try {
     if ('caches' in window) {
@@ -91,19 +91,24 @@ export async function hardResetToLatest(): Promise<void> {
       reg?.active?.postMessage('kelion-clear-caches')
     }
   } catch {
-    /* best-effort — reîncărcăm oricum */
+    /* best-effort — we reload anyway */
   }
-  // „Tot default": starea locală se golește COMPLET (fără restaurare de chat pe
-  // pagină — istoricul revine de pe server la încărcare, ca la prima logare).
-  // EXCEPȚIE: amprenta vocală (kelion.voiceprint). BUG găsit 10 iul (Adrian:
-  // „microfonul nu se deschide automat să zic da" — de fapt calibrarea îi era
-  // ștearsă la FIECARE publicare de resetul ăsta, deci mereu cerea reînrolare).
-  // Nu e „stare de sesiune" — e o calibrare hardware/voce care trebuie să
-  // supraviețuiască oricărei publicări, la fel ca memoriile de pe server.
+  // "All default": local state is emptied COMPLETELY (no chat restoration on
+  // the page — history comes back from the server on load, like at first login).
+  // EXCEPTIONS: the voiceprint (kelion.voiceprint). BUG found Jul 10 (Adrian:
+  // "the microphone doesn't open automatically to say yes" — in fact its calibration
+  // was erased on EVERY publish by this reset, so it kept asking for re-enrollment).
+  // It's not "session state" — it's a hardware/voice calibration that must
+  // survive every publish, just like the memories on the server.
+  // And the COMPOSER DRAFT (kelion.draft, Aug 1): the reset now applies by
+  // itself (the auto-update countdown), so what you were typing is kept too —
+  // the composer restores it on boot.
   try {
     const voiceprint = localStorage.getItem('kelion.voiceprint')
+    const draft = localStorage.getItem('kelion.draft')
     localStorage.clear()
     if (voiceprint) localStorage.setItem('kelion.voiceprint', voiceprint)
+    if (draft) localStorage.setItem('kelion.draft', draft)
   } catch {
     /* indisponibil */
   }
@@ -119,10 +124,10 @@ export async function hardResetToLatest(): Promise<void> {
 }
 
 /**
- * Cheamă `onUpdate` când apare un DEPLOY nou: versiunea serverului (/api/version)
- * s-a schimbat față de cea de la pornire — sau, ca plasă (server fără sha),
- * bundle-ul servit diferă de cel cu care a pornit pagina. Verifică la pornire,
- * apoi la fiecare 45s și când tab-ul redevine vizibil. Întoarce funcția de stop.
+ * Calls `onUpdate` when a NEW deploy appears: the server version (/api/version)
+ * changed since startup — or, as a safety net (server without sha),
+ * the served bundle differs from the one the page started with. Checks at startup,
+ * then every 45s and when the tab becomes visible again. Returns the stop function.
  */
 export function watchForUpdate(onUpdate: () => void): () => void {
   const bootedBundle = currentBundle()
@@ -136,7 +141,7 @@ export function watchForUpdate(onUpdate: () => void): () => void {
 
   const check = async (): Promise<void> => {
     if (stopped || fired) return
-    // Calea principală: versiunea deploy-ului de pe server.
+    // The main path: the server's deploy version.
     const j = await fetchServerVersion()
     if (j?.v) {
       if (!bootedV) {
@@ -147,7 +152,7 @@ export function watchForUpdate(onUpdate: () => void): () => void {
         return
       }
     }
-    // Plasa: numele bundle-ului servit (acoperă serverele fără sha).
+    // The safety net: the served bundle name (covers servers without sha).
     if (!bootedBundle) return
     try {
       const html = await fetch(`/?_v=${Date.now()}`, { cache: 'no-store' }).then((r) => r.text())
@@ -157,7 +162,7 @@ export function watchForUpdate(onUpdate: () => void): () => void {
         onUpdate()
       }
     } catch {
-      /* offline / tranzitoriu — la următoarea bătaie */
+      /* offline / transient — on the next beat */
     }
   }
 

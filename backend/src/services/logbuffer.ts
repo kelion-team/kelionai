@@ -1,0 +1,80 @@
+import { Writable } from 'node:stream'
+
+// ── THE SERVER'S F12 (Adrian, 27 Jul: "these logs must absolutely reach
+// Kelion like F12") ────────────────────────────────────────────────────────
+// CLIENT errors already reach Kelion through /api/client-errors (the
+// browser's F12). The SERVER logs, however, lived only in `docker logs`,
+// which Kelion cannot reach (he runs in a container, without docker.sock —
+// and that is correct). The solution: a memory ring that keeps the latest
+// entries straight from the app's pino stream; the admin tool `server_logs`
+// (chat.ts) hands them to Kelion natively, exactly as `db_query` hands him
+// the client errors.
+
+export interface LogEntry {
+  t: string // ISO time
+  level: number // pino: 30 info, 40 warn, 50 error, 60 fatal
+  msg: string
+}
+
+const MAX_ENTRIES = 600
+const ring: LogEntry[] = []
+
+function push(e: LogEntry): void {
+  ring.push(e)
+  if (ring.length > MAX_ENTRIES) ring.splice(0, ring.length - MAX_ENTRIES)
+}
+
+/** Pino stream: keeps writing to stdout (docker logs stays intact) AND
+ *  retains entries in the ring. Reqid/req/res are compressed to a short
+ *  summary so the ring holds SIGNAL, not access noise. */
+export function makeLogTee(): Writable {
+  return new Writable({
+    write(chunk: Buffer, _enc, cb) {
+      process.stdout.write(chunk)
+      try {
+        for (const line of chunk.toString('utf8').split('\n')) {
+          if (!line.trim()) continue
+          const j = JSON.parse(line) as {
+            time?: number
+            level?: number
+            msg?: string
+            reqId?: string
+            req?: { method?: string; url?: string }
+            res?: { statusCode?: number }
+            err?: { message?: string; stack?: string }
+            reason?: unknown
+          }
+          const level = j.level ?? 30
+          // Access noise (request completed 2xx/3xx) does NOT enter the
+          // ring — only errors, warnings and real applicative messages.
+          const code = j.res?.statusCode ?? 0
+          const isAccessNoise =
+            level <= 30 && (j.msg === 'request completed' || j.msg === 'incoming request') && code < 400
+          if (isAccessNoise) continue
+          const parts: string[] = []
+          if (j.req?.method) parts.push(`${j.req.method} ${j.req.url ?? ''}`)
+          if (code) parts.push(`→ ${code}`)
+          if (j.msg) parts.push(j.msg)
+          if (j.err?.message) parts.push(`err: ${j.err.message}`)
+          if (j.reason !== undefined) parts.push(`reason: ${String(j.reason).slice(0, 200)}`)
+          push({
+            t: new Date(j.time ?? Date.now()).toISOString(),
+            level,
+            msg: parts.join(' ').slice(0, 400) || line.slice(0, 400),
+          })
+        }
+      } catch {
+        // Non-JSON line (e.g. foreign output) — we keep it raw if it looks like an error.
+        const s = chunk.toString('utf8')
+        if (/error|fail|exception/i.test(s)) push({ t: new Date().toISOString(), level: 50, msg: s.slice(0, 400) })
+      }
+      cb()
+    },
+  })
+}
+
+/** The latest entries, optionally only from a level up (40 = warn+error). */
+export function recentLogs(minLevel = 0, limit = 80): LogEntry[] {
+  const out = ring.filter((e) => e.level >= minLevel)
+  return out.slice(-Math.max(1, Math.min(limit, MAX_ENTRIES)))
+}

@@ -1,0 +1,47 @@
+# ── LACĂTUL GEMINI — ZIDUL CARE BLOCHEAZĂ (Adrian, 3 aug 2026) ──────────────
+#
+# „trebuie sa blochezi schimbarea gemini de aici in colo."
+#
+# Spre deosebire de pr-verify (INFORMATIV — nu oprea nimic, de-aia s-a putut
+# strica Gemini), ăsta e menit să BLOCHEZE: pasul de mai jos NU are
+# continue-on-error, deci checkul „gemini-lock" se face ROȘU dacă cineva —
+# inclusiv Claude — schimbă ce e bătut în cuie pe Gemini.
+#
+# DEVINE cu adevărat blocant când Adrian îl pune „required" (o singură dată):
+#   GitHub → repo → Settings → Branches → Branch protection rules → master
+#   → bifează „Require status checks to pass before merging"
+#   → caută și adaugă checkul: gemini-lock
+#   → Save.
+# De atunci, NICIUN merge în master nu trece dacă gemini-lock e roșu — nici măcar
+# al lui Claude. Cheia zidului e la Adrian (branch protection), nu în cod, tocmai
+# ca să apere de oricine ar vrea să calce lacătul din cod.
+name: gemini-lock
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  gemini-lock:
+    # ── OPRIT PÂNĂ SE DEBLOCHEAZĂ ACTIONS (Adrian, 7 aug: „aceleași fantome…
+    # nu repari?") ────────────────────────────────────────────────────────────
+    # MĂSURAT pe run 31223561134: `runner_id: 0`, `runner_name` gol, job creat și
+    # terminat în 3 secunde, loguri 404. Niciun runner nu i s-a alocat vreodată —
+    # repo privat, minutele contului blocate. Jobul nu putea pica pe cod, fiindcă
+    # nu ajungea să ruleze cod. Ce producea în schimb: un check ROȘU la fiecare
+    # push și o notificare pe telefonul ownerului, în timp ce verdictul adevărat
+    # venea de la porțile rulate pe VPS.
+    # Nu se șterge — se ține pe un întrerupător. Când factura se deblochează:
+    #   GitHub → repo → Settings → Secrets and variables → Actions → Variables
+    #   → New repository variable → Name: ACTIONS_PORNIT → Value: true
+    # și lacătul rulează din nou aici, neschimbat. Până atunci, aceeași verificare
+    # (`node scripts/verifica-gemini.mjs`) rulează în porțile de pe VPS.
+    if: ${{ vars.ACTIONS_PORNIT == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # NICIUN continue-on-error: dacă scriptul iese cu 1, jobul PICĂ → checkul e roșu.
+      - name: Verifică lacătul Gemini (BLOCANT)
+        run: node scripts/verifica-gemini.mjs

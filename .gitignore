@@ -11,3 +11,14 @@ desktop/src-tauri/target/
 *.tsbuildinfo
 # generat de deploy.sh la fiecare publicare (canalul de update al lui Kelion)
 deploy/last-updates.txt
+
+# jscpd — rapoartele detectorului de duplicare
+.jscpd/
+
+# Claude Code agent worktrees (schele temporare, nu cod)
+.claude/worktrees/
+backend/models/*.onnx
+
+# Python bytecode (proba-modele.py rulează pe VPS; cache-ul nu are ce căuta în git)
+__pycache__/
+*.pyc

@@ -25,24 +25,41 @@ export interface DeviceCommand {
 const CLOSE_VERB =
   /(?<![\p{L}\p{N}])(închide|inchide|închid|ascunde|opre[șs]t[eiî]|close|hide|dismiss|cierra|cerrar|ferme|fermer|schlie[sß]|закро)\w*/iu
 const SCREEN_NOUN =
-  /\b(harta|hart[ăa]|ecran\w*|monitor\w*|map|screen|video|imagin\w*|image|fereastr\w*|window|pagin\w*|page|asta|aceasta|acesta|it|that|tot)\b/i
+  /(?<![\p{L}\p{N}])(harta|hart[ăa]|ecran\p{L}*|monitor\p{L}*|map|screen|video|imagin\p{L}*|image|fereastr\p{L}*|window|pagin\p{L}*|page|asta|aceasta|acesta|it|that|tot)(?![\p{L}\p{N}])/iu
 // "Switch to <task>" — narrow verbs only, so "arată-mi harta Romei" (new
 // content) still reaches Kelion; a bare switch just changes the active surface.
 const SWITCH_VERB =
   /(?<![\p{L}\p{N}])(comut[ăa]?|treci|revino|switch|schimb[ăa]\s+la|mergi\s+la|back\s+to|înapoi\s+la|inapoi\s+la)(?![\p{L}])/iu
-const CLOSE_ALL = /\b(tot|totul|toate|everything|all)\b/i
+const CLOSE_ALL = /(?<![\p{L}\p{N}])(tot|totul|toate|everything|all)(?![\p{L}\p{N}])/iu
 
 // Map words the user says to a monitor task kind (the tab to switch/close).
+// REAL BUG CAUGHT BY TESTS (30 Jul): this used to be `\b...\b`, and in
+// JavaScript `\b` is ASCII-only — after "ă"/"î"/"ș" it does NOT match. The
+// proven effect:
+//   "treci pe hartă"  → did NOTHING (without the diacritic it worked);
+//   "închide hartă"   → closed the ACTIVE TAB instead of the map (the very
+//                        W4 #2 regression the comment below believed fixed).
+// The same trap as "Dansează!" (20 Jul, AI-HANDOFF). The house solution,
+// already used by CLOSE_VERB/SWITCH_VERB in this file: an explicit Unicode
+// boundary via lookaround + the `u` flag.
+const G0 = '(?<![\\p{L}\\p{N}])' // word start, safe on diacritics
+const G1 = '(?![\\p{L}\\p{N}])' // word end, safe on diacritics
+const cuvinte = (corp: string): RegExp => new RegExp(`${G0}(?:${corp})${G1}`, 'iu')
+
+const RE_MAP = cuvinte('hart[ăa]|harta|map|rut[ăa]|ruta|traseu\\p{L}*|route|directions|navigat\\p{L}*')
+const RE_YOUTUBE = cuvinte('youtube|video\\p{L}*|clip\\p{L}*|film\\p{L}*|melodi\\p{L}*|pies[ăa]|muzic\\p{L}*|song')
+const RE_WEATHER = cuvinte('meteo|vreme\\p{L}*|vremea|weather|windy')
+const RE_IMAGE = cuvinte('imagin\\p{L}*|poz[ăa]\\p{L}*|poza|image|picture')
+const RE_WEB = cuvinte('pagin\\p{L}*|pagina|site\\p{L}*|web|articol\\p{L}*|page')
+const RE_DOC = cuvinte('document\\p{L}*|documentul|text\\p{L}*|textul|email\\p{L}*|emailul|scrisoare\\p{L}*|nota|not[ăa]')
+
 function taskKindFromText(msg: string): string | null {
-  if (/\b(hart[ăa]|harta|map|rut[ăa]|ruta|traseu\w*|route|directions|navigat\w*)\b/i.test(msg))
-    return 'map'
-  if (/\b(youtube|video\w*|clip\w*|film\w*|melodi\w*|pies[ăa]|muzic\w*|song)\b/i.test(msg))
-    return 'youtube'
-  if (/\b(meteo|vreme\w*|vremea|weather|windy)\b/i.test(msg)) return 'weather'
-  if (/\b(imagin\w*|poz[ăa]\w*|poza|image|picture)\b/i.test(msg)) return 'image'
-  if (/\b(pagin\w*|pagina|site\w*|web|articol\w*|page)\b/i.test(msg)) return 'web'
-  if (/\b(document\w*|documentul|text\w*|textul|email\w*|emailul|scrisoare\w*|nota|notă)\b/i.test(msg))
-    return 'doc'
+  if (RE_MAP.test(msg)) return 'map'
+  if (RE_YOUTUBE.test(msg)) return 'youtube'
+  if (RE_WEATHER.test(msg)) return 'weather'
+  if (RE_IMAGE.test(msg)) return 'image'
+  if (RE_WEB.test(msg)) return 'web'
+  if (RE_DOC.test(msg)) return 'doc'
   return null
 }
 
@@ -87,9 +104,10 @@ export function interpretDeviceCommand(
   if (CLOSE_VERB.test(msg)) {
     if (CLOSE_ALL.test(msg)) return { screen: { op: 'closeAll' } }
     const kind = taskKindFromText(msg)
-    // W4 #2: dacă Adrian numește o suprafață anume (ex. „închide harta"), o închidem
-    // DOAR dacă e chiar deschisă; altfel lăsăm creierul să răspundă — NU închidem
-    // tab-ul activ (alt lucru) doar fiindcă cel numit nu e deschis.
+    // W4 #2: if Adrian names a specific surface (e.g. "închide harta"), we
+    // close it ONLY if it is actually open; otherwise we let the brain answer
+    // — we do NOT close the active tab (a different thing) just because the
+    // named one isn't open.
     if (kind) {
       if (open.some((t) => t.kind === kind)) return { screen: { op: 'closeKind', kind } }
       return null
@@ -127,14 +145,16 @@ export type GestureLabel = 'raiseRightHand' | 'salute' | 'pointMonitor' | 'dans'
 
 const GESTURE_KEYWORDS: { label: GestureLabel; patterns: RegExp[] }[] = [
   {
-    // „Dansează!" e comandă DIRECTĂ (Adrian, 24 iul: în test Kelion a refuzat să
-    // danseze — modelul de chat nu chema unealta). Determinist, fără creier:
-    // doar forme imperative clare, ca o discuție DESPRE dans să nu-l pornească.
+    // "Dansează!" is a DIRECT command (Adrian, 24 Jul: in the test Kelion
+    // refused to dance — the chat model wasn't calling the tool).
+    // Deterministic, no brain: only clear imperative forms, so a conversation
+    // ABOUT dancing doesn't trigger it.
     label: 'dans',
     patterns: [
-      // FĂRĂ \b după diacritice: în JS \b se bazează pe \w (ASCII), deci după
-      // „ă" nu există graniță de cuvânt → /danseaz[ăa]\b/ NU prindea „Dansează!"
-      // (bug dovedit în testul live din 24 iul). Prefixul e suficient de precis.
+      // NO \b after diacritics: in JS \b relies on \w (ASCII), so after
+      // "ă" there is no word boundary → /danseaz[ăa]\b/ did NOT catch
+      // "Dansează!" (bug proven in the 24 Jul live test). The prefix is
+      // precise enough.
       /\bdanseaz/i,
       /\bf[ăa]\s+un\s+dans\b/i,
       /\b(do\s+a\s+dance|dance\s+for\s+me)\b/i,
@@ -195,4 +215,70 @@ export function gestureAck(label: GestureLabel, ro: boolean): string {
     case 'dans':
       return 'Dansez!'
   }
+}
+
+// ── GESTUL PE SITUAȚIE (Adrian, 5 aug: „folosește gesturile greșit, fără
+// logică — implementează o logică clară pe subiect/situație") ────────────────
+//
+// Până acum gestul autonom îl ALEGEA creierul (unealta play_avatar_gesture),
+// liber, dintr-o paletă de 15 emoții, cu un prompt „moale". Un model slab
+// (Gemini 2.5-flash, pinuit) nimerea des greșit — „victorie"/„uimire" pe o
+// replică neutră. Ăsta era „fără logică". Acum gestul NU se mai ghicește: îl
+// decide DETERMINIST situația REALĂ a turei — ce face Kelion ACUM. O situație →
+// un gest, previzibil și testabil. Numele întors = vocabularul semantic
+// (salut/arata-inainte/…), pe care frontend-ul îl mapează la clipul RPM
+// (GESTURE_TO_CLIP), exact ca la comenzile directe de mai sus. Comenzile
+// directe („dansează", „salută") rămân neatinse (interpretGestureCommand).
+export interface SituatieGest {
+  /** Ultimul mesaj primit de la om. */
+  userText: string
+  /** Textul răspunsului lui Kelion (fără markup de unelte). */
+  replyText: string
+  /** A pus ceva vizibil pe monitor în tura asta (hartă/doc/card/imagine). */
+  aAratat: boolean
+}
+
+// Deschideri de salut — comparate pe PRIMUL cuvânt (un salut e la început).
+const SALUTURI_DESCHIDERE = new Set([
+  'bună', 'buna', 'salut', 'salutare', 'noroc', 'hei', 'hey', 'hello', 'hi', 'neața', 'neata',
+])
+// Rămas-bun / „stai puțin" / reușită / scuză / mulțumire — Unicode-safe (cuvinte()).
+const RE_RAMAS_BUN = cuvinte('pa|la revedere|noapte bun[ăa]|ne auzim|ne vedem|bye|goodbye|see you|take care')
+const RE_ASTEAPTA = cuvinte('o secund[ăa]|o clip[ăa]|stai pu[țt]in|imediat|un moment|hold on|one moment|just a second')
+const RE_SUCCES = cuvinte('gata|am reu[șs]it|am terminat|s-a f[ăa]cut|s-a rezolvat|rezolvat|finalizat|done')
+const RE_SCUZA = cuvinte('[îi]mi pare r[ăa]u|regret|din p[ăa]cate|n-am reu[șs]it|nu am reu[șs]it|nu am putut|a e[șs]uat|sorry|unfortunately')
+const RE_MULTUMESC = cuvinte('mul[țt]umesc|mersi|thank you|thanks')
+
+function primulCuvant(text: string): string {
+  return text.toLowerCase().split(/[^\p{L}]+/u).filter(Boolean)[0] ?? ''
+}
+function scurt(text: string): boolean {
+  return text.split(/\s+/).filter(Boolean).length <= 6
+}
+
+/** O logică clară: situația turei → un singur gest (sau niciunul). Numele
+ *  întors e din vocabularul semantic; `null` înseamnă „nimic" (gentleman
+ *  compus — pe replici neutre, informative, NU gesticulează). */
+export function gestPentruSituatie(s: SituatieGest): string | null {
+  const u = (s.userText ?? '').trim()
+  const r = (s.replyText ?? '').trim()
+  // 1. Arată ceva pe ecran → arată cu mâna spre monitor (cel mai obiectiv semn).
+  if (s.aAratat) return 'arata-inainte'
+  // 2. Rămas-bun (în mesajul omului SAU în replica lui Kelion) → salut de mână.
+  if (RE_RAMAS_BUN.test(u) || RE_RAMAS_BUN.test(r)) return 'salut'
+  // 3. Salut de deschidere (omul salută scurt, sau Kelion începe cu un salut).
+  if ((scurt(u) && SALUTURI_DESCHIDERE.has(primulCuvant(u))) || SALUTURI_DESCHIDERE.has(primulCuvant(r)))
+    return 'salut'
+  // 4. Kelion cere să aștepți → „stai puțin".
+  if (RE_ASTEAPTA.test(r)) return 'stai-putin'
+  // 5. Se scuză / n-a reușit → dezamăgire ușoară. ÎNAINTEA reușitei: „n-am
+  // reușit" conține „am reușit", deci scuza trebuie prinsă prima, altfel un
+  // eșec ar declanșa entuziasm (bug prins de test).
+  if (RE_SCUZA.test(r)) return 'dezamagire'
+  // 6. A reușit / veste bună → entuziasm discret.
+  if (RE_SUCCES.test(r)) return 'entuziasm'
+  // 7. Omul mulțumește → mulțumire.
+  if (scurt(u) && RE_MULTUMESC.test(u)) return 'multumire'
+  // 8. Replică neutră, informativă → NIMIC.
+  return null
 }

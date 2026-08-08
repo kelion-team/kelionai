@@ -6,6 +6,8 @@ import {
   fetchDisabledGestures,
   saveDisabledGestures,
 } from '../lib/gestures'
+import BackLink from './BackLink'
+import { adminStrings } from '../lib/adminText'
 import {
   fetchUsers,
   fetchHistory,
@@ -13,15 +15,15 @@ import {
   fetchGaps,
   runGapsTriage,
   fetchFinance,
-  fetchTransactions,
-  type TransactionRow,
-  updatePool,
   manageUser,
-  sellCredits,
   fetchMoneyCircuit,
-  createAiCard,
-  ownerDeposit,
-  adminPayout,
+  pauzaAutonomie,
+  fetchDoveziAutonomie,
+  fetchPlati,
+  atribuiePlata,
+  ignoraPlata,
+  type PlatiAdmin,
+  type DovadaAutonomie,
   type MoneyCircuit,
   fetchLeads,
   emailLead,
@@ -31,6 +33,7 @@ import {
   replyVisitorChat,
   type VisitorConvo,
   type VisitorMsg,
+  fetchCereriNeacoperite,
   fetchDemos,
   fetchActivity,
   resolveGap,
@@ -45,7 +48,7 @@ import {
   type StoresData,
   fetchInbound,
   fetchMailboxLive,
-  type MailboxLiveItem,
+  type MailboxLiveResult,
   type InboundEmail,
   fetchContactMessages,
   type ContactMessage,
@@ -54,7 +57,11 @@ import {
   deleteVoiceprint,
   type VoiceprintRow,
   fetchTokenChecks,
+  fetchEnvCheck,
+  type EnvCheckResult,
   type TokenChecksResult,
+  fetchAudit,
+  type AuditReport,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -86,13 +93,31 @@ function Flag({ code }: { readonly code: string }) {
 }
 
 const AI_LABELS: Record<string, string> = {
-  chat: 'Creier (OpenRouter)',
+  // ETICHETELE ALINIATE LA JURNAL (auditul admin, 3 aug): creierul CURENT
+  // scrie sub kind 'gemini' (chat.ts, google-direct) — rândul lui apărea cu
+  // cheia brută, în timp ce „Creier" stătea pe 'chat' (istoricul OpenRouter).
+  // Un admin care citea „Creier $X" credea că vede costul creierului de acum.
+  gemini: 'Creier (Gemini)',
+  chat: 'Creier (istoric OpenRouter)',
   correct: 'Gemini (correct)',
   image: 'Images (Gemini)',
-  tts: 'Voice (TTS)',
+  image_est: 'Images (estimare internă)',
+  video: 'Video (Veo)',
   asr: 'Hearing (STT)',
-  search: 'Căutare (OpenRouter web)',
+  search: 'Căutare web',
   memory: 'Memorie',
+  memory_est: 'Memorie (estimare internă)',
+  // The live-voice minutes — an INTERNAL ESTIMATE (mic-on seconds × a fixed
+  // rate), never the provider's invoice. Labeled as such wherever it shows.
+  voice_minutes: 'Minute voce',
+}
+
+// Jurnalul scrie vocea ca 'tts:<motor>' (tts.ts) — vechea cheie fixă 'tts'
+// nu se potrivea niciodată, deci rândul apărea cu cheia brută.
+function aiLabel(k: string): string {
+  if (AI_LABELS[k]) return AI_LABELS[k]
+  if (k.startsWith('tts:')) return `Voice (TTS ${k.slice(4)})`
+  return k
 }
 
 // Group the history newest-first, with a date header per day (Today / Yesterday /
@@ -122,62 +147,179 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
   return groups
 }
 
+// ── ONE GRID OF LINKS, built once (unique, no duplicates) ───────────────────
+// „Trimite linkul pe rețele” and „Platforme video” were TWO identical JSX
+// blocks, differing only in title and list. If a button's look changed, it
+// had to be changed in both. Now: one small component, two calls.
+function ShareGrid({ title, items }: { title: string; items: { name: string; href: string }[] }): React.JSX.Element {
+  return (
+    <div className="fin-breakdown">
+      <div className="fin-breakdown-head">{title}</div>
+      <div className="share-grid">
+        {items.map((l) => (
+          <a key={l.name} className="share-btn" href={l.href} target="_blank" rel="noreferrer">
+            {l.name}
+          </a>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function AdminPanel({
   onClose,
   initialTab,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
   >(initialTab ?? 'finance')
-  // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
-  const [gestOff, setGestOff] = useState<string[]>([])
+  // GESTURES (Adrian, Jul 13): the disabled list — what is NOT checked is NOT used.
+  // Tri-stat (auditul admin, 3 aug): pe o citire EȘUATĂ nu desenăm „toate
+  // active" și mai ales nu lăsăm un toggle să salveze peste o bază necitită
+  // (ștergea dezactivările reale de pe server).
+  const [gestOff, setGestOff] = useState<string[] | null | 'necitit'>('necitit')
   const [gestSaved, setGestSaved] = useState(false)
-  // La preview, panoul devine transparent ~3.5s ca să vezi avatarul din spate.
+  // „NU s-a salvat" — simetric cu „salvat ✓" (auditul admin, 3 aug: pe eșec
+  // checkbox-ul rămânea întors și nimeni nu afla).
+  const [gestErr, setGestErr] = useState('')
+  // On preview the panel goes transparent for ~3.5s, so you see the avatar behind.
   const [peek, setPeek] = useState(false)
+  // The „Pune pe 0” button in the Money tab: while it runs, it can't be pressed twice.
+  const [resetBusy, setResetBusy] = useState(false)
   const previewAndPeek = (clip: string): void => {
     previewGesture(clip)
     setPeek(true)
     window.setTimeout(() => setPeek(false), 3500)
   }
-  // Chat live cu vizitatorii (inbox owner): conversații, cea selectată, răspuns.
-  const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
+  // Live chat with visitors (owner inbox): conversations, the selected one, the reply.
+  // TRI-STAT peste tot (auditul admin, 3 aug): 'necitit' = încă n-am întrebat;
+  // null = citirea a EȘUAT (se scrie ca eșec); [] = serverul chiar a răspuns gol.
+  const [vconvos, setVconvos] = useState<VisitorConvo[] | null | 'necitit'>('necitit')
   const [vsel, setVsel] = useState<string | null>(null)
   const [vmsgs, setVmsgs] = useState<VisitorMsg[]>([])
+  const [vLoading, setVLoading] = useState(false)
   const [vreply, setVreply] = useState('')
-  const vLastId = useState({ id: 0 })[0]
-  const [inbound, setInbound] = useState<InboundEmail[]>([])
-  const [mailboxLive, setMailboxLive] = useState<MailboxLiveItem[]>([])
+  // Eșecul trimiterii NU mai tace (auditul admin, 3 aug): mesaj sub input.
+  const [vReplyErr, setVReplyErr] = useState('')
+  const vLastId = useRef(0)
+  const [inbound, setInbound] = useState<InboundEmail[] | null | 'necitit'>('necitit')
+  const [mailboxLive, setMailboxLive] = useState<MailboxLiveResult | null | 'necitit'>('necitit')
   const [mailboxLoading, setMailboxLoading] = useState(false)
-  const [contactMsgs, setContactMsgs] = useState<ContactMessage[]>([])
+  // ȘTERGEREA DIN INBOX (Adrian, 3 aug: „să șterg de aici câte una sau prin
+  // selecție toate"): selecția pe UID + ștergerea (una sau grupul selectat).
+  // Serverul mută în coșul REAL al căsuței când există; mesajul de confirmare
+  // spune ce s-a întâmplat DE FAPT (câte, și unde au ajuns).
+  const [mailSel, setMailSel] = useState<Set<number>>(new Set())
+  const [mailDelMsg, setMailDelMsg] = useState('')
+  const [mailDelBusy, setMailDelBusy] = useState(false)
+  const toggleMailSel = (uid: number): void =>
+    setMailSel((prev) => {
+      const n = new Set(prev)
+      if (n.has(uid)) n.delete(uid)
+      else n.add(uid)
+      return n
+    })
+  const stergeMailuri = (uids: number[]): void => {
+    if (!uids.length || mailDelBusy) return
+    if (!window.confirm(A.confirmDeleteInboxMsg(uids.length))) return
+    setMailDelBusy(true)
+    void fetch('/api/admin/mailbox-delete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ uids }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { sterse?: number; detaliu?: string } | null) => {
+        setMailDelMsg(j ? A.mailDeleteResult(j.sterse ?? 0, j.detaliu ?? '') : A.mailDeleteFailed)
+        setMailSel(new Set())
+        // Reîncarcă lista REALĂ de pe server — nu scoatem optimist rânduri
+        // pe care poate nu le-am șters (cifra vine din ce s-a întâmplat).
+        setMailboxLoading(true)
+        void fetchMailboxLive().then((m) => {
+          setMailboxLive(m)
+          setMailboxLoading(false)
+        })
+      })
+      // (setMailSel(new Set()) de mai sus golește selecția, deci nu poate
+      // rămâne un „Șterge selectate (N)" cu UID-uri moarte — auditul, 3 aug.)
+      .catch(() => setMailDelMsg(A.mailDeleteFailed))
+      .finally(() => setMailDelBusy(false))
+  }
+  const [contactMsgs, setContactMsgs] = useState<ContactMessage[] | null | 'necitit'>('necitit')
   const [copied, setCopied] = useState(false)
-  const [users, setUsers] = useState<UserSummary[]>([])
+  // TEXTUL DE DISTRIBUIRE, AL OWNERULUI (Adrian, 3 aug: „rescrie corect tot
+  // tabul"): mesajul nu mai e bătut în cuie în cod — îl scrii/ajustezi aici și
+  // rămâne salvat local (localStorage), iar toate butoanele îl folosesc pe AL TĂU.
+  const SHARE_TEXT_IMPLICIT =
+    'Ți-l prezint pe Kelion — asistentul meu AI cu avatar și voce: vede, aude și vorbește, în orice limbă. Contul e gratuit și îl faci în 30 de secunde:'
+  const [shareText, setShareText] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem('kelionai:share-text') || SHARE_TEXT_IMPLICIT
+    } catch {
+      return SHARE_TEXT_IMPLICIT
+    }
+  })
+  const salveazaShareText = (t: string): void => {
+    setShareText(t)
+    try {
+      window.localStorage.setItem('kelionai:share-text', t)
+    } catch {
+      /* privat/incognito — rămâne doar în sesiune */
+    }
+  }
+  // null = citirea listei a EȘUAT (auditul admin, 3 aug) — nu „No history yet".
+  const [users, setUsers] = useState<UserSummary[] | null | 'necitit'>('necitit')
   const [selected, setSelected] = useState<string | null>(null)
-  const [history, setHistory] = useState<HistoryRow[]>([])
+  // null = fetchHistory a picat — se scrie ca eșec, nu ca chat gol.
+  const [history, setHistory] = useState<HistoryRow[] | null>([])
   const [loading, setLoading] = useState(false)
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
+  // gapsFailed = ultima citire a gaps-urilor a picat (lista veche RĂMÂNE pe
+  // ecran — contractul „a dispărut = auto-rezolvat" interzice golirea falsă);
+  // gapsMsg = feedbackul acțiunilor din tab (triaj / arhivare / ștergere).
+  const [gapsFailed, setGapsFailed] = useState(false)
+  const [gapsMsg, setGapsMsg] = useState('')
   const [triaging, setTriaging] = useState(false)
+  // THE OUTAGES AUDIT (Adrian, Jul 27): everything that went down, in the same tab as gaps.
+  // La eșec PĂSTRĂM ultimul audit bun (auditul admin, 3 aug: setAudit(null) pe
+  // un blip ștergea problemele critice de pe ecran) — auditFailedAt spune de când.
+  const [audit, setAudit] = useState<AuditReport | null>(null)
+  const [auditFailedAt, setAuditFailedAt] = useState<string | null>(null)
   const [finance, setFinance] = useState<Finance | null>(null)
-  // Circuitul banilor Stripe→AI, gestionat DIN admin (Adrian, 24 iul).
+  // financeFailed = ultima citire a picat: fără date → mesaj de eșec (nu
+  // „Se încarcă…" pe veci); cu date vechi → notă că cifrele sunt ultimele bune.
+  const [financeFailed, setFinanceFailed] = useState(false)
+  // The money circuit, managed FROM admin (Adrian, Jul 24).
   const [circuit, setCircuit] = useState<MoneyCircuit | null>(null)
-  const [cardBusy, setCardBusy] = useState(false)
-  // Tranzacțiile Stripe reale (alimentări credite) — tabul Bani.
-  const [transactions, setTransactions] = useState<TransactionRow[]>([])
-  // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
-  const [poolAmount, setPoolAmount] = useState('')
-  const [poolBusy, setPoolBusy] = useState(false)
-  // Lead-uri — vizitatori care și-au lăsat emailul.
-  const [leads, setLeads] = useState<Lead[]>([])
-  const [demos, setDemos] = useState<DemoStats | null>(null)
-  const [activity, setActivity] = useState<UserActivity | null>(null)
-  const [stores, setStores] = useState<StoresData | null>(null)
-  const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
+  const [circuitFailed, setCircuitFailed] = useState(false)
+  // Mesajul butonului „Pune pe 0" (auditul admin, 3 aug: r.ok nu era verificat
+  // — eșecul arăta identic cu succesul).
+  const [resetMsg, setResetMsg] = useState('')
+  // Legarea contului Revolut (PSD2) — starea celor două butoane noi.
+  const [legMsg, setLegMsg] = useState('')
+  // HERE STOOD `cardBusy` and `cardDeschis` — the state of the „Creează cardul”
+  // button and of the window that showed the Stripe virtual card number. The
+  // Issuing card left with Stripe (Jul 30): providers are paid with Adrian's card.
+  // Stripe transactions were REMOVED from the panel on Jul 31 with the channel —
+  // they are no longer read, so their state is no longer kept (nor requested
+  // from the server on every tab load).
+  // AI pool — how much you add/remove (typed value) + the buttons' state.
+  // Leads — visitors who left their email. Tri-stat (auditul admin, 3 aug).
+  const [leads, setLeads] = useState<Lead[] | null | 'necitit'>('necitit')
+  const [demos, setDemos] = useState<DemoStats | null | 'necitit'>('necitit')
+  const [activity, setActivity] = useState<UserActivity | null | 'necitit'>('necitit')
+  const [stores, setStores] = useState<StoresData | null | 'necitit'>('necitit')
+  const [voiceprints, setVoiceprints] = useState<VoiceprintRow[] | null>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
-  // CONSTRUCTORUL (Adrian, 27 iul: „Kelion trebuie să poată crea orice soft îi
-  // cere admin"): ordine noi + coada cu starea lor (lucrătorul de pe VPS le
-  // execută și deschide PR-uri; merge-ul e al lui Adrian).
+  // Mesajele acțiunilor pe amprente (ștergere/ascultare picate — nu mai tac).
+  const [vpMsg, setVpMsg] = useState('')
+  // THE BUILDER (Adrian, Jul 27: „Kelion must be able to create any software the
+  // admin asks him to”): new orders + the queue with their state (the worker on
+  // the VPS executes them and opens PRs; the merge is Adrian's).
   interface BuildJobRow {
     id: number
     status: 'queued' | 'running' | 'done' | 'failed'
@@ -185,23 +327,70 @@ export default function AdminPanel({
     branch: string | null
     prUrl: string | null
     tokens: number
+    // Aug 2: 'fable-5' when the order ran on the expressly requested paid
+    // brain, 'free' otherwise (null until the worker reports).
+    brain: string | null
     updatedAt: string
+    // BARA 0–100% (Adrian, 3 aug): etapa REALĂ raportată de lucrător + harta
+    // ei în procent (serverul o calculează din progres — progresOrdin.ts).
+    // null = eșuat (eticheta spune adevărul, fără procent inventat).
+    progress?: string | null
+    pct?: number | null
   }
-  const [buildJobs, setBuildJobs] = useState<BuildJobRow[]>([])
+  // null = coada nu s-a putut citi (auditul admin, 3 aug) — nu „Niciun ordin".
+  const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>('necitit')
+  // Pauza de autonomie, VIZIBILĂ și aici (auditul admin, 3 aug): cu pauza
+  // pornită lucrătorul nu ia nimic — ordinul stătea „în coadă · 0%" la
+  // nesfârșit după promisiunea „max. 2 minute", fără nicio explicație.
+  const [buildPaused, setBuildPaused] = useState(false)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
-  // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul): secretul de activare se setează
-  // AICI (lângă amprente — ambii factori ai lacătului stau împreună). Odată
-  // armat, butonul Admin cere amprenta vocală sau secretul; nu se dezarmează.
-  const [lockArmed, setLockArmed] = useState<boolean | null>(null)
+  // THE PAID BRAIN TOGGLE (Adrian, Aug 2: "Everything FREE. The admin can
+  // EXPRESSLY request the paid Fable 5 brain for the CONSTRUCTOR only"). Off by
+  // default; when on, the order text carries the "Fable 5" marker that the VPS
+  // constructor parses.
+  // (Toggle-ul „Use Fable 5 brain (paid)" a fost SCOS, 3 aug — extirparea
+  // OpenRouter: creierul plătit Fable 5 mergea prin OpenRouter, care nu mai
+  // există. Constructorul e Gemini-only; marcajul 'fable-5' rămâne acceptat
+  // doar în API-ul workerului, pentru compatibilitate cu rapoartele vechi.)
+  // RECOVERY (Adrian, Jul 27): saved versions + saving the current version.
+  interface RecoveryRow {
+    tag: string
+    sha: string
+    date: string
+    note: string
+  }
+  const [recoveryPoints, setRecoveryPoints] = useState<RecoveryRow[]>([])
+  // recoveryFailed = citirea versiunilor a picat (403/503/rețea) — se scrie ca
+  // eșec, nu ca „Nicio versiune salvată încă" (auditul admin, 3 aug).
+  const [recoveryFailed, setRecoveryFailed] = useState(false)
+  const [recoveryLoading, setRecoveryLoading] = useState(false)
+  const [recoveryNote, setRecoveryNote] = useState('')
+  const [recoveryMsg, setRecoveryMsg] = useState('')
+  // Restore BY BUTTON (Adrian, Jul 27: „the admin must be able to select it”).
+  // While a restore runs, every restore button is locked.
+  const [restoringTag, setRestoringTag] = useState<string | null>(null)
+  // THE ADMIN BUTTON LOCK (Adrian, Jul 27): the activation secret is set HERE
+  // (next to the voiceprints — both lock factors stay together).
+  // ATENȚIE (auditul admin, 3 aug): lacătul e DEZARMAT hard în backend
+  // (adminLock.ts, LACAT_DEZARMAT=true, la cererea ownerului din 31 iul) —
+  // serverul răspunde mereu armed:false, deci UI-ul spune starea REALĂ, nu
+  // mai vinde armarea ca funcțională. 'necitit' = n-am întrebat încă;
+  // null = citirea stării a picat (nu „nearmat"!).
+  const [lockArmed, setLockArmed] = useState<boolean | null | 'necitit'>('necitit')
   const [lockSecret, setLockSecret] = useState('')
   const [lockMsg, setLockMsg] = useState('')
-  // Redarea mostrei audio a unei amprente (butonul „play"): reținem cine cântă
-  // acum ca să arătăm ⏸ și să nu pornim două deodată.
+  // Playing a voiceprint's audio sample (the „play” button): we remember who is
+  // playing now, to show ⏸ and never start two at once.
   const [playingVp, setPlayingVp] = useState<string | null>(null)
   const vpAudioRef = useRef<HTMLAudioElement | null>(null)
+  // Ocupat ÎNTRE click și rezolvarea fetch-ului (auditul admin, 3 aug): două
+  // clickuri rapide porneau două obiecte Audio în paralel — primul nu mai
+  // putea fi oprit decât din pauza globală.
+  const vpBusyRef = useRef(false)
   const playVoiceprint = async (email: string): Promise<void> => {
-    // Al doilea click pe același rând oprește redarea.
+    if (vpBusyRef.current) return
+    // A second click on the same row stops playback.
     if (vpAudioRef.current) {
       vpAudioRef.current.pause()
       vpAudioRef.current = null
@@ -210,11 +399,16 @@ export default function AdminPanel({
       setPlayingVp(null)
       return
     }
+    vpBusyRef.current = true
     const clip = await fetchVoiceprintAudio(email)
+    vpBusyRef.current = false
     if (!clip) {
       setPlayingVp(null)
+      // ▶ nu mai tace la eșec (auditul admin, 3 aug): apăsarea primea NIMIC.
+      setVpMsg(A.voiceprintFetchError(email))
       return
     }
+    setVpMsg('')
     const audio = new Audio(clip)
     vpAudioRef.current = audio
     audio.onended = () => setPlayingVp(null)
@@ -228,17 +422,28 @@ export default function AdminPanel({
   }
   const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
   const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
+  // WHICH KEYS THE SERVER SEES RIGHT NOW — the answer to „I've typed them dozens of times”.
+  // Tri-stat (auditul admin, 3 aug): tabelul-vedetă dispărea MUT când citirea
+  // pica — ownerul vedea tabul fără tabel și nu știa dacă e stricat sau așa
+  // trebuie. null = citire eșuată, spusă ca atare.
+  const [envCheck, setEnvCheck] = useState<EnvCheckResult | null | 'necitit'>('necitit')
 
   // The conversation + testing profile of a clicked user (tab "Utilizatori") —
-  // ce a scris (chatul) și cum a testat (browser/device/IP/sesiuni/timp), într-un
-  // singur click, fără să mai treacă prin tabul separat "Istoric chat".
-  const [userConvo, setUserConvo] = useState<{ u: UserActivityRow; rows: HistoryRow[] } | null>(null)
+  // what he wrote (the chat) and how he tested (browser/device/IP/sessions/time),
+  // in one click, without going through the separate "Istoric chat" tab.
+  // rows: null = citirea conversației a PICAT (auditul admin, 3 aug) — se
+  // scrie ca eșec, nu ca „Nu a scris niciun mesaj încă".
+  const [userConvo, setUserConvo] = useState<{ u: UserActivityRow; rows: HistoryRow[] | null } | null>(null)
   const [userConvoLoading, setUserConvoLoading] = useState(false)
-  // „Tradu în română" în vizualizarea conversațiilor: roOn = afișăm traducerea;
-  // roMap = cache text-original → traducere (o singură cerere per mesaj nou).
+  // „Tradu în română” in the conversation view: roOn = show the translation;
+  // roMap = original-text → translation cache (one request per new message).
   const [roOn, setRoOn] = useState(false)
   const [roMap, setRoMap] = useState<Record<string, string>>({})
   const [roBusy, setRoBusy] = useState(false)
+  // How many messages could NOT be translated (shown as the original text) —
+  // the admin must SEE that the "translation" is partial, not believe a
+  // silently half-failed one.
+  const [roFailed, setRoFailed] = useState(0)
 
   async function toggleRo(rows: HistoryRow[]): Promise<void> {
     if (roOn) {
@@ -248,34 +453,80 @@ export default function AdminPanel({
     const missing = Array.from(new Set(rows.map((r) => r.content).filter((c) => c && !(c in roMap))))
     if (missing.length > 0) {
       setRoBusy(true)
-      const translated = await translateToRo(missing)
+      const { translations: translated, failed } = await translateToRo(missing)
       setRoMap((m) => {
         const next = { ...m }
         missing.forEach((src, i) => (next[src] = translated[i] ?? src))
         return next
       })
+      setRoFailed(failed)
       setRoBusy(false)
     }
     setRoOn(true)
   }
-  // La deschiderea unei conversații noi, pornim mereu pe limba originală.
+  // Opening a new conversation always starts on the original language.
   const showMsg = (content: string): string => (roOn ? (roMap[content] ?? content) : content)
 
   async function openUserConvo(u: UserActivityRow): Promise<void> {
     setUserConvoLoading(true)
     setRoOn(false)
+    setRoFailed(0)
     setUserConvo({ u, rows: [] })
+    // fetchHistory nu mai aruncă (auditul admin, 3 aug): null = citire picată,
+    // iar loading se închide ORICUM — overlay-ul nu mai rămâne pe veci pe
+    // „Se încarcă…".
     const rows = await fetchHistory(u.email)
     setUserConvo({ u, rows })
     setUserConvoLoading(false)
   }
 
+  // Închiderea overlay-ului RESETEAZĂ starea traducerii (auditul admin, 3 aug):
+  // roOn/roFailed se scurgeau în tabul Istoric chat — butonul arăta „Arată
+  // originalul" și „⚠ N netraduse" pentru ALTĂ conversație.
+  const closeUserConvo = (): void => {
+    setUserConvo(null)
+    setRoOn(false)
+    setRoFailed(0)
+  }
+
+  // THE OWNER'S LEVER: stops / restarts autonomy in one click. After the press
+  // we re-read the state from the server — we don't assume it worked.
+  const [pauzaBusy, setPauzaBusy] = useState(false)
+  // THE EIGHT PROOFS (Adrian, Jul 31: „there must be 8 out of 8 proofs”).
+  const [dovezi, setDovezi] = useState<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null>(null)
+  // THE PAYMENTS PANEL (M3, Aug 2): 'necitit' until the read lands; null = the
+  // read FAILED (shown as failure, never as an empty ledger — rule no. 1).
+  const [plati, setPlati] = useState<PlatiAdmin | null | 'necitit'>('necitit')
+  async function onPauzaAutonomie(oprit: boolean): Promise<void> {
+    setPauzaBusy(true)
+    await pauzaAutonomie(oprit)
+    // Păstrăm ultimele date bune dacă recitirea pică (auditul admin, 3 aug).
+    const c = await fetchMoneyCircuit()
+    if (c) setCircuit(c)
+    setCircuitFailed(!c)
+    setPauzaBusy(false)
+  }
+
   useEffect(() => {
     void fetchUsers().then(setUsers)
-    void fetchGaps().then(setGaps)
-    void fetchFinance().then(setFinance)
-    void fetchMoneyCircuit().then(setCircuit)
-    void fetchTransactions().then(setTransactions)
+    // gaps: la eșec PĂSTRĂM lista (aici încă goală) și ridicăm doar flagul —
+    // un [] fals s-ar citi ca „totul rezolvat" (auditul admin, 3 aug).
+    void fetchGaps().then((g) => {
+      if (g) setGaps(g)
+      setGapsFailed(!g)
+    })
+    // Legătură cereri neacoperite (plăți neatribuite + cereri useri)
+    void fetchCereriNeacoperite()
+    void fetchFinance().then((f) => {
+      if (f) setFinance(f)
+      setFinanceFailed(!f)
+    })
+    void fetchMoneyCircuit().then((c) => {
+      if (c) setCircuit(c)
+      setCircuitFailed(!c)
+    })
+    void fetchDoveziAutonomie().then(setDovezi)
+    void fetchPlati().then(setPlati)
     void fetchDemos().then(setDemos)
     void fetchLeads().then(setLeads)
     void fetchVisitorConvos().then(setVconvos)
@@ -283,21 +534,111 @@ export default function AdminPanel({
   }, [])
 
   // While the "Cereri neacoperite" tab is open, refresh every 15s so a request
-  // that reached a successful deploy DISPARE singură din listă (auto-rezolvat).
+  // that reached a successful deploy DISAPPEARS from the list (auto-resolved).
   useEffect(() => {
     if (tab !== 'gaps') return
-    const id = window.setInterval(() => void fetchGaps().then(setGaps), 15_000)
+    // The outages audit loads when the tab opens and refreshes together with the
+    // gaps — a single place where you see EVERYTHING that went down.
+    // LA EȘEC NU SE GOLEȘTE NIMIC (auditul admin, 3 aug): setGaps([])/
+    // setAudit(null) pe un blip trecător ȘTERGEAU lista și problemele critice
+    // de pe ecran — golirea falsă se citea ca „s-au rezolvat". Păstrăm
+    // ultimele date bune și declarăm eșecul separat.
+    const load = (): void => {
+      void fetchGaps().then((g) => {
+        if (g) setGaps(g)
+        setGapsFailed(!g)
+      })
+      void fetchAudit().then((a) => {
+        if (a) {
+          setAudit(a)
+          setAuditFailedAt(null)
+        } else {
+          setAuditFailedAt((cur) => cur ?? new Date().toLocaleTimeString('ro-RO'))
+        }
+      })
+    }
+    load()
+    const id = window.setInterval(load, 15_000)
     return () => window.clearInterval(id)
   }, [tab])
 
-  // BANI ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
-  // real, valoarea reală"): cât timp tabul Bani e deschis, reîmprospătăm soldul
-  // OpenRouter, Stripe, profit și tranzacțiile la fiecare 15s — valori LIVE.
+  // SYNC WITH VOICE NAVIGATION (fluidity audit Jul 27, defect 7): initialTab was
+  // only the starting value — if the panel was ALREADY open and Kelion got
+  // „deschide admin → vizitatori”, the tab didn't change at all.
+  useEffect(() => {
+    if (initialTab) setTab(initialTab)
+  }, [initialTab])
+
+  // LOAD ON TAB, NOT ON CLICK (defect 6): stores/inbox/tokens loaded their data
+  // ONLY from the button's onClick — opened by voice or initialTab they stayed
+  // forever empty („Se verifică magazinele live…” forever).
+  useEffect(() => {
+    if (tab === 'stores') {
+      setStores('necitit')
+      void fetchStores().then(setStores)
+    } else if (tab === 'inbox') {
+      // SELECȚIA SE RESETEAZĂ la fiecare intrare în tab (auditul admin, 3 aug):
+      // mailSel/mailDelMsg rămâneau stătute — „Șterge selectate (3)" pentru
+      // mesaje care nu mai existau în listă, plus un „Șterse: …" vechi afișat
+      // ca și cum tocmai s-ar fi întâmplat.
+      setMailSel(new Set())
+      setMailDelMsg('')
+      void fetchInbound().then(setInbound)
+      void fetchContactMessages().then(setContactMsgs)
+      setMailboxLoading(true)
+      void fetchMailboxLive().then((m) => {
+        setMailboxLive(m)
+        setMailboxLoading(false)
+      })
+    } else if (tab === 'tokenuri') {
+      // The „Ce chei vede serverul CHIAR ACUM” table loads together with the tab.
+      // This call had ended up by mistake at the tail of the `inbox` branch, so the
+      // table NEVER appeared in Tokens — caught by Adrian from a screenshot.
+      void fetchEnvCheck().then(setEnvCheck)
+      setTokenChecksLoading(true)
+      void fetchTokenChecks().then((r) => {
+        setTokenChecks(r)
+        setTokenChecksLoading(false)
+      })
+    } else if (tab === 'users') {
+      // REÎNCĂRCARE LA DESCHIDEREA TABULUI (auditul admin, 3 aug): activitatea
+      // se citea O SINGURĂ dată, la montare — un eșec lăsa „Se încarcă…" pe
+      // veci, fără nicio a doua șansă.
+      void fetchActivity().then(setActivity)
+    } else if (tab === 'history') {
+      // Aceeași regulă pentru lista de utilizatori din Istoric chat.
+      void fetchUsers().then(setUsers)
+    }
+  }, [tab])
+
+  // Tab „Vizitatori" deschis → reîncarcă și REÎMPROSPĂTEAZĂ cât stă deschis
+  // (auditul admin, 3 aug: datele veneau doar la montare — „Vizite azi"
+  // îngheța la valoarea de la deschidere, iar un eșec inițial lăsa
+  // „Se încarcă…" pe veci, fără retry).
+  useEffect(() => {
+    if (tab !== 'visitors') return
+    const load = (): void => {
+      void fetchDemos().then(setDemos)
+      void fetchLeads().then(setLeads)
+    }
+    load()
+    const id = window.setInterval(load, 30_000)
+    return () => window.clearInterval(id)
+  }, [tab])
+
+  // MONEY IN REAL TIME (Adrian, Jul 24: „all credits show in real time, the real
+  // value”): while the Money tab is open we refresh the balances and the profit
+  // every 15s — LIVE values.
   useEffect(() => {
     if (tab !== 'finance') return
     const id = window.setInterval(() => {
-      void fetchFinance().then(setFinance)
-      void fetchTransactions().then(setTransactions)
+      // PĂSTREAZĂ ultimele date bune (auditul admin, 3 aug): pollul scria null
+      // peste datele afișate la un blip de rețea, golind tabul înapoi în
+      // „Se încarcă…". Eșecul se declară prin financeFailed, nu prin golire.
+      void fetchFinance().then((f) => {
+        if (f) setFinance(f)
+        setFinanceFailed(!f)
+      })
     }, 15_000)
     return () => window.clearInterval(id)
   }, [tab])
@@ -314,11 +655,18 @@ export default function AdminPanel({
     if (tab !== 'vchat' || !vsel) return
     let alive = true
     const tick = async (): Promise<void> => {
-      const more = await fetchVisitorChat(vsel, vLastId.id)
-      if (alive && more.length > 0) {
-        vLastId.id = more[more.length - 1].id
-        setVmsgs((m) => [...m, ...more])
-      }
+      const more = await fetchVisitorChat(vsel, vLastId.current)
+      if (!alive || more.length === 0) return
+      // FĂRĂ DUBLURI (auditul admin, 3 aug): openConvo și tick porneau două
+      // fetch-uri concurente cu after=0 — al doilea răspuns APPEND-uia toată
+      // conversația încă o dată (fiecare bulă de două ori + chei React
+      // duplicate; aceeași cursă dubla și replica proprie). Dedupe pe id.
+      setVmsgs((m) => {
+        const vazute = new Set(m.map((x) => x.id))
+        const noi = more.filter((x) => !vazute.has(x.id))
+        return noi.length ? [...m, ...noi] : m
+      })
+      vLastId.current = Math.max(vLastId.current, more[more.length - 1].id)
     }
     void tick()
     const id = window.setInterval(() => void tick(), 3000)
@@ -329,11 +677,15 @@ export default function AdminPanel({
   }, [tab, vsel, vLastId])
 
   async function openConvo(conv: string): Promise<void> {
-    vLastId.id = 0
+    vLastId.current = 0
     setVsel(conv)
     setVmsgs([])
+    // VISIBLE BUSY (fluidity audit Jul 27, defect 10): the thread emptied and
+    // stayed WHITE while the conversation loaded — it looked broken.
+    setVLoading(true)
     const rows = await fetchVisitorChat(conv, 0)
-    vLastId.id = rows.length ? rows[rows.length - 1].id : 0
+    setVLoading(false)
+    vLastId.current = rows.length ? rows[rows.length - 1].id : 0
     setVmsgs(rows)
   }
 
@@ -343,16 +695,25 @@ export default function AdminPanel({
     const id = await replyVisitorChat(vsel, t)
     if (id > 0) {
       setVmsgs((m) => [...m, { id, role: 'owner', text: t, created_at: '' }])
-      vLastId.id = Math.max(vLastId.id, id)
+      vLastId.current = Math.max(vLastId.current, id)
       setVreply('')
+      setVReplyErr('')
+    } else {
+      // ↑ nu mai tace la eșec (auditul admin, 3 aug): vizitatorul NU va primi
+      // răspunsul — ownerul trebuie să afle, nu să creadă că a trimis.
+      // (Widgetul vizitatorului primise „HONESTY REWRITE" fix pentru defectul
+      // ăsta; partea de admin rămăsese cu el.)
+      setVReplyErr(A.mailReplyFailed)
     }
   }
 
-  // Tab „Amprente vocale" deschis → încarcă lista și reîmprospătează la 10s.
+  // Tab „Amprente vocale” open → loads the list and refreshes every 10s.
   useEffect(() => {
     if (tab !== 'voiceprints') return
     const load = async (): Promise<void> => {
       setVoiceprintsLoading(true)
+      // null = citirea a picat (auditul admin, 3 aug) — se afișează ca eșec,
+      // nu ca „Nicio amprentă înregistrată încă".
       const rows = await fetchVoiceprints()
       setVoiceprints(rows)
       setVoiceprintsLoading(false)
@@ -362,28 +723,37 @@ export default function AdminPanel({
     return () => window.clearInterval(id)
   }, [tab])
 
-  // Tab „Constructor" deschis → coada ordinelor, reîmprospătată la 10s.
+  // Reîncarcă coada ordinelor — UN SINGUR loc (jscpd, 3 aug): efectul de tab și
+  // butoanele de ștergere/reia foloseau două copii identice ale aceluiași fetch.
+  const refreshBuildJobs = (): void => {
+    fetch('/api/admin/constructor', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean } | null) => {
+        // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
+        // nu se lasă „Niciun ordin încă" peste o citire picată.
+        if (j?.jobs) {
+          setBuildJobs(j.jobs)
+          setBuildPaused(!!j.paused)
+        } else setBuildJobs(null)
+      })
+      .catch(() => setBuildJobs(null))
+  }
+  // Tab „Constructor” open → the orders queue, refreshed every 10s.
   useEffect(() => {
     if (tab !== 'constructor') return
-    const load = (): void => {
-      fetch('/api/admin/constructor', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j: { jobs?: BuildJobRow[] } | null) => {
-          if (j?.jobs) setBuildJobs(j.jobs)
-        })
-        .catch(() => {})
-    }
-    load()
-    const id = window.setInterval(load, 10_000)
+    refreshBuildJobs()
+    const id = window.setInterval(refreshBuildJobs, 10_000)
     return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshBuildJobs e stabil funcțional (doar fetch+set)
   }, [tab])
 
   const sendBuildOrder = (): void => {
-    const order = buildOrder.trim()
-    if (order.length < 8) {
-      setBuildMsg('Scrie ordinul complet (ce construiește, unde, cum verifici).')
+    const text = buildOrder.trim()
+    if (text.length < 8) {
+      setBuildMsg(A.writeCompleteOrder)
       return
     }
+    const order = text
     void fetch('/api/admin/constructor', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -394,27 +764,182 @@ export default function AdminPanel({
       .then((j: { id?: number } | null) => {
         if (j?.id) {
           setBuildOrder('')
-          setBuildMsg(`Ordin #${j.id} în coadă — lucrătorul îl ia în max. 2 minute; primești email cu PR-ul.`)
-        } else setBuildMsg('Nu s-a putut trimite — reîncearcă.')
+          // PROMISIUNEA ONESTĂ (auditul admin, 3 aug): cu autonomia pe pauză
+          // lucrătorul NU ia nimic — „max. 2 minute" ar fi fost o minciună.
+          setBuildMsg(
+            buildPaused
+              ? A.orderEnqueuedPaused(j.id)
+              : A.orderEnqueuedActive(j.id),
+          )
+        } else setBuildMsg(A.orderSendFailed)
       })
-      .catch(() => setBuildMsg('Nu s-a putut trimite — reîncearcă.'))
+      .catch(() => setBuildMsg(A.orderSendFailed))
   }
 
-  // Tab „Amprente vocale" deschis → și starea lacătului (armat sau nu).
+  // ── ȘTERGE / CURĂȚĂ / REIA un ordin din coadă (Adrian, 3 aug: „scoate 30/31
+  //    dacă nu le poate face … aici nu apar butoane de ștergere"). Rutele existau
+  //    (db.ts → constructor.ts); aici sunt butoanele care le cheamă.
+  //    Reîncărcarea = refreshBuildJobs, definit sus lângă efectul de tab.
+  // ȘTERGERE CU VERDICT, o singură implementare (jscpd + auditul admin, 3 aug):
+  // DELETE + citirea lui {ok} din CORP — serverul răspunde 200 cu {ok:false}
+  // când rândul nu există sau DB pică, iar vechiul cod care se uita doar la
+  // status raporta „șters" pentru o ștergere care nu s-a întâmplat.
+  const stergeCuVerdict = (url: string): Promise<boolean> =>
+    fetch(url, { method: 'DELETE', credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { ok?: boolean } | null) => j?.ok === true)
+      .catch(() => false)
+  const deleteBuildOrder = (id: number): void => {
+    if (!window.confirm(A.confirmDeleteBuildOrder(id))) return
+    void stergeCuVerdict(`/api/admin/constructor/${id}`).then((ok) => {
+      if (ok) {
+        setBuildJobs((prev) => (Array.isArray(prev) ? prev.filter((x) => x.id !== id) : prev))
+        setBuildMsg(A.orderDeleted(id))
+      } else setBuildMsg(A.orderDeleteFailed)
+    })
+  }
+  // OPREȘTE un ordin în curs (auditul admin, 3 aug): cancelBuildJob exista în
+  // backend, dar panoul n-avea niciun buton spre el — un 'running' nu putea fi
+  // oprit decât din chat.
+  const cancelBuildOrder = (id: number): void => {
+    if (!window.confirm(A.confirmStopBuildOrder(id))) return
+    void fetch(`/api/admin/constructor/${id}/anuleaza`, { method: 'POST', credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { ok?: boolean } | null) => {
+        refreshBuildJobs()
+        setBuildMsg(j?.ok ? A.orderStopped(id) : A.orderStopFailed)
+      })
+      .catch(() => setBuildMsg(A.orderStopFailed))
+  }
+  const cleanBuildOrders = (): void => {
+    if (!window.confirm(A.confirmClearFailedJobs)) return
+    void fetch('/api/admin/constructor/curata', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ scope: 'failed_done' }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { sterse?: number } | null) => {
+        refreshBuildJobs()
+        setBuildMsg(j ? A.ordersCleaned(j.sterse ?? 0) : A.ordersCleanFailed)
+      })
+      .catch(() => setBuildMsg(A.ordersCleanFailed))
+  }
+  const retryBuildOrder = (id: number): void => {
+    void fetch(`/api/admin/constructor/${id}/reia`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({}),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { ok?: boolean } | null) => {
+        refreshBuildJobs()
+        setBuildMsg(j?.ok ? A.orderResumed(id) : A.orderResumeFailed)
+      })
+      .catch(() => setBuildMsg(A.orderResumeFailed))
+  }
+
+  // Tab „Recuperare” open → loads the saved recovery points.
+  const loadRecovery = (): void => {
+    setRecoveryLoading(true)
+    fetch('/api/admin/backups', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { points?: RecoveryRow[] } | null) => {
+        // Eșecul se DECLARĂ (auditul admin, 3 aug): 503/403/rețea nu mai
+        // arată ca „Nicio versiune salvată încă" — în panoul de siguranță
+        // unde ownerul decide dacă are la ce să se întoarcă.
+        if (j?.points) {
+          setRecoveryPoints(j.points)
+          setRecoveryFailed(false)
+        } else setRecoveryFailed(true)
+        setRecoveryLoading(false)
+      })
+      .catch(() => {
+        setRecoveryFailed(true)
+        setRecoveryLoading(false)
+      })
+  }
+  useEffect(() => {
+    if (tab !== 'recuperare') return
+    loadRecovery()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
+  const saveRecoveryNow = (): void => {
+    setRecoveryMsg(A.savingRecovery)
+    void fetch('/api/admin/backups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ note: recoveryNote.trim() }),
+    })
+      // CITEȘTE CORPUL ȘI LA EȘEC (auditul admin, 3 aug): serverul trimite
+      // cauza măsurată ({error:'github_token_missing'} etc.) — genericul
+      // „reîncearcă" trimitea ownerul să repete o operație condamnată.
+      // Același tipar ca restoreFromPoint, două funcții mai jos.
+      .then((r) => r.json().then((j: { ok?: boolean; tag?: string; error?: string }) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        if (ok && j.tag != null) {
+          setRecoveryMsg(A.recoverySaved(j.tag))
+          setRecoveryNote('')
+          loadRecovery()
+        } else setRecoveryMsg(A.recoverySaveFailed(j.error ?? 'eroare necunoscută'))
+      })
+      .catch(() => setRecoveryMsg(A.recoverySaveNetworkError))
+  }
+
+  // Restores the app to a saved point: double confirmation (heavy action —
+  // production changes), then the server brings master to the tag's state and
+  // the publish starts by itself. The button shows progress and result, with proof.
+  const restoreFromPoint = (p: RecoveryRow): void => {
+    const when = p.date ? new Date(p.date).toLocaleString('ro-RO') : p.tag
+    if (!window.confirm(A.confirmRestoreApp(when, p.sha))) return
+    if (
+      !window.confirm(
+        A.confirmRestoreAppSure(p.note.split('\n')[0].slice(0, 80), p.tag),
+      )
+    )
+      return
+    setRestoringTag(p.tag)
+    setRecoveryMsg(A.restoringApp(p.tag))
+    void fetch('/api/admin/backups/restore', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ tag: p.tag }),
+    })
+      .then((r) => r.json().then((j: { ok?: boolean; sha?: string; error?: string }) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        setRestoringTag(null)
+        if (ok && j.ok)
+          setRecoveryMsg(
+            A.restoreSuccess(j.sha ?? p.sha),
+          )
+        else setRecoveryMsg(A.restoreFailed(j.error ?? 'eroare necunoscută'))
+      })
+      .catch(() => {
+        setRestoringTag(null)
+        setRecoveryMsg(A.restoreNetworkError)
+      })
+  }
+
+  // Tab „Amprente vocale” open → also the lock's state (armed or not).
+  // null = citirea a PICAT (auditul admin, 3 aug) — nu se mai afișează ca
+  // „nearmat": o valoare nemăsurată nu e un verdict (regula #1).
   useEffect(() => {
     if (tab !== 'voiceprints') return
     fetch('/api/admin/unlock/status', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { armed?: boolean } | null) => {
-        if (j) setLockArmed(!!j.armed)
-      })
-      .catch(() => {})
+      .then((j: { armed?: boolean } | null) => setLockArmed(j ? !!j.armed : null))
+      .catch(() => setLockArmed(null))
   }, [tab])
 
   const saveLockSecret = (): void => {
     const s = lockSecret.trim()
     if (s.length < 4) {
-      setLockMsg('Secretul trebuie să aibă minim 4 caractere.')
+      setLockMsg(A.lockSecretMinLength)
       return
     }
     void fetch('/api/admin/unlock/secret', {
@@ -425,33 +950,69 @@ export default function AdminPanel({
     })
       .then((r) => {
         if (r.ok) {
-          setLockArmed(true)
           setLockSecret('')
-          setLockMsg('Salvat ✓ — lacătul e armat: butonul Admin cere de-acum vocea ta sau secretul.')
-        } else setLockMsg('Nu s-a putut salva — reîncearcă.')
+          // FĂRĂ AFIRMAȚII (auditul admin, 3 aug): vechiul setLockArmed(true) +
+          // „lacătul e armat" era o pretenție, nu o măsurătoare — backend-ul e
+          // DEZARMAT hard (adminLock.ts, la cererea ownerului din 31 iul), deci
+          // butonul Admin nu cerea nimic. Spunem ce s-a întâmplat DE FAPT și
+          // recitim starea de la server.
+          setLockMsg(A.lockSecretSaved)
+          fetch('/api/admin/unlock/status', { credentials: 'include' })
+            .then((r2) => (r2.ok ? r2.json() : null))
+            .then((j: { armed?: boolean } | null) => setLockArmed(j ? !!j.armed : null))
+            .catch(() => setLockArmed(null))
+        } else setLockMsg(A.lockSecretSaveFailed)
       })
-      .catch(() => setLockMsg('Nu s-a putut salva — reîncearcă.'))
+      .catch(() => setLockMsg(A.lockSecretSaveFailed))
   }
 
-  // Tab „Gesturi" deschis → încarcă lista dezactivată.
+  // Tab „Gesturi” open → loads the disabled list.
   useEffect(() => {
     if (tab !== 'gesturi') return
+    setGestOff('necitit')
     void fetchDisabledGestures().then(setGestOff)
   }, [tab])
 
-  // Bifează/debifează un gest → salvează pe server. Bifat = activ (NU în lista
-  // dezactivată). Ce nu e bifat NU se folosește deloc în aplicație.
+  // Check/uncheck a gesture → saves to the server. Checked = active (NOT on the
+  // disabled list). What is not checked is NOT used anywhere in the app.
+  // NU se salvează peste o bază necitită (auditul admin, 3 aug): pe o citire
+  // eșuată, un singur toggle ar fi ȘTERS toate dezactivările reale de pe server.
   const toggleGesture = (clip: string): void => {
+    if (!Array.isArray(gestOff)) return
+    const inainte = gestOff
     const next = gestOff.includes(clip) ? gestOff.filter((c) => c !== clip) : [...gestOff, clip]
     setGestOff(next)
+    setGestErr('')
     void saveDisabledGestures(next).then((ok) => {
       if (ok) {
         setGestSaved(true)
         window.setTimeout(() => setGestSaved(false), 1500)
+      } else {
+        // REVERT + mesaj (auditul admin, 3 aug): fără el, checkbox-ul rămânea
+        // întors pe o stare pe care serverul nu o are, iar bifele „săreau
+        // înapoi" inexplicabil la următoarea deschidere.
+        setGestOff(inainte)
+        setGestErr(A.gestureSaveFailed)
       }
     })
   }
 
+  // TEXTUL PANOULUI, in limba adminului (engleza implicit). Vezi lib/adminText.ts.
+  const A = adminStrings()
+  // Formele „doar date" ale stărilor tri-valente (auditul admin, 3 aug):
+  // 'necitit'/null nu sunt liste — render-ul le tratează explicit.
+  const activityData = typeof activity === 'object' && activity !== null ? activity : null
+  const demosData = typeof demos === 'object' && demos !== null ? demos : null
+  const vconvosData = Array.isArray(vconvos) ? vconvos : null
+  const leadsData = Array.isArray(leads) ? leads : null
+  const usersData = Array.isArray(users) ? users : null
+  const mailboxData = typeof mailboxLive === 'object' && mailboxLive !== null ? mailboxLive : null
+  const inboundData = Array.isArray(inbound) ? inbound : null
+  const contactData = Array.isArray(contactMsgs) ? contactMsgs : null
+  const storesData = typeof stores === 'object' && stores !== null ? stores : null
+  const envCheckData = typeof envCheck === 'object' && envCheck !== null ? envCheck : null
+  const buildJobsData = Array.isArray(buildJobs) ? buildJobs : null
+  const gestOffData = Array.isArray(gestOff) ? gestOff : null
   const sym = finance?.currency === 'usd' ? '$' : '£'
   const aiParts = finance
     ? Object.entries(finance.byKind)
@@ -460,17 +1021,24 @@ export default function AdminPanel({
     : []
 
   async function markResolved(id: number): Promise<void> {
-    await resolveGap(id, true)
-    setGaps((cur) => cur.filter((g) => g.id !== id))
+    // Rândul iese din listă DOAR când serverul a confirmat (auditul admin,
+    // 3 aug): înainte dispărea necondiționat și REAPĂREA la refresh-ul de 15s
+    // — apăsarea se pierdea în tăcere.
+    const ok = await resolveGap(id, true)
+    if (ok) {
+      setGaps((cur) => cur.filter((g) => g.id !== id))
+      setGapsMsg('')
+    } else setGapsMsg(A.gapArchiveFailed)
   }
 
   useEffect(() => {
     if (!selected) return
     setLoading(true)
-    void fetchHistory(selected).then((h) => {
-      setHistory(h)
-      setLoading(false)
-    })
+    // fetchHistory nu mai aruncă (null = eșec, afișat ca eșec), iar loading
+    // se închide garantat — „Loading…" nu mai rămâne blocat pe veci.
+    void fetchHistory(selected)
+      .then(setHistory)
+      .finally(() => setLoading(false))
   }, [selected])
 
   return (
@@ -478,431 +1046,599 @@ export default function AdminPanel({
       <div className="admin-panel">
         <header className="admin-head">
           <div className="admin-tabs">
+            {/* Deschide pagina de adăugat agenți manual (+ temele iscoadelor).
+                Crearea în consola Google Enterprise a fost SCOASĂ pe ordinul
+                ownerului (8 aug) — agenții lucrează în aplicație, la /api/a2a. */}
+            <button
+              type="button"
+              className="admin-tab"
+              onClick={() => window.open('/api/enterprise/creeaza', '_blank', 'noopener')}
+            >
+              {A.tabEnterprise}
+            </button>
+            {/* Panoul de tranzacționare (Adrian, 4 aug: „buton separat în
+                admin"): date reale + analiza agentului Tranzacții, doar owner. */}
+            <button
+              type="button"
+              className="admin-tab"
+              onClick={() => window.open('/api/tranzactii', '_blank', 'noopener')}
+            >
+              {A.tabTrading}
+            </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'finance' ? 'sel' : ''}`}
               onClick={() => setTab('finance')}
             >
-              Bani
+              {A.tabMoney}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'users' ? 'sel' : ''}`}
               onClick={() => setTab('users')}
             >
-              Utilizatori{activity && activity.users.length > 0 ? ` (${activity.users.length})` : ''}
+              {A.tabUsers}{activityData && activityData.users.length > 0 ? ` (${activityData.users.length})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'visitors' ? 'sel' : ''}`}
               onClick={() => setTab('visitors')}
             >
-              Vizitatori
-              {demos && demos.visitsToday + demos.today > 0
-                ? ` (${demos.visitsToday + demos.today})`
-                : ''}
+              {A.tabVisitors}
+              {/* The demo half of DemoStats is dead (nothing writes demo_uses
+                  anymore) — the badge counts only REAL visits, not the
+                  permanently-zero demo field. */}
+              {demosData && demosData.visitsToday > 0 ? ` (${demosData.visitsToday})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'vchat' ? 'sel' : ''}`}
               onClick={() => setTab('vchat')}
             >
-              Chat live{vconvos.length > 0 ? ` (${vconvos.length})` : ''}
+              {A.tabLiveChat}{vconvosData && vconvosData.length > 0 ? ` (${vconvosData.length})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'history' ? 'sel' : ''}`}
               onClick={() => setTab('history')}
             >
-              Istoric chat
+              {A.tabChatHistory}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'share' ? 'sel' : ''}`}
               onClick={() => setTab('share')}
             >
-              Distribuie
+              {A.tabShare}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'gaps' ? 'sel' : ''}`}
               onClick={() => setTab('gaps')}
             >
-              Cereri neacoperite{gaps.length > 0 ? ` (${gaps.length})` : ''}
+              {A.tabGaps}{gaps.length > 0 ? ` (${gaps.length})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'stores' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('stores')
-                void fetchStores().then(setStores)
-              }}
+              onClick={() => setTab('stores')}
             >
-              Magazine
+              {A.tabStores}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'inbox' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('inbox')
-                void fetchInbound().then(setInbound)
-                void fetchContactMessages().then(setContactMsgs)
-                setMailboxLoading(true)
-                void fetchMailboxLive().then((m) => {
-                  setMailboxLive(m)
-                  setMailboxLoading(false)
-                })
-              }}
+              onClick={() => setTab('inbox')}
             >
-              Inbox
+              {A.tabInbox}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'voiceprints' ? 'sel' : ''}`}
               onClick={() => setTab('voiceprints')}
             >
-              Amprente vocale{voiceprints.length > 0 ? ` (${voiceprints.length})` : ''}
+              {A.tabVoiceprints}{Array.isArray(voiceprints) && voiceprints.length > 0 ? ` (${voiceprints.length})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'gesturi' ? 'sel' : ''}`}
               onClick={() => setTab('gesturi')}
             >
-              Gesturi
+              {A.tabGestures}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'tokenuri' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('tokenuri')
-                setTokenChecksLoading(true)
-                void fetchTokenChecks().then((r) => {
-                  setTokenChecks(r)
-                  setTokenChecksLoading(false)
-                })
-              }}
+              onClick={() => setTab('tokenuri')}
             >
-              Tokenuri
+              {A.tabTokens}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'constructor' ? 'sel' : ''}`}
               onClick={() => setTab('constructor')}
             >
-              Constructor
+              {A.tabBuilder}
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'recuperare' ? 'sel' : ''}`}
+              onClick={() => setTab('recuperare')}
+            >
+              {A.tabRecovery}
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'sistem' ? 'sel' : ''}`}
+              onClick={() => setTab('sistem')}
+            >
+              Sistem (VPS)
             </button>
           </div>
-          <button type="button" className="ghost" onClick={onClose}>
-            Close
-          </button>
+          {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
+          onOpenSettings rămâne în props (fereastra CustomerSettings poate fi
+          redeschisă de altundeva la nevoie), dar butonul nu se mai arată. */}
+          <BackLink onBack={onClose} />
         </header>
         {tab === 'finance' && (
           <section className="admin-finance">
-            {!finance && <p className="chat-hint">Se încarcă…</p>}
+            {/* TREI STĂRI, NU DOUĂ (auditul admin, 3 aug): o citire EȘUATĂ nu
+            mai e deghizată în „Se încarcă…" fără sfârșit — se declară. */}
+            {!finance && !financeFailed && <p className="chat-hint">{A.loading}</p>}
+            {!finance && financeFailed && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ Nu pot citi datele de bani — citirea a eșuat (nu e o încărcare). Reîncerc automat la 15s.
+              </p>
+            )}
+            {finance && financeFailed && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ Ultima reîmprospătare a picat — cifrele de mai jos sunt ultimele citite cu succes.
+              </p>
+            )}
             {finance && (
               <>
-                <div className="fin-cards fin-cards-4">
-                  <div className="fin-card">
-                    <span className="fin-label">Stripe — disponibil</span>
-                    <span className="fin-val">
-                      {finance.stripe ? `${sym}${finance.stripe.available.toFixed(2)}` : '—'}
-                    </span>
-                    {finance.stripe && finance.stripe.pending !== 0 && (
-                      <span className="fin-sub">
-                        în tranzit {sym}
-                        {finance.stripe.pending.toFixed(2)}
-                      </span>
-                    )}
-                    {finance.stripe && finance.stripe.available < 0 && (
-                      <span className="fin-sub">
-                        sub zero = taxe Stripe reținute la rambursări/dispute (cifra vine direct de
-                        la Stripe)
-                      </span>
-                    )}
-                  </div>
-                  <div className="fin-card">
-                    <span className="fin-label">Consumat la AI (real)</span>
-                    <span className="fin-val">
-                      {sym}
-                      {finance.spent.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="fin-card">
-                    <span className="fin-label">Consumat azi</span>
-                    <span className="fin-val">${finance.today.toFixed(2)}</span>
-                  </div>
-                  <div className="fin-card">
-                    <span className="fin-label">Profit</span>
-                    <span className="fin-val">
-                      {sym}
-                      {finance.profit.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-                {/* PUNGA LUI KELION = soldul REAL, exact din contul OpenRouter
-                    (creierul central). Valoare LIVE; când e sub prag, avertizăm
-                    să depui bani. Doar adminul vede acest tab. */}
-                {finance.openrouter && (
-                  <div className={`or-wallet ${finance.openrouter.low ? 'low' : ''}`}>
+                {/* ── THE MONEY PANEL, CLEANED (Adrian, Jul 30: „simplify the page,
+                keep only what we use”) ─────────────────────────────────────────
+                What it was: the same figures written two-three times. „Stripe —
+                available” appeared both as a big card on top and as a row in the
+                wallet. The brain's balance appeared twice — in dollars on top, in
+                pounds below („Credit la creier”). The card wallet, likewise, in two
+                places. And „Consumat la AI (real)” was exactly the sum of the
+                „Cost per AI” table below. From 4 cards + 2 blocks, ONE single place
+                remains, saying how much you have, each figure exactly once. */}
+                {/* „PUNGA" A MURIT DE TOT (3 aug — extirparea totală): punga ERA
+                soldul contului OpenRouter, iar furnizorul a fost scos din
+                aplicație cu totul. Nu mai există un sold de citit, deci nici o
+                cifră de desenat — o pastilă cu un „$0.00" fabricat ar fi exact
+                minciuna interzisă de regula #1. Starea creierului (Gemini) se
+                vede pe pastila Gemini din bară. */}
+                {/* HERE STOOD „Depune în pungă” and „Trage profitul”. Both went
+                through Stripe — Checkout for the deposit, `/v1/payouts` for the
+                withdrawal. With Stripe out they have nothing to move: the users'
+                money comes on the Revolut link, straight into his account, and the
+                profit no longer passes through us. A button that does nothing
+                anymore is worse than its absence — it looks like it works. */}
+                {/* HERE STOOD „The money circuit: users → Stripe → AI” — the four
+                links, the „What I can read from Stripe” block, the Issuing state,
+                the virtual card creation and its number reveal. Removed on Jul 30:
+                „Stripe goes out completely and Pro comes in”. The circuit no longer
+                passes through the app — the user pays on the Revolut link, the money
+                goes straight to the owner, and the providers are paid with his card.
+                What remains useful here is the shortest path to where the card gets
+                changed, at each provider. */}
+                {/* THE GUARD THAT KILLED THE PANEL (Adrian, Aug 2: „mai jos nu
+                mai e nimic"): this block was gated on `expenses` — a field
+                built in stripe.ts that silently DIED when Stripe was removed
+                (#624). Since Aug 1 the payment reader, the autonomy row, the
+                proofs and the pause were ALL invisible. The status readings
+                gate on `circuit` now; only the provider row needs expenses. */}
+                {circuit && (
+                  <div className="or-wallet">
                     <div className="or-wallet-main">
-                      <span className="or-wallet-label">
-                        OpenRouter — punga lui Kelion (creierul central)
-                      </span>
-                      <span className="or-wallet-val">
-                        {finance.openrouter.live ? `$${finance.openrouter.balance.toFixed(2)}` : '—'}
-                      </span>
+                      <span className="or-wallet-label">Furnizorii plătiți cu cardul tău</span>
                     </div>
-                    {!finance.openrouter.live && (
-                      <span className="or-wallet-sub">
-                        Nu pot citi soldul acum (cheia OpenRouter lipsește sau contul e inaccesibil).
+                    {/* AUTOMATIC PAYMENT CREDITING (Adrian, Jul 30). Revolut Pro has no
+                    webhook, so the app reads the transactions itself and matches the
+                    unique code. The state is SHOWN, because „I can't read the account”
+                    and „nobody paid” look identical if you stay silent — exactly the
+                    confusion that cost a day. */}
+                    {circuit?.citirePlati && (
+                      <span className="or-wallet-sub" style={{ color: circuit.citirePlati.ok ? undefined : '#e6a23c' }}>
+                        {circuit.citirePlati.ok ? '✅' : '⚠'} Citirea plăților Revolut:{' '}
+                        {circuit.citirePlati.detaliu}
                       </span>
                     )}
-                    {finance.openrouter.live && finance.openrouter.low && (
-                      <span className="or-wallet-sub">
-                        ⚠️ Sub ${finance.openrouter.threshold} — depune bani ca să nu pice creierul.{' '}
-                        <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
-                          Alimentează OpenRouter
-                        </a>
-                        {' · '}
-                        Ca să se alimenteze SINGUR, activează „Auto Top-Up" pe OpenRouter (cu un card salvat) — se reîncarcă automat sub prag.
+                    {/* CALEA REALĂ pe Pro (auditul admin, 3 aug): serverul trimitea
+                    citirePlatiEmail — cititorul mailurilor „Ai primit …" din Gmail,
+                    calea de creditare care CHIAR merge din 3 aug — dar nimeni n-o
+                    desena: ownerul nu putea deosebi „nimeni n-a plătit" de „nu pot
+                    citi inboxul". Aceleași reguli de culoare ca rândul de sus. */}
+                    {circuit?.citirePlatiEmail && (
+                      <span className="or-wallet-sub" style={{ color: circuit.citirePlatiEmail.ok ? undefined : '#e6a23c' }}>
+                        {circuit.citirePlatiEmail.ok ? '✅' : '⚠'} Citirea plăților din email (Gmail „Ai primit…"):{' '}
+                        {circuit.citirePlatiEmail.detaliu}
                       </span>
                     )}
-                    {finance.openrouter.live && !finance.openrouter.low && (
+                    {/* LEGAREA CONTULUI REVOLUT (auditul admin, 3 aug): detaliul de
+                    mai sus trimitea la „Admin → Money", dar butoanele nu existau —
+                    rutele /plati/legatura/* n-aveau niciun apelant. Consimțământul
+                    PSD2 (max 90 zile) se pornește/reînnoiește acum de AICI. */}
+                    <span className="or-wallet-sub">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          setLegMsg(A.revolutLinkStarting)
+                          void fetch('/api/admin/plati/legatura/start', { method: 'POST', credentials: 'include' })
+                            .then((r) => r.json().then((j: { url?: string; error?: string }) => ({ ok: r.ok, j })))
+                            .then(({ ok, j }) => {
+                              if (ok && j.url) {
+                                window.open(j.url, '_blank', 'noopener')
+                                setLegMsg(A.revolutLinkApprovePrompt)
+                              } else setLegMsg(A.revolutLinkStartFailed(j.error ?? 'eroare necunoscută'))
+                            })
+                            .catch(() => setLegMsg(A.revolutLinkNetworkError))
+                        }}
+                      >
+                        Leagă contul Revolut (PSD2)
+                      </button>{' '}
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          const cod = window.prompt(A.revolutLinkPromptCode)
+                          if (!cod?.trim()) return
+                          setLegMsg(A.revolutLinkFinalizing)
+                          void fetch('/api/admin/plati/legatura/finalizeaza', {
+                            method: 'POST',
+                            headers: { 'content-type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({ code: cod.trim() }),
+                          })
+                            .then((r) => r.json().then((j: { conturi?: number; error?: string }) => ({ ok: r.ok, j })))
+                            .then(({ ok, j }) => {
+                              if (ok && j.conturi != null) setLegMsg(A.revolutLinkSuccess(j.conturi))
+                              else setLegMsg(A.revolutLinkFailed(j.error ?? 'eroare necunoscută'))
+                            })
+                            .catch(() => setLegMsg(A.revolutLinkNetworkError))
+                        }}
+                      >
+                        Am codul din retur
+                      </button>
+                      {legMsg && <i> {legMsg}</i>}
+                    </span>
+                    {/* KELION STARTS BY HIMSELF (Adrian, Jul 30: „make him autonomous” ·
+                    „his autonomy theme will be doing the whole part with Revolut”).
+                    Here you see the loop's LAST pass: either it started something on
+                    its own, or why not. Without this row, „he is autonomous” would be
+                    just another claim of mine. */}
+                    {/* THE COST IN PLAIN SIGHT (Adrian, Jul 30). It existed as a tool —
+                    you had to ask to learn what it costs you. Now it's here, next to
+                    the money. It cuts nothing: it shows. */}
+                    {circuit?.costReal && (
+                      <>
                       <span className="or-wallet-sub">
-                        Creierul central consumă din acest cont. Pentru alimentare automată, activează „Auto Top-Up" pe OpenRouter.{' '}
-                        <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
-                          Deschide OpenRouter
-                        </a>
+                        {/* IT SAID „How much it cost, REAL”. That was false for ~90% of the
+                        sum: only the brain calls come with the money spelled out by the
+                        provider (OpenRouter usage.cost). The rest — the voice minutes
+                        especially — is MY fixed rate multiplied by how long the microphone
+                        was on. Adrian, Jul 31: „where did the $504 figure come from?”
+                        Exactly from there, and it had to be written on the figure, not
+                        explained afterwards. */}
+                        💷 Măsurat de furnizor: <b>${circuit.costReal.masurat.toFixed(2)}</b>
+                        {' · '}estimat de mine (tarife fixe, NU facturi):{' '}
+                        <b>${circuit.costReal.estimat.toFixed(2)}</b>
+                        {' · '}azi ${circuit.costReal.today.toFixed(2)}
+                        {Object.keys(circuit.costReal.byKind).length > 0 && (
+                          <>
+                            {' — '}
+                            {Object.entries(circuit.costReal.byKind)
+                              .sort((a, b) => b[1] - a[1])
+                              .slice(0, 4)
+                              .map(
+                                ([k, v]) =>
+                                  `${k} $${v.toFixed(2)}${circuit.costReal!.felul[k] === 'masurat' ? '' : '~'}`,
+                              )
+                              .join(' · ')}
+                            {' — „~" = estimare'}
+                          </>
+                        )}
+                      </span>
+                      {/* FĂRĂ FALLBACK DE MÂNĂ (auditul admin, 3 aug): vechiul
+                      „?? 0.35" afișa o cifră scrisă în cod cu aerul uneia citite —
+                      exact minciuna pe care câmpul voiceUsdPerMin există s-o
+                      împiedice. Câmp absent → fraza spune că tariful nu s-a citit. */}
+                      <span className="or-wallet-sub" style={{ opacity: 0.7 }}>
+                        {circuit.voiceUsdPerMin != null
+                          ? `Minutele de voce se socotesc cât a fost microfonul PORNIT × $${circuit.voiceUsdPerMin.toFixed(2)}/min — estimare internă, nu factura furnizorului de voce. Suma exactă e doar în contul furnizorului.`
+                          : 'Minutele de voce: tariful pe minut nu s-a putut citi de la server — nu afișez o cifră din cod.'}
+                      </span>
+                      </>
+                    )}
+                    {/* M7b (8 aug): costul necitit se SPUNE, nu se ascunde — înainte,
+                    costReal null făcea blocul să dispară tăcut, fix „£0.00"-ul invers. */}
+                    {circuit && !circuit.costReal && (
+                      <span className="or-wallet-sub">
+                        💷 nu pot citi jurnalul de cost{circuit.costRealMotiv ? `: ${circuit.costRealMotiv}` : ''}
+                      </span>
+                    )}
+                    {/* YOUR LEVER (Adrian: „the 6 are needed, but not brakes”). The
+                    „pauza-autonomie” command existed since Jul 27, but you had to know
+                    it by heart. A limit YOU choose is not a barrier; one I impose on
+                    you, is. */}
+                    <span className="or-wallet-sub">
+                      {circuit?.autonomiaOprita ? '⏸ Autonomia e OPRITĂ de tine' : '▶ Autonomia merge'}{' '}
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={pauzaBusy}
+                        onClick={() => void onPauzaAutonomie(!circuit?.autonomiaOprita)}
+                      >
+                        {circuit?.autonomiaOprita ? 'Repornește' : 'Oprește'}
+                      </button>
+                    </span>
+                    {circuit?.autonomie && (
+                      <span className="or-wallet-sub" style={{ color: circuit.autonomie.ok ? undefined : '#8a8f98' }}>
+                        {circuit.autonomie.ok ? '🤖' : '·'} Kelion, de capul lui: {circuit.autonomie.detaliu}
+                      </span>
+                    )}
+                    {(circuit.expenses?.length ?? 0) > 0 && (
+                    <span className="or-wallet-sub">
+                      Unde se schimbă cardul, la fiecare:{' '}
+                      {(circuit.expenses ?? [])
+                        .filter((e) => e.configured)
+                        .map((e, i) => (
+                          <span key={e.name}>
+                            {i > 0 && ' · '}
+                            {/* WHAT WAS MEASURED on the provider's page, not what someone said:
+                            🔁 = automatic top-up is on, 💳 = only a card on file (so NOT done).
+                            A provider nobody touched has no sign at all — „I don't know” is
+                            never written as „no”. */}
+                            {e.platiAutomate ? '🔁 ' : e.cardPus ? '💳 ' : ''}
+                            {e.billingUrl ? (
+                              <a href={e.billingUrl} target="_blank" rel="noreferrer">
+                                {e.name}
+                              </a>
+                            ) : (
+                              `${e.name} (${e.billing.toLowerCase()})`
+                            )}
+                          </span>
+                        ))}
+                    </span>
+                    )}
+                  </div>
+                )}
+                {/* GARDUL NU MAI OMOARĂ TOT (auditul admin, 3 aug): când
+                money-circuit pică, o spunem — nu dispare tăcut jumătate de tab
+                (fix tiparul „the guard that killed the panel" din 2 aug, cu
+                `circuit` în locul lui `expenses`). */}
+                {!circuit && circuitFailed && (
+                  <div className="or-wallet">
+                    <span className="or-wallet-sub" style={{ color: '#e6a23c' }}>
+                      ⚠ Nu pot citi circuitul banilor (starea plăților, costul, autonomia) — citirea a eșuat.
+                    </span>
+                  </div>
+                )}
+                {/* DOVEZILE + PLĂȚILE, ÎN AFARA gardului {circuit && …} (auditul
+                admin, 3 aug): au surse PROPRII de date (fetchDoveziAutonomie,
+                fetchPlati) — un money-circuit picat nu are voie să le ascundă. */}
+                {(dovezi !== null || plati !== 'necitit') && (
+                  <div className="or-wallet">
+                    {/* THE EIGHT PROOFS. Not a list written by me: each level looks
+                    for its own trace in the database — an order, a PR, a measurement
+                    — and says „proven” ONLY if it found it. What has no proof says
+                    what exactly the proof would be. */}
+                    {dovezi && (
+                      <span className="or-wallet-sub">
+                        🎯 Autonomia: <b>{dovezi.dovedite}/{dovezi.din} dovedite</b>
+                        {dovezi.dovezi.map((d) => (
+                          <span key={d.nivel} style={{ display: 'block', paddingLeft: 12, opacity: d.dovedit ? 1 : 0.65 }}>
+                            {d.dovedit ? '✅' : '⬜'} <b>{d.nivel}.</b> {d.ce} —{' '}
+                            {d.dovedit ? d.dovada : <i>{d.dovada || d.cum}</i>}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    {/* Tablou Plăți & Încasări */}
+                    {plati !== 'necitit' && (
+                      <span className="or-wallet-sub">
+                        💳 <b>Tablou Plăți & Încasări:</b>
+                        
+                        {/* 1. TOTALURI */}
+                        <span style={{ display: 'block', marginTop: 8, marginBottom: 8 }}>
+                          <b>💰 Totaluri Încasate:</b>{' '}
+                          {plati === null || !plati.totaluri ? (
+                            <i style={{ color: 'red' }}>nu pot verifica</i>
+                          ) : (
+                            <span>
+                              Azi: <b>{plati.totaluri.totalAzi} {plati.totaluri.moneda}</b> · Luna asta: <b>{plati.totaluri.totalLunaAsta} {plati.totaluri.moneda}</b>
+                            </span>
+                          )}
+                        </span>
+
+                        {/* 2. CODURI EMISE ȘI NEPLĂTITE */}
+                        <span style={{ display: 'block', marginTop: 8, marginBottom: 8 }}>
+                          <b>⏳ Coduri Emise și Neplătite:</b>
+                          {plati === null || plati.coduriNeplatite === null ? (
+                            <span style={{ display: 'block', paddingLeft: 12, color: 'red' }}><i>nu pot verifica</i></span>
+                          ) : plati.coduriNeplatite.length === 0 ? (
+                            <span style={{ display: 'block', paddingLeft: 12, opacity: 0.8 }}>Niciun cod neplătit în așteptare.</span>
+                          ) : (
+                            plati.coduriNeplatite.map((c) => (
+                              <span key={c.code} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
+                                {c.expirata ? '🔴 [Expirat]' : '⏳ [În așteptare]'} <b>{c.code}</b> · User: {c.email} · Sumă: {c.amount} {c.currency} · De când: {new Date(c.createdAt).toLocaleString()}
+                              </span>
+                            ))
+                          )}
+                        </span>
+
+                        {/* 3. PLĂȚI ÎNCASATE ȘI CREDITATE */}
+                        <span style={{ display: 'block', marginTop: 8, marginBottom: 8 }}>
+                          <b>✅ Plăți Încasate și Creditate:</b>
+                          {plati === null || plati.platiIncasate === null ? (
+                            <span style={{ display: 'block', paddingLeft: 12, color: 'red' }}><i>nu pot verifica</i></span>
+                          ) : plati.platiIncasate.length === 0 ? (
+                            <span style={{ display: 'block', paddingLeft: 12, opacity: 0.8 }}>Nicio plată încasată.</span>
+                          ) : (
+                            plati.platiIncasate.map((p) => (
+                              <span key={p.code} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
+                                ✅ <b>{p.code}</b> · User: {p.email} · Sumă: {p.amount} {p.currency} · Data: {new Date(p.paidAt).toLocaleString()} · Ref bancară: {p.bankRef || '—'}
+                              </span>
+                            ))
+                          )}
+                        </span>
+
+                        {/* 4. PLĂȚI NEATRIBUITE (PLASA) */}
+                        <span style={{ display: 'block', marginTop: 8, marginBottom: 8 }}>
+                          <b>🕸 Plăți Neatribuite (în plasă):</b>
+                          {plati === null || plati.neatribuite === null ? (
+                            <span style={{ display: 'block', paddingLeft: 12, color: 'red' }}><i>nu pot verifica</i></span>
+                          ) : plati.neatribuite.length === 0 ? (
+                            <span style={{ display: 'block', paddingLeft: 12, opacity: 0.8 }}>Nimic în plasă (nicio plată neatribuită).</span>
+                          ) : (
+                            plati.neatribuite.map((p) => (
+                              <span key={p.id} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
+                                £{p.amount} · „{p.referinta || p.bankRef || '—'}” · Văzut la: {new Date(p.seenAt).toLocaleString()}{' '}
+                                <button
+                                  type="button"
+                                  className="ghost"
+                                  onClick={() => {
+                                    const email = window.prompt(A.revolutPromptAssign(p.amount))
+                                    if (!email) return
+                                    void atribuiePlata(p.id, email).then((rezultat) => {
+                                      window.alert(A.alertResult(rezultat))
+                                      void fetchPlati().then(setPlati)
+                                    })
+                                  }}
+                                >
+                                  atribuie userului X
+                                </button>{' '}
+                                <button
+                                  type="button"
+                                  className="ghost"
+                                  onClick={() => void ignoraPlata(p.id).then(() => void fetchPlati().then(setPlati))}
+                                >
+                                  {A.payIgnore}
+                                </button>
+                              </span>
+                            ))
+                          )}
+                        </span>
                       </span>
                     )}
                   </div>
                 )}
-                {/* CIRCUITUL BANILOR, din admin (Adrian, 24 iul: „din platforma
-                    kelionai admin"): userii plătesc → punga Stripe → cardul
-                    virtual → OpenAI + OpenRouter. Fiecare verigă cu starea ei
-                    LIVE; ce se poate prin API se face de AICI. */}
-                <div className="or-wallet">
-                  <div className="or-wallet-main">
-                    <span className="or-wallet-label">Circuitul banilor: useri → Stripe → AI</span>
-                  </div>
-                  {!circuit && <span className="or-wallet-sub">Se citește starea din Stripe…</span>}
-                  {circuit && (
-                    <>
-                      <span className="or-wallet-sub">
-                        {circuit.payoutsInterval === 'manual' ? '✅' : '❌'} 1. Banii RĂMÂN în pungă (payouts: {circuit.payoutsInterval}){' '}
-                        {circuit.payoutsInterval !== 'manual' && (
-                          <a href="https://dashboard.stripe.com/settings/payouts" target="_blank" rel="noreferrer">Setează Manual</a>
-                        )}
-                      </span>
-                      <span className="or-wallet-sub">
-                        {circuit.issuingStatus === 'active' ? '✅' : '❌'} 2. Carduri virtuale Stripe (Issuing: {circuit.issuingStatus}){' '}
-                        {circuit.issuingStatus !== 'active' && (
-                          <a href="https://dashboard.stripe.com/issuing/overview" target="_blank" rel="noreferrer">Activează</a>
-                        )}
-                      </span>
-                      <span className="or-wallet-sub">
-                        {circuit.cards.length > 0 ? `✅ 3. Cardul Kelion AI: •••• ${circuit.cards[0].last4}` : '❌ 3. Cardul Kelion AI: necreat'}{' '}
-                        {circuit.issuingStatus === 'active' && circuit.cards.length === 0 && (
-                          <button
-                            type="button"
-                            className="ghost"
-                            disabled={cardBusy}
-                            onClick={async () => {
-                              setCardBusy(true)
-                              const c = await createAiCard()
-                              setCardBusy(false)
-                              if (c) {
-                                window.open(c.url, '_blank', 'noopener')
-                                void fetchMoneyCircuit().then(setCircuit)
-                              } else window.alert('Crearea cardului a eșuat — activează întâi Issuing.')
-                            }}
-                          >
-                            {cardBusy ? 'Se creează…' : 'Creează cardul'}
-                          </button>
-                        )}
-                        {circuit.cards.length > 0 && (
-                          <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi datele cardului</a>
-                        )}
-                      </span>
-                      <span className="or-wallet-sub">
-                        4. Cardul pus la AI:{' '}
-                        <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noreferrer">OpenAI (voce)</a>
-                        {' · '}
-                        <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">OpenRouter (creier)</a>
-                        {' '}— cu auto-recharge pornit la amândouă
-                      </span>
-                      <span className="or-wallet-sub">
-                        Punga cardului (gata de cheltuit pe AI): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong> — se umple
-                        AUTOMAT din plățile userilor (Balance Transfer API, orar; circuit închis, nicio alimentare externă).{' '}
-                        <a href="https://dashboard.stripe.com/balance/overview" target="_blank" rel="noreferrer">Vezi punga</a>
-                      </span>
-                      {/* PAYOUT ADMIN (Adrian): profitul → contul/cardul REAL
-                          declarat la Stripe (prin design, NU cel virtual).
-                          Pe extras scrie „PAYOUT ADMIN". */}
-                      <span className="or-wallet-sub">
-                        🏦 PAYOUT admin (către cardul/contul tău REAL, nu cel virtual):{' '}
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={async () => {
-                            const s = window.prompt('Câte lire tragi în contul tău real? (din disponibil)')
-                            if (s == null) return
-                            const pounds = Number(s)
-                            if (!(pounds > 0)) return
-                            const r = await adminPayout(pounds)
-                            if (r) window.alert(`PAYOUT ADMIN creat: £${pounds.toFixed(2)} → contul tău real${r.arrival ? `, ajunge ~${r.arrival}` : ''}.`)
-                            else window.alert('Payout eșuat — verifică disponibilul (nu poate depăși punga disponibilă).')
-                          }}
-                        >
-                          Trage profitul
-                        </button>
-                      </span>
-                      {/* DEPUNEREA OWNERULUI (Adrian): bani în pungă prin ușa din
-                          față — checkout Stripe marcat owner_deposit, FĂRĂ să
-                          genereze credite. De aici: transfer automat → card → AI. */}
-                      <span className="or-wallet-sub">
-                        💰 Depune bani în pungă (owner, fără credite):{' '}
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={async () => {
-                            const s = window.prompt('Câte lire depui în pungă? (întreg, max 2000)')
-                            if (s == null) return
-                            const pounds = Math.round(Number(s))
-                            if (!(pounds > 0)) return
-                            const url = await ownerDeposit(pounds)
-                            if (url) window.open(url, '_blank', 'noopener')
-                            else window.alert('Generarea plății a eșuat.')
-                          }}
-                        >
-                          Depune
-                        </button>
-                      </span>
-                      {circuit.autoFund && (
-                        <span className="or-wallet-sub">
-                          {circuit.autoFund.ok ? '✅' : '⚠️'} Ultimul transfer automat plăți→card:{' '}
-                          {circuit.autoFund.detail}
-                          {!circuit.autoFund.ok && /permission|beta|not.*enabled|Unrecognized|unknown/i.test(circuit.autoFund.detail) && (
-                            <> — endpointul Balance Transfers e în beta la Stripe: cere accesul din <a href="https://dashboard.stripe.com/support" target="_blank" rel="noreferrer">dashboard</a> (o dată)</>
-                          )}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className="pool-manage">
-                  <div className="pool-manage-head">
-                    Pool AI — banii puși la dispoziția AI. Încărcat {sym}
-                    {finance.loaded.toFixed(2)} · rămas {sym}
-                    {finance.remaining.toFixed(2)}
-                  </div>
-                  <div className="pool-manage-row">
-                    <input
-                      className="pool-input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder={`Sumă (${sym})`}
-                      value={poolAmount}
-                      onChange={(e) => setPoolAmount(e.target.value)}
-                      onKeyDown={(e) => {
-                        // Enter în câmp = „Adaugă bani" (fluxul principal), ca să nu
-                        // pară că „nu face nimic" când apeși Enter în loc de buton.
-                        if (e.key !== 'Enter' || poolBusy || !(Number(poolAmount) > 0)) return
-                        e.preventDefault()
-                        void (async () => {
-                          setPoolBusy(true)
-                          const ok = await updatePool(Number(poolAmount), 'add')
-                          if (ok) {
-                            setPoolAmount('')
-                            await fetchFinance().then(setFinance)
-                          }
-                          setPoolBusy(false)
-                        })()
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="pool-btn add"
-                      disabled={poolBusy || !(Number(poolAmount) > 0)}
-                      onClick={async () => {
-                        setPoolBusy(true)
-                        const ok = await updatePool(Number(poolAmount), 'add')
-                        if (ok) {
-                          setPoolAmount('')
-                          await fetchFinance().then(setFinance)
-                        }
-                        setPoolBusy(false)
-                      }}
-                    >
-                      + Adaugă bani
-                    </button>
+                <div className="fin-breakdown">
+                  <div className="fin-breakdown-head">
+                    {/* ONE CURRENCY (USD) END TO END: the journal is kept in USD
+                    (cost_events.cost_usd), and the tab no longer converts the
+                    total to £ while "azi" stayed in $ — the mixed "total £163.66,
+                    azi $0.02" Adrian flagged. The split "măsurat / estimare
+                    internă" is written on the head too, so a number without its
+                    kind is never read as an invoice. */}
+                    Cost per AI — total ${finance.spentUsd.toFixed(2)}
+                    {` (măsurat $${finance.masurat.toFixed(2)} · estimare internă $${finance.estimat.toFixed(2)})`}
+                    , azi ${finance.today.toFixed(2)}
+                    {/* RESETTING THE COUNTERS (Adrian, Jul 30). Deletes ONLY our
+                        provider-cost journal. The users' wallets are NOT touched: spent
+                        credits are never given back. The wallet has nothing to reset — it
+                        is read live. */}
                     <button
                       type="button"
                       className="pool-btn withdraw"
-                      disabled={poolBusy || !(Number(poolAmount) > 0)}
+                      style={{ marginLeft: 10, fontSize: 12, padding: '3px 9px' }}
+                      disabled={resetBusy}
                       onClick={async () => {
-                        setPoolBusy(true)
-                        const ok = await updatePool(Number(poolAmount), 'withdraw')
-                        if (ok) {
-                          setPoolAmount('')
-                          await fetchFinance().then(setFinance)
-                        }
-                        setPoolBusy(false)
+                        if (!window.confirm(A.confirmResetCounters)) return
+                        setResetBusy(true)
+                        // r.ok VERIFICAT (auditul admin, 3 aug): la 500/423
+                        // butonul ieșea tăcut din „…" și adminul nu afla că
+                        // resetarea NU s-a făcut.
+                        const r = await fetch('/api/admin/reset-counters', { method: 'POST', credentials: 'include' }).catch(() => null)
+                        // ȘI CORPUL (măsurat 8 aug): un DELETE picat răspundea
+                        // 200 cu `{ok:false, sterse:0}`, deci `r.ok` era true și
+                        // aici scria „Resetat ✓" peste contoare neatinse. Acum
+                        // serverul dă 502 la eșec, iar aici se citește cifra.
+                        const j = (await r?.json().catch(() => null)) as
+                          | { ok?: boolean; sterse?: number; error?: string }
+                          | null
+                        setResetMsg(
+                          r?.ok && j?.ok === true
+                            ? `Resetat ✓ (${j.sterse ?? 0} înregistrări șterse)`
+                            : `Nu s-a putut reseta${j?.error ? ` — ${j.error}` : ''} — reîncearcă.`,
+                        )
+                        await fetchFinance().then((f) => { if (f) setFinance(f) }).catch(() => {})
+                        setResetBusy(false)
                       }}
                     >
-                      − Scoate bani
+                      {resetBusy ? '…' : 'Pune pe 0'}
                     </button>
+                    {resetMsg && (
+                      <span className="fin-sub" style={{ marginLeft: 8, color: resetMsg.startsWith('Resetat') ? undefined : '#e6a23c' }}>
+                        {resetMsg}
+                      </span>
+                    )}
                   </div>
-                </div>
-                <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Cost per AI (real)</div>
-                  {aiParts.length === 0 && <div className="chat-hint">Niciun consum încă.</div>}
+                  {aiParts.length === 0 && <div className="chat-hint">{A.noSpendYet}</div>}
                   {aiParts.map(([k, v]) => (
                     <div className="fin-row" key={k}>
-                      <span>{AI_LABELS[k] ?? k}</span>
+                      <span>
+                        {aiLabel(k)}
+                        {/* THE GOLDEN RULE (Adrian: „REAL, stop fabricating"):
+                        a shown figure is either MEASURED (the provider's own
+                        number / DB recordCost from its response) or it says
+                        „estimare internă" right next to it. The voice minutes
+                        are the big one: mic-on seconds × a fixed rate — never
+                        the OpenAI invoice. */}
+                        {finance.felul[k] === 'estimat' && (
+                          <span className="fin-sub" style={{ color: '#e6a23c' }}>
+                            {' '}— estimare internă
+                          </span>
+                        )}
+                      </span>
                       <span>${v.toFixed(4)}</span>
                     </div>
                   ))}
                 </div>
-                {/* Tranzacțiile Stripe REALE (alimentări credite) — cine, cât, status, când. */}
-                <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Tranzacții — alimentări credite prin Stripe</div>
-                  {transactions.length === 0 && <div className="chat-hint">Nicio tranzacție încă.</div>}
-                  {transactions.map((t) => (
-                    <div className="fin-row" key={t.id}>
-                      <span>
-                        {t.user_id} · {t.status} ·{' '}
-                        {new Date(t.created_at).toLocaleString('ro-RO', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                      <span>
-                        {sym}
-                        {Number(t.amount).toFixed(2)} · {Number(t.credits).toFixed(0)} credite
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                {/* THE STRIPE BLOCK — REMOVED (Adrian, Jul 31: „these don't exist
+                    anymore” · „Stripe doesn't exist anymore” · „we only have Revolut”).
+                    The only payment channel is Revolut, by card. The old Jul 24 rows
+                    were his own tests, from his own accounts, paid with his own card —
+                    not revenue from clients. They stay in the database (`transactions`),
+                    but no longer belong in the panel: they showed a dead channel as if
+                    it were alive. */}
               </>
             )}
           </section>
         )}
         {tab === 'stores' && (
           <section className="admin-finance">
-            {!stores && <p className="chat-hint">Se verifică magazinele live…</p>}
-            {stores && (
+            {/* TREI STĂRI (auditul admin, 3 aug): citirea picată nu mai stă
+            deghizată în „Se verifică magazinele live…" pe veci. */}
+            {stores === 'necitit' && <p className="chat-hint">{A.checkingStores}</p>}
+            {stores === null && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ Nu am putut citi magazinele — citire eșuată, nu magazine lipsă.{' '}
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setStores('necitit')
+                    void fetchStores().then(setStores)
+                  }}
+                >
+                  Reîncearcă
+                </button>
+              </p>
+            )}
+            {storesData && (
               <>
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">
                     Magazine — verificare LIVE pe paginile publice (nu pe promisiunile
                     dashboard-urilor), la maxim 5 minute vechime.
                   </div>
-                  {stores.stores.map((s) => (
+                  {storesData.stores.map((s) => (
                     <div className="fin-row" key={s.key}>
                       <span>
                         {s.name} — {s.store}
@@ -913,7 +1649,7 @@ export default function AdminPanel({
                             ● LISTAT — deschide
                           </a>
                         ) : (
-                          <span className="store-missing">○ nelistat încă</span>
+                          <span className="store-missing">{A.notListedYet}</span>
                         )}
                       </span>
                     </div>
@@ -921,26 +1657,36 @@ export default function AdminPanel({
                 </div>
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">
+                    {/* TEXT CORECTAT (auditul admin, 3 aug): vechiul „prin
+                    API-urile lor" sugera că aplicația citește instalările din
+                    magazine — niciun cod nu cheamă vreun API de magazin. */}
                     Descărcări directe de pe site (numărate de serverul nostru — cifre reale).
-                    Instalările DIN magazine sunt doar agregate, prin API-urile lor; niciun magazin
-                    nu dezvăluie identitatea celui care instalează.
+                    Magazinele își arată instalările doar agregat, în propriile dashboard-uri;
+                    aplicația NU le citește — aici sunt numărate doar descărcările directe.
                   </div>
-                  {stores.downloads.counts.length === 0 && (
+                  {/* dbOk=false = jurnalul NU s-a citit (auditul admin, 3 aug) —
+                  nu se afișează zeroul fals „nicio descărcare". */}
+                  {!storesData.downloads.dbOk && (
+                    <div className="chat-hint" style={{ color: '#e6a23c' }}>
+                      ⚠ Nu pot citi jurnalul de descărcări — baza de date nu răspunde (NU înseamnă zero descărcări).
+                    </div>
+                  )}
+                  {storesData.downloads.dbOk && storesData.downloads.counts.length === 0 && (
                     <div className="chat-hint">
                       Nicio descărcare înregistrată încă (jurnalul pornește de la acest release).
                     </div>
                   )}
-                  {stores.downloads.counts.map((c) => (
+                  {storesData.downloads.counts.map((c) => (
                     <div className="fin-row" key={c.file}>
                       <span>{c.file}</span>
                       <span>{c.total} descărcări</span>
                     </div>
                   ))}
                 </div>
-                {stores.downloads.recent.length > 0 && (
+                {storesData.downloads.recent.length > 0 && (
                   <div className="fin-breakdown">
-                    <div className="fin-breakdown-head">Cine a descărcat (ultimele 100)</div>
-                    {stores.downloads.recent.map((d, i) => (
+                    <div className="fin-breakdown-head">{A.downloadsHead}</div>
+                    {storesData.downloads.recent.map((d, i) => (
                       <div className="fin-row" key={i}>
                         <span>
                           {d.user_email || `${d.ip}${d.country ? ` · ${d.country}` : ''} (nelogat)`}
@@ -965,23 +1711,94 @@ export default function AdminPanel({
         {tab === 'inbox' && (
           <section className="admin-finance">
             <div className="fin-breakdown">
-              <div className="fin-breakdown-head">
-                📬 Cutia REALĂ contact@kelionai.app — citită direct din server (toate
-                mesajele, citite sau nu). Aici vezi tot ce e în inbox, nu doar mailul
-                nou. Ultimele 40.
+              <div className="fin-breakdown-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <span>
+                  {/* TEXT CORECTAT (auditul admin, 3 aug): vechiul „toate mesajele"
+                  era fals — aici se citește DOAR folderul INBOX, iar pollerul
+                  rândului 19 (MAIL_ORGANIZE) mută mesajele procesate în
+                  Kelion-Answered / Kelion-ToAnswer / Kelion-Automated în ~3 min.
+                  Un mesaj „dispărut" de aici e de regulă ARHIVAT acolo, nu pierdut
+                  (defectul din 10 iul, reintrodus de organizare). */}
+                  📬 Cutia contact@kelionai.app — DOAR folderul INBOX, citit direct din
+                  server (ultimele 40, citite sau nu). Mesajele deja procesate de Secretar
+                  stau în folderele Kelion-Answered / Kelion-ToAnswer / Kelion-Automated
+                  (vizibile în clientul de mail). Bifează și șterge — una sau mai multe
+                  odată; serverul le mută în coșul căsuței când acesta există.
+                </span>
+                <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                  {mailboxData && mailboxData.emails.length > 0 && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      style={{ fontSize: 12 }}
+                      onClick={() =>
+                        setMailSel((prev) =>
+                          prev.size === mailboxData.emails.length ? new Set() : new Set(mailboxData.emails.map((m) => m.uid)),
+                        )
+                      }
+                    >
+                      {mailboxData && mailSel.size === mailboxData.emails.length && mailboxData.emails.length > 0 ? 'Deselectează tot' : 'Selectează tot'}
+                    </button>
+                  )}
+                  {mailSel.size > 0 && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      style={{ fontSize: 12, color: '#ff7a7a' }}
+                      disabled={mailDelBusy}
+                      onClick={() => stergeMailuri([...mailSel])}
+                    >
+                      {mailDelBusy ? '…' : `Șterge selectate (${mailSel.size})`}
+                    </button>
+                  )}
+                </span>
               </div>
-              {mailboxLoading && <p className="chat-hint">Se citește cutia…</p>}
-              {!mailboxLoading && mailboxLive.length === 0 && (
-                <p className="chat-hint">Cutia e goală sau nu s-a putut citi (verifică MAIL_PASS).</p>
+              {mailDelMsg && <div className="chat-hint">{mailDelMsg}</div>}
+              {mailboxLoading && <p className="chat-hint">{A.readingMailbox}</p>}
+              {/* TREI STĂRI DISTINCTE (auditul admin, 3 aug): „goală", „IMAP a
+              picat: {motiv}" și „MAIL_PASS nesetat" nu mai sunt un singur text. */}
+              {!mailboxLoading && mailboxLive === null && (
+                <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ {A.mailboxReadFail.replace('{motiv}', 'ruta serverului nu a răspuns')}
+                </p>
               )}
-              {mailboxLive.map((m) => (
+              {!mailboxLoading && mailboxData && !mailboxData.ok && (
+                <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠{' '}
+                  {mailboxData.motiv === 'mail_neconfigurat'
+                    ? A.mailboxNotConfigured
+                    : A.mailboxReadFail.replace('{motiv}', mailboxData.motiv ?? 'motiv necunoscut')}
+                </p>
+              )}
+              {!mailboxLoading && mailboxData?.ok && mailboxData.emails.length === 0 && (
+                <p className="chat-hint">{A.mailboxEmpty}</p>
+              )}
+              {(mailboxData?.emails ?? []).map((m) => (
                 <div className="inbox-item" key={m.uid}>
                   <div className="inbox-top">
-                    <span className="inbox-from">
+                    <span className="inbox-from" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={mailSel.has(m.uid)}
+                        onChange={() => toggleMailSel(m.uid)}
+                        title="Selectează pentru ștergere"
+                      />
                       {m.fromName ? `${m.fromName} <${m.from}>` : m.from || '(expeditor necunoscut)'}
                     </span>
-                    <span className={`inbox-flag ${m.seen ? 'ok' : 'wait'}`}>
-                      {m.seen ? 'citit' : '● necitit'}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <span className={`inbox-flag ${m.seen ? 'ok' : 'wait'}`}>
+                        {m.seen ? 'citit' : '● necitit'}
+                      </span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12, color: '#ff7a7a' }}
+                        disabled={mailDelBusy}
+                        onClick={() => stergeMailuri([m.uid])}
+                        title="Șterge acest mesaj"
+                      >
+                        ✕
+                      </button>
                     </span>
                   </div>
                   <div className="inbox-subj">{m.subject || '(fără subiect)'}</div>
@@ -1002,17 +1819,26 @@ export default function AdminPanel({
                 Mesaje din formularul „Contact" — salvate MEREU aici, chiar dacă
                 emailul (MAIL_PASS) nu e configurat. Niciun mesaj nu se mai pierde.
               </div>
-              {contactMsgs.length === 0 && (
-                <p className="chat-hint">Niciun mesaj de contact încă.</p>
+              {contactMsgs === 'necitit' && <p className="chat-hint">{A.loading}</p>}
+              {contactMsgs === null && (
+                <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu am putut citi mesajele de contact — citire eșuată (posibil sesiune expirată), nu listă goală.
+                </p>
               )}
-              {contactMsgs.map((m) => (
+              {contactData && contactData.length === 0 && (
+                <p className="chat-hint">{A.noContactMessagesYet}</p>
+              )}
+              {(contactData ?? []).map((m) => (
                 <div className="inbox-item" key={m.id}>
                   <div className="inbox-top">
                     <span className="inbox-from">
                       {m.name || '(fără nume)'} &lt;{m.email}&gt;
                     </span>
+                    {/* `emailed` e acum MĂSURAT (auditul admin, 3 aug): devine
+                    true doar după ce sendMail chiar a raportat succes — vechea
+                    etichetă ✉️ se scria înainte de orice trimitere. */}
                     <span className={`inbox-flag ${m.emailed ? 'ok' : 'wait'}`}>
-                      {m.emailed ? '✉️ redirecționat pe email' : '📥 doar salvat (email off)'}
+                      {m.emailed ? '✉️ redirecționat pe email' : '📥 doar salvat (trimiterea a picat sau email off)'}
                     </span>
                   </div>
                   <div className="inbox-subj">
@@ -1036,10 +1862,16 @@ export default function AdminPanel({
                 Inbox contact@kelionai.app — emailurile PRIMITE și răspunsul redactat
                 automat de Secretar (row 19). Se citesc la fiecare 3 minute.
               </div>
-              {inbound.length === 0 && (
-                <p className="chat-hint">Nicio scrisoare încă (sau MAIL_PASS nesetat).</p>
+              {inbound === 'necitit' && <p className="chat-hint">{A.loading}</p>}
+              {inbound === null && (
+                <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu am putut citi scrisorile — citire eșuată (posibil sesiune expirată), nu listă goală.
+                </p>
               )}
-              {inbound.map((m) => (
+              {inboundData && inboundData.length === 0 && (
+                <p className="chat-hint">{A.noLettersYet}</p>
+              )}
+              {(inboundData ?? []).map((m) => (
                 <div className="inbox-item" key={m.id}>
                   <div className="inbox-top">
                     <span className="inbox-from">{m.from_name || m.from_addr}</span>
@@ -1051,7 +1883,7 @@ export default function AdminPanel({
                   {m.body && <div className="inbox-body">{m.body.slice(0, 300)}</div>}
                   {m.reply && (
                     <div className="inbox-reply">
-                      <b>Răspuns:</b> {m.reply.slice(0, 300)}
+                      <b>{A.reply}</b> {m.reply.slice(0, 300)}
                     </div>
                   )}
                 </div>
@@ -1065,15 +1897,43 @@ export default function AdminPanel({
               <div className="fin-breakdown-head">
                 Amprente vocale înregistrate — identificare speaker + gen detectat
               </div>
-              {voiceprintsLoading && voiceprints.length === 0 && (
-                <div className="chat-hint">Se încarcă…</div>
+              {voiceprintsLoading && (voiceprints?.length ?? 0) === 0 && (
+                <div className="chat-hint">{A.loading}</div>
               )}
-              {!voiceprintsLoading && voiceprints.length === 0 && (
-                <div className="chat-hint">Nicio amprentă vocală înregistrată încă.</div>
+              {/* null = citirea a PICAT (auditul admin, 3 aug) — nu se afișează
+              „Nicio amprentă": ownerul ar crede că amprenta lui a dispărut. */}
+              {!voiceprintsLoading && voiceprints === null && (
+                <div className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu am putut citi lista amprentelor — citire eșuată, nu listă goală (reîncerc la 10s).
+                </div>
               )}
-              {voiceprints.map((v) => (
+              {!voiceprintsLoading && voiceprints !== null && voiceprints.length === 0 && (
+                <div className="chat-hint">{A.noVoiceprintsYet}</div>
+              )}
+              {vpMsg && <div className="chat-hint" style={{ color: '#e6a23c' }}>{vpMsg}</div>}
+              {(voiceprints ?? []).map((v) => (
                 <div className="fin-row" key={v.email}>
-                  <span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {/* THE PAIRED FACE (Adrian, Aug 1: „voiceprint paired with an
+                    image capture — why wasn't it done?”). It WAS — saved in
+                    faceprints since Jul — only INVISIBLE. Now shown, so the pair
+                    voice+face is seen at a glance. */}
+                    {v.hasFace ? (
+                      <img
+                        src={v.facePhoto}
+                        alt={`Fața lui ${v.name || v.email}`}
+                        title="Captura de imagine împerecheată cu amprenta vocală"
+                        style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.15)' }}
+                      />
+                    ) : (
+                      <span
+                        className="muted"
+                        title="Fără captură încă — se face singură la prima tură cu camera pornită"
+                        style={{ width: 44, height: 44, borderRadius: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px dashed rgba(255,255,255,0.2)', fontSize: 18 }}
+                      >
+                        ?
+                      </span>
+                    )}
                     <strong>{v.name || v.email}</strong>
                     {' · '}
                     <span className={`vis-badge ${v.isAdmin ? 'kind-demo' : 'human'}`}>
@@ -1096,13 +1956,13 @@ export default function AdminPanel({
                       <button
                         type="button"
                         className="ghost"
-                        title="Ascultă mostra vocii"
+                        title={A.playVoiceSample}
                         onClick={() => void playVoiceprint(v.email)}
                       >
                         {playingVp === v.email ? '⏸ oprește' : '▶ ascultă'}
                       </button>
                     ) : (
-                      <span className="muted" title="Încă nu s-a captat o mostră audio">
+                      <span className="muted" title={A.noVoiceSampleYet}>
                         fără audio
                       </span>
                     )}
@@ -1110,11 +1970,18 @@ export default function AdminPanel({
                     <button
                       type="button"
                       className="ghost"
-                      onClick={() =>
+                      onClick={() => {
+                        // CONFIRMARE + verdict măsurat (auditul admin, 3 aug):
+                        // era SINGURUL buton distructiv fără confirmare, iar pe
+                        // {ok:false} rândul „dispărea" și reapărea la refresh.
+                        if (!window.confirm(A.confirmDeleteVoiceprint(v.name || v.email))) return
                         void deleteVoiceprint(v.email).then((ok) => {
-                          if (ok) setVoiceprints((cur) => cur.filter((x) => x.email !== v.email))
+                          if (ok) {
+                            setVoiceprints((cur) => (cur ? cur.filter((x) => x.email !== v.email) : cur))
+                            setVpMsg('')
+                          } else setVpMsg(A.voiceprintDeleteFailed(v.email))
                         })
-                      }
+                      }}
                     >
                       șterge
                     </button>
@@ -1123,11 +1990,22 @@ export default function AdminPanel({
               ))}
             </div>
             <div className="fin-breakdown" style={{ marginTop: 12 }}>
+              {/* STAREA REALĂ, NU RECLAMA (auditul admin, 3 aug): backend-ul e
+              DEZARMAT hard (adminLock.ts, LACAT_DEZARMAT=true — cererea
+              ownerului, 31 iul), deci serverul răspunde mereu armed:false.
+              Vechiul formular promitea „Armează lacătul … butonul Admin cere
+              de-acum vocea ta sau secretul" — fals: nu cerea nimic, niciodată.
+              Acum: starea citită se afișează CUM E, iar null (citire picată)
+              nu se mai preface „nearmat". */}
               <div className="fin-breakdown-head">
                 Lacătul butonului Admin —{' '}
-                {lockArmed
-                  ? 'ARMAT ✓: butonul se deschide doar cu amprenta ta vocală sau cu secretul'
-                  : 'nearmat: alege un secret ca să-l pornești'}
+                {lockArmed === 'necitit'
+                  ? 'se citește starea…'
+                  : lockArmed === null
+                    ? 'nu am putut citi starea (citire eșuată — redeschide tabul)'
+                    : lockArmed
+                      ? 'ARMAT ✓: butonul se deschide doar cu amprenta ta vocală sau cu secretul'
+                      : 'DEZARMAT la cererea ta (31 iul): butonul Admin intră direct, fără voce/secret'}
               </div>
               <form
                 className="fin-row"
@@ -1140,19 +2018,147 @@ export default function AdminPanel({
                   type="password"
                   value={lockSecret}
                   onChange={(e) => setLockSecret(e.target.value)}
-                  placeholder={lockArmed ? 'Secret nou (îl schimbă pe cel vechi)' : 'Secretul de activare (min. 4 caractere)'}
+                  placeholder="Secretul de activare (min. 4 caractere) — păstrat pentru rearmare"
                   autoComplete="new-password"
                   style={{ flex: 1, minWidth: 0 }}
                 />
                 <button type="submit" className="ghost">
-                  {lockArmed ? 'Schimbă secretul' : 'Armează lacătul'}
+                  Salvează secretul
                 </button>
               </form>
               {lockMsg && <div className="chat-hint">{lockMsg}</div>}
               <div className="chat-hint">
-                Odată armat: intrarea în admin cere vocea ta recunoscută în sesiune sau secretul
-                tastat. Vocea străină nu poate deschide panoul, chiar logată pe contul tău.
+                Dezarmarea e o constantă în cod (decizia ta din 31 iul: „scoate aprobarea complet").
+                Secretul salvat aici rămâne pregătit; ca să REARMEZI lacătul, cere-mi în chat
+                „repornește lacătul admin" — e o linie de cod + deploy. Cât e dezarmat, sesiunea
+                de admin e singurul factor de acces.
               </div>
+            </div>
+          </section>
+        )}
+        {tab === 'recuperare' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Recuperare — versiunile salvate ale aplicației (tag-uri git, oglindite pe serverul
+                Linux ca .bundle + .tar.gz). Fiecare e recuperabilă integral.
+              </div>
+              <form
+                className="fin-row"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  saveRecoveryNow()
+                }}
+              >
+                <input
+                  value={recoveryNote}
+                  onChange={(e) => setRecoveryNote(e.target.value)}
+                  placeholder={A.versionNotePlaceholder}
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button type="submit" className="ghost">
+                  Salvează versiunea curentă
+                </button>
+              </form>
+              {recoveryMsg && <div className="chat-hint">{recoveryMsg}</div>}
+            </div>
+            <div className="fin-breakdown" style={{ marginTop: 12 }}>
+              <div className="fin-breakdown-head">Versiuni salvate ({recoveryPoints.length})</div>
+              {recoveryLoading && recoveryPoints.length === 0 && <div className="chat-hint">{A.loading}</div>}
+              {/* EȘECUL SE DECLARĂ (auditul admin, 3 aug): „Nicio versiune
+              salvată încă" rămâne DOAR pentru o listă confirmată goală. */}
+              {!recoveryLoading && recoveryFailed && (
+                <div className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu am putut citi versiunile — citire eșuată (GITHUB_TOKEN lipsă sau GitHub n-a răspuns), NU listă goală.{' '}
+                  <button type="button" className="ghost" onClick={loadRecovery}>
+                    Reîncearcă
+                  </button>
+                </div>
+              )}
+              {!recoveryLoading && !recoveryFailed && recoveryPoints.length === 0 && (
+                <div className="chat-hint">{A.noVersionsYet}</div>
+              )}
+              {recoveryPoints.map((p) => (
+                <div className="fin-row" key={p.tag}>
+                  <span>
+                    <strong>
+                      {p.date
+                        ? new Date(p.date).toLocaleString('ro-RO', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : p.tag}
+                    </strong>
+                    {' · '}
+                    <code>{p.sha}</code>
+                    {p.note ? <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{p.note.split('\n')[0].slice(0, 140)}</div> : null}
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="muted" style={{ fontSize: 12 }}>{p.tag}</span>
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={restoringTag !== null}
+                      onClick={() => restoreFromPoint(p)}
+                    >
+                      {restoringTag === p.tag ? 'Restaurez…' : 'Restaurează'}
+                    </button>
+                  </span>
+                </div>
+              ))}
+              <div className="chat-hint">
+                „Restaurează" aduce aplicația EXACT la versiunea aleasă (commit nou pe master —
+                nimic nu se pierde din istoric) și republică automat pe server. Rezerve manuale:
+                bundle-urile din <code>/root/kelion/backups/</code>.
+              </div>
+            </div>
+          </section>
+        )}
+        {tab === 'sistem' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">Sistem (VPS)</div>
+              <p className="chat-hint" style={{ marginTop: 8 }}>
+                Declanșează fluxurile de restart pentru aplicație și Caddy. Durează câteva secunde.
+              </p>
+              <button
+                className="ghost"
+                style={{ marginTop: 12 }}
+                onClick={async () => {
+                  if (!confirm('Ești sigur că vrei să resetezi VPS-ul (aplicația și serverul web)?')) return
+                  try {
+                    const res = await fetch('/api/admin/reset-vps', {
+                      method: 'POST',
+                      credentials: 'include'
+                    })
+                    // CORPUL, nu doar statusul (măsurat 8 aug): serverul întorcea
+                    // `{ok:true}` chiar și când GitHub refuzase declanșarea, deci
+                    // aici scria „trimisă cu succes" pentru o repornire care nu
+                    // pornise. Acum răspunsul poartă fiecare pas, cu motivul lui.
+                    const j = (await res.json().catch(() => null)) as
+                      | { ok?: boolean; pasi?: { runbook: string; ok: boolean; detaliu: string }[] }
+                      | null
+                    if (res.ok && j?.ok === true) {
+                      alert(`Repornire pornită: ${(j.pasi ?? []).map((p) => p.runbook).join(', ')}`)
+                    } else {
+                      const motiv = (j?.pasi ?? []).find((p) => !p.ok)?.detaliu ?? `HTTP ${res.status}`
+                      alert(`Resetarea NU a pornit: ${motiv}`)
+                    }
+                  } catch (e) {
+                    // Eroarea era PRINSĂ și ARUNCATĂ: omul vedea „eroare de rețea"
+                    // orice s-ar fi întâmplat, iar cauza reală dispărea. Acum
+                    // motivul ajunge la el și în consolă, ca să se poată repara.
+                    const motiv = e instanceof Error ? e.message : String(e)
+                    console.error('[reset-vps]', e)
+                    alert(`Eroare la trimiterea comenzii de resetare: ${motiv}`)
+                  }
+                }}
+              >
+                Reset VPS
+              </button>
             </div>
           </section>
         )}
@@ -1173,38 +2179,162 @@ export default function AdminPanel({
                 <input
                   value={buildOrder}
                   onChange={(e) => setBuildOrder(e.target.value)}
-                  placeholder="Ordinul de construcție: ce, unde, cum se verifică"
+                  placeholder={A.buildOrderPlaceholder}
                   style={{ flex: 1, minWidth: 0 }}
                 />
                 <button type="submit" className="ghost">
                   Trimite ordinul
                 </button>
               </form>
+              {/* (Checkbox-ul „Use Fable 5 brain (paid)" a fost SCOS, 3 aug —
+                  extirparea OpenRouter: Fable 5 mergea prin OpenRouter, care nu
+                  mai există. Constructorul rulează pe Gemini, cheia ownerului.) */}
               {buildMsg && <div className="chat-hint">{buildMsg}</div>}
             </div>
             <div className="fin-breakdown" style={{ marginTop: 12 }}>
-              <div className="fin-breakdown-head">Coada ordinelor</div>
-              {buildJobs.length === 0 && <div className="chat-hint">Niciun ordin încă.</div>}
-              {buildJobs.map((j) => (
-                <div className="fin-row" key={j.id}>
+              <div className="fin-breakdown-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span>Coada ordinelor</span>
+                {buildJobsData?.some((j) => j.status === 'failed' || j.status === 'done') && (
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ fontSize: 12 }}
+                    onClick={cleanBuildOrders}
+                    title="Șterge din coadă toate ordinele eșuate și terminate (rămân doar cele în curs)"
+                  >
+                    Curăță eșuate/terminate
+                  </button>
+                )}
+              </div>
+              {/* PAUZA, VIZIBILĂ AICI (auditul admin, 3 aug): trăia doar în tabul
+              Bani — ordinele stăteau „în coadă · 0%" fără nicio explicație. */}
+              {buildPaused && (
+                <div className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⏸ Autonomia e PE PAUZĂ (oprită de tine din tabul Bani) — ordinele așteaptă în coadă, nu se pierd; lucrătorul nu ia nimic până n-o repornești.
+                </div>
+              )}
+              {/* TREI STĂRI (auditul admin, 3 aug): „Niciun ordin încă" doar după
+              o citire REUȘITĂ; înainte, orice eșec arăta coada „goală". */}
+              {buildJobs === 'necitit' && <div className="chat-hint">{A.loading}</div>}
+              {buildJobs === null && (
+                <div className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu am putut citi coada — citire eșuată, nu coadă goală (reîncerc la 10s).
+                </div>
+              )}
+              {buildJobsData && buildJobsData.length === 0 && <div className="chat-hint">{A.noOrdersYet}</div>}
+              {(buildJobsData ?? []).map((j) => (
+                <div className="fin-row" key={j.id} style={{ flexWrap: 'wrap' }}>
                   <span>
                     <strong>#{j.id}</strong>{' '}
                     <span className={`vis-badge ${j.status === 'done' ? 'human' : j.status === 'failed' ? 'kind-demo' : ''}`}>
-                      {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'GATA' : 'eșuat'}
+                      {/* ONESTITATE (Adrian, 5 aug): un job „done" = PR DESCHIS, NU
+                          pe live. „GATA" sugera fals că e publicat. Un job al cărui
+                          PR nu e merge-uit în master arată „în așteptare" (PR gata,
+                          dar așteaptă publicarea) — orice, dar nu „GATA". */}
+                      {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'în așteptare' : 'eșuat'}
                     </span>{' '}
+                    {/* FABLE 5 BADGE — DOAR pe raportul lucrătorului (auditul
+                        admin, 3 aug): ramura veche pe regex peste orderText
+                        eticheta „Fable 5" orice ordin nou care doar pomenea
+                        cuvintele, afirmând un creier care nu mai există
+                        (toggle-ul a fost scos odată cu OpenRouter). Marcajul
+                        rămâne istoric, pe rapoartele vechi cu j.brain='fable-5'. */}
+                    {j.brain === 'fable-5' && (
+                      <span
+                        className="vis-badge"
+                        style={{ background: '#7c3aed', color: '#fff' }}
+                        title="Fable 5 — marcaj istoric (creierul plătit de dinainte de extirparea OpenRouter, 3 aug)"
+                      >
+                        Fable 5
+                      </span>
+                    )}{' '}
                     {j.orderText.slice(0, 90)}
                     {j.orderText.length > 90 ? '…' : ''}
                   </span>
-                  <span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                     {j.prUrl && (
                       <a href={j.prUrl} target="_blank" rel="noreferrer">
                         PR ↗
                       </a>
                     )}
-                    {j.tokens > 0 && ` · ${Math.round(j.tokens / 1000)}k tok`}
-                    {' · '}
-                    {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    {j.tokens > 0 && <span>{`· ${Math.round(j.tokens / 1000)}k tok`}</span>}
+                    <span style={{ opacity: 0.7 }}>
+                      · {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {/* REIA — doar pentru cele care nu sunt în curs (eșuat/GATA/în coadă). */}
+                    {(j.status === 'failed' || j.status === 'done' || j.status === 'queued') && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12 }}
+                        onClick={() => retryBuildOrder(j.id)}
+                        title="Repune ordinul în coadă (îl reia de la zero)"
+                      >
+                        ↻ reia
+                      </button>
+                    )}
+                    {/* ȘTERGE — un ordin viu ('running') nu se șterge din greșeală. */}
+                    {j.status !== 'running' && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12, color: '#ff7a7a' }}
+                        onClick={() => deleteBuildOrder(j.id)}
+                        title="Șterge definitiv ordinul"
+                      >
+                        ✕
+                      </button>
+                    )}
+                    {/* OPREȘTE — un 'running' nu putea fi oprit din panou deloc
+                        (auditul admin, 3 aug); ruta cheamă cancelBuildJob. */}
+                    {j.status === 'running' && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12, color: '#ff7a7a' }}
+                        onClick={() => cancelBuildOrder(j.id)}
+                        title={'Oprește ordinul aflat în lucru (trece pe „eșuat”)'}
+                      >
+                        ⏹ oprește
+                      </button>
+                    )}
                   </span>
+                  {/* BARA 0–100% (Adrian, 3 aug: „fiecare job trebuie să afișeze
+                      starea reală printr-o bară 0–100%, actualizată dinamic").
+                      Procentul e harta etapei REALE raportate de lucrător
+                      (serverul o calculează din progres); textul etapei stă
+                      lângă cifră, ca s-o poți confrunta oricând cu sursa.
+                      Se actualizează cu polling-ul de 10s al cozii. */}
+                  {j.pct != null && (
+                    <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                      <div
+                        style={{
+                          flex: 1,
+                          height: 6,
+                          borderRadius: 999,
+                          background: 'color-mix(in srgb, currentColor 12%, transparent)',
+                          overflow: 'hidden',
+                        }}
+                        title={j.progress || (j.status === 'queued' ? 'în coadă' : '')}
+                      >
+                        <div
+                          style={{
+                            width: `${j.pct}%`,
+                            height: '100%',
+                            borderRadius: 999,
+                            background: j.status === 'done' ? '#38b26e' : '#4a8df0',
+                            transition: 'width 0.6s ease',
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: 11, opacity: 0.8, minWidth: 34, textAlign: 'right' }}>{j.pct}%</span>
+                      {j.status === 'running' && j.progress && (
+                        <span className="chat-hint" style={{ fontSize: 11, maxWidth: '46%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {j.progress}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1217,18 +2347,28 @@ export default function AdminPanel({
                 Gesturile lui Kelion — apasă „▶ Arată" ca să-l vezi făcând gestul; bifează ce are voie
                 să folosească pe logică/context. Ce NU e bifat NU se folosește deloc în aplicație.
                 {gestSaved ? ' · salvat ✓' : ''}
+                {gestErr && <span style={{ color: '#ff7a7a' }}> · {gestErr}</span>}
               </div>
+              {gestOff === 'necitit' && <div className="chat-hint">{A.loading}</div>}
+              {/* BIFELE BLOCATE PE CITIRE EȘUATĂ (auditul admin, 3 aug): pe []
+              fals, toate gesturile apăreau „active" și primul toggle salva peste
+              lista reală de pe server, ștergând dezactivările anterioare. */}
+              {gestOff === null && (
+                <div className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu am putut citi starea gesturilor — bifele sunt blocate ca să nu salvez peste o listă necitită. Redeschide tabul.
+                </div>
+              )}
               {GESTURE_CATEGORIES.map((cat) => (
                 <div key={cat}>
                   <div className="fin-breakdown-head" style={{ opacity: 0.7, marginTop: 12 }}>
                     {cat}
                   </div>
                   {GESTURE_CATALOG.filter((g) => g.category === cat).map((g) => {
-                    const on = !gestOff.includes(g.clip)
+                    const on = gestOffData ? !gestOffData.includes(g.clip) : false
                     return (
                       <div className="fin-row" key={g.clip}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                          <input type="checkbox" checked={on} onChange={() => toggleGesture(g.clip)} />
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: gestOffData ? 'pointer' : 'not-allowed' }}>
+                          <input type="checkbox" checked={on} disabled={!gestOffData} onChange={() => toggleGesture(g.clip)} />
                           <span style={{ opacity: on ? 1 : 0.5 }}>{g.label}</span>
                         </label>
                         <button type="button" className="ghost" onClick={() => previewAndPeek(g.clip)}>
@@ -1244,6 +2384,79 @@ export default function AdminPanel({
         )}
         {tab === 'tokenuri' && (
           <section className="admin-finance">
+            {/* WHAT THE SERVER SEES, BEFORE ANY NETWORK TEST (Adrian, Jul 30:
+                „all the keys have been typed dozens of times”). A WRITTEN key does
+                not automatically reach the running process: it can be in a
+                different file than the one given to docker, written AFTER the
+                container started, or set as a GitHub secret without running
+                `vps-set-env`. This table separates „not written” from „written but
+                never got here”. */}
+            {/* TABELUL NU MAI DISPARE MUT (auditul admin, 3 aug): o citire
+            eșuată se DECLARĂ — vedeta tabului nu poate lipsi fără explicație. */}
+            {envCheck === 'necitit' && <p className="chat-hint">{A.loading}</p>}
+            {envCheck === null && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ Nu am putut citi cheile procesului — citire eșuată, NU înseamnă că lipsesc. Apasă „Reîmprospătează".
+              </p>
+            )}
+            {envCheckData && (
+              <div className="fin-breakdown" style={{ marginBottom: 14 }}>
+                <div className="fin-breakdown-head">
+                  Ce chei vede serverul CHIAR ACUM — {envCheckData.summary.total - envCheckData.summary.lipsa - envCheckData.summary.goale}/
+                  {envCheckData.summary.total} prezente
+                </div>
+                <div className="or-wallet-sub">
+                  Procesul a pornit la{' '}
+                  <strong>{new Date(envCheckData.startedAt).toLocaleString('ro-RO')}</strong>. O cheie scrisă
+                  DUPĂ ora asta nu e încărcată până la repornirea containerului — asta e capcana în care
+                  „am scris-o de zeci de ori" și „nu o vede" sunt amândouă adevărate.
+                </div>
+                {envCheckData.orphans.length > 0 && (
+                  <div className="fin-row">
+                    <span style={{ color: '#e6a23c', fontWeight: 600 }}>
+                      ⚠ Chei pe care LE AI, dar sub alt nume:{' '}
+                      {envCheckData.orphans.map((n, i) => (
+                        <span key={n}>
+                          {i > 0 && ', '}
+                          <code>{n}</code>
+                        </span>
+                      ))}
+                    </span>
+                    <span className="fin-sub">redenumește-le, sau spune-mi și le citesc și așa</span>
+                  </div>
+                )}
+                {envCheckData.vars
+                  .filter((v) => !v.present || v.length === 0)
+                  .map((v) => (
+                    <div className="fin-row" key={v.name}>
+                      <span style={{ color: '#e6a23c' }}>
+                        ⚠ <code>{v.name}</code> — {v.what}
+                      </span>
+                      <span className="fin-sub" title={`Nume acceptate: ${v.accepts.join(', ')}`}>
+                        {v.present ? 'prezentă dar GOALĂ' : 'nu e în proces'} · {v.breaks}
+                      </span>
+                    </div>
+                  ))}
+                {envCheckData.summary.lipsa === 0 && envCheckData.summary.goale === 0 && (
+                  <div className="fin-row">
+                    <span>✅ Toate cheile așteptate sunt în procesul care rulează.</span>
+                  </div>
+                )}
+                {envCheckData.vars
+                  .filter((v) => v.present && v.length > 0)
+                  .map((v) => (
+                    <div className="fin-row" key={v.name}>
+                      <span>
+                        ✅ <code>{v.name}</code> — {v.what}
+                      </span>
+                      <span className="fin-sub" title={`Nume acceptate: ${v.accepts.join(', ')}`}>
+                        {v.foundAs && v.foundAs !== v.name ? `găsită ca ${v.foundAs} · ` : ''}
+                        {v.length} caractere
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
                 Tokenuri și chei API cu drepturi — verificare LIVE
@@ -1252,6 +2465,10 @@ export default function AdminPanel({
                   className="ghost"
                   style={{ marginLeft: 12 }}
                   onClick={() => {
+                    // REÎMPROSPĂTEAZĂ AMBELE BLOCURI (auditul admin, 3 aug):
+                    // tabelul „CHIAR ACUM" rămânea pe datele de la deschidere —
+                    // titlul mințea față de comportament.
+                    void fetchEnvCheck().then(setEnvCheck)
                     setTokenChecksLoading(true)
                     void fetchTokenChecks().then((r) => {
                       setTokenChecks(r)
@@ -1262,8 +2479,8 @@ export default function AdminPanel({
                   Reîmprospătează
                 </button>
               </div>
-              {tokenChecksLoading && <p className="chat-hint">Se verifică tokenurile…</p>}
-              {!tokenChecksLoading && !tokenChecks && <p className="chat-hint">Nu s-au putut încărca verificările.</p>}
+              {tokenChecksLoading && <p className="chat-hint">{A.checkingTokens}</p>}
+              {!tokenChecksLoading && !tokenChecks && <p className="chat-hint">{A.tokensFailed}</p>}
               {tokenChecks && (
                 <>
                   <div className="fin-row" style={{ fontWeight: 600 }}>
@@ -1289,20 +2506,31 @@ export default function AdminPanel({
         )}
         {tab === 'users' && (
           <section className="admin-finance">
-            {!activity && <p className="chat-hint">Se încarcă…</p>}
-            {activity && activity.users.length === 0 && (
+            {/* TREI STĂRI (auditul admin, 3 aug): backend-ul răspundea 200 cu
+            liste goale la DB picat, iar „nu s-a strâns activitate" era o
+            afirmație nemăsurată; acum eșecul e eșec, cu reîncercare. */}
+            {activity === 'necitit' && <p className="chat-hint">{A.loading}</p>}
+            {activity === null && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ Nu pot citi activitatea — citirea a eșuat, nu e cont fără activitate.{' '}
+                <button type="button" className="ghost" onClick={() => void fetchActivity().then(setActivity)}>
+                  Reîncearcă
+                </button>
+              </p>
+            )}
+            {activityData && activityData.users.length === 0 && (
               <p className="chat-hint">
                 Încă nu s-a strâns activitate pe conturi — se adună de la prima intrare a fiecărui
                 utilizator după această actualizare.
               </p>
             )}
-            {activity && activity.users.length > 0 && (
+            {activityData && activityData.users.length > 0 && (
               <>
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">
                     Pe utilizator — ultima intrare, IP, loc, cât a stat în total
                   </div>
-                  {activity.users.map((u) => (
+                  {activityData.users.map((u) => (
                     <div
                       className="vis-row vis-clickable"
                       key={u.email}
@@ -1312,7 +2540,7 @@ export default function AdminPanel({
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') void openUserConvo(u)
                       }}
-                      title="Vezi ce a scris și cum a testat"
+                      title={A.seeWhatTheyWrote}
                     >
                       <div className="vis-main">
                         <span className="vis-flagline">
@@ -1349,17 +2577,21 @@ export default function AdminPanel({
                         <button
                           type="button"
                           className="user-act"
-                          title="Vezi tot chatul: ce a scris și cum a răspuns Kelion"
+                          title={A.seeWholeChat}
                           onClick={() => void openUserConvo(u)}
                         >
                           💬 Vezi chat
                         </button>
+                        {/* FEEDBACK LA EȘEC (auditul admin, 3 aug): toate cele
+                        patru acțiuni tăceau când manageUser întorcea null —
+                        butonul părea apăsat degeaba. */}
                         <button
                           type="button"
                           className="user-act"
                           onClick={async () => {
                             const r = await manageUser(u.email, u.blocked ? 'unblock' : 'block')
                             if (r) setActivity(r)
+                            else window.alert(A.alertCouldNotPerf)
                           }}
                         >
                           {u.blocked ? 'Deblochează' : 'Blochează'}
@@ -1369,58 +2601,37 @@ export default function AdminPanel({
                           className="user-act"
                           onClick={async () => {
                             const s = window.prompt(
-                              `Credit pentru ${u.email} în ${sym}. Pune negativ ca să scazi:`,
+                              A.promptManualCreditAmount(u.email),
                             )
                             if (s == null) return
-                            const amt = Number(s)
-                            if (!Number.isFinite(amt) || amt === 0) return
+                            // VIRGULA ZECIMALĂ ACCEPTATĂ (auditul admin, 3 aug):
+                            // „5,50" dădea NaN și funcția ieșea tăcut — ownerul
+                            // credea că a creditat. Același tratament ca ruta
+                            // gemini-credit din backend.
+                            const amt = Number(s.replace(',', '.').trim())
+                            if (!Number.isFinite(amt) || amt === 0) {
+                              window.alert(A.alertInvalidAmount(s))
+                              return
+                            }
                             const r = await manageUser(u.email, 'credit', amt)
                             if (r) setActivity(r)
+                            else window.alert(A.alertNotCredited)
                           }}
                         >
                           Credit
-                        </button>
-                        {/* VÂNZARE (Adrian, 24 iul): X credite pe bani — generează
-                            linkul de plată Stripe pentru user; la plată primește
-                            EXACT X credite. Userii nu au buton de cumpărare. */}
-                        <button
-                          type="button"
-                          className="user-act"
-                          onClick={async () => {
-                            const s = window.prompt(`Câte credite îi vinzi lui ${u.email}?`)
-                            if (s == null) return
-                            const credits = Math.floor(Number(s))
-                            if (!(credits > 0)) return
-                            const r = await sellCredits(u.email, credits)
-                            if (!r) {
-                              window.alert('Generarea linkului a eșuat — vezi consola.')
-                              return
-                            }
-                            try {
-                              await navigator.clipboard.writeText(r.url)
-                            } catch {
-                              /* clipboard indisponibil — linkul rămâne în prompt */
-                            }
-                            window.prompt(
-                              `${r.credits} credite = £${r.pounds.toFixed(2)}. Linkul de plată (copiat deja în clipboard) — trimite-i-l userului:`,
-                              r.url,
-                            )
-                          }}
-                        >
-                          Vinde credite
                         </button>
                         <button
                           type="button"
                           className="user-act danger"
                           onClick={async () => {
-                            if (
-                              !window.confirm(
-                                `Ștergi definitiv datele lui ${u.email}? (mesaje, sold, sesiuni, memorie)`,
-                              )
-                            )
+                            // CONFIRMAREA SPUNE SCOPUL REAL (auditul admin, 3 aug):
+                            // lista vine din deleteUserData — inclusiv biometria
+                            // și contul Google, nu doar „mesaje, sold".
+                            if (!window.confirm(A.confirmDeleteUserData(u.email)))
                               return
                             const r = await manageUser(u.email, 'delete')
                             if (r) setActivity(r)
+                            else window.alert(A.alertNotDeleted)
                           }}
                         >
                           Șterge
@@ -1430,9 +2641,9 @@ export default function AdminPanel({
                   ))}
                 </div>
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Sesiuni recente — cine, când, cât a stat</div>
-                  {activity.sessions.length === 0 && <div className="chat-hint">—</div>}
-                  {activity.sessions.map((s, i) => (
+                  <div className="fin-breakdown-head">{A.recentSessions}</div>
+                  {activityData.sessions.length === 0 && <div className="chat-hint">—</div>}
+                  {activityData.sessions.map((s, i) => (
                     <div className="vis-row" key={i}>
                       <div className="vis-main">
                         <span className="vis-flagline">
@@ -1465,10 +2676,18 @@ export default function AdminPanel({
           <section className="admin-finance">
             <div className="fin-breakdown leads-box">
               <div className="fin-breakdown-head">
-                Contacte — vizitatori care și-au lăsat emailul ({leads.length})
+                Contacte — vizitatori care și-au lăsat emailul{leadsData ? ` (${leadsData.length})` : ''}
               </div>
-              {leads.length === 0 && <div className="chat-hint">Niciun contact încă.</div>}
-              {leads.map((l) => (
+              {leads === 'necitit' && <div className="chat-hint">{A.loading}</div>}
+              {/* null = citirea a EȘUAT (auditul admin, 3 aug) — nu „Niciun
+              contact încă" afirmat fără măsurătoare. */}
+              {leads === null && (
+                <div className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu am putut citi contactele — citire eșuată, nu listă goală (reîncerc la 30s).
+                </div>
+              )}
+              {leadsData && leadsData.length === 0 && <div className="chat-hint">{A.noContactsYet}</div>}
+              {(leadsData ?? []).map((l) => (
                 <div className="lead-row" key={l.id}>
                   <div className="lead-main">
                     <span className="lead-email">{l.email}</span>
@@ -1484,12 +2703,19 @@ export default function AdminPanel({
                         if (!subject) return
                         const body = window.prompt('Mesajul:')
                         if (!body) return
-                        const ok = await emailLead(l.id, l.email, subject, body)
-                        if (ok) {
+                        // ALERTA SPUNE CE S-A MĂSURAT (auditul admin, 3 aug):
+                        // vechiul text inventa cauza „verifică MAIL_PASS" chiar
+                        // când mailul mergea și eșecul era cu totul altul.
+                        const verdict = await emailLead(l.id, l.email, subject, body)
+                        if (verdict === 'ok') {
                           await fetchLeads().then(setLeads)
-                          window.alert('Email trimis.')
+                          window.alert(A.alertEmailSent)
+                        } else if (verdict === 'bad_request') {
+                          window.alert(A.alertEmailNotSent400)
+                        } else if (verdict === 'send_failed') {
+                          window.alert(A.alertEmailNotSent502)
                         } else {
-                          window.alert('Nu s-a putut trimite (verifică MAIL_PASS pe server).')
+                          window.alert(A.alertEmailNotSentNetwork)
                         }
                       }}
                     >
@@ -1499,31 +2725,42 @@ export default function AdminPanel({
                 </div>
               ))}
             </div>
-            {!demos && <p className="chat-hint">Se încarcă…</p>}
-            {demos && (
+            {demos === 'necitit' && <p className="chat-hint">{A.loading}</p>}
+            {/* ZEROURILE FABRICATE AU MURIT (auditul admin, 3 aug): DB picat nu
+            mai desenează „Vizite 0/0" pe carduri — 500-ul serverului ajunge
+            aici ca eșec declarat, cu reîncercare. */}
+            {demos === null && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ Nu pot citi vizitele — citirea a eșuat (nu înseamnă zero vizite).{' '}
+                <button type="button" className="ghost" onClick={() => void fetchDemos().then(setDemos)}>
+                  Reîncearcă
+                </button>
+              </p>
+            )}
+            {demosData && (
               <>
                 <div className="fin-cards">
                   <div className="fin-card">
                     <span className="fin-label">Vizite azi / total</span>
                     <span className="fin-val">
-                      {demos.visitsToday} / {demos.visitsTotal}
+                      {demosData.visitsToday} / {demosData.visitsTotal}
                     </span>
                   </div>
                   <div className="fin-card">
                     <span className="fin-label">Țări</span>
-                    <span className="fin-val">{demos.byCountry.filter((c) => c.code).length}</span>
+                    <span className="fin-val">{demosData.byCountry.filter((c) => c.code).length}</span>
                   </div>
                   <div className="fin-card">
-                    <span className="fin-label">Boți detectați</span>
-                    <span className="fin-val">{demos.bots}</span>
+                    <span className="fin-label">{A.botsDetected}</span>
+                    <span className="fin-val">{demosData.bots}</span>
                   </div>
                 </div>
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">După țară</div>
-                  {demos.byCountry.length === 0 && (
-                    <div className="chat-hint">Niciun vizitator încă.</div>
+                  <div className="fin-breakdown-head">{A.byCountry}</div>
+                  {demosData.byCountry.length === 0 && (
+                    <div className="chat-hint">{A.noVisitorsYet}</div>
                   )}
-                  {demos.byCountry.map((c) => (
+                  {demosData.byCountry.map((c) => (
                     <div className="fin-row" key={`${c.country}${c.code}`}>
                       <span className="vis-flagline">
                         <Flag code={c.code} /> {c.country}
@@ -1532,12 +2769,12 @@ export default function AdminPanel({
                     </div>
                   ))}
                 </div>
-                {/* Probele demo sunt MOARTE (nimic nu mai scrie demo_uses) — lista
-                    arată doar VIZITELE, fără badge/flux DEMO. */}
+                {/* The demo probes are DEAD (nothing writes demo_uses anymore) — the
+                list shows only the VISITS, no DEMO badge/flow. */}
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">Vizite recente — profil complet</div>
-                  {demos.recent.length === 0 && <div className="chat-hint">—</div>}
-                  {demos.recent.map((r, i) => (
+                  {demosData.recent.length === 0 && <div className="chat-hint">—</div>}
+                  {demosData.recent.map((r, i) => (
                     <div className="vis-row" key={i}>
                       <div className="vis-main">
                         <span className="vis-flagline">
@@ -1568,6 +2805,23 @@ export default function AdminPanel({
                           {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
                         </span>
                         {r.lang && <span>limbă {r.lang}</span>}
+                        {/* HIS timezone + how many times he has come (Adrian, Jul 31: „this
+                        field must offer full information about the visit”). */}
+                        {r.tz && (
+                          <span>
+                            {r.tz} · la el era{' '}
+                            {new Date(r.started_at).toLocaleTimeString('ro-RO', {
+                              timeZone: r.tz,
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        )}
+                        <span>
+                          {r.vizite_anterioare > 0
+                            ? `a ${r.vizite_anterioare + 1}-a vizită`
+                            : 'prima vizită'}
+                        </span>
                         <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
                       </div>
                     </div>
@@ -1580,9 +2834,17 @@ export default function AdminPanel({
         {tab === 'vchat' && (
           <section className="admin-finance vchat-admin">
             <div className="vchat-admin-list">
-              <div className="fin-breakdown-head">Conversații live cu vizitatorii</div>
-              {vconvos.length === 0 && <div className="chat-hint">Nicio conversație încă.</div>}
-              {vconvos.map((c) => (
+              <div className="fin-breakdown-head">{A.liveVisitorChats}</div>
+              {vconvos === 'necitit' && <div className="chat-hint">{A.loading}</div>}
+              {/* null = citirea a EȘUAT (auditul admin, 3 aug): pot exista
+              vizitatori care scriu chiar acum — pollul de 5s reîncearcă. */}
+              {vconvos === null && (
+                <div className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu pot citi conversațiile — citirea a eșuat (reîncerc la 5s).
+                </div>
+              )}
+              {vconvosData && vconvosData.length === 0 && <div className="chat-hint">{A.noConversationsYet}</div>}
+              {(vconvosData ?? []).map((c) => (
                 <div
                   key={c.conv_id}
                   className={`vchat-convo ${vsel === c.conv_id ? 'sel' : ''}`}
@@ -1607,10 +2869,11 @@ export default function AdminPanel({
               ))}
             </div>
             <div className="vchat-admin-thread">
-              {!vsel && <div className="chat-hint">Alege o conversație ca să răspunzi.</div>}
+              {!vsel && <div className="chat-hint">{A.pickConversation}</div>}
               {vsel && (
                 <>
                   <div className="vchat-admin-log">
+                    {vLoading && <p className="chat-hint">{A.loading}</p>}
                     {vmsgs.map((m) => (
                       <div
                         key={m.id}
@@ -1620,11 +2883,16 @@ export default function AdminPanel({
                       </div>
                     ))}
                   </div>
+                  {vReplyErr && (
+                    <p className="chat-hint" style={{ color: '#ff7a7a' }}>
+                      {vReplyErr}
+                    </p>
+                  )}
                   <div className="vchat-row">
                     <input
                       className="vchat-input"
                       value={vreply}
-                      placeholder="Răspunde vizitatorului…"
+                      placeholder={A.replyToVisitor}
                       onChange={(e) => setVreply(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') void sendReply()
@@ -1643,17 +2911,23 @@ export default function AdminPanel({
           <section className="admin-finance">
             {(() => {
               const url = 'https://kelionai.app'
-              const text =
-                'Ți-l prezint pe Kelion — asistentul meu AI cu avatar și voce: vede, aude și vorbește, în orice limbă. Îl încerci 3 minute gratuit, fără cont:'
+              // TABUL RESCRIS CORECT (Adrian, 3 aug: „rescrie corect tot tabul"):
+              // (1) mesajul e AL LUI, editabil, salvat local — nu bătut în cod;
+              // (2) fiecare rețea spune ce preia REAL (LinkedIn ignoră textul —
+              //     doar linkul; nu promitem ce platforma nu face);
+              // (3) clipul promo: fluxul REAL, pas cu pas (se generează din chat
+              //     cu `prepare_promo_clip`, se salvează în Downloads, se urcă
+              //     în studioul platformei) — nu o afirmație despre un folder.
+              const text = shareText.trim() || SHARE_TEXT_IMPLICIT
               const enc = encodeURIComponent
-              // Text/link networks accept a prefilled share URL; video platforms
-              // require uploading IN their studio — the clips are in Downloads.
               const links: { name: string; href: string }[] = [
                 { name: 'X (Twitter)', href: `https://twitter.com/intent/tweet?text=${enc(text)}&url=${enc(url)}` },
                 { name: 'Facebook', href: `https://www.facebook.com/sharer/sharer.php?u=${enc(url)}&quote=${enc(text)}` },
                 { name: 'WhatsApp', href: `https://wa.me/?text=${enc(`${text} ${url}`)}` },
                 { name: 'Telegram', href: `https://t.me/share/url?url=${enc(url)}&text=${enc(text)}` },
-                { name: 'LinkedIn', href: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}` },
+                // LinkedIn NU acceptă text pre-completat pe share-offsite — doar
+                // linkul. Scris pe buton, ca să nu pară stricat când textul „dispare".
+                { name: 'LinkedIn (doar linkul)', href: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}` },
                 { name: 'Reddit', href: `https://www.reddit.com/submit?url=${enc(url)}&title=${enc(text)}` },
               ]
               const uploads: { name: string; href: string }[] = [
@@ -1665,16 +2939,22 @@ export default function AdminPanel({
               return (
                 <>
                   <div className="fin-breakdown">
-                    <div className="fin-breakdown-head">Linkul aplicației</div>
+                    <div className="fin-breakdown-head">{A.appLink}</div>
                     <div className="share-row">
                       <code className="share-url">{url}</code>
                       <button
                         type="button"
                         className="ghost"
                         onClick={() => {
+                          // .catch OBLIGATORIU (auditul admin, 3 aug): clipboard-ul
+                          // refuzat (permisiuni/focus) lăsa butonul mut + unhandled
+                          // rejection în consolă (zgomot în auditul F12).
                           void navigator.clipboard.writeText(`${text} ${url}`).then(() => {
                             setCopied(true)
                             window.setTimeout(() => setCopied(false), 1800)
+                          }).catch(() => {
+                            setCopied(false)
+                            window.alert('Nu s-a putut copia (browserul a refuzat clipboard-ul) — copiază manual textul.')
                           })
                         }}
                       >
@@ -1692,27 +2972,42 @@ export default function AdminPanel({
                     </div>
                   </div>
                   <div className="fin-breakdown">
-                    <div className="fin-breakdown-head">Trimite linkul pe rețele</div>
-                    <div className="share-grid">
-                      {links.map((l) => (
-                        <a key={l.name} className="share-btn" href={l.href} target="_blank" rel="noreferrer">
-                          {l.name}
-                        </a>
-                      ))}
+                    <div className="fin-breakdown-head">
+                      Mesajul tău de prezentare — îl scrii o dată, îl folosesc toate
+                      butoanele de mai jos. Se salvează în browserul ăsta.
                     </div>
+                    <textarea
+                      className="admin-input"
+                      style={{ width: '100%', minHeight: 64, resize: 'vertical' }}
+                      value={shareText}
+                      onChange={(e) => salveazaShareText(e.target.value)}
+                      placeholder={SHARE_TEXT_IMPLICIT}
+                    />
+                    {shareText !== SHARE_TEXT_IMPLICIT && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12, marginTop: 6 }}
+                        onClick={() => salveazaShareText(SHARE_TEXT_IMPLICIT)}
+                      >
+                        Revino la mesajul standard
+                      </button>
+                    )}
                   </div>
+                  <ShareGrid title={A.shareOnSocial} items={links} />
                   <div className="fin-breakdown">
                     <div className="fin-breakdown-head">
-                      Platforme video — clipurile promo sunt în folderul Downloads; se încarcă în studioul lor
-                    </div>
-                    <div className="share-grid">
-                      {uploads.map((l) => (
-                        <a key={l.name} className="share-btn" href={l.href} target="_blank" rel="noreferrer">
-                          {l.name}
-                        </a>
-                      ))}
+                      Clipul promo — fluxul real, pas cu pas: (1) îi ceri lui Kelion în
+                      chat „pregătește clipul promo" — îl compune și ți-l salvează în
+                      Downloads; (2) deschizi studioul platformei de mai jos; (3) urci
+                      clipul din Downloads acolo. Butoanele DOAR deschid studiourile —
+                      nicio platformă nu permite încărcare automată din afară.
                     </div>
                   </div>
+                  <ShareGrid
+                    title={A.videoPlatforms}
+                    items={uploads}
+                  />
                 </>
               )
             })()}
@@ -1720,8 +3015,8 @@ export default function AdminPanel({
         )}
         {tab === 'gaps' && (
           <section className="admin-gaps">
-            {/* TRIAJ AUTONOM (Adrian, 24 iul): Kelion decide singur — valoros
-                rămâne „DE IMPLEMENTAT", restul se închide automat cu motiv. */}
+            {/* AUTONOMOUS TRIAGE (Adrian, Jul 24): Kelion decides by himself —
+            the valuable one stays „DE IMPLEMENTAT”, the rest auto-close with a reason. */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
               <button
                 type="button"
@@ -1729,16 +3024,44 @@ export default function AdminPanel({
                 disabled={triaging}
                 onClick={() => {
                   setTriaging(true)
+                  // FEEDBACK MĂSURAT (auditul admin, 3 aug): butonul tăcea și la
+                  // succes, și când creierul pica (backend: 200 + error în corp).
                   void runGapsTriage().then(async (r) => {
                     setTriaging(false)
-                    if (r) setGaps(await fetchGaps())
+                    if (!r) {
+                      setGapsMsg('Nu s-a putut porni triajul — reîncearcă.')
+                      return
+                    }
+                    if (r.error) {
+                      setGapsMsg(
+                        r.error === 'brain_unavailable'
+                          ? 'Triajul a picat: creierul nu a răspuns.'
+                          : 'Triajul a picat: răspunsul creierului nu s-a putut citi.',
+                      )
+                      return
+                    }
+                    setGapsMsg(
+                      r.triaged === 0
+                        ? 'Triaj: nimic de triat (toate cererile au deja verdict).'
+                        : `Triaj: ${r.triaged} analizate — ${r.kept} păstrate, ${r.closed} închise.`,
+                    )
+                    const g = await fetchGaps()
+                    if (g) setGaps(g)
                   })
                 }}
               >
                 {triaging ? 'Kelion analizează…' : '🤖 Triaj Kelion (autonom)'}
               </button>
             </div>
-            {gaps.length === 0 && (
+            {gapsMsg && <p className="chat-hint">{gapsMsg}</p>}
+            {/* Citirea picată se DECLARĂ, lista veche RĂMÂNE (auditul admin,
+            3 aug): un [] fals se citea ca „totul auto-rezolvat". */}
+            {gapsFailed && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ Nu am putut citi cererile — afișez ultima listă bună; reîncerc la 15s.
+              </p>
+            )}
+            {gaps.length === 0 && !gapsFailed && (
               <p className="chat-hint">
                 Nicio cerere neacoperită încă. Aici apar lucrurile pe care userii i le cer lui Kelion și pe
                 care nu le poate face încă — pentru a decide ce construim mai departe.
@@ -1761,24 +3084,124 @@ export default function AdminPanel({
                   </span>
                 </div>
                 <div className="admin-gap-actions">
+                  {/* Rezolvat = ARHIVARE (iese din lista implicită, rămâne în istoric);
+                      ✕ = ștergere DEFINITIVĂ, pentru zgomot/duplicate (Adrian, 3 aug:
+                      „butoane de ștergere, sau rezolvate și arhivate"). */}
                   <button type="button" className="ghost" onClick={() => void markResolved(g.id)}>
-                    Rezolvat (curăță)
+                    Rezolvat (arhivează)
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ color: '#ff7a7a' }}
+                    title="Șterge definitiv cererea (pentru zgomot/duplicate)"
+                    onClick={() => {
+                      if (!window.confirm(A.confirmDeleteGap)) return
+                      // ✕ nu mai tace la eșec (auditul admin, 3 aug): adminul
+                      // confirmase o ștergere „definitivă" și nu se întâmpla,
+                      // vizibil, nimic. Verdictul vine din stergeCuVerdict.
+                      void stergeCuVerdict(`/api/admin/gaps/${g.id}`).then((ok) => {
+                        if (ok) {
+                          setGaps((cur) => cur.filter((x) => x.id !== g.id))
+                          setGapsMsg('')
+                        } else setGapsMsg(A.gapDeleteFailed)
+                      })
+                    }}
+                  >
+                    ✕ șterge
                   </button>
                 </div>
               </div>
             ))}
+
+            {/* THE OUTAGES AUDIT (Adrian, Jul 27: „here you must see all the
+            audits and all the failures”): health + server errors + client
+            errors + failed orders — EVERYTHING that went down, in this tab. */}
+            <h3 style={{ marginTop: 22, marginBottom: 6 }}>
+              Audit — toate căzutele{' '}
+              <span style={{ fontWeight: 400, fontSize: 12, opacity: 0.7 }}>
+                (sănătate sistem · erori server · erori F12 · construcții eșuate)
+              </span>
+            </h3>
+            {/* Ultimul audit bun RĂMÂNE pe ecran la un eșec (auditul admin,
+            3 aug): setAudit(null) pe un blip ștergea problemele critice —
+            revenirea la „Se încarcă…" se citea ca „s-au rezolvat". */}
+            {!audit && !auditFailedAt && <p className="chat-hint">{A.loadingAudit}</p>}
+            {auditFailedAt && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ Nu am putut citi auditul — {audit ? `ultimele date sunt de dinainte de ${auditFailedAt}` : 'nicio citire reușită încă'}; reîncerc la 15s.
+              </p>
+            )}
+            {audit && (
+              <>
+                {(audit.health?.probleme?.length ?? 0) === 0 &&
+                  (audit.serverErrors?.length ?? 0) === 0 &&
+                  (audit.clientErrors?.length ?? 0) === 0 &&
+                  (audit.failedJobs?.length ?? 0) === 0 && (
+                    <p className="chat-hint">{A.nothingDown}</p>
+                  )}
+                {(audit.health?.probleme ?? []).map((p) => (
+                  <div key={`h-${p.id}`} className="admin-gap">
+                    <div className="admin-gap-main">
+                      <span className="admin-gap-req" style={{ color: p.grav === 'critic' ? '#ff7a7a' : '#ffb86b' }}>
+                        [{p.grav.toUpperCase()}] {p.desc}
+                      </span>
+                      <span className="admin-gap-meta">reparabil: {p.reparabil}</span>
+                    </div>
+                  </div>
+                ))}
+                {(audit.serverErrors ?? []).slice(-15).reverse().map((e, i) => (
+                  <div key={`s-${i}`} className="admin-gap">
+                    <div className="admin-gap-main">
+                      <span className="admin-gap-req" style={{ color: e.level >= 50 ? '#ff7a7a' : '#ffb86b' }}>
+                        [server {e.level >= 50 ? 'EROARE' : 'avert.'}] {e.msg}
+                      </span>
+                      <span className="admin-gap-meta">{new Date(e.t).toLocaleTimeString('ro-RO')}</span>
+                    </div>
+                  </div>
+                ))}
+                {(audit.clientErrors ?? []).slice(0, 15).map((e, i) => (
+                  <div key={`c-${i}`} className="admin-gap">
+                    <div className="admin-gap-main">
+                      <span className="admin-gap-req" style={{ color: '#ffb86b' }}>[F12 client] {e.message}</span>
+                      <span className="admin-gap-meta">
+                        {Number(e.n) > 1 ? `de ${e.n} ori · ` : ''}
+                        {e.user_email ?? 'anonim'} · {new Date(e.created_at).toLocaleString('ro-RO')}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {(audit.failedJobs ?? []).map((j) => (
+                  <div key={`j-${j.id}`} className="admin-gap">
+                    <div className="admin-gap-main">
+                      <span className="admin-gap-req" style={{ color: '#ff7a7a' }}>[constructor EȘUAT] #{j.id} — {j.order}</span>
+                      <span className="admin-gap-meta">{new Date(j.updated).toLocaleString('ro-RO')}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </section>
         )}
         <div className="admin-body" style={tab !== 'history' ? { display: 'none' } : undefined}>
           <aside className="admin-users">
-            {users.length === 0 && <p className="chat-hint">No history yet.</p>}
-            {users.map((u) => (
+            {/* Citirea picată nu mai e „No history yet." (auditul admin, 3 aug)
+            — și textele au intrat în adminText (erau hardcodate în engleză). */}
+            {users === 'necitit' && <p className="chat-hint">{A.loading}</p>}
+            {users === null && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ {A.usersReadFail}
+              </p>
+            )}
+            {usersData && usersData.length === 0 && <p className="chat-hint">{A.noHistoryYet}</p>}
+            {(usersData ?? []).map((u) => (
               <button
                 key={u.email}
                 type="button"
                 className={`admin-user ${selected === u.email ? 'sel' : ''}`}
                 onClick={() => {
                   setRoOn(false)
+                  setRoFailed(0)
                   setSelected(u.email)
                 }}
               >
@@ -1788,24 +3211,39 @@ export default function AdminPanel({
             ))}
           </aside>
           <section className="admin-history">
-            {!selected && <p className="chat-hint">Select a user to view their history.</p>}
-            {loading && <p className="chat-hint">Loading…</p>}
-            {selected && !loading && history.length > 0 && (
+            {!selected && <p className="chat-hint">{A.selectUserHint}</p>}
+            {loading && <p className="chat-hint">{A.loading}</p>}
+            {/* Conversație goală ≠ citire picată ≠ panou alb (auditul admin,
+            3 aug): fiecare stare are propriul text. */}
+            {selected && !loading && history === null && (
+              <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                ⚠ {A.historyReadFail}
+              </p>
+            )}
+            {selected && !loading && history !== null && history.length === 0 && (
+              <p className="chat-hint">{A.noMessagesYet}</p>
+            )}
+            {selected && !loading && history !== null && history.length > 0 && (
               <div className="convo-head-actions" style={{ marginBottom: 8 }}>
                 <button
                   type="button"
                   className="user-act"
                   disabled={roBusy}
-                  title="Traduce toată conversația în română (din orice limbă), instant"
+                  title={A.translateToRo}
                   onClick={() => void toggleRo(history)}
                 >
                   {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
                 </button>
+                {roOn && roFailed > 0 && (
+                  <span className="chat-hint" style={{ color: '#d97706' }}>
+                    ⚠ {roFailed} mesaje netraduse (serviciul de traducere nu a răspuns) — vezi textul original
+                  </span>
+                )}
               </div>
             )}
             {selected &&
               !loading &&
-              groupByDay(history).map((g) => (
+              groupByDay(history ?? []).map((g) => (
                 <div key={g.header} className="admin-day">
                   <div className="admin-day-header">{g.header}</div>
                   {g.rows.map((h, i) => (
@@ -1825,7 +3263,7 @@ export default function AdminPanel({
         </div>
       </div>
       {userConvo && (
-        <div className="convo-overlay" onClick={() => setUserConvo(null)}>
+        <div className="convo-overlay" onClick={closeUserConvo}>
           <div className="convo-panel" onClick={(e) => e.stopPropagation()}>
             <header className="admin-head">
               <div className="convo-title">
@@ -1842,24 +3280,36 @@ export default function AdminPanel({
                 <button
                   type="button"
                   className="user-act"
-                  disabled={roBusy || userConvo.rows.length === 0}
-                  title="Traduce toată conversația în română (din orice limbă), instant"
-                  onClick={() => void toggleRo(userConvo.rows)}
+                  disabled={roBusy || (userConvo.rows?.length ?? 0) === 0}
+                  title={A.translateToRo}
+                  onClick={() => void toggleRo(userConvo.rows ?? [])}
                 >
                   {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
                 </button>
-                <button type="button" className="ghost" onClick={() => setUserConvo(null)}>
+                {roOn && roFailed > 0 && (
+                  <span className="chat-hint" style={{ color: '#d97706' }}>
+                    ⚠ {roFailed} netraduse
+                  </span>
+                )}
+                <button type="button" className="ghost" onClick={closeUserConvo}>
                   Close
                 </button>
               </div>
             </header>
             <div className="admin-history convo-body">
-              {userConvoLoading && <p className="chat-hint">Se încarcă…</p>}
-              {!userConvoLoading && userConvo.rows.length === 0 && (
-                <p className="chat-hint">Nu a scris niciun mesaj încă.</p>
+              {userConvoLoading && <p className="chat-hint">{A.loading}</p>}
+              {/* null = citirea a PICAT (auditul admin, 3 aug) — distinct de
+              „Nu a scris niciun mesaj încă". */}
+              {!userConvoLoading && userConvo.rows === null && (
+                <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ {A.historyReadFail}
+                </p>
+              )}
+              {!userConvoLoading && userConvo.rows !== null && userConvo.rows.length === 0 && (
+                <p className="chat-hint">{A.noMessagesYet}</p>
               )}
               {!userConvoLoading &&
-                groupByDay(userConvo.rows).map((g) => (
+                groupByDay(userConvo.rows ?? []).map((g) => (
                   <div key={g.header} className="admin-day">
                     <div className="admin-day-header">{g.header}</div>
                     {g.rows.map((h, i) => (

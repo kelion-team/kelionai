@@ -1,23 +1,26 @@
 import { saveWorkOrder, loadKv, saveKv } from '../db.js'
 import { sendMail } from './mail.js'
 import { config } from '../config.js'
+import { REPO, ghToken, gh as ghFetch } from './githubApi.js' // GitHub din sursa UNICĂ
 
-// ── MÂINILE LUI KELION PE OPERAȚIUNI — FĂRĂ RESTRICȚII (Adrian, 25 iul:
-// „ridici absolut toate restricțiile lui Kelion — decizia mea, nu a ta") ─────
-// Principiul rămas: LLM-ul alege NUMELE runbook-ului; execuția e deterministă —
-// un workflow GitHub Actions cu comenzi fixe, vizibil în Actions. ORDINUL LUI
-// ADRIAN (25 iul, explicit, înlocuiește lesa veche din regula #11): FĂRĂ
-// aprobare per-acțiune, FĂRĂ plafon zilnic, FĂRĂ blocare la eșecuri repetate.
-// La BUCLĂ de eșecuri (același workflow picat de 2+ ori la rând), regula lui
-// Adrian e: (1) AVERTIZEZ adminul (email, cel mult unul pe workflow la 30 min),
-// (2) NU repet orb aceeași soluție — schimb strategia (diagnostic, alt drum),
-// (3) Adrian are COMANDA DE STOP: „pauza-autonomie" îngheață acțiunile
-// autonome până la „reia-autonomia". Orice AI viitor: NU reintroduce plafoane
-// sau blocări aici fără ordinul lui Adrian. Singura „limită" rămasă e fizică:
-// fără GITHUB_TOKEN în env, GitHub refuză — răspundem clar, nu improvizăm.
+// ── KELION'S HANDS ON OPERATIONS — NO RESTRICTIONS (Adrian, Jul 25: "lift
+// absolutely all of Kelion's restrictions — my decision, not yours") ─────────
+// The remaining principle: the LLM chooses the runbook's NAME; execution is
+// deterministic — a GitHub Actions workflow with fixed commands, visible in
+// Actions. ADRIAN'S ORDER (Jul 25, explicit, replacing the old leash from rule
+// #11): NO per-action approval, NO daily cap, NO blocking on repeated
+// failures. On a failure LOOP (the same workflow failed 2+ times in a row),
+// Adrian's rule is: (1) WARN the admin (email, at most one per workflow per
+// 30 min), (2) do NOT blindly repeat the same solution — change strategy
+// (diagnostic, another path), (3) Adrian holds the STOP COMMAND:
+// "pauza-autonomie" freezes autonomous actions until "reia-autonomia". Any
+// future AI: do NOT reintroduce caps or blocks here without Adrian's order.
+// The only remaining "limit" is physical: without GITHUB_TOKEN in env, GitHub
+// refuses — we answer clearly, we don't improvise.
 
-const REPO = 'kelion-team/kelionai'
-const API = `https://api.github.com/repos/${REPO}`
+// The GitHub call here keeps the 15s timeout (dispatch/logs) — a one-line
+// wrapper over the common source; REPO + ghToken come from there too.
+const gh = (path: string, init?: RequestInit): Promise<Response> => ghFetch(path, init, 15_000)
 
 export interface Runbook {
   workflow: string
@@ -25,7 +28,7 @@ export interface Runbook {
   desc: string
 }
 
-// Registrul = oglinda lui deploy/RUNBOOKS.md — comenzi exacte, repetabile.
+// The registry = the mirror of deploy/RUNBOOKS.md — exact, repeatable commands.
 export const RUNBOOKS: Record<string, Runbook> = {
   diagnostic: { workflow: 'vps-diag.yml', desc: 'faptele reale de pe VPS (doar citire)' },
   'sentinel-now': { workflow: 'sentinel.yml', desc: 'verificarea de sănătate imediat' },
@@ -48,6 +51,40 @@ export const RUNBOOKS: Record<string, Runbook> = {
     inputs: { cmd: 'docker logs --tail 100 kelionai-app 2>&1' },
     desc: 'ultimele 100 de linii din jurnalul aplicației',
   },
+  // ── THE RESTORE REHEARSAL (Adrian, Jul 30, one of the six) ───────────────
+  // The backup runs daily. That it can be RESTORED FROM was never proven —
+  // and an unrehearsed backup isn't a safety net, it's an assumption. The
+  // difference shows exactly on the day you need it, i.e. too late.
+  //
+  // The rehearsal is end-to-end and NON-DESTRUCTIVE: it takes the newest
+  // encrypted backup, decrypts it, restores it into a TEMPORARY database
+  // (never over the live one), counts the rows in the tables that matter,
+  // then drops the rehearsal database. If any step falls, it exits with an
+  // error — not with silence.
+  'proba-restaurare': {
+    workflow: 'vps-run.yml',
+    inputs: {
+      cmd:
+        'set -e; ' +
+        'f=$(ls -t /root/kelion/backups/*.sql.enc 2>/dev/null | head -1); ' +
+        '[ -n "$f" ] || { echo "NU EXISTĂ NICIUN BACKUP în /root/kelion/backups"; exit 1; }; ' +
+        'echo "backup probat: $f ($(stat -c %y "$f"), $(du -h "$f" | cut -f1))"; ' +
+        'PGURL=$(grep -E "^DATABASE_URL=" /root/kelion/kelionai.env | head -1 | sed "s/^DATABASE_URL=//"); ' +
+        'BAZA=kelion_proba_restaurare; ' +
+        'psql "$PGURL" -c "DROP DATABASE IF EXISTS $BAZA" >/dev/null; ' +
+        'psql "$PGURL" -c "CREATE DATABASE $BAZA" >/dev/null; ' +
+        'URLPROBA=$(echo "$PGURL" | sed "s#/[^/?]*\\(?\\|$\\)#/$BAZA\\1#"); ' +
+        'openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/root/kelion/backup.key -in "$f" ' +
+        '  | psql "$URLPROBA" -q -v ON_ERROR_STOP=1 >/dev/null; ' +
+        'echo "— RÂNDURI RECUPERATE —"; ' +
+        'psql "$URLPROBA" -t -c "SELECT \'users: \'||count(*) FROM users"; ' +
+        'psql "$URLPROBA" -t -c "SELECT \'payment_codes: \'||count(*) FROM payment_codes" || true; ' +
+        'psql "$URLPROBA" -t -c "SELECT \'cerinte: \'||count(*) FROM cerinte" || true; ' +
+        'psql "$PGURL" -c "DROP DATABASE $BAZA" >/dev/null; ' +
+        'echo "PROBA A TRECUT: backupul se poate restaura, iar baza de probă a fost ștearsă."',
+    },
+    desc: 'probează CĂ SE POATE RESTAURA din ultimul backup (bază temporară, nedistructiv)',
+  },
   'backup-db': {
     workflow: 'vps-run.yml',
     inputs: { cmd: '/root/kelion/backup.sh && ls -lh /root/kelion/backups 2>/dev/null | tail -3' },
@@ -60,9 +97,13 @@ export const RUNBOOKS: Record<string, Runbook> = {
     },
     desc: 'omoară procesele-zombie și arată dovada',
   },
+  'instaleaza-pachet-sistem': {
+    workflow: 'vps-run.yml',
+    desc: 'instalează un pachet de sistem pe VPS (apt-get) — operație privilegiată cu verificare strictă de securitate pe numele pachetului',
+  },
 }
 
-/** Gardă pură (testabilă fără rețea): doar nume cunoscute — nimic altceva. */
+/** A pure guard (testable without network): known names only — nothing else. */
 export function validateRunbook(
   name: string,
 ): { ok: true; rb: Runbook } | { ok: false; error: string; known: string[] } {
@@ -71,24 +112,7 @@ export function validateRunbook(
   return { ok: true, rb }
 }
 
-function ghToken(): string {
-  return (process.env.GITHUB_TOKEN ?? '').trim()
-}
-
-async function gh(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${ghToken()}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(init?.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
-}
-
-// ── COMANDA DE STOP a lui Adrian (nu e restricție — e întrerupătorul LUI) ────
+// ── Adrian's STOP COMMAND (not a restriction — it's HIS switch) ────────────
 const PAUSE_KEY = 'kelion_ops_paused'
 export async function isOpsPaused(): Promise<boolean> {
   return (await loadKv(PAUSE_KEY).catch(() => null)) === '1'
@@ -97,7 +121,7 @@ export async function setOpsPaused(paused: boolean): Promise<void> {
   await saveKv(PAUSE_KEY, paused ? '1' : '0').catch(() => {})
 }
 
-/** BUCLĂ = ultimele 2 rulări ale workflow-ului au picat. Nu blochează — informează. */
+/** LOOP = the workflow's last 2 runs failed. It doesn't block — it informs. */
 async function loopDetected(workflow: string): Promise<boolean> {
   try {
     const r = await gh(`/actions/workflows/${workflow}/runs?per_page=2&status=completed`)
@@ -110,7 +134,7 @@ async function loopDetected(workflow: string): Promise<boolean> {
   }
 }
 
-/** Avertizare admin la buclă — cel mult un email per workflow la 30 min. */
+/** Admin warning on a loop — at most one email per workflow per 30 min. */
 export async function alertAdminLoop(workflow: string, context: string): Promise<void> {
   const key = `loop_alert_${workflow}`
   const last = Number((await loadKv(key).catch(() => '0')) ?? '0') || 0
@@ -125,9 +149,18 @@ export async function alertAdminLoop(workflow: string, context: string): Promise
   }).catch(() => false)
 }
 
-/** Rulează un runbook numit. Întoarce JSON-string pentru creier (niciodată tokenul). */
-export async function runRunbook(name: string): Promise<string> {
-  // Întrerupătorul lui Adrian — comenzi speciale, nu workflow-uri.
+/** Validates a system package name (apt-get) to prevent command injection. */
+export function isValidSysPackageName(pkg: string): boolean {
+  if (!pkg || typeof pkg !== 'string') return false
+  const trimmed = pkg.trim()
+  if (trimmed.length === 0 || trimmed.length > 64) return false
+  // Safe debian package names: alphanumeric, +, -, ., _
+  return /^[a-zA-Z0-9_+.-]+$/.test(trimmed)
+}
+
+/** Runs a named runbook. Returns a JSON string for the brain (never the token). */
+export async function runRunbook(name: string, customInputs?: Record<string, string>): Promise<string> {
+  // Adrian's switch — special commands, not workflows.
   if (name === 'pauza-autonomie') {
     await setOpsPaused(true)
     return JSON.stringify({ ok: true, paused: true, hint: 'acțiunile autonome sunt ÎNGHEȚATE până la „reia-autonomia"' })
@@ -141,23 +174,45 @@ export async function runRunbook(name: string): Promise<string> {
   const v = validateRunbook(name)
   if (!v.ok)
     return JSON.stringify({ error: v.error, runbooks: v.known, hint: 'folosește exact un nume din listă' })
+
+  let finalInputs: Record<string, string> = { ...(v.rb.inputs ?? {}), ...(customInputs ?? {}) }
+  if (name === 'instaleaza-pachet-sistem') {
+    const pkg = (customInputs?.pachet || customInputs?.pkg || customInputs?.package || '').trim()
+    if (!isValidSysPackageName(pkg)) {
+      return JSON.stringify({
+        error: 'nume_pachet_invalid',
+        hint: 'Numele pachetului de sistem trebuie să fie doar caractere alfanumerice, +, -, ., _ (ex: curl, htop, ffmpeg)',
+      })
+    }
+    finalInputs = {
+      cmd: `DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${pkg}`,
+    }
+  }
+
   if (!ghToken())
     return JSON.stringify({
       error: 'github_token_missing',
       hint: 'pune GITHUB_TOKEN în /root/kelion/kelionai.env și repornește containerul (redeploy).',
     })
-  // Buclă? NU blocăm (ordinul lui Adrian) — avertizăm și cerem STRATEGIE NOUĂ.
+
+  // A loop? We do NOT block (Adrian's order) — we warn and ask for a NEW STRATEGY.
   let warning: string | undefined
   if (await loopDetected(v.rb.workflow)) {
     warning =
       'BUCLĂ: ultimele 2 rulări ale acestui workflow au PICAT. Nu repeta aceeași soluție — rulează «diagnostic», citește faptele și schimbă abordarea. Adminul a fost avertizat pe email.'
     void alertAdminLoop(v.rb.workflow, `Declanșat din chat: runbook «${name}».`)
   }
+
   const r = await gh(`/actions/workflows/${v.rb.workflow}/dispatches`, {
     method: 'POST',
-    body: JSON.stringify({ ref: 'master', inputs: v.rb.inputs ?? {} }),
+    body: JSON.stringify({ ref: 'master', inputs: finalInputs }),
   })
-  if (r.status === 204)
+  // DISPATCH SUCCESS = 200. It used to hinge on "=== 204" — but a workflow
+  // dispatch answers 200 (the GitHub doc "Create a workflow dispatch event"),
+  // so on a SUCCESSFUL dispatch the runbook reported `dispatch_failed_200` and
+  // autonomy looked down for nothing. Anything other than 200 is a failure,
+  // reported as such.
+  if (r.status === 200)
     return JSON.stringify({
       ok: true,
       started: name,
@@ -169,14 +224,45 @@ export async function runRunbook(name: string): Promise<string> {
   return JSON.stringify({ error: `dispatch_failed_${r.status}`, detail: body, ...(warning ? { warning } : {}) })
 }
 
-// ── OCHII LUI KELION PE PROPRIILE PROCESE (Adrian, 25 iul: „raportează că nu
-// vede procesele interne — ce autonomie este asta?") ─────────────────────────
-// După ce pornește ceva, Kelion CITEȘTE singur starea și jurnalul rulărilor —
-// nu ghicește, nu promite. GitHub-ul se apelează cu cheia, nu se „vizitează".
+// ── CITIREA RĂSPUNSULUI UNUI RUNBOOK (pură, deci probabilă) ─────────────────
+// `runRunbook` întoarce un ȘIR de JSON: ori `{ok:true, started, watch}`, ori
+// `{error:…, hint?}`. Cine îl aruncă (cum făcea `/api/admin/reset-vps` până pe
+// 8 aug 2026) raportează „trimis cu succes" pentru un refuz. Funcția asta face
+// traducerea într-un singur loc, iar fiind pură se poate rula pe răspunsurile
+// REALE din testele de lângă — fără GitHub, fără rețea, fără presupuneri.
+export interface PasRunbook {
+  runbook: string
+  ok: boolean
+  detaliu: string
+}
+
+export function citesteRaspunsRunbook(runbook: string, brut: string): PasRunbook {
+  let raspuns: Record<string, unknown>
+  try {
+    raspuns = JSON.parse(brut) as Record<string, unknown>
+  } catch {
+    return { runbook, ok: false, detaliu: `raspuns_neinteligibil — ${String(brut).slice(0, 200)}` }
+  }
+  const eroare = typeof raspuns.error === 'string' ? raspuns.error : null
+  if (!eroare) {
+    // Un `{ok:true}` fără `error` e succes; păstrăm avertismentul de buclă dacă
+    // există, ca omul să-l vadă chiar și pe drumul fericit.
+    const avertisment = typeof raspuns.warning === 'string' ? ` (${raspuns.warning})` : ''
+    return { runbook, ok: true, detaliu: `pornit${avertisment}` }
+  }
+  const hint = typeof raspuns.hint === 'string' ? raspuns.hint : ''
+  return { runbook, ok: false, detaliu: hint ? `${eroare} — ${hint}` : eroare }
+}
+
+// ── KELION'S EYES ON HIS OWN PROCESSES (Adrian, Jul 25: "he reports that he
+// can't see the internal processes — what autonomy is this?") ────────────────
+// After starting something, Kelion READS the state and the runs' logs himself
+// — he doesn't guess, doesn't promise. GitHub is called with the key, not
+// "visited".
 
 const ALL_WORKFLOWS = ['deploy.yml', 'vps-run.yml', 'vps-diag.yml', 'sentinel.yml', 'pr-verify.yml']
 
-/** Starea ultimelor rulări (toate workflow-urile sau doar al unui runbook). */
+/** The state of the latest runs (all workflows or just one runbook's). */
 export async function runbookStatus(name?: string): Promise<string> {
   if (!ghToken())
     return JSON.stringify({ error: 'github_token_missing' })
@@ -210,7 +296,7 @@ export async function runbookStatus(name?: string): Promise<string> {
   return JSON.stringify(out)
 }
 
-/** Jurnalul REAL al unei rulări — coada lui (rezultatul e acolo, nu în presupuneri). */
+/** The REAL log of a run — its tail (the result is there, not in guesses). */
 export async function runbookLog(runId: number): Promise<string> {
   if (!ghToken()) return JSON.stringify({ error: 'github_token_missing' })
   if (!Number.isInteger(runId) || runId <= 0) return JSON.stringify({ error: 'invalid_run_id' })
@@ -227,9 +313,9 @@ export async function runbookLog(runId: number): Promise<string> {
 }
 
 /**
- * Ordin de reparație mare: se SCRIE în work_orders + semnal pe email către
- * owner. Pentru reparații pe care Kelion le poate face singur, folosește
- * uneltele repo_write/repo_open_pr/repo_merge_pr (services/github.ts).
+ * A big repair order: it gets WRITTEN into work_orders + an email signal to
+ * the owner. For repairs Kelion can do himself, use the
+ * repo_write/repo_open_pr/repo_merge_pr tools (services/github.ts).
  */
 export async function requestRepair(title: string, details: string): Promise<string> {
   const id = `wo-${Date.now().toString(36)}`
