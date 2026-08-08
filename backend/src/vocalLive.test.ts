@@ -318,3 +318,28 @@ describe('mapview — niciun oraș bătut în cod', () => {
     expect(sursa).toContain('primulFix&&!dest')
   })
 })
+
+// ── UNELTELE PRIN UȘĂ + ANUNȚUL LA TERMINARE (8 aug: „a oferit soluții dar nu
+// poate să implementeze... dă-i uneltele să poată, și să anunțe când e gata") ─
+describe('vocalLive — ușa dă faza de ACȚIUNE și anunță ordinele terminate', () => {
+  const ruta = readFileSync(new URL('./routes/vocalLive.ts', import.meta.url), 'utf8')
+  const chat = readFileSync(new URL('./routes/chat.ts', import.meta.url), 'utf8')
+
+  it('ușa marchează tura (usaCreierului) și chatul o tratează ca ACȚIUNE', () => {
+    expect(ruta).toContain('usaCreierului: true')
+    expect(chat).toContain("req.body?.usaCreierului === true")
+  })
+
+  it('ordinul din „Am preluat cerința (ordin #N)" intră sub urmărire', () => {
+    expect(ruta).toMatch(/ordin\\s\*#\(\\d\+\)/)
+    expect(ruta).toContain('ordineUrmarite.add(Number(ordin[1]))')
+  })
+
+  it('la done/failed, sesiunea primește anunțul — Kelion îl spune cu vocea lui', () => {
+    expect(ruta).toContain("j.status === 'done' || j.status === 'failed'")
+    expect(ruta).toContain('ANUNȚ DE SISTEM')
+    const motor = readFileSync(new URL('./services/vocalLive.ts', import.meta.url), 'utf8')
+    expect(motor).toContain('anunta(text: string): void')
+    expect(motor).toContain('clientContent')
+  })
+})
