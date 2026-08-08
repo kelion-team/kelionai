@@ -37,7 +37,6 @@ import { startAutoInvatare } from './services/autoInvatare.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { runSelfHeal } from './services/selfHeal.js'
 import { pornesteIscoadele } from './services/iscoada.js'
-import { reiaCreareaDupaRepornire } from './services/enterpriseCreate.js'
 import { pornestePietarul } from './services/pietar.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
@@ -424,11 +423,6 @@ try {
   // PIETARUL (Adrian, 4 aug: „el învață din realitate 24 din 24, din datele
   // agenților bursieri"): patrula piețelor → observații în memoria lui Kelion.
   pornestePietarul()
-  // CREAREA AGENȚILOR ENTERPRISE reia SINGURĂ după un restart (Adrian, 4 aug:
-  // „remediază err asta cu reluarea de la 0") — steagul stă în memorie_proiect.
-  setTimeout(() => {
-    void reiaCreareaDupaRepornire().catch(() => {})
-  }, 60_000)
 } catch (err) {
   app.log.error(err)
   process.exit(1)

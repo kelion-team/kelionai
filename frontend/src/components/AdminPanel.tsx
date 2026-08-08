@@ -1046,9 +1046,9 @@ export default function AdminPanel({
       <div className="admin-panel">
         <header className="admin-head">
           <div className="admin-tabs">
-            {/* Butonul cerut de owner („pui în admin buton, eu loghez și
-                continui"): deschide pagina care creează cei 33 de agenți în
-                consola Google Enterprise, cu tokenul lui (services/enterpriseCreate). */}
+            {/* Deschide pagina de adăugat agenți manual (+ temele iscoadelor).
+                Crearea în consola Google Enterprise a fost SCOASĂ pe ordinul
+                ownerului (8 aug) — agenții lucrează în aplicație, la /api/a2a. */}
             <button
               type="button"
               className="admin-tab"

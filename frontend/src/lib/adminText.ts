@@ -190,7 +190,7 @@ export interface AdminStrings {
 }
 
 const en: AdminStrings = {
-  tabEnterprise: '🚀 Enterprise agents',
+  tabEnterprise: '➕ Add agent',
   tabTrading: '📈 Trading',
   tabMoney: 'Money',
   tabUsers: 'Users',
@@ -347,7 +347,7 @@ const en: AdminStrings = {
 }
 
 const ro: AdminStrings = {
-  tabEnterprise: '🚀 Agenți Enterprise',
+  tabEnterprise: '➕ Agent nou',
   tabTrading: '📈 Tranzacționare',
   tabMoney: 'Bani',
   tabUsers: 'Utilizatori',
