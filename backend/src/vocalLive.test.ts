@@ -94,6 +94,15 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     expect(i, 'fără istoric nu există „ultimele schimburi" — nu se inventează').not.toContain('ULTIMELE')
   })
 
+  it('regula limbii e în instrucțiune: orice limbă, oglindirea vorbitorului (Adrian, 8 aug)', () => {
+    // Măsurat înainte de regulă: instrucțiunea nu spunea NIMIC despre limbă și
+    // configul nu trimite languageCode — modelul rămânea pe limba ghicită.
+    const i = construiesteInstructiune(persona, 'Adrian', [])
+    expect(i).toContain('REGULA LIMBII')
+    expect(i).toContain('limba ULTIMEI fraze')
+    expect(i, 'nu se pinuiește niciun cod de limbă — aia ar fi cușca inversă').not.toMatch(/languageCode/)
+  })
+
   it('cu istoric: ultimele schimburi intră, cu numele omului pe replicile lui', () => {
     const i = construiesteInstructiune(persona, 'Adrian', [
       { role: 'user', content: 'cât e ceasul?' },
@@ -109,8 +118,11 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     const i = construiesteInstructiune(persona, 'Adrian', lung)
     expect(i, 'mesajul 27 e al 13-lea de la coadă — nu are ce căuta').not.toContain('mesajul 27 ')
     expect(i).toContain('mesajul 39 ')
+    // Bugetul fix: numele + REGULA LIMBII (8 aug, ~390 de caractere) + antetul
+    // blocului de istoric + blocul plafonat la 2400. Plafonul RĂMÂNE — doar
+    // încape și regula limbii în el, că e parte din antetul fix, nu din istoric.
     expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
-      persona.length + 2600,
+      persona.length + 3000,
     )
   })
 })

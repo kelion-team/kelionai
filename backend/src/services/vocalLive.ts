@@ -56,6 +56,16 @@ export function construiesteInstructiune(
   istoric: Array<{ role: string; content: string }>,
 ): string {
   let instructiune = `${persona}\nVorbești cu ${numeUser}.`
+  // REGULA LIMBII pe sesiunea VIE (Adrian, 8 aug: „trebuie să vorbească în
+  // orice limbă Kelion"). Măsurat înainte: instrucțiunea nu spunea NIMIC
+  // despre limbă și nici configul nu trimite languageCode — modelul rămânea
+  // pe ce ghicea (de regulă limba personei), indiferent în ce limbă i se
+  // vorbea. Nu pinuim niciun cod de limbă (aia ar fi cușca inversă): regula
+  // e OGLINDIREA vorbitorului, în orice limbă, cu comutare instant.
+  instructiune +=
+    `\nREGULA LIMBII — PRIMA REGULĂ: vorbește în LIMBA în care ți se vorbește, oricare ar fi ea. ` +
+    `Răspunzi în limba ULTIMEI fraze a omului; dacă el comută limba, comuți și tu INSTANT, fără să comentezi comutarea. ` +
+    `Nu amesteci limbile în același răspuns și nu traduci nechemat.`
   if (istoric.length) {
     const randuri = istoric
       .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
