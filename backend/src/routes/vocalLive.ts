@@ -201,6 +201,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           trimite({ type: 'eroare', motiv })
           app.log.warn(`vocal-live: ${motiv}`)
         },
+        onInfo: (msg) => app.log.info(`vocal-live: ${msg}`),
       })
       if (!live) {
         try {

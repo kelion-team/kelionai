@@ -94,6 +94,8 @@ export interface VocalLiveEvenimente {
   onTuraGata?(): void
   /** Orice eroare, NUMITĂ. */
   onEroare(motiv: string): void
+  /** Informații de mers (varianta de setup acceptată, degradări) — pentru jurnal. */
+  onInfo?(msg: string): void
 }
 
 export interface VocalLive {
@@ -232,6 +234,18 @@ export function deschideVocalLive(
   let inchisa = false
   let handleReluare: string | undefined
   let reconectari = 0
+  // ── DEGRADARE MĂSURATĂ (8 aug: „a crăpat chatul... după ce ai scos limitarea
+  // de 5 minute") ──────────────────────────────────────────────────────────
+  // Extensiile „no limit" (sessionResumption + contextWindowCompression) au
+  // fost dovedite doar pe FORMĂ, nu pe acceptare — și un model preview le
+  // poate refuza LA SETUP, adică sesiunea nu se mai deschide deloc: mai rău
+  // decât limita pe care o scoteam. De-aia: prima încercare cere extensiile;
+  // dacă sesiunea moare ÎNAINTE de `gata`, următoarea încearcă FĂRĂ ele —
+  // modelul care le știe primește „no limit", cel care nu le știe rămâne pe
+  // varianta care a mers 5 minute impecabil. Varianta acceptată se scrie în
+  // jurnal, ca data viitoare să nu mai ghicim.
+  let aFostGataVreodata = false
+  let faraExtensii = false
   const coada: Buffer[] = [] // audio strâns cât sesiunea nu e gata (și în reconectări)
 
   const trimiteAudio = (pcm: Buffer): void => {
@@ -250,7 +264,14 @@ export function deschideVocalLive(
 
     socket.on('open', () => {
       try {
-        socket.send(JSON.stringify(construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelte, handleReluare)))
+        const st = construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelte, handleReluare) as {
+          setup: Record<string, unknown>
+        }
+        if (faraExtensii) {
+          delete st.setup.sessionResumption
+          delete st.setup.contextWindowCompression
+        }
+        socket.send(JSON.stringify(st))
       } catch (e) {
         ev.onEroare(`setup: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
       }
@@ -267,6 +288,10 @@ export function deschideVocalLive(
         switch (e.fel) {
           case 'gata':
             gata = true
+            if (!aFostGataVreodata) {
+              aFostGataVreodata = true
+              ev.onInfo?.(faraExtensii ? 'sesiune acceptată FĂRĂ extensiile no-limit (modelul le-a refuzat)' : 'sesiune acceptată CU extensiile no-limit (reluare + fereastră glisantă)')
+            }
             reconectari = 0 // sesiune vie → contorul intern se șterge
             for (const b of coada.splice(0)) trimiteAudio(b)
             ev.onGata?.()
@@ -311,6 +336,12 @@ export function deschideVocalLive(
     })
     socket.on('close', (cod: number, motiv: Buffer) => {
       if (inchisa || ws !== socket) return
+      // Moarte ÎNAINTE de primul `gata` = setup-ul e suspectul: următoarea
+      // încercare merge fără extensii, nu repetă orbește aceeași cerere.
+      if (!aFostGataVreodata && !faraExtensii) {
+        faraExtensii = true
+        ev.onInfo?.(`setup cu extensii respins (cod ${cod}) — reîncerc fără ele`)
+      }
       if (reconectari < 3) {
         reconectari++
         setTimeout(conecteaza, 300 * reconectari)
