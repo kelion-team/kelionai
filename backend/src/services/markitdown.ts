@@ -45,7 +45,11 @@ export async function documentToMarkdown(bytes: Buffer, filename: string): Promi
       py.on('error', (e) => { clearTimeout(killer); reject(e) })
       py.on('close', (code) => {
         clearTimeout(killer)
-        code === 0 ? resolve(out) : reject(new Error(err.trim().slice(0, 200) || `exit ${code}`))
+        // Ternar folosit ca instrucțiune: analizorul îl semnala („expression not
+        // used"), iar la citit ascunde care ramură rulează. Același comportament,
+        // scris ca ce este — o ramificație.
+        if (code === 0) resolve(out)
+        else reject(new Error(err.trim().slice(0, 200) || `exit ${code}`))
       })
     })
     return md.trim()

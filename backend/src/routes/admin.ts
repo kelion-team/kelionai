@@ -333,6 +333,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // The brain is 100% Gemini direct (OpenRouter/OpenAI extirpate, 3 aug). The
   // bar polls this route: the Gemini live state + real month spend, the Serper
   // search credit and the VPS resources. STRICTLY admin (users don't see it).
+  // ── CREDITUL RĂMAS, PE FIECARE AI (Adrian, 8 aug) ────────────────────────
+  // `/api/admin/brain-credit` de mai jos e pastila din bară: Gemini + Serper,
+  // în formă scurtă. Asta e RAPORTUL: un rând pe furnizor, cu ce s-a putut citi
+  // de la el, ce s-a cheltuit la noi, și — acolo unde furnizorul nu dă sold —
+  // motivul scris pe față, nu un zero care arată liniștitor.
+  app.get('/api/admin/credit-ai', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const { crediteAI } = await import('../services/creditAI.js')
+    return reply.send({ furnizori: await crediteAI() })
+  })
+
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -614,19 +626,45 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // and the purchase history stay UNTOUCHED — consumed credits are not given
   // back, and accounting is not rewritten. Requires an admin session, like
   // everything here.
+  // ── „TRIMISĂ CU SUCCES" ERA O MINCIUNĂ (măsurat, 8 aug 2026) ──────────────
+  // Ruta chema cele două runbook-uri și le ARUNCA răspunsul, apoi întorcea
+  // `{ok:true}` orice s-ar fi întâmplat. Probat pe o instanță fără GITHUB_TOKEN:
+  //
+  //     POST /api/admin/reset-vps  →  200 {"ok":true}
+  //
+  // în timp ce `runRunbook` întorsese `{"error":"github_token_missing"}`. Adică
+  // butonul „Reset VPS" scria „Comanda a fost trimisă cu succes" fără să fi
+  // trimis nimic — și s-ar fi purtat identic cu autonomia pusă pe pauză
+  // („paused_by_owner"), cu workflow-ul șters sau cu un dispatch refuzat de
+  // GitHub. A patra oară aceeași familie, după „£0.00", „Cardul: necreat" și
+  // „0 creați, 0 eșuați": o operație REFUZATĂ, raportată ca fapt împlinit.
+  // Acum răspunsul POARTĂ rezultatul fiecărui pas, iar un refuz e 502.
   app.post('/api/admin/reset-vps', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const { runRunbook } = await import('../services/runbooks.js')
-    await runRunbook('restart-app')
-    await runRunbook('restart-caddy')
-    return { ok: true }
+    const { runRunbook, citesteRaspunsRunbook } = await import('../services/runbooks.js')
+    const pasi = []
+    for (const nume of ['restart-app', 'restart-caddy']) {
+      const pas = citesteRaspunsRunbook(nume, await runRunbook(nume))
+      pasi.push(pas)
+      // Primul pas refuzat înseamnă că al doilea primește exact același „nu":
+      // nu mai punem încă o cerere pe drum ca să adunăm aceeași eroare.
+      if (!pas.ok) break
+    }
+    const ok = pasi.length === 2 && pasi.every((p) => p.ok)
+    if (!ok) return reply.code(502).send({ ok: false, error: 'repornire_nepornita', pasi })
+    return reply.send({ ok: true, pasi })
   })
 
   app.post('/api/admin/reset-counters', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await resetCostCounters())
+    const r = await resetCostCounters()
+    // ȘTERGEREA PICATĂ răspundea 200 cu `{ok:false, sterse:0}`, iar panoul se
+    // uita DOAR la statusul HTTP (`r?.ok`) — deci scria „Resetat ✓" peste niște
+    // contoare neatinse. Măsurat 8 aug pe o instanță fără bază de date.
+    if (!r.ok) return reply.code(502).send({ ...r, error: 'resetare_esuata' })
+    return reply.send(r)
   })
 
   // The /api/admin/pool route was DELETED (Adrian, 30 Jul): it hand-wrote how

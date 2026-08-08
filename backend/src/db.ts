@@ -1909,18 +1909,37 @@ const COSTURI_MASURATE = new Set(['chat', 'memory'])
 // scris cu usageMetadata-ul lui Gemini). Luna curentă, ca pastila OpenAI.
 // Întotdeauna „live" (e jurnalul nostru, mereu citibil); 0 REAL înseamnă 0
 // cheltuit luna asta, nu o citire eșuată.
-export async function getGeminiMonthUsd(): Promise<{ ok: boolean; monthUsd: number }> {
-  if (!dbEnabled()) return { ok: false, monthUsd: 0 }
+/** ── CHELTUIALA LUNII PE FURNIZOR (Adrian, 8 aug: „raportarea reală a
+ *  creditului rămas pe fiecare AI") ─────────────────────────────────────────
+ *
+ *  Citirea de mai jos era lipită de `kind = 'gemini'`. Ca să pot spune, pentru
+ *  FIECARE furnizor, cât s-a dus din creditul lui, suma trebuie să se poată
+ *  cere pe orice set de feluri. Un fel care se termină în `*` e prefix — vocea
+ *  se înregistrează ca `tts:google`, `tts:eleven` etc., deci `tts:*`.
+ *
+ *  `ok:false` NU e „0 dolari": e „n-am putut citi". Apelantul e obligat să facă
+ *  diferența — de-aia cifra vine împreună cu ea, nu singură. */
+export async function cheltuialaLunaPeKinduri(kinds: string[]): Promise<{ ok: boolean; usd: number }> {
+  if (!dbEnabled() || kinds.length === 0) return { ok: false, usd: 0 }
+  const exacte = kinds.filter((k) => !k.endsWith('*'))
+  const prefixe = kinds.filter((k) => k.endsWith('*')).map((k) => `${k.slice(0, -1)}%`)
   try {
     const r = await getPool().query<{ s: string | null }>(
       `SELECT COALESCE(SUM(cost_usd), 0) AS s
          FROM cost_events
-        WHERE kind = 'gemini' AND created_at >= date_trunc('month', now())`,
+        WHERE created_at >= date_trunc('month', now())
+          AND (kind = ANY($1::text[]) OR kind LIKE ANY($2::text[]))`,
+      [exacte, prefixe],
     )
-    return { ok: true, monthUsd: Number(r.rows[0]?.s ?? 0) }
+    return { ok: true, usd: Number(r.rows[0]?.s ?? 0) }
   } catch {
-    return { ok: false, monthUsd: 0 }
+    return { ok: false, usd: 0 }
   }
+}
+
+export async function getGeminiMonthUsd(): Promise<{ ok: boolean; monthUsd: number }> {
+  const r = await cheltuialaLunaPeKinduri(['gemini'])
+  return { ok: r.ok, monthUsd: r.usd }
 }
 
 /** ── RESETTING THE CONSUMPTION COUNTERS ─────────────────────────────────────

@@ -64,6 +64,11 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     const targetEmail =
       user.role === 'admin' && req.body?.email ? req.body.email.toLowerCase() : user.email.toLowerCase()
     const ok = await deleteVoiceprint(targetEmail)
+    // 200 cu `{ok:false}` însemna „ștergere reușită" pentru orice apelant care
+    // se uită la status (panoul se uită și la corp, dar uneltele lui Kelion și
+    // scripturile nu). `deleteVoiceprint` întoarce `true` și când n-a găsit
+    // rândul, deci `false` = ștergerea chiar a picat. Măsurat 8 aug.
+    if (!ok) return reply.code(502).send({ ok: false, error: 'stergere_esuata' })
     return reply.send({ ok })
   })
 }

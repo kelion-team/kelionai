@@ -1,7 +1,6 @@
 // Local AI voice pipeline (STT/TTS) running as a separate microservice.
 // Replaces the paid Google Cloud services when the app is configured to use it.
 
-import { Readable } from 'stream'
 
 const VOSK_URL = process.env.LOCAL_VOSK_URL || 'http://localhost:8010'
 const STT_URL = `${VOSK_URL}/stt`
