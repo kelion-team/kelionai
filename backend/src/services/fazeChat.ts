@@ -67,6 +67,7 @@ export const UNELTE_VORBIRE: readonly string[] = [
   'get_weather',
   'web_search',
   'show_on_screen',
+  'goleste_monitorul', // a goli ecranul e o comandă de conversație, nu de lucru
   'show_document',
   'open_app_view',
   'save_note',

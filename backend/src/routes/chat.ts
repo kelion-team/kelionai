@@ -373,6 +373,18 @@ const SHOW_TOOL: Tool = {
   },
 }
 
+// „GOLEȘTE MONITORUL” (Adrian, 8 aug: „i-am cerut să golească monitorul și n-o
+// face”). Avea dreptate prin construcție: Kelion putea să PUNĂ pe monitor
+// (show_on_screen, run_web_app, imagini generate), dar nimeni nu i-a dat
+// vreodată mâna care ȘTERGE — singurul drum era X-ul apăsat de om. O cerere
+// perfect legitimă răspundea cu neputință mută.
+const GOLESTE_MONITOR_TOOL: Tool = {
+  name: 'goleste_monitorul',
+  description:
+    "Clear the user's monitor completely: closes whatever is displayed - web page, running app, document, generated image. Call this whenever the user asks to clear, empty or close the screen/monitor (goleste monitorul, inchide ce e pe ecran, ia aia de pe ecran).",
+  input_schema: { type: 'object', properties: {} },
+}
+
 // DISPLAYING ITS OWN RECOMMENDATIONS/PLANS on the monitor (Adrian, Jul 24: "it
 // can't display what it recommends on the monitor"). When Kelion himself writes
 // a plan, a list, a summary, code — he puts it DIRECTLY on the monitor as a
@@ -2181,7 +2193,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...googleTools,
           ...escalationTools,
           // Bază + vedere
-          SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
+          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
           // Memorie + mâini (browser) — NU se mai taie
           ...NOTE_TOOLS,
           ...BROWSER_TOOLS,
@@ -2211,7 +2223,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
           ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -3134,6 +3146,13 @@ async function runTool(
       if (!text.trim()) return JSON.stringify({ error: 'empty' })
       reply.raw.write(`${CTRL}${JSON.stringify({ doc: { title, text } })}${CTRL}`)
       return JSON.stringify({ shown: true })
+    }
+
+    case 'goleste_monitorul': {
+      // Un singur cadru care curăță TOT: paginile/aplicațiile din workspace și
+      // imaginea generată — stări diferite în client, o singură comandă aici.
+      reply.raw.write(`${CTRL}${JSON.stringify({ golesteMonitor: true })}${CTRL}`)
+      return JSON.stringify({ golit: true })
     }
 
     case 'show_on_screen': {
