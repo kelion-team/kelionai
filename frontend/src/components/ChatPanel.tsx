@@ -335,6 +335,9 @@ export default function ChatPanel({
   // până la un refresh — altfel am pendula între cele două căi la nesfârșit).
   const vlTickRef = useRef<number | null>(null)
   const vlCazutRef = useRef(false)
+  /** Sonda de ÎNTOARCERE pe live după o cădere (restart de publicare = 1006):
+   *  bate capabilitatea la 5s și, când serverul revine, repune vocea live. */
+  const vlSondaRef = useRef<number | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
   // The abort controller of the current turn — "stop" aborts it on the spot.
@@ -1459,7 +1462,10 @@ export default function ChatPanel({
                 if (micManualOffRef.current) return
                 if (reluari < 3) {
                   reluari++
-                  const pauza = 800 * reluari
+                  // Ferestre care acoperă o REPORNIRE de server, nu doar un sughiț
+                  // (8 aug, „trimite err 1006": publicarea repornește containerul;
+                  // vechile 800/1600/2400 ms picau toate cât serverul încă bootă).
+                  const pauza = [2000, 6000, 15000][reluari - 1] ?? 15000
                   console.info(`[vocalLive] reluare ${reluari}/3 în ${pauza} ms`)
                   window.setTimeout(() => {
                     if (!micManualOffRef.current && !vlRef.current) void porneste()
@@ -1472,6 +1478,35 @@ export default function ChatPanel({
                   setLiveVoice('⚠ vocea live a picat de 3 ori — trec pe calea veche')
                   vlCazutRef.current = true
                   void ensureMic()
+                  // ÎNTOARCEREA PE LIVE (8 aug: „trimite err 1006 pe live… și
+                  // moare, nu mă mai aude"). Până acum, după cădere rămâneai pe
+                  // calea veche până la reîncărcarea paginii — vocea live revenea
+                  // doar dacă pica un mesaj SCRIS (sonda aia trăia în trimitere).
+                  // Acum sondăm chiar capabilitatea live la 5s: când serverul
+                  // revine, oprim calea veche și repornim lanțul — live-ul își ia
+                  // locul înapoi singur.
+                  if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                  vlSondaRef.current = window.setInterval(() => {
+                    if (micManualOffRef.current) {
+                      // Omul a închis microfonul cu mâna — nu pornim nimic peste el.
+                      if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                      vlSondaRef.current = null
+                      return
+                    }
+                    void vocalLiveDisponibila()
+                      .then((c) => {
+                        if (!c?.disponibil || vlRef.current) return
+                        if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                        vlSondaRef.current = null
+                        console.info('[vocalLive] serverul a revenit — mă întorc pe vocea live')
+                        vlCazutRef.current = false
+                        reluari = 0
+                        micRef.current?.stop()
+                        micRef.current = null
+                        void ensureMic()
+                      })
+                      .catch(() => {})
+                  }, 5000)
                 }
               },
             })
@@ -1962,6 +1997,10 @@ export default function ChatPanel({
       }
       vlRef.current?.inchide()
       vlRef.current = null
+      if (vlSondaRef.current) {
+        window.clearInterval(vlSondaRef.current)
+        vlSondaRef.current = null
+      }
       micRef.current?.stop()
       micRef.current = null
       setListening(false)
