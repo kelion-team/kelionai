@@ -18,9 +18,8 @@ interface Event {
 interface ConversationBuffer {
   seq: number // last used sequence number
   events: Event[] // ring buffer, oldest at index 0
-  // The FINISHED turns (25 Jul): without this, resume couldn't know whether
-  // the turn still produces events — it replayed the buffer and CLOSED,
-  // truncating the reply.
+  // Turele ÎNCHEIATE (25 iul): fără asta, resume-ul nu putea ști dacă tura mai
+  // produce evenimente — replay-a bufferul și ÎNCHIDEA, trunchiind răspunsul.
   finished: Set<string>
 }
 
@@ -112,10 +111,10 @@ export function finishTurn(email: string, turnId: string): void {
   // Refresh TTL on finish.
   const ev = buf.events[buf.events.length - 1]
   if (ev && ev.turnId === turnId) ev.ts = Date.now()
-  // Marks the turn FINISHED — resume (readTurnFrom) can stop cleanly.
+  // Marchează tura ÎNCHEIATĂ — resume-ul (readTurnFrom) se poate opri curat.
   buf.finished.add(turnId)
   if (buf.finished.size > 32) {
-    // We don't grow without bound; old turns leave the ring/TTL anyway.
+    // Nu creștem la nesfârșit; turele vechi ies oricum din ring/TTL.
     const first = buf.finished.values().next().value
     if (first !== undefined) buf.finished.delete(first)
   }
@@ -143,21 +142,14 @@ export async function* readTurnFrom(
     return
   }
 
-  // LIVE-FOLLOW (25 Jul — a REAL truncation bug): before, the loop replayed
-  // only what was ALREADY in the buffer and ended — if the turn was still
-  // running on the server (e.g. a 20s tool), the client got half a reply
-  // presented as whole, with no error. Now: replay what exists, then FOLLOW
-  // the live turn and yield new events as they arrive, until the turn is
-  // marked finished (finishTurn) or the TTL expires — only then does the
-  // stream close.
+  // LIVE-FOLLOW (25 iul — bug REAL de trunchiere): înainte, bucla replay-a doar
+  // ce era DEJA în buffer și se termina — dacă tura încă rula pe server (ex. o
+  // unealtă de 20s), clientul primea jumătate de răspuns prezentat ca întreg,
+  // fără nicio eroare. Acum: replay ce există, apoi URMĂREȘTE tura vie și cedează
+  // evenimentele noi pe măsură ce sosesc, până când tura e marcată încheiată
+  // (finishTurn) sau expiră TTL-ul — abia atunci stream-ul se închide.
   let cursor = startSeq
-  // TERMEN PE INACTIVITATE, nu pe vârsta conexiunii (agenții de debug, 3 aug,
-  // verdict REAL: termenul fix „Date.now()+TTL la deschidere" închidea NORMAL
-  // conexiunea la fix 120s deși tura ÎNCĂ curgea — jumătate de răspuns servit
-  // ca întreg, fără nicio eroare). Cât timp sosesc evenimente, termenul se
-  // împinge; doar o tăcere de TTL_MS întreagă închide plasa de siguranță —
-  // și atunci se SPUNE (desync), nu se tace.
-  let deadline = Date.now() + TTL_MS
+  const deadline = Date.now() + TTL_MS
   for (;;) {
     let emitted = false
     for (const ev of buf.events) {
@@ -168,16 +160,24 @@ export async function* readTurnFrom(
       emitted = true
       yield formatSSE(ev.seq, ev.payload)
     }
-    if (emitted) deadline = Date.now() + TTL_MS // activitate → termenul se împinge
-    if (buf.finished.has(turnId)) return // the turn is done — everything has been given
-    if (Date.now() > deadline) {
-      // Plasa de siguranță a expirat cu tura NEDECLARATĂ terminată — clientul
-      // trebuie să ȘTIE că poate lipsi coada răspunsului, nu să creadă că e tot.
-      yield formatSSE(++buf.seq, desyncSSE())
-      return
-    }
-    // The turn is still running — wait a bit and check again (no busy-loop).
+    if (buf.finished.has(turnId)) return // tura e gata — tot ce era de dat s-a dat
+    if (Date.now() > deadline) return // plasă: nu ținem conexiunea la nesfârșit
+    // Tura încă rulează — așteaptă puțin și verifică iar (fără busy-loop).
     if (!emitted) await new Promise((r) => setTimeout(r, 150))
   }
 }
 
+/**
+ * Return the last sequence number known for a conversation. Useful for the
+ * resume endpoint to know whether a client is asking for a completely lost range.
+ */
+export function lastSeqFor(email: string): number {
+  return buffers.get(email)?.seq ?? 0
+}
+
+/**
+ * Return the oldest sequence number still in the ring. Useful for overflow checks.
+ */
+export function oldestSeqFor(email: string): number {
+  return buffers.get(email)?.events[0]?.seq ?? 0
+}

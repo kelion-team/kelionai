@@ -26,8 +26,8 @@ export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
 <style>html,body,#map{height:100%;margin:0;background:#0b0d12}
 #hud{position:absolute;z-index:1000;left:12px;bottom:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
 font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:12px;border:1px solid #2a3350}
-/* TOP-right, NOT bottom-right: the corner avatar sits there and covers the button
-   (Adrian, Jul 24: "images and buttons overlap"). */
+/* SUS-dreapta, NU jos-dreapta: acolo stă avatarul în colț și acoperea butonul
+   (Adrian, 24 iul: „se suprapun imagini și butoane"). */
 #recenter{position:absolute;z-index:1000;right:12px;top:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
 border:1px solid #2a3350;border-radius:999px;padding:8px 14px;font:600 13px system-ui;cursor:pointer}</style></head>
 <body><div id="map"></div><div id="hud" style="display:none"></div><button id="recenter">Urmărește mașina ↺</button>
@@ -46,11 +46,10 @@ if(c.length>1){
 }else{map.setView([44.43,26.10],6);}
 
 // ── Live position: a blue dot for the car + a remaining-distance readout.
-// BY DEFAULT we show the WHOLE route (fitBounds above), NOT a zoom on the car —
-// otherwise the GPS covered the route at the first position and the user saw
-// just a dot (bug reported by Adrian). Car tracking (zoom + centering) is
-// OPTIONAL: the "Urmărește mașina" button starts it (useful while actually
-// driving), panning stops it.
+// IMPLICIT arătăm TOT traseul (fitBounds mai sus), NU zoom pe mașină — altfel
+// GPS-ul acoperea ruta la prima poziție și userul vedea doar un punct (bug
+// raportat de Adrian). Urmărirea mașinii (zoom + centrare) e OPȚIONALĂ: butonul
+// „Urmărește mașina" o pornește (util când chiar conduci), pan-ul o oprește.
 var carDot=null,following=false;
 var hud=document.getElementById('hud'),btn=document.getElementById('recenter');
 function haversineKm(a,b){var R=6371,d2r=Math.PI/180;

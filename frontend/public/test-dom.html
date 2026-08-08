@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<style>
+body { margin: 0; background: #0b0d12; font-family: system-ui, sans-serif; color: #fff; }
+.heard-band {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  margin: 20px;
+  padding: 0 14px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: linear-gradient(90deg, rgba(6, 12, 26, 0.9), rgba(4, 10, 22, 0.9));
+  border: 1px solid rgba(120, 180, 255, 0.35);
+  width: 400px;
+}
+.speech-tail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  direction: ltr;
+  text-align: right;
+}
+.speech-tail-text {
+  display: inline-block;
+  direction: ltr;
+  unicode-bidi: normal;
+  text-align: left;
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+<div class="heard-band">
+  <span>K</span>
+  <span class="speech-tail"><span class="speech-tail-text" id="text">Bună, Adrian. Ce faci astăzi?</span></span>
+</div>
+<script>
+const el = document.getElementById('text');
+const text = 'Bună, Adrian. Ce faci astăzi?';
+let i = 0;
+const interval = setInterval(() => {
+  el.textContent = text.slice(0, i);
+  i++;
+  if (i > text.length) clearInterval(interval);
+}, 80);
+</script>
+
+
+</body></html>

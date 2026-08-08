@@ -1,23 +1,23 @@
-// ── Meserii (roles/personas for Kelion) ───────────────────────────────────
-// A "meserie" is an optional role Kelion can adopt on top of his default
-// behaviour. The data structure + the list of meserii is here; the per-user
-// activation (persisted in user_prefs.meserie_activa) is in db.ts
-// (getMeserieActiva/setMeserieActivaPref), exposed through GET/PUT /api/prefs
-// (routes/prefs.ts) and applied to the system prompt in routes/chat.ts.
+// ── Meserii (roluri/persona pentru Kelion) ────────────────────────────────
+// O "meserie" este un rol opțional pe care Kelion îl poate adopta pe lângă
+// comportamentul lui implicit. Structura de date + lista de meserii e aici;
+// activarea per-user (persistată în user_prefs.meserie_activa) e în db.ts
+// (getMeserieActiva/setMeserieActivaPref), expusă prin GET/PUT /api/prefs
+// (routes/prefs.ts) și aplicată la system prompt în routes/chat.ts.
 
 export interface Meserie {
   id: number
   nume: string
-  // What the meserie entails — description for the user/admin.
+  // Ce presupune meseria — descriere pentru utilizator/admin.
   descriere: string
-  // A short text that, IF the meserie is activated, would be added to
-  // Kelion's system prompt to instruct him to behave according to the role.
+  // Text scurt care, DACĂ meseria e activată, s-ar adăuga la system prompt-ul
+  // lui Kelion pentru a-l instrui să se comporte conform rolului.
   systemPromptAddon: string
 }
 
-// An extensible list of meserii. Meserie 1 is "Influencer", explicitly
-// requested by the owner. Future meserii are added here with id 2, 3, ... —
-// each new entry must follow the same shape (id, nume, descriere,
+// Listă extensibilă de meserii. Meseria 1 este "Influencer", cerută explicit
+// de proprietar. Meserii viitoare se adaugă aici cu id 2, 3, ... — fiecare
+// intrare nouă trebuie să respecte aceeași formă (id, nume, descriere,
 // systemPromptAddon).
 export const MESERII: Meserie[] = [
   {

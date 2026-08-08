@@ -14,16 +14,10 @@ describe('Token checks', () => {
   it('reports not_configured when no external keys are set', async () => {
     const checks = await runAllTokenChecks()
     const names = checks.map((c) => c.name)
-    // (3 aug — extirparea totală: verificările OpenRouter/OpenAI au dispărut
-    // cu tot cu furnizorii; creierul e verificat prin pingul Gemini.)
-    expect(names).toContain('Creierul Gemini (chat direct)')
-    expect(names.some((n) => /OpenRouter|OpenAI/.test(n))).toBe(false)
-    expect(names).toContain('Revolut pay link')
-    expect(names).toContain('Enable Banking (citire plăți)')
+    expect(names).toContain('OpenRouter API key')
+    expect(names).toContain('Stripe secret key')
     expect(names).toContain('Google service account')
-    // Serper — SINGURUL motor de căutare post-extirpare, cheie plătită; lipsea
-    // complet din „verificarea LIVE" (adăugat la auditul admin, 3 aug).
-    expect(names).toContain('Serper (căutarea web)')
+    expect(names).toContain('OpenAI API key (voce/STT/TTS)')
     expect(names).toContain('Gemini API key')
     expect(names).toContain('Mail SMTP')
     expect(names).toContain('Mail IMAP')
@@ -31,13 +25,13 @@ describe('Token checks', () => {
     expect(names).toContain('Google OAuth (login)')
     expect(names).toContain('SESSION_SECRET')
 
-    // Local checks (presence/config only, no external call) can be ok even
-    // without external keys — we exclude them from the "nothing external configured" test.
+    // Verificările locale (doar prezență/config, fără apel extern) pot fi ok și
+    // fără chei externe — le excludem din testul „nimic extern configurat".
     const local = new Set(['SESSION_SECRET', 'Google OAuth (login)', 'PostgreSQL'])
     const configured = checks.filter((c) =>
       c.status !== 'not_configured' && !local.has(c.name),
     )
-    // With no external keys configured, no external token should be ok/fail.
+    // Fără chei externe configurate, niciun token extern nu ar trebui să fie ok/fail.
     expect(configured).toEqual([])
 
     const session = checks.find((c) => c.name === 'SESSION_SECRET')

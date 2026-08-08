@@ -23,8 +23,8 @@ export async function asrRoutes(app: FastifyInstance): Promise<void> {
     const audio = req.body?.audio?.trim()
     if (!audio) return reply.code(400).send({ error: 'bad_request' })
 
-    // mime = the real container of the browser's MediaRecorder (e.g. audio/mp4
-    // on Safari) — transcribe() picks the filename for OpenAI from it.
+    // mime = containerul real al MediaRecorder-ului din browser (ex. audio/mp4
+    // pe Safari) — transcribe() alege numele fișierului pentru OpenAI după el.
     const mime = (req.body?.mime ?? '').trim()
     const r = await transcribe(audio, { langHint: (req.body?.lang ?? '').trim(), mime: mime || undefined })
     if (!r.ok) {

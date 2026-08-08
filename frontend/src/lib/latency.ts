@@ -1,18 +1,17 @@
-// The REAL response time, measured in the BROWSER (what the user actually
-// feels): from sending → first visible word → complete reply. Different from
-// the server-measured time (brain only) — this one includes the network + the
-// whole journey. Shown on the monitor counter (Adrian, Jul 14: "the counter
-// should show the real response time").
+// Timpul de răspuns REAL, măsurat în BROWSER (ce simte userul cu adevărat):
+// de când trimite → primul cuvânt vizibil → răspunsul complet. Diferit de timpul
+// măsurat pe server (doar creierul) — ăsta include rețeaua + tot drumul. Se afișează
+// pe contorul din monitor (Adrian, 14 iul: „contorul să afișeze timpul de răspuns real").
 //
-// Minimal external store (like workspace.ts): any component reads it with
+// Store extern minimal (ca workspace.ts): orice componentă îl citește cu
 // useSyncExternalStore(subscribeRealLatency, getRealLatency).
 
 export interface RealLatency {
-  /** sent → first visible word (ms) — the first REAL word. */
+  /** trimis → primul cuvânt vizibil (ms) — primul cuvânt REAL. */
   readonly firstMs: number
-  /** sent → complete reply (ms). */
+  /** trimis → răspuns complet (ms). */
   readonly totalMs: number
-  /** when it was measured (epoch ms) — so the badge never shows a stale value. */
+  /** când a fost măsurat (epoch ms) — ca badge-ul să nu arate o valoare veche. */
   readonly at: number
 }
 

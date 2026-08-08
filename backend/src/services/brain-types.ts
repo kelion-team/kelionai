@@ -75,10 +75,14 @@ export interface Message {
   stop_reason: string | null
   stop_sequence: string | null
   usage: Usage
-  /** Kelion extension: the REAL cost of the call in USD, as reported by the
-   *  provider (OpenRouter `usage.cost`) on the call that produced this
-   *  Message. Present on the internal adapter path (brain.ts); undefined
-   *  means the provider did not itemize it — never assume 0. */
-  costUsd?: number
 }
 
+// ── Request params for messages.create / messages.stream ──────────────────
+export interface MessageCreateParams {
+  model: string
+  max_tokens: number
+  system?: string | TextBlockParam[]
+  tools?: Tool[]
+  messages: MessageParam[]
+  temperature?: number
+}

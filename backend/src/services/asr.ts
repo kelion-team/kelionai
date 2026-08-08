@@ -1,9 +1,6 @@
 import { GoogleAuth } from 'google-auth-library'
-import { normalizeLang } from './tts.js'
-import { googleServiceAccount } from './googleCreds.js'
 import { config } from '../config.js'
-import { localTranscribe, localVoskAvailable } from './localVosk.js'
-import { pcm16InWav, transcrieGemini } from './urecheGemini.js'
+import { normalizeLang } from './tts.js'
 
 // Shared Google Cloud Speech-to-Text v2 (chirp_3) transcription. ONE
 // implementation used by BOTH the session-gated /api/asr route (browser sends a
@@ -12,21 +9,17 @@ import { pcm16InWav, transcrieGemini } from './urecheGemini.js'
 // config. Speech is Google-only per spec. Region + model must match asr.ts's
 // original proven values (chirp_3, region 'eu', automatic punctuation).
 
-// THE PROVEN REGION (live matrix, 10 Jul): chirp_3 does NOT EXIST in
-// us-central1 — it exists in the 'us' and 'eu' multi-regions. 'eu' = minimum
-// latency for European users. (STT-ul streaming a fost scos total pe 5 aug —
-// voce unificată; rămâne DOAR dictarea batch de aici.)
-export const GOOGLE_STT_REGION = 'eu'
-// The most advanced model Adrian asked for: chirp_3 EVERYWHERE (batch,
-// streaming, full-duplex voice).
-export const GOOGLE_STT_MODEL = 'chirp_3'
+// REGIUNEA DOVEDITĂ (matrice live, 10 iul): chirp_3 NU EXISTĂ în us-central1 —
+// există în multi-regiunile 'us' și 'eu'. 'eu' = latență minimă pentru
+// utilizatorii europeni. Aceeași regiune și la streaming (asr-stream.ts).
+const REGION = 'eu'
 
 let auth: GoogleAuth | null = null
 let projectId = ''
 function getAuth(): GoogleAuth | null {
+  if (!config.googleServiceAccountJson) return null
   if (!auth) {
-    const creds = googleServiceAccount()
-    if (!creds) return null
+    const creds = JSON.parse(config.googleServiceAccountJson) as { project_id?: string }
     projectId = creds.project_id ?? ''
     auth = new GoogleAuth({
       credentials: creds as Record<string, unknown>,
@@ -49,57 +42,73 @@ export interface TranscribeOpts {
   // encoded container, so Google needs to be told the format explicitly. When
   // omitted we use autoDecodingConfig (browser WAV/encoded blob).
   pcm?: { sampleRateHertz: number; channels?: number }
-  // The real container of the browser's MediaRecorder (e.g. 'audio/mp4' on
-  // Safari) — on the OpenAI path it chooses the extension of the file sent
-  // to transcription.
+  // Containerul real al MediaRecorder-ului din browser (ex. 'audio/mp4' pe
+  // Safari) — pe calea OpenAI alege extensia fișierului trimis la transcriere.
   mime?: string
 }
 
-// ── GOOGLE-ONLY (OpenAI scos complet, Adrian 3 aug: „OpenAI scos din toată
-// aplicația") ────────────────────────────────────────────────────────────────
-// Rezerva OpenAI de STT a fost scoasă. În locul ei (Adrian, 3 aug seara:
-// „auzul trebuie să fie pe Gemini", după căderea Chirp cu PERMISSION_DENIED):
-// când Chirp refuză sau nu e configurat, auzul cade pe URECHEA GEMINI
-// (services/urecheGemini.ts — cheia GEMINI_API_KEY, fără cont de serviciu).
+// ── REZERVĂ OpenAI (aceeași cheie ca vocea) ──────────────────────────────────
+// AUZUL NU ARE VOIE SĂ MOARĂ (Adrian, 24 iul: „nu mă aude"): dacă Realtime pică
+// pe client, calea batch STT era singura plasă — dar cerea Google STT, care nu
+// e configurat pe VPS → Kelion rămânea surd. Acum: Google primar (dacă există
+// service account), altfel OpenAI /v1/audio/transcriptions pe cheia existentă.
 
-/** Rezerva Gemini a căii batch: PCM se îmbracă în WAV, blobul de browser merge
- *  cu mime-ul lui real. Eroarea Gemini se raportează NUMITĂ, nu mascată. */
-async function transcribeFallbackGemini(audio: string, opts: TranscribeOpts): Promise<TranscribeResult> {
-  const wav = opts.pcm
-    ? pcm16InWav(Buffer.from(audio, 'base64'), opts.pcm.sampleRateHertz, opts.pcm.channels ?? 1)
-    : null
-  const r = await transcrieGemini(
-    wav ? wav.toString('base64') : audio,
-    wav ? 'audio/wav' : (opts.mime ?? 'audio/webm'),
-    opts.langHint,
-  )
-  if (!r.ok) return { ok: false, status: 502, error: `asr_failed (gemini: ${r.error})` }
-  return { ok: true, lang: opts.langHint ?? null, transcript: r.transcript }
+// PCM brut → WAV minim (antet 44 bytes), ca OpenAI să-l poată decoda.
+function pcmToWav(pcm: Uint8Array, sampleRate: number, channels: number): Uint8Array {
+  const h = Buffer.alloc(44)
+  h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8)
+  h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20)
+  h.writeUInt16LE(channels, 22); h.writeUInt32LE(sampleRate, 24)
+  h.writeUInt32LE(sampleRate * channels * 2, 28); h.writeUInt16LE(channels * 2, 32)
+  h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([h, Buffer.from(pcm)])
+}
+
+async function transcribeOpenAI(audioBase64: string, opts: TranscribeOpts): Promise<TranscribeResult> {
+  if (!config.openai.key) return { ok: false, status: 503, error: 'asr_not_configured' }
+  let buf: Uint8Array = Buffer.from(audioBase64, 'base64')
+  // OpenAI decodează după EXTENSIA numelui de fișier — o alegem din mimetype-ul
+  // real al browserului (Safari trimite audio/mp4, nu webm), altfel transcrierea
+  // pica exact pe dispozitivele Apple.
+  const mime = (opts.mime ?? '').toLowerCase()
+  let filename = 'audio.webm' // implicit: blob-ul Chrome/Firefox
+  if (mime.includes('audio/mp4')) filename = 'audio.mp4'
+  else if (mime.includes('audio/ogg')) filename = 'audio.ogg'
+  else if (mime.includes('audio/wav')) filename = 'audio.wav'
+  if (opts.pcm) {
+    buf = pcmToWav(buf, opts.pcm.sampleRateHertz, opts.pcm.channels ?? 1)
+    filename = 'audio.wav'
+  }
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(buf)]), filename)
+  form.append('model', config.openai.transcribeModel)
+  const lang2 = (opts.langHint ?? '').trim().slice(0, 2).toLowerCase()
+  if (/^[a-z]{2}$/.test(lang2)) form.append('language', lang2)
+  try {
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.openai.key}` },
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (!res.ok) return { ok: false, status: 502, error: `asr_failed:${res.status}` }
+    const j = (await res.json()) as { text?: string }
+    return { ok: true, lang: lang2 || null, transcript: (j.text ?? '').trim() }
+  } catch {
+    return { ok: false, status: 502, error: 'asr_failed' }
+  }
 }
 
 /**
- * Transcribe base64 audio: întâi Google STT v2 chirp_3; dacă lipsește contul
- * de serviciu sau Google refuză → urechea Gemini (fără IAM). Typed result;
- * no auth-gate/cost here (they stay with the caller).
+ * Transcribe base64 audio. Google STT v2 chirp_3 când există service account
+ * (calea originală, dovedită); altfel — sau dacă Google pică — OpenAI pe aceeași
+ * cheie ca vocea. Rezultat tipat; fără auth-gate/cost aici (rămân în apelant).
  */
 export async function transcribe(audioBase64: string, opts: TranscribeOpts = {}): Promise<TranscribeResult> {
   const audio = audioBase64.trim()
   if (!audio) return { ok: false, status: 400, error: 'bad_request' }
-
-  if (config.useLocalVosk) {
-    if (!localVoskAvailable()) {
-      return { ok: false, status: 503, error: 'asr_not_configured' }
-    }
-    const result = await localTranscribe(audio, opts.langHint ?? 'auto')
-    if (result.ok) {
-      return { ok: true, lang: result.lang, transcript: result.transcript }
-    } else {
-      return { ok: false, status: 502, error: result.error }
-    }
-  }
-
   const a = getAuth()
-  if (!a || !projectId) return transcribeFallbackGemini(audio, opts)
+  if (!a || !projectId) return transcribeOpenAI(audio, opts)
 
   const rawLang = (opts.langHint ?? '').trim()
   const langHint = /^[a-z]{2}(-[A-Za-z]{2})?$/.test(rawLang) ? normalizeLang(rawLang) : ''
@@ -117,16 +126,15 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
   try {
     const token = await a.getAccessToken()
     if (!token) return { ok: false, status: 502, error: 'asr_auth_failed' }
-    const url = `https://${GOOGLE_STT_REGION}-speech.googleapis.com/v2/projects/${projectId}/locations/${GOOGLE_STT_REGION}/recognizers/_:recognize`
+    const url = `https://${REGION}-speech.googleapis.com/v2/projects/${projectId}/locations/${REGION}/recognizers/_:recognize`
     const res = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         config: {
-          // chirp_3 EVERYWHERE (Adrian, 10 Jul). Streaming is already
-          // chirp_3; the batch path and the full-duplex voice use the same
-          // model — the single constant above.
-          model: GOOGLE_STT_MODEL,
+          // chirp_3 PESTE TOT (Adrian, 10 iul). Streamingul e deja chirp_3;
+          // calea batch și vocea full-duplex folosesc același model.
+          model: 'chirp_3',
           languageCodes: langHint ? [langHint] : ['auto'],
           ...decodingConfig,
           features: { enableAutomaticPunctuation: true },
@@ -135,8 +143,8 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
       }),
     })
     if (!res.ok) {
-      // Google a refuzat (ex: rol IAM pierdut) → urechea Gemini preia.
-      return transcribeFallbackGemini(audio, opts)
+      // Google a refuzat — nu rămânem surzi: încercăm OpenAI pe aceeași cheie.
+      return transcribeOpenAI(audio, opts)
     }
     const j = (await res.json()) as {
       results?: { languageCode?: string; alternatives?: { transcript?: string }[] }[]
@@ -144,6 +152,6 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
     const r0 = j.results?.find((r) => r.alternatives?.[0]?.transcript)
     return { ok: true, lang: r0?.languageCode ?? null, transcript: r0?.alternatives?.[0]?.transcript ?? '' }
   } catch {
-    return transcribeFallbackGemini(audio, opts)
+    return transcribeOpenAI(audio, opts)
   }
 }

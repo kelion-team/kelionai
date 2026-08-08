@@ -1,12 +1,11 @@
-// SEMANTIC MEMORY (roadmap item #5; Adrian's order, 12 Jul at night:
-// "memories, kelion complete and intelligent"): memories get a meaning vector
-// (Gemini text-embedding-004, the same key as the STT proofreading), and
-// recall finds facts by MEANING, not just by words — "what car do I have?"
-// finds "Adrian drives a BMW" without a single common word.
-// Best-effort everywhere: without a key or with the API down, the existing
-// full-text memory stays the only one on duty — nothing breaks, nothing
-// blocks the chat path (the embedding is written asynchronously, recall has
-// a short timeout).
+// MEMORIA SEMANTICĂ (foaia de parcurs #5; ordinul lui Adrian, 12 iul noaptea:
+// „memorii, kelion complet și inteligent"): amintirile primesc un vector de
+// înțeles (Gemini text-embedding-004, aceeași cheie ca la corectarea STT), iar
+// recall-ul găsește faptele după SENS, nu doar după cuvinte — „ce mașină am?"
+// găsește „Adrian conduce un BMW" fără niciun cuvânt comun.
+// Best-effort peste tot: fără cheie sau cu API-ul căzut, memoria full-text
+// existentă rămâne singură la datorie — nimic nu se strică, nimic nu blochează
+// calea chatului (embedding-ul se scrie asincron, recall-ul are timeout scurt).
 
 import { config } from '../config.js'
 

@@ -1,106 +1,25 @@
-import React, { useEffect, useState, useRef } from 'react'
-import { PUBLIC_TEXT as T } from '../lib/publicText'
-import { startCheckout, fetchBalance, fetchHistory, type CheckoutStart, type PurchaseRecord, type WalletStatus } from '../lib/billing'
-import BackLink from '../components/BackLink'
+// PAGINA PUBLICĂ DE CREDITE (Adrian, 26 iul: „pagină dedicată de... cumpărare
+// credite... inclusiv să poată crea și cumpăra"). Vizibilă ȘI fără cont —
+// prețuri transparente înainte de înregistrare. „Cumpără" → dacă nu e logat,
+// îl ducem la /login; dacă e logat, pornește Checkout-ul Stripe existent
+// (/api/billing/checkout — aceeași cale ca pastila de portofel din aplicație).
+import React, { useEffect, useState } from 'react'
 
 const CREDITS_PER_POUND = 7.5
+// Prima alimentare are minim £20 pe server — pachetele pornesc de la £20 ca
+// niciun buton public să nu pice pe regula asta.
+const PACKS = [20, 30, 50]
 
 export default function Credits(): React.JSX.Element {
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
-  const [balance, setBalance] = useState<WalletStatus | null>(null)
-  const [history, setHistory] = useState<PurchaseRecord[] | null>(null)
   const [err, setErr] = useState('')
-  const [successMsg, setSuccessMsg] = useState('')
   const [busy, setBusy] = useState(0)
-
-  // Custom amount state
-  const [customInput, setCustomInput] = useState('')
-
-  // Auto-topup settings
-  const [ar, setAr] = useState<{ enabled: boolean; threshold: number; topupAmount: number } | null>(null)
-  const [arSaved, setArSaved] = useState(false)
-
-  // Payment code state
-  const [payCode, setPayCode] = useState<CheckoutStart | null>(null)
-  const [codeCopied, setCodeCopied] = useState(false)
-
-  const prevCreditsRef = useRef<number | null>(null)
-
-  const loadUserData = async (): Promise<void> => {
-    const [b, h] = await Promise.all([fetchBalance(), fetchHistory()])
-    if (b) {
-      if (prevCreditsRef.current !== null && b.credits > prevCreditsRef.current) {
-        setPayCode(null)
-        setSuccessMsg('Plată primită cu succes! Creditele au fost adăugate în cont.')
-      }
-      prevCreditsRef.current = b.credits
-      setBalance(b)
-    }
-    if (h) setHistory(h)
-  }
 
   useEffect(() => {
     void fetch('/auth/me', { credentials: 'include' })
-      .then((r) => {
-        setSignedIn(r.ok)
-        if (r.ok) {
-          void loadUserData()
-          void fetch('/api/billing/autorecharge', { credentials: 'include' })
-            .then((x) => (x.ok ? x.json() : null))
-            .then((a) => {
-              if (a) setAr({ enabled: !!a.enabled, threshold: Number(a.threshold ?? 20), topupAmount: Number(a.topupAmount ?? 10) })
-            })
-            .catch(() => {})
-        }
-      })
+      .then((r) => setSignedIn(r.ok))
       .catch(() => setSignedIn(false))
   }, [])
-
-  // Fast poll while waiting for payment code confirmation
-  useEffect(() => {
-    if (!payCode) return
-    const interval = window.setInterval(() => {
-      void loadUserData()
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [payCode])
-
-  const firstTopUp = balance ? (balance.firstTopUp ?? true) : true
-  const minAmount = firstTopUp ? 20 : 5
-  const PACKS = firstTopUp ? [20, 30, 50] : [10, 20, 50]
-
-  const customVal = Number(customInput)
-  const isCustomFilled = customInput.trim() !== ''
-  let customErr = ''
-  if (isCustomFilled) {
-    if (!Number.isFinite(customVal) || customVal <= 0) {
-      customErr = 'Introdu o sumă validă.'
-    } else if (customVal % 5 !== 0) {
-      customErr = 'Suma trebuie să fie un multiplu de £5.'
-    } else if (customVal < minAmount) {
-      customErr = firstTopUp ? 'Prima reîncărcare trebuie să fie de minim £20.' : 'Suma minimă este £5.'
-    }
-  }
-  const isCustomValid = isCustomFilled && !customErr
-
-  const saveAr = (patch: Partial<{ enabled: boolean; topupAmount: number }>): void => {
-    if (!ar) return
-    const next = { ...ar, ...patch }
-    setAr(next)
-    void fetch('/api/billing/autorecharge', {
-      method: 'PUT',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(next),
-    })
-      .then((r) => {
-        if (r.ok) {
-          setArSaved(true)
-          window.setTimeout(() => setArSaved(false), 1500)
-        }
-      })
-      .catch(() => {})
-  }
 
   const buy = async (amount: number): Promise<void> => {
     if (!signedIn) {
@@ -109,15 +28,16 @@ export default function Credits(): React.JSX.Element {
     }
     setBusy(amount)
     setErr('')
-    setSuccessMsg('')
     try {
-      const r = await startCheckout(amount)
-      if (r.ok) {
-        setCodeCopied(false)
-        setPayCode(r.pay)
-      } else {
-        setErr(r.error === 'offline' || r.error.startsWith('checkout_http') ? T.errPaymentStart : r.error)
-      }
+      const r = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      })
+      const j = (await r.json().catch(() => ({}))) as { url?: string; error?: string }
+      if (j.url) window.location.href = j.url
+      else setErr(j.error ?? 'Plata nu a pornit — încearcă din nou.')
     } finally {
       setBusy(0)
     }
@@ -126,139 +46,24 @@ export default function Credits(): React.JSX.Element {
   return (
     <div className="login-page">
       <div className="login-card credits-card">
-        <BackLink />
         <a className="login-brand" href="/">Kelionai</a>
-        <h2 className="login-title">{T.creditsTitle}</h2>
+        <h2 className="login-title">Credite Kelionai</h2>
         <p className="credits-blurb">
-          {T.creditsBlurb} {T.creditsRate(CREDITS_PER_POUND)}
+          Creditele acoperă tot ce face Kelion: conversație, voce, vedere, căutări.
+          1 liră = {CREDITS_PER_POUND} credite. Plata e securizată prin Stripe.
         </p>
-
-        {balance !== null && (
-          <div className="login-note" style={{ marginBottom: 16 }}>
-            Sold curent: <strong>{balance.credits} credite</strong>
-          </div>
-        )}
-
-        {/* PRESET PACKS */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          {PACKS.map((p) => (
-            <button key={p} type="button" className="credits-pack" disabled={busy === p} onClick={() => void buy(p)}>
-              <span className="credits-pack-n">{T.creditsUnit(Math.floor(p * CREDITS_PER_POUND))}</span>
-              <span className="credits-pack-price">£{p}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* CUSTOM AMOUNT / SUMĂ LIBERĂ */}
-        <div className="custom-amount-box" style={{ marginBottom: 16, padding: '12px', border: '1px solid var(--border-color, #e0e0e0)', borderRadius: 8 }}>
-          <label style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
-            Altă sumă (sumă liberă)
-          </label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              type="number"
-              placeholder={`£${minAmount}+ (multiplu de £5)`}
-              value={customInput}
-              min={minAmount}
-              step={5}
-              onChange={(e) => setCustomInput(e.target.value)}
-              style={{ flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc' }}
-            />
-            <button
-              type="button"
-              className="credits-pack"
-              style={{ width: 'auto', padding: '8px 16px', margin: 0 }}
-              disabled={!isCustomValid || busy > 0}
-              onClick={() => void buy(customVal)}
-            >
-              Cumpără £{isCustomValid ? customVal : ''}
-            </button>
-          </div>
-          {customErr && <div className="login-note" style={{ color: '#d32f2f', marginTop: 6 }}>{customErr}</div>}
-          {!customErr && (
-            <div className="login-note" style={{ fontSize: 12, marginTop: 4 }}>
-              * Minim £{minAmount}, multiplu de £5 ({Math.floor(minAmount * CREDITS_PER_POUND)} credite = £{minAmount}).
-            </div>
-          )}
-        </div>
-
-        {/* SUCCESS MESSAGE */}
-        {successMsg && <div className="login-note" style={{ color: '#2e7d32', fontWeight: 600, marginBottom: 12 }}>✓ {successMsg}</div>}
-
-        {/* THE REVOLUT CODE DISPLAY & WAITING FOR PAYMENT */}
-        {payCode && (
-          <div className="pay-code-panel">
-            <h3 style={{ margin: '10px 0 4px' }}>{T.payCodeTitle}</h3>
-            <div className="pay-code-big">{payCode.code}</div>
-            <p className="login-note" style={{ fontWeight: 600, color: '#000' }}>{T.payCodeHint}</p>
-            <div className="pay-code-actions">
-              <button
-                type="button"
-                className="credits-pack"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(payCode.code)
-                  setCodeCopied(true)
-                }}
-              >
-                {codeCopied ? T.payCodeCopied : T.payCodeCopy}
-              </button>
-              <button type="button" className="credits-pack" onClick={() => window.open(payCode.url, '_blank', 'noopener')}>
-                {T.payCodeOpen}
-              </button>
-            </div>
-            <p className="login-note">⏳ {T.payCodeWaiting}</p>
-          </div>
-        )}
-
-        {/* AUTO TOP-UP */}
-        {signedIn === true && ar && (
-          <div className="credits-autopay" style={{ marginTop: 16 }}>
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left', fontSize: 14 }}>
-              <input type="checkbox" checked={ar.enabled} onChange={(e) => saveAr({ enabled: e.target.checked })} />
-              <span>{T.autoTopUpLabel}</span>
-            </label>
-            {ar.enabled && (
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', marginTop: 8, fontSize: 14 }}>
-                <span>{T.autoTopUpAmount}</span>
-                <select value={ar.topupAmount} onChange={(e) => saveAr({ topupAmount: Number(e.target.value) })}>
-                  {[5, 10, 20, 50].map((p) => (
-                    <option key={p} value={p}>
-                      {T.creditsUnit(Math.floor(p * CREDITS_PER_POUND))} — £{p}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {arSaved && <div className="login-note">{T.autoTopUpSaved}</div>}
-          </div>
-        )}
-
-        {/* TRANSACTION HISTORY */}
-        {signedIn === true && history && history.length > 0 && (
-          <div style={{ marginTop: 24, textAlign: 'left' }}>
-            <h3 style={{ fontSize: 16, marginBottom: 8 }}>Istoric tranzacții</h3>
-            <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', borderRadius: 6, fontSize: 13 }}>
-              {history.map((h) => (
-                <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid #eee' }}>
-                  <div>
-                    <div><strong>£{h.amount}</strong> ({h.credits} credite)</div>
-                    <div style={{ fontSize: 11, color: '#666' }}>{new Date(h.created_at).toLocaleString('ro-RO')} {h.code ? `• ${h.code}` : ''}</div>
-                  </div>
-                  <div style={{ alignSelf: 'center', fontWeight: 600, color: h.status === 'completed' ? '#2e7d32' : '#f57c00' }}>
-                    {h.status === 'completed' ? 'Finalizată' : h.status}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
+        {PACKS.map((p) => (
+          <button key={p} type="button" className="credits-pack" disabled={busy === p} onClick={() => void buy(p)}>
+            <span className="credits-pack-n">{Math.floor(p * CREDITS_PER_POUND)} credite</span>
+            <span className="credits-pack-price">£{p}</span>
+          </button>
+        ))}
         {err && <div className="login-note">{err}</div>}
         {signedIn === false && (
-          <div className="login-note">{T.creditsSignInFirst}</div>
+          <div className="login-note">Pentru cumpărare intri întâi în cont — butoanele te duc la login.</div>
         )}
         <div className="login-legal">
-          <a href="/login">{T.accountLink}</a> · <a href="/privacy">{T.privacyLink}</a> · <a href="/terms">{T.termsLink}</a>
+          <a href="/login">Intră în cont</a> · <a href="/privacy">Confidențialitate</a> · <a href="/terms">Termeni</a>
         </div>
       </div>
     </div>

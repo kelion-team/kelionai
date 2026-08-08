@@ -1,20 +1,19 @@
-// ── REPORTING BROWSER ERRORS TO KELION (F12 → server) ─────────────────────
-// Adrian (Jul 24): "he must have access to the F12 logs". We catch console
-// errors (onerror, unhandledrejection, console.error) and send them in batches
-// to /api/client-errors; the server injects them into Kelion's context, so he
-// can ANALYZE them when asked why something doesn't work. Dedup + cap, so it
-// floods neither the network nor the context.
+// ── RAPORTAREA ERORILOR DIN BROWSER CĂTRE KELION (F12 → server) ──────────────
+// Adrian (24 iul): „el trebuie să aibă acces la logurile F12". Prindem erorile
+// consolei (onerror, unhandledrejection, console.error) și le trimitem batch la
+// /api/client-errors; serverul le injectează în contextul lui Kelion, care le
+// poate ANALIZA când e întrebat de ce nu merge ceva. Dedup + limită, ca să nu
+// inunde nici rețeaua, nici contextul.
 
 const queue: string[] = []
 let timer: number | null = null
-// Dedup WITH EXPIRY (Jul 24 audit, P1-4): the old lifetime Set sent a
-// RECURRENT error only once per page session — after the server's 15-min
-// window, Kelion no longer saw it even though it kept happening. Now we
-// resend after 5 min.
+// Dedup CU EXPIRARE (audit 24 iul, P1-4): vechiul Set pe viață trimitea o eroare
+// RECURENTĂ o singură dată per sesiune de pagină — după fereastra serverului de
+// 15 min, Kelion n-o mai vedea deși încă se producea. Acum retrimitem după 5 min.
 const seen = new Map<string, number>()
 const RESEND_AFTER_MS = 5 * 60_000
 
-function reportClientError(msg: string): void {
+export function reportClientError(msg: string): void {
   const m = (msg ?? '').slice(0, 400).trim()
   if (!m) return
   const now = Date.now()
@@ -38,7 +37,7 @@ async function flush(): Promise<void> {
       body: JSON.stringify({ errors }),
     })
   } catch {
-    /* offline — errors stay only in the local console */
+    /* offline — erorile rămân doar în consola locală */
   }
   if (queue.length > 0) timer = window.setTimeout(() => void flush(), 3000)
 }
@@ -51,8 +50,8 @@ export function startErrorReporting(): void {
   window.addEventListener('unhandledrejection', (e) => {
     reportClientError(`unhandledrejection: ${String(e.reason).slice(0, 300)}`)
   })
-  // console.error is the channel through which our own code also reports
-  // symptoms (e.g. voice connection refusal) — we catch them without breaking the console.
+  // console.error e canalul prin care și codul nostru raportează simptome
+  // (ex: refuzul conexiunii de voce) — le prindem fără să stricăm consola.
   const orig = console.error.bind(console)
   console.error = (...args: unknown[]) => {
     try {
@@ -62,7 +61,7 @@ export function startErrorReporting(): void {
           .join(' '),
       )
     } catch {
-      /* reporting must never throw */
+      /* raportarea nu are voie să arunce */
     }
     orig(...args)
   }

@@ -8,11 +8,11 @@ import { getVoiceLevel } from '../lib/audioIO'
 import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
 import { fetchDisabledGestures } from '../lib/gestures'
 
-// ── FACIAL EXPRESSIONS (ARKit blendshapes) — kept from the constructor's "avatar
-// v2.3" release (its good part: the face on morphs, allowed), while
-// the skeleton stays EXCLUSIVELY on library clips (rule #125).
-// Gentleman style: small amplitudes, micro-expressions, no grimaces; they lay ADDITIVELY
-// over the neutral face and don't touch blinking or lip-sync.
+// ── EXPRESII FACIALE (ARKit blendshapes) — păstrate din release-ul „avatar
+// v2.3" al constructorului (partea lui bună: fața pe morph-uri, permisă), în
+// timp ce scheletul rămâne EXCLUSIV pe clipurile din bibliotecă (regula #125).
+// Stil de domn: amplitudini mici, micro-expresii, nu grimase; se așază ADITIV
+// peste fața neutră și nu ating clipitul sau lip-sync-ul.
 type FaceTarget = Partial<Record<string, number>>
 const FACE_EXPRESSIONS: Record<FacialLabel, FaceTarget> = {
   smile: { mouthSmileLeft: 0.28, mouthSmileRight: 0.28, cheekSquintLeft: 0.12, cheekSquintRight: 0.12 },
@@ -22,7 +22,7 @@ const FACE_EXPRESSIONS: Record<FacialLabel, FaceTarget> = {
   empathy: { browInnerUp: 0.18, mouthFrownLeft: 0.14, mouthFrownRight: 0.14 },
   warmth: { mouthSmileLeft: 0.16, mouthSmileRight: 0.16, cheekSquintLeft: 0.09, cheekSquintRight: 0.09, browInnerUp: 0.07 },
 }
-// Morph names can come in two conventions (ARKit or _L/_R).
+// Numele morph-urilor pot veni în două convenții (ARKit sau _L/_R).
 const MORPH_ALT: Record<string, string> = {
   mouthSmileLeft: 'mouthSmile_L',
   mouthSmileRight: 'mouthSmile_R',
@@ -39,21 +39,21 @@ const MORPH_ALT: Record<string, string> = {
   mouthFrownLeft: 'mouthFrown_L',
   mouthFrownRight: 'mouthFrown_R',
 }
-// A micro-expression's envelope: eases in, holds briefly, eases out.
+// Anvelopa unei micro-expresii: intră lin, ține puțin, iese lin.
 const FACE_IN = 0.25
 const FACE_HOLD = 1.6
 const FACE_OUT = 0.6
-// All morphs used by expressions — zeroed on every frame
-// before applying the current one, so an expression interrupted by another doesn't
-// stay "frozen" on the face.
+// Toate morph-urile folosite de expresii — se aduc la zero în fiecare cadru
+// înainte de aplicarea expresiei curente, ca o expresie întreruptă de alta să
+// nu rămână „înghețată" pe față.
 const FACE_KEYS = [...new Set(Object.values(FACE_EXPRESSIONS).flatMap((t) => Object.keys(t)))].filter(
   (k) => k !== 'jawOpen',
 )
 
 // Rest pose (arms hanging down along the body, natural A-pose) for THIS RPM
 // asset's skeleton. The GLB bind pose ships with arms raised, so we snap the
-// arm bones down ONCE before the first paint (no T-pose flash). After the mixer’s
-// first update, the library clips take over the skeleton completely.
+// arm bones down ONCE before the first paint (no T-pose flash). După prima
+// actualizare a mixerului, clipurile din bibliotecă preiau complet scheletul.
 const ARM_NAMES: Record<string, string[]> = {
   LeftArm: ['LeftArm', 'LeftUpperArm', 'mixamorigLeftArm'],
   RightArm: ['RightArm', 'RightUpperArm', 'mixamorigRightArm'],
@@ -67,50 +67,50 @@ const ARM_REST: Record<string, { x: number; y: number; z: number }> = {
   RightForeArm: { x: 0.2, y: 0, z: 0 },
 }
 
-// ── THE MOVEMENT DIRECTION (Adrian, Jul 11: "full control of the avatar's
-// movements, sync with moves from the already existing library") ──
-// The skeleton is moved EXCLUSIVELY by official Ready Player Me clips
-// (animation-library, MIT, motion capture, same skeleton — zero hand-
-// written code, lesson #125). The direction picks the clip by what Kelion does NOW:
-//   • silent → "idle" looping + every now and then a variation (once), so he doesn't
-//     look like a robot repeating the same loop forever;
-//   • speaking (the REAL level of the Chirp 3 voice, not an assumption) → a talking
-//     clip with gestures, chosen randomly on each reply, looping while he speaks;
-//   • gesture on command → the `kelion-gesture` event (detail: the clip name)
-//     runs any clip from the direction ONCE — the channel through which the brain
-//     can explicitly request a gesture ("wave", "point at the monitor" etc.).
-// Transitions are always crossfade (0.35s) — never a dry jump between poses.
-// Blinking and lip-sync stay on morph targets (the clips don't touch them).
-// The commandable clip names = exactly the names the BRAIN knows
+// ── REGIA DE MIȘCARE (Adrian, 11 iul: „controlul full al mișcărilor
+// avatarului, sincronizare cu mișcări din biblioteca deja existentă") ──
+// Scheletul e mișcat EXCLUSIV de clipuri oficiale Ready Player Me
+// (animation-library, MIT, captură de mișcare, același schelet — zero cod de
+// mână, lecția #125). Regia alege clipul după ce face Kelion ACUM:
+//   • tăcut  → „idle" în buclă + din când în când o variație (once), ca să nu
+//     pară un robot care repetă aceeași buclă la nesfârșit;
+//   • vorbește (nivelul REAL al vocii Chirp 3, nu presupunere) → un clip de
+//     vorbit cu gesturi, ales aleator la fiecare replică, în buclă cât vorbește;
+//   • gest la comandă → evenimentul `kelion-gesture` (detail: numele clipului)
+//     rulează O DATĂ orice clip din regie — canalul prin care creierul va
+//     putea cere explicit un gest („salută", „arată spre monitor" etc.).
+// Tranzițiile sunt mereu crossfade (0.35s) — niciodată salt sec între poziții.
+// Clipirea și lip-sync-ul rămân pe morph targets (clipurile nu le ating).
+// Numele clipurilor comandabile = exact numele pe care le știe CREIERUL
 // (eticheta [GEST nume] din chat.ts): Adrian cere prin viu grai sau tonul
 // replicii o cere (context/sentimente), creierul alege numele, avatarul
-// executes (Adrian, Jul 11: "movements on command for everything I want him to do" +
-// "the movements must be tied to context, feelings").
+// execută (Adrian, 11 iul: „mișcări comandate la tot ce vreau să facă" +
+// „mișcările trebuiesc legate de context, sentimente").
 const CLIP_FILES: Record<string, string> = {
   idle: '/anim/M_Standing_Idle_001.glb',
   variatie: '/anim/M_Standing_Idle_Variations_002.glb',
-  // ONE SINGLE talking clip, the retained one (Adrian: "the current gestures
-  // unsuitable for a gentleman") — the ample gesticulation was removed
-  // from the automatic rotation; the big expressions stay ONLY on command.
+  // UN SINGUR clip de vorbit, cel reținut (Adrian: „gesturile actuale
+  // nepotrivite pentru gentleman") — gesticulația amplă a fost scoasă
+  // din rotația automată; expresiile mari rămân DOAR la comandă.
   talk: '/anim/M_Talking_Variations_004.glb',
   'expresie-1': '/anim/M_Standing_Expressions_001.glb',
   'expresie-2': '/anim/M_Standing_Expressions_002.glb',
   'expresie-3': '/anim/M_Standing_Expressions_008.glb',
   'expresie-4': '/anim/M_Standing_Expressions_004.glb',
   dans: '/anim/M_Dances_001.glb',
-  // The GENTLE gestures (Adrian: "what gentler gestures can he do") — idle
-  // variations from the library: subtle weight shift, looking around.
+  // Gesturile DOMOALE (Adrian: „ce gesturi mai domoale poate face") — variații
+  // de repaus din bibliotecă: mutare subtilă de greutate, privire în jur.
   'variatie-2': '/anim/M_Standing_Idle_Variations_003.glb',
   'variatie-3': '/anim/M_Standing_Idle_Variations_007.glb',
 }
 
-// THE WHOLE LIBRARY (Adrian, Jul 11 evening: "can you load all the gestures from
-// that library? he should have them") — the rest of the stationary Ready Player Me
-// catalog (idle variations, expressions, conversation gestures, dances; locomotion
-// makes no sense for an avatar standing in place). NOT loaded at startup:
-// the core above comes through Suspense as before, and this catalog
-// downloads IN THE BACKGROUND, clip by clip, a few seconds after first paint —
-// the app starts just as fast, and in ~a minute Kelion has them all.
+// TOATĂ BIBLIOTECA (Adrian, 11 iul seara: „poți încărca toate gesturile din
+// biblioteca aia? să le aibă") — restul catalogului staționar Ready Player Me
+// (variații de repaus, expresii, gesturi de conversație, dansuri; locomoția
+// n-are sens pentru un avatar care stă pe loc). NU se încarcă la pornire:
+// nucleul de mai sus vine prin Suspense ca până acum, iar catalogul ăsta se
+// descarcă ÎN FUNDAL, clip după clip, la câteva secunde după primul paint —
+// aplicația pornește la fel de repede, iar în ~un minut Kelion le are pe toate.
 const LAZY_CLIP_FILES: Record<string, string> = {
   'variatie-4': '/anim/M_Standing_Idle_Variations_001.glb',
   'variatie-5': '/anim/M_Standing_Idle_Variations_004.glb',
@@ -129,7 +129,7 @@ const LAZY_CLIP_FILES: Record<string, string> = {
   'expresie-12': '/anim/M_Standing_Expressions_013.glb',
   'expresie-13': '/anim/M_Standing_Expressions_014.glb',
   'expresie-14': '/anim/M_Standing_Expressions_015.glb',
-  // Conversation gestures (M_Talking_Variations; 004 is the automatic "talk" clip).
+  // Gesturi de conversație (M_Talking_Variations; 004 e clipul auto „talk").
   'vorbit-1': '/anim/M_Talking_Variations_001.glb',
   'vorbit-2': '/anim/M_Talking_Variations_002.glb',
   'vorbit-3': '/anim/M_Talking_Variations_003.glb',
@@ -150,14 +150,14 @@ const LAZY_CLIP_FILES: Record<string, string> = {
   'dans-10': '/anim/M_Dances_011.glb',
 }
 
-// THE GESTURE TAXONOMY (Adrian, Jul 13) — GENTLE idle allowed vs ample "warm-ups"
-// banned from the automatic rotation. RESTARTED on Jul 27 (Adrian: "missing
+// TAXONOMIA GESTURILOR (Adrian, 13 iul) — repaus DOMOL permis vs „dezmorțiri"
+// ample interzise în rotația automată. REPORNITĂ pe 27 iul (Adrian: „lipsește
 // motorul/creierul de apelare gesturi — umane reale, decente"): regia de mai
-// below it picks by itself, but ONLY from the gentle set (gentleman); the ample expressions
-// and dances stay ONLY on explicit command. Everything Adrian unchecks in
-// Admin→Gestures is excluded everywhere (disabledG, refreshed every 30s).
+// jos alege singură, dar NUMAI din setul domol (gentleman); expresiile ample
+// și dansurile rămân DOAR la comandă explicită. Tot ce debifează Adrian în
+// Admin→Gesturi e exclus de peste tot (disabledG, reîmprospătat la 30s).
 const CHAT_IDLE_CALM = ['variatie', 'variatie-2', 'variatie-4', 'variatie-5', 'variatie-6', 'variatie-8']
-// (banned from the automatic rotation: variatie-3, variatie-7, variatie-9, variatie-10)
+// (interzise în rotația automată: variatie-3, variatie-7, variatie-9, variatie-10)
 
 export default function AvatarModel() {
   const { scene } = useGLTF('/kelion-rpm.glb')
@@ -173,20 +173,8 @@ export default function AvatarModel() {
   const variatie3 = useGLTF(CLIP_FILES['variatie-3'])
   const root = useRef<Group>(null)
 
-  // THE "AVATAR LOADED" SIGNAL (Adrian, Jul 28): the component reaches here ONLY
-  // after Suspense resolved `useGLTF('/kelion-rpm.glb')` — meaning the base GLB
-  // is loaded and the main thread is free. We emit once the event
-  // ChatPanel waits for to arm the microphone EXACTLY at this moment
-  // (not during the model's heavy parsing). We also set a flag on window for
-  // the case ChatPanel mounts after us (catches the state, no race).
-  useEffect(() => {
-    const w = window as unknown as { __kelionAvatarReady?: boolean }
-    w.__kelionAvatarReady = true
-    window.dispatchEvent(new CustomEvent('kelion:avatar-ready'))
-  }, [])
-
-  // Each library GLB has a single clip, all with the same generic
-  // name — we rename them by role so we can call them by name.
+  // Fiecare GLB din bibliotecă are un singur clip, toate cu același nume
+  // generic — le redenumim după rol ca să le putem chema pe nume.
   const clips = useMemo(() => {
     const out: AnimationClip[] = []
     const add = (g: { animations: AnimationClip[] }, name: string): void => {
@@ -212,32 +200,32 @@ export default function AvatarModel() {
   const { actions, mixer } = useAnimations(clips, root)
   const current = useRef<AnimationAction | null>(null)
   const state = useRef<'idle' | 'talking' | 'gesture'>('idle')
-  // THE GESTURE ENGINE (Jul 27): the direction's tracks — how long "speaking" holds
-  // after the last voice peak and when the next idle variation comes.
+  // MOTORUL DE GESTURI (27 iul): urmele regiei — până când ține „vorbește"
+  // după ultimul vârf de voce și când vine următoarea variație de repaus.
   const talkHold = useRef(0)
   const nextVar = useRef(30)
-  // SUBTLETY (Adrian, Jul 27: "the hand gesturing and everyone's must be
-  // much more subtle"): the talking clip does NOT replace the idle — it lays
-  // OVER it as a small-weight layer (idle stays the base), so just a shadow
-  // of gesticulation, not the whole clip in full force.
+  // SUBTILITATE (Adrian, 27 iul: „gestica mâinilor și a tuturor trebuie să fie
+  // mult mai subtile"): clipul de vorbit NU înlocuiește repausul — se așază
+  // PESTE el ca strat cu greutate mică (idle rămâne baza), deci doar o umbră
+  // de gesticulație, nu clipul întreg în forță.
   const talkLayer = useRef<AnimationAction | null>(null)
-  // The arm/forearm bones discovered in the scene, for locking them at
-  // rest on every frame (Adrian, Jul 13: full stop of ample gestures).
+  // Oasele brațelor/antebrațelor descoperite în scenă, pentru blocarea lor în
+  // repaus în fiecare cadru (Adrian, 13 iul: oprire completă a gesturilor ample).
   const armBones = useRef<Record<string, Bone | null>>({})
-  // DISABLED GESTURES (Adrian, Jul 13): what Adrian unchecks in Admin → Gestures
-  // does NOT play at all — neither automatically, nor on command. Refreshed periodically.
+  // GESTURI DEZACTIVATE (Adrian, 13 iul): ce Adrian debifează în Admin → Gesturi
+  // NU se joacă deloc — nici automat, nici comandat. Reîmprospătat periodic.
   const disabledG = useRef<Set<string>>(new Set())
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
-  // Hydration fix: fixed initial value, randomized in useEffect on the client.
+  // Fix hydration: valoare fixă inițial, randomizez în useEffect pe client.
   const blink = useRef({ t: 0, nextAt: 4, phase: 0, duration: 0.16 })
   useEffect(() => {
     blink.current.nextAt = 2 + Math.random() * 4
   }, [])
   const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
-  // The full-catalog clips, arrived in the background (mixer.clipAction keeps
-  // the action registry by itself — one clip + same root = same action).
+  // Clipurile din catalogul complet, sosite în fundal (mixer.clipAction ține
+  // singur evidența acțiunilor — un clip + aceeași rădăcină = aceeași acțiune).
   const lazyClips = useRef<Record<string, AnimationClip>>({})
-  // The current facial micro-expression (commanded from chat via facialQueue).
+  // Micro-expresia facială curentă (comandată din chat prin facialQueue).
   const face = useRef<{ label: FacialLabel; t: number } | null>(null)
   useFacialQueue((label) => {
     face.current = { label, t: 0 }
@@ -276,8 +264,8 @@ export default function AvatarModel() {
       if (obj.isMesh) obj.castShadow = true
     })
     morphs.current = m
-    // Arms down before the first frame — the clip takes over from the first update.
-    // We also save the bones to lock them at rest on every frame.
+    // Brațele jos înainte de primul cadru — clipul preia din prima actualizare.
+    // Salvăm și oasele pentru a le bloca la repaus în fiecare cadru.
     for (const key of Object.keys(ARM_REST)) {
       const target = ARM_REST[key]
       for (const name of ARM_NAMES[key]) {
@@ -292,48 +280,46 @@ export default function AvatarModel() {
   }, [scene])
 
   // Ce gesturi a scos Adrian din Admin → Gesturi (public /api/gestures/state).
-  // Reloaded every 30s, so panel changes take effect without a reload.
+  // Reîncărcat la 30s, ca schimbările din panou să prindă fără reload.
   useEffect(() => {
-    // null = citirea a picat (auditul admin, 3 aug) — păstrăm ultima listă
-    // bună; nu tratăm eșecul drept „totul e permis".
-    const load = (): void => void fetchDisabledGestures().then((l) => { if (l) disabledG.current = new Set(l) })
+    const load = (): void => void fetchDisabledGestures().then((l) => (disabledG.current = new Set(l)))
     load()
     const id = window.setInterval(load, 30_000)
     return () => window.clearInterval(id)
   }, [])
 
   useEffect(() => {
-    // THE ENGINE RESTARTED (Jul 27, Adrian's order): the living idle runs from
-    // the first blink — the body breathes subtly; the arms stay locked at rest by
-    // the useFrame padlock (only in idle), so the Jul 13 decency is preserved.
+    // MOTORUL REPORNIT (27 iul, ordinul lui Adrian): repausul viu rulează din
+    // prima clipă — corpul respiră subtil; brațele rămân blocate în repaus de
+    // lacătul din useFrame (doar în idle), deci decența din 13 iul se păstrează.
     play('idle')
-    // At the end of a "once" clip (variation/gesture), smoothly back to idle.
+    // La finalul unui clip „once" (variație/gest), înapoi lin la repaus.
     const onFinished = (): void => {
       state.current = 'idle'
       current.current = null
       play('idle')
-      // The scene (Stage) learns the gesture ended — e.g. it returns from the dance
-      // position back into Adrian's corner.
+      // Scena (Stage) află că gestul s-a terminat — de ex. revine din poziția
+      // de dans înapoi în colțul lui Adrian.
       window.dispatchEvent(new Event('kelion-gesture-done'))
     }
     mixer.addEventListener('finished', onFinished)
-    // THE COMMAND CHANNEL: any part of the app (in the future: the brain, via
-    // the bridge) can request a gesture by name — it plays once, then returns by itself.
+    // CANALUL DE COMANDĂ: orice parte a aplicației (în viitor: creierul, prin
+    // punte) poate cere un gest pe nume — rulează o dată, apoi revine singur.
     const runGesture = (name: string, allowDisabled: boolean): void => {
       if (!allowDisabled && disabledG.current.has(name)) return // debifat → nu se joacă
       if (actions[name] || lazyClips.current[name]) {
         // Stratul subtil de vorbit se stinge — gestul comandat (pe context, de
-        // to the brain) has priority and plays at full expressiveness.
+        // la creier) are prioritate și rulează la expresivitate întreagă.
         talkLayer.current?.fadeOut(0.3)
         talkLayer.current = null
         state.current = 'gesture'
         play(name, true)
       }
     }
-    // Normal channel (brain/command): refuses the gestures Adrian unchecked.
+    // Canal normal (creier/comandă): refuză gesturile debifate de Adrian.
     const onGesture = (e: Event): void => runGesture(String((e as CustomEvent).detail ?? ''), false)
-    // PREVIEW channel (Admin → Gestures "▶ Show"): plays ANYTHING, so the admin
-    // sees the gesture before checking it.
+    // Canal de PREVIEW (Admin → Gesturi „▶ Arată"): joacă ORICE, ca adminul să
+    // vadă gestul înainte să-l bifeze.
     const onPreview = (e: Event): void => runGesture(String((e as CustomEvent).detail ?? ''), true)
     window.addEventListener('kelion-gesture', onGesture)
     window.addEventListener('kelion-gesture-preview', onPreview)
@@ -345,17 +331,17 @@ export default function AvatarModel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions, mixer])
 
-  // THE FULL CATALOG, in the background: a few seconds after first paint, the rest
-  // of the library downloads sequentially (one clip at a time — doesn't compete with
-  // app startup nor with voice/chat); a failed clip doesn't block
+  // CATALOGUL COMPLET, în fundal: la câteva secunde după primul paint, restul
+  // bibliotecii se descarcă secvențial (un clip odată — nu concurează cu
+  // pornirea aplicației și nici cu vocea/chatul); un clip picat nu blochează
   // restul. Numele devine cel comandabil ([GEST nume]).
   useEffect(() => {
     let disposed = false
-    // SEPARATE MANAGER (not DefaultLoadingManager): the background library download
-    // must NOT touch `useProgress`/AvatarLoading — otherwise the loading bar
-    // reappeared ~2.5s after first paint and the avatar "loaded twice"
-    // (once the core, once the library). With its own manager, the indicator
-    // appears ONE SINGLE time, for the base avatar, then stays.
+    // MANAGER SEPARAT (nu DefaultLoadingManager): descărcarea bibliotecii din
+    // fundal NU trebuie să atingă `useProgress`/AvatarLoading — altfel bara de
+    // încărcare reapărea la ~2.5s după primul paint și avatarul „se încărca de
+    // 2 ori" (o dată nucleul, o dată biblioteca). Cu manager propriu, indicatorul
+    // apare O SINGURĂ DATĂ, pentru avatarul de bază, apoi rămâne.
     const loader = new GLTFLoader(new LoadingManager())
     const queue = Object.entries(LAZY_CLIP_FILES)
     const loadNext = (): void => {
@@ -390,22 +376,22 @@ export default function AvatarModel() {
     const t = state3.clock.elapsedTime
 
     // ── MOTORUL DE GESTURI (Adrian, 27 iul: „umane reale, decente") ──
-    // The deterministic direction, by what Kelion does NOW (the REAL voice level):
-    //   speaking → the calm conversation clip looping (gentleman
-    //   gesticulation, the clip Adrian retained on Jul 13);
-    //   silent → living idle + a rare GENTLE variation (25–45s), from the calm set;
-    //   commanded gesture (brain/living voice) → absolute priority, we don't touch it.
-    // Everything unchecked in Admin→Gestures doesn't play here either (disabledG).
+    // Regia deterministă, pe ce face Kelion ACUM (nivelul REAL al vocii):
+    //   vorbește → clipul calm de conversație în buclă (gesticulație de
+    //   gentleman, clipul reținut de Adrian pe 13 iul);
+    //   tace → repaus viu + o variație DOMOLĂ rară (25–45s), din setul calm;
+    //   gest comandat (creier/viu grai) → prioritate absolută, nu-l atingem.
+    // Tot ce e debifat în Admin→Gesturi nu se joacă nici aici (disabledG).
     if (level > 0.05) talkHold.current = t + 0.7
     const talking = t < talkHold.current
     if (state.current !== 'gesture') {
       if (talking && state.current !== 'talking' && !disabledG.current.has('talk')) {
         state.current = 'talking'
-        // GENTLEMAN, NOT RUFFIAN (Adrian, Jul 27: "waving hands like that... gentleman
-        // gestures"): idle stays the base; talking is just a SHADOW of a layer —
-        // weight 0.25, slowed — arms practically at rest, the life shows,
+        // GENTLEMAN, NU GOLAN (Adrian, 27 iul: „dă așa din mâini... gesturi de
+        // gentleman"): idle rămâne baza; vorbitul e doar o UMBRĂ de strat —
+        // greutate 0.25, încetinit — brațele practic în repaus, viața se vede,
         // teatrul nu. Expresivitatea vine NUMAI de la creier, pe context
-        // (play_avatar_gesture: points at the monitor when presenting etc.).
+        // (play_avatar_gesture: arată spre monitor când prezintă etc.).
         const lazy = lazyClips.current['talk']
         const act = actions['talk'] ?? (lazy && root.current ? mixer.clipAction(lazy, root.current) : null)
         if (act) {
@@ -431,8 +417,8 @@ export default function AvatarModel() {
       }
     }
 
-    // Arms locked at rest ONLY in idle (the Jul 13 decency): in talking
-    // and in gestures, the motion-capture clips have a free hand.
+    // Brațele blocate în repaus DOAR în idle (decența din 13 iul): în vorbit
+    // și în gesturi, clipurile de captură de mișcare au mâna liberă.
     if (state.current === 'idle') {
       for (const key of Object.keys(ARM_REST)) {
         const bone = armBones.current[key]
@@ -459,13 +445,13 @@ export default function AvatarModel() {
       }
     }
 
-    // Lip-sync — the mouth follows the real amplitude of the voice playing now (Chirp
-    // 3), smoothed like the blink; MODERATE opening (Adrian once complained that
+    // Lip-sync — gura urmărește amplitudinea reală a vocii redate acum (Chirp
+    // 3), netezit ca blink-ul; deschidere MODERATĂ (Adrian s-a plâns cândva că
     // gura se deschide prea mult).
     mouth.current += (level - mouth.current) * 0.4
     const jawOpen = Math.min(0.5, mouth.current * 0.55)
 
-    // The facial micro-expression: envelope in → hold → out, then done.
+    // Micro-expresia facială: anvelopă intrare → ținere → ieșire, apoi gata.
     let faceW = 0
     let faceTargets: FaceTarget | null = null
     const f = face.current
@@ -487,13 +473,13 @@ export default function AvatarModel() {
       if (l !== undefined) inf[l] = eye
       if (r !== undefined) inf[r] = eye
       const jaw = d['jawOpen'] ?? d['mouthOpen'] ?? d['viseme_aa']
-      // First cleans the previous expression's traces (an expression interrupted by
-      // another must not stay on the face), then applies the current one.
+      // Curăță întâi urmele expresiei anterioare (o expresie întreruptă de
+      // alta nu are voie să rămână pe față), apoi aplică expresia curentă.
       for (const k of FACE_KEYS) {
         const idx = d[k] ?? d[MORPH_ALT[k] ?? '']
         if (idx !== undefined) inf[idx] = 0
       }
-      // Voice always has priority on the mouth; the expression only complements.
+      // Vocea are întotdeauna prioritate la gură; expresia doar completează.
       let jawExtra = 0
       if (faceTargets) {
         for (const [k, v] of Object.entries(faceTargets)) {

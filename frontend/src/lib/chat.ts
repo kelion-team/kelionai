@@ -1,7 +1,7 @@
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
-  /** When it was sent (epoch ms) — shown as a time next to each message. */
+  /** Când a fost trimis (epoch ms) — afișat ca oră lângă fiecare mesaj. */
   ts?: number
 }
 
@@ -35,13 +35,9 @@ export interface ChatControl {
   // A readable text deliverable from an agent (email, translation, findings),
   // shown as a copyable panel on the monitor.
   doc?: { title: string; text: string }
-  // A COMPLETE web page written by Kelion (run_web_app) — runs live on the
-  // monitor in an isolated frame (srcdoc + sandbox) and can be saved as .html.
+  // O pagină web COMPLETĂ scrisă de Kelion (run_web_app) — rulează live pe
+  // monitor într-un cadru izolat (srcdoc + sandbox) și se poate salva ca .html.
   app?: { title: string; html: string }
-  // THE CONSTRUCTOR PANEL (Stage 4b): opens on the monitor the live display of
-  // build orders — subscribes to /api/constructor/live and shows
-  // Taken→current step→Done/Failed. Emitted when Kelion takes a build order.
-  build?: { open?: boolean; title?: string }
   // A device command the SERVER interpreted (camera / monitor tabs) — the
   // regexes moved off the browser; the client just executes what this says.
   device?: {
@@ -51,34 +47,28 @@ export interface ChatControl {
   // The server committed a new speech language (detected + persisted there);
   // the client applies it to the recognizer and mirrors it locally.
   lang?: string
-  // ACCESS TO THE APP TABS from the written chat (the open_app_view tool):
-  // the client translates into the kelion:navigate event; Stage opens the panel.
+  // ACCES LA TAB-URILE APLICAȚIEI din chatul scris (unealta open_app_view):
+  // clientul traduce în evenimentul kelion:navigate; Stage deschide panoul.
   nav?: { view: string; section?: string }
   // Out of credit — the client should open the top-up (buy credit) flow.
   paywall?: boolean
-  // A heartbeat from the server while the brain thinks (nothing to show) — keeps
-  // the connection open through Cloudflare and feeds the watchdog below.
+  // Puls de viață de la server cât gândește creierul (nimic de afișat) — ține
+  // conexiunea deschisă prin Cloudflare și hrănește ceasul de gardă de mai jos.
   ping?: number
   // The server has received the message — the delivery check mark in the UI.
   receipt?: boolean
-  // GESTURE ON COMMAND: the clip name from the movement direction (AvatarModel)
-  // the brain requests via the [GEST name] tag — the avatar plays it once.
+  // GEST LA COMANDĂ: numele clipului din regia de mișcare (AvatarModel) pe
+  // care creierul îl cere prin eticheta [GEST nume] — avatarul îl execută o dată.
   gest?: string
   // Eticheta tool-ului server-side play_avatar_gesture (release v2.3) —
-  // ChatPanel translates it into the equivalent RPM clip, on the same gesture channel.
+  // ChatPanel o traduce în clipul RPM echivalent, pe același canal de gest.
   gesture?: string
-  // TRANSCRIPT AT THE BRAIN'S ENTRANCE (Adrian, Jul 10): the EXACT text the
-  // server hands to the brain this turn — sent from the server, not a
-  // local echo. Shown as a distinct band, so you can see what it "heard".
-  // VOCE UNIFICATĂ (5 aug): pe o tură vocală, `heard` = ce a auzit CREIERUL
-  // (transcript precis, din voce) — clientul umple bula userului cu el.
+  // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): textul EXACT pe care
+  // serverul îl predă creierului la această tură — trimis de pe server, nu un
+  // ecou local. Se afișează ca bandă distinctă, ca să se vadă ce „a auzit".
   heard?: string
-  // VOCE AMBIENTALĂ: creierul a decis că NU i se vorbea → tura se stinge; clientul
-  // șterge bulele optimiste și nu redă nimic (Adrian: „să nu vorbească neîntrebat").
-  ignored?: boolean
-  golesteMonitor?: boolean
-  // THE BRAIN'S VOICE: MP3 (base64) synthesized on the server (Chirp 3) and sent over
-  // the bridge. The app only decodes + plays it — it synthesizes nothing locally.
+  // VOCEA CREIERULUI: MP3 (base64) sintetizat pe server (Chirp 3) și trimis prin
+  // punte. Aplicația doar îl decodează + redă — nu sintetizează nimic local.
   audio?: string
   // Owner promo pipeline: an APPROVED clip script + shot list — arm the recorder;
   // when recording starts the script is spoken (voice only, no text on screen)
@@ -95,7 +85,6 @@ export interface ChatControl {
 }
 
 import type { VoiceFeatures } from './audioIO.js'
-import { moment as contorMoment } from './contorFraza'
 
 // U+001F (unit separator) brackets a JSON control frame in the text stream.
 const CTRL = String.fromCharCode(31)
@@ -113,82 +102,36 @@ export interface ScreenTask {
   active: boolean
 }
 
-// ── THE HONEST CONNECTION VERDICT (Adrian, 2 aug: „raportează fals că pierde
-// conexiunea la net — trebuie monitorizat real dacă e așa") ─────────────────
-// Before, ANY failed fetch/stream became 'offline' → the chat told the human
-// „I've lost the internet connection" with ZERO measurement — including when
-// OUR server was restarting (a deploy!) while his internet was perfectly
-// fine. A failed read presented as an established fact, rule no. 1 broken.
-// Now the claim is MEASURED, and the verdict is logged (console.error reaches
-// the server through the F12 pipe — the real monitoring he asked for):
-//   'offline'     → the BROWSER itself says the machine has no network;
-//   'server_down' → the network is up but /api/health doesn't answer
-//                   (deploy/restart/crash — NOT the user's internet);
-//   'transient'   → network up AND the server answers: only this one request
-//                   broke on the road (proxy hiccup, dropped socket).
-async function diagnozaConexiune(): Promise<'offline' | 'server_down' | 'transient'> {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    console.error('[CONEXIUNE] verdict măsurat: offline (navigator.onLine=false)')
-    return 'offline'
-  }
-  try {
-    const r = await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(4000) })
-    const verdict = r.ok ? 'transient' : 'server_down'
-    console.error(`[CONEXIUNE] verdict măsurat: ${verdict} (net OK, /api/health → ${r.status})`)
-    return verdict
-  } catch {
-    console.error('[CONEXIUNE] verdict măsurat: server_down (net OK, /api/health nu răspunde)')
-    return 'server_down'
-  }
-}
-
 export async function* streamChat(
   messages: ChatMessage[],
   image?: string,
   coords?: Coords,
   onControl?: (c: ChatControl) => void,
   screen?: ScreenTask[],
-  // STOP: abandon signal — "stop" typed/spoken cuts the turn AT ONCE (not queued).
+  // STOP: semnal de abandon — „stop" scris/vorbit taie tura PE LOC (nu în coadă).
   signal?: AbortSignal,
-  // The picture was EXPLICITLY ATTACHED (pasted with Ctrl+V or uploaded) — an
-  // unambiguous analysis request, unlike the always-on camera frame (which
-  // is analyzed only on explicit request in text). See ChatPanel.tsx.
+  // Poza a fost ATAȘATĂ EXPLICIT (lipită cu Ctrl+V sau încărcată) — cerere de
+  // analiză fără echivoc, spre deosebire de cadrul camerei mereu-pornite (care
+  // se analizează doar la cerere explicită în text). Vezi ChatPanel.tsx.
   imageIsAttachment?: boolean,
-  // CONTINUOUS VISION (Adrian, Jul 11): the camera's last 4 frames — for
-  // ALL users (rule no. 9: same capabilities), not just the admin.
+  // VEDEREA CONTINUĂ (Adrian, 11 iul): ultimele 4 cadre ale camerei — pentru
+  // TOȚI userii (regula nr. 9: aceleași capabilități), nu doar admin.
   images?: string[],
   // Features vocale extrase client-side pentru identificare speaker + gen.
   voiceFeatures?: VoiceFeatures,
-  // 128-d face descriptor (face-api) + thumbnail, extracted in the background when the camera
-  // is on. Triggered by voice, no button, off-hot-path.
+  // Descriptor facial 128-d (face-api) + miniatură, extrase în fundal când camera
+  // e pornită. Declanșat de voce, fără buton, off-hot-path.
   faceDescriptor?: number[],
   facePhoto?: string,
-  // THE SINGLE VOICE RULE (Adrian, Jul 26): the full-duplex voice session is active →
-  // the server doesn't synthesize the Chirp voice for this turn (no cost, no frames).
+  // REGULA VOCII UNICE (Adrian, 26 iul): sesiunea de voce full-duplex e activă →
+  // serverul nu sintetizează vocea Chirp pentru tura asta (nici cost, nici cadre).
   serverVoiceOff?: boolean,
-  // THE SPOKEN TURN (Aug 1 — one brain): this message came from the live voice
-  // session's ears. The server shapes the reply for speech (clean sentences,
-  // no markdown tables/links) — the client speaks it verbatim through the
-  // voice session's mouth. Typed turns omit the flag.
-  spoken?: boolean,
-  // THE GUEST SPEAKER (Aug 1 — the timbre gate): the voice session recognised
-  // the speaker as an approved/pending GUEST of the account — the server
-  // strips every admin power from this turn and tells the brain who's talking.
-  speaker?: string,
-  // AUDIO NATIV → CREIER (Adrian, 3 aug: „deep learning legat de creier direct"):
-  // vocea BRUTĂ a frazei (WAV data-URI). Gemini 2.5 o aude nativ (ton/accent);
-  // celelalte modele primesc textul (serverul scoate blocul audio). Creier unic.
-  audio?: string,
-  // VOCE AMBIENTALĂ (Adrian, 5 aug: „tot decis de creierul unic"): tura a venit din
-  // ascultarea continuă, fără poartă de nume pe client — creierul aude audio-ul și
-  // decide SINGUR dacă i se vorbește; dacă nu, tace ({ignored}). Doar pe voce.
-  voceAmbianta?: boolean,
 ): AsyncGenerator<string> {
-  // FINANCIAL BUG FIXED (Jul 24 audit): there used to be another POST /api/chat
-  // whose response was NEVER read — openStream() below opened A SECOND identical
-  // POST, the only one consumed. The server therefore ran EVERY message twice:
-  // double brain cost, doubled history, the first turn's frames lost. One single
-  // POST remains: the one in openStream().
+  // BUG FINANCIAR REPARAT (audit 24 iul): aici mai exista un POST /api/chat al
+  // cărui răspuns NU era citit niciodată — openStream() de mai jos deschidea AL
+  // DOILEA POST identic, singurul consumat. Serverul rula deci FIECARE mesaj de
+  // DOUĂ ori: dublu cost la creier, istoric dublat, frame-urile primei ture
+  // pierdute. Un singur POST rămâne: cel din openStream().
 
   // Deduplication set: a reconnect may re-send events we already processed.
   const seenIds = new Set<string>()
@@ -215,11 +158,11 @@ export async function* streamChat(
       for (const line of block.split('\n')) {
         if (line.startsWith('id:')) id = line.slice(3).trim()
         else if (line.startsWith('data:')) {
-          // SSE spec: if ONE space follows "data:", that space is part
-          // of the framing and gets removed (the server writes "data: <chunk>"). WITHOUT this,
-          // every token came with a leading space and the words shattered —
+          // SSE spec: dacă după "data:" urmează UN spațiu, acel spațiu e parte
+          // din framing și se scoate (serverul scrie „data: <chunk>"). FĂRĂ asta,
+          // fiecare token venea cu un spațiu în față și cuvintele se spărgeau —
           // „detaliat" (token-urile det/ali/at) → „det ali at" (bug raportat de
-          // Adrian). EXACTLY one space is removed, so the text's real spaces stay.
+          // Adrian). Se scoate EXACT un spațiu, deci spațiile reale din text rămân.
           let v = line.slice(5)
           if (v.startsWith(' ')) v = v.slice(1)
           dataLines.push(v)
@@ -252,9 +195,9 @@ export async function* streamChat(
         break
       }
       const json = textBuf.slice(i + 1, j)
-      // desync propagates OUTSIDE the try (Jul 25): thrown inside, it was
-      // swallowed by the "malformed frame" catch and the fresh-turn mechanism
-      // described below never fired.
+      // desync se propagă ÎN AFARA try-ului (25 iul): aruncat înăuntru, era
+      // înghițit de catch-ul „malformed frame" și mecanismul de tură-proaspătă
+      // descris mai jos nu se declanșa niciodată.
       let desynced = false
       try {
         const frame = JSON.parse(json) as ChatControl & { turn?: string; desync?: boolean }
@@ -299,42 +242,24 @@ export async function* streamChat(
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           signal,
-          body: (voceAmbianta && contorMoment('cerere trimisă'), JSON.stringify({
+          body: JSON.stringify({
             messages,
             image,
             images,
             imageIsAttachment,
-            imageSource: imageIsAttachment ? 'chat' : 'camera',
             coords,
             screen,
             voiceFeatures,
             faceDescriptor,
             facePhoto,
             serverVoiceOff,
-            spoken: spoken || undefined,
-            speaker,
-            audio,
-            voceAmbianta: voceAmbianta || undefined,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          })),
+          }),
         })
       }
-    } catch (e) {
-      // ABORT IS NOT "OFFLINE" (Adrian, Jul 31: "hears the second question, briefly
-      // shows it, but doesn't pass it on to the brain" + "the message that technically it
-      // appeared again").
-      // Here the second question got lost. When you type something NEW while Kelion is still
-      // replying, the old turn is intentionally aborted (barge-in, ChatPanel:823).
-      // This catch swallowed the abort and reported it as `offline` — and `offline`
-      // starts the resume mechanism: marks the session fallen, remembers
-      // the text, and on the next `online` signal DELETES THE LAST TWO MESSAGES
-      // (ChatPanel:1588) and resends. After a barge-in, the last two messages are
-      // exactly your new question and its in-progress reply. That's why you saw it for a
-      // moment and it disappeared, with ⚠️ on top.
-      // A human-requested cancellation is not a network failure and doesn't get repaired.
-      if (signal?.aborted || (e instanceof Error && e.name === 'AbortError')) throw new Error('aborted')
-      throw new Error(await diagnozaConexiune())
+    } catch {
+      throw new Error('offline')
     }
 
     if (!res.ok || !res.body) {
@@ -348,7 +273,6 @@ export async function* streamChat(
       throw new Error(code)
     }
 
-    if (voceAmbianta) contorMoment('server a răspuns (headere)')
     reader = res.body.getReader()
     decoder = new TextDecoder()
   }
@@ -374,10 +298,10 @@ export async function* streamChat(
 
   await openStream()
 
-  // WATCHDOG: a dead-but-"open" connection never throws from
-  // read() — the turn stayed blocked forever. The server pulses a heartbeat every
-  // ≤15s, so 50s without ANY byte = certainly dead thread → resume, and if even
-  // that fails, the turn closes ('offline') and the chat unblocks.
+  // CEAS DE GARDĂ: o conexiune moartă dar „deschisă" nu aruncă niciodată din
+  // read() — tura rămânea blocată la nesfârșit. Serverul pulsează heartbeat la
+  // ≤15s, deci 50s fără NICIUN octet = fir mort sigur → resume, iar dacă nici
+  // asta nu merge, tura se închide ('offline') și chatul se deblochează.
   const READ_SILENCE_MS = 50_000
   for (;;) {
     let chunk: ReadableStreamReadResult<Uint8Array>
@@ -389,14 +313,10 @@ export async function* streamChat(
           watchdog = window.setTimeout(() => rej(new Error('silent')), READ_SILENCE_MS)
         }),
       ])
-    } catch (e) {
-      // As above: an intentionally aborted turn (barge-in / "stop") doesn't
-      // reconnect and isn't declared offline — its stop was requested.
-      if (signal?.aborted || (e instanceof Error && e.name === 'AbortError')) throw new Error('aborted')
+    } catch {
       if (await resume()) continue
-      throw new Error(await diagnozaConexiune())
+      throw new Error('offline')
     } finally {
-      if (voceAmbianta) contorMoment('primul semn în stream')
       window.clearTimeout(watchdog)
     }
     if (chunk.done) break

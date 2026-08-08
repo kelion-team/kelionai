@@ -1,6 +1,6 @@
-// Kelion's gesture catalog (Adrian, Jul 13) — the canonical key is the CLIP
-// NAME (same as in AvatarModel + backend). The admin panel shows every gesture
-// with preview + activation checkbox; what is NOT checked is NOT used at all.
+// Catalogul de gesturi al lui Kelion (Adrian, 13 iul) — cheia canonică e NUMELE
+// CLIPULUI (la fel ca în AvatarModel + backend). Panoul admin arată fiecare gest
+// cu preview + casetă de activare; ce NU e bifat NU se folosește deloc.
 export interface GestureItem {
   clip: string // numele clipului RPM (identitatea canonică, folosită la dezactivare + preview)
   label: string // numele afișat, în română
@@ -8,7 +8,7 @@ export interface GestureItem {
 }
 
 export const GESTURE_CATALOG: GestureItem[] = [
-  // Expressions commanded by the brain based on context/sentiment.
+  // Expresii comandate de creier după context/sentiment.
   { clip: 'expresie-1', label: 'Salut / rămas-bun', category: 'Expresii' },
   { clip: 'expresie-2', label: 'Arată înainte', category: 'Expresii' },
   { clip: 'expresie-3', label: 'Uimire', category: 'Expresii' },
@@ -23,14 +23,14 @@ export const GESTURE_CATALOG: GestureItem[] = [
   { clip: 'expresie-12', label: 'Entuziasm', category: 'Expresii' },
   { clip: 'expresie-13', label: 'Acord discret', category: 'Expresii' },
   { clip: 'expresie-14', label: 'Plecăciune teatrală', category: 'Expresii' },
-  // Gentle idle variations (the chat rotation uses only these 6).
+  // Variații domoale de repaus (rotația din chat folosește doar aceste 6).
   { clip: 'variatie', label: 'Înclină capul', category: 'Repaus (domol)' },
   { clip: 'variatie-2', label: 'Privire în jos', category: 'Repaus (domol)' },
   { clip: 'variatie-4', label: 'Privește în jur', category: 'Repaus (domol)' },
   { clip: 'variatie-5', label: 'Se uită la mâini', category: 'Repaus (domol)' },
   { clip: 'variatie-6', label: 'Se uită ca la ceas', category: 'Repaus (domol)' },
   { clip: 'variatie-8', label: 'Mută greutatea', category: 'Repaus (domol)' },
-  // Conversation gestures (once, while explaining).
+  // Gesturi de conversație (o dată, cât explică).
   { clip: 'vorbit-1', label: 'Vorbit — calm', category: 'Conversație' },
   { clip: 'vorbit-2', label: 'Vorbit — o mână', category: 'Conversație' },
   { clip: 'vorbit-3', label: 'Vorbit — ambele mâini', category: 'Conversație' },
@@ -55,12 +55,12 @@ export const GESTURE_CATALOG: GestureItem[] = [
 
 export const GESTURE_CATEGORIES = ['Expresii', 'Repaus (domol)', 'Conversație', 'Dansuri'] as const
 
-// Preview: asks the avatar to play a gesture once (the channel AvatarModel
-// listens on). The name = the clip name.
+// Preview: cere avatarului să joace un gest o dată (canalul pe care AvatarModel
+// îl ascultă). Numele = numele clipului.
 export function previewGesture(clip: string): void {
   try {
-    // SEPARATE channel: the preview plays ANY gesture (so the admin sees it
-    // before deciding), even if unchecked. The normal channel ('kelion-gesture') refuses
+    // Canal SEPARAT: preview-ul joacă ORICE gest (ca adminul să-l vadă înainte
+    // să decidă), chiar dacă e debifat. Canalul normal ('kelion-gesture') refuză
     // gesturile debifate.
     window.dispatchEvent(new CustomEvent('kelion-gesture-preview', { detail: clip }))
   } catch {
@@ -68,20 +68,16 @@ export function previewGesture(clip: string): void {
   }
 }
 
-// The gesture state (the disabled list) — read by the avatar so it doesn't
-// play what's removed. Cached on window so AvatarModel sees it without
-// depending on the admin.
-// null = citirea a EȘUAT (auditul admin, 3 aug): vechiul [] arăta toate cele
-// 39 de gesturi ca „active", iar primul toggle salva peste lista reală de pe
-// server, ȘTERGÂND dezactivările anterioare — o scriere peste o bază necitită.
-export async function fetchDisabledGestures(): Promise<string[] | null> {
+// Starea de gesturi (lista dezactivată) — citită de avatar ca să nu joace ce e
+// scos. Cache pe window ca AvatarModel s-o vadă fără să depindă de admin.
+export async function fetchDisabledGestures(): Promise<string[]> {
   try {
     const r = await fetch('/api/gestures/state', { credentials: 'include' })
-    if (!r.ok) return null
+    if (!r.ok) return []
     const j = (await r.json()) as { disabled?: string[] }
     return Array.isArray(j.disabled) ? j.disabled : []
   } catch {
-    return null
+    return []
   }
 }
 

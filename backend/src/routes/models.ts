@@ -1,36 +1,19 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { loadKv, userKey } from '../db.js'
-import { config } from '../config.js'
-import { resolveModel } from '../services/brainContract.js'
+import { saveKv, loadKv } from '../db.js'
+import { getCatalog, resolveModel, type ModelTier } from '../services/openrouter.js'
 
-// ── SELECTABLE MODELS — GEMINI-ONLY (extirparea OpenRouter, 3 aug) ──────────
-// Catalogul viu OpenRouter a dispărut odată cu furnizorul. Ce rămâne e lista
-// FIXĂ a treptelor Gemini (config.brain) — adevărată, nu simulată — plus
-// selecția per-user (KV), validată acum doar pe google-direct/*.
-// GET  /api/models/catalog   → treptele Gemini (chat + work)
-// GET  /api/models/selection → which models the user has chosen now (chat + work)
-// PUT  /api/models/selection → saves the user's choice (validated: google-direct/* only)
+// ── MODELE SELECTABILE — catalog live + selecția per-user ─────────────────────
+// GET  /api/models/catalog   → modelele selectabile, grupate pe tier (auto-update)
+// GET  /api/models/selection → ce modele are userul alese acum (chat + work)
+// PUT  /api/models/selection → salvează alegerea userului (validată pe catalog)
+// Selecția se persistă în KV (fără schemă nouă), la fel ca aranjarea avatarului.
 
-const KEY = (email: string): string => `model_choice:${userKey(email)}`
+const KEY = (email: string): string => `model_choice:${email}`
 
 interface Selection {
   chat: string
   work: string
-}
-
-// Forma pe care frontend-ul (CustomerSettings, selector ascuns) o știe deja:
-// id/name/provider/vision. Toate treptele Gemini văd nativ.
-function geminiCatalog(): { chat: { id: string; name: string; provider: string; vision: boolean }[]; work: { id: string; name: string; provider: string; vision: boolean }[] } {
-  const intrare = (id: string): { id: string; name: string; provider: string; vision: boolean } => ({
-    id,
-    name: id.replace('google-direct/', ''),
-    provider: 'google',
-    vision: true,
-  })
-  const chat = [...new Set([config.brain.chatDefault])].map(intrare)
-  const work = [...new Set([config.brain.workDefault, config.brain.topDefault])].map(intrare)
-  return { chat, work }
 }
 
 async function readSelection(email: string): Promise<Selection> {
@@ -44,10 +27,9 @@ async function readSelection(email: string): Promise<Selection> {
       work = typeof p.work === 'string' ? p.work : null
     }
   } catch {
-    /* fall back to the default */
+    /* fallback pe implicit */
   }
-  // Validare Gemini-only: o alegere veche (id OpenRouter rămas în KV) cade pe
-  // defaultul treptei — nu mai există alt furnizor care s-o servească.
+  // Validăm pe catalog: dacă modelul salvat nu mai există, cade pe implicit.
   return {
     chat: await resolveModel('chat', chat),
     work: await resolveModel('work', work),
@@ -56,7 +38,8 @@ async function readSelection(email: string): Promise<Selection> {
 
 export async function modelRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/models/catalog', async (_req, reply) => {
-    return reply.send(geminiCatalog())
+    const cat = await getCatalog()
+    return reply.send({ chat: cat.chat, work: cat.work })
   })
 
   app.get('/api/models/selection', async (req, reply) => {
@@ -65,14 +48,24 @@ export async function modelRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await readSelection(user.email))
   })
 
-  // SIGILAT (Adrian, 6 aug, regulă ultra-decisă: „modelul decis de mine să nu se
-  // poată modifica accidental sau de altcineva fără decizia mea"). Selectorul de
-  // model din UI/API e BLOCAT: nu se mai salvează nicio alegere. Modelul creierului
-  // e UNIC și se schimbă DOAR prin auto-upgrade-ul validat (decizia permanentă a
-  // ownerului), niciodată dintr-o cerere de client. Întoarcem 423 + modelul curent.
-  app.put('/api/models/selection', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    return reply.code(423).send({ error: 'model_locked', selection: await readSelection(user.email) })
-  })
+  app.put<{ Body: { tier?: ModelTier; model?: string } }>(
+    '/api/models/selection',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const tier = req.body?.tier
+      const model = String(req.body?.model ?? '').trim()
+      if ((tier !== 'chat' && tier !== 'work') || !model) {
+        return reply.code(400).send({ error: 'bad_request' })
+      }
+      // Acceptăm doar un model existent în tier-ul cerut (altfel s-ar salva gunoi).
+      const resolved = await resolveModel(tier, model)
+      if (resolved !== model) return reply.code(400).send({ error: 'model_not_in_tier' })
+
+      const current = await readSelection(user.email)
+      const next: Selection = { ...current, [tier]: model }
+      await saveKv(KEY(user.email), JSON.stringify(next))
+      return reply.send(next)
+    },
+  )
 }

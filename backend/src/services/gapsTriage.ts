@@ -1,28 +1,24 @@
 import { getCapabilityGaps, setGapTriage } from '../db.js'
 import { brainComplete } from './brain.js'
-import { CAPABILITIES } from './brainCapabilities.js'
 
-// ── THE AUTONOMOUS TRIAGE OF UNCOVERED REQUESTS ─────────────────────────────
-// Adrian (24 Jul): "Kelion must analyse the uncovered requests and be able to
-// decide BY HIMSELF whether they are good and bring value to the app, to
-// implement them, and if not, to close them automatically."
-// Kelion (the work model — Gemini direct) reads the open gaps and decides:
-//   VALUABLE → stays open, marked "DE IMPLEMENTAT: <reason>" (the owner sees
-//              a short, clean list, only with what is worth building);
-//   CLOSE    → closed automatically with "ÎNCHIS AUTONOM: <reason>"
-//              (duplicate / already possible / no value / out of scope).
-// Runs on demand (admin button) and AUTONOMOUSLY once a day (index.ts).
+// ── TRIAJUL AUTONOM AL CERERILOR NEACOPERITE ─────────────────────────────────
+// Adrian (24 iul): „Kelion trebuie să analizeze cererile neacoperite și să
+// poată decide SINGUR dacă sunt bune și aduc valoare aplicației să le
+// implementeze, dacă nu să le închidă automat."
+// Kelion (modelul work, prin OpenRouter) citește gap-urile deschise și decide:
+//   VALOROS → rămâne deschis, marcat „DE IMPLEMENTAT: <motiv>" (owner-ul vede
+//             lista scurtă, curată, doar cu ce merită construit);
+//   ÎNCHIDE → închis automat cu „ÎNCHIS AUTONOM: <motiv>" (duplicat / deja
+//             posibil / fără valoare / în afara scopului).
+// Rulează la cerere (buton admin) și AUTONOM o dată pe zi (index.ts).
 
-// WHAT THE APP CAN ALREADY DO — DERIVED from the single registry
-// (services/brainCapabilities.ts), never a hand-written copy. The old constant
-// below was written by hand and had already rotted: it listed nothing about
-// run_web_app, open_app_view, get_monitor, get_location, lookup_address or
-// ask_brain — so the triage could mark "valuable" a request the app already
-// covers, and "already possible" would never be provable. Derived, it cannot
-// fall behind: a new capability appears here on its own.
-const APP_CAPABILITIES =
-  `Aplicația Kelionai POATE deja (${CAPABILITIES.length} capabilități, din registrul unic):\n` +
-  CAPABILITIES.map((c) => `- ${c.name}: ${c.does}`).join('\n')
+const APP_CAPABILITIES = `Aplicația Kelionai POATE deja: conversație (chat+voce full-duplex) cu escaladare
+automată chat→creier; hărți + traseu rutier pe monitor; vreme; căutare web live;
+YouTube; generare imagini; traduceri; Wikipedia; valute; ceas mondial; Gmail
+(citire+trimitere), Calendar, Drive, Tasks, Contacts (după Connect Google);
+memorie persistentă + note explicite; voiceprint; vedere prin cameră + analiză
+poze; afișare orice pagină pe monitor + browser live cu click/scris; gesturi
+avatar (inclusiv dans); credite Stripe cu auto-recharge.`
 
 export interface TriageOutcome {
   triaged: number

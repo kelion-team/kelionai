@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { getSessionUser } from '../session.js'
 import {
   logVisit,
@@ -100,31 +100,6 @@ function parseUa(ua: string): { browser: string; os: string; device: string; isB
   return { browser, os, device, isBot }
 }
 
-// The visitor's REAL IP behind Cloudflare: cf-connecting-ip (XFF gives the
-// CF edge's IP, shared by many visitors — bad for geo AND anti-reuse). It
-// prefers the real-client headers, falls back to XFF then req.ip. It used to
-// be copied in demo (×2) and chat (services→routes) — one single exported
-// source (the permanent principle: unique, no duplicates).
-export function clientIp(req: FastifyRequest): string {
-  const hdr = (name: string): string =>
-    ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
-  return hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
-}
-
-// The visitor↔admin conversation poll: the same conv/after + validation +
-// reply. Used by the PUBLIC route (/api/visitor-chat/poll, here) and by the
-// ADMIN one (/api/admin/visitor-chat, which only adds the admin gate in
-// front). Single source (the permanent principle: unique, no duplicates).
-export async function pollVisitorChat(
-  req: FastifyRequest<{ Querystring: { conv?: string; after?: string } }>,
-  reply: FastifyReply,
-): Promise<unknown> {
-  const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
-  const after = Number(req.query?.after ?? 0) || 0
-  if (!conv) return reply.code(400).send({ error: 'bad_request' })
-  return reply.send({ messages: await getVisitorMessages(conv, after) })
-}
-
 // Build the full visitor profile for one request: real IP (Cloudflare-aware),
 // geo, browser/OS/device, language, referrer, bot flag. Shared by the visit
 // beacon and the demo start.
@@ -132,7 +107,12 @@ async function visitorProfile(
   req: FastifyRequest,
   referrer: string,
 ): Promise<{ ip: string; visit: DemoVisit }> {
-  const ip = clientIp(req)
+  // Behind Cloudflare, the REAL visitor IP is in cf-connecting-ip (x-forwarded-for
+  // gives the CF edge IP, which many visitors share — bad for geo AND for the
+  // per-IP anti-reuse). Prefer the real-client headers, fall back to XFF.
+  const hdr = (name: string): string =>
+    ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
+  const ip = hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
   const ua = (req.headers['user-agent'] as string | undefined) ?? ''
   const lang = ((req.headers['accept-language'] as string | undefined) ?? '').split(',')[0]?.trim() ?? ''
   const { browser, os, device, isBot } = parseUa(ua)
@@ -158,7 +138,10 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { fp?: string } }>('/api/visit/ping', async (req, reply) => {
     const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
     const email = getSessionUser(req)?.email ?? ''
-    const ip = clientIp(req)
+    const hdr = (name: string): string =>
+      ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
+    const ip =
+      hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
     const touched = await touchVisit(fp, ip, email)
     if (!touched) {
       const { ip: fullIp, visit } = await visitorProfile(req, '')
@@ -167,10 +150,9 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // NO free tier (Adrian: "the trial minutes are removed completely, users
-  // buy to try"). The visit is still tracked (the analytics above), but
-  // NOBODY gets a free session anymore — access requires an account +
-  // credits.
+  // FĂRĂ tier gratuit (Adrian: „se scot total minutele de test, userii cumpără
+  // să probeze"). Vizita e în continuare urmărită (analytics de mai sus), dar
+  // NIMENI nu mai primește o sesiune gratuită — accesul cere cont + credite.
 
   // A visitor leaves their email (the only real channel to an anonymous visitor):
   // stored as a lead the owner can then email from the admin panel. Public but
@@ -192,15 +174,16 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     const text = typeof req.body?.text === 'string' ? req.body.text : ''
     if (!conv || !text.trim()) return reply.code(400).send({ error: 'bad_request' })
     const id = await addVisitorMessage(conv, 'visitor', text)
-    if (id > 0) return reply.send({ ok: true, id })
-    // AUDIT ADMIN (3 aug): INSERT-ul picat răspundea 200 cu {ok:false} —
-    // widgetul verifica doar statusul HTTP și desena bula ca „trimisă", deși
-    // mesajul nu exista nicăieri și adminul nu l-ar fi văzut niciodată. 502.
-    return reply.code(502).send({ ok: false, error: 'save_failed', id: 0 })
+    return reply.send({ ok: id > 0, id })
   })
 
   app.get<{ Querystring: { conv?: string; after?: string } }>(
     '/api/visitor-chat/poll',
-    (req, reply) => pollVisitorChat(req, reply),
+    async (req, reply) => {
+      const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
+      const after = Number(req.query?.after ?? 0) || 0
+      if (!conv) return reply.code(400).send({ error: 'bad_request' })
+      return reply.send({ messages: await getVisitorMessages(conv, after) })
+    },
   )
 }

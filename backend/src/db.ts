@@ -1,8 +1,4 @@
 import pg from 'pg'
-import { randomBytes } from 'node:crypto'
-// THE HTTP CONTRACT, a single declaration (Batch A) — see src/shared/api-types.ts.
-import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.js'
-export type { DemoRecent, DemoStats, UserActivityRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 
@@ -12,13 +8,13 @@ export function dbEnabled(): boolean {
   return Boolean(config.databaseUrl)
 }
 
-// Exported for the live "PostgreSQL" check in tokenChecks (SELECT 1).
+// Exportat pentru verificarea live „PostgreSQL" din tokenChecks (SELECT 1).
 export function getPool(): pg.Pool {
   if (!pool) {
     const url = config.databaseUrl
-    // Local/no-TLS Postgres (VPS on the same machine, explicit sslmode=disable)
-    // connects without SSL; any other target gets TLS with a self-signed
-    // certificate accepted (managed proxies).
+    // Local/no-TLS Postgres (VPS pe aceeași mașină, sslmode=disable explicit)
+    // se conectează fără SSL; orice altă țintă primește TLS cu certificat
+    // self-signed acceptat (proxy-uri gestionate).
     const noTls = /sslmode=disable/.test(url) || /@(localhost|127\.0\.0\.1)[:/]/.test(url)
     const ssl = noTls ? false : { rejectUnauthorized: false }
     pool = new pg.Pool({ connectionString: url, ssl })
@@ -43,39 +39,8 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS meserie_activa INTEGER;
-    -- THE VOICE CHOSEN BY EACH PERSON (Adrian, 30 Jul: "he can set the app with
-    -- whatever AI he wants and whatever voice he wants... it's remembered per
-    -- user"). Until now the voice came from the environment, so it was ONE for
-    -- everyone.
-    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS voice TEXT;
-    -- AUTO TOP-UP, per user (Adrian, Aug 1: "auto-pay selectable with a
-    -- checkbox when the user pays"). The rails (Revolut pay-link) cannot pull
-    -- money by themselves, so "enabled" means: when the balance drops below
-    -- the threshold, the app PREPARES the payment (unique code + link) and
-    -- the user confirms with one tap. Stored here so it survives sessions.
-    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_enabled BOOLEAN NOT NULL DEFAULT false;
-    -- The 20/10 column defaults are only a STORAGE BACKSTOP for rows written
-    -- without values; the application-level defaults come from config.billing
-    -- (autoRechargeThreshold/autoRechargeAmount) — see getAutoRecharge.
-    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_threshold INTEGER NOT NULL DEFAULT 20;
-    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_amount INTEGER NOT NULL DEFAULT 10;
-    -- EVIDENȚA TIMPILOR DE REZOLVARE (Adrian, 3 aug: „un sistem care ține evidența
-    -- timpilor de rezolvare, ca să se poată măsura" + auto-învățare în spate).
-    -- O linie per sarcină reală: cât a durat creierul, ce model, câte runde,
-    -- reușită sau nu. Din asta învață bucla din spate (services/autoInvatare.ts).
-    CREATE TABLE IF NOT EXISTS task_timings (
-      id BIGSERIAL PRIMARY KEY,
-      user_email TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      model TEXT,
-      ms INTEGER NOT NULL,
-      ok BOOLEAN NOT NULL DEFAULT true,
-      rounds INTEGER,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    CREATE INDEX IF NOT EXISTS idx_task_timings_kind ON task_timings (kind, created_at);
-    -- Voiceprints: timbre + gender + admin flag per account.
-    -- The vector is normalized client-side; meta keeps the raw values for debug.
+    -- Amprente vocale: timbru + gen + flag admin per cont.
+    -- vectorul e normalizat client-side; meta păstrează valorile brute pentru debug.
     CREATE TABLE IF NOT EXISTS voiceprints (
       user_email TEXT PRIMARY KEY,
       name TEXT NOT NULL DEFAULT '',
@@ -87,11 +52,10 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_voiceprints_admin ON voiceprints (is_admin, updated_at DESC);
-    -- AUDIO CLIP (Adrian, 14 Jul: "I need a play button to hear the voice"):
-    -- besides the identification vector we also keep a short audio sample
-    -- (webm/opus data-URL, a few seconds) of the last phrase, so the admin can
-    -- LISTEN to it from the panel. Only the admin reads it; it never goes out
-    -- to chat.
+    -- CLIP AUDIO (Adrian, 14 iul: „trebuie să am buton play să aud vocea"): pe
+    -- lângă vectorul de identificare ținem și o mostră audio scurtă (data-URL
+    -- webm/opus, câteva secunde) a ultimei fraze, ca adminul s-o poată ASCULTA
+    -- din panou. Doar admin o citește; nu iese niciodată în chat.
     ALTER TABLE voiceprints ADD COLUMN IF NOT EXISTS audio_clip TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS faceprints (
       user_email TEXT PRIMARY KEY,
@@ -103,24 +67,6 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_faceprints_admin ON faceprints (is_admin, updated_at DESC);
-    -- GUEST VOICES (Adrian, Aug 1): the holder may explicitly ask Kelion to
-    -- also talk with another person (wife, son, friend...). That person's
-    -- voiceprint + photo + RELATION to the holder are stored here — but only
-    -- after the holder's explicit approval (approved=true). Unknown voices
-    -- without the holder's request are ignored entirely.
-    CREATE TABLE IF NOT EXISTS voice_guests (
-      id BIGSERIAL PRIMARY KEY,
-      account_email TEXT NOT NULL,
-      name TEXT NOT NULL DEFAULT '',
-      relation TEXT NOT NULL DEFAULT '',
-      features DOUBLE PRECISION[] NOT NULL DEFAULT '{}',
-      feature_meta JSONB NOT NULL DEFAULT '{}',
-      photo TEXT NOT NULL DEFAULT '',
-      approved BOOLEAN NOT NULL DEFAULT false,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    CREATE INDEX IF NOT EXISTS idx_voice_guests_account ON voice_guests (account_email, approved, updated_at DESC);
     CREATE TABLE IF NOT EXISTS cost_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -145,45 +91,41 @@ export async function initDb(): Promise<void> {
     DROP INDEX IF EXISTS uniq_memory;
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_memory ON memories (user_email, agent, content);
     CREATE INDEX IF NOT EXISTS idx_memories_user ON memories (user_email, agent, last_seen DESC);
-    -- REAL MEMORY SEARCH (Adrian, 11 Jul: "memory quality" — ILIKE on an exact
-    -- substring missed any rephrasing). Native Postgres full-text: 'simple'
-    -- config (no language dictionary — tokenizes any mixed ro/en text without
-    -- assuming a single language), GIN-indexed for speed with many memories.
-    -- It's not embeddings/AI (that would require pgvector + an API call on
-    -- write, cost and unconfirmed infra risk) — but it matches real WORDS, with
-    -- a relevance score, not just a literal substring.
+    -- CĂUTARE REALĂ ÎN MEMORIE (Adrian, 11 iul: „calitatea memoriei" — ILIKE pe
+    -- substring exact rata orice reformulare). Full-text nativ Postgres:
+    -- config 'simple' (fără dicționar de limbă — tokenizează orice text ro/en
+    -- mixat, fără să presupună o singură limbă), indexat GIN pentru viteză la
+    -- multe amintiri. Nu e embeddings/AI (ar cere pgvector + apel API pe scriere,
+    -- cost și risc de infra neconfirmată) — dar e potrivire pe CUVINTE reale, cu
+    -- scor de relevanță, nu doar un substring literal.
     CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories
       USING GIN (to_tsvector('simple', content));
-    -- SEMANTIC MEMORY (12 Jul, roadmap #5): the meaning vector of the memory
-    -- (Gemini text-embedding-004), written asynchronously at learning time.
-    -- JSONB, not pgvector: no extensions to install, cosine is computed in
-    -- Node over the last few hundred — instant at current volume.
+    -- MEMORIE SEMANTICĂ (12 iul, foaia de parcurs #5): vectorul de înțeles al
+    -- amintirii (Gemini text-embedding-004), scris asincron la învățare.
+    -- JSONB, nu pgvector: fără extensii de instalat, cosine se calculează în
+    -- Node peste ultimele câteva sute — la volumul actual e instant.
     ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding JSONB;
-    -- The prepaid credit wallet. The balance is in display currency (GBP);
-    -- topup_ref = the amount credited at the LAST top-up, so we can show
-    -- "% of credit left" for the escalated alerts (30/20/10/5%).
+    -- Prepaid credit wallet (Stripe). Balance is in the display currency (GBP);
+    -- topup_ref = the credited amount of the LAST top-up, so we can show the
+    -- "% of credit left" for the escalating low-credit alerts (30/20/10/5%).
     CREATE TABLE IF NOT EXISTS wallets (
       user_email TEXT PRIMARY KEY,
       balance NUMERIC(14,6) NOT NULL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'gbp',
       topup_ref NUMERIC(14,6) NOT NULL DEFAULT 0,
+      stripe_customer_id TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE wallets ADD COLUMN IF NOT EXISTS topup_ref NUMERIC(14,6) NOT NULL DEFAULT 0;
-    -- Stripe is fully out (Adrian, 31 Jul: "the leftovers are not needed") —
-    -- the old Stripe customer column is dropped, it had no history to keep.
-    ALTER TABLE wallets DROP COLUMN IF EXISTS stripe_customer_id;
-    -- THE admin_pool TABLE IS DEAD — dropped, not created (audit, Aug 3).
-    -- Its comment used to say "the owner's provider-credit pool (REAL money):
-    -- the admin loads it" — i.e. a figure TYPED by hand ("+ Add money"),
-    -- presented as the pocket. Adrian killed that on 30 Jul ("one single
-    -- pocket... only real remains, no hardcode"): loadAdminPool/
-    -- withdrawAdminPool were deleted, NOTHING reads this table anymore, and
-    -- the live DB confirms it — one row, (1, 0.000000), untouched since
-    -- Jul 23. A table that only holds a hand-seeded zero is a seed with false
-    -- data; the real pocket is READ from Revolut (Enable Banking) and
-    -- OpenRouter. DROP, not CREATE: existing databases get cleaned on boot.
-    DROP TABLE IF EXISTS admin_pool;
+    -- The owner's provider-credit pool (REAL money): the admin loads it; every
+    -- AI call's real cost draws it down. remaining = loaded − total cost. Singleton.
+    CREATE TABLE IF NOT EXISTS admin_pool (
+      id INT PRIMARY KEY DEFAULT 1,
+      loaded NUMERIC(14,6) NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'gbp',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    INSERT INTO admin_pool (id, loaded) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
     -- Free-trial usage: one row per demo started — enforces the daily cost cap
     -- and a light anti-reuse (a fingerprint or IP that already tried is refused).
     CREATE TABLE IF NOT EXISTS demo_uses (
@@ -241,158 +183,35 @@ export async function initDb(): Promise<void> {
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS actions INT NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_visits_email ON visits (user_email, last_seen_at DESC);
-    -- The ledger of top-ups (+) and consumptions (−) — the structure is below.
-    -- ── PAYMENTS VIA REVOLUT PRO, WITH A UNIQUE CODE (Adrian, 30 Jul) ────────
-    -- "nowadays, having to manually manage thousands of potential users, is
-    -- that what you offer?" — he was right. For a payment to credit ITSELF you
-    -- must know WHO paid, and Revolut Pro has no webhook to tell us.
-    --
-    -- His solution: "every payment must come with a unique code". The code
-    -- leaves with the user to the payment and comes back in the transaction
-    -- reference; the app reads the account transactions and matches the code
-    -- to the person.
-    --
-    -- Why a code and not the amount (my first idea, wrong): the amount can be
-    -- fixed by the link and can be altered by fees before it lands — two
-    -- things we don't control. The code passes untouched through both.
-    CREATE TABLE IF NOT EXISTS payment_codes (
-      code TEXT PRIMARY KEY,
-      user_email TEXT NOT NULL,
-      amount NUMERIC(14,6) NOT NULL,
-      currency TEXT NOT NULL DEFAULT 'gbp',
-      -- pending → paid (credited) | expired (never paid) | manual (assigned by admin)
-      status TEXT NOT NULL DEFAULT 'pending',
-      -- the bank transaction reference, so the same payment never credits twice
-      bank_ref TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      paid_at TIMESTAMPTZ
-    );
-    CREATE INDEX IF NOT EXISTS idx_paycode_user ON payment_codes (user_email, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_paycode_status ON payment_codes (status, created_at DESC);
-    -- THE SAME PAYMENT NEVER CREDITS TWICE, no matter how many reads overlap.
-    CREATE UNIQUE INDEX IF NOT EXISTS uniq_paycode_bankref ON payment_codes (bank_ref) WHERE bank_ref IS NOT NULL;
-    -- THE NET (M2, Aug 2): an inflow the reader could NOT tie to anyone lands
-    -- HERE — it never disappears into a local counter again (the old code
-    -- counted faraCod++ and threw the payment away; the M2 order and
-    -- RAMAS-DE-FACUT §G promised this table while it did not exist).
-    -- bank_ref UNIQUE = the 5-minute reader can see the same transaction on
-    -- every pass forever without duplicating rows.
-    CREATE TABLE IF NOT EXISTS plati_neatribuite (
-      id SERIAL PRIMARY KEY,
-      bank_ref TEXT NOT NULL UNIQUE,
-      referinta TEXT,
-      amount NUMERIC(14,6) NOT NULL,
-      currency TEXT NOT NULL DEFAULT 'gbp',
-      -- noua → atribuita (the admin gave it to a user) | ignorata (the owner's
-      -- unrelated income — the account also receives money that isn't a top-up)
-      status TEXT NOT NULL DEFAULT 'noua',
-      resolved_email TEXT,
-      seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      resolved_at TIMESTAMPTZ
-    );
-    CREATE INDEX IF NOT EXISTS idx_neatrib_status ON plati_neatribuite (status, seen_at DESC);
-    -- KELION'S PROJECT MEMORY (his own request, Aug 2: "persistent, structured
-    -- working memory... a project context I can query and update
-    -- programmatically, not just chat history"). Keyed notes he writes and
-    -- reads through his own tools — they survive every restart and deploy,
-    -- unlike the conversation window.
-    CREATE TABLE IF NOT EXISTS memorie_proiect (
-      cheie TEXT PRIMARY KEY,
-      continut TEXT NOT NULL,
-      actualizat TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    -- AGENȚII ADĂUGAȚI DE OWNER din pagina de admin (Adrian, 4 aug: „când mai
-    -- vreau un model de agent să pot pune și să fie creat automat"). Se lipesc
-    -- la rosterul din cod (rosterViu) și intră automat pe /api/a2a și în
-    -- consola Enterprise la următorul ocol de creare.
-    CREATE TABLE IF NOT EXISTS agenti_custom (
-      id TEXT PRIMARY KEY,
-      nume TEXT NOT NULL,
-      rol TEXT NOT NULL,
-      efort TEXT,
-      doar_admin BOOLEAN NOT NULL DEFAULT false,
-      creat TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    -- The ledger of top-ups (+) and consumptions (−). The "ref" column makes
-    -- top-ups idempotent: the same payment is never credited twice, no matter
-    -- how many reads or retries overlap.
+    -- Ledger of top-ups (+) and usage (−). stripe_ref makes top-ups idempotent
+    -- so a webhook retry can never double-credit.
     CREATE TABLE IF NOT EXISTS billing_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
       kind TEXT NOT NULL,
       amount NUMERIC(14,6) NOT NULL,
-      ref TEXT,
+      stripe_ref TEXT,
       meta TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- Stripe is fully out (31 Jul): the old column is dropped entirely
-    -- (it had no history worth keeping) and replaced by "ref".
-    ALTER TABLE billing_events DROP COLUMN IF EXISTS stripe_ref CASCADE;
-    ALTER TABLE billing_events ADD COLUMN IF NOT EXISTS ref TEXT;
-    CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (ref) WHERE ref IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (stripe_ref) WHERE stripe_ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_billing_user ON billing_events (user_email, created_at DESC);
-    -- CREDITS (ORDER #6G): dedicated table for credit purchase transactions.
-    -- user_id = the user's email (the unique identifier used across the system).
+    -- STRIPE + CREDITS (ORDIN #6G): tabelă dedicată tranzacțiilor de cumpărare a creditelor.
+    -- user_id = emailul utilizatorului (identificatorul unic folosit în tot sistemul).
     CREATE TABLE IF NOT EXISTS transactions (
       id BIGSERIAL PRIMARY KEY,
       user_id TEXT NOT NULL,
       amount NUMERIC(14,6) NOT NULL,
       credits NUMERIC(14,6) NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
-      payment_ref TEXT,
+      stripe_payment_intent_id TEXT UNIQUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    ALTER TABLE transactions DROP COLUMN IF EXISTS stripe_payment_intent_id CASCADE;
-    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_ref TEXT;
-    CREATE UNIQUE INDEX IF NOT EXISTS uniq_transactions_ref ON transactions (payment_ref) WHERE payment_ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions (user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions (status, created_at DESC);
     -- Capability gaps: things users asked for that Kelion CANNOT do yet. Kelion
     -- logs them here (via the log_unsupported_request tool); only the owner/admin
     -- reads them, to prioritise what to build next. Never shown to end users.
-    -- ── REQUIREMENTS MANAGEMENT (Adrian, 30 Jul: "I need advanced systems
-    -- assigned to Kelion for requirements management, advanced evaluations of
-    -- the offered solutions") ────────────────────────────────────────────────
-    -- Until now, an owner requirement lived in three places that didn't talk
-    -- to each other: a row in RAMAS-DE-FACUT.md (hand-written), an order in
-    -- build_jobs (no link to the requirement) and, sometimes, only in chat —
-    -- where it got lost. The result: "I asked you dozens of times" was TRUE
-    -- and unprovable. Here a requirement has a single place, with its whole
-    -- journey: what was asked, how it's proven done, which OPTIONS were
-    -- evaluated and with what scores, which was chosen and why, which order
-    -- carried it, and what was MEASURED at the end.
-    CREATE TABLE IF NOT EXISTS cerinte (
-      id BIGSERIAL PRIMARY KEY,
-      text TEXT NOT NULL,
-      sursa TEXT NOT NULL DEFAULT 'owner',
-      -- noua → analizata (has evaluated options) → in_lucru → livrata →
-      -- verificata (with measured proof) | respinsa (with reason)
-      stare TEXT NOT NULL DEFAULT 'noua',
-      -- How it's PROVEN to be done. Written at the start, not the end, so the
-      -- target doesn't move after something has been delivered.
-      criteriu TEXT,
-      optiuni TEXT,      -- JSON: the evaluated options, with scores and risks
-      aleasa TEXT,       -- the chosen option + WHY
-      dovada TEXT,       -- what was measured at the end (not what was declared)
-      job_id BIGINT,
-      pr_url TEXT,
-      -- HOW URGENT it is, for the OWNER (1 = burning, 9 = can wait). Without
-      -- it, work happens in the order things were written — and you get a
-      -- button fixed while payments are down. It's not a brake: it changes
-      -- the ORDER, not what it's allowed to do.
-      prioritate INT NOT NULL DEFAULT 5,
-      -- HOW HARD it is (1..5), set by it at evaluation. From it, the HAND that
-      -- works is chosen: a big model on a hard task, a free one on a rename.
-      -- Without it, a hard task started on a small model, burned turns
-      -- rambling, and failed.
-      dificultate INT NOT NULL DEFAULT 3,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS prioritate INT NOT NULL DEFAULT 5;
-    ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS dificultate INT NOT NULL DEFAULT 3;
-    CREATE INDEX IF NOT EXISTS idx_cerinte_stare ON cerinte (stare, prioritate, created_at);
-
     CREATE TABLE IF NOT EXISTS capability_gaps (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -407,18 +226,17 @@ export async function initDb(): Promise<void> {
     );
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
-    -- Kelion's AUTONOMOUS TRIAGE (Adrian, 24 Jul): his decision on each
-    -- uncovered request — "TO IMPLEMENT: ..." or "AUTONOMOUSLY CLOSED: ...".
+    -- TRIAJUL AUTONOM al lui Kelion (Adrian, 24 iul): decizia lui pe fiecare
+    -- cerere neacoperită — „DE IMPLEMENTAT: ..." sau „ÎNCHIS AUTONOM: ...".
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS triage TEXT;
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS triaged_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_gaps_open ON capability_gaps (resolved, last_seen DESC);
-    -- KELION'S SELF-EXPANSION (Adrian, 25 Jul: "Kelion must be able to install
-    -- tools by itself, independently, up to deploy — with my approval"). Kelion
-    -- PROPOSES a new tool (an HTTP call, as data, not arbitrary code): name,
-    -- what it does, parameters, method+URL. The owner APPROVES it with one
-    -- click in admin → it becomes ACTIVE instantly, no redeploy. Safety: HTTPS
-    -- only, no internal IPs, no executable code — Kelion can only run tools
-    -- approved by the admin.
+    -- AUTO-EXTINDEREA LUI KELION (Adrian, 25 iul: „Kelion să-și poată instala
+    -- singur unelte, independent, până la deploy — cu aprobarea mea"). Kelion
+    -- PROPUNE o unealtă nouă (un apel HTTP, ca dată, nu cod arbitrar): nume, ce
+    -- face, parametri, metodă+URL. Owner-ul o APROBĂ cu un click în admin → devine
+    -- ACTIVĂ instant, fără redeploy. Siguranță: doar HTTPS, fără IP-uri interne,
+    -- fără cod executabil — Kelion nu poate rula decât unelte aprobate de admin.
     CREATE TABLE IF NOT EXISTS kelion_tools (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -434,7 +252,7 @@ export async function initDb(): Promise<void> {
       decided_at TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS idx_kelion_tools_status ON kelion_tools (status, created_at DESC);
-    -- Explicit user notes ("remember this", "save X for me") — distinct from the
+    -- Explicit user notes ("reține asta", "salvează-mi X") — distinct from the
     -- memories table: memories are auto-learned facts Kelion recalls silently;
     -- notes are things the user deliberately asked to save and can list/delete.
     CREATE TABLE IF NOT EXISTS notes (
@@ -461,7 +279,7 @@ export async function initDb(): Promise<void> {
       received_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_inbound_recent ON inbound_emails (received_at DESC);
-    -- SHARED MEMORY ("the common notebook"): the single brain shared by BOTH sides —
+    -- SHARED MEMORY ("caietul comun"): the single brain shared by BOTH sides —
     -- the laptop builder and the always-on server bridge. Either writes an entry;
     -- both read the latest entries. This is how "write here, appears there; write
     -- there, appears here" works: one store, two readers/writers.
@@ -486,7 +304,7 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_downloads_file ON app_downloads (file, created_at DESC);
-    -- Persistent store for images generated by Kelion (audit 9 Jul 2026).
+    -- Persistent store for images generated by Kelion (audit 9 iul 2026).
     -- Survival through redeployments: instead of in-memory Map, we use the DB.
     CREATE TABLE IF NOT EXISTS generated_images (
       id TEXT PRIMARY KEY,
@@ -502,11 +320,11 @@ export async function initDb(): Promise<void> {
       content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- THE BUILDER (Adrian, 27 Jul: "Kelion must be able to create any software
-    -- the admin asks"). The build-order queue: Kelion (or the admin from the
-    -- panel) puts the order here; the worker on the VPS (cron, short jobs, NOT
-    -- daemons) picks it up, builds in the workshop (separate clone), runs build
-    -- + tests and opens the PR. Merging stays with Adrian (his rule, 27 Jul).
+    -- CONSTRUCTORUL (Adrian, 27 iul: „Kelion trebuie să poată crea orice soft
+    -- îi cere admin"). Coada ordinelor de construcție: Kelion (sau adminul din
+    -- panou) pune ordinul aici; lucrătorul de pe VPS (cron, job-uri scurte, NU
+    -- demoni) îl ia, construiește în atelier (clonă separată), rulează build +
+    -- teste și deschide PR-ul. Merge-ul rămâne la Adrian (regula lui, 27 iul).
     CREATE TABLE IF NOT EXISTS build_jobs (
       id BIGSERIAL PRIMARY KEY,
       ordered_by TEXT NOT NULL,
@@ -521,28 +339,8 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_build_jobs_status ON build_jobs (status, created_at);
-    -- LIVE PROGRESS (autonomy Stage 4, 29 Jul): the builder's current step
-    -- (cloned → editing X → build → opening PR...) so it appears on the monitor
-    -- and Kelion can NARRATE it. Updated along the way by
-    -- POST /api/constructor/progress.
-    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS progress TEXT;
-    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS progress_at TIMESTAMPTZ;
-    -- THE INDEPENDENT VERIFICATION VERDICT (autonomy Stage 6, 29 Jul): "Done" is
-    -- no longer the worker's word — after the PR, the worker waits for CI
-    -- (verify) on a clean machine and writes 'green' / 'red' / 'in progress'
-    -- here. Kelion can NARRATE it ("Done, verified by CI") and the owner sees
-    -- it in the report.
-    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS ci TEXT;
-    -- THE BRAIN USED + ITS MEASURED COST (Adrian, Aug 2: "Everything FREE.
-    -- The admin can EXPRESSLY request the paid Fable 5 brain for the
-    -- CONSTRUCTOR only"): the worker writes 'fable-5' or 'free' here, plus the
-    -- cost in USD as MEASURED from OpenRouter's usage.cost (null when the
-    -- provider didn't report one — never estimated). This makes paid orders
-    -- distinguishable in the Money views without any fabrication.
-    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS brain TEXT;
-    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
-    -- was WIPED by every deploy (the admin's "sent to execution" orders
+    -- was WIPED by every deploy (the admin's "am trimis la execuție" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
     -- admin can SEE the whole queue + its history in the panel.
     CREATE TABLE IF NOT EXISTS work_orders (
@@ -565,13 +363,13 @@ export async function initDb(): Promise<void> {
       approved_at TIMESTAMPTZ,
       at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- REAL SCHEMA DRIFT (12 Jul, caught by purge-phantom: Postgres error 42703
-    -- "column branch does not exist"): the table had been created before branch
-    -- was added to the definition, and CREATE TABLE IF NOT EXISTS is a no-op on
-    -- an existing table — the column had stayed missing in production since its
-    -- introduction. Safety net, same as memories.
+    -- DRIFT DE SCHEMĂ REAL (12 iul, prins de purge-phantom: eroare Postgres
+    -- 42703 „column branch does not exist"): tabelul a fost creat înainte ca
+    -- branch să fie adăugat în definiție, iar CREATE TABLE IF NOT EXISTS
+    -- e un no-op pe un tabel deja existent — coloana rămăsese lipsă pe
+    -- producție de la introducerea ei. Plasă de siguranță, ca la memories.
     ALTER TABLE staged_releases ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT '';
-    -- When the release was approved — used for expiring unpublished approvals.
+    -- Când s-a aprobat release-ul — folosit la expirarea aprobărilor nepublicate.
     ALTER TABLE staged_releases ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_releases ON staged_releases (status, at DESC);
     -- Tiny key-value state that must survive restarts (e.g. the bridge worker's
@@ -602,10 +400,10 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_vchat_conv ON visitor_chats (conv_id, id);
-    -- CONTACT MESSAGES: they are ALWAYS saved here, whether email is configured
-    -- or not — so a contact message is NEVER lost (bug 10 Jul: "contact
-    -- messages don't get sent"). Email is just best-effort forwarding on top;
-    -- the truth is in the DB, visible in the admin's Inbox.
+    -- MESAJE DE CONTACT: se salvează MEREU aici, indiferent dacă emailul e
+    -- configurat — ca un mesaj de contact să nu se piardă NICIODATĂ (bug 10 iul:
+    -- „mesajele din contact nu se trimit"). Emailul e doar redirectare best-effort
+    -- pe deasupra; adevărul e în DB, vizibil în Inbox-ul adminului.
     CREATE TABLE IF NOT EXISTS contact_messages (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL DEFAULT '',
@@ -618,21 +416,20 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_contact_created ON contact_messages (created_at DESC);
-    -- LOCAL ACCOUNTS (Adrian, 26 Jul: "other non-Gmail login solutions... yes,
-    -- start, including letting them create one"). Identity = the email, exactly
-    -- like Google — wallet/history/memory/voiceprint are already tied to the
-    -- email, so a local account AUTOMATICALLY gets every feature (except the
-    -- skills on personal Google data, impossible without a Google account).
-    -- Password: scrypt (node:crypto), hex "salt:hash" format — zero new
-    -- dependencies.
+    -- CONTURI LOCALE (Adrian, 26 iul: „alte soluții de logare non-Gmail... da,
+    -- pornește, inclusiv să poată crea"). Identitatea = emailul, exact ca la
+    -- Google — portofel/istoric/memorie/amprentă sunt deja legate de email,
+    -- deci un cont local are AUTOMAT toate funcțiile (mai puțin skill-urile pe
+    -- datele Google personale, imposibile fără cont Google). Parola: scrypt
+    -- (node:crypto), formatul "sare:hash" hex — zero dependențe noi.
     CREATE TABLE IF NOT EXISTS local_accounts (
       email TEXT PRIMARY KEY,
       name TEXT NOT NULL DEFAULT '',
       pass_hash TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- One-time links (magic link + password reset): we keep ONLY the token
-    -- hash (a DB dump can't log anyone in), with expiry.
+    -- Linkuri de unică folosință (link magic + resetare parolă): păstrăm DOAR
+    -- hash-ul tokenului (un dump de DB nu poate loga pe nimeni), cu expirare.
     CREATE TABLE IF NOT EXISTS login_tokens (
       token_hash TEXT PRIMARY KEY,
       email TEXT NOT NULL,
@@ -641,19 +438,18 @@ export async function initDb(): Promise<void> {
       used BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- PERSISTENT GOOGLE CONNECTION (Adrian, 10 Jul: "you're making me log into
-    -- Google again? fixed 10 times"). The recurrence cause: the refresh token
-    -- lived ONLY in the session cookie, so any re-login/expiry/re-issue lost
-    -- it. Now we keep it PERMANENTLY here, per account: connect once → it
-    -- restores itself from the DB at every login. Never asks to reconnect
-    -- again.
+    -- CONECTAREA GOOGLE PERSISTENTĂ (Adrian, 10 iul: „iar îmi dai să loghez
+    -- Google? reparată de 10 ori"). Cauza recurenței: refresh-token-ul trăia DOAR
+    -- în cookie-ul de sesiune, deci orice re-logare/expirare/re-emitere îl pierdea.
+    -- Acum îl ținem PERMANENT aici, per cont: conectezi o dată → se restaurează
+    -- singur din DB la fiecare logare. Nu mai cere reconectare niciodată.
     CREATE TABLE IF NOT EXISTS google_accounts (
       email TEXT PRIMARY KEY,
       refresh_token TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- CLIENT CONSOLE ERRORS (Adrian, 11 Jul): we capture frontend errors
-    -- (camera, network, JS) as evidence before diagnosis. They contain no PII.
+    -- ERORI DE CONSOLĂ CLIENT (Adrian, 11 iul): capturăm erorile frontend
+    -- (camera, rețea, JS) ca dovezi înainte de diagnostic. Nu conțin PII.
     CREATE TABLE IF NOT EXISTS client_errors (
       id BIGSERIAL PRIMARY KEY,
       type TEXT NOT NULL DEFAULT '',
@@ -664,12 +460,12 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_client_errors_recent ON client_errors (created_at DESC);
-    -- SUBSCRIPTION-TIER TRACKING SYSTEM (12 Jul, Adrian's order: "a system to
-    -- track when new values are restored, query when allocated by key, return
-    -- to the preset order automatically"). Every switch (kimi→glm at an empty
-    -- quota) OR automatic return (back to the top tier, after cooldown) is a
-    -- row here — the worker writes it at the very moment of the transition, not
-    -- just in the systemd journal that gets lost.
+    -- SISTEM DE URMĂRIRE A TREPTELOR DE ABONAMENT (12 iul, ordinul lui Adrian:
+    -- „sistem de urmărit când sunt repuse valorile noi, interogare când se
+    -- alocă prin cheie, revenire la ordinea prestabilită automat"). Fiecare
+    -- comutare (kimi→glm la cotă golită) SAU revenire automată (înapoi la
+    -- treapta de sus, după cooldown) e un rând aici — worker-ul o scrie chiar
+    -- în clipa tranziției, nu doar în jurnalul systemd care se pierde.
     CREATE TABLE IF NOT EXISTS tier_events (
       id BIGSERIAL PRIMARY KEY,
       worker TEXT NOT NULL,
@@ -681,6 +477,16 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_tier_events_recent ON tier_events (at DESC);
   `)
+}
+
+export interface ClientErrorRow {
+  id: number
+  type: string
+  message: string
+  stack: string | null
+  url: string
+  ip: string
+  created_at: string
 }
 
 export async function saveClientError(e: {
@@ -704,34 +510,17 @@ export async function saveClientError(e: {
       ],
     )
   } catch {
-    /* non-fatal: we don't block the client for a log */
+    /* non-fatal: nu blocăm clientul pentru un log */
   }
 }
 
-export interface ClientErrorGroup {
-  created_at: string
-  user_email: string | null
-  message: string
-  n: string
-}
-
-/** Client errors GROUPED by message, for the admin panel.
- *
- *  This query used to live hand-written IN THE ROUTE (admin.ts), while a
- *  `listClientErrors` that nobody called lay here: two places for the same
- *  job, one of them dead. jscpd couldn't catch it (the text differed), but
- *  it's exactly a violation of the "single, no duplicates" principle — plus a
- *  route that touched the database directly, bypassing this layer. Now: a
- *  single source, here. */
-export async function listClientErrorGroups(hours = 48, limit = 30): Promise<ClientErrorGroup[]> {
+export async function listClientErrors(n = 100): Promise<ClientErrorRow[]> {
   if (!dbEnabled()) return []
   try {
-    const r = await getPool().query<ClientErrorGroup>(
-      `SELECT max(created_at)::text AS created_at, user_email, left(message, 200) AS message, count(*)::text AS n
-       FROM client_errors WHERE created_at > now() - ($1 || ' hours')::interval
-       GROUP BY user_email, left(message, 200)
-       ORDER BY max(created_at) DESC LIMIT $2`,
-      [Math.max(1, Math.min(720, hours)), Math.max(1, Math.min(200, limit))],
+    const r = await getPool().query<ClientErrorRow>(
+      `SELECT id, type, message, stack, url, ip, created_at::text
+       FROM client_errors ORDER BY created_at DESC LIMIT $1`,
+      [Math.max(1, Math.min(500, n))],
     )
     return r.rows
   } catch {
@@ -739,12 +528,12 @@ export async function listClientErrorGroups(hours = 48, limit = 30): Promise<Cli
   }
 }
 
-// SELF-HEALING (Adrian, 27 Jul: "Kelion must be able to collect errors that
-// appear under each user automatically and fix them, shipping the repaired
-// version to all users afterwards"). We group client errors by message (first
-// 200 chars) and return ONLY the RECURRING ones — seen many times, by several
-// users (distinct IPs) in the given window. That way the builder doesn't take
-// on an isolated/environmental incident, but a real, repeated bug.
+// AUTO-VINDECAREA (Adrian, 27 iul: „Kelion trebuie să poată culege err apărute
+// sub fiecare user automat și să le remedieze, dând versiunea reparată pentru
+// toți userii ulterior"). Grupăm erorile de client pe mesaj (primele 200 de
+// caractere) și întoarcem DOAR pe cele RECURENTE — apărute de multe ori, la mai
+// mulți utilizatori (ip-uri distincte) în fereastra dată. Astfel constructorul
+// nu se apucă de un incident izolat/ambiental, ci de un bug real, repetat.
 export interface RecurringError {
   message: string
   count: number
@@ -776,8 +565,8 @@ export async function recurringClientErrors(hours = 24, minCount = 5, minUsers =
          FROM client_errors
         WHERE created_at > now() - ($1 || ' hours')::interval
           AND message <> ''
-          -- exclude noise that can't be fixed in code: opaque cross-origin
-          -- errors, network outages, browser extensions.
+          -- excludem zgomotul ne-reparabil din cod: erori cross-origin opace,
+          -- pene de rețea, extensii de browser.
           AND message NOT ILIKE 'Script error%'
           AND message NOT ILIKE '%NetworkError%'
           AND message NOT ILIKE '%Failed to fetch%'
@@ -803,7 +592,56 @@ export async function recurringClientErrors(hours = 24, minCount = 5, minUsers =
   }
 }
 
-// ── Persistent Google connection (refresh token per account) ────────────────
+export interface TierEventRow {
+  id: number
+  worker: string
+  from_tier: string | null
+  to_tier: string
+  action: string
+  reason: string | null
+  at: string
+}
+
+export async function saveTierEvent(e: {
+  worker: string
+  from?: string | null
+  to: string
+  action: string
+  reason?: string
+}): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO tier_events (worker, from_tier, to_tier, action, reason)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        String(e.worker).slice(0, 20),
+        e.from ? String(e.from).slice(0, 20) : null,
+        String(e.to).slice(0, 20),
+        String(e.action).slice(0, 20),
+        e.reason ? String(e.reason).slice(0, 500) : null,
+      ],
+    )
+  } catch {
+    /* non-fatal: nu blocăm worker-ul pentru un log */
+  }
+}
+
+export async function listTierEvents(n = 50): Promise<TierEventRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<TierEventRow>(
+      `SELECT id, worker, from_tier, to_tier, action, reason, at::text
+       FROM tier_events ORDER BY at DESC LIMIT $1`,
+      [Math.max(1, Math.min(300, n))],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+// ── Conectarea Google persistentă (refresh token per cont) ──────────────────
 export async function saveGoogleRefreshToken(email: string, token: string): Promise<void> {
   if (!dbEnabled() || !email || !token) return
   try {
@@ -813,7 +651,7 @@ export async function saveGoogleRefreshToken(email: string, token: string): Prom
       [email.toLowerCase(), token],
     )
   } catch {
-    /* don't break the login if saving the token fails */
+    /* nu rupem logarea dacă salvarea token-ului dă rateu */
   }
 }
 
@@ -877,11 +715,8 @@ export interface VisitorConvo {
   visitor_msgs: number
 }
 
-// AUDIT ADMIN (3 aug, Chat live): DB picat întorcea [] cu 200 → panoul afișa
-// „Nicio conversație încă" deși vizitatorii puteau scrie chiar atunci. null la
-// eșec — ruta răspunde 500, iar pollul de 5s al panoului reîncearcă singur.
-export async function listVisitorConvos(): Promise<VisitorConvo[] | null> {
-  if (!dbEnabled()) return null
+export async function listVisitorConvos(): Promise<VisitorConvo[]> {
+  if (!dbEnabled()) return []
   try {
     const r = await getPool().query<VisitorConvo>(
       `SELECT conv_id,
@@ -890,25 +725,14 @@ export async function listVisitorConvos(): Promise<VisitorConvo[] | null> {
               COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE role = 'visitor')::int AS visitor_msgs
        FROM visitor_chats
-       -- SELF-CLEANING (Adrian, 31 Jul: "and what about these?" — three
-       -- "conversations" from 25 Jul that were only "Test QA automat — mesaj
-       -- de verificare (ignora)"). Automated probes are not visitors; they
-       -- have no business in the list you read to see who wrote to you. They
-       -- stay in the table, but no longer appear. The filter is on TEXT, not
-       -- date, so it also catches tomorrow's probes.
-       WHERE conv_id NOT IN (
-         SELECT DISTINCT conv_id FROM visitor_chats
-         WHERE text ILIKE '%Test QA automat%' OR text ILIKE '%mesaj de verificare (ignora)%'
-       )
        GROUP BY conv_id
        ORDER BY MAX(id) DESC LIMIT 100`,
     )
     return r.rows
   } catch {
-    return null
+    return []
   }
 }
-
 
 // ── Leads (visitor contact capture) ─────────────────────────────────────────
 // A visitor leaves an email on the landing so the owner can reach them (the
@@ -935,17 +759,15 @@ export async function addLead(email: string, note: string, fp: string): Promise<
   }
 }
 
-// AUDIT ADMIN (3 aug, tab Vizitatori): eșecul citirii colapsa în [] → panoul
-// afișa „Niciun contact încă" fără nicio măsurătoare. null la eșec → 500.
-export async function listLeads(): Promise<Lead[] | null> {
-  if (!dbEnabled()) return null
+export async function listLeads(): Promise<Lead[]> {
+  if (!dbEnabled()) return []
   try {
     const r = await getPool().query<Lead>(
       'SELECT id, email, note, contacted, created_at::text FROM leads ORDER BY created_at DESC LIMIT 200',
     )
     return r.rows
   } catch {
-    return null
+    return []
   }
 }
 
@@ -958,8 +780,8 @@ export async function markLeadContacted(id: number): Promise<void> {
   }
 }
 
-// ── Contact messages (the "Contact" form) ───────────────────────────────────
-// ALWAYS saved (regardless of email) so no message is ever lost.
+// ── Mesaje de contact (formularul „Contact") ────────────────────────────────
+// Se salvează MEREU (indiferent de email) ca să nu se piardă niciun mesaj.
 
 export interface ContactMessage {
   id: number
@@ -973,9 +795,6 @@ export interface ContactMessage {
   created_at: string
 }
 
-// Întoarce id-ul rândului (sau null la eșec) — ca `emailed` să poată fi
-// actualizat DUPĂ ce trimiterea chiar s-a măsurat (auditul admin, 3 aug:
-// „✉️ redirecționat" era scris ÎNAINTE de orice trimitere).
 export async function saveContactMessage(m: {
   name: string
   email: string
@@ -984,12 +803,12 @@ export async function saveContactMessage(m: {
   department: string
   lang: string
   emailed: boolean
-}): Promise<number | null> {
-  if (!dbEnabled() || !m.email || !m.message) return null
+}): Promise<boolean> {
+  if (!dbEnabled() || !m.email || !m.message) return false
   try {
-    const r = await getPool().query<{ id: number }>(
+    await getPool().query(
       `INSERT INTO contact_messages (name, email, subject, message, department, lang, emailed)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [
         m.name.slice(0, 120),
         m.email.slice(0, 200),
@@ -1000,20 +819,9 @@ export async function saveContactMessage(m: {
         m.emailed,
       ],
     )
-    return Number(r.rows[0]?.id ?? 0) || null
+    return true
   } catch {
-    return null
-  }
-}
-
-/** Marchează un mesaj de contact ca REDIRECȚIONAT pe email — se cheamă doar
- *  după ce sendMail a întors true (măsurat, nu presupus). */
-export async function marcheazaContactEmailat(id: number): Promise<void> {
-  if (!dbEnabled() || !(id > 0)) return
-  try {
-    await getPool().query('UPDATE contact_messages SET emailed = true WHERE id = $1', [id])
-  } catch {
-    /* non-fatal — rândul rămâne onest pe „doar salvat" */
+    return false
   }
 }
 
@@ -1066,8 +874,8 @@ export async function unblockUser(email: string): Promise<void> {
   }
 }
 
-/** Admin grants credit straight to a user's wallet (a gift, no split). */
-export async function grantCredit(email: string, amount: number, currency = config.billing.currency): Promise<void> {
+/** Admin grants credit straight to a user's wallet (no Stripe, no split). */
+export async function grantCredit(email: string, amount: number, currency = 'gbp'): Promise<void> {
   if (!dbEnabled() || !email || !(amount !== 0)) return
   const e = email.toLowerCase()
   try {
@@ -1079,19 +887,18 @@ export async function grantCredit(email: string, amount: number, currency = conf
              updated_at = now()`,
       [e, amount, currency],
     )
-    // AUDIT TRAIL (audit 24 Jul, P2-2): the admin's gift was invisible — no
-    // billing_events, no transactions → a hole in the audit trail + the user
-    // stayed on "first top-up £20" despite having a balance. Now both ledgers
-    // see it.
+    // URMĂ CONTABILĂ (audit 24 iul, P2-2): cadoul adminului era invizibil — nici
+    // billing_events, nici transactions → gaură în pista de audit + userul rămânea
+    // pe „prima alimentare £20" deși avea sold. Acum ambele registre îl văd.
     await getPool().query(
-      `INSERT INTO billing_events (user_email, kind, amount, ref, meta)
-       VALUES ($1, 'grant', $2, $3, 'credit admin')`,
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES ($1, 'grant', $2, $3, 'credit admin (fără Stripe)')`,
       [e, amount, `grant:${e}:${Date.now()}`],
     )
     await getPool().query(
-      `INSERT INTO transactions (user_id, amount, credits, status, payment_ref)
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
        VALUES ($1, $2, $3, 'admin_grant', NULL)`,
-      [e, amount, Math.floor(amount / config.billing.creditValue)],
+      [e, amount, Math.floor(amount / config.stripe.creditValue)],
     )
   } catch {
     /* non-fatal */
@@ -1105,11 +912,11 @@ export async function deleteUserData(email: string): Promise<void> {
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    // Full GDPR (audit 24 Jul): besides conversation data, biometric data
-    // (voice/face prints), notes and linked Google accounts are also deleted.
-    // NOTHING personal remains. (Columns differ across tables — careful: an
-    // error inside a Postgres transaction poisons ALL of it, so the list
-    // contains ONLY tables+columns verified in the schema above.)
+    // GDPR complet (audit 24 iul): pe lângă datele de conversație, se șterg și
+    // datele biometrice (amprente vocale/faciale), notițele și conturile Google
+    // legate. NIMIC personal nu rămâne. (Coloanele diferă pe tabele — atenție:
+    // o eroare într-o tranzacție Postgres o otrăvește pe TOATĂ, deci lista
+    // conține DOAR tabele+coloane verificate în schema de mai sus.)
     const targets: [string, string][] = [
       ['messages', 'user_email'], ['user_prefs', 'user_email'], ['memories', 'user_email'],
       ['wallets', 'user_email'], ['visits', 'user_email'], ['blocked_users', 'email'],
@@ -1119,10 +926,9 @@ export async function deleteUserData(email: string): Promise<void> {
     for (const [t, col] of targets) {
       await client.query(`DELETE FROM ${t} WHERE ${col} = $1`, [e])
     }
-    // The FINANCIAL LEDGER (transactions, billing_events) is NOT deleted — the
-    // law requires keeping payments — but it is ANONYMIZED: the email becomes
-    // an irreversible marker, so it's no longer personal data, while the
-    // accounting stays whole.
+    // EVIDENȚA FINANCIARĂ (transactions, billing_events) NU se șterge — legea
+    // cere păstrarea plăților — dar se ANONIMIZEAZĂ: emailul devine un marcaj
+    // ireversibil, deci nu mai e dată personală, iar contabilitatea rămâne întreagă.
     await client.query(`UPDATE transactions SET user_id = 'deleted-user' WHERE user_id = $1`, [e])
     await client.query(`UPDATE billing_events SET user_email = 'deleted-user' WHERE user_email = $1`, [e])
     await client.query('COMMIT')
@@ -1135,17 +941,172 @@ export async function deleteUserData(email: string): Promise<void> {
 
 // ── Work orders (persistent builder queue) ──────────────────────────────────
 
+export interface WorkOrderRow {
+  id: string
+  text: string
+  status: string
+  created_at: string
+  delivered_at: string | null
+}
+
 export async function saveWorkOrder(id: string, text: string): Promise<void> {
   if (!dbEnabled()) return
   await getPool().query('INSERT INTO work_orders (id, text) VALUES ($1,$2)', [id, text])
 }
 
+/** Atomic pull: pending → delivered, returned once — but never deleted. */
+export async function pullPendingWorkOrders(): Promise<WorkOrderRow[]> {
+  if (!dbEnabled()) return []
+  const r = await getPool().query<WorkOrderRow>(
+    `UPDATE work_orders SET status='delivered', delivered_at=now()
+     WHERE status='pending' RETURNING id, text, status, created_at, delivered_at`,
+  )
+  return r.rows
+}
+
+// POOL ELASTIC DE REPARATORI (Adrian, 12 iul: „mai mulți reparatori sincronizați
+// care se opresc când termină și repornesc când cresc sarcinile"). Revendică UN
+// SINGUR ordin, atomic și sigur pentru mai mulți workeri în paralel: `FOR UPDATE
+// SKIP LOCKED` face ca doi workeri să ia MEREU ordine diferite (al doilea sare
+// peste rândul blocat de primul), fără dublă-revendicare. Întoarce ordinul luat
+// sau null (coadă goală → workerul iese, nu consumă).
+export async function claimOneWorkOrder(): Promise<WorkOrderRow | null> {
+  if (!dbEnabled()) return null
+  const r = await getPool().query<WorkOrderRow>(
+    `UPDATE work_orders SET status='delivered', delivered_at=now()
+     WHERE id = (
+       SELECT id FROM work_orders WHERE status='pending'
+       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+     )
+     RETURNING id, text, status, created_at, delivered_at`,
+  )
+  return r.rows[0] ?? null
+}
+
+// Câte ordine așteaptă (pentru supervizor: câți workeri să pornească).
+export async function countPendingWorkOrders(): Promise<number> {
+  if (!dbEnabled()) return 0
+  const r = await getPool().query<{ n: string }>(
+    `SELECT count(*)::int AS n FROM work_orders WHERE status='pending'`,
+  )
+  return Number(r.rows[0]?.n ?? 0)
+}
+
+export async function listWorkOrders(n = 50): Promise<WorkOrderRow[]> {
+  if (!dbEnabled()) return []
+  const r = await getPool().query<WorkOrderRow>(
+    'SELECT id, text, status, created_at, delivered_at FROM work_orders ORDER BY created_at DESC LIMIT $1',
+    [n],
+  )
+  return r.rows
+}
+
+// STADIU REAL PER ORDIN (Adrian, 6 iul: registrul arăta „în lucru" la infinit —
+// nu avansa după publicare). Acum stadiul se închide: delivered → published (200
+// live) → certified (tester PASS). Așa lista spune adevărul, nu „în lucru" pe veci.
+export async function setWorkOrderStatus(id: string, status: string): Promise<void> {
+  if (!dbEnabled() || !id) return
+  await getPool()
+    .query('UPDATE work_orders SET status=$2 WHERE id=$1', [id, status])
+    .catch(() => {})
+}
+
+// RECONCILIERE — închide ordinele blocate la „delivered" (Adrian, 8 iul: „procedura
+// e defectă dacă rămân în «preluat» pe veci; reparat, iar când e gata → finalizat;
+// până nu e reparat, nici vorbă să le ștergem"). CAUZA blocajului: doar UN ordin
+// (cel legat de cerința deținută) poate avansa la published/certified; toate
+// celelalte — lanțuri SUPERVIZOR reasignate, verificări auto (VERIFICARE PE
+// CERINȚĂ / LEGEA 200) care raportează verdict pe cerință dar nu pe rândul lor,
+// giveup-uri neînchise — rămâneau `delivered` la nesfârșit, fără cale spre terminal.
+// Această tură ia orice ordin `delivered` care NU e cel activ deținut acum și care
+// stă de mai mult de `staleMs` (abandonat/înlocuit/verificare-terminată) și îl
+// mută în terminalul onest `finalized` = „închis, nu mai e în lucru". NU șterge
+// nimic — doar închide stadiul, ca registrul să spună adevărul.
+export async function finalizeStaleWorkOrders(
+  activeOrderId: string | null,
+  staleMs = 30 * 60_000,
+): Promise<string[]> {
+  if (!dbEnabled()) return []
+  const cutoffSecs = Math.max(60, Math.floor(staleMs / 1000))
+  const r = await getPool()
+    .query<{ id: string }>(
+      `UPDATE work_orders
+         SET status='finalized'
+       WHERE status='delivered'
+         AND ($1::text IS NULL OR id <> $1)
+         AND COALESCE(delivered_at, created_at) < now() - ($2 * interval '1 second')
+       RETURNING id`,
+      [activeOrderId, cutoffSecs],
+    )
+    .catch(() => ({ rows: [] as { id: string }[] }))
+  return r.rows.map((x) => x.id)
+}
+
 // ── Staged releases (persistent approval gate) ──────────────────────────────
+
+export interface StagedReleaseRow {
+  id: string
+  title: string
+  detail: string
+  branch: string
+  status: string
+  approved_at: string | null
+  at: string
+}
+
+export async function saveStagedRelease(id: string, title: string, detail: string, branch = ''): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query('INSERT INTO staged_releases (id, title, detail, branch) VALUES ($1,$2,$3,$4)', [
+      id,
+      title,
+      detail,
+      branch,
+    ])
+  } catch {
+    // Un release nesalvat nu are voie să dărâme constructorul — Adrian
+    // pierde o aprobare, nu tot fluxul.
+  }
+}
+
+export async function listStagedReleases(n = 50): Promise<StagedReleaseRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<StagedReleaseRow>(
+      'SELECT id, title, detail, branch, status, approved_at, at FROM staged_releases ORDER BY at DESC LIMIT $1',
+      [n],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+export async function setReleaseApproved(id: string): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      "UPDATE staged_releases SET status='approved', approved_at=now() WHERE id=$1",
+      [id],
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+export async function setReleaseStatus(id: string, status: string): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query('UPDATE staged_releases SET status=$2 WHERE id=$1', [id, status])
+  } catch {
+    /* non-fatal */
+  }
+}
 
 // ── Tiny key-value state that must SURVIVE restarts ─────────────────────────
 // (e.g. the bridge worker's last-seen beat: a deploy must not blink the light).
 
-// ── LOCAL ACCOUNTS (email + password / magic link) ──────────────────────────
+// ── CONTURI LOCALE (email + parolă / link magic) ─────────────────────────────
 export interface LocalAccount {
   email: string
   name: string
@@ -1174,7 +1135,7 @@ export async function saveLoginToken(tokenHash: string, email: string, purpose: 
     [tokenHash, email.toLowerCase().trim(), purpose, String(ttlMin)],
   )
 }
-/** Consume the token (single use, unexpired) → its email, otherwise null. */
+/** Consumă tokenul (o singură folosire, neexpirat) → emailul lui, altfel null. */
 export async function consumeLoginToken(tokenHash: string, purpose: 'magic' | 'reset'): Promise<string | null> {
   if (!dbEnabled()) return null
   const r = await getPool().query<{ email: string }>(
@@ -1203,10 +1164,9 @@ export async function loadKv(key: string): Promise<string | null> {
   return r.rows[0]?.value ?? null
 }
 
-// ── GESTURES: which gestures Kelion is allowed to use CONTEXTUALLY (Adrian,
-// 13 Jul: admin panel with a checkbox per gesture). We store ONLY the disabled
-// list (default: all active). The brain reads the list and avoids the gestures
-// checked OFF.
+// ── GESTURI: ce gesturi are voie Kelion să folosească CONTEXTUAL (Adrian, 13
+// iul: panou admin cu casetă per gest). Stocăm DOAR lista dezactivată (default:
+// toate active). Creierul citește lista și evită gesturile bifate ca OFF.
 export async function getDisabledGestures(): Promise<string[]> {
   const raw = await loadKv('gesture_disabled')
   if (!raw) return []
@@ -1245,6 +1205,16 @@ export function getAppFile(name: string): { buf: Buffer; type: string } | null {
   return appFileCache.get(name) ?? null
 }
 
+export async function putAppFile(name: string, buf: Buffer, type: string): Promise<void> {
+  appFileCache.set(name, { buf, type }) // serve immediately, even before DB ack
+  if (!dbEnabled()) return
+  await getPool().query(
+    `INSERT INTO app_files (name, content, content_type, updated_at) VALUES ($1,$2,$3,now())
+     ON CONFLICT (name) DO UPDATE SET content=$2, content_type=$3, updated_at=now()`,
+    [name, buf, type],
+  )
+}
+
 // ── Installer download log (who downloaded what, from our own /dl) ─────────
 
 export async function recordDownload(
@@ -1269,107 +1239,76 @@ export interface DownloadRow {
   created_at: string
 }
 
-// AUDIT ADMIN (3 aug, tab Magazine): fără DB, {counts:[]} arăta în panou ca
-// „Nicio descărcare înregistrată încă" — un zero fără măsurătoare. `dbOk`
-// spune dacă cifrele CHIAR vin dintr-o citire; false → panoul scrie „nu pot
-// citi jurnalul", nu zeroul fals.
 export async function getDownloadStats(): Promise<{
-  dbOk: boolean
   counts: { file: string; total: number }[]
   recent: DownloadRow[]
 }> {
-  if (!dbEnabled()) return { dbOk: false, counts: [], recent: [] }
-  try {
-    const counts = await getPool().query<{ file: string; total: number }>(
-      'SELECT file, COUNT(*)::int AS total FROM app_downloads GROUP BY file',
-    )
-    const recent = await getPool().query<DownloadRow>(
-      `SELECT file, user_email, ip, country, created_at
-       FROM app_downloads ORDER BY created_at DESC LIMIT 100`,
-    )
-    return { dbOk: true, counts: counts.rows, recent: recent.rows }
-  } catch {
-    return { dbOk: false, counts: [], recent: [] }
-  }
+  if (!dbEnabled()) return { counts: [], recent: [] }
+  const counts = await getPool().query<{ file: string; total: number }>(
+    'SELECT file, COUNT(*)::int AS total FROM app_downloads GROUP BY file',
+  )
+  const recent = await getPool().query<DownloadRow>(
+    `SELECT file, user_email, ip, country, created_at
+     FROM app_downloads ORDER BY created_at DESC LIMIT 100`,
+  )
+  return { counts: counts.rows, recent: recent.rows }
 }
 
 // ── Shared memory: the common notebook both sides read + write ──
 
-// ── Prepaid wallet (credit wallet) ──
-
-// ── ONE PERSON'S EMAIL, ONE SINGLE FORM, ACROSS THE WHOLE APP ───────────────
-//
-// Found first at the wallet (tests, 30 Jul): top-ups had long been writing
-// `lower($1)` (audit P2-3), but balance READS and CHARGING used the email
-// EXACTLY as it comes from the session. Local login lowercases it; Google
-// login does NOT. For an email with capitals ("Ion@Firma.ro") the user paid,
-// the credit landed on one row, the app read another → showed him 0 credits
-// and stopped him at the paywall, while his consumption opened a SECOND
-// wallet, in the negative.
-//
-// The same crack was open at PREFERENCES (language, role), at AUTO-TOP-UP
-// (money: the setting was no longer read → the user was left without credit
-// although he had enabled it), at MODEL SELECTION and at avatar layout. All
-// of them are now written and read through this single key — one only,
-// exported.
-export const userKey = (email: string): string => String(email ?? '').trim().toLowerCase()
-const walletKey = userKey
-
-/** ── O CITIRE CARE SPUNE DACĂ A REUȘIT (M7b, 8 aug 2026) ───────────────────
- *
- *  Adrian: „le faci corect, măsurat și rezolvat". Continuarea lui M7a (soldul).
- *  Aceleași două capcane, în toate citirile de mai jos:
- *
- *      if (!dbEnabled()) return []      →  „nu e nicio bază"  citit ca „0 rânduri"
- *      catch { return [] }              →  „interogarea a crăpat" citit la fel
- *
- *  Panoul desena apoi „0 utilizatori", „£0.00", „nicio tranzacție" — adică
- *  exact minciuna din regula #1, fix în minutul în care ai nevoie de adevăr.
- *
- *  Un singur înveliș, ca să nu se repete tiparul de cinci ori (și ca poarta de
- *  dubluri să nu aibă ce reclama). O listă GOALĂ citită cu succes rămâne o
- *  listă goală — ăla e un fapt. Doar imposibilitatea de a citi se numește. */
-export type Citire<T> = { citit: true; valoare: T } | { citit: false; motiv: string }
-
-async function citireDb<T>(ce: string, fn: () => Promise<T>): Promise<Citire<T>> {
-  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
+export async function appendSharedMemory(source: string, content: string): Promise<void> {
+  if (!dbEnabled()) return
+  const c = content.trim()
+  if (!c) return
   try {
-    return { citit: true, valoare: await fn() }
-  } catch (e) {
-    return { citit: false, motiv: `${ce} a picat: ${e instanceof Error ? e.message.slice(0, 140) : String(e)}` }
+    await getPool().query(
+      'INSERT INTO shared_memory (source, content) VALUES ($1, $2)',
+      [source.slice(0, 40), c.slice(0, 8000)],
+    )
+    // Keep it bounded — the last 400 entries are plenty of shared context.
+    await getPool().query(
+      `DELETE FROM shared_memory WHERE id NOT IN
+         (SELECT id FROM shared_memory ORDER BY created_at DESC LIMIT 400)`,
+    )
+  } catch {
+    /* shared memory is best-effort, never breaks a turn */
   }
 }
 
-/** ── SOLDUL: „N-AM PUTUT CITI" NU E „AI ZERO" (8 aug 2026) ─────────────────
- *
- *  `getBalance` întorcea `0` și când baza nu era configurată, și când
- *  interogarea crăpa. Consecința nu era cosmetică — soldul e ZID:
- *
- *    chat.ts     : `getBalance(...) <= 0` → paywall („Ai rămas fără credit")
- *    realtime.ts : `bal <= 0` → `stop` → i se TAIE vocea
- *    billing.ts  : £0.00 pe ecran
- *
- *  Adică un sughiț de bază de date îi spunea unui om care ȘI-A PLĂTIT creditul
- *  că a rămas fără bani, și îl bloca. Familia „£0.00", în forma ei cea mai
- *  scumpă.
- *
- *  Aici citirea spune ce s-a întâmplat. Zero RĂMÂNE zero când chiar nu există
- *  rând (utilizator nou, portofel gol) — ăla e un fapt citit, nu o presupunere.
- *  Doar imposibilitatea de a citi se numește pe nume. */
-export type CitireSold = { citit: true; sold: number } | { citit: false; motiv: string }
+export interface SharedMemoryRow {
+  source: string
+  content: string
+  created_at: string
+}
 
-export async function citesteSold(email: string): Promise<CitireSold> {
-  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
+export async function getSharedMemory(limit = 30): Promise<SharedMemoryRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<SharedMemoryRow>(
+      `SELECT source, content, created_at FROM (
+         SELECT source, content, created_at FROM shared_memory
+         ORDER BY created_at DESC LIMIT $1
+       ) x ORDER BY created_at ASC`,
+      [limit],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+// ── Prepaid wallet (Stripe credit) ──
+
+export async function getBalance(email: string): Promise<number> {
+  if (!dbEnabled()) return 0
   try {
     const r = await getPool().query<{ balance: string }>(
       'SELECT balance FROM wallets WHERE user_email = $1',
-      [walletKey(email)],
+      [email],
     )
-    // Fără rând = portofel inexistent = zero REAL, citit. Nu e același lucru
-    // cu „n-am ajuns la bază".
-    return { citit: true, sold: Number(r.rows[0]?.balance ?? 0) }
-  } catch (e) {
-    return { citit: false, motiv: `citirea portofelului a picat: ${e instanceof Error ? e.message.slice(0, 120) : String(e)}` }
+    return Number(r.rows[0]?.balance ?? 0)
+  } catch {
+    return 0
   }
 }
 
@@ -1384,60 +1323,73 @@ export async function debitWallet(email: string, amount: number, meta = ''): Pro
     await pool.query(
       `INSERT INTO wallets (user_email, balance) VALUES ($1, -($2::numeric))
        ON CONFLICT (user_email) DO UPDATE SET balance = wallets.balance - $2::numeric, updated_at = now()`,
-      [walletKey(email), amount],
+      [email, amount],
     )
     await pool.query(
       `INSERT INTO billing_events (user_email, kind, amount, meta) VALUES ($1, 'usage', $2, $3)`,
-      [walletKey(email), -amount, meta],
+      [email, -amount, meta],
     )
-  } catch (e) {
-    // We don't break the chat if charging fails — but NEVER silently (audit 27
-    // Jul: exactly this empty catch once hid "users consume without being
-    // charged"). The error goes into the journal → server_logs → admin audit.
-    console.error(`[money] debitWallet FAILED for ${email}, amount ${amount}: ${String(e).slice(0, 200)}`)
+  } catch {
+    // Never break the chat because metering failed.
   }
 }
 
-// The payment idempotency guard: an already-recorded reference is NOT credited
-// a second time. Called inside an open transaction (the caller ROLLBACKs if
-// true). A single source here (the permanent principle: single, no duplicates).
-async function billingRefSeen(client: pg.PoolClient, ref: string): Promise<boolean> {
-  const seen = await client.query('SELECT 1 FROM billing_events WHERE ref = $1', [ref])
-  return (seen.rowCount ?? 0) > 0
+export async function getStripeCustomer(email: string): Promise<string | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query<{ stripe_customer_id: string | null }>(
+      'SELECT stripe_customer_id FROM wallets WHERE user_email = $1',
+      [email],
+    )
+    return r.rows[0]?.stripe_customer_id ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function setStripeCustomer(email: string, id: string): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO wallets (user_email, stripe_customer_id) VALUES ($1, $2)
+       ON CONFLICT (user_email) DO UPDATE SET stripe_customer_id = $2, updated_at = now()`,
+      [email, id],
+    )
+  } catch {
+    // Non-fatal.
+  }
 }
 
 /**
- * Top up the user's wallet (payment confirmed — e.g. a Revolut transfer read
- * through Enable Banking). The user KEEPS `userShare` (75%) as spendable
- * credit; the remaining 25% is our profit, taken upfront. Idempotent on `ref`
- * (the payment's unique reference). topup_ref becomes the new full balance —
- * the reference for the percentage alerts.
+ * User top-up (Stripe). The user KEEPS `userShare` (75%) as spendable credit;
+ * the remaining 25% is our profit, taken up front. Idempotent on stripeRef.
+ * topup_ref becomes the new full balance — the reference for the % alerts.
  */
 export async function topUpUser(
   email: string,
   gross: number,
   currency: string,
-  ref: string,
+  stripeRef: string,
 ): Promise<boolean> {
-  if (!dbEnabled() || !(gross > 0) || !ref) return false
-  const userCredit = gross * config.billing.userShare
+  if (!dbEnabled() || !(gross > 0) || !stripeRef) return false
+  const userCredit = gross * config.stripe.userShare
   const profit = gross - userCredit
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    if (await billingRefSeen(client, ref)) {
+    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [stripeRef])
+    if ((seen.rowCount ?? 0) > 0) {
       await client.query('ROLLBACK')
       return false
     }
     await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, ref, meta)
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
        VALUES (lower($1), 'topup', $2, $3, 'user 75%')`,
-      [email, userCredit, ref],
+      [email, userCredit, stripeRef],
     )
-    // NORMALIZED email (audit P2-3: an email credited here with a different
-    // case was NEVER read by the balance endpoint) + topup_ref = the NEW full
-    // BALANCE (audit P1-3: only the last top-up falsified the alert
-    // percentage).
+    // Email NORMALIZAT (audit P2-3: un email cu alt caz creditat aici nu mai era
+    // citit NICIODATĂ de endpoint-ul de sold) + topup_ref = NOUL SOLD complet
+    // (audit P1-3: doar ultima alimentare falsifica procentul de alertă).
     await client.query(
       `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
        ON CONFLICT (user_email) DO UPDATE
@@ -1445,19 +1397,21 @@ export async function topUpUser(
       [email, userCredit, currency],
     )
     await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, ref, meta)
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
        VALUES (lower($1), 'profit', $2, $3, 'margin 25%')`,
-      [email, profit, `${ref}:profit`],
+      [email, profit, `${stripeRef}:profit`],
     )
-    // VISIBLE ACCOUNTING (Adrian, 24 Jul: "to see for REAL in the database who
-    // topped up, how much, and the money split"). Every top-up leaves the full
-    // accounting row, in the SAME SQL transaction: the gross amount paid, the
-    // credits received (75%), the user and the payment's unique reference.
+    // CONTABILITATE VIZIBILĂ (Adrian, 24 iul: „să văd REAL în baza de date cine
+    // a alimentat, cât, și repartizarea banilor"). Până acum, alimentările prin
+    // topUpUser (webhook + reconciliere) nu scriau NIMIC în `transactions` →
+    // tabul admin „Tranzacții" rămânea gol deși banii intrau. Acum fiecare
+    // alimentare lasă rândul contabil complet, în ACEEAȘI tranzacție SQL:
+    // suma brută plătită, creditele primite (75%), userul și referința Stripe.
     await client.query(
-      `INSERT INTO transactions (user_id, amount, credits, status, payment_ref)
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
        VALUES ($1, $2, $3, 'paid', $4)
-       ON CONFLICT (payment_ref) DO UPDATE SET status = 'paid'`,
-      [email.toLowerCase(), gross, Math.floor(userCredit / config.billing.creditValue), ref],
+       ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET status = 'paid'`,
+      [email.toLowerCase(), gross, Math.floor(userCredit / config.stripe.creditValue), stripeRef],
     )
     await client.query('COMMIT')
     return true
@@ -1473,7 +1427,7 @@ export async function topUpUser(
   }
 }
 
-/** Records in the `transactions` table (ORDER #6G). */
+/** STRIPE + CREDITS (ORDIN #6G): înregistrări în tabela `transactions`. */
 
 export interface Transaction {
   id: number
@@ -1481,16 +1435,54 @@ export interface Transaction {
   amount: number
   credits: number
   status: string
-  payment_ref: string | null
+  stripe_payment_intent_id: string | null
   created_at: string
 }
 
-/** A user's purchase history. */
+/** Creează o tranzacție nouă (plasare PaymentIntent). */
+export async function createTransaction(
+  email: string,
+  amount: number,
+  credits: number,
+  stripePaymentIntentId: string,
+): Promise<number> {
+  if (!dbEnabled() || !email || !stripePaymentIntentId) return 0
+  try {
+    const r = await getPool().query<{ id: number }>(
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+       VALUES ($1, $2, $3, 'pending', $4)
+       ON CONFLICT (stripe_payment_intent_id) DO NOTHING
+       RETURNING id`,
+      [email.toLowerCase(), amount, credits, stripePaymentIntentId],
+    )
+    return r.rows[0]?.id ?? 0
+  } catch {
+    return 0
+  }
+}
+
+/** Actualizează statusul unei tranzacții după ID-ul Stripe PaymentIntent. */
+export async function updateTransactionStatus(
+  stripePaymentIntentId: string,
+  status: string,
+): Promise<void> {
+  if (!dbEnabled() || !stripePaymentIntentId) return
+  try {
+    await getPool().query(
+      'UPDATE transactions SET status = $2, created_at = COALESCE(created_at, now()) WHERE stripe_payment_intent_id = $1',
+      [stripePaymentIntentId, status],
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Istoricul de cumpărături al unui utilizator. */
 export async function listTransactionsForUser(email: string, limit = 50): Promise<Transaction[]> {
   if (!dbEnabled() || !email) return []
   try {
     const r = await getPool().query<Transaction>(
-      `SELECT id, user_id, amount, credits, status, payment_ref, created_at::text
+      `SELECT id, user_id, amount, credits, status, stripe_payment_intent_id, created_at::text
        FROM transactions WHERE user_id = $1
        ORDER BY created_at DESC LIMIT $2`,
       [email.toLowerCase(), Math.max(1, Math.min(500, limit))],
@@ -1501,43 +1493,274 @@ export async function listTransactionsForUser(email: string, limit = 50): Promis
   }
 }
 
-/** All transactions (admin panel). */
-export async function citesteTranzactii(limit = 200): Promise<Citire<Transaction[]>> {
-  return citireDb('citirea tranzacțiilor', async () => {
+/** Toate tranzacțiile (panou admin). */
+export async function listAllTransactions(limit = 200): Promise<Transaction[]> {
+  if (!dbEnabled()) return []
+  try {
     const r = await getPool().query<Transaction>(
-      `SELECT id, user_id, amount, credits, status, payment_ref, created_at::text
+      `SELECT id, user_id, amount, credits, status, stripe_payment_intent_id, created_at::text
        FROM transactions ORDER BY created_at DESC LIMIT $1`,
       [Math.max(1, Math.min(500, limit))],
     )
     return r.rows
-  })
+  } catch {
+    return []
+  }
+}
+
+/** Creditare unitară din PaymentIntent (ORDIN #6G): tranzacție + wallet + profit.
+ *  Idempotent pe stripe_payment_intent_id. */
+export async function topUpUserFromPaymentIntent(
+  email: string,
+  gross: number,
+  currency: string,
+  stripePaymentIntentId: string,
+): Promise<boolean> {
+  if (!dbEnabled() || !(gross > 0) || !stripePaymentIntentId) return false
+  const userCredit = gross * config.stripe.userShare
+  const profit = gross - userCredit
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const seen = await client.query<{ status: string }>(
+      'SELECT status FROM transactions WHERE stripe_payment_intent_id = $1',
+      [stripePaymentIntentId],
+    )
+    // CAPCANA „pending" DEZAMORSATĂ (audit 24 iul, P0-3): înainte, ORICE rând
+    // existent (inclusiv `pending` de la plasarea intenției) era tratat ca „deja
+    // creditat" → status devenea `succeeded` FĂRĂ niciun ban în portofel: user
+    // plătit, credit zero, tabelă „verde". Acum sărim peste creditare DOAR dacă
+    // statusul anterior era chiar `succeeded`; pentru pending/failed continuăm cu
+    // creditarea completă (dublarea rămâne blocată de uniq_billing_ref → ROLLBACK).
+    const priorStatus = seen.rows[0]?.status ?? null
+    if (priorStatus === 'succeeded' || priorStatus === 'paid') {
+      await client.query('COMMIT')
+      return true
+    }
+    if (priorStatus !== null) {
+      await client.query(
+        `UPDATE transactions SET status = 'succeeded' WHERE stripe_payment_intent_id = $1`,
+        [stripePaymentIntentId],
+      )
+    } else {
+      // Creditele în UNITĂȚI de credit (1 credit = £0.10), consecvent cu
+      // topUpUser și cu afișarea din admin — nu în lire (era de 10× mai mic).
+      await client.query(
+        `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+         VALUES ($1, $2, $3, 'succeeded', $4)`,
+        [email.toLowerCase(), gross, Math.floor(userCredit / config.stripe.creditValue), stripePaymentIntentId],
+      )
+    }
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES (lower($1), 'topup', $2, $3, 'user 75%')`,
+      [email, userCredit, stripePaymentIntentId],
+    )
+    // Email NORMALIZAT (P2-3) + topup_ref = NOUL SOLD complet (P1-3), nu doar
+    // ultima alimentare — altfel procentul de alertă avea referință falsă.
+    await client.query(
+      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
+       ON CONFLICT (user_email) DO UPDATE
+         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
+      [email, userCredit, currency],
+    )
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES (lower($1), 'profit', $2, $3, 'margin 25%')`,
+      [email, profit, `${stripePaymentIntentId}:profit`],
+    )
+    await client.query('COMMIT')
+    return true
+  } catch {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    return false
+  } finally {
+    client.release()
+  }
+}
+
+/** VÂNZARE ADMIN: creditează EXACT `credits` credite (nu formula 75%, ca să nu
+ *  apară erori de rotunjire — userul primește fix ce i s-a vândut). Idempotent
+ *  pe stripe_ref. Diferența dintre brut și valoarea creditelor = marja, în
+ *  registru ca de obicei. */
+export async function creditSaleExact(
+  email: string,
+  gross: number,
+  currency: string,
+  stripeRef: string,
+  credits: number,
+): Promise<boolean> {
+  if (!dbEnabled() || !(gross > 0) || !stripeRef || !(credits > 0)) return false
+  const userCredit = Math.round(credits * config.stripe.creditValue * 100) / 100
+  const profit = Math.max(0, Math.round((gross - userCredit) * 100) / 100)
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [stripeRef])
+    if ((seen.rowCount ?? 0) > 0) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES (lower($1), 'topup', $2, $3, 'vânzare admin — credite exacte')`,
+      [email, userCredit, stripeRef],
+    )
+    await client.query(
+      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
+       ON CONFLICT (user_email) DO UPDATE
+         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
+      [email, userCredit, currency],
+    )
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES (lower($1), 'profit', $2, $3, 'marjă vânzare admin')`,
+      [email, profit, `${stripeRef}:profit`],
+    )
+    await client.query(
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+       VALUES (lower($1), $2, $3, 'paid', $4)
+       ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET status = 'paid'`,
+      [email, gross, Math.floor(credits), stripeRef],
+    )
+    await client.query('COMMIT')
+    return true
+  } catch {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    return false
+  } finally {
+    client.release()
+  }
+}
+
+/** RETRAGEREA creditelor la REFUND (incident real 24 iul: plată rambursată pe
+ *  card dar creditată în portofel = credite pentru bani inexistenți). Găsește
+ *  alimentarea după stripe_ref, scade creditul userului din portofel, marchează
+ *  tranzacția `refunded` și lasă urma `refund` în registru. Idempotent pe
+ *  `<ref>:refund` — un refund retras o dată nu se mai retrage a doua oară. */
+export async function revokeTopUpForRefund(stripeRef: string): Promise<boolean> {
+  if (!dbEnabled() || !stripeRef) return false
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const t = await client.query<{ user_email: string; amount: string }>(
+      `SELECT user_email, amount FROM billing_events WHERE stripe_ref = $1 AND kind = 'topup'`,
+      [stripeRef],
+    )
+    if (!t.rows[0]) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [
+      `${stripeRef}:refund`,
+    ])
+    if ((seen.rowCount ?? 0) > 0) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    const email = t.rows[0].user_email
+    const userCredit = Number(t.rows[0].amount)
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES (lower($1), 'refund', $2, $3, 'plată rambursată pe card — credit retras')`,
+      [email, userCredit, `${stripeRef}:refund`],
+    )
+    await client.query(
+      `UPDATE wallets SET balance = balance - $2, updated_at = now() WHERE user_email = lower($1)`,
+      [email, userCredit],
+    )
+    await client.query(`UPDATE transactions SET status = 'refunded' WHERE stripe_payment_intent_id = $1`, [
+      stripeRef,
+    ])
+    await client.query('COMMIT')
+    return true
+  } catch {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    return false
+  } finally {
+    client.release()
+  }
 }
 
 /** Wallet balance + the last-top-up reference, for the low-credit % alerts. */
-/** Ca `citesteSold`, dar cu referința ultimei alimentări (procentul rămas).
- *  Aceeași regulă: o citire imposibilă NU se scrie ca „0 credite". */
-export type CitirePortofel = { citit: true; balance: number; topupRef: number } | { citit: false; motiv: string }
-
-export async function citestePortofel(email: string): Promise<CitirePortofel> {
-  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
+export async function getWalletStatus(email: string): Promise<{ balance: number; topupRef: number }> {
+  if (!dbEnabled()) return { balance: 0, topupRef: 0 }
   try {
     const r = await getPool().query<{ balance: string; topup_ref: string }>(
       'SELECT balance, topup_ref FROM wallets WHERE user_email = lower($1)',
       [email],
     )
-    return { citit: true, balance: Number(r.rows[0]?.balance ?? 0), topupRef: Number(r.rows[0]?.topup_ref ?? 0) }
-  } catch (e) {
-    return { citit: false, motiv: `citirea portofelului a picat: ${e instanceof Error ? e.message.slice(0, 120) : String(e)}` }
+    return { balance: Number(r.rows[0]?.balance ?? 0), topupRef: Number(r.rows[0]?.topup_ref ?? 0) }
+  } catch {
+    return { balance: 0, topupRef: 0 }
   }
 }
 
-// Here used to live `loadAdminPool` and `withdrawAdminPool` — the "+ Add
-// money" / "− Take out money" buttons that HAND-WROTE how much the man
-// thought he had in his pocket. Deleted (Adrian, 30 Jul: "one single
-// pocket... only real remains, no hardcode"). How much money you have is read
-// from the Revolut account (through Enable Banking) and from OpenRouter,
-// which actually hold it; it's no longer declared anywhere.
+/** Reîncărcare automată per user (ca să nu rămână fără credit — cerința Adrian).
+ *  `threshold` = sub câte CREDITE se declanșează; `topupAmount` = suma de taxat
+ *  (aceeași unitate ca top-up-ul manual). Stocat în KV, ca preferințele. */
+export interface AutoRecharge {
+  enabled: boolean
+  threshold: number
+  topupAmount: number
+}
+const AUTO_RECHARGE_DEFAULT: AutoRecharge = { enabled: false, threshold: 20, topupAmount: 10 }
 
+export async function getAutoRecharge(email: string): Promise<AutoRecharge> {
+  try {
+    const raw = await loadKv(`autorecharge:${email}`)
+    if (!raw) return { ...AUTO_RECHARGE_DEFAULT }
+    const p = JSON.parse(raw) as Partial<AutoRecharge>
+    return {
+      enabled: Boolean(p.enabled),
+      threshold: Number.isFinite(p.threshold) ? Math.max(0, Number(p.threshold)) : AUTO_RECHARGE_DEFAULT.threshold,
+      topupAmount: Number.isFinite(p.topupAmount)
+        ? Math.max(1, Math.min(500, Number(p.topupAmount)))
+        : AUTO_RECHARGE_DEFAULT.topupAmount,
+    }
+  } catch {
+    return { ...AUTO_RECHARGE_DEFAULT }
+  }
+}
+
+export async function setAutoRecharge(email: string, v: AutoRecharge): Promise<void> {
+  await saveKv(`autorecharge:${email}`, JSON.stringify(v))
+}
+
+/** Owner loads the provider-credit pool (real money he put at the AI providers). */
+export async function loadAdminPool(amount: number): Promise<void> {
+  if (!dbEnabled() || !(amount > 0)) return
+  try {
+    await getPool().query('UPDATE admin_pool SET loaded = loaded + $1, updated_at = now() WHERE id = 1', [amount])
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Owner withdraws real money from the pool (records taking it back out).
+ *  Clamped at 0 so the recorded pool can't go negative. */
+export async function withdrawAdminPool(amount: number): Promise<void> {
+  if (!dbEnabled() || !(amount > 0)) return
+  try {
+    await getPool().query('UPDATE admin_pool SET loaded = GREATEST(0, loaded - $1), updated_at = now() WHERE id = 1', [amount])
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Owner's real-money view: pool loaded, remaining (loaded − real cost) and profit. */
 // Start a free trial if allowed. Enforces the daily cap (cost guard) and a light
 // anti-reuse: a fingerprint or IP that already tried within 30 days is refused.
 // Fails OPEN (allows the trial) if there's no DB or a transient error, so a
@@ -1640,6 +1863,22 @@ export async function touchVisit(
   }
 }
 
+export interface UserActivityRow {
+  email: string
+  sessions: number
+  seconds: number
+  actions: number
+  messages: number
+  last_seen: string
+  last_ip: string
+  city: string
+  country: string
+  code: string
+  device: string
+  browser: string
+  blocked: boolean
+  balance: number
+}
 
 export interface UserSessionRow {
   email: string
@@ -1656,15 +1895,11 @@ export interface UserSessionRow {
 // The owner's per-USER activity: WHO signed in, from what IP/place/device,
 // how long they stayed (presence pings), how active they were, plus their
 // latest sessions one by one. Admin only.
-// AUDIT ADMIN (3 aug, tab Utilizatori): o eroare de DB întorcea {users:[],
-// sessions:[]} cu 200 — panoul afișa „încă nu s-a strâns activitate", o
-// afirmație nemăsurată (forma „Cardul: necreat"). Acum: null la eșec → ruta
-// răspunde 500, panoul spune „nu pot citi", nu „nu există activitate".
 export async function getUserActivity(): Promise<{
   users: UserActivityRow[]
   sessions: UserSessionRow[]
-} | null> {
-  if (!dbEnabled()) return null
+}> {
+  if (!dbEnabled()) return { users: [], sessions: [] }
   try {
     const pool = getPool()
     const users = (
@@ -1704,23 +1939,53 @@ export async function getUserActivity(): Promise<{
     ).rows
     return { users, sessions }
   } catch {
-    return null
+    return { users: [], sessions: [] }
   }
 }
 
+export interface DemoRecent {
+  kind: 'visit' | 'demo'
+  ip: string
+  country: string
+  code: string
+  city: string
+  region: string
+  isp: string
+  browser: string
+  os: string
+  device: string
+  lang: string
+  referrer: string
+  is_bot: boolean
+  started_at: string
+  // For a DEMO row: the throwaway email whose conversation the owner can open.
+  // Empty for plain visits (they never chatted).
+  session_email: string
+  // CE L-A INTERESAT: prima întrebare/temă a vizitatorului din proba demo (semnal
+  // real de interes). Gol pentru vizitele fără chat.
+  topic: string
+}
 
+export interface DemoStats {
+  total: number
+  today: number
+  bots: number
+  visitsTotal: number
+  visitsToday: number
+  byCountry: { country: string; code: string; count: number }[]
+  recent: DemoRecent[]
+}
 
 // The owner's visitor analytics (admin only): EVERY site visit — totals, a
 // breakdown by country, and the latest arrivals with their full profile.
-// The "demo probes" half is DEAD (nothing writes demo_uses anymore), so we no
-// longer query that table; the demo fields stay 0/empty so the SHAPE of the
-// DemoStats type doesn't change (the frontend doesn't break).
-// AUDIT ADMIN (3 aug, tab Vizitatori): o eroare de DB întorcea `empty`
-// (visitsTotal:0, bots:0) cu 200 — cardurile arătau „Vizite 0/0" ca măsurătoare,
-// fix tiparul „£0.00" din 30 iul. Acum: null la eșec (ruta răspunde 500, panoul
-// scrie „nu pot citi"), zerourile rămân DOAR pentru o citire reușită.
-export async function getDemoStats(): Promise<DemoStats | null> {
-  if (!dbEnabled()) return null
+// Jumătatea „probe demo" e MOARTĂ (nimic nu mai scrie demo_uses), deci nu mai
+// interogăm tabela; câmpurile de demo rămân 0/goale ca FORMA tipului DemoStats
+// să nu se schimbe (frontend-ul nu crapă).
+export async function getDemoStats(): Promise<DemoStats> {
+  const empty: DemoStats = {
+    total: 0, today: 0, bots: 0, visitsTotal: 0, visitsToday: 0, byCountry: [], recent: [],
+  }
+  if (!dbEnabled()) return empty
   try {
     const pool = getPool()
     const vCounts = (
@@ -1757,23 +2022,10 @@ export async function getDemoStats(): Promise<DemoStats | null> {
         started_at: string
         session_email: string
         topic: string
-        tz: string
-        vizite_anterioare: number
       }>(
-        // FULL VISIT PROFILE (Adrian, 31 Jul: "visitors, this field must give
-        // full information about the visit"). Two things that change how you
-        // read a row were missing: the TIMEZONE (the `tz` column existed in
-        // the table and wasn't read — it tells you HIS time, not yours) and
-        // whether it's the FIRST visit or a returning one (same fingerprint
-        // earlier). A visitor coming back for the third time is not the same
-        // thing as one who landed on the site once.
-        `SELECT 'visit'::text AS kind, v.ip, v.country, v.country_code, v.city, v.region, v.isp,
-                v.browser, v.os, v.device, v.lang, v.referrer, v.is_bot, v.started_at,
-                '' AS session_email, '' AS topic, v.tz,
-                (SELECT COUNT(*)::int - 1 FROM visits p
-                  WHERE p.fingerprint = v.fingerprint AND p.fingerprint <> ''
-                    AND p.started_at <= v.started_at) AS vizite_anterioare
-         FROM visits v ORDER BY v.started_at DESC LIMIT 60`,
+        `SELECT 'visit'::text AS kind, ip, country, country_code, city, region, isp,
+                browser, os, device, lang, referrer, is_bot, started_at, '' AS session_email, '' AS topic
+         FROM visits ORDER BY started_at DESC LIMIT 60`,
       )
     ).rows.map((r) => ({
       kind: r.kind,
@@ -1792,8 +2044,6 @@ export async function getDemoStats(): Promise<DemoStats | null> {
       started_at: r.started_at,
       session_email: r.session_email,
       topic: r.topic ?? '',
-      tz: r.tz ?? '',
-      vizite_anterioare: Math.max(0, Number(r.vizite_anterioare ?? 0)),
     }))
     return {
       total: 0,
@@ -1805,39 +2055,39 @@ export async function getDemoStats(): Promise<DemoStats | null> {
       recent,
     }
   } catch {
-    return null
+    return empty
   }
 }
 
-// ── THE OWNER'S REAL ACCOUNTING — NOTHING DECLARED BY HAND ──────────────────
-//
-// Adrian, 30 Jul: "one single pocket, remove the lies from the platform; only
-// REAL remains, no hardcode."
-//
-// What there was before: `loaded` — a figure TYPED into the panel ("+ Add
-// money" / "− Take out money") — and `remaining = loaded − spent`. Nothing
-// ever checked it against Stripe or OpenRouter. Meaning the panel could show
-// "you still have £50" while the provider account was at zero. A figure the
-// man writes is not a measurement, it's an opinion — and with money, an
-// opinion displayed as fact is a lie. DELETED, together with the buttons that
-// wrote it.
-//
-// What remains here is ONLY measurements:
-//   • `spent`  — the sum of the REAL costs reported by providers on each call
-//                (cost_events, written by recordCost from their response);
-//   • `profit` — the sum of margins from the payments ledger (billing_events),
-//                which comes from real verified payments, not estimates.
-// The actual pocket (how much you have left) is NO LONGER kept here: it's read
-// LIVE from the Revolut account (through Enable Banking). (Soldul OpenRouter a
-// dispărut odată cu furnizorul — extirpat, 3 aug; starea creierului Gemini se
-// vede prin pingul live geminiLive().) The source of truth is with the bank.
-//
-// AICI A STAT `getAdminAccount` (spent/profit). ȘTEARSĂ (auditul admin, 3 aug):
-// `spent` era EXACT suma pe care tabul Bani o citește deja din getCostSummary
-// (același SELECT SUM(cost_usd)), `profit` nu era desenat nicăieri, iar la
-// eșec funcția inventa {spent:0, profit:0} — fix tiparul „£0.00" din 30 iul.
-// Consumatorii ei (ruta /api/admin/pool, câmpul `pool` din brain-credit și
-// spent/profit din finance) au fost scoși odată cu ea.
+export async function getAdminAccount(): Promise<{
+  loaded: number
+  remaining: number
+  spent: number
+  profit: number
+}> {
+  const empty = { loaded: 0, remaining: 0, spent: 0, profit: 0 }
+  if (!dbEnabled()) return empty
+  try {
+    const pool = getPool()
+    const loaded = Number(
+      (await pool.query<{ loaded: string }>('SELECT loaded FROM admin_pool WHERE id = 1')).rows[0]?.loaded ?? 0,
+    )
+    const costUsd = Number(
+      (await pool.query<{ t: string | null }>('SELECT COALESCE(SUM(cost_usd),0) AS t FROM cost_events')).rows[0]?.t ?? 0,
+    )
+    const spent = costUsd * config.stripe.usdToCurrency
+    const profit = Number(
+      (
+        await pool.query<{ t: string | null }>(
+          "SELECT COALESCE(SUM(amount),0) AS t FROM billing_events WHERE kind = 'profit'",
+        )
+      ).rows[0]?.t ?? 0,
+    )
+    return { loaded, remaining: loaded - spent, spent, profit }
+  } catch {
+    return empty
+  }
+}
 
 // Record the real provider cost of one AI call (admin-only accounting).
 export async function recordCost(email: string, kind: string, costUsd: number): Promise<void> {
@@ -1849,49 +2099,6 @@ export async function recordCost(email: string, kind: string, costUsd: number): 
     )
   } catch {
     // Never break a request because metering failed.
-  }
-}
-
-// EVIDENȚA TIMPILOR (Adrian, 3 aug). Fire-and-forget, ca recordCost — nu rupe
-// niciodată tura dacă măsurarea eșuează. `ms` = durata reală a creierului.
-export interface TaskTiming {
-  email: string
-  kind: string
-  model?: string | null
-  ms: number
-  ok?: boolean
-  rounds?: number | null
-}
-export async function recordTiming(t: TaskTiming): Promise<void> {
-  if (!dbEnabled() || !(t.ms >= 0)) return
-  try {
-    await getPool().query(
-      'INSERT INTO task_timings (user_email, kind, model, ms, ok, rounds) VALUES ($1,$2,$3,$4,$5,$6)',
-      [t.email, t.kind, t.model ?? null, Math.round(t.ms), t.ok ?? true, t.rounds ?? null],
-    )
-  } catch {
-    // Never break a request because timing failed.
-  }
-}
-
-export interface TimingRow {
-  kind: string
-  model: string | null
-  ms: number
-  ok: boolean
-  rounds: number | null
-  created_at: string
-}
-export async function recentTimings(limit = 500): Promise<TimingRow[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = await getPool().query<TimingRow>(
-      'SELECT kind, model, ms, ok, rounds, created_at FROM task_timings ORDER BY created_at DESC LIMIT $1',
-      [Math.max(1, Math.min(5000, limit))],
-    )
-    return r.rows
-  } catch {
-    return []
   }
 }
 
@@ -1924,107 +2131,30 @@ export interface CostSummary {
   total: number
   today: number
   byKind: Record<string, number>
-  /** How much of `total` comes from a provider MEASUREMENT (OpenRouter
-   *  `usage.cost` — the money it said it took). */
-  masurat: number
-  /** How much is OUR ESTIMATE, with fixed rates written in `cost.ts` (voice
-   *  minutes × $0.35, TTS characters, Serper calls…). It's not what it cost —
-   *  it's what we believe it cost. Adrian, 31 Jul: "where did the $504 value
-   *  come from?" — from here, and it should have been written from the
-   *  start. */
-  estimat: number
-  /** What kind of figure each row is, so the panel can't present it wrong. */
-  felul: Record<string, 'masurat' | 'estimat'>
 }
 
-// The only kind of cost that comes MEASURED from the provider: brain calls,
-// where OpenRouter returns `usage.cost` with its real money. Everything else
-// is fixed rates I wrote — useful as an order of magnitude, false as "real".
-// 'gemini' și 'image' SCOASE de aici (agenții de debug, 3 aug, verdict REAL):
-// după migrarea pe cheia Tier 2, Google NU întoarce dolari în răspuns —
-// tokenii sunt măsurați, dar prețul e tariful publicat scris de mână
-// (geminiDirect.ts) → după chiar definiția acestui set, e „estimat", nu
-// „măsurat". Un 0 (sau orice produs tarif×tokeni) afișat ca „măsurat" e exact
-// cifra falsă din regula #1.
-const COSTURI_MASURATE = new Set(['chat', 'memory'])
-
-// ── PASTILA GEMINI (Adrian, 3 aug: „vreau să văd și aici creditul de la gemini") ─
-// Gemini Tier 2 e plătit postpaid pe contul Google al ownerului — nu are un
-// „sold" ca OpenRouter. Măsura ONESTĂ e cheltuiala reală făcută pe apelurile
-// google-direct, luată din PROPRIUL nostru jurnal (cost_events, kind='gemini',
-// scris cu usageMetadata-ul lui Gemini). Luna curentă, ca pastila OpenAI.
-// Întotdeauna „live" (e jurnalul nostru, mereu citibil); 0 REAL înseamnă 0
-// cheltuit luna asta, nu o citire eșuată.
-/** ── CHELTUIALA LUNII PE FURNIZOR (Adrian, 8 aug: „raportarea reală a
- *  creditului rămas pe fiecare AI") ─────────────────────────────────────────
- *
- *  Citirea de mai jos era lipită de `kind = 'gemini'`. Ca să pot spune, pentru
- *  FIECARE furnizor, cât s-a dus din creditul lui, suma trebuie să se poată
- *  cere pe orice set de feluri. Un fel care se termină în `*` e prefix — vocea
- *  se înregistrează ca `tts:google`, `tts:eleven` etc., deci `tts:*`.
- *
- *  `ok:false` NU e „0 dolari": e „n-am putut citi". Apelantul e obligat să facă
- *  diferența — de-aia cifra vine împreună cu ea, nu singură. */
-export async function cheltuialaLunaPeKinduri(kinds: string[]): Promise<{ ok: boolean; usd: number }> {
-  if (!dbEnabled() || kinds.length === 0) return { ok: false, usd: 0 }
-  const exacte = kinds.filter((k) => !k.endsWith('*'))
-  const prefixe = kinds.filter((k) => k.endsWith('*')).map((k) => `${k.slice(0, -1)}%`)
+// Costul de AZI, pe motoare (Adrian, 11 iul, aprobat: „6 da" — raportul zilnic
+// de bani): doar evenimentele zilei curente, grupate pe fel, cele mai scumpe
+// primele. Abonamentele fixe (Kimi/GLM) nu trec pe aici — doar API-urile
+// plătite la consum (tts/asr/memory/chat-API/căutare/imagini).
+export async function getCostToday(): Promise<{ kind: string; sum: number }[]> {
+  if (!dbEnabled()) return []
   try {
-    const r = await getPool().query<{ s: string | null }>(
-      `SELECT COALESCE(SUM(cost_usd), 0) AS s
-         FROM cost_events
-        WHERE created_at >= date_trunc('month', now())
-          AND (kind = ANY($1::text[]) OR kind LIKE ANY($2::text[]))`,
-      [exacte, prefixe],
+    const r = await getPool().query<{ kind: string; sum: string }>(
+      `SELECT kind, SUM(cost_usd) AS sum FROM cost_events
+        WHERE created_at >= date_trunc('day', now())
+        GROUP BY kind ORDER BY SUM(cost_usd) DESC`,
     )
-    return { ok: true, usd: Number(r.rows[0]?.s ?? 0) }
+    return r.rows.map((x) => ({ kind: x.kind, sum: Number(x.sum) }))
   } catch {
-    return { ok: false, usd: 0 }
+    return []
   }
 }
 
-export async function getGeminiMonthUsd(): Promise<{ ok: boolean; monthUsd: number }> {
-  const r = await cheltuialaLunaPeKinduri(['gemini'])
-  return { ok: r.ok, monthUsd: r.usd }
-}
-
-/** ── RESETTING THE CONSUMPTION COUNTERS ─────────────────────────────────────
- *
- *  Adrian, 30 Jul: "reset all counters to 0; only the AI money, let it
- *  reflect what credits are now; for the rest, zero out what was consumed."
- *  And immediately: "it must be put in the right place, because credits once
- *  consumed do NOT get refunded."
- *
- *  That's why we delete EXACTLY one thing: `cost_events` — the journal of our
- *  costs at providers, i.e. "how much it cost us". This counter is only
- *  history; nobody reads it to decide anything.
- *
- *  INTENTIONALLY UNTOUCHED:
- *    • `wallets`       — the users' credits. Consumed = consumed; putting them
- *                        back would mean a refund nobody asked for.
- *    • `billing_events`— the real payments ledger (top-ups, margins, refunds).
- *                        It's accounting; it's only deleted on account deletion.
- *    • `transactions`  — each person's purchase history.
- *
- *  The AI money (the pocket) has nothing to reset: it's read LIVE from the
- *  bank account (through Enable Banking) and from the brain provider, so it
- *  always reflects what's there now. */
-export async function resetCostCounters(): Promise<{ ok: boolean; sterse: number }> {
-  if (!dbEnabled()) return { ok: false, sterse: 0 }
+export async function getCostSummary(): Promise<CostSummary> {
+  const empty: CostSummary = { total: 0, today: 0, byKind: {} }
+  if (!dbEnabled()) return empty
   try {
-    const r = await getPool().query('DELETE FROM cost_events')
-    return { ok: true, sterse: r.rowCount ?? 0 }
-  } catch {
-    return { ok: false, sterse: 0 }
-  }
-}
-
-/** Rezumatul costurilor, ca CITIRE (M7b, 8 aug — ultima rămasă): `getCostSummary`
- *  întorcea zerouri și când baza era picată — fix tiparul „£0.00" din 30 iul,
- *  o citire eșuată prezentată ca fapt. Acum: ori cifrele măsurate, ori
- *  `{citit:false, motiv}` — iar consumatorii spun „nu pot citi", nu „0". */
-export async function citesteRezumatCost(): Promise<Citire<CostSummary>> {
-  return citireDb('citirea jurnalului de cost', async () => {
     const pool = getPool()
     const totals = await pool.query<{ total: string | null; today: string | null }>(
       `SELECT
@@ -2036,26 +2166,15 @@ export async function citesteRezumatCost(): Promise<Citire<CostSummary>> {
       'SELECT kind, SUM(cost_usd) AS sum FROM cost_events GROUP BY kind',
     )
     const byKind: Record<string, number> = {}
-    const felul: Record<string, 'masurat' | 'estimat'> = {}
-    let masurat = 0
-    let estimat = 0
-    for (const r of kinds.rows) {
-      const v = Number(r.sum)
-      byKind[r.kind] = v
-      const e = COSTURI_MASURATE.has(r.kind)
-      felul[r.kind] = e ? 'masurat' : 'estimat'
-      if (e) masurat += v
-      else estimat += v
-    }
+    for (const r of kinds.rows) byKind[r.kind] = Number(r.sum)
     return {
       total: Number(totals.rows[0]?.total ?? 0),
       today: Number(totals.rows[0]?.today ?? 0),
       byKind,
-      masurat,
-      estimat,
-      felul,
     }
-  })
+  } catch {
+    return empty
+  }
 }
 
 // Per-user speech language — persists across sessions for as long as the user
@@ -2065,7 +2184,7 @@ export async function getSpeechLang(email: string): Promise<string | null> {
   try {
     const r = await getPool().query<{ speech_lang: string | null }>(
       'SELECT speech_lang FROM user_prefs WHERE user_email = $1',
-      [userKey(email)],
+      [email],
     )
     return r.rows[0]?.speech_lang ?? null
   } catch {
@@ -2080,7 +2199,7 @@ export async function setSpeechLangPref(email: string, lang: string): Promise<vo
       `INSERT INTO user_prefs (user_email, speech_lang, updated_at)
        VALUES ($1, $2, now())
        ON CONFLICT (user_email) DO UPDATE SET speech_lang = $2, updated_at = now()`,
-      [userKey(email), lang],
+      [email, lang],
     )
   } catch {
     // Never break the chat because persistence failed.
@@ -2094,39 +2213,11 @@ export async function getMeserieActiva(email: string): Promise<number | null> {
   try {
     const r = await getPool().query<{ meserie_activa: number | null }>(
       'SELECT meserie_activa FROM user_prefs WHERE user_email = $1',
-      [userKey(email)],
+      [email],
     )
     return r.rows[0]?.meserie_activa ?? null
   } catch {
     return null
-  }
-}
-
-/** The voice chosen by the user (null = the app's default). */
-export async function getVoicePref(email: string): Promise<string | null> {
-  if (!dbEnabled()) return null
-  try {
-    const r = await getPool().query<{ voice: string | null }>(
-      'SELECT voice FROM user_prefs WHERE user_email = $1',
-      [userKey(email)],
-    )
-    return r.rows[0]?.voice ?? null
-  } catch {
-    return null
-  }
-}
-
-export async function setVoicePref(email: string, voice: string | null): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query(
-      `INSERT INTO user_prefs (user_email, voice, updated_at)
-       VALUES ($1, $2, now())
-       ON CONFLICT (user_email) DO UPDATE SET voice = $2, updated_at = now()`,
-      [userKey(email), voice],
-    )
-  } catch {
-    // Don't break the voice if saving the preference fails.
   }
 }
 
@@ -2137,66 +2228,10 @@ export async function setMeserieActivaPref(email: string, id: number | null): Pr
       `INSERT INTO user_prefs (user_email, meserie_activa, updated_at)
        VALUES ($1, $2, now())
        ON CONFLICT (user_email) DO UPDATE SET meserie_activa = $2, updated_at = now()`,
-      [userKey(email), id],
+      [email, id],
     )
   } catch {
     // Never break the chat because persistence failed.
-  }
-}
-
-// ── AUTO TOP-UP (the checkbox in Settings / on the credits page) ────────────
-// Same single-key persistence pattern as the other preferences. The shape is
-// always returned complete (defaults included), so the UI never guesses.
-export interface AutoRechargePrefs {
-  enabled: boolean
-  /** credits — below this, the app prepares the payment automatically */
-  threshold: number
-  /** pounds — the pack prepared each time (multiple of 5, like any top-up) */
-  topupAmount: number
-}
-
-export async function getAutoRecharge(email: string): Promise<AutoRechargePrefs> {
-  // The defaults are OWNER SETTINGS from config (Billing section), not magic
-  // numbers buried here — threshold in credits, amount in display currency.
-  const def: AutoRechargePrefs = {
-    enabled: false,
-    threshold: config.billing.autoRechargeThreshold,
-    topupAmount: config.billing.autoRechargeAmount,
-  }
-  if (!dbEnabled()) return def
-  try {
-    const r = await getPool().query<{
-      autorecharge_enabled: boolean
-      autorecharge_threshold: number
-      autorecharge_amount: number
-    }>(
-      'SELECT autorecharge_enabled, autorecharge_threshold, autorecharge_amount FROM user_prefs WHERE user_email = $1',
-      [userKey(email)],
-    )
-    const row = r.rows[0]
-    if (!row) return def
-    return {
-      enabled: !!row.autorecharge_enabled,
-      threshold: Number(row.autorecharge_threshold ?? def.threshold),
-      topupAmount: Number(row.autorecharge_amount ?? def.topupAmount),
-    }
-  } catch {
-    return def
-  }
-}
-
-export async function setAutoRecharge(email: string, p: AutoRechargePrefs): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query(
-      `INSERT INTO user_prefs (user_email, autorecharge_enabled, autorecharge_threshold, autorecharge_amount, updated_at)
-       VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (user_email) DO UPDATE
-         SET autorecharge_enabled = $2, autorecharge_threshold = $3, autorecharge_amount = $4, updated_at = now()`,
-      [userKey(email), p.enabled, p.threshold, p.topupAmount],
-    )
-  } catch {
-    // Never break the app because a preference failed to save.
   }
 }
 
@@ -2222,14 +2257,17 @@ export interface UserSummary {
   last: string
 }
 
-export async function citesteUtilizatori(): Promise<Citire<UserSummary[]>> {
-  return citireDb('citirea utilizatorilor', async () => {
+export async function listUsers(): Promise<UserSummary[]> {
+  if (!dbEnabled()) return []
+  try {
     const r = await getPool().query<UserSummary>(
       `SELECT user_email AS email, COUNT(*)::int AS count, MAX(created_at) AS last
        FROM messages GROUP BY user_email ORDER BY last DESC`,
     )
     return r.rows
-  })
+  } catch {
+    return []
+  }
 }
 
 export interface HistoryRow {
@@ -2238,15 +2276,18 @@ export interface HistoryRow {
   created_at: string
 }
 
-export async function citesteIstoric(email: string, limit = 1000): Promise<Citire<HistoryRow[]>> {
-  return citireDb('citirea istoricului', async () => {
+export async function getHistory(email: string, limit = 1000): Promise<HistoryRow[]> {
+  if (!dbEnabled()) return []
+  try {
     const r = await getPool().query<HistoryRow>(
       `SELECT role, content, created_at FROM messages
        WHERE user_email = $1 ORDER BY created_at ASC LIMIT $2`,
       [email, limit],
     )
     return r.rows
-  })
+  } catch {
+    return []
+  }
 }
 
 // The LAST n messages (chronological) — what the chat panel reloads at start
@@ -2298,20 +2339,19 @@ export async function searchMemories(
 ): Promise<Memory[]> {
   if (!dbEnabled() || words.length === 0) return []
   try {
-    // Real full-text (Adrian, 11 Jul): each keyword is an OR term in the
-    // query, with PREFIX MATCHING (`:*`) — it finds memories containing ANY
-    // word that STARTS with the search term (cafea → cafeaua, catches the
-    // Romanian plural/declension without a language dictionary), in ANY
-    // order, not just an exact literal substring. PROVEN with real tests
-    // (local Postgres): 'simple' config without prefix missed "cafeaua" when
-    // searching "cafea" (a regression vs ILIKE) — the prefix fixes exactly
-    // that. Results are SORTED by relevance (`ts_rank`), not just recency —
-    // an old but highly relevant fact is no longer buried by a recent but
-    // off-topic one.
-    // Each token must remain ONE alphanumeric word — everything else (spaces,
-    // punctuation, tsquery operators) REMOVED completely, not just replaced
-    // with a space (a leftover internal space breaks to_tsquery syntax, proven
-    // with a real test: "o'reilly!" → "o reilly" → syntax error).
+    // Full-text real (Adrian, 11 iul): fiecare cuvânt-cheie e un termen OR în
+    // interogare, cu POTRIVIRE DE PREFIX (`:*`) — găsește amintiri care conțin
+    // ORICE cuvânt ce ÎNCEPE cu termenul căutat (cafea → cafeaua, prinde
+    // pluralul/declinarea ro fără dicționar de limbă), în ORICE ordine, nu doar
+    // un substring literal exact. DOVEDIT cu teste reale (Postgres local): config
+    // 'simple' fără prefix rata "cafeaua" la căutarea "cafea" (regresie față de
+    // ILIKE) — prefixul repară exact asta. Rezultatele sunt SORTATE după
+    // relevanță (`ts_rank`), nu doar recență — un fapt vechi dar foarte relevant
+    // nu mai e îngropat de unul recent dar nepotrivit.
+    // Fiecare token trebuie să rămână UN singur cuvânt alfanumeric — orice
+    // rest (spații, punctuație, operatori tsquery) SCOS complet, nu doar
+    // înlocuit cu spațiu (un rest de spațiu intern rupe sintaxa to_tsquery,
+    // dovedit cu un test real: "o'reilly!" → "o reilly" → eroare de sintaxă).
     const clean = words
       .slice(0, 8)
       .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
@@ -2334,10 +2374,9 @@ export async function searchMemories(
   }
 }
 
-// Forgetting on demand (#20, Adrian 10 Jul): the user is the master of his
-// memory — "forget that..." deletes the facts matching the fragment. Returns
-// how many were deleted, so Kelion can confirm honestly (0 = found nothing to
-// forget).
+// Uitare la cerere (#20, Adrian 10 iul): userul e stăpân pe memoria lui —
+// „uită că..." șterge faptele care se potrivesc fragmentului. Întoarce câte au
+// fost șterse, ca Kelion să confirme sincer (0 = n-a găsit nimic de uitat).
 export async function deleteMemory(
   email: string,
   fragment: string,
@@ -2365,7 +2404,7 @@ export interface CapabilityGap {
   hits: number
   resolved: boolean
   escalated?: boolean
-  // Kelion's autonomous decision ("TO IMPLEMENT: ..." / "AUTONOMOUSLY CLOSED: ...").
+  // Decizia autonomă a lui Kelion („DE IMPLEMENTAT: ..." / „ÎNCHIS AUTONOM: ...").
   triage?: string | null
   created_at: string
   last_seen: string
@@ -2403,103 +2442,9 @@ export async function logCapabilityGap(email: string, request: string, reason = 
 }
 
 /** Open capability gaps, most-requested / most-recent first (admin only). */
-// ── REQUIREMENTS: a single place, with the whole journey ────────────────────
-export interface Cerinta {
-  id: number
-  text: string
-  sursa: string
-  stare: string
-  criteriu: string | null
-  prioritate: number
-  dificultate: number
-  optiuni: string | null
-  aleasa: string | null
-  dovada: string | null
-  job_id: number | null
-  pr_url: string | null
-  created_at: Date
-  updated_at: Date
-}
-
-/** Write a requirement. Duplicates are not added: same request, same row —
- *  otherwise the list would fill with variations of the same thing and it
- *  would stop being management and become noise. */
-export async function adaugaCerinta(
-  text: string,
-  sursa = 'owner',
-  criteriu?: string,
-  prioritate = 5,
-): Promise<number> {
-  if (!dbEnabled()) return 0
-  const t = text.trim().slice(0, 4000)
-  if (!t) return 0
-  try {
-    const dej = await getPool().query<{ id: string | number }>(
-      `SELECT id FROM cerinte WHERE lower(text) = lower($1) AND stare <> 'respinsa' LIMIT 1`,
-      [t],
-    )
-    if (dej.rows[0]) return Number(dej.rows[0].id)
-    const r = await getPool().query<{ id: string | number }>(
-      'INSERT INTO cerinte (text, sursa, criteriu, prioritate) VALUES ($1,$2,$3,$4) RETURNING id',
-      [t, sursa, criteriu ?? null, Math.max(1, Math.min(9, Math.round(prioritate) || 5))],
-    )
-    return Number(r.rows[0]?.id ?? 0)
-  } catch {
-    return 0
-  }
-}
-
-export async function listeazaCerinte(stare?: string, limit = 100): Promise<Cerinta[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = stare
-      ? await getPool().query<Cerinta>(
-          'SELECT * FROM cerinte WHERE stare = $1 ORDER BY prioritate ASC, created_at ASC LIMIT $2',
-          [stare, limit],
-        )
-      : await getPool().query<Cerinta>('SELECT * FROM cerinte ORDER BY created_at DESC LIMIT $1', [limit])
-    return r.rows
-  } catch {
-    return []
-  }
-}
-
-/** Move the requirement along its journey. Only the given fields are touched
- *  — the rest stay. */
-export async function actualizeazaCerinta(
-  id: number,
-  p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url' | 'prioritate' | 'dificultate'>> & { job_id?: number },
-): Promise<void> {
-  if (!dbEnabled() || !id) return
-  const campuri: string[] = []
-  const val: unknown[] = [id]
-  for (const [k, v] of Object.entries(p)) {
-    if (v === undefined) continue
-    val.push(v)
-    campuri.push(`${k} = $${val.length}`)
-  }
-  if (!campuri.length) return
-  try {
-    await getPool().query(`UPDATE cerinte SET ${campuri.join(', ')}, updated_at = now() WHERE id = $1`, val)
-  } catch {
-    /* never break the turn for a bookkeeping write */
-  }
-}
-
-/** How many days a RESOLVED gap stays in the list before it removes itself. */
-const ZILE_GOL_REZOLVAT = 7
-
 export async function getCapabilityGaps(includeResolved = false, limit = 200): Promise<CapabilityGap[]> {
   if (!dbEnabled()) return []
   try {
-    // SELF-CLEANING (Adrian, 31 Jul: "what's with all these? if they're no
-    // longer needed they must self-clean"). The panel held requests marked
-    // "Resolved" from 27-28 Jul — some saying "I have no code tools", about
-    // tools it has had since. A resolved row stays a week (so you see it if
-    // you look in those days), then leaves by itself. No button to press.
-    void getPool()
-      .query(`DELETE FROM capability_gaps WHERE resolved = true AND last_seen < now() - interval '${ZILE_GOL_REZOLVAT} days'`)
-      .catch(() => {})
     const where = includeResolved ? '' : 'WHERE resolved = false'
     const r = await getPool().query<CapabilityGap>(
       `SELECT id, user_email, request, reason, hits, resolved, escalated, triage, created_at, last_seen
@@ -2523,27 +2468,27 @@ export async function setGapResolved(id: number, resolved: boolean): Promise<voi
   }
 }
 
-/** Șterge DEFINITIV o cerere neacoperită (Adrian, 3 aug: „trebuie să aibă
- *  butoane de ștergere, sau rezolvate și arhivate"). Rezolvarea = arhivare
- *  (rândul iese din lista implicită, rămâne la „toate"); asta e ștergerea
- *  adevărată, pentru zgomot/duplicate. `true` doar dacă rândul chiar a existat. */
-export async function deleteCapabilityGap(id: number): Promise<boolean> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
-  try {
-    const r = await getPool().query('DELETE FROM capability_gaps WHERE id = $1', [id])
-    return (r.rowCount ?? 0) > 0
-  } catch {
-    return false
-  }
-}
-
-/** Kelion's triage decision on a gap (+ any automatic closing). */
+/** Decizia de triaj a lui Kelion pe un gap (+ eventuala închidere automată). */
 export async function setGapTriage(id: number, triage: string, resolved: boolean): Promise<void> {
   if (!dbEnabled()) return
   try {
     await getPool().query(
       'UPDATE capability_gaps SET triage = $2, triaged_at = now(), resolved = $3 WHERE id = $1',
       [id, triage.slice(0, 500), resolved],
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Mark a gap as sent to the brain (escalated) — it stays visible, tagged, until
+ * a successful deploy clears it automatically. */
+export async function markGapEscalated(id: number): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      'UPDATE capability_gaps SET escalated = true, escalated_at = now() WHERE id = $1',
+      [id],
     )
   } catch {
     /* non-fatal */
@@ -2560,8 +2505,8 @@ export async function addMemory(email: string, content: string, agent = 'kelion'
        ON CONFLICT (user_email, agent, content) DO UPDATE SET last_seen = now()`,
       [email, agent, c],
     )
-    // The meaning vector, ASYNCHRONOUSLY (doesn't hold the turn): if the
-    // embedding fails, the memory stays anyway — full-text finds it by words.
+    // Vectorul de înțeles, ASINCRON (nu ține tura pe loc): dacă embedding-ul
+    // pică, amintirea rămâne oricum — full-text-ul o găsește după cuvinte.
     if (embeddingsEnabled()) {
       void embedText(c)
         .then((v) => {
@@ -2579,9 +2524,9 @@ export async function addMemory(email: string, content: string, agent = 'kelion'
   }
 }
 
-// BACKFILL (12 Jul): memories from before semantic memory also get a vector,
-// in small batches (called periodically from index.ts) — after a few hours the
-// whole past is searchable by meaning. Negligible cost (Gemini embeddings).
+// BACKFILL (12 iul): amintirile de dinaintea memoriei semantice primesc și ele
+// vector, în loturi mici (apelat periodic din index.ts) — după câteva ore tot
+// trecutul e căutabil după sens. Cost neglijabil (embeddings Gemini).
 export async function backfillMemoryEmbeddings(batch = 40): Promise<number> {
   if (!dbEnabled() || !embeddingsEnabled()) return 0
   try {
@@ -2605,10 +2550,9 @@ export async function backfillMemoryEmbeddings(batch = 40): Promise<number> {
   }
 }
 
-// SEMANTIC RECALL (12 Jul): the memories closest in MEANING to the question —
-// complements full-text (which requires shared words). The vectors of the last
-// ~400 memories are compared in Node (cosine); a threshold so we don't inject
-// noise.
+// RECALL SEMANTIC (12 iul): amintirile cele mai apropiate ca SENS de întrebare
+// — completează full-text-ul (care cere cuvinte comune). Vectorii ultimelor
+// ~400 de amintiri se compară în Node (cosine); prag ca să nu injectăm zgomot.
 export async function semanticMemories(
   email: string,
   agent: string,
@@ -2639,7 +2583,7 @@ export async function semanticMemories(
   }
 }
 
-// ── Explicit user notes ("remember this") ──
+// ── Explicit user notes ("reține asta") ──
 
 export interface Note {
   id: number
@@ -2688,7 +2632,7 @@ export async function deleteNote(email: string, id: number): Promise<boolean> {
   }
 }
 
-// ── KELION'S SELF-EXPANSION — tools proposed by it, approved by the owner ───
+// ── AUTO-EXTINDEREA LUI KELION — unelte propuse de el, aprobate de owner ──────
 export interface KelionTool {
   id: number
   name: string
@@ -2702,7 +2646,7 @@ export interface KelionTool {
   createdAt: string
 }
 
-/** Kelion proposes a new tool (stays 'pending' until the owner approves). */
+/** Kelion propune o unealtă nouă (rămâne 'pending' până aprobă owner-ul). */
 export async function proposeKelionTool(t: {
   name: string
   description: string
@@ -2714,7 +2658,7 @@ export async function proposeKelionTool(t: {
 }): Promise<number | null> {
   if (!dbEnabled()) return null
   const name = t.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40)
-  if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // HTTPS only
+  if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // doar HTTPS
   try {
     const r = await getPool().query<{ id: number }>(
       `INSERT INTO kelion_tools (name, description, params_json, http_method, http_url, http_headers, rationale, status)
@@ -2729,7 +2673,7 @@ export async function proposeKelionTool(t: {
   }
 }
 
-/** Kelion's tools by status ('pending' | 'approved' | 'rejected'). */
+/** Uneltele lui Kelion după status ('pending' | 'approved' | 'rejected'). */
 export async function listKelionTools(status?: string): Promise<KelionTool[]> {
   if (!dbEnabled()) return []
   try {
@@ -2747,7 +2691,7 @@ export async function listKelionTools(status?: string): Promise<KelionTool[]> {
   }
 }
 
-/** The owner approves/rejects a proposed tool (one click in admin). */
+/** Owner-ul aprobă/respinge o unealtă propusă (un click în admin). */
 export async function decideKelionTool(id: number, approve: boolean): Promise<boolean> {
   if (!dbEnabled()) return false
   try {
@@ -2796,12 +2740,12 @@ export async function saveInboundEmail(m: {
   }
 }
 
-// Which of these UIDs are ALREADY in inbound_emails. The poller's pre-filter
-// (26 Jul): lets it download the body ONLY for new messages, not for all of
-// the last 100 — bulk downloading was the cause of the timeouts that kept the
-// mailbox dead. On any error we return the empty set: the poller then
-// downloads at most the capped batch and the dedupe in saveInboundEmail
-// (ON CONFLICT) still prevents any double reply.
+// Care dintre aceste UID-uri sunt DEJA în inbound_emails. Pre-filtrul
+// pollerului (26 iul): îi permite să descarce corpul DOAR pentru mesajele noi,
+// nu pentru toate ultimele 100 — descărcarea în masă era cauza timeout-urilor
+// care au ținut cutia moartă. La orice eroare întoarcem mulțimea goală:
+// pollerul descarcă atunci cel mult lotul plafonat și dedupe-ul din
+// saveInboundEmail (ON CONFLICT) tot împiedică orice răspuns dublu.
 export async function knownInboundUids(uids: string[]): Promise<Set<string>> {
   if (!dbEnabled() || uids.length === 0) return new Set()
   try {
@@ -2844,9 +2788,6 @@ export async function listInboundEmails(limit = 50): Promise<InboundEmail[]> {
 
 export interface VoiceFeatureMeta {
   pitchMean: number
-  // The median pitch — the gender is inferred from THIS (robust to tracker
-  // spikes). Optional: old clients don't send it.
-  pitchMedian?: number
   pitchStd: number
   pitchMin: number
   pitchMax: number
@@ -2866,11 +2807,6 @@ export interface VoiceprintRow {
   features: number[]
   featureMeta: VoiceFeatureMeta
   hasAudio: boolean
-  // THE PAIRED FACE (Adrian, Aug 1: „every voiceprint must be paired with an
-  // image capture” — it WAS saved, in `faceprints`, but the panel never
-  // showed it, so it looked unexecuted). The list now joins the photo.
-  hasFace: boolean
-  facePhoto: string
   createdAt: string
   updatedAt: string
 }
@@ -2883,7 +2819,6 @@ interface VoiceprintDbRow {
   features: number[]
   feature_meta: VoiceFeatureMeta
   has_audio?: boolean
-  face_photo?: string | null
   created_at: string
   updated_at: string
 }
@@ -2897,64 +2832,25 @@ function rowToVoiceprint(r: VoiceprintDbRow): VoiceprintRow {
     features: r.features || [],
     featureMeta: r.feature_meta || ({} as VoiceFeatureMeta),
     hasAudio: !!r.has_audio,
-    hasFace: !!r.face_photo,
-    facePhoto: r.face_photo || '',
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
 }
 
-export async function saveVoiceprint(
-  v: {
-    email: string
-    name: string
-    gender: VoiceprintRow['gender']
-    isAdmin: boolean
-    features: number[]
-    featureMeta: VoiceFeatureMeta
-    audioClip?: string
-  },
-  opts: { adapt?: boolean } = {},
-): Promise<void> {
+export async function saveVoiceprint(v: {
+  email: string
+  name: string
+  gender: VoiceprintRow['gender']
+  isAdmin: boolean
+  features: number[]
+  featureMeta: VoiceFeatureMeta
+  audioClip?: string
+}): Promise<void> {
   if (!dbEnabled() || !v.email) return
   try {
-    // Plafon 256 (Adrian, 6 aug): amprenta NEURALĂ (wespeaker) are 256 de valori —
-    // vechiul cap de 64 o tăia și o rupea. Cele vechi (9/64) încap în continuare.
-    let vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 256)
-    let gender = v.gender
-    let featureMeta: VoiceFeatureMeta = v.featureMeta
-    // ADAPTATION, NOT OVERWRITE (Adrian, Aug 1: his print flip-flopped
-    // male↔female as single bad pitch readings rewrote it on every matching
-    // turn). On an adaptation save: (1) the stored GENDER wins — it was set at
-    // enrolment from a full phrase and never flips on one utterance; (2) the
-    // vector BLENDS (70% old + 30% new) so one bad read can't drag the
-    // reference away from the holder's real timbre; (3) the meta blends the
-    // same way, keeping the stored gender's pitch evidence.
-    if (opts.adapt) {
-      const cur = await getPool().query<{
-        features: number[]
-        gender: VoiceprintRow['gender']
-        feature_meta: VoiceFeatureMeta
-      }>('SELECT features, gender, feature_meta FROM voiceprints WHERE user_email = $1', [v.email.toLowerCase()])
-      const old = cur.rows[0]
-      if (old?.features?.length) {
-        if (old.gender && old.gender !== 'unknown') gender = old.gender
-        const len = Math.min(old.features.length, vec.length)
-        vec = vec.map((x, i) => (i < len ? 0.7 * old.features[i] + 0.3 * x : x))
-        const om = old.feature_meta ?? ({} as VoiceFeatureMeta)
-        featureMeta = {
-          ...v.featureMeta,
-          pitchMean: om.pitchMean ? 0.7 * om.pitchMean + 0.3 * v.featureMeta.pitchMean : v.featureMeta.pitchMean,
-          pitchMedian:
-            om.pitchMedian && v.featureMeta.pitchMedian
-              ? 0.7 * om.pitchMedian + 0.3 * v.featureMeta.pitchMedian
-              : (v.featureMeta.pitchMedian ?? om.pitchMedian),
-        }
-      }
-    }
-    // The audio sample: we only keep it if it's reasonable in size (≤ ~600KB
-    // base64, a few seconds of webm/opus). Too big → we don't store it, but
-    // identification still works.
+    const vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 64)
+    // Mostra audio: o păstrăm doar dacă e rezonabilă ca mărime (≤ ~600KB base64,
+    // câteva secunde webm/opus). Prea mare → n-o stocăm, dar identificarea merge.
     const clip = typeof v.audioClip === 'string' && v.audioClip.length <= 600_000 ? v.audioClip : ''
     await getPool().query(
       `INSERT INTO voiceprints
@@ -2963,18 +2859,17 @@ export async function saveVoiceprint(
        ON CONFLICT (user_email) DO UPDATE
          SET name = $2, gender = $3, is_admin = $4, features = $5,
              feature_meta = $6,
-             -- new clip only if one arrived; otherwise keep the old sample.
+             -- clip nou doar dacă a venit unul; altfel păstrăm mostra veche.
              audio_clip = CASE WHEN $7 <> '' THEN $7 ELSE voiceprints.audio_clip END,
              updated_at = now()`,
-      [v.email.toLowerCase(), v.name, gender, v.isAdmin, vec, JSON.stringify(featureMeta), clip],
+      [v.email.toLowerCase(), v.name, v.gender, v.isAdmin, vec, JSON.stringify(v.featureMeta), clip],
     )
   } catch {
     // Never break the chat because voiceprint persistence failed.
   }
 }
 
-// The audio sample of a voiceprint (data-URL) — only for the "play" button in
-// admin.
+// Mostra audio a unei amprente (data-URL) — doar pentru butonul „play" din admin.
 export async function getVoiceprintAudio(email: string): Promise<string | null> {
   if (!dbEnabled() || !email) return null
   try {
@@ -3014,164 +2909,13 @@ export async function deleteVoiceprint(email: string): Promise<boolean> {
   }
 }
 
-// ── GUEST VOICES (Adrian, Aug 1) ─────────────────────────────────────────────
-// The people the HOLDER explicitly allows to talk to Kelion on his account
-// (wife, son, daughter, friend...). The print + relation are remembered for
-// future chats — but ONLY after the holder approves (approve_guest_voice).
-export interface GuestVoiceRow {
-  id: number
-  accountEmail: string
-  name: string
-  relation: string
-  features: number[]
-  approved: boolean
-  hasPhoto: boolean
-  createdAt: string
-  updatedAt: string
-}
-
-interface GuestVoiceDbRow {
-  id: string
-  account_email: string
-  name: string
-  relation: string
-  features: number[]
-  approved: boolean
-  has_photo: boolean
-  created_at: Date
-  updated_at: Date
-}
-
-function rowToGuestVoice(r: GuestVoiceDbRow): GuestVoiceRow {
-  return {
-    id: Number(r.id),
-    accountEmail: r.account_email,
-    name: r.name,
-    relation: r.relation,
-    features: Array.isArray(r.features) ? r.features : [],
-    approved: r.approved,
-    hasPhoto: r.has_photo,
-    createdAt: r.created_at?.toISOString?.() ?? '',
-    updatedAt: r.updated_at?.toISOString?.() ?? '',
-  }
-}
-
-export async function saveGuestVoice(g: {
-  accountEmail: string
-  name: string
-  relation: string
-  features: number[]
-  featureMeta: unknown
-}): Promise<number | null> {
-  if (!dbEnabled() || !g.accountEmail) return null
-  try {
-    const vec = g.features.filter((x) => Number.isFinite(x)).slice(0, 64)
-    const r = await getPool().query<{ id: string }>(
-      `INSERT INTO voice_guests (account_email, name, relation, features, feature_meta, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now()) RETURNING id`,
-      [g.accountEmail.toLowerCase(), g.name, g.relation, vec, JSON.stringify(g.featureMeta ?? {})],
-    )
-    return r.rows[0] ? Number(r.rows[0].id) : null
-  } catch {
-    return null
-  }
-}
-
-export async function listGuestVoices(accountEmail: string, onlyApproved = false): Promise<GuestVoiceRow[]> {
-  if (!dbEnabled() || !accountEmail) return []
-  try {
-    const r = await getPool().query<GuestVoiceDbRow>(
-      `SELECT id, account_email, name, relation, features, approved,
-              (photo <> '') AS has_photo, created_at, updated_at
-       FROM voice_guests
-       WHERE account_email = $1 ${onlyApproved ? 'AND approved' : ''}
-       ORDER BY updated_at DESC LIMIT 50`,
-      [accountEmail.toLowerCase()],
-    )
-    return r.rows.map(rowToGuestVoice)
-  } catch {
-    return []
-  }
-}
-
-// The newest guest print still awaiting the holder's approval.
-export async function latestPendingGuest(accountEmail: string): Promise<GuestVoiceRow | null> {
-  if (!dbEnabled() || !accountEmail) return null
-  try {
-    const r = await getPool().query<GuestVoiceDbRow>(
-      `SELECT id, account_email, name, relation, features, approved,
-              (photo <> '') AS has_photo, created_at, updated_at
-       FROM voice_guests
-       WHERE account_email = $1 AND NOT approved
-       ORDER BY updated_at DESC LIMIT 1`,
-      [accountEmail.toLowerCase()],
-    )
-    return r.rows[0] ? rowToGuestVoice(r.rows[0]) : null
-  } catch {
-    return null
-  }
-}
-
-// The holder's decision on a guest print: approve (optionally correcting the
-// name/relation) or reject (the row is deleted — the voice returns to being
-// ignored).
-export async function decideGuestVoice(id: number, approve: boolean, name?: string, relation?: string): Promise<boolean> {
-  if (!dbEnabled() || !id) return false
-  try {
-    if (approve) {
-      await getPool().query(
-        `UPDATE voice_guests SET approved = true,
-           name = CASE WHEN $2 <> '' THEN $2 ELSE name END,
-           relation = CASE WHEN $3 <> '' THEN $3 ELSE relation END,
-           updated_at = now()
-         WHERE id = $1`,
-        [id, name ?? '', relation ?? ''],
-      )
-    } else {
-      await getPool().query('DELETE FROM voice_guests WHERE id = $1 AND NOT approved', [id])
-    }
-    return true
-  } catch {
-    return false
-  }
-}
-
-// The guest's photo (the camera frame that rode along on their turn).
-export async function attachGuestPhoto(id: number, photo: string): Promise<void> {
-  if (!dbEnabled() || !id || !photo) return
-  try {
-    if (photo.length > 900_000) return // same sanity cap as the voice clip
-    await getPool().query('UPDATE voice_guests SET photo = $2, updated_at = now() WHERE id = $1', [id, photo])
-  } catch {
-    /* never break the chat for a photo */
-  }
-}
-
-// Forget guest(s) by name (the holder's "uită-o pe X"). Returns how many.
-export async function forgetGuestVoices(accountEmail: string, name: string): Promise<number> {
-  if (!dbEnabled() || !accountEmail || !name) return 0
-  try {
-    const r = await getPool().query(
-      'DELETE FROM voice_guests WHERE account_email = $1 AND lower(name) = lower($2)',
-      [accountEmail.toLowerCase(), name.trim()],
-    )
-    return r.rowCount ?? 0
-  } catch {
-    return 0
-  }
-}
-
 export async function listVoiceprints(limit = 200): Promise<VoiceprintRow[]> {
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<VoiceprintDbRow>(
-      `SELECT v.user_email, v.name, v.gender, v.is_admin, v.features, v.feature_meta,
-              (v.audio_clip <> '') AS has_audio,
-              NULLIF(f.photo, '') AS face_photo,
-              v.created_at, v.updated_at
-       FROM voiceprints v
-       LEFT JOIN faceprints f ON f.user_email = v.user_email
-       ORDER BY v.updated_at DESC LIMIT $1`,
+      `SELECT user_email, name, gender, is_admin, features, feature_meta,
+              (audio_clip <> '') AS has_audio, created_at, updated_at
+       FROM voiceprints ORDER BY updated_at DESC LIMIT $1`,
       [limit],
     )
     return r.rows.map(rowToVoiceprint)
@@ -3180,38 +2924,43 @@ export async function listVoiceprints(limit = 200): Promise<VoiceprintRow[]> {
   }
 }
 
-// The common core of the two distances (normalized voice + raw face): the sum
-// of squared differences across components + the compared length. Single
-// source — the two functions differ ONLY in the final normalization (single,
-// no duplicates).
-function sumSquaredDiff(a: number[], b: number[]): { sum: number; len: number } {
+/** Euclidean distance between two equal-length vectors. */
+export function vectorDistance(a: number[], b: number[]): number {
   const len = Math.min(a.length, b.length)
+  if (len === 0) return Infinity
   let sum = 0
   for (let i = 0; i < len; i++) {
     const d = (a[i] ?? 0) - (b[i] ?? 0)
     sum += d * d
   }
-  return { sum, len }
-}
-
-/** Euclidean distance between two equal-length vectors. */
-export function vectorDistance(a: number[], b: number[]): number {
-  const { sum, len } = sumSquaredDiff(a, b)
-  if (len === 0) return Infinity
   return Math.sqrt(sum / len)
 }
 
-// Here used to live `identifyVoiceprint` — it searched through ALL voiceprints
-// for "who is speaking" (1:N). Nobody ever called it. The product rule is ONE
-// person per account (Adrian, 29 Jul), so the correct recognition is the one
-// that actually runs: 1:1 VERIFICATION — "is it the account holder or someone
-// else?" (chat.ts and realtime.ts, via vectorDistance). Deleted: abandoned
-// code, not capability.
+export async function identifyVoiceprint(
+  vector: number[],
+  threshold: number,
+): Promise<(VoiceprintRow & { distance: number }) | null> {
+  if (!dbEnabled() || vector.length === 0) return null
+  try {
+    const rows = await listVoiceprints(1000)
+    let best: (VoiceprintRow & { distance: number }) | null = null
+    for (const row of rows) {
+      if (!row.features || row.features.length === 0) continue
+      const d = vectorDistance(vector, row.features)
+      if (d < threshold && (!best || d < best.distance)) {
+        best = { ...row, distance: d }
+      }
+    }
+    return best
+  } catch {
+    return null
+  }
+}
 
-// ── Face identification by faceprint (128-d descriptor from face-api) ───────
-// Camera on + voice = Kelion automatically captures the speaker's face,
-// compares it with the account holder's reference and tells the brain
-// "holder / someone else". NO button — triggered by voice, same as voiceprint.
+// ── Face identification by faceprint (128-d descriptor de la face-api) ───────
+// Camera pornită + voce = Kelion prinde automat fața vorbitorului, o compară cu
+// referința titularului contului și îi zice creierului „titular / altcineva".
+// NICIUN buton — declanșat de voce, ca la voiceprint.
 
 export interface FaceprintRow {
   email: string
@@ -3245,11 +2994,15 @@ function rowToFaceprint(r: FaceprintDbRow): FaceprintRow {
   }
 }
 
-/** RAW Euclidean distance (not normalized) — the face-api convention,
- *  threshold ~0.6. */
+/** Distanță euclidiană BRUTĂ (nu normalizată) — convenția face-api, prag ~0.6. */
 export function faceDistance(a: number[], b: number[]): number {
-  const { sum, len } = sumSquaredDiff(a, b)
+  const len = Math.min(a.length, b.length)
   if (len === 0) return Infinity
+  let sum = 0
+  for (let i = 0; i < len; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0)
+    sum += d * d
+  }
   return Math.sqrt(sum)
 }
 
@@ -3264,8 +3017,7 @@ export async function saveFaceprint(f: {
   try {
     const vec = f.descriptor.filter((x) => Number.isFinite(x)).slice(0, 128)
     if (vec.length === 0) return
-    // We keep the thumbnail small (avoids DB bloat); if missing, we don't
-    // overwrite.
+    // Miniatura o păstrăm mică (evită umflarea DB); dacă lipsește, nu suprascriem.
     const photo = (f.photo || '').slice(0, 200_000)
     await getPool().query(
       `INSERT INTO faceprints
@@ -3296,7 +3048,31 @@ export async function getFaceprint(email: string): Promise<FaceprintRow | null> 
   }
 }
 
-// ── THE BUILDER — the build-order queue (Adrian, 27 Jul) ────────────────────
+export async function deleteFaceprint(email: string): Promise<boolean> {
+  if (!dbEnabled() || !email) return false
+  try {
+    await getPool().query('DELETE FROM faceprints WHERE user_email = $1', [email.toLowerCase()])
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function listFaceprints(limit = 200): Promise<FaceprintRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<FaceprintDbRow>(
+      `SELECT user_email, name, is_admin, descriptor, photo, created_at, updated_at
+       FROM faceprints ORDER BY updated_at DESC LIMIT $1`,
+      [limit],
+    )
+    return r.rows.map(rowToFaceprint)
+  } catch {
+    return []
+  }
+}
+
+// ── CONSTRUCTORUL — coada ordinelor de construcție (Adrian, 27 iul) ─────────
 export interface BuildJob {
   id: number
   orderedBy: string
@@ -3307,12 +3083,6 @@ export interface BuildJob {
   prUrl: string | null
   tokens: number
   log: string | null
-  progress: string | null
-  ci: string | null
-  // Aug 2: which brain ran the order ('fable-5' | 'free') and the cost in USD
-  // as measured from OpenRouter (null = not reported by the provider).
-  brain: string | null
-  costUsd: number | null
   createdAt: string
   updatedAt: string
 }
@@ -3327,10 +3097,6 @@ interface BuildJobDbRow {
   pr_url: string | null
   tokens: string | number
   log: string | null
-  progress?: string | null
-  ci?: string | null
-  brain?: string | null
-  cost_usd?: string | number | null
   created_at: Date
   updated_at: Date
 }
@@ -3346,10 +3112,6 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     prUrl: r.pr_url,
     tokens: Number(r.tokens),
     log: r.log,
-    progress: r.progress ?? null,
-    ci: r.ci ?? null,
-    brain: r.brain ?? null,
-    costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -3364,33 +3126,23 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
   return Number(r.rows[0]?.id ?? 0)
 }
 
-// Cât timp de TĂCERE (fără nicio raportare de progres) până când un ordin
-// „running" e considerat BLOCAT — worker-ul lui a murit (omorât de `timeout
-// 1800` din constructor-worker.sh) și nimeni nu-l mai duce. Era 40 de minute
-// (Adrian, 5 aug: „pleacă enorm de greu să rezolve orice cerere" — un job agățat
-// ținea coada blocată 40 de minute). E scăzut la 15: worker-ul viu trimite
-// progres la fiecare pas, iar pasul cel mai lung fără bătaie de inimă e un `npm`
-// cu timeout de 10 min — deci 15 min de tăcere = worker mort, sigur. Flock-ul de
-// pe VPS (un singur worker odată) apără oricum de dubla-execuție.
-const MIN_JOB_BLOCAT = 15
-
-// The worker takes ONE order: the oldest "queued", or a stuck "running"
-// (>15 min silent — the agent was killed by timeout). Over 2 attempts → failed,
-// so an impossible order doesn't block the queue forever.
+// Lucrătorul ia UN ordin: cel mai vechi „queued", sau un „running" înțepenit
+// (>40 min — agentul a fost omorât de timeout). Peste 2 încercări → failed,
+// ca un ordin imposibil să nu blocheze coada la nesfârșit.
 export async function claimNextBuildJob(): Promise<BuildJob | null> {
   if (!dbEnabled()) return null
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
     await client.query(
-      `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandoned: 3 attempts exhausted]', updated_at = now()
-       WHERE status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND attempts >= 3`,
+      `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandonat: 3 încercări epuizate]', updated_at = now()
+       WHERE status='running' AND updated_at < now() - interval '40 minutes' AND attempts >= 3`,
     )
     const r = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
        WHERE id = (
          SELECT id FROM build_jobs
-         WHERE status='queued' OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes')
+         WHERE status='queued' OR (status='running' AND updated_at < now() - interval '40 minutes')
          ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
        )
        RETURNING *`,
@@ -3407,207 +3159,30 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
 
 export async function reportBuildJob(
   id: number,
-  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number },
+  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string },
 ): Promise<void> {
   if (!dbEnabled()) return
   await getPool().query(
     `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
-       tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
-       updated_at = now() WHERE id = $1`,
-    [
-      id,
-      fields.status,
-      fields.branch ?? null,
-      fields.prUrl ?? null,
-      fields.tokens ?? 0,
-      (fields.log ?? '').slice(-20000) || null,
-      fields.ci ?? null,
-      fields.brain ?? null,
-      fields.costUsd ?? null,
-    ],
+       tokens = tokens + $5, log = $6, updated_at = now() WHERE id = $1`,
+    [id, fields.status, fields.branch ?? null, fields.prUrl ?? null, fields.tokens ?? 0, (fields.log ?? '').slice(-20000) || null],
   )
 }
 
-// AUDIT ADMIN (3 aug, Constructor): eroarea de DB colapsa în [] cu 200 →
-// coada apărea „goală" deși nu fusese citită. null la eșec; consumatorii
-// best-effort (audit, health, dovezi) cad explicit pe `?? []`, iar ruta
-// panoului răspunde 500 ca UI-ul să scrie „nu pot citi coada".
-export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
-  if (!dbEnabled()) return null
-  try {
-    const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
-    return r.rows.map(rowToBuildJob)
-  } catch {
-    return null
-  }
-}
-
-// LIVE PROGRESS (Stage 4): writes the builder's current step. ONLY on active
-// jobs (`running`) — doesn't overwrite the terminal state of a done/failed
-// job.
-export async function updateBuildJobProgress(id: number, progress: string): Promise<void> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return
-  try {
-    await getPool().query(
-      `UPDATE build_jobs SET progress=$2, progress_at=now(), updated_at=now() WHERE id=$1 AND status='running'`,
-      [id, progress.slice(0, 500)],
-    )
-  } catch {
-    /* progress is best-effort — it stops nothing if it fails */
-  }
-}
-
-// The jobs for the LIVE DISPLAY on the monitor (Stage 4b): the active ones
-// (queued / running) PLUS the RECENTLY finished (last 10 min). Without
-// "recently finished", the panel would delete the job at the very moment it
-// becomes "Done"/"Failed" — exactly the state Adrian wants to SEE. Active
-// first, then by how recently they moved; a few, as many as fit on screen.
-export async function listMonitorBuildJobs(): Promise<BuildJob[]> {
+export async function listBuildJobs(limit = 40): Promise<BuildJob[]> {
   if (!dbEnabled()) return []
   try {
-    const r = await getPool().query<BuildJobDbRow>(
-      `SELECT * FROM build_jobs
-         WHERE status IN ('queued','running')
-            OR (status IN ('done','failed') AND updated_at > now() - interval '10 minutes')
-       ORDER BY
-         CASE WHEN status IN ('queued','running') THEN 0 ELSE 1 END,
-         COALESCE(progress_at, updated_at, created_at) DESC
-       LIMIT 10`,
-    )
+    const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
     return r.rows.map(rowToBuildJob)
   } catch {
     return []
   }
 }
 
-// ── KELION POATE STĂPÂNI ORDINELE (Adrian, 3 aug: „kelion nu are instrument să
-// modifice, să șteargă, sau să le șteargă în grup") ─────────────────────────
-// Până acum putea DOAR să creeze (build_software) și să vadă (constructor_status).
-// Acum poate și: să șteargă unul, să șteargă în GRUP (toate eșuate / toate
-// terminate), să reia (opțional cu textul reformulat = „modifică"), și să
-// anuleze unul în curs. Toate ADMIN-only, expuse prin unealta `constructor_manage`.
-
-/** Șterge DEFINITIV un ordin după id. `true` dacă a existat și s-a șters. */
-export async function deleteBuildJob(id: number): Promise<boolean> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
-  try {
-    const r = await getPool().query('DELETE FROM build_jobs WHERE id=$1', [id])
-    return (r.rowCount ?? 0) > 0
-  } catch {
-    return false
-  }
-}
-
-/** Ștergere în GRUP după stare. `scope`: 'failed' (doar eșuate), 'done' (doar
- *  terminate), 'failed_done' (eșuate + terminate — cele „istorice", NU cele în
- *  curs), 'all' (chiar tot). Nu atinge NICIODATĂ ordinele 'queued'/'running'
- *  decât la 'all' — un ordin viu nu se șterge din greșeală. Întoarce câte a șters. */
-// AUDIT ADMIN (3 aug): la eroare de DB întorcea 0 → panoul afișa „Curățat: 0
-// ordine șterse." ca rezultat măsurat, deși ștergerea nu rulase deloc (zeroul
-// fals interzis de regula #1). null = eșec (ruta răspunde 500); 0 rămâne
-// posibil DOAR ca număr real de rânduri șterse.
-export async function deleteBuildJobsByScope(
-  scope: 'failed' | 'done' | 'failed_done' | 'all',
-): Promise<number | null> {
-  if (!dbEnabled()) return null
-  const stariCurente: Record<typeof scope, string[] | null> = {
-    failed: ['failed'],
-    done: ['done'],
-    failed_done: ['failed', 'done'],
-    all: null, // null = fără filtru (chiar tot)
-  }
-  const stari = stariCurente[scope]
-  try {
-    const r =
-      stari === null
-        ? await getPool().query('DELETE FROM build_jobs')
-        : await getPool().query('DELETE FROM build_jobs WHERE status = ANY($1)', [stari])
-    return r.rowCount ?? 0
-  } catch {
-    return null
-  }
-}
-
-/** Reia un ordin (îl repune în coadă). Opțional cu textul REFORMULAT — asta e
- *  „modificarea": schimbă comanda și o repornește curat (attempts=0). Întoarce
- *  jobul actualizat sau null.
- *
- *  ACCEPTĂ ȘI 'running' (Adrian, 5 aug: „dacă apăs reia reparația nu face nimic"
- *  — ordinul #94 era agățat în 'running', worker-ul lui murise, dar butonul
- *  „reia" chema retryBuildJob care ignora 'running' → 409 → buton mort). Când
- *  OMUL apasă reia, e o comandă explicită: „ăsta e blocat, repornește-l". Un
- *  worker cu adevărat viu ar fi trimis progres în ultimele 15 min; dacă totuși
- *  mai raportează după reluare, e cazul de graniță acceptat — ordinul rulează o
- *  dată, nu se pierde. Nu mai lăsăm un job mort să țină coada blocată. */
-export async function retryBuildJob(id: number, newOrderText?: string): Promise<BuildJob | null> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return null
-  const text = (newOrderText ?? '').trim()
-  try {
-    const r = await getPool().query<BuildJobDbRow>(
-      `UPDATE build_jobs
-         SET status='queued', attempts=0,
-             order_text = CASE WHEN $2 <> '' THEN $2 ELSE order_text END,
-             log = COALESCE(log,'') || E'\\n[repus în coadă de owner${text ? ' cu ordin reformulat' : ''}]',
-             updated_at = now()
-       WHERE id=$1 AND status IN ('failed','done','queued','running')
-       RETURNING *`,
-      [id, text.slice(0, 4000)],
-    )
-    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
-  } catch {
-    return null
-  }
-}
-
-/** Anulează un ordin în curs sau în coadă: îl trece pe 'failed' cu marcaj de
- *  anulare, ca lucrătorul să nu-l mai ia. `true` dacă exista ceva de oprit. */
-export async function cancelBuildJob(id: number): Promise<boolean> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
-  try {
-    const r = await getPool().query(
-      `UPDATE build_jobs
-         SET status='failed',
-             log = COALESCE(log,'') || E'\\n[anulat de owner]',
-             updated_at = now()
-       WHERE id=$1 AND status IN ('queued','running')`,
-      [id],
-    )
-    return (r.rowCount ?? 0) > 0
-  } catch {
-    return false
-  }
-}
-
-// AUTOMATIC HEALING OF ORDERS THAT FAILED ON MONEY (Adrian, 27 Jul: "why
-// doesn't the healing system see it, fix it? — automatically?"): an order that
-// failed because the brain had no credit (402/credits) is not an impossible
-// order — it's an order that FELL TO POVERTY. When the pocket is positive
-// again, we requeue it OURSELVES, once only (a marker in the log so we don't
-// cycle), with the attempts counter reset.
-export async function requeueMoneyFailedBuildJobs(): Promise<number> {
-  if (!dbEnabled()) return 0
-  try {
-    const r = await getPool().query<{ id: string | number }>(
-      `UPDATE build_jobs
-         SET status='queued', attempts=0,
-             log = COALESCE(log,'') || E'\\n[healer: requeued — it had failed on lack of credit, the pocket is full again]',
-             updated_at = now()
-       WHERE status='failed'
-         AND updated_at > now() - interval '72 hours'
-         AND log ~* '(402|requires more credits|insufficient credits)'
-         AND log NOT LIKE '%[healer: requeued%'
-       RETURNING id`,
-    )
-    return r.rowCount ?? 0
-  } catch {
-    return 0
-  }
-}
-
-// ── KELION'S EYES ON THE PERMANENT STORAGE (Adrian, 27 Jul: "access to any of
-// the app's databases") — the full schema + direct SQL, for the admin tools
-// db_tables/db_query in chat. Caps: 200 rows out and a 10s statement_timeout,
-// so a heavy query can't choke the live app.
+// ── OCHII LUI KELION PE STOCAREA PERMANENTĂ (Adrian, 27 iul: „acces la orice
+// bază de date a aplicației") — schema completă + SQL direct, pentru uneltele
+// de admin db_tables/db_query din chat. Plafoane: 200 rânduri la ieșire și
+// statement_timeout 10s, ca o interogare grea să nu sugrume aplicația vie.
 export async function dbTablesOverview(): Promise<string> {
   if (!dbEnabled()) return JSON.stringify({ error: 'db_indisponibil' })
   try {
@@ -3624,7 +3199,7 @@ export async function dbTablesOverview(): Promise<string> {
       tables[c.table_name] ??= { rows: nByTable.get(c.table_name) ?? 0, columns: [] }
       tables[c.table_name].columns.push(`${c.column_name} ${c.data_type}`)
     }
-    return JSON.stringify({ database: 'postgres (the app)', tables })
+    return JSON.stringify({ database: 'postgres (aplicația)', tables })
   } catch (e) {
     return JSON.stringify({ error: String((e as Error).message ?? e) })
   }
@@ -3653,518 +3228,4 @@ export async function dbQuery(sql: string): Promise<string> {
   } finally {
     client.release()
   }
-}
-
-// ── PAYMENT WITH A UNIQUE CODE (Adrian, 30 Jul: "every payment must come with
-// a unique code") ─────────────────────────────────────────────────────────────
-//
-// The flow, end to end:
-//   1. the user presses "add credit"  → `creeazaCodPlata` gives him a code
-//   2. he pays in Revolut, with the code in the reference
-//   3. the transaction reader finds the code → `crediteazaDupaCod` gives him
-//      the credits
-//
-// The code is not a secret — it's just a label tying the payment to the
-// person. That's why it can be short and easy to type. What matters is that it
-// doesn't repeat while pending.
-
-/** Alphabet WITHOUT the characters that get confused when read/typed:
- *  0/O, 1/I/L. The person copies it from the screen into the banking app —
- *  every ambiguous character is a payment that lands "unassigned" and manual
- *  work for the admin. */
-const COD_ALFABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-
-function codNou(): string {
-  const b = randomBytes(8)
-  let s = ''
-  for (let i = 0; i < 8; i++) s += COD_ALFABET[b[i] % COD_ALFABET.length]
-  // Grouped 4+4: easier to read and type than a long string.
-  return `KLN-${s.slice(0, 4)}-${s.slice(4)}`
-}
-
-export interface CodPlata {
-  code: string
-  amount: number
-  currency: string
-}
-
-/** Give the user a new code for the payment he's starting NOW. */
-export async function creeazaCodPlata(email: string, amount: number, currency = config.billing.currency): Promise<CodPlata | null> {
-  if (!dbEnabled() || !email || !(amount > 0)) return null
-  const e = email.toLowerCase().trim()
-  // Collision is practically impossible (31^8), but "practically impossible"
-  // is not "impossible", and here two people's money would get mixed: we
-  // retry.
-  for (let i = 0; i < 5; i++) {
-    const code = codNou()
-    try {
-      await getPool().query(
-        `INSERT INTO payment_codes (code, user_email, amount, currency) VALUES ($1, $2, $3, $4)`,
-        [code, e, amount, currency],
-      )
-      return { code, amount, currency }
-    } catch {
-      /* code already exists → try again */
-    }
-  }
-  return null
-}
-
-/** Find the code in a bank reference text and credit, ONCE only.
- *
- *  `bankRef` is the bank's transaction identifier: it's what makes crediting
- *  idempotent. The same transaction read ten times credits once — guaranteed
- *  by the unique index, not by the caller's care.
- *
- *  Returns the credited email, or null if no code was found, or if the
- *  payment had already been credited. */
-export async function crediteazaDupaCod(
-  referinta: string,
-  suma: number,
-  moneda: string,
-  bankRef: string,
-): Promise<string | null> {
-  if (!dbEnabled() || !referinta || !(suma > 0) || !bankRef) return null
-  // The code may come glued to other text ("payment KLN-AB12-CD34 credits"),
-  // in lowercase, or with spaces instead of dashes — we accept them all.
-  const m = referinta.toUpperCase().replace(/\s+/g, '-').match(/KLN-[A-Z2-9]{4}-[A-Z2-9]{4}/)
-  if (!m) return null
-  const code = m[0]
-  const client = await getPool().connect()
-  let email = ''
-  try {
-    await client.query('BEGIN')
-    // `FOR UPDATE` + the status condition: two simultaneous reads can't both
-    // take the same code.
-    const r = await client.query(
-      `SELECT user_email FROM payment_codes WHERE code = $1 AND status = 'pending' FOR UPDATE`,
-      [code],
-    )
-    const row = r.rows[0] as { user_email?: string } | undefined
-    if (!row?.user_email) {
-      await client.query('ROLLBACK')
-      return null
-    }
-    email = row.user_email
-    await client.query('ROLLBACK') // release the lock: crediting opens its own transaction
-  } catch {
-    await client.query('ROLLBACK').catch(() => {})
-    return null
-  } finally {
-    client.release()
-  }
-  // ORDER MATTERS, and it's chosen deliberately: WE CREDIT FIRST, close the
-  // code after.
-  //
-  // `topUpUser` is idempotent on the reference (the unique index on `ref`), so
-  // a second read of the same transaction can't credit twice. If we closed the
-  // code first and crediting failed, the person would be left with the payment
-  // "closed" and no credits — i.e. exactly paid-but-not-delivered. Conversely,
-  // if crediting succeeds and closing the code fails, the next read retries:
-  // crediting doesn't repeat (idempotent), and the code closes then.
-  const ok = await topUpUser(email, suma, moneda, bankRef)
-  if (!ok) return null
-  await getPool()
-    .query(
-      `UPDATE payment_codes SET status = 'paid', bank_ref = $2, paid_at = now(), amount = $3
-        WHERE code = $1 AND status = 'pending'`,
-      [code, bankRef, suma],
-    )
-    .catch(() => null)
-  return email
-}
-
-/** The user's still-pending code from the last 2 hours — REUSED so three
- *  clicks on "add credit" don't mint three valid codes and leave the person
- *  guessing which one to write. (The old comment here described the
- *  unattributed-payments net — a feature that lived only in prose; the real
- *  net is below: `salveazaPlataNeatribuita` & friends.) */
-export async function codPlataInAsteptare(email: string): Promise<CodPlata | null> {
-  if (!dbEnabled() || !email) return null
-  const r = await getPool()
-    .query(
-      `SELECT code, amount, currency FROM payment_codes
-        WHERE user_email = $1 AND status = 'pending' AND created_at > now() - interval '2 hours'
-        ORDER BY created_at DESC LIMIT 1`,
-      [email.toLowerCase().trim()],
-    )
-    .catch(() => null)
-  const row = r?.rows[0] as { code?: string; amount?: string; currency?: string } | undefined
-  return row?.code ? { code: row.code, amount: Number(row.amount ?? 0), currency: row.currency ?? config.billing.currency } : null
-}
-
-// ── THE NET: UNATTRIBUTED PAYMENTS (M2, Aug 2) ─────────────────────────────
-//
-// "O plată fără cod, sau cu cod greșit, ajunge în plati_neatribuite — nu
-// dispare" (the M2 order). Until today that sentence was prose: the reader
-// counted the unmatched inflow in a local variable and threw it away. Now
-// every inflow the reader could not credit lands in the table, exactly once
-// (bank_ref UNIQUE + ON CONFLICT DO NOTHING), and the admin assigns or
-// dismisses it from the panel. Better to ask than to credit the wrong person.
-
-export interface PlataNeatribuita {
-  id: number
-  bankRef: string
-  referinta: string
-  amount: number
-  currency: string
-  status: string
-  seenAt: string
-}
-
-/** Record an inflow nobody could be credited for. Idempotent on the bank's
- *  transaction id — the 5-minute reader re-sees old transactions forever.
- *  Returns true only when the row is NEW. */
-export async function salveazaPlataNeatribuita(
-  bankRef: string,
-  referinta: string,
-  amount: number,
-  currency: string,
-): Promise<boolean> {
-  if (!dbEnabled() || !bankRef || !(amount > 0)) return false
-  const r = await getPool()
-    .query(
-      `INSERT INTO plati_neatribuite (bank_ref, referinta, amount, currency) VALUES ($1, $2, $3, $4)
-        ON CONFLICT (bank_ref) DO NOTHING`,
-      [bankRef, referinta || '', amount, currency || config.billing.currency],
-    )
-    .catch(() => null)
-  return (r?.rowCount ?? 0) > 0
-}
-
-/** A payment already credited must NOT re-enter the net: after a code is
- *  closed (status 'paid'), the same bank transaction keeps appearing in every
- *  read, `crediteazaDupaCod` correctly returns null for it — and without this
- *  guard every SUCCESSFUL payment would land in the net one pass later,
- *  dressed up as a problem. The ledger's `ref` is the bank id, so one lookup
- *  answers it. */
-export async function refCreditatDeja(bankRef: string): Promise<boolean> {
-  if (!dbEnabled() || !bankRef) return false
-  const r = await getPool()
-    .query(`SELECT 1 FROM billing_events WHERE ref = $1`, [bankRef])
-    .catch(() => null)
-  return (r?.rowCount ?? 0) > 0
-}
-
-/** The open rows of the net, newest first — what the panel shows.
- *
- *  AUDIT ADMIN (3 aug, plasa): o citire EȘUATĂ colapsa în [] și panoul afișa
- *  senin „Nimic în plasă." — un gol fals, exact ce interzice regula #1 (aici
- *  stau banii pe care nu i-a potrivit nimeni). Acum null = citirea a picat
- *  (UI-ul o spune ca eșec), [] = plasa e CHIAR goală. */
-export async function listeazaPlatiNeatribuite(limit = 50): Promise<PlataNeatribuita[] | null> {
-  if (!dbEnabled()) return null
-  const r = await getPool()
-    .query(
-      `SELECT id, bank_ref, referinta, amount, currency, status, seen_at FROM plati_neatribuite
-        WHERE status = 'noua' ORDER BY seen_at DESC LIMIT $1`,
-      [limit],
-    )
-    .catch(() => null)
-  if (!r) return null
-  return r.rows.map((row) => {
-    const x = row as {
-      id?: number
-      bank_ref?: string
-      referinta?: string
-      amount?: string
-      currency?: string
-      status?: string
-      seen_at?: string
-    }
-    return {
-      id: Number(x.id ?? 0),
-      bankRef: String(x.bank_ref ?? ''),
-      referinta: String(x.referinta ?? ''),
-      amount: Number(x.amount ?? 0),
-      currency: String(x.currency ?? config.billing.currency),
-      status: String(x.status ?? 'noua'),
-      seenAt: String(x.seen_at ?? ''),
-    }
-  })
-}
-
-/** The admin ties a netted payment to a person. Credits THROUGH `topUpUser`
- *  with the bank id as the reference — so if the code-matching path somehow
- *  processes the same transaction later, the unique ledger index refuses the
- *  double, not anyone's care. Returns:
- *  'creditat' (done) · 'negasit' (no open row with this id) ·
- *  'deja' (that bank transaction had already credited someone) · 'esec'. */
-export async function atribuiePlataNeatribuita(
-  id: number,
-  email: string,
-): Promise<'creditat' | 'negasit' | 'deja' | 'esec'> {
-  if (!dbEnabled() || !(id > 0) || !email) return 'esec'
-  const e = email.toLowerCase().trim()
-  const r = await getPool()
-    .query(
-      `SELECT bank_ref, amount, currency FROM plati_neatribuite WHERE id = $1 AND status = 'noua'`,
-      [id],
-    )
-    .catch(() => null)
-  const row = r?.rows[0] as { bank_ref?: string; amount?: string; currency?: string } | undefined
-  if (!row?.bank_ref) return 'negasit'
-  const ok = await topUpUser(e, Number(row.amount ?? 0), row.currency ?? config.billing.currency, row.bank_ref)
-  if (!ok) {
-    // `topUpUser` is idempotent on the reference: false here means either the
-    // transaction had already credited someone, or the write failed. Tell the
-    // truth apart — the caller shows different messages for them.
-    return (await refCreditatDeja(row.bank_ref)) ? 'deja' : 'esec'
-  }
-  await getPool()
-    .query(
-      `UPDATE plati_neatribuite SET status = 'atribuita', resolved_email = $2, resolved_at = now()
-        WHERE id = $1 AND status = 'noua'`,
-      [id, e],
-    )
-    .catch(() => null)
-  return 'creditat'
-}
-
-/** The admin dismisses a netted inflow (the owner's unrelated income). */
-export async function ignoraPlataNeatribuita(id: number): Promise<boolean> {
-  if (!dbEnabled() || !(id > 0)) return false
-  const r = await getPool()
-    .query(
-      `UPDATE plati_neatribuite SET status = 'ignorata', resolved_at = now() WHERE id = $1 AND status = 'noua'`,
-      [id],
-    )
-    .catch(() => null)
-  return (r?.rowCount ?? 0) > 0
-}
-
-/** The panel's summary (M3): codes issued/paid + the open net, with the most
- *  recent codes so the admin sees WHO owes what and who paid. Every figure is
- *  a count from the database — a failed read returns null, never zeros. */
-/** Câmpurile comune ale unui rând `payment_codes` (dedup — evită clonul jscpd
- *  dintre `rezumatPlati` și `listeazaCoduriNeplatite`). `statusImplicit` păstrează
- *  exact defaultul fiecărui apelant (rezumat: '', neplătite: 'pending'). */
-function codPlataBaza(
-  x: Record<string, unknown>,
-  statusImplicit = '',
-): { code: string; email: string; amount: number; currency: string; status: string } {
-  return {
-    code: String(x.code ?? ''),
-    email: String(x.user_email ?? ''),
-    amount: Number(x.amount ?? 0),
-    currency: String(x.currency ?? config.billing.currency),
-    status: String(x.status ?? statusImplicit),
-  }
-}
-
-export interface RezumatPlati {
-  emise: number
-  platite: number
-  inAsteptare: number
-  neatribuite: number
-  recente: { code: string; email: string; amount: number; currency: string; status: string; createdAt: string; paidAt: string | null }[]
-}
-export async function rezumatPlati(): Promise<RezumatPlati | null> {
-  if (!dbEnabled()) return null
-  try {
-    const stari = await getPool().query(`SELECT status, count(*)::int AS n FROM payment_codes GROUP BY status`)
-    const net = await getPool().query(`SELECT count(*)::int AS n FROM plati_neatribuite WHERE status = 'noua'`)
-    const recente = await getPool().query(
-      `SELECT code, user_email, amount, currency, status, created_at, paid_at FROM payment_codes
-        ORDER BY created_at DESC LIMIT 30`,
-    )
-    const numar = (st: string): number =>
-      Number((stari.rows as { status?: string; n?: number }[]).find((r2) => r2.status === st)?.n ?? 0)
-    const total = (stari.rows as { n?: number }[]).reduce((s, r2) => s + Number(r2.n ?? 0), 0)
-    return {
-      emise: total,
-      platite: numar('paid'),
-      inAsteptare: numar('pending'),
-      neatribuite: Number((net.rows[0] as { n?: number } | undefined)?.n ?? 0),
-      recente: (recente.rows as Record<string, unknown>[]).map((x) => ({
-        ...codPlataBaza(x),
-        createdAt: String(x.created_at ?? ''),
-        paidAt: x.paid_at ? String(x.paid_at) : null,
-      })),
-    }
-  } catch {
-    return null // a failed read is not an empty ledger (rule no. 1)
-  }
-}
-
-// ── KELION'S PROJECT MEMORY (his own request, Aug 2) ────────────────────────
-// Structured, keyed, persistent — the working context he asked for. The tools
-// (memorie_pune / memorie_ia / memorie_lista) go through here. Content only;
-// no secrets (the secrets tools have their own guarded path).
-
-// ── AGENȚII CUSTOM AI OWNERULUI (4 aug: „să pot pune și să fie creat automat") ─
-
-/** Lista agenților adăugați din admin — formă identică cu rosterul din cod. */
-export async function listaAgentiCustom(): Promise<
-  { id: string; nume: string; rol: string; efort?: 'low' | 'high'; doarAdmin?: boolean }[]
-> {
-  if (!dbEnabled()) return []
-  const r = await getPool()
-    .query(`SELECT id, nume, rol, efort, doar_admin FROM agenti_custom ORDER BY creat`)
-    .catch(() => null)
-  return ((r?.rows ?? []) as { id: string; nume: string; rol: string; efort?: string; doar_admin?: boolean }[]).map((x) => ({
-    id: x.id,
-    nume: x.nume,
-    rol: x.rol,
-    efort: x.efort === 'high' ? 'high' : undefined,
-    doarAdmin: x.doar_admin === true ? true : undefined,
-  }))
-}
-
-/** Adaugă un agent custom. Întoarce null la succes sau motivul refuzului. */
-export async function adaugaAgentCustom(a: {
-  id: string
-  nume: string
-  rol: string
-  efort?: 'low' | 'high'
-  doarAdmin?: boolean
-}): Promise<string | null> {
-  if (!dbEnabled()) return 'baza de date nu e configurată'
-  const r = await getPool()
-    .query(
-      `INSERT INTO agenti_custom (id, nume, rol, efort, doar_admin) VALUES ($1,$2,$3,$4,$5)
-        ON CONFLICT (id) DO NOTHING`,
-      [a.id, a.nume.slice(0, 80), a.rol.slice(0, 500), a.efort === 'high' ? 'high' : null, a.doarAdmin === true],
-    )
-    .catch((e: unknown) => (e instanceof Error ? e.message : String(e)))
-  if (typeof r === 'string') return `scrierea a picat: ${r.slice(0, 150)}`
-  if (r && r.rowCount === 0) return `există deja un agent cu id-ul „${a.id}"`
-  return null
-}
-
-/** Write (upsert) a memory entry. Empty content DELETES the key — one verb,
- *  no separate delete tool for the model to fumble. */
-export async function memoriePune(cheie: string, continut: string): Promise<string> {
-  if (!dbEnabled()) return 'baza de date nu e configurată'
-  const k = cheie.trim().slice(0, 200)
-  if (!k) return 'cheia lipsește'
-  if (!continut.trim()) {
-    await getPool().query(`DELETE FROM memorie_proiect WHERE cheie = $1`, [k]).catch(() => null)
-    return `șters: ${k}`
-  }
-  const r = await getPool()
-    .query(
-      `INSERT INTO memorie_proiect (cheie, continut, actualizat) VALUES ($1, $2, now())
-        ON CONFLICT (cheie) DO UPDATE SET continut = $2, actualizat = now()`,
-      [k, continut.slice(0, 20_000)],
-    )
-    .catch(() => null)
-  return r ? `scris: ${k} (${continut.length} caractere)` : 'scrierea a picat'
-}
-
-export interface CodNeplatit {
-  code: string
-  email: string
-  amount: number
-  currency: string
-  status: string
-  createdAt: string
-  expirata: boolean
-}
-
-export async function listeazaCoduriNeplatite(): Promise<CodNeplatit[] | null> {
-  if (!dbEnabled()) return null
-  try {
-    const r = await getPool().query(
-      `SELECT code, user_email, amount, currency, status, created_at
-       FROM payment_codes
-       WHERE status IN ('pending', 'expired')
-       ORDER BY created_at DESC LIMIT 100`
-    )
-    const nowMs = Date.now()
-    return (r.rows as Record<string, unknown>[]).map((x) => {
-      const createdAt = String(x.created_at ?? '')
-      const createdMs = new Date(createdAt).getTime()
-      const baza = codPlataBaza(x, 'pending')
-      const expirata =
-        baza.status === 'expired' ||
-        (baza.status === 'pending' && !isNaN(createdMs) && nowMs - createdMs > 2 * 3600 * 1000)
-      return { ...baza, createdAt, expirata }
-    })
-  } catch {
-    return null
-  }
-}
-
-export interface PlataIncasata {
-  code: string
-  email: string
-  amount: number
-  currency: string
-  paidAt: string
-  bankRef: string
-}
-
-export async function listeazaPlatiIncasate(): Promise<PlataIncasata[] | null> {
-  if (!dbEnabled()) return null
-  try {
-    const r = await getPool().query(
-      `SELECT code, user_email, amount, currency, paid_at, bank_ref
-       FROM payment_codes
-       WHERE status = 'paid'
-       ORDER BY paid_at DESC NULLS LAST LIMIT 100`
-    )
-    return (r.rows as Record<string, unknown>[]).map((x) => ({
-      code: String(x.code ?? ''),
-      email: String(x.user_email ?? ''),
-      amount: Number(x.amount ?? 0),
-      currency: String(x.currency ?? config.billing.currency),
-      paidAt: String(x.paid_at ?? ''),
-      bankRef: String(x.bank_ref ?? ''),
-    }))
-  } catch {
-    return null
-  }
-}
-
-export interface TotaluriPlati {
-  totalAzi: number
-  totalLunaAsta: number
-  moneda: string
-}
-
-export async function totaluriPlati(): Promise<TotaluriPlati | null> {
-  if (!dbEnabled()) return null
-  try {
-    const rAzi = await getPool().query(
-      `SELECT COALESCE(SUM(amount), 0)::numeric AS sum_azi FROM payment_codes WHERE status = 'paid' AND paid_at >= CURRENT_DATE`
-    )
-    const rLuna = await getPool().query(
-      `SELECT COALESCE(SUM(amount), 0)::numeric AS sum_luna FROM payment_codes WHERE status = 'paid' AND paid_at >= date_trunc('month', CURRENT_DATE)`
-    )
-    const sumAzi = Number((rAzi.rows[0] as { sum_azi?: number | string })?.sum_azi ?? 0)
-    const sumLuna = Number((rLuna.rows[0] as { sum_luna?: number | string })?.sum_luna ?? 0)
-    return {
-      totalAzi: sumAzi,
-      totalLunaAsta: sumLuna,
-      moneda: config.billing.currency || 'EUR',
-    }
-  } catch {
-    return null
-  }
-}
-
-/** Read one memory entry, whole. */
-export async function memorieIa(cheie: string): Promise<string> {
-  if (!dbEnabled()) return 'baza de date nu e configurată'
-  const r = await getPool()
-    .query(`SELECT continut, actualizat FROM memorie_proiect WHERE cheie = $1`, [cheie.trim()])
-    .catch(() => null)
-  const row = r?.rows[0] as { continut?: string; actualizat?: string } | undefined
-  return row?.continut ? `[${row.actualizat}] ${row.continut}` : `nimic sub cheia „${cheie}"`
-}
-
-/** List keys (optionally by prefix), newest first — the index of his memory. */
-export async function memorieLista(prefix = ''): Promise<string> {
-  if (!dbEnabled()) return 'baza de date nu e configurată'
-  const r = await getPool()
-    .query(
-      `SELECT cheie, length(continut)::int AS marime, actualizat FROM memorie_proiect
-        WHERE cheie LIKE $1 ORDER BY actualizat DESC LIMIT 100`,
-      [`${prefix.trim()}%`],
-    )
-    .catch(() => null)
-  const rows = (r?.rows ?? []) as { cheie?: string; marime?: number; actualizat?: string }[]
-  if (!rows.length) return prefix ? `nicio cheie cu prefixul „${prefix}"` : 'memoria e goală'
-  return rows.map((x) => `${x.cheie} (${x.marime} car., ${x.actualizat})`).join('\n')
 }

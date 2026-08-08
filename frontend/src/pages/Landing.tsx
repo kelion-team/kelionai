@@ -1,7 +1,6 @@
 import { Suspense, useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { AVATAR_ORBIT } from '../lib/avatarCamera'
 import AvatarModel from '../components/AvatarModel'
 import AvatarLoading from '../components/AvatarLoading'
 import ContactModal from '../components/ContactModal'
@@ -9,15 +8,13 @@ import VisitorChatWidget from '../components/VisitorChatWidget'
 import { startGoogleLogin } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
-import { PUBLIC_TEXT as PT } from '../lib/publicText'
 import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
-import { themeBg } from '../lib/theme'
 
 // The four install codes — one per platform. Click → enlarged for scanning.
 const QR_CODES = [
-  // `href` = the INSTALL target (Adrian, Jul 26: "under each code there must be
-  // install that takes you to the install page") — the same place the code
-  // scan leads to, but on click, for someone already on the target device.
+  // `href` = ținta de INSTALARE (Adrian, 26 iul: „sub fiecare cod trebuie să fie
+  // install care te duce la pagina de instalare") — același loc în care duce și
+  // scanarea codului, dar pe click, pentru cine e deja pe dispozitivul țintă.
   { key: 'win', label: '⊞ Windows', img: '/dl/qr-win.png', href: '/dl/Kelionai-Setup.exe' },
   { key: 'linux', label: '🐧 Linux', img: '/dl/qr-linux.png', href: '/dl/Kelionai-linux.zip' },
   { key: 'ios', label: 'iOS', img: '/dl/qr-ios.png', href: 'https://apps.apple.com/app/id6786766714' },
@@ -44,9 +41,9 @@ export default function Landing({ error }: { error?: string | null }) {
   const t = strings('en')
   const [contactOpen, setContactOpen] = useState(false)
   const [qrZoom, setQrZoom] = useState<QrCode | null>(null)
-  // The live version (same source as the browser watermark) — we show it under
-  // each QR code as proof that the installed app is EXACTLY the browser
-  // version; it refreshes itself on every deploy (fetchServerVersion).
+  // Versiunea live (aceeași sursă ca filigranul din browser) — o arătăm sub
+  // fiecare cod QR ca dovadă că aplicația instalată e EXACT versiunea din
+  // browser; se împrospătează singură la orice deploy (fetchServerVersion).
   const [srv, setSrv] = useState<ServerVersion | null>(null)
   useEffect(() => {
     let alive = true
@@ -62,8 +59,8 @@ export default function Landing({ error }: { error?: string | null }) {
       window.clearInterval(id)
     }
   }, [])
-  // Error arriving via URL (e.g. ?error=closed). Shown once; doesn't change
-  // after mount (there's no probe flow left to update it).
+  // Eroare venită prin URL (ex: ?error=closed). Afișată o dată; nu se schimbă
+  // după montare (nu mai există flux de probă care s-o actualizeze).
   const [notice] = useState<string | null>(
     error ? (t[ERR_KEY[error] ?? 'errGeneric'] as string) : null,
   )
@@ -110,17 +107,11 @@ export default function Landing({ error }: { error?: string | null }) {
 
   return (
     <div className="landing">
-      {/* THE MANUAL, top-right (Adrian): anyone, without an account, can read
-      everything the app does — picks their language and downloads it in that
-      language. */}
-      <a className="landing-manual-btn" href="/manual">{PT.userManual}</a>
       <div className="landing-hero">
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
         <Canvas shadows="percentage" camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
-          {/* Follows the page theme (Aug 2 — the bright background): the hero
-              no longer sits in a hard-coded black box. */}
-          <color attach="background" args={[themeBg()]} />
+          <color attach="background" args={['#0b0d12']} />
           {/* Self-contained lighting (no remote HDR): a third-party CDN failure
               must never leave the marketing hero black. Key + fill + cool rim. */}
           <ambientLight intensity={0.75} />
@@ -129,9 +120,15 @@ export default function Landing({ error }: { error?: string | null }) {
           <Suspense fallback={null}>
             <AvatarModel />
           </Suspense>
-          {/* The camera limits come from the shared source (lib/avatarCamera) —
-          the same on the landing and in the app, so Kelion is framed identically. */}
-          <OrbitControls {...AVATAR_ORBIT} />
+          <OrbitControls
+            enablePan={false}
+            enableZoom={false}
+            minPolarAngle={Math.PI / 2.3}
+            maxPolarAngle={Math.PI / 1.95}
+            minAzimuthAngle={-Math.PI / 60}
+            maxAzimuthAngle={Math.PI / 60}
+            target={[0, 0.7, 0]}
+          />
         </Canvas>
         <AvatarLoading />
         <div className="landing-hero-fade" />
@@ -154,8 +151,9 @@ export default function Landing({ error }: { error?: string | null }) {
           {notice && <p className="error">{notice}</p>}
 
           <div className="landing-cta">
-            {/* No free trial (Adrian): the only way in is the Google account, then
-            buying credits. Nobody gets free minutes anymore. */}
+            {/* Fără probă gratuită (Adrian): singura cale de intrare e contul
+                Google, apoi cumpărarea de credite. Nimeni nu mai primește
+                minute gratis. */}
             <button type="button" className="google-btn cta-primary" onClick={startGoogleLogin}>
               <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -177,27 +175,19 @@ export default function Landing({ error }: { error?: string | null }) {
               </svg>
               {t.signIn}
             </button>
-            {/* THE ORPHAN PAGES, LINKED (Jul 27 — built on the Jul 26 order but
-            never linked from the landing; the audit found them untouched by any
-            link): the email sign-in + the public prices. */}
-            <div className="landing-alt-links">
-              <a href="/login">{PT.emailSignIn}</a>
-              <span aria-hidden>·</span>
-              <a href="/credite">{PT.creditsPricing}</a>
-            </div>
           </div>
 
           <div className="landing-lead">
             {leadSent ? (
-              <p className="landing-lead-done">{PT.leadThanks}</p>
+              <p className="landing-lead-done">Thanks — we'll get back to you soon.</p>
             ) : (
               <>
-                <h3 className="landing-lead-title">{PT.leadTitle}</h3>
+                <h3 className="landing-lead-title">Leave your email and we'll reach out</h3>
                 <div className="landing-lead-row">
                   <input
                     className="landing-lead-input"
                     type="email"
-                    placeholder={PT.emailPlaceholder}
+                    placeholder="email@example.com"
                     value={leadEmail}
                     onChange={(e) => setLeadEmail(e.target.value)}
                   />
@@ -207,13 +197,13 @@ export default function Landing({ error }: { error?: string | null }) {
                     onClick={() => void submitLead()}
                     disabled={leadBusy || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadEmail)}
                   >
-                    {leadBusy ? PT.leadSending : PT.leadSend}
+                    {leadBusy ? 'Sending…' : 'Send'}
                   </button>
                 </div>
                 <input
                   className="landing-lead-input landing-lead-note"
                   type="text"
-                  placeholder={PT.leadNotePlaceholder}
+                  placeholder="Short message (optional)"
                   value={leadNote}
                   onChange={(e) => setLeadNote(e.target.value)}
                 />
@@ -237,25 +227,25 @@ export default function Landing({ error }: { error?: string | null }) {
               .exe self-updates. Store targets get swapped in the moment a
               listing goes public (MS Store, Play, App Store). */}
           <div className="landing-qr">
-            <span className="landing-qr-hint">{PT.qrHint}</span>
+            <span className="landing-qr-hint">Tap a code to install — or scan it (🔍 enlarges)</span>
             <div className="landing-qr-row">
               {QR_CODES.map((q) => (
                 <figure key={q.key}>
-                  {/* THE CODE IS AN INSTALL BUTTON (Adrian, Jul 26: „when you press the
-                  win code the win app installs... each according to his system”).
-                  Click/tap on the code → installs that platform; the enlarge-for-scanning
-                  stays on the 🔍 button. */}
-                  <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={PT.qrInstallLabel(q.label)}>
-                    <img src={q.img} alt={PT.qrAlt(q.label)} width="96" height="96" />
+                  {/* CODUL E BUTON DE INSTALARE (Adrian, 26 iul: „când apeși pe
+                      codul win se instalează aplicația win... la fiecare după
+                      sistemul lui"). Click/tap pe cod → instalarea platformei
+                      respective; mărirea pentru scanat rămâne pe butonul 🔍. */}
+                  <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={`Install — ${q.label}`}>
+                    <img src={q.img} alt={`QR — ${q.label}`} width="96" height="96" />
                   </a>
                   <figcaption>{q.label}</figcaption>
-                  {/* The watermark number, under EVERY code — the same as in the browser;
-                  it proves the installed app is exactly the live version. */}
+                  {/* Numărul din filigram, sub FIECARE cod — același ca în browser;
+                      dovedește că aplicația instalată e exact versiunea live. */}
                   <span className="qr-version">{versionLabel(srv)}</span>
                   <a className="qr-install" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
-                    {PT.installBtn}
+                    Install
                   </a>
-                  <button type="button" className="qr-zoom-btn" onClick={() => setQrZoom(q)} title={PT.zoomQr}>
+                  <button type="button" className="qr-zoom-btn" onClick={() => setQrZoom(q)} title="Mărește codul pentru scanare">
                     🔍
                   </button>
                 </figure>
@@ -265,7 +255,7 @@ export default function Landing({ error }: { error?: string | null }) {
 
           <p className="landing-legal">
             <button type="button" className="landing-contact-link" onClick={() => setContactOpen(true)}>
-              {PT.contactLink}
+              Contact
             </button>{' '}
             · <a href="/privacy">{t.privacyLabel}</a> · <a href="/terms">{t.termsLabel}</a>
             <br />
@@ -285,10 +275,10 @@ export default function Landing({ error }: { error?: string | null }) {
           }}
         >
           <figure className="qr-zoom">
-            <img src={qrZoom.img} alt={PT.qrAlt(qrZoom.label)} />
+            <img src={qrZoom.img} alt={`QR — ${qrZoom.label}`} />
             <figcaption>
               {qrZoom.label}
-              <span className="qr-zoom-hint">{PT.qrZoomHint}</span>
+              <span className="qr-zoom-hint">Scan with your phone — tap anywhere to close</span>
             </figcaption>
           </figure>
         </div>
