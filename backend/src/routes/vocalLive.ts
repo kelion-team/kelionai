@@ -107,6 +107,7 @@ export async function turaCreierului(
   cookie: string,
   cerere: string,
   coords: { lat: number; lon: number } | null,
+  imagini: string[],
   laControl: (frame: Record<string, unknown>) => void,
 ): Promise<{ ok: true; text: string } | { ok: false; motiv: string }> {
   let r: Response
@@ -120,6 +121,10 @@ export async function turaCreierului(
         // vocii unice) și nu plătim o sinteză pe care n-o redă nimeni.
         serverVoiceOff: true,
         coords: coords ?? undefined,
+        // VEDEREA (8 aug: „hai și cu vedere, să închidem un capitol"): cadrele
+        // camerei, cerute browserului LA CERERE (nu flux continuu) — ruta de
+        // chat le primește exact ca de la clientul scris (max 4, sursă camera).
+        images: imagini.length ? imagini.slice(-4) : undefined,
         now: new Date().toISOString(),
       }),
       signal: AbortSignal.timeout(90_000),
@@ -266,16 +271,46 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     }
     const ceasCost = setInterval(varsaCostul, 60_000)
 
-    // GPS-ul device-ului, primit de la browser (cadru JSON text) — dat mai
-    // departe creierului la fiecare trecere prin ușa cere_creierului.
+    // ANCORA REALITĂȚII (8 aug: „nu e ancorat în realitate, după coordonatele
+    // gps"): browserul trimite {type:'coords', lat, lon, now, tz} chiar la
+    // deschiderea socketului; deschiderea sesiunii Google o așteaptă maxim
+    // 600 ms și o coace în instrucțiune. GPS-ul rămâne viu (reîmprospătat la
+    // 2 min) pentru ușa creierului.
     let coords: { lat: number; lon: number } | null = null
+    let ancora: { nowIso?: string; tz?: string; lat?: number; lon?: number } = {}
+    let ancoraSosita: (() => void) | null = null
+    // VEDEREA LA CERERE (8 aug: „hai și cu vedere"): când ușa se deschide,
+    // serverul cere browserului cadrele camerei ({type:'cere_cadre'}) și
+    // așteaptă răspunsul aici — zero trafic de imagini cât nu e nevoie.
+    let primesteCadre: ((cadre: string[]) => void) | null = null
 
     socket.on('message', (data: RawData, isBinary: boolean) => {
       if (!isBinary) {
         try {
-          const m = JSON.parse(String(data)) as { type?: string; lat?: number; lon?: number }
-          if (m.type === 'coords' && Number.isFinite(m.lat) && Number.isFinite(m.lon)) {
-            coords = { lat: m.lat as number, lon: m.lon as number }
+          const m = JSON.parse(String(data)) as {
+            type?: string
+            lat?: number
+            lon?: number
+            now?: string
+            tz?: string
+            cadre?: unknown
+          }
+          if (m.type === 'coords') {
+            if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) {
+              coords = { lat: m.lat as number, lon: m.lon as number }
+            }
+            ancora = {
+              nowIso: typeof m.now === 'string' ? m.now : ancora.nowIso,
+              tz: typeof m.tz === 'string' ? m.tz : ancora.tz,
+              lat: coords?.lat,
+              lon: coords?.lon,
+            }
+            ancoraSosita?.()
+            ancoraSosita = null
+          } else if (m.type === 'cadre') {
+            const cadre = Array.isArray(m.cadre) ? m.cadre.filter((c): c is string => typeof c === 'string') : []
+            primesteCadre?.(cadre)
+            primesteCadre = null
           }
         } catch {
           /* cadru text neînțeles — îl ignorăm, audio rămâne pe binar */
@@ -317,7 +352,22 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         app.log.warn('vocal-live: istoricul nu s-a putut citi — sesiunea pornește fără memorie')
       }
       const nume = user.name || user.email.split('@')[0]
-      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric)
+      // Ancora realității: dacă n-a sosit încă (browserul o trimite chiar la
+      // deschiderea socketului), o așteptăm maxim 600 ms — sub pragul „primul
+      // cuvânt sub 1s", și oricum sesiunea Google se deschide abia după.
+      if (!ancora.nowIso) {
+        await new Promise<void>((gata) => {
+          const limita = setTimeout(() => {
+            ancoraSosita = null
+            gata()
+          }, 600)
+          ancoraSosita = () => {
+            clearTimeout(limita)
+            gata()
+          }
+        })
+      }
+      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric, ancora)
 
       // CONVERSAȚIA SUPRAVIEȚUIEȘTE REPORNIRII (8 aug, ownerul: „trebuie să nu
       // mai moară… chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
@@ -371,8 +421,22 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               return
             }
             app.log.info(`vocal-live: ușa creierului — „${cerere.slice(0, 80)}"`)
+            // VEDEREA: cere browserului cadrele camerei și așteaptă maxim
+            // 1,5 s — fără cameră (sau fără răspuns) tura pleacă fără imagini,
+            // nu se blochează.
+            const cadre = await new Promise<string[]>((resolve) => {
+              const limita = setTimeout(() => {
+                primesteCadre = null
+                resolve([])
+              }, 1500)
+              primesteCadre = (c) => {
+                clearTimeout(limita)
+                resolve(c)
+              }
+              trimite({ type: 'cere_cadre' })
+            })
             const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device']
-            const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, (frame) => {
+            const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, (frame) => {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
             })
             if (r.ok) {

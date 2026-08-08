@@ -1476,6 +1476,15 @@ export default function ChatPanel({
               // GPS-ul device-ului către sesiunea live (8 aug: „nu are acces la
               // gps, meteo") — meteo/hărțile din ușa creierului au acum locul real.
               coordonate: () => coordsRef.current,
+              // Ochii ușii creierului (8 aug: „hai și cu vedere"): un cadru
+              // captat PE LOC + ultimele din tampon. Fără captură proaspătă
+              // (camera oprită/negata) NU se trimit cadre stătute — mai bine o
+              // tură fără vedere decât o vedere veche dată drept acum.
+              cadre: () => {
+                const proaspat = captureRef.current?.()
+                if (!proaspat) return []
+                return [...frameBufRef.current.slice(-3), proaspat]
+              },
               onEroare: (motiv) => {
                 // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
                 // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).

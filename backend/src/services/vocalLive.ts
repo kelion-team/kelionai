@@ -78,12 +78,55 @@ export function octetiDinBase64(b64: string): number {
  *  Sesiunea Live pornește de la zero la fiecare deschidere — fără blocul ăsta,
  *  Kelion ar fi un străin politicos la fiecare apăsare de microfon. PURĂ și
  *  exportată: contractul cu memoria se probează, nu se ia pe încredere. */
+/** Ancora spațio-temporală a sesiunii: ora locală pe fusul device-ului +
+ *  coordonatele GPS. Vine de la browser la deschiderea socketului. */
+export interface AncoraRealitate {
+  nowIso?: string
+  tz?: string
+  lat?: number
+  lon?: number
+}
+
 export function construiesteInstructiune(
   persona: string,
   numeUser: string,
   istoric: Array<{ role: string; content: string }>,
+  ancora?: AncoraRealitate,
 ): string {
   let instructiune = `${persona}\nVorbești cu ${numeUser}.`
+  // ANCORA REALITĂȚII (8 aug, ownerul: „nu e ancorat în realitate, după
+  // coordonatele gps"). Sesiunea live pornea fără NICIO noțiune de timp sau
+  // loc — modelul plutea. Aceeași lecție ca la calea clasică (4 aug, „Kelion
+  // nu e înfipt în realitatea spațio-temporală"): mereu există o ancoră.
+  // Ce nu avem se spune că nu-l avem — nu se inventează un loc sau o oră.
+  {
+    const parti: string[] = []
+    if (ancora?.nowIso) {
+      let oraText = ancora.nowIso
+      try {
+        oraText = new Intl.DateTimeFormat('ro-RO', {
+          timeZone: ancora.tz || 'UTC',
+          dateStyle: 'full',
+          timeStyle: 'short',
+        }).format(new Date(ancora.nowIso))
+      } catch {
+        /* fus necunoscut → rămâne ISO, tot o ancoră reală */
+      }
+      parti.push(`acum e ${oraText}${ancora.tz ? ` (fusul ${ancora.tz})` : ''}`)
+    }
+    if (Number.isFinite(ancora?.lat) && Number.isFinite(ancora?.lon)) {
+      parti.push(`te afli cu omul la coordonatele GPS ${ancora?.lat}, ${ancora?.lon}`)
+    }
+    if (parti.length) {
+      instructiune +=
+        `\nANCORA REALITĂȚII: ${parti.join('; ')}. Ancora e de la deschiderea sesiunii — ` +
+        `pentru ora exactă mai târziu, adresa precisă, vremea sau harta, chemi cere_creierului.`
+    } else {
+      instructiune +=
+        `\nANCORA REALITĂȚII: nu ai primit nici ora, nici locul device-ului — dacă omul întreabă ` +
+        `de ele, chemi cere_creierului; nu inventezi nici ora, nici locul.`
+    }
+  }
   // REGULA LIMBII pe sesiunea VIE (Adrian, 8 aug: „trebuie să vorbească în
   // orice limbă Kelion"). Măsurat înainte: instrucțiunea nu spunea NIMIC
   // despre limbă și nici configul nu trimite languageCode — modelul rămânea
@@ -94,6 +137,19 @@ export function construiesteInstructiune(
     `\nREGULA LIMBII — PRIMA REGULĂ: vorbește în LIMBA în care ți se vorbește, oricare ar fi ea. ` +
     `Răspunzi în limba ULTIMEI fraze a omului; dacă el comută limba, comuți și tu INSTANT, fără să comentezi comutarea. ` +
     `Nu amesteci limbile în același răspuns și nu traduci nechemat.`
+  // REGULA TĂCERII LA DESCHIDERE (8 aug, ownerul, cu captura „Pa!" → „Bună
+  // seara, Adrian.": „trebuie oprită bâlbâiala permanentă a salutului").
+  // Modelul Live vorbește PRIMUL la fiecare deschidere de sesiune — iar scara
+  // de reconectare (reluări la ~1s după orice sughiț) îl punea să salute iar
+  // și iar. Nimic din codul nostru nu trimite salutul; e reflexul modelului,
+  // deci se stinge unde se nasc reflexele: în instrucțiune, care se dă la
+  // FIECARE deschidere, inclusiv la reluări.
+  instructiune +=
+    `\nREGULA TĂCERII LA DESCHIDERE: la pornirea sau RELUAREA sesiunii NU spui nimic — nici salut, ` +
+    `nici prezentare, niciun sunet; taci și asculți până îți vorbește omul. Saluți DOAR dacă el te ` +
+    `salută primul, o singură dată pe conversație. După o reconectare continui de unde ați rămas, ` +
+    `fără nicio formulă de deschidere. Dacă omul își ia rămas-bun („pa", „noapte bună"), răspunzi ` +
+    `scurt la rămas-bun — NU cu un salut de început.`
   if (istoric.length) {
     const randuri = istoric
       .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
