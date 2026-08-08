@@ -411,3 +411,69 @@ Recomandarea mea: **1 + 2** (plafon + free-cu-escaladare) — păstrează Fable 
 | L1l | SUITA DE AGENȚI GOOGLE/GEMINI (Adrian, 3 aug, întrebat de 2 ori): Gemini CLI ✅ LIVE (al 4-lea lucrător, în imagine pe 979cec8). Jules ✅ LIVE ca unelte (`jules_repos`/`jules_task`/`jules_status`; dovadă 3 aug: HTTP 200, 7 surse văzute PRIN unealta lui Kelion) — dar producția `kelion-team/kelionai` NU e între sursele legate (toate-s `AE1968/*`): ownerul trebuie să lege org-ul kelion-team în Jules („Connect to GitHub"), abia apoi proba sarcină→PR. ADK = framework, nu aduce câștig peste orchestratorul existent | parțial LIVE — blocat pe legarea repo-ului (owner) |
 | L1m | AGENȚII ENTERPRISE „pentru tot, inclusiv skilluri" (Adrian, 3 aug seara): TOT lanțul tehnic a fost deschis în aceeași seară, pas cu pas, fiecare cu măsurătoarea lui — API-uri aprinse ✓, rol dat ✓ (`engines.list` 200), data store-uri create ✓ (`kelion-cunostinte`, `kelion-cautare`), **motorul `kelion-agenti` („Kelion — agenți") CREAT ✓ (HTTP 200, 21:50)** — se vede în consola lui. Zidul FINAL, măsurat 21:56 pe două forme de agent (A2A + managed): `FAILED_PRECONDITION — „an active Gemini Enterprise license is not available. Please contact your GCP administrator to allocate an active license"`. Adică: crearea de agenți în Gemini Enterprise cere LICENȚĂ plătită (produs cu abonament per-loc) — decizie de bani a ownerului, nu de cod. Alternativa care EXISTĂ deja: cei 34 de agenți 🏠 din aplicație (meserii + skilluri pe creierul Gemini). Scriptul `scripts/creaza-agenti-enterprise.mjs` ține tot lanțul și rosterul (~33) — în secunda în care licența apare, o rulare îi creează pe toți și citește lista din API | ACTUALIZAT 4 aug seara: LICENȚA CUMPĂRATĂ de owner (Gemini Enterprise Standard, $35/lună, ACTIVE) — verdictul vechi era greșit, nu trebuie organizație Workspace. Butonul din admin creează agenții ÎN FUNDAL cu ritm (fix 429, PR #747); primii intrați măsurat (Agent Deploy CI, Agent Monitorizare, Inginer-șef...). RĂMAS: quota Google de creare e strânsă azi (429 repetat) — apăsări repetate până intră toți; „nu pot verifica" încă numărul final din consolă |
 | L1n | URECHILE CHIRP JOS (măsurat 3 aug 22:12, email alertă): `PERMISSION_DENIED speech.recognizers.recognize` — foarte probabil rolul Speech pierdut la editarea IAM din aceeași seară (corelație de timp; „nu pot verifica" exact ce rol a dispărut — IAM nu e citibil cu contul de serviciu). PLASA construită imediat (ordin „auzul pe Gemini"): urechea Gemini în PR #715 — batch + rafale streaming, fără IAM. Reparația Chirp = ownerul re-adaugă rolul „Cloud Speech Client" (sau Editor) pe kelion-ears în IAM | plasă în PR #715; rolul Chirp = 1 click owner |
+
+## M. AUDITUL RUTELOR CARE SCRIU (8 aug 2026) — măsurat, nu citit
+
+Ce s-a făcut: aplicația a fost pornită local cu **mediul curățat de credențiale**
+(listă albă: doar `PATH`, `HOME`, `NODE_ENV`, `PORT`, plus un `SESSION_SECRET` și
+un `ADMIN_EMAIL` generate pe loc) și au fost lovite **toate cele 57 de rute care
+scriu** — de două ori fiecare: fără bilet (poarta) și cu bilet de admin (ce face
+butonul cu adevărat). Unealta: `scripts/proba-scriere.mjs`.
+
+De ce curățarea mediului nu e un moft: containerul în care rulează probele **are
+`GITHUB_TOKEN`**, iar `POST /api/admin/reset-vps` cheamă `runRunbook` →
+`workflow_dispatch` pe repo-ul real. O probă care moștenea mediul ar fi repornit
+producția.
+
+| # | Ce s-a găsit, măsurat | Stare |
+|---|---|---|
+| M1 | `POST /api/admin/reset-vps` întorcea `200 {"ok":true}` **orice s-ar fi întâmplat** — arunca răspunsul celor două runbook-uri. Dovadă: fără `GITHUB_TOKEN`, `runRunbook` a întors `{"error":"github_token_missing"}` și ruta a răspuns tot `ok:true`; panoul scria „Comanda a fost trimisă cu succes". La fel s-ar fi purtat cu autonomia pe pauză (`paused_by_owner`) | ✅ reparat + 6 teste pe răspunsurile reale ale runbook-urilor |
+| M2 | `POST /api/admin/reset-counters` („Pune pe 0") întorcea `200 {"ok":false,"sterse":0}`, iar panoul se uita **doar** la statusul HTTP → scria „Resetat ✓" peste contoare neatinse | ✅ reparat (502 la eșec) + panoul citește cifra ștearsă |
+| M3 | `DELETE /api/voiceprint/me` întorcea `200 {"ok":false}` pentru o ștergere picată (panoul citea corpul, dar uneltele lui Kelion și scripturile nu) | ✅ reparat (502) |
+| M4 | `POST /api/tranzactii/analiza` întorcea `200` cu `{error:…}` pe trei ieșiri (piață necitibilă, agent lipsă, agent mut) | ✅ reparat (502/503) |
+| M5 | **Poarta**: 38/38 rute privilegiate refuză cererea fără bilet. Zero rute de admin fără poartă | ✅ măsurat |
+| M6 | Zero rute care crapă, tac sau lipsesc la rulare (57 din 57) | ✅ măsurat |
+
+### M7. GĂSIT ȘI **NEREPARAT** — familia „citire picată → 0/gol" din `db.ts`
+
+Măsurat pe 8 aug: din 129 de funcții exportate în `backend/src/db.ts`, **36**
+întorc o valoare goală/zero la `!dbEnabled()` și **49** fac la fel în `catch`.
+Adică o citire IMPOSIBILĂ iese pe sârmă ca un fapt: `listUsers()` → `[]`
+(„0 utilizatori"), `getBalance()` → `0` („£0.00"), `getCostSummary()` → totul pe
+zero. E exact familia care te-a costat ziua de 30 iulie.
+
+**Nu toate sunt defecte** — unele sunt corecte prin proiectare (`isBlocked → false`
+ca o pică de bază să nu blocheze pe toată lumea; `touchVisit → true` ca analitica
+să nu rupă aplicația). De-aia nu am făcut o rescriere în bloc: ar fi fost fix
+genul de operație pe nevăzute care a stricat lucruri înainte (regula #3).
+
+Subsetul care contează cel mai mult, de atacat cu `Masuratoare<T>` din
+`services/masurare.ts` (varianta picată n-are câmp `valoare`, deci minciuna nu
+compilează): `getBalance`, `getWalletStatus`, `getCostSummary`, `listUsers`,
+`listAllTransactions`, `getHistory`.
+
+**Cum se vede că e real:** în producție `DATABASE_URL` există, deci `dbEnabled()`
+e adevărat și zerourile astea nu apar la mers normal. Apar **la o pică de bază de
+date** — adică exact în minutul în care ai nevoie de adevăr, panoul ar arăta
+„£0.00" și „0 utilizatori" în loc de „nu pot citi".
+
+| # | Ce | Stare |
+|---|---|---|
+| M7 | Cele 6 citiri de bani/numărători trecute pe `Masuratoare<T>`, ca o pică de DB să scrie „nu pot citi", nu un zero | **de făcut** |
+
+### M8. Creditul rămas pe fiecare AI (cerut 8 aug)
+
+`GET /api/admin/credit-ai` + `services/creditAI.ts`: un rând pe furnizor, fiecare
+cifră fiind o `Masuratoare<T>` (ori valoare + cum s-a citit, ori motiv).
+
+| Furnizor | Sold rămas | Ce e măsurabil |
+|---|---|---|
+| Serper | **citibil real** (`GET /account`) | căutări rămase, live |
+| Gemini (Google AI) | **nu e citibil** — Google nu expune sold prin API | creditul spus de tine − cheltuiala lunii măsurată din `cost_events`; plus starea live a cheii |
+| Google Cloud (voce/traducere/agenți) | **nu e citibil** | cheltuiala lunii (`asr`, `voice_minutes`, `tts:*`) + link la facturare |
+| Jules | **nu e citibil** | nimic — Jules nu trece prin `recordCost`, deci nu raportez nicio cifră |
+
+Probat pe instanța de probă (fără chei, fără DB): ruta a răspuns `200` și **toate
+cele 8 celule au ieșit „nu pot verifica" cu motiv**, niciun zero inventat.
+RĂMAS: Gemini și Google Cloud n-au fost încă văzute cu chei reale — „nu pot
+verifica" cifrele live până nu se uită cineva pe kelionai.app.

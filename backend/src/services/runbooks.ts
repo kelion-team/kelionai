@@ -224,6 +224,36 @@ export async function runRunbook(name: string, customInputs?: Record<string, str
   return JSON.stringify({ error: `dispatch_failed_${r.status}`, detail: body, ...(warning ? { warning } : {}) })
 }
 
+// ── CITIREA RĂSPUNSULUI UNUI RUNBOOK (pură, deci probabilă) ─────────────────
+// `runRunbook` întoarce un ȘIR de JSON: ori `{ok:true, started, watch}`, ori
+// `{error:…, hint?}`. Cine îl aruncă (cum făcea `/api/admin/reset-vps` până pe
+// 8 aug 2026) raportează „trimis cu succes" pentru un refuz. Funcția asta face
+// traducerea într-un singur loc, iar fiind pură se poate rula pe răspunsurile
+// REALE din testele de lângă — fără GitHub, fără rețea, fără presupuneri.
+export interface PasRunbook {
+  runbook: string
+  ok: boolean
+  detaliu: string
+}
+
+export function citesteRaspunsRunbook(runbook: string, brut: string): PasRunbook {
+  let raspuns: Record<string, unknown>
+  try {
+    raspuns = JSON.parse(brut) as Record<string, unknown>
+  } catch {
+    return { runbook, ok: false, detaliu: `raspuns_neinteligibil — ${String(brut).slice(0, 200)}` }
+  }
+  const eroare = typeof raspuns.error === 'string' ? raspuns.error : null
+  if (!eroare) {
+    // Un `{ok:true}` fără `error` e succes; păstrăm avertismentul de buclă dacă
+    // există, ca omul să-l vadă chiar și pe drumul fericit.
+    const avertisment = typeof raspuns.warning === 'string' ? ` (${raspuns.warning})` : ''
+    return { runbook, ok: true, detaliu: `pornit${avertisment}` }
+  }
+  const hint = typeof raspuns.hint === 'string' ? raspuns.hint : ''
+  return { runbook, ok: false, detaliu: hint ? `${eroare} — ${hint}` : eroare }
+}
+
 // ── KELION'S EYES ON HIS OWN PROCESSES (Adrian, Jul 25: "he reports that he
 // can't see the internal processes — what autonomy is this?") ────────────────
 // After starting something, Kelion READS the state and the runs' logs himself

@@ -25,8 +25,7 @@
 // Rulare:  node scripts/proba-rute.mjs
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
-import { createRequire } from 'node:module'
+import { RADACINA, porneste } from './lib/server-proba.mjs'
 
 // ── PROBĂ AUTENTIFICATĂ (Adrian, 8 aug: „403 greșit, real trebuie 200") ──────
 // Un 403 dovedește doar că poarta e acolo, NU că butonul face ceva. Ca să vedem
@@ -34,9 +33,11 @@ import { createRequire } from 'node:module'
 // sesiune și un email de admin GENERATE AICI, iar proba își semnează singură un
 // bilet cu ele. E instanța noastră locală, pornită și oprită de script — nicio
 // atingere de producție, niciun secret real folosit.
+//
+// Pornirea (și CURĂȚAREA MEDIULUI) stau în `lib/server-proba.mjs`: prima
+// variantă dădea serverului `...process.env`, adică inclusiv GITHUB_TOKEN-ul
+// din mediul în care rulează probele. Vezi acolo de ce era o mină.
 
-const RADACINA = new URL('..', import.meta.url).pathname
-const require_ = createRequire(path.join(RADACINA, 'backend/package.json'))
 const PORT = Number(process.env.PROBA_PORT || 18100)
 
 function fisiere(dir) {
@@ -82,19 +83,6 @@ function ruteGet() {
 /** Parametrii primesc o valoare inofensivă, ca ruta să fie chiar atinsă. */
 const concret = (r) => r.replace(/:[A-Za-z_]+/g, 'proba')
 
-async function asteaptaServerul(url, secunde = 40) {
-  for (let i = 0; i < secunde * 2; i++) {
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(1500) })
-      if (r.status) return true
-    } catch {
-      /* încă nu s-a ridicat */
-    }
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  return false
-}
-
 const rute = ruteGet()
 if (rute.length === 0) {
   console.error('\n❌ NU POT VERIFICA: n-am găsit nicio rută GET în cod.\n')
@@ -103,41 +91,18 @@ if (rute.length === 0) {
 
 console.log(`\nProbez ${rute.length} rute GET pe un server pornit local (port ${PORT})…\n`)
 
-const SECRET = `proba-${Math.random().toString(36).slice(2)}-${Date.now()}`
-const EMAIL_ADMIN = 'proba-admin@local.test'
-const jwt = require_('jsonwebtoken')
-const BILET = jwt.sign({ email: EMAIL_ADMIN, role: 'admin' }, SECRET, { expiresIn: '10m' })
-const COOKIE = `kelionai_session=${encodeURIComponent(BILET)}`
-
-const server = spawn('node', ['dist/index.js'], {
-  cwd: path.join(RADACINA, 'backend'),
-  env: {
-    ...process.env,
-    PORT: String(PORT),
-    NODE_ENV: 'production',
-    SESSION_SECRET: SECRET,
-    ADMIN_EMAIL: EMAIL_ADMIN,
-  },
-  stdio: ['ignore', 'pipe', 'pipe'],
-})
-let iesireServer = ''
-server.stdout.on('data', (d) => (iesireServer += String(d)))
-server.stderr.on('data', (d) => (iesireServer += String(d)))
-
-const opreste = () => {
-  try {
-    server.kill('SIGKILL')
-  } catch {
-    /* deja oprit */
-  }
+let server
+try {
+  server = await porneste({ port: PORT })
+} catch (e) {
+  console.error(`\n❌ NU POT VERIFICA: mediul de probă n-a trecut auto-verificarea — ${e.message}\n`)
+  process.exit(2)
 }
-process.on('exit', opreste)
 
-const viu = await asteaptaServerul(`http://127.0.0.1:${PORT}/api/health`)
-if (!viu) {
-  opreste()
+if (!server.ok) {
+  server.opreste()
   console.error('\n❌ NU POT VERIFICA: serverul nu s-a ridicat în 40s. Ultimele rânduri:\n')
-  console.error(iesireServer.slice(-1200))
+  console.error(server.iesire().slice(-1200))
   process.exit(2)
 }
 
@@ -145,14 +110,14 @@ const rez = []
 for (const r of rute) {
   const url = `http://127.0.0.1:${PORT}${concret(r)}`
   try {
-    const raspuns = await fetch(url, { headers: { cookie: COOKIE }, signal: AbortSignal.timeout(12000) })
+    const raspuns = await fetch(url, { headers: { cookie: server.cookie }, signal: AbortSignal.timeout(12000) })
     const corp = (await raspuns.text().catch(() => '')).slice(0, 120).replace(/\s+/g, ' ')
     rez.push({ ruta: r, status: raspuns.status, corp })
   } catch (e) {
     rez.push({ ruta: r, status: 0, corp: String(e).slice(0, 100) })
   }
 }
-opreste()
+server.opreste()
 
 const clasa = (x) => {
   if (x.status === 0) return 'MUT'
