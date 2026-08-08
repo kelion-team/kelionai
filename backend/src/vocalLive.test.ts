@@ -125,6 +125,13 @@ describe('vocalLive — reluarea sesiunii la limita de durată', () => {
     expect(reluat.setup.sessionResumption).toEqual({ handle: 'handle-123' })
   })
 
+  it('„no limit": fereastra glisantă e cerută — contextul plin nu mai omoară sesiunea', () => {
+    const st = construiesteSetup('m', 'Charon', 'p', []) as { setup: Record<string, unknown> }
+    expect(st.setup.contextWindowCompression, 'fără compresie, sesiunea moare când conversația se lungește').toEqual({
+      slidingWindow: {},
+    })
+  })
+
   it('handle-ul de reluare se citește din cadru (doar când e resumable)', () => {
     const ev = interpreteazaCadru({ sessionResumptionUpdate: { resumable: true, newHandle: 'h9' } })
     expect(ev).toContainEqual({ fel: 'handleReluare', handle: 'h9' })

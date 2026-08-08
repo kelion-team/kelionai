@@ -129,6 +129,13 @@ export function construiesteSetup(
     // (sessionResumptionUpdate) și un preaviz de închidere (goAway) — și
     // redeschide sesiunea CU CONTEXT, transparent pentru browser.
     sessionResumption: reluareHandle ? { handle: reluareHandle } : {},
+    // „SĂ FIE NO LIMIT" (Adrian, 8 aug): a doua limită, pe lângă durata
+    // conexiunii, e umplerea contextului — sesiunea moare când conversația
+    // devine prea lungă. Fereastra glisantă e mecanismul oficial Google pentru
+    // sesiuni de durată NELIMITATĂ: contextul vechi se comprimă din mers, în
+    // loc să omoare sesiunea. Împreună cu reluarea pe handle, singurele limite
+    // rămase sunt cele fizice (rețeaua ta, cheia ta).
+    contextWindowCompression: { slidingWindow: {} },
     generationConfig: {
       // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat: cu
       // TEXT dau cod 1007). Vocea = prebuiltVoiceConfig.voiceName (masculină).
