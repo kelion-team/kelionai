@@ -51,9 +51,7 @@ import {
 } from '../db.js'
 import { brainCompleteWithTools, expertModelLadder } from './brain.js'
 import {
-  BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
-  CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
-} from './brainToolDefs.js'
+  BROWSER_TOOLS, SECRET_LISTA_TOOL, } from './brainToolDefs.js'
 import { TOATE_UNELTELE_ADMIN } from './brainToolDefs.js'
 // repo_* / runbook_* / request_repair live in the SHARED source — importing
 // them from routes/chat.js put this module in an import cycle, and on plain
@@ -72,7 +70,6 @@ import {
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { listeazaCerinte, actualizeazaCerinta } from '../db.js'
-import { listeazaSecrete } from './secrete.js'
 import { isOpsPaused } from './runbooks.js'
 import { utcDay } from './timeContext.js'
 import {
@@ -130,15 +127,6 @@ interface Sarcina {
 }
 
 /** Do the keys really exist in the repo secrets? (measurement, not claim) */
-async function secreteExista(...nume: string[]): Promise<boolean> {
-  try {
-    const j = JSON.parse(await listeazaSecrete()) as { secrete?: { nume: string }[] }
-    const set = new Set((j.secrete ?? []).map((s) => s.nume))
-    return nume.every((n) => set.has(n))
-  } catch {
-    return false
-  }
-}
 
 /** A repo file, tried on the same paths the RAMAS reader uses. `null` = not
  *  readable — a proof that depends on it stays UNPROVEN, it never guesses. */

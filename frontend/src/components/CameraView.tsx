@@ -86,7 +86,11 @@ export default function CameraView({
       stopStream(streamRef.current)
       streamRef.current = null
     }
-  }, [active, facing, onError, retryNonce])
+    // `captureRef` lipsea din listă. E un ref (identitate stabilă), deci
+    // adăugarea NU schimbă când rulează efectul — dar oprește avertismentul și,
+    // mai important, ține lista sinceră: dacă mâine devine altceva decât un ref,
+    // efectul chiar trebuie să reacționeze la el.
+  }, [active, facing, onError, retryNonce, captureRef])
 
   // If the page regains focus or comes back online, try to recover from a
   // transient failure (camera busy, permission prompt dismissed, etc.).

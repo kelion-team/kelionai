@@ -2119,7 +2119,12 @@ export default function AdminPanel({
                     if (res.ok) alert('Comanda de resetare VPS a fost trimisă cu succes.')
                     else alert('Eroare la trimiterea comenzii de resetare.')
                   } catch (e) {
-                    alert('Eroare rețea la trimiterea comenzii.')
+                    // Eroarea era PRINSĂ și ARUNCATĂ: omul vedea „eroare de rețea"
+                    // orice s-ar fi întâmplat, iar cauza reală dispărea. Acum
+                    // motivul ajunge la el și în consolă, ca să se poată repara.
+                    const motiv = e instanceof Error ? e.message : String(e)
+                    console.error('[reset-vps]', e)
+                    alert(`Eroare la trimiterea comenzii de resetare: ${motiv}`)
                   }
                 }}
               >
