@@ -33,10 +33,12 @@ describe('plafonul de unelte al furnizorului e garantat structural', () => {
     // (sau modelul escaladează), plafonul redevine cel al furnizorului.
     expect(chat).toMatch(/MAX_PROVIDER_TOOLS = turaUsoara \? PLAFON_UNELTE_USOR : PLAFON_FURNIZOR/)
     expect(chat).toMatch(/cereActiune = hasActionIntent\(lastUserText\)/)
-    // `ask_brain` trebuie să supraviețuiască tăierii — fără ea, ce nu încape în
-    // cele 12 n-ar mai putea fi cerut deloc.
-    expect(chat).toMatch(/baseTools\.filter\(\(t\) => t\.name === 'ask_brain'\)/)
+    expect(chat).toMatch(/baseTools\.filter\(\(t\) => permisaLaVorbire\(t\.name\)\)/)
   })
+
+  // (Testul detaliat al listei de vorbire s-a mutat în fazeChat.test.ts —
+  // lista însăși s-a mutat în services/fazeChat.ts, sursa unică a fazelor.)
+
 
   it('lista e deduplicată pe NUME înainte de trimitere', () => {
     expect(chat).toMatch(/seenNames\.has\(t\.name\)/)
