@@ -337,6 +337,20 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     // ar deschide o frază fantomă.
     const voiced = rms > VOICE_RMS && rms > noiseFloor * DOMINANCE
     if (!voiced) noiseFloor = noiseFloor * 0.97 + rms * 0.03
+    // ── DEBLOCAREA VAD-ULUI (măsurat 8 aug, consola ownerului) ──────────────
+    // Rândul de deasupra adapta podeaua DOAR când nu e voce. Cu zgomot ambiental
+    // peste prag, fiecare cadru era „voce" → podeaua nu se mai mișca NICIODATĂ →
+    // voce continuă pentru totdeauna. Dovada, de 4 ori la rând în consola lui:
+    //     [frază] plec la creier {ms: 20048, octeti: 855482}
+    // Fiecare „frază" = fix plafonul de 20 s / 855 KB, identică — fraza nu se
+    // închidea la pauza lui de 1,4 s (pauza nu se VEDEA), ci doar la plafon.
+    // Alea erau secundele lui de așteptare.
+    // Deblocarea: după 8 s de „voce" neîntreruptă (nicio frază vorbită normal
+    // n-are 8 s fără NICIO pauză de 1,4 s), podeaua începe să urce încet spre
+    // nivelul curent — zgomotul constant devine podea, vocea reală rămâne peste.
+    else if (phraseOpen && phrasePcmLen > TARGET_RATE * 8) {
+      noiseFloor = noiseFloor * 0.99 + rms * 0.01
+    }
 
     // Pre-roll: păstrăm mereu ultimele cadre, chiar înainte ca VAD-ul să declare voce.
     pushPreRoll(input)
@@ -375,8 +389,21 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       phrasePcmLen += ds.length
       framesSent++
     } else {
-      // depășit capul de ~20s → închidem fraza acum (nu o lăsăm să crească la infinit)
-      closePhrase()
+      // ── PLAFONUL DE 20 s ATINS = ZGOMOT CONTINUU, NU O FRAZĂ ──────────────
+      // Înainte, aici se chema closePhrase() — adică cele 20 s / 855 KB de
+      // zgomot PLECAU la creier: urcare de aproape 1 s, creierul asculta 20 s
+      // de fond și (corect) tăcea, iar banii și secundele se duceau degeaba.
+      // O rostire adresată nu ține 20 s fără NICIO pauză de 1,4 s. Se aruncă,
+      // cu motivul scris, iar podeaua se recalibrează la nivelul zgomotului ca
+      // VAD-ul să se deblocheze pe loc. Ce se pierde, pe față: o dictare
+      // neîntreruptă mai lungă de 20 s ar fi și ea aruncată — dacă apare cazul
+      // real, se vede în jurnal exact pe linia asta.
+      noiseFloor = Math.max(noiseFloor, rms * 0.9)
+      console.warn(
+        `[frază] ARUNCATĂ — 20 s fără nicio pauză = zgomot continuu (VAD blocat); podeaua de zgomot recalibrată la ${noiseFloor.toFixed(4)}`,
+      )
+      opts.onLive('')
+      resetPhrase()
     }
   }
 
