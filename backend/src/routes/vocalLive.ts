@@ -12,7 +12,7 @@ import {
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
-import { saveMessage, getRecentHistory } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv } from '../db.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -167,6 +167,30 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       const nume = user.name || user.email.split('@')[0]
       const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric)
 
+      // CONVERSAȚIA SUPRAVIEȚUIEȘTE REPORNIRII (8 aug, ownerul: „trebuie să nu
+      // mai moară… chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
+      // și să continue chatul logic"). Mânerul de reluare Google trăia doar în
+      // memoria procesului — o publicare îl pierdea și conversația murea. Acum
+      // se persistă în kv la fiecare împrospătare (frânat la 5s) și se citește
+      // aici: procesul nou reia ACEEAȘI sesiune, cu tot contextul ei. Un mâner
+      // stătut nu strică: setup-ul cu el pică înainte de `gata`, iar degradarea
+      // măsurată din motor reia curat, fără el.
+      const KV_RELUARE = `vocal-live:reluare:${user.email.toLowerCase()}`
+      let reluareInitial: string | undefined
+      try {
+        const brut = await loadKv(KV_RELUARE)
+        if (brut) {
+          const j = JSON.parse(brut) as { h?: string; t?: number }
+          if (j.h && typeof j.t === 'number' && Date.now() - j.t < 10 * 60_000) {
+            reluareInitial = j.h
+            app.log.info('vocal-live: reiau sesiunea Google cu handle persistat (conversația continuă)')
+          }
+        }
+      } catch {
+        /* fără handle — sesiune proaspătă, nu blocăm vocea */
+      }
+      let ultimaSalvareHandle = 0
+
       if (inchis) return
       live = deschideVocalLive(instructiune, unelteleSesiuniiLive(), {
         onGata: () => trimite({ type: 'gata' }),
@@ -202,7 +226,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           app.log.warn(`vocal-live: ${motiv}`)
         },
         onInfo: (msg) => app.log.info(`vocal-live: ${msg}`),
-      })
+        onHandleReluare: (handle) => {
+          const acum = Date.now()
+          if (acum - ultimaSalvareHandle < 5_000) return
+          ultimaSalvareHandle = acum
+          void saveKv(KV_RELUARE, JSON.stringify({ h: handle, t: acum })).catch(() => {})
+        },
+      }, reluareInitial)
       if (!live) {
         try {
           socket.close(1011, 'vocal_live_indisponibil')

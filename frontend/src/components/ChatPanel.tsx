@@ -1460,13 +1460,20 @@ export default function ChatPanel({
                 setListening(false)
                 // Oprirea manuală nu se „repară" — doar căderile.
                 if (micManualOffRef.current) return
-                if (reluari < 3) {
+                if (reluari < 90) {
                   reluari++
-                  // Ferestre care acoperă o REPORNIRE de server, nu doar un sughiț
-                  // (8 aug, „trimite err 1006": publicarea repornește containerul;
-                  // vechile 800/1600/2400 ms picau toate cât serverul încă bootă).
-                  const pauza = [2000, 6000, 15000][reluari - 1] ?? 15000
-                  console.info(`[vocalLive] reluare ${reluari}/3 în ${pauza} ms`)
+                  // LA SECUNDĂ, nu în 3 încercări rare (8 aug, ownerul: „15-20
+                  // sec este criminal pentru chat… chiar dacă se întrerupe 1
+                  // sec, e suficient să se redeschidă și să continue logic").
+                  // Prima reluare la 400 ms (sughițurile se sting sub secundă),
+                  // apoi la fiecare secundă până la 90 — în clipa în care
+                  // serverul respiră după o publicare, sesiunea e înapoi, iar
+                  // handle-ul persistat pe server îi redă conversația întreagă.
+                  // Banda apare abia de la a 5-a ratare, ca un sughiț de-o
+                  // secundă să rămână invizibil pe ecran.
+                  const pauza = reluari === 1 ? 400 : 1000
+                  if (reluari < 5) setLiveVoice('')
+                  console.info(`[vocalLive] reluare ${reluari}/90 în ${pauza} ms`)
                   window.setTimeout(() => {
                     if (!micManualOffRef.current && !vlRef.current) void porneste()
                   }, pauza)

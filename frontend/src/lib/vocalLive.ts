@@ -145,6 +145,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let proc: ScriptProcessorNode | null = null
   let resumeTimer: ReturnType<typeof setInterval> | null = null
   let inchis = false
+  // O SINGURĂ eroare urcă per deschidere: la un server picat, `onerror` și
+  // `onclose` trag amândouă — fără frâna asta, ChatPanel ar porni DOUĂ lanțuri
+  // de reluare în paralel (adică două sesiuni) la fiecare ratare de conectare.
+  let eroareUrcata = false
+  const urcaEroarea = (m: string): void => {
+    if (eroareUrcata) return
+    eroareUrcata = true
+    opts.onEroare(m)
+  }
   let octeti = 0
   // Coada de redare: fiecare cadru primit se programează DUPĂ ce se termină
   // precedentul. Fără asta, cadrele s-ar suprapune și vocea ar suna ca un cor.
@@ -285,25 +294,25 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       case 'tura_gata':
         break
       case 'eroare':
-        opts.onEroare(m.motiv ?? 'eroare necunoscută în sesiunea vocală')
+        urcaEroarea(m.motiv ?? 'eroare necunoscută în sesiunea vocală')
         break
       default:
         break
     }
   }
 
-  ws.onerror = (): void => opts.onEroare('sesiunea vocală a căzut (rețea)')
+  ws.onerror = (): void => urcaEroarea('sesiunea vocală a căzut (rețea)')
   ws.onclose = (ev: CloseEvent): void => {
     if (inchis) return
     // Motivele numite ale serverului urcă la om, nu mor în consolă.
-    if (ev.code === 1008) opts.onEroare('sesiune vocală: nu ești autentificat')
-    else if (ev.code === 1011) opts.onEroare('sesiune vocală indisponibilă pe server (lipsește cheia?)')
+    if (ev.code === 1008) urcaEroarea('sesiune vocală: nu ești autentificat')
+    else if (ev.code === 1011) urcaEroarea('sesiune vocală indisponibilă pe server (lipsește cheia?)')
     // ORICE altă închidere neinițiată de noi era MOARTE TĂCUTĂ (8 aug: „salută
     // și moare"): cod 1000/1006 → niciun mesaj, nicio reluare, iar vlRef rămas
     // setat bloca ȘI audio-ul căii vechi — bec aprins, totul mort. Acum urcă la
     // ChatPanel: 3 reluări, apoi coboară singur pe calea veche — orice cauză ar
     // avea serverul/Google, vocea se întoarce în secunde, cu motivul pe bandă.
-    else opts.onEroare(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
+    else urcaEroarea(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
     inchide()
   }
 
@@ -313,7 +322,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     ws.onopen = () => gata()
     setTimeout(() => esec(new Error('timeout la deschiderea sesiunii')), 10_000)
   }).catch((e: Error) => {
-    opts.onEroare(e.message)
+    urcaEroarea(e.message)
     inchide()
   })
   if (inchis || ws.readyState !== WebSocket.OPEN) return null
@@ -323,7 +332,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     })
   } catch {
-    opts.onEroare('microfonul nu a fost permis')
+    urcaEroarea('microfonul nu a fost permis')
     inchide()
     return null
   }
