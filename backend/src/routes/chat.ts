@@ -1590,6 +1590,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // something it has in hand. The list is DERIVED from the registry (the
     // single source), so it cannot fall behind. The ordinary user does not see
     // the admin tools — they could not call them anyway.
+    // ── CHATUL E DOAR CHAT (Adrian, 8 aug, verbatim): „orice chat trebuie să fie
+    // default chat, fără să poarte nimic cu el, după care urmează procedura prin
+    // creier de analiză și execuție" ─────────────────────────────────────────
+    //
+    // Se hotărăște AICI, înainte de a construi promptul, fiindcă și promptul e
+    // ceva „purtat": blocurile despre reparat cod, PR-uri, runbook-uri, clipuri
+    // promo — mii de tokeni citiți degeaba la „cât e ceasul". Măsurat: 24 de
+    // blocuri, 17 necondiționate, ~3.900 tokeni la FIECARE tură.
+    const textulTurei = (() => {
+      const ultim = messages.at(-1)
+      return ultim?.role === 'user' ? String(ultim.content ?? '') : ''
+    })()
+    const turaCurata = !hasActionIntent(textulTurei) && !image && camFrames.length === 0
     let systemPrompt = `${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
@@ -1753,7 +1766,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // promise.
     if (user.role === 'admin') {
       systemPrompt +=
-        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. IF YOU SAY YOU WILL ANALYSE, ANALYSE — ON SCREEN (Adrian, 31 Jul: "when he says he will analyse, he must FACTUALLY open the monitor and show what he is doing"). The words "analizez", "mă uit", "verific", "let me look into it" are a PROMISE, and until now they were where turns died: it sounded like work, and he was left staring at an empty screen. From now on, the moment you say any of them, IN THE SAME TURN: (1) call show_document FIRST with what you are about to look at, so the monitor lights up before the waiting starts; (2) actually call the tools (read_source, search_source, db_query, system_health, runbook_log — whatever fits); (3) call show_document AGAIN with what you FOUND — file and line, the log excerpt, the query result. If you have nothing to look with, say so plainly instead of promising. Never announce an analysis you do not immediately perform and display. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. ANSWER WHAT HE ASKED — DON'T RAMBLE SYSTEM STATUS (Adrian, 3 aug: „bate câmpii" — every reply opened with the same system-problems monologue instead of answering): answer EXACTLY what Adrian asked and ONLY that. Do NOT open replies with unsolicited system status, health, deploy state, failed build orders, or reserve/limit reports, and do NOT call system_health or constructor_status on your own initiative unless he ASKS about status/health/builds, or it is directly needed to carry out what he asked. Surface a system problem ONLY when it directly blocks the request he just made — then in ONE short sentence, after doing the task — or when he explicitly asks how things are, in which case say them briefly and, if he wants, repair them with your own tools (no permission question). Never lead an answer with problems he did not ask about. SELF-INSTALL WHAT YOU LACK (never stop at "I don't have that library/tool"): when a task needs a dependency you don't have — an npm package, or a system tool — ADD it yourself the DURABLE way, through the constructor: order build_software to add the npm package to backend/package.json (or the system package to the Dockerfile's apt-get line), which builds with tests and opens a PR; once it merges, the image rebuilds and the dependency is LIVE and permanent (it survives redeploys). For a tiny change you may instead use repo_write on package.json/Dockerfile + repo_open_pr directly. Say which package and why, order it, then finish the task once it is deployed. NEVER run an ad-hoc live "apt install"/"npm install" on the server as the way to gain a capability — that is ephemeral and unsafe; the package.json/Dockerfile route is the only permanent, auditable one. Only say you cannot when a thing is truly impossible, not merely missing a package.`
+        // BLOCURILE DE LUCRU (reparat, PR, runbook, constructor, clipuri) NU
+        // pleacă pe o tură de conversație — acolo sunt doar greutate. Vin
+        // înapoi, întregi, în clipa în care se cere o acțiune sau creierul
+        // escaladează prin `ask_brain`.
+        (turaCurata ? '' : `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. IF YOU SAY YOU WILL ANALYSE, ANALYSE — ON SCREEN (Adrian, 31 Jul: "when he says he will analyse, he must FACTUALLY open the monitor and show what he is doing"). The words "analizez", "mă uit", "verific", "let me look into it" are a PROMISE, and until now they were where turns died: it sounded like work, and he was left staring at an empty screen. From now on, the moment you say any of them, IN THE SAME TURN: (1) call show_document FIRST with what you are about to look at, so the monitor lights up before the waiting starts; (2) actually call the tools (read_source, search_source, db_query, system_health, runbook_log — whatever fits); (3) call show_document AGAIN with what you FOUND — file and line, the log excerpt, the query result. If you have nothing to look with, say so plainly instead of promising. Never announce an analysis you do not immediately perform and display. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. ANSWER WHAT HE ASKED — DON'T RAMBLE SYSTEM STATUS (Adrian, 3 aug: „bate câmpii" — every reply opened with the same system-problems monologue instead of answering): answer EXACTLY what Adrian asked and ONLY that. Do NOT open replies with unsolicited system status, health, deploy state, failed build orders, or reserve/limit reports, and do NOT call system_health or constructor_status on your own initiative unless he ASKS about status/health/builds, or it is directly needed to carry out what he asked. Surface a system problem ONLY when it directly blocks the request he just made — then in ONE short sentence, after doing the task — or when he explicitly asks how things are, in which case say them briefly and, if he wants, repair them with your own tools (no permission question). Never lead an answer with problems he did not ask about. SELF-INSTALL WHAT YOU LACK (never stop at "I don't have that library/tool"): when a task needs a dependency you don't have — an npm package, or a system tool — ADD it yourself the DURABLE way, through the constructor: order build_software to add the npm package to backend/package.json (or the system package to the Dockerfile's apt-get line), which builds with tests and opens a PR; once it merges, the image rebuilds and the dependency is LIVE and permanent (it survives redeploys). For a tiny change you may instead use repo_write on package.json/Dockerfile + repo_open_pr directly. Say which package and why, order it, then finish the task once it is deployed. NEVER run an ad-hoc live "apt install"/"npm install" on the server as the way to gain a capability — that is ephemeral and unsafe; the package.json/Dockerfile route is the only permanent, auditable one. Only say you cannot when a thing is truly impossible, not merely missing a package.`)
       // NO CONFIRMATIONS TO THE OWNER (Adrian, Jul 31). The general rule above
       // ("confirm only before irreversible ones") is written for public users.
       // Here it is the owner: if he asked for something, the request IS the
@@ -1762,7 +1779,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // destructive step you inferred yourself. That is not a security
       // confirmation; it is avoiding something nobody asked you to do.
       systemPrompt +=
-        `\n\nOWNER — NO CONFIRMATIONS: this overrides the general "confirm before irreversible actions" rule, which is for public users. When the owner asks for something, the request IS the authorisation: send, delete, merge, restart, run the runbook — DO IT, then report what you did. Never answer with "shall I proceed?", "are you sure?", "do you want me to?" or any other permission question about the thing he just asked for. Also never ask him to unlock, authenticate, or confirm his identity in chat — being in this conversation already proves he is the owner. The ONE exception is an action he did NOT ask for: if carrying out his request would additionally destroy something he never mentioned (dropping a table to fix a query, deleting files to free space, force-pushing over work), name that specific side effect in one sentence and ask about THAT alone — never about the request itself. Same for the health check: if system_health reports problems, say them briefly and repair them; don't ask permission first.`
+        (turaCurata ? '' : `\n\nOWNER — NO CONFIRMATIONS: this overrides the general "confirm before irreversible actions" rule, which is for public users. When the owner asks for something, the request IS the authorisation: send, delete, merge, restart, run the runbook — DO IT, then report what you did. Never answer with "shall I proceed?", "are you sure?", "do you want me to?" or any other permission question about the thing he just asked for. Also never ask him to unlock, authenticate, or confirm his identity in chat — being in this conversation already proves he is the owner. The ONE exception is an action he did NOT ask for: if carrying out his request would additionally destroy something he never mentioned (dropping a table to fix a query, deleting files to free space, force-pushing over work), name that specific side effect in one sentence and ask about THAT alone — never about the request itself. Same for the health check: if system_health reports problems, say them briefly and repair them; don't ask permission first.`)
       // THE UPDATE CHANNEL: Kelion knows from the prompt WHAT it received at the
       // latest deploy (local file, cached on first read — zero latency cost).
       const upd = await latestUpdateSummary().catch(() => '')
@@ -2217,7 +2234,39 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Ce se pierde, spus pe față: dacă ceri prin conversație ceva ce cere o
     // unealtă rară, ea vine în runda a doua — acolo e mai lent, în rest e mai
     // rapid peste tot. E schimbul pe care l-a ales ownerul, cu cifrele în față.
-    const PLAFON_UNELTE_USOR = 12
+    // ── CE ARE VOIE PE TURA DE CONVERSAȚIE (Adrian, 8 aug: „scoate verificarea
+    // sistemului la fiecare început de frază, îmi bagă cel puțin 8 secunde de
+    // delay" → „se scoate din chat") ─────────────────────────────────────────
+    //
+    // MĂSURAT de ce erau 8 secunde: `system_health` face două apeluri la GitHub
+    // (timeout 10 s fiecare) ȘI sondează endpointul FIECĂRUI buton din Admin, cu
+    // timeout 8 s. Sunt în paralel, deci ~8 s în cel mai rău caz — exact cifra
+    // reclamată. Nu are ce căuta pe drumul unei fraze rostite.
+    //
+    // Lista e ANUME, pe nume, nu „primele N din inventar": ordinea inventarului
+    // e făcută pentru plafonul furnizorului, iar acolo primele 23 sunt uneltele
+    // Google — o tăiere oarbă la 12 lăsa conversația cu Gmail și Calendar, dar
+    // FĂRĂ monitor, notițe sau memorie. (Prima variantă de azi făcea exact asta;
+    // se vedea doar numărând, nu citind.)
+    //
+    // Ce NU e aici se poate cere oricând: modelul cheamă `ask_brain` și tura de
+    // lucru primește tot inventarul. Costul e o rundă în plus, DOAR când chiar e
+    // nevoie — nu 8 secunde la fiecare frază.
+    const UNELTE_CONVERSATIE = new Set([
+      'ask_brain', // scara spre tot restul — fără ea, tura ușoară ar fi o cușcă
+      'get_time',
+      'get_weather',
+      'web_search',
+      'show_on_screen',
+      'show_document',
+      'open_app_view',
+      'save_note',
+      'list_notes',
+      'list_memories',
+      'memorie_ia',
+      'cheama_agent',
+    ])
+    const PLAFON_UNELTE_USOR = UNELTE_CONVERSATIE.size
     const cereActiune = hasActionIntent(lastUserText) || turnHasImage
     const PLAFON_FURNIZOR = orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
@@ -2237,10 +2286,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // tura ușoară sigură (fără ea, ce nu încape în cele 12 n-ar mai avea cum să
     // fie cerut deloc, și am fi construit chiar defectul „zice că nu poate").
     const tools: Tool[] = turaUsoara
-      ? [
-          ...baseTools.filter((t) => t.name === 'ask_brain'),
-          ...baseTools.filter((t) => t.name !== 'ask_brain').slice(0, MAX_PROVIDER_TOOLS - 1),
-        ]
+      ? baseTools.filter((t) => UNELTE_CONVERSATIE.has(t.name))
       : baseTools.slice(0, MAX_PROVIDER_TOOLS)
     console.log(
       `[UNELTE] tura ${turaUsoara ? 'UȘOARĂ' : 'de LUCRU'}: ${tools.length} din ${baseTools.length} unelte` +
