@@ -55,7 +55,6 @@ import {
 import { runOrchestrator } from '../services/orchestrator.js'
 import { autoPreviewFrame } from '../services/monitorAutoPreview.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
-import { brainComplete } from '../services/brain.js'
 import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -595,11 +594,11 @@ export const PROPOSE_TOOL: Tool = {
 const ASK_BRAIN_TOOL: Tool = {
   name: 'ask_brain',
   description:
-    "HEAVY requests only — deep analysis, architecture, coding, math, long multi-step reasoning, anything that needs an expert brain. Pass the user's full request with context; you get back the expert's answer to deliver (rephrase naturally in the conversation's language, keep it complete).",
+    'ESCALATION DOOR — call this THE MOMENT the request needs a tool you do not have this turn (system checks, database, logs, source code, repo/PR, runbooks, builds, Jules) or a heavy multi-step job. It UNLOCKS the full tool inventory for THIS turn only: after it returns, immediately call the right tool and do the work — the result you bring back is the answer. Access closes by itself when the turn ends. NEVER say "I can\'t do that" or stall without opening this door first.',
   input_schema: {
     type: 'object',
     properties: {
-      request: { type: 'string', description: "The user's full request, with any needed context." },
+      request: { type: 'string', description: 'What you need to do and which capability is missing, in one short sentence.' },
     },
     required: ['request'],
   },
@@ -2175,9 +2174,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // clients' credits (debitWallet at the end of the turn); the admin is exempt.
 
     const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL]
-    // ask_brain ONLY on the chat step — on work it would be recursive (it IS the
-    // brain).
-    const escalationTools = heavyTurn ? [] : [ASK_BRAIN_TOOL]
+    // UȘA DE ESCALADARE pe FAZA de vorbire, nu pe treapta de model (8 aug,
+    // ownerul: „verifică de ce nu știe să escaladeze să ceară acces la unelte").
+    // Vechea condiție (pe heavyTurn) lăsa turele VOCALE fără ușă: ele sunt
+    // „heavy" ca MODEL (decid adresarea), dar ușoare ca unelte — deci o cerere
+    // rostită care avea nevoie de o unealtă grea n-avea NICIO cale de
+    // escaladare. Pe faza de decizie ușa nu are sens (inventarul e deja plin).
+    const escalationTools = incarcatura.faza === 'vorbire' ? [ASK_BRAIN_TOOL] : []
     // SELF-EXTENSION: the dynamic tools APPROVED by the owner (active instantly,
     // without redeploy) + `propose_tool` so it can propose new ones.
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
@@ -2321,6 +2324,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         tools.push(t)
       }
     }
+    // INVENTARUL PLIN pentru escaladare (Adrian, 8 aug: „din chat, fără să care
+    // după el, trebuie să știe să IASĂ, să ia funcția sau unealta, să rezolve
+    // și să aducă rezultatul"). Tura ușoară pleacă cu 13 unelte; când modelul
+    // cheamă `ask_brain`, lista turei se comută PE LOC pe asta — aceeași listă
+    // pe care ar fi primit-o o tură de lucru, cu același plafon de furnizor.
+    const uneltePline: Tool[] = (() => {
+      const vazute = new Set<string>()
+      const plin: Tool[] = []
+      for (const t of [...baseTools, ...dynTools]) {
+        if (vazute.has(t.name) || t.name === 'ask_brain') continue // ușa nu se re-oferă: e deja deschisă
+        vazute.add(t.name)
+        if (plin.length >= PLAFON_FURNIZOR) break
+        plin.push(t)
+      }
+      return plin
+    })()
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Voice from the first sentence on the API path too (clients): every
     // broadcast piece enters the pipe; synthesis runs in parallel with the text
@@ -2427,21 +2446,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         if (dynNames.has(name)) {
           return await runDynamicTool(name, input as Record<string, unknown>)
         }
-        // MODEL-DECIDED ESCALATION: the same path as voice — full persona + the
-        // turn's language, an answer from the brain with internal reasoning. The
-        // REAL cost enters usage → debited at the end of the turn like any call.
+        // UȘA DE ESCALADARE CHIAR DESCHIDE UNELTELE (8 aug, ownerul: „nu știe
+        // să escaladeze să ceară acces la unelte… dacă nu are acces la unealtă
+        // sau funcție intră în blocaj"). Măsurat în cod ce era înainte: aici se
+        // chema `brainComplete` — o completare de TEXT, zero unelte; „expertul"
+        // primea cererea și răspundea din cap, iar cu modelul unic era ACELAȘI
+        // model — deci escaladarea nu aducea nimic, doar un al doilea apel fără
+        // mâini. Fix blocajul reclamat. Acum: lista turei se comută PE LOC pe
+        // inventarul plin (runOrchestrator dă array-ul prin REFERINȚĂ către
+        // fiecare rundă, deci runda următoare pleacă cu el), modelul cheamă
+        // unealta potrivită și aduce REZULTATUL; la finalul turei accesul se
+        // închide singur — tura următoare o ia iar de la zero, prin fazaTurei.
         if (name === 'ask_brain') {
           const request = String((input as { request?: string }).request ?? '').trim()
-          if (!request) return JSON.stringify({ error: 'empty_request' })
-          const brainPrompt =
-            `${SYSTEM_PROMPT}\n\n` +
-            `CHAT ESCALATION: the fast chat model handed you a request it judged too hard. Answer it fully ` +
-            `and correctly${langName ? `, writing ONLY in ${langName}` : ''}. Plain conversational text, no markdown.\n\n${request}`
-          const answer = await brainComplete(brainPrompt, 4000, (usd) => {
-            usage.usd += usd
-            void recordCost(user.email, 'chat', usd)
+          if (tools.length < uneltePline.length) {
+            tools.length = 0
+            tools.push(...uneltePline)
+            for (const t of uneltePline) toolNamesThisTurn.add(t.name)
+            console.log(`[FAZĂ] ESCALADARE ask_brain: inventar comutat la ${tools.length} unelte pentru restul turei${request ? ` — „${request.slice(0, 120)}"` : ''}`)
+          }
+          return JSON.stringify({
+            escaladat: true,
+            unelte_disponibile_acum: tools.length,
+            mesaj:
+              'Acces acordat la TOT inventarul, DOAR pentru tura asta. Cheamă ACUM unealta potrivită și adu rezultatul — el e răspunsul. ' +
+              'Dacă spui că analizezi, cheamă uneltele și arată pe monitor (show_document) ce ai găsit. Nu promite — fă.',
           })
-          return answer || JSON.stringify({ error: 'brain_unavailable' })
         }
         const block = { type: 'tool_use', id: `call_${++callN}`, name, input } as unknown as ToolUseBlock
         if (eCautare) {

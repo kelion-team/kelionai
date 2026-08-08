@@ -67,6 +67,63 @@ function urlWs(): string {
   return `${proto}//${location.host}/api/vocal-live`
 }
 
+// ── AEC — SISTEMUL CU NUME, cerut de owner pe nume (8 aug: „lipsește un sistem
+// clar… care nu dă voie ca propria voce să intre în buclă, ca la concerte") ──
+//
+// Sistemul se numește AEC — Acoustic Echo Cancellation cu semnal de REFERINȚĂ
+// („mix-minus"/N-1 în broadcast): scazi din microfon EXACT ce știi că ai redat,
+// adaptiv — nu după tărie. Browserul ÎL ARE (același din Meet/WhatsApp), dar
+// scade doar sunetul pe care îl CUNOAȘTE: cel sosit prin conexiuni WebRTC.
+// Redarea noastră era WebAudio brut — invizibilă pentru AEC — deci ecoul
+// boxelor intra în microfon și modelul își tăia vorba (măsurat în consola
+// ownerului: șase barge-in-uri false la rând, apoi sesiunea moartă; iar
+// pragul fix 0.028 pus dimineață era greșeala inversă — bloca vocea lui de
+// 0.005 și lăsa ecoul tare să treacă; a fost ȘTERS).
+//
+// Soluția documentată (demo public: github.com/nguyenvulebinh/browser-aec):
+// sunetul lui Kelion trece printr-o BUCLĂ WebRTC locală — două conexiuni peer
+// legate una de alta în aceeași pagină — și se redă dintr-un element <audio>
+// cu fluxul „primit". Din clipa aia AEC-ul are referința și șterge vocea lui
+// din microfon, oricât de tari boxele și oricât de slab microfonul. Costul:
+// ~40-100 ms în plus pe redare (bufferul WebRTC) — nimic față de ture moarte.
+interface BuclaAEC {
+  pc1: RTCPeerConnection
+  pc2: RTCPeerConnection
+  el: HTMLAudioElement
+}
+
+async function pornesteBuclaAEC(ctx: AudioContext, sursa: AudioNode): Promise<BuclaAEC> {
+  const dest = ctx.createMediaStreamDestination()
+  sursa.connect(dest)
+  const pc1 = new RTCPeerConnection()
+  const pc2 = new RTCPeerConnection()
+  pc1.onicecandidate = (e): void => {
+    if (e.candidate) void pc2.addIceCandidate(e.candidate).catch(() => {})
+  }
+  pc2.onicecandidate = (e): void => {
+    if (e.candidate) void pc1.addIceCandidate(e.candidate).catch(() => {})
+  }
+  const fluxSosit = new Promise<MediaStream>((res, rej) => {
+    pc2.ontrack = (e): void => res(e.streams[0] ?? new MediaStream([e.track]))
+    setTimeout(() => rej(new Error('bucla WebRTC nu s-a legat în 5s')), 5000)
+  })
+  for (const t of dest.stream.getAudioTracks()) pc1.addTrack(t, dest.stream)
+  const oferta = await pc1.createOffer()
+  await pc1.setLocalDescription(oferta)
+  await pc2.setRemoteDescription(oferta)
+  const raspuns = await pc2.createAnswer()
+  await pc2.setLocalDescription(raspuns)
+  await pc1.setRemoteDescription(raspuns)
+  const flux = await fluxSosit
+  const el = new Audio()
+  el.srcObject = flux
+  el.autoplay = true
+  void el.play().catch(() => {
+    /* politica de autoplay — reîncercat de ceasul de deblocaj */
+  })
+  return { pc1, pc2, el }
+}
+
 export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia) {
     opts.onEroare('browserul nu dă acces la microfon')
@@ -93,6 +150,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // precedentul. Fără asta, cadrele s-ar suprapune și vocea ar suna ca un cor.
   let cursorRedare = 0
   let surseActive: AudioBufferSourceNode[] = []
+  let aec: BuclaAEC | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -106,6 +164,17 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       /* deja deconectat */
     }
     stream?.getTracks().forEach((t) => t.stop())
+    if (aec) {
+      try {
+        aec.pc1.close()
+        aec.pc2.close()
+        aec.el.pause()
+        aec.el.srcObject = null
+      } catch {
+        /* deja închise */
+      }
+      aec = null
+    }
     void ctxIn?.close().catch(() => {})
     void ctxOut?.close().catch(() => {})
     try {
@@ -164,15 +233,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   }
 
   const redaCadru = (b64: string): void => {
-    if (!ctxOut || inchis) return
+    if (!ctxOut || inchis || !analizor) return
     const f32 = pcm16ToFloat32(base64ToBytes(b64))
     if (!f32.length) return
-    if (!analizor) {
-      analizor = ctxOut.createAnalyser()
-      analizor.fftSize = 256
-      analizor.connect(ctxOut.destination)
-      bufAnalizor = new Uint8Array(analizor.fftSize)
-    }
     const buf = ctxOut.createBuffer(1, f32.length, RATA_IESIRE)
     buf.copyToChannel(f32, 0)
     const src = ctxOut.createBufferSource()
@@ -267,6 +330,22 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
 
   ctxIn = new AudioContext()
   ctxOut = new AudioContext()
+  // Lanțul de ieșire se ridică ACUM, nu leneș la primul cadru: analizorul
+  // (gura avatarului) → bucla WebRTC locală → <audio>, ca AEC-ul browserului
+  // să aibă referința din prima clipă (vezi antetul lui `pornesteBuclaAEC`).
+  analizor = ctxOut.createAnalyser()
+  analizor.fftSize = 256
+  bufAnalizor = new Uint8Array(analizor.fftSize)
+  try {
+    aec = await pornesteBuclaAEC(ctxOut, analizor)
+    console.info('[vocalLive] AEC activ — redarea trece prin bucla WebRTC locală; browserul scade vocea lui Kelion din microfon')
+  } catch (e) {
+    // Fără buclă (browser vechi, eșec de negociere): redare directă, spusă pe
+    // față — ecoul rămâne netratat, dar vocea MERGE.
+    aec = null
+    analizor.connect(ctxOut.destination)
+    console.warn(`[vocalLive] bucla AEC nu a pornit (${String(e).slice(0, 80)}) — redare directă, fără anulare de ecou`)
+  }
   const sursa = ctxIn.createMediaStreamSource(stream)
   // ScriptProcessor: deprecat, dar universal și fără fișier separat — aceeași
   // alegere ca în micStream.ts, pe aceeași motivație („merge pur și simplu" pe
@@ -275,17 +354,10 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   proc.onaudioprocess = (ev: AudioProcessingEvent): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
     const brut = ev.inputBuffer.getChannelData(0)
-    // ── GARDA DE ECOU (8 aug: „audio lui se oprește la jumătatea frazei") ────
-    // Redarea live e prin WebAudio, pe care anularea de ecou a browserului n-o
-    // acoperă sigur — microfonul aude vocea lui Kelion din difuzor, modelul o
-    // ia drept „omul vorbește peste" și își taie singur vorba. Cât timp Kelion
-    // vorbește, cadrele SLABE (ecoul rezidual) nu se trimit; vocea adevărată,
-    // apropiată, trece — barge-in-ul real rămâne.
-    if (surseActive.length > 0) {
-      let s2 = 0
-      for (let i = 0; i < brut.length; i++) s2 += brut[i] * brut[i]
-      if (Math.sqrt(s2 / brut.length) < 0.028) return
-    }
+    // FĂRĂ garda de prag (ștearsă 8 aug, la câteva ore după ce-am pus-o):
+    // 0.028 bloca vocea de 0.005 a ownerului și lăsa ecoul tare al boxelor să
+    // treacă — fix pe dos. Ecoul se tratează la rădăcină, cu AEC-ul browserului
+    // prin bucla WebRTC (vezi mai sus) — adaptiv, nu ghicit după tărie.
     const la16k = downsample(brut, ctxIn!.sampleRate)
     const pcm = float32ToPcm16([la16k])
     // `.buffer` e exact bufferul acestui Int16Array proaspăt creat — nu o felie
@@ -305,6 +377,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (inchis) return
     if (ctxIn && ctxIn.state !== 'running') void ctxIn.resume().catch(() => {})
     if (ctxOut && ctxOut.state !== 'running') void ctxOut.resume().catch(() => {})
+    // Politica de autoplay poate ține elementul AEC pe pauză până la un gest —
+    // același deblocaj continuu ca la contexte, aceeași lecție din 6 aug.
+    if (aec && aec.el.paused) void aec.el.play().catch(() => {})
   }, 1200)
 
   console.info(`[vocalLive] sesiune deschisă — microfon ${RATA_INTRARE} Hz → server, redare ${RATA_IESIRE} Hz`)
