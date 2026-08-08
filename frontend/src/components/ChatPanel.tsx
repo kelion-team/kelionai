@@ -1445,7 +1445,12 @@ export default function ChatPanel({
       // mid-sesiune NU înseamnă „vocea a murit", ci „redeschide". Se reia
       // singură de câteva ori; abia dacă și reluarea pică se coboară pe calea
       // veche, cu motivul scris.
-      if (localStorage.getItem('kelion_voce_live') !== '0' && !vlRef.current && !vlCazutRef.current) {
+      // CALEA CLASICĂ E IMPLICITĂ (8 aug, ownerul, după ziua vocii live: „vezi
+      // ce făcea [în iulie] și trebuie să facă la fel, dar cu Gemini"). Lanțul
+      // ureche→creier→gură de mai jos E fix comportamentul din iulie, cu
+      // creierul mutat pe Gemini încă din 3 aug. Vocea live rămâne DOAR la
+      // cerere: localStorage.kelion_voce_live = '1' — nu mai e implicită.
+      if (localStorage.getItem('kelion_voce_live') === '1' && !vlRef.current && !vlCazutRef.current) {
         const cap = await vocalLiveDisponibila()
         if (cap?.disponibil) {
           let reluari = 0
