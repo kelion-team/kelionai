@@ -1432,11 +1432,15 @@ export default function ChatPanel({
             const vl = await deschideVocalLive({
               onGata: () => {
                 reluari = 0 // sesiune sănătoasă → contorul de reluări se șterge
+                setLiveVoice('') // orice eroare veche de pe bandă se șterge
                 setListening(true)
               },
               onUser: (text, final) => setLiveVoice(final ? '' : text),
               onKelion: (text, final) => setLiveVoice(final ? '' : text),
               onEroare: (motiv) => {
+                // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
+                // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).
+                setLiveVoice(`⚠ voce live: ${motiv}`.slice(0, 140))
                 console.warn(`[vocalLive] ${motiv}`)
                 vlRef.current?.inchide()
                 vlRef.current = null
@@ -1455,6 +1459,7 @@ export default function ChatPanel({
                   // pica în aceeași groapă în buclă): se marchează sesiunea asta
                   // de tab ca „live căzut" și ensureMic pornește lanțul vechi.
                   console.error('[vocalLive] 3 reluări picate — cobor pe calea vocală veche')
+                  setLiveVoice('⚠ vocea live a picat de 3 ori — trec pe calea veche')
                   vlCazutRef.current = true
                   void ensureMic()
                 }

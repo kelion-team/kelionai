@@ -10,6 +10,7 @@ import {
   type VocalLive,
 } from '../services/vocalLive.js'
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
+import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
 import { saveMessage, getRecentHistory } from '../db.js'
 
@@ -40,6 +41,34 @@ import { saveMessage, getRecentHistory } from '../db.js'
 //     { type:'intrerupt' }                         barge-in: oprește redarea ACUM
 //     { type:'tura_gata' }                         Kelion a terminat de vorbit
 //     { type:'eroare', motiv }                     eroare NUMITĂ (nu murim tăcut)
+
+// ── UNELTELE SESIUNII LIVE — DOAR SETUL DOVEDIT (8 aug, „pornește la voce,
+// dar nimic") ────────────────────────────────────────────────────────────────
+// Ruta trimitea TOATE cele 58 de unelte de admin, prin `as any[]`. Două
+// probleme, ambele REALE:
+//   1. NEDOVEDIT: proba din 7 aug a dovedit sesiunea live cu O SINGURĂ unealtă
+//      simplă (`cauta`) — nimeni n-a văzut vreodată 58 de declarații acceptate.
+//   2. SCHEMĂ GREȘITĂ, ascunsă de cast: uneltele de admin au câmpul
+//      `input_schema`, sesiunea live cere `parameters` — deci fiecare
+//      declarație pleca spre Google cu schema UNDEFINED. Exact felul de
+//      nepotrivire pe care TypeScript l-ar fi prins, dacă nu-l amuțea `as any`.
+// Consecința potrivea perfect simptomul: setup refuzat → sesiunea moare → un
+// warn invizibil în consolă → cădere pe calea veche (care avea surzenia).
+// Setul de mai jos e mic, conversațional, cu scheme plate — în spiritul
+// fazelor: vocea vorbește; lucrul greu vine după ce se dovedește.
+const UNELTE_LIVE = new Set(['list_updates', 'get_real_cost', 'stare_masurata', 'memorie_ia', 'memorie_lista', 'list_memories'])
+
+function unelteleSesiuniiLive(): UnealtaVocala[] {
+  return (TOATE_UNELTELE_ADMIN as Array<{ name: string; description: string; input_schema?: Record<string, unknown> }>)
+    .filter((t) => UNELTE_LIVE.has(t.name))
+    .map((t) => ({
+      name: t.name,
+      description: t.description,
+      // `input_schema` → `parameters`: traducerea care lipsea. Fără schemă
+      // reală, un obiect gol VALID — nu undefined.
+      parameters: t.input_schema ?? { type: 'object', properties: {} },
+    }))
+}
 
 const PERSONA_KELION =
   'Ești Kelion, asistentul lui Adrian. Vorbești firesc, cald și SCURT, în română. ' +
@@ -139,7 +168,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric)
 
       if (inchis) return
-      live = deschideVocalLive(instructiune, TOATE_UNELTELE_ADMIN as any[], {
+      live = deschideVocalLive(instructiune, unelteleSesiuniiLive(), {
         onGata: () => trimite({ type: 'gata' }),
         onAudioIesire: (data) => trimite({ type: 'audio', data }),
         onTranscriereUser: (text, final) => {
