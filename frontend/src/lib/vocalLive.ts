@@ -52,6 +52,11 @@ export interface VocalLiveOpts {
    *  când ușa cere_creierului se deschide, tura escaladată pleacă cu ochii.
    *  Gol/absent = fără cameră; tura pleacă fără imagini, nu se blochează. */
   cadre?(): string[]
+  /** VEDEREA CONTINUĂ (8 aug: „trebuie să poată folosi camera"): un cadru
+   *  PROASPĂT (data-URL JPEG) sau null când camera e oprită. Cât sesiunea e
+   *  vie, un cadru pleacă la fiecare ~2,5 s direct în sesiunea Live — modelul
+   *  vede în timp ce vorbește. null = nu se trimite nimic (nu cadre stătute). */
+  cadruLive?(): string | null
 }
 
 export interface VocalLiveHandle {
@@ -174,6 +179,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let surseActive: AudioBufferSourceNode[] = []
   let aec: BuclaAEC | null = null
   let ceasCoords: ReturnType<typeof setInterval> | null = null
+  let ceasCadre: ReturnType<typeof setInterval> | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -182,6 +188,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     alimenteazaNivelVoce(0)
     if (resumeTimer) clearInterval(resumeTimer)
     if (ceasCoords) clearInterval(ceasCoords)
+    if (ceasCadre) clearInterval(ceasCadre)
     try {
       proc?.disconnect()
     } catch {
@@ -316,6 +323,22 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       case 'gata':
         trimiteCoords()
         if (!ceasCoords) ceasCoords = setInterval(trimiteCoords, 120_000)
+        // VEDEREA CONTINUĂ: un cadru la ~2,5s cât camera e pornită. Prefixul
+        // data-URL se taie aici — sesiunea Live vrea JPEG base64 BRUT.
+        if (!ceasCadre && opts.cadruLive) {
+          ceasCadre = setInterval(() => {
+            if (inchis || ws.readyState !== WebSocket.OPEN) return
+            const f = opts.cadruLive?.()
+            if (!f) return
+            const virgula = f.indexOf(',')
+            const brut = virgula >= 0 ? f.slice(virgula + 1) : f
+            try {
+              ws.send(JSON.stringify({ type: 'cadru', data: brut }))
+            } catch {
+              /* socket picat — close-ul curăță */
+            }
+          }, 2500)
+        }
         opts.onGata?.()
         break
       case 'control':

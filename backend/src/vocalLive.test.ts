@@ -282,3 +282,26 @@ describe('vocalLive — precizia GPS măsurată intră în ancoră', () => {
     expect(i).not.toContain('precizie ±')
   })
 })
+
+// ── VEDEREA CONTINUĂ (8 aug: „trebuie să poată folosi camera") ───────────────
+import { estimareCostCadreUsd, TOKENI_PE_CADRU_EST } from './services/vocalLive.js'
+
+describe('vocalLive — camera intră în sesiune, cu costul estimat pe față', () => {
+  it('costul cadrelor: N cadre × ~516 tokeni × tariful de intrare', () => {
+    // 24 cadre (un minut la 1 cadru/2,5s) ≈ $0.0093 — sub costul audio pe minut
+    expect(estimareCostCadreUsd(24)).toBeCloseTo((24 * TOKENI_PE_CADRU_EST * 0.75) / 1e6, 10)
+    expect(estimareCostCadreUsd(0)).toBe(0)
+  })
+
+  it('motorul are scrieCadru — cadrele intră ca video pe realtimeInput', () => {
+    const sursa = readFileSync(new URL('./services/vocalLive.ts', import.meta.url), 'utf8')
+    expect(sursa).toContain('scrieCadru(jpegBase64: string): void')
+    expect(sursa).toMatch(/realtimeInput: \{ video: \{ data: jpegBase64, mimeType: 'image\/jpeg' \} \}/)
+  })
+
+  it('persona spune modelului că VEDE cadrele — și că lipsa lor se declară', () => {
+    const ruta = readFileSync(new URL('./routes/vocalLive.ts', import.meta.url), 'utf8')
+    expect(ruta).toContain('primești CADRELE ei în timp real')
+    expect(ruta).toContain('camera e oprită — o spui, nu inventezi o vedere')
+  })
+})
