@@ -1403,6 +1403,14 @@ export default function ChatPanel({
     // veghea din efectul „o voce în toate taburile" o reia dacă acel tab moare.
     if (voceAiureaRef.current) return
     if (micRef.current || micStartingRef.current || micManualOffRef.current) return
+    // GARDA LIPSĂ (8 aug, consola ownerului: „[voce] urechi Chirp 3…" APĂRUT
+    // PESTE „calea veche NU pornește" + audio mort la fiecare ~5 numere).
+    // Garda de mai sus verifică doar mânerul căii VECHI (micRef) — dacă vocea
+    // LIVE rulează (vlRef), o a doua chemare a lui ensureMic sărea peste blocul
+    // live („e deja pornit") și cădea în blocul vechi, pornind A DOUA voce
+    // PESTE cea vie: două urechi, două guri, vechea își închidea „fraza"
+    // periodic și o tăia pe cea nouă. O sesiune live sănătoasă = nimic de făcut.
+    if (vlRef.current) return
     if (micRetryRef.current) {
       window.clearTimeout(micRetryRef.current)
       micRetryRef.current = null
