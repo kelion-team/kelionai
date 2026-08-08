@@ -58,16 +58,33 @@ import { saveMessage, getRecentHistory, saveKv, loadKv } from '../db.js'
 // fazelor: vocea vorbește; lucrul greu vine după ce se dovedește.
 const UNELTE_LIVE = new Set(['list_updates', 'get_real_cost', 'stare_masurata', 'memorie_ia', 'memorie_lista', 'list_memories'])
 
-function unelteleSesiuniiLive(): UnealtaVocala[] {
-  return (TOATE_UNELTELE_ADMIN as Array<{ name: string; description: string; input_schema?: Record<string, unknown> }>)
-    .filter((t) => UNELTE_LIVE.has(t.name))
-    .map((t) => ({
-      name: t.name,
-      description: t.description,
-      // `input_schema` → `parameters`: traducerea care lipsea. Fără schemă
-      // reală, un obiect gol VALID — nu undefined.
-      parameters: t.input_schema ?? { type: 'object', properties: {} },
-    }))
+function tradu(t: { name: string; description: string; input_schema?: Record<string, unknown> }): UnealtaVocala {
+  return {
+    name: t.name,
+    description: t.description,
+    // `input_schema` → `parameters`: traducerea care lipsea. Fără schemă
+    // reală, un obiect gol VALID — nu undefined.
+    parameters: t.input_schema ?? { type: 'object', properties: {} },
+  }
+}
+
+/** Uneltele sesiunii live, pe ROL (8 aug, ownerul: „acum e doar chat bot, da?"
+ *  — măsurat: DA, sesiunea căra 6 unelte de citit și atât). La Live uneltele
+ *  se declară O DATĂ la setup, nu la fiecare frază — deci inventarul plin nu
+ *  costă nimic pe drumul frazei. Adminul primește TOT (cu plasa din motor:
+ *  dacă Google refuză setul plin la setup, sesiunea coboară singură pe setul
+ *  dovedit și scrie asta în jurnal); ceilalți rămân pe setul mic de citit. */
+export function unelteleSesiuniiLive(rol: string): UnealtaVocala[] {
+  const toate = TOATE_UNELTELE_ADMIN as Array<{ name: string; description: string; input_schema?: Record<string, unknown> }>
+  if (rol === 'admin') return toate.map(tradu)
+  return toate.filter((t) => UNELTE_LIVE.has(t.name)).map(tradu)
+}
+
+/** Setul mic DOVEDIT — rezerva pe care motorul o folosește dacă setup-ul cu
+ *  inventarul plin e refuzat (vezi `unelteRezerva` în deschideVocalLive). */
+export function unelteleDovedite(): UnealtaVocala[] {
+  const toate = TOATE_UNELTELE_ADMIN as Array<{ name: string; description: string; input_schema?: Record<string, unknown> }>
+  return toate.filter((t) => UNELTE_LIVE.has(t.name)).map(tradu)
 }
 
 const PERSONA_KELION =
@@ -192,7 +209,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       let ultimaSalvareHandle = 0
 
       if (inchis) return
-      live = deschideVocalLive(instructiune, unelteleSesiuniiLive(), {
+      live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
         onGata: () => trimite({ type: 'gata' }),
         onAudioIesire: (data) => trimite({ type: 'audio', data }),
         onTranscriereUser: (text, final) => {
@@ -232,7 +249,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           ultimaSalvareHandle = acum
           void saveKv(KV_RELUARE, JSON.stringify({ h: handle, t: acum })).catch(() => {})
         },
-      }, reluareInitial)
+      }, reluareInitial, user.role === 'admin' ? unelteleDovedite() : undefined)
       if (!live) {
         try {
           socket.close(1011, 'vocal_live_indisponibil')

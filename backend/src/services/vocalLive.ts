@@ -238,8 +238,13 @@ export function deschideVocalLive(
    *  reia cu tot contextul ei. Un handle stătut nu strică nimic: setup-ul cu
    *  el pică înainte de `gata`, iar degradarea măsurată reia curat, fără el. */
   reluareInitial?: string,
+  /** Setul DOVEDIT de rezervă: dacă setup-ul cu inventarul plin e refuzat
+   *  (moarte înainte de `gata` chiar și fără extensii), sesiunea coboară pe
+   *  setul ăsta mic în loc să moară — și spune în jurnal pe ce a rămas. */
+  unelteRezerva?: UnealtaVocala[],
 ): VocalLive | null {
   if (!config.geminiKey) return null
+  let unelteActive = unelte
 
   // ── SESIUNEA CARE SUPRAVIEȚUIEȘTE LIMITEI (8 aug: „a funcționat 5 minute
   // impecabil, după care a amuțit") ─────────────────────────────────────────
@@ -284,7 +289,7 @@ export function deschideVocalLive(
 
     socket.on('open', () => {
       try {
-        const st = construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelte, handleReluare) as {
+        const st = construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelteActive, handleReluare) as {
           setup: Record<string, unknown>
         }
         if (faraExtensii) {
@@ -365,6 +370,12 @@ export function deschideVocalLive(
         // refuzului — reluarea curată pleacă fără el, nu-l târăște mai departe.
         handleReluare = undefined
         ev.onInfo?.(`setup cu extensii respins (cod ${cod}) — reîncerc fără ele, cu sesiune curată`)
+      } else if (!aFostGataVreodata && unelteRezerva && unelteActive !== unelteRezerva) {
+        // A doua moarte înainte de `gata`, deja fără extensii → suspectul
+        // următor e INVENTARUL PLIN de unelte (nedovedit pe Live). Coborâm pe
+        // setul mic dovedit — o voce cu 6 unelte bate o voce moartă cu 58.
+        unelteActive = unelteRezerva
+        ev.onInfo?.(`setul plin de unelte respins la setup (cod ${cod}) — cobor pe setul dovedit (${unelteRezerva.length} unelte)`)
       }
       if (reconectari < 3) {
         reconectari++
