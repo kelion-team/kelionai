@@ -1903,8 +1903,11 @@ export async function saveGeneratedImage(id: string, mime: string, data: Buffer)
       mime,
       data,
     ])
-  } catch {
-    //
+  } catch (e) {
+    // NUMIT, nu înghițit (8 aug, captura „nu poate fi redat"): dacă INSERT-ul
+    // pică tăcut, imaginea trăiește DOAR în memoria procesului — următoarea
+    // publicare o șterge și monitorul arată un 404 drept „codec neacceptat".
+    console.error(`[imagine] salvarea în DB a picat (imaginea NU supraviețuiește restartului): ${e instanceof Error ? e.message.slice(0, 120) : String(e)}`)
   }
 }
 

@@ -377,8 +377,14 @@ export function isGeminiQuotaError(e: unknown): boolean {
 // Return shape: OrImage (brainContract.ts) — mime + bytes, so image.ts's
 // storage/URL logic is unchanged. costUsd is 0 — these endpoints report no
 // per-call cost, and an unmeasured number would be a fabrication (rule no. 1).
-const IMAGEN_MODEL = 'imagen-3.0-generate-002'
-const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image'
+// MODELELE DE IMAGINE — CITITE de pe cheia ownerului, nu presupuse (8 aug,
+// „i-am dat să genereze imagini și nu a mers"; jurnalul: `imagen-3.0-generate-002`
+// → HTTP 404, model RETRAS de Google). ListModels pe cheia lui (măsurat 8 aug,
+// 20:22) dă: imagen-4.0-generate-001 / -ultra- / -fast- și familia
+// gemini-3.x-image. Primul = succesorul direct al lui 3.0; rezerva urcă pe
+// 3.1-flash-image (2.5-flash-image există dar întorcea 200 fără imagine).
+const IMAGEN_MODEL = 'imagen-4.0-generate-001'
+const GEMINI_IMAGE_MODEL = 'gemini-3.1-flash-image'
 
 /** Imagen's predict endpoint. Bytes on success, null on any miss (missing key
  *  is handled by the caller). */
@@ -445,6 +451,15 @@ async function geminiImageContent(prompt: string): Promise<{ mime: string; buf: 
       return { mime, buf: Buffer.from(data, 'base64') }
     }
   }
+  // GAURA TĂCUTĂ (8 aug): 200-OK fără nicio parte de imagine (refuz de
+  // siguranță, doar text, schemă schimbată) ieșea ca `null` FĂRĂ niciun rând
+  // în jurnal — „nu a mers" fără cauză. Acum motivul se NUMEȘTE.
+  const cand = (j as { candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[] })
+    .candidates?.[0]
+  const text = cand?.content?.parts?.map((p) => p.text ?? '').join(' ').trim() ?? ''
+  console.error(
+    `[imagine] Gemini image 200 dar FĂRĂ imagine (finish=${cand?.finishReason ?? '?'}${text ? `, text: ${text.slice(0, 120)}` : ''})`,
+  )
   return null
 }
 
@@ -458,7 +473,9 @@ async function geminiImageContent(prompt: string): Promise<{ mime: string; buf: 
  *  ieșit din COSTURI_MASURATE în db.ts). All-fail → eroarea spune că
  *  GENERAREA a picat (cauzele exacte sunt în log, numite), nu că „nu e
  *  configurat" când cheia există. */
-const IMAGE_USD_ESTIMAT = 0.03
+// Tariful publicat Imagen 4 standard ($0.04/imagine) — estimare declarată,
+// jurnalul o etichetează așa ('image' nu e în COSTURI_MASURATE).
+const IMAGE_USD_ESTIMAT = 0.04
 export async function geminiImage(prompt: string): Promise<OrImage> {
   if (!config.geminiKey) return { error: 'image_not_configured' }
   const hit = (await imagenPredict(prompt)) ?? (await geminiImageContent(prompt))
