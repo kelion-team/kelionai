@@ -118,8 +118,11 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     const i = construiesteInstructiune(persona, 'Adrian', lung)
     expect(i, 'mesajul 27 e al 13-lea de la coadă — nu are ce căuta').not.toContain('mesajul 27 ')
     expect(i).toContain('mesajul 39 ')
+    // Bugetul fix: numele + REGULA LIMBII (8 aug, ~390 de caractere) + antetul
+    // blocului de istoric + blocul plafonat la 2400. Plafonul RĂMÂNE — doar
+    // încape și regula limbii în el, că e parte din antetul fix, nu din istoric.
     expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
-      persona.length + 2600,
+      persona.length + 3000,
     )
   })
 })
