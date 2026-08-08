@@ -82,12 +82,12 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
     expect(await execSharedAdminTool('constructor_status', {})).toBeNull()
   })
 
-  it('SHARED_ADMIN_TOOLS conține exact cele 33 unelte partajate', () => {
+  it('SHARED_ADMIN_TOOLS conține exact cele 34 unelte partajate', () => {
     // 3 aug: +3 (jules_repos/jules_task/jules_status — agentul asincron oficial
     // Google, pe cheia JULES_API_KEY pusă de owner).
     // 8 aug: +2 (ruleaza_portile/jurnal_masuratori — sistemul de măsurare cerut
     // de owner: „să știe să-și ruleze testele cum îmi dai tu mie să-ți rulez").
-    expect(SHARED_ADMIN_TOOLS.size).toBe(33)
+    expect(SHARED_ADMIN_TOOLS.size).toBe(34)
     for (const n of [
       'list_source', 'db_query', 'repo_merge_pr', 'run_runbook', 'request_repair',
       // Jul 30: he does his OWN settings — the same three in writing and in voice.

@@ -37,7 +37,7 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   // MĂSURAREA (8 aug, ordinul ownerului): Kelion își rulează SINGUR porțile, cu
   // aceleași comenzi ca omul, și își poate citi jurnalul propriilor măsurători —
   // ca o afirmație despre starea softului să poată fi CONFRUNTATĂ cu ce a măsurat.
-  'ruleaza_portile', 'jurnal_masuratori',
+  'ruleaza_portile', 'jurnal_masuratori', 'vaneaza_buguri',
   'repo_write', 'repo_open_pr', 'repo_merge_pr',
   'run_runbook', 'runbook_status', 'runbook_log', 'request_repair',
   'secret_pune', 'secret_lista', 'secret_publica',
@@ -80,6 +80,10 @@ export async function execSharedAdminTool(
       const cerute = Array.isArray(args.porti) ? (args.porti as unknown[]).map(String) : undefined
       const rez = await ruleazaPortile(cerute)
       return raportPorti(rez)
+    }
+    case 'vaneaza_buguri': {
+      const v = await vaneazaBuguri(Number(args.ore ?? 48) || 48)
+      return raportVanatoare(v)
     }
     case 'jurnal_masuratori': {
       const randuri = await jurnalMasuratori(Number(args.cate ?? 30) || 30)
@@ -243,7 +247,7 @@ import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
 import { getMemories, deleteMemory, logCapabilityGap, getCostSummary, proposeKelionTool } from '../db.js'
 import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
-import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor } from './masurare.js'
+import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor, vaneazaBuguri, raportVanatoare } from './masurare.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',

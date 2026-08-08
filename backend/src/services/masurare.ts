@@ -280,3 +280,72 @@ export function compara(inainte: Masuratoare<number>, dupa: Masuratoare<number>)
   const procent = inainte.valoare !== 0 ? ` (${semn}${((d / inainte.valoare) * 100).toFixed(1)}%)` : ''
   return `${inainte.cum}: ${inainte.valoare} → ${dupa.valoare} (${semn}${d}${procent})`
 }
+
+// ── VÂNĂTOAREA DE BUGURI (Adrian, 8 aug: „nu se pot căuta automat toate bugurile
+// și err? să le rezolvi și să le remăsori?") ─────────────────────────────────
+//
+// Răspunsul cinstit: o parte DA, complet automat; restul nu, și e important să
+// se știe care e care.
+//
+// SE POATE AUTOMAT: erorile reale ale utilizatorilor (adunate din browser în
+// `client_errors`), tipurile (tsc), tiparele de bug din analizor (oxlint), codul
+// abandonat, duplicatul, testele picate. Alea se caută, se numără și se remăsoară
+// după reparație.
+//
+// NU SE POATE AUTOMAT: bugul de LOGICĂ pe care niciun test nu-l acoperă și
+// niciun analizor nu-l vede — „face ce i s-a cerut?". Ăla se prinde doar
+// măsurând comportamentul, nu citind codul. De-aia vânătoarea nu spune niciodată
+// „nu sunt buguri": spune ce a găsit ȘI ce n-a putut căuta.
+//
+// CAPCANA EVITATĂ AICI, EXPLICIT: `listClientErrorGroups` întoarce listă goală
+// și când baza e căzută. Adică exact tiparul „£0.00" — zero care înseamnă „n-am
+// putut citi". De-aia se verifică ÎNTÂI că baza răspunde; dacă nu, erorile sunt
+// „NU POT VERIFICA", niciodată „0".
+
+export interface Vanatoare {
+  /** Erori reale de la utilizatori — sau motivul pentru care nu se pot citi. */
+  eroriUtilizatori: Masuratoare<{ grupuri: number; total: number; exemple: string[] }>
+  /** Tiparele de bug găsite de analizor. */
+  analizor: RezultatPoarta
+  /** Porțile obișnuite (tipuri, teste, exporturi, sintaxă). */
+  porti: RezultatPoarta[]
+}
+
+export async function vaneazaBuguri(oreInapoi = 48): Promise<Vanatoare> {
+  const eroriUtilizatori = await masoara(`erori reale din browser, ultimele ${oreInapoi}h`, async () => {
+    // ÎNTÂI dovada că baza răspunde. Fără ea, o listă goală nu înseamnă nimic.
+    const { loadKv: ping } = await import('../db.js')
+    await ping('__ping_vanatoare__')
+    const { listClientErrorGroups } = await import('../db.js')
+    const g = await listClientErrorGroups(oreInapoi, 30)
+    return {
+      grupuri: g.length,
+      total: g.reduce((s, x) => s + (Number(x.n) || 0), 0),
+      exemple: g.slice(0, 5).map((x) => `${x.n}× ${x.message}`),
+    }
+  })
+  const analizor = await ruleazaPoarta(
+    { nume: 'analizor', comanda: 'npx', argumente: ['oxlint', '--deny', 'no-unused-vars'], in: 'backend' },
+    300,
+  )
+  const porti = await ruleazaPortile(['tipuri', 'teste', 'exporturi', 'sintaxa'])
+  return { eroriUtilizatori, analizor, porti }
+}
+
+/** Raportul vânătorii. Nu spune NICIODATĂ „nu sunt buguri" — spune ce a găsit ȘI
+ *  ce n-a putut căuta, ca omul să știe cât din tablou lipsește. */
+export function raportVanatoare(v: Vanatoare): string {
+  const l: string[] = ['VÂNĂTOARE DE BUGURI:']
+  l.push(
+    v.eroriUtilizatori.masurat
+      ? v.eroriUtilizatori.valoare.grupuri === 0
+        ? '  ✓ erori de la utilizatori: 0 (baza a răspuns — deci chiar zero)'
+        : `  ✗ erori de la utilizatori: ${v.eroriUtilizatori.valoare.grupuri} feluri, ${v.eroriUtilizatori.valoare.total} apariții\n${v.eroriUtilizatori.valoare.exemple.map((e) => `      ${e}`).join('\n')}`
+      : `  ?  erori de la utilizatori: NU POT VERIFICA — ${v.eroriUtilizatori.motiv}`,
+  )
+  l.push(raportPorti([v.analizor, ...v.porti]))
+  l.push('')
+  l.push('CE NU S-A CĂUTAT: bugul de logică pe care niciun test nu-l acoperă.')
+  l.push('Automatizarea găsește ce se poate număra; restul se prinde măsurând comportamentul.')
+  return l.join('\n')
+}
