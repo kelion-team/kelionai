@@ -325,6 +325,11 @@ export default function ChatPanel({
   // = '1'`, ca ownerul s-o poată ASCULTA înainte s-o facem implicită. Ruta
   // avertizează „vei avea 2 voci în același timp" — de-aia e SAU una, SAU alta.
   const vlRef = useRef<VocalLiveHandle | null>(null)
+  // Contorul de minute al sesiunii live + steagul „live a căzut de tot în tabul
+  // ăsta" (după 3 reluări picate se coboară pe calea veche și nu se mai insistă
+  // până la un refresh — altfel am pendula între cele două căi la nesfârșit).
+  const vlTickRef = useRef<number | null>(null)
+  const vlCazutRef = useRef(false)
   const busyRef = useRef(busy)
   busyRef.current = busy
   // The abort controller of the current turn — "stop" aborts it on the spot.
@@ -439,6 +444,10 @@ export default function ChatPanel({
       // {audio} frames are dropped. A net too for frames already synthesized by a
       // turn started before the flag (serverVoiceOff stops the source, this drains the rest).
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
+      // Aceeași regulă pentru sesiunea LIVE (8 aug): cât timp modelul live e
+      // glasul lui Kelion, vocea Chirp a chatului scris nu se redă peste el —
+      // și, la fel de important, microfonul live nu o aude ca „voce străină".
+      if (vlRef.current) return
       contorGata('primul sunet (gura a pornit)')
       playVoice(
         c.audio,
@@ -1383,33 +1392,82 @@ export default function ChatPanel({
         realtimeOffRef.current = false
         realtimeFailCountRef.current = 0
       }
-      // ── VOCEA LIVE FULL-DUPLEX, DACĂ E APRINSĂ (7 aug) ────────────────────
+      // ── VOCEA LIVE FULL-DUPLEX — DRUMUL IMPLICIT (8 aug: „execută cu Gemini") ──
       // Un singur model AUDE + GÂNDEȘTE + VORBEȘTE + CHEAMĂ UNELTE, într-o
-      // sesiune. Măsurat de owner pe VPS: 90 ms handshake, 491 ms primul
-      // răspuns, 66 KB de audio real. Lanțul de mai jos face trei drumuri
-      // separate (ureche → creier → gură).
-      // OPȚIUNE, nu implicit: `localStorage.kelion_voce_live = '1'`. Motivul e
-      // regula casei — nu se schimbă tăcut o cale care merge, pe ceva ce încă
-      // n-a fost ASCULTAT. Când ownerul confirmă vocea, mutăm implicitul.
-      if (localStorage.getItem('kelion_voce_live') === '1' && !vlRef.current) {
+      // sesiune (măsurat pe cheia ownerului: 90 ms handshake, 491 ms primul
+      // răspuns). Ownerul a ales azi drumul ăsta ca implicit — dispar prin
+      // construcție VAD-ul local, frazele împachetate, pauza de 1,4 s și tot
+      // lanțul ureche→creier→gură care a produs întârzierile măsurate azi.
+      // Ieșirea de siguranță a rămas: `localStorage.kelion_voce_live = '0'`
+      // repune calea veche, fără deploy.
+      // RECONECTARE: sesiunile Live au limită de durată la Google — o cădere
+      // mid-sesiune NU înseamnă „vocea a murit", ci „redeschide". Se reia
+      // singură de câteva ori; abia dacă și reluarea pică se coboară pe calea
+      // veche, cu motivul scris.
+      if (localStorage.getItem('kelion_voce_live') !== '0' && !vlRef.current && !vlCazutRef.current) {
         const cap = await vocalLiveDisponibila()
         if (cap?.disponibil) {
-          const vl = await deschideVocalLive({
-            onGata: () => setListening(true),
-            onUser: (text, final) => setLiveVoice(final ? '' : text),
-            onKelion: (text, final) => setLiveVoice(final ? '' : text),
-            onEroare: (motiv) => {
-              // Eroarea urcă la om cu numele ei și cade ÎNAPOI pe calea veche —
-              // niciun „merge" prefăcut, și nicio sesiune rămasă mută.
-              console.warn(`[vocalLive] ${motiv}`)
-              vlRef.current?.inchide()
-              vlRef.current = null
-              setListening(false)
-            },
-          })
-          if (vl) {
-            vlRef.current = vl
+          let reluari = 0
+          const porneste = async (): Promise<boolean> => {
+            const vl = await deschideVocalLive({
+              onGata: () => {
+                reluari = 0 // sesiune sănătoasă → contorul de reluări se șterge
+                setListening(true)
+              },
+              onUser: (text, final) => setLiveVoice(final ? '' : text),
+              onKelion: (text, final) => setLiveVoice(final ? '' : text),
+              onEroare: (motiv) => {
+                console.warn(`[vocalLive] ${motiv}`)
+                vlRef.current?.inchide()
+                vlRef.current = null
+                setListening(false)
+                // Oprirea manuală nu se „repară" — doar căderile.
+                if (micManualOffRef.current) return
+                if (reluari < 3) {
+                  reluari++
+                  const pauza = 800 * reluari
+                  console.info(`[vocalLive] reluare ${reluari}/3 în ${pauza} ms`)
+                  window.setTimeout(() => {
+                    if (!micManualOffRef.current && !vlRef.current) void porneste()
+                  }, pauza)
+                } else {
+                  // Coborârea pe calea veche NU trece iar prin blocul live (am
+                  // pica în aceeași groapă în buclă): se marchează sesiunea asta
+                  // de tab ca „live căzut" și ensureMic pornește lanțul vechi.
+                  console.error('[vocalLive] 3 reluări picate — cobor pe calea vocală veche')
+                  vlCazutRef.current = true
+                  void ensureMic()
+                }
+              },
+            })
+            if (vl) {
+              vlRef.current = vl
+              setListening(true)
+              return true
+            }
+            return false
+          }
+          if (await porneste()) {
             console.info(`[vocalLive] pornit pe ${cap.model} (voce ${cap.voce}) — calea veche NU pornește`)
+            // Contorul de minute: vocea live se taxează ca orice voce (adminul e
+            // scutit pe server). Bate cât timp sesiunea trăiește.
+            if (vlTickRef.current) window.clearInterval(vlTickRef.current)
+            let ultimulTick = Date.now()
+            vlTickRef.current = ceas('puls minute voce live', () => {
+              if (!vlRef.current) {
+                if (vlTickRef.current) window.clearInterval(vlTickRef.current)
+                vlTickRef.current = null
+                return
+              }
+              const secs = Math.round((Date.now() - ultimulTick) / 1000)
+              ultimulTick = Date.now()
+              void fetch('/api/realtime/tick', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ seconds: secs }),
+              }).catch(() => {})
+            }, 60_000)
             return
           }
         }

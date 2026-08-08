@@ -1,4 +1,5 @@
 import { downsample, float32ToPcm16, base64ToBytes, pcm16ToFloat32 } from './pcm'
+import { alimenteazaNivelVoce } from './audioIO'
 
 // ── VOCEA LIVE FULL-DUPLEX — PARTEA DIN BROWSER (7 aug 2026) ─────────────────
 //
@@ -42,6 +43,8 @@ export interface VocalLiveOpts {
 
 export interface VocalLiveHandle {
   inchide(): void
+  /** Mut/dezmut microfonul fără a rupe sesiunea (butonul de microfon al UI-ului). */
+  setMuted(muted: boolean): void
   /** Câți octeți de microfon au plecat — dovadă că se trimite ceva, nu doar că
    *  socketul e deschis (exact distincția care a lipsit la prima probă live). */
   octetiTrimisi(): number
@@ -94,6 +97,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   const inchide = (): void => {
     if (inchis) return
     inchis = true
+    if (rafGura) cancelAnimationFrame(rafGura)
+    alimenteazaNivelVoce(0)
     if (resumeTimer) clearInterval(resumeTimer)
     try {
       proc?.disconnect()
@@ -122,23 +127,63 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     }
     surseActive = []
     cursorRedare = 0
+    alimenteazaNivelVoce(0)
     opts.onVorbeste?.(false)
+  }
+
+  // ── GURA AVATARULUI (8 aug: „atașez avatarul — merge?") ────────────────────
+  // Avatarul își ia deschiderea gurii din getVoiceLevel(), hrănit până acum doar
+  // de redarea <audio> a căii vechi. Aici redarea e WebAudio, deci nivelul se
+  // calculează dintr-un analizor pus pe drumul sunetului și se împinge în
+  // același loc — gura mișcă la fel, indiferent de cale.
+  let analizor: AnalyserNode | null = null
+  let bufAnalizor: Uint8Array<ArrayBuffer> | null = null
+  let rafGura = 0
+  const pornesteGura = (): void => {
+    if (rafGura || !analizor || !bufAnalizor) return
+    const pas = (): void => {
+      if (inchis || !analizor || !bufAnalizor) {
+        rafGura = 0
+        alimenteazaNivelVoce(0)
+        return
+      }
+      analizor.getByteTimeDomainData(bufAnalizor)
+      let s2 = 0
+      for (let i = 0; i < bufAnalizor.length; i++) {
+        const v = (bufAnalizor[i] - 128) / 128
+        s2 += v * v
+      }
+      alimenteazaNivelVoce(Math.sqrt(s2 / bufAnalizor.length) * 3)
+      if (surseActive.length) rafGura = requestAnimationFrame(pas)
+      else {
+        rafGura = 0
+        alimenteazaNivelVoce(0)
+      }
+    }
+    rafGura = requestAnimationFrame(pas)
   }
 
   const redaCadru = (b64: string): void => {
     if (!ctxOut || inchis) return
     const f32 = pcm16ToFloat32(base64ToBytes(b64))
     if (!f32.length) return
+    if (!analizor) {
+      analizor = ctxOut.createAnalyser()
+      analizor.fftSize = 256
+      analizor.connect(ctxOut.destination)
+      bufAnalizor = new Uint8Array(analizor.fftSize)
+    }
     const buf = ctxOut.createBuffer(1, f32.length, RATA_IESIRE)
     buf.copyToChannel(f32, 0)
     const src = ctxOut.createBufferSource()
     src.buffer = buf
-    src.connect(ctxOut.destination)
+    src.connect(analizor)
     const acum = ctxOut.currentTime
     if (cursorRedare < acum) cursorRedare = acum
     src.start(cursorRedare)
     cursorRedare += buf.duration
     surseActive.push(src)
+    pornesteGura()
     opts.onVorbeste?.(true)
     src.onended = () => {
       surseActive = surseActive.filter((s) => s !== src)
@@ -242,5 +287,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   }, 1200)
 
   console.info(`[vocalLive] sesiune deschisă — microfon ${RATA_INTRARE} Hz → server, redare ${RATA_IESIRE} Hz`)
-  return { inchide, octetiTrimisi: () => octeti }
+  return {
+    inchide,
+    octetiTrimisi: () => octeti,
+    setMuted: (m: boolean) => {
+      // Track-ul rămâne viu (sesiunea nu se rupe) — doar nu mai produce cadre.
+      stream?.getAudioTracks().forEach((t) => (t.enabled = !m))
+    },
+  }
 }

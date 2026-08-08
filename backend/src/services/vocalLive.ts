@@ -45,6 +45,29 @@ export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-3.1-flas
 // (Puck / Charon / Fenrir / Orus sunt toate acceptate) după ce o ascultă.
 export const VOCAL_LIVE_VOICE = process.env.VOCAL_LIVE_VOICE || 'Charon'
 
+/** ── INSTRUCȚIUNEA SESIUNII LIVE, CU MEMORIA OMULUI (8 aug, „execută cu
+ *  Gemini") ─────────────────────────────────────────────────────────────────
+ *  Sesiunea Live pornește de la zero la fiecare deschidere — fără blocul ăsta,
+ *  Kelion ar fi un străin politicos la fiecare apăsare de microfon. PURĂ și
+ *  exportată: contractul cu memoria se probează, nu se ia pe încredere. */
+export function construiesteInstructiune(
+  persona: string,
+  numeUser: string,
+  istoric: Array<{ role: string; content: string }>,
+): string {
+  let instructiune = `${persona}\nVorbești cu ${numeUser}.`
+  if (istoric.length) {
+    const randuri = istoric
+      .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
+      .map((r) => `${r.role === 'user' ? numeUser : 'Kelion'}: ${String(r.content).slice(0, 200)}`)
+      .join('\n')
+    instructiune +=
+      `\n\nULTIMELE VOASTRE SCHIMBURI (context, nu de recitat — continuă natural de unde ați rămas):\n` +
+      randuri.slice(0, 2400)
+  }
+  return instructiune
+}
+
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent'
 
 /** O unealtă pe care modelul o poate chema în timpul conversației vocale. */
