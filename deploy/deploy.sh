@@ -108,7 +108,33 @@ crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' | crontab - 2>/dev/nul
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
 git fetch origin --prune
-git checkout -B deploy "origin/$BRANCH"
+# ── ARBORELE DE PUBLICARE NU E SPAȚIU DE LUCRU (8 aug 2026) ──────────────────
+# CE S-A ÎNTÂMPLAT, MĂSURAT: publicarea a stat oprită PESTE OPT ORE (live
+# `ee283ef` la 16:48Z, master `c4e0402`), fără niciun proces agățat, fără lacăt
+# blocat, cu mașina la load 0,68 și cu cronul rulând în fiecare minut. În
+# `auto-publicare.log`, aceeași eroare la fiecare minut:
+#     error: Your local changes to the following files would be overwritten by checkout:
+#         scripts/proba-modele.py · backend/src/routes/chat.ts ·
+#         backend/src/services/geminiDirect.ts · frontend/src/lib/micStream.ts
+#     Aborting
+# `git checkout` refuza să suprascrie modificări locale, deploy-ul renunța la
+# pasul 1, cronul relua peste un minut — LA INFINIT. Nimic nu se agăța: renunța
+# de fiecare dată, tăcut pentru oricine nu deschidea exact logul ăla.
+#
+# `/root/kelion/repo` e o copie de PUBLICARE, nu un loc unde se lucrează: ce e de
+# păstrat trăiește în git, nu acolo. Deci arborele se curăță — dar NU orbește:
+# se salvează întâi un petic cu tot ce se aruncă, și se scrie în log ce anume.
+# Un „am curățat" fără listă e exact verdictul nemăsurat pe care-l interzicem.
+if ! git diff --quiet HEAD 2>/dev/null; then
+  PETIC="/root/kelion/repo-modificari-$(date -u +%Y%m%d-%H%M%S).patch"
+  git diff HEAD > "$PETIC" 2>/dev/null || true
+  echo "!! Arborele de publicare avea modificări locale — salvate în $PETIC, apoi aruncate:"
+  git diff HEAD --stat | sed 's/^/     /'
+  git reset --hard >/dev/null 2>&1 || true
+fi
+# `-f`: chiar dacă a mai rămas ceva (fișier neurmărit care se ciocnește), publicarea
+# nu se mai oprește. Codul care ajunge la om e cel din master, întotdeauna.
+git checkout -f -B deploy "origin/$BRANCH"
 git log --oneline -1
 # Ieșire devreme sub lacăt: dacă alt publicator tocmai a dus live EXACT sha-ul
 # țintă cât am așteptat la flock, nu mai reconstruim nimic — verde, gata.
