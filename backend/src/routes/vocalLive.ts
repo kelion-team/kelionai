@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { RawData } from 'ws'
+import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import {
   deschideVocalLive,
@@ -34,12 +35,18 @@ import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost } from '../db
 //      memorie. Cercul se închide.
 //
 // Contractul WS (browser ↔ server):
-//   client → server:  cadre BINARE = PCM16 mono 16kHz de la microfon.
+//   client → server:  cadre BINARE = PCM16 mono 16kHz de la microfon;
+//                     JSON { type:'coords', lat, lon } = GPS-ul device-ului
+//                     (8 aug: „nu are acces la gps, meteo" — fără el, ușa
+//                     creierului rula meteo/hărți fără loc).
 //   server → client:  JSON —
 //     { type:'gata' }                              sesiunea Live e deschisă
 //     { type:'audio', data:<base64 PCM 24kHz> }    glasul lui Kelion, de redat
 //     { type:'user', text, final }                 ce aude (subtitrare)
 //     { type:'kelion', text, final }               ce spune (subtitrare)
+//     { type:'control', frame }                    cadru de ECRAN de la creier
+//                                                  (monitor/doc/card — la
+//                                                  handleControl, ca la scris)
 //     { type:'intrerupt' }                         barge-in: oprește redarea ACUM
 //     { type:'tura_gata' }                         Kelion a terminat de vorbit
 //     { type:'eroare', motiv }                     eroare NUMITĂ (nu murim tăcut)
@@ -60,6 +67,87 @@ import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost } from '../db
 // fazelor: vocea vorbește; lucrul greu vine după ce se dovedește.
 const UNELTE_LIVE = new Set(['list_updates', 'get_real_cost', 'stare_masurata', 'memorie_ia', 'memorie_lista', 'list_memories'])
 
+// ── UȘA SPRE CREIERUL ÎNTREG (8 aug, ownerul, pe live: „kelion nu are acces
+// la unelte, vocea merge, și atât" + „nu are acces la gps, meteo" + „modelul
+// să rămână acesta, pe el construim") ────────────────────────────────────────
+// Sesiunea live declara DOAR uneltele de administrare (sursă/DB/repo) — niciuna
+// din uneltele de zi cu zi ale creierului (căutare, meteo, YouTube, hărți,
+// mail, imagini, monitor: alea trăiesc în registrul chatului, ~76, cu execuția
+// împletită în /api/chat). În loc să duplicăm executorul, sesiunea live
+// primește O USĂ: unealta de mai jos duce cererea în /api/chat (aceeași
+// sesiune de utilizator, același creier, aceleași unelte, aceeași
+// contabilizare), iar rezultatul se întoarce modelului live care îl SPUNE.
+// Cadrele de ECRAN (monitor/doc/card) din tură se retrimit browserului prin
+// WS, la același handleControl ca la chatul scris. Exact arhitectura cerută:
+// „să fie la fel ca la chatul live, doar că acum are și creier".
+const UNEALTA_CREIER: UnealtaVocala = {
+  name: 'cere_creierului',
+  description:
+    'Execută ORICE sarcină care cere unelte, informație din lume sau acțiune: căutare pe web, știri, ' +
+    'METEO, muzică/YouTube, hărți/trasee/GPS, e-mail, calendar, generat imagini, deschis pagini sau ' +
+    'panouri pe monitor, costuri, orice lucru concret. Cheam-o cu cererea utilizatorului formulată ' +
+    'COMPLET, în limba lui. Creierul aplicației o execută cu uneltele lui și îți întoarce rezultatul.',
+  parameters: {
+    type: 'object',
+    properties: { cerere: { type: 'string', description: 'cererea utilizatorului, completă, în limba lui' } },
+    required: ['cerere'],
+  },
+}
+
+/** Caracterul de control al fluxului /api/chat (chat.ts scrie
+ *  `CTRL + JSON + CTRL` printre bucățile de text — oglinda parserului din
+ *  frontend/src/lib/chat.ts). */
+const CTRL = String.fromCharCode(31)
+
+/** O tură COMPLETĂ pe creierul clasic, prin chiar ruta /api/chat (cookie-ul
+ *  sesiunii omului → aceleași drepturi, aceleași unelte, aceeași
+ *  contabilizare). Întoarce textul final; cadrele de control trec prin
+ *  `laControl` pe măsură ce se despachetează. Orice eșec vine NUMIT. */
+export async function turaCreierului(
+  cookie: string,
+  cerere: string,
+  coords: { lat: number; lon: number } | null,
+  laControl: (frame: Record<string, unknown>) => void,
+): Promise<{ ok: true; text: string } | { ok: false; motiv: string }> {
+  let r: Response
+  try {
+    r = await fetch(`http://127.0.0.1:${config.port}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: cerere }],
+        // Glasul e al modelului live — Chirp-ul chatului rămâne stins (regula
+        // vocii unice) și nu plătim o sinteză pe care n-o redă nimeni.
+        serverVoiceOff: true,
+        coords: coords ?? undefined,
+        now: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(90_000),
+    })
+  } catch (e) {
+    return { ok: false, motiv: `creierul nu răspunde: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}` }
+  }
+  if (!r.ok) return { ok: false, motiv: `creierul a răspuns ${r.status}` }
+  const brut = await r.text()
+  // Fluxul e text + cadre `CTRL json CTRL`: la split pe CTRL, segmentele impare
+  // sunt cadrele. Un segment impar care nu e JSON valid se păstrează ca text —
+  // mai bine un rând ciudat în rezultat decât un cadru pierdut tăcut.
+  let text = ''
+  const segmente = brut.split(CTRL)
+  for (let i = 0; i < segmente.length; i++) {
+    if (i % 2 === 0) {
+      text += segmente[i]
+      continue
+    }
+    try {
+      laControl(JSON.parse(segmente[i]) as Record<string, unknown>)
+    } catch {
+      text += segmente[i]
+    }
+  }
+  return { ok: true, text: text.trim() }
+}
+
 function tradu(t: { name: string; description: string; input_schema?: Record<string, unknown> }): UnealtaVocala {
   return {
     name: t.name,
@@ -78,20 +166,29 @@ function tradu(t: { name: string; description: string; input_schema?: Record<str
  *  dovedit și scrie asta în jurnal); ceilalți rămân pe setul mic de citit. */
 export function unelteleSesiuniiLive(rol: string): UnealtaVocala[] {
   const toate = TOATE_UNELTELE_ADMIN as Array<{ name: string; description: string; input_schema?: Record<string, unknown> }>
-  if (rol === 'admin') return toate.map(tradu)
-  return toate.filter((t) => UNELTE_LIVE.has(t.name)).map(tradu)
+  // Ușa spre creierul întreg e PRIMA, pentru TOATE rolurile — fără ea, „vocea
+  // merge, și atât" (măsurat 8 aug: sesiune acceptată, zero unelte de lume).
+  if (rol === 'admin') return [UNEALTA_CREIER, ...toate.map(tradu)]
+  return [UNEALTA_CREIER, ...toate.filter((t) => UNELTE_LIVE.has(t.name)).map(tradu)]
 }
 
 /** Setul mic DOVEDIT — rezerva pe care motorul o folosește dacă setup-ul cu
- *  inventarul plin e refuzat (vezi `unelteRezerva` în deschideVocalLive). */
+ *  inventarul plin e refuzat (vezi `unelteRezerva` în deschideVocalLive).
+ *  Ușa spre creier rămâne ȘI aici — degradarea pierde uneltele de
+ *  administrare, nu accesul la lume. */
 export function unelteleDovedite(): UnealtaVocala[] {
   const toate = TOATE_UNELTELE_ADMIN as Array<{ name: string; description: string; input_schema?: Record<string, unknown> }>
-  return toate.filter((t) => UNELTE_LIVE.has(t.name)).map(tradu)
+  return [UNEALTA_CREIER, ...toate.filter((t) => UNELTE_LIVE.has(t.name)).map(tradu)]
 }
 
 const PERSONA_KELION =
   'Ești Kelion, asistentul lui Adrian. Vorbești firesc, cald și SCURT, în română. ' +
-  'Ce nu poți proba spui „nu pot verifica" — nu inventezi. Nu te prezinta la fiecare replică.'
+  'Ce nu poți proba spui „nu pot verifica" — nu inventezi. Nu te prezinta la fiecare replică. ' +
+  'REGULA UNELTELOR: pentru ORICE cerere care implică informație din lume sau o acțiune — căutare, ' +
+  'știri, METEO, muzică, YouTube, hărți, unde mă aflu, e-mail, calendar, imagini, deschis ceva pe ' +
+  'monitor — chemi unealta cere_creierului cu cererea omului formulată complet, apoi spui pe scurt ' +
+  'rezultatul. NU refuza niciodată pe motiv că n-ai unealta sau accesul: ușa e cere_creierului. ' +
+  'Ce apare pe monitor NU se citește cu voce tare — o propoziție scurtă și atât.'
 
 export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
   // Sonda: frontendul întreabă întâi dacă modul unificat e disponibil (are cheie
@@ -169,8 +266,22 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     }
     const ceasCost = setInterval(varsaCostul, 60_000)
 
+    // GPS-ul device-ului, primit de la browser (cadru JSON text) — dat mai
+    // departe creierului la fiecare trecere prin ușa cere_creierului.
+    let coords: { lat: number; lon: number } | null = null
+
     socket.on('message', (data: RawData, isBinary: boolean) => {
-      if (!isBinary) return
+      if (!isBinary) {
+        try {
+          const m = JSON.parse(String(data)) as { type?: string; lat?: number; lon?: number }
+          if (m.type === 'coords' && Number.isFinite(m.lat) && Number.isFinite(m.lon)) {
+            coords = { lat: m.lat as number, lon: m.lon as number }
+          }
+        } catch {
+          /* cadru text neînțeles — îl ignorăm, audio rămâne pe binar */
+        }
+        return
+      }
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
       if (live) {
         live.scrieAudio(buf)
@@ -248,6 +359,30 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           trimite({ type: 'kelion', text, final })
         },
         onUnealta: async (apel) => {
+          // UȘA SPRE CREIERUL ÎNTREG: cererea trece prin /api/chat cu sesiunea
+          // omului — toate uneltele chatului, aceeași contabilizare. Cadrele de
+          // ECRAN se retrimit browserului; cadrele de VOCE nu trec (glasul e al
+          // modelului live — regula vocii unice), nici cele de mers (receipt/
+          // heartbeat/lang), care ar deruta handleControl.
+          if (apel.name === 'cere_creierului') {
+            const cerere = String((apel.args as { cerere?: unknown }).cerere ?? '').trim()
+            if (!cerere) {
+              live?.raspundeUnealta(apel.id, apel.name, { eroare: 'cerere goală' })
+              return
+            }
+            app.log.info(`vocal-live: ușa creierului — „${cerere.slice(0, 80)}"`)
+            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device']
+            const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, (frame) => {
+              if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
+            })
+            if (r.ok) {
+              live?.raspundeUnealta(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
+            } else {
+              app.log.warn(`vocal-live: ușa creierului a picat: ${r.motiv}`)
+              live?.raspundeUnealta(apel.id, apel.name, { eroare: r.motiv })
+            }
+            return
+          }
           try {
             const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
             if (rezultat !== null) {

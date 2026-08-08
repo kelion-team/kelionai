@@ -99,7 +99,12 @@ export function startFaceSampling(
           const h = Math.max(2, Math.round(video.videoHeight * scara))
           if (panzaInferenta.width !== w) panzaInferenta.width = w
           if (panzaInferenta.height !== h) panzaInferenta.height = h
-          const pctx = panzaInferenta.getContext('2d')
+          // willReadFrequently: face-api CITEȘTE pixelii pânzei la fiecare
+          // eșantion (getImageData) — fără atribut, browserul ține pânza pe GPU
+          // și fiecare citire e un readback scump (avertismentul din consola
+          // ownerului, 8 aug). Cu el, pânza stă în RAM: desenul e ieftin la
+          // 320px, iar citirile repetate devin ieftine.
+          const pctx = panzaInferenta.getContext('2d', { willReadFrequently: true })
           if (pctx) {
             pctx.drawImage(video, 0, 0, w, h)
             const t0 = performance.now()
