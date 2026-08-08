@@ -1,18 +1,19 @@
-// PRONUNȚIE ACADEMICĂ (Adrian, 10 iul: „mod academic — termeni tehnici, absolut
-// tot"). Chirp 3 HD citește textul brut și adesea stâlcește acronimele tehnice
-// (spune „ap" în loc de „a pe i" pentru API). Aici, chiar înainte de sinteză,
-// respellăm un set CURAT de acronime tehnice literă-cu-literă în limba țintă,
-// ca să fie rostite corect, academic. E un strat PUR pe text→voce: NU atinge
-// microfonul / detecția vocii, deci nu poate strica ascultarea.
+// ACADEMIC PRONUNCIATION (Adrian, 10 Jul: "academic mode — technical terms,
+// absolutely everything"). Chirp 3 HD reads the raw text and often butchers
+// technical acronyms. Here, right before synthesis, we respell a CURATED set
+// of technical acronyms letter-by-letter in the target language, so they are
+// pronounced correctly, academically. It is a PURE text→voice layer: it does
+// NOT touch the microphone / voice detection, so it cannot break listening.
 //
-// Regulă de siguranță: modificăm DOAR jetoane cu majuscule aflate în lista
-// curată de mai jos. Orice alt cuvânt (nume proprii cu majuscule, cuvinte
-// normale, interjecții) rămâne NEATINS — deci normalizarea nu poate înrăutăți
-// niciodată vorbirea obișnuită. Ușor de extins: când auzi un termen rostit
-// greșit, îl adaugi în TECH_ACRONYMS și, dacă e cazul, în tabelul de litere.
+// Safety rule: we modify ONLY uppercase tokens found in the curated list
+// below. Any other word (capitalized proper nouns, normal words,
+// interjections) stays UNTOUCHED — so normalization can never make ordinary
+// speech worse. Easy to extend: when you hear a term mispronounced, add it
+// to TECH_ACRONYMS and, if needed, to the letter table.
 
-// Numele literelor pe limbă. Avem RO (limba proprietarului) și EN; pentru orice
-// altă limbă lăsăm textul neatins (mai sigur decât o respellare greșită).
+// The names of the letters per language. We have RO (the owner's language)
+// and EN; for any other language we leave the text untouched (safer than a
+// wrong respelling).
 const LETTER_SOUNDS: Record<string, Record<string, string>> = {
   ro: {
     A: 'a', B: 'be', C: 'ce', D: 'de', E: 'e', F: 'ef', G: 'ge', H: 'haș',
@@ -28,13 +29,12 @@ const LETTER_SOUNDS: Record<string, Record<string, string>> = {
   },
 }
 
-// Acronime tehnice pe care Chirp le stâlcește de regulă — rostite literă cu
-// literă. Cele de DOUĂ litere ambigue, citite în mod normal CA CUVINTE (OK, AI,
-// IT, OS, GO, ID, PC, TV) sunt lăsate ANUME pe dinafară, ca să nu le mutilăm.
-// LA FEL și jetoanele cu majuscule care SUNT și cuvinte comune (PIN=ac,
-// SIM=simian, ROM=român, RAM=berbec, GIF, WAN, LAN, SEO, PDF, CSV…) — scoase
-// din lista de spart ca TTS-ul să NU mai rostească „litere răzlețe, tăiate,
-// scoase din context" (bug raportat: „n , a m înț eles").
+// Technical acronyms Chirp usually butchers — spoken letter by letter.
+// The ambiguous TWO-letter ones, normally read AS WORDS (OK, AI, IT, OS, GO,
+// ID, PC, TV) are deliberately left out, so we don't mutilate them. LIKEWISE
+// the uppercase tokens that ARE also common words (PIN, SIM, ROM, RAM, GIF,
+// WAN, LAN, SEO, PDF, CSV…) — removed from the split list so the TTS no
+// longer speaks "stray letters, cut, out of context" (reported bug).
 const COMMON_WORDS = new Set([
   'PIN', 'SIM', 'ROM', 'GIF', 'RAM', 'WAN', 'LAN', 'SEO', 'PDF', 'CSV', 'RSS',
   'OTP', 'RGB', 'GUI', 'CLI', 'IDE', 'SDK', 'SQL', 'PHP', 'CSS', 'SVG',
@@ -48,11 +48,44 @@ const TECH_ACRONYMS = new Set([
   'WWW', 'MP3', 'MP4',
 ])
 
+// ── TEMPERATURES (Adrian, Aug 2 — live bug: the mouth said „27°C" RAW) ─────
+// Chirp 3 HD reads „27°C" as a mutilated „twenty-seven-see" / drops the unit.
+// The fix is textual: „27°C" → „27 de grade Celsius" (ro) / „27 degrees
+// Celsius" (en) BEFORE synthesis, so the model reads an ordinary sentence.
+// Romanian agreement: 1 → „grad", 2–19 → „grade", everything else (0, 20+,
+// decimals, negatives by absolute value) → „de grade". „27° C" (with the
+// space Google's own transcription emits) and „ºC" (ordinal glyph) included.
+function roGradeWord(numRaw: string): string {
+  const n = Math.abs(parseFloat(numRaw.replace(',', '.')))
+  if (Number.isInteger(n) && n === 1) return 'grad'
+  if (Number.isInteger(n) && n >= 2 && n <= 19) return 'grade'
+  return 'de grade'
+}
+
+function pronounceTemperatures(text: string, langBase: string): string {
+  if (langBase !== 'ro' && langBase !== 'en') return text // same rule as the acronyms
+  // The lookbehind keeps a RANGE („20-27°C") intact: the „-" glued to a digit
+  // is a dash, not a minus — only the last number gets the unit.
+  return text.replace(/(?<![\d.,])([−-]?\s*\d+(?:[.,]\d+)?)\s*[°º]\s*([CFcf])\b/g, (m, numRaw: string, unit: string) => {
+    const neg = /^[−-]/.test(numRaw.trim())
+    const num = numRaw.replace(/^[−-]\s*/, '')
+    const celsius = unit.toUpperCase() === 'C'
+    if (langBase === 'ro') {
+      const prefix = neg ? 'minus ' : ''
+      return `${prefix}${num} ${roGradeWord(num)} ${celsius ? 'Celsius' : 'Fahrenheit'}`
+    }
+    const n = Math.abs(parseFloat(num.replace(',', '.')))
+    const word = n === 1 && Number.isInteger(n) ? 'degree' : 'degrees'
+    const prefix = neg ? 'minus ' : ''
+    return `${prefix}${num} ${word} ${celsius ? 'Celsius' : 'Fahrenheit'}`
+  })
+}
+
 function spellOut(word: string, table: Record<string, string>): string {
   const parts: string[] = []
   for (const ch of word) {
-    // Literă → numele ei în limba țintă; cifră → o lăsăm (Chirp o citește ca
-    // număr); orice altceva rămâne pe loc.
+    // Letter → its name in the target language; digit → we leave it (Chirp
+    // reads it as a number); anything else stays in place.
     parts.push(table[ch] ?? ch)
   }
   return parts.join(' ')
@@ -65,12 +98,16 @@ function spellOut(word: string, table: Record<string, string>): string {
  */
 export function academicPronounce(text: string, langBase: string): string {
   const table = LETTER_SOUNDS[langBase]
-  if (!table) return text // limbă fără tabel de litere → nu atingem nimic
-  // Doar jetoane cu MAJUSCULE (2–8 caractere, litere+cifre), delimitate curat.
-  return text.replace(/\b[A-Z][A-Z0-9]{1,7}\b/g, (m) => {
-    // Cuvânt comun (PIN, SIM, ROM, GIF, RAM…) → îl lăsăm INTACT: Chirp îl
-    // citește ca cuvânt normal, nu literă-cu-literă. Altfel TTS-ul rostea
-    // „litere răzlețe, tăiate, scoase din context" (bug raportat).
+  if (!table) return text // language without a letter table → we touch nothing
+  // Temperatures FIRST („27°C" → „27 de grade Celsius"): they contain no
+  // uppercase tokens the acronym pass could mangle, and the acronym pass
+  // would otherwise see the bare „C" (too short to match anyway).
+  const withTemperatures = pronounceTemperatures(text, langBase)
+  // Only UPPERCASE tokens (2–8 characters, letters+digits), cleanly delimited.
+  return withTemperatures.replace(/\b[A-Z][A-Z0-9]{1,7}\b/g, (m) => {
+    // Common word (PIN, SIM, ROM, GIF, RAM…) → we leave it INTACT: Chirp
+    // reads it as a normal word, not letter-by-letter. Otherwise the TTS
+    // spoke "stray letters, cut, out of context" (reported bug).
     if (COMMON_WORDS.has(m)) return m
     const lettersOnly = m.replace(/[0-9]/g, '')
     if (!TECH_ACRONYMS.has(m) && !TECH_ACRONYMS.has(lettersOnly)) return m

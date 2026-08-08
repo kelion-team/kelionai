@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import BackLink from './BackLink'
 import type { User } from '../lib/api'
 import { logout } from '../lib/api'
 import {
@@ -6,80 +7,20 @@ import {
   saveSpeechLang,
   deleteMyAccount,
   loadLocalLang,
+  saveVoicePref,
 } from '../lib/prefs'
-import { fetchBalance, type WalletStatus } from '../lib/billing'
+import { fetchBalance, fetchHistory, type WalletStatus, type PurchaseRecord } from '../lib/billing'
 import { LANGS } from '../lib/languages'
+import { resolveLang, strings } from '../lib/i18n'
+// the user never sees pounds anywhere on their screen, only the resulting credits.
+const CREDITE_PE_LIRA = 7.5
 
-// SETĂRI CLIENT (plătitor). Un client are mai puțin acces decât adminul — nu
-// vede panoul de admin — dar are propriul buton ⚙ cu trei secțiuni:
-//   1. Preferințe de bază  — limba în care Kelion îl ascultă și îi vorbește.
-//   2. Credit / portofel   — soldul, reîncărcare, ȘI mențiunea 25% către platformă.
-//   3. Cont                — email, delogare, ștergere cont (GDPR).
-// BYOK-provider a fost SCOS complet (Adrian, 12 iul: „scoatem vechiul provider") —
-// creierul e pe Kimi/GLM, toți userii trec prin creditul de mai sus.
-// Backend-ul (prefs + billing + me/delete) e deja verificat live. NU dublează
-// cod: folosește exact aceleași rute pe care le folosește restul aplicației.
-
-// Etichete în limba clientului (ro pentru vorbitorii de română, altfel engleză —
-// clienții pot fi din orice limbă). Doar textele UI; valorile vin de la server.
-interface L {
-  title: string
-  prefs: string
-  langLabel: string
-  wallet: string
-  credits: string
-  topUp: string
-  marginNote: string
-  account: string
-  signedInAs: string
-  loggingOut: string
-  logout: string
-  deleteAcc: string
-  deleteConfirm: string
-  deleting: string
-  cancel: string
-  close: string
-}
-const RO: L = {
-  title: 'Setări',
-  prefs: 'Preferințe de bază',
-  langLabel: 'Limba în care Kelion te ascultă și îți vorbește',
-  wallet: 'Credit / portofel',
-  credits: 'credite disponibile',
-  topUp: 'Reîncarcă',
-  marginNote:
-    'Din fiecare reîncărcare, 75% devine credit disponibil pentru tine, iar 25% merge către contul platformei (admin).',
-  account: 'Cont',
-  signedInAs: 'Conectat ca',
-  loggingOut: 'Se deloghează…',
-  logout: 'Deconectare',
-  deleteAcc: 'Șterge contul',
-  deleteConfirm:
-    'Sigur ștergi contul? Se șterg definitiv mesajele, preferințele, memoria și portofelul. Ireversibil.',
-  deleting: 'Se șterge…',
-  cancel: 'Anulează',
-  close: 'Închide',
-}
-const EN: L = {
-  title: 'Settings',
-  prefs: 'Basic preferences',
-  langLabel: 'The language Kelion hears you in and speaks',
-  wallet: 'Credit / wallet',
-  credits: 'credits available',
-  topUp: 'Top up',
-  marginNote:
-    'From each top-up, 75% becomes credit available to you, and 25% goes to the platform account (admin).',
-  account: 'Account',
-  signedInAs: 'Signed in as',
-  loggingOut: 'Signing out…',
-  logout: 'Sign out',
-  deleteAcc: 'Delete account',
-  deleteConfirm:
-    'Delete your account? Your messages, preferences, memory and wallet are permanently erased. Irreversible.',
-  deleting: 'Deleting…',
-  cancel: 'Cancel',
-  close: 'Close',
-}
+// MODEL SELECTOR ASCUNS (Adrian, 3 aug: „migrăm complet pe Gemini"). Secțiunea 3
+// de mai jos era un <select> cu catalogul de modele rutate prin OpenRouter
+// (Claude, ByteDance, Gemma etc.). UI-ul e ascuns; starea (catalog/sel) și
+// handler-ul de salvare (onModel) rămân conectate ca să nu se strice nimic.
+// Pune pe false ca să reapară selectorul.
+const MODEL_SELECTOR_HIDDEN: boolean = true
 
 interface CatModel {
   id: string
@@ -95,17 +36,17 @@ export default function CustomerSettings({
   readonly user: User
   readonly onClose: () => void
 }): React.JSX.Element {
-  // Default ENGLEZĂ până la identificarea limbii (nu limba browserului).
-  const base = (loadLocalLang() ?? 'en')
-    .slice(0, 2)
-    .toLowerCase()
-  const t = base === 'ro' ? RO : EN
-
-  const [lang, setLang] = useState<string>('en-US')
-  const [wallet, setWallet] = useState<WalletStatus | null>(null)
+  const [lang, setLang] = useState<string>(loadLocalLang() ?? 'en')
+  const base = lang.slice(0, 2).toLowerCase()
+  const ro = base === 'ro'
+  const t = strings(resolveLang(lang))
+  const [voice, setVoice] = useState<string>('')
+  const [voices, setVoices] = useState<string[]>([])
+  const [wallet, setWallet] = useState<WalletStatus | null | 'necitit'>('necitit')
+  const [saveErr, setSaveErr] = useState('')
+  const [istoric, setIstoric] = useState<PurchaseRecord[] | null | 'necitit'>('necitit')
   const [busy, setBusy] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
-  // Modele selectabile (OpenRouter) + reîncărcare automată.
   const [catalog, setCatalog] = useState<{ chat: CatModel[]; work: CatModel[] }>({ chat: [], work: [] })
   const [sel, setSel] = useState<{ chat: string; work: string }>({ chat: '', work: '' })
   const [ar, setAr] = useState<{ enabled: boolean; threshold: number; topupAmount: number }>({
@@ -113,52 +54,74 @@ export default function CustomerSettings({
     threshold: 20,
     topupAmount: 10,
   })
-  const ro = base === 'ro'
-
   useEffect(() => {
     void (async () => {
-      const [p, b] = await Promise.all([loadServerPrefs(), fetchBalance()])
+      const [p, b, h] = await Promise.all([loadServerPrefs(), fetchBalance(), fetchHistory()])
       if (p?.speechLang) setLang(p.speechLang)
-      if (b) setWallet(b)
+      if (p?.voices?.length) setVoices(p.voices)
+      setVoice(p?.voice ?? '')
+      setWallet(b) // null = citirea a picat — se afișează ca eșec, nu „…" pe veci
+      setIstoric(h) // null = read failed (said as such, never an empty list)
       try {
+        // CÂT SELECTORUL DE MODELE E ASCUNS, nu mai cerem catalogul/selecția
+        // (auditul admin, 3 aug: date cerute și aruncate la fiecare deschidere).
         const [cat, s, a] = await Promise.all([
-          fetch('/api/models/catalog', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
-          fetch('/api/models/selection', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
+          MODEL_SELECTOR_HIDDEN ? Promise.resolve(null) : fetch('/api/models/catalog', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
+          MODEL_SELECTOR_HIDDEN ? Promise.resolve(null) : fetch('/api/models/selection', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
           fetch('/api/billing/autorecharge', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
         ])
         if (cat) setCatalog({ chat: cat.chat ?? [], work: cat.work ?? [] })
         if (s) setSel({ chat: s.chat ?? '', work: s.work ?? '' })
         if (a) setAr({ enabled: !!a.enabled, threshold: Number(a.threshold ?? 20), topupAmount: Number(a.topupAmount ?? 10) })
       } catch {
-        /* endpointuri indisponibile → secțiunile rămân goale */
+        /* endpoints unavailable → the sections stay empty */
       }
     })()
   }, [])
 
+  // TOATE SALVĂRILE VERIFICĂ REZULTATUL (auditul admin, 3 aug): înainte,
+  // .catch(() => {}) fără r.ok lăsa checkbox-ul/selectul pe ecran ca „salvat"
+  // când serverul refuzase — la realitate serverul avea altă valoare. Pe eșec:
+  // revert la valoarea anterioară + nota „Nu s-a salvat".
   async function onModel(tier: 'chat' | 'work', model: string): Promise<void> {
+    const inainte = sel
     setSel((s) => ({ ...s, [tier]: model }))
-    await fetch('/api/models/selection', {
+    const r = await fetch('/api/models/selection', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ tier, model }),
-    }).catch(() => {})
+    }).catch(() => null)
+    if (!r?.ok) {
+      setSel(inainte)
+      setSaveErr(ro ? 'Nu s-a salvat modelul — reîncearcă.' : 'The model was not saved — try again.')
+    } else setSaveErr('')
   }
 
   async function onAr(patch: Partial<typeof ar>): Promise<void> {
+    const inainte = ar
     const next = { ...ar, ...patch }
     setAr(next)
-    await fetch('/api/billing/autorecharge', {
+    const r = await fetch('/api/billing/autorecharge', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify(next),
-    }).catch(() => {})
+    }).catch(() => null)
+    if (!r?.ok) {
+      setAr(inainte)
+      setSaveErr(ro ? 'Nu s-a salvat reîncărcarea automată — reîncearcă.' : 'Auto top-up was not saved — try again.')
+    } else setSaveErr('')
   }
 
   async function onLang(code: string): Promise<void> {
+    const inainte = lang
     setLang(code)
-    await saveSpeechLang(code)
+    const ok = await saveSpeechLang(code)
+    if (!ok) {
+      setLang(inainte)
+      setSaveErr(ro ? 'Nu s-a salvat limba — reîncearcă.' : 'The language was not saved — try again.')
+    } else setSaveErr('')
   }
 
   async function onLogout(): Promise<void> {
@@ -181,6 +144,7 @@ export default function CustomerSettings({
     <div className="contact-overlay" onClick={onClose}>
       <div className="contact-panel settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="contact-langbar">
+          <BackLink onBack={onClose} />
           <div className="contact-title" style={{ margin: 0 }}>
             ⚙ {t.title}
           </div>
@@ -189,7 +153,7 @@ export default function CustomerSettings({
           </button>
         </div>
 
-        {/* 1 — Preferințe de bază */}
+        {/* 1 — Basic preferences */}
         <section className="settings-sec">
           <h4>{t.prefs}</h4>
           <label className="contact-label">{t.langLabel}</label>
@@ -200,30 +164,93 @@ export default function CustomerSettings({
               </option>
             ))}
           </select>
+
+          {/* THE VOICE, PER USER (Adrian, Jul 30: „he can set the app with whatever
+          voice he wants… it's remembered per user. Not to be mixed up with another
+          user or affect another account”). The list comes from the server — a
+          parallel list here would go stale when the env changes. */}
+          {voices.length > 0 && (
+            <>
+              <label className="contact-label" style={{ marginTop: 12 }}>
+                {t.voiceLabel}
+              </label>
+              <select
+                value={voice}
+                onChange={(e) => {
+                  const v = e.target.value
+                  const inainte = voice
+                  setVoice(v)
+                  // Rezultatul NU se aruncă (auditul admin, 3 aug) — pe eșec
+                  // vocea revine și nota o spune.
+                  void saveVoicePref(v || null).then((ok) => {
+                    if (!ok) {
+                      setVoice(inainte)
+                      setSaveErr(ro ? 'Nu s-a salvat vocea — reîncearcă.' : 'The voice was not saved — try again.')
+                    } else setSaveErr('')
+                  })
+                }}
+              >
+                <option value="">{t.voiceDefault}</option>
+                {voices.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+              <p className="settings-note">{t.voiceNote}</p>
+            </>
+          )}
         </section>
 
-        {/* 2 — Credit / portofel (+ mențiunea 25%). Alimentarea MANUALĂ se face
-            dintr-un SINGUR loc — pastila de credit din bară (Adrian, 24 iul:
-            „utilizatorul trebuie să vadă doar acea parte de alimentare"). Aici
-            rămân doar soldul, regula 25% și reîncărcarea automată. */}
+        {/* 2 — Credit / wallet (+ the 25% note). MANUAL top-up happens from ONE
+        single place — the credit pill in the bar (Adrian, Jul 24: „the user must
+        see only that top-up part”). Here remain only the balance, the 25% rule
+        and the automatic top-up. */}
         <section className="settings-sec">
           <h4>{t.wallet}</h4>
+          {saveErr && (
+            <p className="settings-note" style={{ color: '#e6a23c' }}>
+              ⚠ {saveErr}
+            </p>
+          )}
           <div className="settings-credits">
-            <strong>{wallet ? wallet.credits.toLocaleString() : '…'}</strong> {t.credits}
+            {/* Tri-stat (auditul admin, 3 aug): „…" doar cât se citește; eșecul
+            se declară, nu rămâne „…" pe veci. */}
+            <strong>{wallet === 'necitit' ? '…' : wallet === null ? '—' : wallet.credits.toLocaleString()}</strong> {t.credits}
+            {wallet === null && (
+              <span className="settings-note" style={{ color: '#e6a23c' }}>
+                {' '}
+                {ro ? '(nu am putut citi soldul — redeschide Setările)' : '(could not read the balance — reopen Settings)'}
+              </span>
+            )}
           </div>
-          <p className="settings-note">
-            {ro
-              ? 'Alimentezi din pastila de credit „＋" din bara de sus (prima dată £20, apoi multipli de £5).'
-              : 'Top up from the credit pill “＋” in the top bar (first £20, then multiples of £5).'}
-          </p>
-          <p className="settings-note">{t.marginNote}</p>
+          {/* PENTRU ADMIN, ADEVĂRUL (auditul admin, 3 aug): bara lui NU are
+          pastila „＋" (Stage o randează doar la role !== 'admin'), iar fluxul
+          de reîncărcare (cod unic + link Revolut) e al clienților — pentru
+          owner ar însemna să-și trimită bani singur. */}
+          {user.role === 'admin' ? (
+            <p className="settings-note">
+              {ro
+                ? 'Contul de admin nu cumpără credite (bara ta nu are pastila „＋"). Creditarea userilor se face din Admin → Utilizatori → Credit.'
+                : 'The admin account does not buy credits (your bar has no “＋” pill). Users are credited from Admin → Users → Credit.'}
+            </p>
+          ) : (
+            <p className="settings-note">
+              {ro
+                ? 'Alimentezi din pastila de credit „＋" din bara de sus — alegi pachetul de credite dorit.'
+                : 'Top up from the credit pill “＋” in the top bar — pick the credit pack you want.'}
+            </p>
+          )}
 
-          {/* Reîncărcare automată — ca să nu rămâi fără credit în mijlocul unei sesiuni */}
+          {/* Automatic top-up — so you never run out of credit mid-session.
+          Ascuns pentru admin (fluxul e al clienților). */}
+          {user.role !== 'admin' && (
           <label className="contact-label" style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="checkbox" checked={ar.enabled} onChange={(e) => void onAr({ enabled: e.target.checked })} />
             {ro ? 'Reîncărcare automată (să nu rămân fără credit)' : 'Auto top-up (never run out of credit)'}
           </label>
-          {ar.enabled && (
+          )}
+          {user.role !== 'admin' && ar.enabled && (
             <div className="settings-topup" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <span className="settings-note">{ro ? 'Când scad sub' : 'When below'}</span>
               <input
@@ -233,26 +260,62 @@ export default function CustomerSettings({
                 onChange={(e) => void onAr({ threshold: Math.max(0, Number(e.target.value)) })}
                 style={{ width: 70 }}
               />
-              <span className="settings-note">{ro ? 'credite, reîncarcă £' : 'credits, top up £'}</span>
-              {/* Multipli de £5 (regula cunoscută), min £5 — rotunjim la 5 la ieșire. */}
-              <input
-                type="number"
-                min={5}
-                max={500}
-                step={5}
+              <span className="settings-note">{ro ? 'credite, adaugă' : 'credits, add'}</span>
+              {/* THE USER SEES ONLY CREDITS (Adrian, Jul 30). The server works in
+              pounds (his rule: multiples of £5), so the packs below are the same
+              amounts, shown in the only unit that concerns him. The conversion
+              stays here, in a single place. */}
+              <select
                 value={ar.topupAmount}
-                onChange={(e) => {
-                  const n = Math.max(5, Math.min(500, Math.round(Number(e.target.value) / 5) * 5))
-                  void onAr({ topupAmount: n })
-                }}
-                style={{ width: 70 }}
-              />
+                onChange={(e) => void onAr({ topupAmount: Number(e.target.value) })}
+              >
+                {[5, 10, 20, 50].map((lire) => (
+                  <option key={lire} value={lire}>
+                    {Math.floor(lire * CREDITE_PE_LIRA)} {ro ? 'credite' : 'credits'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {user.role !== 'admin' && ar.enabled && (
+            <p className="settings-note">
+              {ro
+                ? 'Când ajungi sub prag, îți pregătim plata automat (cod unic + link) — confirmi cu o singură apăsare. Banii se mișcă doar la confirmarea ta: linkul Revolut nu poate trage singur din cont.'
+                : 'When you drop below the threshold, we prepare your payment automatically (unique code + link) — you confirm with a single tap. Money moves only on your confirmation: the Revolut link cannot pull from your account by itself.'}
+            </p>
+          )}
+
+          {/* THE PURCHASE HISTORY (M4 „istoric", Aug 2): the route existed with
+          zero callers — the person could never see their own top-ups. A failed
+          read says so; it is NOT shown as "no purchases" (rule no. 1). */}
+          {istoric !== 'necitit' && (
+            <div style={{ marginTop: 12 }}>
+              <label className="contact-label">{ro ? 'Istoricul plăților' : 'Payment history'}</label>
+              {istoric === null ? (
+                <p className="settings-note">
+                  {ro ? 'Nu am putut citi istoricul — reîncearcă.' : 'Could not read the history — try again.'}
+                </p>
+              ) : istoric.length === 0 ? (
+                <p className="settings-note">{ro ? 'Nicio plată încă.' : 'No payments yet.'}</p>
+              ) : (
+                <ul className="settings-history">
+                  {istoric.slice(0, 10).map((r) => (
+                    <li key={r.id} className="settings-note" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span>{new Date(r.created_at).toLocaleDateString()}</span>
+                      <span>£{r.amount} → {r.credits.toLocaleString()} {ro ? 'credite' : 'credits'}</span>
+                      <span>{r.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </section>
 
-        {/* 3 — Model AI (chat + creier), selectabil prin OpenRouter */}
-        {(catalog.chat.length > 0 || catalog.work.length > 0) && (
+        {/* 3 — Model AI (chat + creier) — selectorul de modele OpenRouter, ASCUNS
+        (migrare completă pe Gemini). Rămâne montat în cod, dar nu se randează;
+        catalog/sel și handler-ul onModel stau conectate ca să nu se strice nimic. */}
+        {!MODEL_SELECTOR_HIDDEN && (catalog.chat.length > 0 || catalog.work.length > 0) && (
           <section className="settings-sec">
             <h4>{ro ? 'Model AI' : 'AI model'}</h4>
             <label className="contact-label">{ro ? 'Chat (conversație)' : 'Chat'}</label>

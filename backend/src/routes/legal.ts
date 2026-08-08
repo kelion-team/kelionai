@@ -90,10 +90,9 @@ const PRIVACY = page(
 
   <h2>Sub-processors</h2>
   <ul>
-    <li><strong>OpenRouter</strong> — routes conversation content to the selected large-language model (OpenAI, Google or Anthropic) to generate replies.</li>
-    <li><strong>OpenAI</strong> — real-time voice (speech-in / speech-out) and, when selected, text replies.</li>
+    <li><strong>Google (Gemini API)</strong> — processes conversation content (text, and any images/audio you send) to generate replies.</li>
     <li><strong>Google Cloud</strong> — speech-to-text and text-to-speech (voice), plus the Google skills you invoke.</li>
-    <li><strong>Anthropic</strong> — text replies when the Claude model is selected for work tasks.</li>
+    <li><strong>Serper</strong> — processes your web-search queries to return live Google results.</li>
     <li><strong>Dedicated VPS server (EU)</strong> — hosting and database.</li>
   </ul>
 

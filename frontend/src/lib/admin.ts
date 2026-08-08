@@ -1,3 +1,9 @@
+// THE HTTP CONTRACT with the backend, ONE SINGLE declaration (Batch A of
+// PROCEDURA-REFACERE-CLONE.md): tipurile astea erau redeclarate identic aici
+// and in the backend (98 duplicated lines). Now they come from the common source; a TYPE
+// import, so it vanishes at compile time — it adds nothing to the bundle.
+import type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
+export type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow }
 export interface UserSummary {
   email: string
   count: number
@@ -10,48 +16,28 @@ export interface HistoryRow {
   created_at: string
 }
 
-// The owner's REAL money picture (admin only): live Stripe balance, real cost
-// consumed, real profit, and per-AI cost. Replaces the old hand-typed pool.
+// The owner's REAL money picture (admin only): real cost consumed, real
+// profit, and per-AI cost. No hand-typed figures.
+// (Stripe is fully out — 31 Jul. „Punga" — soldul OpenRouter — și cheltuiala
+// OpenAI au fost EXTIRPATE pe 3 aug, împreună cu furnizorii.)
 export interface Finance {
-  stripe: { available: number; pending: number; currency: string } | null
-  loaded: number
-  remaining: number
-  spent: number
-  profit: number
+  // (`spent` și `profit` au fost SCOASE — auditul admin, 3 aug: tabul nu le
+  // desena, iar sursa lor din backend inventa zerouri la eșec de DB.)
+  /** The cost journal, unconverted (USD end to end) — the Money tab shows
+   *  ONLY this, so "total" and "azi" can't be in two currencies anymore. */
+  spentUsd: number
   currency: string
   byKind: Record<string, number>
-  // Consumat AZI la AI (USD, real) — cardul „Consumat azi" din tabul Bani.
+  // Consumed TODAY at the AI providers (USD, real) — the "Spent today" card.
   today: number
-  // „Punga lui Kelion" — soldul REAL, exact din contul OpenRouter (USD).
-  openrouter?: {
-    balance: number
-    low: boolean
-    threshold: number
-    live: boolean
-    topup: string
-  }
+  /** REAL vs ESTIMATE per row: only 'masurat' rows carry the provider's own
+   *  figure; the rest are internal estimates and MUST be labeled as such. */
+  masurat: number
+  estimat: number
+  felul: Record<string, 'masurat' | 'estimat'>
 }
 
-export interface TransactionRow {
-  id: number
-  user_id: string
-  amount: number
-  credits: number
-  status: string
-  stripe_payment_intent_id: string | null
-  created_at: string
-}
 
-export async function fetchTransactions(): Promise<TransactionRow[]> {
-  try {
-    const r = await fetch('/api/admin/transactions', { credentials: 'include' })
-    if (!r.ok) return []
-    const j = (await r.json()) as { transactions?: TransactionRow[] }
-    return j.transactions ?? []
-  } catch {
-    return []
-  }
-}
 
 export async function fetchFinance(): Promise<Finance | null> {
   try {
@@ -64,14 +50,48 @@ export async function fetchFinance(): Promise<Finance | null> {
 }
 
 // CIRCUITUL BANILOR (admin): starea verigilor Stripe→AI + crearea cardului.
-export interface MoneyCircuit {
-  payoutsInterval: string
-  issuingStatus: string
-  cards: { id: string; last4: string; status: string }[]
-  issuingAvailable: number
-  autoFund?: { at: string; ok: boolean; detail: string } | null
-  error?: string
+/** The owner's lever: stops / restarts Kelion's autonomy.
+ *
+ *  The "pauza-autonomie" command existed since Jul 27, but you had to know it
+ *  by heart and say it in chat. A brake the owner chooses himself is not a barrier —
+ *  it's control. That's why it's a button, in plain sight, not a magic word. */
+export async function pauzaAutonomie(oprit: boolean): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/autonomie/pauza', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ oprit }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
 }
+
+/** A proof of autonomy, as the server reads it from the database. */
+export interface DovadaAutonomie {
+  nivel: number
+  ce: string
+  cum: string
+  dovedit: boolean
+  dovada: string
+  cand: string | null
+}
+
+/** Cele opt dovezi (Adrian, 31 iul: „trebuie 8 din 8 dovezi").
+ *
+ *  Not a list written by me: each level looks in the database for its concrete
+ *  trace — an order, a PR, a measurement — and says "proven" ONLY if it found it. */
+export async function fetchDoveziAutonomie(): Promise<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null> {
+  try {
+    const r = await fetch('/api/admin/autonomie/dovezi', { credentials: 'include' })
+    return r.ok ? await r.json() : null
+  } catch {
+    return null
+  }
+}
+
 export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
   try {
     const r = await fetch('/api/admin/money-circuit', { credentials: 'include' })
@@ -80,83 +100,101 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
     return null
   }
 }
-export async function createAiCard(): Promise<{ id: string; last4: string; url: string } | null> {
+
+// ── THE PAYMENTS PANEL (M3, Aug 2): codes + the unattributed net ────────────
+export interface CodNeplatit {
+  code: string
+  email: string
+  amount: number
+  currency: string
+  status: string
+  createdAt: string
+  expirata: boolean
+}
+
+export interface PlataIncasata {
+  code: string
+  email: string
+  amount: number
+  currency: string
+  paidAt: string
+  bankRef: string
+}
+
+export interface TotaluriPlati {
+  totalAzi: number
+  totalLunaAsta: number
+  moneda: string
+}
+
+export interface PlatiAdmin {
+  rezumat: {
+    emise: number
+    platite: number
+    inAsteptare: number
+    neatribuite: number
+    recente: { code: string; email: string; amount: number; currency: string; status: string; createdAt: string; paidAt: string | null }[]
+  } | null
+  /** null = citirea plasei a EȘUAT — se scrie ca eșec, niciodată ca „Nimic în plasă"; [] = plasa e chiar goală. */
+  neatribuite: { id: number; bankRef: string; referinta: string; amount: number; currency: string; seenAt: string }[] | null
+  coduriNeplatite: CodNeplatit[] | null
+  platiIncasate: PlataIncasata[] | null
+  totaluri: TotaluriPlati | null
+}
+export async function fetchPlati(): Promise<PlatiAdmin | null> {
   try {
-    const r = await fetch('/api/admin/money-circuit/card', { method: 'POST', credentials: 'include' })
-    return r.ok ? ((await r.json()) as { id: string; last4: string; url: string }) : null
+    const r = await fetch('/api/admin/plati', { credentials: 'include' })
+    return r.ok ? ((await r.json()) as PlatiAdmin) : null
   } catch {
     return null
   }
 }
-
-// PAYOUT ADMIN: profitul → contul bancar/cardul REAL declarat (nu cel virtual).
-export async function adminPayout(pounds: number): Promise<{ id: string; arrival: string } | null> {
+/** Returns the server's verdict ('creditat' | 'deja' | 'negasit' | 'esec') —
+ *  shown as-is, so a double credit REFUSED is never displayed as an error. */
+export async function atribuiePlata(id: number, email: string): Promise<string> {
   try {
-    const r = await fetch('/api/admin/payout', {
+    const r = await fetch('/api/admin/plati/neatribuite/atribuie', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pounds }),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, email }),
     })
-    if (!r.ok) return null
-    return (await r.json()) as { id: string; arrival: string }
+    const j = (await r.json().catch(() => ({}))) as { rezultat?: string }
+    return j.rezultat ?? (r.ok ? 'creditat' : 'esec')
   } catch {
-    return null
+    return 'esec'
   }
 }
-
-// DEPUNEREA OWNERULUI: bani în punga Stripe (fără credite) → checkout URL.
-export async function ownerDeposit(pounds: number): Promise<string | null> {
+export async function ignoraPlata(id: number): Promise<boolean> {
   try {
-    const r = await fetch('/api/admin/deposit', {
+    const r = await fetch('/api/admin/plati/neatribuite/ignora', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pounds }),
-    })
-    if (!r.ok) return null
-    const j = (await r.json()) as { url?: string }
-    return j.url ?? null
-  } catch {
-    return null
-  }
-}
-
-// VÂNZARE DE CREDITE (admin): X credite → linkul de plată Stripe pentru user.
-export async function sellCredits(
-  email: string,
-  credits: number,
-): Promise<{ url: string; pounds: number; credits: number } | null> {
-  try {
-    const r = await fetch('/api/admin/sell-credits', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, credits }),
-    })
-    if (!r.ok) return null
-    const j = (await r.json()) as { url?: string; pounds?: number; credits?: number }
-    return j.url ? { url: j.url, pounds: j.pounds ?? 0, credits: j.credits ?? credits } : null
-  } catch {
-    return null
-  }
-}
-
-// Owner adds money to, or withdraws money from, the provider-credit pool.
-// Returns true on success so the caller can refresh the finance view.
-export async function updatePool(amount: number, direction: 'add' | 'withdraw'): Promise<boolean> {
-  try {
-    const r = await fetch('/api/admin/pool', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, direction }),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id }),
     })
     return r.ok
   } catch {
     return false
   }
 }
+// AICI A STAT `fetchCardKey` — cheia efemera prin care se afisa numarul cardului
+// virtual Stripe (Issuing Elements). It went away with the card: the component that
+// folosea (CardReveal) a fost stearsa.
+
+// AICI AU STAT `CardAddress`, `createAiCard`, `adminPayout` si `ownerDeposit` —
+// crearea cardului virtual Stripe, retragerea profitului si depunerea in punga.
+// Toate trei mergeau prin Stripe, iar Stripe a iesit pe 30 iul: userii platesc pe
+// linkul Revolut, banii intra direct in contul lui Adrian, iar furnizorii se
+// pay with his card. The back-end routes stay until the transition is confirmed
+// live, but the interface no longer calls them.
+
+// HERE STOOD `sellCredits` — X credits → a Stripe payment link for the user.
+// Deleted together with Stripe (31 Jul): credit sales go through the unique
+// code + Revolut transfer flow, and manual crediting stays on /api/admin/user.
+
+// Owner adds money to, or withdraws money from, the provider-credit pool.
+// Returns true on success so the caller can refresh the finance view.
 
 // Market control (admin only): LIVE presence in the four install locations
 // (checked against the real store pages, not dashboards) + the verifiable
@@ -177,7 +215,9 @@ export interface DownloadRow {
 }
 export interface StoresData {
   stores: StoreRow[]
-  downloads: { counts: { file: string; total: number }[]; recent: DownloadRow[] }
+  /** `dbOk:false` = jurnalul de descărcări NU s-a putut citi (auditul admin,
+   *  3 aug) — counts goale nu înseamnă atunci „nicio descărcare". */
+  downloads: { dbOk: boolean; counts: { file: string; total: number }[]; recent: DownloadRow[] }
 }
 
 export async function fetchStores(): Promise<StoresData | null> {
@@ -195,37 +235,7 @@ export async function fetchStores(): Promise<StoresData | null> {
 // Free-trial visitor analytics (admin only): the full professional picture —
 // who (human/bot), from where (country/region/city/ISP), on what device, which
 // browser, speaking what, and which ad brought them.
-export interface DemoRecent {
-  kind: 'visit' | 'demo'
-  ip: string
-  country: string
-  code: string
-  city: string
-  region: string
-  isp: string
-  browser: string
-  os: string
-  device: string
-  lang: string
-  referrer: string
-  is_bot: boolean
-  started_at: string
-  // For a DEMO row: the throwaway email whose conversation the owner can open
-  // (click the row). Empty for plain visits.
-  session_email: string
-  // Ce l-a interesat: prima întrebare/temă din proba demo. Gol la vizite simple.
-  topic: string
-}
 
-export interface DemoStats {
-  total: number
-  today: number
-  bots: number
-  visitsTotal: number
-  visitsToday: number
-  byCountry: { country: string; code: string; count: number }[]
-  recent: DemoRecent[]
-}
 
 export async function fetchDemos(): Promise<DemoStats | null> {
   try {
@@ -239,22 +249,6 @@ export async function fetchDemos(): Promise<DemoStats | null> {
 
 // Per-USER activity (admin only): who signed in, last IP/place/device, how
 // long they stayed in total, and their latest sessions one by one.
-export interface UserActivityRow {
-  email: string
-  sessions: number
-  seconds: number
-  actions: number
-  messages: number
-  last_seen: string
-  last_ip: string
-  city: string
-  country: string
-  code: string
-  device: string
-  browser: string
-  blocked: boolean
-  balance: number
-}
 
 export interface UserSessionRow {
   email: string
@@ -282,22 +276,28 @@ export interface Lead {
   created_at: string
 }
 
-export async function fetchLeads(): Promise<Lead[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug) — tabul o scrie ca eșec,
+// nu ca „Niciun contact încă".
+export async function fetchLeads(): Promise<Lead[] | null> {
   try {
     const r = await fetch('/api/admin/leads', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     return ((await r.json()) as { leads: Lead[] }).leads
   } catch {
-    return []
+    return null
   }
 }
 
+/** Verdictul MĂSURAT al trimiterii (auditul admin, 3 aug): vechiul boolean
+ *  colapsa 400 (adresă/subiect invalide) cu 502 (SMTP a refuzat) și cu rețeaua
+ *  picată, iar alerta inventa cauza „verifică MAIL_PASS". Acum alerta spune ce
+ *  s-a măsurat: 'ok' | 'bad_request' | 'send_failed' | 'network'. */
 export async function emailLead(
   id: number,
   to: string,
   subject: string,
   body: string,
-): Promise<boolean> {
+): Promise<'ok' | 'bad_request' | 'send_failed' | 'network'> {
   try {
     const r = await fetch('/api/admin/lead/email', {
       method: 'POST',
@@ -305,9 +305,10 @@ export async function emailLead(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, to, subject, body }),
     })
-    return r.ok
+    if (r.ok) return 'ok'
+    return r.status === 400 ? 'bad_request' : 'send_failed'
   } catch {
-    return false
+    return 'network'
   }
 }
 
@@ -326,13 +327,15 @@ export interface VisitorMsg {
   created_at: string
 }
 
-export async function fetchVisitorConvos(): Promise<VisitorConvo[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug) — pot exista vizitatori care
+// scriu chiar atunci; tabul scrie eșecul, iar pollul de 5s reîncearcă singur.
+export async function fetchVisitorConvos(): Promise<VisitorConvo[] | null> {
   try {
     const r = await fetch('/api/admin/visitor-chats', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     return ((await r.json()) as { convos: VisitorConvo[] }).convos
   } catch {
-    return []
+    return null
   }
 }
 
@@ -396,18 +399,20 @@ export interface InboundEmail {
   received_at: string
 }
 
-export async function fetchInbound(): Promise<InboundEmail[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug: o sesiune expirată vopsea
+// simultan trei secțiuni din Inbox ca „goale" — trei ❌ dintr-un singur apel).
+export async function fetchInbound(): Promise<InboundEmail[] | null> {
   try {
     const r = await fetch('/api/admin/inbound', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     return ((await r.json()) as { emails?: InboundEmail[] }).emails ?? []
   } catch {
-    return []
+    return null
   }
 }
 
-// INBOX LIVE — cutia REALĂ contact@kelionai.app citită direct prin IMAP (ultimele
-// mesaje, citite sau nu), ca adminul să vadă tot ce e în cutie, nu doar mailul nou.
+// LIVE INBOX — the REAL contact@kelionai.app mailbox read directly via IMAP (latest
+// messages, read or not), so the admin sees everything in the box, not just new mail.
 export interface MailboxLiveItem {
   uid: number
   from: string
@@ -416,17 +421,27 @@ export interface MailboxLiveItem {
   date: string
   seen: boolean
 }
-export async function fetchMailboxLive(): Promise<MailboxLiveItem[]> {
+/** Răspunsul cutiei spune și DE CE e goală lista (auditul admin, 3 aug):
+ *  `ok:false` + `motiv` ('mail_neconfigurat' sau eroarea IMAP) = citire
+ *  eșuată; `ok:true` + emails [] = INBOX-ul chiar e gol. null = ruta însăși
+ *  a picat (rețea/403/500). Trei stări, trei texte în panou. */
+export interface MailboxLiveResult {
+  ok: boolean
+  motiv: string | null
+  emails: MailboxLiveItem[]
+}
+export async function fetchMailboxLive(): Promise<MailboxLiveResult | null> {
   try {
     const r = await fetch('/api/admin/mailbox-live', { credentials: 'include' })
-    if (!r.ok) return []
-    return ((await r.json()) as { emails?: MailboxLiveItem[] }).emails ?? []
+    if (!r.ok) return null
+    const j = (await r.json()) as Partial<MailboxLiveResult>
+    return { ok: j.ok === true, motiv: j.motiv ?? null, emails: j.emails ?? [] }
   } catch {
-    return []
+    return null
   }
 }
 
-// Mesajele din formularul „Contact" — salvate mereu în DB, vizibile chiar dacă
+// Messages from the "Contact" form — always saved in the DB, visible even if
 // emailul nu e configurat.
 export interface ContactMessage {
   id: number
@@ -440,13 +455,14 @@ export interface ContactMessage {
   created_at: string
 }
 
-export async function fetchContactMessages(): Promise<ContactMessage[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug) — nu „Niciun mesaj de contact".
+export async function fetchContactMessages(): Promise<ContactMessage[] | null> {
   try {
     const r = await fetch('/api/admin/contact-messages', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     return ((await r.json()) as { messages?: ContactMessage[] }).messages ?? []
   } catch {
-    return []
+    return null
   }
 }
 
@@ -460,27 +476,46 @@ export async function fetchActivity(): Promise<UserActivity | null> {
   }
 }
 
-export async function fetchUsers(): Promise<UserSummary[]> {
-  const r = await fetch('/api/admin/users', { credentials: 'include' })
-  if (!r.ok) return []
-  const j = (await r.json()) as { users?: UserSummary[] }
-  return j.users ?? []
+// AUDIT ADMIN (3 aug): fetchUsers/fetchHistory erau SINGURELE funcții de aici
+// fără try/catch — o eroare de rețea arunca (loading blocat pe veci +
+// unhandled rejection), iar un 403/500 colapsa în [] („No history yet." /
+// „Nu a scris niciun mesaj" pentru o citire picată). null = eșec, spus ca atare.
+export async function fetchUsers(): Promise<UserSummary[] | null> {
+  try {
+    const r = await fetch('/api/admin/users', { credentials: 'include' })
+    if (!r.ok) return null
+    const j = (await r.json()) as { users?: UserSummary[] }
+    return j.users ?? []
+  } catch {
+    return null
+  }
 }
 
-export async function fetchHistory(email: string): Promise<HistoryRow[]> {
-  const r = await fetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
-    credentials: 'include',
-  })
-  if (!r.ok) return []
-  const j = (await r.json()) as { history?: HistoryRow[] }
-  return j.history ?? []
+export async function fetchHistory(email: string): Promise<HistoryRow[] | null> {
+  try {
+    const r = await fetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
+      credentials: 'include',
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { history?: HistoryRow[] }
+    return j.history ?? []
+  } catch {
+    return null
+  }
 }
 
-// Traduce în bloc mesajele unei conversații în română (butonul „Tradu în română"
-// din vizualizarea chaturilor). Întoarce traducerile aliniate 1:1 cu intrarea;
-// pe eroare, întoarce textele originale ca să nu se golească afișajul.
-export async function translateToRo(texts: string[]): Promise<string[]> {
-  if (texts.length === 0) return []
+// Batch-translates a conversation's messages into Romanian (the "Translate to Romanian"
+// button in the chat viewer). Returns translations aligned 1:1 with the input, plus
+// `failed` — how many messages came back as the UNTRANSLATED ORIGINAL because the
+// translation service failed for them (or the whole request failed, in which case
+// failed = all). The caller must surface that count, not show it as a clean translation.
+export interface TranslateRoResult {
+  translations: string[]
+  failed: number
+}
+
+export async function translateToRo(texts: string[]): Promise<TranslateRoResult> {
+  if (texts.length === 0) return { translations: [], failed: 0 }
   try {
     const r = await fetch('/api/admin/translate', {
       method: 'POST',
@@ -488,11 +523,14 @@ export async function translateToRo(texts: string[]): Promise<string[]> {
       credentials: 'include',
       body: JSON.stringify({ texts, target: 'Romanian' }),
     })
-    if (!r.ok) return texts
-    const j = (await r.json()) as { translations?: string[] }
-    return Array.isArray(j.translations) && j.translations.length === texts.length ? j.translations : texts
+    if (!r.ok) return { translations: texts, failed: texts.length }
+    const j = (await r.json()) as { translations?: string[]; failed?: number }
+    if (Array.isArray(j.translations) && j.translations.length === texts.length) {
+      return { translations: j.translations, failed: typeof j.failed === 'number' ? j.failed : 0 }
+    }
+    return { translations: texts, failed: texts.length }
   } catch {
-    return texts
+    return { translations: texts, failed: texts.length }
   }
 }
 
@@ -505,61 +543,98 @@ export interface CapabilityGap {
   hits: number
   resolved: boolean
   escalated?: boolean
-  // Decizia autonomă a lui Kelion: „DE IMPLEMENTAT: ..." / „ÎNCHIS AUTONOM: ...".
+  // Kelion's autonomous decision: "DE IMPLEMENTAT: ..." / "ÎNCHIS AUTONOM: ...".
   triage?: string | null
   created_at: string
   last_seen: string
 }
 
-// Declanșează triajul autonom al lui Kelion pe toate gap-urile deschise.
-export async function runGapsTriage(): Promise<{ triaged: number; kept: number; closed: number } | null> {
+// Triggers Kelion's autonomous triage over all open gaps.
+// `error` PĂSTRAT în tip (auditul admin, 3 aug): backend-ul răspunde 200 și
+// când creierul pică ({triaged:0, error:'brain_unavailable'|'bad_brain_json'})
+// — vechiul tip îl tăia și butonul tăcea, indiferent de rezultat.
+export async function runGapsTriage(): Promise<{ triaged: number; kept: number; closed: number; error?: string } | null> {
   try {
     const r = await fetch('/api/admin/gaps/triage', { method: 'POST', credentials: 'include' })
     if (!r.ok) return null
-    return (await r.json()) as { triaged: number; kept: number; closed: number }
+    return (await r.json()) as { triaged: number; kept: number; closed: number; error?: string }
   } catch {
     return null
   }
 }
 
-export async function fetchGaps(all = false): Promise<CapabilityGap[]> {
+// THE FALLS AUDIT (Adrian, Jul 27: "here you must see all the audits and
+// all the falls") — the aggregate from /api/admin/audit, shown under gaps.
+export interface AuditReport {
+  health?: {
+    ok?: boolean
+    info?: Record<string, unknown>
+    probleme?: { id: string; grav: string; desc: string; reparabil: string }[]
+  }
+  serverErrors?: { t: string; level: number; msg: string }[]
+  clientErrors?: { created_at: string; user_email: string | null; message: string; n: string }[]
+  failedJobs?: { id: number; order: string; updated: string }[]
+}
+
+export async function fetchAudit(): Promise<AuditReport | null> {
   try {
-    const r = await fetch(`/api/admin/gaps${all ? '?all=1' : ''}`, { credentials: 'include' })
-    if (!r.ok) return []
-    const j = (await r.json()) as { gaps?: CapabilityGap[] }
-    return j.gaps ?? []
+    const r = await fetch('/api/admin/audit', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as AuditReport
   } catch {
-    return []
+    return null
   }
 }
 
-export async function resolveGap(id: number, resolved = true): Promise<void> {
+// null = citirea a EȘUAT (auditul admin, 3 aug): contractul tabului e „a
+// dispărut = auto-rezolvat", deci un [] fals pe 403/500 se citea ca „totul
+// rezolvat" și refresh-ul de 15s ȘTERGEA lista bună de pe ecran.
+export async function fetchGaps(all = false): Promise<CapabilityGap[] | null> {
   try {
-    await fetch('/api/admin/gaps/resolve', {
+    const r = await fetch(`/api/admin/gaps${all ? '?all=1' : ''}`, { credentials: 'include' })
+    if (!r.ok) return null
+    const j = (await r.json()) as { gaps?: CapabilityGap[] }
+    return j.gaps ?? []
+  } catch {
+    return null
+  }
+}
+
+// Boolean MĂSURAT (auditul admin, 3 aug): vechiul void înghițea orice eroare,
+// iar „Rezolvat (arhivează)" scotea rândul de pe ecran chiar când POST-ul
+// picase — apăsarea se pierdea în tăcere și rândul reapărea la refresh.
+export async function resolveGap(id: number, resolved = true): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/gaps/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ id, resolved }),
     })
+    return r.ok
   } catch {
-    /* non-fatal */
+    return false
   }
 }
 
-// Amprente vocale înregistrate (admin only).
+// Registered voiceprints (admin only).
 export interface VoiceprintRow {
   email: string
   name: string
   gender: 'male' | 'female' | 'unknown'
   isAdmin: boolean
   hasAudio: boolean
+  hasFace: boolean
+  facePhoto: string
   updatedAt: string
 }
 
-export async function fetchVoiceprints(): Promise<VoiceprintRow[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug) — o pană de DB/rețea nu mai
+// arată identic cu „chiar nu există amprente" (factorul de voce al ownerului).
+export async function fetchVoiceprints(): Promise<VoiceprintRow[] | null> {
   try {
     const r = await fetch('/api/voiceprint/list', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     const j = (await r.json()) as { rows?: unknown[] }
     return (j.rows ?? []).map((row: unknown) => {
       const r = row as Record<string, unknown>
@@ -569,15 +644,17 @@ export async function fetchVoiceprints(): Promise<VoiceprintRow[]> {
         gender: String(r.gender ?? 'unknown') as VoiceprintRow['gender'],
         isAdmin: Boolean(r.isAdmin ?? r.is_admin),
         hasAudio: Boolean(r.hasAudio ?? r.has_audio),
+        hasFace: Boolean(r.hasFace ?? r.has_face),
+        facePhoto: String(r.facePhoto ?? r.face_photo ?? ''),
         updatedAt: String(r.updatedAt ?? r.updated_at ?? ''),
       }
     })
   } catch {
-    return []
+    return null
   }
 }
 
-// Mostra audio a unei amprente (data-URL) — pentru butonul „play" din panou.
+// A voiceprint's audio sample (data-URL) — for the „play” button in the panel.
 export async function fetchVoiceprintAudio(email: string): Promise<string | null> {
   try {
     const r = await fetch(`/api/voiceprint/audio?email=${encodeURIComponent(email)}`, {
@@ -599,7 +676,12 @@ export async function deleteVoiceprint(email: string): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     })
-    return r.ok
+    if (!r.ok) return false
+    // CORPUL, nu doar statusul (auditul admin, 3 aug): backend-ul răspunde
+    // 200 cu {ok:false} când DELETE-ul din DB pică — rândul dispărea din
+    // listă „șters" și reapărea la refresh-ul de 10s.
+    const j = (await r.json().catch(() => null)) as { ok?: boolean } | null
+    return j?.ok === true
   } catch {
     return false
   }
@@ -621,11 +703,75 @@ export interface TokenChecksResult {
   checks: TokenCheck[]
 }
 
+/** Which keys the server sees RIGHT NOW. Answers "I've written them dozens of times"
+ *  vs. "(not configured)": a written key doesn't automatically reach the process that
+ *  runs. Contains NO values — only names, presence and length. */
+export interface EnvCheckResult {
+  vars: { name: string; what: string; present: boolean; length: number; breaks: string; foundAs?: string; accepts: string[] }[]
+  /** Names of keys the server HAS, but which the code wasn't reading. */
+  orphans: string[]
+  summary: { total: number; lipsa: number; goale: number; nume: string[] }
+  /** Process start time: a key written AFTER this is not loaded yet. */
+  startedAt: string
+}
+
+export async function fetchEnvCheck(): Promise<EnvCheckResult | null> {
+  try {
+    const r = await fetch('/api/admin/env-check', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as EnvCheckResult
+  } catch {
+    return null
+  }
+}
+
 export async function fetchTokenChecks(): Promise<TokenChecksResult | null> {
   try {
     const r = await fetch('/api/admin/token-checks', { credentials: 'include' })
     if (!r.ok) return null
     return (await r.json()) as TokenChecksResult
+  } catch {
+    return null
+  }
+}
+
+// ── Cereri neacoperite & Plăți neatribuite ──────────────────────────────
+export interface PlataNeatribuita {
+  id: number
+  suma: number
+  moneda: string
+  referinta: string | null
+  banca: string | null
+  status: string
+  detalii?: string | null
+  created_at: string
+}
+
+export interface CodNeplatit {
+  cod: string
+  user_email: string
+  suma: number
+  status: string
+  created_at: string
+}
+
+export interface CereriNeacoperiteData {
+  neatribuite: PlataNeatribuita[]
+  coduriNeplatite: CodNeplatit[]
+  gaps: CapabilityGap[]
+}
+
+export async function fetchCereriNeacoperite(): Promise<CereriNeacoperiteData | null> {
+  try {
+    const r = await fetch('/api/admin/plati', { credentials: 'include' })
+    if (!r.ok) return null
+    const j = await r.json()
+    const gaps = await fetchGaps(false)
+    return {
+      neatribuite: j.neatribuite ?? [],
+      coduriNeplatite: j.coduriNeplatite ?? [],
+      gaps: gaps ?? [],
+    }
   } catch {
     return null
   }

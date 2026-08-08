@@ -1,10 +1,9 @@
 import { config } from '../config.js'
 import { dbEnabled, getPool } from '../db.js'
 import { verifyKeys } from './brain.js'
-import { getStripeBalance } from './stripe.js'
-import { mailEnabled } from './mail.js'
+import { mailEnabled, smtpTransport } from './mail.js'
+import { getSerperBalance } from './serperBalance.js'
 import { ImapFlow } from 'imapflow'
-import nodemailer from 'nodemailer'
 
 export interface TokenCheck {
   name: string
@@ -33,44 +32,42 @@ async function fetchStatus(url: string, init: RequestInit): Promise<{ ok: boolea
   }
 }
 
-// 1. Creierul — OpenRouter (o singură cheie pentru GPT/Gemini/Claude). Kimi/GLM scoase.
+// 1. The brain — Gemini direct, unic (OpenRouter/OpenAI extirpate, 3 aug).
+// Un ping REAL prin exact drumul creierului (verifyKeys → geminiDirectChat),
+// nu doar prezența cheii — aia o verifică separat checkGemini.
 async function checkBrainKeys(): Promise<TokenCheck[]> {
   try {
     const v = await timed(20_000, () => verifyKeys())
     return [
       {
-        name: 'OpenRouter API key',
+        name: 'Creierul Gemini (chat direct)',
         status: v.primary === 'ok' ? 'ok' : (v.primary === 'not_configured' ? 'not_configured' : (v.primary.startsWith('fail_') ? (v.primary as `fail_${number}`) : 'fail')),
-        detail: v.primary === 'ok' ? 'autentificare + credit OK' : v.primary,
-        requiredScope: 'Chat Completions (GPT/Gemini/Claude)',
+        detail: v.primary === 'ok' ? 'ping prin drumul creierului OK' : v.primary,
+        requiredScope: 'Generative Language API (cheia GEMINI_API_KEY)',
       },
     ]
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return [
-      { name: 'OpenRouter API key', status: 'fail', detail: msg, requiredScope: 'Chat Completions (GPT/Gemini/Claude)' },
+      { name: 'Creierul Gemini (chat direct)', status: 'fail', detail: msg, requiredScope: 'Generative Language API (cheia GEMINI_API_KEY)' },
     ]
   }
 }
 
-// 2. Stripe — cheia secretă trebuie să poată citi balance
-async function checkStripe(): Promise<TokenCheck> {
-  if (!config.stripe.secretKey) {
-    return { name: 'Stripe secret key', status: 'not_configured', requiredScope: 'Balance + Checkout' }
-  }
-  try {
-    const balance = await timed(15_000, () => getStripeBalance())
-    if (balance) {
-      return { name: 'Stripe secret key', status: 'ok', detail: `balance disponibil ${balance.available} ${balance.currency}`, requiredScope: 'Balance + Checkout' }
-    }
-    return { name: 'Stripe secret key', status: 'fail', detail: 'getStripeBalance a returnat null', requiredScope: 'Balance + Checkout' }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return { name: 'Stripe secret key', status: 'fail', detail: msg, requiredScope: 'Balance + Checkout' }
-  }
+// 2. Payments — the Revolut link (collection) + the Enable Banking keys
+// (reading transactions, for automatic crediting with a unique code)
+function checkPlati(): TokenCheck[] {
+  const link: TokenCheck = config.revolut.payLink
+    ? { name: 'Revolut pay link', status: 'ok', detail: 'configurat', requiredScope: 'Payment link activ' }
+    : { name: 'Revolut pay link', status: 'not_configured', requiredScope: 'REVOLUT_PAY_LINK în env' }
+  const eb: TokenCheck =
+    config.enableBanking.appId && config.enableBanking.privateKeyB64
+      ? { name: 'Enable Banking (citire plăți)', status: 'ok', detail: 'appId + cheie privată prezente', requiredScope: 'AIS pe contul Revolut' }
+      : { name: 'Enable Banking (citire plăți)', status: 'not_configured', requiredScope: 'ENABLE_BANKING_APP_ID + ENABLE_BANKING_PRIVATE_KEY_B64' }
+  return [link, eb]
 }
 
-// 3. Google service account — folosit la TTS, ASR, Gemini, imagini
+// 3. Google service account — used for TTS, ASR, Gemini, images
 async function checkGoogleServiceAccount(): Promise<TokenCheck> {
   if (!config.googleServiceAccountJson) {
     return { name: 'Google service account', status: 'not_configured', requiredScope: 'cloud-platform + generative-language' }
@@ -93,38 +90,63 @@ async function checkGoogleServiceAccount(): Promise<TokenCheck> {
   }
 }
 
-// 4. Google TTS API key (fallback când nu e service account)
+// 4. Google TTS API key (fallback when there is no service account)
 async function checkGoogleTtsKey(): Promise<TokenCheck> {
-  if (config.googleServiceAccountJson) {
-    return { name: 'Google TTS API key', status: 'not_configured', detail: 'folosit service account', requiredScope: 'Cloud Text-to-Speech API' }
-  }
+  // AUDIT ADMIN (3 aug): cu SA prezent, o cheie SETATĂ era raportată „⚪
+  // neconfigurat" fără nicio măsurătoare — pe același ecran cu „✅
+  // GOOGLE_TTS_API_KEY, N caractere" din tabelul de sus. Acum: dacă cheia
+  // există o testăm ORICUM (e rezerva reală a gurii) și spunem că nu e cea
+  // folosită; „neconfigurat" rămâne doar când chiar lipsește.
   if (!config.googleTtsKey) {
-    return { name: 'Google TTS API key', status: 'not_configured', requiredScope: 'Cloud Text-to-Speech API' }
+    return {
+      name: 'Google TTS API key',
+      status: 'not_configured',
+      detail: config.googleServiceAccountJson ? 'lipsește (gura merge pe service account)' : undefined,
+      requiredScope: 'Cloud Text-to-Speech API',
+    }
   }
   const url = `https://texttospeech.googleapis.com/v1/voices?key=${config.googleTtsKey}`
   const r = await fetchStatus(url, {})
   if (r.ok) {
-    return { name: 'Google TTS API key', status: 'ok', detail: 'voices list OK', requiredScope: 'Cloud Text-to-Speech API' }
+    return {
+      name: 'Google TTS API key',
+      status: 'ok',
+      detail: config.googleServiceAccountJson
+        ? 'validă, dar nefolosită — service account are prioritate'
+        : 'voices list OK',
+      requiredScope: 'Cloud Text-to-Speech API',
+    }
   }
   return { name: 'Google TTS API key', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Cloud Text-to-Speech API' }
 }
 
-// 5. OpenAI — vocea live (Realtime), STT de rezervă și TTS merg pe această cheie
-async function checkOpenAI(): Promise<TokenCheck> {
-  if (!config.openai.key) {
-    return { name: 'OpenAI API key (voce/STT/TTS)', status: 'not_configured', requiredScope: 'Realtime + Audio API' }
+// 4b. Serper — SINGURUL motor de căutare al aplicației (post-extirpare, 3 aug),
+// cheie plătită cu credit propriu. AUDIT ADMIN (3 aug): lipsea complet din
+// „verificarea LIVE", deși comentariul rutei promite „TOATE cheile cu drepturi"
+// — ownerul n-avea unde să vadă dacă SERPER_API_KEY servește sau a rămas fără
+// credit. Refolosim serviciul serperBalance (citirea reală /account, cache 5m).
+async function checkSerper(): Promise<TokenCheck> {
+  const scope = 'google.serper.dev/account (SERPER_API_KEY)'
+  try {
+    const b = await timed(20_000, () => getSerperBalance())
+    if (b.ok) {
+      return { name: 'Serper (căutarea web)', status: 'ok', detail: `${b.balance} căutări rămase`, requiredScope: scope }
+    }
+    if (b.error === 'not_configured') {
+      return { name: 'Serper (căutarea web)', status: 'not_configured', requiredScope: scope }
+    }
+    return { name: 'Serper (căutarea web)', status: 'fail', detail: b.error, requiredScope: scope }
+  } catch (e) {
+    return { name: 'Serper (căutarea web)', status: 'fail', detail: e instanceof Error ? e.message : String(e), requiredScope: scope }
   }
-  const r = await fetchStatus('https://api.openai.com/v1/models', {
-    headers: { Authorization: `Bearer ${config.openai.key}` },
-  })
-  if (r.ok) {
-    return { name: 'OpenAI API key (voce/STT/TTS)', status: 'ok', detail: 'models list OK', requiredScope: 'Realtime + Audio API' }
-  }
-  return { name: 'OpenAI API key (voce/STT/TTS)', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Realtime + Audio API' }
 }
 
-// 5b. Google OAuth — loginul aplicației. Doar prezența client id + secret (fără
-// apel extern: Google nu oferă o verificare cheap a perechii fără un flow real).
+// (Verificarea cheii OpenAI a fost ȘTEARSĂ, 3 aug — OpenAI extirpat complet:
+// vocea e Google Chirp 3, creierul e Gemini. Nu mai există nicio cheie OpenAI.)
+
+// 5b. Google OAuth — the app's login. Only the presence of client id +
+// secret (no external call: Google offers no cheap verification of the pair
+// without a real flow).
 function checkGoogleOAuth(): TokenCheck {
   if (!config.google.clientId || !config.google.clientSecret) {
     return { name: 'Google OAuth (login)', status: 'not_configured', requiredScope: 'OAuth 2.0 client (login + Connect Google)' }
@@ -132,7 +154,7 @@ function checkGoogleOAuth(): TokenCheck {
   return { name: 'Google OAuth (login)', status: 'ok', detail: 'client id + secret prezente', requiredScope: 'OAuth 2.0 client (login + Connect Google)' }
 }
 
-// 5c. PostgreSQL — baza de date (SELECT 1 real, nu doar prezența URL-ului)
+// 5c. PostgreSQL — the database (a real SELECT 1, not just the URL's presence)
 async function checkDb(): Promise<TokenCheck> {
   if (!dbEnabled()) {
     return { name: 'PostgreSQL', status: 'not_configured', requiredScope: 'DATABASE_URL' }
@@ -146,7 +168,7 @@ async function checkDb(): Promise<TokenCheck> {
   }
 }
 
-// 6. Gemini API key — corectare STT, imagini, grounded search fallback
+// 6. Gemini API key — STT proofreading, images, grounded search fallback
 async function checkGemini(): Promise<TokenCheck> {
   if (!config.geminiKey) {
     return { name: 'Gemini API key', status: 'not_configured', requiredScope: 'Generative Language API' }
@@ -169,12 +191,7 @@ async function checkMailSmtp(): Promise<TokenCheck> {
     return { name: 'Mail SMTP', status: 'not_configured', requiredScope: 'SMTP send' }
   }
   try {
-    const tx = nodemailer.createTransport({
-      host: config.mail.smtpHost,
-      port: config.mail.smtpPort,
-      secure: config.mail.smtpPort === 465,
-      auth: { user: config.mail.user, pass: config.mail.pass },
-    })
+    const tx = smtpTransport()
     await timed(15_000, () => new Promise<void>((resolve, reject) => {
       tx.verify((err) => (err ? reject(err) : resolve()))
     }))
@@ -210,7 +227,7 @@ async function checkMailImap(): Promise<TokenCheck> {
 }
 
 
-// 11. Session secret — nu e token extern, dar e critic pentru securitate
+// 11. Session secret — not an external token, but critical for security
 function checkSessionSecret(): TokenCheck {
   if (!config.sessionSecret) {
     return { name: 'SESSION_SECRET', status: 'not_configured', requiredScope: 'Semnare cookie-uri sesiune' }
@@ -222,12 +239,11 @@ function checkSessionSecret(): TokenCheck {
 }
 
 export async function runAllTokenChecks(): Promise<TokenCheck[]> {
-  const [brain, stripe, googleSa, googleTts, openai, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
+  const [brain, googleSa, googleTts, serper, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
     checkBrainKeys(),
-    checkStripe(),
     checkGoogleServiceAccount(),
     checkGoogleTtsKey(),
-    checkOpenAI(),
+    checkSerper(),
     checkGemini(),
     checkMailSmtp(),
     checkMailImap(),
@@ -237,10 +253,10 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
   ])
   return [
     ...brain,
-    stripe,
+    ...checkPlati(),
     googleSa,
     googleTts,
-    openai,
+    serper,
     gemini,
     smtp,
     imap,

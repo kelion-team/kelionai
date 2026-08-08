@@ -1,11 +1,11 @@
 import type { TextBlock } from './brain-types.js'
 import { config } from '../config.js'
 import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } from '../db.js'
-import { brainCost } from './cost.js'
+import { brainCostUsd } from './cost.js'
 import { brain } from './brain.js'
 
-// Memoria rulează pe modelul de chat implicit (OpenRouter). Kimi/GLM scoase.
-const MEMORY_MODEL = config.openrouter.chatDefault
+// Memory runs on the default chat model (Gemini direct — OpenRouter extirpat, 3 aug).
+const MEMORY_MODEL = config.brain.chatDefault
 
 export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
   const recent = await getMemories(email, 40, agent)
@@ -41,7 +41,7 @@ export async function learnFromTurn(
   assistantMsg: string,
   agent = 'kelion',
 ): Promise<void> {
-  if (!config.openrouter.key || (!userMsg.trim() && !assistantMsg.trim())) return
+  if (!config.geminiKey || (!userMsg.trim() && !assistantMsg.trim())) return
   const explicit = userMsg.match(
     /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
   )
@@ -74,7 +74,17 @@ export async function learnFromTurn(
         },
       ],
     })
-    void recordCost(email, 'memory', brainCost(MEMORY_MODEL, res.usage.input_tokens, res.usage.output_tokens))
+    // REAL COST FIRST (the owner's rule: "show real, stop fabricating"): the
+    // adapter returns the provider's own `usage.cost` for the call that
+    // answered — booked as 'memory', a MEASUREMENT (db.ts COSTURI_MASURATE).
+    // Only when the provider didn't itemize it do we estimate, and then under
+    // a different kind ('memory_est') so the ledger never mixes the two.
+    if (typeof res.costUsd === 'number' && res.costUsd > 0) {
+      void recordCost(email, 'memory', res.costUsd)
+    } else {
+      const est = await brainCostUsd(res.model || MEMORY_MODEL, res.usage.input_tokens, res.usage.output_tokens).catch(() => null)
+      if (est && est.usd > 0) void recordCost(email, 'memory_est', est.usd)
+    }
     const text = res.content
       .filter((b): b is TextBlock => b.type === 'text')
       .map((b) => b.text)
