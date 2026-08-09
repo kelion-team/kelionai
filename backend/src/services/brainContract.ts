@@ -33,6 +33,13 @@ export interface BrainCallOpts {
   toolChoice?: 'auto' | 'required'
 }
 
+// OCHII PE REZULTATUL UNEI UNELTE (9 aug, ownerul: „sistemul nu dă lui Kelion
+// poza reală pentru analiză"): o unealtă care are o captură reală (browserul,
+// la fiecare pas) o lipește după acest marcaj la coada rezultatului text.
+// Orchestratorul o desface și o pune în conversație ca IMAGINE (inline_data) —
+// modelul chiar O VEDE, nu primește doar un URL pe care nu-l poate privi.
+export const OCHI_MARCAJ = '\u001F[OCHI]'
+
 export interface OrMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   // String for plain text; array for multimodal blocks in the house (OpenAI-chat)

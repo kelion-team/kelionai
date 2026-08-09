@@ -148,6 +148,12 @@ export interface BrowserSnapshot {
   text: string
   elements: BrowserElement[]
   shotUrl: string
+  /** Captura paginii ca jpeg base64 — OCHII modelului (9 aug, ownerul:
+   *  „sistemul nu dă lui Kelion poza reală pentru analiză"): până acum captura
+   *  ajungea DOAR pe monitor (pentru om), iar modelul primea un URL pe care
+   *  nu-l poate privi. Gol în modul discret (nimic nu iese de pe pagina de
+   *  card) și la eșecul capturii. */
+  shotB64: string
 }
 export type BrowserResult = BrowserSnapshot | { error: string }
 
@@ -223,11 +229,11 @@ async function takeSnapshot(page: Page, baseUrl: string, email = ''): Promise<Br
   let text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
   if (email && discret.has(email)) {
     // No screenshot (nothing would reach the monitor) and no digits in the text.
-    return { url, title, text: mascheazaCifre(text), elements, shotUrl: '' }
+    return { url, title, text: mascheazaCifre(text), elements, shotUrl: '', shotB64: '' }
   }
   const buf = await page.screenshot({ type: 'jpeg', quality: 60 })
   const id = putShot(buf)
-  return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}` }
+  return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}`, shotB64: buf.toString('base64') }
 }
 
 async function snapshot(page: Page, baseUrl: string, email = ''): Promise<BrowserSnapshot> {
