@@ -20,12 +20,15 @@ const CUVINTE_RO = new Set([
 ])
 
 /** Markerii altor limbi — DOAR pe primele cuvinte (începutul e al gurii, nu al
- *  citatelor). Liste scurte, cuvinte de DESCHIDERE tipice, nu dicționare. */
+ *  citatelor). Liste scurte, cuvinte de DESCHIDERE tipice, nu dicționare.
+ *  HOTFIX 9 aug seara („nu-i merge audio"): orice cuvânt cu dublură posibilă
+ *  în română A ZBURAT — „La ora…" ieșea francez, „Ok, am făcut" englez, iar
+ *  gardul tăia replici legitime. Mai bine o scăpare rară decât un Kelion mut. */
 const SEMNE_ES = /[¿¡ñ]/
-const START_ES = new Set(['dime', 'hola', 'claro', 'bueno', 'vale', 'qué', 'que', 'cómo', 'como', 'sí', 'gracias', 'entiendo', 'perfecto', 'muy', 'aquí', 'aqui', 'entonces', 'no', 'y', 'los', 'las', 'una', 'esto', 'necesito', 'puedo', 'tengo', 'para'])
-const START_EN = new Set(['the', 'hello', 'hi', 'hey', 'sure', 'okay', 'ok', 'well', 'yes', 'i', "i'm", 'here', 'this', 'that', 'let', "let's", 'so', 'what', 'now'])
-const START_DE = new Set(['der', 'die', 'das', 'ich', 'ja', 'nein', 'gut', 'hallo', 'also', 'und', 'hier', 'jetzt'])
-const START_FR = new Set(['le', 'la', 'les', 'je', 'oui', 'non', 'bonjour', 'alors', 'voilà', 'voila', 'bien', 'ici'])
+const START_ES = new Set(['dime', 'hola', 'claro', 'bueno', 'vale', 'qué', 'cómo', 'sí', 'gracias', 'entiendo', 'aquí', 'entonces', 'necesito', 'puedo', 'tengo'])
+const START_EN = new Set(['the', 'hello', 'hi', 'hey', 'sure', 'yes', "i'm", "let's", 'what'])
+const START_DE = new Set(['ich', 'nein', 'hallo', 'jetzt'])
+const START_FR = new Set(['je', 'oui', 'bonjour', 'voilà', 'voila'])
 
 const primeleCuvinte = (text: string, n = 4): string[] =>
   String(text ?? '')

@@ -8,8 +8,16 @@ describe('inceputStrain — răspunsul care începe străin se prinde determinis
   it('replicile spaniole REALE de pe banda ownerului se prind', () => {
     expect(inceputStrain('Dime, con quién hablo')).toBe('spaniolă')
     expect(inceputStrain('Dime, ¿qué necesitas?')).toBe('spaniolă')
-    expect(inceputStrain('No. Identifica errores y le da a la luz.')).toBe('spaniolă')
     expect(inceputStrain('¡Hola! Claro que sí')).toBe('spaniolă')
+  })
+
+  it('dublurile românești NU se prind (hotfix „nu-i merge audio")', () => {
+    // Astea începeau replici legitime și gardul le tăia — Kelion ieșea MUT.
+    expect(inceputStrain('La ora 17 ai întâlnirea')).toBeNull()
+    expect(inceputStrain('Ok, am facut ce ai cerut')).toBeNull()
+    expect(inceputStrain('Le-am trimis pe amandoua')).toBeNull()
+    expect(inceputStrain('No, hai ca se poate')).toBeNull()
+    expect(inceputStrain('Una din probleme e rezolvata')).toBeNull()
   })
 
   it('româna NU se prinde — nici cu diacritice, nici fără', () => {

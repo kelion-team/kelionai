@@ -35,15 +35,22 @@ describe('vocalLive — construiesteSetup', () => {
   // PINUL DE LIMBĂ (9 aug, „Dime, ¿qué"): determinist în speechConfig, nu în
   // instrucțiuni (alea s-au dovedit că nu țin). Fără pin, forma veche rămâne
   // neatinsă (compatibilitate cu plasa faraExtensii).
-  it('pinul de limbă intră în speechConfig.languageCode doar când e dat', () => {
+  it('limba: hintul URECHII intră mereu; pinul GURII doar cu VOCAL_LIVE_LANG=1 (hotfix audio)', () => {
     const cu = construiesteSetup('m', 'Charon', 'p', [], undefined, 'ro-RO') as {
-      setup: { generationConfig: { speechConfig: { languageCode?: string } } }
+      setup: {
+        generationConfig: { speechConfig: { languageCode?: string } }
+        inputAudioTranscription: { languageCodes?: string[] }
+      }
     }
-    expect(cu.setup.generationConfig.speechConfig.languageCode).toBe('ro-RO')
+    // urechea primește hintul (documentat, risc mic — oprește „Dime" pe foșnete)
+    expect(cu.setup.inputAudioTranscription.languageCodes).toEqual(['ro-RO'])
+    // gura NU se pinuiește implicit: ro-RO nu e în lista documentată; pinul
+    // nedovedit a putut omorî setup-ul („nu-i merge audio") — doar prin env.
+    expect(cu.setup.generationConfig.speechConfig.languageCode).toBeUndefined()
     const fara = construiesteSetup('m', 'Charon', 'p', []) as {
-      setup: { generationConfig: { speechConfig: { languageCode?: string } } }
+      setup: { inputAudioTranscription: Record<string, unknown> }
     }
-    expect(fara.setup.generationConfig.speechConfig.languageCode).toBeUndefined()
+    expect(fara.setup.inputAudioTranscription).toEqual({})
   })
 
   it('fără unelte NU trimite câmpul tools; cu unelte îl trimite', () => {
