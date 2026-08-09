@@ -296,6 +296,17 @@ echo "== 6f. Porțile pe VPS (cron la 10 min — verdictul PR-urilor, zero cost)
 install -m 700 "$REPO/deploy/porti-pr.sh" /root/kelion/porti-pr.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/porti-pr.sh' ; echo '*/10 * * * * /root/kelion/porti-pr.sh >> /root/kelion/porti-pr.log 2>&1' ) | crontab -
 
+echo "== 6h. Curățenia VPS-ului (cron zilnic 04:30 — discul nu se mai umple TĂCUT) =="
+# 9 aug (Adrian: „58% utilizat, cu ce e umplut?"): vps-curatenie.sh există din
+# 27 iul și își spune singur povestea (134 imagini / ~48G strânse înainte de
+# prima rulare), dar NIMENI nu-l instala în cron — exact boala veghii din 8 aug:
+# scriptul scris, instalarea uitată. Fiecare publicare construiește o imagine
+# Docker nouă și straturile vechi rămân pe disc pentru totdeauna. Instalarea e
+# AICI, idempotentă, ca tot restul. Scriptul își scrie singur logul
+# (curatenie.log) și împarte lacătul de publicare, deci nu calcă un build.
+install -m 700 "$REPO/deploy/vps-curatenie.sh" /root/kelion/vps-curatenie.sh
+( crontab -l 2>/dev/null | grep -v '/root/kelion/vps-curatenie.sh' ; echo '30 4 * * * /root/kelion/vps-curatenie.sh' ) | crontab -
+
 # (Pasul 6g — „proba modelelor free" prin curl direct la OpenRouter — a fost
 # EXTIRPAT pe 3 aug împreună cu furnizorul: creierul e Gemini-only, nu mai
 # există pool de modele free de probat.)

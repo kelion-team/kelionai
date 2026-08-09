@@ -33,6 +33,28 @@
 > in-app + × + memorie separată admin; date reale „ca în live" + selecția pe
 > timp + butonul „Urmărește"; buton REC vizibil în orice tab admin.
 
+> **9 aug 2026 (seara) — FURTUNA VOCII, ÎNCHISĂ CU NUMERE (#935–#949, live
+> `ff6a1a7` = master):** simptomul „nu-i pleacă vocea audio, răspunde scris" a
+> fost MĂSURAT cu contoarele publice `GET /api/vocal-live/stare` (PR #947):
+> înainte de fix — 429/429 cadre audio de la Google, TOATE suprimate de gardul
+> de adresare, 0 spre browser (blocaj la rece: `ultimaVorbaKelion` se seta doar
+> pe cadre care treceau → prima tură nu trecea niciodată). Fix #949 (prima tură
+> după deschidere e adresată) publicat 20:59:31Z; dovada live: **281/281 cadre
+> spre browser, 0 suprimate**. Pe drum: #943 butonul de mic oprește și sesiunea
+> live (factura nu mai curge după opt); #944–#946 garda de limbă doar pe pin
+> ro-RO + deschideri românești scoase din markerii străini + NO_INTERRUPTION;
+> #948 consola pe reparații reale (mic pe AudioWorklet). „Live a rămas în urmă"
+> (21:57) NU a fost blocaj: două merge-uri spate-în-spate (21:48, 21:50 UK) =
+> două publicări la rând; fereastra totală master→live pentru #949 a fost 9 min.
+> **RÂND NOU (R5):** discul VPS 58% — `vps-curatenie.sh` (27 iul; 134 imagini/
+> ~48G strânse la prima rulare manuală) NU era instalat de nimeni în cron (boala
+> veghii din 8 aug); instalarea intră în `deploy.sh` pasul 6h — dovada = discul
+> scade în auditul de după 04:30. **RÂMÂN:** THREE.Clock (avertisment din
+> @react-three/fiber, cere upgrade de bibliotecă — planificat separat);
+> barge-in-ul clientului a tăiat vorba de 3× în consola ownerului (de urmărit cu
+> microfonul în față); căderea 1006/521 din timpul fiecărei publicări taie
+> sesiunea vocală în curs (reconectarea merge singură, dar tăietura se simte).
+
 > **3 aug 2026 — EXTIRPAREA TOTALĂ OpenRouter + OpenAI (branch, PR în lucru,
 > NEVERIFICAT LIVE):** furnizorii au fost scoși din tot codul (creier =
 > Gemini-only, căutare = Serper, voce = Chirp; detalii în AI-HANDOFF §3 + §13).
