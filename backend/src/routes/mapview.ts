@@ -11,12 +11,56 @@ import { osrmRoute } from '../services/google.js'
 // alt domeniu poate fi ucis de orice blocant/extensie; măsurat: anteturile OSM
 // și ale noastre sunt curate, deci moartea vine din browserul lui). Pagina și
 // Leaflet (frontend/public/leaflet/, copia 1.9.4) se servesc de la noi — un
-// cadru same-origin nu are ce să-i omoare. Doar piesele de hartă rămân de la
-// tile.openstreetmap.org (cerute de BROWSERUL omului, cu Referer și UA reale —
-// conform politicii OSM; prin VPS ar veni de la IP de datacenter = blocat,
-// măsurat 8 aug: „Access blocked… tile usage policy"). Dacă piesele totuși nu
-// vin, HUD-ul SPUNE asta (tileerror), nu lasă un gri mut.
+// cadru same-origin nu are ce să-i omoare.
+//
+// ȘI PIESELE, TOT DE LA NOI (9 aug, ownerul: „orice afișare de hărți nu
+// funcționează" — a doua oară, după schimbarea OSM→CartoDB). MĂSURAT: pagina,
+// Leaflet, marcajele — toate 200 de pe domeniul nostru; SINGURA resursă externă
+// rămasă erau piesele (întâi tile.openstreetmap.org, apoi basemaps.cartocdn.com)
+// — și ambele au picat la el ⇒ numitorul comun e că browserul/rețeaua lui
+// blochează CDN-uri străine de hartă. Așa că piesele trec acum prin NOI:
+// /api/tile/{z}/{x}/{y} ia piesa de la CartoDB PE SERVER (măsurat 9 aug:
+// CartoDB răspunde 200 și de la IP de datacenter — spre deosebire de OSM, care
+// blochează datacenter-ele) și o dă browserului de pe kelionai.app. Zero
+// domenii străine în pagină. Cache în memorie ca să nu batem CartoDB la
+// fiecare zoom (piesele de hartă sunt statice cu lunile).
+const PIESE_SURSA = 'https://basemaps.cartocdn.com/rastertiles/voyager'
+const pieseCache = new Map<string, Buffer>() // cheie z/x/y@r — LRU simplu
+const PIESE_CACHE_MAX = 600 // ~15-35 MB la 25-60 KB/piesă — plafonat conștient
 export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
+  // Proxy-ul de piese: /api/tile/12/2048/1362 sau /api/tile/12/2048/1362@2x
+  // (retina). Doar cifre + opțional @2x — nimic altceva nu pleacă spre CartoDB.
+  app.get<{ Params: { z: string; x: string; y: string } }>('/api/tile/:z/:x/:y', async (req, reply) => {
+    const { z, x, y } = req.params
+    if (!/^\d{1,2}$/.test(z) || !/^\d{1,7}$/.test(x) || !/^\d{1,7}(@2x)?$/.test(y))
+      return reply.code(400).send({ error: 'bad_tile' })
+    const cheie = `${z}/${x}/${y}`
+    const dinCache = pieseCache.get(cheie)
+    if (dinCache) {
+      // LRU: re-inserarea o mută la coadă (cea mai recentă).
+      pieseCache.delete(cheie)
+      pieseCache.set(cheie, dinCache)
+      return reply.type('image/png').header('Cache-Control', 'public, max-age=86400').send(dinCache)
+    }
+    try {
+      const r = await fetch(`${PIESE_SURSA}/${z}/${x}/${y}.png`, {
+        headers: { 'user-agent': 'kelionai.app tile proxy (contact@kelionai.app)' },
+        signal: AbortSignal.timeout(8000),
+      })
+      if (!r.ok) return reply.code(502).send({ error: `tile_upstream_${r.status}` })
+      const buf = Buffer.from(await r.arrayBuffer())
+      pieseCache.set(cheie, buf)
+      if (pieseCache.size > PIESE_CACHE_MAX) {
+        // Scoatem cea mai VECHE intrare (primul element al Map-ului = LRU).
+        const primaCheie = pieseCache.keys().next().value
+        if (primaCheie !== undefined) pieseCache.delete(primaCheie)
+      }
+      return reply.type('image/png').header('Cache-Control', 'public, max-age=86400').send(buf)
+    } catch {
+      // Rețeaua serverului a picat spre CartoDB — 502, ca tileerror să vorbească.
+      return reply.code(502).send({ error: 'tile_unreachable' })
+    }
+  })
   app.get<{ Querystring: { from?: string; to?: string; punct?: string; nume?: string } }>(
     '/api/route',
     async (req, reply) => {
@@ -57,14 +101,15 @@ var punct=${JSON.stringify(arePunct ? [punct[0], punct[1]] : null)};
 var nume=${JSON.stringify(nume)};
 var map=L.map('map',{zoomControl:true});
 var hud=document.getElementById('hud');
-var strat=L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors © CartoDB'}).addTo(map);
-/* PIESE NEVENITE = SPUS, NU MASCAT: dacă browserul (extensie/blocant/rețea)
-   refuză piesele OSM, harta ar rămâne un gri mut. HUD-ul spune cauza. */
+var strat=L.tileLayer('/api/tile/{z}/{x}/{y}{r}',{maxZoom:19,attribution:'© OpenStreetMap contributors © CartoDB'}).addTo(map);
+/* PIESE NEVENITE = SPUS, NU MASCAT: piesele vin acum de pe DOMENIUL NOSTRU
+   (/api/tile → proxy spre CartoDB pe server). Dacă tot nu vin, cauza e serverul
+   nostru sau rețeaua ta spre kelionai.app — HUD-ul o spune, nu lasă gri mut. */
 var pieseCazute=0,hudPiese=false;
 strat.on('tileerror',function(){
   pieseCazute++;
   if(pieseCazute===4){hud.style.display='block';hudPiese=true;
-    hud.textContent='Piesele de hartă nu se încarcă — un blocant din browser sau rețeaua opresc tile.openstreetmap.org';}
+    hud.textContent='Piesele de hartă nu se încarcă de la kelionai.app/api/tile — serverul nu ajunge la sursa de hărți sau rețeaua ta blochează cererea';}
 });
 strat.on('tileload',function(){
   if(hudPiese){hud.style.display='none';hudPiese=false;}
