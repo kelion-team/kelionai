@@ -35,22 +35,22 @@ describe('vocalLive — construiesteSetup', () => {
   // PINUL DE LIMBĂ (9 aug, „Dime, ¿qué"): determinist în speechConfig, nu în
   // instrucțiuni (alea s-au dovedit că nu țin). Fără pin, forma veche rămâne
   // neatinsă (compatibilitate cu plasa faraExtensii).
-  it('limba: hintul URECHII intră mereu; pinul GURII doar cu VOCAL_LIVE_LANG=1 (hotfix audio)', () => {
-    const cu = construiesteSetup('m', 'Charon', 'p', [], undefined, 'ro-RO') as {
+  it('vocea nu se mai taie singură: NO_INTERRUPTION + prag anti-zgomot; urechea pe auto', () => {
+    const st = construiesteSetup('m', 'Charon', 'p', [], undefined, 'ro-RO') as {
       setup: {
+        realtimeInputConfig: { automaticActivityDetection: Record<string, unknown>; activityHandling?: string }
+        inputAudioTranscription: Record<string, unknown>
         generationConfig: { speechConfig: { languageCode?: string } }
-        inputAudioTranscription: { languageCodes?: string[] }
       }
     }
-    // urechea primește hintul (documentat, risc mic — oprește „Dime" pe foșnete)
-    expect(cu.setup.inputAudioTranscription.languageCodes).toEqual(['ro-RO'])
-    // gura NU se pinuiește implicit: ro-RO nu e în lista documentată; pinul
-    // nedovedit a putut omorî setup-ul („nu-i merge audio") — doar prin env.
-    expect(cu.setup.generationConfig.speechConfig.languageCode).toBeUndefined()
-    const fara = construiesteSetup('m', 'Charon', 'p', []) as {
-      setup: { inputAudioTranscription: Record<string, unknown> }
-    }
-    expect(fara.setup.inputAudioTranscription).toEqual({})
+    // barge-in-ul pe ecou l-a tăiat după fiecare replică (consola ownerului,
+    // 9 aug seara) — vorbirea nu-i mai întrerupe replica:
+    expect(st.setup.realtimeInputConfig.activityHandling).toBe('NO_INTERRUPTION')
+    expect(st.setup.realtimeInputConfig.automaticActivityDetection).toEqual({ startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' })
+    // hintul de ureche (16:23) a fost scos — tăierile au început fix după el:
+    expect(st.setup.inputAudioTranscription).toEqual({})
+    // pinul gurii rămâne doar prin env (nedovedit pe ro-RO):
+    expect(st.setup.generationConfig.speechConfig.languageCode).toBeUndefined()
   })
 
   it('fără unelte NU trimite câmpul tools; cu unelte îl trimite', () => {

@@ -107,6 +107,24 @@ const UNEALTA_CREIER: UnealtaVocala = {
  *  frontend/src/lib/chat.ts). */
 const CTRL = String.fromCharCode(31)
 
+// ── PULSUL VOCII — DIAGNOSTIC PUBLIC, DOAR CIFRE (9 aug seara) ───────────────
+// „Nu merge audio" fără acces la jurnalul VPS = ghicit pe rând. Contoarele
+// astea spun EXACT unde moare sunetul: serverul primește audio de la Google?
+// îl trimite browserului? îl suprimă vreun gard? Niciun conținut nu iese —
+// doar numere și numele variantei de sesiune. GET /api/vocal-live/stare.
+export const pulsVoce = {
+  sesiuniDeschise: 0,
+  sesiuniTotal: 0,
+  cadreAudioDeLaGoogle: 0,
+  cadreAudioSpreBrowser: 0,
+  suprimateAdresare: 0,
+  suprimateLimba: 0,
+  intreruperiModel: 0,
+  varianta: '',
+  ultimaEroare: '',
+  laUltimulCadru: 0,
+}
+
 /** O tură COMPLETĂ pe creierul clasic, prin chiar ruta /api/chat (cookie-ul
  *  sesiunii omului → aceleași drepturi, aceleași unelte, aceeași
  *  contabilizare). Întoarce textul final; cadrele de control trec prin
@@ -221,6 +239,13 @@ const PERSONA_KELION =
 export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
   // Sonda: frontendul întreabă întâi dacă modul unificat e disponibil (are cheie
   // Gemini). Dacă nu, rămâne pe calea veche — nu deschide un WS spre gol.
+  // Pulsul vocii — DOAR cifre (vezi pulsVoce, mai sus). Public: niciun conținut,
+  // doar contoare; cu el, „nu merge audio" se citește de oriunde cu un curl.
+  app.get('/api/vocal-live/stare', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store')
+    return pulsVoce
+  })
+
   app.get('/api/vocal-live/capability', async (_req, reply) => {
     reply.header('Cache-Control', 'no-store')
     return { disponibil: vocalLiveDisponibila(), model: VOCAL_LIVE_MODEL, voce: VOCAL_LIVE_VOICE }
@@ -557,11 +582,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
         onGata: () => trimite({ type: 'gata' }),
         onAudioIesire: (data) => {
+          pulsVoce.cadreAudioDeLaGoogle++
+          pulsVoce.laUltimulCadru = Date.now()
           octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
           if (verdictTura === null) verdictTura = turaAdresataAcum()
-          if (!verdictTura) return // nu i se vorbea lui — difuzorul tace
-          if (verdictLimba === false) return // limbă străină necerută — tăiat
+          if (!verdictTura) { pulsVoce.suprimateAdresare++; return } // nu i se vorbea lui
+          if (verdictLimba === false) { pulsVoce.suprimateLimba++; return } // limbă necerută
           ultimaVorbaKelion = Date.now()
+          pulsVoce.cadreAudioSpreBrowser++
           trimite({ type: 'audio', data })
         },
         onTranscriereUser: (text, final) => {
@@ -643,6 +671,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         },
         onIntrerupt: () => {
+          pulsVoce.intreruperiModel++
           verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
           verdictLimba = null
           trimite({ type: 'intrerupt' })
@@ -668,10 +697,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           trimite({ type: 'tura_gata' })
         },
         onEroare: (motiv) => {
+          pulsVoce.ultimaEroare = motiv.slice(0, 160)
           trimite({ type: 'eroare', motiv })
           app.log.warn(`vocal-live: ${motiv}`)
         },
-        onInfo: (msg) => app.log.info(`vocal-live: ${msg}`),
+        onInfo: (msg) => {
+          pulsVoce.varianta = msg.slice(0, 120)
+          app.log.info(`vocal-live: ${msg}`)
+        },
         onHandleReluare: (handle) => {
           const acum = Date.now()
           if (acum - ultimaSalvareHandle < 5_000) return

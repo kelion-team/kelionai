@@ -370,6 +370,15 @@ export function construiesteSetup(
     // (o replică tăiată ar fi mai rea decât bălăriile).
     realtimeInputConfig: {
       automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' },
+      // FĂRĂ ÎNTRERUPERE PE VOCE (9 aug seara, consola ownerului: „modelul
+      // și-a tăiat vorba — a auzit voce peste el" ×3, chiar cu pragul LOW):
+      // ecoul propriului difuzor intra pe microfon și barge-in-ul îl tăia după
+      // fiecare început de replică — „a răspuns o dată și a murit".
+      // NO_INTERRUPTION e reglajul OFICIAL al Live API: vorbirea nu-i mai taie
+      // replica; Kelion termină ce are de spus, imun la ecou. Compromis
+      // asumat: nu-l mai întrerupi cu vocea în mijlocul frazei (butonul îl
+      // oprește). La refuz de setup, degradarea păstrează doar pragul dovedit.
+      activityHandling: 'NO_INTERRUPTION',
     },
     generationConfig: {
       // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat: cu
@@ -385,7 +394,10 @@ export function construiesteSetup(
     // language detection"): auto-detecția e chiar sursa etichetărilor
     // Fahrradbahn/Tequilón/„Dime" pe foșnete. Cu hintul, urechea benzii nu mai
     // importă frânturi străine. E hint, nu pin — și tot sub plasa faraExtensii.
-    inputAudioTranscription: limba ? { languageCodes: [limba] } : {},
+    // Hintul de limbă pe ureche (16:23, #940) a fost SCOS (9 aug seara):
+    // tăierile au început fix după el; urechea revine pe auto-detecție —
+    // frânturile străine le oprește gardul de ieșire, nu hintul nedovedit.
+    inputAudioTranscription: {},
     outputAudioTranscription: {},
     systemInstruction: { parts: [{ text: instructiune }] },
   }
@@ -554,13 +566,12 @@ export function deschideVocalLive(
         if (faraExtensii) {
           delete st.setup.sessionResumption
           delete st.setup.contextWindowCompression
-          // REGLAJUL ANTI-ZGOMOT NU SE MAI ARUNCĂ (9 aug seara, consola
-          // ownerului: „modelul și-a tăiat vorba — a auzit voce peste el" ×2,
-          // „a răspuns o dată și a murit"): degradarea îl arunca împreună cu
-          // extensiile, iar sesiunea reintra cu urechea HIPERSENSIBILĂ —
-          // ecoul difuzorului deschidea barge-in peste propria voce. Pragul
-          // e acceptat de model din 8 aug (măsurat pe sesiuni întregi) — nu
-          // el e suspectul de setup; rămâne pe TOATE variantele.
+          // Varianta redusă păstrează DOAR pragul anti-zgomot DOVEDIT (8 aug,
+          // măsurat pe sesiuni întregi); câmpurile noi (NO_INTERRUPTION) se
+          // scot — dacă modelul le-ar refuza la setup, vocea tot pornește.
+          st.setup.realtimeInputConfig = {
+            automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' },
+          }
         }
         socket.send(JSON.stringify(st))
       } catch (e) {
