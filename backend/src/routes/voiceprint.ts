@@ -39,7 +39,8 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
   // The list of all voiceprints — admin only.
   app.get('/api/voiceprint/list', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const rows = await listVoiceprints(200)
     return reply.send({ rows })
   })
@@ -49,7 +50,8 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
   // 14 Jul).
   app.get<{ Querystring: { email?: string } }>('/api/voiceprint/audio', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const email = (req.query?.email ?? '').toLowerCase()
     if (!email) return reply.code(400).send({ error: 'bad_request' })
     const clip = await getVoiceprintAudio(email)
