@@ -454,6 +454,17 @@ export function deschideVocalLive(
       /* eroarea reală vine pe canalul 'error' */
     }
   }
+  // Un rând de text injectat în conversație. `turnComplete:true` = intervenție
+  // la care modelul RĂSPUNDE (anunța) · `false` = context tăcut, fără răspuns
+  // (ancoreaza ora reală). Unic, ca să nu se dubleze (jscpd, 9 aug).
+  const trimiteRand = (text: string, turnComplete: boolean): void => {
+    if (inchisa || !gata || !text.trim()) return
+    try {
+      ws?.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete } }))
+    } catch {
+      /* eroarea reală vine pe canalul 'error' */
+    }
+  }
 
   const conecteaza = (): void => {
     if (inchisa) return
@@ -583,32 +594,14 @@ export function deschideVocalLive(
       trimiteCadru(jpegBase64)
     },
     anunta(text: string): void {
-      if (inchisa || !gata || !text.trim()) return
-      try {
-        // clientContent cu turnComplete: modelul primește rândul ca pe o
-        // intervenție în conversație și răspunde — adică ANUNȚĂ cu vocea lui.
-        ws?.send(
-          JSON.stringify({
-            clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true },
-          }),
-        )
-      } catch {
-        /* eroarea reală vine pe canalul 'error' */
-      }
+      // turnComplete:true — modelul primește rândul ca intervenție și RĂSPUNDE
+      // (anunță cu vocea lui). Corpul comun e în trimiteRand (fără dublare).
+      trimiteRand(text, true)
     },
     ancoreaza(text: string): void {
-      if (inchisa || !gata || !text.trim()) return
-      try {
-        // turnComplete: FALSE — rândul intră în context fără să provoace un
-        // răspuns; ancora orei nu trebuie să-l facă pe Kelion să vorbească.
-        ws?.send(
-          JSON.stringify({
-            clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: false },
-          }),
-        )
-      } catch {
-        /* eroarea reală vine pe canalul 'error' */
-      }
+      // turnComplete:false — rândul intră în context fără să provoace răspuns;
+      // ancora orei nu trebuie să-l facă pe Kelion să vorbească.
+      trimiteRand(text, false)
     },
     raspundeUnealta(id: string, name: string, rezultat: unknown): void {
       if (inchisa) return

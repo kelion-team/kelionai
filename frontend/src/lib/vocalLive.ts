@@ -180,7 +180,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let surseActive: AudioBufferSourceNode[] = []
   let aec: BuclaAEC | null = null
   let ceasCoords: ReturnType<typeof setInterval> | null = null
-  let ceasCadre: ReturnType<typeof setInterval> | null = null
+  // (ceasCadre scos 9 aug — camera doar la cerință; vezi handlerul 'gata'.)
   // Radierea vocii din registrul de înregistrare (vezi mai jos, la analizor).
   let radiazaVocea: (() => void) | null = null
 
@@ -191,7 +191,6 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     alimenteazaNivelVoce(0)
     if (resumeTimer) clearInterval(resumeTimer)
     if (ceasCoords) clearInterval(ceasCoords)
-    if (ceasCadre) clearInterval(ceasCadre)
     radiazaVocea?.() // vocea iese din registrul de înregistrare odată cu sesiunea
     try {
       proc?.disconnect()
@@ -327,22 +326,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       case 'gata':
         trimiteCoords()
         if (!ceasCoords) ceasCoords = setInterval(trimiteCoords, 120_000)
-        // VEDEREA CONTINUĂ: un cadru la ~2,5s cât camera e pornită. Prefixul
-        // data-URL se taie aici — sesiunea Live vrea JPEG base64 BRUT.
-        if (!ceasCadre && opts.cadruLive) {
-          ceasCadre = setInterval(() => {
-            if (inchis || ws.readyState !== WebSocket.OPEN) return
-            const f = opts.cadruLive?.()
-            if (!f) return
-            const virgula = f.indexOf(',')
-            const brut = virgula >= 0 ? f.slice(virgula + 1) : f
-            try {
-              ws.send(JSON.stringify({ type: 'cadru', data: brut }))
-            } catch {
-              /* socket picat — close-ul curăță */
-            }
-          }, 2500)
-        }
+        // CAMERA DOAR LA CERINȚĂ (9 aug, ownerul: „camera doar la cerință" —
+        // pentru economie). Am SCOS ceasul care trimitea un cadru la ~2,5s cât
+        // sesiunea era vie: ardea credit CONTINUU chiar și când nimeni nu cerea
+        // să vadă (cadrele video se taxează, măsurat). Vederea rămâne întreagă,
+        // dar DOAR când modelul o cere: ușa cere_creierului declanșează
+        // `cere_cadre` → atunci trimitem cadrele proaspete (vezi handlerul
+        // 'cere_cadre' mai jos). Fără cerere = zero cadre = zero cost.
         opts.onGata?.()
         break
       case 'control':

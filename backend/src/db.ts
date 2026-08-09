@@ -1968,22 +1968,37 @@ const COSTURI_MASURATE = new Set(['chat', 'memory'])
  *
  *  `ok:false` NU e „0 dolari": e „n-am putut citi". Apelantul e obligat să facă
  *  diferența — de-aia cifra vine împreună cu ea, nu singură. */
-export async function cheltuialaLunaPeKinduri(kinds: string[]): Promise<{ ok: boolean; usd: number }> {
+// Corpul comun al celor două sume pe feluri (9 aug, jscpd — erau aproape
+// identice). `filtruTimp` e o clauză SQL de timp CONTROLATĂ DE COD (nu vine
+// niciodată din input, deci fără risc de injecție); `paramTimp` = parametrul
+// ei ($3), sau undefined când clauza n-are parametru. Felurile: exact = exact,
+// `*` la coadă = prefix.
+async function sumaCostPeKinduri(
+  kinds: string[],
+  filtruTimp: string,
+  paramTimp?: string,
+): Promise<{ ok: boolean; usd: number }> {
   if (!dbEnabled() || kinds.length === 0) return { ok: false, usd: 0 }
   const exacte = kinds.filter((k) => !k.endsWith('*'))
   const prefixe = kinds.filter((k) => k.endsWith('*')).map((k) => `${k.slice(0, -1)}%`)
+  const params: unknown[] = [exacte, prefixe]
+  if (paramTimp !== undefined) params.push(paramTimp)
   try {
     const r = await getPool().query<{ s: string | null }>(
       `SELECT COALESCE(SUM(cost_usd), 0) AS s
          FROM cost_events
-        WHERE created_at >= date_trunc('month', now())
+        WHERE ${filtruTimp}
           AND (kind = ANY($1::text[]) OR kind LIKE ANY($2::text[]))`,
-      [exacte, prefixe],
+      params,
     )
     return { ok: true, usd: Number(r.rows[0]?.s ?? 0) }
   } catch {
     return { ok: false, usd: 0 }
   }
+}
+
+export async function cheltuialaLunaPeKinduri(kinds: string[]): Promise<{ ok: boolean; usd: number }> {
+  return sumaCostPeKinduri(kinds, "created_at >= date_trunc('month', now())")
 }
 
 /** ── CHELTUIALA DE LA UN MOMENT DAT (Adrian, 8 aug: „asta trebuie să scadă
@@ -1998,22 +2013,8 @@ export async function cheltuialaDeLaPeKinduri(
   deLaIso: string,
   kinds: string[],
 ): Promise<{ ok: boolean; usd: number }> {
-  if (!dbEnabled() || kinds.length === 0) return { ok: false, usd: 0 }
   if (!Number.isFinite(Date.parse(deLaIso))) return { ok: false, usd: 0 }
-  const exacte = kinds.filter((k) => !k.endsWith('*'))
-  const prefixe = kinds.filter((k) => k.endsWith('*')).map((k) => `${k.slice(0, -1)}%`)
-  try {
-    const r = await getPool().query<{ s: string | null }>(
-      `SELECT COALESCE(SUM(cost_usd), 0) AS s
-         FROM cost_events
-        WHERE created_at >= $3::timestamptz
-          AND (kind = ANY($1::text[]) OR kind LIKE ANY($2::text[]))`,
-      [exacte, prefixe, deLaIso],
-    )
-    return { ok: true, usd: Number(r.rows[0]?.s ?? 0) }
-  } catch {
-    return { ok: false, usd: 0 }
-  }
+  return sumaCostPeKinduri(kinds, 'created_at >= $3::timestamptz', deLaIso)
 }
 
 export async function getGeminiMonthUsd(): Promise<{ ok: boolean; monthUsd: number }> {
