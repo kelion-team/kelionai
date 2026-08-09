@@ -17,6 +17,7 @@
 
 import WebSocket from 'ws'
 import { config } from '../config.js'
+import { inceputStrain } from './limbaRaspuns.js'
 
 // MODELUL Live. NU există „3.6 Live" (Google n-a scos unul — măsurat: 3.6 e
 // refuzat pe bidiGenerateContent). Owner (4 aug): „fără 3.1" → folosim
@@ -235,6 +236,12 @@ export function construiesteInstructiune(
     `întrerupere nedorită. Fiind strigat pe nume ESTE invitația de a vorbi.`
   if (istoric.length) {
     const randuri = istoric
+      // ISTORICUL NU CARĂ OTRAVA (9 aug, revizia): o replică spaniolă scăpată
+      // ieri ar reapărea în „ULTIMELE VOASTRE SCHIMBURI" și ar legitima
+      // spaniola drept limba conversației — degradarea s-ar autoîntreține
+      // peste sesiuni. Replicile asistentului detectate străine (același
+      // detector determinist ca gardul din rută) se SAR la coacere.
+      .filter((r) => r.role === 'user' || !inceputStrain(String(r.content)))
       .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
       .map((r) => `${r.role === 'user' ? numeUser : 'Kelion'}: ${String(r.content).slice(0, 200)}`)
       .join('\n')
@@ -362,7 +369,12 @@ export function construiesteSetup(
         : { voiceConfig: { prebuiltVoiceConfig: { voiceName: voce } } },
     },
     // Transcrierea pe AMBELE sensuri — pentru istoric + subtitrări în UI.
-    inputAudioTranscription: {},
+    // HINTUL DE LIMBĂ PE URECHE (9 aug, revizia — măsurat în discovery v1beta:
+    // AudioTranscriptionConfig.languageCodes există, „if omitted, automatic
+    // language detection"): auto-detecția e chiar sursa etichetărilor
+    // Fahrradbahn/Tequilón/„Dime" pe foșnete. Cu hintul, urechea benzii nu mai
+    // importă frânturi străine. E hint, nu pin — și tot sub plasa faraExtensii.
+    inputAudioTranscription: limba ? { languageCodes: [limba] } : {},
     outputAudioTranscription: {},
     systemInstruction: { parts: [{ text: instructiune }] },
   }

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { createHash } from 'node:crypto'
 import type { RawData } from 'ws'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
@@ -16,6 +17,7 @@ import {
 } from '../services/vocalLive.js'
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import { turaAdresata } from '../services/numeStrigat.js'
+import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
 import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost, listBuildJobs, getSpeechLang } from '../db.js'
@@ -481,9 +483,20 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // sesiunea pornește proaspăt — cu memoria din istoric (instrucțiunea o
       // cară oricum), dar cu uneltele de AZI. O repornire de publicare fără
       // schimbare de unelte reia în continuare conversația, ca până acum.
-      const genUnelte = `${unelteleSesiuniiLive(user.role)
-        .map((u) => u.name)
-        .join(',')}|${PERSONA_KELION.length}`
+      // AMPRENTA VEDE ACUM ȘI REGULILE (9 aug, revizia: CRITICĂ — „ancora
+      // întărită N-A AJUNS în sesiunile reluate"): vechea amprentă era numele
+      // uneltelor + LUNGIMEA personei, deci o regulă nouă în
+      // construiesteInstructiune (ancora limbii, trezirea) NU rotea generația —
+      // handle-ul relua sesiunea Google veche, cu instrucțiunea din ziua
+      // NAȘTERII ei. De-aia capturile de la 16:24 tot spaniolă arătau: regula
+      // nouă nici nu ajunsese la model. Acum amprenta e hash peste instrucțiunea
+      // STATICĂ completă (fără ancoră/istoric — alea se schimbă mereu): orice
+      // schimbare de REGULI aruncă mânerul vechi și sesiunea pornește proaspăt.
+      const genUnelte = createHash('sha256')
+        .update(unelteleSesiuniiLive(user.role).map((u) => u.name).join(','))
+        .update(construiesteInstructiune(PERSONA_KELION, 'gen', []))
+        .digest('hex')
+        .slice(0, 16)
       let reluareInitial: string | undefined
       try {
         const brut = await loadKv(KV_RELUARE)
@@ -516,6 +529,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // GREȘITĂ trebuie să se poată vedea, nu să dispară (lecția numeStrigat).
       let ultimaVorbaKelion = 0 // 0 = n-a vorbit încă deloc
       let verdictTura: boolean | null = null // null = tura n-a început să răspundă
+      // ── GARDUL DE LIMBĂ — DETERMINIST, PE SERVER (9 aug, revizia) ────────
+      // Al doilea gard pe ieșire, frate cu adresarea: dacă răspunsul ÎNCEPE
+      // într-o limbă străină (markeri ficși, services/limbaRaspuns.ts) și omul
+      // n-a cerut-o, tura se SUPRIMĂ (audio tăiat + intrerupt spre browser) și
+      // NU intră în istoric (altfel otrăvea instrucțiunea sesiunii următoare).
+      let verdictLimba: boolean | null = null // null = nedecis; false = străină
       const turaAdresataAcum = (): boolean => {
         const spusa = bufUser.trim()
         if (!spusa) return true // tură de sistem (anunț/unealtă) — nu e vorbire de om
@@ -528,6 +547,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
           if (verdictTura === null) verdictTura = turaAdresataAcum()
           if (!verdictTura) return // nu i se vorbea lui — difuzorul tace
+          if (verdictLimba === false) return // limbă străină necerută — tăiat
           ultimaVorbaKelion = Date.now()
           trimite({ type: 'audio', data })
         },
@@ -537,9 +557,18 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
         onTranscriereKelion: (text, final) => {
           bufKelion += text
-          // Replica unei ture suprimate nu se afișează — nici pe bandă, nici în
-          // difuzor; rămâne doar în jurnalul de mai jos (turaGata).
-          if (verdictTura === false) return
+          // Verdictul de LIMBĂ se ia O DATĂ pe tură, pe începutul replicii
+          // (≥6 caractere sau primul final): început străin + necerut = tura
+          // moare AICI — audio tăiat, redarea din browser oprită (intrerupt).
+          if (verdictLimba === null && (bufKelion.trim().length >= 6 || final)) {
+            const straina = inceputStrain(bufKelion)
+            verdictLimba = !(straina && !aCerutAltaLimba(bufUser))
+            if (verdictLimba === false) {
+              app.log.info(`[VOCE] tură suprimată (răspuns în ${straina}, necerut): „${bufKelion.trim().slice(0, 80)}"`)
+              trimite({ type: 'intrerupt' })
+            }
+          }
+          if (verdictTura === false || verdictLimba === false) return
           trimite({ type: 'kelion', text, final })
         },
         onUnealta: async (apel) => {
@@ -602,15 +631,19 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
         onIntrerupt: () => {
           verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
+          verdictLimba = null
           trimite({ type: 'intrerupt' })
         },
         onTuraGata: () => {
-          if (verdictTura === false) {
-            // Tura NU i se adresa: nu se salvează în memorie (vorbire între alți
-            // oameni nu e conversația noastră), dar se NUMEȘTE în jurnal — o
-            // suprimare greșită trebuie să fie vizibilă, nu îngropată.
+          if (verdictTura === false || verdictLimba === false) {
+            // Tura NU i se adresa SAU a răspuns într-o limbă necerută: nu se
+            // salvează în memorie (o replică spaniolă salvată ar OTRĂVI
+            // instrucțiunea sesiunii următoare — revizia, 9 aug), dar se
+            // NUMEȘTE în jurnal — o suprimare greșită trebuie să fie vizibilă.
             app.log.info(
-              `[VOCE] tură suprimată (nu i se vorbea lui): auzit „${bufUser.trim().slice(0, 120)}"`,
+              verdictLimba === false
+                ? `[VOCE] tură suprimată (limbă străină necerută): „${bufKelion.trim().slice(0, 120)}"`
+                : `[VOCE] tură suprimată (nu i se vorbea lui): auzit „${bufUser.trim().slice(0, 120)}"`,
             )
             bufUser = ''
             bufKelion = ''
@@ -618,6 +651,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             salveazaTura()
           }
           verdictTura = null
+          verdictLimba = null
           trimite({ type: 'tura_gata' })
         },
         onEroare: (motiv) => {
