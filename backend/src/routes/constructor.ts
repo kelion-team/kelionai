@@ -22,7 +22,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // The admin (or Kelion through a tool) queues an order.
   app.post<{ Body: { order?: string } }>('/api/admin/constructor', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const order = String(req.body?.order ?? '').trim()
     if (order.length < 8) return reply.code(400).send({ error: 'ordin_prea_scurt' })
     const id = await createBuildJob(user.email, order)
@@ -32,7 +33,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/admin/constructor', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // AUDIT ADMIN (3 aug): coada necitibilă (DB picat) → 500, nu 200 cu [] —
     // panoul scria „Niciun ordin încă" fără nicio măsurătoare reușită.
     const raw = await listBuildJobs(40)
@@ -69,7 +71,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // curăță istoricul „eșuat/GATA", lasă cele vii). Întoarce câte a șters.
   app.post<{ Body: { scope?: string } }>('/api/admin/constructor/curata', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const scope = ['failed', 'done', 'failed_done', 'all'].includes(String(req.body?.scope))
       ? (String(req.body?.scope) as 'failed' | 'done' | 'failed_done' | 'all')
       : 'failed_done'
@@ -224,7 +227,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // shows the ENDING (Done/Failed), not just the road to it.
   app.get('/api/constructor/live', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const jobs = await listMonitorBuildJobs()
     return reply.send({
       jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),

@@ -255,7 +255,12 @@ const BOOT_AT = new Date().toISOString()
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')
-  return { v: DEPLOY_V, at: BOOT_AT }
+  // `adminCfg` (9 aug, „flux admin 403 — trebuie 200"): spune dacă emailul de
+  // admin REZOLVAT pe server e cel implicit al ownerului (valoarea implicită e
+  // deja publică, în repo — nu se scurge nimic). `false` = env-ul VPS cară un
+  // ADMIN_EMAIL stricat/diferit → rolul iese „customer" cu sesiune validă.
+  // Diagnostic măsurabil de oriunde cu un curl, fără SSH.
+  return { v: DEPLOY_V, at: BOOT_AT, adminCfg: config.adminEmail === 'adrianenc11@gmail.com' }
 })
 
 

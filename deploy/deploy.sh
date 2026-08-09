@@ -150,9 +150,28 @@ if [ "${KELION_DEPLOY_FORCE:-0}" != 1 ] && [ "$LIVE_NOW" = "$TARGET" ]; then
 fi
 
 echo "== 2. Verific env-ul =="
+# IGIENA IDENTITĂȚII (9 aug, „flux admin 403 — trebuie 200" + „nu are audio
+# voce"): un ADMIN_EMAIL stricat în env (spații, ghilimele, valoare rescrisă de
+# vreun flux) îl face pe owner „customer" cu sesiune validă → 403 pe tot adminul
+# și vocea căzută pe poarta de plată. Emailul adminului E DEJA implicit în cod
+# (config.ts) și nu are nevoie de env — ștergem orice linie ADMIN_EMAIL ca
+# implicitul din cod să domnească. La fel, un SESSION_SECRET GOL (linia există,
+# valoarea nu) invalidează tăcut toate cookie-urile — îl ștergem doar dacă e gol
+# (gate-ul de mai jos cere apoi unul real).
+if grep -q "^ADMIN_EMAIL=" "$ENVFILE" 2>/dev/null; then
+  grep -v "^ADMIN_EMAIL=" "$ENVFILE" > "$ENVFILE.tmp" && mv "$ENVFILE.tmp" "$ENVFILE" && chmod 600 "$ENVFILE"
+  echo "· ADMIN_EMAIL scos din env — implicitul din cod (ownerul) domnește"
+fi
+if grep -q "^SESSION_SECRET=$" "$ENVFILE" 2>/dev/null; then
+  grep -v "^SESSION_SECRET=$" "$ENVFILE" > "$ENVFILE.tmp" && mv "$ENVFILE.tmp" "$ENVFILE" && chmod 600 "$ENVFILE"
+  echo "· SESSION_SECRET era GOL — linia ștearsă ca gate-ul să o ceară pe față"
+fi
 for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SESSION_SECRET DATABASE_URL GEMINI_API_KEY; do
-  if ! grep -q "^$v=" "$ENVFILE" 2>/dev/null; then
-    echo "❌ LIPSEȘTE $v din $ENVFILE — completează-l înainte de deploy."; MISS=1
+  # `^$v=.` (cu punct), nu `^$v=`: o linie cu valoarea GOALĂ trecea drept
+  # „prezentă" — un SESSION_SECRET gol semna cookie-uri pe '' și îl deloga
+  # tăcut pe owner (9 aug).
+  if ! grep -q "^$v=." "$ENVFILE" 2>/dev/null; then
+    echo "❌ LIPSEȘTE $v (sau e GOL) din $ENVFILE — completează-l înainte de deploy."; MISS=1
   fi
 done
 [ "${MISS:-0}" = 1 ] && { echo "Opresc: env incomplet."; exit 1; }

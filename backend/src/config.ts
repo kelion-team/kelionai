@@ -321,7 +321,14 @@ export const config = {
   // .trim() OBLIGATORIU (9 aug): era SINGURUL câmp de email fără trim — un
   // spațiu la coada lui ADMIN_EMAIL (env-ul e scris de mașini) făcea tăcut din
   // owner un „customer". Vecinii (allowlist, mail.*) trimau deja toți.
-  adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com').trim().toLowerCase(),
+  // + ghilimelele se dezbracă (9 aug, „flux admin 403 — trebuie 200"):
+  // `docker --env-file` NU scoate ghilimelele — ADMIN_EMAIL="adrian…" rămânea
+  // cu ele în valoare și rolul ieșea „customer" cu sesiune perfect validă.
+  adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com')
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .trim()
+    .toLowerCase(),
   bridgeSecret: env(...ENV_ALIASES.bridgeSecret),
   githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
   githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),
