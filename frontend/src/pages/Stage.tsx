@@ -211,6 +211,10 @@ function MediaFailed({ url }: { url: string }) {
 
 function MonitorImage({ url, title, taskId }: { url: string; title: string; taskId: string }) {
   const [failed, setFailed] = useState(false)
+  // O sursă NOUĂ repornește ciclul onLoad/onError (auditul de noapte, 9 aug):
+  // taskul de același fel nu se remontează (id-ul taskului E felul), deci fără
+  // resetare un singur eșec bloca TOATE imaginile următoare pe panoul de eșec.
+  useEffect(() => setFailed(false), [url])
   if (failed) return <MediaFailed url={url} />
   return (
     <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--panel-solid)' }}>
@@ -230,6 +234,7 @@ function MonitorImage({ url, title, taskId }: { url: string; title: string; task
 
 function MonitorVideo({ url, taskId }: { url: string; taskId: string }) {
   const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [url]) // sursă nouă = judecată nouă (audit 9 aug)
   if (failed) return <MediaFailed url={url} />
   return (
     <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
@@ -249,6 +254,7 @@ function MonitorVideo({ url, taskId }: { url: string; taskId: string }) {
 
 function MonitorAudio({ url, taskId }: { url: string; taskId: string }) {
   const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [url]) // sursă nouă = judecată nouă (audit 9 aug)
   if (failed) return <MediaFailed url={url} />
   return (
     <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>

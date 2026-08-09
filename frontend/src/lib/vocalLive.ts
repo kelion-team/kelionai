@@ -144,11 +144,22 @@ async function pornesteBuclaAEC(ctx: AudioContext, sursa: AudioNode): Promise<Bu
   return { pc1, pc2, el }
 }
 
+// O SINGURĂ sesiune live per tab, garantată AICI, nu în apelant (auditul de
+// noapte, 9 aug): gărzile apelantului sunt check-then-act peste await-uri de
+// secunde — cronometrul de reluare și apăsarea pe microfon puteau deschide
+// DOUĂ sesiuni, prima rămânând scursă cu microfonul și WS-ul vii (și factura
+// curgând). Modelul e exact cel al căii vechi (realtimeVoice.ts: activeVoice).
+let sesiuneActiva: { inchide: () => void } | null = null
+
 export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia) {
     opts.onEroare('browserul nu dă acces la microfon')
     return null
   }
+  // Orice a doua deschidere o omoară determinist pe prima, indiferent din ce
+  // cursă a apelantului vine.
+  sesiuneActiva?.inchide()
+  sesiuneActiva = null
 
   let ws: WebSocket
   try {
@@ -189,6 +200,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   const inchide = (): void => {
     if (inchis) return
     inchis = true
+    if (sesiuneActiva?.inchide === inchide) sesiuneActiva = null // zăvorul se predă curat
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
     if (resumeTimer) clearInterval(resumeTimer)
@@ -221,6 +233,10 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       /* deja închis */
     }
   }
+  // Zăvorul se ia IMEDIAT ce sesiunea are un `inchide` întreg — inclusiv în
+  // fereastra de setup (getUserMedia/AEC durează secunde): a doua deschidere
+  // sosită între timp o omoară pe asta, nu-i lasă microfonul scurs.
+  sesiuneActiva = { inchide }
 
   /** Barge-in: userul a vorbit peste Kelion → oprim redarea INSTANT și golim coada.
    *  Fără asta, Kelion ar continua să vorbească peste om încă câteva secunde. */
