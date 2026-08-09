@@ -55,6 +55,25 @@
 > microfonul în față); căderea 1006/521 din timpul fiecărei publicări taie
 > sesiunea vocală în curs (reconectarea merge singură, dar tăietura se simte).
 
+> **10 aug 2026 (noaptea) — AUDITUL CU 40 DE AGENȚI + REPARAȚIA DE NOAPTE
+> (#950–#953).** Ordinul ownerului: „ia din nou toți agenții și reparați până
+> dimineața aplicația și cu toți agenții o testezi în live". 10 lentile de
+> căutare + un sceptic adversarial per constatare → **29 confirmate (6 critice),
+> 1 respinsă**; **28 REPARATE** în #952 (voce/chat-bani/porți) + #953 (Trading
+> Center/frontend), toate cu porți verzi (1108/1108 teste; scriptul emis al
+> paginii de tranzacții validat cu node --check; proba Playwright pe build-ul
+> de producție: pagina + Trading Center fără nicio eroare de script). Pe drum:
+> #951 „vorbește peste mine" — barge-in pe server (vocea OMULUI susținută îl
+> taie; ecoul/zgomotul nu; degradarea nu mai aruncă NO_INTERRUPTION — cauza
+> celor ×10 „modelul și-a tăiat vorba"). **RÂND NOU (R6):** calea „vederii în
+> timp real" din sesiunea live e moartă pe sârmă (serverul are handlerul
+> `type:'cadru'`, frontend-ul nu-l trimite nicăieri, dar persona îi SPUNE
+> modelului că vede camera) — decizie de produs: ori recablăm expeditorul, ori
+> aliniem persona la realitate; până atunci „ce vezi" merge prin ușa
+> cere_creierului. **DOVEZI CARE RĂMÂN ALE DIMINEȚII:** barge-in-ul pe vocea
+> ownerului (contorul `taieriPeVoceaOmului` din puls trebuie să crească când
+> vorbește peste el); discul scade după 04:30.
+
 > **3 aug 2026 — EXTIRPAREA TOTALĂ OpenRouter + OpenAI (branch, PR în lucru,
 > NEVERIFICAT LIVE):** furnizorii au fost scoși din tot codul (creier =
 > Gemini-only, căutare = Serper, voce = Chirp; detalii în AI-HANDOFF §3 + §13).
