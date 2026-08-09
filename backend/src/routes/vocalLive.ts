@@ -18,7 +18,7 @@ import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import { turaAdresata } from '../services/numeStrigat.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost, listBuildJobs } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost, listBuildJobs, getSpeechLang } from '../db.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -427,6 +427,21 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       } catch {
         app.log.warn('vocal-live: istoricul nu s-a putut citi — sesiunea pornește fără memorie')
       }
+      // PINUL DE LIMBĂ (9 aug, „Dime, ¿qué" — instrucțiunile nu țin): limba
+      // gurii se PINUIEȘTE determinist din preferința REALĂ a userului
+      // (speech_lang); fără preferință, româna (limba aplicației). O citire
+      // picată nu blochează vocea — cade pe ro-RO și spune în jurnal.
+      const BCP47: Record<string, string> = {
+        ro: 'ro-RO', en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-PT',
+      }
+      let limbaPin = 'ro-RO'
+      try {
+        const pref = await getSpeechLang(user.email)
+        if (pref && BCP47[pref]) limbaPin = BCP47[pref]
+        else if (pref && /^[a-z]{2}-[A-Z]{2}$/.test(pref)) limbaPin = pref
+      } catch {
+        app.log.warn('vocal-live: speech_lang necitibil — pinul de limbă rămâne ro-RO')
+      }
       const nume = user.name || user.email.split('@')[0]
       // Ancora realității: dacă n-a sosit încă (browserul o trimite chiar la
       // deschiderea socketului), o așteptăm maxim 600 ms — sub pragul „primul
@@ -618,7 +633,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           // schimbare de capabilități, un mâner din altă generație se aruncă.
           void saveKv(KV_RELUARE, JSON.stringify({ h: handle, t: acum, gen: genUnelte })).catch(() => {})
         },
-      }, reluareInitial, user.role === 'admin' ? unelteleDovedite() : undefined)
+      }, reluareInitial, user.role === 'admin' ? unelteleDovedite() : undefined, limbaPin)
       if (!live) {
         try {
           socket.close(1011, 'vocal_live_indisponibil')

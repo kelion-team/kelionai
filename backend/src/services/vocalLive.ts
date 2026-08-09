@@ -318,6 +318,14 @@ export function construiesteSetup(
   instructiune: string,
   unelte: UnealtaVocala[],
   reluareHandle?: string,
+  /** PINUL DE LIMBĂ (9 aug, capturile „Dime, con"/„Dime, ¿qué": instrucțiunile
+   *  singure NU țin — modelul tot aluneca în spaniolă pe ureche stâlcită).
+   *  BCP-47 (ex. 'ro-RO'): se pune DETERMINIST în speechConfig.languageCode —
+   *  gura vorbește limba pinuită, indiferent ce i se năzare urechii. Vine din
+   *  preferința REALĂ a userului (speech_lang), nu ghicită. Modelele care l-ar
+   *  refuza la setup cad pe plasa `faraExtensii` (pinul se scoate, vocea
+   *  trăiește) — fixul nu poate omorî sesiunea. */
+  limba?: string,
 ): Record<string, unknown> {
   const setup: Record<string, unknown> = {
     model: `models/${model}`,
@@ -349,7 +357,9 @@ export function construiesteSetup(
       // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat: cu
       // TEXT dau cod 1007). Vocea = prebuiltVoiceConfig.voiceName (masculină).
       responseModalities: ['AUDIO'],
-      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voce } } },
+      speechConfig: limba
+        ? { voiceConfig: { prebuiltVoiceConfig: { voiceName: voce } }, languageCode: limba }
+        : { voiceConfig: { prebuiltVoiceConfig: { voiceName: voce } } },
     },
     // Transcrierea pe AMBELE sensuri — pentru istoric + subtitrări în UI.
     inputAudioTranscription: {},
@@ -434,6 +444,9 @@ export function deschideVocalLive(
    *  (moarte înainte de `gata` chiar și fără extensii), sesiunea coboară pe
    *  setul ăsta mic în loc să moară — și spune în jurnal pe ce a rămas. */
   unelteRezerva?: UnealtaVocala[],
+  /** PINUL DE LIMBĂ (9 aug, „Dime, ¿qué"): BCP-47, ex. 'ro-RO' — vezi
+   *  construiesteSetup. Se scoate singur pe plasa `faraExtensii`. */
+  limba?: string,
 ): VocalLive | null {
   if (!config.geminiKey) return null
   let unelteActive = unelte
@@ -502,7 +515,17 @@ export function deschideVocalLive(
 
     socket.on('open', () => {
       try {
-        const st = construiesteSetup(VOCAL_LIVE_MODEL, VOCAL_LIVE_VOICE, instructiune, unelteActive, handleReluare) as {
+        // Pinul de limbă intră DOAR pe varianta plină: dacă modelul refuză
+        // setup-ul (moarte înainte de `gata`), plasa `faraExtensii` reia FĂRĂ
+        // pin — vocea trăiește oricum, iar jurnalul spune pe ce variantă.
+        const st = construiesteSetup(
+          VOCAL_LIVE_MODEL,
+          VOCAL_LIVE_VOICE,
+          instructiune,
+          unelteActive,
+          handleReluare,
+          faraExtensii ? undefined : limba,
+        ) as {
           setup: Record<string, unknown>
         }
         if (faraExtensii) {
