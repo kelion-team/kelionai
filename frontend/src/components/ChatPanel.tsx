@@ -2166,6 +2166,22 @@ export default function ChatPanel({
   // The ON-THE-SPOT read below stays, for precision on explicit location turns.
   useEffect(() => {
     if (!navigator.geolocation) return
+    // PRIMUL FIX RAPID, TĂCUT (9 aug, ownerul: „nu preia gps imediat"):
+    // precizia ÎNALTĂ (satelit) poate dura zeci de secunde la primul fix, deci
+    // GPS-ul părea că „nu se ia imediat". Cerem ÎNTÂI un fix GROSIER, aproape
+    // instant (rețea, fără satelit, cache generos) — coordsRef e populat pe loc,
+    // în tăcere, gata de folosit la nevoie; paznicul satelitar de mai jos îl
+    // rafinează apoi. Nu suprascrie un fix satelitar deja prins (doar dacă e gol).
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (!coordsRef.current) {
+          coordsRef.current = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+          precizieRef.current = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null
+        }
+      },
+      () => {},
+      { enableHighAccuracy: false, maximumAge: 600_000, timeout: 10_000 },
+    )
     // GPS REAL (8 aug, ownerul: „îi trebuiesc date de la gps real"): paznicul
     // permanent cere precizie ÎNALTĂ (satelit). Lecția din 26 iul rămâne
     // respectată prin construcție: pana de atunci era citirea LA RECE cu
