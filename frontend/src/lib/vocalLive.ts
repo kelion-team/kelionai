@@ -446,6 +446,18 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     analizor.connect(ctxOut.destination)
     console.warn(`[vocalLive] bucla AEC nu a pornit (${String(e).slice(0, 80)}) — redare directă, fără anulare de ecou`)
   }
+  // Serverul află dacă ecoul e ANULAT: doar cu AEC viu are voie să-i taie
+  // vorba lui Kelion la vocea omului (barge-in pe server, 9 aug — „vorbește
+  // peste mine"); fără AEC, „vocea de peste el" ar fi chiar ecoul lui.
+  const spuneAec = (): void => {
+    try {
+      ws.send(JSON.stringify({ type: 'aec', activ: aec !== null }))
+    } catch {
+      /* sesiunea se închide oricum */
+    }
+  }
+  if (ws.readyState === WebSocket.OPEN) spuneAec()
+  else ws.addEventListener('open', spuneAec, { once: true })
   const sursa = ctxIn.createMediaStreamSource(stream)
   // Culesul microfonului (9 aug, „scoate alertele prin rezolvări reale"):
   // ÎNTÂI AudioWorklet (API-ul curent, pe firul audio — fără [Deprecation] și

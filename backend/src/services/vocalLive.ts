@@ -566,11 +566,14 @@ export function deschideVocalLive(
         if (faraExtensii) {
           delete st.setup.sessionResumption
           delete st.setup.contextWindowCompression
-          // Varianta redusă păstrează DOAR pragul anti-zgomot DOVEDIT (8 aug,
-          // măsurat pe sesiuni întregi); câmpurile noi (NO_INTERRUPTION) se
-          // scot — dacă modelul le-ar refuza la setup, vocea tot pornește.
+          // Varianta redusă păstrează pragul anti-zgomot DOVEDIT (8 aug) ȘI
+          // NO_INTERRUPTION (dovedit live pe 480382c, 9 aug 20:42 — sesiuni
+          // acceptate și funcționale). Prima formă a plasei îl ARUNCA aici, și
+          // exact sesiunile degradate/reluate reveneau la barge-in-ul pe ecou:
+          // consola ownerului, 9 aug seara — „modelul și-a tăiat vorba" ×10.
           st.setup.realtimeInputConfig = {
             automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' },
+            activityHandling: 'NO_INTERRUPTION',
           }
         }
         socket.send(JSON.stringify(st))
