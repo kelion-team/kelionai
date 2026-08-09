@@ -79,10 +79,15 @@ jobs:
           # dinadins — cheia de acces la mașină n-are ce căuta în env-ul
           # aplicației. `KELION_GITHUB_TOKEN` se scrie sub numele pe care îl
           # citește codul: `GITHUB_TOKEN`.
+          # `SESSION_SECRET` + `ADMIN_EMAIL` sunt și ele EXCLUSE (9 aug): sunt
+          # stare de IDENTITATE a serverului, nu secrete de aplicație — o rotire
+          # tăcută a lui SESSION_SECRET omoară TOATE cookie-urile (ownerul,
+          # logat, primea 403 „ca și cum nu sunt admin"), iar un ADMIN_EMAIL cu
+          # spațiu la coadă îl făcea „customer". Se schimbă doar cu mâna, pe VPS.
           {
             printf '%s' "$SECRETS_JSON" | jq -r '
               to_entries[]
-              | select(.key | test("^(VPS_SSH_KEY|github_token|KELION_GITHUB_TOKEN)$") | not)
+              | select(.key | test("^(VPS_SSH_KEY|github_token|KELION_GITHUB_TOKEN|SESSION_SECRET|ADMIN_EMAIL)$") | not)
               | select(.value != null and .value != "")
               | "\(.key)=\(.value | @base64)"'
             if [ -n "${GITHUB_TOKEN:-}" ]; then

@@ -141,6 +141,10 @@ export interface Strings {
   buildDone: string
   buildFailed: string
   buildOnlyAdmin: string
+  /** Sesiunea a murit (401) — NU e o problemă de rol; omul trebuie doar să se
+   *  logheze iar (9 aug: 403-ul mincinos îl făcea pe owner să creadă că nu mai
+   *  e admin). */
+  sessionExpired: string
   buildUnavailable: string
   buildNoServer: string
   buildHead: string
@@ -328,6 +332,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildDone: 'Done',
     buildFailed: 'Failed',
     buildOnlyAdmin: 'Only the admin can see the builder.',
+    sessionExpired: 'Your session expired — sign in again.',
     buildUnavailable: 'The builder is unavailable right now.',
     buildNoServer: 'No connection to the server.',
     buildHead: 'Kelion’s builder',
@@ -494,6 +499,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildDone: 'Gata',
     buildFailed: 'Eșuat',
     buildOnlyAdmin: 'Doar adminul vede constructorul.',
+    sessionExpired: 'Sesiunea a expirat — loghează-te din nou.',
     buildUnavailable: 'Constructor indisponibil momentan.',
     buildNoServer: 'Fără legătură cu serverul.',
     buildHead: 'Constructorul lui Kelion',
@@ -660,6 +666,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildDone: 'Listo',
     buildFailed: 'Fallido',
     buildOnlyAdmin: 'Solo el administrador puede ver el constructor.',
+    sessionExpired: 'Tu sesión expiró — inicia sesión de nuevo.',
     buildUnavailable: 'El constructor no está disponible en este momento.',
     buildNoServer: 'Sin conexión con el servidor.',
     buildHead: 'El constructor de Kelion',
@@ -810,6 +817,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildDone: 'Terminé',
     buildFailed: 'Échoué',
     buildOnlyAdmin: 'Seul l’administrateur peut voir le constructeur.',
+    sessionExpired: 'Votre session a expiré — reconnectez-vous.',
     buildUnavailable: 'Le constructeur est indisponible pour le moment.',
     buildNoServer: 'Pas de connexion au serveur.',
     buildHead: 'Le constructeur de Kelion',
@@ -960,6 +968,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildDone: 'Fertig',
     buildFailed: 'Fehlgeschlagen',
     buildOnlyAdmin: 'Nur der Admin kann den Builder sehen.',
+    sessionExpired: 'Deine Sitzung ist abgelaufen — melde dich neu an.',
     buildUnavailable: 'Der Builder ist derzeit nicht verfügbar.',
     buildNoServer: 'Keine Verbindung zum Server.',
     buildHead: 'Kelions Builder',
@@ -1110,6 +1119,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildDone: 'Fatto',
     buildFailed: 'Fallito',
     buildOnlyAdmin: 'Solo l’amministratore può vedere il builder.',
+    sessionExpired: 'La sessione è scaduta — accedi di nuovo.',
     buildUnavailable: 'Il builder non è disponibile al momento.',
     buildNoServer: 'Nessuna connessione al server.',
     buildHead: 'Il builder di Kelion',
@@ -1260,6 +1270,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildDone: 'Concluído',
     buildFailed: 'Falhou',
     buildOnlyAdmin: 'Apenas o administrador pode ver o construtor.',
+    sessionExpired: 'A sessão expirou — inicie sessão novamente.',
     buildUnavailable: 'O construtor está indisponível no momento.',
     buildNoServer: 'Sem conexão com o servidor.',
     buildHead: 'O construtor do Kelion',
