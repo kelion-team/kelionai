@@ -134,6 +134,10 @@ export function construiesteInstructiune(
   numeUser: string,
   istoric: Array<{ role: string; content: string }>,
   ancora?: AncoraRealitate,
+  /** Limba pinuită a userului (BCP-47). Filtrul „anti-otravă" de mai jos
+   *  (replici străine sărite din istoric) are sens DOAR pe română — pe alte
+   *  limbi ar arunca istoricul legitim al userului. Implicit ro-RO. */
+  limbaPin: string | undefined = 'ro-RO',
 ): string {
   let instructiune = `${persona}\nVorbești cu ${numeUser}.`
   // ANCORA REALITĂȚII (8 aug, ownerul: „nu e ancorat în realitate, după
@@ -241,7 +245,7 @@ export function construiesteInstructiune(
       // spaniola drept limba conversației — degradarea s-ar autoîntreține
       // peste sesiuni. Replicile asistentului detectate străine (același
       // detector determinist ca gardul din rută) se SAR la coacere.
-      .filter((r) => r.role === 'user' || !inceputStrain(String(r.content)))
+      .filter((r) => limbaPin !== 'ro-RO' || r.role === 'user' || !inceputStrain(String(r.content)))
       .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
       .map((r) => `${r.role === 'user' ? numeUser : 'Kelion'}: ${String(r.content).slice(0, 200)}`)
       .join('\n')

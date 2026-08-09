@@ -436,11 +436,19 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       const BCP47: Record<string, string> = {
         ro: 'ro-RO', en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-PT',
       }
-      let limbaPin = 'ro-RO'
+      // PE TOATE LIMBILE (9 aug, ownerul: „la user chinez sau japonez ce
+      // face?"): pinul se pune DOAR pe ce știm sigur — limbile aplicației din
+      // hartă sau un BCP-47 complet salvat (ex. ja-JP). O limbă NECUNOSCUTĂ =
+      // FĂRĂ pin și FĂRĂ gard: sesiunea merge pe auto-detecția Google
+      // (comportamentul dinainte) — mai bine auto decât un pin GREȘIT pe
+      // română pentru un vorbitor de chineză.
+      let limbaPin: string | undefined = 'ro-RO'
       try {
         const pref = await getSpeechLang(user.email)
-        if (pref && BCP47[pref]) limbaPin = BCP47[pref]
-        else if (pref && /^[a-z]{2}-[A-Z]{2}$/.test(pref)) limbaPin = pref
+        if (!pref) limbaPin = 'ro-RO' // fără preferință → limba aplicației
+        else if (BCP47[pref]) limbaPin = BCP47[pref]
+        else if (/^[a-z]{2}-[A-Z]{2}$/.test(pref)) limbaPin = pref // ex. ja-JP întreg
+        else limbaPin = undefined // necunoscută → auto-detecție, fără gard
       } catch {
         app.log.warn('vocal-live: speech_lang necitibil — pinul de limbă rămâne ro-RO')
       }
@@ -460,7 +468,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         })
       }
-      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric, ancora)
+      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric, ancora, limbaPin)
 
       // CONVERSAȚIA SUPRAVIEȚUIEȘTE REPORNIRII (8 aug, ownerul: „trebuie să nu
       // mai moară… chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
@@ -535,6 +543,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // n-a cerut-o, tura se SUPRIMĂ (audio tăiat + intrerupt spre browser) și
       // NU intră în istoric (altfel otrăvea instrucțiunea sesiunii următoare).
       let verdictLimba: boolean | null = null // null = nedecis; false = străină
+      // Gardul e legat de limba PINUITĂ a userului (9 aug, ownerul: „asta e
+      // pentru admin sau se aplică la fiecare limbă?"): detectorul știe să
+      // prindă doar ne-româna, deci taie DOAR când limba userului e româna —
+      // un user cu engleza (sau orice altă limbă) setată își primește limba lui.
+      const gardDeLimba = limbaPin === 'ro-RO'
       const turaAdresataAcum = (): boolean => {
         const spusa = bufUser.trim()
         if (!spusa) return true // tură de sistem (anunț/unealtă) — nu e vorbire de om
@@ -560,7 +573,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           // Verdictul de LIMBĂ se ia O DATĂ pe tură, pe începutul replicii
           // (≥6 caractere sau primul final): început străin + necerut = tura
           // moare AICI — audio tăiat, redarea din browser oprită (intrerupt).
-          if (verdictLimba === null && (bufKelion.trim().length >= 6 || final)) {
+          if (gardDeLimba && verdictLimba === null && (bufKelion.trim().length >= 6 || final)) {
             const straina = inceputStrain(bufKelion)
             verdictLimba = !(straina && !aCerutAltaLimba(bufUser))
             if (verdictLimba === false) {
