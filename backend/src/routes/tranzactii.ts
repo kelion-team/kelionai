@@ -12,6 +12,12 @@ import { config } from '../config.js'
 // CE E, cinstit:
 //  • CRYPTO intraday REAL (Binance public, fără cheie): preț viu, lumânări pe
 //    1m/15m/1h/4h/1d — desenate în grafic adevărat pe pagină.
+//  • PREȚUL LA MILISECUNDĂ (9 aug, ownerul: „datele trebuie reale total la
+//    miime de secundă… real ca în live"): pe crypto, pagina se abonează DIRECT
+//    la fluxul public de tranzacții Binance (WebSocket @trade) — prețul se
+//    mișcă la FIECARE tranzacție executată pe bursă, cu timestamp-ul în ms al
+//    bursei afișat. Dacă fluxul pică, pagina o SPUNE și rămâne pe împrospătarea
+//    la 10s (nu tace, nu minte).
 //  • ACȚIUNI + INDICI pe date ZILNICE reale (Stooq, fără cheie): AAPL.US,
 //    TSLA.US, ^SPX, ^DJI, ^DAX... — tot cu grafic.
 //  • ÎNVĂȚAREA REALĂ a lui Kelion: fiecare analiză se salvează în memoria lui
@@ -53,7 +59,7 @@ function paginaTranzactii(): string {
 <p class="nota">Date REALE: crypto intraday (Binance) · acțiuni și indici pe zile (Stooq: AAPL.US, TSLA.US, ^SPX, ^DJI, ^DAX). Kelion ÎNVAȚĂ real: fiecare analiză se salvează cu prețul ei, iar la următoarea își judecă apelurile pe ce s-a întâmplat de fapt. Cinstit: NU plasează ordine (niciun broker legat) și nu promite câștiguri; intraday pe bursele clasice cere abonament de date — se leagă când alegi furnizorul.</p>
 <div>
  <input id="s" value="BTCUSDT" placeholder="BTCUSDT · ETHUSDT · AAPL.US · ^SPX">
- <button id="v">👁 Urmărește</button>
+ <button id="v" title="Pornește urmărirea simbolului din câmp: pe crypto prețul curge LIVE, tranzacție cu tranzacție (flux Binance, milisecunda bursei); lumânările graficului se împrospătează la 10s. Pe bursă (Stooq) datele sunt zilnice.">👁 Urmărește</button>
  <button id="an">🧠 Analiza lui Kelion (cu memoria apelurilor)</button>
 </div>
 <div id="chips">
@@ -65,12 +71,17 @@ function paginaTranzactii(): string {
  <button class="gri int">1m</button><button class="gri int">15m</button><button class="gri int activ">1h</button><button class="gri int">4h</button><button class="gri int">1d</button>
 </div>
 <div><span class="pret" id="p">—</span> <span id="var">—</span></div>
+<div id="viu" class="nota">—</div>
 <canvas id="graf" width="960" height="380"></canvas>
 <pre id="out">Alege simbolul (crypto sau bursă) și apasă „Analiza lui Kelion" — regimul pieței, niveluri, scenarii cu invalidare, riscul întâi, plus judecata propriilor apeluri anterioare.</pre>
 <script>
  const s=document.getElementById('s'), p=document.getElementById('p'), va=document.getElementById('var'), out=document.getElementById('out');
- const an=document.getElementById('an'), v=document.getElementById('v'), graf=document.getElementById('graf');
- let ceas=null, interval='1h';
+ const an=document.getElementById('an'), v=document.getElementById('v'), graf=document.getElementById('graf'), viu=document.getElementById('viu');
+ let ceas=null, interval='1h', ws=null, pretVechi=0;
+ // crypto = simbol Binance simplu (BTCUSDT); punct/caret = bursă (Stooq, zilnic)
+ function eCripto(sim){ return /^[A-Z0-9]{5,}$/.test(sim) && sim.indexOf('.')<0 && sim.indexOf('^')<0; }
+ function oraMs(t){ const d=new Date(t); function z(n,l){ return String(n).padStart(l||2,'0'); }
+   return z(d.getHours())+':'+z(d.getMinutes())+':'+z(d.getSeconds())+'.'+z(d.getMilliseconds(),3); }
  function deseneaza(lum){
    const x=graf.getContext('2d'); const W=graf.width, H=graf.height;
    x.clearRect(0,0,W,H);
@@ -90,7 +101,9 @@ function paginaTranzactii(): string {
    }
    x.fillStyle='#8b93ad'; x.font='12px system-ui';
    x.fillText(String(max), 6, sus+10);
-   x.fillText(String(min), 6, H-jos+14);
+   // minimul URCĂ deasupra benzii de date (9 aug: la H-jos+14 se suprapunea cu
+   // data de start din colț — textul ieșea ilizibil, „6478008…2026-08-08")
+   x.fillText(String(min), 6, H-jos-4);
    const t0=new Date(lum[0].t), t1=new Date(lum[lum.length-1].t);
    x.fillText(t0.toISOString().slice(0,16).replace('T',' '), 6, H-6);
    const et=t1.toISOString().slice(0,16).replace('T',' ');
@@ -101,12 +114,37 @@ function paginaTranzactii(): string {
      const r=await fetch('/api/tranzactii/date?simbol='+encodeURIComponent(s.value)+'&interval='+interval);
      const j=await r.json();
      if(j.error){ p.textContent='—'; va.innerHTML='<span class=rau>'+j.error+'</span>'; return; }
-     p.textContent=j.pret;
+     if(!ws){ p.textContent=j.pret; }
      va.innerHTML='24h: <span class="'+(j.variatie24h>=0?'sus':'jos')+'">'+j.variatie24h+'%</span> · '+j.simbol+' · '+j.sursa+' · lumânări '+j.interval;
+     // ONESTITATE PE TIMP (9 aug, „selecția pe timp nu merge"): bursele Stooq au
+     // DOAR lumânări zilnice — butoanele intraday se sting pe ele, nu mint.
+     const zilnic=String(j.sursa||'').indexOf('Stooq')>=0;
+     document.querySelectorAll('.int').forEach(function(b){ b.disabled=zilnic&&b.textContent!=='1d'; });
+     if(zilnic&&!ws){ viu.textContent='bursă clasică: lumânări ZILNICE reale (intraday tick-cu-tick cere abonament de date — se leagă când alegi furnizorul)'; }
      deseneaza(j.lumanari);
    }catch(e){ va.innerHTML='<span class=rau>rețea: '+e+'</span>'; }
  }
- function urmareste(){ if(ceas)clearInterval(ceas); void pret(); ceas=setInterval(pret,10000); }
+ // PREȚUL LA MILISECUNDĂ (9 aug, „real ca în live"): pe crypto ne abonăm DIRECT
+ // la fluxul public de tranzacții al bursei — prețul se mișcă la FIECARE
+ // tranzacție executată, cu ms-ul bursei pe ecran. Căderea fluxului SE SPUNE.
+ function opresteViu(){ if(ws){ try{ws.close();}catch(e){} ws=null; } }
+ function pornesteViu(sim){
+   opresteViu();
+   if(!eCripto(sim)) return;
+   try{
+     const w=new WebSocket('wss://stream.binance.com:9443/ws/'+sim.toLowerCase()+'@trade');
+     ws=w;
+     w.onmessage=function(ev){ try{
+       const j=JSON.parse(ev.data); const nou=Number(j.p);
+       if(!(nou>0)) return;
+       p.textContent=nou; p.className='pret '+(nou>=pretVechi?'sus':'jos'); pretVechi=nou;
+       viu.textContent='● LIVE (flux Binance, tranzacție cu tranzacție) · ultima: '+oraMs(j.T)+' — milisecunda bursei';
+     }catch(e){} };
+     w.onerror=function(){ if(ws===w){ viu.textContent='fluxul live a picat — rămân pe împrospătarea la 10s (rețeaua/blocantul browserului?)'; } };
+     w.onclose=function(){ if(ws===w){ ws=null; } };
+   }catch(e){ viu.textContent='fluxul live nu a pornit ('+e+') — împrospătare la 10s'; }
+ }
+ function urmareste(){ if(ceas)clearInterval(ceas); void pret(); ceas=setInterval(pret,10000); pornesteViu(s.value.toUpperCase().trim()); }
  v.onclick=urmareste;
  document.querySelectorAll('.chip').forEach(function(b){ b.onclick=function(){ s.value=b.textContent; urmareste(); }; });
  document.querySelectorAll('.int').forEach(function(b){ b.onclick=function(){ interval=b.textContent;
