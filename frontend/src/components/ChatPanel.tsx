@@ -1866,7 +1866,10 @@ export default function ChatPanel({
     // while the boot was in flight, and a double-click left the microphone forever
     // on. Now: pressed during the start = STOP (manualOff), and
     // ensureMic checks manualOff after every await before installing.
-    if (micRef.current || micStartingRef.current) {
+    // + vlRef (9 aug, ownerul: „dacă ar merge să-l oprești, că nici asta nu
+    // merge"): pe vocea LIVE micRef e null — condiția veche nu intra NICIODATĂ
+    // pe ramura de închidere, sesiunea (și facturarea) supraviețuiau butonului.
+    if (micRef.current || micStartingRef.current || vlRef.current) {
       micManualOffRef.current = true
       // Also release the start flag: if the boot really is in flight, it sees
       // manualOff at the end and stops by itself; if the flag was stuck from an
