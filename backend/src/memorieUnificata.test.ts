@@ -30,6 +30,17 @@ describe('memorieUnificata — creierul scris vede și ce s-a vorbit', () => {
     expect(memorieUnificata([], [{ role: 'user', content: 'ceva' }])).toBe('')
   })
 
+  it('turele LIPITE de sanitizeHistory nu se dublează (dedup pe bucăți, audit 9 aug)', () => {
+    // Clientul are cele două rostiri LIPITE într-un singur mesaj (chat.ts unește
+    // turele consecutive de același rol cu \n); DB le are ca rânduri SEPARATE.
+    const client = [{ role: 'user', content: 'prima frază\na doua frază' }]
+    const db = [
+      { role: 'user', content: 'prima frază' },
+      { role: 'user', content: 'a doua frază' },
+    ]
+    expect(memorieUnificata(db, client)).toBe('')
+  })
+
   it('păstrează cel mult `cap` rânduri, pe cele mai RECENTE', () => {
     const db = Array.from({ length: 30 }, (_, i) => ({ role: 'user', content: `vorbit ${i}` }))
     const nota = memorieUnificata(db, [], 5)

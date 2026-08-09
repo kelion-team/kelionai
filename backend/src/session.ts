@@ -1,6 +1,33 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import jwt from 'jsonwebtoken'
 import { config, roleFor } from './config.js'
+
+// ── REFRESH TOKEN-UL GOOGLE NU CĂLĂTOREȘTE ÎN CLAR (audit 9 aug) ─────────────
+// JWT-ul e doar SEMNAT (JWS), nu criptat: payload-ul e base64url, lizibil de
+// oricine capturează cookie-ul, fără SESSION_SECRET. Refresh token-ul e o
+// credencială de LUNGĂ durată pentru Gmail/Calendar/Drive — de-aia se
+// criptează AES-256-GCM (cheie derivată din SESSION_SECRET) înainte să intre
+// în payload și se decriptează la citire. Cookie-urile vechi, cu tokenul în
+// clar, rămân valabile până expiră (decriptarea le lasă cum sunt).
+const cheiaRt = (): Buffer => createHash('sha256').update(`kelionai:rt:${config.sessionSecret}`).digest()
+const cripteazaRt = (txt: string): string => {
+  const iv = randomBytes(12)
+  const c = createCipheriv('aes-256-gcm', cheiaRt(), iv)
+  const enc = Buffer.concat([c.update(txt, 'utf8'), c.final()])
+  return `enc1:${iv.toString('base64url')}:${enc.toString('base64url')}:${c.getAuthTag().toString('base64url')}`
+}
+const decripteazaRt = (val: string): string | undefined => {
+  if (!val.startsWith('enc1:')) return val // cookie vechi, în clar — acceptat până expiră
+  try {
+    const [, ivB, encB, tagB] = val.split(':')
+    const d = createDecipheriv('aes-256-gcm', cheiaRt(), Buffer.from(ivB, 'base64url'))
+    d.setAuthTag(Buffer.from(tagB, 'base64url'))
+    return Buffer.concat([d.update(Buffer.from(encB, 'base64url')), d.final()]).toString('utf8')
+  } catch {
+    return undefined // token de nedescifrat (alt secret?) = ca și absent — nu crăpăm sesiunea
+  }
+}
 
 export const SESSION_COOKIE = 'kelionai_session'
 
@@ -33,7 +60,9 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
     locale: user.locale,
     googleAccessToken: user.googleAccessToken,
     googleTokenExp: user.googleTokenExp,
-    googleRefreshToken: user.googleRefreshToken,
+    // Criptat, nu în clar — vezi antetul. (setSession poate primi userul citit
+    // dintr-un JWT vechi cu tokenul necriptat; cripteazaRt îl sigilează atunci.)
+    googleRefreshToken: user.googleRefreshToken ? cripteazaRt(user.googleRefreshToken) : undefined,
   }
   const token = jwt.sign(payload, config.sessionSecret, { expiresIn: '30d' })
   reply.setCookie(SESSION_COOKIE, token, {
@@ -63,6 +92,9 @@ export function getSessionUser(req: FastifyRequest): SessionUser | null {
     // Re-derive the role from the email (W10 #5): the role "frozen" in the JWT
     // stayed admin for 30 days if ADMIN_EMAIL changed — revoking admin had no effect.
     u.role = roleFor(u.email)
+    // Refresh token-ul stă criptat în cookie — consumatorii primesc valoarea
+    // REALĂ; una de nedescifrat devine „absent", nu o sesiune moartă.
+    if (u.googleRefreshToken) u.googleRefreshToken = decripteazaRt(u.googleRefreshToken)
     return u
   } catch {
     return null

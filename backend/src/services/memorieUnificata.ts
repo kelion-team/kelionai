@@ -42,9 +42,19 @@ export function memorieUnificata(
   cap = 12,
 ): string {
   if (!Array.isArray(dbRows) || dbRows.length === 0) return ''
-  const inClient = new Set(
-    (Array.isArray(clientMessages) ? clientMessages : []).map((m) => `${m.role}:${norm(m.content)}`),
-  )
+  const inClient = new Set<string>()
+  for (const m of Array.isArray(clientMessages) ? clientMessages : []) {
+    const intreg = norm(m.content)
+    if (intreg) inClient.add(`${m.role}:${intreg}`)
+    // Turele LIPITE (sanitizeHistory din chat.ts unește turele consecutive de
+    // același rol cu \n) se sparg pe linii: rândul din DB e o BUCATĂ a turei
+    // lipite — pe cheia întreagă nu s-ar potrivi niciodată și ambele ture ar
+    // reintra în prompt, dublate (audit 9 aug).
+    for (const bucata of String(m.content ?? '').split('\n')) {
+      const b = norm(bucata)
+      if (b) inClient.add(`${m.role}:${b}`)
+    }
+  }
   // Rândurile din DB care NU-s deja în transcriptul clientului = ce n-a văzut
   // creierul scris (de regulă turele vorbite). Golurile fără conținut se sar.
   const lipsa = dbRows.filter((r) => norm(r.content) && !inClient.has(`${r.role}:${norm(r.content)}`))

@@ -78,11 +78,13 @@ function paginaAdmin(total: number): string {
 </script></body></html>`
 }
 
-/** Gardul comun al rutelor de admin: întoarce userul sau null (după 403). */
+/** Gardul comun al rutelor de admin: întoarce userul sau null (după 401/403).
+ *  401 pe sesiune moartă, 403 DOAR pe rol (regula din 9 aug; recidiva prinsă
+ *  la auditul de noapte). */
 function adminSau403(req: FastifyRequest, reply: FastifyReply): { email: string } | null {
   const user = getSessionUser(req)
   if (user && user.role === 'admin') return user
-  reply.code(403)
+  reply.code(user ? 403 : 401)
   return null
 }
 
