@@ -53,6 +53,7 @@ import {
   noteazaEsuare,
 } from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
+import { memorieUnificata } from '../services/memorieUnificata.js'
 import { autoPreviewFrame } from '../services/monitorAutoPreview.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, geminiLive } from '../services/geminiDirect.js'
 import { ruleazaPanou } from '../services/panouLucratori.js'
@@ -1412,7 +1413,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // jos, la fiecare cerere: viteza nu se ia din securitate.
     const acumMs = Date.now()
     const cache = stareSesiune(user.email, acumMs)
-    const [prefs, memRecall, lastSavedRow] = await Promise.all([
+    const [prefs, memRecall, istoricDb] = await Promise.all([
       cache
         ? Promise.resolve(cache)
         : Promise.all([
@@ -1432,9 +1433,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             return { ...stare, laMs: acumMs }
           }),
       recallWithDeadline,
-      // Continuity between sessions (#20): the timestamp of the last saved
-      // message — pure DB, in parallel with the rest (zero added latency).
-      getRecentHistory(user.email, 1).catch(() => []),
+      // Continuity between sessions (#20) + MEMORIA UNIFICATĂ voce↔scris (9 aug):
+      // istoricul REAL din DB (AMBELE modalități). O singură citire, două
+      // folosințe — timestamp-ul de continuitate (ultimul rând) ȘI nota de
+      // memorie unificată (turele vorbite pe care array-ul scris nu le are).
+      // Rămâne în paralel cu restul → zero latență adăugată.
+      getRecentHistory(user.email, MAX_HISTORY).catch(() => []),
     ])
     const storedPref = prefs.speechLang
     const meserieId = prefs.meserieId
@@ -1846,6 +1850,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // this user so the conversation is continuous across sessions. Read above
     // (the single trip to the database).
     systemPrompt += memRecall
+    // MEMORIA UNIFICATĂ voce↔scris (9 aug, ownerul: „trebuie să preia și din
+    // audio sau invers din scris istoricul, indiferent modalitatea"). Creierul
+    // scris construia contextul DOAR din array-ul clientului (turele de pe
+    // ecran) — orb la ce se vorbise în sesiunea live (salvat în DB, dar nu în
+    // array). Aici lipim turele din DB care NU-s în transcriptul curent (de
+    // regulă cele VORBITE), deduplicat, ca să nu mai spună „n-am căutat nimic"
+    // după ce a căutat prin voce. Invers mergea deja (calea vocală citește DB).
+    systemPrompt += memorieUnificata(istoricDb, messages)
 
     // ── BIOMETRICS (voice + face) — account holder vs. someone else ──────────
     // Adrian: "nothing directly in chat, everything in parallel, so it doesn't
@@ -1956,7 +1968,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // time ago, Kelion KNOWS this is a reunion (not a continuous thread) and
     // greets naturally with continuity. Pure DB — the timestamp read in
     // parallel above, zero cost.
-    const lastSavedAt = lastSavedRow?.[0]?.created_at ? new Date(lastSavedRow[0].created_at).getTime() : 0
+    // istoricDb vine ASC (cel mai vechi primul) → cel mai RECENT e ultimul rând.
+    const ultimSalvat = istoricDb.at(-1)
+    const lastSavedAt = ultimSalvat?.created_at ? new Date(ultimSalvat.created_at).getTime() : 0
     const gapMin = lastSavedAt > 0 ? Math.floor((Date.now() - lastSavedAt) / 60_000) : -1
     if (gapMin > 45) {
       const gapText =

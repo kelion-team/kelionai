@@ -1155,9 +1155,16 @@ export default function ChatPanel({
         voiceFeatures,
         face?.descriptor,
         face?.photo,
-        // THE SINGLE-VOICE RULE: with the Realtime session active, the written turn gets
-        // no Chirp voice from the server (the session remains the only voice).
-        (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
+        // ECONOMIE PE SCRIS (9 aug, ownerul: „dacă i se scrie se răspunde doar
+        // scris… asta face economie?"): o tură SCRISĂ (spoken=false) NU mai
+        // cere voce Chirp de la server — text-in → text-out, fără sinteză
+        // plătită. MĂSURAT înainte: serverVoiceOff depindea DOAR de calea
+        // realtime veche (micRef.isRealtime), deci o tură scrisă în chat pur era
+        // rostită cu voce (audio pe text), iar în modul live TTS-ul se sintetiza
+        // și se arunca — cost irosit. Acum: fără voce pe scris; vocea rămâne DOAR
+        // pe turele vorbite (spoken) sau când sesiunea realtime e deja vocea.
+        // THE SINGLE-VOICE RULE se păstrează: sesiunea realtime rămâne singura voce.
+        !spoken || (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
         // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
         spoken || undefined,
         // GUEST SPEAKER (the voice gate's verdict): the server strips ALL admin
