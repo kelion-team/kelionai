@@ -54,7 +54,7 @@ import { keepScreenOn } from '../lib/wakelock'
 // Dictarea batch (/api/asr) și streamingul standalone (STT) au dispărut.
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
 import { deschideVocalLive, vocalLiveDisponibila, type VocalLiveHandle } from '../lib/vocalLive'
-import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
+import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, emiteTakeover, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
 import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
@@ -1574,6 +1574,10 @@ export default function ChatPanel({
             if (vl) {
               vlRef.current = vl
               setListening(true)
+              // Tabul ăsta a luat VOCEA — o anunță pe canal, ca celelalte
+              // taburi să se zăvorască (auditul de noapte: calea live pornea
+              // fără takeover, deci un al doilea tab pornea liniștit a doua voce).
+              emiteTakeover(canalVoceRef.current, tabVoceIdRef.current)
               return true
             }
             return false
@@ -2085,7 +2089,11 @@ export default function ChatPanel({
     }
     bc.addEventListener('message', onMesaj)
     const puls = ceas('puls interfață', () => {
-      if (micRef.current) bc.postMessage({ inima: tabVoceIdRef.current })
+      // ÎNTREG lanțul vocii ține inima — și calea veche (micRef), și sesiunea
+      // LIVE (vlRef). Auditul de noapte (9 aug): inima bătea doar pe micRef,
+      // iar calea live (implicită din 8 aug) era în afara zăvorului — două
+      // taburi = două voci, bugul din 4 aug reapărut prin construcție.
+      if (micRef.current || vlRef.current) bc.postMessage({ inima: tabVoceIdRef.current })
       else if (voceAiureaRef.current && inimaAMurit(ultimaInimaRef.current, Date.now())) {
         // Tabul care ținea vocea a murit fără rămas-bun → vocea revine AICI.
         voceAiureaRef.current = false
@@ -2093,7 +2101,7 @@ export default function ChatPanel({
       }
     }, INIMA_BATE_MS)
     const laPlecare = (): void => {
-      if (micRef.current) bc.postMessage({ ramasBun: tabVoceIdRef.current })
+      if (micRef.current || vlRef.current) bc.postMessage({ ramasBun: tabVoceIdRef.current })
     }
     window.addEventListener('pagehide', laPlecare)
     return () => {

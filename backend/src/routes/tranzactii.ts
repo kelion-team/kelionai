@@ -38,7 +38,7 @@ import { config } from '../config.js'
  *  întoarce perechile nume→valoare pe care pagina le DESENEAZĂ ca linii pe
  *  lumânări. Fără rând sau „NIVELURI: -" → listă goală (nu se inventează).
  *  PURĂ și exportată — se probează pe texte reale, fără agent. */
-export function extrageNiveluri(text: string): { nume: string; valoare: number }[] {
+export function extrageNiveluri(text: string, pretCurent?: number): { nume: string; valoare: number }[] {
   // Revizia (9 aug): virgula era luată drept separator de perechi → „intrare=65,100"
   // ieșea 65 (linie GREȘITĂ pe grafic); prima apariție a „NIVELURI" în proză
   // îngropa rândul real; boldul markdown și monedele stricau potrivirea.
@@ -47,8 +47,15 @@ export function extrageNiveluri(text: string): { nume: string; valoare: number }
   for (let a = aparitii.length - 1; a >= 0; a--) {
     const rand = aparitii[a][1] ?? ''
     const out: { nume: string; valoare: number }[] = []
-    for (const p of rand.matchAll(/([a-zăâîșțşţ_ -]+?)\s*=\s*[~≈$€£]?\s*([0-9][0-9.,\s]*)/gi)) {
-      const valoare = normalizeazaNumar(p[2])
+    // Întâi TĂIEM rândul în perechi (audit 9 aug: captura de valoare trecea
+    // peste granițele perechii — „intrare=65,100, stop=…" înghițea „65,100, "
+    // → NaN → intrarea și stopul DISPĂREAU tăcut, rămânea doar ținta): `;`
+    // desparte mereu; virgula desparte DOAR când urmează un nume (literă),
+    // nu cifre — „76,42" rămâne întreg, „65,100, stop" se taie la a doua.
+    for (const segment of rand.split(/;|,(?=\s*[^\d\s.,])/)) {
+      const p = /([a-zăâîșțşţ_ -]+?)\s*=\s*[~≈$€£]?\s*([0-9][0-9.,\s]*)/i.exec(segment)
+      if (!p) continue
+      const valoare = normalizeazaNumar(p[2], pretCurent)
       if (valoare === null) continue
       out.push({ nume: p[1].trim().toLowerCase().normalize('NFC'), valoare })
       if (out.length >= 8) break
@@ -59,9 +66,11 @@ export function extrageNiveluri(text: string): { nume: string; valoare: number }
 }
 
 /** „65,100" / „65.100,50" / „65 100" → numărul REAL: grupele de 3 sunt mii,
- *  ultima grupă scurtă e zecimale. PURĂ — probată pe formate reale de agent. */
-export function normalizeazaNumar(brut: string): number | null {
-  const t = String(brut ?? '').trim().replace(/\s+/g, '')
+ *  ultima grupă scurtă e zecimale. `pretCurent` (dacă e dat) dezambiguizează
+ *  „X.YYY": pe DOGE la 0.123, „0.123" e preț zecimal, nu 123 (audit 9 aug —
+ *  liniile false de ~1000× pe grafic). PURĂ — probată pe formate reale. */
+export function normalizeazaNumar(brut: string, pretCurent?: number): number | null {
+  const t = String(brut ?? '').trim().replace(/\s+/g, '').replace(/[.,]+$/, '')
   if (!t) return null
   let s = t
   if (/^\d{1,3}([.,]\d{3})+([.,]\d{1,2})?$/.test(t)) {
@@ -69,6 +78,26 @@ export function normalizeazaNumar(brut: string): number | null {
     const m = t.match(/^(.*?)([.,](\d{1,2}))?$/)
     const intreg = (m?.[1] ?? t).replace(/[.,]/g, '')
     s = m?.[3] ? `${intreg}.${m[3]}` : intreg
+    // DEZAMBIGUIZAREA „X.YYY" (un singur grup de 3): poate fi mii europene
+    // (66.800 pe BTC) sau preț zecimal (0.123 pe DOGE). Regulile, în ordine:
+    const unGrup = /^(\d{1,3})[.,](\d{3})$/.exec(t)
+    if (unGrup) {
+      const caMii = Number(s)
+      const caZecimal = Number(`${unGrup[1]}.${unGrup[2]}`)
+      // 1. Partea întreagă 0 nu e notație de mii în NICIO convenție.
+      if (unGrup[1] === '0') return caZecimal > 0 ? caZecimal : null
+      // 2. Cu prețul REAL în mână, câștigă interpretarea din același ordin de
+      //    mărime cu el — asta e și singura care se poate DESENA pe grafic.
+      if (typeof pretCurent === 'number' && Number.isFinite(pretCurent) && pretCurent > 0) {
+        const dMii = Math.abs(Math.log10(caMii / pretCurent))
+        const dZecimal = Math.abs(Math.log10(caZecimal / pretCurent))
+        return dZecimal < dMii ? caZecimal : caMii
+      }
+      // 3. Fără context: o singură cifră întreagă (1.085) e mai degrabă preț
+      //    zecimal de altcoin; 2-3 cifre (66.800) rămân mii europene (dovedit
+      //    pe BTC, testul de mai jos).
+      if (unGrup[1].length === 1) return caZecimal
+    }
   } else {
     s = t.replace(',', '.')
   }
@@ -163,6 +192,9 @@ function paginaTranzactii(): string {
  var an=document.getElementById('an'), v=document.getElementById('v');
  var jurnal=document.getElementById('jurnal'), ci=document.getElementById('ci'), ct=document.getElementById('ct'), cv=document.getElementById('cv');
  var interval='1h', ws=null, ceas=null, pretVechi=0, simbolCurent='', primaIncarcare=true, reconectDelay=1000, primaTranzactie=false;
+ // Prețul REAL curent, ca NUMĂR — dezambiguizează „X.YYY" în parserele de
+ // niveluri (audit 9 aug: 0.123 pe DOGE devenea 123 pe grafic).
+ var pretCurentNr=null;
  var fir=[], liniile=[], cuVoce=true, gura=null;
 
  // IEȘIREA (9 aug, ownerul: „nu are buton ieșire"): pe pagina de sine
@@ -249,8 +281,15 @@ function paginaTranzactii(): string {
      var j=await r.json();
      if(j.error){ p.textContent='—'; va.innerHTML='<span class=rau>'+j.error+'</span>'; return; }
      if(!ws||!primaTranzactie){ p.textContent=j.pret; }
+     pretCurentNr=Number(j.pret)||null;
      va.innerHTML='24h: <span class="'+(j.variatie24h>=0?'sus':'jos')+'">'+j.variatie24h+'%</span> · '+j.simbol+' · '+j.sursa+' · lumânări '+j.interval;
      var zilnic=String(j.sursa||'').indexOf('Stooq')>=0;
+     // AUTORITATEA E SURSA REALĂ, nu forma simbolului (audit 9 aug): GOOGL și
+     // EURUSD au ≥5 caractere, deci eCripto le credea crypto → socket Binance
+     // ZOMBI (conectat, mut pe veci) care ținea eticheta „● LIVE" peste date
+     // ZILNICE și îngropa mesajul onest. Serverul a măsurat: sursa e Stooq →
+     // fluxul viu moare aici, iar ramura de mai jos spune adevărul.
+     if(zilnic&&ws){ opresteViu(); }
      document.querySelectorAll('.int').forEach(function(b){ b.disabled=zilnic&&b.textContent!=='1d'; });
      if(zilnic&&!ws){ viu.textContent='bursă clasică: lumânări ZILNICE reale (intraday tick-cu-tick cere abonament de date — se leagă când alegi furnizorul)'; }
      // Cu fluxul live pe lumânări deschis, NU rescriem seria la fiecare poll —
@@ -318,11 +357,19 @@ function paginaTranzactii(): string {
 
  an.onclick=async function(){
    an.disabled=true; out.textContent='Kelion citește piața, memoria apelurilor și gândește (~30-60s)…';
+   // Analiza pleacă pe SIMBOLUL DE PE GRAFIC, nu pe câmpul editabil (audit
+   // 9 aug: tastai ETHUSDT în câmp fără Urmărește → nivelurile ETH se desenau
+   // pe lumânările BTC). Iar la desen se verifică răspunsul contra ecranului —
+   // dacă ai schimbat simbolul cât gândea, nivelurile rămân doar în text.
+   var simbolAnalizat=simbolCurent||s.value;
    try{
-     var r=await fetch('/api/tranzactii/analiza',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({simbol:s.value,interval:interval})});
+     var r=await fetch('/api/tranzactii/analiza',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({simbol:simbolAnalizat,interval:interval})});
      var j=await r.json();
      out.innerHTML=j.error?'<span class=rau>'+j.error+'</span>':String(j.analiza).replace(/</g,'&lt;');
-     if(!j.error){ aratNiveluri(j.niveluri); }
+     if(!j.error){
+       if(String(j.simbol).toUpperCase()===String(simbolCurent).toUpperCase()){ aratNiveluri(j.niveluri); }
+       else{ out.innerHTML+='<br><span class=nota>(nivelurile sunt pentru '+j.simbol+' — graficul arată '+simbolCurent+', nu le desenez)</span>'; }
+     }
    }catch(e){ out.innerHTML='<span class=rau>rețea: '+e+'</span>'; }
    an.disabled=false;
  };
@@ -363,25 +410,39 @@ function paginaTranzactii(): string {
    return r;
  }
  // NIVELURI: aceeași extragere ca pe server (rândul NIVELURI: nume=valoare; …)
- function normalizeazaNumarText(brut){
-   var t=String(brut||'').trim().replace(/\\s+/g,'');
+ // Audit 9 aug, in AMBELE oglinzi: perechile se taie INTAI, iar "X.YYY" se
+ // dezambiguizeaza cu pretul REAL de pe ecran (0.123 pe DOGE e zecimal, nu 123).
+ function normalizeazaNumarText(brut,pretC){
+   var t=String(brut||'').trim().replace(/\\s+/g,'').replace(/[.,]+$/,'');
    if(!t) return null;
    var s2=t;
    if(/^\\d{1,3}([.,]\\d{3})+([.,]\\d{1,2})?$/.test(t)){
      var m=t.match(/^(.*?)([.,](\\d{1,2}))?$/);
      var intreg=(m&&m[1]?m[1]:t).replace(/[.,]/g,'');
      s2=(m&&m[3])?(intreg+'.'+m[3]):intreg;
+     var unGrup=/^(\\d{1,3})[.,](\\d{3})$/.exec(t);
+     if(unGrup){
+       var caMii=Number(s2), caZec=Number(unGrup[1]+'.'+unGrup[2]);
+       if(unGrup[1]==='0') return caZec>0?caZec:null;
+       if(typeof pretC==='number'&&isFinite(pretC)&&pretC>0){
+         var dM=Math.abs(Math.log(caMii/pretC)), dZ=Math.abs(Math.log(caZec/pretC));
+         return dZ<dM?caZec:caMii;
+       }
+       if(unGrup[1].length===1) return caZec;
+     }
    } else { s2=t.replace(',','.'); }
    var v=Number(s2);
    return (isFinite(v)&&v>0)?v:null;
  }
- function extrageNiveluriText(text){
+ function extrageNiveluriText(text,pretC){
    var curat=String(text||'').replace(/[*_\u0060]/g,'');
    var aparitii=curat.match(/NIVELURI\\s*:?\\s*[^\\n]*/gi)||[];
    for(var a=aparitii.length-1;a>=0;a--){
-     var out=[], re=/([a-zăâîșțşţ_ -]+?)\\s*=\\s*[~≈$€£]?\\s*([0-9][0-9.,\\s]*)/gi, pm;
-     while((pm=re.exec(aparitii[a]))&&out.length<8){
-       var val=normalizeazaNumarText(pm[2]);
+     var out=[], segmente=aparitii[a].split(/;|,(?=\\s*[^\\d\\s.,])/);
+     for(var sg=0;sg<segmente.length&&out.length<8;sg++){
+       var pm=/([a-z\u0103\u00e2\u00ee\u0219\u021b\u015f\u0163_ -]+?)\\s*=\\s*[~\u2248$\u20ac\u00a3]?\\s*([0-9][0-9.,\\s]*)/i.exec(segmente[sg]);
+       if(!pm) continue;
+       var val=normalizeazaNumarText(pm[2],pretC);
        if(val!==null) out.push({nume:pm[1].trim().toLowerCase(),valoare:val});
      }
      if(out.length) return out;
@@ -390,6 +451,7 @@ function paginaTranzactii(): string {
  }
  async function trimiteChat(){
    var q=ci.value.trim(); if(!q) return;
+   var simbolLaTrimitere=simbolCurent; // capturat ACUM — desenul se judecă la sosire
    ci.value=''; ct.disabled=true; ci.disabled=true;
    scrieRand('eu',q); fir.push({cine:'eu',text:q});
    var asteapta=scrieRand('kelion','…');
@@ -454,7 +516,14 @@ function paginaTranzactii(): string {
        if(text.trim()){
          asteapta.textContent='Kelion: '+text;
          fir.push({cine:'kelion',text:text});
-         aratNiveluri(extrageNiveluriText(text));
+         // Desenăm DOAR dacă graficul mai arată simbolul pe care ai întrebat
+         // (audit 9 aug) — altfel liniile ar minți pe alt simbol.
+         if(simbolLaTrimitere===simbolCurent){ aratNiveluri(extrageNiveluriText(text,pretCurentNr)); }
+         // Promisiunea paginii — „discuția se salvează în memoria lui separată"
+         // — ținută pe drumul VIU: schimbul pleacă în memoria 'tranzactii'
+         // (creierul rămâne cel UNIC, prin /api/chat).
+         fetch('/api/tranzactii/jurnal',{method:'POST',headers:{'content-type':'application/json'},
+           body:JSON.stringify({simbol:simbolLaTrimitere,intrebare:q,raspuns:text.slice(0,600)})}).catch(function(){});
        } else { asteapta.textContent='Kelion: (fără răspuns — vezi aplicația)'; }
      }
    }catch(e){ asteapta.textContent='Kelion: rețea picată: '+e; }
@@ -482,71 +551,27 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
     return dateSimbol(String(q.simbol ?? 'BTCUSDT'), String(q.interval ?? '1h'))
   })
 
-  // CHAT CU KELION ÎN CENTRU (9 aug, ownerul: „trebuie să am chat aici cu
-  // Kelion, care îmi spune detalii despre cum funcționează tranzacționarea,
-  // cum și când să intru sau să ies, caută pe net algoritmul complet de
-  // tranzacționare"). Fiecare întrebare pleacă ANCORATĂ în datele REALE ale
-  // simbolului de pe ecran (preț/lumânări din clipa aia) + memoria separată
-  // 'tranzactii'; agentul are căutarea pe net + cititul paginilor (blindajul
-  // din 5 aug), deci poate aduce algoritmi/strategii cu sursa și data.
-  // Schimbul se salvează în ACEEAȘI memorie separată, doar-admin.
-  app.post('/api/tranzactii/chat', async (req, reply) => {
+  // MEMORIA SEPARATĂ A CENTRULUI — pe drumul VIU (audit 9 aug): chatul
+  // paginii bate în /api/chat (creierul UNIC — decizia ownerului: „același
+  // model peste tot", cu căutare pe net), deci salvarea în memoria doar-admin
+  // 'tranzactii' se face AICI, cu un apel mic după fiecare schimb. Vechea rută
+  // /api/tranzactii/chat (agent separat) rămăsese COD MORT — pagina n-o mai
+  // chema pe ea, iar promisiunea „discuția se salvează în memoria lui separată"
+  // era ținută de un drum pe care nu mergea nimeni. Ștearsă; promisiunea o ține
+  // jurnalul ăsta.
+  app.post('/api/tranzactii/jurnal', async (req, reply) => {
     if (!adminul(req, reply)) return { error: 'forbidden' }
-    const b = req.body as {
-      intrebare?: string
-      simbol?: string
-      interval?: string
-      istoric?: { cine?: string; text?: string }[]
-    } | null
-    const intrebare = String(b?.intrebare ?? '').trim().slice(0, 2000)
-    if (!intrebare) return reply.code(400).send({ error: 'întrebarea e goală' })
-    const agent = gasesteAgent('tranzactii')
-    if (!agent) return reply.code(503).send({ error: 'agentul tranzactii lipsește din roster' })
-    // Datele reale din clipa întrebării — dacă piața nu se poate citi, chatul
-    // MERGE mai departe și o spune (întrebările teoretice nu depind de preț).
-    const d = await dateSimbol(String(b?.simbol ?? 'BTCUSDT'), String(b?.interval ?? '1h'))
-    const ancora = 'error' in d
-      ? `(piața nu s-a putut citi acum: ${d.error} — răspunde totuși la ce se poate fără preț viu)`
-      : rezumatPentruAgent(d)
-    const vechi = await searchMemories(config.adminEmail, 'tranzactii', [String(b?.simbol ?? '')], 2)
-    const memoria = vechi.length
-      ? `\nDIN MEMORIA TA pe simbol (analize/discuții vechi):\n` + vechi.map((m) => m.content.slice(0, 400)).join('\n---\n')
-      : ''
-    const istoric = (Array.isArray(b?.istoric) ? b.istoric : [])
-      .slice(-8)
-      .map((r) => `${r?.cine === 'kelion' ? 'Kelion' : 'Adrian'}: ${String(r?.text ?? '').slice(0, 400)}`)
-      .join('\n')
-    try {
-      const r = await cheamaAgent(
-        agent,
-        `Ești în CHATUL Centrului de Tranzacționare cu ownerul. Răspunde DIRECT la întrebarea lui, ` +
-          `ca un mentor de trading cu riscul întâi: explică pe înțeles cum funcționează ce întreabă; ` +
-          `când cere intrare/ieșire, dă niveluri CONCRETE din datele reale de mai jos (intrare, stop, ` +
-          `țintă, invalidare — „dacă… atunci…"), cu mărimea poziției ca % din capital; NU promite ` +
-          `câștiguri, NU spune „sigur". Dacă cere algoritmi/strategii/boți sau ceva ce nu știi din ` +
-          `date, CAUTĂ PE NET cu uneltele tale și adu structura completă cu SURSA și DATA fiecărei ` +
-          `afirmații. RĂSPUNS SCURT, OBLIGATORIU: cel mult 10 rânduri — esența, nu eseu; detaliile vin ` +
-          `DOAR dacă omul le cere explicit. REGULA DE FIER — DOAR PE REAL: fiecare cifră pe care o spui vine ori din datele ` +
-          `reale de mai jos, ori dintr-o sursă de pe net cu link și dată; NICIO cifră inventată, NICIO ` +
-          `„estimare" nespusă — ce nu ai măsurat spui că nu ai de unde să știi.` +
-          `\n\nDATELE REALE de pe ecran acum:\n${ancora}${memoria}` +
-          (istoric ? `\n\nCONVERSAȚIA de până acum:\n${istoric}` : '') +
-          `\n\nÎNTREBAREA lui: ${intrebare}${CERE_NIVELURI}`,
-        true,
-      )
-      const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
-      const simbolLog = 'error' in d ? String(b?.simbol ?? '?') : d.simbol
-      await addMemory(
-        config.adminEmail,
-        `[tranzactii-chat ${zi}] ${simbolLog} Î: ${intrebare.slice(0, 300)} | R: ${r.text.slice(0, 600)}`,
-        'tranzactii',
-      )
-      return { raspuns: r.text, niveluri: extrageNiveluri(r.text) }
-    } catch (e) {
-      return reply
-        .code(502)
-        .send({ error: `agentul n-a răspuns: ${e instanceof Error ? e.message.slice(0, 150) : String(e)}` })
-    }
+    const b = req.body as { simbol?: string; intrebare?: string; raspuns?: string } | null
+    const intrebare = String(b?.intrebare ?? '').trim().slice(0, 300)
+    const raspuns = String(b?.raspuns ?? '').trim().slice(0, 600)
+    if (!intrebare || !raspuns) return reply.code(400).send({ error: 'schimb gol' })
+    const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    await addMemory(
+      config.adminEmail,
+      `[tranzactii-chat ${zi}] ${String(b?.simbol ?? '?').slice(0, 20)} Î: ${intrebare} | R: ${raspuns}`,
+      'tranzactii',
+    )
+    return { salvat: true }
   })
 
   // Analiza cu ÎNVĂȚARE REALĂ: agentul primește analizele lui anterioare pe
@@ -581,7 +606,7 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
       )
       const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
       await addMemory(config.adminEmail, `[tranzactii ${zi}] ${d.simbol} [pret ${d.pret}, ${d.interval}]: ${r.text.slice(0, 900)}`, 'tranzactii')
-      return { analiza: r.text, simbol: d.simbol, pret: d.pret, sursa: d.sursa, niveluri: extrageNiveluri(r.text) }
+      return { analiza: r.text, simbol: d.simbol, pret: d.pret, sursa: d.sursa, niveluri: extrageNiveluri(r.text, Number(d.pret)) }
     } catch (e) {
       return reply
         .code(502)
