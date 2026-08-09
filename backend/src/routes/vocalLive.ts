@@ -573,9 +573,17 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // prindă doar ne-româna, deci taie DOAR când limba userului e româna —
       // un user cu engleza (sau orice altă limbă) setată își primește limba lui.
       const gardDeLimba = limbaPin === 'ro-RO'
+      let primaTura = true
       const turaAdresataAcum = (): boolean => {
         const spusa = bufUser.trim()
         if (!spusa) return true // tură de sistem (anunț/unealtă) — nu e vorbire de om
+        // BLOCAJUL LA RECE, MĂSURAT (9 aug seara, pulsul: 308 cadre de voce de
+        // la Google, 308 suprimate pe adresare, 0 spre browser): fereastra de
+        // dialog se deschide doar după ce Kelion „a vorbit", dar nimic nu
+        // trecea de gard ca să fi vorbit vreodată — mut pe veci fără „Kelion"
+        // la fiecare frază. Cine deschide sesiunea și vorbește PRIMUL, lui
+        // Kelion îi vorbește — prima tură e adresată prin definiție.
+        if (primaTura) return true
         const deLaVorba = ultimaVorbaKelion > 0 ? Date.now() - ultimaVorbaKelion : Number.POSITIVE_INFINITY
         return turaAdresata(spusa, deLaVorba)
       }
@@ -694,6 +702,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
           verdictTura = null
           verdictLimba = null
+          primaTura = false // de-acum fereastra de dialog + numele decid
           trimite({ type: 'tura_gata' })
         },
         onEroare: (motiv) => {
