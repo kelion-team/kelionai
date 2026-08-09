@@ -10,6 +10,29 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **9 aug 2026 (după-amiaza) — 7 PR-uri MERGED + VERIFICATE LIVE (`c8ebed3` =
+> master, health 200):** #926 trezirea pe nume în persona live; #927 memoria
+> unificată voce↔scris + economia pe scris (text-in→text-out); #928 constructorul
+> pe DeepSeek direct (gated pe cheie, fallback Gemini); #929 **oprirea arderii
+> fără user** — motoarele autonome (iscoade/pietar/embeddings/autonomie/self-heal/
+> triaj) OFF implicit, comutator `POST /api/admin/autonom`; cauza „creditul afișat
+> e fals": motoarele NU treceau prin `recordCost`; #930 **hărțile: dalele prin
+> domeniul nostru** (`/api/tile` proxy+cache; dovadă live: 200 image/png); #931
+> **gardul trezirii pe SERVER** (difuzorul tace determinist la vorbire între alți
+> oameni; tura suprimată se scrie în jurnal); #932 **sesiunea moartă nu mai minte**
+> (54 porți admin: 401 pe cookie mort vs 403 pe rol; dovadă live: admin fără
+> cookie → 401; `ADMIN_EMAIL` cu `.trim()`; `SESSION_SECRET`/`ADMIN_EMAIL` excluse
+> din `vps-set-env`). **RÂNDURI NOI (deschise azi):** (R1) testul LIVE al
+> trezirii/memoriei/hărților/imaginilor pe monitor = al ownerului (credit Google
+> viu din nou) — „nu pot verifica" de aici; (R2) circuitul constructor→DeepSeek
+> așteaptă cheia `CONSTRUCTOR_DEEPSEEK_KEY` pe VPS (prin Kelion `secret_pune`);
+> dovada = `modelServit: deepseek/…` în raport; (R3) banda urechii mai poate
+> scrie fonetici străine pe vorbirea PROPRIE a ownerului (turele neadresate nu se
+> mai afișează, dar transcrierea urechii Google rămâne fără buton de limbă);
+> (R4) cereri NOI în coadă, neatinse (ordinea ownerului): Trading Center ca tab
+> in-app + × + memorie separată admin; date reale „ca în live" + selecția pe
+> timp + butonul „Urmărește"; buton REC vizibil în orice tab admin.
+
 > **3 aug 2026 — EXTIRPAREA TOTALĂ OpenRouter + OpenAI (branch, PR în lucru,
 > NEVERIFICAT LIVE):** furnizorii au fost scoși din tot codul (creier =
 > Gemini-only, căutare = Serper, voce = Chirp; detalii în AI-HANDOFF §3 + §13).
