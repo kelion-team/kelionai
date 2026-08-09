@@ -166,12 +166,21 @@ function paginaTranzactii(): string {
  // stătătoare te întoarce la Kelion; în tabul din aplicație butonul dispare —
  // tabul are deja ×-ul lui.
  var iesire=document.getElementById('iesire');
- if(window.top!==window.self){ iesire.style.display='none'; }
- iesire.onclick=function(){ if(history.length>1){ history.back(); } else { location.href='/'; } };
- document.addEventListener('keydown',function(ev){ if(ev.key==='Escape'&&window.top===window.self){ iesire.onclick(); } });
+ // IESIREA MERGE DIN ORICE CONTEXT (9 aug, ownerul: „x tranzactii nu merge
+ // sau buton iesire nu merge"): in tabul din aplicatie trimite mesaj
+ // parintelui (Stage inchide tabul — history.back() intr-un iframe nu facea
+ // nimic, iar butonul parea mort); pe pagina de sine statatoare -> aplicatia.
+ function inchideCentrul(){
+   if(window.top!==window.self){ try{ window.parent.postMessage({kelion:'inchide-tranzactii'},'*'); }catch(e){} }
+   else { location.href='/'; }
+ }
+ iesire.onclick=inchideCentrul;
+ document.addEventListener('keydown',function(ev){ if(ev.key==='Escape') inchideCentrul(); });
 
  // GRAFICUL PROFESIONAL — lightweight-charts v5 (motorul TradingView, local).
- var chart=LightweightCharts.createChart(document.getElementById('graf'),{
+ var chart=null, serie=null, vol=null, ma20=null, ema50=null;
+ try{
+ chart=LightweightCharts.createChart(document.getElementById('graf'),{
    layout:{background:{color:'#0e1428'},textColor:'#8b93ad'},
    grid:{vertLines:{color:'#141b33'},horzLines:{color:'#141b33'}},
    timeScale:{timeVisible:true,secondsVisible:false,borderColor:'#1c2440'},
@@ -179,13 +188,13 @@ function paginaTranzactii(): string {
    crosshair:{mode:0},
    autoSize:true
  });
- var serie=chart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#4ade80',downColor:'#f87171',wickUpColor:'#4ade80',wickDownColor:'#f87171',borderVisible:false});
+ serie=chart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#4ade80',downColor:'#f87171',wickUpColor:'#4ade80',wickDownColor:'#f87171',borderVisible:false});
  // VOLUMUL sub lumanari (revizia: exista in date, nu era desenat) + medii
- var vol=chart.addSeries(LightweightCharts.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'',lastValueVisible:false,priceLineVisible:false});
+ vol=chart.addSeries(LightweightCharts.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'',lastValueVisible:false,priceLineVisible:false});
  vol.priceScale().applyOptions({scaleMargins:{top:0.8,bottom:0}});
  chart.priceScale('right').applyOptions({scaleMargins:{top:0.08,bottom:0.22}});
- var ma20=chart.addSeries(LightweightCharts.LineSeries,{color:'#eab308',lineWidth:1,lastValueVisible:false,priceLineVisible:false});
- var ema50=chart.addSeries(LightweightCharts.LineSeries,{color:'#60a5fa',lineWidth:1,lastValueVisible:false,priceLineVisible:false});
+ ma20=chart.addSeries(LightweightCharts.LineSeries,{color:'#eab308',lineWidth:1,lastValueVisible:false,priceLineVisible:false});
+ ema50=chart.addSeries(LightweightCharts.LineSeries,{color:'#60a5fa',lineWidth:1,lastValueVisible:false,priceLineVisible:false});
  function sma(l,n){var out=[],s2=0;for(var i=0;i<l.length;i++){s2+=l[i].inchis;if(i>=n)s2-=l[i-n].inchis;if(i>=n-1)out.push({time:Math.floor(l[i].t/1000),value:s2/n});}return out;}
  function ema(l,n){var out=[],k=2/(n+1),e=null;for(var i=0;i<l.length;i++){e=e===null?l[i].inchis:l[i].inchis*k+e*(1-k);if(i>=n-1)out.push({time:Math.floor(l[i].t/1000),value:e});}return out;}
  // LEGENDA OHLC la crosshair (revizia: graficul era mut la hover)
@@ -197,6 +206,12 @@ function paginaTranzactii(): string {
    var pct=d.open?((d.close-d.open)/d.open*100):0;
    leg.textContent='O '+d.open+'  H '+d.high+'  L '+d.low+'  C '+d.close+'  ('+(pct>=0?'+':'')+pct.toFixed(2)+'%)'+(v&&v.value?('  V '+Math.round(v.value)):'');
  });
+ }catch(e){
+   // Biblioteca lipsa/refuzata NU mai omoara scriptul: pana azi, o exceptie
+   // aici lasa TOATA pagina moarta (butoane, chat, iesire) si graficul gol,
+   // fara nicio explicatie. Acum pagina merge fara grafic si SPUNE cauza.
+   document.getElementById('viu').textContent='graficul nu s-a putut porni ('+(e&&e.message?e.message:'biblioteca /lwc nu s-a incarcat')+') — restul paginii merge; reincarca pentru grafic';
+ }
  function zecimale(x){var s2=String(x);var i=s2.indexOf('.');return i<0?2:Math.min(8,s2.length-i-1);}
 
  function eCripto(sim){ return /^[A-Z0-9]{5,}$/.test(sim) && sim.indexOf('.')<0 && sim.indexOf('^')<0; }
@@ -215,6 +230,7 @@ function paginaTranzactii(): string {
    return '#b9c2da';
  }
  function aratNiveluri(niveluri){
+   if(!serie) return;
    for(var i=0;i<liniile.length;i++){ try{serie.removePriceLine(liniile[i]);}catch(e){} }
    liniile=[];
    if(!niveluri||!niveluri.length) return;
@@ -236,7 +252,7 @@ function paginaTranzactii(): string {
      if(zilnic&&!ws){ viu.textContent='bursă clasică: lumânări ZILNICE reale (intraday tick-cu-tick cere abonament de date — se leagă când alegi furnizorul)'; }
      // Cu fluxul live pe lumânări deschis, NU rescriem seria la fiecare poll —
      // ți-ar reseta zoomul; fluxul kline ține lumânarea curentă vie.
-     if(primaIncarcare||zilnic||!ws){
+     if(serie&&(primaIncarcare||zilnic||!ws)){
        serie.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),open:c.deschis,high:c.maxim,low:c.minim,close:c.inchis}; }));
        vol.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),value:c.volum,color:c.inchis>=c.deschis?'#4ade8055':'#f8717155'}; }));
        ma20.setData(sma(j.lumanari,20)); ema50.setData(ema(j.lumanari,50));
@@ -269,7 +285,7 @@ function paginaTranzactii(): string {
            viu.textContent='● LIVE (flux Binance, tranzacție cu tranzacție) · ultima: '+oraMs(d.T)+' — milisecunda bursei'; }
        } else if(d.e==='kline'&&d.k){
          var k=d.k;
-         serie.update({time:Math.floor(k.t/1000),open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)});
+         if(serie) serie.update({time:Math.floor(k.t/1000),open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)});
        }
      }catch(e){} };
      w.onerror=function(){ if(ws===w){ viu.textContent='fluxul live a picat — rămân pe împrospătarea la 10s (rețeaua/blocantul browserului?)'; } };
@@ -345,11 +361,11 @@ function paginaTranzactii(): string {
  }
  // NIVELURI: aceeași extragere ca pe server (rândul NIVELURI: nume=valoare; …)
  function normalizeazaNumarText(brut){
-   var t=String(brut||'').trim().replace(/\s+/g,'');
+   var t=String(brut||'').trim().replace(/\\s+/g,'');
    if(!t) return null;
    var s2=t;
-   if(/^\d{1,3}([.,]\d{3})+([.,]\d{1,2})?$/.test(t)){
-     var m=t.match(/^(.*?)([.,](\d{1,2}))?$/);
+   if(/^\\d{1,3}([.,]\\d{3})+([.,]\\d{1,2})?$/.test(t)){
+     var m=t.match(/^(.*?)([.,](\\d{1,2}))?$/);
      var intreg=(m&&m[1]?m[1]:t).replace(/[.,]/g,'');
      s2=(m&&m[3])?(intreg+'.'+m[3]):intreg;
    } else { s2=t.replace(',','.'); }
@@ -358,9 +374,9 @@ function paginaTranzactii(): string {
  }
  function extrageNiveluriText(text){
    var curat=String(text||'').replace(/[*_\u0060]/g,'');
-   var aparitii=curat.match(/NIVELURI\s*:?\s*[^\n]*/gi)||[];
+   var aparitii=curat.match(/NIVELURI\\s*:?\\s*[^\\n]*/gi)||[];
    for(var a=aparitii.length-1;a>=0;a--){
-     var out=[], re=/([a-zăâîșțşţ_ -]+?)\s*=\s*[~≈$€£]?\s*([0-9][0-9.,\s]*)/gi, pm;
+     var out=[], re=/([a-zăâîșțşţ_ -]+?)\\s*=\\s*[~≈$€£]?\\s*([0-9][0-9.,\\s]*)/gi, pm;
      while((pm=re.exec(aparitii[a]))&&out.length<8){
        var val=normalizeazaNumarText(pm[2]);
        if(val!==null) out.push({nume:pm[1].trim().toLowerCase(),valoare:val});
@@ -416,10 +432,10 @@ function paginaTranzactii(): string {
          if(pas.done) break;
          sseBuf+=dec.decode(pas.value,{stream:true});
          for(;;){
-           var taie=sseBuf.indexOf('\n\n');
+           var taie=sseBuf.indexOf('\\n\\n');
            if(taie===-1) break;
            var ev=sseBuf.slice(0,taie); sseBuf=sseBuf.slice(taie+2);
-           var linii=ev.split('\n'), bucati=[];
+           var linii=ev.split('\\n'), bucati=[];
            for(var li=0;li<linii.length;li++){
              if(linii[li].indexOf('data:')===0){
                var v=linii[li].slice(5);
@@ -427,7 +443,7 @@ function paginaTranzactii(): string {
                bucati.push(v);
              }
            }
-           if(bucati.length) inghiteBucata(bucati.join('\n'));
+           if(bucati.length) inghiteBucata(bucati.join('\\n'));
          }
          asteapta.textContent='Kelion: '+text;
          jurnal.scrollTop=jurnal.scrollHeight;

@@ -791,6 +791,17 @@ export default function Stage({ user }: { user: User }) {
   // set by the promo pipeline; falls back to the timestamp name.
   const recNameRef = useRef<string | null>(null)
   const ws = useSyncExternalStore(subscribeWorkspace, getWorkspace)
+  // IEȘIREA DIN CENTRUL DE TRANZACȚIONARE (9 aug, ownerul: „buton ieșire nu
+  // merge"): pagina din iframe nu-și poate închide singură tabul — trimite
+  // mesaj, iar aici tabul se închide ca la apăsarea ×-ului.
+  useEffect(() => {
+    const laMesaj = (ev: MessageEvent): void => {
+      if (ev.origin !== window.location.origin) return
+      if ((ev.data as { kelion?: string } | null)?.kelion === 'inchide-tranzactii') closeTasksByKind('tranzactii')
+    }
+    window.addEventListener('message', laMesaj)
+    return () => window.removeEventListener('message', laMesaj)
+  }, [])
 
   // Keep the screen awake while a map/route is on the monitor, so navigation
   // never freezes when the browser would otherwise throttle the tab.
