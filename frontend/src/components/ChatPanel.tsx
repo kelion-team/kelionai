@@ -2166,6 +2166,17 @@ export default function ChatPanel({
   // The ON-THE-SPOT read below stays, for precision on explicit location turns.
   useEffect(() => {
     if (!navigator.geolocation) return
+    // Distanța în metri între două fixuri (haversine) — pentru pragul de mișcare.
+    const distantaMetri = (a: Coords, b: Coords): number => {
+      const R = 6_371_000
+      const d2r = Math.PI / 180
+      const dLat = (b.lat - a.lat) * d2r
+      const dLon = (b.lon - a.lon) * d2r
+      const s =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(a.lat * d2r) * Math.cos(b.lat * d2r) * Math.sin(dLon / 2) ** 2
+      return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
+    }
     // PRIMUL FIX RAPID, TĂCUT (9 aug, ownerul: „nu preia gps imediat"):
     // precizia ÎNALTĂ (satelit) poate dura zeci de secunde la primul fix, deci
     // GPS-ul părea că „nu se ia imediat". Cerem ÎNTÂI un fix GROSIER, aproape
@@ -2191,8 +2202,18 @@ export default function ChatPanel({
     // sesiunea vocală și creierul să știe cât de bun e fixul — nu să presupună.
     const id = navigator.geolocation.watchPosition(
       (pos) => {
-        coordsRef.current = { lat: pos.coords.latitude, lon: pos.coords.longitude }
-        precizieRef.current = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null
+        const nou = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+        // AUTO-UPDATE DOAR LA MIȘCARE REALĂ (9 aug, ownerul: „când există o
+        // diferență mai mare de 20m de la ultima poziție se auto-updatează").
+        // Sub 20m = același loc (drift de senzor) → nu rescriem (fără zgomot,
+        // fără trafic inutil spre creier); peste 20m sau primul fix →
+        // actualizăm. „La cerință" rămâne acoperit de getFreshCoords, care
+        // forțează o citire proaspătă indiferent de prag.
+        const vechi = coordsRef.current
+        if (!vechi || distantaMetri(vechi, nou) > 20) {
+          coordsRef.current = nou
+          precizieRef.current = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null
+        }
       },
       // Refusal/failure → the last known position stays (may be null); the
       // server DECLARES the void instead of inventing a place (LOCATION_NONE).
