@@ -6,6 +6,7 @@ import {
   deschideVocalLive,
   vocalLiveDisponibila,
   construiesteInstructiune,
+  oraLocalaText,
   estimareCostAudioUsd,
   estimareCostCadreUsd,
   octetiDinBase64,
@@ -360,6 +361,19 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             }
             ancoraSosita?.()
             ancoraSosita = null
+            // ORA CURGE ÎN SESIUNE (8 aug: „la «bună seara» verifică ora dată
+            // de GPS real"). Instrucțiunea are ora doar de la NAȘTEREA
+            // sesiunii, iar reluările o cară ore întregi — de-aia salutul
+            // cădea pe ora veche. Fiecare cadru de coordonate (la deschidere +
+            // la 2 min) împinge ora reală ca ancoră TĂCUTĂ (turnComplete:
+            // false — modelul nu răspunde, doar știe cât e ceasul).
+            if (ancora.nowIso && live) {
+              live.ancoreaza(
+                `[ANCORĂ DE SISTEM — context, nu răspunde la rândul ăsta] ` +
+                  `Ora locală reală a device-ului chiar acum: ${oraLocalaText(ancora.nowIso, ancora.tz)}` +
+                  `${ancora.tz ? ` (fusul ${ancora.tz})` : ''}.`,
+              )
+            }
           } else if (m.type === 'cadre') {
             const cadre = Array.isArray(m.cadre) ? m.cadre.filter((c): c is string => typeof c === 'string') : []
             primesteCadre?.(cadre)

@@ -82,7 +82,7 @@ describe('vocalLive — interpreteazaCadru', () => {
 // Sesiunea Live pornește de la zero la fiecare deschidere — fără instrucțiunea
 // care cară istoricul, Kelion ar fi un străin politicos la fiecare apăsare de
 // microfon. Funcția e pură, deci se probează aici, nu se ia pe încredere.
-import { construiesteInstructiune } from './services/vocalLive.js'
+import { construiesteInstructiune, oraLocalaText } from './services/vocalLive.js'
 
 describe('vocalLive — instrucțiunea cară memoria omului', () => {
   const persona = 'Ești Kelion.'
@@ -119,12 +119,13 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     expect(i, 'mesajul 27 e al 13-lea de la coadă — nu are ce căuta').not.toContain('mesajul 27 ')
     expect(i).toContain('mesajul 39 ')
     // Bugetul fix: numele + REGULA LIMBII (~390) + REGULA TĂCERII + ANCORA
-    // REALITĂȚII + ANCORA LIMBII (8 aug seara, antet FIX — reguli ordonate de
-    // owner una câte una, scrise o dată, nu cresc cu istoricul) + antetul
-    // blocului de istoric + blocul plafonat la 2400. Plafonul pe ISTORIC
-    // rămâne neatins — bugetul total urcă conștient cu fiecare regulă nouă.
+    // REALITĂȚII + ANCORA LIMBII + REGULA SALUTULUI (8 aug seara/noaptea,
+    // antet FIX — reguli ordonate de owner una câte una, scrise o dată, nu
+    // cresc cu istoricul) + antetul blocului de istoric + blocul plafonat la
+    // 2400. Plafonul pe ISTORIC rămâne neatins — bugetul total urcă conștient
+    // cu fiecare regulă nouă (4200 → 4800 la REGULA SALUTULUI).
     expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
-      persona.length + 4200,
+      persona.length + 4800,
     )
   })
 })
@@ -246,6 +247,39 @@ describe('vocalLive — ancora realității și tăcerea la deschidere', () => {
     const i = construiesteInstructiune('p', 'Adrian', [])
     expect(i).toContain('nu ai primit nici ora, nici locul')
     expect(i).toContain('nu inventezi')
+  })
+})
+
+// ── SALUTUL PE ORA REALĂ (8 aug: „când primește «bună seara» sau «bună
+// dimineața» verifică ora dată de GPS real al utilizatorului"). Măsurat: ora
+// era coaptă DOAR la nașterea sesiunii, iar reluările o cărau ore întregi —
+// salutul cădea pe ora veche. Acum ora curge: cadrele de coordonate împing
+// [ANCORĂ DE SISTEM] tăcut (turnComplete:false), iar instrucțiunea cere
+// verificarea salutului pe cea mai RECENTĂ oră. ─────────────────────────────
+describe('vocalLive — salutul se verifică pe ora REALĂ, împrospătată', () => {
+  it('oraLocalaText dă ora pe fusul device-ului (nu UTC, nu inventată)', () => {
+    // 21:00 UTC vara = 22:00 la Londra (BST) — exact cazul ownerului.
+    expect(oraLocalaText('2026-08-08T21:00:00.000Z', 'Europe/London')).toContain('22:00')
+    // fus necunoscut → rămâne ISO (ancoră reală, nu ghicită)
+    expect(oraLocalaText('2026-08-08T21:00:00.000Z', 'Fus/Inexistent')).toBe('2026-08-08T21:00:00.000Z')
+  })
+
+  it('instrucțiunea poartă REGULA SALUTULUI și spune că ora recentă bate ancora veche', () => {
+    const i = construiesteInstructiune('p', 'Adrian', [], { nowIso: '2026-08-08T18:30:00.000Z', tz: 'Europe/London' })
+    expect(i).toContain('REGULA SALUTULUI')
+    expect(i).toContain('saluți conform orei REALE')
+    expect(i).toContain('cea mai RECENTĂ oră primită e ora adevărată')
+  })
+
+  it('motorul are ancoreaza() TĂCUT — context fără răspuns (turnComplete: false)', () => {
+    const motor = readFileSync(new URL('./services/vocalLive.ts', import.meta.url), 'utf8')
+    expect(motor).toMatch(/ancoreaza\(text: string\): void \{[\s\S]{0,400}turnComplete: false/)
+  })
+
+  it('ruta împinge ora la FIECARE cadru de coordonate, ca [ANCORĂ DE SISTEM]', () => {
+    const ruta = readFileSync(new URL('./routes/vocalLive.ts', import.meta.url), 'utf8')
+    expect(ruta).toContain('live.ancoreaza(')
+    expect(ruta).toContain('[ANCORĂ DE SISTEM — context, nu răspunde la rândul ăsta]')
   })
 })
 

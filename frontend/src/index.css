@@ -839,6 +839,15 @@ the risk of diverging. */
   180px guard above the composer. The REAL position/scale comes as inline
   style from Adrian's layout (double-click). */
   transform: translate(calc(58vw - 14px), calc(58vh - 180px)) scale(0.42);
+  /* CLICKURILE TREC PRIN AVATAR (8 aug, Adrian: „×-ul de la tab nu e permanent
+     activ"). Stratul canvasului e un dreptunghi invizibil pe tot ecranul
+     (inset:0, z-index:1) DEASUPRA monitorului (z-index:0): unde cădea
+     dreptunghiul transformat al avatarului, clickurile pe taburi/× mureau —
+     „uneori merge, uneori nu", după așezare și mărimea ferestrei. În modul
+     monitor avatarul nu are nicio interacțiune proprie (aranjarea pe
+     dublu-click e scoasă din 24 iul, la ordinul lui), deci stratul devine
+     transparent la clickuri — monitorul primește TOT, întotdeauna. */
+  pointer-events: none;
 }
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {

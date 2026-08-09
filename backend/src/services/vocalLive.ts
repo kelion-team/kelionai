@@ -101,6 +101,23 @@ export interface AncoraRealitate {
   acc?: number
 }
 
+// Ora locală a device-ului, ca text românesc — folosită și la coacerea
+// instrucțiunii, și la împrospătările tăcute de ancoră din timpul sesiunii
+// (8 aug, ownerul: „când primește «bună seara» el verifică ora dată de GPS
+// real al utilizatorului").
+export function oraLocalaText(nowIso: string, tz?: string): string {
+  try {
+    return new Intl.DateTimeFormat('ro-RO', {
+      timeZone: tz || 'UTC',
+      dateStyle: 'full',
+      timeStyle: 'short',
+    }).format(new Date(nowIso))
+  } catch {
+    /* fus necunoscut → rămâne ISO, tot o ancoră reală */
+    return nowIso
+  }
+}
+
 export function construiesteInstructiune(
   persona: string,
   numeUser: string,
@@ -116,17 +133,7 @@ export function construiesteInstructiune(
   {
     const parti: string[] = []
     if (ancora?.nowIso) {
-      let oraText = ancora.nowIso
-      try {
-        oraText = new Intl.DateTimeFormat('ro-RO', {
-          timeZone: ancora.tz || 'UTC',
-          dateStyle: 'full',
-          timeStyle: 'short',
-        }).format(new Date(ancora.nowIso))
-      } catch {
-        /* fus necunoscut → rămâne ISO, tot o ancoră reală */
-      }
-      parti.push(`acum e ${oraText}${ancora.tz ? ` (fusul ${ancora.tz})` : ''}`)
+      parti.push(`acum e ${oraLocalaText(ancora.nowIso, ancora.tz)}${ancora.tz ? ` (fusul ${ancora.tz})` : ''}`)
     }
     if (Number.isFinite(ancora?.lat) && Number.isFinite(ancora?.lon)) {
       // Precizia e MĂSURATĂ (±m, de la senzor) — se spune când există, ca
@@ -136,13 +143,24 @@ export function construiesteInstructiune(
     }
     if (parti.length) {
       instructiune +=
-        `\nANCORA REALITĂȚII: ${parti.join('; ')}. Ancora e de la deschiderea sesiunii — ` +
-        `pentru ora exactă mai târziu, adresa precisă, vremea sau harta, chemi cere_creierului.`
+        `\nANCORA REALITĂȚII: ${parti.join('; ')}. Ora se împrospătează pe parcurs prin rânduri ` +
+        `[ANCORĂ DE SISTEM] — cea mai RECENTĂ oră primită e ora adevărată, nu cea de aici. ` +
+        `Pentru adresa precisă, vremea sau harta, chemi cere_creierului.`
     } else {
       instructiune +=
         `\nANCORA REALITĂȚII: nu ai primit nici ora, nici locul device-ului — dacă omul întreabă ` +
         `de ele, chemi cere_creierului; nu inventezi nici ora, nici locul.`
     }
+    // REGULA SALUTULUI PE ORA REALĂ (8 aug, ownerul: „când primește de ex bună
+    // seara sau bună dimineața, el verifică ora dată de GPS real al
+    // utilizatorului"). Fără regula asta modelul oglindea salutul primit sau
+    // ghicea ora — cu ancora veche de la nașterea sesiunii (reluările o țin
+    // ore întregi).
+    instructiune +=
+      `\nREGULA SALUTULUI: orice salut legat de momentul zilei („bună dimineața/ziua/seara", ` +
+      `„noapte bună") îl VERIFICI pe ora reală a device-ului (cea mai recentă ancoră) înainte să ` +
+      `răspunzi: saluți conform orei REALE, chiar dacă omul a greșit momentul zilei. Fără ancoră ` +
+      `de oră, saluți fără moment al zilei („salut", „bună") — nu ghicești.`
   }
   // REGULA LIMBII pe sesiunea VIE (Adrian, 8 aug: „trebuie să vorbească în
   // orice limbă Kelion"). Măsurat înainte: instrucțiunea nu spunea NIMIC
@@ -237,6 +255,12 @@ export interface VocalLive {
    *  un rând text către model, pe care el îl SPUNE cu vocea lui. Folosit de
    *  rută când un ordin de constructor pornit din sesiune se termină. */
   anunta(text: string): void
+  /** Împrospătează TĂCUT contextul (8 aug: „la «bună seara» verifică ora dată
+   *  de GPS real"): un rând [ANCORĂ DE SISTEM] cu turnComplete:false — modelul
+   *  îl primește drept context și NU răspunde. Folosit de rută la fiecare
+   *  cadru de coordonate (ora reală curge în sesiune, nu îngheață la naștere,
+   *  iar reluările nu mai trăiesc cu ora veche de ore). */
+  ancoreaza(text: string): void
   /** Răspunde la un apel de unealtă, cu rezultatul (obiect JSON). */
   raspundeUnealta(id: string, name: string, rezultat: unknown): void
   /** Închide sesiunea. */
@@ -556,6 +580,20 @@ export function deschideVocalLive(
         ws?.send(
           JSON.stringify({
             clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true },
+          }),
+        )
+      } catch {
+        /* eroarea reală vine pe canalul 'error' */
+      }
+    },
+    ancoreaza(text: string): void {
+      if (inchisa || !gata || !text.trim()) return
+      try {
+        // turnComplete: FALSE — rândul intră în context fără să provoace un
+        // răspuns; ancora orei nu trebuie să-l facă pe Kelion să vorbească.
+        ws?.send(
+          JSON.stringify({
+            clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: false },
           }),
         )
       } catch {
