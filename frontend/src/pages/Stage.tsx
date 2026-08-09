@@ -304,7 +304,12 @@ function BuildSurface({ zoom }: { zoom: number }) {
       try {
         const r = await fetch('/api/constructor/live', { credentials: 'include' })
         if (!alive) return
-        if (r.status === 403) {
+        if (r.status === 401) {
+          // Sesiune moartă ≠ „nu ești admin" (9 aug): serverul desparte acum
+          // 401 (cookie expirat/invalidat) de 403 (rol) — și noi la fel.
+          setNote(uiStrings().sessionExpired)
+          setJobs([])
+        } else if (r.status === 403) {
           setNote(uiStrings().buildOnlyAdmin)
           setJobs([])
         } else if (!r.ok) {

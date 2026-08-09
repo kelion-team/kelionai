@@ -318,7 +318,10 @@ export const config = {
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
-  adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com').toLowerCase(),
+  // .trim() OBLIGATORIU (9 aug): era SINGURUL câmp de email fără trim — un
+  // spațiu la coada lui ADMIN_EMAIL (env-ul e scris de mașini) făcea tăcut din
+  // owner un „customer". Vecinii (allowlist, mail.*) trimau deja toți.
+  adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com').trim().toLowerCase(),
   bridgeSecret: env(...ENV_ALIASES.bridgeSecret),
   githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
   githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),
@@ -331,5 +334,5 @@ export function isAllowed(email: string): boolean {
 }
 
 export function roleFor(email: string): 'admin' | 'customer' {
-  return email.toLowerCase() === config.adminEmail ? 'admin' : 'customer'
+  return email.trim().toLowerCase() === config.adminEmail ? 'admin' : 'customer'
 }

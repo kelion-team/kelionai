@@ -117,14 +117,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // the button.
   app.get('/api/admin/unlock/status', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const armed = await isLockArmed()
     return reply.send({ armed, unlocked: !armed || hasUnlock(req, user.email) })
   })
 
   app.post<{ Body: { secret?: string } }>('/api/admin/unlock', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const secret = String(req.body?.secret ?? '')
     if (!secret || !(await verifyLockSecret(user.email, secret)))
       return reply.code(401).send({ error: 'cod_gresit' })
@@ -136,7 +138,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // only from an ALREADY unlocked session (an open panel implies that).
   app.post<{ Body: { secret?: string } }>('/api/admin/unlock/secret', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const armed = await isLockArmed()
     if (armed && !hasUnlock(req, user.email)) return reply.code(423).send({ error: 'admin_locked' })
     const secret = String(req.body?.secret ?? '').trim()
@@ -151,7 +154,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // details, + a button to save the current version.
   app.get('/api/admin/backups', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // AUDIT ADMIN (3 aug): citirea picată (token lipsă / GitHub ne-ok) NU mai
     // e servită ca listă goală — 503, iar panoul scrie „nu pot citi
     // versiunile", distinct de „nicio versiune salvată încă".
@@ -161,7 +165,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
   app.post<{ Body: { note?: string } }>('/api/admin/backups', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const r = await createRecoveryPoint(String(req.body?.note ?? ''))
     if (!r.ok) return reply.code(500).send(r)
     return reply.send(r)
@@ -171,7 +176,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // starts by itself. Heavy action → confirmation is in the UI, double.
   app.post<{ Body: { tag?: string } }>('/api/admin/backups/restore', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const r = await restoreToPoint(String(req.body?.tag ?? ''))
     if (!r.ok) return reply.code(500).send(r)
     return reply.send(r)
@@ -180,7 +186,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // ROW 19 — inbound contact@ emails + the Secretary's auto-replies (admin only).
   app.get('/api/admin/inbound', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ emails: await listInboundEmails(50) })
   })
 
@@ -190,7 +197,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // only.
   app.get('/api/admin/mailbox-live', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // AUDIT ADMIN (3 aug): răspunsul spune și DE CE e goală lista — `ok:false`
     // + `motiv` deosebește „cutia e goală" de „IMAP a picat" / „MAIL_PASS
     // lipsă"; UI-ul desenează trei texte diferite, nu unul ambiguu.
@@ -203,7 +211,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // care din ele s-a întâmplat. Întoarce câte s-au șters DE FAPT.
   app.post<{ Body: { uids?: number[] } }>('/api/admin/mailbox-delete', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const uids = Array.isArray(req.body?.uids) ? req.body.uids.map(Number) : []
     if (!uids.length) return reply.code(400).send({ error: 'uids_lipsa' })
     const r = await deleteInboxMessages(uids)
@@ -215,7 +224,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // aggregate-only by design — no store exposes user identities.
   app.get('/api/admin/stores', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const [checks, downloads] = await Promise.all([checkStores(), getDownloadStats()])
     return reply.send({ stores: checks, downloads })
   })
@@ -223,7 +233,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // List users with message counts (admin only).
   app.get('/api/admin/users', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const u = await citesteUtilizatori()
     // 0 UTILIZATORI ≠ NU POT CITI (M7b, 8 aug). `listUsers()` întorcea `[]` și
     // când baza nu răspundea — panoul desena „niciun utilizator" peste o citire
@@ -235,7 +246,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // Full chat history for one user (admin only).
   app.get<{ Querystring: { email?: string } }>('/api/admin/history', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const email = req.query.email
     if (!email) return reply.code(400).send({ error: 'bad_request', message: 'email required' })
     const h = await citesteIstoric(email)
@@ -250,7 +262,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // half-translated conversation is never mistaken for a full one.
   app.post<{ Body: { texts?: unknown; target?: unknown } }>('/api/admin/translate', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const raw = req.body?.texts
     const texts = Array.isArray(raw) ? raw.slice(0, 300).map((t) => String(t ?? '')) : []
     if (texts.length === 0) return reply.send({ translations: [], failed: 0 })
@@ -262,7 +275,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // M7b (8 aug): o citire picată NU mai iese ca „total: 0" — iese 503 cu motivul.
   app.get('/api/admin/costs', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const c = await citesteRezumatCost()
     if (!c.citit) return reply.code(503).send({ error: 'costuri_necitibile', motiv: c.motiv })
     return reply.send(c.valoare)
@@ -271,7 +285,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // Capability gaps — what users asked for that Kelion can't do yet (admin only).
   app.get<{ Querystring: { all?: string } }>('/api/admin/gaps', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ gaps: await getCapabilityGaps(req.query.all === '1') })
   })
 
@@ -282,7 +297,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // master, red runs, disk, DB, brain balance).
   app.get('/api/admin/audit', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const [healthRaw, jobs, clientErrors] = await Promise.all([
       systemHealth().catch(() => '{}'),
       // listBuildJobs întoarce null la eșec (auditul admin, 3 aug); aici e
@@ -312,14 +328,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // autonomously.
   app.post('/api/admin/gaps/triage', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await triageGaps())
   })
 
   // Mark a gap resolved / reopen it (admin only). Used by the "Reject" button.
   app.post<{ Body: { id?: number; resolved?: boolean } }>('/api/admin/gaps/resolve', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const id = Number(req.body?.id)
     if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad_request' })
     await setGapResolved(id, req.body?.resolved !== false)
@@ -351,14 +369,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // motivul scris pe față, nu un zero care arată liniștitor.
   app.get('/api/admin/credit-ai', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const { crediteAI } = await import('../services/creditAI.js')
     return reply.send({ furnizori: await crediteAI() })
   })
 
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const [vps, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
       resurseGazda(),
       // THE SERPER PILL: the REAL remaining search credit read from Serper's
@@ -477,7 +497,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // (pastila revine la ✓/⚠), niciodată un zero fals.
   app.post<{ Body: { gbp?: number | string | null } }>('/api/admin/gemini-credit', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const raw = req.body?.gbp
     const n = typeof raw === 'string' ? Number(raw.replace(',', '.').trim()) : raw
     if (raw == null || raw === '' || !Number.isFinite(n) || (n as number) < 0) {
@@ -498,7 +519,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // care era soldul OpenRouter.)
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // M7b (8 aug): banii nu se desenează din zerouri inventate — dacă jurnalul
     // de cost nu se poate citi, pagina primește 503 cu motivul, nu „£0.00".
     const citire = await citesteRezumatCost()
@@ -534,7 +556,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // ORDIN #6G: admin view of all credit transactions (status, amount, credits, user).
   app.get('/api/admin/transactions', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const t = await citesteTranzactii(200)
     if (!t.citit) return reply.code(503).send({ error: 'tranzactii_necitite', motiv: t.motiv })
     return reply.send({ transactions: t.valoare })
@@ -544,7 +567,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // long they stayed (sum of presence-ping time), plus their latest sessions.
   app.get('/api/admin/activity', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // AUDIT ADMIN (3 aug): DB picat NU mai răspunde 200 cu liste goale („nu
     // s-a strâns activitate" nemăsurat) — 500, iar panoul scrie „nu pot citi".
     const activity = await getUserActivity()
@@ -556,7 +580,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // city, IP, total, today.
   app.get('/api/admin/demos', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // AUDIT ADMIN (3 aug): zerourile fabricate de vechiul `empty` nu mai ies
     // pe ușă — o citire picată e 500, nu „Vizite 0/0".
     const demos = await getDemoStats()
@@ -568,7 +593,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // ping of the default chat + work models through Gemini direct (services/brain.ts).
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // DOVADA ULTIMULUI AUTO-UPGRADE (Adrian, 7 aug: „clar cu dovadă"). Scorul
     // candidatului ȘI al modelului activ, probate în aceeași trecere, plus ce
     // sarcini a picat. `null` când nu s-a verificat încă — „nu pot verifica",
@@ -580,7 +606,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // with a 1-token call; reports ok/fail without ever exposing the key value.
   app.get('/api/admin/keys', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyKeys())
   })
 
@@ -591,7 +618,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // and SESSION_SECRET.
   app.get('/api/admin/token-checks', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const checks = await runAllTokenChecks()
     const ok = checks.filter((c) => c.status === 'ok').length
     const notConfigured = checks.filter((c) => c.status === 'not_configured').length
@@ -610,7 +638,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // the length.
   app.get('/api/admin/env-check', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({
       vars: envCheck(),
       summary: envSummary(),
@@ -629,12 +658,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // store the DISABLED list (default: all active).
   app.get('/api/admin/gestures', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ disabled: await getDisabledGestures() })
   })
   app.post<{ Body: { disabled?: string[] } }>('/api/admin/gestures', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const list = Array.isArray(req.body?.disabled) ? req.body.disabled : []
     await setDisabledGestures(list)
     // Gesturile sunt o setare GLOBALĂ, dar de la 7 aug fiecare sesiune își ține
@@ -652,12 +683,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // deploy, with my approval" — exactly the requested gate.
   app.get('/api/admin/kelion-tools', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ tools: await listKelionTools() })
   })
   app.post<{ Body: { id?: number; approve?: boolean } }>('/api/admin/kelion-tools', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const id = Number(req.body?.id ?? 0)
     if (!id) return reply.code(400).send({ error: 'bad_request' })
     const ok = await decideKelionTool(id, req.body?.approve === true)
@@ -684,7 +717,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // Acum răspunsul POARTĂ rezultatul fiecărui pas, iar un refuz e 502.
   app.post('/api/admin/reset-vps', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const { runRunbook, citesteRaspunsRunbook } = await import('../services/runbooks.js')
     const pasi = []
     for (const nume of ['restart-app', 'restart-caddy']) {
@@ -701,7 +735,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/api/admin/reset-counters', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const r = await resetCostCounters()
     // ȘTERGEREA PICATĂ răspundea 200 cu `{ok:false, sterse:0}`, iar panoul se
     // uita DOAR la statusul HTTP (`r?.ok`) — deci scria „Resetat ✓" peste niște
@@ -719,7 +754,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // of each payment→AI link. STRICTLY admin.
   app.get('/api/admin/money-circuit', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // M7b (8 aug): costul e o CITIRE — picată, se spune cu motiv (costRealMotiv),
     // nu se maschează în zerouri și nu doboară restul panoului.
     const cost = await citesteRezumatCost()
@@ -776,13 +812,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // own evidence.
   app.get('/api/admin/autonomie/dovezi', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await dovezileAutonomiei())
   })
 
   app.post<{ Body: { oprit?: boolean } }>('/api/admin/autonomie/pauza', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const oprit = req.body?.oprit === true
     await setOpsPaused(oprit)
     return reply.send({ oprit })
@@ -794,7 +832,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // autonomia orară. Implicit OPRIT; se pornește DOAR de aici, la nevoie.
   app.post<{ Body: { activ?: boolean } }>('/api/admin/autonom', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const activ = req.body?.activ === true
     await seteazaAutonom(activ)
     return reply.send({ activ })
@@ -810,7 +849,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // `redirect_url` must be declared in the Enable Banking Control Panel.
   app.post('/api/admin/plati/legatura/start', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const redirectUrl = `https://${req.headers.host ?? 'kelionai.app'}/admin`
     const r = await incepeLegaturaPlati(redirectUrl)
     if ('error' in r) return reply.code(502).send(r)
@@ -819,7 +859,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: { code?: string } }>('/api/admin/plati/legatura/finalizeaza', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const r = await finalizeazaLegaturaPlati(String(req.body?.code ?? ''))
     if ('error' in r) return reply.code(502).send(r)
     return reply.send(r)
@@ -833,7 +874,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // null, never as zeros (rule no. 1).
   app.get('/api/admin/plati', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({
       rezumat: await rezumatPlati(),
       neatribuite: await listeazaPlatiNeatribuite(),
@@ -845,19 +887,22 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/admin/plati/coduri-neplatite', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ ok: true, coduri: await listeazaCoduriNeplatite() })
   })
 
   app.get('/api/admin/plati/incasate', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ ok: true, plati: await listeazaPlatiIncasate() })
   })
 
   app.get('/api/admin/plati/totaluri', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ ok: true, totaluri: await totaluriPlati() })
   })
 
@@ -866,7 +911,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // a double credit is refused by the unique index, not by anyone's care).
   app.post<{ Body: { id?: number; email?: string } }>('/api/admin/plati/neatribuite/atribuie', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const id = Number(req.body?.id ?? 0)
     const email = String(req.body?.email ?? '').trim()
     if (!(id > 0) || !email.includes('@')) return reply.code(400).send({ error: 'bad_request' })
@@ -878,7 +924,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: { id?: number } }>('/api/admin/plati/neatribuite/ignora', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const id = Number(req.body?.id ?? 0)
     if (!(id > 0)) return reply.code(400).send({ error: 'bad_request' })
     const ok = await ignoraPlataNeatribuita(id)
@@ -898,7 +945,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     '/api/admin/user',
     async (req, reply) => {
       const user = getSessionUser(req)
-      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
       const email = String(req.body?.email ?? '').trim().toLowerCase()
       const action = String(req.body?.action ?? '')
       if (!email) return reply.code(400).send({ error: 'bad_request' })
@@ -932,7 +980,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // Leads captured from visitors who left an email (admin only).
   app.get('/api/admin/leads', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // AUDIT ADMIN (3 aug): eșec de DB → 500, nu „Niciun contact încă".
     const leads = await listLeads()
     if (!leads) return reply.code(500).send({ error: 'db_unreadable' })
@@ -944,7 +993,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // send" bug).
   app.get('/api/admin/contact-messages', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ messages: await listContactMessages() })
   })
 
@@ -953,7 +1003,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     '/api/admin/lead/email',
     async (req, reply) => {
       const user = getSessionUser(req)
-      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
       const to = String(req.body?.to ?? '').trim()
       const subject = String(req.body?.subject ?? '').trim()
       const body = String(req.body?.body ?? '')
@@ -975,7 +1026,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // List conversations, read one, and reply — the owner's inbox for the widget.
   app.get('/api/admin/visitor-chats', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     // AUDIT ADMIN (3 aug): DB picat → 500, nu „Nicio conversație încă" — pot
     // exista vizitatori care scriu chiar atunci.
     const convos = await listVisitorConvos()
@@ -987,7 +1039,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     '/api/admin/visitor-chat',
     async (req, reply) => {
       const user = getSessionUser(req)
-      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
       // The body is shared with the public route (single source in demo.ts);
       // only the admin gate above is added here.
       return pollVisitorChat(req, reply)
@@ -998,7 +1051,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     '/api/admin/visitor-chat/reply',
     async (req, reply) => {
       const user = getSessionUser(req)
-      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
       const conv = String(req.body?.conv ?? '')
       const text = String(req.body?.text ?? '')
       if (!conv || !text.trim()) return reply.code(400).send({ error: 'bad_request' })

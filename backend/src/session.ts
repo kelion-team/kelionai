@@ -79,7 +79,14 @@ export function adminSiId(
   rawId: string,
 ): number | null {
   const user = getSessionUser(req)
-  if (!user || user.role !== 'admin') {
+  // 401 pe sesiune moartă, 403 DOAR pe rol — un cookie expirat nu are voie să
+  // arate ca „nu ești admin" (9 aug, ownerul: „sistemul dă err 403, ca și cum
+  // nu sunt admin" — cauza reală era sesiunea, nu rolul).
+  if (!user) {
+    void reply.code(401).send({ error: 'unauthorized' })
+    return null
+  }
+  if (user.role !== 'admin') {
     void reply.code(403).send({ error: 'forbidden' })
     return null
   }
