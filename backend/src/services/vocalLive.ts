@@ -60,10 +60,19 @@ export const VOCAL_LIVE_VOICE = process.env.VOCAL_LIVE_VOICE || 'Charon'
  *  jurnal, nu măsurătoare de bani) — factura adevărată e doar la Google. */
 export const USD_MIN_AUDIO_INTRARE = 0.005
 export const USD_MIN_AUDIO_IESIRE = 0.018
+// CALIBRARE PE FACTURA REALĂ (9 aug, capturile ownerului): £20 puse pe 8 aug
+// seara → sold −£1.32 a doua zi la 07:29, deci Google a facturat ~£21.32
+// (~$27) în ~11 ore; registrul nostru înregistrase în aceeași fereastră doar
+// ~$8 pe kind „gemini" — subnumărare ~×3. Formula pe octeți NU e greșită, dar
+// tarifele publicate nu acoperă tot ce facturează Google pe sesiunea live
+// (reluări care re-procesează contextul, fereastra glisantă, tokenizarea reală
+// a video-ului). Până avem o factură care contrazice, estimarea se înmulțește
+// cu factorul MĂSURAT — declarat, re-calibrabil la următorul punct real.
+export const CALIBRARE_LIVE = 3
 export function estimareCostAudioUsd(octetiIntrare: number, octetiIesire: number): number {
   const minIntrare = octetiIntrare / (2 * 16_000) / 60
   const minIesire = octetiIesire / (2 * 24_000) / 60
-  return minIntrare * USD_MIN_AUDIO_INTRARE + minIesire * USD_MIN_AUDIO_IESIRE
+  return (minIntrare * USD_MIN_AUDIO_INTRARE + minIesire * USD_MIN_AUDIO_IESIRE) * CALIBRARE_LIVE
 }
 
 /** Costul cadrelor de cameră trimise în sesiunea live (8 aug: „trebuie să
@@ -75,7 +84,8 @@ export function estimareCostAudioUsd(octetiIntrare: number, octetiIesire: number
 export const TOKENI_PE_CADRU_EST = 516
 export const USD_1M_TOKENI_INTRARE = 0.75
 export function estimareCostCadreUsd(nrCadre: number): number {
-  return (nrCadre * TOKENI_PE_CADRU_EST * USD_1M_TOKENI_INTRARE) / 1_000_000
+  // Aceeași calibrare măsurată ca la audio (vezi CALIBRARE_LIVE, mai sus).
+  return ((nrCadre * TOKENI_PE_CADRU_EST * USD_1M_TOKENI_INTRARE) / 1_000_000) * CALIBRARE_LIVE
 }
 
 /** Octeții REALI dintr-un șir base64, fără decodare (aritmetică pură). */

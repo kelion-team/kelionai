@@ -165,17 +165,24 @@ describe('vocalLive — reluarea sesiunii la limita de durată', () => {
 // ── COSTUL SESIUNII LIVE (8 aug: „creditul se consumă cu viteza luminii") ────
 // Ruta vocii live nu scria NIMIC în cost_events — pastila scădea orbește pe
 // lângă voce. Estimarea e pură și se probează aici pe cifre de mână.
-import { estimareCostAudioUsd, octetiDinBase64 } from './services/vocalLive.js'
+import { estimareCostAudioUsd, octetiDinBase64, CALIBRARE_LIVE } from './services/vocalLive.js'
 
 describe('vocalLive — costul sesiunii, din octeții retransmiși', () => {
-  it('un minut de microfon (PCM16 16kHz) costă exact tariful de intrare', () => {
-    // 60s × 16000 mostre/s × 2 octeți = 1.920.000 octeți → $0.005
-    expect(estimareCostAudioUsd(60 * 16_000 * 2, 0)).toBeCloseTo(0.005, 10)
+  // CALIBRAREA MĂSURATĂ (9 aug): Google a facturat ~£21.32 în ~11h în care
+  // registrul nostru estimase ~$8 — tarifele pe octeți subnumărau ~×3.
+  // Formulele rămân, înmulțite cu factorul real (declarat, re-calibrabil).
+  it('calibrarea pe factura reală din 9 aug e aplicată (×3)', () => {
+    expect(CALIBRARE_LIVE).toBe(3)
   })
 
-  it('un minut de glas (PCM16 24kHz) costă exact tariful de ieșire', () => {
-    // 60s × 24000 mostre/s × 2 octeți = 2.880.000 octeți → $0.018
-    expect(estimareCostAudioUsd(0, 60 * 24_000 * 2)).toBeCloseTo(0.018, 10)
+  it('un minut de microfon (PCM16 16kHz) costă tariful de intrare × calibrare', () => {
+    // 60s × 16000 mostre/s × 2 octeți = 1.920.000 octeți → $0.005 × 3
+    expect(estimareCostAudioUsd(60 * 16_000 * 2, 0)).toBeCloseTo(0.005 * CALIBRARE_LIVE, 10)
+  })
+
+  it('un minut de glas (PCM16 24kHz) costă tariful de ieșire × calibrare', () => {
+    // 60s × 24000 mostre/s × 2 octeți = 2.880.000 octeți → $0.018 × 3
+    expect(estimareCostAudioUsd(0, 60 * 24_000 * 2)).toBeCloseTo(0.018 * CALIBRARE_LIVE, 10)
   })
 
   it('zero octeți = zero dolari — nu se inventează un cost pe sesiune goală', () => {
@@ -321,9 +328,8 @@ describe('vocalLive — precizia GPS măsurată intră în ancoră', () => {
 import { estimareCostCadreUsd, TOKENI_PE_CADRU_EST } from './services/vocalLive.js'
 
 describe('vocalLive — camera intră în sesiune, cu costul estimat pe față', () => {
-  it('costul cadrelor: N cadre × ~516 tokeni × tariful de intrare', () => {
-    // 24 cadre (un minut la 1 cadru/2,5s) ≈ $0.0093 — sub costul audio pe minut
-    expect(estimareCostCadreUsd(24)).toBeCloseTo((24 * TOKENI_PE_CADRU_EST * 0.75) / 1e6, 10)
+  it('costul cadrelor: N cadre × ~516 tokeni × tariful de intrare × calibrarea din 9 aug', () => {
+    expect(estimareCostCadreUsd(24)).toBeCloseTo(((24 * TOKENI_PE_CADRU_EST * 0.75) / 1e6) * CALIBRARE_LIVE, 10)
     expect(estimareCostCadreUsd(0)).toBe(0)
   })
 

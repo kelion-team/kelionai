@@ -55,3 +55,23 @@ describe('ochii pe rezultat — captura browserului ajunge la OCHII modelului', 
     expect(chat).toMatch(/JSON\.stringify\(faraOchi\)\}\$\{OCHI_MARCAJ\}/)
   })
 })
+
+// ── CREDITUL MORT SPUS PE FAȚĂ (9 aug: sold AI Studio −£1.32, card refuzat —
+// Kelion inventa scuze peste turele care mureau pe cotă). Sigiliul ține
+// detectorul în plasa de siguranță: DOAR adminul primește cauza reală, userii
+// rămân pe mesajul neutru din regula de pe 1 aug. ───────────────────────────
+describe('creditul mort — adminul află cauza reală, userii rămân pe neutru', () => {
+  const chat = readFileSync(new URL('./routes/chat.ts', import.meta.url), 'utf8')
+
+  it('detectorul e legat de admin ȘI de clasificarea de cotă', () => {
+    expect(chat).toContain('if (isAdminUser && isRateLimit)')
+    expect(chat).toContain('[CREDIT GOOGLE EPUIZAT]')
+    expect(chat).toContain('[COTĂ GEMINI ATINSĂ]')
+  })
+
+  it('desparte creditul epuizat de limita de viteză prin sonda geminiLive', () => {
+    expect(chat).toMatch(/geminiLive\(\)\.catch/)
+    expect(chat).toContain("g.reason === 'depleted'")
+    expect(chat).toContain("g.reason === 'quota'")
+  })
+})
