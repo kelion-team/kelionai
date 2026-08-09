@@ -237,6 +237,21 @@ describe('vocalLive — ancora realității și tăcerea la deschidere', () => {
     expect(i).toContain('Saluți DOAR dacă el te salută primul')
   })
 
+  // 9 aug, ownerul: „el trebuie să răspundă DOAR când îl strigi Kelion, și asta
+  // e implementată dar nu funcționează". MĂSURAT: calea LIVE nu avea NICIO
+  // regulă de trezire — o aducem aici, cu contractul de pe calea ambientală.
+  it('instrucțiunea poartă REGULA TREZIRII PE NUME (răspunde DOAR când e strigat)', () => {
+    const i = construiesteInstructiune('persona', 'Adrian', [])
+    expect(i).toContain('REGULA TREZIRII PE NUME')
+    // trezirea e pe NUME (Kelion/Kei), nu pe orice vorbire
+    expect(i).toContain('Kelion')
+    expect(i).toContain('Kei')
+    // când NU e strigat, tace complet — asta e miezul cererii
+    expect(i).toContain('TACI complet')
+    // un răspuns la propria întrebare tot îl trezește (nu pierde firul)
+    expect(i).toContain('răspunsul la ea')
+  })
+
   it('cu oră+fus+GPS, ancora e coaptă în instrucțiune cu valorile reale', () => {
     const i = construiesteInstructiune('p', 'Adrian', [], {
       nowIso: '2026-08-08T18:30:00.000Z',
