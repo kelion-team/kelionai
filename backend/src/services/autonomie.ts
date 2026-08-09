@@ -71,6 +71,7 @@ import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
+import { autonomActiv } from './autonomActiv.js'
 import { utcDay } from './timeContext.js'
 import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
@@ -943,6 +944,13 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   // Exactly his rule #1, in its most expensive form: the panel ASSERTED a
   // state nobody had measured. The check comes first, before any brain turn,
   // and costs one database read — zero tokens.
+  // OFF BY DEFAULT (9 aug, ownerul: „off default, dacă nu trebuie nu se
+  // autoactivează"). Comutatorul-master, verificat ÎNAINTE de orice tură de
+  // creier: fără el pornit, bucla nu umple coada constructorului și nu cheltuie
+  // niciun token. Separat de isOpsPaused (aia rămâne frâna clasică).
+  if (!(await autonomActiv().catch(() => false))) {
+    return { pornit: false, motiv: '⏹ autonomie OPRITĂ (implicit) — pornește-o din admin când e nevoie' }
+  }
   if (await isOpsPaused().catch(() => false)) {
     return { pornit: false, motiv: '⏸ oprit de tine — nu fac nimic și nu cheltuiesc nimic' }
   }

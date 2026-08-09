@@ -128,6 +128,12 @@ vi.mock('./brain.js', () => ({
 let opritDeOwner = false
 vi.mock('./runbooks.js', () => ({ isOpsPaused: async () => opritDeOwner }))
 
+// Comutatorul-master al motoarelor autonome (9 aug): OFF by default în producție.
+// În teste îl ținem PORNIT (autonomOprit=false) ca testele de comportament să
+// ruleze; un test dedicat îl trece pe OFF ca să probeze că bucla nu cheltuie.
+let autonomOprit = false
+vi.mock('./autonomActiv.js', () => ({ autonomActiv: async () => !autonomOprit }))
+
 vi.mock('./secrete.js', () => ({
   listeazaSecrete: async () => JSON.stringify({ secrete: secreteExistente.map((n) => ({ nume: n })) }),
 }))
@@ -202,6 +208,7 @@ beforeEach(() => {
   uitaVocea('adrianenc11@gmail.com')
   uitaFata('adrianenc11@gmail.com')
   opritDeOwner = false
+  autonomOprit = false
 })
 
 // THE SWITCH (Adrian, Jul 31, after seeing $27.84 burned in 3½ hours and
@@ -226,6 +233,18 @@ describe('întrerupătorul ownerului chiar întrerupe', () => {
     opritDeOwner = false
     const r = await poateSaLucreze()
     expect(r.motiv).not.toContain('oprit de tine')
+  })
+
+  // OFF BY DEFAULT (Adrian, 9 aug: „nu am folosit 1 sec… clar altceva arde" +
+  // „off default, dacă nu trebuie nu se autoactivează"). Comutatorul-master al
+  // motoarelor autonome e OPRIT implicit; bucla nu cheltuie nimic până e pornit.
+  it('cu autonomia OPRITĂ (implicit): nicio tură de creier, niciun ordin', async () => {
+    autonomOprit = true
+    const r = await poateSaLucreze()
+    expect(r.pornit).toBe(false)
+    expect(r.motiv).toContain('autonomie OPRITĂ')
+    expect(turiDeMaini).toBe(0)
+    expect(jobs.length).toBe(0)
   })
 })
 
