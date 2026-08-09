@@ -18,6 +18,7 @@ import {
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import { turaAdresata } from '../services/numeStrigat.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
+import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
 import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost, listBuildJobs, getSpeechLang } from '../db.js'
@@ -120,6 +121,10 @@ export const pulsVoce = {
   suprimateAdresare: 0,
   suprimateLimba: 0,
   intreruperiModel: 0,
+  // Barge-in-ul SERVERULUI (9 aug seara, „vorbește peste mine"): de câte ori
+  // vocea omului l-a oprit pe Kelion + câte cadre Google s-au aruncat după.
+  taieriPeVoceaOmului: 0,
+  suprimateDupaTaiere: 0,
   varianta: '',
   ultimaEroare: '',
   laUltimulCadru: 0,
@@ -278,6 +283,19 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // altfel primele cuvinte ale omului ar dispărea exact ca în bugul vechi
     // „nu mă aude la prima frază".
     const preCoada: Buffer[] = []
+    // ── TĂIEREA LA VOCEA OMULUI (9 aug seara, ownerul: „vorbește peste mine") ─
+    // NO_INTERRUPTION (#946) l-a făcut imun la ecou, dar și la OM. Serverul
+    // decide în locul lui Google: voce susținută peste replica lui → redarea
+    // din browser se golește (intrerupt) și restul replicii se aruncă.
+    // `aecActiv` vine de la browser — fără anulare de ecou detectorul ar auzi
+    // chiar vocea lui Kelion și l-ar tăia singur (regresia din 8 aug), deci
+    // rămâne oprit până la raport.
+    let aecActiv = false
+    let taiatDeVoce = false
+    // Ceasul DIFUZORULUI: cadrele sosesc în rafale, mai repede decât se aud —
+    // estimăm până CÂND se aude vocea din durata PCM reală (24 kHz, 16 bit).
+    let redareEstimataPanaLa = 0
+    const detectorVoce = creeazaDetectorVocePeste()
 
     const trimite = (o: unknown): void => {
       if (inchis) return
@@ -412,6 +430,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // în timp ce vorbește, fără să treacă prin ușă.
             live?.scrieCadru((m as { data: string }).data)
             cadreTrimise++
+          } else if (m.type === 'aec') {
+            // Browserul raportează dacă bucla de anulare a ecoului e vie —
+            // doar atunci tăierea la vocea omului are voie să judece.
+            aecActiv = (m as { activ?: unknown }).activ === true
+            app.log.info(`vocal-live: AEC raportat de browser: ${aecActiv ? 'activ — tăierea la voce armată' : 'INACTIV — tăierea la voce oprită (ecou netratat)'}`)
           }
         } catch {
           /* cadru text neînțeles — îl ignorăm, audio rămâne pe binar */
@@ -419,6 +442,16 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         return
       }
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
+      // Detectorul rulează pe FIECARE cadru (podeaua de zgomot învață și când
+      // Kelion tace); verdictul de tăiere e posibil doar cât se AUDE Kelion
+      // (ceasul difuzorului) și doar cu AEC-ul viu.
+      if (detectorVoce.proceseazaCadru(buf, aecActiv && Date.now() < redareEstimataPanaLa)) {
+        taiatDeVoce = true
+        redareEstimataPanaLa = 0
+        pulsVoce.taieriPeVoceaOmului++
+        trimite({ type: 'intrerupt' }) // browserul golește redarea ACUM
+        app.log.info('[VOCE] omul a vorbit peste Kelion — i-am tăiat vorba (barge-in pe server)')
+      }
       if (live) {
         live.scrieAudio(buf)
         octetiIn += buf.length
@@ -592,11 +625,21 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         onAudioIesire: (data) => {
           pulsVoce.cadreAudioDeLaGoogle++
           pulsVoce.laUltimulCadru = Date.now()
-          octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
-          if (verdictTura === null) verdictTura = turaAdresataAcum()
+          const octeti = octetiDinBase64(data)
+          octetiOut += octeti // Google a facturat-o oricum — se numără
+          if (verdictTura === null) {
+            verdictTura = turaAdresataAcum()
+            taiatDeVoce = false // replică nouă — tăierea veche nu o mai privește
+          }
           if (!verdictTura) { pulsVoce.suprimateAdresare++; return } // nu i se vorbea lui
           if (verdictLimba === false) { pulsVoce.suprimateLimba++; return } // limbă necerută
+          if (taiatDeVoce) { pulsVoce.suprimateDupaTaiere++; return } // omul i-a tăiat vorba — restul replicii moare
           ultimaVorbaKelion = Date.now()
+          // Ceasul difuzorului: octeți → mostre 16-bit → ms la 24 kHz. Fără el,
+          // barge-in-ul ar crede că Kelion tace când el încă vorbește din buffer
+          // (cadrele sosesc în rafale, redarea durează mult după ultimul cadru).
+          const acum = Date.now()
+          redareEstimataPanaLa = Math.max(redareEstimataPanaLa, acum) + octeti / 2 / 24
           pulsVoce.cadreAudioSpreBrowser++
           trimite({ type: 'audio', data })
         },
@@ -682,6 +725,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           pulsVoce.intreruperiModel++
           verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
           verdictLimba = null
+          taiatDeVoce = false
+          redareEstimataPanaLa = 0 // browserul golește redarea — difuzorul tace
           trimite({ type: 'intrerupt' })
         },
         onTuraGata: () => {
