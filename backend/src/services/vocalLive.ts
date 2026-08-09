@@ -45,6 +45,13 @@ export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-3.1-flas
 // Voce MASCULINĂ implicită (măsurat: acceptată). Owner o poate schimba din env
 // (Puck / Charon / Fenrir / Orus sunt toate acceptate) după ce o ascultă.
 export const VOCAL_LIVE_VOICE = process.env.VOCAL_LIVE_VOICE || 'Charon'
+// PINUL GURII E OPT-IN (hotfix 9 aug seara, „nu-i merge audio"): revizia a
+// spus-o negru pe alb — ro-RO NU e în lista documentată a lui languageCode și
+// trebuia PROBAT întâi pe cheia ownerului; l-am livrat totuși și sesiunile au
+// putut muri la setup. Până la probă, pinul gurii se aprinde DOAR din env
+// (VOCAL_LIVE_LANG=1); hintul URECHII (languageCodes, documentat, risc mic)
+// rămâne mereu — el oprește etichetările „Dime"/„Fahrradbahn" pe foșnete.
+export const VOCAL_LIVE_LANG_PIN = process.env.VOCAL_LIVE_LANG === '1'
 
 /** ── COSTUL SESIUNII LIVE, DIN OCTEȚII RETRANSMIȘI (8 aug, „se consumă cu
  *  viteza luminii" + pastila care scade) ─────────────────────────────────────
@@ -134,6 +141,10 @@ export function construiesteInstructiune(
   numeUser: string,
   istoric: Array<{ role: string; content: string }>,
   ancora?: AncoraRealitate,
+  /** Limba pinuită a userului (BCP-47). Filtrul „anti-otravă" de mai jos
+   *  (replici străine sărite din istoric) are sens DOAR pe română — pe alte
+   *  limbi ar arunca istoricul legitim al userului. Implicit ro-RO. */
+  limbaPin: string | undefined = 'ro-RO',
 ): string {
   let instructiune = `${persona}\nVorbești cu ${numeUser}.`
   // ANCORA REALITĂȚII (8 aug, ownerul: „nu e ancorat în realitate, după
@@ -241,7 +252,7 @@ export function construiesteInstructiune(
       // spaniola drept limba conversației — degradarea s-ar autoîntreține
       // peste sesiuni. Replicile asistentului detectate străine (același
       // detector determinist ca gardul din rută) se SAR la coacere.
-      .filter((r) => r.role === 'user' || !inceputStrain(String(r.content)))
+      .filter((r) => limbaPin !== 'ro-RO' || r.role === 'user' || !inceputStrain(String(r.content)))
       .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
       .map((r) => `${r.role === 'user' ? numeUser : 'Kelion'}: ${String(r.content).slice(0, 200)}`)
       .join('\n')
@@ -364,7 +375,7 @@ export function construiesteSetup(
       // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat: cu
       // TEXT dau cod 1007). Vocea = prebuiltVoiceConfig.voiceName (masculină).
       responseModalities: ['AUDIO'],
-      speechConfig: limba
+      speechConfig: limba && VOCAL_LIVE_LANG_PIN
         ? { voiceConfig: { prebuiltVoiceConfig: { voiceName: voce } }, languageCode: limba }
         : { voiceConfig: { prebuiltVoiceConfig: { voiceName: voce } } },
     },
