@@ -74,6 +74,14 @@ function paginaTranzactii(): string {
 <div id="viu" class="nota">—</div>
 <canvas id="graf" width="960" height="380"></canvas>
 <pre id="out">Alege simbolul (crypto sau bursă) și apasă „Analiza lui Kelion" — regimul pieței, niveluri, scenarii cu invalidare, riscul întâi, plus judecata propriilor apeluri anterioare.</pre>
+<h2 style="font-size:1.05rem;margin:.8rem 0 .3rem">💬 Chat cu Kelion — mentorul de tranzacționare (DOAR pe date reale)</h2>
+<p class="nota">Întreabă orice: cum funcționează tranzacționarea, când/cum să intri sau să ieși pe simbolul de pe ecran (niveluri concrete cu invalidare, riscul întâi), sau cere-i să CAUTE PE NET algoritmul complet al unei strategii — vine cu sursa și data. Fiecare răspuns e ancorat în prețul REAL din clipa întrebării; discuția se salvează în memoria lui separată, doar a ta.</p>
+<div id="jurnal" style="background:#111830;border-radius:.6rem;padding:.8rem;max-height:320px;overflow-y:auto;display:none"></div>
+<div style="display:flex;gap:.4rem;margin:.4rem 0">
+ <input id="ci" style="flex:1" placeholder="ex: cum și când intru pe BTCUSDT acum? · caută algoritmul complet de mean-reversion">
+ <button id="ct">Trimite</button>
+ <button id="cv" class="gri" title="Vocea lui Kelion pe răspunsurile din chatul ăsta (Chirp). Apasă ca să o stingi/aprinzi.">🔊</button>
+</div>
 <script>
  const s=document.getElementById('s'), p=document.getElementById('p'), va=document.getElementById('var'), out=document.getElementById('out');
  const an=document.getElementById('an'), v=document.getElementById('v'), graf=document.getElementById('graf'), viu=document.getElementById('viu');
@@ -158,6 +166,51 @@ function paginaTranzactii(): string {
    }catch(e){ out.innerHTML='<span class=rau>rețea: '+e+'</span>'; }
    an.disabled=false;
  };
+ // CHATUL DIN CENTRU (9 aug): fiecare întrebare pleacă ancorată în simbolul +
+ // intervalul de pe ecran; istoricul conversației merge cu ea (continuitate).
+ const jurnal=document.getElementById('jurnal'), ci=document.getElementById('ci'), ct=document.getElementById('ct'), cv=document.getElementById('cv');
+ const fir=[];
+ // GURA LUI KELION ÎN TAB (9 aug, ownerul: „nu-l aud"): răspunsurile din chatul
+ // ăsta se și SPUN, cu aceeași voce Chirp ca în aplicație (POST /api/tts).
+ // Butonul 🔊 o stinge/aprinde; eșecul sintezei nu rupe chatul (textul rămâne).
+ let cuVoce=true, gura=null;
+ cv.onclick=function(){ cuVoce=!cuVoce; cv.textContent=cuVoce?'🔊':'🔇'; if(!cuVoce&&gura){ try{gura.pause();}catch(e){} gura=null; } };
+ async function spune(text){
+   if(!cuVoce||!text) return;
+   try{
+     const r=await fetch('/api/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:text.slice(0,1200)})});
+     if(!r.ok) return;
+     const b=await r.blob();
+     if(gura){ try{gura.pause();}catch(e){} }
+     gura=new Audio(URL.createObjectURL(b));
+     void gura.play().catch(function(){});
+   }catch(e){}
+ }
+ function scrieRand(cine,text){
+   jurnal.style.display='block';
+   const r=document.createElement('div');
+   r.style.margin='.35rem 0'; r.style.whiteSpace='pre-wrap'; r.style.wordBreak='break-word';
+   r.style.color = cine==='kelion' ? '#e8ecf6' : '#8fb7ff';
+   r.textContent=(cine==='kelion'?'Kelion: ':'Tu: ')+text;
+   jurnal.appendChild(r); jurnal.scrollTop=jurnal.scrollHeight;
+   return r;
+ }
+ async function trimiteChat(){
+   const q=ci.value.trim(); if(!q) return;
+   ci.value=''; ct.disabled=true; ci.disabled=true;
+   scrieRand('eu',q); fir.push({cine:'eu',text:q});
+   const asteapta=scrieRand('kelion','… (citește piața reală, memoria și, dacă e nevoie, caută pe net — poate dura ~30-60s)');
+   try{
+     const r=await fetch('/api/tranzactii/chat',{method:'POST',headers:{'content-type':'application/json'},
+       body:JSON.stringify({intrebare:q,simbol:s.value,interval:interval,istoric:fir.slice(-8)})});
+     const j=await r.json();
+     asteapta.textContent='Kelion: '+(j.error?('eroare: '+j.error):j.raspuns);
+     if(!j.error){ fir.push({cine:'kelion',text:j.raspuns}); void spune(j.raspuns); }
+   }catch(e){ asteapta.textContent='Kelion: rețea picată: '+e; }
+   ct.disabled=false; ci.disabled=false; ci.focus();
+ }
+ ct.onclick=trimiteChat;
+ ci.addEventListener('keydown',function(ev){ if(ev.key==='Enter') trimiteChat(); });
  urmareste();
 </script></body></html>`
 }
@@ -176,6 +229,72 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
     if (!adminul(req, reply)) return { error: 'forbidden' }
     const q = req.query as { simbol?: string; interval?: string }
     return dateSimbol(String(q.simbol ?? 'BTCUSDT'), String(q.interval ?? '1h'))
+  })
+
+  // CHAT CU KELION ÎN CENTRU (9 aug, ownerul: „trebuie să am chat aici cu
+  // Kelion, care îmi spune detalii despre cum funcționează tranzacționarea,
+  // cum și când să intru sau să ies, caută pe net algoritmul complet de
+  // tranzacționare"). Fiecare întrebare pleacă ANCORATĂ în datele REALE ale
+  // simbolului de pe ecran (preț/lumânări din clipa aia) + memoria separată
+  // 'tranzactii'; agentul are căutarea pe net + cititul paginilor (blindajul
+  // din 5 aug), deci poate aduce algoritmi/strategii cu sursa și data.
+  // Schimbul se salvează în ACEEAȘI memorie separată, doar-admin.
+  app.post('/api/tranzactii/chat', async (req, reply) => {
+    if (!adminul(req, reply)) return { error: 'forbidden' }
+    const b = req.body as {
+      intrebare?: string
+      simbol?: string
+      interval?: string
+      istoric?: { cine?: string; text?: string }[]
+    } | null
+    const intrebare = String(b?.intrebare ?? '').trim().slice(0, 2000)
+    if (!intrebare) return reply.code(400).send({ error: 'întrebarea e goală' })
+    const agent = gasesteAgent('tranzactii')
+    if (!agent) return reply.code(503).send({ error: 'agentul tranzactii lipsește din roster' })
+    // Datele reale din clipa întrebării — dacă piața nu se poate citi, chatul
+    // MERGE mai departe și o spune (întrebările teoretice nu depind de preț).
+    const d = await dateSimbol(String(b?.simbol ?? 'BTCUSDT'), String(b?.interval ?? '1h'))
+    const ancora = 'error' in d
+      ? `(piața nu s-a putut citi acum: ${d.error} — răspunde totuși la ce se poate fără preț viu)`
+      : rezumatPentruAgent(d)
+    const vechi = await searchMemories(config.adminEmail, 'tranzactii', [String(b?.simbol ?? '')], 2)
+    const memoria = vechi.length
+      ? `\nDIN MEMORIA TA pe simbol (analize/discuții vechi):\n` + vechi.map((m) => m.content.slice(0, 400)).join('\n---\n')
+      : ''
+    const istoric = (Array.isArray(b?.istoric) ? b.istoric : [])
+      .slice(-8)
+      .map((r) => `${r?.cine === 'kelion' ? 'Kelion' : 'Adrian'}: ${String(r?.text ?? '').slice(0, 400)}`)
+      .join('\n')
+    try {
+      const r = await cheamaAgent(
+        agent,
+        `Ești în CHATUL Centrului de Tranzacționare cu ownerul. Răspunde DIRECT la întrebarea lui, ` +
+          `ca un mentor de trading cu riscul întâi: explică pe înțeles cum funcționează ce întreabă; ` +
+          `când cere intrare/ieșire, dă niveluri CONCRETE din datele reale de mai jos (intrare, stop, ` +
+          `țintă, invalidare — „dacă… atunci…"), cu mărimea poziției ca % din capital; NU promite ` +
+          `câștiguri, NU spune „sigur". Dacă cere algoritmi/strategii/boți sau ceva ce nu știi din ` +
+          `date, CAUTĂ PE NET cu uneltele tale și adu structura completă cu SURSA și DATA fiecărei ` +
+          `afirmații. REGULA DE FIER — DOAR PE REAL: fiecare cifră pe care o spui vine ori din datele ` +
+          `reale de mai jos, ori dintr-o sursă de pe net cu link și dată; NICIO cifră inventată, NICIO ` +
+          `„estimare" nespusă — ce nu ai măsurat spui că nu ai de unde să știi. Scurt și aplicat, nu eseu.` +
+          `\n\nDATELE REALE de pe ecran acum:\n${ancora}${memoria}` +
+          (istoric ? `\n\nCONVERSAȚIA de până acum:\n${istoric}` : '') +
+          `\n\nÎNTREBAREA lui: ${intrebare}`,
+        true,
+      )
+      const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const simbolLog = 'error' in d ? String(b?.simbol ?? '?') : d.simbol
+      await addMemory(
+        config.adminEmail,
+        `[tranzactii-chat ${zi}] ${simbolLog} Î: ${intrebare.slice(0, 300)} | R: ${r.text.slice(0, 600)}`,
+        'tranzactii',
+      )
+      return { raspuns: r.text }
+    } catch (e) {
+      return reply
+        .code(502)
+        .send({ error: `agentul n-a răspuns: ${e instanceof Error ? e.message.slice(0, 150) : String(e)}` })
+    }
   })
 
   // Analiza cu ÎNVĂȚARE REALĂ: agentul primește analizele lui anterioare pe
