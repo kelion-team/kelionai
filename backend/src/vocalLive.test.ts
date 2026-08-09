@@ -280,7 +280,11 @@ describe('vocalLive — salutul se verifică pe ora REALĂ, împrospătată', ()
 
   it('motorul are ancoreaza() TĂCUT — context fără răspuns (turnComplete: false)', () => {
     const motor = readFileSync(new URL('./services/vocalLive.ts', import.meta.url), 'utf8')
-    expect(motor).toMatch(/ancoreaza\(text: string\): void \{[\s\S]{0,400}turnComplete: false/)
+    // După dedup (jscpd, 9 aug) corpul comun e în trimiteRand(text, turnComplete):
+    // ancoreaza trimite cu FALSE (context tăcut), anunta cu TRUE (răspunde).
+    expect(motor).toMatch(/ancoreaza\(text: string\): void \{[\s\S]{0,200}trimiteRand\(text, false\)/)
+    expect(motor).toMatch(/anunta\(text: string\): void \{[\s\S]{0,200}trimiteRand\(text, true\)/)
+    expect(motor).toMatch(/const trimiteRand[\s\S]{0,300}turnComplete/)
   })
 
   it('ruta împinge ora la FIECARE cadru de coordonate, ca [ANCORĂ DE SISTEM]', () => {
