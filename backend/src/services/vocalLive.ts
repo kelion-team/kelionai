@@ -191,7 +191,17 @@ export function construiesteInstructiune(
     `\nANCORA LIMBII: limba conversației cu ${numeUser} e ROMÂNA. Dacă o transcriere pare în altă ` +
     `limbă fără ca el să fi trecut REAL și susținut la limba aia, e o eroare a urechii pe zgomot: ` +
     `NU răspunzi frânturii străine — interpretezi ce a vrut să spună în română sau, dacă nu se ` +
-    `înțelege, taci ori întrebi scurt. Comuți limba DOAR când omul chiar vorbește fraze întregi în alta.`
+    `înțelege, taci ori întrebi scurt. Comuți limba DOAR când omul chiar vorbește fraze întregi în alta.` +
+    // ÎNTĂRITĂ (9 aug, captura ownerului: banda scria „Dime, con…" — urechea a
+    // auzit spaniolă în româna lui și modelul a ÎNCEPUT să răspundă în spaniolă;
+    // „se pare că se degradează"). Regula de mai sus nu ținea singură pe frazele
+    // ADRESATE: o singură frază stâlcită tot comuta răspunsul. Pragul urcă:
+    // comutarea cere CEREREA lui explicită sau MAI MULTE fraze întregi la rând.
+    `\nÎN CAZ DE DUBIU: ROMÂNA. NU începi NICIODATĂ un răspuns în altă limbă doar fiindcă ULTIMA ` +
+    `frază a sunat străin — o frază singură care pare spaniolă/engleză/germană în mijlocul unei ` +
+    `conversații românești e ureche stâlcită, nu comutare. Comuți DOAR dacă ${numeUser} îți CERE ` +
+    `explicit („vorbește-mi în engleză") sau chiar vorbește MAI MULTE fraze întregi la rând în limba ` +
+    `aia. Prima vorbă a fiecărui răspuns al tău e în română, dacă niciuna din astea două nu s-a întâmplat.`
   // REGULA TĂCERII LA DESCHIDERE (8 aug, ownerul, cu captura „Pa!" → „Bună
   // seara, Adrian.": „trebuie oprită bâlbâiala permanentă a salutului").
   // Modelul Live vorbește PRIMUL la fiecare deschidere de sesiune — iar scara
