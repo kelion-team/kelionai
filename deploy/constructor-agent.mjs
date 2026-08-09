@@ -77,6 +77,24 @@ const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
 // 5-15× mai rapid decât Pro, dar păstrează raționamentul de care are nevoie o
 // reparație reală. Viteza nu ajută dacă produce cod prost mai repede.
 const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.5-flash'
+// ── DEEPSEEK DIRECT — CREIERUL CONSTRUCTORULUI, IZOLAT DE VOCE (Adrian, 9 aug) ─
+// „dacă nu merge OmniRoute, pui cheia și rămâne DOAR deepseek la constructor" +
+// „vreau ca tot creditul să rămână doar pe voce". Scop: constructorul să NU mai
+// consume cheia Gemini (aia rămâne pe vocea live) — folosește DeepSeek direct.
+// OmniRoute a fost sărit intenționat: la testul live pe VPS nu crea o conexiune
+// PLĂTITĂ (doar catalog gratuit, „no connected models"), iar în repo e marcat
+// risc de securitate (AI-HANDOFF §13: CVE + tipar MITM blocat de Socket.dev).
+// DeepSeek e OpenAI-compatibil, iar mesajele + TOOLS-urile noastre sunt DEJA în
+// format OpenAI → trec DIRECT, fără conversia spre Gemini (mai puține locuri de
+// greșit). GATED: fără cheie, constructorul rămâne pe Gemini exact ca înainte —
+// nimic nu se strică. Cheia stă DOAR în env-ul VPS (/root/kelion/kelionai.env),
+// NICIODATĂ în repo; se pune prin Kelion (secret_pune) sau direct în env.
+const DEEPSEEK_KEY = env.CONSTRUCTOR_DEEPSEEK_KEY ?? ''
+const DEEPSEEK_MODEL = env.CONSTRUCTOR_DEEPSEEK_MODEL || 'deepseek-chat'
+const DEEPSEEK_URL = env.CONSTRUCTOR_DEEPSEEK_URL || 'https://api.deepseek.com/v1/chat/completions'
+// Un SINGUR creier pe rulare (nu amestecăm furnizori într-un ordin): dacă e
+// cheia DeepSeek, tot ordinul merge pe DeepSeek; altfel pe Gemini.
+const FOLOSESTE_DEEPSEEK = !!DEEPSEEK_KEY
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
 // rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
 // 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
@@ -730,35 +748,90 @@ async function llmGemini(messages) {
   }
 }
 
+// DeepSeek DIRECT — OpenAI-compatible. Mesajele NOASTRE sunt deja în format
+// OpenAI (role/content/tool_calls/tool_call_id) și TOOLS la fel → se trimit
+// DIRECT, fără nicio conversie (spre deosebire de Gemini). Întoarce ACELAȘI
+// obiect OpenAI-shaped pe care îl așteaptă main() (choices[0].message). Pe orice
+// eșec aruncă {clasa:'furnizor'} — llm() reîncearcă exact ca pe Gemini.
+async function llmDeepSeek(messages) {
+  let r
+  try {
+    r = await fetch(DEEPSEEK_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${DEEPSEEK_KEY}` },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages,
+        tools: TOOLS,
+        tool_choice: 'auto',
+        max_tokens: 8192,
+        temperature: 0.7,
+      }),
+      // Aceeași plasă de timp ca Gemini — un endpoint blocat nu ține jobul peste
+      // timeout-ul dur al constructor-worker.sh.
+      signal: AbortSignal.timeout(Math.max(30_000, Math.min(120_000, ramase()))),
+    })
+  } catch (e) {
+    throw Object.assign(new Error(`DeepSeek rețea: ${String(e?.message ?? e).slice(0, 200)}`), { clasa: 'furnizor' })
+  }
+  const text = await r.text().catch(() => '')
+  if (!r.ok) throw Object.assign(new Error(`DeepSeek ${r.status}: ${text.slice(0, 300)}`), { clasa: 'furnizor' })
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw Object.assign(new Error(`DeepSeek JSON rupt (${text.length} caractere)`), { clasa: 'furnizor' })
+  }
+  const message = parsed?.choices?.[0]?.message
+  if (!message) throw Object.assign(new Error('DeepSeek fără candidați (200 gol/blocat)'), { clasa: 'furnizor' })
+  const content = typeof message.content === 'string' ? message.content : ''
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
+  // Gol de tot (nici text, nici tool) — aruncăm ca llm() să reîncerce, la fel ca
+  // la Gemini, în loc să ardem o tură sterilă pe nimic.
+  if (!content.trim() && !toolCalls.length)
+    throw Object.assign(new Error('DeepSeek: răspuns gol (200 fără text/tool)'), { clasa: 'furnizor' })
+  const out = { role: 'assistant', content }
+  if (toolCalls.length) out.tool_calls = toolCalls
+  const total = Number(parsed?.usage?.total_tokens)
+  return {
+    choices: [{ message: out }],
+    usage: { total_tokens: Number.isFinite(total) ? total : 0 },
+    modelServit: `deepseek/${DEEPSEEK_MODEL}`,
+  }
+}
+
 async function llm(messages) {
-  // GEMINI-ONLY (3 aug — extirparea OpenRouter): nu mai există nicio scară de
-  // rezervă. Reîncercăm pe ACELAȘI creier Gemini cu pauze crescătoare; o
-  // eroare de cheie/cont (401/403) e FATALĂ pe loc (nicio reîncercare nu
-  // ajută); la epuizarea încercărilor, sugrumarea (429/cotă/5xx) marchează
-  // ordinul AMÂNABIL — rămâne în coadă și se reia singur, nu moare.
-  if (!GEMINI_KEY) throw Object.assign(new Error('lipsește GEMINI_API_KEY — constructorul nu are creier'), { fatal: true })
+  // UN SINGUR CREIER PE RULARE (9 aug): DeepSeek dacă e cheia lui (constructorul
+  // izolat de creditul Gemini/voce), altfel Gemini — exact ca înainte.
+  // Reîncercăm pe ACELAȘI creier cu pauze crescătoare; o eroare de cheie/cont
+  // (401/403) e FATALĂ pe loc (nicio reîncercare nu ajută); la epuizarea
+  // încercărilor, sugrumarea (429/cotă/5xx) marchează ordinul AMÂNABIL.
+  const foloseste = FOLOSESTE_DEEPSEEK ? llmDeepSeek : llmGemini
+  const numeCreier = FOLOSESTE_DEEPSEEK ? 'DeepSeek' : 'Gemini'
+  if (!GEMINI_KEY && !DEEPSEEK_KEY)
+    throw Object.assign(new Error('lipsește cheia creierului (CONSTRUCTOR_DEEPSEEK_KEY sau GEMINI_API_KEY) — constructorul nu are creier'), { fatal: true })
   let lastErr = ''
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
     if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
     try {
-      return await llmGemini(messages)
+      return await foloseste(messages)
     } catch (e) {
       lastErr = String(e?.message ?? e)
       // Cheia/contul nostru — nicio reîncercare nu ajută; ne oprim pe loc.
-      if (/gemini (401|403)/i.test(lastErr)) {
-        log(`llm [fatal] — cheia/contul Gemini: ${lastErr.slice(0, 200)}`)
+      if (/(deepseek|gemini) (401|403)/i.test(lastErr)) {
+        log(`llm [fatal] — cheia/contul ${numeCreier}: ${lastErr.slice(0, 200)}`)
         throw Object.assign(new Error(lastErr), { fatal: true })
       }
       if (attempt === LLM_ATTEMPTS) break
       const wait = Math.min(attempt * 8_000, 30_000)
-      log(`llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe Gemini (${lastErr.slice(0, 100)}) — reîncerc în ${wait / 1000}s`)
+      log(`llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe ${numeCreier} (${lastErr.slice(0, 100)}) — reîncerc în ${wait / 1000}s`)
       await dormi(wait)
     }
   }
   // La capătul tuturor încercărilor: dacă ultima eroare e sugrumare de furnizor
   // (429/cotă/5xx/gol), marcăm amânabil — ordinul nu moare, se reia.
-  throw Object.assign(new Error(lastErr || `Gemini indisponibil după ${LLM_ATTEMPTS} încercări`), {
-    amanabil: /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|gemini 5\d\d|răspuns gol|rețea/i.test(lastErr),
+  throw Object.assign(new Error(lastErr || `${numeCreier} indisponibil după ${LLM_ATTEMPTS} încercări`), {
+    amanabil: /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|(deepseek|gemini) 5\d\d|răspuns gol|rețea/i.test(lastErr),
   })
 }
 
@@ -916,8 +989,8 @@ for (const semnal of ['SIGTERM', 'SIGINT']) {
 }
 
 async function main() {
-  if (!BRIDGE || !GEMINI_KEY || !GHTOKEN) {
-    log('lipsesc BRIDGE_SECRET/GEMINI_API_KEY/GITHUB_TOKEN din kelionai.env — ies')
+  if (!BRIDGE || (!GEMINI_KEY && !DEEPSEEK_KEY) || !GHTOKEN) {
+    log('lipsesc BRIDGE_SECRET/(CONSTRUCTOR_DEEPSEEK_KEY sau GEMINI_API_KEY)/GITHUB_TOKEN din kelionai.env — ies')
     return
   }
   const claim = await api('/api/constructor/next')
@@ -925,6 +998,10 @@ async function main() {
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
+  // DOVADA CREIERULUI ACTIV (9 aug): scris în jurnal la fiecare ordin, ca să se
+  // vadă negru pe alb pe ce rulează constructorul — DeepSeek (izolat de voce) sau
+  // Gemini (fallback). modelServit din răspuns cară aceeași informație în raport.
+  log(`creier constructor: ${FOLOSESTE_DEEPSEEK ? `DeepSeek (${DEEPSEEK_MODEL})` : `Gemini (${GEMINI_MODEL})`}`)
   // CREIERUL ORDINULUI (3 aug — extirparea OpenRouter): Gemini, unic, pe cheia
   // ownerului. Marcajul „Fable 5" din text nu mai pornește nimic (creierul
   // plătit prin OpenRouter a dispărut) — alegerea e scrisă în jurnal.
