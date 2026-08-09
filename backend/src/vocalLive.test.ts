@@ -103,6 +103,16 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     expect(i, 'nu se pinuiește niciun cod de limbă — aia ar fi cușca inversă').not.toMatch(/languageCode/)
   })
 
+  // 9 aug, captura ownerului: banda scria „Dime, con…" — o singură frază
+  // stâlcită comuta răspunsul pe spaniolă. Pragul comutării a urcat: cerere
+  // explicită SAU mai multe fraze întregi la rând; în dubiu, româna.
+  it('ancora limbii ÎNTĂRITĂ: în dubiu româna; comutarea cere cerere explicită sau fraze susținute', () => {
+    const i = construiesteInstructiune(persona, 'Adrian', [])
+    expect(i).toContain('ÎN CAZ DE DUBIU: ROMÂNA')
+    expect(i).toContain('NICIODATĂ un răspuns în altă limbă doar fiindcă ULTIMA')
+    expect(i).toContain('CERE explicit')
+  })
+
   it('cu istoric: ultimele schimburi intră, cu numele omului pe replicile lui', () => {
     const i = construiesteInstructiune(persona, 'Adrian', [
       { role: 'user', content: 'cât e ceasul?' },
@@ -123,9 +133,11 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     // antet FIX — reguli ordonate de owner una câte una, scrise o dată, nu
     // cresc cu istoricul) + antetul blocului de istoric + blocul plafonat la
     // 2400. Plafonul pe ISTORIC rămâne neatins — bugetul total urcă conștient
-    // cu fiecare regulă nouă (4200 → 4800 la REGULA SALUTULUI).
+    // cu fiecare regulă nouă (4200 → 4800 la REGULA SALUTULUI; → 5500 la
+    // REGULA TREZIRII PE NUME + ancora limbii ÎNTĂRITĂ, 9 aug — amândouă
+    // ordonate de owner: „răspunde doar când e strigat" + banda „Dime, con").
     expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
-      persona.length + 4800,
+      persona.length + 5500,
     )
   })
 })
