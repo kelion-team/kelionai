@@ -1,5 +1,6 @@
 import { downsample, float32ToPcm16, base64ToBytes, pcm16ToFloat32 } from './pcm'
 import { alimenteazaNivelVoce } from './audioIO'
+import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
 import { inscrieVoceaLuiKelion } from './vociKelion'
 
 // ── VOCEA LIVE FULL-DUPLEX — PARTEA DIN BROWSER (7 aug 2026) ─────────────────
@@ -162,6 +163,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let ctxIn: AudioContext | null = null
   let ctxOut: AudioContext | null = null
   let proc: ScriptProcessorNode | null = null
+  let cules: CulesPcm | null = null
   let resumeTimer: ReturnType<typeof setInterval> | null = null
   let inchis = false
   // O SINGURĂ eroare urcă per deschidere: la un server picat, `onerror` și
@@ -194,6 +196,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     radiazaVocea?.() // vocea iese din registrul de înregistrare odată cu sesiunea
     try {
       proc?.disconnect()
+      cules?.opreste()
+      cules = null
     } catch {
       /* deja deconectat */
     }
@@ -443,26 +447,27 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     console.warn(`[vocalLive] bucla AEC nu a pornit (${String(e).slice(0, 80)}) — redare directă, fără anulare de ecou`)
   }
   const sursa = ctxIn.createMediaStreamSource(stream)
-  // ScriptProcessor: deprecat, dar universal și fără fișier separat — aceeași
-  // alegere ca în micStream.ts, pe aceeași motivație („merge pur și simplu" pe
-  // calea critică a vocii).
-  proc = ctxIn.createScriptProcessor(4096, 1, 1)
-  proc.onaudioprocess = (ev: AudioProcessingEvent): void => {
+  // Culesul microfonului (9 aug, „scoate alertele prin rezolvări reale"):
+  // ÎNTÂI AudioWorklet (API-ul curent, pe firul audio — fără [Deprecation] și
+  // fără să țină firul principal); doar dacă browserul nu poate, cădem pe
+  // ScriptProcessor, cu deprecarea lui cu tot — mai bine deprecat decât mut.
+  const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
-    const brut = ev.inputBuffer.getChannelData(0)
-    // FĂRĂ garda de prag (ștearsă 8 aug, la câteva ore după ce-am pus-o):
-    // 0.028 bloca vocea de 0.005 a ownerului și lăsa ecoul tare al boxelor să
-    // treacă — fix pe dos. Ecoul se tratează la rădăcină, cu AEC-ul browserului
-    // prin bucla WebRTC (vezi mai sus) — adaptiv, nu ghicit după tărie.
+    // FĂRĂ garda de prag (ștearsă 8 aug): ecoul se tratează cu AEC-ul
+    // browserului prin bucla WebRTC (vezi mai sus) — adaptiv, nu ghicit.
     const la16k = downsample(brut, ctxIn!.sampleRate)
     const pcm = float32ToPcm16([la16k])
-    // `.buffer` e exact bufferul acestui Int16Array proaspăt creat — nu o felie
-    // dintr-un buffer partajat — deci trimiterea lui întreg e corectă.
     ws.send(pcm.buffer)
     octeti += pcm.byteLength
   }
-  sursa.connect(proc)
-  proc.connect(ctxIn.destination) // necesar ca onaudioprocess să ruleze în unele browsere
+  cules = await pornesteCulesPcm(ctxIn, sursa, laCadru)
+  if (!cules) {
+    console.warn('[vocalLive] AudioWorklet indisponibil — cad pe ScriptProcessor (deprecat, dar merge)')
+    proc = ctxIn.createScriptProcessor(4096, 1, 1)
+    proc.onaudioprocess = (ev: AudioProcessingEvent): void => laCadru(ev.inputBuffer.getChannelData(0))
+    sursa.connect(proc)
+    proc.connect(ctxIn.destination) // necesar ca onaudioprocess să ruleze în unele browsere
+  }
 
   // DEBLOCAJ CONTINUU (lecția din 6 aug: „se deschide să preia dar nu se preia
   // nimic audio"). Un AudioContext pornit fără gest rămâne 'suspended' și
