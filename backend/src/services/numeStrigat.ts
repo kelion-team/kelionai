@@ -78,8 +78,12 @@ export function numeStrigat(auzit: string): boolean {
 //   vorbit de curând — un răspuns la propria lui întrebare nu cere numele).
 // Fereastra „în curs" e măsurată, nu ghicită: 30s de la ultima lui vorbă.
 
-/** Cât ține o conversație „în curs" după ultima vorbă a lui Kelion. */
-export const FEREASTRA_DIALOG_MS = 30_000
+/** Cât ține o conversație „în curs" după ultima vorbă a lui Kelion.
+ *  30s → 120s (9 aug seara, ownerul: „a răspuns o dată și a murit"): o pauză
+ *  naturală de gândire trece de 30s, iar după fereastră ORICE frază fără
+ *  „Kelion" era suprimată la nesfârșit, fără niciun semn — conversația părea
+ *  moartă. Două minute țin un dialog real viu; ambientalul tot cere numele. */
+export const FEREASTRA_DIALOG_MS = 120_000
 
 /**
  * Tura userului era adresată lui Kelion? Funcție PURĂ — se probează pe

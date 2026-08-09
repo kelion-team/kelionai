@@ -554,9 +554,13 @@ export function deschideVocalLive(
         if (faraExtensii) {
           delete st.setup.sessionResumption
           delete st.setup.contextWindowCompression
-          // Aceeași plasă și pentru reglajul anti-zgomot: un model care l-ar
-          // refuza la setup primește varianta fără el, nu o sesiune moartă.
-          delete st.setup.realtimeInputConfig
+          // REGLAJUL ANTI-ZGOMOT NU SE MAI ARUNCĂ (9 aug seara, consola
+          // ownerului: „modelul și-a tăiat vorba — a auzit voce peste el" ×2,
+          // „a răspuns o dată și a murit"): degradarea îl arunca împreună cu
+          // extensiile, iar sesiunea reintra cu urechea HIPERSENSIBILĂ —
+          // ecoul difuzorului deschidea barge-in peste propria voce. Pragul
+          // e acceptat de model din 8 aug (măsurat pe sesiuni întregi) — nu
+          // el e suspectul de setup; rămâne pe TOATE variantele.
         }
         socket.send(JSON.stringify(st))
       } catch (e) {
