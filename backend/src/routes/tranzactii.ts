@@ -30,6 +30,36 @@ import { config } from '../config.js'
 //
 // Contract de eșec: sursa necitibilă → eroarea verbatim, nu cifre inventate.
 
+/** ── NIVELURILE SE VĂD PE GRAFIC (9 aug, ownerul: „ce spune trebuie să arate
+ *  clar pe grafic") ──────────────────────────────────────────────────────────
+ *  Agentul e pus să-și încheie răspunsul cu un rând mașină-citibil:
+ *      NIVELURI: intrare=65100; stop=64300; tinta=66800
+ *  Funcția asta îl extrage tolerant (`;` sau `,`, spații, majuscule) și
+ *  întoarce perechile nume→valoare pe care pagina le DESENEAZĂ ca linii pe
+ *  lumânări. Fără rând sau „NIVELURI: -" → listă goală (nu se inventează).
+ *  PURĂ și exportată — se probează pe texte reale, fără agent. */
+export function extrageNiveluri(text: string): { nume: string; valoare: number }[] {
+  const m = String(text ?? '').match(/NIVELURI:\s*([^\n]*)/i)
+  if (!m || !m[1]) return []
+  const out: { nume: string; valoare: number }[] = []
+  for (const bucata of m[1].split(/[;,]/)) {
+    const p = bucata.match(/\s*([a-zăâîșț_ -]+?)\s*=\s*([0-9]+(?:[.][0-9]+)?)\s*$/i)
+    if (!p) continue
+    const valoare = Number(p[2])
+    if (!Number.isFinite(valoare) || valoare <= 0) continue
+    out.push({ nume: p[1].trim().toLowerCase(), valoare })
+    if (out.length >= 8) break // un grafic cu 30 de linii nu mai arată nimic
+  }
+  return out
+}
+
+/** Instrucțiunea comună prin care agentul își face nivelurile DESENABILE. */
+const CERE_NIVELURI =
+  `\nLA FINAL, OBLIGATORIU, pe un rând separat, scrie nivelurile tale numerice în formatul exact: ` +
+  `"NIVELURI: intrare=...; stop=...; tinta=...; suport=...; rezistenta=..." — DOAR cele care există ` +
+  `în analiza ta, cu cifre REALE din date (fără altele). Dacă nu ai niciun nivel, scrie "NIVELURI: -". ` +
+  `Rândul ăsta se DESENEAZĂ pe graficul omului — de-aia trebuie exact formatul.`
+
 function adminul(req: FastifyRequest, reply: FastifyReply): { email: string } | null {
   const user = getSessionUser(req)
   if (user && user.role === 'admin') return user
@@ -38,29 +68,45 @@ function adminul(req: FastifyRequest, reply: FastifyReply): { email: string } | 
 }
 
 function paginaTranzactii(): string {
+  // GRAFIC PROFESIONAL (9 aug, ownerul: „rudimentară aplicația… ieși în net și
+  // construiește soluția real funcțională"): motorul open-source al graficelor
+  // TradingView (lightweight-charts v5, Apache-2.0), VENDORED pe domeniul
+  // nostru (/lwc/ — aceeași lecție ca Leaflet: nimic de pe CDN-uri străine).
+  // Lumânarea CURENTĂ se mișcă LIVE din fluxul kline al bursei; prețul bate la
+  // fiecare tranzacție (@trade, milisecunda bursei); nivelurile lui Kelion din
+  // chat/analiză se desenează ca LINII DE PREȚ cu etichetă pe axă
+  // (createPriceLine) — „ce spune trebuie să arate clar pe grafic".
   return `<!doctype html><html lang="ro"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kelion — Centrul de Tranzacționare</title>
+<script src="/lwc/lightweight-charts.standalone.production.js"><\/script>
 <style>
- body{font-family:system-ui,Segoe UI,Roboto,sans-serif;max-width:980px;margin:1.5rem auto;padding:0 1rem;background:#0b1020;color:#e8ecf6}
- h1{font-size:1.3rem} p{line-height:1.5;color:#b9c2da}
- input,button{padding:.55rem .9rem;border-radius:.6rem;border:1px solid #2a3550;font-size:.95rem}
- input{background:#111830;color:#e8ecf6} button{background:#3b82f6;color:#fff;border:0;cursor:pointer;margin:.15rem}
+ *{box-sizing:border-box}
+ body{font-family:system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#0b1020;color:#e8ecf6}
+ .bara{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.55rem 1rem;border-bottom:1px solid #1c2440;position:sticky;top:0;background:#0b1020cc;backdrop-filter:blur(6px);z-index:5}
+ .bara h1{font-size:1.05rem;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .continut{max-width:1100px;margin:0 auto;padding:.8rem 1rem 2rem}
+ input,button{padding:.5rem .8rem;border-radius:.6rem;border:1px solid #2a3550;font-size:.92rem}
+ input{background:#111830;color:#e8ecf6} button{background:#3b82f6;color:#fff;border:0;cursor:pointer;margin:.12rem}
  button.gri{background:#2a3550} button.activ{outline:2px solid #4ade80}
- button:disabled{opacity:.5;cursor:default}
+ button:disabled{opacity:.45;cursor:default}
  pre{background:#111830;padding:1rem;border-radius:.6rem;white-space:pre-wrap;word-break:break-word}
  .ok{color:#4ade80}.rau{color:#f87171}
- .pret{font-size:1.9rem;font-weight:700;margin:.3rem 0;display:inline-block}
+ .pret{font-size:1.8rem;font-weight:700;margin:.2rem 0;display:inline-block}
  .sus{color:#4ade80}.jos{color:#f87171}
- .nota{font-size:.85rem;color:#8b93ad;border-left:3px solid #2a3550;padding-left:.7rem}
- canvas{width:100%;background:#0e1428;border-radius:.6rem;border:1px solid #1c2440}
+ .nota{font-size:.83rem;color:#8b93ad;border-left:3px solid #2a3550;padding-left:.7rem;line-height:1.45}
+ #graf{width:100%;height:440px;border:1px solid #1c2440;border-radius:.6rem;overflow:hidden}
 </style></head><body>
-<h1>📈 Centrul de Tranzacționare — Kelion, analistul tău</h1>
-<p class="nota">Date REALE: crypto intraday (Binance) · acțiuni și indici pe zile (Stooq: AAPL.US, TSLA.US, ^SPX, ^DJI, ^DAX). Kelion ÎNVAȚĂ real: fiecare analiză se salvează cu prețul ei, iar la următoarea își judecă apelurile pe ce s-a întâmplat de fapt. Cinstit: NU plasează ordine (niciun broker legat) și nu promite câștiguri; intraday pe bursele clasice cere abonament de date — se leagă când alegi furnizorul.</p>
+<div class="bara">
+ <h1>📈 Centrul de Tranzacționare — Kelion, analistul tău</h1>
+ <button id="iesire" class="gri" title="Închide Centrul și întoarce-te la Kelion (Esc)">✕ Ieșire</button>
+</div>
+<div class="continut">
+<p class="nota">Date REALE: crypto LIVE tranzacție-cu-tranzacție (Binance) · acțiuni/indici pe zile (Stooq). Kelion învață real: fiecare analiză se salvează cu prețul ei și își judecă apelurile. NU plasează ordine și nu promite câștiguri. Nivelurile lui (intrare/stop/țintă) se desenează PE grafic.</p>
 <div>
  <input id="s" value="BTCUSDT" placeholder="BTCUSDT · ETHUSDT · AAPL.US · ^SPX">
- <button id="v" title="Pornește urmărirea simbolului din câmp: pe crypto prețul curge LIVE, tranzacție cu tranzacție (flux Binance, milisecunda bursei); lumânările graficului se împrospătează la 10s. Pe bursă (Stooq) datele sunt zilnice.">👁 Urmărește</button>
- <button id="an">🧠 Analiza lui Kelion (cu memoria apelurilor)</button>
+ <button id="v" title="Pornește urmărirea simbolului din câmp: preț live tranzacție-cu-tranzacție + lumânarea curentă mișcându-se în timp real (crypto); bursa clasică pe zile.">👁 Urmărește</button>
+ <button id="an">🧠 Analiza lui Kelion</button>
 </div>
 <div id="chips">
  <button class="gri chip">BTCUSDT</button><button class="gri chip">ETHUSDT</button><button class="gri chip">SOLUSDT</button>
@@ -72,140 +118,228 @@ function paginaTranzactii(): string {
 </div>
 <div><span class="pret" id="p">—</span> <span id="var">—</span></div>
 <div id="viu" class="nota">—</div>
-<canvas id="graf" width="960" height="380"></canvas>
-<pre id="out">Alege simbolul (crypto sau bursă) și apasă „Analiza lui Kelion" — regimul pieței, niveluri, scenarii cu invalidare, riscul întâi, plus judecata propriilor apeluri anterioare.</pre>
-<h2 style="font-size:1.05rem;margin:.8rem 0 .3rem">💬 Chat cu Kelion — mentorul de tranzacționare (DOAR pe date reale)</h2>
-<p class="nota">Întreabă orice: cum funcționează tranzacționarea, când/cum să intri sau să ieși pe simbolul de pe ecran (niveluri concrete cu invalidare, riscul întâi), sau cere-i să CAUTE PE NET algoritmul complet al unei strategii — vine cu sursa și data. Fiecare răspuns e ancorat în prețul REAL din clipa întrebării; discuția se salvează în memoria lui separată, doar a ta.</p>
-<div id="jurnal" style="background:#111830;border-radius:.6rem;padding:.8rem;max-height:320px;overflow-y:auto;display:none"></div>
+<div id="graf"></div>
+<h2 style="font-size:1rem;margin:.8rem 0 .3rem">💬 Chat cu Kelion — mentorul de tranzacționare (DOAR pe date reale)</h2>
+<p class="nota">Întreabă cum funcționează, când/cum intri sau ieși (niveluri concrete, desenate pe grafic), sau cere-i să caute pe net algoritmul complet al unei strategii — vine cu sursa și data. Răspunsuri SCURTE; discuția se salvează în memoria lui separată, doar a ta.</p>
+<div id="jurnal" style="background:#111830;border-radius:.6rem;padding:.8rem;max-height:300px;overflow-y:auto;display:none"></div>
 <div style="display:flex;gap:.4rem;margin:.4rem 0">
  <input id="ci" style="flex:1" placeholder="ex: cum și când intru pe BTCUSDT acum? · caută algoritmul complet de mean-reversion">
  <button id="ct">Trimite</button>
- <button id="cv" class="gri" title="Vocea lui Kelion pe răspunsurile din chatul ăsta (Chirp). Apasă ca să o stingi/aprinzi.">🔊</button>
+ <button id="cv" class="gri" title="Vocea lui Kelion pe răspunsuri. Apasă ca să o stingi/aprinzi.">🔊</button>
+</div>
+<pre id="out">Apasă „Analiza lui Kelion" pentru analiza completă (regim, niveluri, scenarii cu invalidare, riscul întâi) — nivelurile apar PE grafic.</pre>
 </div>
 <script>
- const s=document.getElementById('s'), p=document.getElementById('p'), va=document.getElementById('var'), out=document.getElementById('out');
- const an=document.getElementById('an'), v=document.getElementById('v'), graf=document.getElementById('graf'), viu=document.getElementById('viu');
- let ceas=null, interval='1h', ws=null, pretVechi=0;
- // crypto = simbol Binance simplu (BTCUSDT); punct/caret = bursă (Stooq, zilnic)
+ var s=document.getElementById('s'), p=document.getElementById('p'), va=document.getElementById('var'), out=document.getElementById('out'), viu=document.getElementById('viu');
+ var an=document.getElementById('an'), v=document.getElementById('v');
+ var jurnal=document.getElementById('jurnal'), ci=document.getElementById('ci'), ct=document.getElementById('ct'), cv=document.getElementById('cv');
+ var interval='1h', ws=null, ceas=null, pretVechi=0, simbolCurent='', primaIncarcare=true;
+ var fir=[], liniile=[], cuVoce=true, gura=null;
+
+ // IEȘIREA (9 aug, ownerul: „nu are buton ieșire"): pe pagina de sine
+ // stătătoare te întoarce la Kelion; în tabul din aplicație butonul dispare —
+ // tabul are deja ×-ul lui.
+ var iesire=document.getElementById('iesire');
+ if(window.top!==window.self){ iesire.style.display='none'; }
+ iesire.onclick=function(){ if(history.length>1){ history.back(); } else { location.href='/'; } };
+ document.addEventListener('keydown',function(ev){ if(ev.key==='Escape'&&window.top===window.self){ iesire.onclick(); } });
+
+ // GRAFICUL PROFESIONAL — lightweight-charts v5 (motorul TradingView, local).
+ var chart=LightweightCharts.createChart(document.getElementById('graf'),{
+   layout:{background:{color:'#0e1428'},textColor:'#8b93ad'},
+   grid:{vertLines:{color:'#141b33'},horzLines:{color:'#141b33'}},
+   timeScale:{timeVisible:true,secondsVisible:false,borderColor:'#1c2440'},
+   rightPriceScale:{borderColor:'#1c2440'},
+   crosshair:{mode:0},
+   autoSize:true
+ });
+ var serie=chart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#4ade80',downColor:'#f87171',wickUpColor:'#4ade80',wickDownColor:'#f87171',borderVisible:false});
+
  function eCripto(sim){ return /^[A-Z0-9]{5,}$/.test(sim) && sim.indexOf('.')<0 && sim.indexOf('^')<0; }
- function oraMs(t){ const d=new Date(t); function z(n,l){ return String(n).padStart(l||2,'0'); }
+ function oraMs(t){ var d=new Date(t); function z(n,l){ return String(n).padStart(l||2,'0'); }
    return z(d.getHours())+':'+z(d.getMinutes())+':'+z(d.getSeconds())+'.'+z(d.getMilliseconds(),3); }
- function deseneaza(lum){
-   const x=graf.getContext('2d'); const W=graf.width, H=graf.height;
-   x.clearRect(0,0,W,H);
-   if(!lum||lum.length<2) return;
-   const min=Math.min.apply(null,lum.map(function(c){return c.minim;}));
-   const max=Math.max.apply(null,lum.map(function(c){return c.maxim;}));
-   const marja=(max-min)||1, sus=14, jos=22, util=H-sus-jos;
-   const pas=W/lum.length, corp=Math.max(1,Math.floor(pas*0.6));
-   function Y(v){ return sus + (max-v)/marja*util; }
-   for(let i=0;i<lum.length;i++){
-     const c=lum[i], cx=Math.floor(i*pas+pas/2);
-     const urca=c.inchis>=c.deschis;
-     x.strokeStyle=x.fillStyle=urca?'#4ade80':'#f87171';
-     x.beginPath(); x.moveTo(cx,Y(c.maxim)); x.lineTo(cx,Y(c.minim)); x.stroke();
-     const y1=Y(Math.max(c.deschis,c.inchis)), y2=Y(Math.min(c.deschis,c.inchis));
-     x.fillRect(cx-Math.floor(corp/2), y1, corp, Math.max(1,y2-y1));
-   }
-   x.fillStyle='#8b93ad'; x.font='12px system-ui';
-   x.fillText(String(max), 6, sus+10);
-   // minimul URCĂ deasupra benzii de date (9 aug: la H-jos+14 se suprapunea cu
-   // data de start din colț — textul ieșea ilizibil, „6478008…2026-08-08")
-   x.fillText(String(min), 6, H-jos-4);
-   const t0=new Date(lum[0].t), t1=new Date(lum[lum.length-1].t);
-   x.fillText(t0.toISOString().slice(0,16).replace('T',' '), 6, H-6);
-   const et=t1.toISOString().slice(0,16).replace('T',' ');
-   x.fillText(et, W-x.measureText(et).width-6, H-6);
+
+ // NIVELURILE LUI KELION PE GRAFIC (9 aug: „ce spune trebuie să arate clar pe
+ // grafic") — linii de preț cu etichetă pe axă; se șterg la schimbarea
+ // simbolului (nivelurile vechi ar minți pe alt simbol).
+ function culoareNivel(nume){
+   if(nume.indexOf('intrare')>=0||nume.indexOf('cumpar')>=0) return '#4ade80';
+   if(nume.indexOf('stop')>=0) return '#f87171';
+   if(nume.indexOf('tint')>=0||nume.indexOf('țint')>=0||nume.indexOf('iesire')>=0||nume.indexOf('ieșire')>=0) return '#60a5fa';
+   if(nume.indexOf('suport')>=0) return '#eab308';
+   if(nume.indexOf('rezist')>=0) return '#c084fc';
+   return '#b9c2da';
  }
+ function aratNiveluri(niveluri){
+   for(var i=0;i<liniile.length;i++){ try{serie.removePriceLine(liniile[i]);}catch(e){} }
+   liniile=[];
+   if(!niveluri||!niveluri.length) return;
+   for(var j=0;j<niveluri.length;j++){
+     var n=niveluri[j];
+     liniile.push(serie.createPriceLine({price:n.valoare,color:culoareNivel(n.nume),lineWidth:2,lineStyle:2,axisLabelVisible:true,title:n.nume}));
+   }
+ }
+
  async function pret(){
    try{
-     const r=await fetch('/api/tranzactii/date?simbol='+encodeURIComponent(s.value)+'&interval='+interval);
-     const j=await r.json();
+     var r=await fetch('/api/tranzactii/date?simbol='+encodeURIComponent(s.value)+'&interval='+interval);
+     var j=await r.json();
      if(j.error){ p.textContent='—'; va.innerHTML='<span class=rau>'+j.error+'</span>'; return; }
      if(!ws){ p.textContent=j.pret; }
      va.innerHTML='24h: <span class="'+(j.variatie24h>=0?'sus':'jos')+'">'+j.variatie24h+'%</span> · '+j.simbol+' · '+j.sursa+' · lumânări '+j.interval;
-     // ONESTITATE PE TIMP (9 aug, „selecția pe timp nu merge"): bursele Stooq au
-     // DOAR lumânări zilnice — butoanele intraday se sting pe ele, nu mint.
-     const zilnic=String(j.sursa||'').indexOf('Stooq')>=0;
+     var zilnic=String(j.sursa||'').indexOf('Stooq')>=0;
      document.querySelectorAll('.int').forEach(function(b){ b.disabled=zilnic&&b.textContent!=='1d'; });
      if(zilnic&&!ws){ viu.textContent='bursă clasică: lumânări ZILNICE reale (intraday tick-cu-tick cere abonament de date — se leagă când alegi furnizorul)'; }
-     deseneaza(j.lumanari);
+     // Cu fluxul live pe lumânări deschis, NU rescriem seria la fiecare poll —
+     // ți-ar reseta zoomul; fluxul kline ține lumânarea curentă vie.
+     if(primaIncarcare||zilnic||!ws){
+       serie.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),open:c.deschis,high:c.maxim,low:c.minim,close:c.inchis}; }));
+       if(primaIncarcare){ chart.timeScale().fitContent(); primaIncarcare=false; }
+     }
    }catch(e){ va.innerHTML='<span class=rau>rețea: '+e+'</span>'; }
  }
- // PREȚUL LA MILISECUNDĂ (9 aug, „real ca în live"): pe crypto ne abonăm DIRECT
- // la fluxul public de tranzacții al bursei — prețul se mișcă la FIECARE
- // tranzacție executată, cu ms-ul bursei pe ecran. Căderea fluxului SE SPUNE.
+
+ // LIVE (9 aug: „real ca în live… la miime de secundă"): un singur socket cu
+ // DOUĂ fluxuri — @trade (prețul la fiecare tranzacție, ms-ul bursei) și
+ // @kline (lumânarea CURENTĂ, mișcându-se în timp real pe grafic).
  function opresteViu(){ if(ws){ try{ws.close();}catch(e){} ws=null; } }
  function pornesteViu(sim){
    opresteViu();
    if(!eCripto(sim)) return;
    try{
-     const w=new WebSocket('wss://stream.binance.com:9443/ws/'+sim.toLowerCase()+'@trade');
+     var st=sim.toLowerCase();
+     var w=new WebSocket('wss://stream.binance.com:9443/stream?streams='+st+'@trade/'+st+'@kline_'+interval);
      ws=w;
      w.onmessage=function(ev){ try{
-       const j=JSON.parse(ev.data); const nou=Number(j.p);
-       if(!(nou>0)) return;
-       p.textContent=nou; p.className='pret '+(nou>=pretVechi?'sus':'jos'); pretVechi=nou;
-       viu.textContent='● LIVE (flux Binance, tranzacție cu tranzacție) · ultima: '+oraMs(j.T)+' — milisecunda bursei';
+       var m=JSON.parse(ev.data); var d=(m&&m.data)||{};
+       if(d.e==='trade'){
+         var nou=Number(d.p);
+         if(nou>0){ p.textContent=nou; p.className='pret '+(nou>=pretVechi?'sus':'jos'); pretVechi=nou;
+           viu.textContent='● LIVE (flux Binance, tranzacție cu tranzacție) · ultima: '+oraMs(d.T)+' — milisecunda bursei'; }
+       } else if(d.e==='kline'&&d.k){
+         var k=d.k;
+         serie.update({time:Math.floor(k.t/1000),open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)});
+       }
      }catch(e){} };
      w.onerror=function(){ if(ws===w){ viu.textContent='fluxul live a picat — rămân pe împrospătarea la 10s (rețeaua/blocantul browserului?)'; } };
      w.onclose=function(){ if(ws===w){ ws=null; } };
    }catch(e){ viu.textContent='fluxul live nu a pornit ('+e+') — împrospătare la 10s'; }
  }
- function urmareste(){ if(ceas)clearInterval(ceas); void pret(); ceas=setInterval(pret,10000); pornesteViu(s.value.toUpperCase().trim()); }
+
+ function urmareste(){
+   var sim=s.value.toUpperCase().trim();
+   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); }
+   if(ceas)clearInterval(ceas);
+   void pret(); ceas=setInterval(pret,10000);
+   pornesteViu(sim);
+ }
  v.onclick=urmareste;
  document.querySelectorAll('.chip').forEach(function(b){ b.onclick=function(){ s.value=b.textContent; urmareste(); }; });
- document.querySelectorAll('.int').forEach(function(b){ b.onclick=function(){ interval=b.textContent;
-   document.querySelectorAll('.int').forEach(function(o){o.classList.remove('activ');}); b.classList.add('activ'); urmareste(); }; });
- an.onclick=async()=>{
-   an.disabled=true; out.textContent='Kelion citește piața, își recitește apelurile din memorie și gândește (poate dura ~30-60s)…';
+ document.querySelectorAll('.int').forEach(function(b){ b.onclick=function(){ if(b.disabled)return; interval=b.textContent;
+   document.querySelectorAll('.int').forEach(function(o){o.classList.remove('activ');}); b.classList.add('activ'); primaIncarcare=true; urmareste(); }; });
+
+ an.onclick=async function(){
+   an.disabled=true; out.textContent='Kelion citește piața, memoria apelurilor și gândește (~30-60s)…';
    try{
-     const r=await fetch('/api/tranzactii/analiza',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({simbol:s.value,interval:interval})});
-     const j=await r.json();
-     out.innerHTML=j.error?'<span class=rau>'+j.error+'</span>':j.analiza.replace(/</g,'&lt;');
+     var r=await fetch('/api/tranzactii/analiza',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({simbol:s.value,interval:interval})});
+     var j=await r.json();
+     out.innerHTML=j.error?'<span class=rau>'+j.error+'</span>':String(j.analiza).replace(/</g,'&lt;');
+     if(!j.error){ aratNiveluri(j.niveluri); }
    }catch(e){ out.innerHTML='<span class=rau>rețea: '+e+'</span>'; }
    an.disabled=false;
  };
- // CHATUL DIN CENTRU (9 aug): fiecare întrebare pleacă ancorată în simbolul +
- // intervalul de pe ecran; istoricul conversației merge cu ea (continuitate).
- const jurnal=document.getElementById('jurnal'), ci=document.getElementById('ci'), ct=document.getElementById('ct'), cv=document.getElementById('cv');
- const fir=[];
- // GURA LUI KELION ÎN TAB (9 aug, ownerul: „nu-l aud"): răspunsurile din chatul
- // ăsta se și SPUN, cu aceeași voce Chirp ca în aplicație (POST /api/tts).
- // Butonul 🔊 o stinge/aprinde; eșecul sintezei nu rupe chatul (textul rămâne).
- let cuVoce=true, gura=null;
- cv.onclick=function(){ cuVoce=!cuVoce; cv.textContent=cuVoce?'🔊':'🔇'; if(!cuVoce&&gura){ try{gura.pause();}catch(e){} gura=null; } };
- async function spune(text){
-   if(!cuVoce||!text) return;
+
+ // CHATUL (9 aug): ancorat în simbolul+intervalul de pe ecran; nivelurile din
+ // răspuns se desenează pe grafic; răspunsul se și SPUNE (gura Chirp).
+ cv.onclick=function(){ cuVoce=!cuVoce; cv.textContent=cuVoce?'🔊':'🔇'; if(!cuVoce){ coadaAudio=[]; if(gura){ try{gura.pause();}catch(e){} gura=null; } } };
+ // VOCEA VINE DIN CREIERUL UNIC (9 aug, ownerul: „modelul de chat cerut peste
+ // tot" + „în chat audio nu merge"): chatul de aici NU mai are alt motor — e
+ // ACELAȘI /api/chat ca peste tot (aceeași persona, același model, aceleași
+ // unelte, aceeași gură Chirp). Framele {audio} din flux se redau la coadă.
+ var coadaAudio=[];
+ function redaUrmatorul(){
+   if(!cuVoce||gura||!coadaAudio.length) return;
+   var b64=coadaAudio.shift();
    try{
-     const r=await fetch('/api/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:text.slice(0,1200)})});
-     if(!r.ok) return;
-     const b=await r.blob();
-     if(gura){ try{gura.pause();}catch(e){} }
-     gura=new Audio(URL.createObjectURL(b));
-     void gura.play().catch(function(){});
-   }catch(e){}
+     var oct=atob(b64), buf=new Uint8Array(oct.length);
+     for(var i=0;i<oct.length;i++){ buf[i]=oct.charCodeAt(i); }
+     var url=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
+     gura=new Audio(url);
+     gura.onended=function(){ URL.revokeObjectURL(url); gura=null; redaUrmatorul(); };
+     void gura.play().catch(function(){ URL.revokeObjectURL(url); gura=null; });
+   }catch(e){ gura=null; }
  }
  function scrieRand(cine,text){
    jurnal.style.display='block';
-   const r=document.createElement('div');
+   var r=document.createElement('div');
    r.style.margin='.35rem 0'; r.style.whiteSpace='pre-wrap'; r.style.wordBreak='break-word';
    r.style.color = cine==='kelion' ? '#e8ecf6' : '#8fb7ff';
    r.textContent=(cine==='kelion'?'Kelion: ':'Tu: ')+text;
    jurnal.appendChild(r); jurnal.scrollTop=jurnal.scrollHeight;
    return r;
  }
+ // NIVELURI: aceeași extragere ca pe server (rândul NIVELURI: nume=valoare; …)
+ function extrageNiveluriText(text){
+   var m=String(text||'').match(/NIVELURI:\s*([^\n]*)/i);
+   if(!m||!m[1]) return [];
+   var out=[];
+   var bucati=m[1].split(/[;,]/);
+   for(var i=0;i<bucati.length&&out.length<8;i++){
+     var pm=bucati[i].match(/\s*([a-zăâîșț_ -]+?)\s*=\s*([0-9]+(?:[.][0-9]+)?)\s*$/i);
+     if(!pm) continue;
+     var val=Number(pm[2]);
+     if(isFinite(val)&&val>0) out.push({nume:pm[1].trim().toLowerCase(),valoare:val});
+   }
+   return out;
+ }
  async function trimiteChat(){
-   const q=ci.value.trim(); if(!q) return;
+   var q=ci.value.trim(); if(!q) return;
    ci.value=''; ct.disabled=true; ci.disabled=true;
    scrieRand('eu',q); fir.push({cine:'eu',text:q});
-   const asteapta=scrieRand('kelion','… (citește piața reală, memoria și, dacă e nevoie, caută pe net — poate dura ~30-60s)');
+   var asteapta=scrieRand('kelion','…');
+   // ANCORA DE PIAȚĂ pe CREIERUL UNIC: întrebarea pleacă cu datele reale de pe
+   // ecran în față — Kelion (același de peste tot) răspunde pe ele, scurt, cu
+   // rândul NIVELURI: la final (se desenează pe grafic).
+   var ancora='[CENTRUL DE TRANZACȚIONARE — pe ecran acum: '+simbolCurent+' preț '+p.textContent+', interval '+interval+
+     '. Răspunde ca mentor de trading cu riscul întâi, SCURT (max 10 rânduri), DOAR pe cifre reale (de pe ecran sau din surse de pe net cu link și dată). '+
+     'La final, pe rând separat, scrie exact: NIVELURI: intrare=…; stop=…; tinta=…; suport=…; rezistenta=… — doar cele care există; altfel NIVELURI: -] ';
+   var mesaje=[];
+   var coada=fir.slice(-8);
+   for(var k=0;k<coada.length;k++){ mesaje.push({role:coada[k].cine==='kelion'?'assistant':'user',content:coada[k].text}); }
+   mesaje[mesaje.length-1]={role:'user',content:ancora+q};
    try{
-     const r=await fetch('/api/tranzactii/chat',{method:'POST',headers:{'content-type':'application/json'},
-       body:JSON.stringify({intrebare:q,simbol:s.value,interval:interval,istoric:fir.slice(-8)})});
-     const j=await r.json();
-     asteapta.textContent='Kelion: '+(j.error?('eroare: '+j.error):j.raspuns);
-     if(!j.error){ fir.push({cine:'kelion',text:j.raspuns}); void spune(j.raspuns); }
+     var res=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},
+       body:JSON.stringify({messages:mesaje,serverVoiceOff:!cuVoce})});
+     if(!res.ok||!res.body){ asteapta.textContent='Kelion: eroare HTTP '+res.status; }
+     else{
+       var reader=res.body.getReader(), dec=new TextDecoder(), buf='', text='';
+       var CTRL=String.fromCharCode(31);
+       for(;;){
+         var pas=await reader.read();
+         if(pas.done) break;
+         buf+=dec.decode(pas.value,{stream:true});
+         for(;;){
+           var i0=buf.indexOf(CTRL);
+           if(i0===-1){ text+=buf; buf=''; break; }
+           text+=buf.slice(0,i0);
+           var i1=buf.indexOf(CTRL,i0+1);
+           if(i1===-1){ buf=buf.slice(i0); break; }
+           try{
+             var frame=JSON.parse(buf.slice(i0+1,i1));
+             if(frame&&typeof frame.audio==='string'){ coadaAudio.push(frame.audio); redaUrmatorul(); }
+           }catch(e){}
+           buf=buf.slice(i1+1);
+         }
+         asteapta.textContent='Kelion: '+text;
+         jurnal.scrollTop=jurnal.scrollHeight;
+       }
+       text+=buf;
+       if(text.trim()){
+         asteapta.textContent='Kelion: '+text;
+         fir.push({cine:'kelion',text:text});
+         aratNiveluri(extrageNiveluriText(text));
+       } else { asteapta.textContent='Kelion: (fără răspuns — vezi aplicația)'; }
+     }
    }catch(e){ asteapta.textContent='Kelion: rețea picată: '+e; }
    ct.disabled=false; ci.disabled=false; ci.focus();
  }
@@ -274,12 +408,13 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
           `țintă, invalidare — „dacă… atunci…"), cu mărimea poziției ca % din capital; NU promite ` +
           `câștiguri, NU spune „sigur". Dacă cere algoritmi/strategii/boți sau ceva ce nu știi din ` +
           `date, CAUTĂ PE NET cu uneltele tale și adu structura completă cu SURSA și DATA fiecărei ` +
-          `afirmații. REGULA DE FIER — DOAR PE REAL: fiecare cifră pe care o spui vine ori din datele ` +
+          `afirmații. RĂSPUNS SCURT, OBLIGATORIU: cel mult 10 rânduri — esența, nu eseu; detaliile vin ` +
+          `DOAR dacă omul le cere explicit. REGULA DE FIER — DOAR PE REAL: fiecare cifră pe care o spui vine ori din datele ` +
           `reale de mai jos, ori dintr-o sursă de pe net cu link și dată; NICIO cifră inventată, NICIO ` +
-          `„estimare" nespusă — ce nu ai măsurat spui că nu ai de unde să știi. Scurt și aplicat, nu eseu.` +
+          `„estimare" nespusă — ce nu ai măsurat spui că nu ai de unde să știi.` +
           `\n\nDATELE REALE de pe ecran acum:\n${ancora}${memoria}` +
           (istoric ? `\n\nCONVERSAȚIA de până acum:\n${istoric}` : '') +
-          `\n\nÎNTREBAREA lui: ${intrebare}`,
+          `\n\nÎNTREBAREA lui: ${intrebare}${CERE_NIVELURI}`,
         true,
       )
       const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
@@ -289,7 +424,7 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
         `[tranzactii-chat ${zi}] ${simbolLog} Î: ${intrebare.slice(0, 300)} | R: ${r.text.slice(0, 600)}`,
         'tranzactii',
       )
-      return { raspuns: r.text }
+      return { raspuns: r.text, niveluri: extrageNiveluri(r.text) }
     } catch (e) {
       return reply
         .code(502)
@@ -324,12 +459,12 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
           `(suport/rezistență din minime/maxime reale); 3) Scenarii (dacă… atunci…, cu invalidare clară); ` +
           `4) Riscul (mărimea poziției ca % din capital, unde stă stopul, raport risc/câștig); 5) Ce NU se vede în date; ` +
           `6) JUDECATA apelurilor tale vechi (dacă există mai jos).\n` +
-          `Fără promisiuni, fără „sigur". Datele:\n${rezumatPentruAgent(d)}${istoria}`,
+          `Fără promisiuni, fără „sigur". Datele:\n${rezumatPentruAgent(d)}${istoria}${CERE_NIVELURI}`,
         true,
       )
       const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
       await addMemory(config.adminEmail, `[tranzactii ${zi}] ${d.simbol} [pret ${d.pret}, ${d.interval}]: ${r.text.slice(0, 900)}`, 'tranzactii')
-      return { analiza: r.text, simbol: d.simbol, pret: d.pret, sursa: d.sursa }
+      return { analiza: r.text, simbol: d.simbol, pret: d.pret, sursa: d.sursa, niveluri: extrageNiveluri(r.text) }
     } catch (e) {
       return reply
         .code(502)
