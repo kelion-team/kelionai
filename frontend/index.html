@@ -16,7 +16,11 @@
     <!-- PRELOAD AVATAR (auditul de fluiditate 27 iul): modelul 3D (~9MB) pornea
          abia DUPĂ parsarea bundle-ului JS → ecranul de încărcare stătea mult la
          prima deschidere. Preload = descărcarea începe odată cu pagina. -->
-    <link rel="preload" href="/kelion-rpm.glb" as="fetch" type="model/gltf-binary" crossorigin />
+    <!-- FĂRĂ crossorigin (9 aug, alerta „preloaded but not used"): loaderul GLTF
+         cere fișierul same-origin FĂRĂ mod CORS, deci preload-ul cu crossorigin
+         nu se potrivea NICIODATĂ cu cererea reală — modelul se descărca de două
+         ori și consola striga. Fără atribut, preload-ul chiar e folosit. -->
+    <link rel="preload" href="/kelion-rpm.glb" as="fetch" type="model/gltf-binary" />
     <!-- SEO (rescris 2 aug, auditul de onestitate): era în ROMÂNĂ pe o
          suprafață publică în engleză prin regulă, și promitea „Încearcă 3
          minute gratuit” — proba gratuită NU există (decizia lui Adrian, vezi
