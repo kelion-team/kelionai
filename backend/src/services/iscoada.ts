@@ -2,6 +2,7 @@ import { config } from '../config.js'
 import { addMemory, memorieIa } from '../db.js'
 import { webSearch } from './google.js'
 import { geminiDirectChat } from './geminiDirect.js'
+import { autonomActiv } from './autonomActiv.js'
 import type { OrMessage } from './brainContract.js'
 
 // ── ISCOADELE LUI KELION (Adrian, 4 aug: „boti care bat netul 24 din 24 si
@@ -82,10 +83,16 @@ export function pornesteIscoadele(): void {
   if (pornit) return
   pornit = true
   const minute = Math.max(60, Number(process.env.ISCOADA_MIN) || 360)
+  // OFF BY DEFAULT (9 aug): fără comutatorul autonom pornit, patrula nu cheltuie
+  // niciun token (nici Serper, nici Gemini) — timerul bate, tura e no-op.
+  const ocol = async (): Promise<void> => {
+    if (!(await autonomActiv())) return
+    await unOcolIscoada().catch(() => {})
+  }
   setTimeout(() => {
-    void unOcolIscoada().catch(() => {})
+    void ocol()
     setInterval(() => {
-      void unOcolIscoada().catch(() => {})
+      void ocol()
     }, minute * 60_000)
   }, 5 * 60_000)
 }

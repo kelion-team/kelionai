@@ -32,6 +32,7 @@ import { startMailbox } from './services/mailbox.js'
 import { startCitirePlati } from './services/openBanking.js'
 import { startPlatiEmail } from './services/platiEmail.js'
 import { startAutonomie } from './services/autonomie.js'
+import { autonomActiv } from './services/autonomActiv.js'
 import { incarcaModelUnic, startAutoUpgradeModel } from './services/modelAutoUpgrade.js'
 import { startAutoInvatare } from './services/autoInvatare.js'
 import { triageGaps } from './services/gapsTriage.js'
@@ -316,11 +317,14 @@ try {
 // SEMANTIC MEMORY — slow backfill (12 Jul): old memories get a meaning vector
 // in small batches, every 10 minutes; without a Gemini key it's a cheap no-op.
 setTimeout(() => {
-  const tick = (): void => {
-    void backfillMemoryEmbeddings(40).catch(() => {})
+  // OFF BY DEFAULT (9 aug): embedding-urile de memorie ard Gemini la fiecare 10
+  // min FĂRĂ user; fără comutatorul autonom pornit, tura e no-op (o citire KV).
+  const tick = async (): Promise<void> => {
+    if (!(await autonomActiv())) return
+    await backfillMemoryEmbeddings(40).catch(() => {})
   }
-  tick()
-  setInterval(tick, 10 * 60_000)
+  void tick()
+  setInterval(() => { void tick() }, 10 * 60_000)
 }, 30_000)
 
 // Download endpoint: the installer MASTER lives on the Linux server and is
@@ -404,18 +408,27 @@ try {
   // decides by itself what brings value (stays "TO IMPLEMENT") and what gets
   // closed automatically. 1h after boot, then every 24h. Best-effort — blocks
   // nothing.
+  // OFF BY DEFAULT (9 aug): triajul cheamă creierul; fără comutator, no-op.
+  const triaj = async (): Promise<void> => {
+    if (!(await autonomActiv())) return
+    await triageGaps().then((r) => app.log.info(r, 'gaps triage (autonomous)')).catch(() => {})
+  }
   setTimeout(() => {
-    void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonomous)')).catch(() => {})
-    setInterval(() => {
-      void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonomous)')).catch(() => {})
-    }, 24 * 60 * 60 * 1000)
+    void triaj()
+    setInterval(() => { void triaj() }, 24 * 60 * 60 * 1000)
   }, 60 * 60 * 1000)
   // SELF-HEALING (Adrian, 27 Jul): Kelion collects the users' RECURRING errors
   // by itself and sends them to the builder for repair (PR → merge → all users
   // get the repaired version). 3 min after boot, then every 30 min.
+  // OFF BY DEFAULT (9 aug): self-heal sondează Gemini + umple coada
+  // constructorului; fără comutatorul autonom pornit, no-op (o citire KV).
+  const vindeca = async (): Promise<void> => {
+    if (!(await autonomActiv())) return
+    await runSelfHeal().catch(() => {})
+  }
   setTimeout(() => {
-    void runSelfHeal().catch(() => {})
-    setInterval(() => { void runSelfHeal().catch(() => {}) }, 30 * 60 * 1000)
+    void vindeca()
+    setInterval(() => { void vindeca() }, 30 * 60 * 1000)
   }, 3 * 60 * 1000)
   // ISCOADELE (Adrian, 4 aug: „boti care bat netul 24 din 24 si aduc informati
   // lui kelion"): patrula periodică Serper→creier→memoria lui Kelion.

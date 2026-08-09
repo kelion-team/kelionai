@@ -49,6 +49,7 @@ import { starePlatiEmail } from '../services/platiEmail.js'
 import { stareAutonomie } from '../services/autonomie.js'
 import { cheltuieliAplicatiei } from '../services/cardFurnizor.js'
 import { isOpsPaused, setOpsPaused } from '../services/runbooks.js'
+import { autonomActiv, seteazaAutonom } from '../services/autonomActiv.js'
 import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
@@ -757,6 +758,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // time, but only as a command you had to know by heart. A limit you
       // choose is not a barrier; one I impose on you is.
       autonomiaOprita: await isOpsPaused().catch(() => false),
+      // MOTOARELE AUTONOME (9 aug): OFF by default — iscoade/pietar/embeddings/
+      // self-heal/triaj/autonomia orară nu mai ard credit fără user decât dacă
+      // e pornit explicit de aici.
+      autonomActiv: await autonomActiv().catch(() => false),
     })
   })
   // YOUR BRAKE, ONE CLICK AWAY (Adrian, 30 Jul: "the 6 are needed, but no
@@ -781,6 +786,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const oprit = req.body?.oprit === true
     await setOpsPaused(oprit)
     return reply.send({ oprit })
+  })
+
+  // MOTOARELE AUTONOME — PORNIT/OPRIT (9 aug, ownerul: „off default, dacă nu
+  // trebuie nu se autoactivează; la sfârșit de cerință se revine în OFF").
+  // Comutatorul-master pentru iscoade/pietar/embeddings/self-heal/triaj/
+  // autonomia orară. Implicit OPRIT; se pornește DOAR de aici, la nevoie.
+  app.post<{ Body: { activ?: boolean } }>('/api/admin/autonom', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const activ = req.body?.activ === true
+    await seteazaAutonom(activ)
+    return reply.send({ activ })
   })
 
   // ── LINKING THE REVOLUT ACCOUNT (PSD2 consent, Enable Banking) ────────────

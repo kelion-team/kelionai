@@ -2,6 +2,7 @@ import { config } from '../config.js'
 import { addMemory, memorieIa } from '../db.js'
 import { dateSimbol, rezumatPentruAgent } from './piete.js'
 import { geminiDirectChat } from './geminiDirect.js'
+import { autonomActiv } from './autonomActiv.js'
 import type { OrMessage } from './brainContract.js'
 
 // ── PIETARUL: PATRULA PIEȚELOR 24/24 (Adrian, 4 aug: „el învață din realitate
@@ -72,10 +73,17 @@ export function pornestePietarul(): void {
   if (pornit) return
   pornit = true
   const minute = Math.max(15, Number(process.env.PIETE_MIN) || 60)
+  // OFF BY DEFAULT (9 aug): fără comutatorul autonom pornit, ocolul nu cheltuie
+  // niciun token — doar o citire KV. Timerul bate, dar tura e no-op până când
+  // ownerul pornește autonomia „când trebuie".
+  const ocol = async (): Promise<void> => {
+    if (!(await autonomActiv())) return
+    await unOcolPietar().catch(() => {})
+  }
   setTimeout(() => {
-    void unOcolPietar().catch(() => {})
+    void ocol()
     setInterval(() => {
-      void unOcolPietar().catch(() => {})
+      void ocol()
     }, minute * 60_000)
   }, 10 * 60_000)
 }
