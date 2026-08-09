@@ -1,3 +1,4 @@
+import { OCHI_MARCAJ } from './brainContract.js'
 import type { AnthropicTool, OrMessage, OrToolCall } from './brainContract.js'
 import {
   GEMINI_DIRECT_PREFIX,
@@ -75,6 +76,33 @@ const ANALIZA_CLAIM_RE =
  * @param tools      the tools in Anthropic format (the ones from chat.ts)
  * @param execTool   runs a tool: (name, argsJson) → text result
  */
+// OCHII PE REZULTAT (9 aug, ownerul: „sistemul nu dă lui Kelion poza reală
+// pentru analiză"): un rezultat de unealtă poate purta o captură reală după
+// OCHI_MARCAJ (browserul o lipește la fiecare pas). Textul curat intră ca
+// rezultat de unealtă, iar captura intră imediat după, ca IMAGINE într-un rând
+// user — modelul chiar O VEDE (geminiDirect o mapează pe inline_data), nu doar
+// primește un URL pe care nu-l poate privi.
+export function impingeRezultat(convo: OrMessage[], id: string, out: string): void {
+  const taietura = out.indexOf(OCHI_MARCAJ)
+  if (taietura < 0) {
+    convo.push({ role: 'tool', tool_call_id: id, content: out })
+    return
+  }
+  const curat = out.slice(0, taietura)
+  const b64 = out.slice(taietura + OCHI_MARCAJ.length)
+  convo.push({ role: 'tool', tool_call_id: id, content: curat })
+  convo.push({
+    role: 'user',
+    content: [
+      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } },
+      {
+        type: 'text',
+        text: '[OCHII TĂI — captura reală a paginii din browser, chiar acum. Analizezi CE SE VEDE aici, nu din amintiri sau din textul paginii.]',
+      },
+    ],
+  })
+}
+
 export async function runOrchestrator(
   model: string,
   messages: OrMessage[],
@@ -221,7 +249,7 @@ export async function runOrchestrator(
           } catch (e) {
             out = `tool_error: ${String(e).slice(0, 200)}`
           }
-          convo.push({ role: 'tool', tool_call_id: call.id, content: out })
+          impingeRezultat(convo, call.id, out)
         }
         continue
       }
@@ -328,7 +356,7 @@ export async function runOrchestrator(
     )
     if (iesiri.length > 1) console.log(`[TIMP] ${iesiri.length} unelte în paralel: ${Date.now() - tUnelte}ms`)
     for (let i = 0; i < res.toolCalls.length; i++) {
-      convo.push({ role: 'tool', tool_call_id: res.toolCalls[i].id, content: iesiri[i] })
+      impingeRezultat(convo, res.toolCalls[i].id, iesiri[i])
     }
   }
 

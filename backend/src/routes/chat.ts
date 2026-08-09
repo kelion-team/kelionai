@@ -44,7 +44,7 @@ import {
   userKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/brainContract.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, OCHI_MARCAJ, type OrMessage, type AnthropicTool } from '../services/brainContract.js'
 import { stripToolMarkup, makeToolMarkupStripper } from '../services/toolMarkup.js'
 import {
   iaSlotDacaLiber,
@@ -3021,6 +3021,14 @@ async function runTool(
   const browserResult = (result: BrowserResult): string => {
     if (!('error' in result)) {
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      // OCHII PE PAGINĂ (9 aug, ownerul: „sistemul nu dă lui Kelion poza reală
+      // pentru analiză"): captura pleca DOAR pe monitor, iar modelul primea un
+      // URL pe care nu-l poate privi — „citește captura" din descrierea uneltei
+      // era o minciună structurală. Acum base64-ul iese din textul rezultatului
+      // (să nu umfle jurnalul/istoricul cu 100KB de text) și pleacă pe marcajul
+      // OCHI — orchestratorul îl lipește ca IMAGINE reală în conversație.
+      const { shotB64, ...faraOchi } = result
+      return shotB64 ? `${JSON.stringify(faraOchi)}${OCHI_MARCAJ}${shotB64}` : JSON.stringify(faraOchi)
     }
     return JSON.stringify(result)
   }
