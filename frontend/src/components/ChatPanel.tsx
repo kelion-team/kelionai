@@ -2203,14 +2203,15 @@ export default function ChatPanel({
     const id = navigator.geolocation.watchPosition(
       (pos) => {
         const nou = { lat: pos.coords.latitude, lon: pos.coords.longitude }
-        // AUTO-UPDATE DOAR LA MIȘCARE REALĂ (9 aug, ownerul: „când există o
-        // diferență mai mare de 20m de la ultima poziție se auto-updatează").
-        // Sub 20m = același loc (drift de senzor) → nu rescriem (fără zgomot,
-        // fără trafic inutil spre creier); peste 20m sau primul fix →
-        // actualizăm. „La cerință" rămâne acoperit de getFreshCoords, care
-        // forțează o citire proaspătă indiferent de prag.
+        // AUTO-UPDATE DOAR LA MIȘCARE MARE (9 aug, ownerul: „și un km e ok, că
+        // la cerere se citește real"). Paznicul de fundal e doar un CACHE CALD
+        // — nu trebuie precis, fiindcă orice tură care chiar are nevoie de loc
+        // cheamă getFreshCoords (citire REALĂ pe loc, indiferent de prag). Deci
+        // rescriem cache-ul doar la o mișcare de peste PRAG_MISCARE_M (drift de
+        // senzor = zero zgomot, zero trafic inutil spre creier).
+        const PRAG_MISCARE_M = 1000 // 1 km — schimbă aici dacă vrei mai des
         const vechi = coordsRef.current
-        if (!vechi || distantaMetri(vechi, nou) > 20) {
+        if (!vechi || distantaMetri(vechi, nou) > PRAG_MISCARE_M) {
           coordsRef.current = nou
           precizieRef.current = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null
         }
