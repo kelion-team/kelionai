@@ -41,7 +41,8 @@ export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
       const html = `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/leaflet/leaflet.css">
-<style>html,body,#map{height:100%;margin:0;background:#0b0d12}
+<style>html,body{height:100%;width:100%;margin:0;padding:0;background:#0b0d12;overflow:hidden}
+#map{height:100vh;min-height:100vh;width:100vw;margin:0;padding:0;background:#0b0d12}
 #hud{position:absolute;z-index:1000;left:12px;bottom:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
 font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:12px;border:1px solid #2a3350}
 /* TOP-right, NOT bottom-right: the corner avatar sits there and covers the button
@@ -56,7 +57,7 @@ var punct=${JSON.stringify(arePunct ? [punct[0], punct[1]] : null)};
 var nume=${JSON.stringify(nume)};
 var map=L.map('map',{zoomControl:true});
 var hud=document.getElementById('hud');
-var strat=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+var strat=L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors © CartoDB'}).addTo(map);
 /* PIESE NEVENITE = SPUS, NU MASCAT: dacă browserul (extensie/blocant/rețea)
    refuză piesele OSM, harta ar rămâne un gri mut. HUD-ul spune cauza. */
 var pieseCazute=0,hudPiese=false;
