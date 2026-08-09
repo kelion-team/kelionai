@@ -205,6 +205,24 @@ export function construiesteInstructiune(
     `salută primul, o singură dată pe conversație. După o reconectare continui de unde ați rămas, ` +
     `fără nicio formulă de deschidere. Dacă omul își ia rămas-bun („pa", „noapte bună"), răspunzi ` +
     `scurt la rămas-bun — NU cu un salut de început.`
+  // REGULA TREZIRII PE NUME (9 aug, ownerul: „el trebuie să răspundă DOAR când
+  // îl strigi Kelion, și asta e implementată dar nu funcționează"). MĂSURAT în
+  // cod: calea LIVE (Gemini) NU avea NICIO regulă de trezire — VAD-ul deschidea
+  // tura pe ORICE vorbire clară, deci Kelion răspundea și când nu i se vorbea
+  // lui. Regula de nume trăia doar pe calea ambientală (chat.ts, „WAKE WORD IS
+  // DECISIVE"), nu aici. O aducem și pe sesiunea vie, cu ACELAȘI contract pe
+  // care ownerul l-a validat: numele deschide tura, restul e tăcere. Nu tăiem
+  // audio (regresia din 6 aug, „nu aude"): pragul rămâne pe judecata modelului,
+  // dar acum instruit clar CÂND i se vorbește.
+  instructiune +=
+    `\nREGULA TREZIRII PE NUME — DECISIVĂ: răspunzi cu voce DOAR dacă ȚIE ți se vorbește. ` +
+    `Ți se vorbește când: (a) numele tău („Kelion", „Kei") e primul sau printre primele cuvinte ` +
+    `ale frazei, SAU (b) tu tocmai ai pus o întrebare și fraza asta e răspunsul la ea. În rest — ` +
+    `vorbire între alți oameni, gânduri cu voce tare, zgomot de fundal, sau un nume care NU e al ` +
+    `tău — TACI complet: niciun cuvânt, niciun sunet, nicio unealtă. Un nume care apare TÂRZIU ` +
+    `în frază e vorbire DESPRE tine, nu CĂTRE tine — și aia se ignoră. Când ești strigat pe nume, ` +
+    `tăcerea e GREȘITĂ (nu fi peste-precaut); când NU ești strigat, orice vorbă a ta e o ` +
+    `întrerupere nedorită. Fiind strigat pe nume ESTE invitația de a vorbi.`
   if (istoric.length) {
     const randuri = istoric
       .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
