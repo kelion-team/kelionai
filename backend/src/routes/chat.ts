@@ -54,7 +54,7 @@ import {
 } from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { autoPreviewFrame } from '../services/monitorAutoPreview.js'
-import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
+import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, geminiLive } from '../services/geminiDirect.js'
 import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -2879,13 +2879,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // dacă textul deja a curs, sufixul se SEPARĂ de el (nu se lipește în
       // aceeași propoziție) și spune cinstit că s-a întrerupt — iar istoricul
       // salvează ecranul ÎNTREG (parțial + notă), nu doar sufixul.
-      const spoken = ecranPartial.trim()
+      let spoken = ecranPartial.trim()
         ? (ro
             ? '\n\n[Răspunsul s-a întrerupt aici — cere-mi să continui.]'
             : '\n\n[The reply was cut off here — ask me to continue.]')
         : ro
           ? 'Încearcă din nou în câteva secunde.'
           : 'Try again in a few seconds.'
+      // CREDITUL MORT SPUS PE FAȚĂ, DOAR ADMINULUI (9 aug, capturile ownerului:
+      // sold AI Studio −£1.32, card refuzat la auto-reîncărcare — iar Kelion
+      // inventa scuze („nu ești logat ca admin") peste turele care mureau pe
+      // cotă). Userii plătitori RĂMÂN pe mesajul neutru (regula din 1 aug: nu
+      // citesc despre modele/cote/bani); OWNERUL are nevoie de cauza reală ca
+      // să știe CE să repare. Sonda geminiLive() (ping generateContent, cache
+      // 5 min) desparte creditul epuizat de o limită de viteză trecătoare.
+      if (isAdminUser && isRateLimit) {
+        const g = await geminiLive().catch(() => null)
+        const cauza =
+          g?.ok && !g.serving && g.reason === 'depleted'
+            ? '[CREDIT GOOGLE EPUIZAT] Google refuză generarea: soldul AI Studio e sub zero, iar cardul de auto-reîncărcare a fost refuzat. Reîncarcă la aistudio.google.com → Billing; până atunci creierul nu poate răspunde.'
+            : g?.ok && !g.serving && g.reason === 'quota'
+              ? '[COTĂ GEMINI ATINSĂ] Limita de cereri pe minut e atinsă — nu e problemă de credit; reîncearcă în circa un minut.'
+              : null
+        if (cauza) spoken = `${ecranPartial.trim() ? '\n\n' : ''}${cauza}`
+      }
       reply.raw.write(spoken)
       reply.raw.end()
       void saveMessage(user.email, 'assistant', ecranPartial.trim() ? ecranPartial + spoken : spoken)
