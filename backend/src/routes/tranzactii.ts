@@ -39,18 +39,41 @@ import { config } from '../config.js'
  *  lumânări. Fără rând sau „NIVELURI: -" → listă goală (nu se inventează).
  *  PURĂ și exportată — se probează pe texte reale, fără agent. */
 export function extrageNiveluri(text: string): { nume: string; valoare: number }[] {
-  const m = String(text ?? '').match(/NIVELURI:\s*([^\n]*)/i)
-  if (!m || !m[1]) return []
-  const out: { nume: string; valoare: number }[] = []
-  for (const bucata of m[1].split(/[;,]/)) {
-    const p = bucata.match(/\s*([a-zăâîșț_ -]+?)\s*=\s*([0-9]+(?:[.][0-9]+)?)\s*$/i)
-    if (!p) continue
-    const valoare = Number(p[2])
-    if (!Number.isFinite(valoare) || valoare <= 0) continue
-    out.push({ nume: p[1].trim().toLowerCase(), valoare })
-    if (out.length >= 8) break // un grafic cu 30 de linii nu mai arată nimic
+  // Revizia (9 aug): virgula era luată drept separator de perechi → „intrare=65,100"
+  // ieșea 65 (linie GREȘITĂ pe grafic); prima apariție a „NIVELURI" în proză
+  // îngropa rândul real; boldul markdown și monedele stricau potrivirea.
+  const curat = String(text ?? '').replace(/[*_`]/g, '')
+  const aparitii = [...curat.matchAll(/NIVELURI\s*:?\s*([^\n]*)/gi)]
+  for (let a = aparitii.length - 1; a >= 0; a--) {
+    const rand = aparitii[a][1] ?? ''
+    const out: { nume: string; valoare: number }[] = []
+    for (const p of rand.matchAll(/([a-zăâîșțşţ_ -]+?)\s*=\s*[~≈$€£]?\s*([0-9][0-9.,\s]*)/gi)) {
+      const valoare = normalizeazaNumar(p[2])
+      if (valoare === null) continue
+      out.push({ nume: p[1].trim().toLowerCase().normalize('NFC'), valoare })
+      if (out.length >= 8) break
+    }
+    if (out.length) return out // rândul cerut e „LA FINAL" — ultima apariție validă câștigă
   }
-  return out
+  return []
+}
+
+/** „65,100" / „65.100,50" / „65 100" → numărul REAL: grupele de 3 sunt mii,
+ *  ultima grupă scurtă e zecimale. PURĂ — probată pe formate reale de agent. */
+export function normalizeazaNumar(brut: string): number | null {
+  const t = String(brut ?? '').trim().replace(/\s+/g, '')
+  if (!t) return null
+  let s = t
+  if (/^\d{1,3}([.,]\d{3})+([.,]\d{1,2})?$/.test(t)) {
+    // separatori de mii cu (poate) zecimale la coadă
+    const m = t.match(/^(.*?)([.,](\d{1,2}))?$/)
+    const intreg = (m?.[1] ?? t).replace(/[.,]/g, '')
+    s = m?.[3] ? `${intreg}.${m[3]}` : intreg
+  } else {
+    s = t.replace(',', '.')
+  }
+  const v = Number(s)
+  return Number.isFinite(v) && v > 0 ? v : null
 }
 
 /** Instrucțiunea comună prin care agentul își face nivelurile DESENABILE. */
@@ -95,7 +118,10 @@ function paginaTranzactii(): string {
  .pret{font-size:1.8rem;font-weight:700;margin:.2rem 0;display:inline-block}
  .sus{color:#4ade80}.jos{color:#f87171}
  .nota{font-size:.83rem;color:#8b93ad;border-left:3px solid #2a3550;padding-left:.7rem;line-height:1.45}
- #graf{width:100%;height:440px;border:1px solid #1c2440;border-radius:.6rem;overflow:hidden}
+ html,body{height:100%}
+ .continut{display:flex;flex-direction:column;min-height:calc(100dvh - 52px);max-width:1400px}
+ #graf{position:relative;flex:1 1 auto;min-height:320px;width:100%;border:1px solid #1c2440;border-radius:.6rem;overflow:hidden}
+ #leg{position:absolute;top:.4rem;left:.6rem;z-index:3;font:.78rem ui-monospace,monospace;color:#8b93ad;pointer-events:none;white-space:pre}
 </style></head><body>
 <div class="bara">
  <h1>📈 Centrul de Tranzacționare — Kelion, analistul tău</h1>
@@ -118,7 +144,7 @@ function paginaTranzactii(): string {
 </div>
 <div><span class="pret" id="p">—</span> <span id="var">—</span></div>
 <div id="viu" class="nota">—</div>
-<div id="graf"></div>
+<div id="graf"><div id="leg"></div></div>
 <h2 style="font-size:1rem;margin:.8rem 0 .3rem">💬 Chat cu Kelion — mentorul de tranzacționare (DOAR pe date reale)</h2>
 <p class="nota">Întreabă cum funcționează, când/cum intri sau ieși (niveluri concrete, desenate pe grafic), sau cere-i să caute pe net algoritmul complet al unei strategii — vine cu sursa și data. Răspunsuri SCURTE; discuția se salvează în memoria lui separată, doar a ta.</p>
 <div id="jurnal" style="background:#111830;border-radius:.6rem;padding:.8rem;max-height:300px;overflow-y:auto;display:none"></div>
@@ -133,7 +159,7 @@ function paginaTranzactii(): string {
  var s=document.getElementById('s'), p=document.getElementById('p'), va=document.getElementById('var'), out=document.getElementById('out'), viu=document.getElementById('viu');
  var an=document.getElementById('an'), v=document.getElementById('v');
  var jurnal=document.getElementById('jurnal'), ci=document.getElementById('ci'), ct=document.getElementById('ct'), cv=document.getElementById('cv');
- var interval='1h', ws=null, ceas=null, pretVechi=0, simbolCurent='', primaIncarcare=true;
+ var interval='1h', ws=null, ceas=null, pretVechi=0, simbolCurent='', primaIncarcare=true, reconectDelay=1000, primaTranzactie=false;
  var fir=[], liniile=[], cuVoce=true, gura=null;
 
  // IEȘIREA (9 aug, ownerul: „nu are buton ieșire"): pe pagina de sine
@@ -154,6 +180,24 @@ function paginaTranzactii(): string {
    autoSize:true
  });
  var serie=chart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#4ade80',downColor:'#f87171',wickUpColor:'#4ade80',wickDownColor:'#f87171',borderVisible:false});
+ // VOLUMUL sub lumanari (revizia: exista in date, nu era desenat) + medii
+ var vol=chart.addSeries(LightweightCharts.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'',lastValueVisible:false,priceLineVisible:false});
+ vol.priceScale().applyOptions({scaleMargins:{top:0.8,bottom:0}});
+ chart.priceScale('right').applyOptions({scaleMargins:{top:0.08,bottom:0.22}});
+ var ma20=chart.addSeries(LightweightCharts.LineSeries,{color:'#eab308',lineWidth:1,lastValueVisible:false,priceLineVisible:false});
+ var ema50=chart.addSeries(LightweightCharts.LineSeries,{color:'#60a5fa',lineWidth:1,lastValueVisible:false,priceLineVisible:false});
+ function sma(l,n){var out=[],s2=0;for(var i=0;i<l.length;i++){s2+=l[i].inchis;if(i>=n)s2-=l[i-n].inchis;if(i>=n-1)out.push({time:Math.floor(l[i].t/1000),value:s2/n});}return out;}
+ function ema(l,n){var out=[],k=2/(n+1),e=null;for(var i=0;i<l.length;i++){e=e===null?l[i].inchis:l[i].inchis*k+e*(1-k);if(i>=n-1)out.push({time:Math.floor(l[i].t/1000),value:e});}return out;}
+ // LEGENDA OHLC la crosshair (revizia: graficul era mut la hover)
+ var leg=document.getElementById('leg');
+ chart.subscribeCrosshairMove(function(par){
+   var d=par&&par.seriesData?par.seriesData.get(serie):null;
+   if(!d||d.open===undefined){ leg.textContent=''; return; }
+   var v=par.seriesData.get(vol);
+   var pct=d.open?((d.close-d.open)/d.open*100):0;
+   leg.textContent='O '+d.open+'  H '+d.high+'  L '+d.low+'  C '+d.close+'  ('+(pct>=0?'+':'')+pct.toFixed(2)+'%)'+(v&&v.value?('  V '+Math.round(v.value)):'');
+ });
+ function zecimale(x){var s2=String(x);var i=s2.indexOf('.');return i<0?2:Math.min(8,s2.length-i-1);}
 
  function eCripto(sim){ return /^[A-Z0-9]{5,}$/.test(sim) && sim.indexOf('.')<0 && sim.indexOf('^')<0; }
  function oraMs(t){ var d=new Date(t); function z(n,l){ return String(n).padStart(l||2,'0'); }
@@ -185,7 +229,7 @@ function paginaTranzactii(): string {
      var r=await fetch('/api/tranzactii/date?simbol='+encodeURIComponent(s.value)+'&interval='+interval);
      var j=await r.json();
      if(j.error){ p.textContent='—'; va.innerHTML='<span class=rau>'+j.error+'</span>'; return; }
-     if(!ws){ p.textContent=j.pret; }
+     if(!ws||!primaTranzactie){ p.textContent=j.pret; }
      va.innerHTML='24h: <span class="'+(j.variatie24h>=0?'sus':'jos')+'">'+j.variatie24h+'%</span> · '+j.simbol+' · '+j.sursa+' · lumânări '+j.interval;
      var zilnic=String(j.sursa||'').indexOf('Stooq')>=0;
      document.querySelectorAll('.int').forEach(function(b){ b.disabled=zilnic&&b.textContent!=='1d'; });
@@ -194,7 +238,13 @@ function paginaTranzactii(): string {
      // ți-ar reseta zoomul; fluxul kline ține lumânarea curentă vie.
      if(primaIncarcare||zilnic||!ws){
        serie.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),open:c.deschis,high:c.maxim,low:c.minim,close:c.inchis}; }));
-       if(primaIncarcare){ chart.timeScale().fitContent(); primaIncarcare=false; }
+       vol.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),value:c.volum,color:c.inchis>=c.deschis?'#4ade8055':'#f8717155'}; }));
+       ma20.setData(sma(j.lumanari,20)); ema50.setData(ema(j.lumanari,50));
+       if(primaIncarcare){
+         var p0=zecimale(j.pret);
+         serie.applyOptions({priceFormat:{type:'price',precision:p0,minMove:Math.pow(10,-p0)}});
+         chart.timeScale().fitContent(); primaIncarcare=false;
+       }
      }
    }catch(e){ va.innerHTML='<span class=rau>rețea: '+e+'</span>'; }
  }
@@ -209,12 +259,13 @@ function paginaTranzactii(): string {
    try{
      var st=sim.toLowerCase();
      var w=new WebSocket('wss://stream.binance.com:9443/stream?streams='+st+'@trade/'+st+'@kline_'+interval);
-     ws=w;
+     ws=w; primaTranzactie=false; pretVechi=0;
+     w.onopen=function(){ reconectDelay=1000; };
      w.onmessage=function(ev){ try{
        var m=JSON.parse(ev.data); var d=(m&&m.data)||{};
        if(d.e==='trade'){
          var nou=Number(d.p);
-         if(nou>0){ p.textContent=nou; p.className='pret '+(nou>=pretVechi?'sus':'jos'); pretVechi=nou;
+         if(nou>0){ primaTranzactie=true; p.textContent=nou; p.className='pret '+(pretVechi&&nou>=pretVechi?'sus':pretVechi?'jos':'sus'); pretVechi=nou;
            viu.textContent='● LIVE (flux Binance, tranzacție cu tranzacție) · ultima: '+oraMs(d.T)+' — milisecunda bursei'; }
        } else if(d.e==='kline'&&d.k){
          var k=d.k;
@@ -222,7 +273,15 @@ function paginaTranzactii(): string {
        }
      }catch(e){} };
      w.onerror=function(){ if(ws===w){ viu.textContent='fluxul live a picat — rămân pe împrospătarea la 10s (rețeaua/blocantul browserului?)'; } };
-     w.onclose=function(){ if(ws===w){ ws=null; } };
+     // Revizia: fluxul murea tacut si eticheta ramanea „● LIVE" — stare
+     // afisata nemasurata. Acum: eticheta onesta + reconectare cu backoff.
+     w.onclose=function(){ if(ws===w){ ws=null;
+       if(simbolCurent&&eCripto(simbolCurent)){
+         viu.textContent='fluxul live s-a inchis — reconectez in '+Math.round(reconectDelay/1000)+'s…';
+         setTimeout(function(){ if(!ws&&simbolCurent&&eCripto(simbolCurent)){ void pret(); pornesteViu(simbolCurent); } }, reconectDelay);
+         reconectDelay=Math.min(reconectDelay*2,30000);
+       }
+     } };
    }catch(e){ viu.textContent='fluxul live nu a pornit ('+e+') — împrospătare la 10s'; }
  }
 
@@ -251,23 +310,29 @@ function paginaTranzactii(): string {
 
  // CHATUL (9 aug): ancorat în simbolul+intervalul de pe ecran; nivelurile din
  // răspuns se desenează pe grafic; răspunsul se și SPUNE (gura Chirp).
- cv.onclick=function(){ cuVoce=!cuVoce; cv.textContent=cuVoce?'🔊':'🔇'; if(!cuVoce){ coadaAudio=[]; if(gura){ try{gura.pause();}catch(e){} gura=null; } } };
+ cv.onclick=function(){ cuVoce=!cuVoce; cv.textContent=cuVoce?'🔊':'🔇'; if(!cuVoce){ coadaAudio=[]; if(gura){ try{gura.pause();}catch(e){} } curataGura(false); } };
  // VOCEA VINE DIN CREIERUL UNIC (9 aug, ownerul: „modelul de chat cerut peste
  // tot" + „în chat audio nu merge"): chatul de aici NU mai are alt motor — e
  // ACELAȘI /api/chat ca peste tot (aceeași persona, același model, aceleași
  // unelte, aceeași gură Chirp). Framele {audio} din flux se redau la coadă.
- var coadaAudio=[];
+ var coadaAudio=[], urlCurent=null;
+ function curataGura(maiDeparte){
+   if(urlCurent){ try{URL.revokeObjectURL(urlCurent);}catch(e){} urlCurent=null; }
+   gura=null;
+   if(maiDeparte) redaUrmatorul();
+ }
  function redaUrmatorul(){
    if(!cuVoce||gura||!coadaAudio.length) return;
    var b64=coadaAudio.shift();
    try{
      var oct=atob(b64), buf=new Uint8Array(oct.length);
      for(var i=0;i<oct.length;i++){ buf[i]=oct.charCodeAt(i); }
-     var url=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
-     gura=new Audio(url);
-     gura.onended=function(){ URL.revokeObjectURL(url); gura=null; redaUrmatorul(); };
-     void gura.play().catch(function(){ URL.revokeObjectURL(url); gura=null; });
-   }catch(e){ gura=null; }
+     urlCurent=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
+     gura=new Audio(urlCurent);
+     gura.onended=function(){ curataGura(true); };
+     gura.onerror=function(){ curataGura(true); }; // un frame stricat nu omoara vocea
+     void gura.play().catch(function(){ coadaAudio=[]; curataGura(false); cv.title='Vocea e blocată de browser — apasă 🔊 și trimite iar.'; });
+   }catch(e){ curataGura(true); }
  }
  function scrieRand(cine,text){
    jurnal.style.display='block';
@@ -279,18 +344,30 @@ function paginaTranzactii(): string {
    return r;
  }
  // NIVELURI: aceeași extragere ca pe server (rândul NIVELURI: nume=valoare; …)
+ function normalizeazaNumarText(brut){
+   var t=String(brut||'').trim().replace(/\s+/g,'');
+   if(!t) return null;
+   var s2=t;
+   if(/^\d{1,3}([.,]\d{3})+([.,]\d{1,2})?$/.test(t)){
+     var m=t.match(/^(.*?)([.,](\d{1,2}))?$/);
+     var intreg=(m&&m[1]?m[1]:t).replace(/[.,]/g,'');
+     s2=(m&&m[3])?(intreg+'.'+m[3]):intreg;
+   } else { s2=t.replace(',','.'); }
+   var v=Number(s2);
+   return (isFinite(v)&&v>0)?v:null;
+ }
  function extrageNiveluriText(text){
-   var m=String(text||'').match(/NIVELURI:\s*([^\n]*)/i);
-   if(!m||!m[1]) return [];
-   var out=[];
-   var bucati=m[1].split(/[;,]/);
-   for(var i=0;i<bucati.length&&out.length<8;i++){
-     var pm=bucati[i].match(/\s*([a-zăâîșț_ -]+?)\s*=\s*([0-9]+(?:[.][0-9]+)?)\s*$/i);
-     if(!pm) continue;
-     var val=Number(pm[2]);
-     if(isFinite(val)&&val>0) out.push({nume:pm[1].trim().toLowerCase(),valoare:val});
+   var curat=String(text||'').replace(/[*_\u0060]/g,'');
+   var aparitii=curat.match(/NIVELURI\s*:?\s*[^\n]*/gi)||[];
+   for(var a=aparitii.length-1;a>=0;a--){
+     var out=[], re=/([a-zăâîșțşţ_ -]+?)\s*=\s*[~≈$€£]?\s*([0-9][0-9.,\s]*)/gi, pm;
+     while((pm=re.exec(aparitii[a]))&&out.length<8){
+       var val=normalizeazaNumarText(pm[2]);
+       if(val!==null) out.push({nume:pm[1].trim().toLowerCase(),valoare:val});
+     }
+     if(out.length) return out;
    }
-   return out;
+   return [];
  }
  async function trimiteChat(){
    var q=ci.value.trim(); if(!q) return;
@@ -312,28 +389,49 @@ function paginaTranzactii(): string {
        body:JSON.stringify({messages:mesaje,serverVoiceOff:!cuVoce})});
      if(!res.ok||!res.body){ asteapta.textContent='Kelion: eroare HTTP '+res.status; }
      else{
-       var reader=res.body.getReader(), dec=new TextDecoder(), buf='', text='';
+       // FLUXUL /api/chat E SSE (revizia, constatarea 1): linii "id:"/"data:"
+       // despartite de rand gol; textul REAL e in liniile data: (minus UN
+       // spatiu), iar cadrele de control JSON stau intre doi U+001F. Un parser
+       // care citea fluxul brut ar fi afisat "id:"/"data:" ca text (bug prins
+       // de revizie inainte sa-l vada ownerul).
+       var reader=res.body.getReader(), dec=new TextDecoder(), sseBuf='', text='';
        var CTRL=String.fromCharCode(31);
+       function inghiteBucata(bucata){
+         var b=bucata;
+         for(;;){
+           var i0=b.indexOf(CTRL);
+           if(i0===-1){ text+=b; return; }
+           text+=b.slice(0,i0);
+           var i1=b.indexOf(CTRL,i0+1);
+           if(i1===-1){ return; } // frame rupt la granita de eveniment — se ignora
+           try{
+             var frame=JSON.parse(b.slice(i0+1,i1));
+             if(frame&&typeof frame.audio==='string'){ coadaAudio.push(frame.audio); redaUrmatorul(); }
+           }catch(e){}
+           b=b.slice(i1+1);
+         }
+       }
        for(;;){
          var pas=await reader.read();
          if(pas.done) break;
-         buf+=dec.decode(pas.value,{stream:true});
+         sseBuf+=dec.decode(pas.value,{stream:true});
          for(;;){
-           var i0=buf.indexOf(CTRL);
-           if(i0===-1){ text+=buf; buf=''; break; }
-           text+=buf.slice(0,i0);
-           var i1=buf.indexOf(CTRL,i0+1);
-           if(i1===-1){ buf=buf.slice(i0); break; }
-           try{
-             var frame=JSON.parse(buf.slice(i0+1,i1));
-             if(frame&&typeof frame.audio==='string'){ coadaAudio.push(frame.audio); redaUrmatorul(); }
-           }catch(e){}
-           buf=buf.slice(i1+1);
+           var taie=sseBuf.indexOf('\n\n');
+           if(taie===-1) break;
+           var ev=sseBuf.slice(0,taie); sseBuf=sseBuf.slice(taie+2);
+           var linii=ev.split('\n'), bucati=[];
+           for(var li=0;li<linii.length;li++){
+             if(linii[li].indexOf('data:')===0){
+               var v=linii[li].slice(5);
+               if(v.charAt(0)===' ') v=v.slice(1);
+               bucati.push(v);
+             }
+           }
+           if(bucati.length) inghiteBucata(bucati.join('\n'));
          }
          asteapta.textContent='Kelion: '+text;
          jurnal.scrollTop=jurnal.scrollHeight;
        }
-       text+=buf;
        if(text.trim()){
          asteapta.textContent='Kelion: '+text;
          fir.push({cine:'kelion',text:text});
