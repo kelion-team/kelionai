@@ -21,7 +21,7 @@ import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
 import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost, listBuildJobs, getSpeechLang } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang } from '../db.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -275,6 +275,17 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       return
     }
 
+    // Pulsul numără sesiunile REAL (audit 9 aug: contoarele existau din #947,
+    // dar nimeni nu le incrementa — panoul anti-minciună raporta permanent 0).
+    pulsVoce.sesiuniTotal++
+    pulsVoce.sesiuniDeschise++
+    let sesiuneScazuta = false // close și error pot trage amândouă — scădem o dată
+    const scadeSesiunea = (): void => {
+      if (sesiuneScazuta) return
+      sesiuneScazuta = true
+      pulsVoce.sesiuniDeschise = Math.max(0, pulsVoce.sesiuniDeschise - 1)
+    }
+
     let inchis = false
     let live: VocalLive | null = null
     // Microfonul clientului pornește imediat după deschiderea WS-ului, dar
@@ -296,6 +307,35 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // estimăm până CÂND se aude vocea din durata PCM reală (24 kHz, 16 bit).
     let redareEstimataPanaLa = 0
     const detectorVoce = creeazaDetectorVocePeste()
+    // ── VERDICTELE TUREI — trăiesc AICI, nu în closure-ul async, ca și
+    // close/error să le poată consulta (audit 9 aug: salvarea de la închidere
+    // ignora verdictele și băga în istoric ture suprimate — otravă pentru
+    // instrucțiunea sesiunii următoare).
+    let verdictTura: boolean | null = null // null = tura n-a început să răspundă
+    let verdictLimba: boolean | null = null // null = nedecis; false = străină
+    // Tura de SISTEM se declară EXPLICIT (anunțul de ordin terminat), nu se
+    // mai deduce din „transcriere goală" — deducția era o poartă fail-open:
+    // transcrierea Google sosește adesea DUPĂ primul cadru audio, deci tura
+    // ambientală trecea drept „sistem" și se REDA (audit 9 aug, critică).
+    let turaDeSistem = false
+    // Rostirea CURENTĂ (segmentată pe pauze >2,5s): adresarea se judecă pe
+    // ULTIMA rostire, nu pe tot ce s-a strâns peste ture mute — altfel
+    // „Kelion, …" proaspăt rămânea îngropat după primele 4 cuvinte VECHI.
+    let rostireCurenta = ''
+    let ultimaTranscriereUserLa = 0
+    // Verdict AMÂNAT: cadrele sosite înaintea transcrierii se țin aici — nici
+    // redate, nici suprimate. La prima transcriere se judecă; la 900 ms fără
+    // nicio transcriere → fail-open (lecția 308/308: mai bine o tură ambientală
+    // scăpată decât vocea moartă).
+    const cadreInAsteptare: string[] = []
+    let ceasAsteptareVerdict: NodeJS.Timeout | null = null
+    // Golirea difuzorului și ceasul lui nu se despart NICIODATĂ (audit 9 aug:
+    // gardul de limbă golea redarea dar lăsa ceasul pe „vorbește" → detectorul
+    // de voce tăia fals, pe liniște).
+    const golesteRedarea = (): void => {
+      redareEstimataPanaLa = 0
+      trimite({ type: 'intrerupt' })
+    }
 
     const trimite = (o: unknown): void => {
       if (inchis) return
@@ -317,8 +357,27 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       const k = bufKelion.trim()
       bufUser = ''
       bufKelion = ''
+      rostireCurenta = ''
       if (u) void saveMessage(user.email, 'user', u).catch(() => {})
       if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
+    }
+    // UN SINGUR drum de închidere a turei (audit 9 aug): tura suprimată se
+    // GOLEȘTE cu jurnal, nu se salvează — regula din onTuraGata, acum și pe
+    // close/error; înainte, o replică spaniolă suprimată intra totuși în
+    // istoric la închiderea WS-ului și otrăvea sesiunea următoare.
+    const incheieTura = (): void => {
+      if (verdictTura === false || verdictLimba === false) {
+        app.log.info(
+          verdictLimba === false
+            ? `[VOCE] tură suprimată aruncată la închidere (limbă străină): „${bufKelion.trim().slice(0, 120)}"`
+            : `[VOCE] tură suprimată aruncată la închidere (nu i se vorbea lui): auzit „${bufUser.trim().slice(0, 120)}"`,
+        )
+        bufUser = ''
+        bufKelion = ''
+        rostireCurenta = ''
+        return
+      }
+      salveazaTura()
     }
 
     // ── CONTABILIZAREA VOCII (8 aug: „creditul se consumă cu viteza luminii") ─
@@ -357,6 +416,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           if (!ordineUrmarite.has(j.id)) continue
           if (j.status === 'done' || j.status === 'failed') {
             ordineUrmarite.delete(j.id)
+            turaDeSistem = true // tura care urmează e ANUNȚ, declarat pe față — nu dedus din buffer gol
             live?.anunta(
               `[ANUNȚ DE SISTEM — nu e vocea omului] Ordinul de construcție #${j.id} ` +
                 `(„${j.orderText.slice(0, 80)}") s-a terminat: ${j.status === 'done' ? 'GATA' : 'A EȘUAT'}` +
@@ -447,9 +507,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // (ceasul difuzorului) și doar cu AEC-ul viu.
       if (detectorVoce.proceseazaCadru(buf, aecActiv && Date.now() < redareEstimataPanaLa)) {
         taiatDeVoce = true
-        redareEstimataPanaLa = 0
         pulsVoce.taieriPeVoceaOmului++
-        trimite({ type: 'intrerupt' }) // browserul golește redarea ACUM
+        golesteRedarea() // browserul golește redarea ACUM, ceasul difuzorului tace
         app.log.info('[VOCE] omul a vorbit peste Kelion — i-am tăiat vorba (barge-in pe server)')
       }
       if (live) {
@@ -462,18 +521,29 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     })
     socket.on('close', () => {
       inchis = true
+      scadeSesiunea()
       clearInterval(ceasCost)
       clearInterval(ceasOrdine)
+      if (ceasAsteptareVerdict) {
+        clearTimeout(ceasAsteptareVerdict)
+        ceasAsteptareVerdict = null
+      }
       varsaCostul() // restul de sub un minut nu se pierde
-      salveazaTura() // o tură neterminată la închidere nu se pierde
+      incheieTura() // o tură neterminată nu se pierde — dar una SUPRIMATĂ nu se salvează
       live?.inchide()
       app.log.info('vocal-live: WS închis')
     })
     socket.on('error', () => {
       inchis = true
+      scadeSesiunea()
       clearInterval(ceasCost)
       clearInterval(ceasOrdine)
+      if (ceasAsteptareVerdict) {
+        clearTimeout(ceasAsteptareVerdict)
+        ceasAsteptareVerdict = null
+      }
       varsaCostul()
+      incheieTura()
       live?.inchide()
     })
 
@@ -594,13 +664,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // atunci; tura suprimată se scrie în jurnal cu ce s-a auzit — o tăcere
       // GREȘITĂ trebuie să se poată vedea, nu să dispară (lecția numeStrigat).
       let ultimaVorbaKelion = 0 // 0 = n-a vorbit încă deloc
-      let verdictTura: boolean | null = null // null = tura n-a început să răspundă
       // ── GARDUL DE LIMBĂ — DETERMINIST, PE SERVER (9 aug, revizia) ────────
       // Al doilea gard pe ieșire, frate cu adresarea: dacă răspunsul ÎNCEPE
       // într-o limbă străină (markeri ficși, services/limbaRaspuns.ts) și omul
       // n-a cerut-o, tura se SUPRIMĂ (audio tăiat + intrerupt spre browser) și
       // NU intră în istoric (altfel otrăvea instrucțiunea sesiunii următoare).
-      let verdictLimba: boolean | null = null // null = nedecis; false = străină
+      // (verdictTura/verdictLimba trăiesc în scope-ul conexiunii, mai sus —
+      // close/error le consultă la salvare.)
       // Gardul e legat de limba PINUITĂ a userului (9 aug, ownerul: „asta e
       // pentru admin sau se aplică la fiecare limbă?"): detectorul știe să
       // prindă doar ne-româna, deci taie DOAR când limba userului e româna —
@@ -608,8 +678,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       const gardDeLimba = limbaPin === 'ro-RO'
       let primaTura = true
       const turaAdresataAcum = (): boolean => {
-        const spusa = bufUser.trim()
-        if (!spusa) return true // tură de sistem (anunț/unealtă) — nu e vorbire de om
+        // Judecăm pe ROSTIREA curentă (ultima activitate de vorbire), nu pe
+        // bufferul întreg — un „Kelion, …" proaspăt nu mai e îngropat după
+        // primele 4 cuvinte ale unui text vechi (audit 9 aug).
+        const spusa = rostireCurenta.trim() || bufUser.trim()
+        if (turaDeSistem) return true // anunț declarat EXPLICIT, nu dedus
+        if (!spusa) return true // nimic auzit vreodată — nu suprimăm orbește
         // BLOCAJUL LA RECE, MĂSURAT (9 aug seara, pulsul: 308 cadre de voce de
         // la Google, 308 suprimate pe adresare, 0 spre browser): fereastra de
         // dialog se deschide doar după ce Kelion „a vorbit", dar nimic nu
@@ -620,32 +694,82 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         const deLaVorba = ultimaVorbaKelion > 0 ? Date.now() - ultimaVorbaKelion : Number.POSITIVE_INFINITY
         return turaAdresata(spusa, deLaVorba)
       }
+      // Livrarea unui cadru de voce spre difuzor — TOATĂ contabilitatea la un
+      // loc, folosită și de drumul normal și de vărsarea cadrelor amânate.
+      const livreazaCadru = (data: string): void => {
+        ultimaVorbaKelion = Date.now()
+        // Ceasul difuzorului: octeți → mostre 16-bit → ms la 24 kHz. Fără el,
+        // barge-in-ul ar crede că Kelion tace când el încă vorbește din buffer.
+        redareEstimataPanaLa = Math.max(redareEstimataPanaLa, Date.now()) + octetiDinBase64(data) / 2 / 24
+        pulsVoce.cadreAudioSpreBrowser++
+        trimite({ type: 'audio', data })
+      }
+      // Cadrele ținute până la verdict se varsă prin ACEEAȘI judecată ca cele
+      // directe — redate sau numărate ca suprimate, niciodată pierdute tăcut.
+      const varsaCadreleInAsteptare = (): void => {
+        if (ceasAsteptareVerdict) {
+          clearTimeout(ceasAsteptareVerdict)
+          ceasAsteptareVerdict = null
+        }
+        for (const data of cadreInAsteptare.splice(0)) {
+          if (!verdictTura) pulsVoce.suprimateAdresare++
+          else if (verdictLimba === false) pulsVoce.suprimateLimba++
+          else if (taiatDeVoce) pulsVoce.suprimateDupaTaiere++
+          else livreazaCadru(data)
+        }
+      }
       live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
         onGata: () => trimite({ type: 'gata' }),
         onAudioIesire: (data) => {
           pulsVoce.cadreAudioDeLaGoogle++
           pulsVoce.laUltimulCadru = Date.now()
-          const octeti = octetiDinBase64(data)
-          octetiOut += octeti // Google a facturat-o oricum — se numără
+          octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
           if (verdictTura === null) {
+            const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem || primaTura
+            if (!areTemei) {
+              // Transcrierea n-a sosit încă (Google o trimite adesea DUPĂ
+              // primul cadru audio) — verdict AMÂNAT, nu poartă deschisă:
+              // înainte, „buffer gol = tură de sistem" reda tura ambientală
+              // (audit 9 aug, critică). Ținem cadrul; judecăm la prima
+              // transcriere sau, la 900 ms fără niciuna, fail-open.
+              cadreInAsteptare.push(data)
+              if (!ceasAsteptareVerdict) {
+                ceasAsteptareVerdict = setTimeout(() => {
+                  ceasAsteptareVerdict = null
+                  if (verdictTura === null) {
+                    verdictTura = true
+                    taiatDeVoce = false
+                    varsaCadreleInAsteptare()
+                  }
+                }, 900)
+              }
+              return
+            }
             verdictTura = turaAdresataAcum()
+            turaDeSistem = false // anunțul e consumat de tura lui
             taiatDeVoce = false // replică nouă — tăierea veche nu o mai privește
           }
           if (!verdictTura) { pulsVoce.suprimateAdresare++; return } // nu i se vorbea lui
           if (verdictLimba === false) { pulsVoce.suprimateLimba++; return } // limbă necerută
           if (taiatDeVoce) { pulsVoce.suprimateDupaTaiere++; return } // omul i-a tăiat vorba — restul replicii moare
-          ultimaVorbaKelion = Date.now()
-          // Ceasul difuzorului: octeți → mostre 16-bit → ms la 24 kHz. Fără el,
-          // barge-in-ul ar crede că Kelion tace când el încă vorbește din buffer
-          // (cadrele sosesc în rafale, redarea durează mult după ultimul cadru).
-          const acum = Date.now()
-          redareEstimataPanaLa = Math.max(redareEstimataPanaLa, acum) + octeti / 2 / 24
-          pulsVoce.cadreAudioSpreBrowser++
-          trimite({ type: 'audio', data })
+          livreazaCadru(data)
         },
         onTranscriereUser: (text, final) => {
+          const acum = Date.now()
+          // Segmentare pe pauze: >2,5 s fără transcriere = rostire NOUĂ —
+          // adresarea se judecă mereu pe ce se spune ACUM, nu pe resturi.
+          if (acum - ultimaTranscriereUserLa > 2_500) rostireCurenta = ''
+          ultimaTranscriereUserLa = acum
+          rostireCurenta += text
           bufUser += text
           trimite({ type: 'user', text, final })
+          // Verdict amânat + transcrierea a sosit → judecăm ACUM și vărsăm.
+          if (verdictTura === null && cadreInAsteptare.length) {
+            verdictTura = turaAdresataAcum()
+            turaDeSistem = false
+            taiatDeVoce = false
+            varsaCadreleInAsteptare()
+          }
         },
         onTranscriereKelion: (text, final) => {
           bufKelion += text
@@ -657,7 +781,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             verdictLimba = !(straina && !aCerutAltaLimba(bufUser))
             if (verdictLimba === false) {
               app.log.info(`[VOCE] tură suprimată (răspuns în ${straina}, necerut): „${bufKelion.trim().slice(0, 80)}"`)
-              trimite({ type: 'intrerupt' })
+              golesteRedarea() // și ceasul difuzorului, nu doar redarea (audit 9 aug)
             }
           }
           if (verdictTura === false || verdictLimba === false) return
@@ -726,10 +850,22 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
           verdictLimba = null
           taiatDeVoce = false
-          redareEstimataPanaLa = 0 // browserul golește redarea — difuzorul tace
-          trimite({ type: 'intrerupt' })
+          cadreInAsteptare.length = 0 // tura moartă nu mai are ce vărsa
+          if (ceasAsteptareVerdict) {
+            clearTimeout(ceasAsteptareVerdict)
+            ceasAsteptareVerdict = null
+          }
+          golesteRedarea() // browserul golește redarea — și ceasul difuzorului tace
         },
         onTuraGata: () => {
+          // Tura s-a terminat cu verdictul încă AMÂNAT (nicio transcriere n-a
+          // sosit vreodată) → fail-open: cadrele ținute se livrează, nu se
+          // înghit tăcut — răspunsul complet e al omului.
+          if (verdictTura === null && cadreInAsteptare.length) {
+            verdictTura = true
+            taiatDeVoce = false
+            varsaCadreleInAsteptare()
+          }
           if (verdictTura === false || verdictLimba === false) {
             // Tura NU i se adresa SAU a răspuns într-o limbă necerută: nu se
             // salvează în memorie (o replică spaniolă salvată ar OTRĂVI
@@ -742,6 +878,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             )
             bufUser = ''
             bufKelion = ''
+            rostireCurenta = ''
           } else {
             salveazaTura()
           }
@@ -766,6 +903,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           // Mânerul se salvează CU generația lui de unelte — la următoarea
           // schimbare de capabilități, un mâner din altă generație se aruncă.
           void saveKv(KV_RELUARE, JSON.stringify({ h: handle, t: acum, gen: genUnelte })).catch(() => {})
+        },
+        onHandleProst: () => {
+          // Handle-ul a picat la setup — se ȘTERGE din KV, altfel fiecare
+          // sesiune nouă din următoarele 10 minute l-ar reîncărca și ar muri
+          // în același connect (audit 9 aug, critică).
+          app.log.warn('vocal-live: handle de reluare picat la setup — îl șterg din KV')
+          void deleteKv(KV_RELUARE).catch(() => {})
         },
       }, reluareInitial, user.role === 'admin' ? unelteleDovedite() : undefined, limbaPin)
       if (!live) {

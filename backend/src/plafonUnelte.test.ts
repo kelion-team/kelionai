@@ -44,7 +44,10 @@ describe('plafonul de unelte al furnizorului e garantat structural', () => {
     expect(chat).toMatch(/seenNames\.has\(t\.name\)/)
   })
 
-  it('uneltele dinamice umplu DOAR sloturile rămase sub plafon', () => {
-    expect(chat).toMatch(/for \(const t of dynTools\)[\s\S]*?tools\.length >= MAX_PROVIDER_TOOLS[\s\S]*?break/)
+  it('uneltele dinamice umplu DOAR sloturile rămase sub plafon — și NICIODATĂ pe tura ușoară', () => {
+    // Audit 9 aug: dinamicele se lipeau DUPĂ filtrul permisaLaVorbire și
+    // ocoleau lista albă a fazei de vorbire; acum pe tura ușoară nu intră deloc
+    // (rămân prin ask_brain → inventarul plin), iar plafonul rămâne pinuit.
+    expect(chat).toMatch(/for \(const t of turaUsoara \? \[\] : dynTools\)[\s\S]*?tools\.length >= MAX_PROVIDER_TOOLS[\s\S]*?break/)
   })
 })

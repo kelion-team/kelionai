@@ -170,9 +170,22 @@ export async function runOrchestrator(
     // its real duration in the log, so a slow turn shows WHERE the seconds go
     // (the model, the tool, or the number of rounds) instead of being guessed.
     const tRunda = Date.now()
-    const res = onTextFiltrat
-      ? await geminiDirectChatStream(gModel, convo, tools, onTextFiltrat, callOpts)
-      : await geminiDirectChat(gModel, convo, tools, callOpts)
+    let res
+    try {
+      res = onTextFiltrat
+        ? await geminiDirectChatStream(gModel, convo, tools, onTextFiltrat, callOpts)
+        : await geminiDirectChat(gModel, convo, tools, callOpts)
+    } catch (e) {
+      // BANII RUNDELOR DEJA PLĂTITE NU SE EVAPORĂ CU EXCEPȚIA (audit 9 aug):
+      // rundele 1..N-1 au fost apeluri REALE, plătite la Google, dar totalCost
+      // era local și murea cu throw-ul — nici înregistrat, nici debitat.
+      // Eroarea cară costul; catch-ul din chat.ts îl adună și îl înregistrează.
+      if (totalCost > 0 && e instanceof Error) {
+        const purtator = e as Error & { costUsd?: number }
+        purtator.costUsd = (purtator.costUsd ?? 0) + totalCost
+      }
+      throw e
+    }
     totalCost += res.costUsd
     served = res.model
     console.log(`[TIMP] ${served} runda ${round}: ${Date.now() - tRunda}ms (${res.toolCalls.length} apeluri de unelte)`)

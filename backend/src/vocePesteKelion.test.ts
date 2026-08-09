@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   creeazaDetectorVocePeste,
   rmsPcm16,
-  PRAG_MIN_RMS,
+  PRAG_VOCE,
   SUSTINERE_MS,
 } from './services/vocePesteKelion.js'
 
@@ -33,6 +33,17 @@ describe('creeazaDetectorVocePeste — „vorbește peste mine"', () => {
     expect(d.proceseazaCadru(cadru(0.2, 256), true)).toBe(true)
   })
 
+  it('CAZUL COMUN (constatarea auditului): omul a ÎNTREBAT la volum normal, apoi taie la ACELAȘI volum', () => {
+    const d = creeazaDetectorVocePeste()
+    // Întrebarea omului, ~3 s, cât Kelion tace — podeaua NU are voie să
+    // învețe vorbirea (asta era gaura: EMA simetrică o absorbea și cerea apoi
+    // 3× volumul ca să taie).
+    for (let i = 0; i < 12; i++) d.proceseazaCadru(cadru(0.2, 256), false)
+    // Kelion răspunde; omul intervine LA ACELAȘI volum → tăiat în ~512 ms.
+    expect(d.proceseazaCadru(cadru(0.2, 256), true)).toBe(false)
+    expect(d.proceseazaCadru(cadru(0.2, 256), true)).toBe(true)
+  })
+
   it('aceeași voce cât Kelion TACE nu taie nimic (nu e nimeni de tăiat)', () => {
     const d = creeazaDetectorVocePeste()
     for (let i = 0; i < 10; i++) {
@@ -40,9 +51,9 @@ describe('creeazaDetectorVocePeste — „vorbește peste mine"', () => {
     }
   })
 
-  it('rezidualul slab de ecou (sub pragul absolut) nu taie', () => {
+  it('rezidualul slab de ecou (sub pragul absolut de vorbire) nu taie', () => {
     const d = creeazaDetectorVocePeste()
-    const slab = PRAG_MIN_RMS * 0.6
+    const slab = PRAG_VOCE * 0.6
     for (let i = 0; i < 10; i++) {
       expect(d.proceseazaCadru(cadru(slab, 256), true)).toBe(false)
     }
@@ -55,11 +66,11 @@ describe('creeazaDetectorVocePeste — „vorbește peste mine"', () => {
     expect(d.proceseazaCadru(cadru(0.2, 256), true)).toBe(false) // ia de la zero
   })
 
-  it('zgomotul CONSTANT (ventilator) intră în podea cât Kelion tace și nu mai taie', () => {
+  it('zgomotul CONSTANT (ventilator, minute în șir) urcă podeaua și nu taie; vocea reală peste el DA', () => {
     const d = creeazaDetectorVocePeste()
-    // Podeaua învață ventilatorul (0.08) în liniștea dinaintea replicii…
+    // Ventilatorul merge ~15 s cât Kelion tace — urcarea lentă îl învață.
     for (let i = 0; i < 60; i++) d.proceseazaCadru(cadru(0.08, 256), false)
-    // …apoi Kelion vorbește peste același ventilator: fără dominanță → nu taie.
+    // Kelion vorbește peste același ventilator: fără dominanță → nu taie.
     for (let i = 0; i < 10; i++) {
       expect(d.proceseazaCadru(cadru(0.08, 256), true)).toBe(false)
     }

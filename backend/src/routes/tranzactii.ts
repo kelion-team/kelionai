@@ -86,7 +86,10 @@ const CERE_NIVELURI =
 function adminul(req: FastifyRequest, reply: FastifyReply): { email: string } | null {
   const user = getSessionUser(req)
   if (user && user.role === 'admin') return user
-  reply.code(403)
+  // 401 pe sesiune moartă, 403 DOAR pe rol (regula din 9 aug; recidiva prinsă
+  // la auditul de noapte) — un cookie expirat nu are voie să arate ca „nu ești
+  // admin", clientul trebuie să știe să RE-LOGHEZE, nu să creadă că a pierdut rolul.
+  reply.code(user ? 403 : 401)
   return null
 }
 

@@ -296,6 +296,9 @@ export interface VocalLiveEvenimente {
    *  ownerul: „chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
    *  și să continue chatul logic"). */
   onHandleReluare?(handle: string): void
+  /** Handle-ul de reluare a picat la setup — ruta trebuie să-l ȘTEARGĂ din KV,
+   *  altfel fiecare sesiune nouă îl reîncarcă și moare la fel (audit 9 aug). */
+  onHandleProst?(): void
 }
 
 export interface VocalLive {
@@ -511,6 +514,11 @@ export function deschideVocalLive(
   // jurnal, ca data viitoare să nu mai ghicim.
   let aFostGataVreodata = false
   let faraExtensii = false
+  // Morți pre-`gata` FĂRĂ handle de reluare în joc: abia a DOUA la rând (sau
+  // un refuz numit 1007/1008) degradează configurația — un singur 1006 de
+  // rețea nu mai aruncă extensiile + pinul de limbă (auditul de noapte, 9 aug:
+  // orice sughiț TCP la primul connect condamna sesiunea la modul degradat).
+  let mortiPreGataFaraHandle = 0
   const coada: Buffer[] = [] // audio strâns cât sesiunea nu e gata (și în reconectări)
 
   const trimiteAudio = (pcm: Buffer): void => {
@@ -642,20 +650,37 @@ export function deschideVocalLive(
     })
     socket.on('close', (cod: number, motiv: Buffer) => {
       if (inchisa || ws !== socket) return
-      // Moarte ÎNAINTE de primul `gata` = setup-ul e suspectul: următoarea
-      // încercare merge fără extensii, nu repetă orbește aceeași cerere.
-      if (!aFostGataVreodata && !faraExtensii) {
-        faraExtensii = true
-        // Un handle stătut (dintr-o viață anterioară) poate fi chiar EL motivul
-        // refuzului — reluarea curată pleacă fără el, nu-l târăște mai departe.
-        handleReluare = undefined
-        ev.onInfo?.(`setup cu extensii respins (cod ${cod}) — reîncerc fără ele, cu sesiune curată`)
-      } else if (!aFostGataVreodata && unelteRezerva && unelteActive !== unelteRezerva) {
-        // A doua moarte înainte de `gata`, deja fără extensii → suspectul
-        // următor e INVENTARUL PLIN de unelte (nedovedit pe Live). Coborâm pe
-        // setul mic dovedit — o voce cu 6 unelte bate o voce moartă cu 58.
-        unelteActive = unelteRezerva
-        ev.onInfo?.(`setul plin de unelte respins la setup (cod ${cod}) — cobor pe setul dovedit (${unelteRezerva.length} unelte)`)
+      // Moarte ÎNAINTE de primul `gata` — dar NU orice moarte e un refuz
+      // (auditul de noapte, 9 aug: prima formă degrada pe ORICE cod, inclusiv
+      // 1006 de rețea — un sughiț TCP condamna sesiunea la viață fără reluare,
+      // fără fereastră glisantă și fără pinul de limbă). Suspecții, în ordine:
+      if (!aFostGataVreodata) {
+        if (handleReluare) {
+          // 1. Handle-ul de reluare (stătut, din altă viață a serverului) e
+          // primul suspect: se aruncă DOAR el, iar ruta îl șterge și din KV
+          // (onHandleProst) — altfel fiecare sesiune nouă din următoarele 10
+          // minute l-ar târî în același connect mort.
+          handleReluare = undefined
+          ev.onHandleProst?.()
+          ev.onInfo?.(`setup cu handle de reluare picat (cod ${cod}) — arunc handle-ul, reîncerc configurația plină`)
+        } else if (cod === 1007 || cod === 1008 || ++mortiPreGataFaraHandle >= 2) {
+          // 2. Refuz NUMIT de protocol (1007 date invalide / 1008 politică)
+          // sau a DOUA moarte curată la rând fără handle → abia acum se
+          // degradează configurația, treaptă cu treaptă.
+          if (!faraExtensii) {
+            faraExtensii = true
+            ev.onInfo?.(`setup cu extensii respins (cod ${cod}) — reîncerc fără ele, cu sesiune curată`)
+          } else if (unelteRezerva && unelteActive !== unelteRezerva) {
+            // Ultima treaptă: INVENTARUL PLIN de unelte (nedovedit pe Live).
+            // O voce cu 6 unelte bate o voce moartă cu 58.
+            unelteActive = unelteRezerva
+            ev.onInfo?.(`setul plin de unelte respins la setup (cod ${cod}) — cobor pe setul dovedit (${unelteRezerva.length} unelte)`)
+          }
+        } else {
+          // 3. Prima moarte fără handle, cod de rețea → aceeași configurație;
+          // reconectarea de mai jos o reia neschimbată.
+          ev.onInfo?.(`conexiunea a murit înainte de gata (cod ${cod}) — reîncerc aceeași configurație`)
+        }
       }
       if (reconectari < 3) {
         reconectari++

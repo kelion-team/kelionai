@@ -7,19 +7,28 @@
 //    Kelion continuă netulburat — „vorbește peste mine".
 // Ieșirea din clește: Google nu știe A CUI e vocea — dar serverul poate cere
 // mai mult decât „am auzit ceva": voce SUSȚINUTĂ (≥ SUSTINERE_MS), peste un
-// prag absolut ȘI dominantă față de podeaua de zgomot adaptivă. Ecoul propriu
-// e deja scăzut de AEC-ul browserului (bucla WebRTC); rezidualul intră în
-// podea și nu poate deveni verdict. Ruta cheamă detectorul DOAR când browserul
-// a raportat AEC activ — fără anulare de ecou, „vocea de peste el" ar fi chiar
-// vocea lui și s-ar tăia singur, exact regresia din 8 aug.
+// prag absolut de vorbire ȘI dominantă față de podeaua de zgomot. Ecoul
+// propriu e deja scăzut de AEC-ul browserului (bucla WebRTC); ruta cheamă
+// detectorul DOAR când browserul a raportat AEC activ — fără anulare de ecou,
+// „vocea de peste el" ar fi chiar vocea lui și s-ar tăia singur (8 aug).
+//
+// PODEAUA URMĂREȘTE ZGOMOTUL, NU VORBIREA (auditul de noapte, 9 aug —
+// constatare CONFIRMATĂ pe prima formă): EMA simetrică (0.95/0.05) învăța
+// chiar ÎNTREBAREA omului cât Kelion tăcea, iar dominanța 3× cerea apoi ~3×
+// volumul vorbirii lui normale — barge-in-ul nu se declanșa tocmai în cazul
+// comun. Acum adaptarea e ASIMETRICĂ (coboară repede, urcă foarte încet —
+// „minimum statistics" în forma simplă): vorbirea, tranzitorie, nu se mai
+// absoarbe în podea; zgomotul CONSTANT (ventilator) tot o urcă și tot taie
+// verdictul prin dominanță.
 //
 // Modulul e PUR (fără I/O, fără ceasuri proprii) ca să fie testabil cadru cu
 // cadru: primește PCM16 mono și un bool „Kelion se aude acum în difuzor".
 
-/** Sub RMS-ul ăsta (0..1) nu e voce, orice-ar zice dominanța. */
-export const PRAG_MIN_RMS = 0.02
-/** Vocea trebuie să fie de atâtea ori peste podeaua de zgomot. */
-export const DOMINANTA = 3
+/** Prag ABSOLUT de vorbire (RMS 0..1): vorbirea normală la microfon e
+ *  ~0.05–0.3; rezidualul de ecou după AEC e sub 0.02. */
+export const PRAG_VOCE = 0.04
+/** Vocea trebuie să domine podeaua de zgomot de atâtea ori. */
+export const DOMINANTA = 1.8
 /** Atâta voce NEÎNTRERUPTĂ cere verdictul — un cadru de 256 ms nu ajunge,
  *  două da: clinchete, tuse și rafale de ecou rămân sub prag. */
 export const SUSTINERE_MS = 350
@@ -44,23 +53,18 @@ export interface DetectorVocePeste {
 }
 
 export function creeazaDetectorVocePeste(rataHz = 16_000): DetectorVocePeste {
-  let podea = 0.004 // liniște de cameră, punctul de pornire al adaptării
+  let podea = 0.004 // liniște de cameră, punctul de pornire
   let voceMs = 0
   return {
     proceseazaCadru(cadru, kelionVorbeste) {
       const rms = rmsPcm16(cadru)
       const ms = (cadru.length / 2 / rataHz) * 1000
-      const eVoce = rms > PRAG_MIN_RMS && rms > podea * DOMINANTA
-      if (!kelionVorbeste) {
-        // Cât Kelion tace, TOT ce se aude e ambient (om, ventilator, stradă)
-        // — podeaua învață nivelul, ca un zgomot CONSTANT să nu poată tăia.
-        podea = podea * 0.95 + rms * 0.05
-        voceMs = 0
-        return false
-      }
-      if (!eVoce) {
-        // Rezidualul de ecou / liniștea din timpul redării coboară în podea.
-        podea = podea * 0.95 + rms * 0.05
+      // Adaptare ASIMETRICĂ, pe orice cadru: spre liniște repede (0.3), spre
+      // tare foarte încet (0.02) — o frază de câteva secunde urcă podeaua doar
+      // marginal, un ventilator pornit minute în șir o urcă de tot.
+      podea = rms < podea ? podea * 0.7 + rms * 0.3 : podea * 0.98 + rms * 0.02
+      const eVoce = rms > PRAG_VOCE && rms > podea * DOMINANTA
+      if (!kelionVorbeste || !eVoce) {
         voceMs = 0
         return false
       }

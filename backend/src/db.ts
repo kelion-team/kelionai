@@ -1203,6 +1203,11 @@ export async function loadKv(key: string): Promise<string | null> {
   return r.rows[0]?.value ?? null
 }
 
+export async function deleteKv(key: string): Promise<void> {
+  if (!dbEnabled()) return
+  await getPool().query('DELETE FROM kv_state WHERE key=$1', [key])
+}
+
 // ── GESTURES: which gestures Kelion is allowed to use CONTEXTUALLY (Adrian,
 // 13 Jul: admin panel with a checkbox per gesture). We store ONLY the disabled
 // list (default: all active). The brain reads the list and avoids the gestures

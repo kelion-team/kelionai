@@ -45,6 +45,15 @@ export const ENV_ALIASES: Record<string, string[]> = {
 function required(name: string): string {
   const v = process.env[name]
   if (!v || v.trim() === '') {
+    // FAIL-FAST ÎN PRODUCȚIE (audit 9 aug): „required" care întoarce '' nu
+    // cere nimic — un SESSION_SECRET lipsă lăsa serverul să booteze tăcut,
+    // login-ul dădea 500 și TOATE cookie-urile mureau mut. Mai bine o pornire
+    // care ȚIPĂ (anti-fantoma publicării o prinde pe loc: containerul nu urcă,
+    // live rămâne pe versiunea bună) decât un server care minte. Toate cele 4
+    // nume gardate aici sunt deja obligatorii și în poarta de env din deploy.sh.
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(`env obligatoriu LIPSĂ sau GOL: ${name} — completează-l în kelionai.env (poarta din deploy.sh îl cere și ea)`)
+    }
     return ''
   }
   return v
@@ -324,11 +333,18 @@ export const config = {
   // + ghilimelele se dezbracă (9 aug, „flux admin 403 — trebuie 200"):
   // `docker --env-file` NU scoate ghilimelele — ADMIN_EMAIL="adrian…" rămânea
   // cu ele în valoare și rolul ieșea „customer" cu sesiune perfect validă.
-  adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com')
-    .trim()
-    .replace(/^["']+|["']+$/g, '')
-    .trim()
-    .toLowerCase(),
+  adminEmail: ((): string => {
+    const curatat = (process.env.ADMIN_EMAIL ?? '')
+      .trim()
+      .replace(/^["']+|["']+$/g, '')
+      .trim()
+      .toLowerCase()
+    // GOL după curățare = implicitul domnește (audit 9 aug, măsurat cu tsx pe
+    // modulul real): `ADMIN_EMAIL=` sau `ADMIN_EMAIL=""` treceau de `??` și
+    // lăsau adminEmail='' → ownerul „customer" cu sesiune perfect validă.
+    // O valoare goală nu e o alegere de configurare — e o linie stricată.
+    return curatat || 'adrianenc11@gmail.com'
+  })(),
   bridgeSecret: env(...ENV_ALIASES.bridgeSecret),
   githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
   githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),

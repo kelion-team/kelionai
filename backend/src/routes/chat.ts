@@ -1528,9 +1528,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       console.error('[paywall] sold NECITIT, las trecerea liberă:', soldPoarta.motiv)
     if (soldPoarta?.citit && soldPoarta.sold <= 0) {
       reply.hijack()
-      reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' })
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+      })
       const paywallTurnId = randomUUID()
       startTurn(user.email, paywallTurnId)
+      // Chitanța {turn} pleacă PRIMA, ca pe orice tură (audit 9 aug: ramura
+      // paywall era singura fără ea — bifele de livrare și resume-ul orbecăiau).
+      reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ turn: paywallTurnId })}${CTRL}`))
       const paywallText = ro
         ? 'Ai rămas fără credit. Te rog reîncarcă creditul ca să continuăm.'
         : "You've run out of credit. Please top up to keep talking with me."
@@ -1739,9 +1746,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Jul 24: "during the audit it doesn't see that I'm logged into the Google
     // account"). Without this, the audit said "you are not connected" even
     // though the user was signed in with Google.
+    // THE GUEST SPEAKER, PARSED ONCE — ȘI DEVREME (Adrian, Aug 1; mutat sus la
+    // auditul din 9 aug): eticheta porții de voce vine în corpul cererii —
+    // "guest:<id>:<name> (<relation>)" pentru un invitat aprobat,
+    // "guest-pending:..." pentru unul în așteptare, "nevalidat" pentru o voce
+    // care nu s-a potrivit cu amprenta. Înainte, parsarea era DUPĂ construcția
+    // promptului, deci o tură de OASPETE în sesiunea adminului primea blocurile
+    // de OWNER („acționează fără confirmare", identitatea de owner) — drepturi
+    // decise pe cine deține SESIUNEA, nu pe cine VORBEȘTE.
+    const speakerRaw = typeof req.body?.speaker === 'string' ? req.body.speaker : ''
+    const nevalidat = speakerRaw === 'nevalidat'
+    const guestMatch = /^guest(-pending)?:(\d+):(.+)$/.exec(speakerRaw)
+    const guestPending = guestMatch?.[1] === '-pending'
+    const guestId = guestMatch ? Number(guestMatch[2]) : 0
+    const guestLabel = guestMatch?.[3] ?? ''
+    // Tura e „de oaspete" când NU vorbește deținătorul sesiunii — aceeași
+    // regulă ca isAdmin (mai jos), aplicată acum și promptului.
+    const turaDeOaspete = !!guestMatch || nevalidat
     systemPrompt +=
       `\n\nUSER ACCOUNT (silent context — NEVER announce or narrate this, just act on it): the user IS signed in via Google as ${user.email}` +
-      `${user.role === 'admin' ? ' (the OWNER/admin of this app)' : ''}. ` +
+      `${user.role === 'admin' && !turaDeOaspete ? ' (the OWNER/admin of this app)' : ''}. ` +
       // "Connected to Gmail" = ONLY if there is a refresh token from the Connect
       // flow (the heavy scopes). Plain login gives an IDENTITY access token with
       // no Gmail rights — that does not mean connected (Adrian, Jul 24: "it says
@@ -1801,7 +1825,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // anything; the old instruction "you sent it to be built" predated the real
     // tools and taught him exactly that anti-behavior). Now: EXECUTE, do not
     // promise.
-    if (user.role === 'admin') {
+    if (user.role === 'admin' && !turaDeOaspete) {
       systemPrompt +=
         // BLOCURILE DE LUCRU (reparat, PR, runbook, constructor, clipuri) NU
         // pleacă pe o tură de conversație — acolo sunt doar greutate. Vin
@@ -2116,22 +2140,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
-    // THE GUEST SPEAKER, PARSED ONCE (Adrian, Aug 1): the voice gate's label
-    // travels in the request body — "guest:<id>:<name> (<relation>)" for an
-    // approved guest, "guest-pending:..." for one awaiting the holder's
-    // confirmation. Parsed BEFORE the save, so everything below (the brain
-    // note, the admin strip) uses it.
-    const speakerRaw = typeof req.body?.speaker === 'string' ? req.body.speaker : ''
-    // VOCE NEVALIDATĂ (Adrian, 6 aug): o voce care nu s-a potrivit cu amprenta
-    // proprietarului (ex. amprenta veche „derapată") NU mai e aruncată pe client —
-    // ajunge la creier ca să fie AUZITĂ, dar marcată `nevalidat`. Aici o tratăm ca pe
-    // un invitat pentru DREPTURI: ZERO puteri de admin, datele sensibile protejate
-    // (cardul cere oricum potrivirea reală holder, deci rămâne închis).
-    const nevalidat = speakerRaw === 'nevalidat'
-    const guestMatch = /^guest(-pending)?:(\d+):(.+)$/.exec(speakerRaw)
-    const guestPending = guestMatch?.[1] === '-pending'
-    const guestId = guestMatch ? Number(guestMatch[2]) : 0
-    const guestLabel = guestMatch?.[3] ?? ''
+    // (Vorbitorul — speakerRaw/guestMatch/nevalidat — e parsat SUS, înaintea
+    // construcției promptului: blocurile de OWNER se decid pe el, audit 9 aug.)
     // PROGRESS BAR ON BRAIN ENTRY — ONE {heard} for EVERYONE (admin, demo,
     // public, paying): the server confirms exactly the text handed to the brain
     // on this turn, and the UI band displays it. It is not a local echo — if
@@ -2342,7 +2352,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       const taiate = baseTools.slice(MAX_PROVIDER_TOOLS).map((t) => t.name).join(', ')
       console.error(`[chat] ${baseTools.length} unelte > plafon ${MAX_PROVIDER_TOOLS} — tăiate din coadă: ${taiate}`)
     }
-    for (const t of dynTools) {
+    // Pe tura UȘOARĂ uneltele dinamice NU se lipesc (audit 9 aug: se împingeau
+    // DUPĂ filtrul permisaLaVorbire și ocoleau lista albă a fazei de vorbire) —
+    // rămân disponibile prin ask_brain, care comută pe inventarul plin.
+    for (const t of turaUsoara ? [] : dynTools) {
       if (tools.length >= MAX_PROVIDER_TOOLS) break
       if (!seenNames.has(t.name)) {
         seenNames.add(t.name)
@@ -2386,6 +2399,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // ecranul și istoricul divergeau. Acumulatorul ăsta ține exact ce a curs,
     // ca la eșec să (1) separăm sufixul de text și (2) istoricul = ecranul.
     let ecranPartial = ''
+    // Poarta de adresare (voce ambientală) — declarată AICI, în afara try-ului,
+    // ca și catch-ul să o poată consulta: pana de creier pe o tură neadresată
+    // se stinge cu {ignored}, nu cu bulă rostită (audit 9 aug).
+    let gateDecided = !voceAmbianta
     // THE BRAIN CLOCK (admin): the first real word measures speed; the bar moves
     // to "Composing the reply". Once per turn, only for the admin (his telemetry).
     let firstWordMarked = false
@@ -2579,7 +2596,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       //     nu se scurgă nici sentinela, nici linia AUZIT. Pe turele ne-vocale
       //     poarta e deschisă din start (gateDecided = true).
       let gateBuf = ''
-      let gateDecided = !voceAmbianta
+      // (gateDecided trăiește lângă ecranPartial, în afara try-ului — catch-ul
+      // îl consultă la pană ca să stingă tura neadresată cu {ignored}.)
       let taced = false
       let userEcho = ''
       // Coada reținută cât timp mai poate fi începutul marcajului de ecou.
@@ -2866,6 +2884,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             ? `[VOCE] tura ${turnId.slice(0, 8)}: TĂCERE GREȘITĂ — a auzit numele și tot a tăcut. AUZIT: „${userEcho}"`
             : `[VOCE] tura ${turnId.slice(0, 8)}: tăcere — nu i se vorbea. AUZIT: „${userEcho || '(n-a spus ce a auzit)'}"`,
         )
+        // BANII NU SE PIERD PE TĂCERE (audit 9 aug, critică): creierul + uneltele
+        // au costat și pe tura tăcută, iar return-ul de aici sărea peste debit —
+        // fundalul vorbit continuu (majoritatea turelor ambientale tac) consuma
+        // pe gratis, repetabil. Ownerul nu se debitează niciodată (PR #648).
+        if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-tac:${turnId.slice(0, 8)}`)
         return
       }
       // Voce adresată: salvăm mesajul userului = ce a auzit creierul (ecou precis,
@@ -2877,6 +2900,27 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // The brain failed — honest, never silent. No Kimi/GLM safety net
       // (removed).
       const errMsg = e instanceof Error ? e.message : String(e)
+      // COSTUL RUNDELOR DEJA PLĂTITE vine agățat de eroare (orchestrator, audit
+      // 9 aug) — se adună în usage ÎNAINTE de orice ieșire de mai jos, ca și
+      // debitul și registrul să-l vadă.
+      const costPierdut = e instanceof Error ? Number((e as Error & { costUsd?: number }).costUsd ?? 0) : 0
+      if (costPierdut > 0) {
+        usage.usd += costPierdut
+        void recordCost(user.email, 'gemini', costPierdut)
+      }
+      // TURA AMBIENTALĂ MOARE TĂCUT, CA-N CONTRACT (audit 9 aug): la o pană de
+      // creier pe o frază de fundal NEADRESATĂ (poarta n-a decis), nu se scrie
+      // nicio bulă „Încearcă din nou" și nu se murdărește istoricul — clientul
+      // primește {ignored} exact ca la <TAC/>; cauza rămâne în jurnal, iar
+      // uneltele deja rulate tot se debitează (nu pe gratis).
+      if (voceAmbianta && !gateDecided) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
+        reply.raw.end()
+        console.error('[CHAT ERROR pe tură ambientală neadresată — stinsă cu {ignored}]', errMsg)
+        void recordTiming({ email: user.email, kind: 'chat', ms: Date.now() - tCreier, ok: false })
+        if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
+        return
+      }
       const low = errMsg.toLowerCase()
       // Diagnostic classification — LOG ONLY (429 vs 402 vs refusal matters to
       // us in the server log, never to the user; Adrian, Aug 1).
@@ -3105,6 +3149,9 @@ async function runTool(
         // lui Kelion când vorbește ownerul (isAdmin) — nu și pentru vizitatori.
         const r = await cheamaAgent(a, sarcina, isAdmin)
         usage.usd += r.costUsd
+        // Registrul vede și agenții (audit 9 aug: costul se DEBITA dar nu se
+        // ÎNREGISTRA — Money tab orb la agenți, ca odinioară la creier).
+        if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
         return JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text })
       } catch (e) {
         return JSON.stringify({ error: 'agent_a_esuat', detaliu: e instanceof Error ? e.message.slice(0, 200) : String(e) })

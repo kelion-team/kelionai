@@ -87,9 +87,12 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
     if (a.doarAdmin) {
       const user = getSessionUser(req)
       if (!user || user.role !== 'admin') {
-        if (esteRpc) return rpcEroare(body.id, -32003, 'doar ownerul poate chema acest agent')
-        reply.code(403)
-        return { error: 'doar ownerul poate chema acest agent' }
+        // 401 pe sesiune moartă, 403 DOAR pe rol (regula din 9 aug) — și
+        // mesajul spune cauza REALĂ, nu „nu ești owner" pe un cookie expirat.
+        const motiv = user ? 'doar ownerul poate chema acest agent' : 'sesiune moartă — loghează-te din nou'
+        if (esteRpc) return rpcEroare(body.id, -32003, motiv)
+        reply.code(user ? 403 : 401)
+        return { error: motiv }
       }
     }
 
