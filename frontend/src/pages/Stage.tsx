@@ -18,6 +18,8 @@ import { adminStrings } from '../lib/adminText'
 import {
   getWorkspace,
   subscribeWorkspace,
+  openWorkspace,
+  closeTasksByKind,
   closeTask,
   closeAllTasks,
   switchToId,
@@ -1205,6 +1207,23 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
+            {/* CENTRUL DE TRANZACȚIONARE CA TAB ÎN APLICAȚIE (9 aug, ownerul:
+            „când deschid aplicația să am un tab care se comută din bază cu
+            toate atributele, și buton de închidere, memoria separat doar
+            admin"). Butonul COMUTĂ: deschide pagina completă (/api/tranzactii,
+            cu preț live la ms + analiza cu memoria 'tranzactii', separată și
+            doar-admin pe server) ca tab pe monitor — tabul are × ca oricare;
+            aceeași apăsare îl închide. */}
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                if (!closeTasksByKind('tranzactii')) openWorkspace('📈 Tranzacții', '/api/tranzactii')
+              }}
+              title="Centrul de Tranzacționare — comută tabul (preț live la milisecundă pe crypto; memoria analizelor separată, doar admin)"
+            >
+              📈
+            </button>
             {/* LACĂTUL SPUS, NU BARĂ GOALĂ (auditul admin, 3 aug): cu lacătul
             armat, 423 pe /api/admin/* lăsa bara fără NICIO pastilă și fără
             explicație. Pastila unică 🔒 duce la fereastra de cod. */}

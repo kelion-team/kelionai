@@ -158,6 +158,10 @@ function kindForUrl(raw: string): string {
     if (host.includes('windy') || u.pathname.includes('weather')) return 'weather'
     if (u.pathname.startsWith('/api/image')) return 'image'
     if (u.pathname.startsWith('/api/route')) return 'map'
+    // Centrul de Tranzacționare are FELUL lui (9 aug, ownerul: „un tab care se
+    // comută din bază… buton de închidere"): butonul din bară îl deschide/închide
+    // pe felul ăsta, fără să atingă alte suprafețe 'web' deschise pe monitor.
+    if (u.pathname.startsWith('/api/tranzactii')) return 'tranzactii'
     if (host.includes('openstreetmap') || u.pathname.includes('/maps')) return 'map'
     // By file extension (works even with a ?query after it).
     const ext = (u.pathname.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
