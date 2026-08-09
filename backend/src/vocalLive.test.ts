@@ -32,6 +32,20 @@ describe('vocalLive — construiesteSetup', () => {
     expect(s.setup.systemInstruction.parts[0].text).toBe('Ești Kelion.')
   })
 
+  // PINUL DE LIMBĂ (9 aug, „Dime, ¿qué"): determinist în speechConfig, nu în
+  // instrucțiuni (alea s-au dovedit că nu țin). Fără pin, forma veche rămâne
+  // neatinsă (compatibilitate cu plasa faraExtensii).
+  it('pinul de limbă intră în speechConfig.languageCode doar când e dat', () => {
+    const cu = construiesteSetup('m', 'Charon', 'p', [], undefined, 'ro-RO') as {
+      setup: { generationConfig: { speechConfig: { languageCode?: string } } }
+    }
+    expect(cu.setup.generationConfig.speechConfig.languageCode).toBe('ro-RO')
+    const fara = construiesteSetup('m', 'Charon', 'p', []) as {
+      setup: { generationConfig: { speechConfig: { languageCode?: string } } }
+    }
+    expect(fara.setup.generationConfig.speechConfig.languageCode).toBeUndefined()
+  })
+
   it('fără unelte NU trimite câmpul tools; cu unelte îl trimite', () => {
     const gol = construiesteSetup('m', 'Puck', 'x', []) as { setup: Record<string, unknown> }
     expect(gol.setup.tools).toBeUndefined()
