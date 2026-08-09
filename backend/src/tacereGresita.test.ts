@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
-import { numeStrigat } from './services/numeStrigat.js'
+import { numeStrigat, turaAdresata, FEREASTRA_DIALOG_MS } from './services/numeStrigat.js'
 
 // ── „VORBESC ȘI NU SE ÎNTÂMPLĂ NIMIC" (8 aug 2026) ─────────────────────────
 //
@@ -64,6 +64,33 @@ describe('a fost strigat pe nume — funcție pură, probată pe rostiri reale',
     // „N-a spus ce-a auzit" NU înseamnă „a fost strigat", și nici invers.
     expect(numeStrigat('')).toBe(false)
     expect(numeStrigat('   ')).toBe(false)
+  })
+})
+
+// ── GARDUL DETERMINIST AL SESIUNII LIVE (9 aug, ownerul, a treia oară: „nu
+// identifică când discuțiile ambientale sunt între alte persoane"). Contractul:
+// adresat = numele la început SAU dialog în curs (Kelion a vorbit de curând). ──
+describe('turaAdresata — gardul serverului pe sesiunea live', () => {
+  it('numele strigat trece MEREU, oricât de veche e ultima vorbă a lui Kelion', () => {
+    expect(turaAdresata('Kelion, cât e ceasul?', Number.POSITIVE_INFINITY)).toBe(true)
+    expect(turaAdresata('hei Kelion ajută-mă', 999_999_999)).toBe(true)
+  })
+
+  it('dialog în curs: răspunsul la întrebarea lui trece FĂRĂ nume', () => {
+    // Kelion a vorbit acum 5 secunde — omul îi răspunde natural.
+    expect(turaAdresata('da, te rog', 5_000)).toBe(true)
+    expect(turaAdresata('nu, mersi', FEREASTRA_DIALOG_MS - 1)).toBe(true)
+  })
+
+  it('vorbire între ALȚI oameni (fără nume, fără dialog în curs) → suprimat', () => {
+    // Exact cazul ownerului: discuție ambientală, Kelion tăcut de mult.
+    expect(turaAdresata('și i-am zis că vin mâine pe la ei', Number.POSITIVE_INFINITY)).toBe(false)
+    expect(turaAdresata('No. Identifica errores y le da a la luz.', FEREASTRA_DIALOG_MS + 1)).toBe(false)
+  })
+
+  it('fereastra e închisă exact la prag — nu „cam pe-acolo"', () => {
+    expect(turaAdresata('bine', FEREASTRA_DIALOG_MS)).toBe(false)
+    expect(turaAdresata('bine', -1)).toBe(false)
   })
 })
 

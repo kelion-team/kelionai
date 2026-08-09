@@ -63,3 +63,33 @@ export function numeStrigat(auzit: string): boolean {
   // trezire. Un gard care se declanșează degeaba e tot un gard stricat.
   return cuvinte.some((c) => NUME.includes(c))
 }
+
+// ── POARTA DETERMINISTĂ A SESIUNII LIVE (9 aug 2026) ────────────────────────
+//
+// Ownerul, a treia oară în aceeași zi: „kelion nu identifică când discuțiile
+// ambientale sunt între alte persoane" — răspundea (și în spaniolă) la vorbire
+// care nu-i era adresată. REGULA TREZIRII din instrucțiune (PR #926) e doar o
+// rugăminte către model; modelul o mai calcă. Asta de aici e GARDUL: pe server,
+// determinist, audio-ul lui Kelion pleacă spre difuzor DOAR dacă tura era
+// adresată. Modelul poate vorbi cât vrea în gol — difuzorul tace.
+//
+// Contractul validat de owner (același ca pe calea ambientală):
+//   adresat = numele la începutul frazei, SAU conversație ÎN CURS (Kelion a
+//   vorbit de curând — un răspuns la propria lui întrebare nu cere numele).
+// Fereastra „în curs" e măsurată, nu ghicită: 30s de la ultima lui vorbă.
+
+/** Cât ține o conversație „în curs" după ultima vorbă a lui Kelion. */
+export const FEREASTRA_DIALOG_MS = 30_000
+
+/**
+ * Tura userului era adresată lui Kelion? Funcție PURĂ — se probează pe
+ * transcrieri și milisecunde, fără rețea.
+ *
+ * @param transcript ce a spus omul în tura asta (transcrierea urechii)
+ * @param msDeLaVorbaKelion milisecunde de la ultima vorbă a lui Kelion
+ *   (Infinity = n-a vorbit deloc în sesiune)
+ */
+export function turaAdresata(transcript: string, msDeLaVorbaKelion: number): boolean {
+  if (numeStrigat(transcript)) return true
+  return Number.isFinite(msDeLaVorbaKelion) && msDeLaVorbaKelion >= 0 && msDeLaVorbaKelion < FEREASTRA_DIALOG_MS
+}

@@ -15,6 +15,7 @@ import {
   type VocalLive,
 } from '../services/vocalLive.js'
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
+import { turaAdresata } from '../services/numeStrigat.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool } from '../services/adminTools.js'
 import { saveMessage, getRecentHistory, saveKv, loadKv, recordCost, listBuildJobs } from '../db.js'
@@ -488,10 +489,31 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       let ultimaSalvareHandle = 0
 
       if (inchis) return
+      // ── GARDUL TREZIRII PE NUME — DETERMINIST, PE SERVER (9 aug) ────────────
+      // Ownerul, a treia oară azi: „kelion nu identifică când discuțiile
+      // ambientale sunt între alte persoane". Instrucțiunea (PR #926) e o
+      // rugăminte; ăsta e gardul: audio-ul modelului pleacă spre difuzor DOAR
+      // dacă tura era ADRESATĂ (numele la început SAU dialog în curs — Kelion a
+      // vorbit în ultimele FEREASTRA_DIALOG_MS). O tură pornită de SISTEM
+      // (anunț de ordin, fără vorbă de om în față) trece mereu. Verdictul se ia
+      // O DATĂ pe tură, la prima bucată de audio, pe transcrierea de până
+      // atunci; tura suprimată se scrie în jurnal cu ce s-a auzit — o tăcere
+      // GREȘITĂ trebuie să se poată vedea, nu să dispară (lecția numeStrigat).
+      let ultimaVorbaKelion = 0 // 0 = n-a vorbit încă deloc
+      let verdictTura: boolean | null = null // null = tura n-a început să răspundă
+      const turaAdresataAcum = (): boolean => {
+        const spusa = bufUser.trim()
+        if (!spusa) return true // tură de sistem (anunț/unealtă) — nu e vorbire de om
+        const deLaVorba = ultimaVorbaKelion > 0 ? Date.now() - ultimaVorbaKelion : Number.POSITIVE_INFINITY
+        return turaAdresata(spusa, deLaVorba)
+      }
       live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
         onGata: () => trimite({ type: 'gata' }),
         onAudioIesire: (data) => {
-          octetiOut += octetiDinBase64(data)
+          octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
+          if (verdictTura === null) verdictTura = turaAdresataAcum()
+          if (!verdictTura) return // nu i se vorbea lui — difuzorul tace
+          ultimaVorbaKelion = Date.now()
           trimite({ type: 'audio', data })
         },
         onTranscriereUser: (text, final) => {
@@ -500,6 +522,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
         onTranscriereKelion: (text, final) => {
           bufKelion += text
+          // Replica unei ture suprimate nu se afișează — nici pe bandă, nici în
+          // difuzor; rămâne doar în jurnalul de mai jos (turaGata).
+          if (verdictTura === false) return
           trimite({ type: 'kelion', text, final })
         },
         onUnealta: async (apel) => {
@@ -560,9 +585,24 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
           }
         },
-        onIntrerupt: () => trimite({ type: 'intrerupt' }),
+        onIntrerupt: () => {
+          verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
+          trimite({ type: 'intrerupt' })
+        },
         onTuraGata: () => {
-          salveazaTura()
+          if (verdictTura === false) {
+            // Tura NU i se adresa: nu se salvează în memorie (vorbire între alți
+            // oameni nu e conversația noastră), dar se NUMEȘTE în jurnal — o
+            // suprimare greșită trebuie să fie vizibilă, nu îngropată.
+            app.log.info(
+              `[VOCE] tură suprimată (nu i se vorbea lui): auzit „${bufUser.trim().slice(0, 120)}"`,
+            )
+            bufUser = ''
+            bufKelion = ''
+          } else {
+            salveazaTura()
+          }
+          verdictTura = null
           trimite({ type: 'tura_gata' })
         },
         onEroare: (motiv) => {
