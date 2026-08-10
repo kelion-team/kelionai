@@ -803,3 +803,26 @@ export const AGENT_NOU_TOOL: Tool = {
     required: ['nume', 'rol'],
   },
 }
+
+// ── UNELTELE CONSTRUCTORULUI, DIN SURSA UNICĂ (Adrian, 10 aug: „dă-i TOT,
+// deblochează TOT — nu mai pot pierde vremea") ──────────────────────────────────
+// Constructorul (deploy/constructor-agent.mjs) le cere la pornire prin
+// GET /api/constructor/tool-defs și le lipește peste uneltele lui LOCALE de
+// fișiere (ls/grep/read/write/edit/edit_lines/delete_file/run/finish). Toate
+// astea se EXECUTĂ deja prin `uneltele()` (autonomie.ts → execSharedAdminTool +
+// execUserScopedTool + browser + agenți), deci aici doar le DECLARĂM dintr-un
+// singur loc — ca lista constructorului să nu mai poată rămâne în urmă față de
+// creierul de chat, și ca nimic să nu poată fi scos pe furiș (un test păzește
+// că acoperă tot SHARED_ADMIN_TOOLS).
+// INCLUSIV repo_write / repo_open_pr / repo_merge_pr (Adrian, 10 aug: „după ce
+// face PR trebuie să fie capabil să DEA PR-ul [să-l îmbine]; dacă sunt probleme,
+// să anunțe" + „dă-i TOT"). Deci constructorul își poate îmbina singur PR-ul în
+// master când verificarea e verde, iar dacă rămân probleme le raportează
+// (request_repair) și NU îmbină. Totul prin master (regula casei).
+export const UNELTE_CONSTRUCTOR: Tool[] = [
+  ...TOATE_UNELTELE_ADMIN,
+  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
+  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+  CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL,
+  ...BROWSER_TOOLS,
+]
