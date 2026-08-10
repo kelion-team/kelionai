@@ -28,6 +28,10 @@ export interface SkillCard {
 
 export interface ChatControl {
   monitor?: { url: string; title: string }
+  // Nivelurile de trading extrase de SERVER din răspuns (parserul testat, cu
+  // prețul real) — ChatPanel le pasează în iframe-ul Centrului, care le
+  // desenează pe grafic (10 aug: chatul REAL, conștient de pagina de trading).
+  niveluri?: { simbol: string; lista: { nume: string; valoare: number }[] }
   // A generated image to show inline in the chat (in addition to the monitor).
   image?: { url: string }
   // A structured skill result to render as a card on the monitor.
@@ -96,6 +100,7 @@ export interface ChatControl {
 
 import type { VoiceFeatures } from './audioIO.js'
 import { moment as contorMoment } from './contorFraza'
+import { getStareTranzactii } from './workspace'
 
 // U+001F (unit separator) brackets a JSON control frame in the text stream.
 const CTRL = String.fromCharCode(31)
@@ -307,6 +312,9 @@ export async function* streamChat(
             imageSource: imageIsAttachment ? 'chat' : 'camera',
             coords,
             screen,
+            // Ancora Centrului de Tranzacționare, cât tabul e deschis (10 aug):
+            // creierul răspunde pe CIFRELE de pe ecran, nu din burtă.
+            tranzactii: getStareTranzactii() ?? undefined,
             voiceFeatures,
             faceDescriptor,
             facePhoto,

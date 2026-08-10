@@ -27,6 +27,7 @@ import {
   isEmbeddable,
   setMonitorWorking,
   setTaskStatus,
+  setStareTranzactii,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
@@ -803,7 +804,18 @@ export default function Stage({ user }: { user: User }) {
   useEffect(() => {
     const laMesaj = (ev: MessageEvent): void => {
       if (ev.origin !== window.location.origin) return
-      if ((ev.data as { kelion?: string } | null)?.kelion === 'inchide-tranzactii') closeTasksByKind('tranzactii')
+      const d = ev.data as { kelion?: string; simbol?: unknown; pret?: unknown; interval?: unknown; sursa?: unknown } | null
+      if (d?.kelion === 'inchide-tranzactii') closeTasksByKind('tranzactii')
+      // Pagina de trading raportează CE e pe ecran (10 aug: chatul „conștient")
+      // — starea intră în ancora fiecărei ture de chat cât tabul e deschis.
+      else if (d?.kelion === 'tranzactii-stare')
+        setStareTranzactii({
+          simbol: String(d.simbol ?? ''),
+          pret: Number(d.pret) || null,
+          interval: String(d.interval ?? ''),
+          sursa: String(d.sursa ?? ''),
+          la: Date.now(),
+        })
     }
     window.addEventListener('message', laMesaj)
     return () => window.removeEventListener('message', laMesaj)
@@ -966,7 +978,7 @@ export default function Stage({ user }: { user: User }) {
             closeTask ieșea curat, tabul rămânea). Snapshot-ul doar DESENEAZĂ
             fade-ul de 520ms. */}
         {(ws.open || wsFading) && (
-          <div className="workspace-inner">
+          <div className={`workspace-inner ${wsv.kind === 'tranzactii' ? 'plin' : ''}`}>
             <div className="workspace-head">
               <div className="workspace-tabs">
                 {wsv.tasks.map((task) => (

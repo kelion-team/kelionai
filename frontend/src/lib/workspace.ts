@@ -77,6 +77,29 @@ export function getWorkspace(): WorkspaceState {
   return state
 }
 
+// ── STAREA VIE A CENTRULUI DE TRANZACȚIONARE (10 aug, ownerul: chatul REAL
+// trebuie să fie „conștient" de pagina de trading) ───────────────────────────
+// Pagina din iframe își raportează starea (postMessage {kelion:
+// 'tranzactii-stare'}); chatul o trimite creierului ca ANCORĂ a clipei.
+export interface StareTranzactii {
+  simbol: string
+  pret: number | null
+  interval: string
+  sursa: string
+  la: number
+}
+let stareTranzactii: StareTranzactii | null = null
+export function setStareTranzactii(s: StareTranzactii): void {
+  stareTranzactii = s
+}
+export function getStareTranzactii(): StareTranzactii | null {
+  // Stătută (>30s) sau cu tabul închis = nu mai e „pe ecran" — nu ancorăm pe ea.
+  if (!stareTranzactii) return null
+  if (Date.now() - stareTranzactii.la > 30_000) return null
+  if (!state.tasks.some((t) => t.kind === 'tranzactii')) return null
+  return stareTranzactii
+}
+
 export function subscribeWorkspace(fn: () => void): () => void {
   subscribers.add(fn)
   return () => {
