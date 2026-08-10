@@ -9,11 +9,9 @@ import {
 import BackLink from './BackLink'
 import { adminStrings } from '../lib/adminText'
 import {
-  fetchUsers,
   fetchHistory,
+  type HistoryRow,
   translateToRo,
-  fetchGaps,
-  runGapsTriage,
   fetchFinance,
   manageUser,
   fetchMoneyCircuit,
@@ -28,18 +26,8 @@ import {
   fetchLeads,
   emailLead,
   type Lead,
-  fetchVisitorConvos,
-  fetchVisitorChat,
-  replyVisitorChat,
-  type VisitorConvo,
-  type VisitorMsg,
-  fetchCereriNeacoperite,
   fetchDemos,
   fetchActivity,
-  resolveGap,
-  type UserSummary,
-  type HistoryRow,
-  type CapabilityGap,
   type Finance,
   type DemoStats,
   type UserActivity,
@@ -60,8 +48,6 @@ import {
   fetchEnvCheck,
   type EnvCheckResult,
   type TokenChecksResult,
-  fetchAudit,
-  type AuditReport,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -171,10 +157,10 @@ export default function AdminPanel({
   initialTab,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
+    'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
   >(initialTab ?? 'finance')
   // GESTURES (Adrian, Jul 13): the disabled list — what is NOT checked is NOT used.
   // Tri-stat (auditul admin, 3 aug): pe o citire EȘUATĂ nu desenăm „toate
@@ -197,14 +183,6 @@ export default function AdminPanel({
   // Live chat with visitors (owner inbox): conversations, the selected one, the reply.
   // TRI-STAT peste tot (auditul admin, 3 aug): 'necitit' = încă n-am întrebat;
   // null = citirea a EȘUAT (se scrie ca eșec); [] = serverul chiar a răspuns gol.
-  const [vconvos, setVconvos] = useState<VisitorConvo[] | null | 'necitit'>('necitit')
-  const [vsel, setVsel] = useState<string | null>(null)
-  const [vmsgs, setVmsgs] = useState<VisitorMsg[]>([])
-  const [vLoading, setVLoading] = useState(false)
-  const [vreply, setVreply] = useState('')
-  // Eșecul trimiterii NU mai tace (auditul admin, 3 aug): mesaj sub input.
-  const [vReplyErr, setVReplyErr] = useState('')
-  const vLastId = useRef(0)
   const [inbound, setInbound] = useState<InboundEmail[] | null | 'necitit'>('necitit')
   const [mailboxLive, setMailboxLive] = useState<MailboxLiveResult | null | 'necitit'>('necitit')
   const [mailboxLoading, setMailboxLoading] = useState(false)
@@ -272,23 +250,9 @@ export default function AdminPanel({
     }
   }
   // null = citirea listei a EȘUAT (auditul admin, 3 aug) — nu „No history yet".
-  const [users, setUsers] = useState<UserSummary[] | null | 'necitit'>('necitit')
-  const [selected, setSelected] = useState<string | null>(null)
   // null = fetchHistory a picat — se scrie ca eșec, nu ca chat gol.
-  const [history, setHistory] = useState<HistoryRow[] | null>([])
-  const [loading, setLoading] = useState(false)
-  const [gaps, setGaps] = useState<CapabilityGap[]>([])
-  // gapsFailed = ultima citire a gaps-urilor a picat (lista veche RĂMÂNE pe
-  // ecran — contractul „a dispărut = auto-rezolvat" interzice golirea falsă);
-  // gapsMsg = feedbackul acțiunilor din tab (triaj / arhivare / ștergere).
-  const [gapsFailed, setGapsFailed] = useState(false)
-  const [gapsMsg, setGapsMsg] = useState('')
-  const [triaging, setTriaging] = useState(false)
   // THE OUTAGES AUDIT (Adrian, Jul 27): everything that went down, in the same tab as gaps.
-  // La eșec PĂSTRĂM ultimul audit bun (auditul admin, 3 aug: setAudit(null) pe
   // un blip ștergea problemele critice de pe ecran) — auditFailedAt spune de când.
-  const [audit, setAudit] = useState<AuditReport | null>(null)
-  const [auditFailedAt, setAuditFailedAt] = useState<string | null>(null)
   const [finance, setFinance] = useState<Finance | null>(null)
   // financeFailed = ultima citire a picat: fără date → mesaj de eșec (nu
   // „Se încarcă…" pe veci); cu date vechi → notă că cifrele sunt ultimele bune.
@@ -508,15 +472,8 @@ export default function AdminPanel({
   }
 
   useEffect(() => {
-    void fetchUsers().then(setUsers)
     // gaps: la eșec PĂSTRĂM lista (aici încă goală) și ridicăm doar flagul —
-    // un [] fals s-ar citi ca „totul rezolvat" (auditul admin, 3 aug).
-    void fetchGaps().then((g) => {
-      if (g) setGaps(g)
-      setGapsFailed(!g)
-    })
     // Legătură cereri neacoperite (plăți neatribuite + cereri useri)
-    void fetchCereriNeacoperite()
     void fetchFinance().then((f) => {
       if (f) setFinance(f)
       setFinanceFailed(!f)
@@ -529,38 +486,9 @@ export default function AdminPanel({
     void fetchPlati().then(setPlati)
     void fetchDemos().then(setDemos)
     void fetchLeads().then(setLeads)
-    void fetchVisitorConvos().then(setVconvos)
     void fetchActivity().then(setActivity)
   }, [])
 
-  // While the "Cereri neacoperite" tab is open, refresh every 15s so a request
-  // that reached a successful deploy DISAPPEARS from the list (auto-resolved).
-  useEffect(() => {
-    if (tab !== 'gaps') return
-    // The outages audit loads when the tab opens and refreshes together with the
-    // gaps — a single place where you see EVERYTHING that went down.
-    // LA EȘEC NU SE GOLEȘTE NIMIC (auditul admin, 3 aug): setGaps([])/
-    // setAudit(null) pe un blip trecător ȘTERGEAU lista și problemele critice
-    // de pe ecran — golirea falsă se citea ca „s-au rezolvat". Păstrăm
-    // ultimele date bune și declarăm eșecul separat.
-    const load = (): void => {
-      void fetchGaps().then((g) => {
-        if (g) setGaps(g)
-        setGapsFailed(!g)
-      })
-      void fetchAudit().then((a) => {
-        if (a) {
-          setAudit(a)
-          setAuditFailedAt(null)
-        } else {
-          setAuditFailedAt((cur) => cur ?? new Date().toLocaleTimeString('ro-RO'))
-        }
-      })
-    }
-    load()
-    const id = window.setInterval(load, 15_000)
-    return () => window.clearInterval(id)
-  }, [tab])
 
   // SYNC WITH VOICE NAVIGATION (fluidity audit Jul 27, defect 7): initialTab was
   // only the starting value — if the panel was ALREADY open and Kelion got
@@ -605,9 +533,6 @@ export default function AdminPanel({
       // se citea O SINGURĂ dată, la montare — un eșec lăsa „Se încarcă…" pe
       // veci, fără nicio a doua șansă.
       void fetchActivity().then(setActivity)
-    } else if (tab === 'history') {
-      // Aceeași regulă pentru lista de utilizatori din Istoric chat.
-      void fetchUsers().then(setUsers)
     }
   }, [tab])
 
@@ -645,67 +570,9 @@ export default function AdminPanel({
 
   // Live visitor chat: refresh the conversation list while the tab is open, and
   // poll the OPEN conversation for new visitor lines (both every few seconds).
-  useEffect(() => {
-    if (tab !== 'vchat') return
-    const id = window.setInterval(() => void fetchVisitorConvos().then(setVconvos), 5000)
-    return () => window.clearInterval(id)
-  }, [tab])
 
-  useEffect(() => {
-    if (tab !== 'vchat' || !vsel) return
-    let alive = true
-    const tick = async (): Promise<void> => {
-      const more = await fetchVisitorChat(vsel, vLastId.current)
-      if (!alive || more.length === 0) return
-      // FĂRĂ DUBLURI (auditul admin, 3 aug): openConvo și tick porneau două
-      // fetch-uri concurente cu after=0 — al doilea răspuns APPEND-uia toată
-      // conversația încă o dată (fiecare bulă de două ori + chei React
-      // duplicate; aceeași cursă dubla și replica proprie). Dedupe pe id.
-      setVmsgs((m) => {
-        const vazute = new Set(m.map((x) => x.id))
-        const noi = more.filter((x) => !vazute.has(x.id))
-        return noi.length ? [...m, ...noi] : m
-      })
-      vLastId.current = Math.max(vLastId.current, more[more.length - 1].id)
-    }
-    void tick()
-    const id = window.setInterval(() => void tick(), 3000)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [tab, vsel, vLastId])
 
-  async function openConvo(conv: string): Promise<void> {
-    vLastId.current = 0
-    setVsel(conv)
-    setVmsgs([])
-    // VISIBLE BUSY (fluidity audit Jul 27, defect 10): the thread emptied and
-    // stayed WHITE while the conversation loaded — it looked broken.
-    setVLoading(true)
-    const rows = await fetchVisitorChat(conv, 0)
-    setVLoading(false)
-    vLastId.current = rows.length ? rows[rows.length - 1].id : 0
-    setVmsgs(rows)
-  }
 
-  async function sendReply(): Promise<void> {
-    const t = vreply.trim()
-    if (!t || !vsel) return
-    const id = await replyVisitorChat(vsel, t)
-    if (id > 0) {
-      setVmsgs((m) => [...m, { id, role: 'owner', text: t, created_at: '' }])
-      vLastId.current = Math.max(vLastId.current, id)
-      setVreply('')
-      setVReplyErr('')
-    } else {
-      // ↑ nu mai tace la eșec (auditul admin, 3 aug): vizitatorul NU va primi
-      // răspunsul — ownerul trebuie să afle, nu să creadă că a trimis.
-      // (Widgetul vizitatorului primise „HONESTY REWRITE" fix pentru defectul
-      // ăsta; partea de admin rămăsese cu el.)
-      setVReplyErr(A.mailReplyFailed)
-    }
-  }
 
   // Tab „Amprente vocale” open → loads the list and refreshes every 10s.
   useEffect(() => {
@@ -1003,9 +870,7 @@ export default function AdminPanel({
   // 'necitit'/null nu sunt liste — render-ul le tratează explicit.
   const activityData = typeof activity === 'object' && activity !== null ? activity : null
   const demosData = typeof demos === 'object' && demos !== null ? demos : null
-  const vconvosData = Array.isArray(vconvos) ? vconvos : null
   const leadsData = Array.isArray(leads) ? leads : null
-  const usersData = Array.isArray(users) ? users : null
   const mailboxData = typeof mailboxLive === 'object' && mailboxLive !== null ? mailboxLive : null
   const inboundData = Array.isArray(inbound) ? inbound : null
   const contactData = Array.isArray(contactMsgs) ? contactMsgs : null
@@ -1020,26 +885,7 @@ export default function AdminPanel({
         .sort((a, b) => b[1] - a[1])
     : []
 
-  async function markResolved(id: number): Promise<void> {
-    // Rândul iese din listă DOAR când serverul a confirmat (auditul admin,
-    // 3 aug): înainte dispărea necondiționat și REAPĂREA la refresh-ul de 15s
-    // — apăsarea se pierdea în tăcere.
-    const ok = await resolveGap(id, true)
-    if (ok) {
-      setGaps((cur) => cur.filter((g) => g.id !== id))
-      setGapsMsg('')
-    } else setGapsMsg(A.gapArchiveFailed)
-  }
 
-  useEffect(() => {
-    if (!selected) return
-    setLoading(true)
-    // fetchHistory nu mai aruncă (null = eșec, afișat ca eșec), iar loading
-    // se închide garantat — „Loading…" nu mai rămâne blocat pe veci.
-    void fetchHistory(selected)
-      .then(setHistory)
-      .finally(() => setLoading(false))
-  }, [selected])
 
   return (
     <div className={`admin-overlay ${peek ? 'peek' : ''}`}>
@@ -1092,31 +938,10 @@ export default function AdminPanel({
             </button>
             <button
               type="button"
-              className={`admin-tab ${tab === 'vchat' ? 'sel' : ''}`}
-              onClick={() => setTab('vchat')}
-            >
-              {A.tabLiveChat}{vconvosData && vconvosData.length > 0 ? ` (${vconvosData.length})` : ''}
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'history' ? 'sel' : ''}`}
-              onClick={() => setTab('history')}
-            >
-              {A.tabChatHistory}
-            </button>
-            <button
-              type="button"
               className={`admin-tab ${tab === 'share' ? 'sel' : ''}`}
               onClick={() => setTab('share')}
             >
               {A.tabShare}
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'gaps' ? 'sel' : ''}`}
-              onClick={() => setTab('gaps')}
-            >
-              {A.tabGaps}{gaps.length > 0 ? ` (${gaps.length})` : ''}
             </button>
             <button
               type="button"
@@ -2831,82 +2656,7 @@ export default function AdminPanel({
             )}
           </section>
         )}
-        {tab === 'vchat' && (
-          <section className="admin-finance vchat-admin">
-            <div className="vchat-admin-list">
-              <div className="fin-breakdown-head">{A.liveVisitorChats}</div>
-              {vconvos === 'necitit' && <div className="chat-hint">{A.loading}</div>}
-              {/* null = citirea a EȘUAT (auditul admin, 3 aug): pot exista
-              vizitatori care scriu chiar acum — pollul de 5s reîncearcă. */}
-              {vconvos === null && (
-                <div className="chat-hint" style={{ color: '#e6a23c' }}>
-                  ⚠ Nu pot citi conversațiile — citirea a eșuat (reîncerc la 5s).
-                </div>
-              )}
-              {vconvosData && vconvosData.length === 0 && <div className="chat-hint">{A.noConversationsYet}</div>}
-              {(vconvosData ?? []).map((c) => (
-                <div
-                  key={c.conv_id}
-                  className={`vchat-convo ${vsel === c.conv_id ? 'sel' : ''}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => void openConvo(c.conv_id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') void openConvo(c.conv_id)
-                  }}
-                >
-                  <span className="vchat-convo-last">{c.last_text.slice(0, 60)}</span>
-                  <span className="vchat-convo-meta">
-                    {c.visitor_msgs} de la vizitator ·{' '}
-                    {new Date(c.last_at).toLocaleString('ro-RO', {
-                      day: 'numeric',
-                      month: 'short',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="vchat-admin-thread">
-              {!vsel && <div className="chat-hint">{A.pickConversation}</div>}
-              {vsel && (
-                <>
-                  <div className="vchat-admin-log">
-                    {vLoading && <p className="chat-hint">{A.loading}</p>}
-                    {vmsgs.map((m) => (
-                      <div
-                        key={m.id}
-                        className={`vchat-bubble ${m.role === 'owner' ? 'me' : 'owner'}`}
-                      >
-                        {m.text}
-                      </div>
-                    ))}
-                  </div>
-                  {vReplyErr && (
-                    <p className="chat-hint" style={{ color: '#ff7a7a' }}>
-                      {vReplyErr}
-                    </p>
-                  )}
-                  <div className="vchat-row">
-                    <input
-                      className="vchat-input"
-                      value={vreply}
-                      placeholder={A.replyToVisitor}
-                      onChange={(e) => setVreply(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') void sendReply()
-                      }}
-                    />
-                    <button type="button" className="vchat-send" onClick={() => void sendReply()}>
-                      ↑
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </section>
-        )}
+        {/* (Tabul „Chat live" SCOS — 10 aug, ordinul ownerului.) */}
         {tab === 'share' && (
           <section className="admin-finance">
             {(() => {
@@ -3013,254 +2763,8 @@ export default function AdminPanel({
             })()}
           </section>
         )}
-        {tab === 'gaps' && (
-          <section className="admin-gaps">
-            {/* AUTONOMOUS TRIAGE (Adrian, Jul 24): Kelion decides by himself —
-            the valuable one stays „DE IMPLEMENTAT”, the rest auto-close with a reason. */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-              <button
-                type="button"
-                className="ghost"
-                disabled={triaging}
-                onClick={() => {
-                  setTriaging(true)
-                  // FEEDBACK MĂSURAT (auditul admin, 3 aug): butonul tăcea și la
-                  // succes, și când creierul pica (backend: 200 + error în corp).
-                  void runGapsTriage().then(async (r) => {
-                    setTriaging(false)
-                    if (!r) {
-                      setGapsMsg('Nu s-a putut porni triajul — reîncearcă.')
-                      return
-                    }
-                    if (r.error) {
-                      setGapsMsg(
-                        r.error === 'brain_unavailable'
-                          ? 'Triajul a picat: creierul nu a răspuns.'
-                          : 'Triajul a picat: răspunsul creierului nu s-a putut citi.',
-                      )
-                      return
-                    }
-                    setGapsMsg(
-                      r.triaged === 0
-                        ? 'Triaj: nimic de triat (toate cererile au deja verdict).'
-                        : `Triaj: ${r.triaged} analizate — ${r.kept} păstrate, ${r.closed} închise.`,
-                    )
-                    const g = await fetchGaps()
-                    if (g) setGaps(g)
-                  })
-                }}
-              >
-                {triaging ? 'Kelion analizează…' : '🤖 Triaj Kelion (autonom)'}
-              </button>
-            </div>
-            {gapsMsg && <p className="chat-hint">{gapsMsg}</p>}
-            {/* Citirea picată se DECLARĂ, lista veche RĂMÂNE (auditul admin,
-            3 aug): un [] fals se citea ca „totul auto-rezolvat". */}
-            {gapsFailed && (
-              <p className="chat-hint" style={{ color: '#e6a23c' }}>
-                ⚠ Nu am putut citi cererile — afișez ultima listă bună; reîncerc la 15s.
-              </p>
-            )}
-            {gaps.length === 0 && !gapsFailed && (
-              <p className="chat-hint">
-                Nicio cerere neacoperită încă. Aici apar lucrurile pe care userii i le cer lui Kelion și pe
-                care nu le poate face încă — pentru a decide ce construim mai departe.
-              </p>
-            )}
-            {gaps.map((g) => (
-              <div key={g.id} className="admin-gap">
-                <div className="admin-gap-main">
-                  <span className="admin-gap-req">{g.request}</span>
-                  {g.triage && (
-                    <span className="admin-gap-reason" style={{ color: g.triage.startsWith('DE IMPLEMENTAT') ? '#7ee2a8' : '#ffb86b' }}>
-                      {g.triage}
-                    </span>
-                  )}
-                  {g.reason && <span className="admin-gap-reason">{g.reason}</span>}
-                  <span className="admin-gap-meta">
-                    {g.hits > 1 ? `cerut de ${g.hits} ori · ` : ''}
-                    {g.user_email} ·{' '}
-                    {new Date(g.last_seen).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })}
-                  </span>
-                </div>
-                <div className="admin-gap-actions">
-                  {/* Rezolvat = ARHIVARE (iese din lista implicită, rămâne în istoric);
-                      ✕ = ștergere DEFINITIVĂ, pentru zgomot/duplicate (Adrian, 3 aug:
-                      „butoane de ștergere, sau rezolvate și arhivate"). */}
-                  <button type="button" className="ghost" onClick={() => void markResolved(g.id)}>
-                    Rezolvat (arhivează)
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    style={{ color: '#ff7a7a' }}
-                    title="Șterge definitiv cererea (pentru zgomot/duplicate)"
-                    onClick={() => {
-                      if (!window.confirm(A.confirmDeleteGap)) return
-                      // ✕ nu mai tace la eșec (auditul admin, 3 aug): adminul
-                      // confirmase o ștergere „definitivă" și nu se întâmpla,
-                      // vizibil, nimic. Verdictul vine din stergeCuVerdict.
-                      void stergeCuVerdict(`/api/admin/gaps/${g.id}`).then((ok) => {
-                        if (ok) {
-                          setGaps((cur) => cur.filter((x) => x.id !== g.id))
-                          setGapsMsg('')
-                        } else setGapsMsg(A.gapDeleteFailed)
-                      })
-                    }}
-                  >
-                    ✕ șterge
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {/* THE OUTAGES AUDIT (Adrian, Jul 27: „here you must see all the
-            audits and all the failures”): health + server errors + client
-            errors + failed orders — EVERYTHING that went down, in this tab. */}
-            <h3 style={{ marginTop: 22, marginBottom: 6 }}>
-              Audit — toate căzutele{' '}
-              <span style={{ fontWeight: 400, fontSize: 12, opacity: 0.7 }}>
-                (sănătate sistem · erori server · erori F12 · construcții eșuate)
-              </span>
-            </h3>
-            {/* Ultimul audit bun RĂMÂNE pe ecran la un eșec (auditul admin,
-            3 aug): setAudit(null) pe un blip ștergea problemele critice —
-            revenirea la „Se încarcă…" se citea ca „s-au rezolvat". */}
-            {!audit && !auditFailedAt && <p className="chat-hint">{A.loadingAudit}</p>}
-            {auditFailedAt && (
-              <p className="chat-hint" style={{ color: '#e6a23c' }}>
-                ⚠ Nu am putut citi auditul — {audit ? `ultimele date sunt de dinainte de ${auditFailedAt}` : 'nicio citire reușită încă'}; reîncerc la 15s.
-              </p>
-            )}
-            {audit && (
-              <>
-                {(audit.health?.probleme?.length ?? 0) === 0 &&
-                  (audit.serverErrors?.length ?? 0) === 0 &&
-                  (audit.clientErrors?.length ?? 0) === 0 &&
-                  (audit.failedJobs?.length ?? 0) === 0 && (
-                    <p className="chat-hint">{A.nothingDown}</p>
-                  )}
-                {(audit.health?.probleme ?? []).map((p) => (
-                  <div key={`h-${p.id}`} className="admin-gap">
-                    <div className="admin-gap-main">
-                      <span className="admin-gap-req" style={{ color: p.grav === 'critic' ? '#ff7a7a' : '#ffb86b' }}>
-                        [{p.grav.toUpperCase()}] {p.desc}
-                      </span>
-                      <span className="admin-gap-meta">reparabil: {p.reparabil}</span>
-                    </div>
-                  </div>
-                ))}
-                {(audit.serverErrors ?? []).slice(-15).reverse().map((e, i) => (
-                  <div key={`s-${i}`} className="admin-gap">
-                    <div className="admin-gap-main">
-                      <span className="admin-gap-req" style={{ color: e.level >= 50 ? '#ff7a7a' : '#ffb86b' }}>
-                        [server {e.level >= 50 ? 'EROARE' : 'avert.'}] {e.msg}
-                      </span>
-                      <span className="admin-gap-meta">{new Date(e.t).toLocaleTimeString('ro-RO')}</span>
-                    </div>
-                  </div>
-                ))}
-                {(audit.clientErrors ?? []).slice(0, 15).map((e, i) => (
-                  <div key={`c-${i}`} className="admin-gap">
-                    <div className="admin-gap-main">
-                      <span className="admin-gap-req" style={{ color: '#ffb86b' }}>[F12 client] {e.message}</span>
-                      <span className="admin-gap-meta">
-                        {Number(e.n) > 1 ? `de ${e.n} ori · ` : ''}
-                        {e.user_email ?? 'anonim'} · {new Date(e.created_at).toLocaleString('ro-RO')}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                {(audit.failedJobs ?? []).map((j) => (
-                  <div key={`j-${j.id}`} className="admin-gap">
-                    <div className="admin-gap-main">
-                      <span className="admin-gap-req" style={{ color: '#ff7a7a' }}>[constructor EȘUAT] #{j.id} — {j.order}</span>
-                      <span className="admin-gap-meta">{new Date(j.updated).toLocaleString('ro-RO')}</span>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-          </section>
-        )}
-        <div className="admin-body" style={tab !== 'history' ? { display: 'none' } : undefined}>
-          <aside className="admin-users">
-            {/* Citirea picată nu mai e „No history yet." (auditul admin, 3 aug)
-            — și textele au intrat în adminText (erau hardcodate în engleză). */}
-            {users === 'necitit' && <p className="chat-hint">{A.loading}</p>}
-            {users === null && (
-              <p className="chat-hint" style={{ color: '#e6a23c' }}>
-                ⚠ {A.usersReadFail}
-              </p>
-            )}
-            {usersData && usersData.length === 0 && <p className="chat-hint">{A.noHistoryYet}</p>}
-            {(usersData ?? []).map((u) => (
-              <button
-                key={u.email}
-                type="button"
-                className={`admin-user ${selected === u.email ? 'sel' : ''}`}
-                onClick={() => {
-                  setRoOn(false)
-                  setRoFailed(0)
-                  setSelected(u.email)
-                }}
-              >
-                <span className="admin-user-email">{u.email}</span>
-                <span className="admin-user-meta">{u.count} msg</span>
-              </button>
-            ))}
-          </aside>
-          <section className="admin-history">
-            {!selected && <p className="chat-hint">{A.selectUserHint}</p>}
-            {loading && <p className="chat-hint">{A.loading}</p>}
-            {/* Conversație goală ≠ citire picată ≠ panou alb (auditul admin,
-            3 aug): fiecare stare are propriul text. */}
-            {selected && !loading && history === null && (
-              <p className="chat-hint" style={{ color: '#e6a23c' }}>
-                ⚠ {A.historyReadFail}
-              </p>
-            )}
-            {selected && !loading && history !== null && history.length === 0 && (
-              <p className="chat-hint">{A.noMessagesYet}</p>
-            )}
-            {selected && !loading && history !== null && history.length > 0 && (
-              <div className="convo-head-actions" style={{ marginBottom: 8 }}>
-                <button
-                  type="button"
-                  className="user-act"
-                  disabled={roBusy}
-                  title={A.translateToRo}
-                  onClick={() => void toggleRo(history)}
-                >
-                  {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
-                </button>
-                {roOn && roFailed > 0 && (
-                  <span className="chat-hint" style={{ color: '#d97706' }}>
-                    ⚠ {roFailed} mesaje netraduse (serviciul de traducere nu a răspuns) — vezi textul original
-                  </span>
-                )}
-              </div>
-            )}
-            {selected &&
-              !loading &&
-              groupByDay(history ?? []).map((g) => (
-                <div key={g.header} className="admin-day">
-                  <div className="admin-day-header">{g.header}</div>
-                  {g.rows.map((h, i) => (
-                    <div key={i} className={`bubble ${h.role === 'user' ? 'user' : 'assistant'}`}>
-                      <span className="admin-msg-time">
-                        {new Date(h.created_at).toLocaleTimeString('ro-RO', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                      {showMsg(h.content)}
-                    </div>
-                  ))}
-                </div>
-              ))}
-          </section>
-        </div>
+        {/* (Tabul „Cereri neacoperite" SCOS — 10 aug, ordinul ownerului.) */}
+        {/* (Tabul „Istoric chat" a fost SCOS ca tab de sus — 10 aug, ownerul: „se mută în butonul user, cu istoric pe user"; istoricul per user se deschide din tabul Utilizatori, click pe rând.) */}
       </div>
       {userConvo && (
         <div className="convo-overlay" onClick={closeUserConvo}>
