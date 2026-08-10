@@ -103,20 +103,43 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
     }
   }
 
-  // Download ca .doc (deschide în Word/LibreOffice), numit „nume_aplicant_nume_job".
-  const handleDownload = (): void => {
-    if (!adaptedCv.trim()) return
-    const esc = adaptedCv.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const html = `<html><head><meta charset="utf-8"></head><body><pre style="font-family:Calibri,Arial,sans-serif;white-space:pre-wrap;font-size:11pt;line-height:1.4;">${esc}</pre></body></html>`
-    const blob = new Blob([html], { type: 'application/msword' })
+  // Download „nume_aplicant_nume_job" în AMBELE formate (ownerul, 10 aug:
+  // „format de salvare doc și pdf").
+  const descarcaBlob = (blob: Blob, extensie: string): void => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${fileName || 'cv_adaptat'}.doc`
+    a.download = `${fileName || 'cv_adaptat'}.${extensie}`
     document.body.appendChild(a)
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
+  }
+  const handleDownloadDoc = (): void => {
+    if (!adaptedCv.trim()) return
+    const esc = adaptedCv.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const html = `<html><head><meta charset="utf-8"></head><body><pre style="font-family:Calibri,Arial,sans-serif;white-space:pre-wrap;font-size:11pt;line-height:1.4;">${esc}</pre></body></html>`
+    descarcaBlob(new Blob([html], { type: 'application/msword' }), 'doc')
+  }
+  // PDF REAL, generat local (jspdf, import leneș — se încarcă doar la click):
+  // A4, margini, împărțire pe rânduri și pe pagini.
+  const handleDownloadPdf = async (): Promise<void> => {
+    if (!adaptedCv.trim()) return
+    const { jsPDF } = await import('jspdf')
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
+    const margine = 18
+    const latime = 210 - margine * 2
+    const inaltime = 297 - margine
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(10.5)
+    const randuri = pdf.splitTextToSize(adaptedCv, latime) as string[]
+    let y = margine
+    for (const rand of randuri) {
+      if (y > inaltime) { pdf.addPage(); y = margine }
+      pdf.text(rand, margine, y)
+      y += 5
+    }
+    descarcaBlob(pdf.output('blob'), 'pdf')
   }
 
   const box: React.CSSProperties = { backgroundColor: '#25262b', padding: '15px', borderRadius: '6px', border: '1px solid #2c2e33' }
@@ -169,8 +192,11 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
           <textarea readOnly value={adaptedCv} placeholder={T.cvResultPlaceholder} style={{ width: '100%', flex: 1, minHeight: '470px', backgroundColor: '#1a1b1e', color: '#fff', border: '1px solid #373a40', borderRadius: '4px', padding: '15px', fontFamily: 'monospace', fontSize: '0.85rem', resize: 'none', whiteSpace: 'pre-wrap' }} />
           {adaptedCv && (
             <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-              <button onClick={handleDownload} style={{ ...btn('#37b24d'), flex: 2 }}>
-                {T.cvDownload} ({fileName || 'cv_adaptat'}.doc)
+              <button onClick={handleDownloadDoc} style={{ ...btn('#37b24d'), flex: 2 }}>
+                {T.cvDownload} .doc
+              </button>
+              <button onClick={() => void handleDownloadPdf()} style={{ ...btn('#37b24d'), flex: 2 }}>
+                {T.cvDownload} .pdf
               </button>
               <button onClick={() => { void navigator.clipboard.writeText(adaptedCv); setSuccessMessage(T.cvCopied) }} style={{ ...btn('#495057'), flex: 1 }}>
                 {T.cvCopy}
