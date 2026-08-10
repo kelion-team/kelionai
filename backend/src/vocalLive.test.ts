@@ -35,7 +35,7 @@ describe('vocalLive — construiesteSetup', () => {
   // PINUL DE LIMBĂ (9 aug, „Dime, ¿qué"): determinist în speechConfig, nu în
   // instrucțiuni (alea s-au dovedit că nu țin). Fără pin, forma veche rămâne
   // neatinsă (compatibilitate cu plasa faraExtensii).
-  it('vocea nu se mai taie singură: NO_INTERRUPTION + prag anti-zgomot; urechea pe auto', () => {
+  it('vocea nu se mai taie singură: NO_INTERRUPTION + prag anti-zgomot; urechea PE LIMBA userului', () => {
     const st = construiesteSetup('m', 'Charon', 'p', [], undefined, 'ro-RO') as {
       setup: {
         realtimeInputConfig: { automaticActivityDetection: Record<string, unknown>; activityHandling?: string }
@@ -47,8 +47,12 @@ describe('vocalLive — construiesteSetup', () => {
     // 9 aug seara) — vorbirea nu-i mai întrerupe replica:
     expect(st.setup.realtimeInputConfig.activityHandling).toBe('NO_INTERRUPTION')
     expect(st.setup.realtimeInputConfig.automaticActivityDetection).toEqual({ startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' })
-    // hintul de ureche (16:23) a fost scos — tăierile au început fix după el:
-    expect(st.setup.inputAudioTranscription).toEqual({})
+    // hintul de ureche REPUS (10 aug, „prima frază e scrisă fără noimă într-o
+    // limbă ciudată"): fără el, urechea stâlcește chiar româna la prima frază.
+    // Urmează limba pinuită; fără pin (limbă necunoscută) → auto, ca înainte.
+    expect(st.setup.inputAudioTranscription).toEqual({ languageCodes: ['ro-RO'] })
+    const faraPin = construiesteSetup('m', 'Charon', 'p', []) as { setup: { inputAudioTranscription: Record<string, unknown> } }
+    expect(faraPin.setup.inputAudioTranscription).toEqual({})
     // pinul gurii rămâne doar prin env (nedovedit pe ro-RO):
     expect(st.setup.generationConfig.speechConfig.languageCode).toBeUndefined()
   })

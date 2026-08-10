@@ -208,11 +208,16 @@ export const googleTools: Tool[] = [
   {
     name: 'maps_search',
     description:
-      'Find ONE place, address or point of interest and show it on the monitor map with a marker. Use for "where is X", addresses, or locating a single place. NOT for routes or directions — anything "from A to B", "route", "directions", "how do I get to" MUST go to maps_directions, which draws the actual route on the map.',
+      'Find ONE place, address or point of interest and show it on the monitor map with a marker. Use for "where is X", addresses, or locating a single place. NOT for routes or directions — anything "from A to B", "route", "directions", "how do I get to" MUST go to maps_directions, which draws the actual route on the map. ' +
+      // MĂSURAT 10 aug (ownerul: „casa lui Shakespeare" → harta aiurea): Nominatim
+      // potrivește NUME LITERALE de pe hartă — fraza românească întoarce NIMIC,
+      // „Casa Shakespeare" întoarce o casă din BOLIVIA cu toată încrederea.
+      // Contractul de mai jos e gardul: creierul știe numele canonic; geocoderul nu.
+      'CANONICAL NAMES ONLY: the geocoder matches literal map names — NEVER pass a descriptive phrase in the user\'s language ("casa lui Shakespeare"), it returns nothing or a confidently WRONG place (measured: "Casa Shakespeare" → Bolivia). YOU know the canonical name — translate the request to the place\'s official name plus its town ("Shakespeare\'s Birthplace, Stratford-upon-Avon"). Then VERIFY the returned display_name really is the intended place (right town, right country); if it is not, retry once with a more specific canonical name, and if still wrong, tell the user honestly instead of showing a wrong map.',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Place or address, e.g. "Athenaeum Bucharest".' },
+        query: { type: 'string', description: 'Canonical place name or address + town, e.g. "Romanian Athenaeum, Bucharest" — never a descriptive phrase in the user\'s language.' },
         max_results: { type: 'number', description: 'How many places (default 5).' },
       },
       required: ['query'],
@@ -225,12 +230,15 @@ export const googleTools: Tool[] = [
     // descriere care pomenea harta) și n-a desenat NICIODATĂ traseul. Descrierea
     // trebuie să spună că unealta ASTA pune traseul pe monitor.
     description:
-      'Show the DRIVEN ROUTE between two places ON the monitor map (a live Leaflet map with the route line drawn), plus driving distance, travel time and turn-by-turn directions. This is THE tool for any route/directions/"from A to B"/"show me the way" request — never maps_search for those.',
+      'Show the DRIVEN ROUTE between two places ON the monitor map (a live Leaflet map with the route line drawn), plus driving distance, travel time and turn-by-turn directions. This is THE tool for any route/directions/"from A to B"/"show me the way" request — never maps_search for those. ' +
+      // Același gard ca la maps_search (măsurat 10 aug) — traseul cu o
+      // destinație geocodată greșit e o hartă care minte frumos.
+      'CANONICAL NAMES ONLY for both ends: the geocoder matches literal map names — never pass a descriptive phrase in the user\'s language ("casa lui Shakespeare" returns nothing; "Casa Shakespeare" returns Bolivia). Translate to the official place name plus its town ("Shakespeare\'s Birthplace, Stratford-upon-Avon"). For "from here"/"de aici", use the GPS coordinates injected in your context as origin ("<lat>,<lon>" works). Then CHECK the returned origin/destination display_names really are the intended places; wrong place → retry once with a more specific canonical name, still wrong → say so honestly, never draw a wrong route.',
     input_schema: {
       type: 'object',
       properties: {
-        origin: { type: 'string', description: 'Start place or address.' },
-        destination: { type: 'string', description: 'Destination place or address.' },
+        origin: { type: 'string', description: 'Start: canonical place name + town, exact address, or "lat,lon" (use the context GPS for "from here").' },
+        destination: { type: 'string', description: 'Destination: canonical place name + town or exact address — never a descriptive phrase in the user\'s language.' },
       },
       required: ['origin', 'destination'],
     },
@@ -1130,10 +1138,29 @@ function stepText(s: OsrmStep): string {
   return `Continue${road}${dist}`
 }
 
+// „lat,lon" e contract, nu noroc (10 aug): GPS-ul din context vine ca
+// coordonate — alea NU trec prin geocoder (Nominatim pe „52.19,-1.7" poate
+// întoarce orice clădire din apropiere), se folosesc direct.
+function caCoordonate(s: string): { lat: string; lon: string; display_name: string } | null {
+  const m = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(s)
+  if (!m) return null
+  const lat = Number(m[1])
+  const lon = Number(m[2])
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null
+  return { lat: m[1], lon: m[2], display_name: `${m[1]},${m[2]} (coordonate)` }
+}
+
 async function mapsDirections(origin: string, destination: string): Promise<string> {
   if (!origin || !destination) return JSON.stringify({ error: 'missing_origin_or_destination' })
-  const [a, b] = await Promise.all([geocodeOne(origin), geocodeOne(destination)])
-  if (!a?.lat || !b?.lat) return JSON.stringify({ error: 'could_not_geocode' })
+  const [a, b] = await Promise.all([
+    caCoordonate(origin) ?? geocodeOne(origin),
+    caCoordonate(destination) ?? geocodeOne(destination),
+  ])
+  // Eșecul e NUMIT pe capăt (10 aug, „casa lui Shakespeare" → nimic găsit):
+  // creierul trebuie să știe CE capăt a picat ca să reîncerce cu numele canonic.
+  if (!a?.lat && !b?.lat) return JSON.stringify({ error: 'could_not_geocode', care: 'ambele', origin, destination })
+  if (!a?.lat) return JSON.stringify({ error: 'could_not_geocode', care: 'origin', origin })
+  if (!b?.lat) return JSON.stringify({ error: 'could_not_geocode', care: 'destination', destination })
   const [aLat, aLon, bLat, bLon] = [Number(a.lat), Number(a.lon), Number(b.lat), Number(b.lon)]
   // steps=true → REAL turn-by-turn instructions, not just distance/duration.
   const j = (await osrmRoute(aLon, aLat, bLon, bLat, 'overview=false&steps=true')) as {
