@@ -1283,7 +1283,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // CONȚINUTUL de pe monitor (10 aug, „nu are acces la ce se afișează"):
       // clientul trimite conținutul REAL al tabului activ (text/HTML/URL),
       // bounded — get_monitor îl întoarce brainului.
-      monitorContent?: { kind?: string; title?: string; url?: string; text?: string }
+      monitorContent?: { kind?: string; title?: string; url?: string; text?: string; mouse?: { x: number; y: number; indicator: string } }
       now?: string
       tz?: string
       // Voice features extracted 100% client-side for speaker + gender
@@ -2560,16 +2560,59 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
                 titlu: (c.title ?? '').slice(0, 200),
                 url: (c.url ?? '').slice(0, 500) || undefined,
                 continut: (c.text ?? '').slice(0, 8000) || undefined,
+                mouse: c.mouse,
               }
             : null
           return JSON.stringify({
             taburi_deschise: listaTaburi,
             tab_activ: activ ?? '(nimic afișat sau conținut necitibil de pe acest tab)',
+            mouse_pozitie: activ?.mouse ? `x: ${activ.mouse.x}, y: ${activ.mouse.y}, indică: ${activ.mouse.indicator}` : 'necunoscută',
             nota: activ?.continut
               ? 'Conținutul de mai sus e ce vede omul ACUM pe ecran — răspunde din el.'
               : activ?.url
                 ? 'Tabul activ afișează un URL/o suprafață media; nu are text de citit — descrie ce e după titlu/URL.'
                 : 'Nimic de citit pe monitor acum.',
+          })
+        }
+
+        if (name === 'get_mouse_position') {
+          const c = req.body?.monitorContent
+          if (c?.mouse) {
+            return JSON.stringify({
+              x: c.mouse.x,
+              y: c.mouse.y,
+              indica: c.mouse.indicator,
+              nota: `Mouse-ul se află la poziția (${c.mouse.x}, ${c.mouse.y}) și indică: ${c.mouse.indicator}`
+            })
+          }
+          return JSON.stringify({
+            eroare: 'Nu s-a putut citi poziția mouse-ului de pe monitor.'
+          })
+        }
+
+        if (name === 'click_monitor') {
+          const args = input as { x?: number; y?: number }
+          const x = args.x ?? 0
+          const y = args.y ?? 0
+          try {
+            reply.raw.write(`${CTRL}${JSON.stringify({ clickMonitor: { x, y } })}${CTRL}`)
+          } catch (e) {}
+          return JSON.stringify({
+            succes: true,
+            mesaj: `S-a trimis comanda de click la coordonatele (${x}, ${y}) pe monitor.`
+          })
+        }
+
+        if (name === 'zoom_monitor') {
+          const args = input as { level?: number; direction?: string }
+          const level = args.level ?? 1.2
+          const direction = args.direction ?? 'in'
+          try {
+            reply.raw.write(`${CTRL}${JSON.stringify({ zoomMonitor: { level, direction } })}${CTRL}`)
+          } catch (e) {}
+          return JSON.stringify({
+            succes: true,
+            mesaj: `S-a trimis comanda de zoom (${direction}, nivel ${level}) pe monitor.`
           })
         }
         // APPROVED DYNAMIC TOOL: generic execution through a safe HTTP call.

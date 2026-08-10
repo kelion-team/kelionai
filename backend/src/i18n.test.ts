@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 describe('i18n translations completeness', () => {
   it('i18n.ts contains es, fr, de, it, pt dictionaries with key translations', () => {
-    const fileContent = fs.readFileSync(path.resolve('../frontend/src/lib/i18n.ts'), 'utf-8')
+    const i18nPath = fileURLToPath(new URL('../../frontend/src/lib/i18n.ts', import.meta.url))
+    const fileContent = fs.readFileSync(i18nPath, 'utf-8')
 
     // Check that dict contains all supported languages
     const languages = ['en', 'ro', 'es', 'fr', 'de', 'it', 'pt']

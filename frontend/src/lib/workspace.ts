@@ -82,14 +82,41 @@ export function getWorkspace(): WorkspaceState {
 // creierului (body.monitorContent), iar unealta get_monitor îl întoarce.
 // Doc/text și app/HTML au conținut de citit; harta/imaginea/pagina au doar
 // URL+titlu (nu text). Cardul se rezumă în titlu.
-export function getMonitorContent(): { kind: string; title: string; url?: string; text?: string } | null {
+
+let mouseX = 0;
+let mouseY = 0;
+let mouseElementIndicator = 'nothing';
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    try {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (el) {
+        const text = el.textContent?.trim().slice(0, 100) || '';
+        const id = el.id ? `#${el.id}` : '';
+        const className = el.className && typeof el.className === 'string' ? `.${el.className.split(' ').join('.')}` : '';
+        const tag = el.tagName.toLowerCase();
+        mouseElementIndicator = `${tag}${id}${className}${text ? ` containing "${text}"` : ''}`;
+      } else {
+        mouseElementIndicator = 'nothing';
+      }
+    } catch (err) {
+      mouseElementIndicator = 'error reading element';
+    }
+  });
+}
+
+export function getMonitorContent(): { kind: string; title: string; url?: string; text?: string; mouse?: { x: number; y: number; indicator: string } } | null {
   const a = state.tasks.find((t) => t.id === state.activeId)
   if (!a) return null
-  const out: { kind: string; title: string; url?: string; text?: string } = { kind: a.kind, title: a.title }
+  const out: { kind: string; title: string; url?: string; text?: string; mouse?: { x: number; y: number; indicator: string } } = { kind: a.kind, title: a.title }
   if (a.text) out.text = a.text.slice(0, 8000)
   else if (a.html) out.text = a.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 8000)
   else if (a.card) out.text = JSON.stringify(a.card).slice(0, 4000)
   if (a.url) out.url = a.url
+  out.mouse = { x: mouseX, y: mouseY, indicator: mouseElementIndicator }
   return out
 }
 

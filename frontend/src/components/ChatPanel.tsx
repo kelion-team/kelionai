@@ -544,6 +544,34 @@ export default function ChatPanel({
       setChatImage(null)
       return
     }
+    if (c.clickMonitor) {
+      const { x, y } = c.clickMonitor;
+      const el = document.elementFromPoint(x, y);
+      if (el) {
+        (el as HTMLElement).click();
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+      }
+      return
+    }
+    if (c.zoomMonitor) {
+      const { level, direction } = c.zoomMonitor;
+      const scale = direction === 'out' ? 1 / (level || 1.2) : (level || 1.2);
+      const cadru = document.querySelector<HTMLIFrameElement>('iframe.workspace-frame') || document.body;
+      if (cadru) {
+        const currentStyle = cadru.style.transform || 'scale(1)';
+        const match = currentStyle.match(/scale\(([^)]+)\)/);
+        let currentScale = 1;
+        if (match) {
+          currentScale = parseFloat(match[1]);
+        }
+        const newScale = currentScale * scale;
+        cadru.style.transform = `scale(${newScale})`;
+        cadru.style.transformOrigin = 'top left';
+      }
+      return
+    }
     // Nivelurile din răspunsul chatului REAL pleacă în iframe-ul Centrului de
     // Tranzacționare — pagina le desenează pe grafic (10 aug, „conștient").
     if (c.niveluri) {

@@ -10,6 +10,8 @@
 //
 // Un export folosit DOAR de teste e legitim (funcția e ținută sub test).
 // Un export folosit de nimeni, nici măcar de teste, e cod abandonat.
+// Un export folosit DOAR de teste e legitim (funcția e ținută sub test).
+// Un export folosit de nimeni, nici măcar de teste, e cod abandonat.
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, extname } from 'node:path'
 
@@ -38,6 +40,7 @@ const prod = toate.filter((f) => !eTest(f))
 const teste = toate.filter(eTest)
 
 const citit = new Map(toate.map((f) => [f, readFileSync(f, 'utf8')]))
+
 // Punctele de intrare NU sunt importate de nimeni — sunt pornite.
 const INTRARI = new Set(['backend/src/index.ts', 'frontend/src/main.tsx'])
 
