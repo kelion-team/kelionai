@@ -402,13 +402,10 @@ function safeFileName(title: string, ext: string): string {
 // thousands separator of the BROWSER's locale (toLocaleString fără argument) —
 // comentariul vechi promitea „separatorul românesc", fals față de cod
 // (corectat la auditul admin, 3 aug).
-function formatSerperK(credits: number): string {
-  return credits >= 1000 ? `${(credits / 1000).toFixed(1)}k` : String(credits)
-}
-
 // The shape of the /api/admin/brain-credit response — named, so the shared polling
-// (usePolledJson) can type it.
-interface BrainCredit {
+// (usePolledJson) can type it. Exportat (10 aug): AdminPanel arată pastilele AI
+// (Serper/Gemini) mutate din bara de sus.
+export interface BrainCredit {
     // (Câmpurile `openrouter` și `openai` au fost SCOASE din răspuns și din
     // tipul ăsta, 3 aug — furnizorii au fost extirpați; creierul e Gemini.)
     active: string | null
@@ -568,8 +565,6 @@ export default function Stage({ user }: { user: User }) {
   // care ÎNGHEAȚĂ toată pagina (pe mobil bloca și pornirea microfonului). Acum e
   // un câmp inline, non-blocant: Enter salvează, Esc/click-afară renunță, eroarea
   // apare ca text mic lângă câmp, nu ca `window.alert` (alt freeze).
-  const [creditEdit, setCreditEdit] = useState(false)
-  const [creditErr, setCreditErr] = useState('')
   const brainOkAtRef = useRef<number | null>(null)
   // The padlock state at entry + the unlock coming from voice (the voiceprint
   // matched → realtimeVoice emits `kelion:admin-unlock`).
@@ -1288,167 +1283,9 @@ export default function Stage({ user }: { user: User }) {
                 ⚠ {brainStaleMin != null ? `${brainStaleMin}m` : ''}
               </span>
             )}
-            {/* THE SERPER PILL (same "REAL everywhere" rule): the REAL
-            remaining search credit read
-            from Serper's own /account endpoint — the wallet the web search
-            skill spends from. Key missing or read failed → "Serper ⚠", never
-            "Serper 0": a failed read is not an empty account. Click → the
-            provider's dashboard. */}
-            {brainCredit && !brainLocked && (
-              <button
-                type="button"
-                className="ghost"
-                style={brainStale ? { opacity: 0.55 } : undefined}
-                onClick={() => window.open('https://serper.dev/dashboard', '_blank', 'noopener')}
-                title={
-                  brainCredit.serper?.live
-                    ? adminStrings().serperPillLive.replace('{n}', (brainCredit.serper.balance ?? 0).toLocaleString())
-                    : adminStrings().serperPillDead
-                }
-              >
-                {brainCredit.serper?.live
-                  ? `Serper ${formatSerperK(brainCredit.serper.balance ?? 0)}`
-                  : 'Serper ⚠'}
-              </button>
-            )}
-            {/* THE GEMINI PILL (Adrian, 3 aug: „vreau să văd și aici creditul de la
-            gemini"), lângă restul: creierul de LUCRU e Gemini Tier 2 (plătit pe
-            contul Google al ownerului). N-are sold de citit → arătăm cheltuiala
-            REALĂ pe luna curentă, din jurnalul nostru (cost_events kind='gemini').
-            DB necitibil → „Gemini ⚠", niciodată „$0.00"; live cu 0 = zero real
-            (nimic cheltuit încă luna asta). Click → Google AI Studio. */}
-            {brainCredit && !brainLocked && (creditEdit ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  className="ghost"
-                  autoFocus
-                  style={{ width: 96 }}
-                  defaultValue={brainCredit.gemini?.creditGbp != null ? String(brainCredit.gemini.creditGbp) : ''}
-                  placeholder="ex: 10.88"
-                  title={creditErr || 'Enter=salvează · gol=pagina Google · „-”=șterge · Esc=renunț'}
-                  onBlur={() => setCreditEdit(false)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') { setCreditEdit(false); setCreditErr(''); return }
-                    if (e.key !== 'Enter') return
-                    // Gol → pagina Google; „-" → șterge; număr → salvează. Fără
-                    // window.prompt/alert: totul inline, non-blocant (nu îngheață).
-                    const val = (e.currentTarget.value || '').trim()
-                    if (val === '') { window.open('https://aistudio.google.com/billing', '_blank', 'noopener'); setCreditEdit(false); setCreditErr(''); return }
-                    const clear = val === '-'
-                    const gbp = clear ? null : Number(val.replace(',', '.'))
-                    if (!clear && (!Number.isFinite(gbp) || (gbp as number) < 0)) { setCreditErr(adminStrings().gemCreditInvalid); return }
-                    setCreditEdit(false); setCreditErr('')
-                    void fetch('/api/admin/gemini-credit', {
-                      method: 'POST',
-                      headers: { 'content-type': 'application/json' },
-                      credentials: 'include',
-                      body: JSON.stringify({ gbp }),
-                    })
-                      .then((r) => (r.ok ? (r.json() as Promise<{ ok?: boolean; gbp?: number; at?: string; cleared?: boolean }>) : null))
-                      .then((j) => {
-                        // Starea se scrie DOAR din răspunsul serverului (nu pe null).
-                        if (!j?.ok) { setCreditErr(adminStrings().gemCreditSaveFailed); setCreditEdit(true); return }
-                        setBrainCredit((prev) =>
-                          prev && prev.gemini
-                            ? {
-                                ...prev,
-                                gemini: {
-                                  ...prev.gemini,
-                                  creditGbp: j.cleared ? undefined : j.gbp,
-                                  creditAt: j.cleared ? undefined : j.at,
-                                  // Scăderea veche NU mai e valabilă pentru cifra nouă —
-                                  // se șterge; următorul poll o recalculează pe server.
-                                  creditRamasGbp: undefined,
-                                  scazutUsd: undefined,
-                                  scadereMotiv: undefined,
-                                },
-                              }
-                            : prev,
-                        )
-                      })
-                      .catch(() => { setCreditErr(adminStrings().gemCreditSaveFailed); setCreditEdit(true) })
-                  }}
-                />
-                {creditErr && <span style={{ color: '#e5484d', fontSize: 12 }}>{creditErr}</span>}
-              </span>
-            ) : (
-              <button
-                type="button"
-                className={`ghost ${brainCredit.gemini && !brainCredit.gemini.serving ? 'blink-red' : ''}`}
-                style={brainStale ? { opacity: 0.55 } : undefined}
-                // CLICK = ALIMENTARE DIRECT (Adrian, 8 aug, pe pastila „17.8":
-                // „când dau clic aici să mă ducă la alimentare direct"). Pagina
-                // e cea de facturare AI Studio — aceeași pe care a indicat-o
-                // suportul Google (Manage auto-reload / top-up). Editarea
-                // creditului declarat s-a mutat pe creionul de alături.
-                onClick={() => window.open('https://aistudio.google.com/billing', '_blank', 'noopener')}
-                title={(() => {
-                  // {spend} = măsurătoarea reușită SAU declararea eșecului —
-                  // niciodată „$0.00 (măsurat)" fabricat dintr-un ?? 0 (auditul
-                  // admin, 3 aug; tiparul „£0.00" din 30 iul).
-                  const spend =
-                    brainCredit.gemini?.monthUsd != null
-                      ? adminStrings().gemSpendMeasured.replace('{n}', brainCredit.gemini.monthUsd.toFixed(2))
-                      : adminStrings().gemSpendUnreadable
-                  const gem = brainCredit.gemini
-                  if (gem?.creditGbp != null) {
-                    const data = gem.creditAt ? ' · ' + new Date(gem.creditAt).toLocaleDateString('ro-RO') : ''
-                    // Varianta care SCADE: doar când serverul chiar a calculat
-                    // (rămas + cât s-a scăzut vin împreună). Altfel, cifra
-                    // declarată ca atare + de ce nu s-a putut scădea.
-                    if (gem.creditRamasGbp != null && gem.scazutUsd != null) {
-                      return adminStrings()
-                        .gemCreditLeftTitle.replace('{ramas}', gem.creditRamasGbp.toFixed(2))
-                        .replace('{gbp}', gem.creditGbp.toFixed(2))
-                        .replace('{date}', data)
-                        .replace('{usd}', gem.scazutUsd.toFixed(2))
-                        .replace('{spend}', spend)
-                    }
-                    return (
-                      adminStrings()
-                        .gemCreditTitle.replace('{gbp}', gem.creditGbp.toFixed(2))
-                        .replace('{date}', data)
-                        .replace('{spend}', spend) + (gem.scadereMotiv ? ` (${gem.scadereMotiv})` : '')
-                    )
-                  }
-                  return brainCredit.gemini?.serving
-                    ? adminStrings().gemPillLive.replace('{spend}', spend)
-                    : adminStrings().gemPillDead.replace('{why}', brainCredit.gemini?.reason ?? 'necunoscut')
-                })()}
-              >
-                {/* CREDITUL REAL, NU CEL STĂTUT (Adrian, 5 aug: „afișezi creditul real"):
-                    cifra £ spusă de owner o arătăm DOAR când proba live zice că mai e
-                    credit (serving). Când Google spune „prepayment credits depleted",
-                    contul e GOL — arătăm £0 MĂSURAT, nu £11.58 stătut lângă un ⚠ (fix
-                    „valoare veche prezentată ca stare reală", regula #1).
-                    Din 8 aug pastila SCADE („asta trebuie să scadă real"): întâi
-                    `creditRamasGbp` (declarat − cheltuiala măsurată de la declarare,
-                    pe cursul BCE); dacă serverul n-a putut calcula, cifra declarată. */}
-                {brainCredit.gemini?.serving && brainCredit.gemini?.creditGbp != null
-                  ? `Gemini £${(brainCredit.gemini.creditRamasGbp ?? brainCredit.gemini.creditGbp).toFixed(2)}`
-                  : brainCredit.gemini?.serving
-                    ? 'Gemini ✓'
-                    : brainCredit.gemini?.reason === 'depleted'
-                      ? 'Gemini £0 ⚠'
-                      : 'Gemini ⚠'}
-              </button>
-            ))}
-            {/* Creionul: editarea creditului DECLARAT (cifra spusă de owner) a
-                stat până azi chiar pe pastilă — acum pastila duce la alimentare
-                (ordinul de mai sus), deci editarea primește propriul buton. */}
-            {brainCredit && !brainLocked && !creditEdit && (
-              <button
-                type="button"
-                className="ghost"
-                style={{ padding: '0 6px' }}
-                onClick={() => { setCreditErr(''); setCreditEdit(true) }}
-                title="Editează creditul declarat (cifra din AI Studio) / Edit declared credit"
-              >
-                ✎
-              </button>
-            )}
+            {/* Pastilele AI (Serper + Gemini + creionul de credit) au fost MUTATE
+                în panoul de administrare (Adrian, 10 aug: „mută-le sub admin") —
+                bara de sus ține doar VPS-ul + indicatorul de vechime. */}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
             permanently on the interface in the top bar”). Two figures, because they
             answer two different questions: RAM = does anything else FIT on the
@@ -1614,6 +1451,7 @@ export default function Stage({ user }: { user: User }) {
         <AdminPanel
           initialTab={adminTab}
           onClose={() => setAdminOpen(false)}
+          brainCredit={brainCredit}
         />
       )}
 

@@ -76,7 +76,15 @@ const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
 // se SCRIE COD, iar lite e cel mai mic model din familie. Flash întreg rămâne de
 // 5-15× mai rapid decât Pro, dar păstrează raționamentul de care are nevoie o
 // reparație reală. Viteza nu ajută dacă produce cod prost mai repede.
-const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.5-flash'
+// 10 AUG — OWNERUL ALEGE `gemini-2.5-pro` PENTRU CONSTRUCTOR. Flash era prea slab
+// la raționament. Decizia se judecă pe CIFRE REALE, nu pe păreri: fiecare ordin
+// înregistrează deja tokenii + rezultatul + încercările (build_jobs / corpul
+// PR-ului), deci vedem pe ordinele următoare, negru pe alb, dacă 2.5-pro chiar
+// termină mai bine, cu ce cost și în cât timp. Suprascriibil din env
+// (`CONSTRUCTOR_GEMINI_MODEL`). Grijă cunoscută: Pro e lent (până la ~75s/apel) →
+// ordinele țin mult, aproape de plafonul dur de 30 min; garda de timp adaptivă +
+// boot-ul din atelier rămân plasa.
+const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-2.5-pro'
 // ── DEEPSEEK DIRECT — CREIERUL CONSTRUCTORULUI, IZOLAT DE VOCE (Adrian, 9 aug) ─
 // „dacă nu merge OmniRoute, pui cheia și rămâne DOAR deepseek la constructor" +
 // „vreau ca tot creditul să rămână doar pe voce". Scop: constructorul să NU mai
