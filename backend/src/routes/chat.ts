@@ -3039,6 +3039,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         usage.usd += costPierdut
         void recordCost(user.email, 'gemini', costPierdut)
       }
+      // Măsoară + debitează pe eroare — O SINGURĂ sursă (jscpd, 10 aug), folosită
+      // pe ambele ramuri de eșec (tura ambientală și eroarea generală). Timpul se
+      // notează (bucla din spate învață din el); uneltele deja rulate se
+      // debitează (nu pe gratis), dar OWNERUL niciodată (PR #648).
+      const inchideEroare = (): void => {
+        void recordTiming({ email: user.email, kind: 'chat', ms: Date.now() - tCreier, ok: false })
+        if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
+      }
       // TURA AMBIENTALĂ MOARE TĂCUT, CA-N CONTRACT (audit 9 aug): la o pană de
       // creier pe o frază de fundal NEADRESATĂ (poarta n-a decis), nu se scrie
       // nicio bulă „Încearcă din nou" și nu se murdărește istoricul — clientul
@@ -3048,8 +3056,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
         reply.raw.end()
         console.error('[CHAT ERROR pe tură ambientală neadresată — stinsă cu {ignored}]', errMsg)
-        void recordTiming({ email: user.email, kind: 'chat', ms: Date.now() - tCreier, ok: false })
-        if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
+        inchideEroare()
         return
       }
       const low = errMsg.toLowerCase()
@@ -3096,14 +3103,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       reply.raw.end()
       void saveMessage(user.email, 'assistant', ecranPartial.trim() ? ecranPartial + spoken : spoken)
       console.error('[CHAT ERROR]', errMsg, { isRateLimit, isQuota, isRefusal })
-      // EVIDENȚA TIMPILOR — și eșecul se măsoară (bucla din spate învață din el).
-      // `orchestratorModel` e local blocului try; aici, pe eșec, notăm doar durata.
-      void recordTiming({ email: user.email, kind: 'chat', ms: Date.now() - tCreier, ok: false })
-      // MONEY IS NOT LOST ON ERROR (Jul 27 audit): the tools already run in this
-      // turn (searches, images, ask_brain) COST money — the return from here
-      // used to skip the debit and the user consumed for free, repeatably.
-      // The OWNER is never debited (PR #648) — recorded, yes; charged, no.
-      if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
+      // Timpul măsurat + banii pe uneltele deja rulate (nu pe gratis), ownerul
+      // niciodată — aceeași sursă unică inchideEroare (vezi mai sus).
+      inchideEroare()
       return
     }
 
@@ -3210,6 +3212,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     }
     },
   )
+}
+
+// Pornește lucrătorul constructorului ÎN FUNDAL, acum — ca ordinul să nu aștepte
+// cronul de 2 min (PR #966). O SINGURĂ sursă (jscpd, 10 aug): folosit la
+// build_software ȘI la retry. Best-effort: nu blochează, nu aruncă.
+function porneculLucratorulConstructor(): void {
+  import('child_process').then(({ exec }) => {
+    exec('bash /root/kelion/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
+    exec('bash /root/kelion/atelier/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
+  }).catch(() => {})
 }
 
 // ── runTool helper (extracted from the main handler for clarity) ────────────
@@ -3344,10 +3356,7 @@ async function runTool(
       if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
 
       // Trigger the constructor worker immediately in the background so the order executes right away
-      import('child_process').then(({ exec }) => {
-        exec('bash /root/kelion/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
-        exec('bash /root/kelion/atelier/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
-      }).catch(() => {})
+      porneculLucratorulConstructor()
 
       // OPEN THE LIVE PANEL ON THE MONITOR (Stage 4b): from the moment it is
       // taken on, Adrian sees Received→step→Done/Failed on the monitor (the
@@ -3405,10 +3414,7 @@ async function runTool(
           const job = await retryBuildJob(id, order)
           if (job) {
             // Trigger the constructor worker immediately in the background so the retried order executes right away
-            import('child_process').then(({ exec }) => {
-              exec('bash /root/kelion/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
-              exec('bash /root/kelion/atelier/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
-            }).catch(() => {})
+            porneculLucratorulConstructor()
           }
           return JSON.stringify(
             job

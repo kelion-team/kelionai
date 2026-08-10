@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { rosterViu } from '../services/agentiKelion.js'
 import { adaugaAgentCustom, memoriePune } from '../db.js'
 import { temeIscoada } from '../services/iscoada.js'
-import { getSessionUser } from '../session.js'
+import { cerAdmin } from '../session.js'
 
 // ── AGENȚII LUI KELION: DOAR ADĂUGAREA MANUALĂ (ordinul ownerului, 8 aug) ────
 //
@@ -78,14 +78,10 @@ function paginaAdmin(total: number): string {
 </script></body></html>`
 }
 
-/** Gardul comun al rutelor de admin: întoarce userul sau null (după 401/403).
- *  401 pe sesiune moartă, 403 DOAR pe rol (regula din 9 aug; recidiva prinsă
- *  la auditul de noapte). */
+/** Gardul comun al rutelor de admin — o singură sursă (cerAdmin, session.ts):
+ *  401 pe sesiune moartă, 403 DOAR pe rol. */
 function adminSau403(req: FastifyRequest, reply: FastifyReply): { email: string } | null {
-  const user = getSessionUser(req)
-  if (user && user.role === 'admin') return user
-  reply.code(user ? 403 : 401)
-  return null
+  return cerAdmin(req, reply)
 }
 
 export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {

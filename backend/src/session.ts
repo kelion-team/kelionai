@@ -101,6 +101,25 @@ export function getSessionUser(req: FastifyRequest): SessionUser | null {
   }
 }
 
+// ── GARDUL „ești admin?" — O SINGURĂ DATĂ (jscpd, 10 aug) ────────────────────
+// Preambulul „citește sesiunea → 401 dacă e moartă → 403 dacă nu e admin" era
+// copiat identic în 54 de rute din admin.ts (poarta jscpd îl prindea). Aici, o
+// dată: întoarce userul sau `null` DUPĂ ce a trimis răspunsul de eroare. 401 pe
+// sesiune moartă ≠ 403 pe rol (regula 9 aug: un cookie expirat nu are voie să
+// arate ca „nu ești admin").
+export function cerAdmin(req: FastifyRequest, reply: FastifyReply): SessionUser | null {
+  const user = getSessionUser(req)
+  if (!user) {
+    void reply.code(401).send({ error: 'unauthorized' })
+    return null
+  }
+  if (user.role !== 'admin') {
+    void reply.code(403).send({ error: 'forbidden' })
+    return null
+  }
+  return user
+}
+
 // ── GARDUL „admin + :id întreg pozitiv" — O SINGURĂ DATĂ (jscpd, 3 aug) ──────
 // Șablonul „getSessionUser → 403 → Number(:id) → 400" apărea identic în trei
 // rute (constructor șterge/reia, cereri neacoperite șterge). Aici e o dată:
@@ -110,18 +129,8 @@ export function adminSiId(
   reply: FastifyReply,
   rawId: string,
 ): number | null {
-  const user = getSessionUser(req)
-  // 401 pe sesiune moartă, 403 DOAR pe rol — un cookie expirat nu are voie să
-  // arate ca „nu ești admin" (9 aug, ownerul: „sistemul dă err 403, ca și cum
-  // nu sunt admin" — cauza reală era sesiunea, nu rolul).
-  if (!user) {
-    void reply.code(401).send({ error: 'unauthorized' })
-    return null
-  }
-  if (user.role !== 'admin') {
-    void reply.code(403).send({ error: 'forbidden' })
-    return null
-  }
+  // Gardul de admin, o singură sursă (cerAdmin) — 401 pe sesiune moartă, 403 pe rol.
+  if (!cerAdmin(req, reply)) return null
   const id = Number(rawId)
   if (!Number.isInteger(id) || id <= 0) {
     void reply.code(400).send({ error: 'id_invalid' })

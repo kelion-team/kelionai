@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { getSessionUser } from '../session.js'
+import { cerAdmin } from '../session.js'
 import { gasesteAgent, cheamaAgent } from '../services/agentiKelion.js'
 import { addMemory, searchMemories } from '../db.js'
 import { dateSimbol, rezumatPentruAgent } from '../services/piete.js'
@@ -113,13 +113,9 @@ const CERE_NIVELURI =
   `Rândul ăsta se DESENEAZĂ pe graficul omului — de-aia trebuie exact formatul.`
 
 function adminul(req: FastifyRequest, reply: FastifyReply): { email: string } | null {
-  const user = getSessionUser(req)
-  if (user && user.role === 'admin') return user
-  // 401 pe sesiune moartă, 403 DOAR pe rol (regula din 9 aug; recidiva prinsă
-  // la auditul de noapte) — un cookie expirat nu are voie să arate ca „nu ești
-  // admin", clientul trebuie să știe să RE-LOGHEZE, nu să creadă că a pierdut rolul.
-  reply.code(user ? 403 : 401)
-  return null
+  // Gardul de admin, o singură sursă (cerAdmin, session.ts): 401 pe sesiune
+  // moartă, 403 DOAR pe rol (regula din 9 aug).
+  return cerAdmin(req, reply)
 }
 
 function paginaTranzactii(): string {

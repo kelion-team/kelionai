@@ -211,65 +211,45 @@ function MediaFailed({ url }: { url: string }) {
   )
 }
 
-function MonitorImage({ url, title, taskId }: { url: string; title: string; taskId: string }) {
+// Plasa comună a media de pe monitor — O SINGURĂ sursă (jscpd, 10 aug). O sursă
+// NOUĂ repornește ciclul onLoad/onError (auditul de noapte, 9 aug): fără resetare,
+// un singur eșec bloca TOATE fișierele următoare pe panoul de eșec.
+function useMediaFallback(url: string, taskId: string): { failed: boolean; onOk: () => void; onErr: () => void } {
   const [failed, setFailed] = useState(false)
-  // O sursă NOUĂ repornește ciclul onLoad/onError (auditul de noapte, 9 aug):
-  // taskul de același fel nu se remontează (id-ul taskului E felul), deci fără
-  // resetare un singur eșec bloca TOATE imaginile următoare pe panoul de eșec.
   useEffect(() => setFailed(false), [url])
+  return {
+    failed,
+    onOk: () => setTaskStatus(taskId, 'ok'),
+    onErr: () => { setFailed(true); setTaskStatus(taskId, 'error') },
+  }
+}
+
+function MonitorImage({ url, title, taskId }: { url: string; title: string; taskId: string }) {
+  const { failed, onOk, onErr } = useMediaFallback(url, taskId)
   if (failed) return <MediaFailed url={url} />
   return (
     <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--panel-solid)' }}>
-      <img
-        src={url}
-        alt={title}
-        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-        onLoad={() => setTaskStatus(taskId, 'ok')}
-        onError={() => {
-          setFailed(true)
-          setTaskStatus(taskId, 'error')
-        }}
-      />
+      <img src={url} alt={title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} onLoad={onOk} onError={onErr} />
     </div>
   )
 }
 
 function MonitorVideo({ url, taskId }: { url: string; taskId: string }) {
-  const [failed, setFailed] = useState(false)
-  useEffect(() => setFailed(false), [url]) // sursă nouă = judecată nouă (audit 9 aug)
+  const { failed, onOk, onErr } = useMediaFallback(url, taskId)
   if (failed) return <MediaFailed url={url} />
   return (
     <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-      <video
-        src={url}
-        controls
-        style={{ maxWidth: '100%', maxHeight: '100%' }}
-        onLoadedData={() => setTaskStatus(taskId, 'ok')}
-        onError={() => {
-          setFailed(true)
-          setTaskStatus(taskId, 'error')
-        }}
-      />
+      <video src={url} controls style={{ maxWidth: '100%', maxHeight: '100%' }} onLoadedData={onOk} onError={onErr} />
     </div>
   )
 }
 
 function MonitorAudio({ url, taskId }: { url: string; taskId: string }) {
-  const [failed, setFailed] = useState(false)
-  useEffect(() => setFailed(false), [url]) // sursă nouă = judecată nouă (audit 9 aug)
+  const { failed, onOk, onErr } = useMediaFallback(url, taskId)
   if (failed) return <MediaFailed url={url} />
   return (
     <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <audio
-        src={url}
-        controls
-        style={{ width: '100%', maxWidth: 520 }}
-        onLoadedData={() => setTaskStatus(taskId, 'ok')}
-        onError={() => {
-          setFailed(true)
-          setTaskStatus(taskId, 'error')
-        }}
-      />
+      <audio src={url} controls style={{ width: '100%', maxWidth: 520 }} onLoadedData={onOk} onError={onErr} />
     </div>
   )
 }
