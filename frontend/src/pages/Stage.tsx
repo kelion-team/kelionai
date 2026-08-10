@@ -1364,10 +1364,10 @@ export default function Stage({ user }: { user: User }) {
           type="button"
           className="ghost"
           onClick={() => setCvAdaptationOpen(true)}
-          title="Adaptare CV după link/descriere job (LinkedIn, Indeed, CV Library)"
+          title={t.cvTitle}
           style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#4dabf7', fontWeight: 'bold' }}
         >
-          📄 Adaptare CV
+          📄 {t.cvTitle}
         </button>
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,

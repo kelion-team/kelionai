@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { uiStrings } from '../lib/i18n'
 
 // Adaptare CV — fluxul SIMPLU (Adrian, 10 aug): CV de bază + specificația jobului
 // (lipită de user, el își caută singur jobul) → adaptare inteligentă (inserează
@@ -10,6 +11,8 @@ interface CvAdaptationProps {
 }
 
 export default function CvAdaptation({ onClose }: CvAdaptationProps): React.ReactElement {
+  // Limba UI (10 aug): toate textele trec prin i18n - EN default, RO doar pe ro.
+  const T = uiStrings()
   const [cvImplicit, setCvImplicit] = useState('')
   const [applicantName, setApplicantName] = useState('')
   const [jobSpec, setJobSpec] = useState('')
@@ -29,7 +32,7 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
     fetch('/api/jobs/cv-implicit')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('load'))))
       .then((data) => { if (data.cv) setCvImplicit(data.cv) })
-      .catch(() => setErrorMessage('Nu s-a putut încărca CV-ul salvat.'))
+      .catch(() => setErrorMessage(T.cvErrLoad))
   }, [])
 
   const handleSaveCv = async (): Promise<void> => {
@@ -40,10 +43,10 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
         body: JSON.stringify({ cv: cvImplicit }),
       })
       const data = await res.json()
-      if (!res.ok) { setErrorMessage(data.error || 'Eroare la salvare'); return }
-      setSuccessMessage('CV-ul de bază a fost salvat.')
+      if (!res.ok) { setErrorMessage(data.error || T.cvErrSave); return }
+      setSuccessMessage(T.cvSaved)
     } catch {
-      setErrorMessage('Nu s-a putut salva CV-ul.')
+      setErrorMessage(T.cvErrSave)
     } finally {
       setSavingCv(false)
     }
@@ -66,11 +69,11 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
         body: JSON.stringify({ nume: f.name, mime: f.type, base64 }),
       })
       const data = await res.json()
-      if (!res.ok) { setErrorMessage(data.error || 'Eroare la încărcare'); return }
+      if (!res.ok) { setErrorMessage(data.error || T.cvErrRead); return }
       if (data.cv) setCvImplicit(data.cv)
-      setSuccessMessage(data.message || 'CV-ul a fost citit și salvat.')
+      setSuccessMessage(data.message || T.cvSaved)
     } catch {
-      setErrorMessage('Nu s-a putut citi fișierul.')
+      setErrorMessage(T.cvErrRead)
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -80,21 +83,21 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
   const handleAdapt = async (): Promise<void> => {
     setAdapting(true); setErrorMessage(''); setSuccessMessage('')
     setAdaptedCv(''); setJobName(''); setFileName('')
-    if (!cvImplicit.trim()) { setErrorMessage('Scrie sau încarcă întâi CV-ul de bază.'); setAdapting(false); return }
-    if (!jobSpec.trim()) { setErrorMessage('Lipește specificația (anunțul) jobului.'); setAdapting(false); return }
+    if (!cvImplicit.trim()) { setErrorMessage(T.cvErrNeedCv); setAdapting(false); return }
+    if (!jobSpec.trim()) { setErrorMessage(T.cvErrNeedSpec); setAdapting(false); return }
     try {
       const res = await fetch('/api/jobs/adapt', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cvContent: cvImplicit, jobSpec, applicantName }),
       })
       const data = await res.json()
-      if (!res.ok) { setErrorMessage(data.error || 'Eroare la adaptare'); return }
+      if (!res.ok) { setErrorMessage(data.error || T.cvErrNet); return }
       setAdaptedCv(data.adaptedCv || '')
       setJobName(data.jobName || '')
       setFileName(data.fileName || 'cv_adaptat')
-      setSuccessMessage('Adaptare gata — previzualizează și descarcă.')
+      setSuccessMessage(T.cvDone)
     } catch {
-      setErrorMessage('A apărut o eroare de rețea la adaptare.')
+      setErrorMessage(T.cvErrNet)
     } finally {
       setAdapting(false)
     }
@@ -123,7 +126,7 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
   return (
     <div style={{ padding: '20px', color: '#fff', backgroundColor: '#1e1e24', borderRadius: '8px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid #3a3a4a', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #3a3a4a', paddingBottom: '10px' }}>
-        <h2 style={{ margin: 0, fontSize: '1.5rem', color: '#4dabf7' }}>Adaptare CV</h2>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', color: '#4dabf7' }}>{T.cvTitle}</h2>
         <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#aaa', fontSize: '1.5rem', cursor: 'pointer' }}>&times;</button>
       </div>
 
@@ -133,44 +136,44 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           <div style={box}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.1rem', color: '#a5d8ff' }}>1. CV-ul tău de bază</h3>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.1rem', color: '#a5d8ff' }}>{T.cvBaseTitle}</h3>
             <p style={{ fontSize: '0.85rem', color: '#909296', margin: '0 0 10px 0' }}>
-              Scrie-l aici sau încarcă un fișier (text, PDF sau poză). Se salvează și rămâne pentru data viitoare.
+              {T.cvBaseHint}
             </p>
             <input ref={fileRef} type="file" accept=".txt,.md,.csv,.pdf,image/*,application/pdf" onChange={handleUpload} style={{ display: 'none' }} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading} style={{ ...btn('#495057'), marginBottom: '10px' }}>
-              {uploading ? 'Se citește fișierul...' : '📎 Încarcă CV (text / PDF / poză)'}
+              {uploading ? T.cvUploadBusy : T.cvUpload}
             </button>
-            <textarea value={cvImplicit} onChange={(e) => setCvImplicit(e.target.value)} style={{ ...input, height: '220px', fontFamily: 'monospace', fontSize: '0.85rem', resize: 'vertical' }} placeholder="Scrie sau încarcă CV-ul tău de bază aici..." />
+            <textarea value={cvImplicit} onChange={(e) => setCvImplicit(e.target.value)} style={{ ...input, height: '220px', fontFamily: 'monospace', fontSize: '0.85rem', resize: 'vertical' }} placeholder={T.cvBasePlaceholder} />
             <button onClick={handleSaveCv} disabled={savingCv} style={{ ...btn('#228be6'), marginTop: '10px' }}>
-              {savingCv ? 'Se salvează...' : 'Salvează CV-ul de bază'}
+              {savingCv ? T.cvSaveBusy : T.cvSave}
             </button>
           </div>
 
           <div style={box}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.1rem', color: '#a5d8ff' }}>2. Jobul (îl cauți tu)</h3>
-            <label style={{ fontSize: '0.85rem', color: '#909296' }}>Numele tău (pentru fișier):</label>
-            <input type="text" value={applicantName} onChange={(e) => setApplicantName(e.target.value)} placeholder="ex: Adrian Popescu" style={{ ...input, marginBottom: '10px' }} />
-            <label style={{ fontSize: '0.85rem', color: '#909296' }}>Specificația jobului (lipește tot anunțul):</label>
-            <textarea value={jobSpec} onChange={(e) => setJobSpec(e.target.value)} style={{ ...input, height: '180px', fontSize: '0.85rem', resize: 'vertical', marginTop: '4px' }} placeholder="Lipește aici titlul + toată descrierea/cerințele jobului găsit de tine..." />
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.1rem', color: '#a5d8ff' }}>{T.cvJobTitle}</h3>
+            <label style={{ fontSize: '0.85rem', color: '#909296' }}>{T.cvYourName}</label>
+            <input type="text" value={applicantName} onChange={(e) => setApplicantName(e.target.value)} placeholder={T.cvNamePlaceholder} style={{ ...input, marginBottom: '10px' }} />
+            <label style={{ fontSize: '0.85rem', color: '#909296' }}>{T.cvJobSpec}</label>
+            <textarea value={jobSpec} onChange={(e) => setJobSpec(e.target.value)} style={{ ...input, height: '180px', fontSize: '0.85rem', resize: 'vertical', marginTop: '4px' }} placeholder={T.cvJobSpecPlaceholder} />
             <button onClick={handleAdapt} disabled={adapting} style={{ ...btn('#37b24d'), marginTop: '12px', padding: '10px 20px', fontSize: '1rem' }}>
-              {adapting ? 'Se adaptează CV-ul...' : 'Adaptează & Previzualizează'}
+              {adapting ? T.cvAdaptBusy : T.cvAdaptBtn}
             </button>
           </div>
         </div>
 
         <div style={{ ...box, display: 'flex', flexDirection: 'column' }}>
           <h3 style={{ margin: '0 0 10px 0', fontSize: '1.1rem', color: '#a5d8ff' }}>
-            3. CV adaptat{jobName ? ` — ${jobName}` : ''}
+            {T.cvResultTitle}{jobName ? ` — ${jobName}` : ''}
           </h3>
-          <textarea readOnly value={adaptedCv} placeholder="CV-ul adaptat pe cerințele jobului apare aici. Îl previzualizezi, apoi îl descarci." style={{ width: '100%', flex: 1, minHeight: '470px', backgroundColor: '#1a1b1e', color: '#fff', border: '1px solid #373a40', borderRadius: '4px', padding: '15px', fontFamily: 'monospace', fontSize: '0.85rem', resize: 'none', whiteSpace: 'pre-wrap' }} />
+          <textarea readOnly value={adaptedCv} placeholder={T.cvResultPlaceholder} style={{ width: '100%', flex: 1, minHeight: '470px', backgroundColor: '#1a1b1e', color: '#fff', border: '1px solid #373a40', borderRadius: '4px', padding: '15px', fontFamily: 'monospace', fontSize: '0.85rem', resize: 'none', whiteSpace: 'pre-wrap' }} />
           {adaptedCv && (
             <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
               <button onClick={handleDownload} style={{ ...btn('#37b24d'), flex: 2 }}>
-                ⬇ Descarcă ({fileName || 'cv_adaptat'}.doc)
+                {T.cvDownload} ({fileName || 'cv_adaptat'}.doc)
               </button>
-              <button onClick={() => { void navigator.clipboard.writeText(adaptedCv); setSuccessMessage('CV-ul adaptat a fost copiat.') }} style={{ ...btn('#495057'), flex: 1 }}>
-                Copiază
+              <button onClick={() => { void navigator.clipboard.writeText(adaptedCv); setSuccessMessage(T.cvCopied) }} style={{ ...btn('#495057'), flex: 1 }}>
+                {T.cvCopy}
               </button>
             </div>
           )}
