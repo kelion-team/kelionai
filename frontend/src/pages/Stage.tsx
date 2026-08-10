@@ -8,6 +8,7 @@ import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
 import ContactModal from '../components/ContactModal'
 import CustomerSettings from '../components/CustomerSettings'
+import CvAdaptation from '../components/CvAdaptation'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
@@ -557,6 +558,7 @@ export default function Stage({ user }: { user: User }) {
   }
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [cvAdaptationOpen, setCvAdaptationOpen] = useState(false)
   // THE THEME TOGGLE (Aug 2 — the lighter background): the light palette is the
   // default; this top-bar moon/sun flips back to the original dark identity
   // (persisted by lib/theme). Held in state so the click re-renders — which
@@ -668,6 +670,11 @@ export default function Stage({ user }: { user: User }) {
           break
         case 'contact':
           setContactOpen(true)
+          break
+        case 'cv':
+        case 'cv-adaptation':
+        case 'adaptare':
+          setCvAdaptationOpen(true)
           break
         case 'admin':
           if (user.role === 'admin') {
@@ -1527,6 +1534,15 @@ export default function Stage({ user }: { user: User }) {
             Add credits
           </button>
         )}
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => setCvAdaptationOpen(true)}
+          title="Adaptare CV după link/descriere job (LinkedIn, Indeed, CV Library)"
+          style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#4dabf7', fontWeight: 'bold' }}
+        >
+          📄 Adaptare CV
+        </button>
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,
               click-to-enlarge. The topbar stays clean for signed-in users. */}
@@ -1621,6 +1637,26 @@ export default function Stage({ user }: { user: User }) {
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
 
       {settingsOpen && <CustomerSettings user={user} onClose={() => setSettingsOpen(false)} />}
+
+      {cvAdaptationOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px'
+        }}>
+          <div style={{ width: '100%', maxWidth: '1200px' }}>
+            <CvAdaptation onClose={() => setCvAdaptationOpen(false)} />
+          </div>
+        </div>
+      )}
 
     </div>
   )
