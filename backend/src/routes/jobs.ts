@@ -184,18 +184,29 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/jobs/search', async (req, reply) => {
     const cine = await platitorul(req, reply)
     if (!cine) return
-    const { query = '', platforms = Object.keys(PLATFORME) } = (req.body ?? {}) as { query?: string; platforms?: string[] }
+    const { query = '', platforms = Object.keys(PLATFORME), salaryMin, salaryMax } =
+      (req.body ?? {}) as { query?: string; platforms?: string[]; salaryMin?: number | string; salaryMax?: number | string }
     const term = String(query).trim()
     if (!term) return reply.status(400).send({ error: 'scrie ce cauți (titlu, tehnologie, companie)' })
 
     const alese = platforms.filter((p) => PLATFORME[p]).slice(0, 3)
     if (alese.length === 0) return reply.status(400).send({ error: 'alege cel puțin o platformă' })
 
+    // INTERVAL DE SALARIU (Adrian, 10 aug): îl lipim în interogarea Google, ca
+    // rezultatele să fie ancorate pe cifre reale. Doar numere valide intră.
+    const nMin = Number(salaryMin)
+    const nMax = Number(salaryMax)
+    const salariu = [
+      Number.isFinite(nMin) && nMin > 0 ? String(Math.round(nMin)) : '',
+      Number.isFinite(nMax) && nMax > 0 ? String(Math.round(nMax)) : '',
+    ].filter(Boolean).join(' ')
+    const clauzaSalariu = salariu ? ` salary ${salariu}` : ''
+
     const jobs: JobGasit[] = []
     let picat = 0
     for (const p of alese) {
       const { site, nume } = PLATFORME[p]
-      const rez = await cautareStructurata(`site:${site} ${term}`, 6)
+      const rez = await cautareStructurata(`site:${site} ${term}${clauzaSalariu}`, 6)
       if (rez === null) {
         picat++
         continue

@@ -21,6 +21,8 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
   const [activeSubTab, setActiveSubTab] = useState<'search' | 'custom'>('search')
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['linkedin', 'indeed', 'cv_library'])
+  const [salaryMin, setSalaryMin] = useState('')
+  const [salaryMax, setSalaryMax] = useState('')
   const [jobs, setJobs] = useState<Job[]>([])
   const [searchNote, setSearchNote] = useState('')
   const [selectedJobIds, setSelectedJobIds] = useState<string[]>([])
@@ -60,7 +62,7 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
     try {
       const res = await fetch('/api/jobs/search', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchTerm, platforms: selectedPlatforms }),
+        body: JSON.stringify({ query: searchTerm, platforms: selectedPlatforms, salaryMin: salaryMin || undefined, salaryMax: salaryMax || undefined }),
       })
       const data = await res.json()
       if (!res.ok) { setErrorMessage(data.error || 'Eroare la căutare'); setJobs([]); return }
@@ -208,6 +210,11 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
                 <form onSubmit={handleSearch} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <label style={{ fontSize: '0.85rem', color: '#909296' }}>Ce cauți (titlu, tehnologie, companie):</label>
                   <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ex: React developer London" style={input} />
+                  <label style={{ fontSize: '0.85rem', color: '#909296' }}>Interval de salariu (opțional):</label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input type="number" min="0" value={salaryMin} onChange={(e) => setSalaryMin(e.target.value)} placeholder="min (ex. 40000)" style={{ ...input, flex: 1 }} />
+                    <input type="number" min="0" value={salaryMax} onChange={(e) => setSalaryMax(e.target.value)} placeholder="max (ex. 70000)" style={{ ...input, flex: 1 }} />
+                  </div>
                   <div style={{ display: 'flex', gap: '15px', fontSize: '0.85rem' }}>
                     {(['linkedin', 'indeed', 'cv_library'] as const).map((p) => (
                       <label key={p} style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
