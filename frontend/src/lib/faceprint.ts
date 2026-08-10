@@ -59,7 +59,7 @@ async function ensureApi(): Promise<FaceApi | null> {
   }
 }
 
-const SAMPLE_EVERY_MS = 1500 // o inferență la ~1.5s cât e camera pornită
+const SAMPLE_EVERY_MS = 2500 // o inferență la ~2.5s (10 aug: detectSingleFace ține firul 55–77 ms; mai rar = mai puțin înfometată redarea vocii)
 const FRESH_MS = 8000 // un descriptor mai vechi de atât e considerat expirat
 
 /**

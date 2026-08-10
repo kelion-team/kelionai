@@ -219,6 +219,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   list_notes: { what: 'Shows your notes', say: '"what notes do I have?"' },
   delete_note: { what: 'Deletes a note', say: '"delete the meter note"' },
   list_memories: { what: 'Tells you what it remembers about you', say: '"what do you remember about me?"' },
+  cauta_istoric: { what: 'Searches your full past chat history with it', say: '"what did we talk about last week?"' },
   forget_memory: { what: 'Forgets something on request', say: '"forget what I said about the car"' },
 
   // Browser

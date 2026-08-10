@@ -276,6 +276,19 @@ export const LIST_MEMORIES_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+export const CAUTA_ISTORIC_TOOL: Tool = {
+  name: 'cauta_istoric',
+  description:
+    'Search your FULL past chat history with THIS user (both written and voice) by keyword — it reaches conversations OLDER than the recent window you always receive. Use when they refer to something discussed before ("ce am vorbit despre…", "ține minte când ți-am zis de…", "acum câteva zile am discutat…", "what did we say about…"). Pass the key words of the topic; you get back the matching past exchanges with their dates. Present them naturally in the user\'s language.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Key words of the topic to find in the past conversations.' },
+    },
+    required: ['query'],
+  },
+}
+
 export const FORGET_MEMORY_TOOL: Tool = {
   name: 'forget_memory',
   description:
@@ -654,7 +667,7 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
   // About HIMSELF: memory, notes, logs, cost, the mailbox, and the right to
   // ask for a missing tool on his own. Without these he remembers nothing from
   // one turn to the next — that's why he repeated the same mistakes.
-  LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL,
+  LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL,
   COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL,
   // The whole admin panel — he sees what you see, and can change what can be undone.
   ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,

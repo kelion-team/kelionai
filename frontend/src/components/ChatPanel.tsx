@@ -2322,7 +2322,12 @@ export default function ChatPanel({
       // chat. Cât e live activ și nicio tură în zbor, un cadru pe secundă
       // ajunge (proaspăt pentru faceprint și pentru o tură scrisă pornită);
       // firul rămâne liber pentru redarea vocii.
-      if (vlRef.current && !busyRef.current && performance.now() - ultimaCaptura < 950) return
+      // Cât e VOCEA LIVE activă, cel mult 1 cadru/sec — ȘI în timpul unei ture
+      // (busy). Vechea gardă sărea throttle-ul pe `busy`, dar într-o conversație
+      // vocală reală (barge-in-uri) e mereu busy → captarea rula la 4 fps și
+      // înfometa redarea vocii (audio crăpat, 10 aug). Sesiunea live e audio-only,
+      // nu trimite cadre — un cadru/sec ajunge pentru faceprint/o tură scrisă.
+      if (vlRef.current && performance.now() - ultimaCaptura < 950) return
       ultimaCaptura = performance.now()
       const f = captureRef.current?.()
       if (f) {

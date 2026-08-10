@@ -2306,6 +2306,25 @@ export async function getRecentHistory(email: string, n = 60): Promise<HistoryRo
   }
 }
 
+/** Caută în istoricul COMPLET de chat al userului (voce + scris) după cuvinte-
+ *  cheie — accesul lui Kelion la conversații mai vechi decât fereastra de
+ *  continuitate de 24 de ture (Adrian, 10 aug: „Kelion trebuie să aibă acces la
+ *  istoricul de chat al meu cu el"). */
+export async function cautaIstoric(email: string, query: string, limit = 20): Promise<HistoryRow[]> {
+  if (!dbEnabled() || !query.trim()) return []
+  try {
+    const r = await getPool().query<HistoryRow>(
+      `SELECT role, content, created_at FROM messages
+         WHERE user_email = $1 AND content ILIKE $2
+         ORDER BY created_at DESC LIMIT $3`,
+      [email, `%${query.trim().slice(0, 120)}%`, Math.min(Math.max(limit, 1), 50)],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
 // ── Cross-session memory (the Memory agent's store) ──
 export interface Memory {
   content: string
