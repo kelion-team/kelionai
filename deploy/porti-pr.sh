@@ -163,7 +163,7 @@ PRURI=$(gh "$GH/pulls?state=open&per_page=20" | python3 -c '
 import json, sys
 try:
     for p in json.load(sys.stdin):
-        print(p["number"], p["head"]["sha"])
+        print(p["number"], p["head"]["sha"], p["head"]["ref"])
 except Exception:
     pass
 ')
@@ -171,7 +171,7 @@ except Exception:
 
 touch "$STARE"
 
-while read -r NUMAR SHA; do
+while read -r NUMAR SHA REF; do
   [ -z "${NUMAR:-}" ] && continue
   # Un sha se verifică o SINGURĂ dată. Altfel cronul ar comenta la fiecare 10
   # minute pe același commit — zgomot peste zgomot, exact ce-i reproșează
@@ -212,6 +212,28 @@ while read -r NUMAR SHA; do
   gh -X POST -H 'content-type: application/json' \
     -d "{\"state\":\"$STARE_GH\",\"context\":\"porti-vps\",\"description\":\"Porți rulate pe VPS: $VERDICT\",\"target_url\":\"https://github.com/kelion-team/kelionai/pull/$NUMAR\"}" \
     "$GH/statuses/$SHA" >/dev/null
+
+  # ── AUTO-ÎMBINARE PE VERDE, DOAR PENTRU CONSTRUCTOR (Adrian, 10 aug: „după ce
+  # face PR să fie capabil să dea PR-ul; totul prin master") ──────────────────
+  # Poarta REALĂ (asta) decide, nu Actions-ul mort. Deci: un PR al
+  # constructorului (ramura kelion/job-*) se îmbine SINGUR doar când porțile
+  # trec; unul rupt (VERDICT PICĂ) NU se poate îmbina — rămâne deschis cu
+  # problema la vedere (exact ce a lipsit la #973, care s-a îmbinat rupt).
+  # PR-urile mele (claude/*) și ale ownerului NU se ating — le îmbină omul.
+  case "$REF" in
+    kelion/*)
+      if [ "$VERDICT" = TRECE ]; then
+        REZM=$(gh -X PUT -H 'content-type: application/json' -d '{"merge_method":"merge"}' "$GH/pulls/$NUMAR/merge")
+        if echo "$REZM" | grep -q '"merged": *true'; then
+          echo "PR #$NUMAR (constructor): VERDE → îmbinat automat în master"
+        else
+          echo "PR #$NUMAR (constructor): verde, dar îmbinarea a eșuat (rămâne pentru owner): $(echo "$REZM" | tr -d '\n' | head -c 140)"
+        fi
+      else
+        echo "PR #$NUMAR (constructor): VERDICT PICĂ → NU se îmbină, rămâne deschis cu problema anunțată"
+      fi
+      ;;
+  esac
 
   echo "$SHA" >> "$STARE"
   echo "PR #$NUMAR: $VERDICT (comentat + stare $STARE_GH pe commit)"
