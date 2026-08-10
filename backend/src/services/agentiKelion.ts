@@ -321,8 +321,9 @@ const UNEALTA_AMINTIRI: AnthropicTool = {
   },
 }
 
-/** Textul unei pagini web, fără taguri — mâna a doua a căutării. */
-async function citestePagina(url: string): Promise<string> {
+/** Textul unei pagini web, fără taguri — mâna a doua a căutării.
+ *  Exportată (10 aug) pentru Adaptarea CV: citirea reală a anunțului de job. */
+export async function citestePagina(url: string): Promise<string> {
   if (!/^https?:\/\//i.test(url)) return JSON.stringify({ error: 'url invalid (doar http/https)' })
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(10_000), redirect: 'follow' })

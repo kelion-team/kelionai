@@ -456,7 +456,9 @@ function toolRun(cmd) {
   }
 }
 
-const TOOLS = [
+let TOOLS = [
+  // NB: `let`, nu `const` — la pornire se reîncarcă din sursa unică a aplicației
+  // (incarcaUneltele), ca să aibă mereu aceleași unelte de dev/ops ca creierul.
   { type: 'function', function: { name: 'ls', description: 'Listează un director din repo (fără node_modules/.git/dist).', parameters: { type: 'object', properties: { dir: { type: 'string' } } } } },
   { type: 'function', function: { name: 'grep', description: 'Caută un text/regex în tot repo-ul și întoarce fișier:linie:conținut (max 60). FOLOSEȘTE ASTA ca să găsești fișierul de modificat — nu explora cu ls/read pas cu pas.', parameters: { type: 'object', properties: { pattern: { type: 'string' } }, required: ['pattern'] } } },
   { type: 'function', function: { name: 'read', description: 'Citește un fișier (numerotat). Dă from/to ca să iei DOAR intervalul de linii care te interesează — nu tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' } }, required: ['path'] } } },
@@ -507,9 +509,31 @@ const TOOLS = [
 // TOOLS, ca să nu poată rămâne în urmă: uneltele locale sunt cele 7 de fișiere,
 // tot restul trece prin `/api/constructor/tool`.
 const UNELTE_LOCALE = new Set(['ls', 'grep', 'read', 'write', 'edit', 'edit_lines', 'delete_file', 'run', 'finish'])
-const UNELTE_PRIN_APLICATIE = new Set(
+let UNELTE_PRIN_APLICATIE = new Set(
   TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)),
 )
+
+// ── SURSA UNICĂ DE UNELTE (Adrian, 10 aug: „dă-i TOT, deblochează TOT") ────────
+// Defs-urile LOCALE (fișiere) rămân aici — se execută în proces. Restul le cerem
+// la pornire de la aplicație (GET /api/constructor/tool-defs, derivate din
+// SHARED_ADMIN_TOOLS + agenți + browser), ca lista să nu mai poată rămâne în
+// urmă față de creierul de chat. Dacă cererea pică din ORICE motiv, rămâne lista
+// de rezervă de mai sus (TOOLS neatins) — constructorul nu poate ajunge fără unelte.
+const UNELTE_LOCALE_DEFS = TOOLS.filter((t) => UNELTE_LOCALE.has(t.function.name))
+async function incarcaUneltele() {
+  try {
+    const r = await api('/api/constructor/tool-defs')
+    const primite = Array.isArray(r?.tools) ? r.tools.filter((t) => t?.function?.name) : []
+    if (!primite.length) { log('unelte: lista de rezervă (aplicația n-a întors unelte)'); return }
+    const numeLocale = new Set(UNELTE_LOCALE_DEFS.map((t) => t.function.name))
+    const prinApp = primite.filter((t) => !numeLocale.has(t.function.name))
+    TOOLS = [...UNELTE_LOCALE_DEFS, ...prinApp]
+    UNELTE_PRIN_APLICATIE = new Set(TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)))
+    log(`unelte: ${TOOLS.length} din sursa unică (${prinApp.length} prin aplicație)`)
+  } catch (e) {
+    log(`unelte: lista de rezervă (cererea a picat: ${e?.message ?? e})`)
+  }
+}
 
 // ── ANTI-RĂTĂCIRE (5 aug 2026 — cauza MĂSURATĂ a joburilor picate) ────────────
 // Din jurnalul buclei: joburi cu 40 de grep-uri LA RÂND, zero editări, care au
@@ -543,6 +567,7 @@ THE WORK METHOD — follow it 100%, in this order, on EVERY order (the tool-step
 2. CHECK REALITY. Find the file with 'grep' (a pattern from the order) — do NOT explore with ls/read step by step. NEVER assume what the code says: read the actual lines ('read' with from/to, only the relevant range). Never read the same file twice. Do NOT read AI-HANDOFF.md (it is huge) unless the order explicitly asks about architecture.
 3. PLAN. One line: which file(s) change and how the change will be verified.
 4. EXECUTE. On existing files use 'edit' (EXACT old text → new text) or, on LARGE files, 'edit_lines' (give the from/to line numbers from 'read' + the new text — no text matching, immune to the output cap). NEVER 'write' a large existing file — your output has a cap and gets cut in half, corrupting it. Use 'write' only for NEW or small files. Fix the CAUSE, not the symptom; cleanly rewrite the responsible module — no band-aid patches; match the surrounding style. All code comments in ENGLISH. Changes STRICTLY inside the order's perimeter — nothing "on the fly"; never touch financial counters, never delete data.
+   NEVER FAKE A FEATURE (owner's iron rule, 10 Aug, after order #166 shipped a "job search" with a HARDCODED job list and invented "AI adaptation" text): no simulated/hardcoded data presented as real, no mock lists, no invented outputs pretending to be a service. If the order needs search/AI/external data, wire the REAL services this app already has (webSearch via the brain, cheama_agent, db_query, browser_* — all through /api/constructor/tool). If the real integration is genuinely impossible from here, BUILD NOTHING FAKE — say so honestly in the PR body and via request_repair. A visibly missing feature is acceptable; a fake one is not.
 5. PROVE. "Done" is never a claim — it is evidence. Before calling 'finish', re-read the order and check that your change actually FULFILS it (not merely that it compiles). Then call 'finish' IMMEDIATELY — do NOT run 'npm ci/build/test' yourself; the system verifies on its own after finish. Target: finish within ≤3 tool calls after finding the file.
    EXCEPTION — NEW dependency: if the order needs a package that does not exist yet, run 'run' with "npm --prefix backend install <package>" (or frontend) BEFORE finish — so package.json + lock stay in sync and verification passes.
 6. REPORT HONESTLY. The PR body (in Romanian, for the owner) states three things: what was done, how it was verified, and what remains unverified. An honest "this could not be verified" is worth more than a confident guess. If the system tells you the build failed, repair the CAUSE and re-finish (you have a small number of repair rounds). Never hide a failure.
@@ -942,6 +967,27 @@ async function deschidePR(titlu, corp, branch) {
   throw new Error(`PR-ul nu s-a deschis după 4 încercări: ${lastErr}`)
 }
 
+// ── ÎMBINAREA PROPRIE (Adrian, 10 aug: „după ce face PR trebuie să fie capabil
+// să DEA PR-ul [să-l îmbine]; dacă sunt probleme, să anunțe") ─────────────────
+// DOAR pe CI VERDE. Pe roșu/în curs NU îmbină (regula casei: nimic nu se publică
+// pe roșu; „phantom deploy"). La eșec de îmbinare (protecție de branch, drepturi,
+// rețea) NU crapă — raportează că n-a putut, ca ownerul să dea el merge-ul.
+async function imbinaPR(prUrl) {
+  const nr = String(prUrl || '').match(/\/pull\/(\d+)/)?.[1]
+  if (!nr) return { ok: false, motiv: 'număr PR necunoscut' }
+  const headers = { Authorization: `Bearer ${GHTOKEN}`, Accept: 'application/vnd.github+json', 'content-type': 'application/json' }
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/pulls/${nr}/merge`, {
+      method: 'PUT', headers, body: JSON.stringify({ merge_method: 'merge' }), signal: AbortSignal.timeout(60_000),
+    })
+    const b = await r.json().catch(() => null)
+    if (b?.merged) return { ok: true, nr }
+    return { ok: false, motiv: `GitHub ${r.status}: ${String(b?.message ?? '').slice(0, 160)}` }
+  } catch (e) {
+    return { ok: false, motiv: String(e?.message ?? e) }
+  }
+}
+
 // DOVADA INDEPENDENTĂ (Etapa 6): „Gata" nu mai e pe cuvântul lucrătorului —
 // după PR, CI-ul (workflow-ul pr-verify) re-rulează build+teste pe o MAȘINĂ
 // CURATĂ. PUR (fără rețea): din răspunsul GitHub /check-runs alege checkul
@@ -1003,6 +1049,9 @@ async function main() {
   }
   const claim = await api('/api/constructor/next')
   if (!claim?.job) return // coada goală sau pauza-autonomie — tăcere totală
+  // Avem un ordin — abia acum aducem setul COMPLET de unelte din sursa unică
+  // (dacă pică, rămâne lista de rezervă și tot poate lucra).
+  await incarcaUneltele()
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
@@ -1289,7 +1338,7 @@ async function main() {
     const linieCreier = `Creier folosit: Gemini (google-direct/${GEMINI_MODEL}, cheia ownerului) · tokeni: ${tokens}`
     const prUrl = await deschidePR(
       titlu,
-      `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, verificare build/teste în atelier). Merge-ul îl dă ownerul.`,
+      `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, verificare build/teste în atelier). Se îmbină singur DOAR pe CI verde; pe roșu rămâne deschis cu problemele raportate.`,
       branch,
     )
     log(`PR deschis: ${prUrl} (tokeni: ${tokens})`)
@@ -1308,9 +1357,18 @@ async function main() {
     }
     if (ci === 'roșu') {
       // CI a picat pe o mașină curată deși atelierul trecuse — NU declar „Gata"
-      // fals. Raportez eșec cu dovada, ca ownerul să nu dea merge pe roșu.
+      // fals și NU îmbin. Raportez eșec cu dovada (owner: „dacă sunt probleme
+      // să anunțe"), PR-ul rămâne deschis cu problema la vedere.
       await report('failed', { branch, prUrl, tokens, ci, log: `${logLines.join('\n')}\n\nVerificarea independentă (CI) a picat pe PR (commit ${headSha.slice(0, 7)}).` })
+    } else if (ci === 'verde') {
+      // CI VERDE → îmbin singur (owner, 10 aug: „să dea PR-ul"). Totul prin master.
+      // Pe eșec de îmbinare rămâne deschis pentru owner, nu se pierde nimic.
+      const m = await imbinaPR(prUrl)
+      if (m.ok) { log(`PR #${m.nr} îmbinat automat în master`); await report('done', { branch, prUrl, tokens, ci: 'verde · îmbinat automat' }) }
+      else { log(`n-am putut îmbina automat (${m.motiv}) — rămâne pentru owner`); await report('done', { branch, prUrl, tokens, ci: `verde · îmbinare eșuată: ${m.motiv}` }) }
     } else {
+      // CI 'în curs' — n-am confirmat verde în bugetul de timp; NU îmbin pe
+      // neverificat. Raportez gata cu PR-ul deschis; îmbinarea rămâne la owner.
       await report('done', { branch, prUrl, tokens, ci })
     }
   } catch (e) {

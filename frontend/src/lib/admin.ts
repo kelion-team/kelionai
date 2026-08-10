@@ -312,60 +312,9 @@ export async function emailLead(
   }
 }
 
-// Live visitor chat — owner side (inbox + reply).
-export interface VisitorConvo {
-  conv_id: string
-  last_text: string
-  last_at: string
-  total: number
-  visitor_msgs: number
-}
-export interface VisitorMsg {
-  id: number
-  role: string
-  text: string
-  created_at: string
-}
-
-// null = citirea a EȘUAT (auditul admin, 3 aug) — pot exista vizitatori care
-// scriu chiar atunci; tabul scrie eșecul, iar pollul de 5s reîncearcă singur.
-export async function fetchVisitorConvos(): Promise<VisitorConvo[] | null> {
-  try {
-    const r = await fetch('/api/admin/visitor-chats', { credentials: 'include' })
-    if (!r.ok) return null
-    return ((await r.json()) as { convos: VisitorConvo[] }).convos
-  } catch {
-    return null
-  }
-}
-
-export async function fetchVisitorChat(conv: string, after = 0): Promise<VisitorMsg[]> {
-  try {
-    const r = await fetch(
-      `/api/admin/visitor-chat?conv=${encodeURIComponent(conv)}&after=${after}`,
-      { credentials: 'include' },
-    )
-    if (!r.ok) return []
-    return ((await r.json()) as { messages: VisitorMsg[] }).messages
-  } catch {
-    return []
-  }
-}
-
-export async function replyVisitorChat(conv: string, text: string): Promise<number> {
-  try {
-    const r = await fetch('/api/admin/visitor-chat/reply', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conv, text }),
-    })
-    if (!r.ok) return 0
-    return ((await r.json()) as { id: number }).id
-  } catch {
-    return 0
-  }
-}
+// (Chat live vizitatori — SCOS 10 aug: tabul a fost eliminat din admin #959,
+// iar funcțiile lib rămăseseră cod mort. Curățate ca poarta „exporturi fără
+// utilizator" să fie verde.)
 
 // Admin action on a user: block / unblock / credit (amount) / delete.
 // Returns the refreshed activity so the caller can update the list in place.
@@ -553,38 +502,8 @@ export interface CapabilityGap {
 // `error` PĂSTRAT în tip (auditul admin, 3 aug): backend-ul răspunde 200 și
 // când creierul pică ({triaged:0, error:'brain_unavailable'|'bad_brain_json'})
 // — vechiul tip îl tăia și butonul tăcea, indiferent de rezultat.
-export async function runGapsTriage(): Promise<{ triaged: number; kept: number; closed: number; error?: string } | null> {
-  try {
-    const r = await fetch('/api/admin/gaps/triage', { method: 'POST', credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as { triaged: number; kept: number; closed: number; error?: string }
-  } catch {
-    return null
-  }
-}
-
-// THE FALLS AUDIT (Adrian, Jul 27: "here you must see all the audits and
-// all the falls") — the aggregate from /api/admin/audit, shown under gaps.
-export interface AuditReport {
-  health?: {
-    ok?: boolean
-    info?: Record<string, unknown>
-    probleme?: { id: string; grav: string; desc: string; reparabil: string }[]
-  }
-  serverErrors?: { t: string; level: number; msg: string }[]
-  clientErrors?: { created_at: string; user_email: string | null; message: string; n: string }[]
-  failedJobs?: { id: number; order: string; updated: string }[]
-}
-
-export async function fetchAudit(): Promise<AuditReport | null> {
-  try {
-    const r = await fetch('/api/admin/audit', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as AuditReport
-  } catch {
-    return null
-  }
-}
+// (runGapsTriage / fetchAudit + AuditReport — SCOS 10 aug: cod mort după
+// curățarea adminului #959; niciun apelant. `fetchGaps` de mai jos rămâne, e viu.)
 
 // null = citirea a EȘUAT (auditul admin, 3 aug): contractul tabului e „a
 // dispărut = auto-rezolvat", deci un [] fals pe 403/500 se citea ca „totul
@@ -600,22 +519,7 @@ export async function fetchGaps(all = false): Promise<CapabilityGap[] | null> {
   }
 }
 
-// Boolean MĂSURAT (auditul admin, 3 aug): vechiul void înghițea orice eroare,
-// iar „Rezolvat (arhivează)" scotea rândul de pe ecran chiar când POST-ul
-// picase — apăsarea se pierdea în tăcere și rândul reapărea la refresh.
-export async function resolveGap(id: number, resolved = true): Promise<boolean> {
-  try {
-    const r = await fetch('/api/admin/gaps/resolve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ id, resolved }),
-    })
-    return r.ok
-  } catch {
-    return false
-  }
-}
+// (resolveGap — SCOS 10 aug: cod mort după curățarea adminului #959, niciun apelant.)
 
 // Registered voiceprints (admin only).
 export interface VoiceprintRow {
@@ -755,24 +659,5 @@ export interface CodNeplatit {
   created_at: string
 }
 
-export interface CereriNeacoperiteData {
-  neatribuite: PlataNeatribuita[]
-  coduriNeplatite: CodNeplatit[]
-  gaps: CapabilityGap[]
-}
-
-export async function fetchCereriNeacoperite(): Promise<CereriNeacoperiteData | null> {
-  try {
-    const r = await fetch('/api/admin/plati', { credentials: 'include' })
-    if (!r.ok) return null
-    const j = await r.json()
-    const gaps = await fetchGaps(false)
-    return {
-      neatribuite: j.neatribuite ?? [],
-      coduriNeplatite: j.coduriNeplatite ?? [],
-      gaps: gaps ?? [],
-    }
-  } catch {
-    return null
-  }
-}
+// (CereriNeacoperiteData / fetchCereriNeacoperite — SCOS 10 aug: cod mort după
+// curățarea adminului #959, niciun apelant.)

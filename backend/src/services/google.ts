@@ -679,6 +679,28 @@ async function serperSearch(query: string, n: number): Promise<string | null> {
   }
 }
 
+/** Căutare STRUCTURATĂ (10 aug, Adaptarea CV): aceleași rezultate Google reale,
+ *  dar ca listă tipizată — pentru consumatori care afișează carduri (joburi),
+ *  nu pentru creier. `null` = nu pot căuta (cheie/cotă/rețea), NU listă goală —
+ *  cine cheamă spune cinstit „nu pot căuta acum", nu „0 rezultate". */
+export async function cautareStructurata(
+  query: string,
+  n: number,
+): Promise<{ title: string; link: string; snippet: string }[] | null> {
+  if (!config.serperKey || !query) return null
+  try {
+    const res = await serperPost('search', query, n)
+    if (!res.ok) return null
+    const j = (await res.json()) as SerperJson
+    return (j.organic ?? [])
+      .filter((o) => o.link)
+      .slice(0, Math.min(Math.max(n, 1), 12))
+      .map((o) => ({ title: o.title ?? '', link: o.link ?? '', snippet: o.snippet ?? '' }))
+  } catch {
+    return null
+  }
+}
+
 // YouTube videos through Serper's dedicated /videos endpoint — REAL Google video
 // results (title + link), no OpenRouter dependency. Same failure contract as
 // serperSearch: missing/invalid key, quota, non-ok or network → [] so

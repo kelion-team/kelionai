@@ -6,6 +6,7 @@ import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
 import { procentDinProgres } from '../services/progresOrdin.js'
+import { UNELTE_CONSTRUCTOR } from '../services/brainToolDefs.js'
 
 // ── THE CONSTRUCTOR — the "order → code → PR" pipeline (Adrian, Jul 27:
 // "Kelion must be able to create any software the admin asks for, any change,
@@ -102,6 +103,21 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const job = await retryBuildJob(id, req.body?.order)
     if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
     return reply.send({ ok: true, job })
+  })
+
+  // SURSA UNICĂ DE UNELTE pentru lucrător (Adrian, 10 aug: „dă-i TOT"). Worker-ul
+  // le cere la pornire și le lipește peste uneltele lui locale de fișiere. Așa
+  // constructorul are automat aceleași unelte de dev/ops ca creierul de chat,
+  // fără să le mai țină cineva la zi de mână. x-bridge-secret, ca /next.
+  app.get('/api/constructor/tool-defs', async (req, reply) => {
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ error: 'unauthorized' })
+    // Formatul OpenAI (function) — exact ce așteaptă agentul (Gemini/DeepSeek).
+    const tools = UNELTE_CONSTRUCTOR.map((t) => ({
+      type: 'function',
+      function: { name: t.name, description: t.description, parameters: t.input_schema },
+    }))
+    return reply.send({ tools })
   })
 
   // ── The VPS worker's endpoint (x-bridge-secret auth, like ops/pulse) ─────
