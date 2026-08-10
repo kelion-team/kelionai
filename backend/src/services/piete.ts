@@ -67,19 +67,73 @@ export async function dateStooq(s: string): Promise<DatePiata | { error: string 
   }
 }
 
-/** Datele REALE ale unui simbol: crypto → Binance intraday; altfel Stooq zilnic. */
+// ── YAHOO FINANCE — bursele clasice, CU INTRADAY (10 aug) ────────────────────
+// Măsurat: Stooq a pus protecție anti-bot (provocare JavaScript) — serverul
+// primea HTML în loc de CSV, deci TOATE simbolurile clasice picau („graficul gol"
+// din raportul ownerului). Yahoo v8/chart e gratuit, fără cheie, și dă lumânări
+// INTRADAY și pe acțiuni/indici — „ca o platformă reală". Stooq rămâne fallback.
+const YAHOO_SIMBOL: Record<string, string> = { '^SPX': '^GSPC', '^DAX': '^GDAXI' }
+const YAHOO_INTERVAL: Record<string, { i: string; range: string }> = {
+  '1m': { i: '1m', range: '5d' },
+  '15m': { i: '15m', range: '1mo' },
+  '1h': { i: '60m', range: '3mo' },
+  // Yahoo nu are 4h — onest, servim 1h (interval-ul REAL se scrie în răspuns).
+  '4h': { i: '60m', range: '3mo' },
+  '1d': { i: '1d', range: '1y' },
+}
+
+export async function dateYahoo(s: string, interval: string): Promise<DatePiata | { error: string }> {
+  const sym = YAHOO_SIMBOL[s] ?? s.replace(/\.US$/, '')
+  const { i, range } = YAHOO_INTERVAL[interval] ?? YAHOO_INTERVAL['1h']
+  const r = await fetch(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${i}&range=${range}`,
+    { signal: AbortSignal.timeout(8000), headers: { 'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) kelionai.app' } },
+  )
+  if (!r.ok) return { error: `Yahoo a refuzat „${s}" (HTTP ${r.status})` }
+  const j = (await r.json()) as {
+    chart?: { result?: { meta?: { regularMarketPrice?: number; chartPreviousClose?: number; previousClose?: number }; timestamp?: number[]; indicators?: { quote?: { open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]; volume?: (number | null)[] }[] } }[]; error?: { description?: string } | null } }
+  const rez = j.chart?.result?.[0]
+  if (!rez?.timestamp?.length) return { error: `Yahoo nu are date pentru „${s}"${j.chart?.error?.description ? `: ${j.chart.error.description}` : ''}` }
+  const q = rez.indicators?.quote?.[0]
+  const lum: Lumanare[] = []
+  for (let k = 0; k < rez.timestamp.length; k++) {
+    const c = q?.close?.[k]
+    if (c == null) continue // pauzele de tranzacționare vin ca null — nu-s lumânări
+    lum.push({ t: rez.timestamp[k] * 1000, deschis: q?.open?.[k] ?? c, maxim: q?.high?.[k] ?? c, minim: q?.low?.[k] ?? c, inchis: c, volum: q?.volume?.[k] ?? 0 })
+  }
+  if (lum.length < 2) return { error: `prea puține date Yahoo pentru „${s}"` }
+  const pret = rez.meta?.regularMarketPrice ?? lum[lum.length - 1].inchis
+  const anterior = rez.meta?.chartPreviousClose ?? rez.meta?.previousClose ?? lum[lum.length - 2].inchis
+  const intervalReal = i === '60m' ? '1h' : i
+  return {
+    simbol: s.toUpperCase(),
+    sursa: `Yahoo Finance (bursă, ${intervalReal === '1d' ? 'lumânări zilnice' : 'intraday'})`,
+    interval: intervalReal,
+    pret,
+    variatie24h: anterior ? Number((((pret - anterior) / anterior) * 100).toFixed(2)) : 0,
+    lumanari: lum.slice(-160),
+  }
+}
+
+/** Datele REALE ale unui simbol: crypto → Binance intraday; bursă → Yahoo
+ *  (intraday) cu Stooq ca rezervă zilnică. */
 export async function dateSimbol(simbolBrut: string, intervalBrut: string): Promise<DatePiata | { error: string }> {
   const s = simbolBrut.toUpperCase().replace(/[^A-Z0-9.^]/g, '').slice(0, 14)
   const interval = INTERVALE.has(intervalBrut) ? intervalBrut : '1h'
   if (!s) return { error: 'simbol gol' }
   try {
-    // Simbolurile cu punct sau ^ sunt bursiere (Stooq); restul încearcă întâi
-    // Binance, iar dacă crypto nu-l știe, cade cinstit pe Stooq.
-    if (/[.^]/.test(s)) return await dateStooq(s)
+    // Simbolurile cu punct sau ^ sunt bursiere; restul încearcă întâi Binance.
+    if (/[.^]/.test(s)) {
+      const y = await dateYahoo(s, interval)
+      if (!('error' in y)) return y
+      const st = await dateStooq(s)
+      return 'error' in st ? y : st
+    }
     const cripto = await dateBinance(s, interval)
     if (!('error' in cripto)) return cripto
-    // Nu-i crypto: încearcă Stooq gol (valute ca EURUSD, mărfuri) apoi ca
-    // acțiune americană (AAPL → AAPL.US).
+    // Nu-i crypto: Yahoo gol (valute/mărfuri/acțiuni fără sufix), apoi Stooq.
+    const yGol = await dateYahoo(s, interval)
+    if (!('error' in yGol)) return yGol
     const brut = await dateStooq(s)
     if (!('error' in brut)) return brut
     const bursa = await dateStooq(`${s}.US`)

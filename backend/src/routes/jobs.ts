@@ -148,12 +148,18 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     const agent = await gasesteAgentViu('documente')
     if (!agent) return reply.status(503).send({ error: 'agentul de documente nu e disponibil acum' })
 
+    // NIVEL INTERNAȚIONAL (ownerul, 10 aug): „paragrafat, organizat, bine
+    // structurat; identifici cuvintele-cheie din cerință și le regăsim și în CV
+    // sau echivalent". Pașii sunt scriși explicit — întâi cheile, apoi redactarea.
     const sarcina =
-      `Ai CV-ul de bază al candidatului și specificația COMPLETĂ a unui job. Rescrie CV-ul candidatului ADAPTAT pentru ACEST job:\n` +
-      `- inserează și scoate în față EXACT cerințele/atribuțiile jobului pe care candidatul le ARE deja în CV, reformulate cu terminologia anunțului (ca să treacă și filtrele ATS);\n` +
-      `- reordonează secțiunile ca cele mai relevante pentru job să fie sus;\n` +
-      `- CU CAP, nu din topor: NU îndesa liste de cuvinte-cheie, NU inventa experiență, ani, tehnologii sau realizări care nu apar în CV-ul original — doar reformulezi și evidențiezi ce se potrivește REAL;\n` +
-      `- păstrează structura de CV (contact, sumar, experiență, competențe, educație) și limba CV-ului original.\n` +
+      `Ai CV-ul de bază al candidatului și specificația COMPLETĂ a unui job. Lucrezi ca un redactor de CV-uri de nivel INTERNAȚIONAL.\n\n` +
+      `PASUL 1 — CUVINTELE-CHEIE: extrage din specificație cerințele și cuvintele-cheie pe care le caută recrutorul și filtrele ATS (competențe, tehnologii, responsabilități, certificări).\n\n` +
+      `PASUL 2 — REDACTAREA. Rescrie CV-ul candidatului ADAPTAT pentru ACEST job, la standard internațional:\n` +
+      `- STRUCTURĂ clară, cu secțiuni pe titluri MAJUSCULE, în ordinea: date de contact · SUMAR PROFESIONAL (3-4 rânduri, țintit pe job) · COMPETENȚE-CHEIE (listă cu puncte, cu termenii anunțului) · EXPERIENȚĂ PROFESIONALĂ (invers cronologic: rol, angajator, perioadă; sub fiecare, realizări pe puncte, începute cu verbe de acțiune; cifrele DOAR dacă există în CV-ul original) · EDUCAȚIE · CERTIFICĂRI/ALTELE (dacă există);\n` +
+      `- fiecare cuvânt-cheie din PASUL 1 pe care candidatul îl ARE (identic sau echivalent) TREBUIE să se regăsească în CV, cu terminologia anunțului — echivalentul din CV se reformulează pe termenul anunțului;\n` +
+      `- paragrafe scurte și puncte aerisite, zero ziduri de text; consecvent la timpuri verbale și format de date;\n` +
+      `- CU CAP, nu din topor: NU îndesa liste de cuvinte-cheie fără context, NU inventa experiență, ani, cifre, tehnologii sau realizări care nu apar în CV-ul original — doar reformulezi, reordonezi și evidențiezi ce se potrivește REAL;\n` +
+      `- păstrează limba CV-ului original.\n\n` +
       `RĂSPUNDE STRICT în formatul:\nJOB: <titlul jobului, scurt, un singur rând>\n---\n<CV-ul adaptat complet, gata de trimis>\n\n` +
       `CV DE BAZĂ:\n${cv}\n\nSPECIFICAȚIA JOBULUI:\n${spec.slice(0, 9000)}`
 

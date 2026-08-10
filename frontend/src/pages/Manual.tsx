@@ -75,9 +75,40 @@ function inFile(d: ManualDoc): Fila[] {
   return file
 }
 
+/** Căutare fără diacritice: „cautare" găsește „căutare" și invers. */
+function faraDiacritice(s: string): string {
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+}
+
+/** Toate potrivirile unei interogări în filele cărții: fila + un fragment. */
+function cautaInFile(file: Fila[], q: string): { idx: number; titlu: string; fragment: string }[] {
+  const nq = faraDiacritice(q.trim())
+  if (!nq) return []
+  const out: { idx: number; titlu: string; fragment: string }[] = []
+  file.forEach((f, idx) => {
+    const texte: string[] =
+      f.fel === 'coperta' ? [f.titlu, f.subtitlu, ...f.cuprins]
+      : f.fel === 'proza' ? [f.titlu, ...f.paragrafe]
+      : f.fel === 'intro' ? [f.titlu, f.text]
+      : f.fel === 'flux' ? [f.titlu, ...f.pasi.flatMap((p) => [p.label, p.note])]
+      : [f.titlu, ...f.randuri.flatMap((r) => [r.what, r.say])]
+    for (const t of texte) {
+      const poz = faraDiacritice(t).indexOf(nq)
+      if (poz >= 0) {
+        const start = Math.max(0, poz - 40)
+        out.push({ idx, titlu: f.titlu, fragment: (start > 0 ? '…' : '') + t.slice(start, poz + nq.length + 60) })
+        break // o potrivire pe filă ajunge în listă
+      }
+    }
+  })
+  return out
+}
+
 export default function Manual(): React.JSX.Element {
   const dinUrl = new URLSearchParams(window.location.search).get('lang') ?? 'en'
   const [lang, setLang] = useState(dinUrl)
+  // CĂUTAREA ÎN MANUAL (10 aug, ownerul: „să se poată căuta în el cu search").
+  const [cauta, setCauta] = useState('')
   const [doc, setDoc] = useState<ManualDoc | null>(null)
   const [traduce, setTraduce] = useState(false)
   const [fila, setFila] = useState(0)
@@ -124,8 +155,12 @@ export default function Manual(): React.JSX.Element {
   )
 
   // Arrows + space: a book is read from the keyboard, not only the mouse.
+  // NU și când omul TASTEAZĂ (10 aug — căutarea): un spațiu scris în câmpul de
+  // search nu are voie să întoarcă pagina.
   useEffect(() => {
     const pe = (e: KeyboardEvent): void => {
+      const tinta = e.target as HTMLElement | null
+      if (tinta && ['INPUT', 'SELECT', 'TEXTAREA'].includes(tinta.tagName)) return
       if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') muta(1)
       else if (e.key === 'ArrowLeft' || e.key === 'PageUp') muta(-1)
     }
@@ -165,6 +200,15 @@ export default function Manual(): React.JSX.Element {
           <BackLink />
           <a className="login-brand" href="/">Kelionai</a>
           <div className="manual-actions">
+            {/* Search — sare direct la fila care conține textul căutat. */}
+            <input
+              type="search"
+              value={cauta}
+              onChange={(e) => setCauta(e.target.value)}
+              placeholder="Search…"
+              aria-label="Search the manual"
+              style={{ maxWidth: 160 }}
+            />
             <label className="manual-lang">
               <span>Language</span>
               <select value={lang} onChange={(e) => setLang(e.target.value)}>
@@ -191,7 +235,36 @@ export default function Manual(): React.JSX.Element {
 
         {!doc && <p className="chat-hint">…</p>}
 
-        {doc && (
+        {/* REZULTATELE CĂUTĂRII (10 aug): cât timp e text în search, lista de
+            potriviri ia locul cărții; click pe un rezultat = salt la fila lui. */}
+        {doc && cauta.trim() && (
+          <div className="manual-book" lang={doc.lang}>
+            <div className="manual-leaf">
+              {(() => {
+                const rezultate = cautaInFile(file, cauta)
+                if (rezultate.length === 0) return <p className="chat-hint">0 — no matches</p>
+                return (
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {rezultate.map((r) => (
+                      <li key={r.idx}>
+                        <button
+                          type="button"
+                          style={{ background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', padding: 0, font: 'inherit', color: 'inherit' }}
+                          onClick={() => { setFila(r.idx); setCauta('') }}
+                        >
+                          <strong>{r.titlu}</strong>
+                          <br />
+                          <span style={{ opacity: 0.75, fontSize: '0.9em' }}>{r.fragment}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              })()}
+            </div>
+          </div>
+        )}
+        {doc && !cauta.trim() && (
           <>
             <div className="manual-book" lang={doc.lang} dir={rtl ? 'rtl' : 'ltr'}>
               <div className={`manual-leaf ${intoarce ? `turn-${intoarce}` : ''}`} key={`${doc.lang}-${fila}`}>

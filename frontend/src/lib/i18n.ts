@@ -67,6 +67,36 @@ export interface Strings {
   // THE THEME TOGGLE (Aug 2 — the lighter background): top-bar button that
   // flips between the new light default and the original dark identity.
   themeToDark: string
+  langPickTitle: string
+  manualLabel: string
+  cvTitle: string
+  cvBaseTitle: string
+  cvBaseHint: string
+  cvUpload: string
+  cvUploadBusy: string
+  cvBasePlaceholder: string
+  cvSave: string
+  cvSaveBusy: string
+  cvSaved: string
+  cvJobTitle: string
+  cvYourName: string
+  cvNamePlaceholder: string
+  cvJobSpec: string
+  cvJobSpecPlaceholder: string
+  cvAdaptBtn: string
+  cvAdaptBusy: string
+  cvResultTitle: string
+  cvResultPlaceholder: string
+  cvDownload: string
+  cvCopy: string
+  cvCopied: string
+  cvDone: string
+  cvErrLoad: string
+  cvErrSave: string
+  cvErrRead: string
+  cvErrNet: string
+  cvErrNeedCv: string
+  cvErrNeedSpec: string
   themeToLight: string
   wsClose: string
   wsCloseAll: string
@@ -270,6 +300,36 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     wsFileNoPreview: "This file type can't be previewed in the page — you can download it.",
     wsDownloadFile: 'Download the file ↓',
     themeToDark: 'Switch to the dark theme',
+    langPickTitle: 'Language Kelion speaks to you',
+    manualLabel: 'Manual',
+    cvTitle: 'CV Tailoring',
+    cvBaseTitle: '1. Your base CV',
+    cvBaseHint: 'Write it here or upload a file (text, PDF or photo). It is saved for next time.',
+    cvUpload: '\ud83d\udcce Upload CV (text / PDF / photo)',
+    cvUploadBusy: 'Reading the file...',
+    cvBasePlaceholder: 'Write or upload your base CV here...',
+    cvSave: 'Save base CV',
+    cvSaveBusy: 'Saving...',
+    cvSaved: 'Your base CV was saved.',
+    cvJobTitle: '2. The job (you find it)',
+    cvYourName: 'Your name (for the file):',
+    cvNamePlaceholder: 'e.g. John Smith',
+    cvJobSpec: 'Job specification (paste the full ad):',
+    cvJobSpecPlaceholder: 'Paste the title + the full description/requirements of the job you found...',
+    cvAdaptBtn: 'Tailor & Preview',
+    cvAdaptBusy: 'Tailoring your CV...',
+    cvResultTitle: '3. Tailored CV',
+    cvResultPlaceholder: 'Your CV tailored to the job requirements appears here. Preview it, then download.',
+    cvDownload: '\u2b07 Download',
+    cvCopy: 'Copy',
+    cvCopied: 'The tailored CV was copied.',
+    cvDone: 'Done — preview and download.',
+    cvErrLoad: 'Could not load your saved CV.',
+    cvErrSave: 'The CV could not be saved.',
+    cvErrRead: 'Could not read the file.',
+    cvErrNet: 'A network error occurred.',
+    cvErrNeedCv: 'Write or upload your base CV first.',
+    cvErrNeedSpec: 'Paste the job specification (the ad).',
     themeToLight: 'Switch to the light theme',
     wsClose: 'Close',
     wsCloseAll: 'Close everything',
@@ -437,6 +497,36 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     wsFileNoPreview: 'Acest tip de fișier nu se poate previzualiza în pagină — îl poți descărca.',
     wsDownloadFile: 'Descarcă fișierul ↓',
     themeToDark: 'Comută pe tema întunecată',
+    langPickTitle: 'Limba în care îți vorbește Kelion',
+    manualLabel: 'Manual',
+    cvTitle: 'Adaptare CV',
+    cvBaseTitle: '1. CV-ul tău de bază',
+    cvBaseHint: 'Scrie-l aici sau încarcă un fișier (text, PDF sau poză). Se salvează și rămâne pentru data viitoare.',
+    cvUpload: '\ud83d\udcce Încarcă CV (text / PDF / poză)',
+    cvUploadBusy: 'Se citește fișierul...',
+    cvBasePlaceholder: 'Scrie sau încarcă CV-ul tău de bază aici...',
+    cvSave: 'Salvează CV-ul de bază',
+    cvSaveBusy: 'Se salvează...',
+    cvSaved: 'CV-ul de bază a fost salvat.',
+    cvJobTitle: '2. Jobul (îl cauți tu)',
+    cvYourName: 'Numele tău (pentru fișier):',
+    cvNamePlaceholder: 'ex: Adrian Popescu',
+    cvJobSpec: 'Specificația jobului (lipește tot anunțul):',
+    cvJobSpecPlaceholder: 'Lipește aici titlul + toată descrierea/cerințele jobului găsit de tine...',
+    cvAdaptBtn: 'Adaptează & Previzualizează',
+    cvAdaptBusy: 'Se adaptează CV-ul...',
+    cvResultTitle: '3. CV adaptat',
+    cvResultPlaceholder: 'CV-ul adaptat pe cerințele jobului apare aici. Îl previzualizezi, apoi îl descarci.',
+    cvDownload: '\u2b07 Descarcă',
+    cvCopy: 'Copiază',
+    cvCopied: 'CV-ul adaptat a fost copiat.',
+    cvDone: 'Gata — previzualizează și descarcă.',
+    cvErrLoad: 'Nu s-a putut încărca CV-ul salvat.',
+    cvErrSave: 'Nu s-a putut salva CV-ul.',
+    cvErrRead: 'Nu s-a putut citi fișierul.',
+    cvErrNet: 'A apărut o eroare de rețea.',
+    cvErrNeedCv: 'Scrie sau încarcă întâi CV-ul de bază.',
+    cvErrNeedSpec: 'Lipește specificația (anunțul) jobului.',
     themeToLight: 'Comută pe tema luminoasă',
     wsClose: 'Închide',
     wsCloseAll: 'Închide tot',

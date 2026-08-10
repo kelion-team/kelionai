@@ -32,7 +32,8 @@ import {
   type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
+import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii, saveSpeechLang } from '../lib/prefs'
+import { LANGS } from '../lib/languages'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
@@ -469,6 +470,11 @@ export default function Stage({ user }: { user: User }) {
   // language identification the existing procedure applies"). No role forcing,
   // no browser/account locale: the local mirror of the server-IDENTIFIED language
   // (written by the {lang} frame → mirrorLang), otherwise English.
+  // OGLINDA E A CONTULUI, NU A BROWSERULUI (10 aug — „userul a intrat direct pe
+  // ro, de ce?"): un cont NOU pe un browser folosit înainte în română moștenea
+  // „ro" din localStorage. Revendicarea rulează ÎNAINTE de prima citire — alt
+  // cont => oglinda se aruncă, aplicația pornește pe EN până i se determină limba.
+  revendicaOglindaLimbii(user.email)
   const lang = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
@@ -1358,10 +1364,10 @@ export default function Stage({ user }: { user: User }) {
           type="button"
           className="ghost"
           onClick={() => setCvAdaptationOpen(true)}
-          title="Adaptare CV după link/descriere job (LinkedIn, Indeed, CV Library)"
+          title={t.cvTitle}
           style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#4dabf7', fontWeight: 'bold' }}
         >
-          📄 Adaptare CV
+          📄 {t.cvTitle}
         </button>
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,
@@ -1402,6 +1408,29 @@ export default function Stage({ user }: { user: User }) {
               {t.connectGoogle}
             </button>
           )}
+          {/* SELECTORUL DE LIMBĂ ÎN BARĂ (10 aug, ownerul: „buton de selectare
+              limba direct pe bara de lucru sus"): aceeași mecanică precisă ca în
+              Client Settings (saveSpeechLang = PUT /api/prefs + oglinda locală),
+              apoi reîncărcare — toată interfața comută pe loc, fără drum prin
+              setări. Valoarea arătată = limba UI curentă. */}
+          <select
+            className="ghost"
+            value={LANGS.find((l) => l.code.toLowerCase().startsWith(lang)) ? LANGS.find((l) => l.code.toLowerCase().startsWith(lang))!.code : 'en-US'}
+            onChange={(e) => {
+              void saveSpeechLang(e.target.value).then((ok) => {
+                if (ok) window.location.reload()
+              })
+            }}
+            title={t.langPickTitle}
+            aria-label={t.langPickTitle}
+            style={{ maxWidth: 110 }}
+          >
+            {LANGS.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             className="ghost"
@@ -1411,6 +1440,12 @@ export default function Stage({ user }: { user: User }) {
           >
             {theme === 'light' ? '☾' : '☀'}
           </button>
+          {/* MANUALUL, VIZIBIL ȘI DUPĂ LOGARE (10 aug, ownerul: „nu se afișează
+              manualul în engleză sau în limba selectată"): până azi doar pagina
+              de start nelogată avea butonul. Link-ul cară limba UI curentă. */}
+          <a className="ghost" href={`/manual?lang=${lang}`} target="_blank" rel="noreferrer">
+            {t.manualLabel}
+          </a>
           <button type="button" className="ghost" onClick={() => setContactOpen(true)}>
             {t.contactLabel}
           </button>
