@@ -23,7 +23,7 @@ import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, citesteSold, debitWallet } from '../db.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -280,6 +280,29 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
       return
     }
+    // ── POARTA DE CREDIT PE VOCE (10 aug — gaura „−10.280 credite"): chatul
+    // scris avea paywall, sesiunea LIVE nu verifica NICIODATĂ soldul — un user
+    // nou cu Google vorbea pe contul ownerului la nesfârșit, adânc pe minus.
+    // Aceeași politică precisă ca la scris (chat.ts): adminul e scutit; fără
+    // link de plată configurat, aplicația rămâne liberă; soldul NECITIT lasă
+    // trecerea (eroarea noastră nu se plătește din buzunarul omului) — dar un
+    // sold CITIT ≤ 0 închide sesiunea. Aceeași funcție bate și la deschidere,
+    // și pe ceasul de 60s (o sesiune pornită cu credit se OPREȘTE la golire).
+    const inchideDacaFaraCredit = (laDeschidere: boolean): void => {
+      if (!config.revolut.payLink || user.role === 'admin') return
+      void citesteSold(user.email).then((s) => {
+        if (s.citit && s.sold <= 0) {
+          try {
+            socket.close(1008, 'fara_credit')
+          } catch {
+            /* deja închis */
+          }
+        } else if (laDeschidere && !s.citit) {
+          app.log.error(`[VOCE][paywall] sold NECITIT la deschidere, las trecerea: ${s.motiv}`)
+        }
+      })
+    }
+    inchideDacaFaraCredit(true)
 
     // Pulsul numără sesiunile REAL (audit 9 aug: contoarele existau din #947,
     // dar nimeni nu le incrementa — panoul anti-minciună raporta permanent 0).
@@ -408,9 +431,21 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       octetiIn = 0
       octetiOut = 0
       cadreTrimise = 0
-      if (usd > 0) void recordCost(user.email, 'gemini', usd)
+      if (usd > 0) {
+        void recordCost(user.email, 'gemini', usd)
+        // DEBITAREA CLIENTULUI (10 aug, gaura „−10.280"): costul vocii live se
+        // scădea doar în jurnal, nu și din portofelul clientului — vocea era
+        // gratis pentru el, pe factura ownerului. Aceeași regulă ca la scris:
+        // clientul plătește din credit; ownerul nu se taxează singur.
+        if (user.role !== 'admin') void debitWallet(user.email, usd, 'voce-live')
+      }
     }
-    const ceasCost = setInterval(varsaCostul, 60_000)
+    const ceasCost = setInterval(() => {
+      varsaCostul()
+      // OPRIREA PE SOLD GOLIT (10 aug): aceeași poartă ca la deschidere, pe
+      // ritmul de 60s al vărsării costului — altfel „−10.280".
+      inchideDacaFaraCredit(false)
+    }, 60_000)
 
     // ── ANUNȚUL „CÂND E GATA" (8 aug, ownerul: „să anunțe când e gata") ──────
     // Ordinele de constructor pornite PRIN UȘĂ din sesiunea asta se țin minte
