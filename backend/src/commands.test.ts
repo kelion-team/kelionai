@@ -37,6 +37,11 @@ describe('commands — camera', () => {
     expect(interpretDeviceCommand('închide webcam')).toEqual({ camera: 'off' })
     expect(interpretDeviceCommand('pornește camera video')).toEqual({ camera: 'on' })
   })
+  it('prinde și alte moduri de adresare (video, stream, feed, transmisie)', () => {
+    expect(interpretDeviceCommand('pornește stream-ul')).toEqual({ camera: 'on' })
+    expect(interpretDeviceCommand('comută pe spate')).toEqual({ camera: 'back' })
+    expect(interpretDeviceCommand('pune pe față')).toEqual({ camera: 'front' })
+  })
 })
 
 describe('commands — monitorul (doar pe tab-uri chiar deschise)', () => {
