@@ -18,6 +18,7 @@ import {
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import { turaAdresata } from '../services/numeStrigat.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
+import { interpretDeviceCommand, deviceAck } from '../services/commands.js'
 import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
@@ -792,6 +793,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           rostireCurenta += text
           bufUser += text
           trimite({ type: 'user', text, final })
+          if (final) {
+            const deviceCmd = interpretDeviceCommand(rostireCurenta)
+            if (deviceCmd) {
+              trimite({ type: 'control', frame: { device: deviceCmd } })
+            }
+          }
           // Verdict amânat + transcrierea a sosit → judecăm ACUM și vărsăm.
           if (verdictTura === null && cadreInAsteptare.length) {
             verdictTura = turaAdresataAcum()
