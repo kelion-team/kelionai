@@ -10,6 +10,26 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **10 aug 2026 (dimineața/prânz) — ADAPTARE CV + CONSTRUCTORUL PE VERDE REAL.**
+> (1) **Filtrul de salariu chiar filtrează** + ordonare permanentă (relevanță →
+> salariu) — #977, LIVE pe `8af1907` (răspunsul „nu se aplică filtrele").
+> (2) **Constructorul rulează în atelier TOATE cele 7 porți** ca `porti-pr.sh`
+> (adăugate: jscpd, exporturi, sintaxă, boot pe dist) — #978, master `884073c`.
+> Cauza reală a PR-ului roșu #973 (ordin #173, „canal de ordine"): atelierul
+> verifica doar build+teste și sărea celelalte patru porți; #973 e ÎNCHIS,
+> NEMERGE-uit — codul rupt n-a atins niciodată producția. De-acum constructorul
+> repară în atelier ÎNAINTE de PR, nu mai deschide PR-uri care pică pe poartă.
+> (3) **Câmp „Locație" în căutarea de joburi** (ownerul: „lipsește unde editezi
+> locația") — intră în interogarea Serper ȘI în ordonarea de bază ca al treilea
+> filtru (relevanță → salariu → potrivire locație). Distanța = potrivire de
+> locație reală (anunțul menționează zona), NU km inventați fără coordonate.
+> **RÂND NOU (deschis):** „kelion să vadă când pun mouse-ul exact peste orice
+> poziție din graficul de tranzacționare" — arhitectura e mapată (iframe-ul
+> `tranzactii.ts` are deja `cuCrosshair` cu punctul OHLC de sub cursor; se trece
+> prin postMessage → `StareTranzactii` → `body.tranzactii` → mentorul din chat),
+> de implementat. **RÂND NOU:** mutarea pastilelor de credit AI (Serper/Gemini)
+> SUS în admin (răspuns AskUserQuestion), încă neînceput.
+
 > **9 aug 2026 (după-amiaza) — 7 PR-uri MERGED + VERIFICATE LIVE (`c8ebed3` =
 > master, health 200):** #926 trezirea pe nume în persona live; #927 memoria
 > unificată voce↔scris + economia pe scris (text-in→text-out); #928 constructorul
