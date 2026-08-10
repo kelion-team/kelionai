@@ -794,9 +794,16 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           bufUser += text
           trimite({ type: 'user', text, final })
           if (final) {
-            const deviceCmd = interpretDeviceCommand(rostireCurenta)
-            if (deviceCmd) {
-              trimite({ type: 'control', frame: { device: deviceCmd } })
+            // Comanda de dispozitiv DOAR pe tură ADRESATĂ lui Kelion, în limba
+            // cerută (Adrian, 10 aug — bug „prăjit la chat"): o frază ambientală
+            // („închide camera", altcineva din încăpere) comuta camera userului,
+            // deși audio-ul acelei ture e oricum suprimat de gardul de adresare.
+            // Aceeași gardă și aici. turaAdresataAcum() e pură (fără efecte).
+            if (turaAdresataAcum() && verdictLimba !== false) {
+              const deviceCmd = interpretDeviceCommand(rostireCurenta)
+              if (deviceCmd) {
+                trimite({ type: 'control', frame: { device: deviceCmd } })
+              }
             }
           }
           // Verdict amânat + transcrierea a sosit → judecăm ACUM și vărsăm.

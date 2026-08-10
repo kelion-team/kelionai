@@ -67,7 +67,20 @@ function taskKindFromText(msg: string): string | null {
 // questions like "ce vezi pe cameră?" still reach the brain.
 function cameraOp(raw: string): DeviceCommand['camera'] | null {
   const m = raw.toLowerCase()
-  if (!/\bcamer/.test(m) && !/\bwebcam/.test(m)) return null
+  const areWebcam = /\bwebcam/.test(m)
+  if (!areWebcam && !/\bcamer/.test(m)) return null
+  // „cameră" în română înseamnă ȘI „încăpere" (Adrian, 10 aug — bug „prăjit la
+  // chat"): fraze firești despre o ÎNCĂPERE cu un verb imperativ deturnau tura
+  // („stinge lumina din cameră", „închide ușa camerei", „deschide fereastra din
+  // cameră") — comutau camera video ȘI săreau peste creier. Refuzăm când în frază
+  // apare un obiect tipic de încăpere, DACĂ nu e numit explicit dispozitivul
+  // („webcam" sau „cameră video/foto/web").
+  const dispozitivClar = areWebcam || /\bcamer\w*\s+(video|foto|web)\b/.test(m)
+  if (
+    !dispozitivClar &&
+    /\b(lumin|bec|u[șs][aăi]|fereastr|geam|perete|pere[țt]|tavan|podea|priz|întrerup|intrerup|termostat|calorifer|radiator|draperi|jaluz|televizor|frigider|dulap|mobil)/u.test(m)
+  )
+    return null
   const has = (re: RegExp): boolean => re.test(m)
   if (has(/(?<![\p{L}\p{N}])(închide|inchide|opre[sșț]te|opreste|stinge|dezactiv|close|turn off|disconnect)/iu))
     return 'off'
