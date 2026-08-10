@@ -584,30 +584,6 @@ const CONSTRUCTOR_COMMAND_TOOL: Tool = {
 // schema + direct SQL on the app's Postgres. Admin only.
 // db_tables / db_query — definitions in services/brainToolDefs.ts (shared source).
 // request_repair reborn: the order is WRITTEN (work_orders) + an email signal;
-
-// Canalul de ordine de la mine, kelion, kreier, constructor, deploy
-fastify.post('/api/admin/canal-ordine', async (request: any, reply: any) => {
-  const { ordin } = request.body as { ordin: string };
-  if (!ordin) {
-    return reply.status(400).send({ error: 'Ordinul lipsește.' });
-  }
-  try {
-    const id = 'ord-' + Math.random().toString(36).substring(2, 11);
-    await getPool().query(
-      'INSERT INTO work_orders (id, text, status, created_at) VALUES ($1, $2, $3, NOW())',
-      [id, ordin, 'pending']
-    );
-    console.log(`[Canal Ordine] Ordin inregistrat: ${id} - ${ordin}`);
-    return reply.send({
-      success: true,
-      message: 'Ordinul a fost preluat de Kelion, procesat de Kreier, trimis la Constructor și programat pentru Deploy.',
-      ordinId: id,
-      status: 'pending_constructor'
-    });
-  } catch (error: any) {
-    return reply.status(500).send({ error: error.message });
-  }
-});
 // execution is done by a Claude session started by the owner — not a permanent LLM.
 // request_repair — definition moved to services/brainToolDefs.ts (see the note above).
 // read_source / search_source — definitions in services/brainToolDefs.ts (shared
