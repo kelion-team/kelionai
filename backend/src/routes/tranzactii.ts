@@ -177,25 +177,21 @@ function paginaTranzactii(): string {
 <div><span class="pret" id="p">—</span> <span id="var">—</span></div>
 <div id="viu" class="nota">—</div>
 <div id="graf"><div id="leg"></div></div>
-<h2 style="font-size:1rem;margin:.8rem 0 .3rem">💬 Chat cu Kelion — mentorul de tranzacționare (DOAR pe date reale)</h2>
-<p class="nota">Întreabă cum funcționează, când/cum intri sau ieși (niveluri concrete, desenate pe grafic), sau cere-i să caute pe net algoritmul complet al unei strategii — vine cu sursa și data. Răspunsuri SCURTE; discuția se salvează în memoria lui separată, doar a ta.</p>
-<div id="jurnal" style="background:#111830;border-radius:.6rem;padding:.8rem;max-height:300px;overflow-y:auto;display:none"></div>
-<div style="display:flex;gap:.4rem;margin:.4rem 0">
- <input id="ci" style="flex:1" placeholder="ex: cum și când intru pe BTCUSDT acum? · caută algoritmul complet de mean-reversion">
- <button id="ct">Trimite</button>
- <button id="cv" class="gri" title="Vocea lui Kelion pe răspunsuri. Apasă ca să o stingi/aprinzi.">🔊</button>
-</div>
+<!-- CHATUL DE AICI A FOST SCOS (10 aug, ownerul: „asta nu e folositoare —
+     scoate-o; trebuie chatul real, conștient... îl elimini de aici și îl lași
+     acolo complet"): discuția cu Kelion despre tranzacționare se poartă în
+     chatul REAL al aplicației (voce sau scris) — același creier, toate
+     uneltele; pagina rămâne graficul + analiza cu memoria ei. -->
 <pre id="out">Apasă „Analiza lui Kelion" pentru analiza completă (regim, niveluri, scenarii cu invalidare, riscul întâi) — nivelurile apar PE grafic.</pre>
 </div>
 <script>
  var s=document.getElementById('s'), p=document.getElementById('p'), va=document.getElementById('var'), out=document.getElementById('out'), viu=document.getElementById('viu');
  var an=document.getElementById('an'), v=document.getElementById('v');
- var jurnal=document.getElementById('jurnal'), ci=document.getElementById('ci'), ct=document.getElementById('ct'), cv=document.getElementById('cv');
  var interval='1h', ws=null, ceas=null, pretVechi=0, simbolCurent='', primaIncarcare=true, reconectDelay=1000, primaTranzactie=false;
  // Prețul REAL curent, ca NUMĂR — dezambiguizează „X.YYY" în parserele de
  // niveluri (audit 9 aug: 0.123 pe DOGE devenea 123 pe grafic).
  var pretCurentNr=null;
- var fir=[], liniile=[], cuVoce=true, gura=null;
+ var liniile=[];
 
  // IEȘIREA (9 aug, ownerul: „nu are buton ieșire"): pe pagina de sine
  // stătătoare te întoarce la Kelion; în tabul din aplicație butonul dispare —
@@ -374,163 +370,7 @@ function paginaTranzactii(): string {
    an.disabled=false;
  };
 
- // CHATUL (9 aug): ancorat în simbolul+intervalul de pe ecran; nivelurile din
- // răspuns se desenează pe grafic; răspunsul se și SPUNE (gura Chirp).
- cv.onclick=function(){ cuVoce=!cuVoce; cv.textContent=cuVoce?'🔊':'🔇'; if(!cuVoce){ coadaAudio=[]; if(gura){ try{gura.pause();}catch(e){} } curataGura(false); } };
- // VOCEA VINE DIN CREIERUL UNIC (9 aug, ownerul: „modelul de chat cerut peste
- // tot" + „în chat audio nu merge"): chatul de aici NU mai are alt motor — e
- // ACELAȘI /api/chat ca peste tot (aceeași persona, același model, aceleași
- // unelte, aceeași gură Chirp). Framele {audio} din flux se redau la coadă.
- var coadaAudio=[], urlCurent=null;
- function curataGura(maiDeparte){
-   if(urlCurent){ try{URL.revokeObjectURL(urlCurent);}catch(e){} urlCurent=null; }
-   gura=null;
-   if(maiDeparte) redaUrmatorul();
- }
- function redaUrmatorul(){
-   if(!cuVoce||gura||!coadaAudio.length) return;
-   var b64=coadaAudio.shift();
-   try{
-     var oct=atob(b64), buf=new Uint8Array(oct.length);
-     for(var i=0;i<oct.length;i++){ buf[i]=oct.charCodeAt(i); }
-     urlCurent=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
-     gura=new Audio(urlCurent);
-     gura.onended=function(){ curataGura(true); };
-     gura.onerror=function(){ curataGura(true); }; // un frame stricat nu omoara vocea
-     void gura.play().catch(function(){ coadaAudio=[]; curataGura(false); cv.title='Vocea e blocată de browser — apasă 🔊 și trimite iar.'; });
-   }catch(e){ curataGura(true); }
- }
- function scrieRand(cine,text){
-   jurnal.style.display='block';
-   var r=document.createElement('div');
-   r.style.margin='.35rem 0'; r.style.whiteSpace='pre-wrap'; r.style.wordBreak='break-word';
-   r.style.color = cine==='kelion' ? '#e8ecf6' : '#8fb7ff';
-   r.textContent=(cine==='kelion'?'Kelion: ':'Tu: ')+text;
-   jurnal.appendChild(r); jurnal.scrollTop=jurnal.scrollHeight;
-   return r;
- }
- // NIVELURI: aceeași extragere ca pe server (rândul NIVELURI: nume=valoare; …)
- // Audit 9 aug, in AMBELE oglinzi: perechile se taie INTAI, iar "X.YYY" se
- // dezambiguizeaza cu pretul REAL de pe ecran (0.123 pe DOGE e zecimal, nu 123).
- function normalizeazaNumarText(brut,pretC){
-   var t=String(brut||'').trim().replace(/\\s+/g,'').replace(/[.,]+$/,'');
-   if(!t) return null;
-   var s2=t;
-   if(/^\\d{1,3}([.,]\\d{3})+([.,]\\d{1,2})?$/.test(t)){
-     var m=t.match(/^(.*?)([.,](\\d{1,2}))?$/);
-     var intreg=(m&&m[1]?m[1]:t).replace(/[.,]/g,'');
-     s2=(m&&m[3])?(intreg+'.'+m[3]):intreg;
-     var unGrup=/^(\\d{1,3})[.,](\\d{3})$/.exec(t);
-     if(unGrup){
-       var caMii=Number(s2), caZec=Number(unGrup[1]+'.'+unGrup[2]);
-       if(unGrup[1]==='0') return caZec>0?caZec:null;
-       if(typeof pretC==='number'&&isFinite(pretC)&&pretC>0){
-         var dM=Math.abs(Math.log(caMii/pretC)), dZ=Math.abs(Math.log(caZec/pretC));
-         return dZ<dM?caZec:caMii;
-       }
-       if(unGrup[1].length===1) return caZec;
-     }
-   } else { s2=t.replace(',','.'); }
-   var v=Number(s2);
-   return (isFinite(v)&&v>0)?v:null;
- }
- function extrageNiveluriText(text,pretC){
-   var curat=String(text||'').replace(/[*_\u0060]/g,'');
-   var aparitii=curat.match(/NIVELURI\\s*:?\\s*[^\\n]*/gi)||[];
-   for(var a=aparitii.length-1;a>=0;a--){
-     var out=[], segmente=aparitii[a].split(/;|,(?=\\s*[^\\d\\s.,])/);
-     for(var sg=0;sg<segmente.length&&out.length<8;sg++){
-       var pm=/([a-z\u0103\u00e2\u00ee\u0219\u021b\u015f\u0163_ -]+?)\\s*=\\s*[~\u2248$\u20ac\u00a3]?\\s*([0-9][0-9.,\\s]*)/i.exec(segmente[sg]);
-       if(!pm) continue;
-       var val=normalizeazaNumarText(pm[2],pretC);
-       if(val!==null) out.push({nume:pm[1].trim().toLowerCase(),valoare:val});
-     }
-     if(out.length) return out;
-   }
-   return [];
- }
- async function trimiteChat(){
-   var q=ci.value.trim(); if(!q) return;
-   var simbolLaTrimitere=simbolCurent; // capturat ACUM — desenul se judecă la sosire
-   ci.value=''; ct.disabled=true; ci.disabled=true;
-   scrieRand('eu',q); fir.push({cine:'eu',text:q});
-   var asteapta=scrieRand('kelion','…');
-   // ANCORA DE PIAȚĂ pe CREIERUL UNIC: întrebarea pleacă cu datele reale de pe
-   // ecran în față — Kelion (același de peste tot) răspunde pe ele, scurt, cu
-   // rândul NIVELURI: la final (se desenează pe grafic).
-   var ancora='[CENTRUL DE TRANZACȚIONARE — pe ecran acum: '+simbolCurent+' preț '+p.textContent+', interval '+interval+
-     '. Răspunde ca mentor de trading cu riscul întâi, SCURT (max 10 rânduri), DOAR pe cifre reale (de pe ecran sau din surse de pe net cu link și dată). '+
-     'La final, pe rând separat, scrie exact: NIVELURI: intrare=…; stop=…; tinta=…; suport=…; rezistenta=… — doar cele care există; altfel NIVELURI: -] ';
-   var mesaje=[];
-   var coada=fir.slice(-8);
-   for(var k=0;k<coada.length;k++){ mesaje.push({role:coada[k].cine==='kelion'?'assistant':'user',content:coada[k].text}); }
-   mesaje[mesaje.length-1]={role:'user',content:ancora+q};
-   try{
-     var res=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},
-       body:JSON.stringify({messages:mesaje,serverVoiceOff:!cuVoce})});
-     if(!res.ok||!res.body){ asteapta.textContent='Kelion: eroare HTTP '+res.status; }
-     else{
-       // FLUXUL /api/chat E SSE (revizia, constatarea 1): linii "id:"/"data:"
-       // despartite de rand gol; textul REAL e in liniile data: (minus UN
-       // spatiu), iar cadrele de control JSON stau intre doi U+001F. Un parser
-       // care citea fluxul brut ar fi afisat "id:"/"data:" ca text (bug prins
-       // de revizie inainte sa-l vada ownerul).
-       var reader=res.body.getReader(), dec=new TextDecoder(), sseBuf='', text='';
-       var CTRL=String.fromCharCode(31);
-       function inghiteBucata(bucata){
-         var b=bucata;
-         for(;;){
-           var i0=b.indexOf(CTRL);
-           if(i0===-1){ text+=b; return; }
-           text+=b.slice(0,i0);
-           var i1=b.indexOf(CTRL,i0+1);
-           if(i1===-1){ return; } // frame rupt la granita de eveniment — se ignora
-           try{
-             var frame=JSON.parse(b.slice(i0+1,i1));
-             if(frame&&typeof frame.audio==='string'){ coadaAudio.push(frame.audio); redaUrmatorul(); }
-           }catch(e){}
-           b=b.slice(i1+1);
-         }
-       }
-       for(;;){
-         var pas=await reader.read();
-         if(pas.done) break;
-         sseBuf+=dec.decode(pas.value,{stream:true});
-         for(;;){
-           var taie=sseBuf.indexOf('\\n\\n');
-           if(taie===-1) break;
-           var ev=sseBuf.slice(0,taie); sseBuf=sseBuf.slice(taie+2);
-           var linii=ev.split('\\n'), bucati=[];
-           for(var li=0;li<linii.length;li++){
-             if(linii[li].indexOf('data:')===0){
-               var v=linii[li].slice(5);
-               if(v.charAt(0)===' ') v=v.slice(1);
-               bucati.push(v);
-             }
-           }
-           if(bucati.length) inghiteBucata(bucati.join('\\n'));
-         }
-         asteapta.textContent='Kelion: '+text;
-         jurnal.scrollTop=jurnal.scrollHeight;
-       }
-       if(text.trim()){
-         asteapta.textContent='Kelion: '+text;
-         fir.push({cine:'kelion',text:text});
-         // Desenăm DOAR dacă graficul mai arată simbolul pe care ai întrebat
-         // (audit 9 aug) — altfel liniile ar minți pe alt simbol.
-         if(simbolLaTrimitere===simbolCurent){ aratNiveluri(extrageNiveluriText(text,pretCurentNr)); }
-         // Promisiunea paginii — „discuția se salvează în memoria lui separată"
-         // — ținută pe drumul VIU: schimbul pleacă în memoria 'tranzactii'
-         // (creierul rămâne cel UNIC, prin /api/chat).
-         fetch('/api/tranzactii/jurnal',{method:'POST',headers:{'content-type':'application/json'},
-           body:JSON.stringify({simbol:simbolLaTrimitere,intrebare:q,raspuns:text.slice(0,600)})}).catch(function(){});
-       } else { asteapta.textContent='Kelion: (fără răspuns — vezi aplicația)'; }
-     }
-   }catch(e){ asteapta.textContent='Kelion: rețea picată: '+e; }
-   ct.disabled=false; ci.disabled=false; ci.focus();
- }
- ct.onclick=trimiteChat;
- ci.addEventListener('keydown',function(ev){ if(ev.key==='Enter') trimiteChat(); });
+ // (chatul paginii a fost scos — vezi nota din HTML; discuția e în chatul REAL)
  urmareste();
 </script></body></html>`
 }

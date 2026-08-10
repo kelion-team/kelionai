@@ -959,7 +959,13 @@ export default function Stage({ user }: { user: User }) {
       {recording && <div className="rec-watermark">kelionai.app</div>}
       {/* Skill monitor mode: the workspace surface behind the avatar. */}
       <div className={`workspace-bg ${monitorOn ? 'open' : ''}`}>
-        {(wsv.open || wsFading) && (
+        {/* MONTAREA o decide starea VIE (ws.open), nu snapshot-ul: wsv după
+            închidere E poza veche (open:true înghețat) — cu ea în condiție,
+            panoul se randa la NESFÂRȘIT și ✕/Ieșire „nu mergeau" deși starea
+            se închidea corect (măsurat cu Playwright, 10 aug: onClick rula,
+            closeTask ieșea curat, tabul rămânea). Snapshot-ul doar DESENEAZĂ
+            fade-ul de 520ms. */}
+        {(ws.open || wsFading) && (
           <div className="workspace-inner">
             <div className="workspace-head">
               <div className="workspace-tabs">
@@ -1154,9 +1160,16 @@ export default function Stage({ user }: { user: User }) {
             ? {
                 // During a dance, the ring is the center of the screen (bigger,
                 // visible); otherwise, exactly Adrian's saved arrangement.
+                // EXCEPȚIE (10 aug, ownerul: „încadrarea nu e corectă pe
+                // tranzacționare... pagina cu tot ce are ea"): pe tabul de
+                // tranzacții avatarul se dă GARANTAT în colț, mic — aranjamentul
+                // salvat din iulie îl punea peste grafic și peste scala de preț,
+                // iar ajustarea manuală e dezactivată din 24 iul.
                 transform: dancing
                   ? `translate(calc(30vw - 14px), calc(30vh - 180px)) scale(${Math.max(avatarBox.s, 0.62)})`
-                  : `translate(calc(${avatarBox.x}vw - 14px), calc(${avatarBox.y}vh - 180px)) scale(${avatarBox.s})`,
+                  : wsv.kind === 'tranzactii'
+                    ? 'translate(calc(72vw - 14px), calc(66vh - 180px)) scale(0.3)'
+                    : `translate(calc(${avatarBox.x}vw - 14px), calc(${avatarBox.y}vh - 180px)) scale(${avatarBox.s})`,
               }
             : undefined
         }
