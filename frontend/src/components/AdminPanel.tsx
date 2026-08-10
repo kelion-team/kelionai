@@ -911,6 +911,16 @@ export default function AdminPanel({
             >
               {A.tabTrading}
             </button>
+            {/* Adaptare CV — funcție de plătitor, chiar după Tranzacționare
+                (Adrian, 10 aug: „adaptare cv după tranzacții"). Deschide panoul
+                de adaptare prin evenimentul de navigare pe care Stage îl ascultă. */}
+            <button
+              type="button"
+              className="admin-tab"
+              onClick={() => window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: { view: 'cv' } }))}
+            >
+              📄 Adaptare CV
+            </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'finance' ? 'sel' : ''}`}
