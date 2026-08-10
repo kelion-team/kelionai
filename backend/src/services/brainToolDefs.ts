@@ -456,15 +456,15 @@ export const BROWSER_TOOLS: Tool[] = [
 export const OPEN_APP_VIEW_TOOL: Tool = {
   name: 'open_app_view',
   description:
-    "Open or close a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks — by VOICE or in WRITING — to open settings, wallet/credits, contact, the admin panel, the Trading Center, or to go back to the main screen / close what's open. For the admin panel you may also pass a section.",
+    "Open or close a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks — by VOICE or in WRITING — to open settings, wallet/credits, contact, the admin panel, the Trading Center, CV adaptation, or to go back to the main screen / close what's open. For the admin panel you may also pass a section.",
   input_schema: {
     type: 'object',
     properties: {
       view: {
         type: 'string',
-        enum: ['settings', 'wallet', 'contact', 'admin', 'trading', 'home'],
+        enum: ['settings', 'wallet', 'contact', 'admin', 'trading', 'home', 'cv'],
         description:
-          'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), trading (Centrul de Tranzacționare — „deschide tranzacții"), or home (close panels & monitor — „închide pagina / ieși").',
+          'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), trading (Centrul de Tranzacționare — „deschide tranzacții"), home (close panels & monitor — „închide pagina / ieși"), or cv (CV adaptation / Adaptare CV).',
       },
       section: {
         type: 'string',
