@@ -552,6 +552,18 @@ const CONSTRUCTOR_MANAGE_TOOL: Tool = {
     required: ['action'],
   },
 }
+const CONSTRUCTOR_COMMAND_TOOL: Tool = {
+  name: 'constructor_command',
+  description:
+    'ADMIN ONLY. Execute a shell command directly on the server (in the constructor context), as a direct command channel from Kelion to the constructor. Use this whenever the owner asks you to run a command, bash, shell, script, or action in the constructor/server.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      cmd: { type: 'string', description: 'The bash command to execute on the server.' },
+    },
+    required: ['cmd'],
+  },
+}
 // ITS OWN HEALTH (Adrian, Jul 27: "Kelion must see this and be able to tell the
 // admin through chat that it has problems x,y,z and ask whether to fix them"):
 // the deterministic aggregation of all signals + the behavior rule — enumerate
@@ -2280,7 +2292,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // Sursă + putere de dezvoltator + DB/sănătate + operațiuni („de aur")
           LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
           REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL,
+          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL, CONSTRUCTOR_COMMAND_TOOL,
           // Jules — agentul asincron oficial Google (3 aug, cheia pusă de owner).
           JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL,
           DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL,
@@ -3305,6 +3317,13 @@ async function runTool(
       if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
       const jobId = await createBuildJob(email, order)
       if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
+
+      // Trigger the constructor worker immediately in the background so the order executes right away
+      import('child_process').then(({ exec }) => {
+        exec('bash /root/kelion/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
+        exec('bash /root/kelion/atelier/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
+      }).catch(() => {})
+
       // OPEN THE LIVE PANEL ON THE MONITOR (Stage 4b): from the moment it is
       // taken on, Adrian sees Received→step→Done/Failed on the monitor (the
       // panel subscribes to /api/constructor/live). A control frame, like
@@ -3359,6 +3378,13 @@ async function runTool(
           if (!Number.isInteger(id) || id <= 0) return JSON.stringify({ error: 'id_lipsa' })
           const order = args.order != null ? String(args.order) : undefined
           const job = await retryBuildJob(id, order)
+          if (job) {
+            // Trigger the constructor worker immediately in the background so the retried order executes right away
+            import('child_process').then(({ exec }) => {
+              exec('bash /root/kelion/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
+              exec('bash /root/kelion/atelier/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
+            }).catch(() => {})
+          }
           return JSON.stringify(
             job
               ? { ok: true, repus: job.id, stare: job.status, modificat: Boolean(order && order.trim()) }
@@ -3374,6 +3400,23 @@ async function runTool(
         default:
           return JSON.stringify({ error: 'actiune_necunoscuta', action })
       }
+    }
+
+    case 'constructor_command': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const cmd = String(args.cmd ?? '').trim()
+      if (!cmd) return JSON.stringify({ error: 'comanda_goala' })
+      const { exec } = await import('child_process')
+      return new Promise<string>((resolve) => {
+        exec(cmd, { timeout: 60000 }, (error, stdout, stderr) => {
+          resolve(JSON.stringify({
+            ok: !error,
+            stdout: stdout || '',
+            stderr: stderr || '',
+            error: error ? error.message : null
+          }))
+        })
+      })
     }
 
     case 'show_document': {
