@@ -92,8 +92,14 @@ font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:12px;border:1p
 /* TOP-right, NOT bottom-right: the corner avatar sits there and covers the button
    (Adrian, Jul 24: "images and buttons overlap"). */
 #recenter{position:absolute;z-index:1000;right:12px;top:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
+border:1px solid #2a3350;border-radius:999px;padding:8px 14px;font:600 13px system-ui;cursor:pointer}
+/* IEȘIREA (10 aug, ownerul: „x de închidere nu merge"): buton propriu pe hartă
+   care închide tabul din aplicație prin postMessage (ca la Tranzacții), plus
+   tasta Esc. Sus-stânga, ca să nu se bată cu „Urmărește mașina". */
+#iesire{position:absolute;z-index:1001;left:12px;top:12px;background:rgba(12,14,20,.9);color:#eaf0ff;
 border:1px solid #2a3350;border-radius:999px;padding:8px 14px;font:600 13px system-ui;cursor:pointer}</style></head>
-<body><div id="map"></div><div id="hud" style="display:none"></div><button id="recenter">Urmărește mașina ↺</button>
+<body><div id="map"></div><div id="hud" style="display:none"></div>
+<button id="iesire">✕ Ieșire</button><button id="recenter">Urmărește mașina ↺</button>
 <script src="/leaflet/leaflet.js"></script>
 <script>
 var c=${JSON.stringify(coords)};
@@ -145,12 +151,34 @@ if(c.length>1){
 // driving), panning stops it.
 var carDot=null,following=false;
 var btn=document.getElementById('recenter');
+// IEȘIREA (10 aug): închide tabul din aplicație (postMessage, ca Tranzacții);
+// pe pagina de sine stătătoare se întoarce acasă. Esc face la fel.
+function inchideHarta(){
+  if(window.top!==window.self){ try{ window.parent.postMessage({kelion:'inchide-monitorul'},'*'); }catch(e){} }
+  else { location.href='/'; }
+}
+document.getElementById('iesire').onclick=inchideHarta;
+document.addEventListener('keydown',function(ev){ if(ev.key==='Escape') inchideHarta(); });
 function haversineKm(a,b){var R=6371,d2r=Math.PI/180;
  var dLat=(b[0]-a[0])*d2r,dLon=(b[1]-a[1])*d2r;
  var s=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(a[0]*d2r)*Math.cos(b[0]*d2r)*Math.sin(dLon/2)*Math.sin(dLon/2);
  return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}
 map.on('dragstart',function(){following=false;});
-btn.onclick=function(){following=true;if(carDot)map.setView(carDot.getLatLng(),15);};
+// „Urmărește mașina" (10 aug, ownerul: „nu merge"): pe desktop, fără fix GPES
+// încă, butonul părea mort. Acum: dacă avem deja punctul, îl centrează;
+// altfel PORNEȘTE urmărirea și SPUNE că așteaptă semnalul (HUD), nu tace.
+btn.onclick=function(){
+  following=true;
+  if(carDot){ map.setView(carDot.getLatLng(),15); }
+  else {
+    hud.style.display='block';
+    hud.textContent='Urmăresc mașina — aștept semnalul GPS (permite localizarea în browser)…';
+    // dacă browserul n-a pornit watchPosition (permisiune), reîncercăm acum
+    if(navigator.geolocation){ navigator.geolocation.getCurrentPosition(onPos,function(){
+      hud.textContent='Nu am semnal GPS — permite localizarea din bara browserului, apoi apasă din nou.';
+    },{enableHighAccuracy:true,timeout:15000}); }
+  }
+};
 function onPos(p){
   var pos=[p.coords.latitude,p.coords.longitude];
   var primulFix=!carDot;
