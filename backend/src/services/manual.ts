@@ -200,6 +200,9 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   // Eyes and grounding
   look: { what: 'Looks through your camera at you or at what you show it', say: '"what is this part?"' },
   get_monitor: { what: 'Checks what is actually on your screen right now', say: '"what am I looking at?"' },
+  click_monitor: { what: 'Clicks a precise spot on your screen', say: '"click at coordinates 300 400"' },
+  zoom_monitor: { what: 'Zooms in or out on your screen', say: '"zoom in on the page"' },
+  get_mouse_position: { what: 'Checks the position of your mouse and what it is pointing at', say: '"where is my mouse?"' },
   goleste_monitorul: { what: 'Clears the screen — closes whatever it is showing', say: '"close the monitor"' },
   get_location: { what: 'Uses your real position, not a guess', say: '"where am I?"' },
 

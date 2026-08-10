@@ -81,6 +81,8 @@ export interface ChatControl {
   // șterge bulele optimiste și nu redă nimic (Adrian: „să nu vorbească neîntrebat").
   ignored?: boolean
   golesteMonitor?: boolean
+  clickMonitor?: { x: number; y: number }
+  zoomMonitor?: { level?: number; direction?: string }
   // THE BRAIN'S VOICE: MP3 (base64) synthesized on the server (Chirp 3) and sent over
   // the bridge. The app only decodes + plays it — it synthesizes nothing locally.
   audio?: string
