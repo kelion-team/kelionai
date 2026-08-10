@@ -1054,6 +1054,29 @@ async function main() {
       { role: 'system', content: SYSTEM },
       { role: 'user', content: `ORDINUL DE CONSTRUCȚIE (de la owner):\n\n${job.orderText}` },
     ]
+    // ── ÎNVĂȚAREA DIN ÎNCERCAREA ANTERIOARĂ (10 aug, ownerul: „ajută-l să
+    // treacă de blocaje ÎNVĂȚÂNDU-L") ──────────────────────────────────────────
+    // Un ordin repus — manual („reia", care păstrează jurnalul) sau reclamat
+    // după un worker mort — pornea până acum ORB: doar system+ordin, fără nicio
+    // urmă a ce a picat data trecută. Deci repeta EXACT greșeala care l-a blocat,
+    // până la abandonul de la 3 încercări. Acum, dacă ordinul are jurnal de la o
+    // încercare anterioară, i-l dăm și îi cerem O ALTĂ strategie — să învețe, nu
+    // să reia orbește.
+    const jurnalVechi = String(job.log ?? '').trim()
+    if (jurnalVechi) {
+      messages.push({
+        role: 'user',
+        content:
+          'ATENȚIE — ordinul ăsta A MAI FOST ÎNCERCAT și NU s-a terminat. Mai jos e coada ' +
+          'jurnalului încercării anterioare. CITEȘTE-L întâi și află DE CE a picat (build/test ' +
+          'roșu, fișier greșit, plafon de pași, verificare picată, unealtă/agent lipsă). Apoi ia ' +
+          'o ABORDARE DIFERITĂ — nu relua aceiași pași care au dus la blocaj. Dacă îți lipsește un ' +
+          'specialist, creează-l cu agent_nou și cheamă-l cu cheama_agent. Dacă ordinul e prea mare ' +
+          'pentru bugetul de pași, fă partea esențială și notează restul cu request_repair.\n\n' +
+          `--- JURNALUL ÎNCERCĂRII ANTERIOARE (coadă) ---\n${jurnalVechi.slice(-3500)}`,
+      })
+      log(`ordin reîncercat — dau agentului jurnalul vechi (${jurnalVechi.length} car.) ca să învețe din el, nu să repete`)
+    }
     let tokens = 0
     // (Contabilitatea „tokensPaid/costUsd/costMasurat" pe scara plătită
     // OpenRouter a fost EXTIRPATĂ, 3 aug: Gemini nu itemizează cost per apel;

@@ -46,7 +46,7 @@
 import { config } from '../config.js'
 import {
   createBuildJob, listBuildJobs, loadKv, saveKv, getCapabilityGaps, setGapResolved,
-  rezumatPlati, adaugaAgentCustom,
+  rezumatPlati,
   type BuildJob,
 } from '../db.js'
 import { brainCompleteWithTools, expertModelLadder } from './brain.js'
@@ -689,33 +689,17 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
     // ── AGENȚII, ȘI PENTRU CONSTRUCTOR (10 aug, ownerul: „constructorul să
     // folosească la nevoie automat toți agenții"; „când îi lipsește un TIP de
     // agent, îl creează automat, verifică și dă deploy") ─────────────────────
-    // Import dinamic — agentiKelion importă din locuri care ar închide un ciclu
-    // la evaluarea modulului (lecția 2 aug); aici, la RULARE, e sigur.
+    // Logica unică e în agentiKelion.ts (executa*) — aici doar o chemăm. Import
+    // dinamic: agentiKelion ar închide un ciclu la evaluarea modulului (lecția
+    // 2 aug); la RULARE e sigur.
     case 'cheama_agent': {
-      const { gasesteAgentViu, cheamaAgent, rosterViu } = await import('./agentiKelion.js')
-      const a = await gasesteAgentViu(String(args.agent ?? '').trim())
-      if (!a) return JSON.stringify({ error: 'agent_necunoscut', valizi: (await rosterViu()).map((x) => x.id) })
-      const sarcina = String(args.sarcina ?? '').trim()
-      if (!sarcina) return JSON.stringify({ error: 'sarcina_goala' })
-      try {
-        const r = await cheamaAgent(a, sarcina, true)
-        return scurt({ agent: a.id, nume: a.nume, raspuns: r.text })
-      } catch (e) {
-        return JSON.stringify({ error: 'agent_a_esuat', detaliu: e instanceof Error ? e.message.slice(0, 200) : String(e) })
-      }
+      const { executaCheamaAgent } = await import('./agentiKelion.js')
+      const r = await executaCheamaAgent(String(args.agent ?? ''), String(args.sarcina ?? ''), true)
+      return r.json.slice(0, 20_000)
     }
     case 'agent_nou': {
-      // Creează un specialist NOU când lipsește un tip (instant, scriere în DB —
-      // agentul e o persona folosită de cheama_agent; nu cere publicare).
-      const nume = String(args.nume ?? '').trim().slice(0, 80)
-      const rol = String(args.rol ?? '').trim()
-      if (nume.length < 3 || rol.length < 10) return JSON.stringify({ error: 'nume (min 3) și rol (min 10) obligatorii' })
-      const id = nume.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .replace(/^agent\s+/i, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-      if (!id) return JSON.stringify({ error: 'din nume nu iese un id valid' })
-      const err = await adaugaAgentCustom({ id, nume, rol, doarAdmin: args.doarAdmin === true })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify({ ok: true, id, nume, mesaj: `Agent nou creat: ${nume} (${id}). Îl poți chema imediat cu cheama_agent.` })
+      const { executaAgentNou } = await import('./agentiKelion.js')
+      return executaAgentNou(String(args.nume ?? ''), String(args.rol ?? ''), args.doarAdmin === true)
     }
     default: return JSON.stringify({ error: `unealtă necunoscută: ${name}` })
   }

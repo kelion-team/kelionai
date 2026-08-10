@@ -43,7 +43,6 @@ import {
   attachGuestPhoto,
   userKey,
   addMemory,
-  adaugaAgentCustom,
 } from '../db.js'
 import { extrageNiveluri } from './tranzactii.js'
 import { getMeserie } from '../services/meserii.js'
@@ -106,7 +105,7 @@ import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeCha
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL } from '../services/brainToolDefs.js'
-import { gasesteAgentViu, cheamaAgent, rosterViu } from '../services/agentiKelion.js'
+import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
 export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
@@ -3246,37 +3245,20 @@ async function runTool(
     // lui. Costul sub-apelului intră în usage.usd (cost REAL al turei, ca la
     // imagini). Un id necunoscut nu inventează — spune care sunt valizi.
     case 'cheama_agent': {
-      // Rosterul VIU (4 aug): și agenții puși de owner din admin sunt chemabili.
-      const a = await gasesteAgentViu(String(args.agent ?? '').trim())
-      if (!a) return JSON.stringify({ error: 'agent_necunoscut', valizi: (await rosterViu()).map((x) => x.id) })
-      const sarcina = String(args.sarcina ?? '').trim()
-      if (!sarcina) return JSON.stringify({ error: 'sarcina_goala' })
-      try {
-        // Blindat (4 aug): pe calea creierului, specialistul primește și memoria
-        // lui Kelion când vorbește ownerul (isAdmin) — nu și pentru vizitatori.
-        const r = await cheamaAgent(a, sarcina, isAdmin)
-        usage.usd += r.costUsd
-        // Registrul vede și agenții (audit 9 aug: costul se DEBITA dar nu se
-        // ÎNREGISTRA — Money tab orb la agenți, ca odinioară la creier).
-        if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
-        return JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text })
-      } catch (e) {
-        return JSON.stringify({ error: 'agent_a_esuat', detaliu: e instanceof Error ? e.message.slice(0, 200) : String(e) })
-      }
+      // Logica unică e în agentiKelion.ts (executaCheamaAgent) — aici doar
+      // contabilizăm costul pe tura curentă (audit 9 aug: costul se DEBITA dar
+      // nu se ÎNREGISTRA — Money tab orb la agenți). isAdmin = memoria lui
+      // Kelion pentru specialist doar când vorbește ownerul.
+      const r = await executaCheamaAgent(String(args.agent ?? ''), String(args.sarcina ?? ''), isAdmin)
+      usage.usd += r.costUsd
+      if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
+      return r.json
     }
     case 'agent_nou': {
-      // Creează un specialist NOU când lipsește tipul (Adrian, 10 aug) —
-      // instant, scriere în DB; disponibil imediat prin cheama_agent.
+      // Creează un specialist NOU când lipsește tipul (Adrian, 10 aug) — logica
+      // unică în agentiKelion.ts (executaAgentNou); instant, scriere în DB.
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const nume = String(args.nume ?? '').trim().slice(0, 80)
-      const rol = String(args.rol ?? '').trim()
-      if (nume.length < 3 || rol.length < 10) return JSON.stringify({ error: 'nume (min 3) și rol (min 10) obligatorii' })
-      const id = nume.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .replace(/^agent\s+/i, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-      if (!id) return JSON.stringify({ error: 'din nume nu iese un id valid' })
-      const err = await adaugaAgentCustom({ id, nume, rol, doarAdmin: args.doarAdmin === true })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify({ ok: true, id, nume, mesaj: `Agent nou creat: ${nume} (${id}) — îl poți chema imediat cu cheama_agent.` })
+      return executaAgentNou(String(args.nume ?? ''), String(args.rol ?? ''), args.doarAdmin === true)
     }
     // ── THE PANEL: THREE PROPOSE, THE BRAIN CHOOSES (Adrian, Jul 31) ─────────
     // Steps are written ON THE MONITOR as they happen, not at the end: they
