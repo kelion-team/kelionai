@@ -67,6 +67,8 @@ export interface Strings {
   // THE THEME TOGGLE (Aug 2 — the lighter background): top-bar button that
   // flips between the new light default and the original dark identity.
   themeToDark: string
+  langPickTitle: string
+  manualLabel: string
   themeToLight: string
   wsClose: string
   wsCloseAll: string
@@ -270,6 +272,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     wsFileNoPreview: "This file type can't be previewed in the page — you can download it.",
     wsDownloadFile: 'Download the file ↓',
     themeToDark: 'Switch to the dark theme',
+    langPickTitle: 'Language Kelion speaks to you',
+    manualLabel: 'Manual',
     themeToLight: 'Switch to the light theme',
     wsClose: 'Close',
     wsCloseAll: 'Close everything',
@@ -437,6 +441,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     wsFileNoPreview: 'Acest tip de fișier nu se poate previzualiza în pagină — îl poți descărca.',
     wsDownloadFile: 'Descarcă fișierul ↓',
     themeToDark: 'Comută pe tema întunecată',
+    langPickTitle: 'Limba în care îți vorbește Kelion',
+    manualLabel: 'Manual',
     themeToLight: 'Comută pe tema luminoasă',
     wsClose: 'Închide',
     wsCloseAll: 'Închide tot',

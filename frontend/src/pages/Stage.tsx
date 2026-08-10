@@ -32,7 +32,8 @@ import {
   type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii } from '../lib/prefs'
+import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii, saveSpeechLang } from '../lib/prefs'
+import { LANGS } from '../lib/languages'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
@@ -1407,6 +1408,29 @@ export default function Stage({ user }: { user: User }) {
               {t.connectGoogle}
             </button>
           )}
+          {/* SELECTORUL DE LIMBĂ ÎN BARĂ (10 aug, ownerul: „buton de selectare
+              limba direct pe bara de lucru sus"): aceeași mecanică precisă ca în
+              Client Settings (saveSpeechLang = PUT /api/prefs + oglinda locală),
+              apoi reîncărcare — toată interfața comută pe loc, fără drum prin
+              setări. Valoarea arătată = limba UI curentă. */}
+          <select
+            className="ghost"
+            value={LANGS.find((l) => l.code.toLowerCase().startsWith(lang)) ? LANGS.find((l) => l.code.toLowerCase().startsWith(lang))!.code : 'en-US'}
+            onChange={(e) => {
+              void saveSpeechLang(e.target.value).then((ok) => {
+                if (ok) window.location.reload()
+              })
+            }}
+            title={t.langPickTitle}
+            aria-label={t.langPickTitle}
+            style={{ maxWidth: 110 }}
+          >
+            {LANGS.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             className="ghost"
@@ -1416,6 +1440,12 @@ export default function Stage({ user }: { user: User }) {
           >
             {theme === 'light' ? '☾' : '☀'}
           </button>
+          {/* MANUALUL, VIZIBIL ȘI DUPĂ LOGARE (10 aug, ownerul: „nu se afișează
+              manualul în engleză sau în limba selectată"): până azi doar pagina
+              de start nelogată avea butonul. Link-ul cară limba UI curentă. */}
+          <a className="ghost" href={`/manual?lang=${lang}`} target="_blank" rel="noreferrer">
+            {t.manualLabel}
+          </a>
           <button type="button" className="ghost" onClick={() => setContactOpen(true)}>
             {t.contactLabel}
           </button>
