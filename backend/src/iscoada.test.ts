@@ -27,8 +27,10 @@ describe('iscoadele lui Kelion', () => {
     expect(sursa).toContain('/^NIMIC\\b/i.test(text)')
   })
 
-  it('ce se salvează poartă eticheta iscoadei (agent + dată în conținut)', () => {
-    expect(sursa).toContain("'iscoada')")
+  it('ce se salvează merge în memoria pe care creierul o citește (agent kelion) și poartă eticheta iscoadei în conținut', () => {
+    // Scris pe 'kelion' (10 aug), nu 'iscoada': recallMemories citește doar
+    // agent='kelion' — altfel patrula era scriere-oarbă (nimeni n-o citea).
+    expect(sursa).toContain("`[iscoada ${zi}] ${tema}: ${text}`.slice(0, 2000), 'kelion')")
     expect(sursa).toContain('[iscoada ${zi}]')
   })
 

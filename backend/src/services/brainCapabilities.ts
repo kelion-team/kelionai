@@ -135,6 +135,7 @@ export const CAPABILITIES: readonly Capability[] = [
   // 2.6 Sight & place
   { name: 'look', category: 'vedere', does: 'camera (vede utilizatorul / ce i se arată)', chat: false, voice: false, voiceViaBrain: true, admin: false },
   { name: 'get_monitor', category: 'vedere', does: 'ce e FAPTIC pe monitor (conținutul tabului activ)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'goleste_monitorul', category: 'vedere', does: 'golește monitorul (închide tot ce e afișat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'get_location', category: 'vedere', does: 'GPS-ul real al dispozitivului', chat: false, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.7 Money & state — admin
@@ -152,6 +153,11 @@ export const CAPABILITIES: readonly Capability[] = [
   // unelte"). Acum sunt în sursa unică, deci intră în inventar.
   { name: 'cheama_agent', category: 'cod', does: 'deleagă o sarcină unui agent specialist (din cei 91)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'agent_nou', category: 'cod', does: 'creează un agent specialist NOU când lipsește tipul (instant, fără publicare)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  // Suita de măsurare (8 aug): comandate în prompt, dar uitate din rawTools-ul
+  // chatului până pe 10 aug — acum și în registru ca inventarulMeu să le numere.
+  { name: 'ruleaza_portile', category: 'cod', does: 'rulează porțile reale (tsc/teste/lacăt/sintaxă/build) și întoarce rezultatul MĂSURAT', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'jurnal_masuratori', category: 'cod', does: 'ultimele măsurători făcute (metoda, ora, ce a ieșit) — dovada pentru „de unde știi"', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'vaneaza_buguri', category: 'cod', does: 'caută automat erorile reale ale userilor + tipare de bug + tipuri/teste/sintaxă', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'panou_cod', category: 'cod', does: 'deschide panoul constructorului cu un ordin de build', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_manage', category: 'cod', does: 'gestionează ordinele constructorului (reia/oprește/curăță)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_repos', category: 'cod', does: 'listează repo-urile legate la Jules (agentul async Google)', chat: true, voice: false, voiceViaBrain: true, admin: true },

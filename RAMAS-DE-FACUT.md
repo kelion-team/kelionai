@@ -548,3 +548,41 @@ Probat pe instanța de probă (fără chei, fără DB): ruta a răspuns `200` ș
 cele 8 celule au ieșit „nu pot verifica" cu motiv**, niciun zero inventat.
 RĂMAS: Gemini și Google Cloud n-au fost încă văzute cu chei reale — „nu pot
 verifica" cifrele live până nu se uită cineva pe kelionai.app.
+
+## N. VÂNĂTOAREA „DECLARAT DAR NECABLAT" (10 aug 2026) — 19 găuri, val 1 reparat
+
+Un workflow cu 27 de agenți (vânători + verificator adversarial per constatare) a
+căutat tiparul `get_monitor`: capabilități DECLARATE undeva dar NECABLATE. **Val 1
+reparat** (același PR): `ruleaza_portile`/`jurnal_masuratori`/`vaneaza_buguri` legate
+la creierul de chat (fără primul, PR-urile REFUZAU structural din chat);
+`execUserScopedTool` cablat pe voce (7 unelte răspundeau „nesuportată în voce");
+memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă durată
+(recall+învățare) adusă pe calea vocală; `goleste_monitorul` în registru+manual;
+`niveluri`/`gest`/`gesture` în `CADRE_ECRAN`; `proba-restaurare` anunțat în `run_runbook`.
+
+**VAL 2 — RĂMAS (dovadă în raportul workflow-ului, `tasks/wi0dv62rm.output`):**
+
+- **Frame `niveluri` nu se EMITE pe voce.** Adăugat în `CADRE_ECRAN`, dar
+  `turaCreierului` (vocalLive.ts) NU pasează contextul `tranzactii` către /api/chat,
+  deci `piata` e undefined și cadrul {niveluri} nici nu se produce. De cablat:
+  clientul vocal trimite starea de tranzacționare + turaCreierului o pune în body.
+- **Persona vocală supra-declară vedere continuă.** Textul personei promite „primești
+  CADRELE ei în timp real — aia e ce VEZI acum", dar ceasul de cadre a fost scos pe
+  9 aug (`cadruLive` + calea `{type:'cadru'}`/`scrieCadru` = cod mort); vederea reală
+  e doar la cerere, prin ușă. De ales: ori repui ceasul, ori corectezi persona +
+  scoți codul mort (ca modelul să nu pretindă o vedere pe care n-o are).
+- **Deblocarea admin prin voce = listener fără emițător.** `Stage.tsx` ascultă
+  `kelion:admin-unlock`, dar nimeni nu-l emite (amprenta vocală a fost scoasă din
+  calea vocii pe 6 aug). Lacătul e azi dezarmat, dar la rearmare doar secretul tastat
+  ar merge. De ales: ori emiți evenimentul la potrivirea amprentei, ori scoți
+  listener-ul + comentariile care promit calea.
+- **Memoria 'tranzactii' nu e reamintită în conversație** (doar butonul Analiză o
+  citește). Într-o discuție normală despre BTC, observațiile pietarului nu apar. De
+  decis dacă e intenționat (memorie doar-prin-buton) sau de cablat un recall pe
+  'tranzactii' când tabul de trading e ancorat.
+- **Cod mort/UX fără feedback (mic):** banda „queued" + `pendingSendsRef` nu se mai
+  populează (barge-in a înlocuit punerea în coadă) — de curățat; butonul „●
+  Înregistrează scenariul" e mut la eșec (fără getDisplayMedia / la refuz) — de adăugat
+  ack ca la butonul Rec principal.
+- **Respinse la verificare (2):** nu erau găuri reale (verificatorul adversarial le-a
+  infirmat).
