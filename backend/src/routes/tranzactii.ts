@@ -363,12 +363,20 @@ function paginaTranzactii(): string {
      +'  <span class="em">EMA50 '+(typeof e2==='number'?fmtNr(e2,precizie):'—')+'</span></div>';
    leg.innerHTML=h;
  }
+ // PUNCTUL DE SUB CURSOR — trimis creierului (ownerul, 10 aug: „kelion trebuie
+ // să vadă când pun mouse-ul exact peste orice poziție din grafic"). Iframe-ul e
+ // SINGURUL care vede ÎN interiorul graficului: din aplicație, elementFromPoint
+ // vede doar <iframe>, nu lumânarea. Aici avem punctul exact (par.seriesData).
+ var pesteCursor=null;
  function cuCrosshair(par){
    var d=par&&par.seriesData?par.seriesData.get(serie):null;
-   if(!d||d.open===undefined){ subCrosshair=false; scrieLegenda(ultim.c,ultim.v,ultim.m,ultim.e); return; }
+   if(!d||d.open===undefined){ subCrosshair=false; pesteCursor=null; scrieLegenda(ultim.c,ultim.v,ultim.m,ultim.e); raporteazaAcum(); return; }
    subCrosshair=true;
    var vb=par.seriesData.get(vol), m=par.seriesData.get(ma20), e2=par.seriesData.get(ema50);
+   pesteCursor={ t:(typeof d.time==='number'?d.time*1000:String(d.time)), o:d.open, h:d.high, l:d.low, c:d.close,
+     vol:(vb&&typeof vb.value==='number')?vb.value:null, ma20:(m&&typeof m.value==='number')?m.value:null, ema50:(e2&&typeof e2.value==='number')?e2.value:null };
    scrieLegenda(d, vb?vb.value:null, m?m.value:null, e2?e2.value:null);
+   raporteazaAcum();
  }
 
  // ── Nivelurile lui Kelion: linii de preț + panou-legendă cu „curăță liniile" ──
@@ -620,12 +628,22 @@ function paginaTranzactii(): string {
  // creierului cu ce se lucrează") ─────────────────────────────────────────────
  // Pagina își raportează starea către aplicație (Stage → chatul REAL o
  // ancorează), și primește înapoi nivelurile din răspunsurile chatului.
+ var ultimRaport=0, raportPlanificat=null;
+ // Raport imediat dar throttled (~150ms): hover-ul pe grafic e des; nu inundăm
+ // aplicația, dar creierul are mereu ULTIMUL punct de sub cursor când e întrebat.
+ function raporteazaAcum(){
+   if(window.top===window.self) return;
+   var acum=Date.now();
+   if(acum-ultimRaport<150){ if(!raportPlanificat){ raportPlanificat=setTimeout(function(){ raportPlanificat=null; raporteazaAcum(); },160); } return; }
+   raporteazaStarea();
+ }
  function raporteazaStarea(){
    if(window.top===window.self) return; // pe pagina de sine stătătoare n-are cui
+   ultimRaport=Date.now();
    try{
      window.parent.postMessage({kelion:'tranzactii-stare',simbol:simbolCurent||s.value.toUpperCase(),
        pret:(function(){var n=Number(String(p.textContent).replace(/,/g,'')); return isFinite(n)&&n>0?n:null;})(),
-       interval:interval,sursa:stSursa.textContent.replace(/^·\\s*/,'')},'*');
+       interval:interval,sursa:stSursa.textContent.replace(/^·\\s*/,''),peste:pesteCursor},'*');
    }catch(e){}
  }
  setInterval(raporteazaStarea,5000);

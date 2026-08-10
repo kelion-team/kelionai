@@ -1302,7 +1302,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       serverVoiceOff?: boolean
       // Ancora Centrului de Tranzacționare (10 aug, ownerul: chatul REAL,
       // „conștient" de pagina de trading) — starea VIE raportată de iframe.
-      tranzactii?: { simbol?: string; pret?: number; interval?: string; sursa?: string }
+      tranzactii?: { simbol?: string; pret?: number; interval?: string; sursa?: string; peste?: { t?: number | string; o?: number; h?: number; l?: number; c?: number; vol?: number | null; ma20?: number | null; ema50?: number | null } | null }
       // UȘA CREIERULUI (8 aug, ownerul: „a oferit soluții dar nu poate să
       // implementeze"): tura vine din sesiunea vocală live prin unealta
       // cere_creierului — modelul live a DECIS deja că e nevoie de unelte,
@@ -1910,6 +1910,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `preț ${Number(piata.pret) || 'necunoscut'}, interval ${String(piata.interval ?? '?').slice(0, 6)}, sursă ${String(piata.sursa ?? '?').slice(0, 60)}. ` +
         `Ești mentorul lui de trading, cu riscul ÎNTÂI: răspunzi la ORICE întrebare tehnică de tranzacționare (cum funcționează platformele, tipuri de ordine, indicatori, strategii, mărimea poziției, management de risc, când intri/ieși) — pe înțeles, SCURT, doar pe cifre REALE (cele de pe ecran sau surse de net cu link și dată; ce nu ai măsurat spui că nu ai de unde ști). NU promiți câștiguri, NU spui „sigur", NU plasezi ordine. ` +
         `Când dai niveluri concrete pe simbolul de pe ecran (intrare/ieșire/stop/țintă/suport/rezistență), încheie răspunsul cu rândul mașină-citibil, pe rând separat: NIVELURI: intrare=…; stop=…; tinta=…; suport=…; rezistenta=… — doar cele care există; rândul se DESENEAZĂ pe graficul lui.`
+      // MOUSE-UL PE GRAFIC (10 aug, ownerul: „kelion trebuie să vadă când pun
+      // mouse-ul exact peste orice poziție din grafic"). Iframe-ul graficului
+      // trimite lumânarea de sub cursor; o punem în ancoră ca s-o „vadă" exact.
+      const pv = piata.peste
+      if (pv && (typeof pv.c === 'number' || typeof pv.o === 'number')) {
+        const nr = (x?: number | null): string => (typeof x === 'number' && Number.isFinite(x) ? String(x) : '—')
+        const cand = typeof pv.t === 'number' ? new Date(pv.t).toISOString().slice(0, 16).replace('T', ' ') : String(pv.t ?? '?').slice(0, 24)
+        systemPrompt +=
+          `\n\nMOUSE-UL E EXACT PESTE un punct din grafic (îl VEZI acum, nu ghici): lumânarea ${cand} — O ${nr(pv.o)}, H ${nr(pv.h)}, L ${nr(pv.l)}, C ${nr(pv.c)}, volum ${nr(pv.vol)}, MA20 ${nr(pv.ma20)}, EMA50 ${nr(pv.ema50)}. Dacă te întreabă „ce e aici / peste ce sunt / ce arată punctul ăsta / ce lumânare e asta", răspunde pe ACESTE cifre.`
+      }
     }
     if (!(Array.isArray(screen) && screen.length > 0)) {
       // THE EMPTY MONITOR (Adrian, Jul 27, live proof: "open YouTube on the
@@ -2563,10 +2573,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
                 mouse: c.mouse,
               }
             : null
+          // Punctul EXACT de sub cursor pe graficul de trading (când e deschis) —
+          // iframe-ul îl trimite, aici îl dăm brainului la vedere (ownerul, 10 aug).
+          const pg = req.body?.tranzactii?.peste
+          const graficSubCursor = pg && (typeof pg.c === 'number' || typeof pg.o === 'number')
+            ? { moment: pg.t, O: pg.o, H: pg.h, L: pg.l, C: pg.c, volum: pg.vol, MA20: pg.ma20, EMA50: pg.ema50 }
+            : undefined
           return JSON.stringify({
             taburi_deschise: listaTaburi,
             tab_activ: activ ?? '(nimic afișat sau conținut necitibil de pe acest tab)',
             mouse_pozitie: activ?.mouse ? `x: ${activ.mouse.x}, y: ${activ.mouse.y}, indică: ${activ.mouse.indicator}` : 'necunoscută',
+            grafic_sub_cursor: graficSubCursor,
             nota: activ?.continut
               ? 'Conținutul de mai sus e ce vede omul ACUM pe ecran — răspunde din el.'
               : activ?.url

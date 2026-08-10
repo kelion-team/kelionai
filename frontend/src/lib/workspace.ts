@@ -124,11 +124,25 @@ export function getMonitorContent(): { kind: string; title: string; url?: string
 // trebuie să fie „conștient" de pagina de trading) ───────────────────────────
 // Pagina din iframe își raportează starea (postMessage {kelion:
 // 'tranzactii-stare'}); chatul o trimite creierului ca ANCORĂ a clipei.
+// Punctul EXACT de sub cursor pe graficul de trading (ownerul, 10 aug: „kelion
+// trebuie să vadă când pun mouse-ul exact peste orice poziție din grafic").
+// Vine din iframe-ul graficului (singurul care vede lumânarea, nu doar <iframe>).
+export interface PunctGrafic {
+  t: number | string
+  o: number
+  h: number
+  l: number
+  c: number
+  vol: number | null
+  ma20: number | null
+  ema50: number | null
+}
 export interface StareTranzactii {
   simbol: string
   pret: number | null
   interval: string
   sursa: string
+  peste?: PunctGrafic | null
   la: number
 }
 let stareTranzactii: StareTranzactii | null = null

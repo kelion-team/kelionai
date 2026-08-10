@@ -23,12 +23,14 @@
 > locația") — intră în interogarea Serper ȘI în ordonarea de bază ca al treilea
 > filtru (relevanță → salariu → potrivire locație). Distanța = potrivire de
 > locație reală (anunțul menționează zona), NU km inventați fără coordonate.
-> **RÂND NOU (deschis):** „kelion să vadă când pun mouse-ul exact peste orice
-> poziție din graficul de tranzacționare" — arhitectura e mapată (iframe-ul
-> `tranzactii.ts` are deja `cuCrosshair` cu punctul OHLC de sub cursor; se trece
-> prin postMessage → `StareTranzactii` → `body.tranzactii` → mentorul din chat),
-> de implementat. **RÂND NOU:** mutarea pastilelor de credit AI (Serper/Gemini)
-> SUS în admin (răspuns AskUserQuestion), încă neînceput.
+> **REZOLVAT (aceeași sesiune):** „kelion să vadă când pun mouse-ul exact peste
+> orice poziție din graficul de tranzacționare" — `cuCrosshair` din iframe-ul
+> `tranzactii.ts` trimite lumânarea de sub cursor (O/H/L/C/volum/MA20/EMA50) prin
+> postMessage (`peste`, throttled ~150ms) → `StareTranzactii.peste` (workspace.ts)
+> → `body.tranzactii.peste` → ancora mentorului din chat + `get_monitor`
+> (`grafic_sub_cursor`). Merge cu PR-ul locației (#979). **RÂND NOU (deschis):**
+> mutarea pastilelor de credit AI (Serper/Gemini) SUS în admin (răspuns
+> AskUserQuestion), încă neînceput.
 
 > **9 aug 2026 (după-amiaza) — 7 PR-uri MERGED + VERIFICATE LIVE (`c8ebed3` =
 > master, health 200):** #926 trezirea pe nume în persona live; #927 memoria
