@@ -109,6 +109,7 @@ import { gasesteAgentViu, cheamaAgent, rosterViu } from '../services/agentiKelio
 export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
 export { CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL }
 import { latestUpdateSummary } from '../services/updates.js'
+import { bazaPublica } from '../services/bazaPublica.js'
 
 // THE BRAIN — Gemini direct, UNIC (extirparea totală OpenRouter + OpenAI, 3 aug).
 // The selectable chat model is read from KV (same source as /api/models/selection):
@@ -2378,7 +2379,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       }
       return plin
     })()
-    const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
+    // Un Host de loopback (calea VOCALĂ cheamă /api/chat prin 127.0.0.1) nu e
+    // NICIODATĂ baza linkurilor de ecran — harta/imaginile ar pleca spre
+    // browserul omului ca https://127.0.0.1:8080/... și n-ar afișa NIMIC,
+    // mereu (10 aug, ownerul: „nu poate afișa hărți"; detalii în bazaPublica).
+    const baseUrl = bazaPublica(req.headers.host)
     // Voice from the first sentence on the API path too (clients): every
     // broadcast piece enters the pipe; synthesis runs in parallel with the text
     // still flowing.
