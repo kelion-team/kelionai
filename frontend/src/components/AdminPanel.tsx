@@ -8,6 +8,7 @@ import {
 } from '../lib/gestures'
 import BackLink from './BackLink'
 import { adminStrings } from '../lib/adminText'
+import type { BrainCredit } from '../pages/Stage'
 import {
   fetchHistory,
   type HistoryRow,
@@ -152,12 +153,76 @@ function ShareGrid({ title, items }: { title: string; items: { name: string; hre
   )
 }
 
+// PASTILELE AI, MUTATE ÎN ADMIN (10 aug) — self-contained, cu starea proprie de
+// editare. Creditul Gemini declarat se salvează pe /api/admin/gemini-credit (același
+// endpoint ca vechea pastilă); următorul poll din Stage aduce cifra nouă înapoi.
+function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
+  const [edit, setEdit] = useState(false)
+  const [val, setVal] = useState('')
+  const [msg, setMsg] = useState('')
+  if (!brainCredit) return null
+  const g = brainCredit.gemini
+  const s = brainCredit.serper
+  const serperK = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
+  const geminiEticheta =
+    g?.serving && g?.creditGbp != null
+      ? `£${(g.creditRamasGbp ?? g.creditGbp).toFixed(2)}`
+      : g?.serving
+        ? '✓'
+        : g?.reason === 'depleted'
+          ? '£0 ⚠'
+          : '⚠'
+  const salveaza = (): void => {
+    const t = val.trim()
+    const gbp = t === '-' ? null : Number(t.replace(',', '.'))
+    if (t !== '-' && (!Number.isFinite(gbp) || (gbp as number) < 0)) { setMsg('cifră invalidă'); return }
+    setMsg('se salvează…')
+    void fetch('/api/admin/gemini-credit', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include',
+      body: JSON.stringify({ gbp }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { setMsg(j?.ok ? 'salvat — se actualizează la următorul refresh' : 'salvarea a eșuat'); if (j?.ok) setEdit(false) })
+      .catch(() => setMsg('salvarea a eșuat'))
+  }
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: '10px 14px', margin: '10px 0', background: 'color-mix(in srgb, var(--text) 4%, transparent)', border: '1px solid var(--border)', borderRadius: 10 }}>
+      <strong style={{ fontSize: 13, opacity: 0.8 }}>Credite AI</strong>
+      <span title={s?.live ? `${(s.balance ?? 0).toLocaleString()} căutări rămase (Serper)` : 'citirea Serper a eșuat'}>
+        Serper {s?.live ? serperK(s.balance ?? 0) : '⚠'}
+      </span>
+      <span title={g?.monthUsd != null ? `cheltuit luna asta: $${g.monthUsd.toFixed(2)}` : 'cheltuiala Gemini necitibilă'}>
+        Gemini {geminiEticheta}
+      </span>
+      {edit ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input
+            autoFocus value={val} onChange={(e) => setVal(e.target.value)} placeholder="ex: 10.88 („-” șterge)"
+            style={{ width: 130 }}
+            onKeyDown={(e) => { if (e.key === 'Enter') salveaza(); if (e.key === 'Escape') { setEdit(false); setMsg('') } }}
+          />
+          <button type="button" onClick={salveaza}>Salvează</button>
+          <button type="button" onClick={() => { setEdit(false); setMsg('') }}>Renunț</button>
+        </span>
+      ) : (
+        <button type="button" onClick={() => { setVal(g?.creditGbp != null ? String(g.creditGbp) : ''); setMsg(''); setEdit(true) }} title="Editează creditul Gemini declarat (cifra din AI Studio)">
+          ✎ credit Gemini
+        </button>
+      )}
+      <a href="https://aistudio.google.com/billing" target="_blank" rel="noreferrer" style={{ fontSize: 12, opacity: 0.75 }}>alimentează Gemini</a>
+      {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
+    </div>
+  )
+}
+
 export default function AdminPanel({
   onClose,
   initialTab,
+  brainCredit,
 }: {
   readonly onClose: () => void
   readonly initialTab?: 'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
+  readonly brainCredit?: BrainCredit | null
 }) {
   const [tab, setTab] = useState<
     'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
@@ -1015,6 +1080,10 @@ export default function AdminPanel({
           redeschisă de altundeva la nevoie), dar butonul nu se mai arată. */}
           <BackLink onBack={onClose} />
         </header>
+        {/* CREDITELE AI, SUS ÎN ADMIN (Adrian, 10 aug: „mută pastilele AI sub
+            admin"): Serper + Gemini + editarea creditului Gemini declarat — mutate
+            din bara de sus. Bara ține doar VPS-ul. */}
+        <CreditAICard brainCredit={brainCredit} />
         {tab === 'finance' && (
           <section className="admin-finance">
             {/* TREI STĂRI, NU DOUĂ (auditul admin, 3 aug): o citire EȘUATĂ nu
