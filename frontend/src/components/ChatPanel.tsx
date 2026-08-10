@@ -2442,12 +2442,89 @@ export default function ChatPanel({
   // RENDER-LEVEL CLEANUP (Adrian, Aug 1): old saved messages can still carry
   // fake tool-call markup from before the backend stripper existed. It is
   // never shown, no matter how old the bubble.
-  const cleanMsg = (s: string): string =>
-    s
+  const cleanMsg = (s: string): string => {
+    if (!s) return ''
+    
+    // 1. Remove XML/HTML-like thought/thinking tags
+    let cleaned = s
+      .replace(/<thought[\s\S]*?<\/thought>/gi, '')
+      .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
+      .replace(/<thought_signature[\s\S]*?<\/thought_signature>/gi, '')
+      .replace(/<thoughtSignature[\s\S]*?<\/thoughtSignature>/gi, '')
+      .replace(/<thought>[\s\S]*?(<\/thought>|$)/gi, '')
+      .replace(/<thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
+      // Existing cleanups
       .replace(/<\|?tool_call\|?>[\s\S]*?(<\|?\/?tool_call\|?>|$)/g, '')
       .replace(/<\/?tool_call>[\s\S]*?(<\/tool_call>|$)/g, '')
       .replace(/<\|im_(?:start|end)\|>[^\n]*\n?/g, '')
-      .trim()
+
+    // 2. Remove bracketed thought/thinking tags
+    cleaned = cleaned
+      .replace(/\[thought\][\s\S]*?\[\/thought\]/gi, '')
+      .replace(/\[thinking\][\s\S]*?\[\/thinking\]/gi, '')
+      .replace(/\[thought\][\s\S]*?$/gi, '')
+      .replace(/\[thinking\][\s\S]*?$/gi, '')
+
+    // 3. Remove common system/thought prefixes/lines
+    cleaned = cleaned
+      .replace(/^\[CREIER\][\s\S]*?$/gm, '')
+      .replace(/^\[THOUGHT\][\s\S]*?$/gm, '')
+      .replace(/^\[GANDIRE\][\s\S]*?$/gm, '')
+      .replace(/^\[SYSTEM\][\s\S]*?$/gm, '')
+      .replace(/^\[TOOL\][\s\S]*?$/gm, '')
+
+    cleaned = cleaned.trim()
+
+    // 4. Handle JSON structure
+    if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(cleaned)
+        const targetLang = lang || 'ro'
+        if (parsed[targetLang]) {
+          return parsed[targetLang].trim()
+        }
+        const otherLang = targetLang === 'ro' ? 'en' : 'ro'
+        if (parsed[otherLang]) {
+          return parsed[otherLang].trim()
+        }
+        if (parsed.text) return parsed.text.trim()
+        if (parsed.message) return parsed.message.trim()
+      } catch (e) {
+        // Not valid JSON or failed to parse, continue
+      }
+    }
+
+    // 5. Extract specific language part if bilingual markers exist
+    const targetLang = (lang || 'ro').toLowerCase()
+    
+    // Check bracketed markers like [RO] / [EN]
+    const hasRoBracket = /\[ro\]/i.test(cleaned)
+    const hasEnBracket = /\[en\]/i.test(cleaned)
+    if (hasRoBracket || hasEnBracket) {
+      if (targetLang.startsWith('ro')) {
+        const match = cleaned.match(/\[ro\]\s*([\s\S]*?)(?:\s*\[[a-z]{2,}\]|$)/i)
+        if (match && match[1].trim()) return match[1].trim()
+      } else {
+        const match = cleaned.match(/\[en\]\s*([\s\S]*?)(?:\s*\[[a-z]{2,}\]|$)/i)
+        if (match && match[1].trim()) return match[1].trim()
+      }
+    }
+
+    // Check prefixed markers like "RO: ..." / "EN: ..."
+    const hasRoPrefix = /\bRO:\s*/i.test(cleaned)
+    const hasEnPrefix = /\bEN:\s*/i.test(cleaned)
+    if (hasRoPrefix || hasEnPrefix) {
+      if (targetLang.startsWith('ro')) {
+        const match = cleaned.match(/\bRO:\s*([\s\S]*?)(?:\b[a-z]{2,}:|$)/i)
+        if (match && match[1].trim()) return match[1].trim()
+      } else {
+        const match = cleaned.match(/\bEN:\s*([\s\S]*?)(?:\b[a-z]{2,}:|$)/i)
+        if (match && match[1].trim()) return match[1].trim()
+      }
+    }
+
+    return cleaned
+  }
   const hint = t.chatHint
   // The right-hand button concerns ONLY the WRITTEN chat. You have something to send (text or
   // attached file) → it's active. Empty field → the chat is AUDIO (the microphone is always
