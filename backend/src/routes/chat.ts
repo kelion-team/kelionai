@@ -104,8 +104,8 @@ import { numeStrigat } from '../services/numeStrigat.js'
 import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeChat.js'
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL } from '../services/brainToolDefs.js'
-import { gasesteAgentViu, cheamaAgent, rosterViu } from '../services/agentiKelion.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL } from '../services/brainToolDefs.js'
+import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
 export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
@@ -2286,7 +2286,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...BROWSER_TOOLS,
           // Delegarea către cei 33 de agenți specialiști — creierul pune agentul
           // la lucru direct (Adrian, 4 aug). În zona care NU se taie la plafon.
-          CHEAMA_AGENT_TOOL,
+          // + crearea unui agent NOU când lipsește tipul (Adrian, 10 aug).
+          CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL,
           // Sursă + putere de dezvoltator + DB/sănătate + operațiuni („de aur")
           LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
           REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
@@ -2303,6 +2304,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // observabilitatea măsurată = fix ce cerea ownerul, nu se taie la plafon).
           ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
           MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL,
+          // SUITA DE MĂSURARE (8 aug): comandate în promptul de sistem (chat.ts
+          // „ÎNAINTE SĂ SCHIMBI COD: rulează ruleaza_portile"; „de unde știi →
+          // jurnal_masuratori"), cu executor real în adminTools.ts și oferite pe
+          // voce+bucla de noapte prin TOATE_UNELTELE_ADMIN — dar UITATE din
+          // rawTools-ul scris de mână al chatului (10 aug). Fără ruleaza_portile,
+          // repo_open_pr/repo_merge_pr REFUZAU structural pe calea chatului
+          // (dovadaPortilor() nu putea fi satisfăcută). Zona de aur, nu se taie.
+          RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL,
           // ── COADĂ: se taie prima la plafon (ocazionale) ──
           SET_ROLE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL,
           SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
@@ -3236,23 +3245,20 @@ async function runTool(
     // lui. Costul sub-apelului intră în usage.usd (cost REAL al turei, ca la
     // imagini). Un id necunoscut nu inventează — spune care sunt valizi.
     case 'cheama_agent': {
-      // Rosterul VIU (4 aug): și agenții puși de owner din admin sunt chemabili.
-      const a = await gasesteAgentViu(String(args.agent ?? '').trim())
-      if (!a) return JSON.stringify({ error: 'agent_necunoscut', valizi: (await rosterViu()).map((x) => x.id) })
-      const sarcina = String(args.sarcina ?? '').trim()
-      if (!sarcina) return JSON.stringify({ error: 'sarcina_goala' })
-      try {
-        // Blindat (4 aug): pe calea creierului, specialistul primește și memoria
-        // lui Kelion când vorbește ownerul (isAdmin) — nu și pentru vizitatori.
-        const r = await cheamaAgent(a, sarcina, isAdmin)
-        usage.usd += r.costUsd
-        // Registrul vede și agenții (audit 9 aug: costul se DEBITA dar nu se
-        // ÎNREGISTRA — Money tab orb la agenți, ca odinioară la creier).
-        if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
-        return JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text })
-      } catch (e) {
-        return JSON.stringify({ error: 'agent_a_esuat', detaliu: e instanceof Error ? e.message.slice(0, 200) : String(e) })
-      }
+      // Logica unică e în agentiKelion.ts (executaCheamaAgent) — aici doar
+      // contabilizăm costul pe tura curentă (audit 9 aug: costul se DEBITA dar
+      // nu se ÎNREGISTRA — Money tab orb la agenți). isAdmin = memoria lui
+      // Kelion pentru specialist doar când vorbește ownerul.
+      const r = await executaCheamaAgent(String(args.agent ?? ''), String(args.sarcina ?? ''), isAdmin)
+      usage.usd += r.costUsd
+      if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
+      return r.json
+    }
+    case 'agent_nou': {
+      // Creează un specialist NOU când lipsește tipul (Adrian, 10 aug) — logica
+      // unică în agentiKelion.ts (executaAgentNou); instant, scriere în DB.
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return executaAgentNou(String(args.nume ?? ''), String(args.rol ?? ''), args.doarAdmin === true)
     }
     // ── THE PANEL: THREE PROPOSE, THE BRAIN CHOOSES (Adrian, Jul 31) ─────────
     // Steps are written ON THE MONITOR as they happen, not at the end: they

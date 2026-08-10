@@ -200,6 +200,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   // Eyes and grounding
   look: { what: 'Looks through your camera at you or at what you show it', say: '"what is this part?"' },
   get_monitor: { what: 'Checks what is actually on your screen right now', say: '"what am I looking at?"' },
+  goleste_monitorul: { what: 'Clears the screen — closes whatever it is showing', say: '"close the monitor"' },
   get_location: { what: 'Uses your real position, not a guess', say: '"where am I?"' },
 
   // Display

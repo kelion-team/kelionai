@@ -20,7 +20,8 @@ import { turaAdresata } from '../services/numeStrigat.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
 import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
-import { execSharedAdminTool } from '../services/adminTools.js'
+import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
+import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang } from '../db.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
@@ -364,6 +365,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       rostireCurenta = ''
       if (u) void saveMessage(user.email, 'user', u).catch(() => {})
       if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
+      // ÎNVĂȚAREA PE VOCE (10 aug, ownerul: „nu ține minte nimic"): pe scris,
+      // fiecare tură trece prin learnFromTurn (extrage fapte durabile → memorie
+      // 'kelion'); calea vocală nu chema NICIODATĂ asta — un fapt spus la voce
+      // („fiica mea se numește Ana") nu devenea memorie. Acum, la fel ca scrisul.
+      // Fire-and-forget: nu ține tura pe loc, o citire/scriere picată nu strică.
+      if (u || k) void learnFromTurn(user.email, u, k, 'kelion').catch(() => {})
     }
     // UN SINGUR drum de închidere a turei (audit 9 aug): tura suprimată se
     // GOLEȘTE cu jurnal, nu se salvează — regula din onTuraGata, acum și pe
@@ -592,6 +599,17 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         app.log.warn('vocal-live: speech_lang necitibil — pinul de limbă rămâne ro-RO')
       }
       const nume = user.name || user.email.split('@')[0]
+      // MEMORIA DE LUNGĂ DURATĂ (10 aug, ownerul: „nu ține minte nimic"): pe
+      // scris, recallMemories injectează ce știe Kelion despre user în prompt;
+      // calea vocală se cocea DOAR din ultimele 12 replici brute — un fapt
+      // învățat în scris nu era reamintit la voce. Acum aceeași memorie. O citire
+      // picată NU blochează vocea (mai bine fără memorie decât fără voce).
+      let memorie = ''
+      try {
+        memorie = await recallMemories(user.email, 'kelion')
+      } catch {
+        app.log.warn('vocal-live: memoria de lungă durată necitibilă — sesiunea pornește doar cu istoricul recent')
+      }
       // Ancora realității: dacă n-a sosit încă (browserul o trimite chiar la
       // deschiderea socketului), o așteptăm maxim 600 ms — sub pragul „primul
       // cuvânt sub 1s", și oricum sesiunea Google se deschide abia după.
@@ -607,7 +625,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         })
       }
-      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric, ancora, limbaPin)
+      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric, ancora, limbaPin) + memorie
 
       // CONVERSAȚIA SUPRAVIEȚUIEȘTE REPORNIRII (8 aug, ownerul: „trebuie să nu
       // mai moară… chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
@@ -828,7 +846,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // 'nav' adăugat (10 aug, ownerul: „la scris închide/deschide pagina
             // merge, la verbal nu"): open_app_view emite {nav:...}; fără el în
             // listă, deschiderea/închiderea de pagini era ARUNCATĂ tăcut pe voce.
-            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav']
+            // 'niveluri' (nivelurile de tranzacționare pe grafic), 'gest'/'gesture'
+            // (animația avatarului) — aceeași scurgere prin lista albă, adăugate
+            // 10 aug ca cadrele creierului să ajungă la browser și pe voce.
+            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture']
             const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, (frame) => {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
             }, monitorLive)
@@ -848,6 +869,17 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             return
           }
           try {
+            // UNELTELE USER-SCOPED (10 aug): 7 unelte (list_updates, read_inbox,
+            // server_logs, get_real_cost, list_memories, forget_memory,
+            // log_unsupported_request) sunt OFERITE modelului Live prin
+            // TOATE_UNELTELE_ADMIN, dar trăiesc în execUserScopedTool — nu în
+            // execSharedAdminTool. Fără ramura asta răspundeau „nesuportată în
+            // voce" deși pe scris merg. Exact ca bucla de noapte (autonomie.ts).
+            if (USER_SCOPED_TOOLS.has(apel.name)) {
+              const r = await execUserScopedTool(apel.name, apel.args as any, user.email, user.role === 'admin')
+              live?.raspundeUnealta(apel.id, apel.name, { rezultat: r ?? 'Unealtă nesuportată în voce.' })
+              return
+            }
             const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
             if (rezultat !== null) {
               live?.raspundeUnealta(apel.id, apel.name, { rezultat })

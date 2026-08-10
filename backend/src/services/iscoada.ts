@@ -69,7 +69,11 @@ export async function unOcolIscoada(): Promise<{ teme: number; salvate: number }
     }
     if (!text || /^NIMIC\b/i.test(text)) continue
     const zi = new Date().toISOString().slice(0, 10)
-    await addMemory(config.adminEmail, `[iscoada ${zi}] ${tema}: ${text}`.slice(0, 2000), 'iscoada')
+    // Namespace 'kelion' (10 aug): recallMemories citește DOAR agent='kelion'
+    // (chat.ts). Scris pe 'iscoada', ce aduna patrula cadea intr-un sertar pe
+    // care creierul nu-l deschidea niciodata — scriere-oarba. Acum ajunge in
+    // aceeasi memorie pe care Kelion o cauta la fiecare conversatie.
+    await addMemory(config.adminEmail, `[iscoada ${zi}] ${tema}: ${text}`.slice(0, 2000), 'kelion')
     salvate += 1
   }
   return { teme: teme.length, salvate }

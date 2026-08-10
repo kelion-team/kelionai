@@ -1,6 +1,6 @@
 import { config } from '../config.js'
 import { formatNowContext } from './timeContext.js'
-import { listaAgentiCustom, searchMemories, getGoogleRefreshToken } from '../db.js'
+import { listaAgentiCustom, searchMemories, getGoogleRefreshToken, adaugaAgentCustom } from '../db.js'
 import { geminiDirectChat } from './geminiDirect.js'
 import { webSearch, googleTools, runGoogleTool, refreshGoogleAccessToken } from './google.js'
 import type { OrMessage, AnthropicTool } from './brainContract.js'
@@ -192,6 +192,47 @@ export async function rosterViu(): Promise<AgentKelion[]> {
 
 export async function gasesteAgentViu(id: string): Promise<AgentKelion | undefined> {
   return (await rosterViu()).find((a) => a.id === id)
+}
+
+// ── LOGICA UNICĂ A UNELTELOR DE AGENT (10 aug) — un singur loc pentru toate
+// cele trei guri: creierul scris (chat.ts), vocea + bucla de noapte
+// (autonomie.ts) și constructorul. „Nu multiplica duplicările; un singur
+// creier" — înainte, cheama_agent și agent_nou erau copiate în chat.ts ȘI
+// autonomie.ts (jscpd le prindea). Acum sunt aici, o dată. ─────────────────────
+
+/** cheama_agent: găsește agentul viu, îi dă sarcina, întoarce JSON-ul pentru
+ *  model + costul de contabilizat (0 pe eroare — apelantul decide dacă/unde îl
+ *  debitează; creierul de chat îl adaugă la tura curentă). */
+export async function executaCheamaAgent(
+  agent: string,
+  sarcina: string,
+  caAdmin: boolean,
+): Promise<{ json: string; costUsd: number }> {
+  const a = await gasesteAgentViu(String(agent ?? '').trim())
+  if (!a) return { json: JSON.stringify({ error: 'agent_necunoscut', valizi: (await rosterViu()).map((x) => x.id) }), costUsd: 0 }
+  const s = String(sarcina ?? '').trim()
+  if (!s) return { json: JSON.stringify({ error: 'sarcina_goala' }), costUsd: 0 }
+  try {
+    const r = await cheamaAgent(a, s, caAdmin)
+    return { json: JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text }), costUsd: r.costUsd }
+  } catch (e) {
+    return { json: JSON.stringify({ error: 'agent_a_esuat', detaliu: e instanceof Error ? e.message.slice(0, 200) : String(e) }), costUsd: 0 }
+  }
+}
+
+/** agent_nou: creează un specialist NOU când lipsește tipul. Instant, scriere în
+ *  DB (agenti_custom) — fără publicare, disponibil imediat prin cheama_agent.
+ *  Întoarce JSON-ul pentru model. */
+export async function executaAgentNou(nume: string, rol: string, doarAdmin: boolean): Promise<string> {
+  const n = String(nume ?? '').trim().slice(0, 80)
+  const r = String(rol ?? '').trim()
+  if (n.length < 3 || r.length < 10) return JSON.stringify({ error: 'nume (min 3) și rol (min 10) obligatorii' })
+  const id = n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/^agent\s+/i, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+  if (!id) return JSON.stringify({ error: 'din nume nu iese un id valid' })
+  const err = await adaugaAgentCustom({ id, nume: n, rol: r, doarAdmin })
+  if (err) return JSON.stringify({ error: err })
+  return JSON.stringify({ ok: true, id, nume: n, mesaj: `Agent nou creat: ${n} (${id}). Îl poți chema imediat cu cheama_agent.` })
 }
 
 const BAZA_PUBLICA = 'https://kelionai.app'

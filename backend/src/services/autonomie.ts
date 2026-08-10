@@ -686,6 +686,21 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
     case 'browser_key': return scurt(await browserKey(email, baseUrl, String(args.key ?? '')))
     case 'browser_click_at': return scurt(await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0)))
     case 'browser_close': { await browserClose(email); return JSON.stringify({ ok: true }) }
+    // ── AGENȚII, ȘI PENTRU CONSTRUCTOR (10 aug, ownerul: „constructorul să
+    // folosească la nevoie automat toți agenții"; „când îi lipsește un TIP de
+    // agent, îl creează automat, verifică și dă deploy") ─────────────────────
+    // Logica unică e în agentiKelion.ts (executa*) — aici doar o chemăm. Import
+    // dinamic: agentiKelion ar închide un ciclu la evaluarea modulului (lecția
+    // 2 aug); la RULARE e sigur.
+    case 'cheama_agent': {
+      const { executaCheamaAgent } = await import('./agentiKelion.js')
+      const r = await executaCheamaAgent(String(args.agent ?? ''), String(args.sarcina ?? ''), true)
+      return r.json.slice(0, 20_000)
+    }
+    case 'agent_nou': {
+      const { executaAgentNou } = await import('./agentiKelion.js')
+      return executaAgentNou(String(args.nume ?? ''), String(args.rol ?? ''), args.doarAdmin === true)
+    }
     default: return JSON.stringify({ error: `unealtă necunoscută: ${name}` })
   }
 }

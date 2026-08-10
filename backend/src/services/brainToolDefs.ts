@@ -673,11 +673,11 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
 export const RUN_RUNBOOK_TOOL: Tool = {
   name: 'run_runbook',
   description:
-    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'curata-zombi', 'instaleaza-pachet-sistem'. You are fully autonomous — run these freely whenever the owner's request calls for them. For 'instaleaza-pachet-sistem', specify the system package name in 'pachet' (e.g. ffmpeg, htop). If the result carries a 'warning' about a failure LOOP: do NOT retry the same fix — run 'diagnostic', read the facts, change strategy (the owner is alerted by email automatically). Special owner commands: 'pauza-autonomie' freezes all autonomous actions, 'reia-autonomia' resumes them — call these when the owner says stop/resume. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
+    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'proba-restaurare' (verifies a backup can actually be restored), 'curata-zombi', 'instaleaza-pachet-sistem'. You are fully autonomous — run these freely whenever the owner's request calls for them. For 'instaleaza-pachet-sistem', specify the system package name in 'pachet' (e.g. ffmpeg, htop). If the result carries a 'warning' about a failure LOOP: do NOT retry the same fix — run 'diagnostic', read the facts, change strategy (the owner is alerted by email automatically). Special owner commands: 'pauza-autonomie' freezes all autonomous actions, 'reia-autonomia' resumes them — call these when the owner says stop/resume. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
   input_schema: {
     type: 'object',
     properties: {
-      name: { type: 'string', description: "Runbook name: diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, curata-zombi, instaleaza-pachet-sistem." },
+      name: { type: 'string', description: "Runbook name: diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, proba-restaurare, curata-zombi, instaleaza-pachet-sistem." },
       pachet: { type: 'string', description: "Optional system package name for instaleaza-pachet-sistem (e.g. htop, ffmpeg)." },
     },
     required: ['name'],
@@ -782,5 +782,24 @@ export const CHEAMA_AGENT_TOOL: Tool = {
       sarcina: { type: 'string', description: 'sarcina completă și clară pentru agent (context + ce anume trebuie făcut)' },
     },
     required: ['agent', 'sarcina'],
+  },
+}
+
+// CREAREA UNUI AGENT NOU (Adrian, 10 aug: „când îi lipsește un TIP de agent,
+// Kelion îl creează automat"). Instant — agentul e o persona (id+nume+rol)
+// folosită imediat de cheama_agent; nu cere publicare. ADMIN ONLY.
+export const AGENT_NOU_TOOL: Tool = {
+  name: 'agent_nou',
+  description:
+    'ADMIN ONLY. Creează un AGENT SPECIALIST NOU când îți lipsește TIPUL de care ai nevoie pentru o sarcină ' +
+    '(nu-l ai deja în roster). Instant, fără publicare: agentul e disponibil imediat prin cheama_agent. ' +
+    'Anunță pe scurt ownerul ce agent ai creat, apoi deleagă-i sarcina.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      nume: { type: 'string', description: 'numele agentului (ex. „Agent SEO"), min 3 caractere' },
+      rol: { type: 'string', description: 'meseria/rolul lui, ce știe să facă, min 10 caractere' },
+    },
+    required: ['nume', 'rol'],
   },
 }
