@@ -681,7 +681,7 @@ export default function Stage({ user }: { user: User }) {
             // VALIDATED section (Jul 24 audit): a free string from the model
             // ("bani", "finanțe") set a nonexistent tab → empty panel. Only
             // real sections pass; otherwise the current tab stays.
-            const VALID = ['finance', 'users', 'visitors', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'] as const
+            const VALID = ['finance', 'users', 'visitors', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare', 'sistem'] as const
             const sec = String(d?.section ?? '')
             if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
             openAdmin()
