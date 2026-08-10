@@ -41,6 +41,42 @@ interface JobGasit {
   description: string
 }
 
+/** Extrage cifrele de salariu ANUAL dintr-un text (titlu+snippet de la Google):
+ *  „£30,000 - £35,000", „£25,000.00/yr", „£70k", „47000". 'k' = ×1000. Ține doar
+ *  ce e plauzibil salariu (8k–1M), ca să nu prindă ani (2024) sau ore (37.5). */
+export function salariileDinText(text: string): number[] {
+  const nums: number[] = []
+  const re = /£\s*([\d][\d.,]*)\s*(k)?|(\d[\d.,]*)\s*k\b|\b(\d{5,6})\b/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const raw = m[1] ?? m[3] ?? m[4] ?? ''
+    const isK = Boolean(m[2] || m[3])
+    let n = Number(raw.replace(/[,]/g, '').replace(/\.(?=\d{3}\b)/g, ''))
+    if (!Number.isFinite(n)) continue
+    if (isK) n *= 1000
+    if (n >= 8000 && n <= 1_000_000) nums.push(n)
+  }
+  return nums
+}
+
+/** Un rezultat trece filtrul de salariu dacă intervalul lui se SUPRAPUNE cu
+ *  [min,max] cerut. Fără cifră de salariu în text = incert → NU se ascunde. */
+export function treceSalariul(text: string, min: number, max: number): boolean {
+  const s = salariileDinText(text)
+  if (s.length === 0) return true
+  const rMin = Math.min(...s)
+  const rMax = Math.max(...s)
+  return rMax >= min && rMin <= max
+}
+
+/** Câte cuvinte din căutare apar în text (titlul contează dublu la apelant).
+ *  „Cel mai apropiat ca nume/atribuții" = relevanța, filtrul de bază #1. */
+export function scorRelevanta(text: string, term: string): number {
+  const t = String(text || '').toLowerCase()
+  const words = [...new Set(String(term || '').toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])]
+  return words.reduce((s, w) => s + (t.includes(w) ? 1 : 0), 0)
+}
+
 interface AdaptBody {
   jobs?: { title?: string; link?: string; platform?: string; description?: string }[]
   jobDescription?: string
@@ -222,7 +258,40 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     if (picat === alese.length) {
       return reply.status(503).send({ error: 'căutarea nu e disponibilă acum (cheia/cota Serper) — nu pot căuta joburi reale în acest moment' })
     }
-    return reply.send({ jobs, nota: jobs.length === 0 ? `Google nu a întors anunțuri pentru „${term}" pe platformele alese — încearcă alți termeni.` : undefined })
+
+    // FILTRUL DE SALARIU CHIAR FILTREAZĂ (Adrian, 10 aug: „nu se aplică filtrele").
+    // Interogarea Google e doar un indiciu — Google întoarce oricum și joburi sub
+    // prag. Aici tăiem REAL: păstrăm doar anunțurile al căror salariu (extras din
+    // titlu+snippet) se suprapune cu intervalul cerut; cele fără cifră rămân (incert,
+    // nu le ascundem). Câte am scos = spus pe față în notă.
+    let afisate = jobs
+    let scoase = 0
+    if (nMin > 0 || nMax > 0) {
+      const min = nMin > 0 ? nMin : 0
+      const max = nMax > 0 ? nMax : Number.MAX_SAFE_INTEGER
+      afisate = jobs.filter((j) => treceSalariul(`${j.title} ${j.description}`, min, max))
+      scoase = jobs.length - afisate.length
+    }
+
+    // ORDONAREA DE BAZĂ, PERMANENTĂ (Adrian, 10 aug): 1) cel mai apropiat ca
+    // nume/atribuții (relevanța — titlul dublu), 2) salariul cel mai mare. Un
+    // rezultat mai potrivit + mai bine plătit urcă mereu primul.
+    // (Distanța cea mai apropiată = al treilea criteriu — se cablează când
+    // căutarea primește GPS-ul userului; vezi RAMAS.)
+    const scorJob = (j: JobGasit): { rel: number; sal: number } => ({
+      rel: scorRelevanta(j.title, term) * 2 + scorRelevanta(j.description, term),
+      sal: Math.max(0, ...salariileDinText(`${j.title} ${j.description}`)),
+    })
+    afisate = afisate
+      .map((j) => ({ j, s: scorJob(j) }))
+      .sort((a, b) => (b.s.rel - a.s.rel) || (b.s.sal - a.s.sal))
+      .map((x) => x.j)
+
+    const noteParts: string[] = []
+    if (afisate.length === 0 && jobs.length > 0) noteParts.push(`Toate cele ${jobs.length} anunțuri găsite sunt în afara intervalului de salariu — lărgește intervalul.`)
+    else if (afisate.length === 0) noteParts.push(`Google nu a întors anunțuri pentru „${term}" pe platformele alese — încearcă alți termeni.`)
+    else if (scoase > 0) noteParts.push(`${scoase} anunțuri sub/peste intervalul de salariu au fost ascunse.`)
+    return reply.send({ jobs: afisate, nota: noteParts.join(' ') || undefined })
   })
 
   // ADAPTAREA REALĂ — lanțul de agenți („toți agenții... cu management activat,
