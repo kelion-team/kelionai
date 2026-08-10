@@ -680,10 +680,18 @@ export default function Stage({ user }: { user: User }) {
             openAdmin()
           }
           break
+        case 'trading':
+          // „deschide tranzacții" prin Kelion (voce/chat) — comută tabul, ca
+          // butonul 📈 (10 aug: open_app_view acoperă acum și Centrul).
+          if (user.role === 'admin' && !closeTasksByKind('tranzactii')) openWorkspace('📈 Tranzacții', '/api/tranzactii')
+          break
         case 'home':
+          // „închide pagina / ieși" = închide panourile ȘI golește monitorul
+          // (10 aug: la voce nu mergea — cadrul {nav} era filtrat; acum trece).
           setSettingsOpen(false)
           setContactOpen(false)
           setAdminOpen(false)
+          closeAllTasks()
           break
       }
     }
