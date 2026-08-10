@@ -20,6 +20,7 @@ interface CvAdaptationProps {
 export default function CvAdaptation({ onClose }: CvAdaptationProps): React.ReactElement {
   const [activeSubTab, setActiveSubTab] = useState<'search' | 'custom'>('search')
   const [searchTerm, setSearchTerm] = useState('')
+  const [location, setLocation] = useState('')
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['linkedin', 'indeed', 'cv_library'])
   const [salaryMin, setSalaryMin] = useState('')
   const [salaryMax, setSalaryMax] = useState('')
@@ -62,7 +63,7 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
     try {
       const res = await fetch('/api/jobs/search', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchTerm, platforms: selectedPlatforms, salaryMin: salaryMin || undefined, salaryMax: salaryMax || undefined }),
+        body: JSON.stringify({ query: searchTerm, location: location || undefined, platforms: selectedPlatforms, salaryMin: salaryMin || undefined, salaryMax: salaryMax || undefined }),
       })
       const data = await res.json()
       if (!res.ok) { setErrorMessage(data.error || 'Eroare la căutare'); setJobs([]); return }
@@ -209,7 +210,9 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
               <div>
                 <form onSubmit={handleSearch} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <label style={{ fontSize: '0.85rem', color: '#909296' }}>Ce cauți (titlu, tehnologie, companie):</label>
-                  <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ex: React developer London" style={input} />
+                  <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ex: React developer" style={input} />
+                  <label style={{ fontSize: '0.85rem', color: '#909296' }}>Locație (oraș, zonă):</label>
+                  <input type="text" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="ex: London, Manchester, remote" style={input} />
                   <label style={{ fontSize: '0.85rem', color: '#909296' }}>Interval de salariu (opțional):</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <input type="number" min="0" value={salaryMin} onChange={(e) => setSalaryMin(e.target.value)} placeholder="min (ex. 40000)" style={{ ...input, flex: 1 }} />

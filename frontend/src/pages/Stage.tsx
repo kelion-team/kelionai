@@ -29,6 +29,7 @@ import {
   setMonitorWorking,
   setTaskStatus,
   setStareTranzactii,
+  type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
@@ -799,7 +800,7 @@ export default function Stage({ user }: { user: User }) {
   useEffect(() => {
     const laMesaj = (ev: MessageEvent): void => {
       if (ev.origin !== window.location.origin) return
-      const d = ev.data as { kelion?: string; simbol?: unknown; pret?: unknown; interval?: unknown; sursa?: unknown } | null
+      const d = ev.data as { kelion?: string; simbol?: unknown; pret?: unknown; interval?: unknown; sursa?: unknown; peste?: unknown } | null
       if (d?.kelion === 'inchide-tranzactii') closeTasksByKind('tranzactii')
       // Închiderea monitorului dintr-un tab (harta, orice pagină-aplicație) =
       // golirea monitorului (10 aug, ownerul: „funcția de a închide monitorul e
@@ -813,6 +814,8 @@ export default function Stage({ user }: { user: User }) {
           pret: Number(d.pret) || null,
           interval: String(d.interval ?? ''),
           sursa: String(d.sursa ?? ''),
+          // Punctul exact de sub cursor pe grafic (null = mouse-ul nu e pe o lumânare).
+          peste: (d.peste && typeof d.peste === 'object') ? (d.peste as PunctGrafic) : null,
           la: Date.now(),
         })
     }

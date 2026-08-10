@@ -224,13 +224,21 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/jobs/search', async (req, reply) => {
     const cine = await platitorul(req, reply)
     if (!cine) return
-    const { query = '', platforms = Object.keys(PLATFORME), salaryMin, salaryMax } =
-      (req.body ?? {}) as { query?: string; platforms?: string[]; salaryMin?: number | string; salaryMax?: number | string }
+    const { query = '', platforms = Object.keys(PLATFORME), salaryMin, salaryMax, location = '' } =
+      (req.body ?? {}) as { query?: string; platforms?: string[]; salaryMin?: number | string; salaryMax?: number | string; location?: string }
     const term = String(query).trim()
     if (!term) return reply.status(400).send({ error: 'scrie ce cauți (titlu, tehnologie, companie)' })
 
     const alese = platforms.filter((p) => PLATFORME[p]).slice(0, 3)
     if (alese.length === 0) return reply.status(400).send({ error: 'alege cel puțin o platformă' })
+
+    // LOCAȚIA (Adrian, 10 aug: „lipsește unde editezi locația") — câmp propriu,
+    // separat de termen. O lipim în interogarea Google (ancorează rezultatele pe
+    // zonă) ȘI o folosim la ordonare, ca al treilea filtru de bază („distanța cea
+    // mai apropiată"): potrivirea de locație = anunțul chiar menționează zona
+    // cerută. Reală, nu inventată — nu pretindem km fără coordonate.
+    const locatie = String(location).trim().slice(0, 80)
+    const clauzaLocatie = locatie ? ` ${locatie}` : ''
 
     // INTERVAL DE SALARIU (Adrian, 10 aug): îl lipim în interogarea Google, ca
     // rezultatele să fie ancorate pe cifre reale. Doar numere valide intră.
@@ -246,7 +254,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     let picat = 0
     for (const p of alese) {
       const { site, nume } = PLATFORME[p]
-      const rez = await cautareStructurata(`site:${site} ${term}${clauzaSalariu}`, 6)
+      const rez = await cautareStructurata(`site:${site} ${term}${clauzaLocatie}${clauzaSalariu}`, 6)
       if (rez === null) {
         picat++
         continue
@@ -274,17 +282,17 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     // ORDONAREA DE BAZĂ, PERMANENTĂ (Adrian, 10 aug): 1) cel mai apropiat ca
-    // nume/atribuții (relevanța — titlul dublu), 2) salariul cel mai mare. Un
-    // rezultat mai potrivit + mai bine plătit urcă mereu primul.
-    // (Distanța cea mai apropiată = al treilea criteriu — se cablează când
-    // căutarea primește GPS-ul userului; vezi RAMAS.)
-    const scorJob = (j: JobGasit): { rel: number; sal: number } => ({
+    // nume/atribuții (relevanța — titlul dublu), 2) salariul cel mai mare, 3)
+    // distanța cea mai apropiată = potrivirea de locație (anunțul menționează
+    // zona cerută). Cele trei filtre de bază pe care le-a cerut, în ordinea lui.
+    const scorJob = (j: JobGasit): { rel: number; sal: number; loc: number } => ({
       rel: scorRelevanta(j.title, term) * 2 + scorRelevanta(j.description, term),
       sal: Math.max(0, ...salariileDinText(`${j.title} ${j.description}`)),
+      loc: locatie ? scorRelevanta(`${j.title} ${j.description}`, locatie) : 0,
     })
     afisate = afisate
       .map((j) => ({ j, s: scorJob(j) }))
-      .sort((a, b) => (b.s.rel - a.s.rel) || (b.s.sal - a.s.sal))
+      .sort((a, b) => (b.s.rel - a.s.rel) || (b.s.sal - a.s.sal) || (b.s.loc - a.s.loc))
       .map((x) => x.j)
 
     const noteParts: string[] = []
