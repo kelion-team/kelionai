@@ -94,11 +94,15 @@ async function pasAgent(
   sarcina: string,
   email: string,
   caAdmin: boolean,
+  efort?: 'low' | 'high',
 ): Promise<{ agent: string; nume: string; text: string; ok: boolean }> {
   const a = await gasesteAgentViu(idAgent)
   if (!a) return { agent: idAgent, nume: numePas, text: `agentul ${idAgent} nu există în roster`, ok: false }
   try {
-    const r = await cheamaAgent(a, sarcina, caAdmin)
+    // Efortul override (10 aug): pașii ușori (cercetare/verificare/plan) merg pe
+    // flash (rapid); doar adaptarea rămâne pe Pro. Altfel 4 apeluri high pe Pro,
+    // secvențial, fac fluxul să pară blocat.
+    const r = await cheamaAgent(efort ? { ...a, efort } : a, sarcina, caAdmin)
     if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
     return { agent: a.id, nume: numePas, text: r.text.trim(), ok: Boolean(r.text.trim()) }
   } catch (e) {
@@ -260,36 +264,41 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     // 3. LANȚUL DE AGENȚI — pașii unui om care aplică, pe bune.
     const pasi: { agent: string; nume: string; text: string; ok: boolean }[] = []
 
+    // CERCETARE — pe FLASH și DOAR pe textul dat (fără căutare web = fără runde de
+    // unelte lente): textul anunțului e deja în context, nu mai e nevoie să bată netul.
     const cercetare = await pasAgent(
       'cautator', 'Cercetare',
-      `Un candidat aplică la joburile de mai jos. Cercetează REAL (căutare web + citește pagini dacă ajută): ce cere concret fiecare rol, ce e important pentru angajator/companie, cuvintele-cheie pe care sistemele de filtrare CV (ATS) le caută. Scurt și concret, pe puncte, per anunț.\n${context}`,
-      cine.email, cine.admin,
+      `Din anunțurile de mai jos (folosește DOAR textul dat, NU căuta pe web), extrage pe scurt, pe puncte: ce cere concret fiecare rol și cuvintele-cheie pe care le caută filtrele de CV (ATS).\n${context}`,
+      cine.email, cine.admin, 'low',
     )
     pasi.push(cercetare)
 
+    // ADAPTAREA — pasul esențial, pe Pro (high).
     const adaptare = await pasAgent(
       'documente', 'Adaptare CV + scrisoare',
       `Rescrie CV-ul de mai jos ADAPTAT pentru anunțurile date. REGULĂ DE FIER: nimic inventat — nu adăuga experiență, ani sau tehnologii care nu apar în CV-ul original; doar reformulezi, reordonezi și scoți în față ce se potrivește, cu cuvintele-cheie ale anunțului. Apoi scrie o SCRISOARE DE INTENȚIE scurtă (max 150 de cuvinte), concretă, fără șabloane goale.\n\nCV ORIGINAL:\n${cv}\n\nANUNȚURILE:\n${context}\n\nCE A AFLAT CERCETAREA:\n${cercetare.ok ? cercetare.text : '(cercetarea a picat — folosește doar anunțurile)'}\n\nFormat: întâi CV-ul adaptat complet, apoi „--- SCRISOARE DE INTENȚIE ---" și scrisoarea.`,
-      cine.email, cine.admin,
+      cine.email, cine.admin, 'high',
     )
     pasi.push(adaptare)
     if (!adaptare.ok) {
       return reply.status(502).send({ error: `adaptarea a picat: ${adaptare.text}`, pasi })
     }
 
-    const verificare = await pasAgent(
-      'critic', 'Verificare',
-      `Verifică CV-ul adaptat față de anunțuri: 1) A inventat ceva ce nu era în original? (dacă da, spune exact ce trebuie scos) 2) Ce cerințe REALE ale anunțului nu sunt acoperite de candidat (golurile, cinstit)? 3) Trei îmbunătățiri concrete. Scurt, pe puncte.\n\nCV ORIGINAL:\n${cv.slice(0, 6000)}\n\nCV ADAPTAT:\n${adaptare.text.slice(0, 8000)}\n\nANUNȚURILE:\n${context.slice(0, 4000)}`,
-      cine.email, cine.admin,
-    )
-    pasi.push(verificare)
-
-    const plan = await pasAgent(
-      'planificator', 'Plan de aplicare + interviu',
-      `Pentru candidatura de mai jos, fă: 1) PAȘII CONCREȚI de aplicare (unde intră, pe ce link aplică, ce atașează, când revine cu follow-up); 2) 5 ÎNTREBĂRI PROBABILE de interviu PENTRU ACESTE roluri, cu schița răspunsului bazată STRICT pe CV-ul candidatului (nimic inventat).\n\nANUNȚURILE:\n${context.slice(0, 4000)}\n\nCV ADAPTAT:\n${adaptare.text.slice(0, 6000)}`,
-      cine.email, cine.admin,
-    )
-    pasi.push(plan)
+    // VERIFICARE + PLAN — depind DOAR de adaptare, nu una de alta → în PARALEL,
+    // pe flash. Așa fluxul se termină în ~2 valuri, nu în 4 secvențiale.
+    const [verificare, plan] = await Promise.all([
+      pasAgent(
+        'critic', 'Verificare',
+        `Verifică CV-ul adaptat față de anunțuri: 1) A inventat ceva ce nu era în original? (dacă da, spune exact ce trebuie scos) 2) Ce cerințe REALE ale anunțului nu sunt acoperite de candidat (golurile, cinstit)? 3) Trei îmbunătățiri concrete. Scurt, pe puncte.\n\nCV ORIGINAL:\n${cv.slice(0, 6000)}\n\nCV ADAPTAT:\n${adaptare.text.slice(0, 8000)}\n\nANUNȚURILE:\n${context.slice(0, 4000)}`,
+        cine.email, cine.admin, 'low',
+      ),
+      pasAgent(
+        'planificator', 'Plan de aplicare + interviu',
+        `Pentru candidatura de mai jos, fă: 1) PAȘII CONCREȚI de aplicare (unde intră, pe ce link aplică, ce atașează, când revine cu follow-up); 2) 5 ÎNTREBĂRI PROBABILE de interviu PENTRU ACESTE roluri, cu schița răspunsului bazată STRICT pe CV-ul candidatului (nimic inventat).\n\nANUNȚURILE:\n${context.slice(0, 4000)}\n\nCV ADAPTAT:\n${adaptare.text.slice(0, 6000)}`,
+        cine.email, cine.admin, 'low',
+      ),
+    ])
+    pasi.push(verificare, plan)
 
     return reply.send({
       success: true,
@@ -297,7 +306,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
       verificare: verificare.ok ? verificare.text : undefined,
       plan: plan.ok ? plan.text : undefined,
       pasi: pasi.map((p) => ({ agent: p.agent, nume: p.nume, ok: p.ok, text: p.text })),
-      message: 'Adaptare făcută cu lanțul de agenți (cercetare → adaptare → verificare → plan).',
+      message: 'Adaptare făcută cu lanțul de agenți (cercetare → adaptare → verificare + plan).',
     })
   })
 }
