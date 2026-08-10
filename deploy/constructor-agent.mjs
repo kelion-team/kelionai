@@ -407,6 +407,10 @@ const RUN_ALLOWED = new Set([
   'node scripts/verifica-sintaxa.mjs',
   'node scripts/verifica-exporturi.mjs',
   'node scripts/verifica-gemini.mjs',
+  // jscpd (cod duplicat) — poarta reală de pe VPS o rulează oricum; dându-i-o
+  // modelului, poate să-și verifice singur duplicatele într-o rundă de reparație
+  // în loc să afle abia din feedback că a picat.
+  'npx --yes jscpd --threshold 0.0001',
 ])
 // INSTALAREA DE DEPENDENȚE (Etapa 5 autonomie): un ordin poate cere o bibliotecă
 // NOUĂ, iar până acum `npm install` era „comandă nepermisă" — deci constructorul
@@ -568,7 +572,7 @@ THE WORK METHOD — follow it 100%, in this order, on EVERY order (the tool-step
 3. PLAN. One line: which file(s) change and how the change will be verified.
 4. EXECUTE. On existing files use 'edit' (EXACT old text → new text) or, on LARGE files, 'edit_lines' (give the from/to line numbers from 'read' + the new text — no text matching, immune to the output cap). NEVER 'write' a large existing file — your output has a cap and gets cut in half, corrupting it. Use 'write' only for NEW or small files. Fix the CAUSE, not the symptom; cleanly rewrite the responsible module — no band-aid patches; match the surrounding style. All code comments in ENGLISH. Changes STRICTLY inside the order's perimeter — nothing "on the fly"; never touch financial counters, never delete data.
    NEVER FAKE A FEATURE (owner's iron rule, 10 Aug, after order #166 shipped a "job search" with a HARDCODED job list and invented "AI adaptation" text): no simulated/hardcoded data presented as real, no mock lists, no invented outputs pretending to be a service. If the order needs search/AI/external data, wire the REAL services this app already has (webSearch via the brain, cheama_agent, db_query, browser_* — all through /api/constructor/tool). If the real integration is genuinely impossible from here, BUILD NOTHING FAKE — say so honestly in the PR body and via request_repair. A visibly missing feature is acceptable; a fake one is not.
-5. PROVE. "Done" is never a claim — it is evidence. Before calling 'finish', re-read the order and check that your change actually FULFILS it (not merely that it compiles). Then call 'finish' IMMEDIATELY — do NOT run 'npm ci/build/test' yourself; the system verifies on its own after finish. Target: finish within ≤3 tool calls after finding the file.
+5. PROVE. "Done" is never a claim — it is evidence. Before calling 'finish', re-read the order and check that your change actually FULFILS it (not merely that it compiles). Then call 'finish' IMMEDIATELY — do NOT run 'npm ci/build/test' yourself; the system verifies on its own after finish. The verification runs the SAME seven house gates as the PR gate: backend tsc, backend tests, frontend build, jscpd (ZERO duplicated code — extract a shared helper, never copy-paste), unused-exports (no export without a caller), syntax (no conflict markers, valid CSS/JSON), and BOOT on dist (the app must actually start and print "Server listening" — so never write a route/handler at module scope; register it inside the Fastify plugin where the fastify instance and the pool are in scope). If any gate fails you get a repair round with the exact error. Target: finish within ≤3 tool calls after finding the file.
    EXCEPTION — NEW dependency: if the order needs a package that does not exist yet, run 'run' with "npm --prefix backend install <package>" (or frontend) BEFORE finish — so package.json + lock stay in sync and verification passes.
 6. REPORT HONESTLY. The PR body (in Romanian, for the owner) states three things: what was done, how it was verified, and what remains unverified. An honest "this could not be verified" is worth more than a confident guess. If the system tells you the build failed, repair the CAUSE and re-finish (you have a small number of repair rounds). Never hide a failure.
 
@@ -894,6 +898,55 @@ function verificaAtelierul() {
     log(`verific: ${cmd}`)
     const out = toolRun(cmd)
     if (/^EȘEC/.test(out)) return `verificarea a picat la „${cmd}":\n${out.slice(-2000)}`
+  }
+  // PORȚILE COMPLETE ALE CASEI (10 aug — #973 job-173): atelierul verifica DOAR
+  // build+teste, dar POARTA reală de pe VPS (deploy/porti-pr.sh) rulează încă
+  // PATRU pe care atelierul le sărea — cod duplicat (jscpd), exporturi fără
+  // utilizator, sintaxă (markeri de conflict + CSS/JSON) și BOOTUL pe dist cu
+  // Node curat. Așa a putut #973 să treacă buildul în atelier și să pice pe
+  // poartă (tsc/teste/boot roșii), lăsând ownerul cu un PR roșu. Acum rulăm
+  // EXACT aceleași porți AICI: dacă pică, ne întoarcem în runda de reparație și
+  // modelul repară cauza — nu se mai deschide niciun PR care pică pe poartă.
+  const porti = verificaPortileCasei(touchedBackend)
+  if (porti) return porti
+  return ''
+}
+
+// OGLINDA EXACTĂ a lui deploy/porti-pr.sh, rulată în atelier. `sh` = codul NOSTRU
+// de verificare (nu shell-ul modelului), deci nu trece prin RUN_ALLOWED. Întoarce
+// '' dacă toate trec, altfel textul primei porți picate (dat modelului la reparație).
+function verificaPortileCasei(backendGataInstalat) {
+  const coada = (e) => String((e.stdout ?? '') + (e.stderr ?? '')).slice(-2000)
+  // 1) cod duplicat (jscpd) — pragul din poartă: 0 clone
+  log('verific: npx --yes jscpd --threshold 0.0001')
+  try { sh('npx --yes jscpd --threshold 0.0001', { timeout: 5 * 60_000 }) }
+  catch (e) { return `poarta „cod duplicat (jscpd)" a picat — scoate duplicatul (extrage un helper comun):\n${coada(e)}` }
+  // 2) exporturi fără utilizator
+  log('verific: node scripts/verifica-exporturi.mjs')
+  try { sh('node scripts/verifica-exporturi.mjs', { timeout: 2 * 60_000 }) }
+  catch (e) { return `poarta „exporturi fără utilizator" a picat — șterge exportul nefolosit sau folosește-l:\n${coada(e)}` }
+  // 3) sintaxă — markeri de conflict + CSS/JSON valide
+  log('verific: node scripts/verifica-sintaxa.mjs')
+  try { sh('node scripts/verifica-sintaxa.mjs', { timeout: 2 * 60_000 }) }
+  catch (e) { return `poarta „sintaxă CSS + JSON" a picat:\n${coada(e)}` }
+  // 4) BOOTUL pe dist cu Node curat — poarta care a prins căderea producției din
+  //    2 aug (ciclu de importuri): tsc+teste+build erau verzi, dar aplicația NU
+  //    pornea. Singura dovadă că pornește e s-o pornești. Backend-ul are nevoie
+  //    de dependențe + build de emisie; dacă atelierul nu le-a instalat (ordinul
+  //    n-a atins backend/), le instalăm acum, exact ca poarta (porti-pr.sh:49).
+  if (!backendGataInstalat) {
+    log('verific (boot): npm --prefix backend ci')
+    try { sh('npm --prefix backend ci', { timeout: 10 * 60_000 }) }
+    catch { try { sh('npm --prefix backend install', { timeout: 10 * 60_000 }) } catch (e) { return `bootul: instalarea dependențelor backend a picat:\n${coada(e)}` } }
+  }
+  log('verific (boot): npm --prefix backend run build')
+  try { sh('npm --prefix backend run build', { timeout: 5 * 60_000 }) }
+  catch (e) { return `bootul: buildul de emisie a picat:\n${coada(e)}` }
+  log("verific (boot): PORT=18099 node dist/index.js → „Server listening”")
+  try {
+    sh("PORT=18099 timeout 20 node dist/index.js 2>&1 | grep -qm1 'Server listening'", { cwd: ATELIER + '/backend', timeout: 30_000 })
+  } catch {
+    return 'poarta „bootul pe dist (Node curat)" a picat: aplicația nu a scris „Server listening" în 20s. Cauze uzuale: ciclu de importuri, cod la nivel de modul care aruncă la încărcare, sau o rută/`fastify.post` scrisă în afara plugin-ului (fără `fastify`/`getPool` în scope). Repară cauza, nu simptomul.'
   }
   return ''
 }
@@ -1323,7 +1376,7 @@ async function main() {
     const linieCreier = `Creier folosit: Gemini (google-direct/${GEMINI_MODEL}, cheia ownerului) · tokeni: ${tokens}`
     const prUrl = await deschidePR(
       titlu,
-      `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, verificare build/teste în atelier). Se îmbină singur DOAR pe CI verde; pe roșu rămâne deschis cu problemele raportate.`,
+      `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, toate cele 7 porți rulate în atelier: tsc, teste, build, jscpd, exporturi, sintaxă, boot pe dist). Se îmbină singur DOAR pe poartă verde; pe roșu rămâne deschis cu problemele raportate.`,
       branch,
     )
     log(`PR deschis: ${prUrl} (tokeni: ${tokens})`)
