@@ -59,6 +59,11 @@ export interface VocalLiveOpts {
    *  vie, un cadru pleacă la fiecare ~2,5 s direct în sesiunea Live — modelul
    *  vede în timp ce vorbește. null = nu se trimite nimic (nu cadre stătute). */
   cadruLive?(): string | null
+  /** CE E PE MONITOR (10 aug, ownerul: „nu are acces la ce se afișează pe
+   *  monitor" — și pe VOCE): conținutul tabului activ, ca la chatul scris.
+   *  Serverul îl ține și-l retransmite prin ușa creierului la get_monitor.
+   *  null = nimic afișat. */
+  monitor?(): { kind: string; title: string; url?: string; text?: string } | null
 }
 
 export interface VocalLiveHandle {
@@ -327,6 +332,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
           acc: c?.acc,
           now: new Date().toISOString(),
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          // Conținutul de pe monitor merge cu aceeași bătaie (10 aug): serverul
+          // îl ține și-l dă creierului la get_monitor prin ușă, pe VOCE.
+          monitor: opts.monitor?.() ?? null,
         }),
       )
     } catch {

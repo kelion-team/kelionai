@@ -31,6 +31,7 @@ import {
   getWorkspace,
   subscribeWorkspace,
   isMonitorWorking,
+  getMonitorContent,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import {
@@ -1510,6 +1511,9 @@ export default function ChatPanel({
               // e pornită — captura întoarce null când camera e oprită, deci
               // nu pleacă nimic stătut.
               cadruLive: () => captureRef.current?.() ?? null,
+              // CE E PE MONITOR și pe VOCE (10 aug): același conținut ca la
+              // chatul scris — get_monitor îl citește prin ușa creierului.
+              monitor: () => getMonitorContent(),
               onEroare: (motiv) => {
                 // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
                 // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).
