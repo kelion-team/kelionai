@@ -2445,83 +2445,122 @@ export default function ChatPanel({
   const cleanMsg = (s: string): string => {
     if (!s) return ''
     
-    // 1. Remove XML/HTML-like thought/thinking tags
     let cleaned = s
-      .replace(/<thought[\s\S]*?<\/thought>/gi, '')
-      .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
-      .replace(/<thought_signature[\s\S]*?<\/thought_signature>/gi, '')
-      .replace(/<thoughtSignature[\s\S]*?<\/thoughtSignature>/gi, '')
-      .replace(/<thought>[\s\S]*?(<\/thought>|$)/gi, '')
-      .replace(/<thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
-      // Existing cleanups
+
+    // 1. Remove XML/HTML-like system/thought tags (both closed and unclosed at the end of stream)
+    const tags = [
+      'thought', 'thinking', 'thought_signature', 'thoughtSignature', 
+      'gand', 'gandire', 'creier', 'system', 'tool_call', 'tool_response', 
+      'tool', 'context', 'prompt', 'instructiune', 'call', 'response', 
+      'error', 'info', 'warning'
+    ]
+    for (const tag of tags) {
+      const closedRegex = new RegExp(`<${tag}[\\s\\S]*?<\\/${tag}>`, 'gi')
+      cleaned = cleaned.replace(closedRegex, '')
+      const unclosedRegex = new RegExp(`<${tag}>[\\s\\S]*?$`, 'gi')
+      cleaned = cleaned.replace(unclosedRegex, '')
+    }
+
+    // Remove special tokens
+    cleaned = cleaned
       .replace(/<\|?tool_call\|?>[\s\S]*?(<\|?\/?tool_call\|?>|$)/g, '')
       .replace(/<\/?tool_call>[\s\S]*?(<\/tool_call>|$)/g, '')
       .replace(/<\|im_(?:start|end)\|>[^\n]*\n?/g, '')
 
-    // 2. Remove bracketed thought/thinking tags
-    cleaned = cleaned
-      .replace(/\[thought\][\s\S]*?\[\/thought\]/gi, '')
-      .replace(/\[thinking\][\s\S]*?\[\/thinking\]/gi, '')
-      .replace(/\[thought\][\s\S]*?$/gi, '')
-      .replace(/\[thinking\][\s\S]*?$/gi, '')
-
-    // 3. Remove common system/thought prefixes/lines
-    cleaned = cleaned
-      .replace(/^\[CREIER\][\s\S]*?$/gm, '')
-      .replace(/^\[THOUGHT\][\s\S]*?$/gm, '')
-      .replace(/^\[GANDIRE\][\s\S]*?$/gm, '')
-      .replace(/^\[SYSTEM\][\s\S]*?$/gm, '')
-      .replace(/^\[TOOL\][\s\S]*?$/gm, '')
+    // 2. Remove bracketed system/thought tags
+    const bracketTags = [
+      'thought', 'thinking', 'gand', 'gandire', 'creier', 'system', 
+      'tool', 'context', 'prompt', 'error', 'info', 'warning',
+      'CREIER', 'THOUGHT', 'GANDIRE', 'SYSTEM', 'TOOL'
+    ]
+    for (const bTag of bracketTags) {
+      const closedB = new RegExp(`\\[${bTag}\\][\\s\\S]*?\\[\\/${bTag}\\]`, 'gi')
+      cleaned = cleaned.replace(closedB, '')
+      const unclosedB = new RegExp(`\\[${bTag}\\][\\s\\S]*?$`, 'gi')
+      cleaned = cleaned.replace(unclosedB, '')
+      const lineB = new RegExp(`^\\[${bTag}\\][\\s\\S]*?$`, 'gm')
+      cleaned = cleaned.replace(lineB, '')
+    }
 
     cleaned = cleaned.trim()
 
-    // 4. Handle JSON structure
+    // 3. Handle JSON structure
     if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
       try {
         const parsed = JSON.parse(cleaned)
-        const targetLang = lang || 'ro'
-        if (parsed[targetLang]) {
-          return parsed[targetLang].trim()
+        const targetLang = (lang || 'ro').toLowerCase()
+        if (targetLang.startsWith('ro') && parsed.ro) {
+          cleaned = parsed.ro
+        } else if (targetLang.startsWith('en') && parsed.en) {
+          cleaned = parsed.en
+        } else if (parsed[targetLang]) {
+          cleaned = parsed[targetLang]
+        } else {
+          const otherLang = targetLang.startsWith('ro') ? 'en' : 'ro'
+          if (parsed[otherLang]) {
+            cleaned = parsed[otherLang]
+          } else if (parsed.text) {
+            cleaned = parsed.text
+          } else if (parsed.message) {
+            cleaned = parsed.message
+          }
         }
-        const otherLang = targetLang === 'ro' ? 'en' : 'ro'
-        if (parsed[otherLang]) {
-          return parsed[otherLang].trim()
-        }
-        if (parsed.text) return parsed.text.trim()
-        if (parsed.message) return parsed.message.trim()
       } catch (e) {
         // Not valid JSON or failed to parse, continue
       }
     }
 
-    // 5. Extract specific language part if bilingual markers exist
+    // 4. Handle language markers
     const targetLang = (lang || 'ro').toLowerCase()
     
-    // Check bracketed markers like [RO] / [EN]
-    const hasRoBracket = /\[ro\]/i.test(cleaned)
-    const hasEnBracket = /\[en\]/i.test(cleaned)
+    // Check bracketed language markers like [RO] / [EN] / [RO-RO] / [EN-US]
+    const hasRoBracket = /\[ro(?:-ro)?\]/i.test(cleaned)
+    const hasEnBracket = /\[en(?:-us)?\]/i.test(cleaned)
     if (hasRoBracket || hasEnBracket) {
       if (targetLang.startsWith('ro')) {
-        const match = cleaned.match(/\[ro\]\s*([\s\S]*?)(?:\s*\[[a-z]{2,}\]|$)/i)
-        if (match && match[1].trim()) return match[1].trim()
+        const match = cleaned.match(/\[ro(?:-ro)?\]\s*([\s\S]*?)(?:\s*\[[a-z]{2,}(?:-[a-z]{2,})?\]|$)/i)
+        if (match && match[1].trim()) cleaned = match[1].trim()
       } else {
-        const match = cleaned.match(/\[en\]\s*([\s\S]*?)(?:\s*\[[a-z]{2,}\]|$)/i)
-        if (match && match[1].trim()) return match[1].trim()
+        const match = cleaned.match(/\[en(?:-us)?\]\s*([\s\S]*?)(?:\s*\[[a-z]{2,}(?:-[a-z]{2,})?\]|$)/i)
+        if (match && match[1].trim()) cleaned = match[1].trim()
       }
     }
 
-    // Check prefixed markers like "RO: ..." / "EN: ..."
-    const hasRoPrefix = /\bRO:\s*/i.test(cleaned)
-    const hasEnPrefix = /\bEN:\s*/i.test(cleaned)
+    // Check prefixed language markers like "RO: ..." / "EN: ..." / "ROMANA: ..." / "ENGLISH: ..." / "RO-RO: ..."
+    const hasRoPrefix = /\b(?:ro|romana|română|ro-ro):\s*/i.test(cleaned)
+    const hasEnPrefix = /\b(?:en|english|en-us):\s*/i.test(cleaned)
     if (hasRoPrefix || hasEnPrefix) {
       if (targetLang.startsWith('ro')) {
-        const match = cleaned.match(/\bRO:\s*([\s\S]*?)(?:\b[a-z]{2,}:|$)/i)
-        if (match && match[1].trim()) return match[1].trim()
+        const match = cleaned.match(/\b(?:ro|romana|română|ro-ro):\s*([\s\S]*?)(?:\b(?:en|english|en-us|fr|de|it|es|ru):\s*|$)/i)
+        if (match && match[1].trim()) cleaned = match[1].trim()
       } else {
-        const match = cleaned.match(/\bEN:\s*([\s\S]*?)(?:\b[a-z]{2,}:|$)/i)
-        if (match && match[1].trim()) return match[1].trim()
+        const match = cleaned.match(/\b(?:en|english|en-us):\s*([\s\S]*?)(?:\b(?:ro|romana|română|ro-ro|fr|de|it|es|ru):\s*|$)/i)
+        if (match && match[1].trim()) cleaned = match[1].trim()
       }
     }
+
+    // Clean any remaining leading language prefixes or bracketed tags
+    cleaned = cleaned
+      .replace(/^\[(?:ro|en|ro-ro|en-us)\]\s*/i, '')
+      .replace(/^(?:ro|romana|română|ro-ro|en|english|en-us):\s*/i, '')
+
+    // 5. Clean markdown noise (bold, italic, headers, backticks, bullet points)
+    cleaned = cleaned
+      .replace(/\*\*\*([\s\S]*?)\*\*\*/g, '$1')
+      .replace(/\*\*([\s\S]*?)\*\*/g, '$1')
+      .replace(/\*([\s\S]*?)\*/g, '$1')
+      .replace(/___([\s\S]*?)___/g, '$1')
+      .replace(/__([\s\S]*?)__/g, '$1')
+      .replace(/_([\s\S]*?)_/g, '$1')
+      .replace(/`{1,3}([\s\S]*?)`{1,3}/g, '$1')
+      .replace(/^#{1,6}\s+/gm, '') // remove header markers
+      .replace(/^[-*+]\s+/gm, '') // remove simple bullet list symbols at the start of lines
+
+    // 6. Clean whitespace noise
+    cleaned = cleaned
+      .replace(/\r\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n') // allow max 2 consecutive newlines
+      .trim()
 
     return cleaned
   }
