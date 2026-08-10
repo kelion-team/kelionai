@@ -48,6 +48,7 @@ import { tranzactiiRoutes } from './routes/tranzactii.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
+import { jobsRoutes } from './routes/jobs.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings } from './db.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
@@ -289,6 +290,7 @@ await app.register(clientErrorRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 await app.register(pingRoutes)
+await app.register(jobsRoutes)
 await app.register(manualRoutes)
 await app.register(enterpriseRoutes)
 await app.register(a2aRoutes)
