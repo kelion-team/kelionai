@@ -160,6 +160,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'vaneaza_buguri', category: 'cod', does: 'caută automat erorile reale ale userilor + tipare de bug + tipuri/teste/sintaxă', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'panou_cod', category: 'cod', does: 'deschide panoul constructorului cu un ordin de build', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_manage', category: 'cod', does: 'gestionează ordinele constructorului (reia/oprește/curăță)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'constructor_command', category: 'cod', does: 'rulează o comandă shell direct pe server (canal de comandă Kelion→constructor)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_repos', category: 'cod', does: 'listează repo-urile legate la Jules (agentul async Google)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_task', category: 'cod', does: 'dă o sarcină lui Jules (lucrează în VM Google, deschide PR)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_status', category: 'cod', does: 'starea unei sesiuni Jules', chat: true, voice: false, voiceViaBrain: true, admin: true },
