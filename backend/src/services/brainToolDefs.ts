@@ -443,19 +443,19 @@ export const BROWSER_TOOLS: Tool[] = [
 export const OPEN_APP_VIEW_TOOL: Tool = {
   name: 'open_app_view',
   description:
-    "Open a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks to open settings, their wallet/credits, contact, the admin panel, or go back to the main screen. For the admin panel you may also pass a section.",
+    "Open or close a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks — by VOICE or in WRITING — to open settings, wallet/credits, contact, the admin panel, the Trading Center, or to go back to the main screen / close what's open. For the admin panel you may also pass a section.",
   input_schema: {
     type: 'object',
     properties: {
       view: {
         type: 'string',
-        enum: ['settings', 'wallet', 'contact', 'admin', 'home'],
+        enum: ['settings', 'wallet', 'contact', 'admin', 'trading', 'home'],
         description:
-          'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), or home (close panels).',
+          'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), trading (Centrul de Tranzacționare — „deschide tranzacții"), or home (close panels & monitor — „închide pagina / ieși").',
       },
       section: {
         type: 'string',
-        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'],
+        enum: ['finance', 'users', 'visitors', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare', 'sistem'],
         description: 'Optional admin section (only when view=admin).',
       },
     },

@@ -3411,10 +3411,12 @@ async function runTool(
     case 'open_app_view': {
       const view = String(args.view ?? '').trim().toLowerCase()
       const section = String(args.section ?? '').trim()
-      if (!['settings', 'wallet', 'contact', 'admin', 'home'].includes(view)) {
+      if (!['settings', 'wallet', 'contact', 'admin', 'trading', 'home'].includes(view)) {
         return JSON.stringify({ error: 'unknown_view' })
       }
-      if (view === 'admin' && !isAdmin) return JSON.stringify({ error: 'admin_only' })
+      if ((view === 'admin' || view === 'trading') && !isAdmin) return JSON.stringify({ error: 'admin_only' })
+      // Cadrul {nav} e ACUM în CADRE_ECRAN (routes/vocalLive.ts) — deci
+      // deschiderea/închiderea de pagini merge și pe VOCE, nu doar scris.
       reply.raw.write(`${CTRL}${JSON.stringify({ nav: { view, section } })}${CTRL}`)
       return JSON.stringify({ opened: view, section: section || null })
     }

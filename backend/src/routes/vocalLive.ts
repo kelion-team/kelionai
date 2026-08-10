@@ -825,7 +825,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               }
               trimite({ type: 'cere_cadre' })
             })
-            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device']
+            // 'nav' adăugat (10 aug, ownerul: „la scris închide/deschide pagina
+            // merge, la verbal nu"): open_app_view emite {nav:...}; fără el în
+            // listă, deschiderea/închiderea de pagini era ARUNCATĂ tăcut pe voce.
+            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav']
             const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, (frame) => {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
             }, monitorLive)
