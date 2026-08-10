@@ -129,6 +129,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'list_notes', category: 'memorie', does: 'listează notițele', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'delete_note', category: 'memorie', does: 'șterge o notiță', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'list_memories', category: 'memorie', does: 'memoria de lungă durată', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'cauta_istoric', category: 'memorie', does: 'caută în istoricul complet de chat (voce+scris) după cuvinte-cheie', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'forget_memory', category: 'memorie', does: 'uită o memorie', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_inbox', category: 'memorie', does: 'își citește propria cutie poștală (contact@kelionai.app)', chat: true, voice: false, voiceViaBrain: true, admin: true },
 

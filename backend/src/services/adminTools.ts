@@ -245,13 +245,13 @@ export async function execSharedAdminTool(
 import { updatesList } from './updates.js'
 import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
-import { getMemories, deleteMemory, logCapabilityGap, citesteRezumatCost, proposeKelionTool } from '../db.js'
+import { getMemories, deleteMemory, cautaIstoric, logCapabilityGap, citesteRezumatCost, proposeKelionTool } from '../db.js'
 import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
 import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor, vaneazaBuguri, raportVanatoare } from './masurare.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',
-  'list_memories', 'forget_memory', 'log_unsupported_request', 'propose_tool',
+  'list_memories', 'cauta_istoric', 'forget_memory', 'log_unsupported_request', 'propose_tool',
   // GUEST VOICES (Adrian, Aug 1): holder-only by construction — they act on
   // the SESSION user's own account (every user is the holder of theirs).
   // The names come from the single source in guestVoices.ts.
@@ -299,6 +299,18 @@ export async function execUserScopedTool(
     case 'list_memories': {
       const memories = await getMemories(email)
       return JSON.stringify({ memories: memories.map((m) => m.content) })
+    }
+    case 'cauta_istoric': {
+      const query = String(args.query ?? '')
+      if (!query.trim()) return JSON.stringify({ error: 'no_query' })
+      const rows = await cautaIstoric(email, query)
+      return JSON.stringify({
+        gasite: rows.map((r) => ({
+          cine: r.role === 'user' ? 'user' : 'Kelion',
+          text: String(r.content).slice(0, 500),
+          cand: r.created_at,
+        })),
+      })
     }
     case 'forget_memory': {
       const fragment = String(args.fragment ?? '')
