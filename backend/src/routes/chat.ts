@@ -388,6 +388,19 @@ const GOLESTE_MONITOR_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+// CITEȘTE CE E PE MONITOR (10 aug, ownerul: „nu are acces la ce se afișează pe
+// monitor", „nu poate citi fișierele"): brainul știa DOAR ce taburi sunt
+// deschise (kind+title), nu și conținutul lor. Acum clientul trimite conținutul
+// tabului activ (text de document, HTML de aplicație, URL de hartă/imagine),
+// iar unealta asta îl întoarce brainului — deci „citește ce scrie pe ecran",
+// „ce e în documentul ăsta", „ce arată harta" chiar se pot răspunde.
+const GET_MONITOR_TOOL: Tool = {
+  name: 'get_monitor',
+  description:
+    "Read what is ACTUALLY displayed on the user's monitor right now — the content of the open tabs (document text, running-app HTML, the URL/title of a map/image/page). Call this whenever the user refers to what's on screen: \"citește ce e pe monitor\", \"ce scrie aici\", \"ce e în documentul ăsta\", \"uită-te pe ecran\", \"ce arată\". Returns the active tab's real content plus the list of open tabs. If nothing is open, it says so — never guess what's on screen.",
+  input_schema: { type: 'object', properties: {} },
+}
+
 // DISPLAYING ITS OWN RECOMMENDATIONS/PLANS on the monitor (Adrian, Jul 24: "it
 // can't display what it recommends on the monitor"). When Kelion himself writes
 // a plan, a list, a summary, code — he puts it DIRECTLY on the monitor as a
@@ -1255,6 +1268,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       imageIsAttachment?: boolean
       coords?: Coords
       screen?: { kind: string; title: string; active: boolean }[]
+      // CONȚINUTUL de pe monitor (10 aug, „nu are acces la ce se afișează"):
+      // clientul trimite conținutul REAL al tabului activ (text/HTML/URL),
+      // bounded — get_monitor îl întoarce brainului.
+      monitorContent?: { kind?: string; title?: string; url?: string; text?: string }
       now?: string
       tz?: string
       // Voice features extracted 100% client-side for speaker + gender
@@ -2251,7 +2268,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...googleTools,
           ...escalationTools,
           // Bază + vedere
-          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
+          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
           // Memorie + mâini (browser) — NU se mai taie
           ...NOTE_TOOLS,
           ...BROWSER_TOOLS,
@@ -2281,7 +2298,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
           ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -2507,6 +2524,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // SHARED executor with voice (services/adminTools.ts) — no duplication.
           const out = await execUserScopedTool(name, input as Record<string, unknown>, user.email, isAdminUser)
           if (out !== null) return out
+        }
+        // CITEȘTE MONITORUL (10 aug): întoarce conținutul REAL al ecranului,
+        // trimis de client în corpul cererii — nu ghicit, nu inventat.
+        if (name === 'get_monitor') {
+          const tab = Array.isArray(screen) ? screen : []
+          const listaTaburi = tab.length
+            ? tab.map((s) => `${s.kind}${s.title ? ` ("${s.title}")` : ''}${s.active ? ' — ACTIV' : ''}`).join(', ')
+            : '(niciun tab deschis — monitorul e gol)'
+          const c = req.body?.monitorContent
+          const activ = c
+            ? {
+                fel: c.kind ?? 'necunoscut',
+                titlu: (c.title ?? '').slice(0, 200),
+                url: (c.url ?? '').slice(0, 500) || undefined,
+                continut: (c.text ?? '').slice(0, 8000) || undefined,
+              }
+            : null
+          return JSON.stringify({
+            taburi_deschise: listaTaburi,
+            tab_activ: activ ?? '(nimic afișat sau conținut necitibil de pe acest tab)',
+            nota: activ?.continut
+              ? 'Conținutul de mai sus e ce vede omul ACUM pe ecran — răspunde din el.'
+              : activ?.url
+                ? 'Tabul activ afișează un URL/o suprafață media; nu are text de citit — descrie ce e după titlu/URL.'
+                : 'Nimic de citit pe monitor acum.',
+          })
         }
         // APPROVED DYNAMIC TOOL: generic execution through a safe HTTP call.
         if (dynNames.has(name)) {

@@ -65,8 +65,9 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     const cases = new Set([...chatSrc.matchAll(/case '([a-z_]+)':/g)].map((m) => m[1]))
     const google = new Set(googleTools.map((t) => t.name))
     // Intercepted in execTool BEFORE runTool (they're not a `case`): heavy
-    // reasoning and tool self-proposal.
-    const special = new Set(['ask_brain', 'propose_tool'])
+    // reasoning, tool self-proposal, și citirea monitorului (10 aug — conținutul
+    // ecranului vine din corpul cererii, se întoarce înainte de runTool).
+    const special = new Set(['ask_brain', 'propose_tool', 'get_monitor'])
     // The SHARED admin tools (chat ∩ voice) go through the common guard before
     // the switch (execSharedAdminTool) → they no longer have a `case`, but they
     // ARE handled.
@@ -109,7 +110,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // THE STATE MEASURED TODAY — any change to the brain's surface must pass
   // through HERE (otherwise the test falls), so the registry can't fall behind.
   it('numărul de capabilități pe fiecare cale e cel documentat', () => {
-    expect(chatCapabilityNames().length).toBe(88) // 5 aug: +12 unelte legate la creier (cheama_agent, panou_cod, constructor_manage, jules_*, admin_vezi/schimba, memorie_pune/ia/lista, stare_masurata) — erau oferite dar lipseau din registru
+    expect(chatCapabilityNames().length).toBe(89) // 10 aug: +get_monitor (citește conținutul de pe ecran) — cerința ownerului „acces la ce se afișează pe monitor". 5 aug: +12 unelte legate la creier.
     expect(voiceCapabilityNames().length).toBe(0) // 1 aug: sesiunea de voce = urechi+gură, ZERO unelte directe
   })
 

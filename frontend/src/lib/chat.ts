@@ -100,7 +100,7 @@ export interface ChatControl {
 
 import type { VoiceFeatures } from './audioIO.js'
 import { moment as contorMoment } from './contorFraza'
-import { getStareTranzactii } from './workspace'
+import { getStareTranzactii, getMonitorContent } from './workspace'
 
 // U+001F (unit separator) brackets a JSON control frame in the text stream.
 const CTRL = String.fromCharCode(31)
@@ -312,6 +312,9 @@ export async function* streamChat(
             imageSource: imageIsAttachment ? 'chat' : 'camera',
             coords,
             screen,
+            // Conținutul REAL al tabului activ (10 aug: „nu are acces la ce se
+            // afișează pe monitor") — get_monitor îl întoarce brainului.
+            monitorContent: getMonitorContent() ?? undefined,
             // Ancora Centrului de Tranzacționare, cât tabul e deschis (10 aug):
             // creierul răspunde pe CIFRELE de pe ecran, nu din burtă.
             tranzactii: getStareTranzactii() ?? undefined,

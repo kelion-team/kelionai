@@ -77,6 +77,22 @@ export function getWorkspace(): WorkspaceState {
   return state
 }
 
+// CE E FAPTIC PE MONITOR (10 aug, ownerul: „nu are acces la ce se afișează pe
+// monitor"): conținutul REAL al tabului activ, mărginit — chatul îl trimite
+// creierului (body.monitorContent), iar unealta get_monitor îl întoarce.
+// Doc/text și app/HTML au conținut de citit; harta/imaginea/pagina au doar
+// URL+titlu (nu text). Cardul se rezumă în titlu.
+export function getMonitorContent(): { kind: string; title: string; url?: string; text?: string } | null {
+  const a = state.tasks.find((t) => t.id === state.activeId)
+  if (!a) return null
+  const out: { kind: string; title: string; url?: string; text?: string } = { kind: a.kind, title: a.title }
+  if (a.text) out.text = a.text.slice(0, 8000)
+  else if (a.html) out.text = a.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 8000)
+  else if (a.card) out.text = JSON.stringify(a.card).slice(0, 4000)
+  if (a.url) out.url = a.url
+  return out
+}
+
 // ── STAREA VIE A CENTRULUI DE TRANZACȚIONARE (10 aug, ownerul: chatul REAL
 // trebuie să fie „conștient" de pagina de trading) ───────────────────────────
 // Pagina din iframe își raportează starea (postMessage {kelion:
