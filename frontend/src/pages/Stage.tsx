@@ -806,6 +806,10 @@ export default function Stage({ user }: { user: User }) {
       if (ev.origin !== window.location.origin) return
       const d = ev.data as { kelion?: string; simbol?: unknown; pret?: unknown; interval?: unknown; sursa?: unknown } | null
       if (d?.kelion === 'inchide-tranzactii') closeTasksByKind('tranzactii')
+      // Închiderea monitorului dintr-un tab (harta, orice pagină-aplicație) =
+      // golirea monitorului (10 aug, ownerul: „funcția de a închide monitorul e
+      // egală cu golește monitorul"). Un mesaj generic, orice tab îl poate cere.
+      else if (d?.kelion === 'inchide-monitorul') closeAllTasks()
       // Pagina de trading raportează CE e pe ecran (10 aug: chatul „conștient")
       // — starea intră în ancora fiecărei ture de chat cât tabul e deschis.
       else if (d?.kelion === 'tranzactii-stare')
