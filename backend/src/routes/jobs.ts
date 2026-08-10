@@ -1,250 +1,292 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { getPool } from '../db.js'
+import { getPool, citesteSold, recordCost, dbEnabled } from '../db.js'
+import { cautareStructurata } from '../services/google.js'
+import { citestePagina, gasesteAgentViu, cheamaAgent } from '../services/agentiKelion.js'
+import { geminiDirectChat } from '../services/geminiDirect.js'
+import { config } from '../config.js'
 
-interface SearchQuery {
-  query?: string
-  platforms?: string[] // ['linkedin', 'indeed', 'cv_library']
+// ── ADAPTAREA CV — REALĂ, NU SIMULATĂ (Adrian, 10 aug) ───────────────────────
+// Prima versiune (ordinul #166 al constructorului) avea joburi HARDCODATE și o
+// „adaptare" cu text inventat — zero căutare, zero creier. Ordinele ownerului:
+// „nu a afișat niciun job" · „fără joburi hardcodate, doar ce apare la căutare" ·
+// „vreau să pui toți agenții pe tabul de adaptare CV, cu logicile toate activate,
+// cu management activat... intră pe platformele de recrutare, vezi cum
+// funcționează și adaptezi real" · „tab să-mi încarc CV în orice format" ·
+// „funcțiile tranzacționare și adaptare CV vor fi pentru useri plătitori".
+//
+// Acum: căutarea = Google REAL (Serper) cu site: pe platformele de recrutare;
+// adaptarea = lanțul de agenți specialiști (cercetare → adaptare → verificare →
+// plan), fiecare cu unelte reale (căutare web + citirea paginii anunțului);
+// încărcarea CV = text/Markdown direct, PDF și imagini prin extragerea Gemini
+// (nativ multimodal). Nicio listă inventată: căutarea picată se SPUNE
+// (search_unavailable), nu se maschează cu o listă goală „fără rezultate".
+//
+// CONSTRÂNGERE REALĂ, spusă pe față: LinkedIn/Indeed blochează scrapingul de pe
+// IP-uri de datacenter. Ce facem noi e REAL dar prin Google (Serper): găsim
+// anunțurile publice indexate, cu link — omul aplică pe platformă, cu CV-ul
+// adaptat de noi. Nu pretindem „cont conectat la LinkedIn".
+
+const PLATFORME: Record<string, { site: string; nume: string }> = {
+  linkedin: { site: 'linkedin.com/jobs', nume: 'LinkedIn' },
+  indeed: { site: 'indeed.com', nume: 'Indeed' },
+  cv_library: { site: 'cv-library.co.uk', nume: 'CV Library' },
+}
+
+interface JobGasit {
+  id: string
+  platform: string
+  title: string
+  link: string
+  description: string
 }
 
 interface AdaptBody {
-  jobIds?: string[]
+  jobs?: { title?: string; link?: string; platform?: string; description?: string }[]
   jobDescription?: string
   jobLink?: string
   cvContent?: string
 }
 
-// Simulated jobs database for search
-const SIMULATED_JOBS = [
-  {
-    id: 'li-1',
-    platform: 'LinkedIn',
-    title: 'Senior Full Stack Developer',
-    company: 'TechCorp Solutions',
-    location: 'Bucharest, Romania (Hybrid)',
-    description: 'We are looking for a Senior Full Stack Developer proficient in React, Node.js, TypeScript, and PostgreSQL. Responsibilities include designing scalable APIs, optimizing web performance, and mentoring junior engineers. Experience with Fastify and Vite is a big plus.',
-    link: 'https://www.linkedin.com/jobs/view/techcorp-senior-fullstack-123'
-  },
-  {
-    id: 'li-2',
-    platform: 'LinkedIn',
-    title: 'AI Engineering Specialist',
-    company: 'Kelion Technologies',
-    location: 'Remote, Romania',
-    description: 'Join our AI team to build autonomous agents, integrate LLMs, and develop cutting-edge automation tools. Skills required: Python, Node.js, OpenAI API, LangChain, and vector databases. Passion for building self-healing software is highly valued.',
-    link: 'https://www.linkedin.com/jobs/view/kelion-ai-specialist-456'
-  },
-  {
-    id: 'ind-1',
-    platform: 'Indeed',
-    title: 'Software Engineer (React & TypeScript)',
-    company: 'Innova Soft',
-    location: 'Cluj-Napoca, Romania',
-    description: 'Innova Soft is hiring a frontend-heavy Software Engineer. You will build beautiful, interactive user interfaces using React, Tailwind CSS, and TypeScript. Collaborative environment, excellent benefits, and flexible working hours.',
-    link: 'https://www.indeed.com/viewjob?jk=innovasoft-react-789'
-  },
-  {
-    id: 'ind-2',
-    platform: 'Indeed',
-    title: 'Backend Developer (Node.js/Fastify)',
-    company: 'CoreSystems Ltd',
-    location: 'Timisoara, Romania',
-    description: 'Seeking a strong Backend Developer with expertise in Node.js, Fastify, Express, and SQL databases. You will be responsible for building secure microservices, managing database migrations, and ensuring high availability of our systems.',
-    link: 'https://www.indeed.com/viewjob?jk=coresystems-backend-101'
-  },
-  {
-    id: 'cvl-1',
-    platform: 'CV Library',
-    title: 'Junior Web Developer',
-    company: 'WebStart Agency',
-    location: 'Iasi, Romania',
-    description: 'Great opportunity for a Junior Web Developer. Learn and work with modern web technologies: HTML5, CSS3, JavaScript, React, and Node.js. We provide extensive training, mentorship, and a clear path for career progression.',
-    link: 'https://www.cv-library.co.uk/job/webstart-junior-202'
-  },
-  {
-    id: 'cvl-2',
-    platform: 'CV Library',
-    title: 'DevOps & Infrastructure Engineer',
-    company: 'CloudScale Systems',
-    location: 'Remote (Europe)',
-    description: 'Manage our cloud infrastructure on AWS/GCP. Skills: Docker, Kubernetes, Terraform, CI/CD pipelines (GitHub Actions), and Linux system administration. Help us automate deployment and scaling of our microservices.',
-    link: 'https://www.cv-library.co.uk/job/cloudscale-devops-303'
+/** Poarta „useri plătitori" (Adrian, 10 aug): adminul intră mereu; un customer
+ *  intră DOAR cu credit în portofel (singura noțiune reală de „plătitor" din
+ *  aplicație — portofelul preplătit). Citirea picată se spune (503), nu se
+ *  confundă cu „n-ai credit" (402) — regula 1. */
+async function platitorul(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<{ email: string; admin: boolean } | null> {
+  const user = getSessionUser(req)
+  if (!user) {
+    reply.code(401).send({ error: 'Neautorizat' })
+    return null
   }
-]
+  if (user.role === 'admin') return { email: user.email, admin: true }
+  const sold = await citesteSold(user.email)
+  if (!sold.citit) {
+    reply.code(503).send({ error: `nu pot verifica portofelul: ${sold.motiv}` })
+    return null
+  }
+  if (sold.sold <= 0) {
+    reply.code(402).send({ error: 'Adaptarea CV e pentru utilizatorii cu credit. Alimentează portofelul ca s-o folosești.' })
+    return null
+  }
+  return { email: user.email, admin: false }
+}
 
-export async function jobsRoutes(fastify: FastifyInstance) {
-  // Get default CV (CV implicit)
-  fastify.get('/api/jobs/cv-implicit', async (req: FastifyRequest, reply: FastifyReply) => {
-    const user = await getSessionUser(req)
-    if (!user) {
-      return reply.status(401).send({ error: 'Neautorizat' })
-    }
+/** CV-ul salvat al userului. '' = nu există — se SPUNE, nu se inventează unul
+ *  (versiunea veche fabrica un CV cu telefon inexistent — date false). */
+async function citesteCv(email: string): Promise<string> {
+  if (!dbEnabled()) return ''
+  try {
+    const r = await getPool().query<{ value: string }>('SELECT value FROM kv_state WHERE key = $1', [`cv_implicit:${email}`])
+    return r.rows[0]?.value ?? ''
+  } catch {
+    return ''
+  }
+}
 
-    const key = `cv_implicit:${user.email}`
-    const res = await getPool().query('SELECT value FROM kv_state WHERE key = $1', [key])
-    if (res.rows.length === 0) {
-      // Return a default placeholder CV if none is set
-      const defaultCV = `Nume: ${user.name || 'Utilizator Kelion'}
-Email: ${user.email}
-Telefon: 0722 000 000
-Profesie: Software Developer
+/** Un pas din lanțul de agenți: cheamă specialistul, contabilizează costul.
+ *  Eșecul unui pas nu îngroapă tot lanțul — se raportează pasul picat. */
+async function pasAgent(
+  idAgent: string,
+  numePas: string,
+  sarcina: string,
+  email: string,
+  caAdmin: boolean,
+): Promise<{ agent: string; nume: string; text: string; ok: boolean }> {
+  const a = await gasesteAgentViu(idAgent)
+  if (!a) return { agent: idAgent, nume: numePas, text: `agentul ${idAgent} nu există în roster`, ok: false }
+  try {
+    const r = await cheamaAgent(a, sarcina, caAdmin)
+    if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
+    return { agent: a.id, nume: numePas, text: r.text.trim(), ok: Boolean(r.text.trim()) }
+  } catch (e) {
+    return { agent: idAgent, nume: numePas, text: `pasul a picat: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`, ok: false }
+  }
+}
 
-EXPERIENȚĂ PROFESIONALĂ:
-- Developer la Kelion (2024 - Prezent)
-  * Dezvoltare de aplicații web folosind React, Node.js și baze de date SQL.
-  * Integrare de modele lingvistice mari (LLM) și automatizare de procese.
-
-EDUCAȚIE:
-- Licență în Informatică / Automatică și Calculatoare (2020 - 2024)
-
-COMPETENȚE TEHNICE:
-- Limbaje: JavaScript, TypeScript, Python, SQL, HTML, CSS
-- Tehnologii: React, Fastify, Node.js, Git, Docker`
-      return reply.send({ cv: defaultCV })
-    }
-
-    return reply.send({ cv: res.rows[0].value })
+export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
+  // CV-ul implicit — citire. '' când nu există (frontendul cere încărcarea).
+  fastify.get('/api/jobs/cv-implicit', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.status(401).send({ error: 'Neautorizat' })
+    return reply.send({ cv: await citesteCv(user.email) })
   })
 
-  // Save default CV
-  fastify.put('/api/jobs/cv-implicit', async (req: FastifyRequest, reply: FastifyReply) => {
-    const user = await getSessionUser(req)
-    if (!user) {
-      return reply.status(401).send({ error: 'Neautorizat' })
-    }
-
-    const { cv } = req.body as { cv: string }
-    if (!cv) {
-      return reply.status(400).send({ error: 'Conținutul CV-ului este obligatoriu' })
-    }
-
-    const key = `cv_implicit:${user.email}`
+  // CV-ul implicit — salvare manuală (textul editat în pagină).
+  fastify.put('/api/jobs/cv-implicit', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.status(401).send({ error: 'Neautorizat' })
+    const { cv } = (req.body ?? {}) as { cv?: string }
+    if (!cv?.trim()) return reply.status(400).send({ error: 'Conținutul CV-ului este obligatoriu' })
+    if (!dbEnabled()) return reply.status(503).send({ error: 'baza de date nu e configurată — CV-ul nu se poate salva' })
     await getPool().query(
-      `INSERT INTO kv_state (key, value, updated_at) 
-       VALUES ($1, $2, NOW()) 
+      `INSERT INTO kv_state (key, value, updated_at) VALUES ($1, $2, NOW())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-      [key, cv]
+      [`cv_implicit:${user.email}`, cv.slice(0, 40_000)],
     )
-
-    return reply.send({ success: true, message: 'CV-ul implicit a fost salvat cu succes!' })
+    return reply.send({ success: true, message: 'CV-ul a fost salvat.' })
   })
 
-  // Search jobs on LinkedIn, Indeed, CV Library
-  fastify.post('/api/jobs/search', async (req: FastifyRequest, reply: FastifyReply) => {
-    const user = await getSessionUser(req)
-    if (!user) {
-      return reply.status(401).send({ error: 'Neautorizat' })
+  // ÎNCĂRCAREA CV-ULUI „în orice format" (Adrian, 10 aug): text/Markdown direct;
+  // PDF + imagini (scan/poză de CV) prin extragerea REALĂ Gemini (multimodal
+  // nativ — fără biblioteci noi). DOCX nu e suportat de Gemini inline — se
+  // spune cinstit, cu alternativa (salvează ca PDF), nu se preface.
+  fastify.post('/api/jobs/cv-incarca', async (req, reply) => {
+    const cine = await platitorul(req, reply)
+    if (!cine) return
+    const { nume = '', mime = '', base64 = '' } = (req.body ?? {}) as { nume?: string; mime?: string; base64?: string }
+    if (!base64) return reply.status(400).send({ error: 'fișierul lipsește' })
+    if (base64.length > 11_000_000) return reply.status(413).send({ error: 'fișier prea mare (max ~8MB)' })
+    const ext = (nume.split('.').pop() ?? '').toLowerCase()
+
+    let text = ''
+    if (mime.startsWith('text/') || ['txt', 'md', 'csv'].includes(ext)) {
+      text = Buffer.from(base64, 'base64').toString('utf8')
+    } else if (mime === 'application/pdf' || ext === 'pdf' || mime.startsWith('image/')) {
+      const mimeReal = mime || 'application/pdf'
+      try {
+        const r = await geminiDirectChat(config.geminiModel, [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Extrage TEXTUL COMPLET al acestui CV, verbatim, păstrând structura (secțiuni, liste). Doar textul, fără comentarii.' },
+              { type: 'image_url', image_url: { url: `data:${mimeReal};base64,${base64}` } },
+            ],
+          },
+        ], [], { maxTokens: 4096, temperature: 0 })
+        if (r.costUsd > 0) void recordCost(cine.email, 'gemini', r.costUsd)
+        text = r.text.trim()
+      } catch (e) {
+        return reply.status(502).send({ error: `extragerea a picat: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}` })
+      }
+      if (!text) return reply.status(422).send({ error: 'nu am putut extrage text din fișier (e gol sau necitibil)' })
+    } else if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) {
+      return reply.status(415).send({ error: 'formatul Word nu e suportat direct — salvează CV-ul ca PDF sau text și încarcă-l așa' })
+    } else {
+      return reply.status(415).send({ error: `format necunoscut (${mime || ext || 'fără tip'}) — merge text, Markdown, PDF sau imagine` })
     }
 
-    const { query: searchTerm = '', platforms = ['linkedin', 'indeed', 'cv_library'] } = req.body as SearchQuery
-
-    // Filter simulated jobs based on search term and selected platforms
-    const term = searchTerm.toLowerCase()
-    const results = SIMULATED_JOBS.filter(job => {
-      const matchesPlatform = platforms.some(p => {
-        if (p === 'linkedin' && job.platform === 'LinkedIn') return true
-        if (p === 'indeed' && job.platform === 'Indeed') return true
-        if (p === 'cv_library' && job.platform === 'CV Library') return true
-        return false
-      })
-
-      if (!matchesPlatform) return false
-
-      if (!term) return true
-
-      return (
-        job.title.toLowerCase().includes(term) ||
-        job.company.toLowerCase().includes(term) ||
-        job.description.toLowerCase().includes(term) ||
-        job.location.toLowerCase().includes(term)
-      )
-    })
-
-    return reply.send({ jobs: results })
+    text = text.trim().slice(0, 40_000)
+    if (!text) return reply.status(422).send({ error: 'fișierul nu conține text' })
+    if (!dbEnabled()) return reply.status(503).send({ error: 'baza de date nu e configurată — CV-ul nu se poate salva' })
+    await getPool().query(
+      `INSERT INTO kv_state (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [`cv_implicit:${cine.email}`, text],
+    )
+    return reply.send({ success: true, cv: text, message: 'CV-ul a fost citit și salvat.' })
   })
 
-  // Adapt CV based on selected jobs or a custom job description/link
-  fastify.post('/api/jobs/adapt', async (req: FastifyRequest, reply: FastifyReply) => {
-    const user = await getSessionUser(req)
-    if (!user) {
-      return reply.status(401).send({ error: 'Neautorizat' })
-    }
+  // CĂUTAREA REALĂ de joburi: Google (Serper) cu site: pe platforma aleasă.
+  // Fără nimic hardcodat. Căutarea picată = 503 spus pe față, nu listă goală.
+  fastify.post('/api/jobs/search', async (req, reply) => {
+    const cine = await platitorul(req, reply)
+    if (!cine) return
+    const { query = '', platforms = Object.keys(PLATFORME) } = (req.body ?? {}) as { query?: string; platforms?: string[] }
+    const term = String(query).trim()
+    if (!term) return reply.status(400).send({ error: 'scrie ce cauți (titlu, tehnologie, companie)' })
 
-    const { jobIds, jobDescription, jobLink, cvContent } = req.body as AdaptBody
+    const alese = platforms.filter((p) => PLATFORME[p]).slice(0, 3)
+    if (alese.length === 0) return reply.status(400).send({ error: 'alege cel puțin o platformă' })
 
-    // 1. Get CV content to adapt
-    let cvToAdapt = cvContent
-    if (!cvToAdapt) {
-      const key = `cv_implicit:${user.email}`
-      const res = await getPool().query('SELECT value FROM kv_state WHERE key = $1', [key])
-      if (res.rows.length > 0) {
-        cvToAdapt = res.rows[0].value
-      } else {
-        cvToAdapt = `Nume: ${user.name || 'Utilizator Kelion'}
-Email: ${user.email}
-Telefon: 0722 000 000
-Profesie: Software Developer`
+    const jobs: JobGasit[] = []
+    let picat = 0
+    for (const p of alese) {
+      const { site, nume } = PLATFORME[p]
+      const rez = await cautareStructurata(`site:${site} ${term}`, 6)
+      if (rez === null) {
+        picat++
+        continue
+      }
+      for (const r of rez) {
+        jobs.push({ id: r.link, platform: nume, title: r.title, link: r.link, description: r.snippet })
       }
     }
+    if (picat === alese.length) {
+      return reply.status(503).send({ error: 'căutarea nu e disponibilă acum (cheia/cota Serper) — nu pot căuta joburi reale în acest moment' })
+    }
+    return reply.send({ jobs, nota: jobs.length === 0 ? `Google nu a întors anunțuri pentru „${term}" pe platformele alese — încearcă alți termeni.` : undefined })
+  })
 
-    // 2. Identify target job details
-    let targetDetails = ''
-    const targetJobs: typeof SIMULATED_JOBS = []
+  // ADAPTAREA REALĂ — lanțul de agenți („toți agenții... cu management activat,
+  // pași logici ca pentru om"): 1. Cercetare (cautator — citește anunțul real +
+  // caută compania), 2. Adaptare (documente — rescrie CV-ul CINSTIT, fără
+  // experiență inventată, + scrisoarea de intenție), 3. Verificare (critic —
+  // golurile reale, versiunea finală), 4. Plan (planificator — întrebări de
+  // interviu + pașii de aplicare). Fiecare pas se întoarce în răspuns, la vedere.
+  fastify.post('/api/jobs/adapt', async (req, reply) => {
+    const cine = await platitorul(req, reply)
+    if (!cine) return
+    const { jobs = [], jobDescription = '', jobLink = '', cvContent = '' } = (req.body ?? {}) as AdaptBody
 
-    if (jobIds && jobIds.length > 0) {
-      for (const id of jobIds) {
-        const found = SIMULATED_JOBS.find(j => j.id === id)
-        if (found) {
-          targetJobs.push(found)
-          targetDetails += `\n--- JOB: ${found.title} la ${found.company} (${found.platform}) ---\nDescriere: ${found.description}\n`
-        }
+    // 1. CV-ul de adaptat — cel trimis sau cel salvat. Fără CV nu inventăm unul.
+    const cv = (cvContent || (await citesteCv(cine.email))).trim()
+    if (!cv) return reply.status(400).send({ error: 'Nu ai un CV salvat — încarcă-l sau scrie-l întâi în „CV-ul Tău".' })
+
+    // 2. Contextul REAL al joburilor țintă: titlu+platformă+fragment din căutare
+    // + textul PAGINII anunțului (citit acum, nu presupus). Max 3 ținte.
+    const tinte = jobs.filter((j) => j?.title || j?.link).slice(0, 3)
+    let context = ''
+    for (const j of tinte) {
+      context += `\n--- ANUNȚ: ${j.title ?? '(fără titlu)'} (${j.platform ?? '?'}) ---\n`
+      if (j.description) context += `Fragment din căutare: ${j.description}\n`
+      if (j.link) {
+        const pagina = await citestePagina(j.link)
+        context += pagina.startsWith('{"error"')
+          ? `Pagina anunțului (${j.link}) nu s-a putut citi — se folosește doar fragmentul din căutare.\n`
+          : `Textul paginii anunțului:\n${pagina.slice(0, 5000)}\n`
       }
     }
+    if (jobLink.trim()) {
+      const pagina = await citestePagina(jobLink.trim())
+      context += `\n--- ANUNȚ DIN LINK ---\n${pagina.startsWith('{"error"') ? `Pagina (${jobLink}) nu s-a putut citi: ${pagina}` : pagina.slice(0, 5000)}\n`
+    }
+    if (jobDescription.trim()) context += `\n--- DESCRIEREA DATĂ DE UTILIZATOR ---\n${jobDescription.trim().slice(0, 5000)}\n`
+    if (!context.trim()) return reply.status(400).send({ error: 'Selectează cel puțin un job din căutare sau dă un link/o descriere.' })
 
-    if (jobDescription) {
-      targetDetails += `\n--- DESCRIERE JOB INTRODUSĂ ---\n${jobDescription}\n`
+    // 3. LANȚUL DE AGENȚI — pașii unui om care aplică, pe bune.
+    const pasi: { agent: string; nume: string; text: string; ok: boolean }[] = []
+
+    const cercetare = await pasAgent(
+      'cautator', 'Cercetare',
+      `Un candidat aplică la joburile de mai jos. Cercetează REAL (căutare web + citește pagini dacă ajută): ce cere concret fiecare rol, ce e important pentru angajator/companie, cuvintele-cheie pe care sistemele de filtrare CV (ATS) le caută. Scurt și concret, pe puncte, per anunț.\n${context}`,
+      cine.email, cine.admin,
+    )
+    pasi.push(cercetare)
+
+    const adaptare = await pasAgent(
+      'documente', 'Adaptare CV + scrisoare',
+      `Rescrie CV-ul de mai jos ADAPTAT pentru anunțurile date. REGULĂ DE FIER: nimic inventat — nu adăuga experiență, ani sau tehnologii care nu apar în CV-ul original; doar reformulezi, reordonezi și scoți în față ce se potrivește, cu cuvintele-cheie ale anunțului. Apoi scrie o SCRISOARE DE INTENȚIE scurtă (max 150 de cuvinte), concretă, fără șabloane goale.\n\nCV ORIGINAL:\n${cv}\n\nANUNȚURILE:\n${context}\n\nCE A AFLAT CERCETAREA:\n${cercetare.ok ? cercetare.text : '(cercetarea a picat — folosește doar anunțurile)'}\n\nFormat: întâi CV-ul adaptat complet, apoi „--- SCRISOARE DE INTENȚIE ---" și scrisoarea.`,
+      cine.email, cine.admin,
+    )
+    pasi.push(adaptare)
+    if (!adaptare.ok) {
+      return reply.status(502).send({ error: `adaptarea a picat: ${adaptare.text}`, pasi })
     }
 
-    if (jobLink) {
-      targetDetails += `\n--- LINK JOB INTRODUS ---\nLink: ${jobLink}\n`
-    }
+    const verificare = await pasAgent(
+      'critic', 'Verificare',
+      `Verifică CV-ul adaptat față de anunțuri: 1) A inventat ceva ce nu era în original? (dacă da, spune exact ce trebuie scos) 2) Ce cerințe REALE ale anunțului nu sunt acoperite de candidat (golurile, cinstit)? 3) Trei îmbunătățiri concrete. Scurt, pe puncte.\n\nCV ORIGINAL:\n${cv.slice(0, 6000)}\n\nCV ADAPTAT:\n${adaptare.text.slice(0, 8000)}\n\nANUNȚURILE:\n${context.slice(0, 4000)}`,
+      cine.email, cine.admin,
+    )
+    pasi.push(verificare)
 
-    if (!targetDetails) {
-      return reply.status(400).send({ error: 'Trebuie să selectați cel puțin un job sau să introduceți o descriere/link.' })
-    }
-
-    // 3. Perform automated adaptation (simulate highly intelligent LLM adaptation tailoring the CV to the target jobs)
-    const adaptedCv = `=== CV ADAPTAT PENTRU OPORTUNITĂȚILE SELECTATE ===
-
-${cvToAdapt}
-
-[ADAPTĂRI ȘI OPTIMIZĂRI EFECTUATE]:
-- Cuvinte cheie aliniate cu cerințele joburilor selectate.
-- Evidențierea abilităților potrivite pentru rolurile de dezvoltare software și automatizare.
-- Re-structurarea experienței pentru a reflecta competențele cerute în anunțuri.
-
-[PREGĂTIRE PROCES APLICARE]:
-1. SCRISOARE DE INTENȚIE (COVER LETTER) RECOMANDATĂ:
-   "Stimate Manager de Recrutare,
-   Sunt deosebit de entuziasmat de oportunitatea de a aplica pentru pozițiile selectate. Având în vedere experiența mea în dezvoltarea de aplicații web de înaltă performanță cu React și Node.js, consider că pot aduce o contribuție valoroasă echipei dumneavoastră..."
-
-2. ÎNTREBĂRI PROBABILE LA INTERVIU ȘI RĂSPUNSURI SUGERATE:
-   Q: "Cum gestionezi optimizarea performanței într-o aplicație React?"
-   A: "Folosesc tehnici de memoizare (useMemo, useCallback), lazy loading pentru componente și optimizez bundle-ul prin code splitting."
-
-   Q: "Ce experiență ai cu integrarea de API-uri și baze de date?"
-   A: "Am construit API-uri REST/GraphQL scalabile cu Fastify și Node.js, conectate la baze de date PostgreSQL cu optimizări de indecși și interogări eficiente."
-
-3. PLAN DE ACȚIUNE:
-   - Pasul 1: Trimiteți acest CV adaptat prin intermediul linkurilor aferente joburilor selectate.
-   - Pasul 2: Urmăriți statusul aplicației în platformă la 3-5 zile după trimitere.
-   - Pasul 3: Pregătiți portofoliul de proiecte GitHub pentru prezentare.`
+    const plan = await pasAgent(
+      'planificator', 'Plan de aplicare + interviu',
+      `Pentru candidatura de mai jos, fă: 1) PAȘII CONCREȚI de aplicare (unde intră, pe ce link aplică, ce atașează, când revine cu follow-up); 2) 5 ÎNTREBĂRI PROBABILE de interviu PENTRU ACESTE roluri, cu schița răspunsului bazată STRICT pe CV-ul candidatului (nimic inventat).\n\nANUNȚURILE:\n${context.slice(0, 4000)}\n\nCV ADAPTAT:\n${adaptare.text.slice(0, 6000)}`,
+      cine.email, cine.admin,
+    )
+    pasi.push(plan)
 
     return reply.send({
       success: true,
-      adaptedCv,
-      targetJobs,
-      message: 'CV-ul a fost adaptat cu succes pentru joburile selectate!'
+      adaptedCv: adaptare.text,
+      verificare: verificare.ok ? verificare.text : undefined,
+      plan: plan.ok ? plan.text : undefined,
+      pasi: pasi.map((p) => ({ agent: p.agent, nume: p.nume, ok: p.ok, text: p.text })),
+      message: 'Adaptare făcută cu lanțul de agenți (cercetare → adaptare → verificare → plan).',
     })
   })
 }
