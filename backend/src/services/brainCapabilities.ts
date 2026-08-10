@@ -151,6 +151,7 @@ export const CAPABILITIES: readonly Capability[] = [
   // `inventarulMeu()` nu le număra și creierul „nu știa că le are" (cauza „nu am
   // unelte"). Acum sunt în sursa unică, deci intră în inventar.
   { name: 'cheama_agent', category: 'cod', does: 'deleagă o sarcină unui agent specialist (din cei 91)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'agent_nou', category: 'cod', does: 'creează un agent specialist NOU când lipsește tipul (instant, fără publicare)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'panou_cod', category: 'cod', does: 'deschide panoul constructorului cu un ordin de build', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_manage', category: 'cod', does: 'gestionează ordinele constructorului (reia/oprește/curăță)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_repos', category: 'cod', does: 'listează repo-urile legate la Jules (agentul async Google)', chat: true, voice: false, voiceViaBrain: true, admin: true },

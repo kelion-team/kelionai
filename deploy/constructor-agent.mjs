@@ -496,6 +496,10 @@ const TOOLS = [
   { type: 'function', function: { name: 'runbook_status', description: 'Starea rulărilor de operații pornite de tine.', parameters: { type: 'object', properties: { name: { type: 'string' } } } } },
   { type: 'function', function: { name: 'runbook_log', description: 'Jurnalul unei rulări de operație, după id.', parameters: { type: 'object', properties: { run_id: { type: 'number' } }, required: ['run_id'] } } },
   { type: 'function', function: { name: 'request_repair', description: 'Notează durabil un ordin de reparație pentru ce ai găsit și nu intră în lucrarea asta (nu se pierde, ajunge la owner).', parameters: { type: 'object', properties: { title: { type: 'string' }, details: { type: 'string' } }, required: ['title', 'details'] } } },
+  // ── AGENȚII SPECIALIȘTI (Adrian, 10 aug: „folosește la nevoie automat toți
+  // agenții"; „când îți lipsește un TIP de agent, creează-l automat") ──────────
+  { type: 'function', function: { name: 'cheama_agent', description: 'Deleagă o sub-sarcină unui agent specialist din roster (ex. un expert pe un domeniu). Folosește-l cât e cazul, automat, când sub-sarcina cade mai bine pe un specialist decât pe tine.', parameters: { type: 'object', properties: { agent: { type: 'string', description: 'id-ul agentului din roster' }, sarcina: { type: 'string', description: 'ce are de făcut, complet' } }, required: ['agent', 'sarcina'] } } },
+  { type: 'function', function: { name: 'agent_nou', description: 'Creează un agent specialist NOU când îți lipsește TIPUL de care ai nevoie (instant, fără publicare — e o persona folosită imediat de cheama_agent). Dă un nume și rolul (meseria) lui. După ce-l creezi, cheamă-l cu cheama_agent.', parameters: { type: 'object', properties: { nume: { type: 'string' }, rol: { type: 'string', description: 'meseria/rolul agentului, min 10 caractere' } }, required: ['nume', 'rol'] } } },
 ]
 
 // Care unelte NU se execută aici, ci în aplicație (browser Playwright în proces,
@@ -542,6 +546,10 @@ THE WORK METHOD — follow it 100%, in this order, on EVERY order (the tool-step
 5. PROVE. "Done" is never a claim — it is evidence. Before calling 'finish', re-read the order and check that your change actually FULFILS it (not merely that it compiles). Then call 'finish' IMMEDIATELY — do NOT run 'npm ci/build/test' yourself; the system verifies on its own after finish. Target: finish within ≤3 tool calls after finding the file.
    EXCEPTION — NEW dependency: if the order needs a package that does not exist yet, run 'run' with "npm --prefix backend install <package>" (or frontend) BEFORE finish — so package.json + lock stay in sync and verification passes.
 6. REPORT HONESTLY. The PR body (in Romanian, for the owner) states three things: what was done, how it was verified, and what remains unverified. An honest "this could not be verified" is worth more than a confident guess. If the system tells you the build failed, repair the CAUSE and re-finish (you have a small number of repair rounds). Never hide a failure.
+
+USE THE SPECIALIST AGENTS — automatically, whenever a sub-task fits a specialist better than you (owner's order, 10 Aug: "the builder must use, automatically when needed, all the agents"):
+- If a sub-part of the order falls squarely in a specialty (design, SEO, security, database, tests, i18n, etc.), DELEGATE it with 'cheama_agent' (agent id + the full sub-task) instead of doing it half-well yourself. Fold the agent's answer back into your work — you still own the edit and the 'finish'.
+- If you need a TYPE of specialist the roster does NOT have, create one on the spot with 'agent_nou' (a name + the role), briefly say which agent you created, then call it with 'cheama_agent'. Creating an agent is instant and needs no publish. Do this only when a real gap blocks the order — not as busywork.
 
 PROJECT CONVENTIONS — know them; each one saves whole wasted steps (measured on real failed orders):
 - DATABASE: the ENTIRE schema lives in backend/src/db.ts as "CREATE TABLE IF NOT EXISTS ..." inside the init SQL. This repo has NO knex, NO knexfile.ts, NO migrations/ folder — do NOT create migration files (they are dead weight here). To add a table or column, EDIT that SQL block in db.ts.

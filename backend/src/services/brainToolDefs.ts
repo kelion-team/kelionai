@@ -771,3 +771,22 @@ export const CHEAMA_AGENT_TOOL: Tool = {
     required: ['agent', 'sarcina'],
   },
 }
+
+// CREAREA UNUI AGENT NOU (Adrian, 10 aug: „când îi lipsește un TIP de agent,
+// Kelion îl creează automat"). Instant — agentul e o persona (id+nume+rol)
+// folosită imediat de cheama_agent; nu cere publicare. ADMIN ONLY.
+export const AGENT_NOU_TOOL: Tool = {
+  name: 'agent_nou',
+  description:
+    'ADMIN ONLY. Creează un AGENT SPECIALIST NOU când îți lipsește TIPUL de care ai nevoie pentru o sarcină ' +
+    '(nu-l ai deja în roster). Instant, fără publicare: agentul e disponibil imediat prin cheama_agent. ' +
+    'Anunță pe scurt ownerul ce agent ai creat, apoi deleagă-i sarcina.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      nume: { type: 'string', description: 'numele agentului (ex. „Agent SEO"), min 3 caractere' },
+      rol: { type: 'string', description: 'meseria/rolul lui, ce știe să facă, min 10 caractere' },
+    },
+    required: ['nume', 'rol'],
+  },
+}

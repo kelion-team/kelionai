@@ -110,7 +110,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // THE STATE MEASURED TODAY — any change to the brain's surface must pass
   // through HERE (otherwise the test falls), so the registry can't fall behind.
   it('numărul de capabilități pe fiecare cale e cel documentat', () => {
-    expect(chatCapabilityNames().length).toBe(89) // 10 aug: +get_monitor (citește conținutul de pe ecran) — cerința ownerului „acces la ce se afișează pe monitor". 5 aug: +12 unelte legate la creier.
+    expect(chatCapabilityNames().length).toBe(90) // 10 aug: +agent_nou (creierul/constructorul creează un specialist când lipsește tipul) și +get_monitor (citește conținutul de pe ecran). 5 aug: +12 unelte legate la creier.
     expect(voiceCapabilityNames().length).toBe(0) // 1 aug: sesiunea de voce = urechi+gură, ZERO unelte directe
   })
 
