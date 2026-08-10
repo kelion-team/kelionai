@@ -32,7 +32,7 @@ import {
   type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
+import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
@@ -469,6 +469,11 @@ export default function Stage({ user }: { user: User }) {
   // language identification the existing procedure applies"). No role forcing,
   // no browser/account locale: the local mirror of the server-IDENTIFIED language
   // (written by the {lang} frame → mirrorLang), otherwise English.
+  // OGLINDA E A CONTULUI, NU A BROWSERULUI (10 aug — „userul a intrat direct pe
+  // ro, de ce?"): un cont NOU pe un browser folosit înainte în română moștenea
+  // „ro" din localStorage. Revendicarea rulează ÎNAINTE de prima citire — alt
+  // cont => oglinda se aruncă, aplicația pornește pe EN până i se determină limba.
+  revendicaOglindaLimbii(user.email)
   const lang = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)

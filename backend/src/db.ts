@@ -1687,7 +1687,8 @@ export async function getUserActivity(): Promise<{
                 (ARRAY_AGG(v.device ORDER BY v.last_seen_at DESC))[1] AS device,
                 (ARRAY_AGG(v.browser ORDER BY v.last_seen_at DESC))[1] AS browser,
                 EXISTS(SELECT 1 FROM blocked_users b WHERE b.email = v.user_email) AS blocked,
-                COALESCE((SELECT w.balance FROM wallets w WHERE w.user_email = v.user_email), 0)::float AS balance
+                COALESCE((SELECT w.balance FROM wallets w WHERE w.user_email = v.user_email), 0)::float AS balance,
+                COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE c.user_email = v.user_email), 0)::float AS "consumedUsd"
          FROM visits v
          LEFT JOIN (SELECT user_email, COUNT(*)::int AS n
                     FROM messages GROUP BY user_email) m

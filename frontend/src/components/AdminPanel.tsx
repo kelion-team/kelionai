@@ -2475,6 +2475,11 @@ export default function AdminPanel({
                           sold {sym}
                           {u.balance.toFixed(2)}
                         </span>
+                        {/* MONITORIZAREA PE USER (10 aug): cât a COSTAT pe
+                            furnizori — roșu când a consumat peste ce are. */}
+                        <span style={(u.consumedUsd ?? 0) > 0 && u.balance <= 0 ? { color: '#e5484d', fontWeight: 600 } : undefined}>
+                          consum ${(u.consumedUsd ?? 0).toFixed(2)}
+                        </span>
                         {u.blocked && <span className="user-badge blocked">BLOCAT</span>}
                       </div>
                       <div className="vis-actions" onClick={(e) => e.stopPropagation()}>

@@ -155,4 +155,8 @@ export interface UserActivityRow {
   browser: string
   blocked: boolean
   balance: number
+  /** Cât a COSTAT userul ăsta pe furnizori (USD, suma cost_events pe emailul
+   *  lui) — monitorizarea pe user (Adrian, 10 aug: „sistemul de monitorizare
+   *  pe user inexistent"). Consumul, lângă sold: se vede cine arde banii. */
+  consumedUsd: number
 }

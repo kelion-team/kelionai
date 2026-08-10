@@ -6,12 +6,32 @@
 // itself. Best-effort: never throws.
 
 const LS_KEY = 'kelion.speechLang'
+// AL CUI e mirror-ul (10 aug, ownerul: „la prima intrare, EN până se determină
+// limba USERULUI"): localStorage e pe BROWSER, nu pe cont — un user nou logat pe
+// un browser folosit înainte în română moștenea „ro" de la contul anterior.
+// Cheia de mai jos leagă oglinda de email; alt cont => oglinda se aruncă și
+// aplicația pornește pe EN, până serverul determină limba omului ăstuia.
+const LS_CINE = 'kelion.speechLang.cine'
 
 export function loadLocalLang(): string | null {
   try {
     return localStorage.getItem(LS_KEY)
   } catch {
     return null
+  }
+}
+
+/** La montarea aplicației, cu emailul sesiunii în mână: dacă oglinda de limbă
+ *  aparține ALTUI cont (sau nimănui — moștenire veche, nedovedibilă), se
+ *  șterge, iar sesiunea revendică oglinda. Idempotent, sincron, best-effort. */
+export function revendicaOglindaLimbii(email: string): void {
+  try {
+    if (localStorage.getItem(LS_CINE) !== email) {
+      localStorage.removeItem(LS_KEY)
+      localStorage.setItem(LS_CINE, email)
+    }
+  } catch {
+    /* ignore */
   }
 }
 
