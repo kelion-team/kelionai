@@ -67,8 +67,13 @@ function taskKindFromText(msg: string): string | null {
 // questions like "ce vezi pe cameră?" still reach the brain.
 function cameraOp(raw: string): DeviceCommand['camera'] | null {
   const m = raw.toLowerCase()
-  const areWebcam = /\bwebcam/.test(m)
-  if (!areWebcam && !/\bcamer/.test(m)) return null
+  const areWebcam = /(?<![\p{L}\p{N}])webcam/iu.test(m)
+  const areCamera = /(?<![\p{L}\p{N}])camer/iu.test(m)
+  const areStreamOrFeed = /(?<![\p{L}\p{N}])(stream|feed|transmisi)/iu.test(m)
+  const areDirectSwitch = /(?<![\p{L}\p{N}])(comut|pune|schimb|switch|flip|toggle|întoarce|intoarce).*(?<![\p{L}\p{N}])(spate|fa[țt][ăa]|front|back|rear|frontal|selfie)(?![\p{L}])/iu.test(m)
+  const areVideo = /(?<![\p{L}\p{N}])video(?![\p{L}])/iu.test(m) && !/(?<![\p{L}\p{N}])(youtube|clip|film|melodi|pies[ăa]|muzic|song)/iu.test(m)
+
+  if (!areWebcam && !areCamera && !areStreamOrFeed && !areDirectSwitch && !areVideo) return null
   // „cameră" în română înseamnă ȘI „încăpere" (Adrian, 10 aug — bug „prăjit la
   // chat"): fraze firești despre o ÎNCĂPERE cu un verb imperativ deturnau tura
   // („stinge lumina din cameră", „închide ușa camerei", „deschide fereastra din
