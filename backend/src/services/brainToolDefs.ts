@@ -201,6 +201,19 @@ export const CONSTRUCTOR_STATUS_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+export const CONSTRUCTOR_COMMAND_TOOL: Tool = {
+  name: 'constructor_command',
+  description:
+    'ADMIN ONLY. Execute a shell command directly on the server (in the constructor context), as a direct command channel from Kelion to the constructor. Use this whenever the owner asks you to run a command, bash, shell, script, or action in the constructor/server.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      cmd: { type: 'string', description: 'The bash command to execute on the server.' },
+    },
+    required: ['cmd'],
+  },
+}
+
 
 // ── §1: definitions moved out of chat.ts so VOICE can use them too ──────────
 // They were local to chat.ts, so voice had no way to request them — that's why
