@@ -967,26 +967,11 @@ async function deschidePR(titlu, corp, branch) {
   throw new Error(`PR-ul nu s-a deschis după 4 încercări: ${lastErr}`)
 }
 
-// ── ÎMBINAREA PROPRIE (Adrian, 10 aug: „după ce face PR trebuie să fie capabil
-// să DEA PR-ul [să-l îmbine]; dacă sunt probleme, să anunțe") ─────────────────
-// DOAR pe CI VERDE. Pe roșu/în curs NU îmbină (regula casei: nimic nu se publică
-// pe roșu; „phantom deploy"). La eșec de îmbinare (protecție de branch, drepturi,
-// rețea) NU crapă — raportează că n-a putut, ca ownerul să dea el merge-ul.
-async function imbinaPR(prUrl) {
-  const nr = String(prUrl || '').match(/\/pull\/(\d+)/)?.[1]
-  if (!nr) return { ok: false, motiv: 'număr PR necunoscut' }
-  const headers = { Authorization: `Bearer ${GHTOKEN}`, Accept: 'application/vnd.github+json', 'content-type': 'application/json' }
-  try {
-    const r = await fetch(`https://api.github.com/repos/${REPO}/pulls/${nr}/merge`, {
-      method: 'PUT', headers, body: JSON.stringify({ merge_method: 'merge' }), signal: AbortSignal.timeout(60_000),
-    })
-    const b = await r.json().catch(() => null)
-    if (b?.merged) return { ok: true, nr }
-    return { ok: false, motiv: `GitHub ${r.status}: ${String(b?.message ?? '').slice(0, 160)}` }
-  } catch (e) {
-    return { ok: false, motiv: String(e?.message ?? e) }
-  }
-}
+// ÎMBINAREA e a PORȚII REALE de pe VPS (deploy/porti-pr.sh), nu a lucrătorului:
+// ea rulează porțile reale la 10 min și, DOAR pe verde, îmbină singură PR-urile
+// constructorului (kelion/job-*); pe roșu le lasă deschise. Aici nu mai îmbinăm
+// (Actions e mort → n-am avea niciodată un verde de la el; un PR rupt ca #973 nu
+// se mai poate strecura). Lucrătorul doar deschide PR-ul și raportează.
 
 // DOVADA INDEPENDENTĂ (Etapa 6): „Gata" nu mai e pe cuvântul lucrătorului —
 // după PR, CI-ul (workflow-ul pr-verify) re-rulează build+teste pe o MAȘINĂ
@@ -1355,21 +1340,18 @@ async function main() {
       ci = v === 'success' ? 'verde' : v === 'failure' ? 'roșu' : 'în curs'
       log(`CI: ${ci}`)
     }
+    // ÎMBINAREA e a PORȚII REALE, nu a lucrătorului (10 aug): GitHub Actions e
+    // mort (facturare blocată), deci checkul „verify" nu vine niciodată — de-aia
+    // un PR rupt ca #973 a putut fi îmbinat manual. Acum poarta de pe VPS
+    // (deploy/porti-pr.sh, cron 10 min) rulează porțile REALE și, DOAR pe verde,
+    // îmbină singură PR-urile constructorului (kelion/job-*); pe roșu le lasă
+    // deschise cu problema anunțată. Aici doar RAPORTĂM starea; nu îmbinăm de
+    // două ori.
     if (ci === 'roșu') {
-      // CI a picat pe o mașină curată deși atelierul trecuse — NU declar „Gata"
-      // fals și NU îmbin. Raportez eșec cu dovada (owner: „dacă sunt probleme
-      // să anunțe"), PR-ul rămâne deschis cu problema la vedere.
       await report('failed', { branch, prUrl, tokens, ci, log: `${logLines.join('\n')}\n\nVerificarea independentă (CI) a picat pe PR (commit ${headSha.slice(0, 7)}).` })
-    } else if (ci === 'verde') {
-      // CI VERDE → îmbin singur (owner, 10 aug: „să dea PR-ul"). Totul prin master.
-      // Pe eșec de îmbinare rămâne deschis pentru owner, nu se pierde nimic.
-      const m = await imbinaPR(prUrl)
-      if (m.ok) { log(`PR #${m.nr} îmbinat automat în master`); await report('done', { branch, prUrl, tokens, ci: 'verde · îmbinat automat' }) }
-      else { log(`n-am putut îmbina automat (${m.motiv}) — rămâne pentru owner`); await report('done', { branch, prUrl, tokens, ci: `verde · îmbinare eșuată: ${m.motiv}` }) }
     } else {
-      // CI 'în curs' — n-am confirmat verde în bugetul de timp; NU îmbin pe
-      // neverificat. Raportez gata cu PR-ul deschis; îmbinarea rămâne la owner.
-      await report('done', { branch, prUrl, tokens, ci })
+      // verde SAU 'în curs' — poarta de pe VPS confirmă și îmbină pe verde.
+      await report('done', { branch, prUrl, tokens, ci: ci === 'verde' ? 'verde' : `${ci} (poarta VPS confirmă + îmbină pe verde)` })
     }
   } catch (e) {
     // AMÂNARE, NU MOARTE (regula din 28 iul, adaptată la Gemini-only): când
