@@ -140,6 +140,7 @@ export async function turaCreierului(
   coords: { lat: number; lon: number } | null,
   imagini: string[],
   laControl: (frame: Record<string, unknown>) => void,
+  monitor?: Record<string, unknown> | null,
 ): Promise<{ ok: true; text: string } | { ok: false; motiv: string }> {
   let r: Response
   try {
@@ -161,6 +162,9 @@ export async function turaCreierului(
         // camerei, cerute browserului LA CERERE (nu flux continuu) — ruta de
         // chat le primește exact ca de la clientul scris (max 4, sursă camera).
         images: imagini.length ? imagini.slice(-4) : undefined,
+        // CE E PE MONITOR (10 aug): get_monitor din creier îl citește de aici,
+        // deci vocea „citește ce e pe ecran" ajunge la conținutul REAL.
+        monitorContent: monitor ?? undefined,
         now: new Date().toISOString(),
       }),
       signal: AbortSignal.timeout(90_000),
@@ -436,6 +440,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     let coords: { lat: number; lon: number } | null = null
     let ancora: { nowIso?: string; tz?: string; lat?: number; lon?: number; acc?: number } = {}
     let ancoraSosita: (() => void) | null = null
+    // CE E PE MONITOR acum (10 aug): ultimul conținut raportat de browser cu
+    // bătaia de coords — retransmis prin ușa creierului la get_monitor.
+    let monitorLive: Record<string, unknown> | null = null
     // VEDEREA LA CERERE (8 aug: „hai și cu vedere"): când ușa se deschide,
     // serverul cere browserului cadrele camerei ({type:'cere_cadre'}) și
     // așteaptă răspunsul aici — zero trafic de imagini cât nu e nevoie.
@@ -457,6 +464,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) {
               coords = { lat: m.lat as number, lon: m.lon as number }
             }
+            // CE E PE MONITOR, ținut pentru get_monitor pe VOCE (10 aug): vine
+            // cu aceeași bătaie ca ancora; null = nimic afișat acum.
+            const mon = (m as { monitor?: unknown }).monitor
+            monitorLive = mon && typeof mon === 'object' ? (mon as Record<string, unknown>) : null
             ancora = {
               nowIso: typeof m.now === 'string' ? m.now : ancora.nowIso,
               tz: typeof m.tz === 'string' ? m.tz : ancora.tz,
@@ -817,7 +828,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device']
             const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, (frame) => {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
-            })
+            }, monitorLive)
             if (r.ok) {
               // Ordinele de constructor pornite prin ușă intră sub urmărire —
               // la terminare, Kelion anunță cu vocea lui (ceasOrdine, mai sus).
