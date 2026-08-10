@@ -203,6 +203,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   click_monitor: { what: 'Clicks a precise spot on your screen', say: '"click at coordinates 300 400"' },
   zoom_monitor: { what: 'Zooms in or out on your screen', say: '"zoom in on the page"' },
   get_mouse_position: { what: 'Checks the position of your mouse and what it is pointing at', say: '"where is my mouse?"' },
+  arata_pe_grafic: { what: 'Draws pointers on your trading chart to show exactly what he means', say: '"mark the resistance on the chart"' },
   goleste_monitorul: { what: 'Clears the screen — closes whatever it is showing', say: '"close the monitor"' },
   get_location: { what: 'Uses your real position, not a guess', say: '"where am I?"' },
 

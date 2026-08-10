@@ -67,7 +67,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     // Intercepted in execTool BEFORE runTool (they're not a `case`): heavy
     // reasoning, tool self-proposal, și citirea monitorului (10 aug — conținutul
     // ecranului vine din corpul cererii, se întoarce înainte de runTool).
-    const special = new Set(['ask_brain', 'propose_tool', 'get_monitor', 'click_monitor', 'zoom_monitor', 'get_mouse_position'])
+    const special = new Set(['ask_brain', 'propose_tool', 'get_monitor', 'click_monitor', 'zoom_monitor', 'get_mouse_position', 'arata_pe_grafic'])
     // The SHARED admin tools (chat ∩ voice) go through the common guard before
     // the switch (execSharedAdminTool) → they no longer have a `case`, but they
     // ARE handled.
@@ -110,7 +110,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // THE STATE MEASURED TODAY — any change to the brain's surface must pass
   // through HERE (otherwise the test falls), so the registry can't fall behind.
   it('numărul de capabilități pe fiecare cale e cel documentat', () => {
-    expect(chatCapabilityNames().length).toBe(99) // 10 aug: +cauta_istoric (accesul lui Kelion la istoricul complet de chat). 10 aug: +click_monitor, +zoom_monitor, +get_mouse_position. 10 aug: +agent_nou, +get_monitor, +goleste_monitorul (perechea lui get_monitor), +ruleaza_portile/jurnal_masuratori/vaneaza_buguri (suita de măsurare), +constructor_command (canalul de comandă construit de constructor, PR #966). 5 aug: +12 unelte legate la creier.
+    expect(chatCapabilityNames().length).toBe(100) // 10 aug: +arata_pe_grafic (pointeri de indicație pe graficul de trading). 10 aug: +cauta_istoric (accesul lui Kelion la istoricul complet de chat). 10 aug: +click_monitor, +zoom_monitor, +get_mouse_position. 10 aug: +agent_nou, +get_monitor, +goleste_monitorul (perechea lui get_monitor), +ruleaza_portile/jurnal_masuratori/vaneaza_buguri (suita de măsurare), +constructor_command (canalul de comandă construit de constructor, PR #966). 5 aug: +12 unelte legate la creier.
     expect(voiceCapabilityNames().length).toBe(0) // 1 aug: sesiunea de voce = urechi+gură, ZERO unelte directe
   })
 
