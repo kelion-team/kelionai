@@ -391,28 +391,9 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
     return dateSimbol(String(q.simbol ?? 'BTCUSDT'), String(q.interval ?? '1h'))
   })
 
-  // MEMORIA SEPARATĂ A CENTRULUI — pe drumul VIU (audit 9 aug): chatul
-  // paginii bate în /api/chat (creierul UNIC — decizia ownerului: „același
-  // model peste tot", cu căutare pe net), deci salvarea în memoria doar-admin
-  // 'tranzactii' se face AICI, cu un apel mic după fiecare schimb. Vechea rută
-  // /api/tranzactii/chat (agent separat) rămăsese COD MORT — pagina n-o mai
-  // chema pe ea, iar promisiunea „discuția se salvează în memoria lui separată"
-  // era ținută de un drum pe care nu mergea nimeni. Ștearsă; promisiunea o ține
-  // jurnalul ăsta.
-  app.post('/api/tranzactii/jurnal', async (req, reply) => {
-    if (!adminul(req, reply)) return { error: 'forbidden' }
-    const b = req.body as { simbol?: string; intrebare?: string; raspuns?: string } | null
-    const intrebare = String(b?.intrebare ?? '').trim().slice(0, 300)
-    const raspuns = String(b?.raspuns ?? '').trim().slice(0, 600)
-    if (!intrebare || !raspuns) return reply.code(400).send({ error: 'schimb gol' })
-    const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
-    await addMemory(
-      config.adminEmail,
-      `[tranzactii-chat ${zi}] ${String(b?.simbol ?? '?').slice(0, 20)} Î: ${intrebare} | R: ${raspuns}`,
-      'tranzactii',
-    )
-    return { salvat: true }
-  })
+  // (Ruta /api/tranzactii/jurnal a fost SCOASĂ pe 10 aug: chatul paginii nu
+  // mai există, iar chatul REAL scrie direct în memoria 'tranzactii' din
+  // chat.ts, la finalul turei ancorate — un singur drum viu, nu două.)
 
   // Analiza cu ÎNVĂȚARE REALĂ: agentul primește analizele lui anterioare pe
   // simbol + prețul de-acum (își judecă apelurile), iar verdictul nou se

@@ -42,7 +42,9 @@ import {
   cancelBuildJob,
   attachGuestPhoto,
   userKey,
+  addMemory,
 } from '../db.js'
+import { extrageNiveluri } from './tranzactii.js'
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, OCHI_MARCAJ, type OrMessage, type AnthropicTool } from '../services/brainContract.js'
 import { stripToolMarkup, makeToolMarkupStripper } from '../services/toolMarkup.js'
@@ -1269,6 +1271,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // synthesize Chirp (not only would it not play: we don't pay synthesis
       // for discarded audio either).
       serverVoiceOff?: boolean
+      // Ancora Centrului de Tranzacționare (10 aug, ownerul: chatul REAL,
+      // „conștient" de pagina de trading) — starea VIE raportată de iframe.
+      tranzactii?: { simbol?: string; pret?: number; interval?: string; sursa?: string }
       // UȘA CREIERULUI (8 aug, ownerul: „a oferit soluții dar nu poate să
       // implementeze"): tura vine din sesiunea vocală live prin unealta
       // cere_creierului — modelul live a DECIS deja că e nevoie de unelte,
@@ -1863,7 +1868,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         .join(', ')
       systemPrompt +=
         `\n\nMONITOR STATE: these task tabs are already open on the user's monitor: ${list}. One voice narrates all of them and the user can switch or close them at will. When the user says "the map", "the video", "this", "that", or asks to change what is shown, they mean these open tabs — work WITHIN the active one. To change a surface's content, call the SAME tool again (youtube_search swaps the current video, maps_search moves the map, get_weather changes the forecast) rather than describing it in words. Only open a different kind of surface when the user actually needs a new one. CLOSE IT WHEN DONE: as soon as the conversation moves to a NEW subject that has nothing to do with what is on the monitor, call show_on_screen with an EMPTY url to clear the screen — leave it clean and ready for the next request. Don't leave an old map/weather/video lingering once the user is talking about something else.`
-    } else {
+    }
+    // ANCORA CENTRULUI DE TRANZACȚIONARE (10 aug, ownerul: „trebuie chatul
+    // real, conștient... să răspundă tuturor întrebărilor tehnice"): cât tabul
+    // de trading e deschis, fiecare tură primește CIFRELE de pe ecran, iar
+    // regulile de mentor (riscul întâi, doar pe real) intră în prompt. Rândul
+    // NIVELURI din răspuns se desenează pe graficul lui (frame {niveluri}).
+    const piata = isAdminUser ? req.body?.tranzactii : undefined
+    if (piata?.simbol) {
+      systemPrompt +=
+        `\n\nCENTRUL DE TRANZACȚIONARE E PE ECRAN — ancora REALĂ a clipei: simbol ${String(piata.simbol).slice(0, 20)}, ` +
+        `preț ${Number(piata.pret) || 'necunoscut'}, interval ${String(piata.interval ?? '?').slice(0, 6)}, sursă ${String(piata.sursa ?? '?').slice(0, 60)}. ` +
+        `Ești mentorul lui de trading, cu riscul ÎNTÂI: răspunzi la ORICE întrebare tehnică de tranzacționare (cum funcționează platformele, tipuri de ordine, indicatori, strategii, mărimea poziției, management de risc, când intri/ieși) — pe înțeles, SCURT, doar pe cifre REALE (cele de pe ecran sau surse de net cu link și dată; ce nu ai măsurat spui că nu ai de unde ști). NU promiți câștiguri, NU spui „sigur", NU plasezi ordine. ` +
+        `Când dai niveluri concrete pe simbolul de pe ecran (intrare/ieșire/stop/țintă/suport/rezistență), încheie răspunsul cu rândul mașină-citibil, pe rând separat: NIVELURI: intrare=…; stop=…; tinta=…; suport=…; rezistenta=… — doar cele care există; rândul se DESENEAZĂ pe graficul lui.`
+    }
+    if (!(Array.isArray(screen) && screen.length > 0)) {
       // THE EMPTY MONITOR (Adrian, Jul 27, live proof: "open YouTube on the
       // monitor" → "there is nothing on the monitor" instead of execution):
       // empty is the normal starting state, not an obstacle to report.
@@ -2983,6 +3002,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
 
 
     // ── FINAL TURN ──
+    // CENTRUL DE TRANZACȚIONARE — bucla închisă (10 aug): nivelurile din
+    // răspunsul chatului REAL se extrag AICI, cu parserul testat și cu prețul
+    // real în mână, și pleacă spre browser ca frame {niveluri} — ChatPanel le
+    // pasează în iframe, pagina le desenează. Schimbul intră și în memoria
+    // separată 'tranzactii' (promisiunea „memoria doar-admin" ținută pe drum viu).
+    if (piata?.simbol && assistantText.trim()) {
+      const niv = extrageNiveluri(assistantText, Number(piata.pret) || undefined)
+      if (niv.length) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ niveluri: { simbol: String(piata.simbol), lista: niv } })}${CTRL}`)
+      }
+      const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const intrebarea = (messages.at(-1)?.content ?? '').slice(0, 300)
+      void addMemory(
+        config.adminEmail,
+        `[tranzactii-chat ${zi}] ${String(piata.simbol).slice(0, 20)} Î: ${intrebarea} | R: ${assistantText.slice(0, 600)}`,
+        'tranzactii',
+      ).catch(() => {})
+    }
     // TOTUL PE MONITOR (Adrian, Aug 2, 10:13 — the monitor is the PRIMARY
     // display surface): when the brain did NOT push any surface this turn but
     // its final answer still carries an obviously displayable payload (a URL,

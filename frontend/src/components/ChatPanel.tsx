@@ -543,6 +543,12 @@ export default function ChatPanel({
       setChatImage(null)
       return
     }
+    // Nivelurile din răspunsul chatului REAL pleacă în iframe-ul Centrului de
+    // Tranzacționare — pagina le desenează pe grafic (10 aug, „conștient").
+    if (c.niveluri) {
+      const cadru = document.querySelector<HTMLIFrameElement>('iframe.workspace-frame')
+      cadru?.contentWindow?.postMessage({ kelion: 'niveluri', date: c.niveluri }, window.location.origin)
+    }
     if (!c.monitor) return
     if (c.monitor.url) openWorkspace(c.monitor.title || t.monitorTitle, c.monitor.url)
     else closeWorkspace()

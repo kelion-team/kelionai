@@ -874,6 +874,13 @@ the risk of diverging. */
   hidden behind the box anymore. */
   padding: 56px 16px 150px;
 }
+/* PAGINILE-APLICAȚIE (10 aug, ownerul: „mărește în partea de jos monitorul"):
+   tranzacțiile au layoutul LOR intern pe toată înălțimea — golul de 150px
+   lăsat pentru documente devenea o bandă moartă sub grafic. Compozitorul
+   plutește peste marginea de jos a paginii, nu peste un text de citit. */
+.workspace-inner.plin {
+  padding-bottom: 12px;
+}
 /* ON THE PHONE the (fixed) top bar wraps onto 2-3 rows (badges + admin
 buttons) and reaches far below 56px — the panel's title and its buttons
 (A−/100%/A+) went UNDER the badges (Adrian's screenshot, Jul 26: „the
