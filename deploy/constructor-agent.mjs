@@ -106,9 +106,12 @@ const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 120)
 // contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
 // construcție, dar nici să ne țină la nesfârșit.
 const MAX_STERILE = Number(env.CONSTRUCTOR_MAX_STERILE || 8)
-// Runde de reparație după un build/test roșu (promise în system prompt, dar
-// niciodată acordate de codul vechi — vezi bucla din main()).
-const MAX_REPAIR = Number(env.CONSTRUCTOR_MAX_REPAIR || 2)
+// Runde de reparație după o poartă roșie în atelier (promise în system prompt).
+// Ridicat 2→4 (10 aug): atelierul verifică acum TOATE cele 7 porți (jscpd,
+// exporturi, sintaxă, boot — adăugate în #978), nu doar build+teste. Cu doar 2
+// runde, un ordin care pică o poartă nouă (ex. un duplicat de scos, un boot de
+// reparat) rămânea „eșuat" deși era reparabil. Mai multe runde = chiar le termină.
+const MAX_REPAIR = Number(env.CONSTRUCTOR_MAX_REPAIR || 4)
 // Ridicat la 2M odată cu pașii (5 aug): cu 120 de pași, bugetul de tokeni nu mai
 // trebuie să fie el frâna înainte de cel de TIMP. Fereastra glisantă
 // (KEEP_VERBATIM) ține contextul per-tură mărginit, deci ăsta e doar cumulul.
@@ -1336,18 +1339,22 @@ async function main() {
       }
 
       // VERIFICAREA NOASTRĂ, nu pe încredere: ce s-a atins trebuie să compileze.
+      const tVerif = Date.now()
       const problema = verificaAtelierul()
+      const durataVerif = Date.now() - tVerif
       if (!problema) break
       // RUNDA DE REPARAȚIE. System promptul îi promite modelului: „dacă sistemul
       // îți spune că buildul a picat, repari și re-finish" — dar codul vechi NU
       // dădea niciodată runda aia: la primul build roșu arunca direct și ordinul
       // ieșea EȘUAT. Un model gratuit greșește un import sau un tip la prima
       // scriere; asta singură explică o parte din ordinele picate „end-to-end".
-      // Mărginită: MAX_REPAIR runde ȘI doar dacă mai avem timp de încă un ciclu
-      // complet de npm ci/build/test (altfel murim la timeout, fără raport).
-      // NOTĂ (2 aug): aici se urca pe un model PLĂTIT după rundele de reparație
-      // — desființat („nimic altceva plătit, niciodată"): eșec onest.
-      if (reparatii >= MAX_REPAIR || ramase() < 10 * 60_000) {
+      // GARDA DE TIMP, ADAPTIVĂ (10 aug): garda fixă de 10 min renunța DES cu timp
+      // pe ceas — mai ales de când verificarea rulează toate cele 7 porți și ține
+      // mai mult. O rundă reală mai încape dacă a rămas cât o verificare completă
+      // (durataVerif) + un tur de reparație + tamponul de push/PR/raport. Bucla
+      // internă are oricum garda ei (ramase() < 6 min) care protejează coada.
+      const nevoieRunda = Math.max(7 * 60_000, durataVerif + 2 * 60_000)
+      if (reparatii >= MAX_REPAIR || ramase() < nevoieRunda) {
         throw new Error(problema)
       }
       reparatii++

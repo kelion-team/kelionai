@@ -16,9 +16,17 @@
 > (2) **Constructorul rulează în atelier TOATE cele 7 porți** ca `porti-pr.sh`
 > (adăugate: jscpd, exporturi, sintaxă, boot pe dist) — #978, master `884073c`.
 > Cauza reală a PR-ului roșu #973 (ordin #173, „canal de ordine"): atelierul
-> verifica doar build+teste și sărea celelalte patru porți; #973 e ÎNCHIS,
-> NEMERGE-uit — codul rupt n-a atins niciodată producția. De-acum constructorul
-> repară în atelier ÎNAINTE de PR, nu mai deschide PR-uri care pică pe poartă.
+> verifica doar build+teste și sărea celelalte patru porți. CORECȚIE (măsurat pe
+> `merged_at`, nu pe câmpul `merged` care e nesigur în output-ul minimal): #973 A
+> FOST îmbinat 10:03 și A RUPT master (rută la nivel de modul) — reparat imediat
+> de #974 (10:09). De-acum constructorul repară în atelier ÎNAINTE de PR.
+> (2b) **Constructorul chiar TERMINĂ ordinele** (ownerul: „de ce a eșuat,
+> implementează-i să le poată finaliza"): fiindcă #978 a înmulțit porțile din
+> atelier (3→7), dar rundele de reparație rămăseseră 2 și garda de timp era fixă
+> la 10 min — un ordin care pica o poartă nouă „eșua" deși era reparabil, cu timp
+> pe ceas. Fix: `MAX_REPAIR` 2→4 + gardă de timp ADAPTIVĂ (`durataVerif`+tampon,
+> nu 10 min fix). Măsurat: ordinele ard 2–3.4M tokeni fiecare, deci frâna reală e
+> TIMPUL (30 min dur), nu tokenii.
 > (3) **Câmp „Locație" în căutarea de joburi** (ownerul: „lipsește unde editezi
 > locația") — intră în interogarea Serper ȘI în ordonarea de bază ca al treilea
 > filtru (relevanță → salariu → potrivire locație). Distanța = potrivire de
