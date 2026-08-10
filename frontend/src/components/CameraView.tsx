@@ -156,7 +156,11 @@ export default function CameraView({
       // videoWidth alone isn't enough — readyState < 2 (HAVE_CURRENT_DATA) means
       // no frame is painted yet, and drawImage would grab a BLACK rectangle.
       if (!v || !v.videoWidth || v.readyState < 2) return null
-      const maxDim = 768
+      // 512, nu 768 (10 aug — „chat audio crăpat" pe voce+cameră): `toDataURL`
+      // e o encodare JPEG SINCRONĂ; costul crește cu pixelii. La 768² ținea firul
+      // 50–134 ms și înfometa redarea vocii → audio crăpat + barge-in-uri false.
+      // 512² = ~44% din pixeli → ~jumătate de blocaj, cu Kelion vede la fel de bine.
+      const maxDim = 512
       const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight))
       const w = Math.round(v.videoWidth * scale)
       const h = Math.round(v.videoHeight * scale)
