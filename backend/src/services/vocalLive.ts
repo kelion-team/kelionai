@@ -392,15 +392,20 @@ export function construiesteSetup(
         : { voiceConfig: { prebuiltVoiceConfig: { voiceName: voce } } },
     },
     // Transcrierea pe AMBELE sensuri — pentru istoric + subtitrări în UI.
-    // HINTUL DE LIMBĂ PE URECHE (9 aug, revizia — măsurat în discovery v1beta:
-    // AudioTranscriptionConfig.languageCodes există, „if omitted, automatic
-    // language detection"): auto-detecția e chiar sursa etichetărilor
-    // Fahrradbahn/Tequilón/„Dime" pe foșnete. Cu hintul, urechea benzii nu mai
-    // importă frânturi străine. E hint, nu pin — și tot sub plasa faraExtensii.
-    // Hintul de limbă pe ureche (16:23, #940) a fost SCOS (9 aug seara):
-    // tăierile au început fix după el; urechea revine pe auto-detecție —
-    // frânturile străine le oprește gardul de ieșire, nu hintul nedovedit.
-    inputAudioTranscription: {},
+    // HINTUL DE LIMBĂ PE URECHE (istoric complet, ca să nu ne mai mușcăm coada):
+    // · 9 aug, revizia: AudioTranscriptionConfig.languageCodes EXISTĂ în
+    //   discovery v1beta („if omitted, automatic language detection") —
+    //   auto-detecția e chiar sursa etichetărilor Fahrradbahn/„Dime" pe foșnete.
+    // · 9 aug seara (#940→scos): tăierile de vorbă au început fix după hint —
+    //   corelație, nu cauză dovedită; l-am scos din prudență.
+    // · 10 aug dimineața (ownerul: „prima frază apărută e scrisă fără noimă
+    //   într-o limbă ciudată" + „aude aiurea cuvintele"): fără hint, urechea
+    //   stâlcește chiar româna la prima frază („Arhiza mi traseu"). REPUS,
+    //   legat de limba PINUITĂ a userului (necunoscută → auto, fără hint), și
+    //   sub plasa faraExtensii — care între timp NU mai aruncă reglajele la un
+    //   sughiț de rețea (degradarea discriminează cauza, iar NO_INTERRUPTION
+    //   rămâne), deci frica din #940 are acum plasă adevărată.
+    inputAudioTranscription: limba ? { languageCodes: [limba] } : {},
     outputAudioTranscription: {},
     systemInstruction: { parts: [{ text: instructiune }] },
   }
