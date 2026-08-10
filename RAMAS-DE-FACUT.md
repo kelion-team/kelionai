@@ -10,6 +10,20 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **10 aug 2026 (după-amiaza) — „CHATUL PRĂJIT", GĂSIT CU AGENȚII + REPARAT.**
+> Ownerul: „iar ai prăjit ceva la chat, trimite iar toți agenții și repară." Sweep
+> cu 5 vânători + verificare adversarială. Cauza (confirmată, afectează chatul
+> SCRIS normal): în română **„cameră" = și „încăpere"**, iar `cameraOp`
+> (`commands.ts`) se declanșa pe orice `camer`+verb → fraze firești ca „stinge
+> lumina din cameră", „închide ușa camerei", „deschide fereastra din cameră"
+> **deturnau tura**: `chat.ts` întorcea un „am închis camera" din conservă, SĂREA
+> peste creier și chiar comuta camera video. Fix: `cameraOp` refuză când apare un
+> obiect de încăpere (lumină/ușă/fereastră/geam…), dacă nu e numit explicit
+> dispozitivul („webcam"/„cameră video"). +2: pe VOCE, cadrul de cameră se trimitea
+> **fără gardul de adresare** (o frază ambientală „închide camera" din încăpere
+> comuta camera) → acum doar pe tură adresată; și o `Date` invalidă din #979 putea
+> arunca RangeError pe calea de trading (păzit). Teste noi în `commands.test.ts`.
+
 > **10 aug 2026 (dimineața/prânz) — ADAPTARE CV + CONSTRUCTORUL PE VERDE REAL.**
 > (1) **Filtrul de salariu chiar filtrează** + ordonare permanentă (relevanță →
 > salariu) — #977, LIVE pe `8af1907` (răspunsul „nu se aplică filtrele").

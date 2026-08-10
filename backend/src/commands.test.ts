@@ -25,6 +25,18 @@ describe('commands — camera', () => {
     expect(interpretDeviceCommand('')).toBeNull()
     expect(interpretDeviceCommand('   ')).toBeNull()
   })
+  it('„cameră" = ÎNCĂPERE nu deturnează tura (bug „prăjit la chat", 10 aug)', () => {
+    // În română „cameră" e și „încăpere": aceste fraze firești despre o cameră-
+    // încăpere NU trebuie să comute camera video, ci să ajungă la creier.
+    expect(interpretDeviceCommand('stinge lumina din cameră')).toBeNull()
+    expect(interpretDeviceCommand('închide ușa camerei')).toBeNull()
+    expect(interpretDeviceCommand('deschide fereastra din cameră')).toBeNull()
+    expect(interpretDeviceCommand('închide geamul din camera mea')).toBeNull()
+  })
+  it('dispozitivul numit explicit rămâne comandă', () => {
+    expect(interpretDeviceCommand('închide webcam')).toEqual({ camera: 'off' })
+    expect(interpretDeviceCommand('pornește camera video')).toEqual({ camera: 'on' })
+  })
 })
 
 describe('commands — monitorul (doar pe tab-uri chiar deschise)', () => {

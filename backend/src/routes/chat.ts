@@ -1916,7 +1916,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       const pv = piata.peste
       if (pv && (typeof pv.c === 'number' || typeof pv.o === 'number')) {
         const nr = (x?: number | null): string => (typeof x === 'number' && Number.isFinite(x) ? String(x) : '—')
-        const cand = typeof pv.t === 'number' ? new Date(pv.t).toISOString().slice(0, 16).replace('T', ' ') : String(pv.t ?? '?').slice(0, 24)
+        // `.toISOString()` pe o Dată invalidă aruncă RangeError — deci un `pv.t`
+        // numeric aiurea ar fi rupt tura (nu doar trading-ul). Verificăm întâi.
+        const dp = typeof pv.t === 'number' ? new Date(pv.t) : null
+        const cand = dp && !Number.isNaN(dp.getTime()) ? dp.toISOString().slice(0, 16).replace('T', ' ') : String(pv.t ?? '?').slice(0, 24)
         systemPrompt +=
           `\n\nMOUSE-UL E EXACT PESTE un punct din grafic (îl VEZI acum, nu ghici): lumânarea ${cand} — O ${nr(pv.o)}, H ${nr(pv.h)}, L ${nr(pv.l)}, C ${nr(pv.c)}, volum ${nr(pv.vol)}, MA20 ${nr(pv.ma20)}, EMA50 ${nr(pv.ema50)}. Dacă te întreabă „ce e aici / peste ce sunt / ce arată punctul ăsta / ce lumânare e asta", răspunde pe ACESTE cifre.`
       }
