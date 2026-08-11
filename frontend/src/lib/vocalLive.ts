@@ -510,13 +510,51 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // `onaudioprocess` NU rulează NICIODATĂ — microfonul e SURD deși becul e aprins.
   // Vorbitul nu e gest, deci trezirea pe gest nu acoperă cazul. Un context deja
   // 'running' ignoră `resume()`, deci zero risc.
+  //
+  // AUTO-RECUPERAREA AUDIO LA PORNIREA CAMEREI (11 aug, MĂSURAT de owner pe APK:
+  // „i-am zis porneste camera, a pornit-o dar a murit audio" → confirmat că o a
+  // doua atingere îl aduce înapoi). Cauza: când se deschide camera (sau vine o
+  // întrerupere de sistem — apel, notificare, blocare ecran), OS-ul pune pe
+  // PAUZĂ elementul <audio> prin care curge bucla AEC, iar politica de autoplay
+  // de pe mobil REFUZĂ `el.play()` fără un gest nou → audio-ul rămâne mort până
+  // la o atingere manuală. „nimeni nu învață manualul" — deci se face automat:
+  // dacă elementul AEC rămâne pe pauză două bătăi la rând (~2,4 s) în ciuda
+  // reîncercării, trecem SINGURI pe redarea directă WebAudio (ctxOut.destination)
+  // — aceeași cale de rezervă ca la browserele care nu negociază bucla (mai sus),
+  // care NU cere gest fiindcă `ctxOut` a fost deblocat de gestul de la pornirea
+  // sesiunii. Se pierde anularea de ecou până la următoarea sesiune, dar vocea se
+  // ÎNTOARCE singură — mut cu ecou e infinit mai bun decât mut de tot.
+  let aecPauzat = 0
   resumeTimer = setInterval(() => {
     if (inchis) return
     if (ctxIn && ctxIn.state !== 'running') void ctxIn.resume().catch(() => {})
     if (ctxOut && ctxOut.state !== 'running') void ctxOut.resume().catch(() => {})
-    // Politica de autoplay poate ține elementul AEC pe pauză până la un gest —
-    // același deblocaj continuu ca la contexte, aceeași lecție din 6 aug.
-    if (aec && aec.el.paused) void aec.el.play().catch(() => {})
+    if (aec && ctxOut && analizor) {
+      if (aec.el.paused) {
+        // Întâi încercăm calea blândă: repornirea elementului (merge dacă tocmai
+        // a fost un gest recent — pe desktop, sau după ce userul a atins ecranul).
+        void aec.el.play().catch(() => {})
+        aecPauzat++
+        if (aecPauzat >= 2) {
+          // Blocat de politica de autoplay (tipic: camera a întrerupt audio pe
+          // mobil). Cădem pe redarea directă, fără gest, ca vocea să revină acum.
+          console.warn('[vocalLive] elementul AEC rămâne pe pauză (probabil camera/o întrerupere a oprit audio) — trec automat pe redare directă, fără atingere')
+          try {
+            aec.pc1.close()
+            aec.pc2.close()
+            aec.el.pause()
+            aec.el.srcObject = null
+          } catch {
+            /* deja închise */
+          }
+          aec = null
+          analizor.connect(ctxOut.destination)
+          spuneAec() // serverul află că AEC nu mai e activ → oprește barge-in-ul
+        }
+      } else {
+        aecPauzat = 0
+      }
+    }
   }, 1200)
 
   console.info(`[vocalLive] sesiune deschisă — microfon ${RATA_INTRARE} Hz → server, redare ${RATA_IESIRE} Hz`)
