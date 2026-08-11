@@ -10,6 +10,16 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **11 aug 2026 — REPARAT (de verificat live): audio moare când pornești camera pe telefon (#1004).**
+> Ownerul a MĂSURAT pe APK: „i-am zis *porneste camera*, a pornit-o dar a MURIT AUDIO,
+> nu-l mai aud" — și a confirmat că o a doua atingere îl aduce înapoi. Cauza (din cod):
+> camera (sau o întrerupere de sistem) pune pe pauză elementul `<audio>` al buclei AEC,
+> iar autoplay-ul de pe mobil refuză `el.play()` fără gest → mut până la atingere. Fix
+> (`vocalLive.ts`): dacă elementul AEC rămâne pe pauză ~2,4s, sesiunea trece SINGURĂ pe
+> redarea directă WebAudio (nu cere gest) → audio revine automat, fără atingere. Porți
+> verzi (tsc 0 · build · jscpd 0 · sintaxă 0 · oxlint 0). **DE TĂIAT după verificarea
+> LIVE** (pornește camera în timpul vorbirii pe telefon → audio revine singur în 2–3s).
+>
 > **11 aug 2026 — MODUL MAȘINĂ livrat (de verificat live) + MESSENGER Kelion↔Kelion (NOU, de făcut).**
 > (1) **Modul mașină** (voce-first, legislație auto): buton 🚗 (activare manuală),
 > strat Jarvis (glob audio-reactiv pe vocea reală a lui Kelion), `carMode` →
