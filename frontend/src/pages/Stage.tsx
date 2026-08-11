@@ -984,11 +984,16 @@ export default function Stage({ user }: { user: User }) {
           <div className={`workspace-inner ${wsv.kind === 'tranzactii' ? 'plin' : ''}`}>
             <div className="workspace-head">
               <div className="workspace-tabs">
-                {wsv.tasks.map((task) => (
+                {/* TAB BAR-ul se randează din starea VIE `ws`, NU din snapshot-ul
+                    de fade `wsv` (bug 11 aug, ownerul: „× manual nu merge" —
+                    tabul rămânea vizibil pentru că lista venea din poza veche
+                    înghețată). Cu `ws`, ×-ul șterge tabul PE LOC. Corpurile
+                    suprafețelor rămân pe `wsv` doar pentru animația de fade. */}
+                {ws.tasks.map((task) => (
                   <button
                     key={task.id}
                     type="button"
-                    className={`ws-tab ${task.id === wsv.activeId ? 'active' : ''}`}
+                    className={`ws-tab ${task.id === ws.activeId ? 'active' : ''}`}
                     onClick={() => switchToId(task.id)}
                     title={task.title}
                   >
@@ -1016,7 +1021,7 @@ export default function Stage({ user }: { user: User }) {
                   A+
                 </button>
               </div>
-              {wsv.tasks.length > 1 && (
+              {ws.tasks.length > 1 && (
                 <button
                   type="button"
                   className="ghost"
