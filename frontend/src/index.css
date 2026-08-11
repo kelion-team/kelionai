@@ -3062,38 +3062,53 @@ top-left in the card, the same shape everywhere. */
 /* ── FLUIDITATE (audit 27 iul) ─────────────────────────────────────────── */
 /* The „Versiune nouă” bar — announces without cutting the work; the hard
 reset applies on the button or automatically when the tab is hidden (App.tsx). */
-.update-banner {
+/* POARTA DE UPDATE — BLOCANTĂ (Adrian, 11 aug: „să nu se poată continua până nu
+   faci update-ul"). Acoperă TOT ecranul și prinde clicurile — pe versiunea veche
+   nu se mai poate lucra — cu un card centrat + buton + numărătoare. */
+.update-gate {
   position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 4000;
+  inset: 0;
+  z-index: 9000;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 9px 14px;
-  border-radius: 999px;
-  background: rgba(16, 22, 40, 0.92);
-  border: 1px solid rgba(122, 162, 255, 0.45);
-  color: var(--text);
-  font-size: 13.5px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
-  animation: update-banner-in 0.35s ease-out;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 9, 20, 0.86);
+  backdrop-filter: blur(6px);
+  animation: update-gate-in 0.28s ease-out;
 }
-.update-banner button {
+.update-gate-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 360px;
+  padding: 26px 24px;
+  border-radius: 18px;
+  background: rgba(16, 22, 40, 0.98);
+  border: 1px solid rgba(122, 162, 255, 0.5);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+.update-gate-title { font-size: 17px; font-weight: 800; color: var(--text); }
+.update-gate-msg { font-size: 14px; line-height: 1.45; color: var(--muted, #a9b3d0); }
+.update-gate-btn {
+  margin-top: 4px;
   border: 0;
   border-radius: 999px;
-  padding: 6px 13px;
+  padding: 11px 26px;
   background: var(--accent);
   color: var(--on-accent);
-  font-weight: 700;
-  font-size: 13px;
+  font-weight: 800;
+  font-size: 15px;
   cursor: pointer;
 }
-.update-banner button:hover { filter: brightness(1.1); }
-@keyframes update-banner-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+.update-gate-btn:hover { filter: brightness(1.1); }
+.update-gate-auto { font-size: 12px; color: var(--muted, #8b93ad); }
+@keyframes update-gate-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* The floating windows enter smoothly, they don't „pop” (defect 3 from the
@@ -3106,7 +3121,7 @@ audit): the same short entry on all conditionally-mounted overlays. */
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .update-banner, .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
+  .update-gate, .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
     animation: none;
   }
 }
