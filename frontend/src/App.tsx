@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { fetchMe, type User } from './lib/api'
-import Landing from './pages/Landing'
-import Login from './pages/Login'
-import Credits from './pages/Credits'
-import Manual from './pages/Manual'
-import Stage from './pages/Stage'
 import DynamicBackground from './components/DynamicBackground' // Import component
+
+// COD-SPLIT PE RUTE (11 aug — optimizare): fiecare pagină e încărcată LENEȘ, își
+// aduce doar codul ei. Un user pe /login nu mai descarcă degeaba Stage/Manual/
+// Credits; three.js (avatarul) intră doar cu Landing/Stage, nu în entry.
+const Landing = lazy(() => import('./pages/Landing'))
+const Login = lazy(() => import('./pages/Login'))
+const Credits = lazy(() => import('./pages/Credits'))
+const Manual = lazy(() => import('./pages/Manual'))
+const Stage = lazy(() => import('./pages/Stage'))
 import {
   watchForUpdate,
   hardResetToLatest,
@@ -124,17 +128,26 @@ export default function App() {
       sent back into the app. /credite is PUBLIC for everyone (fix Jul 27 —
       before, a LOGGED-IN user could not reach it even by typing the address:
       the user check came first and always threw him onto the stage). */}
-      {window.location.pathname === '/manual' ? (
-        <Manual />
-      ) : window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
-        <Credits />
-      ) : user ? (
-        <Stage user={user} />
-      ) : window.location.pathname === '/login' ? (
-        <Login />
-      ) : (
-        <Landing error={error} />
-      )}
+      <Suspense
+        fallback={
+          <div className="boot">
+            <span className="brand-lg">Kelionai</span>
+            <span className="boot-dot" />
+          </div>
+        }
+      >
+        {window.location.pathname === '/manual' ? (
+          <Manual />
+        ) : window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
+          <Credits />
+        ) : user ? (
+          <Stage user={user} />
+        ) : window.location.pathname === '/login' ? (
+          <Login />
+        ) : (
+          <Landing error={error} />
+        )}
+      </Suspense>
       {/* Version + update-date watermark — the visible proof that the latest
       version is installed (Adrian, Jul 7). Now also includes the server's
       DEPLOY stamp (Jul 10): it changes on ANY publish, not just on a frontend

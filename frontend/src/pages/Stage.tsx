@@ -1,9 +1,4 @@
-import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
-import { AVATAR_ORBIT } from '../lib/avatarCamera'
-import AvatarModel from '../components/AvatarModel'
-import AvatarLoading from '../components/AvatarLoading'
+import { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
 import ContactModal from '../components/ContactModal'
@@ -37,7 +32,11 @@ import { LANGS } from '../lib/languages'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
-import { themeBg, currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
+import { currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
+
+// Avatarul 3D (three.js + @react-three, ≈1 MB) — încărcat leneș, ca interfața
+// aplicației să apară instant; se strecoară după (StageAvatar are AvatarLoading).
+const StageAvatar = lazy(() => import('../components/StageAvatar'))
 
 // SAVING THE MONITOR CONTENT (Adrian, Jul 25: "you can't save what's on the
 // monitor"). Downloads a text/HTML as a local file — a clean name from the title.
@@ -1203,28 +1202,11 @@ export default function Stage({ user }: { user: User }) {
       (−1.65) there must be real air: camera centered at y −0.25, distance
       4.6 → the frame covers −1.93…+1.43. The final size is decided by Adrian
       with a double-click (the layout mode below). */}
-      <Canvas shadows="percentage" camera={{ position: [0, -0.25, 4.6], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
-        {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
-            Kelion floats over the monitor content instead of sitting in a black box. */}
-        {!monitorOn && <color attach="background" args={[themeBg()]} />}
-        {/* Self-contained lighting (key + cool fill + rim) — NO remote HDR.
-            `<Environment preset="city">` fetched a ~1MB HDR from an external CDN
-            (githack/pmndrs) INSIDE the avatar's Suspense: on a fresh phone with a
-            slow or blocked network that fetch could hang, so the Suspense never
-            resolved and the avatar stayed BLACK forever (Adrian, Jul 8: „the app
-            published and broken”). The landing already dropped HDR for this exact
-            reason; the in-app stage now matches — same look, zero external deps. */}
-        <ambientLight intensity={0.75} />
-        <directionalLight position={[2, 3, 2]} intensity={1.6} castShadow />
-        <directionalLight position={[-2.5, 1.2, -2]} intensity={0.7} color="#8fb6ff" />
-        <Suspense fallback={null}>
-          <AvatarModel />
-        </Suspense>
-        {/* The camera limits come from the shared source (lib/avatarCamera) —
-        the same on the landing and in the app, so Kelion is framed identically. */}
-        <OrbitControls {...AVATAR_ORBIT} />
-      </Canvas>
-      <AvatarLoading />
+      {/* Avatarul 3D + AvatarLoading trăiesc în chunk-ul lazy StageAvatar —
+          three.js nu mai e în calea critică; interfața apare instant. */}
+      <Suspense fallback={null}>
+        <StageAvatar monitorOn={monitorOn} />
+      </Suspense>
       </div>
 
       <header className="topbar">

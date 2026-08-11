@@ -1,9 +1,4 @@
-import { Suspense, useEffect, useState } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
-import { AVATAR_ORBIT } from '../lib/avatarCamera'
-import AvatarModel from '../components/AvatarModel'
-import AvatarLoading from '../components/AvatarLoading'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import ContactModal from '../components/ContactModal'
 import VisitorChatWidget from '../components/VisitorChatWidget'
 import { startGoogleLogin } from '../lib/api'
@@ -11,7 +6,8 @@ import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
 import { PUBLIC_TEXT as PT } from '../lib/publicText'
 import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
-import { themeBg } from '../lib/theme'
+// Avatarul 3D — încărcat leneș (three.js scos din calea critică a landing-ului).
+const LandingAvatar = lazy(() => import('../components/LandingAvatar'))
 
 // The four install codes — one per platform. Click → enlarged for scanning.
 const QR_CODES = [
@@ -117,23 +113,11 @@ export default function Landing({ error }: { error?: string | null }) {
       <div className="landing-hero">
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
-        <Canvas shadows="percentage" camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
-          {/* Follows the page theme (Aug 2 — the bright background): the hero
-              no longer sits in a hard-coded black box. */}
-          <color attach="background" args={[themeBg()]} />
-          {/* Self-contained lighting (no remote HDR): a third-party CDN failure
-              must never leave the marketing hero black. Key + fill + cool rim. */}
-          <ambientLight intensity={0.75} />
-          <directionalLight position={[2, 3, 2]} intensity={1.7} castShadow />
-          <directionalLight position={[-2.5, 1.2, -2]} intensity={0.7} color="#8fb6ff" />
-          <Suspense fallback={null}>
-            <AvatarModel />
-          </Suspense>
-          {/* The camera limits come from the shared source (lib/avatarCamera) —
-          the same on the landing and in the app, so Kelion is framed identically. */}
-          <OrbitControls {...AVATAR_ORBIT} />
-        </Canvas>
-        <AvatarLoading />
+        {/* Avatarul 3D + AvatarLoading trăiesc în chunk-ul lazy LandingAvatar —
+            three.js nu mai blochează prima vopsire a hero-ului. */}
+        <Suspense fallback={null}>
+          <LandingAvatar />
+        </Suspense>
         <div className="landing-hero-fade" />
       </div>
 
