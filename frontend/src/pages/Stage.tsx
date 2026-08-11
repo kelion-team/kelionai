@@ -33,7 +33,7 @@ import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
 import { currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
-import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
+import { isCarMode, subscribeCarMode } from '../lib/carMode'
 import { reteaLenta } from '../lib/retea'
 import ApelOverlay from '../components/ApelOverlay'
 import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
@@ -1449,18 +1449,6 @@ export default function Stage({ user }: { user: User }) {
             aria-label={theme === 'light' ? t.themeToDark : t.themeToLight}
           >
             {theme === 'light' ? '☾' : '☀'}
-          </button>
-          {/* MODUL MAȘINĂ (Adrian, 11 aug: „trebuie buton activare în mașină, că
-              nu tot timpul vrei aplicația să pornească automat") — pornire MANUALĂ,
-              nu automată. Deschide stratul Jarvis voce-first (ieșirea e din el). */}
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => setCarMode(true)}
-            title={t.carMode}
-            aria-label={t.carMode}
-          >
-            🚗
           </button>
           {/* MANUALUL, VIZIBIL ȘI DUPĂ LOGARE (10 aug, ownerul: „nu se afișează
               manualul în engleză sau în limba selectată"): până azi doar pagina
