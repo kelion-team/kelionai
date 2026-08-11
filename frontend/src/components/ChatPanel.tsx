@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type DragEvent as ReactDragEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
 import { ceas } from '../lib/ceas'
 import { frazaInchisa, gata as contorGata } from '../lib/contorFraza'
@@ -2650,29 +2651,52 @@ export default function ChatPanel({
       ultima întrebare + răspunsul (spus, nu afișat), un microfon mare și ieșire.
       Fără avatar 3D, fără monitor, fără carduri — legislația auto. Chatul/vocea
       de dedesubt rămân montate și funcționale; aici doar se ARATĂ altfel. */}
-      {carOn && (
-        <div className="car-mode" role="dialog" aria-label={t.carMode}>
-          <JarvisOrb />
-          <button
-            type="button"
-            className="car-exit"
-            onClick={() => setCarMode(false)}
-            aria-label={t.carExit}
-            title={t.carExit}
-          >
-            ✕
-          </button>
-          <div className="car-talk">
-            {listening && (heard || lastUser?.content) ? (
-              <p className="car-heard">{(heard || lastUser?.content || '').slice(0, 200)}</p>
-            ) : null}
-            <p className="car-reply">
-              {cleanMsg(lastAssistant?.content ?? '') || t.carHint}
-            </p>
-          </div>
-          {micButton('car-mic')}
-        </div>
-      )}
+      {/* PRIN PORTAL, DIRECT ÎN <body> (Adrian, 11 aug: „încadrează corect pe orice
+      ecran, e foarte important" + „x nu închide" + „audio nu se aude"). Cauza celor
+      trei: stratul stătea în `.chat`, care are `transform` (prinde `position:fixed`
+      → încadrat greșit, doar banda de jos) ȘI `pointer-events:none` (butoanele mic/✕
+      nu primeau clic → mic mort = fără voce, ✕ mort = nu închide). În <body> scapă
+      de amândouă: acoperă tot ecranul și butoanele răspund. */}
+      {carOn &&
+        createPortal(
+          <div className="car-mode" role="dialog" aria-label={t.carMode}>
+            <JarvisOrb />
+            <button
+              type="button"
+              className="car-exit"
+              onClick={() => setCarMode(false)}
+              aria-label={t.carExit}
+              title={t.carExit}
+            >
+              ✕
+            </button>
+            <div className="car-talk">
+              {listening && (heard || lastUser?.content) ? (
+                <p className="car-heard">{(heard || lastUser?.content || '').slice(0, 200)}</p>
+              ) : null}
+              <p className="car-reply">{cleanMsg(lastAssistant?.content ?? '') || t.carHint}</p>
+            </div>
+            {/* ON/OFF pentru vocea FULL-DUPLEX (Adrian, 11 aug: „butonul să fie
+                on/off, nu când vreau să vorbesc — e full duplex"). O pornești o
+                dată; Kelion ascultă și răspunde continuu, vorbești liber (nu
+                apeși de fiecare dată). toggleMic pornește/oprește exact sesiunea
+                live full-duplex — aceeași ca în restul aplicației. */}
+            <div className="car-mic-wrap">
+              <button
+                type="button"
+                className={`car-mic ${listening ? 'live' : ''}`}
+                onClick={toggleMic}
+                aria-pressed={listening}
+                aria-label={listening ? t.carVoiceOff : t.carVoiceOn}
+                title={listening ? t.carVoiceOff : t.carVoiceOn}
+              >
+                🎙️
+              </button>
+              <span className="car-mic-label">{listening ? t.carListening : t.carVoiceOn}</span>
+            </div>
+          </div>,
+          document.body,
+        )}
       {/* THE CONVERSATION, VISIBLE (Adrian, Aug 1: „the reply must reach the
       chat" — bubbles: you on the right, Kelion on the left, streaming live,
       auto-scroll). ONLY THE LAST EXCHANGE SHOWS (Adrian, Aug 1: „trebuie doar

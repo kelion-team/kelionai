@@ -131,6 +131,9 @@ export interface Strings {
   carMode: string
   carExit: string
   carHint: string
+  carVoiceOn: string
+  carVoiceOff: string
+  carListening: string
   /** The send button while a turn is running — sending INTERRUPTS (Jul 13 barge-in). */
   sendInterrupts: string
   attRemove: string
@@ -362,6 +365,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Car mode',
     carExit: 'Exit car mode',
     carHint: 'Talk — I answer out loud, eyes on the road',
+    carVoiceOn: 'Start voice',
+    carVoiceOff: 'Stop voice',
+    carListening: 'Listening — talk freely',
     voiceVolume: 'Kelion’s voice volume',
     sendInterrupts: 'Kelion is answering — send now and your message replaces the current answer',
     attRemove: 'Remove attachment',
@@ -562,6 +568,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Mod mașină',
     carExit: 'Ieși din modul mașină',
     carHint: 'Vorbește — îți răspund cu voce, ochii pe drum',
+    carVoiceOn: 'Pornește vocea',
+    carVoiceOff: 'Oprește vocea',
+    carListening: 'Ascult — vorbește liber',
     voiceVolume: 'Volumul vocii lui Kelion',
     sendInterrupts: 'Kelion răspunde — trimite acum și mesajul tău înlocuiește răspunsul curent',
     attRemove: 'Scoate atașamentul',
@@ -732,6 +741,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Modo coche',
     carExit: 'Salir del modo coche',
     carHint: 'Habla — te respondo en voz alta, ojos en la carretera',
+    carVoiceOn: 'Activar voz',
+    carVoiceOff: 'Detener voz',
+    carListening: 'Te escucho — habla libremente',
     voiceVolume: 'Volumen de la voz de Kelion',
     sendInterrupts: 'Kelion está respondiendo — envía ahora y tu mensaje reemplazará la respuesta actual',
     attRemove: 'Quitar archivo adjunto',
@@ -886,6 +898,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Mode voiture',
     carExit: 'Quitter le mode voiture',
     carHint: 'Parle — je réponds à voix haute, les yeux sur la route',
+    carVoiceOn: 'Activer la voix',
+    carVoiceOff: 'Couper la voix',
+    carListening: 'J’écoute — parle librement',
     voiceVolume: 'Volume de la voix de Kelion',
     sendInterrupts: 'Kelion répond — envoyez maintenant et votre message remplacera la réponse actuelle',
     attRemove: 'Supprimer la pièce jointe',
@@ -1040,6 +1055,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Automodus',
     carExit: 'Automodus verlassen',
     carHint: 'Sprich — ich antworte laut, Augen auf die Straße',
+    carVoiceOn: 'Stimme starten',
+    carVoiceOff: 'Stimme stoppen',
+    carListening: 'Ich höre zu — sprich frei',
     voiceVolume: 'Kelions Sprachlautstärke',
     sendInterrupts: 'Kelion antwortet — jetzt senden und deine Nachricht ersetzt die aktuelle Antwort',
     attRemove: 'Anhang entfernen',
@@ -1194,6 +1212,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Modalità auto',
     carExit: 'Esci dalla modalità auto',
     carHint: 'Parla — rispondo a voce, occhi sulla strada',
+    carVoiceOn: 'Attiva voce',
+    carVoiceOff: 'Ferma voce',
+    carListening: 'Ti ascolto — parla liberamente',
     voiceVolume: 'Volume della voce di Kelion',
     sendInterrupts: 'Kelion sta rispondendo — invia ora e il tuo messaggio sostituirà la risposta attuale',
     attRemove: 'Rimuovi allegato',
@@ -1348,6 +1369,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Modo carro',
     carExit: 'Sair do modo carro',
     carHint: 'Fala — respondo em voz alta, olhos na estrada',
+    carVoiceOn: 'Ativar voz',
+    carVoiceOff: 'Parar voz',
+    carListening: 'A ouvir — fala à vontade',
     voiceVolume: 'Volume da voz de Kelion',
     sendInterrupts: 'Kelion está respondendo — envie agora e sua mensagem substituirá a resposta atual',
     attRemove: 'Remover anexo',
