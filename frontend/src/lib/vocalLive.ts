@@ -64,9 +64,6 @@ export interface VocalLiveOpts {
    *  Serverul îl ține și-l retransmite prin ușa creierului la get_monitor.
    *  null = nimic afișat. */
   monitor?(): { kind: string; title: string; url?: string; text?: string } | null
-  /** Canvas from which to stream video to CarPlay during the session.
-   *  The native wrapper is responsible for displaying this stream. */
-  carplayCanvas?: HTMLCanvasElement
 }
 
 export interface VocalLiveHandle {
@@ -96,7 +93,7 @@ function urlWs(): string {
 }
 
 // ── IEȘIREA CA MEDIA (A2DP), NU CA „CONVORBIRE" — ca vocea să ajungă pe
-// BLUETOOTH / CARPLAY / BOXELE MAȘINII (11 aug, MĂSURAT de owner: „de ce nu se
+// BLUETOOTH / BOXELE MAȘINII (11 aug, MĂSURAT de owner: „de ce nu se
 // trimite vocea prin bluetooth, rămâne pe telefon; am încercat pe căști, clar
 // nici la car audio") ────────────────────────────────────────────────────────
 //
@@ -105,13 +102,13 @@ function urlWs(): string {
 // „primit" — trucul care dădea browserului referință pentru anularea de ecou
 // (AEC). PROBLEMA măsurată de owner: audio-ul sosit prin WebRTC e clasat de
 // Android drept „convorbire" (canalul VOICE_CALL / SCO al Bluetooth-ului), care
-// RĂMÂNE PE TELEFON și NU folosește canalul A2DP de MUZICĂ pe care-l cer căștile,
-// CarPlay și sistemul mașinii. De-aia vocea SCRISĂ (mp3 printr-un <audio>
+// RĂMÂNE PE TELEFON și NU folosește canalul A2DP de MUZICĂ pe care-l cer căștile
+// și sistemul mașinii. De-aia vocea SCRISĂ (mp3 printr-un <audio>
 // obișnuit, în audioIO.ts) mergea pe Bluetooth, dar cea LIVE nu.
 //
 // Ce e acum: vocea live iese printr-un <audio> obișnuit alimentat de WebAudio
 // (`MediaStreamDestination` de pe analizor) — audio de MEDIA, exact ca mp3-ul —
-// deci urmează ruta de muzică la căști / CarPlay / mașină. Compromis, spus pe
+// deci urmează ruta de muzică la căști / mașină. Compromis, spus pe
 // față: AEC-ul prin WebRTC dispare (rămâne anularea de ecou din microfon,
 // `echoCancellation:true`); pe boxe Bluetooth/mașină AEC-ul oricum nu era
 // necesar (boxele sunt departe de microfon). Dacă pe difuzorul telefonului
@@ -175,8 +172,6 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // (ceasCadre scos 9 aug — camera doar la cerință; vezi handlerul 'gata'.)
   // Radierea vocii din registrul de înregistrare (vezi mai jos, la analizor).
   let radiazaVocea: (() => void) | null = null
-  let carplayVideo: HTMLVideoElement | null = null
-  let carplayStream: MediaStream | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -187,13 +182,6 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (resumeTimer) clearInterval(resumeTimer)
     if (ceasCoords) clearInterval(ceasCoords)
     radiazaVocea?.() // vocea iese din registrul de înregistrare odată cu sesiunea
-    if (carplayVideo) {
-      carplayVideo.pause()
-      carplayVideo.srcObject = null
-      carplayVideo = null
-    }
-    carplayStream?.getTracks().forEach((t) => t.stop())
-    carplayStream = null
     try {
       proc?.disconnect()
       cules?.opreste()
@@ -422,7 +410,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // autoGainControl), Chrome ține tot dispozitivul în MODE_IN_COMMUNICATION —
     // iar în modul ăla ORICE ieșire (chiar și media) stă pe telefon / canalul SCO,
     // NU pe A2DP-ul de muzică al căștilor/mașinii. Oprind procesarea, captura e
-    // brută → mod normal → ieșirea urmează ruta de media pe Bluetooth/CarPlay.
+    // brută → mod normal → ieșirea urmează ruta de media pe Bluetooth/mașină.
     // Preț: pe difuzorul telefonului ecoul nu mai e anulat de browser (barge-in
     // server e oricum OFF); zgomotul de drum nu mai e filtrat pe microfon — dacă
     // devine problemă în mașină, pasul următor e să reactivăm DOAR noiseSuppression
@@ -453,23 +441,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   const destInregistrare = ctxOut.createMediaStreamDestination()
   analizor.connect(destInregistrare)
   radiazaVocea = inscrieVoceaLuiKelion(destInregistrare.stream)
-
-  // CarPlay video stream, if a canvas is provided.
-  if (opt.carplayCanvas) {
-    carplayStream = opt.carplayCanvas.captureStream(25) // 25 fps
-    carplayVideo = document.createElement('video')
-    carplayVideo.id = 'kelion-carplay-video-source'
-    carplayVideo.style.display = 'none'
-    carplayVideo.muted = true
-    carplayVideo.playsInline = true
-    document.body.appendChild(carplayVideo)
-    carplayVideo.srcObject = carplayStream
-    void carplayVideo.play()
-  }
-
   // BOXA MEDIA: analizor → MediaStreamDestination → <audio> obișnuit. Fiind un
   // flux WebAudio (NU WebRTC), Android îl clasează drept MEDIA (A2DP) → vocea
-  // urmează ruta de muzică pe Bluetooth/CarPlay/mașină (vezi antetul de sus).
+  // urmează ruta de muzică pe Bluetooth/mașină (vezi antetul de sus).
   const destBoxe = ctxOut.createMediaStreamDestination()
   analizor.connect(destBoxe)
   boxe = new Audio()
