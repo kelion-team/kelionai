@@ -255,6 +255,26 @@ export const READ_INBOX_TOOL: Tool = {
   },
 }
 
+// MESSENGER KELION↔KELION (Adrian, 11 aug): „apelează-l pe X" — deschide un canal
+// audio full-duplex securizat între doi useri Kelion, cu traducere live între
+// limbile lor. Merge din chat SCRIS sau VOCE, în mașină sau acasă. Aici e Faza 1
+// (sună + acceptă/refuză + conectat + închide); audio+traducere = Faza 2.
+export const APELEAZA_USER_TOOL: Tool = {
+  name: 'apeleaza_user',
+  description:
+    "Call ANOTHER Kelion user by opening a secure full-duplex audio channel between the two people (with live translation between their languages). Use it whenever the user asks to call/phone/ring another Kelion user — e.g. «apelează-l pe X», «sună-l pe X», «pornește un apel cu X», «call X». The other person's app rings and they accept or decline; either side can hang up. Give who to call as a name or an email. This is NOT for calling a phone number or a taxi — only for reaching another user of THIS app.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      user: {
+        type: 'string',
+        description: 'Who to call — the name or email of another Kelion user.',
+      },
+    },
+    required: ['user'],
+  },
+}
+
 export const LOG_GAP_TOOL: Tool = {
   name: 'log_unsupported_request',
   description:

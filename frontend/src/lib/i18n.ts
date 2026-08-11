@@ -134,6 +134,14 @@ export interface Strings {
   carVoiceOn: string
   carVoiceOff: string
   carListening: string
+  // ── MESSENGER KELION↔KELION (Adrian, 11 aug) — interfața de apel ──────────
+  apelSuna: string
+  apelAccepta: string
+  apelRefuza: string
+  apelSunPe: string
+  apelConectat: string
+  apelNotaFaza2: string
+  apelInchide: string
   /** The send button while a turn is running — sending INTERRUPTS (Jul 13 barge-in). */
   sendInterrupts: string
   attRemove: string
@@ -368,6 +376,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carVoiceOn: 'Start voice',
     carVoiceOff: 'Stop voice',
     carListening: 'Listening — talk freely',
+    apelSuna: 'is calling you',
+    apelAccepta: 'Answer',
+    apelRefuza: 'Decline',
+    apelSunPe: 'Calling',
+    apelConectat: 'Connected',
+    apelNotaFaza2: 'Audio & live translation come next',
+    apelInchide: 'Hang up',
     voiceVolume: 'Kelion’s voice volume',
     sendInterrupts: 'Kelion is answering — send now and your message replaces the current answer',
     attRemove: 'Remove attachment',
@@ -571,6 +586,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carVoiceOn: 'Pornește vocea',
     carVoiceOff: 'Oprește vocea',
     carListening: 'Ascult — vorbește liber',
+    apelSuna: 'te sună',
+    apelAccepta: 'Răspunde',
+    apelRefuza: 'Refuză',
+    apelSunPe: 'Sun',
+    apelConectat: 'Conectat',
+    apelNotaFaza2: 'Audio și traducerea live vin în pasul următor',
+    apelInchide: 'Închide',
     voiceVolume: 'Volumul vocii lui Kelion',
     sendInterrupts: 'Kelion răspunde — trimite acum și mesajul tău înlocuiește răspunsul curent',
     attRemove: 'Scoate atașamentul',
@@ -744,6 +766,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carVoiceOn: 'Activar voz',
     carVoiceOff: 'Detener voz',
     carListening: 'Te escucho — habla libremente',
+    apelSuna: 'te está llamando',
+    apelAccepta: 'Responder',
+    apelRefuza: 'Rechazar',
+    apelSunPe: 'Llamando',
+    apelConectat: 'Conectado',
+    apelNotaFaza2: 'El audio y la traducción en directo llegan enseguida',
+    apelInchide: 'Colgar',
     voiceVolume: 'Volumen de la voz de Kelion',
     sendInterrupts: 'Kelion está respondiendo — envía ahora y tu mensaje reemplazará la respuesta actual',
     attRemove: 'Quitar archivo adjunto',
@@ -901,6 +930,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carVoiceOn: 'Activer la voix',
     carVoiceOff: 'Couper la voix',
     carListening: 'J’écoute — parle librement',
+    apelSuna: 't’appelle',
+    apelAccepta: 'Répondre',
+    apelRefuza: 'Refuser',
+    apelSunPe: 'Appel',
+    apelConectat: 'Connecté',
+    apelNotaFaza2: 'L’audio et la traduction en direct arrivent ensuite',
+    apelInchide: 'Raccrocher',
     voiceVolume: 'Volume de la voix de Kelion',
     sendInterrupts: 'Kelion répond — envoyez maintenant et votre message remplacera la réponse actuelle',
     attRemove: 'Supprimer la pièce jointe',
@@ -1058,6 +1094,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carVoiceOn: 'Stimme starten',
     carVoiceOff: 'Stimme stoppen',
     carListening: 'Ich höre zu — sprich frei',
+    apelSuna: 'ruft dich an',
+    apelAccepta: 'Annehmen',
+    apelRefuza: 'Ablehnen',
+    apelSunPe: 'Ruft',
+    apelConectat: 'Verbunden',
+    apelNotaFaza2: 'Audio & Live-Übersetzung folgen als Nächstes',
+    apelInchide: 'Auflegen',
     voiceVolume: 'Kelions Sprachlautstärke',
     sendInterrupts: 'Kelion antwortet — jetzt senden und deine Nachricht ersetzt die aktuelle Antwort',
     attRemove: 'Anhang entfernen',
@@ -1215,6 +1258,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carVoiceOn: 'Attiva voce',
     carVoiceOff: 'Ferma voce',
     carListening: 'Ti ascolto — parla liberamente',
+    apelSuna: 'ti sta chiamando',
+    apelAccepta: 'Rispondi',
+    apelRefuza: 'Rifiuta',
+    apelSunPe: 'Chiamata',
+    apelConectat: 'Connesso',
+    apelNotaFaza2: 'Audio e traduzione dal vivo arrivano dopo',
+    apelInchide: 'Riaggancia',
     voiceVolume: 'Volume della voce di Kelion',
     sendInterrupts: 'Kelion sta rispondendo — invia ora e il tuo messaggio sostituirà la risposta attuale',
     attRemove: 'Rimuovi allegato',
@@ -1372,6 +1422,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carVoiceOn: 'Ativar voz',
     carVoiceOff: 'Parar voz',
     carListening: 'A ouvir — fala à vontade',
+    apelSuna: 'está a ligar-te',
+    apelAccepta: 'Atender',
+    apelRefuza: 'Recusar',
+    apelSunPe: 'A ligar',
+    apelConectat: 'Ligado',
+    apelNotaFaza2: 'Áudio e tradução ao vivo vêm a seguir',
+    apelInchide: 'Desligar',
     voiceVolume: 'Volume da voz de Kelion',
     sendInterrupts: 'Kelion está respondendo — envie agora e sua mensagem substituirá a resposta atual',
     attRemove: 'Remover anexo',

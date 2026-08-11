@@ -3520,3 +3520,88 @@ rearrange by themselves on the phone. */
   .car-mic.live { animation: none; }
 }
 
+/* ── MESSENGER KELION↔KELION — INTERFAȚA DE APEL (Adrian, 11 aug) ──────────────
+   Strat global (portal în <body>), peste tot — inclusiv peste modul mașină, că un
+   apel e comunicare audio și trebuie să treacă. Ecran de apel clasic: avatar cu
+   inițiala, numele, starea, butoane mari (răspunde/refuză sau închide). */
+.apel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9500; /* peste modul mașină (9000) și restul */
+  display: grid;
+  place-items: center;
+  padding: max(20px, env(safe-area-inset-top)) 6vw max(24px, env(safe-area-inset-bottom));
+  background: radial-gradient(120% 120% at 50% 30%, rgba(12, 26, 48, 0.92), rgba(3, 6, 12, 0.96));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #eef4ff;
+}
+.apel-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4vh;
+  text-align: center;
+  max-width: 92vw;
+}
+.apel-avatar {
+  width: clamp(96px, 24vw, 150px);
+  height: clamp(96px, 24vw, 150px);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(40px, 10vw, 64px);
+  font-weight: 700;
+  color: #eef4ff;
+  background: radial-gradient(circle at 50% 38%, rgba(90, 168, 255, 0.5), rgba(20, 44, 86, 0.85));
+  border: 2px solid rgba(150, 185, 230, 0.35);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+.apel-avatar.suna { animation: apelPuls 1.6s ease-in-out infinite; }
+.apel-avatar.live { border-color: #4fe3c4; }
+@keyframes apelPuls {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(90, 168, 255, 0.5); }
+  50% { box-shadow: 0 0 34px 12px rgba(90, 168, 255, 0.22); }
+}
+.apel-nume {
+  margin: 0.6vh 0 0;
+  font-size: clamp(24px, 6vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.apel-sub {
+  margin: 0;
+  font-size: clamp(15px, 3vw, 21px);
+  color: #9fc2ef;
+}
+.apel-nota {
+  margin: 0.2vh 0 0;
+  font-size: clamp(12px, 2.4vw, 15px);
+  color: rgba(150, 180, 220, 0.6);
+}
+.apel-actiuni {
+  display: flex;
+  gap: clamp(18px, 8vw, 48px);
+  margin-top: 3vh;
+}
+.apel-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: clamp(96px, 30vw, 150px);
+  padding: clamp(13px, 2.4vh, 18px) clamp(16px, 5vw, 30px);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: clamp(15px, 3.4vw, 19px);
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  transition: filter 0.15s, transform 0.1s;
+}
+.apel-btn:active { transform: scale(0.96); }
+.apel-btn:hover { filter: brightness(1.08); }
+.apel-btn.accepta { background: #22b463; }
+.apel-btn.refuza,
+.apel-btn.inchide { background: #e0474a; }
+

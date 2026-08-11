@@ -75,6 +75,9 @@ export const UNELTE_VORBIRE: readonly string[] = [
   'list_memories',
   'memorie_ia',
   'cheama_agent',
+  // „apelează-l pe X" e o comandă de CONVERSAȚIE (rapidă: rezolvă ținta + trimite
+  // un mesaj pe WS), nu una scumpă — merge direct din vorbire, din chat sau voce.
+  'apeleaza_user',
 ]
 
 // ── CE NU ARE VOIE SĂ CALCE PE FAZA DE VORBIRE ─────────────────────────────
