@@ -10,6 +10,21 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **11 aug 2026 — REPARAT (de verificat live): update BLOCANT + voce pe Bluetooth pasul 2 (#1008).**
+> (A) Owner: „update-ul să vină la toți oriunde folosesc app-ul + să nu se poată continua până
+> nu faci update-ul." Cauza „telefonul rămas pe cod vechi": bara de update se amâna cât lucrai
+> (voce/cerere/draft) → în sesiune de voce nu se aplica niciodată. Acum: POARTĂ blocantă peste
+> toată aplicația la orice deploy, cu buton + numărătoare 15s care aplică singură (fără pauză).
+> NB: ca să prinzi ACEST update, închide app o dată complet; de-acum se forțează singur.
+> (B) După #1006, vocea TOT rămânea pe telefon: cât microfonul e deschis cu procesare WebRTC,
+> Android intră în „mod convorbire" și ține ieșirea pe telefon/SCO. Fix: microfon FĂRĂ procesare
+> (echoCancellation/noiseSuppression/autoGainControl = false) → mod normal → A2DP pe căști/mașină.
+> Porți verzi (tsc 0 · build · oxlint 0 · jscpd 0 · sintaxă 0 · exporturi 0 · teste 15/15).
+> **DE TĂIAT după verificarea LIVE**: (1) închizi app → prinde poarta; (2) voce live pe căști BT
+> → iese pe căști; (3) deploy următor → poarta nu lasă continuarea. Dacă TOT rămâne pe telefon
+> după (B) → cauza e nativă (captura audio forțează modul convorbire la nivel OS) → fix în APK
+> (audio focus / half-duplex cu mic închis cât vorbește Kelion), rând nou atunci.
+>
 > **11 aug 2026 — REPARAT (de verificat live): vocea live nu ieșea pe Bluetooth/mașină (#1006).**
 > Owner a MĂSURAT: vocea live rămâne pe telefon, nu se duce pe căști/car audio. Critic pentru
 > modul mașină. Cauza (din cod): vocea live ieșea prin bucla WebRTC (AEC), iar audio-ul WebRTC
