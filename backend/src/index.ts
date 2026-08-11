@@ -344,10 +344,21 @@ app.get<{ Params: { file: string } }>('/dl/:file', async (req, reply) => {
   const file = req.params.file
   if (file.includes('/') || file.includes('..')) return reply.code(404).send({ error: 'not_found' })
   const ext = file.split('.').pop()?.toLowerCase() ?? ''
+  // TIPUL vine din EXTENSIE, AUTORITAR — nu din ce tip s-a stocat în DB. Un tip
+  // stocat greșit făcea browserul/OS-ul să salveze fișierul cu extensia greșită
+  // (Adrian, 11 aug: „extensiile sunt greșite pe fiecare model"). Extensia din
+  // URL e adevărul: .exe → Windows, .apk → Android, .zip → Linux.
   const type = DL_TYPES[ext] ?? 'application/octet-stream'
+  // INSTALATOARELE se descarcă cu NUMELE + EXTENSIA exacte (Content-Disposition),
+  // ca fișierul salvat să aibă mereu extensia corectă, pe ORICE browser/model —
+  // înainte doar zip-ul de Linux avea antetul ăsta, deci exe/apk ieșeau cu
+  // extensii greșite pe unele telefoane/download-managere. Imaginile QR (.png) și
+  // JSON-urile RĂMÂN inline (fără attachment) — altfel QR-urile n-ar mai apărea.
+  const eInstalator = ext === 'exe' || ext === 'apk' || ext === 'zip'
+  if (eInstalator) reply.header('Content-Disposition', `attachment; filename="${file}"`)
   const db = getAppFile(file)
   if (db) {
-    reply.header('Content-Type', db.type || type)
+    reply.header('Content-Type', type)
     return reply.send(db.buf)
   }
   const onDisk = path.resolve(distPath, 'downloads', file)
@@ -360,7 +371,6 @@ app.get<{ Params: { file: string } }>('/dl/:file', async (req, reply) => {
   // uploaded later to the DB takes priority, because it's checked above).
   if (file === LINUX_ZIP) {
     reply.header('Content-Type', 'application/zip')
-    reply.header('Content-Disposition', `attachment; filename="${LINUX_ZIP}"`)
     return reply.send(buildLinuxZip(distPath))
   }
   return reply.code(404).send({ error: 'not_found' })
