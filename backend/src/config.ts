@@ -168,6 +168,12 @@ export const config = {
   },
   sessionSecret: required('SESSION_SECRET'),
   autonomyDailyMax: Math.max(1, Number(process.env.AUTONOMY_DAILY_MAX ?? '20') || 20),
+  // FRÂNA DE BANI (11 aug, ordinul ownerului: „opresc partea autonomă care-ți
+  // arde banii"). Bucla autonomă + constructorul (care cheamă Gemini pe cheia
+  // ownerului) pornesc DOAR când owner-ul pune EXPLICIT `AUTONOMY_ENABLED=1`.
+  // Implicit OPRIT: după episodul CarPlay (ordine imposibile → cod gunoi → build
+  // rupt → bani arși), nimic autonom nu mai cheltuie fără „da"-ul lui explicit.
+  autonomyEnabled: process.env.AUTONOMY_ENABLED === '1',
   databaseUrl: env(...ENV_ALIASES.databaseUrl),
   googleServiceAccountJson: env(...ENV_ALIASES.googleServiceAccountJson),
   googleTtsKey: env(...ENV_ALIASES.googleTtsKey),
