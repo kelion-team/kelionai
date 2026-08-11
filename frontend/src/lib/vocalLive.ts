@@ -92,62 +92,28 @@ function urlWs(): string {
   return `${proto}//${location.host}/api/vocal-live`
 }
 
-// ── AEC — SISTEMUL CU NUME, cerut de owner pe nume (8 aug: „lipsește un sistem
-// clar… care nu dă voie ca propria voce să intre în buclă, ca la concerte") ──
+// ── IEȘIREA CA MEDIA (A2DP), NU CA „CONVORBIRE" — ca vocea să ajungă pe
+// BLUETOOTH / CARPLAY / BOXELE MAȘINII (11 aug, MĂSURAT de owner: „de ce nu se
+// trimite vocea prin bluetooth, rămâne pe telefon; am încercat pe căști, clar
+// nici la car audio") ────────────────────────────────────────────────────────
 //
-// Sistemul se numește AEC — Acoustic Echo Cancellation cu semnal de REFERINȚĂ
-// („mix-minus"/N-1 în broadcast): scazi din microfon EXACT ce știi că ai redat,
-// adaptiv — nu după tărie. Browserul ÎL ARE (același din Meet/WhatsApp), dar
-// scade doar sunetul pe care îl CUNOAȘTE: cel sosit prin conexiuni WebRTC.
-// Redarea noastră era WebAudio brut — invizibilă pentru AEC — deci ecoul
-// boxelor intra în microfon și modelul își tăia vorba (măsurat în consola
-// ownerului: șase barge-in-uri false la rând, apoi sesiunea moartă; iar
-// pragul fix 0.028 pus dimineață era greșeala inversă — bloca vocea lui de
-// 0.005 și lăsa ecoul tare să treacă; a fost ȘTERS).
+// Ce era înainte: vocea lui Kelion trecea printr-o BUCLĂ WebRTC locală (două
+// conexiuni peer legate în aceeași pagină) redată dintr-un <audio> cu fluxul
+// „primit" — trucul care dădea browserului referință pentru anularea de ecou
+// (AEC). PROBLEMA măsurată de owner: audio-ul sosit prin WebRTC e clasat de
+// Android drept „convorbire" (canalul VOICE_CALL / SCO al Bluetooth-ului), care
+// RĂMÂNE PE TELEFON și NU folosește canalul A2DP de MUZICĂ pe care-l cer căștile,
+// CarPlay și sistemul mașinii. De-aia vocea SCRISĂ (mp3 printr-un <audio>
+// obișnuit, în audioIO.ts) mergea pe Bluetooth, dar cea LIVE nu.
 //
-// Soluția documentată (demo public: github.com/nguyenvulebinh/browser-aec):
-// sunetul lui Kelion trece printr-o BUCLĂ WebRTC locală — două conexiuni peer
-// legate una de alta în aceeași pagină — și se redă dintr-un element <audio>
-// cu fluxul „primit". Din clipa aia AEC-ul are referința și șterge vocea lui
-// din microfon, oricât de tari boxele și oricât de slab microfonul. Costul:
-// ~40-100 ms în plus pe redare (bufferul WebRTC) — nimic față de ture moarte.
-interface BuclaAEC {
-  pc1: RTCPeerConnection
-  pc2: RTCPeerConnection
-  el: HTMLAudioElement
-}
-
-async function pornesteBuclaAEC(ctx: AudioContext, sursa: AudioNode): Promise<BuclaAEC> {
-  const dest = ctx.createMediaStreamDestination()
-  sursa.connect(dest)
-  const pc1 = new RTCPeerConnection()
-  const pc2 = new RTCPeerConnection()
-  pc1.onicecandidate = (e): void => {
-    if (e.candidate) void pc2.addIceCandidate(e.candidate).catch(() => {})
-  }
-  pc2.onicecandidate = (e): void => {
-    if (e.candidate) void pc1.addIceCandidate(e.candidate).catch(() => {})
-  }
-  const fluxSosit = new Promise<MediaStream>((res, rej) => {
-    pc2.ontrack = (e): void => res(e.streams[0] ?? new MediaStream([e.track]))
-    setTimeout(() => rej(new Error('bucla WebRTC nu s-a legat în 5s')), 5000)
-  })
-  for (const t of dest.stream.getAudioTracks()) pc1.addTrack(t, dest.stream)
-  const oferta = await pc1.createOffer()
-  await pc1.setLocalDescription(oferta)
-  await pc2.setRemoteDescription(oferta)
-  const raspuns = await pc2.createAnswer()
-  await pc2.setLocalDescription(raspuns)
-  await pc1.setRemoteDescription(raspuns)
-  const flux = await fluxSosit
-  const el = new Audio()
-  el.srcObject = flux
-  el.autoplay = true
-  void el.play().catch(() => {
-    /* politica de autoplay — reîncercat de ceasul de deblocaj */
-  })
-  return { pc1, pc2, el }
-}
+// Ce e acum: vocea live iese printr-un <audio> obișnuit alimentat de WebAudio
+// (`MediaStreamDestination` de pe analizor) — audio de MEDIA, exact ca mp3-ul —
+// deci urmează ruta de muzică la căști / CarPlay / mașină. Compromis, spus pe
+// față: AEC-ul prin WebRTC dispare (rămâne anularea de ecou din microfon,
+// `echoCancellation:true`); pe boxe Bluetooth/mașină AEC-ul oricum nu era
+// necesar (boxele sunt departe de microfon). Dacă pe difuzorul telefonului
+// revine ecoul, pasul următor e ruta-conștientă (AEC pe difuzor, media pe
+// Bluetooth) — dar întâi trebuie ca vocea să AJUNGĂ în mașină.
 
 // O SINGURĂ sesiune live per tab, garantată AICI, nu în apelant (auditul de
 // noapte, 9 aug): gărzile apelantului sunt check-then-act peste await-uri de
@@ -196,7 +162,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // precedentul. Fără asta, cadrele s-ar suprapune și vocea ar suna ca un cor.
   let cursorRedare = 0
   let surseActive: AudioBufferSourceNode[] = []
-  let aec: BuclaAEC | null = null
+  // BOXA = elementul <audio> media prin care iese vocea lui Kelion (vezi antetul
+  // de mai jos: ieșirea trebuie să fie MEDIA/A2DP ca să ajungă pe Bluetooth/mașină).
+  let boxe: HTMLAudioElement | null = null
+  // Pârghia de rezervă: dacă boxa media rămâne pe pauză (camera/o întrerupere +
+  // autoplay), cădem pe redarea directă WebAudio — o dată, fără s-o repornim.
+  let iesireDirecta = false
   let ceasCoords: ReturnType<typeof setInterval> | null = null
   // (ceasCadre scos 9 aug — camera doar la cerință; vezi handlerul 'gata'.)
   // Radierea vocii din registrul de înregistrare (vezi mai jos, la analizor).
@@ -219,16 +190,14 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       /* deja deconectat */
     }
     stream?.getTracks().forEach((t) => t.stop())
-    if (aec) {
+    if (boxe) {
       try {
-        aec.pc1.close()
-        aec.pc2.close()
-        aec.el.pause()
-        aec.el.srcObject = null
+        boxe.pause()
+        boxe.srcObject = null
       } catch {
-        /* deja închise */
+        /* deja oprită */
       }
-      aec = null
+      boxe = null
     }
     void ctxIn?.close().catch(() => {})
     void ctxOut?.close().catch(() => {})
@@ -446,8 +415,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   ctxIn = new AudioContext()
   ctxOut = new AudioContext()
   // Lanțul de ieșire se ridică ACUM, nu leneș la primul cadru: analizorul
-  // (gura avatarului) → bucla WebRTC locală → <audio>, ca AEC-ul browserului
-  // să aibă referința din prima clipă (vezi antetul lui `pornesteBuclaAEC`).
+  // (gura avatarului) → <audio> media → boxe/Bluetooth (vezi antetul de mai sus:
+  // media, nu WebRTC, ca să ajungă în mașină).
   analizor = ctxOut.createAnalyser()
   analizor.fftSize = 256
   bufAnalizor = new Uint8Array(analizor.fftSize)
@@ -460,22 +429,25 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   const destInregistrare = ctxOut.createMediaStreamDestination()
   analizor.connect(destInregistrare)
   radiazaVocea = inscrieVoceaLuiKelion(destInregistrare.stream)
-  try {
-    aec = await pornesteBuclaAEC(ctxOut, analizor)
-    console.info('[vocalLive] AEC activ — redarea trece prin bucla WebRTC locală; browserul scade vocea lui Kelion din microfon')
-  } catch (e) {
-    // Fără buclă (browser vechi, eșec de negociere): redare directă, spusă pe
-    // față — ecoul rămâne netratat, dar vocea MERGE.
-    aec = null
-    analizor.connect(ctxOut.destination)
-    console.warn(`[vocalLive] bucla AEC nu a pornit (${String(e).slice(0, 80)}) — redare directă, fără anulare de ecou`)
-  }
-  // Serverul află dacă ecoul e ANULAT: doar cu AEC viu are voie să-i taie
-  // vorba lui Kelion la vocea omului (barge-in pe server, 9 aug — „vorbește
-  // peste mine"); fără AEC, „vocea de peste el" ar fi chiar ecoul lui.
+  // BOXA MEDIA: analizor → MediaStreamDestination → <audio> obișnuit. Fiind un
+  // flux WebAudio (NU WebRTC), Android îl clasează drept MEDIA (A2DP) → vocea
+  // urmează ruta de muzică pe Bluetooth/CarPlay/mașină (vezi antetul de sus).
+  const destBoxe = ctxOut.createMediaStreamDestination()
+  analizor.connect(destBoxe)
+  boxe = new Audio()
+  boxe.srcObject = destBoxe.stream
+  boxe.autoplay = true
+  boxe.setAttribute('playsinline', '') // iOS: nu deschide playerul pe tot ecranul
+  void boxe.play().catch(() => {
+    /* politica de autoplay — reîncercat de ceasul de deblocaj (mai jos) */
+  })
+  // Serverul află că nu mai e AEC prin WebRTC: fără el, „vocea de peste el" ar
+  // putea fi chiar ecoul, deci NU-i dăm voie serverului să-i taie vorba pe voce
+  // (barge-in server OFF). Pe căști/mașină oricum nu e ecou; pe difuzor rămâne
+  // anularea din microfon (echoCancellation:true).
   const spuneAec = (): void => {
     try {
-      ws.send(JSON.stringify({ type: 'aec', activ: aec !== null }))
+      ws.send(JSON.stringify({ type: 'aec', activ: false }))
     } catch {
       /* sesiunea se închide oricum */
     }
@@ -489,8 +461,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // ScriptProcessor, cu deprecarea lui cu tot — mai bine deprecat decât mut.
   const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
-    // FĂRĂ garda de prag (ștearsă 8 aug): ecoul se tratează cu AEC-ul
-    // browserului prin bucla WebRTC (vezi mai sus) — adaptiv, nu ghicit.
+    // FĂRĂ garda de prag (ștearsă 8 aug): ecoul rămâne pe seama anulării din
+    // microfon (`echoCancellation:true` la getUserMedia) — adaptiv, nu ghicit.
     const la16k = downsample(brut, ctxIn!.sampleRate)
     const pcm = float32ToPcm16([la16k])
     ws.send(pcm.buffer)
@@ -515,44 +487,42 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // „i-am zis porneste camera, a pornit-o dar a murit audio" → confirmat că o a
   // doua atingere îl aduce înapoi). Cauza: când se deschide camera (sau vine o
   // întrerupere de sistem — apel, notificare, blocare ecran), OS-ul pune pe
-  // PAUZĂ elementul <audio> prin care curge bucla AEC, iar politica de autoplay
-  // de pe mobil REFUZĂ `el.play()` fără un gest nou → audio-ul rămâne mort până
-  // la o atingere manuală. „nimeni nu învață manualul" — deci se face automat:
-  // dacă elementul AEC rămâne pe pauză două bătăi la rând (~2,4 s) în ciuda
-  // reîncercării, trecem SINGURI pe redarea directă WebAudio (ctxOut.destination)
-  // — aceeași cale de rezervă ca la browserele care nu negociază bucla (mai sus),
+  // PAUZĂ elementul <audio> al boxei, iar politica de autoplay de pe mobil
+  // REFUZĂ `play()` fără un gest nou → audio-ul rămâne mort până la o atingere
+  // manuală. „nimeni nu învață manualul" — deci se face automat: întâi
+  // reîncercăm blând `boxe.play()`; dacă rămâne pe pauză două bătăi la rând
+  // (~2,4 s), cădem SINGURI pe redarea directă WebAudio (ctxOut.destination),
   // care NU cere gest fiindcă `ctxOut` a fost deblocat de gestul de la pornirea
-  // sesiunii. Se pierde anularea de ecou până la următoarea sesiune, dar vocea se
-  // ÎNTOARCE singură — mut cu ecou e infinit mai bun decât mut de tot.
-  let aecPauzat = 0
+  // sesiunii. Vocea se ÎNTOARCE singură — mut e infinit mai rău. (NB: redarea
+  // directă e doar plasa de siguranță pentru „mut de tot"; ruta preferată rămâne
+  // boxa media, cea care ajunge pe Bluetooth/mașină.)
+  let boxaPauzata = 0
   resumeTimer = setInterval(() => {
     if (inchis) return
     if (ctxIn && ctxIn.state !== 'running') void ctxIn.resume().catch(() => {})
     if (ctxOut && ctxOut.state !== 'running') void ctxOut.resume().catch(() => {})
-    if (aec && ctxOut && analizor) {
-      if (aec.el.paused) {
-        // Întâi încercăm calea blândă: repornirea elementului (merge dacă tocmai
-        // a fost un gest recent — pe desktop, sau după ce userul a atins ecranul).
-        void aec.el.play().catch(() => {})
-        aecPauzat++
-        if (aecPauzat >= 2) {
+    if (boxe && ctxOut && analizor && !iesireDirecta) {
+      if (boxe.paused) {
+        // Întâi calea blândă: repornirea elementului (merge dacă tocmai a fost un
+        // gest recent — pe desktop, sau după ce userul a atins ecranul).
+        void boxe.play().catch(() => {})
+        boxaPauzata++
+        if (boxaPauzata >= 2) {
           // Blocat de politica de autoplay (tipic: camera a întrerupt audio pe
           // mobil). Cădem pe redarea directă, fără gest, ca vocea să revină acum.
-          console.warn('[vocalLive] elementul AEC rămâne pe pauză (probabil camera/o întrerupere a oprit audio) — trec automat pe redare directă, fără atingere')
+          console.warn('[vocalLive] boxa media rămâne pe pauză (probabil camera/o întrerupere a oprit audio) — trec automat pe redare directă WebAudio, fără atingere')
+          iesireDirecta = true
           try {
-            aec.pc1.close()
-            aec.pc2.close()
-            aec.el.pause()
-            aec.el.srcObject = null
+            boxe.pause()
+            boxe.srcObject = null
           } catch {
-            /* deja închise */
+            /* deja oprită */
           }
-          aec = null
+          boxe = null
           analizor.connect(ctxOut.destination)
-          spuneAec() // serverul află că AEC nu mai e activ → oprește barge-in-ul
         }
       } else {
-        aecPauzat = 0
+        boxaPauzata = 0
       }
     }
   }, 1200)
