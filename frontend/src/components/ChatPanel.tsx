@@ -538,9 +538,11 @@ export default function ChatPanel({
       return
     }
     if (c.golesteMonitor) {
-      // Mâna care șterge (8 aug): închide și workspace-ul (pagini/aplicații),
-      // și imaginea generată — până acum doar X-ul omului putea.
-      closeWorkspace()
+      // „Golește monitorul" = golește TOT ce e afișat, nu doar tabul activ
+      // (bug 11 aug, ownerul: „golirea ecran la cerere user nu funcționează" —
+      // cu 2 taburi, closeWorkspace închidea doar unul). closeAllTasks curăță
+      // toate suprafețele; imaginea generată din chat se șterge și ea.
+      closeAllTasks()
       setChatImage(null)
       return
     }
