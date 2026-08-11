@@ -53,6 +53,20 @@ def twaManifest = [
 android {
     compileSdkVersion 36
     namespace "app.kelionai.twa"
+    // SEMNARE DIN CI (GitHub Actions) — activă DOAR când există env-urile de
+    // keystore (build-ul din cloud). Local (fluxul Bubblewrap de pe PC-ul lui
+    // Adrian) env-urile lipsesc → blocul e inert, semnarea rămâne cea veche.
+    signingConfigs {
+        release {
+            def ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (ksPath) {
+                storeFile file(ksPath)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
     defaultConfig {
         applicationId "app.kelionai.twa"
         minSdkVersion 21
@@ -153,6 +167,11 @@ android {
     buildTypes {
         release {
             minifyEnabled true
+            // Semnează cu keystore-ul din CI DOAR când e configurat (altfel,
+            // local, Bubblewrap semnează AAB-ul după build, ca înainte).
+            if (System.getenv("ANDROID_KEYSTORE_PATH")) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     compileOptions {

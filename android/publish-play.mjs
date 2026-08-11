@@ -7,16 +7,24 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { createSign } from 'node:crypto'
 
-const SA_PATH = 'C:/Users/adria/Kelionai-secrets/play-service-account.json'
+// Contul de serviciu vine, în ordine: (1) din env PLAY_SERVICE_ACCOUNT_JSON
+// (conținutul JSON ca secret — calea din GitHub Actions), (2) din env
+// PLAY_SERVICE_ACCOUNT_JSON_PATH (cale de fișier), (3) din calea locală a lui
+// Adrian (fluxul de pe PC-ul lui). Așa merge și din cloud, și local — nu dublăm.
+const SA_PATH = process.env.PLAY_SERVICE_ACCOUNT_JSON_PATH || 'C:/Users/adria/Kelionai-secrets/play-service-account.json'
 const AAB = new URL('./app/build/outputs/bundle/release/app-release.aab', import.meta.url)
 const PACKAGE = 'app.kelionai.twa'
 
-if (!existsSync(SA_PATH)) {
-  console.log('play-service-account.json absent — sar peste publicarea Play (vezi PLAY-UPLOAD.md).')
-  process.exit(0)
+let saRaw = process.env.PLAY_SERVICE_ACCOUNT_JSON
+if (!saRaw) {
+  if (!existsSync(SA_PATH)) {
+    console.log('play-service-account.json absent — sar peste publicarea Play (vezi PLAY-UPLOAD.md).')
+    process.exit(0)
+  }
+  saRaw = readFileSync(SA_PATH, 'utf8')
 }
 
-const sa = JSON.parse(readFileSync(SA_PATH, 'utf8'))
+const sa = JSON.parse(saRaw)
 
 // OAuth2 for a service account: signed JWT → access token.
 const now = Math.floor(Date.now() / 1000)
