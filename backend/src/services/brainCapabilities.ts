@@ -139,6 +139,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'click_monitor', category: 'vedere', does: 'dă click la coordonate x,y pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'zoom_monitor', category: 'vedere', does: 'mărește/micșorează (zoom) pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'get_mouse_position', category: 'vedere', does: 'află poziția mouse-ului și ce indică pe ecran', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'arata_pe_grafic', category: 'vedere', does: 'pune pointeri de indicație pe graficul de trading (linie colorată cu săgeată + vorbele lui, fix pe preț) — „arată clar ce zice"', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'goleste_monitorul', category: 'vedere', does: 'golește monitorul (închide todo ce e afișat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'get_location', category: 'vedere', does: 'GPS-ul real al dispozitivului', chat: false, voice: false, voiceViaBrain: true, admin: false },
 

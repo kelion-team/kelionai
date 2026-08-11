@@ -879,7 +879,12 @@ the risk of diverging. */
    lăsat pentru documente devenea o bandă moartă sub grafic. Compozitorul
    plutește peste marginea de jos a paginii, nu peste un text de citit. */
 .workspace-inner.plin {
-  padding-bottom: 12px;
+  /* GRAFICUL SE TERMINĂ DEASUPRA CÂMPULUI DE CHAT (10 aug, ownerul: „butoanele
+     de trading nu merg din bară"). Măsurat cu Playwright: `.composer` (câmpul de
+     chat, fix jos, ~76px) acoperea BAZA graficului din iframe — clickul de acolo
+     cădea pe input, nu pe pagină. Composerul e ~76px de la marginea de jos;
+     lăsăm 96px liberi ca axa/baza graficului să nu mai stea sub el. */
+  padding-bottom: 96px;
 }
 /* ON THE PHONE the (fixed) top bar wraps onto 2-3 rows (badges + admin
 buttons) and reaches far below 56px — the panel's title and its buttons
@@ -943,11 +948,21 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 }
 .ws-tab-x {
   opacity: 0.6;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1;
+  /* ZONĂ DE CLICK REALĂ (10 aug, ownerul: „×-ul din mod monitor nu merge").
+     Măsurat cu Playwright: ×-ul avea doar 9×11px — clickul REAL rata ținta
+     minusculă (deși cel programatic o nimerea, de-aia părea „reparat"). Padding
+     + margin negativ îi dau ~24px de apăsat, fără să miște layoutul tabului.
+     position:relative îl ține deasupra, ca să primească el clickul. */
+  padding: 6px;
+  margin: -6px -3px -6px 0;
+  border-radius: 999px;
+  position: relative;
 }
 .ws-tab-x:hover {
   opacity: 1;
+  background: var(--border);
 }
 .workspace-doc {
   flex: 1;

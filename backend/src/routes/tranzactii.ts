@@ -105,6 +105,36 @@ export function normalizeazaNumar(brut: string, pretCurent?: number): number | n
   return Number.isFinite(v) && v > 0 ? v : null
 }
 
+// ── POINTERII DE INDICAȚIE (10 aug, ownerul: „el când explică trebuie să arate
+// clar pe monitor ce zice, adică poziționează pointeri de indicație") ─────────
+// Chatul REAL cheamă unealta `arata_pe_grafic` cu punctele lui; frame-ul {semne}
+// ajunge în pagină și fiecare punct devine o linie SOLIDĂ colorată cu săgeată +
+// vorbele lui, desenată FIX pe preț. Aici curățăm ce vine de la creier: doar
+// prețuri reale (>0), tip din setul permis (altfel 'nota'), etichetă tăiată,
+// maximum 8. PURĂ și exportată — se probează fără browser (tranzactiiSemne.test).
+export interface SemnGrafic {
+  pret: number
+  tip: string
+  text: string
+}
+const TIPURI_SEMN = new Set(['suport', 'rezistenta', 'intrare', 'stop', 'tinta', 'nota'])
+export function curataSemne(puncte: unknown): SemnGrafic[] {
+  const arr = Array.isArray(puncte) ? puncte : []
+  const out: SemnGrafic[] = []
+  for (const p of arr) {
+    const o = (p ?? {}) as { pret?: unknown; tip?: unknown; text?: unknown }
+    const pret = Number(o.pret)
+    if (!Number.isFinite(pret) || pret <= 0) continue
+    // Diacriticele se scapă (rezistență→rezistenta, țintă→tinta) ca tipul să prindă.
+    const tipBrut = String(o.tip ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    const tip = TIPURI_SEMN.has(tipBrut) ? tipBrut : 'nota'
+    const text = String(o.text ?? '').trim().slice(0, 60)
+    out.push({ pret, tip, text })
+    if (out.length >= 8) break
+  }
+  return out
+}
+
 /** Instrucțiunea comună prin care agentul își face nivelurile DESENABILE. */
 const CERE_NIVELURI =
   `\nLA FINAL, OBLIGATORIU, pe un rând separat, scrie nivelurile tale numerice în formatul exact: ` +
@@ -405,6 +435,39 @@ function paginaTranzactii(): string {
    document.getElementById('nivCurata').onclick=function(){ aratNiveluri([]); };
  }
 
+ // ── POINTERII DE INDICAȚIE (10 aug, ownerul: „el când explică trebuie să arate
+ // clar pe monitor ce zice, adică poziționează pointeri de indicație") ─────────
+ // Vin din chatul REAL (unealta arata_pe_grafic → frame {semne}). Fiecare punct e
+ // o linie SOLIDĂ, mai groasă, colorată, cu SĂGEATĂ + vorbele lui Kelion, fix pe
+ // preț. Ținute separat de nivelurile din analiză, curățate independent.
+ var semnele=[]; // liniile-pointer desenate acum
+ function culoareSemn(tip){
+   if(tip==='intrare') return '#4ade80';
+   if(tip==='stop') return '#f87171';
+   if(tip==='tinta') return '#60a5fa';
+   if(tip==='suport') return '#eab308';
+   if(tip==='rezistenta') return '#c084fc';
+   return '#7aa2ff';
+ }
+ function sagetaSemn(tip){
+   if(tip==='suport'||tip==='intrare') return '▲ ';
+   if(tip==='rezistenta'||tip==='stop') return '▼ ';
+   if(tip==='tinta') return '◆ ';
+   return '➤ ';
+ }
+ function aratSemne(lista){
+   var i;
+   if(serie){ for(i=0;i<semnele.length;i++){ try{serie.removePriceLine(semnele[i]);}catch(e){} } }
+   semnele=[];
+   if(!lista||!lista.length) return;
+   for(i=0;i<lista.length;i++){
+     var sm=lista[i]||{}, pr=Number(sm.pret);
+     if(!isFinite(pr)||pr<=0) continue;
+     var cul=culoareSemn(sm.tip), et=(sagetaSemn(sm.tip)+String(sm.text||sm.tip||'')).slice(0,44);
+     if(serie) semnele.push(serie.createPriceLine({price:pr,color:cul,lineWidth:2,lineStyle:0,axisLabelVisible:true,title:et}));
+   }
+ }
+
  // ── Datele reale (poll 10s): grafic + preț + sursă; eroarea se SPUNE în status ─
  function marcheazaIntervale(){
    document.querySelectorAll('.int').forEach(function(b){
@@ -535,7 +598,7 @@ function paginaTranzactii(): string {
    var sim=s.value.toUpperCase().trim();
    if(!sim){ s.focus(); return; }
    s.value=sim;
-   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); } // nivelurile vechi ar minți pe alt simbol
+   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); aratSemne([]); } // nivelurile/pointerii vechi ar minți pe alt simbol
    marcheazaChips();
    if(primaIncarcare){ arataSchelet('se încarcă '+sim+' ('+interval+')…'); stare('gri','încarc '+sim+'…'); }
    if(ceas) clearInterval(ceas);
@@ -649,10 +712,15 @@ function paginaTranzactii(): string {
  setInterval(raporteazaStarea,5000);
  window.addEventListener('message',function(ev){
    var d=ev.data||{};
-   if(d.kelion!=='niveluri'||!d.date) return;
-   var pn=d.date;
-   if(String(pn.simbol||'').toUpperCase()!==String(simbolCurent).toUpperCase()) return; // pe alt simbol ar minți
-   aratNiveluri(pn.lista||[]);
+   if(!d||!d.date) return;
+   var acelasiSimbol=String(d.date.simbol||'').toUpperCase()===String(simbolCurent).toUpperCase();
+   if(d.kelion==='niveluri'){
+     if(!acelasiSimbol) return; // pe alt simbol ar minți
+     aratNiveluri(d.date.lista||[]);
+   } else if(d.kelion==='semne'){
+     if(!acelasiSimbol) return; // pointerii pe alt simbol ar minți
+     aratSemne(d.date.lista||[]);
+   }
  });
 
  urmareste();

@@ -578,6 +578,12 @@ export default function ChatPanel({
       const cadru = document.querySelector<HTMLIFrameElement>('iframe.workspace-frame')
       cadru?.contentWindow?.postMessage({ kelion: 'niveluri', date: c.niveluri }, window.location.origin)
     }
+    // POINTERII DE INDICAȚIE (10 aug): la fel ca nivelurile, dar cu vorbele lui
+    // Kelion + săgeată, fix pe preț — „când explică, arată clar pe monitor ce zice".
+    if (c.semne) {
+      const cadru = document.querySelector<HTMLIFrameElement>('iframe.workspace-frame')
+      cadru?.contentWindow?.postMessage({ kelion: 'semne', date: c.semne }, window.location.origin)
+    }
     if (!c.monitor) return
     if (c.monitor.url) openWorkspace(c.monitor.title || t.monitorTitle, c.monitor.url)
     else closeWorkspace()
