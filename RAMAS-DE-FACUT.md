@@ -36,7 +36,7 @@
 > e clasat de Android drept „convorbire" (SCO) → rămâne pe telefon, nu folosește canalul A2DP
 > de muzică al căștilor/mașinii. Fix (`vocalLive.ts`): vocea live iese acum printr-un `<audio>`
 > media alimentat de WebAudio (ca mp3-ul din audioIO.ts, care MERGE pe BT) → urmează ruta de
-> muzică la căști/CarPlay/mașină; bucla WebRTC scoasă; ecoul rămâne pe seama microfonului
+> muzică la căști/mașină; bucla WebRTC scoasă; ecoul rămâne pe seama microfonului
 > (echoCancellation). Porți verzi (tsc 0 · build · oxlint 0 · jscpd 0 · sintaxă 0 · teste 15/15).
 > **DE TĂIAT după verificarea LIVE** (pornește vocea live cu căști BT / în mașină → iese pe
 > căști/boxe). Dacă TOT rămâne pe telefon → cauza e „modul convorbire" din microfonul deschis,
