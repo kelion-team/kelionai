@@ -34,6 +34,7 @@ import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
 import { currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
+import { reteaLenta } from '../lib/retea'
 import ApelOverlay from '../components/ApelOverlay'
 import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
 
@@ -801,6 +802,10 @@ export default function Stage({ user }: { user: User }) {
   // ecranul, iar avatarul 3D se DEMONTEAZĂ (three.js iese din memorie — „consumă cât
   // China"). Butonul 🚗 din bară pornește modul; ieșirea se face din stratul de mașină.
   const carOn = useSyncExternalStore(subscribeCarMode, isCarMode)
+  // Pe 3G/2G/economie de date, NU descărcăm avatarul 3D (~1MB) — banda rămâne
+  // pentru chat și voce (owner, 11 aug: „trebuie să meargă și pe 3G"). Măsurat o
+  // dată, la montare; conexiunea bună îl încarcă normal.
+  const [reteaSlaba] = useState(reteaLenta)
   // MESSENGER KELION↔KELION: ține deschis canalul de prezență cât ești logat, ca
   // să POȚI fi sunat oricând — din orice mod (chat scris/voce, acasă sau mașină).
   // Se închide singur la delogare (demontarea Stage-ului).
@@ -1220,7 +1225,7 @@ export default function Stage({ user }: { user: User }) {
           three.js nu mai e în calea critică; interfața apare instant. La volan
           (carOn) NU se montează deloc: stratul Jarvis îl acoperă oricum, iar
           three.js iese din memorie (economie reală de baterie/GPU). */}
-      {!carOn && (
+      {!carOn && !reteaSlaba && (
         <Suspense fallback={null}>
           <StageAvatar monitorOn={monitorOn} />
         </Suspense>
