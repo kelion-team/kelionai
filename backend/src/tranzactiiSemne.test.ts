@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { curataSemne, curataZone } from './routes/tranzactii.js'
+import { curataSemne, curataZone, curataSageti, curataTrend } from './routes/tranzactii.js'
 
 // POINTERII DE INDICAȚIE (10 aug, ownerul: „el când explică trebuie să arate
 // clar pe monitor ce zice, adică poziționează pointeri de indicație"). Curățarea
@@ -69,5 +69,36 @@ describe('curataZone — benzile de preț de pe grafic', () => {
     expect(curataZone(null)).toEqual([])
     expect(curataZone('nope')).toEqual([])
     expect(curataZone([null, 7])).toEqual([])
+  })
+})
+
+// SĂGEȚI pe lumânări — ancorate pe cursor/ultima, nu pe un preț ghicit.
+describe('curataSageti — săgețile de pe lumânări', () => {
+  it('normalizează direcția și ancora (implicit sus / ultima)', () => {
+    expect(curataSageti([{ directie: 'jos', unde: 'cursor', text: 'respingere' }])).toEqual([
+      { directie: 'jos', unde: 'cursor', text: 'respingere' },
+    ])
+    expect(curataSageti([{}])).toEqual([{ directie: 'sus', unde: 'ultima', text: '' }])
+    expect(curataSageti([{ directie: 'AIUREA', unde: 'nustiu' }])).toEqual([{ directie: 'sus', unde: 'ultima', text: '' }])
+  })
+  it('taie eticheta la 32, max 8 săgeți, input ne-array → gol', () => {
+    expect(curataSageti([{ directie: 'sus', text: 'x'.repeat(50) }])[0].text.length).toBe(32)
+    expect(curataSageti(Array.from({ length: 20 }, () => ({ directie: 'sus' }))).length).toBe(8)
+    expect(curataSageti(null)).toEqual([])
+  })
+})
+
+// LINIE DE TREND — două prețuri reale.
+describe('curataTrend — linia de trend', () => {
+  it('păstrează două prețuri reale, aruncă ne-reale/≤0', () => {
+    expect(curataTrend([{ pret1: 63000, pret2: 65000, text: 'trend urcător' }])).toEqual([
+      { pret1: 63000, pret2: 65000, text: 'trend urcător' },
+    ])
+    expect(curataTrend([{ pret1: 0, pret2: 5 }])).toEqual([])
+    expect(curataTrend([{ pret1: 'x', pret2: 5 }])).toEqual([])
+  })
+  it('cel mult 2 linii, input ne-array → gol', () => {
+    expect(curataTrend(Array.from({ length: 5 }, (_, i) => ({ pret1: i + 1, pret2: i + 2 }))).length).toBe(2)
+    expect(curataTrend(null)).toEqual([])
   })
 })

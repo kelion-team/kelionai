@@ -39,8 +39,11 @@ export interface ChatControl {
   semne?: {
     simbol: string
     lista: { pret: number; tip: string; text: string }[]
-    // ZONE (benzi de preț) desenate de aceeași unealtă — o bandă între două prețuri.
+    // ZONE (benzi de preț), SĂGEȚI (pe lumânări) și TREND (linie prin 2 prețuri) —
+    // desenate de aceeași unealtă arata_pe_grafic, pe același canal.
     zone?: { jos: number; sus: number; tip: string; text: string }[]
+    sageti?: { directie: string; unde: string; text: string }[]
+    trend?: { pret1: number; pret2: number; text: string }[]
   }
   // A generated image to show inline in the chat (in addition to the monitor).
   image?: { url: string }

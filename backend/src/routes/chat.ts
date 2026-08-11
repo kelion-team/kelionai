@@ -44,7 +44,7 @@ import {
   userKey,
   addMemory,
 } from '../db.js'
-import { extrageNiveluri, curataSemne, curataZone } from './tranzactii.js'
+import { extrageNiveluri, curataSemne, curataZone, curataSageti, curataTrend } from './tranzactii.js'
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, OCHI_MARCAJ, type OrMessage, type AnthropicTool } from '../services/brainContract.js'
 import { stripToolMarkup, makeToolMarkupStripper } from '../services/toolMarkup.js'
@@ -449,7 +449,33 @@ const ARATA_GRAFIC_TOOL: Tool = {
           required: ['pret1', 'pret2'],
         },
       },
-      curata: { type: 'boolean', description: 'Set true to clear all pointers and zones from the chart.' },
+      sageti: {
+        type: 'array',
+        description: 'Up to 8 arrow markers pinned ON a real candle (not a guessed price) — use to point at a specific candle while explaining.',
+        items: {
+          type: 'object',
+          properties: {
+            directie: { type: 'string', enum: ['sus', 'jos'], description: 'sus = green up-arrow below the candle; jos = red down-arrow above it.' },
+            unde: { type: 'string', enum: ['cursor', 'ultima'], description: 'Which candle to pin on: the one under the user cursor, or the latest one.' },
+            text: { type: 'string', description: 'Short label on the arrow (max ~32 chars).' },
+          },
+          required: ['directie'],
+        },
+      },
+      trend: {
+        type: 'array',
+        description: 'A trend line (one) drawn through two prices, from the first to the last loaded candle. Use to show a trend/channel.',
+        items: {
+          type: 'object',
+          properties: {
+            pret1: { type: 'number', description: 'Price at the left end (older candle) — a real number.' },
+            pret2: { type: 'number', description: 'Price at the right end (latest candle) — a real number.' },
+            text: { type: 'string', description: 'Short label for the trend line.' },
+          },
+          required: ['pret1', 'pret2'],
+        },
+      },
+      curata: { type: 'boolean', description: 'Set true to clear ALL drawings (pointers, zones, arrows, trend) from the chart.' },
     },
   },
 }
@@ -1963,7 +1989,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `preț ${Number(piata.pret) || 'necunoscut'}, interval ${String(piata.interval ?? '?').slice(0, 6)}, sursă ${String(piata.sursa ?? '?').slice(0, 60)}. ` +
         `Ești mentorul lui de trading, cu riscul ÎNTÂI: răspunzi la ORICE întrebare tehnică de tranzacționare (cum funcționează platformele, tipuri de ordine, indicatori, strategii, mărimea poziției, management de risc, când intri/ieși) — pe înțeles, SCURT, doar pe cifre REALE (cele de pe ecran sau surse de net cu link și dată; ce nu ai măsurat spui că nu ai de unde ști). NU promiți câștiguri, NU spui „sigur", NU plasezi ordine. ` +
         `Când dai niveluri concrete pe simbolul de pe ecran (intrare/ieșire/stop/țintă/suport/rezistență), încheie răspunsul cu rândul mașină-citibil, pe rând separat: NIVELURI: intrare=…; stop=…; tinta=…; suport=…; rezistenta=… — doar cele care există; rândul se DESENEAZĂ pe graficul lui. ` +
-        `ARATĂ, NU DOAR SPUNE: ori de câte ori explici un nivel, un suport/rezistență, o intrare/ieșire/stop/țintă, CHEAMĂ unealta arata_pe_grafic — cu «puncte» (preț REAL + tip + etichetă scurtă) pentru POINTERI-linie, și/sau cu «zone» (pret1+pret2+tip+etichetă) pentru o BANDĂ colorată între două prețuri (ex. „zona de acumulare 63.000–63.500"). Apar fix pe prețurile alea, pe graficul lui, ca să VADĂ exact la ce te referi. Când vrei să ștergi ce ai desenat, cheamă cu curata:true.`
+        `ARATĂ, NU DOAR SPUNE: ori de câte ori explici ceva pe grafic, CHEAMĂ unealta arata_pe_grafic ca să-l DESENEZI, cu una sau mai multe din: «puncte» (preț REAL + tip + etichetă) = POINTERI-linie; «zone» (pret1+pret2+tip+etichetă) = BANDĂ colorată între două prețuri („zona de acumulare 63.000–63.500"); «sageti» (directie sus/jos + unde cursor/ultima + etichetă) = SĂGEATĂ fix pe o lumânare reală („uite respingerea aici"); «trend» (pret1→pret2) = LINIE DE TREND prin două prețuri. Totul fix pe cifrele REALE de pe ecran, ca omul să VADĂ exact la ce te referi. Ca să ștergi tot ce ai desenat, cheamă cu curata:true.`
       // MOUSE-UL PE GRAFIC (10 aug, ownerul: „kelion trebuie să vadă când pun
       // mouse-ul exact peste orice poziție din grafic"). Iframe-ul graficului
       // trimite lumânarea de sub cursor; o punem în ancoră ca s-o „vadă" exact.
@@ -2701,25 +2727,29 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (!isAdminUser || !simbol) {
             return JSON.stringify({ succes: false, mesaj: 'Pointerii se pun doar când Centrul de Tranzacționare e deschis pe ecran (admin).' })
           }
-          const inp = input as { puncte?: unknown; zone?: unknown; curata?: unknown }
-          // Curățare explicită: golește pointerii ȘI zonele de pe grafic.
+          const inp = input as { puncte?: unknown; zone?: unknown; sageti?: unknown; trend?: unknown; curata?: unknown }
+          // Curățare explicită: golește TOT ce a desenat pe grafic.
           if (inp.curata === true) {
             try {
-              reply.raw.write(`${CTRL}${JSON.stringify({ semne: { simbol, lista: [], zone: [] } })}${CTRL}`)
+              reply.raw.write(`${CTRL}${JSON.stringify({ semne: { simbol, lista: [], zone: [], sageti: [], trend: [] } })}${CTRL}`)
             } catch (e) {}
-            return JSON.stringify({ succes: true, mesaj: `Am curățat graficul ${simbol} (pointeri + zone).` })
+            return JSON.stringify({ succes: true, mesaj: `Am curățat graficul ${simbol} (pointeri + zone + săgeți + trend).` })
           }
           const lista = curataSemne(inp.puncte)
           const zone = curataZone(inp.zone)
-          if (!lista.length && !zone.length) {
-            return JSON.stringify({ succes: false, mesaj: 'Nimic de desenat — dă puncte și/sau zone cu cifre REALE din graficul de pe ecran (sau curata:true ca să ștergi).' })
+          const sageti = curataSageti(inp.sageti)
+          const trend = curataTrend(inp.trend)
+          if (!lista.length && !zone.length && !sageti.length && !trend.length) {
+            return JSON.stringify({ succes: false, mesaj: 'Nimic de desenat — dă puncte / zone / săgeți / trend cu cifre REALE din graficul de pe ecran (sau curata:true ca să ștergi).' })
           }
           try {
-            reply.raw.write(`${CTRL}${JSON.stringify({ semne: { simbol, lista, zone } })}${CTRL}`)
+            reply.raw.write(`${CTRL}${JSON.stringify({ semne: { simbol, lista, zone, sageti, trend } })}${CTRL}`)
           } catch (e) {}
           const bucati: string[] = []
           if (lista.length) bucati.push(`${lista.length} pointer(i): ${lista.map((p) => `${p.tip} ${p.pret}${p.text ? ` (${p.text})` : ''}`).join('; ')}`)
           if (zone.length) bucati.push(`${zone.length} zonă/zone: ${zone.map((z) => `${z.tip} ${z.jos}–${z.sus}${z.text ? ` (${z.text})` : ''}`).join('; ')}`)
+          if (sageti.length) bucati.push(`${sageti.length} săgeată/săgeți (${sageti.map((s) => `${s.directie} pe ${s.unde}${s.text ? ` „${s.text}"` : ''}`).join('; ')})`)
+          if (trend.length) bucati.push(`o linie de trend ${trend[0].pret1}→${trend[0].pret2}${trend[0].text ? ` (${trend[0].text})` : ''}`)
           return JSON.stringify({ succes: true, mesaj: `Am desenat pe graficul ${simbol} — ${bucati.join(' · ')}.` })
         }
         // APPROVED DYNAMIC TOOL: generic execution through a safe HTTP call.

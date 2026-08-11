@@ -163,6 +163,49 @@ export function curataZone(zone: unknown): ZonaGrafic[] {
   return out
 }
 
+// ── SĂGEȚI pe lumânări: o săgeată ↑/↓ ancorată pe o lumânare REALĂ (cea de sub
+// cursor sau ultima) + eticheta. Nu ghicim timpul — pagina îl rezolvă din starea
+// ei. PURĂ și testată. */
+export interface SageataGrafic {
+  directie: 'sus' | 'jos'
+  unde: 'cursor' | 'ultima'
+  text: string
+}
+export function curataSageti(sageti: unknown): SageataGrafic[] {
+  const arr = Array.isArray(sageti) ? sageti : []
+  const out: SageataGrafic[] = []
+  for (const s of arr) {
+    const o = (s ?? {}) as { directie?: unknown; unde?: unknown; text?: unknown }
+    const directie = String(o.directie ?? '').toLowerCase() === 'jos' ? 'jos' : 'sus'
+    const unde = String(o.unde ?? '').toLowerCase() === 'cursor' ? 'cursor' : 'ultima'
+    const text = String(o.text ?? '').trim().slice(0, 32)
+    out.push({ directie, unde, text })
+    if (out.length >= 8) break
+  }
+  return out
+}
+
+// ── LINIE DE TREND: o diagonală prin două prețuri, de la prima la ultima
+// lumânare încărcată. Doar una (cazul obișnuit la explicat). PURĂ și testată. */
+export interface TrendGrafic {
+  pret1: number
+  pret2: number
+  text: string
+}
+export function curataTrend(trend: unknown): TrendGrafic[] {
+  const arr = Array.isArray(trend) ? trend : []
+  const out: TrendGrafic[] = []
+  for (const t of arr) {
+    const o = (t ?? {}) as { pret1?: unknown; pret2?: unknown; text?: unknown }
+    const a = Number(o.pret1)
+    const b = Number(o.pret2)
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) continue
+    out.push({ pret1: a, pret2: b, text: String(o.text ?? '').trim().slice(0, 60) })
+    if (out.length >= 2) break
+  }
+  return out
+}
+
 /** Instrucțiunea comună prin care agentul își face nivelurile DESENABILE. */
 const CERE_NIVELURI =
   `\nLA FINAL, OBLIGATORIU, pe un rând separat, scrie nivelurile tale numerice în formatul exact: ` +
@@ -515,6 +558,38 @@ function paginaTranzactii(): string {
    }
  }
 
+ // ── SĂGEȚI pe lumânări + LINIE DE TREND (10 aug: „funcții utile ca să arate și
+ // explice vizibil"). Săgeata (createSeriesMarkers) se ancorează pe o lumânare
+ // REALĂ — cea de sub cursor ('cursor') sau ultima ('ultima') — deci nu ghicește
+ // timpul; sus=verde ↑ sub lumânare, jos=roșu ↓ deasupra. Trendul (LineSeries cu
+ // 2 puncte) trece prin două prețuri, de la prima la ultima lumânare încărcată.
+ var timpuri=[], ultimulTimp=null, markeri=null, linTrend=null;
+ function aratSageti(lista){
+   var arr=[], i;
+   for(i=0;i<(lista||[]).length;i++){
+     var sg=lista[i]||{}, t=null;
+     if(sg.unde==='cursor'&&pesteCursor&&pesteCursor.t!=null){ t=(typeof pesteCursor.t==='number')?Math.floor(pesteCursor.t/1000):pesteCursor.t; }
+     else { t=ultimulTimp; }
+     if(t==null) continue;
+     var jos=(sg.directie==='jos');
+     arr.push({time:t,position:jos?'aboveBar':'belowBar',color:jos?'#f87171':'#4ade80',shape:jos?'arrowDown':'arrowUp',text:String(sg.text||'').slice(0,32)});
+   }
+   arr.sort(function(a,b){ return a.time>b.time?1:a.time<b.time?-1:0; });
+   try{
+     if(!serie) return;
+     if(!markeri){ if(LightweightCharts.createSeriesMarkers) markeri=LightweightCharts.createSeriesMarkers(serie,arr); else if(serie.setMarkers) serie.setMarkers(arr); }
+     else markeri.setMarkers(arr);
+   }catch(e){}
+ }
+ function aratTrend(lista){
+   try{ if(!linTrend&&chart) linTrend=chart.addSeries(LightweightCharts.LineSeries,{color:'#eab308',lineWidth:2,lineStyle:0,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false}); }catch(e){}
+   if(!linTrend) return;
+   if(!lista||!lista.length||!timpuri.length){ try{linTrend.setData([]);}catch(e){} return; }
+   var z=lista[0]||{}, a=Number(z.pret1), b=Number(z.pret2);
+   if(!isFinite(a)||!isFinite(b)){ try{linTrend.setData([]);}catch(e){} return; }
+   try{ linTrend.setData([{time:timpuri[0],value:a},{time:timpuri[timpuri.length-1],value:b}]); }catch(e){}
+ }
+
  // ── Datele reale (poll 10s): grafic + preț + sursă; eroarea se SPUNE în status ─
  function marcheazaIntervale(){
    document.querySelectorAll('.int').forEach(function(b){
@@ -570,6 +645,7 @@ function paginaTranzactii(): string {
        // mediile și volumul (serii de linii) se pot împrospăta oricând.
        if(primaIncarcare||eZilnic||!ws){
          serie.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),open:c.deschis,high:c.maxim,low:c.minim,close:c.inchis}; }));
+         timpuri=j.lumanari.map(function(c){ return Math.floor(c.t/1000); }); ultimulTimp=timpuri.length?timpuri[timpuri.length-1]:null;
          vol.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),value:c.volum,color:c.inchis>=c.deschis?CULV_SUS:CULV_JOS}; }));
          var uc=j.lumanari[j.lumanari.length-1];
          if(uc){ ultim.c={open:uc.deschis,high:uc.maxim,low:uc.minim,close:uc.inchis}; ultim.v=uc.volum; }
@@ -622,6 +698,7 @@ function paginaTranzactii(): string {
          }
        } else if(d.e==='kline'&&d.k){
          var k=d.k, tt=Math.floor(k.t/1000);
+         ultimulTimp=tt; if(!timpuri.length||timpuri[timpuri.length-1]!==tt) timpuri.push(tt);
          if(serie) serie.update({time:tt,open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)});
          if(vol) vol.update({time:tt,value:Number(k.v),color:Number(k.c)>=Number(k.o)?CULV_SUS:CULV_JOS});
          ultim.c={open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)}; ultim.v=Number(k.v);
@@ -645,7 +722,7 @@ function paginaTranzactii(): string {
    var sim=s.value.toUpperCase().trim();
    if(!sim){ s.focus(); return; }
    s.value=sim;
-   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); aratSemne([]); aratZone([]); } // nivelurile/pointerii/zonele vechi ar minți pe alt simbol
+   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); aratSemne([]); aratZone([]); aratSageti([]); aratTrend([]); } // desenele vechi ar minți pe alt simbol
    marcheazaChips();
    if(primaIncarcare){ arataSchelet('se încarcă '+sim+' ('+interval+')…'); stare('gri','încarc '+sim+'…'); }
    if(ceas) clearInterval(ceas);
@@ -768,6 +845,8 @@ function paginaTranzactii(): string {
      if(!acelasiSimbol) return; // pointerii/zonele pe alt simbol ar minți
      aratSemne(d.date.lista||[]);
      aratZone(d.date.zone||[]);
+     aratSageti(d.date.sageti||[]);
+     aratTrend(d.date.trend||[]);
    }
  });
 
