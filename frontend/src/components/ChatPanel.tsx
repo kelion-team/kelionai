@@ -48,6 +48,7 @@ import {
   type MicHandle,
 } from '../lib/audioIO'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
+import { watchdogEnter, watchdogBeat, watchdogExit } from '../lib/watchdog'
 import { setRealLatency, getRealLatency, subscribeRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 // VOCE UNIFICATĂ (Adrian, 5 aug): urechea STT a fost scoasă TOTAL — o singură cale
@@ -1185,6 +1186,18 @@ export default function ChatPanel({
       // Otherwise we detect nothing — at most the last known position leaves.
       const locTurn = LOC_INTENT.test(msg)
       const turnCoords = locTurn ? await getFreshCoords() : coordsRef.current
+      // MARTOR + THROTTLING (11 aug, ownerul: „se blochează la tot ce trece prin
+      // chat"): watchdog-ul măsoară cauza (fir principal vs. server); re-randăm
+      // la cel mult ~20/s (nu la fiecare token) ca firul principal să respire.
+      watchdogEnter('creier')
+      let ultimulFlush = 0
+      const flushMesaje = (): void => {
+        setMessages((cur) => {
+          const base = cur.length >= next.length && cur.slice(0, next.length).every((m, i) => m === next[i]) ? cur : next
+          const rest = base.slice(next.length).filter((m) => !(m.role === 'assistant' && m.ts === turnTs))
+          return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
+        })
+      }
       for await (const chunk of streamChat(
         next,
         image ?? undefined,
@@ -1223,18 +1236,18 @@ export default function ChatPanel({
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
         feedSpeech(chunk) // the mouth speaks the reply as it streams
-        // FUNCTIONAL updater, not a snapshot (Jul 25): with a fixed [...next, ...], a
-        // VOICE transcript arriving during the written turn was overwritten by
-        // the next update and disappeared from the chat. We keep any message added
-        // meanwhile and only replace/add the turn's in-progress reply.
-        setMessages((cur) => {
-          const base = cur.length >= next.length && cur.slice(0, next.length).every((m, i) => m === next[i])
-            ? cur
-            : next
-          const rest = base.slice(next.length).filter((m) => !(m.role === 'assistant' && m.ts === turnTs))
-          return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
-        })
+        watchdogBeat('creier') // măsoară pauza față de server (diagnostic blocaj)
+        // THROTTLING (11 aug): re-randăm la cel mult ~20/s, nu la fiecare token —
+        // firul principal nu se mai sufocă pe răspunsuri lungi. Conținutul complet
+        // e garantat de flush-ul final de după buclă. Updater FUNCȚIONAL (Jul 25):
+        // un mesaj sosit între timp (transcript vocal) nu dispare.
+        const acum = performance.now()
+        if (acum - ultimulFlush >= 50) {
+          ultimulFlush = acum
+          flushMesaje()
+        }
       }
+      flushMesaje() // FLUSH FINAL — garantează conținutul complet al răspunsului
       // The LAST piece of the reply (it may end without a terminator) — the
       // mouth says it too, then nothing is left unsaid.
       if (mouth && speechBuf.trim()) {
@@ -1345,6 +1358,7 @@ export default function ChatPanel({
         }
       }
     } finally {
+      watchdogExit('creier') // verdictul turei (fir principal vs. server) în consolă
       // BARGE-IN (full-duplex): if this turn was REPLACED by a new one,
       // `abortRef` already points at the new turn — do NOT reset its "working"
       // flags (that would clobber them). Only the STILL-current turn cleans itself up.
