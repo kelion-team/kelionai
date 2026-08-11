@@ -142,6 +142,8 @@ export interface Strings {
   apelConectat: string
   apelNotaFaza2: string
   apelInchide: string
+  /** Anunțul vocal la apel primit — {name} se înlocuiește cu numele apelantului. */
+  apelAnunt: string
   /** The send button while a turn is running — sending INTERRUPTS (Jul 13 barge-in). */
   sendInterrupts: string
   attRemove: string
@@ -383,6 +385,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     apelConectat: 'Connected',
     apelNotaFaza2: 'Speak — I translate live',
     apelInchide: 'Hang up',
+    apelAnunt: '{name} is calling. Say answer or decline.',
     voiceVolume: 'Kelion’s voice volume',
     sendInterrupts: 'Kelion is answering — send now and your message replaces the current answer',
     attRemove: 'Remove attachment',
@@ -593,6 +596,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     apelConectat: 'Conectat',
     apelNotaFaza2: 'Vorbește — traduc live',
     apelInchide: 'Închide',
+    apelAnunt: 'Te sună {name}. Spune „răspunde" sau „refuză".',
     voiceVolume: 'Volumul vocii lui Kelion',
     sendInterrupts: 'Kelion răspunde — trimite acum și mesajul tău înlocuiește răspunsul curent',
     attRemove: 'Scoate atașamentul',
@@ -773,6 +777,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     apelConectat: 'Conectado',
     apelNotaFaza2: 'Habla — traduzco en directo',
     apelInchide: 'Colgar',
+    apelAnunt: 'Te llama {name}. Di responder o rechazar.',
     voiceVolume: 'Volumen de la voz de Kelion',
     sendInterrupts: 'Kelion está respondiendo — envía ahora y tu mensaje reemplazará la respuesta actual',
     attRemove: 'Quitar archivo adjunto',
@@ -937,6 +942,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     apelConectat: 'Connecté',
     apelNotaFaza2: 'Parle — je traduis en direct',
     apelInchide: 'Raccrocher',
+    apelAnunt: '{name} t’appelle. Dis répondre ou refuser.',
     voiceVolume: 'Volume de la voix de Kelion',
     sendInterrupts: 'Kelion répond — envoyez maintenant et votre message remplacera la réponse actuelle',
     attRemove: 'Supprimer la pièce jointe',
@@ -1101,6 +1107,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     apelConectat: 'Verbunden',
     apelNotaFaza2: 'Sprich — ich übersetze live',
     apelInchide: 'Auflegen',
+    apelAnunt: '{name} ruft an. Sag annehmen oder ablehnen.',
     voiceVolume: 'Kelions Sprachlautstärke',
     sendInterrupts: 'Kelion antwortet — jetzt senden und deine Nachricht ersetzt die aktuelle Antwort',
     attRemove: 'Anhang entfernen',
@@ -1265,6 +1272,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     apelConectat: 'Connesso',
     apelNotaFaza2: 'Parla — traduco dal vivo',
     apelInchide: 'Riaggancia',
+    apelAnunt: 'Ti chiama {name}. Di rispondi o rifiuta.',
     voiceVolume: 'Volume della voce di Kelion',
     sendInterrupts: 'Kelion sta rispondendo — invia ora e il tuo messaggio sostituirà la risposta attuale',
     attRemove: 'Rimuovi allegato',
@@ -1429,6 +1437,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     apelConectat: 'Ligado',
     apelNotaFaza2: 'Fala — traduzo ao vivo',
     apelInchide: 'Desligar',
+    apelAnunt: '{name} está a ligar. Diz atender ou recusar.',
     voiceVolume: 'Volume da voz de Kelion',
     sendInterrupts: 'Kelion está respondendo — envie agora e sua mensagem substituirá a resposta atual',
     attRemove: 'Remover anexo',
