@@ -6,9 +6,15 @@
 // FAZA 1: sunat + acceptă/refuză + conectat + închide. FAZA 2 (audio + traducere)
 // se va releъa tot pe socketul ăsta.
 
+import { playVoice } from './audioIO'
+import { pornesteCapturaApel, type CapturaApel } from './apelMic'
+
 let ws: WebSocket | null = null
 let pornit = false
 let reconnectTimer: number | null = null
+// FAZA 2: apelul în care ești ACUM + captura microfonului cât e conectat.
+let apelCurent: string | null = null
+let captura: CapturaApel | null = null
 
 function urlWs(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -19,7 +25,35 @@ function emite(nume: string, detail: unknown): void {
   window.dispatchEvent(new CustomEvent(nume, { detail }))
 }
 
-function laMesaj(m: { type?: string; callId?: string; from?: unknown; cu?: unknown; motiv?: string }): void {
+// FAZA 2: cât apelul e conectat, ascultăm microfonul și trimitem frazele la server
+// pentru traducere. Suspendarea vocii cu Kelion se face în ChatPanel (pe conectat),
+// ca să nu concureze două microfoane.
+async function pornesteMic(callId: string): Promise<void> {
+  if (captura) return
+  captura = await pornesteCapturaApel(
+    (audioB64, mime) => {
+      if (apelCurent === callId) trimite({ type: 'vorbire', callId, audio: audioB64, mime })
+    },
+    () => {
+      /* microfon indisponibil — măcar auzi ce spune celălalt (tradus) */
+    },
+  )
+}
+function opresteMic(): void {
+  captura?.opreste()
+  captura = null
+}
+
+function laMesaj(m: {
+  type?: string
+  callId?: string
+  from?: unknown
+  cu?: unknown
+  motiv?: string
+  text?: string
+  audio?: string
+  de_la?: string
+}): void {
   switch (m.type) {
     case 'gata':
       break // prezența e activă
@@ -28,13 +62,29 @@ function laMesaj(m: { type?: string; callId?: string; from?: unknown; cu?: unkno
       emite('kelion:apel-intra', { callId: m.callId, from: m.from })
       break
     case 'accepted':
+      apelCurent = m.callId ?? null
+      if (m.callId) void pornesteMic(m.callId) // Faza 2: pornește captura vocii
       emite('kelion:apel-stare', { stare: 'conectat', callId: m.callId, cu: m.cu })
       break
     case 'declined':
+      if (m.callId === apelCurent) {
+        opresteMic()
+        apelCurent = null
+      }
       emite('kelion:apel-stare', { stare: 'refuzat', callId: m.callId })
       break
     case 'hangup':
+      if (m.callId === apelCurent) {
+        opresteMic()
+        apelCurent = null
+      }
       emite('kelion:apel-stare', { stare: 'inchis', callId: m.callId, motiv: m.motiv })
+      break
+    case 'tradus':
+      // Ce a spus celălalt, TRADUS în limba mea: îl aud (vocea Chirp) + îl văd
+      // (subtitrare). Faza 2 — inima messenger-ului.
+      if (m.audio) playVoice(m.audio)
+      emite('kelion:apel-tradus', { callId: m.callId, text: m.text, de_la: m.de_la })
       break
     default:
       break
@@ -111,14 +161,21 @@ export function acceptaApel(callId: string): void {
 export function refuzaApel(callId: string): void {
   trimite({ type: 'decline', callId })
 }
-/** Oricare parte închide apelul. */
+/** Oricare parte închide apelul. Serverul anunță DOAR cealaltă parte, deci cel
+ *  care închide își oprește singur microfonul + starea local. */
 export function inchideApel(callId: string): void {
   trimite({ type: 'hangup', callId })
+  if (callId === apelCurent) {
+    opresteMic()
+    apelCurent = null
+  }
 }
 
 /** Închide canalul de prezență (la delogare). */
 export function oprestePrezentaApel(): void {
   pornit = false
+  opresteMic()
+  apelCurent = null
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer)
     reconnectTimer = null

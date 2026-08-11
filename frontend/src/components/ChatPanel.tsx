@@ -2063,6 +2063,31 @@ export default function ChatPanel({
     }
   }, [])
 
+  // MESSENGER — VOCEA CU KELION SE SUSPENDĂ CÂT VORBEȘTI CU OMUL (Faza 2). Când
+  // un apel se CONECTEАZĂ, oprim microfonul/sesiunea Kelion (altfel două microfoane
+  // s-ar bate, iar Kelion ar „auzi" conversația și ar răspunde). Captura apelului
+  // (lib/apelMic) preia microfonul. La ÎNCHIDEREA apelului, revenim la vocea Kelion.
+  useEffect(() => {
+    const laApel = (e: Event): void => {
+      const d = (e as CustomEvent).detail as { stare?: string }
+      if (d?.stare === 'conectat') {
+        micManualOffRef.current = true // blochează re-armarea automată a urechii Kelion
+        vlRef.current?.inchide()
+        vlRef.current = null
+        micRef.current?.stop()
+        micRef.current = null
+        setListening(false)
+        stopVoice()
+      } else if (d?.stare === 'inchis' || d?.stare === 'refuzat') {
+        // Apelul s-a terminat → readucem vocea cu Kelion (dacă nu era oprită manual).
+        micManualOffRef.current = false
+        void ensureMicRef.current()
+      }
+    }
+    window.addEventListener('kelion:apel-stare', laApel)
+    return () => window.removeEventListener('kelion:apel-stare', laApel)
+  }, [])
+
   // ULTRA-FAST FULL-DUPLEX STREAMING FOR EVERYONE, THE SAME (Adrian, Jul 14: "audio
   // full duplex streaming ultra fast for everyone, now; everyone equally fast").
   // REMOVED the admin-only LiveKit detour: it entered the LiveKit room ALONE and stopped

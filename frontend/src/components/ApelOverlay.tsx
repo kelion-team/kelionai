@@ -35,6 +35,8 @@ export default function ApelOverlay({ lang }: { readonly lang: Lang }): React.Re
   const t = strings(lang)
   const [intra, setIntra] = useState<Intra | null>(null)
   const [apel, setApel] = useState<Ongoing | null>(null)
+  // FAZA 2: ultima replică a celuilalt, TRADUSĂ în limba mea (subtitrare live).
+  const [subtitrare, setSubtitrare] = useState('')
 
   useEffect(() => {
     const laIntra = (e: Event): void => {
@@ -53,13 +55,20 @@ export default function ApelOverlay({ lang }: { readonly lang: Lang }): React.Re
         // Închide orice apel/invitație cu acest id (sau tot, dacă nu vine id).
         setApel((a) => (!a || !d.callId || a.callId === d.callId ? null : a))
         setIntra((i) => (!i || !d.callId || i.callId === d.callId ? null : i))
+        setSubtitrare('')
       }
+    }
+    const laTradus = (e: Event): void => {
+      const d = (e as CustomEvent).detail as { text?: string }
+      if (d?.text) setSubtitrare(d.text)
     }
     window.addEventListener('kelion:apel-intra', laIntra)
     window.addEventListener('kelion:apel-stare', laStare)
+    window.addEventListener('kelion:apel-tradus', laTradus)
     return () => {
       window.removeEventListener('kelion:apel-intra', laIntra)
       window.removeEventListener('kelion:apel-stare', laStare)
+      window.removeEventListener('kelion:apel-tradus', laTradus)
     }
   }, [])
 
@@ -113,7 +122,12 @@ export default function ApelOverlay({ lang }: { readonly lang: Lang }): React.Re
         <p className="apel-sub">
           {apel?.stare === 'conectat' ? t.apelConectat : `${t.apelSunPe}…`}
         </p>
-        {apel?.stare === 'conectat' && <p className="apel-nota">{t.apelNotaFaza2}</p>}
+        {apel?.stare === 'conectat' &&
+          (subtitrare ? (
+            <p className="apel-subtitrare">{subtitrare}</p>
+          ) : (
+            <p className="apel-nota">{t.apelNotaFaza2}</p>
+          ))}
         <div className="apel-actiuni">
           <button
             type="button"

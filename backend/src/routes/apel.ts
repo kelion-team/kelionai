@@ -8,6 +8,7 @@ import {
   seteazaGeneratorId,
   type ConexiuneApel,
 } from '../services/apel.js'
+import { traduVorbire } from '../services/apelTraducere.js'
 
 // ── MESSENGER KELION↔KELION — WebSocket-ul de prezență + semnalizare (Faza 1) ────
 // Fiecare user logat ține deschis /api/apel cât e în aplicație (ca să POATĂ fi
@@ -48,6 +49,12 @@ export async function apelRoutes(app: FastifyInstance): Promise<void> {
       try {
         m = JSON.parse(String(data))
       } catch {
+        return
+      }
+      // FAZA 2: o frază rostită → traducere live la celălalt (async, nu blochează
+      // semnalizarea). Restul (accept/refuz/închide) rămâne pe calea pură.
+      if (m && typeof m === 'object' && (m as { type?: unknown }).type === 'vorbire') {
+        void traduVorbire(email, m)
         return
       }
       gestioneazaMesaj(email, m)
