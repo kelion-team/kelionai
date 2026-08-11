@@ -135,6 +135,34 @@ export function curataSemne(puncte: unknown): SemnGrafic[] {
   return out
 }
 
+// ── ZONE DE PREȚ (10 aug, ownerul: „funcții utile ca să arate și explice vizibil
+// pe grafice") ────────────────────────────────────────────────────────────────
+// Pe lângă pointerii-linie, Kelion poate marca o ZONĂ între două prețuri (o bandă:
+// „zona de acumulare", „suportul 63.000–63.500"). Ancorată pe PREȚ → solidă. Se
+// desenează ca două linii care mărginesc banda + eticheta. PURĂ și testată.
+export interface ZonaGrafic {
+  jos: number
+  sus: number
+  tip: string
+  text: string
+}
+export function curataZone(zone: unknown): ZonaGrafic[] {
+  const arr = Array.isArray(zone) ? zone : []
+  const out: ZonaGrafic[] = []
+  for (const z of arr) {
+    const o = (z ?? {}) as { pret1?: unknown; pret2?: unknown; tip?: unknown; text?: unknown }
+    const a = Number(o.pret1)
+    const b = Number(o.pret2)
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) continue
+    const tipBrut = String(o.tip ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    const tip = TIPURI_SEMN.has(tipBrut) ? tipBrut : 'nota'
+    const text = String(o.text ?? '').trim().slice(0, 60)
+    out.push({ jos: Math.min(a, b), sus: Math.max(a, b), tip, text })
+    if (out.length >= 6) break
+  }
+  return out
+}
+
 /** Instrucțiunea comună prin care agentul își face nivelurile DESENABILE. */
 const CERE_NIVELURI =
   `\nLA FINAL, OBLIGATORIU, pe un rând separat, scrie nivelurile tale numerice în formatul exact: ` +
@@ -467,6 +495,25 @@ function paginaTranzactii(): string {
      if(serie) semnele.push(serie.createPriceLine({price:pr,color:cul,lineWidth:2,lineStyle:0,axisLabelVisible:true,title:et}));
    }
  }
+ // ── ZONE (benzi de preț): banda dintre două prețuri, mărginită de două linii
+ // colorate întrerupte + eticheta pe linia de sus. Ținute separat, curățate la
+ // schimbarea simbolului. „Zona de acumulare / suportul 63.000–63.500".
+ var zonele=[];
+ function aratZone(lista){
+   var i;
+   if(serie){ for(i=0;i<zonele.length;i++){ try{serie.removePriceLine(zonele[i]);}catch(e){} } }
+   zonele=[];
+   if(!lista||!lista.length) return;
+   for(i=0;i<lista.length;i++){
+     var z=lista[i]||{}, jos=Number(z.jos), sus=Number(z.sus);
+     if(!isFinite(jos)||!isFinite(sus)||jos<=0||sus<=0) continue;
+     var cul=culoareSemn(z.tip), et=('▭ '+String(z.text||z.tip||'zonă')).slice(0,44);
+     if(serie){
+       zonele.push(serie.createPriceLine({price:sus,color:cul,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:et}));
+       zonele.push(serie.createPriceLine({price:jos,color:cul,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'▭'}));
+     }
+   }
+ }
 
  // ── Datele reale (poll 10s): grafic + preț + sursă; eroarea se SPUNE în status ─
  function marcheazaIntervale(){
@@ -598,7 +645,7 @@ function paginaTranzactii(): string {
    var sim=s.value.toUpperCase().trim();
    if(!sim){ s.focus(); return; }
    s.value=sim;
-   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); aratSemne([]); } // nivelurile/pointerii vechi ar minți pe alt simbol
+   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); aratSemne([]); aratZone([]); } // nivelurile/pointerii/zonele vechi ar minți pe alt simbol
    marcheazaChips();
    if(primaIncarcare){ arataSchelet('se încarcă '+sim+' ('+interval+')…'); stare('gri','încarc '+sim+'…'); }
    if(ceas) clearInterval(ceas);
@@ -718,8 +765,9 @@ function paginaTranzactii(): string {
      if(!acelasiSimbol) return; // pe alt simbol ar minți
      aratNiveluri(d.date.lista||[]);
    } else if(d.kelion==='semne'){
-     if(!acelasiSimbol) return; // pointerii pe alt simbol ar minți
+     if(!acelasiSimbol) return; // pointerii/zonele pe alt simbol ar minți
      aratSemne(d.date.lista||[]);
+     aratZone(d.date.zone||[]);
    }
  });
 
