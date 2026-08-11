@@ -10,6 +10,23 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **11 aug 2026 — MODUL MAȘINĂ livrat (de verificat live) + MESSENGER Kelion↔Kelion (NOU, de făcut).**
+> (1) **Modul mașină** (voce-first, legislație auto): buton 🚗 (activare manuală),
+> strat Jarvis (glob audio-reactiv pe vocea reală a lui Kelion), `carMode` →
+> creier (răspuns SCURT, spus, fără suprafețe vizuale; muzică/radio doar audio),
+> suprimarea suprafețelor în `handleControl`, avatarul 3D demontat la volan. Porți
+> verzi (tsc 0 · 1135 teste · build · jscpd 0 · sintaxă 0). **DE TĂIAT doar după
+> verificarea LIVE** (🚗 deschide stratul; Kelion răspunde cu vocea, nu deschide
+> monitor/hărți; ✕ iese). Pe drum s-a reparat o poartă `jscpd` ROȘIE pe master
+> (clona LandingAvatar↔StageAvatar din #995 → extras `AvatarScene`).
+> (2) **NOU, DE FĂCUT — Messenger Kelion↔Kelion** (owner, 11 aug, spec completă):
+> „apelează-l pe user X" → se creează un canal full-duplex SECURIZAT între 2
+> utilizatori Kelion; vorbim audio prin internet; TRADUCĂTOR LIVE prin Kelion (eu
+> vorbesc RO, celălalt aude în limba lui și invers); cu posibilitatea de a ÎNCHIDE
+> oricând apelul. Necesită: prezență/directory de useri online, unealtă de
+> inițiere apel (creierul), semnalizare (WebSocket pe backend), WebRTC peer audio
+> P2P, lanț STT→traducere→TTS pe ambele direcții, hangup. NEÎNCEPUT.
+>
 > **10 aug 2026 (după-amiaza) — „CHATUL PRĂJIT", GĂSIT CU AGENȚII + REPARAT.**
 > Ownerul: „iar ai prăjit ceva la chat, trimite iar toți agenții și repară." Sweep
 > cu 5 vânători + verificare adversarială. Cauza (confirmată, afectează chatul

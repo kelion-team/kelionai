@@ -60,6 +60,8 @@ import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, emiteTakeov
 import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
+import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
+import JarvisOrb from './JarvisOrb'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
 // builder) translated into the REAL clips from the RPM library — the skeleton
@@ -398,6 +400,24 @@ export default function ChatPanel({
     // Delivery receipt: the server's first frame arrived — the message got there.
     // (No separate UI: the user text already shows ONCE in the single band below.)
     if (c.receipt) return
+    // MODUL MAȘINĂ (Adrian, 11 aug: „capabilitățile toate dar afișare pentru auto
+    // conform legislației"). La volan, chiar dacă creierul încearcă să deschidă o
+    // suprafață vizuală (hartă/video/document/card/monitor/grafic/imagine/tab),
+    // NU o deschidem — răspunsul se AUDE. Lăsăm să treacă DOAR ce ține de audio,
+    // voce și sistem (vocea lui Kelion, transcriptul, decizia de tăcere, limba,
+    // comenzi de cameră/ecran, gesturi). Plasă de siguranță peste blocul de prompt
+    // „CAR MODE" din backend — dacă unul scapă, celălalt prinde.
+    if (isCarMode()) {
+      const permisLaVolan =
+        !!c.audio ||
+        c.heard !== undefined ||
+        c.ignored === true ||
+        !!c.lang ||
+        !!c.device ||
+        !!c.gest ||
+        !!c.gesture
+      if (!permisLaVolan) return // suprafață vizuală — nu se deschide la volan
+    }
     // GESTURE ON COMMAND (Adrian, Jul 11: "commanded movements for everything I want him
     // to do"): the brain put [GEST name] in the reply → the server turned it
     // into the {gest} frame → the movement direction (AvatarModel) plays the clip once.
@@ -1232,6 +1252,10 @@ export default function ChatPanel({
         // VOCE AMBIENTALĂ: creierul unic decide singur, din audio, dacă i se vorbea
         // (altfel tace — {ignored}). Doar pe turele vocale.
         isVoiceTurn || undefined,
+        // MODUL MAȘINĂ (11 aug): la volan, creierul răspunde SCURT, spus, fără să
+        // deschidă suprafețe vizuale — legislația auto. Frame-urile vizuale sunt
+        // suprimate și în handleControl (jos), ca plasă de siguranță.
+        isCarMode() || undefined,
       )) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
@@ -2455,6 +2479,10 @@ export default function ChatPanel({
   const monitorBusy = useSyncExternalStore(subscribeWorkspace, isMonitorWorking)
   // The REAL latency measured in the browser — shown as proof, not thrown away.
   const realLatency = useSyncExternalStore(subscribeRealLatency, getRealLatency)
+  // MODUL MAȘINĂ (Adrian, 11 aug): la volan se arată stratul Jarvis (voce-first),
+  // nu chatul obișnuit. Se abonează la store-ul de mașină ca să re-randeze la
+  // pornire/oprire; toată logica de voce/chat de dedesubt rămâne neatinsă.
+  const carOn = useSyncExternalStore(subscribeCarMode, isCarMode)
   const monitorMode = wsOpen || monitorBusy
   // Show the CURRENT exchange in writing: the user's request (so he sees it
   // arrived correctly the instant he types) AND Kelion's reply, which updates
@@ -2586,6 +2614,20 @@ export default function ChatPanel({
 
     return cleaned
   }
+  // BUTONUL DE MICROFON — o SINGURĂ definiție, folosită și în compozitor și în
+  // stratul de mașină (fără cod duplicat, poarta jscpd). Diferă doar clasa CSS;
+  // starea (listening), acțiunea (toggleMic) și eticheta sunt aceleași peste tot.
+  const micButton = (cls: string) => (
+    <button
+      type="button"
+      className={`${cls} ${listening ? 'live' : ''}`}
+      onClick={toggleMic}
+      aria-label={listening ? t.micStop : t.micTalk}
+      title={listening ? t.micStop : t.micTalk}
+    >
+      {listening ? '●' : '🎤'}
+    </button>
+  )
   const hint = t.chatHint
   // The right-hand button concerns ONLY the WRITTEN chat. You have something to send (text or
   // attached file) → it's active. Empty field → the chat is AUDIO (the microphone is always
@@ -2603,6 +2645,34 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
+      {/* MODUL MAȘINĂ (Adrian, 11 aug) — strat full-screen voce-first pentru volan.
+      Glob Jarvis care pulsează pe vocea REALĂ a lui Kelion, un rând MARE cu
+      ultima întrebare + răspunsul (spus, nu afișat), un microfon mare și ieșire.
+      Fără avatar 3D, fără monitor, fără carduri — legislația auto. Chatul/vocea
+      de dedesubt rămân montate și funcționale; aici doar se ARATĂ altfel. */}
+      {carOn && (
+        <div className="car-mode" role="dialog" aria-label={t.carMode}>
+          <JarvisOrb />
+          <button
+            type="button"
+            className="car-exit"
+            onClick={() => setCarMode(false)}
+            aria-label={t.carExit}
+            title={t.carExit}
+          >
+            ✕
+          </button>
+          <div className="car-talk">
+            {listening && (heard || lastUser?.content) ? (
+              <p className="car-heard">{(heard || lastUser?.content || '').slice(0, 200)}</p>
+            ) : null}
+            <p className="car-reply">
+              {cleanMsg(lastAssistant?.content ?? '') || t.carHint}
+            </p>
+          </div>
+          {micButton('car-mic')}
+        </div>
+      )}
       {/* THE CONVERSATION, VISIBLE (Adrian, Aug 1: „the reply must reach the
       chat" — bubbles: you on the right, Kelion on the left, streaming live,
       auto-scroll). ONLY THE LAST EXCHANGE SHOWS (Adrian, Aug 1: „trebuie doar
@@ -2864,15 +2934,7 @@ export default function ChatPanel({
             }}
             placeholder={t.chatPlaceholder}
           />
-          <button
-            type="button"
-            className={`composer-mic ${listening ? 'live' : ''}`}
-            onClick={toggleMic}
-            aria-label={listening ? t.micStop : t.micTalk}
-            title={listening ? t.micStop : t.micTalk}
-          >
-            {listening ? '●' : '🎤'}
-          </button>
+          {micButton('composer-mic')}
           {/* VOLUMUL VOCII — ASCUNS din compozitor (Adrian, 6 aug: „ascunde-l că
           nu-și are rostul aici"). Păstrăm starea și logica (volumul persistat se
           aplică în continuare la redare prin getVoiceVolume/setVoiceVolume), doar

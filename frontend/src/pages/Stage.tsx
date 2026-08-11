@@ -33,6 +33,7 @@ import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
 import { currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
+import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 
 // Avatarul 3D (three.js + @react-three, ≈1 MB) — încărcat leneș, ca interfața
 // aplicației să apară instant; se strecoară după (StageAvatar are AvatarLoading).
@@ -794,6 +795,10 @@ export default function Stage({ user }: { user: User }) {
   // set by the promo pipeline; falls back to the timestamp name.
   const recNameRef = useRef<string | null>(null)
   const ws = useSyncExternalStore(subscribeWorkspace, getWorkspace)
+  // MODUL MAȘINĂ (Adrian, 11 aug): la volan, stratul Jarvis (din ChatPanel) acoperă
+  // ecranul, iar avatarul 3D se DEMONTEAZĂ (three.js iese din memorie — „consumă cât
+  // China"). Butonul 🚗 din bară pornește modul; ieșirea se face din stratul de mașină.
+  const carOn = useSyncExternalStore(subscribeCarMode, isCarMode)
   // IEȘIREA DIN CENTRUL DE TRANZACȚIONARE (9 aug, ownerul: „buton ieșire nu
   // merge"): pagina din iframe nu-și poate închide singură tabul — trimite
   // mesaj, iar aici tabul se închide ca la apăsarea ×-ului.
@@ -1203,10 +1208,14 @@ export default function Stage({ user }: { user: User }) {
       4.6 → the frame covers −1.93…+1.43. The final size is decided by Adrian
       with a double-click (the layout mode below). */}
       {/* Avatarul 3D + AvatarLoading trăiesc în chunk-ul lazy StageAvatar —
-          three.js nu mai e în calea critică; interfața apare instant. */}
-      <Suspense fallback={null}>
-        <StageAvatar monitorOn={monitorOn} />
-      </Suspense>
+          three.js nu mai e în calea critică; interfața apare instant. La volan
+          (carOn) NU se montează deloc: stratul Jarvis îl acoperă oricum, iar
+          three.js iese din memorie (economie reală de baterie/GPU). */}
+      {!carOn && (
+        <Suspense fallback={null}>
+          <StageAvatar monitorOn={monitorOn} />
+        </Suspense>
+      )}
       </div>
 
       <header className="topbar">
@@ -1426,6 +1435,18 @@ export default function Stage({ user }: { user: User }) {
             aria-label={theme === 'light' ? t.themeToDark : t.themeToLight}
           >
             {theme === 'light' ? '☾' : '☀'}
+          </button>
+          {/* MODUL MAȘINĂ (Adrian, 11 aug: „trebuie buton activare în mașină, că
+              nu tot timpul vrei aplicația să pornească automat") — pornire MANUALĂ,
+              nu automată. Deschide stratul Jarvis voce-first (ieșirea e din el). */}
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setCarMode(true)}
+            title={t.carMode}
+            aria-label={t.carMode}
+          >
+            🚗
           </button>
           {/* MANUALUL, VIZIBIL ȘI DUPĂ LOGARE (10 aug, ownerul: „nu se afișează
               manualul în engleză sau în limba selectată"): până azi doar pagina
