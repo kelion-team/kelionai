@@ -93,3 +93,38 @@ export async function traduVorbire(deLaEmail: string, msg: unknown): Promise<voi
   // 3) La B: subtitrarea (în limba lui) + vocea. `de_la` = numele celui care a vorbit.
   trimiteCatre(catre, { type: 'tradus', callId, text, audio: audioB64, de_la: numeDe })
 }
+
+// ── HANDS-FREE: „SPUI RĂSPUNDE ȘI SE FACE LEGĂTURA" (Adrian) ────────────────────
+// Cât sună un apel, ce spune cel sunat se clasifică din voce: ANSWER / DECLINE /
+// NONE. Independent de limbă (Gemini decide din audio), ca să meargă „răspunde",
+// „da", „answer", „pronto"… fără listă de cuvinte pe fiecare limbă. Doar în timpul
+// sonorului; costă un apel Gemini pe frază (mic — o vorbă), contorizat.
+export async function intentApel(email: string, audioB64: string, mime: string): Promise<'answer' | 'decline' | 'none'> {
+  if (!audioB64) return 'none'
+  try {
+    const mesaje: OrMessage[] = [
+      {
+        role: 'system',
+        content:
+          `An incoming call is ringing. The audio is the person deciding whether to take the call. ` +
+          `Reply with EXACTLY one word: ANSWER (they want to answer/accept — e.g. "răspunde", "da", ` +
+          `"answer", "yes", "pronto", "hallo", "accept"), DECLINE (they refuse — e.g. "refuză", "nu", ` +
+          `"no", "decline", "later"), or NONE (unclear, silence, background noise, or unrelated speech). ` +
+          `Output only that one word.`,
+      },
+      {
+        role: 'user',
+        content: [{ type: 'audio_url', audio_url: { url: `data:${mime || 'audio/webm'};base64,${audioB64}` } }],
+      },
+    ]
+    const r = await geminiDirectChat(config.geminiModel, mesaje)
+    if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
+    const t = (r.text || '').trim().toUpperCase()
+    if (t.includes('ANSWER')) return 'answer'
+    if (t.includes('DECLINE')) return 'decline'
+    return 'none'
+  } catch {
+    return 'none'
+  }
+}
+

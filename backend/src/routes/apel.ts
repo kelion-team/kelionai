@@ -8,7 +8,7 @@ import {
   seteazaGeneratorId,
   type ConexiuneApel,
 } from '../services/apel.js'
-import { traduVorbire } from '../services/apelTraducere.js'
+import { traduVorbire, intentApel } from '../services/apelTraducere.js'
 
 // ── MESSENGER KELION↔KELION — WebSocket-ul de prezență + semnalizare (Faza 1) ────
 // Fiecare user logat ține deschis /api/apel cât e în aplicație (ca să POATĂ fi
@@ -53,8 +53,23 @@ export async function apelRoutes(app: FastifyInstance): Promise<void> {
       }
       // FAZA 2: o frază rostită → traducere live la celălalt (async, nu blochează
       // semnalizarea). Restul (accept/refuz/închide) rămâne pe calea pură.
-      if (m && typeof m === 'object' && (m as { type?: unknown }).type === 'vorbire') {
+      const tip = m && typeof m === 'object' ? (m as { type?: unknown }).type : undefined
+      if (tip === 'vorbire') {
         void traduVorbire(email, m)
+        return
+      }
+      // HANDS-FREE: cât sună, ce spune cel sunat („răspunde"/„refuză") decide apelul.
+      if (tip === 'comanda-apel') {
+        const mm = m as { callId?: unknown; audio?: unknown; mime?: unknown }
+        const callId = typeof mm.callId === 'string' ? mm.callId : ''
+        const audio = typeof mm.audio === 'string' ? mm.audio : ''
+        const mime = typeof mm.mime === 'string' ? mm.mime : 'audio/webm'
+        if (callId && audio) {
+          void intentApel(email, audio, mime).then((intent) => {
+            if (intent === 'answer') gestioneazaMesaj(email, { type: 'accept', callId })
+            else if (intent === 'decline') gestioneazaMesaj(email, { type: 'decline', callId })
+          })
+        }
         return
       }
       gestioneazaMesaj(email, m)
