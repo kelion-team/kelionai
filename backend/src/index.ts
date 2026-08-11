@@ -410,10 +410,8 @@ try {
   startPlatiEmail()
   // KELION GETS TO WORK BY ITSELF: every hour it takes the next undone row
   // from RAMAS-DE-FACUT.md and sends it to the builder. Without waiting for
-  // anyone. OPRIT IMPLICIT (11 aug, ordinul ownerului): pornește DOAR cu
-  // `AUTONOMY_ENABLED=1`. Fără el, bucla nu consumă niciun ban (vezi config.ts).
-  if (config.autonomyEnabled) startAutonomie()
-  else console.info('[autonomie] OPRITĂ (AUTONOMY_ENABLED≠1) — bucla autonomă nu pornește, zero cost')
+  // anyone.
+  startAutonomie()
   // Veghea de auto-upgrade a modelului unic (validat, doar Pro mai nou) — decizia
   // permanentă a ownerului „mereu cel mai bun, preluat automat, peste tot".
   startAutoUpgradeModel()

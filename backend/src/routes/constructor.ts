@@ -123,13 +123,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // ── The VPS worker's endpoint (x-bridge-secret auth, like ops/pulse) ─────
   // Adrian's "autonomy pause" stops the constructor too: while paused, no
   // orders are handed to the worker (queued ones wait, they aren't lost).
-  // FRÂNA DE BANI (11 aug): cât `AUTONOMY_ENABLED≠1`, constructorul NU primește
-  // niciun ordin — nici cele deja în coadă — deci agentul de pe VPS iese fără să
-  // cheme Gemini. Zero cost pe cheia ownerului până când PORNEȘTE el explicit.
   app.get('/api/constructor/next', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
-    if (!config.autonomyEnabled || (await isOpsPaused())) return reply.send({ job: null, paused: true })
+    if (await isOpsPaused()) return reply.send({ job: null, paused: true })
     const job = await claimNextBuildJob()
     return reply.send({ job })
   })
