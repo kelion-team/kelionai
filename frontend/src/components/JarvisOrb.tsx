@@ -53,15 +53,26 @@ export default function JarvisOrb(): React.ReactElement {
     const idFluxuri = window.setInterval(conecteaza, 700)
     conecteaza()
 
-    // Dimensiunea reală (retina) — se reașază la resize.
+    // Dimensiunea reală (retina) — se reașază ori de câte ori se schimbă mărimea
+    // containerului, nu doar la `resize`-ul ferestrei. La volan, stratul e randat
+    // prin portal și primește dimensiunea DUPĂ montare (sau la rotirea ecranului);
+    // fără ResizeObserver, globul rămânea 1×1 (punctul mic din colț raportat de
+    // owner). Observatorul îl împrospătează pe ORICE ecran, în orice orientare.
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     const potrivesteMarime = (): void => {
       const r = canvas.getBoundingClientRect()
-      canvas.width = Math.max(1, Math.round(r.width * dpr))
-      canvas.height = Math.max(1, Math.round(r.height * dpr))
+      const w = Math.max(1, Math.round(r.width * dpr))
+      const h = Math.max(1, Math.round(r.height * dpr))
+      if (canvas.width !== w) canvas.width = w
+      if (canvas.height !== h) canvas.height = h
     }
     potrivesteMarime()
     window.addEventListener('resize', potrivesteMarime)
+    let ro: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(potrivesteMarime)
+      ro.observe(canvas)
+    }
 
     let raf = 0
     let faza = 0
@@ -121,6 +132,7 @@ export default function JarvisOrb(): React.ReactElement {
       cancelAnimationFrame(raf)
       window.clearInterval(idFluxuri)
       window.removeEventListener('resize', potrivesteMarime)
+      ro?.disconnect()
       void audio?.close().catch(() => undefined)
     }
   }, [])

@@ -3409,6 +3409,10 @@ rearrange by themselves on the phone. */
   position: fixed;
   inset: 0;
   z-index: 9000;
+  /* Randat prin portal în <body>, deci NU mai moștenește pointer-events:none din
+     `.chat` — dar îl punem explicit, ca butoanele (mic on/off + ✕) să primească
+     mereu clic, orice ar fi deasupra în arbore. */
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3467,9 +3471,18 @@ rearrange by themselves on the phone. */
   line-height: 1.25;
   text-wrap: balance;
 }
-.car-mic {
+/* Comutatorul ON/OFF al vocii full-duplex — buton mare + o etichetă dedesubt care
+   spune starea (Pornește vocea / Ascult — vorbește liber), ca la volan să se
+   citească dintr-o ochire dacă e pornit sau nu. */
+.car-mic-wrap {
   position: relative;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2vh;
+}
+.car-mic {
   flex: 0 0 auto;
   width: clamp(84px, 22vw, 120px);
   height: clamp(84px, 22vw, 120px);
@@ -3485,11 +3498,23 @@ rearrange by themselves on the phone. */
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
 .car-mic:active { transform: scale(0.96); }
+/* PORNIT = ascultă full-duplex → halou albastru-verzui calm (NU roșu de „stop",
+   ca să nu pară că trebuie apăsat ca să vorbești). */
 .car-mic.live {
-  border-color: #ff5d5d;
-  color: #ff5d5d;
-  background: rgba(255, 93, 93, 0.18);
-  animation: rec 1.2s ease-in-out infinite;
+  border-color: #46e0c0;
+  color: #eaf2ff;
+  background: rgba(70, 224, 192, 0.16);
+  animation: carPuls 1.8s ease-in-out infinite;
+}
+.car-mic-label {
+  font-size: clamp(14px, 3.2vw, 19px);
+  color: #9fc2ef;
+  letter-spacing: 0.01em;
+}
+.car-mic.live + .car-mic-label { color: #7be9d2; }
+@keyframes carPuls {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(70, 224, 192, 0.5); }
+  50% { box-shadow: 0 0 22px 7px rgba(70, 224, 192, 0.28); }
 }
 @media (prefers-reduced-motion: reduce) {
   .car-mic.live { animation: none; }
