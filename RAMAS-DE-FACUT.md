@@ -10,6 +10,18 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **11 aug 2026 — REPARAT (de verificat live): vocea live nu ieșea pe Bluetooth/mașină (#1006).**
+> Owner a MĂSURAT: vocea live rămâne pe telefon, nu se duce pe căști/car audio. Critic pentru
+> modul mașină. Cauza (din cod): vocea live ieșea prin bucla WebRTC (AEC), iar audio-ul WebRTC
+> e clasat de Android drept „convorbire" (SCO) → rămâne pe telefon, nu folosește canalul A2DP
+> de muzică al căștilor/mașinii. Fix (`vocalLive.ts`): vocea live iese acum printr-un `<audio>`
+> media alimentat de WebAudio (ca mp3-ul din audioIO.ts, care MERGE pe BT) → urmează ruta de
+> muzică la căști/CarPlay/mașină; bucla WebRTC scoasă; ecoul rămâne pe seama microfonului
+> (echoCancellation). Porți verzi (tsc 0 · build · oxlint 0 · jscpd 0 · sintaxă 0 · teste 15/15).
+> **DE TĂIAT după verificarea LIVE** (pornește vocea live cu căști BT / în mașină → iese pe
+> căști/boxe). Dacă TOT rămâne pe telefon → cauza e „modul convorbire" din microfonul deschis,
+> iar fixul e nativ în APK (audio focus), nu în web — de deschis rând nou atunci.
+>
 > **11 aug 2026 — REPARAT (de verificat live): audio moare când pornești camera pe telefon (#1004).**
 > Ownerul a MĂSURAT pe APK: „i-am zis *porneste camera*, a pornit-o dar a MURIT AUDIO,
 > nu-l mai aud" — și a confirmat că o a doua atingere îl aduce înapoi. Cauza (din cod):
