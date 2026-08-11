@@ -23,15 +23,17 @@
 > (owner, 11 aug): „apelează-l pe X" → canal securizat între 2 useri Kelion; audio
 > prin internet cu TRADUCĂTOR LIVE prin Kelion (eu RO, el în limba lui și invers);
 > închizi oricând; funcțional din chat scris SAU voce, în mașină SAU acasă.
-> **Faza 1 livrată** (semnalizare + interfață): prezență (WS `/api/apel`), unealtă
-> `apeleaza_user` (chat scris + voce), invitație + accept/refuz + conectat +
-> închide, strat global de apel (merge și în modul mașină). Porți verzi (tsc 0 ·
-> 1145 teste, 10 noi pe apel · build · jscpd 0). **DE TĂIAT după verificarea LIVE
-> cu 2 conturi.** **Faza 2, DE FĂCUT:** audio real + traducerea live (mic → STT →
-> traducere → TTS la celălalt, ambele direcții, peste WS-ul deja stabilit; opțional
-> WebRTC P2P pentru audio brut). De adăugat: sonerie/anunț vocal la apel primit
-> (mai ales în mașină, hands-free); listă de contacte/permisiuni (acum se apelează
-> orice user înregistrat, după nume/email — de restrâns pentru intimitate).
+> **Faza 1 + Faza 2 livrate** (de verificat live cu 2 conturi). Faza 1: prezență
+> (WS `/api/apel`), `apeleaza_user` (chat scris + voce), invitație + accept/refuz +
+> conectat + închide, strat global de apel (și în modul mașină). Faza 2: audio real
+> + TRADUCERE LIVE — mic (VAD, pe frază) → Gemini transcrie+traduce în limba
+> celuilalt → Chirp o rostește → subtitrare + voce la destinatar, ambele direcții;
+> vocea cu Kelion se suspendă cât ești în apel. Porți verzi (tsc 0 · **1149 teste**,
+> 14 pe apel/traducere · build · jscpd 0). **DE TĂIAT după verificarea LIVE** (2
+> conturi cu limbi diferite în prefs). **Rămas (opțional):** sonerie/anunț vocal la
+> apel primit (hands-free în mașină); WebRTC P2P pentru audio brut simultan; listă
+> de contacte/permisiuni (acum se apelează orice user înregistrat, după nume/email
+> — de restrâns pentru intimitate); latența e per-frază (interpret pe rând).
 >
 > **10 aug 2026 (după-amiaza) — „CHATUL PRĂJIT", GĂSIT CU AGENȚII + REPARAT.**
 > Ownerul: „iar ai prăjit ceva la chat, trimite iar toți agenții și repară." Sweep

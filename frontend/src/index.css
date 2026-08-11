@@ -3581,6 +3581,15 @@ rearrange by themselves on the phone. */
   font-size: clamp(12px, 2.4vw, 15px);
   color: rgba(150, 180, 220, 0.6);
 }
+/* Subtitrarea live — ce a spus celălalt, tradus în limba mea (Faza 2). */
+.apel-subtitrare {
+  margin: 1vh 0 0;
+  max-width: 24ch;
+  font-size: clamp(16px, 3.6vw, 24px);
+  line-height: 1.3;
+  color: #dfebff;
+  text-wrap: balance;
+}
 .apel-actiuni {
   display: flex;
   gap: clamp(18px, 8vw, 48px);

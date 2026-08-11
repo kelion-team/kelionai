@@ -54,7 +54,13 @@ export function esteOnline(email: string): boolean {
   return !!set && set.size > 0
 }
 
-function trimiteCatre(email: string, mesaj: unknown): number {
+/** Apelul activ după id (Faza 2: pipeline-ul de traducere are nevoie de ambele
+ *  părți ca să afle limba fiecăruia și să relezе rezultatul). */
+export function gasesteApel(callId: string): Apel | undefined {
+  return apeluri.get(callId)
+}
+
+export function trimiteCatre(email: string, mesaj: unknown): number {
   const set = prezenta.get(normalizeaza(email))
   if (!set) return 0
   let n = 0
