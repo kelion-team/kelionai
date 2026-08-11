@@ -403,8 +403,20 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   if (inchis || ws.readyState !== WebSocket.OPEN) return null
 
   try {
+    // PROCESAREA DE SUNET OPRITĂ CA VOCEA SĂ AJUNGĂ PE BLUETOOTH (11 aug, MĂSURAT
+    // de owner: „nu funcționează ieșirea pe bluetooth" — chiar și DUPĂ ce redarea
+    // a trecut pe media/A2DP, #1006). Cauza mai adâncă: pe Android, cât timp
+    // microfonul e deschis CU procesare WebRTC (echoCancellation/noiseSuppression/
+    // autoGainControl), Chrome ține tot dispozitivul în MODE_IN_COMMUNICATION —
+    // iar în modul ăla ORICE ieșire (chiar și media) stă pe telefon / canalul SCO,
+    // NU pe A2DP-ul de muzică al căștilor/mașinii. Oprind procesarea, captura e
+    // brută → mod normal → ieșirea urmează ruta de media pe Bluetooth/CarPlay.
+    // Preț: pe difuzorul telefonului ecoul nu mai e anulat de browser (barge-in
+    // server e oricum OFF); zgomotul de drum nu mai e filtrat pe microfon — dacă
+    // devine problemă în mașină, pasul următor e să reactivăm DOAR noiseSuppression
+    // și să vedem dacă ruta A2DP rezistă. Întâi trebuie ca vocea să AJUNGĂ acolo.
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     })
   } catch {
     urcaEroarea('microfonul nu a fost permis')
