@@ -118,6 +118,22 @@ export interface SemnGrafic {
   text: string
 }
 const TIPURI_SEMN = new Set(['suport', 'rezistenta', 'intrare', 'stop', 'tinta', 'nota'])
+// Helpere comune ale sanitizatorilor (o singură sursă — fără cod duplicat):
+// tipul valid (diacriticele scăpate: rezistență→rezistenta), eticheta tăiată,
+// și cele două prețuri reale (>0) ale unei zone/linii de trend.
+function tipValid(x: unknown): string {
+  const b = String(x ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return TIPURI_SEMN.has(b) ? b : 'nota'
+}
+function eticheta(x: unknown, max = 60): string {
+  return String(x ?? '').trim().slice(0, max)
+}
+function douaPreturi(o: { pret1?: unknown; pret2?: unknown }): { a: number; b: number } | null {
+  const a = Number(o.pret1)
+  const b = Number(o.pret2)
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) return null
+  return { a, b }
+}
 export function curataSemne(puncte: unknown): SemnGrafic[] {
   const arr = Array.isArray(puncte) ? puncte : []
   const out: SemnGrafic[] = []
@@ -125,11 +141,7 @@ export function curataSemne(puncte: unknown): SemnGrafic[] {
     const o = (p ?? {}) as { pret?: unknown; tip?: unknown; text?: unknown }
     const pret = Number(o.pret)
     if (!Number.isFinite(pret) || pret <= 0) continue
-    // Diacriticele se scapă (rezistență→rezistenta, țintă→tinta) ca tipul să prindă.
-    const tipBrut = String(o.tip ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-    const tip = TIPURI_SEMN.has(tipBrut) ? tipBrut : 'nota'
-    const text = String(o.text ?? '').trim().slice(0, 60)
-    out.push({ pret, tip, text })
+    out.push({ pret, tip: tipValid(o.tip), text: eticheta(o.text) })
     if (out.length >= 8) break
   }
   return out
@@ -151,13 +163,9 @@ export function curataZone(zone: unknown): ZonaGrafic[] {
   const out: ZonaGrafic[] = []
   for (const z of arr) {
     const o = (z ?? {}) as { pret1?: unknown; pret2?: unknown; tip?: unknown; text?: unknown }
-    const a = Number(o.pret1)
-    const b = Number(o.pret2)
-    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) continue
-    const tipBrut = String(o.tip ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-    const tip = TIPURI_SEMN.has(tipBrut) ? tipBrut : 'nota'
-    const text = String(o.text ?? '').trim().slice(0, 60)
-    out.push({ jos: Math.min(a, b), sus: Math.max(a, b), tip, text })
+    const pp = douaPreturi(o)
+    if (!pp || pp.a === pp.b) continue // bandă cu grosime 0 n-are sens
+    out.push({ jos: Math.min(pp.a, pp.b), sus: Math.max(pp.a, pp.b), tip: tipValid(o.tip), text: eticheta(o.text) })
     if (out.length >= 6) break
   }
   return out
@@ -178,8 +186,7 @@ export function curataSageti(sageti: unknown): SageataGrafic[] {
     const o = (s ?? {}) as { directie?: unknown; unde?: unknown; text?: unknown }
     const directie = String(o.directie ?? '').toLowerCase() === 'jos' ? 'jos' : 'sus'
     const unde = String(o.unde ?? '').toLowerCase() === 'cursor' ? 'cursor' : 'ultima'
-    const text = String(o.text ?? '').trim().slice(0, 32)
-    out.push({ directie, unde, text })
+    out.push({ directie, unde, text: eticheta(o.text, 32) })
     if (out.length >= 8) break
   }
   return out
@@ -197,10 +204,9 @@ export function curataTrend(trend: unknown): TrendGrafic[] {
   const out: TrendGrafic[] = []
   for (const t of arr) {
     const o = (t ?? {}) as { pret1?: unknown; pret2?: unknown; text?: unknown }
-    const a = Number(o.pret1)
-    const b = Number(o.pret2)
-    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) continue
-    out.push({ pret1: a, pret2: b, text: String(o.text ?? '').trim().slice(0, 60) })
+    const pp = douaPreturi(o)
+    if (!pp) continue
+    out.push({ pret1: pp.a, pret2: pp.b, text: eticheta(o.text) })
     if (out.length >= 2) break
   }
   return out
