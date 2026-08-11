@@ -36,7 +36,15 @@ export interface ChatControl {
   // o linie colorată cu săgeată + eticheta cu vorbele lui Kelion, desenată fix pe
   // preț — „când explică, arată clar pe monitor ce zice". ChatPanel le pasează în
   // iframe-ul Centrului de Tranzacționare, care le desenează.
-  semne?: { simbol: string; lista: { pret: number; tip: string; text: string }[] }
+  semne?: {
+    simbol: string
+    lista: { pret: number; tip: string; text: string }[]
+    // ZONE (benzi de preț), SĂGEȚI (pe lumânări) și TREND (linie prin 2 prețuri) —
+    // desenate de aceeași unealtă arata_pe_grafic, pe același canal.
+    zone?: { jos: number; sus: number; tip: string; text: string }[]
+    sageti?: { directie: string; unde: string; text: string }[]
+    trend?: { pret1: number; pret2: number; text: string }[]
+  }
   // A generated image to show inline in the chat (in addition to the monitor).
   image?: { url: string }
   // A structured skill result to render as a card on the monitor.

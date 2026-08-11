@@ -118,6 +118,22 @@ export interface SemnGrafic {
   text: string
 }
 const TIPURI_SEMN = new Set(['suport', 'rezistenta', 'intrare', 'stop', 'tinta', 'nota'])
+// Helpere comune ale sanitizatorilor (o singură sursă — fără cod duplicat):
+// tipul valid (diacriticele scăpate: rezistență→rezistenta), eticheta tăiată,
+// și cele două prețuri reale (>0) ale unei zone/linii de trend.
+function tipValid(x: unknown): string {
+  const b = String(x ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return TIPURI_SEMN.has(b) ? b : 'nota'
+}
+function eticheta(x: unknown, max = 60): string {
+  return String(x ?? '').trim().slice(0, max)
+}
+function douaPreturi(o: { pret1?: unknown; pret2?: unknown }): { a: number; b: number } | null {
+  const a = Number(o.pret1)
+  const b = Number(o.pret2)
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) return null
+  return { a, b }
+}
 export function curataSemne(puncte: unknown): SemnGrafic[] {
   const arr = Array.isArray(puncte) ? puncte : []
   const out: SemnGrafic[] = []
@@ -125,12 +141,73 @@ export function curataSemne(puncte: unknown): SemnGrafic[] {
     const o = (p ?? {}) as { pret?: unknown; tip?: unknown; text?: unknown }
     const pret = Number(o.pret)
     if (!Number.isFinite(pret) || pret <= 0) continue
-    // Diacriticele se scapă (rezistență→rezistenta, țintă→tinta) ca tipul să prindă.
-    const tipBrut = String(o.tip ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-    const tip = TIPURI_SEMN.has(tipBrut) ? tipBrut : 'nota'
-    const text = String(o.text ?? '').trim().slice(0, 60)
-    out.push({ pret, tip, text })
+    out.push({ pret, tip: tipValid(o.tip), text: eticheta(o.text) })
     if (out.length >= 8) break
+  }
+  return out
+}
+
+// ── ZONE DE PREȚ (10 aug, ownerul: „funcții utile ca să arate și explice vizibil
+// pe grafice") ────────────────────────────────────────────────────────────────
+// Pe lângă pointerii-linie, Kelion poate marca o ZONĂ între două prețuri (o bandă:
+// „zona de acumulare", „suportul 63.000–63.500"). Ancorată pe PREȚ → solidă. Se
+// desenează ca două linii care mărginesc banda + eticheta. PURĂ și testată.
+export interface ZonaGrafic {
+  jos: number
+  sus: number
+  tip: string
+  text: string
+}
+export function curataZone(zone: unknown): ZonaGrafic[] {
+  const arr = Array.isArray(zone) ? zone : []
+  const out: ZonaGrafic[] = []
+  for (const z of arr) {
+    const o = (z ?? {}) as { pret1?: unknown; pret2?: unknown; tip?: unknown; text?: unknown }
+    const pp = douaPreturi(o)
+    if (!pp || pp.a === pp.b) continue // bandă cu grosime 0 n-are sens
+    out.push({ jos: Math.min(pp.a, pp.b), sus: Math.max(pp.a, pp.b), tip: tipValid(o.tip), text: eticheta(o.text) })
+    if (out.length >= 6) break
+  }
+  return out
+}
+
+// ── SĂGEȚI pe lumânări: o săgeată ↑/↓ ancorată pe o lumânare REALĂ (cea de sub
+// cursor sau ultima) + eticheta. Nu ghicim timpul — pagina îl rezolvă din starea
+// ei. PURĂ și testată. */
+export interface SageataGrafic {
+  directie: 'sus' | 'jos'
+  unde: 'cursor' | 'ultima'
+  text: string
+}
+export function curataSageti(sageti: unknown): SageataGrafic[] {
+  const arr = Array.isArray(sageti) ? sageti : []
+  const out: SageataGrafic[] = []
+  for (const s of arr) {
+    const o = (s ?? {}) as { directie?: unknown; unde?: unknown; text?: unknown }
+    const directie = String(o.directie ?? '').toLowerCase() === 'jos' ? 'jos' : 'sus'
+    const unde = String(o.unde ?? '').toLowerCase() === 'cursor' ? 'cursor' : 'ultima'
+    out.push({ directie, unde, text: eticheta(o.text, 32) })
+    if (out.length >= 8) break
+  }
+  return out
+}
+
+// ── LINIE DE TREND: o diagonală prin două prețuri, de la prima la ultima
+// lumânare încărcată. Doar una (cazul obișnuit la explicat). PURĂ și testată. */
+export interface TrendGrafic {
+  pret1: number
+  pret2: number
+  text: string
+}
+export function curataTrend(trend: unknown): TrendGrafic[] {
+  const arr = Array.isArray(trend) ? trend : []
+  const out: TrendGrafic[] = []
+  for (const t of arr) {
+    const o = (t ?? {}) as { pret1?: unknown; pret2?: unknown; text?: unknown }
+    const pp = douaPreturi(o)
+    if (!pp) continue
+    out.push({ pret1: pp.a, pret2: pp.b, text: eticheta(o.text) })
+    if (out.length >= 2) break
   }
   return out
 }
@@ -467,6 +544,57 @@ function paginaTranzactii(): string {
      if(serie) semnele.push(serie.createPriceLine({price:pr,color:cul,lineWidth:2,lineStyle:0,axisLabelVisible:true,title:et}));
    }
  }
+ // ── ZONE (benzi de preț): banda dintre două prețuri, mărginită de două linii
+ // colorate întrerupte + eticheta pe linia de sus. Ținute separat, curățate la
+ // schimbarea simbolului. „Zona de acumulare / suportul 63.000–63.500".
+ var zonele=[];
+ function aratZone(lista){
+   var i;
+   if(serie){ for(i=0;i<zonele.length;i++){ try{serie.removePriceLine(zonele[i]);}catch(e){} } }
+   zonele=[];
+   if(!lista||!lista.length) return;
+   for(i=0;i<lista.length;i++){
+     var z=lista[i]||{}, jos=Number(z.jos), sus=Number(z.sus);
+     if(!isFinite(jos)||!isFinite(sus)||jos<=0||sus<=0) continue;
+     var cul=culoareSemn(z.tip), et=('▭ '+String(z.text||z.tip||'zonă')).slice(0,44);
+     if(serie){
+       zonele.push(serie.createPriceLine({price:sus,color:cul,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:et}));
+       zonele.push(serie.createPriceLine({price:jos,color:cul,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'▭'}));
+     }
+   }
+ }
+
+ // ── SĂGEȚI pe lumânări + LINIE DE TREND (10 aug: „funcții utile ca să arate și
+ // explice vizibil"). Săgeata (createSeriesMarkers) se ancorează pe o lumânare
+ // REALĂ — cea de sub cursor ('cursor') sau ultima ('ultima') — deci nu ghicește
+ // timpul; sus=verde ↑ sub lumânare, jos=roșu ↓ deasupra. Trendul (LineSeries cu
+ // 2 puncte) trece prin două prețuri, de la prima la ultima lumânare încărcată.
+ var timpuri=[], ultimulTimp=null, markeri=null, linTrend=null;
+ function aratSageti(lista){
+   var arr=[], i;
+   for(i=0;i<(lista||[]).length;i++){
+     var sg=lista[i]||{}, t=null;
+     if(sg.unde==='cursor'&&pesteCursor&&pesteCursor.t!=null){ t=(typeof pesteCursor.t==='number')?Math.floor(pesteCursor.t/1000):pesteCursor.t; }
+     else { t=ultimulTimp; }
+     if(t==null) continue;
+     var jos=(sg.directie==='jos');
+     arr.push({time:t,position:jos?'aboveBar':'belowBar',color:jos?'#f87171':'#4ade80',shape:jos?'arrowDown':'arrowUp',text:String(sg.text||'').slice(0,32)});
+   }
+   arr.sort(function(a,b){ return a.time>b.time?1:a.time<b.time?-1:0; });
+   try{
+     if(!serie) return;
+     if(!markeri){ if(LightweightCharts.createSeriesMarkers) markeri=LightweightCharts.createSeriesMarkers(serie,arr); else if(serie.setMarkers) serie.setMarkers(arr); }
+     else markeri.setMarkers(arr);
+   }catch(e){}
+ }
+ function aratTrend(lista){
+   try{ if(!linTrend&&chart) linTrend=chart.addSeries(LightweightCharts.LineSeries,{color:'#eab308',lineWidth:2,lineStyle:0,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false}); }catch(e){}
+   if(!linTrend) return;
+   if(!lista||!lista.length||!timpuri.length){ try{linTrend.setData([]);}catch(e){} return; }
+   var z=lista[0]||{}, a=Number(z.pret1), b=Number(z.pret2);
+   if(!isFinite(a)||!isFinite(b)){ try{linTrend.setData([]);}catch(e){} return; }
+   try{ linTrend.setData([{time:timpuri[0],value:a},{time:timpuri[timpuri.length-1],value:b}]); }catch(e){}
+ }
 
  // ── Datele reale (poll 10s): grafic + preț + sursă; eroarea se SPUNE în status ─
  function marcheazaIntervale(){
@@ -523,6 +651,7 @@ function paginaTranzactii(): string {
        // mediile și volumul (serii de linii) se pot împrospăta oricând.
        if(primaIncarcare||eZilnic||!ws){
          serie.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),open:c.deschis,high:c.maxim,low:c.minim,close:c.inchis}; }));
+         timpuri=j.lumanari.map(function(c){ return Math.floor(c.t/1000); }); ultimulTimp=timpuri.length?timpuri[timpuri.length-1]:null;
          vol.setData(j.lumanari.map(function(c){ return {time:Math.floor(c.t/1000),value:c.volum,color:c.inchis>=c.deschis?CULV_SUS:CULV_JOS}; }));
          var uc=j.lumanari[j.lumanari.length-1];
          if(uc){ ultim.c={open:uc.deschis,high:uc.maxim,low:uc.minim,close:uc.inchis}; ultim.v=uc.volum; }
@@ -575,6 +704,7 @@ function paginaTranzactii(): string {
          }
        } else if(d.e==='kline'&&d.k){
          var k=d.k, tt=Math.floor(k.t/1000);
+         ultimulTimp=tt; if(!timpuri.length||timpuri[timpuri.length-1]!==tt) timpuri.push(tt);
          if(serie) serie.update({time:tt,open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)});
          if(vol) vol.update({time:tt,value:Number(k.v),color:Number(k.c)>=Number(k.o)?CULV_SUS:CULV_JOS});
          ultim.c={open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)}; ultim.v=Number(k.v);
@@ -598,7 +728,7 @@ function paginaTranzactii(): string {
    var sim=s.value.toUpperCase().trim();
    if(!sim){ s.focus(); return; }
    s.value=sim;
-   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); aratSemne([]); } // nivelurile/pointerii vechi ar minți pe alt simbol
+   if(sim!==simbolCurent){ simbolCurent=sim; primaIncarcare=true; aratNiveluri([]); aratSemne([]); aratZone([]); aratSageti([]); aratTrend([]); } // desenele vechi ar minți pe alt simbol
    marcheazaChips();
    if(primaIncarcare){ arataSchelet('se încarcă '+sim+' ('+interval+')…'); stare('gri','încarc '+sim+'…'); }
    if(ceas) clearInterval(ceas);
@@ -718,8 +848,11 @@ function paginaTranzactii(): string {
      if(!acelasiSimbol) return; // pe alt simbol ar minți
      aratNiveluri(d.date.lista||[]);
    } else if(d.kelion==='semne'){
-     if(!acelasiSimbol) return; // pointerii pe alt simbol ar minți
+     if(!acelasiSimbol) return; // pointerii/zonele pe alt simbol ar minți
      aratSemne(d.date.lista||[]);
+     aratZone(d.date.zone||[]);
+     aratSageti(d.date.sageti||[]);
+     aratTrend(d.date.trend||[]);
    }
  });
 
