@@ -147,6 +147,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'get_real_cost', category: 'bani', does: 'costul real', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'list_updates', category: 'bani', does: 'ce update-uri a primit', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'prepare_promo_clip', category: 'bani', does: 'pregătește un clip promo', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'episoade_promo', category: 'bani', does: 'jurnalul seriei de clipuri (ep1, ep2…) — ce a filmat și unde a rămas', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
   // Miscellaneous
   { name: 'log_unsupported_request', category: 'diverse', does: 'notează o cerință imposibilă acum', chat: true, voice: false, voiceViaBrain: true, admin: false },
