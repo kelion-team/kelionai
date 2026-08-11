@@ -19,6 +19,11 @@ import {
 } from './lib/updateCheck'
 import { isCalm } from './lib/activity'
 import { uiStrings } from './lib/i18n'
+import { watchdogInit } from './lib/watchdog'
+
+// MARTORUL GLOBAL de fiabilitate pornește o dată, la încărcare — prinde orice
+// blocaj al firului principal, oriunde în aplicație (vedere/voce/creier/…).
+watchdogInit()
 
 // How long the new-version bar counts down before it applies by itself
 // (ticking only while the app is calm — see below).
