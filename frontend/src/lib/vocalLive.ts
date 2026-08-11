@@ -64,6 +64,9 @@ export interface VocalLiveOpts {
    *  Serverul îl ține și-l retransmite prin ușa creierului la get_monitor.
    *  null = nimic afișat. */
   monitor?(): { kind: string; title: string; url?: string; text?: string } | null
+  /** Canvas from which to stream video to CarPlay during the session.
+   *  The native wrapper is responsible for displaying this stream. */
+  carplayCanvas?: HTMLCanvasElement
 }
 
 export interface VocalLiveHandle {
@@ -172,6 +175,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // (ceasCadre scos 9 aug — camera doar la cerință; vezi handlerul 'gata'.)
   // Radierea vocii din registrul de înregistrare (vezi mai jos, la analizor).
   let radiazaVocea: (() => void) | null = null
+  let carplayVideo: HTMLVideoElement | null = null
+  let carplayStream: MediaStream | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -182,6 +187,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (resumeTimer) clearInterval(resumeTimer)
     if (ceasCoords) clearInterval(ceasCoords)
     radiazaVocea?.() // vocea iese din registrul de înregistrare odată cu sesiunea
+    if (carplayVideo) {
+      carplayVideo.pause()
+      carplayVideo.srcObject = null
+      carplayVideo = null
+    }
+    carplayStream?.getTracks().forEach((t) => t.stop())
+    carplayStream = null
     try {
       proc?.disconnect()
       cules?.opreste()
@@ -441,6 +453,20 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   const destInregistrare = ctxOut.createMediaStreamDestination()
   analizor.connect(destInregistrare)
   radiazaVocea = inscrieVoceaLuiKelion(destInregistrare.stream)
+
+  // CarPlay video stream, if a canvas is provided.
+  if (opt.carplayCanvas) {
+    carplayStream = opt.carplayCanvas.captureStream(25) // 25 fps
+    carplayVideo = document.createElement('video')
+    carplayVideo.id = 'kelion-carplay-video-source'
+    carplayVideo.style.display = 'none'
+    carplayVideo.muted = true
+    carplayVideo.playsInline = true
+    document.body.appendChild(carplayVideo)
+    carplayVideo.srcObject = carplayStream
+    void carplayVideo.play()
+  }
+
   // BOXA MEDIA: analizor → MediaStreamDestination → <audio> obișnuit. Fiind un
   // flux WebAudio (NU WebRTC), Android îl clasează drept MEDIA (A2DP) → vocea
   // urmează ruta de muzică pe Bluetooth/CarPlay/mașină (vezi antetul de sus).
