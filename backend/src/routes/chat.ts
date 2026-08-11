@@ -1424,6 +1424,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // or "guest-pending:<id>:<name> (<relation>)". A guest turn gets ZERO
       // admin powers, even inside the holder's logged-in session.
       speaker?: string
+      // MODUL MAȘINĂ (Adrian, 11 aug): tura vine din stratul de mașină (volan).
+      // Toate capacitățile rămân, dar rezultatul e SPUS, nu afișat — legislația
+      // auto. Creierul răspunde scurt, în cuvinte; nu deschide suprafețe vizuale
+      // (hărți/video/documente); muzica/radio doar audio.
+      carMode?: boolean
     }
   }>(
     '/api/chat',
@@ -1865,6 +1870,23 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `called. When your name is heard, staying silent is WRONG — do not be ` +
         `over-cautious. (The owner asked you not to speak UNPROMPTED — but being ` +
         `called by name IS the prompt.)`
+    }
+    // MODUL MAȘINĂ (Adrian, 11 aug: „capabilitățile toate dar afișare pentru auto
+    // conform legislației"). La volan, Kelion păstrează TOATE uneltele și tot
+    // creierul — dar rezultatul se AUDE, nu se afișează. Fără hărți, fără video,
+    // fără documente pe ecran; vremea/GPS/orice informație SE SPUNE; muzica și
+    // radio doar AUDIO. Cel mult text rudimentar, ca să nu distragă condusul.
+    if (req.body?.carMode === true) {
+      systemPrompt +=
+        `\n\nCAR MODE (driving — audio-first, legally safe). The user is at the wheel. ` +
+        `Keep ALL your capabilities and tools — you may still look things up, check ` +
+        `weather from GPS, control music/radio, use Google services, reason fully. ` +
+        `But the RESULT must be SPOKEN, not shown: NEVER open a visual surface (no map, ` +
+        `no video, no document/monitor panel, no image gallery, no chart). Say the answer ` +
+        `out loud instead — e.g. weather from GPS is TOLD ("It's 21 degrees and clear in ` +
+        `your area"), never displayed. Music and radio play AUDIO ONLY (no video window). ` +
+        `Answer in SHORT spoken sentences so the driver isn't distracted; at most a tiny ` +
+        `line of text. Everything you would normally put on screen, say in words.`
     }
     // ACCOUNT STATE — Kelion must KNOW naturally who the user is (Adrian,
     // Jul 24: "during the audit it doesn't see that I'm logged into the Google

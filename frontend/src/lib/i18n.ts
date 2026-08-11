@@ -127,6 +127,10 @@ export interface Strings {
   micTalk: string
   micStop: string
   voiceVolume: string
+  // ── MODUL MAȘINĂ (Adrian, 11 aug) — voce-first, legislație auto ───────────
+  carMode: string
+  carExit: string
+  carHint: string
   /** The send button while a turn is running — sending INTERRUPTS (Jul 13 barge-in). */
   sendInterrupts: string
   attRemove: string
@@ -355,6 +359,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardKelionTitle: 'Kelion — from the brain',
     micTalk: 'Talk (microphone)',
     micStop: 'Stop the microphone',
+    carMode: 'Car mode',
+    carExit: 'Exit car mode',
+    carHint: 'Talk — I answer out loud, eyes on the road',
     voiceVolume: 'Kelion’s voice volume',
     sendInterrupts: 'Kelion is answering — send now and your message replaces the current answer',
     attRemove: 'Remove attachment',
@@ -552,6 +559,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardKelionTitle: 'Kelion — dinspre creier',
     micTalk: 'Vorbește (microfon)',
     micStop: 'Oprește microfonul',
+    carMode: 'Mod mașină',
+    carExit: 'Ieși din modul mașină',
+    carHint: 'Vorbește — îți răspund cu voce, ochii pe drum',
     voiceVolume: 'Volumul vocii lui Kelion',
     sendInterrupts: 'Kelion răspunde — trimite acum și mesajul tău înlocuiește răspunsul curent',
     attRemove: 'Scoate atașamentul',
@@ -719,6 +729,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardKelionTitle: 'Kelion — desde el cerebro',
     micTalk: 'Hablar (micrófono)',
     micStop: 'Detener el micrófono',
+    carMode: 'Modo coche',
+    carExit: 'Salir del modo coche',
+    carHint: 'Habla — te respondo en voz alta, ojos en la carretera',
     voiceVolume: 'Volumen de la voz de Kelion',
     sendInterrupts: 'Kelion está respondiendo — envía ahora y tu mensaje reemplazará la respuesta actual',
     attRemove: 'Quitar archivo adjunto',
@@ -870,6 +883,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardKelionTitle: 'Kelion — depuis le cerveau',
     micTalk: 'Parler (microphone)',
     micStop: 'Arrêter le microphone',
+    carMode: 'Mode voiture',
+    carExit: 'Quitter le mode voiture',
+    carHint: 'Parle — je réponds à voix haute, les yeux sur la route',
     voiceVolume: 'Volume de la voix de Kelion',
     sendInterrupts: 'Kelion répond — envoyez maintenant et votre message remplacera la réponse actuelle',
     attRemove: 'Supprimer la pièce jointe',
@@ -1021,6 +1037,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardKelionTitle: 'Kelion — vom Gehirn',
     micTalk: 'Sprechen (Mikrofon)',
     micStop: 'Mikrofon stoppen',
+    carMode: 'Automodus',
+    carExit: 'Automodus verlassen',
+    carHint: 'Sprich — ich antworte laut, Augen auf die Straße',
     voiceVolume: 'Kelions Sprachlautstärke',
     sendInterrupts: 'Kelion antwortet — jetzt senden und deine Nachricht ersetzt die aktuelle Antwort',
     attRemove: 'Anhang entfernen',
@@ -1172,6 +1191,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardKelionTitle: 'Kelion — dal cervello',
     micTalk: 'Parla (microfono)',
     micStop: 'Interrompi il microfono',
+    carMode: 'Modalità auto',
+    carExit: 'Esci dalla modalità auto',
+    carHint: 'Parla — rispondo a voce, occhi sulla strada',
     voiceVolume: 'Volume della voce di Kelion',
     sendInterrupts: 'Kelion sta rispondendo — invia ora e il tuo messaggio sostituirà la risposta attuale',
     attRemove: 'Rimuovi allegato',
@@ -1323,6 +1345,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardKelionTitle: 'Kelion — do cérebro',
     micTalk: 'Falar (microfone)',
     micStop: 'Parar o microfone',
+    carMode: 'Modo carro',
+    carExit: 'Sair do modo carro',
+    carHint: 'Fala — respondo em voz alta, olhos na estrada',
     voiceVolume: 'Volume da voz de Kelion',
     sendInterrupts: 'Kelion está respondendo — envie agora e sua mensagem substituirá a resposta atual',
     attRemove: 'Remover anexo',
