@@ -898,7 +898,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // 'niveluri' (nivelurile de tranzacționare pe grafic), 'gest'/'gesture'
             // (animația avatarului) — aceeași scurgere prin lista albă, adăugate
             // 10 aug ca cadrele creierului să ajungă la browser și pe voce.
-            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture']
+            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture', 'apel']
             const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, (frame) => {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
             }, monitorLive)

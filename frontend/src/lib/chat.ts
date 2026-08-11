@@ -96,6 +96,10 @@ export interface ChatControl {
   golesteMonitor?: boolean
   clickMonitor?: { x: number; y: number }
   zoomMonitor?: { level?: number; direction?: string }
+  // MESSENGER KELION↔KELION (Adrian, 11 aug): „apelează-l pe X" → creierul a pornit
+  // un apel; frame-ul ăsta ridică la APELANT interfața „sun pe…". Celălalt primește
+  // invitația pe WS-ul lui de prezență (lib/apel.ts). Permis și în modul mașină.
+  apel?: { stare: string; callId?: string; cu?: { email: string; nume: string } }
   // THE BRAIN'S VOICE: MP3 (base64) synthesized on the server (Chirp 3) and sent over
   // the bridge. The app only decodes + plays it — it synthesizes nothing locally.
   audio?: string

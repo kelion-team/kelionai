@@ -34,6 +34,8 @@ import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
 import { currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
+import ApelOverlay from '../components/ApelOverlay'
+import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
 
 // Avatarul 3D (three.js + @react-three, ≈1 MB) — încărcat leneș, ca interfața
 // aplicației să apară instant; se strecoară după (StageAvatar are AvatarLoading).
@@ -799,6 +801,13 @@ export default function Stage({ user }: { user: User }) {
   // ecranul, iar avatarul 3D se DEMONTEAZĂ (three.js iese din memorie — „consumă cât
   // China"). Butonul 🚗 din bară pornește modul; ieșirea se face din stratul de mașină.
   const carOn = useSyncExternalStore(subscribeCarMode, isCarMode)
+  // MESSENGER KELION↔KELION: ține deschis canalul de prezență cât ești logat, ca
+  // să POȚI fi sunat oricând — din orice mod (chat scris/voce, acasă sau mașină).
+  // Se închide singur la delogare (demontarea Stage-ului).
+  useEffect(() => {
+    pornestePrezentaApel()
+    return () => oprestePrezentaApel()
+  }, [])
   // IEȘIREA DIN CENTRUL DE TRANZACȚIONARE (9 aug, ownerul: „buton ieșire nu
   // merge"): pagina din iframe nu-și poate închide singură tabul — trimite
   // mesaj, iar aici tabul se închide ca la apăsarea ×-ului.
@@ -1464,6 +1473,11 @@ export default function Stage({ user }: { user: User }) {
       </header>
 
       <ChatPanel lang={lang} isAdmin={user.role === 'admin'} />
+
+      {/* MESSENGER KELION↔KELION — stratul global de apel (apel primit + apel pornit).
+          Se randează prin portal în <body>, deci apare peste tot, inclusiv peste
+          modul mașină. Ascultă singur evenimentele de apel. */}
+      <ApelOverlay lang={lang} />
 
       {unlockOpen && (
         <div className="unlock-overlay" onClick={() => setUnlockOpen(false)}>

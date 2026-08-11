@@ -2272,6 +2272,44 @@ export async function citesteUtilizatori(): Promise<Citire<UserSummary[]>> {
   })
 }
 
+// ── MESSENGER KELION↔KELION (Adrian, 11 aug) — rezolvarea „apelează-l pe X" la un
+// user REAL. Nu există o tabelă master de conturi (identitatea e emailul), deci
+// numele vin din local_accounts / voiceprints / faceprints, iar emailul e cheia
+// peste tot. Căutăm după email (exact/parțial) SAU nume (exact/parțial) și dedup
+// pe email (preferăm rândul cu nume). Folosit de services/apel.ts la inițiere.
+export interface UtilizatorApel {
+  email: string
+  name: string
+}
+export async function cautaUtilizatorApel(termen: string): Promise<Citire<UtilizatorApel[]>> {
+  return citireDb('căutarea utilizatorului pentru apel', async () => {
+    const t = termen.toLowerCase().trim()
+    if (!t) return []
+    const like = `%${t}%`
+    const r = await getPool().query<UtilizatorApel>(
+      `SELECT email, name FROM (
+         SELECT lower(email) AS email, name FROM local_accounts
+         UNION
+         SELECT lower(user_email) AS email, name FROM voiceprints
+         UNION
+         SELECT lower(user_email) AS email, name FROM faceprints
+         UNION
+         SELECT lower(email) AS email, NULL::text AS name FROM google_accounts
+       ) u
+       WHERE lower(u.email) = $1 OR lower(u.email) LIKE $2
+          OR lower(coalesce(u.name,'')) = $1 OR lower(coalesce(u.name,'')) LIKE $2
+       LIMIT 12`,
+      [t, like],
+    )
+    const map = new Map<string, UtilizatorApel>()
+    for (const row of r.rows) {
+      const ex = map.get(row.email)
+      if (!ex || (!ex.name && row.name)) map.set(row.email, { email: row.email, name: row.name || '' })
+    }
+    return [...map.values()]
+  })
+}
+
 export interface HistoryRow {
   role: string
   content: string

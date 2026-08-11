@@ -583,8 +583,9 @@ const VIDEO_TOOL: Tool = {
 import {
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-  REQUEST_REPAIR_TOOL,
+  REQUEST_REPAIR_TOOL, APELEAZA_USER_TOOL,
 } from '../services/brainToolDefs.js'
+import { sunaUtilizator } from '../services/apel.js'
 export {
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
@@ -2406,6 +2407,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...escalationTools,
           // Bază + vedere
           SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
+          // Messenger Kelion↔Kelion: „apelează-l pe X" (conversațional, gold zone).
+          APELEAZA_USER_TOOL,
           // Pointerii de indicație pe grafic — DOAR când Centrul de Tranzacționare
           // e deschis (altfel n-are pe ce desena); „arate clar pe monitor ce zice".
           ...(piata?.simbol ? [ARATA_GRAFIC_TOOL] : []),
@@ -2447,7 +2450,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
           ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -3639,6 +3642,31 @@ async function runTool(
       const title = String(args.title ?? '')
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
       return JSON.stringify({ shown: true, url, title })
+    }
+
+    // MESSENGER KELION↔KELION (Adrian, 11 aug) — „apelează-l pe X". Rezolvă ținta,
+    // verifică prezența, sună la ea. Frame-ul {apel} pornește la APELANT interfața
+    // „sun pe…"; celălalt primește invitația pe WS-ul lui de prezență. Merge din
+    // chat scris ȘI din voce (prin ușa creierului), în mașină și acasă.
+    case 'apeleaza_user': {
+      const cine = String(args.user ?? '').trim()
+      if (!cine) return JSON.stringify({ error: 'lipsa_user', message: 'Spune-mi pe cine să sun (nume sau email).' })
+      const rez = await sunaUtilizator(email, cine)
+      if (rez.ok) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ apel: { stare: 'suna', callId: rez.callId, cu: rez.cu } })}${CTRL}`)
+        return JSON.stringify({ ok: true, message: `Îl sun pe ${rez.cu?.nume || rez.cu?.email}. Sună la el acum — așteaptă să răspundă.` })
+      }
+      if (rez.motiv === 'ambiguu') {
+        const lista = (rez.candidati ?? []).map((c) => c.name || c.email).join(', ')
+        return JSON.stringify({ error: 'ambiguu', candidati: rez.candidati, message: `Sunt mai mulți care se potrivesc: ${lista}. Pe care dintre ei?` })
+      }
+      if (rez.motiv === 'offline') {
+        return JSON.stringify({ error: 'offline', message: `${rez.cu?.nume || cine} nu e online acum, nu-l pot suna.` })
+      }
+      if (rez.motiv === 'user_negasit') {
+        return JSON.stringify({ error: 'user_negasit', message: `Nu găsesc un utilizator Kelion pe nume „${cine}".` })
+      }
+      return JSON.stringify({ error: 'apel_esuat', message: 'Nu pot porni apelul acum.' })
     }
 
     case 'run_web_app': {

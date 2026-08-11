@@ -416,7 +416,10 @@ export default function ChatPanel({
         !!c.lang ||
         !!c.device ||
         !!c.gest ||
-        !!c.gesture
+        !!c.gesture ||
+        // Un APEL e comunicare audio — trece și la volan (owner: „mesengerul să
+        // fie funcțional indiferent dacă ești în mașină sau acasă").
+        !!c.apel
       if (!permisLaVolan) return // suprafață vizuală — nu se deschide la volan
     }
     // GESTURE ON COMMAND (Adrian, Jul 11: "commanded movements for everything I want him
@@ -443,6 +446,12 @@ export default function ChatPanel({
     // {nav} frame); Stage listens to kelion:navigate and enforces the admin gate.
     if (c.nav?.view) {
       window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: c.nav }))
+      return
+    }
+    // MESSENGER: creierul a pornit un apel („apelează-l pe X") → ridicăm la APELANT
+    // ecranul „sun pe…". Stage ascultă și arată interfața de apel (merge și la volan).
+    if (c.apel) {
+      window.dispatchEvent(new CustomEvent('kelion:apel-stare', { detail: c.apel }))
       return
     }
     // VOCE UNIFICATĂ: creierul a decis că NU i se vorbea → ștergem bulele optimiste

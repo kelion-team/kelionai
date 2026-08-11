@@ -19,13 +19,19 @@
 > verificarea LIVE** (🚗 deschide stratul; Kelion răspunde cu vocea, nu deschide
 > monitor/hărți; ✕ iese). Pe drum s-a reparat o poartă `jscpd` ROȘIE pe master
 > (clona LandingAvatar↔StageAvatar din #995 → extras `AvatarScene`).
-> (2) **NOU, DE FĂCUT — Messenger Kelion↔Kelion** (owner, 11 aug, spec completă):
-> „apelează-l pe user X" → se creează un canal full-duplex SECURIZAT între 2
-> utilizatori Kelion; vorbim audio prin internet; TRADUCĂTOR LIVE prin Kelion (eu
-> vorbesc RO, celălalt aude în limba lui și invers); cu posibilitatea de a ÎNCHIDE
-> oricând apelul. Necesită: prezență/directory de useri online, unealtă de
-> inițiere apel (creierul), semnalizare (WebSocket pe backend), WebRTC peer audio
-> P2P, lanț STT→traducere→TTS pe ambele direcții, hangup. NEÎNCEPUT.
+> (2) **Messenger Kelion↔Kelion — FAZA 1 GATA (de verificat live), FAZA 2 de făcut**
+> (owner, 11 aug): „apelează-l pe X" → canal securizat între 2 useri Kelion; audio
+> prin internet cu TRADUCĂTOR LIVE prin Kelion (eu RO, el în limba lui și invers);
+> închizi oricând; funcțional din chat scris SAU voce, în mașină SAU acasă.
+> **Faza 1 livrată** (semnalizare + interfață): prezență (WS `/api/apel`), unealtă
+> `apeleaza_user` (chat scris + voce), invitație + accept/refuz + conectat +
+> închide, strat global de apel (merge și în modul mașină). Porți verzi (tsc 0 ·
+> 1145 teste, 10 noi pe apel · build · jscpd 0). **DE TĂIAT după verificarea LIVE
+> cu 2 conturi.** **Faza 2, DE FĂCUT:** audio real + traducerea live (mic → STT →
+> traducere → TTS la celălalt, ambele direcții, peste WS-ul deja stabilit; opțional
+> WebRTC P2P pentru audio brut). De adăugat: sonerie/anunț vocal la apel primit
+> (mai ales în mașină, hands-free); listă de contacte/permisiuni (acum se apelează
+> orice user înregistrat, după nume/email — de restrâns pentru intimitate).
 >
 > **10 aug 2026 (după-amiaza) — „CHATUL PRĂJIT", GĂSIT CU AGENȚII + REPARAT.**
 > Ownerul: „iar ai prăjit ceva la chat, trimite iar toți agenții și repară." Sweep
