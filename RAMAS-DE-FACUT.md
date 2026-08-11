@@ -10,6 +10,10 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> ✅ **VERIFICAT LIVE de owner (11 aug): „merge bloutotch".** Vocea live iese pe Bluetooth/mașină,
+> ȘI update-ul blocant a funcționat (a primit codul nou pe telefon fără chin — altfel BT ar fi
+> rămas mort). Ambele puncte (A poarta + B microfonul fără procesare) confirmate pe telefon real.
+> RĂMAS deschis doar dacă reapare: ecou pe difuzorul telefonului (fără AEC) → ruta-conștientă.
 > **11 aug 2026 — REPARAT (de verificat live): update BLOCANT + voce pe Bluetooth pasul 2 (#1008).**
 > (A) Owner: „update-ul să vină la toți oriunde folosesc app-ul + să nu se poată continua până
 > nu faci update-ul." Cauza „telefonul rămas pe cod vechi": bara de update se amâna cât lucrai
@@ -25,6 +29,7 @@
 > după (B) → cauza e nativă (captura audio forțează modul convorbire la nivel OS) → fix în APK
 > (audio focus / half-duplex cu mic închis cât vorbește Kelion), rând nou atunci.
 >
+> ✅ **VERIFICAT LIVE (11 aug, „merge bloutotch") — vezi rândul #1008 de mai sus (pasul 2 l-a închis).**
 > **11 aug 2026 — REPARAT (de verificat live): vocea live nu ieșea pe Bluetooth/mașină (#1006).**
 > Owner a MĂSURAT: vocea live rămâne pe telefon, nu se duce pe căști/car audio. Critic pentru
 > modul mașină. Cauza (din cod): vocea live ieșea prin bucla WebRTC (AEC), iar audio-ul WebRTC
