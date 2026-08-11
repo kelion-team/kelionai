@@ -104,6 +104,7 @@ import { numeStrigat } from '../services/numeStrigat.js'
 import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeChat.js'
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
+import { citesteEpisoade, adaugaEpisod, rezumaEpisoade } from '../services/promoEpisoade.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL } from '../services/brainToolDefs.js'
 import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
@@ -817,6 +818,15 @@ const DELETE_NOTE_TOOL: Tool = {
 // it's better than a question in chat: the Rec button, pressed by him, when he
 // wants. He sees the script before pressing; if he doesn't like it, he says so
 // and you redo it — nothing has been recorded.
+// JURNALUL SERIEI DE CLIPURI (11 aug, ownerul): Kelion își știe ce a filmat în
+// fiecare episod (ep1, ep2…) și unde a rămas, ca să CONTINUE seria.
+export const EPISOADE_PROMO_TOOL: Tool = {
+  name: 'episoade_promo',
+  description:
+    'ADMIN ONLY. List the promo-clip SERIES filmed so far — each episode (ep1, ep2…) with its subject, a summary and the date — so you know WHAT was already filmed and WHERE you left off. Call it before writing a new clip (to continue the series and number the next episode) and whenever the owner asks „unde am rămas / ce episoade am / ce am filmat".',
+  input_schema: { type: 'object', properties: {} },
+}
+
 export const PROMO_TOOL: Tool = {
   name: 'prepare_promo_clip',
   description:
@@ -1963,7 +1973,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           `\n\nYOUR LATEST UPDATES (the newest commits you received at the most recent deploy, newest first):\n${upd}\nWhen the owner asks what's new, what changed, or what update you received, answer from this list — and call list_updates for the fuller recent history. Never claim you don't know what your updates were.`
       }
       systemPrompt +=
-        `\n\nPROMO CLIPS (owner only): when the owner asks for a promo clip ("filmuleț", "clip", "reclamă") about a subject, standard lengths are 15, 30 or 60 seconds — but ANY duration up to 10 minutes (600 seconds) is supported; use exactly what the owner asks for. The result must look PROFESSIONAL: a spoken script plus a shot list of live demo scenes that showcase what Kelion can do, timed to the narration; during recording the script text is NOT displayed (voice only, clean frame, admin interface hidden, site address watermarked). Step 1: WRITE the spoken script in chat, sized to the requested length (about 35 words for 15s, 75 for 30s, 150 for 60s — roughly 150 words per minute for longer clips), briefly list the planned scenes. Step 2: IN THE SAME TURN — his request for a clip IS the authorisation, never stop to ask for a "da" — if the shot list includes an image scene, FIRST call generate_image to create it, THEN call prepare_promo_clip with the script and the scenes (kind avatar/map/weather/image; avatar at second 0, scenes timed to match the words; image scenes use the /api/image/ URL from generate_image). Then tell the owner to press the pulsing red Rec button and pick the screen — everything else is automatic. If the owner asks for changes, revise and ask again. If no duration is given, ask which of 15, 30 or 60 seconds. CLIP LANGUAGE: the spoken script is written in WHATEVER language the owner asks the clip to be in (English, Spanish, Japanese — any language; you CAN do this, it is fully supported, the narration voice follows automatically via the tool's lang parameter). If no language is mentioned, use the owner's language. This is like a requested translation: your own commentary around the script stays in the owner's language, but the script content itself is in the clip's language.`
+        `\n\nPROMO CLIPS (owner only): when the owner asks for a promo clip ("filmuleț", "clip", "reclamă") about a subject, standard lengths are 15, 30 or 60 seconds — but ANY duration up to 10 minutes (600 seconds) is supported; use exactly what the owner asks for. The result must look PROFESSIONAL: a spoken script plus a shot list of live demo scenes that showcase what Kelion can do, timed to the narration; during recording the script text is NOT displayed (voice only, clean frame, admin interface hidden, site address watermarked). Step 1: WRITE the spoken script in chat, sized to the requested length (about 35 words for 15s, 75 for 30s, 150 for 60s — roughly 150 words per minute for longer clips), briefly list the planned scenes. Step 2: IN THE SAME TURN — his request for a clip IS the authorisation, never stop to ask for a "da" — if the shot list includes an image scene, FIRST call generate_image to create it, THEN call prepare_promo_clip with the script and the scenes (kind avatar/map/weather/image; avatar at second 0, scenes timed to match the words; image scenes use the /api/image/ URL from generate_image). Then tell the owner to press the pulsing red Rec button and pick the screen — everything else is automatic. If the owner asks for changes, revise and ask again. If no duration is given, ask which of 15, 30 or 60 seconds. CLIP LANGUAGE: the spoken script is written in WHATEVER language the owner asks the clip to be in (English, Spanish, Japanese — any language; you CAN do this, it is fully supported, the narration voice follows automatically via the tool's lang parameter). If no language is mentioned, use the owner's language. This is like a requested translation: your own commentary around the script stays in the owner's language, but the script content itself is in the clip's language. SERIA DE EPISOADE: clipurile sunt o SERIE (ep1, ep2…). ÎNAINTE să scrii un clip nou, cheamă episoade_promo ca să vezi ce ai filmat deja și unde ai rămas, și CONTINUĂ de acolo (fiecare clip pregătit se salvează automat ca episodul următor). Când ownerul întreabă „unde am rămas / ce am filmat / ce episoade am", cheamă episoade_promo și spune-i.`
     }
 
     // Monitor awareness — Kelion works INSIDE whatever is already on screen. The
@@ -2409,7 +2419,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // (dovadaPortilor() nu putea fi satisfăcută). Zona de aur, nu se taie.
           RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL,
           // ── COADĂ: se taie prima la plafon (ocazionale) ──
-          SET_ROLE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL,
+          SET_ROLE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, EPISOADE_PROMO_TOOL,
           SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
           CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
@@ -3747,17 +3757,32 @@ async function runTool(
 
 
 
+    case 'episoade_promo': {
+      if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
+      const lista = await citesteEpisoade(config.adminEmail)
+      return JSON.stringify({ episoade: lista, rezumat: rezumaEpisoade(lista) })
+    }
     case 'prepare_promo_clip': {
       if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
       // Clip preparation comes from the SHARED source (services/promo.ts) — the
       // same one voice uses, so §1 is respected without duplication.
       const built = await buildPromo(args)
       if ('error' in built) return JSON.stringify({ error: built.error })
+      // JURNALUL SERIEI (11 aug): fiecare clip pregătit se salvează ca EPISOD
+      // auto-numerotat, ca Kelion să știe ce a filmat și unde a rămas. Numărul
+      // episodului intră și în numele fișierului („subiect_epN") și în frame.
+      const episod = await adaugaEpisod(config.adminEmail, {
+        subiect: built.promo.subject,
+        rezumat: String(built.promo.script).replace(/\s+/g, ' ').trim().slice(0, 200),
+        durata: built.promo.duration,
+        data: new Date().toISOString().slice(0, 10),
+      }).catch(() => null)
+      const promoCuEp = episod ? { ...built.promo, ep: episod.ep } : built.promo
       // ARMING THE RECORDER: the `{promo}` frame is the one ChatPanel waits for
       // (c.promo?.script → armPromo) in order to arm the Rec button.
-      reply.raw.write(`${CTRL}${JSON.stringify({ promo: built.promo })}${CTRL}`)
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: built.monitorUrl, title: `Promo: ${built.promo.subject}` } })}${CTRL}`)
-      return JSON.stringify({ armed: true, shown: true, url: built.monitorUrl })
+      reply.raw.write(`${CTRL}${JSON.stringify({ promo: promoCuEp })}${CTRL}`)
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: built.monitorUrl, title: `Promo${episod ? ` ep${episod.ep}` : ''}: ${built.promo.subject}` } })}${CTRL}`)
+      return JSON.stringify({ armed: true, shown: true, url: built.monitorUrl, episod: episod ? episod.ep : undefined })
     }
 
     default: {
