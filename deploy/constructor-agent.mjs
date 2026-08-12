@@ -931,15 +931,15 @@ async function llmDeepSeek(messages) {
 }
 
 async function llm(messages) {
-  // UN SINGUR CREIER PE RULARE (9 aug): DeepSeek dacă e cheia lui (constructorul
-  // izolat de creditul Gemini/voce), altfel Gemini — exact ca înainte.
-  // Reîncercăm pe ACELAȘI creier cu pauze crescătoare; o eroare de cheie/cont
-  // (401/403) e FATALĂ pe loc (nicio reîncercare nu ajută); la epuizarea
-  // încercărilor, sugrumarea (429/cotă/5xx) marchează ordinul AMÂNABIL.
-  const foloseste = FOLOSESTE_DEEPSEEK ? llmDeepSeek : llmGemini
-  const numeCreier = FOLOSESTE_DEEPSEEK ? 'DeepSeek' : 'Gemini'
-  if (!GEMINI_KEY && !DEEPSEEK_KEY)
-    throw Object.assign(new Error('lipsește cheia creierului (CONSTRUCTOR_DEEPSEEK_KEY sau GEMINI_API_KEY) — constructorul nu are creier'), { fatal: true })
+  // DOAR RUNPOD (owner, 12 aug: „doar RunPod"): nu doar „nu Gemini" — creierul
+  // constructorului TREBUIE să fie RunPod (Qwen3-Coder), NU DeepSeek cloud, NU
+  // altceva. Endpoint-ul trebuie să fie RunPod (ESTE_RUNPOD) ȘI cu cheie; altfel
+  // se OPREȘTE zgomotos, fără rezervă. Reîncercăm pe ACELAȘI creier cu pauze
+  // crescătoare; 401/403 = FATAL pe loc; sugrumarea (429/5xx) = AMÂNABIL.
+  if (!DEEPSEEK_KEY || !ESTE_RUNPOD)
+    throw Object.assign(new Error('constructorul e setat DOAR pe RunPod (Qwen3-Coder), dar RunPod nu e configurat: pune CONSTRUCTOR_DEEPSEEK_KEY + CONSTRUCTOR_DEEPSEEK_URL pe endpoint-ul RunPod (…api.runpod.ai/v2/<id>/openai/v1/…). NU cade pe Gemini și NU merge pe DeepSeek cloud — se oprește.'), { fatal: true })
+  const foloseste = llmDeepSeek
+  const numeCreier = 'RunPod'
   let lastErr = ''
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
     if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
@@ -1198,7 +1198,7 @@ async function main() {
   // DOVADA CREIERULUI ACTIV (9 aug): scris în jurnal la fiecare ordin, ca să se
   // vadă negru pe alb pe ce rulează constructorul — DeepSeek (izolat de voce) sau
   // Gemini (fallback). modelServit din răspuns cară aceeași informație în raport.
-  log(`creier constructor: ${FOLOSESTE_DEEPSEEK ? `DeepSeek (${DEEPSEEK_MODEL})` : `Gemini (${GEMINI_MODEL})`}`)
+  log(`creier constructor: RunPod DOAR (${DEEPSEEK_MODEL})${(FOLOSESTE_DEEPSEEK && ESTE_RUNPOD) ? '' : ' — ATENȚIE: RunPod neconfigurat (cheie/URL RunPod lipsă), primul ordin se oprește (fără rezervă)'}`)
   // CREIERUL ORDINULUI (3 aug — extirparea OpenRouter): Gemini, unic, pe cheia
   // ownerului. Marcajul „Fable 5" din text nu mai pornește nimic (creierul
   // plătit prin OpenRouter a dispărut) — alegerea e scrisă în jurnal.
