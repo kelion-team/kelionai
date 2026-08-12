@@ -43,6 +43,7 @@ import {
   attachGuestPhoto,
   userKey,
   addMemory,
+  recordSimptomLive,
 } from '../db.js'
 import { extrageNiveluri, curataSemne, curataZone, curataSageti, curataTrend } from './tranzactii.js'
 import { getMeserie } from '../services/meserii.js'
@@ -2296,6 +2297,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             : camView.length > 0 && VISION_INTENT.test(lm.content)
               ? camView
               : []
+        // KELION VEDE CÂND NU VEDE (Adrian, 12 aug): a cerut ceva vizual în scris
+        // și n-a existat niciun cadru (camera oprită / captura picată) → nu mai
+        // cade tăcut, se notează ca simptom ca autovindecarea să ajungă la el.
+        if (attachedPhoto.length === 0 && camView.length === 0 && VISION_INTENT.test(lm.content)) {
+          void recordSimptomLive('fara-vedere', `scris: cerere vizuală fără cadru — „${lm.content.slice(0, 100)}"`).catch(() => {})
+        }
         if (toSend.length > 0) {
           turnHasImage = true
           const strip = (s: string): string => (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s)
@@ -3437,6 +3444,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         model: orChatModel,
         user: user.email,
       })
+      // ȘI CA SIMPTOM VIU (12 aug): pe backend console.error intră doar în log,
+      // nu în self-heal. Pe semnalul `!sawVisible` deja calculat (zero fals
+      // pozitive — turele de acțiune au `sawVisible`), chatul mut pe SCRIS devine
+      // un simptom la care autovindecarea ajunge, exact ca vocea.
+      void recordSimptomLive('chat-mut', `scris: tura s-a terminat fără nimic vizibil (model ${orChatModel})`).catch(() => {})
     }
     await voice.finish()
     reply.raw.end()

@@ -24,7 +24,8 @@ import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, citesteSold, debitWallet } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, citesteSold, debitWallet, recordSimptomLive } from '../db.js'
+import { pareCerereVizuala } from '../services/simptomeLive.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -964,6 +965,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               }
               trimite({ type: 'cere_cadre' })
             })
+            // KELION VEDE CÂND NU VEDE (Adrian, 12 aug): a cerut ceva vizual și
+            // n-a venit niciun cadru → nu mai cade tăcut, se notează ca simptom ca
+            // autovindecarea să ajungă la el. `pareCerereVizuala` ține un „cât e
+            // ceasul" fără cadru să nu fie luat drept vedere picată (regula #1).
+            if (cadre.length === 0 && pareCerereVizuala(cerere)) {
+              void recordSimptomLive('fara-vedere', `voce: cerere vizuală fără cadru — „${cerere.slice(0, 100)}"`).catch(() => {})
+            }
             // 'nav' adăugat (10 aug, ownerul: „la scris închide/deschide pagina
             // merge, la verbal nu"): open_app_view emite {nav:...}; fără el în
             // listă, deschiderea/închiderea de pagini era ARUNCATĂ tăcut pe voce.
@@ -985,6 +993,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
             } else {
               app.log.warn(`vocal-live: ușa creierului a picat: ${r.motiv}`)
+              // CHATUL CARE NU RĂSPUNDE, FĂCUT VIZIBIL (12 aug): ușa creierului a
+              // picat pe voce = exact „aplicația nu răspunde". Se notează ca simptom
+              // ca autovindecarea să ajungă la cauză.
+              void recordSimptomLive('chat-mut', `voce: ușa creierului a picat — ${r.motiv}`.slice(0, 180)).catch(() => {})
               live?.raspundeUnealta(apel.id, apel.name, { eroare: r.motiv })
             }
             return
