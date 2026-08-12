@@ -97,13 +97,21 @@ const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-2.5-pro'
 // FĂRĂ REZERVĂ: dacă RunPod nu e configurat, constructorul se OPREȘTE — NU cade
 // pe Gemini, nu pe alt furnizor. Cheia + URL-ul + modelul stau DOAR în env-ul VPS
 // (/root/kelion/kelionai.env), NICIODATĂ în repo; prin Kelion (secret_pune) sau env.
-const RUNPOD_KEY = env.CONSTRUCTOR_RUNPOD_KEY ?? ''
-const RUNPOD_MODEL = env.CONSTRUCTOR_RUNPOD_MODEL || ''
+//
+// COMPATIBIL CU ENV-UL CARE E DEJA PE VPS (regresie reparată, 12 aug): în #1037
+// am redenumit variabilele CONSTRUCTOR_DEEPSEEK_* → CONSTRUCTOR_RUNPOD_*, dar
+// cheia RunPod stă pe VPS sub numele VECHI (CONSTRUCTOR_DEEPSEEK_KEY — chiar
+// cerința ownerului îl numea așa). După deploy, RUNPOD_KEY ieșea gol și
+// constructorul se oprea la boot („lipsesc ... — ies"). Citim ACUM ambele nume:
+// întâi cel nou (curat), apoi cel vechi de pe VPS. Nu e rezervă de creier — e
+// DOAR numele variabilei de env; creierul rămâne RunPod (Qwen3-Coder), la fel.
+const RUNPOD_KEY = env.CONSTRUCTOR_RUNPOD_KEY || env.CONSTRUCTOR_DEEPSEEK_KEY || ''
+const RUNPOD_MODEL = env.CONSTRUCTOR_RUNPOD_MODEL || env.CONSTRUCTOR_DEEPSEEK_MODEL || ''
 // URL-ul endpointului RunPod (OpenAI-compatibil, vLLM). FĂRĂ default de furnizor:
 // PROPRIU pe RunPod serverless (vLLM: .../openai/v1/chat/completions), izolat de
 // creditul de voce. Dovedit pe viu 11-12 aug: Qwen3-Coder pe RunPod cheamă unelte
 // corect pe ruta asta (a chemat `grep {"pattern":"8080"}` la un ordin real).
-const RUNPOD_URL = env.CONSTRUCTOR_RUNPOD_URL || ''
+const RUNPOD_URL = env.CONSTRUCTOR_RUNPOD_URL || env.CONSTRUCTOR_DEEPSEEK_URL || ''
 // UN SINGUR creier: RunPod (Qwen3-Coder). Dacă nu e configurat RunPod (cheie +
 // URL RunPod), constructorul se OPREȘTE — nu cade pe Gemini, nu pe alt furnizor.
 const RUNPOD_CONFIGURAT = !!RUNPOD_KEY
@@ -937,7 +945,7 @@ async function llm(messages) {
   // se OPREȘTE zgomotos, fără rezervă. Reîncercăm pe ACELAȘI creier cu pauze
   // crescătoare; 401/403 = FATAL pe loc; sugrumarea (429/5xx) = AMÂNABIL.
   if (!RUNPOD_KEY || !ESTE_RUNPOD)
-    throw Object.assign(new Error('constructorul e setat DOAR pe RunPod (Qwen3-Coder), dar RunPod nu e configurat: pune CONSTRUCTOR_RUNPOD_KEY + CONSTRUCTOR_RUNPOD_URL pe endpoint-ul RunPod (…api.runpod.ai/v2/<id>/openai/v1/…). NU cade pe Gemini și NU merge pe alt endpoint — se oprește.'), { fatal: true })
+    throw Object.assign(new Error('constructorul e setat DOAR pe RunPod (Qwen3-Coder), dar RunPod nu e configurat: pune CONSTRUCTOR_RUNPOD_KEY + CONSTRUCTOR_RUNPOD_URL (sau numele vechi CONSTRUCTOR_DEEPSEEK_KEY + CONSTRUCTOR_DEEPSEEK_URL de pe VPS) pe endpoint-ul RunPod (…api.runpod.ai/v2/<id>/openai/v1/…). NU cade pe Gemini și NU merge pe alt endpoint — se oprește.'), { fatal: true })
   const foloseste = llmRunpod
   const numeCreier = 'RunPod'
   let lastErr = ''
@@ -1184,7 +1192,7 @@ for (const semnal of ['SIGTERM', 'SIGINT']) {
 
 async function main() {
   if (!BRIDGE || !RUNPOD_KEY || !GHTOKEN) {
-    log('lipsesc BRIDGE_SECRET / CONSTRUCTOR_RUNPOD_KEY / GITHUB_TOKEN din kelionai.env — ies')
+    log('lipsesc BRIDGE_SECRET / CONSTRUCTOR_RUNPOD_KEY (sau CONSTRUCTOR_DEEPSEEK_KEY) / GITHUB_TOKEN din kelionai.env — ies')
     return
   }
   const claim = await api('/api/constructor/next')
