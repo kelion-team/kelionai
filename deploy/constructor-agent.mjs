@@ -939,15 +939,19 @@ async function llmRunpod(messages) {
 }
 
 async function llm(messages) {
-  // DOAR RUNPOD (owner, 12 aug: „doar RunPod"): nu doar „nu Gemini" — creierul
-  // constructorului TREBUIE să fie RunPod (Qwen3-Coder), NU alt endpoint, NU
-  // altceva. Endpoint-ul trebuie să fie RunPod (ESTE_RUNPOD) ȘI cu cheie; altfel
-  // se OPREȘTE zgomotos, fără rezervă. Reîncercăm pe ACELAȘI creier cu pauze
+  // UN SINGUR CREIER, PE ENDPOINT OpenAI-COMPATIBIL (owner, 12 aug). Creierul
+  // constructorului e endpoint-ul din env (CONSTRUCTOR_RUNPOD_URL/_KEY, sau
+  // numele vechi _DEEPSEEK_* de pe VPS) — poate fi RunPod SAU un furnizor
+  // GĂZDUIT (ex. DeepInfra: modelul stă pornit non-stop, fără pornire la rece
+  // și fără OOM — spre deosebire de RunPod serverless, care nu servea 30B-ul:
+  // /openai dădea 500, măsurat 12 aug). Regula owner-ului rămâne: creierul e
+  // DOAR endpoint-ul ăsta, NU cade pe Gemini. Cere cheie + URL; altfel se
+  // OPREȘTE zgomotos, fără rezervă. Reîncercăm pe ACELAȘI creier cu pauze
   // crescătoare; 401/403 = FATAL pe loc; sugrumarea (429/5xx) = AMÂNABIL.
-  if (!RUNPOD_KEY || !ESTE_RUNPOD)
-    throw Object.assign(new Error('constructorul e setat DOAR pe RunPod (Qwen3-Coder), dar RunPod nu e configurat: pune CONSTRUCTOR_RUNPOD_KEY + CONSTRUCTOR_RUNPOD_URL (sau numele vechi CONSTRUCTOR_DEEPSEEK_KEY + CONSTRUCTOR_DEEPSEEK_URL de pe VPS) pe endpoint-ul RunPod (…api.runpod.ai/v2/<id>/openai/v1/…). NU cade pe Gemini și NU merge pe alt endpoint — se oprește.'), { fatal: true })
+  if (!RUNPOD_KEY || !RUNPOD_URL)
+    throw Object.assign(new Error('creierul constructorului nu e configurat: pune CONSTRUCTOR_RUNPOD_KEY + CONSTRUCTOR_RUNPOD_URL (sau numele vechi CONSTRUCTOR_DEEPSEEK_KEY + CONSTRUCTOR_DEEPSEEK_URL de pe VPS) pe un endpoint OpenAI-compatibil — RunPod (…api.runpod.ai/v2/<id>/openai/v1/…) SAU găzduit (ex. DeepInfra: https://api.deepinfra.com/v1/openai/chat/completions). NU cade pe Gemini — se oprește.'), { fatal: true })
   const foloseste = llmRunpod
-  const numeCreier = 'RunPod'
+  const numeCreier = ESTE_RUNPOD ? 'RunPod' : 'endpoint găzduit'
   let lastErr = ''
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
     if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
@@ -965,7 +969,7 @@ async function llm(messages) {
       if (e?.fatal) throw e
       if (e?.amanabil) throw Object.assign(new Error(lastErr), { amanabil: true })
       // Cheia/contul nostru — nicio reîncercare nu ajută; ne oprim pe loc.
-      if (/(runpod|gemini) (401|403)/i.test(lastErr)) {
+      if (/\b(401|403)\b/.test(lastErr)) {
         log(`llm [fatal] — cheia/contul ${numeCreier}: ${lastErr.slice(0, 200)}`)
         throw Object.assign(new Error(lastErr), { fatal: true })
       }
@@ -1206,7 +1210,7 @@ async function main() {
   // DOVADA CREIERULUI ACTIV (9 aug): scris în jurnal la fiecare ordin, ca să se
   // vadă negru pe alb pe ce rulează constructorul — RunPod (Qwen3-Coder).
   // modelServit din răspuns cară aceeași informație în raport.
-  log(`creier constructor: RunPod DOAR (${RUNPOD_MODEL})${(RUNPOD_CONFIGURAT && ESTE_RUNPOD) ? '' : ' — ATENȚIE: RunPod neconfigurat (cheie/URL RunPod lipsă), primul ordin se oprește (fără rezervă)'}`)
+  log(`creier constructor: ${ESTE_RUNPOD ? 'RunPod' : 'endpoint găzduit'} — ${RUNPOD_MODEL || '(model nesetat)'}${(RUNPOD_KEY && RUNPOD_URL) ? '' : ' — ATENȚIE: neconfigurat (cheie/URL lipsă), primul ordin se oprește (fără rezervă)'}`)
   // CREIERUL ORDINULUI (3 aug — extirparea OpenRouter): Gemini, unic, pe cheia
   // ownerului. Marcajul „Fable 5" din text nu mai pornește nimic (creierul
   // plătit prin OpenRouter a dispărut) — alegerea e scrisă în jurnal.
