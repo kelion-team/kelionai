@@ -25,6 +25,7 @@ import type { AnthropicTool } from './brainContract.js'
 const NUME_CITIRE = new Set<string>([
   'system_health', 'read_source', 'search_source', 'list_source',
   'list_memories', 'server_logs', 'runbook_log',
+  'db_tables', 'get_real_cost', 'list_updates',
 ])
 
 // Definițiile de unealtă filtrate la subsetul de citire (name e la nivel de sus).
@@ -46,6 +47,9 @@ const BATERIE: Comanda[] = [
   { nume: 'cod-sursă', comanda: 'Caută în propriul cod sursă unde e definită funcția recordSimptomLive și citește câteva rânduri.', asteapta: ['search_source', 'read_source', 'list_source'] },
   { nume: 'memorie', comanda: 'Listează ce ai în memorie despre owner (list_memories).', asteapta: ['list_memories'] },
   { nume: 'loguri', comanda: 'Citește ultimele erori din logurile serverului (server_logs).', asteapta: ['server_logs', 'runbook_log'] },
+  { nume: 'schema-bd', comanda: 'Listează tabelele bazei de date (db_tables) și spune câte sunt.', asteapta: ['db_tables'] },
+  { nume: 'cost', comanda: 'Care e costul real de azi? Folosește get_real_cost.', asteapta: ['get_real_cost'] },
+  { nume: 'noutăți', comanda: 'Ce actualizări/noutăți ai de raportat? Folosește list_updates.', asteapta: ['list_updates'] },
 ]
 
 export interface RaportVerificare {
