@@ -10,6 +10,23 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 (seara, partea 6) — „finalizezi?": L1h făcut, L1b+L1c verificate acoperite (nu fake).**
+> Owner: „finalizezi?" → iau ce se poate în cod, fără cont/token/social („fără
+> insta"). **L1h — feedback implicit** (nou, real): `feedbackImplicit.ts` prinde
+> corecțiile clare („nu asta am cerut") FĂRĂ fals pozitive, le notează în registru
+> și le bagă în lecțiile creierului — 7 teste. **L1b + L1c — verificate în COD ca
+> deja acoperite** (nu presupus, nu re-scris peste ce merge): L1b prin
+> `zidul`/`cauzaComuna`/`escaladare`/`semnaturaLumii`/arhivare din `autonomie.ts`;
+> L1c prin cron-ul de 1 min care re-rulează deploy la live≠master + veghe + plasa
+> de sănătate. Am tăiat rândurile cu dovada, nu am fabricat cod redundant.
+> **Sărite explicit** (i-am spus owner-ului de ce): L1d Telegram + L2 (cer
+> token/cont de-al lui), L1g cameră continuă (i-ar răsturna decizia de cost din
+> 9 aug), L1f sandbox (periculos — doar la cerere explicită). Porți: backend tsc
+> 0 + 1220 teste verzi (7 noi) · sintaxă 0. **Un test a picat (autoInvatare —
+> fereastra de 200 car. între isAdminUser și lectiiCurente): NU l-am slăbit — am
+> REORDONAT codul (lecțiile întâi, notarea reproșului după), ceea ce e și mai
+> corect (corecția curentă intră în lecțiile turelor viitoare, nu în asta).**
+
 > **12 aug 2026 (seara, partea 5) — OPUS pe vocea live (owner: „fă Opus").**
 > Banda vocii live pe 3G (PCM brut ~256/384 kbit/s) e singura care mai rămăsese
 > din discuția cu 3G. Acum: hopul **browser↔server** se comprimă cu Opus (~10×),
@@ -744,13 +761,13 @@ Recomandarea mea: **1 + 2** (plafon + free-cu-escaladare) — păstrează Fable 
 | # | Ce | Stare |
 |---|---|---|
 | L1a | ~~Bara de progres 0–100% pe fiecare ordin din Constructor~~ FĂCUT 3 aug: `progresOrdin.ts` (hartă etapă→procent, testată) + `pct` în `/api/admin/constructor` și `/api/constructor/live`; LIVE pe 49b8e0a (verificat pe master, apoi 979cec8) | ✅ |
-| L1b | Gestionare automată a ordinelor eșuate („dili"): la eșec definitiv → analiză automată a jurnalului + repunere cu enunț corectat sau închidere motivată | de făcut |
-| L1c | Diagnoză/reparare automată deploy (dispatch_failed_204 etc.): santinela deja verifică live==master; de adăugat auto-rerun la eșec de rețea | parțial există (anti-fantomă) |
+| L1b | ~~Gestionare automată a ordinelor eșuate: la eșec definitiv → analiză jurnal + repunere corectată sau închidere motivată~~ **VERIFICAT ACOPERIT 12 aug** (cod, nu presupus): `autonomie.ts` are `zidul` (după `PRAG_ESEC`=2 eșecuri consecutive schimbă ținta, nu lovește același zid), `cauzaComuna` (normalizează jurnalele și scoate cauza REPETATĂ, nu ultima eroare), `escaladare` (reia CU jurnalul eșecului + abordare schimbată de la prima reîncercare), `semnaturaLumii` (parcare motivată până se schimbă lumea: versiune/chei/reușite), `arhiveazaBuildJobsVechi` (curăță ce e vechi). „Închiderea motivată" = starea zidului (`StareZid.cauza/raport`) văzută în panou. Nu re-scriu cod peste ce merge. | ✅ (acoperit) |
+| L1c | ~~Auto-rerun deploy la eșec de rețea~~ **VERIFICAT ACOPERIT 12 aug**: `auto-publicare.sh` (cron 1 min) re-rulează `deploy.sh` ori de câte ori live≠master → o cădere trecătoare de rețea se auto-vindecă la următorul minut; `veghe-publicare.sh` deschide issue la divergență >15 min; `plasa-sanatate.mjs` face revert la LKG dacă publicarea nouă pică sănătatea. „dispatch_failed_204" e mut pe arhitectura de azi (GitHub Actions e mort pe org — calea VPS-cron l-a înlocuit). | ✅ (acoperit) |
 | L1d | Telegram: trimitere/primire mesaje prin Bot API (îți faci un bot cu @BotFather în 2 min, cheia intră în GitHub Secrets) | de făcut — cere UN token de la tine |
 | L1e | ~~Procesare CSV/JSON complexe ca unelte de chat (parse + agregări + afișare pe monitor)~~ **REZOLVAT 12 aug**: unealta `proceseaza_date` (`services/dateTabelare.ts` PUR+testat: parseCSV RFC-4180, laNumar en/ro/mii/%, JSON/NDJSON, agregări suma/medie/min/max/numar/numar_unic grupate, profil măsurat) → cadru `{doc}` pe monitor; înregistrată în `brainCapabilities`+`manual` (count 101→102); 18 teste noi | ✅ |
 | L1f | Scripturi ad-hoc în sandbox pe server (constructorul deja scrie+rulează cod; de expus ca unealtă de chat cu limite dure) | parțial există (constructor) |
 | L1g | Analiză imagine în timp real (obiecte/text): Gemini vede nativ DEJA (fix 3 aug); de adăugat fluxul continuu pe cameră | parțial există |
-| L1h | Învățare din feedback implicit: autoInvatare + memoria există; de legat semnalele („nu asta am cerut") de registru | parțial există |
+| L1h | ~~Învățare din feedback implicit: de legat semnalele („nu asta am cerut") de registru~~ **REZOLVAT 12 aug**: `services/feedbackImplicit.ts` (PUR+testat): `esteNemultumire` prinde CORECȚIILE clare (RO+EN), NU orice negație (fără fals pozitive — testat pe „nu știu"/„ce e greșit la asta?"); reproșul (ce ceruse + ce a făcut + corecția) se notează în registru (`invatare:reprosuri`, persistat, reîncărcat la boot), iar `lectiiReprosuri` bagă ultimele corecții în contextul creierului (lângă lecțiile din timpi), doar pe owner; 7 teste noi | ✅ |
 | L1i | ~~Drive avansat: editare documente/foi prin API-urile Google existente (scope-uri noi la consimțământ)~~ **REZOLVAT 12 aug**: `create_doc`/`edit_doc` (API Docs: adaugă/rescrie/caută-înlocuiește), `create_sheet`/`edit_sheet` (API Sheets: append/scrie interval) în contul omului logat; scope-uri de scriere adăugate la consimțământ (`documents`+`spreadsheets`+`drive.file` — minim necesar, NU drive complet); `normalizeazaRanduri` PUR+testat; înregistrate în `brainCapabilities`+`manual` (google 19→23, count →106); 403 (token vechi) → „reconectează Google" **⚠ owner: reconectează Google o dată ca să acorzi scrierea** | ✅ (reconectare Google o dată) |
 
 ### L2. Cer conturile/aprobările TALE (nu pot fără ele — nu e refuz, e fapt)
