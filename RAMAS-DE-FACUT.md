@@ -10,25 +10,36 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
-> **12 aug 2026 (NOAPTEA) — CONSTRUCTORUL MURSEA PE MODEL SUPRAÎNCĂRCAT, NU PE COD (cauză MĂSURATĂ) + scos codul mort Gemini (PR #1043).**
-> Owner: „constructorul nu merge", „Gemini? tot timpul de azi pierdut". CAUZA
-> CONCRETĂ (măsurată pe cheia ownerului, DeepInfra, aceeași cheie + endpoint):
-> `Qwen3-Coder-480B-A35B-Instruct-Turbo` e SUPRAÎNCĂRCAT CRONIC → `engine_overloaded`,
-> **0 tool_calls**, în timp ce `DeepSeek-V3-0324`, `Qwen2.5-72B`, `Llama-3.3-70B`
-> pe ACEEAȘI cheie cheamă uneltele pe loc. De-aia constructorul murea pe „8 ture
-> sterile" fără să atingă o unealtă — NU era vina codului de tool-calling (format
-> OpenAI corect). Fix (PR #1043): (1) model primar → `DeepSeek-V3-0324` (coder
-> precis; Qwen2.5-72B termina pipeline-ul dar rescria fișiere întregi cu `write`,
-> periculos); (2) ROTIRE pe rezerve în `llm()` — un model supraîncărcat nu mai
-> omoară ordinul; (3) `engine_overloaded`/„Model busy" → AMÂNABIL, nu eșec fatal;
-> (4) SCOS ~250 linii de cod MORT Gemini (`llmGemini`+helpere+`GEMINI_KEY`/
-> `GEMINI_MODEL` — nu-l chema nimeni); (5) monitorul nu mai minte „Gemini e
-> sugrumat" — folosește numele REAL al furnizorului (DeepInfra). **DOVADĂ DE
-> AUTONOMIE (rulare reală, model nou):** constructorul a chemat unelte
-> (grep→write→finish), a trecut TOATE porțile (jscpd/sintaxă/build backend/boot
-> „Server listening"), a împins ramura și A DESCHIS PR SINGUR (#1042). **DE
-> VERIFICAT:** o rulare curată cu DeepSeek care produce un PR CORECT (diff exact
-> cerut) + CI verde, end-to-end, netăiat de timeout manual.
+> **12 aug 2026 (NOAPTEA) — AUTONOMIA CONSTRUCTORULUI: REPARATĂ + DOVEDITĂ + LIVE (PR #1043, #1044, #1046). ✅**
+> Owner: „constructorul nu merge", „Gemini? tot timpul de azi pierdut", „cind e
+> autonomia gata?". Trei cauze CONCRETE, toate MĂSURATE (nu presupuse):
+> 1. **Model supraîncărcat, NU cod.** `Qwen3-Coder-480B-A35B-Instruct-Turbo` pe
+>    DeepInfra e supraîncărcat cronic → `engine_overloaded`, **0 tool_calls**, în
+>    timp ce alte modele pe ACEEAȘI cheie cheamă uneltele pe loc. De-aia murea pe
+>    „8 ture sterile". Format OpenAI de tool-calling era corect.
+> 2. **Cod mort Gemini + etichetă falsă.** Monitorul scria „Gemini e sugrumat"
+>    deși constructorul nu mai e pe Gemini (mutat de owner pe DeepInfra). ~250 de
+>    linii `llmGemini`+helpere+`GEMINI_KEY`/`GEMINI_MODEL` — cod MORT (nu-l chema
+>    nimeni, `foloseste = llmRunpod`).
+> 3. **Atârna pe CI oprit.** După ce deschidea un PR BUN, aștepta checkul `verify`
+>    — dar Actions e oprit pe repo (`ACTIONS_PORNIT` fals), deci `verify` iese
+>    `skipped`. `verdictDinCheckRuns` citea `skipped` ca EȘEC, iar `asteaptaVerificareCI`
+>    aștepta tot bugetul (9 min) pe un check care nu vine → ordinul cu PR corect
+>    raporta „picat".
+> **Reparat:** primar `Qwen/Qwen2.5-72B-Instruct` (măsurat: ~1s/apel, duce un ordin
+> end-to-end în ~67s; DeepSeek-V3 a ATÂRNAT >9 min pe context real — nefolosibil,
+> rămâne doar rezervă) + rotire pe rezerve (DeepSeek-V3, Llama) când primarul cade;
+> `engine_overloaded`→AMÂNABIL; cod mort Gemini SCOS; monitorul arată furnizorul
+> REAL; `skipped`→`absent` (nu eșec) + grație 90s pe CI absent; lacătul Gemini
+> actualizat (creierul APLICAȚIEI neatins, constructorul păzit „NU Gemini"); README
+> refăcut (îl ciuntise constructorul vechi). Porți: backend `tsc` 0 · **1239 teste**
+> · lacăt 10/10 · `node --check`. **DOVADĂ CURATĂ (măsurată, live pe VPS):** ordin
+> #186 → constructorul (Qwen2.5-72B) a chemat unelte, a creat DOAR fișierul cerut
+> (`deploy/SMOKE-DEEPSEEK.md`, 3 linii, nimic altceva atins), a trecut toate cele 7
+> porți, a împins ramura și a deschis PR corect (#1045) în ~67s, singur. Autonomia
+> merge end-to-end. **RĂMAS:** cererile REALE din coadă (#182/#183/#185, «cerințele
+> ownerului») — de rulat prin constructorul reparat (owner le poate reda din panou
+> «reia», sau se reiau automat).
 >
 > **12 aug 2026 (seara, partea 6) — „finalizezi?": L1h făcut, L1b+L1c verificate acoperite (nu fake).**
 > Owner: „finalizezi?" → iau ce se poate în cod, fără cont/token/social („fără
