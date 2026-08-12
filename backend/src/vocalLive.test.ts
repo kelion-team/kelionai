@@ -395,9 +395,13 @@ describe('vocalLive — camera intră în sesiune, cu costul estimat pe față',
     expect(sursa).toMatch(/realtimeInput: \{ video: \{ data: jpegBase64, mimeType: 'image\/jpeg' \} \}/)
   })
 
-  it('persona spune modelului că VEDE cadrele — și că lipsa lor se declară', () => {
+  it('persona spune ONEST că vederea e la CERERE (nu continuu) — și că lipsa cadrelor se declară', () => {
     const ruta = readFileSync(new URL('./routes/vocalLive.ts', import.meta.url), 'utf8')
-    expect(ruta).toContain('primești CADRELE ei în timp real')
+    // Alinierea din 12 aug (secțiunea N val 2): camera e la cerere (cere_cadre),
+    // nu un flux continuu — persona nu mai pretinde o vedere permanentă.
+    expect(ruta).toContain('VEDEREA (la CERERE, NU continuu)')
+    expect(ruta).toContain('CERI')
+    expect(ruta).not.toContain('primești CADRELE ei în timp real')
     expect(ruta).toContain('camera e oprită — o spui, nu inventezi o vedere')
   })
 })
