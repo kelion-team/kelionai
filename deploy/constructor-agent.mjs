@@ -99,10 +99,22 @@ const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-2.5-pro'
 // NICIODATĂ în repo; se pune prin Kelion (secret_pune) sau direct în env.
 const DEEPSEEK_KEY = env.CONSTRUCTOR_DEEPSEEK_KEY ?? ''
 const DEEPSEEK_MODEL = env.CONSTRUCTOR_DEEPSEEK_MODEL || 'deepseek-chat'
+// URL configurabil → ORICE endpoint OpenAI-compatibil: DeepSeek cloud SAU modelul
+// PROPRIU pe RunPod serverless (vLLM: .../openai/v1/chat/completions), izolat de
+// creditul de voce. Dovedit pe viu 11-12 aug: Qwen3-Coder pe RunPod cheamă unelte
+// corect pe ruta asta (a chemat `grep {"pattern":"8080"}` la un ordin real).
 const DEEPSEEK_URL = env.CONSTRUCTOR_DEEPSEEK_URL || 'https://api.deepseek.com/v1/chat/completions'
 // Un SINGUR creier pe rulare (nu amestecăm furnizori într-un ordin): dacă e
 // cheia DeepSeek, tot ordinul merge pe DeepSeek; altfel pe Gemini.
 const FOLOSESTE_DEEPSEEK = !!DEEPSEEK_KEY
+// TIMEOUT-UL apelului OpenAI-compatibil (DeepSeek/RunPod). Default 120s pentru un
+// cloud rapid. Pentru endpoint LOCAL pe RunPod serverless, prima trezire descarcă
+// modelul (~3–8 min), deci pe VPS se ridică prin CONSTRUCTOR_LLM_TIMEOUT_MS (~540s)
+// — altfel primul apel s-ar tăia la 120s și ordinul s-ar amâna la nesfârșit fără
+// să apuce placa să pornească. (Adrian, 11 aug — creierul constructorului pe placa
+// proprie.) Trezirile următoare-s rapide (FlashBoot), deci plafonul lovește doar
+// prima dată.
+const LLM_TIMEOUT_MS = Number(env.CONSTRUCTOR_LLM_TIMEOUT_MS || 120_000)
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
 // rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
 // 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
@@ -815,9 +827,10 @@ async function llmDeepSeek(messages) {
         max_tokens: 8192,
         temperature: 0.7,
       }),
-      // Aceeași plasă de timp ca Gemini — un endpoint blocat nu ține jobul peste
-      // timeout-ul dur al constructor-worker.sh.
-      signal: AbortSignal.timeout(Math.max(30_000, Math.min(120_000, ramase()))),
+      // Plasa de timp, mărginită de bugetul rulării. Configurabilă (LLM_TIMEOUT_MS)
+      // fiindcă un endpoint LOCAL pe RunPod se trezește lent prima dată (descarcă
+      // modelul) — pe cloud rapid rămâne 120s, pe RunPod se ridică din env.
+      signal: AbortSignal.timeout(Math.max(30_000, Math.min(LLM_TIMEOUT_MS, ramase()))),
     })
   } catch (e) {
     throw Object.assign(new Error(`DeepSeek rețea: ${String(e?.message ?? e).slice(0, 200)}`), { clasa: 'furnizor' })
