@@ -10,6 +10,20 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 (seara, partea 3) — N val 2 închis + verificări oneste (nu presupuse).**
+> - **N val 2 (c) — listener MORT de deblocare-admin SCOS.** Nimeni nu emitea
+>   `kelion:admin-unlock` (amprenta scoasă din calea vocii, 6 aug); comentariul jura
+>   „realtimeVoice emits" — FALS. Scos listener-ul + corectat comentariul. NU am
+>   re-cablat voce→admin (din grija ta de securitate: ar fi lărgit suprafața admin).
+>   Un eveniment rătăcit nu-mai poate flip-ui lacătul din UI.
+> - **N val 2 (e) — VERIFICAT deja acoperit** (nu presupus): butonul de înregistrare
+>   dă feedback la refuz/unsupported (`Stage.tsx` 964-975: „Rec ⚠" 3s, cu motiv).
+> - **L1b — VERIFICAT deja acoperit:** bucla de autonomie reia joburile picate CU
+>   jurnalul eșecului + escaladare de la PRIMA reîncercare (test verde).
+> **RĂMAS, onest:** N val 2 (a) cadrul `niveluri` pe voce (wiring, de probat live pe
+> trading); (d) memoria trading în conversație (decizie „intenționat vs cablăm");
+> L1e/L1i (unelte CSV/JSON + Drive avansat — funcții NOI).
+
 > **12 aug 2026 (seara, partea 2) — continuare „toate, absolut toate".**
 > - **N val 2 (b) — persona vocală ONESTĂ.** Nu mai pretinde vedere continuă:
 >   „VEDEREA (la CERERE, NU continuu)… CERI cadrele prin cere_creierului". Test
