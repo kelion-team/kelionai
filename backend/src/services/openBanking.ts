@@ -214,6 +214,7 @@ export async function finalizeazaLegaturaPlati(code: string): Promise<{ conturi:
 // credit the person. It runs periodically, because nobody can notify us —
 // Revolut Pro has no webhook.
 import { crediteazaDupaCod, refCreditatDeja, salveazaPlataNeatribuita } from '../db.js'
+import { notifyAdmin } from './adminNotification.js'
 
 /** The last pass: what we found and what we did. The panel reads it so it can
  *  say whether the system is actually working — a read that fails MUST NOT
@@ -282,6 +283,16 @@ export async function proceseazaIntrare(t: {
   if (email) return { fel: 'creditat', email }
   if (await refCreditatDeja(t.id).catch(() => false)) return { fel: 'vechi' }
   const nou = await salveazaPlataNeatribuita(t.id, t.referinta, t.amount, t.currency).catch(() => false)
+  // ANUNȚ LA OWNER (K14): o plată fără cod ajunge în plasă — ownerul TREBUIE
+  // anunțat, ca s-o atribuie manual (banii nu creditează singuri). Best-effort.
+  if (nou) {
+    void notifyAdmin(
+      'plata_neatribuita',
+      'Plată neatribuită',
+      `Plată de ${t.amount} ${t.currency} fără cod recunoscut (ref: „${String(t.referinta).slice(0, 60)}"). De atribuit manual în Admin → Bani.`,
+      { amount: t.amount, currency: t.currency, referinta: t.referinta, bankRef: t.id },
+    ).catch(() => 0)
+  }
   return nou ? { fel: 'plasa' } : { fel: 'vechi' }
 }
 

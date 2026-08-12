@@ -27,6 +27,7 @@ import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type Camp
 import { voceRecenta, minuteRamaseVoce, fataRecenta, minuteRamaseFata } from './adminLock.js'
 import { adminVezi, adminSchimba } from './adminVedere.js'
 import { julesSurse, julesSarcina, julesStare } from './jules.js'
+import { notifyAdmin } from './adminNotification.js'
 
 // The names of the shared admin tools (chat ∩ voice). The caller checks
 // membership to know whether to delegate here or handle it itself
@@ -321,7 +322,15 @@ export async function execUserScopedTool(
     case 'log_unsupported_request': {
       const request = String(args.request ?? '')
       if (!request) return JSON.stringify({ error: 'no_request' })
-      void logCapabilityGap(email, request, String(args.reason ?? ''))
+      const nouGol = await logCapabilityGap(email, request, String(args.reason ?? ''))
+      // ANUNȚ LA OWNER (K14), o singură dată, DOAR pe gol NOU: un user a cerut ceva
+      // ce Kelion nu acoperă — ownerul e anunțat ca să decidă (nu la fiecare repetare).
+      if (nouGol) {
+        void notifyAdmin('scris', 'Cerere neacoperită', `${email}: „${request.slice(0, 160)}"`, {
+          email,
+          request: request.slice(0, 500),
+        }).catch(() => 0)
+      }
       return JSON.stringify({ logged: true })
     }
     case 'propose_tool': {

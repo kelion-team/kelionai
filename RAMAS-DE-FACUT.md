@@ -10,6 +10,49 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 (seara) — ÎNCHIDEREA LISTEI, la ordinul „toate, absolut toate".**
+> Iau la rând tot ce a rămas cod-abil; fiecare cu porți verzi. De verificat live
+> după merge.
+> - **K16 — DEDUP FUZZY DE CERINȚE.** `adaugaCerinta` deduplica doar pe text
+>   IDENTIC → aceeași cerință spusă altfel (diacritice, punctuație, ordinea
+>   cuvintelor) intra a doua oară și bucla o re-analiza (dubluri = timp + bani).
+>   Fix: modul pur `services/cerinteDedup.ts` (normalizare + similaritate Jaccard
+>   pe tokeni semnificativi, prag 0.8); `adaugaCerinta` compară cu cerințele
+>   deschise și cade pe cea existentă. Prinde reformulările (nu flexiune/sinonime
+>   — onest). 6 teste noi (1167 total), tsc curat.
+> - **K9 + K13 — AUTO-ARHIVAREA ORDINELOR VECHI.** Panoul Constructor
+>   (`listBuildJobs`) arăta TOATE joburile, inclusiv cele eșuate vechi (gunoi).
+>   Fix: coloană `arhivat` pe `build_jobs`; `listBuildJobs` exclude arhivatele;
+>   `arhiveazaBuildJobsVechi()` (nouă) marchează arhivate ordinele TERMINATE
+>   (done/failed) mai vechi de o zi — iese din panou, RĂMÂN în DB (recuperabile,
+>   nu șterse); chemată automat de bucla de autonomie („curățenie când e gata").
+>   Nu atinge niciodată ordinele vii. 1167 teste verzi, tsc curat.
+> - **K14 — ANUNȚ LA OWNER LA CERERE NOUĂ.** Serviciul `adminNotification` exista,
+>   dar NU-l chema nimeni și adminul nu-l vedea. Legat: `notifyAdmin` pe **plată
+>   neatribuită** (openBanking — bani fără cod, de atribuit) și pe **cerere
+>   neacoperită** NOUĂ (`logCapabilityGap` întoarce acum `nou`, anunț o singură
+>   dată). Endpoint `GET /api/admin/notificari` + `POST …/:id/citit` (gardate
+>   `cerAdmin`). Frontend: tab „Notificări" cu badge de necitite. **Atenția
+>   ownerului respectată** („Kelion are drepturi admin"): toate ușile noi gardate
+>   admin; notificarea deduplică (nu se poate spama). 1167 teste, tsc + build +
+>   sintaxă verzi.
+> - **K10 — ANUNȚ DE ESCALADARE CÂND CREIERUL NU POATE.** La `/api/constructor/report`,
+>   dacă un ordin pică fiindcă MODELUL nu a dus sarcina (semnătură în log:
+>   creier/răspuns gol/indisponibil/„fără nicio modificare"/401-403), pun o
+>   notificare în panou (K14) cu ce e de făcut: escaladează la creier plătit
+>   (`CONSTRUCTOR_MODEL` + `CONSTRUCTOR_ALLOW_PAID=1`) + reia ordinul
+>   (`constructor_manage retry`) — nu doar email care se pierde. 1167 teste, tsc curat.
+> - **K8 — FANTOMA STT PE TĂCERE („Greț") + reevaluarea celor 7.** Poarta de
+>   energie de pe client tăia mult, dar o fantomă tot scăpa în chat. Filtru
+>   centralizat pe `/api/asr`: modul pur `asrHalucinatii.ts` (listă curată de
+>   halucinații de tăcere — „greț", „subtitrare", „thanks for watching", doar
+>   simboluri — DOAR când tot transcriptul e asta; Da/Nu/OK NU se ating). 5 teste.
+>   NU promit un „0 garantat" de la un model probabilistic (ar fi invenție) —
+>   blochez tăcerea + fantomele cunoscute, iar lista crește din fantome REALE.
+>   Pe drum (la „reevaluează 1–7"): **corectat un comentariu stale** în
+>   `autonomie.ts` (zicea că schimbarea de metodă vine „de la a treia" încercare;
+>   codul o face de la PRIMA — `escaladare()` linia 536). 1172 teste, tsc curat.
+
 > **12 aug 2026 — PLASĂ DE SĂNĂTATE LA PUBLICARE: backup → health → revert automat (de verificat live).**
 > Adrian: „să poată da automat merged, DAR cu backup înainte în caz că crapă ceva;
 > după merged, verificare automată de sănătate; dacă nu trece, REVERT și schimbă

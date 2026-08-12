@@ -7,6 +7,7 @@ import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
 import { procentDinProgres } from '../services/progresOrdin.js'
 import { UNELTE_CONSTRUCTOR } from '../services/brainToolDefs.js'
+import { notifyAdmin } from '../services/adminNotification.js'
 
 // ── THE CONSTRUCTOR — the "order → code → PR" pipeline (Adrian, Jul 27:
 // "Kelion must be able to create any software the admin asks for, any change,
@@ -165,6 +166,25 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       brain,
       costUsd,
     })
+    // ANUNȚ DE ESCALADARE (K10, Adrian: „când creierul nu poate, să te anunțe
+    // «bifează creier superior»"). Dacă ordinul a picat fiindcă MODELUL nu a dus
+    // sarcina (nu o poartă roșie de cod), pun o notificare în panou cu ce e de
+    // făcut — nu doar un email care se pierde. Distins prin semnătura din log.
+    if (status === 'failed') {
+      const motiv = String(req.body?.log ?? '')
+      const creierNuPoate =
+        /creier|brain|r[ăa]spuns gol|indisponibil|f[ăa]r[ăa] nicio modificare|nu ai scris nimic|\b(401|403)\b|model (invalid|refuzat|nu)/i.test(
+          motiv,
+        )
+      if (creierNuPoate) {
+        void notifyAdmin(
+          'scris',
+          `Ordin #${id}: creierul constructorului nu a putut`,
+          `Ordinul de build #${id} a eșuat fiindcă modelul constructorului nu a dus sarcina (nu din cauza unei porți roșii de cod). Escaladează la un creier superior: pune CONSTRUCTOR_MODEL pe un model plătit + CONSTRUCTOR_ALLOW_PAID=1, apoi reia ordinul (constructor_manage retry). Motiv: „${motiv.slice(0, 200)}".`,
+          { jobId: id, motiv: motiv.slice(0, 300) },
+        ).catch(() => 0)
+      }
+    }
     // The report to Adrian — by email, with the PR to press (the merge is his).
     const dovadaCI =
       ci === 'verde'

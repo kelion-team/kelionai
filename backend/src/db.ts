@@ -5,6 +5,7 @@ import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.
 export type { DemoRecent, DemoStats, UserActivityRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
+import { esteDuplicat } from './services/cerinteDedup.js'
 
 let pool: pg.Pool | null = null
 
@@ -541,6 +542,12 @@ export async function initDb(): Promise<void> {
     -- distinguishable in the Money views without any fabrication.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS brain TEXT;
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION;
+    -- ARHIVAREA ORDINELOR VECHI (Adrian, K9 + K13: „de ascuns cele vechi din
+    -- panou" + „sistem automat de curățare care arhivează când e gata"). Un ordin
+    -- terminat (done/failed) mai vechi se ARHIVEAZĂ (nu se șterge — rămâne
+    -- recuperabil): iese din panou, dar nu se pierde. Bucla de autonomie
+    -- arhivează singură; panoul (listBuildJobs) le exclude.
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "sent to execution" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -2473,9 +2480,11 @@ export interface CapabilityGap {
  * de-duplicated (hits++ and recency refreshed) so the list stays a signal, not
  * a flood. Never throws — logging a gap must never affect the conversation.
  */
-export async function logCapabilityGap(email: string, request: string, reason = ''): Promise<void> {
+// Întoarce `true` DOAR când s-a înregistrat un gol NOU (nu la duplicat) — ca
+// apelantul să poată anunța owner-ul o singură dată (K14), nu la fiecare repetare.
+export async function logCapabilityGap(email: string, request: string, reason = ''): Promise<boolean> {
   const req = request.trim().slice(0, 500)
-  if (!dbEnabled() || !req) return
+  if (!dbEnabled() || !req) return false
   try {
     const pool = getPool()
     const dup = await pool.query<{ id: number }>(
@@ -2488,14 +2497,16 @@ export async function logCapabilityGap(email: string, request: string, reason = 
         'UPDATE capability_gaps SET hits = hits + 1, last_seen = now() WHERE id = $1',
         [dup.rows[0].id],
       )
-      return
+      return false
     }
     await pool.query(
       'INSERT INTO capability_gaps (user_email, request, reason) VALUES ($1, $2, $3)',
       [email, req, reason.trim().slice(0, 500) || null],
     )
+    return true
   } catch {
     // Best-effort — never break the chat because gap logging failed.
+    return false
   }
 }
 
@@ -2531,11 +2542,15 @@ export async function adaugaCerinta(
   const t = text.trim().slice(0, 4000)
   if (!t) return 0
   try {
-    const dej = await getPool().query<{ id: string | number }>(
-      `SELECT id FROM cerinte WHERE lower(text) = lower($1) AND stare <> 'respinsa' LIMIT 1`,
-      [t],
+    // DEDUP FUZZY (K16): nu doar text identic, ci și reformulări (diacritice,
+    // punctuație, ordinea cuvintelor) — o cerință deja deschisă, chiar spusă
+    // altfel, nu mai intră a doua oară (dubluri = timp + bani irosiți în buclă).
+    const deschise = await getPool().query<{ id: string | number; text: string }>(
+      `SELECT id, text FROM cerinte WHERE stare <> 'respinsa' ORDER BY created_at DESC LIMIT 200`,
     )
-    if (dej.rows[0]) return Number(dej.rows[0].id)
+    for (const row of deschise.rows) {
+      if (esteDuplicat(t, String(row.text))) return Number(row.id)
+    }
     const r = await getPool().query<{ id: string | number }>(
       'INSERT INTO cerinte (text, sursa, criteriu, prioritate) VALUES ($1,$2,$3,$4) RETURNING id',
       [t, sursa, criteriu ?? null, Math.max(1, Math.min(9, Math.round(prioritate) || 5))],
@@ -3532,10 +3547,36 @@ export async function reportBuildJob(
 export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
   if (!dbEnabled()) return null
   try {
-    const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
+    // Exclude ARHIVATELE (K9): ordinele vechi terminate nu mai încarcă panoul,
+    // dar rămân în DB (recuperabile), nu se pierd.
+    const r = await getPool().query<BuildJobDbRow>(
+      'SELECT * FROM build_jobs WHERE arhivat = false ORDER BY created_at DESC LIMIT $1',
+      [limit],
+    )
     return r.rows.map(rowToBuildJob)
   } catch {
     return null
+  }
+}
+
+/** AUTO-ARHIVARE (K9 + K13): ordinele TERMINATE (done/failed) mai vechi de
+ *  `zile` se marchează arhivate — ies din panou, rămân în DB. Nu atinge niciodată
+ *  ordinele vii (queued/running). Întoarce câte a arhivat. Rulată de bucla de
+ *  autonomie (curățenie automată, „când e gata"). */
+export async function arhiveazaBuildJobsVechi(zile = 1): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const z = Math.max(1, Math.min(90, Math.round(zile) || 1))
+    const r = await getPool().query(
+      `UPDATE build_jobs SET arhivat = true
+        WHERE arhivat = false
+          AND status IN ('done','failed')
+          AND updated_at < now() - ($1 || ' days')::interval`,
+      [z],
+    )
+    return r.rowCount ?? 0
+  } catch {
+    return 0
   }
 }
 

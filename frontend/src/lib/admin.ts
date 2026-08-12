@@ -555,6 +555,38 @@ export async function fetchErori(): Promise<EroriAdmin | null> {
   }
 }
 
+// ── NOTIFICĂRI PENTRU OWNER (K14) ──────────────────────────────────────────────
+// Cereri noi care cer atenția: plată neatribuită, cerere neacoperită. null =
+// citirea a EȘUAT (nu „zero notificări").
+export interface NotificareAdmin {
+  id: number
+  type: 'scris' | 'voce' | 'plata_neatribuita'
+  title: string
+  message: string
+  read: boolean
+  createdAt: string
+}
+export async function fetchNotificari(): Promise<NotificareAdmin[] | null> {
+  try {
+    const r = await fetch('/api/admin/notificari', { credentials: 'include' })
+    if (!r.ok) return null
+    const j = (await r.json()) as { notificari?: NotificareAdmin[] }
+    return j.notificari ?? []
+  } catch {
+    return null
+  }
+}
+export async function markNotificareCitit(id: number): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/admin/notificari/${id}/citit`, { method: 'POST', credentials: 'include' })
+    if (!r.ok) return false
+    const j = (await r.json()) as { ok?: boolean }
+    return !!j.ok
+  } catch {
+    return false
+  }
+}
+
 // (resolveGap — SCOS 10 aug: cod mort după curățarea adminului #959, niciun apelant.)
 
 // Registered voiceprints (admin only).

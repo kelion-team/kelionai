@@ -45,6 +45,7 @@ import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { explicaEroare } from '../services/explicaEroare.js'
 import { problemeGlobaleAcum } from '../services/autodiagnostic.js'
+import { getAdminNotifications, markAdminNotificationRead } from '../services/adminNotification.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { stareCitirePlati, incepeLegaturaPlati, finalizeazaLegaturaPlati } from '../services/openBanking.js'
 import { starePlatiEmail } from '../services/platiEmail.js'
@@ -335,6 +336,22 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       }
     })
     return reply.send({ browser, sistem })
+  })
+
+  // ── NOTIFICĂRI PENTRU OWNER (K14: „sistem de rezolvări care anunță adminul că
+  // sunt cereri") ────────────────────────────────────────────────────────────
+  // Cereri noi care cer atenția ownerului: plată neatribuită (bani fără cod) și
+  // cerere neacoperită (un user a cerut ceva ce Kelion nu acoperă). Sunt scrise
+  // la momentul evenimentului (notifyAdmin); aici le citește + le marchează citite.
+  app.get<{ Querystring: { necitite?: string } }>('/api/admin/notificari', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    return reply.send({ notificari: await getAdminNotifications(50, req.query?.necitite === '1') })
+  })
+  app.post<{ Params: { id: string } }>('/api/admin/notificari/:id/citit', async (req, reply) => {
+    const id = adminSiId(req, reply, req.params.id)
+    if (id === null) return
+    return reply.send({ ok: await markAdminNotificationRead(id) })
   })
 
   // AUTONOMOUS TRIAGE (Adrian, 24 Jul): Kelion decides by itself on each gap —
