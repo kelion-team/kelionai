@@ -39,6 +39,11 @@ function signature(message: string): string {
   return crypto.createHash('sha1').update(norm).digest('hex').slice(0, 16)
 }
 
+// Contractul de închidere pentru simptomele live (vezi bucla de mai jos).
+const REVERIFICA_MS = 6 * 60 * 60 * 1000 // nu reverificăm mai des de 6h (lasă timp de merge+deploy)
+const FEREASTRA_DEPLOY_MS = 30 * 60 * 1000 // o reapariție la ≤30 min după reparație nu contează (nu apucase să se publice)
+const LIMITA_REPARARI = 4 // după atâtea reparații care n-au ținut, oprim relansarea (rămâne vizibil ca nerezolvat)
+
 export async function runSelfHeal(): Promise<{ filed: number }> {
   if (await isOpsPaused()) return { filed: 0 }
 
@@ -110,11 +115,39 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     if (s.count < pragPentru(s.fel)) continue // nu e (încă) un tipar — nu-l reparăm orbește
     const sig = signature(`${s.fel} ${s.message}`)
     const key = `selfheal-live:${sig}`
-    if (await loadKv(key)) continue // deja trimis — nu duplicăm
 
-    const id = await createBuildJob('kelion-autovindecare-live', ordinSimptomLive(s.fel, s.message, s.count, s.sampleUrl))
+    // ── CONTRACT DE ÎNCHIDERE (Adrian, 12 aug: „nu au nimic clar că trebuie să
+    // ajungă la o soluție măsurabilă real. de ce?") ─────────────────────────────
+    // Un simptom NU e rezolvat fiindcă s-a trimis un ordin — e rezolvat când
+    // ÎNCETEAZĂ. Dacă a mai fost o reparație dar simptomul REAPARE după fereastra
+    // de merge+deploy, reparația n-a ținut: se redeschide cu escaladare (schimbă
+    // metoda), plafonat ca să nu curgă la infinit. Dacă N-a mai reapărut de la
+    // reparație, nici nu ajunge aici (simptomeLiveRecente nu-l mai întoarce) —
+    // închis prin absență, măsurat.
+    let incercari = 0
+    const prevRaw = await loadKv(key)
+    if (prevRaw) {
+      let prev: { at?: number; incercari?: number } = {}
+      try { prev = JSON.parse(prevRaw) } catch { prev = { at: 0, incercari: 1 } }
+      const at = Number(prev.at ?? 0)
+      incercari = Number(prev.incercari ?? 1)
+      const reaparutDupaReparatie = new Date(s.lastSeen).getTime() > at + FEREASTRA_DEPLOY_MS
+      const treceFereastraDeReverificare = Date.now() - at > REVERIFICA_MS
+      if (!(reaparutDupaReparatie && treceFereastraDeReverificare)) continue // încă ține SAU prea devreme
+      if (incercari >= LIMITA_REPARARI) continue // stop-flood: rămâne VIZIBIL ca nerezolvat, nu-l mai reiau orbește
+    }
+
+    const ordinBaza = ordinSimptomLive(s.fel, s.message, s.count, s.sampleUrl)
+    const ordin =
+      incercari > 0
+        ? `⚠ REPARAȚIA PRECEDENTĂ (încercarea ${incercari}) NU A OPRIT eroarea — reapare pe viu. ` +
+          `SCRIE ÎN PRIMUL RÂND CE FACI ALTFEL; nu relua același drum, ai dovada că nu duce nicăieri.\n\n` +
+          ordinBaza
+        : ordinBaza
+
+    const id = await createBuildJob('kelion-autovindecare-live', ordin)
     if (id) {
-      await saveKv(key, JSON.stringify({ at: Date.now(), job: id, fel: s.fel, count: s.count }))
+      await saveKv(key, JSON.stringify({ at: Date.now(), job: id, fel: s.fel, count: s.count, incercari: incercari + 1 }))
       filed += 1
       filedLive += 1
     }

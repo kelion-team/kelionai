@@ -55,7 +55,7 @@ import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddi
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
-import { makeLogTee } from './services/logbuffer.js'
+import { makeLogTee, setLogSymptomSink } from './services/logbuffer.js'
 
 // Content types for the download endpoint (installers + QR images + manifest).
 const DL_TYPES: Record<string, string> = {
@@ -93,23 +93,30 @@ process.on('uncaughtException', (err) => {
   app.log.error({ err }, 'uncaughtException — caught globally, the process stays alive')
 })
 
+// TEUL DE LOG → SIMPTOM (Adrian, 12 aug: „orice err, din toate logurile, să
+// ajungă la creier"): ORICE linie de nivel eroare care trece prin logger (deci
+// și unhandledRejection/uncaughtException de mai sus, și orice app.log.error din
+// tot codul) devine simptom viu, la care self-heal ajunge. O singură poartă, nu
+// puncte alese de mână. recordSimptomLive înghite singur eșecurile de scriere.
+setLogSymptomSink((msg) => {
+  void recordSimptomLive('log-eroare', msg).catch(() => {})
+})
+
 // KELION VEDE CE PICĂ PE SERVER (Adrian, 12 aug: „kelion sa vada tot ce pica").
-// Orice rută care crapă cu 5xx lasă un SIMPTOM structurat (nu doar în log-ul
-// volatil), ca autovindecarea să ajungă la el — nu doar erorile raportate din
-// browser. NU schimbă răspunsul spre client: notează, apoi răspunde ca Fastify
-// implicit (reply.send(err)). 4xx-urile (input greșit, rate-limit) NU se notează
-// — nu sunt eșecuri ale aplicației.
+// O rută care crapă cu 5xx e logată cu metodă+rută+mesaj, iar teul de log (sus)
+// o transformă în simptom — o singură poartă pentru toate erorile de server,
+// fără dublă înregistrare. 4xx-urile (input greșit, rate-limit) NU sunt eșecuri
+// ale aplicației: se logează pe warn, nu devin simptom. NU schimbă răspunsul
+// spre client (reply.send(err), exact ca Fastify implicit).
 app.setErrorHandler((err, req, reply) => {
   const e = err as { statusCode?: number; message?: string }
   const cod = e.statusCode ?? 500
+  const ruta = (req.url || '').split('?')[0]
   if (cod >= 500) {
-    const ruta = (req.url || '').split('?')[0]
-    void recordSimptomLive('ruta-crapata', `${req.method} ${ruta}: ${e.message ?? 'eroare'}`, {
-      url: req.url,
-      ip: (req.headers['cf-connecting-ip'] as string) || req.ip,
-    }).catch(() => {})
+    app.log.error({ err }, `rută 5xx: ${req.method} ${ruta} — ${e.message ?? 'eroare'}`)
+  } else {
+    app.log.warn(`rută ${cod}: ${req.method} ${ruta} — ${e.message ?? ''}`)
   }
-  app.log.error({ err, url: req.url }, 'route error')
   reply.send(err)
 })
 

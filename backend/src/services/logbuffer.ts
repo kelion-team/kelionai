@@ -24,6 +24,39 @@ function push(e: LogEntry): void {
   if (ring.length > MAX_ENTRIES) ring.splice(0, ring.length - MAX_ENTRIES)
 }
 
+// ── PLASA CEA MAI LARGĂ: ORICE eroare de server → simptom viu ────────────────
+// Adrian, 12 aug: „sensul absolut orice err, să o vadă din toate logurile" ·
+// „să ajungă la creier să le poată DECIDE, să le rezolve, nu doar să le vadă".
+// Teul ăsta e SINGURA poartă prin care trece fiecare linie de log a serverului.
+// În loc să aleg eu puncte de emisie, tapez AICI: orice linie de nivel eroare
+// (50/60) devine simptom, deci ajunge la self-heal → constructor. Injectăm
+// funcția din index.ts (setLogSymptomSink) ca să NU închidem un ciclu de import
+// cu db.ts. Rate-limit pe semnătură ca o eroare în buclă să nu bombardeze baza.
+type SimptomSink = (msg: string) => void
+let simptomSink: SimptomSink | null = null
+export function setLogSymptomSink(fn: SimptomSink | null): void {
+  simptomSink = fn
+}
+
+const ultimaEroare = new Map<string, number>()
+const REPETA_MS = 30_000
+function trimiteSimptom(level: number, msg: string): void {
+  if (level < 50 || !simptomSink || !msg) return
+  // NU raportăm liniile despre ÎNSĂȘI înregistrarea simptomelor (anti-buclă).
+  if (/client_errors|recordSimptom|simptom/i.test(msg)) return
+  const sig = msg.replace(/\d+/g, '#').slice(0, 120)
+  const now = Date.now()
+  const last = ultimaEroare.get(sig)
+  if (last !== undefined && now - last < REPETA_MS) return
+  ultimaEroare.set(sig, now)
+  if (ultimaEroare.size > 500) ultimaEroare.clear()
+  try {
+    simptomSink(msg)
+  } catch {
+    /* înregistrarea unui simptom nu are voie să rupă fluxul de log */
+  }
+}
+
 /** Pino stream: keeps writing to stdout (docker logs stays intact) AND
  *  retains entries in the ring. Reqid/req/res are compressed to a short
  *  summary so the ring holds SIGNAL, not access noise. */
@@ -57,16 +90,18 @@ export function makeLogTee(): Writable {
           if (j.msg) parts.push(j.msg)
           if (j.err?.message) parts.push(`err: ${j.err.message}`)
           if (j.reason !== undefined) parts.push(`reason: ${String(j.reason).slice(0, 200)}`)
-          push({
-            t: new Date(j.time ?? Date.now()).toISOString(),
-            level,
-            msg: parts.join(' ').slice(0, 400) || line.slice(0, 400),
-          })
+          const msg = parts.join(' ').slice(0, 400) || line.slice(0, 400)
+          push({ t: new Date(j.time ?? Date.now()).toISOString(), level, msg })
+          trimiteSimptom(level, msg) // orice eroare (≥50) → simptom viu
         }
       } catch {
         // Non-JSON line (e.g. foreign output) — we keep it raw if it looks like an error.
         const s = chunk.toString('utf8')
-        if (/error|fail|exception/i.test(s)) push({ t: new Date().toISOString(), level: 50, msg: s.slice(0, 400) })
+        if (/error|fail|exception/i.test(s)) {
+          const msg = s.slice(0, 400)
+          push({ t: new Date().toISOString(), level: 50, msg })
+          trimiteSimptom(50, msg)
+        }
       }
       cb()
     },
