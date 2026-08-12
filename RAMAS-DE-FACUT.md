@@ -36,6 +36,12 @@
 >   ownerului respectată** („Kelion are drepturi admin"): toate ușile noi gardate
 >   admin; notificarea deduplică (nu se poate spama). 1167 teste, tsc + build +
 >   sintaxă verzi.
+> - **K10 — ANUNȚ DE ESCALADARE CÂND CREIERUL NU POATE.** La `/api/constructor/report`,
+>   dacă un ordin pică fiindcă MODELUL nu a dus sarcina (semnătură în log:
+>   creier/răspuns gol/indisponibil/„fără nicio modificare"/401-403), pun o
+>   notificare în panou (K14) cu ce e de făcut: escaladează la creier plătit
+>   (`CONSTRUCTOR_MODEL` + `CONSTRUCTOR_ALLOW_PAID=1`) + reia ordinul
+>   (`constructor_manage retry`) — nu doar email care se pierde. 1167 teste, tsc curat.
 
 > **12 aug 2026 — PLASĂ DE SĂNĂTATE LA PUBLICARE: backup → health → revert automat (de verificat live).**
 > Adrian: „să poată da automat merged, DAR cu backup înainte în caz că crapă ceva;
