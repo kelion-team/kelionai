@@ -97,6 +97,8 @@ import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { marcheazaFata } from '../services/adminLock.js'
 import { recentClientErrors } from './clientErrors.js'
+import { explicaEroare } from '../services/explicaEroare.js'
+import { problemeGlobaleCache, formateazaProbleme } from '../services/autodiagnostic.js'
 import { neagaUneltele } from '../services/negareUnelte.js'
 import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
@@ -597,7 +599,7 @@ export {
 const BUILD_SOFTWARE_TOOL: Tool = {
   name: 'build_software',
   description:
-    "ADMIN ONLY. Queue a BUILD ORDER for your own constructor: any software, feature, change or improvement the owner asks for that is too big to ship in this conversation with repo_write (multi-file work, needs build+tests). A worker on your server clones the repo, writes the code, runs the build and tests, then opens a PR — the owner merges it. Pass the order COMPLETE and self-contained (what to build, where, acceptance criteria) — the worker only sees this text. For small single-file fixes prefer repo_write; for ops use run_runbook. WHEN THE OWNER LITERALLY SAYS «construiește», «construieste», «fă-mi un soft/o funcție», «adaugă funcția», «trimite la constructor» or «ordin de construcție» — call THIS tool so the order lands in his Constructor panel (which he watches), even if you could also do it yourself with repo_write; that is where he expects to see it. ROUTING RULE: the constructor receives ONLY an explicit build/repair order for the app — NEVER an ordinary question or chat request (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation, with your own tools.",
+    "ADMIN ONLY. Queue a BUILD ORDER for your own constructor: any software, feature, change or improvement the owner asks for that is too big to ship in this conversation with repo_write (multi-file work, needs build+tests). A worker on your server clones the repo, writes the code, runs the build and tests, then opens a PR — the owner merges it. Pass the order COMPLETE and self-contained (what to build, where, acceptance criteria) — the worker only sees this text. For small single-file fixes prefer repo_write; for ops use run_runbook. WHEN THE OWNER ASKS YOU TO CHANGE THIS APP — whether he says the words «construiește», «construieste», «fă-mi un soft/o funcție», «adaugă funcția», «trimite la constructor», «ordin de construcție», OR he gives a task that plainly requires editing the app's code or behavior even WITHOUT those words (e.g. «mută avatarul în stânga», «textul e acoperit, găsește o modalitate», «fă butonul să facă X», «repară Y», «schimbă cum arată Z») — call THIS tool with a complete order so it lands in his Constructor panel (which he watches) and produces a PR. Do NOT merely discuss it, propose an approach, promise to do it, or claim it's done WITHOUT queuing it — for the owner, a task about the app means ACT, not talk. ROUTING RULE: the constructor receives an explicit OR implicit build/repair order for THIS app — NEVER an ordinary question or chat (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation, with your own tools. When a request would change the product and you are unsure between talking and building, BUILD.",
   input_schema: {
     type: 'object',
     properties: {
@@ -1927,8 +1929,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const cerrs = recentClientErrors(user.email)
     if (cerrs.length > 0) {
       systemPrompt +=
-        `\n\nBROWSER CONSOLE (the user's own F12 errors, last 15 min — REAL symptoms from their device; use them to diagnose "why doesn't X work" and say plainly what is failing):\n- ` +
-        cerrs.slice(-8).join('\n- ')
+        `\n\nBROWSER CONSOLE (the user's own F12 errors, last 15 min — REAL symptoms from their device; each line has a plain explanation of WHAT IT IS after "→". When the user asks "what is this error?", answer from THIS, plainly — never a generic "try again"):\n- ` +
+        cerrs.slice(-8).map((l) => `${l} → ${explicaEroare(l).ceEste}`).join('\n- ')
+    }
+    // AUTODIAGNOSTIC (Adrian, 12 aug: „Kelion nu are sisteme să-i zică ce
+    // probleme are"): pentru OWNER injectăm poza defectelor curente (erori de
+    // server + ordine de build eșuate), fiecare cu „ce este". Sincron, din cache,
+    // deci NU adaugă latență. Astfel, la „ce probleme ai?", răspunde din
+    // cunoaștere — nu pretinde că totul e în regulă.
+    if (user.role === 'admin' && !turaDeOaspete) {
+      const probl = formateazaProbleme(problemeGlobaleCache())
+      if (probl) {
+        systemPrompt +=
+          `\n\nYOUR OWN CURRENT PROBLEMS (self-diagnosis — real server errors + failed build orders, each with what it is). You KNOW these. If the owner asks what problems you have / what is broken, list them plainly and offer to fix, instead of claiming all is fine:\n${probl}`
+      }
+      // ACȚIUNE, NU VORBĂ (Adrian, 12 aug: „kelion trebuie să fie capabil să o
+      // facă, nu tu"; ordinul cu avatarul a fost DISCUTAT, nu construit). Ordinele
+      // implicite (fără cuvântul „construiește") plecau la vorbă — regula de mai
+      // jos + rutarea din build_software le trimit acum la constructor.
+      systemPrompt +=
+        `\n\nOWNER TASKS = ACT, NOT TALK: when the owner gives you a task that changes THIS app (fix / add / move / adjust / repair / improve something in the product) — even without the word «construiește» — START it THIS turn: call build_software with a complete, self-contained order (or repo_write for a tiny single-file change), then tell him the order is queued and a PR will follow. Do NOT just describe how you would do it, do NOT promise to do it later, and NEVER claim it is done unless you actually queued the order or wrote the code this turn. Describing a change is not making it.`
     }
     // GPS must NEVER delay the reply: only synchronous cache reads happen here.
     // The place-name/IP lookups run in the background and are ready for the

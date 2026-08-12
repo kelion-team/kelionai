@@ -49,6 +49,8 @@ import {
   fetchEnvCheck,
   type EnvCheckResult,
   type TokenChecksResult,
+  fetchErori,
+  type EroriAdmin,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -58,6 +60,46 @@ function fmtDur(seconds: number): string {
   const m = Math.floor(s / 60)
   if (m < 60) return `${m}m`
   return `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
+// Un rând din lista de erori: pastilă de gravitate (culoare + categorie, nu doar
+// culoare — pentru accesibilitate), explicația „ce este", apoi textul brut.
+function ErrRow({
+  sev,
+  cat,
+  text,
+  ceEste,
+  meta,
+}: {
+  readonly sev: 'critic' | 'important' | 'minor'
+  readonly cat: string
+  readonly text: string
+  readonly ceEste: string
+  readonly meta?: string
+}) {
+  const culoare = sev === 'critic' ? '#e5484d' : sev === 'important' ? '#e6a23c' : '#8a8f98'
+  return (
+    <div style={{ padding: '8px 0', borderTop: '1px solid rgba(128,128,128,0.18)' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <span
+          aria-hidden
+          style={{ width: 8, height: 8, borderRadius: 4, background: culoare, display: 'inline-block', flex: '0 0 auto' }}
+        />
+        <span style={{ fontWeight: 600 }}>{cat}</span>
+        <span className="chat-hint" style={{ fontSize: 12 }}>
+          {sev}
+          {meta ? ` · ${meta}` : ''}
+        </span>
+      </div>
+      <div style={{ marginTop: 3 }}>{ceEste}</div>
+      <div
+        className="chat-hint"
+        style={{ marginTop: 2, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-word' }}
+      >
+        {text}
+      </div>
+    </div>
+  )
 }
 
 // A REAL flag image (Windows doesn't render emoji flags — they show as "GB"
@@ -229,11 +271,11 @@ export default function AdminPanel({
   brainCredit,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori'
   readonly brainCredit?: BrainCredit | null
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem'
+    'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori'
   >(initialTab ?? 'finance')
   // GESTURES (Adrian, Jul 13): the disabled list — what is NOT checked is NOT used.
   // Tri-stat (auditul admin, 3 aug): pe o citire EȘUATĂ nu desenăm „toate
@@ -248,6 +290,11 @@ export default function AdminPanel({
   const [peek, setPeek] = useState(false)
   // The „Pune pe 0” button in the Money tab: while it runs, it can't be pressed twice.
   const [resetBusy, setResetBusy] = useState(false)
+  // Lista de erori (tab „Erori"): erori browser + defecte de sistem, fiecare cu
+  // „ce este". 'necitit' = n-am întrebat încă; null = citirea a EȘUAT (nu „zero
+  // erori"); obiect = citit real.
+  const [erori, setErori] = useState<EroriAdmin | null | 'necitit'>('necitit')
+  const [eroriBusy, setEroriBusy] = useState(false)
   const previewAndPeek = (clip: string): void => {
     previewGesture(clip)
     setPeek(true)
@@ -807,6 +854,22 @@ export default function AdminPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
+  // Tab „Erori" deschis → încarcă lista (erori browser + defecte de sistem, cu
+  // „ce este") și o reîmprospătează cât stă deschis. null = citirea a EȘUAT.
+  const loadErori = (): void => {
+    setEroriBusy(true)
+    fetchErori()
+      .then((e) => setErori(e))
+      .finally(() => setEroriBusy(false))
+  }
+  useEffect(() => {
+    if (tab !== 'erori') return
+    loadErori()
+    const id = window.setInterval(loadErori, 20000)
+    return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
   const saveRecoveryNow = (): void => {
     setRecoveryMsg(A.savingRecovery)
     void fetch('/api/admin/backups', {
@@ -1081,6 +1144,13 @@ export default function AdminPanel({
               onClick={() => setTab('sistem')}
             >
               Sistem (VPS)
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'erori' ? 'sel' : ''}`}
+              onClick={() => setTab('erori')}
+            >
+              Erori
             </button>
           </div>
           {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
@@ -2071,6 +2141,55 @@ export default function AdminPanel({
               >
                 Reset VPS
               </button>
+            </div>
+          </section>
+        )}
+        {tab === 'erori' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Erori — ce e fiecare, în clar. Kelion le vede și el în creier (le poți întreba în chat:
+                „ce e eroarea asta?").
+                {eroriBusy && <span className="chat-hint"> · se încarcă…</span>}
+              </div>
+              {erori === 'necitit' && <p className="chat-hint">Se încarcă…</p>}
+              {erori === null && (
+                <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu pot citi erorile — citirea a eșuat (NU înseamnă „zero erori"). Reîncerc automat la 20s.
+                </p>
+              )}
+              {erori && erori !== 'necitit' && (
+                <>
+                  {erori.sistem.length === 0 && erori.browser.length === 0 && (
+                    <p className="chat-hint" style={{ marginTop: 8 }}>
+                      Nicio eroare în ultimele 48h. 🎉
+                    </p>
+                  )}
+                  {erori.sistem.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Sistem (server + ordine de build)</div>
+                      {erori.sistem.map((p, i) => (
+                        <ErrRow key={`s${i}`} sev={p.severitate} cat={p.categorie} text={p.text} ceEste={p.ceEste} />
+                      ))}
+                    </div>
+                  )}
+                  {erori.browser.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Browser (F12 la utilizatori, ultimele 48h)</div>
+                      {erori.browser.map((e, i) => (
+                        <ErrRow
+                          key={`b${i}`}
+                          sev={e.severitate}
+                          cat={e.categorie}
+                          text={e.text}
+                          ceEste={e.ceEste}
+                          meta={`×${e.cate}${e.cine ? ` · ${e.cine}` : ''}`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </section>
         )}

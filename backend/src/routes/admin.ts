@@ -43,6 +43,8 @@ import {
 } from '../db.js'
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
+import { explicaEroare } from '../services/explicaEroare.js'
+import { problemeGlobaleAcum } from '../services/autodiagnostic.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { stareCitirePlati, incepeLegaturaPlati, finalizeazaLegaturaPlati } from '../services/openBanking.js'
 import { starePlatiEmail } from '../services/platiEmail.js'
@@ -305,6 +307,34 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         .filter((j) => j.status === 'failed')
         .map((j) => ({ id: j.id, order: j.orderText.slice(0, 160), updated: j.updatedAt })),
     })
+  })
+
+  // ── LISTA DE ERORI, CE E FIECARE (Adrian, 12 aug: „adminul trebuie să aibă o
+  // listă de erori care îi spune exact ce este") ─────────────────────────────
+  // Erorile din browser (grupate pe mesaj) + defectele de sistem (server +
+  // ordine picate), FIECARE cu explicația „ce este" din `explicaEroare`. Adminul
+  // vede clar, nu coduri seci. E fața vizuală a autodiagnosticului pe care Kelion
+  // îl are deja în creier (chat.ts) — aceeași sursă de adevăr.
+  app.get('/api/admin/erori', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const [grupuriBrowser, sistem] = await Promise.all([
+      listClientErrorGroups(48, 40).catch(() => []),
+      problemeGlobaleAcum().catch(() => []),
+    ])
+    const browser = grupuriBrowser.map((g) => {
+      const ex = explicaEroare(g.message)
+      return {
+        text: g.message,
+        ceEste: ex.ceEste,
+        severitate: ex.severitate,
+        categorie: ex.categorie,
+        cate: Number(g.n) || 1,
+        cine: g.user_email ?? null,
+        cand: g.created_at,
+      }
+    })
+    return reply.send({ browser, sistem })
   })
 
   // AUTONOMOUS TRIAGE (Adrian, 24 Jul): Kelion decides by itself on each gap —

@@ -228,6 +228,16 @@ export default function ChatPanel({
     const id = window.setTimeout(() => setIdleBandHidden(true), 12_000)
     return () => window.clearTimeout(id)
   }, [busy, messages])
+  // AVATARUL SE DĂ ÎN COLȚ LA O ANALIZĂ (Adrian, 12 aug: „mută avatarul… când se
+  // afișează o analiză, că acoperă ce scrie"; alegerea lui: avatar în colț, mic).
+  // Chatul (z-index 30) stă peste avatarul central; la un răspuns LUNG (o
+  // analiză) se calcă. Semnalăm Stage-ul, care trece avatarul în colț (pip) doar
+  // atât timp cât analiza e pe ecran; la un răspuns scurt / gol, revine central.
+  useEffect(() => {
+    const lastAssistant = messages.filter((m) => m.role === 'assistant').at(-1)
+    const activ = (lastAssistant?.content?.trim().length ?? 0) > 320
+    window.dispatchEvent(new CustomEvent('kelion:analiza-vizibila', { detail: { activ } }))
+  }, [messages])
   // TICKER (fixed rule, Jul 10): the scroll duration scales with the text
   // length, so it stays readable — neither too fast, nor forever.
   const tickerDur = (s: string): string => `${Math.min(22, Math.max(3.5, s.length / 14))}s`

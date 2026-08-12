@@ -121,10 +121,14 @@ describe('regula de rutare: mesajul normal de chat NU ajunge la constructor', ()
     expect(sursaChat).toMatch(/Am preluat cerința \(ordin #\$\{jobId\}\)\./)
   })
 
-  it('definițiile uneltei spun explicit regula: constructorul NU primește întrebări obișnuite de chat', () => {
-    // Ambele definiții (chat + sursa comună pentru voce) poartă regula.
-    expect(sursaChat).toMatch(/ROUTING RULE: the constructor receives ONLY an explicit build\/repair order/)
-    expect(sursaDefs).toMatch(/ROUTING RULE: the constructor receives ONLY an explicit build\/repair order/)
+  it('definițiile uneltei spun explicit regula: constructorul primește ordine explicite SAU implicite, dar NU întrebări obișnuite de chat', () => {
+    // Ambele definiții (chat + sursa comună pentru voce) poartă regula — și
+    // implicit (fără cuvântul „construiește"), ca ordinele să nu mai plece la vorbă.
+    expect(sursaChat).toMatch(/ROUTING RULE: the constructor receives an explicit OR implicit build\/repair order/)
+    expect(sursaDefs).toMatch(/ROUTING RULE: the constructor receives an explicit OR implicit build\/repair order/)
+    // Regula „NU întrebări obișnuite" rămâne, în ambele.
+    expect(sursaChat).toMatch(/NEVER an ordinary question or chat/)
+    expect(sursaDefs).toMatch(/NEVER for an ordinary question or chat/)
   })
 
   it('panoul Admin → Constructor rămâne singura cale directă (403 pentru non-admin)', () => {

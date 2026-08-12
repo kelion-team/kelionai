@@ -10,6 +10,78 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 — CONSTRUCTORUL AJUNGE LA PLACA PROPRIE (jobul #177 „fetch failed" reparat, de verificat live).**
+> Cauza MĂSURATĂ (jobul #177, era în codul meu — regula #2): constructorul suna
+> modelul de pe placa RunPod cu un apel SINCRON pe `/openai`, dar placa serverless
+> stă stinsă la 0 muncitori și prima trezire DESCARCĂ modelul (~3–8 min) →
+> conexiunea sincronă cădea cu „fetch failed" (0 octeți) ÎNAINTE ca placa să
+> pornească. Fix (`deploy/constructor-agent.mjs`): dacă endpointul e RunPod,
+> TREZIM întâi placa pe ruta ASINCRONĂ (`/run` + poll `/status` până e terminal —
+> NU ține conexiunea deschisă, deci supraviețuiește pornirii la rece oricât ar
+> dura), cu progresul scris pe monitor (`beat`); abia când e caldă trimitem
+> cererea reală cu unelte pe `/openai`. Auto-vindecare: dacă placa se stinge între
+> pași și un apel sincron cade, se marchează RECE și reîncercarea o retrezește
+> singură. Sintaxă verificată (`node --check` + `verifica-sintaxa` curate).
+> **DE TĂIAT după proba live**: un ordin de build real → jurnalul constructorului
+> arată „placa e CALDĂ" apoi `modelServit: deepseek/…`, ordinul se termină, nu mai
+> pică pe „fetch failed".
+
+> **12 aug 2026 — KELION ÎȘI CUNOAȘTE SINGUR DEFECTELE (autodiagnostic, de verificat live).**
+> Adrian: „Kelion nu știe by default că are probleme… nu are sisteme să-i zică
+> automat ce probleme are" — întrebat „ce e eroarea 1006?", răspundea „încearcă din
+> nou". Cauza (din cod, regula #2): (1) eroarea de voce urca DOAR ca toast —
+> `urcaEroarea` din `vocalLive.ts` NU o trimitea pe canalul de erori, deci Kelion
+> n-o vedea niciodată; (2) erorile din browser se injectau BRUT în creier, fără
+> „ce este". Fix: `urcaEroarea` raportează acum și pe `console.error` (→
+> `/api/client-errors` → context); clasificator nou `explicaEroare.ts` (traduce
+> „cod 1006" / „Failed to fetch" / 5xx… în explicație clară, iar la necunoscut
+> spune „neclasificat" — NU inventează); serviciu `autodiagnostic.ts` care strânge
+> defectele curente (erori de server + ordine de build eșuate) SINCRON din cache
+> (zero latență, ca lookup-urile GPS); ambele injectate în creier (`chat.ts`) —
+> erorile din browser cu explicație, plus, pentru OWNER, blocul „PROBLEMELE MELE
+> ACUM". Porți verzi (**1161 teste**, +8 pe clasificator; tsc curat cu `@types/ws`;
+> build frontend; sintaxă). **DE TĂIAT după proba live**: în chat „ce e eroarea
+> 1006?" / „ce probleme ai?" → Kelion răspunde exact ce e, nu „încearcă din nou".
+
+> **12 aug 2026 — AVATARUL NU MAI ACOPERĂ ANALIZA (de verificat live).**
+> Adrian: „mută avatarul în stânga sau scrisul în stânga când se afișează o
+> analiză, că acoperă ce scrie." Ales de owner (AskUserQuestion): avatar în colț,
+> mic. Cauza (din CSS): chatul (`.chat`, z-index 30) stă PESTE avatarul central
+> (`.stage-canvas`, z-index 1) — la un răspuns lung (analiză) se calcă în centru.
+> Suprafețele (`monitorOn`) dădeau deja avatarul în colț; lipsea cazul „doar chat,
+> fără suprafață". Fix: `ChatPanel` emite `kelion:analiza-vizibila` când ultimul
+> răspuns e o analiză (text >320 caractere); `Stage` ascultă și pune avatarul în
+> colț (refolosește clasa `pip`, deci mecanism deja probat) cât timp analiza e pe
+> ecran; la răspuns scurt revine central. Build frontend verde. **DE TĂIAT după
+> proba live**: pui o întrebare care cere analiză lungă → avatarul se dă în colț,
+> textul rămâne liber; la „salut" scurt, avatarul stă central.
+
+> **12 aug 2026 — KELION PORNEȘTE SINGUR CONSTRUCȚIA DIN CHAT/VOCE (de verificat live).**
+> Adrian: „kelion trebuie să fie capabil să o facă, nu tu" — a dat ordinul cu
+> avatarul și Kelion a VORBIT, nu a construit. Cauza (din cod, regula #2): regula
+> de rutare a uneltei `build_software` pornea constructorul DOAR când ownerul
+> spunea LITERAL „construiește"; un ordin implicit („găsește o modalitate să muți
+> avatarul") era tratat ca discuție. Fix: rutarea acceptă acum ordine EXPLICITE
+> SAU IMPLICITE (orice cere schimbarea aplicației), în AMBELE surse (`chat.ts` +
+> `brainToolDefs.ts` pentru voce), plus o directivă în prompt pentru owner:
+> „sarcină despre aplicație = ACȚIUNE, nu vorbă" (build_software / repo_write
+> ACUM, nu promite). Test actualizat (`rutareChat.test.ts`). 1161 teste verzi,
+> tsc curat. **DE TĂIAT după proba live**: îi dai un ordin fără „construiește"
+> (ex. „repară X") → apare în panoul Constructor + PR, nu doar vorbă în chat.
+
+> **12 aug 2026 — MONITORUL ARATĂ TOT FLUXUL, CU BARE 0–100% (de verificat live).**
+> Adrian: „tot fluxul, cu bari de la 0 la 100%, actualizate real dinamic până la
+> deploy… de la preluare, pe unde ajunge sarcina." Backendul dădea deja `pct`
+> (`progresOrdin.ts` + `/api/constructor/live`), dar suprafața constructorului din
+> monitor NU-l desena — arăta doar textul ultimului pas. Fix (`Stage.tsx`
+> `BuildSurface` + CSS nou, clase noi fără coliziune): bară vizuală 0–100% +
+> cronologia etapelor (Preluat → Atelier → Construiește → Verifică → PR →
+> CI/Deploy) care se APRIND din pct-ul REAL raportat, cu etapa activă evidențiată;
+> la eșec, motivul scris pe față (bloc roșu), nu doar un badge sec. Se
+> reîmprospătează la 2.5s. Build frontend + sintaxă CSS verzi. **DE TĂIAT după
+> proba live**: dai un ordin → în monitor vezi bara urcând și etapele aprinzându-se
+> pas cu pas până la CI/Deploy; la un ordin picat, vezi motivul, nu doar „eșuat".
+
 > ✅ **VERIFICAT LIVE de owner (11 aug): „merge bloutotch".** Vocea live iese pe Bluetooth/mașină,
 > ȘI update-ul blocant a funcționat (a primit codul nou pe telefon fără chin — altfel BT ar fi
 > rămas mort). Ambele puncte (A poarta + B microfonul fără procesare) confirmate pe telefon real.

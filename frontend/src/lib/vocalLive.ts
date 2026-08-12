@@ -155,6 +155,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   const urcaEroarea = (m: string): void => {
     if (eroareUrcata) return
     eroareUrcata = true
+    // Simptomul ajunge ȘI la Kelion, nu doar ca toast la om: console.error e
+    // canalul prins de errorReport → /api/client-errors → contextul creierului.
+    // Fără asta, Kelion NU știa că sesiunea vocală a picat și răspundea „încearcă
+    // din nou" la „ce e eroarea asta?". (Adrian, 12 aug — autodiagnostic.)
+    try {
+      console.error(`[voce] ${m}`)
+    } catch {
+      /* raportarea nu poate arunca */
+    }
     opts.onEroare(m)
   }
   let octeti = 0

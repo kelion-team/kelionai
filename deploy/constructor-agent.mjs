@@ -115,6 +115,22 @@ const FOLOSESTE_DEEPSEEK = !!DEEPSEEK_KEY
 // proprie.) Trezirile următoare-s rapide (FlashBoot), deci plafonul lovește doar
 // prima dată.
 const LLM_TIMEOUT_MS = Number(env.CONSTRUCTOR_LLM_TIMEOUT_MS || 120_000)
+// PLACA PROPRIE PORNEȘTE LA RECE (Adrian, 12 aug — jobul #177 a picat cu „fetch
+// failed", 0 octeți): RunPod serverless stinge placa la 0 muncitori când n-o
+// folosește nimeni; primul apel trebuie s-o trezească, iar trezirea DESCARCĂ
+// modelul (~3–8 min). Apelul SINCRON /openai ținea conexiunea deschisă și cădea
+// ÎNAINTE ca placa să apuce să pornească — de-aici „fetch failed". FIX: dacă e
+// RunPod, întâi TREZIM placa pe ruta ASINCRONĂ (/run + /status, care NU ține
+// conexiunea deschisă, deci supraviețuiește oricât de lentă e pornirea la rece);
+// abia când placa e caldă trimitem cererea reală cu unelte pe ruta sincronă
+// /openai — atunci răspunde repede. Trezirea își scrie progresul pe monitor.
+const ESTE_RUNPOD = /runpod\.ai/i.test(DEEPSEEK_URL)
+// Baza endpointului: din …/v2/<id>/openai/v1/chat/completions extragem …/v2/<id>,
+// de unde derivăm /run și /status/<jobId> și /health.
+const RUNPOD_BASE = (DEEPSEEK_URL.match(/^(https?:\/\/[^/]+\/v2\/[^/]+)\//i) || [])[1] || ''
+// Cât așteptăm cel mult trezirea la rece (default 9 min — sub bugetul rulării).
+const WARM_MS = Number(env.CONSTRUCTOR_WARM_MS || 9 * 60_000)
+let placaCalda = false
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
 // rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
 // 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
@@ -808,6 +824,55 @@ async function llmGemini(messages) {
   }
 }
 
+// TREZIREA PLĂCII LA RECE (vezi nota de la ESTE_RUNPOD/RUNPOD_BASE, sus): trimite
+// un job minimal pe ruta ASINCRONĂ /run și așteaptă /status până e TERMINAL —
+// atunci muncitorul e pornit (modelul descărcat), deci cererea reală care urmează
+// pe /openai nimerește o placă CALDĂ și nu mai cade cu „fetch failed". Terminal =
+// COMPLETED SAU FAILED SAU CANCELLED: oricum ar ieși ping-ul, containerul a
+// pornit — nouă ne trebuie doar să fie cald. Amânabil pe orice piedică: ordinul
+// NU moare fiindcă placa s-a trezit greu o dată, se reia mai târziu.
+async function trezestePlaca() {
+  if (!ESTE_RUNPOD || !RUNPOD_BASE || placaCalda) return
+  const auth = { 'content-type': 'application/json', authorization: `Bearer ${DEEPSEEK_KEY}` }
+  beat('placa RunPod: o trezesc (pornire la rece, poate dura câteva minute)…', true)
+  log('RunPod: trezesc placa pe ruta asincronă înainte de prima cerere (pornire la rece)')
+  let jobId = ''
+  try {
+    const r = await fetch(`${RUNPOD_BASE}/run`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ input: { prompt: 'ping', sampling_params: { max_tokens: 1, temperature: 0 } } }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    const j = await r.json().catch(() => null)
+    if (!r.ok || !j?.id) throw new Error(`/run ${r.status}: ${JSON.stringify(j ?? '').slice(0, 160)}`)
+    jobId = j.id
+  } catch (e) {
+    throw Object.assign(new Error(`RunPod trezire (/run): ${String(e?.message ?? e).slice(0, 180)}`), { amanabil: true })
+  }
+  const start = Date.now()
+  const buget = Math.max(30_000, Math.min(WARM_MS, ramase() - 60_000))
+  for (;;) {
+    if (Date.now() - start > buget)
+      throw Object.assign(new Error(`RunPod nu s-a trezit în ${Math.round(buget / 60_000)} min (placa pornește prea greu la rece)`), { amanabil: true })
+    await dormi(5_000)
+    let st = ''
+    try {
+      const r = await fetch(`${RUNPOD_BASE}/status/${jobId}`, { headers: auth, signal: AbortSignal.timeout(20_000) })
+      const j = await r.json().catch(() => null)
+      st = j?.status ?? ''
+    } catch {
+      continue // un hopa de rețea pe polling nu ratează trezirea — reîncercăm
+    }
+    beat(`placa RunPod se trezește: ${st || '…'} (${Math.round((Date.now() - start) / 1000)}s)`, true)
+    if (st === 'COMPLETED' || st === 'FAILED' || st === 'CANCELLED') {
+      placaCalda = true
+      log(`RunPod: placa e CALDĂ (${st}, ${Math.round((Date.now() - start) / 1000)}s) — trimit cererea reală cu unelte`)
+      return
+    }
+  }
+}
+
 // DeepSeek DIRECT — OpenAI-compatible. Mesajele NOASTRE sunt deja în format
 // OpenAI (role/content/tool_calls/tool_call_id) și TOOLS la fel → se trimit
 // DIRECT, fără nicio conversie (spre deosebire de Gemini). Întoarce ACELAȘI
@@ -833,6 +898,10 @@ async function llmDeepSeek(messages) {
       signal: AbortSignal.timeout(Math.max(30_000, Math.min(LLM_TIMEOUT_MS, ramase()))),
     })
   } catch (e) {
+    // Placa se putea stinge între pași (RunPod scale-to-zero pe inactivitate) →
+    // apelul sincron cade cu „fetch failed". Marcăm placa RECE ca reîncercarea
+    // din llm() s-o retrezească, în loc să cadă la fel de N ori la rând.
+    if (ESTE_RUNPOD) placaCalda = false
     throw Object.assign(new Error(`DeepSeek rețea: ${String(e?.message ?? e).slice(0, 200)}`), { clasa: 'furnizor' })
   }
   const text = await r.text().catch(() => '')
@@ -875,9 +944,18 @@ async function llm(messages) {
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
     if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
     try {
+      // Placa proprie: dacă e RunPod și încă rece, o trezim ÎNTÂI (no-op după ce
+      // e caldă). Pusă în buclă intenționat — dacă placa se stinge între pași și
+      // un apel sincron cade, `placaCalda` se resetează, iar reîncercarea o
+      // retrezește singură înainte de a mai încerca (auto-vindecare).
+      await trezestePlaca()
       return await foloseste(messages)
     } catch (e) {
       lastErr = String(e?.message ?? e)
+      // Piedici clasificate EXPLICIT în adânc: cheie/cont mort = fatal (stop pe
+      // loc); placa proprie care nu se trezește = amânabil (ordinul se reia).
+      if (e?.fatal) throw e
+      if (e?.amanabil) throw Object.assign(new Error(lastErr), { amanabil: true })
       // Cheia/contul nostru — nicio reîncercare nu ajută; ne oprim pe loc.
       if (/(deepseek|gemini) (401|403)/i.test(lastErr)) {
         log(`llm [fatal] — cheia/contul ${numeCreier}: ${lastErr.slice(0, 200)}`)

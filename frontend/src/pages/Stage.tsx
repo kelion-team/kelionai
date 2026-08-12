@@ -275,7 +275,22 @@ interface BuildLiveJob {
   prUrl: string | null
   attempts: number
   updatedAt?: string
+  /** 0–100, harta etapei REALE raportate (progresOrdin.ts); null la eșuat/necunoscut. */
+  pct?: number | null
 }
+// ETAPELE FLUXULUI CONSTRUCTORULUI (Adrian, 12 aug: „tot fluxul, cu bari de la 0
+// la 100%, până la deploy"). Pragurile sunt ancorate în procentele REALE din
+// progresOrdin.ts (backend) — nu inventate: fiecare etapă se aprinde când pct-ul
+// raportat îi trece pragul. Ordinea = drumul real: preluat → atelier → construit
+// → verificat → PR → CI/deploy.
+const FAZE_BUILD: readonly { readonly prag: number; readonly nume: string }[] = [
+  { prag: 0, nume: 'Preluat' },
+  { prag: 10, nume: 'Atelier' },
+  { prag: 15, nume: 'Construiește' },
+  { prag: 75, nume: 'Verifică' },
+  { prag: 90, nume: 'PR' },
+  { prag: 97, nume: 'CI / Deploy' },
+]
 // The status labels come from i18n (audit Aug 2 — they were Romanian for
 // every user); built as a function so the CURRENT language is read per render.
 const buildLabel = (status: string): string => {
@@ -364,12 +379,46 @@ function BuildSurface({ zoom }: { zoom: number }) {
                 ) : null}
                 <span className="build-order">#{j.id} — {j.order}</span>
               </div>
-              {j.progress ? (
+              {/* BARA + FLUXUL PE ETAPE (Adrian, 12 aug: „tot fluxul, cu bari de
+                  la 0 la 100%, până la deploy"). Etapele se aprind din pct-ul
+                  REAL (progresOrdin.ts). La eșec: motivul, scris pe față. */}
+              {j.status === 'failed' ? (
+                <div className="build-fail">✗ Eșuat{j.progress ? ` — ${j.progress}` : ''}</div>
+              ) : (
+                <>
+                  {typeof j.pct === 'number' && (
+                    <div
+                      className="build-bar"
+                      role="progressbar"
+                      aria-valuenow={j.pct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
+                      <div className="build-bar-fill" style={{ width: `${Math.max(2, j.pct)}%` }} />
+                      <span className="build-bar-num">{j.pct}%</span>
+                    </div>
+                  )}
+                  <div className="build-faze">
+                    {FAZE_BUILD.map((f, i) => {
+                      const pct = typeof j.pct === 'number' ? j.pct : j.status === 'done' ? 100 : 0
+                      const urm = FAZE_BUILD[i + 1]
+                      const atinsa = j.status === 'done' || pct >= f.prag
+                      const activa = j.status === 'running' && atinsa && (!urm || pct < urm.prag)
+                      return (
+                        <span key={f.nume} className={`build-faza ${atinsa ? 'ok' : ''} ${activa ? 'activ' : ''}`}>
+                          {f.nume}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+              {j.progress && j.status !== 'failed' ? (
                 <div className="build-progress">
                   {j.status === 'running' && <span className="build-spin" aria-hidden>●</span>}
                   {j.progress}
                 </div>
-              ) : j.status === 'queued' ? (
+              ) : !j.progress && j.status === 'queued' ? (
                 <div className="build-progress build-progress-dim">{uiStrings().buildWaiting}</div>
               ) : null}
               {(j.attempts > 1 || j.prUrl) && (
@@ -717,6 +766,18 @@ export default function Stage({ user }: { user: User }) {
   // the server. (The `avatarEdit=false` flag + its 'editing' CSS class were
   // dead weight since then — removed in the Aug 2 dead-code audit.)
   const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>({ x: 58, y: 58, s: 0.42 })
+  // ANALIZĂ LUNGĂ ÎN CHAT → AVATARUL ÎN COLȚ (Adrian, 12 aug: „mută avatarul…
+  // când se afișează o analiză, că acoperă ce scrie"; ales: avatar în colț, mic).
+  // ChatPanel emite `kelion:analiza-vizibila` când ultimul răspuns e o analiză
+  // (text lung); atunci punem avatarul în colț (refolosim `pip`), ca textul din
+  // chat să nu se mai calce cu avatarul central. Suprafețele (monitorOn) îl dau
+  // deja în colț — asta acoperă cazul „doar chat, fără suprafață".
+  const [analizaChat, setAnalizaChat] = useState(false)
+  useEffect(() => {
+    const h = (e: Event): void => setAnalizaChat(!!(e as CustomEvent).detail?.activ)
+    window.addEventListener('kelion:analiza-vizibila', h)
+    return () => window.removeEventListener('kelion:analiza-vizibila', h)
+  }, [])
   // Fix hydration: localStorage is client-only; read it after hydration.
   useEffect(() => {
     try {
@@ -1204,7 +1265,7 @@ export default function Stage({ user }: { user: User }) {
       localStorage mirror. */}
       <div
         ref={stageRef}
-        className={`stage-canvas ${monitorOn ? 'pip' : ''}`}
+        className={`stage-canvas ${monitorOn || analizaChat ? 'pip' : ''}`}
         style={
           monitorOn
             ? {
