@@ -36,6 +36,7 @@ import { startAutonomie } from './services/autonomie.js'
 import { autonomActiv } from './services/autonomActiv.js'
 import { incarcaModelUnic, startAutoUpgradeModel } from './services/modelAutoUpgrade.js'
 import { startAutoInvatare } from './services/autoInvatare.js'
+import { incarcaReprosuri } from './services/feedbackImplicit.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { runSelfHeal } from './services/selfHeal.js'
 import { pornesteIscoadele } from './services/iscoada.js'
@@ -418,6 +419,9 @@ try {
   // AUTO-ÎNVĂȚARE DIN TIMPI (Adrian, 3 aug): în spate, invizibil, citește
   // registrul task_timings și învață tiparele (lent/eșec) ca să nu le repete.
   startAutoInvatare()
+  // L1h — reproșurile („nu asta am cerut") persistate se încarcă în cache, ca
+  // lecțiile să supraviețuiască unei reporniri (fără DB → cache gol, nefatal).
+  void incarcaReprosuri().catch(() => {})
   // SANTINELA DE SOLD OPENROUTER — EXTIRPATĂ DE TOT (Adrian, 3 aug, cu
   // mailurile în mână: „de ce încă îmi vin mesaje cu soldul care descrește?").
   // Creierul e Gemini-only; alarma „depune bani la OpenRouter" păzea un

@@ -64,6 +64,7 @@ import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
+import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
 import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
@@ -1837,9 +1838,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // (dovada: rounds/ms scad în task_timings). Doar pe drumul adminului, din
     // cache (fără citire DB per tură — latență zero pe drumul cald).
     if (isAdminUser) {
-      const lectii = lectiiCurente()
+      // Lecțiile — din măsurători (timpi) ȘI din reproșuri (corecțiile lui, L1h).
+      // Ambele din cache (fără DB pe drumul cald).
+      const lectii = [...lectiiCurente(), ...lectiiReprosuri()]
       if (lectii.length) {
-        systemPrompt += `\n\nÎNVĂȚAT DIN MĂSURĂTORI (aplică-le ca să fii mai rapid și să NU repeți greșeli): ${lectii.join(' ')}`
+        systemPrompt += `\n\nÎNVĂȚAT (aplică-le ca să fii mai rapid și să NU repeți greșeli): ${lectii.join(' ')}`
+      }
+      // L1h — ÎNVĂȚARE DIN FEEDBACK IMPLICIT: dacă tura asta e clar o CORECȚIE a
+      // răspunsului dinainte („nu asta am cerut"), notăm reproșul (ce ceruse, ce
+      // a făcut, cum l-a corectat) în registru — intră în lecțiile turelor VIITOARE
+      // (pe asta modelul o vede oricum, e chiar mesajul omului). Doar owner
+      // (corecțiile LUI contează pentru învățarea lui Kelion). Fire-and-forget.
+      const nem = esteNemultumire(lastIncomingText)
+      if (nem.da) {
+        let idxAsist = -1
+        for (let i = messages.length - 2; i >= 0; i--) {
+          if (messages[i]?.role === 'assistant') { idxAsist = i; break }
+        }
+        if (idxAsist >= 0) {
+          let cerere = ''
+          for (let i = idxAsist - 1; i >= 0; i--) {
+            if (messages[i]?.role === 'user') { cerere = String(messages[i]?.content ?? ''); break }
+          }
+          void noteazaRepros(cerere, String(messages[idxAsist]?.content ?? ''), lastIncomingText, nem.fel, new Date().toISOString()).catch(() => {})
+        }
       }
     }
     // SPOKEN TURN (Aug 1 — the ONE-brain voice architecture): the reply leaves
