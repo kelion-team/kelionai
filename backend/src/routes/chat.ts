@@ -61,7 +61,7 @@ import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, geminiLive } from '../serv
 import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
-import { recallMemories, learnFromTurn } from '../services/agents.js'
+import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { generateImage } from '../services/image.js'
@@ -1534,6 +1534,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
       new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
     ])
+    // N val 2d: cât Centrul de Tranzacționare e ANCORAT (admin + tab de trading
+    // pe ecran), reamintește ȘI memoria separată 'tranzactii' (schimburile
+    // trecute pe simbol) — namespace-ul general 'kelion' n-o vede niciodată, așa
+    // că în conversație normală memoria de trading era mută (doar butonul Analiză
+    // o citea). Aceeași cursă cu termen de 400 ms ca recall-ul principal: nu
+    // întârzie primul cuvânt; ce nu vine la timp nu intră în tură, restul se ia
+    // altă dată. Fără ancoră trading = șir gol, zero drum la DB.
+    const ancoraTradingDeschisa =
+      user.role === 'admin' && !!(req.body?.tranzactii as { simbol?: unknown } | undefined)?.simbol
+    const recallTradingWithDeadline = ancoraTradingDeschisa
+      ? Promise.race([
+          recallMemoriiTranzactii(user.email, lastForRecall?.role === 'user' ? lastForRecall.content : ''),
+          new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
+        ])
+      : Promise.resolve('')
     // ── PREFERINȚELE SE CITESC O DATĂ PE SESIUNE, NU LA FIECARE ÎNTREBARE ────
     // (Adrian, 7 aug: „verificarile de plati etc securitate se fac la logare si
     // atit, e clar nu se repeta deloc pe intrebari"). Limba, meseria, gesturile,
@@ -1545,7 +1560,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // jos, la fiecare cerere: viteza nu se ia din securitate.
     const acumMs = Date.now()
     const cache = stareSesiune(user.email, acumMs)
-    const [prefs, memRecall, istoricDb] = await Promise.all([
+    const [prefs, memRecall, istoricDb, memRecallTrading] = await Promise.all([
       cache
         ? Promise.resolve(cache)
         : Promise.all([
@@ -1571,6 +1586,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // memorie unificată (turele vorbite pe care array-ul scris nu le are).
       // Rămâne în paralel cu restul → zero latență adăugată.
       getRecentHistory(user.email, MAX_HISTORY).catch(() => []),
+      // N val 2d: memoria de trading, în ACELAȘI val paralel (deja cu termen) —
+      // șir gol când tabul nu e ancorat, deci zero cost pe conversația obișnuită.
+      recallTradingWithDeadline,
     ])
     const storedPref = prefs.speechLang
     const meserieId = prefs.meserieId
@@ -2069,6 +2087,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // this user so the conversation is continuous across sessions. Read above
     // (the single trip to the database).
     systemPrompt += memRecall
+    // N val 2d: memoria SEPARATĂ de trading, doar cât Centrul e ancorat (șir gol
+    // altfel). Astfel conversația normală „își amintește" ce ați discutat pe
+    // simbolul de pe ecran, nu doar butonul Analiză.
+    systemPrompt += memRecallTrading
     // MEMORIA UNIFICATĂ voce↔scris (9 aug, ownerul: „trebuie să preia și din
     // audio sau invers din scris istoricul, indiferent modalitatea"). Creierul
     // scris construia contextul DOAR din array-ul clientului (turele de pe

@@ -143,6 +143,7 @@ export async function turaCreierului(
   imagini: string[],
   laControl: (frame: Record<string, unknown>) => void,
   monitor?: Record<string, unknown> | null,
+  tranzactii?: Record<string, unknown> | null,
 ): Promise<{ ok: true; text: string } | { ok: false; motiv: string }> {
   let r: Response
   try {
@@ -167,6 +168,11 @@ export async function turaCreierului(
         // CE E PE MONITOR (10 aug): get_monitor din creier îl citește de aici,
         // deci vocea „citește ce e pe ecran" ajunge la conținutul REAL.
         monitorContent: monitor ?? undefined,
+        // ANCORA CENTRULUI DE TRANZACȚIONARE (N val 2a): starea REALĂ de pe
+        // graficul de trading, ca la chatul scris — chat.ts o ia doar pentru
+        // admin (`isAdminUser`), pune cifrele în prompt și, dacă răspunsul dă
+        // niveluri, emite frame-ul {niveluri} care se desenează pe grafic.
+        tranzactii: tranzactii ?? undefined,
         now: new Date().toISOString(),
       }),
       signal: AbortSignal.timeout(90_000),
@@ -488,6 +494,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // CE E PE MONITOR acum (10 aug): ultimul conținut raportat de browser cu
     // bătaia de coords — retransmis prin ușa creierului la get_monitor.
     let monitorLive: Record<string, unknown> | null = null
+    // ANCORA CENTRULUI DE TRANZACȚIONARE acum (N val 2a): ultima stare de pe
+    // graficul de trading, raportată de browser cu aceeași bătaie de coords —
+    // dată creierului prin ușă ca la chatul scris (frontendul o stinge singur
+    // când tabul nu mai e pe ecran, deci null = trading închis).
+    let tranzactiiLive: Record<string, unknown> | null = null
     // VEDEREA LA CERERE (8 aug: „hai și cu vedere"): când ușa se deschide,
     // serverul cere browserului cadrele camerei ({type:'cere_cadre'}) și
     // așteaptă răspunsul aici — zero trafic de imagini cât nu e nevoie.
@@ -513,6 +524,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // cu aceeași bătaie ca ancora; null = nimic afișat acum.
             const mon = (m as { monitor?: unknown }).monitor
             monitorLive = mon && typeof mon === 'object' ? (mon as Record<string, unknown>) : null
+            // ANCORA TRADING, ținută pentru ușa creierului pe VOCE (N val 2a):
+            // aceeași bătaie; null = tabul de trading nu mai e pe ecran.
+            const trz = (m as { tranzactii?: unknown }).tranzactii
+            tranzactiiLive = trz && typeof trz === 'object' ? (trz as Record<string, unknown>) : null
             ancora = {
               nowIso: typeof m.now === 'string' ? m.now : ancora.nowIso,
               tz: typeof m.tz === 'string' ? m.tz : ancora.tz,
@@ -903,7 +918,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture', 'apel']
             const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, (frame) => {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
-            }, monitorLive)
+            }, monitorLive, tranzactiiLive)
             if (r.ok) {
               // Ordinele de constructor pornite prin ușă intră sub urmărire —
               // la terminare, Kelion anunță cu vocea lui (ceasOrdine, mai sus).

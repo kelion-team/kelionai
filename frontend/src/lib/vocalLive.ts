@@ -64,6 +64,13 @@ export interface VocalLiveOpts {
    *  Serverul îl ține și-l retransmite prin ușa creierului la get_monitor.
    *  null = nimic afișat. */
   monitor?(): { kind: string; title: string; url?: string; text?: string } | null
+  /** ANCORA CENTRULUI DE TRANZACȚIONARE pe VOCE (N val 2a): cât tabul de
+   *  trading e deschis, starea REALĂ de pe grafic (simbol, preț, interval,
+   *  punctul de sub cursor) pleacă cu aceeași bătaie ca `monitor`. Serverul o
+   *  ține și-o dă creierului prin ușă, ca la chatul scris — abia atunci
+   *  răspunsul vocal produce frame-ul {niveluri} care se desenează pe grafic.
+   *  null = tabul de trading nu e pe ecran (nu ancorăm pe date stătute). */
+  tranzactii?(): { simbol: string; pret: number | null; interval: string; sursa: string; peste?: unknown; la: number } | null
 }
 
 export interface VocalLiveHandle {
@@ -313,6 +320,10 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
           // Conținutul de pe monitor merge cu aceeași bătaie (10 aug): serverul
           // îl ține și-l dă creierului la get_monitor prin ușă, pe VOCE.
           monitor: opts.monitor?.() ?? null,
+          // Starea Centrului de Tranzacționare merge cu aceeași bătaie (N val 2a):
+          // serverul o ține și-o dă creierului prin ușă ca ancoră a clipei, ca la
+          // chatul scris — abia atunci vocea produce frame-ul {niveluri}.
+          tranzactii: opts.tranzactii?.() ?? null,
         }),
       )
     } catch {

@@ -33,6 +33,7 @@ import {
   subscribeWorkspace,
   isMonitorWorking,
   getMonitorContent,
+  getStareTranzactii,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import {
@@ -1608,6 +1609,11 @@ export default function ChatPanel({
               // CE E PE MONITOR și pe VOCE (10 aug): același conținut ca la
               // chatul scris — get_monitor îl citește prin ușa creierului.
               monitor: () => getMonitorContent(),
+              // ANCORA CENTRULUI DE TRANZACȚIONARE pe VOCE (N val 2a): aceeași
+              // sursă ca la chatul scris (getStareTranzactii — se stinge singură
+              // când tabul nu mai e pe ecran), ca vocea să răspundă pe CIFRELE
+              // reale și să deseneze nivelurile pe grafic (frame {niveluri}).
+              tranzactii: () => getStareTranzactii(),
               onEroare: (motiv) => {
                 // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
                 // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).

@@ -35,6 +35,42 @@ export async function recallMemories(email: string, agent = 'kelion', hint = '')
   )
 }
 
+/** REAMINTIRE TRADING (N val 2d, ownerul: „în conversație normală nu era
+ *  reamintită memoria de tranzacții — doar butonul Analiză o citea"). Schimburile
+ *  trecute stau într-un namespace SEPARAT ('tranzactii', scris de chat.ts cât
+ *  Centrul de Tranzacționare e pe ecran) — deci recall-ul general (namespace
+ *  'kelion') nu le vede niciodată. Când tabul de trading e ancorat, aducem ȘI
+ *  memoria asta în conversație, ca răspunsul să fie continuu pe simbolul de pe
+ *  ecran. Framing distinct: astea-s discuții de trading, nu fapte durabile
+ *  despre om. Gol când nu există nimic măsurat — nu inventăm un istoric. */
+export async function recallMemoriiTranzactii(email: string, hint = ''): Promise<string> {
+  const recent = await getMemories(email, 20, 'tranzactii')
+  let mems = recent
+  if (hint.trim()) {
+    const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
+    const [relevant, semantic] = await Promise.all([
+      searchMemories(email, 'tranzactii', words, 10),
+      semanticMemories(email, 'tranzactii', hint, 6),
+    ])
+    const seen = new Set(recent.map((m) => m.content))
+    mems = [...recent]
+    for (const m of [...relevant, ...semantic]) {
+      if (!seen.has(m.content)) {
+        seen.add(m.content)
+        mems.push(m)
+      }
+    }
+  }
+  if (mems.length === 0) return ''
+  const lines = mems.map((m) => `- ${m.content}`).join('\n')
+  return (
+    `\n\nDISCUȚIILE VOASTRE ANTERIOARE DE TRADING (memoria separată a Centrului de ` +
+    `Tranzacționare — schimburi trecute pe simboluri). Folosește-le ca să rămâi ` +
+    `continuu pe ce ați discutat, dar NU le recita nechemat, iar cifrele vechi NU ` +
+    `sunt prețul de acum:\n${lines}`
+  )
+}
+
 export async function learnFromTurn(
   email: string,
   userMsg: string,
