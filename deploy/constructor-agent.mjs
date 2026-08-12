@@ -5,12 +5,11 @@
 //
 // CE FACE: ia UN ordin din coadă (API-ul aplicației, auth x-bridge-secret),
 // clonează repo-ul proaspăt în ATELIER (/root/kelion/atelier), lasă creierul
-// GEMINI (cheia ownerului — API direct Google, NU CLI pe abonament) să
+// (un endpoint OpenAI-compatibil din env — DeepInfra azi, NU Gemini) să
 // exploreze/scrie/verifice prin unelte, impune BUILD + TESTE verzi, apoi
 // împinge ramura și deschide PR-ul. Merge-ul rămâne la Adrian.
-// (3 aug — extirparea totală OpenRouter: scara de modele :free a dispărut cu
-// tot cu furnizorul; la eșec Gemini ordinul se AMÂNĂ onest, nu cade pe alt
-// creier.)
+// (La eșec de FURNIZOR ordinul se AMÂNĂ onest, rămâne în coadă și se reia
+// automat — nu cade pe alt creier și nu inventează succes.)
 //
 // DE CE E JOB, NU DEMON: ecosistemul vechi (bridge/builder, procese claude
 // permanente) ardea abonamentul și a produs phantom-deploy-uri — vezi
@@ -48,63 +47,16 @@ try {
 }
 const BRIDGE = env.BRIDGE_SECRET ?? ''
 const GHTOKEN = env.GITHUB_TOKEN ?? ''
-// GEMINI DIRECT — the constructor's ONLY brain (owner's paid Tier 2 key from
-// AI Studio, already present in kelionai.env). Extirparea totală OpenRouter
-// (3 aug, ordinul repetat al ownerului): scara de modele :free, garda
-// CONSTRUCTOR_ALLOW_PAID și creierul plătit „Fable 5" prin OpenRouter au
-// DISPĂRUT împreună cu furnizorul. Cheia Gemini e o alegere conștientă a
-// ownerului (aceeași care servește tot creierul aplicației); dacă Gemini pică,
-// ordinul se AMÂNĂ onest (rămâne în coadă, se reia automat) — nu cade pe alt
-// creier și nu inventează succes. Request/response shaping mirrors
-// backend/src/services/geminiDirect.ts. See llmGemini().
-const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
-// CREIERUL CONSTRUCTORULUI = MODELUL UNIC (Adrian, 6 aug — regulă ultra-decisă:
-// „un SINGUR model, peste tot"). Trecut de la 'gemini-3.6-flash' (care întorcea
-// „200 gol/blocat" — răspuns gol pe cheie, 6 aug) la modelul unic al aplicației,
-// 'gemini-3.1-pro-preview' — ACELAȘI care servește tot creierul (config.ts
-// MODEL_UNIC_DEFAULT), dovedit că răspunde. Suprascriibil din env
-// (`CONSTRUCTOR_GEMINI_MODEL`) DOAR pentru testare punctuală — implicit rămâne
-// modelul unic, ca autonomia să nu fugă pe alt model decât restul aplicației.
-// 7 AUG — CONSTRUCTORUL TRECE PE FLASH (Adrian, opțiunea 1: „îl păstrezi, dar îl
-// pui pe modelul rapid"). Motivul măsurat: pe Pro un ordin ținea până la 30 min,
-// rula la fiecare 2 min și SUFOCA CPU-ul VPS-ului — atât de tare încât `docker
-// build`-ul publicării nu se mai termina și live-ul a stat blocat ore (6-7 aug).
-// Măsurat pe cheia ownerului, de pe VPS: Pro = 3,6s…45s (a și EXPIRAT o dată) vs
-// gemini-3.5-flash = 1,1s, cu unelte + vedere + auz intacte.
-//
-// DE CE `gemini-3.5-flash` ȘI NU `-flash-lite` (care e cu ~0,5s mai rapid): aici
-// se SCRIE COD, iar lite e cel mai mic model din familie. Flash întreg rămâne de
-// 5-15× mai rapid decât Pro, dar păstrează raționamentul de care are nevoie o
-// reparație reală. Viteza nu ajută dacă produce cod prost mai repede.
-// 10 AUG — OWNERUL ALEGE `gemini-2.5-pro` PENTRU CONSTRUCTOR. Flash era prea slab
-// la raționament. Decizia se judecă pe CIFRE REALE, nu pe păreri: fiecare ordin
-// înregistrează deja tokenii + rezultatul + încercările (build_jobs / corpul
-// PR-ului), deci vedem pe ordinele următoare, negru pe alb, dacă 2.5-pro chiar
-// termină mai bine, cu ce cost și în cât timp. Suprascriibil din env
-// (`CONSTRUCTOR_GEMINI_MODEL`). Grijă cunoscută: Pro e lent (până la ~75s/apel) →
-// ordinele țin mult, aproape de plafonul dur de 30 min; garda de timp adaptivă +
-// boot-ul din atelier rămân plasa.
-const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-2.5-pro'
-// ── RUNPOD DIRECT — CREIERUL CONSTRUCTORULUI (Qwen3-Coder), IZOLAT DE VOCE ─────
-// Owner, 12 aug: „doar RunPod". Constructorul rulează DOAR pe modelul propriu de
-// pe RunPod (Qwen3-Coder), izolat de Gemini/voce. Scop: constructorul să NU mai
-// consume cheia Gemini (aia rămâne pe vocea live) — folosește RunPod direct.
-// OmniRoute a fost sărit intenționat: la testul live pe VPS nu crea o conexiune
-// PLĂTITĂ (doar catalog gratuit, „no connected models"), iar în repo e marcat
-// risc de securitate (AI-HANDOFF §13: CVE + tipar MITM blocat de Socket.dev).
-// RunPod (vLLM) e OpenAI-compatibil, iar mesajele + TOOLS-urile noastre sunt DEJA în
-// format OpenAI → trec DIRECT, fără conversie (mai puține locuri de greșit).
-// FĂRĂ REZERVĂ: dacă RunPod nu e configurat, constructorul se OPREȘTE — NU cade
-// pe Gemini, nu pe alt furnizor. Cheia + URL-ul + modelul stau DOAR în env-ul VPS
-// (/root/kelion/kelionai.env), NICIODATĂ în repo; prin Kelion (secret_pune) sau env.
-//
-// COMPATIBIL CU ENV-UL CARE E DEJA PE VPS (regresie reparată, 12 aug): în #1037
-// am redenumit variabilele CONSTRUCTOR_DEEPSEEK_* → CONSTRUCTOR_RUNPOD_*, dar
-// cheia RunPod stă pe VPS sub numele VECHI (CONSTRUCTOR_DEEPSEEK_KEY — chiar
-// cerința ownerului îl numea așa). După deploy, RUNPOD_KEY ieșea gol și
-// constructorul se oprea la boot („lipsesc ... — ies"). Citim ACUM ambele nume:
-// întâi cel nou (curat), apoi cel vechi de pe VPS. Nu e rezervă de creier — e
-// DOAR numele variabilei de env; creierul rămâne RunPod (Qwen3-Coder), la fel.
+// ── CREIERUL CONSTRUCTORULUI = UN ENDPOINT OpenAI-COMPATIBIL (NU Gemini) ──────
+// Owner, 12 aug: „nu are ce căuta Gemini acolo". Constructorul NU folosește Gemini
+// și NU are cheia Gemini — aia rămâne DOAR pe vocea/creierul aplicației. Creierul
+// lui e endpoint-ul OpenAI-compatibil din env-ul VPS (DeepInfra azi; înainte
+// RunPod), cu modelul din env. Mesajele + TOOLS-urile noastre sunt DEJA în format
+// OpenAI → trec DIRECT, fără conversie. Fără rezervă de furnizor: dacă lipsește
+// cheia/URL-ul, constructorul se OPREȘTE (nu cade pe alt creier, nu inventează).
+// Citim ambele nume de env (nou CONSTRUCTOR_RUNPOD_*, vechi CONSTRUCTOR_DEEPSEEK_*
+// — cheia stă pe VPS sub numele vechi). Cheia + URL-ul + modelul stau DOAR în
+// /root/kelion/kelionai.env, NICIODATĂ în repo.
 const RUNPOD_KEY = env.CONSTRUCTOR_RUNPOD_KEY || env.CONSTRUCTOR_DEEPSEEK_KEY || ''
 const RUNPOD_MODEL = env.CONSTRUCTOR_RUNPOD_MODEL || env.CONSTRUCTOR_DEEPSEEK_MODEL || ''
 // URL-ul endpointului RunPod (OpenAI-compatibil, vLLM). FĂRĂ default de furnizor:
@@ -112,8 +64,8 @@ const RUNPOD_MODEL = env.CONSTRUCTOR_RUNPOD_MODEL || env.CONSTRUCTOR_DEEPSEEK_MO
 // creditul de voce. Dovedit pe viu 11-12 aug: Qwen3-Coder pe RunPod cheamă unelte
 // corect pe ruta asta (a chemat `grep {"pattern":"8080"}` la un ordin real).
 const RUNPOD_URL = env.CONSTRUCTOR_RUNPOD_URL || env.CONSTRUCTOR_DEEPSEEK_URL || ''
-// UN SINGUR creier: RunPod (Qwen3-Coder). Dacă nu e configurat RunPod (cheie +
-// URL RunPod), constructorul se OPREȘTE — nu cade pe Gemini, nu pe alt furnizor.
+// UN SINGUR creier: endpoint-ul OpenAI-compatibil din env (DeepInfra azi). Dacă
+// nu e configurat (cheie + URL), constructorul se OPREȘTE — nu cade pe alt creier.
 const RUNPOD_CONFIGURAT = !!RUNPOD_KEY
 // TIMEOUT-UL apelului OpenAI-compatibil (RunPod). Default 120s pentru un
 // cloud rapid. Pentru endpoint LOCAL pe RunPod serverless, prima trezire descarcă
@@ -139,6 +91,26 @@ const RUNPOD_BASE = (RUNPOD_URL.match(/^(https?:\/\/[^/]+\/v2\/[^/]+)\//i) || []
 // Cât așteptăm cel mult trezirea la rece (default 9 min — sub bugetul rulării).
 const WARM_MS = Number(env.CONSTRUCTOR_WARM_MS || 9 * 60_000)
 let placaCalda = false
+// ── MODELELE DE ÎNCERCAT, ÎN ORDINE (owner, 12 aug — „fă-l să meargă") ────────
+// Pe DeepInfra un SINGUR model supraîncărcat omora ordinul: MĂSURAT pe cheia
+// ownerului, Qwen3-Coder-480B-Turbo întorcea `engine_overloaded` cu 0 tool_calls,
+// în timp ce ALTE modele pe ACEEAȘI cheie chemau uneltele pe loc. Fix: reîncercarea
+// din llm() ROTEȘTE printr-o listă de modele DOVEDITE că merg — primul e cel din
+// env (alegerea ownerului), rezervele intră DOAR pe furnizor găzduit (nu RunPod) și
+// DOAR când principalul cade. Nu schimbă creierul „pe la spate" (fiecare pas nou
+// reîncepe cu principalul); ține doar ordinul în viață când unul e supraîncărcat.
+const MODELE_REZERVA = ESTE_RUNPOD
+  ? []
+  : ['Qwen/Qwen2.5-72B-Instruct', 'deepseek-ai/DeepSeek-V3-0324', 'meta-llama/Llama-3.3-70B-Instruct-Turbo']
+const MODELE = [RUNPOD_MODEL, ...MODELE_REZERVA].filter((m, i, a) => m && a.indexOf(m) === i)
+// Numele FURNIZORULUI, pentru mesaje ONESTE pe monitor (owner, 12 aug: monitorul
+// scria hardcodat „Gemini e sugrumat" deși creierul e pe DeepInfra — etichetă
+// FALSĂ, exact ce n-are voie). Dedus din URL: RunPod / DeepInfra / hostname.
+const NUME_FURNIZOR = ESTE_RUNPOD
+  ? 'RunPod'
+  : /deepinfra\.com/i.test(RUNPOD_URL)
+    ? 'DeepInfra'
+    : RUNPOD_URL.match(/^https?:\/\/([^/]+)/i)?.[1] || 'creierul constructorului'
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
 // rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
 // 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
@@ -661,176 +633,14 @@ function compactHistory(messages) {
 // plătit „Fable 5" (FABLE_MODEL / cereCreierFable / modelePentruOrdin), rotația
 // circulară pe trepte și clasificarea erorilor OpenRouter. Toate au murit odată
 // cu furnizorul — ordinul repetat al ownerului: „openrouter și open ai scos din
-// toată aplicația". Creierul e Gemini-only; la eșec, ordinul se AMÂNĂ onest
-// (rămâne în coadă, se reia automat) — nu cade pe alt creier.
+// toată aplicația". Creierul e UN SINGUR endpoint OpenAI-compatibil (DeepInfra);
+// la eșec de furnizor, ordinul se AMÂNĂ onest (rămâne în coadă, se reia automat).
 const LLM_ATTEMPTS = 6
 
-// ── GEMINI DIRECT — THE ONLY CODING BRAIN (extirparea OpenRouter, 3 aug) ─────
-// The owner's paid Gemini (Tier 2) key. The request/response shaping MIRRORS
-// backend/src/services/geminiDirect.ts (toGeminiPayload / partsToResult) —
-// same Google API, same schema cleaning — but the value it returns is the SAME
-// OpenAI-shaped object the loop in main() already consumes:
-// choices[0].message.{content,tool_calls}, usage.total_tokens, modelServit.
-
-// TOOLS' JSON schema → the schema Gemini accepts: keep only the supported keys,
-// silently drop the rest (mirrors cleanSchema in geminiDirect.ts). Recurses into
-// properties/items so nested object/array parameters stay valid.
-function geminiCleanSchema(s) {
-  if (Array.isArray(s)) return s.map(geminiCleanSchema)
-  if (!s || typeof s !== 'object') return s
-  const keep = ['type', 'description', 'properties', 'required', 'items', 'enum']
-  const out = {}
-  for (const [k, v] of Object.entries(s)) {
-    if (!keep.includes(k)) continue
-    out[k] =
-      k === 'properties' && v && typeof v === 'object'
-        ? Object.fromEntries(Object.entries(v).map(([pk, pv]) => [pk, geminiCleanSchema(pv)]))
-        : geminiCleanSchema(v)
-  }
-  return out
-}
-
-// OpenAI-format TOOLS → Gemini functionDeclarations: strip the `type:'function'`
-// wrapper, use the `.function` object, clean its parameters' schema.
-// EMPTY-SCHEMA GUARD (wo-msex5yey, 4 Aug): tools with no arguments used to send
-// `parameters:{type:'object',properties:{}}`. gemini-2.5 tolerated it, but
-// newer models REJECT it with HTTP 400 ("properties: should be non-empty for
-// OBJECT type") — orders #72/#73 died on every llm() call. A function with no
-// arguments is valid WITHOUT a `parameters` field at all, on every generation —
-// so when the cleaned schema has no properties, we omit the field entirely.
-function geminiToolDeclarations() {
-  return [
-    {
-      functionDeclarations: TOOLS.map((t) => {
-        const d = { name: t.function.name, description: t.function.description }
-        const p = geminiCleanSchema(t.function.parameters)
-        if (p && p.properties && Object.keys(p.properties).length) d.parameters = p
-        return d
-      }),
-    },
-  ]
-}
-
-// The house message list (OpenAI roles) → the Gemini request body. system →
-// systemInstruction; user/assistant text → {text} parts; assistant tool_calls →
-// {functionCall:{name,args}} parts (args = the parsed JSON arguments object);
-// role:'tool' → a role:'user' content carrying {functionResponse:{name,response}}.
-// functionResponse needs the tool NAME, but a tool message only carries the id —
-// we rebuild the id→name map from the assistant's earlier tool_calls, exactly
-// like toGeminiPayload does.
-function toGeminiBody(messages) {
-  const sys = []
-  const contents = []
-  const idToName = new Map()
-  for (const m of messages) for (const c of m.tool_calls ?? []) idToName.set(c.id, c.function?.name)
-  for (const m of messages) {
-    if (m.role === 'system') {
-      sys.push(typeof m.content === 'string' ? m.content : JSON.stringify(m.content))
-      continue
-    }
-    if (m.role === 'tool') {
-      const name = idToName.get(m.tool_call_id ?? '') ?? 'tool'
-      contents.push({ role: 'user', parts: [{ functionResponse: { name, response: { result: String(m.content ?? '') } } }] })
-      continue
-    }
-    const role = m.role === 'assistant' ? 'model' : 'user'
-    const parts = []
-    if (typeof m.content === 'string' && m.content) parts.push({ text: m.content })
-    for (const c of m.tool_calls ?? []) {
-      let args = {}
-      try {
-        args = JSON.parse(c.function?.arguments || '{}')
-      } catch {
-        /* corrupted arguments — we go with {} (mirrors geminiDirect) */
-      }
-      // Echo the thought signature back (wo-msex5yey) — newer models reject the
-      // replayed history without it.
-      const part = { functionCall: { name: c.function?.name, args } }
-      if (c.thoughtSignature) part.thoughtSignature = c.thoughtSignature
-      parts.push(part)
-    }
-    if (!parts.length) continue // Gemini rejects a content with no parts
-    contents.push({ role, parts })
-  }
-  // GENERATION CONFIG — OBLIGATORIU pe modelele 3.x (6 aug, cauza „200 gol/blocat"):
-  // Gemini 3.x „gândește" cu tokeni care INTRĂ în maxOutputTokens; fără o podea de
-  // output, gândirea consumă tot bugetul implicit → răspuns GOL (finish=MAX_TOKENS,
-  // fără parts). Oglindim calea dovedită (backend/src/services/geminiDirect.ts):
-  // podea 8192 + `thinkingLevel` (3.x REFUZĂ `thinkingBudget` cu 400). Pe generația
-  // veche 2.5 s-ar folosi `thinkingBudget` — păstrat pentru compat dacă cineva
-  // suprascrie modelul din env.
-  const este3x = /gemini-3/.test(GEMINI_MODEL)
-  const generationConfig = { maxOutputTokens: 8192, temperature: 0.7 }
-  if (este3x) generationConfig.thinkingConfig = { thinkingLevel: 'high' }
-  else if (/gemini-2\.5/.test(GEMINI_MODEL)) generationConfig.thinkingConfig = { thinkingBudget: 4096 }
-  const body = { contents, generationConfig, tools: geminiToolDeclarations(), toolConfig: { functionCallingConfig: { mode: 'AUTO' } } }
-  if (sys.length) body.systemInstruction = { parts: [{ text: sys.join('\n\n') }] }
-  return body
-}
-
-// The Gemini call itself. Returns the OpenAI-shaped object main() expects. On ANY
-// failure — non-2xx, network, broken JSON, empty/blocked 200 — it THROWS an error
-// tagged {clasa:'furnizor'}; llm() retries with backoff on the SAME Gemini brain
-// (no other provider exists — extirparea OpenRouter, 3 aug) and, when all
-// attempts are spent, marks the order postponable so the queue retries it later.
-async function llmGemini(messages) {
-  let r
-  try {
-    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
-      body: JSON.stringify(toGeminiBody(messages)),
-      // Bounded by the run budget, like the OpenRouter path — a hung endpoint
-      // must never keep the job past constructor-worker.sh's hard timeout.
-      signal: AbortSignal.timeout(Math.max(30_000, Math.min(120_000, ramase()))),
-    })
-  } catch (e) {
-    throw Object.assign(new Error(`Gemini rețea: ${String(e?.message ?? e).slice(0, 200)}`), { clasa: 'furnizor' })
-  }
-  const text = await r.text().catch(() => '')
-  if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}: ${text.slice(0, 300)}`), { clasa: 'furnizor' })
-  let parsed
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw Object.assign(new Error(`Gemini JSON rupt (${text.length} caractere)`), { clasa: 'furnizor' })
-  }
-  // candidates[0].content.parts → OpenAI message shape. No candidate at all
-  // (safety block / empty 200) is treated as a provider hiccup → fall back.
-  const parts = parsed?.candidates?.[0]?.content?.parts
-  if (!Array.isArray(parts)) throw Object.assign(new Error('Gemini fără candidați (200 gol/blocat)'), { clasa: 'furnizor' })
-  let content = ''
-  const toolCalls = []
-  for (const p of parts) {
-    if (typeof p?.text === 'string') content += p.text
-    if (p?.functionCall) {
-      const tc = {
-        id: `call_${toolCalls.length}`,
-        type: 'function',
-        function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
-      }
-      // THOUGHT SIGNATURE (wo-msex5yey, 4 Aug — the REAL 400 on newer models):
-      // Gemini 3.x attaches a `thoughtSignature` to its functionCall parts and
-      // REQUIRES it echoed back on replay ("Function call is missing a
-      // thought_signature in functionCall parts" — orders #72/#73 died on every
-      // second turn). We keep it on the tool_call and toGeminiBody sends it back.
-      if (p.thoughtSignature) tc.thoughtSignature = p.thoughtSignature
-      toolCalls.push(tc)
-    }
-  }
-  // Empty 200 (no text, no tool call) — Gemini can do this under load; throw so
-  // llm() retries instead of burning a sterile turn on nothing.
-  if (!content.trim() && !toolCalls.length)
-    throw Object.assign(new Error('Gemini: răspuns gol (200 fără text/tool)'), { clasa: 'furnizor' })
-  const message = { role: 'assistant', content }
-  if (toolCalls.length) message.tool_calls = toolCalls
-  const total = Number(parsed?.usageMetadata?.totalTokenCount)
-  return {
-    choices: [{ message }],
-    usage: { total_tokens: Number.isFinite(total) ? total : 0 },
-    modelServit: `google-direct/${GEMINI_MODEL}`,
-  }
-}
+// (Calea Gemini a constructorului a fost SCOASĂ, 12 aug — owner: „nu are ce
+// căuta Gemini acolo". Constructorul are UN SINGUR creier: endpoint-ul
+// OpenAI-compatibil din env (DeepInfra), cu rotire pe modele-rezervă în llm().
+// Nu mai există cod care să cheme Gemini din constructor.)
 
 // TREZIREA PLĂCII LA RECE (vezi nota de la ESTE_RUNPOD/RUNPOD_BASE, sus): trimite
 // un job minimal pe ruta ASINCRONĂ /run și așteaptă /status până e TERMINAL —
@@ -883,17 +693,17 @@ async function trezestePlaca() {
 
 // RunPod DIRECT — OpenAI-compatible. Mesajele NOASTRE sunt deja în format
 // OpenAI (role/content/tool_calls/tool_call_id) și TOOLS la fel → se trimit
-// DIRECT, fără nicio conversie (spre deosebire de Gemini). Întoarce ACELAȘI
+// DIRECT, fără nicio conversie. Întoarce ACELAȘI
 // obiect OpenAI-shaped pe care îl așteaptă main() (choices[0].message). Pe orice
-// eșec aruncă {clasa:'furnizor'} — llm() reîncearcă exact ca pe Gemini.
-async function llmRunpod(messages) {
+// eșec aruncă {clasa:'furnizor'} — llm() reîncearcă cu backoff (și rotește modelul).
+async function llmRunpod(messages, model = RUNPOD_MODEL) {
   let r
   try {
     r = await fetch(RUNPOD_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${RUNPOD_KEY}` },
       body: JSON.stringify({
-        model: RUNPOD_MODEL,
+        model,
         messages,
         tools: TOOLS,
         tool_choice: 'auto',
@@ -921,11 +731,17 @@ async function llmRunpod(messages) {
     throw Object.assign(new Error(`RunPod JSON rupt (${text.length} caractere)`), { clasa: 'furnizor' })
   }
   const message = parsed?.choices?.[0]?.message
-  if (!message) throw Object.assign(new Error('RunPod fără candidați (200 gol/blocat)'), { clasa: 'furnizor' })
+  if (!message) {
+    // 200 fără candidați = de obicei o eroare în corp (DeepInfra: „Model busy,
+    // retry later" / engine_overloaded). O scoatem în mesaj ca reîncercarea +
+    // clasificarea „amânabil" din llm() s-o vadă și ordinul să NU moară pe ea.
+    const em = parsed?.error?.message || parsed?.error?.code || ''
+    throw Object.assign(new Error(`endpoint fără candidați (200 gol/blocat)${em ? ': ' + String(em).slice(0, 120) : ''}`), { clasa: 'furnizor' })
+  }
   const content = typeof message.content === 'string' ? message.content : ''
   const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
   // Gol de tot (nici text, nici tool) — aruncăm ca llm() să reîncerce, la fel ca
-  // la Gemini, în loc să ardem o tură sterilă pe nimic.
+  // în loc să ardem o tură sterilă pe nimic.
   if (!content.trim() && !toolCalls.length)
     throw Object.assign(new Error('RunPod: răspuns gol (200 fără text/tool)'), { clasa: 'furnizor' })
   const out = { role: 'assistant', content }
@@ -934,7 +750,7 @@ async function llmRunpod(messages) {
   return {
     choices: [{ message: out }],
     usage: { total_tokens: Number.isFinite(total) ? total : 0 },
-    modelServit: `runpod/${RUNPOD_MODEL}`,
+    modelServit: `runpod/${model}`,
   }
 }
 
@@ -945,23 +761,25 @@ async function llm(messages) {
   // GĂZDUIT (ex. DeepInfra: modelul stă pornit non-stop, fără pornire la rece
   // și fără OOM — spre deosebire de RunPod serverless, care nu servea 30B-ul:
   // /openai dădea 500, măsurat 12 aug). Regula owner-ului rămâne: creierul e
-  // DOAR endpoint-ul ăsta, NU cade pe Gemini. Cere cheie + URL; altfel se
+  // DOAR endpoint-ul ăsta, NU cade pe alt creier. Cere cheie + URL; altfel se
   // OPREȘTE zgomotos, fără rezervă. Reîncercăm pe ACELAȘI creier cu pauze
   // crescătoare; 401/403 = FATAL pe loc; sugrumarea (429/5xx) = AMÂNABIL.
   if (!RUNPOD_KEY || !RUNPOD_URL)
-    throw Object.assign(new Error('creierul constructorului nu e configurat: pune CONSTRUCTOR_RUNPOD_KEY + CONSTRUCTOR_RUNPOD_URL (sau numele vechi CONSTRUCTOR_DEEPSEEK_KEY + CONSTRUCTOR_DEEPSEEK_URL de pe VPS) pe un endpoint OpenAI-compatibil — RunPod (…api.runpod.ai/v2/<id>/openai/v1/…) SAU găzduit (ex. DeepInfra: https://api.deepinfra.com/v1/openai/chat/completions). NU cade pe Gemini — se oprește.'), { fatal: true })
+    throw Object.assign(new Error('creierul constructorului nu e configurat: pune CONSTRUCTOR_RUNPOD_KEY + CONSTRUCTOR_RUNPOD_URL (sau numele vechi CONSTRUCTOR_DEEPSEEK_KEY + CONSTRUCTOR_DEEPSEEK_URL de pe VPS) pe un endpoint OpenAI-compatibil — RunPod (…api.runpod.ai/v2/<id>/openai/v1/…) SAU găzduit (ex. DeepInfra: https://api.deepinfra.com/v1/openai/chat/completions). NU cade pe alt creier — se oprește.'), { fatal: true })
   const foloseste = llmRunpod
-  const numeCreier = ESTE_RUNPOD ? 'RunPod' : 'endpoint găzduit'
+  const numeCreier = NUME_FURNIZOR
   let lastErr = ''
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
     if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
+    // modelul acestei încercări: principalul (env) întâi, apoi rezervele (rotire pe eșec).
+    const model = MODELE[Math.min(attempt - 1, MODELE.length - 1)] || RUNPOD_MODEL
     try {
       // Placa proprie: dacă e RunPod și încă rece, o trezim ÎNTÂI (no-op după ce
       // e caldă). Pusă în buclă intenționat — dacă placa se stinge între pași și
       // un apel sincron cade, `placaCalda` se resetează, iar reîncercarea o
       // retrezește singură înainte de a mai încerca (auto-vindecare).
       await trezestePlaca()
-      return await foloseste(messages)
+      return await foloseste(messages, model)
     } catch (e) {
       lastErr = String(e?.message ?? e)
       // Piedici clasificate EXPLICIT în adânc: cheie/cont mort = fatal (stop pe
@@ -975,14 +793,14 @@ async function llm(messages) {
       }
       if (attempt === LLM_ATTEMPTS) break
       const wait = Math.min(attempt * 8_000, 30_000)
-      log(`llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe ${numeCreier} (${lastErr.slice(0, 100)}) — reîncerc în ${wait / 1000}s`)
+      log(`llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe ${numeCreier}/${model} (${lastErr.slice(0, 90)}) — reîncerc în ${wait / 1000}s`)
       await dormi(wait)
     }
   }
   // La capătul tuturor încercărilor: dacă ultima eroare e sugrumare de furnizor
   // (429/cotă/5xx/gol), marcăm amânabil — ordinul nu moare, se reia.
   throw Object.assign(new Error(lastErr || `${numeCreier} indisponibil după ${LLM_ATTEMPTS} încercări`), {
-    amanabil: /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|(runpod|gemini) 5\d\d|răspuns gol|rețea/i.test(lastErr),
+    amanabil: /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overloaded|Model busy|\b5\d\d\b|răspuns gol|rețea/i.test(lastErr),
   })
 }
 
@@ -1528,23 +1346,24 @@ async function main() {
       await report('done', { branch, prUrl, tokens, ci: ci === 'verde' ? 'verde' : `${ci} (poarta VPS confirmă + îmbină pe verde)` })
     }
   } catch (e) {
-    // AMÂNARE, NU MOARTE (regula din 28 iul, adaptată la Gemini-only): când
-    // vina e a FURNIZORULUI (429/cotă/5xx la Gemini), NU raportăm eșec:
+    // AMÂNARE, NU MOARTE (regula din 28 iul): când
+    // vina e a FURNIZORULUI (429/cotă/5xx/„busy" la endpoint), NU raportăm eșec:
     // ordinul rămâne „running" iar coada îl reia singură după 40 min (până la 3
     // încercări — mecanismul existent din claimNextBuildJob). Fără email de
     // eșec fals, fără ordin îngropat degeaba. Nu există alt creier pe care să
     // cadă — extirparea OpenRouter, 3 aug.
     const amanabil =
-      e?.amanabil || /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|gemini 5\d\d/i.test(String(e?.message ?? ''))
+      e?.amanabil ||
+      /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overloaded|Model busy|\b5\d\d\b/i.test(String(e?.message ?? ''))
     if (amanabil && Number(job.attempts) < 3) {
       log(
-        `AMÂNAT (nu eșuat): Gemini e sugrumat acum (${String(e.message).slice(0, 120)}) — ` +
+        `AMÂNAT (nu eșuat): ${NUME_FURNIZOR} e sugrumat acum (${String(e.message).slice(0, 120)}) — ` +
           'ordinul rămâne în coadă și se reia automat în ~40 min',
       )
       // PAUZA SE VEDE (D6). Fără rândul ăsta, panoul rămânea pe „Lucrează" cu
       // ultimul pas înghețat pe ecran 40 de minute — imposibil de deosebit de
       // un ordin blocat. Marcajul „⏳" îl citește interfața și schimbă insigna.
-      beat('⏳ Gemini e sugrumat acum. Ordinul NU e pierdut — se reia automat în ~40 min.', true)
+      beat(`⏳ ${NUME_FURNIZOR} e sugrumat acum. Ordinul NU e pierdut — se reia automat în ~40 min.`, true)
       return
     }
     log(`EȘEC: ${e.message}`)
