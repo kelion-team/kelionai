@@ -69,6 +69,19 @@
 > tsc curat. **DE TĂIAT după proba live**: îi dai un ordin fără „construiește"
 > (ex. „repară X") → apare în panoul Constructor + PR, nu doar vorbă în chat.
 
+> **12 aug 2026 — MONITORUL ARATĂ TOT FLUXUL, CU BARE 0–100% (de verificat live).**
+> Adrian: „tot fluxul, cu bari de la 0 la 100%, actualizate real dinamic până la
+> deploy… de la preluare, pe unde ajunge sarcina." Backendul dădea deja `pct`
+> (`progresOrdin.ts` + `/api/constructor/live`), dar suprafața constructorului din
+> monitor NU-l desena — arăta doar textul ultimului pas. Fix (`Stage.tsx`
+> `BuildSurface` + CSS nou, clase noi fără coliziune): bară vizuală 0–100% +
+> cronologia etapelor (Preluat → Atelier → Construiește → Verifică → PR →
+> CI/Deploy) care se APRIND din pct-ul REAL raportat, cu etapa activă evidențiată;
+> la eșec, motivul scris pe față (bloc roșu), nu doar un badge sec. Se
+> reîmprospătează la 2.5s. Build frontend + sintaxă CSS verzi. **DE TĂIAT după
+> proba live**: dai un ordin → în monitor vezi bara urcând și etapele aprinzându-se
+> pas cu pas până la CI/Deploy; la un ordin picat, vezi motivul, nu doar „eșuat".
+
 > ✅ **VERIFICAT LIVE de owner (11 aug): „merge bloutotch".** Vocea live iese pe Bluetooth/mașină,
 > ȘI update-ul blocant a funcționat (a primit codul nou pe telefon fără chin — altfel BT ar fi
 > rămas mort). Ambele puncte (A poarta + B microfonul fără procesare) confirmate pe telefon real.
