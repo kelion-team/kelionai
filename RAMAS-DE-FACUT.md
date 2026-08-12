@@ -42,6 +42,16 @@
 >   notificare în panou (K14) cu ce e de făcut: escaladează la creier plătit
 >   (`CONSTRUCTOR_MODEL` + `CONSTRUCTOR_ALLOW_PAID=1`) + reia ordinul
 >   (`constructor_manage retry`) — nu doar email care se pierde. 1167 teste, tsc curat.
+> - **K8 — FANTOMA STT PE TĂCERE („Greț") + reevaluarea celor 7.** Poarta de
+>   energie de pe client tăia mult, dar o fantomă tot scăpa în chat. Filtru
+>   centralizat pe `/api/asr`: modul pur `asrHalucinatii.ts` (listă curată de
+>   halucinații de tăcere — „greț", „subtitrare", „thanks for watching", doar
+>   simboluri — DOAR când tot transcriptul e asta; Da/Nu/OK NU se ating). 5 teste.
+>   NU promit un „0 garantat" de la un model probabilistic (ar fi invenție) —
+>   blochez tăcerea + fantomele cunoscute, iar lista crește din fantome REALE.
+>   Pe drum (la „reevaluează 1–7"): **corectat un comentariu stale** în
+>   `autonomie.ts` (zicea că schimbarea de metodă vine „de la a treia" încercare;
+>   codul o face de la PRIMA — `escaladare()` linia 536). 1172 teste, tsc curat.
 
 > **12 aug 2026 — PLASĂ DE SĂNĂTATE LA PUBLICARE: backup → health → revert automat (de verificat live).**
 > Adrian: „să poată da automat merged, DAR cu backup înainte în caz că crapă ceva;

@@ -1253,7 +1253,9 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       await saveKv(`autonomie:zi:${ziua}`, String(azi + 1)).catch(() => {})
       try {
         // Hands steps leave no job log, so the escalation gets glued here, by
-        // the number of attempts: from the third, change the method.
+        // the number of attempts. NB: `escaladare()` kicks in from the FIRST
+        // retry (`incercariDeja < 1` → ''), NOT the third — the old „from the
+        // third" note was stale (the 3-threshold was mine, removed 2 aug).
         const spus = await ruleazaCuMainile({ ...s, ordin: escaladare(st.incercari) + ordin })
           .catch((e: Error) => `a crăpat: ${e.message}`)
         const chiarAFacut = s.dovada ? await s.dovada().catch(() => false) : false

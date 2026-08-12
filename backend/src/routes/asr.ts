@@ -3,6 +3,7 @@ import { getSessionUser } from '../session.js'
 import { recordCost } from '../db.js'
 import { ASR_USD_PER_CALL } from '../services/cost.js'
 import { transcribe } from '../services/asr.js'
+import { esteHalucinatieASR } from '../services/asrHalucinatii.js'
 
 // Audio language identification + transcription via Google Cloud Speech-to-Text
 // v2 (chirp_3, automatic language detection). This is what lets Kelion detect
@@ -32,6 +33,11 @@ export async function asrRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(r.status).send({ error: r.error.split(':')[0] })
     }
     void recordCost(user.email, 'asr', ASR_USD_PER_CALL)
-    return reply.send({ lang: r.lang, transcript: r.transcript })
+    // FANTOMA STT PE TĂCERE/ZGOMOT (K8): dacă transcriptul ÎNTREG e o halucinație
+    // cunoscută („Greț", „Subtitrare", „Thanks for watching") sau doar simboluri,
+    // îl golim — clientul (`if (text) onTranscript`) nu mai face o bulă-fantomă.
+    // Cuvinte reale scurte (Da/Nu/OK) NU se ating (vezi asrHalucinatii.ts).
+    const transcript = esteHalucinatieASR(r.transcript ?? '') ? '' : r.transcript
+    return reply.send({ lang: r.lang, transcript })
   })
 }
