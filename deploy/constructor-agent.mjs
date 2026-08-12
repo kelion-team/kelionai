@@ -967,15 +967,23 @@ export function verdictDinCheckRuns(json, nume = 'verify') {
   const r = runs.find((x) => x?.name === nume)
   if (!r) return 'absent'
   if (r.status !== 'completed') return 'pending'
+  // 'skipped'/'neutral' = CI-ul NU a rulat de fapt (pe repo-ul ăsta Actions e
+  // oprit — `vars.ACTIONS_PORNIT` fals — deci checkul „verify" iese 'skipped').
+  // NU e un EȘEC: verificarea reală au fost cele 7 porți din atelier, rulate deja
+  // înainte de PR, plus poarta de pe VPS care îmbină pe verde. Îl tratăm ca
+  // 'absent' ca ordinul să NU fie marcat „picat" pe un check care n-a rulat.
+  if (r.conclusion === 'skipped' || r.conclusion === 'neutral') return 'absent'
   return r.conclusion === 'success' ? 'success' : 'failure'
 }
 
 // Așteaptă checkul „verify" pe commit-ul PR-ului, mărginit de un termen (nu poate
 // depăși bugetul de timp al rulării — un job NU devine demon). Întoarce
 // 'success' | 'failure' | 'timeout'.
-async function asteaptaVerificareCI(sha, deadlineMs) {
+async function asteaptaVerificareCI(sha, deadlineMs, gratieAbsentMs = 90_000) {
   const headers = { Authorization: `Bearer ${GHTOKEN}`, Accept: 'application/vnd.github+json' }
+  const start = Date.now()
   let ultim = 'absent'
+  let aRulatVreodata = false // checkul „verify" a apărut măcar o dată ca 'pending'?
   while (Date.now() < deadlineMs) {
     let json = null
     try {
@@ -987,6 +995,13 @@ async function asteaptaVerificareCI(sha, deadlineMs) {
     const v = verdictDinCheckRuns(json, 'verify')
     ultim = v
     if (v === 'success' || v === 'failure') return v
+    if (v === 'pending') aRulatVreodata = true
+    // NU așteptăm tot bugetul pe un check care NU vine: pe repo-ul ăsta Actions e
+    // oprit, deci „verify" rămâne 'absent' (sau iese 'skipped' → tot 'absent') la
+    // nesfârșit. Dacă după perioada de grație tot n-a pornit niciodată, ieșim —
+    // porțile din atelier (deja verzi) + poarta de pe VPS confirmă și îmbină. Dacă
+    // A pornit ('pending'), rămânem până la termen ca să prindem verdictul real.
+    if (!aRulatVreodata && Date.now() - start > gratieAbsentMs) return 'absent'
     await dormi(15_000)
   }
   return ultim === 'failure' ? 'failure' : ultim === 'success' ? 'success' : 'timeout'
