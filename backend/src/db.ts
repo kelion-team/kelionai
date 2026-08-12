@@ -3559,6 +3559,23 @@ export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
   }
 }
 
+/** Cât a cheltuit constructorul AZI — suma `cost_usd` MĂSURATĂ a joburilor de
+ *  azi (UTC). Pentru plafonul zilnic de ardere (B8/K15). Doar cifre reale de la
+ *  furnizor; joburile fără cost raportat (ex. RunPod pe timp-GPU) nu se numără —
+ *  nu inventăm o cheltuială. */
+export async function cheltuitAziConstructor(): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const r = await getPool().query<{ s: string | null }>(
+      `SELECT COALESCE(SUM(cost_usd), 0)::text AS s FROM build_jobs
+        WHERE cost_usd IS NOT NULL AND updated_at::date = (now() AT TIME ZONE 'UTC')::date`,
+    )
+    return Number(r.rows[0]?.s ?? 0) || 0
+  } catch {
+    return 0
+  }
+}
+
 /** AUTO-ARHIVARE (K9 + K13): ordinele TERMINATE (done/failed) mai vechi de
  *  `zile` se marchează arhivate — ies din panou, rămân în DB. Nu atinge niciodată
  *  ordinele vii (queued/running). Întoarce câte a arhivat. Rulată de bucla de

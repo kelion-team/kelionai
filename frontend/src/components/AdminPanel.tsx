@@ -54,6 +54,9 @@ import {
   fetchNotificari,
   markNotificareCitit,
   type NotificareAdmin,
+  fetchPlafon,
+  setPlafon,
+  type PlafonConstructor,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -301,6 +304,8 @@ export default function AdminPanel({
   // Notificări pentru owner (K14): cereri noi (plată neatribuită / cerere
   // neacoperită). 'necitit' = n-am întrebat; null = citirea a EȘUAT; listă = citit.
   const [notificari, setNotificari] = useState<NotificareAdmin[] | null | 'necitit'>('necitit')
+  // Plafonul zilnic de ardere al constructorului (B8/K15): contor + cifră + comutator.
+  const [plafon, setPlafonState] = useState<PlafonConstructor | null>(null)
   const previewAndPeek = (clip: string): void => {
     previewGesture(clip)
     setPeek(true)
@@ -735,7 +740,11 @@ export default function AdminPanel({
   useEffect(() => {
     if (tab !== 'constructor') return
     refreshBuildJobs()
-    const id = window.setInterval(refreshBuildJobs, 10_000)
+    void fetchPlafon().then(setPlafonState)
+    const id = window.setInterval(() => {
+      refreshBuildJobs()
+      void fetchPlafon().then(setPlafonState)
+    }, 10_000)
     return () => window.clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshBuildJobs e stabil funcțional (doar fetch+set)
   }, [tab])
@@ -2289,6 +2298,74 @@ export default function AdminPanel({
                 Constructorul — dai ordinul, Kelion construiește pe server (build + teste), deschide
                 PR-ul, iar merge-ul îl dai tu. Poți ordona și prin voce/chat: „Kelion, construiește…".
               </div>
+              {plafon && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                    background: 'color-mix(in srgb, var(--text) 3%, transparent)',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600 }}>
+                      Plafon zilnic de ardere: construit azi ${plafon.cheltuit.toFixed(2)} din ${plafon.plafon.toFixed(2)}
+                    </span>
+                    <span
+                      className="build-faza"
+                      style={
+                        plafon.activ
+                          ? plafon.cheltuit >= plafon.plafon
+                            ? { color: '#ff9a9a', borderColor: '#ff7a7a', opacity: 1 }
+                            : { color: 'var(--text)', opacity: 1 }
+                          : { opacity: 0.6 }
+                      }
+                    >
+                      {plafon.activ
+                        ? plafon.cheltuit >= plafon.plafon
+                          ? 'ATINS — oprit azi'
+                          : 'limită activă'
+                        : 'limită oprită'}
+                    </span>
+                    <button
+                      type="button"
+                      className="ghost"
+                      style={{ marginLeft: 'auto', fontSize: 12, padding: '3px 10px' }}
+                      onClick={async () => {
+                        const p = await setPlafon({ activ: !plafon.activ })
+                        if (p) setPlafonState(p)
+                      }}
+                    >
+                      {plafon.activ ? 'Oprește limita' : 'Pornește limita'}
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                    <label className="chat-hint" style={{ fontSize: 12 }}>
+                      Cifra ($/zi):
+                    </label>
+                    <input
+                      type="number"
+                      min={0.5}
+                      step={0.5}
+                      defaultValue={plafon.plafon}
+                      style={{ width: 90 }}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter') {
+                          const v = Number((e.target as HTMLInputElement).value)
+                          if (v > 0) {
+                            const p = await setPlafon({ plafon: v })
+                            if (p) setPlafonState(p)
+                          }
+                        }
+                      }}
+                    />
+                    <span className="chat-hint" style={{ fontSize: 12 }}>
+                      Enter ca să salvezi. Când se atinge, Kelion nu mai pornește ordine azi (doar cheltuiala MĂSURATĂ se numără).
+                    </span>
+                  </div>
+                </div>
+              )}
               <form
                 className="fin-row"
                 onSubmit={(e) => {

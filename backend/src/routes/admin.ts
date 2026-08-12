@@ -354,6 +354,30 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: await markAdminNotificationRead(id) })
   })
 
+  // ── PLAFONUL ZILNIC DE ARDERE (B8/K15: „contor real + limitare automată +
+  // buton de oprit limita") ───────────────────────────────────────────────────
+  // Contorul (cât s-a cheltuit azi, MĂSURAT), cifra plafonului și comutatorul.
+  // Bucla de autonomie citește aceleași valori (plafonConstructor) și se oprește
+  // la atingere. Import dinamic ca să nu legăm rutele de autonomie la boot.
+  app.get('/api/admin/plafon-constructor', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const { plafonConstructor } = await import('../services/autonomie.js')
+    return reply.send(await plafonConstructor())
+  })
+  app.post<{ Body: { plafon?: number; activ?: boolean } }>('/api/admin/plafon-constructor', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    if (typeof req.body?.plafon === 'number' && Number.isFinite(req.body.plafon) && req.body.plafon > 0) {
+      await saveKv('constructor:plafon_usd', String(Math.min(10000, Math.max(0.5, req.body.plafon))))
+    }
+    if (typeof req.body?.activ === 'boolean') {
+      await saveKv('constructor:plafon_activ', req.body.activ ? '1' : '0')
+    }
+    const { plafonConstructor } = await import('../services/autonomie.js')
+    return reply.send(await plafonConstructor())
+  })
+
   // AUTONOMOUS TRIAGE (Adrian, 24 Jul): Kelion decides by itself on each gap —
   // valuable (stays, "TO IMPLEMENT") or automatically closed with a reason.
   // The admin button only triggers; the same function also runs daily,

@@ -587,6 +587,36 @@ export async function markNotificareCitit(id: number): Promise<boolean> {
   }
 }
 
+// ── PLAFONUL ZILNIC DE ARDERE (B8/K15) ─────────────────────────────────────────
+export interface PlafonConstructor {
+  activ: boolean
+  plafon: number
+  cheltuit: number
+}
+export async function fetchPlafon(): Promise<PlafonConstructor | null> {
+  try {
+    const r = await fetch('/api/admin/plafon-constructor', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as PlafonConstructor
+  } catch {
+    return null
+  }
+}
+export async function setPlafon(body: { plafon?: number; activ?: boolean }): Promise<PlafonConstructor | null> {
+  try {
+    const r = await fetch('/api/admin/plafon-constructor', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) return null
+    return (await r.json()) as PlafonConstructor
+  } catch {
+    return null
+  }
+}
+
 // (resolveGap — SCOS 10 aug: cod mort după curățarea adminului #959, niciun apelant.)
 
 // Registered voiceprints (admin only).
