@@ -10,6 +10,23 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 — PLASĂ DE SĂNĂTATE LA PUBLICARE: backup → health → revert automat (de verificat live).**
+> Adrian: „să poată da automat merged, DAR cu backup înainte în caz că crapă ceva;
+> după merged, verificare automată de sănătate; dacă nu trece, REVERT și schimbă
+> abordarea." Construit ca script Node standalone (`deploy/plasa-sanatate.mjs`),
+> chemat de `auto-publicare.sh` DUPĂ `deploy.sh` — rulează din AFARA aplicației,
+> deci poate reveni chiar dacă publicarea nouă nu mai pornește. Flux: (1) BACKUP
+> durabil (tag `backup-…`) al stării bune de dinainte; (2) `/api/health` verificat
+> ~4 min (sănătos = 3 citiri 200 la rând, cu toleranță la blip-ul de repornire);
+> (3) dacă nu ajunge sănătos → REVERT la starea bună (commit ÎNAINTE pe master, ca
+> `restoreToPoint`, fără rescriere de istorie — `auto-publicare` o republică
+> singură); (4) ISSUE care spune că abordarea a picat (semnalul de schimbat
+> abordarea). Anti-spirală: nu revine de două ori la rând. Acoperă ORICE publicare
+> (merge-uri constructor ȘI ale ownerului — toate trec prin `auto-publicare`).
+> Probat uscat: scenariile sănătos + picat→revert merg; `node --check` + `bash -n`
+> curate. **DE TĂIAT după proba live**: o publicare stricată intenționat → live
+> revine singur la starea bună în câteva minute + issue deschis.
+
 > **12 aug 2026 — CONSTRUCTORUL AJUNGE LA PLACA PROPRIE (jobul #177 „fetch failed" reparat, de verificat live).**
 > Cauza MĂSURATĂ (jobul #177, era în codul meu — regula #2): constructorul suna
 > modelul de pe placa RunPod cu un apel SINCRON pe `/openai`, dar placa serverless

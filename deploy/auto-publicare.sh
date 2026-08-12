@@ -46,5 +46,17 @@ LIVE=$(curl -s -m 8 http://127.0.0.1:8080/api/version | grep -o '"v":"[^"]*"' | 
 # 3. Live ≠ master → publicăm exact master, cu pipeline-ul OFICIAL: deploy.sh
 # face singur fetch + checkout origin/master + build + restart + verificarea
 # anti-fantomă (v == sha), și rulează din copia lui din /tmp (garda proprie).
+#
+# LKG = starea BUNĂ de dinainte de publicare (ce e live ACUM). O reținem înainte
+# de swap, ca plasa de sănătate să știe la ce să revină dacă publicarea nouă crapă.
+LKG=$LIVE
 echo "[auto-publicare] $(date -u +%H:%M:%S) live=$LIVE master=$SHORT — public"
 bash "$REPO/deploy/deploy.sh" >> /root/kelion/auto-publicare.log 2>&1
+
+# 4. PLASA DE SĂNĂTATE (Adrian, 12 aug: „backup înainte; după merged verificare de
+# sănătate; dacă nu trece, revert și schimbă abordarea"). Rulează DIN AFARA
+# aplicației (Node standalone) — poate reveni chiar dacă publicarea nouă nu mai
+# pornește. Ține lacătul cât verifică (câteva min), ca să nu se suprapună altă
+# publicare peste verdictul ei. Nefatal pentru cron: orice ar păți, `|| true`.
+GITHUB_TOKEN="$TOKEN" node "$REPO/deploy/plasa-sanatate.mjs" "$LKG" "$SHORT" \
+  >> /root/kelion/plasa-sanatate.log 2>&1 || true
