@@ -26,6 +26,23 @@
 > arată „placa e CALDĂ" apoi `modelServit: deepseek/…`, ordinul se termină, nu mai
 > pică pe „fetch failed".
 
+> **12 aug 2026 — KELION ÎȘI CUNOAȘTE SINGUR DEFECTELE (autodiagnostic, de verificat live).**
+> Adrian: „Kelion nu știe by default că are probleme… nu are sisteme să-i zică
+> automat ce probleme are" — întrebat „ce e eroarea 1006?", răspundea „încearcă din
+> nou". Cauza (din cod, regula #2): (1) eroarea de voce urca DOAR ca toast —
+> `urcaEroarea` din `vocalLive.ts` NU o trimitea pe canalul de erori, deci Kelion
+> n-o vedea niciodată; (2) erorile din browser se injectau BRUT în creier, fără
+> „ce este". Fix: `urcaEroarea` raportează acum și pe `console.error` (→
+> `/api/client-errors` → context); clasificator nou `explicaEroare.ts` (traduce
+> „cod 1006" / „Failed to fetch" / 5xx… în explicație clară, iar la necunoscut
+> spune „neclasificat" — NU inventează); serviciu `autodiagnostic.ts` care strânge
+> defectele curente (erori de server + ordine de build eșuate) SINCRON din cache
+> (zero latență, ca lookup-urile GPS); ambele injectate în creier (`chat.ts`) —
+> erorile din browser cu explicație, plus, pentru OWNER, blocul „PROBLEMELE MELE
+> ACUM". Porți verzi (**1161 teste**, +8 pe clasificator; tsc curat cu `@types/ws`;
+> build frontend; sintaxă). **DE TĂIAT după proba live**: în chat „ce e eroarea
+> 1006?" / „ce probleme ai?" → Kelion răspunde exact ce e, nu „încearcă din nou".
+
 > ✅ **VERIFICAT LIVE de owner (11 aug): „merge bloutotch".** Vocea live iese pe Bluetooth/mașină,
 > ȘI update-ul blocant a funcționat (a primit codul nou pe telefon fără chin — altfel BT ar fi
 > rămas mort). Ambele puncte (A poarta + B microfonul fără procesare) confirmate pe telefon real.

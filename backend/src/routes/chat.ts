@@ -97,6 +97,8 @@ import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { marcheazaFata } from '../services/adminLock.js'
 import { recentClientErrors } from './clientErrors.js'
+import { explicaEroare } from '../services/explicaEroare.js'
+import { problemeGlobaleCache, formateazaProbleme } from '../services/autodiagnostic.js'
 import { neagaUneltele } from '../services/negareUnelte.js'
 import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
@@ -1927,8 +1929,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const cerrs = recentClientErrors(user.email)
     if (cerrs.length > 0) {
       systemPrompt +=
-        `\n\nBROWSER CONSOLE (the user's own F12 errors, last 15 min — REAL symptoms from their device; use them to diagnose "why doesn't X work" and say plainly what is failing):\n- ` +
-        cerrs.slice(-8).join('\n- ')
+        `\n\nBROWSER CONSOLE (the user's own F12 errors, last 15 min — REAL symptoms from their device; each line has a plain explanation of WHAT IT IS after "→". When the user asks "what is this error?", answer from THIS, plainly — never a generic "try again"):\n- ` +
+        cerrs.slice(-8).map((l) => `${l} → ${explicaEroare(l).ceEste}`).join('\n- ')
+    }
+    // AUTODIAGNOSTIC (Adrian, 12 aug: „Kelion nu are sisteme să-i zică ce
+    // probleme are"): pentru OWNER injectăm poza defectelor curente (erori de
+    // server + ordine de build eșuate), fiecare cu „ce este". Sincron, din cache,
+    // deci NU adaugă latență. Astfel, la „ce probleme ai?", răspunde din
+    // cunoaștere — nu pretinde că totul e în regulă.
+    if (user.role === 'admin' && !turaDeOaspete) {
+      const probl = formateazaProbleme(problemeGlobaleCache())
+      if (probl) {
+        systemPrompt +=
+          `\n\nYOUR OWN CURRENT PROBLEMS (self-diagnosis — real server errors + failed build orders, each with what it is). You KNOW these. If the owner asks what problems you have / what is broken, list them plainly and offer to fix, instead of claiming all is fine:\n${probl}`
+      }
     }
     // GPS must NEVER delay the reply: only synchronous cache reads happen here.
     // The place-name/IP lookups run in the background and are ready for the
