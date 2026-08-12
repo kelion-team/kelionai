@@ -214,6 +214,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   generate_image: { what: 'Draws an image from your description', say: '"draw me a red kitchen"' },
   generate_video: { what: 'Makes a short video clip from your description (paid, only if enabled)', say: '"make me a video of waves at sunset"' },
   open_app_view: { what: 'Opens a panel of the app for you', say: '"open my settings"' },
+  proceseaza_date: { what: 'Reads a CSV/JSON you paste and works out totals, averages or a summary, shown on your screen', say: '"add up this CSV by region"' },
 
   // Notes and memory
   save_note: { what: 'Saves a note for later', say: '"note the meter reading is 4471"' },

@@ -54,6 +54,30 @@ export const SYSTEM_HEALTH_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+// ── L1e: PROCESARE DE DATE TABELARE (CSV/JSON) — capabilitate generală ────────
+// Ownerul (autonomie): Kelion trebuie să poată PROCESA date, nu doar să discute
+// despre ele. Unealtă PURĂ: primește textul (CSV sau JSON, lipit de om sau adus
+// de model cu alte unelte), îl parsează, face o agregare SAU un profil măsurat,
+// și AFIȘEAZĂ tabelul + rezultatul pe monitor. Nu deschide URL-uri, nu atinge
+// disc/DB — deci e sigură pentru oricine (nu lărgește suprafața de admin).
+export const PROCESEAZA_DATE_TOOL: Tool = {
+  name: 'proceseaza_date',
+  description:
+    'Process TABULAR DATA the user gives you — a CSV or JSON they pasted, or data you fetched with another tool. Parses it, then EITHER runs one aggregation (sum/avg/min/max/count/unique per group) OR profiles every column (type, min/max/sum/avg, empties, uniques), and SHOWS the table + result on the monitor. Use this whenever the user pastes rows/records and wants totals, averages, grouping, counts, or "what does this data say". Numbers are only treated as numbers when the value is clearly numeric — nothing is invented; empty results are shown as "—", not faked.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      date: { type: 'string', description: 'The raw data as text: CSV (with a header row) or JSON (array of objects / NDJSON). Paste exactly what the user gave.' },
+      format: { type: 'string', enum: ['auto', 'csv', 'json'], description: 'Force the parser; default "auto" detects CSV vs JSON.' },
+      operatie: { type: 'string', enum: ['suma', 'medie', 'min', 'max', 'numar', 'numar_gol', 'numar_unic'], description: 'Optional aggregation. Omit to profile all columns instead. suma=sum, medie=avg, numar=row count, numar_gol=empty count, numar_unic=distinct count.' },
+      valoare: { type: 'string', description: 'Column the aggregation runs on (required for suma/medie/min/max/numar_unic/numar_gol).' },
+      grupeaza_dupa: { type: 'string', description: 'Optional column to group by; omit to aggregate over the whole table.' },
+      titlu: { type: 'string', description: 'Optional title for the monitor panel.' },
+    },
+    required: ['date'],
+  },
+}
+
 // ── HIS SETTINGS, SET BY HIMSELF (Adrian, Jul 30: "he should create the
 // secrets and put them where they belong, it's mine and I allow him full
 // access") ───────────────────────────────────────────────────────────────────
