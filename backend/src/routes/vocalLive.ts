@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type { RawData } from 'ws'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
+import { creeazaOpusVoce, type OpusVoce } from '../services/opusVoce.js'
 import {
   deschideVocalLive,
   vocalLiveDisponibila,
@@ -325,6 +326,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
 
     let inchis = false
     let live: VocalLive | null = null
+    // OPUS PE HOPUL BROWSER↔SERVER (owner, 12 aug: „fă Opus"). OFF până când:
+    // (a) flagul `config.voiceOpus` e pornit, (b) codecul de server se încarcă
+    // (verificat la `gata`), (c) clientul confirmă `opus_ready` (are WebCodecs).
+    // Până atunci — și mereu, dacă flagul e stins — calea rămâne PCM curat.
+    let opus: OpusVoce | null = null
+    let opusActiv = false // clientul a confirmat că trece pe Opus (uploads tag-uite, downloads Opus)
     // Microfonul clientului pornește imediat după deschiderea WS-ului, dar
     // sesiunea Live se deschide DUPĂ citirea istoricului (mai jos). Cadrele din
     // fereastra aia nu se aruncă — se țin aici și se varsă la deschidere,
@@ -371,6 +378,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // de voce tăia fals, pe liniște).
     const golesteRedarea = (): void => {
       redareEstimataPanaLa = 0
+      // OPUS: golim și restul neîncadrat de download — un cadru parțial din
+      // replica tăiată n-are ce căuta lipit de începutul celei următoare.
+      opus?.reseteazaDownload()
       trimite({ type: 'intrerupt' })
     }
 
@@ -566,13 +576,35 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // doar atunci tăierea la vocea omului are voie să judece.
             aecActiv = (m as { activ?: unknown }).activ === true
             app.log.info(`vocal-live: AEC raportat de browser: ${aecActiv ? 'activ — tăierea la voce armată' : 'INACTIV — tăierea la voce oprită (ecou netratat)'}`)
+          } else if (m.type === 'opus_ready') {
+            // Clientul și-a pornit codecul WebCodecs. DE-AICI (ordinea WS ne
+            // garantează): uploadurile lui vin tag-uite [octet codec][payload] și
+            // downloadurile pot pleca Opus. Doar dacă avem și noi codecul.
+            if (opus) {
+              opusActiv = true
+              app.log.info('vocal-live: Opus ACTIV pe hopul browser↔server (client + server gata)')
+            }
           }
         } catch {
           /* cadru text neînțeles — îl ignorăm, audio rămâne pe binar */
         }
         return
       }
-      const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
+      let buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
+      // OPUS: cât e activ, cadrul de microfon vine [octet codec: 0=PCM, 1=Opus]
+      // [payload]. Decodăm ÎNAINTE de detector și de Gemini — tot lanțul de jos
+      // lucrează pe PCM exact ca azi. Pachet corupt → sărim cadrul, nu crăpăm.
+      if (opusActiv && opus && buf.length >= 1) {
+        const codec = buf[0]
+        const payload = buf.subarray(1)
+        if (codec === 1) {
+          const pcm = opus.decodeUpload(payload)
+          if (!pcm) return
+          buf = pcm
+        } else {
+          buf = payload // clientul încă nu e gata pe codec — payload e PCM curat
+        }
+      }
       // Detectorul rulează pe FIECARE cadru (podeaua de zgomot învață și când
       // Kelion tace); verdictul de tăiere e posibil doar cât se AUDE Kelion
       // (ceasul difuzorului) și doar cu AEC-ul viu.
@@ -602,6 +634,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       varsaCostul() // restul de sub un minut nu se pierde
       incheieTura() // o tură neterminată nu se pierde — dar una SUPRIMATĂ nu se salvează
       live?.inchide()
+      opus?.inchide() // eliberează codecul Opus (WASM) al sesiunii
+      opus = null
       app.log.info('vocal-live: WS închis')
     })
     socket.on('error', () => {
@@ -782,9 +816,21 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         ultimaVorbaKelion = Date.now()
         // Ceasul difuzorului: octeți → mostre 16-bit → ms la 24 kHz. Fără el,
         // barge-in-ul ar crede că Kelion tace când el încă vorbește din buffer.
+        // Se calculează pe PCM (independent de codecul de pe sârmă), deci rămâne
+        // corect și pe Opus — Opus scade OCTEȚII, nu DURATA sunetului.
         redareEstimataPanaLa = Math.max(redareEstimataPanaLa, Date.now()) + octetiDinBase64(data) / 2 / 24
         pulsVoce.cadreAudioSpreBrowser++
-        trimite({ type: 'audio', data })
+        // OPUS: cât e activ, comprimăm PCM-ul 24 kHz în pachete de 20 ms și le
+        // trimitem tag-uite `codec:'opus'`. Restul neîncadrat se ține în codec
+        // pentru cadrul următor. Fără Opus — exact ca azi, PCM base64.
+        if (opusActiv && opus) {
+          const pcm = Buffer.from(data, 'base64')
+          for (const pkt of opus.encodeDownload(pcm)) {
+            trimite({ type: 'audio', codec: 'opus', data: pkt.toString('base64') })
+          }
+        } else {
+          trimite({ type: 'audio', data })
+        }
       }
       // Cadrele ținute până la verdict se varsă prin ACEEAȘI judecată ca cele
       // directe — redate sau numărate ca suprimate, niciodată pierdute tăcut.
@@ -801,7 +847,16 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         }
       }
       live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
-        onGata: () => trimite({ type: 'gata' }),
+        onGata: async () => {
+          // OPUS: cât sesiunea se pregătește, încercăm codecul de server O DATĂ.
+          // Îl anunțăm clientului DOAR dacă flagul e pornit ȘI codecul chiar s-a
+          // încărcat — altfel clientul rămâne pe PCM (fără cursă, fără regresie).
+          if (config.voiceOpus && !opus) {
+            opus = await creeazaOpusVoce().catch(() => null)
+            if (!opus) app.log.warn('vocal-live: VOICE_OPUS pornit, dar codecul de server nu s-a încărcat — rămân pe PCM')
+          }
+          trimite({ type: 'gata', opus: !!(config.voiceOpus && opus) })
+        },
         onAudioIesire: (data) => {
           pulsVoce.cadreAudioDeLaGoogle++
           pulsVoce.laUltimulCadru = Date.now()

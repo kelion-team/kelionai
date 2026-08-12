@@ -167,6 +167,13 @@ export const config = {
     redirectUri: required('GOOGLE_REDIRECT_URI'),
   },
   sessionSecret: required('SESSION_SECRET'),
+  // OPUS PE VOCEA LIVE (owner, 12 aug: „fă Opus" — banda vocii pe 3G). OFF din
+  // start: cu flagul stins, calea vocii rămâne EXACT PCM-ul de azi (zero
+  // regresie). Pornit (`VOICE_OPUS=1`), hopul browser↔server se comprimă ~10×,
+  // cu cădere sigură pe PCM dacă browserul n-are WebCodecs sau codecul de server
+  // nu se încarcă. Serverul↔Google rămâne PCM (Gemini Live cere PCM) — dar aia e
+  // bandă de datacenter, nu 3G-ul omului.
+  voiceOpus: (process.env.VOICE_OPUS ?? '') === '1',
   autonomyDailyMax: Math.max(1, Number(process.env.AUTONOMY_DAILY_MAX ?? '20') || 20),
   databaseUrl: env(...ENV_ALIASES.databaseUrl),
   googleServiceAccountJson: env(...ENV_ALIASES.googleServiceAccountJson),

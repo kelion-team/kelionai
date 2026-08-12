@@ -10,6 +10,18 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 (seara, partea 5) — OPUS pe vocea live (owner: „fă Opus").**
+> Banda vocii live pe 3G (PCM brut ~256/384 kbit/s) e singura care mai rămăsese
+> din discuția cu 3G. Acum: hopul **browser↔server** se comprimă cu Opus (~10×),
+> serverul↔Google rămâne PCM (Gemini cere PCM). **OFF din start** (`VOICE_OPUS`):
+> stins = PCM-ul de azi octet cu octet, zero regresie; cădere sigură pe PCM fără
+> WebCodecs sau fără codec de server. Server = opusscript (pur-JS, fără build
+> nativ); browser = WebCodecs nativ (zero dep). Teste: round-trip REAL de server
+> (9) + reîncadrare pură ambele capete; backend 1213 verzi, frontend 41 verzi.
+> **De probat LIVE de owner** (WebCodecs nu există în Node): `VOICE_OPUS=1` →
+> voce pe telefon curată + bandă mult mai mică. **RĂMAS din 3G:** nimic — Opus
+> era ultimul. Detecția țevii + calitatea adaptivă a vederii sunt deja pe master.
+
 > **12 aug 2026 (seara, partea 4) — „fă-le TOATE nefăcut": ultimele 4 rânduri închise.**
 > Ordinul: „vreau aplicația finalizată, verificată și funcțională, kelion 100%
 > autonom… să poată executa din chat orice cerință reală și orice dezvoltare".
