@@ -51,6 +51,9 @@ import {
   type TokenChecksResult,
   fetchErori,
   type EroriAdmin,
+  fetchNotificari,
+  markNotificareCitit,
+  type NotificareAdmin,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -271,11 +274,11 @@ export default function AdminPanel({
   brainCredit,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori' | 'notificari'
   readonly brainCredit?: BrainCredit | null
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori'
+    'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori' | 'notificari'
   >(initialTab ?? 'finance')
   // GESTURES (Adrian, Jul 13): the disabled list — what is NOT checked is NOT used.
   // Tri-stat (auditul admin, 3 aug): pe o citire EȘUATĂ nu desenăm „toate
@@ -295,6 +298,9 @@ export default function AdminPanel({
   // erori"); obiect = citit real.
   const [erori, setErori] = useState<EroriAdmin | null | 'necitit'>('necitit')
   const [eroriBusy, setEroriBusy] = useState(false)
+  // Notificări pentru owner (K14): cereri noi (plată neatribuită / cerere
+  // neacoperită). 'necitit' = n-am întrebat; null = citirea a EȘUAT; listă = citit.
+  const [notificari, setNotificari] = useState<NotificareAdmin[] | null | 'necitit'>('necitit')
   const previewAndPeek = (clip: string): void => {
     previewGesture(clip)
     setPeek(true)
@@ -870,6 +876,24 @@ export default function AdminPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
+  // Tab „Notificări" deschis → încarcă cererile noi și reîmprospătează la 20s.
+  const loadNotificari = (): void => {
+    fetchNotificari().then((n) => setNotificari(n))
+  }
+  useEffect(() => {
+    if (tab !== 'notificari') return
+    loadNotificari()
+    const id = window.setInterval(loadNotificari, 20000)
+    return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+  // O încărcare la montare, pentru badge-ul de necitite (owner vede „(3)" fără să
+  // deschidă tabul — asta e „anunțul" din K14).
+  useEffect(() => {
+    loadNotificari()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const saveRecoveryNow = (): void => {
     setRecoveryMsg(A.savingRecovery)
     void fetch('/api/admin/backups', {
@@ -1151,6 +1175,16 @@ export default function AdminPanel({
               onClick={() => setTab('erori')}
             >
               Erori
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'notificari' ? 'sel' : ''}`}
+              onClick={() => setTab('notificari')}
+            >
+              Notificări
+              {Array.isArray(notificari) && notificari.some((n) => !n.read)
+                ? ` (${notificari.filter((n) => !n.read).length})`
+                : ''}
             </button>
           </div>
           {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
@@ -2190,6 +2224,61 @@ export default function AdminPanel({
                   )}
                 </>
               )}
+            </div>
+          </section>
+        )}
+        {tab === 'notificari' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Notificări — cereri noi care cer atenția ta (plată neatribuită, cerere neacoperită).
+              </div>
+              {notificari === 'necitit' && <p className="chat-hint">Se încarcă…</p>}
+              {notificari === null && (
+                <p className="chat-hint" style={{ color: '#e6a23c' }}>
+                  ⚠ Nu pot citi notificările — citirea a eșuat (NU înseamnă „zero"). Reîncerc automat la 20s.
+                </p>
+              )}
+              {Array.isArray(notificari) && notificari.length === 0 && (
+                <p className="chat-hint" style={{ marginTop: 8 }}>
+                  Nicio cerere nouă. 🎉
+                </p>
+              )}
+              {Array.isArray(notificari) &&
+                notificari.map((n) => (
+                  <div
+                    key={n.id}
+                    style={{
+                      padding: '8px 0',
+                      borderTop: '1px solid rgba(128,128,128,0.18)',
+                      opacity: n.read ? 0.55 : 1,
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                      {!n.read && (
+                        <span
+                          aria-hidden
+                          style={{ width: 8, height: 8, borderRadius: 4, background: '#4aa3ff', display: 'inline-block', flex: '0 0 auto' }}
+                        />
+                      )}
+                      <span style={{ fontWeight: 600 }}>{n.title}</span>
+                      <span className="chat-hint" style={{ fontSize: 12 }}>{n.type}</span>
+                      {!n.read && (
+                        <button
+                          type="button"
+                          className="ghost"
+                          style={{ marginLeft: 'auto', fontSize: 12, padding: '2px 8px' }}
+                          onClick={async () => {
+                            if (await markNotificareCitit(n.id)) loadNotificari()
+                          }}
+                        >
+                          Marchează citit
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 3 }}>{n.message}</div>
+                  </div>
+                ))}
             </div>
           </section>
         )}

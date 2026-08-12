@@ -27,6 +27,15 @@
 >   (done/failed) mai vechi de o zi — iese din panou, RĂMÂN în DB (recuperabile,
 >   nu șterse); chemată automat de bucla de autonomie („curățenie când e gata").
 >   Nu atinge niciodată ordinele vii. 1167 teste verzi, tsc curat.
+> - **K14 — ANUNȚ LA OWNER LA CERERE NOUĂ.** Serviciul `adminNotification` exista,
+>   dar NU-l chema nimeni și adminul nu-l vedea. Legat: `notifyAdmin` pe **plată
+>   neatribuită** (openBanking — bani fără cod, de atribuit) și pe **cerere
+>   neacoperită** NOUĂ (`logCapabilityGap` întoarce acum `nou`, anunț o singură
+>   dată). Endpoint `GET /api/admin/notificari` + `POST …/:id/citit` (gardate
+>   `cerAdmin`). Frontend: tab „Notificări" cu badge de necitite. **Atenția
+>   ownerului respectată** („Kelion are drepturi admin"): toate ușile noi gardate
+>   admin; notificarea deduplică (nu se poate spama). 1167 teste, tsc + build +
+>   sintaxă verzi.
 
 > **12 aug 2026 — PLASĂ DE SĂNĂTATE LA PUBLICARE: backup → health → revert automat (de verificat live).**
 > Adrian: „să poată da automat merged, DAR cu backup înainte în caz că crapă ceva;

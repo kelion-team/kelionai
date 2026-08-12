@@ -2480,9 +2480,11 @@ export interface CapabilityGap {
  * de-duplicated (hits++ and recency refreshed) so the list stays a signal, not
  * a flood. Never throws — logging a gap must never affect the conversation.
  */
-export async function logCapabilityGap(email: string, request: string, reason = ''): Promise<void> {
+// Întoarce `true` DOAR când s-a înregistrat un gol NOU (nu la duplicat) — ca
+// apelantul să poată anunța owner-ul o singură dată (K14), nu la fiecare repetare.
+export async function logCapabilityGap(email: string, request: string, reason = ''): Promise<boolean> {
   const req = request.trim().slice(0, 500)
-  if (!dbEnabled() || !req) return
+  if (!dbEnabled() || !req) return false
   try {
     const pool = getPool()
     const dup = await pool.query<{ id: number }>(
@@ -2495,14 +2497,16 @@ export async function logCapabilityGap(email: string, request: string, reason = 
         'UPDATE capability_gaps SET hits = hits + 1, last_seen = now() WHERE id = $1',
         [dup.rows[0].id],
       )
-      return
+      return false
     }
     await pool.query(
       'INSERT INTO capability_gaps (user_email, request, reason) VALUES ($1, $2, $3)',
       [email, req, reason.trim().slice(0, 500) || null],
     )
+    return true
   } catch {
     // Best-effort — never break the chat because gap logging failed.
+    return false
   }
 }
 
