@@ -49,6 +49,9 @@ let spuseCreierul = 'am pus cheile'
 // How many hands turns were started, and with which tools.
 let turiDeMaini = 0
 let uneltePrimite: string[] = []
+// Cheltuiala MĂSURATĂ a constructorului azi (pentru plafonul B8/K15). Configurabil
+// din test ca să probăm oprirea la atingere ȘI dezactivarea prin comutator.
+let cheltuitAzi = 0
 
 vi.mock('../config.js', () => ({
   config: {
@@ -102,6 +105,7 @@ vi.mock('../db.js', () => ({
   saveKv: async (k: string, v: string) => {
     kv.set(k, v)
   },
+  cheltuitAziConstructor: async () => cheltuitAzi,
 }))
 
 let ultimulPrompt = ''
@@ -201,6 +205,7 @@ beforeEach(() => {
   cerinte = []
   cerinteAtinse.length = 0
   evaluari = 0
+  cheltuitAzi = 0
   scaraCeruta = undefined
   // The voice window is global per process: if it stays open from one test to
   // another, the card step would leak into tests that have nothing to do with
@@ -737,15 +742,25 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(uneltePrimite.length).toBeGreaterThanOrEqual(31)
   })
 
-  it('NU există plafon zilnic — bariera aia a fost scoasă', async () => {
-    // Adrian, Jul 30: "I pay, I ask, you execute without commenting".
-    // I had put the ceiling in myself, nobody had asked me for it.
-    plafon = 1
+  it('PLAFONUL ZILNIC DE ARDERE (aprobat de owner, B8/K15): oprește la atingere, iar butonul îl stinge', async () => {
+    // CERINȚA S-A SCHIMBAT față de 30 iul: pe 30 iul pusesem un plafon pe care
+    // nimeni nu-l ceruse (scos, corect). ACUM ownerul l-a cerut EXPLICIT, cu buton
+    // de oprit. Testul verifică AMBELE — oprirea la atingere ȘI dezactivarea prin
+    // comutator (nu doar că „există"; altfel n-ar dovedi nimic).
     secreteExistente = ['REVOLUT_PAY_LINK']
+    // Plafon implicit $10; cheltuiala MĂSURATĂ de azi peste el → NU mai pornește,
+    // cu motivul scris pe față.
+    cheltuitAzi = 999
+    const blocat = await poateSaLucreze()
+    expect(blocat.pornit).toBe(false)
+    expect(blocat.motiv).toContain('plafon')
+    // Butonul „oprește limita" (comutatorul '0' în KV) → lucrează din nou, chiar
+    // peste plafon: e decizia ownerului, nu o barieră ascunsă.
+    kv.set('constructor:plafon_activ', '0')
     expect((await poateSaLucreze()).pornit).toBe(true)
-    // The second pass, over the "ceiling": it keeps working.
-    const doi = await poateSaLucreze()
-    expect(doi.pornit).toBe(true)
-    expect(doi.motiv).not.toContain('plafon')
+    // Limită repornită, dar cheltuiala sub plafon → lucrează normal.
+    kv.set('constructor:plafon_activ', '1')
+    cheltuitAzi = 0
+    expect((await poateSaLucreze()).pornit).toBe(true)
   })
 })

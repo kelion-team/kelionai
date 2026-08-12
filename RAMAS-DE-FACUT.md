@@ -10,6 +10,20 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 (seara, partea 2) — continuare „toate, absolut toate".**
+> - **N val 2 (b) — persona vocală ONESTĂ.** Nu mai pretinde vedere continuă:
+>   „VEDEREA (la CERERE, NU continuu)… CERI cadrele prin cere_creierului". Test
+>   întărit (`.not.toContain` pe minciuna veche).
+> - **B8/K15 — PLAFON ZILNIC DE ARDERE, cerut EXPLICIT de owner.** Contor real
+>   (cheltuiala MĂSURATĂ azi, `cheltuitAziConstructor`), cifră adjustabilă
+>   (`constructor:plafon_usd`, default $10) + comutator (`constructor:plafon_activ`);
+>   bucla `poateSaLucreze` se OPREȘTE la atingere, cu motiv clar. Endpoint
+>   `GET/POST /api/admin/plafon-constructor` (gardat admin) + bloc în tabul
+>   Constructor: „construit azi $X din $Y" + buton „oprește limita" + câmp cifră.
+>   Testul vechi „nu există plafon" (cerință depășită) ÎNLOCUIT cu unul care CHIAR
+>   verifică oprirea la atingere + butonul de stins — NU slăbit ca să treacă. 1172
+>   teste, tsc + build + sintaxă verzi.
+
 > **12 aug 2026 (seara) — ÎNCHIDEREA LISTEI, la ordinul „toate, absolut toate".**
 > Iau la rând tot ce a rămas cod-abil; fiecare cu porți verzi. De verificat live
 > după merge.

@@ -69,7 +69,7 @@ import {
 } from './adminTools.js'
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
-import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi } from '../db.js'
+import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuitAziConstructor } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { utcDay } from './timeContext.js'
@@ -943,6 +943,23 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
 }
 
 /** One pass: repairs itself if it failed, otherwise takes the next task. */
+// PLAFON ZILNIC DE ARDERE (Adrian, B8/K15: „contor real pe admin cu cât s-a
+// construit zilnic, limitare automată, buton de oprit limita"). APROBAT explicit
+// de owner (spre deosebire de plafonul scos pe 30 iul, pe care nu-l ceruse). Cifra
+// + comutatorul se citesc din KV — le setezi din admin. Implicit PORNIT (a cerut
+// limitarea automată); '0' pe comutator o stinge.
+const PLAFON_USD_DEFAULT = 10
+export async function plafonConstructor(): Promise<{ activ: boolean; plafon: number; cheltuit: number }> {
+  const [activRaw, plafonRaw, cheltuit] = await Promise.all([
+    loadKv('constructor:plafon_activ').catch(() => null),
+    loadKv('constructor:plafon_usd').catch(() => null),
+    cheltuitAziConstructor().catch(() => 0),
+  ])
+  const plafon = Number(plafonRaw) > 0 ? Number(plafonRaw) : PLAFON_USD_DEFAULT
+  const activ = activRaw === null ? true : activRaw !== '0' && activRaw !== 'false'
+  return { activ, plafon, cheltuit }
+}
+
 export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string }> {
   // ── HIS SWITCH, CHECKED BEFORE ANYTHING ─────────────────────────────────────
   //
@@ -978,6 +995,17 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   // 1. Already busy? One thing at a time — otherwise it finishes nothing.
   if (jobs.some((j) => j.status === 'running' || j.status === 'queued')) {
     return { pornit: false, motiv: 'are deja un ordin în lucru' }
+  }
+
+  // 1b. PLAFONUL ZILNIC DE ARDERE (B8/K15): dacă e activ și s-a atins, nu mai
+  // pornim ordine azi — dar o SPUNEM clar, cu unde se oprește limita. Nu e o
+  // barieră ascunsă: e cifra TA, cu buton de oprit, în admin.
+  const pl = await plafonConstructor()
+  if (pl.activ && pl.cheltuit >= pl.plafon) {
+    return {
+      pornit: false,
+      motiv: `⛔ plafon zilnic de ardere atins: $${pl.cheltuit.toFixed(2)} din $${pl.plafon.toFixed(2)} — nu mai pornesc ordine azi (oprește limita din Admin → Constructor)`,
+    }
   }
 
   // 2. THERE IS NO CAP. (Adrian, Jul 30: "if you put unwanted barriers,
