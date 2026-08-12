@@ -1355,6 +1355,13 @@ async function main() {
           // modelul a vorbit fără unealtă — îl împingem înapoi la lucru. Tură
           // STERILĂ: nu scade din bugetul de construcție, are contorul ei.
           pasiSterili++
+          // CE SPUNE MODELUL CÂND SE BLOCHEAZĂ (owner, 12 aug: „dă-i acces să
+          // citească logurile dacă eșuează" — dar logul avea doar pașii, NU
+          // cauza). Scoatem în jurnal exact ce a scris modelul în loc să cheme o
+          // unealtă → cauza reală intră în log, ca (1) owner-ul s-o vadă, (2)
+          // reîncercarea s-o citească și să ia altă abordare, nu să repete orb.
+          const spus = String(msg.content ?? '').replace(/\s+/g, ' ').trim()
+          log(`tură sterilă ${pasiSterili}/${MAX_STERILE} — modelul a scris în loc să lucreze: ${spus.slice(0, 400) || '(răspuns gol)'}`)
           messages.push({
             role: 'user',
             content: `Continue with the tools (grep/read/edit/write/run) or call finish. Don't narrate — work. (${pasiSterili}/${MAX_STERILE} wasted turns)`,
