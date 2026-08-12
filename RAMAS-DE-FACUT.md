@@ -10,6 +10,22 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 — CONSTRUCTORUL AJUNGE LA PLACA PROPRIE (jobul #177 „fetch failed" reparat, de verificat live).**
+> Cauza MĂSURATĂ (jobul #177, era în codul meu — regula #2): constructorul suna
+> modelul de pe placa RunPod cu un apel SINCRON pe `/openai`, dar placa serverless
+> stă stinsă la 0 muncitori și prima trezire DESCARCĂ modelul (~3–8 min) →
+> conexiunea sincronă cădea cu „fetch failed" (0 octeți) ÎNAINTE ca placa să
+> pornească. Fix (`deploy/constructor-agent.mjs`): dacă endpointul e RunPod,
+> TREZIM întâi placa pe ruta ASINCRONĂ (`/run` + poll `/status` până e terminal —
+> NU ține conexiunea deschisă, deci supraviețuiește pornirii la rece oricât ar
+> dura), cu progresul scris pe monitor (`beat`); abia când e caldă trimitem
+> cererea reală cu unelte pe `/openai`. Auto-vindecare: dacă placa se stinge între
+> pași și un apel sincron cade, se marchează RECE și reîncercarea o retrezește
+> singură. Sintaxă verificată (`node --check` + `verifica-sintaxa` curate).
+> **DE TĂIAT după proba live**: un ordin de build real → jurnalul constructorului
+> arată „placa e CALDĂ" apoi `modelServit: deepseek/…`, ordinul se termină, nu mai
+> pică pe „fetch failed".
+
 > ✅ **VERIFICAT LIVE de owner (11 aug): „merge bloutotch".** Vocea live iese pe Bluetooth/mașină,
 > ȘI update-ul blocant a funcționat (a primit codul nou pe telefon fără chin — altfel BT ar fi
 > rămas mort). Ambele puncte (A poarta + B microfonul fără procesare) confirmate pe telefon real.
