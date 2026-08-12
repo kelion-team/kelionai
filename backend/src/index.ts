@@ -40,6 +40,7 @@ import { incarcaReprosuri } from './services/feedbackImplicit.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { runSelfHeal } from './services/selfHeal.js'
 import { probaChatLive } from './services/probaLive.js'
+import { verificareIntegrala } from './services/verificareIntegrala.js'
 import { pornesteIscoadele } from './services/iscoada.js'
 import { pornestePietarul } from './services/pietar.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
@@ -494,6 +495,19 @@ try {
     void probeaza()
     setInterval(() => { void probeaza() }, 60 * 60 * 1000)
   }, 5 * 60 * 1000)
+  // VERIFICAREA ÎNTREGII APLICAȚII PRIN CHAT, CU COMENZI MĂSURABILE (Adrian,
+  // 12 aug: „verifici toată aplicația prin comenzi măsurabile prin chatul live").
+  // O baterie de comenzi reale prin creierul chatului (unelte DOAR de citire) →
+  // raport „X din N pass" în KV verificare:integrala, + simptom pe fiecare
+  // comandă picată. La 6h (prima la 10 min după boot), gate pe autonomie+plafon.
+  const verifica = async (): Promise<void> => {
+    const r = await verificareIntegrala().catch(() => null)
+    if (r) app.log.info(`verificare-integrală: ${r.pass}/${r.total} comenzi pass`)
+  }
+  setTimeout(() => {
+    void verifica()
+    setInterval(() => { void verifica() }, 6 * 60 * 60 * 1000)
+  }, 10 * 60 * 1000)
   // ISCOADELE (Adrian, 4 aug: „boti care bat netul 24 din 24 si aduc informati
   // lui kelion"): patrula periodică Serper→creier→memoria lui Kelion.
   pornesteIscoadele()

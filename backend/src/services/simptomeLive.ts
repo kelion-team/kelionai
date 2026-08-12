@@ -64,6 +64,10 @@ export function ordinSimptomLive(
  *  RECURENȚĂ (5) ca un simplu „camera oprită" să nu nască un ordin degeaba. */
 export const PRAG_SIMPTOM: Record<string, number> = {
   'fara-vedere': 5,
+  // O comandă de verificare integrală care pică e o MĂSURĂTOARE deliberată, nu
+  // zgomot de user — o singură picare e semnal (contractul de închidere din
+  // self-heal o închide singur dacă la runda următoare trece).
+  'verificare-picata': 1,
 }
 export const PRAG_SIMPTOM_IMPLICIT = 2
 
