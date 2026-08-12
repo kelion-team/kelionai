@@ -10,6 +10,17 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 (seara) — ÎNCHIDEREA LISTEI, la ordinul „toate, absolut toate".**
+> Iau la rând tot ce a rămas cod-abil; fiecare cu porți verzi. De verificat live
+> după merge.
+> - **K16 — DEDUP FUZZY DE CERINȚE.** `adaugaCerinta` deduplica doar pe text
+>   IDENTIC → aceeași cerință spusă altfel (diacritice, punctuație, ordinea
+>   cuvintelor) intra a doua oară și bucla o re-analiza (dubluri = timp + bani).
+>   Fix: modul pur `services/cerinteDedup.ts` (normalizare + similaritate Jaccard
+>   pe tokeni semnificativi, prag 0.8); `adaugaCerinta` compară cu cerințele
+>   deschise și cade pe cea existentă. Prinde reformulările (nu flexiune/sinonime
+>   — onest). 6 teste noi (1167 total), tsc curat.
+
 > **12 aug 2026 — PLASĂ DE SĂNĂTATE LA PUBLICARE: backup → health → revert automat (de verificat live).**
 > Adrian: „să poată da automat merged, DAR cu backup înainte în caz că crapă ceva;
 > după merged, verificare automată de sănătate; dacă nu trece, REVERT și schimbă

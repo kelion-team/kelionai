@@ -5,6 +5,7 @@ import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.
 export type { DemoRecent, DemoStats, UserActivityRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
+import { esteDuplicat } from './services/cerinteDedup.js'
 
 let pool: pg.Pool | null = null
 
@@ -2531,11 +2532,15 @@ export async function adaugaCerinta(
   const t = text.trim().slice(0, 4000)
   if (!t) return 0
   try {
-    const dej = await getPool().query<{ id: string | number }>(
-      `SELECT id FROM cerinte WHERE lower(text) = lower($1) AND stare <> 'respinsa' LIMIT 1`,
-      [t],
+    // DEDUP FUZZY (K16): nu doar text identic, ci și reformulări (diacritice,
+    // punctuație, ordinea cuvintelor) — o cerință deja deschisă, chiar spusă
+    // altfel, nu mai intră a doua oară (dubluri = timp + bani irosiți în buclă).
+    const deschise = await getPool().query<{ id: string | number; text: string }>(
+      `SELECT id, text FROM cerinte WHERE stare <> 'respinsa' ORDER BY created_at DESC LIMIT 200`,
     )
-    if (dej.rows[0]) return Number(dej.rows[0].id)
+    for (const row of deschise.rows) {
+      if (esteDuplicat(t, String(row.text))) return Number(row.id)
+    }
     const r = await getPool().query<{ id: string | number }>(
       'INSERT INTO cerinte (text, sursa, criteriu, prioritate) VALUES ($1,$2,$3,$4) RETURNING id',
       [t, sursa, criteriu ?? null, Math.max(1, Math.min(9, Math.round(prioritate) || 5))],
