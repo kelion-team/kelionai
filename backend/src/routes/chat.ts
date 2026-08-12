@@ -61,7 +61,7 @@ import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, geminiLive } from '../serv
 import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
-import { recallMemories, learnFromTurn } from '../services/agents.js'
+import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { generateImage } from '../services/image.js'
@@ -107,7 +107,7 @@ import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeCha
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { citesteEpisoade, adaugaEpisod, rezumaEpisoade } from '../services/promoEpisoade.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL } from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL } from '../services/brainToolDefs.js'
 import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
@@ -588,6 +588,7 @@ import {
   REQUEST_REPAIR_TOOL, APELEAZA_USER_TOOL,
 } from '../services/brainToolDefs.js'
 import { sunaUtilizator } from '../services/apel.js'
+import { parseTabel, agrega, profil, formatDoc, formatProfil, formatAgregare, EroareDate, type Operatie } from '../services/dateTabelare.js'
 export {
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
@@ -1534,6 +1535,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
       new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
     ])
+    // N val 2d: cât Centrul de Tranzacționare e ANCORAT (admin + tab de trading
+    // pe ecran), reamintește ȘI memoria separată 'tranzactii' (schimburile
+    // trecute pe simbol) — namespace-ul general 'kelion' n-o vede niciodată, așa
+    // că în conversație normală memoria de trading era mută (doar butonul Analiză
+    // o citea). Aceeași cursă cu termen de 400 ms ca recall-ul principal: nu
+    // întârzie primul cuvânt; ce nu vine la timp nu intră în tură, restul se ia
+    // altă dată. Fără ancoră trading = șir gol, zero drum la DB.
+    const ancoraTradingDeschisa =
+      user.role === 'admin' && !!(req.body?.tranzactii as { simbol?: unknown } | undefined)?.simbol
+    const recallTradingWithDeadline = ancoraTradingDeschisa
+      ? Promise.race([
+          recallMemoriiTranzactii(user.email, lastForRecall?.role === 'user' ? lastForRecall.content : ''),
+          new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
+        ])
+      : Promise.resolve('')
     // ── PREFERINȚELE SE CITESC O DATĂ PE SESIUNE, NU LA FIECARE ÎNTREBARE ────
     // (Adrian, 7 aug: „verificarile de plati etc securitate se fac la logare si
     // atit, e clar nu se repeta deloc pe intrebari"). Limba, meseria, gesturile,
@@ -1545,7 +1561,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // jos, la fiecare cerere: viteza nu se ia din securitate.
     const acumMs = Date.now()
     const cache = stareSesiune(user.email, acumMs)
-    const [prefs, memRecall, istoricDb] = await Promise.all([
+    const [prefs, memRecall, istoricDb, memRecallTrading] = await Promise.all([
       cache
         ? Promise.resolve(cache)
         : Promise.all([
@@ -1571,6 +1587,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // memorie unificată (turele vorbite pe care array-ul scris nu le are).
       // Rămâne în paralel cu restul → zero latență adăugată.
       getRecentHistory(user.email, MAX_HISTORY).catch(() => []),
+      // N val 2d: memoria de trading, în ACELAȘI val paralel (deja cu termen) —
+      // șir gol când tabul nu e ancorat, deci zero cost pe conversația obișnuită.
+      recallTradingWithDeadline,
     ])
     const storedPref = prefs.speechLang
     const meserieId = prefs.meserieId
@@ -2069,6 +2088,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // this user so the conversation is continuous across sessions. Read above
     // (the single trip to the database).
     systemPrompt += memRecall
+    // N val 2d: memoria SEPARATĂ de trading, doar cât Centrul e ancorat (șir gol
+    // altfel). Astfel conversația normală „își amintește" ce ați discutat pe
+    // simbolul de pe ecran, nu doar butonul Analiză.
+    systemPrompt += memRecallTrading
     // MEMORIA UNIFICATĂ voce↔scris (9 aug, ownerul: „trebuie să preia și din
     // audio sau invers din scris istoricul, indiferent modalitatea"). Creierul
     // scris construia contextul DOAR din array-ul clientului (turele de pe
@@ -2427,6 +2450,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...escalationTools,
           // Bază + vedere
           SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
+          // L1e: procesare de date tabelare (CSV/JSON) — capabilitate generală, în zona de aur.
+          PROCESEAZA_DATE_TOOL,
           // Messenger Kelion↔Kelion: „apelează-l pe X" (conversațional, gold zone).
           APELEAZA_USER_TOOL,
           // Pointerii de indicație pe grafic — DOAR când Centrul de Tranzacționare
@@ -2470,7 +2495,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
           ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -3648,6 +3673,52 @@ async function runTool(
       if (!text.trim()) return JSON.stringify({ error: 'empty' })
       reply.raw.write(`${CTRL}${JSON.stringify({ doc: { title, text } })}${CTRL}`)
       return JSON.stringify({ shown: true })
+    }
+
+    // L1e: PROCESARE DE DATE TABELARE (CSV/JSON). Parsează → agregare SAU profil
+    // măsurat → tabelul + rezultatul pe monitor (suprafața {doc}, deci
+    // surfaceShown se marchează singur). Totul PUR: valorile care nu-s clar
+    // numerice rămân text, ce nu se poate calcula e „—", nimic inventat.
+    case 'proceseaza_date': {
+      const date = String(args.date ?? '')
+      const format = (['auto', 'csv', 'json'].includes(String(args.format)) ? String(args.format) : 'auto') as 'auto' | 'csv' | 'json'
+      try {
+        const tabel = parseTabel(date, format)
+        if (!tabel.randuri.length) return JSON.stringify({ error: 'gol', mesaj: 'Datele nu conțin niciun rând.' })
+        const titlu = String(args.titlu ?? `Date (${tabel.format.toUpperCase()}, ${tabel.randuri.length} rânduri)`)
+        const operatie = args.operatie ? (String(args.operatie) as Operatie) : undefined
+        // Corpul documentului: tabelul + (agregarea CERUTĂ sau profilul măsurat).
+        let sectiune: string
+        let rezumatModel: Record<string, unknown>
+        if (operatie) {
+          const rez = agrega(tabel, {
+            operatie,
+            valoare: args.valoare ? String(args.valoare) : undefined,
+            grupeaza_dupa: args.grupeaza_dupa ? String(args.grupeaza_dupa) : undefined,
+          })
+          sectiune = formatAgregare(rez)
+          rezumatModel = { operatie, valoare: rez.valoare, grupeaza_dupa: rez.grupeaza_dupa, rezultate: rez.rezultate.slice(0, 50) }
+        } else {
+          const p = profil(tabel)
+          sectiune = formatProfil(p)
+          rezumatModel = { profil: p }
+        }
+        const doc = `${sectiune}\n\n${'─'.repeat(40)}\nDATE\n${formatDoc(tabel)}`
+        reply.raw.write(`${CTRL}${JSON.stringify({ doc: { title: titlu, text: doc } })}${CTRL}`)
+        // Modelului îi dăm rezultatul COMPACT (nu tot tabelul) — el îl spune scurt.
+        return JSON.stringify({
+          shown: true,
+          format: tabel.format,
+          randuri: tabel.randuri.length,
+          coloane: tabel.coloane,
+          ...rezumatModel,
+        })
+      } catch (e) {
+        // Eroare NUMITĂ (date invalide, coloană inexistentă, prea multe rânduri) —
+        // nu prăbușire, nu verdict fals. Modelul o spune omului pe înțeles.
+        const mesaj = e instanceof EroareDate ? e.message : e instanceof Error ? e.message.slice(0, 120) : 'date invalide'
+        return JSON.stringify({ error: 'date_invalide', mesaj })
+      }
     }
 
     case 'goleste_monitorul': {

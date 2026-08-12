@@ -10,6 +10,26 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **12 aug 2026 (seara, partea 4) — „fă-le TOATE nefăcut": ultimele 4 rânduri închise.**
+> Ordinul: „vreau aplicația finalizată, verificată și funcțională, kelion 100%
+> autonom… să poată executa din chat orice cerință reală și orice dezvoltare".
+> - **N val 2 (a) — starea de trading pe VOCE.** Clientul vocal trimite acum
+>   `getStareTranzactii()` cu bătaia de coords → serverul o ține (`tranzactiiLive`)
+>   → `turaCreierului` o pune în body `tranzactii` la `/api/chat`. Abia atunci
+>   răspunsul VOCAL produce cadrul `{niveluri}` desenat pe grafic (deja în lista
+>   albă). Aceeași logică chat.ts, deci vocea beneficiază de tot.
+> - **N val 2 (d) — memoria de trading REAMINTITĂ în conversație.** Namespace
+>   separat `tranzactii` (doar butonul Analiză îl citea) → `recallMemoriiTranzactii`
+>   intră în conversație cât Centrul e ancorat (admin+tab), în valul paralel cu
+>   termen de 400ms (zero latență adăugată). Test nou (citește `tranzactii` NU
+>   `kelion`, gol fără schimburi, dedup).
+> - **L1e — procesare CSV/JSON** ca unealtă (`proceseaza_date`, vezi tabelul L1).
+> - **L1i — editare avansată Docs+Sheets** (vezi tabelul L1; ⚠ reconectare Google).
+> **Verificat:** backend tsc 0 + 1204 teste verzi + frontend tsc/build verzi +
+> `verifica-sintaxa` curat. **RĂMAS din N val 2:** nimic — toate închise.
+> **De probat LIVE de owner:** nivelurile pe voce (trading deschis) + editarea
+> Drive DUPĂ reconectarea Google (scope-uri noi).
+
 > **12 aug 2026 (seara, partea 3) — N val 2 închis + verificări oneste (nu presupuse).**
 > - **N val 2 (c) — listener MORT de deblocare-admin SCOS.** Nimeni nu emitea
 >   `kelion:admin-unlock` (amprenta scoasă din calea vocii, 6 aug); comentariul jura
@@ -20,9 +40,8 @@
 >   dă feedback la refuz/unsupported (`Stage.tsx` 964-975: „Rec ⚠" 3s, cu motiv).
 > - **L1b — VERIFICAT deja acoperit:** bucla de autonomie reia joburile picate CU
 >   jurnalul eșecului + escaladare de la PRIMA reîncercare (test verde).
-> **RĂMAS, onest:** N val 2 (a) cadrul `niveluri` pe voce (wiring, de probat live pe
-> trading); (d) memoria trading în conversație (decizie „intenționat vs cablăm");
-> L1e/L1i (unelte CSV/JSON + Drive avansat — funcții NOI).
+> **RĂMAS, onest:** ~~N val 2 (a) cadrul `niveluri` pe voce; (d) memoria trading în
+> conversație; L1e/L1i~~ → **TOATE închise în partea 4 (mai sus), 12 aug.**
 
 > **12 aug 2026 (seara, partea 2) — continuare „toate, absolut toate".**
 > - **N val 2 (b) — persona vocală ONESTĂ.** Nu mai pretinde vedere continuă:
@@ -716,11 +735,11 @@ Recomandarea mea: **1 + 2** (plafon + free-cu-escaladare) — păstrează Fable 
 | L1b | Gestionare automată a ordinelor eșuate („dili"): la eșec definitiv → analiză automată a jurnalului + repunere cu enunț corectat sau închidere motivată | de făcut |
 | L1c | Diagnoză/reparare automată deploy (dispatch_failed_204 etc.): santinela deja verifică live==master; de adăugat auto-rerun la eșec de rețea | parțial există (anti-fantomă) |
 | L1d | Telegram: trimitere/primire mesaje prin Bot API (îți faci un bot cu @BotFather în 2 min, cheia intră în GitHub Secrets) | de făcut — cere UN token de la tine |
-| L1e | Procesare CSV/JSON complexe ca unelte de chat (parse + agregări + afișare pe monitor) | de făcut |
+| L1e | ~~Procesare CSV/JSON complexe ca unelte de chat (parse + agregări + afișare pe monitor)~~ **REZOLVAT 12 aug**: unealta `proceseaza_date` (`services/dateTabelare.ts` PUR+testat: parseCSV RFC-4180, laNumar en/ro/mii/%, JSON/NDJSON, agregări suma/medie/min/max/numar/numar_unic grupate, profil măsurat) → cadru `{doc}` pe monitor; înregistrată în `brainCapabilities`+`manual` (count 101→102); 18 teste noi | ✅ |
 | L1f | Scripturi ad-hoc în sandbox pe server (constructorul deja scrie+rulează cod; de expus ca unealtă de chat cu limite dure) | parțial există (constructor) |
 | L1g | Analiză imagine în timp real (obiecte/text): Gemini vede nativ DEJA (fix 3 aug); de adăugat fluxul continuu pe cameră | parțial există |
 | L1h | Învățare din feedback implicit: autoInvatare + memoria există; de legat semnalele („nu asta am cerut") de registru | parțial există |
-| L1i | Drive avansat: editare documente/foi prin API-urile Google existente (scope-uri noi la consimțământ) | de făcut |
+| L1i | ~~Drive avansat: editare documente/foi prin API-urile Google existente (scope-uri noi la consimțământ)~~ **REZOLVAT 12 aug**: `create_doc`/`edit_doc` (API Docs: adaugă/rescrie/caută-înlocuiește), `create_sheet`/`edit_sheet` (API Sheets: append/scrie interval) în contul omului logat; scope-uri de scriere adăugate la consimțământ (`documents`+`spreadsheets`+`drive.file` — minim necesar, NU drive complet); `normalizeazaRanduri` PUR+testat; înregistrate în `brainCapabilities`+`manual` (google 19→23, count →106); 403 (token vechi) → „reconectează Google" **⚠ owner: reconectează Google o dată ca să acorzi scrierea** | ✅ (reconectare Google o dată) |
 
 ### L2. Cer conturile/aprobările TALE (nu pot fără ele — nu e refuz, e fapt)
 | # | Ce | Ce-mi trebuie de la tine |

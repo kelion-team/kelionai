@@ -184,6 +184,10 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   complete_task: { what: 'Ticks a task off', say: '"mark the insurance one done"' },
   get_drive_files: { what: 'Lists your Drive files', say: '"what files do I have about the house?"' },
   read_drive_file: { what: 'Opens a Drive file and reads it', say: '"read me the tenancy agreement"' },
+  create_doc: { what: 'Writes a new Google Doc for you', say: '"make a doc with the shopping list"' },
+  edit_doc: { what: 'Adds to or rewrites one of your Google Docs', say: '"add a paragraph to the meeting notes"' },
+  create_sheet: { what: 'Makes a new Google Sheet from your data', say: '"put these numbers in a spreadsheet"' },
+  edit_sheet: { what: 'Appends rows or fills cells in one of your sheets', say: '"add this row to the expenses sheet"' },
   search_contacts: { what: 'Finds someone in your contacts', say: '"what\'s Ana\'s number?"' },
   add_contact: { what: 'Saves a new contact', say: '"save this number as the plumber"' },
   web_search: { what: 'Searches the web and reads the results', say: '"what happened with the interest rates?"' },
@@ -214,6 +218,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   generate_image: { what: 'Draws an image from your description', say: '"draw me a red kitchen"' },
   generate_video: { what: 'Makes a short video clip from your description (paid, only if enabled)', say: '"make me a video of waves at sunset"' },
   open_app_view: { what: 'Opens a panel of the app for you', say: '"open my settings"' },
+  proceseaza_date: { what: 'Reads a CSV/JSON you paste and works out totals, averages or a summary, shown on your screen', say: '"add up this CSV by region"' },
 
   // Notes and memory
   save_note: { what: 'Saves a note for later', say: '"note the meter reading is 4471"' },

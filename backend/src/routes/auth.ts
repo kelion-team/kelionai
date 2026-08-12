@@ -51,7 +51,15 @@ const FULL_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/contacts',
-  // Sheets/Docs already work through the Drive scope.
+  // L1i — EDITARE avansată (Docs + Sheets, 12 aug): citirea mergea prin
+  // drive.readonly, dar SCRIEREA are nevoie de scope propriu de scriere.
+  // `documents` = creează/editează Google Docs; `spreadsheets` = creează/editează
+  // Google Sheets; `drive.file` = creează/gestionează fișierele pe care le face
+  // chiar el. Fără ele, create_doc/edit_doc/create_sheet/edit_sheet dau 403 și
+  // dispecerul cere reconectarea (un token vechi doar-citire nu poate scrie).
+  'https://www.googleapis.com/auth/documents',
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/drive.file',
   // REMOVED (Aug 2, live probe): 'photoslibrary.readonly' — Google DELETED this
   // scope on 2025-03-31 for every client; the Photos Library API now answers
   // 403 PERMISSION_DENIED even when the scope appears as granted in tokeninfo

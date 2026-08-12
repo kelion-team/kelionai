@@ -47,8 +47,9 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'generate_image', category: 'afisare', does: 'generează o imagine', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'generate_video', category: 'afisare', does: 'generează un clip video (Veo; plătit, doar cu aprobarea conștientă din env)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'open_app_view', category: 'afisare', does: 'deschide panourile aplicației', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'proceseaza_date', category: 'afisare', does: 'procesează date tabelare (CSV/JSON): parse + agregări/profil, arătate pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
-  // 2.2 Google (19)
+  // 2.2 Google (23) — +create_doc/edit_doc/create_sheet/edit_sheet (L1i, 12 aug)
   { name: 'get_recent_emails', category: 'google', does: 'citește antetele emailurilor recente', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_email', category: 'google', does: 'citește corpul COMPLET al unui email (după căutare)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'send_email', category: 'google', does: 'trimite email', chat: true, voice: false, voiceViaBrain: true, admin: false },
@@ -58,6 +59,10 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'complete_task', category: 'google', does: 'bifează un task ca terminat (după id)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'get_drive_files', category: 'google', does: 'listează fișierele Drive', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_drive_file', category: 'google', does: 'citește conținutul unui fișier Drive (după căutare)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'create_doc', category: 'google', does: 'creează un Google Doc (titlu + conținut)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'edit_doc', category: 'google', does: 'editează un Google Doc (adaugă / rescrie / caută-înlocuiește)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'create_sheet', category: 'google', does: 'creează un Google Sheet (titlu + rânduri)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'edit_sheet', category: 'google', does: 'editează un Google Sheet (adaugă rânduri / scrie într-un interval)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'get_tasks', category: 'google', does: 'citește task-urile', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'add_task', category: 'google', does: 'adaugă un task', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'search_contacts', category: 'google', does: 'caută contacte', chat: true, voice: false, voiceViaBrain: true, admin: false },

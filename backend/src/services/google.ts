@@ -147,6 +147,63 @@ export const googleTools: Tool[] = [
     },
   },
   {
+    name: 'create_doc',
+    description:
+      "Create a NEW Google Doc in the user's Drive, with a title and optional text content. Use when the user asks you to WRITE something into a document, draft a doc, or save text as a Google Doc. Returns the document link. (Writing needs the Docs scope — if the user connected Google before this feature, they'll be asked to reconnect once.)",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Title of the new document.' },
+        content: { type: 'string', description: 'Optional initial text content.' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'edit_doc',
+    description:
+      "Edit an EXISTING Google Doc (found by name). mode 'adauga' appends text at the end; 'inlocuieste' replaces the whole body with new text; 'gaseste_inlocuieste' replaces every occurrence of `find` with `replace`. Use when the user wants to add to, rewrite, or find-and-replace inside one of their docs.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name search to pick the doc, e.g. "meeting notes".' },
+        mode: { type: 'string', enum: ['adauga', 'inlocuieste', 'gaseste_inlocuieste'], description: 'adauga=append, inlocuieste=replace all body, gaseste_inlocuieste=find & replace. Default adauga.' },
+        text: { type: 'string', description: 'Text to append (adauga) or the new body (inlocuieste).' },
+        find: { type: 'string', description: 'For gaseste_inlocuieste: the text to find.' },
+        replace: { type: 'string', description: 'For gaseste_inlocuieste: the replacement text.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'create_sheet',
+    description:
+      "Create a NEW Google Sheet in the user's Drive, with a title and optional rows. `rows` is a 2D array (array of rows, each row an array of cells) — the first row is usually the header. Use when the user asks you to make a spreadsheet or table in Sheets. Returns the sheet link.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Title of the new spreadsheet.' },
+        rows: { type: 'array', items: { type: 'array', items: {} }, description: 'Optional initial data: array of rows, each row an array of cell values.' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'edit_sheet',
+    description:
+      "Add data to an EXISTING Google Sheet (found by name). mode 'adauga' appends `rows` after the last used row; 'scrie' writes `rows` starting at `range` (e.g. \"A1\" or \"Sheet1!B2\"). `rows` is a 2D array. Use when the user wants to append records to, or overwrite a region of, one of their spreadsheets.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name search to pick the spreadsheet.' },
+        mode: { type: 'string', enum: ['adauga', 'scrie'], description: 'adauga=append rows at the end, scrie=write starting at `range`. Default adauga.' },
+        rows: { type: 'array', items: { type: 'array', items: {} }, description: 'Array of rows, each row an array of cell values.' },
+        range: { type: 'string', description: 'For scrie: A1-style start cell/range, e.g. "A1" or "Sheet1!B2".' },
+      },
+      required: ['query', 'rows'],
+    },
+  },
+  {
     name: 'get_tasks',
     description: "List the user's Google Tasks (to-dos). Use for questions about their tasks or to-do list.",
     input_schema: {
@@ -901,6 +958,204 @@ async function readDriveFile(query: string, token: string): Promise<string> {
   return JSON.stringify({ found: true, name: f.name, mimeType: mime, content: text, link: f.webViewLink ?? '' })
 }
 
+// ── L1i: EDITARE AVANSATĂ GOOGLE DRIVE (Docs + Sheets) ──────────────────────
+//
+// Ownerul (autonomie): Kelion citea Drive, dar nu putea CREA/EDITA. Aici capătă
+// mâinile: creează și modifică Google Docs (API Docs, scope `documents`) și
+// Google Sheets (API Sheets, scope `spreadsheets`) în contul OMULUI logat.
+// Scrierea NU merge fără scope de scriere — de-aia consimțământul cere acum și
+// scope-urile astea; dacă tokenul e vechi (doar citire), API-ul dă 403 și
+// dispecerul întoarce „reconectează Google" (nu un cod brut). Regula #1: ce nu
+// s-a scris cu succes NU se raportează ca scris (răspunsul poartă id-ul/linkul
+// REAL de la Google, nu o promisiune).
+
+/** 2D array de valori pentru Sheets, curățat din inputul modelului. Rânduri =
+ *  array de array-uri; celulele rămân string sau number (nimic altceva). Pur,
+ *  ca să-l putem proba fără rețea. */
+export function normalizeazaRanduri(input: unknown): (string | number)[][] {
+  if (!Array.isArray(input)) throw new Error('randuri_invalide (aștept un array de rânduri)')
+  const MAX_R = 5_000
+  const MAX_C = 256
+  return input.slice(0, MAX_R).map((rand) => {
+    const celule = Array.isArray(rand) ? rand : [rand] // un rând scalar → o singură celulă
+    return celule.slice(0, MAX_C).map((c) => {
+      if (typeof c === 'number' && Number.isFinite(c)) return c
+      if (c === null || c === undefined) return ''
+      if (typeof c === 'object') return JSON.stringify(c)
+      return String(c)
+    })
+  })
+}
+
+/** Găsește UN fișier după nume (+ opțional tip), cel mai recent modificat. */
+async function gasesteFisierDrive(
+  query: string,
+  mimeType: string | null,
+  token: string,
+): Promise<{ found: boolean; id?: string; name?: string; link?: string; error?: string }> {
+  const url = new URL('https://www.googleapis.com/drive/v3/files')
+  url.searchParams.set('pageSize', '1')
+  url.searchParams.set('fields', 'files(id,name,mimeType,webViewLink)')
+  url.searchParams.set('orderBy', 'modifiedTime desc')
+  const safe = (query || '').replaceAll("'", String.raw`\'`)
+  const clauze = ['trashed = false']
+  if (safe) clauze.unshift(`name contains '${safe}'`)
+  if (mimeType) clauze.push(`mimeType = '${mimeType}'`)
+  url.searchParams.set('q', clauze.join(' and '))
+  const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return { found: false, error: `drive_http_${res.status}` }
+  const j = (await res.json()) as { files?: { id?: string; name?: string; webViewLink?: string }[] }
+  const f = j.files?.[0]
+  if (!f?.id) return { found: false }
+  return { found: true, id: f.id, name: f.name, link: f.webViewLink }
+}
+
+const DOC_MIME = 'application/vnd.google-apps.document'
+const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
+const MAX_TEXT_DRIVE = 100_000
+
+// CREEAZĂ un Google Doc cu titlu + conținut. API Docs: creare goală, apoi
+// batchUpdate insertText la începutul corpului (index 1).
+async function createDoc(titlu: string, continut: string, token: string): Promise<string> {
+  if (!titlu.trim()) return JSON.stringify({ error: 'missing_title' })
+  const cRes = await tfetch('https://docs.googleapis.com/v1/documents', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: titlu.slice(0, 300) }),
+  })
+  if (!cRes.ok) return JSON.stringify({ error: `docs_create_http_${cRes.status}` })
+  const doc = (await cRes.json()) as { documentId?: string }
+  const id = doc.documentId
+  if (!id) return JSON.stringify({ error: 'docs_create_no_id' })
+  const text = (continut || '').slice(0, MAX_TEXT_DRIVE)
+  if (text) {
+    const uRes = await tfetch(`https://docs.googleapis.com/v1/documents/${id}:batchUpdate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text } }] }),
+    })
+    if (!uRes.ok) return JSON.stringify({ error: `docs_write_http_${uRes.status}`, created_empty: true, id })
+  }
+  return JSON.stringify({ created: true, name: titlu, id, link: `https://docs.google.com/document/d/${id}/edit` })
+}
+
+// Sfârșitul corpului unui Doc (indexul de inserare pentru „adaugă la final").
+async function docEndIndex(id: string, token: string): Promise<number | null> {
+  const res = await tfetch(`https://docs.googleapis.com/v1/documents/${id}?fields=body(content(endIndex))`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return null
+  const j = (await res.json()) as { body?: { content?: { endIndex?: number }[] } }
+  const ends = (j.body?.content ?? []).map((c) => c.endIndex ?? 0)
+  const end = ends.length ? Math.max(...ends) : 0
+  return end > 1 ? end : 1
+}
+
+// EDITEAZĂ un Google Doc existent (găsit după nume). Moduri:
+//   adauga            → adaugă text la finalul documentului
+//   inlocuieste       → golește corpul și scrie textul nou
+//   gaseste_inlocuieste → înlocuiește toate aparițiile lui `cauta` cu `inlocuieste`
+async function editDoc(
+  query: string,
+  mod: string,
+  text: string,
+  cauta: string,
+  inlocuieste: string,
+  token: string,
+): Promise<string> {
+  const f = await gasesteFisierDrive(query, DOC_MIME, token)
+  if (f.error) return JSON.stringify({ error: f.error })
+  if (!f.found || !f.id) return JSON.stringify({ found: false, note: 'Niciun Google Doc pentru această căutare.' })
+
+  const requests: unknown[] = []
+  if (mod === 'gaseste_inlocuieste') {
+    if (!cauta) return JSON.stringify({ error: 'missing_cauta' })
+    requests.push({ replaceAllText: { containsText: { text: cauta, matchCase: false }, replaceText: inlocuieste || '' } })
+  } else if (mod === 'inlocuieste') {
+    const end = await docEndIndex(f.id, token)
+    if (end === null) return JSON.stringify({ error: 'docs_read_failed' })
+    if (end > 1) requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: end - 1 } } })
+    if (text) requests.push({ insertText: { location: { index: 1 }, text: text.slice(0, MAX_TEXT_DRIVE) } })
+  } else {
+    // adauga (implicit)
+    if (!text) return JSON.stringify({ error: 'missing_text' })
+    const end = await docEndIndex(f.id, token)
+    if (end === null) return JSON.stringify({ error: 'docs_read_failed' })
+    requests.push({ insertText: { location: { index: end - 1 }, text: `\n${text.slice(0, MAX_TEXT_DRIVE)}` } })
+  }
+  if (!requests.length) return JSON.stringify({ error: 'nimic_de_facut' })
+  const uRes = await tfetch(`https://docs.googleapis.com/v1/documents/${f.id}:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests }),
+  })
+  if (!uRes.ok) return JSON.stringify({ error: `docs_edit_http_${uRes.status}` })
+  return JSON.stringify({ edited: true, mod, name: f.name, id: f.id, link: `https://docs.google.com/document/d/${f.id}/edit` })
+}
+
+// CREEAZĂ un Google Sheet cu titlu + rânduri (2D). API Sheets: creare, apoi
+// values.update pe A1.
+async function createSheet(titlu: string, randuriRaw: unknown, token: string): Promise<string> {
+  if (!titlu.trim()) return JSON.stringify({ error: 'missing_title' })
+  let randuri: (string | number)[][] = []
+  if (randuriRaw !== undefined && randuriRaw !== null) {
+    try { randuri = normalizeazaRanduri(randuriRaw) } catch (e) { return JSON.stringify({ error: e instanceof Error ? e.message : 'randuri_invalide' }) }
+  }
+  const cRes = await tfetch('https://sheets.googleapis.com/v4/spreadsheets', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ properties: { title: titlu.slice(0, 300) } }),
+  })
+  if (!cRes.ok) return JSON.stringify({ error: `sheets_create_http_${cRes.status}` })
+  const sh = (await cRes.json()) as { spreadsheetId?: string }
+  const id = sh.spreadsheetId
+  if (!id) return JSON.stringify({ error: 'sheets_create_no_id' })
+  if (randuri.length) {
+    const uRes = await tfetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/A1?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: randuri }),
+      },
+    )
+    if (!uRes.ok) return JSON.stringify({ error: `sheets_write_http_${uRes.status}`, created_empty: true, id })
+  }
+  return JSON.stringify({ created: true, name: titlu, id, randuri: randuri.length, link: `https://docs.google.com/spreadsheets/d/${id}/edit` })
+}
+
+// EDITEAZĂ un Google Sheet existent (găsit după nume). Moduri:
+//   adauga → adaugă rândurile la finalul foii (values.append)
+//   scrie  → scrie rândurile începând de la `interval` (ex. "A1", "Foaie1!B2")
+async function editSheet(
+  query: string,
+  mod: string,
+  randuriRaw: unknown,
+  interval: string,
+  token: string,
+): Promise<string> {
+  let randuri: (string | number)[][]
+  try { randuri = normalizeazaRanduri(randuriRaw) } catch (e) { return JSON.stringify({ error: e instanceof Error ? e.message : 'randuri_invalide' }) }
+  if (!randuri.length) return JSON.stringify({ error: 'randuri_goale' })
+  const f = await gasesteFisierDrive(query, SHEET_MIME, token)
+  if (f.error) return JSON.stringify({ error: f.error })
+  if (!f.found || !f.id) return JSON.stringify({ found: false, note: 'Niciun Google Sheet pentru această căutare.' })
+
+  const rangeRaw = (mod === 'scrie' ? (interval || 'A1') : 'A1').replace(/[^A-Za-z0-9!:$ ]/g, '')
+  const range = encodeURIComponent(rangeRaw || 'A1')
+  const url =
+    mod === 'scrie'
+      ? `https://sheets.googleapis.com/v4/spreadsheets/${f.id}/values/${range}?valueInputOption=USER_ENTERED`
+      : `https://sheets.googleapis.com/v4/spreadsheets/${f.id}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`
+  const uRes = await tfetch(url, {
+    method: mod === 'scrie' ? 'PUT' : 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: randuri }),
+  })
+  if (!uRes.ok) return JSON.stringify({ error: `sheets_edit_http_${uRes.status}` })
+  return JSON.stringify({ edited: true, mod, name: f.name, id: f.id, randuri: randuri.length, link: `https://docs.google.com/spreadsheets/d/${f.id}/edit` })
+}
+
 async function getTasks(max: number, token: string): Promise<string> {
   const url = new URL('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks')
   url.searchParams.set('maxResults', String(Math.min(Math.max(max, 1), 100)))
@@ -1471,6 +1726,13 @@ export async function runGoogleTool(
     else if (name === 'complete_task') result = await completeTask(str(args.id), token)
     else if (name === 'get_drive_files') result = await driveFiles(str(args.query), num(args.max_results, 10), token)
     else if (name === 'read_drive_file') result = await readDriveFile(str(args.query), token)
+    // L1i: editare avansată (Docs + Sheets) în contul omului logat.
+    else if (name === 'create_doc') result = await createDoc(str(args.title), str(args.content), token)
+    else if (name === 'edit_doc')
+      result = await editDoc(str(args.query), str(args.mode) || 'adauga', str(args.text), str(args.find), str(args.replace), token)
+    else if (name === 'create_sheet') result = await createSheet(str(args.title), args.rows, token)
+    else if (name === 'edit_sheet')
+      result = await editSheet(str(args.query), str(args.mode) || 'adauga', args.rows, str(args.range), token)
     else if (name === 'get_tasks') result = await getTasks(num(args.max_results, 20), token)
     else if (name === 'add_task') result = await addTask(str(args.title), str(args.due), token)
     else if (name === 'search_contacts')
