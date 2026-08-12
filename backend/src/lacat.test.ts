@@ -122,21 +122,21 @@ describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: �
   })
 })
 
-describe('LACĂT — constructor (Gemini-only, fără scară OpenRouter)', () => {
-  // (Vechiul zid „REFUZ dacă nu e :free și nu e ALLOW_PAID" păzea scara de
-  // modele OpenRouter — extirpată pe 3 aug cu tot cu furnizorul. Noul zid:
-  // constructorul are UN singur creier, Gemini pe cheia ownerului, și nu mai
-  // există nicio cale de rețea spre OpenRouter/OpenAI în agent.)
-  it('agentul e Gemini-only: fără apeluri OpenRouter, fără scara plătită', () => {
+describe('LACĂT — constructor (endpoint OpenAI-compatibil, NU Gemini)', () => {
+  // Owner, 12 aug: „nu are ce căuta Gemini acolo". Constructorul a fost mutat de
+  // pe Gemini pe un endpoint OpenAI-compatibil (RunPod→DeepInfra). Noul zid: fără
+  // OpenRouter/OpenAI, fără NICIUN apel Gemini, și creierul vine din env-ul
+  // RunPod/DeepInfra. Codul mort Gemini (llmGemini + helperele) a fost SCOS.
+  it('agentul: fără OpenRouter/OpenAI, fără apel Gemini, creier din env-ul OpenAI-compat', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
     expect(/openrouter\.ai/.test(s)).toBe(false)
     expect(/OPENROUTER_API_KEY/.test(s)).toBe(false)
     expect(/anthropic\/claude-fable-5/.test(s)).toBe(false)
-    expect(/function llmGemini/.test(s)).toBe(true)
-    // Iar default-ul de model e Gemini.
-    const def = /CONSTRUCTOR_GEMINI_MODEL\s*\|\|\s*'([^']+)'/.exec(s)
-    expect(def, 'nu am găsit default-ul CONSTRUCTOR_GEMINI_MODEL').toBeTruthy()
-    expect(/gemini/.test(def![1])).toBe(true)
+    // NU mai cheamă Gemini (niciun apel către API-ul Google) și fără codul mort.
+    expect(/generativelanguage\.googleapis\.com/.test(s)).toBe(false)
+    expect(/function llmGemini/.test(s)).toBe(false)
+    // Creierul vine din env-ul endpointului OpenAI-compatibil (nume nou SAU vechi).
+    expect(/env\.CONSTRUCTOR_RUNPOD_KEY\s*\|\|\s*env\.CONSTRUCTOR_DEEPSEEK_KEY/.test(s)).toBe(true)
   })
 })
 

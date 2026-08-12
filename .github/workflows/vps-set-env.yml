@@ -124,7 +124,14 @@ jobs:
 
           # CONSTRUCTORUL PE DeepInfra, PERMANENT (12 aug). RunPod serverless nu
           # servea modelul de 30B (pornire la rece ~6 min + apoi 500 la inferență,
-          # măsurat) → mutat pe DeepInfra găzduit (Qwen3-Coder-480B, răspuns <1s).
+          # măsurat) → mutat pe DeepInfra găzduit. MODELUL: întâi Qwen3-Coder-480B-
+          # Turbo, dar ăla e SUPRAÎNCĂRCAT CRONIC pe DeepInfra (măsurat pe cheia
+          # ownerului: `engine_overloaded`, 0 tool_calls, în timp ce ALTE modele pe
+          # ACEEAȘI cheie chemau uneltele pe loc) → trecut pe `DeepSeek-V3-0324`
+          # (coder puternic, editează PRECIS — Qwen2.5-72B termina pipeline-ul dar
+          # rescria fișiere întregi cu `write`, periculos pe cod real).
+          # constructor-agent.mjs are rezerve (Qwen2.5-72B rapid, Llama-3.3-70B)
+          # dacă primarul s-ar supraîncărca.
           # URL-ul + modelul NU sunt secrete, dar stăteau ca secrete VECHI (RunPod)
           # în GitHub și reveneau la fiecare rulare. Le FORȚĂM aici, după scriere,
           # ca vps-set-env să nu mai poată da constructorul înapoi pe RunPod. Cheia
@@ -135,7 +142,7 @@ jobs:
             touch "$f"; chmod 600 "$f"
             for kv in \
               "CONSTRUCTOR_DEEPSEEK_URL=https://api.deepinfra.com/v1/openai/chat/completions" \
-              "CONSTRUCTOR_DEEPSEEK_MODEL=Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo"; do
+              "CONSTRUCTOR_DEEPSEEK_MODEL=deepseek-ai/DeepSeek-V3-0324"; do
               name="${kv%%=*}"
               grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
               printf "%s\n" "$kv" >> "$f.tmp"
