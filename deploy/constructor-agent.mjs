@@ -85,29 +85,29 @@ const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
 // ordinele țin mult, aproape de plafonul dur de 30 min; garda de timp adaptivă +
 // boot-ul din atelier rămân plasa.
 const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-2.5-pro'
-// ── DEEPSEEK DIRECT — CREIERUL CONSTRUCTORULUI, IZOLAT DE VOCE (Adrian, 9 aug) ─
-// „dacă nu merge OmniRoute, pui cheia și rămâne DOAR deepseek la constructor" +
-// „vreau ca tot creditul să rămână doar pe voce". Scop: constructorul să NU mai
-// consume cheia Gemini (aia rămâne pe vocea live) — folosește DeepSeek direct.
+// ── RUNPOD DIRECT — CREIERUL CONSTRUCTORULUI (Qwen3-Coder), IZOLAT DE VOCE ─────
+// Owner, 12 aug: „doar RunPod". Constructorul rulează DOAR pe modelul propriu de
+// pe RunPod (Qwen3-Coder), izolat de Gemini/voce. Scop: constructorul să NU mai
+// consume cheia Gemini (aia rămâne pe vocea live) — folosește RunPod direct.
 // OmniRoute a fost sărit intenționat: la testul live pe VPS nu crea o conexiune
 // PLĂTITĂ (doar catalog gratuit, „no connected models"), iar în repo e marcat
 // risc de securitate (AI-HANDOFF §13: CVE + tipar MITM blocat de Socket.dev).
-// DeepSeek e OpenAI-compatibil, iar mesajele + TOOLS-urile noastre sunt DEJA în
-// format OpenAI → trec DIRECT, fără conversia spre Gemini (mai puține locuri de
-// greșit). GATED: fără cheie, constructorul rămâne pe Gemini exact ca înainte —
-// nimic nu se strică. Cheia stă DOAR în env-ul VPS (/root/kelion/kelionai.env),
-// NICIODATĂ în repo; se pune prin Kelion (secret_pune) sau direct în env.
-const DEEPSEEK_KEY = env.CONSTRUCTOR_DEEPSEEK_KEY ?? ''
-const DEEPSEEK_MODEL = env.CONSTRUCTOR_DEEPSEEK_MODEL || 'deepseek-chat'
-// URL configurabil → ORICE endpoint OpenAI-compatibil: DeepSeek cloud SAU modelul
+// RunPod (vLLM) e OpenAI-compatibil, iar mesajele + TOOLS-urile noastre sunt DEJA în
+// format OpenAI → trec DIRECT, fără conversie (mai puține locuri de greșit).
+// FĂRĂ REZERVĂ: dacă RunPod nu e configurat, constructorul se OPREȘTE — NU cade
+// pe Gemini, nu pe alt furnizor. Cheia + URL-ul + modelul stau DOAR în env-ul VPS
+// (/root/kelion/kelionai.env), NICIODATĂ în repo; prin Kelion (secret_pune) sau env.
+const RUNPOD_KEY = env.CONSTRUCTOR_RUNPOD_KEY ?? ''
+const RUNPOD_MODEL = env.CONSTRUCTOR_RUNPOD_MODEL || ''
+// URL-ul endpointului RunPod (OpenAI-compatibil, vLLM). FĂRĂ default de furnizor:
 // PROPRIU pe RunPod serverless (vLLM: .../openai/v1/chat/completions), izolat de
 // creditul de voce. Dovedit pe viu 11-12 aug: Qwen3-Coder pe RunPod cheamă unelte
 // corect pe ruta asta (a chemat `grep {"pattern":"8080"}` la un ordin real).
-const DEEPSEEK_URL = env.CONSTRUCTOR_DEEPSEEK_URL || 'https://api.deepseek.com/v1/chat/completions'
-// Un SINGUR creier pe rulare (nu amestecăm furnizori într-un ordin): dacă e
-// cheia DeepSeek, tot ordinul merge pe DeepSeek; altfel pe Gemini.
-const FOLOSESTE_DEEPSEEK = !!DEEPSEEK_KEY
-// TIMEOUT-UL apelului OpenAI-compatibil (DeepSeek/RunPod). Default 120s pentru un
+const RUNPOD_URL = env.CONSTRUCTOR_RUNPOD_URL || ''
+// UN SINGUR creier: RunPod (Qwen3-Coder). Dacă nu e configurat RunPod (cheie +
+// URL RunPod), constructorul se OPREȘTE — nu cade pe Gemini, nu pe alt furnizor.
+const RUNPOD_CONFIGURAT = !!RUNPOD_KEY
+// TIMEOUT-UL apelului OpenAI-compatibil (RunPod). Default 120s pentru un
 // cloud rapid. Pentru endpoint LOCAL pe RunPod serverless, prima trezire descarcă
 // modelul (~3–8 min), deci pe VPS se ridică prin CONSTRUCTOR_LLM_TIMEOUT_MS (~540s)
 // — altfel primul apel s-ar tăia la 120s și ordinul s-ar amâna la nesfârșit fără
@@ -124,10 +124,10 @@ const LLM_TIMEOUT_MS = Number(env.CONSTRUCTOR_LLM_TIMEOUT_MS || 120_000)
 // conexiunea deschisă, deci supraviețuiește oricât de lentă e pornirea la rece);
 // abia când placa e caldă trimitem cererea reală cu unelte pe ruta sincronă
 // /openai — atunci răspunde repede. Trezirea își scrie progresul pe monitor.
-const ESTE_RUNPOD = /runpod\.ai/i.test(DEEPSEEK_URL)
+const ESTE_RUNPOD = /runpod\.ai/i.test(RUNPOD_URL)
 // Baza endpointului: din …/v2/<id>/openai/v1/chat/completions extragem …/v2/<id>,
 // de unde derivăm /run și /status/<jobId> și /health.
-const RUNPOD_BASE = (DEEPSEEK_URL.match(/^(https?:\/\/[^/]+\/v2\/[^/]+)\//i) || [])[1] || ''
+const RUNPOD_BASE = (RUNPOD_URL.match(/^(https?:\/\/[^/]+\/v2\/[^/]+)\//i) || [])[1] || ''
 // Cât așteptăm cel mult trezirea la rece (default 9 min — sub bugetul rulării).
 const WARM_MS = Number(env.CONSTRUCTOR_WARM_MS || 9 * 60_000)
 let placaCalda = false
@@ -833,7 +833,7 @@ async function llmGemini(messages) {
 // NU moare fiindcă placa s-a trezit greu o dată, se reia mai târziu.
 async function trezestePlaca() {
   if (!ESTE_RUNPOD || !RUNPOD_BASE || placaCalda) return
-  const auth = { 'content-type': 'application/json', authorization: `Bearer ${DEEPSEEK_KEY}` }
+  const auth = { 'content-type': 'application/json', authorization: `Bearer ${RUNPOD_KEY}` }
   beat('placa RunPod: o trezesc (pornire la rece, poate dura câteva minute)…', true)
   log('RunPod: trezesc placa pe ruta asincronă înainte de prima cerere (pornire la rece)')
   let jobId = ''
@@ -873,19 +873,19 @@ async function trezestePlaca() {
   }
 }
 
-// DeepSeek DIRECT — OpenAI-compatible. Mesajele NOASTRE sunt deja în format
+// RunPod DIRECT — OpenAI-compatible. Mesajele NOASTRE sunt deja în format
 // OpenAI (role/content/tool_calls/tool_call_id) și TOOLS la fel → se trimit
 // DIRECT, fără nicio conversie (spre deosebire de Gemini). Întoarce ACELAȘI
 // obiect OpenAI-shaped pe care îl așteaptă main() (choices[0].message). Pe orice
 // eșec aruncă {clasa:'furnizor'} — llm() reîncearcă exact ca pe Gemini.
-async function llmDeepSeek(messages) {
+async function llmRunpod(messages) {
   let r
   try {
-    r = await fetch(DEEPSEEK_URL, {
+    r = await fetch(RUNPOD_URL, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${DEEPSEEK_KEY}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${RUNPOD_KEY}` },
       body: JSON.stringify({
-        model: DEEPSEEK_MODEL,
+        model: RUNPOD_MODEL,
         messages,
         tools: TOOLS,
         tool_choice: 'auto',
@@ -902,44 +902,44 @@ async function llmDeepSeek(messages) {
     // apelul sincron cade cu „fetch failed". Marcăm placa RECE ca reîncercarea
     // din llm() s-o retrezească, în loc să cadă la fel de N ori la rând.
     if (ESTE_RUNPOD) placaCalda = false
-    throw Object.assign(new Error(`DeepSeek rețea: ${String(e?.message ?? e).slice(0, 200)}`), { clasa: 'furnizor' })
+    throw Object.assign(new Error(`RunPod rețea: ${String(e?.message ?? e).slice(0, 200)}`), { clasa: 'furnizor' })
   }
   const text = await r.text().catch(() => '')
-  if (!r.ok) throw Object.assign(new Error(`DeepSeek ${r.status}: ${text.slice(0, 300)}`), { clasa: 'furnizor' })
+  if (!r.ok) throw Object.assign(new Error(`RunPod ${r.status}: ${text.slice(0, 300)}`), { clasa: 'furnizor' })
   let parsed
   try {
     parsed = JSON.parse(text)
   } catch {
-    throw Object.assign(new Error(`DeepSeek JSON rupt (${text.length} caractere)`), { clasa: 'furnizor' })
+    throw Object.assign(new Error(`RunPod JSON rupt (${text.length} caractere)`), { clasa: 'furnizor' })
   }
   const message = parsed?.choices?.[0]?.message
-  if (!message) throw Object.assign(new Error('DeepSeek fără candidați (200 gol/blocat)'), { clasa: 'furnizor' })
+  if (!message) throw Object.assign(new Error('RunPod fără candidați (200 gol/blocat)'), { clasa: 'furnizor' })
   const content = typeof message.content === 'string' ? message.content : ''
   const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
   // Gol de tot (nici text, nici tool) — aruncăm ca llm() să reîncerce, la fel ca
   // la Gemini, în loc să ardem o tură sterilă pe nimic.
   if (!content.trim() && !toolCalls.length)
-    throw Object.assign(new Error('DeepSeek: răspuns gol (200 fără text/tool)'), { clasa: 'furnizor' })
+    throw Object.assign(new Error('RunPod: răspuns gol (200 fără text/tool)'), { clasa: 'furnizor' })
   const out = { role: 'assistant', content }
   if (toolCalls.length) out.tool_calls = toolCalls
   const total = Number(parsed?.usage?.total_tokens)
   return {
     choices: [{ message: out }],
     usage: { total_tokens: Number.isFinite(total) ? total : 0 },
-    modelServit: `deepseek/${DEEPSEEK_MODEL}`,
+    modelServit: `runpod/${RUNPOD_MODEL}`,
   }
 }
 
 async function llm(messages) {
-  // UN SINGUR CREIER PE RULARE (9 aug): DeepSeek dacă e cheia lui (constructorul
-  // izolat de creditul Gemini/voce), altfel Gemini — exact ca înainte.
-  // Reîncercăm pe ACELAȘI creier cu pauze crescătoare; o eroare de cheie/cont
-  // (401/403) e FATALĂ pe loc (nicio reîncercare nu ajută); la epuizarea
-  // încercărilor, sugrumarea (429/cotă/5xx) marchează ordinul AMÂNABIL.
-  const foloseste = FOLOSESTE_DEEPSEEK ? llmDeepSeek : llmGemini
-  const numeCreier = FOLOSESTE_DEEPSEEK ? 'DeepSeek' : 'Gemini'
-  if (!GEMINI_KEY && !DEEPSEEK_KEY)
-    throw Object.assign(new Error('lipsește cheia creierului (CONSTRUCTOR_DEEPSEEK_KEY sau GEMINI_API_KEY) — constructorul nu are creier'), { fatal: true })
+  // DOAR RUNPOD (owner, 12 aug: „doar RunPod"): nu doar „nu Gemini" — creierul
+  // constructorului TREBUIE să fie RunPod (Qwen3-Coder), NU alt endpoint, NU
+  // altceva. Endpoint-ul trebuie să fie RunPod (ESTE_RUNPOD) ȘI cu cheie; altfel
+  // se OPREȘTE zgomotos, fără rezervă. Reîncercăm pe ACELAȘI creier cu pauze
+  // crescătoare; 401/403 = FATAL pe loc; sugrumarea (429/5xx) = AMÂNABIL.
+  if (!RUNPOD_KEY || !ESTE_RUNPOD)
+    throw Object.assign(new Error('constructorul e setat DOAR pe RunPod (Qwen3-Coder), dar RunPod nu e configurat: pune CONSTRUCTOR_RUNPOD_KEY + CONSTRUCTOR_RUNPOD_URL pe endpoint-ul RunPod (…api.runpod.ai/v2/<id>/openai/v1/…). NU cade pe Gemini și NU merge pe alt endpoint — se oprește.'), { fatal: true })
+  const foloseste = llmRunpod
+  const numeCreier = 'RunPod'
   let lastErr = ''
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
     if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
@@ -957,7 +957,7 @@ async function llm(messages) {
       if (e?.fatal) throw e
       if (e?.amanabil) throw Object.assign(new Error(lastErr), { amanabil: true })
       // Cheia/contul nostru — nicio reîncercare nu ajută; ne oprim pe loc.
-      if (/(deepseek|gemini) (401|403)/i.test(lastErr)) {
+      if (/(runpod|gemini) (401|403)/i.test(lastErr)) {
         log(`llm [fatal] — cheia/contul ${numeCreier}: ${lastErr.slice(0, 200)}`)
         throw Object.assign(new Error(lastErr), { fatal: true })
       }
@@ -970,7 +970,7 @@ async function llm(messages) {
   // La capătul tuturor încercărilor: dacă ultima eroare e sugrumare de furnizor
   // (429/cotă/5xx/gol), marcăm amânabil — ordinul nu moare, se reia.
   throw Object.assign(new Error(lastErr || `${numeCreier} indisponibil după ${LLM_ATTEMPTS} încercări`), {
-    amanabil: /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|(deepseek|gemini) 5\d\d|răspuns gol|rețea/i.test(lastErr),
+    amanabil: /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|(runpod|gemini) 5\d\d|răspuns gol|rețea/i.test(lastErr),
   })
 }
 
@@ -1183,8 +1183,8 @@ for (const semnal of ['SIGTERM', 'SIGINT']) {
 }
 
 async function main() {
-  if (!BRIDGE || (!GEMINI_KEY && !DEEPSEEK_KEY) || !GHTOKEN) {
-    log('lipsesc BRIDGE_SECRET/(CONSTRUCTOR_DEEPSEEK_KEY sau GEMINI_API_KEY)/GITHUB_TOKEN din kelionai.env — ies')
+  if (!BRIDGE || !RUNPOD_KEY || !GHTOKEN) {
+    log('lipsesc BRIDGE_SECRET / CONSTRUCTOR_RUNPOD_KEY / GITHUB_TOKEN din kelionai.env — ies')
     return
   }
   const claim = await api('/api/constructor/next')
@@ -1196,9 +1196,9 @@ async function main() {
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
   // DOVADA CREIERULUI ACTIV (9 aug): scris în jurnal la fiecare ordin, ca să se
-  // vadă negru pe alb pe ce rulează constructorul — DeepSeek (izolat de voce) sau
-  // Gemini (fallback). modelServit din răspuns cară aceeași informație în raport.
-  log(`creier constructor: ${FOLOSESTE_DEEPSEEK ? `DeepSeek (${DEEPSEEK_MODEL})` : `Gemini (${GEMINI_MODEL})`}`)
+  // vadă negru pe alb pe ce rulează constructorul — RunPod (Qwen3-Coder).
+  // modelServit din răspuns cară aceeași informație în raport.
+  log(`creier constructor: RunPod DOAR (${RUNPOD_MODEL})${(RUNPOD_CONFIGURAT && ESTE_RUNPOD) ? '' : ' — ATENȚIE: RunPod neconfigurat (cheie/URL RunPod lipsă), primul ordin se oprește (fără rezervă)'}`)
   // CREIERUL ORDINULUI (3 aug — extirparea OpenRouter): Gemini, unic, pe cheia
   // ownerului. Marcajul „Fable 5" din text nu mai pornește nimic (creierul
   // plătit prin OpenRouter a dispărut) — alegerea e scrisă în jurnal.
