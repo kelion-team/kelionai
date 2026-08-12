@@ -542,10 +542,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // necitibil (nu e RunPod / cheie lipsă / citire picată) → bara scrie
       // „RunPod ⚠", NICIODATĂ „RunPod 0" (regula #1).
       runpod: {
-        live: runpodBalance.ok,
-        balanceUsd: runpodBalance.ok ? runpodBalance.balanceUsd : undefined,
-        ratePerHr: runpodBalance.ok ? runpodBalance.currentSpendPerHr : undefined,
-        limitPerHr: runpodBalance.ok ? runpodBalance.spendLimitPerHr : undefined,
+        provider: runpodBalance.provider,
+        live: runpodBalance.live ?? runpodBalance.ok,
+        balanceUsd: runpodBalance.balanceUsd,
+        ratePerHr: runpodBalance.currentSpendPerHr,
+        limitPerHr: runpodBalance.spendLimitPerHr,
         error: runpodBalance.error,
       },
       // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
