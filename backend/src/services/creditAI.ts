@@ -1,6 +1,7 @@
 import { config } from '../config.js'
 import { cheltuialaDeLaPeKinduri, cheltuialaLunaPeKinduri, loadKv } from '../db.js'
 import { getSerperBalance } from './serperBalance.js'
+import { getRunpodBalance } from './runpodBalance.js'
 import { geminiLive } from './geminiDirect.js'
 import { cursUsdGbp } from './fx.js'
 import type { Masuratoare } from './masurare.js'
@@ -229,8 +230,56 @@ async function randJules(): Promise<CreditAI> {
   }
 }
 
+/** ── RUNPOD: placa lucrătorului, cu SOLD CITIT REAL (Adrian, 12 aug) ──────────
+ *  Constructorul rulează pe modelul propriu (Qwen3-Coder) pe o placă RunPod
+ *  serverless — NU pe VPS. Spre deosebire de Google, RunPod EXPUNE soldul
+ *  (GraphQL myself.clientBalance), deci aici cifra e CITITĂ, nu estimată. Cheia
+ *  e cea a constructorului (CONSTRUCTOR_DEEPSEEK_KEY, dacă URL-ul e RunPod). */
+async function randRunpod(): Promise<CreditAI> {
+  const t0 = Date.now()
+  const sold = await getRunpodBalance().catch(() => null)
+  const cum = 'POST https://api.runpod.io/graphql { myself { clientBalance } } (soldul spus de RunPod)'
+  const cheieConfigurata =
+    Boolean((process.env.CONSTRUCTOR_DEEPSEEK_KEY ?? '').trim()) &&
+    /runpod\.ai/i.test(process.env.CONSTRUCTOR_DEEPSEEK_URL ?? '')
+
+  let ramas: Masuratoare<{ cantitate: number; unitate: string }>
+  if (!sold || sold.error === 'not_runpod') {
+    ramas = picat(cum, 'constructorul nu e pus pe RunPod (CONSTRUCTOR_DEEPSEEK_URL nu e RunPod)', Date.now() - t0)
+  } else if (sold.error === 'not_configured') {
+    ramas = picat(cum, 'cheia RunPod nu e pusă (CONSTRUCTOR_DEEPSEEK_KEY)', Date.now() - t0)
+  } else if (!sold.ok) {
+    ramas = picat(cum, `citirea la RunPod a picat (${sold.error})`, Date.now() - t0)
+  } else {
+    ramas = reusit(cum, { cantitate: Number((sold.balanceUsd ?? 0).toFixed(2)), unitate: 'USD' }, Date.now() - t0)
+  }
+
+  const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = sold?.ok
+    ? reusit(
+        'sold RunPod citit',
+        { da: true, detaliu: `rată acum $${(sold.currentSpendPerHr ?? 0).toFixed(3)}/h · plafon $${sold.spendLimitPerHr ?? '?'}/h` },
+        0,
+      )
+    : picat('sold RunPod', 'nu s-a putut citi soldul RunPod')
+
+  return {
+    furnizor: 'RunPod (placa lucrătorului)',
+    alimenteaza: 'creierul constructorului — modelul tău Qwen3-Coder, pe placa RunPod (nu pe VPS)',
+    cheieConfigurata,
+    ramas,
+    // RunPod nu trece prin jurnalul nostru de costuri (worker-ul nu itemizează
+    // cost per apel). Soldul real de mai sus e măsura DIRECTĂ — nu pun un 0 fals.
+    cheltuitLuna: picat(
+      'jurnalul de costuri (cost_events)',
+      'RunPod nu trece prin jurnalul nostru — soldul real de mai sus e măsura directă a banilor rămași',
+    ),
+    serveste,
+    facturare: 'https://www.runpod.io/console/user/billing',
+  }
+}
+
 /** Raportul complet, un rând pe furnizor. Un rând care n-a putut fi citit
  *  RĂMÂNE în listă, cu motivul lui — dispariția tăcută ar fi tot o minciună. */
 export async function crediteAI(): Promise<CreditAI[]> {
-  return Promise.all([randGemini(), randSerper(), randGoogleCloud(), randJules()])
+  return Promise.all([randGemini(), randSerper(), randRunpod(), randGoogleCloud(), randJules()])
 }
