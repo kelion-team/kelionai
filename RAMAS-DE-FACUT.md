@@ -56,6 +56,19 @@
 > proba live**: pui o întrebare care cere analiză lungă → avatarul se dă în colț,
 > textul rămâne liber; la „salut" scurt, avatarul stă central.
 
+> **12 aug 2026 — KELION PORNEȘTE SINGUR CONSTRUCȚIA DIN CHAT/VOCE (de verificat live).**
+> Adrian: „kelion trebuie să fie capabil să o facă, nu tu" — a dat ordinul cu
+> avatarul și Kelion a VORBIT, nu a construit. Cauza (din cod, regula #2): regula
+> de rutare a uneltei `build_software` pornea constructorul DOAR când ownerul
+> spunea LITERAL „construiește"; un ordin implicit („găsește o modalitate să muți
+> avatarul") era tratat ca discuție. Fix: rutarea acceptă acum ordine EXPLICITE
+> SAU IMPLICITE (orice cere schimbarea aplicației), în AMBELE surse (`chat.ts` +
+> `brainToolDefs.ts` pentru voce), plus o directivă în prompt pentru owner:
+> „sarcină despre aplicație = ACȚIUNE, nu vorbă" (build_software / repo_write
+> ACUM, nu promite). Test actualizat (`rutareChat.test.ts`). 1161 teste verzi,
+> tsc curat. **DE TĂIAT după proba live**: îi dai un ordin fără „construiește"
+> (ex. „repară X") → apare în panoul Constructor + PR, nu doar vorbă în chat.
+
 > ✅ **VERIFICAT LIVE de owner (11 aug): „merge bloutotch".** Vocea live iese pe Bluetooth/mașină,
 > ȘI update-ul blocant a funcționat (a primit codul nou pe telefon fără chin — altfel BT ar fi
 > rămas mort). Ambele puncte (A poarta + B microfonul fără procesare) confirmate pe telefon real.
