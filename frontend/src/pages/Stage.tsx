@@ -636,8 +636,11 @@ export default function Stage({ user }: { user: User }) {
   // un câmp inline, non-blocant: Enter salvează, Esc/click-afară renunță, eroarea
   // apare ca text mic lângă câmp, nu ca `window.alert` (alt freeze).
   const brainOkAtRef = useRef<number | null>(null)
-  // The padlock state at entry + the unlock coming from voice (the voiceprint
-  // matched → realtimeVoice emits `kelion:admin-unlock`).
+  // Starea lacătului la intrare, CITITĂ de la server. (Deblocarea prin VOCE a
+  // fost scoasă odată cu amprenta din calea vocii — 6 aug: nu mai există niciun
+  // emițător `kelion:admin-unlock`. Am scos și listener-ul mort — nu doar că nu
+  // mai făcea nimic, dar un eveniment rătăcit i-ar fi putut flip-ui lacătul din
+  // UI. Rearmarea/deblocarea trec prin server + codul tastat; N val 2, 0 minciuni.)
   useEffect(() => {
     if (user.role !== 'admin') return
     fetch('/api/admin/unlock/status', { credentials: 'include' })
@@ -646,10 +649,6 @@ export default function Stage({ user }: { user: User }) {
         if (j) setAdminLock({ armed: !!j.armed, unlocked: !!j.unlocked })
       })
       .catch(() => {})
-    const onUnlock = (): void =>
-      setAdminLock((s) => (s ? { ...s, unlocked: true } : { armed: true, unlocked: true }))
-    window.addEventListener('kelion:admin-unlock', onUnlock)
-    return () => window.removeEventListener('kelion:admin-unlock', onUnlock)
   }, [user.role])
   // The SINGLE gate to the admin panel: all roads (button, navigation from
   // voice/chat, the Stripe bag) pass through here — locked → the code window.
