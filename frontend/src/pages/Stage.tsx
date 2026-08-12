@@ -413,6 +413,18 @@ export interface BrainCredit {
     // (Câmpurile `openrouter` și `openai` au fost SCOASE din răspuns și din
     // tipul ăsta, 3 aug — furnizorii au fost extirpați; creierul e Gemini.)
     active: string | null
+    /** Soldul REAL RunPod (placa lucrătorului), CITIT de la furnizor (GraphQL
+     *  myself.clientBalance) — spre deosebire de Gemini, RunPod ÎL dă. `live:
+     *  false` = necitibil (nu e RunPod / cheie lipsă / citire picată) → bara
+     *  scrie „RunPod ⚠", NICIODATĂ „RunPod 0". `balanceUsd` = soldul preplătit
+     *  (plafonul dur de faliment: nu poți cheltui peste el). */
+    runpod?: {
+      live: boolean
+      balanceUsd?: number
+      ratePerHr?: number
+      limitPerHr?: number
+      error?: string
+    }
     /** The REAL Serper search credit (searches left), from the provider's
      *  /account endpoint. `live: false` = the read failed or SERPER_API_KEY is
      *  missing — the bar writes "Serper ⚠", NEVER "Serper 0": a failed read is

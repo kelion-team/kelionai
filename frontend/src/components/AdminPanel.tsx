@@ -163,6 +163,7 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
   if (!brainCredit) return null
   const g = brainCredit.gemini
   const s = brainCredit.serper
+  const r = brainCredit.runpod
   const serperK = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
   const geminiEticheta =
     g?.serving && g?.creditGbp != null
@@ -194,6 +195,13 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
       <span title={g?.monthUsd != null ? `cheltuit luna asta: $${g.monthUsd.toFixed(2)}` : 'cheltuiala Gemini necitibilă'}>
         Gemini {geminiEticheta}
       </span>
+      {r && (
+        <span title={r.live
+          ? `sold RunPod (placa lucrătorului): $${(r.balanceUsd ?? 0).toFixed(2)} · rată acum $${(r.ratePerHr ?? 0).toFixed(3)}/h · plafon $${r.limitPerHr ?? '?'}/h`
+          : `soldul RunPod nu se poate citi (${r.error ?? 'necunoscut'})`}>
+          RunPod {r.live ? `$${(r.balanceUsd ?? 0).toFixed(2)}` : '⚠'}
+        </span>
+      )}
       {edit ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <input
