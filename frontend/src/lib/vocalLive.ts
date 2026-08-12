@@ -1,4 +1,5 @@
 import { downsample, float32ToPcm16, base64ToBytes, pcm16ToFloat32 } from './pcm'
+import { OpusVoceClient, esteSuportat as opusSuportat } from './opusVoce'
 import { alimenteazaNivelVoce } from './audioIO'
 import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
 import { inscrieVoceaLuiKelion } from './vociKelion'
@@ -185,6 +186,11 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // autoplay), cădem pe redarea directă WebAudio — o dată, fără s-o repornim.
   let iesireDirecta = false
   let ceasCoords: ReturnType<typeof setInterval> | null = null
+  // OPUS (owner, 12 aug): codecul WebCodecs al sesiunii + steagul „upload pe
+  // Opus". Rămân null/false până serverul oferă Opus la `gata` ȘI codecul
+  // pornește; altfel toată calea e PCM, ca azi.
+  let opusClient: OpusVoceClient | null = null
+  let opusTx = false
   // (ceasCadre scos 9 aug — camera doar la cerință; vezi handlerul 'gata'.)
   // Radierea vocii din registrul de înregistrare (vezi mai jos, la analizor).
   let radiazaVocea: (() => void) | null = null
@@ -197,6 +203,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     alimenteazaNivelVoce(0)
     if (resumeTimer) clearInterval(resumeTimer)
     if (ceasCoords) clearInterval(ceasCoords)
+    opusClient?.inchide() // eliberează encoderul/decoderul WebCodecs
+    opusClient = null
+    opusTx = false
     radiazaVocea?.() // vocea iese din registrul de înregistrare odată cu sesiunea
     try {
       proc?.disconnect()
@@ -276,12 +285,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     rafGura = requestAnimationFrame(pas)
   }
 
-  const redaCadru = (b64: string): void => {
-    if (!ctxOut || inchis || !analizor) return
-    const f32 = pcm16ToFloat32(base64ToBytes(b64))
-    if (!f32.length) return
+  // Redarea unui bloc Float32 @24 kHz — folosită și de PCM base64 (redaCadru),
+  // și de decoderul Opus (care scoate direct Float32). Aceeași programare pe
+  // cursorRedare, deci sunetul curge la fel indiferent de codecul de pe sârmă.
+  const redaFloat32 = (f32: Float32Array): void => {
+    if (!ctxOut || inchis || !analizor || !f32.length) return
     const buf = ctxOut.createBuffer(1, f32.length, RATA_IESIRE)
-    buf.copyToChannel(f32, 0)
+    // `.set` acceptă orice Float32Array (indiferent de tipul buffer-ului din
+    // spate), spre deosebire de copyToChannel care cere strict ArrayBuffer.
+    buf.getChannelData(0).set(f32)
     const src = ctxOut.createBufferSource()
     src.buffer = buf
     src.connect(analizor)
@@ -296,6 +308,11 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       surseActive = surseActive.filter((s) => s !== src)
       if (!surseActive.length) opts.onVorbeste?.(false)
     }
+  }
+
+  const redaCadru = (b64: string): void => {
+    const f32 = pcm16ToFloat32(base64ToBytes(b64))
+    if (f32.length) redaFloat32(f32)
   }
 
   // GPS-ul CĂTRE sesiune (8 aug: „nu are acces la gps, meteo"): serverul ține
@@ -333,7 +350,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
 
   ws.onmessage = (ev: MessageEvent): void => {
     if (typeof ev.data !== 'string') return
-    let m: { type?: string; data?: string; text?: string; final?: boolean; motiv?: string; frame?: unknown }
+    let m: { type?: string; data?: string; text?: string; final?: boolean; motiv?: string; frame?: unknown; opus?: boolean; codec?: string }
     try {
       m = JSON.parse(ev.data) as typeof m
     } catch {
@@ -343,6 +360,28 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       case 'gata':
         trimiteCoords()
         if (!ceasCoords) ceasCoords = setInterval(trimiteCoords, 120_000)
+        // OPUS: serverul a oferit Opus ȘI browserul are WebCodecs → pornim
+        // codecul. Doar când e gata anunțăm serverul (`opus_ready`) și abia de
+        // ATUNCI tag-uim uploadurile — ordinea WS ne scutește de curse. Orice
+        // eșec = rămânem pe PCM (nimic nu se rupe).
+        if (m.opus && opusSuportat() && !opusClient) {
+          void OpusVoceClient.creeaza(
+            (octeti) => {
+              // pachet Opus de microfon → [octet codec = 1][payload]
+              if (inchis || ws.readyState !== WebSocket.OPEN) return
+              const cadru = new Uint8Array(octeti.length + 1)
+              cadru[0] = 1
+              cadru.set(octeti, 1)
+              try { ws.send(cadru.buffer) } catch { /* close-ul curăță */ }
+            },
+            (pcm) => redaFloat32(pcm), // Opus de jos decodat → difuzor
+          ).then((c) => {
+            if (!c || inchis) { c?.inchide(); return }
+            opusClient = c
+            opusTx = true
+            try { ws.send(JSON.stringify({ type: 'opus_ready' })) } catch { /* close-ul curăță */ }
+          })
+        }
         // CAMERA DOAR LA CERINȚĂ (9 aug, ownerul: „camera doar la cerință" —
         // pentru economie). Am SCOS ceasul care trimitea un cadru la ~2,5s cât
         // sesiunea era vie: ardea credit CONTINUU chiar și când nimeni nu cerea
@@ -366,7 +405,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         break
       }
       case 'audio':
-        if (m.data) redaCadru(m.data)
+        if (!m.data) break
+        // OPUS: cadrele de jos vin tag-uite `codec:'opus'` cât e activ; le dăm
+        // decoderului (ieșirea lui cade pe redaFloat32). Fără tag = PCM base64,
+        // ca azi. Dacă decoderul lipsește dintr-un motiv, cadrul Opus se pierde
+        // (nu-l putem reda ca PCM) — dar asta doar cât Opus e pornit explicit.
+        if (m.codec === 'opus') {
+          opusClient?.incarcaOpusJos(base64ToBytes(m.data))
+        } else {
+          redaCadru(m.data)
+        }
         break
       case 'user':
         opts.onUser?.(m.text ?? '', !!m.final)
@@ -496,6 +544,20 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // FĂRĂ garda de prag (ștearsă 8 aug): ecoul rămâne pe seama anulării din
     // microfon (`echoCancellation:true` la getUserMedia) — adaptiv, nu ghicit.
     const la16k = downsample(brut, ctxIn!.sampleRate)
+    // OPUS: cât e activ, microfonul intră în encoder (care trimite singur
+    // [1][opus] prin callback). Dacă encode-ul pică pe un cadru, trimitem PCM
+    // tag-uit [0][pcm] — serverul, în modul Opus, citește mereu octetul-codec.
+    if (opusTx && opusClient) {
+      if (opusClient.incarcaMic(la16k)) return
+      const pcm0 = float32ToPcm16([la16k])
+      const octetiPcm = new Uint8Array(pcm0.buffer, pcm0.byteOffset, pcm0.byteLength)
+      const cadru = new Uint8Array(octetiPcm.length + 1)
+      cadru[0] = 0
+      cadru.set(octetiPcm, 1)
+      try { ws.send(cadru.buffer) } catch { /* close-ul curăță */ }
+      octeti += octetiPcm.length
+      return
+    }
     const pcm = float32ToPcm16([la16k])
     ws.send(pcm.buffer)
     octeti += pcm.byteLength
