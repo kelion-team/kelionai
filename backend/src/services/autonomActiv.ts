@@ -29,13 +29,12 @@ import { loadKv, saveKv } from '../db.js'
 export const CHEIE_AUTONOM = 'autonom:activ'
 
 /** Sunt PORNITE motoarele autonome? DEFAULT ON din 12 aug 2026 (owner, verbatim:
- *  „dă drumul la autonomie", ordin repetat). Cheia lipsă sau orice ≠ '0'/'false'
- *  = PORNIT; '0' din admin = oprit. EXCEPȚIE de siguranță: baza NECITIBILĂ
- *  (eroare) = OFF — „nu știu starea" = nu pornesc pe orb la o cădere de DB.
- *  Plafonul de bani ($10/zi, `plafonConstructor`) rămâne activ ca protecție. */
+ *  „dă drumul la autonomie" + „nu e corect fără excepții"). ON FĂRĂ NICIO
+ *  EXCEPȚIE: DOAR '0'/'false' explicit din admin oprește; orice altceva —
+ *  cheia lipsă SAU baza necitibilă — = PORNIT. Plafonul de bani ($10/zi,
+ *  `plafonConstructor`) rămâne activ ca protecție. */
 export async function autonomActiv(): Promise<boolean> {
-  const v = await loadKv(CHEIE_AUTONOM).catch(() => '__eroare__')
-  if (v === '__eroare__') return false
+  const v = await loadKv(CHEIE_AUTONOM).catch(() => null)
   return v !== '0' && v !== 'false'
 }
 
