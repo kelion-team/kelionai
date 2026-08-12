@@ -783,6 +783,10 @@ export async function recurringClientErrors(hours = 24, minCount = 5, minUsers =
          FROM client_errors
         WHERE created_at > now() - ($1 || ' hours')::interval
           AND message <> ''
+          -- LIVE SYMPTOMS have their own reader (simptomeLiveRecente) and their
+          -- own self-heal pass; excluding them here keeps the two paths from
+          -- filing the SAME failure twice.
+          AND type NOT LIKE 'live:%'
           -- exclude noise that can't be fixed in code: opaque cross-origin
           -- errors, network outages, browser extensions.
           AND message NOT ILIKE 'Script error%'
@@ -803,6 +807,86 @@ export async function recurringClientErrors(hours = 24, minCount = 5, minUsers =
       sampleStack: x.stack,
       sampleUrl: x.url,
       firstSeen: x.first_seen,
+      lastSeen: x.last_seen,
+    }))
+  } catch {
+    return []
+  }
+}
+
+// ── LIVE SYMPTOMS — silent internal failures made VISIBLE ────────────────────
+//
+// Adrian, 12 aug: „vreau autonomia si kelion sa vada tot ce pica, acces de admin
+// pe toate logurile". The self-heal loop above only ever saw errors the BROWSER
+// reported. What broke SILENTLY on the server or the UI — the camera that gives
+// no frame, a route that throws, the brain that returns no text — reached
+// NOWHERE, so it reached no repair either. That is exactly why "Kelion doesn't
+// see": there was nothing recorded for it to reach.
+//
+// These functions make such failures land in the SAME table the admin already
+// watches (client_errors), tagged with a `live:<fel>` type, so they stop being
+// silent AND self-heal can pick them up (see selfHeal.ts). The bar is LOWER than
+// recurringClientErrors on purpose: a mute chat is severe even at one user (the
+// owner himself) — so there is NO "2 distinct users" requirement here.
+export async function recordSimptomLive(
+  fel: string,
+  detaliu: string,
+  extra?: { url?: string; ip?: string },
+): Promise<void> {
+  // Reuses the visible, admin-watched store; the `live:` prefix is what the
+  // reader and the recurring-errors exclusion key on.
+  await saveClientError({
+    type: `live:${String(fel).replace(/[^a-z0-9-]/gi, '').slice(0, 32)}`,
+    message: detaliu,
+    url: extra?.url,
+    ip: extra?.ip,
+  })
+}
+
+export interface SimptomLive {
+  /** The kind, without the `live:` prefix — e.g. `fara-vedere`, `chat-mut`, `ruta-crapata`. */
+  fel: string
+  /** The concrete detail: what failed, exactly (grouped by first 200 chars). */
+  message: string
+  count: number
+  sampleUrl: string
+  lastSeen: string
+}
+
+/** The recent LIVE symptoms, grouped by kind + message — for self-heal and the
+ *  panel. Deliberately NO minimum-users bar: a single occurrence of a mute chat
+ *  is a real failure, not noise. `minCount` lets the caller demand recurrence
+ *  per kind (e.g. a one-off „camera off" shouldn't be treated as a bug). */
+export async function simptomeLiveRecente(hours = 6, minCount = 1): Promise<SimptomLive[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<{
+      fel: string
+      message: string
+      count: string
+      url: string
+      last_seen: string
+    }>(
+      `SELECT type AS fel,
+              left(message, 200) AS message,
+              count(*) AS count,
+              (array_agg(url ORDER BY created_at DESC))[1] AS url,
+              max(created_at)::text AS last_seen
+         FROM client_errors
+        WHERE created_at > now() - ($1 || ' hours')::interval
+          AND type LIKE 'live:%'
+          AND message <> ''
+        GROUP BY type, left(message, 200)
+       HAVING count(*) >= $2
+        ORDER BY max(created_at) DESC
+        LIMIT 20`,
+      [Math.max(1, Math.min(720, hours)), Math.max(1, minCount)],
+    )
+    return r.rows.map((x) => ({
+      fel: String(x.fel).replace(/^live:/, ''),
+      message: x.message,
+      count: Number(x.count),
+      sampleUrl: x.url ?? '',
       lastSeen: x.last_seen,
     }))
   } catch {

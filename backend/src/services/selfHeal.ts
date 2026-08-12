@@ -1,7 +1,12 @@
 import crypto from 'node:crypto'
-import { recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs } from '../db.js'
+import {
+  recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs,
+  simptomeLiveRecente,
+} from '../db.js'
 import { isOpsPaused } from './runbooks.js'
 import { geminiLive } from './geminiDirect.js'
+import { ordinSimptomLive, pragPentru } from './simptomeLive.js'
+import { plafonConstructor } from './autonomie.js'
 
 // ── KELION'S SELF-HEALING (Adrian, 27 Jul: "Kelion must be able to gather
 // errors appearing under each user automatically and remedy them, delivering
@@ -52,10 +57,21 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     /* live signal unavailable — we try again on the next run */
   }
 
-  const errors = await recurringClientErrors(24, 5, 2)
-  if (!errors.length) return { filed: 0 }
+  // PLAFONUL DE BANI, ȘI AICI (B5, 12 aug): self-heal cheamă createBuildJob
+  // direct — deci trebuie să respecte ACELAȘI plafon zilnic de $10 ca bucla de
+  // noapte, altfel o rafală de simptome ar putea porni ordine peste limita pe
+  // care owner-ul a cerut-o. Dacă plafonul e atins, nu mai file-uim azi (requeue-ul
+  // de mai sus, care doar reia ce a picat pe lipsă de credit, a rulat deja).
+  const pl = await plafonConstructor().catch(() => ({ activ: false, plafon: 0, cheltuit: 0 }))
+  if (pl.activ && pl.cheltuit >= pl.plafon) {
+    console.log(`[self-heal] plafon zilnic atins ($${pl.cheltuit.toFixed(2)}/$${pl.plafon.toFixed(2)}) — nu mai trimit reparații azi`)
+    return { filed: 0 }
+  }
 
   let filed = 0
+
+  // ── ERORILE RAPORTATE DIN BROWSER (calea veche) ─────────────────────────────
+  const errors = await recurringClientErrors(24, 5, 2)
   for (const e of errors) {
     if (filed >= 3) break
     const sig = signature(e.message)
@@ -79,6 +95,36 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
       filed += 1
     }
   }
-  if (filed) console.log(`[self-heal] ${filed} eroare(i) recurentă(e) trimisă(e) constructorului spre reparare`)
+
+  // ── EȘECURILE MUTE DE PE VIU (calea nouă — „kelion sa vada tot ce pica") ─────
+  // Ce a picat TĂCUT — camera fără cadru, o rută 5xx, creierul mut — a fost
+  // înregistrat structurat (recordSimptomLive) și AICI devine ordin de reparație
+  // cu cauza REALĂ atașată. Fără pragul „2 useri" al erorilor de browser: eșecul
+  // ownerului, singur, contează. Pragul pe fel (`pragPentru`) ține un simplu
+  // „camera oprită" să nu nască un ordin degeaba (regula #1). Dedup 7 zile pe
+  // semnătură, plafon mic pe rulare — nu inundăm coada.
+  let filedLive = 0
+  const simptome = await simptomeLiveRecente(6, 1).catch(() => [])
+  for (const s of simptome) {
+    if (filedLive >= 3) break
+    if (s.count < pragPentru(s.fel)) continue // nu e (încă) un tipar — nu-l reparăm orbește
+    const sig = signature(`${s.fel} ${s.message}`)
+    const key = `selfheal-live:${sig}`
+    if (await loadKv(key)) continue // deja trimis — nu duplicăm
+
+    const id = await createBuildJob('kelion-autovindecare-live', ordinSimptomLive(s.fel, s.message, s.count, s.sampleUrl))
+    if (id) {
+      await saveKv(key, JSON.stringify({ at: Date.now(), job: id, fel: s.fel, count: s.count }))
+      filed += 1
+      filedLive += 1
+    }
+  }
+
+  if (filed) {
+    console.log(
+      `[self-heal] ${filed} reparare(i) trimisă(e) constructorului` +
+        (filedLive ? ` (din care ${filedLive} din eșecuri MUTE de pe viu)` : ''),
+    )
+  }
   return { filed }
 }

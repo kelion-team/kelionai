@@ -88,32 +88,10 @@ export function reteaLenta(): boolean {
   return t === 'slow-2g' || t === '2g' || t === '3g'
 }
 
-const abonati = new Set<(t: Teava) => void>()
-let ultima: Teava = 'necunoscut'
-
-/** Anunță la SCHIMBARE de treaptă (pentru UI/indicator). Întoarce dezabonarea. */
-export function subscribeTeava(cb: (t: Teava) => void): () => void {
-  abonati.add(cb)
-  return () => {
-    abonati.delete(cb)
-  }
-}
-
-/** Atașează watcher-ul pe `connection.change` (o dată, la boot). Fără el,
- *  `getTeava()` tot merge (citește live); watcher-ul doar trezește abonații. */
-export function pornesteRetea(): void {
-  ultima = getTeava()
-  const c = conn()
-  if (c?.addEventListener) {
-    c.addEventListener('change', () => {
-      const noua = getTeava()
-      if (noua !== ultima) {
-        ultima = noua
-        for (const cb of abonati) cb(noua)
-      }
-    })
-  }
-}
+// NB: comutarea calității e DINAMICĂ fără vreun watcher — `getTeava()` citește
+// live semnalele browserului la fiecare cadru (property reads sincrone). Un
+// watcher pe `connection.change` (subscribeTeava/pornesteRetea) exista aici, dar
+// n-avea niciun abonat — surplus mort, scos ca să nu rămână cod nelegat.
 
 // ── CALITATEA CAMEREI PE TREAPTĂ ────────────────────────────────────────────
 export interface CalitateCamera {

@@ -51,7 +51,7 @@ import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
 import { jobsRoutes } from './routes/jobs.js'
-import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings } from './db.js'
+import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive } from './db.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
@@ -91,6 +91,26 @@ process.on('unhandledRejection', (reason) => {
 })
 process.on('uncaughtException', (err) => {
   app.log.error({ err }, 'uncaughtException — caught globally, the process stays alive')
+})
+
+// KELION VEDE CE PICĂ PE SERVER (Adrian, 12 aug: „kelion sa vada tot ce pica").
+// Orice rută care crapă cu 5xx lasă un SIMPTOM structurat (nu doar în log-ul
+// volatil), ca autovindecarea să ajungă la el — nu doar erorile raportate din
+// browser. NU schimbă răspunsul spre client: notează, apoi răspunde ca Fastify
+// implicit (reply.send(err)). 4xx-urile (input greșit, rate-limit) NU se notează
+// — nu sunt eșecuri ale aplicației.
+app.setErrorHandler((err, req, reply) => {
+  const e = err as { statusCode?: number; message?: string }
+  const cod = e.statusCode ?? 500
+  if (cod >= 500) {
+    const ruta = (req.url || '').split('?')[0]
+    void recordSimptomLive('ruta-crapata', `${req.method} ${ruta}: ${e.message ?? 'eroare'}`, {
+      url: req.url,
+      ip: (req.headers['cf-connecting-ip'] as string) || req.ip,
+    }).catch(() => {})
+  }
+  app.log.error({ err, url: req.url }, 'route error')
+  reply.send(err)
 })
 
 await app.register(cookie)
