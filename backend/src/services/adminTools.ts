@@ -38,7 +38,7 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   // MĂSURAREA (8 aug, ordinul ownerului): Kelion își rulează SINGUR porțile, cu
   // aceleași comenzi ca omul, și își poate citi jurnalul propriilor măsurători —
   // ca o afirmație despre starea softului să poată fi CONFRUNTATĂ cu ce a măsurat.
-  'ruleaza_portile', 'jurnal_masuratori', 'vaneaza_buguri',
+  'ruleaza_portile', 'jurnal_masuratori', 'vaneaza_buguri', 'ruleaza_verificarea',
   'repo_write', 'repo_open_pr', 'repo_merge_pr',
   'run_runbook', 'runbook_status', 'runbook_log', 'request_repair',
   'secret_pune', 'secret_lista', 'secret_publica',
@@ -85,6 +85,13 @@ export async function execSharedAdminTool(
     case 'vaneaza_buguri': {
       const v = await vaneazaBuguri(Number(args.ore ?? 48) || 48)
       return raportVanatoare(v)
+    }
+    // Import dinamic: verificareIntegrala importă din acest modul (SHARED/USER
+    // sets) — un import static ar închide un ciclu. La RULARE e sigur.
+    case 'ruleaza_verificarea': {
+      const { verificareIntegrala, formateazaRaport } = await import('./verificareIntegrala.js')
+      const r = await verificareIntegrala()
+      return r ? formateazaRaport(r) : 'Verificarea e sărită acum (autonomie oprită sau plafon zilnic atins din Admin).'
     }
     case 'jurnal_masuratori': {
       const randuri = await jurnalMasuratori(Number(args.cate ?? 30) || 30)

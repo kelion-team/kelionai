@@ -130,3 +130,15 @@ export async function verificareIntegrala(): Promise<RaportVerificare | null> {
   await saveKv('verificare:integrala', JSON.stringify(raport)).catch(() => {})
   return raport
 }
+
+/** Tabelul măsurat, gata de citit în chat. ✅ merge · ❌ nu merge · • efect-real. */
+export function formateazaRaport(r: RaportVerificare): string {
+  const simbol = (s: RandTabel['status']): string => (s === 'merge' ? '✅' : s === 'nu merge' ? '❌' : '•')
+  const linii = r.tabel.map((x) => `${simbol(x.status)} ${x.skill} [${x.tip}] — ${x.motiv}`)
+  return (
+    `VERIFICARE INTEGRALĂ — ${r.la}\n` +
+    `Rezumat: ${r.rezumat.merg} MERG / ${r.rezumat.nuMerg} NU MERG / ${r.rezumat.efectReal} efect-real (neexecutate), ` +
+    `din ${r.rezumat.totalSkill} skill-uri. Prin creier (routing): ${r.prinChat.pass}/${r.prinChat.total}.\n\n` +
+    linii.join('\n')
+  )
+}

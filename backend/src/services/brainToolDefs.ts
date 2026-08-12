@@ -54,6 +54,17 @@ export const SYSTEM_HEALTH_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+// ── VERIFICAREA INTEGRALĂ, LA CERERE (owner, 12 aug: „dă-mi comanda să i-o dau") ─
+// O comandă pe care o dă OWNERUL în chat, ca admin: rulează pe loc tabelul cu
+// TOATE skill-urile din registru — cele de citire rulate live („merge/nu merge"),
+// cele cu efect real arătate dar neexecutate — și întoarce tabelul măsurat.
+export const RULEAZA_VERIFICAREA_TOOL: Tool = {
+  name: 'ruleaza_verificarea',
+  description:
+    'ADMIN ONLY. Rulează ACUM verificarea integrală a aplicației prin chat și întoarce TABELUL cu toate skill-urile din registru: cele de CITIRE rulate live prin dispecerul chatului („merge/nu merge", cu motiv măsurat) + cele cu EFECT REAL arătate dar NEexecutate (ar scrie cod/secret/card/email pe prod). Plus rezumatul numeric (total / merg / nu merg / efect-real) și bateria prin creier. Fără argumente. Cheam-o când ownerul spune „rulează verificarea", „verifică toată aplicația", „ce merge și ce nu".',
+  input_schema: { type: 'object', properties: {} },
+}
+
 // ── L1e: PROCESARE DE DATE TABELARE (CSV/JSON) — capabilitate generală ────────
 // Ownerul (autonomie): Kelion trebuie să poată PROCESA date, nu doar să discute
 // despre ele. Unealtă PURĂ: primește textul (CSV sau JSON, lipit de om sau adus
@@ -717,6 +728,7 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
   ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
   // His own wishlist, granted (Aug 2): project memory + measured observability.
   MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL,
+  RULEAZA_VERIFICAREA_TOOL,
 ]
 
 
