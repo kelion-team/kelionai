@@ -69,7 +69,7 @@ import {
 } from './adminTools.js'
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
-import { listeazaCerinte, actualizeazaCerinta } from '../db.js'
+import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { utcDay } from './timeContext.js'
@@ -1328,6 +1328,10 @@ export function urmatoareaPauzaMs(r: { pornit: boolean; motiv: string }): number
  *  working while there is work, and sleeps the hour only when idle. */
 export function startAutonomie(): void {
   const ruleaza = async (): Promise<{ pornit: boolean; motiv: string }> => {
+    // CURĂȚENIE AUTOMATĂ (K9 + K13): arhivează ordinele terminate mai vechi de o
+    // zi, ca panoul Constructor să nu se încarce cu istoric. Best-effort — nu
+    // blochează pasul de autonomie dacă pică.
+    await arhiveazaBuildJobsVechi(1).catch(() => 0)
     const r = await poateSaLucreze().catch((e) => ({ pornit: false, motiv: String(e).slice(0, 120) }))
     ultima = {
       la: new Date().toISOString(),

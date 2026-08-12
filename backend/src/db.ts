@@ -542,6 +542,12 @@ export async function initDb(): Promise<void> {
     -- distinguishable in the Money views without any fabrication.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS brain TEXT;
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION;
+    -- ARHIVAREA ORDINELOR VECHI (Adrian, K9 + K13: „de ascuns cele vechi din
+    -- panou" + „sistem automat de curățare care arhivează când e gata"). Un ordin
+    -- terminat (done/failed) mai vechi se ARHIVEAZĂ (nu se șterge — rămâne
+    -- recuperabil): iese din panou, dar nu se pierde. Bucla de autonomie
+    -- arhivează singură; panoul (listBuildJobs) le exclude.
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "sent to execution" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -3537,10 +3543,36 @@ export async function reportBuildJob(
 export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
   if (!dbEnabled()) return null
   try {
-    const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
+    // Exclude ARHIVATELE (K9): ordinele vechi terminate nu mai încarcă panoul,
+    // dar rămân în DB (recuperabile), nu se pierd.
+    const r = await getPool().query<BuildJobDbRow>(
+      'SELECT * FROM build_jobs WHERE arhivat = false ORDER BY created_at DESC LIMIT $1',
+      [limit],
+    )
     return r.rows.map(rowToBuildJob)
   } catch {
     return null
+  }
+}
+
+/** AUTO-ARHIVARE (K9 + K13): ordinele TERMINATE (done/failed) mai vechi de
+ *  `zile` se marchează arhivate — ies din panou, rămân în DB. Nu atinge niciodată
+ *  ordinele vii (queued/running). Întoarce câte a arhivat. Rulată de bucla de
+ *  autonomie (curățenie automată, „când e gata"). */
+export async function arhiveazaBuildJobsVechi(zile = 1): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const z = Math.max(1, Math.min(90, Math.round(zile) || 1))
+    const r = await getPool().query(
+      `UPDATE build_jobs SET arhivat = true
+        WHERE arhivat = false
+          AND status IN ('done','failed')
+          AND updated_at < now() - ($1 || ' days')::interval`,
+      [z],
+    )
+    return r.rowCount ?? 0
+  } catch {
+    return 0
   }
 }
 

@@ -20,6 +20,13 @@
 >   pe tokeni semnificativi, prag 0.8); `adaugaCerinta` compară cu cerințele
 >   deschise și cade pe cea existentă. Prinde reformulările (nu flexiune/sinonime
 >   — onest). 6 teste noi (1167 total), tsc curat.
+> - **K9 + K13 — AUTO-ARHIVAREA ORDINELOR VECHI.** Panoul Constructor
+>   (`listBuildJobs`) arăta TOATE joburile, inclusiv cele eșuate vechi (gunoi).
+>   Fix: coloană `arhivat` pe `build_jobs`; `listBuildJobs` exclude arhivatele;
+>   `arhiveazaBuildJobsVechi()` (nouă) marchează arhivate ordinele TERMINATE
+>   (done/failed) mai vechi de o zi — iese din panou, RĂMÂN în DB (recuperabile,
+>   nu șterse); chemată automat de bucla de autonomie („curățenie când e gata").
+>   Nu atinge niciodată ordinele vii. 1167 teste verzi, tsc curat.
 
 > **12 aug 2026 — PLASĂ DE SĂNĂTATE LA PUBLICARE: backup → health → revert automat (de verificat live).**
 > Adrian: „să poată da automat merged, DAR cu backup înainte în caz că crapă ceva;
