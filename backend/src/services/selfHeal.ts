@@ -39,6 +39,11 @@ function signature(message: string): string {
   return crypto.createHash('sha1').update(norm).digest('hex').slice(0, 16)
 }
 
+// Simptome care se ÎNREGISTREAZĂ (owner-ul le vede) dar NU se trimit
+// constructorului — nu-s bug de cod, ci stare externă (bani/cotă). Constructorul
+// n-are ce repara acolo; le rezolvă owner-ul, informat de simptom.
+const FARA_REPARATIE = new Set<string>(['creier-indisponibil'])
+
 // Contractul de închidere pentru simptomele live (vezi bucla de mai jos).
 const REVERIFICA_MS = 6 * 60 * 60 * 1000 // nu reverificăm mai des de 6h (lasă timp de merge+deploy)
 const FEREASTRA_DEPLOY_MS = 30 * 60 * 1000 // o reapariție la ≤30 min după reparație nu contează (nu apucase să se publice)
@@ -112,6 +117,10 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
   const simptome = await simptomeLiveRecente(6, 1).catch(() => [])
   for (const s of simptome) {
     if (filedLive >= 3) break
+    // Simptome VIZIBILE dar pe care constructorul NU le poate repara (nu-s bug de
+    // cod): creierul fără credit / cu cota atinsă. Le vede owner-ul, dar nu se
+    // trimite un ordin degeaba (regula #1 + #4). Rămân în admin ca semnal.
+    if (FARA_REPARATIE.has(s.fel)) continue
     if (s.count < pragPentru(s.fel)) continue // nu e (încă) un tipar — nu-l reparăm orbește
     const sig = signature(`${s.fel} ${s.message}`)
     const key = `selfheal-live:${sig}`

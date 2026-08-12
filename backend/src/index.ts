@@ -39,6 +39,7 @@ import { startAutoInvatare } from './services/autoInvatare.js'
 import { incarcaReprosuri } from './services/feedbackImplicit.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { runSelfHeal } from './services/selfHeal.js'
+import { probaChatLive } from './services/probaLive.js'
 import { pornesteIscoadele } from './services/iscoada.js'
 import { pornestePietarul } from './services/pietar.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
@@ -480,6 +481,19 @@ try {
     void vindeca()
     setInterval(() => { void vindeca() }, 30 * 60 * 1000)
   }, 3 * 60 * 1000)
+  // PROBA CARE EXERSEAZĂ CHATUL VIU (Adrian, 12 aug: „testele se creează pentru
+  // chatul LIVE, nu din spate"). Rulează pe serverul viu, cere creierului un
+  // răspuns real și, dacă tura e mută, scrie un simptom la care self-heal ajunge
+  // — deci „chatul mut" e prins FĂRĂ ca un om să dea peste el. Orară (cost mic,
+  // tokens minimi), auto-gate pe autonomie + plafon în interiorul probei.
+  const probeaza = async (): Promise<void> => {
+    const r = await probaChatLive().catch(() => null)
+    if (r && !r.ok) app.log.warn(`proba-chat-live: ${r.detaliu}`)
+  }
+  setTimeout(() => {
+    void probeaza()
+    setInterval(() => { void probeaza() }, 60 * 60 * 1000)
+  }, 5 * 60 * 1000)
   // ISCOADELE (Adrian, 4 aug: „boti care bat netul 24 din 24 si aduc informati
   // lui kelion"): patrula periodică Serper→creier→memoria lui Kelion.
   pornesteIscoadele()
