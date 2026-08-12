@@ -8,6 +8,7 @@ import {
   type Facing,
 } from '../lib/camera'
 import { startFaceSampling } from '../lib/faceprint'
+import { getTeava, calitateCamera } from '../lib/retea'
 
 // Device camera capture — NOT shown on screen. The feed is for Kelion's vision
 // only: the <video> element is kept playing but visually hidden, and frames are
@@ -160,7 +161,11 @@ export default function CameraView({
       // e o encodare JPEG SINCRONĂ; costul crește cu pixelii. La 768² ținea firul
       // 50–134 ms și înfometa redarea vocii → audio crăpat + barge-in-uri false.
       // 512² = ~44% din pixeli → ~jumătate de blocaj, cu Kelion vede la fel de bine.
-      const maxDim = 512
+      // CALITATE ADAPTIVĂ LA ȚEAVĂ (12 aug): pe 4G/Wi-Fi rămâne 512/0.6; pe
+      // 3G/2G scade dimensiunea + calitatea JPEG, ca vederea să treacă și pe
+      // țeavă slabă (citit LIVE la fiecare cadru → comută din mers, fără re-render).
+      const cal = calitateCamera(getTeava())
+      const maxDim = cal.maxDim
       const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight))
       const w = Math.round(v.videoWidth * scale)
       const h = Math.round(v.videoHeight * scale)
@@ -186,7 +191,7 @@ export default function CameraView({
       // Cadrul mare: DOAR desen + JPEG — nicio citire de pixeli pe 768px.
       ctx.filter = filtru
       ctx.drawImage(v, 0, 0, w, h)
-      return panzaMare.toDataURL('image/jpeg', 0.6)
+      return panzaMare.toDataURL('image/jpeg', cal.jpeg)
     }
     return () => {
       captureRef.current = null

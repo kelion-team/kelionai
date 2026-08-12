@@ -1396,6 +1396,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Ancora Centrului de Tranzacționare (10 aug, ownerul: chatul REAL,
       // „conștient" de pagina de trading) — starea VIE raportată de iframe.
       tranzactii?: { simbol?: string; pret?: number; interval?: string; sursa?: string; peste?: { t?: number | string; o?: number; h?: number; l?: number; c?: number; vol?: number | null; ma20?: number | null; ema50?: number | null } | null }
+      // ȚEAVA DE REȚEA (12 aug): treapta detectată de client (slab/mediu/bun/
+      // necunoscut) — creierul o ȘTIE (poate răspunde „ce țeavă am?") și își
+      // scurtează răspunsul + evită să deschidă pagini grele nechemat pe țeavă slabă.
+      retea?: 'slab' | 'mediu' | 'bun' | 'necunoscut'
       // UȘA CREIERULUI (8 aug, ownerul: „a oferit soluții dar nu poate să
       // implementeze"): tura vine din sesiunea vocală live prin unealta
       // cere_creierului — modelul live a DECIS deja că e nevoie de unelte,
@@ -2048,6 +2052,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         .join(', ')
       systemPrompt +=
         `\n\nMONITOR STATE: these task tabs are already open on the user's monitor: ${list}. One voice narrates all of them and the user can switch or close them at will. When the user says "the map", "the video", "this", "that", or asks to change what is shown, they mean these open tabs — work WITHIN the active one. To change a surface's content, call the SAME tool again (youtube_search swaps the current video, maps_search moves the map, get_weather changes the forecast) rather than describing it in words. Only open a different kind of surface when the user actually needs a new one. CLOSE IT WHEN DONE: as soon as the conversation moves to a NEW subject that has nothing to do with what is on the monitor, call show_on_screen with an EMPTY url to clear the screen — leave it clean and ready for the next request. Don't leave an old map/weather/video lingering once the user is talking about something else.`
+    }
+    // ȚEAVA DE REȚEA (12 aug, owner: „test care vede ce țeavă se folosește"):
+    // clientul raportează treapta detectată. Creierul o ȘTIE — poate răspunde la
+    // „ce țeavă am?" cu adevărul măsurat (nu inventează), iar pe țeavă slabă/medie
+    // își scurtează răspunsul și nu deschide pagini grele/video nechemat.
+    const retea = req.body?.retea
+    if (retea === 'slab' || retea === 'mediu') {
+      systemPrompt +=
+        `\n\nNETWORK: the user's connection is measured as ${retea === 'slab' ? 'WEAK (2G / data-saver)' : 'MEDIUM (3G)'}. ` +
+        `If they ask "what connection am I on / ce țeavă am", answer with THIS measured value (never guess). ` +
+        `On a weak/medium pipe: keep answers short, prefer speaking the result over opening heavy visuals, ` +
+        `and do NOT auto-open videos or large embeds unless explicitly asked — a laggy page helps no one.`
     }
     // ANCORA CENTRULUI DE TRANZACȚIONARE (10 aug, ownerul: „trebuie chatul
     // real, conștient... să răspundă tuturor întrebărilor tehnice"): cât tabul

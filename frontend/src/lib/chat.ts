@@ -120,6 +120,7 @@ export interface ChatControl {
 import type { VoiceFeatures } from './audioIO.js'
 import { moment as contorMoment } from './contorFraza'
 import { getStareTranzactii, getMonitorContent } from './workspace'
+import { getTeava } from './retea'
 
 // U+001F (unit separator) brackets a JSON control frame in the text stream.
 const CTRL = String.fromCharCode(31)
@@ -342,6 +343,10 @@ export async function* streamChat(
             // Ancora Centrului de Tranzacționare, cât tabul e deschis (10 aug):
             // creierul răspunde pe CIFRELE de pe ecran, nu din burtă.
             tranzactii: getStareTranzactii() ?? undefined,
+            // ȚEAVA DE REȚEA (12 aug, owner: „test care vede ce țeavă se
+            // folosește"): treapta detectată, ca să poți întreba „ce țeavă am?"
+            // și Kelion să răspundă REAL + să-și scurteze răspunsul pe țeavă slabă.
+            retea: getTeava(),
             voiceFeatures,
             faceDescriptor,
             facePhoto,

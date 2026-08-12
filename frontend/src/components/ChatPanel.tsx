@@ -58,6 +58,7 @@ import { keepScreenOn } from '../lib/wakelock'
 // Dictarea batch (/api/asr) și streamingul standalone (STT) au dispărut.
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
 import { deschideVocalLive, vocalLiveDisponibila, type VocalLiveHandle } from '../lib/vocalLive'
+import { getTeava, calitateCamera } from '../lib/retea'
 import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, emiteTakeover, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
 import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
@@ -1599,7 +1600,15 @@ export default function ChatPanel({
               cadre: () => {
                 const proaspat = captureRef.current?.()
                 if (!proaspat) return []
-                return [...frameBufRef.current.slice(-3), proaspat]
+                // CALITATE ADAPTIVĂ LA ȚEAVĂ (12 aug): pe 4G/Wi-Fi trimitem până
+                // la 4 cadre (fresh + 3 din tampon); pe 3G/2G doar 1–2, ca
+                // vederea să nu sufoce urcarea slabă. Dimensiunea/calitatea JPEG
+                // a fiecărui cadru se adaptează în CameraView (aceeași sursă).
+                const n = calitateCamera(getTeava()).cadre
+                // atenție: slice(-0) === slice(0) (întoarce TOT) — deci pe n=1
+                // trimitem DOAR cadrul proaspăt, fără tampon.
+                const dinTampon = n > 1 ? frameBufRef.current.slice(-(n - 1)) : []
+                return [...dinTampon, proaspat]
               },
               // VEDEREA CONTINUĂ (8 aug: „trebuie să poată folosi camera"):
               // sesiunea live primește un cadru proaspăt la ~2,5s cât camera
