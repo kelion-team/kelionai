@@ -43,6 +43,19 @@
 > build frontend; sintaxă). **DE TĂIAT după proba live**: în chat „ce e eroarea
 > 1006?" / „ce probleme ai?" → Kelion răspunde exact ce e, nu „încearcă din nou".
 
+> **12 aug 2026 — AVATARUL NU MAI ACOPERĂ ANALIZA (de verificat live).**
+> Adrian: „mută avatarul în stânga sau scrisul în stânga când se afișează o
+> analiză, că acoperă ce scrie." Ales de owner (AskUserQuestion): avatar în colț,
+> mic. Cauza (din CSS): chatul (`.chat`, z-index 30) stă PESTE avatarul central
+> (`.stage-canvas`, z-index 1) — la un răspuns lung (analiză) se calcă în centru.
+> Suprafețele (`monitorOn`) dădeau deja avatarul în colț; lipsea cazul „doar chat,
+> fără suprafață". Fix: `ChatPanel` emite `kelion:analiza-vizibila` când ultimul
+> răspuns e o analiză (text >320 caractere); `Stage` ascultă și pune avatarul în
+> colț (refolosește clasa `pip`, deci mecanism deja probat) cât timp analiza e pe
+> ecran; la răspuns scurt revine central. Build frontend verde. **DE TĂIAT după
+> proba live**: pui o întrebare care cere analiză lungă → avatarul se dă în colț,
+> textul rămâne liber; la „salut" scurt, avatarul stă central.
+
 > ✅ **VERIFICAT LIVE de owner (11 aug): „merge bloutotch".** Vocea live iese pe Bluetooth/mașină,
 > ȘI update-ul blocant a funcționat (a primit codul nou pe telefon fără chin — altfel BT ar fi
 > rămas mort). Ambele puncte (A poarta + B microfonul fără procesare) confirmate pe telefon real.

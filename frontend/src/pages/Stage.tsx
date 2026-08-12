@@ -717,6 +717,18 @@ export default function Stage({ user }: { user: User }) {
   // the server. (The `avatarEdit=false` flag + its 'editing' CSS class were
   // dead weight since then — removed in the Aug 2 dead-code audit.)
   const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>({ x: 58, y: 58, s: 0.42 })
+  // ANALIZĂ LUNGĂ ÎN CHAT → AVATARUL ÎN COLȚ (Adrian, 12 aug: „mută avatarul…
+  // când se afișează o analiză, că acoperă ce scrie"; ales: avatar în colț, mic).
+  // ChatPanel emite `kelion:analiza-vizibila` când ultimul răspuns e o analiză
+  // (text lung); atunci punem avatarul în colț (refolosim `pip`), ca textul din
+  // chat să nu se mai calce cu avatarul central. Suprafețele (monitorOn) îl dau
+  // deja în colț — asta acoperă cazul „doar chat, fără suprafață".
+  const [analizaChat, setAnalizaChat] = useState(false)
+  useEffect(() => {
+    const h = (e: Event): void => setAnalizaChat(!!(e as CustomEvent).detail?.activ)
+    window.addEventListener('kelion:analiza-vizibila', h)
+    return () => window.removeEventListener('kelion:analiza-vizibila', h)
+  }, [])
   // Fix hydration: localStorage is client-only; read it after hydration.
   useEffect(() => {
     try {
@@ -1204,7 +1216,7 @@ export default function Stage({ user }: { user: User }) {
       localStorage mirror. */}
       <div
         ref={stageRef}
-        className={`stage-canvas ${monitorOn ? 'pip' : ''}`}
+        className={`stage-canvas ${monitorOn || analizaChat ? 'pip' : ''}`}
         style={
           monitorOn
             ? {
