@@ -123,24 +123,27 @@ function regulaFaraEnvModel() {
   }
 }
 
-// CONSTRUCTORUL (autonomia) rulează pe ACELAȘI model unic (Adrian, 6 aug: „un
-// singur model, peste tot"). Fără asta, worker-ul a fugit pe 'gemini-3.6-flash',
-// care întorcea „200 gol/blocat" → autonomia pica. Lacătul cere ca modelul
-// implicit al constructorului să fie tot Gemini Pro (nu flash/2.5/1.5).
-function regulaConstructorModelUnic() {
+// CONSTRUCTORUL (autonomia) A FOST MUTAT DE PE GEMINI de owner (12 aug: „nu are ce
+// căuta Gemini acolo"; înainte „doar RunPod" → DeepInfra). Regula veche cerea ca
+// modelul constructorului să fie Gemini — acum contrazice ordinul ownerului. O
+// INVERSĂM: lacătul păzește ca acest creier să RĂMÂNĂ un endpoint OpenAI-compatibil
+// (RunPod/DeepInfra din env) și să NU recadă pe Gemini. Celelalte reguli (creierul
+// APLICAȚIEI — chat/voce/work) rămân neatinse: acolo Gemini e în continuare bătut
+// în cuie. Măsurat 12 aug: Qwen3-Coder-480B-Turbo pe DeepInfra e supraîncărcat
+// (engine_overloaded, 0 tool_calls); DeepSeek-V3/Qwen2.5-72B/Llama merg pe aceeași
+// cheie → constructorul rulează pe DeepSeek-V3 cu rotire pe rezerve.
+function regulaConstructorFaraGemini() {
   return {
-    nume: 'Constructorul (autonomia) = Gemini, model rapid (nu Pro)',
+    nume: 'Constructorul (autonomia) = endpoint OpenAI-compatibil (DeepInfra), NU Gemini',
     fisier: 'deploy/constructor-agent.mjs',
     verifica(src) {
-      const m = /CONSTRUCTOR_GEMINI_MODEL\s*\|\|\s*'([^']+)'/.exec(src)
-      if (!m) return 'nu am găsit modelul implicit al constructorului (structura s-a schimbat)'
-      const model = m[1]
-      // 7 aug (Adrian, opțiunea 1): constructorul NU mai are voie pe Pro — pe Pro
-      // un ordin ținea 30 min, sufoca CPU-ul VPS-ului și bloca publicarea ore.
-      // Trebuie flash (rapid), dar NU flash-lite: acolo se scrie cod și lite e
-      // prea mic. Poarta cere exact familia din mijloc.
-      if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(model))
-        return `modelul constructorului trebuie să fie Gemini flash (nu Pro, nu lite): „${model}"`
+      // Trebuie să-și ia creierul din env-ul OpenAI-compatibil (ambele nume: nou
+      // RUNPOD_*, vechi DEEPSEEK_* — cheia stă pe VPS sub numele vechi).
+      if (!/env\.CONSTRUCTOR_RUNPOD_KEY\s*\|\|\s*env\.CONSTRUCTOR_DEEPSEEK_KEY/.test(src))
+        return 'constructorul nu mai citește cheia endpointului OpenAI-compatibil (CONSTRUCTOR_RUNPOD_KEY/CONSTRUCTOR_DEEPSEEK_KEY) — structura s-a schimbat'
+      // ȘI nu trebuie să mai cheme Gemini (niciun apel către API-ul Google).
+      if (/generativelanguage\.googleapis\.com/.test(src))
+        return 'a reapărut un apel Gemini (generativelanguage.googleapis.com) în constructor — owner: „nu are ce căuta Gemini acolo"'
       return null
     },
   }
@@ -192,7 +195,7 @@ const REGULI = [
   regulaTreaptaGetter('workDefault', 'modelUnicDirect'),
   regulaTreaptaGetter('topDefault', 'modelUnicDirect'),
   regulaFaraEnvModel(),
-  regulaConstructorModelUnic(),
+  regulaConstructorFaraGemini(),
   regulaPoartaUpgrade(),
   regulaSemnaturaGandirii(),
   regulaVoceLive(),

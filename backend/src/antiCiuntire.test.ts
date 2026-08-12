@@ -77,9 +77,9 @@ describe('fișierul distrus e la loc, întreg', () => {
 
   it('bucățile mari ale constructorului sunt toate acolo', () => {
     // A coarse but real check: if the file were maimed again, at least one of
-    // these would be missing. (MODEL_LADDER → llmGemini după extirparea
-    // OpenRouter, 3 aug.)
-    for (const bucata of ['function toolWrite', 'function toolEdit', 'function llmGemini', 'RUN_ALLOWED', 'compactHistory'])
+    // these would be missing. (llmGemini a fost SCOS 12 aug — cod mort; creierul
+    // e llmRunpod, un endpoint OpenAI-compatibil pe DeepInfra.)
+    for (const bucata of ['function toolWrite', 'function toolEdit', 'function llmRunpod', 'RUN_ALLOWED', 'compactHistory'])
       expect(constructor).toContain(bucata)
   })
 })
