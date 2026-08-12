@@ -37,9 +37,20 @@
 > #186 → constructorul (Qwen2.5-72B) a chemat unelte, a creat DOAR fișierul cerut
 > (`deploy/SMOKE-DEEPSEEK.md`, 3 linii, nimic altceva atins), a trecut toate cele 7
 > porți, a împins ramura și a deschis PR corect (#1045) în ~67s, singur. Autonomia
-> merge end-to-end. **RĂMAS:** cererile REALE din coadă (#182/#183/#185, «cerințele
-> ownerului») — de rulat prin constructorul reparat (owner le poate reda din panou
-> «reia», sau se reiau automat).
+> merge end-to-end. **CERINȚELE REALE #182/#183/#185, rulate autonom peste noapte —
+> rezultat MĂSURAT, onest:** constructorul le-a atacat pe rând; TOATE au eșuat SIGUR
+> pe porți (build/tsc), **niciun cod stricat nu s-a îmbinat, master intact, live 200**.
+> Cauza: Qwen2.5-72B nu e destul de puternic pe fișiere existente mari — inventează
+> pachete (`jooble-api`, `@mui/material`) și ciuntește fișiere cu erori de sintaxă
+> (`App.tsx`, `AdminPanel.tsx`, `brainToolDefs.ts`) → porțile îl resping de fiecare
+> dată. Plasa de siguranță merge PERFECT; livrarea, nu. Le-am OPRIT din reîncercări
+> (status failed, attempts=9) ca să nu ardă bani la infinit; rămân în panou cu notă,
+> re-lansabile cu «reia». **Ce le blochează, pe rând:** #183 (#12 CV) cere un CONT
+> API extern (Jooble/Adzuna) — decizia ownerului; #182 (#11) e o funcție mare de CV
+> upload, spec de clarificat; #185 (#13) e auto-publish în producție fără confirmare
+> — riscant, de revizuit (istoricul „phantom deploy"). Concluzie: **autonomia merge
+> mecanic + în siguranță (dovedit), dar cele 3 cerințe cer ori owner-ul (cont/decizie),
+> ori un model mai puternic decât cel disponibil pe cheia curentă.**
 >
 > **12 aug 2026 (seara, partea 6) — „finalizezi?": L1h făcut, L1b+L1c verificate acoperite (nu fake).**
 > Owner: „finalizezi?" → iau ce se poate în cod, fără cont/token/social („fără
