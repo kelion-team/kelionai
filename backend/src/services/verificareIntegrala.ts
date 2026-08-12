@@ -1,103 +1,132 @@
-// ── VERIFICAREA ÎNTREGII APLICAȚII PRIN CHAT, CU COMENZI MĂSURABILE ───────────
+// ── VERIFICAREA ÎNTREGII APLICAȚII PRIN CHAT — TABELUL CU TOATE SKILL-URILE ───
 //
-// Adrian, 12 aug: „nu doresc să exersez chatul live, doresc să verifici TOATĂ
-// aplicația prin comenzi măsurabile PRIN chatul live" · „din 10 cereri câte
-// ajung la constructor? câte vor fi pass? câte sunt analizate?".
+// Adrian, 12 aug: „dacă voiai, concepeai o listă la toate funcționalitățile,
+// skill-urile, într-un tabel și te apucai să le rulezi în chatul live și vedeai
+// ce merge și ce nu merge… asta ar pune în evidență tot, și exact asta nu vrei
+// să se vadă."
 //
-// Chatul e CANALUL, nu subiectul. Aici trimit COMENZI reale prin exact creierul
-// + uneltele pe care le folosește chatul (brainCompleteWithTools + dispecerul
-// `uneltele`, ca admin) și MĂSOR, comandă cu comandă: ce unealtă a chemat și
-// dacă a întors rezultat. Iese un raport „X din N pass" — numărul cerut, nu o
-// vorbă. Fiecare comandă picată → simptom la care self-heal ajunge.
-//
-// SIGURANȚĂ: verificarea primește DOAR unelte de CITIRE (nu poate scrie cod, nu
-// poate pune secrete, nu poate atinge browserul) — măsoară, nu modifică.
+// Se vede tot. Aici e tabelul peste REGISTRUL REAL de skill-uri (uneltele pe
+// care le are chatul: SHARED_ADMIN_TOOLS ∪ USER_SCOPED_TOOLS ∪ browser). Pentru
+// FIECARE:
+//   • skill de CITIRE (fără efect) → îl RULEZ live prin dispecerul chatului și
+//     scriu „merge / nu merge", cu motivul măsurat;
+//   • skill cu EFECT REAL (scrie cod, pune secret, taxează card, trimite email,
+//     generează) → apare în tabel marcat „efect real — neexecutat pe prod": la
+//     VEDERE, dar nu-l declanșez ca test (efectul ar fi real). NIMIC ascuns.
+// În plus, o baterie reprezentativă trece PRIN CREIER (nu doar dispecer), ca să
+// măsor și că routing-ul chatului ajunge la unealtă. Ce pică → simptom → self-heal.
 
 import { brainCompleteWithTools } from './brain.js'
 import { uneltele, UNELTELE_MAINILOR, plafonConstructor } from './autonomie.js'
 import { recordSimptomLive, saveKv } from '../db.js'
 import { autonomActiv } from './autonomActiv.js'
 import { isOpsPaused } from './runbooks.js'
+import { SHARED_ADMIN_TOOLS, USER_SCOPED_TOOLS } from './adminTools.js'
 import type { AnthropicTool } from './brainContract.js'
 
-// Uneltele pe care verificarea are voie să le cheme — TOATE de citire pură.
-// db_query e scos dinadins (SQL construit de creier ar putea, teoretic, muta).
-const NUME_CITIRE = new Set<string>([
-  'system_health', 'read_source', 'search_source', 'list_source',
-  'list_memories', 'server_logs', 'runbook_log',
-  'db_tables', 'get_real_cost', 'list_updates',
-])
+// Skill-uri de CITIRE PURĂ, cu argumente benigne — le pot rula live fără efect.
+// (Orice atinge extern / costă / modifică e scos dinadins și tratat ca efect real.)
+const ARG_IMPLICIT: Record<string, Record<string, unknown>> = {
+  system_health: {},
+  db_tables: {},
+  stare_masurata: {},
+  jurnal_masuratori: { cate: 20 },
+  secret_lista: {},
+  cerinte_lista: {},
+  memorie_lista: { prefix: '' },
+  read_source: { path: 'backend/src/index.ts', from_line: 1 },
+  search_source: { query: 'recordSimptomLive' },
+  list_source: { dir: 'backend/src/services' },
+  server_logs: { errorsOnly: false },
+  get_real_cost: {},
+  list_updates: {},
+}
+const SAFE_INVOKE = new Set(Object.keys(ARG_IMPLICIT))
 
-// Definițiile de unealtă filtrate la subsetul de citire (name e la nivel de sus).
+// Uneltele browserului — au efect (navighează), deci în tabel apar ca efect real.
+const BROWSER_NUME = [
+  'browser_open', 'browser_click', 'browser_type', 'browser_read', 'browser_back',
+  'browser_scroll', 'browser_key', 'browser_click_at', 'browser_close',
+]
+
+// Bateria reprezentativă care trece PRIN CREIER (routing-ul chatului).
+interface Comanda { nume: string; comanda: string; asteapta: string[] }
+const BATERIE: Comanda[] = [
+  { nume: 'sănătate', comanda: 'Verifică-ți starea sistemului (system_health) și spune pe scurt.', asteapta: ['system_health'] },
+  { nume: 'cod-sursă', comanda: 'Caută în codul tău sursă unde e definită recordSimptomLive și citește câteva rânduri.', asteapta: ['search_source', 'read_source', 'list_source'] },
+  { nume: 'memorie', comanda: 'Listează ce ai în memorie (memorie_lista).', asteapta: ['memorie_lista', 'list_memories'] },
+  { nume: 'loguri', comanda: 'Citește ultimele erori din logurile serverului (server_logs).', asteapta: ['server_logs', 'runbook_log'] },
+]
 const UNELTE_CITIRE = (UNELTELE_MAINILOR as unknown as Array<{ name?: string }>).filter(
-  (t) => NUME_CITIRE.has(String(t.name ?? '')),
+  (t) => SAFE_INVOKE.has(String(t.name ?? '')),
 ) as unknown as AnthropicTool[]
 
-interface Comanda {
-  nume: string
-  comanda: string
-  /** Trece dacă a chemat ORICARE dintre uneltele astea și a întors rezultat. */
-  asteapta: string[]
+interface RandTabel {
+  skill: string
+  tip: 'citire' | 'efect-real'
+  status: 'merge' | 'nu merge' | 'cablat'
+  motiv: string
 }
-
-// Bateria — fiecare comandă e cum ar scrie omul în chat, cu un rezultat MĂSURABIL
-// (o anume capabilitate a aplicației, exersată cap-coadă prin creier).
-const BATERIE: Comanda[] = [
-  { nume: 'sănătate', comanda: 'Verifică-ți starea sistemului (system_health) și spune pe scurt ce ai găsit.', asteapta: ['system_health'] },
-  { nume: 'cod-sursă', comanda: 'Caută în propriul cod sursă unde e definită funcția recordSimptomLive și citește câteva rânduri.', asteapta: ['search_source', 'read_source', 'list_source'] },
-  { nume: 'memorie', comanda: 'Listează ce ai în memorie despre owner (list_memories).', asteapta: ['list_memories'] },
-  { nume: 'loguri', comanda: 'Citește ultimele erori din logurile serverului (server_logs).', asteapta: ['server_logs', 'runbook_log'] },
-  { nume: 'schema-bd', comanda: 'Listează tabelele bazei de date (db_tables) și spune câte sunt.', asteapta: ['db_tables'] },
-  { nume: 'cost', comanda: 'Care e costul real de azi? Folosește get_real_cost.', asteapta: ['get_real_cost'] },
-  { nume: 'noutăți', comanda: 'Ce actualizări/noutăți ai de raportat? Folosește list_updates.', asteapta: ['list_updates'] },
-]
 
 export interface RaportVerificare {
   la: string
-  total: number
-  pass: number
-  detalii: Array<{ nume: string; pass: boolean; motiv: string }>
+  tabel: RandTabel[]
+  rezumat: { totalSkill: number; merg: number; nuMerg: number; efectReal: number }
+  prinChat: { pass: number; total: number }
 }
 
-/** O trecere a verificării integrale. Întoarce raportul măsurat (sau null dacă
- *  e sărită — autonomie oprită / plafon atins). */
+function pare_eroare(out: string): boolean {
+  return /"error"|\beroare\b|\berror\b|not found|nesuportat|necunoscut/i.test(out.slice(0, 240))
+}
+
+/** O trecere: tabelul complet peste registru + bateria prin creier. */
 export async function verificareIntegrala(): Promise<RaportVerificare | null> {
   const la = new Date().toISOString()
   if (!(await autonomActiv().catch(() => false)) || (await isOpsPaused().catch(() => false))) return null
   const pl = await plafonConstructor().catch(() => ({ activ: false, plafon: 0, cheltuit: 0 }))
   if (pl.activ && pl.cheltuit >= pl.plafon) return null
 
-  const detalii: RaportVerificare['detalii'] = []
-  for (const c of BATERIE) {
-    const chemate: Array<{ name: string; ok: boolean }> = []
-    // Dispecer înfășurat: MĂSOARĂ fiecare chemare și BLOCHEAZĂ orice nu e citire.
-    const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
-      if (!NUME_CITIRE.has(name)) return JSON.stringify({ error: 'unealtă blocată în verificare (doar citire)' })
-      const out = await uneltele(name, args).catch((e: Error) => JSON.stringify({ error: e.message }))
-      chemate.push({ name, ok: !/error|eroare|"error"/i.test(out.slice(0, 200)) })
-      return out
-    }
-    const text = await brainCompleteWithTools(c.comanda, UNELTE_CITIRE, exec, { maxRounds: 3, maxTokens: 800 }).catch(() => '')
-
-    const potrivit = chemate.find((x) => c.asteapta.includes(x.name))
-    const pass = !!potrivit && potrivit.ok
-    const motiv = pass
-      ? `${potrivit!.name} a răspuns ok`
-      : potrivit
-        ? `${potrivit.name} a întors eroare`
-        : chemate.length
-          ? `a chemat ${chemate.map((x) => x.name).join(', ')} în loc de ${c.asteapta.join('/')}`
-          : text
-            ? 'n-a chemat nicio unealtă (doar text)'
-            : 'chatul n-a răspuns deloc'
-    detalii.push({ nume: c.nume, pass, motiv })
-    if (!pass) {
-      await recordSimptomLive('verificare-picata', `verificare integrală „${c.nume}": ${motiv} — comanda: ${c.comanda.slice(0, 90)}`).catch(() => {})
+  // ── 1. TABELUL COMPLET peste TOT registrul de skill-uri ────────────────────
+  const toate = [...new Set([...SHARED_ADMIN_TOOLS, ...USER_SCOPED_TOOLS, ...BROWSER_NUME])].sort()
+  const tabel: RandTabel[] = []
+  for (const skill of toate) {
+    if (SAFE_INVOKE.has(skill)) {
+      const out = await uneltele(skill, ARG_IMPLICIT[skill]).catch((e: Error) => JSON.stringify({ error: e.message }))
+      const ok = !pare_eroare(out)
+      tabel.push({ skill, tip: 'citire', status: ok ? 'merge' : 'nu merge', motiv: ok ? 'răspuns ok' : out.slice(0, 120) })
+      if (!ok) await recordSimptomLive('verificare-picata', `skill „${skill}" nu merge: ${out.slice(0, 120)}`).catch(() => {})
+    } else {
+      tabel.push({ skill, tip: 'efect-real', status: 'cablat', motiv: 'efect real — la vedere, neexecutat pe prod' })
     }
   }
 
-  const pass = detalii.filter((d) => d.pass).length
-  const raport: RaportVerificare = { la, total: BATERIE.length, pass, detalii }
+  // ── 2. BATERIA PRIN CREIER (routing-ul chatului ajunge la unealtă?) ────────
+  let pass = 0
+  for (const c of BATERIE) {
+    const chemate: Array<{ name: string; ok: boolean }> = []
+    const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
+      if (!SAFE_INVOKE.has(name)) return JSON.stringify({ error: 'unealtă blocată în verificare (doar citire)' })
+      const out = await uneltele(name, args).catch((e: Error) => JSON.stringify({ error: e.message }))
+      chemate.push({ name, ok: !pare_eroare(out) })
+      return out
+    }
+    const text = await brainCompleteWithTools(c.comanda, UNELTE_CITIRE, exec, { maxRounds: 3, maxTokens: 800 }).catch(() => '')
+    const potrivit = chemate.find((x) => c.asteapta.includes(x.name))
+    const okChat = !!potrivit && potrivit.ok
+    if (okChat) pass += 1
+    else {
+      const motiv = potrivit ? `${potrivit.name} a întors eroare` : chemate.length ? `a chemat ${chemate.map((x) => x.name).join(', ')}` : text ? 'doar text, nicio unealtă' : 'chatul n-a răspuns'
+      await recordSimptomLive('verificare-picata', `prin chat „${c.nume}": ${motiv} — comanda: ${c.comanda.slice(0, 80)}`).catch(() => {})
+    }
+  }
+
+  const rezumat = {
+    totalSkill: tabel.length,
+    merg: tabel.filter((r) => r.status === 'merge').length,
+    nuMerg: tabel.filter((r) => r.status === 'nu merge').length,
+    efectReal: tabel.filter((r) => r.status === 'cablat').length,
+  }
+  const raport: RaportVerificare = { la, tabel, rezumat, prinChat: { pass, total: BATERIE.length } }
   await saveKv('verificare:integrala', JSON.stringify(raport)).catch(() => {})
   return raport
 }

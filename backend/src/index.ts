@@ -502,7 +502,13 @@ try {
   // comandă picată. La 6h (prima la 10 min după boot), gate pe autonomie+plafon.
   const verifica = async (): Promise<void> => {
     const r = await verificareIntegrala().catch(() => null)
-    if (r) app.log.info(`verificare-integrală: ${r.pass}/${r.total} comenzi pass`)
+    if (r) {
+      app.log.info(
+        `verificare-integrală: ${r.rezumat.merg} merg / ${r.rezumat.nuMerg} NU merg / ` +
+          `${r.rezumat.efectReal} efect-real, din ${r.rezumat.totalSkill} skill-uri; ` +
+          `prin chat ${r.prinChat.pass}/${r.prinChat.total}`,
+      )
+    }
   }
   setTimeout(() => {
     void verifica()
