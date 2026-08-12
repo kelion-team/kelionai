@@ -1,4 +1,10 @@
-// ── ÎNTRERUPĂTORUL MOTOARELOR AUTONOME — OFF BY DEFAULT (Adrian, 9 aug 2026) ──
+// ── ÎNTRERUPĂTORUL MOTOARELOR AUTONOME — ON BY DEFAULT (owner, 12 aug 2026) ───
+// ORDIN NOU (12 aug, verbatim: „dă drumul la autonomie"): default-ul e ON,
+// anulând ordinul din 9 aug de mai jos. Plafonul de $10/zi rămâne activ.
+// Istoricul de mai jos e păstrat ca CONTEXT (de ce a existat frâna), nu ca stare
+// curentă — ordinul valabil e ON, sus.
+//
+// ── (VECHI, 9 aug 2026 — context) DE CE A EXISTAT FRÂNA OFF ──────────────────
 //
 // Ownerul, cu creditul scăzând fără să atingă nimic: „nu am folosit 1 sec de la
 // ultima alimentare cu credit… clar altceva arde". MĂSURAT: buclele autonome
@@ -22,10 +28,15 @@ import { loadKv, saveKv } from '../db.js'
 
 export const CHEIE_AUTONOM = 'autonom:activ'
 
-/** Sunt PORNITE motoarele autonome? DEFAULT OFF — orice ≠ '1' înseamnă oprit
- *  (inclusiv cheia inexistentă sau baza necitibilă: „nu știu" = nu ard). */
+/** Sunt PORNITE motoarele autonome? DEFAULT ON din 12 aug 2026 (owner, verbatim:
+ *  „dă drumul la autonomie", ordin repetat). Cheia lipsă sau orice ≠ '0'/'false'
+ *  = PORNIT; '0' din admin = oprit. EXCEPȚIE de siguranță: baza NECITIBILĂ
+ *  (eroare) = OFF — „nu știu starea" = nu pornesc pe orb la o cădere de DB.
+ *  Plafonul de bani ($10/zi, `plafonConstructor`) rămâne activ ca protecție. */
 export async function autonomActiv(): Promise<boolean> {
-  return (await loadKv(CHEIE_AUTONOM).catch(() => null)) === '1'
+  const v = await loadKv(CHEIE_AUTONOM).catch(() => '__eroare__')
+  if (v === '__eroare__') return false
+  return v !== '0' && v !== 'false'
 }
 
 /** Pornește/oprește motoarele autonome (admin). `true` = pornit până când e
