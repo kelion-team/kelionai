@@ -122,6 +122,28 @@ jobs:
             fi
           '
 
+          # CONSTRUCTORUL PE DeepInfra, PERMANENT (12 aug). RunPod serverless nu
+          # servea modelul de 30B (pornire la rece ~6 min + apoi 500 la inferență,
+          # măsurat) → mutat pe DeepInfra găzduit (Qwen3-Coder-480B, răspuns <1s).
+          # URL-ul + modelul NU sunt secrete, dar stăteau ca secrete VECHI (RunPod)
+          # în GitHub și reveneau la fiecare rulare. Le FORȚĂM aici, după scriere,
+          # ca vps-set-env să nu mai poată da constructorul înapoi pe RunPod. Cheia
+          # rămâne din secretul CONSTRUCTOR_DEEPSEEK_KEY (reală, pusă de owner).
+          $SSH '
+            set -e
+            f=/root/kelion/kelionai.env
+            touch "$f"; chmod 600 "$f"
+            for kv in \
+              "CONSTRUCTOR_DEEPSEEK_URL=https://api.deepinfra.com/v1/openai/chat/completions" \
+              "CONSTRUCTOR_DEEPSEEK_MODEL=Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo"; do
+              name="${kv%%=*}"
+              grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
+              printf "%s\n" "$kv" >> "$f.tmp"
+              mv "$f.tmp" "$f"; chmod 600 "$f"
+              echo "  FORȚAT pe DeepInfra: $name"
+            done
+          '
+
           if [ "${RESTART:-true}" = "true" ]; then
             echo "== Repornesc containerul ca să încarce env-ul nou (fără rebuild) =="
             $SSH '

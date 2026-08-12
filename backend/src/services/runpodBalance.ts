@@ -11,13 +11,20 @@
 // (regula #1: o citire imposibilă nu se prezintă ca „£0.00").
 export interface RunpodBalance {
   ok: boolean
-  /** Soldul preplătit, în USD (cât mai ai de cheltuit — plafonul dur de faliment). */
+  /** Furnizorul creierului constructorului, dedus din URL: 'RunPod' / 'DeepInfra'
+   *  / hostname. Afișat pe pastilă ca nume real (nu mai scrie „RunPod" fix). */
+  provider?: string
+  /** Endpoint-ul RĂSPUNDE (cheia validă). Pentru furnizorii care NU expun sold
+   *  prin API (ex. DeepInfra — verificat 12 aug: billing/balance = 404), ăsta e
+   *  semnalul afișat (✓/⚠) în locul unei cifre pe care nu o putem citi. */
+  live?: boolean
+  /** Soldul preplătit, în USD — DOAR la furnizorii care-l expun (RunPod). */
   balanceUsd?: number
   /** Plafonul de rată permis ($/oră) — RunPod nu te lasă peste. */
   spendLimitPerHr?: number
   /** Cât cheltuiești ACUM ($/oră). 0 = placa stinsă (£0). */
   currentSpendPerHr?: number
-  /** Motivul, când nu s-a putut citi (not_runpod / not_configured / http_* / rețea). */
+  /** Motivul, când nu s-a putut citi (not_configured / http_* / rețea). */
   error?: string
 }
 
@@ -30,31 +37,62 @@ const TTL_MS = 60_000
 export async function getRunpodBalance(force = false): Promise<RunpodBalance> {
   const key = (process.env.CONSTRUCTOR_DEEPSEEK_KEY ?? '').trim()
   const url = (process.env.CONSTRUCTOR_DEEPSEEK_URL ?? '').trim()
-  if (!/runpod\.ai/i.test(url)) return { ok: false, error: 'not_runpod' }
-  if (!key) return { ok: false, error: 'not_configured' }
+  if (!key || !url) return { ok: false, error: 'not_configured' }
   if (!force && cache && Date.now() - cache.la < TTL_MS) return cache.val
-  try {
-    const r = await fetch('https://api.runpod.io/graphql', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify({ query: 'query { myself { clientBalance spendLimit currentSpendPerHr } }' }),
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!r.ok) return { ok: false, error: `http_${r.status}` }
-    const j = (await r.json()) as {
-      data?: { myself?: { clientBalance?: number; spendLimit?: number; currentSpendPerHr?: number } }
+
+  const esteRunpod = /runpod\.ai/i.test(url)
+  const esteDeepInfra = /deepinfra\.com/i.test(url)
+  const provider = esteRunpod ? 'RunPod' : esteDeepInfra ? 'DeepInfra' : (url.match(/^https?:\/\/([^/]+)/i)?.[1] ?? 'endpoint')
+  const eroareRetea = (e: unknown): RunpodBalance => ({ ok: false, provider, live: false, error: `retea: ${String((e as Error)?.message ?? e).slice(0, 80)}` })
+
+  // RunPod EXPUNE soldul (GraphQL myself.clientBalance) — cifră CITITĂ, nu estimată.
+  if (esteRunpod) {
+    try {
+      const r = await fetch('https://api.runpod.io/graphql', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+        body: JSON.stringify({ query: 'query { myself { clientBalance spendLimit currentSpendPerHr } }' }),
+        signal: AbortSignal.timeout(8000),
+      })
+      if (!r.ok) return { ok: false, provider, live: false, error: `http_${r.status}` }
+      const j = (await r.json()) as {
+        data?: { myself?: { clientBalance?: number; spendLimit?: number; currentSpendPerHr?: number } }
+      }
+      const m = j?.data?.myself
+      if (!m || typeof m.clientBalance !== 'number') return { ok: false, provider, live: false, error: 'raspuns_neinteles' }
+      const val: RunpodBalance = {
+        ok: true,
+        provider,
+        live: true,
+        balanceUsd: m.clientBalance,
+        spendLimitPerHr: typeof m.spendLimit === 'number' ? m.spendLimit : undefined,
+        currentSpendPerHr: typeof m.currentSpendPerHr === 'number' ? m.currentSpendPerHr : undefined,
+      }
+      cache = { la: Date.now(), val }
+      return val
+    } catch (e) {
+      return eroareRetea(e)
     }
-    const m = j?.data?.myself
-    if (!m || typeof m.clientBalance !== 'number') return { ok: false, error: 'raspuns_neinteles' }
-    const val: RunpodBalance = {
-      ok: true,
-      balanceUsd: m.clientBalance,
-      spendLimitPerHr: typeof m.spendLimit === 'number' ? m.spendLimit : undefined,
-      currentSpendPerHr: typeof m.currentSpendPerHr === 'number' ? m.currentSpendPerHr : undefined,
-    }
-    cache = { la: Date.now(), val }
-    return val
-  } catch (e) {
-    return { ok: false, error: `retea: ${String((e as Error)?.message ?? e).slice(0, 80)}` }
   }
+
+  // Furnizor GĂZDUIT (ex. DeepInfra): NU expune sold prin API (măsurat 12 aug:
+  // billing/balance = 404; /v1/me dă doar identitatea). Nu inventăm o cifră
+  // (regula #1) — verificăm DOAR că servește, GRATIS, pe /v1/me (cheie validă →
+  // 200). Soldul rămâne pe dashboard-ul furnizorului. Alt endpoint necunoscut →
+  // „configurat" (cheie + URL prezente), fără ping, ca să nu ghicim o rută gratuită.
+  if (esteDeepInfra) {
+    try {
+      const origin = url.match(/^(https?:\/\/[^/]+)/i)?.[1] ?? 'https://api.deepinfra.com'
+      const r = await fetch(`${origin}/v1/me`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) })
+      const val: RunpodBalance = { ok: r.ok, provider, live: r.ok, error: r.ok ? undefined : `http_${r.status}` }
+      cache = { la: Date.now(), val }
+      return val
+    } catch (e) {
+      return eroareRetea(e)
+    }
+  }
+
+  const val: RunpodBalance = { ok: true, provider, live: true }
+  cache = { la: Date.now(), val }
+  return val
 }

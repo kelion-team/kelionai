@@ -244,10 +244,13 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
         Gemini {geminiEticheta}
       </span>
       {r && (
-        <span title={r.live
-          ? `sold RunPod (placa lucrătorului): $${(r.balanceUsd ?? 0).toFixed(2)} · rată acum $${(r.ratePerHr ?? 0).toFixed(3)}/h · plafon $${r.limitPerHr ?? '?'}/h`
-          : `soldul RunPod nu se poate citi (${r.error ?? 'necunoscut'})`}>
-          RunPod {r.live ? `$${(r.balanceUsd ?? 0).toFixed(2)}` : '⚠'}
+        <span title={
+          r.balanceUsd != null
+            ? `sold ${r.provider ?? ''} (placa lucrătorului): $${r.balanceUsd.toFixed(2)} · rată acum $${(r.ratePerHr ?? 0).toFixed(3)}/h · plafon $${r.limitPerHr ?? '?'}/h`
+            : r.live
+              ? `${r.provider ?? 'creierul constructorului'} servește — soldul se vede pe dashboard-ul furnizorului (nu-l dă prin API)`
+              : `${r.provider ?? 'creierul constructorului'} nu răspunde (${r.error ?? 'necunoscut'})`}>
+          {r.provider ?? 'Constructor'} {r.balanceUsd != null ? `$${r.balanceUsd.toFixed(2)}` : (r.live ? '✓' : '⚠')}
         </span>
       )}
       {edit ? (

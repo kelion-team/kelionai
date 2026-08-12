@@ -468,6 +468,8 @@ export interface BrainCredit {
      *  scrie „RunPod ⚠", NICIODATĂ „RunPod 0". `balanceUsd` = soldul preplătit
      *  (plafonul dur de faliment: nu poți cheltui peste el). */
     runpod?: {
+      /** Furnizorul creierului constructorului: 'RunPod' / 'DeepInfra' / hostname. */
+      provider?: string
       live: boolean
       balanceUsd?: number
       ratePerHr?: number

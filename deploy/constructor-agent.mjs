@@ -1211,10 +1211,6 @@ async function main() {
   // vadă negru pe alb pe ce rulează constructorul — RunPod (Qwen3-Coder).
   // modelServit din răspuns cară aceeași informație în raport.
   log(`creier constructor: ${ESTE_RUNPOD ? 'RunPod' : 'endpoint găzduit'} — ${RUNPOD_MODEL || '(model nesetat)'}${(RUNPOD_KEY && RUNPOD_URL) ? '' : ' — ATENȚIE: neconfigurat (cheie/URL lipsă), primul ordin se oprește (fără rezervă)'}`)
-  // CREIERUL ORDINULUI (3 aug — extirparea OpenRouter): Gemini, unic, pe cheia
-  // ownerului. Marcajul „Fable 5" din text nu mai pornește nimic (creierul
-  // plătit prin OpenRouter a dispărut) — alegerea e scrisă în jurnal.
-  log(`creier: google-direct/${GEMINI_MODEL} (cheia Gemini a ownerului) — unic, fără scară de rezervă`)
 
   // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
   // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
@@ -1314,7 +1310,7 @@ async function main() {
         // plătit, niciodată"): ordinul eșuează onest, cu diagnostic.
         if (pasiSterili >= MAX_STERILE) {
           throw new Error(
-            `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (creier: google-direct/${GEMINI_MODEL})`,
+            `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (creier: ${RUNPOD_MODEL || 'constructor'})`,
           )
         }
         // Ne oprim ÎNAINTE de `timeout 1800` din constructor-worker.sh, ca să mai
@@ -1490,8 +1486,8 @@ async function main() {
     log(`ramura ${branch} împinsă`)
 
     // CREIERUL, SCRIS ÎN PR (regula din 2 aug: alegerea modelului e VIZIBILĂ).
-    // Gemini nu itemizează cost per apel — se raportează DOAR tokenii măsurați.
-    const linieCreier = `Creier folosit: Gemini (google-direct/${GEMINI_MODEL}, cheia ownerului) · tokeni: ${tokens}`
+    // Furnizorul nu itemizează cost per apel — se raportează DOAR tokenii măsurați.
+    const linieCreier = `Creier folosit: ${ESTE_RUNPOD ? 'RunPod' : 'endpoint găzduit'}/${RUNPOD_MODEL} · tokeni: ${tokens}`
     const prUrl = await deschidePR(
       titlu,
       `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, toate cele 7 porți rulate în atelier: tsc, teste, build, jscpd, exporturi, sintaxă, boot pe dist). Se îmbină singur DOAR pe poartă verde; pe roșu rămâne deschis cu problemele raportate.`,
