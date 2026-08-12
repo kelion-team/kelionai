@@ -7,24 +7,38 @@ import { brain } from './brain.js'
 // Memory runs on the default chat model (Gemini direct — OpenRouter extirpat, 3 aug).
 const MEMORY_MODEL = config.brain.chatDefault
 
-export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
-  const recent = await getMemories(email, 40, agent)
-  let mems = recent
-  if (hint.trim()) {
-    const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
-    const [relevant, semantic] = await Promise.all([
-      searchMemories(email, agent, words, 12),
-      semanticMemories(email, agent, hint, 8),
-    ])
-    const seen = new Set(recent.map((m) => m.content))
-    mems = [...recent]
-    for (const m of [...relevant, ...semantic]) {
-      if (!seen.has(m.content)) {
-        seen.add(m.content)
-        mems.push(m)
-      }
+/** Aduce memoriile unui agent: cele recente + (când e `hint`) cele relevante pe
+ *  cuvinte + cele semantice, dedup pe conținut păstrând ordinea. Sursă UNICĂ
+ *  pentru ambele recall-uri (general 'kelion' și trading 'tranzactii') — înainte
+ *  fiecare avea propria copie a aceleiași aduceri (dublură prinsă de jscpd). */
+async function aduMemorii(
+  email: string,
+  agent: string,
+  hint: string,
+  recentN: number,
+  cuvinteN: number,
+  semanticN: number,
+): Promise<Awaited<ReturnType<typeof getMemories>>> {
+  const recent = await getMemories(email, recentN, agent)
+  if (!hint.trim()) return recent
+  const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
+  const [relevant, semantic] = await Promise.all([
+    searchMemories(email, agent, words, cuvinteN),
+    semanticMemories(email, agent, hint, semanticN),
+  ])
+  const seen = new Set(recent.map((m) => m.content))
+  const mems = [...recent]
+  for (const m of [...relevant, ...semantic]) {
+    if (!seen.has(m.content)) {
+      seen.add(m.content)
+      mems.push(m)
     }
   }
+  return mems
+}
+
+export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
+  const mems = await aduMemorii(email, agent, hint, 40, 12, 8)
   if (mems.length === 0) return ''
   const lines = mems.map((m) => `- ${m.content}`).join('\n')
   return (
@@ -44,23 +58,7 @@ export async function recallMemories(email: string, agent = 'kelion', hint = '')
  *  ecran. Framing distinct: astea-s discuții de trading, nu fapte durabile
  *  despre om. Gol când nu există nimic măsurat — nu inventăm un istoric. */
 export async function recallMemoriiTranzactii(email: string, hint = ''): Promise<string> {
-  const recent = await getMemories(email, 20, 'tranzactii')
-  let mems = recent
-  if (hint.trim()) {
-    const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
-    const [relevant, semantic] = await Promise.all([
-      searchMemories(email, 'tranzactii', words, 10),
-      semanticMemories(email, 'tranzactii', hint, 6),
-    ])
-    const seen = new Set(recent.map((m) => m.content))
-    mems = [...recent]
-    for (const m of [...relevant, ...semantic]) {
-      if (!seen.has(m.content)) {
-        seen.add(m.content)
-        mems.push(m)
-      }
-    }
-  }
+  const mems = await aduMemorii(email, 'tranzactii', hint, 20, 10, 6)
   if (mems.length === 0) return ''
   const lines = mems.map((m) => `- ${m.content}`).join('\n')
   return (
