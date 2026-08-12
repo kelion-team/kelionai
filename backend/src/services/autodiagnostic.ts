@@ -33,43 +33,51 @@ const TTL_MS = 45_000
 
 /** Poza SINCRONĂ a defectelor (non-blocantă). Dacă e veche, pornește o
  *  reîmprospătare în fundal și întoarce ultima poză cunoscută — gata pentru tura
- *  următoare, fără să adauge latență turei curente. */
+ *  următoare, fără să adauge latență turei curente. Pentru creier (chat.ts). */
 export function problemeGlobaleCache(): ProblemaKelion[] {
-  if (!cache || Date.now() - cache.la > TTL_MS) void reimprospateazaProbleme()
+  if (!cache || Date.now() - cache.la > TTL_MS) {
+    if (!reimprospatareInCurs) {
+      reimprospatareInCurs = true
+      void computeaza().finally(() => {
+        reimprospatareInCurs = false
+      })
+    }
+  }
   return cache?.val ?? []
 }
 
-/** Reconstruiește poza defectelor din surse reale. Rulează în fundal. */
-export async function reimprospateazaProbleme(): Promise<void> {
-  if (reimprospatareInCurs) return
-  reimprospatareInCurs = true
-  try {
-    const out: ProblemaKelion[] = []
-    // Erori de server: nivel error+ (50) din jurnalul pino in-memory.
-    for (const e of recentLogs(50, 15)) {
-      const t = String(e.msg ?? '').slice(0, 220).trim()
-      if (!t) continue
-      out.push({ sursa: 'server', text: t, ...explicaEroare(t) })
-    }
-    // Ordine de build eșuate (constructorul) — best-effort, nu blochează restul.
-    const jobs = await listBuildJobs(15)
-      .then((j) => j ?? [])
-      .catch(() => [])
-    for (const j of jobs.filter((x) => x.status === 'failed')) {
-      out.push({
-        sursa: 'ordin',
-        text: `ordinul de build #${j.id}: „${String(j.orderText ?? '').slice(0, 100)}"`,
-        ceEste:
-          'Un ordin de construcție a eșuat definitiv. Cauza e în jurnalul constructorului (creier indisponibil, o poartă roșie, sau un pas care n-a mers) — se poate reanaliza și repune.',
-        severitate: 'important',
-        categorie: 'Constructor',
-      })
-    }
-    out.sort((a, b) => rangSeveritate(a.severitate) - rangSeveritate(b.severitate))
-    cache = { la: Date.now(), val: out }
-  } finally {
-    reimprospatareInCurs = false
+/** Poza PROASPĂTĂ (așteaptă citirea) — pentru panoul de admin, unde ownerul vrea
+ *  starea de ACUM, nu una veche de cache. Actualizează și cache-ul. */
+export async function problemeGlobaleAcum(): Promise<ProblemaKelion[]> {
+  return computeaza()
+}
+
+/** Reconstruiește poza defectelor din surse reale. */
+async function computeaza(): Promise<ProblemaKelion[]> {
+  const out: ProblemaKelion[] = []
+  // Erori de server: nivel error+ (50) din jurnalul pino in-memory.
+  for (const e of recentLogs(50, 15)) {
+    const t = String(e.msg ?? '').slice(0, 220).trim()
+    if (!t) continue
+    out.push({ sursa: 'server', text: t, ...explicaEroare(t) })
   }
+  // Ordine de build eșuate (constructorul) — best-effort, nu blochează restul.
+  const jobs = await listBuildJobs(15)
+    .then((j) => j ?? [])
+    .catch(() => [])
+  for (const j of jobs.filter((x) => x.status === 'failed')) {
+    out.push({
+      sursa: 'ordin',
+      text: `ordinul de build #${j.id}: „${String(j.orderText ?? '').slice(0, 100)}"`,
+      ceEste:
+        'Un ordin de construcție a eșuat definitiv. Cauza e în jurnalul constructorului (creier indisponibil, o poartă roșie, sau un pas care n-a mers) — se poate reanaliza și repune.',
+      severitate: 'important',
+      categorie: 'Constructor',
+    })
+  }
+  out.sort((a, b) => rangSeveritate(a.severitate) - rangSeveritate(b.severitate))
+  cache = { la: Date.now(), val: out }
+  return out
 }
 
 /** Bloc compact pentru promptul creierului. Listă goală → șir gol (nimic de spus). */

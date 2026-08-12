@@ -519,6 +519,42 @@ export async function fetchGaps(all = false): Promise<CapabilityGap[] | null> {
   }
 }
 
+// ── LISTA DE ERORI, CE E FIECARE (Adrian, 12 aug) ──────────────────────────────
+// Fața vizuală a autodiagnosticului: erorile din browser (grupate) + defectele de
+// sistem, fiecare cu „ce este". null = citirea a EȘUAT (nu confunda „n-am putut
+// citi" cu „nicio eroare" — tiparul tabului admin, 3 aug).
+export type SeveritateEroare = 'critic' | 'important' | 'minor'
+export interface EroareBrowser {
+  text: string
+  ceEste: string
+  severitate: SeveritateEroare
+  categorie: string
+  cate: number
+  cine: string | null
+  cand: string
+}
+export interface ProblemaSistem {
+  sursa: 'server' | 'ordin'
+  text: string
+  ceEste: string
+  severitate: SeveritateEroare
+  categorie: string
+}
+export interface EroriAdmin {
+  browser: EroareBrowser[]
+  sistem: ProblemaSistem[]
+}
+export async function fetchErori(): Promise<EroriAdmin | null> {
+  try {
+    const r = await fetch('/api/admin/erori', { credentials: 'include' })
+    if (!r.ok) return null
+    const j = (await r.json()) as Partial<EroriAdmin>
+    return { browser: j.browser ?? [], sistem: j.sistem ?? [] }
+  } catch {
+    return null
+  }
+}
+
 // (resolveGap — SCOS 10 aug: cod mort după curățarea adminului #959, niciun apelant.)
 
 // Registered voiceprints (admin only).
