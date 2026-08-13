@@ -151,49 +151,101 @@ export default function CameraView({
       }
     }
 
-    captureRef.current = () => {
-      const v = videoRef.current
-      // The frame is only real once the camera has actually decoded a picture.
-      // videoWidth alone isn't enough — readyState < 2 (HAVE_CURRENT_DATA) means
-      // no frame is painted yet, and drawImage would grab a BLACK rectangle.
-      if (!v || !v.videoWidth || v.readyState < 2) return null
-      // 512, nu 768 (10 aug — „chat audio crăpat" pe voce+cameră): `toDataURL`
-      // e o encodare JPEG SINCRONĂ; costul crește cu pixelii. La 768² ținea firul
-      // 50–134 ms și înfometa redarea vocii → audio crăpat + barge-in-uri false.
-      // 512² = ~44% din pixeli → ~jumătate de blocaj, cu Kelion vede la fel de bine.
-      // CALITATE ADAPTIVĂ LA ȚEAVĂ (12 aug): pe 4G/Wi-Fi rămâne 512/0.6; pe
-      // 3G/2G scade dimensiunea + calitatea JPEG, ca vederea să treacă și pe
-      // țeavă slabă (citit LIVE la fiecare cadru → comută din mers, fără re-render).
-      const cal = calitateCamera(getTeava())
-      const maxDim = cal.maxDim
-      const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight))
-      const w = Math.round(v.videoWidth * scale)
-      const h = Math.round(v.videoHeight * scale)
-      if (panzaMare.width !== w) panzaMare.width = w
-      if (panzaMare.height !== h) panzaMare.height = h
-      const ctx = panzaMare.getContext('2d')
-      if (!ctx) return null
+    // ── CAPTURĂ NON-BLOCANTĂ (owner, 13 aug, log live: „captare cadre cameră a
+    // ținut firul 8720 ms — repară să nu mai am așa ceva"). `toDataURL` e o
+    // encodare JPEG + citire GPU→CPU SINCRONĂ: când GPU-ul e sufocat (avatar +
+    // face-api + o pagină browser pe monitor) blochează firul principal SECUNDE,
+    // iar lip-sync-ul/vocea sar. Fixul din #1053 (pauză cât VORBEȘTE Kelion) nu
+    // acoperea cazul „tăcut, dar creierul așteaptă serverul 18s". Acum encode-ul e
+    // ASINCRON, în afara firului: `createImageBitmap` (redimensionare off-thread) →
+    // `OffscreenCanvas.convertToBlob` (encode async) → dataURL. captureRef întoarce
+    // INSTANT ultimul cadru gata — nu mai blochează niciodată firul.
+    let ultimulCadru: string | null = null
+    let ocupat = false
+    const suportaAsync =
+      typeof createImageBitmap === 'function' && typeof OffscreenCanvas === 'function'
 
-      const lit = masoaraLumina(v, 'none')
-      let filtru = 'none'
-      if (lit !== null) {
-        if (lit === 0) return null // niciun pixel măsurabil — lentila acoperită
-        if (lit < 0.08) {
-          // Scenă întunecată dar nu moartă: boost, ca Kelion să primească un
-          // cadru utilizabil în lumină slabă. Garda pe negru pur rămâne.
-          const boost = lit < 0.02 ? 2.8 : lit < 0.04 ? 2.2 : 1.8
-          filtru = `brightness(${boost}) contrast(${Math.min(1.4, 1 + boost * 0.15)})`
-          const litBoost = masoaraLumina(v, filtru)
-          // Dacă și boostat rămâne practic negru, senzorul nu produce imagine.
-          if (litBoost !== null && litBoost < 0.02) return null
+    const blobLaDataUrl = (b: Blob): Promise<string> =>
+      new Promise((rez, resp) => {
+        const fr = new FileReader()
+        fr.onload = () => rez(String(fr.result))
+        fr.onerror = () => resp(fr.error ?? new Error('citire blob'))
+        fr.readAsDataURL(b)
+      })
+
+    const reincarca = async (): Promise<void> => {
+      const v = videoRef.current
+      // Cadrul e real doar după ce camera a DECODAT o imagine (readyState >= 2);
+      // altfel drawImage ar prinde un dreptunghi negru.
+      if (ocupat || !v || !v.videoWidth || v.readyState < 2) return
+      ocupat = true
+      try {
+        // CALITATE ADAPTIVĂ LA ȚEAVĂ (12 aug): pe 4G/Wi-Fi 512/0.6; pe 3G/2G scade.
+        const cal = calitateCamera(getTeava())
+        const scale = Math.min(1, cal.maxDim / Math.max(v.videoWidth, v.videoHeight))
+        const w = Math.round(v.videoWidth * scale)
+        const h = Math.round(v.videoHeight * scale)
+        // Lumina + boost pe sonda mică 48×27 (sync, ~500× mai ieftin decât cadrul).
+        const lit = masoaraLumina(v, 'none')
+        let filtru = 'none'
+        if (lit !== null) {
+          if (lit === 0) {
+            ultimulCadru = null // lentila acoperită
+            return
+          }
+          if (lit < 0.08) {
+            const boost = lit < 0.02 ? 2.8 : lit < 0.04 ? 2.2 : 1.8
+            filtru = `brightness(${boost}) contrast(${Math.min(1.4, 1 + boost * 0.15)})`
+            const litBoost = masoaraLumina(v, filtru)
+            if (litBoost !== null && litBoost < 0.02) {
+              ultimulCadru = null // și boostat rămâne negru — senzorul nu dă imagine
+              return
+            }
+          }
         }
+        if (suportaAsync) {
+          const bmp = await createImageBitmap(v, {
+            resizeWidth: w,
+            resizeHeight: h,
+            resizeQuality: 'low',
+          })
+          const off = new OffscreenCanvas(w, h)
+          const octx = off.getContext('2d')
+          if (!octx) {
+            bmp.close()
+            return
+          }
+          octx.filter = filtru
+          octx.drawImage(bmp, 0, 0, w, h)
+          bmp.close()
+          const blob = await off.convertToBlob({ type: 'image/jpeg', quality: cal.jpeg })
+          ultimulCadru = await blobLaDataUrl(blob)
+        } else {
+          // Cădere sigură (browsere fără OffscreenCanvas/createImageBitmap): calea
+          // sincronă de dinainte — rară, și pe astea nu rulează avatarul greu.
+          if (panzaMare.width !== w) panzaMare.width = w
+          if (panzaMare.height !== h) panzaMare.height = h
+          const ctx = panzaMare.getContext('2d')
+          if (!ctx) return
+          ctx.filter = filtru
+          ctx.drawImage(v, 0, 0, w, h)
+          ultimulCadru = panzaMare.toDataURL('image/jpeg', cal.jpeg)
+        }
+      } catch {
+        /* un cadru prost nu oprește bucla */
+      } finally {
+        ocupat = false
       }
-      // Cadrul mare: DOAR desen + JPEG — nicio citire de pixeli pe 768px.
-      ctx.filter = filtru
-      ctx.drawImage(v, 0, 0, w, h)
-      return panzaMare.toDataURL('image/jpeg', cal.jpeg)
     }
+
+    // captureRef = citirea INSTANT a ultimului cadru gata (nu atinge GPU-ul, nu
+    // blochează firul); reîmprospătarea se face în fundal la ~1s (ajunge pentru
+    // vedere + faceprint), nu la 4 fps sincron care sufoca firul.
+    captureRef.current = () => ultimulCadru
+    const idReincarca = window.setInterval(() => void reincarca(), 1000)
+    void reincarca()
     return () => {
+      window.clearInterval(idReincarca)
       captureRef.current = null
     }
   }, [captureRef])
