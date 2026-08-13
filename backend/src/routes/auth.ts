@@ -255,8 +255,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         picture: claims.picture ?? '',
         role: roleFor(email),
         locale: claims.locale ?? 'en',
-        googleAccessToken: tokens.access_token ?? '',
-        googleTokenExp: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+        // NU stocăm access-token-ul de la LOGIN ca token Google (owner, 13 aug:
+        // „Kelion nu vede că m-am logat / cere reautorizare"). Login-ul dă DOAR
+        // scope-uri de IDENTITATE (email/profil/openid), FĂRĂ Gmail/Calendar.
+        // Dacă îl țineam (cu exp în viitor), tura de chat îl credea valid, NU
+        // reîmprospăta din refresh-token, iar unealta Gmail îl folosea → 403 →
+        // google_not_connected → „reautorizează" (MĂSURAT: get_recent_emails
+        // picată deși refresh-token-ul e full-scope și valid). Îl lăsăm GOL (exp 0):
+        // tura scoate un access-token cu scope COMPLET din refresh-token-ul salvat.
+        googleAccessToken: '',
+        googleTokenExp: 0,
         // Refresh token restored from the DB → the Google skills keep working
         // without reconnecting at every login.
         googleRefreshToken: savedRefresh,
