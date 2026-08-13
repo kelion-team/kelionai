@@ -2963,7 +2963,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // google-direct). Flag STINS → rămâne fața rapidă, EXACT ca azi. Turele
       // ușoare rămân MEREU pe fața rapidă (primul cuvânt sub 1s). Holder-ul cald +
       // orchestrarea vocii unice = etapa 2.
-      const orchestratorModel =
+      // `let`, nu `const`: dacă creierul PROFUND se epuizează, plasa de mai jos îl
+      // comută pe fața rapidă (orChatModel) pentru o ultimă încercare — reasignabil.
+      let orchestratorModel =
         config.creierDublu && heavyTurn ? `google-direct/${config.modelCreierProfund}` : orChatModel
       // ── VEDEREA E NATIVĂ (3 aug — extirparea OpenRouter a îngropat și
       // „vederea delegată") ────────────────────────────────────────────────────
@@ -3225,6 +3227,33 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         }
       } finally {
         if (slotTinut) elibereazaSlot(slotTinut)
+      }
+      // ── PLASA CREIERULUI PROFUND (owner, 13 aug: „e urgent ca kelion să lucreze
+      // real") ──────────────────────────────────────────────────────────────────
+      // Creierul profund (Pro) e mai deștept, dar și mai expus la rate-limit/eroare.
+      // Dacă s-a epuizat (`!r`) ȘI nimic n-a curs încă la om (`!textFlowed`), cădem
+      // O SINGURĂ dată pe fața rapidă (flash) — o tură de EXECUȚIE nu mai moare pe
+      // mesajul neutru; măcar răspunde. Rulează DOAR pe calea deja pierdută, deci nu
+      // poate strica o tură care mergea (dacă și asta pică, se aruncă eroarea de jos,
+      // exact ca înainte).
+      if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
+        const modelProfund = orchestratorModel
+        orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
+        console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
+        let slotPlasa: string | null = null
+        try {
+          if (iaSlotDacaLiber(orchestratorModel)) slotPlasa = orchestratorModel
+          else if (await asteaptaLaCoada(async () => [orchestratorModel], new Set<string>())) slotPlasa = orchestratorModel
+          if (slotPlasa) {
+            const cand = await runBrainOnce()
+            const textCurat = stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim()
+            if (textCurat || textFlowed || sawVisible) r = cand
+          }
+        } catch (ge) {
+          lastBrainErr = ge
+        } finally {
+          if (slotPlasa) elibereazaSlot(slotPlasa)
+        }
       }
       if (!r) throw (lastBrainErr ?? new Error('brain_gemini_exhausted'))
       markupStrip.flush() // held marker fragments: logged, never shown
