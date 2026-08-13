@@ -462,7 +462,11 @@ export default function AvatarModel() {
     // Lip-sync — the mouth follows the real amplitude of the voice playing now (Chirp
     // 3), smoothed like the blink; MODERATE opening (Adrian once complained that
     // gura se deschide prea mult).
-    mouth.current += (level - mouth.current) * 0.4
+    // Netezire pe DELTA, nu factor fix pe cadru (owner, 13 aug — desincronizarea
+    // feței sub sarcină): la fps mic (firul încărcat) gura urmărește vocea la fel
+    // de repede în timp REAL, nu mai leneșă exact când contează. La un blocaj mare
+    // factorul saturează la 1 (gura se aliniază pe loc, fără overshoot). ~50ms.
+    mouth.current += (level - mouth.current) * (1 - Math.exp(-delta * 20))
     const jawOpen = Math.min(0.5, mouth.current * 0.55)
 
     // The facial micro-expression: envelope in → hold → out, then done.

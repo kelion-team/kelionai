@@ -22,12 +22,19 @@ export default function AvatarScene({
   readonly keyLight?: number
   readonly gl?: { alpha?: boolean }
 }) {
+  // PERF PE MOBIL (owner, 13 aug — „ce desincronizează fața sub sarcină"): pe
+  // telefon (pointer grosier) plafonăm dpr și folosim umbre PCF-soft în loc de
+  // PCSS („percentage" = cel mai scump per cadru), ca GPU-ul să rămână cu rezervă
+  // pentru lip-sync când rulează camera/inferența. Pe desktop rămâne EXACT ca
+  // înainte (aspect neschimbat).
+  const eMobil =
+    typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)')?.matches
   return (
     <>
       <Canvas
-        shadows="percentage"
+        shadows={eMobil ? 'soft' : 'percentage'}
         camera={{ position: camera, fov: 40 }}
-        dpr={[1, 2]}
+        dpr={eMobil ? [1, 1.5] : [1, 2]}
         {...(gl ? { gl } : {})}
       >
         {showBg && <color attach="background" args={[themeBg()]} />}

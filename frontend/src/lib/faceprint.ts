@@ -7,6 +7,8 @@
 //  - chat only takes the latest READY descriptor via getPendingFaceDescriptor()
 //    (instant, waits for no inference) — exactly like voiceFeatures.
 
+import { getVoiceLevel } from './audioIO'
+
 type FaceApi = typeof import('@vladmandic/face-api')
 
 let api: FaceApi | null = null
@@ -92,6 +94,16 @@ export function startFaceSampling(
     let primaMasurata = false
     const tick = async (): Promise<void> => {
       if (stopped) return
+      // NU CONCURA CU AVATARUL CÂT VORBEȘTE KELION (owner, 13 aug — „ce
+      // desincronizează fața sub sarcină"): inferența rulează pe WebGL, pe
+      // ACELAȘI GPU ca avatarul, iar citirea descriptorului forțează o
+      // sincronizare GPU→CPU care blochează firul principal (măsurat în consola
+      // ownerului: fir blocat secunde). Dacă o facem cât gura se mișcă, lip-sync-ul
+      // sare. Cât vorbește, sărim inferența și reîncercăm repede după ce tace.
+      if (getVoiceLevel() > 0.06) {
+        if (!stopped) timer = setTimeout(() => void tick(), 400)
+        return
+      }
       try {
         if (video.videoWidth > 0 && video.readyState >= 2) {
           const scara = Math.min(1, INTRARE_MAX / Math.max(video.videoWidth, video.videoHeight))
