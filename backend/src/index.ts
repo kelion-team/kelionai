@@ -50,6 +50,7 @@ import { tranzactiiRoutes } from './routes/tranzactii.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
+import { constructorViuRoutes } from './routes/constructorViu.js'
 import { jobsRoutes } from './routes/jobs.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive } from './db.js'
 import { getSessionUser } from './session.js'
@@ -313,6 +314,7 @@ await app.register(clientErrorRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 await app.register(pingRoutes)
+await app.register(constructorViuRoutes)
 await app.register(jobsRoutes)
 await app.register(manualRoutes)
 await app.register(enterpriseRoutes)
