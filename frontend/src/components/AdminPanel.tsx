@@ -57,6 +57,8 @@ import {
   fetchPlafon,
   setPlafon,
   type PlafonConstructor,
+  fetchCreditAI,
+  type CreditAIFurnizor,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -204,6 +206,74 @@ function ShareGrid({ title, items }: { title: string; items: { name: string; hre
 // PASTILELE AI, MUTATE ÎN ADMIN (10 aug) — self-contained, cu starea proprie de
 // editare. Creditul Gemini declarat se salvează pe /api/admin/gemini-credit (același
 // endpoint ca vechea pastilă); următorul poll din Stage aduce cifra nouă înapoi.
+// ── BECURILE DE CREDIT AI (owner, 13 aug: „un bec roșu/verde care indică credit
+// sau lipsă de credit, click = reîncărcare; 402 înseamnă că nu are credit") ───
+// Verde = are credit; roșu = fără (402/sold 0 — click ca să adaugi bani); gri =
+// nu pot verifica (necunoscutul NU se maschează în verde — regula #1). Click pe
+// rând = pagina de reîncărcare REALĂ a furnizorului. Starea „roșu pâlpâind"
+// (clasa .bec-rosu.palpaie) e pregătită în CSS pentru auto-alimentarea de pe
+// card (card gol) — vine cu acea piesă, nu de aici.
+function BecuriCredit() {
+  const A = adminStrings()
+  const [rows, setRows] = useState<CreditAIFurnizor[] | null>(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    let viu = true
+    void fetchCreditAI().then((r) => {
+      if (!viu) return
+      if (r) setRows(r)
+      else setErr(true)
+    })
+    return () => {
+      viu = false
+    }
+  }, [])
+  if (err) return <div className="becuri-credit becuri-stare">{A.becuriEroare}</div>
+  if (!rows) return <div className="becuri-credit becuri-stare">{A.becuriLoad}</div>
+  return (
+    <div className="becuri-credit">
+      <div className="becuri-titlu">{A.becuriTitlu}</div>
+      <div className="becuri-lista">
+        {rows.map((f) => {
+          const stare =
+            f.ramas.masurat && f.ramas.valoare
+              ? `${f.ramas.valoare.cantitate} ${f.ramas.valoare.unitate}`
+              : f.bec === 'rosu'
+                ? A.becuriReincarca
+                : f.bec === 'verde'
+                  ? A.becuriServeste
+                  : `${A.becuriNecunoscut}${f.ramas.motiv ? ` — ${f.ramas.motiv}` : ''}`
+          const titlu = f.bec === 'rosu' ? A.becuriReincarca : A.becuriDeschideFactura
+          const continut = (
+            <>
+              <span className={`bec bec-${f.bec}`} aria-hidden="true" />
+              <span className="bec-nume">{f.furnizor}</span>
+              <span className="bec-alim">{f.alimenteaza}</span>
+              <span className="bec-stare">{stare}</span>
+            </>
+          )
+          return f.facturare ? (
+            <a
+              key={f.furnizor}
+              className={`bec-rand bec-rand-${f.bec}`}
+              href={f.facturare}
+              target="_blank"
+              rel="noreferrer"
+              title={titlu}
+            >
+              {continut}
+            </a>
+          ) : (
+            <div key={f.furnizor} className={`bec-rand bec-rand-${f.bec}`} title={titlu}>
+              {continut}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
   const [edit, setEdit] = useState(false)
   const [val, setVal] = useState('')
@@ -1210,6 +1280,9 @@ export default function AdminPanel({
         <CreditAICard brainCredit={brainCredit} />
         {tab === 'finance' && (
           <section className="admin-finance">
+            {/* BECURILE DE CREDIT AI, SUS (owner, 13 aug): unde are nevoie de
+                credit se vede din prima — roșu = fără, click = reîncărcare. */}
+            <BecuriCredit />
             {/* TREI STĂRI, NU DOUĂ (auditul admin, 3 aug): o citire EȘUATĂ nu
             mai e deghizată în „Se încarcă…" fără sfârșit — se declară. */}
             {!finance && !financeFailed && <p className="chat-hint">{A.loading}</p>}

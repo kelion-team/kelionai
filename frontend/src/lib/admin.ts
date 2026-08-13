@@ -49,6 +49,34 @@ export async function fetchFinance(): Promise<Finance | null> {
   }
 }
 
+// ── CREDIT PER FURNIZOR AI, cu BEC (owner, 13 aug) ──────────────────────────
+// Sursa bogată pe care backendul o calcula deja (crediteAI) dar frontendul n-o
+// citea. `bec` vine derivat de pe server (o singură logică, testată): verde =
+// are credit, roșu = fără (402/0), gri = nu pot verifica. `facturare` = pagina
+// de reîncărcare a furnizorului (click-ul becului duce acolo).
+export type BecCredit = 'verde' | 'rosu' | 'gri'
+export interface CreditAIFurnizor {
+  furnizor: string
+  alimenteaza: string
+  cheieConfigurata: boolean
+  ramas: { masurat: boolean; valoare?: { cantitate: number; unitate: string }; motiv?: string }
+  cheltuitLuna: { masurat: boolean; valoare?: { usd: number }; motiv?: string }
+  serveste?: { masurat: boolean; valoare?: { da: boolean; detaliu?: string }; motiv?: string }
+  facturare?: string
+  bec: BecCredit
+}
+
+export async function fetchCreditAI(): Promise<CreditAIFurnizor[] | null> {
+  try {
+    const r = await fetch('/api/admin/credit-ai', { credentials: 'include' })
+    if (!r.ok) return null
+    const j = (await r.json()) as { furnizori: CreditAIFurnizor[] }
+    return Array.isArray(j.furnizori) ? j.furnizori : null
+  } catch {
+    return null
+  }
+}
+
 // CIRCUITUL BANILOR (admin): starea verigilor Stripe→AI + crearea cardului.
 /** The owner's lever: stops / restarts Kelion's autonomy.
  *

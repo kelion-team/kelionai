@@ -35,8 +35,13 @@ const TTL_MS = 60_000
  *  constructorului (CONSTRUCTOR_DEEPSEEK_*). Cache 1 min, ca polling-ul pastilei
  *  (~30s) să nu bată RunPod la fiecare tick. `force` sare peste cache. */
 export async function getRunpodBalance(force = false): Promise<RunpodBalance> {
-  const key = (process.env.CONSTRUCTOR_DEEPSEEK_KEY ?? '').trim()
-  const url = (process.env.CONSTRUCTOR_DEEPSEEK_URL ?? '').trim()
+  // NUMELE DE ENV, ÎMPĂCATE (owner, 13 aug: RunPod „nu apare deloc" în credite):
+  // clientul constructorului acceptă CONSTRUCTOR_RUNPOD_* SAU CONSTRUCTOR_DEEPSEEK_*.
+  // Dacă aici citeam DOAR ..._DEEPSEEK_*, un RunPod pus sub ..._RUNPOD_* ieșea
+  // „not_configured" → becul lui de credit (roșu la 402) NU se arăta deloc, exact
+  // ce l-a lăsat orb pe furnizorul picat. Citim ambele nume, RunPod-ul întâi.
+  const key = (process.env.CONSTRUCTOR_RUNPOD_KEY ?? process.env.CONSTRUCTOR_DEEPSEEK_KEY ?? '').trim()
+  const url = (process.env.CONSTRUCTOR_RUNPOD_URL ?? process.env.CONSTRUCTOR_DEEPSEEK_URL ?? '').trim()
   if (!key || !url) return { ok: false, error: 'not_configured' }
   if (!force && cache && Date.now() - cache.la < TTL_MS) return cache.val
 

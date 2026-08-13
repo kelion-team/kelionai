@@ -424,8 +424,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/credit-ai', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const { crediteAI } = await import('../services/creditAI.js')
-    return reply.send({ furnizori: await crediteAI() })
+    // BECUL per furnizor, derivat pe server (o singură sursă, testabilă): verde =
+    // are credit, roșu = fără (402/0), gri = nu pot verifica. Frontendul doar
+    // desenează culoarea, nu re-judecă starea (două logici ar diverge).
+    const { crediteAI, beculCredit } = await import('../services/creditAI.js')
+    const furnizori = (await crediteAI()).map((c) => ({ ...c, bec: beculCredit(c) }))
+    return reply.send({ furnizori })
   })
 
   app.get('/api/admin/brain-credit', async (req, reply) => {
