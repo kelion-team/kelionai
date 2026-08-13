@@ -2974,60 +2974,72 @@ export default function AdminPanel({
                     </div>
                   ))}
                 </div>
-                {/* The demo probes are DEAD (nothing writes demo_uses anymore) — the
-                list shows only the VISITS, no DEMO badge/flow. */}
+                {/* Rebuilt visitor cards (Adrian, Mar 2026): IP, city, country+flag,
+                photo thumbnail — professional, highly informational layout. */}
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">Vizite recente — profil complet</div>
                   {demosData.recent.length === 0 && <div className="chat-hint">—</div>}
                   {demosData.recent.map((r, i) => (
-                    <div className="vis-row" key={i}>
-                      <div className="vis-main">
-                        <span className="vis-flagline">
-                          <Flag code={r.code} />
-                          <strong>
-                            {r.country || 'Necunoscut'}
-                            {r.region && r.region !== r.city ? ` · ${r.region}` : ''}
-                            {r.city ? ` · ${r.city}` : ''}
-                          </strong>
-                        </span>
-                        <span className={`vis-badge ${r.is_bot ? 'bot' : 'human'}`}>
-                          {r.is_bot ? 'BOT' : 'UMAN'}
-                        </span>
-                        <span className="vis-time">
-                          {new Date(r.started_at).toLocaleString('ro-RO', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
+                    <div className="visitor-card" key={i}>
+                      {/* Photo column */}
+                      <div className="visitor-photo">
+                        {r.photo_url ? (
+                          <img src={r.photo_url} alt="foto vizitator" className="visitor-thumb" />
+                        ) : (
+                          <div className="visitor-no-photo" title="fără fotografie">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <circle cx="12" cy="8" r="4"/>
+                              <path d="M4 22c0-4.4 3.6-8 8-8s8 3.6 8 8"/>
+                            </svg>
+                          </div>
+                        )}
                       </div>
-                      <div className="vis-meta">
-                        <span>{r.ip}</span>
-                        {r.isp && <span>{r.isp}</span>}
-                        <span>
-                          {[r.browser, r.os].filter(Boolean).join(' / ') || '—'}
-                          {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
-                        </span>
-                        {r.lang && <span>limbă {r.lang}</span>}
-                        {/* HIS timezone + how many times he has come (Adrian, Jul 31: „this
-                        field must offer full information about the visit”). */}
-                        {r.tz && (
-                          <span>
-                            {r.tz} · la el era{' '}
-                            {new Date(r.started_at).toLocaleTimeString('ro-RO', {
-                              timeZone: r.tz,
+                      {/* Info column */}
+                      <div className="visitor-info">
+                        <div className="visitor-top">
+                          <span className="visitor-flagline">
+                            <Flag code={r.code} />
+                            <strong>{r.country || 'Necunoscut'}</strong>
+                            {r.city ? ` · ${r.city}` : ''}
+                            {r.region && r.region !== r.city ? `, ${r.region}` : ''}
+                          </span>
+                          <span className={`vis-badge ${r.is_bot ? 'bot' : 'human'}`}>
+                            {r.is_bot ? 'BOT' : 'UMAN'}
+                          </span>
+                          <span className="vis-time">
+                            {new Date(r.started_at).toLocaleString('ro-RO', {
+                              day: 'numeric',
+                              month: 'short',
                               hour: '2-digit',
                               minute: '2-digit',
                             })}
                           </span>
-                        )}
-                        <span>
-                          {r.vizite_anterioare > 0
-                            ? `a ${r.vizite_anterioare + 1}-a vizită`
-                            : 'prima vizită'}
-                        </span>
-                        <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
+                        </div>
+                        <div className="visitor-details">
+                          <span className="visitor-ip" title="IP">{r.ip}</span>
+                          {r.isp && <span>{r.isp}</span>}
+                          <span>
+                            {[r.browser, r.os].filter(Boolean).join(' / ') || '—'}
+                            {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
+                          </span>
+                          {r.lang && <span>limbă {r.lang}</span>}
+                          {r.tz && (
+                            <span>
+                              {r.tz} · la el era{' '}
+                              {new Date(r.started_at).toLocaleTimeString('ro-RO', {
+                                timeZone: r.tz,
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          )}
+                          <span>
+                            {r.vizite_anterioare > 0
+                              ? `a ${r.vizite_anterioare + 1}-a vizită`
+                              : 'prima vizită'}
+                          </span>
+                          <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
+                        </div>
                       </div>
                     </div>
                   ))}
