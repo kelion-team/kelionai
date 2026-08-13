@@ -10,6 +10,33 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — GDPR + AEC + CONSTRUCTOR (poartă calitate) + BECURI pâlpâie. ✅ (PR #1079, LIVE-ul = merge-ul lui Adrian)**
+> Patru cerințe din aceeași zi, pe ramura `claude/reparatie-cu-rosu-uokj4m`:
+> - **GDPR**: poartă blocantă de consimțământ foto (Landing + Stage; refuz = fără
+>   acces; `/credite` și `/manual` publice). „Ce au vizitat" în raport: coloană
+>   `pages` pe `visits`, fiecare pagină își anunță secțiunea, strânse DISTINCT pe
+>   rând; cardul de vizitator arată „a vizitat: …", rândurile vechi spun cinstit
+>   „secțiuni: neînregistrate". Buton admin-only „Golește baza de vizitatori"
+>   (declanșat de owner; șterge doar `visits`; rezultat măsurat).
+> - **AEC half-duplex**: microfonul e fără echoCancellation (ca ieșirea să prindă
+>   Bluetooth) → Kelion își auzea ecoul → „varză". Fix: cât e audibil (redare +
+>   coadă 250ms) se trimite TĂCERE la creier (`vocalLive.ts`). Preț: fără barge-in
+>   vocal cât vorbește (server barge-in oricum OFF). Verificare LIVE = a lui.
+> - **Constructor**: poartă de calitate (`evalueazaOrdin`, pură + testată) — „să
+>   treacă orice ordin?" NU: ordinele goale/vagi/în-afară RESPINSE cu motiv,
+>   ENFORCED în POST (400). AI-uri pe capacitate + credit live (Constructor local,
+>   Jules, Creier 2; roșu ≈ exclus) + panou de evaluare + endpoint `/evalueaza`.
+>   RĂMAS: dispatch explicit la Jules din tab (acum recomandarea e informativă).
+> - **Becuri**: roșul (gol/402) PÂLPÂIE (owner: „când e gol becul pâlpâie roșu").
+> - **Auto-alimentare Revolut — NU e posibilă complet fără om** (măsurat,
+>   `billing.ts`): Revolut Pro n-are API de charge / webhook; linkul e „pull la
+>   tapul userului". Ce EXISTĂ deja (cel mai bun posibil): pre-armarea reîncărcării
+>   la prag + un tap. Auto-charge real = alt procesator (Stripe/mandat) = decizie
+>   de business a owner-ului. NU am inventat o alimentare care nu poate mișca banii.
+> Porți: backend tsc 0 · 1315 teste (145 fișiere) · frontend build 0 · 46 teste ·
+> jscpd 0 · exporturi 0 · sintaxă 0. **Nu pot verifica LIVE** din headless — se
+> confirmă pe telefonul lui, DUPĂ merge-ul PR #1079 pe master.
+
 > **13 aug 2026 — CREIERUL 2 LEGAT LA CONSTRUCTOR (fallback 24/7) + model creier-2 dezînțepenit. ✅**
 > Owner, cu dovadă: „creierul 2 nu e legat la constructor, am verificat… de aia
 > TOATE ordinele sunt eșuate; supervizează 24/7." DOVADA (în cod, regula #2):
