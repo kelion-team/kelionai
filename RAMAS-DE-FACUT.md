@@ -10,6 +10,20 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — BARA DE SUS reorganizată: VPS sub Admin, becurile de credit în locul liber. ✅**
+> Owner (captură bară): „VPS îl pui sub admin, vizibil; și în spațiul rămas pe
+> linia aia pui butoanele astea [becurile]. Trading la useri momentan NU se
+> afișează până nu e gata." FĂCUT: (1) pastila VPS scoasă din bara de sus și
+> mutată în tabul „Sistem (VPS)" cu ACELEAȘI cifre (RAM liber, încărcare ca raport
+> pe nuclee, load average) și același prag roșu — necitibil = „⚠ VPS necitibil",
+> nu zerouri. (2) În locul liber din bară, `BecuriBara` (admin): un rând compact
+> de becuri per AI (verde/roșu/gri din aceeași sursă server ca boardul, fără logică
+> dublată) + numărul de „fără credit"; click → tabul Bani. (3) Trading rămâne DOAR
+> admin (neschimbat); Adaptare CV rămâne la toți (neschimbat). Porți: frontend tsc
+> 0 · 43 teste · build 0 · sintaxă 0.
+> RĂMAS: auto-alimentare Revolut + bec pâlpâind (card gol); constructor autonom
+> (fallback 402 → creier 2 + agenți, aprobat).
+
 > **13 aug 2026 — BECURI DE CREDIT per-furnizor în Bani: „unde arată că are nevoie de credit?" — REZOLVAT (parțial). ✅**
 > Owner: „butonul Bani trebuie redesenat să fie util… un bec roșu/verde care
 > indică credit sau lipsă, click = reîncărcare; 402 = fără credit." CAUZA (măsurat

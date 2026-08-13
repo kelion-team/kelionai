@@ -3868,3 +3868,29 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
 .bec-stare { font-size: 12px; opacity: 0.85; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bec-rand-rosu .bec-stare { color: #e5484d; font-weight: 600; }
 
+/* BECURILE COMPACTE ÎN BARA DE SUS (admin) — în locul lăsat liber de VPS. */
+.becuri-bara { display: inline-flex; align-items: center; gap: 5px; }
+.becuri-bara .bec {
+  width: 9px; height: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
+}
+.becuri-bara.are-rosu { border-color: color-mix(in srgb, #e5484d 55%, var(--border)); }
+.becuri-bara-nr {
+  font-size: 11px; font-weight: 700; color: #e5484d;
+  font-variant-numeric: tabular-nums; margin-left: 1px;
+}
+
+/* CIFRELE VPS, SUB ADMIN (tabul „Sistem (VPS)") — mutate din bara de sus. */
+.vps-resurse {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin: 10px 0 4px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.vps-resurse.vps-critic {
+  border-color: color-mix(in srgb, #e5484d 55%, var(--border));
+  background: color-mix(in srgb, #e5484d 8%, transparent);
+}
+.vps-cifra { font-size: 13px; font-variant-numeric: tabular-nums; }
+.vps-load { opacity: 0.7; }
+.vps-alarma { color: #e5484d; font-weight: 700; }
+
