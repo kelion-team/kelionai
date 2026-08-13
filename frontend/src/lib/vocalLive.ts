@@ -439,7 +439,11 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     }
   }
 
-  ws.onerror = (): void => urcaEroarea('sesiunea vocală a căzut (rețea)')
+  // onerror NU se raportează separat: specificația WebSocket spune că onerror e
+  // întotdeauna urmat de onclose (cu codul și motivul real). Raportarea de aici
+  // fura guardul eroareUrcata și ascundea cauza reală din onclose — utilizatorul
+  // vedea doar „(rețea)" în loc de codul/serverul/Google care a picat cu adevărat.
+  ws.onerror = (): void => { /* onclose preia raportarea */ }
   ws.onclose = (ev: CloseEvent): void => {
     if (inchis) return
     // Motivele numite ale serverului urcă la om, nu mor în consolă.
