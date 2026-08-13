@@ -849,6 +849,18 @@ the risk of diverging. */
      transparent la clickuri — monitorul primește TOT, întotdeauna. */
   pointer-events: none;
 }
+/* CANVASUL three.js ÎNSUȘI (owner, 13 aug: „X nu merge NICĂIERI când Kelion
+   deschide o pagină pe ecran"). `pointer-events:none` pe containerul `.pip` NU se
+   moștenește: `<canvas>` e implicit `auto`, deci rămânea ȚINTĂ de click și înghițea
+   ×-ul/taburile de sub el — mai ales când avatarul e mare/centrat (tab „doc"), unde
+   dreptunghiul canvasului acoperă bara de taburi. Reparațiile din 8/10 aug au pus
+   `none` doar pe container, nu pe canvas — de-aia „nu merge" a supraviețuit. Acum
+   canvasul e și el transparent la click în modul monitor: clicul trece GARANTAT la
+   taburi și la ×. */
+.stage-canvas.pip > canvas,
+.stage-canvas.pip div > canvas {
+  pointer-events: none;
+}
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {
   position: absolute;
@@ -902,6 +914,12 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   color: var(--text);
   font-size: 14px;
   padding: 4px 6px 10px;
+  /* BARA DE TABURI DEASUPRA AVATARULUI (owner, 13 aug: „X nu merge nicăieri").
+     Avatarul e la z-index:1; taburile stăteau la z-index:0 (în workspace-bg), deci
+     canvasul lui era deasupra lor. Cu position:relative + z-index peste avatar,
+     bara de taburi și ×-ul primesc clicul GARANTAT, orice s-ar suprapune. */
+  position: relative;
+  z-index: 3;
 }
 .workspace-tabs {
   display: flex;
