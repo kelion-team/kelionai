@@ -174,15 +174,19 @@ export const config = {
   // nu se încarcă. Serverul↔Google rămâne PCM (Gemini Live cere PCM) — dar aia e
   // bandă de datacenter, nu 3G-ul omului.
   voiceOpus: (process.env.VOICE_OPUS ?? '') === '1',
-  // ── CREIER DUBLU (owner, 13 aug: „două creiere, o singură voce") ─────────────
+  // ── CREIER DUBLU (owner, 13 aug: „două creiere, o singură voce"; „e urgent ca
+  // kelion să lucreze real") ───────────────────────────────────────────────────
   // Fața rapidă (flash) ține discuția caldă + primul cuvânt sub 1s; pe turele
-  // GRELE, creierul din spate = INTELIGENȚĂ REALĂ (Gemini Pro la thinking maxim —
-  // `gemini-3.1-pro-preview`, măsurat 20/20 pe cheia ownerului). STINS din start,
-  // ca `VOICE_OPUS`: cu flagul stins, turele grele rămân EXACT ca azi (flash +
-  // thinking high), zero regresie. Pornit (`CREIER_DUBLU=1`), turele grele merg
-  // pe creierul real; modelul e suprascriabil din env fără publicare.
-  // Etapa 1 = comutarea modelului; holder-ul cald + orchestrarea vocii = etapa 2.
-  creierDublu: (process.env.CREIER_DUBLU ?? '') === '1',
+  // GRELE (inclusiv „ownerul cere o ACȚIUNE" — vezi `heavy` din chat.ts), creierul
+  // din spate = INTELIGENȚĂ REALĂ (Gemini Pro la thinking maxim,
+  // `gemini-3.1-pro-preview`, măsurat 20/20 pe cheia ownerului) — ăsta e leacul
+  // pentru „spune că face și nu execută / fabrică": un model care CHEAMĂ unealta,
+  // nu narează. PORNIT DIN START (owner, 13 aug): turele ușoare rămân pe flash
+  // (conversație caldă, latență mică), doar cele grele urcă pe creierul real. Se
+  // stinge cu `CREIER_DUBLU=0`; modelul e suprascriabil din env fără publicare.
+  // PLASĂ (chat.ts): dacă profundul se epuizează, tura cade O DATĂ pe flash — nu
+  // moare pe mesajul neutru. Etapa 2 (holder cald + orchestrarea vocii) rămâne.
+  creierDublu: (process.env.CREIER_DUBLU ?? '') !== '0',
   modelCreierProfund: process.env.MODEL_CREIER_PROFUND ?? 'gemini-3.1-pro-preview',
   autonomyDailyMax: Math.max(1, Number(process.env.AUTONOMY_DAILY_MAX ?? '20') || 20),
   databaseUrl: env(...ENV_ALIASES.databaseUrl),

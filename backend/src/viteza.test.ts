@@ -29,9 +29,20 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     // pe cele grele cu flagul STINS; cu flagul pornit, turele grele merg pe
     // creierul real (Pro) — care e TOT google-direct, deci invariantul „Gemini
     // peste tot" se păstrează.
-    expect(chat).toMatch(/const orchestratorModel =[\s\S]{0,120}config\.creierDublu && heavyTurn/)
+    // `let` (nu `const`): plasa de mai jos comută modelul pe flash la epuizarea profundului.
+    expect(chat).toMatch(/let orchestratorModel =[\s\S]{0,160}config\.creierDublu && heavyTurn/)
     expect(chat).toMatch(/google-direct\/\$\{config\.modelCreierProfund\}` : orChatModel/)
     expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel/)
+  })
+
+  it('creierul profund are PLASĂ: dacă se epuizează, tura cade pe fața rapidă (nu moare)', () => {
+    // owner, 13 aug: „e urgent ca kelion să lucreze real" — profundul (Pro) e mai
+    // deștept dar mai expus la rate-limit; dacă se epuizează ȘI nimic n-a curs la
+    // om, cădem O DATĂ pe flash (orChatModel), ca turele de execuție să nu moară pe
+    // mesajul neutru. Rulează doar pe calea deja pierdută (`!r && !textFlowed`).
+    expect(chat).toMatch(/CREIER PROFUND EPUIZAT/)
+    expect(chat).toMatch(/orchestratorModel = orChatModel/)
+    expect(chat).toMatch(/if \(!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel\)/)
   })
 
   it('creierul de LUCRU = Gemini direct (regula lui Adrian, 3 aug; măsurat 1,2s + 1,0s cu apel de unealtă corect)', () => {
