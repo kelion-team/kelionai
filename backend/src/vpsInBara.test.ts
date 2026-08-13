@@ -39,7 +39,10 @@ describe('pilula de VPS există și e alimentată', () => {
     // RAM = does anything else FIT on the machine. CPU = can it still CARRY.
     // One without the other answers half the question the pill was asked for.
     expect(bara).toMatch(/VPS \$\{brainCredit\.vps\.liberGb\.toFixed\(1\)\}GB/)
-    expect(bara).toContain('brainCredit.vps.incarcarePct}%')
+    // Încărcarea rămâne afișată din measurătoarea REALĂ (incarcarePct), dar ca
+    // RAPORT peste nuclee (owner, 13 aug: „măsurători mincinoase" — „201%" citit
+    // ca CPU părea imposibil). /100 → „2.0×"; tot numărul măsurat, altă etichetă.
+    expect(bara).toMatch(/brainCredit\.vps\.incarcarePct \/ 100\)\.toFixed\(1\)\}×/)
   })
 
   it('nu adaugă un poller nou — merge pe cererea care exista deja', () => {

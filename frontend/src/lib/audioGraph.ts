@@ -44,7 +44,7 @@ function getAudioContextCtor(): typeof AudioContext | null {
  *  `resume()` fără gest (fire-and-forget) nu ajută. Aici: încercăm resume ACUM
  *  și, dacă nu prinde, îl reluăm la PRIMUL gest (tap/touch/tastă) — apoi ne
  *  retragem singuri. Un singur tap al ownerului deblochează urechea. */
-function deblocheazaAudioLaGest(ctx: AudioContext): void {
+export function deblocheazaAudioLaGest(ctx: AudioContext): void {
   void ctx.resume().catch(() => {})
   const evenimente = ['pointerdown', 'touchstart', 'touchend', 'click', 'keydown']
   const reia = (): void => {

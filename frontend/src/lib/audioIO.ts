@@ -1,4 +1,4 @@
-import { openMicGraph } from './audioGraph'
+import { openMicGraph, deblocheazaAudioLaGest } from './audioGraph'
 import { inscrieVoceaLuiKelion } from './vociKelion'
 // AUDIO I/O — the gate to the brain (Adrian, Jul 4). The app does NOT synthesize and
 // does NOT recognize anything locally: the microphone captures → sends to the server (STT), and
@@ -842,9 +842,24 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
       const destInreg = levelCtx.createMediaStreamDestination()
       levelAnalyser.connect(destInreg)
       inscrieVoceaLuiKelion(destInreg.stream)
+      // DEBLOCAJ PE GEST pentru contextul de REDARE (owner, 13 aug: „audio nu
+      // merge, nu-l aud"). createMediaElementSource de mai jos MUTĂ tot sunetul
+      // elementului <audio> în levelCtx — dacă el e 'suspended' (politica autoplay,
+      // context creat în afara unui gest), vocea devine INAUDIBILĂ deși play() a
+      // reușit. E exact bug-ul microfonului din 5 aug, dar la IEȘIRE, unde
+      // deblocajul pe gest lipsea. Îl armăm și aici, refolosind aceeași funcție.
+      deblocheazaAudioLaGest(levelCtx)
     }
     if (levelCtx.state === 'suspended') void levelCtx.resume().catch(() => {})
     if (!levelAnalyser || !levelBuf) return
+
+    // AUDIBILITATEA E SFÂNTĂ (regula de aur de mai sus): NU deviem sunetul prin
+    // createMediaElementSource cât contextul nu e 'running' — l-ar muta într-un
+    // context surd și vocea ar tăcea. Cât e 'suspended', elementul <audio> rămâne
+    // pe ieșirea LUI proprie, audibil; doar gura nu se mișcă la replica asta. La
+    // următoarea replică (după ce un gest a deblocat levelCtx) devierea prinde și
+    // revine și lip-sync-ul. Fără garda asta, un context suspendat = voce mută.
+    if (levelCtx.state !== 'running') return
 
     // createMediaElementSource can be called only once per element —
     // if this audio element was analyzed before (it shouldn't, it's always new),
