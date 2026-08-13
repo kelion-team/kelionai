@@ -27,6 +27,8 @@
 //     owner — not because I don't trust him, but because a mistake there
 //     cannot be undone.
 
+import { config } from '../config.js'
+
 /** The admin routes he may NOT call on his own, with the reason written down.
  *  The rule: if the mistake cannot be undone, you press it yourself.
  *
@@ -61,12 +63,70 @@ const ALIAS_SECTIUNE: Record<string, string> = {
   greseli: 'erori',
 }
 
-/** Routes are called on LIVE, not localhost: what he sees must be exactly
- *  what you see in the panel, from the same application. */
+// CATALOGUL SECȚIUNILOR pe care Kelion le poate CITI (owner, 13 aug: „nu știe
+// unde sunt butoanele, nu are inventar"). Când `admin_vezi` e chemat fără
+// secțiune — sau cu una inexistentă (404) — întoarce lista asta, ca să nu
+// ghicească un nume care nu există și să pară orb. Sunt rutele GET reale din
+// routes/admin.ts; când adaugi o secțiune nouă acolo, adaug-o și aici.
+const SECTIUNI: { nume: string; ce: string }[] = [
+  { nume: 'erori', ce: 'erorile recente ale userilor (F12/client) + explicație' },
+  { nume: 'notificari', ce: 'alertele/notificările pentru owner (alias: alerte)' },
+  { nume: 'finance', ce: 'situația financiară (venituri, solduri)' },
+  { nume: 'money-circuit', ce: 'circuitul banilor, cap la cap' },
+  { nume: 'transactions', ce: 'tranzacțiile' },
+  { nume: 'plati', ce: 'plățile (încasate / neatribuite / coduri)' },
+  { nume: 'costs', ce: 'costurile reale ale aplicației' },
+  { nume: 'credit-ai', ce: 'creditul AI rămas' },
+  { nume: 'brain-credit', ce: 'creditul creierului (Gemini)' },
+  { nume: 'users', ce: 'utilizatorii' },
+  { nume: 'activity', ce: 'activitatea recentă a userilor' },
+  { nume: 'demos', ce: 'statistici demo' },
+  { nume: 'leads', ce: 'lead-uri' },
+  { nume: 'contact-messages', ce: 'mesaje din formularul de contact' },
+  { nume: 'visitor-chats', ce: 'conversațiile vizitatorilor' },
+  { nume: 'audit', ce: 'jurnalul de audit' },
+  { nume: 'gaps', ce: 'cererile neacoperite (capability gaps)' },
+  { nume: 'kelion-tools', ce: 'uneltele pe care Kelion și le-a propus (de aprobat)' },
+  { nume: 'autonomie/dovezi', ce: 'dovezile de autonomie' },
+  { nume: 'plafon-constructor', ce: 'plafonul zilnic de bani al constructorului' },
+  { nume: 'models', ce: 'modelele de creier + verificarea lor' },
+  { nume: 'keys', ce: 'cheile/secretele (doar starea, nu valorile)' },
+  { nume: 'token-checks', ce: 'verificarea token-urilor / integrărilor' },
+  { nume: 'env-check', ce: 'variabilele de mediu (prezente / lipsă)' },
+  { nume: 'backups', ce: 'punctele de restaurare' },
+  { nume: 'stores', ce: 'prezența în magazine (Windows/Android/iOS/web)' },
+  { nume: 'inbound', ce: 'emailurile primite recent' },
+]
+
+/** Lista secțiunilor ca text pentru creier — „ce pot citi și cum se cheamă". */
+function catalogSectiuni(): string {
+  return JSON.stringify({
+    nota: 'Secțiunile pe care le pot CITI cu admin_vezi(sectiune). Alege numele EXACT din listă.',
+    sectiuni: SECTIUNI,
+  })
+}
+
+/** Rutele se cheamă pe BUCLA LOCALĂ (127.0.0.1:port), nu pe domeniul public.
+ *  E ACELAȘI proces, aceeași bază de date, exact datele pe care le vezi în panou
+ *  — dar pe drumul care nu poate cădea.
+ *
+ *  DE CE (rule #2, „prima dată caut în codul meu care a produs raportul"; owner,
+ *  13 aug: „Kelion e orb pe admin, îi sabotezi activitatea"): `https://kelionai.app`
+ *  însemna VPS → internet public → înapoi la același VPS (hairpin-NAT + un TLS
+ *  către tine însuți). Când conexiunile IEȘITE ale VPS-ului pică — MĂSURAT chiar
+ *  în logurile ownerului din aceeași zi: „[mailbox] poll failed: Failed to
+ *  establish connection in required time" / „[mail] send failed: Connection
+ *  timeout" — ACEST fetch pica la fel, iar `admin_vezi` întorcea o eroare de
+ *  rețea. Deci Kelion AVEA unealta, dar unealta murea pe drumul pe care i-l
+ *  pusesem eu. Bucla locală e fix calea pe care vocea își cheamă deja creierul
+ *  (`http://127.0.0.1:${config.port}/api/chat`, vocalLive.ts), dovedită în
+ *  producție: fără DNS, fără hairpin, fără TLS-către-sine, și mai rapid. Poarta
+ *  de admin rămâne — cookie-ul e trimis mai departe, iar aceeași rută îl
+ *  validează în proces, exact ca peste rețea. */
 function url(cale: string): string {
   const c = cale.replace(/^\/+/, '').replace(/^api\/admin\//, '')
   const mapat = ALIAS_SECTIUNE[c.toLowerCase()] ?? c
-  return `https://kelionai.app/api/admin/${mapat}`
+  return `http://127.0.0.1:${config.port}/api/admin/${mapat}`
 }
 
 /**
@@ -76,11 +136,17 @@ function url(cale: string): string {
  * 403, and that is good — the tool does not bypass the admin gate, it uses it.
  */
 export async function adminVezi(cale: string, cookie: string): Promise<string> {
-  if (!cale.trim()) return JSON.stringify({ error: 'spune ce secțiune vrei, ex. „finance" sau „users"' })
+  // Fără secțiune → nu „sunt orb", ci CATALOGUL: ce pot citi și cum se cheamă.
+  if (!cale.trim()) return catalogSectiuni()
   try {
     const r = await fetch(url(cale), { headers: cookie ? { cookie } : {} })
     const text = (await r.text()).slice(0, MAX)
     if (!r.ok) {
+      // 404 = secțiune inexistentă → dau catalogul, ca să aleagă numele corect,
+      // nu să repete un nume care nu există (owner: „nu știe unde-s butoanele").
+      if (r.status === 404) {
+        return JSON.stringify({ error: `secțiunea „${cale}" nu există`, alege_din: SECTIUNI })
+      }
       return JSON.stringify({
         error: `panoul a răspuns ${r.status}`,
         detaliu: r.status === 403 ? 'sesiunea nu e de admin — cere-i ownerului să fie logat' : text.slice(0, 500),

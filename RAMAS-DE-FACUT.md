@@ -10,6 +10,27 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — KELION ORB PE ADMIN: `admin_vezi` chema hairpin-ul public, nu bucla — REPARAT. ✅**
+> Owner: „în continuare Kelion nu are acces la admin… îi sabotezi activitatea
+> punându-l să fie orb." CAUZA MĂSURATĂ, în codul meu (regula #2): `admin_vezi` /
+> `admin_schimba` (`backend/src/services/adminVedere.ts`) chemau
+> `https://kelionai.app/api/admin/<secțiune>` — adică VPS → internet public →
+> înapoi la ACELAȘI VPS (hairpin-NAT + un TLS către tine însuți). Când ies
+> conexiunile VPS-ului — DOVADĂ chiar în logurile lui din aceeași zi:
+> „[mailbox] poll failed: Failed to establish connection in required time" /
+> „[mail] send failed: Connection timeout" — fetch-ul ăsta pica la fel, iar
+> unealta întorcea o eroare de rețea: Kelion AVEA unealta, dar o murea pe drumul
+> pe care i-l pusesem eu. FIX: se cheamă **bucla locală** `http://127.0.0.1:${port}`
+> — exact calea pe care vocea își cheamă deja creierul (vocalLive.ts), dovedită
+> în producție (fără DNS, fără hairpin, fără TLS-către-sine, mai rapid); poarta de
+> admin rămâne (cookie-ul e dus mai departe, aceeași rută îl validează în proces).
+> În plus, „nu știe unde-s butoanele": `admin_vezi` fără secțiune (sau cu una
+> inexistentă) întoarce acum **catalogul secțiunilor reale** din admin, nu o
+> eroare oarbă. Porți: backend tsc 0 · 1277 teste (7 noi în `adminVedere.test.ts`) ·
+> build 0. RĂMAS de verificat LIVE cu ownerul: „Kelion, arată-mi erorile din admin".
+> (Separat, de urmărit: erorile `[mailbox]`/`[mail]` = conexiuni IEȘITE ale
+> VPS-ului către serverul de mail extern — alt subiect decât bucla internă.)
+
 > **13 aug 2026 — „VORBĂ = FAPTĂ": garda care lăsa Kelion să SPUNĂ ce nu face — SCOASĂ. ✅**
 > Owner: „kelion se chinuie să pună ceva pe monitor, să închidă pe X… când spune
 > orice, trebuie să fie executat acel orice." CAUZA MĂSURATĂ (în cod, nu presupusă):
