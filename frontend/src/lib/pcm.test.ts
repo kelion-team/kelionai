@@ -70,3 +70,50 @@ describe('vocea live — conversiile de audio', () => {
     expect(pcm.byteLength).toBe(2730)
   })
 })
+
+// ── DOVADA ANTI-ALIAS (owner, 13 aug: „tot ce trimit audio = varză") ─────────
+// Nu „sună mai bine" — se MĂSOARĂ. Un ton de 15 kHz la 48 kHz e peste Nyquist-ul
+// noii rate (8 kHz). Fără filtru, decimarea prin eșantionare-punct îl pliază
+// jos, la 1 kHz, cu amplitudine plină — un fluierat fals PESTE voce, exact ce
+// aude Google când scoate „Kelemen" din „Kelion". Cu media (filtru trece-jos),
+// componenta aia e strivită ÎNAINTE de decimare. Testul arată AMBELE căi pe
+// aceleași numere: veche (alias plin) vs nouă (alias ucis), și că vocea reală
+// (sub 8 kHz) trece neatinsă.
+describe('reeșantionarea la 16 kHz — filtrul anti-alias', () => {
+  const rms = (x: Float32Array): number => {
+    let s = 0
+    for (const v of x) s += v * v
+    return Math.sqrt(s / x.length)
+  }
+  const ton = (hz: number, rata: number, n: number): Float32Array => {
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) x[i] = Math.sin((2 * Math.PI * hz * i) / rata)
+    return x
+  }
+  // Calea VECHE, ca referință de comparație: un eșantion din `ratio`, fără filtru.
+  const decimarePunct = (x: Float32Array, rata: number): Float32Array => {
+    const ratio = rata / 16000
+    const out = new Float32Array(Math.floor(x.length / ratio))
+    for (let i = 0; i < out.length; i++) out[i] = x[Math.floor(i * ratio)]
+    return out
+  }
+
+  it('un ton de 15 kHz (peste 8 kHz) — aliasing PLIN pe calea veche, STRIVIT pe cea nouă', () => {
+    const x = ton(15000, 48000, 4800)
+    const vechi = rms(decimarePunct(x, 48000)) // aliasul supraviețuiește
+    const nou = rms(downsample(x, 48000)) // aliasul e filtrat
+    // Calea veche lasă aproape toată energia (alias ~amplitudine plină).
+    expect(vechi).toBeGreaterThan(0.6)
+    // Calea nouă îl taie de câteva ori — dovada că nu se mai pliază peste voce.
+    expect(nou).toBeLessThan(vechi * 0.35)
+    expect(nou).toBeLessThan(0.2)
+  })
+
+  it('vocea reală (500 Hz, sub 8 kHz) trece PRACTIC neatinsă prin filtru', () => {
+    const x = ton(500, 48000, 4800)
+    const inRms = rms(x) // ≈ 0.707
+    const nou = rms(downsample(x, 48000))
+    // Banda vocii nu se pierde: rămâne peste 85% din energie.
+    expect(nou).toBeGreaterThan(inRms * 0.85)
+  })
+})

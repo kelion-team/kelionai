@@ -14,15 +14,42 @@
 /** Rata pe care o cere creierul pentru audio de intrare (PCM16 mono). */
 export const TARGET_RATE = 16000
 
-/** Eșantionare liniară în jos (rata contextului → 16 kHz) — suficient pentru voce.
- *  Când rata coincide, întoarce ACEEAȘI referință: zero copiere pe calea critică. */
+/** Eșantionare în jos (rata contextului → 16 kHz) CU filtru anti-alias.
+ *  Când rata coincide, întoarce ACEEAȘI referință: zero copiere pe calea critică.
+ *
+ *  DE CE media, nu eșantionarea-punct (owner, 13 aug: „tot ce trimit audio =
+ *  varză", „primul cuvânt nu-l aude corect" — MĂSURAT pe vocea lui: „Kelion" →
+ *  „Kelemen"): la 48 kHz → 16 kHz, Nyquist-ul noii rate e 8 kHz. Vechiul cod lua
+ *  `input[floor(i*ratio)]` — un eșantion din 3, FĂRĂ să taie nimic peste 8 kHz.
+ *  Orice energie de peste 8 kHz (sâsâitul consoanelor, zgomotul de fond, hârâitul
+ *  microfonului) se PLIAZĂ (aliasing) înapoi peste voce, ca frecvențe false care
+ *  nu erau acolo — exact „bruiajul cu cauza imposibil de găsit cu urechea" din
+ *  antetul fișierului, și exact ce aude Google când transcrie: silabe stâlcite.
+ *  Media pe o fereastră proporțională cu factorul de decimare (`win ≈ ratio`) e
+ *  un filtru trece-jos simplu (FIR box) care atenuează banda de peste ~8 kHz
+ *  ÎNAINTE de decimare, deci nu se mai pliază. Nu e brick-wall, dar ține banda
+ *  vocii (sub 8 kHz) și scoate aliasing-ul — dovada e în pcm.test.ts: un ton de
+ *  15 kHz iese ca alias puternic pe calea veche și atenuat pe asta. Fereastra
+ *  se calculează pe `ratio` real, deci merge și pe rate ne-întregi (44.1→16). */
 export function downsample(input: Float32Array, inRate: number): Float32Array {
   // (tipul rămâne larg aici: intrarea vine din Web Audio, care dă ArrayBufferLike)
   if (inRate === TARGET_RATE) return input
   const ratio = inRate / TARGET_RATE
   const outLen = Math.floor(input.length / ratio)
   const out = new Float32Array(outLen)
-  for (let i = 0; i < outLen; i++) out[i] = input[Math.floor(i * ratio)]
+  // La upsampling (ratio < 1, rar — un context sub 16 kHz) media n-ar avea sens:
+  // fereastra e 1, deci se reduce la eșantionare, fără să strice nimic.
+  const win = Math.max(1, Math.round(ratio))
+  for (let i = 0; i < outLen; i++) {
+    const start = Math.floor(i * ratio)
+    let suma = 0
+    let n = 0
+    for (let k = 0; k < win && start + k < input.length; k++) {
+      suma += input[start + k]
+      n++
+    }
+    out[i] = n ? suma / n : 0
+  }
   return out
 }
 

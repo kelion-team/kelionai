@@ -10,6 +10,24 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — URECHEA lui Kelion: „varză" = ALIASING la decimarea 48→16 kHz — REPARAT (măsurat). ✅**
+> Owner, pe vocea lui: „tot ce trimit audio = varză", „primul cuvânt nu-l aude
+> corect" („Kelion" → „Kelemen"). CAUZA MĂSURATĂ în `frontend/src/lib/pcm.ts`:
+> `downsample` lua `input[floor(i*ratio)]` — un eșantion din 3, FĂRĂ filtru
+> trece-jos. La 16 kHz, Nyquist = 8 kHz; orice energie de peste 8 kHz (sâsâit,
+> zgomot, hârâit de microfon) se PLIA (aliasing) înapoi peste voce = frecvențe
+> false peste silabe → Google scoate silabe stâlcite. FIX: medie pe o fereastră
+> ≈ factorul de decimare (filtru FIR box) ÎNAINTE de decimare. DOVADĂ în
+> `pcm.test.ts`: ton de 15 kHz → alias PLIN pe calea veche (RMS >0.6), STRIVIT pe
+> cea nouă (<0.2, de ~13×); vocea reală de 500 Hz trece cu >85% din energie.
+> A 2-a cauză (mobil): în `frontend/src/lib/vocalLive.ts` contextele audio se
+> creează DUPĂ 2 await-uri → nasc 'suspended' pe telefon → microfon surd / primul
+> cuvânt pierdut; `resume()` pe interval „nu ajută" fără gest. Armat
+> `deblocheazaAudioLaGest` pe primul tap (exact ca `openMicGraph`) — additiv,
+> no-op pe desktop. **NU pot proba efectul de mobil din headless — se confirmă
+> LIVE pe telefonul ownerului.** Porți: frontend tsc 0 · 43 teste (2 noi anti-alias) ·
+> build 0 · sintaxă 0.
+
 > **13 aug 2026 — KELION ORB PE ADMIN: `admin_vezi` chema hairpin-ul public, nu bucla — REPARAT. ✅**
 > Owner: „în continuare Kelion nu are acces la admin… îi sabotezi activitatea
 > punându-l să fie orb." CAUZA MĂSURATĂ, în codul meu (regula #2): `admin_vezi` /
