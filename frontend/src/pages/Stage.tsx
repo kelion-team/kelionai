@@ -1109,18 +1109,27 @@ export default function Stage({ user }: { user: User }) {
                     tabul rămânea vizibil pentru că lista venea din poza veche
                     înghețată). Cu `ws`, ×-ul șterge tabul PE LOC. Corpurile
                     suprafețelor rămân pe `wsv` doar pentru animația de fade. */}
+                {/* STRUCTURĂ VALIDĂ (owner, 13 aug: „×-ul să funcționeze"): tabul
+                    era `<button>` cu un `<span role=button>` X ÎNĂUNTRU — HTML
+                    invalid (interactiv-în-interactiv), fragil. Acum e un `<div>` cu
+                    DOUĂ butoane-surori reale: eticheta (comută) + ×-ul (închide).
+                    Fiecare e țintă de clic proprie, robustă. */}
                 {ws.tasks.map((task) => (
-                  <button
+                  <div
                     key={task.id}
-                    type="button"
                     className={`ws-tab ${task.id === ws.activeId ? 'active' : ''}`}
-                    onClick={() => switchToId(task.id)}
                     title={task.title}
                   >
-                    <span className="ws-tab-label">{task.title}</span>
-                    <span
+                    <button
+                      type="button"
+                      className="ws-tab-label"
+                      onClick={() => switchToId(task.id)}
+                    >
+                      {task.title}
+                    </button>
+                    <button
+                      type="button"
                       className="ws-tab-x"
-                      role="button"
                       aria-label={t.wsClose}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -1128,8 +1137,8 @@ export default function Stage({ user }: { user: User }) {
                       }}
                     >
                       ✕
-                    </span>
-                  </button>
+                    </button>
+                  </div>
                 ))}
               </div>
               <div className="ws-zoom" title={t.wsZoomFit}>

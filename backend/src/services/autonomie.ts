@@ -992,6 +992,22 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   const jobs = (await listBuildJobs(40).catch(() => null)) ?? ([] as BuildJob[])
   const dupaId = new Map(jobs.map((j) => [j.id, j]))
 
+  // RECONCILIERE CERINȚE ORFANE la „in_lucru" (owner, 13 aug: constructorul „nu
+  // refuză" — cerința nu rămâne blocată pe veci). O cerință pusă `in_lucru` când i
+  // s-a pornit ordinul NU se mai citea nicăieri (`cerinteDeDus` ia DOAR „analizata"),
+  // deci rămânea in_lucru la infinit chiar dacă ordinul ei s-a terminat sau a picat.
+  // Aici o împingem după verdictul REAL al ordinului: gata→livrata, picat→analizata
+  // (se reia singură). DOAR citește joburile deja aduse (`dupaId`) + actualizează
+  // starea cerinței — ZERO ordine noi, deci nu poate face duble și nu atinge bucla
+  // de dispecerat. Rulează ÎNAINTE de gărzile de mai jos, ca să deblocheze chiar și
+  // când e „ocupat"/pe zid.
+  for (const c of await listeazaCerinte('in_lucru', 20).catch(() => [])) {
+    if (!c.job_id) continue
+    const v = verdict(dupaId.get(c.job_id))
+    if (v === 'gata') await actualizeazaCerinta(c.id, { stare: 'livrata', dovada: `ordinul #${c.job_id} s-a terminat — de VERIFICAT live` }).catch(() => {})
+    else if (v === 'picat') await actualizeazaCerinta(c.id, { stare: 'analizata', dovada: `ordinul #${c.job_id} a picat — se reia` }).catch(() => {})
+  }
+
   // 1. Already busy? One thing at a time — otherwise it finishes nothing.
   if (jobs.some((j) => j.status === 'running' || j.status === 'queued')) {
     return { pornit: false, motiv: 'are deja un ordin în lucru' }
