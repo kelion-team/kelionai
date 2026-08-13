@@ -1227,6 +1227,39 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .build-order {
   font-weight: 500;
   word-break: break-word;
+  flex: 1 1 auto;
+}
+/* ×-ul de oprire per-ordin (owner, 13 aug: „nu are x de oprit individual").
+   Buton real, împins la dreapta rândului; roșu discret, evident la hover. */
+.build-stop {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: #ff7a7a;
+  font: 600 16px/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.build-stop:hover {
+  background: color-mix(in srgb, #ff7a7a 18%, transparent);
+  border-color: #ff7a7a;
+}
+.build-stop:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.build-stop:focus-visible {
+  outline: 2px solid #ff7a7a;
+  outline-offset: 2px;
 }
 .build-progress {
   margin-top: 8px;

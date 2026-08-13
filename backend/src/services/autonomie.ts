@@ -1098,6 +1098,17 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     }
   }
 
+  // CERINȚA NOUĂ A OWNERULUI SE ANALIZEAZĂ CHIAR ȘI PE ZID (owner, 13 aug:
+  // „constructorul nu are voie să refuze"). Evaluarea e o tură IEFTINĂ de creier,
+  // FĂRĂ ordin de build — deci nu atinge protecția de bani a zidului. Așa, cererea
+  // ta nu mai stă blocată la „noua": ajunge „analizata" și e gata de pornit imediat
+  // ce cade zidul. (Pornirea ordinului rămâne gata de zid — asta e partea pe bani.)
+  const noi = await listeazaCerinte('noua', 5).catch(() => [])
+  if (noi.length) {
+    const r = await evalueazaCerinta(noi[0]).catch((e: Error) => ({ ok: false, detaliu: e.message }))
+    return { pornit: r.ok, motiv: `cerința #${noi[0].id}: ${r.detaliu}` }
+  }
+
   const zid = zidul(jobs, granita)
   if (zid.blocat && !mainileOcupate) {
     mainileOcupate = true
@@ -1149,13 +1160,8 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     }
   }
 
-  // ANALYSIS BEFORE CODE: a new requirement gets evaluated first — options,
-  // scores, one chosen with a reason. It's a cheap brain turn, not an order.
-  const noi = await listeazaCerinte('noua', 5).catch(() => [])
-  if (noi.length) {
-    const r = await evalueazaCerinta(noi[0]).catch((e: Error) => ({ ok: false, detaliu: e.message }))
-    return { pornit: r.ok, motiv: `cerința #${noi[0].id}: ${r.detaliu}` }
-  }
+  // (Evaluarea cerinței NOI s-a mutat ÎNAINTE de zid — vezi mai sus: cererea nouă
+  // a ownerului se analizează chiar și pe zid, fiind o tură ieftină fără ordin.)
 
   // THE OWNER'S REQUIREMENTS DON'T WAIT FOR THE MISSION TO CLOSE. Measured
   // live (3 aug): C1 was 'analizata' at 00:34 and structurally could NEVER
