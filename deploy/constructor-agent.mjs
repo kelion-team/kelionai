@@ -788,6 +788,47 @@ async function llmRunpod(messages, model = RUNPOD_MODEL) {
   }
 }
 
+// ── CREIERUL 2 (Gemini) PRIN APP — PLASA constructorului (owner, 13 aug:
+// „creierul 2 nu e legat la constructor… supervizează 24/7") ─────────────────
+// Când creierul propriu (DeepInfra/RunPod) pică, cerem creierul APLICAȚIEI
+// (Gemini) prin endpointul gardat cu bridge-secret. App-ul are cheia Gemini +
+// creditul (constructorul, nu). Răspunsul vine în ACELAȘI format OpenAI ca de la
+// DeepInfra, deci restul buclei nu știe că a schimbat creierul.
+async function llmGemini(messages) {
+  let r
+  try {
+    r = await fetch(`${APP}/api/constructor/creier`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-bridge-secret': BRIDGE },
+      body: JSON.stringify({ messages, tools: TOOLS }),
+      signal: AbortSignal.timeout(Math.max(30_000, Math.min(120_000, ramase()))),
+    })
+  } catch (e) {
+    throw new Error(`creier 2 rețea: ${String(e?.message ?? e).slice(0, 200)}`)
+  }
+  const text = await r.text().catch(() => '')
+  if (!r.ok) throw new Error(`creier 2 ${r.status}: ${text.slice(0, 200)}`)
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error(`creier 2 JSON rupt (${text.length} caractere)`)
+  }
+  const message = parsed?.choices?.[0]?.message
+  if (!message) throw new Error('creier 2: răspuns fără candidați')
+  const content = typeof message.content === 'string' ? message.content : ''
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
+  if (!content.trim() && !toolCalls.length) throw new Error('creier 2: răspuns gol')
+  const out = { role: 'assistant', content }
+  if (toolCalls.length) out.tool_calls = toolCalls
+  const total = Number(parsed?.usage?.total_tokens)
+  return {
+    choices: [{ message: out }],
+    usage: { total_tokens: Number.isFinite(total) ? total : 0 },
+    modelServit: parsed?.modelServit || 'gemini/creier-2',
+  }
+}
+
 async function llm(messages) {
   // UN SINGUR CREIER, PE ENDPOINT OpenAI-COMPATIBIL (owner, 12 aug). Creierul
   // constructorului e endpoint-ul din env (CONSTRUCTOR_RUNPOD_URL/_KEY, sau
@@ -830,6 +871,21 @@ async function llm(messages) {
       log(`llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe ${numeCreier}/${model} (${lastErr.slice(0, 90)}) — reîncerc în ${wait / 1000}s`)
       await dormi(wait)
     }
+  }
+  // ── CREIERUL 2 (Gemini) CA PLASĂ 24/7 (owner, 13 aug: „creierul 2 supervizează
+  // constructorul") ────────────────────────────────────────────────────────────
+  // Creierul propriu a picat TOATE cele LLM_ATTEMPTS. În loc să lăsăm ordinul să
+  // moară/reia la nesfârșit pe un furnizor mort (exact „toate ordinele eșuate"),
+  // cerem creierul 2 prin app — are credit când DeepInfra nu servește. 401/403 s-au
+  // oprit deja sus (fatal), deci aici ajungem DOAR pe eșec de furnizor: cazul de rescue.
+  try {
+    log(`llm: ${numeCreier} a picat toate ${LLM_ATTEMPTS} încercările — cad pe creierul 2 (Gemini, prin app)`)
+    const rez = await llmGemini(messages)
+    log('llm: creierul 2 (Gemini) a preluat ordinul — constructorul continuă')
+    return rez
+  } catch (e2) {
+    log(`llm: și creierul 2 a picat (${String(e2?.message ?? e2).slice(0, 100)}) — ordinul se reia`)
+    // cădem pe aruncarea de mai jos (amânabilă), ca ordinul să se reia data viitoare
   }
   // La capătul tuturor încercărilor: dacă ultima eroare e sugrumare de furnizor
   // (429/cotă/5xx/gol), marcăm amânabil — ordinul nu moare, se reia.

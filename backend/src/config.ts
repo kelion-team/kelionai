@@ -187,7 +187,17 @@ export const config = {
   // PLASĂ (chat.ts): dacă profundul se epuizează, tura cade O DATĂ pe flash — nu
   // moare pe mesajul neutru. Etapa 2 (holder cald + orchestrarea vocii) rămâne.
   creierDublu: (process.env.CREIER_DUBLU ?? '') !== '0',
-  modelCreierProfund: process.env.MODEL_CREIER_PROFUND ?? 'gemini-3.1-pro-preview',
+  // DEFAULT = modelul VALIDAT/viu (modelUnicCod), NU un ID hardcodat expirat.
+  // Owner, 13 aug: „creierul 2 nu e funcțional" — DOVADA: era `gemini-3.1-pro-preview`
+  // (versiunea 3.1), pe când modelul viu, validat automat, e 3.5. Deci pe turele
+  // grele (chat.ts) comuta pe un model EXPIRAT → pica → cădea tăcut pe flash →
+  // creierul 2 „mort", iar Kelion rămânea pe modelul slab care nu cheamă uneltele
+  // de admin. Acum profundul e MEREU un model care servește; gândirea grea vine din
+  // `reasoning:'high'` aplicat pe el. Suprascriabil din env (MODEL_CREIER_PROFUND)
+  // când există un Pro dedicat, valid.
+  get modelCreierProfund(): string {
+    return process.env.MODEL_CREIER_PROFUND ?? modelUnicCod()
+  },
   autonomyDailyMax: Math.max(1, Number(process.env.AUTONOMY_DAILY_MAX ?? '20') || 20),
   databaseUrl: env(...ENV_ALIASES.databaseUrl),
   googleServiceAccountJson: env(...ENV_ALIASES.googleServiceAccountJson),

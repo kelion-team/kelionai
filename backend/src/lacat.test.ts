@@ -122,21 +122,33 @@ describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: �
   })
 })
 
-describe('LACĂT — constructor (endpoint OpenAI-compatibil, NU Gemini)', () => {
-  // Owner, 12 aug: „nu are ce căuta Gemini acolo". Constructorul a fost mutat de
-  // pe Gemini pe un endpoint OpenAI-compatibil (RunPod→DeepInfra). Noul zid: fără
-  // OpenRouter/OpenAI, fără NICIUN apel Gemini, și creierul vine din env-ul
-  // RunPod/DeepInfra. Codul mort Gemini (llmGemini + helperele) a fost SCOS.
-  it('agentul: fără OpenRouter/OpenAI, fără apel Gemini, creier din env-ul OpenAI-compat', () => {
+describe('LACĂT — constructor: creier propriu OpenAI-compat + FALLBACK creier 2 PRIN APP', () => {
+  // Owner, 12 aug: „nu are ce căuta Gemini acolo" — constructorul pe endpoint
+  // OpenAI-compatibil (RunPod→DeepInfra), fără cheia Gemini. 13 aug, ownerul
+  // REVINE EXPLICIT asupra propriei reguli: „creierul 2 (Gemini) NU e legat la
+  // constructor… de aia toate ordinele eșuate; să-l supervizeze 24/7." Deci zidul
+  // se MUTĂ, nu se rupe: constructorul tot NU are cheia Gemini și NU cheamă DIRECT
+  // API-ul Google — dar când creierul propriu pică, cade pe creierul 2 PRIN APP
+  // (endpoint gardat cu bridge-secret; app-ul are cheia + creditul, îl înregistrează).
+  it('agentul: fără OpenRouter/OpenAI, fără cheia Gemini, fără apel DIRECT la Google', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
     expect(/openrouter\.ai/.test(s)).toBe(false)
     expect(/OPENROUTER_API_KEY/.test(s)).toBe(false)
     expect(/anthropic\/claude-fable-5/.test(s)).toBe(false)
-    // NU mai cheamă Gemini (niciun apel către API-ul Google) și fără codul mort.
+    // NU cheamă DIRECT API-ul Google — n-are cheia Gemini; creierul propriu e OpenAI-compat.
     expect(/generativelanguage\.googleapis\.com/.test(s)).toBe(false)
-    expect(/function llmGemini/.test(s)).toBe(false)
-    // Creierul vine din env-ul endpointului OpenAI-compatibil (nume nou SAU vechi).
+    expect(/x-goog-api-key/.test(s)).toBe(false)
+    // Creierul PROPRIU vine din env-ul endpointului OpenAI-compatibil (nume nou SAU vechi).
     expect(/env\.CONSTRUCTOR_RUNPOD_KEY\s*\|\|\s*env\.CONSTRUCTOR_DEEPSEEK_KEY/.test(s)).toBe(true)
+  })
+
+  it('FALLBACK creier 2 (owner 13 aug): cere Gemini PRIN APP (bridge-secret), nu direct', () => {
+    const s = sursa('../../deploy/constructor-agent.mjs')
+    // Plasa 24/7 aprobată: fallback-ul EXISTĂ, dar merge la endpointul APP-ului,
+    // gardat cu x-bridge-secret — nu la Google direct și fără cheie în constructor.
+    expect(/function llmGemini/.test(s)).toBe(true)
+    expect(/\/api\/constructor\/creier/.test(s)).toBe(true)
+    expect(/x-bridge-secret/.test(s)).toBe(true)
   })
 })
 

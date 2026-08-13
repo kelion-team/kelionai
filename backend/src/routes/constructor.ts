@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser, adminSiId } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob } from '../db.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, recordCost } from '../db.js'
+import type { OrMessage } from '../services/brainContract.js'
+import { uneltePentruCreier2, raspunsCreier2 } from '../services/creier2Constructor.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { autonomActiv } from '../services/autonomActiv.js'
 import { sendMail } from '../services/mail.js'
@@ -141,6 +143,43 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const job = await claimNextBuildJob()
     return reply.send({ job })
   })
+
+  // ── CREIERUL 2 PENTRU CONSTRUCTOR (owner, 13 aug: „creierul 2 nu e legat la
+  // constructor… de aia toate ordinele sunt eșuate") ──────────────────────────
+  // DOVADA din cod: `deploy/constructor-agent.mjs` folosea UN SINGUR creier
+  // (DeepInfra) și „NU cădea pe alt creier". Când acela pica toate încercările,
+  // ORICE ordin murea. Aici e legătura care lipsea: când creierul propriu al
+  // constructorului pică, `llm()` cade PE ACEST endpoint, care rutează cererea
+  // (format OpenAI, identic cu ce trimitea la DeepInfra) la creierul aplicației
+  // = Gemini (creierul 2), care are credit când DeepInfra nu servește. Gardat cu
+  // x-bridge-secret, ca restul endpointurilor de worker. Cheltuie credit Gemini
+  // DOAR la salvare (aprobat de owner) și îl ÎNREGISTREAZĂ (recordCost), ca banii
+  // să apară în panoul Bani, nu pe ascuns. Dacă și Gemini pică → eroare, iar
+  // constructorul o clasifică „amânabil" și reia, exact ca înainte.
+  app.post<{ Body: { messages?: OrMessage[]; tools?: unknown[]; model?: string } }>(
+    '/api/constructor/creier',
+    async (req, reply) => {
+      if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+        return reply.code(401).send({ error: 'unauthorized' })
+      const { geminiDirectAvailable, geminiDirectChat } = await import('../services/geminiDirect.js')
+      if (!geminiDirectAvailable()) return reply.code(503).send({ error: 'gemini_indisponibil' })
+      const messages = Array.isArray(req.body?.messages) ? (req.body.messages as OrMessage[]) : []
+      if (!messages.length) return reply.code(400).send({ error: 'fara_mesaje' })
+      // Uneltele constructorului (OpenAI function) → formatul geminiDirectChat;
+      // răspunsul creierului → înapoi în format OpenAI. Ambele punți sunt în
+      // services/creier2Constructor.ts, PURE și probate (creier2Constructor.test.ts).
+      const tools = uneltePentruCreier2(Array.isArray(req.body?.tools) ? req.body.tools : [])
+      // Modelul VALIDAT/viu (geminiModelGreu), nu ID-ul expirat modelCreierProfund.
+      const model = String(req.body?.model ?? '').trim() || config.geminiModelGreu
+      try {
+        const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high' })
+        if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
+        return reply.send(raspunsCreier2(r))
+      } catch (e) {
+        return reply.code(502).send({ error: `gemini_esec: ${(e as Error).message.slice(0, 200)}` })
+      }
+    },
+  )
 
   app.post<{
     Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }

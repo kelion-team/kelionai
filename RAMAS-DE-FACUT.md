@@ -10,6 +10,27 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — CREIERUL 2 LEGAT LA CONSTRUCTOR (fallback 24/7) + model creier-2 dezînțepenit. ✅**
+> Owner, cu dovadă: „creierul 2 nu e legat la constructor, am verificat… de aia
+> TOATE ordinele sunt eșuate; supervizează 24/7." DOVADA (în cod, regula #2):
+> `deploy/constructor-agent.mjs:791` scria explicit „UN SINGUR creier… NU cade pe
+> alt creier" — deci când DeepInfra pica toate cele 6 încercări, ORICE ordin murea.
+> FĂCUT: (1) endpoint `POST /api/constructor/creier` (gardat x-bridge-secret) care
+> rutează cererea constructorului (format OpenAI) la creierul 2 (Gemini) prin
+> `geminiDirectChat` + înregistrează costul; conversia de format e într-un modul
+> PUR + testat (`services/creier2Constructor.ts`, `creier2Constructor.test.ts`,
+> 5 teste). (2) `llm()` din constructor cade pe `llmGemini()` (prin app) când
+> creierul propriu pică — nu mai moare pe furnizorul sufocat. (3) DOVADA #2:
+> `modelCreierProfund` era `gemini-3.1-pro-preview` (versiunea 3.1 EXPIRATĂ) în timp
+> ce modelul viu, validat, e 3.5 → creierul 2 din CHAT pica tăcut pe flash → „creier
+> 2 nefuncțional" + Kelion orb pe admin (modelul slab nu cheamă uneltele). Acum
+> `modelCreierProfund` = modelul VALIDAT (env-overridable). LACĂTUL de la 12 aug
+> („fără Gemini în constructor") MUTAT, nu rupt: constructorul tot n-are cheia
+> Gemini / apel direct la Google — rescue-ul merge prin app (bridge). Porți:
+> backend tsc 0 · 1289 teste · sintaxă 0 · constructor-agent.mjs `node --check` OK.
+> RĂMAS: tab AI-uri selectabile pe capacitate + credit (poartă de calitate: nu
+> orice ordin trece); auto-alimentare Revolut; verificare LIVE creier 2.
+
 > **13 aug 2026 — BECURI: fals-roșu REPARAT (Gemini £9.59 & RunPod $5.84 arătau roșu) + buton individual per AI. ✅**
 > Owner (capturi Google AI Studio £9.59 + RunPod $5.84): „e greșit roșu că are
 > credit… ce ai scris că nu e credit era FALS." CAUZA, în codul meu (regula #2):
