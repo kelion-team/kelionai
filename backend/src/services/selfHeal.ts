@@ -4,6 +4,7 @@ import {
   simptomeLiveRecente,
 } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
+import { autonomActiv } from './autonomActiv.js'
 import { geminiLive } from './geminiDirect.js'
 import { ordinSimptomLive, pragPentru } from './simptomeLive.js'
 import { plafonConstructor } from './autonomie.js'
@@ -40,7 +41,11 @@ function signature(message: string): string {
 }
 
 export async function runSelfHeal(): Promise<{ filed: number }> {
-  if (await isOpsPaused()) return { filed: 0 }
+  // AMBELE COMUTATOARE opresc self-heal-ul (owner, 13 aug, incident VPS 1000%):
+  // altfel, cu „motoare autonome" OFF, self-heal-ul tot reumplea coada (repunea
+  // ordine eșuate cu attempts=0 + depunea ordine noi), iar lucrătorul le construia
+  // → VPS sufocat. Acum ORICARE comutator oprit ⇒ self-heal-ul nu reumple nimic.
+  if ((await isOpsPaused()) || !(await autonomActiv().catch(() => true))) return { filed: 0 }
 
   // HEALING THE ORDERS THAT FELL ON MONEY (Adrian, 27 Jul: "why doesn't the
   // healing system see, repair? — automatically?"): if the brain (Gemini)

@@ -3,6 +3,7 @@ import { config } from '../config.js'
 import { getSessionUser, adminSiId } from '../session.js'
 import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
+import { autonomActiv } from '../services/autonomActiv.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
 import { procentDinProgres } from '../services/progresOrdin.js'
@@ -124,10 +125,19 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // ── The VPS worker's endpoint (x-bridge-secret auth, like ops/pulse) ─────
   // Adrian's "autonomy pause" stops the constructor too: while paused, no
   // orders are handed to the worker (queued ones wait, they aren't lost).
+  //
+  // AMBELE COMUTATOARE OPRESC LUCRĂTORUL (owner, 13 aug, incident VPS 1000%):
+  // erau DOUĂ butoane diferite — „pauză autonomie" (isOpsPaused / kelion_ops_paused)
+  // ȘI „motoare autonome" (autonomActiv / autonom:activ). Lucrătorul asculta DOAR
+  // primul. Owner-ul a apăsat al doilea („motoare autonome OFF") ca să oprească
+  // totul — dar lucrătorul a continuat să ceară ordine și să construiască, până a
+  // sufocat VPS-ul. Exact regula #1: butonul spunea „oprit", iar lucrătorul nu se
+  // uita la el. Acum ORICARE dintre comutatoare oprește lucrătorul.
   app.get('/api/constructor/next', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
-    if (await isOpsPaused()) return reply.send({ job: null, paused: true })
+    if ((await isOpsPaused()) || !(await autonomActiv().catch(() => true)))
+      return reply.send({ job: null, paused: true })
     const job = await claimNextBuildJob()
     return reply.send({ job })
   })
