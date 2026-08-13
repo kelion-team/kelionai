@@ -288,15 +288,32 @@ async function randRunpod(): Promise<CreditAI> {
     Boolean((process.env.CONSTRUCTOR_RUNPOD_KEY ?? process.env.CONSTRUCTOR_DEEPSEEK_KEY ?? '').trim()) &&
     /runpod\.ai/i.test(process.env.CONSTRUCTOR_RUNPOD_URL ?? process.env.CONSTRUCTOR_DEEPSEEK_URL ?? '')
 
+  // SOLD REAL doar când furnizorul CHIAR expune o cifră (RunPod clientBalance).
+  // BUG prins de owner (13 aug, „0 USD" roșu deși DeepInfra servește): când
+  // constructorul e pe DeepInfra, `getRunpodBalance` întoarce ok:true DAR fără
+  // `balanceUsd` (DeepInfra nu expune sold). Codul făcea `balanceUsd ?? 0` = un 0
+  // FABRICAT → bec roșu fals, exact „£0.00". Acum: dacă nu vine o cifră reală, NU
+  // inventăm 0 — spunem „nu pot verifica" și becul vine din „servește" (verde).
   let ramas: Masuratoare<{ cantitate: number; unitate: string }>
+  let soldReal = false
   if (!sold || sold.error === 'not_runpod') {
-    ramas = picat(cum, 'constructorul nu e pus pe RunPod (CONSTRUCTOR_DEEPSEEK_URL nu e RunPod)', Date.now() - t0)
+    ramas = picat(cum, 'constructorul nu e pus pe RunPod (URL-ul nu e RunPod)', Date.now() - t0)
   } else if (sold.error === 'not_configured') {
-    ramas = picat(cum, 'cheia RunPod nu e pusă (CONSTRUCTOR_DEEPSEEK_KEY)', Date.now() - t0)
+    ramas = picat(cum, 'cheia constructorului nu e pusă (CONSTRUCTOR_RUNPOD_KEY / _DEEPSEEK_KEY)', Date.now() - t0)
   } else if (!sold.ok) {
-    ramas = picat(cum, `citirea la RunPod a picat (${sold.error})`, Date.now() - t0)
+    ramas = picat(cum, `citirea soldului a picat (${sold.error})`, Date.now() - t0)
+  } else if (typeof sold.balanceUsd === 'number') {
+    // RunPod EXPUNE soldul → cifră reală; aici 0 chiar înseamnă „fără credit" (402).
+    ramas = reusit(cum, { cantitate: Number(sold.balanceUsd.toFixed(2)), unitate: 'USD' }, Date.now() - t0)
+    soldReal = true
   } else {
-    ramas = reusit(cum, { cantitate: Number((sold.balanceUsd ?? 0).toFixed(2)), unitate: 'USD' }, Date.now() - t0)
+    // Furnizor găzduit (DeepInfra) care SERVEȘTE dar NU expune sold prin API — nu
+    // fabricăm un 0; becul vine din „servește" (verde), soldul se vede pe dashboard.
+    ramas = picat(
+      `${sold.provider ?? 'furnizorul'} nu expune sold prin API`,
+      `${sold.provider ?? 'furnizorul'} servește, dar soldul se vede doar pe dashboard-ul lui — nu inventez un 0`,
+      Date.now() - t0,
+    )
   }
 
   const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = sold?.ok
@@ -308,11 +325,15 @@ async function randRunpod(): Promise<CreditAI> {
     : picat('sold RunPod', 'nu s-a putut citi soldul RunPod')
 
   return {
-    furnizor: 'RunPod (placa lucrătorului)',
-    alimenteaza: 'creierul constructorului — modelul tău Qwen3-Coder, pe placa RunPod (nu pe VPS)',
+    // Numele REAL al furnizorului (DeepInfra/RunPod/…), nu „RunPod" fix — altfel
+    // pastila minte când constructorul e pe DeepInfra (owner: „0 USD" pe RunPod
+    // deși e pe DeepInfra).
+    furnizor: `${sold?.provider ?? 'RunPod'} (creierul constructorului)`,
+    alimenteaza: 'creierul constructorului — modelul care execută ordinele de build',
     cheieConfigurata,
-    // SOLD REAL (RunPod clientBalance) — 0 chiar înseamnă „fără credit" (402).
-    soldReal: true,
+    // SOLD REAL doar unde furnizorul expune o cifră (RunPod). DeepInfra: soldReal
+    // fals → becul vine din „servește", nu dintr-un 0 fabricat.
+    soldReal,
     ramas,
     // RunPod nu trece prin jurnalul nostru de costuri (worker-ul nu itemizează
     // cost per apel). Soldul real de mai sus e măsura DIRECTĂ — nu pun un 0 fals.
