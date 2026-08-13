@@ -82,16 +82,26 @@ function currentBundle(): string | null {
 let resetting = false
 export async function hardResetToLatest(): Promise<void> {
   if (resetting) return
-  resetting = true
   // Reload ANTI-LOOP (survives the reload): if we reset within the
   // last 30s, we do NOT reload again — a reload loop would make
   // the app unusable.
+  //
+  // BUG (owner, 13 aug: „nu pot trece de actualizare / bagi update la foc
+  // continuu"): `resetting = true` era pus ÎNAINTE de garda asta, iar pe ramura
+  // de ieșire (reset <30s în urmă) NU se mai elibera → zăvor pe veci. După o
+  // singură blocare, `if (resetting) return` de sus omora TOATE apelurile
+  // următoare: butonul „Actualizează" și auto-aplicarea („se aplică în 0s")
+  // deveneau moarte, omul rămânea prins pe fereastră. FIX: verificăm garda
+  // ÎNAINTE de a pune zăvorul, deci o încercare blocată nu mai înțepenește
+  // mecanismul — după fereastra de 30s, un click sau următoarea verificare
+  // pornește resetarea normal.
   try {
     const last = Number(sessionStorage.getItem('kelion_last_reset') || 0)
     if (Date.now() - last < 30_000) return
   } catch {
     /* storage unavailable — we continue with the reset */
   }
+  resetting = true
   try {
     if ('caches' in window) {
       const keys = await caches.keys()
@@ -100,6 +110,17 @@ export async function hardResetToLatest(): Promise<void> {
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration()
       reg?.active?.postMessage('kelion-clear-caches')
+      // DEZÎNREGISTRĂM service worker-ul, nu doar îi cerem să golească (owner,
+      // 13 aug: „update la foc continuu"). Dacă SW-ul servește bundle-ul VECHI
+      // din cache, `?_v=` de mai jos nu ajută — reîncărcarea aterizează pe
+      // același bundle → fereastra „versiune nouă" revine la infinit. Scos din
+      // cale, browserul ia HTML+bundle proaspăt de la server; SW-ul se
+      // reînregistrează singur la boot-ul următor.
+      try {
+        await reg?.unregister()
+      } catch {
+        /* best-effort */
+      }
     }
   } catch {
     /* best-effort — we reload anyway */

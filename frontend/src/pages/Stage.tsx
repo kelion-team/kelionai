@@ -1491,8 +1491,13 @@ export default function Stage({ user }: { user: User }) {
                     : adminStrings().vpsPillDead
                 }
               >
+                {/* ETICHETĂ ONESTĂ (owner, 13 aug: „măsurători pe monitor
+                    mincinoase"). Numărul E real (din /proc/loadavg), dar „201%"
+                    citit ca „CPU 201%" pare imposibil → minciună. E load average
+                    raportat la nuclee: îl arătăm ca RAPORT („2.0×"), nu ca „%".
+                    GB-ul e memoria LIBERĂ (tooltip-ul explică tot). */}
                 {brainCredit.vps
-                  ? `VPS ${brainCredit.vps.liberGb.toFixed(1)}GB · ${brainCredit.vps.incarcarePct}%`
+                  ? `VPS ${brainCredit.vps.liberGb.toFixed(1)}GB · ${(brainCredit.vps.incarcarePct / 100).toFixed(1)}×`
                   : '⚠ VPS'}
               </button>
             )}
