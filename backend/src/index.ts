@@ -51,6 +51,7 @@ import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
 import { constructorViuRoutes } from './routes/constructorViu.js'
+import { constructorStareRoutes } from './routes/constructorStare.js'
 import { jobsRoutes } from './routes/jobs.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive } from './db.js'
 import { getSessionUser } from './session.js'
@@ -315,6 +316,7 @@ await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 await app.register(pingRoutes)
 await app.register(constructorViuRoutes)
+await app.register(constructorStareRoutes)
 await app.register(jobsRoutes)
 await app.register(manualRoutes)
 await app.register(enterpriseRoutes)
