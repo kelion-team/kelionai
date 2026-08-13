@@ -77,6 +77,40 @@ export async function fetchCreditAI(): Promise<CreditAIFurnizor[] | null> {
   }
 }
 
+// ── Evaluarea unui ordin de constructor (owner, 13 aug) ─────────────────────
+export interface EvalRandAI {
+  cheie: 'constructor' | 'jules' | 'creier2'
+  nume: string
+  descriere: string
+  scor: number
+  potrivire: string
+  bec: 'verde' | 'rosu' | 'gri' | null
+}
+export interface EvalConstructor {
+  trece: boolean
+  motiv: string
+  capacitatiNecesare: string[]
+  clasament: EvalRandAI[]
+  aiRecomandat: 'constructor' | 'jules' | 'creier2' | null
+}
+
+/** Evaluează cerința ÎNAINTE de trimitere: poarta de calitate + AI-urile potrivite
+ *  pe capacitate, cu credit live. `null` dacă apelul pică (nu inventăm verdict). */
+export async function evalueazaOrdinConstructor(order: string): Promise<EvalConstructor | null> {
+  try {
+    const r = await fetch('/api/admin/constructor/evalueaza', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ order }),
+    })
+    if (!r.ok) return null
+    return (await r.json()) as EvalConstructor
+  } catch {
+    return null
+  }
+}
+
 /** GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug). Distructiv, declanșat de owner.
  *  Întoarce câte rânduri s-au șters (măsurat), sau `null` dacă a picat — ca
  *  butonul să spună adevărul, nu un „gata" inventat pe un apel eșuat. */

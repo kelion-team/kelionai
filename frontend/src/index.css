@@ -2261,6 +2261,59 @@ is used by the visitor analytics. */
   justify-content: flex-end;
   margin: 10px 0 6px;
 }
+
+/* EVALUAREA CERINȚEI + AI-uri pe capacitate (owner, 13 aug) — sub formularul de
+   ordin în constructor. Verdictul porții sus, apoi AI-urile de sus în jos. */
+.eval-ordin {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.eval-verdict { font-weight: 700; font-size: 13px; }
+.eval-verdict.ok { color: #1fbf6b; }
+.eval-verdict.stop { color: #ff8a8a; }
+.eval-caps { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.eval-cap {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+  font-size: 11px;
+}
+.eval-ai-lista { display: flex; flex-direction: column; gap: 6px; }
+.eval-ai {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.eval-ai.recomandat {
+  border-color: color-mix(in srgb, #1fbf6b 55%, transparent);
+  background: color-mix(in srgb, #1fbf6b 12%, transparent);
+}
+.eval-ai .bec { margin-top: 3px; flex: 0 0 auto; }
+.eval-ai-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.eval-ai-cap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.eval-badge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #06210f;
+  background: #1fbf6b;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.eval-potrivire { font-size: 11.5px; color: var(--muted); }
+.eval-ai-desc { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
 .admin-body {
   flex: 1;
   display: flex;
