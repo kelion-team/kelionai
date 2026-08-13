@@ -10,6 +10,27 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — BECURI DE CREDIT per-furnizor în Bani: „unde arată că are nevoie de credit?" — REZOLVAT (parțial). ✅**
+> Owner: „butonul Bani trebuie redesenat să fie util… un bec roșu/verde care
+> indică credit sau lipsă, click = reîncărcare; 402 = fără credit." CAUZA (măsurat
+> cu agent de mapare): backendul CALCULA deja creditul per furnizor
+> (`services/creditAI.ts` → `/api/admin/credit-ai`: Gemini, Serper, RunPod, Google
+> Cloud, Jules, fiecare cu sold/serveste/facturare) DAR **frontendul nu-l citea
+> deloc** — bara arăta doar 3 pastile, iar RunPod (care murise pe 402) nici măcar
+> nu apărea. FĂCUT: (1) `beculCredit()` onest — verde=credit citit>0/servește,
+> **roșu=fără credit MĂSURAT (402/sold 0)**, gri=nu pot verifica (necunoscutul NU
+> se maschează în verde, regula #1); 10 teste. (2) Env RunPod împăcat
+> (`CONSTRUCTOR_RUNPOD_*` SAU `_DEEPSEEK_*`) ca becul lui roșu să APARĂ, nu să fie
+> ascuns. (3) Secțiune „Credit AI — becuri" în tabul Bani: rând per furnizor cu
+> bec colorat + soldul/motivul + **click = pagina reală de reîncărcare**. Clasa
+> `.bec-rosu.palpaie` e pregătită în CSS pentru pasul următor (auto-alimentare
+> eșuată = card gol). Porți: backend tsc 0 · 1279 teste · frontend tsc 0 · 43 teste ·
+> build 0 · sintaxă 0.
+> RĂMAS: (a) bara de sus — VPS mutat sub Admin, becurile în spațiul liber, trading
+> rămâne doar admin (până e gata); (b) **auto-alimentare de pe card Revolut** +
+> bec roșu PÂLPÂIND când cardul e gol; (c) constructorul autonom: fallback rapid
+> pe 402 → creier 2 (Gemini) + agenți de ajutor (APROBAT de owner).
+
 > **13 aug 2026 — URECHEA lui Kelion: „varză" = ALIASING la decimarea 48→16 kHz — REPARAT (măsurat). ✅**
 > Owner, pe vocea lui: „tot ce trimit audio = varză", „primul cuvânt nu-l aude
 > corect" („Kelion" → „Kelemen"). CAUZA MĂSURATĂ în `frontend/src/lib/pcm.ts`:

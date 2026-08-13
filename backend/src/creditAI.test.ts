@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { crediteAI } from './services/creditAI.js'
+import { crediteAI, beculCredit, type CreditAI } from './services/creditAI.js'
 
 // ── CREDITUL RĂMAS PE FIECARE AI, FĂRĂ ZEROURI INVENTATE (8 aug 2026) ───────
 //
@@ -53,5 +53,55 @@ describe('creditul rămas pe fiecare AI', () => {
     const gc = (await crediteAI()).find((x) => x.furnizor.startsWith('Google Cloud'))
     expect(gc, 'furnizorul fără sold citibil a fost ascuns din raport').toBeTruthy()
     expect(gc?.facturare, 'dacă nu pot citi soldul, omul trebuie măcar trimis unde se vede factura').toContain('http')
+  })
+})
+
+// ── BECUL DE CREDIT — verde/roșu/gri, ONEST (owner, 13 aug) ──────────────────
+// „un bec roșu/verde care indică credit sau lipsă… 402 înseamnă că nu are credit."
+// Regula #1: necunoscutul NU se maschează în verde. Probăm cele trei stări pe
+// măsurători, ca becul din admin să nu poată minți.
+
+const citit = <T>(valoare: T): CreditAI['ramas'] =>
+  ({ masurat: true, cum: 'test', valoare, ms: 1, la: 'now' }) as CreditAI['ramas']
+const servesteM = (da: boolean): CreditAI['serveste'] =>
+  ({ masurat: true, cum: 'ping', valoare: { da }, ms: 1, la: 'now' })
+const picat = (motiv: string) => ({ masurat: false as const, cum: 'test', motiv, ms: 0, la: 'now' })
+
+function furnizor(over: Partial<CreditAI>): CreditAI {
+  return {
+    furnizor: 'X',
+    alimenteaza: '',
+    cheieConfigurata: true,
+    ramas: picat('necunoscut'),
+    cheltuitLuna: picat('n/a'),
+    ...over,
+  }
+}
+
+describe('beculCredit', () => {
+  it('sold citit > 0 → VERDE', () => {
+    expect(beculCredit(furnizor({ ramas: citit({ cantitate: 12.5, unitate: 'USD' }) }))).toBe('verde')
+  })
+
+  it('sold citit 0 (RunPod 402 / Serper gol) → ROȘU', () => {
+    expect(beculCredit(furnizor({ ramas: citit({ cantitate: 0, unitate: 'USD' }) }))).toBe('rosu')
+  })
+
+  it('pingul spune că NU servește (Gemini „depleted") → ROȘU, chiar dacă soldul nu se citește', () => {
+    expect(beculCredit(furnizor({ ramas: picat('Google nu dă sold'), serveste: servesteM(false) }))).toBe('rosu')
+  })
+
+  it('servește ACUM, sold necitibil → VERDE (lucrează = are credit)', () => {
+    expect(beculCredit(furnizor({ ramas: picat('fără API de sold'), serveste: servesteM(true) }))).toBe('verde')
+  })
+
+  it('nimic măsurabil (Google Cloud / Jules) → GRI, NU verde fals', () => {
+    expect(beculCredit(furnizor({ ramas: picat('fără endpoint de sold') }))).toBe('gri')
+  })
+
+  it('roșul (fără credit MĂSURAT) bate verdele: sold 0 dar pingul a mers → tot ROȘU', () => {
+    expect(
+      beculCredit(furnizor({ ramas: citit({ cantitate: 0, unitate: 'USD' }), serveste: servesteM(true) })),
+    ).toBe('rosu')
   })
 })

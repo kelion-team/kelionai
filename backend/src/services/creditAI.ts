@@ -47,6 +47,31 @@ export interface CreditAI {
   facturare?: string
 }
 
+// ── BECUL DE CREDIT (owner, 13 aug: „un bec roșu/verde care indică credit sau
+// lipsă… 402 înseamnă că nu are credit") ─────────────────────────────────────
+// Trei stări ONESTE, derivate DOAR din măsurători (regula #1 — niciodată verde
+// fals):
+//   • verde = are credit MĂSURAT (sold citit > 0) SAU servește ACUM
+//   • rosu  = fără credit MĂSURAT (sold citit ≤ 0, ex. RunPod 402/„positive
+//             balance", Serper 0) SAU pingul spune clar că NU servește (Gemini
+//             „depleted"). Ăsta e semnalul cel mai onest de „adaugă credit aici".
+//   • gri   = NU pot verifica (Google/Jules n-au API de sold, cheie lipsă,
+//             citire picată). NU verde — necunoscutul nu se maschează în „e ok".
+// (Starea „roșu pâlpâind" = auto-alimentare eșuată/card gol vine cu auto-alimentarea,
+// nu de aici — becul ăsta raportează doar creditul citit, nu tentativa de plată.)
+export type BecCredit = 'verde' | 'rosu' | 'gri'
+
+export function beculCredit(c: CreditAI): BecCredit {
+  // ROȘU întâi: un „fără credit" MĂSURAT bate orice (chiar dacă pingul a mers).
+  if (c.ramas.masurat && c.ramas.valoare.cantitate <= 0) return 'rosu'
+  if (c.serveste?.masurat && c.serveste.valoare.da === false) return 'rosu'
+  // VERDE: credit citit > 0, sau servește chiar acum.
+  if (c.ramas.masurat && c.ramas.valoare.cantitate > 0) return 'verde'
+  if (c.serveste?.masurat && c.serveste.valoare.da === true) return 'verde'
+  // GRI: nimic măsurabil — se spune „nu pot verifica", nu se prezintă ca verde.
+  return 'gri'
+}
+
 const acum = (): string => new Date().toISOString()
 
 const reusit = <T,>(cum: string, valoare: T, ms: number): Masuratoare<T> => ({
@@ -240,8 +265,8 @@ async function randRunpod(): Promise<CreditAI> {
   const sold = await getRunpodBalance().catch(() => null)
   const cum = 'POST https://api.runpod.io/graphql { myself { clientBalance } } (soldul spus de RunPod)'
   const cheieConfigurata =
-    Boolean((process.env.CONSTRUCTOR_DEEPSEEK_KEY ?? '').trim()) &&
-    /runpod\.ai/i.test(process.env.CONSTRUCTOR_DEEPSEEK_URL ?? '')
+    Boolean((process.env.CONSTRUCTOR_RUNPOD_KEY ?? process.env.CONSTRUCTOR_DEEPSEEK_KEY ?? '').trim()) &&
+    /runpod\.ai/i.test(process.env.CONSTRUCTOR_RUNPOD_URL ?? process.env.CONSTRUCTOR_DEEPSEEK_URL ?? '')
 
   let ramas: Masuratoare<{ cantitate: number; unitate: string }>
   if (!sold || sold.error === 'not_runpod') {

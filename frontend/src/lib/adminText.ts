@@ -22,6 +22,14 @@ export interface AdminStrings {
   tabEnterprise: string
   tabTrading: string
   tabMoney: string
+  // Becuri de credit AI (owner, 13 aug: „bec roșu/verde… click = reîncărcare")
+  becuriTitlu: string
+  becuriLoad: string
+  becuriEroare: string
+  becuriReincarca: string
+  becuriDeschideFactura: string
+  becuriServeste: string
+  becuriNecunoscut: string
   tabUsers: string
   tabVisitors: string
   tabLiveChat: string
@@ -197,6 +205,13 @@ const en: AdminStrings = {
   tabEnterprise: '➕ Add agent',
   tabTrading: '📈 Trading',
   tabMoney: 'Money',
+  becuriTitlu: 'AI credit — lights (click = top-up page)',
+  becuriLoad: 'reading balances…',
+  becuriEroare: 'could not read AI credit',
+  becuriReincarca: 'no credit — click to add funds',
+  becuriDeschideFactura: 'open billing page',
+  becuriServeste: 'serving (has credit)',
+  becuriNecunoscut: 'cannot verify',
   tabUsers: 'Users',
   tabVisitors: 'Visitors',
   tabLiveChat: 'Live chat',
@@ -355,6 +370,13 @@ const ro: AdminStrings = {
   tabEnterprise: '➕ Agent nou',
   tabTrading: '📈 Tranzacționare',
   tabMoney: 'Bani',
+  becuriTitlu: 'Credit AI — becuri (click = pagina de reîncărcare)',
+  becuriLoad: 'se citesc soldurile…',
+  becuriEroare: 'nu am putut citi creditul AI',
+  becuriReincarca: 'fără credit — click ca să adaugi bani',
+  becuriDeschideFactura: 'deschide pagina de facturare',
+  becuriServeste: 'servește (are credit)',
+  becuriNecunoscut: 'nu pot verifica',
   tabUsers: 'Utilizatori',
   tabVisitors: 'Vizitatori',
   tabLiveChat: 'Chat live',
