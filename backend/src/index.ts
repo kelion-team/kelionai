@@ -57,7 +57,7 @@ import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddi
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
-import { makeLogTee } from './services/logbuffer.js'
+import { makeLogTee, capturaConsole } from './services/logbuffer.js'
 
 // Content types for the download endpoint (installers + QR images + manifest).
 const DL_TYPES: Record<string, string> = {
@@ -81,6 +81,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // THE SERVER'S F12 (Adrian, 27 Jul: "the logs must reach Kelion like F12"): the
 // logger writes everything to stdout (docker logs untouched) AND keeps the
 // errors/warnings in a memory ring read by the server_logs tool.
+// console.* → inelul server_logs (owner, 13 aug: „Kelion nu vede toate logurile").
+// Cât mai devreme, ca să prindă și logurile de pornire; idempotent.
+capturaConsole()
 const app = Fastify({ logger: { stream: makeLogTee() }, bodyLimit: 25_000_000 })
 
 // GLOBAL SAFETY NET (audit 6 Jul): on modern Node, a single rejected promise

@@ -263,7 +263,7 @@ export const SERVER_LOGS_TOOL: Tool = {
   input_schema: {
     type: 'object',
     properties: {
-      errorsOnly: { type: 'boolean', description: 'true (default) = only warnings+errors; false = all retained entries.' },
+      errorsOnly: { type: 'boolean', description: 'false (default) = ALL retained entries (info + warnings + errors, including the [BRAIN]/[CHAT-IN] traces); true = only warnings+errors when you want just the signal.' },
       limit: { type: 'number', description: 'Max entries, default 60.' },
     },
   },
@@ -541,7 +541,7 @@ export const OPEN_APP_VIEW_TOOL: Tool = {
 export const ADMIN_VEZI_TOOL: Tool = {
   name: 'admin_vezi',
   description:
-    "ADMIN ONLY. Read ANY section of the owner's admin panel — exactly the data he sees on screen, from the same routes the panel calls. Sections: finance, users, demos (visitors), history, gaps, audit, costs, money-circuit, keys, env-check, models, backups, leads, activity, visitor-chats, contact-messages, kelion-tools, gestures, token-checks, stores, inbound, mailbox-live, autonomie/dovezi. Use it whenever he asks about anything in the panel, INSTEAD of rebuilding the numbers from db_query — the panel's numbers are the ones he is looking at.",
+    "ADMIN ONLY. Read ANY section of the owner's admin panel — exactly the data he sees on screen, from the same routes the panel calls. Sections: finance, users, demos (visitors), history, gaps, audit, costs, money-circuit, keys, env-check, models, backups, leads, activity, visitor-chats, contact-messages, kelion-tools, gestures, token-checks, stores, inbound, mailbox-live, autonomie/dovezi, notificari (the owner ALERTS and pending requests — use this section for the alerts), erori (recent server errors). Use it whenever he asks about anything in the panel, INSTEAD of rebuilding the numbers from db_query — the panel's numbers are the ones he is looking at.",
   input_schema: {
     type: 'object',
     properties: { sectiune: { type: 'string', description: "Section name, e.g. 'finance', 'users', 'demos', 'audit'." } },
