@@ -715,6 +715,30 @@ export async function saveClientError(e: {
   }
 }
 
+// „ERORI DE CLIENT" CARE ÎNSEAMNĂ CU ADEVĂRAT INTERFAȚĂ RUPTĂ (owner, 13 aug:
+// „să nu mai numere simptomele [PERF] ca «erori UI rupt» — emailul fals de 23 de
+// erori"). Simptomele de PERFORMANȚĂ (fir principal blocat, ceas lent — tastate
+// cu tipul `perf`, marcaj `[PERF]`) NU sunt interfață stricată: sunt un semnal
+// SEPARAT pe care creierul îl vede în continuare (inelul din contextul chatului
+// + db_query pe client_errors). Sentinela (emailul) și scanarea de sănătate
+// (problema `erori_client`) numără DOAR erorile reale — o singură definiție,
+// folosită în ambele locuri, ca să nu mai plece alarme false. Filtrăm și după
+// tip (rândurile noi), și după marcaj (rândurile vechi, încă `f12`, din fereastră).
+export async function countClientErrorsLastHour(): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const r = await getPool().query<{ n: string }>(
+      `SELECT count(*) AS n FROM client_errors
+        WHERE created_at > now() - interval '1 hour'
+          AND type <> 'perf'
+          AND message NOT LIKE '%[PERF]%'`,
+    )
+    return Number(r.rows[0]?.n ?? 0)
+  } catch {
+    return 0
+  }
+}
+
 export interface ClientErrorGroup {
   created_at: string
   user_email: string | null

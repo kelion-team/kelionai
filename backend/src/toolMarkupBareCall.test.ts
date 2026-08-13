@@ -114,3 +114,51 @@ describe('makeToolMarkupStripper cu numele uneltelor turei (streaming)', () => {
     expect(visible).toBe('get_weather\nText.')
   })
 })
+
+// ── ECOUL DE REZULTAT `response:NAME{...}` NU AJUNGE LA OM (Adrian, 13 aug —
+// screenshot live: bula arăta RAW `response:secret_publica{result:{rezultat:{…}}}`)
+// Un model slab a TASTAT wrapperul de rezultat al unei unelte ca text. E markup,
+// nu răspuns — și, spre deosebire de un apel, doar se ASCUNDE, nu se execută.
+const ADMIN_TOOLS = new Set(['secret_publica', 'db_query', 'system_health'])
+
+describe('ecoul `response:NAME{...}` (rezultat de unealtă tastat) e ascuns', () => {
+  it('linia `response:secret_publica{...}` de deasupra răspunsului dispare', () => {
+    expect(
+      stripToolMarkup(
+        'response:secret_publica{result:{rezultat:{}}}\nGata, am publicat.',
+        undefined,
+        ADMIN_TOOLS,
+      ),
+    ).toBe('Gata, am publicat.')
+  })
+
+  it('variantele wrapper (result:/output:/observation:, cu spațiu) dispar toate', () => {
+    expect(stripToolMarkup('result: db_query{"q":"x"}\nGata.', undefined, ADMIN_TOOLS)).toBe('Gata.')
+    expect(stripToolMarkup('output:system_health()\nTotul merge.', undefined, ADMIN_TOOLS)).toBe(
+      'Totul merge.',
+    )
+    expect(stripToolMarkup('tool_response:secret_publica{}\nOK.', undefined, ADMIN_TOOLS)).toBe('OK.')
+  })
+
+  it('bula care e ÎN TOTALITATE ecoul de rezultat devine goală', () => {
+    expect(stripToolMarkup('response:secret_publica{result:{}}', undefined, ADMIN_TOOLS).trim()).toBe('')
+  })
+
+  it('o FRAZĂ care conține „response:" + numele uneltei rămâne vizibilă', () => {
+    const t = 'response: secret_publica e unealta prin care public un secret.'
+    expect(stripToolMarkup(t, undefined, ADMIN_TOOLS)).toBe(t)
+  })
+
+  it('un nume NECUNOSCUT după wrapper NU e mâncat (nu inventăm unelte)', () => {
+    const t = 'response:hack_everything{}\nText real.'
+    expect(stripToolMarkup(t, undefined, ADMIN_TOOLS)).toBe(t)
+  })
+
+  it('streaming: ecoul rupt pe bucăți nu scapă nicio literă în bulă', () => {
+    const s = makeToolMarkupStripper(() => {}, ADMIN_TOOLS)
+    let visible = s.push('response:secret_pub')
+    visible += s.push('lica{result:{}}\nAm publicat.')
+    visible += s.flush()
+    expect(visible).toBe('Am publicat.')
+  })
+})

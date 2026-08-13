@@ -51,7 +51,17 @@ const FRAGMENTS = [
 // text AND voice). The same name INSIDE a sentence ("folosesc get_weather
 // pentru...") stays visible: only standalone call-shaped lines go. The name
 // set ALWAYS comes from the tools the turn offered — never hardcoded here.
-const CALL_LINE_RE = /^\s*(?:call:)?([A-Za-z_][\w.]*)\s*(\([\s\S]*\)|\{[\s\S]*\})?\s*$/
+//
+// TOOL-RESPONSE / RESULT ECHO (Adrian, 13 aug — live screenshot: the bubble
+// showed RAW `response:secret_publica{result:{rezultat:{…}}}`). A weak model
+// TYPED a tool's RESULT wrapper as text: an optional protocol keyword
+// (`response:` / `result:` / `output:` / `observation:`, maybe `tool_`-prefixed)
+// before a real tool name + a brace block. It's markup, never a human reply, and
+// unlike a bare call it must ONLY be hidden — never executed (it's a fabricated
+// result, not a request). Same guard as above: the tool name must be one the
+// turn offered, so a sentence like "response: secret_publica e o unealtă" stays.
+const CALL_LINE_RE =
+  /^\s*(?:(?:tool[_-])?(?:response|result|output|observation)\s*[:=]\s*)?(?:call:)?([A-Za-z_][\w.]*)\s*(\([\s\S]*\)|\{[\s\S]*\})?\s*$/
 
 function isBareCallLine(line: string, knownTools: ReadonlySet<string>): boolean {
   const m = CALL_LINE_RE.exec(line)
@@ -84,7 +94,8 @@ function stripBareCallLines(
 // can still grow into a bare typed call — the identifier typed so far is a
 // prefix of a real tool name, optionally followed by the start of the
 // argument block. Anything else flows through at once: normal text never waits.
-const PARTIAL_CALL_LINE_RE = /^\s*(?:call:)?([A-Za-z_][\w.]*)?\s*(\([\s\S]*|\{[\s\S]*)?$/
+const PARTIAL_CALL_LINE_RE =
+  /^\s*(?:(?:tool[_-])?(?:response|result|output|observation)\s*[:=]\s*)?(?:call:)?([A-Za-z_][\w.]*)?\s*(\([\s\S]*|\{[\s\S]*)?$/
 
 function couldGrowIntoBareCallLine(line: string, knownTools: ReadonlySet<string>): boolean {
   const m = PARTIAL_CALL_LINE_RE.exec(line)

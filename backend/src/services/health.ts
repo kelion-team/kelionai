@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises'
-import { getPool, dbEnabled, listBuildJobs } from '../db.js'
+import { getPool, dbEnabled, listBuildJobs, countClientErrorsLastHour } from '../db.js'
 import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from './resurse.js'
 import { geminiLive } from './geminiDirect.js'
 import { stareDispecer } from './dispecer.js'
@@ -134,10 +134,10 @@ export async function systemHealth(): Promise<string> {
   try {
     if (dbEnabled()) {
       await getPool().query('SELECT 1')
-      const r = await getPool().query<{ n: string }>(
-        "SELECT count(*) AS n FROM client_errors WHERE created_at > now() - interval '1 hour'",
-      )
-      const n = Number(r.rows[0]?.n ?? 0)
+      // Simptomele [PERF] sunt EXCLUSE de helper (owner, 13 aug): nu sunt
+      // interfață ruptă, ci un semnal separat pe care creierul îl vede oricum în
+      // contextul chatului — aici numărăm doar erorile reale de UI.
+      const n = await countClientErrorsLastHour()
       if (n > 20)
         problems.push({
           id: 'erori_client',

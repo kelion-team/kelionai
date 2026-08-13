@@ -9,7 +9,7 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'node:fs/promises'
 import { config } from '../config.js'
-import { getPool, dbEnabled, saveKv, loadKv } from '../db.js'
+import { getPool, dbEnabled, saveKv, loadKv, countClientErrorsLastHour } from '../db.js'
 import { sendMail } from '../services/mail.js'
 import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from '../services/resurse.js'
 
@@ -106,19 +106,13 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
 
     // 3. Wave of client errors (>20 in the last hour) → something is
     //    broken in the browser for real users; the admin finds out without
-    //    waiting for complaints.
+    //    waiting for complaints. Simptomele [PERF] sunt EXCLUSE de helper
+    //    (owner, 13 aug) — nu sunt interfață ruptă, iar creierul le vede separat.
     if (dbOk) {
-      try {
-        const r = await getPool().query<{ n: string }>(
-          "SELECT count(*) AS n FROM client_errors WHERE created_at > now() - interval '1 hour'",
-        )
-        const n = Number(r.rows[0]?.n ?? 0)
-        if (n > 20) {
-          findings.push(`erori_client_${n}`)
-          await alertOnce('client_errors', 3 * 3600_000, `${n} erori de client în ultima oră`, `S-au strâns ${n} erori în client_errors în ultima oră — ceva e rupt în interfață pentru utilizatori. Vezi Admin sau tabela client_errors.`)
-        }
-      } catch {
-        /* the query failed — db_moarta is already reported above */
+      const n = await countClientErrorsLastHour()
+      if (n > 20) {
+        findings.push(`erori_client_${n}`)
+        await alertOnce('client_errors', 3 * 3600_000, `${n} erori de client în ultima oră`, `S-au strâns ${n} erori reale în client_errors în ultima oră — ceva e rupt în interfață pentru utilizatori. Vezi Admin sau tabela client_errors.`)
       }
     }
 
