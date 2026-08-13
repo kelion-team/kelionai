@@ -3,6 +3,7 @@ import { OpusVoceClient, esteSuportat as opusSuportat } from './opusVoce'
 import { alimenteazaNivelVoce } from './audioIO'
 import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
 import { inscrieVoceaLuiKelion } from './vociKelion'
+import { deblocheazaAudioLaGest } from './audioGraph'
 
 // ── VOCEA LIVE FULL-DUPLEX — PARTEA DIN BROWSER (7 aug 2026) ─────────────────
 //
@@ -498,6 +499,19 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
 
   ctxIn = new AudioContext()
   ctxOut = new AudioContext()
+  // MOBIL — CONTEXTUL PORNIT 'suspended' (owner, 13 aug: „primul cuvânt nu-l aude
+  // corect"). Contextele astea se creează DUPĂ două await-uri (deschiderea
+  // socketului + getUserMedia), deci nasc SUSPENDATE pe iOS/Android — gestul care
+  // a pornit sesiunea s-a „consumat" până aici. Cât rămân suspendate,
+  // `onaudioprocess` NU rulează → microfonul e surd și primele cuvinte se pierd.
+  // `resumeTimer` de mai jos face `resume()` pe interval, DAR — cum spune chiar
+  // audioGraph.ts — `resume()` fără gest „nu ajută" pe mobil. Armăm deci
+  // deblocajul pe PRIMUL tap, exact cum face deja cealaltă cale (openMicGraph):
+  // additiv (pe desktop contextul e deja 'running' → practic no-op, iar ascultătorii
+  // se auto-retrag la prima trezire). Verificat: nu pot proba efectul de mobil din
+  // headless — se confirmă LIVE pe telefonul ownerului.
+  if (ctxIn.state !== 'running') deblocheazaAudioLaGest(ctxIn)
+  if (ctxOut.state !== 'running') deblocheazaAudioLaGest(ctxOut)
   // Lanțul de ieșire se ridică ACUM, nu leneș la primul cadru: analizorul
   // (gura avatarului) → <audio> media → boxe/Bluetooth (vezi antetul de mai sus:
   // media, nu WebRTC, ca să ajungă în mașină).
