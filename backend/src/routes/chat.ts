@@ -3083,6 +3083,29 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // this turn never reaches the user — stream, final text and voice.
       // The set comes from the tools offered, never hardcoded.
       const toolNamesThisTurn = new Set(tools.map((t) => t.name))
+      // AFIȘARE ≠ FAPTĂ (owner, 13 aug: „doar afișează un card, nu execută").
+      // Uneltele DOAR-afișare: un apel la ele NU înseamnă că a executat cererea —
+      // gardele din orchestrator nu le socotesc drept faptă.
+      const UNELTE_AFISAJ = new Set([
+        'show_document', 'show_on_screen', 'open_app_view',
+        'goleste_monitorul', 'click_monitor', 'zoom_monitor', 'arata_pe_grafic',
+      ])
+      // FORȚARE PE UNEALTA DE EXECUȚIE (owner, 13 aug: „îl scoți de pe auto, îl pui
+      // pe obligatoriu să cheme unealta CORECTĂ"): pe runda 1 a turelor de ACȚIUNE
+      // ale ownerului, forțăm o unealtă de FAPTĂ (lista ∩ cele oferite) — niciodată
+      // una de afișare. Lista NU trebuie exhaustivă: dacă unealta corectă lipsește
+      // de aici, modelul o poate chema oricum pe runda 2 (AUTO). Restrângerea e doar
+      // o plasă contra „card fals în loc de execuție".
+      const UNELTE_FAPTA = [
+        'build_software', 'cerinta_noua', 'repo_write', 'repo_open_pr', 'repo_merge_pr',
+        'constructor_command', 'constructor_manage', 'run_runbook', 'request_repair',
+        'panou_cod', 'cheama_agent', 'secret_pune', 'secret_publica', 'send_email',
+        'create_doc', 'edit_doc', 'create_sheet', 'edit_sheet', 'create_calendar_event',
+        'add_task', 'browser_open', 'browser_type', 'browser_click', 'generate_image',
+        'generate_video', 'memorie_pune', 'db_query',
+      ].filter((n) => toolNamesThisTurn.has(n))
+      // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului.
+      const forteazaFapta = isAdmin && cereActiune
       const markupStrip = makeToolMarkupStripper(
         (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
         toolNamesThisTurn,
@@ -3107,19 +3130,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // THE DEED GATE (Adrian, Jul 27): on the admin's turns, if Kelion
           // ASSERTS a deed without calling the tool, it is mechanically obliged
           // to execute or retract — it no longer stays at the declarative stage.
+          // Garda de execuție (owner, 13 aug: „gărzile să deosebească afișare de
+          // faptă"): show_document NU dezarmează poarta faptei; iar dacă tura de
+          // acțiune se închide fără o unealtă de faptă, e forțat o dată să execute
+          // sau să spună cinstit „nu pot" (poarta acțiunii, prinde și cardul tăcut).
           deedGate: isAdmin,
-          // WE NO LONGER FORCE the tool (Adrian, Jul 29: "it doesn't listen to
-          // the request, does what it wants, as if certain things were
-          // hardcoded"). THE REAL CAUSE: ACTION_INTENT caught almost ANY common
-          // verb (show/put/search/open/check/do/read/write...), and
-          // tool_choice:'required' OBLIGED it to call a tool even when you only
-          // wanted an answer → "does what it wants". The forcing was exactly the
-          // hardcoding that deafened the brain to the request. Now the brain
-          // (still capable — heavy escalates the model) DECIDES by itself whether
-          // and which tool to call, LISTENING to what you asked. The deed gate
-          // (deedGate) remains the safety net: it cannot declare a deed without
-          // having done it.
-          forceToolsFirstRound: false,
+          uneltAfisaj: UNELTE_AFISAJ,
+          actiuneCeruta: forteazaFapta,
+          // FORȚAREA E ÎNAPOI, DAR ÎNGUSTĂ (owner, 13 aug, anulează frâna din 29
+          // iul). Regresia din iulie venea din a forța ORICE unealtă pe aproape
+          // orice verb. Acum: forțăm DOAR pe turele clare de acțiune ale ownerului
+          // (`forteazaFapta`), și DOAR spre uneltele de EXECUȚIE (`UNELTE_FAPTA`),
+          // niciodată spre afișare — deci nu mai poate bifa cererea cu un card fals.
+          forceToolsFirstRound: forteazaFapta,
+          forceToolNames: UNELTE_FAPTA,
           onText: (txt) => {
             let clean = markupStrip.push(txt)
             if (!clean) return
@@ -3203,7 +3227,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             if (!textFlowed && textCurat && neagaUneltele(textCurat)) {
               console.error(`[CHAT NEGARE] ${orchestratorModel} și-a negat uneltele — nu trimit minciuna, reîncerc`)
               noteazaEsuare(orchestratorModel)
-            } else if (!textFlowed && textCurat && deflecteazaConstructor(textCurat) && !aAlocatConstructie(toolNamesThisTurn)) {
+            } else if (!textFlowed && textCurat && deflecteazaConstructor(textCurat) && !aAlocatConstructie(new Set(cand.toolsCalled))) {
               // GARDUL ANTI-DEFLECTARE (Adrian, 5 aug: „kelion nu alocă
               // constructorului cererile — spune că echipa de dezvoltare repară.
               // Care e echipa de dezvoltare?"). Nu există niciuna — el e

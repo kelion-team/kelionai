@@ -21,6 +21,9 @@ export interface OrchestratorResult {
   costUsd: number
   model: string
   rounds: number
+  /** Numele uneltelor CHEMATE efectiv în tură (nu cele oferite) — ca gardele din
+   *  chat.ts să judece pe ce s-a FĂCUT, nu pe ce era disponibil. */
+  toolsCalled: string[]
 }
 
 export interface OrchestratorOpts {
@@ -37,6 +40,17 @@ export interface OrchestratorOpts {
    *  — for the owner's ACTION turns, so it executes instead of narrating.
    *  Later rounds return to 'auto' (otherwise it would call tools forever). */
   forceToolsFirstRound?: boolean
+  /** Pe runda forțată, uneltele PERMISE (owner, 13 aug: „unealta corectă") — de
+   *  regulă toate cele oferite MINUS cele de afișare, ca forțarea să nu fie
+   *  bifată cu un card fals. Gol/absent = orice unealtă (ANY simplu). */
+  forceToolNames?: string[]
+  /** Uneltele care sunt DOAR AFIȘARE (show_document, show_on_screen…). Un apel la
+   *  ele NU înseamnă „a executat" — gardele nu le socotesc drept faptă. */
+  uneltAfisaj?: ReadonlySet<string>
+  /** Tura ownerului cere o ACȚIUNE (a cerut să se FACĂ ceva). Dacă tura se închide
+   *  fără nicio unealtă de faptă, e forțat o dată să execute sau să spună cinstit
+   *  „nu pot" — indiferent de text (prinde și cardul fabricat, tăcut). */
+  actiuneCeruta?: boolean
 }
 
 // Detects an ACTION claim ("am trimis/salvat/deschis/reparat...") — things
@@ -122,7 +136,26 @@ export async function runOrchestrator(
   let allText = ''
   let deedGateUsed = false
   let analizaGateUsed = false
+  let actiuneGateUsed = false
   let anyToolCalled = false
+  // AFIȘARE ≠ FAPTĂ (owner, 13 aug): un apel la show_document NU e execuție.
+  // `anyFaptaToolCalled` = s-a chemat o unealtă care NU e doar afișare — asta
+  // dezarmează porțile, nu simpla „a chemat ceva".
+  const afisaj = opts.uneltAfisaj ?? new Set<string>()
+  const uneltChemate = new Set<string>()
+  let anyFaptaToolCalled = false
+  const marcheazaChemata = (name: string): void => {
+    uneltChemate.add(name)
+    anyToolCalled = true
+    if (!afisaj.has(name)) anyFaptaToolCalled = true
+  }
+  const rez = (text: string, rounds: number): OrchestratorResult => ({
+    text,
+    costUsd: totalCost,
+    model: served,
+    rounds,
+    toolsCalled: [...uneltChemate],
+  })
 
   // ── THE SAME THING IS NEVER WRITTEN TWICE ──────────────────────────────────
   // Adrian, Jul 31: "writes the same sentence nonstop" / "in chat his written
@@ -152,11 +185,18 @@ export async function runOrchestrator(
     // the API.
     const toolChoice: 'required' | undefined =
       opts.forceToolsFirstRound && round === 1 && tools.length ? 'required' : undefined
+    // Pe runda forțată, restrângem la uneltele „de faptă" (owner, 13 aug: „unealta
+    // CORECTĂ") — intersectate cu ce e chiar oferit, ca lista să fie validă.
+    const allowedFunctionNames =
+      toolChoice === 'required' && opts.forceToolNames?.length
+        ? opts.forceToolNames.filter((n) => tools.some((t) => t.name === n))
+        : undefined
     const callOpts = {
       maxTokens: opts.maxTokens,
       temperature: opts.temperature,
       reasoning: opts.reasoning,
       toolChoice,
+      allowedFunctionNames,
     }
     // GEMINI-ONLY (3 aug — extirparea OpenRouter): orice model al creierului
     // poartă prefixul google-direct/ și merge prin API-ul Google. Un id fără
@@ -243,10 +283,10 @@ export async function runOrchestrator(
           .join('|')
         if (rundaGoala && semnF === semnaturaTrecuta) {
           console.error(`[orchestrator] runda ${round}: aceleași apeluri tastate de două ori → opresc bucla (${served})`)
-          return { text: stripToolMarkup(allText), costUsd: totalCost, model: served, rounds: round }
+          return rez(stripToolMarkup(allText), round)
         }
         semnaturaTrecuta = semnF
-        anyToolCalled = true
+        for (const f of fakeCalls) marcheazaChemata(f.name)
         const calls: OrToolCall[] = fakeCalls.map((f, i) => ({
           id: `fake_${round}_${i}`,
           type: 'function',
@@ -273,7 +313,7 @@ export async function runOrchestrator(
       if (
         opts.deedGate &&
         !deedGateUsed &&
-        !anyToolCalled &&
+        !anyFaptaToolCalled &&
         DEED_CLAIM_RE.test(res.text || '')
       ) {
         deedGateUsed = true
@@ -282,10 +322,11 @@ export async function runOrchestrator(
           role: 'user',
           content:
             'POARTA FAPTEI: ai spus că faci sau că ai făcut o acțiune (ex. ' +
-            '„Deschid Gmail", „am trimis"), dar nu ai chemat NICIO unealtă — ' +
-            'deci acțiunea NU s-a întâmplat. Ori cheamă ACUM unealta care ' +
-            'execută cu adevărat, ori retrage sincer afirmația și spune clar ' +
-            'ce anume nu poți face și de ce.',
+            '„Deschid Gmail", „am trimis"), dar nu ai chemat nicio unealtă de ' +
+            'EXECUȚIE — a arăta ceva pe monitor (show_document) NU e execuție. ' +
+            'Deci acțiunea NU s-a întâmplat. Ori cheamă ACUM unealta care execută ' +
+            'cu adevărat (build_software, repo_write, send_email, run_runbook…), ' +
+            'ori retrage sincer afirmația și spune clar ce nu poți face și de ce.',
         })
         continue
       }
@@ -305,7 +346,7 @@ export async function runOrchestrator(
       if (
         opts.deedGate &&
         !analizaGateUsed &&
-        !anyToolCalled &&
+        !anyFaptaToolCalled &&
         ANALIZA_CLAIM_RE.test(res.text || '')
       ) {
         analizaGateUsed = true
@@ -324,9 +365,29 @@ export async function runOrchestrator(
         })
         continue
       }
+      // ── POARTA ACȚIUNII (owner, 13 aug: „nu execută nimic … doar fabulă") ───
+      // Tura ownerului a cerut o ACȚIUNE, dar s-a închis fără nicio unealtă de
+      // FAPTĂ (a doar afișat un card, sau doar a vorbit). Nu depinde de text — deci
+      // prinde și cardul fabricat, tăcut. O dată pe tură, forțat să execute sau să
+      // spună cinstit „nu pot". Perechea reală a lui forceToolNames.
+      if (opts.actiuneCeruta && !actiuneGateUsed && !anyFaptaToolCalled) {
+        actiuneGateUsed = true
+        convo.push({ role: 'assistant', content: res.text ?? '' })
+        convo.push({
+          role: 'user',
+          content:
+            'POARTA ACȚIUNII: ți-am cerut să FACI ceva, dar n-ai chemat nicio ' +
+            'unealtă care execută cu adevărat — a arăta un card pe monitor NU e ' +
+            'execuție, e doar afișare. Cheamă ACUM unealta care chiar face lucrul ' +
+            '(ex. build_software pentru cod, repo_write, run_runbook, send_email, ' +
+            'cerinta_noua urmată de build), pe cererea de mai sus. Dacă întradevăr ' +
+            'nu se poate, spune clar de ce — nu inventa un card cu „în lucru".',
+        })
+        continue
+      }
       // On streaming the text already flowed through onText; we don't re-emit it.
       // allText is returned CLEAN: history must never contain typed fake calls.
-      return { text: stripToolMarkup(allText), costUsd: totalCost, model: served, rounds: round }
+      return rez(stripToolMarkup(allText), round)
     }
 
     // ── SPINNING IN PLACE? ───────────────────────────────────────────────────
@@ -342,11 +403,11 @@ export async function runOrchestrator(
       .join('|')
     if (rundaGoala && semnatura && semnatura === semnaturaTrecuta) {
       console.error(`[orchestrator] runda ${round}: nimic nou + aceleași unelte → opresc bucla (${served})`)
-      return { text: stripToolMarkup(allText), costUsd: totalCost, model: served, rounds: round }
+      return rez(stripToolMarkup(allText), round)
     }
     semnaturaTrecuta = semnatura
 
-    anyToolCalled = true
+    for (const c of res.toolCalls) marcheazaChemata(c.function.name)
     // The assistant message ASKING for the tools (keeps tool_calls for linkage).
     convo.push({ role: 'assistant', content: res.text ?? '', tool_calls: res.toolCalls })
     // TOOLS IN PARALLEL (Aug 2 — the latency mission): the model's calls from
@@ -374,5 +435,5 @@ export async function runOrchestrator(
   }
 
   // Too many tool rounds — return what we have, without blocking the user.
-  return { text: stripToolMarkup(allText), costUsd: totalCost, model: served, rounds: maxRounds }
+  return rez(stripToolMarkup(allText), maxRounds)
 }

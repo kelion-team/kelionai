@@ -233,7 +233,15 @@ export function toGeminiPayload(
         return d
       }),
     }]
-    body.toolConfig = { functionCallingConfig: { mode: opts.toolChoice === 'required' ? 'ANY' : 'AUTO' } }
+    // FORȚARE PE UNEALTA CORECTĂ (owner, 13 aug: „îl pui pe obligatoriu să cheme
+    // unealta corectă"): pe modul ANY putem restrânge la o listă de unelte permise
+    // (doar cele de EXECUȚIE, niciodată cele de afișare) — ca o tură forțată să nu
+    // poată fi „bifată" cu un card fals. Fără listă, ANY lasă orice unealtă.
+    const fcc: Record<string, unknown> = { mode: opts.toolChoice === 'required' ? 'ANY' : 'AUTO' }
+    if (opts.toolChoice === 'required' && opts.allowedFunctionNames?.length) {
+      fcc.allowedFunctionNames = opts.allowedFunctionNames
+    }
+    body.toolConfig = { functionCallingConfig: fcc }
   }
   return body
 }
