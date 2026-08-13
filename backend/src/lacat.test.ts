@@ -304,6 +304,32 @@ describe('LACĂT — voce unificată: fraza pleacă DIRECT la creierul unic ca a
   })
 })
 
+describe('LACĂT — AEC half-duplex: microfonul tace cât Kelion vorbește (owner, 13 aug)', () => {
+  // „aec e problema" — microfonul e deschis FĂRĂ echoCancellation (ca ieșirea să
+  // prindă A2DP pe Bluetooth), deci propria voce a lui Kelion intra în microfon
+  // și strica recunoașterea („varză"). Plasa: cât Kelion e audibil, se trimite
+  // TĂCERE la creier. Dacă cineva scoate poarta asta (sau readuce echoCancellation
+  // care rupe Bluetooth-ul), testul cade.
+  const vl = sursa('../../frontend/src/lib/vocalLive.ts')
+
+  it('există poarta half-duplex (kelionAudibil) legată de coada de redare', () => {
+    expect(/kelionAudibil/.test(vl)).toBe(true)
+    // predicatul se sprijină pe cursorRedare (ora până la care e programat sunetul)
+    expect(/ctxOut\.currentTime < cursorRedare \+ COADA_ECOU_S/.test(vl)).toBe(true)
+  })
+
+  it('cadrul de microfon devine TĂCERE cât Kelion e audibil (array nou, nu mută captura)', () => {
+    expect(/kelionAudibil\(\) \? new Float32Array\(ds\.length\) : ds/.test(vl)).toBe(true)
+  })
+
+  it('microfonul rămâne deschis fără echoCancellation (altfel se rupe ieșirea Bluetooth)', () => {
+    // Cuplul e intenționat: fără AEC de browser ⇒ half-duplex în cod. Dacă revine
+    // echoCancellation:true, poarta de mai sus devine redundantă ȘI Bluetooth-ul
+    // pică din nou — semnalăm împerecherea greșită.
+    expect(/echoCancellation:\s*false/.test(vl)).toBe(true)
+  })
+})
+
 describe('LACĂT — creier Pro + Extended Thinking (Adrian, 5 aug: „la creier adaugi Gemini Pro + Extended Thinking")', () => {
   // SCHIMBAT 7 AUG — DOUĂ SLOTURI, pe dovadă măsurată de owner pe cheia lui, de pe
   // VPS: chatul rula pe Pro și făcea 3.622 ms … 45.026 ms (a și EXPIRAT) la o

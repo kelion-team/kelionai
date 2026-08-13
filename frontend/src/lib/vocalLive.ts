@@ -557,11 +557,27 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // ÎNTÂI AudioWorklet (API-ul curent, pe firul audio — fără [Deprecation] și
   // fără să țină firul principal); doar dacă browserul nu poate, cădem pe
   // ScriptProcessor, cu deprecarea lui cu tot — mai bine deprecat decât mut.
+  // HALF-DUPLEX ANTI-ECOU (owner, 13 aug: „aec e problema"). Microfonul e deschis
+  // FĂRĂ echoCancellation (linia getUserMedia de mai sus — ca ieșirea să prindă
+  // ruta A2DP pe Bluetooth/mașină). Prețul măsurat de owner: cât Kelion vorbește,
+  // propria lui voce intră în microfon și, trimisă la creier, iese „varză" în
+  // recunoaștere („Kelion" → „Kelemen"). Fără AEC în browser, plasa corectă e
+  // half-duplex: cât Kelion e AUDIBIL (redarea deja programată + o coadă scurtă
+  // pentru ecoul rămas în aer), trimitem TĂCERE în locul microfonului — fluxul
+  // rămâne continuu pentru VAD-ul serverului, dar creierul nu-și mai aude propria
+  // voce. Pe căști nu strică nimic (ecou ~0); pe difuzor exact aici se stinge
+  // „varza". Preț acceptat: nu se poate întrerupe prin voce cât vorbește (barge-in
+  // server e oricum OFF). `cursorRedare` e ora (în ceasul lui ctxOut) până la care
+  // e programat sunetul lui Kelion; peste ea + coada = tăcut.
+  const COADA_ECOU_S = 0.25
+  const kelionAudibil = (): boolean =>
+    !!ctxOut && ctxOut.currentTime < cursorRedare + COADA_ECOU_S
   const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
-    // FĂRĂ garda de prag (ștearsă 8 aug): ecoul rămâne pe seama anulării din
-    // microfon (`echoCancellation:true` la getUserMedia) — adaptiv, nu ghicit.
-    const la16k = downsample(brut, ctxIn!.sampleRate)
+    const ds = downsample(brut, ctxIn!.sampleRate)
+    // Tăcere cât Kelion e audibil. Array NOU, nu mutăm bufferul microfonului —
+    // downsample îl întoarce ca ATARE când rata e deja 16 kHz (ar corupe captura).
+    const la16k = kelionAudibil() ? new Float32Array(ds.length) : ds
     // OPUS: cât e activ, microfonul intră în encoder (care trimite singur
     // [1][opus] prin callback). Dacă encode-ul pică pe un cadru, trimitem PCM
     // tag-uit [0][pcm] — serverul, în modul Opus, citește mereu octetul-codec.
