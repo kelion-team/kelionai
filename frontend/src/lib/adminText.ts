@@ -30,6 +30,8 @@ export interface AdminStrings {
   becuriDeschideFactura: string
   becuriServeste: string
   becuriNecunoscut: string
+  becuriBaraTitlu: string
+  becuriBaraFaraCredit: string
   tabUsers: string
   tabVisitors: string
   tabLiveChat: string
@@ -212,6 +214,8 @@ const en: AdminStrings = {
   becuriDeschideFactura: 'open billing page',
   becuriServeste: 'serving (has credit)',
   becuriNecunoscut: 'cannot verify',
+  becuriBaraTitlu: 'AI credit — click for Money',
+  becuriBaraFaraCredit: '{n} AI out of credit — click for Money',
   tabUsers: 'Users',
   tabVisitors: 'Visitors',
   tabLiveChat: 'Live chat',
@@ -377,6 +381,8 @@ const ro: AdminStrings = {
   becuriDeschideFactura: 'deschide pagina de facturare',
   becuriServeste: 'servește (are credit)',
   becuriNecunoscut: 'nu pot verifica',
+  becuriBaraTitlu: 'Credit AI — click pentru Bani',
+  becuriBaraFaraCredit: '{n} AI fără credit — click pentru Bani',
   tabUsers: 'Utilizatori',
   tabVisitors: 'Vizitatori',
   tabLiveChat: 'Chat live',

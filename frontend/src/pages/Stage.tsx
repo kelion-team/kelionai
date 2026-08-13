@@ -11,6 +11,7 @@ import { usePolledJson } from '../lib/usePolledJson'
 import { logout, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings, uiStrings } from '../lib/i18n'
 import { adminStrings } from '../lib/adminText'
+import { fetchCreditAI, type CreditAIFurnizor } from '../lib/admin'
 import {
   getWorkspace,
   subscribeWorkspace,
@@ -37,6 +38,48 @@ import { isCarMode, subscribeCarMode } from '../lib/carMode'
 import { reteaLenta } from '../lib/retea'
 import ApelOverlay from '../components/ApelOverlay'
 import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
+
+// ── BECURILE DE CREDIT, COMPACT ÎN BARĂ (owner, 13 aug: „în spațiul rămas pe
+// linia aia pui butoanele astea") ────────────────────────────────────────────
+// Un rând mic de becuri (unul per AI) în bara de admin, în locul lăsat liber de
+// pastila VPS (mutată sub Admin). Verde/roșu/gri vine derivat de pe server
+// (aceeași sursă ca panoul Bani — nicio logică dublată). Click = deschide Bani,
+// unde e boardul întreg + reîncărcarea. Când ceva e roșu (fără credit), apare
+// numărul, ca ownerul să prindă din prima „X AI fără credit".
+function BecuriBara({ onOpen }: { onOpen: () => void }) {
+  const [rows, setRows] = useState<CreditAIFurnizor[] | null>(null)
+  useEffect(() => {
+    let viu = true
+    const citeste = (): void => {
+      void fetchCreditAI().then((r) => {
+        if (viu && r) setRows(r)
+      })
+    }
+    citeste()
+    const t = setInterval(citeste, 60_000)
+    return () => {
+      viu = false
+      clearInterval(t)
+    }
+  }, [])
+  if (!rows || rows.length === 0) return null
+  const rosii = rows.filter((r) => r.bec === 'rosu').length
+  const A = adminStrings()
+  const titlu = rosii > 0 ? A.becuriBaraFaraCredit.replace('{n}', String(rosii)) : A.becuriBaraTitlu
+  return (
+    <button
+      type="button"
+      className={`ghost becuri-bara${rosii > 0 ? ' are-rosu' : ''}`}
+      onClick={onOpen}
+      title={titlu}
+    >
+      {rows.map((r) => (
+        <span key={r.furnizor} className={`bec bec-${r.bec}`} aria-hidden="true" />
+      ))}
+      {rosii > 0 && <span className="becuri-bara-nr">{rosii}</span>}
+    </button>
+  )
+}
 
 // Avatarul 3D (three.js + @react-three, ≈1 MB) — încărcat leneș, ca interfața
 // aplicației să apară instant; se strecoară după (StageAvatar are AvatarLoading).
@@ -1460,47 +1503,12 @@ export default function Stage({ user }: { user: User }) {
                 ⚠ {brainStaleMin != null ? `${brainStaleMin}m` : ''}
               </span>
             )}
-            {/* Pastilele AI (Serper + Gemini + creionul de credit) au fost MUTATE
-                în panoul de administrare (Adrian, 10 aug: „mută-le sub admin") —
-                bara de sus ține doar VPS-ul + indicatorul de vechime. */}
-            {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
-            permanently on the interface in the top bar”). Two figures, because they
-            answer two different questions: RAM = does anything else FIT on the
-            machine, CPU = can it still COPE. Red when memory drops under 10% free
-            or the load passes 200% — the same thresholds as the sentinel's email
-            alarm, so the bar and the mail never contradict. When it can't be
-            measured it writes „⚠ VPS”, not zeros (see the type). */}
-            {brainCredit && !brainLocked && (
-              <button
-                type="button"
-                className={`ghost ${
-                  brainCredit.vps && (brainCredit.vps.liberPct <= (brainCredit.vps.pragMemoriePct ?? 10) || brainCredit.vps.incarcarePct >= (brainCredit.vps.pragIncarcarePct ?? 200))
-                    ? 'blink-red'
-                    : ''
-                }`}
-                style={brainStale ? { opacity: 0.55 } : undefined}
-                onClick={() => openAdmin()}
-                title={
-                  brainCredit.vps
-                    ? adminStrings()
-                        .vpsPillLive.replace('{free}', brainCredit.vps.liberGb.toFixed(1))
-                        .replace('{total}', brainCredit.vps.totalGb.toFixed(1))
-                        .replace('{load}', String(brainCredit.vps.incarcarePct))
-                        .replace('{cpus}', String(brainCredit.vps.procesoare))
-                        .replace('{avg}', brainCredit.vps.incarcare.map((n) => n.toFixed(2)).join(' / '))
-                    : adminStrings().vpsPillDead
-                }
-              >
-                {/* ETICHETĂ ONESTĂ (owner, 13 aug: „măsurători pe monitor
-                    mincinoase"). Numărul E real (din /proc/loadavg), dar „201%"
-                    citit ca „CPU 201%" pare imposibil → minciună. E load average
-                    raportat la nuclee: îl arătăm ca RAPORT („2.0×"), nu ca „%".
-                    GB-ul e memoria LIBERĂ (tooltip-ul explică tot). */}
-                {brainCredit.vps
-                  ? `VPS ${brainCredit.vps.liberGb.toFixed(1)}GB · ${(brainCredit.vps.incarcarePct / 100).toFixed(1)}×`
-                  : '⚠ VPS'}
-              </button>
-            )}
+            {/* VPS MUTAT SUB ADMIN (owner, 13 aug: „VPS îl pui sub admin, vizibil").
+                Pastila cu RAM/încărcarea a plecat din bară în tabul „Sistem (VPS)",
+                cu aceleași cifre și același prag roșu. În locul rămas liber pe linia
+                asta stau acum BECURILE de credit — „în spațiul rămas pui butoanele
+                astea". Click pe becuri → tabul Bani (boardul întreg + reîncărcarea). */}
+            {!brainLocked && <BecuriBara onOpen={() => openAdmin('finance')} />}
             {/* HERE STOOD THE „Stripe £0.00” PILL from the top bar. Removed on
             Jul 30, together with Stripe: the users' money no longer passes through
             it — they pay on the Revolut link, straight into Adrian's account. The

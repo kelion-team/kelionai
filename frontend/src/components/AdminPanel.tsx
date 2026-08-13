@@ -2222,6 +2222,35 @@ export default function AdminPanel({
           <section className="admin-finance">
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">Sistem (VPS)</div>
+              {/* CIFRELE VPS, MUTATE DIN BARA DE SUS SUB ADMIN (owner, 13 aug:
+                  „VPS îl pui sub admin, vizibil"). Aceleași măsurători ca pastila
+                  veche: RAM liber + încărcarea (raport la nuclee), roșu la același
+                  prag ca alarma sentinelei. Necitibil = se spune, nu se pun zerouri. */}
+              {brainCredit?.vps ? (
+                (() => {
+                  const v = brainCredit.vps
+                  const critic =
+                    v.liberPct <= (v.pragMemoriePct ?? 10) || v.incarcarePct >= (v.pragIncarcarePct ?? 200)
+                  return (
+                    <div className={`vps-resurse${critic ? ' vps-critic' : ''}`}>
+                      <span className="vps-cifra">
+                        RAM liber: <b>{v.liberGb.toFixed(1)}GB</b> / {v.totalGb.toFixed(1)}GB
+                      </span>
+                      <span className="vps-cifra">
+                        Încărcare: <b>{(v.incarcarePct / 100).toFixed(1)}×</b> pe {v.procesoare} nuclee
+                      </span>
+                      <span className="vps-cifra vps-load">
+                        load: {v.incarcare.map((n) => n.toFixed(2)).join(' / ')}
+                      </span>
+                      {critic && <span className="vps-alarma">⚠ critic</span>}
+                    </div>
+                  )
+                })()
+              ) : (
+                <div className="vps-resurse">
+                  <span className="vps-cifra">⚠ VPS necitibil (nu s-au putut măsura RAM/încărcarea acum)</span>
+                </div>
+              )}
               <p className="chat-hint" style={{ marginTop: 8 }}>
                 Declanșează fluxurile de restart pentru aplicație și Caddy. Durează câteva secunde.
               </p>
