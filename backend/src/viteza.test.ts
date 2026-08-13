@@ -24,8 +24,13 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     expect(chat).not.toMatch(/Promise\.all\(curse\)/)
   })
 
-  it('toate turele merg pe creierul Gemini (google-direct), cu unelte', () => {
-    expect(chat).toMatch(/const orchestratorModel = orChatModel/)
+  it('toate turele merg pe creierul Gemini (google-direct); pe turele GRELE + CREIER_DUBLU → creierul real, tot google-direct', () => {
+    // CREIER DUBLU (13 aug): fața rapidă (orChatModel) rămâne pe turele ușoare +
+    // pe cele grele cu flagul STINS; cu flagul pornit, turele grele merg pe
+    // creierul real (Pro) — care e TOT google-direct, deci invariantul „Gemini
+    // peste tot" se păstrează.
+    expect(chat).toMatch(/const orchestratorModel =[\s\S]{0,120}config\.creierDublu && heavyTurn/)
+    expect(chat).toMatch(/google-direct\/\$\{config\.modelCreierProfund\}` : orChatModel/)
     expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel/)
   })
 
