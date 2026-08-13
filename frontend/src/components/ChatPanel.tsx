@@ -413,27 +413,12 @@ export default function ChatPanel({
     // Delivery receipt: the server's first frame arrived — the message got there.
     // (No separate UI: the user text already shows ONCE in the single band below.)
     if (c.receipt) return
-    // MODUL MAȘINĂ (Adrian, 11 aug: „capabilitățile toate dar afișare pentru auto
-    // conform legislației"). La volan, chiar dacă creierul încearcă să deschidă o
-    // suprafață vizuală (hartă/video/document/card/monitor/grafic/imagine/tab),
-    // NU o deschidem — răspunsul se AUDE. Lăsăm să treacă DOAR ce ține de audio,
-    // voce și sistem (vocea lui Kelion, transcriptul, decizia de tăcere, limba,
-    // comenzi de cameră/ecran, gesturi). Plasă de siguranță peste blocul de prompt
-    // „CAR MODE" din backend — dacă unul scapă, celălalt prinde.
-    if (isCarMode()) {
-      const permisLaVolan =
-        !!c.audio ||
-        c.heard !== undefined ||
-        c.ignored === true ||
-        !!c.lang ||
-        !!c.device ||
-        !!c.gest ||
-        !!c.gesture ||
-        // Un APEL e comunicare audio — trece și la volan (owner: „mesengerul să
-        // fie funcțional indiferent dacă ești în mașină sau acasă").
-        !!c.apel
-      if (!permisLaVolan) return // suprafață vizuală — nu se deschide la volan
-    }
+    // MODUL MAȘINĂ — GARDA DE SUPRIMARE SCOASĂ (Adrian, 13 aug: „când spune orice,
+    // trebuie să fie executat acel orice"). Aici stătea plasa care, la volan, arunca
+    // ORICE frame de suprafață vizuală (monitor/hartă/document/card/imagine/tab) deși
+    // creierul spunea că a deschis-o — exact ruptura „vorbă fără faptă" pe care
+    // ownerul a cerut-o scoasă. Acum toate frame-urile se execută la fel ca în modul
+    // normal; car mode rămâne doar UI voce-first (răspuns scurt). Vorbă = faptă.
     // GESTURE ON COMMAND (Adrian, Jul 11: "commanded movements for everything I want him
     // to do"): the brain put [GEST name] in the reply → the server turned it
     // into the {gest} frame → the movement direction (AvatarModel) plays the clip once.
@@ -1274,9 +1259,9 @@ export default function ChatPanel({
         // VOCE AMBIENTALĂ: creierul unic decide singur, din audio, dacă i se vorbea
         // (altfel tace — {ignored}). Doar pe turele vocale.
         isVoiceTurn || undefined,
-        // MODUL MAȘINĂ (11 aug): la volan, creierul răspunde SCURT, spus, fără să
-        // deschidă suprafețe vizuale — legislația auto. Frame-urile vizuale sunt
-        // suprimate și în handleControl (jos), ca plasă de siguranță.
+        // MODUL MAȘINĂ (11 aug; rescris 13 aug): semnalăm creierului că userul e la
+        // volan ca să răspundă SCURT, voce-first. NU mai suprimă suprafețe — ce spune
+        // că face, execută (owner: „vorbă = faptă"; garda din handleControl a fost scoasă).
         isCarMode() || undefined,
       )) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word

@@ -208,10 +208,9 @@ export async function* streamChat(
   // ascultarea continuă, fără poartă de nume pe client — creierul aude audio-ul și
   // decide SINGUR dacă i se vorbește; dacă nu, tace ({ignored}). Doar pe voce.
   voceAmbianta?: boolean,
-  // MODUL MAȘINĂ (Adrian, 11 aug): tura vine din stratul de mașină. Serverul
-  // răspunde SCURT, în cuvinte (voce-first) și NU deschide suprafețe vizuale
-  // (hărți/video/documente) — legislația auto. Toate capacitățile rămân, dar
-  // rezultatul e SPUS, nu afișat; muzica/radio doar audio.
+  // MODUL MAȘINĂ (Adrian, 11 aug; rescris 13 aug): tura vine din stratul de mașină.
+  // Serverul răspunde SCURT, voce-first — dar NU mai suprimă suprafețe: ce spune că
+  // face, execută (owner: „vorbă = faptă").
   carMode?: boolean,
 ): AsyncGenerator<string> {
   // FINANCIAL BUG FIXED (Jul 24 audit): there used to be another POST /api/chat

@@ -124,25 +124,28 @@ jobs:
 
           # CONSTRUCTORUL PE DeepInfra, PERMANENT (12 aug). RunPod serverless nu
           # servea modelul de 30B (pornire la rece ~6 min + apoi 500 la inferență,
-          # măsurat) → mutat pe DeepInfra găzduit. MODELUL (ales pe MĂSURĂTORI, nu
-          # pe păreri): Qwen3-Coder-480B-Turbo e SUPRAÎNCĂRCAT CRONIC (engine_overloaded,
-          # 0 tool_calls). DeepSeek-V3-0324 răspunde la un apel simplu în ~3s, DAR pe
-          # un ordin REAL (context mare) a ATÂRNAT >9 min fără niciun pas, măsurat pe
-          # VPS. `Qwen/Qwen2.5-72B-Instruct` (~1s/apel) a dus un ordin end-to-end —
-          # unelte → 7 porți verzi → PR corect în ~67s — de-aia e PRIMAR.
-          # constructor-agent.mjs rotește pe rezerve (DeepSeek-V3, Llama-3.3-70B)
-          # dacă primarul s-ar supraîncărca.
+          # măsurat) → mutat pe DeepInfra găzduit. MODELUL — ales pe MĂSURĂTORI, nu
+          # pe păreri (proba comparativă, 13 aug, un endpoint nou + înregistrare în
+          # index.ts):
+          #   • deepseek-ai/DeepSeek-V4-Pro — a DUS ordinul end-to-end: 19 pași,
+          #     fișier nou + import + register, 7 porți verzi, boot OK, PR #1050
+          #     auto-merge pe master. ALES PRIMAR (decizia ownerului).
+          #   • Qwen/Qwen2.5-72B-Instruct — rapid, bun la fișiere NOI, dar STÂLCEȘTE
+          #     editările precise pe fișiere mari (erori de sintaxă).
+          #   • moonshotai/Kimi-K3 — s-a BLOCAT la pasul 5, procesul a murit, 0 PR.
+          # constructor-agent.mjs rotește pe rezerve (Qwen2.5-72B, DeepSeek-V3,
+          # Llama-3.3-70B) dacă primarul s-ar supraîncărca.
           # URL-ul + modelul NU sunt secrete, dar stăteau ca secrete VECHI (RunPod)
           # în GitHub și reveneau la fiecare rulare. Le FORȚĂM aici, după scriere,
-          # ca vps-set-env să nu mai poată da constructorul înapoi pe RunPod. Cheia
-          # rămâne din secretul CONSTRUCTOR_DEEPSEEK_KEY (reală, pusă de owner).
+          # ca vps-set-env să nu mai poată da constructorul înapoi pe RunPod/alt model.
+          # Cheia rămâne din secretul CONSTRUCTOR_DEEPSEEK_KEY (reală, pusă de owner).
           $SSH '
             set -e
             f=/root/kelion/kelionai.env
             touch "$f"; chmod 600 "$f"
             for kv in \
               "CONSTRUCTOR_DEEPSEEK_URL=https://api.deepinfra.com/v1/openai/chat/completions" \
-              "CONSTRUCTOR_DEEPSEEK_MODEL=Qwen/Qwen2.5-72B-Instruct"; do
+              "CONSTRUCTOR_DEEPSEEK_MODEL=deepseek-ai/DeepSeek-V4-Pro"; do
               name="${kv%%=*}"
               grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
               printf "%s\n" "$kv" >> "$f.tmp"

@@ -10,6 +10,25 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — „VORBĂ = FAPTĂ": garda care lăsa Kelion să SPUNĂ ce nu face — SCOASĂ. ✅**
+> Owner: „kelion se chinuie să pună ceva pe monitor, să închidă pe X… când spune
+> orice, trebuie să fie executat acel orice." CAUZA MĂSURATĂ (în cod, nu presupusă):
+> **modul mașină (car mode)** avea o gardă DUBLĂ care, la volan, arunca orice frame
+> de suprafață vizuală (monitor/hartă/document/card) DEȘI creierul zicea că a
+> deschis-o — (a) promptul „CAR MODE" din `backend/src/routes/chat.ts` îi zicea „nu
+> deschide, doar spune"; (b) `permisLaVolan` din `frontend/src/components/ChatPanel.tsx`
+> (`handleControl`) tăia frame-ul. FIX: ambele scoase; car mode rămâne doar UI
+> voce-first + o linie de prompt care CERE „ce spui că faci, execută prin unealtă".
+> A 2-a cauză (creierul NARează în limbaj natural fără să cheme unealta) NU e gardă —
+> e comportament de model; plasa existentă `parseFakeToolCalls` prinde doar apeluri
+> în FORMĂ de apel, nu narațiune liberă — de urmărit separat.
+> **Constructor FIXAT pe `deepseek-ai/DeepSeek-V4-Pro`** (probă comparativă 13 aug:
+> DeepSeek dus end-to-end 19 pași→PR #1050 merge; Qwen stâlcește editări precise;
+> Kimi K3 blocat la pas 5; forțat și în `vps-set-env.yml`). **MINIM 4G** (owner: „nu
+> cred că e realizabil 3G… treci 4G minim"): scoasă suprimarea de vizualuri pe 2G/3G
+> + notă scurtă non-blocantă (i18n `retea4g` × 7 limbi). Porți: backend tsc 0 · 1246
+> teste · frontend build 0 · sintaxă 0 · exporturi 0 · jscpd 0.
+
 > **12 aug 2026 (NOAPTEA) — AUTONOMIA CONSTRUCTORULUI: REPARATĂ + DOVEDITĂ + LIVE (PR #1043, #1044, #1046). ✅**
 > Owner: „constructorul nu merge", „Gemini? tot timpul de azi pierdut", „cind e
 > autonomia gata?". Trei cauze CONCRETE, toate MĂSURATE (nu presupuse):

@@ -876,10 +876,13 @@ export default function Stage({ user }: { user: User }) {
   // ecranul, iar avatarul 3D se DEMONTEAZĂ (three.js iese din memorie — „consumă cât
   // China"). Butonul 🚗 din bară pornește modul; ieșirea se face din stratul de mașină.
   const carOn = useSyncExternalStore(subscribeCarMode, isCarMode)
-  // Pe 3G/2G/economie de date, NU descărcăm avatarul 3D (~1MB) — banda rămâne
-  // pentru chat și voce (owner, 11 aug: „trebuie să meargă și pe 3G"). Măsurat o
-  // dată, la montare; conexiunea bună îl încarcă normal.
+  // MINIM 4G (owner, 13 aug: „nu cred că e realizabil 3G… treci 4G minim"). Pe
+  // 2G/3G/economie de date NU descărcăm avatarul 3D (~1MB) — banda rămâne pentru
+  // chat și voce, iar userul vede o notă scurtă că experiența completă e pentru 4G+
+  // (chatul de bază merge oricum, nimic nu se blochează). Măsurat o dată, la
+  // montare; pe 4G+ avatarul se încarcă normal.
   const [reteaSlaba] = useState(reteaLenta)
+  const [reteaNotaInchisa, setReteaNotaInchisa] = useState(false)
   // MESSENGER KELION↔KELION: ține deschis canalul de prezență cât ești logat, ca
   // să POȚI fi sunat oricând — din orice mod (chat scris/voce, acasă sau mașină).
   // Se închide singur la delogare (demontarea Stage-ului).
@@ -1064,6 +1067,31 @@ export default function Stage({ user }: { user: User }) {
     // chat bubbles) and the site address is watermarked into the frame.
     <div className={`stage ${recording ? 'rec-clean' : ''}`}>
       {recording && <div className="rec-watermark">kelionai.app</div>}
+      {/* MINIM 4G (owner, 13 aug): notă scurtă, non-blocantă, pe conexiune slabă
+          (2G/3G). Stil inline INTENȚIONAT — nu reciclăm o clasă CSS (lecția din 30
+          iul: o clasă refolosită a rupt o pagină live). Ascunsă în timpul filmării
+          (rec-clean) și după ce userul o închide cu ×. Nu blochează nimic. */}
+      {reteaSlaba && !reteaNotaInchisa && !recording && (
+        <div
+          role="status"
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 60,
+            display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center',
+            padding: '6px 12px', background: 'rgba(18,18,22,0.92)', color: '#ffd27a',
+            font: '500 12px/1.35 system-ui, -apple-system, sans-serif', textAlign: 'center',
+          }}
+        >
+          <span>{t.retea4g}</span>
+          <button
+            type="button"
+            onClick={() => setReteaNotaInchisa(true)}
+            aria-label="×"
+            style={{ background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 4px' }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* Skill monitor mode: the workspace surface behind the avatar. */}
       <div className={`workspace-bg ${monitorOn ? 'open' : ''}`}>
         {/* MONTAREA o decide starea VIE (ws.open), nu snapshot-ul: wsv după
