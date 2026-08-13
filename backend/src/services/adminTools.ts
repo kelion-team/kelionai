@@ -27,6 +27,7 @@ import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type Camp
 import { voceRecenta, minuteRamaseVoce, fataRecenta, minuteRamaseFata } from './adminLock.js'
 import { adminVezi, adminSchimba } from './adminVedere.js'
 import { julesSurse, julesSarcina, julesStare } from './jules.js'
+import { mediaControl } from './mediaControl.js'
 import { notifyAdmin } from './adminNotification.js'
 
 // The names of the shared admin tools (chat ∩ voice). The caller checks
@@ -53,6 +54,7 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'memorie_pune', 'memorie_ia', 'memorie_lista', 'stare_masurata',
   // JULES (3 aug) — agentul asincron oficial Google, pe cheia pusă de owner.
   'jules_repos', 'jules_task', 'jules_status',
+  'media_control',
 ])
 
 // Executes a SHARED admin tool. Returns the result (string) or `null` if the
@@ -73,6 +75,8 @@ export async function execSharedAdminTool(
     case 'db_tables': return dbTablesOverview()
     case 'db_query': return dbQuery(String(args.sql ?? ''))
     case 'system_health': return systemHealth()
+    // MEDIA CONTROL (order #16) — queries OS-level media API to check/pause playback.
+    case 'media_control': return mediaControl()
     // MĂSURAREA (8 aug) — Kelion își rulează singur porțile, exact cele pe care
     // le rulează omul, și primește înapoi un verdict cu TREI stări. Raportul e
     // formatat aici, nu de model: „NU POT VERIFICA" nu se poate rescrie în

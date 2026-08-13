@@ -54,6 +54,17 @@ export const SYSTEM_HEALTH_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+// ── MEDIA CONTROL (OS-level) — owner's order #16 ──────────────────────────────
+// Queries the OS media API (playerctl on Linux) to check playback state, pause
+// if playing, and report the result. Used when the owner says "oprește ce-i pe
+// monitor" so Kelion can confirm whether something was actually stopped.
+export const MEDIA_CONTROL_TOOL: Tool = {
+  name: 'media_control',
+  description:
+    "ADMIN ONLY. Control OS-level media playback. Call this when the owner says 'oprește ce-i pe monitor' or similar — it queries the native OS media API (playerctl on Linux) to check if anything is playing, sends pause if so, and returns the result so you can confirm verbally: either 'am oprit <player>' or 'nu rula nimic'. No arguments needed.",
+  input_schema: { type: 'object', properties: {} },
+}
+
 // ── L1e: PROCESARE DE DATE TABELARE (CSV/JSON) — capabilitate generală ────────
 // Ownerul (autonomie): Kelion trebuie să poată PROCESA date, nu doar să discute
 // despre ele. Unealtă PURĂ: primește textul (CSV sau JSON, lipit de om sau adus
@@ -698,7 +709,7 @@ export const JURNAL_MASURATORI_TOOL: Tool = {
 
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
-  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
+  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, MEDIA_CONTROL_TOOL,
   RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL,
   // repo_* and runbook_* are still defined in routes/chat.ts (the migration to
   // the single source is incremental). They are added in autonomie.ts, from there.
