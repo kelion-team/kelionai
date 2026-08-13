@@ -241,6 +241,7 @@ export async function initDb(): Promise<void> {
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS user_email TEXT NOT NULL DEFAULT '';
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS actions INT NOT NULL DEFAULT 0;
+    ALTER TABLE visits ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_visits_email ON visits (user_email, last_seen_at DESC);
     -- The ledger of top-ups (+) and consumptions (−) — the structure is below.
     -- ── PAYMENTS VIA REVOLUT PRO, WITH A UNIQUE CODE (Adrian, 30 Jul) ────────
@@ -1888,6 +1889,7 @@ export async function getDemoStats(): Promise<DemoStats | null> {
         topic: string
         tz: string
         vizite_anterioare: number
+        photo_url: string
       }>(
         // FULL VISIT PROFILE (Adrian, 31 Jul: "visitors, this field must give
         // full information about the visit"). Two things that change how you
@@ -1898,7 +1900,7 @@ export async function getDemoStats(): Promise<DemoStats | null> {
         // thing as one who landed on the site once.
         `SELECT 'visit'::text AS kind, v.ip, v.country, v.country_code, v.city, v.region, v.isp,
                 v.browser, v.os, v.device, v.lang, v.referrer, v.is_bot, v.started_at,
-                '' AS session_email, '' AS topic, v.tz,
+                '' AS session_email, '' AS topic, v.tz, v.photo_url,
                 (SELECT COUNT(*)::int - 1 FROM visits p
                   WHERE p.fingerprint = v.fingerprint AND p.fingerprint <> ''
                     AND p.started_at <= v.started_at) AS vizite_anterioare
@@ -1923,6 +1925,7 @@ export async function getDemoStats(): Promise<DemoStats | null> {
       topic: r.topic ?? '',
       tz: r.tz ?? '',
       vizite_anterioare: Math.max(0, Number(r.vizite_anterioare ?? 0)),
+      photo_url: r.photo_url ?? '',
     }))
     return {
       total: 0,

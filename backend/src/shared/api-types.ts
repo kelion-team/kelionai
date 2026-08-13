@@ -49,6 +49,8 @@ export interface DemoRecent {
    *  0 = first time. A person returning for the third time is not the same
    *  thing as one who landed on the site once. */
   vizite_anterioare: number
+  /** URL of the photo captured during the visit (webcam snapshot). Empty if none. */
+  photo_url: string
 }
 
 /** The visitor analysis, aggregated (admin-only): totals + countries + latest arrivals. */
