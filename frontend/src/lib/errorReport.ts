@@ -43,6 +43,16 @@ async function flush(): Promise<void> {
   if (queue.length > 0) timer = window.setTimeout(() => void flush(), 3000)
 }
 
+// PERF → CREIER (owner, 13 aug: „astea trebuia să apară alerte la creier, să
+// autorepare"). Watchdog-ul (fir blocat) și ceasul (ceas lent) scriau cu
+// `console.warn`, pe care reporterul NU-l prinde — deci simptomele de performanță
+// nu ajungeau NICIODATĂ la creier. Le dăm o poartă directă spre ACELAȘI canal
+// (/api/client-errors), ca blocajele mari să devină alerte pe care Kelion le vede
+// și le poate analiza. Dedup + batch ca orice altă eroare-client (nu îneacă).
+export function raporteazaSimptom(msg: string): void {
+  reportClientError(msg)
+}
+
 export function startErrorReporting(): void {
   window.addEventListener('error', (e) => {
     const src = (e.filename ?? '').split('/').pop()

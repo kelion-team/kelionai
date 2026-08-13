@@ -11,6 +11,8 @@
 // Doar observă + scrie în consolă; ZERO efect asupra logicii. Se scoate după ce
 // prindem cauzele reale.
 
+import { raporteazaSimptom } from './errorReport'
+
 const activ = new Map<string, number>() // direcție → performance.now() la intrare
 const ultimaBataie = new Map<string, number>()
 const pauzaMax = new Map<string, number>()
@@ -27,6 +29,11 @@ export function watchdogInit(): void {
         if (e.duration <= 200) continue
         const unde = activ.size ? [...activ.keys()].join(' + ') : '(nicio direcție activă)'
         console.warn(`[WATCHDOG] fir principal BLOCAT ${Math.round(e.duration)}ms în timpul: ${unde}`)
+        // ALERTĂ LA CREIER (owner, 13 aug): blocajele MARI (>1s) — cele care chiar
+        // desincronizează fața/vocea — ajung la server, ca Kelion să le vadă și să
+        // le poată analiza, nu doar în consola omului. Bucket pe secunde → dedup.
+        if (e.duration > 1000)
+          raporteazaSimptom(`[PERF] fir principal blocat ~${Math.round(e.duration / 1000)}s în timpul: ${unde}`)
       }
     })
     obs.observe({ entryTypes: ['longtask'] })
