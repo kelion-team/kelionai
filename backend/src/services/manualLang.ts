@@ -56,6 +56,7 @@ const NUME_LIMBA: Record<string, string> = {
   tr: 'Turkish',
   uk: 'Ukrainian',
   hi: 'Hindi',
+  ko: 'Korean',
 }
 
 const numeLimba = (cod: string): string => NUME_LIMBA[cod] ?? cod

@@ -29,7 +29,7 @@ import { CAPABILITIES } from './brainCapabilities.js'
 // version I put up (the UN official languages: + Chinese and Arabic, without
 // Italian and without Romanian) was an academic choice, not one fit for the
 // product — Adrian rightly asked "where is ro? Italian?".
-export const MANUAL_LANGS = ['en', 'fr', 'de', 'es', 'it', 'ru', 'ro'] as const
+export const MANUAL_LANGS = ['en', 'fr', 'de', 'es', 'it', 'ru', 'ro', 'ko'] as const
 
 export function isManualLang(v: string): boolean {
   return (MANUAL_LANGS as readonly string[]).includes(String(v ?? '').trim().toLowerCase())
