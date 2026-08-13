@@ -46,11 +46,27 @@ const DOAR_OWNERUL = new Map<string, string>([
 /** We truncate what is too long so it doesn't eat the brain's context window. */
 const MAX = 20_000
 
+// ALIASURI DE SECȚIUNE (owner, 13 aug: „alertele îi dau lui Kelion 404"). Datele
+// de alerte pentru owner stau la /api/admin/notificari (cererile lui) și
+// /api/admin/erori (erorile recente), dar creierul cerea firesc „alerte"/„alerts"
+// → ruta nu există → 404. Mapăm numele firești pe rutele REALE, ca „arată-mi
+// alertele" să meargă, în loc să ghicească o secțiune inexistentă.
+const ALIAS_SECTIUNE: Record<string, string> = {
+  alerte: 'notificari',
+  alerts: 'notificari',
+  notifications: 'notificari',
+  notificari: 'notificari',
+  erori: 'erori',
+  errors: 'erori',
+  greseli: 'erori',
+}
+
 /** Routes are called on LIVE, not localhost: what he sees must be exactly
  *  what you see in the panel, from the same application. */
 function url(cale: string): string {
   const c = cale.replace(/^\/+/, '').replace(/^api\/admin\//, '')
-  return `https://kelionai.app/api/admin/${c}`
+  const mapat = ALIAS_SECTIUNE[c.toLowerCase()] ?? c
+  return `https://kelionai.app/api/admin/${mapat}`
 }
 
 /**

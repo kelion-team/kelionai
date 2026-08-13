@@ -16,7 +16,7 @@ export interface LogEntry {
   msg: string
 }
 
-const MAX_ENTRIES = 600
+const MAX_ENTRIES = 2000 // mărit 13 aug (era 600) — Kelion să aibă istoric real de citit
 const ring: LogEntry[] = []
 
 function push(e: LogEntry): void {
@@ -77,4 +77,47 @@ export function makeLogTee(): Writable {
 export function recentLogs(minLevel = 0, limit = 80): LogEntry[] {
   const out = ring.filter((e) => e.level >= minLevel)
   return out.slice(-Math.max(1, Math.min(limit, MAX_ENTRIES)))
+}
+
+function safeStringify(a: unknown): string {
+  if (typeof a === 'string') return a
+  try {
+    return JSON.stringify(a)
+  } catch {
+    return String(a)
+  }
+}
+
+// CAPTURA console.* ÎN INEL (owner, 13 aug: „Kelion nu vede toate logurile").
+// Inelul era alimentat DOAR din stream-ul pino (`app.log.*`); toate apelurile
+// `console.log/info/warn/error` din cod (ex. `[BRAIN]`/`[CHAT-IN]` din chat.ts)
+// scriau DIRECT pe stdout, deci NU ajungeau niciodată la creier prin server_logs.
+// Împachetăm console.* ca să scrie ȘI în inel — după ce cheamă originalul, deci
+// stdout / `docker logs` rămân neatinse. Idempotent (o singură dată).
+let consolaCapturata = false
+export function capturaConsole(): void {
+  if (consolaCapturata) return
+  consolaCapturata = true
+  const nivele: Array<['log' | 'info' | 'warn' | 'error', number]> = [
+    ['log', 30],
+    ['info', 30],
+    ['warn', 40],
+    ['error', 50],
+  ]
+  const c = console as unknown as Record<string, (...args: unknown[]) => void>
+  for (const [metoda, level] of nivele) {
+    const orig = c[metoda].bind(console)
+    c[metoda] = (...args: unknown[]): void => {
+      orig(...args)
+      try {
+        push({
+          t: new Date().toISOString(),
+          level,
+          msg: args.map(safeStringify).join(' ').slice(0, 400),
+        })
+      } catch {
+        /* logarea nu are voie să arunce */
+      }
+    }
+  }
 }

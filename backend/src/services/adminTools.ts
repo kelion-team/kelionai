@@ -287,7 +287,10 @@ export async function execUserScopedTool(
     }
     case 'server_logs': {
       if (!isAdmin) return denied
-      const minLevel = args.errorsOnly === false ? 0 : 40
+      // DEFAULT = TOATE (owner, 13 aug: „Kelion nu vede toate logurile"). Înainte
+      // implicitul era 40 (doar warn+error), deci info-ul (inclusiv urmele [BRAIN])
+      // rămânea ascuns. Acum implicit vede tot; `errorsOnly:true` filtrează la nevoie.
+      const minLevel = args.errorsOnly === true ? 40 : 0
       const entries = recentLogs(minLevel, Math.min(Math.max(Number(args.limit) || 60, 1), 200))
       return JSON.stringify({ count: entries.length, entries })
     }

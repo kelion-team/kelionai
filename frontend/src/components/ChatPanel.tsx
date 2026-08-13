@@ -47,6 +47,7 @@ import {
   clearPendingVoiceFeatures,
   getVoiceVolume,
   setVoiceVolume,
+  getVoiceLevel,
   type MicHandle,
 } from '../lib/audioIO'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
@@ -2405,6 +2406,14 @@ export default function ChatPanel({
 
     let ultimaCaptura = 0
     const tick = (): void => {
+      // PAUZĂ CÂT VORBEȘTE KELION (owner, 13 aug — desincronizarea feței sub
+      // sarcină): captarea = `toDataURL` SINCRON, care citește înapoi de pe
+      // GPU-ul avatarului; cât gura se mișcă, blochează firul principal și
+      // lip-sync-ul sare (măsurat live: „captare cadre cameră a ținut firul
+      // 3440 ms, vârf 4275 ms"). Cât vorbește Kelion nu capturăm — vederea nu e
+      // cerută atunci (o tură pornită ia oricum un cadru proaspăt); se reia
+      // instant la tăcere.
+      if (getVoiceLevel() > 0.06) return
       // ÎN VOCEA LIVE, CAPTAREA SE RĂREȘTE (măsurat 8 aug, consola ownerului:
       // „[ceas lent] captare cadre cameră a ținut firul 51–92 ms" în timpul
       // sesiunii live). Împachetarea JPEG (toDataURL = citire sincronă GPU→CPU
