@@ -77,6 +77,13 @@ export async function fetchCreditAI(): Promise<CreditAIFurnizor[] | null> {
   }
 }
 
+/** Clasa CSS a unui bec de credit. ROȘU (gol / 402) PÂLPÂIE — owner, 13 aug:
+ *  „când e gol becul pâlpâie roșu"; e semnalul că exact acolo trebuie pus credit.
+ *  Verde/gri stau liniștite. O singură definiție, folosită și în bară, și în admin. */
+export function clasaBec(bec: string): string {
+  return `bec bec-${bec}${bec === 'rosu' ? ' palpaie' : ''}`
+}
+
 // ── Evaluarea unui ordin de constructor (owner, 13 aug) ─────────────────────
 export interface EvalRandAI {
   cheie: 'constructor' | 'jules' | 'creier2'

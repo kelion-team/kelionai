@@ -62,6 +62,7 @@ import {
   golesteVizitatori,
   evalueazaOrdinConstructor,
   type EvalConstructor,
+  clasaBec,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -249,7 +250,7 @@ function BecuriCredit() {
           const titlu = f.bec === 'rosu' ? A.becuriReincarca : A.becuriDeschideFactura
           const continut = (
             <>
-              <span className={`bec bec-${f.bec}`} aria-hidden="true" />
+              <span className={clasaBec(f.bec)} aria-hidden="true" />
               <span className="bec-nume">{f.furnizor}</span>
               <span className="bec-alim">{f.alimenteaza}</span>
               <span className="bec-stare">{stare}</span>
@@ -2538,7 +2539,7 @@ export default function AdminPanel({
                           className={`eval-ai ${ai.cheie === evalOrdin.aiRecomandat ? 'recomandat' : ''}`}
                           key={ai.cheie}
                         >
-                          <span className={`bec bec-${ai.bec ?? 'gri'}`} title={ai.bec ? `credit: ${ai.bec}` : 'credit necunoscut'} />
+                          <span className={clasaBec(ai.bec ?? 'gri')} title={ai.bec ? `credit: ${ai.bec}` : 'credit necunoscut'} />
                           <div className="eval-ai-text">
                             <div className="eval-ai-cap">
                               <strong>{ai.nume}</strong>

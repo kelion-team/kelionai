@@ -11,7 +11,7 @@ import { usePolledJson } from '../lib/usePolledJson'
 import { logout, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings, uiStrings } from '../lib/i18n'
 import { adminStrings } from '../lib/adminText'
-import { fetchCreditAI, type CreditAIFurnizor } from '../lib/admin'
+import { fetchCreditAI, clasaBec, type CreditAIFurnizor } from '../lib/admin'
 import {
   getWorkspace,
   subscribeWorkspace,
@@ -83,10 +83,10 @@ function BecuriBara() {
             title={eticheta(r)}
             aria-label={eticheta(r)}
           >
-            <span className={`bec bec-${r.bec}`} aria-hidden="true" />
+            <span className={clasaBec(r.bec)} aria-hidden="true" />
           </a>
         ) : (
-          <span key={r.furnizor} className={`bec bec-${r.bec}`} title={eticheta(r)} />
+          <span key={r.furnizor} className={clasaBec(r.bec)} title={eticheta(r)} />
         ),
       )}
       {/* TOTALUL, nu doar roșii (owner, 13 aug: „se afișează exact câți AI
