@@ -2945,7 +2945,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // „secundar" pe alt furnizor. Modelul turei e treapta Gemini aleasă de
       // selectedBrainModel; pe tura ușoară e deja gemini-2.5-flash (măsurat pe
       // payload-ul real: 1.2s runda 1 + 1.0s runda 2).
-      const orchestratorModel = orChatModel
+      // CREIER DUBLU (owner, 13 aug: „două creiere, o singură voce"). Pe turele
+      // GRELE comutăm de pe fața rapidă (flash) pe creierul din spate = inteligență
+      // reală (Gemini Pro; thinking `high` se aplică automat mai jos fiindcă e
+      // google-direct). Flag STINS → rămâne fața rapidă, EXACT ca azi. Turele
+      // ușoare rămân MEREU pe fața rapidă (primul cuvânt sub 1s). Holder-ul cald +
+      // orchestrarea vocii unice = etapa 2.
+      const orchestratorModel =
+        config.creierDublu && heavyTurn ? `google-direct/${config.modelCreierProfund}` : orChatModel
       // ── VEDEREA E NATIVĂ (3 aug — extirparea OpenRouter a îngropat și
       // „vederea delegată") ────────────────────────────────────────────────────
       // Orice creier al aplicației e Gemini (google-direct/*), care VEDE nativ:

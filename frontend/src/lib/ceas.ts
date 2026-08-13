@@ -43,6 +43,13 @@ function masoaraBataia(nume: string, fn: () => void): void {
       if (acum - (ultimulAvertisment.get(nume) ?? -Infinity) > TACERE_MS) {
         ultimulAvertisment.set(nume, acum)
         console.warn(`[ceas lent] „${nume}" a ținut firul ${Math.round(ms)} ms (vârf ${Math.round(v.maxMs)} ms, ${v.lente} din ${v.batai} bătăi)`)
+        // ALERTĂ LA CREIER (owner, 13 aug): ceasurile FOARTE lente (vârf >500ms)
+        // ajung la server, ca simptomul să fie vizibil creierului, nu doar în F12.
+        // Bucket pe 100ms → dedup (nu îneacă). Import lene ca să nu creăm ciclu.
+        if (v.maxMs > 500)
+          void import('./errorReport').then((m) =>
+            m.raporteazaSimptom(`[PERF] ceas lent „${nume}" vârf ~${Math.round(v.maxMs / 100) * 100}ms`),
+          )
       }
     }
     varfuri.set(nume, v)
