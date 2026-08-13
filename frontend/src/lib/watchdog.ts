@@ -27,7 +27,11 @@ export function watchdogInit(): void {
     obs = new PerformanceObserver((list) => {
       for (const e of list.getEntries()) {
         if (e.duration <= 200) continue
-        const unde = activ.size ? [...activ.keys()].join(' + ') : '(nicio direcție activă)'
+        // Blocajele fără nicio direcție activă sunt evenimente normale de browser
+        // (GC, încărcare inițială etc.) — nu deranjează funcționalitatea, deci nu
+        // le raportăm (evităm alarme false și zgomot în client_errors).
+        if (activ.size === 0) continue
+        const unde = [...activ.keys()].join(' + ')
         console.warn(`[WATCHDOG] fir principal BLOCAT ${Math.round(e.duration)}ms în timpul: ${unde}`)
         // ALERTĂ LA CREIER (owner, 13 aug): blocajele MARI (>1s) — cele care chiar
         // desincronizează fața/vocea — ajung la server, ca Kelion să le vadă și să
