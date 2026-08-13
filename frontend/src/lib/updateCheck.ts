@@ -40,11 +40,16 @@ function deployStamp(srv: ServerVersion | null): string {
         .format(d)
         .replace(',', '')
     : srv.at.slice(0, 16).replace('T', ' ')
-  return `deploy${srv.v && !srv.v.includes('T') ? ` ${srv.v}` : ''} ${stamp} London`
+  // Owner (13 aug): „versiunea și data/ora, atât" — fără SHA-ul de deploy, fără
+  // eticheta „London". Rămâne doar data/ora (ora Londrei, comutare vară/iarnă auto).
+  return stamp
 }
 export function versionLabel(srv: ServerVersion | null): string {
-  const stamp = deployStamp(srv)
-  return `v${__APP_VERSION__} · ${__BUILD_DATE__}${stamp ? ` · ${stamp}` : ''}`
+  // „V1.0 · data/ora deploy" (owner, 13 aug). Data/ora = momentul deploy-ului
+  // (srv.at, se schimbă la ORICE publicare); cade pe data build-ului dacă serverul
+  // n-a răspuns încă la prima citire.
+  const dt = deployStamp(srv)
+  return `V${__APP_VERSION__} · ${dt || __BUILD_DATE__}`
 }
 
 export async function fetchServerVersion(): Promise<ServerVersion | null> {
