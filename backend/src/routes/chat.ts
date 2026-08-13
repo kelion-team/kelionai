@@ -72,7 +72,7 @@ import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
-import { getVoicePref } from '../db.js'
+import { getVoicePref, getGoogleRefreshToken } from '../db.js'
 import { stareSesiune, pastreazaStareSesiune, actualizeazaStareSesiune } from '../services/stareSesiune.js'
 import { splitForSpeech } from '../services/speech-chunk.js'
 import {
@@ -1452,6 +1452,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
+
+    // GOOGLE CONECTAT — CREIERUL SE UITĂ ÎN DB, NU DOAR ÎN COOKIE (owner, 13 aug:
+    // „Kelion nu vede că m-am logat prin Google"). `/auth/me` restaura tokenul din
+    // DB când cookie-ul îl pierdea, dar creierul (aici) citea DOAR cookie-ul → zicea
+    // „neconectat" deși DB-ul, sursa de adevăr, îl are (MĂSURAT live: tokenul
+    // owner-ului e în google_accounts din 8 aug). Acum, dacă sesiunea n-are token,
+    // îl luăm din DB — așa merge ȘI conștientizarea din prompt, ȘI uneltele Google
+    // (Gmail/Calendar/Drive), care tot pe `user.googleRefreshToken` se bazează.
+    if (!user.googleRefreshToken) {
+      const dbRt = await getGoogleRefreshToken(user.email).catch(() => '')
+      if (dbRt) user.googleRefreshToken = dbRt
+    }
 
     // THE BRAIN is 100% Gemini direct (extirparea OpenRouter/OpenAI, 3 aug).
     // If the key is missing, the streaming safety net returns a clear error in
