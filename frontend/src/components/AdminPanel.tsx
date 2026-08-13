@@ -59,6 +59,10 @@ import {
   type PlafonConstructor,
   fetchCreditAI,
   type CreditAIFurnizor,
+  golesteVizitatori,
+  evalueazaOrdinConstructor,
+  type EvalConstructor,
+  clasaBec,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -246,7 +250,7 @@ function BecuriCredit() {
           const titlu = f.bec === 'rosu' ? A.becuriReincarca : A.becuriDeschideFactura
           const continut = (
             <>
-              <span className={`bec bec-${f.bec}`} aria-hidden="true" />
+              <span className={clasaBec(f.bec)} aria-hidden="true" />
               <span className="bec-nume">{f.furnizor}</span>
               <span className="bec-alim">{f.alimenteaza}</span>
               <span className="bec-stare">{stare}</span>
@@ -513,6 +517,22 @@ export default function AdminPanel({
   const [buildPaused, setBuildPaused] = useState(false)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
+  // EVALUAREA CERINȚEI (owner, 13 aug): pe măsură ce scrii ordinul, evaluăm
+  // cerința (poarta de calitate + AI-urile potrivite pe capacitate, credit live).
+  const [evalOrdin, setEvalOrdin] = useState<EvalConstructor | null>(null)
+  useEffect(() => {
+    if (tab !== 'constructor') return
+    const text = buildOrder.trim()
+    if (text.length < 3) {
+      setEvalOrdin(null)
+      return
+    }
+    // Debounce: nu lovim serverul la fiecare tastă.
+    const id = window.setTimeout(() => {
+      void evalueazaOrdinConstructor(text).then((e) => setEvalOrdin(e))
+    }, 400)
+    return () => window.clearTimeout(id)
+  }, [buildOrder, tab])
   // THE PAID BRAIN TOGGLE (Adrian, Aug 2: "Everything FREE. The admin can
   // EXPRESSLY request the paid Fable 5 brain for the CONSTRUCTOR only"). Off by
   // default; when on, the order text carries the "Fable 5" marker that the VPS
@@ -835,17 +855,20 @@ export default function AdminPanel({
       credentials: 'include',
       body: JSON.stringify({ order }),
     })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { id?: number } | null) => {
-        if (j?.id) {
+      .then(async (r) => ({
+        ok: r.ok,
+        j: (await r.json().catch(() => null)) as { id?: number; error?: string; motiv?: string } | null,
+      }))
+      .then(({ ok, j }) => {
+        if (ok && j?.id) {
           setBuildOrder('')
+          setEvalOrdin(null)
           // PROMISIUNEA ONESTĂ (auditul admin, 3 aug): cu autonomia pe pauză
           // lucrătorul NU ia nimic — „max. 2 minute" ar fi fost o minciună.
-          setBuildMsg(
-            buildPaused
-              ? A.orderEnqueuedPaused(j.id)
-              : A.orderEnqueuedActive(j.id),
-          )
+          setBuildMsg(buildPaused ? A.orderEnqueuedPaused(j.id) : A.orderEnqueuedActive(j.id))
+        } else if (j?.error === 'ordin_respins') {
+          // Poarta de calitate a respins ordinul — arătăm MOTIVUL, nu un „eșec" mut.
+          setBuildMsg(`Ordin respins: ${j.motiv ?? 'cerință neclară'}`)
         } else setBuildMsg(A.orderSendFailed)
       })
       .catch(() => setBuildMsg(A.orderSendFailed))
@@ -2492,6 +2515,45 @@ export default function AdminPanel({
                   extirparea OpenRouter: Fable 5 mergea prin OpenRouter, care nu
                   mai există. Constructorul rulează pe Gemini, cheia ownerului.) */}
               {buildMsg && <div className="chat-hint">{buildMsg}</div>}
+              {/* EVALUAREA CERINȚEI + AI-uri pe capacitate (owner, 13 aug): cerința
+              e evaluată, poarta de calitate spune dacă trece, iar AI-urile potrivite
+              se așază de sus în jos, cu creditul live. Recomandarea e informativă —
+              executorul rămâne constructorul local (Jules se dă din chat). */}
+              {evalOrdin && (
+                <div className="eval-ordin">
+                  <div className={`eval-verdict ${evalOrdin.trece ? 'ok' : 'stop'}`}>
+                    {evalOrdin.trece ? '✓ ' : '✕ '}
+                    {evalOrdin.motiv}
+                  </div>
+                  {evalOrdin.capacitatiNecesare.length > 0 && (
+                    <div className="eval-caps">
+                      Cerință: {evalOrdin.capacitatiNecesare.map((c) => (
+                        <span className="eval-cap" key={c}>{c}</span>
+                      ))}
+                    </div>
+                  )}
+                  {evalOrdin.trece && evalOrdin.clasament.length > 0 && (
+                    <div className="eval-ai-lista">
+                      {evalOrdin.clasament.map((ai) => (
+                        <div
+                          className={`eval-ai ${ai.cheie === evalOrdin.aiRecomandat ? 'recomandat' : ''}`}
+                          key={ai.cheie}
+                        >
+                          <span className={clasaBec(ai.bec ?? 'gri')} title={ai.bec ? `credit: ${ai.bec}` : 'credit necunoscut'} />
+                          <div className="eval-ai-text">
+                            <div className="eval-ai-cap">
+                              <strong>{ai.nume}</strong>
+                              {ai.cheie === evalOrdin.aiRecomandat && <span className="eval-badge">recomandat</span>}
+                              <span className="eval-potrivire">{ai.potrivire}</span>
+                            </div>
+                            <div className="eval-ai-desc">{ai.descriere}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="fin-breakdown" style={{ marginTop: 12 }}>
               <div className="fin-breakdown-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -3076,6 +3138,35 @@ export default function AdminPanel({
                     </div>
                   ))}
                 </div>
+                {/* GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug: „golești baza de
+                date de vizitatori, cine va fi acolo va avea o poză cu acceptul
+                lor"). Distructiv → declanșat DOAR de owner (confirmarea lui =
+                clicul). Rezultatul e MĂSURAT (câte s-au șters), nu un „gata". */}
+                <div className="vizitatori-golire">
+                  <button
+                    type="button"
+                    className="user-act danger"
+                    onClick={async () => {
+                      const n = demosData.visitsTotal
+                      if (
+                        !window.confirm(
+                          `Golești baza de vizitatori? Se șterg toate cele ${n} vizite (profil + poze de vizitator). ` +
+                            'Conturile, plățile și recunoașterea userilor logați NU se ating. Acțiunea nu se poate anula.',
+                        )
+                      )
+                        return
+                      const sterse = await golesteVizitatori()
+                      if (sterse === null) {
+                        window.alert('Nu am putut goli baza — apelul a eșuat. Nimic nu s-a șters.')
+                        return
+                      }
+                      await fetchDemos().then(setDemos)
+                      window.alert(`Gata: ${sterse} vizite șterse. De-acum, în raport apar doar vizitatori cu consimțământ.`)
+                    }}
+                  >
+                    Golește baza de vizitatori
+                  </button>
+                </div>
                 {/* Rebuilt visitor cards (Adrian, Mar 2026): IP, city, country+flag,
                 photo thumbnail — professional, highly informational layout. */}
                 <div className="fin-breakdown">
@@ -3141,6 +3232,14 @@ export default function AdminPanel({
                               : 'prima vizită'}
                           </span>
                           <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
+                          {/* CE AU VIZITAT (owner, 13 aug): secțiunile deschise.
+                          Gol pe rândurile vechi ⇒ spunem cinstit că nu s-a
+                          înregistrat, nu inventăm „n-a vizitat nimic". */}
+                          <span className="visitor-pages">
+                            {r.pages
+                              ? `a vizitat: ${r.pages.replace(/,/g, ' · ')}`
+                              : 'secțiuni: neînregistrate'}
+                          </span>
                         </div>
                       </div>
                     </div>

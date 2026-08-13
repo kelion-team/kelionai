@@ -19,6 +19,8 @@ import {
 } from './lib/updateCheck'
 import { uiStrings } from './lib/i18n'
 import { watchdogInit } from './lib/watchdog'
+import { ConsimtamantFoto } from './components/ConsimtamantFoto'
+import { citesteConsimtamant, scrieConsimtamant, type StareConsimtamant } from './lib/consimtamant'
 
 // MARTORUL GLOBAL de fiabilitate pornește o dată, la încărcare — prinde orice
 // blocaj al firului principal, oriunde în aplicație (vedere/voce/creier/…).
@@ -35,6 +37,9 @@ export default function App() {
   // of interface. The label is composed with versionLabel (same source as under the QR).
   const [srv, setSrv] = useState<ServerVersion | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // POARTA DE CONSIMȚĂMÂNT FOTO (GDPR) — owner 13 aug. Alegerea locală per
+  // dispozitiv; `null` = încă n-a ales → i se arată poarta blocantă.
+  const [consimt, setConsimt] = useState<StareConsimtamant>(() => citesteConsimtamant())
 
   useEffect(() => {
     const err = new URLSearchParams(window.location.search).get('error')
@@ -123,6 +128,33 @@ export default function App() {
         <span className="brand-lg">Kelionai</span>
         <span className="boot-dot" />
       </div>
+    )
+  }
+
+  // POARTA DE CONSIMȚĂMÂNT FOTO (GDPR) — owner, 13 aug: „dacă nu acceptă captarea
+  // unei poze conform GDPR, nu li se permite accesul deloc pe aplicație — refuz
+  // total; anunț pe pagina de pornire." Poarta acoperă aplicația (Landing +
+  // Stage). Paginile PUBLICE de utilitate — /credite (plată) și /manual (docs) —
+  // rămân accesibile: nu captează nicio poză, iar blocarea plății ar lovi direct
+  // în venit. Enforcement-ul real al camerei stă în ChatPanel (nu pornește
+  // camera fără „acceptat"), poarta e stratul vizibil de consimțământ.
+  const rutaPublica =
+    window.location.pathname === '/manual' ||
+    window.location.pathname === '/credite' ||
+    window.location.pathname === '/credits'
+  if (!rutaPublica && consimt !== 'acceptat') {
+    return (
+      <>
+        <DynamicBackground />
+        <ConsimtamantFoto
+          stare={consimt}
+          lang={typeof navigator !== 'undefined' ? navigator.language : 'en'}
+          onDecide={(v) => {
+            scrieConsimtamant(v)
+            setConsimt(v)
+          }}
+        />
+      </>
     )
   }
 

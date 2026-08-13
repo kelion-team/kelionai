@@ -10,6 +10,71 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — GDPR + AEC + CONSTRUCTOR (poartă calitate) + BECURI pâlpâie. ✅ (PR #1079, LIVE-ul = merge-ul lui Adrian)**
+> Patru cerințe din aceeași zi, pe ramura `claude/reparatie-cu-rosu-uokj4m`:
+> - **GDPR**: poartă blocantă de consimțământ foto (Landing + Stage; refuz = fără
+>   acces; `/credite` și `/manual` publice). „Ce au vizitat" în raport: coloană
+>   `pages` pe `visits`, fiecare pagină își anunță secțiunea, strânse DISTINCT pe
+>   rând; cardul de vizitator arată „a vizitat: …", rândurile vechi spun cinstit
+>   „secțiuni: neînregistrate". Buton admin-only „Golește baza de vizitatori"
+>   (declanșat de owner; șterge doar `visits`; rezultat măsurat).
+> - **AEC half-duplex**: microfonul e fără echoCancellation (ca ieșirea să prindă
+>   Bluetooth) → Kelion își auzea ecoul → „varză". Fix: cât e audibil (redare +
+>   coadă 250ms) se trimite TĂCERE la creier (`vocalLive.ts`). Preț: fără barge-in
+>   vocal cât vorbește (server barge-in oricum OFF). Verificare LIVE = a lui.
+> - **Constructor**: poartă de calitate (`evalueazaOrdin`, pură + testată) — „să
+>   treacă orice ordin?" NU: ordinele goale/vagi/în-afară RESPINSE cu motiv,
+>   ENFORCED în POST (400). AI-uri pe capacitate + credit live (Constructor local,
+>   Jules, Creier 2; roșu ≈ exclus) + panou de evaluare + endpoint `/evalueaza`.
+>   RĂMAS: dispatch explicit la Jules din tab (acum recomandarea e informativă).
+> - **Becuri**: roșul (gol/402) PÂLPÂIE (owner: „când e gol becul pâlpâie roșu").
+> - **Auto-alimentare Revolut — NU e posibilă complet fără om** (măsurat,
+>   `billing.ts`): Revolut Pro n-are API de charge / webhook; linkul e „pull la
+>   tapul userului". Ce EXISTĂ deja (cel mai bun posibil): pre-armarea reîncărcării
+>   la prag + un tap. Auto-charge real = alt procesator (Stripe/mandat) = decizie
+>   de business a owner-ului. NU am inventat o alimentare care nu poate mișca banii.
+> Porți: backend tsc 0 · 1315 teste (145 fișiere) · frontend build 0 · 46 teste ·
+> jscpd 0 · exporturi 0 · sintaxă 0. **Nu pot verifica LIVE** din headless — se
+> confirmă pe telefonul lui, DUPĂ merge-ul PR #1079 pe master.
+
+> **13 aug 2026 — CREIERUL 2 LEGAT LA CONSTRUCTOR (fallback 24/7) + model creier-2 dezînțepenit. ✅**
+> Owner, cu dovadă: „creierul 2 nu e legat la constructor, am verificat… de aia
+> TOATE ordinele sunt eșuate; supervizează 24/7." DOVADA (în cod, regula #2):
+> `deploy/constructor-agent.mjs:791` scria explicit „UN SINGUR creier… NU cade pe
+> alt creier" — deci când DeepInfra pica toate cele 6 încercări, ORICE ordin murea.
+> FĂCUT: (1) endpoint `POST /api/constructor/creier` (gardat x-bridge-secret) care
+> rutează cererea constructorului (format OpenAI) la creierul 2 (Gemini) prin
+> `geminiDirectChat` + înregistrează costul; conversia de format e într-un modul
+> PUR + testat (`services/creier2Constructor.ts`, `creier2Constructor.test.ts`,
+> 5 teste). (2) `llm()` din constructor cade pe `llmGemini()` (prin app) când
+> creierul propriu pică — nu mai moare pe furnizorul sufocat. (3) DOVADA #2:
+> `modelCreierProfund` era `gemini-3.1-pro-preview` (versiunea 3.1 EXPIRATĂ) în timp
+> ce modelul viu, validat, e 3.5 → creierul 2 din CHAT pica tăcut pe flash → „creier
+> 2 nefuncțional" + Kelion orb pe admin (modelul slab nu cheamă uneltele). Acum
+> `modelCreierProfund` = modelul VALIDAT (env-overridable). LACĂTUL de la 12 aug
+> („fără Gemini în constructor") MUTAT, nu rupt: constructorul tot n-are cheia
+> Gemini / apel direct la Google — rescue-ul merge prin app (bridge). Porți:
+> backend tsc 0 · 1289 teste · sintaxă 0 · constructor-agent.mjs `node --check` OK.
+> RĂMAS: tab AI-uri selectabile pe capacitate + credit (poartă de calitate: nu
+> orice ordin trece); auto-alimentare Revolut; verificare LIVE creier 2.
+
+> **13 aug 2026 — BECURI: fals-roșu REPARAT (Gemini £9.59 & RunPod $5.84 arătau roșu) + buton individual per AI. ✅**
+> Owner (capturi Google AI Studio £9.59 + RunPod $5.84): „e greșit roșu că are
+> credit… ce ai scris că nu e credit era FALS." CAUZA, în codul meu (regula #2):
+> `beculCredit` trata orice `ramas ≤ 0` ca roșu — dar pentru Gemini `ramas` e o
+> ESTIMARE (declarat − cheltuit) care NU vede auto-reload-ul (£20 pe Aug 13) →
+> roșu fals. FIX: câmp `soldReal` — doar soldurile CITITE real (Serper /account,
+> RunPod clientBalance) aprind roșul pe 0; pentru Gemini becul vine din PINGUL de
+> viață (servește = are credit = verde), iar estimarea rămâne doar cifra. Necitibil
+> = gri, nu roșu fals. + Link-urile EXACTE de reîncărcare date de owner: Gemini
+> `aistudio.google.com/billing?billing=011729-7DA3DA-87ED94`, RunPod
+> `console.runpod.io/user/billing`, Serper `serper.dev/dashboard`. + „buton
+> individual la fiecare ai, click = reîncărcare DIRECT": fiecare bec din bară e
+> acum PROPRIUL link spre pagina furnizorului (nu un buton comun spre panou).
+> Porți: backend tsc 0 · teste 10 (creditAI) · frontend tsc 0 · 43 teste · build 0 · sintaxă 0.
+> URMĂTORUL: constructorul — teanc de AUTO-VINDECARE care pică pe „llm încercarea
+> X/6 a picat pe DeepInfra/…" (fără plasă → creier 2 + agenți, aprobat).
+
 > **13 aug 2026 — BARA DE SUS reorganizată: VPS sub Admin, becurile de credit în locul liber. ✅**
 > Owner (captură bară): „VPS îl pui sub admin, vizibil; și în spațiul rămas pe
 > linia aia pui butoanele astea [becurile]. Trading la useri momentan NU se

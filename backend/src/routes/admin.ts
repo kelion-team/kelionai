@@ -20,6 +20,7 @@ import {
   listVisitorConvos,
   addVisitorMessage,
   getDemoStats,
+  purgeVisits,
   getUserActivity,
   getDownloadStats,
   listInboundEmails,
@@ -654,6 +655,23 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const demos = await getDemoStats()
     if (!demos) return reply.code(500).send({ error: 'db_unreadable' })
     return reply.send(demos)
+  })
+
+  // GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug: „golești baza de date de
+  // vizitatori, cine va fi acolo va avea o poză cu acceptul lor"). Distructiv,
+  // dar mărginit la analiza de vizitatori — declanșat DOAR de owner, prin
+  // butonul din tabul „Vizitatori" (confirmarea lui = clicul). Întoarce câte
+  // rânduri s-au șters (măsurat), nu un „gata" inventat.
+  app.post('/api/admin/visitors/purge', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    try {
+      const deleted = await purgeVisits()
+      if (deleted < 0) return reply.code(500).send({ error: 'db_unreadable' })
+      return reply.send({ ok: true, deleted })
+    } catch {
+      return reply.code(500).send({ error: 'purge_failed' })
+    }
   })
 
   // Which brain models actually serve right now (admin only): a real 1-token

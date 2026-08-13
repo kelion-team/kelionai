@@ -2246,6 +2246,74 @@ is used by the visitor analytics. */
   padding: 1px 7px;
   border-radius: 5px;
 }
+/* „ce au vizitat" (owner, 13 aug) — evidențiat pe rând propriu, ca ownerul să
+   vadă imediat CE secțiuni a deschis vizitatorul, nu doar CINE e. */
+.visitor-pages {
+  flex-basis: 100%;
+  color: var(--text);
+  opacity: 0.9;
+  font-weight: 600;
+}
+/* Golirea bazei de vizitatori (owner, 13 aug) — acțiune distructivă, discretă
+   dar la vedere, deasupra listei de vizite. */
+.vizitatori-golire {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 0 6px;
+}
+
+/* EVALUAREA CERINȚEI + AI-uri pe capacitate (owner, 13 aug) — sub formularul de
+   ordin în constructor. Verdictul porții sus, apoi AI-urile de sus în jos. */
+.eval-ordin {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.eval-verdict { font-weight: 700; font-size: 13px; }
+.eval-verdict.ok { color: #1fbf6b; }
+.eval-verdict.stop { color: #ff8a8a; }
+.eval-caps { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.eval-cap {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+  font-size: 11px;
+}
+.eval-ai-lista { display: flex; flex-direction: column; gap: 6px; }
+.eval-ai {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.eval-ai.recomandat {
+  border-color: color-mix(in srgb, #1fbf6b 55%, transparent);
+  background: color-mix(in srgb, #1fbf6b 12%, transparent);
+}
+.eval-ai .bec { margin-top: 3px; flex: 0 0 auto; }
+.eval-ai-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.eval-ai-cap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.eval-badge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #06210f;
+  background: #1fbf6b;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.eval-potrivire { font-size: 11.5px; color: var(--muted); }
+.eval-ai-desc { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
 .admin-body {
   flex: 1;
   display: flex;
@@ -3262,7 +3330,11 @@ reset applies on the button or automatically when the tab is hidden (App.tsx). *
 /* POARTA DE UPDATE — BLOCANTĂ (Adrian, 11 aug: „să nu se poată continua până nu
    faci update-ul"). Acoperă TOT ecranul și prinde clicurile — pe versiunea veche
    nu se mai poate lucra — cu un card centrat + buton + numărătoare. */
-.update-gate {
+/* Poarta de update ȘI poarta de consimțământ (GDPR) au aceeași carcasă
+   blocantă — o singură definiție, ca poarta jscpd să nu vadă cod duplicat;
+   diferențele (culoare/z-index/lățime) stau în `.consimt-*` mai jos. */
+.update-gate,
+.consimt-gate {
   position: fixed;
   inset: 0;
   z-index: 9000;
@@ -3274,7 +3346,8 @@ reset applies on the button or automatically when the tab is hidden (App.tsx). *
   backdrop-filter: blur(6px);
   animation: update-gate-in 0.28s ease-out;
 }
-.update-gate-card {
+.update-gate-card,
+.consimt-card {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3308,6 +3381,45 @@ reset applies on the button or automatically when the tab is hidden (App.tsx). *
   to { opacity: 1; }
 }
 
+/* POARTA DE CONSIMȚĂMÂNT FOTO (GDPR) — owner, 13 aug. Carcasa vine din regula
+   comună de mai sus; aici doar diferențele: stă peste poarta de update, fundal
+   un pic mai opac, card puțin mai lat. Butonul de accept e verde (acțiunea care
+   lasă înăuntru), refuzul e discret. */
+.consimt-gate {
+  z-index: 9100;
+  background: rgba(6, 9, 20, 0.9);
+}
+.consimt-card {
+  gap: 14px;
+  max-width: 400px;
+  padding: 28px 26px;
+}
+.consimt-titlu { font-size: 18px; font-weight: 800; color: var(--text); }
+.consimt-mesaj { font-size: 14px; line-height: 1.5; color: var(--muted, #a9b3d0); }
+.consimt-actiuni {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 4px;
+}
+.consimt-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 22px;
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+}
+.consimt-accept { background: #1fbf6b; color: #06210f; }
+.consimt-accept:hover { filter: brightness(1.08); }
+.consimt-refuz {
+  background: transparent;
+  color: var(--muted, #a9b3d0);
+  border: 1px solid rgba(169, 179, 208, 0.4);
+}
+.consimt-refuz:hover { background: rgba(169, 179, 208, 0.12); }
+
 /* The floating windows enter smoothly, they don't „pop” (defect 3 from the
 audit): the same short entry on all conditionally-mounted overlays. */
 .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
@@ -3318,7 +3430,7 @@ audit): the same short entry on all conditionally-mounted overlays. */
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .update-gate, .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
+  .update-gate, .consimt-gate, .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
     animation: none;
   }
 }
@@ -3868,16 +3980,23 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
 .bec-stare { font-size: 12px; opacity: 0.85; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bec-rand-rosu .bec-stare { color: #e5484d; font-weight: 600; }
 
-/* BECURILE COMPACTE ÎN BARA DE SUS (admin) — în locul lăsat liber de VPS. */
-.becuri-bara { display: inline-flex; align-items: center; gap: 5px; }
+/* BECURILE COMPACTE ÎN BARA DE SUS (admin) — fiecare bec = link INDIVIDUAL spre
+   pagina de reîncărcare a furnizorului („buton individual la fiecare ai"). */
+.becuri-bara { display: inline-flex; align-items: center; gap: 3px; }
+.becuri-bec-link {
+  display: inline-flex; align-items: center; padding: 3px; border-radius: 6px;
+  line-height: 0; text-decoration: none; transition: background 0.15s ease;
+}
+.becuri-bec-link:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 .becuri-bara .bec {
   width: 9px; height: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
 }
-.becuri-bara.are-rosu { border-color: color-mix(in srgb, #e5484d 55%, var(--border)); }
 .becuri-bara-nr {
   font-size: 11px; font-weight: 700; color: #e5484d;
-  font-variant-numeric: tabular-nums; margin-left: 1px;
+  font-variant-numeric: tabular-nums; margin-left: 2px;
 }
+/* Toate au credit → totalul e discret (gri), nu alarmant (roșu). */
+.becuri-bara-nr.toate-ok { color: var(--text); opacity: 0.45; font-weight: 600; }
 
 /* CIFRELE VPS, SUB ADMIN (tabul „Sistem (VPS)") — mutate din bara de sus. */
 .vps-resurse {

@@ -1,12 +1,16 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser, adminSiId } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob } from '../db.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, recordCost } from '../db.js'
+import type { OrMessage } from '../services/brainContract.js'
+import { uneltePentruCreier2, raspunsCreier2 } from '../services/creier2Constructor.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { autonomActiv } from '../services/autonomActiv.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
 import { procentDinProgres } from '../services/progresOrdin.js'
+import { evalueazaOrdin, AI_CONSTRUCTORI, type BecCredit } from '../services/evalOrdinConstructor.js'
+import { crediteAI, beculCredit } from '../services/creditAI.js'
 import { UNELTE_CONSTRUCTOR } from '../services/brainToolDefs.js'
 import { notifyAdmin } from '../services/adminNotification.js'
 
@@ -21,6 +25,20 @@ import { notifyAdmin } from '../services/adminNotification.js'
 // loop on the Gemini API (the owner's key, hard caps), which works in a
 // separate clone (the workshop), runs build + tests and opens the PR. THE
 // MERGE STAYS WITH ADRIAN (his rule, Jul 27: "me doing the merge is ok").
+// Becul LIVE per AI-constructor, cheiat pe subșirul stabil (becFurnizor):
+// creditAI dă numele complet al furnizorului, îl potrivim cu `includes`. Un AI
+// fără rând de credit rămâne necunoscut (fără cheie), nu „verde" inventat.
+async function hartaCreditConstructor(): Promise<Record<string, BecCredit>> {
+  const rows = await crediteAI()
+  const m: Record<string, BecCredit> = {}
+  for (const ai of AI_CONSTRUCTORI) {
+    if (!ai.becFurnizor) continue
+    const row = rows.find((r) => r.furnizor.includes(ai.becFurnizor))
+    if (row) m[ai.becFurnizor] = beculCredit(row)
+  }
+  return m
+}
+
 export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // The admin (or Kelion through a tool) queues an order.
   app.post<{ Body: { order?: string } }>('/api/admin/constructor', async (req, reply) => {
@@ -28,10 +46,29 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
     if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const order = String(req.body?.order ?? '').trim()
-    if (order.length < 8) return reply.code(400).send({ error: 'ordin_prea_scurt' })
+    // POARTA DE CALITATE (owner, 13 aug: „să treacă orice ordin?" — NU). Ordinele
+    // goale/vagi/în-afara-scopului sunt oprite AICI, cu motiv, înainte să intre în
+    // coadă și să ardă credit. Poarta nu depinde de credit (doar de cerință), deci
+    // rămâne rapidă — fără apel de rețea pe fiecare trimitere.
+    const ev = evalueazaOrdin(order)
+    if (!ev.trece) return reply.code(400).send({ error: 'ordin_respins', motiv: ev.motiv })
     const id = await createBuildJob(user.email, order)
     if (!id) return reply.code(500).send({ error: 'db_indisponibil' })
     return reply.send({ ok: true, id })
+  })
+
+  // Evaluarea unei cerințe ÎNAINTE de trimitere (owner, 13 aug: „ordinul X →
+  // cerința evaluată → se oferă AI-urile potrivite"). Întoarce poarta de calitate
+  // + AI-urile potrivite pe capacitate, cu creditul LIVE din becuri. Doar citire.
+  app.post<{ Body: { order?: string } }>('/api/admin/constructor/evalueaza', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const order = String(req.body?.order ?? '')
+    // Creditul live e „nice to have": dacă becurile nu se pot citi, evaluăm doar pe
+    // capacitate (fără să inventăm verde/roșu).
+    const credit = await hartaCreditConstructor().catch(() => undefined)
+    return reply.send({ ...evalueazaOrdin(order, credit), aiuri: AI_CONSTRUCTORI })
   })
 
   app.get('/api/admin/constructor', async (req, reply) => {
@@ -141,6 +178,43 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const job = await claimNextBuildJob()
     return reply.send({ job })
   })
+
+  // ── CREIERUL 2 PENTRU CONSTRUCTOR (owner, 13 aug: „creierul 2 nu e legat la
+  // constructor… de aia toate ordinele sunt eșuate") ──────────────────────────
+  // DOVADA din cod: `deploy/constructor-agent.mjs` folosea UN SINGUR creier
+  // (DeepInfra) și „NU cădea pe alt creier". Când acela pica toate încercările,
+  // ORICE ordin murea. Aici e legătura care lipsea: când creierul propriu al
+  // constructorului pică, `llm()` cade PE ACEST endpoint, care rutează cererea
+  // (format OpenAI, identic cu ce trimitea la DeepInfra) la creierul aplicației
+  // = Gemini (creierul 2), care are credit când DeepInfra nu servește. Gardat cu
+  // x-bridge-secret, ca restul endpointurilor de worker. Cheltuie credit Gemini
+  // DOAR la salvare (aprobat de owner) și îl ÎNREGISTREAZĂ (recordCost), ca banii
+  // să apară în panoul Bani, nu pe ascuns. Dacă și Gemini pică → eroare, iar
+  // constructorul o clasifică „amânabil" și reia, exact ca înainte.
+  app.post<{ Body: { messages?: OrMessage[]; tools?: unknown[]; model?: string } }>(
+    '/api/constructor/creier',
+    async (req, reply) => {
+      if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+        return reply.code(401).send({ error: 'unauthorized' })
+      const { geminiDirectAvailable, geminiDirectChat } = await import('../services/geminiDirect.js')
+      if (!geminiDirectAvailable()) return reply.code(503).send({ error: 'gemini_indisponibil' })
+      const messages = Array.isArray(req.body?.messages) ? (req.body.messages as OrMessage[]) : []
+      if (!messages.length) return reply.code(400).send({ error: 'fara_mesaje' })
+      // Uneltele constructorului (OpenAI function) → formatul geminiDirectChat;
+      // răspunsul creierului → înapoi în format OpenAI. Ambele punți sunt în
+      // services/creier2Constructor.ts, PURE și probate (creier2Constructor.test.ts).
+      const tools = uneltePentruCreier2(Array.isArray(req.body?.tools) ? req.body.tools : [])
+      // Modelul VALIDAT/viu (geminiModelGreu), nu ID-ul expirat modelCreierProfund.
+      const model = String(req.body?.model ?? '').trim() || config.geminiModelGreu
+      try {
+        const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high' })
+        if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
+        return reply.send(raspunsCreier2(r))
+      } catch (e) {
+        return reply.code(502).send({ error: `gemini_esec: ${(e as Error).message.slice(0, 200)}` })
+      }
+    },
+  )
 
   app.post<{
     Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }

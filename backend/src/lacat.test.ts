@@ -122,21 +122,33 @@ describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: �
   })
 })
 
-describe('LACĂT — constructor (endpoint OpenAI-compatibil, NU Gemini)', () => {
-  // Owner, 12 aug: „nu are ce căuta Gemini acolo". Constructorul a fost mutat de
-  // pe Gemini pe un endpoint OpenAI-compatibil (RunPod→DeepInfra). Noul zid: fără
-  // OpenRouter/OpenAI, fără NICIUN apel Gemini, și creierul vine din env-ul
-  // RunPod/DeepInfra. Codul mort Gemini (llmGemini + helperele) a fost SCOS.
-  it('agentul: fără OpenRouter/OpenAI, fără apel Gemini, creier din env-ul OpenAI-compat', () => {
+describe('LACĂT — constructor: creier propriu OpenAI-compat + FALLBACK creier 2 PRIN APP', () => {
+  // Owner, 12 aug: „nu are ce căuta Gemini acolo" — constructorul pe endpoint
+  // OpenAI-compatibil (RunPod→DeepInfra), fără cheia Gemini. 13 aug, ownerul
+  // REVINE EXPLICIT asupra propriei reguli: „creierul 2 (Gemini) NU e legat la
+  // constructor… de aia toate ordinele eșuate; să-l supervizeze 24/7." Deci zidul
+  // se MUTĂ, nu se rupe: constructorul tot NU are cheia Gemini și NU cheamă DIRECT
+  // API-ul Google — dar când creierul propriu pică, cade pe creierul 2 PRIN APP
+  // (endpoint gardat cu bridge-secret; app-ul are cheia + creditul, îl înregistrează).
+  it('agentul: fără OpenRouter/OpenAI, fără cheia Gemini, fără apel DIRECT la Google', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
     expect(/openrouter\.ai/.test(s)).toBe(false)
     expect(/OPENROUTER_API_KEY/.test(s)).toBe(false)
     expect(/anthropic\/claude-fable-5/.test(s)).toBe(false)
-    // NU mai cheamă Gemini (niciun apel către API-ul Google) și fără codul mort.
+    // NU cheamă DIRECT API-ul Google — n-are cheia Gemini; creierul propriu e OpenAI-compat.
     expect(/generativelanguage\.googleapis\.com/.test(s)).toBe(false)
-    expect(/function llmGemini/.test(s)).toBe(false)
-    // Creierul vine din env-ul endpointului OpenAI-compatibil (nume nou SAU vechi).
+    expect(/x-goog-api-key/.test(s)).toBe(false)
+    // Creierul PROPRIU vine din env-ul endpointului OpenAI-compatibil (nume nou SAU vechi).
     expect(/env\.CONSTRUCTOR_RUNPOD_KEY\s*\|\|\s*env\.CONSTRUCTOR_DEEPSEEK_KEY/.test(s)).toBe(true)
+  })
+
+  it('FALLBACK creier 2 (owner 13 aug): cere Gemini PRIN APP (bridge-secret), nu direct', () => {
+    const s = sursa('../../deploy/constructor-agent.mjs')
+    // Plasa 24/7 aprobată: fallback-ul EXISTĂ, dar merge la endpointul APP-ului,
+    // gardat cu x-bridge-secret — nu la Google direct și fără cheie în constructor.
+    expect(/function llmGemini/.test(s)).toBe(true)
+    expect(/\/api\/constructor\/creier/.test(s)).toBe(true)
+    expect(/x-bridge-secret/.test(s)).toBe(true)
   })
 })
 
@@ -289,6 +301,32 @@ describe('LACĂT — voce unificată: fraza pleacă DIRECT la creierul unic ca a
       existaStream = false
     }
     expect(existaStream).toBe(false)
+  })
+})
+
+describe('LACĂT — AEC half-duplex: microfonul tace cât Kelion vorbește (owner, 13 aug)', () => {
+  // „aec e problema" — microfonul e deschis FĂRĂ echoCancellation (ca ieșirea să
+  // prindă A2DP pe Bluetooth), deci propria voce a lui Kelion intra în microfon
+  // și strica recunoașterea („varză"). Plasa: cât Kelion e audibil, se trimite
+  // TĂCERE la creier. Dacă cineva scoate poarta asta (sau readuce echoCancellation
+  // care rupe Bluetooth-ul), testul cade.
+  const vl = sursa('../../frontend/src/lib/vocalLive.ts')
+
+  it('există poarta half-duplex (kelionAudibil) legată de coada de redare', () => {
+    expect(/kelionAudibil/.test(vl)).toBe(true)
+    // predicatul se sprijină pe cursorRedare (ora până la care e programat sunetul)
+    expect(/ctxOut\.currentTime < cursorRedare \+ COADA_ECOU_S/.test(vl)).toBe(true)
+  })
+
+  it('cadrul de microfon devine TĂCERE cât Kelion e audibil (array nou, nu mută captura)', () => {
+    expect(/kelionAudibil\(\) \? new Float32Array\(ds\.length\) : ds/.test(vl)).toBe(true)
+  })
+
+  it('microfonul rămâne deschis fără echoCancellation (altfel se rupe ieșirea Bluetooth)', () => {
+    // Cuplul e intenționat: fără AEC de browser ⇒ half-duplex în cod. Dacă revine
+    // echoCancellation:true, poarta de mai sus devine redundantă ȘI Bluetooth-ul
+    // pică din nou — semnalăm împerecherea greșită.
+    expect(/echoCancellation:\s*false/.test(vl)).toBe(true)
   })
 })
 

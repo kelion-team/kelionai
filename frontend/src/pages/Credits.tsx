@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
 import { startCheckout, fetchBalance, fetchHistory, type CheckoutStart, type PurchaseRecord, type WalletStatus } from '../lib/billing'
+import { raporteazaPagina } from '../lib/vizita'
 import BackLink from '../components/BackLink'
 
 const CREDITS_PER_POUND = 7.5
@@ -25,6 +26,9 @@ export default function Credits(): React.JSX.Element {
   const [codeCopied, setCodeCopied] = useState(false)
 
   const prevCreditsRef = useRef<number | null>(null)
+
+  // „ce au vizitat" (owner, 13 aug): secțiunea „credite" în raportul de vizite.
+  useEffect(() => raporteazaPagina('credite'), [])
 
   const loadUserData = async (): Promise<void> => {
     const [b, h] = await Promise.all([fetchBalance(), fetchHistory()])

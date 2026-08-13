@@ -77,6 +77,64 @@ export async function fetchCreditAI(): Promise<CreditAIFurnizor[] | null> {
   }
 }
 
+/** Clasa CSS a unui bec de credit. ROȘU (gol / 402) PÂLPÂIE — owner, 13 aug:
+ *  „când e gol becul pâlpâie roșu"; e semnalul că exact acolo trebuie pus credit.
+ *  Verde/gri stau liniștite. O singură definiție, folosită și în bară, și în admin. */
+export function clasaBec(bec: string): string {
+  return `bec bec-${bec}${bec === 'rosu' ? ' palpaie' : ''}`
+}
+
+// ── Evaluarea unui ordin de constructor (owner, 13 aug) ─────────────────────
+export interface EvalRandAI {
+  cheie: 'constructor' | 'jules' | 'creier2'
+  nume: string
+  descriere: string
+  scor: number
+  potrivire: string
+  bec: 'verde' | 'rosu' | 'gri' | null
+}
+export interface EvalConstructor {
+  trece: boolean
+  motiv: string
+  capacitatiNecesare: string[]
+  clasament: EvalRandAI[]
+  aiRecomandat: 'constructor' | 'jules' | 'creier2' | null
+}
+
+/** Evaluează cerința ÎNAINTE de trimitere: poarta de calitate + AI-urile potrivite
+ *  pe capacitate, cu credit live. `null` dacă apelul pică (nu inventăm verdict). */
+export async function evalueazaOrdinConstructor(order: string): Promise<EvalConstructor | null> {
+  try {
+    const r = await fetch('/api/admin/constructor/evalueaza', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ order }),
+    })
+    if (!r.ok) return null
+    return (await r.json()) as EvalConstructor
+  } catch {
+    return null
+  }
+}
+
+/** GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug). Distructiv, declanșat de owner.
+ *  Întoarce câte rânduri s-au șters (măsurat), sau `null` dacă a picat — ca
+ *  butonul să spună adevărul, nu un „gata" inventat pe un apel eșuat. */
+export async function golesteVizitatori(): Promise<number | null> {
+  try {
+    const r = await fetch('/api/admin/visitors/purge', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { ok?: boolean; deleted?: number }
+    return j.ok ? Number(j.deleted ?? 0) : null
+  } catch {
+    return null
+  }
+}
+
 // CIRCUITUL BANILOR (admin): starea verigilor Stripe→AI + crearea cardului.
 /** The owner's lever: stops / restarts Kelion's autonomy.
  *
