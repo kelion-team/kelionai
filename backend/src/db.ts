@@ -724,6 +724,14 @@ export async function saveClientError(e: {
 // (problema `erori_client`) numără DOAR erorile reale — o singură definiție,
 // folosită în ambele locuri, ca să nu mai plece alarme false. Filtrăm și după
 // tip (rândurile noi), și după marcaj (rândurile vechi, încă `f12`, din fereastră).
+/** Pure logic: does a client error row represent a REAL UI error (not a perf symptom)?
+ *  Used by the SQL query AND by tests — one definition, no drift. */
+export function isRealClientError(type: string | null, message: string | null): boolean {
+  if (type === 'perf') return false
+  if (message && message.includes('[PERF]')) return false
+  return true
+}
+
 export async function countClientErrorsLastHour(): Promise<number> {
   if (!dbEnabled()) return 0
   try {

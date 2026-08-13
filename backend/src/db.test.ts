@@ -9,7 +9,7 @@
 //
 // We also check that without DATABASE_URL nothing pretends to work.
 import { describe, it, expect } from 'vitest'
-import { vectorDistance, faceDistance, dbEnabled } from './db.js'
+import { vectorDistance, faceDistance, dbEnabled, isRealClientError } from './db.js'
 
 describe('db — distanța dintre amprente (identitatea userului)', () => {
   it('un vector cu EL ÎNSUȘI dă distanță 0 (recunoaștere perfectă)', () => {
@@ -60,6 +60,32 @@ describe('db — distanța dintre amprente (identitatea userului)', () => {
     const b = [0, 0, 0, 0]
     expect(vectorDistance(a, b)).toBe(1) // sqrt(4/4)
     expect(faceDistance(a, b)).toBe(2) // sqrt(4)
+  })
+})
+
+describe('db — erori reale vs simptome [PERF] (sentinela nu mai țipă fals)', () => {
+  it('type="perf" NU e eroare reală', () => {
+    expect(isRealClientError('perf', 'orice')).toBe(false)
+  })
+
+  it('mesaj cu [PERF] NU e eroare reală (rânduri vechi, tip f12)', () => {
+    expect(isRealClientError('f12', 'blocaj [PERF] fir principal')).toBe(false)
+  })
+
+  it('type=f12 fără [PERF] E eroare reală', () => {
+    expect(isRealClientError('f12', 'TypeError: cannot read null')).toBe(true)
+  })
+
+  it('type gol + mesaj gol E eroare reală (nu avem motiv să excludem)', () => {
+    expect(isRealClientError(null, null)).toBe(true)
+  })
+
+  it('[PERF] oriunde în mesaj e prins (nu doar la început)', () => {
+    expect(isRealClientError('f12', 'ceva [PERF] la final')).toBe(false)
+  })
+
+  it('mesaj care conține "perf" fără paranteze drepte E eroare reală', () => {
+    expect(isRealClientError('f12', 'performance bottleneck')).toBe(true)
   })
 })
 
