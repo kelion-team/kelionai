@@ -72,8 +72,11 @@ function BecuriBara() {
     `${r.furnizor} — ${r.bec === 'rosu' ? A.becuriReincarca : r.bec === 'verde' ? A.becuriServeste : A.becuriNecunoscut}`
   return (
     <span className={`becuri-bara${rosii > 0 ? ' are-rosu' : ''}`} title={A.becuriBaraTitlu}>
-      {rows.map((r) =>
-        r.facturare ? (
+      {rows.map((r) => {
+        // NUMELE AI-ULUI SCRIS PE BUTON (owner, 13 aug: „scrii numele ai pe ele")
+        // — scurt (partea dinaintea parantezei). Tot butonul = link la reîncărcare.
+        const nume = r.furnizor.split(' (')[0]
+        return r.facturare ? (
           <a
             key={r.furnizor}
             className="becuri-bec-link"
@@ -81,14 +84,17 @@ function BecuriBara() {
             target="_blank"
             rel="noreferrer"
             title={eticheta(r)}
-            aria-label={eticheta(r)}
           >
             <span className={clasaBec(r.bec)} aria-hidden="true" />
+            <span className="becuri-bec-nume">{nume}</span>
           </a>
         ) : (
-          <span key={r.furnizor} className={clasaBec(r.bec)} title={eticheta(r)} />
-        ),
-      )}
+          <span key={r.furnizor} className="becuri-bec-link becuri-bec-static" title={eticheta(r)}>
+            <span className={clasaBec(r.bec)} aria-hidden="true" />
+            <span className="becuri-bec-nume">{nume}</span>
+          </span>
+        )
+      })}
       {/* TOTALUL, nu doar roșii (owner, 13 aug: „se afișează exact câți AI
           monitorizăm"): „2/5" = 2 fără credit din 5 AI monitorizați. Când toate
           au credit, un „5" discret spune câți sunt urmăriți. */}
