@@ -966,3 +966,10 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
   ack ca la butonul Rec principal.
 - **Respinse la verificare (2):** nu erau găuri reale (verificatorul adversarial le-a
   infirmat).
+
+## O. SENTINELĂ + SCURGERE DE MARKUP (13 aug 2026) — reparat în cod, de verificat live
+
+| # | Ce nu mergea | Stare |
+|---|---|---|
+| O1 | **Emailul fals „23 erori de client în ultima oră".** Cablajul [PERF] din 13 aug (fir principal blocat / ceas lent → `raporteazaSimptom` → `/api/client-errors`) e CORECT — vrei ca astea să ajungă la creier — dar sentinela le număra ca „erori UI rupt" și trimitea alarma. FIX: `[PERF]` primește `type='perf'` la salvare (`routes/clientErrors.ts`); un helper unic `countClientErrorsLastHour()` (`db.ts`) numără doar erorile REALE (exclude `type='perf'` ȘI mesajele cu `[PERF]` — și rândurile vechi din fereastră), folosit de sentinelă (`routes/ops.ts`) ȘI de scanarea de sănătate (`services/health.ts`). Creierul TOT le vede (inel `recentClientErrors` + `client_errors` prin db_query), doar nu mai declanșează „UI rupt". | 🔧 reparat, de verificat live (owner): emailul nu mai vine doar din blocaje [PERF] |
+| O2 | **`response:secret_publica{result:{rezultat:{}` brut în bandă.** Un model slab tastase wrapperul de REZULTAT al unei unelte ca text; `toolMarkup.ts` cunoștea apelurile goale (`get_weather`, `call:x{...}`) dar nu forma cu prefix de răspuns. FIX: `CALL_LINE_RE` + `PARTIAL_CALL_LINE_RE` prind acum prefixul opțional `response:`/`result:`/`output:`/`observation:` (eventual `tool_`-) înaintea unei unelte a turei — se ASCUNDE (stream + text final), NU se execută (e rezultat fabricat); garda pe `knownTools` rămâne, deci o frază care menționează unealta stă vizibilă. 6 teste noi. | 🔧 reparat, de verificat live (owner): în bandă nu mai apare `response:...{...}` brut |

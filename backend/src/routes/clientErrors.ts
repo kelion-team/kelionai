@@ -43,7 +43,12 @@ export async function clientErrorRoutes(app: FastifyInstance): Promise<void> {
       // restart the errors disappeared and the autonomous repair had no
       // durable source. We also save to the DB (best-effort, doesn't block
       // the reply).
-      void saveClientError({ type: 'f12', message: `${user.email}: ${msg}`, ip: req.ip })
+      // PERF ≠ INTERFAȚĂ RUPTĂ (owner, 13 aug): simptomele de performanță
+      // (watchdog/ceas → marcaj `[PERF]`) primesc tipul `perf`, ca sentinela să
+      // nu le mai numere drept „erori UI rupt" (emailul fals de 23). Creierul
+      // tot le vede — ajung în inel și în client_errors ca orice altă eroare.
+      const tip = msg.includes('[PERF]') ? 'perf' : 'f12'
+      void saveClientError({ type: tip, message: `${user.email}: ${msg}`, ip: req.ip })
     }
     while (ring.length > MAX_PER_USER) ring.shift()
     rings.set(user.email, ring)
