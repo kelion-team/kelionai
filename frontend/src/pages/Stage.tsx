@@ -28,8 +28,7 @@ import {
   type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii, saveSpeechLang } from '../lib/prefs'
-import { LANGS } from '../lib/languages'
+import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
@@ -90,7 +89,12 @@ function BecuriBara() {
           <span key={r.furnizor} className={`bec bec-${r.bec}`} title={eticheta(r)} />
         ),
       )}
-      {rosii > 0 && <span className="becuri-bara-nr">{rosii}</span>}
+      {/* TOTALUL, nu doar roșii (owner, 13 aug: „se afișează exact câți AI
+          monitorizăm"): „2/5" = 2 fără credit din 5 AI monitorizați. Când toate
+          au credit, un „5" discret spune câți sunt urmăriți. */}
+      <span className={`becuri-bara-nr${rosii > 0 ? '' : ' toate-ok'}`}>
+        {rosii > 0 ? `${rosii}/${rows.length}` : rows.length}
+      </span>
     </span>
   )
 }
@@ -1606,29 +1610,12 @@ export default function Stage({ user }: { user: User }) {
               {t.connectGoogle}
             </button>
           )}
-          {/* SELECTORUL DE LIMBĂ ÎN BARĂ (10 aug, ownerul: „buton de selectare
-              limba direct pe bara de lucru sus"): aceeași mecanică precisă ca în
-              Client Settings (saveSpeechLang = PUT /api/prefs + oglinda locală),
-              apoi reîncărcare — toată interfața comută pe loc, fără drum prin
-              setări. Valoarea arătată = limba UI curentă. */}
-          <select
-            className="ghost"
-            value={LANGS.find((l) => l.code.toLowerCase().startsWith(lang)) ? LANGS.find((l) => l.code.toLowerCase().startsWith(lang))!.code : 'en-US'}
-            onChange={(e) => {
-              void saveSpeechLang(e.target.value).then((ok) => {
-                if (ok) window.location.reload()
-              })
-            }}
-            title={t.langPickTitle}
-            aria-label={t.langPickTitle}
-            style={{ maxWidth: 110 }}
-          >
-            {LANGS.map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.label}
-              </option>
-            ))}
-          </select>
+          {/* SELECTORUL DE LIMBĂ SCOS DIN BARĂ (owner, 13 aug: „dacă pun o limbă și
+              vorbesc în alta, Kelion trece pe limba auzită — nu e nevoie aici; era
+              necesar în Manual"). Conversația se adaptează SINGURĂ la limba
+              auzită/scrisă (creierul o decide), deci butonul nu ajuta la vorbit.
+              Limba INTERFEȚEI rămâne setabilă din Manual (are selector propriu de
+              7 limbi) și din Client Settings — bara rămâne curată. */}
           <button
             type="button"
             className="ghost"

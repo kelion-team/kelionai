@@ -3883,6 +3883,8 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
   font-size: 11px; font-weight: 700; color: #e5484d;
   font-variant-numeric: tabular-nums; margin-left: 2px;
 }
+/* Toate au credit → totalul e discret (gri), nu alarmant (roșu). */
+.becuri-bara-nr.toate-ok { color: var(--text); opacity: 0.45; font-weight: 600; }
 
 /* CIFRELE VPS, SUB ADMIN (tabul „Sistem (VPS)") — mutate din bara de sus. */
 .vps-resurse {
