@@ -75,8 +75,15 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
 
   let filed = 0
 
-  // ── ERORILE RAPORTATE DIN BROWSER (calea veche) ─────────────────────────────
-  const errors = await recurringClientErrors(24, 5, 2)
+  // ── ERORILE RAPORTATE DIN BROWSER (F12/consolă) ─────────────────────────────
+  // PRAG COBORÂT (owner, 13 aug: „obligatoriu trebuie să le verifice, eu nu am
+  // timp de așa ceva, face parte din autonomia lui"). Înainte: 5 apariții la 2
+  // utilizatori distincți — deci erorile pe care le lovea ownerul SINGUR, testând,
+  // NU declanșau auto-reparația. Acum: 3 apariții la 1 utilizator — eșecul lui,
+  // singur, contează (ca la simptomele „mute" de mai jos). Rămâne mărginit de
+  // plafonul zilnic de bani + dedup pe semnătură + max 3 ordine/rulare, ca o rafală
+  // să nu inunde coada. Un singur fluke (1 apariție) tot nu naște ordin — regula #1.
+  const errors = await recurringClientErrors(24, 3, 1)
   for (const e of errors) {
     if (filed >= 3) break
     const sig = signature(e.message)
