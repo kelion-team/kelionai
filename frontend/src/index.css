@@ -963,11 +963,24 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 170px;
+  /* Buton real acum (nu span) — resetăm ca să arate identic. */
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
 }
 .ws-tab-x {
   opacity: 0.6;
   font-size: 13px;
   line-height: 1;
+  /* Buton real acum (nu span) — resetăm aspectul de buton. */
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   /* ZONĂ DE CLICK REALĂ (10 aug, ownerul: „×-ul din mod monitor nu merge").
      Măsurat cu Playwright: ×-ul avea doar 9×11px — clickul REAL rata ținta
      minusculă (deși cel programatic o nimerea, de-aia părea „reparat"). Padding
@@ -1214,6 +1227,39 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .build-order {
   font-weight: 500;
   word-break: break-word;
+  flex: 1 1 auto;
+}
+/* ×-ul de oprire per-ordin (owner, 13 aug: „nu are x de oprit individual").
+   Buton real, împins la dreapta rândului; roșu discret, evident la hover. */
+.build-stop {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: #ff7a7a;
+  font: 600 16px/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.build-stop:hover {
+  background: color-mix(in srgb, #ff7a7a 18%, transparent);
+  border-color: #ff7a7a;
+}
+.build-stop:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.build-stop:focus-visible {
+  outline: 2px solid #ff7a7a;
+  outline-offset: 2px;
 }
 .build-progress {
   margin-top: 8px;

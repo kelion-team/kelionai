@@ -202,6 +202,11 @@ export interface Strings {
   /** `{n}` = attempt number. */
   buildAttempt: string
   buildSeePr: string
+  /** Butonul × de pe fiecare ordin viu (owner, 13 aug: „nu are x de oprit
+   *  individual"). Oprește DOAR ordinul lui, nu tot panoul. */
+  buildStop: string
+  /** `{n}` = numărul ordinului. Confirmarea înainte de a opri un ordin în lucru. */
+  buildStopConfirm: string
   buildCiFailed: string
   unlockWrongCode: string
   unlockRetryError: string
@@ -435,6 +440,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildHead: 'Kelion’s builder',
     buildAttempt: 'attempt {n}',
     buildSeePr: 'See the PR ↗',
+    buildStop: 'Stop this order',
+    buildStopConfirm: 'Stop order #{n}? What it has already done is kept; it just stops here.',
     buildCiFailed: 'CI failed on the PR',
     unlockWrongCode: 'Wrong code — try again.',
     unlockRetryError: 'Error — try again.',
@@ -648,6 +655,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildHead: 'Constructorul lui Kelion',
     buildAttempt: 'încercarea {n}',
     buildSeePr: 'Vezi PR ↗',
+    buildStop: 'Oprește acest ordin',
+    buildStopConfirm: 'Oprești ordinul #{n}? Ce a făcut deja rămâne; doar se oprește aici.',
     buildCiFailed: 'CI a picat pe PR',
     unlockWrongCode: 'Cod greșit — mai încearcă.',
     unlockRetryError: 'Eroare — reîncearcă.',

@@ -307,6 +307,36 @@ function BuildSurface({ zoom }: { zoom: number }) {
   const [jobs, setJobs] = useState<BuildLiveJob[]>([])
   const [note, setNote] = useState('')
   const [loaded, setLoaded] = useState(false)
+  // OPRIREA INDIVIDUALĂ (owner, 13 aug: „nu are x de oprit individual"). Ruta
+  // POST /api/admin/constructor/:id/anuleaza exista de mult (cancelBuildJob),
+  // dar panoul n-avea butonul care s-o cheme. Aici e ×-ul de pe fiecare ordin
+  // VIU (queued/running); oprește DOAR ordinul lui, nu tot panoul. Optimist:
+  // marchez local „eșuat", iar pollul de 2.5s confirmă din DB.
+  const [opresc, setOpresc] = useState<ReadonlySet<number>>(new Set())
+  const opreste = async (id: number): Promise<void> => {
+    if (opresc.has(id)) return
+    if (!window.confirm(uiStrings().buildStopConfirm.replace('{n}', String(id)))) return
+    setOpresc((s) => new Set(s).add(id))
+    try {
+      const r = await fetch(`/api/admin/constructor/${id}/anuleaza`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      if (r.ok) {
+        setJobs((js) =>
+          js.map((j) => (j.id === id ? { ...j, status: 'failed', progress: 'anulat de owner' } : j)),
+        )
+      }
+    } catch {
+      /* pollul următor reîncearcă */
+    } finally {
+      setOpresc((s) => {
+        const n = new Set(s)
+        n.delete(id)
+        return n
+      })
+    }
+  }
   useEffect(() => {
     let alive = true
     let timer: number | undefined
@@ -378,6 +408,20 @@ function BuildSurface({ zoom }: { zoom: number }) {
                   <span className="build-ci build-ci-wait" title={uiStrings().buildCiRunning}>CI…</span>
                 ) : null}
                 <span className="build-order">#{j.id} — {j.order}</span>
+                {/* ×-ul de oprire, DOAR pe ordinele vii (owner, 13 aug). Ordinele
+                    gata/eșuate n-au ce opri — se curăță din butoanele de sus. */}
+                {(j.status === 'queued' || j.status === 'running') && (
+                  <button
+                    type="button"
+                    className="build-stop"
+                    onClick={() => void opreste(j.id)}
+                    disabled={opresc.has(j.id)}
+                    aria-label={uiStrings().buildStop}
+                    title={uiStrings().buildStop}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
               {/* BARA + FLUXUL PE ETAPE (Adrian, 12 aug: „tot fluxul, cu bari de
                   la 0 la 100%, până la deploy"). Etapele se aprind din pct-ul
@@ -1109,18 +1153,27 @@ export default function Stage({ user }: { user: User }) {
                     tabul rămânea vizibil pentru că lista venea din poza veche
                     înghețată). Cu `ws`, ×-ul șterge tabul PE LOC. Corpurile
                     suprafețelor rămân pe `wsv` doar pentru animația de fade. */}
+                {/* STRUCTURĂ VALIDĂ (owner, 13 aug: „×-ul să funcționeze"): tabul
+                    era `<button>` cu un `<span role=button>` X ÎNĂUNTRU — HTML
+                    invalid (interactiv-în-interactiv), fragil. Acum e un `<div>` cu
+                    DOUĂ butoane-surori reale: eticheta (comută) + ×-ul (închide).
+                    Fiecare e țintă de clic proprie, robustă. */}
                 {ws.tasks.map((task) => (
-                  <button
+                  <div
                     key={task.id}
-                    type="button"
                     className={`ws-tab ${task.id === ws.activeId ? 'active' : ''}`}
-                    onClick={() => switchToId(task.id)}
                     title={task.title}
                   >
-                    <span className="ws-tab-label">{task.title}</span>
-                    <span
+                    <button
+                      type="button"
+                      className="ws-tab-label"
+                      onClick={() => switchToId(task.id)}
+                    >
+                      {task.title}
+                    </button>
+                    <button
+                      type="button"
                       className="ws-tab-x"
-                      role="button"
                       aria-label={t.wsClose}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -1128,8 +1181,8 @@ export default function Stage({ user }: { user: User }) {
                       }}
                     >
                       ✕
-                    </span>
-                  </button>
+                    </button>
+                  </div>
                 ))}
               </div>
               <div className="ws-zoom" title={t.wsZoomFit}>
@@ -1326,8 +1379,14 @@ export default function Stage({ user }: { user: User }) {
       {/* Avatarul 3D + AvatarLoading trăiesc în chunk-ul lazy StageAvatar —
           three.js nu mai e în calea critică; interfața apare instant. La volan
           (carOn) NU se montează deloc: stratul Jarvis îl acoperă oricum, iar
-          three.js iese din memorie (economie reală de baterie/GPU). */}
-      {!carOn && !reteaSlaba && (
+          three.js iese din memorie (economie reală de baterie/GPU). ECRAN NEGRU
+          (owner, 13 aug: „unde e avatarul, ai distrus aplicația"): avatarul NU
+          mai e stins pe „rețea slabă". reteaLenta() dă fals-pozitiv pe wifi bun
+          (effectiveType raportează '3g' tranzitoriu), iar avatarul E aplicația —
+          nu are voie să dispară. Nota „minim 4G" (mai jos) rămâne, non-blocantă,
+          dar nu mai golește scena. StageAvatar e lazy: pe conexiune chiar slabă
+          apare pur și simplu mai târziu, nu deloc. */}
+      {!carOn && (
         <Suspense fallback={null}>
           <StageAvatar monitorOn={monitorOn} />
         </Suspense>
