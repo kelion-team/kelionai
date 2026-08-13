@@ -449,6 +449,25 @@ const INSTALL_RE = /^npm --prefix (backend|frontend) install\b(.*)$/
 // verific „pe încredere"). Întoarce {mode:'shell'|'install'|'denied'}.
 export function classifyRunCommand(cmd) {
   const c = String(cmd ?? '').trim()
+  // Comenzi ÎNLĂNȚUITE cu `&&` — modelele le scriu firesc pentru verificări
+  // (`npm --prefix backend run typecheck && npm --prefix backend test && …`).
+  // MĂSURAT (ordin #187, DeepSeek): fiecare verigă era PERMISĂ, dar chain-ul întreg
+  // era respins „comandă nepermisă", iar modelul ardea ture reîncercând. Le acceptăm
+  // DOAR dacă FIECARE verigă e permisă individual; rulează în secvență, oprindu-se la
+  // prima care pică (ca `&&`). Fără shell (execFileSync/sh per verigă) — `&&` nu ajunge
+  // niciodată la un shell, deci gardul de injecție rămâne intact.
+  if (c.includes('&&')) {
+    const parti = c.split('&&').map((p) => p.trim()).filter(Boolean)
+    if (parti.length > 1) {
+      const pasi = []
+      for (const p of parti) {
+        const sub = classifyRunCommand(p)
+        if (sub.mode === 'denied') return sub
+        pasi.push(sub)
+      }
+      return { mode: 'chain', pasi }
+    }
+  }
   if (RUN_ALLOWED.has(c)) return { mode: 'shell', cmd: c }
   const mi = INSTALL_RE.exec(c)
   if (mi) {
@@ -465,18 +484,32 @@ export function classifyRunCommand(cmd) {
   }
   return { mode: 'denied', reason: `comandă nepermisă. Permise: ${[...RUN_ALLOWED].join(' | ')} | npm --prefix (backend|frontend) install [pachete]` }
 }
-function toolRun(cmd) {
-  const cls = classifyRunCommand(cmd)
-  if (cls.mode === 'denied') return cls.reason
+function ruleazaUnPas(cls) {
   try {
     const out =
       cls.mode === 'install'
         ? execFileSync('npm', cls.argv, { cwd: ATELIER, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], timeout: 10 * 60_000 })
         : sh(cls.cmd, { timeout: 10 * 60_000 })
-    return out.slice(-8000) || '(ok, fără ieșire)'
+    return { ok: true, text: out.slice(-8000) || '(ok, fără ieșire)' }
   } catch (e) {
-    return `EȘEC (exit ${e.status ?? '?'})\n${String((e.stdout ?? '') + (e.stderr ?? '')).slice(-8000)}`
+    return { ok: false, text: `EȘEC (exit ${e.status ?? '?'})\n${String((e.stdout ?? '') + (e.stderr ?? '')).slice(-8000)}` }
   }
+}
+function toolRun(cmd) {
+  const cls = classifyRunCommand(cmd)
+  if (cls.mode === 'denied') return cls.reason
+  if (cls.mode === 'chain') {
+    // Verigile în ordine; ne oprim la prima care pică, exact ca `&&`.
+    const bucati = []
+    for (const pas of cls.pasi) {
+      const eticheta = pas.mode === 'install' ? `npm ${pas.argv.join(' ')}` : pas.cmd
+      const r = ruleazaUnPas(pas)
+      bucati.push(`$ ${eticheta}\n${r.text}`)
+      if (!r.ok) break
+    }
+    return bucati.join('\n---\n').slice(-8000)
+  }
+  return ruleazaUnPas(cls).text
 }
 
 let TOOLS = [
@@ -1265,8 +1298,14 @@ async function main() {
           const capRezultat = c.function.name === 'read' ? READ_CAP_FISIER : READ_CAP
           messages.push({ role: 'tool', tool_call_id: c.id, content: result.slice(0, capRezultat) })
         }
-        if (aLucrat) pasiUtili++
-        else pasiSterili++
+        // Contor de sterile CONSECUTIVE, nu cumulative (MĂSURAT, ordin #187: modele
+        // care făceau 13-18 pași REALI mureau fiindcă adunau 8 ture de „gândit cu voce
+        // tare" RĂSPÂNDITE printre pași — deși LUCRAU). Un pas productiv resetează
+        // contorul; mor doar buclele de pură povestire (8 la RÂND fără unealtă utilă).
+        if (aLucrat) {
+          pasiUtili++
+          pasiSterili = 0
+        } else pasiSterili++
         // ANTI-RĂTĂCIRE: dacă modelul explorează întruna (grep/ls/read) fără nicio
         // editare, la PRAG_EXPLORARE îl ghiontim TARE spre producție — altfel
         // arde tot bugetul pe explorare (job 96: 40 grep-uri, 0 editări).
