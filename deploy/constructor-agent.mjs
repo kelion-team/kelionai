@@ -25,6 +25,7 @@
 import { execSync, execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const ENVFILE = '/root/kelion/kelionai.env'
@@ -837,6 +838,43 @@ async function llm(messages) {
   })
 }
 
+// ── VITEZĂ: node_modules cald, sar peste instalarea inutilă (owner, 13 aug:
+// „constructor mai rapid") ────────────────────────────────────────────────────
+// `npm ci` ȘTERGE + reinstalează node_modules DE FIECARE DATĂ — minute pierdute
+// când lock-ul n-a fost atins. Cu atelierul persistent (vezi main), node_modules
+// rămâne cald; aici decidem: dacă package-lock.json e IDENTIC cu cel de la ultima
+// instalare reușită (marca `.kelion-lock` scrisă în node_modules) ȘI node_modules
+// există → SĂRIM instalarea. La ORICE dubiu → `npm ci` (sigur, reproductibil).
+// Marca se scrie DOAR după o instalare+build+test reușite.
+function hashLock(prefix) {
+  try {
+    return crypto.createHash('sha1').update(fs.readFileSync(path.join(ATELIER, prefix, 'package-lock.json'))).digest('hex')
+  } catch {
+    return null
+  }
+}
+/** Comanda de instalare pentru un prefix, SAU null când node_modules e cald și lock-ul neschimbat. */
+function comandaInstalare(prefix, depsSchimbate) {
+  if (depsSchimbate) return `npm --prefix ${prefix} install` // aduce pachetul nou + lock la zi
+  try {
+    const nm = path.join(ATELIER, prefix, 'node_modules')
+    const marca = path.join(nm, '.kelion-lock')
+    const h = hashLock(prefix)
+    if (h && fs.existsSync(nm) && fs.existsSync(marca) && fs.readFileSync(marca, 'utf8') === h) return null
+  } catch {
+    /* dubiu → cădem pe ci */
+  }
+  return `npm --prefix ${prefix} ci`
+}
+function marcheazaInstalat(prefix) {
+  try {
+    const h = hashLock(prefix)
+    if (h) fs.writeFileSync(path.join(ATELIER, prefix, 'node_modules', '.kelion-lock'), h)
+  } catch {
+    /* best-effort — la următorul job se reinstalează, nu strică nimic */
+  }
+}
+
 // VERIFICAREA ATELIERULUI — ce s-a atins trebuie să compileze. Întoarce '' dacă
 // e curat, altfel TEXTUL problemei: îl dăm înapoi modelului pentru o rundă de
 // reparație, în loc să omorâm ordinul din prima (vezi bucla din main()).
@@ -857,13 +895,27 @@ function verificaAtelierul() {
   const backendDeps = /(^|\n).{3}backend\/package(-lock)?\.json/.test(changed)
   const frontendDeps = /(^|\n).{3}frontend\/package(-lock)?\.json/.test(changed)
   const verify = []
-  if (touchedBackend) verify.push(backendDeps ? 'npm --prefix backend install' : 'npm --prefix backend ci', 'npm --prefix backend run build', 'npm --prefix backend test')
-  if (touchedFrontend) verify.push(frontendDeps ? 'npm --prefix frontend install' : 'npm --prefix frontend ci', 'npm --prefix frontend run build')
+  const instalBackend = touchedBackend ? comandaInstalare('backend', backendDeps) : null
+  const instalFrontend = touchedFrontend ? comandaInstalare('frontend', frontendDeps) : null
+  if (touchedBackend) {
+    if (instalBackend) verify.push(instalBackend)
+    else log('backend: node_modules cald (lock neschimbat) — sar peste instalare')
+    verify.push('npm --prefix backend run build', 'npm --prefix backend test')
+  }
+  if (touchedFrontend) {
+    if (instalFrontend) verify.push(instalFrontend)
+    else log('frontend: node_modules cald (lock neschimbat) — sar peste instalare')
+    verify.push('npm --prefix frontend run build')
+  }
   for (const cmd of verify) {
     log(`verific: ${cmd}`)
     const out = toolRun(cmd)
     if (/^EȘEC/.test(out)) return `verificarea a picat la „${cmd}":\n${out.slice(-2000)}`
   }
+  // Marcăm lock-ul ca instalat DOAR după ce instalarea + build + test au trecut
+  // (dacă am instalat efectiv, nu am sărit). Așa jobul următor cu lock identic sare.
+  if (instalBackend) marcheazaInstalat('backend')
+  if (instalFrontend) marcheazaInstalat('frontend')
   // PORȚILE COMPLETE ALE CASEI (10 aug — #973 job-173): atelierul verifica DOAR
   // build+teste, dar POARTA reală de pe VPS (deploy/porti-pr.sh) rulează încă
   // PATRU pe care atelierul le sărea — cod duplicat (jscpd), exporturi fără
@@ -900,9 +952,15 @@ function verificaPortileCasei(backendGataInstalat) {
   //    de dependențe + build de emisie; dacă atelierul nu le-a instalat (ordinul
   //    n-a atins backend/), le instalăm acum, exact ca poarta (porti-pr.sh:49).
   if (!backendGataInstalat) {
-    log('verific (boot): npm --prefix backend ci')
-    try { sh('npm --prefix backend ci', { timeout: 10 * 60_000 }) }
-    catch { try { sh('npm --prefix backend install', { timeout: 10 * 60_000 }) } catch (e) { return `bootul: instalarea dependențelor backend a picat:\n${coada(e)}` } }
+    const inst = comandaInstalare('backend', false)
+    if (inst) {
+      log(`verific (boot): ${inst}`)
+      try { sh(inst, { timeout: 10 * 60_000 }) }
+      catch { try { sh('npm --prefix backend install', { timeout: 10 * 60_000 }) } catch (e) { return `bootul: instalarea dependențelor backend a picat:\n${coada(e)}` } }
+      marcheazaInstalat('backend')
+    } else {
+      log('boot: node_modules backend cald (lock neschimbat) — sar peste instalare')
+    }
   }
   log('verific (boot): npm --prefix backend run build')
   try { sh('npm --prefix backend run build', { timeout: 5 * 60_000 }) }
@@ -1107,11 +1165,33 @@ async function main() {
   raportCurent = report // ca handlerul de SIGTERM să poată raporta eșecul
 
   try {
-    // Atelier proaspăt = exact master-ul de ACUM, nimic rămas din jobul trecut.
-    fs.rmSync(ATELIER, { recursive: true, force: true })
-    execFileSync('git', ['clone', '--depth', '50', `https://x-access-token:${GHTOKEN}@github.com/${REPO}.git`, ATELIER], { stdio: 'pipe', timeout: 120_000 })
+    // ATELIER PERSISTENT (owner, 13 aug: „constructor mai rapid"). Înainte ștergeam
+    // TOT (inclusiv node_modules) + re-clonam ~mii de fișiere la FIECARE job — minute
+    // pierdute. Acum refolosim atelierul: aducem master-ul de ACUM prin fetch + reset
+    // DUR + clean, PĂSTRÂND node_modules (gitignored → nici `reset --hard`, nici
+    // `clean -fd` fără `-x` nu-l ating). Dacă atelierul lipsește / e corupt / fetch-ul
+    // pică → cădem pe CLONA CURATĂ de dinainte (fallback SIGUR: cel mai rău caz =
+    // comportamentul vechi). Așa jobul următor pornește pe master proaspăt, dar cu
+    // node_modules cald (vezi comandaInstalare — sare peste `npm ci` inutil).
+    const url = `https://x-access-token:${GHTOKEN}@github.com/${REPO}.git`
+    let rapid = false
+    if (fs.existsSync(path.join(ATELIER, '.git'))) {
+      try {
+        execFileSync('git', ['-C', ATELIER, 'remote', 'set-url', 'origin', url], { stdio: 'pipe', timeout: 30_000 })
+        execFileSync('git', ['-C', ATELIER, 'fetch', '--depth', '50', 'origin', 'master'], { stdio: 'pipe', timeout: 120_000 })
+        execFileSync('git', ['-C', ATELIER, 'reset', '--hard', 'FETCH_HEAD'], { stdio: 'pipe', timeout: 60_000 })
+        execFileSync('git', ['-C', ATELIER, 'clean', '-fd'], { stdio: 'pipe', timeout: 60_000 }) // FĂRĂ -x → node_modules (ignorat) rămâne
+        rapid = true
+      } catch {
+        rapid = false
+      }
+    }
+    if (!rapid) {
+      fs.rmSync(ATELIER, { recursive: true, force: true })
+      execFileSync('git', ['clone', '--depth', '50', url, ATELIER], { stdio: 'pipe', timeout: 120_000 })
+    }
     const baseSha = sh('git rev-parse --short=7 HEAD').trim()
-    log(`atelier clonat pe ${baseSha}`)
+    log(`atelier pe ${baseSha}${rapid ? ' (persistent, node_modules cald)' : ' (clonă curată)'}`)
 
     const messages = [
       { role: 'system', content: SYSTEM },
