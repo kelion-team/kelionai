@@ -3982,14 +3982,20 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
 
 /* BECURILE COMPACTE ÎN BARA DE SUS (admin) — fiecare bec = link INDIVIDUAL spre
    pagina de reîncărcare a furnizorului („buton individual la fiecare ai"). */
-.becuri-bara { display: inline-flex; align-items: center; gap: 3px; }
+.becuri-bara { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%; }
+/* Fiecare bec = buton individual cu NUMELE AI pe el (owner, 13 aug), click →
+   pagina lui de reîncărcare. Chip cu contur, ca să se vadă că e apăsabil. */
 .becuri-bec-link {
-  display: inline-flex; align-items: center; padding: 3px; border-radius: 6px;
-  line-height: 0; text-decoration: none; transition: background 0.15s ease;
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px;
+  line-height: 1; text-decoration: none; transition: background 0.15s ease;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
 }
 .becuri-bec-link:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.becuri-bec-static { cursor: default; }
+.becuri-bec-nume { font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
 .becuri-bara .bec {
-  width: 9px; height: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
+  width: 9px; height: 9px; flex: 0 0 auto;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
 }
 .becuri-bara-nr {
   font-size: 11px; font-weight: 700; color: #e5484d;
