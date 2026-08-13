@@ -46,7 +46,7 @@ import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
 // (aceeași sursă ca panoul Bani — nicio logică dublată). Click = deschide Bani,
 // unde e boardul întreg + reîncărcarea. Când ceva e roșu (fără credit), apare
 // numărul, ca ownerul să prindă din prima „X AI fără credit".
-function BecuriBara({ onOpen }: { onOpen: () => void }) {
+function BecuriBara() {
   const [rows, setRows] = useState<CreditAIFurnizor[] | null>(null)
   useEffect(() => {
     let viu = true
@@ -65,19 +65,33 @@ function BecuriBara({ onOpen }: { onOpen: () => void }) {
   if (!rows || rows.length === 0) return null
   const rosii = rows.filter((r) => r.bec === 'rosu').length
   const A = adminStrings()
-  const titlu = rosii > 0 ? A.becuriBaraFaraCredit.replace('{n}', String(rosii)) : A.becuriBaraTitlu
+  // BUTON INDIVIDUAL per AI (owner: „buton individual la fiecare ai… click = reîncărcare
+  // DIRECT; să muți alea în aplicații"): fiecare bec e PROPRIUL link spre aplicația de
+  // facturare a furnizorului — NU un buton comun spre panoul intern. Verde/roșu/gri vine
+  // de pe server (fără logică dublată). Numărul roșu = câți sunt fără credit.
+  const eticheta = (r: CreditAIFurnizor): string =>
+    `${r.furnizor} — ${r.bec === 'rosu' ? A.becuriReincarca : r.bec === 'verde' ? A.becuriServeste : A.becuriNecunoscut}`
   return (
-    <button
-      type="button"
-      className={`ghost becuri-bara${rosii > 0 ? ' are-rosu' : ''}`}
-      onClick={onOpen}
-      title={titlu}
-    >
-      {rows.map((r) => (
-        <span key={r.furnizor} className={`bec bec-${r.bec}`} aria-hidden="true" />
-      ))}
+    <span className={`becuri-bara${rosii > 0 ? ' are-rosu' : ''}`} title={A.becuriBaraTitlu}>
+      {rows.map((r) =>
+        r.facturare ? (
+          <a
+            key={r.furnizor}
+            className="becuri-bec-link"
+            href={r.facturare}
+            target="_blank"
+            rel="noreferrer"
+            title={eticheta(r)}
+            aria-label={eticheta(r)}
+          >
+            <span className={`bec bec-${r.bec}`} aria-hidden="true" />
+          </a>
+        ) : (
+          <span key={r.furnizor} className={`bec bec-${r.bec}`} title={eticheta(r)} />
+        ),
+      )}
       {rosii > 0 && <span className="becuri-bara-nr">{rosii}</span>}
-    </button>
+    </span>
   )
 }
 
@@ -1508,7 +1522,7 @@ export default function Stage({ user }: { user: User }) {
                 cu aceleași cifre și același prag roșu. În locul rămas liber pe linia
                 asta stau acum BECURILE de credit — „în spațiul rămas pui butoanele
                 astea". Click pe becuri → tabul Bani (boardul întreg + reîncărcarea). */}
-            {!brainLocked && <BecuriBara onOpen={() => openAdmin('finance')} />}
+            {!brainLocked && <BecuriBara />}
             {/* HERE STOOD THE „Stripe £0.00” PILL from the top bar. Removed on
             Jul 30, together with Stripe: the users' money no longer passes through
             it — they pay on the Revolut link, straight into Adrian's account. The

@@ -10,6 +10,23 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **13 aug 2026 — BECURI: fals-roșu REPARAT (Gemini £9.59 & RunPod $5.84 arătau roșu) + buton individual per AI. ✅**
+> Owner (capturi Google AI Studio £9.59 + RunPod $5.84): „e greșit roșu că are
+> credit… ce ai scris că nu e credit era FALS." CAUZA, în codul meu (regula #2):
+> `beculCredit` trata orice `ramas ≤ 0` ca roșu — dar pentru Gemini `ramas` e o
+> ESTIMARE (declarat − cheltuit) care NU vede auto-reload-ul (£20 pe Aug 13) →
+> roșu fals. FIX: câmp `soldReal` — doar soldurile CITITE real (Serper /account,
+> RunPod clientBalance) aprind roșul pe 0; pentru Gemini becul vine din PINGUL de
+> viață (servește = are credit = verde), iar estimarea rămâne doar cifra. Necitibil
+> = gri, nu roșu fals. + Link-urile EXACTE de reîncărcare date de owner: Gemini
+> `aistudio.google.com/billing?billing=011729-7DA3DA-87ED94`, RunPod
+> `console.runpod.io/user/billing`, Serper `serper.dev/dashboard`. + „buton
+> individual la fiecare ai, click = reîncărcare DIRECT": fiecare bec din bară e
+> acum PROPRIUL link spre pagina furnizorului (nu un buton comun spre panou).
+> Porți: backend tsc 0 · teste 10 (creditAI) · frontend tsc 0 · 43 teste · build 0 · sintaxă 0.
+> URMĂTORUL: constructorul — teanc de AUTO-VINDECARE care pică pe „llm încercarea
+> X/6 a picat pe DeepInfra/…" (fără plasă → creier 2 + agenți, aprobat).
+
 > **13 aug 2026 — BARA DE SUS reorganizată: VPS sub Admin, becurile de credit în locul liber. ✅**
 > Owner (captură bară): „VPS îl pui sub admin, vizibil; și în spațiul rămas pe
 > linia aia pui butoanele astea [becurile]. Trading la useri momentan NU se

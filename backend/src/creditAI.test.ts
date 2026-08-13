@@ -79,29 +79,32 @@ function furnizor(over: Partial<CreditAI>): CreditAI {
 }
 
 describe('beculCredit', () => {
-  it('sold citit > 0 → VERDE', () => {
-    expect(beculCredit(furnizor({ ramas: citit({ cantitate: 12.5, unitate: 'USD' }) }))).toBe('verde')
+  it('SOLD REAL > 0 (Serper/RunPod) → VERDE', () => {
+    expect(beculCredit(furnizor({ soldReal: true, ramas: citit({ cantitate: 12.5, unitate: 'USD' }) }))).toBe('verde')
   })
 
-  it('sold citit 0 (RunPod 402 / Serper gol) → ROȘU', () => {
-    expect(beculCredit(furnizor({ ramas: citit({ cantitate: 0, unitate: 'USD' }) }))).toBe('rosu')
+  it('SOLD REAL 0 (RunPod 402 / Serper gol) → ROȘU', () => {
+    expect(beculCredit(furnizor({ soldReal: true, ramas: citit({ cantitate: 0, unitate: 'USD' }) }))).toBe('rosu')
   })
 
-  it('pingul spune că NU servește (Gemini „depleted") → ROȘU, chiar dacă soldul nu se citește', () => {
+  it('SOLD REAL necitibil (citirea a picat) → GRI, NU roșu fals', () => {
+    expect(beculCredit(furnizor({ soldReal: true, ramas: picat('citirea a picat') }))).toBe('gri')
+  })
+
+  // BUG-UL REAL (owner, 13 aug): Gemini avea £9.59 + auto-reload ON, dar becul ieșea
+  // ROȘU fiindcă estimarea „declarat − cheltuit" nu vedea top-up-ul. Fără sold real,
+  // becul TREBUIE să vină din ping: servește = are credit = VERDE, nu roșu pe estimare.
+  it('Gemini SERVEȘTE dar estimarea e 0 → VERDE (nu roșu fals — bug £9.59)', () => {
+    expect(
+      beculCredit(furnizor({ ramas: citit({ cantitate: 0, unitate: 'GBP' }), serveste: servesteM(true) })),
+    ).toBe('verde')
+  })
+
+  it('Gemini NU servește (depleted) → ROȘU', () => {
     expect(beculCredit(furnizor({ ramas: picat('Google nu dă sold'), serveste: servesteM(false) }))).toBe('rosu')
-  })
-
-  it('servește ACUM, sold necitibil → VERDE (lucrează = are credit)', () => {
-    expect(beculCredit(furnizor({ ramas: picat('fără API de sold'), serveste: servesteM(true) }))).toBe('verde')
   })
 
   it('nimic măsurabil (Google Cloud / Jules) → GRI, NU verde fals', () => {
     expect(beculCredit(furnizor({ ramas: picat('fără endpoint de sold') }))).toBe('gri')
-  })
-
-  it('roșul (fără credit MĂSURAT) bate verdele: sold 0 dar pingul a mers → tot ROȘU', () => {
-    expect(
-      beculCredit(furnizor({ ramas: citit({ cantitate: 0, unitate: 'USD' }), serveste: servesteM(true) })),
-    ).toBe('rosu')
   })
 })

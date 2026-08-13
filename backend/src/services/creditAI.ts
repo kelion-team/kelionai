@@ -45,6 +45,11 @@ export interface CreditAI {
   serveste?: Masuratoare<{ da: boolean; detaliu?: string }>
   /** Unde se vede factura, când soldul nu e citibil prin API. */
   facturare?: string
+  /** `ramas` e un SOLD REAL citit de la furnizor (Serper /account, RunPod
+   *  clientBalance) — atunci 0 chiar înseamnă „fără credit". FALS/lipsă = `ramas`
+   *  e o ESTIMARE (Gemini: declarat − cheltuit), care se învechește la auto-reload
+   *  și NU are voie să aprindă roșul; pentru ăștia decide pingul de viață. */
+  soldReal?: boolean
 }
 
 // ── BECUL DE CREDIT (owner, 13 aug: „un bec roșu/verde care indică credit sau
@@ -62,13 +67,22 @@ export interface CreditAI {
 export type BecCredit = 'verde' | 'rosu' | 'gri'
 
 export function beculCredit(c: CreditAI): BecCredit {
-  // ROȘU întâi: un „fără credit" MĂSURAT bate orice (chiar dacă pingul a mers).
-  if (c.ramas.masurat && c.ramas.valoare.cantitate <= 0) return 'rosu'
-  if (c.serveste?.masurat && c.serveste.valoare.da === false) return 'rosu'
-  // VERDE: credit citit > 0, sau servește chiar acum.
+  // (1) SOLD REAL citit de la furnizor (Serper /account, RunPod clientBalance):
+  // aici cifra e adevărul — 0 = fără credit (402) → ROȘU; > 0 → VERDE.
+  if (c.soldReal && c.ramas.masurat) {
+    return c.ramas.valoare.cantitate > 0 ? 'verde' : 'rosu'
+  }
+  // (2) FĂRĂ sold real (Gemini): Google NU expune soldul, iar estimarea
+  // „declarat − cheltuit" se ÎNVECHEȘTE la fiecare auto-reload pe care nu-l vedem
+  // (owner, 13 aug: bec ROȘU fals deși Gemini avea £9.59, auto-reload ON). Deci
+  // lumina vine din PINGUL DE VIAȚĂ — servește = are credit — nu din estimare.
+  // Estimarea rămâne doar cifra afișată, nu decide culoarea.
+  if (c.serveste?.masurat) {
+    return c.serveste.valoare.da ? 'verde' : 'rosu'
+  }
+  // (3) Fallback: un sold (chiar și estimat) citit > 0 → verde; altfel nimic
+  // măsurabil → GRI („nu pot verifica"), niciodată verde fals (regula #1).
   if (c.ramas.masurat && c.ramas.valoare.cantitate > 0) return 'verde'
-  if (c.serveste?.masurat && c.serveste.valoare.da === true) return 'verde'
-  // GRI: nimic măsurabil — se spune „nu pot verifica", nu se prezintă ca verde.
   return 'gri'
 }
 
@@ -194,7 +208,10 @@ async function randGemini(): Promise<CreditAI> {
     ramas,
     cheltuitLuna,
     serveste,
-    facturare: 'https://aistudio.google.com/apikey',
+    // soldReal LIPSĂ intenționat (estimare declarat−cheltuit, nu sold citit):
+    // becul vine din `serveste`, nu din estimarea care se învechește la auto-reload.
+    // Link-ul EXACT de reîncărcare, dat de owner (contul lui de facturare).
+    facturare: 'https://aistudio.google.com/billing?billing=011729-7DA3DA-87ED94',
   }
 }
 
@@ -214,6 +231,9 @@ async function randSerper(): Promise<CreditAI> {
     cheieConfigurata: Boolean(config.serperKey),
     ramas,
     cheltuitLuna,
+    // SOLD REAL (Serper /account) — 0 chiar înseamnă „fără credit", deci becul
+    // poate fi roșu pe cifra citită. Link-ul are butonul „Top up".
+    soldReal: true,
     facturare: 'https://serper.dev/dashboard',
   }
 }
@@ -291,6 +311,8 @@ async function randRunpod(): Promise<CreditAI> {
     furnizor: 'RunPod (placa lucrătorului)',
     alimenteaza: 'creierul constructorului — modelul tău Qwen3-Coder, pe placa RunPod (nu pe VPS)',
     cheieConfigurata,
+    // SOLD REAL (RunPod clientBalance) — 0 chiar înseamnă „fără credit" (402).
+    soldReal: true,
     ramas,
     // RunPod nu trece prin jurnalul nostru de costuri (worker-ul nu itemizează
     // cost per apel). Soldul real de mai sus e măsura DIRECTĂ — nu pun un 0 fals.
@@ -299,7 +321,8 @@ async function randRunpod(): Promise<CreditAI> {
       'RunPod nu trece prin jurnalul nostru — soldul real de mai sus e măsura directă a banilor rămași',
     ),
     serveste,
-    facturare: 'https://www.runpod.io/console/user/billing',
+    // Link-ul EXACT de reîncărcare, dat de owner (consola RunPod, cu „+" de credit).
+    facturare: 'https://console.runpod.io/user/billing',
   }
 }
 

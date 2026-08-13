@@ -3868,15 +3868,20 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
 .bec-stare { font-size: 12px; opacity: 0.85; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bec-rand-rosu .bec-stare { color: #e5484d; font-weight: 600; }
 
-/* BECURILE COMPACTE ÎN BARA DE SUS (admin) — în locul lăsat liber de VPS. */
-.becuri-bara { display: inline-flex; align-items: center; gap: 5px; }
+/* BECURILE COMPACTE ÎN BARA DE SUS (admin) — fiecare bec = link INDIVIDUAL spre
+   pagina de reîncărcare a furnizorului („buton individual la fiecare ai"). */
+.becuri-bara { display: inline-flex; align-items: center; gap: 3px; }
+.becuri-bec-link {
+  display: inline-flex; align-items: center; padding: 3px; border-radius: 6px;
+  line-height: 0; text-decoration: none; transition: background 0.15s ease;
+}
+.becuri-bec-link:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 .becuri-bara .bec {
   width: 9px; height: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
 }
-.becuri-bara.are-rosu { border-color: color-mix(in srgb, #e5484d 55%, var(--border)); }
 .becuri-bara-nr {
   font-size: 11px; font-weight: 700; color: #e5484d;
-  font-variant-numeric: tabular-nums; margin-left: 1px;
+  font-variant-numeric: tabular-nums; margin-left: 2px;
 }
 
 /* CIFRELE VPS, SUB ADMIN (tabul „Sistem (VPS)") — mutate din bara de sus. */
