@@ -1434,10 +1434,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // or "guest-pending:<id>:<name> (<relation>)". A guest turn gets ZERO
       // admin powers, even inside the holder's logged-in session.
       speaker?: string
-      // MODUL MAȘINĂ (Adrian, 11 aug): tura vine din stratul de mașină (volan).
-      // Toate capacitățile rămân, dar rezultatul e SPUS, nu afișat — legislația
-      // auto. Creierul răspunde scurt, în cuvinte; nu deschide suprafețe vizuale
-      // (hărți/video/documente); muzica/radio doar audio.
+      // MODUL MAȘINĂ (Adrian, 11 aug; rescris 13 aug): tura vine din stratul de
+      // mașină (volan). Creierul răspunde SCURT, voce-first — dar NU se mai suprimă
+      // nicio suprafață: ce spune că face, execută (owner: „vorbă = faptă").
       carMode?: boolean
     }
   }>(
@@ -1920,22 +1919,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `over-cautious. (The owner asked you not to speak UNPROMPTED — but being ` +
         `called by name IS the prompt.)`
     }
-    // MODUL MAȘINĂ (Adrian, 11 aug: „capabilitățile toate dar afișare pentru auto
-    // conform legislației"). La volan, Kelion păstrează TOATE uneltele și tot
-    // creierul — dar rezultatul se AUDE, nu se afișează. Fără hărți, fără video,
-    // fără documente pe ecran; vremea/GPS/orice informație SE SPUNE; muzica și
-    // radio doar AUDIO. Cel mult text rudimentar, ca să nu distragă condusul.
+    // MODUL MAȘINĂ (Adrian, 11 aug; RESCRIS 13 aug — „când spune orice, trebuie
+    // să fie executat acel orice"). La volan, Kelion răspunde SCURT și voce-first,
+    // dar NU se mai suprimă nicio suprafață. Garda veche îi spunea creierului „nu
+    // deschide harta/documentul, doar spune-l" — exact ruptura pe care ownerul a
+    // cerut-o scoasă: vorbă fără faptă. Acum: ce spune că face, EXECUTĂ prin unealtă
+    // (plasa-pereche din handleControl/ChatPanel a fost și ea scoasă). Vorbă = faptă.
     if (req.body?.carMode === true) {
       systemPrompt +=
-        `\n\nCAR MODE (driving — audio-first, legally safe). The user is at the wheel. ` +
-        `Keep ALL your capabilities and tools — you may still look things up, check ` +
-        `weather from GPS, control music/radio, use Google services, reason fully. ` +
-        `But the RESULT must be SPOKEN, not shown: NEVER open a visual surface (no map, ` +
-        `no video, no document/monitor panel, no image gallery, no chart). Say the answer ` +
-        `out loud instead — e.g. weather from GPS is TOLD ("It's 21 degrees and clear in ` +
-        `your area"), never displayed. Music and radio play AUDIO ONLY (no video window). ` +
-        `Answer in SHORT spoken sentences so the driver isn't distracted; at most a tiny ` +
-        `line of text. Everything you would normally put on screen, say in words.`
+        `\n\nCAR MODE (driving — voice-first). The user is at the wheel, so answer in ` +
+        `SHORT spoken sentences and lead with the voice. Keep ALL your capabilities and ` +
+        `tools. CRITICAL: whatever you SAY you are doing, you MUST actually do by calling ` +
+        `the matching tool in this SAME turn — if you say you are opening the map, a ` +
+        `document, a video or any panel, actually CALL the tool so it opens on the ` +
+        `monitor. Never claim an action you did not perform. Speak the answer, but never ` +
+        `withhold a surface the user asked for.`
     }
     // ACCOUNT STATE — Kelion must KNOW naturally who the user is (Adrian,
     // Jul 24: "during the audit it doesn't see that I'm logged into the Google
@@ -2080,13 +2078,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // clientul raportează treapta detectată. Creierul o ȘTIE — poate răspunde la
     // „ce țeavă am?" cu adevărul măsurat (nu inventează), iar pe țeavă slabă/medie
     // își scurtează răspunsul și nu deschide pagini grele/video nechemat.
+    // MINIM 4G (owner, 13 aug: „nu cred că e realizabil 3G… treci 4G minim"). Nu
+    // mai SUPRIMĂM nimic pe conexiune slabă — ruptura „vorbă fără faptă" e scoasă și
+    // aici: ce spune Kelion că face, face (deschide harta/video/document oricum).
+    // Rămâne DOAR raportarea măsurată + nota onestă că experiența completă e pentru 4G+.
     const retea = req.body?.retea
     if (retea === 'slab' || retea === 'mediu') {
       systemPrompt +=
-        `\n\nNETWORK: the user's connection is measured as ${retea === 'slab' ? 'WEAK (2G / data-saver)' : 'MEDIUM (3G)'}. ` +
-        `If they ask "what connection am I on / ce țeavă am", answer with THIS measured value (never guess). ` +
-        `On a weak/medium pipe: keep answers short, prefer speaking the result over opening heavy visuals, ` +
-        `and do NOT auto-open videos or large embeds unless explicitly asked — a laggy page helps no one.`
+        `\n\nNETWORK: the user's connection is measured as ${retea === 'slab' ? 'WEAK (2G / data-saver)' : 'MEDIUM (3G)'}, ` +
+        `below the app's recommended minimum of 4G. If they ask "what connection am I on / ce țeavă am", answer with ` +
+        `THIS measured value (never guess) and you MAY note that the full experience (fast voice, 3D avatar, live ` +
+        `visuals) is built for 4G+. But do EVERYTHING they ask anyway — open the map, the video, the document, any ` +
+        `surface they request; NEVER withhold or refuse one because of the connection. What you say you do, you do.`
     }
     // ANCORA CENTRULUI DE TRANZACȚIONARE (10 aug, ownerul: „trebuie chatul
     // real, conștient... să răspundă tuturor întrebărilor tehnice"): cât tabul

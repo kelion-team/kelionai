@@ -133,6 +133,8 @@ export interface Strings {
   carMode: string
   carExit: string
   carHint: string
+  // MINIM 4G (owner, 13 aug): nota scurtă, non-blocantă, pe conexiune slabă (2G/3G).
+  retea4g: string
   carVoiceOn: string
   carVoiceOff: string
   carListening: string
@@ -378,6 +380,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Car mode',
     carExit: 'Exit car mode',
     carHint: 'Talk — I answer out loud, eyes on the road',
+    retea4g: 'For the full experience (fast voice, 3D avatar) you need at least 4G — basic chat still works.',
     carVoiceOn: 'Start voice',
     carVoiceOff: 'Stop voice',
     carListening: 'Listening — talk freely',
@@ -590,6 +593,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Mod mașină',
     carExit: 'Ieși din modul mașină',
     carHint: 'Vorbește — îți răspund cu voce, ochii pe drum',
+    retea4g: 'Pentru experiența completă (voce rapidă, avatar 3D) e nevoie de minim 4G — chatul de bază merge oricum.',
     carVoiceOn: 'Pornește vocea',
     carVoiceOff: 'Oprește vocea',
     carListening: 'Ascult — vorbește liber',
@@ -772,6 +776,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Modo coche',
     carExit: 'Salir del modo coche',
     carHint: 'Habla — te respondo en voz alta, ojos en la carretera',
+    retea4g: 'Para la experiencia completa (voz rápida, avatar 3D) necesitas al menos 4G — el chat básico funciona igual.',
     carVoiceOn: 'Activar voz',
     carVoiceOff: 'Detener voz',
     carListening: 'Te escucho — habla libremente',
@@ -938,6 +943,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Mode voiture',
     carExit: 'Quitter le mode voiture',
     carHint: 'Parle — je réponds à voix haute, les yeux sur la route',
+    retea4g: 'Pour une expérience complète (voix rapide, avatar 3D), il faut au moins la 4G — le chat de base fonctionne quand même.',
     carVoiceOn: 'Activer la voix',
     carVoiceOff: 'Couper la voix',
     carListening: 'J’écoute — parle librement',
@@ -1104,6 +1110,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Automodus',
     carExit: 'Automodus verlassen',
     carHint: 'Sprich — ich antworte laut, Augen auf die Straße',
+    retea4g: 'Für das volle Erlebnis (schnelle Stimme, 3D-Avatar) brauchst du mindestens 4G — der einfache Chat funktioniert trotzdem.',
     carVoiceOn: 'Stimme starten',
     carVoiceOff: 'Stimme stoppen',
     carListening: 'Ich höre zu — sprich frei',
@@ -1270,6 +1277,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Modalità auto',
     carExit: 'Esci dalla modalità auto',
     carHint: 'Parla — rispondo a voce, occhi sulla strada',
+    retea4g: 'Per la piena esperienza (voce veloce, avatar 3D) serve almeno il 4G — la chat di base funziona comunque.',
     carVoiceOn: 'Attiva voce',
     carVoiceOff: 'Ferma voce',
     carListening: 'Ti ascolto — parla liberamente',
@@ -1436,6 +1444,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     carMode: 'Modo carro',
     carExit: 'Sair do modo carro',
     carHint: 'Fala — respondo em voz alta, olhos na estrada',
+    retea4g: 'Para a experiência completa (voz rápida, avatar 3D) precisas de pelo menos 4G — o chat básico funciona na mesma.',
     carVoiceOn: 'Ativar voz',
     carVoiceOff: 'Parar voz',
     carListening: 'A ouvir — fala à vontade',
