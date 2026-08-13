@@ -25,7 +25,9 @@ describe('poarta analizei există și e separată de poarta faptei', () => {
   it('are propriul tipar de cuvinte și propriul întrerupător de o-singură-dată', () => {
     expect(orch).toMatch(/const ANALIZA_CLAIM_RE\s*=/)
     expect(orch).toMatch(/let analizaGateUsed = false/)
-    expect(orch).toMatch(/!analizaGateUsed &&\s*\n\s*!anyToolCalled/)
+    // Execuție-conștientă (owner, 13 aug): un apel de AFIȘARE (show_document) nu
+    // mai dezarmează poarta — condiția e pe `anyFaptaToolCalled`, nu pe „a chemat ceva".
+    expect(orch).toMatch(/!analizaGateUsed &&\s*\n\s*!anyFaptaToolCalled/)
   })
 
   it('nu o înlocuiește pe cea veche — amândouă rămân active', () => {

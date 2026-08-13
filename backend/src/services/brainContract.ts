@@ -31,6 +31,10 @@ export interface BrainCallOpts {
   reasoning?: 'low' | 'medium' | 'high'
   /** `required` = must call a tool; `auto` = decides on its own. */
   toolChoice?: 'auto' | 'required'
+  /** When forcing a tool (`required`), restrict WHICH tools the model may pick
+   *  (Gemini `allowedFunctionNames`) — e.g. only the „doing" tools, never the
+   *  display-only ones, so a forced turn can't be satisfied with a fake card. */
+  allowedFunctionNames?: string[]
 }
 
 // OCHII PE REZULTATUL UNEI UNELTE (9 aug, ownerul: „sistemul nu dă lui Kelion
