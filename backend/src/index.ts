@@ -53,7 +53,7 @@ import { pingRoutes } from './routes/ping.js'
 import { constructorViuRoutes } from './routes/constructorViu.js'
 import { constructorStareRoutes } from './routes/constructorStare.js'
 import { jobsRoutes } from './routes/jobs.js'
-import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive } from './db.js'
+import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive, loadKv, saveKv } from './db.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
@@ -281,6 +281,10 @@ const BOOT_AT = new Date().toISOString()
 // Without an injected sha, the boot moment IS the version: it changes on every
 // real publish.
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
+// AUTO-VERSIUNE (owner, 13 aug: „se incrementează singură la fiecare publicare,
+// +0.1"). Se calculează o dată la boot, din KV (vezi mai jos, după initDb) —
+// V1.0, V1.1, V1.2 … Până când KV răspunde (sau fără DB), cade pe „1.0".
+let VERSIUNE_AUTO = '1.0'
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')
   // `adminCfg` (9 aug, „flux admin 403 — trebuie 200"): spune dacă emailul de
@@ -288,7 +292,7 @@ app.get('/api/version', async (_req, reply) => {
   // deja publică, în repo — nu se scurge nimic). `false` = env-ul VPS cară un
   // ADMIN_EMAIL stricat/diferit → rolul iese „customer" cu sesiune validă.
   // Diagnostic măsurabil de oriunde cu un curl, fără SSH.
-  return { v: DEPLOY_V, at: BOOT_AT, adminCfg: config.adminEmail === 'adrianenc11@gmail.com' }
+  return { v: DEPLOY_V, at: BOOT_AT, ver: VERSIUNE_AUTO, adminCfg: config.adminEmail === 'adrianenc11@gmail.com' }
 })
 
 
@@ -343,6 +347,22 @@ try {
   // MODELUL UNIC (sigilat) — reia din KV un eventual auto-upgrade validat de dinainte,
   // ÎNAINTE ca vreo rută să folosească creierul (altfel prima tură pornește pe default).
   await incarcaModelUnic().catch(() => {})
+  // AUTO-VERSIUNE (owner, 13 aug): contor persistent care urcă cu 1 la FIECARE
+  // publicare nouă (sha de deploy nou), NU la fiecare restart pe același sha. Bază
+  // 1.0, +0.1/publicare → V1.0, V1.1 … (1.9→2.0). Fără DB rămâne „1.0" (regula 1:
+  // nu inventăm o urcare pe o citire eșuată). Best-effort — nu blochează pornirea.
+  try {
+    const ultimulSha = (await loadKv('deploy_last_sha')) ?? ''
+    let n = Math.max(0, Math.floor(Number((await loadKv('deploy_count')) ?? '0') || 0))
+    if (DEPLOY_V !== ultimulSha) {
+      n += 1
+      await saveKv('deploy_count', String(n))
+      await saveKv('deploy_last_sha', DEPLOY_V)
+    }
+    VERSIUNE_AUTO = ((10 + n) / 10).toFixed(1)
+  } catch {
+    /* KV indisponibil — rămâne „1.0", se corectează la următoarea publicare cu DB viu */
+  }
 } catch (err) {
   if (config.databaseUrl) {
     app.log.error({ err }, 'initDb FAILED with DB configured — exiting (money protection requires the full schema)')

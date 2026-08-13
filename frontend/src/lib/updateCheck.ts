@@ -8,6 +8,9 @@
 export interface ServerVersion {
   v: string
   at: string
+  // Versiunea AUTO (owner, 13 aug): urcă +0.1 la fiecare publicare (V1.0, V1.1…).
+  // Vine de pe server (sursă unică live → aceeași pe web/.exe/apk), nu din build.
+  ver?: string
 }
 
 // Injectate la build (vezi vite.config.ts).
@@ -49,7 +52,10 @@ export function versionLabel(srv: ServerVersion | null): string {
   // (srv.at, se schimbă la ORICE publicare); cade pe data build-ului dacă serverul
   // n-a răspuns încă la prima citire.
   const dt = deployStamp(srv)
-  return `V${__APP_VERSION__} · ${dt || __BUILD_DATE__}`
+  // Numărul vine AUTO de pe server (urcă la fiecare publicare); până răspunde el,
+  // cade pe versiunea din build (sursa unică tauri.conf.json) — nu pe gol.
+  const nr = srv?.ver || __APP_VERSION__
+  return `V${nr} · ${dt || __BUILD_DATE__}`
 }
 
 export async function fetchServerVersion(): Promise<ServerVersion | null> {
