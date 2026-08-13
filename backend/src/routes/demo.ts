@@ -143,11 +143,14 @@ async function visitorProfile(
 export async function demoRoutes(app: FastifyInstance): Promise<void> {
   // Visit beacon: EVERY landing-page visitor lands in the owner's analytics
   // (deduped 6h server-side). Public, fire-and-forget, never fails the page.
-  app.post<{ Body: { fp?: string; ref?: string } }>('/api/visit', async (req, reply) => {
+  app.post<{ Body: { fp?: string; ref?: string; path?: string } }>('/api/visit', async (req, reply) => {
     const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
     const referrer = typeof req.body?.ref === 'string' ? req.body.ref.slice(0, 300) : ''
+    // CE AU VIZITAT (owner, 13 aug): eticheta secțiunii deschise, ca raportul de
+    // vizitatori să nu arate doar CINE, ci și CE a deschis fiecare.
+    const path = typeof req.body?.path === 'string' ? req.body.path.slice(0, 32) : ''
     const { ip, visit } = await visitorProfile(req, referrer)
-    void logVisit(fp, ip, visit)
+    void logVisit(fp, ip, visit, '', path)
     return reply.send({ ok: true })
   })
 
@@ -155,14 +158,15 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
   // analytics — WHO is on, from what IP/place/device, and for HOW LONG. The
   // cheap path just extends the current session row; geo is only looked up
   // when a brand-new session row must be created.
-  app.post<{ Body: { fp?: string } }>('/api/visit/ping', async (req, reply) => {
+  app.post<{ Body: { fp?: string; path?: string } }>('/api/visit/ping', async (req, reply) => {
     const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
+    const path = typeof req.body?.path === 'string' ? req.body.path.slice(0, 32) : ''
     const email = getSessionUser(req)?.email ?? ''
     const ip = clientIp(req)
-    const touched = await touchVisit(fp, ip, email)
+    const touched = await touchVisit(fp, ip, email, path)
     if (!touched) {
       const { ip: fullIp, visit } = await visitorProfile(req, '')
-      void logVisit(fp, fullIp, visit, email)
+      void logVisit(fp, fullIp, visit, email, path)
     }
     return reply.send({ ok: true })
   })

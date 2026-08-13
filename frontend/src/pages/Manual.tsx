@@ -16,6 +16,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import BackLink from '../components/BackLink'
 import ManualIcon from '../components/ManualIcon'
+import { raporteazaPagina } from '../lib/vizita'
 // The manual's 7 languages (same list as on the server). The general
 // language selector stays for the contact form, where it costs nothing.
 const MANUAL_LANGS: { code: string; label: string }[] = [
@@ -115,6 +116,9 @@ export default function Manual(): React.JSX.Element {
   const [intoarce, setIntoarce] = useState<'' | 'inainte' | 'inapoi'>('')
   const [descarca, setDescarca] = useState(false)
   const timer = useRef<number | null>(null)
+
+  // „ce au vizitat" (owner, 13 aug): secțiunea „manual" în raportul de vizite.
+  useEffect(() => raporteazaPagina('manual'), [])
 
   // Fetches the manual; if the language is still translating, re-asks until ready.
   useEffect(() => {

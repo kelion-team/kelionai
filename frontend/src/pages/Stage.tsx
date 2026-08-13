@@ -1129,7 +1129,9 @@ export default function Stage({ user }: { user: User }) {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fp }),
+            // `path`: secțiunea curentă pentru raportul „ce au vizitat" (owner,
+            // 13 aug) — aici, aplicația propriu-zisă.
+            body: JSON.stringify({ fp, path: 'aplicație' }),
           })
         })
         .catch(() => {})

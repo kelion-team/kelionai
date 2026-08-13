@@ -3,6 +3,7 @@ import ContactModal from '../components/ContactModal'
 import VisitorChatWidget from '../components/VisitorChatWidget'
 import { startGoogleLogin } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
+import { raporteazaPagina } from '../lib/vizita'
 import { strings } from '../lib/i18n'
 import { PUBLIC_TEXT as PT } from '../lib/publicText'
 import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
@@ -91,18 +92,8 @@ export default function Landing({ error }: { error?: string | null }) {
   }
 
   // Visit beacon: every arrival lands in the owner's analytics (server dedupes
-  // 6h; the sessionStorage guard just avoids re-firing on SPA re-renders).
-  useEffect(() => {
-    if (sessionStorage.getItem('kelion_visited')) return
-    sessionStorage.setItem('kelion_visited', '1')
-    void deviceFingerprint().then((fp) =>
-      fetch('/api/visit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fp, ref: document.referrer }),
-      }).catch(() => {}),
-    )
-  }, [])
+  // 6h). Eticheta „acasă" hrănește raportul „ce au vizitat" (owner, 13 aug).
+  useEffect(() => raporteazaPagina('acasă'), [])
 
   return (
     <div className="landing">

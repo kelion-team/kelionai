@@ -59,6 +59,7 @@ import {
   type PlafonConstructor,
   fetchCreditAI,
   type CreditAIFurnizor,
+  golesteVizitatori,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -3076,6 +3077,35 @@ export default function AdminPanel({
                     </div>
                   ))}
                 </div>
+                {/* GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug: „golești baza de
+                date de vizitatori, cine va fi acolo va avea o poză cu acceptul
+                lor"). Distructiv → declanșat DOAR de owner (confirmarea lui =
+                clicul). Rezultatul e MĂSURAT (câte s-au șters), nu un „gata". */}
+                <div className="vizitatori-golire">
+                  <button
+                    type="button"
+                    className="user-act danger"
+                    onClick={async () => {
+                      const n = demosData.visitsTotal
+                      if (
+                        !window.confirm(
+                          `Golești baza de vizitatori? Se șterg toate cele ${n} vizite (profil + poze de vizitator). ` +
+                            'Conturile, plățile și recunoașterea userilor logați NU se ating. Acțiunea nu se poate anula.',
+                        )
+                      )
+                        return
+                      const sterse = await golesteVizitatori()
+                      if (sterse === null) {
+                        window.alert('Nu am putut goli baza — apelul a eșuat. Nimic nu s-a șters.')
+                        return
+                      }
+                      await fetchDemos().then(setDemos)
+                      window.alert(`Gata: ${sterse} vizite șterse. De-acum, în raport apar doar vizitatori cu consimțământ.`)
+                    }}
+                  >
+                    Golește baza de vizitatori
+                  </button>
+                </div>
                 {/* Rebuilt visitor cards (Adrian, Mar 2026): IP, city, country+flag,
                 photo thumbnail — professional, highly informational layout. */}
                 <div className="fin-breakdown">
@@ -3141,6 +3171,14 @@ export default function AdminPanel({
                               : 'prima vizită'}
                           </span>
                           <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
+                          {/* CE AU VIZITAT (owner, 13 aug): secțiunile deschise.
+                          Gol pe rândurile vechi ⇒ spunem cinstit că nu s-a
+                          înregistrat, nu inventăm „n-a vizitat nimic". */}
+                          <span className="visitor-pages">
+                            {r.pages
+                              ? `a vizitat: ${r.pages.replace(/,/g, ' · ')}`
+                              : 'secțiuni: neînregistrate'}
+                          </span>
                         </div>
                       </div>
                     </div>

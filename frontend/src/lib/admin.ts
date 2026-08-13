@@ -77,6 +77,23 @@ export async function fetchCreditAI(): Promise<CreditAIFurnizor[] | null> {
   }
 }
 
+/** GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug). Distructiv, declanșat de owner.
+ *  Întoarce câte rânduri s-au șters (măsurat), sau `null` dacă a picat — ca
+ *  butonul să spună adevărul, nu un „gata" inventat pe un apel eșuat. */
+export async function golesteVizitatori(): Promise<number | null> {
+  try {
+    const r = await fetch('/api/admin/visitors/purge', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { ok?: boolean; deleted?: number }
+    return j.ok ? Number(j.deleted ?? 0) : null
+  } catch {
+    return null
+  }
+}
+
 // CIRCUITUL BANILOR (admin): starea verigilor Stripe→AI + crearea cardului.
 /** The owner's lever: stops / restarts Kelion's autonomy.
  *

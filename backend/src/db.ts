@@ -242,6 +242,11 @@ export async function initDb(): Promise<void> {
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS actions INT NOT NULL DEFAULT 0;
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT '';
+    -- CE AU VIZITAT (owner, 13 aug: „dacă la raport nu am și ce au vizitat, nu
+    -- mă ajută cu nimic"). Lista secțiunilor deschise de acel vizitator în
+    -- sesiune (acasă / aplicație / credite / manual / autentificare), listă
+    -- distinctă separată prin virgulă, acumulată pe același rând, plafonată.
+    ALTER TABLE visits ADD COLUMN IF NOT EXISTS pages TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_visits_email ON visits (user_email, last_seen_at DESC);
     -- The ledger of top-ups (+) and consumptions (−) — the structure is below.
     -- ── PAYMENTS VIA REVOLUT PRO, WITH A UNIQUE CODE (Adrian, 30 Jul) ────────
@@ -1699,37 +1704,67 @@ const EMPTY_VISIT: DemoVisit = {
  * starters). Deduped: the same fingerprint/IP within 6 hours counts once, so a
  * refresh doesn't inflate the numbers. Fire-and-forget; never throws.
  */
+/**
+ * Adaugă o secțiune în lista `pages` a unui rând de vizită — DISTINCT (nu
+ * repetă), separată prin virgulă, plafonată la 400 de caractere. Reutilizată
+ * de logVisit (pe dedup) și de touchVisit, ca „ce au vizitat" să se strângă pe
+ * ACELAȘI rând, fără să umfle numărul de vizite. Best-effort; nu aruncă.
+ */
+async function appendPagina(id: number | string, path: string): Promise<void> {
+  const p = path.slice(0, 32)
+  if (!dbEnabled() || !p) return
+  try {
+    await getPool().query(
+      `UPDATE visits SET pages = CASE
+         WHEN pages = '' THEN $2
+         WHEN position(',' || $2 || ',' in ',' || pages || ',') > 0 THEN pages
+         ELSE left(pages || ',' || $2, 400)
+       END
+       WHERE id = $1`,
+      [id, p],
+    )
+  } catch {
+    /* analytics must never break the app */
+  }
+}
+
 export async function logVisit(
   fingerprint: string,
   ip: string,
   visit: DemoVisit = EMPTY_VISIT,
   userEmail = '',
+  path = '',
 ): Promise<void> {
   if (!dbEnabled()) return
   try {
     const pool = getPool()
     if (fingerprint || ip) {
-      const seen = Number(
-        (
-          await pool.query<{ n: string }>(
-            `SELECT COUNT(*) AS n FROM visits
-             WHERE started_at >= now() - interval '6 hours'
-               AND ((fingerprint <> '' AND fingerprint = $1) OR (ip <> '' AND ip = $2))`,
-            [fingerprint, ip],
-          )
-        ).rows[0]?.n ?? 0,
-      )
-      if (seen > 0) return
+      // Deja numărat în fereastra de 6h? Nu adăugăm rând nou (nu umflăm
+      // cifrele) — dar REȚINEM secțiunea nou deschisă pe același rând, ca
+      // raportul să arate „ce au vizitat" (owner, 13 aug).
+      const seen = (
+        await pool.query<{ id: string }>(
+          `SELECT id FROM visits
+           WHERE started_at >= now() - interval '6 hours'
+             AND ((fingerprint <> '' AND fingerprint = $1) OR (ip <> '' AND ip = $2))
+           ORDER BY started_at DESC LIMIT 1`,
+          [fingerprint, ip],
+        )
+      ).rows[0]
+      if (seen) {
+        await appendPagina(seen.id, path)
+        return
+      }
     }
     await pool.query(
       `INSERT INTO visits
          (fingerprint, ip, country, country_code, city, region, isp, tz,
-          browser, os, device, lang, referrer, is_bot, user_email)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          browser, os, device, lang, referrer, is_bot, user_email, pages)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [
         fingerprint, ip, visit.country, visit.code, visit.city, visit.region,
         visit.isp, visit.tz, visit.browser, visit.os, visit.device, visit.lang,
-        visit.referrer, visit.isBot, userEmail,
+        visit.referrer, visit.isBot, userEmail, path.slice(0, 32),
       ],
     )
   } catch {
@@ -1748,10 +1783,11 @@ export async function touchVisit(
   fingerprint: string,
   ip: string,
   email: string,
+  path = '',
 ): Promise<boolean> {
   if (!dbEnabled()) return true
   try {
-    const r = await getPool().query(
+    const r = await getPool().query<{ id: string }>(
       `UPDATE visits
        SET last_seen_at = now(), actions = actions + 1,
            user_email = CASE WHEN user_email = '' THEN $3 ELSE user_email END
@@ -1760,13 +1796,30 @@ export async function touchVisit(
                      AND ((user_email <> '' AND user_email = $3)
                           OR (fingerprint <> '' AND fingerprint = $1)
                           OR (ip <> '' AND ip = $2))
-                   ORDER BY started_at DESC LIMIT 1)`,
+                   ORDER BY started_at DESC LIMIT 1)
+       RETURNING id`,
       [fingerprint, ip, email],
     )
+    const id = r.rows[0]?.id
+    if (id) await appendPagina(id, path) // „ce au vizitat" pe rândul curent
     return (r.rowCount ?? 0) > 0
   } catch {
     return true /* analytics must never break the app */
   }
+}
+
+/**
+ * GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug: „golești baza de date de vizitatori,
+ * cine va fi acolo va avea o poză cu acceptul lor"). Șterge TOATE rândurile din
+ * `visits` — analiza de vizitatori + pozele de vizitator (photo_url), ca de-aici
+ * încolo tot ce apare în raport să fie cu consimțământ (poarta GDPR). NU atinge
+ * conturile, plățile, faceprints-urile utilizatorilor logați. Întoarce câte
+ * rânduri a șters (măsurat), sau -1 dacă baza nu e disponibilă (nu inventăm 0).
+ */
+export async function purgeVisits(): Promise<number> {
+  if (!dbEnabled()) return -1
+  const r = await getPool().query('DELETE FROM visits')
+  return r.rowCount ?? 0
 }
 
 
@@ -1870,27 +1923,10 @@ export async function getDemoStats(): Promise<DemoStats | null> {
       )
     ).rows.map((r) => ({ country: r.country, code: r.country_code, count: Number(r.n) }))
     const recent = (
-      await pool.query<{
-        kind: 'visit' | 'demo'
-        ip: string
-        country: string
-        country_code: string
-        city: string
-        region: string
-        isp: string
-        browser: string
-        os: string
-        device: string
-        lang: string
-        referrer: string
-        is_bot: boolean
-        started_at: string
-        session_email: string
-        topic: string
-        tz: string
-        vizite_anterioare: number
-        photo_url: string
-      }>(
+        // Rândul citit din DB e chiar DemoRecent, dar cu `country_code` în loc de
+        // `code` (mapat mai jos). Derivat din tip, nu re-scris — altfel lista de
+        // câmpuri se dublează literă cu literă cu DemoRecent (poarta jscpd).
+      await pool.query<Omit<DemoRecent, 'code'> & { country_code: string }>(
         // FULL VISIT PROFILE (Adrian, 31 Jul: "visitors, this field must give
         // full information about the visit"). Two things that change how you
         // read a row were missing: the TIMEZONE (the `tz` column existed in
@@ -1900,7 +1936,7 @@ export async function getDemoStats(): Promise<DemoStats | null> {
         // thing as one who landed on the site once.
         `SELECT 'visit'::text AS kind, v.ip, v.country, v.country_code, v.city, v.region, v.isp,
                 v.browser, v.os, v.device, v.lang, v.referrer, v.is_bot, v.started_at,
-                '' AS session_email, '' AS topic, v.tz, v.photo_url,
+                '' AS session_email, '' AS topic, v.tz, v.photo_url, v.pages,
                 (SELECT COUNT(*)::int - 1 FROM visits p
                   WHERE p.fingerprint = v.fingerprint AND p.fingerprint <> ''
                     AND p.started_at <= v.started_at) AS vizite_anterioare
@@ -1926,6 +1962,7 @@ export async function getDemoStats(): Promise<DemoStats | null> {
       tz: r.tz ?? '',
       vizite_anterioare: Math.max(0, Number(r.vizite_anterioare ?? 0)),
       photo_url: r.photo_url ?? '',
+      pages: r.pages ?? '',
     }))
     return {
       total: 0,

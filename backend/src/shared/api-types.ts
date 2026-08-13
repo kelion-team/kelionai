@@ -51,6 +51,10 @@ export interface DemoRecent {
   vizite_anterioare: number
   /** URL of the photo captured during the visit (webcam snapshot). Empty if none. */
   photo_url: string
+  /** CE AU VIZITAT (owner, 13 aug): secțiunile deschise de acest vizitator în
+   *  sesiune — listă distinctă separată prin virgulă (acasă, aplicație, credite,
+   *  manual, autentificare). Gol dacă n-a fost înregistrată nicio secțiune. */
+  pages: string
 }
 
 /** The visitor analysis, aggregated (admin-only): totals + countries + latest arrivals. */

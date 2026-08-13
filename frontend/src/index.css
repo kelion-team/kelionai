@@ -2246,6 +2246,21 @@ is used by the visitor analytics. */
   padding: 1px 7px;
   border-radius: 5px;
 }
+/* „ce au vizitat" (owner, 13 aug) — evidențiat pe rând propriu, ca ownerul să
+   vadă imediat CE secțiuni a deschis vizitatorul, nu doar CINE e. */
+.visitor-pages {
+  flex-basis: 100%;
+  color: var(--text);
+  opacity: 0.9;
+  font-weight: 600;
+}
+/* Golirea bazei de vizitatori (owner, 13 aug) — acțiune distructivă, discretă
+   dar la vedere, deasupra listei de vizite. */
+.vizitatori-golire {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 0 6px;
+}
 .admin-body {
   flex: 1;
   display: flex;
@@ -3262,7 +3277,11 @@ reset applies on the button or automatically when the tab is hidden (App.tsx). *
 /* POARTA DE UPDATE — BLOCANTĂ (Adrian, 11 aug: „să nu se poată continua până nu
    faci update-ul"). Acoperă TOT ecranul și prinde clicurile — pe versiunea veche
    nu se mai poate lucra — cu un card centrat + buton + numărătoare. */
-.update-gate {
+/* Poarta de update ȘI poarta de consimțământ (GDPR) au aceeași carcasă
+   blocantă — o singură definiție, ca poarta jscpd să nu vadă cod duplicat;
+   diferențele (culoare/z-index/lățime) stau în `.consimt-*` mai jos. */
+.update-gate,
+.consimt-gate {
   position: fixed;
   inset: 0;
   z-index: 9000;
@@ -3274,7 +3293,8 @@ reset applies on the button or automatically when the tab is hidden (App.tsx). *
   backdrop-filter: blur(6px);
   animation: update-gate-in 0.28s ease-out;
 }
-.update-gate-card {
+.update-gate-card,
+.consimt-card {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3308,6 +3328,45 @@ reset applies on the button or automatically when the tab is hidden (App.tsx). *
   to { opacity: 1; }
 }
 
+/* POARTA DE CONSIMȚĂMÂNT FOTO (GDPR) — owner, 13 aug. Carcasa vine din regula
+   comună de mai sus; aici doar diferențele: stă peste poarta de update, fundal
+   un pic mai opac, card puțin mai lat. Butonul de accept e verde (acțiunea care
+   lasă înăuntru), refuzul e discret. */
+.consimt-gate {
+  z-index: 9100;
+  background: rgba(6, 9, 20, 0.9);
+}
+.consimt-card {
+  gap: 14px;
+  max-width: 400px;
+  padding: 28px 26px;
+}
+.consimt-titlu { font-size: 18px; font-weight: 800; color: var(--text); }
+.consimt-mesaj { font-size: 14px; line-height: 1.5; color: var(--muted, #a9b3d0); }
+.consimt-actiuni {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 4px;
+}
+.consimt-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 22px;
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+}
+.consimt-accept { background: #1fbf6b; color: #06210f; }
+.consimt-accept:hover { filter: brightness(1.08); }
+.consimt-refuz {
+  background: transparent;
+  color: var(--muted, #a9b3d0);
+  border: 1px solid rgba(169, 179, 208, 0.4);
+}
+.consimt-refuz:hover { background: rgba(169, 179, 208, 0.12); }
+
 /* The floating windows enter smoothly, they don't „pop” (defect 3 from the
 audit): the same short entry on all conditionally-mounted overlays. */
 .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
@@ -3318,7 +3377,7 @@ audit): the same short entry on all conditionally-mounted overlays. */
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .update-gate, .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
+  .update-gate, .consimt-gate, .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
     animation: none;
   }
 }
