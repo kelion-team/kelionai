@@ -27,6 +27,7 @@ import {
   openWorkspaceBuild,
   openWorkspaceExecutie,
   adaugaPasExecutie,
+  getStareExecutie,
   closeWorkspace,
   closeTasksByKind,
   closeAllTasks,
@@ -564,8 +565,16 @@ export default function ChatPanel({
     // final (gata) doar închide bara la 100% — nu redeschide tabul dacă omul
     // l-a închis între timp.
     if (c.executie) {
+      // Tabul se deschide DOAR la ÎNCEPUTUL unei ture de execuție — nu la
+      // fiecare pas (bug 14 aug, captura ownerului: fiecare frame re-activa
+      // „Execuție în direct", iar cu microfonul mereu pornit turele curg
+      // întruna → tabul fura click-urile de pe celelalte taburi — „nu se
+      // poate trece din tab în tab, sau închide individual"). Conținutul
+      // suprafeței se hrănește ORICUM din starea vie (getStareExecutie),
+      // nu din re-deschidere — deci nimic nu se pierde.
+      const inainte = getStareExecutie()
       adaugaPasExecutie(c.executie.pas ?? '', c.executie.procent ?? 0, c.executie.gata === true)
-      if (!c.executie.gata) openWorkspaceExecutie(t.execTitle)
+      if (!c.executie.gata && (inainte === null || inainte.gata)) openWorkspaceExecutie(t.execTitle)
       return
     }
     // PANOUL CONSTRUCTORULUI (Etapa 4b): Kelion a preluat un ordin de build →

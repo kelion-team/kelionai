@@ -298,6 +298,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/auth/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ authenticated: false })
+    // SESIUNE ROSTOGOLITĂ (owner, 14 aug: „kelion a pierdut drepturile de
+    // admin… fă ceva să nu se mai poată pierde"). Cookie-ul avea termen FIX
+    // de 30 de zile de la LOGIN — expira în mijlocul folosirii și te lăsa
+    // „customer" din senin. Ruta asta e bătută la fiecare încărcare a
+    // aplicației, deci re-semnăm biletul aici: termenul curge mereu de la
+    // ULTIMA vizită. Cine intră măcar o dată pe lună nu mai pierde NICIODATĂ
+    // sesiunea (rolul de admin se recalculează oricum din email, la fiecare
+    // citire — ăla nu se pierde cât timp sesiunea trăiește).
+    setSession(reply, user)
     // GUSTAREA GRATIS (owner, 14 aug): la prima venire a unui cont — pe ORICE
     // cale de intrare (Google, email+parolă, magic link), fiindcă toate trec
     // pe aici la încărcarea aplicației — casa îi dă O SINGURĂ dată creditul de
