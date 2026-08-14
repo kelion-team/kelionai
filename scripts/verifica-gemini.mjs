@@ -123,27 +123,18 @@ function regulaFaraEnvModel() {
   }
 }
 
-// CONSTRUCTORUL (autonomia) A FOST MUTAT DE PE GEMINI de owner (12 aug: „nu are ce
-// căuta Gemini acolo"; înainte „doar RunPod" → DeepInfra). Regula veche cerea ca
-// modelul constructorului să fie Gemini — acum contrazice ordinul ownerului. O
-// INVERSĂM: lacătul păzește ca acest creier să RĂMÂNĂ un endpoint OpenAI-compatibil
-// (RunPod/DeepInfra din env) și să NU recadă pe Gemini. Celelalte reguli (creierul
-// APLICAȚIEI — chat/voce/work) rămân neatinse: acolo Gemini e în continuare bătut
-// în cuie. Măsurat 12 aug: Qwen3-Coder-480B-Turbo pe DeepInfra e supraîncărcat
-// (engine_overloaded, 0 tool_calls); DeepSeek-V3/Qwen2.5-72B/Llama merg pe aceeași
-// cheie → constructorul rulează pe DeepSeek-V3 cu rotire pe rezerve.
-function regulaConstructorFaraGemini() {
+// CONSTRUCTORUL (autonomia) apelează creierul securizat prin aplicație
+// (/api/constructor/creier, cu cheie de bridge), care orchestrează modelele
+// cu rezervă Fable 5. Lacătul păzește ca acest flux prin app să rămână intact.
+function regulaConstructorApp() {
   return {
-    nume: 'Constructorul (autonomia) = endpoint OpenAI-compatibil (DeepInfra), NU Gemini',
+    nume: 'Constructorul (autonomia) = apelează creierul securizat prin app (/api/constructor/creier)',
     fisier: 'deploy/constructor-agent.mjs',
     verifica(src) {
-      // Trebuie să-și ia creierul din env-ul OpenAI-compatibil (ambele nume: nou
-      // RUNPOD_*, vechi DEEPSEEK_* — cheia stă pe VPS sub numele vechi).
-      if (!/env\.CONSTRUCTOR_RUNPOD_KEY\s*\|\|\s*env\.CONSTRUCTOR_DEEPSEEK_KEY/.test(src))
-        return 'constructorul nu mai citește cheia endpointului OpenAI-compatibil (CONSTRUCTOR_RUNPOD_KEY/CONSTRUCTOR_DEEPSEEK_KEY) — structura s-a schimbat'
-      // ȘI nu trebuie să mai cheme Gemini (niciun apel către API-ul Google).
-      if (/generativelanguage\.googleapis\.com/.test(src))
-        return 'a reapărut un apel Gemini (generativelanguage.googleapis.com) în constructor — owner: „nu are ce căuta Gemini acolo"'
+      if (!/api\/constructor\/creier/.test(src))
+        return 'constructorul nu mai apelează ruta dedicată a aplicației (/api/constructor/creier)'
+      if (!/BRIDGE_SECRET/.test(src))
+        return 'constructorul nu mai folosește autentificarea prin BRIDGE_SECRET'
       return null
     },
   }
@@ -195,7 +186,7 @@ const REGULI = [
   regulaTreaptaGetter('workDefault', 'modelUnicDirect'),
   regulaTreaptaGetter('topDefault', 'modelUnicDirect'),
   regulaFaraEnvModel(),
-  regulaConstructorFaraGemini(),
+  regulaConstructorApp(),
   regulaPoartaUpgrade(),
   regulaSemnaturaGandirii(),
   regulaVoceLive(),
