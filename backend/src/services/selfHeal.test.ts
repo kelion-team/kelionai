@@ -26,6 +26,9 @@ vi.mock('../db.js', () => ({
   },
   requeueMoneyFailedBuildJobs: async () => 0,
   listFailedBuildJobsRecent: async () => ordineMoarte,
+  // „Un doctor pe pacient": ordinele depuse în test se numără drept ACTIVE pe
+  // sursa lor — exact ca în DB (create = queued), deci zgarda de unicat e reală.
+  activeBuildJobsByScope: async (scope: string) => jobs.filter((j) => j.scope === scope).length,
 }))
 vi.mock('./runbooks.js', () => ({ isOpsPaused: async () => false }))
 vi.mock('./geminiDirect.js', () => ({ geminiLive: async () => ({ ok: false, serving: false }) }))
@@ -118,5 +121,29 @@ describe('runSelfHeal — eșecurile mute ajung la reparație', () => {
     const r = await runSelfHeal()
     expect(r.filed).toBe(0)
     expect(jobs).toHaveLength(0)
+  })
+
+  // ── UNICAT — „un doctor pe pacient" (owner, 14 aug: „setezi 1 singur ordin
+  // identic, că deschide ZECI" — #235/#236/#237/#248, ~1M tokeni fiecare, pe
+  // ACEEAȘI cauză) ──────────────────────────────────────────────────────────
+  it('două simptome diferite în ACEEAȘI rulare → UN singur ordin, nu un roi', async () => {
+    simptome = [
+      simptom('ruta-crapata', 'POST /api/chat: boom', 3, '/api/chat'),
+      simptom('chat-mut', 'voce: ușa creierului a picat', 3),
+    ]
+    const r = await runSelfHeal()
+    // primul ordin intră; al doilea vede sursa OCUPATĂ și așteaptă rulările viitoare
+    expect(r.filed).toBe(1)
+    expect(jobs).toHaveLength(1)
+  })
+
+  it('cât timp ordinul unei surse e VIU, sursa nu mai depune nimic — unicat garantat', async () => {
+    simptome = [simptom('ruta-crapata', 'POST /api/chat: boom', 3, '/api/chat')]
+    await runSelfHeal()
+    expect(jobs).toHaveLength(1)
+    // apare o eroare NOUĂ (altă semnătură) cât primul ordin încă lucrează:
+    simptome = [simptom('ruta-crapata', 'POST /api/plati: alt boom', 3, '/api/plati')]
+    await runSelfHeal()
+    expect(jobs).toHaveLength(1) // tot UNUL — zgarda a ținut
   })
 })
