@@ -238,26 +238,30 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
         // Uneltele constructorului (OpenAI function) → formatul geminiDirectChat;
         // răspunsul → înapoi în format OpenAI. Punțile sunt în creier2Constructor.ts.
         const tools = uneltePentruCreier2(rawTools)
-        const model = String(req.body?.model ?? '').trim() || config.constructorGeminiModel
-        // RETRY TRANSIENT GEMINI ERRORS (503 Service Unavailable, 429 Rate Limit, 500/502/504)
-        // Upstream Gemini intermittently returns 503 (model overloaded / temporary unavailable).
-        // A brief backoff retry inside the app prevents unnecessary 502 escalations and constructor stalls.
-        const maxIncercariGemini = 3
-        for (let incercare = 1; incercare <= maxIncercariGemini; incercare++) {
-          try {
-            const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high', toolChoice: 'required' })
-            if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
-            esecuriCreierLaRand = 0 // creierul a servit — lanțul de eșecuri s-a rupt
-            return reply.send(raspunsCreier2(r))
-          } catch (e) {
-            const errStr = (e as Error).message || ''
-            gemeniEsec = errStr.slice(0, 200)
-            const isTransient = /503|502|504|500|429|overload|unavailable|resource_exhausted|high demand/i.test(errStr)
-            if (incercare < maxIncercariGemini && isTransient) {
-              await new Promise((resolve) => setTimeout(resolve, incercare * 1500))
-              continue
+        const candidateModels = [
+          String(req.body?.model ?? '').trim() || config.constructorGeminiModel,
+          config.geminiModelGreu,
+          config.geminiModel,
+        ].filter((m, idx, arr) => m && arr.indexOf(m) === idx)
+
+        for (const m of candidateModels) {
+          const maxIncercariGemini = 2
+          for (let incercare = 1; incercare <= maxIncercariGemini; incercare++) {
+            try {
+              const r = await geminiDirectChat(m, messages, tools, { reasoning: 'high', toolChoice: 'required' })
+              if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
+              esecuriCreierLaRand = 0 // creierul a servit — lanțul de eșecuri s-a rupt
+              return reply.send(raspunsCreier2(r))
+            } catch (e) {
+              const errStr = (e as Error).message || ''
+              gemeniEsec = errStr.slice(0, 200)
+              const isTransient = /503|502|504|500|429|overload|unavailable|resource_exhausted|high demand/i.test(errStr)
+              if (incercare < maxIncercariGemini && isTransient) {
+                await new Promise((resolve) => setTimeout(resolve, incercare * 1000))
+                continue
+              }
+              break
             }
-            break
           }
         }
       } else {
@@ -265,8 +269,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       }
       // ── REZERVĂ: FABLE 5 (owner, 14 aug: „când nu merge repara vreau să cadă pe
       // fable 5"). Tot PRIN APP (cheia Anthropic stă aici, nu în constructor);
-      // mesajele+uneltele sunt deja OpenAI → trec direct la endpointul Anthropic
-      // OpenAI-compat. REVENIRE: fiecare pas nou reîncepe cu Gemini (mai sus), deci
+      // mesajele+uneltele sunt convertite conform endpoint-ului Anthropic (/v1/messages).
+      // REVENIRE: fiecare pas nou reîncepe cu Gemini (mai sus), deci
       // se revine SINGUR pe principal când Gemini își revine — nu rămâne pe rezervă.
       const { fable5Disponibil, fable5Chat } = await import('../services/fable5Constructor.js')
       if (fable5Disponibil()) {
