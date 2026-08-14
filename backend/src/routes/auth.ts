@@ -68,7 +68,13 @@ const FULL_SCOPES = [
   // session-based picker flow — a NEW feature, not a scope fix). Keeping the
   // dead scope here would only promise Photos on the consent screen and never
   // deliver it.
-  'https://www.googleapis.com/auth/youtube.readonly',
+  // REMOVED (14 aug, captura LIVE a ownerului): 'youtube.readonly' — Google a
+  // început să REFUZE cererea întreagă („Error 400: invalid_request — scopes
+  // that cannot be requested together: drive.file, youtube.readonly"), deci
+  // scope-ul ăsta bloca TOATĂ conectarea Google. Măsurat în cod înainte de
+  // tăiere: NICIUN apel la youtube/v3 cu tokenul OAuth nu există —
+  // youtube_search merge pe Serper (serperVideos), redarea pe embed public.
+  // Un scope nefolosit care omoară consimțământul e doar pagubă.
   // (`cloud-platform` — cerut pe 4 aug DOAR pentru crearea agenților în consola
   // Gemini Enterprise — a fost SCOS pe 8 aug odată cu toată calea consolei,
   // pe ordinul ownerului: niciun consumator rămas, deci consimțământul nu mai
