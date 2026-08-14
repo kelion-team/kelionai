@@ -5,7 +5,7 @@
 //
 // CE FACE: ia UN ordin din coadă (API-ul aplicației, auth x-bridge-secret),
 // clonează repo-ul proaspăt în ATELIER (/root/kelion/atelier), lasă creierul
-// (un endpoint OpenAI-compatibil din env — DeepInfra azi, NU Gemini) să
+// (prin app: Gemini principal → Fable 5 rezervă) să
 // exploreze/scrie/verifice prin unelte, impune BUILD + TESTE verzi, apoi
 // împinge ramura și deschide PR-ul. Merge-ul rămâne la Adrian.
 // (La eșec de FURNIZOR ordinul se AMÂNĂ onest, rămâne în coadă și se reia
@@ -616,8 +616,8 @@ function compactHistory(messages) {
 // plătit „Fable 5" (FABLE_MODEL / cereCreierFable / modelePentruOrdin), rotația
 // circulară pe trepte și clasificarea erorilor OpenRouter. Toate au murit odată
 // cu furnizorul — ordinul repetat al ownerului: „openrouter și open ai scos din
-// toată aplicația". Creierul e UN SINGUR endpoint OpenAI-compatibil (DeepInfra);
-// la eșec de furnizor, ordinul se AMÂNĂ onest (rămâne în coadă, se reia automat).
+// toată aplicația". Creierul constructorului merge prin app (/api/constructor/creier:
+// Gemini principal → Fable 5 rezervă); la eșec de furnizor, ordinul se AMÂNĂ onest (rămâne în coadă, se reia automat).
 const LLM_ATTEMPTS = 6
 
 // (Owner, 14 aug: creierul constructorului e PRIN APP — Gemini (principal) →

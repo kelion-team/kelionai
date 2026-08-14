@@ -56,9 +56,9 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // Linii care CONȚIN cuvinte de eroare dar sunt de fapt verdicte bune/contoare
   // pe zero — fără ele, „0 failed" ar fi născut ordine de reparație degeaba.
   // Tot zgomot sunt și erorile din subsisteme/furnizori DECOMISIONAȚI
-  // (ex. RunPod/DeepInfra — scoși din constructor prin PR #1085, dar rămași în
+  // (ex. RunPod/DeepInfra/OpenRouter — scoși din constructor, dar rămași în
   // coada logurilor istorice ale gazdei).
-  const zgomot = /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra)/i
+  const zgomot = /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter)/i
   const vazute = new Set<string>()
   const out: string[] = []
   for (const linie of text.split('\n')) {
