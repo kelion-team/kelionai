@@ -210,7 +210,14 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
         const tools = uneltePentruCreier2(rawTools)
         const model = String(req.body?.model ?? '').trim() || config.geminiModelGreu
         try {
-          const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high' })
+          // FORȚĂM CHEMAREA UNELTEI (owner, 14 aug: „trebuia să cheme, nu cheamă"):
+          // pe AUTO, Gemini putea răspunde cu TEXT în loc să cheme o unealtă → „tură
+          // sterilă", exact ce omora ordinul. `toolChoice:'required'` = mod ANY: pe
+          // fiecare tură TREBUIE să cheme o unealtă (explorează/scrie/verifică sau
+          // `finish`) — constructorul e agentic, n-are ture de vorbă. (Owner ceruse
+          // deja 13 aug „obligatoriu să cheme unealta corectă"; infra ANY exista, dar
+          // ruta constructorului n-o folosea.)
+          const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high', toolChoice: 'required' })
           if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
           return reply.send(raspunsCreier2(r))
         } catch (e) {
