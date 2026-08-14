@@ -19,12 +19,26 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       (2) YouTube upload (consimțământ SEPARAT, nu poate sta lângă Drive) —
       SCRIS, pe #1118 (09c07dc0): poartă `/auth/google/connect-youtube`,
       urcare privată implicit, unealta `youtube_urca`, registru 113 — de
-      probat live cu un clip real; (3) Firebase push (notificări pe telefon),
-      (4) Business Profile (cere aprobare Google pe contul ownerului — pas de
-      ghidat). Fiecare: un PR, intrare în meniul „Aplicații", rând în manual,
-      tarif unde costă bani, porți verzi + probă live. Deja legate azi:
-      Slides, Meet, Forms (#1116). Imposibilele rămân marcate cinstit
-      (Keep = doar enterprise, Google Pay ≠ procesator, Fit = mort).
+      probat live cu un clip real; (3) notificări pe telefon — SCRIS (14 aug,
+      noaptea): Web Push cu VAPID, NU cont Firebase (același canal standard pe
+      care browserele îl duc prin FCM, dar zero conturi, zero chei de pus de
+      owner — perechea VAPID se naște singură în kv_state); butonul „🔔 Pe
+      telefon" în capul adminului; orice notifyAdmin (pr_gata al santinelei,
+      alarme) zboară și pe telefon; de probat live: pornește butonul, apoi
+      un „PR gata" trebuie să sune telefonul; (4) Business Profile (cere
+      aprobare Google pe contul ownerului — pas de ghidat). Fiecare: un PR,
+      intrare în meniul „Aplicații", rând în manual, tarif unde costă bani,
+      porți verzi + probă live. Deja legate azi: Slides, Meet, Forms (#1116).
+      Imposibilele rămân marcate cinstit (Keep = doar enterprise, Google Pay ≠
+      procesator, Fit = mort).
+- [ ] GĂURILE DE POARTĂ prinse pe viu (14 aug, noaptea): poarta VPS nu rula
+      NICI verifica-butoane (bara de deploy din #1122 a intrat pe master cu
+      ambele apeluri în gol — rute fără prefix, la rădăcină — și verdictul a
+      fost TRECE), NICI lacătul Gemini (a zăcut crăpat pe master cu
+      ReferenceError și tot TRECE se posta). SCRIS: ambele adăugate în
+      ruleaza_portile + rândurile lor în raport; rutele deploy reparate (căi
+      complete + gard x-bridge-secret pe POST). De probat live: primul raport
+      de poartă de după deploy trebuie să aibă 9 rânduri, nu 7.
 - [ ] ORDIN 14 aug, 20:45 („când apare ceva scris de la Kelion, obligatoriu e
       și audio"): ORICE text al lui Kelion se și rostește — inclusiv turele
       scrise, ack-urile și rezultatele. De legat sinteza (aceleași frame-uri

@@ -142,6 +142,9 @@ const SECTIONS: ManualSection[] = [
       // BARA DE EXECUȚIE (owner, 14 aug) — the manual must describe the app as
       // it IS: every execution turn shows its steps live on the monitor.
       'When you ask Kelion to actually do something, the work is not a black box: every step it takes appears live on the monitor behind it, with a dotted progress bar filling from 0 to 100%. The bar reaches 100% only when the turn has truly finished — it never claims "done" in advance.',
+      // PUSH PE TELEFON (14 aug, a treia bifă din „toate aplicațiile"): și
+      // manualul trebuie să știe că anunțurile pot ajunge pe telefon.
+      'Platform announcements can also reach your phone: turning on "🔔 Pe telefon" in the admin panel subscribes that device through standard Web Push, so alerts arrive even when the site is closed. It only ever happens after you grant the browser permission, and you can switch it off from the same button.',
     ],
   },
   {

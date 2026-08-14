@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
+import { config } from '../config.js';
 
 export interface DeployState {
   status: 'idle' | 'running' | 'success' | 'failed';
@@ -69,7 +70,7 @@ export async function deployRoutes(
   _opts: FastifyPluginOptions
 ) {
   // Read current deploy progress (JSON)
-  fastify.get('/progress', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/deploy/progress', async (_req: FastifyRequest, reply: FastifyReply) => {
     return reply.send({
       ok: true,
       state: getDeployState(),
@@ -77,7 +78,7 @@ export async function deployRoutes(
   });
 
   // Real-time SSE stream for deploy status & progress
-  fastify.get('/status', async (req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/deploy/status', async (req: FastifyRequest, reply: FastifyReply) => {
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
     reply.raw.setHeader('Connection', 'keep-alive');
@@ -100,8 +101,11 @@ export async function deployRoutes(
     });
   });
 
-  // Update deploy progress from CI / deploy scripts / runbook
-  fastify.post('/progress', async (
+  // Update deploy progress from CI / deploy scripts / runbook.
+  // GARDAT cu x-bridge-secret (ca rutele constructorului): fără gard, ORICINE
+  // putea picta în admin un „deploy reușit" fals — exact soiul de ecran
+  // mincinos (capturi false de aplicație) pe care ownerul l-a interzis pe 14 aug.
+  fastify.post('/api/deploy/progress', async (
     req: FastifyRequest<{
       Body: {
         status?: 'idle' | 'running' | 'success' | 'failed';
@@ -115,6 +119,8 @@ export async function deployRoutes(
     }>,
     reply: FastifyReply
   ) => {
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ ok: false, error: 'unauthorized' });
     const body = req.body || {};
     const updated = setDeployState({
       status: body.status,

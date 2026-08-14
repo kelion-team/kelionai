@@ -8,6 +8,7 @@ import {
 } from '../lib/gestures'
 import BackLink from './BackLink'
 import { adminStrings } from '../lib/adminText'
+import { starePush, activeazaPush, dezactiveazaPush, type StarePush } from '../lib/pushTelefon'
 import type { BrainCredit } from '../pages/Stage'
 import {
   fetchHistory,
@@ -360,6 +361,21 @@ export default function AdminPanel({
   const [tab, setTab] = useState<
     'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori' | 'notificari'
   >(initialTab ?? 'finance')
+  // Notificările pe telefon (Web Push): starea vine MĂSURATĂ din browser
+  // (starePush), nu ținută minte — „activ" înseamnă chiar o abonare vie.
+  const [push, setPush] = useState<StarePush>('inactiv')
+  const [pushBusy, setPushBusy] = useState(false)
+  useEffect(() => {
+    void starePush().then(setPush)
+  }, [])
+  const comutaPush = async (): Promise<void> => {
+    setPushBusy(true)
+    try {
+      setPush(push === 'activ' ? await dezactiveazaPush() : await activeazaPush())
+    } finally {
+      setPushBusy(false)
+    }
+  }
   // GESTURES (Adrian, Jul 13): the disabled list — what is NOT checked is NOT used.
   // Tri-stat (auditul admin, 3 aug): pe o citire EȘUATĂ nu desenăm „toate
   // active" și mai ales nu lăsăm un toggle să salveze peste o bază necitită
@@ -1184,7 +1200,8 @@ export default function AdminPanel({
                 rutele lor rămân în cod (Kelion le folosește prin unelte).
                 EXCEPȚIA, spusă ownerului: Notificări NU dispare de tot —
                 alarmele construite azi (creier căzut în lanț, ordin mort) scriu
-                DOAR aici (adminNotification = doar DB, fără email/push), deci
+                DOAR aici (adminNotification = DB + copia pe telefon prin Web
+                Push, dacă ownerul a pornit-o din „🔔 Pe telefon"), deci
                 tabul reapare SINGUR doar când există ceva NECITIT, ca alarma să
                 nu redevină mută. La zero necitite, vitrina rămâne curată. */}
             <button
@@ -1264,6 +1281,32 @@ export default function AdminPanel({
           {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
           onOpenSettings rămâne în props (fereastra CustomerSettings poate fi
           redeschisă de altundeva la nevoie), dar butonul nu se mai arată. */}
+          {/* Notificările pe telefon: anunțurile santinelei („PR gata") și
+              alarmele ajung la owner și când NU e pe site — Web Push, pornit
+              conștient de aici (browserul oricum cere permisiunea lui). */}
+          <button
+            type="button"
+            className="ghost"
+            disabled={pushBusy || push === 'nesuportat' || push === 'refuzat'}
+            title={
+              push === 'refuzat'
+                ? 'Notificările sunt blocate din setările browserului — deblochează-le acolo întâi.'
+                : push === 'nesuportat'
+                  ? 'Browserul ăsta nu știe Web Push.'
+                  : 'Anunțurile de panou (PR gata, alarme) vin și pe telefonul ăsta.'
+            }
+            onClick={() => void comutaPush()}
+          >
+            {pushBusy
+              ? '🔔 …'
+              : push === 'activ'
+                ? '🔔 Pe telefon: pornit'
+                : push === 'refuzat'
+                  ? '🔕 blocat din browser'
+                  : push === 'nesuportat'
+                    ? '🔕 indisponibil aici'
+                    : '🔔 Pornește pe telefon'}
+          </button>
           <BackLink onBack={onClose} />
         </header>
         {/* CREDITELE AI, SUS ÎN ADMIN (Adrian, 10 aug: „mută pastilele AI sub

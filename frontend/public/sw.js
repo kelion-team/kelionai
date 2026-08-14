@@ -32,6 +32,44 @@ self.addEventListener('message', (e) => {
   }
 })
 
+// ── NOTIFICĂRI PUSH (Web Push, VAPID — serverul le trimite prin
+// /api/push/*) ── notificarea se ARATĂ mereu (userVisibleOnly e promisiunea
+// făcută browserului la abonare); clicul duce înapoi în aplicație.
+self.addEventListener('push', (e) => {
+  let date = { titlu: 'Kelion', mesaj: '' }
+  try {
+    date = { ...date, ...e.data.json() }
+  } catch {
+    date.mesaj = e.data ? e.data.text() : ''
+  }
+  e.waitUntil(
+    self.registration.showNotification(date.titlu, {
+      body: date.mesaj,
+      icon: '/kelion-logo.png',
+      badge: '/kelion-logo.png',
+      data: { url: date.url || '/' },
+    }),
+  )
+})
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close()
+  const url = (e.notification.data && e.notification.data.url) || '/'
+  e.waitUntil(
+    (async () => {
+      const ferestre = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      for (const f of ferestre) {
+        if ('focus' in f) {
+          await f.focus()
+          if ('navigate' in f && url !== '/') await f.navigate(url).catch(() => {})
+          return
+        }
+      }
+      await self.clients.openWindow(url)
+    })(),
+  )
+})
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url)
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return
