@@ -52,7 +52,7 @@ export async function coadaLogGazda(
  *  — omul și constructorul au nevoie de context real, nu de amprentă. */
 export function semnaturiEroare(text: string, maxim = 8): string[] {
   const tipar =
-    /(error|eroare|fatal|fail(ed|ure)?|pic[ăa]t?\b|refuz|denied|exception|traceback|unhandled|ECONN|ETIMEDOUT|EACCES|ENOSPC|creier_esec|\b5\d\d\b)/i
+    /\b(error|errors|eroare|erori|fatal|fail(ed|ure)?|pic[ăa]t?\b|refuz(at)?|denied|exception|traceback|unhandled|ECONN|ETIMEDOUT|EACCES|ENOSPC|creier_esec|\b5\d\d\b)/i
   // Linii care CONȚIN cuvinte de eroare dar sunt de fapt verdicte bune/contoare
   // pe zero — fără ele, „0 failed" ar fi născut ordine de reparație degeaba.
   // Tot zgomot sunt și erorile din subsisteme/furnizori DECOMISIONAȚI
@@ -63,6 +63,11 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // care conține cuvântul „eroare" este re-detectat ca eroare nouă într-o buclă infinită.
   const zgomot =
     /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\])/i
+  // coada logurilor istorice ale gazdei), precum și pașii normali de lucru ai
+  // constructorului (ex. `pas 18/120: grep ...`, `pas 2/120: read ...`) care
+  // conțin în argumente numele funcțiilor/fișierelor căutate.
+  const zgomot =
+    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*pas\s+\d+\/\d+:\s*(grep|read|edit|write|ls|run|run_runbook|cauta|search))/i
   const vazute = new Set<string>()
   const out: string[] = []
   for (const linie of text.split('\n')) {
