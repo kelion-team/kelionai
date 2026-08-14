@@ -4005,7 +4005,12 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
 .becuri-bara-nr.toate-ok { color: var(--text); opacity: 0.45; font-weight: 600; }
 
 /* „APLICAȚII" — buton cu meniu (trading + Adaptare CV grupate), owner 13 aug. */
-.apps-wrap { position: relative; display: inline-flex; }
+/* `.topbar` e pointer-events:none (ca să nu acopere avatarul), iar FIECARE copil
+   interactiv RE-activează clicurile. Butonul „Aplicații" stă în `.apps-wrap`, deci
+   NU e `.topbar > button` — fără linia de mai jos, wrap-ul + butonul + meniul moștenesc
+   `none` și clicul trece PRIN ele (owner, 14 aug: „butonul Aplicații nu merge"). Aceeași
+   cauză ca bugul vechi de la `.wallet`. */
+.apps-wrap { position: relative; display: inline-flex; pointer-events: auto; }
 .apps-backdrop { position: fixed; inset: 0; z-index: 40; }
 .apps-menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 41;
