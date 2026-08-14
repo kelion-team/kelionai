@@ -35,6 +35,8 @@ export interface BrainCallOpts {
    *  (Gemini `allowedFunctionNames`) — e.g. only the „doing" tools, never the
    *  display-only ones, so a forced turn can't be satisfied with a fake card. */
   allowedFunctionNames?: string[]
+  /** Custom timeout in milliseconds for the engine call. */
+  timeoutMs?: number
 }
 
 // OCHII PE REZULTATUL UNEI UNELTE (9 aug, ownerul: „sistemul nu dă lui Kelion
