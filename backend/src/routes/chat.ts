@@ -3703,6 +3703,22 @@ async function runTool(
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       const order = String(args.order ?? '').trim()
       if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
+      // POARTA DE CALITATE ȘI PE CALEA DIN CHAT (owner, 14 aug: „vreau să nu mai
+      // eșueze niciun ordin"). Pe panou poarta exista (13 aug); AICI lipsea — un
+      // ordin vag/imposibil dat prin Kelion intra în coadă și murea DUPĂ ce ardea
+      // bani și încercări. Un ordin condamnat se respinge LA UȘĂ, cu motivul, iar
+      // Kelion îi spune ownerului CE lipsește ca să-l reformuleze — nu-l îngroapă.
+      {
+        const { evalueazaOrdin } = await import('../services/evalOrdinConstructor.js')
+        const ev = evalueazaOrdin(order)
+        if (!ev.trece) {
+          return JSON.stringify({
+            error: 'ordin_respins',
+            motiv: ev.motiv,
+            message: `Nu l-am pus în coadă — ar fi murit acolo: ${ev.motiv}. Reformulează ordinul cu ce/unde/cum se verifică și îl preiau.`,
+          })
+        }
+      }
       const jobId = await createBuildJob(email, order)
       if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
 

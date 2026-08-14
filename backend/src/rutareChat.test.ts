@@ -117,7 +117,7 @@ describe('regula de rutare: mesajul normal de chat NU ajunge la constructor', ()
   it('mesajul de admin cu ordin EXPLICIT („construiește/repară X în aplicație") AJUNGE la constructor', () => {
     // Calea legitimă, neschimbată: unealta build_software pune ordinul în coada
     // reală (build_jobs) și confirmă cu numărul ordinului.
-    expect(sursaChat).toMatch(/case 'build_software'[\s\S]{0,700}createBuildJob\(email, order\)/)
+    expect(sursaChat).toMatch(/case 'build_software'[\s\S]{0,1600}createBuildJob\(email, order\)/)
     expect(sursaChat).toMatch(/Am preluat cerința \(ordin #\$\{jobId\}\)\./)
   })
 
