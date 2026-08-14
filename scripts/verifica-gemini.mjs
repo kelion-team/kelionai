@@ -202,7 +202,7 @@ const REGULI = [
   regulaTreaptaGetter('workDefault', 'modelUnicDirect'),
   regulaTreaptaGetter('topDefault', 'modelUnicDirect'),
   regulaFaraEnvModel(),
-  regulaConstructorFaraGemini(),
+  regulaConstructorApp(),
   regulaPoartaUpgrade(),
   regulaSemnaturaGandirii(),
   regulaVoceLive(),

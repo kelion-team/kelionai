@@ -1,4 +1,5 @@
 // ── VOCEA UNIFICATĂ — UN SINGUR MODEL GEMINI LIVE FACE TOT (4 aug 2026) ──────
+// (Investighez freeze-ul după câteva fraze)
 //
 // Adrian: „un singur AI, voce masculină, face tot" (aude full-duplex + gândește
 // + vorbește + unelte). Confirmat la sursa oficială Google (Live API) ȘI măsurat
@@ -743,3 +744,4 @@ export function deschideVocalLive(
     },
   }
 }
+

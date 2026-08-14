@@ -74,8 +74,10 @@
           navigator.serviceWorker
             .register('/sw.js', { updateViaCache: 'none' })
             .then((reg) => {
-              void reg.update()
-              setInterval(() => void reg.update(), 60_000)
+              reg.update().catch(() => {})
+              setInterval(() => {
+                reg.update().catch(() => {})
+              }, 60_000)
             })
             .catch(() => {})
         })

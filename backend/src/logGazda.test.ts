@@ -55,8 +55,13 @@ describe('logGazda — semnăturile de eroare', () => {
     expect(s[0]).toContain('creier_esec')
   })
 
-  it('NU ia verdictele bune drept boală („0 failed", „TRECE")', () => {
-    const text = ['Tests: 0 failed, 1321 passed', 'VERDICT: TRECE', 'build ok'].join('\n')
+  it('NU ia verdictele bune drept boală („0 failed", „TRECE") și ignoră furnizorii decomisionați (RunPod/DeepInfra)', () => {
+    const text = [
+      'Tests: 0 failed, 1321 passed',
+      'VERDICT: TRECE',
+      'build ok',
+      '[08:04:20] llm încercarea 4/6 a picat pe DeepInfra/meta-llama/Llama-3.3-70B-Instruct-Turbo (RunPod 402: {"error":{"message":"You need positive balance to do inference. Please add bal) — reîncerc în 30s',
+    ].join('\n')
     expect(semnaturiEroare(text)).toEqual([])
   })
 
