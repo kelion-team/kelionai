@@ -22,6 +22,11 @@ import { googleServiceAccount } from './googleCreds.js'
 const CONT_FACTURARE = process.env.GOOGLE_BILLING_ACCOUNT ?? '011729-7DA3DA-87ED94'
 /** Datasetul BigQuery în care ownerul pornește exportul (pasul 3 din consolă). */
 const DATASET = process.env.GOOGLE_BILLING_DATASET ?? 'facturare'
+/** Proiectul în care stă datasetul de export — VĂZUT în consola ownerului la
+ *  activare (14 aug, captură: „Kelion (gen-lang-client-0460348646)"). Poate
+ *  diferi de proiectul contului de serviciu — de-aia NU-l deducem din cont, îl
+ *  fixăm aici (env-ul îl poate schimba fără deploy). */
+const PROIECT_EXPORT = process.env.GOOGLE_BILLING_PROJECT ?? 'gen-lang-client-0460348646'
 
 /** Numele STANDARD al tabelului de export (documentat de Google):
  *  gcp_billing_export_v1_<cont-cu-underscore>. */
@@ -106,7 +111,7 @@ export async function facturareGoogle(
   if (cache && Date.now() - cache.la < CACHE_MS) return cache.rezultat
   const t = await tokenBigQuery()
   if (!t.ok) return t
-  const tabel = `\`${t.proiect}.${DATASET}.${tabelExport()}\``
+  const tabel = `\`${PROIECT_EXPORT}.${DATASET}.${tabelExport()}\``
   // Creditele din export sunt NEGATIVE (scad costul) → le întoarcem pozitive.
   const sql =
     `SELECT IFNULL(SUM(cost),0) AS cheltuit, ` +
