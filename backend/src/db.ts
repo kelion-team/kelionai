@@ -2321,6 +2321,14 @@ export async function citesteRezumatCost(): Promise<Citire<CostSummary>> {
 
 // Per-user speech language — persists across sessions for as long as the user
 // exists. Returns null when unset (the client then auto-detects).
+//
+// IGIENIZARE LA SURSĂ (owner, 14 aug: „chatul la mine îl traduce în rusă").
+// Gardul din lang.ts (24 iul) oprește COMMIT-ul unei limbi nesuportate — dar o
+// preferință otrăvită de DINAINTE de gard (dovada vie din 24 iul: româna auzită
+// ca RUSĂ) rămânea în bază și curgea în vocea live / persona. De-acum, o limbă
+// din afara setului suportat NU mai iese de aici: se întoarce null (= detectare
+// de la zero) și se șterge din bază, ca otrava să nu se mai întoarcă.
+const LIMBI_SUPORTATE_PREF = new Set(['en', 'ro', 'fr', 'es', 'pt', 'it', 'de'])
 export async function getSpeechLang(email: string): Promise<string | null> {
   if (!dbEnabled()) return null
   try {
@@ -2328,7 +2336,16 @@ export async function getSpeechLang(email: string): Promise<string | null> {
       'SELECT speech_lang FROM user_prefs WHERE user_email = $1',
       [userKey(email)],
     )
-    return r.rows[0]?.speech_lang ?? null
+    const brut = r.rows[0]?.speech_lang ?? null
+    if (!brut) return null
+    if (!LIMBI_SUPORTATE_PREF.has(brut.toLowerCase().split('-')[0])) {
+      console.error(`[limbă] preferință otrăvită ștearsă pentru ${email}: „${brut}" (nesuportată)`)
+      void getPool()
+        .query('UPDATE user_prefs SET speech_lang = NULL WHERE user_email = $1', [userKey(email)])
+        .catch(() => {})
+      return null
+    }
+    return brut
   } catch {
     return null
   }

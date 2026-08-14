@@ -51,6 +51,10 @@ export function inceputStrain(text: string): string | null {
   const cuvinte = primeleCuvinte(brut)
   if (!cuvinte.length) return null
   if (cuvinte.some((c) => CUVINTE_RO.has(c))) return null
+  // CHIRILICĂ = rusă/ucraineană (owner, 14 aug: „chatul la mine îl traduce în
+  // rusă") — spre deosebire de listele de cuvinte, alfabetul nu are dubluri
+  // românești, deci verdictul e fără risc de fals-pozitiv.
+  if (/[Ѐ-ӿ]/.test(brut.slice(0, 60))) return 'rusă'
   if (SEMNE_ES.test(brut.slice(0, 60)) || cuvinte.some((c) => START_ES.has(c))) return 'spaniolă'
   if (cuvinte.some((c) => START_EN.has(c))) return 'engleză'
   if (cuvinte.some((c) => START_DE.has(c))) return 'germană'

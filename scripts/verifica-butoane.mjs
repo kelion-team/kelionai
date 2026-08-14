@@ -94,9 +94,11 @@ function ruteBackend() {
     if (!src) continue
     // Genericele TS pot conține `>` („<{ Body: { x: string } }>") și pot sta pe
     // mai multe linii, iar adresa vine adesea pe rândul următor. `[^>]*` se
-    // oprea la primul `>` și rata rute REALE — printre ele chiar `/api/chat`,
-    // al cărui bloc de tipuri are peste 400 de caractere (de-aia fereastra e 4000).
-    for (const m of src.matchAll(/\.(get|post|put|patch|delete|all)[\s\S]{0,4000}?\(\s*['"`](\/api\/[^'"`]*)/g)) {
+    // oprea la primul `>` și rata rute REALE — printre ele chiar `/api/chat`.
+    // 14 aug: fereastra 4000 a rămas MICĂ pentru același /api/chat (tipul Body
+    // a crescut la ~78 de rânduri ≈ peste 4000 de caractere) → fals-pozitiv
+    // „apel fără rută" pe chiar ruta principală. Fereastra ține pasul cu tipul.
+    for (const m of src.matchAll(/\.(get|post|put|patch|delete|all)[\s\S]{0,12000}?\(\s*['"`](\/api\/[^'"`]*)/g)) {
       rute.add(normal(m[2]))
     }
   }
