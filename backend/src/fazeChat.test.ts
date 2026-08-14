@@ -76,11 +76,22 @@ describe('faza de vorbire nu cară nimic scump', () => {
     expect(UNELTE_VORBIRE.includes('ask_brain')).toBe(true)
   })
 
-  it('lista de vorbire e SCURTĂ și nu se intersectează cu cea interzisă', () => {
-    expect(UNELTE_VORBIRE.length).toBeLessThanOrEqual(14)
+  it('lista de vorbire e mărginită, disjunctă de cea interzisă, ȘI dă adminului observabilitatea', () => {
+    // Owner, 13 aug: uneltele READ-ONLY de admin (db/loguri/fișiere/vederea
+    // adminului) au intrat pe vorbire — „kelion e un admin secund cu toate
+    // drepturile, mereu sub observație". Lista nu mai e „scurtă", dar rămâne
+    // mărginită (schemele costă tokeni) și DISJUNCTĂ de cea interzisă.
+    expect(UNELTE_VORBIRE.length).toBeLessThanOrEqual(24)
     for (const u of UNELTE_VORBIRE) {
       expect(INTERZISE_LA_VORBIRE.includes(u), `„${u}" e și permisă și interzisă — listele s-au contrazis`).toBe(false)
     }
+    // Adminul secund TREBUIE să vadă baza de date, logurile și fișierele în ORICE
+    // tură (read-only, ieftin) — nu doar după escaladare.
+    for (const u of ['db_query', 'db_tables', 'server_logs', 'read_source', 'admin_vezi']) {
+      expect(permisaLaVorbire(u), `„${u}" trebuie disponibilă adminului pe vorbire`).toBe(true)
+    }
+    // …dar system_health (scumpă, ~8s: GitHub + sonde) rămâne DOAR prin ask_brain.
+    expect(permisaLaVorbire('system_health'), 'system_health e scumpă — nu pe vorbire').toBe(false)
   })
 
   it('o unealtă necunoscută NU trece implicit (lista e albă, nu neagră)', () => {
