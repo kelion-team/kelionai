@@ -136,15 +136,28 @@ const SECTIONS: ManualSection[] = [
     ],
   },
   {
+    title: 'Watching Kelion work',
+    paragraphs: [
+      // BARA DE EXECUȚIE (owner, 14 aug) — the manual must describe the app as
+      // it IS: every execution turn shows its steps live on the monitor.
+      'When you ask Kelion to actually do something, the work is not a black box: every step it takes appears live on the monitor behind it, with a dotted progress bar filling from 0 to 100%. The bar reaches 100% only when the turn has truly finished — it never claims "done" in advance.',
+    ],
+  },
+  {
     title: 'Credits',
     paragraphs: [
       'Kelion runs on prepaid credits. You top up from the credit pill in the top bar, and usage is drawn from your balance as you go. You can turn on automatic top-up so you are never cut off mid-conversation, and turn it off again at any time.',
+      // GUSTAREA GRATIS (owner, 14 aug): the taster exists — the manual says so.
+      'Your first visit comes with a small welcome credit, on the house, so you can try Kelion before paying anything. It is granted once per account.',
     ],
   },
   {
     title: 'Privacy',
     paragraphs: [
-      'Your conversations, memory, notes, voice and face data belong to your account and are never shared with another user. You can delete your account and everything in it at any time, from your account settings.',
+      // ADUS LA REALITATE (owner, 14 aug: „baza de utilizatori nu se șterge
+      // prin nicio comandă") — the old "delete your account at any time, from
+      // settings" promised a button that no longer exists.
+      'Your conversations, memory, notes, voice and face data belong to your account and are never shared with another user. To exercise your legal right to erasure, write to contact@kelionai.app — deletion requests are handled personally, with confirmation, not by an automatic button.',
     ],
   },
 ]
