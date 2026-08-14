@@ -58,7 +58,7 @@ const GHTOKEN = env.GITHUB_TOKEN ?? ''
 // (Gemini + Anthropic) + creditul stau în APP, NICIODATĂ în constructor (regula 13
 // aug: constructorul nu ține chei de furnizor și nu cheamă direct API-uri externe).
 // Mesajele + TOOLS-urile sunt deja în format OpenAI → trec DIRECT, fără conversie.
-const LLM_TIMEOUT_MS = Number(env.CONSTRUCTOR_LLM_TIMEOUT_MS || 120_000)
+const LLM_TIMEOUT_MS = Number(env.CONSTRUCTOR_LLM_TIMEOUT_MS || 180_000)
 // Numele lanțului, pentru mesaje ONESTE pe monitor (nu mai există „RunPod/DeepInfra").
 const NUME_FURNIZOR = 'creierul prin app (Gemini → Fable 5)'
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei

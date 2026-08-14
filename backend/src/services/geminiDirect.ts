@@ -306,11 +306,12 @@ function geminiFetch(
   tools: AnthropicTool[],
   opts: BrainCallOpts,
 ): Promise<Response> {
+  const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 120_000
   return fetch(`${G_BASE}/models/${model}:${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
     body: JSON.stringify(toGeminiPayload(messages, tools, opts, model)),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeoutMs),
   })
 }
 

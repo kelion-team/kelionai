@@ -244,18 +244,30 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
           config.geminiModel,
         ].filter((m, idx, arr) => m && arr.indexOf(m) === idx)
 
-        for (const m of candidateModels) {
-          const maxIncercariGemini = 2
+        for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
+          const m = candidateModels[mIdx]
+          const isPrimary = mIdx === 0
+          const maxIncercariGemini = isPrimary ? 2 : 1
+          const modelTimeoutMs = isPrimary ? 45_000 : 35_000
+          const reasoningLevel = isPrimary ? 'high' : 'medium'
+
           for (let incercare = 1; incercare <= maxIncercariGemini; incercare++) {
             try {
-              const r = await geminiDirectChat(m, messages, tools, { reasoning: 'high', toolChoice: 'required' })
+              const r = await geminiDirectChat(m, messages, tools, {
+                reasoning: reasoningLevel,
+                toolChoice: 'required',
+                timeoutMs: modelTimeoutMs,
+              })
               if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
               esecuriCreierLaRand = 0 // creierul a servit — lanțul de eșecuri s-a rupt
               return reply.send(raspunsCreier2(r))
             } catch (e) {
               const errStr = (e as Error).message || ''
               gemeniEsec = errStr.slice(0, 200)
-              const isTransient = /503|502|504|500|429|overload|unavailable|resource_exhausted|high demand/i.test(errStr)
+              const isTimeout = /timeout|aborted/i.test(errStr)
+              const isTransient = isTimeout || /503|502|504|500|429|overload|unavailable|resource_exhausted|high demand|econnreset/i.test(errStr)
+              // La timeout pe modelul curent, trecem direct la următorul model candidat
+              if (isTimeout) break
               if (incercare < maxIncercariGemini && isTransient) {
                 await new Promise((resolve) => setTimeout(resolve, incercare * 1000))
                 continue
