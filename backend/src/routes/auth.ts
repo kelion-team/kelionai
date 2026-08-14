@@ -285,6 +285,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/auth/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ authenticated: false })
+    // GUSTAREA GRATIS (owner, 14 aug): la prima venire a unui cont — pe ORICE
+    // cale de intrare (Google, email+parolă, magic link), fiindcă toate trec
+    // pe aici la încărcarea aplicației — casa îi dă O SINGURĂ dată creditul de
+    // bun-venit, ca zidul de plată să nu-l lovească la PRIMUL mesaj. Nu
+    // blochează răspunsul (void) — o alergare pierdută se reia la următoarea
+    // încărcare, semnul din kv se scrie doar după acordare.
+    void import('../services/bunVenit.js').then((m) => m.acordaBunVenit(user.email)).catch(() => 0)
     // If the current session has no refresh token but the DB has one
     // (connected some time ago), we restore it into the session NOW — without
     // asking you to reconnect Google.
