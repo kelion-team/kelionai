@@ -2842,7 +2842,28 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           })
         }
 
+        // ── POARTA MONITORULUI (owner, 14 aug: „fără comandă clară să nu facă
+        // nimic pe monitor") ────────────────────────────────────────────────
+        // click_monitor apasă ELEMENTE REALE din aplicație (elementFromPoint +
+        // .click() în ChatPanel) — o halucinație a creierului ar putea apăsa
+        // orice buton, inclusiv din admin. De-aia acțiunile pe monitor rulează
+        // DOAR când tura curentă a omului conține o comandă clară: fie un verb
+        // de acțiune general (hasActionIntent — „deschide", „apasă pe meniu"),
+        // fie verbul specific de click/zoom. Fără comandă → refuz cinstit, iar
+        // frame-ul de control NU pleacă spre ecran. Cititul (get_monitor,
+        // get_mouse_position) rămâne liber — a privi nu e a face.
+        const COMANDA_MONITOR_RE =
+          /(clic|click|apas[ăa]|\btap\b|zoom|m[ăa]re[șs]te|mic[șs]oreaz[ăa]|apropie|dep[ăa]rteaz[ăa]|mai\s+(mare|mic|aproape)|scroll|deruleaz[ăa])/i
+        const comandaClaraMonitor = (): boolean =>
+          hasActionIntent(lastUserText) || COMANDA_MONITOR_RE.test(lastUserText)
+
         if (name === 'click_monitor') {
+          if (!comandaClaraMonitor()) {
+            return JSON.stringify({
+              succes: false,
+              mesaj: 'Refuzat: nu fac nimic pe monitor fără o comandă clară a omului în tura curentă. Întreabă-l întâi ce vrea apăsat.'
+            })
+          }
           const args = input as { x?: number; y?: number }
           const x = args.x ?? 0
           const y = args.y ?? 0
@@ -2856,6 +2877,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         }
 
         if (name === 'zoom_monitor') {
+          if (!comandaClaraMonitor()) {
+            return JSON.stringify({
+              succes: false,
+              mesaj: 'Refuzat: nu schimb nimic pe monitor fără o comandă clară a omului în tura curentă.'
+            })
+          }
           const args = input as { level?: number; direction?: string }
           const level = args.level ?? 1.2
           const direction = args.direction ?? 'in'
