@@ -13,6 +13,15 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 14 aug, 21:10 („toate aplicațiile trebuiesc"): TOATE aplicațiile
+      Google interconectabile se fac, în ordinea: (1) Photos (Picker API —
+      flux propriu de ales poze), (2) YouTube upload (consimțământ SEPARAT,
+      nu poate sta lângă Drive), (3) Firebase push (notificări pe telefon),
+      (4) Business Profile (cere aprobare Google pe contul ownerului — pas de
+      ghidat). Fiecare: un PR, intrare în meniul „Aplicații", rând în manual,
+      tarif unde costă bani, porți verzi + probă live. Deja legate azi:
+      Slides, Meet, Forms (#1116). Imposibilele rămân marcate cinstit
+      (Keep = doar enterprise, Google Pay ≠ procesator, Fit = mort).
 - [ ] ORDIN 14 aug, 20:45 („când apare ceva scris de la Kelion, obligatoriu e
       și audio"): ORICE text al lui Kelion se și rostește — inclusiv turele
       scrise, ack-urile și rezultatele. De legat sinteza (aceleași frame-uri
