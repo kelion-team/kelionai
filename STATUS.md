@@ -2,7 +2,11 @@
 
 > **Sursa de adevăr:** `AI-HANDOFF.md` (rădăcina proiectului). Acest fișier reflectă starea curentă a deploy-ului și a infrastructurii.
 
-_Last updated: 2026-07-16_
+_Last updated: 2026-07-25_
+
+## ⚠️ Probleme active GitHub (iulie 2026)
+
+- **GitHub Actions Blocat** — Toate workflow-urile (`vps-diag`, `deploy`, `sentinel`) eșuează instant (durată ≤ 20s, eroare log 404). Aceasta indică depășirea limitei de minute gratuite sau un blocaj de facturare (billing) la nivelul organizației `kelion-team` pe GitHub. Necesită rezolvare din setările de billing ale organizației GitHub de către owner.
 
 ## 🚀 Stabilizare completă (16 iul 2026)
 
