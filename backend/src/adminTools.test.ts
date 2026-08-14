@@ -82,13 +82,14 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
     expect(await execSharedAdminTool('constructor_status', {})).toBeNull()
   })
 
-  it('SHARED_ADMIN_TOOLS conține exact cele 35 unelte partajate', () => {
+  it('SHARED_ADMIN_TOOLS conține exact cele 36 unelte partajate', () => {
     // 3 aug: +3 (jules_repos/jules_task/jules_status — agentul asincron oficial
     // Google, pe cheia JULES_API_KEY pusă de owner).
     // 8 aug: +2 (ruleaza_portile/jurnal_masuratori — sistemul de măsurare cerut
     // de owner: „să știe să-și ruleze testele cum îmi dai tu mie să-ți rulez").
     // 14 apr: +1 (media_control — order #16, OS-level media pause via playerctl).
-    expect(SHARED_ADMIN_TOOLS.size).toBe(35)
+    // 14 aug: +1 (server_ops — comenzi VPS securizate).
+    expect(SHARED_ADMIN_TOOLS.size).toBe(36)
     for (const n of [
       'list_source', 'db_query', 'repo_merge_pr', 'run_runbook', 'request_repair',
       // Jul 30: he does his OWN settings — the same three in writing and in voice.
@@ -101,6 +102,7 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
       'admin_vezi', 'admin_schimba',
       // Aug 2, LISTA LUI, aprobată de Adrian: memoria de proiect + starea măsurată.
       'memorie_pune', 'memorie_ia', 'memorie_lista', 'stare_masurata',
+      'server_ops',
     ])
       expect(SHARED_ADMIN_TOOLS.has(n)).toBe(true)
     expect(SHARED_ADMIN_TOOLS.has('build_software')).toBe(false)
