@@ -242,10 +242,26 @@ export default function CameraView({
     // blochează firul); reîmprospătarea se face în fundal la ~1s (ajunge pentru
     // vedere + faceprint), nu la 4 fps sincron care sufoca firul.
     captureRef.current = () => ultimulCadru
-    const idReincarca = window.setInterval(() => void reincarca(), 1000)
+    // PORNIRE RAPIDĂ (owner, 14 aug: „vede exact, dar are delay enorm la pornire").
+    // Înainte: un tick FIX la 1000 ms — dacă primul tick prindea camera încă
+    // nedecodată (readyState<2), primul cadru bun venea abia la următorul tick →
+    // 1-3 s de „orb" la pornire. Acum: sondăm DES (150 ms) până prindem PRIMUL
+    // cadru, apoi revenim la ritmul lent (1 s, care ajunge pentru vedere+faceprint
+    // și nu sufocă firul). Auto-planificat (setTimeout), guardat de `ocupat`.
+    let primaGata = false
+    let idReincarca = 0
+    const planifica = (): void => {
+      idReincarca = window.setTimeout(() => {
+        void reincarca().then(() => {
+          if (!primaGata && ultimulCadru) primaGata = true
+          planifica()
+        })
+      }, primaGata ? 1000 : 150)
+    }
     void reincarca()
+    planifica()
     return () => {
-      window.clearInterval(idReincarca)
+      window.clearTimeout(idReincarca)
       captureRef.current = null
     }
   }, [captureRef])
