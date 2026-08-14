@@ -90,6 +90,7 @@ export const UNELTE_VORBIRE: readonly string[] = [
   'db_tables',
   'db_query',
   'server_logs',
+  'client_errors', // erorile F12 din browser, la cerere (owner, 14 aug) — read-only, ieftin
   'list_source',
   'read_source',
   'search_source',

@@ -250,12 +250,14 @@ export async function execSharedAdminTool(
 import { updatesList } from './updates.js'
 import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
+import { recentClientErrorRows } from '../db.js'
+import { recentClientErrors } from '../routes/clientErrors.js'
 import { getMemories, deleteMemory, cautaIstoric, logCapabilityGap, citesteRezumatCost, proposeKelionTool } from '../db.js'
 import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
 import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor, vaneazaBuguri, raportVanatoare } from './masurare.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
-  'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',
+  'list_updates', 'read_inbox', 'server_logs', 'client_errors', 'get_real_cost',
   'list_memories', 'cauta_istoric', 'forget_memory', 'log_unsupported_request', 'propose_tool',
   // GUEST VOICES (Adrian, Aug 1): holder-only by construction — they act on
   // the SESSION user's own account (every user is the holder of theirs).
@@ -297,6 +299,25 @@ export async function execUserScopedTool(
       const minLevel = args.errorsOnly === true ? 40 : 0
       const entries = recentLogs(minLevel, Math.min(Math.max(Number(args.limit) || 60, 1), 200))
       return JSON.stringify({ count: entries.length, entries })
+    }
+    case 'client_errors': {
+      if (!isAdmin) return denied
+      // Erorile F12 din browser, la CERERE (owner, 14 aug: „kelion să vadă F12").
+      // DB-ul (durabil, toți userii) + inelul tău din memorie (cele mai proaspete
+      // ale userului curent, poate încă nescrise în DB) — împreună, poza completă.
+      const hours = Math.min(Math.max(Number(args.hours) || 24, 1), 720)
+      const limit = Math.min(Math.max(Number(args.limit) || 40, 1), 100)
+      const includePerf = args.includePerf === true
+      const rows = await recentClientErrorRows(hours, limit, includePerf)
+      const proaspete = recentClientErrors(email, hours * 3600_000)
+      return JSON.stringify({
+        count: rows.length,
+        erori: rows,
+        proaspete_utilizator_curent: proaspete,
+        nota: rows.length === 0 && proaspete.length === 0
+          ? 'Nicio eroare de browser în fereastra cerută — interfața nu a raportat erori (nu înseamnă că nu poți vedea, ci că nu sunt).'
+          : undefined,
+      })
     }
     case 'get_real_cost': {
       if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })

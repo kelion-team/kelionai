@@ -753,6 +753,39 @@ export async function countClientErrorsLastHour(): Promise<number> {
   }
 }
 
+// ── ERORILE DIN BROWSER (F12), LA CERERE (owner, 14 aug: „kelion să vadă F12") ──
+// Inelul din memorie (clientErrors.ts) injectează în context DOAR ultimele 15 min
+// ale userului CURENT. Ăsta e cititorul DURABIL, din DB, pe care unealta
+// `client_errors` îl cheamă când Kelion vrea să VADĂ activ erorile din browser —
+// mai vechi de 15 min, sau după o repornire. Implicit exclude simptomele [PERF]
+// (nu-s interfață stricată), dar le poate include la cerere.
+export interface ClientErrorRow {
+  created_at: string
+  type: string
+  message: string
+  url: string
+}
+export async function recentClientErrorRows(hours = 24, limit = 40, includePerf = false): Promise<ClientErrorRow[]> {
+  if (!dbEnabled()) return []
+  const h = Math.max(1, Math.min(720, Math.floor(hours) || 24))
+  const lim = Math.max(1, Math.min(200, Math.floor(limit) || 40))
+  const perfFiltru = includePerf ? '' : "AND type <> 'perf' AND message NOT LIKE '%[PERF]%'"
+  try {
+    const r = await getPool().query<ClientErrorRow>(
+      `SELECT created_at::text AS created_at, type, left(message, 400) AS message, url
+         FROM client_errors
+        WHERE created_at > now() - ($1 || ' hours')::interval
+          ${perfFiltru}
+        ORDER BY created_at DESC
+        LIMIT $2`,
+      [h, lim],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
 export interface ClientErrorGroup {
   created_at: string
   user_email: string | null
