@@ -1731,6 +1731,12 @@ export interface TranslateManyResult {
 }
 
 export async function translateMany(texts: string[], target: string): Promise<TranslateManyResult> {
+  // GARDUL DE ALFABET (owner, 14 aug: „chatul la mine îl traduce în RUSĂ").
+  // Traducătorul e un model cu prompt — poate scăpa chirilică la ținta
+  // „Romanian". Alfabetul nu minte: chirilică pe o țintă latină = traducere
+  // PICATĂ (rămâne originalul, contorizat în `failed`), nu text rusesc afișat
+  // drept „tradus în română".
+  const tintaChirilica = /(russian|ukrain|bulgar|serb|rus[ăa]|ucrain)/i.test(target)
   const results = await Promise.all(
     texts.map(async (t) => {
       const s = (t ?? '').trim()
@@ -1738,7 +1744,10 @@ export async function translateMany(texts: string[], target: string): Promise<Tr
       try {
         const r = await translateText(s, target)
         const j = JSON.parse(r) as { translation?: string }
-        if (j.translation && j.translation.trim()) return { text: j.translation, ok: true }
+        if (j.translation && j.translation.trim()) {
+          if (!tintaChirilica && /[Ѐ-ӿ]/.test(j.translation)) return { text: t ?? '', ok: false }
+          return { text: j.translation, ok: true }
+        }
         return { text: t ?? '', ok: false }
       } catch {
         return { text: t ?? '', ok: false }
