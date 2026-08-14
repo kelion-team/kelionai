@@ -59,7 +59,6 @@ import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLo
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { geminiLive } from '../services/geminiDirect.js'
 import { getSerperBalance } from '../services/serperBalance.js'
-import { getRunpodBalance } from '../services/runpodBalance.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { resurseGazda } from '../services/resurse.js'
 import { triageGaps } from '../services/gapsTriage.js'
@@ -436,7 +435,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const [vps, serperBalance, geminiCost, geminiState, geminiCreditRaw, runpodBalance] = await Promise.all([
+    const [vps, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
       resurseGazda(),
       // THE SERPER PILL: the REAL remaining search credit read from Serper's
       // /account endpoint. Cached 5 min in the service.
@@ -457,9 +456,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // dădea 500 și TOATE pastilele se stingeau, deși Serper/VPS/Gemini se
       // măsuraseră cu succes. Eșecul se declară per câmp, nu omoară răspunsul.
       loadKv('gemini:credit').catch(() => null),
-      // Soldul REAL RunPod (placa lucrătorului) — RunPod ÎL expune, deci e citit,
-      // nu estimat. Cache 1 min în serviciu, ca polling-ul de ~30s să nu-l bată.
-      getRunpodBalance(),
     ])
     // Creditul „spus de owner" — citit onest din kv. Dacă lipsește sau e stricat,
     // rămâne undefined (pastila arată ✓/⚠, nu o cifră falsă).
@@ -541,19 +537,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         scazutUsd: geminiScazutUsd,
         scadereMotiv: geminiScadereMotiv,
       },
-      // ── RUNPOD: soldul REAL al plăcii lucrătorului (Adrian, 12 aug) ──────────
-      // Constructorul rulează pe modelul propriu (Qwen3-Coder) pe RunPod, nu pe
-      // VPS. RunPod EXPUNE soldul → cifră CITITĂ, nu estimată. `live: false` =
-      // necitibil (nu e RunPod / cheie lipsă / citire picată) → bara scrie
-      // „RunPod ⚠", NICIODATĂ „RunPod 0" (regula #1).
-      runpod: {
-        provider: runpodBalance.provider,
-        live: runpodBalance.live ?? runpodBalance.ok,
-        balanceUsd: runpodBalance.balanceUsd,
-        ratePerHr: runpodBalance.currentSpendPerHr,
-        limitPerHr: runpodBalance.spendLimitPerHr,
-        error: runpodBalance.error,
-      },
+      // (Câmpul `runpod` a fost SCOS, 14 aug — owner: constructorul nu mai rulează
+      // pe RunPod, ci pe Gemini (principal) → Fable 5 (rezervă), AMBELE prin app.
+      // Creierul PRINCIPAL (Gemini) se vede pe pastila Gemini de mai sus; REZERVA
+      // (Fable 5) e un rând în raportul pe furnizori — /api/admin/credit-ai. O
+      // pastilă „RunPod" ar fi afișaj fals.)
       // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
       // desena, tipul din frontend mințea (loaded/remaining nu mai existau),
       // iar sursa lui, getAdminAccount, rula două SUM-uri la fiecare poll

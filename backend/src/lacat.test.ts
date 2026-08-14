@@ -122,33 +122,43 @@ describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: �
   })
 })
 
-describe('LACĂT — constructor: creier propriu OpenAI-compat + FALLBACK creier 2 PRIN APP', () => {
-  // Owner, 12 aug: „nu are ce căuta Gemini acolo" — constructorul pe endpoint
-  // OpenAI-compatibil (RunPod→DeepInfra), fără cheia Gemini. 13 aug, ownerul
-  // REVINE EXPLICIT asupra propriei reguli: „creierul 2 (Gemini) NU e legat la
-  // constructor… de aia toate ordinele eșuate; să-l supervizeze 24/7." Deci zidul
-  // se MUTĂ, nu se rupe: constructorul tot NU are cheia Gemini și NU cheamă DIRECT
-  // API-ul Google — dar când creierul propriu pică, cade pe creierul 2 PRIN APP
-  // (endpoint gardat cu bridge-secret; app-ul are cheia + creditul, îl înregistrează).
-  it('agentul: fără OpenRouter/OpenAI, fără cheia Gemini, fără apel DIRECT la Google', () => {
+describe('LACĂT — constructor: creierul PRIN APP (Gemini principal → Fable 5 rezervă)', () => {
+  // Owner, 12 aug: „nu are ce căuta Gemini acolo" → constructor pe creier propriu.
+  // 13 aug: „creierul 2 (Gemini) supervizează 24/7" → fallback PRIN APP. 14 aug:
+  // „schimbă-mi constructorul cu gemeni ultra… când nu merge repara să cadă pe fable
+  // 5, înlocuiește peste tot" → Gemini devine PRINCIPALUL, Fable 5 REZERVA, AMBELE
+  // rulate în APP (cheile stau în app). Zidul care rămâne: constructorul NU ține chei
+  // de furnizor și NU cheamă DIRECT niciun API extern — cere creierul DOAR pe ruta
+  // gardată din app.
+  it('agentul: fără OpenRouter, fără chei de furnizor, fără apel DIRECT (Google/Anthropic)', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
     expect(/openrouter\.ai/.test(s)).toBe(false)
     expect(/OPENROUTER_API_KEY/.test(s)).toBe(false)
-    expect(/anthropic\/claude-fable-5/.test(s)).toBe(false)
-    // NU cheamă DIRECT API-ul Google — n-are cheia Gemini; creierul propriu e OpenAI-compat.
+    // Fără apel DIRECT la Google SAU Anthropic — n-are chei de furnizor în constructor.
     expect(/generativelanguage\.googleapis\.com/.test(s)).toBe(false)
     expect(/x-goog-api-key/.test(s)).toBe(false)
-    // Creierul PROPRIU vine din env-ul endpointului OpenAI-compatibil (nume nou SAU vechi).
-    expect(/env\.CONSTRUCTOR_RUNPOD_KEY\s*\|\|\s*env\.CONSTRUCTOR_DEEPSEEK_KEY/.test(s)).toBe(true)
+    expect(/api\.anthropic\.com/.test(s)).toBe(false)
+    expect(/claude-fable-5/.test(s)).toBe(false)
+    // Creierul propriu pe RunPod/DeepInfra a fost SCOS — nu mai citește chei din env.
+    expect(/CONSTRUCTOR_RUNPOD_KEY|CONSTRUCTOR_DEEPSEEK_KEY/.test(s)).toBe(false)
   })
 
-  it('FALLBACK creier 2 (owner 13 aug): cere Gemini PRIN APP (bridge-secret), nu direct', () => {
+  it('creierul PRIN APP: constructorul cere ruta gardată (bridge-secret)', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
-    // Plasa 24/7 aprobată: fallback-ul EXISTĂ, dar merge la endpointul APP-ului,
-    // gardat cu x-bridge-secret — nu la Google direct și fără cheie în constructor.
+    // Constructorul cere creierul aplicației pe ruta gardată — nu ține el cheia.
     expect(/function llmGemini/.test(s)).toBe(true)
     expect(/\/api\/constructor\/creier/.test(s)).toBe(true)
     expect(/x-bridge-secret/.test(s)).toBe(true)
+  })
+
+  it('escaladarea Gemini → Fable 5 + revenirea stau în APP (routes/constructor.ts)', () => {
+    // Owner 14 aug: principal Gemini, rezervă Fable 5. Ruta din app le înlănțuie:
+    // Gemini întâi (geminiDirectChat), Fable 5 când Gemini nu poate (fable5Disponibil),
+    // iar revenirea e automată (fiecare pas reîncepe cu Gemini).
+    const ruta = sursa('./routes/constructor.ts')
+    expect(/geminiDirectChat/.test(ruta)).toBe(true)
+    expect(/fable5Disponibil/.test(ruta)).toBe(true)
+    expect(/fable5Chat/.test(ruta)).toBe(true)
   })
 })
 
