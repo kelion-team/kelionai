@@ -1587,6 +1587,10 @@ export default function Stage({ user }: { user: User }) {
                   ['🔎 Căutare', 'Caută pe web ultimele știri.'],
                   ['▶️ YouTube', 'Caută pe YouTube un clip și pune-l pe monitor.'],
                   ['🎨 Imagini', 'Generează o imagine cu un răsărit peste mare.'],
+                  // Produsele bifate de owner (14 aug): Slides, Meet, Forms.
+                  ['📽 Prezentări', 'Fă-mi o prezentare Google Slides despre un subiect — întreabă-mă întâi subiectul.'],
+                  ['📹 Meet', 'Fă-mi o întâlnire în calendar cu link Google Meet — întreabă-mă întâi când și cu cine.'],
+                  ['📋 Formulare', 'Fă-mi un formular Google — întreabă-mă întâi ce întrebări să conțină.'],
                 ].map(([eticheta, comanda]) => (
                   <button
                     key={eticheta}

@@ -60,6 +60,10 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'get_drive_files', category: 'google', does: 'listează fișierele Drive', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_drive_file', category: 'google', does: 'citește conținutul unui fișier Drive (după căutare)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'create_doc', category: 'google', does: 'creează un Google Doc (titlu + conținut)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  // Produsele alese de owner (14 aug): Slides + Forms; Meet e parametru pe
+  // create_calendar_event (nu unealtă nouă — aceeași intrare în calendar).
+  { name: 'create_presentation', category: 'google', does: 'creează o prezentare Google Slides (titlu + slide-uri) — extra-serviciu cu tarif', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'create_form', category: 'google', does: 'creează un Google Form (titlu + întrebări)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'edit_doc', category: 'google', does: 'editează un Google Doc (adaugă / rescrie / caută-înlocuiește)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'create_sheet', category: 'google', does: 'creează un Google Sheet (titlu + rânduri)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'edit_sheet', category: 'google', does: 'editează un Google Sheet (adaugă rânduri / scrie într-un interval)', chat: true, voice: false, voiceViaBrain: true, admin: false },

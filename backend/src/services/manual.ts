@@ -208,6 +208,8 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   get_drive_files: { what: 'Lists your Drive files', say: '"what files do I have about the house?"' },
   read_drive_file: { what: 'Opens a Drive file and reads it', say: '"read me the tenancy agreement"' },
   create_doc: { what: 'Writes a new Google Doc for you', say: '"make a doc with the shopping list"' },
+  create_presentation: { what: 'Builds a Google Slides presentation on your topic (paid extra, see Price menu)', say: '"make me a presentation about solar energy"' },
+  create_form: { what: 'Creates a Google Form with your questions', say: '"make a sign-up form for the event"' },
   edit_doc: { what: 'Adds to or rewrites one of your Google Docs', say: '"add a paragraph to the meeting notes"' },
   create_sheet: { what: 'Makes a new Google Sheet from your data', say: '"put these numbers in a spreadsheet"' },
   edit_sheet: { what: 'Appends rows or fills cells in one of your sheets', say: '"add this row to the expenses sheet"' },
