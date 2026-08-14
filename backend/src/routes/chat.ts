@@ -109,7 +109,7 @@ import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeCha
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { citesteEpisoade, adaugaEpisod, rezumaEpisoade } from '../services/promoEpisoade.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL } from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL } from '../services/brainToolDefs.js'
 import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
@@ -1960,14 +1960,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // de OWNER („acționează fără confirmare", identitatea de owner) — drepturi
     // decise pe cine deține SESIUNEA, nu pe cine VORBEȘTE.
     const speakerRaw = typeof req.body?.speaker === 'string' ? req.body.speaker : ''
-    const nevalidat = speakerRaw === 'nevalidat'
     const guestMatch = /^guest(-pending)?:(\d+):(.+)$/.exec(speakerRaw)
     const guestPending = guestMatch?.[1] === '-pending'
     const guestId = guestMatch ? Number(guestMatch[2]) : 0
     const guestLabel = guestMatch?.[3] ?? ''
-    // Tura e „de oaspete" când NU vorbește deținătorul sesiunii — aceeași
-    // regulă ca isAdmin (mai jos), aplicată acum și promptului.
-    const turaDeOaspete = !!guestMatch || nevalidat
+    // LOGAT = ADMIN, AUTORITAR (owner, 14 aug: „sunt logat, ca e logat admin — să
+    // nu-mi mai dea fals"). O voce care NU se potrivește cu amprenta (fals-negativ
+    // frecvent) NU mai retrage drepturile deținătorului LOGAT: doar un oaspete
+    // CONFIRMAT (altă persoană recunoscută la microfon, `guest:…`) coboară tura la
+    // „oaspete". Așa Kelion nu-i mai spune adminului logat „nu am acces pe admin".
+    const turaDeOaspete = !!guestMatch
     systemPrompt +=
       `\n\nUSER ACCOUNT (silent context — NEVER announce or narrate this, just act on it): the user IS signed in via Google as ${user.email}` +
       `${user.role === 'admin' && !turaDeOaspete ? ' (the OWNER/admin of this app)' : ''}. ` +
@@ -2005,6 +2007,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // jos + rutarea din build_software le trimit acum la constructor.
       systemPrompt +=
         `\n\nOWNER TASKS = ACT, NOT TALK: when the owner gives you a task that changes THIS app (fix / add / move / adjust / repair / improve something in the product) — even without the word «construiește» — START it THIS turn: call build_software with a complete, self-contained order (or repo_write for a tiny single-file change), then tell him the order is queued and a PR will follow. Do NOT just describe how you would do it, do NOT promise to do it later, and NEVER claim it is done unless you actually queued the order or wrote the code this turn. Describing a change is not making it.`
+      // OCHII DE ADMIN, MEREU DISPONIBILI (owner, 14 aug: „kelion spune că nu poate
+      // vedea err din server, F12, și nu are acces pe admin" — deși LE ARE). Regula
+      // „folosește-ți uneltele" stătea în blocul de LUCRU, tăiat pe turele de
+      // conversație — de-aia pe un simplu „vezi erorile" răspundea „nu pot". Acum e
+      // AICI, mereu-pornit pentru admin, ca să știe ce POATE citi și că trebuie s-o facă.
+      systemPrompt +=
+        `\n\nYOU ARE THE ADMIN WITH FULL READ ACCESS — ON EVERY TURN, including plain chat. You CAN see, and you MUST USE these whenever the owner asks about errors, logs, admin data, or «why doesn't X work»: server_logs (YOUR server-side errors/logs — the server F12), client_errors (the users' BROWSER F12 errors, on demand), admin_vezi (any Admin-panel section: finance, users, money-circuit…), db_query/db_tables (the database), read_source/search_source (your own code). The owner's RECENT browser (F12) errors are ALSO injected into your context under «BROWSER CONSOLE» — read them there. NEVER answer «I can't see the server errors», «I can't see F12», or «I don't have admin access» — you have all of these. If a tool returns nothing, say plainly «no errors in that window» — that is NOT «I can't see». You are logged-in as admin, and that alone gives you these powers: a voiceprint mismatch never removes them.`
     }
     // GPS must NEVER delay the reply: only synchronous cache reads happen here.
     // The place-name/IP lookups run in the background and are ready for the
@@ -2470,7 +2479,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // GUEST runs inside the holder's session, but the person at the microphone
     // is NOT the holder — so this turn gets ZERO admin powers, whoever is
     // logged in. (guestMatch is parsed above, before the save.)
-    const isAdmin = user.role === 'admin' && !guestMatch && !nevalidat
+    const isAdmin = user.role === 'admin' && !guestMatch
 
     // The turn's model is chosen HERE (before the tool list): on the CHAT step,
     // the model also gets the ask_brain tool so it can escalate whatever it
@@ -2530,7 +2539,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL, CONSTRUCTOR_COMMAND_TOOL,
           // Jules — agentul asincron oficial Google (3 aug, cheia pusă de owner).
           JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL,
-          DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL,
+          DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL,
           RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
           LIST_UPDATES_TOOL, READ_INBOX_TOOL, PROPOSE_TOOL,
           // LEGATE LA CREIER (5 aug, ordinul repetat „leagă TOT la creier"): astea

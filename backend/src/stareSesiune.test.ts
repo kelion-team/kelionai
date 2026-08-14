@@ -77,7 +77,7 @@ describe('chat.ts chiar folosește starea, și NU slăbește securitatea', () =>
     // Regula ownerului e despre VITEZĂ (preferințe recitite degeaba), nu despre
     // a slăbi gardul. isAdmin depinde de CINE vorbește în tura curentă (oaspete,
     // voce nevalidată) — nu are ce căuta într-un cache de sesiune.
-    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch && !nevalidat/)
+    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch\n/)
     // isAdmin nu se citește NICIODATĂ din cache (ar fi `cache.isAdmin`/`prefs.isAdmin`)
     expect(chat).not.toMatch(/(?:cache|prefs)\.isAdmin/)
   })

@@ -60,9 +60,15 @@ describe('clientul nu mai etichetează timbrul — fraza pleacă direct, negată
   })
 })
 
-describe('oaspetele și vocea nevalidată au ZERO drepturi de admin', () => {
-  it('tura de oaspete SAU nevalidată dezactivează isAdmin chiar în sesiunea titularului', () => {
-    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch && !nevalidat/)
+describe('oaspetele CONFIRMAT are ZERO drepturi de admin; adminul LOGAT rămâne admin', () => {
+  // Owner, 14 aug: „sunt logat, ca e logat admin — să nu-mi mai dea fals". O voce
+  // care nu se potrivește cu amprenta (fals-negativ) NU mai retrage adminul
+  // deținătorului logat; doar un oaspete CONFIRMAT (`guest:…`) coboară tura. Deci
+  // isAdmin depinde DOAR de rol + lipsa unui oaspete confirmat, nu de `nevalidat`.
+  it('doar un oaspete CONFIRMAT dezactivează isAdmin — nu o amprentă vocală neprinsă', () => {
+    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch\n/)
+    // `nevalidat` nu mai poate retrage adminul (a fost scos din poartă).
+    expect(chat).not.toMatch(/const isAdmin = [^\n]*!nevalidat/)
   })
 
   it('creierul primește nota de oaspete cu interdicții explicite', () => {

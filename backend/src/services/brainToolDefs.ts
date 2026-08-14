@@ -280,6 +280,20 @@ export const SERVER_LOGS_TOOL: Tool = {
   },
 }
 
+export const CLIENT_ERRORS_TOOL: Tool = {
+  name: 'client_errors',
+  description:
+    "ADMIN ONLY. Read the users' BROWSER (F12) errors — the client-side console: window.onerror, unhandled promise rejections, console.error — sent automatically by the frontend and saved durably. The recent ones (last 15 min, the current user) are ALSO auto-injected into your context; call THIS tool to see MORE — older errors, or across users — when the owner asks «why doesn't X work?», «see the F12 errors», «what's breaking in the interface». Diagnose from REAL symptoms, never guess. Pair with server_logs (the server-side F12) for the full picture.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      hours: { type: 'number', description: 'How many hours back to look, default 24 (max 720).' },
+      limit: { type: 'number', description: 'Max errors, default 40 (max 100).' },
+      includePerf: { type: 'boolean', description: 'false (default) = only real UI errors; true = also performance symptoms ([PERF], e.g. a slow/blocked main thread).' },
+    },
+  },
+}
+
 export const READ_INBOX_TOOL: Tool = {
   name: 'read_inbox',
   description:
@@ -722,7 +736,7 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
   // About HIMSELF: memory, notes, logs, cost, the mailbox, and the right to
   // ask for a missing tool on his own. Without these he remembers nothing from
   // one turn to the next — that's why he repeated the same mistakes.
-  LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL,
+  LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL,
   COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL,
   // The whole admin panel — he sees what you see, and can change what can be undone.
   ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
