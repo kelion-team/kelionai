@@ -38,15 +38,27 @@ export interface FacturareGoogle {
   dinData: string
 }
 
-const CACHE_MS = 10 * 60_000
+// LA MINUT (owner, 14 aug: „dacă nu cere consum mare, poate îl pui la minut, și
+// măsori"). MĂSURAT înainte de decizie: interogarea e un SUM pe un tabel mic
+// (MB), BigQuery taxează pe octeți scanați cu primul 1 TB/lună GRATUIT → chiar
+// și la 1440 interogări/zi rămâi sub prag: cost 0. Cache-ul e deci 60s
+// (reglabil prin GOOGLE_BILLING_CACHE_S) — cifra din panou e mereu proaspătă de
+// cel mult un minut. Tokenul OAuth se ține separat (~50 min), nu-l batem degeaba.
+const CACHE_MS = Math.max(15, Number(process.env.GOOGLE_BILLING_CACHE_S ?? 60)) * 1000
 let cache: { la: number; rezultat: { ok: true; date: FacturareGoogle } } | null = null
+let tokenCache: { token: string; proiect: string; expira: number } | null = null
 /** Doar pentru teste. */
 export function _resetFacturare(): void {
   cache = null
+  tokenCache = null
 }
 
-/** Token OAuth pentru BigQuery, din contul de serviciu (JWT RS256). */
+/** Token OAuth pentru BigQuery, din contul de serviciu (JWT RS256). Ținut ~50
+ *  min — la citirea „la minut" nu re-semnăm/re-cerem degeaba. */
 async function tokenBigQuery(): Promise<{ ok: true; token: string; proiect: string } | { ok: false; motiv: string }> {
+  if (tokenCache && Date.now() < tokenCache.expira) {
+    return { ok: true, token: tokenCache.token, proiect: tokenCache.proiect }
+  }
   const sa = googleServiceAccount()
   if (!sa?.client_email || !sa.private_key || !sa.project_id) {
     return { ok: false, motiv: 'contul de serviciu Google (GOOGLE_SERVICE_ACCOUNT_JSON) lipsește sau e incomplet' }
@@ -79,6 +91,7 @@ async function tokenBigQuery(): Promise<{ ok: true; token: string; proiect: stri
     if (!r.ok || !j.access_token) {
       return { ok: false, motiv: `Google a refuzat tokenul (${r.status}): ${String(j.error_description ?? '').slice(0, 100)}` }
     }
+    tokenCache = { token: j.access_token, proiect: String(sa.project_id), expira: Date.now() + 50 * 60_000 }
     return { ok: true, token: j.access_token, proiect: String(sa.project_id) }
   } catch (e) {
     return { ok: false, motiv: `rețea la token: ${String((e as Error)?.message ?? e).slice(0, 80)}` }
