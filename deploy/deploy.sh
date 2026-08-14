@@ -47,7 +47,35 @@ restore_constructor() {
 }
 trap restore_constructor EXIT
 
+# Helper pentru afișarea barei de progres dinamice pe monitor / consolă
+show_progress() {
+  local pct="$1"
+  local msg="$2"
+  local width=30
+  local filled=$(( pct * width / 100 ))
+  local empty=$(( width - filled ))
+  local bar=""
+  local bar_empty=""
+  local i=0
+  while [ "$i" -lt "$filled" ]; do
+    bar="${bar}█"
+    i=$(( i + 1 ))
+  done
+  i=0
+  while [ "$i" -lt "$empty" ]; do
+    bar_empty="${bar_empty}░"
+    i=$(( i + 1 ))
+  done
+  printf "\n\033[1;36m[DEPLOY]\033[0m \033[1;32m[%s%s]\033[0m \033[1;33m%3d%%\033[0m — \033[1;37m%s\033[0m\n\n" "$bar" "$bar_empty" "$pct" "$msg"
+  local json="{\"percent\":$pct,\"step\":\"$msg\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)\"}"
+  printf '%s\n' "$json" > /tmp/deploy-progress.json 2>/dev/null || true
+  printf '%s\n' "$json" > /root/kelion/deploy-progress.json 2>/dev/null || true
+}
+
+show_progress 0 "Inițializare deploy"
+
 echo "== 0. Blochez ecosistemul-zombie (puntea/constructorul, șters din cod pe 23 iul) =="
+show_progress 10 "Blocare ecosistem-zombie"
 # Lanț complet descoperit la audit (24 iul): serviciile kelion-bridge/builder/
 # paznic/deployer loveau endpointuri șterse și ardeau abonamentul cu procese
 # claude; watchdog.sh + paznic-chat.sh (cron, la fiecare minut) le REPORNEAU
@@ -105,6 +133,7 @@ crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' | crontab - 2>/dev/nul
   pkill -9 -f 'constructor-worker|constructor-agent|/root/kelion/atelier' 2>/dev/null || true
 } || true
 
+show_progress 25 "Aducere cod ($BRANCH)"
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
 git fetch origin --prune
@@ -149,6 +178,7 @@ if [ "${KELION_DEPLOY_FORCE:-0}" != 1 ] && [ "$LIVE_NOW" = "$TARGET" ]; then
   exit 0
 fi
 
+show_progress 40 "Verificare fișier mediu (env)"
 echo "== 2. Verific env-ul =="
 # IGIENA IDENTITĂȚII (9 aug, „flux admin 403 — trebuie 200" + „nu are audio
 # voce"): un ADMIN_EMAIL stricat în env (spații, ghilimele, valoare rescrisă de
@@ -176,6 +206,7 @@ for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SESSION_SECRET DATABASE_URL GEMIN
 done
 [ "${MISS:-0}" = 1 ] && { echo "Opresc: env incomplet."; exit 1; }
 
+show_progress 50 "Canalul de update al lui Kelion"
 echo "== 2b. Canalul de update al lui Kelion (ce primește la ACEST deploy) =="
 # Adrian, 25 iul: „canal de informare a lui cu tot ce primește ca update".
 # Scriem git log-ul recent în contextul de build; Dockerfile îl copiază în
@@ -186,6 +217,7 @@ echo "== 2b. Canalul de update al lui Kelion (ce primește la ACEST deploy) =="
   git -C "$REPO" log -40 --date=format:'%Y-%m-%d %H:%M' --pretty='%h | %ad | %s'
 } > "$REPO/deploy/last-updates.txt"
 
+show_progress 65 "Construire imagine Docker (kelionai:latest)"
 echo "== 3. Construiesc imaginea =="
 # TIMEOUT PE BUILD (Adrian, 7 aug — audit: `docker build` n-avea limită; dacă
 # atârna, ținea lacătul de publicare la infinit → totul îngheța, exact ce s-a
@@ -194,6 +226,7 @@ echo "== 3. Construiesc imaginea =="
 # reîncearcă la ciclul următor. Un build sănătos e sub ~8 min, deci pragul e larg.
 timeout 1200 docker build -t kelionai:latest "$REPO"
 
+show_progress 75 "Pornire aplicație și container"
 echo "== 4. Pornesc aplicația (:8080, network host, env-file) =="
 docker rm -f kelionai-app 2>/dev/null || true
 # GIT_COMMIT_SHA intră în container ca /api/version să întoarcă EXACT sha-ul
@@ -224,6 +257,7 @@ docker exec kelionai-app sh -c 'cd /app/backend && npx playwright install --with
   && echo "Chromium prezent — browserul mâinilor e viu" \
   || echo "AVERTISMENT: instalarea Chromium a picat — pașii pe mâini cu browser vor pica până la următoarea publicare"
 
+show_progress 85 "Repornire Caddy reverse proxy"
 echo "== 5. (Re)pornesc Caddy cu Caddyfile-ul aplicației =="
 install -D -m 644 "$REPO/deploy/Caddyfile" "$CADDY_DIR/Caddyfile"
 docker rm -f kelion-caddy 2>/dev/null || true
@@ -232,6 +266,7 @@ docker run -d --name kelion-caddy --restart unless-stopped --network host \
   -v "$CADDY_DIR/data:/data" -v "$CADDY_DIR/config:/config" \
   caddy:2 caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
 
+show_progress 90 "Configurare cronuri și servicii suport"
 echo "== 6. Backup criptat zilnic (cron) =="
 # Instalează/actualizează IDEMPOTENT cronul de backup criptat al DB-ului
 # (Adrian, 24 iul: „salvări periodice în zona criptată"). Zilnic la 03:15 UTC.
@@ -316,6 +351,7 @@ install -m 700 "$REPO/deploy/vps-curatenie.sh" /root/kelion/vps-curatenie.sh
 # EXTIRPAT pe 3 aug împreună cu furnizorul: creierul e Gemini-only, nu mai
 # există pool de modele free de probat.)
 
+show_progress 95 "Verificare LIVE anti-fantomă"
 echo "== 7. Verific LIVE (anti-fantomă: versiunea trebuie să fie chiar sha-ul publicat) =="
 SHA=$(git -C "$REPO" rev-parse HEAD | cut -c1-7)   # exact ca .slice(0,7) din backend
 V=""
@@ -326,6 +362,7 @@ for _ in $(seq 1 12); do
 done
 if [ "$V" = "$SHA" ]; then
   echo "✅ LIVE = $SHA (anti-fantomă TRECE). Verifică și https://kelionai.app/api/version."
+  show_progress 100 "Deploy finalizat cu succes! Versiunea live: $SHA"
 else
   echo "❌ ANTI-FANTOMĂ PICĂ: local v='$V', așteptat '$SHA' — vezi 'docker logs kelionai-app'."
   exit 1
