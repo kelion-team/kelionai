@@ -2000,7 +2000,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // server + ordine de build eșuate), fiecare cu „ce este". Sincron, din cache,
     // deci NU adaugă latență. Astfel, la „ce probleme ai?", răspunde din
     // cunoaștere — nu pretinde că totul e în regulă.
-    if (user.role === 'admin' && !turaDeOaspete) {
+    // DREPTURILE DE ADMIN NU SE MAI PIERD NICĂIERI (owner, 14 aug, seara:
+    // „kelion a pierdut drepturile de admin… fă ceva să nu se mai poată
+    // pierde" + „nu are atribute de admin, nicăieri"). Până acum, o tură
+    // etichetată „oaspete" pe sesiunea DE ADMIN tăia toate blocurile de owner
+    // — iar o potrivire greșită de voce îl lăsa pe OWNER fără admin la el
+    // acasă. De-acum sesiunea de admin ține blocurile ARMATE întotdeauna;
+    // oaspetele confirmat primește doar prudența de mai jos (fără date
+    // personale, confirmare la acțiuni grele), nu amputarea puterilor.
+    if (user.role === 'admin' && turaDeOaspete) {
+      systemPrompt +=
+        `\n\nGUEST AT THE MIC (the voice gate matched a known guest: ${guestLabel || 'guest'}): the OWNER's session stays fully armed, but the person SPEAKING now may not be the owner. Do not reveal the owner's personal data on voice, and for destructive or costly actions ask the owner to confirm first.`
+    }
+    if (user.role === 'admin') {
       const probl = formateazaProbleme(problemeGlobaleCache())
       if (probl) {
         systemPrompt +=
