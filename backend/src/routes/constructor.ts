@@ -200,15 +200,19 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       const messages = Array.isArray(req.body?.messages) ? (req.body.messages as OrMessage[]) : []
       if (!messages.length) return reply.code(400).send({ error: 'fara_mesaje' })
       const rawTools = Array.isArray(req.body?.tools) ? req.body.tools : []
-      // ── PRINCIPAL: GEMINI „ULTRA" (owner, 14 aug: „schimbă-mi constructorul cu
-      // gemeni ultra") = geminiModelGreu (Pro, cel mai puternic de pe cheia app-ului).
+      // ── PRINCIPAL: GEMINI „ULTRA" (owner, 14 aug: „ultra ca al doilea creier,
+      // da? primul e blocat") = constructorGeminiModel (gemini-pro-latest — mereu
+      // cel mai puternic Pro; NU modelul unic al chatului, care e sigilat pe flash
+      // pentru viteză. Constructorul lucrează în fundal — puterea bate viteza).
+      // Până azi ruta folosea geminiModelGreu crezând că e Pro; din 7 aug modelul
+      // unic e flash, deci constructorul moștenise flash. Reparat: treaptă proprie.
       const { geminiDirectAvailable, geminiDirectChat } = await import('../services/geminiDirect.js')
       let gemeniEsec = ''
       if (geminiDirectAvailable()) {
         // Uneltele constructorului (OpenAI function) → formatul geminiDirectChat;
         // răspunsul → înapoi în format OpenAI. Punțile sunt în creier2Constructor.ts.
         const tools = uneltePentruCreier2(rawTools)
-        const model = String(req.body?.model ?? '').trim() || config.geminiModelGreu
+        const model = String(req.body?.model ?? '').trim() || config.constructorGeminiModel
         try {
           // FORȚĂM CHEMAREA UNELTEI (owner, 14 aug: „trebuia să cheme, nu cheamă"):
           // pe AUTO, Gemini putea răspunde cu TEXT în loc să cheme o unealtă → „tură

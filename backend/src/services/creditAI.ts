@@ -303,17 +303,22 @@ async function randJules(): Promise<CreditAI> {
  *  fable 5". Constructorul rulează pe Gemini (PRINCIPAL — vezi rândul Gemini) și cade
  *  pe Fable 5 când Gemini nu poate. Fable 5 merge PRIN APP (cheia ANTHROPIC_API_KEY
  *  stă în app, nu în constructor). Anthropic NU expune un sold prin API public → nu
- *  inventez o cifră (regula #1); becul vine din „e cheia pusă?": pusă = VERDE (rezervă
- *  gata), lipsă = ROȘU (inactivă) — MĂSURAT (config), deci niciodată GRI. */
+ *  inventez o cifră (regula #1); becul vine din PROBA REALĂ a cheii la Anthropic:
+ *  validă = VERDE, invalidă/lipsă = ROȘU — MĂSURAT, deci niciodată GRI. */
 async function randFable(): Promise<CreditAI> {
-  const { fable5Disponibil } = await import('./fable5Constructor.js')
+  const { fable5Disponibil, fable5Valida } = await import('./fable5Constructor.js')
   const activa = fable5Disponibil()
+  // PROBA REALĂ (owner, 14 aug: becul verde a MINȚIT — cheia era pusă dar
+  // INVALIDĂ, rezerva moartă, raportul „gata", constructorul blocat). De-acum
+  // „servește" = dovada de la Anthropic (GET /v1/models, gratuit, cache 10 min),
+  // nu prezența cheii în env. O cheie pusă dar refuzată = ROȘU, cu motivul exact.
+  const proba = await fable5Valida()
   return {
     furnizor: 'Fable 5 (Claude — rezerva constructorului)',
     alimenteaza: 'creierul constructorului când Gemini nu poate repara (rezervă)',
     cheieConfigurata: activa,
     // Fără sold real: Anthropic nu expune „cât mai ai" prin API public → nu fabricăm
-    // o cifră; becul vine din „servește" (cheia pusă), nu dintr-un 0 fals.
+    // o cifră; becul vine din „servește" (proba cheii), nu dintr-un 0 fals.
     ramas: picat(
       'Anthropic nu expune sold prin API public — se vede în consolă (Billing)',
       activa
@@ -325,11 +330,9 @@ async function randFable(): Promise<CreditAI> {
       'jurnalul de costuri (cost_events)',
       'Fable 5 (Anthropic) nu trece prin jurnalul nostru — n-am ce măsura, deci nu raportez o cifră',
     ),
-    // MĂSURAT (config): cheia pusă = rezerva poate servi (VERDE); lipsă = inactivă
-    // (ROȘU). E o măsurătoare de configurare → becul NU rămâne gri (regula ownerului).
     serveste: reusit(
-      'cheia ANTHROPIC_API_KEY e pusă în app?',
-      { da: activa, detaliu: activa ? 'rezervă gata (Fable 5)' : 'ANTHROPIC_API_KEY lipsă — rezervă inactivă' },
+      'proba REALĂ a cheii la Anthropic (GET /v1/models — gratuit, cache 10 min)',
+      { da: proba.ok, detaliu: proba.motiv },
       0,
     ),
     // Link-ul EXACT de reîncărcare/facturare Anthropic.

@@ -235,6 +235,17 @@ export const config = {
   get geminiModelGreu(): string {
     return modelUnicCod()
   },
+  // ── CREIERUL 2 (constructorul) = GEMINI „ULTRA" (owner, 14 aug: „ultra ca al
+  // doilea creier, da? primul e blocat") ─────────────────────────────────────
+  // CHATUL rămâne pe modelul unic SIGILAT (flash — la vorbă viteza contează, iar
+  // proba din 7 aug l-a ales pe măsurători). CONSTRUCTORUL n-are nevoie de
+  // viteză, are nevoie de PUTERE: lucrează în fundal, un pas poate aștepta și
+  // 70s. `gemini-pro-latest` = aliasul oficial care arată MEREU spre cel mai
+  // puternic Pro publicat (20/20 la proba ownerului) — urcă singur la fiecare
+  // Pro nou, fără deploy. Suprascriibil prin env (CONSTRUCTOR_GEMINI_MODEL).
+  get constructorGeminiModel(): string {
+    return process.env.CONSTRUCTOR_GEMINI_MODEL ?? 'gemini-pro-latest'
+  },
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
   // VIDEO_ALLOW_PAID=1, ca la constructor: nimic plătit din greșeală.
