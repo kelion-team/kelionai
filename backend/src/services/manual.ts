@@ -210,6 +210,8 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   create_doc: { what: 'Writes a new Google Doc for you', say: '"make a doc with the shopping list"' },
   create_presentation: { what: 'Builds a Google Slides presentation on your topic (paid extra, see Price menu)', say: '"make me a presentation about solar energy"' },
   create_form: { what: 'Creates a Google Form with your questions', say: '"make a sign-up form for the event"' },
+  photos_alege: { what: 'Lets you pick photos from your Google Photos (you choose in Google, privately)', say: '"let me pick some photos from my Google Photos"' },
+  photos_adu: { what: 'Brings the photos you picked onto the monitor', say: '"show the photos I picked"' },
   edit_doc: { what: 'Adds to or rewrites one of your Google Docs', say: '"add a paragraph to the meeting notes"' },
   create_sheet: { what: 'Makes a new Google Sheet from your data', say: '"put these numbers in a spreadsheet"' },
   edit_sheet: { what: 'Appends rows or fills cells in one of your sheets', say: '"add this row to the expenses sheet"' },

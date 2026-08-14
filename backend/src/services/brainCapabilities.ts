@@ -64,6 +64,8 @@ export const CAPABILITIES: readonly Capability[] = [
   // create_calendar_event (nu unealtă nouă — aceeași intrare în calendar).
   { name: 'create_presentation', category: 'google', does: 'creează o prezentare Google Slides (titlu + slide-uri) — extra-serviciu cu tarif', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'create_form', category: 'google', does: 'creează un Google Form (titlu + întrebări)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'photos_alege', category: 'google', does: 'pornește alegerea de poze din Google Photos (Picker — omul alege, Kelion vede doar alegerea)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'photos_adu', category: 'google', does: 'aduce pozele alese din Google Photos și le arată pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'edit_doc', category: 'google', does: 'editează un Google Doc (adaugă / rescrie / caută-înlocuiește)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'create_sheet', category: 'google', does: 'creează un Google Sheet (titlu + rânduri)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'edit_sheet', category: 'google', does: 'editează un Google Sheet (adaugă rânduri / scrie într-un interval)', chat: true, voice: false, voiceViaBrain: true, admin: false },

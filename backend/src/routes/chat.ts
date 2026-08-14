@@ -4200,6 +4200,16 @@ async function runTool(
     }
 
     default: {
+      // GOOGLE PHOTOS (Picker) — au nevoie de email + baseUrl, pe care
+      // runGoogleTool nu le are; se rezolvă aici, cu tokenul aceluiași om.
+      if (block.name === 'photos_alege') {
+        const { photosAlege } = await import('../services/googlePhotos.js')
+        return photosAlege(email, token)
+      }
+      if (block.name === 'photos_adu') {
+        const { photosAdu } = await import('../services/googlePhotos.js')
+        return photosAdu(email, token, baseUrl)
+      }
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
         // THE get_weather GUARD (the "27° without GPS" fix): a location-less

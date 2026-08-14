@@ -135,6 +135,18 @@ export const googleTools: Tool[] = [
     },
   },
   {
+    name: 'photos_alege',
+    description:
+      "Start a Google Photos picking session for the user. Returns pickerUri — SHOW it on the monitor (show_on_screen) and tell the user to open it and pick their photos in Google's own interface (private by design: you only ever see what they picked). Then call photos_adu to fetch the picked photos.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'photos_adu',
+    description:
+      'Fetch the photos the user picked in the Google Photos session started with photos_alege (max 6). Returns app URLs — show them on the monitor. If the user has not finished picking yet, it says so — wait and call again.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'create_form',
     description:
       "Create a Google Form in the user's account: a title, an optional description and a list of text questions. Use for sign-up forms, surveys, questionnaires. Returns the link to fill it in (url) and the edit link (editUrl).",

@@ -67,6 +67,11 @@ const FULL_SCOPES = [
   // reconectarea (același tratament ca la documents/spreadsheets, 12 aug).
   'https://www.googleapis.com/auth/presentations',
   'https://www.googleapis.com/auth/forms.body',
+  // PHOTOS prin Picker API (14 aug, bifat de owner): omul își ALEGE pozele în
+  // interfața Google; aplicația vede doar alegerea. Scope-ul vechi
+  // photoslibrary.readonly e MORT (șters de Google, 31 mar 2025) — ăsta e cel
+  // al Picker-ului, viu.
+  'https://www.googleapis.com/auth/photospicker.mediaitems.readonly',
   // REMOVED (Aug 2, live probe): 'photoslibrary.readonly' — Google DELETED this
   // scope on 2025-03-31 for every client; the Photos Library API now answers
   // 403 PERMISSION_DENIED even when the scope appears as granted in tokeninfo
