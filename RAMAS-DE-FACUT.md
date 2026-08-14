@@ -2,6 +2,30 @@
 
 > Adrian, 30 iul: „pune pe listă tot ce nu ai făcut din proiect, tot ce nu merge,
 > că mă ia capul."
+
+## ⭐ CRITERIUL DE „GATA" (owner, 14 aug: „când voi avea aplicația gata, ca produs final funcțional?")
+
+**Definiția convenită (nu o dată din aer):** produs final = fiecare funcție promisă
+merge pentru un utilizator care plătește, iar când ceva pică, sistemul **vede
+singur, strigă singur, repară singur** — fără Adrian pe post de babysitter.
+**Proba de GATA: 7 zile la rând** în care (a) Adrian nu repară nimic cu mâna,
+(b) becurile stau verzi pe PROBE reale, (c) zero bug nou raportat de el —
+self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
+
+**Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] Vocea live îngheață după câteva schimburi de fraze (ordinul #233, în coadă).
+- [ ] Camera: nu capturează după accept + delay mare la pornire — instrumentată azi
+      (jurnal `[cameră]` + eroare la >5s până la primul cadru); cifra fazei vinovate
+      vine din primul test live al ownerului.
+- [ ] Împerecherea biometrică voce+față (cerută 14 aug) — neîncepută.
+- [ ] Reducerea testelor (>1400) fără tăierea lacătelor de bani/securitate — necerută încă o trecere.
+- [ ] Cheia `ANTHROPIC_API_KEY` de pe server e INVALIDĂ (măsurat 14 aug la Anthropic);
+      cheia NOUĂ validă există (probată: „Rezerva funcționează.") — de pus prin
+      `secret_pune` + `secret_publica`. Până atunci becul Fable 5 stă ROȘU pe drept.
+- [ ] Estimarea de credit Gemini („£0.00") e declarativă și veche — de re-declarat
+      în Admin → „credit Gemini" ca cifra să însemne ceva.
+- [ ] Proba vie a constructorului pe 3.7-flash: un ordin dus cap-coadă cu
+      „Creier folosit: gemini/gemini-3.7-flash" în PR (după deploy #1095 → „reia" pe #233).
 >
 > Lista asta e făcută din COD și de pe LIVE, nu din memorie. Fiecare rând are
 > dovada lângă el. **Se actualizează la fiecare sesiune** — un rând rezolvat se

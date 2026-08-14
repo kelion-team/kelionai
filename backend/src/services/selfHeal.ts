@@ -1,8 +1,9 @@
 import crypto from 'node:crypto'
 import {
   recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs,
-  simptomeLiveRecente,
+  simptomeLiveRecente, listFailedBuildJobsRecent,
 } from '../db.js'
+import { FISIERE_GAZDA, coadaLogGazda, semnaturiEroare } from './logGazda.js'
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { geminiLive } from './geminiDirect.js'
@@ -132,10 +133,75 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     }
   }
 
+  // ── ORDINELE MOARTE DE TOT (owner, 14 aug: „trebuie rezolvată definitiv
+  // partea cu eșuatul ordinelor") ────────────────────────────────────────────
+  // Un ordin care și-a ars toate încercările nu mai e reluat de nimeni — și
+  // până azi murea ÎN TĂCERE (ownerul îl descoperea singur, pe panou). De-acum:
+  // alarmă în panou cu motivul din log, O SINGURĂ dată per ordin (semn în kv).
+  // Banii/creierul au căile lor (requeue-ul de mai sus + alarma din ruta
+  // creierului) — aici doar se STRIGĂ, nu se re-depune orbește același ordin
+  // (l-ar arde din nou pe aceiași bani).
+  const moarte = await listFailedBuildJobsRecent(24).catch(() => [])
+  for (const m of moarte) {
+    const key = `selfheal-ordin-mort:${m.id}`
+    if (await loadKv(key)) continue
+    await saveKv(key, JSON.stringify({ at: Date.now(), attempts: m.attempts }))
+    const peBani = /(402|credit|creier_esec|indisponibil)/i.test(m.log)
+    try {
+      const { notifyAdmin } = await import('./adminNotification.js')
+      await notifyAdmin(
+        'scris',
+        `Ordinul #${m.id} a MURIT după ${m.attempts} încercări`,
+        `Ordin: „${m.orderText.slice(0, 160)}". Coada NU îl mai reia singură. ` +
+          `Motiv (coada logului): „${m.log.slice(-300)}"` +
+          (peBani ? ' — pare BANI/CREIER: la revenirea creierului se repune singur (vindecătorul de credit).' : ''),
+        { jobId: m.id, attempts: m.attempts },
+      )
+    } catch {
+      /* alarma nu are voie să oprească vindecarea */
+    }
+  }
+
+  // ── LOGURILE GAZDEI (owner, 14 aug: „cine monitorizează toate logurile?" —
+  // răspuns cinstit de azi-dimineață: nimeni; de-acum: ochiul ăsta) ──────────
+  // constructor.log + auto-publicare.log, montate read-only la /host/kelion.
+  // O semnătură de eroare trebuie văzută în DOUĂ rulări distincte (kv contor)
+  // ca să devină ordin — un fulger nu e un tipar (regula #1). Fișier nemontat
+  // încă → se sare tăcut (coadaLogGazda spune motivul, nu inventează).
+  let filedGazda = 0
+  for (const fisier of FISIERE_GAZDA) {
+    const coada = await coadaLogGazda(fisier)
+    if (!coada.ok) continue
+    for (const linie of semnaturiEroare(coada.text)) {
+      if (filedGazda >= 2 || filed >= 5) break
+      const sig = signature(`${fisier} ${linie}`)
+      const cheieFiled = `selfheal-gazda:${sig}`
+      if (await loadKv(cheieFiled)) continue
+      const cheieContor = `selfheal-gazda-n:${sig}`
+      const vazutDe = Number((await loadKv(cheieContor)) ?? '0') + 1
+      await saveKv(cheieContor, String(vazutDe))
+      if (vazutDe < 2) continue
+      const order =
+        `AUTO-VINDECARE (loguri gazdă): în ${fisier} de pe VPS apare RECURENT eroarea:\n` +
+        `${linie}\n\n` +
+        `Găsește CAUZA REALĂ în cod (search_source pe mesaj; sursa probabilă: ` +
+        `${fisier === 'constructor.log' ? 'deploy/constructor-agent.mjs sau ruta /api/constructor/*' : 'deploy/deploy.sh, deploy/auto-publicare.sh sau bootul aplicației'}) ` +
+        `și rescrie curat modulul responsabil — fără petice. NU schimba nimic în afara cauzei.\n` +
+        `Verifică: build + teste (backend și, dacă atingi, frontend).`
+      const id = await createBuildJob('kelion-autovindecare-gazda', order)
+      if (id) {
+        await saveKv(cheieFiled, JSON.stringify({ at: Date.now(), job: id }))
+        filed += 1
+        filedGazda += 1
+      }
+    }
+  }
+
   if (filed) {
     console.log(
       `[self-heal] ${filed} reparare(i) trimisă(e) constructorului` +
-        (filedLive ? ` (din care ${filedLive} din eșecuri MUTE de pe viu)` : ''),
+        (filedLive ? ` (din care ${filedLive} din eșecuri MUTE de pe viu)` : '') +
+        (filedGazda ? ` (din care ${filedGazda} din logurile GAZDEI)` : ''),
     )
   }
   return { filed }

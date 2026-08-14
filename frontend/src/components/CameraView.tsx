@@ -30,6 +30,12 @@ export default function CameraView({
   const streamRef = useRef<MediaStream | null>(null)
   const faceStopRef = useRef<(() => void) | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
+  // CRONOMETRUL PORNIRII (owner, 14 aug: „nici nu capturează după ce dau accept"
+  // + „delay enorm"). Ca următorul raport să vină cu CIFRA fazei vinovate, nu cu
+  // ghicit: măsurăm de la activare → flux → play → PRIMUL CADRU capturat, și
+  // scriem fiecare fază în consolă. Peste 5s până la primul cadru = EROARE
+  // (console.error → intră în client_errors → o vede și Kelion, și self-heal).
+  const tPornireRef = useRef(0)
 
   // Start/stop the camera stream. Camera access is serialised inside camera.ts,
   // so rapid flips (front/back) or React StrictMode remounts cannot grab the
@@ -44,6 +50,7 @@ export default function CameraView({
     }
 
     const controller = new AbortController()
+    tPornireRef.current = performance.now()
     void (async () => {
       try {
         const stream = await startCamera(facing, controller.signal)
@@ -51,10 +58,14 @@ export default function CameraView({
           stopStream(stream)
           return
         }
+        // eslint-disable-next-line no-console
+        console.log(`[cameră] flux obținut după ${Math.round(performance.now() - tPornireRef.current)} ms (getUserMedia + coadă de eliberare)`)
         streamRef.current = stream
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           await videoRef.current.play().catch(() => undefined)
+          // eslint-disable-next-line no-console
+          console.log(`[cameră] play pornit după ${Math.round(performance.now() - tPornireRef.current)} ms de la activare`)
         }
         // Lift exposure/gain after the stream is alive — the browser may have
         // started conservatively in dim light.
@@ -253,7 +264,20 @@ export default function CameraView({
     const planifica = (): void => {
       idReincarca = window.setTimeout(() => {
         void reincarca().then(() => {
-          if (!primaGata && ultimulCadru) primaGata = true
+          if (!primaGata && ultimulCadru) {
+            primaGata = true
+            // CIFRA care închide ghicitul (14 aug): cât a durat REAL de la
+            // activarea camerei până la primul cadru capturat. Sub 5s = doar
+            // informativ; peste = EROARE raportată (client_errors → self-heal).
+            const ms = Math.round(performance.now() - tPornireRef.current)
+            if (ms > 5000) {
+              // eslint-disable-next-line no-console
+              console.error(`cameră lentă: primul cadru abia după ${ms} ms de la pornire (flux+decodare) — de investigat faza din jurnalul [cameră]`)
+            } else {
+              // eslint-disable-next-line no-console
+              console.log(`[cameră] primul cadru capturat după ${ms} ms de la activare`)
+            }
+          }
           planifica()
         })
       }, primaGata ? 1000 : 150)

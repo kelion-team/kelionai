@@ -1,0 +1,77 @@
+// ── OCHII PE LOGURILE GAZDEI (owner, 14 aug: „cine monitorizează toate
+// logurile? … nimeni — și asta trebuie aflat/rezolvat, tot, urgent, complet") ──
+//
+// Până azi, `constructor.log` și `auto-publicare.log` de pe VPS nu le citea
+// NIMENI automat: blocajul constructorului l-a văzut ownerul cu ochii lui, nu
+// sistemul. Containerul nu vedea fișierele (nu erau montate). De azi:
+// deploy.sh + vps-set-env montează `/root/kelion` read-only la `/host/kelion`,
+// iar modulul ăsta citește COADA fișierelor și scoate semnăturile de eroare —
+// pentru self-heal (care deschide ordine pe recurență) și pentru server_ops
+// (ca Kelion să le arate la cerere).
+//
+// REGULA #1 e respectată prin construcție: fișier absent (montarea încă nu a
+// ajuns live / alt mediu) → `{ ok: false, motiv }`, NICIODATĂ text inventat.
+
+import { open, stat } from 'node:fs/promises'
+
+/** Directorul gazdei montat în container. Funcție (nu constantă) ca testele să
+ *  poată arăta spre un director temporar prin env, fără importuri re-jucate. */
+const radacina = (): string => process.env.HOST_KELION_DIR ?? '/host/kelion'
+
+export const FISIERE_GAZDA = ['constructor.log', 'auto-publicare.log'] as const
+export type FisierGazda = (typeof FISIERE_GAZDA)[number]
+
+/** Coada (ultimii `maxBytes`) unui log de pe gazdă — sau motivul cinstit. */
+export async function coadaLogGazda(
+  fisier: FisierGazda,
+  maxBytes = 64 * 1024,
+): Promise<{ ok: true; text: string } | { ok: false; motiv: string }> {
+  const cale = `${radacina()}/${fisier}`
+  try {
+    const s = await stat(cale)
+    const fh = await open(cale, 'r')
+    try {
+      const lungime = Math.min(maxBytes, s.size)
+      const start = Math.max(0, s.size - lungime)
+      const buf = Buffer.alloc(lungime)
+      await fh.read(buf, 0, lungime, start)
+      return { ok: true, text: buf.toString('utf8') }
+    } finally {
+      await fh.close()
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      motiv: `nu pot citi ${cale}: ${String((e as Error)?.message ?? e).slice(0, 120)} (montarea /host/kelion vine cu deploy-ul; până atunci nu inventăm)`,
+    }
+  }
+}
+
+/** Liniile care put a eroare din textul unui log, normalizate și deduplicate.
+ *  Întoarce LINIA ORIGINALĂ (pentru ordinul de reparație), nu forma normalizată
+ *  — omul și constructorul au nevoie de context real, nu de amprentă. */
+export function semnaturiEroare(text: string, maxim = 8): string[] {
+  const tipar =
+    /(error|eroare|fatal|fail(ed|ure)?|pic[ăa]t?\b|refuz|denied|exception|traceback|unhandled|ECONN|ETIMEDOUT|EACCES|ENOSPC|creier_esec|\b5\d\d\b)/i
+  // Linii care CONȚIN cuvinte de eroare dar sunt de fapt verdicte bune/contoare
+  // pe zero — fără ele, „0 failed" ar fi născut ordine de reparație degeaba.
+  const zgomot = /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde)/i
+  const vazute = new Set<string>()
+  const out: string[] = []
+  for (const linie of text.split('\n')) {
+    if (!tipar.test(linie) || zgomot.test(linie)) continue
+    const norm = linie
+      .toLowerCase()
+      .replace(/\d{4}-\d{2}-\d{2}[t ][\d:.,+z-]*/gi, '') // timpul nu schimbă eroarea
+      .replace(/[0-9a-f]{8,}/gi, '') // sha-uri/id-uri
+      .replace(/\d+/g, '#')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 160)
+    if (!norm || vazute.has(norm)) continue
+    vazute.add(norm)
+    out.push(linie.trim().slice(0, 300))
+    if (out.length >= maxim) break
+  }
+  return out
+}

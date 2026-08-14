@@ -204,11 +204,16 @@ docker rm -f kelionai-app 2>/dev/null || true
 # publicare — măsurat 3 aug: /root/.cache/ms-playwright inexistent, deci
 # browser_open crăpa pe „Executable doesn't exist", iar comentariul din
 # Dockerfile promitea un „check la startup" pe care nu-l făcea nimeni).
+# /host/kelion (read-only, 14 aug): OCHII pe logurile gazdei. Până azi,
+# constructor.log și auto-publicare.log nu le citea NIMENI automat — blocajul
+# constructorului l-a văzut ownerul cu ochii, nu sistemul („cine monitorizează
+# toate logurile? nimeni"). Montate read-only, self-heal + server_ops le văd.
 docker run -d --name kelionai-app --restart unless-stopped \
   --network host --env-file "$ENVFILE" \
   -e PORT=8080 -e NODE_ENV=production \
   -e GIT_COMMIT_SHA="$(git -C "$REPO" rev-parse HEAD)" \
   -v /root/kelion/pw-cache:/root/.cache/ms-playwright \
+  -v /root/kelion:/host/kelion:ro \
   kelionai:latest
 
 echo "== 4b. Browserul mâinilor (Chromium) — prezent, nu promis =="

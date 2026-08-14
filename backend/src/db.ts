@@ -3665,6 +3665,26 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
   return Number(r.rows[0]?.id ?? 0)
 }
 
+/** Ordinele EȘUATE de tot din ultimele `hours` ore — pentru ochiul auto-vindecării
+ *  (owner, 14 aug: „rezolvată definitiv partea cu eșuatul ordinelor"): un ordin
+ *  mort nu are voie să moară în tăcere; alarma se dă o singură dată per ordin. */
+export async function listFailedBuildJobsRecent(
+  hours = 24,
+): Promise<{ id: number; orderText: string; log: string; attempts: number }[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<{ id: string | number; order_text: string; log: string; attempts: number }>(
+      `SELECT id, order_text, COALESCE(log,'') AS log, attempts FROM build_jobs
+       WHERE status='failed' AND updated_at > now() - ($1 || ' hours')::interval
+       ORDER BY updated_at DESC LIMIT 20`,
+      [String(hours)],
+    )
+    return r.rows.map((x) => ({ id: Number(x.id), orderText: x.order_text, log: x.log, attempts: x.attempts }))
+  } catch {
+    return []
+  }
+}
+
 // Cât timp de TĂCERE (fără nicio raportare de progres) până când un ordin
 // „running" e considerat BLOCAT — worker-ul lui a murit (omorât de `timeout
 // 1800` din constructor-worker.sh) și nimeni nu-l mai duce. Era 40 de minute
