@@ -27,6 +27,44 @@ export function fable5Disponibil(): boolean {
   return Boolean(fable5Key())
 }
 
+// ── PROBA DE VALIDITATE A CHEII (owner, 14 aug: becul verde a MINȚIT — cheia era
+// PUSĂ dar INVALIDĂ („API key is invalid" de la Anthropic, măsurat), rezerva a
+// fost moartă de la început, iar raportul spunea „rezervă gata"). Lecția: prezența
+// cheii NU e o măsurătoare. De-acum dovada se cere de la Anthropic: GET /v1/models
+// e GRATUIT și trece DOAR cu o cheie bună. Cache 10 min — panoul nu bombardează
+// API-ul, dar nici o minciună nu poate trăi mai mult de 10 minute.
+const FABLE_MODELS_URL = 'https://api.anthropic.com/v1/models'
+const PROBA_CACHE_MS = 10 * 60_000
+let probaFable: { la: number; ok: boolean; motiv: string } | null = null
+/** Doar pentru teste: golește cache-ul probei. */
+export function _resetProbaFable(): void {
+  probaFable = null
+}
+/** Cheia chiar POATE servi? Probă reală la Anthropic, nu „e pusă în env". */
+export async function fable5Valida(): Promise<{ ok: boolean; motiv: string }> {
+  const key = fable5Key()
+  if (!key) return { ok: false, motiv: 'cheia (ANTHROPIC_API_KEY) nu e pusă — rezervă inactivă' }
+  if (probaFable && Date.now() - probaFable.la < PROBA_CACHE_MS) return probaFable
+  try {
+    const r = await fetch(FABLE_MODELS_URL, {
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      signal: AbortSignal.timeout(8_000),
+    })
+    probaFable = {
+      la: Date.now(),
+      ok: r.ok,
+      motiv: r.ok
+        ? 'cheie VALIDĂ — probă reală la Anthropic (GET /v1/models, gratuit)'
+        : `cheia e PUSĂ dar Anthropic o REFUZĂ (HTTP ${r.status}) — rezerva NU poate servi; pune o cheie nouă din console.anthropic.com`,
+    }
+    return probaFable
+  } catch (e) {
+    // Rețeaua picată NU intră în cache (reîncercăm la următoarea citire). Becul e
+    // tot ROȘU: o rezervă pe care app-ul n-o poate atinge nu poate nici servi.
+    return { ok: false, motiv: `nu pot proba cheia (rețea): ${String((e as Error)?.message ?? e).slice(0, 80)}` }
+  }
+}
+
 interface OpenAiToolCall {
   id?: string
   type?: string
