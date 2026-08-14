@@ -60,6 +60,13 @@ const FULL_SCOPES = [
   'https://www.googleapis.com/auth/documents',
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive.file',
+  // PRODUSELE ALESE DE OWNER (14 aug, bifate în listă): Slides + Forms.
+  // Meet nu cere nimic nou (merge pe scope-ul calendar). Cine s-a conectat
+  // ÎNAINTE de scope-urile astea trebuie să se RE-conecteze o dată ca să le
+  // acorde — uneltele noi răspund 403 până atunci, iar dispecerul cere
+  // reconectarea (același tratament ca la documents/spreadsheets, 12 aug).
+  'https://www.googleapis.com/auth/presentations',
+  'https://www.googleapis.com/auth/forms.body',
   // REMOVED (Aug 2, live probe): 'photoslibrary.readonly' — Google DELETED this
   // scope on 2025-03-31 for every client; the Photos Library API now answers
   // 403 PERMISSION_DENIED even when the scope appears as granted in tokeninfo

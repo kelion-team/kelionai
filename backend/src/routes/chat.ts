@@ -4176,7 +4176,15 @@ async function runTool(
           if ('errorJson' in guarded) return guarded.errorJson
           block = { ...block, input: guarded.input }
         }
+        // TARIFUL PREZENTĂRII (owner, 14 aug — Slides e extra-serviciu ales):
+        // taxare înainte de consum, ramburs dacă crearea pică — ca la video.
+        let taxaPrez: Awaited<ReturnType<typeof taxeazaServiciu>> | null = null
+        if (block.name === 'create_presentation') {
+          taxaPrez = await taxeazaServiciu(email, 'prezentare', isAdmin)
+          if (!taxaPrez.ok) return JSON.stringify({ error: 'plata_serviciului', motiv: taxaPrez.motiv })
+        }
         const result = await runGoogleTool(block.name, block.input, token)
+        if (taxaPrez?.ok && /"error"/.test(result)) await taxaPrez.ramburseaza().catch(() => {})
         // AUTOMATIC DISPLAY: tools that return `screen_url` (map, route,
         // weather, video) must APPEAR on the monitor from a SINGLE call — the
         // brain does not always make the second `show_on_screen`, so the user

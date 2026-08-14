@@ -98,7 +98,7 @@ export const googleTools: Tool[] = [
   {
     name: 'create_calendar_event',
     description:
-      "Create an event in the user's Google Calendar. Times must be ISO 8601 (e.g. 2026-07-02T15:00:00). If no end is given, a 1-hour event is created.",
+      "Create an event in the user's Google Calendar. Times must be ISO 8601 (e.g. 2026-07-02T15:00:00). If no end is given, a 1-hour event is created. Set meet=true when the user wants a video meeting — the event gets a Google Meet link, returned as meetLink.",
     input_schema: {
       type: 'object',
       properties: {
@@ -106,8 +106,46 @@ export const googleTools: Tool[] = [
         start: { type: 'string', description: 'Start datetime, ISO 8601.' },
         end: { type: 'string', description: 'End datetime, ISO 8601 (optional).' },
         location: { type: 'string', description: 'Location (optional).' },
+        meet: { type: 'boolean', description: 'true = attach a Google Meet video link to the event.' },
       },
       required: ['summary', 'start'],
+    },
+  },
+  {
+    name: 'create_presentation',
+    description:
+      'Create a Google Slides presentation in the user\'s account: a title plus a list of slides (each with a title and body text). Use when the user asks for a presentation, a deck, or slides on a topic — write the content yourself, well structured. Returns the edit URL. This is a PAID extra service (charged from the user\'s credits automatically — do not charge or refuse yourself).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Presentation title.' },
+        slides: {
+          type: 'array',
+          description: 'The slides, in order. Keep each body concise (bullet-style lines).',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Slide title.' },
+              body: { type: 'string', description: 'Slide body text (newline-separated points).' },
+            },
+          },
+        },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'create_form',
+    description:
+      "Create a Google Form in the user's account: a title, an optional description and a list of text questions. Use for sign-up forms, surveys, questionnaires. Returns the link to fill it in (url) and the edit link (editUrl).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Form title.' },
+        description: { type: 'string', description: 'Optional form description.' },
+        questions: { type: 'array', items: { type: 'string' }, description: 'The questions, in order (short text answers).' },
+      },
+      required: ['title'],
     },
   },
   {
@@ -883,6 +921,7 @@ async function createCalendarEvent(
   end: string,
   location: string,
   token: string,
+  meet = false,
 ): Promise<string> {
   if (!summary || !start) return JSON.stringify({ error: 'missing_summary_or_start' })
   const startMs = Date.parse(start)
@@ -890,7 +929,12 @@ async function createCalendarEvent(
   const endIso = end && !Number.isNaN(Date.parse(end))
     ? new Date(end).toISOString()
     : new Date(startMs + 3_600_000).toISOString()
-  const res = await tfetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+  // GOOGLE MEET (owner, 14 aug: interconectarea produselor alese — Meet).
+  // Cu meet=true, Calendar creează și camera de întâlnire (conferenceData) —
+  // NICIUN scope nou: merge pe scope-ul calendar deja acordat.
+  const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events')
+  if (meet) url.searchParams.set('conferenceDataVersion', '1')
+  const res = await tfetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -898,11 +942,126 @@ async function createCalendarEvent(
       location: location || undefined,
       start: { dateTime: new Date(startMs).toISOString() },
       end: { dateTime: endIso },
+      conferenceData: meet
+        ? { createRequest: { requestId: `kelion-${Date.now()}`, conferenceSolutionKey: { type: 'hangoutsMeet' } } }
+        : undefined,
     }),
   })
   if (!res.ok) return JSON.stringify({ error: `calendar_create_http_${res.status}` })
-  const j = (await res.json()) as { htmlLink?: string }
-  return JSON.stringify({ created: true, summary, start, link: j.htmlLink ?? '' })
+  const j = (await res.json()) as {
+    htmlLink?: string
+    hangoutLink?: string
+    conferenceData?: { entryPoints?: { uri?: string }[] }
+  }
+  const meetLink = j.hangoutLink ?? j.conferenceData?.entryPoints?.[0]?.uri
+  return JSON.stringify({ created: true, summary, start, link: j.htmlLink ?? '', meetLink: meet ? (meetLink ?? '') : undefined })
+}
+
+// ── GOOGLE SLIDES (owner, 14 aug: produsele alese — „vreau să le văd") ───────
+// Creează prezentarea + câte un slide TITLE_AND_BODY per intrare, cu textele
+// puse prin placeholderIdMappings (calea documentată — fără ghicit de id-uri).
+async function createPresentation(
+  title: string,
+  slides: unknown,
+  token: string,
+): Promise<string> {
+  if (!title) return JSON.stringify({ error: 'missing_title' })
+  const cRes = await tfetch('https://slides.googleapis.com/v1/presentations', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (!cRes.ok) return JSON.stringify({ error: `slides_create_http_${cRes.status}` })
+  const cj = (await cRes.json()) as { presentationId?: string }
+  const id = cj.presentationId
+  if (!id) return JSON.stringify({ error: 'slides_no_id' })
+  const lista = (Array.isArray(slides) ? slides : [])
+    .map((s) => {
+      const o = (s ?? {}) as Record<string, unknown>
+      return { titlu: String(o.title ?? o.titlu ?? '').slice(0, 200), corp: String(o.body ?? o.corp ?? '').slice(0, 4000) }
+    })
+    .filter((s) => s.titlu || s.corp)
+    .slice(0, 25)
+  if (lista.length) {
+    const requests = lista.flatMap((s, i) => {
+      const slideId = `kelion_slide_${i}`
+      const titluId = `kelion_titlu_${i}`
+      const corpId = `kelion_corp_${i}`
+      const reqs: unknown[] = [
+        {
+          createSlide: {
+            objectId: slideId,
+            slideLayoutReference: { predefinedLayout: 'TITLE_AND_BODY' },
+            placeholderIdMappings: [
+              { layoutPlaceholder: { type: 'TITLE' }, objectId: titluId },
+              { layoutPlaceholder: { type: 'BODY' }, objectId: corpId },
+            ],
+          },
+        },
+      ]
+      if (s.titlu) reqs.push({ insertText: { objectId: titluId, text: s.titlu } })
+      if (s.corp) reqs.push({ insertText: { objectId: corpId, text: s.corp } })
+      return reqs
+    })
+    const uRes = await tfetch(`https://slides.googleapis.com/v1/presentations/${id}:batchUpdate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests }),
+    })
+    // Prezentarea EXISTĂ deja — un eșec la umplere se spune, nu se ascunde.
+    if (!uRes.ok) {
+      return JSON.stringify({
+        created: true, id, url: `https://docs.google.com/presentation/d/${id}/edit`,
+        avertisment: `prezentarea s-a creat, dar umplerea slide-urilor a picat (HTTP ${uRes.status}) — deschide-o și completeaz-o`,
+      })
+    }
+  }
+  return JSON.stringify({ created: true, id, slides: lista.length, url: `https://docs.google.com/presentation/d/${id}/edit` })
+}
+
+// ── GOOGLE FORMS (owner, 14 aug: produsele alese) ────────────────────────────
+// Creează formularul + întrebări text simple; întoarce linkul de completat.
+async function createForm(title: string, description: string, questions: unknown, token: string): Promise<string> {
+  if (!title) return JSON.stringify({ error: 'missing_title' })
+  const cRes = await tfetch('https://forms.googleapis.com/v1/forms', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ info: { title, documentTitle: title } }),
+  })
+  if (!cRes.ok) return JSON.stringify({ error: `forms_create_http_${cRes.status}` })
+  const cj = (await cRes.json()) as { formId?: string; responderUri?: string }
+  if (!cj.formId) return JSON.stringify({ error: 'forms_no_id' })
+  const intrebari = (Array.isArray(questions) ? questions : [])
+    .map((q) => String(q ?? '').trim().slice(0, 300))
+    .filter(Boolean)
+    .slice(0, 30)
+  const requests: unknown[] = []
+  if (description) requests.push({ updateFormInfo: { info: { description: description.slice(0, 1000) }, updateMask: 'description' } })
+  intrebari.forEach((q, i) =>
+    requests.push({
+      createItem: {
+        item: { title: q, questionItem: { question: { required: false, textQuestion: { paragraph: false } } } },
+        location: { index: i },
+      },
+    }),
+  )
+  if (requests.length) {
+    const uRes = await tfetch(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests }),
+    })
+    if (!uRes.ok) {
+      return JSON.stringify({
+        created: true, id: cj.formId, url: cj.responderUri ?? `https://docs.google.com/forms/d/${cj.formId}/edit`,
+        avertisment: `formularul s-a creat, dar întrebările nu au intrat (HTTP ${uRes.status}) — deschide-l și completează-l`,
+      })
+    }
+  }
+  return JSON.stringify({
+    created: true, id: cj.formId, intrebari: intrebari.length,
+    url: cj.responderUri ?? '', editUrl: `https://docs.google.com/forms/d/${cj.formId}/edit`,
+  })
 }
 
 async function driveFiles(query: string, max: number, token: string): Promise<string> {
@@ -1721,7 +1880,9 @@ export async function runGoogleTool(
     else if (name === 'send_email')
       result = await sendEmail(str(args.to), str(args.subject), str(args.body), token)
     else if (name === 'create_calendar_event')
-      result = await createCalendarEvent(str(args.summary), str(args.start), str(args.end), str(args.location), token)
+      result = await createCalendarEvent(str(args.summary), str(args.start), str(args.end), str(args.location), token, args.meet === true)
+    else if (name === 'create_presentation') result = await createPresentation(str(args.title), args.slides, token)
+    else if (name === 'create_form') result = await createForm(str(args.title), str(args.description), args.questions, token)
     else if (name === 'delete_calendar_event') result = await deleteCalendarEvent(str(args.id), token)
     else if (name === 'complete_task') result = await completeTask(str(args.id), token)
     else if (name === 'get_drive_files') result = await driveFiles(str(args.query), num(args.max_results, 10), token)

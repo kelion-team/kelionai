@@ -40,6 +40,9 @@ const IMPLICITE: readonly { cheie: string; eticheta: string; credite: number }[]
   { cheie: 'video_preview', eticheta: 'Video clip, 8s (top quality)', credite: 50 },
   { cheie: 'imagine', eticheta: 'Generated image', credite: 1 },
   { cheie: 'cv', eticheta: 'CV adaptation for a job', credite: 2 },
+  // Slides — ales de owner din lista bifată (14 aug); gratuit la Google,
+  // deci tariful e aproape marjă curată.
+  { cheie: 'prezentare', eticheta: 'Presentation (Google Slides)', credite: 3 },
 ]
 
 function crediteDinEnv(cheie: string, implicit: number): number {
