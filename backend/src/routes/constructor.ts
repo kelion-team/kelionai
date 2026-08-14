@@ -179,40 +179,65 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ job })
   })
 
-  // ── CREIERUL 2 PENTRU CONSTRUCTOR (owner, 13 aug: „creierul 2 nu e legat la
-  // constructor… de aia toate ordinele sunt eșuate") ──────────────────────────
-  // DOVADA din cod: `deploy/constructor-agent.mjs` folosea UN SINGUR creier
-  // (DeepInfra) și „NU cădea pe alt creier". Când acela pica toate încercările,
-  // ORICE ordin murea. Aici e legătura care lipsea: când creierul propriu al
-  // constructorului pică, `llm()` cade PE ACEST endpoint, care rutează cererea
-  // (format OpenAI, identic cu ce trimitea la DeepInfra) la creierul aplicației
-  // = Gemini (creierul 2), care are credit când DeepInfra nu servește. Gardat cu
-  // x-bridge-secret, ca restul endpointurilor de worker. Cheltuie credit Gemini
-  // DOAR la salvare (aprobat de owner) și îl ÎNREGISTREAZĂ (recordCost), ca banii
-  // să apară în panoul Bani, nu pe ascuns. Dacă și Gemini pică → eroare, iar
-  // constructorul o clasifică „amânabil" și reia, exact ca înainte.
+  // ── CREIERUL CONSTRUCTORULUI, PRIN APP: GEMINI (principal) → FABLE 5 (rezervă) ─
+  // Owner, 13 aug: „creierul 2 nu e legat la constructor… supervizează 24/7" →
+  // legătura asta. Owner, 14 aug: „schimbă-mi constructorul cu gemeni ultra… când
+  // nu merge repara să cadă pe fable 5, înlocuiește peste tot" → Gemini devine
+  // PRINCIPALUL (nu doar plasa), iar rezerva e Fable 5. Constructorul cere creierul
+  // DOAR pe ruta asta (gardată cu x-bridge-secret) — cheile Gemini ȘI Anthropic stau
+  // AICI, în app, NU în constructor (regula: constructorul nu ține chei de furnizor
+  // și nu cheamă direct API-uri externe). Formatul e OpenAI, identic cu ce aștepta
+  // constructorul, deci bucla lui nu știe pe ce creier merge. Cheltuiala Gemini se
+  // ÎNREGISTREAZĂ (recordCost) ca banii să apară în panoul Bani, nu pe ascuns.
+  // ESCALADARE+REVENIRE: Gemini întâi; dacă nu poate → Fable 5; iar fiindcă FIECARE
+  // pas reintră pe rută, se revine SINGUR pe Gemini când acesta își revine. Dacă
+  // pică ambele → eroare, iar constructorul o clasifică „amânabil" și reia.
   app.post<{ Body: { messages?: OrMessage[]; tools?: unknown[]; model?: string } }>(
     '/api/constructor/creier',
     async (req, reply) => {
       if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
         return reply.code(401).send({ error: 'unauthorized' })
-      const { geminiDirectAvailable, geminiDirectChat } = await import('../services/geminiDirect.js')
-      if (!geminiDirectAvailable()) return reply.code(503).send({ error: 'gemini_indisponibil' })
       const messages = Array.isArray(req.body?.messages) ? (req.body.messages as OrMessage[]) : []
       if (!messages.length) return reply.code(400).send({ error: 'fara_mesaje' })
-      // Uneltele constructorului (OpenAI function) → formatul geminiDirectChat;
-      // răspunsul creierului → înapoi în format OpenAI. Ambele punți sunt în
-      // services/creier2Constructor.ts, PURE și probate (creier2Constructor.test.ts).
-      const tools = uneltePentruCreier2(Array.isArray(req.body?.tools) ? req.body.tools : [])
-      // Modelul VALIDAT/viu (geminiModelGreu), nu ID-ul expirat modelCreierProfund.
-      const model = String(req.body?.model ?? '').trim() || config.geminiModelGreu
-      try {
-        const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high' })
-        if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
-        return reply.send(raspunsCreier2(r))
-      } catch (e) {
-        return reply.code(502).send({ error: `gemini_esec: ${(e as Error).message.slice(0, 200)}` })
+      const rawTools = Array.isArray(req.body?.tools) ? req.body.tools : []
+      // ── PRINCIPAL: GEMINI „ULTRA" (owner, 14 aug: „schimbă-mi constructorul cu
+      // gemeni ultra") = geminiModelGreu (Pro, cel mai puternic de pe cheia app-ului).
+      const { geminiDirectAvailable, geminiDirectChat } = await import('../services/geminiDirect.js')
+      let gemeniEsec = ''
+      if (geminiDirectAvailable()) {
+        // Uneltele constructorului (OpenAI function) → formatul geminiDirectChat;
+        // răspunsul → înapoi în format OpenAI. Punțile sunt în creier2Constructor.ts.
+        const tools = uneltePentruCreier2(rawTools)
+        const model = String(req.body?.model ?? '').trim() || config.geminiModelGreu
+        try {
+          const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high' })
+          if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
+          return reply.send(raspunsCreier2(r))
+        } catch (e) {
+          gemeniEsec = (e as Error).message.slice(0, 200)
+        }
+      } else {
+        gemeniEsec = 'gemini_indisponibil (cheie lipsă)'
       }
+      // ── REZERVĂ: FABLE 5 (owner, 14 aug: „când nu merge repara vreau să cadă pe
+      // fable 5"). Tot PRIN APP (cheia Anthropic stă aici, nu în constructor);
+      // mesajele+uneltele sunt deja OpenAI → trec direct la endpointul Anthropic
+      // OpenAI-compat. REVENIRE: fiecare pas nou reîncepe cu Gemini (mai sus), deci
+      // se revine SINGUR pe principal când Gemini își revine — nu rămâne pe rezervă.
+      const { fable5Disponibil, fable5Chat } = await import('../services/fable5Constructor.js')
+      if (fable5Disponibil()) {
+        try {
+          return reply.send(await fable5Chat(messages, rawTools))
+        } catch (e) {
+          return reply
+            .code(502)
+            .send({ error: `creier_esec: gemini(${gemeniEsec}) → fable5(${(e as Error).message.slice(0, 160)})` })
+        }
+      }
+      // Nici Gemini, nici rezerva Fable 5 (fără ANTHROPIC_API_KEY în app) — onest.
+      return reply.code(gemeniEsec.includes('indisponibil') ? 503 : 502).send({
+        error: `creier_esec: gemini(${gemeniEsec}); rezerva Fable 5 INACTIVĂ (pune ANTHROPIC_API_KEY în app)`,
+      })
     },
   )
 

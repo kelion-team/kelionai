@@ -1,7 +1,6 @@
 import { config } from '../config.js'
 import { cheltuialaDeLaPeKinduri, cheltuialaLunaPeKinduri, loadKv } from '../db.js'
 import { getSerperBalance } from './serperBalance.js'
-import { getRunpodBalance } from './runpodBalance.js'
 import { geminiLive } from './geminiDirect.js'
 import { cursUsdGbp } from './fx.js'
 import { julesServeste } from './jules.js'
@@ -299,80 +298,47 @@ async function randJules(): Promise<CreditAI> {
   }
 }
 
-/** ── RUNPOD: placa lucrătorului, cu SOLD CITIT REAL (Adrian, 12 aug) ──────────
- *  Constructorul rulează pe modelul propriu (Qwen3-Coder) pe o placă RunPod
- *  serverless — NU pe VPS. Spre deosebire de Google, RunPod EXPUNE soldul
- *  (GraphQL myself.clientBalance), deci aici cifra e CITITĂ, nu estimată. Cheia
- *  e cea a constructorului (CONSTRUCTOR_DEEPSEEK_KEY, dacă URL-ul e RunPod). */
-async function randRunpod(): Promise<CreditAI> {
-  const t0 = Date.now()
-  const sold = await getRunpodBalance().catch(() => null)
-  const cum = 'POST https://api.runpod.io/graphql { myself { clientBalance } } (soldul spus de RunPod)'
-  const cheieConfigurata =
-    Boolean((process.env.CONSTRUCTOR_RUNPOD_KEY ?? process.env.CONSTRUCTOR_DEEPSEEK_KEY ?? '').trim()) &&
-    /runpod\.ai/i.test(process.env.CONSTRUCTOR_RUNPOD_URL ?? process.env.CONSTRUCTOR_DEEPSEEK_URL ?? '')
-
-  // SOLD REAL doar când furnizorul CHIAR expune o cifră (RunPod clientBalance).
-  // BUG prins de owner (13 aug, „0 USD" roșu deși DeepInfra servește): când
-  // constructorul e pe DeepInfra, `getRunpodBalance` întoarce ok:true DAR fără
-  // `balanceUsd` (DeepInfra nu expune sold). Codul făcea `balanceUsd ?? 0` = un 0
-  // FABRICAT → bec roșu fals, exact „£0.00". Acum: dacă nu vine o cifră reală, NU
-  // inventăm 0 — spunem „nu pot verifica" și becul vine din „servește" (verde).
-  let ramas: Masuratoare<{ cantitate: number; unitate: string }>
-  let soldReal = false
-  if (!sold || sold.error === 'not_runpod') {
-    ramas = picat(cum, 'constructorul nu e pus pe RunPod (URL-ul nu e RunPod)', Date.now() - t0)
-  } else if (sold.error === 'not_configured') {
-    ramas = picat(cum, 'cheia constructorului nu e pusă (CONSTRUCTOR_RUNPOD_KEY / _DEEPSEEK_KEY)', Date.now() - t0)
-  } else if (!sold.ok) {
-    ramas = picat(cum, `citirea soldului a picat (${sold.error})`, Date.now() - t0)
-  } else if (typeof sold.balanceUsd === 'number') {
-    // RunPod EXPUNE soldul → cifră reală; aici 0 chiar înseamnă „fără credit" (402).
-    ramas = reusit(cum, { cantitate: Number(sold.balanceUsd.toFixed(2)), unitate: 'USD' }, Date.now() - t0)
-    soldReal = true
-  } else {
-    // Furnizor găzduit (DeepInfra) care SERVEȘTE dar NU expune sold prin API — nu
-    // fabricăm un 0; becul vine din „servește" (verde), soldul se vede pe dashboard.
-    ramas = picat(
-      `${sold.provider ?? 'furnizorul'} nu expune sold prin API`,
-      `${sold.provider ?? 'furnizorul'} servește, dar soldul se vede doar pe dashboard-ul lui — nu inventez un 0`,
-      Date.now() - t0,
-    )
-  }
-
-  const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = sold?.ok
-    ? reusit(
-        'sold RunPod citit',
-        { da: true, detaliu: `rată acum $${(sold.currentSpendPerHr ?? 0).toFixed(3)}/h · plafon $${sold.spendLimitPerHr ?? '?'}/h` },
-        0,
-      )
-    : picat('sold RunPod', 'nu s-a putut citi soldul RunPod')
-
+/** ── FABLE 5 (Claude): REZERVA creierului constructorului (owner, 14 aug) ──────
+ *  „schimbă-mi constructorul cu gemeni ultra… când nu merge repara vreau să cadă pe
+ *  fable 5". Constructorul rulează pe Gemini (PRINCIPAL — vezi rândul Gemini) și cade
+ *  pe Fable 5 când Gemini nu poate. Fable 5 merge PRIN APP (cheia ANTHROPIC_API_KEY
+ *  stă în app, nu în constructor). Anthropic NU expune un sold prin API public → nu
+ *  inventez o cifră (regula #1); becul vine din „e cheia pusă?": pusă = VERDE (rezervă
+ *  gata), lipsă = ROȘU (inactivă) — MĂSURAT (config), deci niciodată GRI. */
+async function randFable(): Promise<CreditAI> {
+  const { fable5Disponibil } = await import('./fable5Constructor.js')
+  const activa = fable5Disponibil()
   return {
-    // Numele REAL al furnizorului (DeepInfra/RunPod/…), nu „RunPod" fix — altfel
-    // pastila minte când constructorul e pe DeepInfra (owner: „0 USD" pe RunPod
-    // deși e pe DeepInfra).
-    furnizor: `${sold?.provider ?? 'RunPod'} (creierul constructorului)`,
-    alimenteaza: 'creierul constructorului — modelul care execută ordinele de build',
-    cheieConfigurata,
-    // SOLD REAL doar unde furnizorul expune o cifră (RunPod). DeepInfra: soldReal
-    // fals → becul vine din „servește", nu dintr-un 0 fabricat.
-    soldReal,
-    ramas,
-    // RunPod nu trece prin jurnalul nostru de costuri (worker-ul nu itemizează
-    // cost per apel). Soldul real de mai sus e măsura DIRECTĂ — nu pun un 0 fals.
+    furnizor: 'Fable 5 (Claude — rezerva constructorului)',
+    alimenteaza: 'creierul constructorului când Gemini nu poate repara (rezervă)',
+    cheieConfigurata: activa,
+    // Fără sold real: Anthropic nu expune „cât mai ai" prin API public → nu fabricăm
+    // o cifră; becul vine din „servește" (cheia pusă), nu dintr-un 0 fals.
+    ramas: picat(
+      'Anthropic nu expune sold prin API public — se vede în consolă (Billing)',
+      activa
+        ? 'Anthropic nu dă „cât mai ai" prin API; cheltuiala se vede în consola Anthropic'
+        : 'cheia Fable 5 (ANTHROPIC_API_KEY) nu e pusă în app — rezerva e INACTIVĂ',
+    ),
+    // Anthropic nu trece prin jurnalul nostru de costuri — nu pun 0 în locul gol.
     cheltuitLuna: picat(
       'jurnalul de costuri (cost_events)',
-      'RunPod nu trece prin jurnalul nostru — soldul real de mai sus e măsura directă a banilor rămași',
+      'Fable 5 (Anthropic) nu trece prin jurnalul nostru — n-am ce măsura, deci nu raportez o cifră',
     ),
-    serveste,
-    // Link-ul EXACT de reîncărcare, dat de owner (consola RunPod, cu „+" de credit).
-    facturare: 'https://console.runpod.io/user/billing',
+    // MĂSURAT (config): cheia pusă = rezerva poate servi (VERDE); lipsă = inactivă
+    // (ROȘU). E o măsurătoare de configurare → becul NU rămâne gri (regula ownerului).
+    serveste: reusit(
+      'cheia ANTHROPIC_API_KEY e pusă în app?',
+      { da: activa, detaliu: activa ? 'rezervă gata (Fable 5)' : 'ANTHROPIC_API_KEY lipsă — rezervă inactivă' },
+      0,
+    ),
+    // Link-ul EXACT de reîncărcare/facturare Anthropic.
+    facturare: 'https://console.anthropic.com/settings/billing',
   }
 }
 
 /** Raportul complet, un rând pe furnizor. Un rând care n-a putut fi citit
  *  RĂMÂNE în listă, cu motivul lui — dispariția tăcută ar fi tot o minciună. */
 export async function crediteAI(): Promise<CreditAI[]> {
-  return Promise.all([randGemini(), randSerper(), randRunpod(), randGoogleCloud(), randJules()])
+  return Promise.all([randGemini(), randSerper(), randFable(), randGoogleCloud(), randJules()])
 }

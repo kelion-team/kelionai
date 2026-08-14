@@ -285,7 +285,6 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
   if (!brainCredit) return null
   const g = brainCredit.gemini
   const s = brainCredit.serper
-  const r = brainCredit.runpod
   const serperK = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
   const geminiEticheta =
     g?.serving && g?.creditGbp != null
@@ -317,16 +316,9 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
       <span title={g?.monthUsd != null ? `cheltuit luna asta: $${g.monthUsd.toFixed(2)}` : 'cheltuiala Gemini necitibilă'}>
         Gemini {geminiEticheta}
       </span>
-      {r && (
-        <span title={
-          r.balanceUsd != null
-            ? `sold ${r.provider ?? ''} (placa lucrătorului): $${r.balanceUsd.toFixed(2)} · rată acum $${(r.ratePerHr ?? 0).toFixed(3)}/h · plafon $${r.limitPerHr ?? '?'}/h`
-            : r.live
-              ? `${r.provider ?? 'creierul constructorului'} servește — soldul se vede pe dashboard-ul furnizorului (nu-l dă prin API)`
-              : `${r.provider ?? 'creierul constructorului'} nu răspunde (${r.error ?? 'necunoscut'})`}>
-          {r.provider ?? 'Constructor'} {r.balanceUsd != null ? `$${r.balanceUsd.toFixed(2)}` : (r.live ? '✓' : '⚠')}
-        </span>
-      )}
+      {/* (Pastila RunPod a fost SCOASĂ, 14 aug — constructorul rulează pe Gemini
+          (principal, pastila de sus) → Fable 5 (rezervă), prin app. Fable 5 apare ca
+          rând în raportul pe furnizori. O pastilă „RunPod" aici ar fi afișaj fals.) */}
       {edit ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <input

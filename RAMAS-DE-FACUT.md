@@ -10,6 +10,24 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **14 aug 2026 — CONSTRUCTORUL PE GEMINI → FABLE 5 (ordinul #213 / RunPod 402 reparat în cod). ⏳ de verificat LIVE de owner.**
+> Owner: „schimbă-mi constructorul cu gemeni ultra… când nu merge repara să cadă
+> pe fable 5, înlocuiește peste tot" + „să schimbi și în afișaj AI corect" + „nu mai
+> bag bani". CAUZA (din emailurile #213): constructorul pe RunPod, `402 out-of-balance`
+> îi omora ordinele. **Reparat, respectând regula 13 aug (constructorul NU ține chei
+> de furnizor):** creierul e PRIN APP, pe `/api/constructor/creier` — app-ul rulează
+> Gemini „ultra" (Pro, `geminiModelGreu`) ca PRINCIPAL și cade pe Fable 5 (`claude-fable-5`,
+> `ANTHROPIC_API_KEY` în app) ca REZERVĂ; revenirea pe Gemini e automată (fiecare pas
+> reîncepe cu principalul). Constructorul: scos creierul propriu RunPod/DeepInfra;
+> `runpodBalance.ts` șters. **Afișaj:** becul „RunPod" → „Fable 5 (rezerva
+> constructorului)" (verde=cheie pusă / roșu=lipsă, nu gri); pastila Gemini marcată
+> creier PRINCIPAL al constructorului; câmpul `runpod` din admin + pastila AdminPanel
+> scoase. Porți: backend tsc 0 · **1316 teste** · frontend build 0 · sintaxă/exporturi/jscpd 0.
+> **NU POT VERIFICA LIVE** (fără acces VPS): owner-ul (1) pune `ANTHROPIC_API_KEY`
+> (console.anthropic.com → API Keys) în `/root/kelion/kelionai.env` ca rezerva Fable 5
+> să fie activă — fără ea, DOAR Gemini, spus onest; (2) trimite un ordin real → raportul
+> arată `Creier folosit: gemini/…` (sau `fable5/…` la cădere).
+
 > **13 aug 2026 — GDPR + AEC + CONSTRUCTOR (poartă calitate) + BECURI pâlpâie. ✅ (PR #1079, LIVE-ul = merge-ul lui Adrian)**
 > Patru cerințe din aceeași zi, pe ramura `claude/reparatie-cu-rosu-uokj4m`:
 > - **GDPR**: poartă blocantă de consimțământ foto (Landing + Stage; refuz = fără

@@ -77,9 +77,10 @@ describe('fișierul distrus e la loc, întreg', () => {
 
   it('bucățile mari ale constructorului sunt toate acolo', () => {
     // A coarse but real check: if the file were maimed again, at least one of
-    // these would be missing. (llmGemini a fost SCOS 12 aug — cod mort; creierul
-    // e llmRunpod, un endpoint OpenAI-compatibil pe DeepInfra.)
-    for (const bucata of ['function toolWrite', 'function toolEdit', 'function llmRunpod', 'RUN_ALLOWED', 'compactHistory'])
+    // these would be missing. (Owner 14 aug: creierul propriu pe RunPod/DeepInfra a
+    // fost SCOS; creierul e PRIN APP — llmGemini cere /api/constructor/creier, iar
+    // app-ul face Gemini → Fable 5.)
+    for (const bucata of ['function toolWrite', 'function toolEdit', 'function llmGemini', 'RUN_ALLOWED', 'compactHistory'])
       expect(constructor).toContain(bucata)
   })
 })
