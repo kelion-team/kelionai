@@ -4,6 +4,8 @@ import { getSerperBalance } from './serperBalance.js'
 import { getRunpodBalance } from './runpodBalance.js'
 import { geminiLive } from './geminiDirect.js'
 import { cursUsdGbp } from './fx.js'
+import { julesServeste } from './jules.js'
+import { googleServiceAccount } from './googleCreds.js'
 import type { Masuratoare } from './masurare.js'
 
 // ── CÂT CREDIT A MAI RĂMAS, PE FIECARE AI (Adrian, 8 aug 2026) ──────────────
@@ -240,6 +242,18 @@ async function randSerper(): Promise<CreditAI> {
 
 async function randGoogleCloud(): Promise<CreditAI> {
   const cheieConfigurata = Boolean(config.googleServiceAccountJson || config.googleTtsKey)
+  // VERDE/ROȘU, nu gri (owner, 13 aug: „culorile la fel pt toți AI"). Google nu dă
+  // „cât mai ai", dar pot spune dacă e OPERAȚIONAL: cont de serviciu cu JSON valid
+  // (parsabil + client_email) sau cheie TTS pusă → verde; nimic → roșu. Măsurat.
+  const saValid = Boolean(googleServiceAccount())
+  const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = reusit(
+    'cont de serviciu Google valid (JSON parsabil) sau cheie TTS pusă',
+    {
+      da: saValid || Boolean(config.googleTtsKey),
+      detaliu: saValid ? 'cont de serviciu valid — STT/TTS/traducere' : config.googleTtsKey ? 'cheie TTS pusă' : 'nimic configurat',
+    },
+    0,
+  )
   return {
     furnizor: 'Google Cloud (voce + traducere + agenți)',
     alimenteaza: 'ascultarea (STT), vocea (TTS), traducerea, agenții Enterprise',
@@ -251,16 +265,26 @@ async function randGoogleCloud(): Promise<CreditAI> {
         : 'nu e configurat niciun cont de serviciu / cheie TTS',
     ),
     cheltuitLuna: await cheltuiala(['asr', 'voice_minutes', 'tts:*']),
+    serveste,
     facturare: 'https://console.cloud.google.com/billing',
   }
 }
 
 async function randJules(): Promise<CreditAI> {
   const cheieConfigurata = Boolean(config.julesKey)
+  // VERDE/ROȘU, nu gri: ping real la API-ul Jules (GET surse, fără cost). Cheia
+  // pusă + API răspunde → verde; lipsă cheie sau API pică → roșu.
+  const live = await julesServeste()
+  const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = reusit(
+    'ping Jules (GET surse) — cheia pusă și API-ul răspunde',
+    { da: live.ok, detaliu: live.detaliu },
+    0,
+  )
   return {
     furnizor: 'Jules (agent de cod Google)',
     alimenteaza: 'sarcini de cod pornite de Kelion',
     cheieConfigurata,
+    serveste,
     ramas: picat(
       'API-ul Jules nu are endpoint de sold',
       cheieConfigurata ? 'furnizorul nu publică sold; cota se vede în contul Google' : 'cheia Jules nu e pusă în mediu',

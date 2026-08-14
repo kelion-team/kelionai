@@ -4004,6 +4004,22 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
 /* Toate au credit → totalul e discret (gri), nu alarmant (roșu). */
 .becuri-bara-nr.toate-ok { color: var(--text); opacity: 0.45; font-weight: 600; }
 
+/* „APLICAȚII" — buton cu meniu (trading + Adaptare CV grupate), owner 13 aug. */
+.apps-wrap { position: relative; display: inline-flex; }
+.apps-backdrop { position: fixed; inset: 0; z-index: 40; }
+.apps-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 41;
+  display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 6px;
+  border-radius: 10px; background: var(--panel, #10162a);
+  border: 1px solid var(--border); box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+}
+.apps-item {
+  display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 0;
+  border-radius: 7px; background: transparent; color: var(--text);
+  font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; white-space: nowrap;
+}
+.apps-item:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+
 /* CIFRELE VPS, SUB ADMIN (tabul „Sistem (VPS)") — mutate din bara de sus. */
 .vps-resurse {
   display: flex; flex-wrap: wrap; align-items: center; gap: 14px;

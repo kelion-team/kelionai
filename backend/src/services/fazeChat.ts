@@ -78,24 +78,40 @@ export const UNELTE_VORBIRE: readonly string[] = [
   // „apelează-l pe X" e o comandă de CONVERSAȚIE (rapidă: rezolvă ținta + trimite
   // un mesaj pe WS), nu una scumpă — merge direct din vorbire, din chat sau voce.
   'apeleaza_user',
+  // ── OBSERVABILITATEA DE ADMIN, MEREU DISPONIBILĂ (owner, 13 aug: „kelion e un
+  //    admin secund cu toate drepturile… are obligația să țină TOT sub observație
+  //    și să repare autonom"; „nu are toate drepturile de admin"). Uneltele
+  //    READ-ONLY și IEFTINE — baza de date locală (~ms), fișierele (~ms), logurile
+  //    din memorie (~ms) și vederea adminului (loopback local) — NU mai stau în
+  //    spatele escaladării. Un admin secund trebuie să vadă DB/fișiere/loguri în
+  //    ORICE tură, inclusiv într-o conversație, fără să ceară voie. Pe non-admin
+  //    n-au NICIUN efect (nu-s în lista lor de unelte, deci filtrul nu le poate
+  //    adăuga). Singura care rămâne AFARĂ e `system_health` (~8s: GitHub + sonde).
+  'db_tables',
+  'db_query',
+  'server_logs',
+  'list_source',
+  'read_source',
+  'search_source',
+  'admin_vezi',
 ]
 
 // ── CE NU ARE VOIE SĂ CALCE PE FAZA DE VORBIRE ─────────────────────────────
-// Nu e o listă de gusturi. Fiecare de aici costă SECUNDE pe drumul unei fraze:
+// Nu e o listă de gusturi. Fiecare de aici costă SECUNDE sau BANI pe drumul unei
+// fraze:
 //   system_health   → 2 apeluri la GitHub (timeout 10 s) + sondează endpointul
 //                     fiecărui buton din Admin (timeout 8 s) ≈ 8 s în cel mai
-//                     rău caz. Exact întârzierea reclamată de owner pe 8 aug.
-//   db_query/tables → interogări în baza de date
-//   repo_*/build_*  → GitHub, PR-uri, construcții
+//                     rău caz. SINGURA observabilitate care rămâne afară (e scumpă).
+//   repo_*/build_*  → GitHub, PR-uri, construcții (SCRIU / cheltuie)
 //   run_runbook     → declanșează workflow-uri pe VPS
-//   jules_*         → rețea la Google
-// Toate rămân disponibile — dar pe faza LOR, chemate prin `ask_brain`.
+//   jules_*         → rețea la Google (pornesc sarcini)
+// Restul rămân disponibile prin `ask_brain`.
+// NOTĂ (owner, 13 aug): db_query/db_tables/server_logs au IEȘIT de aici — sunt
+// read-only și ieftine (DB locală, loguri din memorie), iar adminul secund trebuie
+// să vadă baza de date și logurile în orice tură. Sunt acum în UNELTE_VORBIRE.
 export const INTERZISE_LA_VORBIRE: readonly string[] = [
   'system_health',
   'stare_masurata',
-  'db_query',
-  'db_tables',
-  'server_logs',
   'constructor_status',
   'build_software',
   'repo_write',
