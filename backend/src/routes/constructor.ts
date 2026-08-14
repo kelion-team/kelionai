@@ -239,20 +239,26 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
         // răspunsul → înapoi în format OpenAI. Punțile sunt în creier2Constructor.ts.
         const tools = uneltePentruCreier2(rawTools)
         const model = String(req.body?.model ?? '').trim() || config.constructorGeminiModel
-        try {
-          // FORȚĂM CHEMAREA UNELTEI (owner, 14 aug: „trebuia să cheme, nu cheamă"):
-          // pe AUTO, Gemini putea răspunde cu TEXT în loc să cheme o unealtă → „tură
-          // sterilă", exact ce omora ordinul. `toolChoice:'required'` = mod ANY: pe
-          // fiecare tură TREBUIE să cheme o unealtă (explorează/scrie/verifică sau
-          // `finish`) — constructorul e agentic, n-are ture de vorbă. (Owner ceruse
-          // deja 13 aug „obligatoriu să cheme unealta corectă"; infra ANY exista, dar
-          // ruta constructorului n-o folosea.)
-          const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high', toolChoice: 'required' })
-          if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
-          esecuriCreierLaRand = 0 // creierul a servit — lanțul de eșecuri s-a rupt
-          return reply.send(raspunsCreier2(r))
-        } catch (e) {
-          gemeniEsec = (e as Error).message.slice(0, 200)
+        // RETRY TRANSIENT GEMINI ERRORS (503 Service Unavailable, 429 Rate Limit, 500/502/504)
+        // Upstream Gemini intermittently returns 503 (model overloaded / temporary unavailable).
+        // A brief backoff retry inside the app prevents unnecessary 502 escalations and constructor stalls.
+        const maxIncercariGemini = 3
+        for (let incercare = 1; incercare <= maxIncercariGemini; incercare++) {
+          try {
+            const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high', toolChoice: 'required' })
+            if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
+            esecuriCreierLaRand = 0 // creierul a servit — lanțul de eșecuri s-a rupt
+            return reply.send(raspunsCreier2(r))
+          } catch (e) {
+            const errStr = (e as Error).message || ''
+            gemeniEsec = errStr.slice(0, 200)
+            const isTransient = /503|502|504|500|429|overload|unavailable|resource_exhausted|high demand/i.test(errStr)
+            if (incercare < maxIncercariGemini && isTransient) {
+              await new Promise((resolve) => setTimeout(resolve, incercare * 1500))
+              continue
+            }
+            break
+          }
         }
       } else {
         gemeniEsec = 'gemini_indisponibil (cheie lipsă)'
