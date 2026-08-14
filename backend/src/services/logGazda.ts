@@ -57,6 +57,12 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // pe zero — fără ele, „0 failed" ar fi născut ordine de reparație degeaba.
   // Tot zgomot sunt și erorile din subsisteme/furnizori DECOMISIONAȚI
   // (ex. RunPod/DeepInfra/OpenRouter — scoși din constructor, dar rămași în
+  // coada logurilor istorice ale gazdei), precum și liniile de log care doar
+  // citează/anunță un ordin anterior sau o auto-vindecare (ex. „ordin #235...",
+  // „AUTO-VINDECARE", „[CHAT-IN]", etc.), altfel titlul ordinului de auto-vindecare
+  // care conține cuvântul „eroare" este re-detectat ca eroare nouă într-o buclă infinită.
+  const zgomot =
+    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\])/i
   // coada logurilor istorice ale gazdei), precum și pașii normali de lucru ai
   // constructorului (ex. `pas 18/120: grep ...`, `pas 2/120: read ...`) care
   // conțin în argumente numele funcțiilor/fișierelor căutate.
