@@ -1168,25 +1168,18 @@ export default function AdminPanel({
             >
               {A.tabEnterprise}
             </button>
-            {/* Panoul de tranzacționare (Adrian, 4 aug: „buton separat în
-                admin"): date reale + analiza agentului Tranzacții, doar owner. */}
-            <button
-              type="button"
-              className="admin-tab"
-              onClick={() => window.open('/api/tranzactii', '_blank', 'noopener')}
-            >
-              {A.tabTrading}
-            </button>
-            {/* Adaptare CV — funcție de plătitor, chiar după Tranzacționare
-                (Adrian, 10 aug: „adaptare cv după tranzacții"). Deschide panoul
-                de adaptare prin evenimentul de navigare pe care Stage îl ascultă. */}
-            <button
-              type="button"
-              className="admin-tab"
-              onClick={() => window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: { view: 'cv' } }))}
-            >
-              📄 Adaptare CV
-            </button>
+            {/* ── VITRINA SIMPLIFICATĂ (Adrian, 14 aug: „avem Aplicații, deci în
+                admin nu mai apar: Tranzacționare, Adaptare CV, Magazine, Inbox,
+                Erori, Notificări — nu le ștergi, le folosește Kelion; doar nu
+                mai sunt vizibile"). Butoanele au fost SCOASE din bară, dar TOT
+                restul trăiește: Tranzacționare + Adaptare CV stau în meniul
+                „Aplicații" din bara de sus; panourile Inbox/Magazine/Erori și
+                rutele lor rămân în cod (Kelion le folosește prin unelte).
+                EXCEPȚIA, spusă ownerului: Notificări NU dispare de tot —
+                alarmele construite azi (creier căzut în lanț, ordin mort) scriu
+                DOAR aici (adminNotification = doar DB, fără email/push), deci
+                tabul reapare SINGUR doar când există ceva NECITIT, ca alarma să
+                nu redevină mută. La zero necitite, vitrina rămâne curată. */}
             <button
               type="button"
               className={`admin-tab ${tab === 'finance' ? 'sel' : ''}`}
@@ -1218,20 +1211,6 @@ export default function AdminPanel({
               onClick={() => setTab('share')}
             >
               {A.tabShare}
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'stores' ? 'sel' : ''}`}
-              onClick={() => setTab('stores')}
-            >
-              {A.tabStores}
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'inbox' ? 'sel' : ''}`}
-              onClick={() => setTab('inbox')}
-            >
-              {A.tabInbox}
             </button>
             <button
               type="button"
@@ -1275,23 +1254,17 @@ export default function AdminPanel({
             >
               Sistem (VPS)
             </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'erori' ? 'sel' : ''}`}
-              onClick={() => setTab('erori')}
-            >
-              Erori
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'notificari' ? 'sel' : ''}`}
-              onClick={() => setTab('notificari')}
-            >
-              Notificări
-              {Array.isArray(notificari) && notificari.some((n) => !n.read)
-                ? ` (${notificari.filter((n) => !n.read).length})`
-                : ''}
-            </button>
+            {/* Notificări: vizibil DOAR când e ceva NECITIT (vezi comentariul
+                vitrinei de mai sus — alarma nu are voie să redevină mută). */}
+            {Array.isArray(notificari) && notificari.some((n) => !n.read) && (
+              <button
+                type="button"
+                className={`admin-tab ${tab === 'notificari' ? 'sel' : ''}`}
+                onClick={() => setTab('notificari')}
+              >
+                🔔 Notificări ({notificari.filter((n) => !n.read).length})
+              </button>
+            )}
           </div>
           {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
           onOpenSettings rămâne în props (fereastra CustomerSettings poate fi
