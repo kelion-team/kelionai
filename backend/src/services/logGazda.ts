@@ -49,8 +49,24 @@ export async function coadaLogGazda(
 
 /** Liniile care put a eroare din textul unui log, normalizate și deduplicate.
  *  Întoarce LINIA ORIGINALĂ (pentru ordinul de reparație), nu forma normalizată
- *  — omul și constructorul au nevoie de context real, nu de amprentă. */
+ *  — omul și constructorul au nevoie de context real, nu de amprentă.
+ *
+ *  Pentru loguri secvențiale de execuție (cum e auto-publicare.log):
+ *  Dacă logul conține mai multe rulări, ne uităm doar la ULTIMA rulare.
+ *  Dacă ultima rulare s-a terminat cu succes (anti-fantomă TRECE / Deploy finalizat),
+ *  erorile din rulările vechi sunt istorice (deja rezolvate de noul deploy) și nu
+ *  trebuie să mai nască alarme sau auto-vindecări fantomă. */
 export function semnaturiEroare(text: string, maxim = 8): string[] {
+  // Dacă textul provine dintr-un log de deploy/auto-publicare cu mai multe rulări,
+  // izolăm ultima rulare ca să nu re-raportăm erori din rulări vechi deja reparate.
+  const parti = text.split(/(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez))/i)
+  const textDeVerificat = parti[parti.length - 1] ?? text
+
+  // Dacă ultima rulare s-a încheiat cu succes, nu există nicio eroare activă.
+  if (/anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes/i.test(textDeVerificat)) {
+    return []
+  }
+
   const tipar =
     /\b(error|errors|eroare|erori|fatal|fail(ed|ure)?|pic[ăa]t?\b|refuz(at)?|denied|exception|traceback|unhandled|ECONN|ETIMEDOUT|EACCES|ENOSPC|creier_esec|\b5\d\d\b)/i
   // Linii care CONȚIN cuvinte de eroare dar sunt de fapt verdicte bune/contoare
@@ -70,7 +86,7 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
     /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*pas\s+\d+\/\d+:\s*(grep|read|edit|write|ls|run|run_runbook|cauta|search))/i
   const vazute = new Set<string>()
   const out: string[] = []
-  for (const linie of text.split('\n')) {
+  for (const linie of textDeVerificat.split('\n')) {
     if (!tipar.test(linie) || zgomot.test(linie)) continue
     const norm = linie
       .toLowerCase()
