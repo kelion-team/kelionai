@@ -122,9 +122,13 @@ describe('rutele care scriu nu mai răspund 2xx peste un eșec', () => {
     expect(/reply\.code\(502\)/.test(h)).toBe(true)
   })
 
-  it('ștergerea amprentei vocale nu mai răspunde 200 peste un DELETE picat', () => {
+  it('ștergerea amprentei e ÎNCHISĂ de tot (ordinul din 14 aug: se păstrează) — refuz 403, nu 2xx', () => {
+    // Contractul vechi (502 la DELETE picat, 8 aug) e ÎNLOCUIT de ordinul mai
+    // nou al ownerului: „amprentele vocale trebuie să se păstreze" — ruta nu
+    // mai șterge nimic, niciodată; răspunde 403 cu motivul, tot ne-2xx.
     const h = handler(voiceprint, 'delete', '/api/voiceprint/me')
-    expect(/reply\.code\(502\)/.test(h)).toBe(true)
+    expect(/reply\.code\(403\)/.test(h), 'refuzul trebuie să fie explicit, cu status de refuz').toBe(true)
+    expect(/amprentele_se_pastreaza/.test(h), 'motivul ordinului trebuie să fie în răspuns').toBe(true)
   })
 
   it('analiza de piață nu mai întoarce 200 cu {error}', () => {

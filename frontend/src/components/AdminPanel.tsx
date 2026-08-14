@@ -43,7 +43,6 @@ import {
   type ContactMessage,
   fetchVoiceprints,
   fetchVoiceprintAudio,
-  deleteVoiceprint,
   type VoiceprintRow,
   fetchTokenChecks,
   fetchEnvCheck,
@@ -2065,24 +2064,14 @@ export default function AdminPanel({
                       </span>
                     )}
                     {' · '}
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => {
-                        // CONFIRMARE + verdict măsurat (auditul admin, 3 aug):
-                        // era SINGURUL buton distructiv fără confirmare, iar pe
-                        // {ok:false} rândul „dispărea" și reapărea la refresh.
-                        if (!window.confirm(A.confirmDeleteVoiceprint(v.name || v.email))) return
-                        void deleteVoiceprint(v.email).then((ok) => {
-                          if (ok) {
-                            setVoiceprints((cur) => (cur ? cur.filter((x) => x.email !== v.email) : cur))
-                            setVpMsg('')
-                          } else setVpMsg(A.voiceprintDeleteFailed(v.email))
-                        })
-                      }}
-                    >
-                      șterge
-                    </button>
+                    {/* BUTONUL „șterge" A FOST SCOS (ordinul ownerului, 14 aug:
+                        „amprentele vocale trebuie să se păstreze"). Serverul
+                        oricum refuză (ruta 403 + triggerul din Postgres) — un
+                        buton care promite o ștergere imposibilă ar fi afișaj
+                        fals. În loc, starea pe față: */}
+                    <span className="muted" title={A.voiceprintKeptTitle}>
+                      {A.voiceprintKept}
+                    </span>
                   </span>
                 </div>
               ))}

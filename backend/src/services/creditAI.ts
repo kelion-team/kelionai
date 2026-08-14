@@ -193,19 +193,28 @@ async function randGemini(): Promise<CreditAI> {
     if (!r.ok) {
       ramas = picat(cumRamas, `am creditul spus de tine (£${declarat.gbp}), dar ${r.motiv}`, Date.now() - t0)
     } else {
-      // „£0.00" NU înseamnă creier mort (14 aug: estimarea pe zero a fost citită
-      // drept „Gemini nu poate" — dar creierul RĂSPUNDEA, a și construit #230 cu
-      // 2,3M tokeni). Estimarea e declarativă și se învechește; adevărul despre
-      // capacitate e becul «servește» (apel REAL la model). Când estimarea ajunge
-      // pe zero, o spunem în clar, ca cifra să nu mai poată fi citită drept verdict.
-      const notaZero =
-        r.ramasGbp <= 0 ? ' · ATENȚIE: estimare pe declarația ta (posibil veche), NU soldul Google — capacitatea reală o arată becul «servește»' : ''
-      ramas = reusit(
-        `${cumRamas} — spus de tine: £${declarat.gbp}${declarat.at ? ` la ${declarat.at.slice(0, 10)}` : ''}; ` +
-          `cheltuit de atunci: $${r.scazutUsd.toFixed(2)} × curs ${r.curs.toFixed(4)}${notaZero}`,
-        { cantitate: r.ramasGbp, unitate: 'GBP' },
-        Date.now() - t0,
-      )
+      // ESTIMAREA CONSUMATĂ NU MAI E O CIFRĂ (owner, 14 aug, cu captura din AI
+      // Studio: soldul REAL era £25.80 cu auto-reload PORNIT, iar panoul scria
+      // „0 GBP" cu bec verde lângă — o cifră inventată care contrazicea becul).
+      // Când declarația ta s-a consumat pe hârtie, ea NU mai spune nimic despre
+      // soldul Google (auto-reload-ul îl tot umple la loc) — deci nu mai
+      // afișăm un număr, ci starea cinstită: „re-declară soldul din AI Studio".
+      if (r.ramasGbp <= 0) {
+        ramas = picat(
+          cumRamas,
+          `declarația ta (£${declarat.gbp}${declarat.at ? `, ${declarat.at.slice(0, 10)}` : ''}) s-a consumat pe estimare ` +
+            `(cheltuit de atunci: $${r.scazutUsd.toFixed(2)}) — cu auto-reload pornit soldul real e ALTUL; ` +
+            `citește-l în AI Studio (link pe rând) și re-declară-l cu «credit Gemini»`,
+          Date.now() - t0,
+        )
+      } else {
+        ramas = reusit(
+          `${cumRamas} — spus de tine: £${declarat.gbp}${declarat.at ? ` la ${declarat.at.slice(0, 10)}` : ''}; ` +
+            `cheltuit de atunci: $${r.scazutUsd.toFixed(2)} × curs ${r.curs.toFixed(4)}`,
+          { cantitate: r.ramasGbp, unitate: 'GBP' },
+          Date.now() - t0,
+        )
+      }
     }
   }
   // CIFRA REALĂ DE LA GOOGLE (owner, 14 aug: „dacă e soluție oficială, de ce nu

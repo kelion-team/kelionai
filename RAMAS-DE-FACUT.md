@@ -18,6 +18,18 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       îmbinat de Kelion singur (cu jurnalul în Notificări) cât e delogat.
 - [ ] Bara de execuție cu punctulețe (nou, 14 aug noaptea): scrisă, de văzut LIVE
       pe un ordin real („fiecare pas pe monitor, 0→100%").
+- [ ] După deploy: ownerul re-declară soldul Gemini REAL (£25.80 din AI Studio,
+      butonul «credit Gemini») — pastila nu mai are voie să arate £0.00, dar
+      cifra corectă o știe doar el; exportul BigQuery îi va scădea apoi
+      cheltuiala reală (primele rânduri apar în ore).
+- [ ] Scutul datelor: de PROBAT live după deploy (un DELETE de test pe
+      voiceprints prin db_query trebuie refuzat cu «tabel_protejat», iar
+      triggerul din Postgres să apară în \d voiceprints).
+- [ ] Auditul „fiecare buton din admin, pe realitate" (ordinul din 14 aug,
+      noaptea): azi s-au tăiat minciunile GĂSITE (cifra £0.00/0 GBP, „are
+      credit" nemăsurat, butonul „șterge amprenta" care promitea interzisul).
+      O trecere buton-cu-buton pe TOATE taburile, pe live, încă nu s-a făcut —
+      rămâne aici până e făcută cu dovezi.
 - [ ] Vocea live îngheață după câteva schimburi de fraze (ordinul #233, în coadă).
 - [ ] Camera: nu capturează după accept + delay mare la pornire — instrumentată azi
       (jurnal `[cameră]` + eroare la >5s până la primul cadru); cifra fazei vinovate

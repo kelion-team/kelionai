@@ -756,24 +756,9 @@ export async function fetchVoiceprintAudio(email: string): Promise<string | null
   }
 }
 
-export async function deleteVoiceprint(email: string): Promise<boolean> {
-  try {
-    const r = await fetch('/api/voiceprint/me', {
-      method: 'DELETE',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    })
-    if (!r.ok) return false
-    // CORPUL, nu doar statusul (auditul admin, 3 aug): backend-ul răspunde
-    // 200 cu {ok:false} când DELETE-ul din DB pică — rândul dispărea din
-    // listă „șters" și reapărea la refresh-ul de 10s.
-    const j = (await r.json().catch(() => null)) as { ok?: boolean } | null
-    return j?.ok === true
-  } catch {
-    return false
-  }
-}
+// (`deleteVoiceprint` a fost SCOS de tot, 14 aug — ordinul ownerului:
+// „amprentele vocale trebuie să se păstreze"; serverul răspunde 403 pe ruta
+// de ștergere, iar butonul „șterge" din panou a devenit starea „se păstrează".)
 
 // ── Verificare tokenuri cu drepturi (admin only) ───────────────────────────
 export interface TokenCheck {

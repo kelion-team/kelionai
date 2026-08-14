@@ -4,7 +4,6 @@ import {
   getVoiceprint,
   getVoiceprintAudio,
   listVoiceprints,
-  deleteVoiceprint,
   type VoiceFeatureMeta,
 } from '../db.js'
 
@@ -59,19 +58,18 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ clip })
   })
 
-  // Deletes the logged-in user's voiceprint (or another user's, admin only).
+  // ȘTERGEREA E ÎNCHISĂ (ordinul ownerului, 14 aug: „amprentele vocale trebuie
+  // să se păstreze"). Ruta rămâne ca orice apelant vechi să primească MOTIVUL,
+  // nu un 404 mut; funcția de ștergere din db.ts a fost SCOASĂ de tot, iar
+  // triggerul scutului din Postgres refuză DELETE chiar și pentru cod viitor.
   app.delete<{ Body: { email?: string } }>('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    const targetEmail =
-      user.role === 'admin' && req.body?.email ? req.body.email.toLowerCase() : user.email.toLowerCase()
-    const ok = await deleteVoiceprint(targetEmail)
-    // 200 cu `{ok:false}` însemna „ștergere reușită" pentru orice apelant care
-    // se uită la status (panoul se uită și la corp, dar uneltele lui Kelion și
-    // scripturile nu). `deleteVoiceprint` întoarce `true` și când n-a găsit
-    // rândul, deci `false` = ștergerea chiar a picat. Măsurat 8 aug.
-    if (!ok) return reply.code(502).send({ ok: false, error: 'stergere_esuata' })
-    return reply.send({ ok })
+    return reply.code(403).send({
+      ok: false,
+      error: 'amprentele_se_pastreaza',
+      motiv: 'Ordinul ownerului (14 aug): amprentele vocale se păstrează — nu se șterg prin nicio comandă.',
+    })
   })
 }
 
