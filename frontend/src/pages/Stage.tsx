@@ -720,6 +720,9 @@ export default function Stage({ user }: { user: User }) {
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cvAdaptationOpen, setCvAdaptationOpen] = useState(false)
+  // „APLICAȚII" — trading (admin) + Adaptare CV (toți) grupate sub un buton
+  // (owner, 13 aug: „trading și adaptare cv trebuie să fie sub un buton aplicații").
+  const [appsOpen, setAppsOpen] = useState(false)
   // THE THEME TOGGLE (Aug 2 — the lighter background): the light palette is the
   // default; this top-bar moon/sun flips back to the original dark identity
   // (persisted by lib/theme). Held in state so the click re-renders — which
@@ -1486,29 +1489,57 @@ export default function Stage({ user }: { user: User }) {
           />
           Kelionai
         </span>
+        {/* APLICAȚII — trading (doar admin) + Adaptare CV (toți) sub UN buton
+            (owner, 13 aug). Meniul se închide la clic pe un element, pe fundal,
+            sau re-apăsând butonul. */}
+        <div className="apps-wrap">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setAppsOpen((v) => !v)}
+            aria-expanded={appsOpen}
+            title="Aplicații"
+          >
+            ▦ Aplicații ▾
+          </button>
+          {appsOpen && (
+            <>
+              <div className="apps-backdrop" onClick={() => setAppsOpen(false)} />
+              <div className="apps-menu">
+                {user.role === 'admin' && (
+                  <button
+                    type="button"
+                    className="apps-item"
+                    onClick={() => {
+                      setAppsOpen(false)
+                      if (!closeTasksByKind('tranzactii')) openWorkspace('📈 Tranzacții', '/api/tranzactii')
+                    }}
+                  >
+                    📈 Tranzacții
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="apps-item"
+                  onClick={() => {
+                    setAppsOpen(false)
+                    setCvAdaptationOpen(true)
+                  }}
+                >
+                  📄 {t.cvTitle}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         {/* Adrian's ALWAYS-ON status (admin, top-left): shows what's being worked
             on when there's live work, else the real Linux server load — so the
             server status + current task never vanish (they used to hide when the
             work console closed). */}
         {user.role === 'admin' && (
           <>
-            {/* CENTRUL DE TRANZACȚIONARE CA TAB ÎN APLICAȚIE (9 aug, ownerul:
-            „când deschid aplicația să am un tab care se comută din bază cu
-            toate atributele, și buton de închidere, memoria separat doar
-            admin"). Butonul COMUTĂ: deschide pagina completă (/api/tranzactii,
-            cu preț live la ms + analiza cu memoria 'tranzactii', separată și
-            doar-admin pe server) ca tab pe monitor — tabul are × ca oricare;
-            aceeași apăsare îl închide. */}
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => {
-                if (!closeTasksByKind('tranzactii')) openWorkspace('📈 Tranzacții', '/api/tranzactii')
-              }}
-              title="Centrul de Tranzacționare — comută tabul (preț live la milisecundă pe crypto; memoria analizelor separată, doar admin)"
-            >
-              📈
-            </button>
+            {/* 📈 Tranzacții a fost MUTAT sub „Aplicații" (owner, 13 aug) — vezi
+                meniul de lângă logo. Aici rămân doar pastilele de stare. */}
             {/* LACĂTUL SPUS, NU BARĂ GOALĂ (auditul admin, 3 aug): cu lacătul
             armat, 423 pe /api/admin/* lăsa bara fără NICIO pastilă și fără
             explicație. Pastila unică 🔒 duce la fereastra de cod. */}
@@ -1570,15 +1601,7 @@ export default function Stage({ user }: { user: User }) {
             Add credits
           </button>
         )}
-        <button
-          type="button"
-          className="ghost"
-          onClick={() => setCvAdaptationOpen(true)}
-          title={t.cvTitle}
-          style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#4dabf7', fontWeight: 'bold' }}
-        >
-          📄 {t.cvTitle}
-        </button>
+        {/* „Adaptare CV" a fost MUTAT sub „Aplicații" (owner, 13 aug) — meniul de lângă logo. */}
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,
               click-to-enlarge. The topbar stays clean for signed-in users. */}
