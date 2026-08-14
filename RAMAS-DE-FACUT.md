@@ -13,6 +13,11 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 14 aug, 20:45 („când apare ceva scris de la Kelion, obligatoriu e
+      și audio"): ORICE text al lui Kelion se și rostește — inclusiv turele
+      scrise, ack-urile și rezultatele. De legat sinteza (aceleași frame-uri
+      {audio} care merg pe voce) și pe calea scrisă; de măsurat costul TTS
+      înainte de a-l face implicit pentru userii plătitori. URMĂTORUL PR.
 - [ ] Santinela PR (nou, 14 aug noaptea): scrisă + teste verzi, dar NEPROBATĂ live —
       dovada cerută: un PR verde anunțat în panou cât ownerul e logat, și unul
       îmbinat de Kelion singur (cu jurnalul în Notificări) cât e delogat.
