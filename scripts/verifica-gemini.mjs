@@ -151,6 +151,11 @@ function regulaConstructorFaraGemini() {
         return 'a reapărut un apel Gemini DIRECT în constructor — Gemini rulează în app, constructorul nu ține cheia'
       if (/api\.anthropic\.com/.test(src))
         return 'a reapărut un apel Anthropic DIRECT în constructor — Fable 5 rulează în app, constructorul nu ține cheia'
+      // Ruta prin app e gardată: fără BRIDGE_SECRET constructorul n-ar mai putea
+      // intra (regula venită din PR-ul constructorului, păstrată la re-unirea
+      // celor două variante ale lacătului — 14 aug).
+      if (!/BRIDGE_SECRET/.test(src))
+        return 'constructorul nu se mai autentifică cu BRIDGE_SECRET la /api/constructor/creier — ruta gardată l-ar refuza'
       return null
     },
   }
@@ -202,7 +207,7 @@ const REGULI = [
   regulaTreaptaGetter('workDefault', 'modelUnicDirect'),
   regulaTreaptaGetter('topDefault', 'modelUnicDirect'),
   regulaFaraEnvModel(),
-  regulaConstructorApp(),
+  regulaConstructorFaraGemini(),
   regulaPoartaUpgrade(),
   regulaSemnaturaGandirii(),
   regulaVoceLive(),
