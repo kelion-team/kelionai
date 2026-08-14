@@ -1195,3 +1195,22 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
 |---|---|---|
 | O1 | **Emailul fals „23 erori de client în ultima oră".** Cablajul [PERF] din 13 aug (fir principal blocat / ceas lent → `raporteazaSimptom` → `/api/client-errors`) e CORECT — vrei ca astea să ajungă la creier — dar sentinela le număra ca „erori UI rupt" și trimitea alarma. FIX: `[PERF]` primește `type='perf'` la salvare (`routes/clientErrors.ts`); un helper unic `countClientErrorsLastHour()` (`db.ts`) numără doar erorile REALE (exclude `type='perf'` ȘI mesajele cu `[PERF]` — și rândurile vechi din fereastră), folosit de sentinelă (`routes/ops.ts`) ȘI de scanarea de sănătate (`services/health.ts`). Creierul TOT le vede (inel `recentClientErrors` + `client_errors` prin db_query), doar nu mai declanșează „UI rupt". | 🔧 reparat, de verificat live (owner): emailul nu mai vine doar din blocaje [PERF] |
 | O2 | **`response:secret_publica{result:{rezultat:{}` brut în bandă.** Un model slab tastase wrapperul de REZULTAT al unei unelte ca text; `toolMarkup.ts` cunoștea apelurile goale (`get_weather`, `call:x{...}`) dar nu forma cu prefix de răspuns. FIX: `CALL_LINE_RE` + `PARTIAL_CALL_LINE_RE` prind acum prefixul opțional `response:`/`result:`/`output:`/`observation:` (eventual `tool_`-) înaintea unei unelte a turei — se ASCUNDE (stream + text final), NU se execută (e rezultat fabricat); garda pe `knownTools` rămâne, deci o frază care menționează unealta stă vizibilă. 6 teste noi. | 🔧 reparat, de verificat live (owner): în bandă nu mai apare `response:...{...}` brut |
+
+> **RELUAREA ÎNTREGII DISCUȚII (14 aug, 21:20 — ordinul „nu zău, reia toată
+> discuția"; extras din transcriptul brut, nu din memorie).** Cerințe din
+> straturile vechi regăsite și starea lor:
+> - „Kelion să aibă acces la ORICE buton apare pe ecran" — PARȚIAL (click_monitor
+>   + poarta comenzii clare); acoperirea buton-cu-buton a TUTUROR suprafețelor
+>   rămâne de probat live. [ ]
+> - „vocea care funcționează să fie PESTE TOT în aplicație" — reunit cu „audio
+>   obligatoriu pe scris" (#1118); de probat live pe toate căile. [ ]
+> - „sistemul de auzit să NU se mai schimbe niciodată" — angajament de
+>   stabilitate: orice schimbare pe lanțul urechii cere acordul explicit al
+>   ownerului; de adăugat un lacăt de tip verifica-gemini pe pipeline-ul ASR. [ ]
+> - „liber la creier pe gratuite; la plată DOAR cu întrebare" — construit
+>   (aprobare la 402); de re-verificat live după toate schimbările de azi. [ ]
+> - „pentru alți useri din RO cum se va face?" — limba per user există
+>   (detectare 2 mesaje + persistare); de probat cu un cont nou RO. [ ]
+> Restul cerințelor vechi (Revolut/KLN automat, gratuitele de bun-venit, becuri
+> reale, Gemini permanent cu rezervă anunțată) sunt FĂCUTE și live — dovezile în
+> AI-HANDOFF §13.
