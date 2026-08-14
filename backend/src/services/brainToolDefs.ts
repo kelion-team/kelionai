@@ -65,6 +65,24 @@ export const MEDIA_CONTROL_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+// ── SERVER_OPS (VPS commands) — owner's requirement 127 ──────────────────────────────
+export const SERVER_OPS_TOOL: Tool = {
+  name: 'server_ops',
+  description:
+    "ADMIN ONLY. Run predefined VPS operations: uptime, df, free, docker_ps. Timeout 20s, limit 8KB, audit logged. Rejects other commands.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      cmd: {
+        type: 'string',
+        enum: ['uptime', 'df', 'free', 'docker_ps'],
+        description: 'Predefined VPS command to run: uptime, df, free, docker_ps'
+      }
+    },
+    required: ['cmd']
+  }
+}
+
 // ── L1e: PROCESARE DE DATE TABELARE (CSV/JSON) — capabilitate generală ────────
 // Ownerul (autonomie): Kelion trebuie să poată PROCESA date, nu doar să discute
 // despre ele. Unealtă PURĂ: primește textul (CSV sau JSON, lipit de om sau adus
@@ -723,7 +741,7 @@ export const JURNAL_MASURATORI_TOOL: Tool = {
 
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
-  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, MEDIA_CONTROL_TOOL,
+  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, MEDIA_CONTROL_TOOL, SERVER_OPS_TOOL,
   RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL,
   // repo_* and runbook_* are still defined in routes/chat.ts (the migration to
   // the single source is incremental). They are added in autonomie.ts, from there.
