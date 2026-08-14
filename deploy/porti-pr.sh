@@ -223,6 +223,26 @@ while read -r NUMAR SHA REF; do
   case "$REF" in
     kelion/*)
       if [ "$VERDICT" = TRECE ]; then
+        # ── LA ZI CU MASTER ÎNAINTE DE ÎMBINARE (14 aug, noaptea: job-254 și
+        # job-256, VERZI fiecare pe sha-ul LUI, au stivuit două declarații
+        # `const zgomot` în logGazda.ts la îmbinarea textuală — master a rămas
+        # NECOMPILABIL, iar poarta n-avea cum să vadă: rulase pe ramuri, nu pe
+        # rezultatul îmbinării; același tipar rupsese și lacătul Gemini la
+        # merge-ul 83167b36). Un PR rămas în urmă NU se mai îmbină orbește:
+        # îl aducem la zi (update-branch) și ciclul următor re-rulează porțile
+        # chiar pe rezultatul îmbinării (sha-ul nou). Master primește DOAR ce
+        # s-a măsurat — „producția = master, 100% în sinc" cere exact asta.
+        IN_URMA=$(gh "$GH/compare/master...$SHA" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("behind_by", 0))' 2>/dev/null || echo 0)
+        case "$IN_URMA" in ''|*[!0-9]*) IN_URMA=0;; esac
+        if [ "$IN_URMA" -gt 0 ]; then
+          gh -X PUT -H 'content-type: application/json' -d '{}' "$GH/pulls/$NUMAR/update-branch" >/dev/null || true
+          echo "PR #$NUMAR (constructor): verde dar cu $IN_URMA comituri ÎN URMA master → adus la zi; porțile re-rulează pe sha-ul nou la ciclul următor"
+          # Sha-ul ăsta E procesat (gate + comentariu + stare) — îl însemnăm,
+          # altfel un update-branch EȘUAT l-ar re-procesa la fiecare ciclu
+          # (comentarii duplicate — exact zgomotul pe care fișierul îl previne).
+          echo "$SHA" >> "$STARE"
+          continue
+        fi
         REZM=$(gh -X PUT -H 'content-type: application/json' -d '{"merge_method":"merge"}' "$GH/pulls/$NUMAR/merge")
         if echo "$REZM" | grep -q '"merged": *true'; then
           echo "PR #$NUMAR (constructor): VERDE → îmbinat automat în master"
