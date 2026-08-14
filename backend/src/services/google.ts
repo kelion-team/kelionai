@@ -1027,6 +1027,10 @@ async function createPresentation(
   return JSON.stringify({ created: true, id, slides: lista.length, url: `https://docs.google.com/presentation/d/${id}/edit` })
 }
 
+// (La merge-ul cu #1119: constructorul dedupase ACEEAȘI clonă în paralel, cu
+// propriul ajutor `batchUpdateGoogleResource` — doi doctori pe același pacient.
+// A rămas UNUL singur: batchUpdateGoogle, definit mai sus.)
+
 // ── GOOGLE FORMS (owner, 14 aug: produsele alese) ────────────────────────────
 // Creează formularul + întrebări text simple; întoarce linkul de completat.
 async function createForm(title: string, description: string, questions: unknown, token: string): Promise<string> {

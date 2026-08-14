@@ -257,6 +257,9 @@ Alte costuri reale (contorizate în `cost.ts`, plătite din abonament/cheie plat
 
 **A UNSPREZECEA LECȚIE — „Salut la pornire cu imagine salvată tăcut" (K6).** Când se primește o imagine la pornire/salut, modelul nu trebuie să spună „Văd că ați trimis o imagine" sau „Observ...". Regula a fost întărită în `SYSTEM_PROMPT` din `routes/chat.ts` și în `greetPrompt` din `i18n.ts`: imaginea e salvată/procesată tăcut, iar răspunsul este strict salutul scurt ancorat pe ora zilei (dimineața/ziua/seara/noaptea).
 
+**A DOUĂSPREZECEA LECȚIE — „Bară dinamică de progres pentru deploy pe monitor" (Cerința #23).**
+Am implementat bara dinamică de progres pentru deploy (`DeployProgressBar.tsx` în frontend și `/api/deploy/status` cu Server-Sent Events în `routes/deploy.ts`). Se conectează prin EventSource la backend, citește în timp real fișierele de progres de deploy (`/tmp/deploy-progress.json` / `/root/kelion/deploy-progress.json`) generate de pașii `deploy.sh` și afișează procentul, pasul curent și confirmarea finalizării pe monitor/spațiul de lucru. În caz de cădere a streaming-ului SSE (ex: buffering intermediar), componenta face fallback automat la polling `/api/deploy/progress`.
+
 ## 7. CI/WORKFLOWS (`.github/workflows/`) — starea 25 iul 2026
 **Cele 3 workflow-uri ale autonomiei (25 iul, §14.b):**
 - **`deploy.yml`** — PIPELINE-UL DE PUBLICARE (push pe master + manual): SSH cu `VPS_SSH_KEY` → rulează versiunea din `origin/master` a lui `deploy/deploy.sh` (dintr-o copie în /tmp, nu din clonă) → verificare ANTI-FANTOMĂ din afară: live `v` == sha `origin/master` + health 200, altfel roșu.
