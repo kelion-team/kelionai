@@ -694,6 +694,59 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_tier_events_recent ON tier_events (at DESC);
   `)
+  await scutulDatelor()
+}
+
+// ── SCUTUL DATELOR DE NEATINS (owner, 14 aug, verbatim: „baza de date de
+// utilizatori trebuie să nu se poată șterge niciodată, prin nicio comandă, să
+// nu se poată suprascrie prin înlocuire ci doar prin adăugare cu validare,
+// legată de sistemele de plăți" + „amprentele vocale trebuie să se păstreze").
+//
+// DOUĂ straturi, pentru că o singură barieră se poate ocoli:
+//   1. TRIGGERE ÎN POSTGRES (aici): DELETE și TRUNCATE pe tabelele protejate
+//      sunt REFUZATE de baza însăși — indiferent cine cere (dbQuery, o rută,
+//      un cod viitor, o migrare grăbită). Nu depinde de disciplina apelantului.
+//   2. POARTA din dbQuery (mai jos): comenzile brute ale creierului nu ating
+//      tabelele protejate decât cu SELECT — nici măcar UPDATE „nevinovat".
+//
+// Banii se mișcă DOAR pe căile validate (grantCredit/topUpUser/chargeCredit),
+// care ADAUGĂ în billing_events/transactions — exact „adăugare cu validare,
+// legată de plăți". Upsert-urile de profil (ON CONFLICT DO UPDATE) rămân —
+// ele completează rândul omului, nu îl înlocuiesc cu altul.
+/** Tabelele pe care ordinul le apără: identitatea, banii, biometria. */
+export const TABELE_PROTEJATE = [
+  'local_accounts', 'google_accounts', 'wallets', 'transactions',
+  'billing_events', 'payment_codes', 'voiceprints', 'faceprints',
+] as const
+
+async function scutulDatelor(): Promise<void> {
+  try {
+    await getPool().query(`
+      CREATE OR REPLACE FUNCTION refuza_stergerea() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'PROTEJAT (ordinul ownerului, 14 aug): tabelul % nu se șterge niciodată — doar adăugare validată', TG_TABLE_NAME;
+      END $$ LANGUAGE plpgsql;
+    `)
+    for (const t of TABELE_PROTEJATE) {
+      // to_regclass: tabelul poate lipsi pe o bază veche — scutul nu crapă boot-ul.
+      await getPool().query(`
+        DO $$ BEGIN
+          IF to_regclass('public.${t}') IS NOT NULL THEN
+            DROP TRIGGER IF EXISTS scut_${t}_del ON ${t};
+            CREATE TRIGGER scut_${t}_del BEFORE DELETE ON ${t}
+              FOR EACH STATEMENT EXECUTE FUNCTION refuza_stergerea();
+            DROP TRIGGER IF EXISTS scut_${t}_trunc ON ${t};
+            CREATE TRIGGER scut_${t}_trunc BEFORE TRUNCATE ON ${t}
+              FOR EACH STATEMENT EXECUTE FUNCTION refuza_stergerea();
+          END IF;
+        END $$;
+      `)
+    }
+  } catch (e) {
+    // Scutul care nu s-a putut ridica se STRIGĂ — o protecție tăcut-absentă
+    // e mai rea decât una lipsă la vedere (regula #1).
+    console.error('[scutul datelor] nu s-a putut ridica:', (e as Error).message)
+  }
 }
 
 export async function saveClientError(e: {
@@ -3305,15 +3358,10 @@ export async function getVoiceprint(email: string): Promise<VoiceprintRow | null
   }
 }
 
-export async function deleteVoiceprint(email: string): Promise<boolean> {
-  if (!dbEnabled() || !email) return false
-  try {
-    await getPool().query('DELETE FROM voiceprints WHERE user_email = $1', [email.toLowerCase()])
-    return true
-  } catch {
-    return false
-  }
-}
+// (`deleteVoiceprint` a fost SCOS de tot, 14 aug — ordinul ownerului:
+// „amprentele vocale trebuie să se păstreze". Ruta DELETE /api/voiceprint/me
+// răspunde 403 cu motivul, iar triggerul din scutulDatelor refuză DELETE pe
+// `voiceprints` chiar dacă un cod viitor ar încerca din nou.)
 
 // ── GUEST VOICES (Adrian, Aug 1) ─────────────────────────────────────────────
 // The people the HOLDER explicitly allows to talk to Kelion on his account
@@ -4017,6 +4065,22 @@ export async function dbQuery(sql: string): Promise<string> {
   if (!dbEnabled()) return JSON.stringify({ error: 'db_indisponibil' })
   const text = sql.trim()
   if (!text) return JSON.stringify({ error: 'sql_gol' })
+  // POARTA SCUTULUI (owner, 14 aug: „prin nicio comandă"): pe tabelele
+  // protejate (identitate, bani, biometrie) comanda brută are voie DOAR să
+  // citească. Orice altceva (UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT ocolind
+  // validarea plăților) se refuză aici, iar DELETE/TRUNCATE ar fi oprite
+  // ORICUM de triggerele din scutulDatelor — două straturi, nu unul.
+  const primulCuvant = (text.match(/^[a-z]+/i)?.[0] ?? '').toUpperCase()
+  const eCitire = primulCuvant === 'SELECT' || primulCuvant === 'WITH' || primulCuvant === 'EXPLAIN' || primulCuvant === 'SHOW'
+  if (!eCitire) {
+    const atinse = TABELE_PROTEJATE.filter((t) => new RegExp(`\\b${t}\\b`, 'i').test(text))
+    if (atinse.length) {
+      return JSON.stringify({
+        error: 'tabel_protejat',
+        refuz: `PROTEJAT (ordinul ownerului, 14 aug): ${atinse.join(', ')} nu se modifică prin comenzi brute — doar citire aici; banii se mișcă doar pe căile validate de plăți, amprentele se păstrează.`,
+      })
+    }
+  }
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')

@@ -25,6 +25,7 @@ import {
   setMonitorWorking,
   setTaskStatus,
   setStareTranzactii,
+  getStareExecutie,
   type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
@@ -544,6 +545,53 @@ function BuildSurface({ zoom }: { zoom: number }) {
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+// ── SUPRAFAȚA DE EXECUȚIE (owner, 14 aug: „să arate fiecare pas pe monitor pe
+// care îl întreprinde, cu bara de evoluție de la 0 la 100% actualizată live
+// dinamic, bara de progres… grupuri de punctulețe de 5x5… 0,5% până la 100%").
+// Pașii vin VII de pe server (frame {executie} la fiecare unealtă chemată);
+// bara e EXACT rețeta lui: 200 de punctulețe a câte 0,5%, grupate 8 × (5×5).
+// 100% se aprinde doar la închiderea reală a turei — bara nu declară „gata".
+const PUNCTE_TOTAL = 200 // 200 × 0,5% = 100%
+const PUNCTE_PE_GRUP = 25 // 5 × 5
+function ExecutieSurface({ zoom }: { zoom: number }) {
+  const stare = useSyncExternalStore(subscribeWorkspace, getStareExecutie)
+  const t = uiStrings()
+  const procent = stare?.procent ?? 0
+  const aprinse = Math.round(procent / 0.5) // fiecare punct = 0,5%
+  const grupuri = Array.from({ length: PUNCTE_TOTAL / PUNCTE_PE_GRUP }, (_, g) => g)
+  return (
+    <div className="workspace-doc exec-surface" style={{ fontSize: `${zoom}em` }}>
+      <div className="build-head">{t.execTitle}</div>
+      <div
+        className="exec-bar"
+        role="progressbar"
+        aria-valuenow={procent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`${procent}%`}
+      >
+        {grupuri.map((g) => (
+          <span key={g} className="exec-grup" aria-hidden>
+            {Array.from({ length: PUNCTE_PE_GRUP }, (_, i) => {
+              const idx = g * PUNCTE_PE_GRUP + i
+              return <span key={idx} className={`exec-punct ${idx < aprinse ? 'plin' : ''}`} />
+            })}
+          </span>
+        ))}
+        <span className="exec-procent">{procent}%</span>
+      </div>
+      <ul className="exec-pasi">
+        {(stare?.pasi ?? []).map((p) => (
+          <li key={p.la + p.text} className="exec-pas">
+            <span className="exec-pas-ora">{new Date(p.la).toLocaleTimeString()}</span> {p.text}
+          </li>
+        ))}
+      </ul>
+      {stare?.gata && <div className="exec-gata">✓ 100%</div>}
     </div>
   )
 }
@@ -1281,6 +1329,9 @@ export default function Stage({ user }: { user: User }) {
                 {task.kind === 'build' ? (
                   // THE CONSTRUCTOR PANEL (Stage 4b) — own poller, no url/text.
                   <BuildSurface zoom={monZoom} />
+                ) : task.kind === 'executie' ? (
+                  // EXECUȚIA PAS CU PAS (owner, 14 aug) — starea vie din workspace.ts.
+                  <ExecutieSurface zoom={monZoom} />
                 ) : task.html ? (
                   // PLAYGROUND: the page written by Kelion runs live in an isolated
                   // iframe (srcdoc + sandbox, no same-origin → it can't reach

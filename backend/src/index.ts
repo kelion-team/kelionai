@@ -504,6 +504,20 @@ try {
     void vindeca()
     setInterval(() => { void vindeca() }, 5 * 60 * 1000)
   }, 60 * 1000)
+  // SANTINELA PR (owner, 14 aug: „kelion… admin 2 sub mine: mă anunță când sunt
+  // logat să dau merge; când nu-s logat, verifică el, le trage de pe master și
+  // dă merge"). Măsoară de la GitHub (checkul porti-vps + mergeable), anunță
+  // sau îmbină — vezi santinelaPR.ts. La 2 min după boot, apoi la 5 min.
+  const santinela = async (): Promise<void> => {
+    const { ruleazaSantinelaPR } = await import('./services/santinelaPR.js')
+    const r = await ruleazaSantinelaPR().catch(() => null)
+    if (r && (r.anuntate.length || r.imbinate.length || r.trase.length))
+      app.log.info(r, 'santinela PR')
+  }
+  setTimeout(() => {
+    void santinela()
+    setInterval(() => { void santinela() }, 5 * 60 * 1000)
+  }, 2 * 60 * 1000)
   // ISCOADELE (Adrian, 4 aug: „boti care bat netul 24 din 24 si aduc informati
   // lui kelion"): patrula periodică Serper→creier→memoria lui Kelion.
   pornesteIscoadele()

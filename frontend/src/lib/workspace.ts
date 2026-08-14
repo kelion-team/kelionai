@@ -157,6 +157,46 @@ export function getStareTranzactii(): StareTranzactii | null {
   return stareTranzactii
 }
 
+// ── EXECUȚIA PAS CU PAS PE MONITOR (owner, 14 aug: „să arate fiecare pas pe
+// monitor pe care îl întreprinde, cu bara de evoluție de la 0 la 100%
+// actualizată live dinamic, bara… făcută de grupuri de punctulețe de 5x5…
+// 0,5% până la 100%") ────────────────────────────────────────────────────────
+// Serverul emite frame-uri {executie} la FIECARE unealtă chemată pe o tură de
+// execuție; aici se ține starea vie (pași reali + procent), iar suprafața
+// 'executie' de pe monitor o desenează: lista pașilor + bara din 200 de
+// punctulețe a câte 0,5%, grupate 5×5. 100% vine DOAR la închiderea reală a
+// turei (interceptorul de end de pe server) — bara nu minte „gata".
+export interface PasExecutie {
+  readonly la: number
+  readonly text: string
+}
+export interface StareExecutie {
+  readonly pasi: readonly PasExecutie[]
+  readonly procent: number
+  readonly gata: boolean
+}
+let stareExecutie: StareExecutie | null = null
+export function adaugaPasExecutie(pas: string, procent: number, gata: boolean): void {
+  // O tură NOUĂ de execuție (primul pas după un „gata") pornește listă proaspătă.
+  const veche = stareExecutie && !stareExecutie.gata ? stareExecutie : null
+  const pasi = gata && !pas ? (veche?.pasi ?? []) : [...(veche?.pasi ?? []), { la: Date.now(), text: pas }]
+  stareExecutie = {
+    pasi,
+    procent: Math.max(0, Math.min(100, procent)),
+    gata,
+  }
+  emit()
+}
+export function getStareExecutie(): StareExecutie | null {
+  return stareExecutie
+}
+
+// Suprafața de execuție pe monitor — un singur tab (dedup pe kind), fără
+// url/text: corpul se desenează în Stage din starea vie de mai sus.
+export function openWorkspaceExecutie(title: string): void {
+  upsert({ id: 'executie', kind: 'executie', title, url: '', card: null, status: 'ok' })
+}
+
 export function subscribeWorkspace(fn: () => void): () => void {
   subscribers.add(fn)
   return () => {

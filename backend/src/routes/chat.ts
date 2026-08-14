@@ -63,7 +63,7 @@ import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
-import { inventarulMeu } from '../services/brainCapabilities.js'
+import { inventarulMeu, CAPABILITIES } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
@@ -906,7 +906,11 @@ const CTRL = String.fromCharCode(31)
 //
 // So "the turn produced something visible" = non-empty text OR at least one
 // non-protocol frame.
-const CADRE_PROTOCOL = /"(turn|heard|lang|receipt|ping|desync)"\s*:/
+// {executie} e PROGRES, nu răspuns: dacă ar conta ca „vizibil", o tură de
+// execuție cu text final GOL ar trece de rotația mută și de plasa anti-tăcere
+// exact ca ack-ul instant din 2 aug (vezi mai jos). Pașii se văd pe monitor,
+// dar răspunsul tot trebuie să vină.
+const CADRE_PROTOCOL = /"(turn|heard|lang|receipt|ping|desync|executie)"\s*:/
 export function areCevaDeVazut(chunk: string): boolean {
   const cadru = new RegExp(`${CTRL}[^${CTRL}]*${CTRL}`, 'g')
   if (chunk.replace(cadru, '').trim() !== '') return true
@@ -2388,6 +2392,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // a receipt, not the reply — it must NOT flip `sawVisible` (see
     // conteazaCaVizibil above). Plain flag around a synchronous write.
     let ackInstantZbor = false
+    // ── BARA DE EXECUȚIE PE MONITOR (owner, 14 aug: „să arate fiecare pas pe
+    // monitor pe care îl întreprinde, cu bara de evoluție de la 0 la 100%
+    // actualizată live") ────────────────────────────────────────────────────
+    // Fiecare unealtă chemată pe o tură de EXECUȚIE = un pas REAL, emis pe loc
+    // ca frame {executie}. Procentul urcă asimptotic spre 95% cu fiecare pas
+    // (numărul total de pași nu se știe dinainte — a-l pretinde ar fi cifră
+    // inventată, regula #1); 100% se scrie O SINGURĂ dată, la închiderea REALĂ
+    // a turei (interceptorul de end), nu dintr-o afirmație.
+    let pasiExecutie = 0
     // A SURFACE ON THE MONITOR this turn (Adrian, Aug 2 — "TOT pe monitor"): the
     // auto-preview post-step at the end of the turn must never duplicate what a
     // tool already pushed. The interceptor sees every write, so it is the one
@@ -2410,6 +2423,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     }, 5_000)
     reply.raw.end = ((...args: unknown[]) => {
       clearInterval(pingTimer)
+      // Bara de execuție se închide la sfârșitul REAL al turei: 100% înseamnă
+      // „tura s-a încheiat" (rezultatul — bun sau eșec cinstit — e în text și
+      // în pași), niciodată un „gata" declarat înainte de vreme.
+      if (pasiExecutie > 0 && !reply.raw.writableEnded && !reply.raw.destroyed) {
+        pasiExecutie = 0
+        try {
+          reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: 'Tura încheiată', procent: 100, gata: true } })}${CTRL}`)
+        } catch { /* progresul nu are voie să omoare închiderea turei */ }
+      }
       finishTurn(user.email, turnId)
       return (rawEnd as (...a: unknown[]) => unknown)(...args)
     }) as typeof reply.raw.end
@@ -2775,6 +2797,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         } catch {
           input = {}
         }
+        // FIECARE PAS PE MONITOR (owner, 14 aug): pe turele de EXECUȚIE, fiecare
+        // unealtă chemată se anunță PE LOC ca frame {executie} — numele pasului
+        // vine din inventarul de capabilități (o singură sursă, nu o listă
+        // paralelă), procentul urcă asimptotic (totalul nu se știe dinainte) și
+        // 100% îl scrie DOAR interceptorul de end, la închiderea reală a turei.
+        if (cereActiune) {
+          pasiExecutie += 1
+          const capabilitate = CAPABILITIES.find((c) => c.name === name)
+          const pas = capabilitate ? `${name} — ${capabilitate.does}` : name
+          const procent = Math.min(95, Math.round(1000 * (1 - Math.pow(0.8, pasiExecutie))) / 10)
+          try {
+            reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas, procent } })}${CTRL}`)
+          } catch { /* progresul nu are voie să omoare tura */ }
+        }
         // CĂUTAREA SE TAXEAZĂ DOAR LA SUCCES (agenții de debug, 3 aug: costul se
         // adăuga NECONDIȚIONAT, înainte de rulare — o căutare picată
         // (search_unavailable) tot îl costa pe user). Serper nu taxează un apel
@@ -2842,7 +2878,28 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           })
         }
 
+        // ── POARTA MONITORULUI (owner, 14 aug: „fără comandă clară să nu facă
+        // nimic pe monitor") ────────────────────────────────────────────────
+        // click_monitor apasă ELEMENTE REALE din aplicație (elementFromPoint +
+        // .click() în ChatPanel) — o halucinație a creierului ar putea apăsa
+        // orice buton, inclusiv din admin. De-aia acțiunile pe monitor rulează
+        // DOAR când tura curentă a omului conține o comandă clară: fie un verb
+        // de acțiune general (hasActionIntent — „deschide", „apasă pe meniu"),
+        // fie verbul specific de click/zoom. Fără comandă → refuz cinstit, iar
+        // frame-ul de control NU pleacă spre ecran. Cititul (get_monitor,
+        // get_mouse_position) rămâne liber — a privi nu e a face.
+        const COMANDA_MONITOR_RE =
+          /(clic|click|apas[ăa]|\btap\b|zoom|m[ăa]re[șs]te|mic[șs]oreaz[ăa]|apropie|dep[ăa]rteaz[ăa]|mai\s+(mare|mic|aproape)|scroll|deruleaz[ăa])/i
+        const comandaClaraMonitor = (): boolean =>
+          hasActionIntent(lastUserText) || COMANDA_MONITOR_RE.test(lastUserText)
+
         if (name === 'click_monitor') {
+          if (!comandaClaraMonitor()) {
+            return JSON.stringify({
+              succes: false,
+              mesaj: 'Refuzat: nu fac nimic pe monitor fără o comandă clară a omului în tura curentă. Întreabă-l întâi ce vrea apăsat.'
+            })
+          }
           const args = input as { x?: number; y?: number }
           const x = args.x ?? 0
           const y = args.y ?? 0
@@ -2856,6 +2913,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         }
 
         if (name === 'zoom_monitor') {
+          if (!comandaClaraMonitor()) {
+            return JSON.stringify({
+              succes: false,
+              mesaj: 'Refuzat: nu schimb nimic pe monitor fără o comandă clară a omului în tura curentă.'
+            })
+          }
           const args = input as { level?: number; direction?: string }
           const level = args.level ?? 1.2
           const direction = args.direction ?? 'in'

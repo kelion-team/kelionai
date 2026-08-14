@@ -1,6 +1,6 @@
 import { getPool, dbEnabled } from '../db.js'
 
-export type AdminNotificationType = 'scris' | 'voce' | 'plata_neatribuita'
+export type AdminNotificationType = 'scris' | 'voce' | 'plata_neatribuita' | 'pr_gata'
 
 export interface AdminNotification {
   id?: number

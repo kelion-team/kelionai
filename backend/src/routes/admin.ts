@@ -482,9 +482,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (geminiCreditGbp !== undefined) {
       const { ramasDinDeclarat } = await import('../services/creditAI.js')
       const r = await ramasDinDeclarat({ gbp: geminiCreditGbp, at: geminiCreditAt })
-      if (r.ok) {
+      if (r.ok && r.ramasGbp > 0) {
         geminiCreditRamasGbp = r.ramasGbp
         geminiScazutUsd = r.scazutUsd
+      } else if (r.ok) {
+        // ESTIMAREA CONSUMATĂ NU MAI E O CIFRĂ (owner, 14 aug — pastila scria
+        // „£0.00" în timp ce AI Studio arăta £25.80 cu auto-reload pornit).
+        // Nici restul, nici declarația veche nu se mai trimit ca numere:
+        // pastila cade pe ✓/⚠ (becul viu), iar motivul spune ce e de făcut.
+        geminiCreditGbp = undefined
+        geminiScadereMotiv =
+          'declarația s-a consumat pe estimare — soldul real e în AI Studio (auto-reload pornit); re-declară-l cu «credit Gemini»'
       } else {
         geminiScadereMotiv = r.motiv
       }

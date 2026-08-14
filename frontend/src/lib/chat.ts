@@ -95,6 +95,10 @@ export interface ChatControl {
   ignored?: boolean
   golesteMonitor?: boolean
   clickMonitor?: { x: number; y: number }
+  // EXECUȚIA PAS CU PAS (owner, 14 aug): fiecare unealtă chemată pe o tură de
+  // execuție = un pas anunțat live; bara de punctulețe de pe monitor îl arată.
+  // gata=true vine o singură dată, la închiderea REALĂ a turei (100%).
+  executie?: { pas: string; procent: number; gata?: boolean }
   zoomMonitor?: { level?: number; direction?: string }
   // MESSENGER KELION↔KELION (Adrian, 11 aug): „apelează-l pe X" → creierul a pornit
   // un apel; frame-ul ăsta ridică la APELANT interfața „sun pe…". Celălalt primește

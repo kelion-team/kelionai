@@ -189,8 +189,8 @@ export interface AdminStrings {
   alertNotCredited: string
   confirmDeleteGap: string
   alertNotDeleted: string
-  confirmDeleteVoiceprint: (name: string) => string
-  voiceprintDeleteFailed: (email: string) => string
+  voiceprintKept: string
+  voiceprintKeptTitle: string
   voiceprintFetchError: (email: string) => string
   confirmResetCounters: string
   confirmDeleteUserData: (email: string) => string
@@ -212,7 +212,7 @@ const en: AdminStrings = {
   becuriEroare: 'could not read AI credit',
   becuriReincarca: 'no credit — click to add funds',
   becuriDeschideFactura: 'open billing page',
-  becuriServeste: 'serving (has credit)',
+  becuriServeste: 'serving (live probe passed)',
   becuriNecunoscut: 'cannot verify',
   becuriBaraTitlu: 'AI credit — click for Money',
   becuriBaraFaraCredit: '{n} AI out of credit — click for Money',
@@ -356,8 +356,8 @@ const en: AdminStrings = {
   alertNotCredited: 'Not credited — server refused or session expired.',
   confirmDeleteGap: 'PERMANENTLY delete request?',
   alertNotDeleted: 'Not deleted — server refused or session expired.',
-  confirmDeleteVoiceprint: (name: string) => `Delete voiceprint for ${name}? (removes voice recognition factor)`,
-  voiceprintDeleteFailed: (email: string) => `Could not delete voiceprint for ${email} — try again.`,
+  voiceprintKept: 'kept (never deleted)',
+  voiceprintKeptTitle: "Owner's order (Aug 14): voiceprints are kept — no command can delete them (server + database both refuse).",
   voiceprintFetchError: (email: string) => `Voice sample for ${email} could not be loaded — missing or read failed.`,
   confirmResetCounters: 'Reset consumption counters to 0?\n\nDeletes only supplier cost log.\nDoes NOT touch user credits, payment ledger or purchase history.\nAlready consumed credits are NOT refunded.',
   confirmDeleteUserData: (email: string) => `Permanently delete all data for ${email}? Deletes: messages, balance, sessions, memory, voice/facial prints, notes, linked Google account and cost journal. Payments remain in ledger, irreversibly anonymized.`,
@@ -379,7 +379,7 @@ const ro: AdminStrings = {
   becuriEroare: 'nu am putut citi creditul AI',
   becuriReincarca: 'fără credit — click ca să adaugi bani',
   becuriDeschideFactura: 'deschide pagina de facturare',
-  becuriServeste: 'servește (are credit)',
+  becuriServeste: 'servește (probă vie reușită)',
   becuriNecunoscut: 'nu pot verifica',
   becuriBaraTitlu: 'Credit AI — click pentru Bani',
   becuriBaraFaraCredit: '{n} AI fără credit — click pentru Bani',
@@ -514,8 +514,8 @@ const ro: AdminStrings = {
   alertNotCredited: 'Nu s-a creditat — serverul a refuzat sau sesiunea a expirat.',
   confirmDeleteGap: 'Ștergi DEFINITIV cererea? (nu rămâne nici în istoric)',
   alertNotDeleted: 'Nu s-a șters — serverul a refuzat sau sesiunea a expirat.',
-  confirmDeleteVoiceprint: (name: string) => `Ștergi amprenta vocală a lui ${name}? (taie factorul de voce al recunoașterii)`,
-  voiceprintDeleteFailed: (email: string) => `Nu s-a putut șterge amprenta lui ${email} — reîncearcă.`,
+  voiceprintKept: 'se păstrează (nu se șterge)',
+  voiceprintKeptTitle: 'Ordinul ownerului (14 aug): amprentele vocale se păstrează — nicio comandă nu le poate șterge (refuză și serverul, și baza de date).',
   voiceprintFetchError: (email: string) => `Mostra lui ${email} nu s-a putut încărca — lipsește sau citirea a picat.`,
   confirmResetCounters: 'Pui pe 0 contoarele de consum?\n\nSe șterge doar jurnalul „cât ne-a costat pe noi la furnizori”.\nNU se ating: creditele userilor, registrul plăților, istoricul de cumpărare.\nCreditele deja consumate NU se dau înapoi.',
   confirmDeleteUserData: (email: string) => `Ștergi definitiv datele lui ${email}? Se șterg: mesaje, sold, sesiuni, memorie, amprentele vocale/faciale, notele, contul Google legat și jurnalul de costuri. Plățile rămân în registru, anonimizate ireversibil.`,

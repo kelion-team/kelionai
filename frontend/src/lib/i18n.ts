@@ -22,6 +22,7 @@ export interface Strings {
   scenarioStop: string
   scenarioRecording: string
   monitorTitle: string
+  execTitle: string
   disconnectCamTitle: string
   connectCamTitle: string
   micBlocked: string
@@ -273,6 +274,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scenarioStop: 'Stop',
     scenarioRecording: 'Recording scenario…',
     monitorTitle: 'Monitor mode',
+    execTitle: 'Live execution',
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
     micBlocked: 'Microphone blocked. Allow mic access in the browser, then tap the mic again.',
@@ -491,6 +493,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scenarioStop: 'Stop',
     scenarioRecording: 'Înregistrez scenariul…',
     monitorTitle: 'Mod monitor',
+    execTitle: 'Execuție în direct',
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',
     micBlocked: 'Microfonul e blocat. Permite accesul la microfon în browser, apoi apasă din nou pe microfon.',
@@ -706,6 +709,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scenarioStop: 'Detener',
     scenarioRecording: 'Grabando guion…',
     monitorTitle: 'Modo monitor',
+    execTitle: 'Ejecución en vivo',
     disconnectCamTitle: 'Desconectar cámara',
     connectCamTitle: 'Conectar cámara',
     micBlocked: 'Micrófono bloqueado. Permite el acceso al micrófono en el navegador y vuelve a pulsar.',
@@ -873,6 +877,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scenarioStop: 'Arrêter',
     scenarioRecording: 'Enregistrement du scénario…',
     monitorTitle: 'Mode moniteur',
+    execTitle: 'Exécution en direct',
     disconnectCamTitle: 'Déconnecter la caméra',
     connectCamTitle: 'Connecter la caméra',
     micBlocked: 'Micro bloqué. Autorisez l’accès au micro dans le navigateur, puis réessayez.',
@@ -1040,6 +1045,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scenarioStop: 'Stopp',
     scenarioRecording: 'Szenario wird aufgenommen…',
     monitorTitle: 'Monitor-Modus',
+    execTitle: 'Live-Ausführung',
     disconnectCamTitle: 'Kamera trennen',
     connectCamTitle: 'Kamera verbinden',
     micBlocked: 'Mikrofon blockiert. Erlaube den Mikrofonzugriff im Browser und tippe erneut.',
@@ -1207,6 +1213,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scenarioStop: 'Ferma',
     scenarioRecording: 'Registrazione dello scenario…',
     monitorTitle: 'Modalità monitor',
+    execTitle: 'Esecuzione dal vivo',
     disconnectCamTitle: 'Scollega fotocamera',
     connectCamTitle: 'Collega fotocamera',
     micBlocked: 'Microfono bloccato. Consenti l’accesso al microfono nel browser e riprova.',
@@ -1374,6 +1381,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scenarioStop: 'Parar',
     scenarioRecording: 'Gravando roteiro…',
     monitorTitle: 'Modo monitor',
+    execTitle: 'Execução ao vivo',
     disconnectCamTitle: 'Desconectar câmera',
     connectCamTitle: 'Conectar câmera',
     micBlocked: 'Microfone bloqueado. Permita o acesso ao microfone no navegador e toque novamente.',

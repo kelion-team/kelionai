@@ -1194,6 +1194,61 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
+/* SUPRAFAȚA DE EXECUȚIE (owner, 14 aug): bara din 200 de punctulețe a câte
+   0,5%, grupate 8 × (5×5), + lista pașilor vii. Clase NOI (exec-*), fără
+   coliziune cu build-* — lecția din 30 iul: o clasă refolosită a rupt o pagină. */
+.exec-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+.exec-grup {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+}
+.exec-punct {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  transition: background 300ms ease;
+}
+.exec-punct.plin {
+  background: linear-gradient(135deg, #4aa3ff, #57c98a);
+}
+.exec-procent {
+  font-size: 0.85em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.exec-pasi {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.exec-pas {
+  font-size: 0.85em;
+  color: var(--text);
+  opacity: 0.9;
+  overflow-wrap: break-word;
+}
+.exec-pas-ora {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  margin-right: 6px;
+}
+.exec-gata {
+  margin-top: 10px;
+  font-weight: 700;
+  color: #57c98a;
+}
 .build-row {
   display: flex;
   align-items: baseline;

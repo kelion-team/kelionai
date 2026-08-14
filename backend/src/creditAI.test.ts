@@ -1,5 +1,4 @@
-import { describe, it, expect } from 'vitest'
-import { crediteAI, beculCredit, type CreditAI } from './services/creditAI.js'
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 
 // ── CREDITUL RĂMAS PE FIECARE AI, FĂRĂ ZEROURI INVENTATE (8 aug 2026) ───────
 //
@@ -9,9 +8,53 @@ import { crediteAI, beculCredit, type CreditAI } from './services/creditAI.js'
 // ce scriu în celulele pe care NU le pot citi: Google nu expune „cât mai ai"
 // nici prin Gemini API, nici prin Cloud Billing. Acolo se năștea „£0.00".
 //
-// Testele rulează pe mediul de test, unde NU sunt chei de furnizor și NU e
-// bază de date — adică exact situația în care un zero ar arăta cel mai
-// convingător. Ce se cere aici: NICIUN rând nu are voie să întoarcă o cifră.
+// SCENARIUL E FIXAT DE TEST, NU MOȘTENIT DIN MEDIU (măsurat 14 aug: pe poarta
+// VPS testele au PICAT pentru că acolo cheile REALE erau în mediu → crediteAI()
+// chiar măsura solduri, iar aserțiunile „fără chei" mințeau despre ce rulează).
+// De-acum testul își face SINGUR situația „fără chei, fără bază, fără rețea":
+// config cu cheile goale (Proxy — getterii config nu se evaluează degeaba),
+// kv/DB mut, fetch care refuză. Ce se cere: NICIUN rând nu are voie să
+// întoarcă o cifră în situația asta.
+
+const CHEI_GOALE = new Set([
+  'geminiKey', 'serperKey', 'googleTtsKey', 'julesKey', 'googleServiceAccountJson',
+])
+vi.mock('./config.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./config.js')>()
+  return {
+    ...mod,
+    config: new Proxy(mod.config, {
+      get: (t, p) => (CHEI_GOALE.has(String(p)) ? '' : Reflect.get(t, p)),
+    }),
+  }
+})
+vi.mock('./db.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./db.js')>()
+  return {
+    ...mod,
+    loadKv: async () => null,
+    cheltuialaDeLaPeKinduri: async () => ({ ok: false, usd: 0 }),
+    cheltuialaLunaPeKinduri: async () => ({ ok: false, usd: 0 }),
+  }
+})
+
+import { crediteAI, beculCredit, type CreditAI } from './services/creditAI.js'
+
+// Cheia Fable se citește din process.env direct (fable5Constructor) — o
+// scoatem și pe ea, cu restaurare la final; fetch-ul refuză orice drum afară.
+const ENV_SCOASE = ['ANTHROPIC_API_KEY', 'CONSTRUCTOR_FABLE_KEY', 'FABLE_KEY'] as const
+const salvate: Record<string, string | undefined> = {}
+beforeAll(() => {
+  for (const n of ENV_SCOASE) {
+    salvate[n] = process.env[n]
+    delete process.env[n]
+  }
+  vi.stubGlobal('fetch', () => Promise.reject(new Error('test fără rețea')))
+})
+afterAll(() => {
+  for (const n of ENV_SCOASE) if (salvate[n] != null) process.env[n] = salvate[n]
+  vi.unstubAllGlobals()
+})
 
 describe('creditul rămas pe fiecare AI', () => {
   it('acoperă toți furnizorii pe care se dau bani, nu doar pe cei ușor de citit', async () => {
