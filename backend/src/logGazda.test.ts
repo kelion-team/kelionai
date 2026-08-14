@@ -88,6 +88,17 @@ describe('semnaturiEroare', () => {
     expect(out).toHaveLength(0)
   })
 
+  it('izolează joburile din constructor.log și ignoră erorile din joburile finalizate cu succes', () => {
+    const textLog = [
+      '[constructor] Job #100: Ordin vechi',
+      'src/services/logGazda.ts(64,9): error TS2451: Cannot redeclare block-scoped variable \'zgomot\'.',
+      '[constructor] Job #101: Alt ordin',
+      '✅ PR deschis: #258',
+    ].join('\n')
+    const out = semnaturiEroare(textLog)
+    expect(out).toHaveLength(0)
+  })
+
   it('prinde eroarea din ultima rulare dacă nu s-a finalizat cu succes', () => {
     const textLog = [
       '[auto-publicare] 10:00:00 live=aaa master=bbb — public',

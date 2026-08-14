@@ -57,13 +57,21 @@ export async function coadaLogGazda(
  *  erorile din rulările vechi sunt istorice (deja rezolvate de noul deploy) și nu
  *  trebuie să mai nască alarme sau auto-vindecări fantomă. */
 export function semnaturiEroare(text: string, maxim = 8): string[] {
-  // Dacă textul provine dintr-un log de deploy/auto-publicare cu mai multe rulări,
-  // izolăm ultima rulare ca să nu re-raportăm erori din rulări vechi deja reparate.
-  const parti = text.split(/(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez))/i)
+  // Dacă textul provine dintr-un log secvențial (auto-publicare.log sau constructor.log)
+  // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
+  // deja rezolvate/istorice.
+  const parti = text.split(
+    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|=== (?:Job|ORDIN)|🚀\s*\[?constructor\]?))/i,
+  )
   const textDeVerificat = parti[parti.length - 1] ?? text
 
-  // Dacă ultima rulare s-a încheiat cu succes, nu există nicio eroare activă.
-  if (/anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes/i.test(textDeVerificat)) {
+  // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
+  // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
+  if (
+    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|Nimic de f[ăa]cut/i.test(
+      textDeVerificat,
+    )
+  ) {
     return []
   }
 
