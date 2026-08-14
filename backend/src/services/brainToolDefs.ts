@@ -69,14 +69,14 @@ export const MEDIA_CONTROL_TOOL: Tool = {
 export const SERVER_OPS_TOOL: Tool = {
   name: 'server_ops',
   description:
-    "ADMIN ONLY. Run predefined VPS operations: uptime, df, free, docker_ps. Timeout 20s, limit 8KB, audit logged. Rejects other commands.",
+    "ADMIN ONLY. Run predefined VPS operations: uptime, df, free, docker_ps, log_constructor (tail of the constructor worker's host log), log_publicare (tail of the auto-publish/deploy host log). Timeout 20s, limit 8KB, audit logged. Rejects other commands.",
   input_schema: {
     type: 'object',
     properties: {
       cmd: {
         type: 'string',
-        enum: ['uptime', 'df', 'free', 'docker_ps'],
-        description: 'Predefined VPS command to run: uptime, df, free, docker_ps'
+        enum: ['uptime', 'df', 'free', 'docker_ps', 'log_constructor', 'log_publicare'],
+        description: 'Predefined VPS command: uptime, df, free, docker_ps, log_constructor, log_publicare'
       }
     },
     required: ['cmd']

@@ -162,10 +162,16 @@ jobs:
               # GIT_COMMIT_SHA se păstrează și la repornirea de aici (clona
               # `deploy` = codul imaginii) — altfel /api/version recădea pe ora
               # bootului și verificarea anti-fantomă orbea.
+              # ACELEAȘI volume ca la deploy.sh (14 aug): pw-cache LIPSEA aici —
+              # o repornire prin secret_publica pierdea Chromium-ul (browserul
+              # mâinilor murea până la următoarea publicare completă); iar
+              # /host/kelion:ro dă self-heal-ului ochii pe logurile gazdei.
               docker run -d --name kelionai-app --restart unless-stopped \
                 --network host --env-file /root/kelion/kelionai.env \
                 -e PORT=8080 -e NODE_ENV=production \
                 -e GIT_COMMIT_SHA="$(git -C /root/kelion/repo rev-parse HEAD 2>/dev/null || true)" \
+                -v /root/kelion/pw-cache:/root/.cache/ms-playwright \
+                -v /root/kelion:/host/kelion:ro \
                 kelionai:latest >/dev/null
               sleep 4
               code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/version || echo 000)

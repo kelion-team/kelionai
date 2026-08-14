@@ -6,6 +6,11 @@ const ALLOWED_COMMANDS: Record<string, { file: string; args: string[] }> = {
   df: { file: 'df', args: ['-h'] },
   free: { file: 'free', args: ['-m'] },
   docker_ps: { file: 'docker', args: ['ps'] },
+  // ── LOGURILE GAZDEI (14 aug): montate read-only la /host/kelion (deploy.sh).
+  // Owner: „Kelion trebuie să vadă logurile" — astea-s comenzile FIXE prin care
+  // le vede la cerere (self-heal le scanează separat, prin logGazda.ts).
+  log_constructor: { file: 'tail', args: ['-n', '200', '/host/kelion/constructor.log'] },
+  log_publicare: { file: 'tail', args: ['-n', '200', '/host/kelion/auto-publicare.log'] },
 };
 
 export async function serverOps(cmd: string): Promise<string> {

@@ -11,6 +11,7 @@ const jobs: { scope: string; order: string }[] = []
 const kv = new Map<string, string>()
 let recurring: unknown[] = []
 let simptome: unknown[] = []
+let ordineMoarte: { id: number; orderText: string; log: string; attempts: number }[] = []
 
 vi.mock('../db.js', () => ({
   recurringClientErrors: async () => recurring,
@@ -24,6 +25,7 @@ vi.mock('../db.js', () => ({
     kv.set(k, v)
   },
   requeueMoneyFailedBuildJobs: async () => 0,
+  listFailedBuildJobsRecent: async () => ordineMoarte,
 }))
 vi.mock('./runbooks.js', () => ({ isOpsPaused: async () => false }))
 vi.mock('./geminiDirect.js', () => ({ geminiLive: async () => ({ ok: false, serving: false }) }))
@@ -38,6 +40,7 @@ beforeEach(() => {
   kv.clear()
   recurring = []
   simptome = []
+  ordineMoarte = []
   plafon = { activ: false, plafon: 10, cheltuit: 0 }
 })
 
@@ -97,5 +100,23 @@ describe('runSelfHeal — eșecurile mute ajung la reparație', () => {
     const r = await runSelfHeal()
     expect(r.filed).toBe(1)
     expect(jobs[0].scope).toBe('kelion-autovindecare')
+  })
+
+  // ── ORDINELE MOARTE NU MAI MOR ÎN TĂCERE (owner, 14 aug: „rezolvată
+  // definitiv partea cu eșuatul ordinelor") ─────────────────────────────────
+  it('un ordin mort primește SEMN o singură dată (alarma nu spamează)', async () => {
+    ordineMoarte = [{ id: 42, orderText: 'repară ceva', log: 'eroare: nu am putut', attempts: 3 }]
+    await runSelfHeal()
+    expect(kv.has('selfheal-ordin-mort:42')).toBe(true)
+    const semn = kv.get('selfheal-ordin-mort:42')!
+    await runSelfHeal() // aceeași lume — semnul NU se rescrie (alarma nu se repetă)
+    expect(kv.get('selfheal-ordin-mort:42')).toBe(semn)
+  })
+
+  it('un ordin mort NU naște automat alt ordin (nu ardem aceiași bani orbește)', async () => {
+    ordineMoarte = [{ id: 43, orderText: 'x', log: 'eroare de cod: boom', attempts: 3 }]
+    const r = await runSelfHeal()
+    expect(r.filed).toBe(0)
+    expect(jobs).toHaveLength(0)
   })
 })
