@@ -3149,27 +3149,28 @@ export default function AdminPanel({
                   {demosData.recent.length === 0 && <div className="chat-hint">—</div>}
                   {demosData.recent.map((r, i) => (
                     <div className="visitor-card" key={i}>
-                      {/* Photo column */}
-                      <div className="visitor-photo">
-                        {r.photo_url ? (
+                      {/* Poza apare DOAR când chiar există (owner, 14 aug:
+                          „vizitatori nu au poze, de ce?"). Silueta gri promitea
+                          o poză care NU poate exista la un anonim (fără cont,
+                          fără cameră) — afișaj fals, scoasă. */}
+                      {r.photo_url && (
+                        <div className="visitor-photo">
                           <img src={r.photo_url} alt="foto vizitator" className="visitor-thumb" />
-                        ) : (
-                          <div className="visitor-no-photo" title="fără fotografie">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                              <circle cx="12" cy="8" r="4"/>
-                              <path d="M4 22c0-4.4 3.6-8 8-8s8 3.6 8 8"/>
-                            </svg>
-                          </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
                       {/* Info column */}
                       <div className="visitor-info">
                         <div className="visitor-top">
                           <span className="visitor-flagline">
                             <Flag code={r.code} />
                             <strong>{r.country || 'Necunoscut'}</strong>
-                            {r.city ? ` · ${r.city}` : ''}
+                            {/* ORAȘUL E ESTIMARE DUPĂ IP, nu GPS (owner, 14 aug:
+                                „GPS-ul lor spune Manchester, e real? nu cred" —
+                                corect: la mobil arată de obicei poarta
+                                operatorului). „~" + eticheta spun adevărul. */}
+                            {r.city ? ` · ~${r.city}` : ''}
                             {r.region && r.region !== r.city ? `, ${r.region}` : ''}
+                            {r.city && <span className="muted" style={{ fontSize: 11 }}> (după IP, aproximativ)</span>}
                           </span>
                           <span className={`vis-badge ${r.is_bot ? 'bot' : 'human'}`}>
                             {r.is_bot ? 'BOT' : 'UMAN'}
