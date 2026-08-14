@@ -163,12 +163,18 @@ async function creditDeclaratGemini(): Promise<{ gbp: number; at?: string } | nu
 
 async function randGemini(): Promise<CreditAI> {
   const cheieConfigurata = Boolean(config.geminiKey)
-  const [cheltuitLuna, declarat, live] = await Promise.all([
+  const [cheltuitLuna, declarat, live, facturare] = await Promise.all([
     // Lista auditabilă a felurilor e FELURI_GEMINI (exportată, folosită și de
     // pastila din bară — aceeași sumă peste tot, nu două liste divergente).
     cheltuiala(FELURI_GEMINI),
     creditDeclaratGemini(),
     geminiLive().catch(() => null),
+    // CALEA OFICIALĂ (owner, 14 aug: „dacă e soluție oficială, de ce nu o
+    // facem?"): cheltuiala + creditele REALE din exportul Cloud Billing →
+    // BigQuery (facturareGoogle.ts). Până când ownerul dă rolul + pornește
+    // exportul în consolă, întoarce ok:false cu PASUL exact rămas — și becul
+    // rămâne pe estimarea declarată, spus cinstit.
+    import('./facturareGoogle.js').then((m) => m.facturareGoogle()).catch(() => null),
   ])
 
   const cumRamas =
@@ -201,6 +207,17 @@ async function randGemini(): Promise<CreditAI> {
         Date.now() - t0,
       )
     }
+  }
+  // CIFRA REALĂ DE LA GOOGLE (owner, 14 aug: „dacă e soluție oficială, de ce nu
+  // o facem?"): exportul Cloud Billing → BigQuery, citit cu contul de serviciu.
+  // Când e activ, se ARATĂ lângă estimare (nu o înlocuiește tăcut — ferestrele
+  // și moneda diferă); când NU e încă activ, se scrie PASUL exact rămas în
+  // consolă — deci panoul îți spune singur ce mai e de apăsat, nu tace.
+  if (facturare) {
+    const nota = facturare.ok
+      ? ` · GOOGLE REAL (export, din ${facturare.date.dinData || '—'}): cheltuit ${facturare.date.cheltuitUsd.toFixed(2)} · credite aplicate ${facturare.date.crediteUsd.toFixed(2)} (moneda contului)`
+      : ` · export Google: ${facturare.motiv}`
+    ramas = { ...ramas, cum: `${ramas.cum}${nota}` }
   }
 
   const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = !live
