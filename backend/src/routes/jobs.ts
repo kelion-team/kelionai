@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getSessionUser } from '../session.js'
 import { getPool, citesteSold, recordCost, dbEnabled } from '../db.js'
 import { gasesteAgentViu, cheamaAgent } from '../services/agentiKelion.js'
+import { taxeazaServiciu } from '../services/tarife.js'
 import { geminiDirectChat } from '../services/geminiDirect.js'
 import { config } from '../config.js'
 
@@ -148,6 +149,12 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     const agent = await gasesteAgentViu('documente')
     if (!agent) return reply.status(503).send({ error: 'agentul de documente nu e disponibil acum' })
 
+    // TARIFUL DIN MENIU (owner, 14 aug): adaptarea se taxează per bucată,
+    // ÎNAINTE de consum (2 credite implicit, TARIF_CV în env — prețul afișat
+    // e cu profit cu tot); pică adaptarea → banii se întorc singuri.
+    const taxa = await taxeazaServiciu(cine.email, 'cv', cine.admin)
+    if (!taxa.ok) return reply.status(402).send({ error: taxa.motiv })
+
     // NIVEL INTERNAȚIONAL (ownerul, 10 aug): „paragrafat, organizat, bine
     // structurat; identifici cuvintele-cheie din cerință și le regăsim și în CV
     // sau echivalent". Pașii sunt scriși explicit — întâi cheile, apoi redactarea.
@@ -169,9 +176,14 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
       if (r.costUsd > 0) void recordCost(cine.email, 'gemini', r.costUsd)
       text = r.text.trim()
     } catch (e) {
+      // Nimeni nu plătește o adaptare care nu s-a născut — banii se întorc.
+      await taxa.ramburseaza().catch(() => {})
       return reply.status(502).send({ error: `adaptarea a picat: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}` })
     }
-    if (!text) return reply.status(502).send({ error: 'adaptarea a întors gol — încearcă din nou' })
+    if (!text) {
+      await taxa.ramburseaza().catch(() => {})
+      return reply.status(502).send({ error: 'adaptarea a întors gol — încearcă din nou' })
+    }
 
     // Despărțim titlul jobului (pentru numele fișierului) de CV-ul adaptat.
     let jobName = ''
@@ -183,6 +195,10 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     const fileName = `${curataNume(applicantName, 'aplicant')}_${curataNume(jobName, 'job')}`
-    return reply.send({ success: true, adaptedCv, jobName: jobName || undefined, fileName })
+    return reply.send({
+      success: true, adaptedCv, jobName: jobName || undefined, fileName,
+      // Prețul se SPUNE (owner, 14 aug): suma încasată e în răspuns, la vedere.
+      taxat: taxa.scazutGbp > 0 ? `£${taxa.scazutGbp.toFixed(2)}` : undefined,
+    })
   })
 }

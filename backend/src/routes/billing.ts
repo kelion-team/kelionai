@@ -41,6 +41,23 @@ export async function validateTopUp(citestePortofelFn: typeof citestePortofel, e
 }
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
+  // ── MENIUL DE PREȚURI, PUBLIC (owner, 14 aug: „meniu de prețuri regăsite și
+  // în manual… afișezi prețul cu profit cu tot") ─────────────────────────────
+  // Prețurile extra-serviciilor sunt informație publică (userul le vede ÎNAINTE
+  // să opteze) — fără login. Sursa e UNA (services/tarife.ts): același meniu
+  // taxează, se afișează pe pagina de credite și intră în manual.
+  app.get('/api/tarife', async (_req, reply) => {
+    const { meniulDeTarife, lirePentru } = await import('../services/tarife.js')
+    return reply.send({
+      credit: { lire: config.billing.creditValue, moneda: config.billing.currency },
+      tarife: meniulDeTarife().map((t) => ({
+        cheie: t.cheie,
+        eticheta: t.eticheta,
+        credite: t.credite,
+        lire: lirePentru(t.cheie),
+      })),
+    })
+  })
   // The customer sees CREDITS (1 credit = config.billing.creditValue) and the %
   // of the last top-up still left, for the escalating low-credit alerts.
   app.get('/api/billing/balance', async (req, reply) => {

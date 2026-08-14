@@ -25,6 +25,18 @@ export default function Credits(): React.JSX.Element {
   const [payCode, setPayCode] = useState<CheckoutStart | null>(null)
   const [codeCopied, setCodeCopied] = useState(false)
 
+  // Meniul de prețuri al extra-serviciilor — viu de pe server (/api/tarife),
+  // aceeași sursă care și taxează. null = necitit/picat → secțiunea nu apare.
+  const [tarife, setTarife] = useState<{ cheie: string; eticheta: string; credite: number; lire: number | null }[] | null>(null)
+  useEffect(() => {
+    void fetch('/api/tarife')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { tarife?: { cheie: string; eticheta: string; credite: number; lire: number | null }[] } | null) => {
+        if (Array.isArray(j?.tarife)) setTarife(j.tarife)
+      })
+      .catch(() => {})
+  }, [])
+
   const prevCreditsRef = useRef<number | null>(null)
 
   // „ce au vizitat" (owner, 13 aug): secțiunea „credite" în raportul de vizite.
@@ -140,6 +152,27 @@ export default function Credits(): React.JSX.Element {
         {balance !== null && (
           <div className="login-note" style={{ marginBottom: 16 }}>
             Sold curent: <strong>{balance.credits} credite</strong>
+          </div>
+        )}
+
+        {/* MENIUL DE PREȚURI (owner, 14 aug: „când userul optează pentru o
+            funcție i se arată și prețul, și se încasează… cu profit cu tot").
+            Vine VIU de pe server (/api/tarife) — aceeași sursă care taxează;
+            citirea picată nu inventează un meniu, secțiunea doar nu apare. */}
+        {tarife && tarife.length > 0 && (
+          <div className="custom-amount-box" style={{ marginBottom: 16, padding: '12px', border: '1px solid var(--border-color, #e0e0e0)', borderRadius: 8 }}>
+            <label style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
+              Prețuri extra-servicii (se scad din credite la folosire)
+            </label>
+            {tarife.map((t) => (
+              <div key={t.cheie} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '2px 0' }}>
+                <span>{t.eticheta}</span>
+                <strong>
+                  {t.credite} {t.credite === 1 ? 'credit' : 'credite'}
+                  {t.lire != null ? ` (£${t.lire.toFixed(2)})` : ''}
+                </strong>
+              </div>
+            ))}
           </div>
         )}
 

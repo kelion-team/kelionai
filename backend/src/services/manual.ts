@@ -15,6 +15,7 @@
 //
 // The admin tools do NOT enter: the manual is for users.
 import { CAPABILITIES } from './brainCapabilities.js'
+import { meniulDeTarife, lirePentru } from './tarife.js'
 
 // ── THE MANUAL'S 7 LANGUAGES ───────────────────────────────────────────────
 // Adrian, Jul 30: "the manual will show 7 major languages, translate
@@ -152,6 +153,15 @@ const SECTIONS: ManualSection[] = [
     ],
   },
   {
+    title: 'Price menu',
+    paragraphs: [
+      // MENIUL DE PREȚURI (owner, 14 aug: „meniu de prețuri regăsite și în
+      // manual"). Rândurile cu cifre se generează din services/tarife.ts în
+      // buildManual() — o singură sursă, manualul nu poate diverge de taxare.
+      'Everyday conversation, mail, calendar, files, maps, search and video playback are included in your normal credit usage. The services below have a fixed price per use, shown before you confirm and drawn from your credits. If a paid generation fails, the credits come straight back.',
+    ],
+  },
+  {
     title: 'Privacy',
     paragraphs: [
       // ADUS LA REALITATE (owner, 14 aug: „baza de utilizatori nu se șterge
@@ -270,12 +280,28 @@ export function buildManual(): ManualDoc {
       .filter((x): x is { what: string; say: string } => x != null)
     if (items.length) groups.push({ title: GROUP_TITLES[g] ?? GROUP_TITLES.diverse, key: g, items })
   }
+  // MENIUL DE PREȚURI, VIU (owner, 14 aug): rândurile cu cifre intră în
+  // secțiunea „Price menu" DIN sursa taxării (tarife.ts) la fiecare build —
+  // manualul arată exact prețurile care se încasează, cu profit cu tot.
+  const sections = SECTIONS.map((s) =>
+    s.title === 'Price menu'
+      ? {
+          ...s,
+          paragraphs: [
+            ...s.paragraphs,
+            ...meniulDeTarife().map(
+              (t) => `${t.eticheta}: ${t.credite} ${t.credite === 1 ? 'credit' : 'credits'} (£${(lirePentru(t.cheie) ?? 0).toFixed(2)})`,
+            ),
+          ],
+        }
+      : s,
+  )
   return {
     lang: 'en',
     title: TITLE,
     subtitle: SUBTITLE,
     flow: FLOW,
-    sections: SECTIONS,
+    sections,
     abilitiesTitle: ABILITIES_TITLE,
     abilitiesIntro: ABILITIES_INTRO,
     columnWhat: COL_WHAT,

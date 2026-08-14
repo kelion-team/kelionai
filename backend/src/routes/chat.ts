@@ -68,6 +68,7 @@ import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
+import { taxeazaServiciu, cheiaTarifVideo } from '../services/tarife.js'
 import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
@@ -4023,8 +4024,15 @@ async function runTool(
     case 'generate_image': {
       const prompt = String(args.prompt ?? '')
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
+      // ZIDUL EXTRA-SERVICIILOR (owner, 14 aug): imaginea are tarif din meniu
+      // (1 credit implicit, TARIF_IMAGINE în env); pică generarea → ramburs.
+      const taxaImg = await taxeazaServiciu(email, 'imagine', isAdmin)
+      if (!taxaImg.ok) return JSON.stringify({ error: 'plata_serviciului', motiv: taxaImg.motiv })
       const result = await generateImage(prompt)
-      if ('error' in result) return JSON.stringify({ error: result.error })
+      if ('error' in result) {
+        await taxaImg.ramburseaza().catch(() => {})
+        return JSON.stringify({ error: result.error })
+      }
       // THE REAL COST, BOOKED WHERE IT IS KNOWN (the owner's rule: "show real,
       // stop fabricating"): the generation's own usage.cost from OpenRouter,
       // booked as 'image' — a MEASUREMENT (db.ts COSTURI_MASURATE). The flat
@@ -4040,17 +4048,28 @@ async function runTool(
       }
       const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
-      return JSON.stringify({ shown: true, url: imageUrl })
+      return JSON.stringify({
+        shown: true, url: imageUrl,
+        taxat: taxaImg.scazutGbp > 0 ? `£${taxaImg.scazutGbp.toFixed(2)} scăzuți din creditul tău` : undefined,
+      })
     }
 
     case 'generate_video': {
       const prompt = String(args.prompt ?? '')
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
+      // ZIDUL EXTRA-SERVICIILOR (owner, 14 aug: meniu de prețuri cu profitul
+      // copt înăuntru): clipul se taxează ÎNAINTE de a costa banii ownerului
+      // la Google; dacă generarea pică DUPĂ taxare, banii se întorc singuri.
+      const taxa = await taxeazaServiciu(email, cheiaTarifVideo(), isAdmin)
+      if (!taxa.ok) return JSON.stringify({ error: 'plata_serviciului', motiv: taxa.motiv })
       const result = await genereazaVideo(prompt, Number(args.seconds ?? 8))
       // The refusal (no key / payment not consciously enabled) travels to the
       // brain VERBATIM — it contains the measured price, so the person hears
       // the real reason, not a generic "failed".
-      if ('error' in result) return JSON.stringify({ error: result.error })
+      if ('error' in result) {
+        await taxa.ramburseaza().catch(() => {})
+        return JSON.stringify({ error: result.error })
+      }
       // The cost is the official list price × the real seconds generated —
       // Google does not itemize per call, so this is the exact bill by their
       // published rate, booked as its own kind to stay distinguishable.
@@ -4058,7 +4077,12 @@ async function runTool(
       void recordCost(email, 'video', result.costUsd)
       const videoUrl = `${baseUrl}/api/video/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: videoUrl, title: 'Generated video' } })}${CTRL}`)
-      return JSON.stringify({ shown: true, url: videoUrl, secunde: result.secunde, costUsd: result.costUsd })
+      // PREȚUL SE SPUNE (owner, 14 aug: „i se arată și prețul, și se
+      // încasează") — suma scăzută intră în rezultat ca Kelion s-o spună omului.
+      return JSON.stringify({
+        shown: true, url: videoUrl, secunde: result.secunde, costUsd: result.costUsd,
+        taxat: taxa.scazutGbp > 0 ? `£${taxa.scazutGbp.toFixed(2)} scăzuți din creditul tău` : undefined,
+      })
     }
 
     // The 8 browser actions: the call differs, the queue is shared
