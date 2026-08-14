@@ -167,7 +167,14 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
                 // Neural când îl avem (256, robust); altfel vectorul vechi de 9.
                 features: useNeural ? neuralEmb! : vf.vector,
                 featureMeta: vf.meta,
-                audioClip: '',
+                // TIMBRUL SE PĂSTREAZĂ (owner, 14 aug, cu captura „fără audio":
+                // „timbrul audio lipsește, de ce? că am vorbit cu el!"). Calea
+                // vocii LIVE avea mostra sub nas (`audioIn`, WAV data-URI — chiar
+                // din ea se scoate embedding-ul neural) și trimitea '' — deci
+                // cine vorbea zilnic pe live rămânea pe veci „fără audio".
+                // saveVoiceprint păstrează oricum mostra veche când vine gol,
+                // și taie ce depășește plafonul de mărime — nimic de păzit aici.
+                audioClip: audioIn,
               },
               // Prima înrolare = referință proaspătă; voce potrivită = adaptare
               // (medie de embedding-uri — îmbunătățește referința, gen stabil).

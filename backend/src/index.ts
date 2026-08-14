@@ -21,6 +21,7 @@ import { legalRoutes } from './routes/legal.js'
 import { imageRoutes } from './routes/image.js'
 import { billingRoutes } from './routes/billing.js'
 import { meRoutes } from './routes/me.js'
+import { pushRoutes } from './routes/push.js'
 import { demoRoutes } from './routes/demo.js'
 import { mapviewRoutes } from './routes/mapview.js'
 import { ingestRoutes } from './routes/ingest.js'
@@ -310,6 +311,7 @@ await app.register(legalRoutes)
 await app.register(imageRoutes)
 await app.register(billingRoutes)
 await app.register(meRoutes)
+await app.register(pushRoutes)
 await app.register(demoRoutes)
 await app.register(mapviewRoutes)
 await app.register(ingestRoutes)
@@ -326,6 +328,12 @@ await app.register(pingRoutes)
 await app.register(constructorViuRoutes)
 await app.register(constructorStareRoutes)
 await app.register(jobsRoutes)
+// Căile COMPLETE stau în deploy.ts (convenția întregului backend, pe care o
+// citește și verifica-butoane): componenta DeployProgressBar chema
+// /api/deploy/progress și /api/deploy/status, dar rutele fuseseră declarate
+// FĂRĂ prefix (trăiau la rădăcină: /progress, /status) → bara era moartă din
+// naștere, 404 la fiecare poll (prins de verifica-butoane pe merge-ul #1122;
+// poarta VPS nu rulează încă verificatorul de butoane — de-aia a trecut).
 await app.register(deployRoutes)
 await app.register(manualRoutes)
 await app.register(enterpriseRoutes)

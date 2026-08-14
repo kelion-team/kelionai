@@ -135,6 +135,32 @@ export const googleTools: Tool[] = [
     },
   },
   {
+    name: 'photos_alege',
+    description:
+      "Start a Google Photos picking session for the user. Returns pickerUri — SHOW it on the monitor (show_on_screen) and tell the user to open it and pick their photos in Google's own interface (private by design: you only ever see what they picked). Then call photos_adu to fetch the picked photos.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'photos_adu',
+    description:
+      'Fetch the photos the user picked in the Google Photos session started with photos_alege (max 6). Returns app URLs — show them on the monitor. If the user has not finished picking yet, it says so — wait and call again.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'youtube_urca',
+    description:
+      "Upload a video that ALREADY exists in this app (a generated clip — the id from its /api/video/<id> URL) to the user's own YouTube channel, PRIVATE by default. Use only when the user clearly asks to upload/post a clip to YouTube. If the tool says the YouTube consent is missing, show the user the link /auth/google/connect-youtube on the monitor (a separate one-time consent — it cannot share a consent screen with Drive).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        video_id: { type: 'string', description: 'The clip id (or its /api/video/<id> URL).' },
+        title: { type: 'string', description: 'Video title.' },
+        description: { type: 'string', description: 'Video description (optional).' },
+      },
+      required: ['video_id', 'title'],
+    },
+  },
+  {
     name: 'create_form',
     description:
       "Create a Google Form in the user's account: a title, an optional description and a list of text questions. Use for sign-up forms, surveys, questionnaires. Returns the link to fill it in (url) and the edit link (editUrl).",
@@ -957,6 +983,18 @@ async function createCalendarEvent(
   return JSON.stringify({ created: true, summary, start, link: j.htmlLink ?? '', meetLink: meet ? (meetLink ?? '') : undefined })
 }
 
+// UN SINGUR batchUpdate pentru Slides + Forms (jscpd, 14 aug — cele două
+// blocuri identice au picat poarta de duplicat). null = a mers; altfel
+// statusul HTTP, ca apelantul să-și spună avertismentul lui.
+async function batchUpdateGoogle(url: string, requests: unknown[], token: string): Promise<number | null> {
+  const r = await tfetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests }),
+  })
+  return r.ok ? null : r.status
+}
+
 // ── GOOGLE SLIDES (owner, 14 aug: produsele alese — „vreau să le văd") ───────
 // Creează prezentarea + câte un slide TITLE_AND_BODY per intrare, cu textele
 // puse prin placeholderIdMappings (calea documentată — fără ghicit de id-uri).
@@ -1003,26 +1041,21 @@ async function createPresentation(
       if (s.corp) reqs.push({ insertText: { objectId: corpId, text: s.corp } })
       return reqs
     })
-    const batchEndpoint = `https://slides.googleapis.com/v1/presentations/${id}:batchUpdate`
-    const uRes = await batchUpdateGoogleResource(batchEndpoint, token, requests)
     // Prezentarea EXISTĂ deja — un eșec la umplere se spune, nu se ascunde.
-    if (!uRes.ok) {
+    const status = await batchUpdateGoogle(`https://slides.googleapis.com/v1/presentations/${id}:batchUpdate`, requests, token)
+    if (status !== null) {
       return JSON.stringify({
         created: true, id, url: `https://docs.google.com/presentation/d/${id}/edit`,
-        avertisment: `prezentarea s-a creat, dar umplerea slide-urilor a picat (HTTP ${uRes.status}) — deschide-o și completeaz-o`,
+        avertisment: `prezentarea s-a creat, dar umplerea slide-urilor a picat (HTTP ${status}) — deschide-o și completeaz-o`,
       })
     }
   }
   return JSON.stringify({ created: true, id, slides: lista.length, url: `https://docs.google.com/presentation/d/${id}/edit` })
 }
 
-async function batchUpdateGoogleResource(url: string, token: string, requests: unknown[]): Promise<Response> {
-  return tfetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requests }),
-  })
-}
+// (La merge-ul cu #1119: constructorul dedupase ACEEAȘI clonă în paralel, cu
+// propriul ajutor `batchUpdateGoogleResource` — doi doctori pe același pacient.
+// A rămas UNUL singur: batchUpdateGoogle, definit mai sus.)
 
 // ── GOOGLE FORMS (owner, 14 aug: produsele alese) ────────────────────────────
 // Creează formularul + întrebări text simple; întoarce linkul de completat.
@@ -1051,11 +1084,11 @@ async function createForm(title: string, description: string, questions: unknown
     }),
   )
   if (requests.length) {
-    const uRes = await batchUpdateGoogleResource(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, token, requests)
-    if (!uRes.ok) {
+    const status = await batchUpdateGoogle(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, requests, token)
+    if (status !== null) {
       return JSON.stringify({
         created: true, id: cj.formId, url: cj.responderUri ?? `https://docs.google.com/forms/d/${cj.formId}/edit`,
-        avertisment: `formularul s-a creat, dar întrebările nu au intrat (HTTP ${uRes.status}) — deschide-l și completează-l`,
+        avertisment: `formularul s-a creat, dar întrebările nu au intrat (HTTP ${status}) — deschide-l și completează-l`,
       })
     }
   }

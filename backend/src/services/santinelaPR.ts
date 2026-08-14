@@ -88,7 +88,20 @@ export async function ruleazaSantinelaPR(): Promise<RaportSantinela> {
 
     // Rămas în urmă față de master → „îl trage de pe master" (o dată per sha);
     // porțile se re-rulează pe sha-ul nou, decizia vine la ciclul următor.
-    if (stare === 'behind') {
+    // NU ne bazăm doar pe mergeable_state==='behind' (GitHub îl raportează
+    // sigur doar sub protecție strictă de branch — altfel un PR în urmă poate
+    // apărea „clean"): măsurăm DIRECT cu compare. Lecția din 14 aug: job-254
+    // și job-256, verzi FIECARE pe sha-ul lui, au stivuit două declarații
+    // `const zgomot` la îmbinarea textuală și master a rămas necompilabil —
+    // porțile trebuie să ruleze chiar pe rezultatul îmbinării, adică pe sha-ul
+    // de DUPĂ update-branch.
+    let inUrma = stare === 'behind'
+    if (!inUrma) {
+      const cmp = await gh(`/compare/master...${sha}`).catch(() => null)
+      const cj = cmp?.ok ? ((await cmp.json()) as { behind_by?: number }) : null
+      inUrma = (cj?.behind_by ?? 0) > 0
+    }
+    if (inUrma) {
       const cheie = `santinela:tras:${pr.number}:${sha}`
       if (await loadKv(cheie)) continue
       const u = await gh(`/pulls/${pr.number}/update-branch`, { method: 'PUT' }).catch(() => null)

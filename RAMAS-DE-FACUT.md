@@ -13,6 +13,37 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 14 aug, 21:10 („toate aplicațiile trebuiesc"): TOATE aplicațiile
+      Google interconectabile se fac, în ordinea: (1) Photos (Picker API —
+      flux propriu de ales poze) — SCRIS, pe #1118 (9b2b9369), de probat live;
+      (2) YouTube upload (consimțământ SEPARAT, nu poate sta lângă Drive) —
+      SCRIS, pe #1118 (09c07dc0): poartă `/auth/google/connect-youtube`,
+      urcare privată implicit, unealta `youtube_urca`, registru 113 — de
+      probat live cu un clip real; (3) notificări pe telefon — SCRIS (14 aug,
+      noaptea): Web Push cu VAPID, NU cont Firebase (același canal standard pe
+      care browserele îl duc prin FCM, dar zero conturi, zero chei de pus de
+      owner — perechea VAPID se naște singură în kv_state); butonul „🔔 Pe
+      telefon" în capul adminului; orice notifyAdmin (pr_gata al santinelei,
+      alarme) zboară și pe telefon; de probat live: pornește butonul, apoi
+      un „PR gata" trebuie să sune telefonul; (4) Business Profile (cere
+      aprobare Google pe contul ownerului — pas de ghidat). Fiecare: un PR,
+      intrare în meniul „Aplicații", rând în manual, tarif unde costă bani,
+      porți verzi + probă live. Deja legate azi: Slides, Meet, Forms (#1116).
+      Imposibilele rămân marcate cinstit (Keep = doar enterprise, Google Pay ≠
+      procesator, Fit = mort).
+- [ ] GĂURILE DE POARTĂ prinse pe viu (14 aug, noaptea): poarta VPS nu rula
+      NICI verifica-butoane (bara de deploy din #1122 a intrat pe master cu
+      ambele apeluri în gol — rute fără prefix, la rădăcină — și verdictul a
+      fost TRECE), NICI lacătul Gemini (a zăcut crăpat pe master cu
+      ReferenceError și tot TRECE se posta). SCRIS: ambele adăugate în
+      ruleaza_portile + rândurile lor în raport; rutele deploy reparate (căi
+      complete + gard x-bridge-secret pe POST). De probat live: primul raport
+      de poartă de după deploy trebuie să aibă 9 rânduri, nu 7.
+- [ ] ORDIN 14 aug, 20:45 („când apare ceva scris de la Kelion, obligatoriu e
+      și audio"): ORICE text al lui Kelion se și rostește — inclusiv turele
+      scrise, ack-urile și rezultatele. De legat sinteza (aceleași frame-uri
+      {audio} care merg pe voce) și pe calea scrisă; de măsurat costul TTS
+      înainte de a-l face implicit pentru userii plătitori. URMĂTORUL PR.
 - [ ] Santinela PR (nou, 14 aug noaptea): scrisă + teste verzi, dar NEPROBATĂ live —
       dovada cerută: un PR verde anunțat în panou cât ownerul e logat, și unul
       îmbinat de Kelion singur (cu jurnalul în Notificări) cât e delogat.
@@ -1181,3 +1212,22 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
 |---|---|---|
 | O1 | **Emailul fals „23 erori de client în ultima oră".** Cablajul [PERF] din 13 aug (fir principal blocat / ceas lent → `raporteazaSimptom` → `/api/client-errors`) e CORECT — vrei ca astea să ajungă la creier — dar sentinela le număra ca „erori UI rupt" și trimitea alarma. FIX: `[PERF]` primește `type='perf'` la salvare (`routes/clientErrors.ts`); un helper unic `countClientErrorsLastHour()` (`db.ts`) numără doar erorile REALE (exclude `type='perf'` ȘI mesajele cu `[PERF]` — și rândurile vechi din fereastră), folosit de sentinelă (`routes/ops.ts`) ȘI de scanarea de sănătate (`services/health.ts`). Creierul TOT le vede (inel `recentClientErrors` + `client_errors` prin db_query), doar nu mai declanșează „UI rupt". | 🔧 reparat, de verificat live (owner): emailul nu mai vine doar din blocaje [PERF] |
 | O2 | **`response:secret_publica{result:{rezultat:{}` brut în bandă.** Un model slab tastase wrapperul de REZULTAT al unei unelte ca text; `toolMarkup.ts` cunoștea apelurile goale (`get_weather`, `call:x{...}`) dar nu forma cu prefix de răspuns. FIX: `CALL_LINE_RE` + `PARTIAL_CALL_LINE_RE` prind acum prefixul opțional `response:`/`result:`/`output:`/`observation:` (eventual `tool_`-) înaintea unei unelte a turei — se ASCUNDE (stream + text final), NU se execută (e rezultat fabricat); garda pe `knownTools` rămâne, deci o frază care menționează unealta stă vizibilă. 6 teste noi. | 🔧 reparat, de verificat live (owner): în bandă nu mai apare `response:...{...}` brut |
+
+> **RELUAREA ÎNTREGII DISCUȚII (14 aug, 21:20 — ordinul „nu zău, reia toată
+> discuția"; extras din transcriptul brut, nu din memorie).** Cerințe din
+> straturile vechi regăsite și starea lor:
+> - „Kelion să aibă acces la ORICE buton apare pe ecran" — PARȚIAL (click_monitor
+>   + poarta comenzii clare); acoperirea buton-cu-buton a TUTUROR suprafețelor
+>   rămâne de probat live. [ ]
+> - „vocea care funcționează să fie PESTE TOT în aplicație" — reunit cu „audio
+>   obligatoriu pe scris" (#1118); de probat live pe toate căile. [ ]
+> - „sistemul de auzit să NU se mai schimbe niciodată" — angajament de
+>   stabilitate: orice schimbare pe lanțul urechii cere acordul explicit al
+>   ownerului; de adăugat un lacăt de tip verifica-gemini pe pipeline-ul ASR. [ ]
+> - „liber la creier pe gratuite; la plată DOAR cu întrebare" — construit
+>   (aprobare la 402); de re-verificat live după toate schimbările de azi. [ ]
+> - „pentru alți useri din RO cum se va face?" — limba per user există
+>   (detectare 2 mesaje + persistare); de probat cu un cont nou RO. [ ]
+> Restul cerințelor vechi (Revolut/KLN automat, gratuitele de bun-venit, becuri
+> reale, Gemini permanent cu rezervă anunțată) sunt FĂCUTE și live — dovezile în
+> AI-HANDOFF §13.

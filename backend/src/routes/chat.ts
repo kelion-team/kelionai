@@ -69,7 +69,7 @@ import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/fee
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
 import { taxeazaServiciu, cheiaTarifVideo } from '../services/tarife.js'
-import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
+import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -531,7 +531,7 @@ const RUN_WEB_TOOL: Tool = {
 const IMAGE_TOOL: Tool = {
   name: 'generate_image',
   description:
-    'Generate an image from a text description and show it on the user\'s monitor. Use when the user asks you to draw, create, generate, design or imagine a picture/logo/illustration. Write a rich, detailed English prompt describing the desired image.',
+    'Generate an image from a text description and show it on the user\'s monitor. Use ONLY when the user CLEARLY asked you to draw, create, generate, design or imagine a picture/logo/illustration — never on a garbled or ambiguous phrase (it costs money per image; when unsure, ASK first). NEVER generate fake application screenshots, fake progress bars, fake "deploy successful" screens or any image that pretends to show a real system state — that is deception, not art. Write a rich, detailed English prompt describing the desired image.',
   input_schema: {
     type: 'object',
     properties: {
@@ -2000,7 +2000,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // server + ordine de build eșuate), fiecare cu „ce este". Sincron, din cache,
     // deci NU adaugă latență. Astfel, la „ce probleme ai?", răspunde din
     // cunoaștere — nu pretinde că totul e în regulă.
-    if (user.role === 'admin' && !turaDeOaspete) {
+    // DREPTURILE DE ADMIN NU SE MAI PIERD NICĂIERI (owner, 14 aug, seara:
+    // „kelion a pierdut drepturile de admin… fă ceva să nu se mai poată
+    // pierde" + „nu are atribute de admin, nicăieri"). Până acum, o tură
+    // etichetată „oaspete" pe sesiunea DE ADMIN tăia toate blocurile de owner
+    // — iar o potrivire greșită de voce îl lăsa pe OWNER fără admin la el
+    // acasă. De-acum sesiunea de admin ține blocurile ARMATE întotdeauna;
+    // oaspetele confirmat primește doar prudența de mai jos (fără date
+    // personale, confirmare la acțiuni grele), nu amputarea puterilor.
+    if (user.role === 'admin' && turaDeOaspete) {
+      systemPrompt +=
+        `\n\nGUEST AT THE MIC (the voice gate matched a known guest: ${guestLabel || 'guest'}): the OWNER's session stays fully armed, but the person SPEAKING now may not be the owner. Do not reveal the owner's personal data on voice, and for destructive or costly actions ask the owner to confirm first.`
+    }
+    if (user.role === 'admin') {
       const probl = formateazaProbleme(problemeGlobaleCache())
       if (probl) {
         systemPrompt +=
@@ -2879,6 +2891,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           })
         }
 
+        // ── GARDA ANTI-BÂLBĂ PE GENERĂRILE PLĂTITE (owner, 14 aug, capturile
+        // serii: vocea lui românească transcrisă ca italiană stricată — „Come
+        // te per sai generati immagine?" — iar creierul a luat bâlba drept
+        // comandă și A ARS BANI pe două imagini necerute, ba una era o captură
+        // FALSĂ de aplicație) ───────────────────────────────────────────────
+        // Regula deterministă: pe o tură VORBITĂ, dacă limba transcriptului nu
+        // e limba STABILITĂ a omului, generarea plătită NU pornește — refuz cu
+        // îndemnul cinstit „repetă sau scrie comanda". Turele SCRISE nu trec pe
+        // aici (ce scrii cu mâna e comanda ta). Doar uneltele care costă bani.
+        const GENERARI_PLATITE = new Set(['generate_image', 'generate_video', 'create_presentation'])
+        // Semnalul de „tură vorbită" e PREZENȚA audio-ului nativ (doar vocea îl
+        // are — chiar sursa transcrierii), nu flagul `spoken`: paritatea
+        // scris/vorbit (caleUnica.test) cere ca `spoken` să rămână DOAR stil.
+        if (GENERARI_PLATITE.has(name) && typeof req.body?.audio === 'string' && req.body.audio.length > 0) {
+          const auzit = detectSpeechLang(lastUserText, null)
+          const bazaAuzit = (auzit ?? '').toLowerCase().split('-')[0]
+          const bazaOm = (userLang ?? 'en').toLowerCase().split('-')[0]
+          if (bazaAuzit && bazaAuzit !== bazaOm) {
+            return JSON.stringify({
+              error: 'transcript_suspect',
+              motiv: `Nu pornesc o generare plătită pe o frază auzită în altă limbă (${auzit}) decât a ta (${bazaOm}) — probabil transcriere greșită. Roagă omul să repete clar sau să SCRIE comanda.`,
+            })
+          }
+        }
         // ── POARTA MONITORULUI (owner, 14 aug: „fără comandă clară să nu facă
         // nimic pe monitor") ────────────────────────────────────────────────
         // click_monitor apasă ELEMENTE REALE din aplicație (elementFromPoint +
@@ -4164,6 +4200,21 @@ async function runTool(
     }
 
     default: {
+      // GOOGLE PHOTOS (Picker) — au nevoie de email + baseUrl, pe care
+      // runGoogleTool nu le are; se rezolvă aici, cu tokenul aceluiași om.
+      if (block.name === 'photos_alege') {
+        const { photosAlege } = await import('../services/googlePhotos.js')
+        return photosAlege(email, token)
+      }
+      if (block.name === 'photos_adu') {
+        const { photosAdu } = await import('../services/googlePhotos.js')
+        return photosAdu(email, token, baseUrl)
+      }
+      if (block.name === 'youtube_urca') {
+        const { youtubeUrca } = await import('../services/googleYouTube.js')
+        const a = (block.input ?? {}) as Record<string, unknown>
+        return youtubeUrca(token, String(a.video_id ?? ''), String(a.title ?? ''), String(a.description ?? ''))
+      }
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
         // THE get_weather GUARD (the "27° without GPS" fix): a location-less

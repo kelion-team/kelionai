@@ -61,6 +61,13 @@ const ALIAS_SECTIUNE: Record<string, string> = {
   erori: 'erori',
   errors: 'erori',
   greseli: 'erori',
+  // ORDINELE constructorului (owner, 14 aug: „kelion nu vede în admin oriunde,
+  // ordinele de ex") — pe orice nume le-ar cere creierul, ajung la coadă.
+  ordine: 'constructor',
+  ordinele: 'constructor',
+  coada: 'constructor',
+  orders: 'constructor',
+  queue: 'constructor',
 }
 
 // CATALOGUL SECȚIUNILOR pe care Kelion le poate CITI (owner, 13 aug: „nu știe
@@ -96,6 +103,16 @@ const SECTIUNI: { nume: string; ce: string }[] = [
   { nume: 'backups', ce: 'punctele de restaurare' },
   { nume: 'stores', ce: 'prezența în magazine (Windows/Android/iOS/web)' },
   { nume: 'inbound', ce: 'emailurile primite recent' },
+  // COMPLETAREA CATALOGULUI (owner, 14 aug: „kelion nu vede în admin oriunde,
+  // ordinele de ex") — rutele existau, doar catalogul nu le pomenea, deci
+  // creierul nu știa că le poate citi. Auditat pe lista rutelor GET reale.
+  { nume: 'constructor', ce: 'coada ordinelor constructorului: starea fiecărui ordin, pașii, PR-ul (alias: ordine, coada)' },
+  { nume: 'gestures', ce: 'gesturile avatarului (pornite/oprite)' },
+  { nume: 'mailbox-live', ce: 'căsuța contact@ citită direct de pe server (INBOX)' },
+  { nume: 'unlock/status', ce: 'starea lacătului de admin (armat/dezarmat)' },
+  { nume: 'plati/incasate', ce: 'plățile încasate (detaliu)' },
+  { nume: 'plati/coduri-neplatite', ce: 'codurile de plată emise și neplătite încă' },
+  { nume: 'plati/totaluri', ce: 'totalurile plăților' },
 ]
 
 /** Lista secțiunilor ca text pentru creier — „ce pot citi și cum se cheamă". */

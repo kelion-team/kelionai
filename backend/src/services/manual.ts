@@ -142,6 +142,9 @@ const SECTIONS: ManualSection[] = [
       // BARA DE EXECUȚIE (owner, 14 aug) — the manual must describe the app as
       // it IS: every execution turn shows its steps live on the monitor.
       'When you ask Kelion to actually do something, the work is not a black box: every step it takes appears live on the monitor behind it, with a dotted progress bar filling from 0 to 100%. The bar reaches 100% only when the turn has truly finished — it never claims "done" in advance.',
+      // PUSH PE TELEFON (14 aug, a treia bifă din „toate aplicațiile"): și
+      // manualul trebuie să știe că anunțurile pot ajunge pe telefon.
+      'Platform announcements can also reach your phone: turning on "🔔 Pe telefon" in the admin panel subscribes that device through standard Web Push, so alerts arrive even when the site is closed. It only ever happens after you grant the browser permission, and you can switch it off from the same button.',
     ],
   },
   {
@@ -210,6 +213,9 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   create_doc: { what: 'Writes a new Google Doc for you', say: '"make a doc with the shopping list"' },
   create_presentation: { what: 'Builds a Google Slides presentation on your topic (paid extra, see Price menu)', say: '"make me a presentation about solar energy"' },
   create_form: { what: 'Creates a Google Form with your questions', say: '"make a sign-up form for the event"' },
+  photos_alege: { what: 'Lets you pick photos from your Google Photos (you choose in Google, privately)', say: '"let me pick some photos from my Google Photos"' },
+  photos_adu: { what: 'Brings the photos you picked onto the monitor', say: '"show the photos I picked"' },
+  youtube_urca: { what: 'Uploads a clip made here to your own YouTube channel (private until you publish it)', say: '"upload this clip to my YouTube"' },
   edit_doc: { what: 'Adds to or rewrites one of your Google Docs', say: '"add a paragraph to the meeting notes"' },
   create_sheet: { what: 'Makes a new Google Sheet from your data', say: '"put these numbers in a spreadsheet"' },
   edit_sheet: { what: 'Appends rows or fills cells in one of your sheets', say: '"add this row to the expenses sheet"' },

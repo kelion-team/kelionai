@@ -27,6 +27,7 @@ import {
   openWorkspaceBuild,
   openWorkspaceExecutie,
   adaugaPasExecutie,
+  getStareExecutie,
   closeWorkspace,
   closeTasksByKind,
   closeAllTasks,
@@ -564,8 +565,16 @@ export default function ChatPanel({
     // final (gata) doar închide bara la 100% — nu redeschide tabul dacă omul
     // l-a închis între timp.
     if (c.executie) {
+      // Tabul se deschide DOAR la ÎNCEPUTUL unei ture de execuție — nu la
+      // fiecare pas (bug 14 aug, captura ownerului: fiecare frame re-activa
+      // „Execuție în direct", iar cu microfonul mereu pornit turele curg
+      // întruna → tabul fura click-urile de pe celelalte taburi — „nu se
+      // poate trece din tab în tab, sau închide individual"). Conținutul
+      // suprafeței se hrănește ORICUM din starea vie (getStareExecutie),
+      // nu din re-deschidere — deci nimic nu se pierde.
+      const inainte = getStareExecutie()
       adaugaPasExecutie(c.executie.pas ?? '', c.executie.procent ?? 0, c.executie.gata === true)
-      if (!c.executie.gata) openWorkspaceExecutie(t.execTitle)
+      if (!c.executie.gata && (inainte === null || inainte.gata)) openWorkspaceExecutie(t.execTitle)
       return
     }
     // PANOUL CONSTRUCTORULUI (Etapa 4b): Kelion a preluat un ordin de build →
@@ -1251,16 +1260,15 @@ export default function ChatPanel({
         voiceFeatures,
         face?.descriptor,
         face?.photo,
-        // ECONOMIE PE SCRIS (9 aug, ownerul: „dacă i se scrie se răspunde doar
-        // scris… asta face economie?"): o tură SCRISĂ (spoken=false) NU mai
-        // cere voce Chirp de la server — text-in → text-out, fără sinteză
-        // plătită. MĂSURAT înainte: serverVoiceOff depindea DOAR de calea
-        // realtime veche (micRef.isRealtime), deci o tură scrisă în chat pur era
-        // rostită cu voce (audio pe text), iar în modul live TTS-ul se sintetiza
-        // și se arunca — cost irosit. Acum: fără voce pe scris; vocea rămâne DOAR
-        // pe turele vorbite (spoken) sau când sesiunea realtime e deja vocea.
-        // THE SINGLE-VOICE RULE se păstrează: sesiunea realtime rămâne singura voce.
-        !spoken || (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
+        // AUDIO OBLIGATORIU PE SCRIS (14 aug, 20:45, ordinul ownerului: „când
+        // apare ceva scris de la Kelion, obligatoriu e și audio" + „chat audio
+        // era prioritar") — ÎNLOCUIEȘTE economia din 9 aug („pe scris doar
+        // scris"), decizia mai nouă bate. Sinteza revine pe TOATE turele;
+        // singura excepție rămâne regula „o singură voce": când sesiunea
+        // realtime e deja vocea turei, serverul nu mai sintetizează a doua oară
+        // (altfel două guri ar vorbi peste ele). Conducta e UNICĂ, verificat:
+        // createVoiceStream pe server → frame-uri {audio} → audioIO în client.
+        (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
         // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
         spoken || undefined,
         // GUEST SPEAKER (the voice gate's verdict): the server strips ALL admin
