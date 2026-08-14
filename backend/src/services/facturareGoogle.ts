@@ -20,8 +20,10 @@ import { googleServiceAccount } from './googleCreds.js'
 
 /** Contul de facturare al ownerului (din linkul lui de reîncărcare). */
 const CONT_FACTURARE = process.env.GOOGLE_BILLING_ACCOUNT ?? '011729-7DA3DA-87ED94'
-/** Datasetul BigQuery în care ownerul pornește exportul (pasul 3 din consolă). */
-const DATASET = process.env.GOOGLE_BILLING_DATASET ?? 'facturare'
+/** Datasetul BigQuery în care ownerul A PORNIT exportul — VĂZUT în consolă la
+ *  activare (14 aug, captură: „Dataset name: Facturare"). Cu F MARE — BigQuery e
+ *  sensibil la litere, deci numele se ia din realitate, nu din presupunere. */
+const DATASET = process.env.GOOGLE_BILLING_DATASET ?? 'Facturare'
 /** Proiectul în care stă datasetul de export — VĂZUT în consola ownerului la
  *  activare (14 aug, captură: „Kelion (gen-lang-client-0460348646)"). Poate
  *  diferi de proiectul contului de serviciu — de-aia NU-l deducem din cont, îl
