@@ -90,4 +90,61 @@ describe('creditAI — Fable 5 (rezerva constructorului): verde/roșu, fără gr
     // Cheltuiala Fable NU e în jurnalul nostru — spune ONEST, nu raportează 0.
     expect(c.cheltuitLuna.masurat).toBe(false)
   })
+
+  it('fable5Chat apelează endpoint-ul oficial /v1/messages cu format Anthropic corect', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-valid'
+    let apelatUrl = ''
+    let apelatHeaders: Record<string, string> = {}
+    let apelatBody: any = null
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: any) => {
+        apelatUrl = url
+        apelatHeaders = init?.headers || {}
+        apelatBody = JSON.parse(init?.body || '{}')
+        return new Response(
+          JSON.stringify({
+            id: 'msg_123',
+            type: 'message',
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'gândire' },
+              { type: 'tool_use', id: 'call_1', name: 'read', input: { path: 'file.txt' } },
+            ],
+            usage: { input_tokens: 100, output_tokens: 50 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }),
+    )
+
+    const { fable5Chat } = await import('./services/fable5Constructor.js')
+    const res = await fable5Chat(
+      [
+        { role: 'system', content: 'instrucțiuni' },
+        { role: 'user', content: 'fă asta' },
+      ],
+      [
+        {
+          type: 'function',
+          function: { name: 'read', description: 'citește', parameters: { type: 'object' } },
+        },
+      ],
+    )
+
+    expect(apelatUrl).toBe('https://api.anthropic.com/v1/messages')
+    expect(apelatHeaders['x-api-key']).toBe('sk-ant-valid')
+    expect(apelatHeaders['anthropic-version']).toBe('2023-06-01')
+    expect(apelatBody.system).toBe('instrucțiuni')
+    expect(apelatBody.messages).toHaveLength(1)
+    expect(apelatBody.messages[0].role).toBe('user')
+    expect(apelatBody.tools).toHaveLength(1)
+    expect(apelatBody.tools[0].name).toBe('read')
+
+    expect(res.choices[0].message.content).toBe('gândire')
+    expect(res.choices[0].message.tool_calls).toHaveLength(1)
+    expect(res.choices[0].message.tool_calls![0].function?.name).toBe('read')
+    expect(res.usage.total_tokens).toBe(150)
+  })
 })

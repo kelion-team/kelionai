@@ -6,16 +6,18 @@
 // rută cade pe Fable 5 — tot AICI, în app, ca și cheia Anthropic să stea în app
 // (constructorul NU ține chei de furnizor, regula din 13 aug).
 //
-// Anthropic expune un endpoint OpenAI-COMPATIBIL (api.anthropic.com/v1/chat/
-// completions) → mesajele + uneltele constructorului (deja în format OpenAI) trec
-// DIRECT, fără conversie. Răspunsul iese în ACELAȘI format OpenAI ca de la creierul
-// 2 Gemini, deci restul buclei constructorului nu știe că a schimbat creierul.
+// Suportă:
+// 1) Anthropic direct (https://api.anthropic.com/v1/messages cu x-api-key și anthropic-version)
+// 2) Endpoint OpenAI-compatibil dacă CONSTRUCTOR_FABLE_URL sau ANTHROPIC_BASE_URL indică un proxy.
 //
-// FĂRĂ CHEIE = REZERVĂ INACTIVĂ, spus ONEST: `fable5Disponibil()` e false, ruta
-// rămâne DOAR pe Gemini. Nu se inventează un răspuns și nu se cheltuie pe ascuns.
+// Răspunsul iese în formatul cerut de constructor (OpenAI-compatible), compatibil
+// cu creierul 2 Gemini.
 
-const FABLE_URL = process.env.CONSTRUCTOR_FABLE_URL || 'https://api.anthropic.com/v1/chat/completions'
-const FABLE_MODEL = process.env.CONSTRUCTOR_FABLE_MODEL || 'claude-fable-5'
+import { recordCost } from '../db.js'
+import type { OrMessage, OrToolCall } from './brainContract.js'
+
+const FABLE_URL = process.env.CONSTRUCTOR_FABLE_URL || ''
+const FABLE_MODEL = process.env.CONSTRUCTOR_FABLE_MODEL || process.env.ANTHROPIC_MODEL || 'claude-3-7-sonnet-20250219'
 
 /** Cheia Fable 5 (Claude). Stă în app (`ANTHROPIC_API_KEY` pe VPS), NU în constructor. */
 export function fable5Key(): string {
@@ -27,29 +29,39 @@ export function fable5Disponibil(): boolean {
   return Boolean(fable5Key())
 }
 
-// ── PROBA DE VALIDITATE A CHEII (owner, 14 aug: becul verde a MINȚIT — cheia era
-// PUSĂ dar INVALIDĂ („API key is invalid" de la Anthropic, măsurat), rezerva a
-// fost moartă de la început, iar raportul spunea „rezervă gata"). Lecția: prezența
-// cheii NU e o măsurătoare. De-acum dovada se cere de la Anthropic: GET /v1/models
-// e GRATUIT și trece DOAR cu o cheie bună. Cache 10 min — panoul nu bombardează
-// API-ul, dar nici o minciună nu poate trăi mai mult de 10 minute.
+// ── PROBA DE VALIDITATE A CHEII ──────────────────────────────────────────────
+// Dovada se cere de la Anthropic: GET /v1/models e gratuit și trece doar cu cheie bună.
 const FABLE_MODELS_URL = 'https://api.anthropic.com/v1/models'
 const PROBA_CACHE_MS = 10 * 60_000
 let probaFable: { la: number; ok: boolean; motiv: string } | null = null
+
 /** Doar pentru teste: golește cache-ul probei. */
 export function _resetProbaFable(): void {
   probaFable = null
 }
+
 /** Cheia chiar POATE servi? Probă reală la Anthropic, nu „e pusă în env". */
 export async function fable5Valida(): Promise<{ ok: boolean; motiv: string }> {
   const key = fable5Key()
   if (!key) return { ok: false, motiv: 'cheia (ANTHROPIC_API_KEY) nu e pusă — rezervă inactivă' }
   if (probaFable && Date.now() - probaFable.la < PROBA_CACHE_MS) return probaFable
+
   try {
-    const r = await fetch(FABLE_MODELS_URL, {
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    const isCustomOpenAi = FABLE_URL.includes('/chat/completions') || FABLE_URL.includes('openrouter')
+    const url = isCustomOpenAi ? FABLE_URL : FABLE_MODELS_URL
+    const headers: Record<string, string> = isCustomOpenAi
+      ? { authorization: `Bearer ${key}` }
+      : { 'x-api-key': key, 'anthropic-version': '2023-06-01' }
+
+    const r = await fetch(url, {
+      method: isCustomOpenAi ? 'POST' : 'GET',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: isCustomOpenAi
+        ? JSON.stringify({ model: FABLE_MODEL, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 })
+        : undefined,
       signal: AbortSignal.timeout(8_000),
     })
+
     probaFable = {
       la: Date.now(),
       ok: r.ok,
@@ -59,8 +71,6 @@ export async function fable5Valida(): Promise<{ ok: boolean; motiv: string }> {
     }
     return probaFable
   } catch (e) {
-    // Rețeaua picată NU intră în cache (reîncercăm la următoarea citire). Becul e
-    // tot ROȘU: o rezervă pe care app-ul n-o poate atinge nu poate nici servi.
     return { ok: false, motiv: `nu pot proba cheia (rețea): ${String((e as Error)?.message ?? e).slice(0, 80)}` }
   }
 }
@@ -78,9 +88,73 @@ export interface RaspunsCreier {
   modelServit: string
 }
 
-/** Cheamă Fable 5 prin endpointul OpenAI-compatibil al Anthropic. Mesajele +
- *  uneltele sunt DEJA în format OpenAI → se trimit direct. Aruncă la orice eșec
- *  (ruta îl clasifică și îl întoarce constructorului, care reia onest). */
+/** Transformă uneltele din format OpenAI JSON Schema în format Anthropic tools */
+function toAnthropicTools(toolsRaw: unknown[]): unknown[] {
+  if (!Array.isArray(toolsRaw) || !toolsRaw.length) return []
+  return toolsRaw.map((t: any) => {
+    if (t?.type === 'function' && t?.function) {
+      return {
+        name: t.function.name,
+        description: t.function.description || '',
+        input_schema: t.function.parameters || { type: 'object', properties: {} },
+      }
+    }
+    return t
+  })
+}
+
+/** Transformă mesajele OpenAI în format Anthropic messages */
+function toAnthropicMessages(messages: unknown[]): { system?: string; messages: any[] } {
+  let system = ''
+  const msgs: any[] = []
+
+  for (const m of (messages as OrMessage[]) ?? []) {
+    if (m.role === 'system') {
+      system += (system ? '\n\n' : '') + (m.content || '')
+    } else if (m.role === 'user') {
+      msgs.push({ role: 'user', content: m.content || '' })
+    } else if (m.role === 'assistant') {
+      const content: any[] = []
+      if (m.content) content.push({ type: 'text', text: m.content })
+      if (m.tool_calls?.length) {
+        for (const tc of m.tool_calls) {
+          let input = {}
+          try {
+            input = JSON.parse(tc.function.arguments || '{}')
+          } catch {
+            input = {}
+          }
+          content.push({
+            type: 'tool_use',
+            id: tc.id || `tool_${Math.random().toString(36).slice(2, 8)}`,
+            name: tc.function.name,
+            input,
+          })
+        }
+      }
+      msgs.push({ role: 'assistant', content: content.length ? content : (m.content || '') })
+    } else if (m.role === 'tool') {
+      msgs.push({
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: m.tool_call_id || 'unknown_tool',
+            content: m.content || '',
+          },
+        ],
+      })
+    }
+  }
+
+  if (msgs.length === 0) {
+    msgs.push({ role: 'user', content: 'Ready.' })
+  }
+
+  return { system: system || undefined, messages: msgs }
+}
+
+/** Cheamă Fable 5 (Anthropic Claude). Mesajele + uneltele sunt convertite conform endpoint-ului. */
 export async function fable5Chat(
   messages: unknown[],
   tools: unknown[],
@@ -88,35 +162,76 @@ export async function fable5Chat(
 ): Promise<RaspunsCreier> {
   const key = fable5Key()
   if (!key) throw new Error('fable5_neconfigurat: lipsește ANTHROPIC_API_KEY în app')
-  const body: Record<string, unknown> = {
-    model: FABLE_MODEL,
-    messages,
-    max_tokens: 8192,
-    temperature: 0.7,
-  }
-  // Uneltele constructorului sunt în format OpenAI → trec direct; fără unelte nu
-  // trimitem câmpul (unele endpoint-uri resping `tools: []`).
-  // FORȚĂM CHEMAREA UNELTEI (owner, 14 aug: „nu ai fost în stare să legi Fable 5"):
-  // pe `auto`, Fable 5 putea răspunde cu TEXT în loc să cheme o unealtă → exact
-  // „tura sterilă" pe care am reparat-o la Gemini (ANY), dar o uitasem AICI, pe
-  // rezervă. Constructorul e agentic — n-are ture de vorbă; pe fiecare tură TREBUIE
-  // să cheme o unealtă (explorează / scrie / verifică sau `finish`). `required` =
-  // modul ANY al endpointului OpenAI-compat Anthropic.
-  if (Array.isArray(tools) && tools.length) {
-    body.tools = tools
-    body.tool_choice = 'required'
-  }
-  let r: Response
-  try {
-    r = await fetch(FABLE_URL, {
+
+  const isCustomOpenAi = FABLE_URL.includes('/chat/completions') || FABLE_URL.includes('openrouter')
+
+  if (isCustomOpenAi) {
+    const body: Record<string, unknown> = {
+      model: FABLE_MODEL,
+      messages,
+      max_tokens: 8192,
+      temperature: 0.7,
+    }
+    if (Array.isArray(tools) && tools.length) {
+      body.tools = tools
+      body.tool_choice = 'required'
+    }
+
+    const r = await fetch(FABLE_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(Math.max(30_000, opts.timeoutMs ?? 120_000)),
     })
+    if (!r.ok) {
+      const errText = await r.text().catch(() => '')
+      throw new Error(`fable5 HTTP ${r.status}: ${errText.slice(0, 200)}`)
+    }
+    const data = (await r.json()) as any
+    const message = data?.choices?.[0]?.message
+    if (!message) throw new Error('fable5: răspuns fără candidați')
+    const total = Number(data?.usage?.total_tokens)
+    const cost = (total / 1000) * 0.015
+    if (cost > 0) void recordCost('kelion-constructor', 'fable5', cost)
+    return {
+      choices: [{ message }],
+      usage: { total_tokens: Number.isFinite(total) ? total : 0 },
+      modelServit: `fable5/${FABLE_MODEL}`,
+    }
+  }
+
+  // Anthropic Official /v1/messages
+  const { system, messages: anthropicMsgs } = toAnthropicMessages(messages)
+  const anthropicTools = toAnthropicTools(tools as unknown[])
+
+  const payload: Record<string, unknown> = {
+    model: FABLE_MODEL,
+    messages: anthropicMsgs,
+    max_tokens: 8192,
+  }
+  if (system) payload.system = system
+  if (anthropicTools.length) {
+    payload.tools = anthropicTools
+    payload.tool_choice = { type: 'any' }
+  }
+
+  const endpoint = 'https://api.anthropic.com/v1/messages'
+  let r: Response
+  try {
+    r = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(Math.max(30_000, opts.timeoutMs ?? 120_000)),
+    })
   } catch (e) {
     throw new Error(`fable5 rețea: ${String((e as Error)?.message ?? e).slice(0, 200)}`)
   }
+
   const text = await r.text().catch(() => '')
   if (!r.ok) {
     if (r.status === 401 || r.status === 403) {
@@ -128,26 +243,49 @@ export async function fable5Chat(
     }
     throw new Error(`fable5 ${r.status}: ${text.slice(0, 200)}`)
   }
-  let parsed: {
-    choices?: { message?: { content?: unknown; tool_calls?: unknown } }[]
-    usage?: { total_tokens?: unknown }
-  }
+
+  let parsed: any
   try {
     parsed = JSON.parse(text)
   } catch {
     throw new Error(`fable5 JSON rupt (${text.length} caractere)`)
   }
-  const message = parsed?.choices?.[0]?.message
-  if (!message) throw new Error('fable5: răspuns fără candidați')
-  const content = typeof message.content === 'string' ? message.content : ''
-  const toolCalls = Array.isArray(message.tool_calls) ? (message.tool_calls as OpenAiToolCall[]) : []
-  if (!content.trim() && !toolCalls.length) throw new Error('fable5: răspuns gol (fără text/tool)')
-  const out: RaspunsCreier['choices'][0]['message'] = { role: 'assistant', content }
-  if (toolCalls.length) out.tool_calls = toolCalls
-  const total = Number(parsed?.usage?.total_tokens)
+
+  let outText = ''
+  const toolCalls: OpenAiToolCall[] = []
+
+  if (Array.isArray(parsed.content)) {
+    for (const block of parsed.content) {
+      if (block.type === 'text') {
+        outText += block.text
+      } else if (block.type === 'tool_use') {
+        toolCalls.push({
+          id: block.id,
+          type: 'function',
+          function: {
+            name: block.name,
+            arguments: JSON.stringify(block.input || {}),
+          },
+        })
+      }
+    }
+  }
+
+  const inTok = parsed?.usage?.input_tokens ?? 0
+  const outTok = parsed?.usage?.output_tokens ?? 0
+  const totalTokens = inTok + outTok
+  const cost = (inTok * 3 + outTok * 15) / 1_000_000
+  if (cost > 0) void recordCost('kelion-constructor', 'fable5', cost)
+
+  const outMsg: RaspunsCreier['choices'][0]['message'] = {
+    role: 'assistant',
+    content: outText,
+  }
+  if (toolCalls.length) outMsg.tool_calls = toolCalls
+
   return {
-    choices: [{ message: out }],
-    usage: { total_tokens: Number.isFinite(total) ? total : 0 },
+    choices: [{ message: outMsg }],
+    usage: { total_tokens: totalTokens },
     modelServit: `fable5/${FABLE_MODEL}`,
   }
 }
