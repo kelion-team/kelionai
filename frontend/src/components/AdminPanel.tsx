@@ -239,15 +239,24 @@ function BecuriCredit() {
       <div className="becuri-titlu">{A.becuriTitlu}</div>
       <div className="becuri-lista">
         {rows.map((f) => {
+          // ROȘUL SPUNE CAUZA MĂSURATĂ, NU PRESUPUNEREA (owner, 14 aug: becul
+          // Fable era roșu pe CHEIE INVALIDĂ, dar eticheta zicea „fără credit —
+          // adaugă bani" — în contul Anthropic erau 35 USD; banii nu lipseau,
+          // cheia era refuzată). Când proba «servește» are motivul, ăla se
+          // arată; genericul „fără credit" rămâne DOAR când chiar nu știm de ce.
+          const motivRosu =
+            f.serveste?.masurat && f.serveste.valoare && !f.serveste.valoare.da && f.serveste.valoare.detaliu
+              ? f.serveste.valoare.detaliu.slice(0, 140)
+              : undefined
           const stare =
             f.ramas.masurat && f.ramas.valoare
               ? `${f.ramas.valoare.cantitate} ${f.ramas.valoare.unitate}`
               : f.bec === 'rosu'
-                ? A.becuriReincarca
+                ? (motivRosu ?? A.becuriReincarca)
                 : f.bec === 'verde'
                   ? A.becuriServeste
                   : `${A.becuriNecunoscut}${f.ramas.motiv ? ` — ${f.ramas.motiv}` : ''}`
-          const titlu = f.bec === 'rosu' ? A.becuriReincarca : A.becuriDeschideFactura
+          const titlu = f.bec === 'rosu' ? (motivRosu ?? A.becuriReincarca) : A.becuriDeschideFactura
           const continut = (
             <>
               <span className={clasaBec(f.bec)} aria-hidden="true" />

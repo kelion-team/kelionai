@@ -3665,6 +3665,25 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
   return Number(r.rows[0]?.id ?? 0)
 }
 
+/** Câte ordine sunt ACTIVE (în coadă sau în lucru) de la un depunător anume.
+ *  Zgarda „un doctor pe pacient" (owner, 14 aug: „setezi 1 singur ordin identic,
+ *  că deschide ZECI"): auto-vindecarea nu mai depune un ordin nou pe o sursă cât
+ *  timp cel dinainte încă lucrează — aceeași cauză născuse #235/#236/#237/#248,
+ *  fiecare pe ~1M tokeni. */
+export async function activeBuildJobsByScope(orderedBy: string): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const r = await getPool().query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM build_jobs
+       WHERE ordered_by = $1 AND status IN ('queued','running')`,
+      [orderedBy.toLowerCase()],
+    )
+    return Number(r.rows[0]?.n ?? 0)
+  } catch {
+    return 0
+  }
+}
+
 /** Ordinele EȘUATE de tot din ultimele `hours` ore — pentru ochiul auto-vindecării
  *  (owner, 14 aug: „rezolvată definitiv partea cu eșuatul ordinelor"): un ordin
  *  mort nu are voie să moară în tăcere; alarma se dă o singură dată per ordin. */

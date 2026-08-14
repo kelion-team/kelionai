@@ -1,9 +1,24 @@
 import crypto from 'node:crypto'
 import {
   recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs,
-  simptomeLiveRecente, listFailedBuildJobsRecent,
+  simptomeLiveRecente, listFailedBuildJobsRecent, activeBuildJobsByScope,
 } from '../db.js'
 import { FISIERE_GAZDA, coadaLogGazda, semnaturiEroare } from './logGazda.js'
+
+/** UN DOCTOR PE PACIENT (owner, 14 aug: „setezi 1 singur ordin identic, că
+ *  deschide ZECI"): cât timp o sursă de vindecare are deja un ordin ÎN COADĂ sau
+ *  ÎN LUCRU, nu se mai depune altul de pe aceeași sursă — variațiile aceleiași
+ *  cauze nășteau ordine în serie (#235/#236/#237/#248, ~1M tokeni fiecare), iar
+ *  fixul primului le-ar fi stins oricum pe restul. Dedup-ul pe semnătură rămâne
+ *  (el oprește REPETAREA aceleiași erori); zgarda asta oprește ROIUL de frați. */
+async function sursaOcupata(scope: string): Promise<boolean> {
+  const active = await activeBuildJobsByScope(scope)
+  if (active > 0) {
+    console.log(`[self-heal] ${scope}: ${active} ordin(e) încă în lucru — nu depun altul până nu se termină (un doctor pe pacient)`)
+    return true
+  }
+  return false
+}
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { geminiLive } from './geminiDirect.js'
@@ -87,6 +102,7 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
   const errors = await recurringClientErrors(24, 3, 1)
   for (const e of errors) {
     if (filed >= 3) break
+    if (await sursaOcupata('kelion-autovindecare')) break // un doctor pe pacient
     const sig = signature(e.message)
     const key = `selfheal:${sig}`
     if (await loadKv(key)) continue // already filed — we don't duplicate
@@ -120,6 +136,7 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
   const simptome = await simptomeLiveRecente(6, 1).catch(() => [])
   for (const s of simptome) {
     if (filedLive >= 3) break
+    if (await sursaOcupata('kelion-autovindecare-live')) break // un doctor pe pacient
     if (s.count < pragPentru(s.fel)) continue // nu e (încă) un tipar — nu-l reparăm orbește
     const sig = signature(`${s.fel} ${s.message}`)
     const key = `selfheal-live:${sig}`
@@ -170,10 +187,13 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
   // încă → se sare tăcut (coadaLogGazda spune motivul, nu inventează).
   let filedGazda = 0
   for (const fisier of FISIERE_GAZDA) {
+    if (await sursaOcupata('kelion-autovindecare-gazda')) break // un doctor pe pacient
     const coada = await coadaLogGazda(fisier)
     if (!coada.ok) continue
     for (const linie of semnaturiEroare(coada.text)) {
-      if (filedGazda >= 2 || filed >= 5) break
+      // UNICAT (owner): cel mult UN ordin de gazdă per rulare — și oricum
+      // niciunul nou cât timp cel dinainte e viu (sursaOcupata, mai sus).
+      if (filedGazda >= 1 || filed >= 5) break
       const sig = signature(`${fisier} ${linie}`)
       const cheieFiled = `selfheal-gazda:${sig}`
       if (await loadKv(cheieFiled)) continue
