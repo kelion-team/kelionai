@@ -118,7 +118,16 @@ export async function fable5Chat(
     throw new Error(`fable5 rețea: ${String((e as Error)?.message ?? e).slice(0, 200)}`)
   }
   const text = await r.text().catch(() => '')
-  if (!r.ok) throw new Error(`fable5 ${r.status}: ${text.slice(0, 200)}`)
+  if (!r.ok) {
+    if (r.status === 401 || r.status === 403) {
+      probaFable = {
+        la: Date.now(),
+        ok: false,
+        motiv: `cheia e PUSĂ dar Anthropic o REFUZĂ (HTTP ${r.status}) — rezerva NU poate servi; pune o cheie nouă din console.anthropic.com`,
+      }
+    }
+    throw new Error(`fable5 ${r.status}: ${text.slice(0, 200)}`)
+  }
   let parsed: {
     choices?: { message?: { content?: unknown; tool_calls?: unknown } }[]
     usage?: { total_tokens?: unknown }

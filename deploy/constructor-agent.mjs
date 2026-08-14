@@ -645,7 +645,11 @@ async function llmGemini(messages) {
     throw new Error(`creier 2 rețea: ${String(e?.message ?? e).slice(0, 200)}`)
   }
   const text = await r.text().catch(() => '')
-  if (!r.ok) throw new Error(`creier 2 ${r.status}: ${text.slice(0, 200)}`)
+  if (!r.ok) {
+    const err = new Error(`creier 2 ${r.status}: ${text.slice(0, 200)}`)
+    err.status = r.status
+    throw err
+  }
   let parsed
   try {
     parsed = JSON.parse(text)
@@ -693,9 +697,11 @@ async function llm(messages) {
       return rez
     } catch (e) {
       lastErr = String(e?.message ?? e)
-      // 401 de la app = bridge-secret greșit; nicio reîncercare n-o repară → fatal.
-      if (/\b401\b/.test(lastErr)) {
-        log(`llm [fatal] — app a refuzat creierul (bridge-secret?): ${lastErr.slice(0, 160)}`)
+      // 401 direct de la app = bridge-secret greșit; nicio reîncercare n-o repară → fatal.
+      // Verificăm strict statusul HTTP 401 direct de la ruta /api/constructor/creier
+      // (nu "401" apărut într-un corp de răspuns 502 al unui furnizor secundar).
+      if (e?.status === 401 || /^creier 2 401\b/.test(lastErr)) {
+        log(`llm [fatal] — app a refuzat creierul (bridge-secret incorect): ${lastErr.slice(0, 160)}`)
         throw Object.assign(new Error(lastErr), { fatal: true })
       }
       if (attempt === LLM_ATTEMPTS) break
