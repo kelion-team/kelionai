@@ -7,6 +7,12 @@ set -u
 LOCK=/root/kelion/constructor.lock
 exec 9>"$LOCK"
 flock -n 9 || exit 0
+
+# Rotație log: dacă constructor.log depășește 2MB, păstrează doar ultimii 512KB
+LOG=/root/kelion/constructor.log
+if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 2097152 ]; then
+  tail -c 524288 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
 # TIMEOUT + OMORÂREA ORFANILOR (owner, 13 aug, incident VPS 1000%): `timeout`
 # omoară doar procesul node PĂRINTE; build-urile copil (npm/tsc/vite din atelier,
 # măsurat: un `npm run build` a durat 10+ MINUTE pe mașina sufocată) reparinte la

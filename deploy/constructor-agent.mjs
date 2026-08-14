@@ -130,7 +130,7 @@ function beat(text, acum = false) {
 }
 
 function log(s) {
-  const line = `[${new Date().toISOString().slice(11, 19)}] ${s}`
+  const line = `[${new Date().toISOString()}] ${s}`
   console.log(line)
   logLines.push(line)
   beat(s) // pasul curent → monitorul lui Kelion (throttlat în beat)
