@@ -489,17 +489,21 @@ try {
   }, 60 * 60 * 1000)
   // SELF-HEALING (Adrian, 27 Jul): Kelion collects the users' RECURRING errors
   // by itself and sends them to the builder for repair (PR → merge → all users
-  // get the repaired version). 3 min after boot, then every 30 min.
-  // OFF BY DEFAULT (9 aug): self-heal sondează Gemini + umple coada
-  // constructorului; fără comutatorul autonom pornit, no-op (o citire KV).
+  // get the repaired version). 1 min after boot, then every 5 min.
+  // MAI APROAPE DE „IMEDIAT" (owner, 14 aug: „monitorizează TOATE logurile și
+  // repară imediat cum apar"): ciclul a coborât 30 min → 5 min, ca reparația să
+  // pornească în minute de la un tipar, nu într-o jumătate de oră. NU pe fiecare
+  // eroare singură (regula #1 + „nu mai bag bani"): tot cere RECURENȚĂ (2-3
+  // apariții) ca un fluke tranzitoriu să nu ardă un PR/credit degeaba, și rămâne
+  // sub plafonul zilnic. Când comutatorul autonom e OFF, tura e un no-op ieftin.
   const vindeca = async (): Promise<void> => {
     if (!(await autonomActiv())) return
     await runSelfHeal().catch(() => {})
   }
   setTimeout(() => {
     void vindeca()
-    setInterval(() => { void vindeca() }, 30 * 60 * 1000)
-  }, 3 * 60 * 1000)
+    setInterval(() => { void vindeca() }, 5 * 60 * 1000)
+  }, 60 * 1000)
   // ISCOADELE (Adrian, 4 aug: „boti care bat netul 24 din 24 si aduc informati
   // lui kelion"): patrula periodică Serper→creier→memoria lui Kelion.
   pornesteIscoadele()
