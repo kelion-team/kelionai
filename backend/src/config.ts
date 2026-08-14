@@ -235,16 +235,17 @@ export const config = {
   get geminiModelGreu(): string {
     return modelUnicCod()
   },
-  // ── CREIERUL 2 (constructorul) = GEMINI „ULTRA" (owner, 14 aug: „ultra ca al
-  // doilea creier, da? primul e blocat") ─────────────────────────────────────
-  // CHATUL rămâne pe modelul unic SIGILAT (flash — la vorbă viteza contează, iar
-  // proba din 7 aug l-a ales pe măsurători). CONSTRUCTORUL n-are nevoie de
-  // viteză, are nevoie de PUTERE: lucrează în fundal, un pas poate aștepta și
-  // 70s. `gemini-pro-latest` = aliasul oficial care arată MEREU spre cel mai
-  // puternic Pro publicat (20/20 la proba ownerului) — urcă singur la fiecare
-  // Pro nou, fără deploy. Suprascriibil prin env (CONSTRUCTOR_GEMINI_MODEL).
+  // ── CREIERUL 2 (constructorul) = gemini-3.7-flash (DECIZIA ownerului, 14 aug:
+  // „a apărut 3.7… l-am verificat eu, pune-l la creierul 2") ─────────────────
+  // CHATUL rămâne pe modelul unic SIGILAT (3.5-flash) — auto-upgrade-ul l-a
+  // refuzat CORECT pe 3.7 acolo (poarta „toate probele sau nimic": 3.7 a picat
+  // „fără-invenție", 19/20 vs 20/20 — măsurat 14 aug cu proba-calitate).
+  // Ownerul l-a verificat el și l-a ales EXPLICIT pentru constructor, unde
+  // porțile de cod (7 porți + verdict pe mașină curată) prind oricum orice
+  // invenție. NU știe live (fără bidiGenerateContent — măsurat pe API): vocea
+  // nu-l atinge. Suprascriibil prin env (CONSTRUCTOR_GEMINI_MODEL).
   get constructorGeminiModel(): string {
-    return process.env.CONSTRUCTOR_GEMINI_MODEL ?? 'gemini-pro-latest'
+    return process.env.CONSTRUCTOR_GEMINI_MODEL ?? 'gemini-3.7-flash'
   },
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă

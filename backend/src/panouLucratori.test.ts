@@ -93,8 +93,13 @@ describe('judecata e a creierului, dar pe fapte', () => {
     expect(panou).toMatch(/Fișiere atinse/)
   })
 
-  it('i se spune să nu aleagă o propunere care pică testele', () => {
-    expect(panou).toMatch(/PICĂ testele nu se alege decât dacă toate pică/)
+  // ÎNTĂRIT 14 aug (PR-urile goale #1082-1084: teste picate + o linie în
+  // .gitignore → tot PR, „deși nu rezolvă sarcina" — bani arși + zgomot):
+  // o propunere cu testele ROȘII nu mai e „ultima opțiune", e ZERO opțiune.
+  it('o propunere care PICĂ testele nu ajunge nici la judecată, nici la PR', () => {
+    expect(panou).toMatch(/p\.testeTrec !== false/)
+    expect(panou).toMatch(/NU deschid PR pe produs picat/)
+    expect(panou).toMatch(/PICĂ testele nu ajung la tine deloc/)
   })
 
   // The lesson of the day, put into the judging instruction: on Jul 31 a

@@ -187,9 +187,16 @@ async function randGemini(): Promise<CreditAI> {
     if (!r.ok) {
       ramas = picat(cumRamas, `am creditul spus de tine (£${declarat.gbp}), dar ${r.motiv}`, Date.now() - t0)
     } else {
+      // „£0.00" NU înseamnă creier mort (14 aug: estimarea pe zero a fost citită
+      // drept „Gemini nu poate" — dar creierul RĂSPUNDEA, a și construit #230 cu
+      // 2,3M tokeni). Estimarea e declarativă și se învechește; adevărul despre
+      // capacitate e becul «servește» (apel REAL la model). Când estimarea ajunge
+      // pe zero, o spunem în clar, ca cifra să nu mai poată fi citită drept verdict.
+      const notaZero =
+        r.ramasGbp <= 0 ? ' · ATENȚIE: estimare pe declarația ta (posibil veche), NU soldul Google — capacitatea reală o arată becul «servește»' : ''
       ramas = reusit(
         `${cumRamas} — spus de tine: £${declarat.gbp}${declarat.at ? ` la ${declarat.at.slice(0, 10)}` : ''}; ` +
-          `cheltuit de atunci: $${r.scazutUsd.toFixed(2)} × curs ${r.curs.toFixed(4)}`,
+          `cheltuit de atunci: $${r.scazutUsd.toFixed(2)} × curs ${r.curs.toFixed(4)}${notaZero}`,
         { cantitate: r.ramasGbp, unitate: 'GBP' },
         Date.now() - t0,
       )

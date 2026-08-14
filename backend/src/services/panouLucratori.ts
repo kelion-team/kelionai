@@ -136,9 +136,25 @@ export async function ruleazaPanou(
       spune(`${p.lucrator}: ${p.aSchimbat ? `${p.fisiere} fișiere, teste ${p.testeTrec ? 'TREC' : p.testeTrec === null ? 'nerulate' : 'PICĂ'}` : (p.motiv ?? 'nimic')}`)
     }
 
-    const valide = propuneri.filter((p) => p.ok && p.aSchimbat)
+    // ── FĂRĂ PRODUS REAL → FĂRĂ PR (owner, 14 aug) ───────────────────────────
+    // PR-urile #1082-1084: agenții n-au produs DECÂT o linie în .gitignore, cu
+    // testele PICATE, iar panoul tot a deschis PR „fiindcă era singura opțiune"
+    // — bani arși pe trei creiere + zgomot în repo, cu textul „deși nu rezolvă
+    // sarcina". De-acum o propunere cu testele ROȘII nu e un produs: nu intră la
+    // judecată și nu ajunge PR. `null` (nerulate) rămâne admis — nu e „au picat",
+    // iar porțile de pe VPS le rulează oricum înainte de orice merge.
+    const valide = propuneri.filter((p) => p.ok && p.aSchimbat && p.testeTrec !== false)
     if (!valide.length) {
-      return { ok: true, pornit: echipa.map((l) => l.nume), lipsa, propuneri, motiv: 'niciun lucrător n-a produs o modificare' }
+      const auIncercat = propuneri.some((p) => p.ok && p.aSchimbat)
+      return {
+        ok: true,
+        pornit: echipa.map((l) => l.nume),
+        lipsa,
+        propuneri,
+        motiv: auIncercat
+          ? 'niciun lucrător n-a produs o modificare cu testele verzi — NU deschid PR pe produs picat (banii s-au cheltuit, dar un PR gol ar fi costat și timpul tău)'
+          : 'niciun lucrător n-a produs o modificare',
+      }
     }
 
     // ── THE JUDGMENT ─────────────────────────────────────────────────────────
@@ -150,7 +166,8 @@ export async function ruleazaPanou(
       `SARCINA CERUTĂ DE OWNER:\n> ${text}\n\n` +
       valide.map(rezuma).join('\n\n') +
       `\n\n---\nCUM ALEGI, în ordinea asta:\n` +
-      `1. O propunere care PICĂ testele nu se alege decât dacă toate pică.\n` +
+      `1. Propunerile care PICĂ testele nu ajung la tine deloc (filtrate înainte);\n` +
+      `   una cu testele NERULATE se alege doar dacă niciuna nu le are verzi.\n` +
       `2. Rezolvă CAUZA cerută, nu simptomul, și nu face altceva pe lângă.\n` +
       `3. Mai puțin cod care face treaba bate mai mult cod. Dar 5 rânduri care\n` +
       `   repară cauza bat 200 care ascund simptomul — nu număra, judecă.\n` +
