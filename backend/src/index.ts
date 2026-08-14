@@ -53,6 +53,7 @@ import { pingRoutes } from './routes/ping.js'
 import { constructorViuRoutes } from './routes/constructorViu.js'
 import { constructorStareRoutes } from './routes/constructorStare.js'
 import { jobsRoutes } from './routes/jobs.js'
+import { deployRoutes } from './routes/deploy.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive, loadKv, saveKv } from './db.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
@@ -325,6 +326,7 @@ await app.register(pingRoutes)
 await app.register(constructorViuRoutes)
 await app.register(constructorStareRoutes)
 await app.register(jobsRoutes)
+await app.register(deployRoutes)
 await app.register(manualRoutes)
 await app.register(enterpriseRoutes)
 await app.register(a2aRoutes)
