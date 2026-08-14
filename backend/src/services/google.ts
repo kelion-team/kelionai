@@ -957,6 +957,18 @@ async function createCalendarEvent(
   return JSON.stringify({ created: true, summary, start, link: j.htmlLink ?? '', meetLink: meet ? (meetLink ?? '') : undefined })
 }
 
+// UN SINGUR batchUpdate pentru Slides + Forms (jscpd, 14 aug — cele două
+// blocuri identice au picat poarta de duplicat). null = a mers; altfel
+// statusul HTTP, ca apelantul să-și spună avertismentul lui.
+async function batchUpdateGoogle(url: string, requests: unknown[], token: string): Promise<number | null> {
+  const r = await tfetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests }),
+  })
+  return r.ok ? null : r.status
+}
+
 // ── GOOGLE SLIDES (owner, 14 aug: produsele alese — „vreau să le văd") ───────
 // Creează prezentarea + câte un slide TITLE_AND_BODY per intrare, cu textele
 // puse prin placeholderIdMappings (calea documentată — fără ghicit de id-uri).
@@ -1003,16 +1015,12 @@ async function createPresentation(
       if (s.corp) reqs.push({ insertText: { objectId: corpId, text: s.corp } })
       return reqs
     })
-    const uRes = await tfetch(`https://slides.googleapis.com/v1/presentations/${id}:batchUpdate`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests }),
-    })
     // Prezentarea EXISTĂ deja — un eșec la umplere se spune, nu se ascunde.
-    if (!uRes.ok) {
+    const status = await batchUpdateGoogle(`https://slides.googleapis.com/v1/presentations/${id}:batchUpdate`, requests, token)
+    if (status !== null) {
       return JSON.stringify({
         created: true, id, url: `https://docs.google.com/presentation/d/${id}/edit`,
-        avertisment: `prezentarea s-a creat, dar umplerea slide-urilor a picat (HTTP ${uRes.status}) — deschide-o și completeaz-o`,
+        avertisment: `prezentarea s-a creat, dar umplerea slide-urilor a picat (HTTP ${status}) — deschide-o și completeaz-o`,
       })
     }
   }
@@ -1046,15 +1054,11 @@ async function createForm(title: string, description: string, questions: unknown
     }),
   )
   if (requests.length) {
-    const uRes = await tfetch(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests }),
-    })
-    if (!uRes.ok) {
+    const status = await batchUpdateGoogle(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, requests, token)
+    if (status !== null) {
       return JSON.stringify({
         created: true, id: cj.formId, url: cj.responderUri ?? `https://docs.google.com/forms/d/${cj.formId}/edit`,
-        avertisment: `formularul s-a creat, dar întrebările nu au intrat (HTTP ${uRes.status}) — deschide-l și completează-l`,
+        avertisment: `formularul s-a creat, dar întrebările nu au intrat (HTTP ${status}) — deschide-l și completează-l`,
       })
     }
   }
