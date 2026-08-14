@@ -25,6 +25,32 @@ import { notifyAdmin } from '../services/adminNotification.js'
 // loop on the Gemini API (the owner's key, hard caps), which works in a
 // separate clone (the workshop), runs build + tests and opens the PR. THE
 // MERGE STAYS WITH ADRIAN (his rule, Jul 27: "me doing the merge is ok").
+// ── ALARMA DE CREIER CĂZUT ÎN LANȚ (owner, 14 aug: „constructorul blocat… nu
+// știu cum raportezi funcțional" + „trebuie rezolvată definitiv partea cu
+// eșuatul ordinelor"). Un ordin al cărui creier pică NU moare — se reia
+// („amânabil") — dar până azi cicla ÎN TĂCERE: 5% pe panou ore întregi, niciun
+// semn către owner, iar motivul EXACT (cheie invalidă, credit terminat) murea
+// în log. De-acum: la 3 eșecuri CONSECUTIVE ale rutei de creier, notificare
+// TARE în panou cu motivul măsurat — cel mult una la 30 min (semnal, nu spam).
+// Orice succes (oricare creier) resetează numărătoarea.
+let esecuriCreierLaRand = 0
+let ultimaAlarmaCreierLa = 0
+function creierApicat(motiv: string): void {
+  esecuriCreierLaRand++
+  const acum = Date.now()
+  if (esecuriCreierLaRand >= 3 && acum - ultimaAlarmaCreierLa > 30 * 60_000) {
+    ultimaAlarmaCreierLa = acum
+    void notifyAdmin(
+      'scris',
+      'Creierul constructorului pică în lanț — ordinele NU avansează',
+      `${esecuriCreierLaRand} cereri de creier picate la rând. Motivul măsurat: „${motiv.slice(0, 300)}". ` +
+        'Ordinele se reiau singure când creierul își revine — dar până atunci stau pe loc. ' +
+        'De verificat: creditul Gemini și cheia ANTHROPIC_API_KEY (becul Fable 5 arată proba reală).',
+      { esecuri: esecuriCreierLaRand, motiv: motiv.slice(0, 300) },
+    ).catch(() => 0)
+  }
+}
+
 // Becul LIVE per AI-constructor, cheiat pe subșirul stabil (becFurnizor):
 // creditAI dă numele complet al furnizorului, îl potrivim cu `includes`. Un AI
 // fără rând de credit rămâne necunoscut (fără cheie), nu „verde" inventat.
@@ -223,6 +249,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
           // ruta constructorului n-o folosea.)
           const r = await geminiDirectChat(model, messages, tools, { reasoning: 'high', toolChoice: 'required' })
           if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
+          esecuriCreierLaRand = 0 // creierul a servit — lanțul de eșecuri s-a rupt
           return reply.send(raspunsCreier2(r))
         } catch (e) {
           gemeniEsec = (e as Error).message.slice(0, 200)
@@ -238,17 +265,19 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       const { fable5Disponibil, fable5Chat } = await import('../services/fable5Constructor.js')
       if (fable5Disponibil()) {
         try {
-          return reply.send(await fable5Chat(messages, rawTools))
+          const rasp = await fable5Chat(messages, rawTools)
+          esecuriCreierLaRand = 0 // rezerva a servit — lanțul de eșecuri s-a rupt
+          return reply.send(rasp)
         } catch (e) {
-          return reply
-            .code(502)
-            .send({ error: `creier_esec: gemini(${gemeniEsec}) → fable5(${(e as Error).message.slice(0, 160)})` })
+          const motiv = `creier_esec: gemini(${gemeniEsec}) → fable5(${(e as Error).message.slice(0, 160)})`
+          creierApicat(motiv) // AMBELE creiere jos — la 3 la rând, alarmă în panou
+          return reply.code(502).send({ error: motiv })
         }
       }
       // Nici Gemini, nici rezerva Fable 5 (fără ANTHROPIC_API_KEY în app) — onest.
-      return reply.code(gemeniEsec.includes('indisponibil') ? 503 : 502).send({
-        error: `creier_esec: gemini(${gemeniEsec}); rezerva Fable 5 INACTIVĂ (pune ANTHROPIC_API_KEY în app)`,
-      })
+      const motiv = `creier_esec: gemini(${gemeniEsec}); rezerva Fable 5 INACTIVĂ (pune ANTHROPIC_API_KEY în app)`
+      creierApicat(motiv)
+      return reply.code(gemeniEsec.includes('indisponibil') ? 503 : 502).send({ error: motiv })
     },
   )
 
