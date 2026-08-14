@@ -50,7 +50,7 @@ LIVE=$(curl -s -m 8 http://127.0.0.1:8080/api/version | grep -o '"v":"[^"]*"' | 
 # LKG = starea BUNĂ de dinainte de publicare (ce e live ACUM). O reținem înainte
 # de swap, ca plasa de sănătate să știe la ce să revină dacă publicarea nouă crapă.
 LKG=$LIVE
-echo "[auto-publicare] $(date -u +%H:%M:%S) live=$LIVE master=$SHORT — public"
+echo "[auto-publicare] $(date -u +%H:%M:%S) live=$LIVE master=$SHORT — public" >> /root/kelion/auto-publicare.log 2>&1
 bash "$REPO/deploy/deploy.sh" >> /root/kelion/auto-publicare.log 2>&1
 
 # 4. PLASA DE SĂNĂTATE (Adrian, 12 aug: „backup înainte; după merged verificare de
