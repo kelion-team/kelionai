@@ -38,15 +38,34 @@ const MIROASE_A_CREDENTIAL = /(TOKEN|KEY|SECRET|PASSW|CREDENTIAL|AUTH|DATABASE_U
 const PERMISE = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR']
 
 /**
- * Mediul serverului de probă: lista albă + cele trei valori generate acum.
- * `SESSION_SECRET` e singura excepție de la regula de mai sus — e generat aici,
- * există zece minute și nu deschide decât ușa instanței noastre locale.
+ * FALSURILE OBLIGATORII (măsurat 14 aug: porțile proba-rute/proba-scriere au
+ * PICAT pe VPS cu „env obligatoriu LIPSĂ sau GOL: GOOGLE_CLIENT_ID"). Cauza:
+ * două gărzi bune s-au contrazis — fail-fast-ul din config.ts (audit 9 aug)
+ * cere numele Google la boot pe NODE_ENV=production, iar mediul de probă (8
+ * aug) le curăță PE TOATE, cu bună știință. Împăcarea: probele primesc valori
+ * FALSE, scrise AICI ca niște constante — serverul bootează și își face drumul
+ * prin cod, dar Google refuză orice cerere cu ele, deci niciun drum nu duce
+ * afară. NU sunt moștenite din mediu (exact ce păzește auto-verificarea), de
+ * aceea sunt scutite de testul de miros — la fel ca SESSION_SECRET-ul generat.
+ */
+const FALSURI_PROBEI = {
+  GOOGLE_CLIENT_ID: 'proba-locala-fals.apps.googleusercontent.com',
+  GOOGLE_CLIENT_SECRET: 'proba-locala-fals-niciun-drum-afara',
+  GOOGLE_REDIRECT_URI: 'http://localhost/proba-fals/callback',
+}
+
+/**
+ * Mediul serverului de probă: lista albă + valorile generate acum + falsurile
+ * obligatorii. `SESSION_SECRET` și falsurile sunt singurele excepții de la
+ * testul de miros — toate se nasc în fișierul ăsta, nu vin din mediu, și nu
+ * deschid decât ușa instanței noastre locale.
  */
 export function mediuCurat({ port, secret, email }) {
-  const env = { NODE_ENV: 'production', PORT: String(port), SESSION_SECRET: secret, ADMIN_EMAIL: email }
+  const env = { NODE_ENV: 'production', PORT: String(port), SESSION_SECRET: secret, ADMIN_EMAIL: email, ...FALSURI_PROBEI }
   for (const n of PERMISE) if (process.env[n] != null) env[n] = process.env[n]
 
-  const scapate = Object.keys(env).filter((n) => n !== 'SESSION_SECRET' && MIROASE_A_CREDENTIAL.test(n))
+  const scutite = new Set(['SESSION_SECRET', ...Object.keys(FALSURI_PROBEI)])
+  const scapate = Object.keys(env).filter((n) => !scutite.has(n) && MIROASE_A_CREDENTIAL.test(n))
   if (scapate.length) {
     throw new Error(`mediul de probă conține nume de credențial: ${scapate.join(', ')}`)
   }

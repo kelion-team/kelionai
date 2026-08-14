@@ -25,6 +25,8 @@ import {
   openWorkspaceDoc,
   openWorkspaceApp,
   openWorkspaceBuild,
+  openWorkspaceExecutie,
+  adaugaPasExecutie,
   closeWorkspace,
   closeTasksByKind,
   closeAllTasks,
@@ -554,6 +556,16 @@ export default function ChatPanel({
     // PLAYGROUND: the page written by Kelion runs live on the monitor (sandboxed frame).
     if (c.app && c.app.html.trim()) {
       openWorkspaceApp(c.app.title || t.monitorTitle, c.app.html)
+      return
+    }
+    // EXECUȚIA PAS CU PAS (owner, 14 aug: „să arate fiecare pas pe monitor…
+    // cu bara de evoluție de la 0 la 100%"): fiecare frame {executie} intră în
+    // starea vie și ține suprafața 'executie' deschisă pe monitor. Frame-ul
+    // final (gata) doar închide bara la 100% — nu redeschide tabul dacă omul
+    // l-a închis între timp.
+    if (c.executie) {
+      adaugaPasExecutie(c.executie.pas ?? '', c.executie.procent ?? 0, c.executie.gata === true)
+      if (!c.executie.gata) openWorkspaceExecutie(t.execTitle)
       return
     }
     // PANOUL CONSTRUCTORULUI (Etapa 4b): Kelion a preluat un ordin de build →

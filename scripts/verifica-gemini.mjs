@@ -123,27 +123,34 @@ function regulaFaraEnvModel() {
   }
 }
 
-// CONSTRUCTORUL (autonomia) A FOST MUTAT DE PE GEMINI de owner (12 aug: „nu are ce
-// căuta Gemini acolo"; înainte „doar RunPod" → DeepInfra). Regula veche cerea ca
-// modelul constructorului să fie Gemini — acum contrazice ordinul ownerului. O
-// INVERSĂM: lacătul păzește ca acest creier să RĂMÂNĂ un endpoint OpenAI-compatibil
-// (RunPod/DeepInfra din env) și să NU recadă pe Gemini. Celelalte reguli (creierul
-// APLICAȚIEI — chat/voce/work) rămân neatinse: acolo Gemini e în continuare bătut
-// în cuie. Măsurat 12 aug: Qwen3-Coder-480B-Turbo pe DeepInfra e supraîncărcat
-// (engine_overloaded, 0 tool_calls); DeepSeek-V3/Qwen2.5-72B/Llama merg pe aceeași
-// cheie → constructorul rulează pe DeepSeek-V3 cu rotire pe rezerve.
+// ISTORIA REGULII, ca lacătul să nu mai rămână în urmă mut:
+//   • 12 aug (owner): constructorul mutat de pe Gemini pe RunPod/DeepInfra —
+//     regula de atunci cerea cheia OpenAI-compatibilă în constructor.
+//   • 14 aug (owner, verbatim): „schimbă-mi constructorul cu gemeni ultra… când
+//     nu merge repara să cadă pe fable 5, înlocuiește peste tot" + „nu mai bag
+//     bani" (RunPod 402 îi omora ordinele, dovada în emailurile #213).
+// ADEVĂRUL NOU, păzit de-acum: constructorul NU ține NICIO cheie de furnizor
+// (regula din 13 aug); creierul lui vine PRIN APP, pe /api/constructor/creier
+// (Gemini principal → Fable 5 rezervă, ambele rulate în app). Lacătul s-a
+// schimbat ODATĂ cu ordinul ownerului — exact procedura scrisă la finalul
+// raportului: acordul lui + modificarea lacătului, împreună.
 function regulaConstructorFaraGemini() {
   return {
-    nume: 'Constructorul (autonomia) = endpoint OpenAI-compatibil (DeepInfra), NU Gemini',
+    nume: 'Constructorul (autonomia): creierul PRIN APP (/api/constructor/creier), FĂRĂ chei de furnizor',
     fisier: 'deploy/constructor-agent.mjs',
     verifica(src) {
-      // Trebuie să-și ia creierul din env-ul OpenAI-compatibil (ambele nume: nou
-      // RUNPOD_*, vechi DEEPSEEK_* — cheia stă pe VPS sub numele vechi).
-      if (!/env\.CONSTRUCTOR_RUNPOD_KEY\s*\|\|\s*env\.CONSTRUCTOR_DEEPSEEK_KEY/.test(src))
-        return 'constructorul nu mai citește cheia endpointului OpenAI-compatibil (CONSTRUCTOR_RUNPOD_KEY/CONSTRUCTOR_DEEPSEEK_KEY) — structura s-a schimbat'
-      // ȘI nu trebuie să mai cheme Gemini (niciun apel către API-ul Google).
+      // Trebuie să-și ceară creierul de la app (endpointul gardat cu bridge-secret).
+      if (!/\/api\/constructor\/creier/.test(src))
+        return 'constructorul nu mai cheamă /api/constructor/creier — creierul trebuie să vină PRIN APP (Gemini → Fable 5), nu direct de la vreun furnizor'
+      // Și NU are voie să redevină client direct de furnizor (regula 13 aug:
+      // constructorul nu ține chei) — nici RunPod/DeepInfra, nici Gemini direct,
+      // nici Anthropic direct.
+      if (/env\.CONSTRUCTOR_RUNPOD_KEY|env\.CONSTRUCTOR_DEEPSEEK_KEY|deepinfra\.com|api\.runpod/.test(src))
+        return 'a reapărut clientul direct RunPod/DeepInfra în constructor — creierul merge DOAR prin app (ordinul din 14 aug: „nu mai bag bani")'
       if (/generativelanguage\.googleapis\.com/.test(src))
-        return 'a reapărut un apel Gemini (generativelanguage.googleapis.com) în constructor — owner: „nu are ce căuta Gemini acolo"'
+        return 'a reapărut un apel Gemini DIRECT în constructor — Gemini rulează în app, constructorul nu ține cheia'
+      if (/api\.anthropic\.com/.test(src))
+        return 'a reapărut un apel Anthropic DIRECT în constructor — Fable 5 rulează în app, constructorul nu ține cheia'
       return null
     },
   }

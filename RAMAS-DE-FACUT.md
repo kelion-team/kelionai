@@ -13,6 +13,11 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] Santinela PR (nou, 14 aug noaptea): scrisă + teste verzi, dar NEPROBATĂ live —
+      dovada cerută: un PR verde anunțat în panou cât ownerul e logat, și unul
+      îmbinat de Kelion singur (cu jurnalul în Notificări) cât e delogat.
+- [ ] Bara de execuție cu punctulețe (nou, 14 aug noaptea): scrisă, de văzut LIVE
+      pe un ordin real („fiecare pas pe monitor, 0→100%").
 - [ ] Vocea live îngheață după câteva schimburi de fraze (ordinul #233, în coadă).
 - [ ] Camera: nu capturează după accept + delay mare la pornire — instrumentată azi
       (jurnal `[cameră]` + eroare la >5s până la primul cadru); cifra fazei vinovate
