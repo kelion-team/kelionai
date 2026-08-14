@@ -1,187 +1,212 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react';
 
-export interface DeployStatusData {
-  percent: number
-  step: string
-  timestamp: string
-  active: boolean
-  done: boolean
+export interface DeployState {
+  status: 'idle' | 'running' | 'success' | 'failed';
+  step: string;
+  stepIndex: number;
+  totalSteps: number;
+  percent: number;
+  message: string;
+  startedAt: string | null;
+  updatedAt: string;
+  error?: string | null;
 }
 
-/**
- * Bară dinamică de progres pentru deploy pe monitor,
- * conectată în timp real prin Server-Sent Events (SSE) la /api/deploy/status.
- */
-export function DeployProgressBar({
-  onClose,
-  standalone = false,
-}: {
-  onClose?: () => void
-  standalone?: boolean
-}) {
-  const [status, setStatus] = useState<DeployStatusData>({
+export function DeployProgressBar() {
+  const [state, setState] = useState<DeployState>({
+    status: 'idle',
+    step: '',
+    stepIndex: 0,
+    totalSteps: 0,
     percent: 0,
-    step: 'Inițializare conexiune deploy...',
-    timestamp: new Date().toISOString(),
-    active: true,
-    done: false,
-  })
-  const [error, setError] = useState<string | null>(null)
+    message: '',
+    startedAt: null,
+    updatedAt: new Date().toISOString(),
+    error: null,
+  });
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    let es: EventSource | null = null
-    let fallbackTimer: ReturnType<typeof setInterval> | null = null
+    let es: EventSource | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+    const fetchProgress = async () => {
+      try {
+        const res = await fetch('/api/deploy/progress');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok && data.state) {
+            setState(data.state);
+            if (data.state.status === 'running') {
+              setDismissed(false);
+            }
+          }
+        }
+      } catch {
+        // Silently fail polling
+      }
+    };
 
     try {
-      es = new EventSource('/api/deploy/status')
-
+      es = new EventSource('/api/deploy/status');
       es.onmessage = (event) => {
         try {
-          const data: DeployStatusData = JSON.parse(event.data)
-          setStatus(data)
-          setError(null)
+          const data = JSON.parse(event.data) as DeployState;
+          setState(data);
+          if (data.status === 'running') {
+            setDismissed(false);
+          }
         } catch {
-          // Ignoră mesaje neparsabile (ex. ping-uri)
+          // ignore parsing error
         }
-      }
+      };
 
       es.onerror = () => {
-        // Dacă SSE e blocat temporar (ex: buffering), facem fallback la fetch periodic
-        if (!fallbackTimer) {
-          fallbackTimer = setInterval(async () => {
-            try {
-              const res = await fetch('/api/deploy/progress')
-              if (res.ok) {
-                const json: DeployStatusData = await res.json()
-                setStatus(json)
-                setError(null)
-              }
-            } catch {
-              setError('Conexiune întreruptă cu serverul de deploy')
-            }
-          }, 2000)
+        if (es) {
+          es.close();
+          es = null;
         }
-      }
+        // Fallback to polling every 3 seconds if SSE fails
+        if (!pollInterval) {
+          fetchProgress();
+          pollInterval = setInterval(fetchProgress, 3000);
+        }
+      };
     } catch {
-      setError('EventSource nu este disponibil')
+      fetchProgress();
+      pollInterval = setInterval(fetchProgress, 3000);
     }
 
     return () => {
       if (es) {
-        es.close()
+        es.close();
       }
-      if (fallbackTimer) {
-        clearInterval(fallbackTimer)
+      if (pollInterval) {
+        clearInterval(pollInterval);
       }
-    }
-  }, [])
+    };
+  }, []);
 
-  const clampedPercent = Math.min(100, Math.max(0, status.percent))
-  const isFinished = status.done || clampedPercent >= 100
+  if (state.status === 'idle' || dismissed) {
+    return null;
+  }
+
+  const isRunning = state.status === 'running';
+  const isSuccess = state.status === 'success';
+  const isFailed = state.status === 'failed';
+
+  const statusColor = isRunning
+    ? 'var(--accent, #3b82f6)'
+    : isSuccess
+    ? '#10b981'
+    : '#ef4444';
+
+  const statusTitle = isRunning
+    ? '🚀 Deploy în desfășurare...'
+    : isSuccess
+    ? '✅ Deploy finalizat cu succes!'
+    : '❌ Deploy eșuat';
 
   return (
     <div
-      className={`deploy-progress-container ${standalone ? 'deploy-progress-standalone' : ''}`}
+      role="status"
+      aria-live="polite"
       style={{
-        padding: '16px 20px',
-        background: 'rgba(15, 23, 42, 0.92)',
+        position: 'fixed',
+        bottom: 24,
+        right: 24,
+        maxWidth: 420,
+        width: 'calc(100vw - 48px)',
+        zIndex: 9999,
+        background: 'rgba(23, 23, 23, 0.92)',
+        backdropFilter: 'blur(12px)',
+        border: `1px solid ${statusColor}`,
         borderRadius: 12,
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        color: '#f8fafc',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-        backdropFilter: 'blur(8px)',
-        minWidth: 300,
-        maxWidth: 600,
-        margin: '0 auto',
+        boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
+        padding: '14px 16px',
+        color: '#f3f4f6',
+        fontFamily: 'inherit',
+        fontSize: 13,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              display: 'inline-block',
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              backgroundColor: isFinished ? '#22c55e' : error ? '#ef4444' : '#3b82f6',
-              boxShadow: isFinished
-                ? '0 0 8px #22c55e'
-                : error
-                ? '0 0 8px #ef4444'
-                : '0 0 8px #3b82f6',
-              animation: isFinished ? 'none' : 'pulse 1.5s infinite',
-            }}
-          />
-          <strong style={{ fontSize: '0.95rem', letterSpacing: '0.02em' }}>
-            {isFinished ? 'Deploy Finalizat' : 'Deploy în desfășurare'}
-          </strong>
-        </div>
-        <span
-          style={{
-            fontSize: '1rem',
-            fontWeight: 700,
-            fontFamily: 'ui-monospace, monospace',
-            color: isFinished ? '#4ade80' : '#60a5fa',
-          }}
-        >
-          {clampedPercent}%
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontWeight: 600, color: statusColor, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {statusTitle}
         </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>{state.percent}%</span>
+          {!isRunning && (
+            <button
+              onClick={() => setDismissed(true)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#9ca3af',
+                cursor: 'pointer',
+                padding: '2px 4px',
+                fontSize: 14,
+                lineHeight: 1,
+              }}
+              title="Închide"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Bara de progres dinamică */}
+      {/* Progress Bar Track */}
       <div
         style={{
           width: '100%',
-          height: 10,
-          backgroundColor: 'rgba(255, 255, 255, 0.1)',
-          borderRadius: 6,
+          height: 8,
+          background: 'rgba(255, 255, 255, 0.1)',
+          borderRadius: 4,
           overflow: 'hidden',
-          position: 'relative',
-          marginBottom: 10,
         }}
       >
         <div
           style={{
-            width: `${clampedPercent}%`,
+            width: `${Math.min(100, Math.max(0, state.percent))}%`,
             height: '100%',
-            backgroundColor: isFinished ? '#22c55e' : '#3b82f6',
-            backgroundImage: isFinished
-              ? 'linear-gradient(90deg, #16a34a, #22c55e)'
-              : 'linear-gradient(90deg, #2563eb, #60a5fa)',
-            borderRadius: 6,
+            background: statusColor,
+            borderRadius: 4,
             transition: 'width 0.4s ease-in-out',
-            boxShadow: isFinished ? '0 0 12px rgba(34, 197, 94, 0.6)' : '0 0 12px rgba(59, 130, 246, 0.6)',
           }}
         />
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem', color: '#94a3b8' }}>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%' }}>
-          {status.step || (isFinished ? 'Toate serviciile sunt sincronizate.' : 'Se execută pașii de deploy...')}
+      {/* Details & Step info */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#9ca3af' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
+          {state.step || state.message || 'Procesare...'}
         </span>
-        {onClose && (
-          <button
-            onClick={onClose}
-            type="button"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#cbd5e1',
-              cursor: 'pointer',
-              fontSize: '0.8rem',
-              padding: '2px 6px',
-            }}
-          >
-            Închide
-          </button>
+        {state.totalSteps > 0 && (
+          <span>
+            Pas {state.stepIndex}/{state.totalSteps}
+          </span>
         )}
       </div>
 
-      {error && (
-        <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#f87171' }}>
-          {error}
+      {isFailed && state.error && (
+        <div
+          style={{
+            fontSize: 11,
+            color: '#fca5a5',
+            background: 'rgba(239, 68, 68, 0.1)',
+            padding: '6px 8px',
+            borderRadius: 6,
+            marginTop: 4,
+            wordBreak: 'break-word',
+          }}
+        >
+          {state.error}
         </div>
       )}
     </div>
-  )
+  );
 }
+export default DeployProgressBar;

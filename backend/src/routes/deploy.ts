@@ -1,98 +1,136 @@
-import { FastifyInstance, FastifyPluginAsync } from 'fastify'
-import { readFile, stat } from 'node:fs/promises'
+import { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
 
-export interface DeployProgress {
-  percent: number
-  step: string
-  timestamp: string
-  active: boolean
-  done: boolean
+export interface DeployState {
+  status: 'idle' | 'running' | 'success' | 'failed';
+  step: string;
+  stepIndex: number;
+  totalSteps: number;
+  percent: number;
+  message: string;
+  startedAt: string | null;
+  updatedAt: string;
+  error?: string | null;
 }
 
-/**
- * Căi posibile pentru fișierul de progres al deploy-ului
- * (pe VPS, în container sau în test/dev).
- */
-const POSSIBLE_STATUS_PATHS = [
-  '/tmp/deploy-progress.json',
-  '/host/kelion/deploy-progress.json',
-  '/root/kelion/deploy-progress.json',
-]
+let currentDeployState: DeployState = {
+  status: 'idle',
+  step: '',
+  stepIndex: 0,
+  totalSteps: 0,
+  percent: 0,
+  message: 'Niciun deploy în curs',
+  startedAt: null,
+  updatedAt: new Date().toISOString(),
+  error: null,
+};
 
-/**
- * Citește starea curentă a progresului de deploy din sistemul de fișiere.
- */
-export async function getDeployProgress(): Promise<DeployProgress> {
-  for (const path of POSSIBLE_STATUS_PATHS) {
-    try {
-      const content = await readFile(path, 'utf8')
-      const parsed = JSON.parse(content.trim())
-      const percent = typeof parsed.percent === 'number' ? Math.min(100, Math.max(0, parsed.percent)) : 0
-      const step = typeof parsed.step === 'string' ? parsed.step : 'În desfășurare'
-      const timestamp = typeof parsed.timestamp === 'string' ? parsed.timestamp : new Date().toISOString()
-      const done = percent >= 100
-      return {
-        percent,
-        step,
-        timestamp,
-        active: !done,
-        done,
-      }
-    } catch {
-      // Continuă la următoarea cale dacă fișierul nu există sau nu e parsabil
+// Maximum running time before considering deploy timed out / stale (e.g. 15 minutes)
+const DEPLOY_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function getDeployState(): DeployState {
+  if (currentDeployState.status === 'running') {
+    const elapsed = Date.now() - new Date(currentDeployState.updatedAt).getTime();
+    if (elapsed > DEPLOY_TIMEOUT_MS) {
+      currentDeployState = {
+        ...currentDeployState,
+        status: 'failed',
+        error: 'Deploy-ul a depășit timpul limită (timeout / deconectare)',
+        message: 'Procesul de deploy a expirat sau a fost întrerupt.',
+        updatedAt: new Date().toISOString(),
+      };
     }
   }
-
-  // Stare implicită dacă nu rulează niciun deploy activ
-  return {
-    percent: 100,
-    step: 'Deploy finalizat / sistem pregătit',
-    timestamp: new Date().toISOString(),
-    active: false,
-    done: true,
-  }
+  return currentDeployState;
 }
 
-export const deployRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
-  // Snapshot JSON direct
-  fastify.get('/api/deploy/progress', async (_req, reply) => {
-    const progress = await getDeployProgress()
-    return reply.send(progress)
-  })
+export function setDeployState(newState: Partial<DeployState>): DeployState {
+  const now = new Date().toISOString();
+  const base = getDeployState();
+  const calculatedPercent =
+    typeof newState.percent === 'number'
+      ? newState.percent
+      : typeof newState.stepIndex === 'number' && typeof newState.totalSteps === 'number' && newState.totalSteps > 0
+      ? Math.min(100, Math.round((newState.stepIndex / newState.totalSteps) * 100))
+      : base.percent;
 
-  // Server-Sent Events (SSE) streaming pentru progres în timp real
-  fastify.get('/api/deploy/status', async (req, reply) => {
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-      'Access-Control-Allow-Origin': '*',
-    })
+  currentDeployState = {
+    ...base,
+    ...newState,
+    percent: calculatedPercent,
+    updatedAt: now,
+    startedAt: newState.status === 'running' && base.status !== 'running' ? now : (base.startedAt || now),
+  };
 
-    // Trimite prima stare imediat
-    const initial = await getDeployProgress()
-    reply.raw.write(`data: ${JSON.stringify(initial)}\n\n`)
+  return currentDeployState;
+}
 
-    let lastJson = JSON.stringify(initial)
-    const interval = setInterval(async () => {
+export async function deployRoutes(
+  fastify: FastifyInstance,
+  _opts: FastifyPluginOptions
+) {
+  // Read current deploy progress (JSON)
+  fastify.get('/progress', async (_req: FastifyRequest, reply: FastifyReply) => {
+    return reply.send({
+      ok: true,
+      state: getDeployState(),
+    });
+  });
+
+  // Real-time SSE stream for deploy status & progress
+  fastify.get('/status', async (req: FastifyRequest, reply: FastifyReply) => {
+    reply.raw.setHeader('Content-Type', 'text/event-stream');
+    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.flushHeaders?.();
+
+    const sendState = () => {
+      const state = getDeployState();
       try {
-        const current = await getDeployProgress()
-        const currentJson = JSON.stringify(current)
-        if (currentJson !== lastJson) {
-          lastJson = currentJson
-          reply.raw.write(`data: ${currentJson}\n\n`)
-        } else {
-          // Keep-alive heartbeat comment
-          reply.raw.write(`: ping\n\n`)
-        }
-      } catch (err) {
-        fastify.log.error(err, 'Eroare la citirea progresului de deploy pentru SSE')
+        reply.raw.write(`data: ${JSON.stringify(state)}\n\n`);
+      } catch {
+        // stream closed
       }
-    }, 1500)
+    };
+
+    sendState();
+    const interval = setInterval(sendState, 2000);
 
     req.raw.on('close', () => {
-      clearInterval(interval)
-    })
-  })
+      clearInterval(interval);
+    });
+  });
+
+  // Update deploy progress from CI / deploy scripts / runbook
+  fastify.post('/progress', async (
+    req: FastifyRequest<{
+      Body: {
+        status?: 'idle' | 'running' | 'success' | 'failed';
+        step?: string;
+        stepIndex?: number;
+        totalSteps?: number;
+        percent?: number;
+        message?: string;
+        error?: string;
+      };
+    }>,
+    reply: FastifyReply
+  ) => {
+    const body = req.body || {};
+    const updated = setDeployState({
+      status: body.status,
+      step: body.step,
+      stepIndex: body.stepIndex,
+      totalSteps: body.totalSteps,
+      percent: body.percent,
+      message: body.message,
+      error: body.error,
+    });
+
+    return reply.send({
+      ok: true,
+      state: updated,
+    });
+  });
 }
+
+export default deployRoutes;

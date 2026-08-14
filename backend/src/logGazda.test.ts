@@ -61,6 +61,9 @@ describe('logGazda — semnăturile de eroare', () => {
       'VERDICT: TRECE',
       'build ok',
       '[08:04:20] llm încercarea 4/6 a picat pe DeepInfra/meta-llama/Llama-3.3-70B-Instruct-Turbo (RunPod 402: {"error":{"message":"You need positive balance to do inference. Please add bal) — reîncerc în 30s',
+      '[15:24:02] ordin #235 (încercarea 1): AUTO-VINDECARE (loguri gazdă): în constructor.log de pe VPS apare RECURENT eroarea:',
+      '[15:30:47] pas 18/120: grep semnaturiEroare',
+      '[15:30:48] pas 19/120: read backend/src/services/logGazda.ts',
     ].join('\n')
     expect(semnaturiEroare(text)).toEqual([])
   })
