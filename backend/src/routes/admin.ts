@@ -13,7 +13,6 @@ import {
   blockUser,
   unblockUser,
   grantCredit,
-  deleteUserData,
   listLeads,
   listContactMessages,
   markLeadContacted,
@@ -1025,9 +1024,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           break
         }
         case 'delete':
-          if (isOwner) return reply.code(400).send({ error: 'cannot_delete_admin' })
-          await deleteUserData(email)
-          break
+          // ÎNCHIS (ordinul ownerului, 14 aug: „baza de date de utilizatori
+          // trebuie să nu se poată șterge niciodată, prin nicio comandă" +
+          // „amprentele vocale trebuie să se păstreze"). Scutul din Postgres
+          // (scutulDatelor) oricum ar fi avortat tranzacția pe primul tabel
+          // protejat — refuzăm CINSTIT la ușă, cu motivul, nu cu un 500 criptic.
+          // NOTĂ pentru owner (scrisă și în RAMAS-DE-FACUT): dreptul GDPR la
+          // ștergere al unui user real rămâne o decizie a lui — când o va cere,
+          // se face cu procedura lui explicită, nu cu un buton generic.
+          return reply.code(403).send({
+            error: 'utilizatorii_se_pastreaza',
+            motiv:
+              'Ordinul ownerului (14 aug): datele utilizatorilor nu se șterg prin nicio comandă — identitatea, banii și biometria sunt sub scut.',
+          })
         default:
           return reply.code(400).send({ error: 'bad_action' })
       }

@@ -1313,40 +1313,12 @@ export async function grantCredit(email: string, amount: number, currency = conf
   }
 }
 
-/** Wipe a user's data (messages, prefs, memories, wallet, visits, blocked flag). */
-export async function deleteUserData(email: string): Promise<void> {
-  if (!dbEnabled() || !email) return
-  const e = email.toLowerCase()
-  const client = await getPool().connect()
-  try {
-    await client.query('BEGIN')
-    // Full GDPR (audit 24 Jul): besides conversation data, biometric data
-    // (voice/face prints), notes and linked Google accounts are also deleted.
-    // NOTHING personal remains. (Columns differ across tables — careful: an
-    // error inside a Postgres transaction poisons ALL of it, so the list
-    // contains ONLY tables+columns verified in the schema above.)
-    const targets: [string, string][] = [
-      ['messages', 'user_email'], ['user_prefs', 'user_email'], ['memories', 'user_email'],
-      ['wallets', 'user_email'], ['visits', 'user_email'], ['blocked_users', 'email'],
-      ['voiceprints', 'user_email'], ['faceprints', 'user_email'], ['notes', 'user_email'],
-      ['google_accounts', 'email'], ['cost_events', 'user_email'],
-    ]
-    for (const [t, col] of targets) {
-      await client.query(`DELETE FROM ${t} WHERE ${col} = $1`, [e])
-    }
-    // The FINANCIAL LEDGER (transactions, billing_events) is NOT deleted — the
-    // law requires keeping payments — but it is ANONYMIZED: the email becomes
-    // an irreversible marker, so it's no longer personal data, while the
-    // accounting stays whole.
-    await client.query(`UPDATE transactions SET user_id = 'deleted-user' WHERE user_id = $1`, [e])
-    await client.query(`UPDATE billing_events SET user_email = 'deleted-user' WHERE user_email = $1`, [e])
-    await client.query('COMMIT')
-  } catch {
-    await client.query('ROLLBACK').catch(() => {})
-  } finally {
-    client.release()
-  }
-}
+// (`deleteUserData` — vechea ștergere GDPR completă — a fost SCOASĂ de tot,
+// 14 aug, la ordinul ownerului: „baza de date de utilizatori trebuie să nu se
+// poată șterge niciodată, prin nicio comandă". Scutul din scutulDatelor ar fi
+// avortat oricum tranzacția pe primul tabel protejat, deci funcția ar fi
+// „mers" doar pe jumătate. Cererile legale de ștergere se rezolvă MANUAL, la
+// decizia ownerului — vezi ruta /api/me/delete pentru mesajul către client.)
 
 // ── Work orders (persistent builder queue) ──────────────────────────────────
 

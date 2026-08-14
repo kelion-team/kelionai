@@ -26,10 +26,20 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       voiceprints prin db_query trebuie refuzat cu «tabel_protejat», iar
       triggerul din Postgres să apară în \d voiceprints).
 - [ ] Auditul „fiecare buton din admin, pe realitate" (ordinul din 14 aug,
-      noaptea): azi s-au tăiat minciunile GĂSITE (cifra £0.00/0 GBP, „are
-      credit" nemăsurat, butonul „șterge amprenta" care promitea interzisul).
-      O trecere buton-cu-buton pe TOATE taburile, pe live, încă nu s-a făcut —
-      rămâne aici până e făcută cu dovezi.
+      noaptea): trecerea buton-cu-buton PE COD s-a făcut (14 aug, noaptea, 2 —
+      53 de butoane; găsite și reparate: „Close" englezesc, „merge-ul îl dai
+      tu" depășit, butonul „Șterge" user care promitea interzisul, pozele
+      lipsă la useri). Rămâne CONFRUNTAREA PE LIVE, tab cu tab, după deploy.
+- [ ] „Timbrul nu e salvat" (owner, 14 aug, live): drumul din cod e întreg
+      (chat.ts → saveVoiceprint la prima voce sau la potrivire; scutul NU
+      blochează INSERT/UPDATE). De măsurat pe live: (1) `db_query`:
+      `SELECT count(*), max(updated_at) FROM voiceprints`; (2) client_errors
+      pe extragerea de trăsături; (3) o tură de voce a ownerului → reapare
+      rândul în Amprente? Cauza se caută ÎNTÂI în codul nostru (regula #2).
+- [ ] Vizitatorii nu au poze — PRIN CONSTRUCȚIE (widgetul de vizitatori n-are
+      cameră): nu e bug, e o limită. Dacă ownerul vrea capturi și la
+      vizitatori, e o decizie de produs (consimțământ + cameră în widget) —
+      de discutat, nu de „reparat" pe tăcute.
 - [ ] Vocea live îngheață după câteva schimburi de fraze (ordinul #233, în coadă).
 - [ ] Camera: nu capturează după accept + delay mare la pornire — instrumentată azi
       (jurnal `[cameră]` + eroare la >5s până la primul cadru); cifra fazei vinovate

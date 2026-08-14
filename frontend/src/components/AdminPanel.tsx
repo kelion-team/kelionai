@@ -489,6 +489,10 @@ export default function AdminPanel({
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
   // Mesajele acțiunilor pe amprente (ștergere/ascultare picate — nu mai tac).
   const [vpMsg, setVpMsg] = useState('')
+  // Captura facială a unui om, după email (owner, 14 aug: „userii nu au poze") —
+  // din aceeași listă ca tabul Amprente; gol/nelistat = nu există captură.
+  const pozaUser = (email: string): string =>
+    (Array.isArray(voiceprints) ? voiceprints : []).find((v) => v.email === email && v.hasFace)?.facePhoto ?? ''
   // THE BUILDER (Adrian, Jul 27: „Kelion must be able to create any software the
   // admin asks him to”): new orders + the queue with their state (the worker on
   // the VPS executes them and opens PRs; the merge is Adrian's).
@@ -757,6 +761,10 @@ export default function AdminPanel({
       // se citea O SINGURĂ dată, la montare — un eșec lăsa „Se încarcă…" pe
       // veci, fără nicio a doua șansă.
       void fetchActivity().then(setActivity)
+      // POZELE oamenilor (owner, 14 aug: „userii nu au poze") — capturile
+      // faciale vin din aceeași listă ca tabul Amprente; o citire picată lasă
+      // pur și simplu „?"-ul cinstit pe rând, nu strică tabul.
+      void fetchVoiceprints().then(setVoiceprints)
     }
   }, [tab])
 
@@ -1204,13 +1212,9 @@ export default function AdminPanel({
                   permanently-zero demo field. */}
               {demosData && demosData.visitsToday > 0 ? ` (${demosData.visitsToday})` : ''}
             </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'share' ? 'sel' : ''}`}
-              onClick={() => setTab('share')}
-            >
-              {A.tabShare}
-            </button>
+            {/* „Distribuie" ASCUNS din bară (ordinul ownerului, 14 aug, seara:
+                „distribuie ascunde") — panoul + linkurile de share rămân în
+                cod; se mai deschide doar prin voce (initialTab). */}
             <button
               type="button"
               className={`admin-tab ${tab === 'voiceprints' ? 'sel' : ''}`}
@@ -1225,13 +1229,10 @@ export default function AdminPanel({
             >
               {A.tabGestures}
             </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'tokenuri' ? 'sel' : ''}`}
-              onClick={() => setTab('tokenuri')}
-            >
-              {A.tabTokens}
-            </button>
+            {/* „Tokenuri" ASCUNS din bară (ordinul ownerului, 14 aug, seara:
+                „tokenuri ascunde") — panoul + rutele rămân în cod; creierul
+                vede cheile prin admin_vezi «env-check» + tokenChecks; tabul se
+                mai poate deschide doar prin voce (initialTab), nu din vitrină. */}
             <button
               type="button"
               className={`admin-tab ${tab === 'constructor' ? 'sel' : ''}`}
@@ -1253,17 +1254,12 @@ export default function AdminPanel({
             >
               Sistem (VPS)
             </button>
-            {/* Notificări: vizibil DOAR când e ceva NECITIT (vezi comentariul
-                vitrinei de mai sus — alarma nu are voie să redevină mută). */}
-            {Array.isArray(notificari) && notificari.some((n) => !n.read) && (
-              <button
-                type="button"
-                className={`admin-tab ${tab === 'notificari' ? 'sel' : ''}`}
-                onClick={() => setTab('notificari')}
-              >
-                🔔 Notificări ({notificari.filter((n) => !n.read).length})
-              </button>
-            )}
+            {/* Notificări: ASCUNS COMPLET (ordinul ownerului, 14 aug, seara:
+                „ascunde notificările; tot ce ai ascuns creierul trebuie să le
+                vadă"). Excepția veche „reapare la necitite" a fost scoasă la
+                cererea lui. Creierul le vede în continuare prin admin_vezi
+                («notificari»), iar alarmele (creier căzut, ordin mort, PR gata)
+                se scriu tot acolo — panoul se mai deschide doar prin voce. */}
           </div>
           {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
           onOpenSettings rămâne în props (fereastra CustomerSettings poate fi
@@ -2386,8 +2382,13 @@ export default function AdminPanel({
           <section className="admin-finance">
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
+                {/* TEXT ADUS LA REALITATE (auditul buton-cu-buton, 14 aug): „iar
+                    merge-ul îl dai tu" nu mai era adevărat — poarta de pe VPS
+                    îmbină SINGURĂ PR-urile de constructor verzi, iar santinela
+                    îmbină și restul când nu ești logat. */}
                 Constructorul — dai ordinul, Kelion construiește pe server (build + teste), deschide
-                PR-ul, iar merge-ul îl dai tu. Poți ordona și prin voce/chat: „Kelion, construiește…".
+                PR-ul; pe verde se îmbină singur (sau îl dai tu, dacă ești logat). Poți ordona și prin
+                voce/chat: „Kelion, construiește…".
               </div>
               {plafon && (
                 <div
@@ -2871,6 +2872,27 @@ export default function AdminPanel({
                     >
                       <div className="vis-main">
                         <span className="vis-flagline">
+                          {/* POZA OMULUI (owner, 14 aug: „userii nu au poze"):
+                              captura facială există în faceprints (împerecheată
+                              cu amprenta vocală) — doar tabul Amprente o arăta.
+                              Aici vine din aceeași listă (fetchVoiceprints,
+                              încărcată la deschiderea tabului); fără captură →
+                              „?", cinstit, nu o siluetă care promite. */}
+                          {pozaUser(u.email) ? (
+                            <img
+                              src={pozaUser(u.email)}
+                              alt={`Fața lui ${u.email}`}
+                              style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.15)' }}
+                            />
+                          ) : (
+                            <span
+                              className="muted"
+                              title="Fără captură de față încă — se face singură la prima tură cu camera pornită"
+                              style={{ width: 28, height: 28, borderRadius: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px dashed rgba(255,255,255,0.2)', fontSize: 13 }}
+                            >
+                              ?
+                            </span>
+                          )}
                           <Flag code={u.code} />
                           <strong>{u.email}</strong>
                         </span>
@@ -2952,22 +2974,12 @@ export default function AdminPanel({
                         >
                           Credit
                         </button>
-                        <button
-                          type="button"
-                          className="user-act danger"
-                          onClick={async () => {
-                            // CONFIRMAREA SPUNE SCOPUL REAL (auditul admin, 3 aug):
-                            // lista vine din deleteUserData — inclusiv biometria
-                            // și contul Google, nu doar „mesaje, sold".
-                            if (!window.confirm(A.confirmDeleteUserData(u.email)))
-                              return
-                            const r = await manageUser(u.email, 'delete')
-                            if (r) setActivity(r)
-                            else window.alert(A.alertNotDeleted)
-                          }}
-                        >
-                          Șterge
-                        </button>
+                        {/* BUTONUL „Șterge" A FOST SCOS (ordinul ownerului, 14
+                            aug: „baza de utilizatori nu se poate șterge prin
+                            nicio comandă"). Serverul refuză (403) și scutul din
+                            Postgres refuză și el — un buton care promite o
+                            ștergere imposibilă ar fi afișaj fals. Cererile GDPR
+                            se rezolvă manual, la decizia ownerului. */}
                       </div>
                     </div>
                   ))}
@@ -3351,8 +3363,11 @@ export default function AdminPanel({
                     ⚠ {roFailed} netraduse
                   </span>
                 )}
+                {/* „Close" era ENGLEZESC hardcodat într-un panou de admin
+                    românesc (auditul buton-cu-buton, 14 aug) — limba trebuie
+                    să fie una singură pe tot panoul. */}
                 <button type="button" className="ghost" onClick={closeUserConvo}>
-                  Close
+                  Închide
                 </button>
               </div>
             </header>

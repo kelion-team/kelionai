@@ -1,24 +1,22 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { SESSION_COOKIE } from '../session.js'
-import { deleteUserData } from '../db.js'
 
-// SELF-SERVICE ACCOUNT (paying clients). A client has less access than the
-// admin — but they MUST be able to delete their own account (GDPR: the right
-// to erasure). It deletes everything of theirs (messages, preferences,
-// memories, wallet, visits) and logs them out. The admin (the owner) CANNOT
-// delete himself here — it would lock the application's owner out forever;
-// he is explicitly protected.
+// ȘTERGEREA DE CONT PRIN COMANDĂ E ÎNCHISĂ (ordinul ownerului, 14 aug:
+// „baza de date de utilizatori trebuie să nu se poată șterge niciodată, prin
+// nicio comandă" + „amprentele vocale trebuie să se păstreze"). Scutul din
+// Postgres (scutulDatelor) oricum avorta tranzacția pe primul tabel protejat —
+// vechiul buton ar fi „mers" doar pe jumătate, cel mai rău fel de a merge.
+// Dreptul legal la ștergere (GDPR) NU dispare: cererea se trimite în scris la
+// contact@kelionai.app și o hotărăște ownerul, cu procedura lui explicită —
+// nu un buton generic. Ruta rămâne ca apelanții vechi să primească MOTIVUL.
 export async function meRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/me/delete', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    if (user.role === 'admin') {
-      // The owner's safety net: the admin account does not self-destruct.
-      return reply.code(403).send({ error: 'admin_cannot_self_delete' })
-    }
-    await deleteUserData(user.email)
-    reply.clearCookie(SESSION_COOKIE, { path: '/' })
-    return reply.send({ ok: true })
+    return reply.code(403).send({
+      error: 'stergerea_prin_comanda_inchisa',
+      motiv:
+        'Ștergerea contului prin aplicație e închisă. Pentru cererea legală de ștergere a datelor scrie la contact@kelionai.app — se rezolvă manual, cu confirmare.',
+    })
   })
 }
