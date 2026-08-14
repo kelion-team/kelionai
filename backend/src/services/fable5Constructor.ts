@@ -58,9 +58,15 @@ export async function fable5Chat(
   }
   // Uneltele constructorului sunt în format OpenAI → trec direct; fără unelte nu
   // trimitem câmpul (unele endpoint-uri resping `tools: []`).
+  // FORȚĂM CHEMAREA UNELTEI (owner, 14 aug: „nu ai fost în stare să legi Fable 5"):
+  // pe `auto`, Fable 5 putea răspunde cu TEXT în loc să cheme o unealtă → exact
+  // „tura sterilă" pe care am reparat-o la Gemini (ANY), dar o uitasem AICI, pe
+  // rezervă. Constructorul e agentic — n-are ture de vorbă; pe fiecare tură TREBUIE
+  // să cheme o unealtă (explorează / scrie / verifică sau `finish`). `required` =
+  // modul ANY al endpointului OpenAI-compat Anthropic.
   if (Array.isArray(tools) && tools.length) {
     body.tools = tools
-    body.tool_choice = 'auto'
+    body.tool_choice = 'required'
   }
   let r: Response
   try {
