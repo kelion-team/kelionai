@@ -1569,6 +1569,37 @@ export default function Stage({ user }: { user: User }) {
                 >
                   📄 {t.cvTitle}
                 </button>
+                {/* ── APLICAȚIILE GOOGLE INTERCONECTATE (owner, 14 aug: „tot ce
+                    interconectăm să fie în aplicații") ─────────────────────────
+                    Fiecare intrare = O COMANDĂ CLARĂ trimisă în chat (evenimentul
+                    kelion:comanda → ChatPanel.send) — același drum ca tastatura,
+                    aceleași porți (plată/credite, poarta acțiunii, bara de
+                    execuție pe monitor). Lista e a funcțiilor REAL legate
+                    (services/google.ts — googleapis.com), nu promisiuni. */}
+                {[
+                  ['✉️ Gmail', 'Arată-mi ultimele emailuri primite.'],
+                  ['📅 Calendar', 'Ce am în calendar săptămâna asta?'],
+                  ['📁 Drive', 'Arată-mi ultimele fișiere din Drive.'],
+                  ['📝 Docs', 'Fă-mi un document Google nou.'],
+                  ['📊 Sheets', 'Fă-mi un tabel Google nou.'],
+                  ['✅ Tasks', 'Arată-mi lista mea de sarcini.'],
+                  ['🗺 Hărți', 'Arată-mi pe hartă unde sunt.'],
+                  ['🔎 Căutare', 'Caută pe web ultimele știri.'],
+                  ['▶️ YouTube', 'Caută pe YouTube un clip și pune-l pe monitor.'],
+                  ['🎨 Imagini', 'Generează o imagine cu un răsărit peste mare.'],
+                ].map(([eticheta, comanda]) => (
+                  <button
+                    key={eticheta}
+                    type="button"
+                    className="apps-item"
+                    onClick={() => {
+                      setAppsOpen(false)
+                      window.dispatchEvent(new CustomEvent('kelion:comanda', { detail: comanda }))
+                    }}
+                  >
+                    {eticheta}
+                  </button>
+                ))}
               </div>
             </>
           )}

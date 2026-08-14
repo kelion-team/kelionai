@@ -1426,6 +1426,20 @@ export default function ChatPanel({
   const sendRef = useRef(send)
   sendRef.current = send
 
+  // ── APLICAȚIILE GOOGLE DIN MENIU → O COMANDĂ CLARĂ ÎN CHAT (owner, 14 aug:
+  // „tot ce interconectăm să fie în aplicații") ──────────────────────────────
+  // O intrare din meniul „Aplicații" (Stage) trimite EXACT o comandă de om în
+  // chat — același drum ca tastatura, aceleași porți (plată, poarta acțiunii,
+  // bara de execuție). Nimic nu se cheamă pe ascuns: comanda se vede în chat.
+  useEffect(() => {
+    const onComanda = (e: Event): void => {
+      const text = String((e as CustomEvent<string>).detail ?? '').trim()
+      if (text) void sendRef.current(text)
+    }
+    window.addEventListener('kelion:comanda', onComanda)
+    return () => window.removeEventListener('kelion:comanda', onComanda)
+  }, [])
+
   // The microphone is PERMANENT ON: it starts by itself on entry and reopens
   // by itself when the track dies (phone call, Bluetooth headset removed, another app takes
   // the microphone) or when the tab becomes visible again. The button remains only as a manual

@@ -29,6 +29,13 @@ const DATASET = process.env.GOOGLE_BILLING_DATASET ?? 'Facturare'
  *  diferi de proiectul contului de serviciu — de-aia NU-l deducem din cont, îl
  *  fixăm aici (env-ul îl poate schimba fără deploy). */
 const PROIECT_EXPORT = process.env.GOOGLE_BILLING_PROJECT ?? 'gen-lang-client-0460348646'
+/** Proiectul în care RULEAZĂ jobul de interogare (audit 14 aug, ownerul:
+ *  „procedura scrisă nu merge"): înainte, jobul se crea în proiectul contului
+ *  de serviciu (sa.project_id) — dacă ăla diferă de proiectul exportului,
+ *  BigQuery refuză cu 403 `jobs.create` ORICÂTE roluri ai pe dataset. Jobul
+ *  se creează acum în proiectul exportului (unde consola l-a pus pe owner să
+ *  dea rolurile), reglabil separat prin env. */
+const PROIECT_JOB = process.env.GOOGLE_BILLING_JOB_PROJECT ?? PROIECT_EXPORT
 
 /** Numele STANDARD al tabelului de export (documentat de Google):
  *  gcp_billing_export_v1_<cont-cu-underscore>. */
@@ -121,7 +128,7 @@ export async function facturareGoogle(
     `CAST(MIN(usage_start_time) AS STRING) AS din ` +
     `FROM ${tabel} WHERE usage_start_time > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${Math.max(1, Math.floor(zile))} DAY)`
   try {
-    const r = await fetch(`https://bigquery.googleapis.com/bigquery/v2/projects/${t.proiect}/queries`, {
+    const r = await fetch(`https://bigquery.googleapis.com/bigquery/v2/projects/${PROIECT_JOB}/queries`, {
       method: 'POST',
       headers: { authorization: `Bearer ${t.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ query: sql, useLegacySql: false, timeoutMs: 15_000 }),
@@ -133,11 +140,19 @@ export async function facturareGoogle(
     }
     if (!r.ok) {
       const msg = String(j.error?.message ?? '').slice(0, 160)
+      // Pașii rămași, pe cauze DISTINCTE (audit 14 aug — vechea îndrumare
+      // amesteca două refuzuri diferite și cerea un rol insuficient):
+      //   • jobs.create → lipsă „BigQuery Job User" pe PROIECTUL jobului;
+      //   • citirea datelor → lipsă „BigQuery Data Viewer" pe DATASET;
+      //   • Not found → exportul nu e pornit sau încă nu a scris primul rând
+      //     (Google scrie primele rânduri în câteva ore de la activare).
       const pas = /Not found: (Dataset|Table)/i.test(msg)
-        ? ' — pasul rămas ÎN CONSOLĂ: Billing → Billing export → BigQuery export → Enable (dataset „' + DATASET + '")'
-        : /permission|denied|403/i.test(`${r.status} ${msg}`)
-          ? ' — pasul rămas ÎN CONSOLĂ: dă contului de serviciu rolul Billing Account Viewer + BigQuery Data Viewer pe dataset'
-          : ''
+        ? ` — exportul nu e pornit SAU încă n-a scris primul rând (durează câteva ore de la activare). În consolă: Billing → Billing export → BigQuery export → Enable (dataset „${DATASET}", tabelul „${tabelExport()}")`
+        : /jobs\.create|Job User/i.test(msg)
+          ? ` — pasul rămas ÎN CONSOLĂ: dă contului de serviciu rolul „BigQuery Job User" pe proiectul ${PROIECT_JOB}`
+          : /permission|denied|403/i.test(`${r.status} ${msg}`)
+            ? ` — pasul rămas ÎN CONSOLĂ: rolul „BigQuery Data Viewer" pe datasetul „${DATASET}" + „BigQuery Job User" pe proiectul ${PROIECT_JOB}`
+            : ''
       return { ok: false, motiv: `BigQuery ${r.status}: ${msg}${pas}` }
     }
     const f = j.rows?.[0]?.f
