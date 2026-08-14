@@ -44,6 +44,15 @@ async function julesFetch(cale: string, init?: RequestInit): Promise<{ ok: true;
 
 /** Repo-urile legate la Jules (sursele). Ownerul le leagă o dată în interfața
  *  Jules („Connect to GitHub"); de aici Kelion doar le vede și le folosește. */
+/** Liveness pentru becul de credit (owner, 13 aug: „culorile la fel pt toți AI,
+ *  nu gri"): cheia Jules e pusă ȘI API-ul răspunde? Verde = configurat + răspunde;
+ *  roșu = lipsă cheie sau API-ul pică. Ping ieftin (GET surse, fără cost). */
+export async function julesServeste(): Promise<{ ok: boolean; detaliu: string }> {
+  if (!config.julesKey) return { ok: false, detaliu: 'cheia Jules nu e pusă (JULES_API_KEY)' }
+  const r = await julesFetch('sources')
+  return r.ok ? { ok: true, detaliu: 'API-ul Jules răspunde (surse listate)' } : { ok: false, detaliu: r.error }
+}
+
 export async function julesSurse(): Promise<string> {
   const r = await julesFetch('sources')
   if (!r.ok) return JSON.stringify({ error: r.error })
