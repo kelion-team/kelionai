@@ -147,6 +147,20 @@ export const googleTools: Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'youtube_urca',
+    description:
+      "Upload a video that ALREADY exists in this app (a generated clip — the id from its /api/video/<id> URL) to the user's own YouTube channel, PRIVATE by default. Use only when the user clearly asks to upload/post a clip to YouTube. If the tool says the YouTube consent is missing, show the user the link /auth/google/connect-youtube on the monitor (a separate one-time consent — it cannot share a consent screen with Drive).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        video_id: { type: 'string', description: 'The clip id (or its /api/video/<id> URL).' },
+        title: { type: 'string', description: 'Video title.' },
+        description: { type: 'string', description: 'Video description (optional).' },
+      },
+      required: ['video_id', 'title'],
+    },
+  },
+  {
     name: 'create_form',
     description:
       "Create a Google Form in the user's account: a title, an optional description and a list of text questions. Use for sign-up forms, surveys, questionnaires. Returns the link to fill it in (url) and the edit link (editUrl).",

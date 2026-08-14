@@ -4210,6 +4210,11 @@ async function runTool(
         const { photosAdu } = await import('../services/googlePhotos.js')
         return photosAdu(email, token, baseUrl)
       }
+      if (block.name === 'youtube_urca') {
+        const { youtubeUrca } = await import('../services/googleYouTube.js')
+        const a = (block.input ?? {}) as Record<string, unknown>
+        return youtubeUrca(token, String(a.video_id ?? ''), String(a.title ?? ''), String(a.description ?? ''))
+      }
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
         // THE get_weather GUARD (the "27° without GPS" fix): a location-less

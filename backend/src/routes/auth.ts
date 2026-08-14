@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'node:crypto'
 import { config, isAllowed, roleFor } from '../config.js'
 import { SESSION_COOKIE, getSessionUser, setSession } from '../session.js'
@@ -153,20 +153,32 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // "c." so the shared callback knows to KEEP the current identity and merely
   // attach the freshly granted tokens.
   const CONNECT_SCOPES = FULL_SCOPES // the same list — a single source
-  app.get('/auth/google/connect', async (req, reply) => {
+  // UN SINGUR început de consimțământ incremental pentru ambele porți (jscpd):
+  // access_type=offline + prompt=consent garantează refresh token; state „c."
+  // spune callback-ului comun să PĂSTREZE identitatea și doar să atașeze tokenii.
+  const consimtamantIncremental = (req: FastifyRequest, reply: FastifyReply, scope: string): unknown => {
     const user = getSessionUser(req)
     if (!user) {
       return reply.redirect(`${config.frontendOrigin}/?error=closed`)
     }
     const { state, params } = beginGoogleOAuth(reply, 'c.')
-    params.set('scope', CONNECT_SCOPES)
+    params.set('scope', scope)
     params.set('access_type', 'offline')
     params.set('include_granted_scopes', 'true')
     params.set('prompt', 'consent')
     params.set('login_hint', user.email) // pre-select the account they're signed in as
     params.set('state', state)
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
-  })
+  }
+  app.get('/auth/google/connect', async (req, reply) => consimtamantIncremental(req, reply, CONNECT_SCOPES))
+
+  // ── POARTA SEPARATĂ YOUTUBE (14 aug, bifat de owner) ──────────────────────
+  // youtube.upload NU poate sta în aceeași cerere cu drive.file (refuzul
+  // „scopes that cannot be requested together" — măsurat azi pe conectarea
+  // ownerului). Poarta asta cere DOAR youtube.upload; include_granted_scopes
+  // păstrează tot ce era acordat — autorizare incrementală, calea oficială.
+  app.get('/auth/google/connect-youtube', async (req, reply) =>
+    consimtamantIncremental(req, reply, 'https://www.googleapis.com/auth/youtube.upload'))
 
   // Step 2 — Google redirects back here with a code
   app.get<{ Querystring: { code?: string; state?: string } }>(

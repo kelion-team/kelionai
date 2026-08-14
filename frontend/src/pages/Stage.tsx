@@ -1597,6 +1597,7 @@ export default function Stage({ user }: { user: User }) {
                   ['📹 Meet', 'Fă-mi o întâlnire în calendar cu link Google Meet — întreabă-mă întâi când și cu cine.'],
                   ['📋 Formulare', 'Fă-mi un formular Google — întreabă-mă întâi ce întrebări să conțină.'],
                   ['📷 Photos', 'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.'],
+                  ['▶️ YouTube upload', 'Vreau să urc un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
                 ].map(([eticheta, comanda]) => (
                   <button
                     key={eticheta}
