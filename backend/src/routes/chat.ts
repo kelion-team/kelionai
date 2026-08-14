@@ -69,7 +69,7 @@ import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/fee
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
 import { taxeazaServiciu, cheiaTarifVideo } from '../services/tarife.js'
-import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
+import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -531,7 +531,7 @@ const RUN_WEB_TOOL: Tool = {
 const IMAGE_TOOL: Tool = {
   name: 'generate_image',
   description:
-    'Generate an image from a text description and show it on the user\'s monitor. Use when the user asks you to draw, create, generate, design or imagine a picture/logo/illustration. Write a rich, detailed English prompt describing the desired image.',
+    'Generate an image from a text description and show it on the user\'s monitor. Use ONLY when the user CLEARLY asked you to draw, create, generate, design or imagine a picture/logo/illustration — never on a garbled or ambiguous phrase (it costs money per image; when unsure, ASK first). NEVER generate fake application screenshots, fake progress bars, fake "deploy successful" screens or any image that pretends to show a real system state — that is deception, not art. Write a rich, detailed English prompt describing the desired image.',
   input_schema: {
     type: 'object',
     properties: {
@@ -2879,6 +2879,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           })
         }
 
+        // ── GARDA ANTI-BÂLBĂ PE GENERĂRILE PLĂTITE (owner, 14 aug, capturile
+        // serii: vocea lui românească transcrisă ca italiană stricată — „Come
+        // te per sai generati immagine?" — iar creierul a luat bâlba drept
+        // comandă și A ARS BANI pe două imagini necerute, ba una era o captură
+        // FALSĂ de aplicație) ───────────────────────────────────────────────
+        // Regula deterministă: pe o tură VORBITĂ, dacă limba transcriptului nu
+        // e limba STABILITĂ a omului, generarea plătită NU pornește — refuz cu
+        // îndemnul cinstit „repetă sau scrie comanda". Turele SCRISE nu trec pe
+        // aici (ce scrii cu mâna e comanda ta). Doar uneltele care costă bani.
+        const GENERARI_PLATITE = new Set(['generate_image', 'generate_video', 'create_presentation'])
+        // Semnalul de „tură vorbită" e PREZENȚA audio-ului nativ (doar vocea îl
+        // are — chiar sursa transcrierii), nu flagul `spoken`: paritatea
+        // scris/vorbit (caleUnica.test) cere ca `spoken` să rămână DOAR stil.
+        if (GENERARI_PLATITE.has(name) && typeof req.body?.audio === 'string' && req.body.audio.length > 0) {
+          const auzit = detectSpeechLang(lastUserText, null)
+          const bazaAuzit = (auzit ?? '').toLowerCase().split('-')[0]
+          const bazaOm = (userLang ?? 'en').toLowerCase().split('-')[0]
+          if (bazaAuzit && bazaAuzit !== bazaOm) {
+            return JSON.stringify({
+              error: 'transcript_suspect',
+              motiv: `Nu pornesc o generare plătită pe o frază auzită în altă limbă (${auzit}) decât a ta (${bazaOm}) — probabil transcriere greșită. Roagă omul să repete clar sau să SCRIE comanda.`,
+            })
+          }
+        }
         // ── POARTA MONITORULUI (owner, 14 aug: „fără comandă clară să nu facă
         // nimic pe monitor") ────────────────────────────────────────────────
         // click_monitor apasă ELEMENTE REALE din aplicație (elementFromPoint +
