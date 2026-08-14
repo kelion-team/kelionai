@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
+import { DeployProgressBar } from '../components/DeployProgressBar'
 import ContactModal from '../components/ContactModal'
 import CustomerSettings from '../components/CustomerSettings'
 import CvAdaptation from '../components/CvAdaptation'
@@ -1332,6 +1333,10 @@ export default function Stage({ user }: { user: User }) {
                 ) : task.kind === 'executie' ? (
                   // EXECUȚIA PAS CU PAS (owner, 14 aug) — starea vie din workspace.ts.
                   <ExecutieSurface zoom={monZoom} />
+                ) : task.kind === 'deploy' ? (
+                  <div style={{ padding: 24, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                    <DeployProgressBar />
+                  </div>
                 ) : task.html ? (
                   // PLAYGROUND: the page written by Kelion runs live in an isolated
                   // iframe (srcdoc + sandbox, no same-origin → it can't reach

@@ -1003,11 +1003,8 @@ async function createPresentation(
       if (s.corp) reqs.push({ insertText: { objectId: corpId, text: s.corp } })
       return reqs
     })
-    const uRes = await tfetch(`https://slides.googleapis.com/v1/presentations/${id}:batchUpdate`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests }),
-    })
+    const batchEndpoint = `https://slides.googleapis.com/v1/presentations/${id}:batchUpdate`
+    const uRes = await batchUpdateGoogleResource(batchEndpoint, token, requests)
     // Prezentarea EXISTĂ deja — un eșec la umplere se spune, nu se ascunde.
     if (!uRes.ok) {
       return JSON.stringify({
@@ -1017,6 +1014,14 @@ async function createPresentation(
     }
   }
   return JSON.stringify({ created: true, id, slides: lista.length, url: `https://docs.google.com/presentation/d/${id}/edit` })
+}
+
+async function batchUpdateGoogleResource(url: string, token: string, requests: unknown[]): Promise<Response> {
+  return tfetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests }),
+  })
 }
 
 // ── GOOGLE FORMS (owner, 14 aug: produsele alese) ────────────────────────────
@@ -1046,11 +1051,7 @@ async function createForm(title: string, description: string, questions: unknown
     }),
   )
   if (requests.length) {
-    const uRes = await tfetch(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests }),
-    })
+    const uRes = await batchUpdateGoogleResource(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, token, requests)
     if (!uRes.ok) {
       return JSON.stringify({
         created: true, id: cj.formId, url: cj.responderUri ?? `https://docs.google.com/forms/d/${cj.formId}/edit`,
