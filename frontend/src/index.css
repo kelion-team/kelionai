@@ -4078,6 +4078,11 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
   display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 6px;
   border-radius: 10px; background: var(--panel, #10162a);
   border: 1px solid var(--border); box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+  /* MENIUL NU-ȘI MAI TAIE COADA (owner, 15 aug: „unde e generatorul video" —
+     🎬 e ULTIMA intrare, iar fără max-height lista de ~19 rânduri cădea sub
+     marginea ecranelor mai scunde, fără nicio derulare). Plafonat la fereastră
+     → derulează; pe ecran înalt nu se schimbă NIMIC. */
+  max-height: calc(100vh - 120px); overflow-y: auto;
 }
 .apps-item {
   display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 0;

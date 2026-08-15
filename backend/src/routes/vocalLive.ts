@@ -840,6 +840,20 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           trimite({ type: 'audio', data })
         }
       }
+      // TEXTUL lui Kelion ținut până la verdict (owner, 15 aug: „iar aude
+      // bălării, și scrie alte bălării în chat"). MĂSURAT: audio-ul avea
+      // cadre-în-așteptare, dar TRANSCRIPTUL răspunsului curgea spre bandă cât
+      // timp verdictul era încă null — replica la o vorbire neadresată se
+      // SCRIA în chat chiar dacă vocea ei era apoi suprimată. Aceeași plasă ca
+      // la audio: fragmentele așteaptă verdictul; true → se scriu, false → se
+      // aruncă (numărate, nu pierdute tăcut).
+      const textInAsteptare: Array<{ text: string; final: boolean }> = []
+      const varsaTextulInAsteptare = (): void => {
+        for (const t of textInAsteptare.splice(0)) {
+          if (verdictTura && verdictLimba !== false) trimite({ type: 'kelion', text: t.text, final: t.final })
+          else pulsVoce.suprimateAdresare++
+        }
+      }
       // Cadrele ținute până la verdict se varsă prin ACEEAȘI judecată ca cele
       // directe — redate sau numărate ca suprimate, niciodată pierdute tăcut.
       const varsaCadreleInAsteptare = (): void => {
@@ -888,6 +902,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                     verdictTura = false
                     taiatDeVoce = false
                     varsaCadreleInAsteptare()
+                    varsaTextulInAsteptare()
                   }
                 }, 1500)
               }
@@ -896,6 +911,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             verdictTura = turaAdresataAcum()
             turaDeSistem = false // anunțul e consumat de tura lui
             taiatDeVoce = false // replică nouă — tăierea veche nu o mai privește
+            varsaTextulInAsteptare() // textul ținut se judecă cu ACELAȘI verdict
           }
           if (!verdictTura) { pulsVoce.suprimateAdresare++; return } // nu i se vorbea lui
           if (verdictLimba === false) { pulsVoce.suprimateLimba++; return } // limbă necerută
@@ -925,11 +941,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             }
           }
           // Verdict amânat + transcrierea a sosit → judecăm ACUM și vărsăm.
-          if (verdictTura === null && cadreInAsteptare.length) {
+          // Și textul ținut contează ca „ceva de vărsat" — altfel o tură cu
+          // transcript de răspuns dar fără cadre încă ar rămâne blocată pe null.
+          if (verdictTura === null && (cadreInAsteptare.length || textInAsteptare.length)) {
             verdictTura = turaAdresataAcum()
             turaDeSistem = false
             taiatDeVoce = false
             varsaCadreleInAsteptare()
+            varsaTextulInAsteptare()
           }
         },
         onTranscriereKelion: (text, final) => {
@@ -946,6 +965,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             }
           }
           if (verdictTura === false || verdictLimba === false) return
+          // Verdictul de adresare încă NU e luat → textul așteaptă cu el (P12,
+          // owner: „scrie alte bălării în chat" — nu mai scriem pe negândite).
+          if (verdictTura === null) {
+            textInAsteptare.push({ text, final })
+            return
+          }
           trimite({ type: 'kelion', text, final })
         },
         onUnealta: async (apel) => {
@@ -1040,6 +1065,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           verdictLimba = null
           taiatDeVoce = false
           cadreInAsteptare.length = 0 // tura moartă nu mai are ce vărsa
+          textInAsteptare.length = 0 // nici textul ei ținut
           if (ceasAsteptareVerdict) {
             clearTimeout(ceasAsteptareVerdict)
             ceasAsteptareVerdict = null
@@ -1048,12 +1074,16 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
         onTuraGata: () => {
           // Tura s-a terminat cu verdictul încă AMÂNAT (nicio transcriere n-a
-          // sosit vreodată) → fail-open: cadrele ținute se livrează, nu se
-          // înghit tăcut — răspunsul complet e al omului.
-          if (verdictTura === null && cadreInAsteptare.length) {
-            verdictTura = true
+          // sosit vreodată). STRICT (owner, 15 aug: „doar cind aude numele,
+          // doar atunci"): fail-open-ul de aici se închide la fel ca plasa de
+          // timp — un nume nemăsurat nu e un nume auzit; cadrele și textul
+          // ținute se ARUNCĂ numărate (suprimateAdresare), nu livrate pe
+          // ghicite.
+          if (verdictTura === null && (cadreInAsteptare.length || textInAsteptare.length)) {
+            verdictTura = false
             taiatDeVoce = false
             varsaCadreleInAsteptare()
+            varsaTextulInAsteptare()
           }
           if (verdictTura === false || verdictLimba === false) {
             // Tura NU i se adresa SAU a răspuns într-o limbă necerută: nu se
@@ -1073,6 +1103,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
           verdictTura = null
           verdictLimba = null
+          textInAsteptare.length = 0 // tura încheiată nu mai are text de vărsat
           trimite({ type: 'tura_gata' })
         },
         onEroare: (motiv) => {
