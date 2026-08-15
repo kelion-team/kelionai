@@ -180,8 +180,17 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       „orice clip se salveaza cu nume sugestiv data ora" + „in download" —
       numele = rețeta/subiectul + data + ora (ex.
       Spot-Kelionai-2026-08-15_09-00.mp4), salvat în folderul Download al
-      browserului la finalul fiecărui clip. La construcție se cere acordul
-      lui pe VIDEO_ALLOW_PAID + ore/plafon. PE COADĂ după P20 și P21. [ ]
+      browserului la finalul fiecărui clip. + REȚETA VIDEO GRATUIT PRIN GOOGLE
+      FLOW (ordin 17:23-17:32, verbatim: „prin google flow" + „fiecare user
+      logat poate sa le foloseasca" + „exact la asta ma gindeam"): MĂSURAT
+      (15 aug): Flow dă 50 credite gratuite/zi oricărui cont Google, fără
+      abonament, dar N-ARE API — deci rețeta per user: Kelion scrie promptul
+      șlefuit (buton Copiază + buton Deschide Flow) → userul generează pe
+      creditele LUI → descarcă → încarcă în Kelionai → Kelion analizează/
+      montează/narează/publică. Automatizarea NU apasă în Flow în locul
+      omului (fără API; contra regulilor Google) — complet-automatul rămâne
+      pe API-ul plătit cu butonul P29. La construcție se cere acordul lui pe
+      VIDEO_ALLOW_PAID + ore/plafon. PE COADĂ după P20 și P21. [ ]
 - [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
       tură o escaladează automat pe nivel superior Fable 5. Nu pornește
       duplicat pe același model, se revine pentru un nou job la primul model."

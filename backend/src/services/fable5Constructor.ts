@@ -114,10 +114,43 @@ export async function fable5Valida(): Promise<{ ok: boolean; motiv: string }> {
             : r.status >= 500
               ? `Anthropic are probleme (HTTP ${r.status}) — nu e cheia ta`
               : `Anthropic a răspuns HTTP ${r.status} — de citit corpul răspunsului, nu de schimbat cheia orbește`
+    if (!r.ok) {
+      probaFable = { la: Date.now(), ok: false, motiv: motivRefuz }
+      return probaFable
+    }
+    // ── BECUL NU MAI MINTE (owner, 15 aug, cu becul VERDE pe pungă GOALĂ:
+    // „cit fake ai bagat in acest soft?") ────────────────────────────────────
+    // GET /v1/models e GRATUIT și trece cu orice cheie recunoscută — deci
+    // dovedea „cheia există", nu „servește". Etapa 2 probează SERVIREA REALĂ:
+    // o cerere /v1/messages de 1 token pe cel mai ieftin model din scară.
+    // Costul: fracțiune de cent, o dată la 10 minute (cache) — prețul
+    // adevărului. Punga goală iese ROȘU cu drumul spre alimentare, pe față.
+    if (!isCustomOpenAi) {
+      const rs = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      const corp = await rs.text().catch(() => '')
+      if (!rs.ok) {
+        const faraCredit = rs.status === 400 && /credit balance is too low/i.test(corp)
+        probaFable = {
+          la: Date.now(),
+          ok: false,
+          motiv: faraCredit
+            ? 'CONT FĂRĂ CREDIT API — cheia e bună, punga e goală: console.anthropic.com → Billing → Buy credits (abonamentul Claude NU e creditul API)'
+            : rs.status === 429
+              ? 'cheia servește dar e limitată ACUM (429) — reîncearcă în câteva minute'
+              : `cheia e recunoscută dar cererea de probă a picat (HTTP ${rs.status}): ${corp.slice(0, 120)}`,
+        }
+        return probaFable
+      }
+    }
     probaFable = {
       la: Date.now(),
-      ok: r.ok,
-      motiv: r.ok ? 'cheie VALIDĂ — probă reală la Anthropic (GET /v1/models, gratuit)' : motivRefuz,
+      ok: true,
+      motiv: 'servește REAL — cerere de probă de 1 token executată la Anthropic (nu doar cheia recunoscută)',
     }
     return probaFable
   } catch (e) {
@@ -308,6 +341,11 @@ export async function fable5Chat(
       if (r.status === 404 && text.includes('not_found_error')) {
         lastErr = `fable5 ${r.status}: ${text.slice(0, 200)}`
         continue
+      }
+      // SOLDUL GOL SE SPUNE PE NUME (owner, 15 aug — jurnalul #324 arăta JSON
+      // brut reîncercat orbește de 6 ori): eroarea e PERMANENTĂ, nu trecătoare.
+      if (r.status === 400 && /credit balance is too low/i.test(text)) {
+        throw new Error('fable5 FĂRĂ CREDIT API: contul Anthropic n-are credit (nu e cheia!) — console.anthropic.com → Billing → Buy credits, sau dezapasă butonul Forțează Fable 5. Reîncercarea NU ajută.')
       }
       throw new Error(`fable5 ${r.status}: ${text.slice(0, 200)}`)
     }
