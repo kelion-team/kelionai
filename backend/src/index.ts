@@ -39,6 +39,7 @@ import { incarcaModelUnic, startAutoUpgradeModel } from './services/modelAutoUpg
 import { startAutoInvatare } from './services/autoInvatare.js'
 import { incarcaReprosuri } from './services/feedbackImplicit.js'
 import { triageGaps } from './services/gapsTriage.js'
+import { imbunatatireContinua } from './services/cerinte.js'
 import { runSelfHeal } from './services/selfHeal.js'
 import { pornesteIscoadele } from './services/iscoada.js'
 import { pornestePietarul } from './services/pietar.js'
@@ -492,6 +493,15 @@ try {
   const triaj = async (): Promise<void> => {
     if (!(await autonomActiv())) return
     await triageGaps().then((r) => app.log.info(r, 'gaps triage (autonomous)')).catch(() => {})
+    // REANALIZA LIVRATELOR, pe aceeași cadență zilnică (dovada 7 a autonomiei;
+    // owner, 15 aug: „finalizeeaza si restul de 2 care nu sunt bifate").
+    // Măsurat: imbunatatireContinua() — SINGURUL izvor de cerințe cu
+    // sursa='kelion' — era chemată doar la finalul buclei, când nu era absolut
+    // nimic de dus; cu cerințe curgând mereu, practic niciodată. Dedup-ul fuzzy
+    // din adaugaCerinta (K16) oprește dublurile la re-rulările zilnice.
+    await imbunatatireContinua()
+      .then((r) => app.log.info(r, 'reanaliza livratelor (autonomous)'))
+      .catch(() => {})
   }
   setTimeout(() => {
     void triaj()

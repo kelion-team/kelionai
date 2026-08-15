@@ -764,3 +764,44 @@ describe('Kelion se apucă singur de treabă', () => {
     expect((await poateSaLucreze()).pornit).toBe(true)
   })
 })
+
+// ── DOVADA 6 NU MAI FLĂMÂNZEȘTE ÎN SPATELE UNEI MISIUNI PARCATE ──────────────
+// (owner, 15 aug: „fast-track, finalizeeaza si restul de 2 care nu sunt bifate")
+//
+// Măsurat pe viu: golurile triate „DE IMPLEMENTAT" intrau la rând DOAR după
+// misiune, iar un pas de misiune PARCAT (blocat, cu semnătura lumii curente)
+// ținea misiunea „ne-gata" fără ca el însuși să ruleze — deci golul nu primea
+// NICIODATĂ ordin și dovada 6 („vede ce îi lipsește și construiește") rămânea
+// gri pe vecie. Regula anti-înfometare a buclei se aplică acum și aici.
+describe('golurile intră la rând când misiunea nu are niciun pas rulabil', () => {
+  /** Semnătura lumii EXACT cum o calculează bucla (versiune|chei|reușite=0) —
+   *  parcarea ține doar cât semnătura e cea curentă; cu altă semnătură pasul
+   *  s-ar DE-PARCA singur în aceeași tură și testul n-ar proba flămânzirea.
+   *  Dacă formula din autonomie.ts se schimbă, testul pică zgomotos — corect:
+   *  cine o schimbă decide conștient și despre parcare. */
+  function semnaturaAcum(): string {
+    const versiune = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
+    const chei = Object.keys(process.env).filter((k) => /_KEY$|_SECRET$|_TOKEN$|_URL$|^CARD_/.test(k)).length
+    return `${versiune}|${chei}|0`
+  }
+  function pasParcat(cod: string): void {
+    kv.set(`autonomie:pas:${cod}`, JSON.stringify({ job: 0, incercari: 3, blocat: true, semnatura: semnaturaAcum() }))
+  }
+  const golDeImplementat = { id: 42, request: 'să pot exporta conversațiile', hits: 3, reason: null, triage: 'DE IMPLEMENTAT — cerut des' }
+
+  it('misiune întreagă PARCATĂ → golul „DE IMPLEMENTAT" primește ordin', async () => {
+    for (const c of ['M0', 'M1', 'M2', 'M3', 'M4', 'M5']) pasParcat(c)
+    goluri = [golDeImplementat]
+    const r = await poateSaLucreze()
+    expect(jobs.some((j) => j.orderText.includes('CAPABILITATE CARE ÎȚI LIPSEȘTE'))).toBe(true)
+    expect(r.pornit).toBe(true)
+  })
+
+  it('cu un pas de misiune încă RULABIL, golurile așteaptă — designul din 30 iul rămâne', async () => {
+    // M0 rămâne nescris → rulabil; restul parcate. Golul NU are voie să intre.
+    for (const c of ['M1', 'M2', 'M3', 'M4', 'M5']) pasParcat(c)
+    goluri = [golDeImplementat]
+    await poateSaLucreze()
+    expect(jobs.some((j) => j.orderText.includes('CAPABILITATE CARE ÎȚI LIPSEȘTE'))).toBe(false)
+  })
+})
