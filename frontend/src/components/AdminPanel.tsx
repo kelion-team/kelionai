@@ -116,6 +116,46 @@ function ErrRow({
 
 // A REAL flag image (Windows doesn't render emoji flags — they show as "GB"
 // text). flagcdn serves every ISO country; on any failure we fall back to a dot.
+// ── P26 — REGISTRUL DE AUDIT (owner, 15 aug: „istoric salvat cu dovezi cine a
+// modificat, trasabilitate 24 din 24 de ore" + „baza de date nu se pierde").
+// Se încarcă la deschiderea tabului Utilizatori; arată cine/când/ce, valoarea
+// veche → nouă, plus DOVADA backupului (cel mai nou fișier de pe disc, măsurat
+// de server — dată + mărime; lipsa lui se spune, nu se maschează).
+interface RandAudit { la: string; actor: string; actiune: string; tabel: string; cheie: string; vechi: string; nou: string }
+function RegistruAudit() {
+  const [date, setDate] = useState<{ randuri: RandAudit[]; backup: { fisier: string; la: string; octeti: number } | null } | null | 'eroare'>(null)
+  useEffect(() => {
+    let viu = true
+    void fetch('/api/admin/audit', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j) => { if (viu) setDate(j) })
+      .catch(() => { if (viu) setDate('eroare') })
+    return () => { viu = false }
+  }, [])
+  if (date === null) return <div className="chat-hint">registrul se încarcă…</div>
+  if (date === 'eroare') return <div className="chat-hint">⚠ Registrul de audit nu s-a putut citi.</div>
+  return (
+    <div className="fin-breakdown">
+      <div className="fin-breakdown-head">Registrul modificărilor (audit — cine, când, ce)</div>
+      <div className="chat-hint">
+        {date.backup
+          ? `Ultimul backup: ${date.backup.fisier} · ${new Date(date.backup.la).toLocaleString('ro-RO')} · ${(date.backup.octeti / 1024 / 1024).toFixed(1)} MB`
+          : 'Backup: nemăsurabil de aici (directorul de backup nu e pe mașina asta sau e gol) — de verificat pe VPS.'}
+      </div>
+      {date.randuri.length === 0 && <div className="chat-hint">— încă nicio modificare înregistrată (registrul pornește de la publicarea asta)</div>}
+      {date.randuri.slice(0, 60).map((r, i) => (
+        <div className="vis-meta" key={i} style={{ padding: '3px 0' }}>
+          <span className="vis-time">{new Date(r.la).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+          <span><strong>{r.actor || '—'}</strong></span>
+          <span>{r.actiune}</span>
+          <span className="muted">{r.tabel}{r.cheie ? ` · ${r.cheie}` : ''}</span>
+          {(r.vechi || r.nou) && <span>{r.vechi ? `${r.vechi} → ` : ''}{r.nou}</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Flag({ code }: { readonly code: string }) {
   if (!code || code.length !== 2) return <span className="flag-none">🌐</span>
   return (
@@ -2910,6 +2950,7 @@ export default function AdminPanel({
                 </button>
               </p>
             )}
+            <RegistruAudit />
             {activityData && activityData.users.length === 0 && (
               <p className="chat-hint">
                 Încă nu s-a strâns activitate pe conturi — se adună de la prima intrare a fiecărui
@@ -2942,9 +2983,9 @@ export default function AdminPanel({
                               Aici vine din aceeași listă (fetchVoiceprints,
                               încărcată la deschiderea tabului); fără captură →
                               „?", cinstit, nu o siluetă care promite. */}
-                          {pozaUser(u.email) ? (
+                          {(u.foto || pozaUser(u.email)) ? (
                             <img
-                              src={pozaUser(u.email)}
+                              src={u.foto || pozaUser(u.email)}
                               alt={`Fața lui ${u.email}`}
                               style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.15)' }}
                             />
@@ -2992,6 +3033,13 @@ export default function AdminPanel({
                           consum ${(u.consumedUsd ?? 0).toFixed(2)}
                         </span>
                         {u.blocked && <span className="user-badge blocked">BLOCAT</span>}
+                        {/* P26: mostra de voce e parte din cardul omului — dacă
+                            există, se spune (ascultarea rămâne în Amprente). */}
+                        {u.voce && (
+                          <span title={u.mostraAudio ? 'Amprentă vocală înscrisă, cu mostră audio ascultabilă în tabul Amprente (▶)' : 'Amprentă vocală înscrisă (fără mostră audio încă)'}>
+                            🎤 voce{u.mostraAudio ? ' + mostră' : ''}
+                          </span>
+                        )}
                       </div>
                       {/* DEVICE-URILE LUI, DEDESUBT (P6; owner, 15 aug: „se
                           pastreaza unica si se adauga doar device cu care intra
