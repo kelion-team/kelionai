@@ -94,7 +94,12 @@ ruleaza_portile() {
     # simultan și constructorul. 20s măsura frigul mașinii, nu bootul — PICĂ
     # fals pe #1142 cu tsc+teste+build toate verzi. O aplicație chiar ruptă
     # (ciclul de importuri din 2 aug) pică și din 2 încercări a 45s.
-    for _incercare in 1 2; do
+    # 3 ÎNCERCĂRI, nu 2 (15 aug, după-amiaza): TREI PICĂ false într-o singură
+    # zi (b1e5126, 9689fbb, 79055bb) — de fiecare dată 9/9 restul verzi și
+    # bootul local TRECE din PRIMA cu exact comanda asta; VPS-ul duce simultan
+    # constructorul + poarta + deploy-ul, iar 2×45s tot pierdea booturi reci
+    # sub sarcină. O aplicație chiar ruptă pică identic și din 3.
+    for _incercare in 1 2 3; do
       ( cd "$dir/backend" && PORT=18099 timeout 45 node dist/index.js 2>&1 | grep -qm1 'Server listening' ) && { R_BOOT=TRECE; break; }
     done
   fi

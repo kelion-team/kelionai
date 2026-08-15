@@ -495,6 +495,8 @@ export default function AdminPanel({
     id: number
     status: 'queued' | 'running' | 'done' | 'failed'
     orderText: string
+    /** P8: fapta ordinului, extrasă de server din „CE A CERUT" — pentru afișaj. */
+    nume?: string
     branch: string | null
     prUrl: string | null
     tokens: number
@@ -2598,8 +2600,10 @@ export default function AdminPanel({
                         Fable 5
                       </span>
                     )}{' '}
-                    {j.orderText.slice(0, 90)}
-                    {j.orderText.length > 90 ? '…' : ''}
+                    {/* P8 (owner, 15 aug: „foarte clar ce executa"): FAPTA
+                        extrasă de server (nume), nu ambalajul promptului. */}
+                    {j.nume || j.orderText.slice(0, 90)}
+                    {(j.nume ?? j.orderText).length > 90 ? '…' : ''}
                   </span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                     {j.prUrl && (
