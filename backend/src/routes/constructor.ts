@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
-import { getSessionUser, adminSiId } from '../session.js'
+import { getSessionUser, adminSiId, cerAdmin } from '../session.js'
 import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, recordCost } from '../db.js'
 import type { OrMessage } from '../services/brainContract.js'
 import { uneltePentruCreier2, raspunsCreier2 } from '../services/creier2Constructor.js'
@@ -99,9 +99,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.get('/api/admin/constructor', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
-    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    // P9: poarta prin cerAdmin (sursa unică) — aceleași 401/403 pentru oameni,
+    // plus legitimația internă a lui Kelion (admin 2), ca `admin_vezi ordine`
+    // să meargă și pe voce și în bucla autonomă, nu doar cu cookie-ul ownerului.
+    const user = cerAdmin(req, reply)
+    if (!user) return
     // AUDIT ADMIN (3 aug): coada necitibilă (DB picat) → 500, nu 200 cu [] —
     // panoul scria „Niciun ordin încă" fără nicio măsurătoare reușită.
     const raw = await listBuildJobs(40)
