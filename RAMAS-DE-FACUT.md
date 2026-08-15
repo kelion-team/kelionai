@@ -193,10 +193,13 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       taxată; și pe faza de vorbire); (#7) search_unavailable/maps_http_NNN
       seci → poartă cauza (cheie lipsă ≠ cotă/rețea); (#6 notat: 4 unelte
       Google interceptate în chat.ts, nu în runGoogleTool — fragilitate,
-      nu ruptură azi). Lacăte: aplicatiiVii.test.ts (11). RĂMAS pe live
-      (numai owner): consimțământul Google pe scope-urile noi, cheile
-      SERPER/GEMINI pe VPS, comutatorul 🎬 pornit, cota Business aprobată,
-      agentul de documente viu — codul le spune acum pe nume pe fiecare. [ ]
+      nu ruptură azi). Lacăte: aplicatiiVii.test.ts (11). PUBLICAT: V13.5
+      (f479173) măsurat live la 20:15 UTC — inclusiv lista_tarife (bugul
+      „bate cimpi" cu tarifele inventate, prins de owner pe viu la 20:52,
+      REPARAT PE LIVE). RĂMAS pe live (numai owner): consimțământul Google
+      pe scope-urile noi, cheile SERPER/GEMINI pe VPS, comutatorul 🎬 pornit,
+      cota Business aprobată, agentul de documente viu — codul le spune acum
+      pe nume pe fiecare. [ ]
 - [x] ORDIN 15 aug, P29 (verbatim): „inteleg dar eu vreau sa platesc, sau
       clientul, de ce nu ma duce spre plata" + 19:0x „daca video si funtiile
       nu merg e pa" — drumul banilor la video FUNCȚIONEAZĂ: (1) butonul
