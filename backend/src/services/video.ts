@@ -86,8 +86,10 @@ export function motivRefuzVideo(
     return (
       `video_platit_neaprobat: Veo nu are nivel gratuit (măsurat pe pagina de prețuri Google, 2 aug 2026); ` +
       `modelul ${opts.model} costă ~$${cost.toFixed(2)} pe un clip de 8s. ` +
-      `Pornirea e o alegere conștientă a ownerului: butonul «🎬 Video plătit» din panoul de admin, tabul Bani ` +
-      `(env VIDEO_ALLOW_PAID=1 rămâne doar ca moștenire).`
+      `Pornirea e o alegere conștientă a ownerului: butonul «🎬 Generarea de clipuri (Veo)» → ` +
+      `«Pornește generarea», în panoul de admin, tabul Bani — PORNIT înseamnă că Google facturează ` +
+      `pe secunda de clip (nu există „gratis" la Veo; gratis = doar Google Flow, pe contul Google al omului). ` +
+      `(env VIDEO_ALLOW_PAID=1 rămâne doar ca moștenire.)`
     )
   return null
 }

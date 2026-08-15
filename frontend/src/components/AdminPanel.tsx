@@ -1551,22 +1551,27 @@ export default function AdminPanel({
                         {circuit?.autonomiaOprita ? 'Repornește' : 'Oprește'}
                       </button>
                     </span>
-                    {/* P29: comutatorul VIDEO — clipurile plătite de CLIENȚI se
-                    autofinanțează oricum (tariful poartă profitul); butonul
-                    guvernează generările neplătite (ale tale, de admin). */}
+                    {/* P29: comutatorul VIDEO. Ownerul, 20:58 („tu ai zis sa
+                    opresc in admin ca sa genereze video gratis, iti bati joc
+                    de mine?"): numele vechi «Video plătit» l-a împins să-l
+                    OPREASCĂ atunci când voia video — capcana era eticheta.
+                    Adevărul, pe față: la Veo NU EXISTĂ gratis (Google
+                    facturează pe secundă); PORNIT = clipurile tale de admin
+                    se generează (pe banii tăi la Google); clienții cu tarif
+                    plătit merg ORICUM; gratis = doar Google Flow. */}
                     <span className="or-wallet-sub">
                       {circuit?.videoPlatit == null
-                        ? '🎬 Video (Veo): stare necitită'
+                        ? '🎬 Generarea de clipuri (Veo): stare necitită'
                         : circuit.videoPlatit.pornit
-                          ? `🎬 Video (Veo): PORNIT${circuit.videoPlatit.sursa === 'env' ? ' (din env)' : ''} — și clipurile tale de admin merg`
-                          : '🎬 Video (Veo): OPRIT pentru clipuri neplătite — ale clienților cu tarif plătit MERG oricum'}{' '}
+                          ? `🎬 Generarea de clipuri (Veo): PORNITĂ${circuit.videoPlatit.sursa === 'env' ? ' (din env)' : ''} — clipurile tale se generează; Google îți facturează ~0,10 $/secundă`
+                          : '🎬 Generarea de clipuri (Veo): OPRITĂ — clipurile tale de admin NU se generează; ale clienților cu tarif plătit merg oricum. Gratis la Veo NU există — gratis e doar prin Google Flow.'}{' '}
                       <button
                         type="button"
                         className="ghost"
                         disabled={videoBusy}
                         onClick={() => void onVideoPlatit(!(circuit?.videoPlatit?.pornit ?? false))}
                       >
-                        {circuit?.videoPlatit?.pornit ? 'Oprește' : 'Pornește'}
+                        {circuit?.videoPlatit?.pornit ? 'Oprește generarea' : 'Pornește generarea (pe banii tăi)'}
                       </button>
                     </span>
                     {circuit?.autonomie && (
