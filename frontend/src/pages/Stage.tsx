@@ -1602,6 +1602,7 @@ export default function Stage({ user }: { user: User }) {
                   ['📷 Photos', 'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.'],
                   ['▶️ YouTube upload', 'Vreau să urc un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
                   ['🏪 Profilul firmei', 'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.'],
+                  ['🎬 Generator video', 'Vreau un clip video generat (Veo) — arată-mi întâi prețul în credite pentru fiecare calitate și cere-mi confirmarea înainte să generezi.'],
                 ].map(([eticheta, comanda]) => (
                   <button
                     key={eticheta}
