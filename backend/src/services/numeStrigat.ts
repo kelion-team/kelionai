@@ -73,27 +73,24 @@ export function numeStrigat(auzit: string): boolean {
 // determinist, audio-ul lui Kelion pleacă spre difuzor DOAR dacă tura era
 // adresată. Modelul poate vorbi cât vrea în gol — difuzorul tace.
 //
-// Contractul validat de owner (același ca pe calea ambientală):
-//   adresat = numele la începutul frazei, SAU conversație ÎN CURS (Kelion a
-//   vorbit de curând — un răspuns la propria lui întrebare nu cere numele).
-// Fereastra „în curs" e măsurată, nu ghicită: 30s de la ultima lui vorbă.
-
-/** Cât ține o conversație „în curs" după ultima vorbă a lui Kelion.
- *  30s → 120s (9 aug seara, ownerul: „a răspuns o dată și a murit"): o pauză
- *  naturală de gândire trece de 30s, iar după fereastră ORICE frază fără
- *  „Kelion" era suprimată la nesfârșit, fără niciun semn — conversația părea
- *  moartă. Două minute țin un dialog real viu; ambientalul tot cere numele. */
-export const FEREASTRA_DIALOG_MS = 120_000
+// Contractul din 9 aug (validat atunci): numele la începutul frazei SAU
+// conversație „în curs" (fereastră de 30s → 120s de la ultima lui vorbă).
+//
+// ── CONTRACTUL NOU — STRICT (owner, 15 aug, VERBATIM): „kelion trebuie sa
+// raspunda doar cind aude numele, doar atunci" ───────────────────────────────
+// „DOAR ATUNCI" revocă fereastra de dialog: fiecare enunț cere numele, altfel
+// tăcere — vorbești cu altcineva în cameră/mașină, el tace; îl strigi, îți
+// răspunde. Întrebarea „strict pe fiecare frază sau fereastră scurtă?" i-a
+// fost pusă ownerului pe 15 aug, neblocant; fără alt răspuns, se implementează
+// LITERA ordinului. Cine vrea fereastra înapoi o repune DOAR cu ordinul lui
+// explicit — și atunci istoria de mai sus îi spune exact ce scoate.
 
 /**
  * Tura userului era adresată lui Kelion? Funcție PURĂ — se probează pe
- * transcrieri și milisecunde, fără rețea.
+ * transcrieri, fără rețea. STRICT: doar numele decide (ordinul din 15 aug).
  *
  * @param transcript ce a spus omul în tura asta (transcrierea urechii)
- * @param msDeLaVorbaKelion milisecunde de la ultima vorbă a lui Kelion
- *   (Infinity = n-a vorbit deloc în sesiune)
  */
-export function turaAdresata(transcript: string, msDeLaVorbaKelion: number): boolean {
-  if (numeStrigat(transcript)) return true
-  return Number.isFinite(msDeLaVorbaKelion) && msDeLaVorbaKelion >= 0 && msDeLaVorbaKelion < FEREASTRA_DIALOG_MS
+export function turaAdresata(transcript: string): boolean {
+  return numeStrigat(transcript)
 }

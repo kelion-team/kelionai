@@ -237,15 +237,19 @@ export function construiesteInstructiune(
   // care ownerul l-a validat: numele deschide tura, restul e tăcere. Nu tăiem
   // audio (regresia din 6 aug, „nu aude"): pragul rămâne pe judecata modelului,
   // dar acum instruit clar CÂND i se vorbește.
+  // STRICT (owner, 15 aug, verbatim: „kelion trebuie sa raspunda doar cind
+  // aude numele, doar atunci"): excepția (b) — „răspunsul la întrebarea ta" —
+  // a fost SCOASĂ; fiecare frază cere numele. Gardul determinist de pe server
+  // (routes/vocalLive.ts) aplică aceeași regulă pe transcriere — instrucțiunea
+  // doar îl scutește pe model să vorbească în gol.
   instructiune +=
-    `\nREGULA TREZIRII PE NUME — DECISIVĂ: răspunzi cu voce DOAR dacă ȚIE ți se vorbește. ` +
-    `Ți se vorbește când: (a) numele tău („Kelion", „Kei") e primul sau printre primele cuvinte ` +
-    `ale frazei, SAU (b) tu tocmai ai pus o întrebare și fraza asta e răspunsul la ea. În rest — ` +
-    `vorbire între alți oameni, gânduri cu voce tare, zgomot de fundal, sau un nume care NU e al ` +
-    `tău — TACI complet: niciun cuvânt, niciun sunet, nicio unealtă. Un nume care apare TÂRZIU ` +
-    `în frază e vorbire DESPRE tine, nu CĂTRE tine — și aia se ignoră. Când ești strigat pe nume, ` +
-    `tăcerea e GREȘITĂ (nu fi peste-precaut); când NU ești strigat, orice vorbă a ta e o ` +
-    `întrerupere nedorită. Fiind strigat pe nume ESTE invitația de a vorbi.`
+    `\nREGULA TREZIRII PE NUME — DECISIVĂ ȘI FĂRĂ EXCEPȚII: răspunzi cu voce DOAR când numele ` +
+    `tău („Kelion", „Kei") e primul sau printre primele cuvinte ale frazei. FIECARE frază cere ` +
+    `numele — chiar și răspunsul la o întrebare pusă de tine: fără nume, TACI complet: niciun ` +
+    `cuvânt, niciun sunet, nicio unealtă. Vorbire între alți oameni, gânduri cu voce tare, zgomot ` +
+    `de fundal, un nume care NU e al tău — tăcere. Un nume care apare TÂRZIU în frază e vorbire ` +
+    `DESPRE tine, nu CĂTRE tine — se ignoră. Când ești strigat pe nume, tăcerea e GREȘITĂ (nu fi ` +
+    `peste-precaut); fiind strigat pe nume ESTE invitația de a vorbi.`
   if (istoric.length) {
     const randuri = istoric
       // ISTORICUL NU CARĂ OTRAVA (9 aug, revizia): o replică spaniolă scăpată
