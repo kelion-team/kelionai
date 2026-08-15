@@ -99,28 +99,6 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       Lacăte: vizitatoriRaport.test (grupare + HAVING + faraPoza) +
       pozaVizitatorului.test adaptat pe forma agregată. RĂMAS: verificarea
       LIVE a ownerului (cardul lui unic, cu ambele vizite din 15 aug). [ ]
-- [x] ORDIN 15 aug, P26 (verbatim, LEGE): „orice se intimpla cu aplicatia,
-      baza de date nu se sterge, sau se pierde, nici la suprascriere, se scrie
-      doar unde e necesar dar cu istoric salvat cu dovezi cine a modificat,
-      trasabilitate 24 din 24 de ore" + „se ataseaza inclusiv monstra de voce"
-      — registrul audit_log (sub scut; urme: blocare/deblocare, golirea GDPR,
-      limba, amprenta vocii; banii aveau deja billing_events), scutul extins pe
-      messages + audit_log + video_invatat, ruta /api/admin/audit cu DOVADA
-      backupului de pe disc, Registrul modificărilor în tabul Utilizatori,
-      cardul userului cu poza de pe server + plăcuța 🎤 voce/mostră, iar
-      catch-ul MUT din getUserActivity (bugul „citirea a eșuat" din captura
-      ownerului) strigă acum CAUZA în jurnal. RĂMAS: verificarea live +
-      diagnosticul cauzei reale a citirii picate din jurnalul de pe VPS. [ ]
-- [x] ORDIN 15 aug, P30a (verbatim: „sa vada un videoclip din youtube… sa
-      extraga ideile principale si informatiile din clip, sa le catalogheze si
-      sa le invete"; plan aprobat cu „start") — unealta vede_video: linkul
-      YouTube intră DIRECT în creier (fileData, fără descărcare), fișa
-      structurată (idei/informații/momente cu minutaj/ton, în română), plafon
-      10 min SPUS în cerere, costul = tokenii REALI în jurnal ('video-vazut'),
-      fișa intră în VIDEOTECĂ (video_invatat, sub scut, căutabilă) + în
-      memoria de lungă durată. Manual + registrul capabilităților (116).
-      RĂMAS: proba live a ownerului cu un link real; P30b (TikTok/„de
-      oriunde"/fișiere — cere acordul lui pe descărcare); P30c (Studio). [ ]
 - [ ] INCIDENT 15 aug: poarta VPS a TĂCUT ~3h pe PR #1195 (zero comentarii;
       alte PR-uri primeau verdicte) → #1195 îmbinat ca admin 2 la ordinul
       ownerului („hai cu ele pe aplicatie"), cu porțile rulate local 2× verzi

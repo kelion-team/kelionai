@@ -249,38 +249,6 @@ export async function initDb(): Promise<void> {
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS pages TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_visits_email ON visits (user_email, last_seen_at DESC);
     -- The ledger of top-ups (+) and consumptions (−) — the structure is below.
-    -- ── REGISTRUL DE AUDIT (P26 — owner, 15 aug, LEGE: „se scrie doar unde e
-    -- necesar dar cu istoric salvat cu dovezi cine a modificat, trasabilitate
-    -- 24 din 24 de ore"). Fiecare modificare de date de om lasă urmă: cine,
-    -- când, ce anume, valoarea veche → nouă. Tabelul e el însuși sub scut
-    -- (TABELE_PROTEJATE) — o trasabilitate care se poate șterge nu e niciuna.
-    CREATE TABLE IF NOT EXISTS audit_log (
-      id BIGSERIAL PRIMARY KEY,
-      la TIMESTAMPTZ NOT NULL DEFAULT now(),
-      actor TEXT NOT NULL DEFAULT '',
-      actiune TEXT NOT NULL DEFAULT '',
-      tabel TEXT NOT NULL DEFAULT '',
-      cheie TEXT NOT NULL DEFAULT '',
-      vechi TEXT NOT NULL DEFAULT '',
-      nou TEXT NOT NULL DEFAULT ''
-    );
-    CREATE INDEX IF NOT EXISTS idx_audit_la ON audit_log (la DESC);
-    -- ── VIDEOTECA LUI KELION (P30a — owner, 15 aug: „sa vada un videoclip…
-    -- sa extraga ideile principale si informatiile din clip, sa le catalogheze
-    -- si sa le invete"). Fiecare clip văzut = un rând: sursa, fișa întreagă
-    -- (idei/informații/momente), cine a cerut, tokenii + costul REAL măsurat.
-    -- Sub scutul datelor (LEGEA P26): ce a învățat nu se șterge.
-    CREATE TABLE IF NOT EXISTS video_invatat (
-      id BIGSERIAL PRIMARY KEY,
-      la TIMESTAMPTZ NOT NULL DEFAULT now(),
-      cerut_de TEXT NOT NULL DEFAULT '',
-      url TEXT NOT NULL DEFAULT '',
-      titlu TEXT NOT NULL DEFAULT '',
-      fisa TEXT NOT NULL DEFAULT '',
-      tokeni INT NOT NULL DEFAULT 0,
-      cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_video_invatat_la ON video_invatat (la DESC);
     -- ── PAYMENTS VIA REVOLUT PRO, WITH A UNIQUE CODE (Adrian, 30 Jul) ────────
     -- "nowadays, having to manually manage thousands of potential users, is
     -- that what you offer?" — he was right. For a payment to credit ITSELF you
@@ -745,78 +713,11 @@ export async function initDb(): Promise<void> {
 // care ADAUGĂ în billing_events/transactions — exact „adăugare cu validare,
 // legată de plăți". Upsert-urile de profil (ON CONFLICT DO UPDATE) rămân —
 // ele completează rândul omului, nu îl înlocuiesc cu altul.
-/** Tabelele pe care ordinul le apără: identitatea, banii, biometria — și,
- *  din 15 aug (P26, LEGEA datelor: „orice se intimpla cu aplicatia, baza de
- *  date nu se sterge, sau se pierde"), ISTORICUL conversațiilor și registrul
- *  de audit însuși: nimic din cod nu ștergea `messages` (măsurat — zero căi),
- *  deci scutul doar bate în cuie realitatea; `audit_log` fără scut ar fi o
- *  trasabilitate care se poate șterge singură — adică niciuna. */
+/** Tabelele pe care ordinul le apără: identitatea, banii, biometria. */
 export const TABELE_PROTEJATE = [
   'local_accounts', 'google_accounts', 'wallets', 'transactions',
   'billing_events', 'payment_codes', 'voiceprints', 'faceprints',
-  'messages', 'audit_log', 'video_invatat',
 ] as const
-
-/** ── URMA DE AUDIT (P26, 15 aug — „cu dovezi cine a modificat") ──────────────
- *  Fire-and-forget prin construcție: o urmă care nu se poate scrie NU blochează
- *  operația (datele omului > registrul), dar se STRIGĂ în jurnal — un audit
- *  care tace despre propriile găuri nu e trasabilitate. Valorile se tund la
- *  400 de caractere: registrul ține DOVADA schimbării, nu arhiva conținutului. */
-export function noteazaAudit(actor: string, actiune: string, tabel: string, cheie: string, vechi = '', nou = ''): void {
-  if (!dbEnabled()) return
-  void getPool()
-    .query(`INSERT INTO audit_log (actor, actiune, tabel, cheie, vechi, nou) VALUES ($1,$2,$3,$4,$5,$6)`, [
-      actor.slice(0, 120), actiune.slice(0, 80), tabel.slice(0, 60), cheie.slice(0, 200), String(vechi).slice(0, 400), String(nou).slice(0, 400),
-    ])
-    .catch((e) => console.error('[audit] urma NU s-a putut scrie:', String(e).slice(0, 160)))
-}
-
-/** Registrul de audit pentru panou (admin): ultimele intrări, cele noi primele. */
-export async function citesteAudit(limita = 200): Promise<Array<{ la: string; actor: string; actiune: string; tabel: string; cheie: string; vechi: string; nou: string }> | null> {
-  if (!dbEnabled()) return null
-  try {
-    return (
-      await getPool().query<{ la: string; actor: string; actiune: string; tabel: string; cheie: string; vechi: string; nou: string }>(
-        `SELECT la::text, actor, actiune, tabel, cheie, vechi, nou FROM audit_log ORDER BY la DESC LIMIT $1`,
-        [Math.min(500, Math.max(1, limita))],
-      )
-    ).rows
-  } catch (e) {
-    console.error('[audit] registrul nu s-a putut citi:', String(e).slice(0, 160))
-    return null
-  }
-}
-
-/** P30a: un clip văzut intră în videotecă — cu urmă de audit (LEGEA P26). */
-export async function salveazaVideoInvatat(cerutDe: string, url: string, titlu: string, fisa: string, tokeni: number, costUsd: number): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query(
-      `INSERT INTO video_invatat (cerut_de, url, titlu, fisa, tokeni, cost_usd) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [cerutDe.slice(0, 120), url.slice(0, 500), titlu.slice(0, 200), fisa.slice(0, 8000), tokeni, costUsd],
-    )
-    noteazaAudit(cerutDe, 'video-vazut (catalogat)', 'video_invatat', url.slice(0, 200), '', titlu.slice(0, 120))
-  } catch (e) {
-    console.error('[videoteca] clipul nu s-a putut cataloga:', String(e).slice(0, 160))
-  }
-}
-
-/** Căutare în videotecă („din ce clipuri știi X?") — pe titlu + fișă. */
-export async function cautaVideoInvatat(text: string, limita = 5): Promise<Array<{ la: string; url: string; titlu: string; fisa: string }> | null> {
-  if (!dbEnabled()) return null
-  try {
-    return (
-      await getPool().query<{ la: string; url: string; titlu: string; fisa: string }>(
-        `SELECT la::text, url, titlu, fisa FROM video_invatat
-          WHERE $1 = '' OR titlu ILIKE '%' || $1 || '%' OR fisa ILIKE '%' || $1 || '%'
-          ORDER BY la DESC LIMIT $2`,
-        [String(text ?? '').slice(0, 120), Math.min(20, Math.max(1, limita))],
-      )
-    ).rows
-  } catch {
-    return null
-  }
-}
 
 async function scutulDatelor(): Promise<void> {
   try {
@@ -1366,7 +1267,6 @@ export async function blockUser(email: string): Promise<void> {
       'INSERT INTO blocked_users (email) VALUES ($1) ON CONFLICT (email) DO NOTHING',
       [email.toLowerCase()],
     )
-    noteazaAudit('admin', 'blocare-user', 'blocked_users', email.toLowerCase(), 'liber', 'blocat')
   } catch {
     /* non-fatal */
   }
@@ -1376,7 +1276,6 @@ export async function unblockUser(email: string): Promise<void> {
   if (!dbEnabled() || !email) return
   try {
     await getPool().query('DELETE FROM blocked_users WHERE email = $1', [email.toLowerCase()])
-    noteazaAudit('admin', 'deblocare-user', 'blocked_users', email.toLowerCase(), 'blocat', 'liber')
   } catch {
     /* non-fatal */
   }
@@ -2005,9 +1904,6 @@ export async function attachVisitPhoto(fingerprint: string, ip: string, poza: st
 export async function purgeVisits(): Promise<number> {
   if (!dbEnabled()) return -1
   const r = await getPool().query('DELETE FROM visits')
-  // P26: SINGURA ștergere legitimă de date de oameni (butonul explicit al
-  // ownerului, GDPR) — și tocmai de-aia lasă urmă în registru, cu cifra reală.
-  noteazaAudit('admin', 'golire-vizitatori (buton GDPR)', 'visits', '*', `${r.rowCount ?? 0} vizite`, 'șters')
   return r.rowCount ?? 0
 }
 
@@ -2049,10 +1945,7 @@ export async function getUserActivity(): Promise<{
                 EXISTS(SELECT 1 FROM blocked_users b WHERE lower(b.email) = lower(v.user_email)) AS blocked,
                 COALESCE((SELECT w.balance FROM wallets w WHERE lower(w.user_email) = lower(v.user_email)), 0)::float AS balance,
                 COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE lower(c.user_email) = lower(v.user_email)), 0)::float AS "consumedUsd",
-                (lower(v.user_email) = lower($1)) AS scutit,
-                COALESCE((SELECT f.photo FROM faceprints f WHERE lower(f.user_email) = lower(v.user_email) LIMIT 1), '') AS foto,
-                EXISTS(SELECT 1 FROM voiceprints vp WHERE lower(vp.user_email) = lower(v.user_email)) AS voce,
-                COALESCE((SELECT vp.audio_clip <> '' FROM voiceprints vp WHERE lower(vp.user_email) = lower(v.user_email) LIMIT 1), false) AS "mostraAudio"
+                (lower(v.user_email) = lower($1)) AS scutit
          FROM visits v
          LEFT JOIN (SELECT lower(user_email) AS email_jos, COUNT(*)::int AS n
                     FROM messages GROUP BY lower(user_email)) m
@@ -2094,11 +1987,7 @@ export async function getUserActivity(): Promise<{
     }
     for (const u of users) u.devices = peEmail.get(u.email) ?? []
     return { users }
-  } catch (e) {
-    // P26 (bugul viu din captura ownerului): panoul spunea cinstit „citirea a
-    // eșuat", dar catch-ul MUT înghițea CAUZA — nimeni nu putea diagnostica.
-    // Eroarea se strigă în jurnal (server_logs → admin), null rămâne null.
-    console.error('[users] getUserActivity a picat:', String(e).slice(0, 300))
+  } catch {
     return null
   }
 }
@@ -2554,14 +2443,12 @@ export async function getSpeechLang(email: string): Promise<string | null> {
 export async function setSpeechLangPref(email: string, lang: string): Promise<void> {
   if (!dbEnabled()) return
   try {
-    const vechi = await getSpeechLang(email).catch(() => null)
     await getPool().query(
       `INSERT INTO user_prefs (user_email, speech_lang, updated_at)
        VALUES ($1, $2, now())
        ON CONFLICT (user_email) DO UPDATE SET speech_lang = $2, updated_at = now()`,
       [userKey(email), lang],
     )
-    if ((vechi ?? '') !== lang) noteazaAudit(email, 'limba-vorbirii', 'user_prefs', userKey(email), vechi ?? '', lang)
   } catch {
     // Never break the chat because persistence failed.
   }
@@ -3512,16 +3399,6 @@ export async function saveVoiceprint(
              audio_clip = CASE WHEN $7 <> '' THEN $7 ELSE voiceprints.audio_clip END,
              updated_at = now()`,
       [v.email.toLowerCase(), v.name, gender, v.isAdmin, vec, JSON.stringify(featureMeta), clip],
-    )
-    // P26 (LEGEA datelor): mostra de voce e date de OM — orice scriere lasă
-    // urmă în registru: cine, ce fel (înscriere/adaptare), cu/ fără mostră.
-    noteazaAudit(
-      v.email,
-      opts.adapt ? 'amprenta-vocii (adaptare)' : 'amprenta-vocii (înscriere)',
-      'voiceprints',
-      v.email.toLowerCase(),
-      '',
-      `gen=${gender}, vector=${vec.length} valori${v.audioClip ? ', cu mostră audio' : ''}`,
     )
   } catch {
     // Never break the chat because voiceprint persistence failed.
