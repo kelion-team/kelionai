@@ -861,11 +861,12 @@ export default function ChatPanel({
   //     and converted text, so the raw file went NOWHERE and was silently
   //     cleared. A chip for a file that never leaves the browser is a lie.
   // Now: converted → attached; not converted → an honest chat line says so.
-  // The size gate mirrors the server's REAL limit (Fastify bodyLimit 25MB in
-  // index.ts; base64 inflates 4/3 → ~18MB of file fills the pipe) — the old
-  // 90MB constant was justified by Cloudflare's 100MB cap, which was never
-  // the binding one.
-  const MAX_INGEST_B64 = 24_000_000
+  // The size gate mirrors the server's REAL limit. P13 (owner, 15 aug:
+  // „mărește-i spațiul de încărcare în chat"): /api/ingest are acum limita LUI
+  // de 100MB (routes/ingest.ts, ca /api/chat) — capul real e Cloudflare
+  // (100MB/cerere). 96MB de base64 ≈ fișier de ~72MB; peste, mesajul cinstit
+  // docTooLarge rămâne exact ca înainte.
+  const MAX_INGEST_B64 = 96_000_000
   async function addDocFiles(files: File[]): Promise<void> {
     for (const file of files) {
       if (file.type.startsWith('image/')) continue

@@ -285,8 +285,11 @@ describe('vocalLive — ancora realității și tăcerea la deschidere', () => {
     expect(i).toContain('Kei')
     // când NU e strigat, tace complet — asta e miezul cererii
     expect(i).toContain('TACI complet')
-    // un răspuns la propria întrebare tot îl trezește (nu pierde firul)
-    expect(i).toContain('răspunsul la ea')
+    // STRICT (owner, 15 aug: „doar cind aude numele, doar atunci"): excepția
+    // „răspunsul la întrebarea ta" a fost SCOASĂ — fiecare frază cere numele.
+    expect(i).toContain('FĂRĂ EXCEPȚII')
+    expect(i).toContain('FIECARE frază cere')
+    expect(i).not.toContain('răspunsul la ea')
   })
 
   it('cu oră+fus+GPS, ancora e coaptă în instrucțiune cu valorile reale', () => {

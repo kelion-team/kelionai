@@ -93,8 +93,11 @@ describe('punctul roșu al microfonului = măsurătoare, nu speranță', () => {
 describe('atașamentele nu mai mint', () => {
   it('ramura admin-raw (cip fără transmisie) a dispărut', () => {
     expect(panou).not.toContain('MAX_RAW_FILE')
-    // limita reală e a serverului (bodyLimit 25MB → ~24MB base64)
-    expect(panou).toMatch(/MAX_INGEST_B64 = 24_000_000/)
+    // limita reală e a serverului — P13 (owner, 15 aug: „mărește-i spațiul de
+    // încărcare"): /api/ingest are limita lui de 100MB, oglinda urcă la 96MB
+    // base64 (≈ fișier ~72MB). Intenția lacătului rămâne: oglinda MĂSOARĂ
+    // limita serverului, nu inventează una proprie.
+    expect(panou).toMatch(/MAX_INGEST_B64 = 96_000_000/)
   })
   it('conversia picată se spune omului, cu numele fișierului', () => {
     expect(panou).toMatch(/ack\(t\.docAttachFailed\.replace\('\{name\}', name\)\)/)

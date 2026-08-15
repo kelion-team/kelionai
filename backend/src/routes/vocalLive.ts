@@ -776,16 +776,18 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       let ultimaSalvareHandle = 0
 
       if (inchis) return
-      // ── GARDUL TREZIRII PE NUME — DETERMINIST, PE SERVER (9 aug) ────────────
-      // Ownerul, a treia oară azi: „kelion nu identifică când discuțiile
-      // ambientale sunt între alte persoane". Instrucțiunea (PR #926) e o
-      // rugăminte; ăsta e gardul: audio-ul modelului pleacă spre difuzor DOAR
-      // dacă tura era ADRESATĂ (numele la început SAU dialog în curs — Kelion a
-      // vorbit în ultimele FEREASTRA_DIALOG_MS). O tură pornită de SISTEM
-      // (anunț de ordin, fără vorbă de om în față) trece mereu. Verdictul se ia
-      // O DATĂ pe tură, la prima bucată de audio, pe transcrierea de până
-      // atunci; tura suprimată se scrie în jurnal cu ce s-a auzit — o tăcere
-      // GREȘITĂ trebuie să se poată vedea, nu să dispară (lecția numeStrigat).
+      // ── GARDUL TREZIRII PE NUME — DETERMINIST, PE SERVER ──────────────────
+      // 9 aug (ownerul, a treia oară: „nu identifică când discuțiile ambientale
+      // sunt între alte persoane"): gardul s-a născut cu contractul „numele la
+      // început SAU dialog în curs". 15 aug (ownerul, VERBATIM): „kelion
+      // trebuie sa raspunda doar cind aude numele, doar atunci" — STRICT:
+      // fereastra de dialog și excepția primei ture au fost scoase; audio-ul
+      // modelului pleacă spre difuzor DOAR pe tură cu numele MĂSURAT în
+      // transcriere. O tură pornită de SISTEM (anunț de ordin, fără vorbă de
+      // om în față) trece mereu. Verdictul se ia O DATĂ pe tură, la prima
+      // bucată de audio, pe transcrierea de până atunci; tura suprimată se
+      // scrie în jurnal cu ce s-a auzit — o tăcere GREȘITĂ trebuie să se poată
+      // vedea, nu să dispară (lecția numeStrigat).
       let ultimaVorbaKelion = 0 // 0 = n-a vorbit încă deloc
       // ── GARDUL DE LIMBĂ — DETERMINIST, PE SERVER (9 aug, revizia) ────────
       // Al doilea gard pe ieșire, frate cu adresarea: dacă răspunsul ÎNCEPE
@@ -799,23 +801,22 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // prindă doar ne-româna, deci taie DOAR când limba userului e româna —
       // un user cu engleza (sau orice altă limbă) setată își primește limba lui.
       const gardDeLimba = limbaPin === 'ro-RO'
-      let primaTura = true
       const turaAdresataAcum = (): boolean => {
         // Judecăm pe ROSTIREA curentă (ultima activitate de vorbire), nu pe
         // bufferul întreg — un „Kelion, …" proaspăt nu mai e îngropat după
         // primele 4 cuvinte ale unui text vechi (audit 9 aug).
         const spusa = rostireCurenta.trim() || bufUser.trim()
         if (turaDeSistem) return true // anunț declarat EXPLICIT, nu dedus
-        if (!spusa) return true // nimic auzit vreodată — nu suprimăm orbește
-        // BLOCAJUL LA RECE, MĂSURAT (9 aug seara, pulsul: 308 cadre de voce de
-        // la Google, 308 suprimate pe adresare, 0 spre browser): fereastra de
-        // dialog se deschide doar după ce Kelion „a vorbit", dar nimic nu
-        // trecea de gard ca să fi vorbit vreodată — mut pe veci fără „Kelion"
-        // la fiecare frază. Cine deschide sesiunea și vorbește PRIMUL, lui
-        // Kelion îi vorbește — prima tură e adresată prin definiție.
-        if (primaTura) return true
-        const deLaVorba = ultimaVorbaKelion > 0 ? Date.now() - ultimaVorbaKelion : Number.POSITIVE_INFINITY
-        return turaAdresata(spusa, deLaVorba)
+        // ── STRICT (owner, 15 aug, verbatim: „kelion trebuie sa raspunda doar
+        // cind aude numele, doar atunci") ───────────────────────────────────
+        // „Doar atunci" a scos: fereastra de dialog (120s), excepția primei
+        // ture ȘI trecerea „nimic auzit → nu suprimăm orbește" — un enunț fără
+        // nume MĂSURAT în transcriere nu primește răspuns. Nu e blocajul la
+        // rece din 9 aug (ăla suprima și frazele CU nume): numele deschide
+        // tura oricând, iar cadrele așteaptă transcrierea (mai jos) înainte de
+        // verdict, deci o transcriere întârziată cu „Kelion" tot se redă.
+        if (!spusa) return false
+        return turaAdresata(spusa)
       }
       // Livrarea unui cadru de voce spre difuzor — TOATĂ contabilitatea la un
       // loc, folosită și de drumul normal și de vărsarea cadrelor amânate.
@@ -869,23 +870,26 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           pulsVoce.laUltimulCadru = Date.now()
           octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
           if (verdictTura === null) {
-            const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem || primaTura
+            const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem
             if (!areTemei) {
               // Transcrierea n-a sosit încă (Google o trimite adesea DUPĂ
-              // primul cadru audio) — verdict AMÂNAT, nu poartă deschisă:
-              // înainte, „buffer gol = tură de sistem" reda tura ambientală
-              // (audit 9 aug, critică). Ținem cadrul; judecăm la prima
-              // transcriere sau, la 900 ms fără niciuna, fail-open.
+              // primul cadru audio) — verdict AMÂNAT: ținem cadrul și judecăm
+              // la prima transcriere. STRICT (owner, 15 aug: „doar cind aude
+              // numele, doar atunci"): plasa de timp nu mai e fail-OPEN — fără
+              // nicio transcriere în 1500 ms, tura se SUPRIMĂ (un nume
+              // nemăsurat nu e un nume auzit), cu contorul pe față în puls.
+              // 900→1500 ms: fereastra mai lungă dă transcrierii întârziate
+              // șansa să aducă numele înainte de verdictul de tăcere.
               cadreInAsteptare.push(data)
               if (!ceasAsteptareVerdict) {
                 ceasAsteptareVerdict = setTimeout(() => {
                   ceasAsteptareVerdict = null
                   if (verdictTura === null) {
-                    verdictTura = true
+                    verdictTura = false
                     taiatDeVoce = false
                     varsaCadreleInAsteptare()
                   }
-                }, 900)
+                }, 1500)
               }
               return
             }
@@ -1069,7 +1073,6 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
           verdictTura = null
           verdictLimba = null
-          primaTura = false // de-acum fereastra de dialog + numele decid
           trimite({ type: 'tura_gata' })
         },
         onEroare: (motiv) => {

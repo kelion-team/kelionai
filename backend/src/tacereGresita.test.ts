@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
-import { numeStrigat, turaAdresata, FEREASTRA_DIALOG_MS } from './services/numeStrigat.js'
+import { numeStrigat, turaAdresata } from './services/numeStrigat.js'
 
 // ── „VORBESC ȘI NU SE ÎNTÂMPLĂ NIMIC" (8 aug 2026) ─────────────────────────
 //
@@ -67,30 +67,33 @@ describe('a fost strigat pe nume — funcție pură, probată pe rostiri reale',
   })
 })
 
-// ── GARDUL DETERMINIST AL SESIUNII LIVE (9 aug, ownerul, a treia oară: „nu
-// identifică când discuțiile ambientale sunt între alte persoane"). Contractul:
-// adresat = numele la început SAU dialog în curs (Kelion a vorbit de curând). ──
-describe('turaAdresata — gardul serverului pe sesiunea live', () => {
-  it('numele strigat trece MEREU, oricât de veche e ultima vorbă a lui Kelion', () => {
-    expect(turaAdresata('Kelion, cât e ceasul?', Number.POSITIVE_INFINITY)).toBe(true)
-    expect(turaAdresata('hei Kelion ajută-mă', 999_999_999)).toBe(true)
+// ── GARDUL DETERMINIST AL SESIUNII LIVE — CONTRACTUL STRICT ─────────────────
+// Istoria: pe 9 aug contractul era „numele la început SAU dialog în curs"
+// (fereastra de 120s). Pe 15 aug ownerul a ordonat VERBATIM: „kelion trebuie
+// sa raspunda doar cind aude numele, doar atunci" — „doar atunci" a revocat
+// fereastra. FIECARE frază cere numele; fără nume = tăcere, oricât de proaspăt
+// ar fi vorbit Kelion. Cine repune fereastra o face DOAR cu ordinul lui.
+describe('turaAdresata — gardul serverului pe sesiunea live (STRICT, 15 aug)', () => {
+  it('numele strigat deschide tura — singura cheie', () => {
+    expect(turaAdresata('Kelion, cât e ceasul?')).toBe(true)
+    expect(turaAdresata('hei Kelion ajută-mă')).toBe(true)
   })
 
-  it('dialog în curs: răspunsul la întrebarea lui trece FĂRĂ nume', () => {
-    // Kelion a vorbit acum 5 secunde — omul îi răspunde natural.
-    expect(turaAdresata('da, te rog', 5_000)).toBe(true)
-    expect(turaAdresata('nu, mersi', FEREASTRA_DIALOG_MS - 1)).toBe(true)
+  it('răspunsul la întrebarea LUI, fără nume → tot tăcere („doar atunci")', () => {
+    // Pe 9 aug astea treceau prin fereastra de dialog; ordinul din 15 aug le-a
+    // închis: fără nume nu răspunde nici la propria lui întrebare.
+    expect(turaAdresata('da, te rog')).toBe(false)
+    expect(turaAdresata('nu, mersi')).toBe(false)
   })
 
-  it('vorbire între ALȚI oameni (fără nume, fără dialog în curs) → suprimat', () => {
-    // Exact cazul ownerului: discuție ambientală, Kelion tăcut de mult.
-    expect(turaAdresata('și i-am zis că vin mâine pe la ei', Number.POSITIVE_INFINITY)).toBe(false)
-    expect(turaAdresata('No. Identifica errores y le da a la luz.', FEREASTRA_DIALOG_MS + 1)).toBe(false)
+  it('vorbire între ALȚI oameni → suprimat, ca întotdeauna', () => {
+    expect(turaAdresata('și i-am zis că vin mâine pe la ei')).toBe(false)
+    expect(turaAdresata('No. Identifica errores y le da a la luz.')).toBe(false)
   })
 
-  it('fereastra e închisă exact la prag — nu „cam pe-acolo"', () => {
-    expect(turaAdresata('bine', FEREASTRA_DIALOG_MS)).toBe(false)
-    expect(turaAdresata('bine', -1)).toBe(false)
+  it('gol / neinteligibil → tăcere: un nume nemăsurat nu e un nume auzit', () => {
+    expect(turaAdresata('')).toBe(false)
+    expect(turaAdresata('   ')).toBe(false)
   })
 })
 
