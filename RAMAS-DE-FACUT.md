@@ -71,15 +71,23 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       DE FĂCUT: verdicte precise în erorile aruncate (401/403/429/404-scara/
       400) + diagnostic pe motivul întreg — CERUT ownerului textul complet al
       erorii de pe #322 (de aici nu am drum la logurile VPS). [ ]
-- [ ] ORDIN 15 aug, P21 (verbatim): „cind porneste aplicatia si mic s-a activat
+- [x] ORDIN 15 aug, P21 (verbatim): „cind porneste aplicatia si mic s-a activat
       se deschide imediat si urechea setata pe limba default daca e user nou
-      sau limba setata pe user, e facuta asta dar nu merge, cauta si repara" +
-      „dupa ce finalizezi restul cerintelor" — PE COADĂ, după P20 (FIFO cerut
-      de owner). Pista notată: pinul urechii se citește din preferința
-      speech_lang la routes/vocalLive.ts:685-691, urechea îl primește în
-      services/vocalLive.ts:413 (inputAudioTranscription.languageCodes);
-      de verificat unde se SETEAZĂ speech_lang și de ce nu ajunge la ureche
-      la pornirea cu mic activ. [ ]
+      sau limba setata pe user, e facuta asta dar nu merge, cauta si repara" —
+      LANȚUL VERIFICAT verigă cu verigă pe cod, cauzele lui „nu merge" (raportat
+      dimineața) reparate ÎNTRE timp de fixurile zilei: (1) armarea automată
+      există (kelion:avatar-ready + plasă 4s + visibilitychange; oprirea
+      manuală respectată); (2) urechea deschisă chiar AUDE — contextul audio
+      pornit „suspended" fără gest primește deblocare la gest + auto-resume
+      (fixul din 13 aug); (3) LIMBA la deschidere: user nou → en-US (limba
+      implicită a aplicației, regula scrisă din 24 iul), admin → ro-RO mereu,
+      user cu preferință → a lui (speech_lang, hartă BCP-47, necunoscut →
+      auto-detecție fără gard) — reparat în P20 (înainte pinul cădea ro-RO
+      pentru toți, gardul amuțea userii noi ne-români); (4) limba vorbită
+      constant se ține minte (trackSpeechLang → setSpeechLangPref) — data
+      viitoare urechea se deschide direct pe ea. LACĂT NOU pe tot lanțul:
+      urecheaLaPornire.test.ts (8). RĂMAS: proba live a ownerului (aplicația
+      deschisă cu mic permis → urechea pornită singură, pe limba corectă). [ ]
 - [x] ORDIN 15 aug, P24 (verbatim): „Pune-l rezerva tacuta, invizibil" + „si
       pastila ascunsa" — Jules scos din pastile ȘI din clasamentul
       constructorului (dovada deciziei: 12 zile, zero PR-uri jules/*);
