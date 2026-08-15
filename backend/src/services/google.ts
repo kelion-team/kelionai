@@ -836,7 +836,14 @@ export async function webSearch(query: string, max: number): Promise<string> {
   // că nu putem căuta acum — NU mai cădem pe pluginul web OpenRouter (eliminat).
   const viaSerper = await serperSearch(query, n)
   if (viaSerper) return viaSerper
-  return JSON.stringify({ error: 'search_unavailable' })
+  // P28 (auditul aplicațiilor): eticheta seacă nu spunea CE lipsește — acum
+  // verdictul poartă cauza măsurabilă (cheia lipsă ≠ pana trecătoare).
+  return JSON.stringify({
+    error: 'search_unavailable',
+    motiv: config.serperKey
+      ? 'Serper (motorul de căutare) n-a răspuns — cotă epuizată sau pană de rețea; se poate reîncerca'
+      : 'cheia SERPER_KEY lipsește din configurare — fără ea nu există căutare web',
+  })
 }
 
 const WEATHER_CODES: Record<number, string> = {
@@ -1467,7 +1474,11 @@ async function mapsSearch(query: string, max: number): Promise<string> {
   u.searchParams.set('format', 'json')
   u.searchParams.set('limit', String(Math.min(Math.max(max, 1), 10)))
   const res = await tfetch(u, { headers: { 'User-Agent': OSM_UA } })
-  if (!res.ok) return JSON.stringify({ error: `maps_http_${res.status}` })
+  if (!res.ok)
+    return JSON.stringify({
+      error: `maps_http_${res.status}`,
+      motiv: `serviciul de hărți (OpenStreetMap/Nominatim, gratuit) a răspuns ${res.status} — de obicei trecător (cotă publică); se poate reîncerca în câteva secunde`,
+    })
   const arr = (await res.json()) as NominatimPlace[]
   const places = arr.map((p) => ({
     name: p.display_name ?? '',
@@ -1712,7 +1723,13 @@ export async function youtubeSearch(query: string, max: number): Promise<string>
   // no sources). "I could not search" and "no videos exist" are different truths
   // — the old code merged them into not_found, and the brain would tell the user
   // there are no videos when in fact the search never ran.
-  if (sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
+  if (sources.length === 0)
+    return JSON.stringify({
+      error: 'search_unavailable',
+      motiv: config.serperKey
+        ? 'Serper (motorul de căutare video) n-a răspuns — cotă epuizată sau pană de rețea; se poate reîncerca'
+        : 'cheia SERPER_KEY lipsește din configurare — fără ea nu există căutare video',
+    })
   const videos = extractYoutubeCandidates('', sources)
   if (videos.length > 0) {
     // Only clips that can ACTUALLY play on the monitor (checked in parallel,

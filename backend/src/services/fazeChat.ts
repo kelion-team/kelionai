@@ -70,6 +70,9 @@ export const UNELTE_VORBIRE: readonly string[] = [
   'goleste_monitorul', // a goli ecranul e o comandă de conversație, nu de lucru
   'show_document',
   'open_app_view',
+  // P28: prețurile sunt CONVERSAȚIE („cât costă un clip?") — read-only, ~0ms,
+  // dintr-o singură sursă (tarife.ts); fără ea creierul ar inventa cifre.
+  'lista_tarife',
   'save_note',
   'list_notes',
   'list_memories',
