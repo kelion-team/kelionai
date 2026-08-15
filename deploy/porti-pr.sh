@@ -178,10 +178,18 @@ gh() { curl -s -m 30 -H "Authorization: Bearer $TOKEN" -H 'Accept: application/v
 # PR-urile deschise, „număr sha" pe linie. Parsat cu python3, NU cu grep: în
 # JSON-ul unui PR sunt mai multe câmpuri `sha` (head, base, _links), iar un
 # grep le-ar amesteca și am verifica alt commit decât cel din PR.
+# claude/* se procesează PRIMELE în ciclu (15 aug, măsurat: lista GitHub vine
+# „cel mai nou primul", deci PR-ul constructorului din același ciclu se gata și
+# se ÎMBINA înaintea verdictului meu — PR-ul claude rămânea veșnic „în urmă",
+# 5 depășiri la rând). Cu claude întâi: verdictul și fast-track-ul lui se
+# execută pe master-ul de la începutul ciclului, iar constructorul — mașină,
+# re-încearcă singur — se aduce la zi după, nu invers.
 PRURI=$(gh "$GH/pulls?state=open&per_page=20" | python3 -c '
 import json, sys
 try:
-    for p in json.load(sys.stdin):
+    prs = list(json.load(sys.stdin))
+    prs.sort(key=lambda p: 0 if str(p["head"]["ref"]).startswith("claude/") else 1)
+    for p in prs:
         print(p["number"], p["head"]["sha"], p["head"]["ref"])
 except Exception:
     pass
