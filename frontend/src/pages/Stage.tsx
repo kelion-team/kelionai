@@ -1,5 +1,4 @@
 import { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { LANG_OPTIONS } from '../lib/langList'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
 import { DeployProgressBar } from '../components/DeployProgressBar'
@@ -31,7 +30,7 @@ import {
   type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { loadServerPrefs, saveAvatarBox, loadLocalLang, saveSpeechLang, revendicaOglindaLimbii } from '../lib/prefs'
+import { loadServerPrefs, saveAvatarBox, loadLocalLang, saveSpeechLang, revendicaOglindaLimbii, mirrorLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
@@ -764,6 +763,8 @@ export default function Stage({ user }: { user: User }) {
   // „APLICAȚII" — trading (admin) + Adaptare CV (toți) grupate sub un buton
   // (owner, 13 aug: „trading și adaptare cv trebuie să fie sub un buton aplicații").
   const [appsOpen, setAppsOpen] = useState(false)
+  // Selectorul de limbă din bară (Cerința #29) — stare de meniu, ca la Aplicații.
+  const [langOpen, setLangOpen] = useState(false)
   // THE THEME TOGGLE (Aug 2 — the lighter background): the light palette is the
   // default; this top-bar moon/sun flips back to the original dark identity
   // (persisted by lib/theme). Held in state so the click re-renders — which
@@ -1727,32 +1728,53 @@ export default function Stage({ user }: { user: User }) {
               {t.connectGoogle}
             </button>
           )}
-          <select
-            className="ghost"
-            value={lang}
-            onChange={(e) => {
-              const newLang = e.target.value
-              void saveSpeechLang(newLang)
-              window.location.reload()
-            }}
-            title={t.multilingual}
-            aria-label={t.multilingual}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border, rgba(255,255,255,0.2))',
-              borderRadius: '6px',
-              padding: '2px 6px',
-              fontSize: '12px',
-              color: 'inherit',
-              cursor: 'pointer',
-            }}
-          >
-            {LANG_OPTIONS.map((opt) => (
-              <option key={opt.code} value={opt.code} style={{ background: 'var(--bg, #111)', color: 'inherit' }}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+          {/* SELECTORUL DE LIMBĂ ÎN BARA DE ADMIN (Cerinta #29) — afișează opțiunile de schimbare a limbii.
+              RE-CROIT 15 aug pe sistemul CASEI (ordinul: „refă încadrările corecte pe partea de sus,
+              folosim selectorul de limbă cum am discutat"): varianta constructorului era scrisă cu
+              clase Tailwind, care NU există în proiect — meniul nu se închidea niciodată (captura
+              ownerului: butoanele curgeau despachetate peste bară). Același tipar ca „Aplicații":
+              stare + backdrop + meniu absolut, închis implicit, o singură înălțime de rând. */}
+          <div className="lang-wrap">
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => setLangOpen((v) => !v)}
+              aria-expanded={langOpen}
+              title={t.langPickTitle}
+              aria-label={t.langPickTitle}
+            >
+              🌐 {lang.toUpperCase()} ▾
+            </button>
+            {langOpen && (
+              <>
+                <div className="apps-backdrop" onClick={() => setLangOpen(false)} />
+                <div className="apps-menu lang-menu">
+                  {([
+                    { code: 'ro', label: 'Română', flag: '🇷🇴' },
+                    { code: 'en', label: 'English', flag: '🇬🇧' },
+                    { code: 'es', label: 'Español', flag: '🇪🇸' },
+                    { code: 'fr', label: 'Français', flag: '🇫🇷' },
+                    { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
+                    { code: 'it', label: 'Italiano', flag: '🇮🇹' },
+                    { code: 'ru', label: 'Русский', flag: '🇷🇺' },
+                  ] as const).map((l) => (
+                    <button
+                      key={l.code}
+                      type="button"
+                      className={`apps-item${lang === l.code ? ' lang-activ' : ''}`}
+                      onClick={() => {
+                        setLangOpen(false)
+                        handleAdminLangChange(l.code as Lang)
+                      }}
+                    >
+                      <span>{l.flag}</span>
+                      <span>{l.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button
             type="button"
             className="ghost"

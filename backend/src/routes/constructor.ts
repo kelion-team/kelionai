@@ -202,6 +202,37 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if ((await isOpsPaused()) || !(await autonomActiv().catch(() => true)))
       return reply.send({ job: null, paused: true })
     const job = await claimNextBuildJob()
+    // ── GÂNDIREA DE DEBLOCARE LA REÎNCERCARE (owner, 15 aug: „analizează de ce
+    // anumite ordine se blochează și oferă-i gândirea… să le poată duce la
+    // final") ──────────────────────────────────────────────────────────────
+    // Măsurat pe coada lui: ordinul #293 murea IDENTIC de 3 ori pentru că
+    // reîncercarea primea EXACT textul original — fără „schimbă metoda"
+    // (escaladare() se aplica doar pe misiunile autonomiei, nu pe coada asta),
+    // fără logul eșecului trecut (fiecare încercare era amnezică) și cu
+    // ancora „ai ALES un drum — ĂSTA E" încă lipită (contrazicea schimbarea).
+    // Ușa e UNA (aici): orice reîncercare pleacă cu (1) cerința de a numi CE
+    // face altfel, (2) coada logului încercării moarte — dovada, nu amintirea,
+    // (3) ancora drumului scoasă, (4) pre-verificarea cauzei: pe master-ul
+    // proaspăt din atelier, cauza poate fi deja REZOLVATĂ de altcineva —
+    // atunci ordinul se ÎNCHIDE cinstit, nu se re-muncește.
+    if (job && job.attempts > 1) {
+      const { escaladare } = await import('../services/autonomie.js')
+      const coadaLog = (job.log ?? '').slice(-1500).trim()
+      job.orderText =
+        escaladare(job.attempts - 1) +
+        `PASUL 0, ÎNAINTE DE ORICE: verifică dacă CAUZA mai există pe master-ul proaspăt ` +
+        `din atelier (rulează proba minimă: comanda/testul care o arăta). Dacă a dispărut ` +
+        `(a reparat-o alt PR între timp), raportează „cauza dispărută — nimic de făcut" și ` +
+        `închide ordinul cu succes: a re-munci o reparație existentă naște PR-uri dublate.\n` +
+        `Dacă ordinul cere ceva ce mediul tău NU are (ecranul viu al aplicației, camera, ` +
+        `microfonul, sesiunea de admin din browser), spune EXACT asta în raport — calea aia ` +
+        `se face din aplicație (Kelion are uneltele de ecran), nu din atelier; nu o repeta orbește.\n\n` +
+        (coadaLog ? `COADA LOGULUI ÎNCERCĂRII MOARTE (dovada a ce s-a întâmplat — diagnostichează ÎNTÂI):\n${coadaLog}\n\n` : '') +
+        job.orderText.replace(
+          'Ai analizat-o deja și ai ALES un drum — ăsta e.',
+          'Drumul ales inițial A EȘUAT (dovada în logul de mai sus) — nu mai e drumul tău; alege ALTUL din ce spune eșecul.',
+        )
+    }
     return reply.send({ job })
   })
 

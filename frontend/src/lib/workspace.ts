@@ -112,7 +112,9 @@ export function getMonitorContent(): { kind: string; title: string; url?: string
   const a = state.tasks.find((t) => t.id === state.activeId)
   if (!a) return null
   const out: { kind: string; title: string; url?: string; text?: string; mouse?: { x: number; y: number; indicator: string } } = { kind: a.kind, title: a.title }
-  if (a.text) out.text = a.text.slice(0, 8000)
+  // `!= null`, nu truthy: un doc GOL („Doc Gol", text='') e un tab care există
+  // și e gol — text:'' spune exact asta; undefined ar minți că nu e nimic textual.
+  if (a.text != null) out.text = a.text.slice(0, 8000)
   else if (a.html) out.text = a.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 8000)
   else if (a.card) out.text = JSON.stringify(a.card).slice(0, 4000)
   if (a.url) out.url = a.url

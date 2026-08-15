@@ -113,9 +113,24 @@ for p in prs:
     continue
   fi
 
-  # 3) MERGE cu JUDECATĂ: porți TRECE pe sha-ul curent + mergeable curat.
+  # 3) MERGE cu JUDECATĂ: porți TRECE pe sha-ul curent + mergeable curat
+  #    + LA ZI CU MASTER (15 aug — AICI era gaura prin care master s-a stricat
+  #    de 4 ori într-o noapte: „mergeable curat" înseamnă doar FĂRĂ conflict
+  #    TEXTUAL; două PR-uri verzi FIECARE pe sha-ul lui se pot călca SEMANTIC
+  #    la unire — lacătul Gemini crăpat, `zgomot` dublat, testul logGazda,
+  #    selectorul de limbă pe jumătate. porti-pr.sh își primise garda în #1118,
+  #    dar scriptul ĂSTA îmbina mai departe fără ea. Un PR rămas în urmă se
+  #    aduce întâi la zi (update-branch) — porțile re-rulează pe sha-ul NOU,
+  #    adică pe chiar rezultatul unirii; master primește DOAR ce s-a măsurat.)
   V=$(verdict_pe_sha "$NUMAR" "${SHA:0:7}")
   if [ "$V" = 'TRECE' ] && { [ "$MSTATE" = 'clean' ] || [ "$MSTATE" = 'unstable' ]; }; then
+    IN_URMA=$(gh "$GH/compare/master...$SHA" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("behind_by", 0))' 2>/dev/null || echo 0)
+    case "$IN_URMA" in ''|*[!0-9]*) IN_URMA=0;; esac
+    if [ "$IN_URMA" -gt 0 ]; then
+      actioneaza PUT "$GH/pulls/$NUMAR/update-branch" '{}' || true
+      echo "   → ADUS LA ZI #$NUMAR ($IN_URMA comituri în urmă) — porțile re-rulează pe sha-ul nou; merge la runda viitoare"
+      continue
+    fi
     merge_uieste "$NUMAR" "$SHA"
     continue
   fi
