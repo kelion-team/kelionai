@@ -126,6 +126,22 @@ describe('semnaturiEroare', () => {
     expect(out).toHaveLength(0)
   })
 
+  it('ignoră avertismentele Vite/Rollup despre chunk size (nu sunt erori)', () => {
+    const textLog = [
+      '[auto-publicare] 10:00:00 live=aaa master=bbb — public',
+      '== 3. Construiesc imaginea ==',
+      '(!) Some chunks are larger than 500 kB after minification. Consider:',
+      '-> Using dynamic import() to code-split the application',
+      '-> Use build.rollupOptions.output.manualChunks to improve chunking',
+      '-> Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.',
+      'dist/assets/face-api.esm-BsWe4qxQ.js  1,315.20 kB',
+      '== 7. Verific LIVE ==',
+      '✅ LIVE = bbb1234 (anti-fantomă TRECE).',
+    ].join('\n')
+    const out = semnaturiEroare(textLog)
+    expect(out).toHaveLength(0)
+  })
+
   it('prinde eroarea din ultima rulare dacă nu s-a finalizat cu succes', () => {
     const textLog = [
       '[auto-publicare] 10:00:00 live=aaa master=bbb — public',
