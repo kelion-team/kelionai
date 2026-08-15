@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify'
+import { readdir, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { config } from '../config.js'
 import { getSessionUser, adminSiId, cerAdmin } from '../session.js'
 import { pollVisitorChat } from './demo.js' // visitor chat polling from the common source
 import {
+  citesteAudit,
   citesteTranzactii,
   citesteUtilizatori,
   citesteIstoric,
@@ -612,6 +615,39 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const activity = await getUserActivity()
     if (!activity) return reply.code(500).send({ error: 'db_unreadable' })
     return reply.send(activity)
+  })
+
+  // P26 — REGISTRUL DE AUDIT + dovada backupului (owner, 15 aug: „istoric
+  // INCIDENTUL 15 aug seara: prima versiune a rutei se chema /api/admin/audit —
+  // adresă care EXISTA deja (auditul eșecurilor, 27 iul, mai sus) — iar Fastify
+  // a crăpat bootul pe „duplicated route" → 502 pe live până a ținut plasa
+  // publicării. Lecția: orice rută nouă se caută întâi cu grep + BOOTUL se
+  // probează local înainte de push (poarta VPS fiind mută, bootul nu-l mai
+  // proba nimeni). Adresa nouă: registru-audit.
+  // salvat cu dovezi cine a modificat, trasabilitate 24 din 24 de ore" +
+  // „baza de date nu se pierde"). Registrul vine din audit_log (el însuși sub
+  // scutul datelor); backupul e MĂSURAT de pe disc — cel mai nou fișier din
+  // BACKUP_DIR (implicit /root/kelion/backups, scris de deploy/backup.sh) —
+  // nu presupus. Fără director pe mașina asta → null cinstit, nu o dată
+  // inventată (regula #1).
+  app.get('/api/admin/registru-audit', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const randuri = await citesteAudit(200)
+    let backup: { fisier: string; la: string; octeti: number } | null = null
+    try {
+      const dir = process.env.BACKUP_DIR || '/root/kelion/backups'
+      let cel: { f: string; t: number; s: number } | null = null
+      for (const f of await readdir(dir)) {
+        const st = await stat(join(dir, f)).catch(() => null)
+        if (st?.isFile() && (!cel || st.mtimeMs > cel.t)) cel = { f, t: st.mtimeMs, s: st.size }
+      }
+      if (cel) backup = { fisier: cel.f, la: new Date(cel.t).toISOString(), octeti: cel.s }
+    } catch {
+      /* mașina asta n-are director de backup — rămâne null, spus pe față */
+    }
+    if (!randuri) return reply.code(500).send({ error: 'db_unreadable' })
+    return reply.send({ randuri, backup })
   })
 
   // Free-trial visitor analytics (admin only): where trials come from — country,
