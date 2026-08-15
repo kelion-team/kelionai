@@ -26,7 +26,7 @@ import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type CampCard } from './cardFurnizor.js'
 import { voceRecenta, minuteRamaseVoce, fataRecenta, minuteRamaseFata } from './adminLock.js'
 import { adminVezi, adminSchimba } from './adminVedere.js'
-import { julesSurse, julesSarcina, julesStare } from './jules.js'
+import { julesSurse, julesSarcina, julesStare, julesServeste } from './jules.js'
 import { mediaControl } from './mediaControl.js'
 import { notifyAdmin } from './adminNotification.js'
 import { serverOps } from './serverOps.js'
@@ -135,8 +135,14 @@ export async function execSharedAdminTool(
         1,
       )
     }
-    // JULES — sarcini către agentul asincron oficial Google (PR-ul îl îmbină ownerul).
-    case 'jules_repos': return julesSurse()
+    // JULES — REZERVĂ TĂCUTĂ, INVIZIBILĂ (owner, 15 aug: „Pune-l rezerva tacuta,
+    // invizibil"): pastila și banda din constructor au ieșit; uneltele astea sunt
+    // SINGURA lui ușă — se deschid doar la ordinul explicit al ownerului. Sonda
+    // julesServeste (fostul bec) trăiește aici: întâi măsurăm că servește.
+    case 'jules_repos': {
+      const stare = await julesServeste()
+      return stare.ok ? julesSurse() : `Jules nu servește acum: ${stare.detaliu}`
+    }
     case 'jules_task': return julesSarcina(String(args.prompt ?? ''), String(args.sursa ?? ''), args.ramura ? String(args.ramura) : 'master')
     case 'jules_status': return julesStare(String(args.sesiune ?? ''))
     // ── POARTA OBLIGATORIE (Adrian, 8 aug: „va trebui să folosească OBLIGATORIU

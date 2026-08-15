@@ -79,6 +79,20 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       services/vocalLive.ts:413 (inputAudioTranscription.languageCodes);
       de verificat unde se SETEAZĂ speech_lang și de ce nu ajunge la ureche
       la pornirea cu mic activ. [ ]
+- [x] ORDIN 15 aug, P24 (verbatim): „Pune-l rezerva tacuta, invizibil" + „si
+      pastila ascunsa" — Jules scos din pastile ȘI din clasamentul
+      constructorului (dovada deciziei: 12 zile, zero PR-uri jules/*);
+      serviciul + uneltele jules_* păstrate pentru ordinul explicit al
+      ownerului. Lacăte rescrise (creditAI: Jules ABSENT; evalOrdin: 2 benzi
+      + constructorul pe roșu → vârful clasamentului). RĂMAS: verificarea pe
+      live după publicare (pastila dispărută din bară, cardul cu 2 benzi). [ ]
+- [ ] INCIDENT 15 aug: poarta VPS a TĂCUT ~3h pe PR #1195 (zero comentarii;
+      alte PR-uri primeau verdicte) → #1195 îmbinat ca admin 2 la ordinul
+      ownerului („hai cu ele pe aplicatie"), cu porțile rulate local 2× verzi
+      (dovezile în merge commit 097f2506). DE LĂMURIT PE VPS: de ce gestionarul
+      n-a luat #1195 (suspect: prima rulare a porții E2E noi — playwright
+      install împotmolit; logul gestionar-pr.log). Până la lămurire, PR-urile
+      claude/* pot rămâne negătate — se verifică manual porțile la fiecare. [ ]
 - [ ] ORDIN 15 aug, P22 (verbatim): „se poate numi aplicatia Studioul de
       Clipuri, care cuprinde toate 6, nu? ii dai o ideie, ii spui foloseste
       studioul de clipuri si el face tot" + „cu functie timer de promovare
