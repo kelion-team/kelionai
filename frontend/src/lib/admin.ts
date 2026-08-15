@@ -334,23 +334,11 @@ export async function fetchDemos(): Promise<DemoStats | null> {
 }
 
 // Per-USER activity (admin only): who signed in, last IP/place/device, how
-// long they stayed in total, and their latest sessions one by one.
-
-export interface UserSessionRow {
-  email: string
-  started_at: string
-  seconds: number
-  actions: number
-  ip: string
-  city: string
-  country: string
-  code: string
-  device: string
-}
+// long they stayed in total — UN rând pe adresă, cu device-urile dedesubt
+// (P6, 15 aug; lista plată de sesiuni care repeta același om a fost scoasă).
 
 export interface UserActivity {
   users: UserActivityRow[]
-  sessions: UserSessionRow[]
 }
 
 // Leads: visitors who left their email so the owner can reach them.

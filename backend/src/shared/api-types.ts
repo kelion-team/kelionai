@@ -146,6 +146,21 @@ export interface MoneyCircuit {
 
 /** Per-USER activity (admin-only): who connected, last IP/place/device,
  *  total time spent and their balance. */
+/** Un DEVICE al unui utilizator: (device, browser) cu datele lui agregate —
+ *  P6 (owner, 15 aug: „se pastreaza unica si se adauga doar device cu care
+ *  intra cu datele aferente"). */
+export interface UserDeviceRow {
+  device: string
+  browser: string
+  sessions: number
+  seconds: number
+  last_seen: string
+  ip: string
+  city: string
+  country: string
+  code: string
+}
+
 export interface UserActivityRow {
   email: string
   sessions: number
@@ -165,4 +180,7 @@ export interface UserActivityRow {
    *  lui) — monitorizarea pe user (Adrian, 10 aug: „sistemul de monitorizare
    *  pe user inexistent"). Consumul, lângă sold: se vede cine arde banii. */
   consumedUsd: number
+  /** Device-urile LUI, dedesubt (P6) — în locul listei plate de sesiuni care
+   *  repeta același om de N ori. */
+  devices: UserDeviceRow[]
 }
