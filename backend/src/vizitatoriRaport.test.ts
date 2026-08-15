@@ -36,7 +36,10 @@ describe('LACĂT — „ce au vizitat" ajunge în raport', () => {
 
   it('getDemoStats scoate `v.pages` în raport, iar tipul DemoRecent îl are', () => {
     const db = sursa('./db.ts')
-    expect(/v\.photo_url, v\.pages/.test(db)).toBe(true)
+    // P3 (15 aug): poza vine acum prin COALESCE (cadrul vizitei SAU poza
+    // contului din faceprints) — ancora ține AMBELE coloane în raport, exact
+    // intenția veche, pe forma nouă.
+    expect(/COALESCE\(NULLIF\(v\.photo_url, ''\), f\.photo, ''\) AS photo_url, v\.pages/.test(db)).toBe(true)
     expect(/pages: r\.pages \?\? ''/.test(db)).toBe(true)
     const tip = sursa('./shared/api-types.ts')
     expect(/pages: string/.test(tip)).toBe(true)

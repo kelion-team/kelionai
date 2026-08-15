@@ -1867,6 +1867,33 @@ export async function touchVisit(
 }
 
 /**
+ * POZA VIZITEI (P3; owner, 15 aug: „de ce nu e legata de vizitator poza").
+ * MĂSURAT: coloana `photo_url` exista din 13 aug și panoul o afișa — dar
+ * NIMENI n-o scria vreodată, deci raportul rămânea fără poze prin construcție.
+ * Scrierea vine DOAR după consimțământ (ordinul din 13 aug: „cine va fi acolo
+ * va avea o poză cu acceptul lor"): frontend-ul trimite un cadru abia după ce
+ * omul a ACORDAT camera. Prima poză rămâne (photo_url='' în WHERE) — un al
+ * doilea cadru nu rescrie istoria vizitei; boții nu rulează camera, deci rămân
+ * cinstit fără poză. Rândul se caută exact ca la touchVisit (fereastra de 6h).
+ */
+export async function attachVisitPhoto(fingerprint: string, ip: string, poza: string): Promise<void> {
+  if (!dbEnabled() || !poza || (!fingerprint && !ip)) return
+  try {
+    await getPool().query(
+      `UPDATE visits SET photo_url = $3
+       WHERE photo_url = ''
+         AND id = (SELECT id FROM visits
+                   WHERE started_at >= now() - interval '6 hours'
+                     AND ((fingerprint <> '' AND fingerprint = $1) OR (ip <> '' AND ip = $2))
+                   ORDER BY started_at DESC LIMIT 1)`,
+      [fingerprint, ip, poza],
+    )
+  } catch {
+    /* analytics must never break the app */
+  }
+}
+
+/**
  * GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug: „golești baza de date de vizitatori,
  * cine va fi acolo va avea o poză cu acceptul lor"). Șterge TOATE rândurile din
  * `visits` — analiza de vizitatori + pozele de vizitator (photo_url), ca de-aici
@@ -1992,13 +2019,20 @@ export async function getDemoStats(): Promise<DemoStats | null> {
         // whether it's the FIRST visit or a returning one (same fingerprint
         // earlier). A visitor coming back for the third time is not the same
         // thing as one who landed on the site once.
+        // POZA (P3, owner 15 aug): vizita cu cont logat își ia poza CONTULUI
+        // (înscrierea feței, dată cu acord la enrolare) când vizita n-are cadru
+        // propriu; vizitatorul anonim are doar cadrul lui de cameră (acordat);
+        // botul — nimic, cinstit.
         `SELECT 'visit'::text AS kind, v.ip, v.country, v.country_code, v.city, v.region, v.isp,
                 v.browser, v.os, v.device, v.lang, v.referrer, v.is_bot, v.started_at,
-                '' AS session_email, '' AS topic, v.tz, v.photo_url, v.pages,
+                '' AS session_email, '' AS topic, v.tz,
+                COALESCE(NULLIF(v.photo_url, ''), f.photo, '') AS photo_url, v.pages,
                 (SELECT COUNT(*)::int - 1 FROM visits p
                   WHERE p.fingerprint = v.fingerprint AND p.fingerprint <> ''
                     AND p.started_at <= v.started_at) AS vizite_anterioare
-         FROM visits v ORDER BY v.started_at DESC LIMIT 60`,
+         FROM visits v
+         LEFT JOIN faceprints f ON v.user_email <> '' AND f.user_email = v.user_email
+         ORDER BY v.started_at DESC LIMIT 60`,
       )
     ).rows.map((r) => ({
       kind: r.kind,
