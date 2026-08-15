@@ -1213,12 +1213,28 @@ export default function ChatPanel({
       // NU vorbi peste muzică (Adrian, 4 aug): cât e muzică în cameră, gura tace.
       if (muzicaActivaRef.current) return
       speechBuf += chunk
+      // Fast check: don't run regex if there is no punctuation/newline and buffer is small
+      if (speechBuf.length < 200 && !/[.!?…\n]/.test(speechBuf)) return
       for (;;) {
         const mm = SENT_RE.exec(speechBuf)
-        if (!mm) break
-        speechBuf = speechBuf.slice(mm[0].length)
-        const sent = cleanForSpeech(mm[0])
-        if (sent) mouth.speak(sent)
+        if (mm) {
+          speechBuf = speechBuf.slice(mm[0].length)
+          const sent = cleanForSpeech(mm[0])
+          if (sent) mouth.speak(sent)
+        } else if (speechBuf.length > 300) {
+          // Break on newline or space when buffer gets too large without terminal punctuation
+          const cutIdx = speechBuf.lastIndexOf('\n', 250) !== -1 ? speechBuf.lastIndexOf('\n', 250) + 1 : speechBuf.lastIndexOf(' ', 250)
+          if (cutIdx > 0) {
+            const piece = speechBuf.slice(0, cutIdx)
+            speechBuf = speechBuf.slice(cutIdx)
+            const sent = cleanForSpeech(piece)
+            if (sent) mouth.speak(sent)
+          } else {
+            break
+          }
+        } else {
+          break
+        }
       }
     }
     // REAL RESPONSE TIME (measured here, in the browser — what the user feels): from
@@ -1237,9 +1253,10 @@ export default function ChatPanel({
       const turnCoords = locTurn ? await getFreshCoords() : coordsRef.current
       // MARTOR + THROTTLING (11 aug, ownerul: „se blochează la tot ce trece prin
       // chat"): watchdog-ul măsoară cauza (fir principal vs. server); re-randăm
-      // la cel mult ~20/s (nu la fiecare token) ca firul principal să respire.
+      // la cel mult ~12/s (nu la fiecare token) și cedăm periodic firul ca browserul să respire.
       watchdogEnter('creier')
       let ultimulFlush = 0
+      let ultimulYield = performance.now()
       const flushMesaje = (): void => {
         setMessages((cur) => {
           const base = cur.length >= next.length && cur.slice(0, next.length).every((m, i) => m === next[i]) ? cur : next
@@ -1289,14 +1306,17 @@ export default function ChatPanel({
         acc += chunk
         feedSpeech(chunk) // the mouth speaks the reply as it streams
         watchdogBeat('creier') // măsoară pauza față de server (diagnostic blocaj)
-        // THROTTLING (11 aug): re-randăm la cel mult ~20/s, nu la fiecare token —
-        // firul principal nu se mai sufocă pe răspunsuri lungi. Conținutul complet
-        // e garantat de flush-ul final de după buclă. Updater FUNCȚIONAL (Jul 25):
-        // un mesaj sosit între timp (transcript vocal) nu dispare.
+        // THROTTLING (11 aug, îmbunătățit 15 aug): re-randăm la intervale optime
+        // și cedăm controlul buclei de evenimente a browserului (macrotask) pentru
+        // a preveni blocarea firului principal pe streamuri rapide/dense de date.
         const acum = performance.now()
-        if (acum - ultimulFlush >= 50) {
+        if (acum - ultimulFlush >= 80) {
           ultimulFlush = acum
           flushMesaje()
+        }
+        if (acum - ultimulYield >= 60) {
+          ultimulYield = acum
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
         }
       }
       flushMesaje() // FLUSH FINAL — garantează conținutul complet al răspunsului
