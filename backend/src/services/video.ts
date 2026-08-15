@@ -159,7 +159,15 @@ const BAZA = 'https://generativelanguage.googleapis.com/v1beta'
  *  înăuntru — tarife.ts) ESTE aprobarea conștientă pentru CLIPUL LUI — banii
  *  sunt deja încasați peste costul Google (owner, 15 aug: „de aici daca merge
  *  sa se autofinanteze"). Comutatorul rămâne peste generările NEplătite. */
-export async function genereazaVideo(prompt: string, secundeCerute = 8, platitDeClient = false): Promise<VideoResult> {
+export async function genereazaVideo(
+  prompt: string,
+  secundeCerute = 8,
+  platitDeClient = false,
+  // P22/owner 21:20 („nu afiseaza nimic pe ecran ca ar genera ceva"): generarea
+  // ține 1-3 minute și ecranul TĂCEA tot timpul ăsta. Apelantul primește acum
+  // bătaia de inimă a așteptării (secundele scurse) și o arată omului.
+  onPas?: (secundeScurse: number) => void,
+): Promise<VideoResult> {
   const p = prompt.trim()
   if (!p) return { error: 'empty_prompt' }
   const comutator = await videoPlatitPornit()
@@ -192,10 +200,16 @@ export async function genereazaVideo(prompt: string, secundeCerute = 8, platitDe
 
   // Așteptarea: Veo termină de obicei în 1-3 minute; tavanul e 5, ca un clip
   // blocat să nu țină tura de chat ostatică la nesfârșit.
-  const pana = Date.now() + 5 * 60 * 1000
+  const start = Date.now()
+  const pana = start + 5 * 60 * 1000
   let raspuns: unknown = null
   while (Date.now() < pana) {
     await new Promise((res) => setTimeout(res, 5000))
+    try {
+      onPas?.(Math.round((Date.now() - start) / 1000))
+    } catch {
+      /* bătaia de inimă nu are voie să omoare generarea */
+    }
     try {
       const r = await fetch(`${BAZA}/${opName}?key=${config.geminiKey}`)
       if (!r.ok) continue

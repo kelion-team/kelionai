@@ -4293,14 +4293,26 @@ async function runTool(
           pas: 'Pagina de credite e DEJA pe monitorul lui — spune-i prețul serviciului și că de acolo reîncarcă (card sau cod).',
         })
       }
+      // Ecranul NU mai tace cât Google coace clipul (owner, 21:20: „nu
+      // afiseaza nimic pe ecran ca ar genera ceva"): pasul pornește PE LOC,
+      // apoi bătaia de inimă a așteptării la fiecare 5s — bara de execuție
+      // arată secundele, nu o tăcere de 1-3 minute.
+      reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: '🎬 Generez clipul la Google (durează 1-3 minute)…', procent: 5 } })}${CTRL}`)
       // Al treilea argument (P29): clientul care a plătit ACUM tariful și-a
       // finanțat singur clipul — comutatorul de admin nu-i mai stă în drum.
-      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8), taxa.scazutGbp > 0)
+      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8), taxa.scazutGbp > 0, (sec) => {
+        // procentul crește cu timpul tipic (~3 min), plafonat sub 95 — cinstit:
+        // nu declarăm „aproape gata" ce nu putem măsura, doar că lucrează.
+        const procent = Math.min(94, 5 + Math.round((sec / 180) * 90))
+        reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: `🎬 Clipul se generează la Google… ${sec}s`, procent } })}${CTRL}`)
+      })
       // The refusal (no key / payment not consciously enabled) travels to the
       // brain VERBATIM — it contains the measured price, so the person hears
       // the real reason, not a generic "failed".
       if ('error' in result) {
         await taxa.ramburseaza().catch(() => {})
+        // Bara nu rămâne agățată pe un refuz — se închide cu adevărul.
+        reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: '🎬 Generarea NU a pornit — motivul, mai jos', procent: 100, gata: true } })}${CTRL}`)
         // Refuzul de plată nu lasă omul cu mâna goală (owner: „prin google
         // flow"): calea GRATUITĂ se dă de fiecare dată, cu pași concreți.
         if (String(result.error).startsWith('video_platit_neaprobat'))
@@ -4322,6 +4334,7 @@ async function runTool(
       // cardului = numele de fișier sugestiv — butonul „Salvează" din monitor
       // îl pune în Download exact sub numele ăsta.
       const numeVideo = numeClip('Clip', prompt, new Date())
+      reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: '🎬 Clipul e gata — îl pun pe monitor', procent: 100, gata: true } })}${CTRL}`)
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: videoUrl, title: numeVideo } })}${CTRL}`)
       // PREȚUL SE SPUNE (owner, 14 aug: „i se arată și prețul, și se
       // încasează") — suma scăzută intră în rezultat ca Kelion s-o spună omului.

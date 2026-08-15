@@ -120,7 +120,7 @@ describe('P29 — comutatorul „video plătit": kv (butonul) bate env-ul', () =
     const video = sursa('./services/video.ts')
     expect(video).toMatch(/allowPaid: comutator\.pornit \|\| platitDeClient/)
     const chat = sursa('./routes/chat.ts')
-    expect(chat).toMatch(/genereazaVideo\(prompt, Number\(args\.seconds \?\? 8\), taxa\.scazutGbp > 0\)/)
+    expect(chat).toMatch(/genereazaVideo\(prompt, Number\(args\.seconds \?\? 8\), taxa\.scazutGbp > 0, \(sec\) => \{/)
   })
 })
 
@@ -151,5 +151,17 @@ describe('P29 — omul e DUS spre plată, nu lăsat în fundătură', () => {
     expect(panou).toMatch(/Pornește generarea \(pe banii tăi\)/)
     expect(panou).toMatch(/Gratis la Veo NU există — gratis e doar prin Google Flow\./)
     expect(panou).toMatch(/Google îți facturează ~0,10 \$\/secundă/)
+  })
+
+  it('lecția 21:20 („nu afiseaza nimic pe ecran") — ecranul NU tace cât se generează', () => {
+    const chat = sursa('./routes/chat.ts')
+    // pasul pornește PE LOC, bătaia de inimă la 5s cu secundele, finalul închide bara
+    expect(chat).toMatch(/Generez clipul la Google \(durează 1-3 minute\)/)
+    expect(chat).toMatch(/Clipul se generează la Google… \$\{sec\}s/)
+    expect(chat).toMatch(/Clipul e gata — îl pun pe monitor/)
+    expect(chat).toMatch(/Generarea NU a pornit — motivul, mai jos/)
+    const video = sursa('./services/video.ts')
+    expect(video).toMatch(/onPas\?\: \(secundeScurse: number\) => void/)
+    expect(video).toMatch(/onPas\?\.\(Math\.round\(\(Date\.now\(\) - start\) \/ 1000\)\)/)
   })
 })
