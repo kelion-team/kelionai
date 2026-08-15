@@ -277,8 +277,13 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       nu se cheltuie; clipul gata → anunț în panou cu link + cost + plafon;
       setările în Admin → Bani (PromoStudio) cu urmă în audit. Lacăte:
       studioClipuri.test.ts (13) + lantGoogle actualizat + capabilități 118.
-      RĂMAS: proba live a ownerului (meniu → Studio → idee → clip pe cele
-      două căi; timerul pornit cu orele lui). [ ]
+      PUBLICAT: V13.8 (e0db479) măsurat live 20:40 UTC — Studioul în meniu +
+      bara de progres video. COMPLETARE 21:29 („nu ma mai umple de butoane"):
+      cererea EXPLICITĂ (admin sau client plătit) generează DIRECT — fără
+      butoane; comutatorul 🎬 a rămas doar peste timer; fiecare încercare de
+      generare își lasă verdictul PE NUME în panou (Ultima încercare de clip)
+      — #1212. RĂMAS: proba live a ownerului (meniu → Studio → idee → clip pe
+      cele două căi; timerul pornit cu orele lui). [ ]
 - [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
       tură o escaladează automat pe nivel superior Fable 5. Nu pornește
       duplicat pe același model, se revine pentru un nou job la primul model."
