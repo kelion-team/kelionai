@@ -13,6 +13,21 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 15 aug (verbatim): „acest lucru trebuie să fie monitorizat de
+      Kelion" — publicarea care STĂ (dovedit azi: 2+ ore, live pe f3440b9 cât
+      master avansase de 2 ori; stagnarea nu scrie erori → senzorii pe erori
+      n-o vedeau). SCRIS: santinelaPublicarii (ciclu 5 min): sha propriu vs
+      vârf master; peste prag (20 min, env) → alarmă O DATĂ în panou + pe
+      telefon, cu coada auto-publicare.log lângă (cauza, nu doar simptomul);
+      la revenire → „și-a revenit", o dată. RĂMAS (brațul 2): la alarmă,
+      remedierea din runbook rulată SINGUR (deblocare deploy atârnat/restart
+      cron/curățenie disc), cu jurnal — omul strigat doar dacă pică și asta.
+- [ ] ORDIN 15 aug (captura „Ce vezi în această imagine?" delegată la
+      cheama_agent, 20%, fără sfârșit): „alocă, dar nu are consistență și
+      finalizare" — (1) întrebările cu imagine se răspund NATIV (creierul
+      vede singur; delegarea pierde imaginea), cheama_agent interzis pe ele;
+      (2) ORICE delegare primește timeout + verdict raportat (gata/eșuat cu
+      motiv), niciodată agonie la 20%. DE FĂCUT.
 - [ ] ORDIN 15 aug, dimineața („aplicațiile din butonul Aplicații, de la
       Google, trebuiesc TOATE funcționale, nu doar poze — interconectare reală
       și funcțională"): fiecare intrare din meniu trebuie să ducă REAL la

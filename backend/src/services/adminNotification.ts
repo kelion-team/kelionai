@@ -1,6 +1,13 @@
 import { getPool, dbEnabled } from '../db.js'
 
-export type AdminNotificationType = 'scris' | 'voce' | 'plata_neatribuita' | 'pr_gata'
+export type AdminNotificationType =
+  | 'scris'
+  | 'voce'
+  | 'plata_neatribuita'
+  | 'pr_gata'
+  // Santinela publicării (15 aug: „monitorizat de Kelion"): stagnarea și revenirea.
+  | 'publicare_blocata'
+  | 'publicare_ok'
 
 export interface AdminNotification {
   id?: number
