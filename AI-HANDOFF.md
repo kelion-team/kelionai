@@ -1,5 +1,5 @@
 # KELIONAI — DOCUMENT COMPLET DE PRELUARE PENTRU ORICE AI
-*(actualizat 3 august 2026 — implementat sistem notificări admin K14 și bara de progres dinamică pentru deploy Cerința #24)*
+*(actualizat 3 august 2026 — Cerința #26: Randare locală și previzualizare barei de admin cu opțiunile de schimbare a limbii deschise)*
 
 > **DOCUMENT VIU — regulă obligatorie:** dacă schimbi cod, arhitectură, reguli sau
 > starea proiectului, **actualizează secțiunea relevantă de aici (și §13 Starea)
