@@ -3930,6 +3930,19 @@ export async function cheltuitAziConstructor(): Promise<number> {
  *  `zile` se marchează arhivate — ies din panou, rămân în DB. Nu atinge niciodată
  *  ordinele vii (queued/running). Întoarce câte a arhivat. Rulată de bucla de
  *  autonomie (curățenie automată, „când e gata"). */
+/** Arhivează UN ordin (P7): mătura PR-urilor îmbinate îl scoate din listă în
+ *  clipa în care merge-ul e CONFIRMAT pe GitHub — nu la timerul de o zi.
+ *  `true` doar dacă rândul chiar s-a schimbat (măsurat, nu presupus). */
+export async function arhiveazaBuildJob(id: number): Promise<boolean> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
+  try {
+    const r = await getPool().query('UPDATE build_jobs SET arhivat = true WHERE id = $1 AND arhivat = false', [id])
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
 export async function arhiveazaBuildJobsVechi(zile = 1): Promise<number> {
   if (!dbEnabled()) return 0
   try {

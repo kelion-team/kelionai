@@ -509,6 +509,21 @@ try {
     void triaj()
     setInterval(() => { void triaj() }, 24 * 60 * 60 * 1000)
   }, 60 * 60 * 1000)
+  // MĂTURA PR-URILOR ÎMBINATE (P7; owner, 15 aug: „daca un pr este gata si este
+  // merged se arhiveaza si se scoate automat din lista"). Ordinele 'done' al
+  // căror PR e CONFIRMAT merged pe GitHub ies din coadă în minute, nu la
+  // timerul de o zi — eticheta „în așteptare" nu mai poate minți (#301).
+  // Best-effort: fără GITHUB_TOKEN sau cu GitHub picat, matura nu arhivează
+  // nimic (merged=null nu arhivează pe ghicite) și nu blochează nimic.
+  const matura = async (): Promise<void> => {
+    const { arhiveazaOrdineleMergeuite } = await import('./services/prInfo.js')
+    const n = await arhiveazaOrdineleMergeuite().catch(() => 0)
+    if (n > 0) app.log.info({ arhivate: n }, 'ordine cu PR merged, arhivate (P7)')
+  }
+  setTimeout(() => {
+    void matura()
+    setInterval(() => { void matura() }, 10 * 60 * 1000)
+  }, 3 * 60 * 1000)
   // SELF-HEALING (Adrian, 27 Jul): Kelion collects the users' RECURRING errors
   // by itself and sends them to the builder for repair (PR → merge → all users
   // get the repaired version). 1 min after boot, then every 5 min.

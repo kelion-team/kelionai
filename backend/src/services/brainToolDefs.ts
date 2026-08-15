@@ -83,6 +83,24 @@ export const SERVER_OPS_TOOL: Tool = {
   }
 }
 
+// ── PR_LISTA — sistemul informațional al PR-urilor (P7; owner, 15 aug:
+// „un sistem informational legat de creier cu toate datele din toate pr") ────
+export const PR_LISTA_TOOL: Tool = {
+  name: 'pr_lista',
+  description:
+    "ADMIN ONLY. Read ALL pull requests' real data straight from GitHub: number, title, branch, open/closed, MERGED or not, head sha, URL, created/updated. Use when the owner asks about PRs, their state, what's merged, or why a build order still waits. A failed read says so — never an empty list pretending 'no PRs'.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      stare: {
+        type: 'string',
+        enum: ['open', 'closed', 'all'],
+        description: "Which PRs: 'open', 'closed' or 'all' (default all, newest first)",
+      },
+    },
+  },
+}
+
 // ── L1e: PROCESARE DE DATE TABELARE (CSV/JSON) — capabilitate generală ────────
 // Ownerul (autonomie): Kelion trebuie să poată PROCESA date, nu doar să discute
 // despre ele. Unealtă PURĂ: primește textul (CSV sau JSON, lipit de om sau adus
@@ -741,7 +759,7 @@ export const JURNAL_MASURATORI_TOOL: Tool = {
 
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
-  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, MEDIA_CONTROL_TOOL, SERVER_OPS_TOOL,
+  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, MEDIA_CONTROL_TOOL, SERVER_OPS_TOOL, PR_LISTA_TOOL,
   RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL,
   // repo_* and runbook_* are still defined in routes/chat.ts (the migration to
   // the single source is incremental). They are added in autonomie.ts, from there.
