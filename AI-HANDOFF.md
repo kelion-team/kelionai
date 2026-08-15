@@ -335,6 +335,10 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 27 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **15 AUG — CERINȚA #18: AMPRENTA VOCALĂ SALVATĂ AUTOMAT ȘI ASOCIATĂ DIRECT PROFILULUI UTILIZATORULUI.**
+  - **Asociere și salvare persistentă:** Rută dedicată `POST /api/voiceprint/me` (`backend/src/routes/voiceprint.ts`) ce extrage/primește vectorul spectral și metadatele de voce și le asociază durabil profilului utilizatorului autentificat (`upsertVoiceprint` în tabela `voiceprints` legată de `user.email`).
+  - **Interfață cont utilizator (`CustomerSettings.tsx`):** În secțiunea de cont a fost integrat panoul de amprentă vocală — afișează starea înregistrării (dacă există deja asociată profilului, data actualizării și genul estimat), permite înregistrarea sau reînregistrarea direct din browser prin Web Audio API (microfon) și salvarea automată în DB.
+  - **Teste dedicate:** `backend/src/voiceprintCont.test.ts` verifică persistența amprentei vocale asociate contului de utilizator și validarea vectorilor de trăsături.
 - 🗓️ **14 AUG — CERINȚA #128: AUTO-VINDECARE CU PIPELINE DE SCANARE LOGURI SERVER & CONSTRUCTOR + PRAG DECIZIE BUILD.**
   - **Pipeline decuplat de scanare loguri (`services/selfHealLogPipeline.ts`):** `ServerLogAdapter` scanează logurile serverului (`recentLogs` / inelul de logbuffer); `ConstructorLogAdapter` scanează logurile constructorului și gazdei (`constructor.log`, `auto-publicare.log` via `coadaLogGazda`);
   - **Grupare pe amprente:** `groupLogsByFingerprint` normalizează mesajele de eroare și contorizează aparițiile similare;
