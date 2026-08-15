@@ -59,16 +59,16 @@ export async function coadaLogGazda(
 export function semnaturiEroare(text: string, maxim = 8): string[] {
   // Dacă textul provine dintr-un log secvențial (auto-publicare.log sau constructor.log)
   // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
-  // deja rezolvate/istorice.
+  // deja rezolvate/istorice sau texte din prompturile ordinelor anterioare.
   const parti = text.split(
-    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|=== (?:Job|ORDIN)|🚀\s*\[?constructor\]?))/i,
+    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|Ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
   )
   const textDeVerificat = parti[parti.length - 1] ?? text
 
   // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
   // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
   if (
-    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|Nimic de f[ăa]cut/i.test(
+    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis: #\d+|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
       textDeVerificat,
     )
   ) {
@@ -87,11 +87,8 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // cuvântul „eroare" e re-detectat ca eroare nouă într-o buclă infinită; și
   // pașii normali de lucru ai constructorului (ex. `pas 18/120: grep ...`) care
   // conțin în argumente numele funcțiilor/fișierelor căutate.
-  // (Regex unit din DOUĂ PR-uri paralele ale constructorului — job-254 și
-  // job-256 au declarat fiecare `zgomot` din aceeași bază, iar merge-ul textual
-  // le stivuise pe amândouă: master nu mai compila. Nicio alternativă pierdută.)
   const zgomot =
-    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+))/i
+    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|apare RECURENT eroarea|count=\d+,\s*prag=\d+|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+)|\bit\(|\bexpect\(|\bdescribe\()/i
   const vazute = new Set<string>()
   const out: string[] = []
   for (const linie of textDeVerificat.split('\n')) {
