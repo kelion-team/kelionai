@@ -47,7 +47,7 @@ describe('P26 — registrul de audit: cine a modificat, când, ce', () => {
 
 describe('P26 — nimic nu se șterge, nici registrul însuși', () => {
   it('scutul acoperă și istoricul conversațiilor și audit_log (pe lângă identitate/bani/biometrie)', () => {
-    expect(db).toMatch(/'messages', 'audit_log',\s*\n\] as const/)
+    expect(db).toMatch(/'messages', 'audit_log', 'video_invatat',\s*\n\] as const/)
   })
 
   it('măsurat înainte de scut: NICIO cale de cod nu ștergea messages', () => {

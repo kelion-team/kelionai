@@ -561,6 +561,26 @@ const VIDEO_TOOL: Tool = {
   },
 }
 
+// P30a — OCHIUL VIDEO (owner, 15 aug: „sa vada un videoclip… sa extraga ideile
+// principale… sa le catalogheze si sa le invete"). Felia de azi: YouTube direct
+// (fără descărcare — URL-ul intră în creier); fișa se scrie în videotecă și în
+// memoria de lungă durată. TikTok/fișiere → felia P30b, refuz cinstit până atunci.
+const VEDE_VIDEO_TOOL: Tool = {
+  name: 'vede_video',
+  description:
+    'WATCH a YouTube video and extract its main ideas, facts and key moments (structured, in Romanian). ' +
+    'Use when the user shares a YouTube link and wants it watched/summarized/learned. ' +
+    'Only YouTube for now — for other sources tell the user honestly that the next slice (download in own space) is coming. ' +
+    'The extracted sheet is cataloged and remembered; cite it later when asked.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: 'The YouTube video URL (watch/shorts/youtu.be).' },
+    },
+    required: ['url'],
+  },
+}
+
 // Lets Kelion quietly record a request it genuinely CANNOT fulfil yet, into an
 // owner-only monitor, so the owner (Adrian) can see what to build next. This is
 // invisible to the user — it never replaces telling them honestly it can't do it.
@@ -2561,7 +2581,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...googleTools,
           ...escalationTools,
           // Bază + vedere
-          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
+          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
           // L1e: procesare de date tabelare (CSV/JSON) — capabilitate generală, în zona de aur.
           PROCESEAZA_DATE_TOOL,
           // Messenger Kelion↔Kelion: „apelează-l pe X" (conversațional, gold zone).
@@ -4223,6 +4243,27 @@ async function runTool(
         shown: true, url: videoUrl, secunde: result.secunde, costUsd: result.costUsd,
         taxat: taxa.scazutGbp > 0 ? `£${taxa.scazutGbp.toFixed(2)} scăzuți din creditul tău` : undefined,
       })
+    }
+
+    case 'vede_video': {
+      const url = String(args.url ?? '')
+      if (!url) return JSON.stringify({ error: 'no_url' })
+      const { vedeVideoYoutube, fisaCaText } = await import('../services/vedeVideo.js')
+      const fisa = await vedeVideoYoutube(url)
+      // Refuzul (link nesuportat încă / cheie / plafon) merge la creier VERBATIM —
+      // omul aude motivul real și pasul următor, nu un „failed" generic.
+      if ('error' in fisa) return JSON.stringify({ error: fisa.error })
+      const text = fisaCaText(url, fisa)
+      // Costul REAL (tokenii din usageMetadata, tariful public) — în jurnal.
+      if (fisa.costUsd > 0) {
+        usage.usd += fisa.costUsd
+        void recordCost(email, 'video-vazut', fisa.costUsd)
+      }
+      // CATALOGHEAZĂ (videoteca, sub scut) + ÎNVAȚĂ (memoria de lungă durată).
+      const { salveazaVideoInvatat } = await import('../db.js')
+      void salveazaVideoInvatat(email, url, fisa.titlu, text, fisa.tokeni, fisa.costUsd)
+      void learnFromTurn(email, `[a cerut să văd clipul] ${url}`, text.slice(0, 1500), 'kelion').catch(() => {})
+      return JSON.stringify({ fisa: text, tokeni: fisa.tokeni, costUsd: fisa.costUsd })
     }
 
     // The 8 browser actions: the call differs, the queue is shared

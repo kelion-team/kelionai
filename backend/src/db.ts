@@ -265,6 +265,22 @@ export async function initDb(): Promise<void> {
       nou TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_audit_la ON audit_log (la DESC);
+    -- ── VIDEOTECA LUI KELION (P30a — owner, 15 aug: „sa vada un videoclip…
+    -- sa extraga ideile principale si informatiile din clip, sa le catalogheze
+    -- si sa le invete"). Fiecare clip văzut = un rând: sursa, fișa întreagă
+    -- (idei/informații/momente), cine a cerut, tokenii + costul REAL măsurat.
+    -- Sub scutul datelor (LEGEA P26): ce a învățat nu se șterge.
+    CREATE TABLE IF NOT EXISTS video_invatat (
+      id BIGSERIAL PRIMARY KEY,
+      la TIMESTAMPTZ NOT NULL DEFAULT now(),
+      cerut_de TEXT NOT NULL DEFAULT '',
+      url TEXT NOT NULL DEFAULT '',
+      titlu TEXT NOT NULL DEFAULT '',
+      fisa TEXT NOT NULL DEFAULT '',
+      tokeni INT NOT NULL DEFAULT 0,
+      cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_video_invatat_la ON video_invatat (la DESC);
     -- ── PAYMENTS VIA REVOLUT PRO, WITH A UNIQUE CODE (Adrian, 30 Jul) ────────
     -- "nowadays, having to manually manage thousands of potential users, is
     -- that what you offer?" — he was right. For a payment to credit ITSELF you
@@ -738,7 +754,7 @@ export async function initDb(): Promise<void> {
 export const TABELE_PROTEJATE = [
   'local_accounts', 'google_accounts', 'wallets', 'transactions',
   'billing_events', 'payment_codes', 'voiceprints', 'faceprints',
-  'messages', 'audit_log',
+  'messages', 'audit_log', 'video_invatat',
 ] as const
 
 /** ── URMA DE AUDIT (P26, 15 aug — „cu dovezi cine a modificat") ──────────────
@@ -767,6 +783,37 @@ export async function citesteAudit(limita = 200): Promise<Array<{ la: string; ac
     ).rows
   } catch (e) {
     console.error('[audit] registrul nu s-a putut citi:', String(e).slice(0, 160))
+    return null
+  }
+}
+
+/** P30a: un clip văzut intră în videotecă — cu urmă de audit (LEGEA P26). */
+export async function salveazaVideoInvatat(cerutDe: string, url: string, titlu: string, fisa: string, tokeni: number, costUsd: number): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO video_invatat (cerut_de, url, titlu, fisa, tokeni, cost_usd) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [cerutDe.slice(0, 120), url.slice(0, 500), titlu.slice(0, 200), fisa.slice(0, 8000), tokeni, costUsd],
+    )
+    noteazaAudit(cerutDe, 'video-vazut (catalogat)', 'video_invatat', url.slice(0, 200), '', titlu.slice(0, 120))
+  } catch (e) {
+    console.error('[videoteca] clipul nu s-a putut cataloga:', String(e).slice(0, 160))
+  }
+}
+
+/** Căutare în videotecă („din ce clipuri știi X?") — pe titlu + fișă. */
+export async function cautaVideoInvatat(text: string, limita = 5): Promise<Array<{ la: string; url: string; titlu: string; fisa: string }> | null> {
+  if (!dbEnabled()) return null
+  try {
+    return (
+      await getPool().query<{ la: string; url: string; titlu: string; fisa: string }>(
+        `SELECT la::text, url, titlu, fisa FROM video_invatat
+          WHERE $1 = '' OR titlu ILIKE '%' || $1 || '%' OR fisa ILIKE '%' || $1 || '%'
+          ORDER BY la DESC LIMIT $2`,
+        [String(text ?? '').slice(0, 120), Math.min(20, Math.max(1, limita))],
+      )
+    ).rows
+  } catch {
     return null
   }
 }
