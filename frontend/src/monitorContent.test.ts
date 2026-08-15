@@ -53,4 +53,11 @@ describe('getMonitorContent — conținutul REAL al tabului activ', () => {
     const c = getMonitorContent()
     expect((c?.text?.length ?? 0)).toBeLessThanOrEqual(8000)
   })
+
+  it('gestionează conținut gol sau caractere speciale fără erori', () => {
+    openWorkspaceDoc('Doc Gol', '')
+    const c = getMonitorContent()
+    expect(c?.title).toBe('Doc Gol')
+    expect(c?.text).toBe('')
+  })
 })
