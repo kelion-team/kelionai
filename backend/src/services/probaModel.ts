@@ -254,7 +254,7 @@ export const SARCINI: Sarcina[] = [
  *  O sarcină care aruncă (rețea, 400, timeout) e PICATĂ, nu ignorată — un model
  *  care crapă la o probă nu e „netestat", e nepotrivit. */
 export async function probeazaModelComplet(cod: string): Promise<RezultatProba> {
-  const model = cod.startsWith('google-direct/') ? cod : `google-direct/${cod}`
+  const model = cod.startsWith('google-direct/') ? cod.slice('google-direct/'.length) : cod
   const rez: RezultatProba = { model: cod, scor: 0, total: SARCINI.length, picate: [], detaliu: {} }
   for (const s of SARCINI) {
     try {
