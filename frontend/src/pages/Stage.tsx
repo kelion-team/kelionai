@@ -1598,6 +1598,7 @@ export default function Stage({ user }: { user: User }) {
                   ['📋 Formulare', 'Fă-mi un formular Google — întreabă-mă întâi ce întrebări să conțină.'],
                   ['📷 Photos', 'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.'],
                   ['▶️ YouTube upload', 'Vreau să urc un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
+                  ['🏪 Profilul firmei', 'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.'],
                 ].map(([eticheta, comanda]) => (
                   <button
                     key={eticheta}

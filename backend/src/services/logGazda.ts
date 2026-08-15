@@ -60,6 +60,12 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // Dacă textul provine dintr-un log secvențial (auto-publicare.log sau constructor.log)
   // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
   // deja rezolvate/istorice sau texte din prompturile ordinelor anterioare.
+  // Markerul de job poate purta ora în față (`[13:40:00] ordin #271: ...`) —
+  // exact forma din constructor.log; fără prefixul opțional, despicarea nu se
+  // întâmpla și „ultima rulare" era tot fișierul (prins de propriul test).
+  // (Conflict #1142 ↔ #1147 unit cu ochii: ambele reparau același lucru; a
+  // rămas varianta constructorului, care e superset — acceptă și spații după
+  // newline, nu doar ora opțională.)
   const parti = text.split(
     /(?=(?:^|\n)\s*(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
   )
