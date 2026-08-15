@@ -308,12 +308,19 @@ function MonitorImage({ url, title, taskId }: { url: string; title: string; task
   )
 }
 
-function MonitorVideo({ url, taskId }: { url: string; taskId: string }) {
+function MonitorVideo({ url, title, taskId }: { url: string; title: string; taskId: string }) {
   const { failed, onOk, onErr } = useMediaFallback(url, taskId)
   if (failed) return <MediaFailed url={url} />
+  // P22 (owner: „orice clip se salveaza cu nume sugestiv data ora" + „in
+  // download"): titlul cardului E numele sugestiv (Clip-Subiect-data_ora) —
+  // butonul îl descarcă exact așa în folderul Download al browserului.
+  const numeFisier = `${(title || 'Clip').replace(/[^\w-]+/g, '-')}.mp4`
   return (
-    <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-      <video src={url} controls style={{ maxWidth: '100%', maxHeight: '100%' }} onLoadedData={onOk} onError={onErr} />
+    <div className="workspace-doc" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#000' }}>
+      <video src={url} controls style={{ maxWidth: '100%', maxHeight: '90%' }} onLoadedData={onOk} onError={onErr} />
+      <a className="composer-send" href={url} download={numeFisier} style={{ textDecoration: 'none' }}>
+        ⬇ Salvează în Download ({numeFisier})
+      </a>
     </div>
   )
 }
@@ -1454,7 +1461,7 @@ export default function Stage({ user }: { user: User }) {
                   // onLoad/onError → the real state, so Kelion factually sees it.
                   <MonitorImage url={task.url} title={task.title} taskId={task.id} />
                 ) : task.url && task.kind === 'video' ? (
-                  <MonitorVideo url={task.url} taskId={task.id} />
+                  <MonitorVideo url={task.url} title={task.title} taskId={task.id} />
                 ) : task.url && task.kind === 'audio' ? (
                   <MonitorAudio url={task.url} taskId={task.id} />
                 ) : task.url && task.kind === 'pdf' ? (
@@ -1677,10 +1684,12 @@ export default function Stage({ user }: { user: User }) {
                   ['📷 Photos', 'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.'],
                   ['▶️ YouTube upload', 'Urcă un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
                   ['🏪 Profilul firmei', 'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.'],
-                  // P28: „pentru fiecare calitate" nu avea corespondent (o
-                  // singură calitate e activă) și creierul n-avea sursa de
-                  // prețuri — acum o are (unealta lista_tarife).
-                  ['🎬 Generator video', 'Vreau un clip video generat (Veo) — arată-mi întâi prețul în credite și cere-mi confirmarea înainte să generezi.'],
+                  // P22 (owner: „se poate numi aplicatia Studioul de Clipuri,
+                  // care cuprinde toate 6, nu? ii dai o ideie… el face tot"):
+                  // Studioul ÎNLOCUIEȘTE vechiul „Generator video" — cuprinde
+                  // și generarea plătită (Veo, cu prețul din lista_tarife), și
+                  // calea GRATIS prin Google Flow, pentru orice user logat.
+                  ['🎬 Studioul de Clipuri', 'Pornește Studioul de Clipuri: întreabă-mă ideea clipului și rețeta dorită, oferă-mi calea GRATIS (Google Flow, pe contul meu) și calea plătită cu prețul real, apoi urmează pașii studioului.'],
                 ].map(([eticheta, comanda]) => (
                   <button
                     key={eticheta}

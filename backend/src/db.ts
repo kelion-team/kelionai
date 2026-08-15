@@ -2325,6 +2325,23 @@ export async function recordCost(email: string, kind: string, costUsd: number): 
   }
 }
 
+/** P22 (timerul de promovare): cât s-a cheltuit AZI pe un fel anume — plafonul
+ *  zilnic al ownerului se judecă pe MĂSURĂTOARE, nu pe presupunere. null =
+ *  citirea a picat (apelantul refuză rularea: pe necitit nu se cheltuie). */
+export async function costAziPe(kind: string): Promise<number | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query<{ s: string }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS s FROM cost_events
+       WHERE kind = $1 AND created_at >= date_trunc('day', now())`,
+      [kind],
+    )
+    return Number(r.rows[0]?.s ?? 0)
+  } catch {
+    return null
+  }
+}
+
 // EVIDENȚA TIMPILOR (Adrian, 3 aug). Fire-and-forget, ca recordCost — nu rupe
 // niciodată tura dacă măsurarea eșuează. `ms` = durata reală a creierului.
 export interface TaskTiming {

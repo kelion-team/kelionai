@@ -900,6 +900,30 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       pornit ? 'pornit' : 'oprit')
     return reply.send(await videoPlatitPornit().catch(() => ({ pornit, sursa: 'buton' as const })))
   })
+
+  // P22 — TIMERUL DE PROMOVARE: setările sunt ALE ownerului (ore + plafon
+  // zilnic + ideea + butonul), în kv; fiecare schimbare lasă urmă în audit.
+  app.get('/api/admin/studio-promo', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const { setariPromoDinKv, KV_STUDIO_PROMO } = await import('../services/studioClipuri.js')
+    return reply.send(setariPromoDinKv(await loadKv(KV_STUDIO_PROMO).catch(() => null)))
+  })
+  app.post<{ Body: { pornit?: boolean; ore?: number[]; plafonUsdZi?: number; idee?: string } }>(
+    '/api/admin/studio-promo',
+    async (req, reply) => {
+      const user = cerAdmin(req, reply)
+      if (!user) return
+      const { setariPromoDinKv, KV_STUDIO_PROMO } = await import('../services/studioClipuri.js')
+      const vechi = setariPromoDinKv(await loadKv(KV_STUDIO_PROMO).catch(() => null))
+      // Se trece prin ACEEAȘI validare ca la citire — ce nu e valid nu intră.
+      const nou = setariPromoDinKv(JSON.stringify({ ...vechi, ...req.body }))
+      await saveKv(KV_STUDIO_PROMO, JSON.stringify(nou))
+      noteazaAudit('admin', 'studio-promo (setări timer)', 'kv_state', KV_STUDIO_PROMO,
+        JSON.stringify(vechi).slice(0, 380), JSON.stringify(nou).slice(0, 380))
+      return reply.send(nou)
+    },
+  )
   // YOUR BRAKE, ONE CLICK AWAY (Adrian, 30 Jul: "the 6 are needed, but no
   // brakes" — this is not a brake I put over him, it's the lever YOU hold).
   // "pauza-autonomie" existed since 27 Jul, but only as a command you had to

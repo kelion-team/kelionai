@@ -73,6 +73,9 @@ export const UNELTE_VORBIRE: readonly string[] = [
   // P28: prețurile sunt CONVERSAȚIE („cât costă un clip?") — read-only, ~0ms,
   // dintr-o singură sursă (tarife.ts); fără ea creierul ar inventa cifre.
   'lista_tarife',
+  // P22: planul Studioului e tot conversație (text pur, ~0ms) — abia PAȘII lui
+  // (generate_video etc.) costă, și ăia au gărzile lor.
+  'studioul_de_clipuri',
   'save_note',
   'list_notes',
   'list_memories',
