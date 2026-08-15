@@ -67,6 +67,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'photos_alege', category: 'google', does: 'pornește alegerea de poze din Google Photos (Picker — omul alege, Kelion vede doar alegerea)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'photos_adu', category: 'google', does: 'aduce pozele alese din Google Photos și le arată pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'youtube_urca', category: 'google', does: 'urcă un clip din aplicație pe canalul YouTube al omului (privat implicit; consimțământ separat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'business_vezi', category: 'google', does: 'vede profilul de firmă Google al omului (contul + locațiile; consimțământ separat, cotă doar după aprobarea Google)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'edit_doc', category: 'google', does: 'editează un Google Doc (adaugă / rescrie / caută-înlocuiește)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'create_sheet', category: 'google', does: 'creează un Google Sheet (titlu + rânduri)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'edit_sheet', category: 'google', does: 'editează un Google Sheet (adaugă rânduri / scrie într-un interval)', chat: true, voice: false, voiceViaBrain: true, admin: false },

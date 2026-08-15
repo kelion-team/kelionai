@@ -60,15 +60,18 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // Dacă textul provine dintr-un log secvențial (auto-publicare.log sau constructor.log)
   // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
   // deja rezolvate/istorice sau texte din prompturile ordinelor anterioare.
+  // Markerul de job poate purta ora în față (`[13:40:00] ordin #271: ...`) —
+  // exact forma din constructor.log; fără prefixul opțional, despicarea nu se
+  // întâmpla și „ultima rulare" era tot fișierul (prins de propriul test).
   const parti = text.split(
-    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|Ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
+    /(?=(?:^|\n)(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|Ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
   )
   const textDeVerificat = parti[parti.length - 1] ?? text
 
   // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
   // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
   if (
-    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis: #\d+|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
+    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis: \S+|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
       textDeVerificat,
     )
   ) {

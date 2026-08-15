@@ -216,6 +216,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   photos_alege: { what: 'Lets you pick photos from your Google Photos (you choose in Google, privately)', say: '"let me pick some photos from my Google Photos"' },
   photos_adu: { what: 'Brings the photos you picked onto the monitor', say: '"show the photos I picked"' },
   youtube_urca: { what: 'Uploads a clip made here to your own YouTube channel (private until you publish it)', say: '"upload this clip to my YouTube"' },
+  business_vezi: { what: 'Reads your Google Business Profile — the account and its locations (separate one-time consent; Google must first approve API access for this project)', say: '"show my firm\'s Google listing"' },
   edit_doc: { what: 'Adds to or rewrites one of your Google Docs', say: '"add a paragraph to the meeting notes"' },
   create_sheet: { what: 'Makes a new Google Sheet from your data', say: '"put these numbers in a spreadsheet"' },
   edit_sheet: { what: 'Appends rows or fills cells in one of your sheets', say: '"add this row to the expenses sheet"' },
