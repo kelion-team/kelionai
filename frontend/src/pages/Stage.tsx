@@ -1620,13 +1620,21 @@ export default function Stage({ user }: { user: User }) {
             <>
               <div className="apps-backdrop" onClick={() => setAppsOpen(false)} />
               <div className="apps-menu">
+                {/* P28 (owner, 15 aug: „aplicatii care trebuie sa ruleze, si
+                    kelion sa apeleze si sa dea subiectele cind sunt chemate")
+                    — auditul a măsurat că EXACT aceste două intrări ocoleau
+                    creierul (se deschideau fără știrea lui). Acum merg pe
+                    ACELAȘI drum ca toate celelalte: comandă → Kelion →
+                    open_app_view; el deschide și primește subiectul. Re-clicul
+                    pe Tranzacții rămâne închidere instant (nu costă o tură). */}
                 {user.role === 'admin' && (
                   <button
                     type="button"
                     className="apps-item"
                     onClick={() => {
                       setAppsOpen(false)
-                      if (!closeTasksByKind('tranzactii')) openWorkspace('📈 Tranzacții', '/api/tranzactii')
+                      if (!closeTasksByKind('tranzactii'))
+                        window.dispatchEvent(new CustomEvent('kelion:comanda', { detail: 'Deschide-mi Centrul de Tranzacționare și spune-mi pe scurt starea lui.' }))
                     }}
                   >
                     📈 Tranzacții
@@ -1637,7 +1645,7 @@ export default function Stage({ user }: { user: User }) {
                   className="apps-item"
                   onClick={() => {
                     setAppsOpen(false)
-                    setCvAdaptationOpen(true)
+                    window.dispatchEvent(new CustomEvent('kelion:comanda', { detail: 'Deschide-mi panoul de adaptare CV și spune-mi pe scurt cum funcționează.' }))
                   }}
                 >
                   📄 {t.cvTitle}
@@ -1651,7 +1659,9 @@ export default function Stage({ user }: { user: User }) {
                     (services/google.ts — googleapis.com), nu promisiuni. */}
                 {[
                   ['✉️ Gmail', 'Arată-mi ultimele emailuri primite.'],
-                  ['📅 Calendar', 'Ce am în calendar săptămâna asta?'],
+                  // P28: „Ce am în calendar…" pica pe faza de vorbire (fără
+                  // unealta calendarului în runda 1) — forma de ACȚIUNE nu.
+                  ['📅 Calendar', 'Arată-mi ce am în calendar săptămâna asta.'],
                   ['📁 Drive', 'Arată-mi ultimele fișiere din Drive.'],
                   ['📝 Docs', 'Fă-mi un document Google nou.'],
                   ['📊 Sheets', 'Fă-mi un tabel Google nou.'],
@@ -1665,9 +1675,12 @@ export default function Stage({ user }: { user: User }) {
                   ['📹 Meet', 'Fă-mi o întâlnire în calendar cu link Google Meet — întreabă-mă întâi când și cu cine.'],
                   ['📋 Formulare', 'Fă-mi un formular Google — întreabă-mă întâi ce întrebări să conțină.'],
                   ['📷 Photos', 'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.'],
-                  ['▶️ YouTube upload', 'Vreau să urc un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
+                  ['▶️ YouTube upload', 'Urcă un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
                   ['🏪 Profilul firmei', 'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.'],
-                  ['🎬 Generator video', 'Vreau un clip video generat (Veo) — arată-mi întâi prețul în credite pentru fiecare calitate și cere-mi confirmarea înainte să generezi.'],
+                  // P28: „pentru fiecare calitate" nu avea corespondent (o
+                  // singură calitate e activă) și creierul n-avea sursa de
+                  // prețuri — acum o are (unealta lista_tarife).
+                  ['🎬 Generator video', 'Vreau un clip video generat (Veo) — arată-mi întâi prețul în credite și cere-mi confirmarea înainte să generezi.'],
                 ].map(([eticheta, comanda]) => (
                   <button
                     key={eticheta}

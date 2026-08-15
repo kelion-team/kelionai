@@ -68,7 +68,7 @@ import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
-import { taxeazaServiciu, cheiaTarifVideo } from '../services/tarife.js'
+import { taxeazaServiciu, cheiaTarifVideo, meniulDeTarife, lirePentru } from '../services/tarife.js'
 import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
@@ -559,6 +559,19 @@ const VIDEO_TOOL: Tool = {
     },
     required: ['prompt'],
   },
+}
+
+// P28 (auditul aplicațiilor — RUPTURA #5): butonul 🎬 din meniu îi cere lui
+// Kelion „arată-mi întâi prețul în credite", dar creierul n-avea NICIO sursă
+// pentru cifre — fie inventa, fie tăcea. Meniul viu de tarife (tarife.ts, cu
+// profitul copt și reglabil din env) devine unealtă READ-ONLY: prețul spus
+// omului e MEREU cel care se și taxează, dintr-o singură sursă.
+const TARIFE_TOOL: Tool = {
+  name: 'lista_tarife',
+  description:
+    'Read the LIVE price list of the extra services (video clip, image, CV adaptation, presentation) in credits and £. ' +
+    'Call this BEFORE quoting any price — NEVER invent figures. Also tells which video quality (Veo model tier) is currently active.',
+  input_schema: { type: 'object', properties: {} },
 }
 
 // P30a — OCHIUL VIDEO (owner, 15 aug: „sa vada un videoclip… sa extraga ideile
@@ -2581,7 +2594,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...googleTools,
           ...escalationTools,
           // Bază + vedere
-          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
+          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, TARIFE_TOOL, OPEN_APP_VIEW_TOOL,
           // L1e: procesare de date tabelare (CSV/JSON) — capabilitate generală, în zona de aur.
           PROCESEAZA_DATE_TOOL,
           // Messenger Kelion↔Kelion: „apelează-l pe X" (conversațional, gold zone).
@@ -2627,7 +2640,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
           ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, TARIFE_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -4171,7 +4184,10 @@ async function runTool(
     case 'open_app_view': {
       const view = String(args.view ?? '').trim().toLowerCase()
       const section = String(args.section ?? '').trim()
-      if (!['settings', 'wallet', 'contact', 'admin', 'trading', 'home'].includes(view)) {
+      // P28 (auditul aplicațiilor — RUPTURA #2): schema promitea `cv` din
+      // 13 aug, dar lista de aici îl refuza cu unknown_view — Kelion chema
+      // exact valoarea din propria schemă și primea o eroare inexplicabilă.
+      if (!['settings', 'wallet', 'contact', 'admin', 'trading', 'home', 'cv'].includes(view)) {
         return JSON.stringify({ error: 'unknown_view' })
       }
       if ((view === 'admin' || view === 'trading') && !isAdmin) return JSON.stringify({ error: 'admin_only' })
@@ -4211,6 +4227,16 @@ async function runTool(
       return JSON.stringify({
         shown: true, url: imageUrl,
         taxat: taxaImg.scazutGbp > 0 ? `£${taxaImg.scazutGbp.toFixed(2)} scăzuți din creditul tău` : undefined,
+      })
+    }
+
+    case 'lista_tarife': {
+      // O singură sursă (tarife.ts): cifra afișată = cifra taxată, mereu.
+      const meniu = meniulDeTarife().map((t) => ({ ...t, lire: lirePentru(t.cheie) }))
+      return JSON.stringify({
+        tarife: meniu,
+        video_activ: cheiaTarifVideo(),
+        nota: 'prețurile sunt FINALE (profit inclus); video_activ e singura calitate care se generează acum',
       })
     }
 

@@ -166,7 +166,14 @@ export const ESCALATE_TOP_AT = 85
 // it's doing it" — everyday commands: "open youtube", "play a song", "search X",
 // "run an audit" were NOT recognized as orders → they stayed on the conversation
 // model, which only narrates. Any command verb = an EXECUTION turn.)
-const ACTION_INTENT = /(repar[ăa]|remediaz|execut[ăa]?|ruleaz[ăa]|public[ăa]|deploy|livrez|livreaz[ăa]|scrie\s*cod|corecteaz[ăa]|\bfix\b|adaug[ăa]|schimb[ăa]|instaleaz[ăa]|creeaz[ăa]|[șs]terge|modific[ăa]|\bcommit\b|\bmerge\b|\bpr\b|\bbranch\b|runbook|workflow|restart|backup|afi[șs]eaz[ăa]|arat[ăa](-mi)?\b|diagnostic|deschide|porne[șs]te|opre[șs]te|\bpune\b|caut[ăa]|c[âa]nt[ăa]|salveaz[ăa]|trimite|cite[șs]te|verific[ăa]|uit[ăa]-te|ascult[ăa]|deseneaz[ăa]|genereaz[ăa]|construie[șs]te|\bf[ăa]\b|\baudit\b|raporteaz[ăa]|\braport\b|noteaz[ăa]|programeaz[ăa]|tradu\b|calculeaz[ăa]|rezerv[ăa]|comand[ăa]|monitorizeaz[ăa])/i
+// P28 (auditul aplicațiilor, 15 aug seara — RUPTURA #4, măsurată): `\bf[ăa]\b`
+// nu prindea NICIODATĂ „Fă-mi" — `ă` nu e `\w`, deci granița `\b` dintre „fă"
+// și „-mi" nu există; 5 din comenzile meniului ▦ Aplicații (Docs, Sheets,
+// Prezentări, Meet, Formulare) plecau pe faza de vorbire FĂRĂ unealta lor.
+// Granițele din jurul literelor cu diacritice se scriu acum cu lookaround pe
+// \p{L} (flag /u), nu cu `\b`; la fel `arat[ăa]` fără „-mi" („arată ce am…").
+// + `urc[ăa]` (▶️ YouTube upload — „Urcă un clip…").
+const ACTION_INTENT = /(repar[ăa]|remediaz|execut[ăa]?|ruleaz[ăa]|public[ăa]|deploy|livrez|livreaz[ăa]|scrie\s*cod|corecteaz[ăa]|\bfix\b|adaug[ăa]|schimb[ăa]|instaleaz[ăa]|creeaz[ăa]|[șs]terge|modific[ăa]|\bcommit\b|\bmerge\b|\bpr\b|\bbranch\b|runbook|workflow|restart|backup|afi[șs]eaz[ăa]|arat[ăa](-mi)?(?!\p{L})|diagnostic|deschide|porne[șs]te|opre[șs]te|\bpune\b|caut[ăa]|c[âa]nt[ăa]|salveaz[ăa]|trimite|cite[șs]te|verific[ăa]|uit[ăa]-te|ascult[ăa]|deseneaz[ăa]|genereaz[ăa]|construie[șs]te|(?<!\p{L})f[ăa](?!\p{L})|urc[ăa](?!\p{L})|\baudit\b|raporteaz[ăa]|\braport\b|noteaz[ăa]|programeaz[ăa]|tradu\b|calculeaz[ăa]|rezerv[ăa]|comand[ăa]|monitorizeaz[ăa])/iu
 export function hasActionIntent(text: string): boolean {
   return ACTION_INTENT.test(text || '')
 }

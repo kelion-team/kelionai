@@ -165,13 +165,30 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       rămâne pe vindecătorul lui (nu e permanent). Lacăte: dublareOrdine.test
       (P27, +8), selfHeal.test (+1). RĂMAS: proba live (un ordin pe punga
       goală moare din prima și apare în triaj + panou). [ ]
-- [ ] ORDIN 15 aug 17:13, P28 (verbatim): „Aplicatiile, nu sunt doar poze,
+- [x] ORDIN 15 aug 17:13, P28 (verbatim): „Aplicatiile, nu sunt doar poze,
       ele sunt aplicatii care trebuie sa ruleze, si kelion sa apeleze si sa
       dea subiectele cind sunt chemate, sa analizeze si sa gestioneze tot" —
-      absoarbe P14 (proba buton-cu-buton) ca pasul 1; contractul: fiecare
-      intrare din meniu = aplicație REALĂ condusă de Kelion (subiect la
-      deschidere, analiză, gestionare, erori cinstite); + auto-captura pe
-      site-urile care refuză înrămarea (propus, așteaptă „da"). PE COADĂ. [ ]
+      AUDIT buton-cu-buton pe toate cele 19 intrări din meniul ▦ Aplicații
+      (agent: fiecare comandă urmărită pe cod până la unealta reală, cu
+      fișier:linie) → 7 rupturi CONFIRMATE, toate reparate: (#4) bugul de
+      regex `\bf[ăa]\b` — „Fă-mi" nu era NICIODATĂ acțiune (ă rupe granița
+      \b) → granițe pe \p{L} cu /u; (#3) 7 comenzi de meniu picau pe faza de
+      vorbire FĂRĂ unealta lor în runda 1 → regexul reparat + Calendar/upload
+      rescrise ca acțiuni + LACĂT: toate comenzile meniului se citesc din
+      Stage.tsx și se probează cu hasActionIntent la fiecare rulare de teste;
+      (#2) open_app_view refuza view=cv deși propria schemă îl promitea →
+      acceptat; (#1) Tranzacții și CV se deschideau FĂRĂ știrea lui Kelion →
+      acum merg prin comandă → Kelion le deschide și primește subiectul
+      (re-clic pe Tranzacții rămâne închidere instant); (#5) 🎬 cerea „prețul
+      pe fiecare calitate" dar creierul N-AVEA sursă de prețuri → unealta
+      lista_tarife (citește meniul viu tarife.ts — cifra spusă = cifra
+      taxată; și pe faza de vorbire); (#7) search_unavailable/maps_http_NNN
+      seci → poartă cauza (cheie lipsă ≠ cotă/rețea); (#6 notat: 4 unelte
+      Google interceptate în chat.ts, nu în runGoogleTool — fragilitate,
+      nu ruptură azi). Lacăte: aplicatiiVii.test.ts (11). RĂMAS pe live
+      (numai owner): consimțământul Google pe scope-urile noi, cheile
+      SERPER/GEMINI pe VPS, comutatorul 🎬 pornit, cota Business aprobată,
+      agentul de documente viu — codul le spune acum pe nume pe fiecare. [ ]
 - [x] ORDIN 15 aug, P29 (verbatim): „inteleg dar eu vreau sa platesc, sau
       clientul, de ce nu ma duce spre plata" + 19:0x „daca video si funtiile
       nu merg e pa" — drumul banilor la video FUNCȚIONEAZĂ: (1) butonul
