@@ -45,7 +45,7 @@ import {
   saveKv,
   noteazaAudit,
 } from '../db.js'
-import { videoPlatitPornit, KV_VIDEO_PLATIT } from '../services/video.js'
+import { videoPlatitPornit, KV_VIDEO_PLATIT, KV_VIDEO_ULTIMA } from '../services/video.js'
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { explicaEroare } from '../services/explicaEroare.js'
@@ -882,6 +882,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // P29 (15 aug): comutatorul „video plătit" — citit, nu presupus; null =
       // citirea a picat (se spune „necitit", nu se inventează un OPRIT).
       videoPlatit: await videoPlatitPornit().catch(() => null),
+      // 21:26 („nu vrea sa genereze"): ULTIMA încercare de generare, cu
+      // verdictul ei pe nume — diagnoza e o citire din panou, nu un
+      // interogatoriu al omului. null = nicio încercare notată încă.
+      videoUltimaIncercare: await loadKv(KV_VIDEO_ULTIMA)
+        .then((v) => (v ? (JSON.parse(v) as { la: string; ok: boolean; verdict: string }) : null))
+        .catch(() => null),
     })
   })
 
