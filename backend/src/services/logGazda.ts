@@ -61,14 +61,14 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
   // deja rezolvate/istorice.
   const parti = text.split(
-    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|=== (?:Job|ORDIN)|🚀\s*\[?constructor\]?))/i,
+    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|=== (?:Job|ORDIN)|🚀\s*\[?constructor\]?|(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?ordin #\d+))/i,
   )
   const textDeVerificat = parti[parti.length - 1] ?? text
 
   // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
   // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
   if (
-    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|Nimic de f[ăa]cut/i.test(
+    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|PR deschis\b|✅\s*PR deschis|✅\s*GATA|Nimic de f[ăa]cut/i.test(
       textDeVerificat,
     )
   ) {
