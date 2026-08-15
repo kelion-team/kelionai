@@ -2949,6 +2949,26 @@ export default function AdminPanel({
                         </span>
                         {u.blocked && <span className="user-badge blocked">BLOCAT</span>}
                       </div>
+                      {/* DEVICE-URILE LUI, DEDESUBT (P6; owner, 15 aug: „se
+                          pastreaza unica si se adauga doar device cu care intra
+                          cu datele aferente") — în locul listei plate de sesiuni
+                          care repeta același om de N ori. */}
+                      {(u.devices ?? []).map((d, i) => (
+                        <div className="vis-meta" key={i} style={{ paddingLeft: 36, opacity: 0.8 }}>
+                          <span>{d.device === 'mobile' ? '📱 mobil' : '💻 desktop'}{d.browser ? ` · ${d.browser}` : ''}</span>
+                          <span>{d.sessions} sesiuni</span>
+                          <span>
+                            ultima {new Date(d.last_seen).toLocaleString('ro-RO', {
+                              day: 'numeric',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                          <span>{d.ip || '—'}</span>
+                          <span>{[d.city, d.country].filter(Boolean).join(', ') || '—'}</span>
+                        </div>
+                      ))}
                       <div className="vis-actions" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
@@ -3001,34 +3021,6 @@ export default function AdminPanel({
                             Postgres refuză și el — un buton care promite o
                             ștergere imposibilă ar fi afișaj fals. Cererile GDPR
                             se rezolvă manual, la decizia ownerului. */}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">{A.recentSessions}</div>
-                  {activityData.sessions.length === 0 && <div className="chat-hint">—</div>}
-                  {activityData.sessions.map((s, i) => (
-                    <div className="vis-row" key={i}>
-                      <div className="vis-main">
-                        <span className="vis-flagline">
-                          <Flag code={s.code} />
-                          <strong>{s.email}</strong>
-                        </span>
-                        <span className="vis-time">
-                          {new Date(s.started_at).toLocaleString('ro-RO', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      </div>
-                      <div className="vis-meta">
-                        <span>a stat {fmtDur(s.seconds)}</span>
-                        <span>{s.ip || '—'}</span>
-                        <span>{[s.city, s.country].filter(Boolean).join(', ') || '—'}</span>
-                        <span>{s.device === 'mobile' ? 'mobil' : 'desktop'}</span>
                       </div>
                     </div>
                   ))}
