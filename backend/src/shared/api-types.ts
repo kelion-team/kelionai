@@ -201,6 +201,14 @@ export interface UserActivityRow {
   /** Device-urile LUI, dedesubt (P6) — în locul listei plate de sesiuni care
    *  repeta același om de N ori. */
   devices: UserDeviceRow[]
+  /** P26 (owner, 15 aug: „baza de date completa cu poza cu tot… se ataseaza
+   *  inclusiv monstra de voce"): poza contului (faceprints, dată cu acord la
+   *  enrolare) — gol dacă nu există; nu se inventează siluete. */
+  foto: string
+  /** Are amprentă vocală înscrisă (voiceprints)? */
+  voce: boolean
+  /** Amprenta lui are și mostra AUDIO ascultabilă (butonul ▶ din Amprente)? */
+  mostraAudio: boolean
   /** P10: ownerul e scutit de taxare peste tot — soldul lui (negativ, istoric,
    *  dinaintea scutirilor) se afișează cu explicația, nu ca datorie vie. */
   scutit: boolean
