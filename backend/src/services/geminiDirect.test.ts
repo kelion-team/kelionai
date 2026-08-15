@@ -43,6 +43,7 @@ describe('gemini direct (creierul principal gratuit)', () => {
 
   it('recunoaște erorile de cotă (căderea pe secundar) și prefixul de rutare', () => {
     expect(isGeminiQuotaError(new Error('gemini 429: RESOURCE_EXHAUSTED'))).toBe(true)
+    expect(isGeminiQuotaError(new Error('gemini 503: {"error":{"code":503,"message":"This model is currently experiencing high demand."}}'))).toBe(true)
     expect(isGeminiQuotaError(new Error('gemini 400: bad request'))).toBe(false)
     expect(`${GEMINI_DIRECT_PREFIX}gemini-2.5-flash`.startsWith('google-direct/')).toBe(true)
   })
