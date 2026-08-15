@@ -284,6 +284,10 @@ Am identificat și remediat cauza blocării vocii live după câteva schimburi d
 1. **Heartbeat WebSocket ping-pong**: menține conexiunea WebSocket deschisă pe parcursul tăcerilor dintre replici, prevenind timeout-ul de inactivitate din proxy/NAT. Backend-ul răspunde cu cadre de tip `pong` la ping-urile trimise periodic (10s) de client.
 2. **AudioContext Auto-Resume**: verifică și repornește (`ensureAudioContextRunning`) instanța de `AudioContext` la recepționarea fiecărui cadru audio și la schimbările de stare (`statechange` / gesturi utilizator), prevenind blocarea redării când browserul trece `AudioContext` în starea `suspended`.
 
+**A PĂISPREZECEA LECȚIE — „Opțiunile de limbă și delimitarea atelierului față de runtime" (Cerința #34).**
+1. **Opțiuni de limbă în interfață**: Configurația oficială a celor 27 de limbi suportate este centralizată în `frontend/src/lib/languages.ts` (`LANGS`) cu etichetele endonime corespunzătoare (English, Română, Français, Deutsch, Español etc.) pentru recunoaștere și sinteză vocală.
+2. **Delimitare atelier vs runtime**: Comenzile ce solicită capturi în timp real ale monitorului fizic sau ale sesiunilor deschise în browserul utilizatorului sunt deservite exclusiv de uneltele senzoriale de runtime ale lui Kelion, atelierul constructorului fiind un mediu CI determinist pentru cod, migrații și teste.
+
 ## 7. CI/WORKFLOWS (`.github/workflows/`) — starea 25 iul 2026
 **Cele 3 workflow-uri ale autonomiei (25 iul, §14.b):**
 - **`deploy.yml`** — PIPELINE-UL DE PUBLICARE (push pe master + manual): SSH cu `VPS_SSH_KEY` → rulează versiunea din `origin/master` a lui `deploy/deploy.sh` (dintr-o copie în /tmp, nu din clonă) → verificare ANTI-FANTOMĂ din afară: live `v` == sha `origin/master` + health 200, altfel roșu.
