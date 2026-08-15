@@ -5,6 +5,7 @@ import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updat
 import type { OrMessage } from '../services/brainContract.js'
 import { uneltePentruCreier2, raspunsCreier2 } from '../services/creier2Constructor.js'
 import { isOpsPaused } from '../services/runbooks.js'
+import { numeleOrdinului } from '../services/numeOrdin.js'
 import { autonomActiv } from '../services/autonomActiv.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
@@ -111,6 +112,9 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const jobs = raw.map((j) => ({
       ...j,
       pct: procentDinProgres(j.status, j.progress),
+      // P8 (owner, 15 aug: „trebuie sa fie foarte clar ce executa"): numele
+      // rândului = FAPTA extrasă din ordin, nu ambalajul promptului.
+      nume: numeleOrdinului(j.orderText),
     }))
     // `paused` (auditul admin, 3 aug): pauza de autonomie oprea și lucrătorul
     // (/api/constructor/next nu predă nimic), dar Constructorul n-o arăta
@@ -499,7 +503,9 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const jobs = await listMonitorBuildJobs()
     return reply.send({
-      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
+      // P8: `order` devine FAPTA (numeleOrdinului), nu primele litere ale
+      // promptului — monitorul arată „ce execută", cum a cerut ownerul.
+      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: numeleOrdinului(j.orderText), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
     })
   })
 }
