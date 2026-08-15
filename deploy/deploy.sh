@@ -253,9 +253,19 @@ echo "== 4b. Browserul mâinilor (Chromium) — prezent, nu promis =="
 # Idempotent: cu volumul plin, descărcarea se sare; rămân doar bibliotecile
 # de sistem (apt), care se pierd cu containerul vechi. Eșecul NU oprește
 # publicarea — dar se spune, nu se tace.
-docker exec kelionai-app sh -c 'cd /app/backend && npx playwright install --with-deps chromium >/dev/null 2>&1' \
-  && echo "Chromium prezent — browserul mâinilor e viu" \
-  || echo "AVERTISMENT: instalarea Chromium a picat — pașii pe mâini cu browser vor pica până la următoarea publicare"
+# TESTAT, NU DECLARAT (owner, 15 aug: „browserul acesta nu funcționează" +
+# „ce-ar fi să testezi tot ce faci și lași funcțional"): ieșirea instalării
+# NU se mai aruncă la /dev/null (merge în browser-install.log), iar verdictul
+# vine dintr-o LANSARE REALĂ a Chromium-ului, nu din codul de ieșire al
+# instalării — „install ok" nu înseamnă „browserul chiar pornește".
+docker exec kelionai-app sh -c 'cd /app/backend && npx playwright install --with-deps chromium' \
+  > /root/kelion/browser-install.log 2>&1 \
+  || echo "AVERTISMENT: instalarea Chromium a picat — vezi /root/kelion/browser-install.log"
+if docker exec kelionai-app sh -c 'cd /app/backend && timeout 30 node -e "const {chromium}=require(\"playwright\");chromium.launch({headless:true,args:[\"--no-sandbox\",\"--disable-dev-shm-usage\"]}).then(async b=>{await b.close();console.log(\"BROWSER-VIU\")}).catch(e=>{console.error(\"BROWSER-MORT:\",String(e).slice(0,300));process.exit(1)})"' 2>&1 | tee -a /root/kelion/browser-install.log | grep -q 'BROWSER-VIU'; then
+  echo "Browserul mâinilor: VIU — probat cu lansare reală de Chromium"
+else
+  echo "AVERTISMENT: browserul mâinilor e MORT (lansarea reală a picat) — cauza în /root/kelion/browser-install.log; pașii pe mâini cu browser vor pica"
+fi
 
 show_progress 85 "Repornire Caddy reverse proxy"
 echo "== 5. (Re)pornesc Caddy cu Caddyfile-ul aplicației =="

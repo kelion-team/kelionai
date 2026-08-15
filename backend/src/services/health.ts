@@ -3,6 +3,7 @@ import { getPool, dbEnabled, listBuildJobs, countClientErrorsLastHour } from '..
 import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from './resurse.js'
 import { geminiLive } from './geminiDirect.js'
 import { stareDispecer } from './dispecer.js'
+import { probaBrowserulMainilor } from './browser.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -299,6 +300,27 @@ export async function systemHealth(): Promise<string> {
   // 10. (URECHILE CHIRP — MONITORIZARE SCOASĂ, 5 aug: STT-ul streaming a fost
   // eliminat total odată cu voce unificată. Nu mai există ureche Chirp de
   // supravegheat — creierul unic aude audio-ul brut și decide singur.)
+
+  // 11. BROWSERUL MÂINILOR — PROBAT CU LANSARE, NU DECLARAT (owner, 15 aug:
+  // „browserul acesta nu funcționează" + „ce-ar fi să testezi tot ce faci și
+  // lași funcțional"). Instalarea din deploy 4b putea „reuși" cu un browser
+  // care NU pornește (biblioteci de sistem lipsă) — și nimeni nu-l proba până
+  // la primul om care se lovea. Proba lansează Chromium real (cache 10 min,
+  // ca health-ul să rămână ieftin); MORT → intră la probleme, cu eroarea lui.
+  try {
+    const b = await probaBrowserulMainilor()
+    info.browserMaini = b.ok ? 'VIU (lansare probată)' : `MORT: ${b.motiv}`
+    if (!b.ok) {
+      problems.push({
+        id: 'browser-maini-mort',
+        grav: 'mediu',
+        desc: `browserul mâinilor (Chromium) nu pornește: ${b.motiv} — browser_open și pașii pe mâini cu browser pică`,
+        reparabil: 'pe gazdă: cauza în /root/kelion/browser-install.log; de regulă lipsesc bibliotecile de sistem → o re-publicare rulează 4b cu --with-deps',
+      })
+    }
+  } catch {
+    /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
+  }
 
   return JSON.stringify({
     ok: problems.length === 0,
