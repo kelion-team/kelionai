@@ -28,15 +28,48 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       încă. ÎN LUCRU. [ ]
 - [ ] ORDIN 15 aug, P20 (captura „Eu não sei." pe banda V12.4, verbatim): „vreau
       tu si toti agenti sa faca un audit si reparatie pe tot chatul, nu mai
-      vreau sa mai vad balari in chat sau vocea lui sa lipseasca" — FĂCUT
-      partea măsurată: bălăria din captură era PORTUGHEZĂ, iar gardul de limbă
-      (limbaRaspuns.ts) știa ES/EN/DE/FR/rusă dar NU portugheza → adăugată cu
-      markeri fără dublură românească (ã/õ, „não", „obrigado", „você", „olá",
-      „isso"; NU „eu"/„sim"/„voce" — lecția hotfixului din 9 aug), testul
-      poartă propoziția exactă din captură. ÎN CURS: auditul multi-agent
-      (6 dimensiuni: gard-limba, porți-verdict, voce-lipsă, chat-scris,
-      frontend-redare, istoric-otrăvit; fiecare constatare verificată
-      adversarial pe cod) — reparațiile confirmate vin în PR separat. [ ]
+      vreau sa mai vad balari in chat sau vocea lui sa lipseasca" +
+      „folosesti tot ce ai la dispozitie, inclusiv la verificare toti agenti"
+      — AUDITUL RULAT: 6 auditori pe dimensiuni + 24 verificatori adversariali
+      (48 de agenți în total, fiecare constatare re-verificată pe cod de un
+      agent pus să o RESPINGĂ) → 24 constatări, 23 CONFIRMATE (7 critice),
+      1 respinsă. TOATE cele 23 reparate în același PR (#1195):
+      · portugheza + italiana + poloneza + turca + accentele străine în gard;
+        judecata și pe CONTINUARE („Bine. Não sei…"), nu doar primul cuvânt;
+      · turele cu verdict NEDECIS nu se mai salvează fără nume măsurat
+        (istoricul și memoria nu se mai otrăvesc cu bălăriile urechii);
+      · false-ul ceasului de 1500ms e PROVIZORIU — numele sosit târziu învie
+        tura („Kelion, cât e ora?" nu mai moare pe transcrierea lentă);
+      · negativul nu se mai încuie pe fragment parțial („Hei"→„Kelion");
+      · gardul de limbă judecă ÎNAINTE de livrare (începutul străin nu se mai
+        aude/scrie), cu fail-open 700ms ca să nu-l facă lent;
+      · comutarea LEGITIMĂ de limbă nu se mai suprimă (omul care vorbește el
+        însuși limba aia); user nou → pin en-US (regula scrisă); limba vorbită
+        se comite ca preferință (2 rostiri consecutive, ca pe scris);
+      · suprimarea de limbă corectează și sesiunea Google (ancoră) + aruncă
+        handle-ul otrăvit la a 2-a; anunțul de sistem nu mai deturnează tura
+        în zbor; ambientalul nu se mai lipește de fraza adresată;
+      · calea SCRISĂ are gard de limbă + replica suprimată nu intră în istoric;
+        ușa creierului nu mai dublează istoricul; <TAC/> tolerant la variante;
+        bula de eroare se și ROSTEȘTE; memoria unificată filtrează otrava;
+      · banda acumulează deltele pe canale cu etichetă (🎙/⚡) și se golește
+        la închiderea turei; poarta half-duplex nu se mai zăvorăște pe context
+        suspendat (mut+surd simultan).
+      NEREPARATĂ CONȘTIENT (cere acordul ownerului — lanțul auzului e sub
+      lacăt): poarta half-duplex înghite vorbirea omului cât Kelion e audibil
+      +0,6s și pe DESKTOP unde AEC-ul e pornit → barge-in-ul pe nume întârzie;
+      relaxarea pe desktop riscă întoarcerea ecoului „sala de nunți". DECIZIA
+      LUI. Porți: 1517 teste (183 fișiere) · tsc 0+0 · jscpd 0 · exporturi 0.
+      RĂMAS: merge + publicare + PROBA LIVE a ownerului (vorbit în sală cu
+      zgomot: zero bălării pe bandă, vocea prezentă pe fiecare tură cu nume). [ ]
+- [ ] ORDIN 15 aug, P23 (captura #322, verbatim): „am fortat antropic, are
+      credit, dar nu foloseste fable 5" — MĂSURAT în cod: butonul P18 chiar
+      forțează (503 = refuz cinstit, fără alunecare pe Gemini), apelul
+      Anthropic pică, dar fable5Chat aruncă JSON-ul BRUT (`{"er…`) în loc de
+      verdictul precis RO (ăla se scria doar în probă) → panoul e criptic.
+      DE FĂCUT: verdicte precise în erorile aruncate (401/403/429/404-scara/
+      400) + diagnostic pe motivul întreg — CERUT ownerului textul complet al
+      erorii de pe #322 (de aici nu am drum la logurile VPS). [ ]
 - [ ] ORDIN 15 aug, P21 (verbatim): „cind porneste aplicatia si mic s-a activat
       se deschide imediat si urechea setata pe limba default daca e user nou
       sau limba setata pe user, e facuta asta dar nu merge, cauta si repara" +

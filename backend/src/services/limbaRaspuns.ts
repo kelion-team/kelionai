@@ -25,8 +25,8 @@ const CUVINTE_RO = new Set([
  *  în română A ZBURAT — „La ora…" ieșea francez, „Ok, am făcut" englez, iar
  *  gardul tăia replici legitime. Mai bine o scăpare rară decât un Kelion mut. */
 const SEMNE_ES = /[¿¡ñ]/
-const START_ES = new Set(['dime', 'hola', 'claro', 'bueno', 'vale', 'qué', 'cómo', 'sí', 'gracias', 'entiendo', 'aquí', 'entonces', 'necesito', 'puedo', 'tengo'])
-const START_EN = new Set(['the', 'hello', 'hi', 'hey', 'sure', 'yes', "i'm", "let's", 'what'])
+const START_ES = new Set(['dime', 'hola', 'claro', 'bueno', 'vale', 'qué', 'cómo', 'sí', 'gracias', 'entiendo', 'aquí', 'entonces', 'necesito', 'puedo', 'tengo', 'siento', 'bien'])
+const START_EN = new Set(['the', 'hello', 'hi', 'hey', 'sure', 'yes', "i'm", "let's", 'what', 'okay', "it's", "that's"])
 const START_DE = new Set(['ich', 'nein', 'hallo', 'jetzt'])
 const START_FR = new Set(['je', 'oui', 'bonjour', 'voilà', 'voila'])
 // PORTUGHEZĂ (captura ownerului, 15 aug: „Eu não sei." pe bandă) — ã/õ nu
@@ -35,6 +35,20 @@ const START_FR = new Set(['je', 'oui', 'bonjour', 'voilà', 'voila'])
 // (SIM card), NU „voce" fără accent (vocea) — lecția hotfixului de la 9 aug.
 const SEMNE_PT = /[ãõ]/
 const START_PT = new Set(['não', 'nao', 'obrigado', 'obrigada', 'você', 'olá', 'isso'])
+// AUDITUL MULTI-AGENT (15 aug, ordinul „tu și toți agenții"): italiana,
+// poloneza și turca n-aveau NICIUN marker — „Non lo so." trecea întreg pe
+// bandă, ca portugheza dimineața. Tot pe regula hotfixului: doar markeri fără
+// dublură românească. La turcă INTENȚIONAT doar ı/İ/ğ — ş/ţ sunt dublurile
+// legacy cu sedilă ale românei (ș/ț scrise pe tastaturi vechi)!
+const START_IT = new Set(['non', 'ecco', 'allora', 'grazie', 'sono', 'anche', 'capito', 'bene', 'certo'])
+const SEMNE_PL = /[ąęłńśźż]/
+const START_PL = new Set(['nie', 'przepraszam', 'dziękuję', 'dziekuje'])
+const SEMNE_TR = /[ıİğ]/
+const START_TR = new Set(['evet', 'merhaba'])
+// Accentele grave/acute (à è ì ò ù á é í ó ú) nu există în română (noi avem
+// DOAR ă â î ș ț) — orice apariție în primele litere e semn sigur de limbă
+// străină („perché", „désolé", „está"), chiar când cuvântul nu e în nicio listă.
+const SEMNE_ACCENT_STRAIN = /[àèìòùáéíóú]/
 
 const primeleCuvinte = (text: string, n = 4): string[] =>
   String(text ?? '')
@@ -68,6 +82,29 @@ export function inceputStrain(text: string): string | null {
   if (cuvinte.some((c) => START_EN.has(c))) return 'engleză'
   if (cuvinte.some((c) => START_DE.has(c))) return 'germană'
   if (cuvinte.some((c) => START_FR.has(c))) return 'franceză'
+  if (cuvinte.some((c) => START_IT.has(c))) return 'italiană'
+  if (SEMNE_PL.test(brut.slice(0, 60)) || cuvinte.some((c) => START_PL.has(c))) return 'poloneză'
+  if (SEMNE_TR.test(brut.slice(0, 60)) || cuvinte.some((c) => START_TR.has(c))) return 'turcă'
+  // Plasa finală: accent care nu există în română, oriunde în primele litere.
+  if (SEMNE_ACCENT_STRAIN.test(brut.slice(0, 60))) return 'străină (accent ne-românesc)'
+  return null
+}
+
+/**
+ * Ca inceputStrain, dar judecă și CONTINUAREA — primele ~3 propoziții din
+ * primele 240 de caractere. Auditul din 15 aug: „Bine. Não sei…" trecea de
+ * gard fiindcă doar ÎNCEPUTUL se judeca; aceeași gaură lăsa replica să treacă
+ * și de filtrul anti-otravă la coacerea istoricului. Aceiași markeri fără
+ * dublură românească, deci fără risc nou de fals-pozitiv.
+ */
+export function continuareStraina(text: string): string | null {
+  const brut = String(text ?? '').trim().slice(0, 240)
+  if (!brut) return null
+  const propozitii = brut.split(/[.!?…]+\s+/).slice(0, 3)
+  for (const p of propozitii) {
+    const verdict = inceputStrain(p)
+    if (verdict) return verdict
+  }
   return null
 }
 
