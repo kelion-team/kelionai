@@ -11,7 +11,7 @@ import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
 import { usePolledJson } from '../lib/usePolledJson'
 import { logout, startGoogleConnect } from '../lib/api'
-import { resolveLang, strings, uiStrings } from '../lib/i18n'
+import { resolveLang, strings, uiStrings, type Lang } from '../lib/i18n'
 import { adminStrings } from '../lib/adminText'
 import { fetchCreditAI, clasaBec, type CreditAIFurnizor } from '../lib/admin'
 import {
@@ -688,8 +688,13 @@ export default function Stage({ user }: { user: User }) {
   // „ro" din localStorage. Revendicarea rulează ÎNAINTE de prima citire — alt
   // cont => oglinda se aruncă, aplicația pornește pe EN până i se determină limba.
   revendicaOglindaLimbii(user.email)
-  const lang = resolveLang(loadLocalLang() ?? 'en')
+  const [lang, setLangState] = useState<Lang>(() => resolveLang(loadLocalLang() ?? 'en'))
   const t = strings(lang)
+  const handleAdminLangChange = (nouaLimba: Lang) => {
+    mirrorLang(nouaLimba)
+    setLangState(nouaLimba)
+    void saveSpeechLang(nouaLimba)
+  }
   const [adminOpen, setAdminOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the

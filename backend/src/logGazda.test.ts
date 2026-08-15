@@ -105,10 +105,21 @@ describe('semnaturiEroare', () => {
     const textLog = [
       '[constructor] ORDINUL DE CONSTRUCȚIE (de la owner):',
       'AUTO-VINDECARE (constructor logs): în constructor.log apare RECURENT eroarea (count=2, prag=2):',
+      '[13:31:58] llm [fatal] — app a refuzat creierul (bridge-secret?)',
       'src/services/logGazda.ts(64,9): error TS2451: Cannot redeclare block-scop',
-      'Găsește CAUZA REALĂ în cod...',
-      '[12:00:01] pas 1/10: grep ceva',
-      '[12:00:05] pas 2/10: edit fisier',
+      '[13:35:00] pas 1/120: read backend/src/services/logGazda.ts',
+      '✅ PR deschis: #260',
+    ].join('\n')
+    const out = semnaturiEroare(textLog)
+    expect(out).toHaveLength(0)
+  })
+
+  it('ignoră erorile citate în promptul unui job în curs de execuție', () => {
+    const textLog = [
+      '[13:30:00] ordin #270 (încercarea 1): ORDINUL DE CONSTRUCȚIE (de la owner):',
+      'AUTO-VINDECARE (constructor logs): în constructor.log apare RECURENT eroarea (count=2, prag=2):',
+      '[13:31:58] llm [fatal] — app a refuzat creierul (bridge-secret?)',
+      '[13:32:00] pas 1/120: grep pattern="ceva"',
     ].join('\n')
     const out = semnaturiEroare(textLog)
     expect(out).toHaveLength(0)
