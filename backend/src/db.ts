@@ -3693,8 +3693,48 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
   }
 }
 
+/** Amprenta unui ordin: textul fără părțile volatile (ore, date, sha-uri,
+ *  contoare, numărul încercării) — două ordine cu aceeași amprentă sunt
+ *  ACELAȘI ordin, indiferent cine și când le depune. */
+export function amprentaOrdin(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\d{4}-\d{2}-\d{2}[t ][\d:.,+z-]*/gi, '')
+    .replace(/\[?\d{1,2}:\d{2}(:\d{2})?\]?/g, '')
+    .replace(/[0-9a-f]{8,}/gi, '')
+    .replace(/count=\d+|prag=\d+|încercarea \d+|incercarea \d+/gi, '')
+    .replace(/\d+/g, '#')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 400)
+}
+
+// ── ORDINELE NU SE DUBLEAZĂ NICIODATĂ (ordinul verbatim al ownerului, 15 aug:
+// „ordinele de rezolvat nu au voie sa se dubleze nici o data") ────────────────
+// Dovada din coada lui: cerințele #28 și #29 construite în PARALEL (2,5M tokeni
+// pe aceeași lucrare, unirea lor pe jumătate a rupt build-ul master), #295
+// deschis pe o eroare deja în lucru, auto-vindecări repetate pe aceeași
+// semnătură. Ușa e UNA (aici) — orice depunător (chat, auto-vindecare,
+// constructor) trece prin ea: un ordin VIU (queued/running) cu aceeași amprentă
+// → NU se naște al doilea; se întoarce id-ul celui viu (depunerea e
+// idempotentă, apelantul află că ordinul EXISTĂ). Un ordin încheiat (done/
+// failed) NU blochează — „reia"-ul deliberat al ownerului rămâne posibil.
 export async function createBuildJob(orderedBy: string, orderText: string): Promise<number> {
   if (!dbEnabled()) return 0
+  try {
+    const vii = await getPool().query<{ id: string | number; order_text: string }>(
+      `SELECT id, order_text FROM build_jobs WHERE status IN ('queued','running') ORDER BY id DESC LIMIT 200`,
+    )
+    const amp = amprentaOrdin(orderText)
+    const dublura = vii.rows.find((rand) => amprentaOrdin(rand.order_text) === amp)
+    if (dublura) {
+      console.error(`[ORDINE] dublură refuzată: ordinul #${dublura.id} e VIU cu aceeași amprentă — nu se naște al doilea (depus de ${orderedBy})`)
+      return Number(dublura.id)
+    }
+  } catch {
+    /* citirea dublurilor a picat → mai bine un ordin posibil-dublat decât
+       niciunul: crearea de mai jos rămâne. */
+  }
   const r = await getPool().query<{ id: string | number }>(
     'INSERT INTO build_jobs (ordered_by, order_text) VALUES ($1, $2) RETURNING id',
     [orderedBy.toLowerCase(), orderText],

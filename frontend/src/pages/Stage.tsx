@@ -763,6 +763,8 @@ export default function Stage({ user }: { user: User }) {
   // „APLICAȚII" — trading (admin) + Adaptare CV (toți) grupate sub un buton
   // (owner, 13 aug: „trading și adaptare cv trebuie să fie sub un buton aplicații").
   const [appsOpen, setAppsOpen] = useState(false)
+  // Selectorul de limbă din bară (Cerința #29) — stare de meniu, ca la Aplicații.
+  const [langOpen, setLangOpen] = useState(false)
   // THE THEME TOGGLE (Aug 2 — the lighter background): the light palette is the
   // default; this top-bar moon/sun flips back to the original dark identity
   // (persisted by lib/theme). Held in state so the click re-renders — which
@@ -1727,45 +1729,51 @@ export default function Stage({ user }: { user: User }) {
             </button>
           )}
           {/* SELECTORUL DE LIMBĂ ÎN BARA DE ADMIN (Cerinta #29) — afișează opțiunile de schimbare a limbii.
-              (RESTAURAT 15 aug din versiunea LIVE f3440b9 — exact ce vede ownerul în captură:
-              două joburi paralele au construit aceeași cerință, iar unirea lor textuală a pierdut
-              importul mirrorLang, markerul și blocul cu 7 limbi — build mort + testele #29 roșii.) */}
-          <div className="relative group">
+              RE-CROIT 15 aug pe sistemul CASEI (ordinul: „refă încadrările corecte pe partea de sus,
+              folosim selectorul de limbă cum am discutat"): varianta constructorului era scrisă cu
+              clase Tailwind, care NU există în proiect — meniul nu se închidea niciodată (captura
+              ownerului: butoanele curgeau despachetate peste bară). Același tipar ca „Aplicații":
+              stare + backdrop + meniu absolut, închis implicit, o singură înălțime de rând. */}
+          <div className="lang-wrap">
             <button
               type="button"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/60 shadow-sm transition-colors"
+              className="ghost"
+              onClick={() => setLangOpen((v) => !v)}
+              aria-expanded={langOpen}
               title={t.langPickTitle}
               aria-label={t.langPickTitle}
             >
-              <span className="text-sm">🌐</span>
-              <span className="uppercase tracking-wider font-semibold">{lang}</span>
-              <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              🌐 {lang.toUpperCase()} ▾
             </button>
-            <div className="absolute right-0 mt-1 hidden group-hover:flex group-focus-within:flex flex-col bg-slate-900 border border-slate-700 rounded-lg shadow-xl py-1 z-50 min-w-[140px]">
-              {([
-                { code: 'ro', label: 'Română', flag: '🇷🇴' },
-                { code: 'en', label: 'English', flag: '🇬🇧' },
-                { code: 'es', label: 'Español', flag: '🇪🇸' },
-                { code: 'fr', label: 'Français', flag: '🇫🇷' },
-                { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
-                { code: 'it', label: 'Italiano', flag: '🇮🇹' },
-                { code: 'ru', label: 'Русский', flag: '🇷🇺' },
-              ] as const).map((l) => (
-                <button
-                  key={l.code}
-                  type="button"
-                  onClick={() => handleAdminLangChange(l.code as Lang)}
-                  className={`flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-slate-800 transition-colors ${
-                    lang === l.code ? 'text-cyan-400 font-semibold bg-slate-800/50' : 'text-slate-300'
-                  }`}
-                >
-                  <span>{l.flag}</span>
-                  <span>{l.label}</span>
-                </button>
-              ))}
-            </div>
+            {langOpen && (
+              <>
+                <div className="apps-backdrop" onClick={() => setLangOpen(false)} />
+                <div className="apps-menu lang-menu">
+                  {([
+                    { code: 'ro', label: 'Română', flag: '🇷🇴' },
+                    { code: 'en', label: 'English', flag: '🇬🇧' },
+                    { code: 'es', label: 'Español', flag: '🇪🇸' },
+                    { code: 'fr', label: 'Français', flag: '🇫🇷' },
+                    { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
+                    { code: 'it', label: 'Italiano', flag: '🇮🇹' },
+                    { code: 'ru', label: 'Русский', flag: '🇷🇺' },
+                  ] as const).map((l) => (
+                    <button
+                      key={l.code}
+                      type="button"
+                      className={`apps-item${lang === l.code ? ' lang-activ' : ''}`}
+                      onClick={() => {
+                        setLangOpen(false)
+                        handleAdminLangChange(l.code as Lang)
+                      }}
+                    >
+                      <span>{l.flag}</span>
+                      <span>{l.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
           <button
             type="button"

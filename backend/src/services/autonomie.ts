@@ -532,7 +532,7 @@ async function golurileLui(): Promise<Sarcina[]> {
 // same mistake, paid more. What must change on RETRY is the PATH, not the
 // hand. That's why the method-change demand kicks in from the FIRST retry, and
 // the better model stays just a helper on top, not the strategy.
-function escaladare(incercariDeja: number): string {
+export function escaladare(incercariDeja: number): string {
   if (incercariDeja < 1) return ''
   return (
     `⚠ AI ÎNCERCAT DEJA DE ${incercariDeja} ${incercariDeja === 1 ? 'DATĂ' : 'ORI'} ȘI N-A IEȘIT. ` +

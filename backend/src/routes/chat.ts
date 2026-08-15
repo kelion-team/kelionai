@@ -3369,10 +3369,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // mesajul neutru; măcar răspunde. Rulează DOAR pe calea deja pierdută, deci nu
       // poate strica o tură care mergea (dacă și asta pică, se aruncă eroarea de jos,
       // exact ca înainte).
-      if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
-        const modelProfund = orchestratorModel
-        orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
-        console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
+      // Trupul comun al ambelor plase (profund→rapid și rapid→profund): ia un
+      // slot pe modelul DEJA comutat, o singură încercare, acceptă doar ce se
+      // vede. Scris O DATĂ — două copii ar fi divergat (și jscpd le refuză).
+      const incearcaPlasa = async (): Promise<void> => {
         let slotPlasa: string | null = null
         try {
           if (iaSlotDacaLiber(orchestratorModel)) slotPlasa = orchestratorModel
@@ -3386,6 +3386,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           lastBrainErr = ge
         } finally {
           if (slotPlasa) elibereazaSlot(slotPlasa)
+        }
+      }
+      if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
+        const modelProfund = orchestratorModel
+        orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
+        console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
+        await incearcaPlasa()
+      }
+      // ── PLASA OGLINDITĂ: FAȚA RAPIDĂ EPUIZATĂ → O URCARE PE CREIERUL PROFUND
+      // (owner, 15 aug, prins LIVE cu captura + F12: tura lui a păginat db_query
+      // de ~18 ori, apoi sinteza pe flash a STAT 37s pe server și a întors GOL —
+      // `[CHAT MUTE] gemini-3.7-flash returned empty` ×3 → omul a primit
+      // „încearcă mai târziu"). Plasa de sus acoperă DOAR sensul profund→rapid;
+      // sensul ăsta lipsea: o tură pornită pe flash care s-a dovedit GREA din
+      // mers (unelte multe, context mare) murea fără să fi atins vreodată
+      // inteligența reală. Urcăm O SINGURĂ dată, doar pe calea deja pierdută
+      // (!r && !textFlowed) — o tură care mergea nu poate fi stricată de plasă. */
+      if (!r && !textFlowed && config.modelCreierProfund && orchestratorModel === orChatModel) {
+        const modelRapid = orchestratorModel
+        const profund = `google-direct/${config.modelCreierProfund}`
+        if (profund !== modelRapid) {
+          orchestratorModel = profund // runBrainOnce + reasoning citesc valoarea nouă
+          console.error(`[FAȚA RAPIDĂ EPUIZATĂ] ${modelRapid} a întors gol/eroare de ${MAX_INCERCARI_GEMINI}× → urc pe creierul profund ${orchestratorModel}`)
+          await incearcaPlasa()
         }
       }
       if (!r) throw (lastBrainErr ?? new Error('brain_gemini_exhausted'))

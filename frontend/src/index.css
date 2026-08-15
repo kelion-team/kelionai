@@ -4066,6 +4066,12 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
    `none` și clicul trece PRIN ele (owner, 14 aug: „butonul Aplicații nu merge"). Aceeași
    cauză ca bugul vechi de la `.wallet`. */
 .apps-wrap { position: relative; display: inline-flex; pointer-events: auto; }
+/* Selectorul de limbă din bară (Cerința #29) — ACELAȘI tipar ca Aplicații:
+   wrap relativ cu pointer-events:auto (lecția .apps-wrap: bara e none, fiecare
+   copil interactiv re-activează clicul), meniu absolut, închis implicit. */
+.lang-wrap { position: relative; display: inline-flex; pointer-events: auto; }
+.lang-menu { left: auto; right: 0; min-width: 150px; }
+.lang-activ { color: var(--accent, #4cc2ff); font-weight: 700; }
 .apps-backdrop { position: fixed; inset: 0; z-index: 40; }
 .apps-menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 41;

@@ -13,6 +13,35 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 15 aug, dimineața („aplicațiile din butonul Aplicații, de la
+      Google, trebuiesc TOATE funcționale, nu doar poze — interconectare reală
+      și funcțională"): fiecare intrare din meniu trebuie să ducă REAL la
+      API-ul Google (meniu → comandă → unealtă → googleapis.com). SCRIS AZI:
+      lanțul există pe toate; DE FĂCUT: (1) verificator de lanț ca poartă
+      (meniu ↔ capabilitate ↔ unealtă ↔ apel API — să nu poată rugini în
+      „doar poze"); (2) probele pe ecranul ownerului: RECONECTARE Google o
+      dată (scope-urile noi Photos/Slides/Forms au intrat DUPĂ consimțământul
+      lui vechi), poarta separată YouTube, aprobarea Business Profile. [ ]
+- [x] ORDIN 15 aug (verbatim): „ordinele de rezolvat nu au voie sa se dubleze
+      nici o data" — ușa unică createBuildJob refuză dublura pe amprentă
+      (fără ore/sha/contoare); ordin încheiat nu blochează („reia" rămâne);
+      lacăt: dublareOrdine.test.ts. LIVE după următorul merge.
+- [x] ORDIN 15 aug: „analizează de ce se blochează ordinele + dă-i gândirea să
+      le ducă la final" — găsit: reîncercările din coadă plecau AMNEZICE
+      (text original, fără escaladare, fără logul eșecului, cu ancora „ăsta
+      e" lipită → #293 murea identic de 3 ori). Acum /api/constructor/next
+      dă la reîncercare: schimbă-metoda + coada logului mort + ancora scoasă
+      + pasul 0 („cauza mai există pe master-ul proaspăt? nu → închide
+      cinstit") + granițele mediului (fără ecran/camera → calea din app).
+- [x] ORDIN 15 aug (captură + F12): [CHAT MUTE] — flash a păginat db_query
+      ×18, sinteza a stat 37s pe server și a întors gol ×3 → „încearcă mai
+      târziu". Plasa oglindită pusă: fața rapidă epuizată → o urcare unică pe
+      creierul profund. De probat live: aceeași întrebare grea nu mai moare.
+- [x] ORDIN 15 aug (captură): „refă încadrările pe partea de sus, folosim
+      selectorul de limbă" — selectorul constructorului era scris în Tailwind
+      (inexistent în proiect): meniul nu se închidea niciodată. Re-croit pe
+      tiparul casei (ca Aplicații: stare+backdrop+meniu absolut), un rând,
+      închis implicit. De văzut pe ecran după publicare.
 - [ ] ORDIN 14 aug, 21:10 („toate aplicațiile trebuiesc"): TOATE aplicațiile
       Google interconectabile se fac, în ordinea: (1) Photos (Picker API —
       flux propriu de ales poze) — SCRIS, pe #1118 (9b2b9369), de probat live;
