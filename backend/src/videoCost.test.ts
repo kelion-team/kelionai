@@ -62,8 +62,12 @@ describe('garda structurală de plată', () => {
     const r = motivRefuzVideo({ cheie: 'k', allowPaid: false, model })
     expect(r).toMatch(/video_platit_neaprobat/)
     expect(r).toMatch(/\$0\.80/)
-    // P29: drumul spus omului e BUTONUL din panoul de admin, nu un env pe VPS
-    expect(r).toMatch(/butonul «🎬 Video plătit» din panoul de admin/)
+    // P29 + lecția de la 20:58 („tu ai zis sa opresc… iti bati joc de mine?"):
+    // numele vechi «Video plătit» îl împingea pe owner să-l OPREASCĂ atunci
+    // când voia video. Drumul spus e butonul, PE NUMELE LUI REAL, și adevărul
+    // întreg: la Veo nu există gratis; gratis = doar Google Flow.
+    expect(r).toMatch(/«🎬 Generarea de clipuri \(Veo\)» → «Pornește generarea»/)
+    expect(r).toMatch(/nu există „gratis" la Veo; gratis = doar Google Flow/)
   })
 
   it('model fără preț cunoscut ⇒ refuz chiar și cu plata aprobată', () => {
@@ -138,7 +142,14 @@ describe('P29 — omul e DUS spre plată, nu lăsat în fundătură', () => {
     expect(admin).toMatch(/app\.post<\{ Body: \{ pornit\?: boolean \} \}>\('\/api\/admin\/video-platit'[\s\S]{0,160}?cerAdmin\(req, reply\)/)
     expect(admin).toMatch(/noteazaAudit\('admin', 'video-platit \(buton\)'/)
     const panou = sursa('../../frontend/src/components/AdminPanel.tsx')
-    expect(panou).toMatch(/Video \(Veo\)/)
+    expect(panou).toMatch(/Generarea de clipuri \(Veo\)/)
     expect(panou).toMatch(/onVideoPlatit/)
+  })
+
+  it('lecția 20:58 — eticheta spune ADEVĂRUL întreg: pornit = banii tăi; gratis nu există la Veo', () => {
+    const panou = sursa('../../frontend/src/components/AdminPanel.tsx')
+    expect(panou).toMatch(/Pornește generarea \(pe banii tăi\)/)
+    expect(panou).toMatch(/Gratis la Veo NU există — gratis e doar prin Google Flow\./)
+    expect(panou).toMatch(/Google îți facturează ~0,10 \$\/secundă/)
   })
 })

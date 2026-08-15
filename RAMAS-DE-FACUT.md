@@ -203,8 +203,17 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       măsurată a lui „i-am cerut sa genereze video, dar nu am vazut nimic":
       garda cerea VIDEO_ALLOW_PAID=1 din env-ul VPS — nimeni nu-l setase,
       refuza TOT, inclusiv clipuri deja plătite (rambursate pe tăcute).
-      Lacăte: videoCost.test (P29). RĂMAS: proba live a ownerului — apasă
-      butonul din tabul Bani, cere un clip, îl vede pe monitor. [ ]
+      Lacăte: videoCost.test (P29). PUBLICAT: V13.4 (cd6bba1) verificat live
+      19:40. La 20:52 ownerul a prins PE VIU ruptura #5 (tarife inventate
+      24/48/200 în loc de 6/12/50 — creierul n-avea sursă de prețuri) →
+      reparată în #1206 (lista_tarife). La 20:58 („tu ai zis sa opresc in
+      admin ca sa genereze video gratis, iti bati joc de mine?") — capcana
+      era ETICHETA MEA: «Video plătit» îl împingea să-l oprească atunci când
+      voia video; redenumit «🎬 Generarea de clipuri (Veo)» cu adevărul
+      întreg pe rând (PORNITĂ = pe banii tăi la Google ~0,10$/s; gratis NU
+      există la Veo — gratis = doar Google Flow) + refuzul din creier spune
+      la fel. RĂMAS: proba lui — „Pornește generarea" la 🎬 (tabul Bani),
+      cere clip, „da, generează", 1-3 min, clipul pe monitor. [ ]
 - [ ] DE CLARIFICAT cu ownerul (criticul auditului, 15 aug): mesajul de la
       06:57 „acest lucru trebuie sa fie monitorizat de kelion" — referentul e
       ambiguu: publicarea stagnantă (acoperit de santinelaPublicarii) SAU
