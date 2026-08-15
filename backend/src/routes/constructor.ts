@@ -249,7 +249,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // ESCALADARE+REVENIRE: Gemini întâi; dacă nu poate → Fable 5; iar fiindcă FIECARE
   // pas reintră pe rută, se revine SINGUR pe Gemini când acesta își revine. Dacă
   // pică ambele → eroare, iar constructorul o clasifică „amânabil" și reia.
-  app.post<{ Body: { messages?: OrMessage[]; tools?: unknown[]; model?: string } }>(
+  app.post<{ Body: { messages?: OrMessage[]; tools?: unknown[]; model?: string; job?: number; attempt?: number } }>(
     '/api/constructor/creier',
     async (req, reply) => {
       if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
@@ -257,6 +257,31 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       const messages = Array.isArray(req.body?.messages) ? (req.body.messages as OrMessage[]) : []
       if (!messages.length) return reply.code(400).send({ error: 'fara_mesaje' })
       const rawTools = Array.isArray(req.body?.tools) ? req.body.tools : []
+      // ── ESCALADAREA PE EȘUARE (ordinul ownerului, 15 aug: „constructorul dacă
+      // are o eșuare, următoarea tură o escaladează automat pe nivel superior
+      // Fable 5. Nu pornește duplicat pe același model, se revine pentru un nou
+      // job la primul model.") ────────────────────────────────────────────────
+      // `attempt` vine de la agent (claim → job.attempts): încercarea 1 =
+      // Gemini principal (mai jos, neschimbat); încercarea ≥2 = drumul care a
+      // EȘUAT nu se repetă — Fable 5 conduce TURA întreagă. Gemini rămâne doar
+      // plasă de avarie sub el (o rezervă cu cheia invalidă nu are voie să
+      // omoare jobul), iar un ORDIN NOU pornește iar pe Gemini — revenirea e
+      // automată prin chiar attempt=1 al jobului următor.
+      const incercareOrdin = Math.max(1, Number(req.body?.attempt ?? 1) || 1)
+      const { fable5Disponibil, fable5Chat } = await import('../services/fable5Constructor.js')
+      let fableEsecSus = ''
+      if (incercareOrdin > 1 && fable5Disponibil()) {
+        try {
+          const rasp = await fable5Chat(messages, rawTools)
+          esecuriCreierLaRand = 0
+          return reply.send(rasp)
+        } catch (e) {
+          fableEsecSus = (e as Error).message.slice(0, 160)
+          req.log.warn(
+            `escaladarea pe Fable 5 (încercarea ${incercareOrdin}) a picat: ${fableEsecSus} — cad pe Gemini ca plasă`,
+          )
+        }
+      }
       // ── PRINCIPAL: GEMINI „ULTRA" (owner, 14 aug: „ultra ca al doilea creier,
       // da? primul e blocat") = constructorGeminiModel (gemini-pro-latest — mereu
       // cel mai puternic Pro; NU modelul unic al chatului, care e sigilat pe flash
@@ -317,8 +342,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // mesajele+uneltele sunt convertite conform endpoint-ului Anthropic (/v1/messages).
       // REVENIRE: fiecare pas nou reîncepe cu Gemini (mai sus), deci
       // se revine SINGUR pe principal când Gemini își revine — nu rămâne pe rezervă.
-      const { fable5Disponibil, fable5Chat } = await import('../services/fable5Constructor.js')
-      if (fable5Disponibil()) {
+      // (Pe încercarea ≥2 Fable 5 a condus deja SUS; aici nu-l mai repetăm.)
+      if (incercareOrdin === 1 && fable5Disponibil()) {
         try {
           const rasp = await fable5Chat(messages, rawTools)
           esecuriCreierLaRand = 0 // rezerva a servit — lanțul de eșecuri s-a rupt
@@ -329,8 +354,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
           return reply.code(502).send({ error: motiv })
         }
       }
-      // Nici Gemini, nici rezerva Fable 5 (fără ANTHROPIC_API_KEY în app) — onest.
-      const motiv = `creier_esec: gemini(${gemeniEsec}); rezerva Fable 5 INACTIVĂ (pune ANTHROPIC_API_KEY în app)`
+      // Nici Gemini, nici Fable 5 — onest, cu drumul REAL parcurs în mesaj:
+      // pe escaladare Fable a condus și a picat SUS; altfel rezerva e inactivă.
+      const motiv = fableEsecSus
+        ? `creier_esec (escaladare încercarea ${incercareOrdin}): fable5(${fableEsecSus}) → gemini(${gemeniEsec})`
+        : `creier_esec: gemini(${gemeniEsec}); rezerva Fable 5 INACTIVĂ (pune ANTHROPIC_API_KEY în app)`
       creierApicat(motiv)
       return reply.code(gemeniEsec.includes('indisponibil') ? 503 : 502).send({ error: motiv })
     },

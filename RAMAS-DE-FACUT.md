@@ -13,6 +13,24 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
+      tură o escaladează automat pe nivel superior Fable 5. Nu pornește
+      duplicat pe același model, se revine pentru un nou job la primul model."
+      — SCRIS: agentul trimite attempt-ul la /api/constructor/creier; tura ≥2
+      → Fable 5 conduce (Gemini doar plasă de avarie), job nou → iar Gemini;
+      lacăt: escaladareConstructor.test.ts. ATENȚIE: escaladarea e REALĂ doar
+      cu ANTHROPIC_API_KEY VALIDĂ pe VPS — cea de acum e invalidă (măsurat
+      14 aug); până o schimbă ownerul, tura escaladată cade cinstit pe plasă.
+- [ ] ORDIN 15 aug (captura Sign-in + verbatim): „nu mai are voie să pună doar
+      poza — tot ce pune pe monitor trebuie să fie apelabil, selectabil,
+      adresabil": tab-urile cu URL primesc linkul REAL clicabil («deschide în
+      tab»); suprafețele Google cu zid de logare (iframe-ul nu poate loga —
+      Google blochează) se deschid în tab nou cu sesiunea ownerului, nu în
+      ramă moartă; interzis screenshot în loc de suprafață vie. DE FĂCUT.
+- [ ] Vocea: barge-in FALS pe propriul ecou (F12 owner: „modelul și-a tăiat
+      vorba — a auzit voce peste el" ×3) → poarta de barge-in surdă la propria
+      redare (prag+durată cât se redă audio), APOI lacătul pe lanțul de
+      auz/voce (verifica-gemini-style). DE FĂCUT — prima „una" după #1158.
 - [x] ORDIN 15 aug (verbatim): „acest lucru trebuie să fie monitorizat de
       Kelion" — publicarea care STĂ (dovedit azi: 2+ ore, live pe f3440b9 cât
       master avansase de 2 ori; stagnarea nu scrie erori → senzorii pe erori
