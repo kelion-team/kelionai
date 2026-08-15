@@ -27,10 +27,16 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       tab»); suprafețele Google cu zid de logare (iframe-ul nu poate loga —
       Google blochează) se deschid în tab nou cu sesiunea ownerului, nu în
       ramă moartă; interzis screenshot în loc de suprafață vie. DE FĂCUT.
-- [ ] Vocea: barge-in FALS pe propriul ecou (F12 owner: „modelul și-a tăiat
-      vorba — a auzit voce peste el" ×3) → poarta de barge-in surdă la propria
-      redare (prag+durată cât se redă audio), APOI lacătul pe lanțul de
-      auz/voce (verifica-gemini-style). DE FĂCUT — prima „una" după #1158.
+- [x] ORDIN 15 aug (verbatim): „am nevoie de un sistem care anulează echo" —
+      SCRIS: (1) AEC pornit pe DESKTOP, stins doar pe mobil (istoricul #1006:
+      procesarea WebRTC rupea A2DP pe Android — rămâne apărat); (2) poarta
+      half-duplex din 13 aug avea coada de ecou prea scurtă (0,25s < latența
+      element-audio + boxe) și judeca audibilul doar din ceas → coadă 0,6s +
+      sursele vii numără; (3) LACĂTUL AUZULUI în verifica-gemini (regulaAuzul:
+      AEC !eMobil + poarta + coada ≥0,5s) — rulează pe poarta VPS; contractul
+      vechi din lacat.test (false peste tot) adus la adevărul nou, cu istoria
+      scrisă. PROBA OWNERULUI după publicare: o conversație pe voce, pe boxe —
+      Kelion nu se mai taie singur; întreruperea TA încă merge.
 - [x] ORDIN 15 aug (verbatim): „acest lucru trebuie să fie monitorizat de
       Kelion" — publicarea care STĂ (dovedit azi: 2+ ore, live pe f3440b9 cât
       master avansase de 2 ori; stagnarea nu scrie erori → senzorii pe erori

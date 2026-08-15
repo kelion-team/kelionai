@@ -332,11 +332,17 @@ describe('LACĂT — AEC half-duplex: microfonul tace cât Kelion vorbește (own
     expect(/kelionAudibil\(\) \? new Float32Array\(ds\.length\) : ds/.test(vl)).toBe(true)
   })
 
-  it('microfonul rămâne deschis fără echoCancellation (altfel se rupe ieșirea Bluetooth)', () => {
-    // Cuplul e intenționat: fără AEC de browser ⇒ half-duplex în cod. Dacă revine
-    // echoCancellation:true, poarta de mai sus devine redundantă ȘI Bluetooth-ul
-    // pică din nou — semnalăm împerecherea greșită.
-    expect(/echoCancellation:\s*false/.test(vl)).toBe(true)
+  it('AEC pornit pe desktop, stins DOAR pe mobil (echoCancellation: !eMobil)', () => {
+    // ISTORIA CONTRACTULUI: pe 11 aug s-a pinuit `false` peste tot (procesarea
+    // WebRTC rupea A2DP pe Android, iar barge-in-ul serverului era OFF — prețul
+    // ecoului părea zero). Pe 15 aug prețul a devenit real: VAD-ul sesiunii live
+    // auzea ecoul și îi TĂIA vorba lui Kelion pe desktop (măsurat în consola
+    // ownerului, ×3), iar ordinul lui verbatim: „am nevoie de un sistem care
+    // anulează echo". Adevărul nou, ținut și de lacătul din verifica-gemini:
+    // AEC pe desktop (modul-apel nu există acolo), brut pe mobil (A2DP trăiește),
+    // și poarta half-duplex rămâne peste amândouă.
+    expect(/echoCancellation:\s*!eMobil/.test(vl)).toBe(true)
+    expect(/eMobil = \/Android\|iPhone\|iPad\|Mobile\/i\.test\(navigator\.userAgent\)/.test(vl)).toBe(true)
   })
 })
 
