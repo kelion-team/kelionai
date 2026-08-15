@@ -64,6 +64,7 @@ let tokenCache: { token: string; proiect: string; expira: number } | null = null
 /** Doar pentru teste. */
 export function _resetFacturare(): void {
   cache = null
+  cacheSold = null
   tokenCache = null
 }
 
@@ -112,21 +113,14 @@ async function tokenBigQuery(): Promise<{ ok: true; token: string; proiect: stri
   }
 }
 
-/** Cheltuiala + creditele REALE din exportul BigQuery, pe ultimele `zile` zile.
- *  Orice treaptă lipsă → motiv cu pasul exact care mai e de făcut în consolă. */
-export async function facturareGoogle(
-  zile = 60,
-): Promise<{ ok: true; date: FacturareGoogle } | { ok: false; motiv: string }> {
-  if (cache && Date.now() - cache.la < CACHE_MS) return cache.rezultat
+/** O interogare pe exportul BigQuery → rândurile brute sau motivul cinstit, cu
+ *  PASUL exact rămas în consolă. Maparea refuzurilor e UNA pentru toate
+ *  citirile (cheltuială, credite, sold) — două mapări ar fi divergat. */
+async function interogheazaExport(
+  sql: string,
+): Promise<{ ok: true; rows: { f?: { v?: string }[] }[] } | { ok: false; motiv: string }> {
   const t = await tokenBigQuery()
   if (!t.ok) return t
-  const tabel = `\`${PROIECT_EXPORT}.${DATASET}.${tabelExport()}\``
-  // Creditele din export sunt NEGATIVE (scad costul) → le întoarcem pozitive.
-  const sql =
-    `SELECT IFNULL(SUM(cost),0) AS cheltuit, ` +
-    `IFNULL(-SUM((SELECT IFNULL(SUM(c.amount),0) FROM UNNEST(credits) c)),0) AS credite, ` +
-    `CAST(MIN(usage_start_time) AS STRING) AS din ` +
-    `FROM ${tabel} WHERE usage_start_time > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${Math.max(1, Math.floor(zile))} DAY)`
   try {
     const r = await fetch(`https://bigquery.googleapis.com/bigquery/v2/projects/${PROIECT_JOB}/queries`, {
       method: 'POST',
@@ -155,16 +149,98 @@ export async function facturareGoogle(
             : ''
       return { ok: false, motiv: `BigQuery ${r.status}: ${msg}${pas}` }
     }
-    const f = j.rows?.[0]?.f
-    const date: FacturareGoogle = {
-      cheltuitUsd: Number(f?.[0]?.v ?? 0),
-      crediteUsd: Number(f?.[1]?.v ?? 0),
-      dinData: String(f?.[2]?.v ?? '').slice(0, 10),
-    }
-    const rezultat = { ok: true as const, date }
-    cache = { la: Date.now(), rezultat }
-    return rezultat
+    return { ok: true, rows: j.rows ?? [] }
   } catch (e) {
     return { ok: false, motiv: `rețea la BigQuery: ${String((e as Error)?.message ?? e).slice(0, 80)}` }
   }
+}
+
+/** Cheltuiala + creditele REALE din exportul BigQuery, pe ultimele `zile` zile.
+ *  Orice treaptă lipsă → motiv cu pasul exact care mai e de făcut în consolă. */
+export async function facturareGoogle(
+  zile = 60,
+): Promise<{ ok: true; date: FacturareGoogle } | { ok: false; motiv: string }> {
+  if (cache && Date.now() - cache.la < CACHE_MS) return cache.rezultat
+  const tabel = `\`${PROIECT_EXPORT}.${DATASET}.${tabelExport()}\``
+  // Creditele din export sunt NEGATIVE (scad costul) → le întoarcem pozitive.
+  const sql =
+    `SELECT IFNULL(SUM(cost),0) AS cheltuit, ` +
+    `IFNULL(-SUM((SELECT IFNULL(SUM(c.amount),0) FROM UNNEST(credits) c)),0) AS credite, ` +
+    `CAST(MIN(usage_start_time) AS STRING) AS din ` +
+    `FROM ${tabel} WHERE usage_start_time > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${Math.max(1, Math.floor(zile))} DAY)`
+  const r = await interogheazaExport(sql)
+  if (!r.ok) return r
+  const f = r.rows[0]?.f
+  const date: FacturareGoogle = {
+    cheltuitUsd: Number(f?.[0]?.v ?? 0),
+    crediteUsd: Number(f?.[1]?.v ?? 0),
+    dinData: String(f?.[2]?.v ?? '').slice(0, 10),
+  }
+  const rezultat = { ok: true as const, date }
+  cache = { la: Date.now(), rezultat }
+  return rezultat
+}
+
+export interface SoldCredit {
+  nume: string
+  /** Totalul acordat al creditului (credits.full_amount din export). */
+  total: number | null
+  /** Cât s-a aplicat până azi (pozitiv). */
+  folosit: number
+  /** total − folosit; null când exportul nu poartă full_amount pe acest credit. */
+  sold: number | null
+  moneda: string
+}
+
+let cacheSold: {
+  la: number
+  rezultat: { ok: true; date: { credite: SoldCredit[]; soldTotal: number | null; moneda: string } }
+} | null = null
+
+/** ── SOLDUL REAL, DERIVAT — ZERO CIFRE DECLARATE (ordinul din 15 aug:
+ *  „valoarea reală… trebuie citit automat") ──────────────────────────────────
+ *  Google nu expune soldul din consolă prin niciun API — dar exportul standard
+ *  poartă, pe fiecare credit aplicat, și TOTALUL acordat (credits.full_amount).
+ *  Deci soldul se DERIVEAZĂ, per credit, pe toată istoria exportului:
+ *  full_amount − suma aplicărilor. Nimeni nu mai declară nimic de mână;
+ *  până curg primele rânduri, răspunsul e „aștept exportul", nu un număr. */
+export async function soldCrediteGoogle(): Promise<
+  { ok: true; date: { credite: SoldCredit[]; soldTotal: number | null; moneda: string } } | { ok: false; motiv: string }
+> {
+  if (cacheSold && Date.now() - cacheSold.la < CACHE_MS) return cacheSold.rezultat
+  const tabel = `\`${PROIECT_EXPORT}.${DATASET}.${tabelExport()}\``
+  const sql =
+    `SELECT c.id AS id, ANY_VALUE(c.name) AS nume, ANY_VALUE(c.full_amount) AS total, ` +
+    `-SUM(c.amount) AS folosit, ANY_VALUE(currency) AS moneda ` +
+    `FROM ${tabel}, UNNEST(credits) c GROUP BY c.id`
+  const r = await interogheazaExport(sql)
+  if (!r.ok) return r
+  if (!r.rows.length) {
+    return {
+      ok: false,
+      motiv:
+        'exportul curge dar nu conține încă niciun credit aplicat — fie primele rânduri cu credit n-au venit (ore), fie contul plătește direct, fără credite',
+    }
+  }
+  const credite: SoldCredit[] = r.rows.map((rand) => {
+    const f = rand.f
+    const totalBrut = f?.[2]?.v
+    const total = totalBrut == null || totalBrut === '' ? null : Number(totalBrut)
+    const folosit = Number(f?.[3]?.v ?? 0)
+    return {
+      nume: String(f?.[1]?.v ?? f?.[0]?.v ?? 'credit'),
+      total: Number.isFinite(total as number) ? (total as number) : null,
+      folosit,
+      sold: total != null && Number.isFinite(total) && total > 0 ? Number((total - folosit).toFixed(2)) : null,
+      moneda: String(f?.[4]?.v ?? ''),
+    }
+  })
+  const cuSold = credite.filter((c) => c.sold != null)
+  const soldTotal = cuSold.length
+    ? Number(cuSold.reduce((s, c) => s + (c.sold as number), 0).toFixed(2))
+    : null
+  const date = { credite, soldTotal, moneda: credite[0]?.moneda ?? '' }
+  const rezultat = { ok: true as const, date }
+  cacheSold = { la: Date.now(), rezultat }
+  return rezultat
 }

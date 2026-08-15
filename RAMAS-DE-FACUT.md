@@ -56,14 +56,15 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       îmbinat de Kelion singur (cu jurnalul în Notificări) cât e delogat.
 - [ ] Bara de execuție cu punctulețe (nou, 14 aug noaptea): scrisă, de văzut LIVE
       pe un ordin real („fiecare pas pe monitor, 0→100%").
-- [ ] ORDIN 14 aug, noaptea (după raport): soldul Gemini se citește AUTOMAT —
-      „valoarea reală" — fără re-declarare de mână. Calea: exportul BigQuery
-      are și coloana `credits` (creditele aplicate), nu doar `cost` → soldul =
-      creditele aplicate real − costul real, derivat din export, zero cifre
-      declarate; până curg primele rânduri (ore de la activare), pastila spune
-      cinstit „aștept exportul", NU un număr. URMĂTORUL PR (după Business
-      Profile). Vechea re-declarare cu butonul «credit Gemini» devine inutilă
-      și se scoate atunci.
+- [ ] ORDIN 15 aug (după raport): soldul Gemini se citește AUTOMAT — „valoarea
+      reală" — SCRIS (PR-ul de după #1142): soldul se DERIVEAZĂ per credit din
+      exportul BigQuery (`credits.full_amount` − aplicat, toată istoria) în
+      `soldCrediteGoogle()`; pastila (bară + admin) arată cifra derivată sau
+      motivul cinstit („aștept exportul" / pasul de consolă) — NICIODATĂ un
+      număr declarat; butonul «✎ credit Gemini» + ruta de declarare AU MURIT
+      (410 cu motiv), cheile moarte scoase din toate cele 7 limbi. DE PROBAT
+      LIVE după ce exportul scrie primele rânduri (ore): pastila trebuie să
+      arate singură soldul real din AI Studio, fără nicio mână.
 - [ ] Scutul datelor: de PROBAT live după deploy (un DELETE de test pe
       voiceprints prin db_query trebuie refuzat cu «tabel_protejat», iar
       triggerul din Postgres să apară în \d voiceprints).
