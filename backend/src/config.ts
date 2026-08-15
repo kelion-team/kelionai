@@ -105,7 +105,7 @@ export function setModelUnicValidat(m: string): boolean {
   // (lite e slotul de conversație — dacă ar putea intra aici, cele două sloturi
   // s-ar prăbuși într-unul și gândirea grea ar rămâne fără treaptă). Pro nu mai
   // e acceptat: măsurat 7 aug, la aceeași calitate (20/20) avea cazuri de 72-75 s.
-  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(cod) || /-lite(?:-|$)/.test(cod)) return false
+  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(cod) || /-lite(?:-|$)/.test(cod) || /-(?:video|audio|live|image|embed|eap|tuning|vision|thinking-exp)(?:-|$)/i.test(cod)) return false
   modelUnicActiv = cod
   return true
 }
