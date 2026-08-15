@@ -45,6 +45,7 @@ import { pornesteIscoadele } from './services/iscoada.js'
 import { pornestePietarul } from './services/pietar.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
+import { embedCheckRoutes } from './routes/embedCheck.js'
 import { manualRoutes } from './routes/manual.js'
 import { enterpriseRoutes } from './routes/enterprise.js'
 import { a2aRoutes } from './routes/a2a.js'
@@ -323,6 +324,7 @@ await app.register(authLocalRoutes)
 await app.register(contactRoutes)
 await app.register(voiceprintRoutes)
 await app.register(clientErrorRoutes)
+await app.register(embedCheckRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 await app.register(pingRoutes)

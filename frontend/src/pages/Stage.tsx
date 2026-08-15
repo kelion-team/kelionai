@@ -328,6 +328,55 @@ function MonitorAudio({ url, taskId }: { url: string; taskId: string }) {
   )
 }
 
+// ── PAGINĂ EXTERNĂ PE MONITOR, CU VERDICT MĂSURAT (P2; owner, 15 aug:
+// „aplicațiile trebuiesc toate funcționale, nu doar poze") ───────────────────
+// Un site care refuză înrămarea (X-Frame-Options / CSP frame-ancestors) tot
+// declanșează onLoad pe <iframe> — rama moartă „refused to connect" era deci
+// raportată „ok": omul vedea o cutie moartă, creierul auzea „e pe monitor".
+// Acum serverul citește ANTETURILE paginii (/api/embed-check, cu gardă SSRF și
+// prinderea peretelui de login Google): refuz MĂSURAT → panoul cinstit cu
+// „deschide în tab" + status 'error' spre get_monitor. „Nu pot verifica"
+// (rețea picată) NU e refuz — rama rămâne cum era (regula #1: nu inventăm).
+// Rama se arată imediat (latența nu așteaptă verificarea); verdictul negativ
+// o înlocuiește când sosește.
+function MonitorPagina({ url, title, taskId, allow }: { url: string; title: string; taskId: string; allow: string }) {
+  const [blocat, setBlocat] = useState(false)
+  useEffect(() => {
+    setBlocat(false)
+    // URL relativ (ex. /api/route) e pagina NOASTRĂ, same-origin — mereu înrămabilă.
+    if (!/^https?:\/\//i.test(url)) return
+    let viu = true
+    fetch(`/api/embed-check?url=${encodeURIComponent(url)}`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ incadrabil?: boolean | null }>) : null))
+      .then((v) => {
+        if (!viu || !v || v.incadrabil !== false) return
+        setBlocat(true)
+        setTaskStatus(taskId, 'error')
+      })
+      .catch(() => { /* verificare picată ≠ refuz — rama rămâne */ })
+    return () => { viu = false }
+  }, [url, taskId])
+  if (blocat) {
+    return (
+      <div className="workspace-blocked">
+        <p>{uiStrings().wsPageBlocked}</p>
+        <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenTab}</a>
+      </div>
+    )
+  }
+  return (
+    <iframe
+      title={title}
+      src={normalizeEmbedUrl(url)}
+      className="workspace-frame"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+      onLoad={() => setTaskStatus(taskId, 'ok')}
+      onError={() => setTaskStatus(taskId, 'error')}
+      allow={allow}
+    />
+  )
+}
+
 // PANOUL CONSTRUCTORULUI pe monitor (Etapa 4b, Adrian: „sistem performant cu
 // monitor display of requirement resolution"). It subscribes to
 // /api/constructor/live (admin session) and shows each build order:
@@ -1299,6 +1348,23 @@ export default function Stage({ user }: { user: User }) {
                   </div>
                 ))}
               </div>
+              {/* P2 (owner, 15 aug: „nu doar poze"): orice suprafață cu adresă
+                  are legătura REALĂ mereu la vedere — nu doar când rama moare. */}
+              {(() => {
+                const activ = ws.tasks.find((x) => x.id === ws.activeId)
+                return activ?.url && /^https?:\/\//i.test(activ.url) ? (
+                  <a
+                    className="ghost ws-open-tab"
+                    href={activ.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={t.wsOpenTab}
+                    aria-label={t.wsOpenTab}
+                  >
+                    ↗
+                  </a>
+                ) : null
+              })()}
               <div className="ws-zoom" title={t.wsZoomFit}>
                 <button type="button" className="ghost" onClick={zoomOut} aria-label={t.wsZoomOut}>
                   A−
@@ -1426,16 +1492,15 @@ export default function Stage({ user }: { user: User }) {
                     <a href={task.url} download className="composer-send">{t.wsDownloadFile}</a>
                   </div>
                 ) : task.url && isEmbeddable(task.url) ? (
-                  <iframe
+                  // P2: rama externă cu verdict MĂSURAT din anteturi (embed-check) —
+                  // refuzul de înrămare cade pe panoul cinstit, nu pe cutia moartă.
+                  // ONE voice — Kelion's. Surfaces stay SILENT (no autoplay audio):
+                  // only a YouTube clip the user chose to watch may play sound. The
+                  // route map gets geolocation (no audio) so it can follow the car.
+                  <MonitorPagina
+                    url={task.url}
                     title={task.title}
-                    src={normalizeEmbedUrl(task.url)}
-                    className="workspace-frame"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                    onLoad={() => setTaskStatus(task.id, 'ok')}
-                    onError={() => setTaskStatus(task.id, 'error')}
-                    // ONE voice — Kelion's. Surfaces stay SILENT (no autoplay audio):
-                    // only a YouTube clip the user chose to watch may play sound. The
-                    // route map gets geolocation (no audio) so it can follow the car.
+                    taskId={task.id}
                     allow={
                       task.kind === 'youtube'
                         ? 'autoplay; encrypted-media; picture-in-picture; fullscreen'
