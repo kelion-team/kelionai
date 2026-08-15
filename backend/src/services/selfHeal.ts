@@ -11,7 +11,7 @@ import { FISIERE_GAZDA, coadaLogGazda, semnaturiEroare } from './logGazda.js'
  *  cauze nășteau ordine în serie (#235/#236/#237/#248, ~1M tokeni fiecare), iar
  *  fixul primului le-ar fi stins oricum pe restul. Dedup-ul pe semnătură rămâne
  *  (el oprește REPETAREA aceleiași erori); zgarda asta oprește ROIUL de frați. */
-async function sursaOcupata(scope: string): Promise<boolean> {
+export async function sursaOcupata(scope: string): Promise<boolean> {
   const active = await activeBuildJobsByScope(scope)
   if (active > 0) {
     console.log(`[self-heal] ${scope}: ${active} ordin(e) încă în lucru — nu depun altul până nu se termină (un doctor pe pacient)`)
@@ -24,6 +24,7 @@ import { autonomActiv } from './autonomActiv.js'
 import { geminiLive } from './geminiDirect.js'
 import { ordinSimptomLive, pragPentru } from './simptomeLive.js'
 import { plafonConstructor } from './autonomie.js'
+import { runLogSelfHealPipeline } from './selfHealLogPipeline.js'
 
 // ── KELION'S SELF-HEALING (Adrian, 27 Jul: "Kelion must be able to gather
 // errors appearing under each user automatically and remedy them, delivering
@@ -42,7 +43,7 @@ import { plafonConstructor } from './autonomie.js'
 // pause; (4) max 3 orders per run, so a wave of errors doesn't flood the
 // queue.
 
-function signature(message: string): string {
+export function signature(message: string): string {
   // A stable signature from the message, without variable numbers/addresses
   // — so the same error (with another line:col or another id) is recognized
   // as the same.
@@ -179,49 +180,23 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     }
   }
 
-  // ── LOGURILE GAZDEI (owner, 14 aug: „cine monitorizează toate logurile?" —
-  // răspuns cinstit de azi-dimineață: nimeni; de-acum: ochiul ăsta) ──────────
-  // constructor.log + auto-publicare.log, montate read-only la /host/kelion.
-  // O semnătură de eroare trebuie văzută în DOUĂ rulări distincte (kv contor)
-  // ca să devină ordin — un fulger nu e un tipar (regula #1). Fișier nemontat
-  // încă → se sare tăcut (coadaLogGazda spune motivul, nu inventează).
-  let filedGazda = 0
-  for (const fisier of FISIERE_GAZDA) {
-    if (await sursaOcupata('kelion-autovindecare-gazda')) break // un doctor pe pacient
-    const coada = await coadaLogGazda(fisier)
-    if (!coada.ok) continue
-    for (const linie of semnaturiEroare(coada.text)) {
-      // UNICAT (owner): cel mult UN ordin de gazdă per rulare — și oricum
-      // niciunul nou cât timp cel dinainte e viu (sursaOcupata, mai sus).
-      if (filedGazda >= 1 || filed >= 5) break
-      const sig = signature(`${fisier} ${linie}`)
-      const cheieFiled = `selfheal-gazda:${sig}`
-      if (await loadKv(cheieFiled)) continue
-      const cheieContor = `selfheal-gazda-n:${sig}`
-      const vazutDe = Number((await loadKv(cheieContor)) ?? '0') + 1
-      await saveKv(cheieContor, String(vazutDe))
-      if (vazutDe < 2) continue
-      const order =
-        `AUTO-VINDECARE (loguri gazdă): în ${fisier} de pe VPS apare RECURENT eroarea:\n` +
-        `${linie}\n\n` +
-        `Găsește CAUZA REALĂ în cod (search_source pe mesaj; sursa probabilă: ` +
-        `${fisier === 'constructor.log' ? 'deploy/constructor-agent.mjs sau ruta /api/constructor/*' : 'deploy/deploy.sh, deploy/auto-publicare.sh sau bootul aplicației'}) ` +
-        `și rescrie curat modulul responsabil — fără petice. NU schimba nimic în afara cauzei.\n` +
-        `Verifică: build + teste (backend și, dacă atingi, frontend).`
-      const id = await createBuildJob('kelion-autovindecare-gazda', order)
-      if (id) {
-        await saveKv(cheieFiled, JSON.stringify({ at: Date.now(), job: id }))
-        filed += 1
-        filedGazda += 1
-      }
-    }
+  // ── SCANARE LOGURI (SERVER & CONSTRUCTOR/GAZDĂ) CU PIPELINE ȘI MOTOR DE DECIZIE ──
+  // Scanare adaptoare decuplate (ServerLogAdapter, ConstructorLogAdapter),
+  // grupare pe amprente și verificare praguri de declanșare automată de reparații.
+  let filedLogs = 0
+  try {
+    const logRes = await runLogSelfHealPipeline()
+    filedLogs = logRes.filed
+    filed += filedLogs
+  } catch (err) {
+    console.warn('[self-heal] eroare pipeline loguri:', err)
   }
 
   if (filed) {
     console.log(
       `[self-heal] ${filed} reparare(i) trimisă(e) constructorului` +
         (filedLive ? ` (din care ${filedLive} din eșecuri MUTE de pe viu)` : '') +
-        (filedGazda ? ` (din care ${filedGazda} din logurile GAZDEI)` : ''),
+        (filedLogs ? ` (din care ${filedLogs} din logurile scanate server/constructor)` : ''),
     )
   }
   return { filed }
