@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser, adminSiId, cerAdmin } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, recordCost } from '../db.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, recordCost, loadKv, saveKv } from '../db.js'
 import type { OrMessage } from '../services/brainContract.js'
 import { uneltePentruCreier2, raspunsCreier2 } from '../services/creier2Constructor.js'
 import { isOpsPaused } from '../services/runbooks.js'
@@ -122,7 +122,23 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // (/api/constructor/next nu predă nimic), dar Constructorul n-o arăta
     // nicăieri — ordinul stătea „în coadă · 0%" la nesfârșit după promisiunea
     // „max. 2 minute". Panoul afișează bannerul și corectează promisiunea.
-    return reply.send({ jobs, paused: await isOpsPaused().catch(() => false) })
+    return reply.send({
+      jobs,
+      paused: await isOpsPaused().catch(() => false),
+      // COMUTATORUL MANUAL (owner, 15 aug): starea butonului „Fable 5 forțat".
+      fortaFable: (await loadKv('constructor:forta_fable').catch(() => null)) === '1',
+    })
+  })
+
+  // COMUTATORUL MANUAL DE CREIER (owner, 15 aug: „buton apeși se trece pe
+  // fable 5 obligatoriu, dezapeși trece normal"). Doar starea se schimbă aici;
+  // efectul e în /api/constructor/creier, la fiecare tură.
+  app.post<{ Body: { activ?: boolean } }>('/api/admin/constructor/forta-fable', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const activ = req.body?.activ === true
+    await saveKv('constructor:forta_fable', activ ? '1' : '0').catch(() => {})
+    return reply.send({ ok: true, fortaFable: activ })
   })
 
   // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
@@ -275,6 +291,26 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // automată prin chiar attempt=1 al jobului următor.
       const incercareOrdin = Math.max(1, Number(req.body?.attempt ?? 1) || 1)
       const { fable5Disponibil, fable5Chat } = await import('../services/fable5Constructor.js')
+      // ── COMUTATORUL MANUAL (owner, 15 aug: „buton apeși se trece pe fable 5
+      // obligatoriu, dezapeși trece normal") ─────────────────────────────────
+      // Apăsat (kv constructor:forta_fable='1'): TOATE turele merg pe Fable 5,
+      // iar un eșec al lui NU cade tăcut pe Gemini — „obligatoriu" care ar
+      // aluneca pe alt creier ar minți butonul; eroarea se spune pe față.
+      // Neapăsat: logica de azi, neatinsă (Gemini principal, Fable la reluări).
+      const fortaFable = (await loadKv('constructor:forta_fable').catch(() => null)) === '1'
+      if (fortaFable) {
+        if (!fable5Disponibil()) {
+          return reply.code(503).send({ error: 'creier_esec', motiv: 'Fable 5 FORȚAT de tine, dar cheia (ANTHROPIC_API_KEY) nu e pusă — pune cheia sau dezapasă butonul' })
+        }
+        try {
+          const rasp = await fable5Chat(messages, rawTools)
+          esecuriCreierLaRand = 0
+          return reply.send(rasp)
+        } catch (e) {
+          const motivF = (e as Error).message.slice(0, 200)
+          return reply.code(503).send({ error: 'creier_esec', motiv: `Fable 5 FORȚAT de tine a picat: ${motivF} — nu cad pe Gemini cât butonul e apăsat` })
+        }
+      }
       let fableEsecSus = ''
       if (incercareOrdin > 1 && fable5Disponibil()) {
         try {

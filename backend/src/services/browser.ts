@@ -77,6 +77,25 @@ const sessions = new Map<string, Session>()
 const MAX_SESSIONS = 8
 const IDLE_MS = 10 * 60_000
 
+// ── PROBA BROWSERULUI — LANSARE REALĂ, NU „instalarea a zis ok" (owner,
+// 15 aug: „browserul acesta nu funcționează" + „ce-ar fi să testezi tot ce
+// faci și lași funcțional"). system_health o cheamă ca becul „browserul
+// mâinilor" să arate starea MĂSURATĂ oricând, nu doar la publicare. Cache 10
+// minute: lansarea costă ~1s, health-ul rămâne ieftin; eșecul păstrează
+// EROAREA reală (biblioteci lipsă, binar absent), nu un „nu merge" generic.
+const PROBA_BROWSER_MS = 10 * 60_000
+let probaBrowser: { la: number; ok: boolean; motiv: string } | null = null
+export async function probaBrowserulMainilor(): Promise<{ ok: boolean; motiv: string }> {
+  if (probaBrowser && Date.now() - probaBrowser.la < PROBA_BROWSER_MS) return probaBrowser
+  try {
+    const b = await getBrowser()
+    probaBrowser = { la: Date.now(), ok: b.isConnected(), motiv: b.isConnected() ? '' : 'lansat dar deconectat' }
+  } catch (e) {
+    probaBrowser = { la: Date.now(), ok: false, motiv: String((e as Error)?.message ?? e).slice(0, 200) }
+  }
+  return probaBrowser
+}
+
 let sharedBrowser: Browser | null = null
 async function getBrowser(): Promise<Browser> {
   if (sharedBrowser?.isConnected()) return sharedBrowser
