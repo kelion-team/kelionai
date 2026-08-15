@@ -4065,7 +4065,8 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
       `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
        WHERE id = (
          SELECT id FROM build_jobs
-         WHERE status='queued' OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes')
+         WHERE (status='queued' OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'))
+           AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
          ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
        )
        RETURNING *`,
@@ -4080,22 +4081,68 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
   }
 }
 
+// ── P27 (owner, 15 aug, LEGE: „la constructor, trebuie 1 singur ordin, nu se
+// fac mai multe ordine pe acelasi subiect, lege, se rezolva, se arhiveaza,
+// sau se escaladeaza sau se raporteaza la kelion") ───────────────────────────
+// Ușa unică a subiectului e mai sus (createBuildJob + amprentaOrdin). Aici e
+// restul legii, măsurat pe jurnalul #324: „Your credit balance is too low"
+// reîncercat ORBEȘTE de 6 ori — bani arși pe aceeași piatră. O eroare
+// PERMANENTĂ (punga goală, cheia respinsă) nu se vindecă prin repetare:
+// ordinul moare la PRIMUL raport, cu verdictul PE NUME, și se RAPORTEAZĂ lui
+// Kelion (triajul golurilor + panoul). Doar „reia"-ul deliberat al ownerului
+// (retryBuildJob, attempts=0) îl mai pornește.
+export const MARCAJ_P27 = '[P27: eroare PERMANENTĂ'
+
+/** Verdictul pe nume — sau null dacă eroarea NU e sigur permanentă (o pană
+ *  trecătoare are voie la reîncercare; 402-ul OpenRouter are vindecătorul lui
+ *  de pungă și NU intră aici). */
+export function eEroarePermanenta(log: string): string | null {
+  if (/FĂRĂ CREDIT API|credit balance is too low/i.test(log))
+    return 'cont fără credit API (Anthropic) — punga aceea, nu codul; reumplerea pungii noastre nu-l vindecă'
+  if (/invalid x-api-key|authentication_error|API key not valid|API_KEY_INVALID/i.test(log))
+    return 'cheie API respinsă de furnizor — config, nu codul'
+  return null
+}
+
 export async function reportBuildJob(
   id: number,
   fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number },
 ): Promise<void> {
   if (!dbEnabled()) return
+  let log = (fields.log ?? '').slice(-20000)
+  let inghetat = ''
+  if (fields.status === 'failed') {
+    const verdict = eEroarePermanenta(log)
+    if (verdict && !log.includes(MARCAJ_P27)) {
+      log = `${log}\n${MARCAJ_P27} — ${verdict}; reîncercarea NU ajută]`.slice(-20000)
+      // attempts=99 = înghețat: plasa de „stale-running" și vindecătorii nu-l
+      // mai reiau niciodată singuri; contorul real rămâne în log.
+      inghetat = ', attempts = 99'
+      // RAPORTAT LA KELION (legea P27): golul intră în triajul lui + panoul —
+      // fire-and-forget, iar EȘECUL raportării se strigă (un raport mut nu e raport).
+      void (async () => {
+        await logCapabilityGap('constructor', `Ordinul #${id} BLOCAT pe eroare permanentă: ${verdict}`, log.slice(-300))
+        const { notifyAdmin } = await import('./services/adminNotification.js')
+        await notifyAdmin(
+          'scris',
+          `Ordinul #${id} OPRIT din prima — eroare permanentă`,
+          `${verdict}. Reîncercarea NU ajută; repornește-l (Reia) doar după ce cauza e scoasă.`,
+          { jobId: id },
+        )
+      })().catch((e) => console.error('[P27] raportarea la Kelion a picat:', String(e).slice(0, 160)))
+    }
+  }
   await getPool().query(
     `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
        tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
-       updated_at = now() WHERE id = $1`,
+       updated_at = now()${inghetat} WHERE id = $1`,
     [
       id,
       fields.status,
       fields.branch ?? null,
       fields.prUrl ?? null,
       fields.tokens ?? 0,
-      (fields.log ?? '').slice(-20000) || null,
+      log || null,
       fields.ci ?? null,
       fields.brain ?? null,
       fields.costUsd ?? null,
@@ -4357,6 +4404,7 @@ export async function requeueMoneyFailedBuildJobs(): Promise<number> {
          AND updated_at > now() - interval '72 hours'
          AND log ~* '(402|requires more credits|insufficient credits)'
          AND log NOT LIKE '%[healer: requeued%'
+         AND log NOT LIKE '%[P27: eroare PERMANENT%'
        RETURNING id`,
     )
     return r.rowCount ?? 0
