@@ -70,7 +70,7 @@ import {
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { notifyAdmin } from './adminNotification.js'
-import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuitAziConstructor } from '../db.js'
+import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuitAziConstructor, cheltuialaAziConstructor } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { utcDay } from './timeContext.js'
@@ -963,15 +963,27 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
 // + comutatorul se citesc din KV — le setezi din admin. Implicit PORNIT (a cerut
 // limitarea automată); '0' pe comutator o stinge.
 const PLAFON_USD_DEFAULT = 10
-export async function plafonConstructor(): Promise<{ activ: boolean; plafon: number; cheltuit: number }> {
-  const [activRaw, plafonRaw, cheltuit] = await Promise.all([
+export async function plafonConstructor(): Promise<{
+  activ: boolean
+  plafon: number
+  cheltuit: number
+  // P10: cifra vine cu contextul ei — altfel „$0.00 măsurat" ascundea și
+  // citirea picată, și joburile care n-au raportat cost (regula #1).
+  cheltuitCitit: boolean
+  cheltuitMotiv?: string
+  joburiAzi: number
+  faraCost: number
+}> {
+  const [activRaw, plafonRaw, c] = await Promise.all([
     loadKv('constructor:plafon_activ').catch(() => null),
     loadKv('constructor:plafon_usd').catch(() => null),
-    cheltuitAziConstructor().catch(() => 0),
+    cheltuialaAziConstructor(),
   ])
   const plafon = Number(plafonRaw) > 0 ? Number(plafonRaw) : PLAFON_USD_DEFAULT
   const activ = activRaw === null ? true : activRaw !== '0' && activRaw !== 'false'
-  return { activ, plafon, cheltuit }
+  return c.citit
+    ? { activ, plafon, cheltuit: c.usd, cheltuitCitit: true, joburiAzi: c.joburiAzi, faraCost: c.faraCost }
+    : { activ, plafon, cheltuit: 0, cheltuitCitit: false, cheltuitMotiv: c.motiv, joburiAzi: 0, faraCost: 0 }
 }
 
 export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string }> {
