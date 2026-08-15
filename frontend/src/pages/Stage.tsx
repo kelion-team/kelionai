@@ -648,19 +648,15 @@ export interface BrainCredit {
       serving: boolean
       reason?: 'depleted' | 'quota' | 'error' | 'no_key'
       monthUsd?: number
-      /** Creditul pe care ownerul îl VEDE în AI Studio și-l spune o dată (Google
-       *  nu-l expune prin API). Afișat ca ATARE pe pastilă, cu data — cifra lui,
-       *  nu o măsurătoare. Absent → pastila arată „Gemini ✓/⚠". */
-      creditGbp?: number
-      creditAt?: string
-      /** CE-A MAI RĂMAS (8 aug: „asta trebuie să scadă real"): declarat minus
-       *  cheltuiala măsurată DE LA declarare, pe cursul BCE. Absent = serverul
-       *  n-a putut calcula (motivul în `scadereMotiv`) — pastila cade atunci pe
-       *  `creditGbp`, cifra declarată, nu pe un calcul cârpit. */
-      creditRamasGbp?: number
-      /** Cât s-a scăzut (USD măsurat de la declarare) — pentru tooltip/audit. */
-      scazutUsd?: number
-      scadereMotiv?: string
+      /** SOLDUL REAL, derivat automat din exportul Cloud Billing → BigQuery
+       *  (totalul acordat `full_amount` minus creditele aplicate, per credit) —
+       *  ordinul din 15 aug: „valoarea reală… citit automat". Absent →
+       *  `soldMotiv` spune exact ce pas de consolă lipsește; pastila arată
+       *  „Gemini ✓/⚠", NICIODATĂ un număr inventat. (Câmpurile declarării
+       *  manuale — creditGbp & co. — au MURIT odată cu ordinul.) */
+      sold?: number
+      soldMoneda?: string
+      soldMotiv?: string
     }
     /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
      *  in the top bar"). `null` = they couldn't be measured — the bar writes "⚠ VPS",
