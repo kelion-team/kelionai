@@ -98,7 +98,10 @@ export async function saveAvatarBox(box: AvatarBox): Promise<boolean> {
   }
 }
 
-// Mirror the server-decided language locally, for an instant read next load.
+/**
+ * Mirror the server-decided language locally, for an instant read next load.
+ * Best-effort: catches storage errors silently.
+ */
 export function mirrorLang(code: string): void {
   try {
     localStorage.setItem(LS_KEY, code)
