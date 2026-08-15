@@ -4,6 +4,7 @@ import {
   getVoiceprint,
   getVoiceprintAudio,
   listVoiceprints,
+  saveVoiceprint,
   type VoiceFeatureMeta,
 } from '../db.js'
 
@@ -27,6 +28,52 @@ export interface VoiceFeatures {
 // and realtime.ts).
 
 export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
+  // Save or update the logged-in user's voiceprint, linking it permanently to their account.
+  app.post<{
+    Body: {
+      vector?: number[]
+      meta?: VoiceFeatureMeta
+      clip?: string
+      name?: string
+    }
+  }>('/api/voiceprint/me', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const { vector, meta, clip, name } = req.body || {}
+    if (!vector || !Array.isArray(vector) || vector.length === 0) {
+      return reply.code(400).send({ error: 'invalid_vector' })
+    }
+    const metaObj: VoiceFeatureMeta = {
+      pitchMean: meta?.pitchMean ?? 0,
+      pitchMedian: meta?.pitchMedian,
+      pitchStd: meta?.pitchStd ?? 0,
+      pitchMin: meta?.pitchMin ?? 0,
+      pitchMax: meta?.pitchMax ?? 0,
+      centroid: meta?.centroid ?? 0,
+      rolloff: meta?.rolloff ?? 0,
+      zcr: meta?.zcr ?? 0,
+      energy: meta?.energy ?? 0,
+      jitter: meta?.jitter ?? 0,
+      shimmer: meta?.shimmer ?? 0,
+    }
+    const gender = inferGender(metaObj.pitchMean || 0)
+    const displayName = name || user.name || user.email.split('@')[0]
+    const isAdmin = user.role === 'admin'
+
+    await saveVoiceprint({
+      email: user.email,
+      name: displayName,
+      gender,
+      isAdmin,
+      features: vector,
+      featureMeta: metaObj,
+      audioClip: clip || '',
+    })
+
+    const updated = await getVoiceprint(user.email)
+    return reply.send({ ok: true, voiceprint: updated })
+  })
+
   // Returns the logged-in user's voiceprint (or null if not enrolled yet).
   app.get('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)

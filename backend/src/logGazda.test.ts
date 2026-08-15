@@ -92,10 +92,11 @@ describe('semnaturiEroare', () => {
 
   it('izolează joburile din constructor.log și ignoră erorile din joburile finalizate cu succes', () => {
     const textLog = [
-      '[constructor] Job #100: Ordin vechi',
+      '[13:30:00] ordin #270 (încercarea 1): ceva',
       'src/services/logGazda.ts(64,9): error TS2451: Cannot redeclare block-scoped variable \'zgomot\'.',
-      '[constructor] Job #101: Alt ordin',
-      '✅ PR deschis: #258',
+      '[13:31:58] llm [fatal] — app a refuzat creierul (bridge-secret?): creier 2 502',
+      '[13:40:00] ordin #271 (încercarea 1): AUTO-VINDECARE',
+      '[13:42:00] PR deschis: https://github.com/kelion-team/kelionai/pull/1134 (tokeni: 581413)',
     ].join('\n')
     const out = semnaturiEroare(textLog)
     expect(out).toHaveLength(0)

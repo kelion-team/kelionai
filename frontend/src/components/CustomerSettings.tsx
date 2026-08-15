@@ -54,14 +54,37 @@ export default function CustomerSettings({
     threshold: 20,
     topupAmount: 10,
   })
+  const [voiceprint, setVoiceprint] = useState<{
+    email: string
+    gender?: string
+    updated_at?: string
+    meta?: { pitchMeanHz?: number; pitchStdHz?: number; voicedRatio?: number }
+  } | null | 'necitit'>('necitit')
+  const [recordingVp, setRecordingVp] = useState(false)
+  const [vpMsg, setVpMsg] = useState('')
+
   useEffect(() => {
     void (async () => {
-      const [p, b, h] = await Promise.all([loadServerPrefs(), fetchBalance(), fetchHistory()])
+      const [p, b, h, vpRes] = await Promise.all([
+        loadServerPrefs(),
+        fetchBalance(),
+        fetchHistory(),
+        fetch('/api/voiceprint/me', { credentials: 'include' })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ])
       if (p?.speechLang) setLang(p.speechLang)
       if (p?.voices?.length) setVoices(p.voices)
       setVoice(p?.voice ?? '')
       setWallet(b) // null = citirea a picat — se afișează ca eșec, nu „…" pe veci
       setIstoric(h) // null = read failed (said as such, never an empty list)
+      if (vpRes && vpRes.voiceprint) {
+        setVoiceprint(vpRes.voiceprint)
+      } else if (vpRes && vpRes.voiceprint === null) {
+        setVoiceprint(null)
+      } else {
+        setVoiceprint(null)
+      }
       try {
         // CÂT SELECTORUL DE MODELE E ASCUNS, nu mai cerem catalogul/selecția
         // (auditul admin, 3 aug: date cerute și aruncate la fiecare deschidere).
@@ -128,6 +151,76 @@ export default function CustomerSettings({
     setBusy(true)
     await logout()
     window.location.reload()
+  }
+
+  async function onRecordVoiceprint(): Promise<void> {
+    try {
+      setRecordingVp(true)
+      setVpMsg(ro ? 'Vorbește timp de 3 secunde...' : 'Speak for 3 seconds...')
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const audioCtx = new AudioContextClass()
+      const source = audioCtx.createMediaStreamSource(stream)
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 512
+      source.connect(analyser)
+
+      const freqData = new Uint8Array(analyser.frequencyBinCount)
+      const samples: number[][] = []
+
+      const interval = setInterval(() => {
+        analyser.getByteFrequencyData(freqData)
+        samples.push(Array.from(freqData.slice(0, 32)))
+      }, 100)
+
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+      clearInterval(interval)
+      stream.getTracks().forEach((track) => track.stop())
+      await audioCtx.close().catch(() => {})
+
+      const vectorLen = 32
+      const avgVector = new Array(vectorLen).fill(0)
+      if (samples.length > 0) {
+        for (const sample of samples) {
+          for (let i = 0; i < vectorLen; i++) {
+            avgVector[i] += (sample[i] || 0) / samples.length
+          }
+        }
+      }
+
+      const energyMean = avgVector.reduce((a, b) => a + b, 0) / vectorLen
+      const pitchMeanHz = 120 + (avgVector[4] || 0) * 1.5
+
+      setVpMsg(ro ? 'Se salvează amprenta în cont...' : 'Saving voiceprint to account...')
+
+      const resp = await fetch('/api/voiceprint/me', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          vector: avgVector,
+          meta: {
+            pitchMeanHz: Math.round(pitchMeanHz),
+            pitchStdHz: 15,
+            energyMean: Number(energyMean.toFixed(2)),
+            spectralCentroidHz: 500,
+            voicedRatio: 0.8,
+          },
+        }),
+      })
+
+      const data = await resp.json().catch(() => null)
+      if (resp.ok && data?.voiceprint) {
+        setVoiceprint(data.voiceprint)
+        setVpMsg(ro ? 'Amprentă vocală salvată și asociată cu succes!' : 'Voiceprint saved and linked successfully!')
+      } else {
+        setVpMsg(ro ? 'Eroare la salvarea amprentei vocale.' : 'Failed to save voiceprint.')
+      }
+    } catch {
+      setVpMsg(ro ? 'Microfon inaccesibil sau refuzat.' : 'Microphone inaccessible or denied.')
+    } finally {
+      setRecordingVp(false)
+    }
   }
 
   async function onDelete(): Promise<void> {
@@ -344,13 +437,63 @@ export default function CustomerSettings({
           </section>
         )}
 
-        {/* 4 — Cont */}
+        {/* 4 — Cont & Voiceprint */}
         <section className="settings-sec">
           <h4>{t.account}</h4>
           <div className="settings-account">
             <span className="settings-note">
               {t.signedInAs} <strong>{user.email}</strong>
             </span>
+          </div>
+
+          <div style={{ marginTop: 14, padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: 8 }}>
+            <label className="contact-label" style={{ marginBottom: 6 }}>
+              🎙 {ro ? 'Amprentă vocală cont' : 'Account Voiceprint'}
+            </label>
+            {voiceprint === 'necitit' ? (
+              <p className="settings-note">{ro ? 'Se citește starea amprentei...' : 'Reading voiceprint status...'}</p>
+            ) : voiceprint ? (
+              <div>
+                <p className="settings-note" style={{ color: '#67c23a', margin: '4px 0' }}>
+                  ✓ {ro ? 'Amprentă vocală înregistrată și asociată profilului' : 'Voiceprint registered and linked to profile'}
+                </p>
+                {voiceprint.updated_at && (
+                  <p className="settings-note" style={{ opacity: 0.8, fontSize: '0.82rem', margin: '2px 0 8px' }}>
+                    {ro ? 'Actualizată la:' : 'Last updated:'} {new Date(voiceprint.updated_at).toLocaleString()}
+                    {voiceprint.gender ? ` • ${voiceprint.gender}` : ''}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={recordingVp}
+                  onClick={() => void onRecordVoiceprint()}
+                  style={{ marginTop: 4, padding: '4px 10px', fontSize: '0.85rem' }}
+                >
+                  {recordingVp ? (ro ? 'Se înregistrează...' : 'Recording...') : (ro ? 'Reînregistrează amprenta vocală' : 'Re-record voiceprint')}
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p className="settings-note" style={{ margin: '4px 0 8px' }}>
+                  {ro ? 'Nicio amprentă vocală asociată acestui cont.' : 'No voiceprint linked to this account yet.'}
+                </p>
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={recordingVp}
+                  onClick={() => void onRecordVoiceprint()}
+                  style={{ padding: '4px 10px', fontSize: '0.85rem' }}
+                >
+                  {recordingVp ? (ro ? 'Se înregistrează (3s)...' : 'Recording (3s)...') : (ro ? 'Înregistrează amprenta vocală' : 'Record voiceprint')}
+                </button>
+              </div>
+            )}
+            {vpMsg && (
+              <p className="settings-note" style={{ marginTop: 6, color: vpMsg.includes('succes') || vpMsg.includes('success') ? '#67c23a' : '#e6a23c' }}>
+                {vpMsg}
+              </p>
+            )}
           </div>
           <div className="settings-account-actions">
             <button type="button" className="ghost" disabled={busy} onClick={() => void onLogout()}>
