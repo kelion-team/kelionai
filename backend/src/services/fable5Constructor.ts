@@ -17,7 +17,16 @@ import { recordCost } from '../db.js'
 import type { OrMessage, OrToolCall } from './brainContract.js'
 
 const FABLE_URL = process.env.CONSTRUCTOR_FABLE_URL || ''
-const FABLE_MODEL = process.env.CONSTRUCTOR_FABLE_MODEL || process.env.ANTHROPIC_MODEL || 'claude-3-7-sonnet-20250219'
+const CANDIDATE_MODELS = [
+  process.env.CONSTRUCTOR_FABLE_MODEL,
+  process.env.ANTHROPIC_MODEL,
+  'claude-3-5-sonnet-20241022',
+  'claude-3-7-sonnet-20250219',
+  'claude-3-5-sonnet-latest',
+  'claude-3-haiku-20240307',
+].filter((m): m is string => Boolean(m && m.trim()))
+
+const FABLE_MODEL = CANDIDATE_MODELS[0] || 'claude-3-5-sonnet-20241022'
 
 /** Cheia Fable 5 (Claude). Stă în app (`ANTHROPIC_API_KEY` pe VPS), NU în constructor. */
 export function fable5Key(): string {
@@ -204,51 +213,69 @@ export async function fable5Chat(
   const { system, messages: anthropicMsgs } = toAnthropicMessages(messages)
   const anthropicTools = toAnthropicTools(tools as unknown[])
 
-  const payload: Record<string, unknown> = {
-    model: FABLE_MODEL,
-    messages: anthropicMsgs,
-    max_tokens: 8192,
-  }
-  if (system) payload.system = system
-  if (anthropicTools.length) {
-    payload.tools = anthropicTools
-    payload.tool_choice = { type: 'any' }
-  }
-
   const endpoint = 'https://api.anthropic.com/v1/messages'
-  let r: Response
-  try {
-    r = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(Math.max(30_000, opts.timeoutMs ?? 120_000)),
-    })
-  } catch (e) {
-    throw new Error(`fable5 rețea: ${String((e as Error)?.message ?? e).slice(0, 200)}`)
-  }
-
-  const text = await r.text().catch(() => '')
-  if (!r.ok) {
-    if (r.status === 401 || r.status === 403) {
-      probaFable = {
-        la: Date.now(),
-        ok: false,
-        motiv: `cheia e PUSĂ dar Anthropic o REFUZĂ (HTTP ${r.status}) — rezerva NU poate servi; pune o cheie nouă din console.anthropic.com`,
-      }
-    }
-    throw new Error(`fable5 ${r.status}: ${text.slice(0, 200)}`)
-  }
-
+  const modelsToTry = Array.from(new Set([FABLE_MODEL, ...CANDIDATE_MODELS]))
+  let lastErr = ''
   let parsed: any
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw new Error(`fable5 JSON rupt (${text.length} caractere)`)
+  let usedModel = FABLE_MODEL
+
+  for (const modelName of modelsToTry) {
+    const payload: Record<string, unknown> = {
+      model: modelName,
+      messages: anthropicMsgs,
+      max_tokens: 8192,
+    }
+    if (system) payload.system = system
+    if (anthropicTools.length) {
+      payload.tools = anthropicTools
+      payload.tool_choice = { type: 'any' }
+    }
+
+    let r: Response
+    try {
+      r = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(Math.max(30_000, opts.timeoutMs ?? 120_000)),
+      })
+    } catch (e) {
+      throw new Error(`fable5 rețea: ${String((e as Error)?.message ?? e).slice(200)}`)
+    }
+
+    const text = await r.text().catch(() => '')
+    if (!r.ok) {
+      if (r.status === 401 || r.status === 403) {
+        probaFable = {
+          la: Date.now(),
+          ok: false,
+          motiv: `cheia e PUSĂ dar Anthropic o REFUZĂ (HTTP ${r.status}) — rezerva NU poate servi; pune o cheie nouă din console.anthropic.com`,
+        }
+        throw new Error(`fable5 ${r.status}: ${text.slice(0, 200)}`)
+      }
+      // If 404 (model not found), try next fallback model
+      if (r.status === 404 && text.includes('not_found_error')) {
+        lastErr = `fable5 ${r.status}: ${text.slice(0, 200)}`
+        continue
+      }
+      throw new Error(`fable5 ${r.status}: ${text.slice(0, 200)}`)
+    }
+
+    try {
+      parsed = JSON.parse(text)
+      usedModel = modelName
+      break
+    } catch {
+      throw new Error(`fable5 JSON rupt (${text.length} caractere)`)
+    }
+  }
+
+  if (!parsed) {
+    throw new Error(lastErr || 'fable5: niciun model valid disponibil')
   }
 
   let outText = ''
@@ -286,6 +313,6 @@ export async function fable5Chat(
   return {
     choices: [{ message: outMsg }],
     usage: { total_tokens: totalTokens },
-    modelServit: `fable5/${FABLE_MODEL}`,
+    modelServit: `fable5/${usedModel}`,
   }
 }

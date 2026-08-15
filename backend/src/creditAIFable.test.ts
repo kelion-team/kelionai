@@ -147,4 +147,41 @@ describe('creditAI — Fable 5 (rezerva constructorului): verde/roșu, fără gr
     expect(res.choices[0].message.tool_calls![0].function?.name).toBe('read')
     expect(res.usage.total_tokens).toBe(150)
   })
+
+  it('fable5Chat cade pe următorul model candidat la 404 not_found_error', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-valid'
+    const modeleIncercate: string[] = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: any) => {
+        const body = JSON.parse(init?.body || '{}')
+        modeleIncercate.push(body.model)
+        if (body.model.includes('3-5-sonnet-20241022')) {
+          return new Response(
+            JSON.stringify({
+              type: 'error',
+              error: { type: 'not_found_error', message: `model: ${body.model}` },
+            }),
+            { status: 404, headers: { 'content-type': 'application/json' } },
+          )
+        }
+        return new Response(
+          JSON.stringify({
+            id: 'msg_fallback',
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'raspuns fallback' }],
+            usage: { input_tokens: 10, output_tokens: 10 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }),
+    )
+
+    const { fable5Chat } = await import('./services/fable5Constructor.js')
+    const res = await fable5Chat([{ role: 'user', content: 'test fallback' }])
+    expect(modeleIncercate.length).toBeGreaterThan(1)
+    expect(res.choices[0].message.content).toBe('raspuns fallback')
+  })
 })
