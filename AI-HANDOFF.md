@@ -1,5 +1,10 @@
 # AI-HANDOFF — Starea curentă a proiectului Kelion
 
+## Cerința #40 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
+- Opțiunile de schimbare a limbii din bara de admin sunt complet configurate și accesibile în interfață (`scripts/admin-bar-preview.html`, `frontend/src/lib/langList.ts`, `frontend/src/lib/languages.ts`, `Stage.tsx`).
+- Meniul de schimbare a limbii din bara de admin afișează clar lista de opțiuni (Română, English, Français, Deutsch, Español, Italiano, Português, Nederlands, etc.).
+- Teste automate dedicate adăugate în `backend/tests/cerinta40.test.ts`.
+
 ## Cerința #41 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - Opțiunile de schimbare a limbii din bara de admin sunt configurate și afișate în interfață (`scripts/admin-bar-preview.html`, `frontend/src/lib/langList.ts`, `frontend/src/lib/languages.ts`, `Stage.tsx`).
 - Selectorul de limbă oferă acces complet și focalizat pe opțiunile de selecție a limbii (Română, English, Français, Deutsch, Español, Italiano, Português, Nederlands, Polski, Русский, etc.).
