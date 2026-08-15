@@ -2144,44 +2144,93 @@ export async function getDemoStats(): Promise<DemoStats | null> {
     // LEGEA POZEI: omul fără nicio poză acceptată (nici cadru de vizită, nici
     // poza contului) NU apare; câți sunt se spune separat (faraPoza), ca
     // totalurile să nu pară scăzute fără explicație. Boții nu-s oameni — afară.
-    const POZA_OMULUI = `COALESCE(
-                  (ARRAY_AGG(o.photo_url ORDER BY o.started_at DESC) FILTER (WHERE o.photo_url <> ''))[1],
-                  (ARRAY_AGG(f.photo ORDER BY o.started_at DESC) FILTER (WHERE f.photo IS NOT NULL AND f.photo <> ''))[1],
-                  '')`
+    // REPARAT 15 aug seara (auditul adversarial al diff-urilor — 3 constatări
+    // CONFIRMATE pe forma dintâi):
+    //   • CRITIC: pozele base64 (≤200KB) intrau în ARRAY_AGG pe FIECARE vizită
+    //     a omului — 120 vizite × 200KB ≈ 24MB stare de agregare PE GRUP, de
+    //     două ori pe apel, la fiecare 30s cât stă tabul deschis. Acum grupul
+    //     ține doar bool_or/MAX/COUNT (octeți); pozele vin prin LATERAL numai
+    //     pentru cele ≤60 de rânduri afișate, iar plafonul de 40 de vizite pe
+    //     card s-a mutat în SQL (nu mai traversează rețeaua tot istoricul).
+    //   • faceprints e scris DOAR lowercase, dar emailul vizitei intră verbatim
+    //     de la Google — join-ul brut rata poza contului și HAVING-ul ȘTERGEA
+    //     omul din raport (numărat fals la faraPoza). Emailul omului se
+    //     calculează acum o dată, cu lower(), și pe el se leagă faceprints.
+    //   • vizitele anonime dinaintea login-ului purtau cheia amprentei, cele
+    //     logate cheia emailului — DOUĂ poziții pe același om (contra legii).
+    //     Amprenta își moștenește emailul (MAX … OVER (PARTITION BY
+    //     fingerprint)), deci toată istoria lui stă sub o singură cheie.
     const CU_OM = `WITH om AS (
-           SELECT COALESCE(NULLIF(lower(v.user_email), ''), NULLIF(v.fingerprint, ''), v.ip) AS cheia, v.*
+           SELECT v.*,
+                  CASE WHEN v.fingerprint <> ''
+                       THEN MAX(NULLIF(lower(v.user_email), '')) OVER (PARTITION BY v.fingerprint)
+                  END AS email_amprentei
              FROM visits v
             WHERE NOT v.is_bot
+         ), cu_cheie AS (
+           SELECT o.*,
+                  COALESCE(NULLIF(lower(o.user_email), ''), o.email_amprentei) AS email_omului,
+                  COALESCE(NULLIF(lower(o.user_email), ''), o.email_amprentei, NULLIF(o.fingerprint, ''), o.ip) AS cheia
+             FROM om o
+         ), grup AS (
+           SELECT c.cheia,
+                  MAX(c.email_omului) AS email_omului,
+                  MAX(c.started_at) AS ultima,
+                  MIN(c.started_at) AS prima,
+                  COUNT(*)::int AS vizite_total,
+                  bool_or(c.photo_url <> '') AS are_cadru
+             FROM cu_cheie c
+            GROUP BY c.cheia
          )`
+    // LEGEA pozei, ieftină: existența pozei se judecă pe bool + EXISTS (fără
+    // să care octeții pozei), ÎNAINTE de LIMIT — legea taie, plafonul doar taie
+    // coada listei deja legale.
+    const LEGEA_POZEI = `(g.are_cadru OR EXISTS (
+                  SELECT 1 FROM faceprints f
+                   WHERE f.user_email = g.email_omului AND f.photo <> ''))`
     const recent = (
       await pool.query<Omit<DemoRecent, 'code' | 'vizite'> & { country_code: string; vizite: { la: string; pages: string }[] }>(
         `${CU_OM}
+         , legea AS (
+           SELECT g.* FROM grup g
+            WHERE ${LEGEA_POZEI}
+            ORDER BY g.ultima DESC LIMIT 60
+         )
          SELECT 'visit'::text AS kind,
-                (ARRAY_AGG(o.ip ORDER BY o.started_at DESC))[1] AS ip,
-                (ARRAY_AGG(o.country ORDER BY o.started_at DESC))[1] AS country,
-                (ARRAY_AGG(o.country_code ORDER BY o.started_at DESC))[1] AS country_code,
-                (ARRAY_AGG(o.city ORDER BY o.started_at DESC))[1] AS city,
-                (ARRAY_AGG(o.region ORDER BY o.started_at DESC))[1] AS region,
-                (ARRAY_AGG(o.isp ORDER BY o.started_at DESC))[1] AS isp,
-                (ARRAY_AGG(o.browser ORDER BY o.started_at DESC))[1] AS browser,
-                (ARRAY_AGG(o.os ORDER BY o.started_at DESC))[1] AS os,
-                (ARRAY_AGG(o.device ORDER BY o.started_at DESC))[1] AS device,
-                (ARRAY_AGG(o.lang ORDER BY o.started_at DESC))[1] AS lang,
-                (ARRAY_AGG(o.referrer ORDER BY o.started_at DESC))[1] AS referrer,
+                meta.ip, meta.country, meta.country_code, meta.city, meta.region,
+                meta.isp, meta.browser, meta.os, meta.device, meta.lang, meta.referrer,
                 false AS is_bot,
-                MAX(o.started_at) AS started_at,
+                l.ultima AS started_at,
                 '' AS session_email, '' AS topic,
-                (ARRAY_AGG(o.tz ORDER BY o.started_at DESC))[1] AS tz,
-                ${POZA_OMULUI} AS photo_url,
-                (ARRAY_AGG(o.pages ORDER BY o.started_at DESC))[1] AS pages,
-                COUNT(*)::int - 1 AS vizite_anterioare,
-                MIN(o.started_at)::text AS prima_vizita,
-                JSON_AGG(json_build_object('la', o.started_at, 'pages', o.pages) ORDER BY o.started_at DESC) AS vizite
-           FROM om o
-           LEFT JOIN faceprints f ON o.user_email <> '' AND f.user_email = o.user_email
-          GROUP BY o.cheia
-         HAVING ${POZA_OMULUI} <> ''
-          ORDER BY MAX(o.started_at) DESC LIMIT 60`,
+                meta.tz,
+                COALESCE(cadru.photo_url, cont.photo, '') AS photo_url,
+                meta.pages,
+                l.vizite_total - 1 AS vizite_anterioare,
+                l.prima::text AS prima_vizita,
+                viz.vizite
+           FROM legea l
+          CROSS JOIN LATERAL (
+            SELECT c.ip, c.country, c.country_code, c.city, c.region, c.isp,
+                   c.browser, c.os, c.device, c.lang, c.referrer, c.tz, c.pages
+              FROM cu_cheie c WHERE c.cheia = l.cheia
+             ORDER BY c.started_at DESC LIMIT 1
+          ) meta
+           LEFT JOIN LATERAL (
+            SELECT c.photo_url FROM cu_cheie c
+             WHERE c.cheia = l.cheia AND c.photo_url <> ''
+             ORDER BY c.started_at DESC LIMIT 1
+          ) cadru ON true
+           LEFT JOIN LATERAL (
+            SELECT f.photo FROM faceprints f
+             WHERE f.user_email = l.email_omului AND f.photo <> '' LIMIT 1
+          ) cont ON true
+          CROSS JOIN LATERAL (
+            SELECT COALESCE(JSON_AGG(json_build_object('la', z.started_at, 'pages', z.pages)
+                            ORDER BY z.started_at DESC), '[]'::json) AS vizite
+              FROM (SELECT c.started_at, c.pages FROM cu_cheie c WHERE c.cheia = l.cheia
+                     ORDER BY c.started_at DESC LIMIT 40) z
+          ) viz
+          ORDER BY l.ultima DESC`,
       )
     ).rows.map((r) => ({
       kind: r.kind,
@@ -2204,21 +2253,18 @@ export async function getDemoStats(): Promise<DemoStats | null> {
       vizite_anterioare: Math.max(0, Number(r.vizite_anterioare ?? 0)),
       photo_url: r.photo_url ?? '',
       pages: r.pages ?? '',
-      // toate vizitele omului, plafonate la 40 pe card — cardul rămâne citibil
-      vizite: (Array.isArray(r.vizite) ? r.vizite : []).slice(0, 40).map((z) => ({ la: String(z.la), pages: String(z.pages ?? '') })),
+      // toate vizitele omului pe card — plafonul de 40 e în SQL (LIMIT 40)
+      vizite: (Array.isArray(r.vizite) ? r.vizite : []).map((z) => ({ la: String(z.la), pages: String(z.pages ?? '') })),
       prima_vizita: r.prima_vizita ? String(r.prima_vizita) : undefined,
     }))
     // Cifra cinstită a LEGII: câți oameni (și câte vizite) nu se afișează.
+    // Aceeași judecată ieftină (bool + EXISTS), negată — fără octeți de poze.
     const ascunsi = (
       await pool.query<{ persoane: string; vizite: string }>(
         `${CU_OM}
-         SELECT COUNT(*)::int AS persoane, COALESCE(SUM(n), 0)::int AS vizite FROM (
-           SELECT o.cheia, COUNT(*)::int AS n
-             FROM om o
-             LEFT JOIN faceprints f ON o.user_email <> '' AND f.user_email = o.user_email
-            GROUP BY o.cheia
-           HAVING ${POZA_OMULUI} = ''
-         ) g`,
+         SELECT COUNT(*)::int AS persoane, COALESCE(SUM(g.vizite_total), 0)::int AS vizite
+           FROM grup g
+          WHERE NOT ${LEGEA_POZEI}`,
       )
     ).rows[0]
     return {

@@ -43,7 +43,9 @@ import {
   getGeminiMonthUsd,
   loadKv,
   saveKv,
+  noteazaAudit,
 } from '../db.js'
+import { videoPlatitPornit, KV_VIDEO_PLATIT } from '../services/video.js'
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { explicaEroare } from '../services/explicaEroare.js'
@@ -877,7 +879,26 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // self-heal/triaj/autonomia orară nu mai ard credit fără user decât dacă
       // e pornit explicit de aici.
       autonomActiv: await autonomActiv().catch(() => false),
+      // P29 (15 aug): comutatorul „video plătit" — citit, nu presupus; null =
+      // citirea a picat (se spune „necitit", nu se inventează un OPRIT).
+      videoPlatit: await videoPlatitPornit().catch(() => null),
     })
+  })
+
+  // P29 — BUTONUL „VIDEO PLĂTIT" (owner, 15 aug: „eu vreau sa platesc, sau
+  // clientul, de ce nu ma duce spre plata"): pornirea/oprirea generării video
+  // plătite era un env pe VPS în care ownerul nu umblă; acum e kv + buton.
+  // Fiecare apăsare lasă urmă în registrul de audit (P26 — trasabilitate 24/7).
+  app.post<{ Body: { pornit?: boolean } }>('/api/admin/video-platit', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const pornit = req.body?.pornit === true
+    const vechi = await videoPlatitPornit().catch(() => null)
+    await saveKv(KV_VIDEO_PLATIT, pornit ? '1' : '0')
+    noteazaAudit('admin', 'video-platit (buton)', 'kv_state', KV_VIDEO_PLATIT,
+      vechi ? `${vechi.pornit ? 'pornit' : 'oprit'} (${vechi.sursa})` : 'necitit',
+      pornit ? 'pornit' : 'oprit')
+    return reply.send(await videoPlatitPornit().catch(() => ({ pornit, sursa: 'buton' as const })))
   })
   // YOUR BRAKE, ONE CLICK AWAY (Adrian, 30 Jul: "the 6 are needed, but no
   // brakes" — this is not a brake I put over him, it's the lever YOU hold).

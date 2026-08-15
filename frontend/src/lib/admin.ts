@@ -155,6 +155,22 @@ export async function pauzaAutonomie(oprit: boolean): Promise<boolean> {
   }
 }
 
+// P29 (15 aug): butonul „Video plătit" — pornește/oprește generarea Veo din
+// panou (kv pe server), în locul env-ului de pe VPS în care ownerul nu umblă.
+export async function setVideoPlatit(pornit: boolean): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/video-platit', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pornit }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 /** A proof of autonomy, as the server reads it from the database. */
 export interface DovadaAutonomie {
   nivel: number

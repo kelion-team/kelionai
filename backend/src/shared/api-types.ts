@@ -159,6 +159,9 @@ export interface MoneyCircuit {
   /** The owner's lever: is autonomy stopped? A limit HE chooses is not a
    *  barrier; one set by me is. That is why it is visible, and it is his. */
   autonomiaOprita?: boolean
+  /** P29 (15 aug): comutatorul „video plătit" (Veo) — buton kv, nu env. null =
+   *  citirea a picat (starea se spune „necitită", nu se inventează un OPRIT). */
+  videoPlatit?: { pornit: boolean; sursa: 'buton' | 'env' | 'implicit' } | null
   error?: string
 }
 

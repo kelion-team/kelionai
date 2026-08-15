@@ -97,16 +97,27 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       LEGEA pozei: omul fără nicio poză acceptată NU apare; cifra celor
       neafișați se spune pe față („+N oameni fără poză — neafișați, conform
       legii tale"); boții afară din lista de oameni (rămân în totaluri).
-      Lacăte: vizitatoriRaport.test (grupare + HAVING + faraPoza) +
-      pozaVizitatorului.test adaptat pe forma agregată. RĂMAS: verificarea
-      LIVE a ownerului (cardul lui unic, cu ambele vizite din 15 aug). [ ]
+      Lacăte: vizitatoriRaport.test (grupare + legea pozei + faraPoza) +
+      pozaVizitatorului.test adaptat pe forma agregată. REPARAT 15 aug seara
+      (auditul adversarial al diff-urilor, 3 constatări CONFIRMATE, dovada pe
+      un Postgres 16 local cu schema reală): (1) CRITIC — pozele base64 nu se
+      mai multiplică în agregate pe fiecare vizită (24MB/grup, ×2 pe apel, la
+      fiecare 30s) — grupul ține doar bool/MAX/COUNT, pozele vin prin LATERAL
+      doar pe cele ≤60 afișate, plafonul 40 vizite/card mutat în SQL;
+      (2) join-ul faceprints era sensibil la majuscule → omul cu poză de cont
+      DISPĂREA din raport (numărat fals la faraPoza) — emailul omului se
+      calculează cu lower() o dată; (3) vizitele anonime dinaintea login-ului
+      făceau a DOUA poziție pe același om — amprenta moștenește emailul, toată
+      istoria sub o cheie (măsurat: 47 vizite → un card, prima_vizita cea
+      veche). RĂMAS: verificarea LIVE a ownerului (cardul lui unic). [ ]
 - [x] ORDIN 15 aug, P26 (verbatim, LEGE): „orice se intimpla cu aplicatia,
       baza de date nu se sterge, sau se pierde, nici la suprascriere, se scrie
       doar unde e necesar dar cu istoric salvat cu dovezi cine a modificat,
       trasabilitate 24 din 24 de ore" + „se ataseaza inclusiv monstra de voce"
       — registrul audit_log (sub scut; urme: blocare/deblocare, golirea GDPR,
       limba, amprenta vocii; banii aveau deja billing_events), scutul extins pe
-      messages + audit_log + video_invatat, ruta /api/admin/audit cu DOVADA
+      messages + audit_log + video_invatat, ruta /api/admin/registru-audit
+      (redenumită după 502 — /api/admin/audit exista deja) cu DOVADA
       backupului de pe disc, Registrul modificărilor în tabul Utilizatori,
       cardul userului cu poza de pe server + plăcuța 🎤 voce/mostră, iar
       catch-ul MUT din getUserActivity (bugul „citirea a eșuat" din captura
@@ -120,8 +131,13 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       10 min SPUS în cerere, costul = tokenii REALI în jurnal ('video-vazut'),
       fișa intră în VIDEOTECĂ (video_invatat, sub scut, căutabilă) + în
       memoria de lungă durată. Manual + registrul capabilităților (116).
-      RĂMAS: proba live a ownerului cu un link real; P30b (TikTok/„de
-      oriunde"/fișiere — cere acordul lui pe descărcare); P30c (Studio). [ ]
+      REPARAT 15 aug seara (audit adversarial, CONFIRMAT prin execuție):
+      regexul de recunoaștere refuza FALS linkuri YouTube autentice —
+      m.youtube.com (forma copiată de pe telefon), music.youtube.com,
+      /embed/, watch?app=desktop&v= — acum URL-ul se parsează (new URL), cu
+      teste pe formele reale + gazdele-capcană. RĂMAS: proba live a ownerului
+      cu un link real; P30b (TikTok/„de oriunde"/fișiere — cere acordul lui
+      pe descărcare); P30c (Studio). [ ]
 - [ ] ORDIN 15 aug 09:11, P31 (verbatim): „pornesc aplicatia pe telefon prin
       web, in masina, telefonul e cuplat la bloutoutch al masinii… kelion aude
       cred… dar vocea lui nu se aude, oare de ce?" — BUG VIU găsit de criticul
@@ -147,11 +163,22 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       intrare din meniu = aplicație REALĂ condusă de Kelion (subiect la
       deschidere, analiză, gestionare, erori cinstite); + auto-captura pe
       site-urile care refuză înrămarea (propus, așteaptă „da"). PE COADĂ. [ ]
-- [ ] ORDIN 15 aug, P29 (verbatim): „inteleg dar eu vreau sa platesc, sau
-      clientul, de ce nu ma duce spre plata" — drumul spre plată la video:
-      buton admin „Generare video plătită PORNIT/OPRIT" (kv, ca Fable), clientul
-      fără credit dus la /credite cu prețul pe față, Kelion propune pasul
-      următor concret. PE COADĂ. [ ]
+- [x] ORDIN 15 aug, P29 (verbatim): „inteleg dar eu vreau sa platesc, sau
+      clientul, de ce nu ma duce spre plata" + 19:0x „daca video si funtiile
+      nu merg e pa" — drumul banilor la video FUNCȚIONEAZĂ: (1) butonul
+      „🎬 Video (Veo) PORNIT/OPRIT" în panoul de admin (kv video_platit, bate
+      env-ul; fiecare apăsare lasă urmă în audit_log — P26); (2) CLIENTUL care
+      plătește tariful (profit copt înăuntru) TRECE de comutator — clipul lui
+      e autofinanțat (ordinul „sa se autofinanteze"); (3) clientul FĂRĂ sold
+      nu mai e în fundătură: pagina /credite se deschide pe monitorul lui +
+      creierul spune prețul și pasul; (4) refuzul „neaprobat" dă mereu calea
+      GRATUITĂ (Google Flow, labs.google/flow, pași concreți); (5) descrierea
+      uneltei obligă creierul la preț+pas, niciodată „failed" sec. CAUZA
+      măsurată a lui „i-am cerut sa genereze video, dar nu am vazut nimic":
+      garda cerea VIDEO_ALLOW_PAID=1 din env-ul VPS — nimeni nu-l setase,
+      refuza TOT, inclusiv clipuri deja plătite (rambursate pe tăcute).
+      Lacăte: videoCost.test (P29). RĂMAS: proba live a ownerului — apasă
+      butonul din tabul Bani, cere un clip, îl vede pe monitor. [ ]
 - [ ] DE CLARIFICAT cu ownerul (criticul auditului, 15 aug): mesajul de la
       06:57 „acest lucru trebuie sa fie monitorizat de kelion" — referentul e
       ambiguu: publicarea stagnantă (acoperit de santinelaPublicarii) SAU
