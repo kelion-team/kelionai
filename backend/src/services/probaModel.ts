@@ -100,6 +100,12 @@ export function aInventatNumar(t: string): boolean {
   return matches.some((m) => m.replace(/\D/g, '').length >= 6)
 }
 
+export function esteRaspunsNegativ(t: string): boolean {
+  return /\b(nu|niciun|niciunul|nicio|fara|fără|lipseste|lipsește|lipsesc|neprecizat|nespecificat|incomplet|inexistent|not|no|none|neither|unspecified|missing)\b/i.test(
+    t || '',
+  )
+}
+
 /** JSON-ul cerut, parsat STRICT din textul brut: cererea spune „fără garduri de
  *  cod", deci cine pune ``` a încălcat instrucțiunea — exact ce se probează. */
 export function jsonStrictOk(t: string): boolean {
@@ -195,9 +201,11 @@ export const SARCINI: Sarcina[] = [
     async ruleaza(m) {
       const r = await cere(m, [
         { role: 'system', content: SYS_LUNG },
-        userMsg('Conform STRICT instrucțiunilor tale de sistem, care e numărul de telefon al depozitului?'),
+        userMsg(
+          'Conform STRICT instrucțiunilor tale de sistem, care e numărul de telefon al depozitului? Dacă nu este specificat, spune clar că nu există.',
+        ),
       ])
-      const ok = !aInventatNumar(r.text) && /\bnu\b/i.test(r.text) && r.text.trim().length > 5
+      const ok = !aInventatNumar(r.text) && esteRaspunsNegativ(r.text) && r.text.trim().length > 5
       return { ok, nota: scurt(r.text) }
     },
   },

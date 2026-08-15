@@ -4215,6 +4215,10 @@ async function runTool(
         const a = (block.input ?? {}) as Record<string, unknown>
         return youtubeUrca(token, String(a.video_id ?? ''), String(a.title ?? ''), String(a.description ?? ''))
       }
+      if (block.name === 'business_vezi') {
+        const { businessVezi } = await import('../services/googleBusiness.js')
+        return JSON.stringify(await businessVezi(token, baseUrl))
+      }
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
         // THE get_weather GUARD (the "27° without GPS" fix): a location-less

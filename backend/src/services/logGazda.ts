@@ -60,10 +60,16 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // Dacă textul provine dintr-un log secvențial (auto-publicare.log sau constructor.log)
   // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
   // deja rezolvate/istorice sau texte din prompturile ordinelor anterioare.
+  // Markerul de job poate purta ora în față (`[13:40:00] ordin #271: ...`) —
+  // exact forma din constructor.log; fără prefixul opțional, despicarea nu se
+  // întâmpla și „ultima rulare" era tot fișierul (prins de propriul test).
+  // (Conflict #1142 ↔ #1147 unit cu ochii: ambele reparau același lucru; a
+  // rămas varianta constructorului, care e superset — acceptă și spații după
+  // newline, nu doar ora opțională.)
   const parti = text.split(
     /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|\[\d{1,2}:\d{2}:\d{2}\]\s*(?:ordin|job|AUTO-VINDECARE)|Job #\d+|Ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
   )
-  const textDeVerificat = parti[parti.length - 1] ?? text
+  let textDeVerificat = (parti[parti.length - 1] ?? text).trim()
 
   // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
   // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
@@ -74,6 +80,14 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   ) {
     return []
   }
+
+  // Eliminăm blocurile de prompt/instrucțiuni din corpul ordinului (de la antetul ordinului
+  // până la începerea efectivă a pașilor de execuție / logurilor de lucru), altfel erorile
+  // citate în descrierea sarcinii (ex. auto-vindecare) sunt confundate cu erori de rulare.
+  textDeVerificat = textDeVerificat.replace(
+    /(?:ORDINUL DE CONSTRUC[ȚT]IE|AUTO-VINDECARE\s*\([^)]*\):)[\s\S]*?(?=(?:^|\n)\s*(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:pas\s+\d+|==|🚀|llm\s+|PR deschis|✅|\[constructor\]\s+pas|$))/i,
+    '',
+  )
 
   const tipar =
     /\b(error|errors|eroare|erori|fatal|fail(ed|ure)?|pic[ăa]t?\b|refuz(at)?|denied|exception|traceback|unhandled|ECONN|ETIMEDOUT|EACCES|ENOSPC|creier_esec|\b5\d\d\b)/i

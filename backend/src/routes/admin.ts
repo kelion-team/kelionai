@@ -434,7 +434,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const [vps, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
+    const [vps, serperBalance, geminiCost, geminiState] = await Promise.all([
       resurseGazda(),
       // THE SERPER PILL: the REAL remaining search credit read from Serper's
       // /account endpoint. Cached 5 min in the service.
@@ -450,51 +450,31 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // ATARE, cu data, fiindcă Google n-o dă automat. A ta, nu inventată de mine.
       getGeminiMonthUsd(),
       geminiLive(),
-      // GARDAT (auditul admin, 3 aug): loadKv era singura citire NEgardată din
-      // acest Promise.all — un sughiț de DB pe KV respingea tot lanțul, ruta
-      // dădea 500 și TOATE pastilele se stingeau, deși Serper/VPS/Gemini se
-      // măsuraseră cu succes. Eșecul se declară per câmp, nu omoară răspunsul.
-      loadKv('gemini:credit').catch(() => null),
+      // (Citirea kv `gemini:credit` a fost SCOASĂ, 15 aug — declarația manuală
+      // a murit; soldul vine derivat din export, mai jos.)
     ])
-    // Creditul „spus de owner" — citit onest din kv. Dacă lipsește sau e stricat,
-    // rămâne undefined (pastila arată ✓/⚠, nu o cifră falsă).
-    let geminiCreditGbp: number | undefined
-    let geminiCreditAt: string | undefined
+    // ── SOLDUL REAL, DERIVAT DIN EXPORT (ordinul din 15 aug: „valoarea reală…
+    // trebuie citit automat") ────────────────────────────────────────────────
+    // Declarația de mână a MURIT: cifra spusă de om se învechea la fiecare
+    // auto-reload și pastila ajungea să mintă (£0.00 lângă £25.80 real).
+    // Acum: full_amount − aplicat, per credit, din exportul Cloud Billing →
+    // BigQuery. Nicio verigă → `soldMotiv` cu pasul exact, NICIODATĂ o cifră.
+    let geminiSold: number | undefined
+    let geminiSoldMoneda: string | undefined
+    let geminiSoldMotiv: string | undefined
     try {
-      const c = geminiCreditRaw ? (JSON.parse(geminiCreditRaw) as { gbp?: number; at?: string }) : null
-      if (c && Number.isFinite(c.gbp) && (c.gbp as number) >= 0) {
-        geminiCreditGbp = c.gbp
-        geminiCreditAt = typeof c.at === 'string' ? c.at : undefined
+      const { soldCrediteGoogle } = await import('../services/facturareGoogle.js')
+      const s = await soldCrediteGoogle()
+      if (s.ok && s.date.soldTotal != null) {
+        geminiSold = s.date.soldTotal
+        geminiSoldMoneda = s.date.moneda || undefined
+      } else {
+        geminiSoldMotiv = s.ok
+          ? 'exportul are credite dar fără full_amount — soldul nu se poate deriva'
+          : s.motiv
       }
     } catch {
-      /* kv stricat → „nu știu", niciodată un zero fals */
-    }
-    // ── PASTILA SCADE (Adrian, 8 aug: „asta trebuie să scadă real cum e afișat
-    // la ei pe site") ────────────────────────────────────────────────────────
-    // Din creditul declarat se scade cheltuiala măsurată de DUPĂ declarare, pe
-    // cursul USD→GBP citit de la BCE (services/fx.ts). Orice verigă picată →
-    // câmpul lipsește și pastila cade pe cifra declarată, cu motivul alături —
-    // nu pe un calcul cârpit.
-    let geminiCreditRamasGbp: number | undefined
-    let geminiScazutUsd: number | undefined
-    let geminiScadereMotiv: string | undefined
-    if (geminiCreditGbp !== undefined) {
-      const { ramasDinDeclarat } = await import('../services/creditAI.js')
-      const r = await ramasDinDeclarat({ gbp: geminiCreditGbp, at: geminiCreditAt })
-      if (r.ok && r.ramasGbp > 0) {
-        geminiCreditRamasGbp = r.ramasGbp
-        geminiScazutUsd = r.scazutUsd
-      } else if (r.ok) {
-        // ESTIMAREA CONSUMATĂ NU MAI E O CIFRĂ (owner, 14 aug — pastila scria
-        // „£0.00" în timp ce AI Studio arăta £25.80 cu auto-reload pornit).
-        // Nici restul, nici declarația veche nu se mai trimit ca numere:
-        // pastila cade pe ✓/⚠ (becul viu), iar motivul spune ce e de făcut.
-        geminiCreditGbp = undefined
-        geminiScadereMotiv =
-          'declarația s-a consumat pe estimare — soldul real e în AI Studio (auto-reload pornit); re-declară-l cu «credit Gemini»'
-      } else {
-        geminiScadereMotiv = r.motiv
-      }
+      geminiSoldMotiv = 'citirea soldului din export a picat'
     }
     return reply.send({
       // (Câmpurile `openrouter` și `openai` au fost SCOASE din răspuns, 3 aug —
@@ -533,16 +513,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         serving: geminiState.serving,
         reason: geminiState.reason,
         monthUsd: geminiCost.ok ? geminiCost.monthUsd : undefined,
-        // Creditul spus de owner (GBP) + când. Afișat ca ATARE pe pastilă.
-        creditGbp: geminiCreditGbp,
-        creditAt: geminiCreditAt,
-        // Ce-a mai rămas din el: declarat − cheltuiala măsurată DE LA declarare,
-        // pe cursul BCE. Lipsește când o verigă a picat (motivul în
-        // `scadereMotiv`) — pastila cade atunci pe `creditGbp`, nu pe o cifră
-        // cârpită. `scazutUsd` = cât s-a scăzut, pentru tooltip/audit.
-        creditRamasGbp: geminiCreditRamasGbp,
-        scazutUsd: geminiScazutUsd,
-        scadereMotiv: geminiScadereMotiv,
+        // SOLDUL REAL, derivat automat din exportul BigQuery (full_amount −
+        // aplicat, per credit) — ordinul din 15 aug: „valoarea reală… citit
+        // automat". Absent → `soldMotiv` spune exact ce lipsește (de obicei:
+        // „aștept exportul" sau rolul rămas în consolă); pastila arată ✓/⚠,
+        // NICIODATĂ un număr inventat. Declarația manuală a murit.
+        sold: geminiSold,
+        soldMoneda: geminiSoldMoneda,
+        soldMotiv: geminiSoldMotiv,
       },
       // (Câmpul `runpod` a fost SCOS, 14 aug — owner: constructorul nu mai rulează
       // pe RunPod, ci pe Gemini (principal) → Fable 5 (rezervă), AMBELE prin app.
@@ -557,24 +535,20 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // ── CREDITUL GEMINI SPUS DE OWNER (Adrian, 3 aug: „gemini nu e afișată
-  //    valoarea pe aplicație", cu poza £10.88 din AI Studio) ─────────────────
-  // Google NU expune creditul promoțional prin niciun API — deci nu-l pot citi
-  // și n-am voie să-l inventez (regula #1). Soluția onestă: îl spui O DATĂ (aici
-  // sau prin Kelion în chat), se salvează cu data, și pastila îl arată ca ATARE
-  // — cifra TA, nu o măsurătoare. `gbp` gol/negativ/absent → șterge ancora
-  // (pastila revine la ✓/⚠), niciodată un zero fals.
-  app.post<{ Body: { gbp?: number | string | null } }>('/api/admin/gemini-credit', async (req, reply) => {
+  //    valoarea pe aplicație") — ÎNCHISĂ pe 15 aug ─────────────────────────
+  // Ordinul: „re-declararea soldului Gemini trebuie citit automat — valoarea
+  // reală". Declarația de mână a murit: soldul se DERIVEAZĂ din exportul
+  // Cloud Billing → BigQuery (full_amount − aplicat, per credit, în
+  // facturareGoogle.soldCrediteGoogle). Ruta rămâne ca apelanții vechi să
+  // primească MOTIVUL, nu un 404 mut (tiparul de la /api/me/delete).
+  app.post('/api/admin/gemini-credit', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const raw = req.body?.gbp
-    const n = typeof raw === 'string' ? Number(raw.replace(',', '.').trim()) : raw
-    if (raw == null || raw === '' || !Number.isFinite(n) || (n as number) < 0) {
-      await saveKv('gemini:credit', '').catch(() => {})
-      return reply.send({ ok: true, cleared: true })
-    }
-    const at = new Date().toISOString()
-    await saveKv('gemini:credit', JSON.stringify({ gbp: n, at, by: user.email }))
-    return reply.send({ ok: true, gbp: n, at })
+    return reply.code(410).send({
+      error: 'declararea_manuala_inchisa',
+      motiv:
+        'Soldul Gemini se citește AUTOMAT din exportul Cloud Billing → BigQuery (totalul acordat minus creditele aplicate) — ordinul din 15 aug: „valoarea reală". Nu mai e nimic de declarat de mână; dacă pastila nu arată încă cifra, motivul de pe ea spune exact ce pas de consolă lipsește.',
+    })
   })
 
   // (Ruta /api/admin/openai-costs a fost ȘTEARSĂ, 3 aug — OpenAI extirpat:

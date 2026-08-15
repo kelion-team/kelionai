@@ -87,7 +87,16 @@ ruleaza_portile() {
   # (dovedit), iar poarta măsoară BOOTUL, nu configurarea.
   R_BOOT=PICĂ
   if ( cd "$dir/backend" && npm run build ) >/dev/null 2>&1; then
-    ( cd "$dir/backend" && PORT=18099 timeout 20 node dist/index.js 2>&1 | grep -qm1 'Server listening' ) && R_BOOT=TRECE
+    # 2 încercări × 45s, nu una × 20s: primul boot de după un build proaspăt
+    # încarcă tot graful de module LA RECE — măsurat (15 aug, 03:35): 1 atârnare
+    # mută din 13 booturi locale, fix pe primul de după build; poarta rulează
+    # MEREU exact cazul ăsta (clonă+ci+build reci), pe mașina pe care lucrează
+    # simultan și constructorul. 20s măsura frigul mașinii, nu bootul — PICĂ
+    # fals pe #1142 cu tsc+teste+build toate verzi. O aplicație chiar ruptă
+    # (ciclul de importuri din 2 aug) pică și din 2 încercări a 45s.
+    for _incercare in 1 2; do
+      ( cd "$dir/backend" && PORT=18099 timeout 45 node dist/index.js 2>&1 | grep -qm1 'Server listening' ) && { R_BOOT=TRECE; break; }
+    done
   fi
 
   VERDICT=TRECE

@@ -161,6 +161,12 @@ export const googleTools: Tool[] = [
     },
   },
   {
+    name: 'business_vezi',
+    description:
+      "Read the user's Google Business Profile: the account and its locations (name, address, phone, website). Use when the user asks about their firm's Google listing. Honest states it can return: consent missing (show the /auth/google/connect-business link on the monitor — separate one-time consent, sensitive scope) or quota not approved yet (Google keeps this API at quota 0 until the project is approved via their access form — the tool returns the exact steps).",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'create_form',
     description:
       "Create a Google Form in the user's account: a title, an optional description and a list of text questions. Use for sign-up forms, surveys, questionnaires. Returns the link to fill it in (url) and the edit link (editUrl).",
