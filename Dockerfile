@@ -65,7 +65,7 @@ COPY backend/package.json backend/package-lock.json ./backend/
 # cursa asta; fără ea, publicarea moare tăcut și live-ul rămâne pe build-ul vechi.
 # Nu ascunde erori reale: dacă pică și a doua oară (lipsă modul, lock stricat),
 # build-ul tot cade.
-RUN cd backend && (npm install || (echo "npm install: reîncerc după eroare trecătoare (ex. esbuild ETXTBSY)" && sleep 5 && npm install))
+RUN cd backend && (npm install || (echo "npm install: reincerc dupa esec trecator (ex. esbuild ETXTBSY)" && sleep 5 && npm install))
 
 # --- frontend build ---
 COPY frontend ./frontend

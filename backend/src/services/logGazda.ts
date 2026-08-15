@@ -97,7 +97,7 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // pașii normali de lucru ai constructorului (ex. `pas 18/120: grep ...`) care
   // conțin în argumente numele funcțiilor/fișierelor căutate.
   const zgomot =
-    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|apare RECURENT eroarea|count=\d+,\s*prag=\d+|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+)|\bit\(|\bexpect\(|\bdescribe\()/i
+    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|apare RECURENT eroarea|count=\d+,\s*prag=\d+|^\s*Step\s+\d+\/\d+\s*:|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+)|\bit\(|\bexpect\(|\bdescribe\()/i
   const vazute = new Set<string>()
   const out: string[] = []
   let inPromptBloc = false

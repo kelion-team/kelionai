@@ -70,6 +70,7 @@ describe('semnaturiEroare', () => {
       '2026-08-14T10:00:05Z RunPod timeout ignorat',
       '[15:18:38] llm încercarea 1/6 a picat pe creierul prin app (Gemini → Fable 5 — reîncerc în 8s',
       '[15:18:40] llm reîncercare 2/6 pe creierul prin app (Gemini → Fable 5) — pauză 8s',
+      'Step 8/18 : RUN cd backend && (npm install || (echo "npm install: reîncerc după eroare trecătoare (ex. esbuild ETXTBSY)" && sleep 5 && npm install))',
     ].join('\n')
 
     const out = semnaturiEroare(text)
