@@ -8,6 +8,10 @@ export type AdminNotificationType =
   // Santinela publicării (15 aug: „monitorizat de Kelion"): stagnarea și revenirea.
   | 'publicare_blocata'
   | 'publicare_ok'
+  // Bucla închisă a cerințelor (P4; owner, 15 aug): verdictul probei pe live
+  // ajunge LA OM (panou + push pe telefon), nu doar în coloana de stare.
+  | 'cerinta_live'
+  | 'cerinta_picata'
 
 export interface AdminNotification {
   id?: number
