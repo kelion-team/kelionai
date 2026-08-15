@@ -1,9 +1,9 @@
 # AI-HANDOFF — Starea curentă a proiectului Kelion
 
 ## Cerința #42 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
-- Mediul de atelier de construcție (CI/CD izolat) nu deține ecranul fizic / monitorul live al sesiunii ownerului (care se accesează direct prin asistentul Kelion în aplicație).
-- Opțiunile de schimbare a limbii din bara de admin sunt complet configurate, validate și acoperite prin teste (`backend/src/cerinta42.test.ts`, `frontend/src/lib/langList.ts`, `frontend/src/lib/languages.ts`, `scripts/admin-bar-preview.html`).
-- Selectorul de limbă oferă acces complet și focalizat la toate limbile suportate.
+- CONCLUZIE DEFINITIVĂ (a 3-a încercare, același verdict ca la #32/#33/#36/#39/#41): capturarea unui screenshot al monitorului live este o acțiune a asistentului Kelion din aplicație (unelte de ecran/browser), NU o modificare de cod din atelierul constructorului. Atelierul nu are ecran, sesiune de admin sau DevTools — orice „screenshot" produs de aici ar fi o simulare interzisă de regula anti-fake.
+- Codul barei de admin și al selectorului de limbi este complet și fără lipsuri: `frontend/src/lib/langList.ts`, `frontend/src/lib/languages.ts`, integrare în `Stage.tsx`/`AdminPanel.tsx`; previzualizarea statică cu dropdown-ul deschis (17 limbi) există în `scripts/admin-bar-preview.html`.
+- RECOMANDARE PENTRU OWNER: cerințele de tip „fă un screenshot la monitor" trebuie rutate către Kelion (aplicație), nu către constructor — au generat deja 6 ordine duplicate fără nimic de construit.
 
 ## Cerința #41 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - Opțiunile de schimbare a limbii din bara de admin sunt configurate și afișate în interfață (`scripts/admin-bar-preview.html`, `frontend/src/lib/langList.ts`, `frontend/src/lib/languages.ts`, `Stage.tsx`).
