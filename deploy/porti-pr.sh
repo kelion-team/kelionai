@@ -104,9 +104,41 @@ ruleaza_portile() {
     done
   fi
 
+  # ── P19: SE DESCHIDE ÎN BROWSER, NU DOAR PORNEȘTE (owner, 15 aug: „nu te
+  # comporți ca un QA inginer soft, și nu livrezi aplicația reparată") ────────
+  # Până azi porțile dovedeau că aplicația compilează și pornește — nimeni n-o
+  # DESCHIDEA într-un browser înainte de merge; primele ochi pe pagină erau ai
+  # ownerului. Acum: instanța bootează în fundal CU frontend-ul servit, iar
+  # Chromium (Playwright, cache-uit pe gazdă) o deschide real: 200 + randare
+  # (nu ecran alb) + zero erori de browser + /manual viu. Fără browser pe
+  # mașina porții → NEPROBAT (spus, nu inventat) — nu blochează verdictul;
+  # PICĂ (aplicația nu se deschide) blochează, exact ca restul porților.
+  R_E2E=NEPROBAT
+  if [ "$R_BOOT" = 'TRECE' ]; then
+    ( cd "$dir/backend" && npx playwright install chromium ) >/dev/null 2>&1 || true
+    # SERVESTE_FRONTEND=1: fără el, servirea SPA e oprită (doar config.isProd o
+    # pornea, iar prod cere secretele pe care poarta nu le are) și pagina dă
+    # 404 — ambele prinse chiar de primele rulări locale ale probei.
+    ( cd "$dir/backend" && SERVESTE_FRONTEND=1 PORT=18099 FRONTEND_DIST="$dir/frontend/dist" node dist/index.js > "$dir/e2e-boot.log" 2>&1 & echo $! > "$dir/e2e.pid" )
+    local _s
+    for _s in $(seq 1 30); do
+      grep -q 'Server listening' "$dir/e2e-boot.log" 2>/dev/null && break
+      sleep 1
+    done
+    if grep -q 'Server listening' "$dir/e2e-boot.log" 2>/dev/null; then
+      ( cd "$dir/backend" && SMOKE_URL=http://127.0.0.1:18099 timeout 90 node e2e-smoke.mjs ) > "$dir/e2e.log" 2>&1
+      local cod_e2e=$?
+      if [ "$cod_e2e" -eq 0 ]; then R_E2E=TRECE
+      elif [ "$cod_e2e" -eq 2 ]; then R_E2E=NEPROBAT
+      else R_E2E=PICĂ; fi
+    fi
+    kill "$(cat "$dir/e2e.pid" 2>/dev/null)" >/dev/null 2>&1 || true
+    rm -f "$dir/e2e.pid"
+  fi
+
   VERDICT=TRECE
   local r
-  for r in "$R_TIPURI" "$R_TESTE" "$R_BUILD" "$R_DUP" "$R_EXP" "$R_SINT" "$R_BOOT" "$R_BUT" "$R_LACAT"; do
+  for r in "$R_TIPURI" "$R_TESTE" "$R_BUILD" "$R_DUP" "$R_EXP" "$R_SINT" "$R_BOOT" "$R_BUT" "$R_LACAT" "$R_E2E"; do
     [ "$r" = 'PICĂ' ] && VERDICT=PICĂ
   done
 }
@@ -131,6 +163,7 @@ scrie_raportul() {
 | sintaxă CSS + JSON | $(ico "$R_SINT") $R_SINT |
 | butoane ↔ rute (frontend ↔ backend) | $(ico "$R_BUT") $R_BUT |
 | lacătul Gemini | $(ico "$R_LACAT") $R_LACAT |
+| se deschide în browser (E2E Chromium) | $([ "$R_E2E" = 'TRECE' ] && printf '✅' || { [ "$R_E2E" = 'NEPROBAT' ] && printf '⚪' || printf '❌'; }) $R_E2E |
 
 **VERDICT: $VERDICT**
 
