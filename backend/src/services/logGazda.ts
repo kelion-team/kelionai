@@ -61,19 +61,27 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
   // deja rezolvate/istorice sau texte din prompturile ordinelor anterioare.
   const parti = text.split(
-    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|Ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
+    /(?=(?:^|\n)\s*(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
   )
-  const textDeVerificat = parti[parti.length - 1] ?? text
+  let textDeVerificat = (parti[parti.length - 1] ?? text).trim()
 
   // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
   // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
   if (
-    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis: #\d+|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
+    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
       textDeVerificat,
     )
   ) {
     return []
   }
+
+  // Eliminăm blocurile de prompt/instrucțiuni din corpul ordinului (de la antetul ordinului
+  // până la începerea efectivă a pașilor de execuție / logurilor de lucru), altfel erorile
+  // citate în descrierea sarcinii (ex. auto-vindecare) sunt confundate cu erori de rulare.
+  textDeVerificat = textDeVerificat.replace(
+    /(?:ORDINUL DE CONSTRUC[ȚT]IE|AUTO-VINDECARE\s*\([^)]*\):)[\s\S]*?(?=(?:^|\n)\s*(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:pas\s+\d+|==|🚀|llm\s+|PR deschis|✅|\[constructor\]\s+pas|$))/i,
+    '',
+  )
 
   const tipar =
     /\b(error|errors|eroare|erori|fatal|fail(ed|ure)?|pic[ăa]t?\b|refuz(at)?|denied|exception|traceback|unhandled|ECONN|ETIMEDOUT|EACCES|ENOSPC|creier_esec|\b5\d\d\b)/i
