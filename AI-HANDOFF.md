@@ -636,6 +636,8 @@ node --check bridge/kelion-bridge-linux.mjs
   8. **NEREPARATE încă (onest)**: mesajele de sistem paywall/erori doar ro/en; `checkLang` neconectat (lock-ul de limbă e doar în prompt); rutele voiceprint fără apeluri din frontend (enrolarea merge pe alt drum); Stripe Issuing așteaptă aprobarea externă.
 - 🗓️ **3 AUG — ADMIN PANEL I1 COMPLET REZOLVAT (RAMAS-DE-FACUT.md I1):**
   Centralizat ~120 literale românești și literale engleze duplicate din `AdminPanel.tsx` în `adminText.ts` (cu traduceri complete `en` și `ro`). Toate acțiunile de admin (confirmări, alerte, prompt-uri, mesaje de status) au acum chei i18n tipizate în `AdminStrings` (`adminText.ts`).
+- 🗓️ **30 AUG — SELECTOR LIMBĂ ÎN BARA DE ADMIN / TOP BAR (Cerința #28):**
+  Adăugat selectorul de limbă în bara de admin / antetul scenei (Stage) cu opțiunile complete de limbă (`LANG_OPTIONS`), permițând vizualizarea și comutarea rapidă a limbii interfeței și vorbirii din bara de admin.
 - 🗓️ **30 AUG — BARGE-IN STT STREAMING REPARAT (RAMAS-DE-FACUT D5):**
   1. **Barge-in în chat (`micStream` → `/api/asr-stream`):** Am actualizat `micStream.ts` pentru a permite fluxului audio PCM să continue către WebSocket-ul `/api/asr-stream` în timpul stării de mute/redare TTS atunci când nivelul audio depășește `VOICE_RMS`. Acest lucru permite detectarea de către Google STT a semnalului `speech_begin` și declanșarea întreruperii audio (`onBargeIn` / `stopVoice()`), beneficiind în același timp de anularea ecoului (WebRTC Acoustic Echo Cancellation - `echoCancellation: true`).
   2. **Verificare și teste:** Trecut typecheck backend, teste vitest (inclusiv noul test din `urechiChirp.test.ts`), build frontend Vite și scripturile de verificare a sintaxei și exporturilor.

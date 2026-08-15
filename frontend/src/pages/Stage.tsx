@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { LANG_OPTIONS } from '../lib/langList'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
 import { DeployProgressBar } from '../components/DeployProgressBar'
@@ -30,7 +31,7 @@ import {
   type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii } from '../lib/prefs'
+import { loadServerPrefs, saveAvatarBox, loadLocalLang, saveSpeechLang, revendicaOglindaLimbii } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
@@ -1721,12 +1722,32 @@ export default function Stage({ user }: { user: User }) {
               {t.connectGoogle}
             </button>
           )}
-          {/* SELECTORUL DE LIMBĂ SCOS DIN BARĂ (owner, 13 aug: „dacă pun o limbă și
-              vorbesc în alta, Kelion trece pe limba auzită — nu e nevoie aici; era
-              necesar în Manual"). Conversația se adaptează SINGURĂ la limba
-              auzită/scrisă (creierul o decide), deci butonul nu ajuta la vorbit.
-              Limba INTERFEȚEI rămâne setabilă din Manual (are selector propriu de
-              7 limbi) și din Client Settings — bara rămâne curată. */}
+          <select
+            className="ghost"
+            value={lang}
+            onChange={(e) => {
+              const newLang = e.target.value
+              void saveSpeechLang(newLang)
+              window.location.reload()
+            }}
+            title={t.multilingual}
+            aria-label={t.multilingual}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border, rgba(255,255,255,0.2))',
+              borderRadius: '6px',
+              padding: '2px 6px',
+              fontSize: '12px',
+              color: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            {LANG_OPTIONS.map((opt) => (
+              <option key={opt.code} value={opt.code} style={{ background: 'var(--bg, #111)', color: 'inherit' }}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             className="ghost"
