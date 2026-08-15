@@ -3351,12 +3351,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           } catch (ge) {
             lastBrainErr = ge
             if (textFlowed) throw ge // partial text already at the user — no retry
+            const errMsg = String(ge)
+            const is503OrHighDemand = errMsg.includes('503') || /high demand/i.test(errMsg) || /UNAVAILABLE/i.test(errMsg)
             if (attempt + 1 < MAX_INCERCARI_GEMINI) {
-              console.warn(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
-              const pauzaMs = Math.min(800 * Math.pow(2, attempt), 3000)
+              console.warn(`[brain] ${orchestratorModel} failed (${errMsg.slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
+              const basePauza = is503OrHighDemand ? 1000 : 800
+              const pauzaMs = Math.min(basePauza * Math.pow(2, attempt) + Math.floor(Math.random() * 400), 3000)
               await new Promise((res) => setTimeout(res, pauzaMs))
             } else {
-              console.error(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 120)}) — încercări epuizate (${MAX_INCERCARI_GEMINI}/${MAX_INCERCARI_GEMINI})`)
+              console.error(`[brain] ${orchestratorModel} failed (${errMsg.slice(0, 120)}) — încercări epuizate (${MAX_INCERCARI_GEMINI}/${MAX_INCERCARI_GEMINI})`)
             }
             noteazaEsuare(orchestratorModel)
           } finally {
