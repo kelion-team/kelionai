@@ -28,6 +28,7 @@
 //     cannot be undone.
 
 import { config } from '../config.js'
+import { TOKEN_ADMIN_INTERN } from '../session.js'
 
 /** The admin routes he may NOT call on his own, with the reason written down.
  *  The rule: if the mistake cannot be undone, you press it yourself.
@@ -149,14 +150,21 @@ function url(cale: string): string {
 /**
  * Reads a section of the admin panel — exactly the data he sees.
  *
- * `cookie` is the admin session of the requester: without it the route answers
- * 403, and that is good — the tool does not bypass the admin gate, it uses it.
+ * `cookie` is the admin session of the requester when there IS one (chatul
+ * scris îl dă mai departe). P9 (owner, 15 aug — „de ce nu are acces ca admin
+ * 2?"): pe voce și în bucla autonomă cookie NU există, iar Kelion rămânea
+ * orb exact când lucra singur. De-acum fetch-ul poartă și LEGITIMAȚIA LUI
+ * (TOKEN_ADMIN_INTERN — token pe viața procesului, acceptat de cerAdmin doar
+ * de pe loopback), deci poarta de admin rămâne poartă: ori sesiunea omului,
+ * ori legitimația internă a lui Kelion — niciodată un ocol.
  */
 export async function adminVezi(cale: string, cookie: string): Promise<string> {
   // Fără secțiune → nu „sunt orb", ci CATALOGUL: ce pot citi și cum se cheamă.
   if (!cale.trim()) return catalogSectiuni()
   try {
-    const r = await fetch(url(cale), { headers: cookie ? { cookie } : {} })
+    const r = await fetch(url(cale), {
+      headers: { 'x-kelion-intern': TOKEN_ADMIN_INTERN, ...(cookie ? { cookie } : {}) },
+    })
     const text = (await r.text()).slice(0, MAX)
     if (!r.ok) {
       // 404 = secțiune inexistentă → dau catalogul, ca să aleagă numele corect,
@@ -196,7 +204,9 @@ export async function adminSchimba(cale: string, corp: unknown, cookie: string):
   try {
     const r = await fetch(url(c), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) },
+      // P9: și scrierea poartă legitimația lui — dar DOAR pe rutele care se pot
+      // desface; cele din DOAR_OWNERUL au fost refuzate mai sus, înainte de fetch.
+      headers: { 'Content-Type': 'application/json', 'x-kelion-intern': TOKEN_ADMIN_INTERN, ...(cookie ? { cookie } : {}) },
       body: JSON.stringify(corp ?? {}),
     })
     const text = (await r.text()).slice(0, MAX)
