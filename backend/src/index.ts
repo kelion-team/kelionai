@@ -528,6 +528,19 @@ try {
     void santinela()
     setInterval(() => { void santinela() }, 5 * 60 * 1000)
   }, 2 * 60 * 1000)
+  // SANTINELA PUBLICĂRII (owner, 15 aug: „acest lucru trebuie să fie monitorizat
+  // de Kelion" — publicarea a stat 2+ ore și nimeni n-a văzut: stagnarea nu
+  // scrie erori, e tăcere). Măsoară sha-ul propriu vs vârful master; peste
+  // prag → alarmă în panou + telefon, cu coada logului de publicare lângă.
+  const santinelaPublicare = async (): Promise<void> => {
+    const { ruleazaSantinelaPublicarii } = await import('./services/santinelaPublicarii.js')
+    const r = await ruleazaSantinelaPublicarii().catch(() => null)
+    if (r?.alarma) app.log.warn(r, 'publicarea STĂ — alarmă trimisă')
+  }
+  setTimeout(() => {
+    void santinelaPublicare()
+    setInterval(() => { void santinelaPublicare() }, 5 * 60 * 1000)
+  }, 3 * 60 * 1000)
   // ISCOADELE (Adrian, 4 aug: „boti care bat netul 24 din 24 si aduc informati
   // lui kelion"): patrula periodică Serper→creier→memoria lui Kelion.
   pornesteIscoadele()

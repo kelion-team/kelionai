@@ -199,6 +199,31 @@ function regulaVoceLive() {
   }
 }
 
+// LACĂTUL AUZULUI (ordinul ownerului, vechi și repetat: „sistemul de auzit să
+// NU se mai schimbe niciodată" — pus sub poartă pe 15 aug, după ce ecoul
+// propriei voci îi tăia vorba lui Kelion pe sesiunea live). Trei adevăruri
+// măsurate, plătite scump, care nu mai au voie să se piardă tăcut:
+function regulaAuzul() {
+  return {
+    nume: 'Auzul: AEC pe desktop / brut pe mobil (A2DP), poarta half-duplex cu coadă reală',
+    fisier: 'frontend/src/lib/vocalLive.ts',
+    verifica(src) {
+      // (1) AEC pornit pe desktop, stins DOAR pe mobil (11 aug #1006: procesarea
+      // WebRTC rupe A2DP pe Android; 15 aug: fără AEC pe desktop, ecoul taie vocea).
+      if (!/echoCancellation:\s*!eMobil/.test(src))
+        return 'AEC nu mai e „pornit pe desktop / stins pe mobil" — ori ecoul taie iar vocea (desktop), ori moare Bluetooth-ul din mașină (mobil)'
+      // (2) Poarta half-duplex există: cât Kelion e audibil, urcă TĂCERE.
+      if (!/kelionAudibil/.test(src) || !/new Float32Array\(ds\.length\)/.test(src))
+        return 'poarta half-duplex a dispărut — microfonul îi cară serverului propria voce a lui Kelion și VAD-ul i-o taie'
+      // (3) Coada ecoului acoperă latența reală a boxelor (element audio + A2DP).
+      const m = /COADA_ECOU_S = ([0-9.]+)/.exec(src)
+      if (!m || Number(m[1]) < 0.5)
+        return `coada ecoului e ${m ? m[1] : 'dispărută'} — sub 0,5s se termină înainte ca sunetul să fi ieșit din boxe (măsurat 15 aug pe 0,25s)`
+      return null
+    },
+  }
+}
+
 // Fiecare regulă: unde caută, ce trebuie să rămână, și mesajul dacă s-a schimbat.
 const REGULI = [
   regulaModelUnic(),
@@ -211,6 +236,7 @@ const REGULI = [
   regulaPoartaUpgrade(),
   regulaSemnaturaGandirii(),
   regulaVoceLive(),
+  regulaAuzul(),
 ]
 
 // DOVADA, NU DECLARAȚIA (Adrian, 7 aug: „vreau dovadă că ce discutăm și facem

@@ -112,6 +112,8 @@ const logLines = []
 // ~4s și cu timeout scurt: NU are voie să mănânce din bugetul de timp al rulării
 // (lecția „un job nu poate deveni demon") — un beat pierdut nu strică nimic.
 let beatJobId = 0
+// Încercarea ordinului curent (1 = primul drum; ≥2 = escaladare pe Fable 5).
+let incercareCurenta = 1
 let lastBeatAt = 0
 function beat(text, acum = false) {
   if (!beatJobId || !BRIDGE) return
@@ -638,7 +640,12 @@ async function llmGemini(messages) {
     r = await fetch(`${APP}/api/constructor/creier`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-bridge-secret': BRIDGE },
-      body: JSON.stringify({ messages, tools: TOOLS }),
+      // `attempt` = încercarea ordinului CURENT (ordinul ownerului, 15 aug:
+      // „dacă are o eșuare, următoarea tură o escaladează automat pe nivel
+      // superior Fable 5; nu pornește duplicat pe același model; se revine
+      // pentru un job nou la primul model"). App-ul decide ordinea creierelor
+      // pe baza lui — agentul doar spune cinstit a câta încercare e.
+      body: JSON.stringify({ messages, tools: TOOLS, job: beatJobId, attempt: incercareCurenta }),
       signal: AbortSignal.timeout(Math.max(30_000, Math.min(LLM_TIMEOUT_MS, ramase()))),
     })
   } catch (e) {
@@ -1008,6 +1015,7 @@ async function main() {
   // (dacă pică, rămâne lista de rezervă și tot poate lucra).
   await incarcaUneltele()
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
+  incercareCurenta = Math.max(1, Number(claim.job.attempts) || 1)
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
   // DOVADA CREIERULUI ACTIV (9 aug): scris în jurnal la fiecare ordin, ca să se

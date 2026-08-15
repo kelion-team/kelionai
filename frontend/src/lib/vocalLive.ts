@@ -521,8 +521,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // server e oricum OFF); zgomotul de drum nu mai e filtrat pe microfon — dacă
     // devine problemă în mașină, pasul următor e să reactivăm DOAR noiseSuppression
     // și să vedem dacă ruta A2DP rezistă. Întâi trebuie ca vocea să AJUNGĂ acolo.
+    // ANTI-ECOU PE DESKTOP (owner, 15 aug: „am nevoie de un sistem care anulează
+    // echo" — măsurat în consola lui: serverul îi tăia vorba lui Kelion pentru
+    // că-și auzea propriul ecou). Motivul stingerii AEC (11 aug, #1006) e DOAR
+    // pe Android: procesarea WebRTC ține telefonul în MODE_IN_COMMUNICATION și
+    // rupe A2DP-ul. Pe DESKTOP modul ăla nu există → AEC pornit acolo omoară
+    // ecoul la sursă, fără să atingă Bluetooth-ul reparat pe mobil.
+    const eMobil = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      audio: { channelCount: 1, echoCancellation: !eMobil, noiseSuppression: false, autoGainControl: false },
     })
   } catch {
     urcaEroarea('microfonul nu a fost permis')
@@ -604,9 +611,14 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // „varza". Preț acceptat: nu se poate întrerupe prin voce cât vorbește (barge-in
   // server e oricum OFF). `cursorRedare` e ora (în ceasul lui ctxOut) până la care
   // e programat sunetul lui Kelion; peste ea + coada = tăcut.
-  const COADA_ECOU_S = 0.25
+  // Coada 0,6s, nu 0,25s (15 aug — ecoul tăia vocea și CU poarta pornită):
+  // drumul real al sunetului trece prin elementul <audio> al boxei (ruta A2DP)
+  // care are bufferul lui + latența dispozitivului — 0,25s se termina înainte
+  // ca sunetul să fi ieșit din boxe. Și sursele încă vii numără ca audibil,
+  // nu doar ceasul programării — două măsurători, nu una singură optimistă.
+  const COADA_ECOU_S = 0.6
   const kelionAudibil = (): boolean =>
-    !!ctxOut && ctxOut.currentTime < cursorRedare + COADA_ECOU_S
+    surseActive.length > 0 || (!!ctxOut && ctxOut.currentTime < cursorRedare + COADA_ECOU_S)
   const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
     const ds = downsample(brut, ctxIn!.sampleRate)

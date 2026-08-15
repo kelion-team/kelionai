@@ -13,6 +13,58 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 15 aug (captura Vizitatori): „vizitatori nu au poză... de ce nu e
+      legată de vizitator" — FAPTE: vizitele se nasc pe server (IP/UA/pagini),
+      camera nu e pe drum; pozele trăiesc în faceprints cu cheia user_email.
+      DE FĂCUT legătura cinstită: (1) la logare, vizitele aceleiași sesiuni/
+      ferestre IP+browser se leagă de cont → rândul de vizitator primește poza
+      contului (acoperă chiar rândurile ownerului dinainte de logare);
+      (2) oaspeții care dau voie camerei în demo → captură legată de vizită
+      (simetric cu amprentele vocale de oaspete). Boții rămân cinstit fără. [ ]
+- [ ] ORDIN 15 aug: dovezile de autonomie 6 și 7 („vede ce îi lipsește și
+      construiește"; „își reanalizează soluțiile livrate") — de APRINS pe
+      dovadă reală: bucla golurilor triate există (triageGaps), dar niciun gol
+      n-a ajuns REZOLVAT cap-coadă; cerințe cu sursa='kelion' nu s-au născut
+      încă. ÎN LUCRU. [ ]
+- [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
+      tură o escaladează automat pe nivel superior Fable 5. Nu pornește
+      duplicat pe același model, se revine pentru un nou job la primul model."
+      — SCRIS: agentul trimite attempt-ul la /api/constructor/creier; tura ≥2
+      → Fable 5 conduce (Gemini doar plasă de avarie), job nou → iar Gemini;
+      lacăt: escaladareConstructor.test.ts. ATENȚIE: escaladarea e REALĂ doar
+      cu ANTHROPIC_API_KEY VALIDĂ pe VPS — cea de acum e invalidă (măsurat
+      14 aug); până o schimbă ownerul, tura escaladată cade cinstit pe plasă.
+- [ ] ORDIN 15 aug (captura Sign-in + verbatim): „nu mai are voie să pună doar
+      poza — tot ce pune pe monitor trebuie să fie apelabil, selectabil,
+      adresabil": tab-urile cu URL primesc linkul REAL clicabil («deschide în
+      tab»); suprafețele Google cu zid de logare (iframe-ul nu poate loga —
+      Google blochează) se deschid în tab nou cu sesiunea ownerului, nu în
+      ramă moartă; interzis screenshot în loc de suprafață vie. DE FĂCUT.
+- [x] ORDIN 15 aug (verbatim): „am nevoie de un sistem care anulează echo" —
+      SCRIS: (1) AEC pornit pe DESKTOP, stins doar pe mobil (istoricul #1006:
+      procesarea WebRTC rupea A2DP pe Android — rămâne apărat); (2) poarta
+      half-duplex din 13 aug avea coada de ecou prea scurtă (0,25s < latența
+      element-audio + boxe) și judeca audibilul doar din ceas → coadă 0,6s +
+      sursele vii numără; (3) LACĂTUL AUZULUI în verifica-gemini (regulaAuzul:
+      AEC !eMobil + poarta + coada ≥0,5s) — rulează pe poarta VPS; contractul
+      vechi din lacat.test (false peste tot) adus la adevărul nou, cu istoria
+      scrisă. PROBA OWNERULUI după publicare: o conversație pe voce, pe boxe —
+      Kelion nu se mai taie singur; întreruperea TA încă merge.
+- [x] ORDIN 15 aug (verbatim): „acest lucru trebuie să fie monitorizat de
+      Kelion" — publicarea care STĂ (dovedit azi: 2+ ore, live pe f3440b9 cât
+      master avansase de 2 ori; stagnarea nu scrie erori → senzorii pe erori
+      n-o vedeau). SCRIS: santinelaPublicarii (ciclu 5 min): sha propriu vs
+      vârf master; peste prag (20 min, env) → alarmă O DATĂ în panou + pe
+      telefon, cu coada auto-publicare.log lângă (cauza, nu doar simptomul);
+      la revenire → „și-a revenit", o dată. RĂMAS (brațul 2): la alarmă,
+      remedierea din runbook rulată SINGUR (deblocare deploy atârnat/restart
+      cron/curățenie disc), cu jurnal — omul strigat doar dacă pică și asta.
+- [ ] ORDIN 15 aug (captura „Ce vezi în această imagine?" delegată la
+      cheama_agent, 20%, fără sfârșit): „alocă, dar nu are consistență și
+      finalizare" — (1) întrebările cu imagine se răspund NATIV (creierul
+      vede singur; delegarea pierde imaginea), cheama_agent interzis pe ele;
+      (2) ORICE delegare primește timeout + verdict raportat (gata/eșuat cu
+      motiv), niciodată agonie la 20%. DE FĂCUT.
 - [ ] ORDIN 15 aug, dimineața („aplicațiile din butonul Aplicații, de la
       Google, trebuiesc TOATE funcționale, nu doar poze — interconectare reală
       și funcțională"): fiecare intrare din meniu trebuie să ducă REAL la
