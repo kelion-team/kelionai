@@ -123,6 +123,8 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'db_query', category: 'cod', does: 'interoghează baza de date', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'system_health', category: 'cod', does: 'sănătatea proprie', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'server_ops', category: 'cod', does: 'rulează comenzi VPS fixe', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  // P7 (owner, 15 aug): „toate datele din toate PR-urile" — vizibile creierului.
+  { name: 'pr_lista', category: 'cod', does: 'citește toate PR-urile de pe GitHub (stare, merged, ramură, sha)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'server_logs', category: 'cod', does: 'jurnalele serverului', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'client_errors', category: 'cod', does: 'erorile din browser (F12) ale utilizatorilor', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'ask_brain', category: 'cod', does: 'raționament profund (cod/analiză)', chat: true, voice: false, voiceViaBrain: true, admin: false },
