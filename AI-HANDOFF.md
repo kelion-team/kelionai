@@ -1,5 +1,10 @@
 # AI-HANDOFF — Starea curentă a proiectului Kelion
 
+## Cerința #31 — Opțiuni schimbare limbă în bara de admin
+- Opțiunile de schimbare a limbii din bara de admin sunt configurate și integrate în `Stage.tsx`.
+- Sunt disponibile opțiunile pentru limbile: Română (RO), English (EN), Español (ES), Français (FR), Deutsch (DE), Italiano (IT), Русский (RU).
+- Verificat cu teste automate în `backend/tests/cerinta31.test.ts`.
+
 ## Cerința #20 — Analiză captură panou Constructor
 - Analiză directă multimodală (Vision) pentru capturi de ecran și imagini din panoul Constructor.
 - Procesare fără halucinații, descriere structurată a stării panoului și a joburilor de construcție.
