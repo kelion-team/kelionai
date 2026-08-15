@@ -120,7 +120,20 @@ describe('P29 — comutatorul „video plătit": kv (butonul) bate env-ul', () =
     const video = sursa('./services/video.ts')
     expect(video).toMatch(/allowPaid: comutator\.pornit \|\| platitDeClient/)
     const chat = sursa('./routes/chat.ts')
-    expect(chat).toMatch(/genereazaVideo\(prompt, Number\(args\.seconds \?\? 8\), taxa\.scazutGbp > 0, \(sec\) => \{/)
+    // 21:29 („nu mai bine il faci sa genereze? nu ma mai umple de butoane"):
+    // cererea explicită a ADMINULUI e aprobarea — generarea pornește direct;
+    // comutatorul 🎬 rămâne doar peste timerul nesupravegheat.
+    expect(chat).toMatch(/genereazaVideo\(prompt, Number\(args\.seconds \?\? 8\), taxa\.scazutGbp > 0 \|\| isAdmin, \(sec\) => \{/)
+  })
+
+  it('lecția 21:26 — fiecare încercare lasă verdictul în kv, iar panoul îl arată', () => {
+    const video = sursa('./services/video.ts')
+    expect(video).toMatch(/KV_VIDEO_ULTIMA = 'video_ultima_incercare'/)
+    expect(video).toMatch(/noteazaIncercarea\(`REUȘIT: clip \$\{secunde\}s/)
+    const admin = sursa('./routes/admin.ts')
+    expect(admin).toMatch(/videoUltimaIncercare/)
+    const panou = sursa('../../frontend/src/components/AdminPanel.tsx')
+    expect(panou).toMatch(/Ultima încercare de clip/)
   })
 })
 
@@ -142,15 +155,16 @@ describe('P29 — omul e DUS spre plată, nu lăsat în fundătură', () => {
     expect(admin).toMatch(/app\.post<\{ Body: \{ pornit\?: boolean \} \}>\('\/api\/admin\/video-platit'[\s\S]{0,160}?cerAdmin\(req, reply\)/)
     expect(admin).toMatch(/noteazaAudit\('admin', 'video-platit \(buton\)'/)
     const panou = sursa('../../frontend/src/components/AdminPanel.tsx')
-    expect(panou).toMatch(/Generarea de clipuri \(Veo\)/)
+    expect(panou).toMatch(/Timerul de promovare POATE genera singur/)
     expect(panou).toMatch(/onVideoPlatit/)
   })
 
-  it('lecția 20:58 — eticheta spune ADEVĂRUL întreg: pornit = banii tăi; gratis nu există la Veo', () => {
+  it('lecția 20:58 + 21:29 — cererea generează DIRECT; butonul a rămas doar peste timer', () => {
     const panou = sursa('../../frontend/src/components/AdminPanel.tsx')
-    expect(panou).toMatch(/Pornește generarea \(pe banii tăi\)/)
-    expect(panou).toMatch(/Gratis la Veo NU există — gratis e doar prin Google Flow\./)
-    expect(panou).toMatch(/Google îți facturează ~0,10 \$\/secundă/)
+    expect(panou).toMatch(/Clipurile CERUTE \(de tine sau de clienți plătiți\) se generează DIRECT — fără butoane\./)
+    expect(panou).toMatch(/Permite timerului să genereze/)
+    expect(panou).toMatch(/gratis la Veo nu există/)
+    expect(panou).toMatch(/~0,10 \$\/secundă/)
   })
 
   it('lecția 21:20 („nu afiseaza nimic pe ecran") — ecranul NU tace cât se generează', () => {

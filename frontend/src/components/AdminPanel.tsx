@@ -1639,21 +1639,37 @@ export default function AdminPanel({
                     facturează pe secundă); PORNIT = clipurile tale de admin
                     se generează (pe banii tăi la Google); clienții cu tarif
                     plătit merg ORICUM; gratis = doar Google Flow. */}
+                    {/* 21:29 („nu mai bine il faci sa genereze? nu ma mai umple
+                    de butoane"): cererea EXPLICITĂ — a ta sau a unui client
+                    plătit — generează DIRECT, fără niciun buton. Comutatorul
+                    de aici a rămas doar peste TIMERUL de promovare (singurul
+                    care cheltuie nesupravegheat). Google facturează
+                    ~0,10 $/secundă pe cheia ta; gratis la Veo nu există —
+                    gratis e doar prin Google Flow (Studioul). */}
                     <span className="or-wallet-sub">
+                      🎬 Clipurile CERUTE (de tine sau de clienți plătiți) se generează DIRECT — fără butoane.{' '}
                       {circuit?.videoPlatit == null
-                        ? '🎬 Generarea de clipuri (Veo): stare necitită'
+                        ? 'Timerul de promovare: stare necitită.'
                         : circuit.videoPlatit.pornit
-                          ? `🎬 Generarea de clipuri (Veo): PORNITĂ${circuit.videoPlatit.sursa === 'env' ? ' (din env)' : ''} — clipurile tale se generează; Google îți facturează ~0,10 $/secundă`
-                          : '🎬 Generarea de clipuri (Veo): OPRITĂ — clipurile tale de admin NU se generează; ale clienților cu tarif plătit merg oricum. Gratis la Veo NU există — gratis e doar prin Google Flow.'}{' '}
+                          ? `Timerul de promovare POATE genera singur${circuit.videoPlatit.sursa === 'env' ? ' (din env)' : ''} (pe banii tăi, sub plafonul de mai jos).`
+                          : 'Timerul de promovare NU generează singur (oprit).'}{' '}
                       <button
                         type="button"
                         className="ghost"
                         disabled={videoBusy}
                         onClick={() => void onVideoPlatit(!(circuit?.videoPlatit?.pornit ?? false))}
                       >
-                        {circuit?.videoPlatit?.pornit ? 'Oprește generarea' : 'Pornește generarea (pe banii tăi)'}
+                        {circuit?.videoPlatit?.pornit ? 'Oprește timerul' : 'Permite timerului să genereze'}
                       </button>
                     </span>
+                    {/* Diagnoza pe față (21:26, „nu vrea sa genereze"): ultima
+                    încercare REALĂ, cu verdictul ei — nu se mai ghicește. */}
+                    {circuit?.videoUltimaIncercare && (
+                      <span className="or-wallet-sub" style={{ color: circuit.videoUltimaIncercare.ok ? undefined : '#e6a23c' }}>
+                        {circuit.videoUltimaIncercare.ok ? '✅' : '⚠'} Ultima încercare de clip ({new Date(circuit.videoUltimaIncercare.la).toLocaleTimeString()}):{' '}
+                        {circuit.videoUltimaIncercare.verdict}
+                      </span>
+                    )}
                     <PromoStudio />
                     {circuit?.autonomie && (
                       <span className="or-wallet-sub" style={{ color: circuit.autonomie.ok ? undefined : '#8a8f98' }}>

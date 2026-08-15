@@ -551,7 +551,7 @@ const IMAGE_TOOL: Tool = {
 const VIDEO_TOOL: Tool = {
   name: 'generate_video',
   description:
-    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. This COSTS real money per second (Veo has no free tier). If the result contains `pas`, the credits top-up page is ALREADY on the user\'s monitor — tell them the price and that they can top up right there. If it contains `alternativa_gratuita`, offer that FREE path (Google Flow) with a ready-made prompt and the exact steps. Never answer a refusal with a bare "failed" — always give the price and the next step.',
+    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. For the ADMIN and for paying users it JUST GENERATES (their explicit request is the approval) — call it directly, do not send them to buttons or panels. It costs real money per second (Veo has no free tier) — say the price from the result. If the result contains `pas`, the credits top-up page is ALREADY on the user\'s monitor — tell them the price and that they can top up right there. If it contains `alternativa_gratuita`, offer that FREE path (Google Flow) with a ready-made prompt and the exact steps. Never answer a refusal with a bare "failed".',
   input_schema: {
     type: 'object',
     properties: {
@@ -4298,9 +4298,13 @@ async function runTool(
       // apoi bătaia de inimă a așteptării la fiecare 5s — bara de execuție
       // arată secundele, nu o tăcere de 1-3 minute.
       reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: '🎬 Generez clipul la Google (durează 1-3 minute)…', procent: 5 } })}${CTRL}`)
-      // Al treilea argument (P29): clientul care a plătit ACUM tariful și-a
-      // finanțat singur clipul — comutatorul de admin nu-i mai stă în drum.
-      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8), taxa.scazutGbp > 0, (sec) => {
+      // Al treilea argument (P29 + ownerul, 21:29: „nu mai bine il faci sa
+      // genereze? nu ma mai umple de butoane"): aprobarea conștientă E chiar
+      // CEREREA — clientul care a plătit tariful ACUM și-a finanțat clipul,
+      // iar ADMINUL care cere cu gura lui un clip și-a dat singur aprobarea
+      // (mai conștientă decât orice buton). Comutatorul 🎬 rămâne DOAR peste
+      // ce cheltuie nesupravegheat (timerul de promovare).
+      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8), taxa.scazutGbp > 0 || isAdmin, (sec) => {
         // procentul crește cu timpul tipic (~3 min), plafonat sub 95 — cinstit:
         // nu declarăm „aproape gata" ce nu putem măsura, doar că lucrează.
         const procent = Math.min(94, 5 + Math.round((sec / 180) * 90))

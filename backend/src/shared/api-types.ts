@@ -162,6 +162,9 @@ export interface MoneyCircuit {
   /** P29 (15 aug): comutatorul „video plătit" (Veo) — buton kv, nu env. null =
    *  citirea a picat (starea se spune „necitită", nu se inventează un OPRIT). */
   videoPlatit?: { pornit: boolean; sursa: 'buton' | 'env' | 'implicit' } | null
+  /** 21:26 („nu vrea sa genereze"): ultima încercare de generare video, cu
+   *  verdictul PE NUME (reușit sau cauza exactă) — diagnoza e o citire. */
+  videoUltimaIncercare?: { la: string; ok: boolean; verdict: string } | null
   error?: string
 }
 

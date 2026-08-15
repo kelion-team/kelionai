@@ -1,6 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { config } from '../config.js'
-import { saveGeneratedImage, loadGeneratedImage, loadKv } from '../db.js'
+import { saveGeneratedImage, loadGeneratedImage, loadKv, saveKv } from '../db.js'
+
+// Ownerul, 21:26 („nu merge, i-am cerut sa faca video cu google, nu vrea sa
+// genereze") — de la distanță nimeni nu vedea CE anume a refuzat. Fiecare
+// încercare își lasă acum verdictul (reușit sau eroarea PE NUME) în kv, iar
+// panoul de Bani îl arată: diagnoza e o CITIRE, nu un interogatoriu al omului.
+export const KV_VIDEO_ULTIMA = 'video_ultima_incercare'
+function noteazaIncercarea(verdict: string, ok: boolean): void {
+  void saveKv(KV_VIDEO_ULTIMA, JSON.stringify({ la: new Date().toISOString(), ok, verdict: verdict.slice(0, 400) })).catch(() => {})
+}
 
 // ── VIDEO GENERAT — Veo prin cheia Gemini (2 aug 2026) ──────────────────────
 // MĂSURAT ÎNTÂI (regula 1), apoi construit:
@@ -176,7 +185,10 @@ export async function genereazaVideo(
     allowPaid: comutator.pornit || platitDeClient,
     model: config.videoModel,
   })
-  if (refuz) return { error: refuz }
+  if (refuz) {
+    noteazaIncercarea(refuz, false)
+    return { error: refuz }
+  }
 
   const model = config.videoModel
   const secunde = secundeVideoValide(secundeCerute)
@@ -190,12 +202,21 @@ export async function genereazaVideo(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ instances: [{ prompt: p }], parameters: { durationSeconds: secunde, aspectRatio: '16:9' } }),
     })
-    if (!r.ok) return { error: `pornire_generare:${r.status}:${(await r.text()).slice(0, 300)}` }
+    if (!r.ok) {
+      const e = `pornire_generare:${r.status}:${(await r.text()).slice(0, 300)}`
+      noteazaIncercarea(e, false)
+      return { error: e }
+    }
     const j = (await r.json()) as { name?: string }
-    if (!j.name) return { error: 'pornire_generare:fara_nume_operatie' }
+    if (!j.name) {
+      noteazaIncercarea('pornire_generare:fara_nume_operatie', false)
+      return { error: 'pornire_generare:fara_nume_operatie' }
+    }
     opName = j.name
   } catch (e) {
-    return { error: `pornire_generare:${String(e).slice(0, 200)}` }
+    const msg = `pornire_generare:${String(e).slice(0, 200)}`
+    noteazaIncercarea(msg, false)
+    return { error: msg }
   }
 
   // Așteptarea: Veo termină de obicei în 1-3 minute; tavanul e 5, ca un clip
@@ -214,7 +235,11 @@ export async function genereazaVideo(
       const r = await fetch(`${BAZA}/${opName}?key=${config.geminiKey}`)
       if (!r.ok) continue
       const j = (await r.json()) as { done?: boolean; error?: { message?: string }; response?: unknown }
-      if (j.error?.message) return { error: `generare:${String(j.error.message).slice(0, 300)}` }
+      if (j.error?.message) {
+        const e = `generare:${String(j.error.message).slice(0, 300)}`
+        noteazaIncercarea(e, false)
+        return { error: e }
+      }
       if (j.done) {
         raspuns = j.response ?? null
         break
@@ -223,26 +248,38 @@ export async function genereazaVideo(
       // un poll picat nu omoară așteptarea — următorul poate reuși
     }
   }
-  if (raspuns === null) return { error: 'generare:timeout_5min (operația poate continua la Google, dar nu am ce arăta)' }
+  if (raspuns === null) {
+    noteazaIncercarea('generare:timeout_5min', false)
+    return { error: 'generare:timeout_5min (operația poate continua la Google, dar nu am ce arăta)' }
+  }
 
   const uri = gasesteUriVideo(raspuns)
   if (!uri) {
     const chei = raspuns && typeof raspuns === 'object' ? Object.keys(raspuns as object).join(',') : typeof raspuns
+    noteazaIncercarea(`raspuns_fara_video (chei: ${chei})`, false)
     return { error: `raspuns_fara_video (chei: ${chei})` }
   }
 
   try {
     const sep = uri.includes('?') ? '&' : '?'
     const r = await fetch(`${uri}${sep}key=${config.geminiKey}`)
-    if (!r.ok) return { error: `descarcare:${r.status}` }
+    if (!r.ok) {
+      noteazaIncercarea(`descarcare:${r.status}`, false)
+      return { error: `descarcare:${r.status}` }
+    }
     const buf = Buffer.from(await r.arrayBuffer())
-    if (!buf.length) return { error: 'descarcare:fisier_gol' }
+    if (!buf.length) {
+      noteazaIncercarea('descarcare:fisier_gol', false)
+      return { error: 'descarcare:fisier_gol' }
+    }
     const mime = r.headers.get('content-type')?.split(';')[0] || 'video/mp4'
     const id = randomUUID()
     await saveGeneratedImage(id, mime, buf)
     cache.set(id, { mime, buf })
+    noteazaIncercarea(`REUȘIT: clip ${secunde}s pe ${model} ($${cost.toFixed(2)})`, true)
     return { id, mime, costUsd: cost, secunde, model }
   } catch (e) {
+    noteazaIncercarea(`descarcare:${String(e).slice(0, 200)}`, false)
     return { error: `descarcare:${String(e).slice(0, 200)}` }
   }
 }
