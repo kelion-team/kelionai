@@ -18,7 +18,7 @@
 
 import WebSocket from 'ws'
 import { config } from '../config.js'
-import { inceputStrain } from './limbaRaspuns.js'
+import { continuareStraina } from './limbaRaspuns.js'
 
 // MODELUL Live. NU există „3.6 Live" (Google n-a scos unul — măsurat: 3.6 e
 // refuzat pe bidiGenerateContent). Owner (4 aug): „fără 3.1" → folosim
@@ -200,21 +200,26 @@ export function construiesteInstructiune(
   // „Fahrradbahn"/„Tequilón"/„la picana" pe foșnete, iar frânturile străine
   // intrau în conversație). Nu contrazice regula de mai sus — o apără de
   // erorile urechii: comutarea rămâne, dar doar pe vorbire REALĂ susținută.
-  instructiune +=
-    `\nANCORA LIMBII: limba conversației cu ${numeUser} e ROMÂNA. Dacă o transcriere pare în altă ` +
-    `limbă fără ca el să fi trecut REAL și susținut la limba aia, e o eroare a urechii pe zgomot: ` +
-    `NU răspunzi frânturii străine — interpretezi ce a vrut să spună în română sau, dacă nu se ` +
-    `înțelege, taci ori întrebi scurt. Comuți limba DOAR când omul chiar vorbește fraze întregi în alta.` +
-    // ÎNTĂRITĂ (9 aug, captura ownerului: banda scria „Dime, con…" — urechea a
-    // auzit spaniolă în româna lui și modelul a ÎNCEPUT să răspundă în spaniolă;
-    // „se pare că se degradează"). Regula de mai sus nu ținea singură pe frazele
-    // ADRESATE: o singură frază stâlcită tot comuta răspunsul. Pragul urcă:
-    // comutarea cere CEREREA lui explicită sau MAI MULTE fraze întregi la rând.
-    `\nÎN CAZ DE DUBIU: ROMÂNA. NU începi NICIODATĂ un răspuns în altă limbă doar fiindcă ULTIMA ` +
-    `frază a sunat străin — o frază singură care pare spaniolă/engleză/germană în mijlocul unei ` +
-    `conversații românești e ureche stâlcită, nu comutare. Comuți DOAR dacă ${numeUser} îți CERE ` +
-    `explicit („vorbește-mi în engleză") sau chiar vorbește MAI MULTE fraze întregi la rând în limba ` +
-    `aia. Prima vorbă a fiecărui răspuns al tău e în română, dacă niciuna din astea două nu s-a întâmplat.`
+  // DOAR PE PINUL ROMÂNESC (auditul din 15 aug): ancora se cocea NECONDIȚIONAT
+  // — un user cu engleza/japoneza setată primea „limba conversației e ROMÂNA"
+  // cu gardul lui de limbă stins → instrucțiunea lupta cu limba userului.
+  if (limbaPin === 'ro-RO') {
+    instructiune +=
+      `\nANCORA LIMBII: limba conversației cu ${numeUser} e ROMÂNA. Dacă o transcriere pare în altă ` +
+      `limbă fără ca el să fi trecut REAL și susținut la limba aia, e o eroare a urechii pe zgomot: ` +
+      `NU răspunzi frânturii străine — interpretezi ce a vrut să spună în română sau, dacă nu se ` +
+      `înțelege, taci ori întrebi scurt. Comuți limba DOAR când omul chiar vorbește fraze întregi în alta.` +
+      // ÎNTĂRITĂ (9 aug, captura ownerului: banda scria „Dime, con…" — urechea a
+      // auzit spaniolă în româna lui și modelul a ÎNCEPUT să răspundă în spaniolă;
+      // „se pare că se degradează"). Regula de mai sus nu ținea singură pe frazele
+      // ADRESATE: o singură frază stâlcită tot comuta răspunsul. Pragul urcă:
+      // comutarea cere CEREREA lui explicită sau MAI MULTE fraze întregi la rând.
+      `\nÎN CAZ DE DUBIU: ROMÂNA. NU începi NICIODATĂ un răspuns în altă limbă doar fiindcă ULTIMA ` +
+      `frază a sunat străin — o frază singură care pare spaniolă/engleză/germană în mijlocul unei ` +
+      `conversații românești e ureche stâlcită, nu comutare. Comuți DOAR dacă ${numeUser} îți CERE ` +
+      `explicit („vorbește-mi în engleză") sau chiar vorbește MAI MULTE fraze întregi la rând în limba ` +
+      `aia. Prima vorbă a fiecărui răspuns al tău e în română, dacă niciuna din astea două nu s-a întâmplat.`
+  }
   // REGULA TĂCERII LA DESCHIDERE (8 aug, ownerul, cu captura „Pa!" → „Bună
   // seara, Adrian.": „trebuie oprită bâlbâiala permanentă a salutului").
   // Modelul Live vorbește PRIMUL la fiecare deschidere de sesiune — iar scara
@@ -257,7 +262,9 @@ export function construiesteInstructiune(
       // spaniola drept limba conversației — degradarea s-ar autoîntreține
       // peste sesiuni. Replicile asistentului detectate străine (același
       // detector determinist ca gardul din rută) se SAR la coacere.
-      .filter((r) => limbaPin !== 'ro-RO' || r.role === 'user' || !inceputStrain(String(r.content)))
+      // Pe CONTINUARE, nu doar pe început (auditul din 15 aug): „Bine. Não
+      // sei…" trecea de filtrul pe primul cuvânt și reintra în instrucțiune.
+      .filter((r) => limbaPin !== 'ro-RO' || r.role === 'user' || !continuareStraina(String(r.content)))
       .slice(-12) // ultimele schimburi, nu toată arhiva — sesiunea vocală e vie, nu bibliotecă
       .map((r) => `${r.role === 'user' ? numeUser : 'Kelion'}: ${String(r.content).slice(0, 200)}`)
       .join('\n')

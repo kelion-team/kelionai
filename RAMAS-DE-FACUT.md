@@ -26,6 +26,76 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       dovadă reală: bucla golurilor triate există (triageGaps), dar niciun gol
       n-a ajuns REZOLVAT cap-coadă; cerințe cu sursa='kelion' nu s-au născut
       încă. ÎN LUCRU. [ ]
+- [ ] ORDIN 15 aug, P20 (captura „Eu não sei." pe banda V12.4, verbatim): „vreau
+      tu si toti agenti sa faca un audit si reparatie pe tot chatul, nu mai
+      vreau sa mai vad balari in chat sau vocea lui sa lipseasca" +
+      „folosesti tot ce ai la dispozitie, inclusiv la verificare toti agenti"
+      — AUDITUL RULAT: 6 auditori pe dimensiuni + 24 verificatori adversariali
+      (48 de agenți în total, fiecare constatare re-verificată pe cod de un
+      agent pus să o RESPINGĂ) → 24 constatări, 23 CONFIRMATE (7 critice),
+      1 respinsă. TOATE cele 23 reparate în același PR (#1195):
+      · portugheza + italiana + poloneza + turca + accentele străine în gard;
+        judecata și pe CONTINUARE („Bine. Não sei…"), nu doar primul cuvânt;
+      · turele cu verdict NEDECIS nu se mai salvează fără nume măsurat
+        (istoricul și memoria nu se mai otrăvesc cu bălăriile urechii);
+      · false-ul ceasului de 1500ms e PROVIZORIU — numele sosit târziu învie
+        tura („Kelion, cât e ora?" nu mai moare pe transcrierea lentă);
+      · negativul nu se mai încuie pe fragment parțial („Hei"→„Kelion");
+      · gardul de limbă judecă ÎNAINTE de livrare (începutul străin nu se mai
+        aude/scrie), cu fail-open 700ms ca să nu-l facă lent;
+      · comutarea LEGITIMĂ de limbă nu se mai suprimă (omul care vorbește el
+        însuși limba aia); user nou → pin en-US (regula scrisă); limba vorbită
+        se comite ca preferință (2 rostiri consecutive, ca pe scris);
+      · suprimarea de limbă corectează și sesiunea Google (ancoră) + aruncă
+        handle-ul otrăvit la a 2-a; anunțul de sistem nu mai deturnează tura
+        în zbor; ambientalul nu se mai lipește de fraza adresată;
+      · calea SCRISĂ are gard de limbă + replica suprimată nu intră în istoric;
+        ușa creierului nu mai dublează istoricul; <TAC/> tolerant la variante;
+        bula de eroare se și ROSTEȘTE; memoria unificată filtrează otrava;
+      · banda acumulează deltele pe canale cu etichetă (🎙/⚡) și se golește
+        la închiderea turei; poarta half-duplex nu se mai zăvorăște pe context
+        suspendat (mut+surd simultan).
+      NEREPARATĂ CONȘTIENT (cere acordul ownerului — lanțul auzului e sub
+      lacăt): poarta half-duplex înghite vorbirea omului cât Kelion e audibil
+      +0,6s și pe DESKTOP unde AEC-ul e pornit → barge-in-ul pe nume întârzie;
+      relaxarea pe desktop riscă întoarcerea ecoului „sala de nunți". DECIZIA
+      LUI. Porți: 1517 teste (183 fișiere) · tsc 0+0 · jscpd 0 · exporturi 0.
+      RĂMAS: merge + publicare + PROBA LIVE a ownerului (vorbit în sală cu
+      zgomot: zero bălării pe bandă, vocea prezentă pe fiecare tură cu nume). [ ]
+- [ ] ORDIN 15 aug, P23 (captura #322, verbatim): „am fortat antropic, are
+      credit, dar nu foloseste fable 5" — MĂSURAT în cod: butonul P18 chiar
+      forțează (503 = refuz cinstit, fără alunecare pe Gemini), apelul
+      Anthropic pică, dar fable5Chat aruncă JSON-ul BRUT (`{"er…`) în loc de
+      verdictul precis RO (ăla se scria doar în probă) → panoul e criptic.
+      DE FĂCUT: verdicte precise în erorile aruncate (401/403/429/404-scara/
+      400) + diagnostic pe motivul întreg — CERUT ownerului textul complet al
+      erorii de pe #322 (de aici nu am drum la logurile VPS). [ ]
+- [ ] ORDIN 15 aug, P21 (verbatim): „cind porneste aplicatia si mic s-a activat
+      se deschide imediat si urechea setata pe limba default daca e user nou
+      sau limba setata pe user, e facuta asta dar nu merge, cauta si repara" +
+      „dupa ce finalizezi restul cerintelor" — PE COADĂ, după P20 (FIFO cerut
+      de owner). Pista notată: pinul urechii se citește din preferința
+      speech_lang la routes/vocalLive.ts:685-691, urechea îl primește în
+      services/vocalLive.ts:413 (inputAudioTranscription.languageCodes);
+      de verificat unde se SETEAZĂ speech_lang și de ce nu ajunge la ureche
+      la pornirea cu mic activ. [ ]
+- [ ] ORDIN 15 aug, P22 (verbatim): „se poate numi aplicatia Studioul de
+      Clipuri, care cuprinde toate 6, nu? ii dai o ideie, ii spui foloseste
+      studioul de clipuri si el face tot" + „cu functie timer de promovare
+      eventual la ore prestabilite" — APLICAȚIE NOUĂ 🎬 Studioul de Clipuri
+      în meniul Aplicații: idee → scenariu (aprobare pe monitor sau „direct")
+      → cadre Veo SAU aplicația reală pe monitor (Tutorial, click_monitor) →
+      pornește SINGUR înregistrarea din bară → narează sincronizat cu vocea
+      lui → clip final + opțional youtube_urca (privat). Rețete: Clip din
+      idee / Spot publicitar / Tutorial / Raport video de seară / Demo cu
+      camera / Clip bilingv (după traducătorul live). + PROGRAMATOR de
+      promovare la ore prestabilite (cadență + plafon de credite setate de
+      owner — banii nu curg nesupravegheați). Ordin completat (verbatim):
+      „orice clip se salveaza cu nume sugestiv data ora" + „in download" —
+      numele = rețeta/subiectul + data + ora (ex.
+      Spot-Kelionai-2026-08-15_09-00.mp4), salvat în folderul Download al
+      browserului la finalul fiecărui clip. La construcție se cere acordul
+      lui pe VIDEO_ALLOW_PAID + ore/plafon. PE COADĂ după P20 și P21. [ ]
 - [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
       tură o escaladează automat pe nivel superior Fable 5. Nu pornește
       duplicat pe același model, se revine pentru un nou job la primul model."

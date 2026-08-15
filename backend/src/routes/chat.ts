@@ -70,6 +70,7 @@ import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
 import { taxeazaServiciu, cheiaTarifVideo } from '../services/tarife.js'
 import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
+import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -1493,6 +1494,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // VOCE AMBIENTALĂ: doar cu audio real (creierul nu poate decide adresarea
     // fără să audă). Fără audio, flag-ul e inert — o tură scrisă e mereu adresată.
     const voceAmbianta = req.body?.voceAmbianta === true && !!audio
+    // UȘA CREIERULUI NU SE SALVEAZĂ DUBLU (auditul 15 aug): cererea turei cu
+    // usaCreierului e FORMULATĂ DE MODELUL live (nu de om — poate fi în orice
+    // limbă), iar tura REALĂ o salvează ruta vocală la verdict. Salvarea de
+    // aici dubla fiecare tură cu ușă (4 rânduri din 12 în instrucțiune erau
+    // parafraze) și strecura în istoric ture pe care vocea apoi le suprima.
+    const eUsaCreierului = req.body?.usaCreierului === true
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
     }
@@ -2179,7 +2186,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // array). Aici lipim turele din DB care NU-s în transcriptul curent (de
     // regulă cele VORBITE), deduplicat, ca să nu mai spună „n-am căutat nimic"
     // după ce a căutat prin voce. Invers mergea deja (calea vocală citește DB).
-    systemPrompt += memorieUnificata(istoricDb, messages)
+    systemPrompt += memorieUnificata(istoricDb, messages, 12, ro)
 
     // ── BIOMETRICS (voice + face) — account holder vs. someone else ──────────
     // Adrian: "nothing directly in chat, everything in parallel, so it doesn't
@@ -2474,7 +2481,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // salvăm atunci; dacă tace (<TAC/>), nu apare nimic și nu se salvează nimic.
     if (!voceAmbianta) {
       reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
-      if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
+      // ușa creierului: tura reală o salvează ruta vocală, la verdict (vezi sus)
+      if (lastTurn?.role === 'user' && !eUsaCreierului) void saveMessage(user.email, 'user', lastTurn.content)
     }
 
     // THE GUEST CONTEXT FOR THE BRAIN (only the model sees it — the saved
@@ -3149,7 +3157,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         const trimmed = gateBuf.replace(/^\s+/, '')
         if (!trimmed) return '' // doar spații încă
         // Sentinela <TAC/> — cât prefixul încă se potrivește, mai așteptăm.
-        const capat = trimmed.slice(0, SENTINELA_TAC.length)
+        // TOLERANT LA VARIANTE (auditul 15 aug: potrivirea byte-exactă lăsa
+        // „<tac/>"/„<TAC />" să se EMITĂ și să se ROSTEASCĂ pe tură neadresată):
+        // comparația e case-insensitive, iar mai jos o plasă prinde și forma
+        // cu spații, odată sosită întreagă.
+        const capat = trimmed.slice(0, SENTINELA_TAC.length).toUpperCase()
         if (SENTINELA_TAC.startsWith(capat)) {
           if (trimmed.length < SENTINELA_TAC.length) return '' // prefix parțial, mai vine
           if (capat === SENTINELA_TAC) {
@@ -3174,6 +3186,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // termina de transcris ce-ai zis — o frază întreagă de așteptare, la
         // FIECARE tură, degeaba: ecoul e pentru ecran, nu se rostește niciodată.
         //
+        // Plasa pentru variantele cu spații („<TAC />", „< tac / >") sosite
+        // întregi: prefixul strict de mai sus nu le prinde, dar tot tăcere
+        // înseamnă — nu se emit și nu se rostesc (auditul 15 aug).
+        const mtac = /^<\s*tac\s*\/?\s*>/i.exec(trimmed)
+        if (mtac) {
+          taced = true
+          gateDecided = true
+          const dupa = trimmed.slice(mtac[0].length)
+          const mt = /AUZIT:\s*(.*)/i.exec(dupa)
+          if (mt) userEcho = mt[1].split('\n')[0].trim()
+          return ''
+        }
         // Acum ecoul vine ULTIMUL, iar poarta se deschide în clipa în care
         // bufferul nu mai poate fi `<TAC/>` — adică după 1-2 caractere. Primul
         // cuvânt pleacă spre gură imediat ce creierul îl scrie.
@@ -3219,6 +3243,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
         toolNamesThisTurn,
       )
+      // GARDUL DE LIMBĂ PE SCRIS (auditul 15 aug, confirmat de 2 verificatori):
+      // incidentul din 14 aug („chatul îl traduce în rusă") era reparat DOAR pe
+      // voce — scrisul n-avea niciun gard determinist, doar instrucțiunea, iar
+      // limbaRaspuns.ts constată negru pe alb că instrucțiunile nu țin singure.
+      // Același detector ca la voce, activ doar pe lacătul românesc (ca la
+      // voce: gardDeLimba = ro-RO). Începutul se strânge până se poate judeca;
+      // străin + necerut + omul nu scria el însuși limba aia → tura se suprimă
+      // cu o notă cinstită, iar replica străină NU intră nici în istoric.
+      let limbaScrisaDecisa = !ro
+      let limbaScrisaSuprimata = false
+      let limbaScrisaBuf = ''
+      const NOTA_LIMBA = 'Mi-a scăpat începutul răspunsului în altă limbă și l-am oprit. Pune-mi, te rog, întrebarea încă o dată.'
       const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
         orchestratorModel,
         orMsgs,
@@ -3287,6 +3323,29 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
               clean = emis
             } else if (taced) {
               return
+            }
+            // Gardul de limbă pe scris (vezi declarația de sus): primele
+            // caractere se strâng până se poate judeca începutul.
+            if (!limbaScrisaDecisa) {
+              limbaScrisaBuf += clean
+              const strans = limbaScrisaBuf.trim()
+              if (strans.length < 12 && !/[.!?\n]/.test(limbaScrisaBuf)) return // încă strânge
+              limbaScrisaDecisa = true
+              const straina = inceputStrain(strans)
+              if (straina && !aCerutAltaLimba(lastUserText) && inceputStrain(lastUserText) !== straina) {
+                limbaScrisaSuprimata = true
+                console.error(`[CHAT] replică scrisă suprimată (începe în ${straina}): „${strans.slice(0, 100)}"`)
+                textFlowed = true
+                ecranPartial += NOTA_LIMBA
+                noteFirstWord()
+                reply.raw.write(NOTA_LIMBA)
+                voice.feed(NOTA_LIMBA)
+                return
+              }
+              clean = limbaScrisaBuf // se varsă întreg ce s-a strâns
+              limbaScrisaBuf = ''
+            } else if (limbaScrisaSuprimata) {
+              return // restul replicii străine nu se emite și nu se rostește
             }
             textFlowed = true
             ecranPartial += clean // oglinda exactă a ecranului, pentru catch
@@ -3426,6 +3485,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Pe voce, textul asistentului e DOAR corpul rostit — poarta a scos linia
       // „AUZIT:" și sentinela din r.text, iar ce-a rămas e deja în ecranPartial.
       if (!voceAmbianta) assistantText += stripToolMarkup(r.text, undefined, toolNamesThisTurn)
+      // Replica suprimată de gardul de limbă NU intră în istoric (assistantText
+      // vine din r.text — textul ÎNTREG al modelului, nu doar ce s-a emis);
+      // se ține nota cinstită, care chiar s-a văzut pe ecran.
+      if (limbaScrisaSuprimata) assistantText = NOTA_LIMBA
       usage.usd += r.costUsd
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
@@ -3451,8 +3514,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           const nl = trimmed.indexOf('\n')
           const corp = nl === -1 ? '' : trimmed.slice(nl + 1).trim()
           if (corp) { textFlowed = true; ecranPartial += corp; reply.raw.write(corp) }
-        } else if (!trimmed || SENTINELA_TAC.startsWith(trimmed.slice(0, SENTINELA_TAC.length))) {
-          taced = true // sentinela (parțială) sau nimic → tăcere
+        } else if (!trimmed || SENTINELA_TAC.startsWith(trimmed.slice(0, SENTINELA_TAC.length).toUpperCase()) || /^<\s*tac\s*\/?\s*>/i.test(trimmed)) {
+          taced = true // sentinela (parțială, în orice variantă) sau nimic → tăcere
         } else {
           emitHeard(''); textFlowed = true; ecranPartial += trimmed; reply.raw.write(trimmed)
         }
@@ -3579,6 +3642,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         if (cauza) spoken = `${ecranPartial.trim() ? '\n\n' : ''}${cauza}`
       }
       reply.raw.write(spoken)
+      // ȘI CU VOCE (auditul 15 aug): bula de eroare apărea DOAR ca text — omul
+      // pe voce rămânea în tăcere totală, iar audio-ul deja sintetizat al
+      // începutului de replică se pierdea nevărsat. Mesajul se rostește, iar
+      // finish() varsă și cozile pending înainte de închidere.
+      voice.feed(spoken)
+      await voice.finish().catch(() => {})
       reply.raw.end()
       void saveMessage(user.email, 'assistant', ecranPartial.trim() ? ecranPartial + spoken : spoken)
       console.error('[CHAT ERROR]', errMsg, { isRateLimit, isQuota, isRefusal })
@@ -3671,7 +3740,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     reply.raw.end()
 
     // Persist the assistant's reply.
-    if (assistantText) {
+    // (ușa creierului: tura reală — transcrierea rostită — o salvează ruta
+    // vocală la verdict; aici s-ar dubla și ar scăpa ture apoi suprimate.)
+    if (assistantText && !eUsaCreierului) {
       void saveMessage(user.email, 'assistant', assistantText)
       // Memory agent (learn): durable facts about this user, learned from this turn.
       // Fire-and-forget — zero latency on the reply path.

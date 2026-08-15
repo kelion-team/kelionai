@@ -20,6 +20,8 @@
 // „ULTIMELE VOASTRE SCHIMBURI". Ce rămâne sunt, în practică, turele VORBITE pe
 // care scrisul nu le avea.
 
+import { continuareStraina } from './limbaRaspuns.js'
+
 export interface RandIstoric {
   role: string
   content: string
@@ -40,6 +42,12 @@ export function memorieUnificata(
   dbRows: RandIstoric[],
   clientMessages: RandIstoric[],
   cap = 12,
+  /** Lacătul românesc e activ (userLang=ro)? Atunci replicile lui Kelion
+   *  detectate străine NU se re-injectează — calea vocală își filtrează exact
+   *  așa istoricul (services/vocalLive.ts, „ISTORICUL NU CARĂ OTRAVA"), dar
+   *  scrisul le prezenta cu framing-ul „ți-o amintești ca fiind a ta" și
+   *  legitima limba străină (auditul 15 aug). Rândurile omului trec mereu. */
+  limbaBlocataRo = false,
 ): string {
   if (!Array.isArray(dbRows) || dbRows.length === 0) return ''
   const inClient = new Set<string>()
@@ -56,8 +64,14 @@ export function memorieUnificata(
     }
   }
   // Rândurile din DB care NU-s deja în transcriptul clientului = ce n-a văzut
-  // creierul scris (de regulă turele vorbite). Golurile fără conținut se sar.
-  const lipsa = dbRows.filter((r) => norm(r.content) && !inClient.has(`${r.role}:${norm(r.content)}`))
+  // creierul scris (de regulă turele vorbite). Golurile fără conținut se sar;
+  // sub lacătul românesc, replicile străine ale lui Kelion se sar și ele.
+  const lipsa = dbRows.filter(
+    (r) =>
+      norm(r.content) &&
+      !inClient.has(`${r.role}:${norm(r.content)}`) &&
+      (!limbaBlocataRo || r.role === 'user' || !continuareStraina(String(r.content))),
+  )
   if (lipsa.length === 0) return ''
   const randuri = lipsa
     .slice(-cap)

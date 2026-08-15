@@ -1614,15 +1614,46 @@ export default function ChatPanel({
         const cap = await vocalLiveDisponibila()
         if (cap?.disponibil) {
           let reluari = 0
+          // BANDA ACUMULEAZĂ DELTELE, PE CANALE (auditul 15 aug, confirmat pe
+          // cod de 2 verificatori): serverul trimite FRAGMENTE incrementale
+          // (ruta le adună cu +=), dar banda făcea setLiveVoice(text) —
+          // înlocuire, nu acumulare: din „Nu știu ce să zic" se vedea doar
+          // „ ce să", iar un delta de INTRARE (inclusiv halucinațiile urechii
+          // pe ture apoi suprimate) suprascria vorbirea lui Kelion fără nicio
+          // etichetă — exact „bălăriile" fotografiate. Două tampoane + semn:
+          // 🎙 = ce aude, ⚡ = ce spune Kelion; ultima activitate câștigă banda.
+          let vlAud = ''
+          let vlSpune = ''
+          const arataBanda = (canal: 'aud' | 'spune'): void => {
+            const activ = canal === 'aud' ? vlAud : vlSpune
+            const altul = canal === 'aud' ? vlSpune : vlAud
+            const semn = canal === 'aud' ? '🎙 ' : '⚡ '
+            const semnAltul = canal === 'aud' ? '⚡ ' : '🎙 '
+            setLiveVoice(activ ? semn + activ : altul ? semnAltul + altul : '')
+          }
           const porneste = async (): Promise<boolean> => {
             const vl = await deschideVocalLive({
               onGata: () => {
                 reluari = 0 // sesiune sănătoasă → contorul de reluări se șterge
+                vlAud = ''
+                vlSpune = ''
                 setLiveVoice('') // orice eroare veche de pe bandă se șterge
                 setListening(true)
               },
-              onUser: (text, final) => setLiveVoice(final ? '' : text),
-              onKelion: (text, final) => setLiveVoice(final ? '' : text),
+              onUser: (text, final) => {
+                vlAud = final ? '' : vlAud + text
+                arataBanda('aud')
+              },
+              onKelion: (text, final) => {
+                vlSpune = final ? '' : vlSpune + text
+                arataBanda('spune')
+              },
+              onTuraInchisa: () => {
+                // tura s-a închis (gata sau tăiată) — banda nu păstrează resturi
+                vlAud = ''
+                vlSpune = ''
+                setLiveVoice('')
+              },
               // Cadrele de ECRAN din ușa creierului (cere_creierului) intră în
               // ACELAȘI handleControl ca la chatul scris — monitorul, cardurile
               // și documentele arată identic, indiferent cine le-a cerut.

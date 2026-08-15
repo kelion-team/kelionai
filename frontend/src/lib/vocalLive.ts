@@ -40,6 +40,11 @@ export interface VocalLiveOpts {
   onUser?(text: string, final: boolean): void
   /** Ce SPUNE Kelion, în flux. */
   onKelion?(text: string, final: boolean): void
+  /** Tura s-a închis (tura_gata sau barge-in) — banda de transcriere se
+   *  golește AICI, determinist (auditul 15 aug: fragmentul unei ture tăiate
+   *  sau suprimate rămânea lipit pe ecran pe termen nelimitat — exact
+   *  „bălăriile" fotografiate de owner). */
+  onTuraInchisa?(): void
   /** Kelion a început/terminat de vorbit — pentru animația avatarului. */
   onVorbeste?(activ: boolean): void
   /** Cadru de ECRAN venit de la creierul complet prin ușa cere_creierului
@@ -441,8 +446,10 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         // indistinctibilă de orice altă cauză).
         console.info('[vocalLive] modelul și-a tăiat vorba (barge-in) — a auzit voce peste el')
         taieRedarea()
+        opts.onTuraInchisa?.() // tura tăiată nu-și lasă fragmentul pe bandă
         break
       case 'tura_gata':
+        opts.onTuraInchisa?.() // tura încheiată își ia textul de pe bandă
         break
       case 'ping':
         try {
@@ -617,8 +624,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // ca sunetul să fi ieșit din boxe. Și sursele încă vii numără ca audibil,
   // nu doar ceasul programării — două măsurători, nu una singură optimistă.
   const COADA_ECOU_S = 0.6
+  // Pe context SUSPENDAT nimic nu iese din difuzor (currentTime îngheață,
+  // sursele nu se scurg) — vechea formulă rămânea „audibil" pe veci și poarta
+  // înlocuia microfonul cu tăcere la nesfârșit: Kelion simultan MUT și SURD,
+  // fără nicio eroare (auditul 15 aug). Suspendat = inaudibil = microfonul
+  // trece; ecoul nu are de unde să vină cât difuzorul tace.
   const kelionAudibil = (): boolean =>
-    surseActive.length > 0 || (!!ctxOut && ctxOut.currentTime < cursorRedare + COADA_ECOU_S)
+    !!ctxOut &&
+    ctxOut.state === 'running' &&
+    (surseActive.length > 0 || ctxOut.currentTime < cursorRedare + COADA_ECOU_S)
   const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
     const ds = downsample(brut, ctxIn!.sampleRate)

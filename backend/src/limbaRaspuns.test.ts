@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { inceputStrain, aCerutAltaLimba } from './services/limbaRaspuns.js'
+import { inceputStrain, continuareStraina, aCerutAltaLimba } from './services/limbaRaspuns.js'
 
 // ── GARDUL DETERMINIST DE LIMBĂ (9 aug — capturile „Dime, con…"/„Dime, ¿qué…"
 // au dovedit că instrucțiunile nu țin). Funcții pure, probate pe replici REALE
@@ -30,6 +30,52 @@ describe('inceputStrain — răspunsul care începe străin se prinde determinis
   it('engleza și germana la început se prind și ele', () => {
     expect(inceputStrain('Hello there, how can I help?')).toBe('engleză')
     expect(inceputStrain('Ich habe das verstanden')).toBe('germană')
+  })
+
+  it('PORTUGHEZA se prinde — bălăria REALĂ din captura ownerului (15 aug)', () => {
+    // Pe banda de la V12.4 scria fix asta. „eu" e cuvânt românesc, deci nu el
+    // e markerul — „não" (și ã/õ oriunde în primele 60 de litere) sunt.
+    expect(inceputStrain('Eu não sei.')).toBe('portugheză')
+    expect(inceputStrain('Não entendi o que você disse')).toBe('portugheză')
+    expect(inceputStrain('Obrigado pela pergunta')).toBe('portugheză')
+    expect(inceputStrain('Olá, tudo bem?')).toBe('portugheză')
+    expect(inceputStrain('São Paulo é uma cidade grande')).toBe('portugheză')
+  })
+
+  it('dublurile portugheze NU mută româna: „eu", „sim", „voce" rămân ale noastre', () => {
+    expect(inceputStrain('Eu am verificat sistemul acum')).toBeNull()
+    expect(inceputStrain('Eu pot face asta acum')).toBeNull()
+    // „SIM card" și „voce" fără accent — românești curate, gardul nu le atinge
+    expect(inceputStrain('Sim cardul telefonului e activ')).toBeNull()
+    expect(inceputStrain('Voce mai clara acum, am reglat volumul')).toBeNull()
+  })
+
+  it('AUDITUL 15 aug: italiana, poloneza, turca și accentele străine se prind', () => {
+    // cele 8 fraze reproduse de verificatorul adversarial — toate treceau
+    expect(inceputStrain('Non lo so.')).toBe('italiană')
+    expect(inceputStrain('Va bene, certo.')).toBe('italiană')
+    expect(inceputStrain('Nie wiem, przepraszam')).toBe('poloneză')
+    expect(inceputStrain('Anlamadım')).toBe('turcă')
+    expect(inceputStrain('Lo siento mucho')).toBe('spaniolă')
+    expect(inceputStrain('Está bien')).toBeTruthy() // á = accent care nu există în română
+    expect(inceputStrain("It's done")).toBe('engleză')
+    expect(inceputStrain('Okay, I did it')).toBe('engleză')
+    expect(inceputStrain('Perché no?')).toBeTruthy() // é — plasa de accente
+  })
+
+  it('turca NU se prinde pe ş/ţ cu sedilă — dublurile legacy ale românei', () => {
+    // Diacriticele românești scrise cu sedilă (tastaturi vechi) nu-s turcești.
+    expect(inceputStrain('Aşa am făcut, totul e gata')).toBeNull()
+    expect(inceputStrain('Ţi-am trimis raportul')).toBeNull()
+  })
+
+  it('continuareStraina prinde străinătatea de DUPĂ începutul românesc', () => {
+    // Auditul: „Bine. Não sei…" trecea de gard pe cuvântul românesc din față.
+    expect(continuareStraina('Bine. Não sei o que dizer')).toBe('portugheză')
+    expect(continuareStraina('Da, sigur. Okay, I did it now')).toBe('engleză')
+    // româna curată pe mai multe propoziții rămâne curată
+    expect(continuareStraina('Bine. Am verificat sistemul. Totul e in regula.')).toBeNull()
+    expect(continuareStraina('Sigur, iată nivelurile. Le-am trimis pe amandoua.')).toBeNull()
   })
 
   it('gol / spații → null (nu inventăm verdict)', () => {
