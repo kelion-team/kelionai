@@ -69,6 +69,7 @@ import {
 } from './adminTools.js'
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
+import { notifyAdmin } from './adminNotification.js'
 import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuitAziConstructor } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
@@ -739,10 +740,23 @@ async function verificaLivrata(): Promise<{ pornit: boolean; motiv: string } | n
 
   if (/^\s*VERIFICAT/i.test(spus)) {
     await actualizeazaCerinta(c.id, { stare: 'verificata', dovada: spus.slice(0, 2000) }).catch(() => {})
+    // BUCLA ÎNCHISĂ (P4; owner, 15 aug): verdictul ajunge LA OM — panou + push
+    // pe telefon (notifyAdmin poartă deja pushTelefon) — nu doar în coloana
+    // de stare, unde îl vede doar cine deschide tabelul.
+    void notifyAdmin('cerinta_live', `Cerința #${c.id} e LIVE`, spus.slice(0, 180), {
+      cerinta: c.id,
+      dovada: spus.slice(0, 500),
+    }).catch(() => {})
     return { pornit: true, motiv: `cerința #${c.id} — VERIFICATĂ pe live: ${spus.slice(10, 160)}` }
   }
   // Didn't pass → back to work, with what it found. Not declared done.
   await actualizeazaCerinta(c.id, { stare: 'analizata', dovada: spus.slice(0, 2000) }).catch(() => {})
+  // Și căderea probei se SPUNE (P4): „a murit pe live" e mai important pentru
+  // om decât „e verde" — altfel află abia când se lovește de ea.
+  void notifyAdmin('cerinta_picata', `Cerința #${c.id} a picat proba pe live`, spus.slice(0, 180), {
+    cerinta: c.id,
+    vazut: spus.slice(0, 500),
+  }).catch(() => {})
   return { pornit: true, motiv: `cerința #${c.id} — n-a trecut proba, o reia: ${spus.slice(0, 160)}` }
 }
 
