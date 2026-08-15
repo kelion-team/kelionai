@@ -28,25 +28,22 @@ export interface AiConstructor {
   becFurnizor: string
 }
 
-// Cele TREI AI-uri reale (măsurat în cod: constructor-agent.mjs, services/jules.ts,
+// AI-urile VIZIBILE în clasament (măsurat în cod: constructor-agent.mjs +
 // endpointul /api/constructor/creier care rutează la Gemini). Ordinea din listă e
 // doar implicită; clasamentul real se calculează pe potrivire + credit.
+// JULES A IEȘIT DIN CLASAMENT (owner, 15 aug: „Pune-l rezerva tacuta, invizibil",
+// după dovada: 12 zile de la integrare, zero PR-uri din ramuri jules/*). Serviciul
+// și uneltele jules_* trăiesc mai departe (services/jules.ts, adminTools) — Kelion
+// îl cheamă DOAR la ordinul explicit al ownerului; cheia 'jules' rămâne în tipul
+// de mai sus fiindcă e contractul API purtat și de panou.
 export const AI_CONSTRUCTORI: AiConstructor[] = [
   {
     cheie: 'constructor',
     nume: 'Constructorul local',
     descriere:
       'Construiește CHIAR în repo pe server: editează fișiere, rulează tsc + testele, deschide PR. Cel mai potrivit pentru reparații și modificări de cod verificabile.',
-    capacitati: ['cod', 'repo', 'teste', 'pr', 'reparatie', 'frontend', 'backend'],
+    capacitati: ['cod', 'repo', 'teste', 'pr', 'reparatie', 'frontend', 'backend', 'mare', 'asincron'],
     becFurnizor: 'creierul constructorului',
-  },
-  {
-    cheie: 'jules',
-    nume: 'Jules (agentul Google)',
-    descriere:
-      'Agentul asincron oficial Google: lucrează în VM-ul lui, pe repo-urile conectate, și deschide PR. Bun pentru sarcini mai mari, izolate, care pot rula în fundal.',
-    capacitati: ['cod', 'repo', 'pr', 'asincron', 'mare'],
-    becFurnizor: 'Jules',
   },
   {
     cheie: 'creier2',
@@ -148,9 +145,8 @@ export function evalueazaOrdin(
     let scor = comune.length
     // Constructorul local e executorul implicit (are teste + PR pe repo): un mic
     // avantaj de bază ca să nu piardă la egalitate în fața celor ce nu execută.
+    // (Sarcinile mari/asincrone cad tot la el — Jules e rezervă tăcută, 15 aug.)
     if (ai.cheie === 'constructor') scor += 1
-    // Sarcină mare/asincronă → Jules urcă (e făcut pentru fundal izolat).
-    if (ai.cheie === 'jules' && (capacitatiNecesare.includes('mare') || capacitatiNecesare.includes('asincron'))) scor += 2
     // Cerință de analiză/planificare fără cod → creierul 2 urcă.
     if (ai.cheie === 'creier2' && (capacitatiNecesare.includes('analiza') || capacitatiNecesare.includes('planificare'))) scor += 2
 
@@ -173,12 +169,18 @@ export function evalueazaOrdin(
   }).sort((a, b) => b.scor - a.scor)
 
   const varf = clasament[0]
+  // Executorul implicit rămâne constructorul — DAR dacă el e pe ROȘU (fără
+  // credit), nu-l recomandăm orbește: vârful clasamentului iese în față chiar
+  // la potrivire slabă (creierul 2 măcar analizează/deblochează cât ownerul
+  // reîncarcă). Cu doar două benzi vizibile (Jules e rezervă tăcută, 15 aug),
+  // regula asta trebuie spusă explicit, nu lăsată pe seama scorului.
+  const constructorPeRosu = clasament.find((r) => r.cheie === 'constructor')?.bec === 'rosu'
   return {
     trece: true,
     motiv: 'Cerință clară — poate intra în coadă.',
     capacitatiNecesare,
     clasament,
-    aiRecomandat: varf && varf.scor > 0 ? varf.cheie : 'constructor',
+    aiRecomandat: varf && (varf.scor > 0 || constructorPeRosu) ? varf.cheie : 'constructor',
   }
 }
 

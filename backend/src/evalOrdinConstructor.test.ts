@@ -46,9 +46,13 @@ describe('clasamentul pe capacitate + credit', () => {
     expect(e.clasament[0]?.cheie).toBe('constructor')
   })
 
-  it('sarcină mare, izolată, în fundal → Jules urcă în față', () => {
+  it('sarcină mare, izolată, în fundal → tot constructorul local (Jules e rezervă tăcută)', () => {
+    // Owner, 15 aug: „Pune-l rezerva tacuta, invizibil" — Jules a ieșit din
+    // clasament; sarcinile mari/asincrone cad la constructorul local, iar
+    // Jules se cheamă DOAR prin uneltele jules_*, la ordin explicit.
     const e = evalueazaOrdin('refac complet tot modulul, o sarcină mare care poate rula în fundal peste noapte')
-    expect(e.aiRecomandat).toBe('jules')
+    expect(e.aiRecomandat).toBe('constructor')
+    expect(e.clasament.some((r) => r.cheie === 'jules')).toBe(false)
   })
 
   it('cerință de analiză/planificare fără cod → creierul 2', () => {
@@ -68,10 +72,10 @@ describe('clasamentul pe capacitate + credit', () => {
     expect(randConstructor?.bec).toBe('rosu')
   })
 
-  it('clasamentul acoperă exact cele trei AI-uri reale', () => {
+  it('clasamentul acoperă exact AI-urile VIZIBILE (Jules e rezervă tăcută, 15 aug)', () => {
     const e = evalueazaOrdin('adaugă un endpoint nou în backend')
-    expect(e.clasament.map((r) => r.cheie).sort()).toEqual(['constructor', 'creier2', 'jules'])
-    expect(AI_CONSTRUCTORI).toHaveLength(3)
+    expect(e.clasament.map((r) => r.cheie).sort()).toEqual(['constructor', 'creier2'])
+    expect(AI_CONSTRUCTORI).toHaveLength(2)
   })
 })
 

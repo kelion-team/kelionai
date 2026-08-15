@@ -61,11 +61,14 @@ describe('creditul rămas pe fiecare AI', () => {
     const r = await crediteAI()
     const nume = r.map((x) => x.furnizor).join(' | ')
     // Gemini și Serper aveau deja pastile în bară; Google Cloud (voce,
-    // traducere, agenți) și Jules nu erau raportate NICĂIERI.
+    // traducere, agenți) nu era raportat NICĂIERI.
     expect(nume).toContain('Gemini')
     expect(nume).toContain('Serper')
     expect(nume).toContain('Google Cloud')
-    expect(nume).toContain('Jules')
+    // JULES E REZERVĂ TĂCUTĂ, INVIZIBILĂ (owner, 15 aug: „Pune-l rezerva
+    // tacuta, invizibil" + „si pastila ascunsa") — pastila lui NU mai există;
+    // sonda trăiește doar în unealta jules_repos, la ordin explicit.
+    expect(nume).not.toContain('Jules')
   })
 
   it('fără chei și fără bază de date: nicio cifră, doar motive — zero rânduri „măsurate"', async () => {
@@ -147,7 +150,7 @@ describe('beculCredit', () => {
     expect(beculCredit(furnizor({ ramas: picat('Google nu dă sold'), serveste: servesteM(false) }))).toBe('rosu')
   })
 
-  it('nimic măsurabil (Google Cloud / Jules) → GRI, NU verde fals', () => {
+  it('nimic măsurabil (Google Cloud) → GRI, NU verde fals', () => {
     expect(beculCredit(furnizor({ ramas: picat('fără endpoint de sold') }))).toBe('gri')
   })
 })

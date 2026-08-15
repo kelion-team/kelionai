@@ -3,7 +3,6 @@ import { cheltuialaDeLaPeKinduri, cheltuialaLunaPeKinduri, loadKv } from '../db.
 import { getSerperBalance } from './serperBalance.js'
 import { geminiLive } from './geminiDirect.js'
 import { cursUsdGbp } from './fx.js'
-import { julesServeste } from './jules.js'
 import { googleServiceAccount } from './googleCreds.js'
 import type { Masuratoare } from './masurare.js'
 
@@ -248,34 +247,10 @@ async function randGoogleCloud(): Promise<CreditAI> {
   }
 }
 
-async function randJules(): Promise<CreditAI> {
-  const cheieConfigurata = Boolean(config.julesKey)
-  // VERDE/ROȘU, nu gri: ping real la API-ul Jules (GET surse, fără cost). Cheia
-  // pusă + API răspunde → verde; lipsă cheie sau API pică → roșu.
-  const live = await julesServeste()
-  const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = reusit(
-    'ping Jules (GET surse) — cheia pusă și API-ul răspunde',
-    { da: live.ok, detaliu: live.detaliu },
-    0,
-  )
-  return {
-    furnizor: 'Jules (agent de cod Google)',
-    alimenteaza: 'sarcini de cod pornite de Kelion',
-    cheieConfigurata,
-    serveste,
-    ramas: picat(
-      'API-ul Jules nu are endpoint de sold',
-      cheieConfigurata ? 'furnizorul nu publică sold; cota se vede în contul Google' : 'cheia Jules nu e pusă în mediu',
-    ),
-    // Jules nu trece prin `recordCost` — nu am de unde scoate o cheltuială, și
-    // nu pun 0 în locul gol.
-    cheltuitLuna: picat(
-      'jurnalul de costuri (cost_events)',
-      'Jules nu înregistrează costuri la noi — n-am ce măsura, deci nu raportez o cifră',
-    ),
-    facturare: 'https://jules.google.com',
-  }
-}
+// (randJules a IEȘIT din becuri, 15 aug — ordinul „rezervă tăcută, invizibilă"
+// + „și pastila ascunsă". Sonda lui trăiește în unealta jules_repos din
+// adminTools: la ordinul explicit al ownerului, Kelion tot poate măsura dacă
+// Jules servește — dar nimic nu se mai afișează nechemat.)
 
 /** ── FABLE 5 (Claude): REZERVA creierului constructorului (owner, 14 aug) ──────
  *  „schimbă-mi constructorul cu gemeni ultra… când nu merge repara vreau să cadă pe
@@ -322,5 +297,11 @@ async function randFable(): Promise<CreditAI> {
 /** Raportul complet, un rând pe furnizor. Un rând care n-a putut fi citit
  *  RĂMÂNE în listă, cu motivul lui — dispariția tăcută ar fi tot o minciună. */
 export async function crediteAI(): Promise<CreditAI[]> {
-  return Promise.all([randGemini(), randSerper(), randFable(), randGoogleCloud(), randJules()])
+  // JULES = REZERVĂ TĂCUTĂ, INVIZIBILĂ (owner, 15 aug: „Pune-l rezerva tacuta,
+  // invizibil" + „si pastila ascunsa", după dovada: 12 zile de la integrare,
+  // ZERO PR-uri din ramuri jules/*). Pastila lui a ieșit din bară; serviciul
+  // (services/jules.ts) și uneltele jules_* RĂMÂN — Kelion îl poate chema DOAR
+  // la ordinul explicit al ownerului. randJules există mai jos pentru sonda
+  // la cerere (julesServeste prin unealtă), nu pentru afișaj.
+  return Promise.all([randGemini(), randSerper(), randFable(), randGoogleCloud()])
 }
