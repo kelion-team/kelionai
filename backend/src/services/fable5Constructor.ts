@@ -14,23 +14,39 @@
 // cu creierul 2 Gemini.
 
 import { recordCost } from '../db.js'
+import { config, ENV_ALIASES } from '../config.js'
 import type { OrMessage, OrToolCall } from './brainContract.js'
 
 const FABLE_URL = process.env.CONSTRUCTOR_FABLE_URL || ''
+// SCARA DE MODELE — „situația identică ca la bula de credit" (owner, 15 aug):
+// lista veche era din 2024 (claude-3-5-sonnet etc., azi RETRASE din API) și
+// nici măcar nu conținea Fable 5, deși ordinul verbatim a fost „să cadă pe
+// fable 5". Orice cheie, oricât de bună, pica pe TOATĂ scara cu model_not_found
+// — iar eșecul a fost pus pe seama CHEII. Scara e acum familia Claude 5, cu
+// Fable 5 primul; env-urile rămân deasupra pentru reglaj fără deploy.
 const CANDIDATE_MODELS = [
   process.env.CONSTRUCTOR_FABLE_MODEL,
   process.env.ANTHROPIC_MODEL,
-  'claude-3-5-sonnet-20241022',
-  'claude-3-7-sonnet-20250219',
-  'claude-3-5-sonnet-latest',
-  'claude-3-haiku-20240307',
+  'claude-fable-5',
+  'claude-opus-5',
+  'claude-sonnet-5',
+  'claude-haiku-4-5-20251001',
 ].filter((m): m is string => Boolean(m && m.trim()))
 
-const FABLE_MODEL = CANDIDATE_MODELS[0] || 'claude-3-5-sonnet-20241022'
+const FABLE_MODEL = CANDIDATE_MODELS[0] || 'claude-fable-5'
 
-/** Cheia Fable 5 (Claude). Stă în app (`ANTHROPIC_API_KEY` pe VPS), NU în constructor. */
+/** Cheia Fable 5 (Claude). Stă în app, NU în constructor — și se citește prin
+ *  ALIASURILE din config (lecția creditului, 30 iul → reaplicată 15 aug):
+ *  orice nume rezonabil scris de owner e găsit, nu doar unul fix. Config-ul
+ *  (înghețat la boot) e primul; env-ul la apel, pe ACELEAȘI aliasuri, acoperă
+ *  cheia pusă la cald și testele — sursa listei rămâne una: ENV_ALIASES. */
 export function fable5Key(): string {
-  return (process.env.ANTHROPIC_API_KEY ?? process.env.CONSTRUCTOR_FABLE_KEY ?? process.env.FABLE_KEY ?? '').trim()
+  if (config.anthropicKey) return config.anthropicKey
+  for (const nume of ENV_ALIASES.anthropicKey) {
+    const v = process.env[nume]
+    if (v && v.trim()) return v.trim()
+  }
+  return ''
 }
 
 /** Rezerva Fable 5 e configurată (cheie pusă)? Fără ea, ruta rămâne pe Gemini. */
@@ -71,12 +87,24 @@ export async function fable5Valida(): Promise<{ ok: boolean; motiv: string }> {
       signal: AbortSignal.timeout(8_000),
     })
 
+    // VERDICT PRECIS, nu „pune o cheie nouă" la orice (regula #1 + lecția
+    // creditului): doar 401 înseamnă cheie nerecunoscută; restul statusurilor
+    // au alte cauze și se spun pe numele lor — altfel dăm vina pe cheia
+    // omului pentru rate-limit, drepturi sau căderea furnizorului.
+    const motivRefuz =
+      r.status === 401
+        ? 'Anthropic NU recunoaște cheia (401) — abia ASTA cere o cheie nouă din console.anthropic.com'
+        : r.status === 403
+          ? 'cheia e recunoscută, dar fără drepturi pe resursa cerută (403) — verifică planul/permisiunile, NU e de înlocuit cheia'
+          : r.status === 429
+            ? 'cheia e validă dar limitată ACUM (429 rate-limit/credit) — nu e problemă de cheie'
+            : r.status >= 500
+              ? `Anthropic are probleme (HTTP ${r.status}) — nu e cheia ta`
+              : `Anthropic a răspuns HTTP ${r.status} — de citit corpul răspunsului, nu de schimbat cheia orbește`
     probaFable = {
       la: Date.now(),
       ok: r.ok,
-      motiv: r.ok
-        ? 'cheie VALIDĂ — probă reală la Anthropic (GET /v1/models, gratuit)'
-        : `cheia e PUSĂ dar Anthropic o REFUZĂ (HTTP ${r.status}) — rezerva NU poate servi; pune o cheie nouă din console.anthropic.com`,
+      motiv: r.ok ? 'cheie VALIDĂ — probă reală la Anthropic (GET /v1/models, gratuit)' : motivRefuz,
     }
     return probaFable
   } catch (e) {
@@ -250,10 +278,16 @@ export async function fable5Chat(
     const text = await r.text().catch(() => '')
     if (!r.ok) {
       if (r.status === 401 || r.status === 403) {
+        // Același verdict precis ca proba (15 aug, lecția creditului): 401 =
+        // cheia nu e recunoscută; 403 = recunoscută dar fără drepturi — NU
+        // „schimbă cheia" la orice.
         probaFable = {
           la: Date.now(),
           ok: false,
-          motiv: `cheia e PUSĂ dar Anthropic o REFUZĂ (HTTP ${r.status}) — rezerva NU poate servi; pune o cheie nouă din console.anthropic.com`,
+          motiv:
+            r.status === 401
+              ? 'Anthropic NU recunoaște cheia (401) — abia ASTA cere o cheie nouă din console.anthropic.com'
+              : 'cheia e recunoscută, dar fără drepturi pe resursa cerută (403) — verifică planul/permisiunile, NU e de înlocuit cheia',
         }
         throw new Error(`fable5 ${r.status}: ${text.slice(0, 200)}`)
       }
