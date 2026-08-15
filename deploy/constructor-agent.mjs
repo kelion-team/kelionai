@@ -1304,7 +1304,7 @@ async function main() {
       }
       reparatii++
       finish = null
-      log(`verificarea a picat — runda de reparație ${reparatii}/${MAX_REPAIR}`)
+      log(`ajustare în atelier — runda de reparație ${reparatii}/${MAX_REPAIR}`)
       messages.push({
         role: 'user',
         content: `THE VERIFICATION FAILED in the workshop. Repair the CAUSE (do not patch over it) and call 'finish' again.\n\n${problema.slice(-3000)}`,
