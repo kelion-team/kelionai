@@ -199,10 +199,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let curataHeartbeat: (() => void) | null = null
   let curataAutoResumeOut: (() => void) | null = null
   let curataAutoResumeIn: (() => void) | null = null
+  let ceasPingWs: ReturnType<typeof setInterval> | null = null
 
   const inchide = (): void => {
     if (inchis) return
     inchis = true
+    if (ceasPingWs) clearInterval(ceasPingWs)
     if (sesiuneActiva?.inchide === inchide) sesiuneActiva = null // zăvorul se predă curat
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
@@ -475,6 +477,19 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     else urcaEroarea(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
     inchide()
   }
+
+  // PING/KEEPALIVE WS: la fiecare 15s trimitem ping ca proxy-ul/Caddy să nu
+  // închidă socket-ul pe liniște cu cod 1006 (abnormal closure).
+  ceasPingWs = setInterval(() => {
+    if (inchis) return
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: 'ping', t: Date.now() }))
+      } catch {
+        /* tratat la onclose */
+      }
+    }
+  }, 15_000)
 
   // Microfonul pornește DUPĂ ce socketul e deschis: altfel primele cadre s-ar
   // pierde în gol și primele cuvinte ale omului ar dispărea.
