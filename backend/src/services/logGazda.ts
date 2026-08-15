@@ -60,21 +60,16 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // Dacă textul provine dintr-un log secvențial (auto-publicare.log sau constructor.log)
   // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
   // deja rezolvate/istorice sau texte din prompturile ordinelor anterioare.
-  // Markerul de job poate purta ora în față (`[13:40:00] ordin #271: ...`) —
-  // exact forma din constructor.log; fără prefixul opțional, despicarea nu se
-  // întâmpla și „ultima rulare" era tot fișierul (prins de propriul test).
-  // (Conflict #1142 ↔ #1147 unit cu ochii: ambele reparau același lucru; a
-  // rămas varianta constructorului, care e superset — acceptă și spații după
-  // newline, nu doar ora opțională.)
+  // Permitem opțional timestamp la începutul liniei (ex. `[13:30:00] ordin #270`).
   const parti = text.split(
-    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|\[\d{1,2}:\d{2}:\d{2}\]\s*(?:ordin|job|AUTO-VINDECARE)|Job #\d+|Ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
+    /(?=(?:^|\n)(?:\[\d{1,2}:\d{2}(?::\d{2})?\]\s*)?(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|Ordin #\d+|ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
   )
   let textDeVerificat = (parti[parti.length - 1] ?? text).trim()
 
   // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
   // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
   if (
-    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis:\s*(?:#\d+|https?:\/\/)|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
+    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis:?\s*(?:#\d+|https?:\/\/)|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
       textDeVerificat,
     )
   ) {
@@ -105,7 +100,20 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
     /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|apare RECURENT eroarea|count=\d+,\s*prag=\d+|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+)|\bit\(|\bexpect\(|\bdescribe\()/i
   const vazute = new Set<string>()
   const out: string[] = []
+  let inPromptBloc = false
   for (const linie of textDeVerificat.split('\n')) {
+    // Ignorăm blocurile de prompt citate în loguri (ex. ORDINUL DE CONSTRUCȚIE ... până la primul pas de execuție)
+    if (/ORDINUL DE CONSTRUC[ȚT]IE|AUTO-VINDECARE \(constructor logs\)/i.test(linie)) {
+      inPromptBloc = true
+      continue
+    }
+    if (inPromptBloc) {
+      if (/^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+|==|🚀|PR deschis|Deploy finalizat)/i.test(linie)) {
+        inPromptBloc = false
+      } else {
+        continue
+      }
+    }
     if (!tipar.test(linie) || zgomot.test(linie)) continue
     const norm = linie
       .toLowerCase()
