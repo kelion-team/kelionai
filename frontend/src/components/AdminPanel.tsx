@@ -3202,7 +3202,20 @@ export default function AdminPanel({
                 {/* Rebuilt visitor cards (Adrian, Mar 2026): IP, city, country+flag,
                 photo thumbnail — professional, highly informational layout. */}
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Vizite recente — profil complet</div>
+                  {/* P25 — LEGE (owner, 15 aug): „nu-mi trebuie pe acelasi om mai
+                      multe pozitii, o pozitie, cu poza lui, si in cadrul
+                      aceluiasi, vizitele, toate; daca nu are poza acceptata,
+                      conform aplicatiei, nu intra". Cardul e al OMULUI (grupat
+                      pe server), cu toate vizitele lui înăuntru; oamenii fără
+                      poză acceptată nu apar — dar CIFRA lor se spune, ca
+                      totalurile să nu pară scăzute fără explicație. */}
+                  <div className="fin-breakdown-head">Vizitatori — un om, o poziție, toate vizitele lui</div>
+                  {(demosData.faraPoza?.persoane ?? 0) > 0 && (
+                    <div className="chat-hint">
+                      +{demosData.faraPoza!.persoane} {demosData.faraPoza!.persoane === 1 ? 'om' : 'oameni'} fără poză
+                      acceptată ({demosData.faraPoza!.vizite} vizite) — neafișați, conform legii tale.
+                    </div>
+                  )}
                   {demosData.recent.length === 0 && <div className="chat-hint">—</div>}
                   {demosData.recent.map((r, i) => (
                     <div className="visitor-card" key={i}>
@@ -3261,18 +3274,33 @@ export default function AdminPanel({
                           )}
                           <span>
                             {r.vizite_anterioare > 0
-                              ? `a ${r.vizite_anterioare + 1}-a vizită`
+                              ? `${r.vizite_anterioare + 1} vizite`
                               : 'prima vizită'}
+                            {r.prima_vizita && r.vizite_anterioare > 0
+                              ? ` · prima: ${new Date(r.prima_vizita).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })}`
+                              : ''}
                           </span>
                           <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
-                          {/* CE AU VIZITAT (owner, 13 aug): secțiunile deschise.
-                          Gol pe rândurile vechi ⇒ spunem cinstit că nu s-a
-                          înregistrat, nu inventăm „n-a vizitat nimic". */}
-                          <span className="visitor-pages">
-                            {r.pages
-                              ? `a vizitat: ${r.pages.replace(/,/g, ' · ')}`
-                              : 'secțiuni: neînregistrate'}
-                          </span>
+                        </div>
+                        {/* TOATE vizitele omului, în cardul LUI (P25): dată/oră +
+                            secțiunile deschise la fiecare. Gol pe rândurile vechi ⇒
+                            spunem cinstit că nu s-a înregistrat. */}
+                        <div className="visitor-visits">
+                          {(r.vizite ?? [{ la: r.started_at, pages: r.pages }]).map((z, j) => (
+                            <div className="visitor-visit-row" key={j}>
+                              <span className="vis-time">
+                                {new Date(z.la).toLocaleString('ro-RO', {
+                                  day: 'numeric',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </span>
+                              <span className="visitor-pages">
+                                {z.pages ? `a vizitat: ${z.pages.replace(/,/g, ' · ')}` : 'secțiuni: neînregistrate'}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </div>

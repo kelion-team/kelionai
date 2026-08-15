@@ -2023,32 +2023,54 @@ export async function getDemoStats(): Promise<DemoStats | null> {
          GROUP BY country, country_code ORDER BY COUNT(*) DESC LIMIT 30`,
       )
     ).rows.map((r) => ({ country: r.country, code: r.country_code, count: Number(r.n) }))
+    // ── UN OM = O POZIȚIE (P25 — owner, 15 aug, LEGE: „nu-mi trebuie pe
+    // acelasi om mai multe pozitii, o pozitie, cu poza lui, si in cadrul
+    // aceluiasi, vizitele, toate; daca nu are poza acceptata, conform
+    // aplicatiei, nu intra"). Înainte, lista era plată — o poziție PE VIZITĂ,
+    // deci același om apărea de N ori (dedup-ul de 6h nu unea peste zile).
+    // Cheia OMULUI, în ordinea încrederii: contul logat → amprenta browserului
+    // → IP-ul. Meta cardului = ULTIMA vizită; înăuntru — TOATE vizitele lui.
+    // LEGEA POZEI: omul fără nicio poză acceptată (nici cadru de vizită, nici
+    // poza contului) NU apare; câți sunt se spune separat (faraPoza), ca
+    // totalurile să nu pară scăzute fără explicație. Boții nu-s oameni — afară.
+    const POZA_OMULUI = `COALESCE(
+                  (ARRAY_AGG(o.photo_url ORDER BY o.started_at DESC) FILTER (WHERE o.photo_url <> ''))[1],
+                  (ARRAY_AGG(f.photo ORDER BY o.started_at DESC) FILTER (WHERE f.photo IS NOT NULL AND f.photo <> ''))[1],
+                  '')`
+    const CU_OM = `WITH om AS (
+           SELECT COALESCE(NULLIF(lower(v.user_email), ''), NULLIF(v.fingerprint, ''), v.ip) AS cheia, v.*
+             FROM visits v
+            WHERE NOT v.is_bot
+         )`
     const recent = (
-        // Rândul citit din DB e chiar DemoRecent, dar cu `country_code` în loc de
-        // `code` (mapat mai jos). Derivat din tip, nu re-scris — altfel lista de
-        // câmpuri se dublează literă cu literă cu DemoRecent (poarta jscpd).
-      await pool.query<Omit<DemoRecent, 'code'> & { country_code: string }>(
-        // FULL VISIT PROFILE (Adrian, 31 Jul: "visitors, this field must give
-        // full information about the visit"). Two things that change how you
-        // read a row were missing: the TIMEZONE (the `tz` column existed in
-        // the table and wasn't read — it tells you HIS time, not yours) and
-        // whether it's the FIRST visit or a returning one (same fingerprint
-        // earlier). A visitor coming back for the third time is not the same
-        // thing as one who landed on the site once.
-        // POZA (P3, owner 15 aug): vizita cu cont logat își ia poza CONTULUI
-        // (înscrierea feței, dată cu acord la enrolare) când vizita n-are cadru
-        // propriu; vizitatorul anonim are doar cadrul lui de cameră (acordat);
-        // botul — nimic, cinstit.
-        `SELECT 'visit'::text AS kind, v.ip, v.country, v.country_code, v.city, v.region, v.isp,
-                v.browser, v.os, v.device, v.lang, v.referrer, v.is_bot, v.started_at,
-                '' AS session_email, '' AS topic, v.tz,
-                COALESCE(NULLIF(v.photo_url, ''), f.photo, '') AS photo_url, v.pages,
-                (SELECT COUNT(*)::int - 1 FROM visits p
-                  WHERE p.fingerprint = v.fingerprint AND p.fingerprint <> ''
-                    AND p.started_at <= v.started_at) AS vizite_anterioare
-         FROM visits v
-         LEFT JOIN faceprints f ON v.user_email <> '' AND f.user_email = v.user_email
-         ORDER BY v.started_at DESC LIMIT 60`,
+      await pool.query<Omit<DemoRecent, 'code' | 'vizite'> & { country_code: string; vizite: { la: string; pages: string }[] }>(
+        `${CU_OM}
+         SELECT 'visit'::text AS kind,
+                (ARRAY_AGG(o.ip ORDER BY o.started_at DESC))[1] AS ip,
+                (ARRAY_AGG(o.country ORDER BY o.started_at DESC))[1] AS country,
+                (ARRAY_AGG(o.country_code ORDER BY o.started_at DESC))[1] AS country_code,
+                (ARRAY_AGG(o.city ORDER BY o.started_at DESC))[1] AS city,
+                (ARRAY_AGG(o.region ORDER BY o.started_at DESC))[1] AS region,
+                (ARRAY_AGG(o.isp ORDER BY o.started_at DESC))[1] AS isp,
+                (ARRAY_AGG(o.browser ORDER BY o.started_at DESC))[1] AS browser,
+                (ARRAY_AGG(o.os ORDER BY o.started_at DESC))[1] AS os,
+                (ARRAY_AGG(o.device ORDER BY o.started_at DESC))[1] AS device,
+                (ARRAY_AGG(o.lang ORDER BY o.started_at DESC))[1] AS lang,
+                (ARRAY_AGG(o.referrer ORDER BY o.started_at DESC))[1] AS referrer,
+                false AS is_bot,
+                MAX(o.started_at) AS started_at,
+                '' AS session_email, '' AS topic,
+                (ARRAY_AGG(o.tz ORDER BY o.started_at DESC))[1] AS tz,
+                ${POZA_OMULUI} AS photo_url,
+                (ARRAY_AGG(o.pages ORDER BY o.started_at DESC))[1] AS pages,
+                COUNT(*)::int - 1 AS vizite_anterioare,
+                MIN(o.started_at)::text AS prima_vizita,
+                JSON_AGG(json_build_object('la', o.started_at, 'pages', o.pages) ORDER BY o.started_at DESC) AS vizite
+           FROM om o
+           LEFT JOIN faceprints f ON o.user_email <> '' AND f.user_email = o.user_email
+          GROUP BY o.cheia
+         HAVING ${POZA_OMULUI} <> ''
+          ORDER BY MAX(o.started_at) DESC LIMIT 60`,
       )
     ).rows.map((r) => ({
       kind: r.kind,
@@ -2071,7 +2093,23 @@ export async function getDemoStats(): Promise<DemoStats | null> {
       vizite_anterioare: Math.max(0, Number(r.vizite_anterioare ?? 0)),
       photo_url: r.photo_url ?? '',
       pages: r.pages ?? '',
+      // toate vizitele omului, plafonate la 40 pe card — cardul rămâne citibil
+      vizite: (Array.isArray(r.vizite) ? r.vizite : []).slice(0, 40).map((z) => ({ la: String(z.la), pages: String(z.pages ?? '') })),
+      prima_vizita: r.prima_vizita ? String(r.prima_vizita) : undefined,
     }))
+    // Cifra cinstită a LEGII: câți oameni (și câte vizite) nu se afișează.
+    const ascunsi = (
+      await pool.query<{ persoane: string; vizite: string }>(
+        `${CU_OM}
+         SELECT COUNT(*)::int AS persoane, COALESCE(SUM(n), 0)::int AS vizite FROM (
+           SELECT o.cheia, COUNT(*)::int AS n
+             FROM om o
+             LEFT JOIN faceprints f ON o.user_email <> '' AND f.user_email = o.user_email
+            GROUP BY o.cheia
+           HAVING ${POZA_OMULUI} = ''
+         ) g`,
+      )
+    ).rows[0]
     return {
       total: 0,
       today: 0,
@@ -2080,6 +2118,7 @@ export async function getDemoStats(): Promise<DemoStats | null> {
       visitsToday: Number(vCounts?.today ?? 0),
       byCountry,
       recent,
+      faraPoza: { persoane: Number(ascunsi?.persoane ?? 0), vizite: Number(ascunsi?.vizite ?? 0) },
     }
   } catch {
     return null

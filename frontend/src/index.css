@@ -2309,6 +2309,27 @@ is used by the visitor analytics. */
   opacity: 0.9;
   font-weight: 600;
 }
+/* P25 (owner, 15 aug — „un om = o poziție"): vizitele omului, listate ÎN cardul
+   lui — rânduri mici, aliniate, sub linia de meta. */
+.visitor-visits {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--text) 14%, transparent);
+}
+.visitor-visit-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.visitor-visit-row .visitor-pages {
+  flex-basis: auto;
+  font-weight: 500;
+}
 /* Golirea bazei de vizitatori (owner, 13 aug) — acțiune distructivă, discretă
    dar la vedere, deasupra listei de vizite. */
 .vizitatori-golire {
