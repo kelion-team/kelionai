@@ -13,6 +13,19 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 15 aug (captura Vizitatori): „vizitatori nu au poză... de ce nu e
+      legată de vizitator" — FAPTE: vizitele se nasc pe server (IP/UA/pagini),
+      camera nu e pe drum; pozele trăiesc în faceprints cu cheia user_email.
+      DE FĂCUT legătura cinstită: (1) la logare, vizitele aceleiași sesiuni/
+      ferestre IP+browser se leagă de cont → rândul de vizitator primește poza
+      contului (acoperă chiar rândurile ownerului dinainte de logare);
+      (2) oaspeții care dau voie camerei în demo → captură legată de vizită
+      (simetric cu amprentele vocale de oaspete). Boții rămân cinstit fără. [ ]
+- [ ] ORDIN 15 aug: dovezile de autonomie 6 și 7 („vede ce îi lipsește și
+      construiește"; „își reanalizează soluțiile livrate") — de APRINS pe
+      dovadă reală: bucla golurilor triate există (triageGaps), dar niciun gol
+      n-a ajuns REZOLVAT cap-coadă; cerințe cu sursa='kelion' nu s-au născut
+      încă. ÎN LUCRU. [ ]
 - [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
       tură o escaladează automat pe nivel superior Fable 5. Nu pornește
       duplicat pe același model, se revine pentru un nou job la primul model."
