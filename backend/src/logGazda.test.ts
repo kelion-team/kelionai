@@ -101,6 +101,16 @@ describe('semnaturiEroare', () => {
     const out = semnaturiEroare(textLog)
     expect(out).toHaveLength(0)
   })
+  it('ignoră prompturile de auto-vindecare citate în logurile constructorului', () => {
+    const textLog = [
+      '[constructor] ORDINUL DE CONSTRUCȚIE (de la owner):',
+      'AUTO-VINDECARE (constructor logs): în constructor.log apare RECURENT eroarea (count=2, prag=2):',
+      'src/services/logGazda.ts(64,9): error TS2451: Cannot redeclare block-scop',
+      '✅ PR deschis: #260',
+    ].join('\n')
+    const out = semnaturiEroare(textLog)
+    expect(out).toHaveLength(0)
+  })
 
   it('prinde eroarea din ultima rulare dacă nu s-a finalizat cu succes', () => {
     const textLog = [
