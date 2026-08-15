@@ -1,6 +1,8 @@
-import { config, modelUnicCod, setModelUnicValidat } from '../config.js'
+import { config, modelUnicCod, setModelUnicValidat, esteModelGeneralGreu } from '../config.js'
 import { probeazaModelComplet, SARCINI } from './probaModel.js'
 import { loadKv, saveKv } from '../db.js'
+
+export { esteModelGeneralGreu } from '../config.js'
 
 // ── AUTO-UPGRADE VALIDAT AL MODELULUI UNIC (Adrian, 6 aug, regula ultra-decisă:
 // „mereu cel mai performant model complet; când apare ceva nou să fie preluat prin
@@ -27,12 +29,6 @@ const KV_KEY = 'model_unic_activ'
 const G_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const VERIFICA_LA_MS = 24 * 60 * 60 * 1000 // zilnic
 const PRIMA_LA_MS = 3 * 60 * 1000 // prima trecere la 3 min după pornire
-
-/** Verifică dacă un model este un candidat general valid pentru slotul greu (nu un model specializat: video, audio, live, image, eap, lite etc.) */
-export function esteModelGeneralGreu(cod: string): boolean {
-  if (/-(?:lite|video|audio|live|image|embed|eap|tuning|vision|thinking-exp)(?:-|$)/i.test(cod)) return false
-  return /^gemini-\d+(?:\.\d+)?-flash(?:-(?:preview|\d{3,}))?$/.test(cod) || /^gemini-\d+(?:\.\d+)?-flash$/.test(cod)
-}
 
 /** Versiunea dintr-un id `gemini-X.Y-flash…` → [X, Y]; null dacă nu e din familia
  *  slotului greu sau dacă este un model specializat (eap, video, audio, lite etc.). */

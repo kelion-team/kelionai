@@ -67,14 +67,14 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // rămas varianta constructorului, care e superset — acceptă și spații după
   // newline, nu doar ora opțională.)
   const parti = text.split(
-    /(?=(?:^|\n)\s*(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
+    /(?=(?:^|\n)(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|\[\d{1,2}:\d{2}:\d{2}\]\s*(?:ordin|job|AUTO-VINDECARE)|Job #\d+|Ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
   )
   let textDeVerificat = (parti[parti.length - 1] ?? text).trim()
 
   // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
   // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
   if (
-    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
+    /anti-fantom[ăa]\s+TRECE|Deploy finalizat cu succes|✅\s*PR deschis|✅\s*GATA|✅\s*PR #\d+|PR deschis:\s*(?:#\d+|https?:\/\/)|PR #\d+ deschis|finalizat cu succes|Nimic de f[ăa]cut/i.test(
       textDeVerificat,
     )
   ) {
