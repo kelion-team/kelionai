@@ -60,7 +60,7 @@ describe('semnaturiEroare', () => {
     expect(out[1]).toContain('conexiune refuzata')
   })
 
-  it('ignoră zgomotul (0 failed, pasuri, comenzi trecute)', () => {
+  it('ignoră zgomotul (0 failed, pasuri, comenzi trecute, reîncercări llm)', () => {
     const text = [
       '2026-08-14T10:00:00Z 0 failed | 5 passed',
       '2026-08-14T10:00:01Z pas 1/10: grep ceva',
@@ -68,6 +68,8 @@ describe('semnaturiEroare', () => {
       '2026-08-14T10:00:03Z [CHAT-IN] test',
       '2026-08-14T10:00:04Z [BRAIN] apel model',
       '2026-08-14T10:00:05Z RunPod timeout ignorat',
+      '[15:18:38] llm încercarea 1/6 a picat pe creierul prin app (Gemini → Fable 5 — reîncerc în 8s',
+      '[15:18:40] llm reîncercare 2/6 pe creierul prin app (Gemini → Fable 5) — pauză 8s',
     ].join('\n')
 
     const out = semnaturiEroare(text)

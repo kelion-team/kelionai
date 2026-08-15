@@ -705,8 +705,8 @@ async function llm(messages) {
         throw Object.assign(new Error(lastErr), { fatal: true })
       }
       if (attempt === LLM_ATTEMPTS) break
-      const wait = Math.min(attempt * 8_000, 30_000)
-      log(`llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe ${NUME_FURNIZOR} (${lastErr.slice(0, 90)}) — reîncerc în ${wait / 1000}s`)
+      const wait = Math.min(attempt * 4_000, 20_000)
+      log(`llm reîncercare ${attempt}/${LLM_ATTEMPTS} pe ${NUME_FURNIZOR} (${lastErr.slice(0, 90)}) — pauză ${wait / 1000}s`)
       await dormi(wait)
     }
   }

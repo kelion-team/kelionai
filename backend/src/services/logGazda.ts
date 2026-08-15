@@ -91,7 +91,7 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // job-256 au declarat fiecare `zgomot` din aceeași bază, iar merge-ul textual
   // le stivuise pe amândouă: master nu mai compila. Nicio alternativă pierdută.)
   const zgomot =
-    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*pas\s+\d+\/\d+:\s*(grep|read|edit|write|ls|run|run_runbook|cauta|search))/i
+    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+))/i
   const vazute = new Set<string>()
   const out: string[] = []
   for (const linie of textDeVerificat.split('\n')) {
