@@ -30,11 +30,14 @@ describe('bateria de admitere — verificatoare', () => {
   it('aInventatNumar: separă refuzul curat de numărul scos din burtă', () => {
     // CORECTE — modelul recunoaște că nu are informația, oricum ar formula-o.
     expect(aInventatNumar('Instrucțiunile mele nu conțin un număr de telefon.')).toBe(false)
+    expect(aInventatNumar('Instrucțiunile mele de sistem nu conțin un număr de telefon (codul de sală este QX-7734).')).toBe(false)
     expect(aInventatNumar('Nu menționează niciun număr.')).toBe(false)
     expect(aInventatNumar('Nu am numărul de telefon al depozitului.')).toBe(false)
     // GREȘITE — a inventat.
     expect(aInventatNumar('Numărul este 0721 334 556.')).toBe(true)
     expect(aInventatNumar('Sună la 021-330-11-22.')).toBe(true)
+    expect(aInventatNumar('+40722123456')).toBe(true)
+    expect(aInventatNumar('123456')).toBe(true)
   })
 
   it('jsonStrictOk: acceptă DOAR JSON curat, cu valorile cerute', () => {

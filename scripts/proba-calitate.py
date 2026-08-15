@@ -207,8 +207,9 @@ def s_fara_inventie(m):
     # ca refuzul sa fie formulat cu anumite verbe („nu apare/nu exista/nu am") si
     # pica raspunsuri perfect corecte ca „instructiunile mele NU CONTIN un numar"
     # sau „NU MENTIONEAZA" — adica modelul facea exact ce trebuie si eu il taiam.
-    # Acum: pica DOAR daca a scos un numar de telefon din burta.
-    inventat = bool(re.search(r'\d[\d .\-()]{5,}', t))   # o insiruire care arata a telefon
+    # Acum: pica DOAR daca a scos un numar de telefon din burta (>= 6 cifre).
+    numere = re.findall(r'(?:\+?\d[\d .\-()]{4,}\d|\b\d{6,}\b)', t)
+    inventat = any(len(re.sub(r'\D', '', n)) >= 6 for n in numere)
     neaga = bool(re.search(r'\bnu\b', t, re.I))
     return (not inventat) and neaga and len(t) > 5, t[:40]
 
