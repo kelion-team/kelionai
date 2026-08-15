@@ -88,7 +88,13 @@ export async function startRecording(
   // audio into a single track. Mic is best-effort — recording proceeds without it.
   let mic: MediaStream | null = null
   try {
-    mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false } })
+    // AEC PORNIT pe microfonul NARAȚIUNII (15 aug, ownerul: „inca are efect de
+    // ecou sala de nunti"): pe boxe, vocea lui Kelion intra și ACUSTIC în
+    // microfonul filmării — încă o copie, cu întârzierea camerei. AEC-ul
+    // browserului o scoate (referința lui e chiar sunetul redat de tab).
+    // Microfonul ăsta NU merge la creier — lanțul auzului (vocalLive.ts, sub
+    // lacătul lui) rămâne neatins; aici se curăță doar narațiunea filmării.
+    mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } })
   } catch {
     mic = null
   }
@@ -118,19 +124,24 @@ export async function startRecording(
       ctx.createMediaStreamSource(mic).connect(dest)
       surseAudio++
     }
-    // VOCEA LUI KELION PRIN CONSTRUCȚIE (8 aug, ownerul a măsurat: „bifa era
-    // pusă dar nu se auzea în înregistrare decât a mea de la microfon").
-    // Captura de tab a Chrome EXCLUDE audio-ul care circulă prin WebRTC — și
-    // exact așa se redă vocea live (bucla AEC pc1↔pc2). Bifa „Distribuie
-    // audio" nu poate aduce ce browserul nu dă. De-aia luăm vocea DIRECT de la
-    // sursă: fiecare gură a lui Kelion și-a înscris fluxul în registru, iar
-    // aici îl vărsăm în mixer — vocea e pe filmare orice ar alege omul.
-    for (const s of vocileLuiKelion()) {
-      try {
-        ctx.createMediaStreamSource(s).connect(dest)
-        surseAudio++
-      } catch {
-        /* flux mort (sesiune închisă între timp) — restul surselor rămân */
+    // VOCEA LUI KELION — O SINGURĂ DATĂ (8 aug → 15 aug, „sala de nunți").
+    // La 8 aug vocea circula prin bucla WebRTC a AEC-ului, pe care captura de
+    // tab o EXCLUDE — de-aia registrul o vărsa DIRECT în mixer („bifa era pusă
+    // dar nu se auzea"). Reforma anti-ecou din 13-15 aug a scos bucla WebRTC:
+    // vocea iese acum prin <audio> media, pe care captura de tab O AUDE. Cu
+    // registrul vărsat pe deasupra, aceeași voce intra de DOUĂ ori, decalată cu
+    // latența redării — MĂSURAT în filmarea ownerului: copie la ~40 ms,
+    // corelație 0.48 — „inca are efect de ecou sala de nunti". Regula de acum:
+    // audio de tab PREZENT → captura duce vocea (o dată); audio de tab ABSENT
+    // (a ales „Fereastră" / bifa uitată) → registrul o garantează, ca la 8 aug.
+    if (displayAudio.length === 0) {
+      for (const s of vocileLuiKelion()) {
+        try {
+          ctx.createMediaStreamSource(s).connect(dest)
+          surseAudio++
+        } catch {
+          /* flux mort (sesiune închisă între timp) — restul surselor rămân */
+        }
       }
     }
     // Un mixer FĂRĂ nicio sursă e doar o pistă de tăcere — nu o punem în
