@@ -12,6 +12,8 @@ const kv = new Map<string, string>()
 let recurring: unknown[] = []
 let simptome: unknown[] = []
 let ordineMoarte: { id: number; orderText: string; log: string; attempts: number }[] = []
+// P27: golurile RAPORTATE lui Kelion (triaj) — capturate ca să se poată afirma.
+const goluri: { request: string; reason: string }[] = []
 
 vi.mock('../db.js', () => ({
   recurringClientErrors: async () => recurring,
@@ -26,6 +28,10 @@ vi.mock('../db.js', () => ({
   },
   requeueMoneyFailedBuildJobs: async () => 0,
   listFailedBuildJobsRecent: async () => ordineMoarte,
+  logCapabilityGap: async (_email: string, request: string, reason: string) => {
+    goluri.push({ request, reason })
+    return true
+  },
   // „Un doctor pe pacient": ordinele depuse în test se numără drept ACTIVE pe
   // sursa lor — exact ca în DB (create = queued), deci zgarda de unicat e reală.
   activeBuildJobsByScope: async (scope: string) => jobs.filter((j) => j.scope === scope).length,
@@ -44,6 +50,7 @@ beforeEach(() => {
   recurring = []
   simptome = []
   ordineMoarte = []
+  goluri.length = 0
   plafon = { activ: false, plafon: 10, cheltuit: 0 }
 })
 
@@ -121,6 +128,16 @@ describe('runSelfHeal — eșecurile mute ajung la reparație', () => {
     const r = await runSelfHeal()
     expect(r.filed).toBe(0)
     expect(jobs).toHaveLength(0)
+  })
+
+  // P27 (owner, 15 aug, LEGE: „se rezolva, se arhiveaza, sau se escaladeaza
+  // sau se raporteaza la kelion"): mortul se RAPORTEAZĂ în triajul lui Kelion.
+  it('un ordin mort se raportează lui Kelion (triajul golurilor), cu motivul', async () => {
+    ordineMoarte = [{ id: 44, orderText: 'repară y', log: 'cauza: pana z', attempts: 3 }]
+    await runSelfHeal()
+    expect(goluri).toHaveLength(1)
+    expect(goluri[0].request).toContain('#44')
+    expect(goluri[0].reason).toContain('pana z')
   })
 
   // ── UNICAT — „un doctor pe pacient" (owner, 14 aug: „setezi 1 singur ordin

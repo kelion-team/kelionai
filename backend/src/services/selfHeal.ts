@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import {
   recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs,
-  simptomeLiveRecente, listFailedBuildJobsRecent, activeBuildJobsByScope,
+  simptomeLiveRecente, listFailedBuildJobsRecent, activeBuildJobsByScope, logCapabilityGap,
 } from '../db.js'
 import { FISIERE_GAZDA, coadaLogGazda, semnaturiEroare } from './logGazda.js'
 
@@ -165,6 +165,15 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     if (await loadKv(key)) continue
     await saveKv(key, JSON.stringify({ at: Date.now(), attempts: m.attempts }))
     const peBani = /(402|credit|creier_esec|indisponibil)/i.test(m.log)
+    // P27 (LEGEA ordinului: „se rezolva, se arhiveaza, sau se escaladeaza sau
+    // se raporteaza la kelion"): ordinul mort intră în TRIAJUL lui Kelion cu
+    // motivul — ÎNAINTE de panou și în try separat, ca un panou picat să nu
+    // lase triajul nescris (și invers). Zombie nu rămâne nimeni.
+    try {
+      await logCapabilityGap('constructor', `Ordinul #${m.id} a murit după ${m.attempts} încercări: „${m.orderText.slice(0, 120)}"`, m.log.slice(-300))
+    } catch {
+      /* raportarea picată nu oprește vindecarea; alarma de panou urmează oricum */
+    }
     try {
       const { notifyAdmin } = await import('./adminNotification.js')
       await notifyAdmin(

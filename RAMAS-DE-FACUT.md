@@ -147,15 +147,24 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       pe dispozitivul Bluetooth, AEC-ul mobil stins, kelionAudibil pe context
       suspendat — fixul P20 poate fi înrudit). De diagnosticat cu owner-ul în
       mașină (jurnal [vocalLive] + client_errors la momentul probei). [ ]
-- [ ] ORDIN 15 aug, P27 (verbatim): „la constructor, trebuie 1 singur ordin,
-      nu se fac mai multe ordine pe acelasi subiect, lege, se rezolva, se
-      arhiveaza, sau se escaladeaza sau se raporteaza la kelion" — poarta
-      unicatului la crearea ordinului (subiect deja deschis → atașare, nu
-      dublură) + ciclul complet: rezolvat→arhivat / escaladat / RAPORTAT LA
-      KELION (ordinul blocat, ex. #324 mort pe 6 reîncercări de sold, intră
-      în triajul lui cu motivul — nu zombie) + erorile PERMANENTE (sold/cheie)
-      opresc reîncercarea din prima (jurnalul #324: „Your credit balance is
-      too low" reîncercat orbește de 6 ori). ÎN LUCRU. [ ]
+- [x] ORDIN 15 aug, P27 (verbatim, LEGE): „la constructor, trebuie 1 singur
+      ordin, nu se fac mai multe ordine pe acelasi subiect, lege, se rezolva,
+      se arhiveaza, sau se escaladeaza sau se raporteaza la kelion" — ciclul
+      complet, verigă cu verigă: (1) UȘA UNICĂ exista (createBuildJob +
+      amprentaOrdin: subiect VIU → se întoarce id-ul lui, nu se naște al
+      doilea; lacăt dublareOrdine.test); (2) rezolvat→ARHIVAT exista (arhivat
+      K9, panoul exclude arhivatele); (3) ESCALADAT exista (tura ≥2 → Fable 5,
+      escaladareConstructor.test); (4) NOU: erorile PERMANENTE (punga Anthropic
+      goală — jurnalul #324 „Your credit balance is too low" reîncercat orbește
+      de 6 ori; cheia respinsă) omoară ordinul la PRIMUL raport cu verdict PE
+      NUME + attempts=99 (înghețat: plasa stale-running și vindecătorul de
+      pungă îl OCOLESC; doar „Reia"-ul deliberat al ownerului îl dezgheață);
+      (5) NOU: RAPORTAT LA KELION — ordinul blocat/mort intră în triajul
+      golurilor (logCapabilityGap 'constructor') + panoul e anunțat, în try-uri
+      SEPARATE (un panou picat nu lasă triajul nescris); 402-ul OpenRouter
+      rămâne pe vindecătorul lui (nu e permanent). Lacăte: dublareOrdine.test
+      (P27, +8), selfHeal.test (+1). RĂMAS: proba live (un ordin pe punga
+      goală moare din prima și apare în triaj + panou). [ ]
 - [ ] ORDIN 15 aug 17:13, P28 (verbatim): „Aplicatiile, nu sunt doar poze,
       ele sunt aplicatii care trebuie sa ruleze, si kelion sa apeleze si sa
       dea subiectele cind sunt chemate, sa analizeze si sa gestioneze tot" —
