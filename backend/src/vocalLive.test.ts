@@ -479,3 +479,13 @@ describe('vocalLive — ușa dă faza de ACȚIUNE și anunță ordinele terminat
     expect(motor).toContain('clientContent')
   })
 })
+
+// ── WEBSOCKET HEARTBEAT & PING-PONG (ordin #131: vocea nu mai îngheață) ─────
+describe('vocalLive — ping/pong heartbeat previne înghețarea fluxului de voce', () => {
+  const ruta = readFileSync(new URL('./routes/vocalLive.ts', import.meta.url), 'utf8')
+
+  it('backend vocalLive răspunde la mesajele ping cu pong', () => {
+    expect(ruta).toContain("m.type === 'ping'")
+    expect(ruta).toContain("type: 'pong'")
+  })
+})

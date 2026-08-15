@@ -577,6 +577,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // doar atunci tăierea la vocea omului are voie să judece.
             aecActiv = (m as { activ?: unknown }).activ === true
             app.log.info(`vocal-live: AEC raportat de browser: ${aecActiv ? 'activ — tăierea la voce armată' : 'INACTIV — tăierea la voce oprită (ecou netratat)'}`)
+          } else if (m.type === 'ping') {
+            try {
+              socket.send(JSON.stringify({ type: 'pong', t: (m as { t?: unknown }).t ?? Date.now() }))
+            } catch {
+              /* socket închis */
+            }
           } else if (m.type === 'opus_ready') {
             // Clientul și-a pornit codecul WebCodecs. DE-AICI (ordinea WS ne
             // garantează): uploadurile lui vin tag-uite [octet codec][payload] și

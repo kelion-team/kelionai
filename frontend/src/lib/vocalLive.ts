@@ -4,6 +4,7 @@ import { alimenteazaNivelVoce } from './audioIO'
 import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
 import { inscrieVoceaLuiKelion } from './vociKelion'
 import { deblocheazaAudioLaGest } from './audioGraph'
+import { ensureAudioContextRunning, setupAudioContextAutoResume, startVoiceHeartbeat } from './voiceHeartbeat'
 
 // ── VOCEA LIVE FULL-DUPLEX — PARTEA DIN BROWSER (7 aug 2026) ─────────────────
 //
@@ -195,6 +196,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // (ceasCadre scos 9 aug — camera doar la cerință; vezi handlerul 'gata'.)
   // Radierea vocii din registrul de înregistrare (vezi mai jos, la analizor).
   let radiazaVocea: (() => void) | null = null
+  let curataHeartbeat: (() => void) | null = null
+  let curataAutoResumeOut: (() => void) | null = null
+  let curataAutoResumeIn: (() => void) | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -202,6 +206,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (sesiuneActiva?.inchide === inchide) sesiuneActiva = null // zăvorul se predă curat
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
+    curataHeartbeat?.()
+    curataAutoResumeOut?.()
+    curataAutoResumeIn?.()
     if (resumeTimer) clearInterval(resumeTimer)
     if (ceasCoords) clearInterval(ceasCoords)
     opusClient?.inchide() // eliberează encoderul/decoderul WebCodecs
@@ -291,6 +298,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // cursorRedare, deci sunetul curge la fel indiferent de codecul de pe sârmă.
   const redaFloat32 = (f32: Float32Array): void => {
     if (!ctxOut || inchis || !analizor || !f32.length) return
+    if (ctxOut.state !== 'running') {
+      void ensureAudioContextRunning(ctxOut)
+    }
     const buf = ctxOut.createBuffer(1, f32.length, RATA_IESIRE)
     // `.set` acceptă orice Float32Array (indiferent de tipul buffer-ului din
     // spate), spre deosebire de copyToChannel care cere strict ArrayBuffer.
@@ -432,6 +442,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         break
       case 'tura_gata':
         break
+      case 'ping':
+        try {
+          ws.send(JSON.stringify({ type: 'pong', t: (m as { t?: unknown }).t ?? Date.now() }))
+        } catch {}
+        break
+      case 'pong':
+        break
       case 'eroare':
         urcaEroarea(m.motiv ?? 'eroare necunoscută în sesiunea vocală')
         break
@@ -466,6 +483,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       // Ancora realității pleacă PRIMA, chiar la deschidere — serverul o
       // așteaptă puțin înainte să construiască instrucțiunea sesiunii.
       trimiteCoords()
+      curataHeartbeat = startVoiceHeartbeat(() => ws, 10_000)
       gata()
     }
     setTimeout(() => esec(new Error('timeout la deschiderea sesiunii')), 10_000)
@@ -512,6 +530,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // headless — se confirmă LIVE pe telefonul ownerului.
   if (ctxIn.state !== 'running') deblocheazaAudioLaGest(ctxIn)
   if (ctxOut.state !== 'running') deblocheazaAudioLaGest(ctxOut)
+  curataAutoResumeIn = setupAudioContextAutoResume(ctxIn, () => !inchis)
+  curataAutoResumeOut = setupAudioContextAutoResume(ctxOut, () => !inchis)
   // Lanțul de ieșire se ridică ACUM, nu leneș la primul cadru: analizorul
   // (gura avatarului) → <audio> media → boxe/Bluetooth (vezi antetul de mai sus:
   // media, nu WebRTC, ca să ajungă în mașină).
