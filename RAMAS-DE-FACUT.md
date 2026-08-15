@@ -225,6 +225,25 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       există la Veo — gratis = doar Google Flow) + refuzul din creier spune
       la fel. RĂMAS: proba lui — „Pornește generarea" la 🎬 (tabul Bani),
       cere clip, „da, generează", 1-3 min, clipul pe monitor. [ ]
+- [x] ORDIN 15 aug 21:44, P32 (verbatim): „dupa ce genereaza scenariul genul
+      asta trebuie sa ai selectare de copiere si sa apesi pe butonul din
+      aplicatii de generare video, se preia textul automat si incepe
+      generarea, se salveaza in download, pe ecran bargraful spune statusul
+      de generare reala dinamica" + 21:42 „trebuie sa apara la text generare
+      sau reparare sa sti ce face" + 21:47 „e buton copy dar inactiv idem
+      save" — LIVRAT: (1) Studioul trimite frame-ul {scenariu} → clientul îl
+      ține minte 30 min; butonul 🎬 din Aplicații devine „Generează clipul
+      din scenariul pregătit" și PREIA textul automat + intrarea „📋 Copiază
+      scenariul pregătit"; (2) bara de execuție spune întâi CE FACE pe
+      românește (numele tehnic în paranteză; generate_video = „GENERARE
+      VIDEO: face clipul cerut"); (3) creierului i s-a interzis să DELEGE
+      generarea de clipuri agenților (captura 21:38: cheama_agent pe o cerere
+      de clip — de-aia „nu vrea sa genereze"); (4) Copy/Save pe documentele
+      de pe monitor nu mai pot părea „inactive": succes = „✓ copiat"/„Salvat",
+      eșec = „✗ refuzat" PE buton + cauza în client_errors (vizibilă de la
+      distanță); z-index blindat. Bargraful real + Download-ul existau
+      (#1211, V13.8). Lacăte: studioClipuri.test (P32, +4). RĂMAS: proba
+      live a ownerului (scenariu → 🎬 → clip în Download). [ ]
 - [ ] DE CLARIFICAT cu ownerul (criticul auditului, 15 aug): mesajul de la
       06:57 „acest lucru trebuie sa fie monitorizat de kelion" — referentul e
       ambiguu: publicarea stagnantă (acoperit de santinelaPublicarii) SAU

@@ -99,6 +99,10 @@ export interface ChatControl {
   // execuție = un pas anunțat live; bara de punctulețe de pe monitor îl arată.
   // gata=true vine o singură dată, la închiderea REALĂ a turei (100%).
   executie?: { pas: string; procent: number; gata?: boolean }
+  // P32 (owner, 15 aug 21:44): scenariul pregătit de Studio — butonul 🎬 din
+  // Aplicații îl PREIA AUTOMAT („se preia textul automat si incepe
+  // generarea"), iar omul are și „Copiază scenariul".
+  scenariu?: { text: string; nume: string; cale: string }
   zoomMonitor?: { level?: number; direction?: string }
   // MESSENGER KELION↔KELION (Adrian, 11 aug): „apelează-l pe X" → creierul a pornit
   // un apel; frame-ul ăsta ridică la APELANT interfața „sun pe…". Celălalt primește

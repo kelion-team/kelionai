@@ -113,7 +113,7 @@ const StageAvatar = lazy(() => import('../components/StageAvatar'))
 
 // SAVING THE MONITOR CONTENT (Adrian, Jul 25: "you can't save what's on the
 // monitor"). Downloads a text/HTML as a local file — a clean name from the title.
-function downloadContent(name: string, content: string, mime: string): void {
+function downloadContent(name: string, content: string, mime: string): boolean {
   try {
     const blob = new Blob([content], { type: mime })
     const url = URL.createObjectURL(blob)
@@ -124,8 +124,13 @@ function downloadContent(name: string, content: string, mime: string): void {
     a.click()
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 4000)
-  } catch {
-    /* best-effort — the download must not break the monitor */
+    return true
+  } catch (e) {
+    // Ownerul, 21:47 („e buton copy dar inactiv idem save"): un eșec MUT arată
+    // identic cu un buton mort. Cauza pleacă în client_errors (F12 → server),
+    // iar apelantul arată ✗ pe buton — nu se mai poate confunda cu „inactiv".
+    console.error('[doc] descărcarea a picat:', String(e).slice(0, 160))
+    return false
   }
 }
 
@@ -777,10 +782,20 @@ export default function Stage({ user }: { user: User }) {
   // iar copierea are plasă (textarea + execCommand) când clipboard-ul modern e
   // refuzat. POST-ul spre notițe rămâne best-effort, nu condiționează feedback-ul.
   const [docCopied, setDocCopied] = useState(false)
+  // 21:47 („e buton copy dar inactiv idem save"): eșecul nu mai e MUT —
+  // butonul arată ✗ cu motivul scurt, iar cauza pleacă în client_errors
+  // (consola F12 ajunge la server) ca să se poată diagnostica de la distanță.
+  const [docActiune, setDocActiune] = useState<'' | 'copy-err' | 'save-err'>('')
   const copyDocText = (text: string): void => {
     const arata = (): void => {
+      setDocActiune('')
       setDocCopied(true)
       window.setTimeout(() => setDocCopied(false), 2000)
+    }
+    const esec = (e: unknown): void => {
+      console.error('[doc] copierea a picat:', String(e).slice(0, 160))
+      setDocActiune('copy-err')
+      window.setTimeout(() => setDocActiune(''), 3000)
     }
     const fallback = (): void => {
       try {
@@ -790,18 +805,23 @@ export default function Stage({ user }: { user: User }) {
         ta.style.opacity = '0'
         document.body.appendChild(ta)
         ta.select()
-        document.execCommand('copy')
+        const ok = document.execCommand('copy')
         document.body.removeChild(ta)
-        arata()
-      } catch {
-        /* nici plasa n-a mers — eticheta rămâne, omul vede că nu s-a confirmat */
+        if (ok) arata()
+        else esec('execCommand a refuzat')
+      } catch (e) {
+        esec(e)
       }
     }
     if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(arata).catch(fallback)
     else fallback()
   }
   const saveDocToKelion = (title: string, content: string, fileName: string, mime: string): void => {
-    downloadContent(fileName, content, mime)
+    if (!downloadContent(fileName, content, mime)) {
+      setDocActiune('save-err')
+      window.setTimeout(() => setDocActiune(''), 3000)
+      return
+    }
     // Descărcarea e fapta vizibilă și LOCALĂ → confirmarea vine imediat, nu
     // după rețea. Nota în Kelion rămâne best-effort, în fundal.
     setDocSaved(true)
@@ -819,6 +839,29 @@ export default function Stage({ user }: { user: User }) {
   // „APLICAȚII" — trading (admin) + Adaptare CV (toți) grupate sub un buton
   // (owner, 13 aug: „trading și adaptare cv trebuie să fie sub un buton aplicații").
   const [appsOpen, setAppsOpen] = useState(false)
+  // P32 (owner, 21:44: „se preia textul automat si incepe generarea"):
+  // scenariul pregătit de Studio (frame {scenariu} → localStorage) — butonul
+  // 🎬 din meniu îl PREIA automat, iar „📋 Copiază scenariul" îl pune în
+  // clipboard. Proaspăt = ultimele 30 de minute; vechi = meniul normal.
+  const [scenariuGata, setScenariuGata] = useState<{ text: string; nume: string; la: number } | null>(() => {
+    try {
+      const brut = localStorage.getItem('kelion_scenariu')
+      if (!brut) return null
+      const j = JSON.parse(brut) as { text?: string; nume?: string; la?: number }
+      return j.text ? { text: j.text, nume: j.nume ?? 'Clip', la: j.la ?? 0 } : null
+    } catch {
+      return null
+    }
+  })
+  useEffect(() => {
+    const onScenariu = (e: Event): void => {
+      const d = (e as CustomEvent).detail as { text?: string; nume?: string }
+      if (d?.text) setScenariuGata({ text: d.text, nume: d.nume ?? 'Clip', la: Date.now() })
+    }
+    window.addEventListener('kelion:scenariu', onScenariu)
+    return () => window.removeEventListener('kelion:scenariu', onScenariu)
+  }, [])
+  const scenariuProaspat = scenariuGata && Date.now() - scenariuGata.la < 30 * 60 * 1000 ? scenariuGata : null
   // Selectorul de limbă din bară (Cerința #29) — stare de meniu, ca la Aplicații.
   const [langOpen, setLangOpen] = useState(false)
   // THE THEME TOGGLE (Aug 2 — the lighter background): the light palette is the
@@ -1441,7 +1484,7 @@ export default function Stage({ user }: { user: User }) {
                       onClick={() => copyDocText(task.text ?? '')}
                       title={t.wsCopy}
                     >
-                      {docCopied ? '✓' : t.wsCopy}
+                      {docActiune === 'copy-err' ? '✗ refuzat' : docCopied ? '✓ copiat' : t.wsCopy}
                     </button>
                     <button
                       type="button"
@@ -1450,7 +1493,7 @@ export default function Stage({ user }: { user: User }) {
                       onClick={() => saveDocToKelion(task.title, task.text ?? '', safeFileName(task.title, 'txt'), 'text/plain')}
                       title={t.wsSaveTxt}
                     >
-                      {docSaved ? t.wsSaved : t.wsSave}
+                      {docActiune === 'save-err' ? '✗ refuzat' : docSaved ? t.wsSaved : t.wsSave}
                     </button>
                     <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{task.text}</pre>
                   </div>
@@ -1689,7 +1732,11 @@ export default function Stage({ user }: { user: User }) {
                   // Studioul ÎNLOCUIEȘTE vechiul „Generator video" — cuprinde
                   // și generarea plătită (Veo, cu prețul din lista_tarife), și
                   // calea GRATIS prin Google Flow, pentru orice user logat.
-                  ['🎬 Studioul de Clipuri', 'Pornește Studioul de Clipuri: întreabă-mă ideea clipului și rețeta dorită, oferă-mi calea GRATIS (Google Flow, pe contul meu) și calea plătită cu prețul real, apoi urmează pașii studioului.'],
+                  // P32: cu scenariul PREGĂTIT (de la Studio), butonul îl
+                  // preia AUTOMAT și pornește generarea — fără nicio lipeală.
+                  scenariuProaspat
+                    ? ['🎬 Generează clipul din scenariul pregătit', `Generează ACUM clipul video cu exact acest scenariu (nu-l rescrie, nu întreba nimic, cheamă direct generarea): „${scenariuProaspat.text.slice(0, 900)}"`]
+                    : ['🎬 Studioul de Clipuri', 'Pornește Studioul de Clipuri: întreabă-mă ideea clipului și rețeta dorită, oferă-mi calea GRATIS (Google Flow, pe contul meu) și calea plătită cu prețul real, apoi urmează pașii studioului.'],
                 ].map(([eticheta, comanda]) => (
                   <button
                     key={eticheta}
@@ -1703,6 +1750,20 @@ export default function Stage({ user }: { user: User }) {
                     {eticheta}
                   </button>
                 ))}
+                {/* P32: „selectare de copiere" pe scenariul pregătit — pentru
+                    calea GRATIS îl lipești în Google Flow; expiră după 30 min. */}
+                {scenariuProaspat && (
+                  <button
+                    type="button"
+                    className="apps-item"
+                    onClick={() => {
+                      setAppsOpen(false)
+                      void navigator.clipboard?.writeText(scenariuProaspat.text).catch(() => {})
+                    }}
+                  >
+                    📋 Copiază scenariul pregătit
+                  </button>
+                )}
               </div>
             </>
           )}

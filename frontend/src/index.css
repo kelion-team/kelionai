@@ -1027,7 +1027,10 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   position: absolute;
   top: 10px;
   right: 12px;
-  z-index: 2;
+  /* 21:47 („buton copy dar inactiv"): nimic nu are voie să stea peste ele —
+     z-index peste orice strat al documentului + clic garantat. */
+  z-index: 5;
+  pointer-events: auto;
   padding: 5px 12px;
   border: 1px solid var(--border);
   border-radius: 999px;
