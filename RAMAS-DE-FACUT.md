@@ -60,7 +60,8 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       +0,6s și pe DESKTOP unde AEC-ul e pornit → barge-in-ul pe nume întârzie;
       relaxarea pe desktop riscă întoarcerea ecoului „sala de nunți". DECIZIA
       LUI. Porți: 1517 teste (183 fișiere) · tsc 0+0 · jscpd 0 · exporturi 0.
-      RĂMAS: merge + publicare + PROBA LIVE a ownerului (vorbit în sală cu
+      MERGE + PUBLICARE FĂCUTE și VERIFICATE (097f2506 strămoș al live
+      V13.0/24c2a34). RĂMAS DOAR PROBA LIVE a ownerului (vorbit în sală cu
       zgomot: zero bălării pe bandă, vocea prezentă pe fiecare tură cu nume). [ ]
 - [ ] ORDIN 15 aug, P23 (captura #322, verbatim): „am fortat antropic, are
       credit, dar nu foloseste fable 5" — MĂSURAT în cod: butonul P18 chiar
@@ -121,6 +122,42 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       memoria de lungă durată. Manual + registrul capabilităților (116).
       RĂMAS: proba live a ownerului cu un link real; P30b (TikTok/„de
       oriunde"/fișiere — cere acordul lui pe descărcare); P30c (Studio). [ ]
+- [ ] ORDIN 15 aug 09:11, P31 (verbatim): „pornesc aplicatia pe telefon prin
+      web, in masina, telefonul e cuplat la bloutoutch al masinii… kelion aude
+      cred… dar vocea lui nu se aude, oare de ce?" — BUG VIU găsit de criticul
+      auditului de completitudine ca NEÎNREGISTRAT (contrazice rândul din
+      11 aug „VERIFICAT LIVE: merge bloutotch" — regula #2: se recitește întâi
+      lanțul nostru de ieșire audio pe A2DP: ctxOut/sample-rate/ruta de ieșire
+      pe dispozitivul Bluetooth, AEC-ul mobil stins, kelionAudibil pe context
+      suspendat — fixul P20 poate fi înrudit). De diagnosticat cu owner-ul în
+      mașină (jurnal [vocalLive] + client_errors la momentul probei). [ ]
+- [ ] ORDIN 15 aug, P27 (verbatim): „la constructor, trebuie 1 singur ordin,
+      nu se fac mai multe ordine pe acelasi subiect, lege, se rezolva, se
+      arhiveaza, sau se escaladeaza sau se raporteaza la kelion" — poarta
+      unicatului la crearea ordinului (subiect deja deschis → atașare, nu
+      dublură) + ciclul complet: rezolvat→arhivat / escaladat / RAPORTAT LA
+      KELION (ordinul blocat, ex. #324 mort pe 6 reîncercări de sold, intră
+      în triajul lui cu motivul — nu zombie) + erorile PERMANENTE (sold/cheie)
+      opresc reîncercarea din prima (jurnalul #324: „Your credit balance is
+      too low" reîncercat orbește de 6 ori). ÎN LUCRU. [ ]
+- [ ] ORDIN 15 aug 17:13, P28 (verbatim): „Aplicatiile, nu sunt doar poze,
+      ele sunt aplicatii care trebuie sa ruleze, si kelion sa apeleze si sa
+      dea subiectele cind sunt chemate, sa analizeze si sa gestioneze tot" —
+      absoarbe P14 (proba buton-cu-buton) ca pasul 1; contractul: fiecare
+      intrare din meniu = aplicație REALĂ condusă de Kelion (subiect la
+      deschidere, analiză, gestionare, erori cinstite); + auto-captura pe
+      site-urile care refuză înrămarea (propus, așteaptă „da"). PE COADĂ. [ ]
+- [ ] ORDIN 15 aug, P29 (verbatim): „inteleg dar eu vreau sa platesc, sau
+      clientul, de ce nu ma duce spre plata" — drumul spre plată la video:
+      buton admin „Generare video plătită PORNIT/OPRIT" (kv, ca Fable), clientul
+      fără credit dus la /credite cu prețul pe față, Kelion propune pasul
+      următor concret. PE COADĂ. [ ]
+- [ ] DE CLARIFICAT cu ownerul (criticul auditului, 15 aug): mesajul de la
+      06:57 „acest lucru trebuie sa fie monitorizat de kelion" — referentul e
+      ambiguu: publicarea stagnantă (acoperit de santinelaPublicarii) SAU
+      delegările/ordinele până la final (neacoperit — rândul delegării de la
+      06:55 e deschis și nu conține monitorizarea). Întrebat; răspunsul lui
+      decide dacă se naște rând nou. [ ]
 - [ ] INCIDENT 15 aug: poarta VPS a TĂCUT ~3h pe PR #1195 (zero comentarii;
       alte PR-uri primeau verdicte) → #1195 îmbinat ca admin 2 la ordinul
       ownerului („hai cu ele pe aplicatie"), cu porțile rulate local 2× verzi
