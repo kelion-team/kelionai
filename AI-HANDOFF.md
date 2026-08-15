@@ -1,4 +1,9 @@
-# KELIONAI — DOCUMENT COMPLET DE PRELUARE PENTRU ORICE AI
+# AI-HANDOFF — Starea curentă a proiectului Kelion
+
+## Cerința #20 — Analiză captură panou Constructor
+- Analiză directă multimodală (Vision) pentru capturi de ecran și imagini din panoul Constructor.
+- Procesare fără halucinații, descriere structurată a stării panoului și a joburilor de construcție.
+
 *(actualizat 3 august 2026 — implementat sistem notificări admin K14 și bara de progres dinamică pentru deploy Cerința #24)*
 
 > **DOCUMENT VIU — regulă obligatorie:** dacă schimbi cod, arhitectură, reguli sau
