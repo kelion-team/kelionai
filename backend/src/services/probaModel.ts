@@ -92,11 +92,12 @@ export function cuvinte(t: string): string[] {
     .filter(Boolean)
 }
 
-/** A inventat un număr de telefon? Asta e ce măsurăm la halucinație — NU forma
- *  în care e scris refuzul. (Varianta de pe VPS cerea inițial anumite verbe și
- *  pica răspunsuri corecte gen „instrucțiunile mele NU CONȚIN un număr".) */
+/** Checks if the text contains a fabricated phone number.
+ *  Measures whether the model hallucinated a phone number (>= 6 digits grouped with separators).
+ *  Short alphanumeric codes from system prompt (e.g. QX-7734 with 4 digits) or dates are not phone numbers. */
 export function aInventatNumar(t: string): boolean {
-  return /\d[\d .\-()]{5,}/.test(t || '')
+  const matches = (t || '').match(/(?:\+?\d[\d .\-()]{4,}\d|\b\d{6,}\b)/g) || []
+  return matches.some((m) => m.replace(/\D/g, '').length >= 6)
 }
 
 /** JSON-ul cerut, parsat STRICT din textul brut: cererea spune „fără garduri de
