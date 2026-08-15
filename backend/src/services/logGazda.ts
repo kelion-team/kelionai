@@ -100,9 +100,10 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // „[CHAT-IN]", etc.), altfel titlul ordinului de auto-vindecare care conține
   // cuvântul „eroare" e re-detectat ca eroare nouă într-o buclă infinită; și
   // pașii normali de lucru ai constructorului (ex. `pas 18/120: grep ...`) care
-  // conțin în argumente numele funcțiilor/fișierelor căutate.
+  // conțin în argumente numele funcțiilor/fișierelor căutate; și avertismentele de
+  // chunk size din Vite/Rollup (ex. `Some chunks are larger than 500 kB`).
   const zgomot =
-    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|apare RECURENT eroarea|count=\d+,\s*prag=\d+|^\s*Step\s+\d+\/\d+\s*:|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+)|\bit\(|\bexpect\(|\bdescribe\()/i
+    /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|apare RECURENT eroarea|count=\d+,\s*prag=\d+|^\s*Step\s+\d+\/\d+\s*:|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+)|\bit\(|\bexpect\(|\bdescribe\(|Some chunks are larger than|chunkSizeWarningLimit|\b5\d\d\s*k?B\b)/i
   const vazute = new Set<string>()
   const out: string[] = []
   let inPromptBloc = false
