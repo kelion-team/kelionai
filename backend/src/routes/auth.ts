@@ -180,6 +180,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/auth/google/connect-youtube', async (req, reply) =>
     consimtamantIncremental(req, reply, 'https://www.googleapis.com/auth/youtube.upload'))
 
+  // ── POARTA SEPARATĂ BUSINESS PROFILE (14 aug, ultima bifă din listă) ──────
+  // business.manage e scope sensibil, cerut DOAR de cine chiar administrează o
+  // firmă pe Google — nu-l punem în FULL_SCOPES ca să nu împovărăm consimțământul
+  // tuturor. Poartă proprie, incrementală, pe același helper unic. ATENȚIE:
+  // API-ul are cota 0 până când Google aprobă proiectul (formularul oficial de
+  // acces GBP) — unealta business_vezi spune asta cinstit la 403/429.
+  app.get('/auth/google/connect-business', async (req, reply) =>
+    consimtamantIncremental(req, reply, 'https://www.googleapis.com/auth/business.manage'))
+
   // Step 2 — Google redirects back here with a code
   app.get<{ Querystring: { code?: string; state?: string } }>(
     '/auth/google/callback',

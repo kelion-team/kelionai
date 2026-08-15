@@ -10,7 +10,7 @@ import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
 import { usePolledJson } from '../lib/usePolledJson'
 import { logout, startGoogleConnect } from '../lib/api'
-import { resolveLang, strings, uiStrings } from '../lib/i18n'
+import { resolveLang, strings, uiStrings, type Lang } from '../lib/i18n'
 import { adminStrings } from '../lib/adminText'
 import { fetchCreditAI, clasaBec, type CreditAIFurnizor } from '../lib/admin'
 import {
@@ -30,7 +30,7 @@ import {
   type PunctGrafic,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii } from '../lib/prefs'
+import { loadServerPrefs, saveAvatarBox, loadLocalLang, revendicaOglindaLimbii, mirrorLang, saveSpeechLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
@@ -648,19 +648,15 @@ export interface BrainCredit {
       serving: boolean
       reason?: 'depleted' | 'quota' | 'error' | 'no_key'
       monthUsd?: number
-      /** Creditul pe care ownerul îl VEDE în AI Studio și-l spune o dată (Google
-       *  nu-l expune prin API). Afișat ca ATARE pe pastilă, cu data — cifra lui,
-       *  nu o măsurătoare. Absent → pastila arată „Gemini ✓/⚠". */
-      creditGbp?: number
-      creditAt?: string
-      /** CE-A MAI RĂMAS (8 aug: „asta trebuie să scadă real"): declarat minus
-       *  cheltuiala măsurată DE LA declarare, pe cursul BCE. Absent = serverul
-       *  n-a putut calcula (motivul în `scadereMotiv`) — pastila cade atunci pe
-       *  `creditGbp`, cifra declarată, nu pe un calcul cârpit. */
-      creditRamasGbp?: number
-      /** Cât s-a scăzut (USD măsurat de la declarare) — pentru tooltip/audit. */
-      scazutUsd?: number
-      scadereMotiv?: string
+      /** SOLDUL REAL, derivat automat din exportul Cloud Billing → BigQuery
+       *  (totalul acordat `full_amount` minus creditele aplicate, per credit) —
+       *  ordinul din 15 aug: „valoarea reală… citit automat". Absent →
+       *  `soldMotiv` spune exact ce pas de consolă lipsește; pastila arată
+       *  „Gemini ✓/⚠", NICIODATĂ un număr inventat. (Câmpurile declarării
+       *  manuale — creditGbp & co. — au MURIT odată cu ordinul.) */
+      sold?: number
+      soldMoneda?: string
+      soldMotiv?: string
     }
     /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
      *  in the top bar"). `null` = they couldn't be measured — the bar writes "⚠ VPS",
@@ -691,8 +687,13 @@ export default function Stage({ user }: { user: User }) {
   // „ro" din localStorage. Revendicarea rulează ÎNAINTE de prima citire — alt
   // cont => oglinda se aruncă, aplicația pornește pe EN până i se determină limba.
   revendicaOglindaLimbii(user.email)
-  const lang = resolveLang(loadLocalLang() ?? 'en')
+  const [lang, setLangState] = useState<Lang>(() => resolveLang(loadLocalLang() ?? 'en'))
   const t = strings(lang)
+  const handleAdminLangChange = (nouaLimba: Lang) => {
+    mirrorLang(nouaLimba)
+    setLangState(nouaLimba)
+    void saveSpeechLang(nouaLimba)
+  }
   const [adminOpen, setAdminOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
@@ -1598,6 +1599,7 @@ export default function Stage({ user }: { user: User }) {
                   ['📋 Formulare', 'Fă-mi un formular Google — întreabă-mă întâi ce întrebări să conțină.'],
                   ['📷 Photos', 'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.'],
                   ['▶️ YouTube upload', 'Vreau să urc un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
+                  ['🏪 Profilul firmei', 'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.'],
                 ].map(([eticheta, comanda]) => (
                   <button
                     key={eticheta}
@@ -1724,12 +1726,44 @@ export default function Stage({ user }: { user: User }) {
               {t.connectGoogle}
             </button>
           )}
-          {/* SELECTORUL DE LIMBĂ SCOS DIN BARĂ (owner, 13 aug: „dacă pun o limbă și
-              vorbesc în alta, Kelion trece pe limba auzită — nu e nevoie aici; era
-              necesar în Manual"). Conversația se adaptează SINGURĂ la limba
-              auzită/scrisă (creierul o decide), deci butonul nu ajuta la vorbit.
-              Limba INTERFEȚEI rămâne setabilă din Manual (are selector propriu de
-              7 limbi) și din Client Settings — bara rămâne curată. */}
+          {/* SELECTORUL DE LIMBĂ ÎN BARA DE ADMIN (Cerinta #29) — afișează opțiunile de schimbare a limbii */}
+          <div className="relative group">
+            <button
+              type="button"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/60 shadow-sm transition-colors"
+              title={t.langPickTitle}
+              aria-label={t.langPickTitle}
+            >
+              <span className="text-sm">🌐</span>
+              <span className="uppercase tracking-wider font-semibold">{lang}</span>
+              <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div className="absolute right-0 mt-1 hidden group-hover:flex group-focus-within:flex flex-col bg-slate-900 border border-slate-700 rounded-lg shadow-xl py-1 z-50 min-w-[140px]">
+              {([
+                { code: 'ro', label: 'Română', flag: '🇷🇴' },
+                { code: 'en', label: 'English', flag: '🇬🇧' },
+                { code: 'es', label: 'Español', flag: '🇪🇸' },
+                { code: 'fr', label: 'Français', flag: '🇫🇷' },
+                { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
+                { code: 'it', label: 'Italiano', flag: '🇮🇹' },
+                { code: 'ru', label: 'Русский', flag: '🇷🇺' },
+              ] as const).map((l) => (
+                <button
+                  key={l.code}
+                  type="button"
+                  onClick={() => handleAdminLangChange(l.code as Lang)}
+                  className={`flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-slate-800 transition-colors ${
+                    lang === l.code ? 'text-cyan-400 font-semibold bg-slate-800/50' : 'text-slate-300'
+                  }`}
+                >
+                  <span>{l.flag}</span>
+                  <span>{l.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             type="button"
             className="ghost"

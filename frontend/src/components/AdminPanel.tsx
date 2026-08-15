@@ -207,9 +207,9 @@ function ShareGrid({ title, items }: { title: string; items: { name: string; hre
   )
 }
 
-// PASTILELE AI, MUTATE ÎN ADMIN (10 aug) — self-contained, cu starea proprie de
-// editare. Creditul Gemini declarat se salvează pe /api/admin/gemini-credit (același
-// endpoint ca vechea pastilă); următorul poll din Stage aduce cifra nouă înapoi.
+// PASTILELE AI, MUTATE ÎN ADMIN (10 aug). Din 15 aug soldul Gemini vine DERIVAT
+// automat din exportul BigQuery (câmpul `sold` din brain-credit) — declararea
+// manuală a murit la ordinul ownerului („valoarea reală… citit automat").
 // ── BECURILE DE CREDIT AI (owner, 13 aug: „un bec roșu/verde care indică credit
 // sau lipsă de credit, click = reîncărcare; 402 înseamnă că nu are credit") ───
 // Verde = are credit; roșu = fără (402/sold 0 — click ca să adaugi bani); gri =
@@ -288,63 +288,42 @@ function BecuriCredit() {
 }
 
 function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
-  const [edit, setEdit] = useState(false)
-  const [val, setVal] = useState('')
-  const [msg, setMsg] = useState('')
   if (!brainCredit) return null
   const g = brainCredit.gemini
   const s = brainCredit.serper
   const serperK = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
+  // SOLDUL DERIVAT DIN EXPORT (15 aug: „valoarea reală… citit automat").
+  // Cifra apare DOAR când serverul a derivat-o din exportul BigQuery
+  // (full_amount − aplicat); altfel ✓/⚠ pe becul viu, cu motivul în tooltip —
+  // niciodată un număr inventat. Butonul „✎ credit Gemini" a MURIT: nu mai
+  // există nimic de declarat de mână.
   const geminiEticheta =
-    g?.serving && g?.creditGbp != null
-      ? `£${(g.creditRamasGbp ?? g.creditGbp).toFixed(2)}`
+    g?.sold != null
+      ? `${g.sold.toFixed(2)} ${g.soldMoneda ?? ''}`.trim()
       : g?.serving
         ? '✓'
         : g?.reason === 'depleted'
-          ? '£0 ⚠'
+          ? '⚠ epuizat'
           : '⚠'
-  const salveaza = (): void => {
-    const t = val.trim()
-    const gbp = t === '-' ? null : Number(t.replace(',', '.'))
-    if (t !== '-' && (!Number.isFinite(gbp) || (gbp as number) < 0)) { setMsg('cifră invalidă'); return }
-    setMsg('se salvează…')
-    void fetch('/api/admin/gemini-credit', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include',
-      body: JSON.stringify({ gbp }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { setMsg(j?.ok ? 'salvat — se actualizează la următorul refresh' : 'salvarea a eșuat'); if (j?.ok) setEdit(false) })
-      .catch(() => setMsg('salvarea a eșuat'))
-  }
+  const geminiTitlu = [
+    g?.sold != null
+      ? `sold REAL derivat din exportul BigQuery: ${g.sold.toFixed(2)} ${g.soldMoneda ?? ''}`
+      : `soldul nu e încă derivabil: ${g?.soldMotiv ?? 'motiv necunoscut'}`,
+    g?.monthUsd != null ? `cheltuit luna asta: $${g.monthUsd.toFixed(2)}` : 'cheltuiala lunii necitibilă',
+  ].join(' · ')
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: '10px 14px', margin: '10px 0', background: 'color-mix(in srgb, var(--text) 4%, transparent)', border: '1px solid var(--border)', borderRadius: 10 }}>
       <strong style={{ fontSize: 13, opacity: 0.8 }}>Credite AI</strong>
       <span title={s?.live ? `${(s.balance ?? 0).toLocaleString()} căutări rămase (Serper)` : 'citirea Serper a eșuat'}>
         Serper {s?.live ? serperK(s.balance ?? 0) : '⚠'}
       </span>
-      <span title={g?.monthUsd != null ? `cheltuit luna asta: $${g.monthUsd.toFixed(2)}` : 'cheltuiala Gemini necitibilă'}>
+      <span title={geminiTitlu}>
         Gemini {geminiEticheta}
       </span>
       {/* (Pastila RunPod a fost SCOASĂ, 14 aug — constructorul rulează pe Gemini
           (principal, pastila de sus) → Fable 5 (rezervă), prin app. Fable 5 apare ca
           rând în raportul pe furnizori. O pastilă „RunPod" aici ar fi afișaj fals.) */}
-      {edit ? (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <input
-            autoFocus value={val} onChange={(e) => setVal(e.target.value)} placeholder="ex: 10.88 („-” șterge)"
-            style={{ width: 130 }}
-            onKeyDown={(e) => { if (e.key === 'Enter') salveaza(); if (e.key === 'Escape') { setEdit(false); setMsg('') } }}
-          />
-          <button type="button" onClick={salveaza}>Salvează</button>
-          <button type="button" onClick={() => { setEdit(false); setMsg('') }}>Renunț</button>
-        </span>
-      ) : (
-        <button type="button" onClick={() => { setVal(g?.creditGbp != null ? String(g.creditGbp) : ''); setMsg(''); setEdit(true) }} title="Editează creditul Gemini declarat (cifra din AI Studio)">
-          ✎ credit Gemini
-        </button>
-      )}
       <a href="https://aistudio.google.com/billing" target="_blank" rel="noreferrer" style={{ fontSize: 12, opacity: 0.75 }}>alimentează Gemini</a>
-      {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
     </div>
   )
 }
@@ -3003,8 +2982,7 @@ export default function AdminPanel({
                             if (s == null) return
                             // VIRGULA ZECIMALĂ ACCEPTATĂ (auditul admin, 3 aug):
                             // „5,50" dădea NaN și funcția ieșea tăcut — ownerul
-                            // credea că a creditat. Același tratament ca ruta
-                            // gemini-credit din backend.
+                            // credea că a creditat.
                             const amt = Number(s.replace(',', '.').trim())
                             if (!Number.isFinite(amt) || amt === 0) {
                               window.alert(A.alertInvalidAmount(s))
