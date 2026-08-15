@@ -57,6 +57,8 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'jules_repos', 'jules_task', 'jules_status',
   'media_control',
   'server_ops',
+  // P7 (owner, 15 aug): toate datele din toate PR-urile, accesibile creierului.
+  'pr_lista',
 ])
 
 // Executes a SHARED admin tool. Returns the result (string) or `null` if the
@@ -80,6 +82,14 @@ export async function execSharedAdminTool(
     // MEDIA CONTROL (order #16) — queries OS-level media API to check/pause playback.
     case 'media_control': return mediaControl()
     case 'server_ops': return serverOps(String(args.cmd ?? ''))
+    // P7: sistemul informațional al PR-urilor — citirea vine din GitHub, iar o
+    // citire picată se SPUNE ({ok:false, motiv}), nu se maschează în listă goală.
+    case 'pr_lista': {
+      const s = String(args.stare ?? 'all')
+      const stare = s === 'open' || s === 'closed' ? s : 'all'
+      const { listeazaPRuri } = await import('./prInfo.js')
+      return JSON.stringify(await listeazaPRuri(stare))
+    }
     // MĂSURAREA (8 aug) — Kelion își rulează singur porțile, exact cele pe care
     // le rulează omul, și primește înapoi un verdict cu TREI stări. Raportul e
     // formatat aici, nu de model: „NU POT VERIFICA" nu se poate rescrie în
