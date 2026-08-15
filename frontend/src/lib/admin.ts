@@ -666,6 +666,12 @@ export interface PlafonConstructor {
   activ: boolean
   plafon: number
   cheltuit: number
+  /** P10: false = citirea cheltuielii a PICAT — cifra 0 nu e „măsurat". */
+  cheltuitCitit?: boolean
+  cheltuitMotiv?: string
+  joburiAzi?: number
+  /** Joburile de azi FĂRĂ cost raportat — cifra afișată e minimul măsurat. */
+  faraCost?: number
 }
 export async function fetchPlafon(): Promise<PlafonConstructor | null> {
   try {

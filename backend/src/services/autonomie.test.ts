@@ -106,6 +106,8 @@ vi.mock('../db.js', () => ({
     kv.set(k, v)
   },
   cheltuitAziConstructor: async () => cheltuitAzi,
+  // P10: citirea cu context pentru afișaj — în teste, aceeași cifră, citită.
+  cheltuialaAziConstructor: async () => ({ citit: true, usd: cheltuitAzi, joburiAzi: 0, faraCost: 0 }),
 }))
 
 let ultimulPrompt = ''
