@@ -260,6 +260,11 @@ Alte costuri reale (contorizate în `cost.ts`, plătite din abonament/cheie plat
 **A DOUĂSPREZECEA LECȚIE — „Bară dinamică de progres pentru deploy pe monitor" (Cerința #23).**
 Am implementat bara dinamică de progres pentru deploy (`DeployProgressBar.tsx` în frontend și `/api/deploy/status` cu Server-Sent Events în `routes/deploy.ts`). Se conectează prin EventSource la backend, citește în timp real fișierele de progres de deploy (`/tmp/deploy-progress.json` / `/root/kelion/deploy-progress.json`) generate de pașii `deploy.sh` și afișează procentul, pasul curent și confirmarea finalizării pe monitor/spațiul de lucru. În caz de cădere a streaming-ului SSE (ex: buffering intermediar), componenta face fallback automat la polling `/api/deploy/progress`.
 
+**A TREISPREZECEA LECȚIE — „Prevenire înghețare voce live după câteva schimburi de fraze" (Cerința #131).**
+Am identificat și remediat cauza blocării vocii live după câteva schimburi de replici (`frontend/src/lib/vocalLive.ts`, `frontend/src/lib/voiceHeartbeat.ts`, `backend/src/routes/vocalLive.ts`):
+1. **Heartbeat WebSocket ping-pong**: menține conexiunea WebSocket deschisă pe parcursul tăcerilor dintre replici, prevenind timeout-ul de inactivitate din proxy/NAT. Backend-ul răspunde cu cadre de tip `pong` la ping-urile trimise periodic (10s) de client.
+2. **AudioContext Auto-Resume**: verifică și repornește (`ensureAudioContextRunning`) instanța de `AudioContext` la recepționarea fiecărui cadru audio și la schimbările de stare (`statechange` / gesturi utilizator), prevenind blocarea redării când browserul trece `AudioContext` în starea `suspended`.
+
 ## 7. CI/WORKFLOWS (`.github/workflows/`) — starea 25 iul 2026
 **Cele 3 workflow-uri ale autonomiei (25 iul, §14.b):**
 - **`deploy.yml`** — PIPELINE-UL DE PUBLICARE (push pe master + manual): SSH cu `VPS_SSH_KEY` → rulează versiunea din `origin/master` a lui `deploy/deploy.sh` (dintr-o copie în /tmp, nu din clonă) → verificare ANTI-FANTOMĂ din afară: live `v` == sha `origin/master` + health 200, altfel roșu.
