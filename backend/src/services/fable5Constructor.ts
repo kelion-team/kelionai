@@ -18,15 +18,28 @@ import { config, ENV_ALIASES } from '../config.js'
 import type { OrMessage, OrToolCall } from './brainContract.js'
 
 const FABLE_URL = process.env.CONSTRUCTOR_FABLE_URL || ''
-// SCARA DE MODELE — „situația identică ca la bula de credit" (owner, 15 aug):
-// lista veche era din 2024 (claude-3-5-sonnet etc., azi RETRASE din API) și
-// nici măcar nu conținea Fable 5, deși ordinul verbatim a fost „să cadă pe
-// fable 5". Orice cheie, oricât de bună, pica pe TOATĂ scara cu model_not_found
-// — iar eșecul a fost pus pe seama CHEII. Scara e acum familia Claude 5, cu
-// Fable 5 primul; env-urile rămân deasupra pentru reglaj fără deploy.
+// MODEL LADDER — the recurring 404 in server.logbuffer (count=29) said it all:
+// «model: claude-3-haiku-20240307 not_found_error». That RETIRED 2024 model was
+// never in this file's list — it came from the ANTHROPIC_MODEL /
+// CONSTRUCTOR_FABLE_MODEL env vars, which sat ABOVE the ladder and were trusted
+// blindly, unfiltered. A stale env value therefore poisoned the FIRST rung on
+// every escalation (attempt 2 always burned on a dead model before falling to
+// a live one — or straight to the Gemini net). Fix the CAUSE, not the symptom:
+// env overrides are still honoured (tuning without deploy), but any env value
+// naming a RETIRED Claude 3.x model is discarded with the same logic the
+// credit-bubble lesson taught (15 Aug): never let a stale setting outrank
+// reality. The ladder itself stays the live Claude 5 family, Fable 5 first.
+const RETIRED_MODEL = /^claude-3(\.|-)/i
+function modelDinEnv(v: string | undefined): string | undefined {
+  const m = (v || '').trim()
+  if (!m) return undefined
+  // Retired 2024-era models 404 on the API — a stale env var must not poison the ladder.
+  if (RETIRED_MODEL.test(m)) return undefined
+  return m
+}
 const CANDIDATE_MODELS = [
-  process.env.CONSTRUCTOR_FABLE_MODEL,
-  process.env.ANTHROPIC_MODEL,
+  modelDinEnv(process.env.CONSTRUCTOR_FABLE_MODEL),
+  modelDinEnv(process.env.ANTHROPIC_MODEL),
   'claude-fable-5',
   'claude-opus-5',
   'claude-sonnet-5',
