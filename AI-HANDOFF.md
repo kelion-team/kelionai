@@ -290,7 +290,7 @@ Am identificat și remediat cauza blocării vocii live după câteva schimburi d
 2. **AudioContext Auto-Resume**: verifică și repornește (`ensureAudioContextRunning`) instanța de `AudioContext` la recepționarea fiecărui cadru audio și la schimbările de stare (`statechange` / gesturi utilizator), prevenind blocarea redării când browserul trece `AudioContext` în starea `suspended`.
 
 **A PĂISPREZECEA LECȚIE — „Opțiunile de limbă și delimitarea atelierului față de runtime" (Cerința #34).**
-1. **Opțiuni de limbă în interfață**: Configurația oficială a celor 27 de limbi suportate este centralizată în `frontend/src/lib/languages.ts` (`LANGS`) cu etichetele endonime corespunzătoare (English, Română, Français, Deutsch, Español etc.) pentru recunoaștere și sinteză vocală.
+1. **Opțiuni de limbă în interfață**: Configurația oficială a celor 27 de limbi suportate este centralizată în `frontend/src/lib/languages.ts` (`LANGS`) cu etichetele endonime corespunzătoare (English, Română, Français, Deutsch, Español etc.) pentru recunoaștere și sinteză vocală, iar lista extinsă de selecție UI în `frontend/src/lib/langList.ts` (`LANG_OPTIONS`). Pentru cereri de captură / screenshot pe ecranul viu al aplicației (ex. bara de admin / dropdown limbi), operațiunea ține de uneltele live de monitor/ecran din sesiunea Kelion (nu de mediul izolat de atelier fără display server).
 2. **Delimitare atelier vs runtime**: Comenzile ce solicită capturi în timp real ale monitorului fizic sau ale sesiunilor deschise în browserul utilizatorului sunt deservite exclusiv de uneltele senzoriale de runtime ale lui Kelion, atelierul constructorului fiind un mediu CI determinist pentru cod, migrații și teste.
 
 ## 7. CI/WORKFLOWS (`.github/workflows/`) — starea 25 iul 2026
