@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { config } from '../config.js'
-import { saveGeneratedImage, loadGeneratedImage } from '../db.js'
+import { saveGeneratedImage, loadGeneratedImage, loadKv } from '../db.js'
 
 // ── VIDEO GENERAT — Veo prin cheia Gemini (2 aug 2026) ──────────────────────
 // MĂSURAT ÎNTÂI (regula 1), apoi construit:
@@ -45,6 +45,31 @@ export function costVideoUsd(model: string, secunde: number): number | null {
   return Math.round(peSecunda * secunde * 100) / 100
 }
 
+// ── P29: COMUTATORUL „VIDEO PLĂTIT" — buton, nu env (owner, 15 aug: „eu vreau
+// sa platesc, sau clientul, de ce nu ma duce spre plata") ────────────────────
+// Garda veche cerea VIDEO_ALLOW_PAID=1 în env-ul de pe VPS — un loc în care
+// ownerul nu umblă. Rezultatul MĂSURAT: „i-am cerut sa genereze video, dar nu
+// am vazut nimic" — orice generare refuza, inclusiv una DEJA plătită de client.
+// Acum comutatorul stă în kv_state (butonul din panoul de admin, tabul Bani);
+// env-ul rămâne doar moștenire. kv setat BATE env-ul, în ambele direcții.
+export const KV_VIDEO_PLATIT = 'video_platit'
+
+/** Verdictul pur (testabil fără DB): kv '1'/'0' = alegerea de pe buton;
+ *  altfel cade pe env; nimic setat = OPRIT (nimic plătit din greșeală). */
+export function verdictVideoPlatit(
+  kv: string | null,
+  env: boolean,
+): { pornit: boolean; sursa: 'buton' | 'env' | 'implicit' } {
+  if (kv === '1') return { pornit: true, sursa: 'buton' }
+  if (kv === '0') return { pornit: false, sursa: 'buton' }
+  return env ? { pornit: true, sursa: 'env' } : { pornit: false, sursa: 'implicit' }
+}
+
+export async function videoPlatitPornit(): Promise<{ pornit: boolean; sursa: 'buton' | 'env' | 'implicit' }> {
+  const kv = await loadKv(KV_VIDEO_PLATIT).catch(() => null)
+  return verdictVideoPlatit(kv, config.videoAllowPaid)
+}
+
 /** De ce NU se poate genera acum — sau null dacă drumul e liber.
  *  Mesajul e pentru creier: spune omului exact ce lipsește și cât costă. */
 export function motivRefuzVideo(
@@ -61,7 +86,8 @@ export function motivRefuzVideo(
     return (
       `video_platit_neaprobat: Veo nu are nivel gratuit (măsurat pe pagina de prețuri Google, 2 aug 2026); ` +
       `modelul ${opts.model} costă ~$${cost.toFixed(2)} pe un clip de 8s. ` +
-      `Pornirea e o alegere conștientă a ownerului: VIDEO_ALLOW_PAID=1 în env.`
+      `Pornirea e o alegere conștientă a ownerului: butonul «🎬 Video plătit» din panoul de admin, tabul Bani ` +
+      `(env VIDEO_ALLOW_PAID=1 rămâne doar ca moștenire).`
     )
   return null
 }
@@ -126,11 +152,20 @@ const BAZA = 'https://generativelanguage.googleapis.com/v1beta'
 
 /** Generarea propriu-zisă: pornește operația long-running, așteaptă până la
  *  5 minute, descarcă fișierul și îl pune în depozit. Orice pas picat se
- *  întoarce ca eroare cu locul exact — niciun „a mers" nemăsurat. */
-export async function genereazaVideo(prompt: string, secundeCerute = 8): Promise<VideoResult> {
+ *  întoarce ca eroare cu locul exact — niciun „a mers" nemăsurat.
+ *  `platitDeClient` (P29): un client care A PLĂTIT tariful (cu profitul copt
+ *  înăuntru — tarife.ts) ESTE aprobarea conștientă pentru CLIPUL LUI — banii
+ *  sunt deja încasați peste costul Google (owner, 15 aug: „de aici daca merge
+ *  sa se autofinanteze"). Comutatorul rămâne peste generările NEplătite. */
+export async function genereazaVideo(prompt: string, secundeCerute = 8, platitDeClient = false): Promise<VideoResult> {
   const p = prompt.trim()
   if (!p) return { error: 'empty_prompt' }
-  const refuz = motivRefuzVideo()
+  const comutator = await videoPlatitPornit()
+  const refuz = motivRefuzVideo({
+    cheie: config.geminiKey,
+    allowPaid: comutator.pornit || platitDeClient,
+    model: config.videoModel,
+  })
   if (refuz) return { error: refuz }
 
   const model = config.videoModel

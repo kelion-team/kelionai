@@ -18,6 +18,7 @@ import {
   manageUser,
   fetchMoneyCircuit,
   pauzaAutonomie,
+  setVideoPlatit,
   fetchDoveziAutonomie,
   fetchPlati,
   atribuiePlata,
@@ -736,6 +737,19 @@ export default function AdminPanel({
     if (c) setCircuit(c)
     setCircuitFailed(!c)
     setPauzaBusy(false)
+  }
+
+  // P29 — butonul „Video plătit" (owner, 15 aug: „eu vreau sa platesc, sau
+  // clientul, de ce nu ma duce spre plata"): pornește/oprește Veo din panou,
+  // nu din env-ul VPS-ului; după apăsare starea se RECITEȘTE, nu se presupune.
+  const [videoBusy, setVideoBusy] = useState(false)
+  async function onVideoPlatit(pornit: boolean): Promise<void> {
+    setVideoBusy(true)
+    await setVideoPlatit(pornit)
+    const c = await fetchMoneyCircuit()
+    if (c) setCircuit(c)
+    setCircuitFailed(!c)
+    setVideoBusy(false)
   }
 
   useEffect(() => {
@@ -1535,6 +1549,24 @@ export default function AdminPanel({
                         onClick={() => void onPauzaAutonomie(!circuit?.autonomiaOprita)}
                       >
                         {circuit?.autonomiaOprita ? 'Repornește' : 'Oprește'}
+                      </button>
+                    </span>
+                    {/* P29: comutatorul VIDEO — clipurile plătite de CLIENȚI se
+                    autofinanțează oricum (tariful poartă profitul); butonul
+                    guvernează generările neplătite (ale tale, de admin). */}
+                    <span className="or-wallet-sub">
+                      {circuit?.videoPlatit == null
+                        ? '🎬 Video (Veo): stare necitită'
+                        : circuit.videoPlatit.pornit
+                          ? `🎬 Video (Veo): PORNIT${circuit.videoPlatit.sursa === 'env' ? ' (din env)' : ''} — și clipurile tale de admin merg`
+                          : '🎬 Video (Veo): OPRIT pentru clipuri neplătite — ale clienților cu tarif plătit MERG oricum'}{' '}
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={videoBusy}
+                        onClick={() => void onVideoPlatit(!(circuit?.videoPlatit?.pornit ?? false))}
+                      >
+                        {circuit?.videoPlatit?.pornit ? 'Oprește' : 'Pornește'}
                       </button>
                     </span>
                     {circuit?.autonomie && (

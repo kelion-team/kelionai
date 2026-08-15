@@ -26,11 +26,28 @@ export const VEDE_VIDEO_MAX_S = Math.max(60, Number(process.env.VEDE_VIDEO_MAX_S
 // Estimare declarată pe tarif public; factura adevărată e la Google.
 export const USD_1M_TOKENI_VIDEO = 0.3
 
-const RE_YOUTUBE = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w-]{5,}/i
-
-/** E un link pe care felia P30a îl poate vedea DIRECT (YouTube)? */
+/** E un link pe care felia P30a îl poate vedea DIRECT (YouTube)?
+ *  REPARAT 15 aug seara (audit adversarial, CONFIRMAT prin execuție): regexul
+ *  dintâi cerea gazda goală/www. și `v=` ca PRIM parametru — refuza linkuri
+ *  YouTube AUTENTICE: m.youtube.com (forma copiată de pe telefon — exact cum
+ *  testează ownerul), music.youtube.com, /embed/, watch?app=desktop&v=….
+ *  Acum URL-ul se PARSEAZĂ (new URL), nu se ghicește cu regex. */
 export function eLinkYoutube(url: string): boolean {
-  return RE_YOUTUBE.test(String(url ?? '').trim())
+  let u: URL
+  try {
+    u = new URL(String(url ?? '').trim())
+  } catch {
+    return false
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
+  const gazda = u.hostname.toLowerCase()
+  if (gazda === 'youtu.be') return /^\/[\w-]{5,}/.test(u.pathname)
+  if (gazda === 'youtube.com' || gazda.endsWith('.youtube.com')) {
+    const v = u.searchParams.get('v')
+    if (v && /^[\w-]{5,}$/.test(v)) return true
+    return /^\/(shorts|live|embed)\/[\w-]{5,}/.test(u.pathname)
+  }
+  return false
 }
 
 export interface FisaVideo {

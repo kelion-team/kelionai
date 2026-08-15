@@ -1,11 +1,18 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   PRET_VIDEO_USD_PE_SECUNDA,
   costVideoUsd,
   secundeVideoValide,
   motivRefuzVideo,
   gasesteUriVideo,
+  verdictVideoPlatit,
 } from './services/video.js'
+
+function sursa(rel: string): string {
+  return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
+}
 
 // ── GARDA DE BANI A VIDEOULUI (2 aug 2026) ──────────────────────────────────
 // Veo NU are nivel gratuit (măsurat pe pagina oficială de prețuri) — deci
@@ -51,11 +58,12 @@ describe('garda structurală de plată', () => {
     expect(motivRefuzVideo({ cheie: '', allowPaid: true, model })).toBe('fara_cheie_gemini')
   })
 
-  it('fără VIDEO_ALLOW_PAID ⇒ refuz care SPUNE prețul măsurat', () => {
+  it('fără aprobare ⇒ refuz care SPUNE prețul măsurat și DRUMUL (butonul din panou)', () => {
     const r = motivRefuzVideo({ cheie: 'k', allowPaid: false, model })
     expect(r).toMatch(/video_platit_neaprobat/)
     expect(r).toMatch(/\$0\.80/)
-    expect(r).toMatch(/VIDEO_ALLOW_PAID=1/)
+    // P29: drumul spus omului e BUTONUL din panoul de admin, nu un env pe VPS
+    expect(r).toMatch(/butonul «🎬 Video plătit» din panoul de admin/)
   })
 
   it('model fără preț cunoscut ⇒ refuz chiar și cu plata aprobată', () => {
@@ -86,5 +94,51 @@ describe('găsirea URI-ului video în răspunsul operației', () => {
   it('răspuns fără video ⇒ null (se raportează sincer, nu se declară succes)', () => {
     expect(gasesteUriVideo({ doar: 'text', numar: 3 })).toBeNull()
     expect(gasesteUriVideo(null)).toBeNull()
+  })
+})
+
+// ── P29: DRUMUL BANILOR LA VIDEO (owner, 15 aug: „eu vreau sa platesc, sau
+// clientul, de ce nu ma duce spre plata" + „daca video si funtiile nu merg e
+// pa") — comutatorul e buton (kv), clientul plătit trece, cel fără sold e DUS
+// la credite, iar refuzul dă mereu și calea gratuită (Google Flow). ──────────
+describe('P29 — comutatorul „video plătit": kv (butonul) bate env-ul', () => {
+  it('kv „1"/„0" = alegerea de pe buton, indiferent de env', () => {
+    expect(verdictVideoPlatit('1', false)).toEqual({ pornit: true, sursa: 'buton' })
+    expect(verdictVideoPlatit('0', true)).toEqual({ pornit: false, sursa: 'buton' })
+  })
+
+  it('fără kv cade pe env; nimic setat = OPRIT (nimic plătit din greșeală)', () => {
+    expect(verdictVideoPlatit(null, true)).toEqual({ pornit: true, sursa: 'env' })
+    expect(verdictVideoPlatit(null, false)).toEqual({ pornit: false, sursa: 'implicit' })
+  })
+
+  it('clientul care a PLĂTIT tariful trece de comutator (clipul e autofinanțat)', () => {
+    const video = sursa('./services/video.ts')
+    expect(video).toMatch(/allowPaid: comutator\.pornit \|\| platitDeClient/)
+    const chat = sursa('./routes/chat.ts')
+    expect(chat).toMatch(/genereazaVideo\(prompt, Number\(args\.seconds \?\? 8\), taxa\.scazutGbp > 0\)/)
+  })
+})
+
+describe('P29 — omul e DUS spre plată, nu lăsat în fundătură', () => {
+  it('sold insuficient ⇒ pagina de credite se deschide pe monitor + pasul spus creierului', () => {
+    const chat = sursa('./routes/chat.ts')
+    expect(chat).toMatch(/monitor: \{ url: '\/credite', title: 'Credits' \}/)
+    expect(chat).toMatch(/Pagina de credite e DEJA pe monitorul lui/)
+  })
+
+  it('refuzul „video plătit neaprobat" dă calea GRATUITĂ (Google Flow), cu pași', () => {
+    const chat = sursa('./routes/chat.ts')
+    expect(chat).toMatch(/alternativa_gratuita/)
+    expect(chat).toMatch(/labs\.google\/flow/)
+  })
+
+  it('butonul de admin există, e gardat de cerAdmin și lasă urmă în audit (P26)', () => {
+    const admin = sursa('./routes/admin.ts')
+    expect(admin).toMatch(/app\.post<\{ Body: \{ pornit\?: boolean \} \}>\('\/api\/admin\/video-platit'[\s\S]{0,160}?cerAdmin\(req, reply\)/)
+    expect(admin).toMatch(/noteazaAudit\('admin', 'video-platit \(buton\)'/)
+    const panou = sursa('../../frontend/src/components/AdminPanel.tsx')
+    expect(panou).toMatch(/Video \(Veo\)/)
+    expect(panou).toMatch(/onVideoPlatit/)
   })
 })

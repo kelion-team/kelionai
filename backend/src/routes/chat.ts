@@ -550,7 +550,7 @@ const IMAGE_TOOL: Tool = {
 const VIDEO_TOOL: Tool = {
   name: 'generate_video',
   description:
-    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. This COSTS real money per second (Veo has no free tier) — if the tool refuses because payment is not enabled, tell the user honestly, including the price from the refusal.',
+    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. This COSTS real money per second (Veo has no free tier). If the result contains `pas`, the credits top-up page is ALREADY on the user\'s monitor — tell them the price and that they can top up right there. If it contains `alternativa_gratuita`, offer that FREE path (Google Flow) with a ready-made prompt and the exact steps. Never answer a refusal with a bare "failed" — always give the price and the next step.',
   input_schema: {
     type: 'object',
     properties: {
@@ -4221,13 +4221,33 @@ async function runTool(
       // copt înăuntru): clipul se taxează ÎNAINTE de a costa banii ownerului
       // la Google; dacă generarea pică DUPĂ taxare, banii se întorc singuri.
       const taxa = await taxeazaServiciu(email, cheiaTarifVideo(), isAdmin)
-      if (!taxa.ok) return JSON.stringify({ error: 'plata_serviciului', motiv: taxa.motiv })
-      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8))
+      if (!taxa.ok) {
+        // P29 (owner, 15 aug: „eu vreau sa platesc, sau clientul, de ce nu ma
+        // duce spre plata"): lipsa banilor NU mai e fundătură — pagina de
+        // reîncărcare se deschide pe monitorul lui, iar creierul spune prețul.
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '/credite', title: 'Credits' } })}${CTRL}`)
+        return JSON.stringify({
+          error: 'plata_serviciului', motiv: taxa.motiv,
+          pas: 'Pagina de credite e DEJA pe monitorul lui — spune-i prețul serviciului și că de acolo reîncarcă (card sau cod).',
+        })
+      }
+      // Al treilea argument (P29): clientul care a plătit ACUM tariful și-a
+      // finanțat singur clipul — comutatorul de admin nu-i mai stă în drum.
+      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8), taxa.scazutGbp > 0)
       // The refusal (no key / payment not consciously enabled) travels to the
       // brain VERBATIM — it contains the measured price, so the person hears
       // the real reason, not a generic "failed".
       if ('error' in result) {
         await taxa.ramburseaza().catch(() => {})
+        // Refuzul de plată nu lasă omul cu mâna goală (owner: „prin google
+        // flow"): calea GRATUITĂ se dă de fiecare dată, cu pași concreți.
+        if (String(result.error).startsWith('video_platit_neaprobat'))
+          return JSON.stringify({
+            error: result.error,
+            alternativa_gratuita:
+              'Google Flow (labs.google/flow) — video GRATUIT cu contul lui Google: dă-i promptul gata scris ' +
+              'și pașii (deschide labs.google/flow → New project → lipește promptul → Generate).',
+          })
         return JSON.stringify({ error: result.error })
       }
       // The cost is the official list price × the real seconds generated —

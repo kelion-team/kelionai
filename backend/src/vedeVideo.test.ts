@@ -19,6 +19,21 @@ describe('P30a — recunoașterea linkurilor (felia YouTube)', () => {
     expect(eLinkYoutube('https://youtube.com/shorts/abc12345')).toBe(true)
   })
 
+  it('REPARAT (audit 15 aug): formele autentice pe care regexul vechi le refuza FALS', () => {
+    // m.youtube.com = forma standard copiată din browserul telefonului —
+    // exact cum testează ownerul live; refuzul ei era un neadevăr spus omului.
+    expect(eLinkYoutube('https://m.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(true)
+    expect(eLinkYoutube('https://music.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(true)
+    expect(eLinkYoutube('https://www.youtube.com/embed/dQw4w9WgXcQ')).toBe(true)
+    expect(eLinkYoutube('https://www.youtube.com/watch?app=desktop&v=dQw4w9WgXcQ')).toBe(true)
+  })
+
+  it('gazdele-capcană NU trec (parsare de URL, nu potrivire de substring)', () => {
+    expect(eLinkYoutube('https://youtube.com.evil.tld/watch?v=dQw4w9WgXcQ')).toBe(false)
+    expect(eLinkYoutube('https://evil.tld/youtube.com/watch?v=dQw4w9WgXcQ')).toBe(false)
+    expect(eLinkYoutube('ftp://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(false)
+  })
+
   it('ce NU e YouTube se refuză cinstit (TikTok = felia P30b, nu tăcere)', () => {
     expect(eLinkYoutube('https://www.tiktok.com/@cineva/video/123')).toBe(false)
     expect(eLinkYoutube('https://vimeo.com/12345')).toBe(false)

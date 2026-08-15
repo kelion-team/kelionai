@@ -36,11 +36,11 @@ describe('LACĂT — „ce au vizitat" ajunge în raport', () => {
 
   it('getDemoStats scoate `pages` în raport, iar tipul DemoRecent îl are', () => {
     const db = sursa('./db.ts')
-    // P25 (15 aug): raportul e GRUPAT PE OM, dar ambele surse de poză (cadrul
-    // vizitei SAU poza contului din faceprints) rămân în judecată — intenția
-    // veche (P3), purtată pe forma nouă (POZA_OMULUI).
-    expect(/ARRAY_AGG\(o\.photo_url ORDER BY o\.started_at DESC\) FILTER \(WHERE o\.photo_url <> ''\)/.test(db)).toBe(true)
-    expect(/ARRAY_AGG\(f\.photo ORDER BY o\.started_at DESC\) FILTER/.test(db)).toBe(true)
+    // P25 (15 aug) + auditul de seară: ambele surse de poză (cadrul vizitei
+    // SAU poza contului din faceprints) rămân în judecată, dar octeții pozei
+    // vin prin LATERAL doar pentru rândurile afișate — nu prin agregate.
+    expect(/SELECT c\.photo_url FROM cu_cheie c\s*\n\s*WHERE c\.cheia = l\.cheia AND c\.photo_url <> ''/.test(db)).toBe(true)
+    expect(/SELECT f\.photo FROM faceprints f/.test(db)).toBe(true)
     expect(/pages: r\.pages \?\? ''/.test(db)).toBe(true)
     const tip = sursa('./shared/api-types.ts')
     expect(/pages: string/.test(tip)).toBe(true)
@@ -48,12 +48,19 @@ describe('LACĂT — „ce au vizitat" ajunge în raport', () => {
 
   it('P25 — UN OM = O POZIȚIE, cu toate vizitele lui; fără poză acceptată NU intră (LEGE)', () => {
     const db = sursa('./db.ts')
-    // cheia omului, în ordinea încrederii: cont → amprentă → IP
-    expect(/COALESCE\(NULLIF\(lower\(v\.user_email\), ''\), NULLIF\(v\.fingerprint, ''\), v\.ip\) AS cheia/.test(db)).toBe(true)
-    // toate vizitele lui intră în card (agregate pe rândul omului)
-    expect(/JSON_AGG\(json_build_object\('la', o\.started_at, 'pages', o\.pages\) ORDER BY o\.started_at DESC\) AS vizite/.test(db)).toBe(true)
-    // LEGEA pozei: HAVING pe poza omului — fără poză, rândul nu există
-    expect(/HAVING \$\{POZA_OMULUI\} <> ''/.test(db)).toBe(true)
+    // cheia omului, în ordinea încrederii: cont → emailul moștenit de amprentă
+    // (auditul 15 aug: vizitele anonime dinaintea login-ului se unesc sub
+    // același om, nu fac o a doua poziție) → amprentă → IP
+    expect(/COALESCE\(NULLIF\(lower\(o\.user_email\), ''\), o\.email_amprentei, NULLIF\(o\.fingerprint, ''\), o\.ip\) AS cheia/.test(db)).toBe(true)
+    expect(/MAX\(NULLIF\(lower\(v\.user_email\), ''\)\) OVER \(PARTITION BY v\.fingerprint\)/.test(db)).toBe(true)
+    // toate vizitele lui intră în card, plafonate în SQL (LIMIT 40), nu în JS
+    expect(/JSON_AGG\(json_build_object\('la', z\.started_at, 'pages', z\.pages\)/.test(db)).toBe(true)
+    expect(/ORDER BY c\.started_at DESC LIMIT 40/.test(db)).toBe(true)
+    // LEGEA pozei taie ÎNAINTE de LIMIT — pe bool + EXISTS, fără octeți de poze
+    expect(/WHERE \$\{LEGEA_POZEI\}/.test(db)).toBe(true)
+    expect(/g\.are_cadru OR EXISTS \(/.test(db)).toBe(true)
+    // lacătul auditului (constatarea CRITICĂ): pozele NU se mai agregă pe rând
+    expect(/ARRAY_AGG\([of]\.photo/.test(db)).toBe(false)
     // cifra cinstită a celor neafișați se măsoară, nu se ascunde
     expect(/faraPoza: \{ persoane: Number\(ascunsi\?\.persoane \?\? 0\), vizite: Number\(ascunsi\?\.vizite \?\? 0\) \}/.test(db)).toBe(true)
     // cardul din panou desenează vizitele omului + cifra celor fără poză
