@@ -80,7 +80,7 @@ describe('creditAI — Fable 5 (rezerva constructorului): verde/roșu, fără gr
     // …dar becul NU mai are voie să fie verde doar din prezență: proba a picat.
     expect(beculCredit(c)).toBe('rosu')
     const v = c.serveste?.masurat && 'valoare' in c.serveste ? (c.serveste.valoare as { detaliu?: string }) : null
-    expect(String(v?.detaliu ?? '')).toContain('REFUZĂ')
+    expect(String(v?.detaliu ?? '')).toContain('NU recunoaște cheia (401)')
   })
 
   it('rândul rămâne în raport oricum, cu link de facturare Anthropic', async () => {
@@ -157,7 +157,9 @@ describe('creditAI — Fable 5 (rezerva constructorului): verde/roșu, fără gr
       vi.fn(async (url: string, init: any) => {
         const body = JSON.parse(init?.body || '{}')
         modeleIncercate.push(body.model)
-        if (body.model.includes('3-5-sonnet-20241022')) {
+        // Scara nouă (15 aug): capul e claude-fable-5 — pe EL cade 404, ca
+        // fallback-ul spre următorul candidat să rămână dovedit, nu decorativ.
+        if (body.model === 'claude-fable-5') {
           return new Response(
             JSON.stringify({
               type: 'error',
