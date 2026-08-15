@@ -107,9 +107,39 @@ export function getSessionUser(req: FastifyRequest): SessionUser | null {
 // dată: întoarce userul sau `null` DUPĂ ce a trimis răspunsul de eroare. 401 pe
 // sesiune moartă ≠ 403 pe rol (regula 9 aug: un cookie expirat nu are voie să
 // arate ca „nu ești admin").
+// ── LEGITIMAȚIA DE SERVICIU A LUI KELION — ADMIN 2 (P9) ─────────────────────
+// (owner, 15 aug: „kelion in continuare nu are acces la panoul de control si
+// la restul, raporteaza de ce nu are acces ca admin 2?")
+//
+// MĂSURAT atunci: accesul lui la panou era ÎMPRUMUTAT din cookie-ul sesiunii
+// ownerului, iar pe voce (vocalLive) și în bucla autonomă (autonomie.ts)
+// cookie-ul nu se transmitea → admin_vezi primea 403 exact când lucra ca
+// admin 2. Legitimația de aici e a LUI: un token aleator pe viața procesului,
+// care NU părăsește niciodată procesul (adminVedere îl pune pe fetch-urile
+// către bucla locală) și e acceptat DOAR de pe loopback — se verifică
+// adresa REALĂ a socketului (req.socket.remoteAddress), nu req.ip, care sub
+// trustProxy ar crede antetul X-Forwarded-For al oricui.
+// Rutele care mișcă bani / restaurează baza rămân ale ownerului — poarta aia
+// stă în adminVedere (DOAR_OWNERUL) și nu se atinge de legitimația asta.
+import { randomBytes as octetiAleatori } from 'node:crypto'
+export const TOKEN_ADMIN_INTERN = octetiAleatori(32).toString('hex')
+const KELION_ADMIN_INTERN: SessionUser = {
+  email: 'kelion@kelionai.app', // apare în audit ca EL, nu ca ownerul
+  name: 'Kelion (admin 2)',
+  picture: '',
+  role: 'admin',
+  locale: 'ro',
+}
+const deLoopback = (req: FastifyRequest): boolean =>
+  /^(127\.|::1$|::ffff:127\.)/.test(String(req.socket?.remoteAddress ?? ''))
+
 export function cerAdmin(req: FastifyRequest, reply: FastifyReply): SessionUser | null {
   const user = getSessionUser(req)
   if (!user) {
+    const intern = req.headers['x-kelion-intern']
+    if (typeof intern === 'string' && intern.length > 0 && intern === TOKEN_ADMIN_INTERN && deLoopback(req)) {
+      return KELION_ADMIN_INTERN
+    }
     void reply.code(401).send({ error: 'unauthorized' })
     return null
   }
