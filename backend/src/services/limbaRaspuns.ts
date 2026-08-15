@@ -29,6 +29,12 @@ const START_ES = new Set(['dime', 'hola', 'claro', 'bueno', 'vale', 'qué', 'có
 const START_EN = new Set(['the', 'hello', 'hi', 'hey', 'sure', 'yes', "i'm", "let's", 'what'])
 const START_DE = new Set(['ich', 'nein', 'hallo', 'jetzt'])
 const START_FR = new Set(['je', 'oui', 'bonjour', 'voilà', 'voila'])
+// PORTUGHEZĂ (captura ownerului, 15 aug: „Eu não sei." pe bandă) — ã/õ nu
+// există în română (a noastră are ă/â/î/ș/ț), deci semnele-s fără dubluri.
+// În listă DOAR cuvinte fără frate românesc: NU „eu" (e românesc!), NU „sim"
+// (SIM card), NU „voce" fără accent (vocea) — lecția hotfixului de la 9 aug.
+const SEMNE_PT = /[ãõ]/
+const START_PT = new Set(['não', 'nao', 'obrigado', 'obrigada', 'você', 'olá', 'isso'])
 
 const primeleCuvinte = (text: string, n = 4): string[] =>
   String(text ?? '')
@@ -55,6 +61,9 @@ export function inceputStrain(text: string): string | null {
   // rusă") — spre deosebire de listele de cuvinte, alfabetul nu are dubluri
   // românești, deci verdictul e fără risc de fals-pozitiv.
   if (/[Ѐ-ӿ]/.test(brut.slice(0, 60))) return 'rusă'
+  // portugheza ÎNAINTEA spaniolei: ã/õ sunt doar ale ei, iar „não"-ul din
+  // captură nu poartă niciun semn spaniol — ordinea nu răpește nimic Spaniei.
+  if (SEMNE_PT.test(brut.slice(0, 60)) || cuvinte.some((c) => START_PT.has(c))) return 'portugheză'
   if (SEMNE_ES.test(brut.slice(0, 60)) || cuvinte.some((c) => START_ES.has(c))) return 'spaniolă'
   if (cuvinte.some((c) => START_EN.has(c))) return 'engleză'
   if (cuvinte.some((c) => START_DE.has(c))) return 'germană'
@@ -71,7 +80,7 @@ export function aCerutAltaLimba(spusa: string): boolean {
     // fără \b: pe diacritice (î/ă) JS-ul le vede non-word și \b nu se mai
     // potrivește — „vorbește-mi în engleză" pica exact pe asta (test).
     /(vorbe[șs]te|r[ăa]spunde|zi|spune|explic[ăa])[^.!?]{0,24}(în|in)\s+(englez|spaniol|german|francez|italian|portughez)/.test(t) ||
-    /speak\s+(in\s+)?(english|spanish|german|french|italian)/.test(t) ||
+    /speak\s+(in\s+)?(english|spanish|german|french|italian|portuguese)/.test(t) ||
     /habla(me)?\s+(en\s+)?espa/.test(t)
   )
 }

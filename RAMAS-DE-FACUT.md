@@ -26,6 +26,26 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       dovadă reală: bucla golurilor triate există (triageGaps), dar niciun gol
       n-a ajuns REZOLVAT cap-coadă; cerințe cu sursa='kelion' nu s-au născut
       încă. ÎN LUCRU. [ ]
+- [ ] ORDIN 15 aug, P20 (captura „Eu não sei." pe banda V12.4, verbatim): „vreau
+      tu si toti agenti sa faca un audit si reparatie pe tot chatul, nu mai
+      vreau sa mai vad balari in chat sau vocea lui sa lipseasca" — FĂCUT
+      partea măsurată: bălăria din captură era PORTUGHEZĂ, iar gardul de limbă
+      (limbaRaspuns.ts) știa ES/EN/DE/FR/rusă dar NU portugheza → adăugată cu
+      markeri fără dublură românească (ã/õ, „não", „obrigado", „você", „olá",
+      „isso"; NU „eu"/„sim"/„voce" — lecția hotfixului din 9 aug), testul
+      poartă propoziția exactă din captură. ÎN CURS: auditul multi-agent
+      (6 dimensiuni: gard-limba, porți-verdict, voce-lipsă, chat-scris,
+      frontend-redare, istoric-otrăvit; fiecare constatare verificată
+      adversarial pe cod) — reparațiile confirmate vin în PR separat. [ ]
+- [ ] ORDIN 15 aug, P21 (verbatim): „cind porneste aplicatia si mic s-a activat
+      se deschide imediat si urechea setata pe limba default daca e user nou
+      sau limba setata pe user, e facuta asta dar nu merge, cauta si repara" +
+      „dupa ce finalizezi restul cerintelor" — PE COADĂ, după P20 (FIFO cerut
+      de owner). Pista notată: pinul urechii se citește din preferința
+      speech_lang la routes/vocalLive.ts:685-691, urechea îl primește în
+      services/vocalLive.ts:413 (inputAudioTranscription.languageCodes);
+      de verificat unde se SETEAZĂ speech_lang și de ce nu ajunge la ureche
+      la pornirea cu mic activ. [ ]
 - [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
       tură o escaladează automat pe nivel superior Fable 5. Nu pornește
       duplicat pe același model, se revine pentru un nou job la primul model."

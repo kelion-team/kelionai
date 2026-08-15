@@ -32,6 +32,24 @@ describe('inceputStrain — răspunsul care începe străin se prinde determinis
     expect(inceputStrain('Ich habe das verstanden')).toBe('germană')
   })
 
+  it('PORTUGHEZA se prinde — bălăria REALĂ din captura ownerului (15 aug)', () => {
+    // Pe banda de la V12.4 scria fix asta. „eu" e cuvânt românesc, deci nu el
+    // e markerul — „não" (și ã/õ oriunde în primele 60 de litere) sunt.
+    expect(inceputStrain('Eu não sei.')).toBe('portugheză')
+    expect(inceputStrain('Não entendi o que você disse')).toBe('portugheză')
+    expect(inceputStrain('Obrigado pela pergunta')).toBe('portugheză')
+    expect(inceputStrain('Olá, tudo bem?')).toBe('portugheză')
+    expect(inceputStrain('São Paulo é uma cidade grande')).toBe('portugheză')
+  })
+
+  it('dublurile portugheze NU mută româna: „eu", „sim", „voce" rămân ale noastre', () => {
+    expect(inceputStrain('Eu am verificat sistemul acum')).toBeNull()
+    expect(inceputStrain('Eu pot face asta acum')).toBeNull()
+    // „SIM card" și „voce" fără accent — românești curate, gardul nu le atinge
+    expect(inceputStrain('Sim cardul telefonului e activ')).toBeNull()
+    expect(inceputStrain('Voce mai clara acum, am reglat volumul')).toBeNull()
+  })
+
   it('gol / spații → null (nu inventăm verdict)', () => {
     expect(inceputStrain('')).toBeNull()
     expect(inceputStrain('   ')).toBeNull()
