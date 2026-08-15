@@ -79,8 +79,13 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // Eliminăm blocurile de prompt/instrucțiuni din corpul ordinului (de la antetul ordinului
   // până la începerea efectivă a pașilor de execuție / logurilor de lucru), altfel erorile
   // citate în descrierea sarcinii (ex. auto-vindecare) sunt confundate cu erori de rulare.
+  // Granița opririi e un PAS REAL de execuție (pas N, ==, 🚀, PR deschis…) —
+  // NU „llm": linia „llm [fatal]" CITATĂ în corpul ordinului de auto-vindecare
+  // e chiar eroarea recurentă reprodusă în prompt, deci face parte din bloc;
+  // cu „llm" ca graniță, ștergerea se oprea înaintea ei și eroarea citată
+  // renăștea ca eroare „vie" la fiecare citire (prins de propriul test).
   textDeVerificat = textDeVerificat.replace(
-    /(?:ORDINUL DE CONSTRUC[ȚT]IE|AUTO-VINDECARE\s*\([^)]*\):)[\s\S]*?(?=(?:^|\n)\s*(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:pas\s+\d+|==|🚀|llm\s+|PR deschis|✅|\[constructor\]\s+pas|$))/i,
+    /(?:ORDINUL DE CONSTRUC[ȚT]IE|AUTO-VINDECARE\s*\([^)]*\):)[\s\S]*?(?=(?:^|\n)\s*(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:pas\s+\d+|==|🚀|PR deschis|✅|\[constructor\]\s+pas|$))/i,
     '',
   )
 
