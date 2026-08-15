@@ -28,16 +28,21 @@ const G_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const VERIFICA_LA_MS = 24 * 60 * 60 * 1000 // zilnic
 const PRIMA_LA_MS = 3 * 60 * 1000 // prima trecere la 3 min după pornire
 
+/** Verifică dacă un model este un candidat general valid pentru slotul greu (nu un model specializat: video, audio, live, image, eap, lite etc.) */
+export function esteModelGeneralGreu(cod: string): boolean {
+  if (/-(?:lite|video|audio|live|image|embed|eap|tuning|vision|thinking-exp)(?:-|$)/i.test(cod)) return false
+  return /^gemini-\d+(?:\.\d+)?-flash(?:-(?:preview|\d{3,}))?$/.test(cod) || /^gemini-\d+(?:\.\d+)?-flash$/.test(cod)
+}
+
 /** Versiunea dintr-un id `gemini-X.Y-flash…` → [X, Y]; null dacă nu e din familia
- *  slotului greu. `-lite` e EXCLUS: ăla e slotul de conversație, iar dacă ar intra
- *  aici cele două sloturi s-ar prăbuși într-unul. */
-function versiune(cod: string): [number, number] | null {
-  if (/-lite(?:-|$)/.test(cod)) return null
+ *  slotului greu sau dacă este un model specializat (eap, video, audio, lite etc.). */
+export function versiune(cod: string): [number, number] | null {
+  if (!esteModelGeneralGreu(cod)) return null
   const m = /^gemini-(\d+)(?:\.(\d+))?-flash/.exec(cod)
   if (!m) return null
   return [Number(m[1]), Number(m[2] ?? 0)]
 }
-function maiNou(a: [number, number], b: [number, number]): boolean {
+export function maiNou(a: [number, number], b: [number, number]): boolean {
   return a[0] > b[0] || (a[0] === b[0] && a[1] > b[1])
 }
 
@@ -45,7 +50,7 @@ function maiNou(a: [number, number], b: [number, number]): boolean {
 const KV_DOVADA = 'model_upgrade_dovada'
 
 /** Modelele din familia slotului GREU disponibile pe cheia ownerului (fără
- *  vision/experimental ciudat, fără `-lite`). */
+ *  modele specializate: video, audio, live, image, eap, fără `-lite`). */
 async function listeazaModeleGrele(): Promise<string[]> {
   if (!config.geminiKey) return []
   try {
@@ -56,7 +61,7 @@ async function listeazaModeleGrele(): Promise<string[]> {
     const j = (await r.json()) as { models?: { name?: string; supportedGenerationMethods?: string[] }[] }
     return (j.models ?? [])
       .map((m) => (m.name ?? '').replace(/^models\//, ''))
-      .filter((cod) => /^gemini-\d+(?:\.\d+)?-flash/.test(cod) && !/-lite(?:-|$)|vision|thinking-exp|tuning/.test(cod))
+      .filter((cod) => esteModelGeneralGreu(cod))
       .filter((cod) => {
         const meths = (j.models ?? []).find((m) => (m.name ?? '').endsWith(cod))?.supportedGenerationMethods ?? []
         return meths.length === 0 || meths.includes('generateContent')
