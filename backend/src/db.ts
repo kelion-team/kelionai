@@ -1,8 +1,8 @@
 import pg from 'pg'
 import { randomBytes } from 'node:crypto'
 // THE HTTP CONTRACT, a single declaration (Batch A) — see src/shared/api-types.ts.
-import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.js'
-export type { DemoRecent, DemoStats, UserActivityRow }
+import type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow } from './shared/api-types.js'
+export type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
@@ -1908,35 +1908,29 @@ export async function purgeVisits(): Promise<number> {
 }
 
 
-export interface UserSessionRow {
-  email: string
-  started_at: string
-  seconds: number
-  actions: number
-  ip: string
-  city: string
-  country: string
-  code: string
-  device: string
-}
-
 // The owner's per-USER activity: WHO signed in, from what IP/place/device,
-// how long they stayed (presence pings), how active they were, plus their
-// latest sessions one by one. Admin only.
+// how long they stayed (presence pings), how active they were — un singur
+// rând pe adresă, cu DEVICE-urile lui dedesubt (P6, 15 aug; lista plată de
+// sesiuni care repeta același om de N ori a fost scoasă). Admin only.
 // AUDIT ADMIN (3 aug, tab Utilizatori): o eroare de DB întorcea {users:[],
 // sessions:[]} cu 200 — panoul afișa „încă nu s-a strâns activitate", o
 // afirmație nemăsurată (forma „Cardul: necreat"). Acum: null la eșec → ruta
 // răspunde 500, panoul spune „nu pot citi", nu „nu există activitate".
 export async function getUserActivity(): Promise<{
   users: UserActivityRow[]
-  sessions: UserSessionRow[]
 } | null> {
   if (!dbEnabled()) return null
   try {
     const pool = getPool()
+    // UN SINGUR RÂND PE ADRESĂ (P6; owner, 15 aug: „nu se afiseaza de mai multe
+    // ori, daca intra cu aceiasi adresa de user, se pastreaza unica si se
+    // adauga doar device cu care intra cu datele aferente"). Gruparea era pe
+    // `user_email` SENSIBIL la majuscule — aceeași adresă scrisă altfel făcea
+    // rânduri separate (dovada că baza chiar are cazuri amestecate: căutarea de
+    // apel a trebuit să pună lower() peste tot). Acum cheia e lower(email).
     const users = (
       await pool.query<UserActivityRow>(
-        `SELECT v.user_email AS email,
+        `SELECT lower(v.user_email) AS email,
                 COUNT(*)::int AS sessions,
                 COALESCE(SUM(EXTRACT(EPOCH FROM (v.last_seen_at - v.started_at))), 0)::float AS seconds,
                 COALESCE(SUM(v.actions), 0)::int AS actions,
@@ -1948,29 +1942,46 @@ export async function getUserActivity(): Promise<{
                 (ARRAY_AGG(v.country_code ORDER BY v.last_seen_at DESC))[1] AS code,
                 (ARRAY_AGG(v.device ORDER BY v.last_seen_at DESC))[1] AS device,
                 (ARRAY_AGG(v.browser ORDER BY v.last_seen_at DESC))[1] AS browser,
-                EXISTS(SELECT 1 FROM blocked_users b WHERE b.email = v.user_email) AS blocked,
-                COALESCE((SELECT w.balance FROM wallets w WHERE w.user_email = v.user_email), 0)::float AS balance,
-                COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE c.user_email = v.user_email), 0)::float AS "consumedUsd"
+                EXISTS(SELECT 1 FROM blocked_users b WHERE lower(b.email) = lower(v.user_email)) AS blocked,
+                COALESCE((SELECT w.balance FROM wallets w WHERE lower(w.user_email) = lower(v.user_email)), 0)::float AS balance,
+                COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE lower(c.user_email) = lower(v.user_email)), 0)::float AS "consumedUsd"
          FROM visits v
-         LEFT JOIN (SELECT user_email, COUNT(*)::int AS n
-                    FROM messages GROUP BY user_email) m
-           ON m.user_email = v.user_email
+         LEFT JOIN (SELECT lower(user_email) AS email_jos, COUNT(*)::int AS n
+                    FROM messages GROUP BY lower(user_email)) m
+           ON m.email_jos = lower(v.user_email)
          WHERE v.user_email <> ''
-         GROUP BY v.user_email
+         GROUP BY lower(v.user_email)
          ORDER BY MAX(v.last_seen_at) DESC
          LIMIT 200`,
       )
     ).rows
-    const sessions = (
-      await pool.query<UserSessionRow>(
-        `SELECT user_email AS email, started_at::text,
-                EXTRACT(EPOCH FROM (last_seen_at - started_at))::float AS seconds,
-                actions, ip, city, country, country_code AS code, device
+    // DEVICE-URILE, SUB USER (nu o listă plată de sesiuni care arăta „același
+    // om de N ori"): un rând pe (adresă, device, browser), cu datele lui.
+    const aparate = (
+      await pool.query<UserDeviceRow & { email: string }>(
+        `SELECT lower(user_email) AS email, device, browser,
+                COUNT(*)::int AS sessions,
+                COALESCE(SUM(EXTRACT(EPOCH FROM (last_seen_at - started_at))), 0)::float AS seconds,
+                MAX(last_seen_at)::text AS last_seen,
+                (ARRAY_AGG(ip ORDER BY last_seen_at DESC))[1] AS ip,
+                (ARRAY_AGG(city ORDER BY last_seen_at DESC))[1] AS city,
+                (ARRAY_AGG(country ORDER BY last_seen_at DESC))[1] AS country,
+                (ARRAY_AGG(country_code ORDER BY last_seen_at DESC))[1] AS code
          FROM visits WHERE user_email <> ''
-         ORDER BY started_at DESC LIMIT 100`,
+         GROUP BY lower(user_email), device, browser
+         ORDER BY MAX(last_seen_at) DESC
+         LIMIT 400`,
       )
     ).rows
-    return { users, sessions }
+    const peEmail = new Map<string, UserDeviceRow[]>()
+    for (const a of aparate) {
+      const { email, ...rest } = a
+      const lista = peEmail.get(email) ?? []
+      lista.push(rest)
+      peEmail.set(email, lista)
+    }
+    for (const u of users) u.devices = peEmail.get(u.email) ?? []
+    return { users }
   } catch {
     return null
   }
