@@ -1150,10 +1150,22 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   // yields its turn to fresh work and is still retried — the same
   // anti-starvation rule the mission already applies to itself. Only the
   // GENERAL list (gaps + RAMAS-DE-FACUT rows) stays behind the mission, as
-  // designed on Jul 30.
-  const brute = misiuneGata
-    ? [...(await cerinteDeDus()), ...(await golurileLui()), ...(await randuriDeFacut())]
-    : [...pasii.filter((e) => e.poate).map((e) => e.p), ...(await cerinteDeDus())]
+  // designed on Jul 30 — behind pașii RULABILI ai misiunii, nu în spatele unei
+  // misiuni întregi PARCATE. Măsurat pe 15 aug (dovada 6 „vede ce îi lipsește
+  // și construiește" stătea gri; owner: „finalizeeaza si restul de 2 care nu
+  // sunt bifate"): un pas de misiune parcat ținea `misiuneGata=false` la
+  // nesfârșit deși el însuși nu rula — deci golurile triate „DE IMPLEMENTAT"
+  // nu primeau NICIODATĂ rând. Aceeași regulă anti-înfometare de mai sus se
+  // aplică și aici: când misiunea nu are NICIUN pas rulabil în tura asta,
+  // lista generală intră la rând. Pașii parcați rămân în listă ca să se
+  // DE-PARCHEZE singuri la schimbarea lumii — și atunci își reiau întâietatea
+  // (sortarea stabilă îi ține primii).
+  const misiuneRulabila = pasii.some((e) => e.poate && !e.st.gata && !e.st.blocat)
+  const brute = [
+    ...(misiuneGata ? [] : pasii.filter((e) => e.poate).map((e) => e.p)),
+    ...(await cerinteDeDus()),
+    ...(misiuneGata || !misiuneRulabila ? [...(await golurileLui()), ...(await randuriDeFacut())] : []),
+  ]
   if (!brute.length) return { pornit: false, motiv: 'n-am ce lua: nici goluri, nici rânduri de listă' }
 
   // NOTHING GETS ABANDONED. Before, after 3 attempts the step was marked

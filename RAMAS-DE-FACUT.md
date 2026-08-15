@@ -1324,3 +1324,19 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
 > Restul cerințelor vechi (Revolut/KLN automat, gratuitele de bun-venit, becuri
 > reale, Gemini permanent cu rezervă anunțată) sunt FĂCUTE și live — dovezile în
 > AI-HANDOFF §13.
+
+## P. FLUXURILE FIFO DIN 15 AUG (dimineața) — ordinea fixată de owner: „le rezolvi doar in ordinea finalizari, nu intrerupi fluxuri"
+
+| # | Ce | Stare |
+|---|---|---|
+| P1 | **Dovezile 6+7 ale autonomiei** — dovada 6: golurile „DE IMPLEMENTAT" flămânzeau în spatele unei misiuni fără pași rulabili (un pas PARCAT ținea `misiuneGata=false` fără să ruleze); dovada 7: `imbunatatireContinua()` (singurul izvor de cerințe cu `sursa='kelion'`) era chemată doar când bucla nu avea absolut nimic de dus — practic niciodată. FIX: misiunea fără pas rulabil lasă lista generală la rând (autonomie.ts) + reanaliza zilnică lângă triaj (index.ts). Verzi REAL abia când bucla produce pe viu golul construit + cerința lui. | 🔧 în fluxul 1, de verificat live pe panoul dovezilor |
+| P2 | **Politica monitorului** — nimic doar-poză: orice suprafață din monitor are legătura reală („deschide în tab"), iar pereții de login Google nu se mai deschid în iframe mort. | ⏳ în coadă (fluxul 2) |
+| P3 | **Poza vizitatorilor** — login → vizitele sesiunii se leagă de poza contului; oaspete → captură de cameră pe vizită; boții rămân cinstit fără. Ownerul: „de ce nu e legata de vizitator poza". | ⏳ în coadă |
+| P4 | **Bucla închisă „cerința #N e LIVE / a murit"** — anunț în panou + push pe telefon la fiecare cerință verificată live (sau picată), nu doar starea în tabel. | ⏳ în coadă |
+| P5 | **Verificatorul lanțului Google** (meniu → unealtă → googleapis) ca poartă + reconectarea Google a ownerului pentru scope-urile noi. Ownerul: „aplicatiile de la google trebuiesc toate functionale, nu doar poze". | ⏳ în coadă |
+| P6 | **Utilizatori unici pe email** — un singur rând per adresă; dedesubt device-urile cu care a intrat, cu datele aferente (ownerul, 15 aug: „se pastreaza unica si se adauga doar device"). | ⏳ în coadă |
+| P7 | **PR-urile merged se arhivează singure din coadă + sistem informațional PR legat de creier** — toate datele din toate PR-urile, accesibile creierului; include minciuna de afișaj văzută la #301 („în așteptare" deși era merged). | ⏳ în coadă |
+| P8 | **Numele ordinelor în coadă = FAPTA** — titlul se extrage din „CE A CERUT", nu din ambalajul promptului („NIVEL DE DIFICULTATE… Ai analizat-o deja" la #306). Ownerul: „trebuie sa fie foarte clar ce executa". | ⏳ în coadă |
+| P9 | **Kelion admin 2 fără legitimație proprie** — accesul lui la panou e împrumutat din cookie-ul sesiunii ownerului; pe voce (vocalLive.ts:1022) și în bucla autonomă (autonomie.ts:664) cookie-ul NU se transmite → `admin_vezi` primește 403 exact când lucrează ca admin 2. FIX plănuit: token intern de proces acceptat de rutele /api/admin doar de pe 127.0.0.1. | ⏳ în coadă (raportat ownerului 15 aug) |
+| P10 | **Soldul £-1027.99 negativ la owner + plafonul „$0.00 (măsurat)"** — de verificat de unde vin ambele cifre și dacă citirea e reală sau un 0/negativ de eroare prezentat ca fapt (regula #1). | ⏳ în coadă |
+
