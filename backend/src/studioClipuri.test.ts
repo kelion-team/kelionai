@@ -128,3 +128,39 @@ describe('P22 — timerul de promovare: TOATE cheile sunt ale ownerului', () => 
     expect(timer).toMatch(/cost_azi_necitibil — pe necitit nu se cheltuie \(regula #1\)/)
   })
 })
+
+// ── P32 (owner, 15 aug 21:44, verbatim: „dupa ce genereaza scenariul genul
+// asta trebuie sa ai selectare de copiere si sa apesi pe butonul din aplicatii
+// de generare video, se preia textul automat si incepe generarea, se salveaza
+// in download, pe ecran bargraful spune statusul de generare reala dinamica"
+// + 21:42: „trebuie sa apara la text generare sau reparare sa sti ce face") ──
+describe('P32 — scenariul se preia AUTOMAT; bara spune pe românește ce face', () => {
+  it('studioul trimite frame-ul {scenariu} către client (textul + numele + calea)', () => {
+    const chat = sursa('./routes/chat.ts')
+    expect(chat).toMatch(/scenariu: \{ text: scenariu, nume: plan\.numeFisier, cale: plan\.cale \}/)
+    const tip = sursa('../../frontend/src/lib/chat.ts')
+    expect(tip).toMatch(/scenariu\?: \{ text: string; nume: string; cale: string \}/)
+  })
+
+  it('clientul îl ține minte (localStorage) și butonul 🎬 îl PREIA automat', () => {
+    const panou = sursa('../../frontend/src/components/ChatPanel.tsx')
+    expect(panou).toMatch(/localStorage\.setItem\('kelion_scenariu'/)
+    const stage = sursa('../../frontend/src/pages/Stage.tsx')
+    expect(stage).toMatch(/Generează ACUM clipul video cu exact acest scenariu/)
+    expect(stage).toMatch(/📋 Copiază scenariul pregătit/)
+    // prospețimea: un scenariu de acum 3 zile nu mai sare singur în meniu
+    expect(stage).toMatch(/30 \* 60 \* 1000/)
+  })
+
+  it('bara de execuție spune întâi CE FACE (românește), numele tehnic în paranteză', () => {
+    const chat = sursa('./routes/chat.ts')
+    expect(chat).toMatch(/`\$\{capabilitate\.does\} \(\$\{name\}\)`/)
+    const cap = sursa('./services/brainCapabilities.ts')
+    expect(cap).toMatch(/GENERARE VIDEO: face clipul cerut/)
+  })
+
+  it('creierul NU mai deleagă generarea de clipuri agenților (captura 21:42: cheama_agent pe o cerere de clip)', () => {
+    const defs = sursa('./services/brainToolDefs.ts')
+    expect(defs).toMatch(/NU delega NICIODATĂ generarea de clipuri sau imagini/)
+  })
+})

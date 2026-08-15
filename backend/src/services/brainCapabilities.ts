@@ -45,7 +45,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'show_document', category: 'afisare', does: 'pune un text/rezultat pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'run_web_app', category: 'afisare', does: 'rulează o pagină scrisă de el (izolat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'generate_image', category: 'afisare', does: 'generează o imagine', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'generate_video', category: 'afisare', does: 'generează un clip video (Veo; plătit, doar cu aprobarea conștientă din env)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'generate_video', category: 'afisare', does: 'GENERARE VIDEO: face clipul cerut (Veo, 1-3 minute)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'vede_video', category: 'vedere', does: 'vede un clip YouTube și extrage ideile/informațiile (fișă catalogată + învățată)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'lista_tarife', category: 'afisare', does: 'citește meniul VIU de prețuri al extra-serviciilor (cifra spusă = cifra taxată)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'studioul_de_clipuri', category: 'afisare', does: 'planul Studioului de Clipuri: rețetă + pași + prompt șlefuit + nume sugestiv; calea gratis (Google Flow) sau plătită (Veo)', chat: true, voice: false, voiceViaBrain: true, admin: false },

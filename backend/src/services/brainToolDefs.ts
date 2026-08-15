@@ -890,7 +890,10 @@ export const CHEAMA_AGENT_TOOL: Tool = {
   description:
     'Deleagă o sarcină unui AGENT SPECIALIST al lui Kelion și primești răspunsul lui. ' +
     'Folosește-l când cererea se potrivește clar unei specialități — specialistul o rezolvă mai ' +
-    'bine decât un răspuns general. Pe lângă lista de mai jos există și agenții adăugați de owner ' +
+    'bine decât un răspuns general. NU delega NICIODATĂ generarea de clipuri sau imagini — ' +
+    'pentru „fă-mi un video/clip" cheamă DIRECT generate_video (agenții doar VORBESC, nu generează; ' +
+    'măsurat 15 aug: o cerere de clip delegată a lăsat omul fără clip). ' +
+    'Pe lângă lista de mai jos există și agenții adăugați de owner ' +
     'din admin (id necunoscut → unealta îți întoarce lista completă). Alege „agent" din (id — specialitate):\n' +
     ROSTER.map((a) => `${a.id} — ${a.rol}`).join('\n'),
   input_schema: {

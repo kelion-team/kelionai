@@ -2885,7 +2885,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         if (cereActiune) {
           pasiExecutie += 1
           const capabilitate = CAPABILITIES.find((c) => c.name === name)
-          const pas = capabilitate ? `${name} — ${capabilitate.does}` : name
+          // Ownerul, 21:42 („trebuie sa apara la text generare sau reparare sa
+          // sti ce face"): întâi CE FACE, pe românește — numele tehnic al
+          // uneltei rămâne în paranteză, pentru depanare, nu în capul frazei.
+          const pas = capabilitate ? `${capabilitate.does} (${name})` : name
           const procent = Math.min(95, Math.round(1000 * (1 - Math.pow(0.8, pasiExecutie))) / 10)
           try {
             reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas, procent } })}${CTRL}`)
@@ -4263,6 +4266,14 @@ async function runTool(
         args.cale === 'platit' ? 'platit' : 'gratis',
         new Date(),
       )
+      // P32 (owner, 21:44: „se preia textul automat si incepe generarea"):
+      // scenariul pregătit pleacă și către CLIENT ca frame — butonul 🎬 din
+      // meniul Aplicații îl preia automat, iar omul are și „Copiază".
+      if (!('error' in plan)) {
+        const scenariu = plan.promptVeo ?? plan.promptFlow ?? ''
+        if (scenariu)
+          reply.raw.write(`${CTRL}${JSON.stringify({ scenariu: { text: scenariu, nume: plan.numeFisier, cale: plan.cale } })}${CTRL}`)
+      }
       return JSON.stringify(plan)
     }
 

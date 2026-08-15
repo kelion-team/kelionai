@@ -449,6 +449,17 @@ export default function ChatPanel({
       window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: c.nav }))
       return
     }
+    // P32: scenariul pregătit de Studio se ține minte (localStorage) — butonul
+    // 🎬 din meniul Aplicații îl preia AUTOMAT la apăsare, plus „Copiază".
+    if (c.scenariu?.text) {
+      try {
+        localStorage.setItem('kelion_scenariu', JSON.stringify({ ...c.scenariu, la: Date.now() }))
+      } catch {
+        /* stocarea plină nu rupe chatul */
+      }
+      window.dispatchEvent(new CustomEvent('kelion:scenariu', { detail: c.scenariu }))
+      return
+    }
     // MESSENGER: creierul a pornit un apel („apelează-l pe X") → ridicăm la APELANT
     // ecranul „sun pe…". Stage ascultă și arată interfața de apel (merge și la volan).
     if (c.apel) {
