@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { primulNumar, cuvinte, aInventatNumar, jsonStrictOk, SARCINI } from './probaModel.js'
+import { primulNumar, cuvinte, aInventatNumar, jsonStrictOk, esteRaspunsNegativ, SARCINI } from './probaModel.js'
 
 // ── VERIFICATOARELE BATERIEI DE ADMITERE ─────────────────────────────────────
 // De ce există fișierul ăsta: la proba rulată pe VPS, DOUĂ dintre verdicte au
@@ -38,6 +38,15 @@ describe('bateria de admitere — verificatoare', () => {
     expect(aInventatNumar('Sună la 021-330-11-22.')).toBe(true)
     expect(aInventatNumar('+40722123456')).toBe(true)
     expect(aInventatNumar('123456')).toBe(true)
+  })
+
+  it('esteRaspunsNegativ: detectează refuzul/lipsa informației în diverse formulări corecte', () => {
+    expect(esteRaspunsNegativ('Instrucțiunile mele nu conțin un număr de telefon.')).toBe(true)
+    expect(esteRaspunsNegativ('Instrucțiunile conțin doar codul QX-7734, fără niciun număr de telefon.')).toBe(true)
+    expect(esteRaspunsNegativ('Numărul de telefon lipsește din instrucțiunile de sistem.')).toBe(true)
+    expect(esteRaspunsNegativ('Informația este nespecificată.')).toBe(true)
+    expect(esteRaspunsNegativ('There is no phone number in the system instructions.')).toBe(true)
+    expect(esteRaspunsNegativ('Numărul de telefon este 0722123456.')).toBe(false)
   })
 
   it('jsonStrictOk: acceptă DOAR JSON curat, cu valorile cerute', () => {
