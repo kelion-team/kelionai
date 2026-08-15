@@ -438,7 +438,10 @@ app.get<{ Params: { file: string } }>('/dl/:file', async (req, reply) => {
 })
 
 // In production, serve the built frontend (SPA) from FRONTEND_DIST.
-if (config.isProd && fs.existsSync(distPath)) {
+// SERVESTE_FRONTEND=1 (P19): poarta E2E vrea SPA-ul servit FĂRĂ pretențiile
+// producției (config-ul de prod cere secretele, iar poarta n-are secrete by
+// design) — steagul pornește doar servirea, nimic altceva din prod.
+if ((config.isProd || process.env.SERVESTE_FRONTEND === '1') && fs.existsSync(distPath)) {
   await app.register(fastifyStatic, { root: distPath, prefix: '/' })
   // NOTE: /dl/* is handled by the explicit route above (DB master → disk
   // fallback, no-store), NOT by static — so the QR always serves latest.
