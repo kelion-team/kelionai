@@ -27,6 +27,19 @@ concurrency:
 
 jobs:
   deploy:
+    # ── PE ÎNTRERUPĂTOR PÂNĂ SE DEBLOCHEAZĂ ACTIONS (15 aug; același tipar ca
+    # gemini-lock din 7 aug) ──────────────────────────────────────────────────
+    # Facturarea organizației e blocată: jobul se năștea, nu primea NICIODATĂ
+    # runner (runner_id: 0, loguri 404) și murea roșu → un email „Run failed:
+    # deploy" către owner la FIECARE merge în master — iar cu constructorul
+    # îmbinând la ~10 minute, inboxul lui era bombardat toată noaptea (captura
+    # lui din 15 aug, 06:51). Publicarea REALĂ nu trece pe aici de la scoaterea
+    # Railway: o face cronul auto-publicare de pe VPS (dovada: live avansează
+    # — v=f3440b9 la 05:45 — cu Actions mort). Jobul se ține, nu se șterge:
+    # când factura se deblochează, variabila de repo ACTIONS_PORNIT=true îl
+    # repornește neschimbat (Settings → Secrets and variables → Actions →
+    # Variables). Un job SĂRIT nu trimite emailuri; unul picat, da.
+    if: ${{ vars.ACTIONS_PORNIT == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Versiunea live ÎNAINTE (pentru jurnal)

@@ -20,6 +20,10 @@ on:
 
 jobs:
   build-upload:
+    # Pe întrerupătorul ACTIONS_PORNIT (15 aug, ca deploy.yml și gemini-lock):
+    # facturarea blocată = niciun runner alocat vreodată → orice declanșare pe
+    # push (schimbări în ios/**) murea roșu cu email către owner. Sărit ≠ picat.
+    if: ${{ vars.ACTIONS_PORNIT == 'true' }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
