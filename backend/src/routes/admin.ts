@@ -618,13 +618,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // P26 — REGISTRUL DE AUDIT + dovada backupului (owner, 15 aug: „istoric
+  // INCIDENTUL 15 aug seara: prima versiune a rutei se chema /api/admin/audit —
+  // adresă care EXISTA deja (auditul eșecurilor, 27 iul, mai sus) — iar Fastify
+  // a crăpat bootul pe „duplicated route" → 502 pe live până a ținut plasa
+  // publicării. Lecția: orice rută nouă se caută întâi cu grep + BOOTUL se
+  // probează local înainte de push (poarta VPS fiind mută, bootul nu-l mai
+  // proba nimeni). Adresa nouă: registru-audit.
   // salvat cu dovezi cine a modificat, trasabilitate 24 din 24 de ore" +
   // „baza de date nu se pierde"). Registrul vine din audit_log (el însuși sub
   // scutul datelor); backupul e MĂSURAT de pe disc — cel mai nou fișier din
   // BACKUP_DIR (implicit /root/kelion/backups, scris de deploy/backup.sh) —
   // nu presupus. Fără director pe mașina asta → null cinstit, nu o dată
   // inventată (regula #1).
-  app.get('/api/admin/audit', async (req, reply) => {
+  app.get('/api/admin/registru-audit', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
     const randuri = await citesteAudit(200)

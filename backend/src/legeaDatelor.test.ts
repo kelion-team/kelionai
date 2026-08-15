@@ -56,8 +56,8 @@ describe('P26 — nimic nu se șterge, nici registrul însuși', () => {
 })
 
 describe('P26 — panoul: registrul + dovada backupului + cardul complet al omului', () => {
-  it('ruta /api/admin/audit e gardată de cerAdmin și măsoară backupul de pe disc', () => {
-    expect(admin).toMatch(/app\.get\('\/api\/admin\/audit'[\s\S]{0,120}?cerAdmin\(req, reply\)/)
+  it('ruta /api/admin/registru-audit e gardată de cerAdmin și măsoară backupul de pe disc', () => {
+    expect(admin).toMatch(/app\.get\('\/api\/admin\/registru-audit'[\s\S]{0,220}?cerAdmin\(req, reply\)/)
     expect(admin).toMatch(/BACKUP_DIR/)
     expect(admin).toMatch(/st\.mtimeMs > cel\.t/)
   })

@@ -126,7 +126,7 @@ function RegistruAudit() {
   const [date, setDate] = useState<{ randuri: RandAudit[]; backup: { fisier: string; la: string; octeti: number } | null } | null | 'eroare'>(null)
   useEffect(() => {
     let viu = true
-    void fetch('/api/admin/audit', { credentials: 'include' })
+    void fetch('/api/admin/registru-audit', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j) => { if (viu) setDate(j) })
       .catch(() => { if (viu) setDate('eroare') })
