@@ -1,5 +1,9 @@
 # AI-HANDOFF — Starea curentă a proiectului Kelion
 
+## Cerința #32 — Screenshot focalizat pe bara de admin și opțiuni schimbare limbă
+- Cerința de captură live / screenshot pe monitor este o acțiune interactivă a asistentului Kelion (din instanța live cu uneltele de ecran/monitor), nu o modificare de cod din sandbox-ul constructorului.
+- Opțiunile de schimbare a limbii din interfață/admin bar sunt definite în `frontend/src/lib/langList.ts` și integrate în `Stage.tsx`.
+
 ## Cerința #31 — Opțiuni schimbare limbă în bara de admin
 - Opțiunile de schimbare a limbii din bara de admin sunt configurate și integrate în `Stage.tsx`.
 - Sunt disponibile opțiunile pentru limbile: Română (RO), English (EN), Español (ES), Français (FR), Deutsch (DE), Italiano (IT), Русский (RU).
