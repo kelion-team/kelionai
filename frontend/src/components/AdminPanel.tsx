@@ -120,6 +120,86 @@ function ErrRow({
 // ── P26 — REGISTRUL DE AUDIT (owner, 15 aug: „istoric salvat cu dovezi cine a
 // modificat, trasabilitate 24 din 24 de ore" + „baza de date nu se pierde").
 // Se încarcă la deschiderea tabului Utilizatori; arată cine/când/ce, valoarea
+// ── P22: TIMERUL DE PROMOVARE (owner: „cu functie timer de promovare eventual
+// la ore prestabilite") — cheile sunt ALE ownerului, pe față: orele, plafonul
+// zilnic în USD, ideea clipului, butonul PORNIT/OPRIT (implicit OPRIT — banii
+// nu curg nesupravegheați). Serverul refuză PE NUME orice rulare în afara
+// cheilor (promoTimer.ts); fiecare salvare lasă urmă în registrul de audit.
+interface SetariPromoUi { pornit: boolean; ore: number[]; plafonUsdZi: number; idee: string }
+function PromoStudio() {
+  const [stare, setStare] = useState<SetariPromoUi | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [oreTxt, setOreTxt] = useState('')
+  const [plafonTxt, setPlafonTxt] = useState('1')
+  const [idee, setIdee] = useState('')
+  useEffect(() => {
+    void fetch('/api/admin/studio-promo', { credentials: 'include' })
+      .then((r) => (r.ok ? (r.json() as Promise<SetariPromoUi>) : null))
+      .then((j) => {
+        if (!j) return
+        setStare(j)
+        setOreTxt(j.ore.join(','))
+        setPlafonTxt(String(j.plafonUsdZi))
+        setIdee(j.idee)
+      })
+      .catch(() => {})
+  }, [])
+  async function salveaza(pornit: boolean): Promise<void> {
+    setBusy(true)
+    const ore = oreTxt
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => Number.isInteger(n) && n >= 0 && n <= 23)
+    const r = await fetch('/api/admin/studio-promo', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pornit, ore, plafonUsdZi: Number(plafonTxt) || 0, idee }),
+    })
+      .then((x) => (x.ok ? (x.json() as Promise<SetariPromoUi>) : null))
+      .catch(() => null)
+    if (r) {
+      setStare(r)
+      setOreTxt(r.ore.join(','))
+      setPlafonTxt(String(r.plafonUsdZi))
+      setIdee(r.idee)
+    }
+    setBusy(false)
+  }
+  if (!stare) return <span className="or-wallet-sub">🗓 Promovarea programată: stare necitită</span>
+  return (
+    <span className="or-wallet-sub" style={{ display: 'block' }}>
+      🗓 Promovarea programată (Studioul de Clipuri):{' '}
+      {stare.pornit ? `PORNITĂ — orele ${stare.ore.join(', ') || '—'}, plafon $${stare.plafonUsdZi}/zi` : 'OPRITĂ'}
+      <details style={{ marginTop: 4 }}>
+        <summary>setări (ore, plafon, ideea clipului)</summary>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+          <label>
+            Orele (0-23, cu virgulă):{' '}
+            <input value={oreTxt} onChange={(e) => setOreTxt(e.target.value)} placeholder="ex. 9,18" />
+          </label>
+          <label>
+            Plafon $/zi:{' '}
+            <input value={plafonTxt} onChange={(e) => setPlafonTxt(e.target.value)} style={{ width: 70 }} />
+          </label>
+          <label>
+            Ideea clipului:{' '}
+            <input value={idee} onChange={(e) => setIdee(e.target.value)} placeholder="ex. Kelion, asistentul tău AI, pe kelionai.app" style={{ width: '100%' }} />
+          </label>
+          <span>
+            <button type="button" className="ghost" disabled={busy} onClick={() => void salveaza(true)}>
+              Salvează și PORNEȘTE
+            </button>{' '}
+            <button type="button" className="ghost" disabled={busy} onClick={() => void salveaza(false)}>
+              Salvează OPRIT
+            </button>
+          </span>
+        </div>
+      </details>
+    </span>
+  )
+}
+
 // veche → nouă, plus DOVADA backupului (cel mai nou fișier de pe disc, măsurat
 // de server — dată + mărime; lipsa lui se spune, nu se maschează).
 interface RandAudit { la: string; actor: string; actiune: string; tabel: string; cheie: string; vechi: string; nou: string }
@@ -1574,6 +1654,7 @@ export default function AdminPanel({
                         {circuit?.videoPlatit?.pornit ? 'Oprește generarea' : 'Pornește generarea (pe banii tăi)'}
                       </button>
                     </span>
+                    <PromoStudio />
                     {circuit?.autonomie && (
                       <span className="or-wallet-sub" style={{ color: circuit.autonomie.ok ? undefined : '#8a8f98' }}>
                         {circuit.autonomie.ok ? '🤖' : '·'} Kelion, de capul lui: {circuit.autonomie.detaliu}

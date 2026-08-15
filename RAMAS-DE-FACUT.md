@@ -235,7 +235,7 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       n-a luat #1195 (suspect: prima rulare a porții E2E noi — playwright
       install împotmolit; logul gestionar-pr.log). Până la lămurire, PR-urile
       claude/* pot rămâne negătate — se verifică manual porțile la fiecare. [ ]
-- [ ] ORDIN 15 aug, P22 (verbatim): „se poate numi aplicatia Studioul de
+- [x] ORDIN 15 aug, P22 (verbatim): „se poate numi aplicatia Studioul de
       Clipuri, care cuprinde toate 6, nu? ii dai o ideie, ii spui foloseste
       studioul de clipuri si el face tot" + „cu functie timer de promovare
       eventual la ore prestabilite" — APLICAȚIE NOUĂ 🎬 Studioul de Clipuri
@@ -259,8 +259,23 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       creditele LUI → descarcă → încarcă în Kelionai → Kelion analizează/
       montează/narează/publică. Automatizarea NU apasă în Flow în locul
       omului (fără API; contra regulilor Google) — complet-automatul rămâne
-      pe API-ul plătit cu butonul P29. La construcție se cere acordul lui pe
-      VIDEO_ALLOW_PAID + ore/plafon. PE COADĂ după P20 și P21. [ ]
+      pe API-ul plătit cu butonul P29. CONSTRUIT (15 aug seara): (1) unealta
+      studioul_de_clipuri — planul determinist (6 rețete, prompt șlefuit în
+      EN, pași de urmat, nume sugestiv Rețetă-Subiect-data_ora.mp4), pentru
+      ORICE user logat, și pe faza de vorbire; calea GRATIS = rețeta Flow cu
+      promptul de lipit; calea PLĂTITĂ = lista_tarife → confirmare EXPLICITĂ
+      → generate_video; (2) intrarea „🎬 Studioul de Clipuri" în meniul
+      Aplicații (a înlocuit Generator video — studioul îl cuprinde);
+      (3) numele sugestiv PESTE TOT: cardul video de pe monitor are butonul
+      „⬇ Salvează în Download (nume.mp4)"; (4) TIMERUL de promovare: kv
+      studio_promo (ore 0-23, plafon $/zi, ideea, buton PORNIT/OPRIT —
+      implicit OPRIT), rulează în bucla serverului la 5 min DOAR sub toate
+      cheile ownerului + comutatorul 🎬 din P29; refuzuri PE NUME; pe necitit
+      nu se cheltuie; clipul gata → anunț în panou cu link + cost + plafon;
+      setările în Admin → Bani (PromoStudio) cu urmă în audit. Lacăte:
+      studioClipuri.test.ts (13) + lantGoogle actualizat + capabilități 118.
+      RĂMAS: proba live a ownerului (meniu → Studio → idee → clip pe cele
+      două căi; timerul pornit cu orele lui). [ ]
 - [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
       tură o escaladează automat pe nivel superior Fable 5. Nu pornește
       duplicat pe același model, se revine pentru un nou job la primul model."

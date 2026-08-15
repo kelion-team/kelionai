@@ -51,7 +51,10 @@ const DOVEZI: Record<string, { fisier: string; semnatura: RegExp }> = {
   '📷 Photos': { fisier: 'services/googlePhotos.ts', semnatura: /photospicker\.googleapis\.com\/v1/ },
   '▶️ YouTube upload': { fisier: 'services/googleYouTube.ts', semnatura: /upload\/youtube\/v3\/videos/ },
   '🏪 Profilul firmei': { fisier: 'services/googleBusiness.ts', semnatura: /googleapis\.com\/v1\/accounts/ },
-  '🎬 Generator video': { fisier: 'services/video.ts', semnatura: /googleapis\.com\/v1beta/ },
+  // P22: Studioul a ÎNLOCUIT vechiul „Generator video" — planul studioului
+  // (services/studioClipuri.ts) conduce spre generate_video (Veo, plătit) sau
+  // spre rețeta gratuită Google Flow; lanțul Veo rămâne cel dovedit.
+  '🎬 Studioul de Clipuri': { fisier: 'services/studioClipuri.ts', semnatura: /labs\.google\/flow/ },
 }
 
 describe('lanțul aplicațiilor din meniu — real cap la cap, nu poze', () => {

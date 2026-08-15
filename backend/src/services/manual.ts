@@ -249,6 +249,8 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   run_web_app: { what: 'Builds a small page and runs it for you', say: '"make me a quick calculator"' },
   generate_image: { what: 'Draws an image from your description', say: '"draw me a red kitchen"' },
   generate_video: { what: 'Makes a short video clip from your description (paid, only if enabled)', say: '"make me a video of waves at sunset"' },
+  lista_tarife: { what: 'Reads the live price list of extra services (the price you are told is the price charged)', say: '"how much does a video clip cost?"' },
+  studioul_de_clipuri: { what: 'The Clip Studio: give it an idea and it plans the whole clip — free path (Google Flow, your account) or paid (Veo)', say: '"use the Clip Studio: a 8s ad for my bakery"' },
   vede_video: { what: 'Watches a YouTube video for you and pulls out the main ideas, facts and key moments (then remembers them)', say: '"watch this video and tell me the main ideas: <link>"' },
   open_app_view: { what: 'Opens a panel of the app for you', say: '"open my settings"' },
   proceseaza_date: { what: 'Reads a CSV/JSON you paste and works out totals, averages or a summary, shown on your screen', say: '"add up this CSV by region"' },

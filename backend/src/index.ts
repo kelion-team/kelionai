@@ -571,6 +571,21 @@ try {
     void santinelaPublicare()
     setInterval(() => { void santinelaPublicare() }, 5 * 60 * 1000)
   }, 3 * 60 * 1000)
+  // P22 — TIMERUL DE PROMOVARE (owner: „timer de promovare eventual la ore
+  // prestabilite"). Implicit OPRIT; rulează DOAR sub cheile ownerului (butonul
+  // + orele + plafonul zilnic din kv, plus comutatorul 🎬 din P29). Trecerea
+  // la 5 min e ieftină: oprit = o singură citire kv, nimic altceva.
+  const promo = async (): Promise<void> => {
+    const { promoTick } = await import('./services/promoTimer.js')
+    const r = await promoTick().catch((e) => ({ rulat: false, motiv: `tick_picat: ${String(e).slice(0, 120)}` }))
+    if (r.rulat) app.log.info(r, 'clip de promovare generat')
+    else if (r.motiv && !r.motiv.startsWith('promo_oprit') && !r.motiv.startsWith('ora_neprogramata') && !r.motiv.startsWith('deja_rulat'))
+      app.log.warn(r, 'timerul de promovare a refuzat')
+  }
+  setTimeout(() => {
+    void promo()
+    setInterval(() => { void promo() }, 5 * 60 * 1000)
+  }, 4 * 60 * 1000)
   // ISCOADELE (Adrian, 4 aug: „boti care bat netul 24 din 24 si aduc informati
   // lui kelion"): patrula periodică Serper→creier→memoria lui Kelion.
   pornesteIscoadele()

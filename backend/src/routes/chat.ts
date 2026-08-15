@@ -69,6 +69,7 @@ import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/fee
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
 import { taxeazaServiciu, cheiaTarifVideo, meniulDeTarife, lirePentru } from '../services/tarife.js'
+import { planStudio, numeClip, RETETE_STUDIO } from '../services/studioClipuri.js'
 import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
@@ -572,6 +573,31 @@ const TARIFE_TOOL: Tool = {
     'Read the LIVE price list of the extra services (video clip, image, CV adaptation, presentation) in credits and £. ' +
     'Call this BEFORE quoting any price — NEVER invent figures. Also tells which video quality (Veo model tier) is currently active.',
   input_schema: { type: 'object', properties: {} },
+}
+
+// P22 — STUDIOUL DE CLIPURI (owner, 15 aug: „ii dai o ideie, ii spui foloseste
+// studioul de clipuri si el face tot"). Unealta întoarce PLANUL determinist
+// (rețeta, pașii, promptul șlefuit, numele sugestiv de fișier) — creierul îl
+// URMEAZĂ, nu improvizează. Calea GRATIS (Google Flow, pe contul omului) e
+// pentru ORICE user logat; calea plătită trece prin lista_tarife + confirmare.
+const STUDIO_TOOL: Tool = {
+  name: 'studioul_de_clipuri',
+  description:
+    'THE CLIP STUDIO (Studioul de Clipuri): give it the user\'s idea and it returns the exact plan to follow — ' +
+    'recipe, steps, a polished video prompt, and the suggestive file name (Recipe-Subject-date_time.mp4). ' +
+    'Use it whenever the user mentions the Studio or wants a clip made end-to-end. FOLLOW the returned `pasi` in order. ' +
+    'cale="gratis" (default; Google Flow on the USER\'s own Google account — free, no app money) or cale="platit" ' +
+    '(Veo via generate_video — ALWAYS quote the real price from lista_tarife and get explicit confirmation first). ' +
+    `Recipes: ${RETETE_STUDIO.join(', ')}.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      idee: { type: 'string', description: 'The user\'s clip idea, one phrase is enough.' },
+      reteta: { type: 'string', enum: [...RETETE_STUDIO], description: 'Optional recipe (default: Clip din idee).' },
+      cale: { type: 'string', enum: ['gratis', 'platit'], description: 'gratis = Google Flow recipe (default); platit = Veo.' },
+    },
+    required: ['idee'],
+  },
 }
 
 // P30a — OCHIUL VIDEO (owner, 15 aug: „sa vada un videoclip… sa extraga ideile
@@ -2594,7 +2620,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...googleTools,
           ...escalationTools,
           // Bază + vedere
-          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, TARIFE_TOOL, OPEN_APP_VIEW_TOOL,
+          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL,
           // L1e: procesare de date tabelare (CSV/JSON) — capabilitate generală, în zona de aur.
           PROCESEAZA_DATE_TOOL,
           // Messenger Kelion↔Kelion: „apelează-l pe X" (conversațional, gold zone).
@@ -2640,7 +2666,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
           ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, TARIFE_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -4230,6 +4256,16 @@ async function runTool(
       })
     }
 
+    case 'studioul_de_clipuri': {
+      const plan = planStudio(
+        String(args.idee ?? ''),
+        args.reteta ? String(args.reteta) : undefined,
+        args.cale === 'platit' ? 'platit' : 'gratis',
+        new Date(),
+      )
+      return JSON.stringify(plan)
+    }
+
     case 'lista_tarife': {
       // O singură sursă (tarife.ts): cifra afișată = cifra taxată, mereu.
       const meniu = meniulDeTarife().map((t) => ({ ...t, lire: lirePentru(t.cheie) }))
@@ -4282,11 +4318,16 @@ async function runTool(
       usage.usd += result.costUsd
       void recordCost(email, 'video', result.costUsd)
       const videoUrl = `${baseUrl}/api/video/${result.id}`
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: videoUrl, title: 'Generated video' } })}${CTRL}`)
+      // P22 („orice clip se salveaza cu nume sugestiv data ora"): titlul
+      // cardului = numele de fișier sugestiv — butonul „Salvează" din monitor
+      // îl pune în Download exact sub numele ăsta.
+      const numeVideo = numeClip('Clip', prompt, new Date())
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: videoUrl, title: numeVideo } })}${CTRL}`)
       // PREȚUL SE SPUNE (owner, 14 aug: „i se arată și prețul, și se
       // încasează") — suma scăzută intră în rezultat ca Kelion s-o spună omului.
       return JSON.stringify({
         shown: true, url: videoUrl, secunde: result.secunde, costUsd: result.costUsd,
+        nume_fisier: `${numeVideo}.mp4`,
         taxat: taxa.scazutGbp > 0 ? `£${taxa.scazutGbp.toFixed(2)} scăzuți din creditul tău` : undefined,
       })
     }
