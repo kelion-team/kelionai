@@ -3,6 +3,7 @@ import { getSessionUser } from '../session.js'
 import {
   logVisit,
   touchVisit,
+  attachVisitPhoto,
   addLead,
   addVisitorMessage,
   getVisitorMessages,
@@ -151,6 +152,21 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     const path = typeof req.body?.path === 'string' ? req.body.path.slice(0, 32) : ''
     const { ip, visit } = await visitorProfile(req, referrer)
     void logVisit(fp, ip, visit, '', path)
+    return reply.send({ ok: true })
+  })
+
+  // POZA VIZITEI (P3; owner, 15 aug: „de ce nu e legata de vizitator poza").
+  // Vine DOAR după ce omul a acordat camera (consimțământul din ordinul de pe
+  // 13 aug) — frontend-ul trimite UN cadru mic pe sesiune, iar prima poză a
+  // rândului rămâne (attachVisitPhoto scrie doar peste gol). Validăm strict:
+  // doar data-URL de imagine, plafonat — ruta e publică și nu cară gunoaie.
+  app.post<{ Body: { fp?: string; poza?: string } }>('/api/visit/poza', async (req, reply) => {
+    const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
+    const poza = typeof req.body?.poza === 'string' ? req.body.poza : ''
+    if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(poza) || poza.length > 200_000) {
+      return reply.code(400).send({ error: 'poza_invalida' })
+    }
+    void attachVisitPhoto(fp, clientIp(req), poza)
     return reply.send({ ok: true })
   })
 

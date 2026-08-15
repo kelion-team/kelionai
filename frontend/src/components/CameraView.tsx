@@ -9,6 +9,7 @@ import {
 } from '../lib/camera'
 import { startFaceSampling } from '../lib/faceprint'
 import { getTeava, calitateCamera } from '../lib/retea'
+import { raporteazaPozaVizitei } from '../lib/vizita'
 
 // Device camera capture — NOT shown on screen. The feed is for Kelion's vision
 // only: the <video> element is kept playing but visually hidden, and frames are
@@ -79,6 +80,11 @@ export default function CameraView({
             () => captureRef?.current?.() ?? null,
           )
         }
+        // POZA VIZITEI (P3; owner, 15 aug: „de ce nu e legata de vizitator
+        // poza"): camera e ACORDATĂ și vie — un singur cadru mic pe sesiune
+        // pleacă spre rândul vizitei. La 1,5s, ca senzorul să apuce să expună
+        // (primul cadru după pornire iese des negru). Best-effort.
+        setTimeout(() => raporteazaPozaVizitei(videoRef.current), 1500)
       } catch (err) {
         // If our own cleanup aborted the request, this is not a real error.
         if (controller.signal.aborted) return

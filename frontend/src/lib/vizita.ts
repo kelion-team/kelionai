@@ -29,3 +29,54 @@ export function raporteazaPagina(eticheta: string): void {
     )
     .catch(() => {})
 }
+
+// ── POZA VIZITEI (P3; owner, 15 aug: „de ce nu e legata de vizitator poza") ──
+// Se trimite UN cadru mic pe sesiune, ABIA după ce omul a acordat camera —
+// consimțământul cerut de ordinul din 13 aug („cine va fi acolo va avea o poză
+// cu acceptul lor"). Boții nu pornesc camera, deci rămân cinstit fără poză.
+// Best-effort: analiza nu are voie să strice nici camera, nici pagina.
+
+/** Cadru JPEG mic (lățime ~160px) din elementul video viu, sau null. */
+function cadruMic(video: HTMLVideoElement): string | null {
+  try {
+    if (!video.videoWidth || !video.videoHeight) return null
+    const latime = 160
+    const inaltime = Math.max(1, Math.round((video.videoHeight / video.videoWidth) * latime))
+    const panza = document.createElement('canvas')
+    panza.width = latime
+    panza.height = inaltime
+    const ctx = panza.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(video, 0, 0, latime, inaltime)
+    return panza.toDataURL('image/jpeg', 0.7)
+  } catch {
+    return null // canvas „tainted" sau video mort — fără poză, nu fără cameră
+  }
+}
+
+/** Anunță poza vizitei (o dată pe sesiune). Chemată după pornirea camerei. */
+export function raporteazaPozaVizitei(video: HTMLVideoElement | null): void {
+  if (!video) return
+  const cheie = 'kelion_vizita_poza'
+  try {
+    if (sessionStorage.getItem(cheie)) return
+  } catch {
+    /* mod privat strict — serverul oricum păstrează doar prima poză a vizitei */
+  }
+  const poza = cadruMic(video)
+  if (!poza || poza.length > 200_000) return
+  try {
+    sessionStorage.setItem(cheie, '1')
+  } catch {
+    /* fără sessionStorage: prima-poză-rămâne de pe server ne apără de dubluri */
+  }
+  void deviceFingerprint()
+    .then((fp) =>
+      fetch('/api/visit/poza', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fp, poza }),
+      }),
+    )
+    .catch(() => {})
+}
