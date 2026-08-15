@@ -248,7 +248,9 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
           const m = candidateModels[mIdx]
           const isPrimary = mIdx === 0
           const maxIncercariGemini = isPrimary ? 2 : 1
-          const modelTimeoutMs = isPrimary ? 45_000 : 35_000
+          // Timeout generos pentru raționament complex / fișiere mari:
+          // Gemini Pro cu reasoning high are nevoie de până la 90s pe prompturi dense.
+          const modelTimeoutMs = isPrimary ? 95_000 : 65_000
           const reasoningLevel = isPrimary ? 'high' : 'medium'
 
           for (let incercare = 1; incercare <= maxIncercariGemini; incercare++) {
