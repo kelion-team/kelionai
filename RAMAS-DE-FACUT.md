@@ -46,6 +46,19 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       services/vocalLive.ts:413 (inputAudioTranscription.languageCodes);
       de verificat unde se SETEAZĂ speech_lang și de ce nu ajunge la ureche
       la pornirea cu mic activ. [ ]
+- [ ] ORDIN 15 aug, P22 (verbatim): „se poate numi aplicatia Studioul de
+      Clipuri, care cuprinde toate 6, nu? ii dai o ideie, ii spui foloseste
+      studioul de clipuri si el face tot" + „cu functie timer de promovare
+      eventual la ore prestabilite" — APLICAȚIE NOUĂ 🎬 Studioul de Clipuri
+      în meniul Aplicații: idee → scenariu (aprobare pe monitor sau „direct")
+      → cadre Veo SAU aplicația reală pe monitor (Tutorial, click_monitor) →
+      pornește SINGUR înregistrarea din bară → narează sincronizat cu vocea
+      lui → clip final + opțional youtube_urca (privat). Rețete: Clip din
+      idee / Spot publicitar / Tutorial / Raport video de seară / Demo cu
+      camera / Clip bilingv (după traducătorul live). + PROGRAMATOR de
+      promovare la ore prestabilite (cadență + plafon de credite setate de
+      owner — banii nu curg nesupravegheați). La construcție se cere acordul
+      lui pe VIDEO_ALLOW_PAID + ore/plafon. PE COADĂ după P20 și P21. [ ]
 - [x] ORDIN 15 aug (verbatim): „constructorul dacă are o eșuare, următoarea
       tură o escaladează automat pe nivel superior Fable 5. Nu pornește
       duplicat pe același model, se revine pentru un nou job la primul model."
