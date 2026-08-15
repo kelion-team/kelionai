@@ -36,8 +36,10 @@ describe('poza vizitatorului: lanțul întreg, verigă cu verigă', () => {
 
   it('lista din admin leagă poza CONTULUI (faceprints) pentru vizitele logate', () => {
     const db = citeste('db.ts')
-    expect(db).toMatch(/COALESCE\(NULLIF\(v\.photo_url, ''\), f\.photo, ''\) AS photo_url/)
-    expect(db).toMatch(/LEFT JOIN faceprints f ON v\.user_email <> '' AND f\.user_email = v\.user_email/)
+    // P25 (15 aug): raportul e grupat PE OM — poza lui = ultimul cadru de vizită
+    // SAU poza contului (faceprints), aceeași intenție pe forma agregată.
+    expect(db).toMatch(/ARRAY_AGG\(f\.photo ORDER BY o\.started_at DESC\) FILTER \(WHERE f\.photo IS NOT NULL AND f\.photo <> ''\)/)
+    expect(db).toMatch(/LEFT JOIN faceprints f ON o\.user_email <> '' AND f\.user_email = o\.user_email/)
   })
 
   it('cadrul pleacă DOAR după camera acordată (CameraView) și o dată pe sesiune (vizita.ts)', () => {

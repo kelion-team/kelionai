@@ -86,6 +86,19 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       ownerului. Lacăte rescrise (creditAI: Jules ABSENT; evalOrdin: 2 benzi
       + constructorul pe roșu → vârful clasamentului). RĂMAS: verificarea pe
       live după publicare (pastila dispărută din bară, cardul cu 2 benzi). [ ]
+- [x] ORDIN 15 aug, P25 (verbatim, LEGE): „pagina vizitator, nu-mi trebuie pe
+      acelasi om mai multe pozitii, o pozitie, cu poza lui, si in cadrul
+      aceluiasi, vizitele, toate, daca nu are poza acceptata, conform
+      aplicatiei, nu intra" — raportul e acum GRUPAT PE OM (cheia: cont logat →
+      amprenta browserului → IP): un card per om cu poza lui (cadrul vizitei
+      sau poza contului), meta ultimei vizite, numărul + prima vizită, și TOATE
+      vizitele lui înăuntru (dată/oră + secțiunile deschise, plafonat 40).
+      LEGEA pozei: omul fără nicio poză acceptată NU apare; cifra celor
+      neafișați se spune pe față („+N oameni fără poză — neafișați, conform
+      legii tale"); boții afară din lista de oameni (rămân în totaluri).
+      Lacăte: vizitatoriRaport.test (grupare + HAVING + faraPoza) +
+      pozaVizitatorului.test adaptat pe forma agregată. RĂMAS: verificarea
+      LIVE a ownerului (cardul lui unic, cu ambele vizite din 15 aug). [ ]
 - [ ] INCIDENT 15 aug: poarta VPS a TĂCUT ~3h pe PR #1195 (zero comentarii;
       alte PR-uri primeau verdicte) → #1195 îmbinat ca admin 2 la ordinul
       ownerului („hai cu ele pe aplicatie"), cu porțile rulate local 2× verzi

@@ -34,15 +34,32 @@ describe('LACĂT — „ce au vizitat" ajunge în raport', () => {
     expect(/export async function touchVisit\([\s\S]*?path = '',/.test(db)).toBe(true)
   })
 
-  it('getDemoStats scoate `v.pages` în raport, iar tipul DemoRecent îl are', () => {
+  it('getDemoStats scoate `pages` în raport, iar tipul DemoRecent îl are', () => {
     const db = sursa('./db.ts')
-    // P3 (15 aug): poza vine acum prin COALESCE (cadrul vizitei SAU poza
-    // contului din faceprints) — ancora ține AMBELE coloane în raport, exact
-    // intenția veche, pe forma nouă.
-    expect(/COALESCE\(NULLIF\(v\.photo_url, ''\), f\.photo, ''\) AS photo_url, v\.pages/.test(db)).toBe(true)
+    // P25 (15 aug): raportul e GRUPAT PE OM, dar ambele surse de poză (cadrul
+    // vizitei SAU poza contului din faceprints) rămân în judecată — intenția
+    // veche (P3), purtată pe forma nouă (POZA_OMULUI).
+    expect(/ARRAY_AGG\(o\.photo_url ORDER BY o\.started_at DESC\) FILTER \(WHERE o\.photo_url <> ''\)/.test(db)).toBe(true)
+    expect(/ARRAY_AGG\(f\.photo ORDER BY o\.started_at DESC\) FILTER/.test(db)).toBe(true)
     expect(/pages: r\.pages \?\? ''/.test(db)).toBe(true)
     const tip = sursa('./shared/api-types.ts')
     expect(/pages: string/.test(tip)).toBe(true)
+  })
+
+  it('P25 — UN OM = O POZIȚIE, cu toate vizitele lui; fără poză acceptată NU intră (LEGE)', () => {
+    const db = sursa('./db.ts')
+    // cheia omului, în ordinea încrederii: cont → amprentă → IP
+    expect(/COALESCE\(NULLIF\(lower\(v\.user_email\), ''\), NULLIF\(v\.fingerprint, ''\), v\.ip\) AS cheia/.test(db)).toBe(true)
+    // toate vizitele lui intră în card (agregate pe rândul omului)
+    expect(/JSON_AGG\(json_build_object\('la', o\.started_at, 'pages', o\.pages\) ORDER BY o\.started_at DESC\) AS vizite/.test(db)).toBe(true)
+    // LEGEA pozei: HAVING pe poza omului — fără poză, rândul nu există
+    expect(/HAVING \$\{POZA_OMULUI\} <> ''/.test(db)).toBe(true)
+    // cifra cinstită a celor neafișați se măsoară, nu se ascunde
+    expect(/faraPoza: \{ persoane: Number\(ascunsi\?\.persoane \?\? 0\), vizite: Number\(ascunsi\?\.vizite \?\? 0\) \}/.test(db)).toBe(true)
+    // cardul din panou desenează vizitele omului + cifra celor fără poză
+    const panel = sursa('../../frontend/src/components/AdminPanel.tsx')
+    expect(/visitor-visits/.test(panel)).toBe(true)
+    expect(/fără poză\s+acceptată/.test(panel)).toBe(true)
   })
 
   it('rutele /api/visit și /api/visit/ping citesc `path` din body', () => {

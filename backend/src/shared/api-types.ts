@@ -55,9 +55,22 @@ export interface DemoRecent {
    *  sesiune — listă distinctă separată prin virgulă (acasă, aplicație, credite,
    *  manual, autentificare). Gol dacă n-a fost înregistrată nicio secțiune. */
   pages: string
+  /** P25 (owner, 15 aug: „nu-mi trebuie pe acelasi om mai multe pozitii, o
+   *  pozitie, cu poza lui, si in cadrul aceluiasi, vizitele, toate"): rândul e
+   *  al OMULUI, nu al vizitei — aici stau TOATE vizitele lui, cea mai nouă
+   *  prima. Meta de sus (ip/oraș/browser…) e a ULTIMEI vizite. */
+  vizite?: VizitaScurta[]
+  /** Prima lui vizită (ISO) — cardul poartă și începutul relației. */
+  prima_vizita?: string
 }
 
 /** The visitor analysis, aggregated (admin-only): totals + countries + latest arrivals. */
+/** O vizită din istoricul UNUI om (P25): când a intrat + ce secțiuni a deschis. */
+export interface VizitaScurta {
+  la: string
+  pages: string
+}
+
 export interface DemoStats {
   total: number
   today: number
@@ -66,6 +79,11 @@ export interface DemoStats {
   visitsToday: number
   byCountry: { country: string; code: string; count: number }[]
   recent: DemoRecent[]
+  /** P25, LEGEA pozei (owner, 15 aug: „daca nu are poza acceptata... nu intra"):
+   *  câți OAMENI (și câte vizite ale lor) NU apar în listă fiindcă n-au nicio
+   *  poză acceptată — cifra se spune pe față, ca totalurile să nu pară scăzute
+   *  fără explicație. */
+  faraPoza?: { persoane: number; vizite: number }
 }
 
 /** THE MONEY CIRCUIT (admin-only): the LIVE state of every payment→AI link.
