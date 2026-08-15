@@ -119,103 +119,49 @@ async function cheltuiala(kinds: string[]): Promise<Masuratoare<{ usd: number }>
  *  scadă EXACT aceleași rânduri — două liste ar fi divergat în tăcere. */
 export const FELURI_GEMINI = ['gemini', 'chat', 'memory', 'memory_est', 'image', 'image_est', 'video']
 
-/** ── CE-A MAI RĂMAS DIN CREDITUL DECLARAT (Adrian, 8 aug: „asta trebuie să
- *  scadă real cum e afișat la ei pe site") ───────────────────────────────────
- *
- *  Creditul declarat e soldul din MOMENTUL declarării, deci din el se scade
- *  DOAR cheltuiala de DUPĂ acel moment — nu luna întreagă (prima variantă
- *  scădea luna, adică și banii arși înainte de declarare: pastila ar fi mințit
- *  în jos). Iar cheltuiala e în USD și creditul în GBP: conversia se face pe
- *  cursul CITIT de la BCE (fx.ts), nu scăzând USD din GBP ca și cum ar fi
- *  aceeași monedă (a doua greșeală a primei variante). Orice verigă picată →
- *  `ok:false` cu motiv, niciodată o cifră cârpită. */
-export async function ramasDinDeclarat(declarat: {
-  gbp: number
-  at?: string
-}): Promise<{ ok: true; ramasGbp: number; scazutUsd: number; curs: number } | { ok: false; motiv: string }> {
-  if (!declarat.at) return { ok: false, motiv: 'creditul declarat nu are dată — nu știu de când să scad' }
-  const [scazut, curs] = await Promise.all([
-    cheltuialaDeLaPeKinduri(declarat.at, FELURI_GEMINI),
-    cursUsdGbp(),
-  ])
-  if (!scazut.ok) return { ok: false, motiv: 'jurnalul de costuri nu se poate citi (baza de date)' }
-  if (!curs.ok) return { ok: false, motiv: `cursul USD→GBP nu s-a putut citi (${curs.motiv})` }
-  return {
-    ok: true,
-    ramasGbp: Math.max(0, Number((declarat.gbp - scazut.usd * curs.rate).toFixed(2))),
-    scazutUsd: Number(scazut.usd.toFixed(2)),
-    curs: curs.rate,
-  }
-}
-
-/** Creditul pe care l-a declarat ownerul pentru Gemini (kv `gemini:credit`). */
-async function creditDeclaratGemini(): Promise<{ gbp: number; at?: string } | null> {
-  try {
-    const brut = await loadKv('gemini:credit')
-    if (!brut) return null
-    const c = JSON.parse(brut) as { gbp?: number; at?: string }
-    if (!Number.isFinite(c.gbp) || (c.gbp as number) < 0) return null
-    return { gbp: c.gbp as number, at: typeof c.at === 'string' ? c.at : undefined }
-  } catch {
-    return null
-  }
-}
-
 async function randGemini(): Promise<CreditAI> {
   const cheieConfigurata = Boolean(config.geminiKey)
-  const [cheltuitLuna, declarat, live, facturare] = await Promise.all([
+  const t0 = Date.now()
+  const [cheltuitLuna, live, facturare, soldExport] = await Promise.all([
     // Lista auditabilă a felurilor e FELURI_GEMINI (exportată, folosită și de
     // pastila din bară — aceeași sumă peste tot, nu două liste divergente).
     cheltuiala(FELURI_GEMINI),
-    creditDeclaratGemini(),
     geminiLive().catch(() => null),
     // CALEA OFICIALĂ (owner, 14 aug: „dacă e soluție oficială, de ce nu o
     // facem?"): cheltuiala + creditele REALE din exportul Cloud Billing →
-    // BigQuery (facturareGoogle.ts). Până când ownerul dă rolul + pornește
-    // exportul în consolă, întoarce ok:false cu PASUL exact rămas — și becul
-    // rămâne pe estimarea declarată, spus cinstit.
+    // BigQuery (facturareGoogle.ts).
     import('./facturareGoogle.js').then((m) => m.facturareGoogle()).catch(() => null),
+    // SOLDUL DERIVAT (ordinul din 15 aug: „valoarea reală… trebuie citit
+    // automat"): full_amount − aplicat, per credit, din același export. Calea
+    // declarată de mână («credit Gemini») A MURIT odată cu ordinul — o cifră
+    // spusă de om se învechea la fiecare auto-reload și pastila ajungea să
+    // mintă (£0.00 lângă un sold real de £25.80).
+    import('./facturareGoogle.js').then((m) => m.soldCrediteGoogle()).catch(() => null),
   ])
 
   const cumRamas =
-    'Google nu expune sold prin API (nici Gemini API, nici Cloud Billing): ' +
-    'cifra e creditul spus de tine minus cheltuiala măsurată de la declarare, pe cursul BCE'
+    'soldul DERIVAT din exportul oficial Cloud Billing → BigQuery: totalul acordat ' +
+    '(credits.full_amount) minus creditele aplicate, per credit — zero cifre declarate de om'
 
   let ramas: Masuratoare<{ cantitate: number; unitate: string }>
-  if (!declarat) {
+  if (soldExport?.ok && soldExport.date.soldTotal != null) {
+    const detaliu = soldExport.date.credite
+      .filter((c) => c.sold != null)
+      .map((c) => `${c.nume}: ${c.sold} din ${c.total}`)
+      .join(' · ')
+    ramas = reusit(
+      `${cumRamas} — ${detaliu}`,
+      { cantitate: soldExport.date.soldTotal, unitate: soldExport.date.moneda || 'moneda contului' },
+      Date.now() - t0,
+    )
+  } else if (soldExport?.ok) {
     ramas = picat(
       cumRamas,
-      'nu mi-ai spus niciun credit (Admin → „Credit Gemini"), iar Google nu-l dă automat — nu inventez o cifră',
+      'exportul are credite dar fără full_amount pe niciunul — nu pot deriva soldul fără să inventez',
+      Date.now() - t0,
     )
   } else {
-    const t0 = Date.now()
-    const r = await ramasDinDeclarat(declarat)
-    if (!r.ok) {
-      ramas = picat(cumRamas, `am creditul spus de tine (£${declarat.gbp}), dar ${r.motiv}`, Date.now() - t0)
-    } else {
-      // ESTIMAREA CONSUMATĂ NU MAI E O CIFRĂ (owner, 14 aug, cu captura din AI
-      // Studio: soldul REAL era £25.80 cu auto-reload PORNIT, iar panoul scria
-      // „0 GBP" cu bec verde lângă — o cifră inventată care contrazicea becul).
-      // Când declarația ta s-a consumat pe hârtie, ea NU mai spune nimic despre
-      // soldul Google (auto-reload-ul îl tot umple la loc) — deci nu mai
-      // afișăm un număr, ci starea cinstită: „re-declară soldul din AI Studio".
-      if (r.ramasGbp <= 0) {
-        ramas = picat(
-          cumRamas,
-          `declarația ta (£${declarat.gbp}${declarat.at ? `, ${declarat.at.slice(0, 10)}` : ''}) s-a consumat pe estimare ` +
-            `(cheltuit de atunci: $${r.scazutUsd.toFixed(2)}) — cu auto-reload pornit soldul real e ALTUL; ` +
-            `citește-l în AI Studio (link pe rând) și re-declară-l cu «credit Gemini»`,
-          Date.now() - t0,
-        )
-      } else {
-        ramas = reusit(
-          `${cumRamas} — spus de tine: £${declarat.gbp}${declarat.at ? ` la ${declarat.at.slice(0, 10)}` : ''}; ` +
-            `cheltuit de atunci: $${r.scazutUsd.toFixed(2)} × curs ${r.curs.toFixed(4)}`,
-          { cantitate: r.ramasGbp, unitate: 'GBP' },
-          Date.now() - t0,
-        )
-      }
-    }
+    ramas = picat(cumRamas, soldExport?.motiv ?? 'citirea soldului din export a picat', Date.now() - t0)
   }
   // CIFRA REALĂ DE LA GOOGLE (owner, 14 aug: „dacă e soluție oficială, de ce nu
   // o facem?"): exportul Cloud Billing → BigQuery, citit cu contul de serviciu.

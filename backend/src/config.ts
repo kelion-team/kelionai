@@ -95,17 +95,22 @@ export function modelUnicCod(): string {
 export function modelUnicDirect(): string {
   return `google-direct/${modelUnicActiv}`
 }
+export function esteModelGeneralGreu(cod: string): boolean {
+  if (!cod || typeof cod !== 'string') return false
+  const curat = cod.replace(/^google-direct\//, '').trim()
+  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(curat) || /-lite(?:-|$)/.test(curat) || /-(?:video|audio|live|image|embed|eap|tuning|vision|thinking|realtime|grounding|robotics|custom|distill|stream|agent)(?:-|$)/i.test(curat)) {
+    return false
+  }
+  return /^gemini-\d+(?:\.\d+)?-flash(?:-(?:preview|\d{3,}))?$/i.test(curat)
+}
+
 /** Setează modelul unic — DOAR din auto-upgrade-ul validat. Acceptă NUMAI un
- *  Gemini *Pro* (niciodată flash/lite/experimental), altfel refuză (false). Poarta
+ *  Gemini flash general de producție/preview (niciodată lite/specializat), altfel refuză (false). Poarta
  *  care ține „mereu cel mai performant, dar niciodată degradat de o schimbare
  *  greșită". */
 export function setModelUnicValidat(m: string): boolean {
   const cod = String(m || '').replace(/^google-direct\//, '').trim()
-  // Poarta familiei slotului GREU: `gemini-*-flash`, dar NICIODATĂ `-lite`
-  // (lite e slotul de conversație — dacă ar putea intra aici, cele două sloturi
-  // s-ar prăbuși într-unul și gândirea grea ar rămâne fără treaptă). Pro nu mai
-  // e acceptat: măsurat 7 aug, la aceeași calitate (20/20) avea cazuri de 72-75 s.
-  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(cod) || /-lite(?:-|$)/.test(cod) || /-(?:video|audio|live|image|embed|eap|tuning|vision|thinking-exp)(?:-|$)/i.test(cod)) return false
+  if (!esteModelGeneralGreu(cod)) return false
   modelUnicActiv = cod
   return true
 }

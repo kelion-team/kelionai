@@ -25,8 +25,15 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       owner — perechea VAPID se naște singură în kv_state); butonul „🔔 Pe
       telefon" în capul adminului; orice notifyAdmin (pr_gata al santinelei,
       alarme) zboară și pe telefon; de probat live: pornește butonul, apoi
-      un „PR gata" trebuie să sune telefonul; (4) Business Profile (cere
-      aprobare Google pe contul ownerului — pas de ghidat). Fiecare: un PR,
+      un „PR gata" trebuie să sune telefonul; (4) Business Profile — SCRIS
+      (14 aug, noaptea, PR-ul de după #1118): poartă separată
+      `/auth/google/connect-business` (scope sensibil, NU în FULL_SCOPES),
+      unealta `business_vezi` (cont + locații), registru 114, meniu + manual;
+      PAȘII OWNERULUI ca să prindă viață (API-ul are cota 0 până la aprobare):
+      în Cloud Console pe proiectul aplicației pornește „My Business Account
+      Management API" + „My Business Business Information API", apoi
+      completează formularul oficial „Business Profile APIs access request"
+      cu numărul proiectului; după emailul de aprobare — nimic de cod. Fiecare: un PR,
       intrare în meniul „Aplicații", rând în manual, tarif unde costă bani,
       porți verzi + probă live. Deja legate azi: Slides, Meet, Forms (#1116).
       Imposibilele rămân marcate cinstit (Keep = doar enterprise, Google Pay ≠
@@ -49,10 +56,15 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       îmbinat de Kelion singur (cu jurnalul în Notificări) cât e delogat.
 - [ ] Bara de execuție cu punctulețe (nou, 14 aug noaptea): scrisă, de văzut LIVE
       pe un ordin real („fiecare pas pe monitor, 0→100%").
-- [ ] După deploy: ownerul re-declară soldul Gemini REAL (£25.80 din AI Studio,
-      butonul «credit Gemini») — pastila nu mai are voie să arate £0.00, dar
-      cifra corectă o știe doar el; exportul BigQuery îi va scădea apoi
-      cheltuiala reală (primele rânduri apar în ore).
+- [ ] ORDIN 15 aug (după raport): soldul Gemini se citește AUTOMAT — „valoarea
+      reală" — SCRIS (PR-ul de după #1142): soldul se DERIVEAZĂ per credit din
+      exportul BigQuery (`credits.full_amount` − aplicat, toată istoria) în
+      `soldCrediteGoogle()`; pastila (bară + admin) arată cifra derivată sau
+      motivul cinstit („aștept exportul" / pasul de consolă) — NICIODATĂ un
+      număr declarat; butonul «✎ credit Gemini» + ruta de declarare AU MURIT
+      (410 cu motiv), cheile moarte scoase din toate cele 7 limbi. DE PROBAT
+      LIVE după ce exportul scrie primele rânduri (ore): pastila trebuie să
+      arate singură soldul real din AI Studio, fără nicio mână.
 - [ ] Scutul datelor: de PROBAT live după deploy (un DELETE de test pe
       voiceprints prin db_query trebuie refuzat cu «tabel_protejat», iar
       triggerul din Postgres să apară în \d voiceprints).

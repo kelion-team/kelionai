@@ -60,10 +60,11 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   // Dacă textul provine dintr-un log secvențial (auto-publicare.log sau constructor.log)
   // cu mai multe rulări/joburi, izolăm ULTIMA rulare ca să nu re-raportăm erori vechi
   // deja rezolvate/istorice sau texte din prompturile ordinelor anterioare.
+  // Permitem opțional timestamp la începutul liniei (ex. `[13:30:00] ordin #270`).
   const parti = text.split(
     /(?=(?:^|\n)(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:\[auto-publicare\]|== [01]\. Actualizez|== 0\. Blochez|\[constructor\]|\[constructor-agent\]|=== (?:Job|ORDIN|Ordin)|🚀\s*\[?constructor\]?|Job #\d+|ordin #\d+|ORDINUL DE CONSTRUC[ȚT]IE))/i,
   )
-  const textDeVerificat = parti[parti.length - 1] ?? text
+  let textDeVerificat = (parti[parti.length - 1] ?? text).trim()
 
   // Dacă ultima rulare s-a încheiat cu succes (sau nu are erori active),
   // erorile din rulările vechi sunt istorice și nu trebuie să nască alarme.
@@ -74,6 +75,14 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
   ) {
     return []
   }
+
+  // Eliminăm blocurile de prompt/instrucțiuni din corpul ordinului (de la antetul ordinului
+  // până la începerea efectivă a pașilor de execuție / logurilor de lucru), altfel erorile
+  // citate în descrierea sarcinii (ex. auto-vindecare) sunt confundate cu erori de rulare.
+  textDeVerificat = textDeVerificat.replace(
+    /(?:ORDINUL DE CONSTRUC[ȚT]IE|AUTO-VINDECARE\s*\([^)]*\):)[\s\S]*?(?=(?:^|\n)\s*(?:\[?\d{1,2}:\d{2}:\d{2}\]?\s*)?(?:pas\s+\d+|==|🚀|llm\s+|PR deschis|✅|\[constructor\]\s+pas|$))/i,
+    '',
+  )
 
   const tipar =
     /\b(error|errors|eroare|erori|fatal|fail(ed|ure)?|pic[ăa]t?\b|refuz(at)?|denied|exception|traceback|unhandled|ECONN|ETIMEDOUT|EACCES|ENOSPC|creier_esec|\b5\d\d\b)/i
@@ -91,7 +100,20 @@ export function semnaturiEroare(text: string, maxim = 8): string[] {
     /(\b0 (failed|errors?)\b|TRECE|passed|✅|verde|RunPod|DeepInfra|OpenRouter|AUTO-VINDECARE|ordin #\d+|\[CHAT-IN\]|\[BRAIN\]|apare RECURENT eroarea|count=\d+,\s*prag=\d+|^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+:\s*(?:grep|read|edit|write|ls|run|run_runbook|cauta|search)|llm\s+(?:încercarea|reîncercare)\s+\d+\/\d+)|\bit\(|\bexpect\(|\bdescribe\()/i
   const vazute = new Set<string>()
   const out: string[] = []
+  let inPromptBloc = false
   for (const linie of textDeVerificat.split('\n')) {
+    // Ignorăm blocurile de prompt citate în loguri (ex. ORDINUL DE CONSTRUCȚIE ... până la primul pas de execuție)
+    if (/ORDINUL DE CONSTRUC[ȚT]IE|AUTO-VINDECARE \(constructor logs\)/i.test(linie)) {
+      inPromptBloc = true
+      continue
+    }
+    if (inPromptBloc) {
+      if (/^\s*\[?\d{1,2}:\d{2}:\d{2}\]?\s*(?:pas\s+\d+\/\d+|==|🚀|PR deschis|Deploy finalizat)/i.test(linie)) {
+        inPromptBloc = false
+      } else {
+        continue
+      }
+    }
     if (!tipar.test(linie) || zgomot.test(linie)) continue
     const norm = linie
       .toLowerCase()
