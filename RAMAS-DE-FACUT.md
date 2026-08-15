@@ -242,8 +242,10 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       de pe monitor nu mai pot părea „inactive": succes = „✓ copiat"/„Salvat",
       eșec = „✗ refuzat" PE buton + cauza în client_errors (vizibilă de la
       distanță); z-index blindat. Bargraful real + Download-ul existau
-      (#1211, V13.8). Lacăte: studioClipuri.test (P32, +4). RĂMAS: proba
-      live a ownerului (scenariu → 🎬 → clip în Download). [ ]
+      (#1211, V13.8). Lacăte: studioClipuri.test (P32, +4). PUBLICAT:
+      V14.0 (2546054) măsurat live la 21:12 UTC — toată seria serii
+      (#1204–#1213) e pe kelionai.app. RĂMAS: proba live a ownerului
+      (scenariu → 🎬 → clip în Download). [ ]
 - [ ] DE CLARIFICAT cu ownerul (criticul auditului, 15 aug): mesajul de la
       06:57 „acest lucru trebuie sa fie monitorizat de kelion" — referentul e
       ambiguu: publicarea stagnantă (acoperit de santinelaPublicarii) SAU
