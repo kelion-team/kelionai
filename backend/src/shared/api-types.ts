@@ -183,4 +183,7 @@ export interface UserActivityRow {
   /** Device-urile LUI, dedesubt (P6) — în locul listei plate de sesiuni care
    *  repeta același om de N ori. */
   devices: UserDeviceRow[]
+  /** P10: ownerul e scutit de taxare peste tot — soldul lui (negativ, istoric,
+   *  dinaintea scutirilor) se afișează cu explicația, nu ca datorie vie. */
+  scutit: boolean
 }

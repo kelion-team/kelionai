@@ -2426,7 +2426,14 @@ export default function AdminPanel({
                 >
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 600 }}>
-                      Plafon zilnic de ardere: construit azi ${plafon.cheltuit.toFixed(2)} din ${plafon.plafon.toFixed(2)}
+                      {/* P10: „$0.00 măsurat" nu mai poate ascunde nici citirea
+                          picată, nici joburile fără cost raportat (regula #1). */}
+                      {plafon.cheltuitCitit === false
+                        ? `Plafon zilnic de ardere: NU POT CITI cheltuiala azi${plafon.cheltuitMotiv ? ` (${plafon.cheltuitMotiv})` : ''} — plafon $${plafon.plafon.toFixed(2)}`
+                        : `Plafon zilnic de ardere: construit azi $${plafon.cheltuit.toFixed(2)} din $${plafon.plafon.toFixed(2)}`}
+                      {plafon.cheltuitCitit !== false && (plafon.faraCost ?? 0) > 0
+                        ? ` · ${plafon.faraCost} joburi fără cost raportat — cifra e minimul măsurat, nu totalul`
+                        : ''}
                     </span>
                     <span
                       className="build-faza"
@@ -2942,9 +2949,11 @@ export default function AdminPanel({
                         <span>{u.sessions} sesiuni</span>
                         <span>timp total {fmtDur(u.seconds)}</span>
                         <span>{u.messages} mesaje</span>
-                        <span>
+                        <span title={u.scutit ? 'Ownerul e scutit de taxare peste tot — soldul negativ e istoric, dinaintea scutirilor, și nu se mai mișcă. Îl poți aduce la zero din Admin → user → credit (butonul e al tău, mișcă bani).' : undefined}>
                           sold {sym}
                           {u.balance.toFixed(2)}
+                          {/* P10: cifra reală rămâne, dar cu adevărul lângă ea. */}
+                          {u.scutit ? ' (scutit — sold istoric)' : ''}
                         </span>
                         {/* MONITORIZAREA PE USER (10 aug): cât a COSTAT pe
                             furnizori — roșu când a consumat peste ce are. */}

@@ -1944,7 +1944,8 @@ export async function getUserActivity(): Promise<{
                 (ARRAY_AGG(v.browser ORDER BY v.last_seen_at DESC))[1] AS browser,
                 EXISTS(SELECT 1 FROM blocked_users b WHERE lower(b.email) = lower(v.user_email)) AS blocked,
                 COALESCE((SELECT w.balance FROM wallets w WHERE lower(w.user_email) = lower(v.user_email)), 0)::float AS balance,
-                COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE lower(c.user_email) = lower(v.user_email)), 0)::float AS "consumedUsd"
+                COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE lower(c.user_email) = lower(v.user_email)), 0)::float AS "consumedUsd",
+                (lower(v.user_email) = lower($1)) AS scutit
          FROM visits v
          LEFT JOIN (SELECT lower(user_email) AS email_jos, COUNT(*)::int AS n
                     FROM messages GROUP BY lower(user_email)) m
@@ -1953,6 +1954,10 @@ export async function getUserActivity(): Promise<{
          GROUP BY lower(v.user_email)
          ORDER BY MAX(v.last_seen_at) DESC
          LIMIT 200`,
+        // P10: ownerul e scutit de taxare peste tot („e casa lui", tarife.ts) —
+        // soldul lui negativ e datorie ISTORICĂ dinaintea scutirilor, fără
+        // efect; rândul lui se marchează ca panoul să spună asta, nu să sperie.
+        [config.adminEmail],
       )
     ).rows
     // DEVICE-URILE, SUB USER (nu o listă plată de sesiuni care arăta „același
@@ -3913,6 +3918,36 @@ export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
  *  azi (UTC). Pentru plafonul zilnic de ardere (B8/K15). Doar cifre reale de la
  *  furnizor; joburile fără cost raportat (ex. RunPod pe timp-GPU) nu se numără —
  *  nu inventăm o cheltuială. */
+/** P10 (owner, 15 aug — plafonul „$0.00 măsurat"): cheltuiala de azi CU
+ *  CONTEXT. Două minciuni tăiate: (1) `catch → 0` prezenta o citire PICATĂ
+ *  drept „$0.00 măsurat" — exact forma „citirea eșuată ca fapt" (regula #1);
+ *  (2) un zero adevărat dar fără context pretindea „nu s-a cheltuit" când de
+ *  fapt joburile de azi n-au RAPORTAT cost (cost_usd NULL nu înseamnă gratis).
+ *  Bucla de plafon rămâne pe cheltuitAziConstructor (suma măsurată, by
+ *  design); ASTA e citirea pentru afișaj, cu tot ce trebuie spus lângă cifră. */
+export async function cheltuialaAziConstructor(): Promise<
+  { citit: true; usd: number; joburiAzi: number; faraCost: number } | { citit: false; motiv: string }
+> {
+  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
+  try {
+    const r = await getPool().query<{ usd: string | null; joburi: string; faracost: string }>(
+      `SELECT COALESCE(SUM(cost_usd), 0)::text AS usd,
+              COUNT(*)::text AS joburi,
+              COUNT(*) FILTER (WHERE cost_usd IS NULL)::text AS faracost
+         FROM build_jobs WHERE updated_at::date = (now() AT TIME ZONE 'UTC')::date`,
+    )
+    const rand = r.rows[0]
+    return {
+      citit: true,
+      usd: Number(rand?.usd ?? 0) || 0,
+      joburiAzi: Number(rand?.joburi ?? 0) || 0,
+      faraCost: Number(rand?.faracost ?? 0) || 0,
+    }
+  } catch (e) {
+    return { citit: false, motiv: String((e as Error)?.message ?? e).slice(0, 120) }
+  }
+}
+
 export async function cheltuitAziConstructor(): Promise<number> {
   if (!dbEnabled()) return 0
   try {
