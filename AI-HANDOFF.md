@@ -1,5 +1,10 @@
-# KELIONAI — DOCUMENT COMPLET DE PRELUARE PENTRU ORICE AI
-*(actualizat 3 august 2026 — Cerința #26: Randare locală și previzualizare barei de admin cu opțiunile de schimbare a limbii deschise)*
+# AI-HANDOFF — Starea curentă a proiectului Kelion
+
+## Cerința #20 — Analiză captură panou Constructor
+- Analiză directă multimodală (Vision) pentru capturi de ecran și imagini din panoul Constructor.
+- Procesare fără halucinații, descriere structurată a stării panoului și a joburilor de construcție.
+
+*(actualizat 3 august 2026 — implementat sistem notificări admin K14 și bara de progres dinamică pentru deploy Cerința #24)*
 
 > **DOCUMENT VIU — regulă obligatorie:** dacă schimbi cod, arhitectură, reguli sau
 > starea proiectului, **actualizează secțiunea relevantă de aici (și §13 Starea)
@@ -44,6 +49,7 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 
 ### 2.1 Frontend (`frontend/src/`)
 - **Pagini:** `pages/Stage.tsx` (scena 3D + orchestrarea UI), `pages/Landing.tsx` (site public + QR-uri).
+- **Admin Bar Language Options:** Cerinta #29 — optiunile de limba in bara de admin.
 - **Componente:** `ChatPanel.tsx` (panoul de chat), `AdminPanel.tsx` („Vezi chat" per user, „Tradu în română", Inbox live, finanțe, useri), `CustomerSettings.tsx` (⚙ client: Preferințe, Credit cu mențiunea 25%, BYOK, Cont+ștergere), `ContactModal.tsx`, `WalletButton.tsx` (credit + reminder escaladant), `AvatarModel.tsx` (randare RPM + REGIA DE MIȘCARE: scheletul EXCLUSIV din clipurile oficiale Ready Player Me din `/anim/` — NICIODATĂ animație procedurală, lecția #125 încălcată de 3 ori; nucleu de 10 clipuri la pornire + restul bibliotecii (44 comandabile prin `[GEST nume]`: variatie..10, expresie-1..14, vorbit-1..9, dans..10) descărcat în fundal; **animația procedurală automată a mâinilor este OPRITĂ complet (13 iul): brațele/antebrațele rămân în repaus static; doar gesturile comandate explicit (`kelion-gesture`) pot mișca scheletul**; **expresii faciale ARKit pe morph-uri** (facialQueue: smile/raisedBrow/surprise/think/empathy/warmth — păstrate din v2.3, fața e permisă pe morphs) + clipit + lip-sync pe nivelul real al vocii; etichetele tool-ului `play_avatar_gesture` se traduc în clipuri prin `GESTURE_TO_CLIP` în ChatPanel), `AvatarLoading.tsx` (progres GLB ~9MB, altfel ecran negru pe mobil), `CameraView.tsx` (ochii lui Kelion — ascuns pe ecran, gard anti-cadru-negru, **boost low-light pe canvas**), `CardView.tsx` (rezultate skill: email/calendar/tasks/Drive/contacts/search), `VisitorChatWidget.tsx` (chat live vizitator↔OWNER, nu AI, poll 3s).
 - **Lib (`src/lib/`):** `audioIO.ts` (voce — anti-ecou `VOICE_GAP_MS=1800` NU se atinge; **plus extragere features vocale client-side**: F0, centroid spectral, rolloff, ZCR, RMS, jitter, shimmer pentru identificare speaker/gen), `updateCheck.ts` (sursă unică versiune: filigran + sub QR, ora Londrei), `chat.ts` (streaming client, „ceas de gardă" 50s + `/api/chat/resume`), `admin.ts` (toate fetch-urile panoului admin), `api.ts` (auth Google + `startGoogleConnect` consimțământ incremental + `startDemo`), `camera.ts` (**low-light constraints**: expunere/gain continue + boost EV/ISO), `errorReporting.ts` (colectare erori consolă frontend → `/api/bridge/client-errors`), `fingerprint.ts` (anti-abuz demo, SHA-256 semnale browser), `i18n.ts` (7 limbi UI), `micStream.ts` (dictare live, pauză 3000ms închide fraza — „ordinul lui Adrian"; colectează features vocale în paralel pentru identificare), `recorder.ts` (clipuri promo admin), `utteranceCoalescer.ts` (leagă fragmente STT, debounce 900ms), `wakelock.ts`, `workspace.ts` (mod monitor multi-taburi, o singură voce), `prefs.ts`, `billing.ts`, `languages.ts`.
 
@@ -258,7 +264,7 @@ Alte costuri reale (contorizate în `cost.ts`, plătite din abonament/cheie plat
 **A UNSPREZECEA LECȚIE — „Salut la pornire cu imagine salvată tăcut" (K6).** Când se primește o imagine la pornire/salut, modelul nu trebuie să spună „Văd că ați trimis o imagine" sau „Observ...". Regula a fost întărită în `SYSTEM_PROMPT` din `routes/chat.ts` și în `greetPrompt` din `i18n.ts`: imaginea e salvată/procesată tăcut, iar răspunsul este strict salutul scurt ancorat pe ora zilei (dimineața/ziua/seara/noaptea).
 
 **A DOUĂSPREZECEA LECȚIE — „Bară dinamică de progres pentru deploy pe monitor" (Cerința #23).**
-Am implementat bara dinamică de progres pentru deploy (`DeployProgressBar.tsx` în frontend și `/api/deploy/status` cu Server-Sent Events în `routes/deploy.ts`). Se conectează prin EventSource la backend, citește în timp real fișierele de progres de deploy (`/tmp/deploy-progress.json` / `/root/kelion/deploy-progress.json`) generate de pașii `deploy.sh` și afișează procentul, pasul curent și confirmarea finalizării pe monitor/spațiul de lucru. În caz de cădere a streaming-ului SSE (ex: buffering intermediar), componenta face fallback automat la polling `/api/deploy/progress`.
+Am implementat și verificat bara dinamică de progres pentru deploy (`DeployProgressBar.tsx` în frontend, `/api/deploy/status` SSE și `/api/deploy/progress` în `backend/src/routes/deploy.ts`, plus script CLI `scripts/deploy_monitor.py`). Sistemul afișează în timp real starea deploy-ului, procentul etapelor și momentul finalizării atât în interfața web pe monitor cât și în terminal.
 
 **A TREISPREZECEA LECȚIE — „Prevenire înghețare voce live după câteva schimburi de fraze" (Cerința #131).**
 Am identificat și remediat cauza blocării vocii live după câteva schimburi de replici (`frontend/src/lib/vocalLive.ts`, `frontend/src/lib/voiceHeartbeat.ts`, `backend/src/routes/vocalLive.ts`):
