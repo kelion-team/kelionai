@@ -5,6 +5,7 @@ import { geminiLive } from './geminiDirect.js'
 import { stareDispecer } from './dispecer.js'
 import { probaBrowserulMainilor } from './browser.js'
 import { probaAider } from './aiderProba.js'
+import { probaOllama } from './ollamaProba.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -335,7 +336,28 @@ export async function systemHealth(): Promise<string> {
         id: 'aider-constructor-lipsa',
         grav: 'critic',
         desc: `motorul constructorului (Aider) nu răspunde la 'aider --version': ${a.motiv} — ordinele de build nu se pot construi`,
-        reparabil: 'pe gazdă: imaginea instalează aider-chat (Dockerfile); o re-publicare îl repune, sau pip install aider-chat pe VPS',
+        reparabil: 'nu e nevoie de mâna omului: constructorul instalează SINGUR Aider pe gazdă la următoarea rulare (asiguraCreierulLocal → deploy/setup-ollama.sh, care pune și Aider)',
+      })
+    }
+  } catch {
+    /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
+  }
+
+  // 13. OLLAMA — CREIERUL LOCAL al constructorului, probat cu `ollama list` pe VPS
+  // (owner, 16 aug: „aider pe un model LOCAL pe VPS (Ollama)… verifică dacă e pus
+  // pe server"). Aider gândește pe modelul local; dacă Ollama lipsește sau n-are
+  // un model, Aider n-are creier local → becul o spune MĂSURAT, cu modelele reale.
+  try {
+    const o = await probaOllama()
+    info.ollamaLocal = o.ok ? `VIU (modele: ${o.modele.join(', ') || 'niciun model instalat'})` : `LIPSĂ: ${o.motiv}`
+    if (!o.ok || o.modele.length === 0) {
+      problems.push({
+        id: 'ollama-local-lipsa',
+        grav: o.ok ? 'mediu' : 'critic',
+        desc: o.ok
+          ? 'Ollama rulează pe VPS dar N-ARE niciun model — Aider n-are creier local de cod'
+          : `creierul local (Ollama) nu răspunde la 'ollama list' pe VPS: ${o.motiv} — Aider n-are pe ce gândi local`,
+        reparabil: 'nu e nevoie de mâna omului: constructorul își instalează SINGUR creierul local la următoarea rulare (asiguraCreierulLocal → deploy/setup-ollama.sh). Dacă tot nu apare, verifică pe VPS rețeaua/discul/root (RAM ≈6GB pentru modelul de cod)',
       })
     }
   } catch {

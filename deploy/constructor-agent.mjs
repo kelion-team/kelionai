@@ -4,10 +4,12 @@
 // orice modificare, orice îmbunătățire".)
 //
 // CE FACE: ia UN ordin din coadă (API-ul aplicației, auth x-bridge-secret),
-// clonează repo-ul proaspăt în ATELIER (/root/kelion/atelier), lasă creierul
-// (prin app: Gemini principal → Fable 5 rezervă) să
-// exploreze/scrie/verifice prin unelte, impune BUILD + TESTE verzi, apoi
-// împinge ramura și deschide PR-ul. Merge-ul rămâne la Adrian.
+// clonează repo-ul proaspăt în ATELIER (/root/kelion/atelier), lasă MOTORUL AIDER
+// (pe creierul LOCAL Ollama de pe VPS — owner 16 aug: „la constructor nu e gemeni…
+// Aider pe un model LOCAL pe VPS (Ollama)") să exploreze/scrie/repare, impune
+// cele 7 porți verzi, apoi împinge ramura și deschide PR-ul. Constructorul își
+// PUNE SINGUR creierul local pe VPS dacă lipsește (asiguraCreierulLocal — fără
+// SSH). Merge-ul rămâne la Adrian.
 // (La eșec de FURNIZOR ordinul se AMÂNĂ onest, rămâne în coadă și se reia
 // automat — nu cade pe alt creier și nu inventează succes.)
 //
@@ -48,19 +50,19 @@ try {
 }
 const BRIDGE = env.BRIDGE_SECRET ?? ''
 const GHTOKEN = env.GITHUB_TOKEN ?? ''
-// ── CREIERUL CONSTRUCTORULUI = GEMINI (principal) → FABLE 5 (rezervă), PRIN APP ─
-// Owner, 14 aug: „schimbă-mi constructorul cu gemeni ultra… când nu merge repara
-// să cadă pe fable 5, înlocuiește peste tot asta". Constructorul NU mai are creier
-// propriu pe RunPod/DeepInfra (SCOS) — cere creierul DOAR prin app, pe ruta gardată
-// `/api/constructor/creier` (x-bridge-secret). ACOLO app-ul rulează Gemini „ultra"
-// (Pro) ca PRINCIPAL și cade pe Fable 5 ca REZERVĂ când Gemini nu poate; tot acolo
-// se face REVENIREA pe Gemini (fiecare pas reîncepe cu principalul). Cheile
-// (Gemini + Anthropic) + creditul stau în APP, NICIODATĂ în constructor (regula 13
-// aug: constructorul nu ține chei de furnizor și nu cheamă direct API-uri externe).
-// Mesajele + TOOLS-urile sunt deja în format OpenAI → trec DIRECT, fără conversie.
+// ── CREIERUL CONSTRUCTORULUI = MODEL LOCAL PE VPS (Ollama) ──────────────────────
+// Owner, 16 aug: „la constructor nu e gemeni idiotule… e doar aider si cu openhands
+// ca si completare… Aider pe un model LOCAL pe VPS (Ollama)… pe serverul linux si de
+// acolo sa lucreze aider". Constructorul NU mai cere creier prin app (Gemini) și NU
+// ține chei de furnizor (regula 13 aug): motorul Aider gândește pe creierul LOCAL
+// Ollama de pe gazdă (localhost:11434), independent — fără cheie, fără cotă, fără
+// bani. Constructorul își PUNE SINGUR creierul local pe VPS dacă lipsește
+// (asiguraCreierulLocal → deploy/setup-ollama.sh), fără SSH — owner: „sa instaleze
+// el, pe linux, aider automat cu tot ce trebuie".
 const LLM_TIMEOUT_MS = Number(env.CONSTRUCTOR_LLM_TIMEOUT_MS || 180_000)
-// Numele lanțului, pentru mesaje ONESTE pe monitor (nu mai există „RunPod/DeepInfra").
-const NUME_FURNIZOR = 'creierul prin app (Gemini rapid → Gemini performant)'
+// Numele creierului, pentru mesaje ONESTE pe monitor. Owner, 16 aug: „la constructor
+// nu e gemeni… Aider pe un model LOCAL pe VPS (Ollama)" — creier local, independent.
+const NUME_FURNIZOR = 'creierul LOCAL Ollama pe VPS (independent — fără cheie, fără cotă, fără bani)'
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
 // rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
 // 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
@@ -885,25 +887,113 @@ for (const semnal of ['SIGTERM', 'SIGINT']) {
 // ── MOTORUL AIDER (owner, 16 aug: „constructor unic aider… aider va avea absolut
 // toate instrumentele necesare pentru a repara si construi, real" + „aider
 // trebuie sa fie permanet de creiere si kelion real, colaboreaza 100% intre ei
-// informational"). Aider e legat PERMANENT de creiere ȘI de Kelion: creierul vine
-// PRIN APP (/api/constructor/openai, bridge-secretul ca Bearer — constructorul NU
-// ține chei de furnizor, legea 13 aug), unde rulează escaladarea Gemini rapid → Gemini performant.
-// Colaborarea informațională e în ambele sensuri: Kelion dă ordinul + jurnalul
-// încercării anterioare; Aider dă pașii (pe monitor) + rezultatul (în raport).
+// informational"). CREIERUL LUI AIDER = MODEL LOCAL PE VPS (Ollama), owner 16 aug:
+// „la constructor nu e gemeni… Aider pe un model LOCAL pe VPS (Ollama)… pe serverul
+// linux si de acolo sa lucreze aider". Independent — fără cheie, fără cotă, fără
+// bani. Colaborarea informațională cu Kelion rămâne (context viu injectat în prompt):
+// Kelion dă ordinul + memoria + roster-ul + jurnalul; Aider dă pașii (pe monitor) +
+// rezultatul (în raport). Constructorul își PUNE SINGUR creierul local pe VPS
+// (asiguraCreierulLocal) — nimeni nu mai intră pe SSH.
 function aiderInstalat() {
   try { execFileSync('aider', ['--version'], { timeout: 20_000, stdio: 'ignore' }); return true } catch { return false }
 }
 
+// ── CREIERUL LOCAL, PUS AUTOMAT DE CONSTRUCTOR (owner, 16 aug: „sa instaleze el…
+// pe linux… aider automat cu tot ce trebuie"). Constructorul își asigură SINGUR
+// pe VPS creierul local de care are nevoie Aider (Ollama + un model de cod) —
+// fără SSH, fără mâna omului. IDEMPOTENT: dacă Aider + modelul sunt deja acolo,
+// iese instant; altfel rulează procedura din repo (deploy/setup-ollama.sh, sursa
+// UNICĂ), cu fallback inline dacă scriptul lipsește din clonă. Prima punere e
+// scumpă (trage câțiva GB, o singură dată); rulările următoare o sar.
+//
+// PUR (fără disc/shell), EXPORTAT ca să fie PROBAT: din ieșirea lui `ollama list`
+// + numele modelului cerut, spune dacă modelul mai trebuie tras. Cu tag explicit
+// (`nume:tag`) cere potrivire exactă; fără tag, acceptă orice tag pe aceeași bază
+// (Ollama trage ':latest').
+export function creierLocalLipseste(ollamaListOutput, modelCerut) {
+  const model = String(modelCerut || '').replace(/^ollama_chat\//, '').trim()
+  if (!model) return true
+  const modele = String(ollamaListOutput || '')
+    .trim()
+    .split('\n')
+    .slice(1) // prima linie = antetul „NAME …"
+    .map((l) => l.trim().split(/\s+/)[0])
+    .filter((m) => m && m !== 'NAME')
+  if (model.includes(':')) return !modele.includes(model)
+  return !modele.some((m) => m.split(':')[0] === model)
+}
+
+// Numele modelului FĂRĂ prefixul LiteLLM (pentru `ollama pull` / scriptul de setup).
+function numeModelOllama() {
+  return (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b').replace(/^ollama_chat\//, '')
+}
+
+function commandExista(bin) {
+  try { execFileSync('bash', ['-lc', `command -v ${bin}`], { timeout: 8_000, stdio: 'ignore' }); return true } catch { return false }
+}
+
+// Fallback inline dacă scriptul din repo lipsește (clonă parțială). Aceleași
+// comenzi ca deploy/setup-ollama.sh, minimul necesar: Ollama + serviciu + model +
+// Aider pe host. Fiecare pas e best-effort (prins în try) — proba finală din
+// asiguraCreierulLocal decide dacă a reușit.
+function instaleazaCreierulInline(model, timeout, instalEnv) {
+  const rula = (cmd) => {
+    try { execSync(cmd, { encoding: 'utf8', timeout, maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], env: instalEnv }) }
+    catch (e) { log(`  (inline) „${cmd.slice(0, 60)}": ${String(e.message).slice(0, 120)}`) }
+  }
+  if (!commandExista('ollama')) rula('curl -fsSL https://ollama.com/install.sh | sh')
+  rula('systemctl enable --now ollama 2>/dev/null || (pgrep -x ollama >/dev/null 2>&1 || nohup ollama serve >/var/log/ollama.log 2>&1 &)')
+  rula('for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && break; sleep 1; done')
+  rula(`ollama pull ${model}`)
+  if (!commandExista('aider')) rula('pip3 install --break-system-packages aider-chat 2>/dev/null || pipx install aider-chat')
+}
+
+// Pune (dacă lipsește) creierul local pe VPS. Întoarce true dacă la final Aider +
+// modelul sunt gata. NU aruncă — decizia de amânare o ia apelantul.
+function asiguraCreierulLocal() {
+  const model = numeModelOllama()
+  const listaAcum = () => { try { return execFileSync('ollama', ['list'], { timeout: 15_000, encoding: 'utf8' }) } catch { return '' } }
+  if (aiderInstalat() && !creierLocalLipseste(listaAcum(), model)) {
+    log(`creier local: Aider + Ollama („${model}") DEJA gata pe VPS — sar peste instalare`)
+    return true
+  }
+  log(`creier local LIPSĂ pe VPS — îl instalez AUTOMAT (Ollama + „${model}" + Aider), fără SSH…`)
+  beat('⚙️ pun creierul local (Ollama) pe VPS — o singură dată, poate dura câteva minute…', true)
+  const timeout = Math.max(60_000, Math.min(ramase() - 60_000, 40 * 60_000))
+  const instalEnv = { ...process.env, CONSTRUCTOR_OLLAMA_MODEL: model, KELION_ENVFILE: ENVFILE }
+  const script = path.join(ATELIER, 'deploy', 'setup-ollama.sh')
+  try {
+    if (fs.existsSync(script)) {
+      const out = execFileSync('bash', [script], { encoding: 'utf8', timeout, maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], env: instalEnv })
+      for (const l of String(out).split('\n').slice(-6)) { const t = l.trim(); if (t) log(`setup-ollama: ${t.slice(0, 140)}`) }
+    } else {
+      log('deploy/setup-ollama.sh lipsește din clonă — instalez inline (curl ollama.com | sh + pull + aider)')
+      instaleazaCreierulInline(model, timeout, instalEnv)
+    }
+  } catch (e) {
+    log(`instalarea creierului local a picat: ${String((e.stdout ?? '') + (e.stderr ?? '') + (e.message ?? '')).slice(-500)}`)
+  }
+  const gata = aiderInstalat() && !creierLocalLipseste(listaAcum(), model)
+  log(gata ? `creier local: instalat și VIU pe VPS („${model}")` : 'creier local: încă indisponibil după instalarea automată (rețea/disc/root?) — ordinul se reia')
+  return gata
+}
+
 function ruleazaAider(prompt) {
+  // CREIERUL LUI AIDER = MODEL LOCAL PE VPS (Ollama) — owner, 16 aug: „aider pe
+  // un model LOCAL pe VPS (Ollama)… pe serverul linux si de acolo sa lucreze
+  // aider". FĂRĂ Gemini, fără cheie, fără cotă, fără bani: constructorul e
+  // independent — Aider gândește pe creierul local de pe server. Modelul + gazda
+  // vin din env (kelionai.env pe VPS), cu un default rezonabil de cod.
+  const model = env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b'
   const args = [
     '--message', prompt,
-    '--model', 'openai/kelion-constructor',
+    '--model', model,
     '--yes-always', '--no-analytics', '--no-check-update', '--no-gitignore', '--auto-commits', '--no-stream',
   ]
   const aiderEnv = {
     ...process.env,
-    OPENAI_API_BASE: `${APP}/api/constructor/openai/v1`,
-    OPENAI_API_KEY: BRIDGE, // ruta openai a app-ului acceptă bridge-secretul ca Bearer
+    // Ollama rulează pe VPS (constructorul rulează tot pe host, lângă el).
+    OLLAMA_API_BASE: env.OLLAMA_API_BASE || 'http://127.0.0.1:11434',
     GIT_TERMINAL_PROMPT: '0',
   }
   const timeout = Math.max(60_000, Math.min(ramase() - 90_000, 22 * 60_000))
@@ -924,7 +1014,18 @@ function ruleazaAider(prompt) {
 // MAX_REPAIR) → {title, body}. Aruncă „amânabil" pe sugrumarea creierului (coada
 // reia ordinul, ca înainte); aruncă eșec clar dacă Aider n-a schimbat nimic.
 async function construiesteCuAider(job, baseSha, jurnalVechi) {
-  ULTIMUL_CREIER = 'aider (creier prin app)'
+  ULTIMUL_CREIER = `aider (creier LOCAL Ollama pe VPS: ${numeModelOllama()})`
+  // ── CREIERUL LOCAL, ASIGURAT AUTOMAT (owner, 16 aug: „sa instaleze el… pe
+  // linux… aider automat cu tot ce trebuie"). Înainte să pornească Aider,
+  // constructorul își pune SINGUR pe VPS creierul local (Ollama + modelul de cod +
+  // Aider) dacă lipsește — fără SSH. Dacă instalarea automată nu reușește acum
+  // (fără rețea/disc/root), AMÂNĂM ordinul (nu-l ardem): rămâne în coadă și se
+  // reia — becul „creier LOCAL Ollama" din panou arată starea reală, măsurată.
+  if (!asiguraCreierulLocal())
+    throw Object.assign(
+      new Error('creierul local (Ollama) nu e disponibil pe VPS și instalarea automată n-a reușit acum — ordinul se reia (vezi becul „creier LOCAL Ollama" în panou)'),
+      { amanabil: true },
+    )
   // ── CONTEXTUL LUI KELION (owner, 16 aug: „aider… colaborează 100% informațional
   // cu kelion… scoate toate restricțiile"). SCOT izolarea: aduc de la app memoria
   // lui Kelion + roster-ul de specialiști + istoricul relevant, ca Aider să
@@ -950,19 +1051,19 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
           ? `ORDINUL:\n${job.orderText}\n\n--- Încercarea anterioară a picat; ia ALTĂ abordare, nu repeta: ---\n${jurnalVechi.slice(-2500)}`
           : `ORDINUL:\n${job.orderText}`)
     const prompt = baza + contextKelion
-    log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : 'aider construiește ordinul (creier prin app)…')
+    log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : 'aider construiește ordinul (creier LOCAL Ollama pe VPS)…')
     const a = ruleazaAider(prompt)
     for (const linie of String(a.log).split('\n').slice(-6)) { const t = linie.trim(); if (t) log(`aider: ${t.slice(0, 140)}`) }
-    if (a.throttled) throw Object.assign(new Error(`aider sugrumat (creier prin app): ${a.log.slice(-160)}`), { amanabil: true })
+    if (a.throttled) throw Object.assign(new Error(`aider sugrumat (creier LOCAL Ollama indisponibil/ocupat): ${a.log.slice(-160)}`), { amanabil: true })
     const headAcum = sh('git rev-parse --short=7 HEAD').trim()
     // NO-CHANGE = AMÂNARE, NU EȘEC (owner, 16 aug, cu coada de ordine eșuate
     // #340–343: „aider nu funcționează… din cauza ta"). Când creierul (Gemini)
     // e epuizat, Aider iese fără să editeze — dar asta NU e o cădere de cod, e
     // lipsă de combustibil. Marcam AMÂNABIL: ordinul rămâne în coadă și se reia
     // când Gemini revine, în loc să se îngrămădească EȘUAT pe un creier gol.
-    if (headAcum === baseSha) throw Object.assign(new Error(`aider n-a modificat nimic — probabil creierul (Gemini) e indisponibil/epuizat; se reia când revine. Coada log:\n${a.log.slice(-600)}`), { amanabil: true })
+    if (headAcum === baseSha) throw Object.assign(new Error(`aider n-a modificat nimic — probabil creierul LOCAL Ollama e indisponibil/ocupat; se reia când revine. Coada log:\n${a.log.slice(-600)}`), { amanabil: true })
     const problema = verificaAtelierul()
-    if (!problema) return { title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120), body: `Construit de Aider (motorul unic al constructorului); creierul prin app (Gemini rapid → Gemini performant). Ordin #${job.id}.` }
+    if (!problema) return { title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120), body: `Construit de Aider (motorul unic al constructorului); creier LOCAL Ollama pe VPS (${numeModelOllama()}) — independent, fără cheie/cotă/bani. Ordin #${job.id}.` }
     ultimaProblema = problema
     if (reparatii >= MAX_REPAIR || ramase() < 8 * 60_000) throw new Error(problema)
     reparatii++
@@ -982,14 +1083,14 @@ async function main() {
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
   // MOTORUL = AIDER, UNIC (owner, 16 aug, verbatim: „constructor unic aider… scoti
   // tot din constructor si instalezi doar aider… aider va avea absolut toate
-  // instrumentele necesare pentru a repara si construi, real"). Aider e legat
-  // PERMANENT de creiere ȘI de Kelion, colaborare 100% informațională: creierul
-  // vine PRIN APP (legea 13 aug — constructorul NU ține chei de furnizor), pe
-  // /api/constructor/openai (bridge-secret ca Bearer), unde rulează escaladarea
-  // Gemini rapid → performant; contextul ordinului + jurnalul încercării anterioare curg
-  // de la Kelion spre Aider, iar pașii + rezultatul lui Aider curg înapoi la
-  // Kelion (monitor prin beat/log + raportul final + triajul).
-  log(`creier constructor: MOTORUL AIDER (unic) — creier prin app /api/constructor/openai (Gemini rapid → performant), fără chei în constructor`)
+  // instrumentele necesare pentru a repara si construi, real"). CREIERUL LUI AIDER
+  // = MODEL LOCAL PE VPS (Ollama), owner 16 aug: „la constructor nu e gemeni… Aider
+  // pe un model LOCAL pe VPS (Ollama)… pe serverul linux si de acolo sa lucreze
+  // aider". Independent, fără chei/cotă/bani. Colaborarea informațională cu Kelion
+  // rămâne: contextul ordinului + memoria + roster-ul + jurnalul curg de la Kelion
+  // spre Aider (în prompt), iar pașii + rezultatul lui Aider curg înapoi la Kelion
+  // (monitor prin beat/log + raportul final + triajul).
+  log(`creier constructor: MOTORUL AIDER (unic) pe creierul LOCAL Ollama de pe VPS (${numeModelOllama()}) — independent, fără chei în constructor`)
 
   // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
   // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
