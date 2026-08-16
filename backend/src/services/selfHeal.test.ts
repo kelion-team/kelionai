@@ -41,6 +41,25 @@ vi.mock('./geminiDirect.js', () => ({ geminiLive: async () => ({ ok: false, serv
 // Mockat ca să NU tragem autonomie.ts (→ config.ts, chei obligatorii) în test.
 let plafon = { activ: false, plafon: 10, cheltuit: 0 }
 vi.mock('./autonomie.js', () => ({ plafonConstructor: async () => plafon }))
+// MÂNA AIDER (16 aug): mockăm lucrătorul + PR-ul ca verdictul buclei să fie al
+// nostru în test — aiderPropune=null înseamnă „aider neinstalat" (drumul vechi).
+let aiderPropune: { aSchimbat: boolean; testeTrec: boolean | null; branch?: string } | null = null
+vi.mock('./lucratori.js', () => ({
+  LUCRATORI: [{ nume: 'aider' }],
+  lucratoriInstalati: async () => (aiderPropune ? ['aider'] : []),
+  ruleazaLucrator: async () => ({
+    lucrator: 'aider', model: 'gemini/test', ok: true, diff: '', log: '', secunde: 1,
+    fisiere: 1, adaugate: 5, sterse: 2, ...aiderPropune,
+  }),
+}))
+const prDeschise: string[] = []
+vi.mock('./github.js', () => ({
+  repoOpenPR: async (branch: string) => {
+    prDeschise.push(branch)
+    return 'https://github.com/kelion-team/kelionai/pull/999'
+  },
+}))
+vi.mock('../config.js', () => ({ config: { constructorGeminiModel: 'gemini-test' } }))
 
 import { runSelfHeal } from './selfHeal.js'
 
@@ -52,6 +71,8 @@ beforeEach(() => {
   ordineMoarte = []
   goluri.length = 0
   plafon = { activ: false, plafon: 10, cheltuit: 0 }
+  aiderPropune = null
+  prDeschise.length = 0
 })
 
 const simptom = (fel: string, message: string, count: number, sampleUrl = '') => ({
@@ -162,5 +183,31 @@ describe('runSelfHeal — eșecurile mute ajung la reparație', () => {
     simptome = [simptom('ruta-crapata', 'POST /api/plati: alt boom', 3, '/api/plati')]
     await runSelfHeal()
     expect(jobs).toHaveLength(1) // tot UNUL — zgarda a ținut
+  })
+})
+
+describe('MÂNA AIDER (owner, 16 aug: „pentru autovindecare... il lasi pe el") — întâi Aider, constructorul rezervă', () => {
+  it('Aider cu produs REAL (diff + testele TREC) → PR direct, NICIUN ordin la constructor', async () => {
+    aiderPropune = { aSchimbat: true, testeTrec: true, branch: 'panou/aider-x1' }
+    simptome = [simptom('ruta-crapata', 'POST /api/chat: boom', 3, '/api/chat')]
+    const r = await runSelfHeal()
+    expect(r.filed).toBe(1)
+    expect(prDeschise).toEqual(['panou/aider-x1']) // PR-ul s-a deschis pe ramura lui
+    expect(jobs).toHaveLength(0) // constructorul n-a fost chemat
+  })
+
+  it('Aider cu teste ROȘII → propunerea NU pleacă; ordinul se depune la constructor (rezerva)', async () => {
+    aiderPropune = { aSchimbat: true, testeTrec: false, branch: 'panou/aider-x2' }
+    simptome = [simptom('ruta-crapata', 'POST /api/chat: boom', 3, '/api/chat')]
+    await runSelfHeal()
+    expect(prDeschise).toHaveLength(0)
+    expect(jobs).toHaveLength(1)
+  })
+
+  it('Aider neinstalat → drumul vechi neatins (ordin la constructor)', async () => {
+    aiderPropune = null
+    simptome = [simptom('ruta-crapata', 'POST /api/chat: boom', 3, '/api/chat')]
+    await runSelfHeal()
+    expect(jobs).toHaveLength(1)
   })
 })
