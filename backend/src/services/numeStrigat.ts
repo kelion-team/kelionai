@@ -31,6 +31,13 @@ const NUME = [
   'chelion',
   'celion',
   'kellion',
+  'kaleon',
+  'kaeleon',
+  'kaleion',
+  'keleion',
+  'calion',
+  'caleon',
+  'kelionn',
   'kei',
   'chei',
   'key',
@@ -58,11 +65,25 @@ export function numeStrigat(auzit: string): boolean {
   const t = fara_diacritice(String(auzit ?? '').trim())
   if (!t) return false
   const cuvinte = t.split(/[^a-z0-9]+/).filter(Boolean).slice(0, CUVINTE_CAP)
-  // Potrivire pe CUVÂNT ÎNTREG: „chei" din „cheia de la mașină" nu e o strigare,
-  // iar un `includes` simplu ar fi făcut din orice propoziție cu „chei" o
-  // trezire. Un gard care se declanșează degeaba e tot un gard stricat.
-  return cuvinte.some((c) => NUME.includes(c))
+  // Exact pe listă SAU stâlcire ASR pe „kelion” (m?surat: Käleon→kaleon).
+  // Fuzzy DOAR pe numele lung — ?kei/chei/key? r?m?n exact (altfel false+).
+  return cuvinte.some(
+    (c) => NUME.includes(c) || aproapeNumeLung(c, 'kelion') || aproapeNumeLung(c, 'kellion'),
+  )
 }
+
+/** Potrivire moale doar pentru nume ≥5 litere (ASR: kaleon↔kelion, max 2 greșeli). */
+function aproapeNumeLung(c: string, tinta: string): boolean {
+  if (c === tinta) return true
+  if (tinta.length < 5 || c.length < 4) return false
+  if (Math.abs(c.length - tinta.length) > 2) return false
+  // Hamming-ish pe aliniere simplă
+  const n = Math.min(c.length, tinta.length)
+  let diff = Math.abs(c.length - tinta.length)
+  for (let i = 0; i < n; i++) if (c[i] !== tinta[i]) diff++
+  return diff <= 2
+}
+
 
 // ── POARTA DETERMINISTĂ A SESIUNII LIVE (9 aug 2026) ────────────────────────
 //

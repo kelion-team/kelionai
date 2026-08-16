@@ -2046,9 +2046,6 @@ export async function getUserActivity(): Promise<{
                 (ARRAY_AGG(v.country_code ORDER BY v.last_seen_at DESC))[1] AS code,
                 (ARRAY_AGG(v.device ORDER BY v.last_seen_at DESC))[1] AS device,
                 (ARRAY_AGG(v.browser ORDER BY v.last_seen_at DESC))[1] AS browser,
-                // PG 16: in GROUP BY lower(v.user_email), correlated subqueries
-                // cannot reference bare v.user_email (ungrouped). Use MIN(lower(...))
-                // which is deterministic inside each email group.
                 EXISTS(SELECT 1 FROM blocked_users b WHERE lower(b.email) = MIN(lower(v.user_email))) AS blocked,
                 COALESCE((SELECT w.balance FROM wallets w WHERE lower(w.user_email) = MIN(lower(v.user_email)) LIMIT 1), 0)::float AS balance,
                 COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE lower(c.user_email) = MIN(lower(v.user_email))), 0)::float AS "consumedUsd",

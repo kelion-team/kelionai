@@ -1128,11 +1128,18 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
   try {
     const ctx = await api('/api/constructor/context', { method: 'POST', body: JSON.stringify({ ordin: job.orderText }) }, 2)
     const parti = []
-    if (ctx?.memorie?.length) parti.push(`MEMORIA lui Kelion (ce știe despre owner/proiect):\n- ${ctx.memorie.slice(0, 40).join('\n- ')}`)
-    if (ctx?.relevante?.length) parti.push(`ISTORIC relevant pentru ordin:\n- ${ctx.relevante.join('\n- ')}`)
-    if (ctx?.agenti?.length) parti.push(`SPECIALIȘTII lui Kelion (poți cere subiectul lor în raționament):\n${ctx.agenti.slice(0, 80).map((a) => `${a.id} — ${a.rol}`).join('\n')}`)
-    if (parti.length) contextKelion = `\n\n=== CREIERUL LUI KELION (context viu, folosește-l) ===\n${parti.join('\n\n')}\n=== sfârșit context ===\n`
-    log(`context Kelion adus pentru Aider: ${ctx?.memorie?.length ?? 0} amintiri, ${ctx?.agenti?.length ?? 0} specialiști, ${ctx?.relevante?.length ?? 0} rânduri istoric`)
+    // PLAFON DUR: iscoada+80 agenți umflau promptul la 300k tokeni pe model 32k → Aider mut.
+    const mem = (ctx?.memorie ?? []).filter((x) => !String(x).includes('[iscoada')).slice(0, 12)
+    const rel = (ctx?.relevante ?? []).slice(0, 8)
+    const ag = (ctx?.agenti ?? []).slice(0, 15)
+    if (mem.length) parti.push(`MEMORIA lui Kelion (fapte, fără iscoadă-spam):\n- ${mem.join('\n- ')}`)
+    if (rel.length) parti.push(`ISTORIC relevant pentru ordin:\n- ${rel.join('\n- ')}`)
+    if (ag.length) parti.push(`SPECIALIȘTII lui Kelion (poți cere subiectul lor în raționament):\n${ag.map((a) => `${a.id} — ${a.rol}`).join('\n')}`)
+    if (parti.length) {
+      contextKelion = `\n\n=== CREIERUL LUI KELION (context viu, folosește-l) ===\n${parti.join('\n\n')}\n=== sfârșit context ===\n`
+      if (contextKelion.length > 6000) contextKelion = contextKelion.slice(0, 6000) + '\n…[context trunchiat]\n'
+    }
+    log(`context Kelion adus pentru Aider: ${mem.length} amintiri (filtrate), ${ag.length} specialiști, ${rel.length} rânduri istoric, ${contextKelion.length} chars`)
   } catch (e) {
     log(`nu am putut aduce contextul lui Kelion (${e instanceof Error ? e.message.slice(0, 80) : e}) — Aider merge pe ordin`)
   }
