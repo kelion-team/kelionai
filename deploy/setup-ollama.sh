@@ -55,8 +55,17 @@ echo "== 4/6) Aider instalat pe HOST? (constructorul rulează pe host) =="
 if command -v aider >/dev/null 2>&1; then
   echo "  DEJA: $(aider --version 2>/dev/null || echo '?')"
 else
-  echo "  lipsește — îl instalez..."
-  pip3 install --break-system-packages aider-chat 2>/dev/null || pipx install aider-chat
+  echo "  lipsește — îl instalez (Ubuntu 24.04 e externally-managed: încerc mai multe căi)..."
+  apt-get install -y python3-pip pipx >/dev/null 2>&1 || true
+  pip3 install --break-system-packages aider-chat \
+    || python3 -m pip install --break-system-packages aider-chat \
+    || pipx install aider-chat \
+    || curl -LsSf https://aider.chat/install.sh | sh
+fi
+# Aider ajunge des în ~/.local/bin (pip --user / pipx / uv) — îl legăm în PATH-ul de
+# sistem ca să-l găsească constructorul de pe host (execFileSync 'aider').
+if ! command -v aider >/dev/null 2>&1 && [ -x "$HOME/.local/bin/aider" ]; then
+  ln -sf "$HOME/.local/bin/aider" /usr/local/bin/aider
 fi
 
 echo "== 5/6) variabilele constructorului în $ENVFILE =="
@@ -68,4 +77,4 @@ echo "== 6/6) proba finală =="
 echo "  modele Ollama pe VPS:"; ollama list
 echo ""
 echo "GATA. Constructorul (Aider) lucrează acum pe creierul LOCAL Ollama — independent de Gemini."
-echo "Panoul Admin → Constructor arată becul: „creier LOCAL Ollama ($MODEL)" verde."
+echo "Panoul Admin -> Constructor arata becul: creier LOCAL Ollama ($MODEL) verde."
