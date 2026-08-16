@@ -277,11 +277,11 @@ docker run -d --name kelion-caddy --restart unless-stopped --network host \
   caddy:2 caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
 
 show_progress 90 "Configurare cronuri și servicii suport"
-echo "== 6. Backup criptat s?pt?m?nal (duminic? 03:00 ora Rom?niei) =="
+echo "== 6. Backup criptat s?pt?m?nal (duminic? 03:00 ora Angliei) =="
 # Instalează/actualizează IDEMPOTENT cronul de backup criptat al DB-ului
 # (Adrian, 24 iul: „salvări periodice în zona criptată"). Zilnic la 03:15 UTC.
 install -m 700 "$REPO/deploy/backup.sh" /root/kelion/backup.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' | grep -v '^CRON_TZ=Europe/Bucharest$' | grep -v '^# kelion-backup-tz' ; echo '# kelion-backup-tz' ; echo 'CRON_TZ=Europe/Bucharest' ; echo '0 3 * * 0 /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
+( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' | grep -v '^CRON_TZ=Europe/London$' | grep -v '^# kelion-backup-tz' ; echo '# kelion-backup-tz' ; echo 'CRON_TZ=Europe/London' ; echo '0 3 * * 0 /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
 
 echo "== 6c. Auto-publicarea de pe server (cron la 1 min — master ajunge live SINGUR) =="
 # Adrian, 26 iul („de ce nu le publici? de ce trebuie să-ți zic eu?"), în plină
