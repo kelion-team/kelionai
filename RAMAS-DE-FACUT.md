@@ -13,6 +13,19 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 16 aug (verbatim): „la constructor NU e gemeni idiotule… Aider pe un
+      model LOCAL pe VPS (Ollama)… pe serverul linux si de acolo sa lucreze aider"
+      + „sa instaleze el, pe linux, aider automat cu tot ce trebuie". SCRIS (nu pot
+      verifica LIVE de aici — n-am Ollama/GPU local): creierul constructorului mutat
+      de pe Gemini-prin-app pe un model LOCAL Ollama (ruleazaAider `--model
+      ollama_chat/…` + OLLAMA_API_BASE); constructorul se auto-instalează creierul
+      pe VPS (`asiguraCreierulLocal` → `deploy/setup-ollama.sh`, fără SSH); ruta
+      veche Gemini-prin-app + puntea creier2Constructor ȘTERSE; becul „creier LOCAL
+      Ollama" măsurat (probaOllama). DE VERIFICAT LIVE pe VPS: (1) prima rulare
+      trage modelul (câțiva GB) și becul devine verde cu modelul listat; (2) un
+      ordin se construiește cap-coadă pe creierul local (PR deschis, porți verzi);
+      (3) OpenHands se instalează non-fatal în imagine (owner „pune openhands ca si
+      completare"). «nu pot verifica» până nu rulează pe server. [ ]
 - [ ] ORDIN 15 aug (captura Vizitatori): „vizitatori nu au poză... de ce nu e
       legată de vizitator" — FAPTE: vizitele se nasc pe server (IP/UA/pagini),
       camera nu e pe drum; pozele trăiesc în faceprints cu cheia user_email.

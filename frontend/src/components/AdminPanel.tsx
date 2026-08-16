@@ -637,6 +637,8 @@ export default function AdminPanel({
   const [buildPaused, setBuildPaused] = useState(false)
   // Dovada vie a motorului: `aider --version` de pe gazdă (owner, 16 aug).
   const [aiderProba, setAiderProba] = useState<{ ok: boolean; versiune: string; motiv: string } | null>(null)
+  // Creierul LOCAL al lui Aider: `ollama list` de pe VPS (owner, 16 aug).
+  const [ollamaProba, setOllamaProba] = useState<{ ok: boolean; modele: string[]; motiv: string } | null>(null)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
   // EVALUAREA CERINȚEI (owner, 13 aug): pe măsură ce scrii ordinul, evaluăm
@@ -950,13 +952,14 @@ export default function AdminPanel({
   const refreshBuildJobs = (): void => {
     fetch('/api/admin/constructor', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string } } | null) => {
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string } } | null) => {
         // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
         // nu se lasă „Niciun ordin încă" peste o citire picată.
         if (j?.jobs) {
           setBuildJobs(j.jobs)
           setBuildPaused(!!j.paused)
           setAiderProba(j.aider ?? null)
+          setOllamaProba(j.ollama ?? null)
         } else setBuildJobs(null)
       })
       .catch(() => setBuildJobs(null))
@@ -2641,10 +2644,29 @@ export default function AdminPanel({
                           : `aider --version a picat: ${aiderProba.motiv}`}
                     >
                       {aiderProba == null
-                        ? 'Motor: Aider (probă…) · creier Gemini (rapid → performant)'
+                        ? 'Motor: Aider (probă…)'
                         : aiderProba.ok
-                          ? `🟢 Motor: Aider VIU (${aiderProba.versiune}) · creier Gemini (rapid → performant)`
+                          ? `🟢 Motor: Aider VIU (${aiderProba.versiune})`
                           : `🔴 Motor: Aider LIPSĂ (${aiderProba.motiv.slice(0, 60)})`}
+                    </span>
+                    {/* CREIERUL LOCAL (Ollama pe VPS) — owner, 16 aug: „aider pe un
+                        model local pe VPS (Ollama)". Probat cu `ollama list`. */}
+                    <span
+                      className="chat-hint"
+                      style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: ollamaProba == null ? undefined : ollamaProba.ok && ollamaProba.modele.length ? '#1a7f37' : '#c1121f' }}
+                      title={ollamaProba == null
+                        ? 'proba creierului local încă nu s-a citit'
+                        : ollamaProba.ok
+                          ? `ollama list pe VPS: ${ollamaProba.modele.join(', ') || 'niciun model instalat'}`
+                          : `ollama list a picat: ${ollamaProba.motiv}`}
+                    >
+                      {ollamaProba == null
+                        ? '· creier local: probă…'
+                        : ollamaProba.ok && ollamaProba.modele.length
+                          ? `· 🟢 creier LOCAL Ollama (${ollamaProba.modele.join(', ')})`
+                          : ollamaProba.ok
+                            ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
+                            : `· 🔴 Ollama LIPSĂ pe VPS (${ollamaProba.motiv.slice(0, 50)})`}
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>

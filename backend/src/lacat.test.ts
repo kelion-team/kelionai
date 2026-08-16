@@ -122,13 +122,14 @@ describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: �
   })
 })
 
-describe('LACĂT — constructor: motor AIDER (unic), creier DOAR Gemini PRIN APP', () => {
-  // Owner, 16 aug: „constructor unic aider… scoti tot din constructor si instalezi
-  // doar aider… ramine doar gemini rapid si cu escaladarea spusa pe modelul
-  // performant gemini… fable iese total de peste tot… nu se comuta nimic".
-  // Zidul care rămâne (legea 13 aug): constructorul NU ține chei de furnizor și
-  // NU cheamă DIRECT niciun API extern — Aider cere creierul DOAR pe ruta gardată
-  // din app (openai, bridge-secret ca Bearer).
+describe('LACĂT — constructor: motor AIDER (unic) pe creier LOCAL Ollama de pe VPS', () => {
+  // Owner, 16 aug: „constructor unic aider… aider va avea absolut toate
+  // instrumentele necesare pentru a repara si construi, real". CORECȚIA (16 aug):
+  // „la constructor NU e gemeni idiotule… Aider pe un model LOCAL pe VPS (Ollama)…
+  // pe serverul linux si de acolo sa lucreze aider" + „sa instaleze el, pe linux,
+  // aider automat cu tot ce trebuie". Zidul (legea 13 aug) rămâne: constructorul NU
+  // ține chei de furnizor și NU cheamă DIRECT niciun API extern — dar creierul lui
+  // NU mai e Gemini prin app, ci un model LOCAL Ollama de pe gazdă (fără chei/cotă/bani).
   it('agentul: fără OpenRouter, fără chei de furnizor, fără apel DIRECT (Google/Anthropic)', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
     expect(/openrouter\.ai/.test(s)).toBe(false)
@@ -142,18 +143,27 @@ describe('LACĂT — constructor: motor AIDER (unic), creier DOAR Gemini PRIN AP
     expect(/CONSTRUCTOR_RUNPOD_KEY|CONSTRUCTOR_DEEPSEEK_KEY/.test(s)).toBe(false)
   })
 
-  it('motorul e AIDER, cu creierul PRIN APP pe ruta gardată (bridge-secret)', () => {
+  it('motorul e AIDER pe model LOCAL Ollama (nu app, nu Gemini, nu OPENAI_API_KEY)', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
-    // Aider e motorul unic; creierul lui vine prin app, nu ține el cheia.
     expect(/construiesteCuAider/.test(s)).toBe(true)
-    expect(/\/api\/constructor\/openai/.test(s)).toBe(true)
-    expect(/OPENAI_API_KEY: BRIDGE/.test(s)).toBe(true)
+    // Creierul lui Aider = model Ollama local + gazda Ollama, nu ruta app-Gemini.
+    expect(/ollama_chat\//.test(s)).toBe(true)
+    expect(/OLLAMA_API_BASE/.test(s)).toBe(true)
+    expect(/\/api\/constructor\/openai/.test(s)).toBe(false)
+    expect(/OPENAI_API_KEY: BRIDGE/.test(s)).toBe(false)
   })
 
-  it('creierul din APP e DOAR Gemini (rapid → performant) — Fable SCOS total', () => {
+  it('constructorul își instalează SINGUR creierul local pe VPS (fără SSH)', () => {
+    const s = sursa('../../deploy/constructor-agent.mjs')
+    expect(/function asiguraCreierulLocal/.test(s)).toBe(true)
+    expect(/setup-ollama\.sh/.test(s)).toBe(true)
+  })
+
+  it('ruta de creier prin app (Gemini) a fost SCOASĂ din constructor — Fable la fel', () => {
     const ruta = sursa('./routes/constructor.ts')
-    expect(/geminiDirectChat/.test(ruta)).toBe(true)
-    expect(/modelPerformant = config\.geminiModelGreu/.test(ruta)).toBe(true)
+    // Constructorul nu mai are creier Gemini prin app.
+    expect(/const creierHandler/.test(ruta)).toBe(false)
+    expect(/geminiDirectChat/.test(ruta)).toBe(false)
     // Fable a ieșit TOTAL: nicio funcție Fable, niciun comutator.
     expect(/fable5Disponibil|fable5Chat/.test(ruta)).toBe(false)
     expect(/forta.?fable/i.test(ruta)).toBe(false)

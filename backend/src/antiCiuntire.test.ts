@@ -72,14 +72,16 @@ describe('fișierul distrus e la loc, întreg', () => {
   })
 
   // (Testul „scara de modele conține schimbarea PR #613" a fost ȘTERS, 3 aug —
-  // scara de modele OpenRouter a fost extirpată cu totul din constructor;
-  // creierul e Gemini-only, deci nu mai există MODELE_DOVEDIT_PROASTE.)
+  // scara de modele OpenRouter a fost extirpată cu totul din constructor. Creierul
+  // constructorului e acum un model LOCAL Ollama de pe VPS, deci nu mai există nici
+  // MODELE_DOVEDIT_PROASTE, nici creier prin app.)
 
   it('bucățile mari ale constructorului sunt toate acolo', () => {
     // A coarse but real check: if the file were maimed again, at least one of
     // these would be missing. (Owner 16 aug: motorul e AIDER, unic —
-    // construiesteCuAider/ruleazaAider; creierul lui vine PRIN APP, DOAR Gemini.
-    // Primitivele de editare + porțile + gardul de comenzi rămân biblioteca casei.)
+    // construiesteCuAider/ruleazaAider; creierul lui e un model LOCAL Ollama pe VPS,
+    // pus automat de asiguraCreierulLocal. Primitivele de editare + porțile + gardul
+    // de comenzi rămân biblioteca casei.)
     for (const bucata of ['function toolWrite', 'function toolEdit', 'construiesteCuAider', 'function ruleazaAider', 'RUN_ALLOWED', 'function verificaAtelierul'])
       expect(constructor).toContain(bucata)
   })

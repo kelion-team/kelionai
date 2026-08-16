@@ -156,13 +156,15 @@ describe('instalarea e verificată, nu presupusă', () => {
     expect(docker).toContain('npm install -g cline')
   })
 
-  // Rule 1 applied to the Dockerfile: I haven't confirmed the command that
-  // provides the headless OpenHands CLI, so I do NOT put it in. The panel
-  // detects it missing and moves on with the other two — instead of
-  // installing "something" and reporting that it works.
-  it('OpenHands NU e instalat orbește, iar motivul e scris', () => {
-    expect(docker).not.toMatch(/install.*openhands/i)
-    expect(docker).toMatch(/OpenHands NU e aici, INTENȚIONAT/)
+  // Owner, 16 aug (cerut repetat): „de ce nu ai pus openhands ca si completare
+  // aider pentru functiile suplimentare". OpenHands intră acum în imagine ca
+  // COMPLETARE la Aider — dar NON-FATAL (`|| echo`): dacă pip-ul lui pică sau
+  // trage dependințe grele, imaginea TOT se construiește cu Aider (motorul
+  // primar). Panoul îl detectează la rulare și merge mai departe dacă lipsește.
+  it('OpenHands e instalat ca completare la Aider, dar non-fatal', () => {
+    expect(docker).toMatch(/pip3 install[^\n]*openhands-ai/)
+    // Dovada că e non-fatal: fallback-ul „|| echo" care ține imaginea validă.
+    expect(docker).toContain('openhands-ai nu s-a instalat')
   })
 
   it('lipsa unui lucrător nu oprește panoul', () => {

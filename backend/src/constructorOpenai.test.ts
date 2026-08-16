@@ -1,31 +1,34 @@
-// ── UȘA OpenAI a CREIERULUI (motorul Aider) — owner, 16 aug ──────────────────
-// Aider (LiteLLM) cere creierul pe /api/constructor/openai/v1/chat/completions,
-// cu bridge-secretul ca Bearer. Endpointul împachetează creierul Gemini al casei
-// în forma OpenAI-completă (id/object/created/choices[].finish_reason). Lacăt pe
-// sursă: forma, autentificarea și înregistrarea rutei nu pot regresa în tăcere.
+// ── LACĂT: creierul prin app (Gemini) a IEȘIT din constructor — owner, 16 aug ──
+// „la constructor nu e gemeni idiotule… Aider pe un model LOCAL pe VPS (Ollama)…
+// pe serverul linux si de acolo sa lucreze aider". Ruta veche prin care Aider cerea
+// creierul Gemini al casei (/api/constructor/creier + ușa OpenAI
+// /api/constructor/openai/v1/chat/completions) a fost SCOASĂ complet, împreună cu
+// handlerul, puntea de formate (creier2Constructor) și alarma ei. Motorul (Aider)
+// gândește acum pe creierul LOCAL Ollama de pe VPS, fără chei și fără app.
+// Lacăt pe sursă: nimeni nu poate re-lega în tăcere constructorul la Gemini prin app.
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const ruta = readFileSync(fileURLToPath(new URL('./routes/constructor.ts', import.meta.url)), 'utf8')
 
-describe('endpointul OpenAI al creierului constructorului (Aider ↔ creier prin app)', () => {
-  it('un SINGUR handler, două uși (fără duplicare): /creier + /openai/v1/chat/completions', () => {
-    expect(ruta).toContain('const creierHandler = (esteOpenai: boolean) =>')
-    expect(ruta).toContain("app.post('/api/constructor/creier', creierHandler(false))")
-    expect(ruta).toContain("app.post('/api/constructor/openai/v1/chat/completions', creierHandler(true))")
+describe('creierul prin app (Gemini) e SCOS din constructor (Aider = Ollama local)', () => {
+  it('handlerul de creier prin app și cele două uși nu mai există', () => {
+    expect(ruta).not.toContain('const creierHandler')
+    expect(ruta).not.toContain("app.post('/api/constructor/creier'")
+    expect(ruta).not.toContain("app.post('/api/constructor/openai/v1/chat/completions'")
   })
 
-  it('autentificarea acceptă bridge-secretul ca antet SAU ca Bearer (doar pe ușa openai)', () => {
-    expect(ruta).toContain("req.headers['x-bridge-secret'] === config.bridgeSecret")
-    expect(ruta).toContain('esteOpenai && bearer === config.bridgeSecret')
+  it('puntea de formate OpenAI↔Gemini (creier2Constructor) a fost ștearsă', () => {
+    expect(ruta).not.toContain('creier2Constructor')
+    expect(ruta).not.toContain('uneltePentruCreier2')
+    expect(ruta).not.toContain('raspunsCreier2')
   })
 
-  it('răspunsul openai e împachetat complet (object/created/finish_reason), altfel neatins', () => {
-    expect(ruta).toContain("object: 'chat.completion'")
-    expect(ruta).toContain('finish_reason')
-    expect(ruta).toContain('created: Math.floor(Date.now() / 1000)')
-    // pe /creier răspunsul rămâne forma noastră brută (raspunde() nu ambalează)
-    expect(ruta).toContain('if (!esteOpenai) return reply.send(payload)')
+  it('constructorul nu mai cheamă geminiDirect pentru propriul creier', () => {
+    // Contextul lui Kelion (memorie/roster/istoric) rămâne pe /api/constructor/context,
+    // dar creierul propriu al motorului NU mai e Gemini prin app.
+    expect(ruta).not.toContain('geminiDirectChat')
+    expect(ruta).not.toContain("recordCost('kelion-constructor', 'gemini'")
   })
 })

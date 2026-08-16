@@ -1,9 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser, adminSiId, cerAdmin } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, recordCost, loadKv, saveKv } from '../db.js'
-import type { OrMessage } from '../services/brainContract.js'
-import { uneltePentruCreier2, raspunsCreier2 } from '../services/creier2Constructor.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, loadKv, saveKv } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { numeleOrdinului, cineACerut } from '../services/numeOrdin.js'
 import { autonomActiv } from '../services/autonomActiv.js'
@@ -22,36 +20,11 @@ import { notifyAdmin } from '../services/adminNotification.js'
 // from the Admin→Constructor panel); the EXECUTION is on the VPS:
 // deploy/constructor-worker.sh (cron every 2 min, flock, short jobs with
 // timeouts — NOT permanent daemons, the lesson of the old ecosystem that
-// burned the subscription) calls deploy/constructor-agent.mjs — the agentic
-// loop on the Gemini API (the owner's key, hard caps), which works in a
-// separate clone (the workshop), runs build + tests and opens the PR. THE
-// MERGE STAYS WITH ADRIAN (his rule, Jul 27: "me doing the merge is ok").
-// ── ALARMA DE CREIER CĂZUT ÎN LANȚ (owner, 14 aug: „constructorul blocat… nu
-// știu cum raportezi funcțional" + „trebuie rezolvată definitiv partea cu
-// eșuatul ordinelor"). Un ordin al cărui creier pică NU moare — se reia
-// („amânabil") — dar până azi cicla ÎN TĂCERE: 5% pe panou ore întregi, niciun
-// semn către owner, iar motivul EXACT (cheie invalidă, credit terminat) murea
-// în log. De-acum: la 3 eșecuri CONSECUTIVE ale rutei de creier, notificare
-// TARE în panou cu motivul măsurat — cel mult una la 30 min (semnal, nu spam).
-// Orice succes (oricare creier) resetează numărătoarea.
-let esecuriCreierLaRand = 0
-let ultimaAlarmaCreierLa = 0
-function creierApicat(motiv: string): void {
-  esecuriCreierLaRand++
-  const acum = Date.now()
-  if (esecuriCreierLaRand >= 3 && acum - ultimaAlarmaCreierLa > 30 * 60_000) {
-    ultimaAlarmaCreierLa = acum
-    void notifyAdmin(
-      'scris',
-      'Creierul constructorului pică în lanț — ordinele NU avansează',
-      `${esecuriCreierLaRand} cereri de creier picate la rând. Motivul măsurat: „${motiv.slice(0, 300)}". ` +
-        'Ordinele se reiau singure când creierul își revine — dar până atunci stau pe loc. ' +
-        'De verificat: creditul Gemini și cheia ANTHROPIC_API_KEY (becul Fable 5 arată proba reală).',
-      { esecuri: esecuriCreierLaRand, motiv: motiv.slice(0, 300) },
-    ).catch(() => 0)
-  }
-}
-
+// burned the subscription) calls deploy/constructor-agent.mjs — the Aider
+// engine on a LOCAL Ollama model on the VPS (owner, Aug 16: "la constructor nu
+// e gemeni… Aider pe un model LOCAL pe VPS (Ollama)" — no key, no quota, no
+// money), which works in a separate clone (the workshop), runs build + tests
+// and opens the PR. THE MERGE STAYS WITH ADRIAN (his rule, Jul 27: "me doing the merge is ok").
 // Becul LIVE per AI-constructor, cheiat pe subșirul stabil (becFurnizor):
 // creditAI dă numele complet al furnizorului, îl potrivim cu `includes`. Un AI
 // fără rând de credit rămâne necunoscut (fără cheie), nu „verde" inventat.
@@ -129,11 +102,16 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // pe gazdă și trimitem starea MĂSURATĂ (versiunea reală sau eroarea), ca
     // panoul să nu doar SCRIE „Aider", ci s-o și DOVEDEASCĂ.
     const { probaAider } = await import('../services/aiderProba.js')
-    const aider = await probaAider().catch((e) => ({ ok: false, versiune: '', motiv: String(e).slice(0, 200) }))
+    const { probaOllama } = await import('../services/ollamaProba.js')
+    const [aider, ollama] = await Promise.all([
+      probaAider().catch((e) => ({ ok: false, versiune: '', motiv: String(e).slice(0, 200) })),
+      probaOllama().catch((e) => ({ ok: false, modele: [] as string[], motiv: String(e).slice(0, 200) })),
+    ])
     return reply.send({
       jobs,
       paused: await isOpsPaused().catch(() => false),
-      aider, // { ok, versiune, motiv } — motorul unic al constructorului, probat live
+      aider, // { ok, versiune, motiv } — motorul (Aider), probat live pe VPS
+      ollama, // { ok, modele, motiv } — creierul LOCAL al lui Aider, probat pe VPS (ollama list)
     })
   })
 
@@ -258,110 +236,16 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ job })
   })
 
-  // ── CREIERUL CONSTRUCTORULUI, PRIN APP: DOAR GEMINI (rapid → performant) ─────
-  // Owner, 16 aug: „constructor unic aider… ramine doar gemini rapid si cu
-  // escaladarea spusa pe modelul performant gemini… fable iese total de peste
-  // tot… nu se comuta nimic". Fable 5 a fost SCOS COMPLET din constructor.
-  // Constructorul cere creierul DOAR pe ruta asta (gardată cu bridge-secret) —
-  // cheia Gemini stă AICI, în app, NU în constructor (regula 13 aug:
-  // constructorul nu ține chei de furnizor și nu cheamă direct API-uri externe).
-  // Cheltuiala Gemini se ÎNREGISTREAZĂ (recordCost) ca banii să apară în panoul
-  // Bani, nu pe ascuns. ESCALADARE: Gemini rapid întâi; pe eșec / încercarea ≥2
-  // → Gemini performant (gândire high), ANUNȚAT; fiecare pas nou repornește pe
-  // rapid. Dacă pică → eroare, iar constructorul o clasifică „amânabil" și reia.
-  // ── CREIERUL CONSTRUCTORULUI, PRIN APP ─────────────────────────────────────
-  // Un SINGUR handler, două uși (fără duplicare — jscpd pe zero):
-  //   • /api/constructor/creier — forma noastră {choices,usage} (compatibilitate).
-  //   • /api/constructor/openai/v1/chat/completions — ACELAȘI creier Gemini
-  //     (rapid → performant), împachetat OpenAI-complet, ca MOTORUL AIDER (owner,
-  //     16 aug: „scoti tot din constructor si instalezi doar aider... aider va
-  //     avea absolut toate instrumentele... real") să ceară creierul TOT prin app
-  //     (legea 13 aug — constructorul NU ține chei de furnizor). Aider trimite
-  //     bridge-secretul ca `Authorization: Bearer`, nu ca antet propriu.
-  const creierHandler = (esteOpenai: boolean) => async (
-    req: import('fastify').FastifyRequest<{ Body: { messages?: OrMessage[]; tools?: unknown[]; model?: string; job?: number; attempt?: number } }>,
-    reply: import('fastify').FastifyReply,
-  ) => {
-      const bearer = String(req.headers['authorization'] ?? '').replace(/^Bearer\s+/i, '')
-      const secretOk =
-        !!config.bridgeSecret &&
-        (req.headers['x-bridge-secret'] === config.bridgeSecret || (esteOpenai && bearer === config.bridgeSecret))
-      if (!secretOk) return reply.code(401).send({ error: 'unauthorized' })
-      // Împachetează payload-ul nostru {choices,usage,modelServit} în forma
-      // OpenAI-completă (id/object/created/finish_reason) pe care o cere LiteLLM
-      // din Aider — DOAR pe ușa openai; pe /creier răspunsul rămâne neatins.
-      const raspunde = (payload: { choices?: { message?: unknown }[]; usage?: unknown; modelServit?: string }): unknown => {
-        if (!esteOpenai) return reply.send(payload)
-        const msg = (payload?.choices?.[0]?.message ?? { role: 'assistant', content: '' }) as { role?: string; content?: string; tool_calls?: unknown[] }
-        return reply.send({
-          id: `chatcmpl-${incercareOrdin}-${Date.now()}`,
-          object: 'chat.completion',
-          created: Math.floor(Date.now() / 1000),
-          model: payload?.modelServit || 'kelion-constructor',
-          choices: [{ index: 0, message: msg, finish_reason: msg.tool_calls?.length ? 'tool_calls' : 'stop' }],
-          usage: payload?.usage ?? {},
-        })
-      }
-      const messages = Array.isArray(req.body?.messages) ? (req.body.messages as OrMessage[]) : []
-      if (!messages.length) return reply.code(400).send({ error: 'fara_mesaje' })
-      const rawTools = Array.isArray(req.body?.tools) ? req.body.tools : []
-      // ── CREIERUL CONSTRUCTORULUI = DOAR GEMINI (owner, 16 aug: „ramine doar
-      // gemini rapid si cu escaladarea spusa pe modelul performant gemini... fable
-      // iese total de peste tot"). Fable 5 a fost SCOS COMPLET din constructor;
-      // niciun comutator — motorul e Aider, iar creierul lui e Gemini, atât. Rapid
-      // întâi (viteză); pe eșec / încercarea ≥2 → modelul PERFORMANT Gemini
-      // (gândire high), ANUNȚAT pe față. Un ordin nou repornește pe rapid.
-      const incercareOrdin = Math.max(1, Number(req.body?.attempt ?? 1) || 1)
-      // Pe ușa openai (Aider) modelul cerut e un simbol ('kelion-constructor') — îl
-      // ignorăm și folosim treptele reale ale casei; pe /creier rămâne cum era.
-      const modelCerut = esteOpenai ? '' : String(req.body?.model ?? '').trim()
-      const { geminiDirectAvailable, geminiDirectChat } = await import('../services/geminiDirect.js')
-      let gemeniEsec = ''
-      if (geminiDirectAvailable()) {
-        const tools = uneltePentruCreier2(rawTools)
-        const modelRapid = modelCerut || config.geminiModel // Gemini rapid (viteză)
-        const modelPerformant = config.geminiModelGreu // Gemini performant (escaladare)
-        // Escaladare ANUNȚATĂ: încercarea ≥2 pornește DIRECT pe performant.
-        const candidateModels = (incercareOrdin > 1
-          ? [modelPerformant, modelRapid]
-          : [modelRapid, modelPerformant]
-        ).filter((m, idx, arr) => m && arr.indexOf(m) === idx)
-        for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
-          const m = candidateModels[mIdx]
-          const performant = m === modelPerformant
-          const maxIncercariGemini = mIdx === 0 ? 2 : 1
-          const modelTimeoutMs = performant ? 95_000 : 65_000
-          const reasoningLevel = performant ? 'high' : 'medium'
-          if (performant) req.log.info('escaladare pe modelul performant Gemini: ' + m)
-          for (let incercare = 1; incercare <= maxIncercariGemini; incercare++) {
-            try {
-              const r = await geminiDirectChat(m, messages, tools, { reasoning: reasoningLevel, toolChoice: 'required', timeoutMs: modelTimeoutMs })
-              if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
-              esecuriCreierLaRand = 0
-              return raspunde(raspunsCreier2(r))
-            } catch (e) {
-              const errStr = (e as Error).message || ''
-              gemeniEsec = errStr.slice(0, 200)
-              const isTimeout = /timeout|aborted/i.test(errStr)
-              const isTransient = isTimeout || /503|502|504|500|429|overload|unavailable|resource_exhausted|high demand|econnreset/i.test(errStr)
-              if (isTimeout) break
-              if (incercare < maxIncercariGemini && isTransient) { await new Promise((resolve) => setTimeout(resolve, incercare * 1000)); continue }
-              break
-            }
-          }
-        }
-      } else {
-        gemeniEsec = 'gemini_indisponibil (cheie lipsă)'
-      }
-      // DOAR Gemini — nicio rezervă Fable (scoasă total). Eșecul se spune pe față;
-      // ordinul e amânabil (coada reia), exact ca înainte.
-      const motiv = `creier_esec: gemini(${gemeniEsec}) — constructorul rulează DOAR pe Gemini (rapid → performant), fără altă rezervă`
-      creierApicat(motiv)
-      return reply.code(gemeniEsec.includes('indisponibil') ? 503 : 502).send({ error: motiv })
-  }
-  // Ușa veche (forma noastră) + ușa OpenAI a MOTORULUI AIDER — același creier.
-  app.post('/api/constructor/creier', creierHandler(false))
-  app.post('/api/constructor/openai/v1/chat/completions', creierHandler(true))
+  // ── CREIERUL CONSTRUCTORULUI = MODEL LOCAL PE VPS (Ollama), NU app-ul ───────
+  // Owner, 16 aug: „la constructor nu e gemeni idiotule… e doar aider si cu
+  // openhands ca si completare… Aider pe un model LOCAL pe VPS (Ollama)… pe
+  // serverul linux si de acolo sa lucreze aider". Motorul (Aider) NU mai cere
+  // creierul prin app — gândește pe creierul LOCAL Ollama de pe gazdă
+  // (deploy/constructor-agent.mjs → ruleazaAider pe modelul local). De-aceea ruta
+  // veche de creier prin app (handlerul + cele două uși ale lui) a fost SCOASĂ,
+  // împreună cu puntea de formate OpenAI↔Gemini și alarma ei — constructorul nu
+  // mai atinge Gemini nicăieri.
+  // Colaborarea informațională cu Kelion rămâne pe /api/constructor/context (mai jos).
 
   // ── CONTEXTUL LUI KELION PENTRU MOTOR (owner, 16 aug: „aider trebuie să fie
   // permanent de creiere ȘI kelion, colaborează 100% informațional… scoate toate
