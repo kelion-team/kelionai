@@ -456,8 +456,33 @@ if ((config.isProd || process.env.SERVESTE_FRONTEND === '1') && fs.existsSync(di
 }
 
 try {
-  await app.listen({ port: config.port, host: '0.0.0.0' })
-  app.log.info(`Kelionai backend on :${config.port}`)
+  let targetPort = config.port
+  let retries = 5
+  while (retries > 0) {
+    try {
+      await app.listen({ port: targetPort, host: '0.0.0.0' })
+      break
+    } catch (err: unknown) {
+      const errCode = (err as { code?: string })?.code
+      if (errCode === 'EADDRINUSE') {
+        if (retries > 1) {
+          app.log.warn(`Port ${targetPort} busy (EADDRINUSE), retrying in 1s (${retries - 1} left)...`)
+          retries--
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        } else if (process.env.NODE_ENV !== 'production' || targetPort !== 3001) {
+          // Fallback to next port if test/gate port is occupied by a lingering process
+          app.log.warn(`Port ${targetPort} unavailable, falling back to ${targetPort + 1}...`)
+          targetPort += 1
+          retries = 3
+        } else {
+          throw err
+        }
+      } else {
+        throw err
+      }
+    }
+  }
+  app.log.info(`Kelionai backend on :${targetPort}`)
   // ROW 19: start reading the contact@ mailbox (no-op until MAIL_PASS is set).
   startMailbox()
   // AUTOMATIC CREDITING OF PAYMENTS VIA REVOLUT PRO (Adrian, 30 Jul): reads
