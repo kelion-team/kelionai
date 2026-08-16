@@ -104,6 +104,10 @@ export interface VocalLiveHandle {
    *  factor de amplificare aplicat microfonului ÎNAINTE de trimitere. 1 = neutru,
    *  >1 = mai tare (dacă e „surd"), <1 = mai încet. Se vede în bargraf. */
   setPreamp(gain: number): void
+  /** REDARE EXTERNĂ (owner, 14 aug: „audio obligatoriu pe scris"): true cât timp
+   *  se redă vocea unei ture SCRISE prin audioIO — poarta half-duplex ține atunci
+   *  urechea live mută (anti-ecou), ca modelul să nu se audă pe el însuși. */
+  setRedareExterna(activ: boolean): void
 }
 
 /** Serverul are cheia și modelul Live? Se întreabă ÎNAINTE de a deschide socketul,
@@ -674,10 +678,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // înlocuia microfonul cu tăcere la nesfârșit: Kelion simultan MUT și SURD,
   // fără nicio eroare (auditul 15 aug). Suspendat = inaudibil = microfonul
   // trece; ecoul nu are de unde să vină cât difuzorul tace.
+  // REDARE EXTERNĂ (owner, 14 aug: „audio obligatoriu pe scris"): cât timp se redă
+  // vocea unei ture SCRISE prin audioIO (nu prin WS-ul live), urechea live TREBUIE
+  // să tacă, altfel se aude pe ea însăși („varză"). ChatPanel ridică steagul pe
+  // durata redării prin handle.setRedareExterna → poarta half-duplex include și asta.
+  let redareExterna = false
   const kelionAudibil = (): boolean =>
-    !!ctxOut &&
-    ctxOut.state === 'running' &&
-    (surseActive.length > 0 || ctxOut.currentTime < cursorRedare + COADA_ECOU_S)
+    redareExterna ||
+    (!!ctxOut &&
+      ctxOut.state === 'running' &&
+      (surseActive.length > 0 || ctxOut.currentTime < cursorRedare + COADA_ECOU_S))
   let ultimNivelLa = 0
   let preampGain = clampPreamp(opts.preampInitial)
   const laCadru = (brut: Float32Array): void => {
@@ -799,6 +809,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     },
     setPreamp: (g: number) => {
       preampGain = clampPreamp(g)
+    },
+    setRedareExterna: (activ: boolean) => {
+      redareExterna = activ
     },
   }
 }

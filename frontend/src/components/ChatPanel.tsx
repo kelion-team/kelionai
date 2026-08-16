@@ -527,15 +527,19 @@ export default function ChatPanel({
       // {audio} frames are dropped. A net too for frames already synthesized by a
       // turn started before the flag (serverVoiceOff stops the source, this drains the rest).
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
-      // Aceeași regulă pentru sesiunea LIVE (8 aug): cât timp modelul live e
-      // glasul lui Kelion, vocea Chirp a chatului scris nu se redă peste el —
-      // și, la fel de important, microfonul live nu o aude ca „voce străină".
-      if (vlRef.current) return
+      // AUDIO OBLIGATORIU PE SCRIS, CHIAR CU SESIUNEA LIVE PORNITĂ (owner, 14 aug:
+      // „când Kelion scrie, obligatoriu și audio"). Înainte, cât sesiunea LIVE era
+      // instalată (acum e permanentă), frame-ul {audio} al turei SCRISE se ARUNCA
+      // (`if (vlRef.current) return`) → text fără voce. Acum îl REDĂM, dar ținem
+      // urechea live MUTĂ pe durata redării (setRedareExterna) ca modelul să nu se
+      // audă pe el însuși („varză"/o a doua voce). Turele VOCALE nu trec pe aici —
+      // ele sunt rostite de sesiunea live prin WS —, deci nu apar două guri.
+      const live = vlRef.current
       contorGata('primul sunet (gura a pornit)')
       playVoice(
         c.audio,
-        () => micRef.current?.setMuted(true),
-        () => micRef.current?.setMuted(false),
+        () => { micRef.current?.setMuted(true); live?.setRedareExterna(true) },
+        () => { micRef.current?.setMuted(false); live?.setRedareExterna(false) },
       )
       return
     }
