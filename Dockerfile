@@ -11,17 +11,21 @@ WORKDIR /app
 # Aider (pip) și Cline (npm) — comenzi verificate în documentația lor oficială,
 # 31 iul. Cline cere Node 20+; imaginea e pe 22.
 #
-# OpenHands NU e aici, INTENȚIONAT: documentația lui nu confirmă o comandă de
-# instalare care să dea CLI-ul headless (`openhands --headless -t`) — arată și
-# npm, și Docker, fără să spună care produce binarul. Nu pun în imagine o
-# comandă despre care nu sunt sigur; s-ar instala „ceva" și am raporta că merge.
-# Panoul îl detectează la rulare, spune că lipsește, și merge mai departe cu
-# ceilalți doi. Se adaugă aici după ce comanda e probată pe VPS.
+# OpenHands — COMPLETARE la Aider (owner, 16 aug, cerut repetat: „pune openhands
+# ca si completare aider pentru functiile suplimentare"). Instalat NON-FATAL
+# (`|| echo`): dacă pip-ul lui pică sau trage dependințe grele, imaginea TOT se
+# construiește cu Aider (motorul primar) — nu riscăm build-ul pe un pachet greu.
+# Panoul îl detectează la rulare (`openhands --version`); dacă lipsește sau CLI-ul
+# diferă de versiune, merge cu Aider și o spune. Runtime-ul lui de sandbox poate
+# cere Docker pe VPS — aia se confirmă pe server.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-pip curl git libgomp1 \
     && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' aider-chat \
     && npm install -g cline @google/gemini-cli \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+# OpenHands, separat și non-fatal, ca un eșec al lui să NU rupă imaginea.
+RUN pip3 install --break-system-packages --no-cache-dir openhands-ai \
+    || echo "[Dockerfile] openhands-ai nu s-a instalat — imaginea rămâne validă cu Aider; panoul raportează lipsa"
 # libgomp1: runtime OpenMP pentru binarul nativ sherpa-onnx (amprentă vocală
 # neurală, services/voiceEmbedding.ts). Fără el, `require('sherpa-onnx-node')` ar
 # arunca la ÎNCĂRCARE — dar serviciul e lazy și cade grațios; îl punem oricum ca
