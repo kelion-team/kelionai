@@ -24,7 +24,7 @@
 // CONSTRUCTOR_MAX_REPAIR (2 — runde de reparație după un build picat),
 // CONSTRUCTOR_BUDGET_MS (1560000 = 26 min, sub timeout-ul dur de 30 min din
 // constructor-worker.sh, ca să apucăm SĂ RAPORTĂM înainte să fim omorâți).
-import { execSync, execFileSync } from 'node:child_process'
+import { execSync, execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -1003,17 +1003,52 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     aiderEnv.OPENAI_API_KEY = creierCfg.cheie
   }
   const timeout = Math.max(60_000, Math.min(ramase() - 90_000, 22 * 60_000))
-  try {
-    const out = execFileSync('aider', args, { cwd: ATELIER, env: aiderEnv, encoding: 'utf8', timeout, maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
-    return { log: String(out).slice(-4000), throttled: false }
-  } catch (e) {
-    const txt = `${e.stdout ?? ''}\n${e.stderr ?? ''}\n${e.message ?? ''}`
-    // Creierul indisponibil/epuizat NU e eșec de cod — e amânare. Prindem și
-    // semnalele endpointului nostru (creier_esec, epuizat) + erorile LiteLLM
-    // (APIError/connection), nu doar codul HTTP brut.
-    const throttled = /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overload|unavailable|\b5\d\d\b|creier_esec|epuizat|depleted|api.?error|connection|econnrefused|econnreset/i.test(txt)
-    return { log: txt.slice(-4000), throttled }
-  }
+  // TRANSPARENT, NU MUT (owner, 16 aug: „e in asteptare la 5%… automatism negândit,
+  // nu stie ca s-a blocat"): înainte aider rula prin execFileSync — BLOCANT și TĂCUT,
+  // deci cât lucra (până la 22 min) monitorul arăta „5%" înghețat, LA FEL pe orice
+  // model (owner a probat mic-local ȘI mare-plătit: identic). Acum îl pornim cu spawn
+  // și trimitem FIECARE linie a lui aider pe monitor (log→beat), în timp real. + PAZNIC
+  // DE TĂCERE: dacă aider nu mai scrie nimic >90s, o spunem pe față („posibil agățat") —
+  // automatismul RECUNOAȘTE că stă, nu mai minte „5%". Asta e reparația cerută.
+  return new Promise((resolve) => {
+    let out = ''
+    let ultimaLa = Date.now()
+    let anuntatAgatat = false
+    const inghite = (buf) => {
+      const s = String(buf)
+      out += s
+      if (out.length > 32 * 1024 * 1024) out = out.slice(-16 * 1024 * 1024)
+      for (const linie of s.split('\n')) {
+        const t = linie.trim()
+        if (t) { log(`aider: ${t.slice(0, 140)}`); ultimaLa = Date.now(); anuntatAgatat = false }
+      }
+    }
+    let child
+    try {
+      child = spawn('aider', args, { cwd: ATELIER, env: aiderEnv, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (e) {
+      resolve({ log: String(e?.message ?? e).slice(-4000), throttled: /econnrefused|enoent|econnreset/i.test(String(e)) })
+      return
+    }
+    child.stdout?.on('data', inghite)
+    child.stderr?.on('data', inghite)
+    const paznic = setInterval(() => {
+      if (!anuntatAgatat && Date.now() - ultimaLa > 90_000) {
+        anuntatAgatat = true
+        log(`aider: TĂCUT de ${Math.round((Date.now() - ultimaLa) / 1000)}s — posibil AGĂȚAT (fără progres); ordinul se reia dacă nu produce nimic`)
+      }
+    }, 15_000)
+    const omoara = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* deja mort */ } }, timeout)
+    const inchide = (throttleSemnal) => {
+      clearInterval(paznic)
+      clearTimeout(omoara)
+      // Creierul indisponibil/epuizat NU e eșec de cod — e amânare (LiteLLM/HTTP).
+      const throttled = throttleSemnal || /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overload|unavailable|\b5\d\d\b|creier_esec|epuizat|depleted|api.?error|connection|econnrefused|econnreset/i.test(out)
+      resolve({ log: out.slice(-4000), throttled })
+    }
+    child.on('close', () => inchide(false))
+    child.on('error', (e) => { out += `\n${e?.message ?? e}`; inchide(/econnrefused|enoent|econnreset/i.test(String(e))) })
+  })
 }
 
 // Ordinul → Aider → verificarea NOASTRĂ (cele 7 porți) → reparație (până la
@@ -1070,7 +1105,7 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
           : `ORDINUL:\n${job.orderText}`)
     const prompt = baza + contextKelion
     log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : `aider construiește ordinul (${ULTIMUL_CREIER})…`)
-    const a = ruleazaAider(prompt, creierCfg)
+    const a = await ruleazaAider(prompt, creierCfg)
     for (const linie of String(a.log).split('\n').slice(-6)) { const t = linie.trim(); if (t) log(`aider: ${t.slice(0, 140)}`) }
     if (a.throttled) throw Object.assign(new Error(`aider sugrumat (creier LOCAL Ollama indisponibil/ocupat): ${a.log.slice(-160)}`), { amanabil: true })
     const headAcum = sh('git rev-parse --short=7 HEAD').trim()
