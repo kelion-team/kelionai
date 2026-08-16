@@ -56,6 +56,11 @@ describe('proba Aider e LEGATĂ (health + panoul constructor + agentul o folose�
   it('agentul chiar rulează Aider ca motor (aiderInstalat + ruleazaAider)', () => {
     const a = sursa('../../deploy/constructor-agent.mjs')
     expect(a).toContain('function aiderInstalat')
-    expect(a).toContain("execFileSync('aider'")
+    // Existența lui aider se probează cu `command -v` (instant), NU cu `aider
+    // --version` (pornea tot Python-ul greu → depășea 20s pe VPS-ul „sugrumat" →
+    // fals „lipsă" → ordinul amânat înainte ca aider să pornească; măsurat 16 aug).
+    expect(a).toContain('command -v aider')
+    // Motorul real e chiar aider, lansat prin spawn (streaming, transparent pe monitor).
+    expect(a).toContain("spawn('aider'")
   })
 })

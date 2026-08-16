@@ -50,6 +50,14 @@ try {
 }
 const BRIDGE = env.BRIDGE_SECRET ?? ''
 const GHTOKEN = env.GITHUB_TOKEN ?? ''
+// PATH-ul CRON-ului e minimal (de regulă doar /usr/bin:/bin) și NU conține
+// /usr/local/bin (unde setup-ollama.sh leagă `aider` și `ollama`) sau ~/.local/bin
+// (unde ajung pip --user / pipx). MĂSURAT 16 aug, în constructor.log de pe gazdă:
+// ordinele #367–#370 erau AMÂNATE la poarta creierului fiindcă `aider`/`ollama`
+// păreau „lipsă" deși erau instalate — cron-ul pur și simplu nu le vedea pe PATH.
+// Lărgim PATH-ul o SINGURĂ dată, aici, ca TOATE apelurile (probele ȘI lansarea
+// reală a lui aider prin spawn, care moștenește process.env) să le găsească.
+process.env.PATH = `${process.env.PATH || '/usr/bin:/bin'}:/usr/local/bin:${process.env.HOME || '/root'}/.local/bin`
 // ── CREIERUL CONSTRUCTORULUI = MODEL LOCAL PE VPS (Ollama) ──────────────────────
 // Owner, 16 aug: „la constructor nu e gemeni idiotule… e doar aider si cu openhands
 // ca si completare… Aider pe un model LOCAL pe VPS (Ollama)… pe serverul linux si de
@@ -895,7 +903,14 @@ for (const semnal of ['SIGTERM', 'SIGINT']) {
 // rezultatul (în raport). Constructorul își PUNE SINGUR creierul local pe VPS
 // (asiguraCreierulLocal) — nimeni nu mai intră pe SSH.
 function aiderInstalat() {
-  try { execFileSync('aider', ['--version'], { timeout: 20_000, stdio: 'ignore' }); return true } catch { return false }
+  // PROBĂ DE EXISTENȚĂ, NU DE VERSIUNE (măsurat 16 aug, constructor.log de pe gazdă,
+  // #370): `aider --version` pornește TOT Python-ul greu al lui aider (litellm etc.)
+  // și pe VPS-ul „sugrumat" (CPU-only, încărcat) depășea cele 20s → arunca → FALS
+  // „aider lipsă" → poarta asiguraCreierulLocal amâna ordinul ÎNAINTE ca aider să
+  // pornească. `command -v` e instant (nu pornește Python) și răspunde exact la
+  // întrebarea reală: e aider pe PATH? (PATH-ul e deja lărgit la pornire cu
+  // /usr/local/bin + ~/.local/bin, deci găsește symlink-ul pus de setup-ollama.)
+  try { execFileSync('bash', ['-c', 'command -v aider'], { timeout: 8_000, stdio: 'ignore' }); return true } catch { return false }
 }
 
 // ── CREIERUL LOCAL, PUS AUTOMAT DE CONSTRUCTOR (owner, 16 aug: „sa instaleze el…
