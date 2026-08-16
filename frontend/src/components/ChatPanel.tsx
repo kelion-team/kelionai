@@ -62,6 +62,7 @@ import { keepScreenOn } from '../lib/wakelock'
 // Dictarea batch (/api/asr) și streamingul standalone (STT) au dispărut.
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
 import { deschideVocalLive, vocalLiveDisponibila, type VocalLiveHandle } from '../lib/vocalLive'
+import MicBargraf, { type NivelIntrare } from './MicBargraf'
 import { getTeava, calitateCamera } from '../lib/retea'
 import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, emiteTakeover, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
 import { pornesteDansPeMuzica } from '../lib/dansMuzica'
@@ -354,6 +355,11 @@ export default function ChatPanel({
   // `localStorage.kelion_voce_live = '0'` repune calea clasică, fără deploy.
   // Rămâne SAU una, SAU alta — două voci în același timp = numărat dublu (#894).
   const vlRef = useRef<VocalLiveHandle | null>(null)
+  // NIVELUL DE INTRARE AL URECHII LIVE (owner, 16 aug: „vreau sa vad un mic
+  // bargraf… sa se identifice daca nu se truncheaza nimic"). Măsurat în vocalLive
+  // pe fiecare cadru trimis modelului; ținut într-un ref (nu state) ca bargraful
+  // să-l citească prin rAF fără să re-randeze tot chatul.
+  const micNivelRef = useRef<NivelIntrare>({ nivel: 0, pic: 0, poarta: false, clip: false })
   // Contorul de minute al sesiunii live + steagul „live a căzut de tot în tabul
   // ăsta" (după 3 reluări picate se coboară pe calea veche și nu se mai insistă
   // până la un refresh — altfel am pendula între cele două căi la nesfârșit).
@@ -1668,6 +1674,11 @@ export default function ChatPanel({
                 vlSpune = ''
                 setLiveVoice('')
               },
+              // NIVELUL DE INTRARE (bargraful urechii) — doar scriem în ref;
+              // MicBargraf îl citește prin rAF. Măsurat, nu presupus.
+              onNivelIntrare: (nv) => {
+                micNivelRef.current = nv
+              },
               // Cadrele de ECRAN din ușa creierului (cere_creierului) intră în
               // ACELAȘI handleControl ca la chatul scris — monitorul, cardurile
               // și documentele arată identic, indiferent cine le-a cerut.
@@ -2942,6 +2953,11 @@ export default function ChatPanel({
             <span className="voice-live-caret" />
           </div>
         )}
+        {/* BARGRAF DE INTRARE AL URECHII LIVE (owner, 16 aug): cât ascultă
+            sesiunea live, arată nivelul REAL al microfonului spre model + dacă
+            poarta half-duplex îl taie (gri „mut") sau clipează (roșu). Ca ownerul
+            să VADĂ, măsurat, dacă vocea ajunge și dacă se trunchiază ceva. */}
+        {listening && <MicBargraf nivelRef={micNivelRef} activ={listening} />}
         {/* ONE BAND, BOTH DIRECTIONS (Adrian, Jul 11 evening: "things must be
             swept here, from the brain and towards the brain — no other written
             chat shows"). The band changes its sign with the turn's phase:

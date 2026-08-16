@@ -337,7 +337,12 @@ describe('LACĂT — AEC half-duplex: microfonul tace cât Kelion vorbește (own
   })
 
   it('cadrul de microfon devine TĂCERE cât Kelion e audibil (array nou, nu mută captura)', () => {
-    expect(/kelionAudibil\(\) \? new Float32Array\(ds\.length\) : ds/.test(vl)).toBe(true)
+    // Poarta e derivată din kelionAudibil() și înlocuiește microfonul cu un array
+    // NOU de zerouri (nu mută bufferul capturii). Refactor 16 aug: extras în
+    // `poarta` ca bargraful urechii să raporteze EXACT aceeași decizie care taie
+    // trimiterea (truncherea half-duplex e vizibilă, măsurată).
+    expect(/const poarta = kelionAudibil\(\)/.test(vl)).toBe(true)
+    expect(/const la16k = poarta \? new Float32Array\(ds\.length\) : ds/.test(vl)).toBe(true)
   })
 
   it('AEC pornit pe desktop, stins DOAR pe mobil (echoCancellation: !eMobil)', () => {
