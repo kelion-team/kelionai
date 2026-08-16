@@ -523,7 +523,8 @@ export async function reverseGeocodeInfo(lat: number, lon: number): Promise<GeoP
   if (hit !== undefined) return hit
   if ((geoRetryAt.get(key) ?? 0) > Date.now()) return null
   try {
-    const u = new URL('https://nominatim.openstreetmap.org/reverse')
+    const nominatimUrl = config?.geo?.nominatimBaseUrl ?? 'https://nominatim.openstreetmap.org'
+    const u = new URL(`${nominatimUrl}/reverse`)
     u.searchParams.set('lat', String(lat))
     u.searchParams.set('lon', String(lon))
     u.searchParams.set('format', 'json')
@@ -1457,7 +1458,8 @@ interface NominatimPlace {
 }
 
 async function geocodeOne(query: string): Promise<NominatimPlace | null> {
-  const u = new URL('https://nominatim.openstreetmap.org/search')
+  const nominatimUrl = config?.geo?.nominatimBaseUrl ?? 'https://nominatim.openstreetmap.org'
+  const u = new URL(`${nominatimUrl}/search`)
   u.searchParams.set('q', query)
   u.searchParams.set('format', 'json')
   u.searchParams.set('limit', '1')
@@ -1469,7 +1471,8 @@ async function geocodeOne(query: string): Promise<NominatimPlace | null> {
 
 async function mapsSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
-  const u = new URL('https://nominatim.openstreetmap.org/search')
+  const nominatimUrl = config?.geo?.nominatimBaseUrl ?? 'https://nominatim.openstreetmap.org'
+  const u = new URL(`${nominatimUrl}/search`)
   u.searchParams.set('q', query)
   u.searchParams.set('format', 'json')
   u.searchParams.set('limit', String(Math.min(Math.max(max, 1), 10)))
@@ -1551,7 +1554,7 @@ export async function promoSceneUrl(kind: 'map' | 'weather', query: string): Pro
 // cause of intermittent "service down") then the FOSSGIS production instance.
 // Same API on both. Exported for the /api/route map page too.
 export const OSRM_BASES = [
-  'https://router.project-osrm.org/route/v1/driving',
+  config?.geo?.osrmRoutingUrl ?? 'https://router.project-osrm.org/route/v1/driving',
   'https://routing.openstreetmap.de/routed-car/route/v1/driving',
 ]
 

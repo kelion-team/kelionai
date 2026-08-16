@@ -408,6 +408,10 @@ export const config = {
   githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  geo: {
+    nominatimBaseUrl: (process.env.NOMINATIM_BASE_URL ?? 'https://nominatim.openstreetmap.org').replace(/\/+$/, ''),
+    osrmRoutingUrl: (process.env.OSRM_ROUTING_URL ?? 'https://router.project-osrm.org/route/v1/driving').replace(/\/+$/, ''),
+  },
 } as const
 
 export function isAllowed(email: string): boolean {
