@@ -1214,6 +1214,9 @@ export default function ChatPanel({
     const SENT_RE = /^[\s\S]*?[.!?…]+["'»)\]]*(?=\s|$)/
     const cleanForSpeech = (s: string): string =>
       s
+        .replace(/<[a-zA-Z0-9_-]+[\s\S]*?<\/[a-zA-Z0-9_-]+>/g, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\[[a-zA-Z0-9_-]+\][\s\S]*?\[\/[a-zA-Z0-9_-]+\]/g, ' ')
         .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images — nothing to say
         .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links keep their label
         .replace(/https?:\/\/\S+/g, '')
@@ -2657,16 +2660,16 @@ export default function ChatPanel({
     ]
     for (const tag of tags) {
       const closedRegex = new RegExp(`<${tag}[\\s\\S]*?<\\/${tag}>`, 'gi')
-      cleaned = cleaned.replace(closedRegex, '')
+      cleaned = cleaned.replace(closedRegex, ' ')
       const unclosedRegex = new RegExp(`<${tag}>[\\s\\S]*?$`, 'gi')
       cleaned = cleaned.replace(unclosedRegex, '')
     }
 
     // Remove special tokens
     cleaned = cleaned
-      .replace(/<\|?tool_call\|?>[\s\S]*?(<\|?\/?tool_call\|?>|$)/g, '')
-      .replace(/<\/?tool_call>[\s\S]*?(<\/tool_call>|$)/g, '')
-      .replace(/<\|im_(?:start|end)\|>[^\n]*\n?/g, '')
+      .replace(/<\|?tool_call\|?>[\s\S]*?(<\|?\/?tool_call\|?>|$)/g, ' ')
+      .replace(/<\/?tool_call>[\s\S]*?(<\/tool_call>|$)/g, ' ')
+      .replace(/<\|im_(?:start|end)\|>[^\n]*\n?/g, ' ')
 
     // 2. Remove bracketed system/thought tags
     const bracketTags = [
@@ -2676,7 +2679,7 @@ export default function ChatPanel({
     ]
     for (const bTag of bracketTags) {
       const closedB = new RegExp(`\\[${bTag}\\][\\s\\S]*?\\[\\/${bTag}\\]`, 'gi')
-      cleaned = cleaned.replace(closedB, '')
+      cleaned = cleaned.replace(closedB, ' ')
       const unclosedB = new RegExp(`\\[${bTag}\\][\\s\\S]*?$`, 'gi')
       cleaned = cleaned.replace(unclosedB, '')
       const lineB = new RegExp(`^\\[${bTag}\\][\\s\\S]*?$`, 'gm')
@@ -2757,9 +2760,11 @@ export default function ChatPanel({
       .replace(/^#{1,6}\s+/gm, '') // remove header markers
       .replace(/^[-*+]\s+/gm, '') // remove simple bullet list symbols at the start of lines
 
-    // 6. Clean whitespace noise
+    // 6. Clean whitespace noise and fix merged sentences
     cleaned = cleaned
       .replace(/\r\n/g, '\n')
+      .replace(/([.!?])([A-ZĂÎÂȘȚ])/g, '$1 $2')
+      .replace(/[ \t]+/g, ' ')
       .replace(/\n{3,}/g, '\n\n') // allow max 2 consecutive newlines
       .trim()
 

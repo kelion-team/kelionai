@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchBalance, startCheckout, type CheckoutStart } from '../lib/billing'
+import { fetchBalance, startCheckout, creditsForPounds, type CheckoutStart } from '../lib/billing'
 import { loadLocalLang } from '../lib/prefs'
 import { strings, resolveLang } from '../lib/i18n'
 import { aduPragurile, pragurileServerului, type Praguri } from '../lib/praguri'
@@ -18,8 +18,7 @@ import { aduPragurile, pragurileServerului, type Praguri } from '../lib/praguri'
 // credits for money"): the displayed product is the CREDIT pack, with the price next to it.
 // Conversion: the user gets 75% of the payment as credit, 1 credit = £0.10 →
 // £ × 7.5 credits. The presets are chosen to give WHOLE credit numbers.
-const CREDITS_PER_POUND = 7.5
-const creditsFor = (pounds: number): number => Math.floor(pounds * CREDITS_PER_POUND)
+const creditsFor = (pounds: number): number => creditsForPounds(pounds)
 // LEGEA ANTI-HARDCODARE (16 aug, ownerul: „m-ai umplut de hardcodate, scoate
 // tot"): pachetele se DERIVĂ din pragurile serverului (prima/minim/pas), nu se
 // scriu de mână — cu pragurile de azi (20/5/5) ies exact 20/30/50 și 10/20/50.
