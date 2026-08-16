@@ -33,6 +33,16 @@ describe('constructor = Aider (motor unic) pe creier LOCAL Ollama de pe VPS', ()
     expect(agent).not.toContain('/api/constructor/openai/v1')
   })
 
+  it('verificaAtelierul vede modificările COMMITUITE de aider (--auto-commits), nu doar arborele', () => {
+    // BUG 16 aug (reprodus): aider face `--auto-commits`, deci `git status
+    // --porcelain` e GOL după el; verificarea veche credea fals „n-ai scris nimic"
+    // și pica ORICE ordin „eșuat", identic pe free ȘI pe plătit. Fixul: se uită la
+    // diff-ul față de baseSha (commituri), nu doar la arborele necomituit.
+    expect(agent).toContain('function verificaAtelierul(baseSha)')
+    expect(agent).toContain('git diff --name-only ${baseSha} HEAD')
+    expect(agent).toContain('verificaAtelierul(baseSha)') // apelul pasează baseSha
+  })
+
   it('constructorul își instalează SINGUR creierul local pe VPS (fără SSH)', () => {
     // Owner: „sa instaleze el, pe linux, aider automat cu tot ce trebuie".
     expect(agent).toContain('function asiguraCreierulLocal')
