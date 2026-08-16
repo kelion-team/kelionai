@@ -8,6 +8,8 @@
 #   openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/root/kelion/backup.key \
 #     -in kelion-YYYY-MM-DD.sql.enc | psql "$DATABASE_URL"
 set -euo pipefail
+# Restore: openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/root/kelion/backup.key -in FILE.sql.enc | gunzip | psql "$DATABASE_URL"
+# Prefer throwaway DB first. Cron: Sunday 03:00 Europe/London (CRON_TZ).
 
 ENVFILE=/root/kelion/kelionai.env
 KEYFILE=/root/kelion/backup.key

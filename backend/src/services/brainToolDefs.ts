@@ -788,6 +788,34 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
 // array evaluated (ReferenceError at boot; production down on the first boot
 // of 93be3a6). Here they sit in the shared source, outside any cycle — which
 // is where SINGLE BRAIN §1 wanted them anyway.
+
+export const LIST_APP_VERSIONS_TOOL: Tool = {
+  name: 'list_app_versions',
+  description:
+    "ADMIN ONLY. List saved APPLICATION code recovery versions (git tags backup-YYYY-…): tag, sha, date, note. CODE history — not DB dumps (use list_db_backups). show_document when the owner wants them on screen.",
+  input_schema: { type: 'object', properties: {} },
+}
+
+export const LIST_DB_BACKUPS_TOOL: Tool = {
+  name: 'list_db_backups',
+  description:
+    "ADMIN ONLY. List encrypted DATABASE backups on the VPS (kelion-*.sql.enc): file, size, mtime. Schedule: weekly Sunday 03:00 Europe/London. Fresh backup: run_runbook backup-db. Safe restore test: run_runbook proba-restaurare. Production restore only on explicit owner order. show_document when asked to display.",
+  input_schema: {
+    type: 'object',
+    properties: { limit: { type: 'number', description: 'Max files (default 20).' } },
+  },
+}
+
+export const SAVE_APP_VERSION_TOOL: Tool = {
+  name: 'save_app_version',
+  description:
+    "ADMIN ONLY. Create a code recovery point (git tag backup-… on master tip). Optional note.",
+  input_schema: {
+    type: 'object',
+    properties: { note: { type: 'string', description: 'Tag message.' } },
+  },
+}
+
 export const RUN_RUNBOOK_TOOL: Tool = {
   name: 'run_runbook',
   description:
@@ -945,7 +973,7 @@ export const AGENT_NOU_TOOL: Tool = {
 // (request_repair) și NU îmbină. Totul prin master (regula casei).
 export const UNELTE_CONSTRUCTOR: Tool[] = [
   ...TOATE_UNELTELE_ADMIN,
-  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
+  LIST_APP_VERSIONS_TOOL, LIST_DB_BACKUPS_TOOL, SAVE_APP_VERSION_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
   CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL,
   ...BROWSER_TOOLS,

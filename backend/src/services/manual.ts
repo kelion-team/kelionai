@@ -172,7 +172,15 @@ const SECTIONS: ManualSection[] = [
       // settings" promised a button that no longer exists.
       'Your conversations, memory, notes, voice and face data belong to your account and are never shared with another user. To exercise your legal right to erasure, write to contact@kelionai.app — deletion requests are handled personally, with confirmation, not by an automatic button.',
     ],
-  },
+  },,
+  {
+    title: 'Your data and continuity',
+    paragraphs: [
+      'Kelion keeps your account data on the application server so that conversations, memory and credits survive restarts. You can always ask Kelion in chat what it remembers about you, and you can ask it to forget a specific memory when that skill is available to your account.',
+      'The service also keeps encrypted technical backups of the database on a schedule, so the platform can recover after a failure. Those backups are operational infrastructure: they are not a public download folder, and other users cannot see your data through them. Only the site owner can run restore procedures.',
+      'If something looks wrong with your balance, history or login, say so in chat or write to contact@kelionai.app. You do not need special commands — plain language is enough.',
+    ],
+  }
 ]
 
 const ABILITIES_TITLE = 'Everything Kelion can do'

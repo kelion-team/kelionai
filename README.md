@@ -48,3 +48,49 @@ cd frontend && npm install && npm run dev
 ```
 
 Create `backend/.env` from `backend/.env.example` first.
+
+## Database backup & restore
+
+English is the default language for ops docs.
+
+### Automatic schedule
+
+| Item | Detail |
+| --- | --- |
+| Script | `deploy/backup.sh` → `/root/kelion/backup.sh` |
+| When | **Sunday 03:00 Europe/London** (`CRON_TZ=Europe/London`) |
+| Files | `/root/kelion/backups/kelion-YYYY-MM-DD_HHMM.sql.enc` |
+| Pipeline | `pg_dump` → `gzip` → AES-256-CBC (PBKDF2) |
+| Key | `/root/kelion/backup.key` (root only) |
+| Retention | 60 days |
+
+**Code versions** (git tags `backup-…`) ≠ **database dumps** (`.sql.enc`). Admin → Recovery = code. Encrypted files = database.
+
+### From Kelion chat (owner)
+
+| Ask | Tool |
+| --- | --- |
+| List DB backups | `list_db_backups` |
+| List app versions | `list_app_versions` |
+| Save code checkpoint | `save_app_version` |
+| Run DB backup now | `run_runbook` → `backup-db` |
+| Rehearse restore (safe) | `run_runbook` → `proba-restaurare` |
+
+Show results with `show_document` when asked. Production DB restore is destructive — only on explicit owner order. Prefer `proba-restaurare` first.
+
+### SSH restore recipe
+
+Always **gunzip** after decrypt (dump is gzipped before encryption):
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/root/kelion/backup.key \
+  -in /root/kelion/backups/kelion-YYYY-MM-DD_HHMM.sql.enc \
+  | gunzip > /tmp/kelion-restore.sql
+# Restore into a throwaway DB first; never production by default.
+```
+
+### User manual vs admin
+
+- **Users**: in-app manual section *Your data and continuity* (no paths, keys, or restore commands).
+- **Admin**: chat tools above, Admin → Recovery, this README.
+- **Default language**: English (manual translates from the English source).

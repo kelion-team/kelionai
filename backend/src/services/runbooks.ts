@@ -75,7 +75,7 @@ export const RUNBOOKS: Record<string, Runbook> = {
         'psql "$PGURL" -c "CREATE DATABASE $BAZA" >/dev/null; ' +
         'URLPROBA=$(echo "$PGURL" | sed "s#/[^/?]*\\(?\\|$\\)#/$BAZA\\1#"); ' +
         'openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/root/kelion/backup.key -in "$f" ' +
-        '  | psql "$URLPROBA" -q -v ON_ERROR_STOP=1 >/dev/null; ' +
+        '  | gunzip | psql "$URLPROBA" -q -v ON_ERROR_STOP=1 >/dev/null; ' +
         'echo "— RÂNDURI RECUPERATE —"; ' +
         'psql "$URLPROBA" -t -c "SELECT \'users: \'||count(*) FROM users"; ' +
         'psql "$URLPROBA" -t -c "SELECT \'payment_codes: \'||count(*) FROM payment_codes" || true; ' +

@@ -2669,7 +2669,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // Jules — agentul asincron oficial Google (3 aug, cheia pusă de owner).
           JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL,
           DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL,
-          RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
+          LIST_APP_VERSIONS_TOOL, LIST_DB_BACKUPS_TOOL, SAVE_APP_VERSION_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
           LIST_UPDATES_TOOL, READ_INBOX_TOOL, PROPOSE_TOOL,
           // LEGATE LA CREIER (5 aug, ordinul repetat „leagă TOT la creier"): astea
           // aveau executor real în adminTools.ts + erau în bucla de noapte, dar
@@ -3324,7 +3324,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // o plasă contra „card fals în loc de execuție".
       const UNELTE_FAPTA = [
         'build_software', 'cerinta_noua', 'repo_write', 'repo_open_pr', 'repo_merge_pr',
-        'constructor_command', 'constructor_manage', 'run_runbook', 'request_repair',
+        'constructor_command', 'constructor_manage', 'list_app_versions', 'list_db_backups', 'save_app_version', 'run_runbook', 'request_repair',
         'panou_cod', 'cheama_agent', 'secret_pune', 'secret_publica', 'send_email',
         'create_doc', 'edit_doc', 'create_sheet', 'edit_sheet', 'create_calendar_event',
         'add_task', 'browser_open', 'browser_type', 'browser_click', 'generate_image',

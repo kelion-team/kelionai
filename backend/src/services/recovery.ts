@@ -1,3 +1,5 @@
+import { readdir, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 // ── RECOVERY POINTS (Adrian, 27 Jul: "save on the Linux server, clearly
 // recoverable" + "a recovery menu in admin, where you see the saved versions
 // with clear details") ─────────────────────────────────────────────────────
@@ -216,3 +218,32 @@ export async function restoreToPoint(
     return { ok: false, error: String((e as Error).message ?? e) }
   }
 }
+
+// ── ENCRYPTED DB DUMPS on disk (deploy/backup.sh) ───────────────────────────
+// listRecoveryPoints = CODE tags. These files = DATABASE snapshots.
+export interface EncryptedDbBackup {
+  file: string
+  path: string
+  bytes: number
+  mtime: string
+}
+
+export async function listEncryptedDbBackups(limit = 20): Promise<EncryptedDbBackup[] | null> {
+  const dir = process.env.BACKUP_DIR || '/root/kelion/backups'
+  try {
+    const names = await readdir(dir)
+    const rows: EncryptedDbBackup[] = []
+    for (const f of names) {
+      if (!f.endsWith('.sql.enc')) continue
+      const p = join(dir, f)
+      const st = await stat(p).catch(() => null)
+      if (!st || !st.isFile() || st.size <= 0) continue
+      rows.push({ file: f, path: p, bytes: st.size, mtime: st.mtime.toISOString() })
+    }
+    rows.sort((a, b) => (a.mtime < b.mtime ? 1 : -1))
+    return rows.slice(0, Math.max(1, Math.min(100, limit)))
+  } catch {
+    return null
+  }
+}
+
