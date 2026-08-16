@@ -1,8 +1,9 @@
 // ── PROBA OLLAMA — dovada vie a creierului LOCAL al constructorului (owner, 16
 // aug: „aider pe un model LOCAL pe VPS (Ollama)… verifică dacă nu e deja pus pe
-// serverul linux"). Nu ghicim dacă Ollama e pe server — rulăm CHIAR `ollama list`
-// și raportăm modelele reale sau eroarea reală. + LEGĂTURA: proba e în health,
-// în panoul constructor, iar agentul chiar instalează/rulează pe creierul local.
+// serverul linux"). Nu ghicim dacă Ollama e pe server — îl întrebăm pe HOST prin
+// HTTP (`/api/tags`), NU rulând CLI-ul în container (bugul „spawn ollama ENOENT"
+// care striga fals „LIPSĂ pe VPS"). + LEGĂTURA: proba e în health, în panoul
+// constructor, iar agentul chiar instalează/rulează pe creierul local.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -11,40 +12,39 @@ function sursa(rel: string): string {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 }
 
-describe('probaOllama — rulează CHIAR ollama list, cu cache', () => {
+describe('probaOllama — întreabă HOST-ul prin HTTP (/api/tags), cu cache', () => {
   beforeEach(async () => {
     const { _resetProbaOllama } = await import('./services/ollamaProba.js')
     _resetProbaOllama()
-    vi.resetModules()
+    vi.restoreAllMocks()
   })
 
-  it('binar absent / serviciu oprit → ok:false cu motiv real (nu „e ok" fabricat)', async () => {
-    vi.doMock('node:child_process', () => ({
-      execFile: (_c: string, _a: string[], _o: unknown, cb: (e: Error | null) => void) =>
-        cb(Object.assign(new Error('spawn ollama ENOENT'), { code: 'ENOENT' })),
-    }))
+  it('Ollama nu răspunde pe host → ok:false cu motiv real (nu „e ok" fabricat)', async () => {
+    // Serviciul căzut / neatins = eroare de rețea, NU „spawn ollama ENOENT" din
+    // container (bugul reparat: nu mai rulăm binarul local, întrebăm host-ul).
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('fetch failed ECONNREFUSED') }))
     const { probaOllama, _resetProbaOllama } = await import('./services/ollamaProba.js')
     _resetProbaOllama()
     const r = await probaOllama()
     expect(r.ok).toBe(false)
     expect(r.modele).toEqual([])
-    expect(r.motiv).toContain('ENOENT')
-    vi.doUnmock('node:child_process')
+    expect(r.motiv).toContain('nu răspunde pe host')
+    vi.unstubAllGlobals()
   })
 
-  it('ollama răspunde → ok:true cu modelele REALE parsate (dovada)', async () => {
-    const stdout = 'NAME                 ID    SIZE   MODIFIED\nqwen2.5-coder:7b     abc   4.7 GB 2 days ago\nllama3.2:latest      def   2.0 GB 1 week ago\n'
-    vi.doMock('node:child_process', () => ({
-      execFile: (_c: string, _a: string[], _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) =>
-        cb(null, { stdout, stderr: '' }),
-    }))
+  it('Ollama pe host răspunde (200 + /api/tags) → ok:true cu modelele REALE (dovada)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ models: [{ name: 'qwen2.5-coder:7b' }, { name: 'llama3.2:latest' }] }),
+    })))
     const { probaOllama, _resetProbaOllama } = await import('./services/ollamaProba.js')
     _resetProbaOllama()
     const r = await probaOllama()
     expect(r.ok).toBe(true)
     expect(r.modele).toContain('qwen2.5-coder:7b')
     expect(r.modele).toContain('llama3.2:latest')
-    vi.doUnmock('node:child_process')
+    vi.unstubAllGlobals()
   })
 })
 

@@ -2680,8 +2680,8 @@ export default function AdminPanel({
                       title={ollamaProba == null
                         ? 'proba creierului local încă nu s-a citit'
                         : ollamaProba.ok
-                          ? `ollama list pe VPS: ${ollamaProba.modele.join(', ') || 'niciun model instalat'}`
-                          : `ollama list a picat: ${ollamaProba.motiv}`}
+                          ? `Ollama pe host (/api/tags): ${ollamaProba.modele.join(', ') || 'niciun model instalat'}`
+                          : `proba Ollama pe host: ${ollamaProba.motiv}`}
                     >
                       {ollamaProba == null
                         ? '· creier local: probă…'
@@ -2689,7 +2689,7 @@ export default function AdminPanel({
                           ? `· 🟢 creier LOCAL Ollama (${ollamaProba.modele.join(', ')})`
                           : ollamaProba.ok
                             ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
-                            : `· 🔴 Ollama LIPSĂ pe VPS (${ollamaProba.motiv.slice(0, 50)})`}
+                            : `· 🔴 Ollama nu răspunde pe host (${ollamaProba.motiv.slice(0, 50)})`}
                     </span>
                   </div>
                   {/* ── COMUTATORUL CREIER 2 + CONSTRUCTOR (owner, 16 aug: „creier 2 →
