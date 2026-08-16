@@ -1,10 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
-import { startCheckout, fetchBalance, fetchHistory, type CheckoutStart, type PurchaseRecord, type WalletStatus } from '../lib/billing'
+import { startCheckout, fetchBalance, fetchHistory, CREDITS_PER_POUND, creditsForPounds, type CheckoutStart, type PurchaseRecord, type WalletStatus } from '../lib/billing'
 import { raporteazaPagina } from '../lib/vizita'
 import BackLink from '../components/BackLink'
-
-const CREDITS_PER_POUND = 7.5
 
 export default function Credits(): React.JSX.Element {
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
@@ -192,7 +190,7 @@ export default function Credits(): React.JSX.Element {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           {PACKS.map((p) => (
             <button key={p} type="button" className="credits-pack" disabled={busy === p} onClick={() => void buy(p)}>
-              <span className="credits-pack-n">{T.creditsUnit(Math.floor(p * CREDITS_PER_POUND))}</span>
+              <span className="credits-pack-n">{T.creditsUnit(creditsForPounds(p))}</span>
               <span className="credits-pack-price">£{p}</span>
             </button>
           ))}

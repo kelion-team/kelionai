@@ -1,3 +1,7 @@
+export const CREDITS_PER_POUND = 7.5
+export const creditsForPounds = (pounds: number, rate = CREDITS_PER_POUND): number =>
+  Math.floor(pounds * rate)
+
 // Client helpers for the credit system. The USER sees CREDITS (+ the % of their
 // last top-up still left, for the low-credit alerts). The ADMIN sees real money
 // (the provider pool) via the admin endpoints.
