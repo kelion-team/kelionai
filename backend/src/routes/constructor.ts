@@ -363,6 +363,26 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/constructor/creier', creierHandler(false))
   app.post('/api/constructor/openai/v1/chat/completions', creierHandler(true))
 
+  // ── CONTEXTUL LUI KELION PENTRU MOTOR (owner, 16 aug: „aider trebuie să fie
+  // permanent de creiere ȘI kelion, colaborează 100% informațional… scoate toate
+  // restricțiile… dă drumul la aplicație să funcționeze independent de tine").
+  // Aici SCOT lanțul pe care i-l pusesem: motorul (Aider) nu mai primește doar
+  // textul ordinului — primește memoria lui Kelion + roster-ul de specialiști, ca
+  // să construiască CU tot creierul lui Kelion, nu izolat. Bridge-gated ca restul.
+  app.post<{ Body: { ordin?: string } }>('/api/constructor/context', async (req, reply) => {
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ error: 'unauthorized' })
+    const ordin = String(req.body?.ordin ?? '').trim()
+    const { getMemories, cautaIstoric } = await import('../db.js')
+    const { rosterViu } = await import('../services/agentiKelion.js')
+    const [memorie, agenti, relevante] = await Promise.all([
+      getMemories(config.adminEmail, 40).then((m) => m.map((x) => x.content)).catch(() => [] as string[]),
+      rosterViu().then((r) => r.map((a) => ({ id: a.id, rol: a.rol }))).catch(() => [] as { id: string; rol: string }[]),
+      ordin ? cautaIstoric(config.adminEmail, ordin, 8).then((h) => h.map((x) => `${x.role === 'user' ? 'owner' : 'Kelion'}: ${String(x.content).slice(0, 300)}`)).catch(() => [] as string[]) : Promise.resolve([] as string[]),
+    ])
+    return reply.send({ memorie, agenti, relevante })
+  })
+
   app.post<{
     Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }
   }>('/api/constructor/report', async (req, reply) => {
