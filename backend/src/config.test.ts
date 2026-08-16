@@ -26,4 +26,9 @@ describe('Config Service', () => {
     // openSignup is true by default in our test env if not specified otherwise
     expect(isAllowed('random@user.com')).toBe(true)
   })
+
+  it('should configure geo endpoints dynamically', () => {
+    expect(config.geo.nominatimBaseUrl).toBeDefined()
+    expect(config.geo.osrmRoutingUrl).toBeDefined()
+  })
 })
