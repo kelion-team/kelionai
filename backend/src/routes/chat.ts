@@ -72,6 +72,7 @@ import { taxeazaServiciu, cheiaTarifVideo, meniulDeTarife, lirePentru } from '..
 import { planStudio, numeClip, RETETE_STUDIO } from '../services/studioClipuri.js'
 import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
+import { pretentiiFaraFapta, textulDemascarii } from '../services/poartaFaptelor.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -1888,7 +1889,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       cereActiune: hasActionIntent(textulTurei) || req.body?.usaCreierului === true,
     })
     const turaCurata = !incarcatura.instructiuniDeLucru
-    let systemPrompt = `${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
+    // ── LEGILE ADMINULUI (owner, 16 aug, verbatim: „orice cerinta a admin
+    // trebuie sa devina lege de neignorat pentru orice model ai e folosit" +
+    // „creiaza legi foarte clare ca nu e admis hardcodat pe aplicatie").
+    // Blocul stă PRIMUL în promptul oricărui creier care servește chatul —
+    // flash, pro sau Fable: legile nu depind de model.
+    const LEGILE_ADMINULUI =
+      `THE ADMIN'S LAWS (16 Aug — binding for WHATEVER model you run on, first and above all):\n` +
+      `1. LAW OF THE DEED: the admin's requests are LAWS, not suggestions. Each one is either EXECUTED ` +
+      `with real tools or REFUSED with the named reason — never ignored, never silently postponed, never ` +
+      `"done" in words only. Claiming you did something without the tool having run is a LIE; the server's ` +
+      `fact-gate cross-checks your words against this turn's tool journal and exposes false claims on screen.\n` +
+      `2. LAW OF MEASUREMENT: never present an unmeasured value as fact. A figure you did not read from a ` +
+      `tool this turn (prices → lista_tarife; balances, states, counts → their tools) is INVENTED — say ` +
+      `"nu pot verifica" or call the tool.\n` +
+      `3. LAW AGAINST HARDCODING: nothing user-facing may be a hardcoded figure or state. Everything shown ` +
+      `must come from a LIVE source (tool, DB, env, measurement). If you notice a hardcoded value while ` +
+      `working, report it as a bug — hardcoded = forbidden in this application.\n`
+    let systemPrompt = `${LEGILE_ADMINULUI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
     // default behavior; absent/unknown id means Kelion stays default.
@@ -2804,6 +2822,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // înainte de apelul la creier. Zero drumuri la DB aici acum.
         : createVoiceStream(reply, userLang, prefs.voicePref)
     let assistantText = ''
+    // Jurnalul uneltelor EXECUTATE în tura asta (nu doar oferite) — proba pe
+    // care poarta faptelor judecă vorbele creierului (owner, 16 aug).
+    const unelteExecutate: string[] = []
     // CE A VĂZUT DEJA OMUL PE ECRAN (agenții de debug, 3 aug, verdict REAL):
     // când un model pică DUPĂ ce a curs text, catch-ul lipea „Încearcă din nou"
     // direct peste jumătatea de răspuns și salva în istoric DOAR sufixul —
@@ -2873,6 +2894,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       }
       let callN = 0
       const execTool = async (name: string, argsJson: string): Promise<string> => {
+        unelteExecutate.push(name) // jurnalul FAPTELOR turei — poarta faptelor judecă pe el
         let input: unknown = {}
         try {
           input = JSON.parse(argsJson || '{}')
@@ -3553,6 +3575,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // vine din r.text — textul ÎNTREG al modelului, nu doar ce s-a emis);
       // se ține nota cinstită, care chiar s-a văzut pe ecran.
       if (limbaScrisaSuprimata) assistantText = NOTA_LIMBA
+      // ── POARTA FAPTELOR (owner, 16 aug: „acest soft e doar o minciuna…
+      // raspunde de ce"; captura 05:54 — creierul recunoaște „am mințit
+      // afirmând că am generat clipul"). Vorbele se verifică pe MĂSURĂTOARE:
+      // jurnalul uneltelor executate în tura asta. Pretenție fără faptă =
+      // demascată pe loc, pe ecran ȘI în istoric — pentru ORICE model.
+      if (!voceAmbianta) {
+        const nedovedite = pretentiiFaraFapta(assistantText, unelteExecutate)
+        if (nedovedite.length) {
+          const demascare = textulDemascarii(nedovedite)
+          try {
+            reply.raw.write(demascare)
+          } catch {
+            /* demascarea nescrisă pe stream rămâne în istoric */
+          }
+          assistantText += demascare
+          console.error(`[POARTA FAPTELOR] pretenții fără faptă: ${nedovedite.join('; ')} | executate: ${unelteExecutate.join(',') || 'niciuna'}`)
+        }
+      }
       usage.usd += r.costUsd
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"

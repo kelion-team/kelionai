@@ -1646,7 +1646,7 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
       adevarat, raspunde de ce" + captura 05:54 în care creierul RECUNOAȘTE
       „am mințit afirmând că am generat clipul" + ordinul „afiseaza tot ce nu
       e masurat in cod si repara sa fie masurabil, pe toate functiile" (P34)
-      — POARTA FAPTELOR: pe turele de execuție, pretențiile de faptă din
+      — FĂCUT (16 aug ~06:10): POARTA FAPTELOR — pretențiile de faptă din
       răspuns („am generat/creat/trimis/urcat…") se verifică pe server contra
       jurnalului de unelte al turei (toolNamesThisTurn); pretenție fără faptă
       = demascată automat pe ecran + în istoric. ÎN LUCRU (serviciul
