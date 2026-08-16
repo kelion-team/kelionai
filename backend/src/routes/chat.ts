@@ -72,7 +72,7 @@ import { taxeazaServiciu, cheiaTarifVideo, meniulDeTarife, lirePentru } from '..
 import { planStudio, numeClip, RETETE_STUDIO } from '../services/studioClipuri.js'
 import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
-import { pretentiiFaraFapta, textulDemascarii } from '../services/poartaFaptelor.js'
+import { pretentiiFaraFapta, textulDemascarii, planFaraExecutie, TEXT_PLAN_FARA_EXECUTIE } from '../services/poartaFaptelor.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -1905,7 +1905,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       `"nu pot verifica" or call the tool.\n` +
       `3. LAW AGAINST HARDCODING: nothing user-facing may be a hardcoded figure or state. Everything shown ` +
       `must come from a LIVE source (tool, DB, env, measurement). If you notice a hardcoded value while ` +
-      `working, report it as a bug — hardcoded = forbidden in this application.\n`
+      `working, report it as a bug — hardcoded = forbidden in this application.\n` +
+      `4. LAW OF CARRYING THROUGH (the admin, 16 Aug: "sa nu mai intepeneasca... sa ofere solutia pina la ` +
+      `deploy masurabil"): a PLAN is not a deed. On an execution request you NEVER end the turn after ` +
+      `announcing steps or showing an analysis document — in the SAME turn you call the tools that start the ` +
+      `work (build_software for build orders, the concrete tool otherwise), or you name the exact blocker. ` +
+      `Think, decide, ACT — every turn. DONE means: PR merged, CI green, published, and MEASURED live ` +
+      `(constructor_status / the live version) — never declare finished earlier.\n`
     let systemPrompt = `${LEGILE_ADMINULUI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
@@ -3591,6 +3597,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           }
           assistantText += demascare
           console.error(`[POARTA FAPTELOR] pretenții fără faptă: ${nedovedite.join('; ')} | executate: ${unelteExecutate.join(',') || 'niciuna'}`)
+        }
+        // ── ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere
+        // solutia pina la deploy masurabil"). Tură de EXECUȚIE + ZERO unelte +
+        // limbaj de plan = fix înghețul de 5 luni. Se demască pe ecran și în
+        // istoric — legea ducerii la capăt, mecanic, pentru orice model.
+        if (planFaraExecutie(assistantText, unelteExecutate, cereActiune)) {
+          try {
+            reply.raw.write(TEXT_PLAN_FARA_EXECUTIE)
+          } catch {
+            /* demascarea nescrisă pe stream rămâne în istoric */
+          }
+          assistantText += TEXT_PLAN_FARA_EXECUTIE
+          console.error('[POARTA FAPTELOR] plan fără execuție — tura de acțiune s-a oprit fără nicio unealtă')
         }
       }
       usage.usd += r.costUsd

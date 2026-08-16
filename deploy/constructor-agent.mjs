@@ -852,10 +852,19 @@ function verificaPortileCasei(backendGataInstalat) {
   try { sh('npm --prefix backend run build', { timeout: 5 * 60_000 }) }
   catch (e) { return `bootul: buildul de emisie a picat:\n${coada(e)}` }
   log("verific (boot): PORT=18099 node dist/index.js → „Server listening”")
+  // 45s, nu 20 (ordinul #331, 16 aug — a TREIA pică de boot-flake notată în
+  // AI-HANDOFF: local trecea cu `timeout 45`, poarta PR-urilor dă tot 45
+  // — porti-pr.sh:103 — doar aici rămăsese 20, prea strâns pe un VPS ocupat
+  // de alt ordin). Și LEGEA MĂSURĂTORII: bootul se scrie în jurnal, iar la
+  // pică raportul poartă COADA REALĂ a jurnalului (stack trace-ul), nu o
+  // listă de „cauze uzuale" ghicite.
+  const bootLog = '/tmp/kelion-boot-proba.log'
   try {
-    sh("PORT=18099 timeout 20 node dist/index.js 2>&1 | grep -qm1 'Server listening'", { cwd: ATELIER + '/backend', timeout: 30_000 })
+    sh(`PORT=18099 timeout 45 node dist/index.js 2>&1 | tee ${bootLog} | grep -qm1 'Server listening'`, { cwd: ATELIER + '/backend', timeout: 60_000 })
   } catch {
-    return 'poarta „bootul pe dist (Node curat)" a picat: aplicația nu a scris „Server listening" în 20s. Cauze uzuale: ciclu de importuri, cod la nivel de modul care aruncă la încărcare, sau o rută/`fastify.post` scrisă în afara plugin-ului (fără `fastify`/`getPool` în scope). Repară cauza, nu simptomul.'
+    let proba = ''
+    try { proba = fs.readFileSync(bootLog, 'utf8').slice(-1500) } catch { /* jurnal absent — raportăm fără el */ }
+    return `poarta „bootul pe dist (Node curat)" a picat: aplicația nu a scris „Server listening" în 45s.${proba ? ` Jurnalul REAL al bootului (coada):\n${proba}` : ' (jurnalul bootului nu s-a putut citi)'}\nRepară cauza din jurnal, nu simptomul.`
   }
   return ''
 }

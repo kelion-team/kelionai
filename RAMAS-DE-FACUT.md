@@ -1689,3 +1689,29 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
       poarta faptelor + legile + poarta anti-hardcod sunt COMMISE pe ramură și
       URCATE ca PR DRAFT, NEîmbinate (nicio publicare cât testează el). La
       „continuă": merge + publicare + verificare live. [ ]
+- [x] ORDIN 16 aug (verbatim): „mai bine te silesti pe tine sa-ti faci cerintele
+      sa-i dai tot ce are nevoie sa-i pui tot sa nu mai intepeneasca, sa-i dai
+      gindire si ratiune, sa ofere solutia pina la deploy masurabil" — LEGEA
+      DUCERII LA CAPĂT (legea 4 în LEGILE ADMINULUI, promptul oricărui creier)
+      + detectorul mecanic planFaraExecutie (tură de acțiune + zero unelte +
+      limbaj de plan → demascare pe ecran și în istoric). Lacăte în
+      poartaFaptelor.test.ts. Verificarea live = următoarea cerere de execuție
+      a ownerului: ori pornește unealta în aceeași tură, ori se demască. [ ]
+- [x] 16 aug 06:56, captura ownerului („asta e dovada mea ca ti-ai batut joc de
+      mine"): Kelion a afișat un „Audit al Elementelor Hardcodate" cu modele
+      care NU EXISTĂ în repo (claude-3-5-sonnet-20241022, gpt-4o — grep 0
+      apariții) și a pretins „scanarea completă a codului sursă" fără să aibă
+      vreo unealtă de citit codul. ÎNCHIS CA CLASĂ: familia „am scanat/auditat
+      codul" la poarta faptelor cu unelte:[] — pretenția asta se demască DE
+      FIECARE DATĂ, pe orice model. [ ]
+- [ ] DATORIE (din aceeași captură): Kelion nu poate face un audit REAL al
+      codului pentru că nu are nicio unealtă care citește sursa aplicației —
+      de decis dacă primește una măsurată (ex. verdictul verifica-hardcodari
+      rulat pe server) sau rămâne pe „nu pot verifica". Până atunci poarta îl
+      demască dacă pretinde. [ ]
+- [x] 16 aug, ordinul #331 picat pe poarta „bootul pe dist": a 3-a pică de
+      boot-flake (prevestită în AI-HANDOFF rândul 6b din 15 aug) — poarta
+      constructorului dădea 20s unde poarta PR-urilor dă 45s. Urcat la 45s +
+      raportul de pică poartă acum JURNALUL REAL al bootului (coada din
+      /tmp/kelion-boot-proba.log), nu „cauze uzuale" ghicite. De verificat la
+      următorul ordin construit pe VPS. [ ]

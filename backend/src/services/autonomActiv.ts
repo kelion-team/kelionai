@@ -15,7 +15,8 @@
 //   • timerul de promovare are cheile LUI separate (ore + plafon + buton);
 //   • poarta faptelor: pretenția nedovedită se demască singură.
 
-export const CHEIE_AUTONOM = 'autonom:activ' // istoric; nu se mai citește
+// (Cheia kv istorică 'autonom:activ' a fost SCOASĂ de tot — nu se mai citește,
+// nu se mai exportă: nu există stare, deci nici nume pentru ea.)
 
 /** PORNITĂ, prin construcție (LEGEA din 16 aug). Nu citește nimic — nu mai
  *  există nicio pană de DB și niciun buton care s-o „oprească" pe tăcute. */
