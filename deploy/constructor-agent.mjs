@@ -912,7 +912,10 @@ function ruleazaAider(prompt) {
     return { log: String(out).slice(-4000), throttled: false }
   } catch (e) {
     const txt = `${e.stdout ?? ''}\n${e.stderr ?? ''}\n${e.message ?? ''}`
-    const throttled = /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overload|unavailable|\b5\d\d\b/i.test(txt)
+    // Creierul indisponibil/epuizat NU e eșec de cod — e amânare. Prindem și
+    // semnalele endpointului nostru (creier_esec, epuizat) + erorile LiteLLM
+    // (APIError/connection), nu doar codul HTTP brut.
+    const throttled = /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overload|unavailable|\b5\d\d\b|creier_esec|epuizat|depleted|api.?error|connection|econnrefused|econnreset/i.test(txt)
     return { log: txt.slice(-4000), throttled }
   }
 }
@@ -952,7 +955,12 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
     for (const linie of String(a.log).split('\n').slice(-6)) { const t = linie.trim(); if (t) log(`aider: ${t.slice(0, 140)}`) }
     if (a.throttled) throw Object.assign(new Error(`aider sugrumat (creier prin app): ${a.log.slice(-160)}`), { amanabil: true })
     const headAcum = sh('git rev-parse --short=7 HEAD').trim()
-    if (headAcum === baseSha) throw new Error(`aider n-a modificat nimic (niciun commit). Coada log:\n${a.log.slice(-800)}`)
+    // NO-CHANGE = AMÂNARE, NU EȘEC (owner, 16 aug, cu coada de ordine eșuate
+    // #340–343: „aider nu funcționează… din cauza ta"). Când creierul (Gemini)
+    // e epuizat, Aider iese fără să editeze — dar asta NU e o cădere de cod, e
+    // lipsă de combustibil. Marcam AMÂNABIL: ordinul rămâne în coadă și se reia
+    // când Gemini revine, în loc să se îngrămădească EȘUAT pe un creier gol.
+    if (headAcum === baseSha) throw Object.assign(new Error(`aider n-a modificat nimic — probabil creierul (Gemini) e indisponibil/epuizat; se reia când revine. Coada log:\n${a.log.slice(-600)}`), { amanabil: true })
     const problema = verificaAtelierul()
     if (!problema) return { title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120), body: `Construit de Aider (motorul unic al constructorului); creierul prin app (Gemini rapid → Gemini performant). Ordin #${job.id}.` }
     ultimaProblema = problema
