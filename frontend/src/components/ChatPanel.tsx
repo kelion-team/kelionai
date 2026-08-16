@@ -1385,7 +1385,7 @@ export default function ChatPanel({
           window.setTimeout(() => {
             transientRetryRef.current = false
           }, 30_000)
-          console.error('[CONEXIUNE] cerere ruptă cu net+server OK — reîncerc tăcut o dată')
+          console.info('[CONEXIUNE] cerere ruptă cu net+server OK — reîncerc tăcut o dată')
           window.setTimeout(() => void sendRef.current(msg), 400)
         } else {
         const m =
@@ -1433,7 +1433,7 @@ export default function ChatPanel({
                 healthPollRef.current = null
                 const retry = retryTextRef.current
                 retryTextRef.current = null
-                console.error('[CONEXIUNE] serverul a revenit — reiau mesajul singur')
+                console.info('[CONEXIUNE] serverul a revenit — reiau mesajul singur')
                 // Serverul a înviat după restart → vocea live primește iar
                 // dreptul de a porni (căderea ei fusese restartul, nu ea).
                 vlCazutRef.current = false
