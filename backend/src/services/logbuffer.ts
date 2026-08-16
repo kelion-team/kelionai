@@ -28,15 +28,27 @@ function safeStringify(a: unknown): string {
   if (a === null || a === undefined) return String(a)
   if (typeof a === 'string') return a
   if (a instanceof Error) return a.stack || `${a.name}: ${a.message}`
+  if (typeof a === 'object') {
+    const obj = a as Record<string, unknown>
+    if (typeof obj.stack === 'string' && obj.stack) return obj.stack
+    if (typeof obj.message === 'string' && obj.message) {
+      const name = typeof obj.name === 'string' ? obj.name : 'Error'
+      return `${name}: ${obj.message}`
+    }
+  }
   if (typeof a === 'symbol' || typeof a === 'bigint') return String(a)
   try {
-    return JSON.stringify(a)
+    const json = JSON.stringify(a)
+    if (json !== undefined && json !== '{}' && json !== '[]') return json
   } catch {
-    try {
-      return String(a)
-    } catch {
-      return '[Unserializable]'
-    }
+    /* fallback to String or getOwnPropertyNames */
+  }
+  try {
+    const str = String(a)
+    if (str !== '[object Object]') return str
+    return JSON.stringify(a, Object.getOwnPropertyNames(a))
+  } catch {
+    return '[Unserializable]'
   }
 }
 

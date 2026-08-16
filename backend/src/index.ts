@@ -95,11 +95,25 @@ const app = Fastify({ logger: { stream: makeLogTee() }, bodyLimit: 25_000_000 })
 // process → restart-loop on the host. We catch and log them, so the live app
 // does NOT fall from an isolated error. (The real fix stays `.catch` on every
 // `.then`.)
-process.on('unhandledRejection', (reason) => {
-  app.log.error({ reason }, 'unhandledRejection — caught globally, the process stays alive')
+process.on('unhandledRejection', (reason: unknown) => {
+  const reasonStr =
+    reason instanceof Error
+      ? (reason.stack || `${reason.name}: ${reason.message}`)
+      : typeof reason === 'object' && reason !== null
+        ? (() => {
+            try {
+              return JSON.stringify(reason)
+            } catch {
+              return String(reason)
+            }
+          })()
+        : String(reason)
+
+  const errObj = reason instanceof Error ? reason : new Error(reasonStr)
+  app.log.error({ err: errObj, reason: reasonStr }, `unhandledRejection — caught globally, the process stays alive: ${reasonStr}`)
 })
-process.on('uncaughtException', (err) => {
-  app.log.error({ err }, 'uncaughtException — caught globally, the process stays alive')
+process.on('uncaughtException', (err: Error) => {
+  app.log.error({ err }, `uncaughtException — caught globally, the process stays alive: ${err.stack || err.message}`)
 })
 
 // KELION VEDE CE PICĂ PE SERVER (Adrian, 12 aug: „kelion sa vada tot ce pica").
