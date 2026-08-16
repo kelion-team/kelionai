@@ -1231,10 +1231,16 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .exec-pasi {
   list-style: none;
   margin: 0;
-  padding: 0;
+  /* Owner, 16 aug: „nu are scroll sa vad ce face" — lista de pași creștea și era
+     tăiată de `overflow:hidden` al panoului. Acum ia spațiul rămas (head + bară
+     stau fixe sus) și DERULEAZĂ; padding-right lasă loc barei de scroll. */
+  padding: 0 8px 4px 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .exec-pas {
   font-size: 0.85em;
