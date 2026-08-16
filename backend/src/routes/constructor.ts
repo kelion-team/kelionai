@@ -251,27 +251,24 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ job })
   })
 
-  // ── CREIERUL CONSTRUCTORULUI, PRIN APP: GEMINI (principal) → FABLE 5 (rezervă) ─
-  // Owner, 13 aug: „creierul 2 nu e legat la constructor… supervizează 24/7" →
-  // legătura asta. Owner, 14 aug: „schimbă-mi constructorul cu gemeni ultra… când
-  // nu merge repara să cadă pe fable 5, înlocuiește peste tot" → Gemini devine
-  // PRINCIPALUL (nu doar plasa), iar rezerva e Fable 5. Constructorul cere creierul
-  // DOAR pe ruta asta (gardată cu x-bridge-secret) — cheile Gemini ȘI Anthropic stau
-  // AICI, în app, NU în constructor (regula: constructorul nu ține chei de furnizor
-  // și nu cheamă direct API-uri externe). Formatul e OpenAI, identic cu ce aștepta
-  // constructorul, deci bucla lui nu știe pe ce creier merge. Cheltuiala Gemini se
-  // ÎNREGISTREAZĂ (recordCost) ca banii să apară în panoul Bani, nu pe ascuns.
-  // ESCALADARE+REVENIRE: Gemini întâi; dacă nu poate → Fable 5; iar fiindcă FIECARE
-  // pas reintră pe rută, se revine SINGUR pe Gemini când acesta își revine. Dacă
-  // pică ambele → eroare, iar constructorul o clasifică „amânabil" și reia.
+  // ── CREIERUL CONSTRUCTORULUI, PRIN APP: DOAR GEMINI (rapid → performant) ─────
+  // Owner, 16 aug: „constructor unic aider… ramine doar gemini rapid si cu
+  // escaladarea spusa pe modelul performant gemini… fable iese total de peste
+  // tot… nu se comuta nimic". Fable 5 a fost SCOS COMPLET din constructor.
+  // Constructorul cere creierul DOAR pe ruta asta (gardată cu bridge-secret) —
+  // cheia Gemini stă AICI, în app, NU în constructor (regula 13 aug:
+  // constructorul nu ține chei de furnizor și nu cheamă direct API-uri externe).
+  // Cheltuiala Gemini se ÎNREGISTREAZĂ (recordCost) ca banii să apară în panoul
+  // Bani, nu pe ascuns. ESCALADARE: Gemini rapid întâi; pe eșec / încercarea ≥2
+  // → Gemini performant (gândire high), ANUNȚAT; fiecare pas nou repornește pe
+  // rapid. Dacă pică → eroare, iar constructorul o clasifică „amânabil" și reia.
   // ── CREIERUL CONSTRUCTORULUI, PRIN APP ─────────────────────────────────────
   // Un SINGUR handler, două uși (fără duplicare — jscpd pe zero):
-  //   • /api/constructor/creier — forma noastră {choices,usage} (creierul vechi
-  //     al agentului o cere cu x-bridge-secret).
-  //   • /api/constructor/openai/v1/chat/completions — ACEEAȘI escaladare
-  //     Gemini→Fable, împachetată OpenAI-complet, ca MOTORUL AIDER (owner, 16
-  //     aug: „scoti tot din constructor si instalezi doar aider... aider va avea
-  //     absolut toate instrumentele... real") să ceară creierul TOT prin app
+  //   • /api/constructor/creier — forma noastră {choices,usage} (compatibilitate).
+  //   • /api/constructor/openai/v1/chat/completions — ACELAȘI creier Gemini
+  //     (rapid → performant), împachetat OpenAI-complet, ca MOTORUL AIDER (owner,
+  //     16 aug: „scoti tot din constructor si instalezi doar aider... aider va
+  //     avea absolut toate instrumentele... real") să ceară creierul TOT prin app
   //     (legea 13 aug — constructorul NU ține chei de furnizor). Aider trimite
   //     bridge-secretul ca `Authorization: Bearer`, nu ca antet propriu.
   const creierHandler = (esteOpenai: boolean) => async (
