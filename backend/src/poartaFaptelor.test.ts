@@ -47,6 +47,14 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(pretentiiFaraFapta('Am trimis emailul.', ['send_email'])).toEqual([])
   })
 
+  it('ÎNGHEȚUL DE 5 LUNI (captura 06:41): „Am preluat cerința." fără build_software → demascat', () => {
+    expect(pretentiiFaraFapta('Am preluat cerința.', [])).toHaveLength(1)
+    expect(pretentiiFaraFapta('Am preluat cerința.', [])[0]).toContain('build_software')
+    // preluarea REALĂ (unealta chiar a creat ordinul) e curată
+    expect(pretentiiFaraFapta('Am preluat cerința (ordin #341).', ['build_software'])).toEqual([])
+    expect(pretentiiFaraFapta('Am preluat ordinul tău.', [])).toHaveLength(1)
+  })
+
   it('vorbirea normală NU declanșează poarta (fals-pozitivele o omoară)', () => {
     expect(pretentiiFaraFapta('Pot să generez un clip dacă vrei — costă 12 credite.', [])).toEqual([])
     expect(pretentiiFaraFapta('Clipul tău preferat e pe YouTube.', [])).toEqual([])
