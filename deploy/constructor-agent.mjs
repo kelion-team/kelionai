@@ -1005,6 +1005,17 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     '--model', model,
     '--yes-always', '--no-analytics', '--no-check-update', '--no-gitignore', '--auto-commits', '--no-stream',
   ]
+  // TAIE REPO-MAP-UL PE FREE (măsurat 16 aug, #370): pe modelul LOCAL de pe CPU-ul
+  // VPS-ului, aider a stat ~18 min „lucrează" apoi a picat pe bugetul de 22 min —
+  // adică a MĂCINAT harta întregului monorepo (tree-sitter peste TOT proiectul,
+  // trimisă modelului) și n-a apucat să editeze. Pe un 7B pe CPU, harta aia
+  // sufocă modelul înainte de fișier; pentru ordine țintite (ex. „o linie în
+  // README") e complet inutilă. `--map-tokens 0` o dezactivează → aider merge
+  // direct la fișierul cerut, de zeci de ori mai rapid, pe ACELAȘI model/CPU,
+  // tot gratis. Pe PLĂTIT (cloud, GPU rapid) harta RĂMÂNE — ajută la calitate pe
+  // ordine complexe, iar viteza nu e problemă acolo. Suprascriibil din env
+  // (CONSTRUCTOR_AIDER_MAP_TOKENS) fără deploy, dacă vrei harta înapoi pe local.
+  if (!platit) args.push('--map-tokens', String(env.CONSTRUCTOR_AIDER_MAP_TOKENS || '0'))
   const aiderEnv = {
     ...process.env,
     // Ollama rulează pe VPS (constructorul rulează tot pe host, lângă el).
