@@ -57,8 +57,16 @@ MASTER=''
 if [ -n "$USCAT" ] && [ -n "${VEGHE_MASTER:-}" ]; then
   MASTER=$VEGHE_MASTER
 elif [ -n "$TOKEN" ]; then
-  MASTER=$(curl -s -m 20 -H "Authorization: Bearer $TOKEN" -H 'Accept: application/vnd.github.sha' \
-    "$GH/commits/master" | head -c 40 | cut -c1-7)
+  # CANAL GIT (ca auto-publicare): ls-remote nu e prins de rate-limit REST.
+  # Fallback API doar daca git pica. (owner: master=live mereu; veghea nu mai tace pe API)
+  FULL=$(git ls-remote "https://x-access-token:${TOKEN}@github.com/kelion-team/kelionai.git" refs/heads/master 2>/dev/null | head -c 40)
+  case "$FULL" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) MASTER=$(printf '%s' "$FULL" | cut -c1-7) ;;
+    *)
+      MASTER=$(curl -s -m 20 -H "Authorization: Bearer $TOKEN" -H 'Accept: application/vnd.github.sha' \
+        "$GH/commits/master" | head -c 40 | cut -c1-7)
+      ;;
+  esac
 fi
 
 # O citire care n-a reușit NU e o stare. Fără sha de master nu putem spune nici
