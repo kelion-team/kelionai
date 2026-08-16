@@ -12,7 +12,7 @@ set -euo pipefail
 ENVFILE=/root/kelion/kelionai.env
 KEYFILE=/root/kelion/backup.key
 OUTDIR=/root/kelion/backups
-KEEP_DAYS=14
+KEEP_DAYS=60
 
 DBURL="$(grep -E '^DATABASE_URL=' "$ENVFILE" | head -1 | sed 's/^DATABASE_URL=//')"
 [ -n "$DBURL" ] || { echo "DATABASE_URL lipsă în $ENVFILE"; exit 1; }
