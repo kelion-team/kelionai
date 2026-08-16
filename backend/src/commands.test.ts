@@ -37,6 +37,16 @@ describe('commands — camera', () => {
     expect(interpretDeviceCommand('închide webcam')).toEqual({ camera: 'off' })
     expect(interpretDeviceCommand('pornește camera video')).toEqual({ camera: 'on' })
   })
+  it('COD/SHELL/JSON/URL NU e comandă de dispozitiv (owner, 16 aug: curl cu JSON comuta camera)', () => {
+    // Bug real: `"stream":false` (cuvântul „stream") + `"role":"user"` (cuvântul
+    // „user") păcăleau detectorul → „camera frontală". Inputul tehnic merge la creier.
+    expect(interpretDeviceCommand(
+      'time curl -s -m 90 http://127.0.0.1:11434/api/chat -d \'{"model":"qwen2.5-coder:7b","messages":[{"role":"user","content":"DONE"}],"stream":false}\'',
+    )).toBeNull()
+    expect(interpretDeviceCommand('git commit --amend')).toBeNull()
+    expect(interpretDeviceCommand('{"stream": true, "role": "user"}')).toBeNull()
+    expect(interpretDeviceCommand('ssh root@164.68.120.87')).toBeNull()
+  })
   it('prinde și alte moduri de adresare (video, stream, feed, transmisie)', () => {
     expect(interpretDeviceCommand('pornește stream-ul')).toEqual({ camera: 'on' })
     expect(interpretDeviceCommand('comută pe spate')).toEqual({ camera: 'back' })
