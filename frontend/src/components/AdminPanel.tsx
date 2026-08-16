@@ -2747,6 +2747,37 @@ export default function AdminPanel({
                             ? `🟢 cheia merge — „${cloudProba.modele[0] ?? 'model'}" rulează pe planul tău (probat live)`
                             : `🔴 ${cloudProba.motiv}`}
                     </div>
+                    {/* TOP-UP „extra usage" (owner, 16 aug: „la creier vreau bifă pentru kimi 3,
+                        in soft sa pot pune extra bani"). Modelele «extra usage» (ex. Kimi K3, #1)
+                        se plătesc SEPARAT de abonament, per folosire. Banii se pun la Ollama (ei
+                        țin plata — aplicația nu-ți poate lua cardul); butonul te duce direct acolo.
+                        Prețul NU-l scriu în cod (legea anti-hardcodare) — e viu pe pagina modelului. */}
+                    {creierCfg.creier2 !== 'gemini' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, background: '#8881', borderRadius: 6, padding: 8 }}>
+                        <div style={{ opacity: 0.9 }}>
+                          Modelele „extra usage" (ex. Kimi K3 — cel mai performant) se plătesc <b>separat</b> de abonament,
+                          per folosire. Soldul se pune la Ollama (ei țin plata), apoi becul de sus devine verde când modelul rulează.
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                          <a
+                            href="https://ollama.com/settings"
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ padding: '4px 10px', borderRadius: 6, background: '#1a7f37', color: '#fff', textDecoration: 'none', fontWeight: 600 }}
+                          >
+                            Pune bani extra / auto-reload
+                          </a>
+                          <a
+                            href={`https://ollama.com/library/${creierCfg.creier2}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #8886', color: 'inherit', textDecoration: 'none' }}
+                          >
+                            Vezi prețul modelului (live)
+                          </a>
+                        </div>
+                      </div>
+                    )}
                     {creierMsg && <div style={{ fontSize: 11, opacity: 0.85 }}>{creierMsg}</div>}
                     <div style={{ fontSize: 10, opacity: 0.6 }}>
                       Constructorul PLĂTIT folosește exact modelul ales la creier 2. Creier 2 pe CHAT se aprinde după ce probez cheia live (ca să nu-ți rup chatul). Chat rapid rămâne Gemini.

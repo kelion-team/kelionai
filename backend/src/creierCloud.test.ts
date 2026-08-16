@@ -66,5 +66,10 @@ describe('cablajul comutatorului — panou scrie, host citește, Aider trece pe 
     expect(p).toContain('Kimi K3 (cloud)')
     expect(p).toContain('Qwen3.5 397B (cloud)')
     expect(p).toContain('PLĂTIT (= creier 2 cloud)')
+    // TOP-UP „extra usage" (owner: „bifă pentru kimi 3, in soft sa pot pune extra bani"):
+    // buton către plata Ollama + link la prețul viu (fără cifră hardcodată în cod).
+    expect(p).toContain('Pune bani extra / auto-reload')
+    expect(p).toContain('https://ollama.com/settings')
+    expect(p).toContain('Vezi prețul modelului (live)')
   })
 })
