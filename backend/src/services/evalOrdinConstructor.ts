@@ -39,17 +39,19 @@ export interface AiConstructor {
 export const AI_CONSTRUCTORI: AiConstructor[] = [
   {
     cheie: 'constructor',
-    nume: 'Constructorul local',
+    // MOTORUL UNIC = AIDER (owner, 16 aug: „constructor unic aider… nu vad aider
+    // default in constructor"). Constructorul rulează Aider CHIAR în repo pe server.
+    nume: 'Aider (constructorul)',
     descriere:
-      'Construiește CHIAR în repo pe server: editează fișiere, rulează tsc + testele, deschide PR. Cel mai potrivit pentru reparații și modificări de cod verificabile.',
+      'Motorul UNIC al constructorului: Aider construiește CHIAR în repo pe server — editează fișiere, rulează tsc + testele, deschide PR. Creierul lui vine prin app (Gemini rapid → performant). Cel mai potrivit pentru reparații și modificări de cod verificabile.',
     capacitati: ['cod', 'repo', 'teste', 'pr', 'reparatie', 'frontend', 'backend', 'mare', 'asincron'],
-    becFurnizor: 'creierul constructorului',
+    becFurnizor: 'creierul constructorului', // cheie internă pt. maparea creditului — stabilă
   },
   {
     cheie: 'creier2',
-    nume: 'Creierul 2 (Gemini)',
+    nume: 'Creierul de raționament (Gemini)',
     descriere:
-      'Creierul de raționament: analizează, planifică și deblochează constructorul când se împotmolește. NU construiește singur în repo — pregătește terenul.',
+      'Creierul de raționament: analizează, planifică și deblochează Aider când se împotmolește. NU construiește singur în repo — pregătește terenul.',
     capacitati: ['analiza', 'planificare', 'deblocare'],
     becFurnizor: 'Gemini',
   },

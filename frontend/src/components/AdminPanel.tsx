@@ -440,9 +440,8 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
       <span title={geminiTitlu}>
         Gemini {geminiEticheta}
       </span>
-      {/* (Pastila RunPod a fost SCOASĂ, 14 aug — constructorul rulează pe Gemini
-          (principal, pastila de sus) → Fable 5 (rezervă), prin app. Fable 5 apare ca
-          rând în raportul pe furnizori. O pastilă „RunPod" aici ar fi afișaj fals.) */}
+      {/* (Constructorul rulează pe motorul Aider, cu creierul Gemini prin app —
+          pastila de sus. Fable a fost scos total, 16 aug: nu mai are rând.) */}
       <a href="https://aistudio.google.com/billing" target="_blank" rel="noreferrer" style={{ fontSize: 12, opacity: 0.75 }}>alimentează Gemini</a>
     </div>
   )
@@ -636,6 +635,8 @@ export default function AdminPanel({
   // pornită lucrătorul nu ia nimic — ordinul stătea „în coadă · 0%" la
   // nesfârșit după promisiunea „max. 2 minute", fără nicio explicație.
   const [buildPaused, setBuildPaused] = useState(false)
+  // Dovada vie a motorului: `aider --version` de pe gazdă (owner, 16 aug).
+  const [aiderProba, setAiderProba] = useState<{ ok: boolean; versiune: string; motiv: string } | null>(null)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
   // EVALUAREA CERINȚEI (owner, 13 aug): pe măsură ce scrii ordinul, evaluăm
@@ -949,12 +950,13 @@ export default function AdminPanel({
   const refreshBuildJobs = (): void => {
     fetch('/api/admin/constructor', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[]; paused?: boolean } | null) => {
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string } } | null) => {
         // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
         // nu se lasă „Niciun ordin încă" peste o citire picată.
         if (j?.jobs) {
           setBuildJobs(j.jobs)
           setBuildPaused(!!j.paused)
+          setAiderProba(j.aider ?? null)
         } else setBuildJobs(null)
       })
       .catch(() => setBuildJobs(null))
@@ -2624,12 +2626,25 @@ export default function AdminPanel({
                     >
                       {plafon.activ ? 'Oprește limita' : 'Pornește limita'}
                     </button>
-                    {/* Motorul constructorului e AIDER (unic), iar creierul lui e
-                        DOAR Gemini (rapid → performant). Comutatorul „Forțează
-                        Fable 5" a fost SCOS — owner, 16 aug: „constructor unic
-                        aider… fable iese total de peste tot… nu se comuta nimic". */}
-                    <span className="chat-hint" style={{ fontSize: 12, opacity: 0.8 }}>
-                      Motor: Aider · creier: Gemini (rapid → performant)
+                    {/* MOTORUL, DOVEDIT VIU (owner, 16 aug: „doar denumit nu e
+                        suficient trebuie verificat real ca e aider… cu dovada").
+                        Becul vine din `aider --version` rulat pe gazdă — verde cu
+                        versiunea reală, roșu cu eroarea. Fără comutator: constructor
+                        unic Aider, creier Gemini (rapid → performant). */}
+                    <span
+                      className="chat-hint"
+                      style={{ fontSize: 12, fontWeight: 600, color: aiderProba == null ? undefined : aiderProba.ok ? '#1a7f37' : '#c1121f' }}
+                      title={aiderProba == null
+                        ? 'proba motorului încă nu s-a citit'
+                        : aiderProba.ok
+                          ? `aider --version pe gazdă: ${aiderProba.versiune}`
+                          : `aider --version a picat: ${aiderProba.motiv}`}
+                    >
+                      {aiderProba == null
+                        ? 'Motor: Aider (probă…) · creier Gemini (rapid → performant)'
+                        : aiderProba.ok
+                          ? `🟢 Motor: Aider VIU (${aiderProba.versiune}) · creier Gemini (rapid → performant)`
+                          : `🔴 Motor: Aider LIPSĂ (${aiderProba.motiv.slice(0, 60)})`}
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
@@ -2761,21 +2776,9 @@ export default function AdminPanel({
                           dar așteaptă publicarea) — orice, dar nu „GATA". */}
                       {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'în așteptare' : 'eșuat'}
                     </span>{' '}
-                    {/* FABLE 5 BADGE — DOAR pe raportul lucrătorului (auditul
-                        admin, 3 aug): ramura veche pe regex peste orderText
-                        eticheta „Fable 5" orice ordin nou care doar pomenea
-                        cuvintele, afirmând un creier care nu mai există
-                        (toggle-ul a fost scos odată cu OpenRouter). Marcajul
-                        rămâne istoric, pe rapoartele vechi cu j.brain='fable-5'. */}
-                    {j.brain === 'fable-5' && (
-                      <span
-                        className="vis-badge"
-                        style={{ background: '#7c3aed', color: '#fff' }}
-                        title="Fable 5 — marcaj istoric (creierul plătit de dinainte de extirparea OpenRouter, 3 aug)"
-                      >
-                        Fable 5
-                      </span>
-                    )}{' '}
+                    {/* (Badge-ul „Fable 5" a fost SCOS — owner, 16 aug: „fable iese
+                        total de peste tot… curata peste tot in aplicatie".
+                        Constructorul rulează pe motorul Aider + creier Gemini.) */}
                     {/* P8 (owner, 15 aug: „foarte clar ce executa"): FAPTA
                         extrasă de server (nume), nu ambalajul promptului. */}
                     {j.nume || j.orderText.slice(0, 90)}
