@@ -10,6 +10,7 @@
 // Iese cu cod 1 la prima problemă — deci CI-ul se face roșu.
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 const SARI = new Set(['node_modules', 'dist', '.git', '.jscpd', 'coverage'])
 const probleme = []
@@ -81,10 +82,37 @@ for (const f of fisiere('.', ['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.c
   }
 }
 
+// ── SHELL (.sh) — sintaxă REALĂ, prin `bash -n` ──────────────────────────────
+//
+// DE CE (16 aug, greșeala mea prinsă de constructor pe VPS, nu de poartă): o
+// ghilimea neînchisă în deploy/setup-ollama.sh (`echo "… ($MODEL)" verde."`) a
+// rupt instalarea creierului local — „unexpected EOF while looking for matching `"`".
+// tsc nu vede .sh, iar verificarea de echilibru simplu n-o prindea (ghilimelele
+// erau PARE). `bash -n` compilează scriptul fără să-l ruleze și prinde exact clasa
+// asta. Gardat: dacă bash lipsește din mediu, sărim (nu dăm alarme false).
+let bashDisponibil = true
+try {
+  execFileSync('bash', ['-c', 'true'], { stdio: 'ignore' })
+} catch {
+  bashDisponibil = false
+}
+if (bashDisponibil) {
+  for (const f of fisiere('.', ['.sh'])) {
+    try {
+      execFileSync('bash', ['-n', f], { stdio: 'pipe' })
+    } catch (e) {
+      const msg = String(e.stderr || e.message || e)
+        .replace(/\s+/g, ' ')
+        .slice(0, 160)
+      probleme.push(`SHELL rupt: ${f} — ${msg}`)
+    }
+  }
+}
+
 // ── Raport ───────────────────────────────────────────────────────────────────
 if (probleme.length) {
   console.error('SEMNE GREȘIT PUSE — găsite:')
   for (const p of probleme) console.error('  ✗ ' + p)
   process.exit(1)
 }
-console.log('Sintaxă: JSON + CSS verificate, toate curate.')
+console.log(`Sintaxă: JSON + CSS + shell (${bashDisponibil ? 'bash -n' : 'sărit — fără bash'}) verificate, toate curate.`)
