@@ -98,7 +98,13 @@ export async function probaOllamaCloud(): Promise<{ ok: boolean; motiv: string; 
       signal: AbortSignal.timeout(12_000),
     })
     if (r.status === 200) {
-      cacheProba = { la: Date.now(), ok: true, motiv: '', modele: [model] }
+      // Modelul pe care Ollama ÎL CONFIRMĂ că a servit (câmpul `model` din răspunsul
+      // lui) — dovada că rulează EXACT modelul ales, nu unul „de sub" el (owner, 16
+      // aug: „vreau sa vad clar ca daca comut kimi 3 foloseste kimi 3"). Dacă Ollama
+      // n-a întors câmpul, cădem pe cel cerut (tot cel ales).
+      const j = (await r.json().catch(() => null)) as { model?: string } | null
+      const confirmat = String(j?.model || model)
+      cacheProba = { la: Date.now(), ok: true, motiv: '', modele: [confirmat] }
       return cacheProba
     }
     if (r.status === 401) {

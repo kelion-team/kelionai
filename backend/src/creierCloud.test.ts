@@ -31,6 +31,9 @@ describe('creierCloud — alegerea modelului cloud (Kimi K3 ↔ Qwen3.5 Max)', (
     expect(src).toContain('r.status === 200')
     expect(src).toContain('r.status === 401') // cheie invalidă
     expect(src).toContain('r.status === 402') // cheie bună, model pe extra usage (nu-i în plan)
+    // Dovada „exact modelul ales": pe 200 citește modelul CONFIRMAT de Ollama
+    // (câmpul `model` din răspuns), nu doar cel cerut (owner: „vad clar… kimi 3").
+    expect(src).toContain('j?.model')
     // Fetch-ul NU mai lovește lista publică drept dovadă a cheii (doar comentariul
     // o mai pomenește, ca explicație — de-aia țintim exact URL-ul de fetch).
     expect(src).not.toContain('bazaOllamaCloud()}/v1/models')
@@ -71,5 +74,8 @@ describe('cablajul comutatorului — panou scrie, host citește, Aider trece pe 
     expect(p).toContain('Pune bani extra / auto-reload')
     expect(p).toContain('https://ollama.com/settings')
     expect(p).toContain('Vezi prețul modelului (live)')
+    // Dovada „exact modelul ales, nu unul de sub el" — becul numește modelul CONFIRMAT de Ollama.
+    expect(p).toContain('CONFIRMAT de Ollama')
+    expect(p).toContain('nu unul de sub el')
   })
 })
