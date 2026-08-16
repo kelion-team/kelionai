@@ -22,8 +22,8 @@ describe('utilizatori unici pe email, cu device-urile lor', () => {
     expect(db).toMatch(/GROUP BY lower\(v\.user_email\)/)
     // și subinterogările (blocat/sold/consum) compară tot pe lower — altfel un
     // email cu majusculă pierde soldul/blocarea lui.
-    expect(db).toMatch(/lower\(w\.user_email\) = lower\(v\.user_email\)/)
-    expect(db).toMatch(/lower\(b\.email\) = lower\(v\.user_email\)/)
+    expect(db).toMatch(/lower\(w\.user_email\) = MIN\(lower\(v\.user_email\)\)/)
+    expect(db).toMatch(/lower\(b\.email\) = MIN\(lower\(v\.user_email\)\)/)
   })
 
   it('device-urile se agregă pe (adresă, device, browser) și se atașează userului', () => {

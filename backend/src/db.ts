@@ -2046,13 +2046,16 @@ export async function getUserActivity(): Promise<{
                 (ARRAY_AGG(v.country_code ORDER BY v.last_seen_at DESC))[1] AS code,
                 (ARRAY_AGG(v.device ORDER BY v.last_seen_at DESC))[1] AS device,
                 (ARRAY_AGG(v.browser ORDER BY v.last_seen_at DESC))[1] AS browser,
-                EXISTS(SELECT 1 FROM blocked_users b WHERE lower(b.email) = lower(v.user_email)) AS blocked,
-                COALESCE((SELECT w.balance FROM wallets w WHERE lower(w.user_email) = lower(v.user_email)), 0)::float AS balance,
-                COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE lower(c.user_email) = lower(v.user_email)), 0)::float AS "consumedUsd",
-                (lower(v.user_email) = lower($1)) AS scutit,
-                COALESCE((SELECT f.photo FROM faceprints f WHERE lower(f.user_email) = lower(v.user_email) LIMIT 1), '') AS foto,
-                EXISTS(SELECT 1 FROM voiceprints vp WHERE lower(vp.user_email) = lower(v.user_email)) AS voce,
-                COALESCE((SELECT vp.audio_clip <> '' FROM voiceprints vp WHERE lower(vp.user_email) = lower(v.user_email) LIMIT 1), false) AS "mostraAudio"
+                // PG 16: in GROUP BY lower(v.user_email), correlated subqueries
+                // cannot reference bare v.user_email (ungrouped). Use MIN(lower(...))
+                // which is deterministic inside each email group.
+                EXISTS(SELECT 1 FROM blocked_users b WHERE lower(b.email) = MIN(lower(v.user_email))) AS blocked,
+                COALESCE((SELECT w.balance FROM wallets w WHERE lower(w.user_email) = MIN(lower(v.user_email)) LIMIT 1), 0)::float AS balance,
+                COALESCE((SELECT SUM(c.cost_usd) FROM cost_events c WHERE lower(c.user_email) = MIN(lower(v.user_email))), 0)::float AS "consumedUsd",
+                (MIN(lower(v.user_email)) = lower($1)) AS scutit,
+                COALESCE((SELECT f.photo FROM faceprints f WHERE lower(f.user_email) = MIN(lower(v.user_email)) LIMIT 1), '') AS foto,
+                EXISTS(SELECT 1 FROM voiceprints vp WHERE lower(vp.user_email) = MIN(lower(v.user_email))) AS voce,
+                COALESCE((SELECT vp.audio_clip <> '' FROM voiceprints vp WHERE lower(vp.user_email) = MIN(lower(v.user_email)) LIMIT 1), false) AS "mostraAudio"
          FROM visits v
          LEFT JOIN (SELECT lower(user_email) AS email_jos, COUNT(*)::int AS n
                     FROM messages GROUP BY lower(user_email)) m
