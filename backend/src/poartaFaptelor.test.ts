@@ -47,6 +47,14 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(pretentiiFaraFapta('Am trimis emailul.', ['send_email'])).toEqual([])
   })
 
+  it('ÎNGHEȚUL DE 5 LUNI (captura 06:41): „Am preluat cerința." fără build_software → demascat', () => {
+    expect(pretentiiFaraFapta('Am preluat cerința.', [])).toHaveLength(1)
+    expect(pretentiiFaraFapta('Am preluat cerința.', [])[0]).toContain('build_software')
+    // preluarea REALĂ (unealta chiar a creat ordinul) e curată
+    expect(pretentiiFaraFapta('Am preluat cerința (ordin #341).', ['build_software'])).toEqual([])
+    expect(pretentiiFaraFapta('Am preluat ordinul tău.', [])).toHaveLength(1)
+  })
+
   it('vorbirea normală NU declanșează poarta (fals-pozitivele o omoară)', () => {
     expect(pretentiiFaraFapta('Pot să generez un clip dacă vrei — costă 12 credite.', [])).toEqual([])
     expect(pretentiiFaraFapta('Clipul tău preferat e pe YouTube.', [])).toEqual([])
@@ -81,5 +89,22 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
     expect(chat).toMatch(/LAW OF MEASUREMENT/)
     expect(chat).toMatch(/LAW AGAINST HARDCODING/)
     expect(chat).toMatch(/let systemPrompt = `\$\{LEGILE_ADMINULUI\}\\n\$\{SYSTEM_PROMPT\}/)
+  })
+})
+
+describe('LEGEA ANTI-HARDCODARE — poarta automată + legea în documentele oricărui AI', () => {
+  it('poarta există, vânează banii din frontend și modelele din afara config-ului', () => {
+    const poarta = sursa('../../scripts/verifica-hardcodari.mjs')
+    expect(poarta).toMatch(/R1 bani-hardcodați/)
+    expect(poarta).toMatch(/R2 model-hardcodat/)
+    expect(poarta).toMatch(/hardcod-permis:/)
+    expect(poarta).toMatch(/process\.exit\(1\)/)
+  })
+
+  it('legea stă scrisă în TOATE documentele de intrare ale AI-urilor', () => {
+    for (const doc of ['../../CLAUDE.md', '../../AGENTS.md', '../../GEMINI.md']) {
+      expect(sursa(doc), doc).toMatch(/LEGEA ANTI-HARDCODARE \(owner, 16 aug 2026/)
+      expect(sursa(doc), doc).toMatch(/verifica-hardcodari\.mjs/)
+    }
   })
 })

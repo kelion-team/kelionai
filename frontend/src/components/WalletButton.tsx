@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { fetchBalance, startCheckout, type CheckoutStart } from '../lib/billing'
 import { loadLocalLang } from '../lib/prefs'
 import { strings, resolveLang } from '../lib/i18n'
+import { aduPragurile, pragurileServerului, type Praguri } from '../lib/praguri'
 
 // Credit visible for ANY logged-in user (Adrian, Jul 24: "once logged in with
 // Google you must be able to buy credit, I don't see how to top up"). It shows ONE
@@ -19,8 +20,13 @@ import { strings, resolveLang } from '../lib/i18n'
 // £ × 7.5 credits. The presets are chosen to give WHOLE credit numbers.
 const CREDITS_PER_POUND = 7.5
 const creditsFor = (pounds: number): number => Math.floor(pounds * CREDITS_PER_POUND)
-const AMOUNTS_FIRST = [20, 30, 50] // 150 / 225 / 375 credite
-const AMOUNTS_NEXT = [10, 20, 50] // 75 / 150 / 375 credite
+// LEGEA ANTI-HARDCODARE (16 aug, ownerul: „m-ai umplut de hardcodate, scoate
+// tot"): pachetele se DERIVĂ din pragurile serverului (prima/minim/pas), nu se
+// scriu de mână — cu pragurile de azi (20/5/5) ies exact 20/30/50 și 10/20/50.
+const pachete = (p: Praguri, primaAlimentare: boolean): number[] =>
+  primaAlimentare
+    ? [p.primaAlimentare, p.primaAlimentare + 2 * p.pas, p.primaAlimentare + 6 * p.pas]
+    : [2 * p.pas, 4 * p.pas, 10 * p.pas]
 
 // NOTE (dead-code audit, Aug 2): the old `isAdmin` prop and its branches are
 // gone — the only render site (Stage.tsx) is guarded by `user.role !== 'admin'`
@@ -71,10 +77,17 @@ export function WalletButton({
   const [payCode, setPayCode] = useState<CheckoutStart | null>(null)
   const [codeCopied, setCodeCopied] = useState(false)
 
+  // LEGEA ANTI-HARDCODARE (16 aug): cifrele pragurilor vin DOAR de la server
+  // (aceeași sursă care validează). Necitite încă = text FĂRĂ cifre — nu se
+  // inventează un „£20" care poate minți când ownerul schimbă pragul din env.
   const errText = (code: string): string => {
-    if (code === 'must_be_multiple_of_5') return ro ? 'Suma trebuie să fie multiplu de £5.' : 'Amount must be a multiple of £5.'
-    if (code === 'first_topup_min_20') return ro ? 'Prima alimentare: minim £20.' : 'First top-up: £20 minimum.'
-    if (code === 'min_5') return ro ? 'Minim £5.' : 'Minimum £5.'
+    const p = pragurileServerului()
+    if (code === 'must_be_multiple_of_5')
+      return p ? (ro ? `Suma trebuie să fie multiplu de £${p.pas}.` : `Amount must be a multiple of £${p.pas}.`) : ro ? 'Suma nu e multiplul cerut de server.' : 'Amount is not the multiple the server requires.'
+    if (code === 'first_topup_min_20')
+      return p ? (ro ? `Prima alimentare: minim £${p.primaAlimentare}.` : `First top-up: £${p.primaAlimentare} minimum.`) : ro ? 'Suma e sub pragul primei alimentări.' : 'Amount is below the first top-up minimum.'
+    if (code === 'min_5')
+      return p ? (ro ? `Minim £${p.minim}.` : `Minimum £${p.minim}.`) : ro ? 'Suma e sub minimul serverului.' : 'Amount is below the server minimum.'
     if (code === 'revolut_link_lipsa') return ro ? 'Plățile nu sunt configurate pe server.' : 'Payments are not configured on the server.'
     if (code === 'offline') return ro ? 'Fără conexiune — încearcă din nou.' : 'No connection — try again.'
     return (ro ? 'Plata nu a pornit: ' : 'Payment failed to start: ') + code
@@ -128,11 +141,22 @@ export function WalletButton({
     }
   }
 
-  const minAmount = firstTopUp ? 20 : 5
-  const presets = firstTopUp ? AMOUNTS_FIRST : AMOUNTS_NEXT
+  // Pragurile vin de la server (o singură citire pe sesiune); necitite încă =
+  // pachetele nu se afișează cu cifre inventate — apar când sosește adevărul.
+  const [praguri, setPraguri] = useState<Praguri | null>(pragurileServerului())
+  useEffect(() => {
+    void aduPragurile().then((p) => {
+      if (p) setPraguri(p)
+    })
+  }, [])
+  const presets = praguri ? pachete(praguri, firstTopUp) : []
   const customValid = (): number | null => {
+    // fără praguri citite, validarea locală tace — serverul validează oricum
+    // și răspunde pe nume (errText); nu inventăm cifre în locul lui.
+    if (!praguri) return null
+    const minim = firstTopUp ? praguri.primaAlimentare : praguri.minim
     const n = Number(custom)
-    return Number.isFinite(n) && n >= minAmount && n % 5 === 0 ? n : null
+    return Number.isFinite(n) && n >= minim && n % praguri.pas === 0 ? n : null
   }
 
   useEffect(() => {
@@ -299,11 +323,11 @@ export function WalletButton({
           so the dead end is gone. */}
           <>
             <span className="wallet-menu-title">{ro ? 'Adaugă credite' : 'Add credits'}</span>
-            {firstTopUp && (
+            {firstTopUp && praguri && (
               <span className="wallet-menu-note">
                 {ro
-                  ? 'Prima alimentare: £20 minim (pornește creierul), apoi multipli de £5.'
-                  : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'}
+                  ? `Prima alimentare: £${praguri.primaAlimentare} minim (pornește creierul), apoi multipli de £${praguri.pas}.`
+                  : `First top-up: £${praguri.primaAlimentare} minimum (starts the brain), then multiples of £${praguri.pas}.`}
               </span>
             )}
             <div className="wallet-amounts">
@@ -320,10 +344,16 @@ export function WalletButton({
               <span aria-hidden>£</span>
               <input
                 type="number"
-                min={minAmount}
-                step={5}
+                min={praguri ? (firstTopUp ? praguri.primaAlimentare : praguri.minim) : undefined}
+                step={praguri?.pas ?? undefined}
                 inputMode="numeric"
-                placeholder={ro ? `altă sumă (×5, min ${minAmount})` : `other (×5, min ${minAmount})`}
+                placeholder={
+                  praguri
+                    ? ro
+                      ? `altă sumă (×${praguri.pas}, min ${firstTopUp ? praguri.primaAlimentare : praguri.minim})`
+                      : `other (×${praguri.pas}, min ${firstTopUp ? praguri.primaAlimentare : praguri.minim})`
+                    : '£…'
+                }
                 value={custom}
                 onChange={(e) => setCustom(e.target.value)}
               />

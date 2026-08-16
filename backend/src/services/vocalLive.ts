@@ -25,7 +25,7 @@ import { continuareStraina } from './limbaRaspuns.js'
 // native-audio (dec. 2025): voce NATURALĂ (emoție/ton) + apel de unealtă
 // NON_BLOCKING (Kelion vorbește în timp ce unealta rulează). Pe variabilă
 // (VOCAL_LIVE_MODEL) → o linie de schimbat când Google scoate un Live mai nou.
-export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-3.1-flash-live-preview'
+export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-3.1-flash-live-preview' // hardcod-permis: implicitul sesiunii live, suprascris din env
 // MĂSURAT 7 aug pe cheia ownerului, de pe VPS (scripts/proba-modele.py, faza 3 —
 // sesiune bidi reală, cu AUDIO cerut corect; „KB" = voce chiar emisă, nu doar o
 // conexiune deschisă):

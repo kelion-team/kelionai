@@ -40,13 +40,13 @@ function modelDinEnv(v: string | undefined): string | undefined {
 const CANDIDATE_MODELS = [
   modelDinEnv(process.env.CONSTRUCTOR_FABLE_MODEL),
   modelDinEnv(process.env.ANTHROPIC_MODEL),
-  'claude-fable-5',
-  'claude-opus-5',
-  'claude-sonnet-5',
-  'claude-haiku-4-5-20251001',
+  'claude-fable-5', // hardcod-permis: SCARA modelelor Anthropic e sursa unică (config o citește, nu invers)
+  'claude-opus-5', // hardcod-permis: scara modelelor — sursa unică
+  'claude-sonnet-5', // hardcod-permis: scara modelelor — sursa unică
+  'claude-haiku-4-5-20251001', // hardcod-permis: scara modelelor — sursa unică
 ].filter((m): m is string => Boolean(m && m.trim()))
 
-const FABLE_MODEL = CANDIDATE_MODELS[0] || 'claude-fable-5'
+const FABLE_MODEL = CANDIDATE_MODELS[0] || 'claude-fable-5' // hardcod-permis: implicitul scării, suprascris din env
 
 /** Cheia Fable 5 (Claude). Stă în app, NU în constructor — și se citește prin
  *  ALIASURILE din config (lecția creditului, 30 iul → reaplicată 15 aug):
@@ -129,7 +129,7 @@ export async function fable5Valida(): Promise<{ ok: boolean; motiv: string }> {
       const rs = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }), // hardcod-permis: proba de servire pe cel mai ieftin model din scară
         signal: AbortSignal.timeout(10_000),
       })
       const corp = await rs.text().catch(() => '')

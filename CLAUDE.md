@@ -71,6 +71,24 @@ are the answer. Read them before you report anything to him.
 - Fix by rewriting the small responsible module — no band-aid patches.
 - Don't touch `C:\Users\adria\Downloads\k` — that's the OLD archived project.
 
+
+## LEGEA ANTI-HARDCODARE (owner, 16 aug 2026 — LEGE pentru ORICE AI care lucrează aici)
+Ordinul verbatim: „creiaza legi si mecanisme automate de cautare a hardocodului
+pe aplicatie, si explicat oricarui ai vine foarte clare ca nu e admis hardcodat
+pe aplicatie".
+- **NU e admis hardcodat pe aplicație**: nicio cifră de bani, prag, tarif, nume
+  de model AI sau stare arătată omului nu se scrie de mână în cod — totul vine
+  dintr-o sursă VIE (config/env/kv/DB/server/unealtă). O cifră scrisă de mână
+  minte în ziua în care realitatea se schimbă (măsurat: tarife inventate
+  24/48/200 vs realele 6/12/50; modelul pensionat care a tăcut zile întregi).
+- **Poarta automată**: `node scripts/verifica-hardcodari.mjs` — pică build-ul
+  pe hardcod negăzduit. O rulezi la fiecare livrare, ca pe tsc.
+- **Excepția se declară PE LINIE, cu motiv**: `// hardcod-permis: <motivul>`.
+  Fără motiv scris lângă faptă, poarta pică. Nu există listă ascunsă.
+- În creierele live, legea e în promptul de sistem (LEGILE ADMINULUI, chat.ts):
+  LEGEA FAPTEI + LEGEA MĂSURĂTORII + LEGEA ANTI-HARDCODARE — plus POARTA
+  FAPTELOR care demască automat pretențiile fără unealtă executată.
+
 ## Layout (see AI-HANDOFF.md §2 for the complete file-by-file map)
 - `backend/` — Node + Fastify + TS. Routes in `src/routes/`, services in `src/services/`.
 - `frontend/` — React + Vite + TS. `src/pages/Stage.tsx`, `src/components/ChatPanel.tsx`.

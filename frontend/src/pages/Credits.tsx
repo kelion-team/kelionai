@@ -28,11 +28,15 @@ export default function Credits(): React.JSX.Element {
   // Meniul de prețuri al extra-serviciilor — viu de pe server (/api/tarife),
   // aceeași sursă care și taxează. null = necitit/picat → secțiunea nu apare.
   const [tarife, setTarife] = useState<{ cheie: string; eticheta: string; credite: number; lire: number | null }[] | null>(null)
+  // LEGEA ANTI-HARDCODARE (16 aug): pragurile alimentării vin din ACELAȘI
+  // răspuns — cifra afișată e cifra care validează pe server, nu una de mână.
+  const [praguri, setPraguri] = useState<{ primaAlimentare: number; minim: number; pas: number } | null>(null)
   useEffect(() => {
     void fetch('/api/tarife')
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { tarife?: { cheie: string; eticheta: string; credite: number; lire: number | null }[] } | null) => {
+      .then((j: { tarife?: { cheie: string; eticheta: string; credite: number; lire: number | null }[]; praguri?: { primaAlimentare: number; minim: number; pas: number } } | null) => {
         if (Array.isArray(j?.tarife)) setTarife(j.tarife)
+        if (j?.praguri && Number.isFinite(j.praguri.pas) && j.praguri.pas > 0) setPraguri(j.praguri)
       })
       .catch(() => {})
   }, [])
@@ -82,8 +86,16 @@ export default function Credits(): React.JSX.Element {
   }, [payCode])
 
   const firstTopUp = balance ? (balance.firstTopUp ?? true) : true
-  const minAmount = firstTopUp ? 20 : 5
-  const PACKS = firstTopUp ? [20, 30, 50] : [10, 20, 50]
+  // LEGEA ANTI-HARDCODARE (16 aug): pragurile și pachetele se DERIVĂ din
+  // cifrele serverului (cu pragurile de azi 20/5/5 ies exact 20/30/50 și
+  // 10/20/50); necitite încă = validarea locală tace și decide serverul
+  // (răspunsul lui numit ajunge oricum înapoi) — nu se inventează cifre.
+  const minAmount = praguri ? (firstTopUp ? praguri.primaAlimentare : praguri.minim) : null
+  const PACKS = praguri
+    ? firstTopUp
+      ? [praguri.primaAlimentare, praguri.primaAlimentare + 2 * praguri.pas, praguri.primaAlimentare + 6 * praguri.pas]
+      : [2 * praguri.pas, 4 * praguri.pas, 10 * praguri.pas]
+    : []
 
   const customVal = Number(customInput)
   const isCustomFilled = customInput.trim() !== ''
@@ -91,10 +103,10 @@ export default function Credits(): React.JSX.Element {
   if (isCustomFilled) {
     if (!Number.isFinite(customVal) || customVal <= 0) {
       customErr = 'Introdu o sumă validă.'
-    } else if (customVal % 5 !== 0) {
-      customErr = 'Suma trebuie să fie un multiplu de £5.'
-    } else if (customVal < minAmount) {
-      customErr = firstTopUp ? 'Prima reîncărcare trebuie să fie de minim £20.' : 'Suma minimă este £5.'
+    } else if (praguri && customVal % praguri.pas !== 0) {
+      customErr = `Suma trebuie să fie un multiplu de £${praguri.pas}.`
+    } else if (praguri && minAmount !== null && customVal < minAmount) {
+      customErr = firstTopUp ? `Prima reîncărcare trebuie să fie de minim £${minAmount}.` : `Suma minimă este £${minAmount}.`
     }
   }
   const isCustomValid = isCustomFilled && !customErr
@@ -194,10 +206,10 @@ export default function Credits(): React.JSX.Element {
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               type="number"
-              placeholder={`£${minAmount}+ (multiplu de £5)`}
+              placeholder={praguri && minAmount !== null ? `£${minAmount}+ (multiplu de £${praguri.pas})` : '£…'}
               value={customInput}
-              min={minAmount}
-              step={5}
+              min={minAmount ?? undefined}
+              step={praguri?.pas ?? undefined}
               onChange={(e) => setCustomInput(e.target.value)}
               style={{ flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc' }}
             />
@@ -212,9 +224,9 @@ export default function Credits(): React.JSX.Element {
             </button>
           </div>
           {customErr && <div className="login-note" style={{ color: '#d32f2f', marginTop: 6 }}>{customErr}</div>}
-          {!customErr && (
+          {!customErr && praguri && minAmount !== null && (
             <div className="login-note" style={{ fontSize: 12, marginTop: 4 }}>
-              * Minim £{minAmount}, multiplu de £5 ({Math.floor(minAmount * CREDITS_PER_POUND)} credite = £{minAmount}).
+              * Minim £{minAmount}, multiplu de £{praguri.pas} ({Math.floor(minAmount * CREDITS_PER_POUND)} credite = £{minAmount}).
             </div>
           )}
         </div>

@@ -71,6 +71,15 @@ const FAMILII: readonly FamiliePretentie[] = [
     unelte: ['youtube_urca'],
     eticheta: '„am urcat pe YouTube" — fără youtube_urca',
   },
+  // ÎNGHEȚUL DE 5 LUNI (owner, 16 aug 06:41, cu captura: „asa incremeneste,
+  // nu face nimic mai departe... ai zis mincinos ca ai rezolvat"): fraza-ritual
+  // „Am preluat cerința." poate fi SPUSĂ fără build_software — fără număr de
+  // ordin, fără panou, fără lucrător. Preluarea nedovedită e minciună.
+  {
+    re: /(?<![-\p{L}])am\s+preluat\b[^.!?\n]{0,40}\b(cerin|ordin)/iu,
+    unelte: ['build_software'],
+    eticheta: '„am preluat cerința" — fără build_software (niciun ordin creat, nimic nu va mișca)',
+  },
 ]
 
 /** Pretențiile de faptă din text pe care jurnalul uneltelor NU le acoperă.

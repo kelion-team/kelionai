@@ -19,7 +19,7 @@ import { config } from '../config.js'
 // gândire (Pro face 5–8s/apel) nu poate transcrie în timp real. Rezerva rămâne
 // pe flash rapid; precizia numelui vine din biasing-ul „Kelion" de mai jos.
 // Creierul e SEPARAT (Pro). Suprascriibil prin MODEL_URECHE.
-const MODEL_URECHE = process.env.MODEL_URECHE || 'gemini-2.5-flash'
+const MODEL_URECHE = process.env.MODEL_URECHE || 'gemini-2.5-flash' // hardcod-permis: implicitul urechii, suprascris din env
 
 /** Îmbracă PCM16 mono într-un antet WAV minim — Gemini acceptă audio/wav, nu
  *  PCM gol. Funcție pură (testată în urecheGemini.test.ts). */
