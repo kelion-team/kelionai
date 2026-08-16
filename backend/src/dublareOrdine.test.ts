@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { amprentaOrdin, eEroarePermanenta, MARCAJ_P27 } from './db.js'
+import { amprentaOrdin, eEroarePermanenta, MARCAJ_P27, seamanaOrdinele } from './db.js'
 
 const db = readFileSync(fileURLToPath(new URL('./db.ts', import.meta.url)), 'utf8')
 
@@ -21,6 +21,35 @@ describe('amprentaOrdin (proba la rulare)', () => {
 
   it('ordine diferite au amprente diferite', () => {
     expect(amprentaOrdin('repară selectorul de limbă')).not.toBe(amprentaOrdin('repară bara de deploy'))
+  })
+})
+
+describe('ACELAȘI SUBIECT în alte cuvinte = dublură (owner, 16 aug: „am cerut unicitate pe ordin, e normal sa ma ignori?")', () => {
+  // Textele REALE din coada lui — trei ordine VII pe același audit de hardcod.
+  const O334 = 'Perform full codebase audit for hardcoded values and UI bubble formatting fixes'
+  const O335 = 'Perform a comprehensive audit of the entire codebase to detect and eliminate any hardcoded values, static fallback strings'
+  const O338 = 'Scan the entire codebase (frontend and backend) for remaining hardcoded values, static fallback strings, fixed'
+
+  it('tripleta din captura lui se prinde: 335~338, 334~335', () => {
+    expect(seamanaOrdinele(O335, O338)).toBe(true)
+    expect(seamanaOrdinele(O334, O335)).toBe(true)
+  })
+
+  it('ordine chiar DIFERITE nu se confundă (fals-pozitivul ar bloca lucrul real)', () => {
+    const websocket = 'Audio Chat: Implement robust websocket reconnection logic for code 1006'
+    const vindecare = 'AUTO-VINDECARE (server logs): în server.logbuffer apare RECURENT eroarea count=2 prag=2'
+    expect(seamanaOrdinele(O335, websocket)).toBe(false)
+    expect(seamanaOrdinele(O335, vindecare)).toBe(false)
+    expect(seamanaOrdinele(websocket, vindecare)).toBe(false)
+  })
+
+  it('ordinele scurte nu intră la ghicit (sub 4 cuvinte de conținut = fără verdict)', () => {
+    expect(seamanaOrdinele('repară login', 'repară login acum')).toBe(false)
+  })
+
+  it('lacăt pe sursă: ușa unică folosește și asemănarea de subiect, nu doar amprenta exactă', () => {
+    expect(db).toMatch(/seamanaOrdinele\(rand\.order_text, orderText\)/)
+    expect(db).toMatch(/același subiect refuzat/)
   })
 })
 

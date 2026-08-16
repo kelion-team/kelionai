@@ -1689,3 +1689,58 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
       poarta faptelor + legile + poarta anti-hardcod sunt COMMISE pe ramură și
       URCATE ca PR DRAFT, NEîmbinate (nicio publicare cât testează el). La
       „continuă": merge + publicare + verificare live. [ ]
+- [x] ORDIN 16 aug (verbatim): „mai bine te silesti pe tine sa-ti faci cerintele
+      sa-i dai tot ce are nevoie sa-i pui tot sa nu mai intepeneasca, sa-i dai
+      gindire si ratiune, sa ofere solutia pina la deploy masurabil" — LEGEA
+      DUCERII LA CAPĂT (legea 4 în LEGILE ADMINULUI, promptul oricărui creier)
+      + detectorul mecanic planFaraExecutie (tură de acțiune + zero unelte +
+      limbaj de plan → demascare pe ecran și în istoric). Lacăte în
+      poartaFaptelor.test.ts. Verificarea live = următoarea cerere de execuție
+      a ownerului: ori pornește unealta în aceeași tură, ori se demască. [ ]
+- [x] 16 aug 06:56, captura ownerului („asta e dovada mea ca ti-ai batut joc de
+      mine"): Kelion a afișat un „Audit al Elementelor Hardcodate" cu modele
+      care NU EXISTĂ în repo (claude-3-5-sonnet-20241022, gpt-4o — grep 0
+      apariții) și a pretins „scanarea completă a codului sursă" fără să aibă
+      vreo unealtă de citit codul. ÎNCHIS CA CLASĂ: familia „am scanat/auditat
+      codul" la poarta faptelor cu unelte:[] — pretenția asta se demască DE
+      FIECARE DATĂ, pe orice model. [ ]
+- [ ] DATORIE (din aceeași captură): Kelion nu poate face un audit REAL al
+      codului pentru că nu are nicio unealtă care citește sursa aplicației —
+      de decis dacă primește una măsurată (ex. verdictul verifica-hardcodari
+      rulat pe server) sau rămâne pe „nu pot verifica". Până atunci poarta îl
+      demască dacă pretinde. [ ]
+- [x] 16 aug, ordinul #331 picat pe poarta „bootul pe dist": a 3-a pică de
+      boot-flake (prevestită în AI-HANDOFF rândul 6b din 15 aug) — poarta
+      constructorului dădea 20s unde poarta PR-urilor dă 45s. Urcat la 45s +
+      raportul de pică poartă acum JURNALUL REAL al bootului (coada din
+      /tmp/kelion-boot-proba.log), nu „cauze uzuale" ghicite. De verificat la
+      următorul ordin construit pe VPS. [ ]
+- [x] ORDIN 16 aug ~07:10 (verbatim): „Orice agent din cei 91, trebuie cind
+      face verificari trebuie sa foloseasca unealta necesara jobului alocat,
+      sau daca e cazul mai multe unelte, asta faci acum aduci dovezi ca ai
+      facut" + „nu te misti pina fiecare agent primeste uneltele real, nu doar
+      text" — LEGEA UNELTEI PE JOB: agenții pe căile ownerului primesc
+      MĂSURĂTORILE reale (stare_masurata, jurnal_masuratori, server_logs,
+      client_errors, ruleaza_portile-rapide), fiecare unealtă executată intră
+      în JURNALUL DOVEZII care pleacă la Kelion (unelte_executate în JSON),
+      poarta faptelor judecă și răspunsul agentului pe jurnalul lui, iar
+      instrucțiunea fiecărui agent poartă legea. Lacăte în agentiA2a.test.ts.
+      Verificare live: după publicare, o delegare de verificare trebuie să
+      întoarcă unelte_executate ne-gol. [ ]
+- [x] 16 aug: poarta anti-hardcod era PREA ÎNGUSTĂ (ownerul: „nu ai scos
+      hardcodul de ce?") — R2 prindea modelul doar lipit de ghilimea, deci
+      'gemini/gemini-2.5-pro' (cu prefix) scăpa. Strânsă + a prins REAL lista
+      pensionată 2.5 din panouLucratori.ts → înlocuită cu treptele vii din
+      config (profund/unic/rapid, deduplicate). Poarta 'hardcodari' e acum și
+      în PORTI (ruleaza_portile) — auditul de hardcod al lui Kelion e de-acum
+      MĂSURAT, nu povestit. [ ]
+- [x] 16 aug, cu coada pe ecran (#334/#335/#338 — TREI ordine VII pe același
+      audit de hardcod; „am cerut unicitate pe ordin, e normal sa ma
+      ignori?"): ușa unică prindea doar amprenta EXACTĂ — formulările diferite
+      ale aceluiași subiect treceau. Adăugat seamanaOrdinele (determinist: ≥4
+      cuvinte de conținut comune + ≥50% din vocabularul ordinului mic) în
+      createBuildJob; tripleta reală din captură e chiar testul. După
+      publicare: dublurile deja născute se închid de owner (Reia/anulare) —
+      ușa nu mai lasă altele noi. STATUT: în cod, pe ramură, porți verzi —
+      NU e „reparat" pentru owner până nu e îmbinat + publicat + văzut în
+      coada lui. [ ]

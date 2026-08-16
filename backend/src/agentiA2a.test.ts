@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { ROSTER, gasesteAgent, carteAgent } from './services/agentiKelion.js'
 import { extrageText } from './routes/a2a.js'
 import { CHEAMA_AGENT_TOOL } from './services/brainToolDefs.js'
@@ -61,6 +63,55 @@ describe('unealta de delegare a creierului (cheama_agent)', () => {
   })
   it('descrierea listează fiecare agent (id — specialitate)', () => {
     for (const a of ROSTER) expect(CHEAMA_AGENT_TOOL.description).toContain(a.id)
+  })
+  it('descrierea îl învață pe creier să citească jurnalul dovezii (16 aug)', () => {
+    expect(CHEAMA_AGENT_TOOL.description).toContain('unelte_executate')
+    expect(CHEAMA_AGENT_TOOL.description).toContain('Listă GOALĂ')
+  })
+})
+
+// ── LEGEA UNELTEI PE JOB (owner, 16 aug, verbatim: „Orice agent din cei 91,
+// trebuie cind face verificari trebuie sa foloseasca unealta necesara jobului
+// alocat... asta faci acum aduci dovezi ca ai facut" + „nu te misti pina
+// fiecare agent primeste uneltele real, nu doar text"). Lacătele citesc CHIAR
+// sursa executorului — o regresie care scoate uneltele sau jurnalul pică aici.
+describe('LEGEA UNELTEI PE JOB — agenții au unelte REALE + jurnalul dovezii', () => {
+  const sursa = readFileSync(fileURLToPath(new URL('./services/agentiKelion.ts', import.meta.url)), 'utf8')
+
+  it('agenții pe căile ownerului primesc MĂSURĂTORILE (stare, jurnal, loguri, erori F12, porți)', () => {
+    for (const unealta of ['stare_masurata', 'jurnal_masuratori', 'server_logs', 'client_errors', 'ruleaza_portile']) {
+      expect(sursa, unealta).toContain(`'${unealta}'`)
+    }
+    expect(sursa).toMatch(/\.\.\.UNELTE_MASURARE\]/)
+    // executorii sunt AI CASEI (sursă unică adminTools), nu copii locale
+    expect(sursa).toMatch(/execSharedAdminTool\(/)
+    expect(sursa).toMatch(/execUserScopedTool\(/)
+  })
+
+  it('fiecare unealtă executată intră în JURNALUL dovezii; refuzul/necunoscuta NU', () => {
+    expect(sursa).toMatch(/const unelteExecutate: string\[\] = \[\]/)
+    expect(sursa).toMatch(/if \(faptaReala\) unelteExecutate\.push\(tc\.function\.name\)/)
+    expect(sursa).toMatch(/unealta_necunoscuta_sau_argumente_goale'[\s\S]{0,40}faptaReala = false/)
+  })
+
+  it('jurnalul pleacă la creierul mare în JSON (unelte_executate) și în RaspunsAgent', () => {
+    expect(sursa).toMatch(/unelte_executate: r\.unelteExecutate/)
+    expect(sursa).toMatch(/unelteExecutate: string\[\]/)
+  })
+
+  it('poarta faptelor judecă și răspunsul agentului, pe jurnalul LUI', () => {
+    expect(sursa).toMatch(/pretentiiFaraFapta\(r\.text, unelteExecutate\)/)
+    expect(sursa).toMatch(/textulDemascarii\(nedovedite\)/)
+  })
+
+  it('porțile grele nu țin tura agentului captivă — doar cele rapide, restul spuse pe față', () => {
+    expect(sursa).toMatch(/PORTI_RAPIDE_AGENT = \['hardcodari', 'sintaxa', 'exporturi', 'lacat-gemini'\]/)
+    expect(sursa).toContain('Porțile grele cerute')
+  })
+
+  it('instrucțiunea fiecărui agent poartă LEGEA UNELTEI PE JOB', () => {
+    expect(sursa).toContain('LEGEA UNELTEI PE JOB')
+    expect(sursa).toContain('Verificare fără unealtă = fabulație')
   })
 })
 

@@ -144,6 +144,14 @@ export const PORTI: Poarta[] = [
   // citește cu unealta `jurnal_masuratori`, ca orice altă poartă.
   { nume: 'rute-citire', comanda: 'node', argumente: ['scripts/proba-rute.mjs'], in: '.' },
   { nume: 'rute-scriere', comanda: 'node', argumente: ['scripts/proba-scriere.mjs'], in: '.' },
+  // ── AUDITUL REAL DE HARDCOD (owner, 16 aug 07:0x: „de ce kelion nu
+  // raporteaza adevarat?") ──────────────────────────────────────────────────
+  // Cauza minciunii din captura lui de la 06:56: întrebat de hardcodări,
+  // creierul N-AVEA nicio unealtă care să citească codul — așa că a INVENTAT
+  // un „audit" cu modele inexistente. Imaginea duce tot repo-ul (Dockerfile
+  // `COPY . .`), deci poarta anti-hardcod chiar POATE rula pe server: de-acum
+  // răspunsul la „ce e hardcodat" e verdictul ăsta măsurat, nu o poveste.
+  { nume: 'hardcodari', comanda: 'node', argumente: ['scripts/verifica-hardcodari.mjs'], in: '.' },
 ]
 
 /** Rădăcina repo-ului în imagine (aplicația pornește din /app). Pe env pentru

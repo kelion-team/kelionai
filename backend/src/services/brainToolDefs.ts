@@ -724,14 +724,14 @@ export const JULES_STATUS_TOOL: Tool = {
 export const RULEAZA_PORTILE_TOOL: Tool = {
   name: 'ruleaza_portile',
   description:
-    "ADMIN ONLY. Rulează PE SERVER porțile reale ale proiectului și întoarce rezultatul MĂSURAT: tipuri (tsc), teste (vitest), lacătul Gemini, exporturi fără utilizator, sintaxă, build frontend. FOLOSEȘTE-O DE DOUĂ ORI la orice schimbare: o dată ÎNAINTE (starea de plecare) și o dată DUPĂ (dovada că n-ai stricat nimic). Verdictul are TREI stări: TRECE, PICĂ și NU POT VERIFICA — o poartă care n-a pornit NU e nici trecută, nici picată, iar raportul devine INCOMPLET, nu 'e bine'. Nu raporta niciodată o stare pe care unealta asta nu ți-a întors-o.",
+    "ADMIN ONLY. Rulează PE SERVER porțile reale ale proiectului și întoarce rezultatul MĂSURAT: tipuri (tsc), teste (vitest), lacătul Gemini, exporturi fără utilizator, sintaxă, build frontend, hardcodări (LEGEA ANTI-HARDCODARE — SINGURUL răspuns adevărat la „ce e hardcodat în aplicație”: rulezi poarta 'hardcodari' și citezi verdictul; un „audit al codului” povestit fără poarta asta e inventat și se demască). FOLOSEȘTE-O DE DOUĂ ORI la orice schimbare: o dată ÎNAINTE (starea de plecare) și o dată DUPĂ (dovada că n-ai stricat nimic). Verdictul are TREI stări: TRECE, PICĂ și NU POT VERIFICA — o poartă care n-a pornit NU e nici trecută, nici picată, iar raportul devine INCOMPLET, nu 'e bine'. Nu raporta niciodată o stare pe care unealta asta nu ți-a întors-o.",
   input_schema: {
     type: 'object',
     properties: {
       porti: {
         type: 'array',
         items: { type: 'string' },
-        description: "Ce porți să ruleze (tipuri, teste, lacat-gemini, exporturi, sintaxa, build-frontend). Gol = toate. Rulează-le pe toate înainte de orice publicare.",
+        description: "Ce porți să ruleze (tipuri, teste, lacat-gemini, exporturi, sintaxa, build-frontend, hardcodari). Gol = toate. Rulează-le pe toate înainte de orice publicare.",
       },
     },
   },
@@ -893,6 +893,9 @@ export const CHEAMA_AGENT_TOOL: Tool = {
     'bine decât un răspuns general. NU delega NICIODATĂ generarea de clipuri sau imagini — ' +
     'pentru „fă-mi un video/clip" cheamă DIRECT generate_video (agenții doar VORBESC, nu generează; ' +
     'măsurat 15 aug: o cerere de clip delegată a lăsat omul fără clip). ' +
+    'Răspunsul vine cu JURNALUL DOVEZII (unelte_executate) — lista uneltelor pe care agentul chiar ' +
+    'le-a rulat. Listă GOALĂ la o sarcină de verificare = agentul a povestit, nu a măsurat: spune asta ' +
+    'pe față, nu vinde povestea drept verificare. ' +
     'Pe lângă lista de mai jos există și agenții adăugați de owner ' +
     'din admin (id necunoscut → unealta îți întoarce lista completă). Alege „agent" din (id — specialitate):\n' +
     ROSTER.map((a) => `${a.id} — ${a.rol}`).join('\n'),

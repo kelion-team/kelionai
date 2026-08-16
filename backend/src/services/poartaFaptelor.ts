@@ -80,6 +80,17 @@ const FAMILII: readonly FamiliePretentie[] = [
     unelte: ['build_software'],
     eticheta: '„am preluat cerința" — fără build_software (niciun ordin creat, nimic nu va mișca)',
   },
+  // AUDITUL INVENTAT (owner, 16 aug 06:56, cu captura: „asta e dovada mea ca
+  // ti-ai batut joc de mine" — un „audit al codului sursă" care numea modele
+  // ce NU EXISTĂ nicăieri în repo: claude-3-5-sonnet, gpt-4o). Singura scanare
+  // REALĂ a codului e poarta anti-hardcod rulată pe server (ruleaza_portile →
+  // 'hardcodari') sau verdictul ei din jurnal (jurnal_masuratori). Un „audit"
+  // povestit fără una din ele = inventat, se demască.
+  {
+    re: /((?<![-\p{L}])am\s+(scanat|auditat)|[îi]n\s+urma\s+(scan|audit)[ăa]?\p{L}*)\b[^.!?\n]{0,80}\b(cod|surs)/iu,
+    unelte: ['ruleaza_portile', 'jurnal_masuratori'],
+    eticheta: '„am scanat codul sursă" — fără ruleaza_portile/jurnal_masuratori: auditul e inventat',
+  },
 ]
 
 /** Pretențiile de faptă din text pe care jurnalul uneltelor NU le acoperă.
@@ -94,6 +105,23 @@ export function pretentiiFaraFapta(text: string, unelteExecutate: readonly strin
   }
   return nedovedite
 }
+
+/** ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere solutia
+ *  pina la deploy masurabil"): pe o tură de EXECUȚIE cu ZERO unelte rulate,
+ *  un răspuns care anunță analiză/pași/plan e fix înghețul de 5 luni — vorbă
+ *  care se oprește singură. Detectat mecanic, strâmt: doar ture de acțiune,
+ *  doar zero unelte, doar limbaj de plan, doar răspuns consistent (nu un „da"
+ *  scurt). */
+export function planFaraExecutie(text: string, unelteExecutate: readonly string[], turaDeActiune: boolean): boolean {
+  if (!turaDeActiune || unelteExecutate.length > 0) return false
+  const t = String(text ?? '')
+  if (t.trim().length < 80) return false
+  return /\b(se analizeaz[ăa]|voi (investiga|verifica|analiza|repara)|pa[șs]ii (sunt|urm)|planul (este|e|meu)|urm[ăa]torii pa[șs]i|încep prin|incep prin)\b/iu.test(t)
+}
+
+export const TEXT_PLAN_FARA_EXECUTIE =
+  `\n\n⚠ PLAN FĂRĂ EXECUȚIE (verificare automată): am anunțat pași, dar n-am chemat NICIO unealtă în tura asta — ` +
+  `exact înghețul interzis de legea ducerii la capăt. Spune „fă-o" și pornesc execuția reală acum, sau numesc blocajul.`
 
 /** Textul demascării — același peste tot (scris + istoric), ca proba să fie
  *  identică oriunde se citește. */

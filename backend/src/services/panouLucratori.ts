@@ -1,4 +1,4 @@
-import { config } from '../config.js'
+import { config, modelUnicCod, modelRapidCod } from '../config.js'
 import { brainComplete } from './brain.js'
 import { repoOpenPR } from './github.js'
 import { resurseGazda, PRAG_INCARCARE_PCT } from './resurse.js'
@@ -52,13 +52,16 @@ export interface RezultatPanou {
 }
 
 /** DIFFERENT models for different workers — that's why it's a panel, not an
- *  echo. GEMINI-ONLY (3 aug — OpenRouter extirpat): trei trepte Gemini pe
- *  aceeași cheie, în forma LiteLLM `gemini/...` pe care o vorbesc uneltele. */
-const MODELE = [
-  'gemini/gemini-2.5-pro',
-  'gemini/gemini-2.5-flash',
-  'gemini/gemini-2.5-flash-lite',
-]
+ *  echo. GEMINI-ONLY (3 aug — OpenRouter extirpat), în forma LiteLLM
+ *  `gemini/...` pe care o vorbesc uneltele. Treptele vin din CONFIG-UL VIU
+ *  (LEGEA ANTI-HARDCODARE, 16 aug — aici stătea lista scrisă de mână pe
+ *  generația 2.5, PENSIONATĂ: exact clasa „modelul pensionat care tace").
+ *  Dedup: profundul poate coincide cu unicul — un panou de 2 modele reale
+ *  bate un panou de 3 nume din care unul e mort. */
+function modeleVii(): string[] {
+  const trepte = [config.modelCreierProfund, modelUnicCod(), modelRapidCod()]
+  return [...new Set(trepte)].map((m) => `gemini/${m}`)
+}
 
 /** A proposal's summary, for the brain. Facts only, in the order they matter
  *  to the judgment. */
@@ -120,14 +123,15 @@ export async function ruleazaPanou(
 
     // ALL AT ONCE, independent. `allSettled`: one that crashes doesn't stop
     // the others — that's why there are three.
+    const modele = modeleVii()
     const rezultate = await Promise.allSettled(
-      echipa.map((l, i) => ruleazaLucrator(l, MODELE[i % MODELE.length], text)),
+      echipa.map((l, i) => ruleazaLucrator(l, modele[i % modele.length], text)),
     )
     const propuneri: Propunere[] = rezultate.map((r, i) =>
       r.status === 'fulfilled'
         ? r.value
         : {
-            lucrator: echipa[i].nume, model: MODELE[i % MODELE.length], ok: false,
+            lucrator: echipa[i].nume, model: modele[i % modele.length], ok: false,
             motiv: String(r.reason).slice(0, 200), aSchimbat: false,
             fisiere: 0, adaugate: 0, sterse: 0, diff: '', testeTrec: null, secunde: 0, log: '',
           },

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { pretentiiFaraFapta, textulDemascarii } from './services/poartaFaptelor.js'
+import { pretentiiFaraFapta, textulDemascarii, planFaraExecutie, TEXT_PLAN_FARA_EXECUTIE } from './services/poartaFaptelor.js'
 
 function sursa(rel: string): string {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -55,6 +55,19 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(pretentiiFaraFapta('Am preluat ordinul tău.', [])).toHaveLength(1)
   })
 
+  it('AUDITUL INVENTAT (captura 06:56): „în urma scanării codului sursă" fără poarta rulată → demascat', () => {
+    const minciunaReala = 'În urma scanării complete a codului sursă (backend/ și frontend/), iată inventarul exact al constantelor.'
+    expect(pretentiiFaraFapta(minciunaReala, [])).toHaveLength(1)
+    // chiar și cu alte unelte executate (ex. documentul creat) — scanarea tot nedovedită rămâne
+    expect(pretentiiFaraFapta(minciunaReala, ['create_doc'])).toHaveLength(1)
+    expect(pretentiiFaraFapta('Am auditat codul aplicației și e curat.', [])).toHaveLength(1)
+    // scanarea REALĂ: poarta anti-hardcod rulată pe server (sau verdictul din jurnal) o acoperă
+    expect(pretentiiFaraFapta(minciunaReala, ['ruleaza_portile'])).toEqual([])
+    expect(pretentiiFaraFapta('Am scanat codul — verdictul din jurnal e curat.', ['jurnal_masuratori'])).toEqual([])
+    // oferta la viitor NU e pretenție
+    expect(pretentiiFaraFapta('Pot scana codul dacă vrei.', [])).toEqual([])
+  })
+
   it('vorbirea normală NU declanșează poarta (fals-pozitivele o omoară)', () => {
     expect(pretentiiFaraFapta('Pot să generez un clip dacă vrei — costă 12 credite.', [])).toEqual([])
     expect(pretentiiFaraFapta('Clipul tău preferat e pe YouTube.', [])).toEqual([])
@@ -66,6 +79,33 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(t).toContain('VERIFICAREA FAPTELOR')
     expect(t).toContain('FALSĂ')
     expect(t).toContain('generate_video')
+  })
+})
+
+describe('ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere solutia pina la deploy masurabil")', () => {
+  // Răspunsul-tip al înghețului de 5 luni: anunță pași, nu cheamă nimic.
+  const PLAN = 'Se analizează cerința ta. Voi verifica modulul de generare, apoi voi repara ruta și voi confirma. Pașii următori sunt clari și încep imediat ce termin analiza.'
+
+  it('tură de acțiune + ZERO unelte + limbaj de plan → ÎNGHEȚ (demascat)', () => {
+    expect(planFaraExecutie(PLAN, [], true)).toBe(true)
+  })
+
+  it('aceeași vorbă, dar cu o unealtă chiar executată → NU e îngheț (a mișcat ceva)', () => {
+    expect(planFaraExecutie(PLAN, ['build_software'], true)).toBe(false)
+  })
+
+  it('tura NU e de acțiune (întrebare, taifas) → planul e doar vorbă permisă', () => {
+    expect(planFaraExecutie(PLAN, [], false)).toBe(false)
+  })
+
+  it('răspuns scurt fără limbaj de plan („da", confirmare) → curat', () => {
+    expect(planFaraExecutie('Da.', [], true)).toBe(false)
+    expect(planFaraExecutie('Gata, pornesc.', [], true)).toBe(false)
+  })
+
+  it('textul demascării numește înghețul și dă pasul următor', () => {
+    expect(TEXT_PLAN_FARA_EXECUTIE).toContain('PLAN FĂRĂ EXECUȚIE')
+    expect(TEXT_PLAN_FARA_EXECUTIE).toContain('fă-o')
   })
 })
 
@@ -88,7 +128,20 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
     expect(chat).toMatch(/LAW OF THE DEED/)
     expect(chat).toMatch(/LAW OF MEASUREMENT/)
     expect(chat).toMatch(/LAW AGAINST HARDCODING/)
+    expect(chat).toMatch(/LAW OF CARRYING THROUGH/)
     expect(chat).toMatch(/let systemPrompt = `\$\{LEGILE_ADMINULUI\}\\n\$\{SYSTEM_PROMPT\}/)
+  })
+
+  it('detectorul de ÎNGHEȚ e legat în tură: judecă pe cereActiune + jurnalul uneltelor', () => {
+    expect(chat).toMatch(/planFaraExecutie\(assistantText, unelteExecutate, cereActiune\)/)
+    expect(chat).toMatch(/assistantText \+= TEXT_PLAN_FARA_EXECUTIE/)
+    expect(chat).toMatch(/\[POARTA FAPTELOR\] plan fără execuție/)
+  })
+
+  it('poarta bootului din constructor poartă DOVADA reală (jurnalul), nu ghicit, și dă 45s', () => {
+    const agent = sursa('../../deploy/constructor-agent.mjs')
+    expect(agent).toMatch(/timeout 45 node dist\/index\.js/)
+    expect(agent).toMatch(/Jurnalul REAL al bootului/)
   })
 })
 
