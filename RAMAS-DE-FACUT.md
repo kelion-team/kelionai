@@ -1663,3 +1663,29 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
       lansată (workflow wf_6422155b: 10 zone × 3 runde + verificatori
       adversariali; agenții rulează pe sesiunea Claude, NU pe cheile/banii
       ownerului). La final: reparat tot ce e confirmat, cu porți + boot. [ ]
+- [x] ORDIN 16 aug ~06:12 (verbatim): „creiaza legi si mecanisme automate de
+      cautare a hardocodului pe aplicatie, si explicat oricarui ai vine foarte
+      clare ca nu e admis hardcodat" — LEGEA ANTI-HARDCODARE scrisă în TOATE
+      documentele de intrare ale AI-urilor (CLAUDE.md, AGENTS.md, GEMINI.md) +
+      în promptul de sistem al creierelor (LEGILE ADMINULUI) + POARTA AUTOMATĂ
+      scripts/verifica-hardcodari.mjs (R1: cifre de bani în frontend; R2:
+      modele AI în afara config-ului; excepția DOAR pe linie, cu motiv:
+      // hardcod-permis: <de ce>). Prima rulare a prins REAL: pragurile £5/£20
+      scrise de mână în WalletButton + Credits (4 locuri) — declarate ca
+      datorie la vedere; rând separat mai jos pentru mutarea lor în server.
+      Lacăte în poartaFaptelor.test. [ ]
+- [ ] DATORIE DECLARATĂ (prinsă de poarta anti-hardcod, 16 aug): textele cu
+      pragurile de bani (£5 multiplu / £20 prima alimentare) din WalletButton
+      și Credits oglindesc regulile serverului — de mutat CIFRELE în răspunsul
+      serverului (/api/tarife sau config servit), ca schimbarea pragului să nu
+      mintă în frontend. [ ]
+- [ ] ORDIN 16 aug ~06:14 (verbatim): „tori agenti sa perie toata aplicatia sa
+      treaca tot in engleza, absolut tot" — TRADUCEREA TOTALĂ EN: pornește cu
+      toți agenții DUPĂ ce marea verificare 3× termină (aceleași fișiere).
+      ÎNTÂI enablerul: verbele englezești în ACTION_INTENT (altfel meniul
+      tradus își pierde uneltele în runda 1) + actualizarea lacătelor care
+      țintesc stringuri românești. [ ]
+- [ ] 16 aug 06:15, ownerul: „treci pe pauza incerc ceva" — PAUZĂ respectată:
+      poarta faptelor + legile + poarta anti-hardcod sunt COMMISE pe ramură și
+      URCATE ca PR DRAFT, NEîmbinate (nicio publicare cât testează el). La
+      „continuă": merge + publicare + verificare live. [ ]

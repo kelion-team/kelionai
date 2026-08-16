@@ -83,3 +83,20 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
     expect(chat).toMatch(/let systemPrompt = `\$\{LEGILE_ADMINULUI\}\\n\$\{SYSTEM_PROMPT\}/)
   })
 })
+
+describe('LEGEA ANTI-HARDCODARE — poarta automată + legea în documentele oricărui AI', () => {
+  it('poarta există, vânează banii din frontend și modelele din afara config-ului', () => {
+    const poarta = sursa('../../scripts/verifica-hardcodari.mjs')
+    expect(poarta).toMatch(/R1 bani-hardcodați/)
+    expect(poarta).toMatch(/R2 model-hardcodat/)
+    expect(poarta).toMatch(/hardcod-permis:/)
+    expect(poarta).toMatch(/process\.exit\(1\)/)
+  })
+
+  it('legea stă scrisă în TOATE documentele de intrare ale AI-urilor', () => {
+    for (const doc of ['../../CLAUDE.md', '../../AGENTS.md', '../../GEMINI.md']) {
+      expect(sursa(doc), doc).toMatch(/LEGEA ANTI-HARDCODARE \(owner, 16 aug 2026/)
+      expect(sursa(doc), doc).toMatch(/verifica-hardcodari\.mjs/)
+    }
+  })
+})

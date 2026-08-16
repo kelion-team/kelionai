@@ -246,7 +246,7 @@ const en: AdminStrings = {
   gemPillLive: 'Gemini Tier 2 is live — the key is serving, so you have credit and it works. {spend}. Click opens Google’s top-up page; the pencil next to the pill sets the credit you see in AI Studio.',
   gemPillDead: 'Gemini is not serving right now ({why}) — if the prepay credit ran out, top it up. Click opens Google’s top-up page; the pencil sets the credit you see in AI Studio. (The exact credit is only on Google’s page — no API exposes it.)',
   gemSpendMeasured: '${n} spent this month (measured)',
-  gemSpendUnreadable: 'the month’s spend is unreadable right now (the journal read failed) — not $0',
+  gemSpendUnreadable: 'the month’s spend is unreadable right now (the journal read failed) — not $0', // hardcod-permis: text DESPRE cifra necitibilă („nu $0") — nu o cifră afișată ca fapt
   pillsLocked: '🔒 measurements locked — unlock the admin (the lock blocks /api/admin/*). Click to enter the code.',
   pillsStale: '⚠ the last reads failed — the figures shown are {min} min old, not current.',
   vpsPillLive: 'VPS: {free} GB free of {total} GB · load {load}% of {cpus} processors ({avg} at 1/5/15 min)',
@@ -402,7 +402,7 @@ const ro: AdminStrings = {
   gemPillLive: 'Gemini Tier 2 activ — cheia servește, deci ai credit și merge. {spend}. Click: pagina de alimentare Google; creionul de lângă pastilă scrie creditul din AI Studio.',
   gemPillDead: 'Gemini nu servește acum ({why}) — dacă s-a epuizat creditul prepay, reîncarcă-l. Click: pagina de alimentare Google; creionul scrie creditul din AI Studio. (Creditul exact e doar pe pagina Google — niciun API nu-l expune.)',
   gemSpendMeasured: '${n} cheltuiți luna asta (măsurat)',
-  gemSpendUnreadable: 'cheltuiala lunii e necitibilă acum (citirea jurnalului a picat) — nu $0',
+  gemSpendUnreadable: 'cheltuiala lunii e necitibilă acum (citirea jurnalului a picat) — nu $0', // hardcod-permis: text DESPRE cifra necitibilă („nu $0") — nu o cifră afișată ca fapt
   pillsLocked: '🔒 măsurători blocate — deblochează adminul (lacătul blochează /api/admin/*). Click pentru cod.',
   pillsStale: '⚠ ultimele citiri au picat — cifrele afișate sunt vechi de {min} min, nu actuale.',
   vpsPillLive: 'VPS: {free} GB liberi din {total} GB · încărcare {load}% din {cpus} procesoare ({avg} la 1/5/15 min)',

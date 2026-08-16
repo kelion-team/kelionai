@@ -92,9 +92,9 @@ export default function Credits(): React.JSX.Element {
     if (!Number.isFinite(customVal) || customVal <= 0) {
       customErr = 'Introdu o sumă validă.'
     } else if (customVal % 5 !== 0) {
-      customErr = 'Suma trebuie să fie un multiplu de £5.'
+      customErr = 'Suma trebuie să fie un multiplu de £5.' // hardcod-permis: oglindește regula serverului (multiplu de £5) — mutarea în server e rând în RAMAS
     } else if (customVal < minAmount) {
-      customErr = firstTopUp ? 'Prima reîncărcare trebuie să fie de minim £20.' : 'Suma minimă este £5.'
+      customErr = firstTopUp ? 'Prima reîncărcare trebuie să fie de minim £20.' : 'Suma minimă este £5.' // hardcod-permis: oglindește regula serverului (minim £20) — idem
     }
   }
   const isCustomValid = isCustomFilled && !customErr

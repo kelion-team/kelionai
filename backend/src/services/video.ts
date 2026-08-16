@@ -32,9 +32,9 @@ function noteazaIncercarea(verdict: string, ok: boolean): void {
  *  (2 aug 2026). Modele necunoscute NU primesc un preț inventat: cost null →
  *  generarea refuză, nu „estimează". */
 export const PRET_VIDEO_USD_PE_SECUNDA: Record<string, number> = {
-  'veo-3.1-generate-preview': 0.4,
-  'veo-3.1-fast-generate-preview': 0.1,
-  'veo-3.1-lite-generate-preview': 0.05,
+  'veo-3.1-generate-preview': 0.4, // hardcod-permis: cheia tabelului oficial de prețuri Veo — tabelul E sursa
+  'veo-3.1-fast-generate-preview': 0.1, // hardcod-permis: cheia tabelului oficial de prețuri Veo
+  'veo-3.1-lite-generate-preview': 0.05, // hardcod-permis: cheia tabelului oficial de prețuri Veo
 }
 
 /** Veo 3.1 acceptă doar 4, 6 sau 8 secunde — cererea se duce la cea mai

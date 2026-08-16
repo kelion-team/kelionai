@@ -394,7 +394,7 @@ export function isGeminiQuotaError(e: unknown): boolean {
 // gemini-3.x-image. Primul = succesorul direct al lui 3.0; rezerva urcă pe
 // 3.1-flash-image (2.5-flash-image există dar întorcea 200 fără imagine).
 const IMAGEN_MODEL = 'imagen-4.0-generate-001'
-const GEMINI_IMAGE_MODEL = 'gemini-3.1-flash-image'
+const GEMINI_IMAGE_MODEL = 'gemini-3.1-flash-image' // hardcod-permis: implicitul modelului de imagini, suprascris din env
 
 /** Imagen's predict endpoint. Bytes on success, null on any miss (missing key
  *  is handled by the caller). */

@@ -72,9 +72,9 @@ export function WalletButton({
   const [codeCopied, setCodeCopied] = useState(false)
 
   const errText = (code: string): string => {
-    if (code === 'must_be_multiple_of_5') return ro ? 'Suma trebuie să fie multiplu de £5.' : 'Amount must be a multiple of £5.'
-    if (code === 'first_topup_min_20') return ro ? 'Prima alimentare: minim £20.' : 'First top-up: £20 minimum.'
-    if (code === 'min_5') return ro ? 'Minim £5.' : 'Minimum £5.'
+    if (code === 'must_be_multiple_of_5') return ro ? 'Suma trebuie să fie multiplu de £5.' : 'Amount must be a multiple of £5.' // hardcod-permis: oglindește regula serverului (must_be_multiple_of_5) — mutarea textelor în server e rând în RAMAS
+    if (code === 'first_topup_min_20') return ro ? 'Prima alimentare: minim £20.' : 'First top-up: £20 minimum.' // hardcod-permis: oglindește regula serverului (first_topup_min_20) — idem
+    if (code === 'min_5') return ro ? 'Minim £5.' : 'Minimum £5.' // hardcod-permis: oglindește regula serverului (min_5) — idem
     if (code === 'revolut_link_lipsa') return ro ? 'Plățile nu sunt configurate pe server.' : 'Payments are not configured on the server.'
     if (code === 'offline') return ro ? 'Fără conexiune — încearcă din nou.' : 'No connection — try again.'
     return (ro ? 'Plata nu a pornit: ' : 'Payment failed to start: ') + code
@@ -302,8 +302,8 @@ export function WalletButton({
             {firstTopUp && (
               <span className="wallet-menu-note">
                 {ro
-                  ? 'Prima alimentare: £20 minim (pornește creierul), apoi multipli de £5.'
-                  : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'}
+                  ? 'Prima alimentare: £20 minim (pornește creierul), apoi multipli de £5.' // hardcod-permis: explicația pragului serverului — idem
+                  : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'} // hardcod-permis: explicația pragului serverului (EN) — idem
               </span>
             )}
             <div className="wallet-amounts">

@@ -31,7 +31,7 @@ export interface BrainCostEstimate {
 const STATIC_FALLBACK_PRICES: Record<string, { input: number; output: number }> = {
   // Google published list price for Gemini 2.5 Flash ($0.30/1M in, $2.50/1M
   // out), noted 2026-07 — estimate, kept only for the no-catalog case.
-  'gemini-2.5-flash': { input: 0.3 / 1e6, output: 2.5 / 1e6 },
+  'gemini-2.5-flash': { input: 0.3 / 1e6, output: 2.5 / 1e6 }, // hardcod-permis: cheia tabelului oficial de prețuri Google — tabelul E sursa
 }
 
 /** Pure per-token math from a price pair. Exported for tests. */
