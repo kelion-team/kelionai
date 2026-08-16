@@ -29,13 +29,26 @@ flock -n 9 || exit 0   # altă publicare e în curs — nu ne suprapunem
 TOKEN=$(grep '^GITHUB_TOKEN=' "$ENVFILE" 2>/dev/null | head -1 | cut -d= -f2-)
 [ -n "$TOKEN" ] || exit 0   # fără token nu putem întreba GitHub — ieșim tăcut
 
-# 1. Vârful lui master — prin API (auth cu token; merge și când Actions e mort).
-MASTER=$(curl -s -m 20 -H "Authorization: Bearer $TOKEN" \
-  -H 'Accept: application/vnd.github.sha' \
-  https://api.github.com/repos/kelion-team/kelionai/commits/master | head -c 40)
+# 1. Vârful lui master — prin `git ls-remote` (CANALUL GIT, nu API-ul REST).
+# (owner, 16 aug: „ia un baros" — publicarea stătea blocată fiindcă citea sha-ul
+# prin API-ul GitHub, exact token-ul care intra în RATE-LIMIT; când API-ul era
+# limitat, răspunsul invalid trimitea scriptul pe `exit 0` și nu publica NIMIC
+# ore în șir, deși master avansase. `git ls-remote` merge pe alt canal (proxy-ul
+# de git), care NU e prins de rate-limit-ul REST → publicarea nu mai poate fi
+# înfometată de o limită de API.) Fallback pe API doar dacă git-ul chiar pică.
+MASTER=$(git ls-remote "https://x-access-token:${TOKEN}@github.com/kelion-team/kelionai.git" refs/heads/master 2>/dev/null | head -c 40)
 case "$MASTER" in
   [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) : ;;
-  *) exit 0 ;;   # răspuns invalid (rate-limit/pană API) — încercăm la următorul ciclu
+  *)
+    # git a picat (rețea) — încercăm API-ul ca plasă, apoi renunțăm pe ciclul ăsta.
+    MASTER=$(curl -s -m 20 -H "Authorization: Bearer $TOKEN" \
+      -H 'Accept: application/vnd.github.sha' \
+      https://api.github.com/repos/kelion-team/kelionai/commits/master | head -c 40)
+    case "$MASTER" in
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) : ;;
+      *) exit 0 ;;   # nici git, nici API — încercăm la următorul ciclu
+    esac
+    ;;
 esac
 SHORT=$(printf '%s' "$MASTER" | cut -c1-7)
 
