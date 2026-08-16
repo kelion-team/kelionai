@@ -636,8 +636,6 @@ export default function AdminPanel({
   // pornită lucrătorul nu ia nimic — ordinul stătea „în coadă · 0%" la
   // nesfârșit după promisiunea „max. 2 minute", fără nicio explicație.
   const [buildPaused, setBuildPaused] = useState(false)
-  // COMUTATORUL MANUAL DE CREIER (owner, 15 aug): apăsat = Fable 5 obligatoriu.
-  const [fortaFable, setFortaFable] = useState(false)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
   // EVALUAREA CERINȚEI (owner, 13 aug): pe măsură ce scrii ordinul, evaluăm
@@ -951,13 +949,12 @@ export default function AdminPanel({
   const refreshBuildJobs = (): void => {
     fetch('/api/admin/constructor', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; fortaFable?: boolean } | null) => {
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean } | null) => {
         // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
         // nu se lasă „Niciun ordin încă" peste o citire picată.
         if (j?.jobs) {
           setBuildJobs(j.jobs)
           setBuildPaused(!!j.paused)
-          setFortaFable(!!j.fortaFable)
         } else setBuildJobs(null)
       })
       .catch(() => setBuildJobs(null))
@@ -2627,34 +2624,13 @@ export default function AdminPanel({
                     >
                       {plafon.activ ? 'Oprește limita' : 'Pornește limita'}
                     </button>
-                    {/* COMUTATORUL MANUAL DE CREIER (owner, 15 aug: „buton
-                        apeși se trece pe fable 5 obligatoriu, dezapeși trece
-                        normal"). Apăsat: TOATE turele constructorului merg pe
-                        Fable 5, fără cădere tăcută pe Gemini; neapăsat: logica
-                        automată (Gemini principal, Fable la reluări). */}
-                    <button
-                      type="button"
-                      className="ghost"
-                      style={{
-                        fontSize: 12,
-                        padding: '3px 10px',
-                        ...(fortaFable ? { borderColor: '#7aa2ff', color: '#7aa2ff', fontWeight: 700 } : {}),
-                      }}
-                      title={fortaFable
-                        ? 'Fable 5 FORȚAT: toate turele constructorului merg pe Fable 5; un eșec al lui se spune, nu cade tăcut pe Gemini. Apasă ca să revii la logica automată.'
-                        : 'Apasă ca să forțezi TOATE turele constructorului pe Fable 5 (obligatoriu). Neapăsat: Gemini principal, Fable 5 la reluări.'}
-                      onClick={async () => {
-                        const r = await fetch('/api/admin/constructor/forta-fable', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          credentials: 'include',
-                          body: JSON.stringify({ activ: !fortaFable }),
-                        }).then((x) => (x.ok ? (x.json() as Promise<{ fortaFable?: boolean }>) : null)).catch(() => null)
-                        if (r) setFortaFable(!!r.fortaFable)
-                      }}
-                    >
-                      {fortaFable ? '🔵 Fable 5 FORȚAT — apasă pt. normal' : 'Forțează Fable 5'}
-                    </button>
+                    {/* Motorul constructorului e AIDER (unic), iar creierul lui e
+                        DOAR Gemini (rapid → performant). Comutatorul „Forțează
+                        Fable 5" a fost SCOS — owner, 16 aug: „constructor unic
+                        aider… fable iese total de peste tot… nu se comuta nimic". */}
+                    <span className="chat-hint" style={{ fontSize: 12, opacity: 0.8 }}>
+                      Motor: Aider · creier: Gemini (rapid → performant)
+                    </span>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
                     <label className="chat-hint" style={{ fontSize: 12 }}>

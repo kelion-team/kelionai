@@ -127,21 +127,12 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       jobs,
       paused: await isOpsPaused().catch(() => false),
-      // COMUTATORUL MANUAL (owner, 15 aug): starea butonului „Fable 5 forțat".
-      fortaFable: (await loadKv('constructor:forta_fable').catch(() => null)) === '1',
     })
   })
 
-  // COMUTATORUL MANUAL DE CREIER (owner, 15 aug: „buton apeși se trece pe
-  // fable 5 obligatoriu, dezapeși trece normal"). Doar starea se schimbă aici;
-  // efectul e în /api/constructor/creier, la fiecare tură.
-  app.post<{ Body: { activ?: boolean } }>('/api/admin/constructor/forta-fable', async (req, reply) => {
-    const user = cerAdmin(req, reply)
-    if (!user) return
-    const activ = req.body?.activ === true
-    await saveKv('constructor:forta_fable', activ ? '1' : '0').catch(() => {})
-    return reply.send({ ok: true, fortaFable: activ })
-  })
+  // (COMUTATORUL „Fable 5 forțat" a fost SCOS — owner, 16 aug: „constructor unic
+  // aider… fable iese total de peste tot… nu se comuta nimic". Constructorul
+  // rulează pe motorul Aider, iar creierul lui e DOAR Gemini, fără comutator.)
 
   // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
   // ștergere" + „scoate 30/31 dacă nu le poate face, ai funcțiile făcute") ─────
@@ -273,107 +264,84 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // ESCALADARE+REVENIRE: Gemini întâi; dacă nu poate → Fable 5; iar fiindcă FIECARE
   // pas reintră pe rută, se revine SINGUR pe Gemini când acesta își revine. Dacă
   // pică ambele → eroare, iar constructorul o clasifică „amânabil" și reia.
-  app.post<{ Body: { messages?: OrMessage[]; tools?: unknown[]; model?: string; job?: number; attempt?: number } }>(
-    '/api/constructor/creier',
-    async (req, reply) => {
-      if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-        return reply.code(401).send({ error: 'unauthorized' })
+  // ── CREIERUL CONSTRUCTORULUI, PRIN APP ─────────────────────────────────────
+  // Un SINGUR handler, două uși (fără duplicare — jscpd pe zero):
+  //   • /api/constructor/creier — forma noastră {choices,usage} (creierul vechi
+  //     al agentului o cere cu x-bridge-secret).
+  //   • /api/constructor/openai/v1/chat/completions — ACEEAȘI escaladare
+  //     Gemini→Fable, împachetată OpenAI-complet, ca MOTORUL AIDER (owner, 16
+  //     aug: „scoti tot din constructor si instalezi doar aider... aider va avea
+  //     absolut toate instrumentele... real") să ceară creierul TOT prin app
+  //     (legea 13 aug — constructorul NU ține chei de furnizor). Aider trimite
+  //     bridge-secretul ca `Authorization: Bearer`, nu ca antet propriu.
+  const creierHandler = (esteOpenai: boolean) => async (
+    req: import('fastify').FastifyRequest<{ Body: { messages?: OrMessage[]; tools?: unknown[]; model?: string; job?: number; attempt?: number } }>,
+    reply: import('fastify').FastifyReply,
+  ) => {
+      const bearer = String(req.headers['authorization'] ?? '').replace(/^Bearer\s+/i, '')
+      const secretOk =
+        !!config.bridgeSecret &&
+        (req.headers['x-bridge-secret'] === config.bridgeSecret || (esteOpenai && bearer === config.bridgeSecret))
+      if (!secretOk) return reply.code(401).send({ error: 'unauthorized' })
+      // Împachetează payload-ul nostru {choices,usage,modelServit} în forma
+      // OpenAI-completă (id/object/created/finish_reason) pe care o cere LiteLLM
+      // din Aider — DOAR pe ușa openai; pe /creier răspunsul rămâne neatins.
+      const raspunde = (payload: { choices?: { message?: unknown }[]; usage?: unknown; modelServit?: string }): unknown => {
+        if (!esteOpenai) return reply.send(payload)
+        const msg = (payload?.choices?.[0]?.message ?? { role: 'assistant', content: '' }) as { role?: string; content?: string; tool_calls?: unknown[] }
+        return reply.send({
+          id: `chatcmpl-${incercareOrdin}-${Date.now()}`,
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: payload?.modelServit || 'kelion-constructor',
+          choices: [{ index: 0, message: msg, finish_reason: msg.tool_calls?.length ? 'tool_calls' : 'stop' }],
+          usage: payload?.usage ?? {},
+        })
+      }
       const messages = Array.isArray(req.body?.messages) ? (req.body.messages as OrMessage[]) : []
       if (!messages.length) return reply.code(400).send({ error: 'fara_mesaje' })
       const rawTools = Array.isArray(req.body?.tools) ? req.body.tools : []
-      // ── ESCALADAREA PE EȘUARE (ordinul ownerului, 15 aug: „constructorul dacă
-      // are o eșuare, următoarea tură o escaladează automat pe nivel superior
-      // Fable 5. Nu pornește duplicat pe același model, se revine pentru un nou
-      // job la primul model.") ────────────────────────────────────────────────
-      // `attempt` vine de la agent (claim → job.attempts): încercarea 1 =
-      // Gemini principal (mai jos, neschimbat); încercarea ≥2 = drumul care a
-      // EȘUAT nu se repetă — Fable 5 conduce TURA întreagă. Gemini rămâne doar
-      // plasă de avarie sub el (o rezervă cu cheia invalidă nu are voie să
-      // omoare jobul), iar un ORDIN NOU pornește iar pe Gemini — revenirea e
-      // automată prin chiar attempt=1 al jobului următor.
+      // ── CREIERUL CONSTRUCTORULUI = DOAR GEMINI (owner, 16 aug: „ramine doar
+      // gemini rapid si cu escaladarea spusa pe modelul performant gemini... fable
+      // iese total de peste tot"). Fable 5 a fost SCOS COMPLET din constructor;
+      // niciun comutator — motorul e Aider, iar creierul lui e Gemini, atât. Rapid
+      // întâi (viteză); pe eșec / încercarea ≥2 → modelul PERFORMANT Gemini
+      // (gândire high), ANUNȚAT pe față. Un ordin nou repornește pe rapid.
       const incercareOrdin = Math.max(1, Number(req.body?.attempt ?? 1) || 1)
-      const { fable5Disponibil, fable5Chat } = await import('../services/fable5Constructor.js')
-      // ── COMUTATORUL MANUAL (owner, 15 aug: „buton apeși se trece pe fable 5
-      // obligatoriu, dezapeși trece normal") ─────────────────────────────────
-      // Apăsat (kv constructor:forta_fable='1'): TOATE turele merg pe Fable 5,
-      // iar un eșec al lui NU cade tăcut pe Gemini — „obligatoriu" care ar
-      // aluneca pe alt creier ar minți butonul; eroarea se spune pe față.
-      // Neapăsat: logica de azi, neatinsă (Gemini principal, Fable la reluări).
-      const fortaFable = (await loadKv('constructor:forta_fable').catch(() => null)) === '1'
-      if (fortaFable) {
-        if (!fable5Disponibil()) {
-          return reply.code(503).send({ error: 'creier_esec', motiv: 'Fable 5 FORȚAT de tine, dar cheia (ANTHROPIC_API_KEY) nu e pusă — pune cheia sau dezapasă butonul' })
-        }
-        try {
-          const rasp = await fable5Chat(messages, rawTools)
-          esecuriCreierLaRand = 0
-          return reply.send(rasp)
-        } catch (e) {
-          const motivF = (e as Error).message.slice(0, 200)
-          return reply.code(503).send({ error: 'creier_esec', motiv: `Fable 5 FORȚAT de tine a picat: ${motivF} — nu cad pe Gemini cât butonul e apăsat` })
-        }
-      }
-      let fableEsecSus = ''
-      if (incercareOrdin > 1 && fable5Disponibil()) {
-        try {
-          const rasp = await fable5Chat(messages, rawTools)
-          esecuriCreierLaRand = 0
-          return reply.send(rasp)
-        } catch (e) {
-          fableEsecSus = (e as Error).message.slice(0, 160)
-          req.log.warn(
-            `escaladarea pe Fable 5 (încercarea ${incercareOrdin}) a picat: ${fableEsecSus} — cad pe Gemini ca plasă`,
-          )
-        }
-      }
-      // ── PRINCIPAL: GEMINI „ULTRA" (owner, 14 aug: „ultra ca al doilea creier,
-      // da? primul e blocat") = constructorGeminiModel (gemini-pro-latest — mereu
-      // cel mai puternic Pro; NU modelul unic al chatului, care e sigilat pe flash
-      // pentru viteză. Constructorul lucrează în fundal — puterea bate viteza).
-      // Până azi ruta folosea geminiModelGreu crezând că e Pro; din 7 aug modelul
-      // unic e flash, deci constructorul moștenise flash. Reparat: treaptă proprie.
+      // Pe ușa openai (Aider) modelul cerut e un simbol ('kelion-constructor') — îl
+      // ignorăm și folosim treptele reale ale casei; pe /creier rămâne cum era.
+      const modelCerut = esteOpenai ? '' : String(req.body?.model ?? '').trim()
       const { geminiDirectAvailable, geminiDirectChat } = await import('../services/geminiDirect.js')
       let gemeniEsec = ''
       if (geminiDirectAvailable()) {
-        // Uneltele constructorului (OpenAI function) → formatul geminiDirectChat;
-        // răspunsul → înapoi în format OpenAI. Punțile sunt în creier2Constructor.ts.
         const tools = uneltePentruCreier2(rawTools)
-        const candidateModels = [
-          String(req.body?.model ?? '').trim() || config.constructorGeminiModel,
-          config.geminiModelGreu,
-          config.geminiModel,
-        ].filter((m, idx, arr) => m && arr.indexOf(m) === idx)
-
+        const modelRapid = modelCerut || config.geminiModel // Gemini rapid (viteză)
+        const modelPerformant = config.geminiModelGreu // Gemini performant (escaladare)
+        // Escaladare ANUNȚATĂ: încercarea ≥2 pornește DIRECT pe performant.
+        const candidateModels = (incercareOrdin > 1
+          ? [modelPerformant, modelRapid]
+          : [modelRapid, modelPerformant]
+        ).filter((m, idx, arr) => m && arr.indexOf(m) === idx)
         for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
           const m = candidateModels[mIdx]
-          const isPrimary = mIdx === 0
-          const maxIncercariGemini = isPrimary ? 2 : 1
-          // Timeout generos pentru raționament complex / fișiere mari:
-          // Gemini Pro cu reasoning high are nevoie de până la 90s pe prompturi dense.
-          const modelTimeoutMs = isPrimary ? 95_000 : 65_000
-          const reasoningLevel = isPrimary ? 'high' : 'medium'
-
+          const performant = m === modelPerformant
+          const maxIncercariGemini = mIdx === 0 ? 2 : 1
+          const modelTimeoutMs = performant ? 95_000 : 65_000
+          const reasoningLevel = performant ? 'high' : 'medium'
+          if (performant) req.log.info('escaladare pe modelul performant Gemini: ' + m)
           for (let incercare = 1; incercare <= maxIncercariGemini; incercare++) {
             try {
-              const r = await geminiDirectChat(m, messages, tools, {
-                reasoning: reasoningLevel,
-                toolChoice: 'required',
-                timeoutMs: modelTimeoutMs,
-              })
+              const r = await geminiDirectChat(m, messages, tools, { reasoning: reasoningLevel, toolChoice: 'required', timeoutMs: modelTimeoutMs })
               if (r.costUsd > 0) void recordCost('kelion-constructor', 'gemini', r.costUsd)
-              esecuriCreierLaRand = 0 // creierul a servit — lanțul de eșecuri s-a rupt
-              return reply.send(raspunsCreier2(r))
+              esecuriCreierLaRand = 0
+              return raspunde(raspunsCreier2(r))
             } catch (e) {
               const errStr = (e as Error).message || ''
               gemeniEsec = errStr.slice(0, 200)
               const isTimeout = /timeout|aborted/i.test(errStr)
               const isTransient = isTimeout || /503|502|504|500|429|overload|unavailable|resource_exhausted|high demand|econnreset/i.test(errStr)
-              // La timeout pe modelul curent, trecem direct la următorul model candidat
               if (isTimeout) break
-              if (incercare < maxIncercariGemini && isTransient) {
-                await new Promise((resolve) => setTimeout(resolve, incercare * 1000))
-                continue
-              }
+              if (incercare < maxIncercariGemini && isTransient) { await new Promise((resolve) => setTimeout(resolve, incercare * 1000)); continue }
               break
             }
           }
@@ -381,32 +349,15 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       } else {
         gemeniEsec = 'gemini_indisponibil (cheie lipsă)'
       }
-      // ── REZERVĂ: FABLE 5 (owner, 14 aug: „când nu merge repara vreau să cadă pe
-      // fable 5"). Tot PRIN APP (cheia Anthropic stă aici, nu în constructor);
-      // mesajele+uneltele sunt convertite conform endpoint-ului Anthropic (/v1/messages).
-      // REVENIRE: fiecare pas nou reîncepe cu Gemini (mai sus), deci
-      // se revine SINGUR pe principal când Gemini își revine — nu rămâne pe rezervă.
-      // (Pe încercarea ≥2 Fable 5 a condus deja SUS; aici nu-l mai repetăm.)
-      if (incercareOrdin === 1 && fable5Disponibil()) {
-        try {
-          const rasp = await fable5Chat(messages, rawTools)
-          esecuriCreierLaRand = 0 // rezerva a servit — lanțul de eșecuri s-a rupt
-          return reply.send(rasp)
-        } catch (e) {
-          const motiv = `creier_esec: gemini(${gemeniEsec}) → fable5(${(e as Error).message.slice(0, 160)})`
-          creierApicat(motiv) // AMBELE creiere jos — la 3 la rând, alarmă în panou
-          return reply.code(502).send({ error: motiv })
-        }
-      }
-      // Nici Gemini, nici Fable 5 — onest, cu drumul REAL parcurs în mesaj:
-      // pe escaladare Fable a condus și a picat SUS; altfel rezerva e inactivă.
-      const motiv = fableEsecSus
-        ? `creier_esec (escaladare încercarea ${incercareOrdin}): fable5(${fableEsecSus}) → gemini(${gemeniEsec})`
-        : `creier_esec: gemini(${gemeniEsec}); rezerva Fable 5 INACTIVĂ (pune ANTHROPIC_API_KEY în app)`
+      // DOAR Gemini — nicio rezervă Fable (scoasă total). Eșecul se spune pe față;
+      // ordinul e amânabil (coada reia), exact ca înainte.
+      const motiv = `creier_esec: gemini(${gemeniEsec}) — constructorul rulează DOAR pe Gemini (rapid → performant), fără altă rezervă`
       creierApicat(motiv)
       return reply.code(gemeniEsec.includes('indisponibil') ? 503 : 502).send({ error: motiv })
-    },
-  )
+  }
+  // Ușa veche (forma noastră) + ușa OpenAI a MOTORULUI AIDER — același creier.
+  app.post('/api/constructor/creier', creierHandler(false))
+  app.post('/api/constructor/openai/v1/chat/completions', creierHandler(true))
 
   app.post<{
     Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }

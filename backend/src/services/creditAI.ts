@@ -252,47 +252,10 @@ async function randGoogleCloud(): Promise<CreditAI> {
 // adminTools: la ordinul explicit al ownerului, Kelion tot poate măsura dacă
 // Jules servește — dar nimic nu se mai afișează nechemat.)
 
-/** ── FABLE 5 (Claude): REZERVA creierului constructorului (owner, 14 aug) ──────
- *  „schimbă-mi constructorul cu gemeni ultra… când nu merge repara vreau să cadă pe
- *  fable 5". Constructorul rulează pe Gemini (PRINCIPAL — vezi rândul Gemini) și cade
- *  pe Fable 5 când Gemini nu poate. Fable 5 merge PRIN APP (cheia ANTHROPIC_API_KEY
- *  stă în app, nu în constructor). Anthropic NU expune un sold prin API public → nu
- *  inventez o cifră (regula #1); becul vine din PROBA REALĂ a cheii la Anthropic:
- *  validă = VERDE, invalidă/lipsă = ROȘU — MĂSURAT, deci niciodată GRI. */
-async function randFable(): Promise<CreditAI> {
-  const { fable5Disponibil, fable5Valida } = await import('./fable5Constructor.js')
-  const activa = fable5Disponibil()
-  // PROBA REALĂ (owner, 14 aug: becul verde a MINȚIT — cheia era pusă dar
-  // INVALIDĂ, rezerva moartă, raportul „gata", constructorul blocat). De-acum
-  // „servește" = dovada de la Anthropic (GET /v1/models, gratuit, cache 10 min),
-  // nu prezența cheii în env. O cheie pusă dar refuzată = ROȘU, cu motivul exact.
-  const proba = await fable5Valida()
-  return {
-    furnizor: 'Fable 5 (Claude — rezerva constructorului)',
-    alimenteaza: 'creierul constructorului când Gemini nu poate repara (rezervă)',
-    cheieConfigurata: activa,
-    // Fără sold real: Anthropic nu expune „cât mai ai" prin API public → nu fabricăm
-    // o cifră; becul vine din „servește" (proba cheii), nu dintr-un 0 fals.
-    ramas: picat(
-      'Anthropic nu expune sold prin API public — se vede în consolă (Billing)',
-      activa
-        ? 'Anthropic nu dă „cât mai ai" prin API; cheltuiala se vede în consola Anthropic'
-        : 'cheia Fable 5 (ANTHROPIC_API_KEY) nu e pusă în app — rezerva e INACTIVĂ',
-    ),
-    // Anthropic nu trece prin jurnalul nostru de costuri — nu pun 0 în locul gol.
-    cheltuitLuna: picat(
-      'jurnalul de costuri (cost_events)',
-      'Fable 5 (Anthropic) nu trece prin jurnalul nostru — n-am ce măsura, deci nu raportez o cifră',
-    ),
-    serveste: reusit(
-      'proba REALĂ a cheii la Anthropic (GET /v1/models — gratuit, cache 10 min)',
-      { da: proba.ok, detaliu: proba.motiv },
-      0,
-    ),
-    // Link-ul EXACT de reîncărcare/facturare Anthropic.
-    facturare: 'https://console.anthropic.com/settings/billing',
-  }
-}
+// (RÂNDUL „Fable 5 (rezerva constructorului)" a fost SCOS — owner, 16 aug:
+// „fable iese total de peste tot… ramine doar gemini rapid si cu escaladarea
+// pe modelul performant gemini". Constructorul rulează pe motorul Aider, iar
+// creierul lui e DOAR Gemini — nu mai există rezervă Fable de arătat.)
 
 /** Raportul complet, un rând pe furnizor. Un rând care n-a putut fi citit
  *  RĂMÂNE în listă, cu motivul lui — dispariția tăcută ar fi tot o minciună. */
@@ -303,5 +266,5 @@ export async function crediteAI(): Promise<CreditAI[]> {
   // (services/jules.ts) și uneltele jules_* RĂMÂN — Kelion îl poate chema DOAR
   // la ordinul explicit al ownerului. randJules există mai jos pentru sonda
   // la cerere (julesServeste prin unealtă), nu pentru afișaj.
-  return Promise.all([randGemini(), randSerper(), randFable(), randGoogleCloud()])
+  return Promise.all([randGemini(), randSerper(), randGoogleCloud()])
 }

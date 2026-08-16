@@ -1744,3 +1744,18 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
       ușa nu mai lasă altele noi. STATUT: în cod, pe ramură, porți verzi —
       NU e „reparat" pentru owner până nu e îmbinat + publicat + văzut în
       coada lui. [ ]
+- [x] ORDIN 16 aug (verbatim, rafală): „constructor unic aider… scoti tot din
+      constructor si instalezi doar aider… aider va avea absolut toate
+      instrumentele necesare pentru a repara si construi, real… aider trebuie sa
+      fie permanet de creiere si kelion real, colaboreaza 100%… ramine doar
+      gemini rapid si cu escaladarea spusa pe modelul performant gemini… fable
+      iese total de peste tot… nu se comuta nimic". LIVRAT: motorul
+      constructorului = AIDER unic (construiesteCuAider/ruleazaAider, rulat în
+      atelier, creier PRIN APP pe /api/constructor/openai cu bridge-secret ca
+      Bearer — fără chei în constructor); creierul = DOAR Gemini (rapid →
+      performant, escaladare anunțată); FABLE SCOS TOTAL (fable5Constructor.ts,
+      creditAIFable.test, fortaFable.test, rândul din creditAI, comutatorul din
+      AdminPanel + ruta forta-fable). Porți verzi 2×, boot OK, endpoint openai
+      gardat (401 fără secret). NEPROBAT LIVE: Aider construind un ordin real pe
+      VPS (Aider + cheia Gemini nu există local; Gemini era sugrumat 429) — se
+      probează la primul ordin pe VPS după publicare. [ ]
