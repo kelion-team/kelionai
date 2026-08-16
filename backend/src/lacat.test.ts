@@ -122,14 +122,13 @@ describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: �
   })
 })
 
-describe('LACĂT — constructor: creierul PRIN APP (Gemini principal → Fable 5 rezervă)', () => {
-  // Owner, 12 aug: „nu are ce căuta Gemini acolo" → constructor pe creier propriu.
-  // 13 aug: „creierul 2 (Gemini) supervizează 24/7" → fallback PRIN APP. 14 aug:
-  // „schimbă-mi constructorul cu gemeni ultra… când nu merge repara să cadă pe fable
-  // 5, înlocuiește peste tot" → Gemini devine PRINCIPALUL, Fable 5 REZERVA, AMBELE
-  // rulate în APP (cheile stau în app). Zidul care rămâne: constructorul NU ține chei
-  // de furnizor și NU cheamă DIRECT niciun API extern — cere creierul DOAR pe ruta
-  // gardată din app.
+describe('LACĂT — constructor: motor AIDER (unic), creier DOAR Gemini PRIN APP', () => {
+  // Owner, 16 aug: „constructor unic aider… scoti tot din constructor si instalezi
+  // doar aider… ramine doar gemini rapid si cu escaladarea spusa pe modelul
+  // performant gemini… fable iese total de peste tot… nu se comuta nimic".
+  // Zidul care rămâne (legea 13 aug): constructorul NU ține chei de furnizor și
+  // NU cheamă DIRECT niciun API extern — Aider cere creierul DOAR pe ruta gardată
+  // din app (openai, bridge-secret ca Bearer).
   it('agentul: fără OpenRouter, fără chei de furnizor, fără apel DIRECT (Google/Anthropic)', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
     expect(/openrouter\.ai/.test(s)).toBe(false)
@@ -143,22 +142,21 @@ describe('LACĂT — constructor: creierul PRIN APP (Gemini principal → Fable 
     expect(/CONSTRUCTOR_RUNPOD_KEY|CONSTRUCTOR_DEEPSEEK_KEY/.test(s)).toBe(false)
   })
 
-  it('creierul PRIN APP: constructorul cere ruta gardată (bridge-secret)', () => {
+  it('motorul e AIDER, cu creierul PRIN APP pe ruta gardată (bridge-secret)', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
-    // Constructorul cere creierul aplicației pe ruta gardată — nu ține el cheia.
-    expect(/function llmGemini/.test(s)).toBe(true)
-    expect(/\/api\/constructor\/creier/.test(s)).toBe(true)
-    expect(/x-bridge-secret/.test(s)).toBe(true)
+    // Aider e motorul unic; creierul lui vine prin app, nu ține el cheia.
+    expect(/construiesteCuAider/.test(s)).toBe(true)
+    expect(/\/api\/constructor\/openai/.test(s)).toBe(true)
+    expect(/OPENAI_API_KEY: BRIDGE/.test(s)).toBe(true)
   })
 
-  it('escaladarea Gemini → Fable 5 + revenirea stau în APP (routes/constructor.ts)', () => {
-    // Owner 14 aug: principal Gemini, rezervă Fable 5. Ruta din app le înlănțuie:
-    // Gemini întâi (geminiDirectChat), Fable 5 când Gemini nu poate (fable5Disponibil),
-    // iar revenirea e automată (fiecare pas reîncepe cu Gemini).
+  it('creierul din APP e DOAR Gemini (rapid → performant) — Fable SCOS total', () => {
     const ruta = sursa('./routes/constructor.ts')
     expect(/geminiDirectChat/.test(ruta)).toBe(true)
-    expect(/fable5Disponibil/.test(ruta)).toBe(true)
-    expect(/fable5Chat/.test(ruta)).toBe(true)
+    expect(/modelPerformant = config\.geminiModelGreu/.test(ruta)).toBe(true)
+    // Fable a ieșit TOTAL: nicio funcție Fable, niciun comutator.
+    expect(/fable5Disponibil|fable5Chat/.test(ruta)).toBe(false)
+    expect(/forta.?fable/i.test(ruta)).toBe(false)
   })
 })
 

@@ -60,7 +60,7 @@ const GHTOKEN = env.GITHUB_TOKEN ?? ''
 // Mesajele + TOOLS-urile sunt deja în format OpenAI → trec DIRECT, fără conversie.
 const LLM_TIMEOUT_MS = Number(env.CONSTRUCTOR_LLM_TIMEOUT_MS || 180_000)
 // Numele lanțului, pentru mesaje ONESTE pe monitor (nu mai există „RunPod/DeepInfra").
-const NUME_FURNIZOR = 'creierul prin app (Gemini → Fable 5)'
+const NUME_FURNIZOR = 'creierul prin app (Gemini rapid → Gemini performant)'
 // PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
 // rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
 // 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
@@ -528,20 +528,6 @@ let UNELTE_PRIN_APLICATIE = new Set(
 // urmă față de creierul de chat. Dacă cererea pică din ORICE motiv, rămâne lista
 // de rezervă de mai sus (TOOLS neatins) — constructorul nu poate ajunge fără unelte.
 const UNELTE_LOCALE_DEFS = TOOLS.filter((t) => UNELTE_LOCALE.has(t.function.name))
-async function incarcaUneltele() {
-  try {
-    const r = await api('/api/constructor/tool-defs')
-    const primite = Array.isArray(r?.tools) ? r.tools.filter((t) => t?.function?.name) : []
-    if (!primite.length) { log('unelte: lista de rezervă (aplicația n-a întors unelte)'); return }
-    const numeLocale = new Set(UNELTE_LOCALE_DEFS.map((t) => t.function.name))
-    const prinApp = primite.filter((t) => !numeLocale.has(t.function.name))
-    TOOLS = [...UNELTE_LOCALE_DEFS, ...prinApp]
-    UNELTE_PRIN_APLICATIE = new Set(TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)))
-    log(`unelte: ${TOOLS.length} din sursa unică (${prinApp.length} prin aplicație)`)
-  } catch (e) {
-    log(`unelte: lista de rezervă (cererea a picat: ${e?.message ?? e})`)
-  }
-}
 
 // ── ANTI-RĂTĂCIRE (5 aug 2026 — cauza MĂSURATĂ a joburilor picate) ────────────
 // Din jurnalul buclei: joburi cu 40 de grep-uri LA RÂND, zero editări, care au
@@ -567,27 +553,6 @@ export function pasExplorare(numeUnelte, aProdus, contorVechi) {
   return { contor, ghiont: false }
 }
 
-const SYSTEM = `You are KELIONAI'S BUILDER — the autonomous coding worker on the project's server.
-Repo: backend/ (Node+Fastify+TS), frontend/ (React+Vite+TS), deploy/ (VPS scripts).
-
-THE WORK METHOD — follow it 100%, in this order, on EVERY order (the tool-step budget is small, ~24; spend it on work, never on wandering):
-1. UNDERSTAND. First message: restate the order in ONE line and name what proves it done. No tool call yet.
-2. CHECK REALITY. Find the file with 'grep' (a pattern from the order) — do NOT explore with ls/read step by step. NEVER assume what the code says: read the actual lines ('read' with from/to, only the relevant range). Never read the same file twice. Do NOT read AI-HANDOFF.md (it is huge) unless the order explicitly asks about architecture.
-3. PLAN. One line: which file(s) change and how the change will be verified.
-4. EXECUTE. On existing files use 'edit' (EXACT old text → new text) or, on LARGE files, 'edit_lines' (give the from/to line numbers from 'read' + the new text — no text matching, immune to the output cap). NEVER 'write' a large existing file — your output has a cap and gets cut in half, corrupting it. Use 'write' only for NEW or small files. Fix the CAUSE, not the symptom; cleanly rewrite the responsible module — no band-aid patches; match the surrounding style. All code comments in ENGLISH. Changes STRICTLY inside the order's perimeter — nothing "on the fly"; never touch financial counters, never delete data.
-   NEVER FAKE A FEATURE (owner's iron rule, 10 Aug, after order #166 shipped a "job search" with a HARDCODED job list and invented "AI adaptation" text): no simulated/hardcoded data presented as real, no mock lists, no invented outputs pretending to be a service. If the order needs search/AI/external data, wire the REAL services this app already has (webSearch via the brain, cheama_agent, db_query, browser_* — all through /api/constructor/tool). If the real integration is genuinely impossible from here, BUILD NOTHING FAKE — say so honestly in the PR body and via request_repair. A visibly missing feature is acceptable; a fake one is not.
-5. PROVE. "Done" is never a claim — it is evidence. Before calling 'finish', re-read the order and check that your change actually FULFILS it (not merely that it compiles). Then call 'finish' IMMEDIATELY — do NOT run 'npm ci/build/test' yourself; the system verifies on its own after finish. The verification runs the SAME seven house gates as the PR gate: backend tsc, backend tests, frontend build, jscpd (ZERO duplicated code — extract a shared helper, never copy-paste), unused-exports (no export without a caller), syntax (no conflict markers, valid CSS/JSON), and BOOT on dist (the app must actually start and print "Server listening" — so never write a route/handler at module scope; register it inside the Fastify plugin where the fastify instance and the pool are in scope). If any gate fails you get a repair round with the exact error. Target: finish within ≤3 tool calls after finding the file.
-   EXCEPTION — NEW dependency: if the order needs a package that does not exist yet, run 'run' with "npm --prefix backend install <package>" (or frontend) BEFORE finish — so package.json + lock stay in sync and verification passes.
-6. REPORT HONESTLY. The PR body (in Romanian, for the owner) states three things: what was done, how it was verified, and what remains unverified. An honest "this could not be verified" is worth more than a confident guess. If the system tells you the build failed, repair the CAUSE and re-finish (you have a small number of repair rounds). Never hide a failure.
-
-USE THE SPECIALIST AGENTS — automatically, whenever a sub-task fits a specialist better than you (owner's order, 10 Aug: "the builder must use, automatically when needed, all the agents"):
-- If a sub-part of the order falls squarely in a specialty (design, SEO, security, database, tests, i18n, etc.), DELEGATE it with 'cheama_agent' (agent id + the full sub-task) instead of doing it half-well yourself. Fold the agent's answer back into your work — you still own the edit and the 'finish'.
-- If you need a TYPE of specialist the roster does NOT have, create one on the spot with 'agent_nou' (a name + the role), briefly say which agent you created, then call it with 'cheama_agent'. Creating an agent is instant and needs no publish. Do this only when a real gap blocks the order — not as busywork.
-
-PROJECT CONVENTIONS — know them; each one saves whole wasted steps (measured on real failed orders):
-- DATABASE: the ENTIRE schema lives in backend/src/db.ts as "CREATE TABLE IF NOT EXISTS ..." inside the init SQL. This repo has NO knex, NO knexfile.ts, NO migrations/ folder — do NOT create migration files (they are dead weight here). To add a table or column, EDIT that SQL block in db.ts.
-- LARGE existing files (backend/src/db.ts, backend/src/routes/admin.ts, frontend/src/components/AdminPanel.tsx): change them with 'edit' or 'edit_lines', NEVER 'write' — your output is capped and a whole-file rewrite gets cut, which corrupts the file and the order fails. After any edit that inserts or deletes lines the numbers SHIFT — 'read' the file again before the next 'edit_lines', or its from/to will point at the wrong place.
-- To remove a file you created by mistake, use 'delete_file' (there is no shell 'rm').`
 
 // REZISTENT LA MODELELE GRATUITE (jobul #2, 27 iul, cauza reală din log:
 // „Unexpected end of JSON input" — endpointul :free a întors corp gol/trunchiat
@@ -601,17 +566,6 @@ PROJECT CONVENTIONS — know them; each one saves whole wasted steps (measured o
 // gratuite (care se sufocau la request-uri uriașe). Mesajele system+ordin și
 // apelurile de unealtă (assistant) rămân neatinse — doar CORPUL rezultatelor
 // vechi (role:'tool') se comprimă, ca modelul să nu-și piardă firul.
-function compactHistory(messages) {
-  const toolIdx = []
-  for (let i = 0; i < messages.length; i++) if (messages[i].role === 'tool') toolIdx.push(i)
-  const cutoff = toolIdx.length - KEEP_VERBATIM
-  for (let k = 0; k < cutoff; k++) {
-    const i = toolIdx[k]
-    const c = messages[i].content
-    if (typeof c === 'string' && c.length > 120 && !c.startsWith('[rezultat vechi'))
-      messages[i] = { ...messages[i], content: `[rezultat vechi elidat — ${c.length} caractere; cere din nou dacă îți trebuie]` }
-  }
-}
 
 // ── SCARA DE MODELE OPENROUTER — EXTIRPATĂ (3 aug) ──────────────────────────
 // Aici stăteau: MODEL_LADDER (pool-ul :free), MODELE_DOVEDIT_PROASTE, creierul
@@ -634,95 +588,10 @@ const LLM_ATTEMPTS = 6
 // poate; cheile (Gemini + Anthropic) + creditul stau în app, nu în constructor.
 // Răspunsul vine în format OpenAI (ca de la orice creier), deci restul buclei nu
 // știe pe ce creier a mers. `modelServit` din răspuns spune care a servit efectiv.
-async function llmGemini(messages) {
-  let r
-  try {
-    r = await fetch(`${APP}/api/constructor/creier`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-bridge-secret': BRIDGE },
-      // `attempt` = încercarea ordinului CURENT (ordinul ownerului, 15 aug:
-      // „dacă are o eșuare, următoarea tură o escaladează automat pe nivel
-      // superior Fable 5; nu pornește duplicat pe același model; se revine
-      // pentru un job nou la primul model"). App-ul decide ordinea creierelor
-      // pe baza lui — agentul doar spune cinstit a câta încercare e.
-      body: JSON.stringify({ messages, tools: TOOLS, job: beatJobId, attempt: incercareCurenta }),
-      signal: AbortSignal.timeout(Math.max(30_000, Math.min(LLM_TIMEOUT_MS, ramase()))),
-    })
-  } catch (e) {
-    throw new Error(`creier 2 rețea: ${String(e?.message ?? e).slice(0, 200)}`)
-  }
-  const text = await r.text().catch(() => '')
-  if (!r.ok) {
-    const err = new Error(`creier 2 ${r.status}: ${text.slice(0, 200)}`)
-    err.status = r.status
-    throw err
-  }
-  let parsed
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw new Error(`creier 2 JSON rupt (${text.length} caractere)`)
-  }
-  const message = parsed?.choices?.[0]?.message
-  if (!message) throw new Error('creier 2: răspuns fără candidați')
-  const content = typeof message.content === 'string' ? message.content : ''
-  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
-  if (!content.trim() && !toolCalls.length) throw new Error('creier 2: răspuns gol')
-  const out = { role: 'assistant', content }
-  if (toolCalls.length) out.tool_calls = toolCalls
-  const total = Number(parsed?.usage?.total_tokens)
-  return {
-    choices: [{ message: out }],
-    usage: { total_tokens: Number.isFinite(total) ? total : 0 },
-    modelServit: parsed?.modelServit || 'gemini/creier-2',
-  }
-}
 
 // Ultimul creier care a SERVIT efectiv (pentru afișajul ONEST din raport/PR: dacă
 // s-a căzut pe Fable 5, se vede Fable 5, nu Gemini). Setat în llm() la fiecare succes.
 let ULTIMUL_CREIER = ''
-async function llm(messages) {
-  // CREIERUL E PRIN APP (owner, 14 aug): Gemini (principal) → Fable 5 (rezervă),
-  // rulate în APP pe /api/constructor/creier (gardat cu bridge-secret). Aici, în
-  // constructor, cerem DOAR ruta aia (llmGemini) și reîncercăm cu pauze crescătoare
-  // pe eșec; ESCALADAREA Gemini→Fable5 și REVENIREA pe Gemini se fac în app (fiecare
-  // pas nou reîncepe cu principalul). 401 = bridge-secret greșit → FATAL; orice alt
-  // eșec (Gemini ȘI Fable 5 jos, sau app jos) → AMÂNABIL: ordinul se reia, nu moare.
-  if (!BRIDGE)
-    throw Object.assign(
-      new Error(
-        'creierul constructorului merge PRIN APP (/api/constructor/creier) — lipsește BRIDGE_SECRET, nu pot cere creierul aplicației',
-      ),
-      { fatal: true },
-    )
-  let lastErr = ''
-  for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
-    if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
-    try {
-      const rez = await llmGemini(messages)
-      ULTIMUL_CREIER = rez.modelServit || NUME_FURNIZOR
-      return rez
-    } catch (e) {
-      lastErr = String(e?.message ?? e)
-      // 401 direct de la app = bridge-secret greșit; nicio reîncercare n-o repară → fatal.
-      // Verificăm strict statusul HTTP 401 direct de la ruta /api/constructor/creier
-      // (nu "401" apărut într-un corp de răspuns 502 al unui furnizor secundar).
-      if (e?.status === 401 || /^creier 2 401\b/.test(lastErr)) {
-        log(`llm [fatal] — app a refuzat creierul (bridge-secret incorect): ${lastErr.slice(0, 160)}`)
-        throw Object.assign(new Error(lastErr), { fatal: true })
-      }
-      if (attempt === LLM_ATTEMPTS) break
-      const wait = Math.min(attempt * 4_000, 20_000)
-      log(`llm reîncercare ${attempt}/${LLM_ATTEMPTS} pe ${NUME_FURNIZOR} (${lastErr.slice(0, 90)}) — pauză ${wait / 1000}s`)
-      await dormi(wait)
-    }
-  }
-  // Toate încercările au picat (Gemini ȘI Fable 5 în app, sau app jos) → AMÂNABIL:
-  // ordinul rămâne în coadă și se reia automat (nu moare).
-  throw Object.assign(new Error(lastErr || `${NUME_FURNIZOR} indisponibil după ${LLM_ATTEMPTS} încercări`), {
-    amanabil: true,
-  })
-}
 
 // ── VITEZĂ: node_modules cald, sar peste instalarea inutilă (owner, 13 aug:
 // „constructor mai rapid") ────────────────────────────────────────────────────
@@ -1013,6 +882,68 @@ for (const semnal of ['SIGTERM', 'SIGINT']) {
   })
 }
 
+// ── MOTORUL AIDER (owner, 16 aug: „constructor unic aider… aider va avea absolut
+// toate instrumentele necesare pentru a repara si construi, real" + „aider
+// trebuie sa fie permanet de creiere si kelion real, colaboreaza 100% intre ei
+// informational"). Aider e legat PERMANENT de creiere ȘI de Kelion: creierul vine
+// PRIN APP (/api/constructor/openai, bridge-secretul ca Bearer — constructorul NU
+// ține chei de furnizor, legea 13 aug), unde rulează escaladarea Gemini rapid → Gemini performant.
+// Colaborarea informațională e în ambele sensuri: Kelion dă ordinul + jurnalul
+// încercării anterioare; Aider dă pașii (pe monitor) + rezultatul (în raport).
+function aiderInstalat() {
+  try { execFileSync('aider', ['--version'], { timeout: 20_000, stdio: 'ignore' }); return true } catch { return false }
+}
+
+function ruleazaAider(prompt) {
+  const args = [
+    '--message', prompt,
+    '--model', 'openai/kelion-constructor',
+    '--yes-always', '--no-analytics', '--no-check-update', '--no-gitignore', '--auto-commits', '--no-stream',
+  ]
+  const aiderEnv = {
+    ...process.env,
+    OPENAI_API_BASE: `${APP}/api/constructor/openai/v1`,
+    OPENAI_API_KEY: BRIDGE, // ruta openai a app-ului acceptă bridge-secretul ca Bearer
+    GIT_TERMINAL_PROMPT: '0',
+  }
+  const timeout = Math.max(60_000, Math.min(ramase() - 90_000, 22 * 60_000))
+  try {
+    const out = execFileSync('aider', args, { cwd: ATELIER, env: aiderEnv, encoding: 'utf8', timeout, maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+    return { log: String(out).slice(-4000), throttled: false }
+  } catch (e) {
+    const txt = `${e.stdout ?? ''}\n${e.stderr ?? ''}\n${e.message ?? ''}`
+    const throttled = /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overload|unavailable|\b5\d\d\b/i.test(txt)
+    return { log: txt.slice(-4000), throttled }
+  }
+}
+
+// Ordinul → Aider → verificarea NOASTRĂ (cele 7 porți) → reparație (până la
+// MAX_REPAIR) → {title, body}. Aruncă „amânabil" pe sugrumarea creierului (coada
+// reia ordinul, ca înainte); aruncă eșec clar dacă Aider n-a schimbat nimic.
+function construiesteCuAider(job, baseSha, jurnalVechi) {
+  ULTIMUL_CREIER = 'aider (creier prin app)'
+  let reparatii = 0
+  let ultimaProblema = ''
+  for (;;) {
+    const prompt = reparatii
+      ? `ORDINUL:\n${job.orderText}\n\nVERIFICAREA A PICAT — repară CAUZA (fără petice), lasă porțile verzi:\n${ultimaProblema.slice(-2500)}`
+      : (jurnalVechi
+          ? `ORDINUL:\n${job.orderText}\n\n--- Încercarea anterioară a picat; ia ALTĂ abordare, nu repeta: ---\n${jurnalVechi.slice(-2500)}`
+          : `ORDINUL:\n${job.orderText}`)
+    log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : 'aider construiește ordinul (creier prin app)…')
+    const a = ruleazaAider(prompt)
+    for (const linie of String(a.log).split('\n').slice(-6)) { const t = linie.trim(); if (t) log(`aider: ${t.slice(0, 140)}`) }
+    if (a.throttled) throw Object.assign(new Error(`aider sugrumat (creier prin app): ${a.log.slice(-160)}`), { amanabil: true })
+    const headAcum = sh('git rev-parse --short=7 HEAD').trim()
+    if (headAcum === baseSha) throw new Error(`aider n-a modificat nimic (niciun commit). Coada log:\n${a.log.slice(-800)}`)
+    const problema = verificaAtelierul()
+    if (!problema) return { title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120), body: `Construit de Aider (motorul unic al constructorului); creierul prin app (Gemini rapid → Gemini performant). Ordin #${job.id}.` }
+    ultimaProblema = problema
+    if (reparatii >= MAX_REPAIR || ramase() < 8 * 60_000) throw new Error(problema)
+    reparatii++
+  }
+}
+
 async function main() {
   if (!BRIDGE || !GHTOKEN) {
     log('lipsesc BRIDGE_SECRET (creierul merge PRIN APP) / GITHUB_TOKEN din kelionai.env — ies')
@@ -1020,17 +951,20 @@ async function main() {
   }
   const claim = await api('/api/constructor/next')
   if (!claim?.job) return // coada goală sau pauza-autonomie — tăcere totală
-  // Avem un ordin — abia acum aducem setul COMPLET de unelte din sursa unică
-  // (dacă pică, rămâne lista de rezervă și tot poate lucra).
-  await incarcaUneltele()
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
   incercareCurenta = Math.max(1, Number(claim.job.attempts) || 1)
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
-  // DOVADA CREIERULUI ACTIV (9 aug): scris în jurnal la fiecare ordin, ca să se
-  // vadă negru pe alb pe ce rulează constructorul — creierul PRIN APP (Gemini → Fable 5).
-  // modelServit din răspuns cară creierul care a SERVIT efectiv, în raport.
-  log(`creier constructor: ${NUME_FURNIZOR} — Gemini principal, Fable 5 rezervă (rulate în app pe /api/constructor/creier)`)
+  // MOTORUL = AIDER, UNIC (owner, 16 aug, verbatim: „constructor unic aider… scoti
+  // tot din constructor si instalezi doar aider… aider va avea absolut toate
+  // instrumentele necesare pentru a repara si construi, real"). Aider e legat
+  // PERMANENT de creiere ȘI de Kelion, colaborare 100% informațională: creierul
+  // vine PRIN APP (legea 13 aug — constructorul NU ține chei de furnizor), pe
+  // /api/constructor/openai (bridge-secret ca Bearer), unde rulează escaladarea
+  // Gemini rapid → performant; contextul ordinului + jurnalul încercării anterioare curg
+  // de la Kelion spre Aider, iar pașii + rezultatul lui Aider curg înapoi la
+  // Kelion (monitor prin beat/log + raportul final + triajul).
+  log(`creier constructor: MOTORUL AIDER (unic) — creier prin app /api/constructor/openai (Gemini rapid → performant), fără chei în constructor`)
 
   // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
   // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
@@ -1089,260 +1023,32 @@ async function main() {
     const baseSha = sh('git rev-parse --short=7 HEAD').trim()
     log(`atelier pe ${baseSha}${rapid ? ' (persistent, node_modules cald)' : ' (clonă curată)'}`)
 
-    const messages = [
-      { role: 'system', content: SYSTEM },
-      { role: 'user', content: `ORDINUL DE CONSTRUCȚIE (de la owner):\n\n${job.orderText}` },
-    ]
-    // ── ÎNVĂȚAREA DIN ÎNCERCAREA ANTERIOARĂ (10 aug, ownerul: „ajută-l să
-    // treacă de blocaje ÎNVĂȚÂNDU-L") ──────────────────────────────────────────
-    // Un ordin repus — manual („reia", care păstrează jurnalul) sau reclamat
-    // după un worker mort — pornea până acum ORB: doar system+ordin, fără nicio
-    // urmă a ce a picat data trecută. Deci repeta EXACT greșeala care l-a blocat,
-    // până la abandonul de la 3 încercări. Acum, dacă ordinul are jurnal de la o
-    // încercare anterioară, i-l dăm și îi cerem O ALTĂ strategie — să învețe, nu
-    // să reia orbește.
-    const jurnalVechi = String(job.log ?? '').trim()
-    if (jurnalVechi) {
-      messages.push({
-        role: 'user',
-        content:
-          'ATENȚIE — ordinul ăsta A MAI FOST ÎNCERCAT și NU s-a terminat. Mai jos e coada ' +
-          'jurnalului încercării anterioare. CITEȘTE-L întâi și află DE CE a picat (build/test ' +
-          'roșu, fișier greșit, plafon de pași, verificare picată, unealtă/agent lipsă). Apoi ia ' +
-          'o ABORDARE DIFERITĂ — nu relua aceiași pași care au dus la blocaj. Dacă îți lipsește un ' +
-          'specialist, creează-l cu agent_nou și cheamă-l cu cheama_agent. Dacă ordinul e prea mare ' +
-          'pentru bugetul de pași, fă partea esențială și notează restul cu request_repair.\n\n' +
-          `--- JURNALUL ÎNCERCĂRII ANTERIOARE (coadă) ---\n${jurnalVechi.slice(-3500)}`,
-      })
-      log(`ordin reîncercat — dau agentului jurnalul vechi (${jurnalVechi.length} car.) ca să învețe din el, nu să repete`)
-    }
-    let tokens = 0
-    // (Contabilitatea „tokensPaid/costUsd/costMasurat" pe scara plătită
-    // OpenRouter a fost EXTIRPATĂ, 3 aug: Gemini nu itemizează cost per apel;
-    // tokenii se numără din usageMetadata și se raportează ca atare.
-    // Invariantul din bug-ul ordinelor #32/#34 — `report()` nu are voie să
-    // moară pe variabile din alt scope — e ținut prin ELIMINARE: report() nu
-    // mai citește nicio variabilă de cost.)
-    let finish = null
-    // CONTABILITATEA PAȘILOR (dovadă live 28 iul, ordinul #9: „EȘEC: plafon de
-    // pași atins fără finish" după ~30 de ture în care nu s-a produs nicio
-    // reparație). Bucla veche socotea O TURĂ = UN PAS, indiferent dacă modelul
-    // a atins vreo unealtă: vorbăria, unealta inexistentă, comanda nepermisă,
-    // calea greșită — toate mâncau din bugetul de CONSTRUCȚIE exact ca o
-    // modificare reală de fișier. Așa se termina bugetul fără o linie de cod
-    // scrisă. Acum plătim doar munca: pașii utili (cel puțin o unealtă care a
-    // lucrat) au plafonul MAX_STEPS, iar turele sterile au plafonul lor, mic —
-    // ca să ieșim repede ȘI CU DIAGNOSTIC dacă modelul nu știe uneltele.
-    let pasiUtili = 0
-    let pasiSterili = 0
-    let reparatii = 0
-    let explorareFaraProductie = 0 // explorări CONSECUTIVE fără nicio editare (anti-rătăcire)
-    const greppuriVazute = new Set() // pattern-uri deja căutate — nu le repetăm în gol
-    // Rezultate care înseamnă „unealta a REFUZAT", nu „unealta a lucrat".
-    const RE_REFUZ = /^(EROARE|REFUZAT|unealtă necunoscută|comandă nepermisă|pattern gol)/
-    // BUCLA MARE = ordinul întreg, cu rundele lui de reparație. Bucla mică
-    // (while) = dialogul cu modelul până la 'finish'; după fiecare finish
-    // verificăm în atelier și, dacă e roșu, ne întoarcem aici cu eroarea în mână.
-    for (;;) {
-      while (!finish) {
-        if (pasiUtili >= MAX_STEPS)
-          throw new Error(`plafon de pași atins fără finish (${pasiUtili} pași cu unelte, ${pasiSterili} sterili)`)
-        // NEPUTINȚĂ: modelul povestește în loc să lucreze. Până la 2 aug se
-        // urca aici pe un model capabil PLĂTIT — desființat („nimic altceva
-        // plătit, niciodată"): ordinul eșuează onest, cu diagnostic.
-        if (pasiSterili >= MAX_STERILE) {
-          throw new Error(
-            `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (creier: ${ULTIMUL_CREIER || NUME_FURNIZOR})`,
-          )
-        }
-        // Ne oprim ÎNAINTE de `timeout 1800` din constructor-worker.sh, ca să mai
-        // rămână timp de verificare + push + PR + RAPORT. Omorâți de timeout am
-        // muri muți, iar ordinul ar rămâne „running" 40 de minute și ar arde o
-        // încercare din trei degeaba.
-        if (ramase() < 6 * 60_000)
-          throw new Error(`timpul rulării s-a terminat înainte de finish (${pasiUtili} pași utili, ${pasiSterili} sterili)`)
-        const resp = await llm(messages)
-        const tokPas = Number(resp.usage?.total_tokens ?? 0)
-        tokens += tokPas
-        if (tokens > MAX_TOKENS) throw new Error(`plafon de tokeni depășit (${tokens})`)
-        const msg = resp.choices?.[0]?.message
-        if (!msg) throw new Error('răspuns gol de la model')
-        // COMPATIBILITATE COHERE (jobul #2, 27 iul, cauza reală din log:
-        // „invalid message at index 9: must have non-empty content or tool
-        // calls"): modelul întoarce uneori mesaje de asistent cu content NULL și
-        // fără tool_calls — GPT/Claude le înghit, Cohere refuză TOATĂ conversația
-        // la pasul următor. Normalizăm: content mereu string; mesaj complet gol →
-        // umplem cu un marcaj inofensiv ca istoricul să rămână valid.
-        const clean = { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : '' }
-        if (msg.tool_calls?.length) {
-          // A DOUA capcană Cohere (jobul #2, pasul 18): la re-trimiterea
-          // istoricului, argumentele uneltelor TREBUIE să fie JSON de obiect
-          // stringificat — un „arguments" gol/rupt pica TOATĂ conversația.
-          // Normalizăm: orice nu parsează ca obiect devine '{}'.
-          clean.tool_calls = msg.tool_calls.map((c) => {
-            let a = c.function?.arguments
-            try {
-              const p = JSON.parse(a || '{}')
-              a = JSON.stringify(p && typeof p === 'object' && !Array.isArray(p) ? p : {})
-            } catch {
-              a = '{}'
-            }
-            return { ...c, function: { ...c.function, arguments: a } }
-          })
-        }
-        if (!clean.content && !clean.tool_calls) clean.content = '(pas fără conținut)'
-        messages.push(clean)
-        const calls = msg.tool_calls ?? []
-        if (!calls.length) {
-          // modelul a vorbit fără unealtă — îl împingem înapoi la lucru. Tură
-          // STERILĂ: nu scade din bugetul de construcție, are contorul ei.
-          pasiSterili++
-          // CE SPUNE MODELUL CÂND SE BLOCHEAZĂ (owner, 12 aug: „dă-i acces să
-          // citească logurile dacă eșuează" — dar logul avea doar pașii, NU
-          // cauza). Scoatem în jurnal exact ce a scris modelul în loc să cheme o
-          // unealtă → cauza reală intră în log, ca (1) owner-ul s-o vadă, (2)
-          // reîncercarea s-o citească și să ia altă abordare, nu să repete orb.
-          const spus = String(msg.content ?? '').replace(/\s+/g, ' ').trim()
-          log(`tură sterilă ${pasiSterili}/${MAX_STERILE} — modelul a scris în loc să lucreze: ${spus.slice(0, 400) || '(răspuns gol)'}`)
-          messages.push({
-            role: 'user',
-            content: `Continue with the tools (grep/read/edit/write/run) or call finish. Don't narrate — work. (${pasiSterili}/${MAX_STERILE} wasted turns)`,
-          })
-          compactHistory(messages)
-          continue
-        }
-        let aLucrat = false
-        let aProductie = false // a lucrat vreo unealtă de PRODUCȚIE în tura asta? (edit/write/...)
-        for (const c of calls) {
-          let args = {}
-          try {
-            args = JSON.parse(c.function?.arguments || '{}')
-          } catch {
-            /* argumente stricate → unealta răspunde cu eroare */
-          }
-          let result = ''
-          try {
-            if (c.function.name === 'ls') result = toolLs(String(args.dir ?? '.'))
-            else if (c.function.name === 'grep') {
-              const pat = String(args.pattern ?? '')
-              if (greppuriVazute.has(pat))
-                result = `(deja ai căutat „${pat}" — rezultatul e mai sus. NU repeta căutări; folosește ce ai și EDITEAZĂ acum, sau finish.)`
-              else {
-                greppuriVazute.add(pat)
-                result = toolGrep(pat)
-              }
-            }
-            else if (c.function.name === 'read') result = toolRead(String(args.path ?? ''), Number(args.from), Number(args.to))
-            else if (c.function.name === 'write') result = toolWrite(String(args.path ?? ''), String(args.content ?? ''))
-            else if (c.function.name === 'edit') result = toolEdit(String(args.path ?? ''), String(args.old ?? ''), String(args.new ?? ''))
-            else if (c.function.name === 'edit_lines') result = toolEditLines(String(args.path ?? ''), Number(args.from), Number(args.to), String(args.new ?? ''))
-            else if (c.function.name === 'delete_file') result = toolDelete(String(args.path ?? ''))
-            else if (c.function.name === 'run') result = toolRun(String(args.cmd ?? ''))
-            else if (c.function.name === 'finish') {
-              finish = { title: String(args.title ?? '').slice(0, 120), body: String(args.body ?? '') }
-              result = 'lucrarea se închide — verific și public'
-            } else if (UNELTE_PRIN_APLICATIE.has(c.function.name)) {
-              // UNELTELE GRELE: trăiesc în aplicație (browser Playwright în
-              // proces + scrierea criptată a secretelor). Le chemăm prin aceeași
-              // poartă x-bridge-secret ca restul capătului de lucrător, cu
-              // aceleași reîncercări la 5xx — deci o repornire a aplicației nu
-              // omoară un ordin în lucru.
-              const r = await api('/api/constructor/tool', {
-                method: 'POST',
-                body: JSON.stringify({ name: c.function.name, args }),
-              })
-              result = r?.rezultat ?? 'aplicația nu a răspuns la unealtă'
-            } else result = 'unealtă necunoscută'
-          } catch (e) {
-            result = `EROARE: ${e.message}`
-          }
-          // Unealta care a REFUZAT (cale greșită, comandă nepermisă, write tăiat)
-          // nu e progres — tura rămâne sterilă și nu costă buget de construcție.
-          if (!RE_REFUZ.test(result)) {
-            aLucrat = true
-            if (UNELTE_PRODUCTIE.has(c.function.name)) aProductie = true // editare reală
-          }
-          if (c.function.name !== 'read')
-            log(
-              `pas ${pasiUtili + 1}/${MAX_STEPS}: ${c.function.name} ${String(args.path ?? args.cmd ?? args.dir ?? args.pattern ?? '').slice(0, 80)}` +
-                (RE_REFUZ.test(result) ? ` → ${result.slice(0, 90)}` : ''),
-            )
-          // Plafon per-rezultat: o CITIRE de fișier are voie mai mult (ca să
-          // vadă fișierul întreg, nu jumătate — altfel edita pe orb și cădea);
-          // restul uneltelor rămân la plafonul mic (era 100k — sursa exploziei).
-          // Fereastra glisantă de mai jos comprimă oricum rezultatele vechi.
-          const capRezultat = c.function.name === 'read' ? READ_CAP_FISIER : READ_CAP
-          messages.push({ role: 'tool', tool_call_id: c.id, content: result.slice(0, capRezultat) })
-        }
-        // Contor de sterile CONSECUTIVE, nu cumulative (MĂSURAT, ordin #187: modele
-        // care făceau 13-18 pași REALI mureau fiindcă adunau 8 ture de „gândit cu voce
-        // tare" RĂSPÂNDITE printre pași — deși LUCRAU). Un pas productiv resetează
-        // contorul; mor doar buclele de pură povestire (8 la RÂND fără unealtă utilă).
-        if (aLucrat) {
-          pasiUtili++
-          pasiSterili = 0
-        } else pasiSterili++
-        // ANTI-RĂTĂCIRE: dacă modelul explorează întruna (grep/ls/read) fără nicio
-        // editare, la PRAG_EXPLORARE îl ghiontim TARE spre producție — altfel
-        // arde tot bugetul pe explorare (job 96: 40 grep-uri, 0 editări).
-        const ghiontExpl = pasExplorare(calls.map((c) => c.function.name), aProductie, explorareFaraProductie)
-        explorareFaraProductie = ghiontExpl.contor
-        if (ghiontExpl.ghiont) {
-          messages.push({
-            role: 'user',
-            content: `You have explored ${PRAG_EXPLORARE}+ times (grep/ls/read) WITHOUT a single edit. You have enough context — STOP exploring. Make an edit NOW (edit/edit_lines/write) or call finish. Do NOT grep/read again.`,
-          })
-        }
-        // FEREASTRA GLISANTĂ (fixul structural, audit 27 iul): comprimă
-        // rezultatele uneltelor VECHI la un ciot de o linie — modelul păstrează
-        // firul (ce a făcut) fără să care conținutul integral al fiecărei citiri
-        // pe veci. Doar ultimele KEEP_VERBATIM rezultate rămân întregi.
-        compactHistory(messages)
-      }
-
-      // VERIFICAREA NOASTRĂ, nu pe încredere: ce s-a atins trebuie să compileze.
-      const tVerif = Date.now()
-      const problema = verificaAtelierul()
-      const durataVerif = Date.now() - tVerif
-      if (!problema) break
-      // RUNDA DE REPARAȚIE. System promptul îi promite modelului: „dacă sistemul
-      // îți spune că buildul a picat, repari și re-finish" — dar codul vechi NU
-      // dădea niciodată runda aia: la primul build roșu arunca direct și ordinul
-      // ieșea EȘUAT. Un model gratuit greșește un import sau un tip la prima
-      // scriere; asta singură explică o parte din ordinele picate „end-to-end".
-      // GARDA DE TIMP, ADAPTIVĂ (10 aug): garda fixă de 10 min renunța DES cu timp
-      // pe ceas — mai ales de când verificarea rulează toate cele 7 porți și ține
-      // mai mult. O rundă reală mai încape dacă a rămas cât o verificare completă
-      // (durataVerif) + un tur de reparație + tamponul de push/PR/raport. Bucla
-      // internă are oricum garda ei (ramase() < 6 min) care protejează coada.
-      const nevoieRunda = Math.max(7 * 60_000, durataVerif + 2 * 60_000)
-      if (reparatii >= MAX_REPAIR || ramase() < nevoieRunda) {
-        throw new Error(problema)
-      }
-      reparatii++
-      finish = null
-      log(`ajustare în atelier — runda de reparație ${reparatii}/${MAX_REPAIR}`)
-      messages.push({
-        role: 'user',
-        content: `THE VERIFICATION FAILED in the workshop. Repair the CAUSE (do not patch over it) and call 'finish' again.\n\n${problema.slice(-3000)}`,
-      })
-      compactHistory(messages)
-    }
-
+    // ── CONSTRUIT DE AIDER (motorul UNIC al constructorului) — owner, 16 aug:
+    // „constructor unic aider… aider va avea absolut toate instrumentele necesare
+    // pentru a repara si construi, real". Kelion → Aider: ordinul + jurnalul
+    // încercării anterioare (învățare). Aider ↔ creiere: PRIN APP. Aider → Kelion:
+    // pașii pe monitor + rezultatul în raport. Bucla veche de model a fost SCOASĂ.
+    const jurnalVechi = String(job.log ?? "").trim()
+    const tokens = 0 // Aider nu itemizează tokeni — nicio cifră inventată (regula #1)
+    const finish = construiesteCuAider(job, baseSha, jurnalVechi)
     const branch = `kelion/job-${job.id}`
     // Titlu gol = `git commit -m ""` refuză commit-ul („Aborting commit due to
     // empty commit message") și ordinul pica după ce toată munca era făcută.
     const titlu = (finish.title || '').trim() || `Ordin #${job.id} — modificare automată`
     sh(`git checkout -B ${branch}`)
-    sh('git add -A')
-    execFileSync('git', ['-c', 'user.name=Kelion Constructor', '-c', 'user.email=contact@kelionai.app', 'commit', '-m', titlu], { cwd: ATELIER, stdio: 'pipe' })
+    // Aider face --auto-commits, deci arborele e de obicei CURAT aici; comitem noi
+    // DOAR dacă mai există modificări nescrise (altfel `git commit` pică pe „empty").
+    if (sh('git status --porcelain').trim()) {
+      sh('git add -A')
+      execFileSync('git', ['-c', 'user.name=Kelion Constructor', '-c', 'user.email=contact@kelionai.app', 'commit', '-m', titlu], { cwd: ATELIER, stdio: 'pipe' })
+    }
     execFileSync('git', ['push', '-u', 'origin', branch, '--force'], { cwd: ATELIER, stdio: 'pipe', timeout: 60_000 })
     const headSha = sh('git rev-parse HEAD').trim()
     log(`ramura ${branch} împinsă`)
 
     // CREIERUL, SCRIS ÎN PR (regula din 2 aug: alegerea modelului e VIZIBILĂ).
     // Furnizorul nu itemizează cost per apel — se raportează DOAR tokenii măsurați.
-    const linieCreier = `Creier folosit: ${ULTIMUL_CREIER || NUME_FURNIZOR} · tokeni: ${tokens}`
+    const linieCreier = `Motor: Aider (unic) · ${ULTIMUL_CREIER || NUME_FURNIZOR} · tokeni neitemizați (regula #1: nicio cifră inventată)`
     const prUrl = await deschidePR(
       titlu,
       `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, toate cele 7 porți rulate în atelier: tsc, teste, build, jscpd, exporturi, sintaxă, boot pe dist). Se îmbină singur DOAR pe poartă verde; pe roșu rămâne deschis cu problemele raportate.`,

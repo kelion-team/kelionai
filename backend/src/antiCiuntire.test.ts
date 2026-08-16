@@ -77,10 +77,10 @@ describe('fișierul distrus e la loc, întreg', () => {
 
   it('bucățile mari ale constructorului sunt toate acolo', () => {
     // A coarse but real check: if the file were maimed again, at least one of
-    // these would be missing. (Owner 14 aug: creierul propriu pe RunPod/DeepInfra a
-    // fost SCOS; creierul e PRIN APP — llmGemini cere /api/constructor/creier, iar
-    // app-ul face Gemini → Fable 5.)
-    for (const bucata of ['function toolWrite', 'function toolEdit', 'function llmGemini', 'RUN_ALLOWED', 'compactHistory'])
+    // these would be missing. (Owner 16 aug: motorul e AIDER, unic —
+    // construiesteCuAider/ruleazaAider; creierul lui vine PRIN APP, DOAR Gemini.
+    // Primitivele de editare + porțile + gardul de comenzi rămân biblioteca casei.)
+    for (const bucata of ['function toolWrite', 'function toolEdit', 'construiesteCuAider', 'function ruleazaAider', 'RUN_ALLOWED', 'function verificaAtelierul'])
       expect(constructor).toContain(bucata)
   })
 })
