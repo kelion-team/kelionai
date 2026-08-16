@@ -5,7 +5,7 @@ import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updat
 import type { OrMessage } from '../services/brainContract.js'
 import { uneltePentruCreier2, raspunsCreier2 } from '../services/creier2Constructor.js'
 import { isOpsPaused } from '../services/runbooks.js'
-import { numeleOrdinului } from '../services/numeOrdin.js'
+import { numeleOrdinului, cineACerut } from '../services/numeOrdin.js'
 import { autonomActiv } from '../services/autonomActiv.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
@@ -117,6 +117,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // P8 (owner, 15 aug: „trebuie sa fie foarte clar ce executa"): numele
       // rândului = FAPTA extrasă din ordin, nu ambalajul promptului.
       nume: numeleOrdinului(j.orderText),
+      // 16 aug: și AUTORUL, pe față — „cine e acolo?" nu se mai întreabă.
+      cerutDe: cineACerut(j.orderedBy),
     }))
     // `paused` (auditul admin, 3 aug): pauza de autonomie oprea și lucrătorul
     // (/api/constructor/next nu predă nimic), dar Constructorul n-o arăta
@@ -543,7 +545,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       // P8: `order` devine FAPTA (numeleOrdinului), nu primele litere ale
       // promptului — monitorul arată „ce execută", cum a cerut ownerul.
-      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: numeleOrdinului(j.orderText), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
+      // 16 aug 05:47 (ownerul, pe #330: „aici nu esti tu" / „cine e acolo?"):
+      // cardul spune de-acum CINE a cerut ordinul — omul, sau o buclă automată
+      // pe nume. Un ordin fără autor vizibil arată ca o fantomă.
+      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
     })
   })
 }

@@ -38,3 +38,18 @@ export function numeleOrdinului(brut: string): string {
   const primaLinie = curat.split('\n').find((l) => l.trim()) ?? ''
   return scurt(primaLinie)
 }
+
+// ── CINE A CERUT ORDINUL (16 aug 05:47 — ownerul, cu #330 „Lucrează" în față:
+// „aici nu esti tu" / „cine e acolo?") ───────────────────────────────────────
+// Un ordin fără autor vizibil arată ca o fantomă: ownerul nu putea deosebi
+// propriile ordine de cele născute de buclele automate. Funcție PURĂ: din
+// ordered_by iese eticheta pe românește, pe care cardul o poartă la vedere.
+export function cineACerut(orderedBy: string): string {
+  const cine = String(orderedBy ?? '').toLowerCase().trim()
+  if (!cine) return 'necunoscut'
+  if (cine === 'kelion-autovindecare' || cine === 'kelion-autovindecare-live') return '🤖 auto-vindecarea'
+  if (cine === 'kelion-autonom') return '🤖 bucla autonomă'
+  if (cine.startsWith('kelion')) return `🤖 ${cine}`
+  if (cine.includes('@')) return `👤 ${cine.split('@')[0]}`
+  return cine
+}
