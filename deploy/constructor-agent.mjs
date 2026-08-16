@@ -920,16 +920,33 @@ function ruleazaAider(prompt) {
 // Ordinul → Aider → verificarea NOASTRĂ (cele 7 porți) → reparație (până la
 // MAX_REPAIR) → {title, body}. Aruncă „amânabil" pe sugrumarea creierului (coada
 // reia ordinul, ca înainte); aruncă eșec clar dacă Aider n-a schimbat nimic.
-function construiesteCuAider(job, baseSha, jurnalVechi) {
+async function construiesteCuAider(job, baseSha, jurnalVechi) {
   ULTIMUL_CREIER = 'aider (creier prin app)'
+  // ── CONTEXTUL LUI KELION (owner, 16 aug: „aider… colaborează 100% informațional
+  // cu kelion… scoate toate restricțiile"). SCOT izolarea: aduc de la app memoria
+  // lui Kelion + roster-ul de specialiști + istoricul relevant, ca Aider să
+  // construiască CU tot creierul lui Kelion, nu doar cu textul ordinului.
+  let contextKelion = ''
+  try {
+    const ctx = await api('/api/constructor/context', { method: 'POST', body: JSON.stringify({ ordin: job.orderText }) }, 2)
+    const parti = []
+    if (ctx?.memorie?.length) parti.push(`MEMORIA lui Kelion (ce știe despre owner/proiect):\n- ${ctx.memorie.slice(0, 40).join('\n- ')}`)
+    if (ctx?.relevante?.length) parti.push(`ISTORIC relevant pentru ordin:\n- ${ctx.relevante.join('\n- ')}`)
+    if (ctx?.agenti?.length) parti.push(`SPECIALIȘTII lui Kelion (poți cere subiectul lor în raționament):\n${ctx.agenti.slice(0, 80).map((a) => `${a.id} — ${a.rol}`).join('\n')}`)
+    if (parti.length) contextKelion = `\n\n=== CREIERUL LUI KELION (context viu, folosește-l) ===\n${parti.join('\n\n')}\n=== sfârșit context ===\n`
+    log(`context Kelion adus pentru Aider: ${ctx?.memorie?.length ?? 0} amintiri, ${ctx?.agenti?.length ?? 0} specialiști, ${ctx?.relevante?.length ?? 0} rânduri istoric`)
+  } catch (e) {
+    log(`nu am putut aduce contextul lui Kelion (${e instanceof Error ? e.message.slice(0, 80) : e}) — Aider merge pe ordin`)
+  }
   let reparatii = 0
   let ultimaProblema = ''
   for (;;) {
-    const prompt = reparatii
+    const baza = reparatii
       ? `ORDINUL:\n${job.orderText}\n\nVERIFICAREA A PICAT — repară CAUZA (fără petice), lasă porțile verzi:\n${ultimaProblema.slice(-2500)}`
       : (jurnalVechi
           ? `ORDINUL:\n${job.orderText}\n\n--- Încercarea anterioară a picat; ia ALTĂ abordare, nu repeta: ---\n${jurnalVechi.slice(-2500)}`
           : `ORDINUL:\n${job.orderText}`)
+    const prompt = baza + contextKelion
     log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : 'aider construiește ordinul (creier prin app)…')
     const a = ruleazaAider(prompt)
     for (const linie of String(a.log).split('\n').slice(-6)) { const t = linie.trim(); if (t) log(`aider: ${t.slice(0, 140)}`) }
@@ -1030,7 +1047,7 @@ async function main() {
     // pașii pe monitor + rezultatul în raport. Bucla veche de model a fost SCOASĂ.
     const jurnalVechi = String(job.log ?? "").trim()
     const tokens = 0 // Aider nu itemizează tokeni — nicio cifră inventată (regula #1)
-    const finish = construiesteCuAider(job, baseSha, jurnalVechi)
+    const finish = await construiesteCuAider(job, baseSha, jurnalVechi)
     const branch = `kelion/job-${job.id}`
     // Titlu gol = `git commit -m ""` refuză commit-ul („Aborting commit due to
     // empty commit message") și ordinul pica după ce toată munca era făcută.
