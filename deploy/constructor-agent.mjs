@@ -643,22 +643,37 @@ function marcheazaInstalat(prefix) {
 // VERIFICAREA ATELIERULUI — ce s-a atins trebuie să compileze. Întoarce '' dacă
 // e curat, altfel TEXTUL problemei: îl dăm înapoi modelului pentru o rundă de
 // reparație, în loc să omorâm ordinul din prima (vezi bucla din main()).
-function verificaAtelierul() {
-  const changed = sh('git status --porcelain').trim()
-  if (!changed) return 'finish fără nicio modificare de fișier — nu ai scris nimic în atelier.'
-  const touchedBackend = /(^|\n).{3}backend\//.test(changed)
-  const touchedFrontend = /(^|\n).{3}frontend\//.test(changed)
-  // `git diff --stat` NU vede fișierele noi (netrăcite) — logăm și starea brută,
-  // altfel un ordin care doar adaugă fișiere apare în jurnal ca „fără modificări".
-  log(`modificări:\n${(sh('git diff --stat').trim() || changed).slice(-1500)}`)
+function verificaAtelierul(baseSha) {
+  // AIDER FACE --auto-commits: modificările lui sunt COMMITUITE, deci `git status
+  // --porcelain` e GOL după el (vezi și comentariul buclei apelante: „arborele e de
+  // obicei CURAT aici"). Verificarea VECHE citea DOAR `git status --porcelain`
+  // (scrisă pentru bucla de dinaintea lui aider, care lăsa fișiere NECOMITUITE) →
+  // după FIECARE ordin al lui aider credea fals „n-ai scris nimic" → intra în bucla
+  // de reparație și pica „eșuat", IDENTIC pe free ȘI pe plătit (verificarea nu
+  // depinde de model — de-aia și pe modelul cloud maxim rezultatul era același).
+  // Bug REPRODUS: după un commit, porcelain e gol, dar `git diff baseSha HEAD` arată
+  // fișierul. FIX: ne uităm la TOT ce s-a schimbat față de baseSha — commituri
+  // (git diff baseSha..HEAD) + eventualul necomituit din arbore (porcelain).
+  const dinCommit = baseSha ? sh(`git diff --name-only ${baseSha} HEAD`).trim() : ''
+  const dinArbore = sh('git status --porcelain').trim()
+  const fisiere = [
+    ...dinCommit.split('\n'),
+    ...dinArbore.split('\n').map((l) => l.slice(3)), // porcelain: „XY <cale>"
+  ]
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (!fisiere.length) return 'finish fără nicio modificare de fișier — nu ai scris nimic în atelier.'
+  const touchedBackend = fisiere.some((f) => f.startsWith('backend/'))
+  const touchedFrontend = fisiere.some((f) => f.startsWith('frontend/'))
+  log(`modificări (${fisiere.length} fișiere):\n${fisiere.slice(0, 40).join('\n').slice(-1500)}`)
   // DEPENDENȚE NOI (Etapa 5): dacă ordinul a schimbat package.json (a adăugat o
   // bibliotecă), `npm ci` ar pica („package.json și package-lock.json out of
   // sync"). Atunci instalăm cu `npm install` — care aduce pachetul ȘI aduce
   // package-lock.json la zi; lock-ul actualizat intră în PR, deci publicarea în
   // producție (care rulează `npm ci`) merge. Fără schimbare de package.json,
   // rămânem pe `npm ci` (reproductibil din lock).
-  const backendDeps = /(^|\n).{3}backend\/package(-lock)?\.json/.test(changed)
-  const frontendDeps = /(^|\n).{3}frontend\/package(-lock)?\.json/.test(changed)
+  const backendDeps = fisiere.some((f) => /^backend\/package(-lock)?\.json$/.test(f))
+  const frontendDeps = fisiere.some((f) => /^frontend\/package(-lock)?\.json$/.test(f))
   const verify = []
   const instalBackend = touchedBackend ? comandaInstalare('backend', backendDeps) : null
   const instalFrontend = touchedFrontend ? comandaInstalare('frontend', frontendDeps) : null
@@ -1141,7 +1156,7 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
     // lipsă de combustibil. Marcam AMÂNABIL: ordinul rămâne în coadă și se reia
     // când Gemini revine, în loc să se îngrămădească EȘUAT pe un creier gol.
     if (headAcum === baseSha) throw Object.assign(new Error(`aider n-a modificat nimic — probabil creierul LOCAL Ollama e indisponibil/ocupat; se reia când revine. Coada log:\n${a.log.slice(-600)}`), { amanabil: true })
-    const problema = verificaAtelierul()
+    const problema = verificaAtelierul(baseSha)
     if (!problema) return { title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120), body: `Construit de Aider (motorul unic al constructorului); creier LOCAL Ollama pe VPS (${numeModelOllama()}) — independent, fără cheie/cotă/bani. Ordin #${job.id}.` }
     ultimaProblema = problema
     if (reparatii >= MAX_REPAIR || ramase() < 8 * 60_000) throw new Error(problema)
