@@ -71,8 +71,16 @@ export function tagModelCloud(creier2: ModelCreier2): string {
 }
 
 let cacheProba: { la: number; ok: boolean; motiv: string; modele: string[] } | null = null
-/** PROBA: cheia chiar merge pe Ollama cloud? Măsurat (GET /v1/models cu Bearer),
- *  nu presupus. Cache 5 min. Fără cheie → ok:false, motiv clar. */
+/** PROBA REALĂ: cheia chiar POATE RULA pe Ollama cloud modelul ales? Măsurat cu o
+ *  cerere minimă `POST /v1/chat/completions` (max_tokens 1) — NU `GET /v1/models`,
+ *  care e PUBLIC (măsurat 16 aug: răspunde 200 și FĂRĂ cheie, deci nu dovedește
+ *  nimic despre cheie). Interpretăm codul HTTP, măsurat, nu presupus:
+ *   • 200 → cheia merge ȘI modelul ales rulează pe planul tău.
+ *   • 401 → cheia e invalidă (moartă/rotită) — refă cheia pe ollama.com.
+ *   • 402 → cheia e bună, dar modelul cere „extra usage" (nu-i inclus în plan;
+ *           balanța de extra usage e 0) — ex. kimi-k3 (măsurat 16 aug).
+ *  Probăm exact modelul pe care-l alege ownerul la creier 2 (dacă e cloud); dacă
+ *  e pe Gemini, probăm un model inclus doar ca să validăm cheia. Cache 5 min. */
 export async function probaOllamaCloud(): Promise<{ ok: boolean; motiv: string; modele: string[] }> {
   if (cacheProba && Date.now() - cacheProba.la < PROBA_MS) return cacheProba
   const cheie = await getCheieOllama()
@@ -80,18 +88,29 @@ export async function probaOllamaCloud(): Promise<{ ok: boolean; motiv: string; 
     cacheProba = { la: Date.now(), ok: false, motiv: 'nicio cheie Ollama pusă', modele: [] }
     return cacheProba
   }
+  const cfg = await getConfigCreier()
+  const model = tagModelCloud(cfg.creier2) || MODELE_CLOUD['qwen3.5']
   try {
-    const r = await fetch(`${bazaOllamaCloud()}/v1/models`, {
-      headers: { Authorization: `Bearer ${cheie}` },
+    const r = await fetch(`${bazaOllamaCloud()}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${cheie}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ok' }], max_tokens: 1, stream: false }),
       signal: AbortSignal.timeout(12_000),
     })
-    if (!r.ok) {
-      cacheProba = { la: Date.now(), ok: false, motiv: `HTTP ${r.status} de la Ollama cloud`, modele: [] }
+    if (r.status === 200) {
+      cacheProba = { la: Date.now(), ok: true, motiv: '', modele: [model] }
       return cacheProba
     }
-    const j = (await r.json().catch(() => null)) as { data?: { id?: string }[] } | null
-    const modele = Array.isArray(j?.data) ? j!.data.map((m) => String(m?.id ?? '')).filter(Boolean) : []
-    cacheProba = { la: Date.now(), ok: true, motiv: '', modele }
+    if (r.status === 401) {
+      cacheProba = { la: Date.now(), ok: false, motiv: 'cheie invalidă (401) — refă cheia pe ollama.com', modele: [] }
+      return cacheProba
+    }
+    if (r.status === 402) {
+      cacheProba = { la: Date.now(), ok: false, motiv: `cheia e bună, dar „${model}" cere extra usage (nu-i în plan) — alege un model inclus sau pune bani`, modele: [model] }
+      return cacheProba
+    }
+    const txt = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 140)
+    cacheProba = { la: Date.now(), ok: false, motiv: `HTTP ${r.status} de la Ollama cloud: ${txt}`, modele: [] }
     return cacheProba
   } catch (e) {
     cacheProba = { la: Date.now(), ok: false, motiv: String((e as Error)?.message ?? e).slice(0, 180), modele: [] }

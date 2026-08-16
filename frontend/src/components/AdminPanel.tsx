@@ -2744,8 +2744,8 @@ export default function AdminPanel({
                         : cloudProba == null
                           ? 'cheie: probă…'
                           : cloudProba.ok
-                            ? `🟢 cheie Ollama validă (${cloudProba.modele.length} modele văzute pe cloud)`
-                            : `🔴 cheie Ollama: ${cloudProba.motiv}`}
+                            ? `🟢 cheia merge — „${cloudProba.modele[0] ?? 'model'}" rulează pe planul tău (probat live)`
+                            : `🔴 ${cloudProba.motiv}`}
                     </div>
                     {creierMsg && <div style={{ fontSize: 11, opacity: 0.85 }}>{creierMsg}</div>}
                     <div style={{ fontSize: 10, opacity: 0.6 }}>

@@ -21,6 +21,20 @@ describe('creierCloud — alegerea modelului cloud (Kimi K3 ↔ Qwen3.5 Max)', (
   it('baza cloud e Ollama, suprascriabilă din env', () => {
     expect(bazaOllamaCloud()).toMatch(/^https?:\/\//)
   })
+
+  it('proba AUTENTIFICĂ real (POST /v1/chat/completions), nu se bazează pe /v1/models public', () => {
+    // Măsurat 16 aug: GET /v1/models răspunde 200 și FĂRĂ cheie → nu dovedește
+    // cheia. Proba trebuie să RULEZE un token și să citească codul HTTP.
+    const src = s('./services/creierCloud.ts')
+    expect(src).toContain('/v1/chat/completions')
+    expect(src).toContain('max_tokens')
+    expect(src).toContain('r.status === 200')
+    expect(src).toContain('r.status === 401') // cheie invalidă
+    expect(src).toContain('r.status === 402') // cheie bună, model pe extra usage (nu-i în plan)
+    // Fetch-ul NU mai lovește lista publică drept dovadă a cheii (doar comentariul
+    // o mai pomenește, ca explicație — de-aia țintim exact URL-ul de fetch).
+    expect(src).not.toContain('bazaOllamaCloud()}/v1/models')
+  })
 })
 
 describe('cablajul comutatorului — panou scrie, host citește, Aider trece pe cloud', () => {
