@@ -316,7 +316,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     src.buffer = buf
     src.connect(analizor)
     const acum = ctxOut.currentTime
-    if (cursorRedare < acum) cursorRedare = acum
+    if (cursorRedare < acum) {
+      cursorRedare = acum
+    } else if (cursorRedare > acum + 2.0) {
+      // Buffer drift / latency buildup protection during burst inference
+      cursorRedare = acum + 0.05
+    }
     src.start(cursorRedare)
     cursorRedare += buf.duration
     surseActive.push(src)
@@ -329,8 +334,14 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   }
 
   const redaCadru = (b64: string): void => {
-    const f32 = pcm16ToFloat32(base64ToBytes(b64))
-    if (f32.length) redaFloat32(f32)
+    try {
+      const bytes = base64ToBytes(b64)
+      if (!bytes.length) return
+      const f32 = pcm16ToFloat32(bytes)
+      if (f32.length) redaFloat32(f32)
+    } catch (err) {
+      console.warn('[vocalLive] audio frame decode error:', err)
+    }
   }
 
   // GPS-ul CĂTRE sesiune (8 aug: „nu are acces la gps, meteo"): serverul ține
@@ -470,18 +481,21 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // întotdeauna urmat de onclose (cu codul și motivul real). Raportarea de aici
   // fura guardul eroareUrcata și ascundea cauza reală din onclose — utilizatorul
   // vedea doar „(rețea)" în loc de codul/serverul/Google care a picat cu adevărat.
-  ws.onerror = (): void => { /* onclose preia raportarea */ }
+  ws.onerror = (err): void => {
+    console.warn('[vocalLive] websocket error encountered:', err)
+  }
   ws.onclose = (ev: CloseEvent): void => {
     if (inchis) return
-    // Motivele numite ale serverului urcă la om, nu mor în consolă.
-    if (ev.code === 1008) urcaEroarea('sesiune vocală: nu ești autentificat')
-    else if (ev.code === 1011) urcaEroarea('sesiune vocală indisponibilă pe server (lipsește cheia?)')
-    // ORICE altă închidere neinițiată de noi era MOARTE TĂCUTĂ (8 aug: „salută
-    // și moare"): cod 1000/1006 → niciun mesaj, nicio reluare, iar vlRef rămas
-    // setat bloca ȘI audio-ul căii vechi — bec aprins, totul mort. Acum urcă la
-    // ChatPanel: 3 reluări, apoi coboară singur pe calea veche — orice cauză ar
-    // avea serverul/Google, vocea se întoarce în secunde, cu motivul pe bandă.
-    else urcaEroarea(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
+    // Specific WebSocket code handling: 1006 is abnormal closure (network drop / timeout)
+    if (ev.code === 1008) {
+      urcaEroarea('sesiune vocală: nu ești autentificat')
+    } else if (ev.code === 1011) {
+      urcaEroarea('sesiune vocală indisponibilă pe server (lipsește cheia?)')
+    } else if (ev.code === 1006) {
+      urcaEroarea('sesiune vocală întreruptă de rețea (cod 1006 abnormal closure) — reîncercare conexiune')
+    } else if (ev.code !== 1000) {
+      urcaEroarea(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
+    }
     inchide()
   }
 

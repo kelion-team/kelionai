@@ -24,49 +24,78 @@ function push(e: LogEntry): void {
   if (ring.length > MAX_ENTRIES) ring.splice(0, ring.length - MAX_ENTRIES)
 }
 
+function safeStringify(a: unknown): string {
+  if (a === null || a === undefined) return String(a)
+  if (typeof a === 'string') return a
+  if (a instanceof Error) return a.stack || `${a.name}: ${a.message}`
+  if (typeof a === 'symbol' || typeof a === 'bigint') return String(a)
+  try {
+    return JSON.stringify(a)
+  } catch {
+    try {
+      return String(a)
+    } catch {
+      return '[Unserializable]'
+    }
+  }
+}
+
 /** Pino stream: keeps writing to stdout (docker logs stays intact) AND
  *  retains entries in the ring. Reqid/req/res are compressed to a short
  *  summary so the ring holds SIGNAL, not access noise. */
 export function makeLogTee(): Writable {
   return new Writable({
     write(chunk: Buffer, _enc, cb) {
-      process.stdout.write(chunk)
       try {
-        for (const line of chunk.toString('utf8').split('\n')) {
-          if (!line.trim()) continue
-          const j = JSON.parse(line) as {
-            time?: number
-            level?: number
-            msg?: string
-            reqId?: string
-            req?: { method?: string; url?: string }
-            res?: { statusCode?: number }
-            err?: { message?: string; stack?: string }
-            reason?: unknown
+        process.stdout.write(chunk)
+      } catch {
+        /* ignore write error to prevent server crash */
+      }
+      try {
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          try {
+            const j = JSON.parse(trimmed) as {
+              time?: number
+              level?: number
+              msg?: string
+              reqId?: string
+              req?: { method?: string; url?: string }
+              res?: { statusCode?: number }
+              err?: { message?: string; stack?: string }
+              reason?: unknown
+            }
+            const level = j.level ?? 30
+            // Access noise (request completed 2xx/3xx) does NOT enter the
+            // ring — only errors, warnings and real applicative messages.
+            const code = j.res?.statusCode ?? 0
+            const isAccessNoise =
+              level <= 30 && (j.msg === 'request completed' || j.msg === 'incoming request') && code < 400
+            if (isAccessNoise) continue
+            const parts: string[] = []
+            if (j.req?.method) parts.push(`${j.req.method} ${j.req.url ?? ''}`)
+            if (code) parts.push(`→ ${code}`)
+            if (j.msg) parts.push(j.msg)
+            if (j.err?.message) parts.push(`err: ${j.err.message}`)
+            if (j.reason !== undefined) parts.push(`reason: ${safeStringify(j.reason).slice(0, 200)}`)
+            push({
+              t: new Date(j.time ?? Date.now()).toISOString(),
+              level,
+              msg: parts.join(' ').slice(0, 500) || trimmed.slice(0, 500),
+            })
+          } catch {
+            // Non-JSON line (e.g. foreign output or stack trace)
+            if (/error|fail|exception|fatal|rejection/i.test(trimmed)) {
+              push({ t: new Date().toISOString(), level: 50, msg: trimmed.slice(0, 500) })
+            } else if (/warn/i.test(trimmed)) {
+              push({ t: new Date().toISOString(), level: 40, msg: trimmed.slice(0, 500) })
+            }
           }
-          const level = j.level ?? 30
-          // Access noise (request completed 2xx/3xx) does NOT enter the
-          // ring — only errors, warnings and real applicative messages.
-          const code = j.res?.statusCode ?? 0
-          const isAccessNoise =
-            level <= 30 && (j.msg === 'request completed' || j.msg === 'incoming request') && code < 400
-          if (isAccessNoise) continue
-          const parts: string[] = []
-          if (j.req?.method) parts.push(`${j.req.method} ${j.req.url ?? ''}`)
-          if (code) parts.push(`→ ${code}`)
-          if (j.msg) parts.push(j.msg)
-          if (j.err?.message) parts.push(`err: ${j.err.message}`)
-          if (j.reason !== undefined) parts.push(`reason: ${String(j.reason).slice(0, 200)}`)
-          push({
-            t: new Date(j.time ?? Date.now()).toISOString(),
-            level,
-            msg: parts.join(' ').slice(0, 400) || line.slice(0, 400),
-          })
         }
       } catch {
-        // Non-JSON line (e.g. foreign output) — we keep it raw if it looks like an error.
-        const s = chunk.toString('utf8')
-        if (/error|fail|exception/i.test(s)) push({ t: new Date().toISOString(), level: 50, msg: s.slice(0, 400) })
+        /* buffer parsing must never throw */
       }
       cb()
     },
@@ -77,15 +106,6 @@ export function makeLogTee(): Writable {
 export function recentLogs(minLevel = 0, limit = 80): LogEntry[] {
   const out = ring.filter((e) => e.level >= minLevel)
   return out.slice(-Math.max(1, Math.min(limit, MAX_ENTRIES)))
-}
-
-function safeStringify(a: unknown): string {
-  if (typeof a === 'string') return a
-  try {
-    return JSON.stringify(a)
-  } catch {
-    return String(a)
-  }
 }
 
 // CAPTURA console.* ÎN INEL (owner, 13 aug: „Kelion nu vede toate logurile").
@@ -105,18 +125,27 @@ export function capturaConsole(): void {
     ['error', 50],
   ]
   const c = console as unknown as Record<string, (...args: unknown[]) => void>
+  let insideCapture = false
   for (const [metoda, level] of nivele) {
     const orig = c[metoda].bind(console)
     c[metoda] = (...args: unknown[]): void => {
-      orig(...args)
+      try {
+        orig(...args)
+      } catch {
+        /* standard console output must not crash */
+      }
+      if (insideCapture) return
+      insideCapture = true
       try {
         push({
           t: new Date().toISOString(),
           level,
-          msg: args.map(safeStringify).join(' ').slice(0, 400),
+          msg: args.map(safeStringify).join(' ').slice(0, 500),
         })
       } catch {
         /* logarea nu are voie să arunce */
+      } finally {
+        insideCapture = false
       }
     }
   }
