@@ -533,7 +533,7 @@ const RUN_WEB_TOOL: Tool = {
 const IMAGE_TOOL: Tool = {
   name: 'generate_image',
   description:
-    'Generate an image from a text description and show it on the user\'s monitor. Use ONLY when the user CLEARLY asked you to draw, create, generate, design or imagine a picture/logo/illustration — never on a garbled or ambiguous phrase (it costs money per image; when unsure, ASK first). NEVER generate fake application screenshots, fake progress bars, fake "deploy successful" screens or any image that pretends to show a real system state — that is deception, not art. Write a rich, detailed English prompt describing the desired image.',
+    'Generate an image from a text description and show it on the user\'s monitor. Use ONLY when the user CLEARLY asked you to draw, create, generate, design or imagine a picture/logo/illustration — never on a garbled or ambiguous phrase (it costs money per image; when unsure, ASK first). NEVER call this when the user asked for a VIDEO — a video request ends with a VIDEO (studioul_de_clipuri → generate_video); "images for each function" INSIDE a video request means scenes of the clip, not separate pictures. NEVER generate fake application screenshots, fake progress bars, fake "deploy successful" screens or any image that pretends to show a real system state — that is deception, not art. Write a rich, detailed English prompt describing the desired image.',
   input_schema: {
     type: 'object',
     properties: {
@@ -551,7 +551,7 @@ const IMAGE_TOOL: Tool = {
 const VIDEO_TOOL: Tool = {
   name: 'generate_video',
   description:
-    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. For the ADMIN and for paying users it JUST GENERATES (their explicit request is the approval) — call it directly, do not send them to buttons or panels. It costs real money per second (Veo has no free tier) — say the price from the result. If the result contains `pas`, the credits top-up page is ALREADY on the user\'s monitor — tell them the price and that they can top up right there. If it contains `alternativa_gratuita`, offer that FREE path (Google Flow) with a ready-made prompt and the exact steps. Never answer a refusal with a bare "failed".',
+    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. THE DELIVERABLE RULE: a VIDEO request ends with a VIDEO — never substitute generated images, documents or descriptions for the clip itself. For long/presentation videos be honest: one clip is max 8 seconds — plan with studioul_de_clipuri (several clips, or the free Flow path). For the ADMIN and for paying users it JUST GENERATES (their explicit request is the approval) — call it directly, do not send them to buttons or panels. It costs real money per second (Veo has no free tier) — say the price from the result. If the result contains `pas`, the credits top-up page is ALREADY on the user\'s monitor — tell them the price and that they can top up right there. If it contains `alternativa_gratuita`, offer that FREE path (Google Flow) with a ready-made prompt and the exact steps. Never answer a refusal with a bare "failed".',
   input_schema: {
     type: 'object',
     properties: {
@@ -585,7 +585,9 @@ const STUDIO_TOOL: Tool = {
   description:
     'THE CLIP STUDIO (Studioul de Clipuri): give it the user\'s idea and it returns the exact plan to follow — ' +
     'recipe, steps, a polished video prompt, and the suggestive file name (Recipe-Subject-date_time.mp4). ' +
-    'Use it whenever the user mentions the Studio or wants a clip made end-to-end. FOLLOW the returned `pasi` in order. ' +
+    'Use it whenever the user mentions the Studio or wants a clip made end-to-end — INCLUDING long/presentation videos ' +
+    '("a video about your capabilities"): plan one or more 8-second clips and SAY that limit honestly; a video request ' +
+    'always ends with a VIDEO, never with substitute images. FOLLOW the returned `pasi` in order. ' +
     'cale="gratis" (default; Google Flow on the USER\'s own Google account — free, no app money) or cale="platit" ' +
     '(Veo via generate_video — ALWAYS quote the real price from lista_tarife and get explicit confirmation first). ' +
     `Recipes: ${RETETE_STUDIO.join(', ')}.`,

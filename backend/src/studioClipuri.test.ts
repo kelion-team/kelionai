@@ -163,4 +163,14 @@ describe('P32 — scenariul se preia AUTOMAT; bara spune pe românește ce face'
     const defs = sursa('./services/brainToolDefs.ts')
     expect(defs).toMatch(/NU delega NICIODATĂ generarea de clipuri sau imagini/)
   })
+
+  // 16 aug 05:38 (captura ownerului: „i-am cerut video si face asta" — creierul
+  // genera IMAGINI pe o cerere de VIDEO): regula livrabilului, în toate cele
+  // trei descrieri — cererea de video se termină cu VIDEO, nu cu substitute.
+  it('REGULA LIVRABILULUI: video cerut = video livrat, nu imagini-substitut', () => {
+    const chat = sursa('./routes/chat.ts')
+    expect(chat).toMatch(/NEVER call this when the user asked for a VIDEO/)
+    expect(chat).toMatch(/THE DELIVERABLE RULE: a VIDEO request ends with a VIDEO/)
+    expect(chat).toMatch(/a video request ' \+\n\s*'always ends with a VIDEO, never with substitute images/)
+  })
 })
