@@ -97,3 +97,23 @@ describe('P27 — lacătele pe sursă: mortul pe nume nu mai e reluat orbește �
     expect(MARCAJ_P27).toBe('[P27: eroare PERMANENTĂ')
   })
 })
+
+// ── 16 aug 05:47 (ownerul, cu #330 „Lucrează" în față: „aici nu esti tu" /
+// „cine e acolo?"): AUTORUL fiecărui ordin stă LA VEDERE pe card. ─────────────
+describe('autorul ordinului, pe față (cine e acolo?)', () => {
+  it('cineACerut traduce ordered_by în etichete pe românește', async () => {
+    const { cineACerut } = await import('./services/numeOrdin.js')
+    expect(cineACerut('kelion-autovindecare')).toBe('🤖 auto-vindecarea')
+    expect(cineACerut('kelion-autovindecare-live')).toBe('🤖 auto-vindecarea')
+    expect(cineACerut('kelion-autonom')).toBe('🤖 bucla autonomă')
+    expect(cineACerut('adrianenc11@gmail.com')).toBe('👤 adrianenc11')
+    expect(cineACerut('')).toBe('necunoscut')
+  })
+
+  it('ambele afișaje (monitor + panoul admin) poartă cerutDe', () => {
+    const constructorRuta = readFileSync(fileURLToPath(new URL('./routes/constructor.ts', import.meta.url)), 'utf8')
+    expect((constructorRuta.match(/cerutDe: cineACerut\(j\.orderedBy\)/g) ?? []).length).toBe(2)
+    const stage = readFileSync(fileURLToPath(new URL('../../frontend/src/pages/Stage.tsx', import.meta.url)), 'utf8')
+    expect(stage).toContain('{j.cerutDe && <span className="build-ci" title="cine a cerut ordinul">{j.cerutDe}</span>}')
+  })
+})

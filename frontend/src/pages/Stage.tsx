@@ -400,6 +400,9 @@ interface BuildLiveJob {
   id: number
   status: string
   order: string
+  /** 16 aug („cine e acolo?"): AUTORUL ordinului, pe față — 🤖 auto-vindecarea
+   *  / 🤖 bucla autonomă / 👤 omul. Un ordin fără autor arată ca o fantomă. */
+  cerutDe?: string
   progress: string | null
   ci?: string | null
   prUrl: string | null
@@ -538,6 +541,9 @@ function BuildSurface({ zoom }: { zoom: number }) {
                   <span className="build-ci build-ci-wait" title={uiStrings().buildCiRunning}>CI…</span>
                 ) : null}
                 <span className="build-order">#{j.id} — {j.order}</span>
+                {/* AUTORUL, LA VEDERE (16 aug, ownerul pe #330: „aici nu esti
+                    tu" / „cine e acolo?"): cardul spune cine a cerut ordinul. */}
+                {j.cerutDe && <span className="build-ci" title="cine a cerut ordinul">{j.cerutDe}</span>}
                 {/* ×-ul de oprire, DOAR pe ordinele vii (owner, 13 aug). Ordinele
                     gata/eșuate n-au ce opri — se curăță din butoanele de sus. */}
                 {(j.status === 'queued' || j.status === 'running') && (
