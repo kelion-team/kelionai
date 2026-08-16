@@ -79,6 +79,14 @@ export interface VocalLiveOpts {
    *  răspunsul vocal produce frame-ul {niveluri} care se desenează pe grafic.
    *  null = tabul de trading nu e pe ecran (nu ancorăm pe date stătute). */
   tranzactii?(): { simbol: string; pret: number | null; interval: string; sursa: string; peste?: unknown; la: number } | null
+  /** BARGRAF DE INTRARE (owner, 16 aug: „vreau sa vad un mic bargraf cu nivelul
+   *  de la intrarea urechii modelului live… sa se identifice daca nu se
+   *  trunchiaza nimic"). Nivelul REAL al microfonului pe fiecare cadru trimis
+   *  modelului: `nivel` (RMS 0..1) + `pic` (vârf 0..1); `poarta`=true când
+   *  half-duplex taie trimiterea (model primește tăcere); `clip`=true când
+   *  vârful atinge plafonul (distorsiune/tăiere). Ca ownerul să VADĂ, măsurat,
+   *  dacă vocea ajunge la model și dacă se trunchiază ceva. */
+  onNivelIntrare?(n: { nivel: number; pic: number; poarta: boolean; clip: boolean }): void
 }
 
 export interface VocalLiveHandle {
@@ -647,12 +655,29 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     !!ctxOut &&
     ctxOut.state === 'running' &&
     (surseActive.length > 0 || ctxOut.currentTime < cursorRedare + COADA_ECOU_S)
+  let ultimNivelLa = 0
   const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
     const ds = downsample(brut, ctxIn!.sampleRate)
     // Tăcere cât Kelion e audibil. Array NOU, nu mutăm bufferul microfonului —
     // downsample îl întoarce ca ATARE când rata e deja 16 kHz (ar corupe captura).
-    const la16k = kelionAudibil() ? new Float32Array(ds.length) : ds
+    const poarta = kelionAudibil()
+    const la16k = poarta ? new Float32Array(ds.length) : ds
+    // BARGRAF DE INTRARE (owner, 16 aug): măsurăm nivelul REAL al microfonului pe
+    // ACEST cadru — exact semnalul care (dacă poarta nu-l taie) pleacă la model —
+    // și-l dăm UI-ului throttlat la ~60ms. `poarta` arată truncherea half-duplex;
+    // `clip` arată vârful în plafon. Ownerul VEDE dacă vocea ajunge și dacă se taie.
+    if (opts.onNivelIntrare) {
+      let sum = 0
+      let pic = 0
+      for (let i = 0; i < ds.length; i++) { const a = Math.abs(ds[i]); sum += a * a; if (a > pic) pic = a }
+      const rms = ds.length ? Math.sqrt(sum / ds.length) : 0
+      const acum = performance.now()
+      if (acum - ultimNivelLa > 60) {
+        ultimNivelLa = acum
+        opts.onNivelIntrare({ nivel: rms, pic, poarta, clip: pic >= 0.98 })
+      }
+    }
     // OPUS: cât e activ, microfonul intră în encoder (care trimite singur
     // [1][opus] prin callback). Dacă encode-ul pică pe un cadru, trimitem PCM
     // tag-uit [0][pcm] — serverul, în modul Opus, citește mereu octetul-codec.
