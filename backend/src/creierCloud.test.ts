@@ -77,5 +77,8 @@ describe('cablajul comutatorului — panou scrie, host citește, Aider trece pe 
     // Dovada „exact modelul ales, nu unul de sub el" — becul numește modelul CONFIRMAT de Ollama.
     expect(p).toContain('CONFIRMAT de Ollama')
     expect(p).toContain('nu unul de sub el')
+    // „nu stă butonul": pollul de 10s NU mai suprascrie alegerea nesalvată (flag EDITAT).
+    expect(p).toContain('creierEditatRef')
+    expect(p).toContain('!creierEditatRef.current')
   })
 })

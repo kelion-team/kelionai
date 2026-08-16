@@ -646,6 +646,10 @@ export default function AdminPanel({
   const [cloudProba, setCloudProba] = useState<{ ok: boolean; motiv: string; modele: string[] } | null>(null)
   const [ollamaKeyInput, setOllamaKeyInput] = useState('')
   const [creierMsg, setCreierMsg] = useState('')
+  // „nu stă butonul" (owner, 16 aug): reîncărcarea la 10s scria peste alegerea
+  // NESALVATĂ (o readucea la Gemini). De când atingi un comutator, marcăm EDITAT
+  // → pollul NU mai suprascrie alegerea ta până salvezi. Salvarea resetează flagul.
+  const creierEditatRef = useRef(false)
   // Un singur buton de comutator (creier 2 + constructor îl refolosesc → fără dublură jscpd).
   const btnComut = (cheie: string, activ: boolean, onClick: () => void, txt: string) => (
     <button
@@ -977,7 +981,7 @@ export default function AdminPanel({
           setBuildPaused(!!j.paused)
           setAiderProba(j.aider ?? null)
           setOllamaProba(j.ollama ?? null)
-          if (j.creier) setCreierCfg(j.creier)
+          if (j.creier && !creierEditatRef.current) setCreierCfg(j.creier)
           setCloudProba(j.cloud ?? null)
         } else setBuildJobs(null)
       })
@@ -2697,13 +2701,13 @@ export default function AdminPanel({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
                       <span style={{ minWidth: 140, opacity: 0.85 }}>Creier 2 (cereri grele):</span>
                       {([['gemini', 'Gemini (gratis)'], ['kimi-k3', 'Kimi K3 (cloud)'], ['qwen3.5', 'Qwen3.5 397B (cloud)']] as const).map(([val, txt]) =>
-                        btnComut(val, creierCfg.creier2 === val, () => setCreierCfg((c) => ({ ...c, creier2: val })), txt),
+                        btnComut(val, creierCfg.creier2 === val, () => { creierEditatRef.current = true; setCreierCfg((c) => ({ ...c, creier2: val })) }, txt),
                       )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
                       <span style={{ minWidth: 140, opacity: 0.85 }}>Constructor:</span>
                       {([['free', 'FREE (local pe VPS)'], ['platit', 'PLĂTIT (= creier 2 cloud)']] as const).map(([val, txt]) =>
-                        btnComut(val, creierCfg.constructorSursa === val, () => setCreierCfg((c) => ({ ...c, constructorSursa: val })), txt),
+                        btnComut(val, creierCfg.constructorSursa === val, () => { creierEditatRef.current = true; setCreierCfg((c) => ({ ...c, constructorSursa: val })) }, txt),
                       )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
@@ -2727,6 +2731,7 @@ export default function AdminPanel({
                             const j = (await r.json().catch(() => null)) as { creier?: typeof creierCfg; cloud?: { ok: boolean; motiv: string; modele: string[] }; error?: string } | null
                             if (j?.creier) setCreierCfg(j.creier)
                             if (j?.cloud) setCloudProba(j.cloud)
+                            if (r.ok) creierEditatRef.current = false // salvat → serverul redevine sursa
                             setOllamaKeyInput('')
                             setCreierMsg(r.ok ? 'salvat' : `eroare: ${j?.error ?? r.status}`)
                           } catch (e) {
