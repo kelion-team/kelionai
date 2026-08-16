@@ -360,6 +360,13 @@ export default function ChatPanel({
   // pe fiecare cadru trimis modelului; ținut într-un ref (nu state) ca bargraful
   // să-l citească prin rAF fără să re-randeze tot chatul.
   const micNivelRef = useRef<NivelIntrare>({ nivel: 0, pic: 0, poarta: false, clip: false })
+  // PREAMP MICROFON (owner, 16 aug: „reglaj preamp de la minim la maxim… ce faci
+  // daca e surd?"). Factorul de amplificare, persistat în localStorage, aplicat
+  // pe calea live prin handle.setPreamp; sliderul de sub bargraf îl schimbă viu.
+  const [preampNivel, setPreampNivel] = useState<number>(() => {
+    const v = Number(localStorage.getItem('kelion_preamp'))
+    return Number.isFinite(v) && v > 0 ? Math.min(12, Math.max(0.5, v)) : 1
+  })
   // Contorul de minute al sesiunii live + steagul „live a căzut de tot în tabul
   // ăsta" (după 3 reluări picate se coboară pe calea veche și nu se mai insistă
   // până la un refresh — altfel am pendula între cele două căi la nesfârșit).
@@ -1679,6 +1686,8 @@ export default function ChatPanel({
               onNivelIntrare: (nv) => {
                 micNivelRef.current = nv
               },
+              // PREAMP inițial din preferința salvată (owner: „ce faci daca e surd").
+              preampInitial: preampNivel,
               // Cadrele de ECRAN din ușa creierului (cere_creierului) intră în
               // ACELAȘI handleControl ca la chatul scris — monitorul, cardurile
               // și documentele arată identic, indiferent cine le-a cerut.
@@ -2957,7 +2966,34 @@ export default function ChatPanel({
             sesiunea live, arată nivelul REAL al microfonului spre model + dacă
             poarta half-duplex îl taie (gri „mut") sau clipează (roșu). Ca ownerul
             să VADĂ, măsurat, dacă vocea ajunge și dacă se trunchiază ceva. */}
-        {listening && <MicBargraf nivelRef={micNivelRef} activ={listening} />}
+        {listening && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <MicBargraf nivelRef={micNivelRef} activ={listening} />
+            {/* PREAMP min→max (owner, 16 aug: „reglaj preamp… ce faci daca e surd?"):
+                ridică/coboară manual nivelul microfonului; efectul se vede în bargraf. */}
+            <label
+              title="Preamp microfon (min→max): ridică nivelul dacă e prea surd (peste amplificarea automată)"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#c9ccd1' }}
+            >
+              <span style={{ opacity: 0.8 }}>preamp</span>
+              <input
+                type="range"
+                min={0.5}
+                max={12}
+                step={0.5}
+                value={preampNivel}
+                onChange={(e) => {
+                  const g = Number(e.target.value)
+                  setPreampNivel(g)
+                  vlRef.current?.setPreamp(g)
+                  try { localStorage.setItem('kelion_preamp', String(g)) } catch { /* ignore */ }
+                }}
+                style={{ width: 96 }}
+              />
+              <span style={{ minWidth: 30, opacity: 0.85, fontVariantNumeric: 'tabular-nums' }}>×{preampNivel.toFixed(1)}</span>
+            </label>
+          </div>
+        )}
         {/* ONE BAND, BOTH DIRECTIONS (Adrian, Jul 11 evening: "things must be
             swept here, from the brain and towards the brain — no other written
             chat shows"). The band changes its sign with the turn's phase:

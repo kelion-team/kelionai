@@ -44,6 +44,31 @@ describe('bargraful urechii live — nivelul de intrare, măsurat, cu truncherea
   it('ChatPanel leagă nivelul într-un ref și randează bargraful cât ascultă', () => {
     expect(panou).toContain("import MicBargraf, { type NivelIntrare } from './MicBargraf'")
     expect(panou).toMatch(/micNivelRef\.current = nv/) // handler-ul onNivelIntrare
-    expect(panou).toMatch(/listening && <MicBargraf nivelRef=\{micNivelRef\} activ=\{listening\} \/>/)
+    expect(panou).toContain('<MicBargraf nivelRef={micNivelRef} activ={listening} />')
+  })
+})
+
+describe('preamp + amplificare pentru microfon surd (owner, 16 aug: „ce faci daca e surd?")', () => {
+  it('lib/vocalLive are preamp reglabil (setPreamp) aplicat pe cadru înainte de trimitere', () => {
+    expect(clientVL).toContain('setPreamp(gain: number): void') // în interfața handle-ului
+    expect(clientVL).toContain('function clampPreamp')
+    expect(clientVL).toMatch(/let preampGain = clampPreamp\(opts\.preampInitial\)/)
+    // aplicarea pe cadru: multiplicare cu clamp la ±1 (peste = clip)
+    expect(clientVL).toMatch(/if \(preampGain !== 1\)/)
+    expect(clientVL).toContain('setPreamp: (g: number) =>')
+  })
+
+  it('autoGainControl PORNIT pe desktop (nu mai e surd), stins pe mobil pentru A2DP', () => {
+    // Fixul „surdului": AGC pe desktop (amplifică la sursă), gardat de eMobil.
+    expect(clientVL).toContain('autoGainControl: !eMobil')
+    // Rămâne stins pe mobil (Bluetooth A2DP) — echoCancellation tot pe !eMobil.
+    expect(clientVL).toContain('echoCancellation: !eMobil')
+  })
+
+  it('ChatPanel are sliderul de preamp (min→max), persistat, legat de handle', () => {
+    expect(panou).toMatch(/preampInitial: preampNivel/)
+    expect(panou).toMatch(/vlRef\.current\?\.setPreamp\(g\)/)
+    expect(panou).toContain("localStorage.setItem('kelion_preamp'")
+    expect(panou).toMatch(/type="range"/)
   })
 })

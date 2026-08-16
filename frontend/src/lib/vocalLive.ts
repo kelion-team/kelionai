@@ -87,6 +87,10 @@ export interface VocalLiveOpts {
    *  vârful atinge plafonul (distorsiune/tăiere). Ca ownerul să VADĂ, măsurat,
    *  dacă vocea ajunge la model și dacă se trunchiază ceva. */
   onNivelIntrare?(n: { nivel: number; pic: number; poarta: boolean; clip: boolean }): void
+  /** PREAMP inițial (owner, 16 aug): factorul de amplificare la deschiderea
+   *  sesiunii (din preferința salvată a userului). 1 = neutru. Poate fi schimbat
+   *  live cu handle.setPreamp. */
+  preampInitial?: number
 }
 
 export interface VocalLiveHandle {
@@ -96,6 +100,10 @@ export interface VocalLiveHandle {
   /** Câți octeți de microfon au plecat — dovadă că se trimite ceva, nu doar că
    *  socketul e deschis (exact distincția care a lipsit la prima probă live). */
   octetiTrimisi(): number
+  /** PREAMP microfon (owner, 16 aug: „reglaj preamp de la minim la maxim"):
+   *  factor de amplificare aplicat microfonului ÎNAINTE de trimitere. 1 = neutru,
+   *  >1 = mai tare (dacă e „surd"), <1 = mai încet. Se vede în bargraf. */
+  setPreamp(gain: number): void
 }
 
 /** Serverul are cheia și modelul Live? Se întreabă ÎNAINTE de a deschide socketul,
@@ -113,6 +121,13 @@ export async function vocalLiveDisponibila(): Promise<{ disponibil: boolean; mod
 function urlWs(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${location.host}/api/vocal-live`
+}
+
+// PREAMP microfon (owner, 16 aug: „reglaj de la minim la maxim"): factor de
+// amplificare mărginit sigur [0.1, 20]. Valoare invalidă → 1 (neutru).
+function clampPreamp(v: unknown): number {
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? Math.min(20, Math.max(0.1, n)) : 1
 }
 
 // ── IEȘIREA CA MEDIA (A2DP), NU CA „CONVORBIRE" — ca vocea să ajungă pe
@@ -556,9 +571,17 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // pe Android: procesarea WebRTC ține telefonul în MODE_IN_COMMUNICATION și
     // rupe A2DP-ul. Pe DESKTOP modul ăla nu există → AEC pornit acolo omoară
     // ecoul la sursă, fără să atingă Bluetooth-ul reparat pe mobil.
+    // AMPLIFICARE PENTRU MICROFON SURD (owner, 16 aug: „poate o fi mai surd… ce
+    // faci daca e surd?"). Diagnosticul a găsit că exact calea LIVE avea
+    // autoGainControl OPRIT, în timp ce celelalte căi îl au pornit — de-aia era
+    // mai puțin sensibilă. Îl PORNIM pe DESKTOP (ridică vocea slabă/departe la
+    // sursă), gardat de eMobil ca să NU strice ruta A2DP Bluetooth de pe Android
+    // (unde procesarea ține telefonul în MODE_IN_COMMUNICATION). noiseSuppression
+    // rămâne OFF: pe vocea joasă ar putea tăia chiar vorba (ar înrăutăți „surdul").
+    // Peste asta, preamp-ul manual (setPreamp) dă boost suplimentar la cerere.
     const eMobil = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: !eMobil, noiseSuppression: false, autoGainControl: false },
+      audio: { channelCount: 1, echoCancellation: !eMobil, noiseSuppression: false, autoGainControl: !eMobil },
     })
   } catch {
     urcaEroarea('microfonul nu a fost permis')
@@ -656,9 +679,20 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     ctxOut.state === 'running' &&
     (surseActive.length > 0 || ctxOut.currentTime < cursorRedare + COADA_ECOU_S)
   let ultimNivelLa = 0
+  let preampGain = clampPreamp(opts.preampInitial)
   const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
-    const ds = downsample(brut, ctxIn!.sampleRate)
+    let ds = downsample(brut, ctxIn!.sampleRate)
+    // PREAMP (owner, 16 aug: „reglaj preamp de la minim la maxim" + „ce faci daca e
+    // surd?"): amplifică microfonul ÎNAINTE de trimitere. Array NOU (nu mutăm bufferul
+    // capturii, pe care downsample îl întoarce ca atare la 16 kHz), cu clamp la ±1
+    // (peste plafon = clip, se vede roșu în bargraf). Boost manual peste autoGainControl.
+    if (preampGain !== 1) {
+      const g = preampGain
+      const amp = new Float32Array(ds.length)
+      for (let i = 0; i < ds.length; i++) { const v = ds[i] * g; amp[i] = v > 1 ? 1 : v < -1 ? -1 : v }
+      ds = amp
+    }
     // Tăcere cât Kelion e audibil. Array NOU, nu mutăm bufferul microfonului —
     // downsample îl întoarce ca ATARE când rata e deja 16 kHz (ar corupe captura).
     const poarta = kelionAudibil()
@@ -762,6 +796,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     setMuted: (m: boolean) => {
       // Track-ul rămâne viu (sesiunea nu se rupe) — doar nu mai produce cadre.
       stream?.getAudioTracks().forEach((t) => (t.enabled = !m))
+    },
+    setPreamp: (g: number) => {
+      preampGain = clampPreamp(g)
     },
   }
 }
