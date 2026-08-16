@@ -55,12 +55,15 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(pretentiiFaraFapta('Am preluat ordinul tău.', [])).toHaveLength(1)
   })
 
-  it('AUDITUL INVENTAT (captura 06:56): „în urma scanării codului sursă" → demascat MEREU (nu există unealtă de citit codul)', () => {
+  it('AUDITUL INVENTAT (captura 06:56): „în urma scanării codului sursă" fără poarta rulată → demascat', () => {
     const minciunaReala = 'În urma scanării complete a codului sursă (backend/ și frontend/), iată inventarul exact al constantelor.'
     expect(pretentiiFaraFapta(minciunaReala, [])).toHaveLength(1)
     // chiar și cu alte unelte executate (ex. documentul creat) — scanarea tot nedovedită rămâne
     expect(pretentiiFaraFapta(minciunaReala, ['create_doc'])).toHaveLength(1)
     expect(pretentiiFaraFapta('Am auditat codul aplicației și e curat.', [])).toHaveLength(1)
+    // scanarea REALĂ: poarta anti-hardcod rulată pe server (sau verdictul din jurnal) o acoperă
+    expect(pretentiiFaraFapta(minciunaReala, ['ruleaza_portile'])).toEqual([])
+    expect(pretentiiFaraFapta('Am scanat codul — verdictul din jurnal e curat.', ['jurnal_masuratori'])).toEqual([])
     // oferta la viitor NU e pretenție
     expect(pretentiiFaraFapta('Pot scana codul dacă vrei.', [])).toEqual([])
   })

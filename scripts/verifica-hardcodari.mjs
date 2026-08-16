@@ -69,7 +69,10 @@ for (const f of fisiere(join(RADACINA, 'frontend/src'), ['.ts', '.tsx'])) {
 for (const rad of ['backend/src', 'frontend/src']) {
   for (const f of fisiere(join(RADACINA, rad), ['.ts', '.tsx'])) {
     if (f.endsWith('config.ts') || f.includes('.test.')) continue
-    scaneaza(f, '[R2 model-hardcodat]', /['"`](?:gemini-\d[\w.-]*|veo-\d[\w.-]*|claude-[a-z0-9][\w.-]*)['"`]/, null)
+    // ORIUNDE în string, nu doar lipit de ghilimea — „gemini/gemini-2.5-pro"
+    // (cu prefix de furnizor) scăpa porții și ownerul a prins-o (16 aug 07:0x:
+    // „nu ai scos hardcodul din aplicatie de ce?").
+    scaneaza(f, '[R2 model-hardcodat]', /['"`][^'"`\n]*\b(?:gemini-\d[\w.-]*|veo-\d[\w.-]*|claude-[a-z0-9][\w.-]*)\b[^'"`\n]*['"`]/, null)
   }
 }
 

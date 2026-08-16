@@ -55,14 +55,15 @@ describe('sunt patru, și chiar sunt independenți', () => {
     expect(lucratori).toMatch(/panou\/\$\{lucrator\.nume\}-/)
   })
 
-  it('modele DIFERITE — altfel n-ar fi trei păreri, ar fi una de trei ori', () => {
-    const m = /const MODELE = \[([\s\S]*?)\]/.exec(panou)?.[1] ?? ''
-    const ids = m.match(/'([^']+)'/g) ?? []
-    expect(ids.length).toBeGreaterThanOrEqual(3)
-    expect(new Set(ids).size).toBe(ids.length)
-    // GEMINI-ONLY (3 aug — OpenRouter extirpat): toate treptele sunt Gemini,
-    // în forma LiteLLM `gemini/...`, pe cheia ownerului.
-    for (const id of ids) expect(id).toContain("'gemini/")
+  it('modelele vin din CONFIG-UL VIU, deduplicate — nu dintr-o listă scrisă de mână', () => {
+    // LEGEA ANTI-HARDCODARE (16 aug): aici stătea `const MODELE = [...]` pe
+    // generația 2.5, PENSIONATĂ — poarta R2 a prins-o abia când ownerul a
+    // întrebat „nu ai scos hardcodul de ce?". Acum treptele se citesc din
+    // config la fiecare rulare (profund + unic + rapid), în forma LiteLLM.
+    expect(panou).not.toMatch(/const MODELE = \[/)
+    expect(panou).toMatch(/\[config\.modelCreierProfund, modelUnicCod\(\), modelRapidCod\(\)\]/)
+    expect(panou).toMatch(/new Set\(trepte\)/)
+    expect(panou).toContain('`gemini/${m}`')
   })
 
   it('pornesc simultan, iar unul care crapă nu-i oprește pe ceilalți', () => {

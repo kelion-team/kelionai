@@ -3,6 +3,10 @@ import { formatNowContext } from './timeContext.js'
 import { listaAgentiCustom, searchMemories, getGoogleRefreshToken, adaugaAgentCustom } from '../db.js'
 import { geminiDirectChat } from './geminiDirect.js'
 import { webSearch, googleTools, runGoogleTool, refreshGoogleAccessToken } from './google.js'
+// adminTools se aduce DINAMIC la execuție (jos, în ramura măsurătorilor):
+// importul static ar închide ciclul agentiKelion → adminTools → autonomie →
+// brainToolDefs → agentiKelion și ROSTER ar fi undefined la încărcare.
+import { pretentiiFaraFapta, textulDemascarii } from './poartaFaptelor.js'
 import type { OrMessage, AnthropicTool } from './brainContract.js'
 
 // ── ARSENALUL COMPLET (5 aug, ownerul: „nu are uneltele pentru tot ce are
@@ -214,7 +218,10 @@ export async function executaCheamaAgent(
   if (!s) return { json: JSON.stringify({ error: 'sarcina_goala' }), costUsd: 0 }
   try {
     const r = await cheamaAgent(a, s, caAdmin)
-    return { json: JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text }), costUsd: r.costUsd }
+    // DOVADA la vedere (owner, 16 aug: „aduci dovezi ca ai facut"): creierul
+    // mare primește NEGRU PE ALB ce unelte a executat agentul — pe listă goală
+    // știe că răspunsul e vorbă nemăsurată și nu-l vinde drept verificare.
+    return { json: JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text, unelte_executate: r.unelteExecutate }), costUsd: r.costUsd }
   } catch (e) {
     return { json: JSON.stringify({ error: 'agent_a_esuat', detaliu: e instanceof Error ? e.message.slice(0, 200) : String(e) }), costUsd: 0 }
   }
@@ -270,6 +277,7 @@ function instructiune(a: AgentKelion): string {
     `- ANALIZĂ COMPLEXĂ, nu răspuns la suprafață (Adrian, 5 aug: „dă agenților analiză complexă și soluție corectă"): desfă problema în bucăți, pune ipotezele la încercare, cântărește variantele cu argumente, apoi dă SOLUȚIA CORECTĂ — verificată, nu una la nimereală. Gândește temeinic înainte să răspunzi; corect bate rapid. Concluzia o dai scurt, dar în spatele ei stă analiza întreagă.\n` +
     `- Ce nu poți proba spui „nu pot verifica" — nu inventezi cifre, verdicte sau surse.\n` +
     `- Ești BLINDAT cu unelte reale: cauta_web (Google real), citeste_pagina, vreme, hărți și rute, adresă din coordonate, YouTube, traduceri, Wikipedia, valute, oră — FOLOSEȘTE-LE pentru orice fapt proaspăt sau verificabil și citează sursele. Nu răspunde din memorie ce poți afla cu unealta.\n` +
+    `- LEGEA UNELTEI PE JOB (adminul, 16 aug): când faci o VERIFICARE, folosești unealta necesară jobului — sau mai multe. Starea sistemului = stare_masurata / jurnal_masuratori / server_logs / client_errors / ruleaza_portile (unde le ai); fapte de pe net = cauta_web + citeste_pagina. Uneltele pe care le execuți se scriu într-un JURNAL care pleacă la Kelion împreună cu răspunsul tău, iar orice pretenție de faptă fără unealta executată se demască automat pe ecran. Verificare fără unealtă = fabulație.\n` +
     `- Rămâi strict în specialitatea ta; dacă cererea e pentru alt specialist, spune care.`
   )
 }
@@ -279,6 +287,9 @@ export interface RaspunsAgent {
   text: string
   costUsd: number
   model: string
+  /** DOVADA (owner, 16 aug: „aduci dovezi ca ai facut"): uneltele chiar
+   *  EXECUTATE de agent în rularea asta — jurnalul pe care se judecă vorbele. */
+  unelteExecutate: string[]
 }
 
 // UNELTELE SPECIALIȘTILOR (4 aug, noaptea, owner: „e doar un chat bot, nu
@@ -320,6 +331,29 @@ const UNEALTA_AMINTIRI: AnthropicTool = {
     required: ['cauta'],
   },
 }
+
+// ── UNELTELE DE VERIFICARE — MĂSURĂTORILE REALE (owner, 16 aug, verbatim:
+// „Orice agent din cei 91, trebuie cind face verificari trebuie sa foloseasca
+// unealta necesara jobului alocat, sau daca e cazul mai multe unelte" + „nu te
+// misti pina fiecare agent primeste uneltele real, nu doar text"). Până azi,
+// agenții de întreținere (monitor, debug, doctor-kelion, igienă, adevăr, vps,
+// deploy) puteau DOAR să povestească despre sistem — n-aveau nicio unealtă de
+// măsurare, deci „verificarea" lor era fabulație cu ton tehnic. DOAR pe căile
+// ownerului (caAdmin): sunt unelte de operare, nu ies pe endpointul public A2A.
+// (Definițiile sunt scrise aici pe scurt, pentru agenți — cele complete ale
+// creierului stau în brainToolDefs.ts, care importă din fișierul ăsta, deci
+// importul invers ar face ciclu.)
+const UNELTE_MASURARE: AnthropicTool[] = [
+  { name: 'stare_masurata', description: 'Starea REALĂ a aplicației, măsurată ACUM pe server (versiune, becuri, sănătate). La ORICE verificare de sistem pornești de aici — nu povesti starea din memorie.', input_schema: { type: 'object', properties: {} } },
+  { name: 'jurnal_masuratori', description: 'Jurnalul măsurătorilor deja făcute pe server (porți, probe, verdicte). De aici răspunzi la „de unde știi".', input_schema: { type: 'object', properties: { cate: { type: 'number', description: 'câte rânduri (implicit 30)' } } } },
+  { name: 'server_logs', description: 'Logurile REALE ale serverului. Pentru diagnostic: citește-le, nu presupune.', input_schema: { type: 'object', properties: { limit: { type: 'number', description: 'câte rânduri (implicit 60)' }, errorsOnly: { type: 'boolean', description: 'doar erori' } } } },
+  { name: 'client_errors', description: 'Erorile REALE din browserele utilizatorilor (F12), adunate pe server. Pentru verificări de interfață.', input_schema: { type: 'object', properties: { hours: { type: 'number', description: 'fereastra în ore (implicit 24)' }, limit: { type: 'number' } } } },
+  { name: 'ruleaza_portile', description: 'Rulează PE SERVER porțile RAPIDE de verificare a codului (hardcodari, sintaxa, exporturi, lacat-gemini) și întoarce verdictul MĂSURAT. Porțile grele (teste, tipuri, build) le rulează Kelion — cere-i-le lui dacă îți trebuie.', input_schema: { type: 'object', properties: { porti: { type: 'array', items: { type: 'string' }, description: 'care din cele rapide (gol = toate cele rapide)' } } } },
+]
+const NUME_MASURARE = new Set(UNELTE_MASURARE.map((t) => t.name))
+// Porțile pe care un agent le poate aștepta ÎN TURĂ (secunde, nu minute) —
+// testele/tsc/buildul ar ține tura captivă; alea rămân la creierul mare.
+const PORTI_RAPIDE_AGENT = ['hardcodari', 'sintaxa', 'exporturi', 'lacat-gemini']
 
 /** Textul unei pagini web, fără taguri — mâna a doua a căutării.
  *  Exportată (10 aug) pentru Adaptarea CV: citirea reală a anunțului de job. */
@@ -366,8 +400,11 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
   // memoria lui Kelion + skill-urile personale (Gmail/Calendar/Drive/Tasks/
   // Contacte, cu tokenul lui). Endpointul A2A e public — datele lui nu ies pe el.
   const unelte = caAdmin
-    ? [UNEALTA_CAUTARE, UNEALTA_PAGINA, UNEALTA_AMINTIRI, ...GOOGLE_TOOLS_PUBLICE, ...GOOGLE_TOOLS_PERSONALE]
+    ? [UNEALTA_CAUTARE, UNEALTA_PAGINA, UNEALTA_AMINTIRI, ...GOOGLE_TOOLS_PUBLICE, ...GOOGLE_TOOLS_PERSONALE, ...UNELTE_MASURARE]
     : [UNEALTA_CAUTARE, UNEALTA_PAGINA, ...GOOGLE_TOOLS_PUBLICE]
+  // Jurnalul faptelor agentului — dovada cerută de owner (16 aug). Se întoarce
+  // apelantului și pe el se judecă răspunsul (poarta faptelor, mai jos).
+  const unelteExecutate: string[] = []
   // Tokenul ownerului se aduce O DATĂ, leneș, la prima unealtă personală.
   let tokenOwner: string | null = null
   // ANALIZĂ COMPLEXĂ PE TOȚI (Adrian, 5 aug: „dă agenților analiză complexă și
@@ -384,7 +421,14 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
     const r = await geminiDirectChat(model, messages, unelte, { maxTokens: plafon, temperature: 0.6, reasoning: efort })
     cost += r.costUsd
     if (r.toolCalls.length === 0 || runda >= 3) {
-      return { agent: a.id, text: r.text, costUsd: cost, model: r.model }
+      // POARTA FAPTELOR ȘI PE AGENT (owner, 16 aug: „kelion zice ca face el
+      // dar nu intreprinde nimic... aduci dovezi ca ai facut"): vorbele
+      // agentului se judecă pe JURNALUL LUI de unelte, exact ca la creierul
+      // mare. Pretenția nedovedită pleacă spre apelant DEMASCATĂ, nu curată.
+      const nedovedite = pretentiiFaraFapta(r.text, unelteExecutate)
+      const text = nedovedite.length ? r.text + textulDemascarii(nedovedite) : r.text
+      if (nedovedite.length) console.error(`[POARTA FAPTELOR][agent ${a.id}] pretenții fără faptă: ${nedovedite.join('; ')}`)
+      return { agent: a.id, text, costUsd: cost, model: r.model, unelteExecutate }
     }
     messages.push({ role: 'assistant', content: r.text || '', tool_calls: r.toolCalls })
     for (const tc of r.toolCalls) {
@@ -395,10 +439,35 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
         /* argumente stricate → cad pe răspunsul onest de mai jos */
       }
       let rezultat: string
+      // Ce se scrie în jurnal = doar fapta REALĂ: unealta refuzată sau
+      // necunoscută nu e faptă (altfel jurnalul-dovadă ar minți el însuși).
+      let faptaReala = true
       if (tc.function.name === 'cauta_web' && typeof arg.intrebare === 'string' && arg.intrebare) {
         rezultat = await webSearch(arg.intrebare, 6)
       } else if (tc.function.name === 'citeste_pagina' && typeof arg.url === 'string' && arg.url) {
         rezultat = await citestePagina(arg.url)
+      } else if (NUME_MASURARE.has(tc.function.name) && caAdmin) {
+        // MĂSURĂTORILE — aceiași executori ca la creierul mare (sursă unică:
+        // adminTools), pe legitimația ownerului (agenții pe căile lui admin).
+        const { execSharedAdminTool, execUserScopedTool } = await import('./adminTools.js')
+        if (tc.function.name === 'server_logs' || tc.function.name === 'client_errors') {
+          rezultat = (await execUserScopedTool(tc.function.name, arg, config.adminEmail, true)) ?? JSON.stringify({ error: 'unealta_indisponibila' })
+        } else {
+          if (tc.function.name === 'ruleaza_portile') {
+            // Doar porțile RAPIDE în tura agentului; ce s-a cerut greu se spune
+            // pe față, nu se rulează pe tăcute și nici nu dispare fără urmă.
+            const cerute = Array.isArray(arg.porti) && arg.porti.length ? (arg.porti as unknown[]).map(String) : PORTI_RAPIDE_AGENT
+            const grele = cerute.filter((p) => !PORTI_RAPIDE_AGENT.includes(p))
+            const rapide = cerute.filter((p) => PORTI_RAPIDE_AGENT.includes(p))
+            arg = { porti: rapide.length ? rapide : PORTI_RAPIDE_AGENT }
+            const raport = (await execSharedAdminTool('ruleaza_portile', arg)) ?? JSON.stringify({ error: 'unealta_indisponibila' })
+            rezultat = grele.length
+              ? `${raport}\n(Porțile grele cerute — ${grele.join(', ')} — nu rulează în tura unui agent: cere-i lui Kelion să le ruleze cu ruleaza_portile.)`
+              : raport
+          } else {
+            rezultat = (await execSharedAdminTool(tc.function.name, arg)) ?? JSON.stringify({ error: 'unealta_indisponibila' })
+          }
+        }
       } else if (tc.function.name === 'amintiri_kelion' && caAdmin && typeof arg.cauta === 'string' && arg.cauta) {
         const cuvinte = arg.cauta.split(/\s+/).filter(Boolean).slice(0, 8)
         const gasite = await searchMemories(config.adminEmail, 'kelion', cuvinte)
@@ -413,13 +482,16 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
         const ePublica = GOOGLE_PUBLICE.has(tc.function.name)
         if (!ePublica && !caAdmin) {
           rezultat = JSON.stringify({ error: 'unealta_personala_doar_pentru_owner' })
+          faptaReala = false
         } else {
           if (!ePublica && tokenOwner === null) tokenOwner = await tokenGoogleOwner()
           rezultat = await runGoogleTool(tc.function.name, arg, ePublica ? '' : (tokenOwner ?? ''))
         }
       } else {
         rezultat = JSON.stringify({ error: 'unealta_necunoscuta_sau_argumente_goale' })
+        faptaReala = false
       }
+      if (faptaReala) unelteExecutate.push(tc.function.name)
       messages.push({ role: 'tool', tool_call_id: tc.id, content: rezultat.slice(0, 8000) })
     }
   }

@@ -1715,3 +1715,22 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
       raportul de pică poartă acum JURNALUL REAL al bootului (coada din
       /tmp/kelion-boot-proba.log), nu „cauze uzuale" ghicite. De verificat la
       următorul ordin construit pe VPS. [ ]
+- [x] ORDIN 16 aug ~07:10 (verbatim): „Orice agent din cei 91, trebuie cind
+      face verificari trebuie sa foloseasca unealta necesara jobului alocat,
+      sau daca e cazul mai multe unelte, asta faci acum aduci dovezi ca ai
+      facut" + „nu te misti pina fiecare agent primeste uneltele real, nu doar
+      text" — LEGEA UNELTEI PE JOB: agenții pe căile ownerului primesc
+      MĂSURĂTORILE reale (stare_masurata, jurnal_masuratori, server_logs,
+      client_errors, ruleaza_portile-rapide), fiecare unealtă executată intră
+      în JURNALUL DOVEZII care pleacă la Kelion (unelte_executate în JSON),
+      poarta faptelor judecă și răspunsul agentului pe jurnalul lui, iar
+      instrucțiunea fiecărui agent poartă legea. Lacăte în agentiA2a.test.ts.
+      Verificare live: după publicare, o delegare de verificare trebuie să
+      întoarcă unelte_executate ne-gol. [ ]
+- [x] 16 aug: poarta anti-hardcod era PREA ÎNGUSTĂ (ownerul: „nu ai scos
+      hardcodul de ce?") — R2 prindea modelul doar lipit de ghilimea, deci
+      'gemini/gemini-2.5-pro' (cu prefix) scăpa. Strânsă + a prins REAL lista
+      pensionată 2.5 din panouLucratori.ts → înlocuită cu treptele vii din
+      config (profund/unic/rapid, deduplicate). Poarta 'hardcodari' e acum și
+      în PORTI (ruleaza_portile) — auditul de hardcod al lui Kelion e de-acum
+      MĂSURAT, nu povestit. [ ]

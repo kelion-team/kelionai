@@ -82,14 +82,14 @@ const FAMILII: readonly FamiliePretentie[] = [
   },
   // AUDITUL INVENTAT (owner, 16 aug 06:56, cu captura: „asta e dovada mea ca
   // ti-ai batut joc de mine" — un „audit al codului sursă" care numea modele
-  // ce NU EXISTĂ nicăieri în repo: claude-3-5-sonnet, gpt-4o). Creierul N-ARE
-  // nicio unealtă care să citească codul sursă al aplicației: ORICE pretenție
-  // de scanare/audit de cod e neverificabilă prin construcție — unelte: [] =
-  // nimic n-o poate dovedi, deci se demască de fiecare dată.
+  // ce NU EXISTĂ nicăieri în repo: claude-3-5-sonnet, gpt-4o). Singura scanare
+  // REALĂ a codului e poarta anti-hardcod rulată pe server (ruleaza_portile →
+  // 'hardcodari') sau verdictul ei din jurnal (jurnal_masuratori). Un „audit"
+  // povestit fără una din ele = inventat, se demască.
   {
     re: /((?<![-\p{L}])am\s+(scanat|auditat)|[îi]n\s+urma\s+(scan|audit)[ăa]?\p{L}*)\b[^.!?\n]{0,80}\b(cod|surs)/iu,
-    unelte: [],
-    eticheta: '„am scanat codul sursă" — nu există NICIO unealtă de citit codul aplicației: auditul e inventat',
+    unelte: ['ruleaza_portile', 'jurnal_masuratori'],
+    eticheta: '„am scanat codul sursă" — fără ruleaza_portile/jurnal_masuratori: auditul e inventat',
   },
 ]
 
