@@ -2744,7 +2744,7 @@ export default function AdminPanel({
                         : cloudProba == null
                           ? 'cheie: probă…'
                           : cloudProba.ok
-                            ? `🟢 cheia merge — „${cloudProba.modele[0] ?? 'model'}" rulează pe planul tău (probat live)`
+                            ? `🟢 CONFIRMAT de Ollama: rulează „${cloudProba.modele[0] ?? 'model'}" — exact modelul ales, nu unul de sub el`
                             : `🔴 ${cloudProba.motiv}`}
                     </div>
                     {/* TOP-UP „extra usage" (owner, 16 aug: „la creier vreau bifă pentru kimi 3,
