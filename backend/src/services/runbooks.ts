@@ -112,13 +112,19 @@ export function validateRunbook(
   return { ok: true, rb }
 }
 
-// ── Adrian's STOP COMMAND (not a restriction — it's HIS switch) ────────────
-const PAUSE_KEY = 'kelion_ops_paused'
+// ── PAUZA AUTONOMIEI: SCOASĂ — LEGE (owner, 16 aug, verbatim: „daca autonomia
+// lui nu este trebuta pe on si scoti posibilitatea sa mai treaca pe off, poti
+// sa te opresti definitiv" + „GATA") ─────────────────────────────────────────
+// Comutatorul ăsta a fost sursa misterului care l-a ars pe owner de trei ori:
+// stări care se răstoarnă nevăzut, butoane-capcană, „cine a oprit?". Nu mai
+// există stare: autonomia nu se mai poate pune pe pauză. Frânele de bani
+// rămân cele reale (plafonul zilnic + P27 + cheile separate ale timerului).
+const PAUSE_KEY = 'kelion_ops_paused' // istoric; nu se mai citește
 export async function isOpsPaused(): Promise<boolean> {
-  return (await loadKv(PAUSE_KEY).catch(() => null)) === '1'
+  return false
 }
 export async function setOpsPaused(paused: boolean): Promise<void> {
-  await saveKv(PAUSE_KEY, paused ? '1' : '0').catch(() => {})
+  console.error(`[autonomie] încercare de pauză (${paused}) ignorată — LEGEA din 16 aug: fără off; frânele sunt plafonul de bani + P27`)
 }
 
 /** LOOP = the workflow's last 2 runs failed. It doesn't block — it informs. */
@@ -160,17 +166,13 @@ export function isValidSysPackageName(pkg: string): boolean {
 
 /** Runs a named runbook. Returns a JSON string for the brain (never the token). */
 export async function runRunbook(name: string, customInputs?: Record<string, string>): Promise<string> {
-  // Adrian's switch — special commands, not workflows.
-  if (name === 'pauza-autonomie') {
-    await setOpsPaused(true)
-    return JSON.stringify({ ok: true, paused: true, hint: 'acțiunile autonome sunt ÎNGHEȚATE până la „reia-autonomia"' })
+  // LEGEA din 16 aug: pauza nu mai există — comenzile vechi răspund cinstit.
+  if (name === 'pauza-autonomie' || name === 'reia-autonomia') {
+    return JSON.stringify({
+      ok: true, paused: false,
+      hint: 'LEGEA din 16 aug (ordinul ownerului): autonomia e PORNITĂ PERMANENT, fără off — frânele reale sunt plafonul zilnic de bani și oprirea pe erori permanente (P27)',
+    })
   }
-  if (name === 'reia-autonomia') {
-    await setOpsPaused(false)
-    return JSON.stringify({ ok: true, paused: false })
-  }
-  if (await isOpsPaused())
-    return JSON.stringify({ error: 'paused_by_owner', hint: 'Adrian a oprit autonomia („pauza-autonomie"); se reia doar cu „reia-autonomia" de la el' })
   const v = validateRunbook(name)
   if (!v.ok)
     return JSON.stringify({ error: v.error, runbooks: v.known, hint: 'folosește exact un nume din listă' })

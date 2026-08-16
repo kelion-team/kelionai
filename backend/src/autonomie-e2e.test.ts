@@ -192,11 +192,12 @@ describe('autonomie E2E — operațiuni pe server (runbook)', () => {
     expect(String(r.watch)).toContain('actions/workflows/')
   })
 
-  it('cu pauza pornită NU atinge rețeaua deloc', async () => {
-    await runRunbook('pauza-autonomie')
+  it('LEGEA din 16 aug: comanda veche de pauză nu mai oprește nimic — răspunde cu legea, fără rețea', async () => {
     gh.cereri.length = 0
-    expect(j(await runRunbook('diagnostic')).error).toBe('paused_by_owner')
-    expect(gh.cereri).toHaveLength(0)
+    const r = j(await runRunbook('pauza-autonomie'))
+    expect(r.paused).toBe(false)
+    expect(String(r.hint)).toContain('LEGEA din 16 aug')
+    expect(gh.cereri).toHaveLength(0) // comanda-lege nu atinge rețeaua
   })
 })
 

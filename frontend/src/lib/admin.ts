@@ -141,19 +141,8 @@ export async function golesteVizitatori(): Promise<number | null> {
  *  The "pauza-autonomie" command existed since Jul 27, but you had to know it
  *  by heart and say it in chat. A brake the owner chooses himself is not a barrier —
  *  it's control. That's why it's a button, in plain sight, not a magic word. */
-export async function pauzaAutonomie(oprit: boolean): Promise<boolean> {
-  try {
-    const r = await fetch('/api/admin/autonomie/pauza', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ oprit }),
-    })
-    return r.ok
-  } catch {
-    return false
-  }
-}
+// (pauzaAutonomie a MURIT pe 16 aug — LEGEA ownerului: autonomia pornită
+// permanent, fără off; ruta de pe server a rămas doar ca răspuns cinstit.)
 
 // P29 (15 aug): butonul „Video plătit" — pornește/oprește generarea Veo din
 // panou (kv pe server), în locul env-ului de pe VPS în care ownerul nu umblă.
