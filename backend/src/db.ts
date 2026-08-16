@@ -3984,6 +3984,38 @@ export function amprentaOrdin(text: string): string {
     .slice(0, 400)
 }
 
+// ── ACELAȘI SUBIECT ÎN ALTE CUVINTE = TOT DUBLURĂ (owner, 16 aug, cu coada pe
+// ecran: #334 „Perform full codebase audit for hardcoded values...", #335
+// „Perform a comprehensive audit of the entire codebase...", #338 „Scan the
+// entire codebase for remaining hardcoded values..." — TREI ordine VII pe
+// ACELAȘI audit; „am cerut unicitate pe ordin, e normal sa ma ignori?").
+// Amprenta exactă prinde doar copiile identice; asemănarea de subiect se
+// judecă pe CUVINTELE DE CONȚINUT (fără umplutură), determinist: ≥4 cuvinte
+// comune ȘI ≥50% din vocabularul ordinului mai mic. Fără AI, fără scor magic
+// — un prag verificabil în teste. ─────────────────────────────────────────────
+const CUVINTE_UMPLUTURA = new Set([
+  'this', 'that', 'with', 'from', 'into', 'have', 'been', 'will', 'shall', 'should',
+  'must', 'need', 'make', 'sure', 'please', 'also', 'orice', 'oricare', 'toate',
+  'pentru', 'care', 'este', 'sunt', 'fara', 'fără', 'după', 'dupa', 'când', 'cind',
+  'unde', 'cum', 'mai', 'foarte', 'doar', 'apoi', 'atunci', 'acum', 'aici',
+])
+export function cuvinteleOrdinului(text: string): Set<string> {
+  return new Set(
+    amprentaOrdin(text)
+      .split(/[^a-zăâîșțé#]+/i)
+      .filter((w) => w.length >= 4 && !CUVINTE_UMPLUTURA.has(w)),
+  )
+}
+/** Două ordine pe ACELAȘI subiect, chiar formulate diferit? Pur, determinist. */
+export function seamanaOrdinele(a: string, b: string): boolean {
+  const A = cuvinteleOrdinului(a)
+  const B = cuvinteleOrdinului(b)
+  if (A.size < 4 || B.size < 4) return false
+  let comune = 0
+  for (const w of A) if (B.has(w)) comune++
+  return comune >= 4 && comune / Math.min(A.size, B.size) >= 0.5
+}
+
 // ── ORDINELE NU SE DUBLEAZĂ NICIODATĂ (ordinul verbatim al ownerului, 15 aug:
 // „ordinele de rezolvat nu au voie sa se dubleze nici o data") ────────────────
 // Dovada din coada lui: cerințele #28 și #29 construite în PARALEL (2,5M tokeni
@@ -4005,6 +4037,12 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
     if (dublura) {
       console.error(`[ORDINE] dublură refuzată: ordinul #${dublura.id} e VIU cu aceeași amprentă — nu se naște al doilea (depus de ${orderedBy})`)
       return Number(dublura.id)
+    }
+    // Același SUBIECT în alte cuvinte (16 aug, tripleta #334/#335/#338):
+    const geaman = vii.rows.find((rand) => seamanaOrdinele(rand.order_text, orderText))
+    if (geaman) {
+      console.error(`[ORDINE] același subiect refuzat: ordinul #${geaman.id} e VIU pe aceeași temă (cuvinte comune peste prag) — nu se naște al doilea (depus de ${orderedBy})`)
+      return Number(geaman.id)
     }
   } catch {
     /* citirea dublurilor a picat → mai bine un ordin posibil-dublat decât

@@ -1734,3 +1734,13 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
       config (profund/unic/rapid, deduplicate). Poarta 'hardcodari' e acum și
       în PORTI (ruleaza_portile) — auditul de hardcod al lui Kelion e de-acum
       MĂSURAT, nu povestit. [ ]
+- [x] 16 aug, cu coada pe ecran (#334/#335/#338 — TREI ordine VII pe același
+      audit de hardcod; „am cerut unicitate pe ordin, e normal sa ma
+      ignori?"): ușa unică prindea doar amprenta EXACTĂ — formulările diferite
+      ale aceluiași subiect treceau. Adăugat seamanaOrdinele (determinist: ≥4
+      cuvinte de conținut comune + ≥50% din vocabularul ordinului mic) în
+      createBuildJob; tripleta reală din captură e chiar testul. După
+      publicare: dublurile deja născute se închid de owner (Reia/anulare) —
+      ușa nu mai lasă altele noi. STATUT: în cod, pe ramură, porți verzi —
+      NU e „reparat" pentru owner până nu e îmbinat + publicat + văzut în
+      coada lui. [ ]
