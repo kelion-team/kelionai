@@ -33,15 +33,9 @@ export const ENV_ALIASES: Record<string, string[]> = {
   // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
   // de la fostul câmp config.googleMapsKey de mai jos.)
   geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
-  // CHEIA FABLE 5 (15 aug — „situația identică ca la bula de credit"): cheia
-  // Anthropic se citea DOAR din process.env, pe 3 nume fixe, ocolind exact
-  // mecanismul de aliasuri construit după lecția din 30 iul. Orice nume
-  // rezonabil scris de owner trebuie GĂSIT — altfel îi spunem la nesfârșit
-  // „pune o cheie nouă" pentru o cheie care există.
-  anthropicKey: [
-    'ANTHROPIC_API_KEY', 'ANTHROPIC_KEY', 'CLAUDE_API_KEY', 'CLAUDE_KEY',
-    'FABLE5_KEY', 'FABLE_KEY', 'CONSTRUCTOR_FABLE_KEY',
-  ],
+  // (CHEIA FABLE 5 / Anthropic a fost SCOASĂ — owner, 16 aug: „fable iese total
+  // de peste tot… curata peste tot in aplicatie". Nu mai există niciun consumator
+  // Fable/Anthropic în cod; constructorul e pe motorul Aider + creier Gemini.)
   julesKey: ['JULES_API_KEY', 'JULES_KEY'],
   mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
   bridgeSecret: ['BRIDGE_SECRET'],
@@ -226,7 +220,7 @@ export const config = {
   // + OSRM, cu sau fără cheie; rândul lui din env-check împingea ownerul să
   // configureze o cheie fără niciun efect — încălcarea regulii #4.)
   geminiKey: env(...ENV_ALIASES.geminiKey),
-  anthropicKey: env(...ENV_ALIASES.anthropicKey),
+  // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
   julesKey: env(...ENV_ALIASES.julesKey),
   // Creierul DIRECT (chat + VEDERE + AUDIO — Gemini e multimodal, un singur

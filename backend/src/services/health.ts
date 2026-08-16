@@ -4,6 +4,7 @@ import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } fr
 import { geminiLive } from './geminiDirect.js'
 import { stareDispecer } from './dispecer.js'
 import { probaBrowserulMainilor } from './browser.js'
+import { probaAider } from './aiderProba.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -316,6 +317,25 @@ export async function systemHealth(): Promise<string> {
         grav: 'mediu',
         desc: `browserul mâinilor (Chromium) nu pornește: ${b.motiv} — browser_open și pașii pe mâini cu browser pică`,
         reparabil: 'pe gazdă: cauza în /root/kelion/browser-install.log; de regulă lipsesc bibliotecile de sistem → o re-publicare rulează 4b cu --with-deps',
+      })
+    }
+  } catch {
+    /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
+  }
+
+  // 12. AIDER — MOTORUL CONSTRUCTORULUI, PROBAT CU `aider --version` (owner, 16
+  // aug: „doar denumit nu e suficient trebuie verificat real ca e aider").
+  // Constructorul rulează Aider ca motor unic; dacă binarul lipsește pe gazdă,
+  // ordinele nu se construiesc — becul o spune MĂSURAT, cu versiunea reală.
+  try {
+    const a = await probaAider()
+    info.aiderConstructor = a.ok ? `VIU (${a.versiune})` : `LIPSĂ: ${a.motiv}`
+    if (!a.ok) {
+      problems.push({
+        id: 'aider-constructor-lipsa',
+        grav: 'critic',
+        desc: `motorul constructorului (Aider) nu răspunde la 'aider --version': ${a.motiv} — ordinele de build nu se pot construi`,
+        reparabil: 'pe gazdă: imaginea instalează aider-chat (Dockerfile); o re-publicare îl repune, sau pip install aider-chat pe VPS',
       })
     }
   } catch {

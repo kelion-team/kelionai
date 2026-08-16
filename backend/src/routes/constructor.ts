@@ -124,9 +124,16 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // (/api/constructor/next nu predă nimic), dar Constructorul n-o arăta
     // nicăieri — ordinul stătea „în coadă · 0%" la nesfârșit după promisiunea
     // „max. 2 minute". Panoul afișează bannerul și corectează promisiunea.
+    // DOVADA VIE A MOTORULUI (owner, 16 aug: „doar denumit nu e suficient
+    // trebuie verificat real ca e aider… cu dovada"): rulăm `aider --version`
+    // pe gazdă și trimitem starea MĂSURATĂ (versiunea reală sau eroarea), ca
+    // panoul să nu doar SCRIE „Aider", ci s-o și DOVEDEASCĂ.
+    const { probaAider } = await import('../services/aiderProba.js')
+    const aider = await probaAider().catch((e) => ({ ok: false, versiune: '', motiv: String(e).slice(0, 200) }))
     return reply.send({
       jobs,
       paused: await isOpsPaused().catch(() => false),
+      aider, // { ok, versiune, motiv } — motorul unic al constructorului, probat live
     })
   })
 
@@ -369,15 +376,12 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // 'în curs' = it couldn't be confirmed within the worker's budget (the
     // workshop had passed anyway).
     const ci = ['verde', 'roșu', 'în curs'].includes(String(req.body?.ci)) ? String(req.body?.ci) : undefined
-    // THE BRAIN USED (Adrian, Aug 2: "Everything FREE. The admin can EXPRESSLY
-    // request the paid Fable 5 brain for the CONSTRUCTOR only"): only two
-    // honest labels are accepted — 'fable-5' (paid, expressly marked in the
-    // order — istoric; agentul e Gemini-only din 3 aug) or 'free'. The cost is
-    // the one MEASURED by the worker from the provider's usage; anything
-    // non-numeric/negative is dropped, so the Money views never show a
-    // fabricated figure. Marcajul 'fable-5' rămâne ACCEPTAT în API (un worker
-    // vechi nu trebuie să pice pe raport), dar UI-ul nu-l mai oferă.
-    const brain = ['fable-5', 'free'].includes(String(req.body?.brain)) ? String(req.body?.brain) : undefined
+    // CREIERUL FOLOSIT — owner, 16 aug: „fable iese total de peste tot". Singura
+    // etichetă onestă rămasă e 'free' (constructorul e pe motorul Aider + creier
+    // Gemini prin app, gratuit pe cheia casei). Costul e cel MĂSURAT de worker;
+    // orice non-numeric/negativ e ignorat, ca panoul Bani să nu arate o cifră
+    // fabricată. (Marcajul 'fable-5' a fost SCOS — Fable nu mai există în constructor.)
+    const brain = String(req.body?.brain) === 'free' ? 'free' : undefined
     const costRaw = Number(req.body?.costUsd)
     const costUsd = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : undefined
     await reportBuildJob(id, {
@@ -424,11 +428,9 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // be VISIBLE everywhere the order is reported). A Fable order says what it
     // cost — measured, or honestly "not reported by the provider".
     const linieCreier =
-      brain === 'fable-5'
-        ? `Creier: Fable 5 (marcaj istoric — agentul e Gemini-only) — ${costUsd != null ? `cost măsurat: $${costUsd.toFixed(4)}` : 'cost neraportat de furnizor'}.\n\n`
-        : brain === 'free'
-          ? `Creier: gratuit (:free).\n\n`
-          : ''
+      brain === 'free'
+        ? `Motor: Aider · creier Gemini (rapid → performant), prin app.\n\n`
+        : ''
     const body =
       status === 'done'
         ? `Ordinul #${id} e construit. ${dovadaCI}\n\n${linieCreier}PR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
