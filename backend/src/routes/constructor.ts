@@ -103,15 +103,64 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // panoul să nu doar SCRIE „Aider", ci s-o și DOVEDEASCĂ.
     const { probaAider } = await import('../services/aiderProba.js')
     const { probaOllama } = await import('../services/ollamaProba.js')
-    const [aider, ollama] = await Promise.all([
+    const { getConfigCreier, probaOllamaCloud } = await import('../services/creierCloud.js')
+    const [aider, ollama, creierCfg, cloud] = await Promise.all([
       probaAider().catch((e) => ({ ok: false, versiune: '', motiv: String(e).slice(0, 200) })),
       probaOllama().catch((e) => ({ ok: false, modele: [] as string[], motiv: String(e).slice(0, 200) })),
+      getConfigCreier().catch(() => ({ creier2: 'gemini' as const, constructorSursa: 'free' as const })),
+      probaOllamaCloud().catch((e) => ({ ok: false, motiv: String(e).slice(0, 200), modele: [] as string[] })),
     ])
     return reply.send({
       jobs,
       paused: await isOpsPaused().catch(() => false),
       aider, // { ok, versiune, motiv } — motorul (Aider), probat live pe VPS
       ollama, // { ok, modele, motiv } — creierul LOCAL al lui Aider, probat pe VPS (ollama list)
+      creier: creierCfg, // { creier2, constructorSursa } — alegerea ownerului (panou)
+      cloud, // { ok, motiv, modele } — cheia Ollama cloud, probată MĂSURAT (nu presupus)
+    })
+  })
+
+  // ── COMUTATORUL CREIER 2 (cloud) + SURSA CONSTRUCTORULUI (free/plătit) ───────
+  // Owner, 16 aug: „creier 2 → Kimi K3 cu comutator Qwen3.5 Max… constructor =
+  // comutator FREE (local) ↔ PLĂTIT (același model ca creier 2)… se aprinde când
+  // lipesc cheia". AICI ownerul ALEGE din panou (nu hardcodat). Cheia se salvează
+  // DOAR dacă a fost trimisă (câmp gol = neatinsă). Doar admin.
+  app.post<{ Body: { creier2?: string; constructorSursa?: string; ollamaKey?: string } }>(
+    '/api/admin/constructor/creier-cloud',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const { setConfigCreier, setCheieOllama, probaOllamaCloud, _resetProbaOllamaCloud } = await import('../services/creierCloud.js')
+      const cheie = req.body?.ollamaKey
+      if (typeof cheie === 'string' && cheie.trim()) {
+        await setCheieOllama(cheie.trim())
+        _resetProbaOllamaCloud() // re-probăm cu cheia nouă
+      }
+      const cfg = await setConfigCreier({
+        creier2: req.body?.creier2 as 'gemini' | 'kimi-k3' | 'qwen3.5' | undefined,
+        constructorSursa: req.body?.constructorSursa as 'free' | 'platit' | undefined,
+      })
+      const cloud = await probaOllamaCloud().catch((e) => ({ ok: false, motiv: String(e).slice(0, 200), modele: [] as string[] }))
+      return reply.send({ ok: true, creier: cfg, cloud })
+    },
+  )
+
+  // Config pentru CONSTRUCTORUL de pe host (bridge-gated): ce model + bază + cheie
+  // să folosească Aider. sursa='platit' → modelul cloud ales la creier2 + baza +
+  // cheia; sursa='free' → local (host-ul folosește default-ul lui de Ollama local).
+  app.get('/api/constructor/creier-config', async (req, reply) => {
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ error: 'unauthorized' })
+    const { getConfigCreier, getCheieOllama, tagModelCloud, bazaOllamaCloud } = await import('../services/creierCloud.js')
+    const cfg = await getConfigCreier()
+    const cheie = await getCheieOllama()
+    const platit = cfg.constructorSursa === 'platit' && cfg.creier2 !== 'gemini' && !!cheie
+    return reply.send({
+      sursa: platit ? 'platit' : 'free',
+      model: platit ? tagModelCloud(cfg.creier2) : '', // gol → host-ul folosește localul lui
+      base: platit ? bazaOllamaCloud() : '',
+      cheie: platit ? cheie : '',
     })
   })
 

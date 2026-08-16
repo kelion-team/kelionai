@@ -72,3 +72,22 @@ describe('preamp + amplificare pentru microfon surd (owner, 16 aug: „ce faci d
     expect(panou).toMatch(/type="range"/)
   })
 })
+
+describe('audio obligatoriu pe scris — vocea turei scrise sună chiar cu sesiunea live (owner, 14 aug)', () => {
+  it('tura scrisă NU mai e aruncată cât e sesiunea live: se redă, nu se face return pe vlRef', () => {
+    // Vechiul „if (vlRef.current) return" ÎNAINTE de playVoice a fost SCOS — altfel
+    // scrisul rămânea fără voce cât sesiunea live e permanentă.
+    expect(panou).not.toMatch(/if \(vlRef\.current\) return\n\s*contorGata/)
+    expect(panou).toContain('const live = vlRef.current')
+    expect(panou).toContain("contorGata('primul sunet (gura a pornit)')")
+  })
+
+  it('anti-ecou: urechea live e mutată pe durata redării turei scrise (setRedareExterna)', () => {
+    expect(panou).toContain('live?.setRedareExterna(true)')
+    expect(panou).toContain('live?.setRedareExterna(false)')
+    // în lib: steagul intră în poarta half-duplex (kelionAudibil)
+    expect(clientVL).toContain('setRedareExterna(activ: boolean): void')
+    expect(clientVL).toMatch(/let redareExterna = false/)
+    expect(clientVL).toMatch(/redareExterna \|\|/) // prima condiție a porții
+  })
+})
