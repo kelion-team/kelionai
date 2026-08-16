@@ -978,13 +978,13 @@ function asiguraCreierulLocal() {
   return gata
 }
 
-function ruleazaAider(prompt) {
-  // CREIERUL LUI AIDER = MODEL LOCAL PE VPS (Ollama) — owner, 16 aug: „aider pe
-  // un model LOCAL pe VPS (Ollama)… pe serverul linux si de acolo sa lucreze
-  // aider". FĂRĂ Gemini, fără cheie, fără cotă, fără bani: constructorul e
-  // independent — Aider gândește pe creierul local de pe server. Modelul + gazda
-  // vin din env (kelionai.env pe VPS), cu un default rezonabil de cod.
-  const model = env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b'
+function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }) {
+  // CREIERUL LUI AIDER = comutator FREE (local pe VPS) ↔ PLĂTIT (cloud), ales de
+  // owner din panou. FREE: model LOCAL Ollama pe gazdă (fără cheie/cotă/bani).
+  // PLĂTIT: modelul CLOUD ales (Kimi K3/Qwen3.5 397B) pe serverele Ollama, prin
+  // API-ul compatibil OpenAI (openai/<model> + OPENAI_API_BASE=<cloud>/v1 + cheia).
+  const platit = creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie
+  const model = platit ? `openai/${creierCfg.model}` : (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b')
   const args = [
     '--message', prompt,
     '--model', model,
@@ -995,6 +995,12 @@ function ruleazaAider(prompt) {
     // Ollama rulează pe VPS (constructorul rulează tot pe host, lângă el).
     OLLAMA_API_BASE: env.OLLAMA_API_BASE || 'http://127.0.0.1:11434',
     GIT_TERMINAL_PROMPT: '0',
+  }
+  if (platit) {
+    // CLOUD: Ollama expune un endpoint compatibil OpenAI. Aider (LiteLLM) îl
+    // folosește cu openai/<model> + baza + cheia. Nu atingem localul.
+    aiderEnv.OPENAI_API_BASE = `${String(creierCfg.base).replace(/\/+$/, '')}/v1`
+    aiderEnv.OPENAI_API_KEY = creierCfg.cheie
   }
   const timeout = Math.max(60_000, Math.min(ramase() - 90_000, 22 * 60_000))
   try {
@@ -1014,14 +1020,26 @@ function ruleazaAider(prompt) {
 // MAX_REPAIR) → {title, body}. Aruncă „amânabil" pe sugrumarea creierului (coada
 // reia ordinul, ca înainte); aruncă eșec clar dacă Aider n-a schimbat nimic.
 async function construiesteCuAider(job, baseSha, jurnalVechi) {
-  ULTIMUL_CREIER = `aider (creier LOCAL Ollama pe VPS: ${numeModelOllama()})`
+  // ── COMUTATORUL FREE ↔ PLĂTIT (owner, 16 aug: „constructor = comutator FREE
+  // (local pe VPS) ↔ PLĂTIT (același model ca creier 2)… se aprinde când lipesc
+  // cheia"). Aducem de la app alegerea ownerului: sursa='platit' → Aider pe modelul
+  // CLOUD ales (Kimi K3/Qwen3.5 397B) + cheia; sursa='free' → local pe VPS. Fără cheie
+  // sau fără alegere, app-ul întoarce 'free' → rămâne pe local (comportamentul de azi).
+  let creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }
+  try {
+    const c = await api('/api/constructor/creier-config', {}, 2)
+    if (c && (c.sursa === 'platit' || c.sursa === 'free')) creierCfg = c
+  } catch (e) {
+    log(`nu am putut aduce config-ul creierului (${e instanceof Error ? e.message.slice(0, 80) : e}) — rămân pe local`)
+  }
+  const platit = creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie
+  ULTIMUL_CREIER = platit
+    ? `aider (creier CLOUD plătit: ${creierCfg.model})`
+    : `aider (creier LOCAL Ollama pe VPS: ${numeModelOllama()})`
   // ── CREIERUL LOCAL, ASIGURAT AUTOMAT (owner, 16 aug: „sa instaleze el… pe
-  // linux… aider automat cu tot ce trebuie"). Înainte să pornească Aider,
-  // constructorul își pune SINGUR pe VPS creierul local (Ollama + modelul de cod +
-  // Aider) dacă lipsește — fără SSH. Dacă instalarea automată nu reușește acum
-  // (fără rețea/disc/root), AMÂNĂM ordinul (nu-l ardem): rămâne în coadă și se
-  // reia — becul „creier LOCAL Ollama" din panou arată starea reală, măsurată.
-  if (!asiguraCreierulLocal())
+  // linux… aider automat cu tot ce trebuie"). Doar pe FREE (local) — pe PLĂTIT
+  // (cloud) Aider vorbește cu serverele Ollama, deci NU mai instalăm nimic local.
+  if (!platit && !asiguraCreierulLocal())
     throw Object.assign(
       new Error('creierul local (Ollama) nu e disponibil pe VPS și instalarea automată n-a reușit acum — ordinul se reia (vezi becul „creier LOCAL Ollama" în panou)'),
       { amanabil: true },
@@ -1051,8 +1069,8 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
           ? `ORDINUL:\n${job.orderText}\n\n--- Încercarea anterioară a picat; ia ALTĂ abordare, nu repeta: ---\n${jurnalVechi.slice(-2500)}`
           : `ORDINUL:\n${job.orderText}`)
     const prompt = baza + contextKelion
-    log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : 'aider construiește ordinul (creier LOCAL Ollama pe VPS)…')
-    const a = ruleazaAider(prompt)
+    log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : `aider construiește ordinul (${ULTIMUL_CREIER})…`)
+    const a = ruleazaAider(prompt, creierCfg)
     for (const linie of String(a.log).split('\n').slice(-6)) { const t = linie.trim(); if (t) log(`aider: ${t.slice(0, 140)}`) }
     if (a.throttled) throw Object.assign(new Error(`aider sugrumat (creier LOCAL Ollama indisponibil/ocupat): ${a.log.slice(-160)}`), { amanabil: true })
     const headAcum = sh('git rev-parse --short=7 HEAD').trim()

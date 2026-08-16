@@ -38,7 +38,7 @@ describe('constructor = Aider (motor unic) pe creier LOCAL Ollama de pe VPS', ()
     expect(agent).toContain('function asiguraCreierulLocal')
     expect(agent).toContain('setup-ollama.sh')
     // Se cheamă ÎNAINTE de a construi; dacă nu reușește, ordinul e AMÂNABIL.
-    expect(agent).toContain('if (!asiguraCreierulLocal())')
+    expect(agent).toContain('if (!platit && !asiguraCreierulLocal())')
     expect(agent).toContain('amanabil: true')
   })
 

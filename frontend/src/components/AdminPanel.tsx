@@ -639,6 +639,23 @@ export default function AdminPanel({
   const [aiderProba, setAiderProba] = useState<{ ok: boolean; versiune: string; motiv: string } | null>(null)
   // Creierul LOCAL al lui Aider: `ollama list` de pe VPS (owner, 16 aug).
   const [ollamaProba, setOllamaProba] = useState<{ ok: boolean; modele: string[]; motiv: string } | null>(null)
+  // COMUTATORUL creier 2 (cloud) + sursa constructorului (free/plătit), ales de
+  // owner (owner, 16 aug: „creier 2 → Kimi K3 cu comutator Qwen3.5… constructor =
+  // FREE ↔ PLĂTIT… se aprinde când lipesc cheia"). `cloud` = proba MĂSURATĂ a cheii.
+  const [creierCfg, setCreierCfg] = useState<{ creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }>({ creier2: 'gemini', constructorSursa: 'free' })
+  const [cloudProba, setCloudProba] = useState<{ ok: boolean; motiv: string; modele: string[] } | null>(null)
+  const [ollamaKeyInput, setOllamaKeyInput] = useState('')
+  const [creierMsg, setCreierMsg] = useState('')
+  // Un singur buton de comutator (creier 2 + constructor îl refolosesc → fără dublură jscpd).
+  const btnComut = (cheie: string, activ: boolean, onClick: () => void, txt: string) => (
+    <button
+      key={cheie}
+      onClick={onClick}
+      style={{ padding: '3px 8px', borderRadius: 6, cursor: 'pointer', border: activ ? '1px solid #2563eb' : '1px solid #8886', background: activ ? '#2563eb' : 'transparent', color: activ ? '#fff' : 'inherit' }}
+    >
+      {txt}
+    </button>
+  )
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
   // EVALUAREA CERINȚEI (owner, 13 aug): pe măsură ce scrii ordinul, evaluăm
@@ -952,7 +969,7 @@ export default function AdminPanel({
   const refreshBuildJobs = (): void => {
     fetch('/api/admin/constructor', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string } } | null) => {
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string }; creier?: { creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }; cloud?: { ok: boolean; motiv: string; modele: string[] } } | null) => {
         // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
         // nu se lasă „Niciun ordin încă" peste o citire picată.
         if (j?.jobs) {
@@ -960,6 +977,8 @@ export default function AdminPanel({
           setBuildPaused(!!j.paused)
           setAiderProba(j.aider ?? null)
           setOllamaProba(j.ollama ?? null)
+          if (j.creier) setCreierCfg(j.creier)
+          setCloudProba(j.cloud ?? null)
         } else setBuildJobs(null)
       })
       .catch(() => setBuildJobs(null))
@@ -2668,6 +2687,70 @@ export default function AdminPanel({
                             ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
                             : `· 🔴 Ollama LIPSĂ pe VPS (${ollamaProba.motiv.slice(0, 50)})`}
                     </span>
+                  </div>
+                  {/* ── COMUTATORUL CREIER 2 + CONSTRUCTOR (owner, 16 aug: „creier 2 →
+                      Kimi K3 cu comutator Qwen3.5 Max… constructor = FREE ↔ PLĂTIT…
+                      se aprinde când lipesc cheia"). Tu alegi, tu vezi, măsurat.
+                      Doar stiluri inline (fără clasă partajată) — lecția coliziunii. */}
+                  <div style={{ marginTop: 10, padding: 10, border: '1px solid #8884', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>Creierul (comutator) — tu alegi, tu vezi</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
+                      <span style={{ minWidth: 140, opacity: 0.85 }}>Creier 2 (cereri grele):</span>
+                      {([['gemini', 'Gemini (gratis)'], ['kimi-k3', 'Kimi K3 (cloud)'], ['qwen3.5', 'Qwen3.5 397B (cloud)']] as const).map(([val, txt]) =>
+                        btnComut(val, creierCfg.creier2 === val, () => setCreierCfg((c) => ({ ...c, creier2: val })), txt),
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
+                      <span style={{ minWidth: 140, opacity: 0.85 }}>Constructor:</span>
+                      {([['free', 'FREE (local pe VPS)'], ['platit', 'PLĂTIT (= creier 2 cloud)']] as const).map(([val, txt]) =>
+                        btnComut(val, creierCfg.constructorSursa === val, () => setCreierCfg((c) => ({ ...c, constructorSursa: val })), txt),
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
+                      <span style={{ minWidth: 140, opacity: 0.85 }}>Cheia Ollama:</span>
+                      <input
+                        type="password"
+                        value={ollamaKeyInput}
+                        onChange={(e) => setOllamaKeyInput(e.target.value)}
+                        placeholder={cloudProba?.ok ? '•••• (pusă — lasă gol ca s-o păstrezi)' : 'lipește cheia Ollama Cloud'}
+                        style={{ flex: 1, minWidth: 180, padding: '3px 6px', fontSize: 12 }}
+                      />
+                      <button
+                        onClick={async () => {
+                          try {
+                            setCreierMsg('salvez…')
+                            const r = await fetch('/api/admin/constructor/creier-cloud', {
+                              method: 'POST',
+                              headers: { 'content-type': 'application/json' },
+                              body: JSON.stringify({ creier2: creierCfg.creier2, constructorSursa: creierCfg.constructorSursa, ollamaKey: ollamaKeyInput || undefined }),
+                            })
+                            const j = (await r.json().catch(() => null)) as { creier?: typeof creierCfg; cloud?: { ok: boolean; motiv: string; modele: string[] }; error?: string } | null
+                            if (j?.creier) setCreierCfg(j.creier)
+                            if (j?.cloud) setCloudProba(j.cloud)
+                            setOllamaKeyInput('')
+                            setCreierMsg(r.ok ? 'salvat' : `eroare: ${j?.error ?? r.status}`)
+                          } catch (e) {
+                            setCreierMsg(`eroare: ${String(e).slice(0, 80)}`)
+                          }
+                        }}
+                        style={{ padding: '3px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#1a7f37', color: '#fff', fontWeight: 600 }}
+                      >
+                        Salvează
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 11, color: cloudProba == null ? undefined : cloudProba.ok ? '#1a7f37' : '#c1121f', opacity: cloudProba == null ? 0.7 : 1 }}>
+                      {creierCfg.creier2 === 'gemini' && creierCfg.constructorSursa === 'free'
+                        ? 'Acum: totul gratis (Gemini + local). Alege cloud + lipește cheia ca să pornești modelul puternic.'
+                        : cloudProba == null
+                          ? 'cheie: probă…'
+                          : cloudProba.ok
+                            ? `🟢 cheie Ollama validă (${cloudProba.modele.length} modele văzute pe cloud)`
+                            : `🔴 cheie Ollama: ${cloudProba.motiv}`}
+                    </div>
+                    {creierMsg && <div style={{ fontSize: 11, opacity: 0.85 }}>{creierMsg}</div>}
+                    <div style={{ fontSize: 10, opacity: 0.6 }}>
+                      Constructorul PLĂTIT folosește exact modelul ales la creier 2. Creier 2 pe CHAT se aprinde după ce probez cheia live (ca să nu-ți rup chatul). Chat rapid rămâne Gemini.
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
                     <label className="chat-hint" style={{ fontSize: 12 }}>
