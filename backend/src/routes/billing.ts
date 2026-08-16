@@ -50,6 +50,14 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const { meniulDeTarife, lirePentru } = await import('../services/tarife.js')
     return reply.send({
       credit: { lire: config.billing.creditValue, moneda: config.billing.currency },
+      // LEGEA ANTI-HARDCODARE (16 aug): pragurile alimentării pleacă DE AICI —
+      // frontendul nu mai are voie să scrie de mână „£20"/„£5"; cifra afișată
+      // e cifra care chiar validează (config.billing, reglabilă din env).
+      praguri: {
+        primaAlimentare: config.billing.firstTopupMin,
+        minim: config.billing.topupMin,
+        pas: config.billing.topupStep,
+      },
       tarife: meniulDeTarife().map((t) => ({
         cheie: t.cheie,
         eticheta: t.eticheta,
