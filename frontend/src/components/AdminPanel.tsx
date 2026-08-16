@@ -17,7 +17,6 @@ import {
   fetchFinance,
   manageUser,
   fetchMoneyCircuit,
-  pauzaAutonomie,
   setVideoPlatit,
   fetchDoveziAutonomie,
   fetchPlati,
@@ -801,23 +800,15 @@ export default function AdminPanel({
     setRoFailed(0)
   }
 
-  // THE OWNER'S LEVER: stops / restarts autonomy in one click. After the press
-  // we re-read the state from the server — we don't assume it worked.
-  const [pauzaBusy, setPauzaBusy] = useState(false)
+  // LEGEA din 16 aug: pârghia de pauză a autonomiei NU MAI EXISTĂ (ordinul
+  // verbatim: „scoti posibilitatea sa mai treaca pe off" + „GATA") — rândul
+  // din panou e o DECLARAȚIE, nu un comutator; onPauzaAutonomie/pauzaBusy au
+  // murit odată cu butonul.
   // THE EIGHT PROOFS (Adrian, Jul 31: „there must be 8 out of 8 proofs”).
   const [dovezi, setDovezi] = useState<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null>(null)
   // THE PAYMENTS PANEL (M3, Aug 2): 'necitit' until the read lands; null = the
   // read FAILED (shown as failure, never as an empty ledger — rule no. 1).
   const [plati, setPlati] = useState<PlatiAdmin | null | 'necitit'>('necitit')
-  async function onPauzaAutonomie(oprit: boolean): Promise<void> {
-    setPauzaBusy(true)
-    await pauzaAutonomie(oprit)
-    // Păstrăm ultimele date bune dacă recitirea pică (auditul admin, 3 aug).
-    const c = await fetchMoneyCircuit()
-    if (c) setCircuit(c)
-    setCircuitFailed(!c)
-    setPauzaBusy(false)
-  }
 
   // P29 — butonul „Video plătit" (owner, 15 aug: „eu vreau sa platesc, sau
   // clientul, de ce nu ma duce spre plata"): pornește/oprește Veo din panou,
@@ -1620,16 +1611,13 @@ export default function AdminPanel({
                     „pauza-autonomie” command existed since Jul 27, but you had to know
                     it by heart. A limit YOU choose is not a barrier; one I impose on
                     you, is. */}
+                    {/* LEGEA din 16 aug (ownerul, verbatim: „autonomia pe on si
+                    scoti posibilitatea sa mai treaca pe off" + „GATA"): nu mai
+                    există buton, nu mai există stare care se răstoarnă nevăzut.
+                    DOVADA stă pe ecran, pe față — cum a arătat el. */}
                     <span className="or-wallet-sub">
-                      {circuit?.autonomiaOprita ? '⏸ Autonomia e OPRITĂ de tine' : '▶ Autonomia merge'}{' '}
-                      <button
-                        type="button"
-                        className="ghost"
-                        disabled={pauzaBusy}
-                        onClick={() => void onPauzaAutonomie(!circuit?.autonomiaOprita)}
-                      >
-                        {circuit?.autonomiaOprita ? 'Repornește' : 'Oprește'}
-                      </button>
+                      ▶ Autonomia: PORNITĂ PERMANENT (LEGE, 16 aug) — fără buton de oprire.
+                      Frânele tale reale: plafonul zilnic de bani, oprirea pe erori permanente (P27), cheile timerului de promovare.
                     </span>
                     {/* P29: comutatorul VIDEO. Ownerul, 20:58 („tu ai zis sa
                     opresc in admin ca sa genereze video gratis, iti bati joc

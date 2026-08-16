@@ -1628,3 +1628,38 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
 | P18 | **Comutatorul manual de creier al constructorului** (ownerul, 15 aug, verbatim: „buton apesi se trece pe fable 5 obligatoriu, dezapesi trece normal") — buton în Admin → Constructor, lângă plafon: APĂSAT = toate turele constructorului merg pe Fable 5, iar un eșec al lui se SPUNE (503 cu motivul), nu cade tăcut pe Gemini — „obligatoriu" care alunecă pe alt creier ar minți butonul; fără cheie → mesaj cinstit, nu alunecare. DEZAPĂSAT = logica automată de azi, neatinsă (Gemini principal, Fable 5 la reluări). Stare în kv `constructor:forta_fable`, rută POST gardată cerAdmin, starea cară în GET-ul cozii. Lacăt fortaFable.test.ts (4 verigi). | 🔧 reparat în cod (PR curent), de verificat live: butonul „Forțează Fable 5" în tabul Constructor |
 | P19 | **Poarta E2E: aplicația se DESCHIDE în browser, nu doar pornește** (ownerul, 15 aug: „nu te comporți ca un QA inginer soft, și nu livrezi aplicația reparată") — până azi porțile dovedeau doar că aplicația compilează și pornește; primele ochi pe pagina REALĂ erau ai ownerului. FIX: ușa a 10-a în porti-pr.sh — instanța bootează cu SPA-ul servit (steag nou SERVESTE_FRONTEND=1, fără pretențiile prod), Chromium (Playwright) o deschide: 200 + randare (nu ecran alb) + zero erori de browser (401-urile de sesiune ale nelogatului nu-s defecte) + /manual viu; fără browser pe mașina porții → NEPROBAT (spus, nu inventat, nu blochează); PICĂ blochează merge-ul. DOVEDIT local cap-la-cap (a și prins pe drum: SPA oprit fără steag → 404). Adâncimea pe Stage/meniu cere sesiune → P19b. Smoke-ul din containerul Claude spre live e blocat de proxy-ul TLS al mediului (măsurat: ERR_CONNECTION_RESET) — de-aia poarta stă pe VPS. | 🔧 în PR; activă post-merge, la fiecare PR viitor |
 
+- [x] ORDIN 16 aug ~06:00 (verbatim, LEGE + ultimatum): „daca autonomia lui nu
+      este trebuta pe on si scoti posibilitatea sa mai treaca pe off, poti sa
+      te opresti definitiv" + „GATA" — AUTONOMIA E PORNITĂ PERMANENT, PRIN
+      CONSTRUCȚIE: autonomActiv()=true și isOpsPaused()=false fără stare, fără
+      kv, fără buton (nu mai există misterul „cine a oprit/pornit" care l-a
+      ars de 3 ori: #330 azi-noapte, incidentul VPS 1000% din 13 aug, toggling
+      nevăzut); comenzile vechi pauza/reia răspund cinstit cu legea; rândul
+      din panou e DECLARAȚIE, nu comutator. FRÂNELE DE BANI RĂMASE (reale, nu
+      comutatoare): plafonul zilnic al constructorului, P27 (erori permanente
+      → ordin înghețat + raportat), cheile separate ale timerului promo,
+      becul Fable cinstit. Lacăte rescrise: autonomie.test (legea nouă),
+      autonomie-e2e.test. Context: #330 era ordin de auto-vindecare din coada
+      veche; autorul e acum PE CARD (#1216, cineACerut). [ ]
+- [ ] ORDIN 16 aug 05:53 (verbatim): „iti repet continu, acest soft e doar o
+      minciuna... nimic din cerintele mele de 7 luni nu regasesti funtional
+      adevarat, raspunde de ce" + captura 05:54 în care creierul RECUNOAȘTE
+      „am mințit afirmând că am generat clipul" + ordinul „afiseaza tot ce nu
+      e masurat in cod si repara sa fie masurabil, pe toate functiile" (P34)
+      — POARTA FAPTELOR: pe turele de execuție, pretențiile de faptă din
+      răspuns („am generat/creat/trimis/urcat…") se verifică pe server contra
+      jurnalului de unelte al turei (toolNamesThisTurn); pretenție fără faptă
+      = demascată automat pe ecran + în istoric. ÎN LUCRU (serviciul
+      poartaFaptelor + legarea în chat.ts post-stream). [ ]
+- [ ] ORDIN 16 aug 06:05 (verbatim, LEGE): „orice cerinta a admin trebuie sa
+      devina lege de neignorat pentru orice model ai e folosit" — secțiunea
+      LEGILE ADMINULUI în promptul de sistem al TUTUROR creierelor (chat
+      flash/pro, Fable, ușa creierului pe voce): ordinele adminului sunt legi,
+      nu sugestii; se execută sau se refuză cu motiv NUMIT — niciodată
+      ignorate sau „uitate". DE FĂCUT împreună cu poarta faptelor. [ ]
+- [ ] ORDIN 16 aug 05:52 (verbatim): „pune toti agenti si verifica toata
+      aplicatia, de 3 ori, la rind si pe ai lui toti si cauta toate bugurile"
+      + „sa ia fiecare funtionalitate sa o testeze" — MAREA VERIFICARE 3×
+      lansată (workflow wf_6422155b: 10 zone × 3 runde + verificatori
+      adversariali; agenții rulează pe sesiunea Claude, NU pe cheile/banii
+      ownerului). La final: reparat tot ce e confirmat, cu porți + boot. [ ]

@@ -72,34 +72,34 @@ describe('autonomie — fără GITHUB_TOKEN nu se pretinde nimic', () => {
   })
 })
 
-describe('autonomie — ÎNTRERUPĂTORUL lui Adrian („pauza-autonomie")', () => {
-  it('pornit din runbook, oprește TOATE acțiunile autonome', async () => {
-    process.env.GITHUB_TOKEN = 'token-de-test' // token present: only the pause can still stop it
+// ── LEGEA din 16 aug (ownerul, verbatim: „daca autonomia lui nu este trebuta
+// pe on si scoti posibilitatea sa mai treaca pe off, poti sa te opresti
+// definitiv" + „GATA"): pauza NU MAI EXISTĂ — autonomia e pornită prin
+// construcție. Testele de aici păzesc LEGEA NOUĂ: nimic n-o mai poate opri
+// pe tăcute; frânele de bani sunt plafonul zilnic + P27, nu comutatoare.
+describe('autonomie — LEGEA din 16 aug: pornită PERMANENT, fără off', () => {
+  it('isOpsPaused e FALS prin construcție; setOpsPaused nu mai poate opri nimic', async () => {
     expect(await isOpsPaused()).toBe(false)
+    await setOpsPaused(true) // încercarea se ignoră (doar urmă în jurnal)
+    expect(await isOpsPaused()).toBe(false)
+  })
 
+  it('vechile comenzi de pauză răspund cinstit cu LEGEA, nu schimbă nimic', async () => {
     const pauza = jsonul(await runRunbook('pauza-autonomie'))
-    expect(pauza.paused).toBe(true)
-    expect(await isOpsPaused()).toBe(true)
-
-    // With the pause on, NONE of Kelion's hands move anymore.
-    expect(jsonul(await repoWrite('kelion/x', 'a.ts', 'cod', 'm')).error).toBe('paused_by_owner')
-    expect(jsonul(await repoOpenPR('kelion/x', 't', 'b')).error).toBe('paused_by_owner')
-    expect(jsonul(await repoMergePR(1)).error).toBe('paused_by_owner')
-    expect(jsonul(await runRunbook('diagnostic')).error).toBe('paused_by_owner')
-  })
-
-  it('„reia-autonomia" ridică pauza — și numai Adrian o poate da', async () => {
-    await setOpsPaused(true)
-    expect(await isOpsPaused()).toBe(true)
-    const r = jsonul(await runRunbook('reia-autonomia'))
-    expect(r.paused).toBe(false)
+    expect(pauza.paused).toBe(false)
+    expect(String(pauza.hint)).toContain('LEGEA din 16 aug')
+    const reia = jsonul(await runRunbook('reia-autonomia'))
+    expect(reia.paused).toBe(false)
     expect(await isOpsPaused()).toBe(false)
   })
 
-  it('comenzile de pauză merg CHIAR ȘI fără token (nu depind de GitHub)', async () => {
-    // If "stop" needed the token, it could fail exactly when it's most needed.
+  it('mâinile lui Kelion NU mai pot fi oprite de vreo pauză (doar tokenul lipsă le oprește)', async () => {
     delete process.env.GITHUB_TOKEN
-    expect(jsonul(await runRunbook('pauza-autonomie')).paused).toBe(true)
+    await setOpsPaused(true)
+    // fără token → refuz pe NUMELE cauzei reale (token), nu pe o pauză-fantomă
+    expect(jsonul(await repoWrite('kelion/x', 'a.ts', 'cod', 'm')).error).toBe('github_token_missing')
+    expect(jsonul(await repoOpenPR('kelion/x', 't', 'b')).error).toBe('github_token_missing')
+    expect(jsonul(await repoMergePR(1)).error).toBe('github_token_missing')
   })
 })
 
