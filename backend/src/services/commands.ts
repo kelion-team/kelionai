@@ -109,6 +109,13 @@ export function interpretDeviceCommand(
   const msg = (text ?? '').trim()
   if (!msg) return null
 
+  // COD/SHELL/JSON/URL NU E COMANDĂ DE DISPOZITIV (owner, 16 aug: un `curl` cu
+  // JSON `"stream":false,"role":"user"` a comutat camera — cuvintele tehnice din
+  // payload — `stream`, `user` — păcăleau detectorul de cameră). Dacă inputul are
+  // semne clare de cod/shell/JSON/URL, NU e limbaj vorbit → îl lăsăm la creier
+  // (return null), nu-l tratăm ca pe o comandă de dispozitiv.
+  if (/[{}]|:\/\/|--[a-z]|[|&;$`]|\bcurl\b|\bhttps?\b|"[a-z0-9_]+"\s*:/i.test(msg)) return null
+
   const camera = cameraOp(msg)
   if (camera) return { camera }
 
