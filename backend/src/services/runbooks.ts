@@ -191,17 +191,28 @@ export async function runRunbook(name: string, customInputs?: Record<string, str
     }
   }
 
+  // ── CALE LOCALĂ pe VPS (17 aug QA): restart-app / restart-caddy ───────────
+  // GitHub Actions e MORT pe org (billing; runner_id=0). Butonul Reset VPS din
+  // admin trecea prin workflow_dispatch și primea 502 cinstit — dar omul tot nu
+  // putea reporni. Cererea se scrie în ops-inbox (montat RW din container);
+  // ops-worker.sh pe gazdă (cron 1 min) execută DOAR comenzile din lista albă.
+  if (name === 'restart-app' || name === 'restart-caddy') {
+    const local = await ruleazaOpsLocal(name)
+    if (local) return local
+    // dacă inbox-ul lipsește (deploy vechi fără mount), cădem pe GitHub mai jos
+  }
+
   if (!ghToken())
     return JSON.stringify({
       error: 'github_token_missing',
-      hint: 'pune GITHUB_TOKEN în /root/kelion/kelionai.env și repornește containerul (redeploy).',
+      hint: 'pune GITHUB_TOKEN în /root/kelion/kelionai.env și repornește containerul (redeploy). Sau calea locală ops-inbox pe VPS.',
     })
 
   // A loop? We do NOT block (Adrian's order) — we warn and ask for a NEW STRATEGY.
   let warning: string | undefined
   if (await loopDetected(v.rb.workflow)) {
     warning =
-      'BUCLĂ: ultimele 2 rulări ale acestui workflow au PICAT. Nu repeta aceeași soluție — rulează «diagnostic», citește faptele și schimbă abordarea. Adminul a fost avertizat pe email.'
+      'BUCLĂ: ultimele 2 rulări ale acestui workflow au PICAT. Nu repeta aceeași soluție — rulează «diagnostic», citește faptele și schimbă strategia. Adminul a fost avertizat pe email.'
     void alertAdminLoop(v.rb.workflow, `Declanșat din chat: runbook «${name}».`)
   }
 
@@ -223,7 +234,69 @@ export async function runRunbook(name: string, customInputs?: Record<string, str
       hint: 'rularea apare în câteva secunde; rezultatul se citește din jurnalul ei',
     })
   const body = (await r.text().catch(() => '')).slice(0, 300)
+  // Actions mort (billing) pe restart: încearcă local din nou (mesaj clar)
+  if ((name === 'restart-app' || name === 'restart-caddy') && (r.status === 403 || r.status === 404 || r.status >= 500)) {
+    const local = await ruleazaOpsLocal(name)
+    if (local) return local
+  }
   return JSON.stringify({ error: `dispatch_failed_${r.status}`, detail: body, ...(warning ? { warning } : {}) })
+}
+
+/** Cale locală ops-inbox pe VPS. null = inbox indisponibil (fără mount). */
+async function ruleazaOpsLocal(name: 'restart-app' | 'restart-caddy'): Promise<string | null> {
+  const inbox =
+    process.env.OPS_INBOX_DIR ||
+    (await import('node:fs').then((fs) => {
+      if (fs.existsSync('/host/ops-inbox')) return '/host/ops-inbox'
+      if (fs.existsSync('/root/kelion/ops-inbox')) return '/root/kelion/ops-inbox'
+      return ''
+    }))
+  if (!inbox) return null
+  const fs = await import('node:fs/promises')
+  const path = await import('node:path')
+  try {
+    await fs.mkdir(inbox, { recursive: true })
+    const id = `${name}-${Date.now().toString(36)}`
+    const req = path.join(inbox, `${id}.req`)
+    const done = path.join(inbox, `${id}.done`)
+    await fs.writeFile(req, `${name}
+`, 'utf8')
+    // așteaptă worker-ul de pe gazdă (cron ≤60s + exec)
+    const deadline = Date.now() + 90_000
+    while (Date.now() < deadline) {
+      try {
+        const text = await fs.readFile(done, 'utf8')
+        const ok = /^ok=1$/m.test(text)
+        // curățenie best-effort
+        await fs.unlink(done).catch(() => {})
+        if (ok) {
+          return JSON.stringify({
+            ok: true,
+            started: name,
+            via: 'ops-local',
+            hint: 'repornit pe VPS prin ops-worker local (fără GitHub Actions)',
+            detail: text.slice(0, 400),
+          })
+        }
+        return JSON.stringify({
+          error: 'ops_local_failed',
+          detail: text.slice(0, 400),
+          hint: 'ops-worker pe gazdă a rulat comanda dar a raportat eșec — vezi /root/kelion/ops-worker.log',
+        })
+      } catch {
+        await new Promise((r) => setTimeout(r, 1500))
+      }
+    }
+    return JSON.stringify({
+      error: 'ops_local_timeout',
+      hint: 'ops-worker nu a preluat cererea în 90s — verifică cronul ops-worker.sh pe VPS',
+    })
+  } catch (e) {
+    return JSON.stringify({
+      error: 'ops_local_write_failed',
+      detail: String((e as Error)?.message ?? e).slice(0, 200),
+    })
+  }
 }
 
 // ── CITIREA RĂSPUNSULUI UNUI RUNBOOK (pură, deci probabilă) ─────────────────

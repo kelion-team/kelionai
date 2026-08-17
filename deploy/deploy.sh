@@ -241,12 +241,16 @@ docker rm -f kelionai-app 2>/dev/null || true
 # constructor.log și auto-publicare.log nu le citea NIMENI automat — blocajul
 # constructorului l-a văzut ownerul cu ochii, nu sistemul („cine monitorizează
 # toate logurile? nimeni"). Montate read-only, self-heal + server_ops le văd.
+mkdir -p /root/kelion/ops-inbox
+chmod 755 /root/kelion/ops-inbox
 docker run -d --name kelionai-app --restart unless-stopped \
   --network host --env-file "$ENVFILE" \
   -e PORT=8080 -e NODE_ENV=production \
+  -e OPS_INBOX_DIR=/host/ops-inbox \
   -e GIT_COMMIT_SHA="$(git -C "$REPO" rev-parse HEAD)" \
   -v /root/kelion/pw-cache:/root/.cache/ms-playwright \
   -v /root/kelion:/host/kelion:ro \
+  -v /root/kelion/ops-inbox:/host/ops-inbox \
   kelionai:latest
 
 echo "== 4b. Browserul mâinilor (Chromium) — prezent, nu promis =="
@@ -334,6 +338,12 @@ echo "== 6g. Veghea publicării (cron la 10 min — divergența master↔live nu
 # instalarea e AICI, idempotentă, ca tot restul.
 install -m 700 "$REPO/deploy/veghe-publicare.sh" /root/kelion/veghe-publicare.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/veghe-publicare.sh' ; echo '*/10 * * * * /root/kelion/veghe-publicare.sh >> /root/kelion/veghe-publicare.log 2>&1' ) | crontab -
+
+echo "== 6i. Ops-worker local (cron 1 min — Reset VPS fără GitHub Actions) =="
+# 17 aug QA: Actions mort pe billing → restart-app/caddy prin inbox pe gazdă.
+install -m 700 "$REPO/deploy/ops-worker.sh" /root/kelion/ops-worker.sh
+mkdir -p /root/kelion/ops-inbox
+( crontab -l 2>/dev/null | grep -v '/root/kelion/ops-worker.sh' ; echo '* * * * * /root/kelion/ops-worker.sh >> /root/kelion/ops-worker.log 2>&1' ) | crontab -
 
 echo "== 6f. Porțile pe VPS (cron la 10 min — verdictul PR-urilor, zero cost) =="
 # Adrian, 31 iul: „nu poți corecta modul de lucru, pică de fiecare dată" —
