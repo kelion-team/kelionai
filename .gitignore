@@ -23,3 +23,5 @@ backend/models/*.onnx
 __pycache__/
 *.pyc
 .aider*
+_ssh_run.py
+Release-uri/
