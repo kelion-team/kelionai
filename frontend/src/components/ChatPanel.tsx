@@ -1314,7 +1314,6 @@ export default function ChatPanel({
         // the mouth, serverVoiceOff skips Chirp synthesis — faster, cheaper, one voice.
         // Written-only turns (no LIVE) still get TTS. LIVE replies are spoken on WS.
         Boolean(vlRef.current) ||
-          Boolean(vlRef.current) ||
 
           (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
         // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.

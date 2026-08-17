@@ -1,72 +1,61 @@
-// ── BARGRAF DE INTRARE AL URECHII LIVE (owner, 16 aug 2026) ─────────────────
-// (verbatim: „vreau sa vad un mic bargraf care arata nivelul de la intrarea
-// urechi modelului live, trebuie indentificat daca nu se truncheaza nimic")
-//
-// Lacăt pe sursă: nivelul se MĂSOARĂ în lib/vocalLive.ts (RMS + vârf pe cadrul
-// trimis modelului) și se dă UI-ului prin onNivelIntrare; ChatPanel îl leagă și
-// randează bargraful cât ascultă. Dacă vreo verigă se rupe, ownerul rămâne fără
-// dovada vizuală a truncherii — de-aia o ținem încuiată.
+// ── Voice / ear locks aligned to CURRENT product (17 aug 2026) ──────────────
+// Keep only what the live app still does. Dropped: dual TTS-while-LIVE rules
+// (14 aug) that fought single-mouth LIVE priority.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const aici = dirname(fileURLToPath(import.meta.url))
-const clientVL = readFileSync(join(aici, '../../frontend/src/lib/vocalLive.ts'), 'utf8')
-const clientChat = readFileSync(join(root, 'frontend/src/lib/chat.ts'), 'utf8')
-const panou = readFileSync(join(aici, '../../frontend/src/components/ChatPanel.tsx'), 'utf8')
-const bargraf = readFileSync(join(aici, '../../frontend/src/components/MicBargraf.tsx'), 'utf8')
+const fe = (...p: string[]) => readFileSync(join(aici, '../../frontend', ...p), 'utf8')
+const clientVL = fe('src/lib/vocalLive.ts')
+const panou = fe('src/components/ChatPanel.tsx')
+const bargraf = fe('src/components/MicBargraf.tsx')
+const clientChat = fe('src/lib/chat.ts')
+const audioFocus = fe('src/lib/audioFocus.ts')
 
-describe('bargraful urechii live — nivelul de intrare, măsurat, cu truncherea vizibilă', () => {
-  it('lib/vocalLive MĂSOARĂ nivelul cadrului trimis (RMS + vârf) și-l emite prin onNivelIntrare', () => {
-    // Măsurătoarea e făcută în laCadru, pe semnalul real, nu inventată.
+describe('bargraful urechii live — nivel de intrare măsurat', () => {
+  it('vocalLive măsoară RMS+vârf pe cadrul trimis și emite onNivelIntrare', () => {
     expect(clientVL).toContain('onNivelIntrare')
-    expect(clientVL).toMatch(/Math\.sqrt\(sum \/ ds\.length\)/) // RMS pe cadru
-    // Emite și starea porții half-duplex (poarta) + clip — ca truncherea să se vadă.
+    expect(clientVL).toMatch(/Math\.sqrt\(sum \/ ds\.length\)/)
     expect(clientVL).toMatch(/onNivelIntrare\(\{ nivel: rms, pic, poarta, clip:/)
   })
 
-  it('poarta half-duplex e raportată din aceeași decizie care taie trimiterea', () => {
-    // `poarta` din raport = exact condiția care înlocuiește microfonul cu tăcere.
+  it('poarta half-duplex e aceeași decizie care taie trimiterea', () => {
     expect(clientVL).toMatch(/const poarta = kelionAudibil\(\)/)
     expect(clientVL).toMatch(/const la16k = poarta \? new Float32Array\(ds\.length\) : ds/)
   })
 
-  it('MicBargraf arată cele trei stări: nivel, poartă (mut) și clip', () => {
+  it('MicBargraf arată nivel, poartă și clip (fără className partajat)', () => {
     expect(bargraf).toContain('export interface NivelIntrare')
     expect(bargraf).toMatch(/poarta/)
     expect(bargraf).toMatch(/clip/)
-    // Citește prin requestAnimationFrame (nu re-randează tot chatul).
     expect(bargraf).toContain('requestAnimationFrame')
-    // Doar stiluri inline — fără clasă CSS partajată (lecția coliziunii de clase).
     expect(bargraf).not.toMatch(/className=/)
   })
 
-  it('ChatPanel leagă nivelul într-un ref și randează bargraful cât ascultă', () => {
+  it('ChatPanel leagă nivelul și randează bargraful cât ascultă', () => {
     expect(panou).toContain("import MicBargraf, { type NivelIntrare } from './MicBargraf'")
-    expect(panou).toMatch(/micNivelRef\.current = nv/) // handler-ul onNivelIntrare
+    expect(panou).toMatch(/micNivelRef\.current = nv/)
     expect(panou).toContain('<MicBargraf nivelRef={micNivelRef} activ={listening} />')
   })
 })
 
-describe('preamp + amplificare pentru microfon surd (owner, 16 aug: „ce faci daca e surd?")', () => {
-  it('lib/vocalLive are preamp reglabil (setPreamp) aplicat pe cadru înainte de trimitere', () => {
-    expect(clientVL).toContain('setPreamp(gain: number): void') // în interfața handle-ului
+describe('preamp microfon (surd / prea tare)', () => {
+  it('vocalLive: setPreamp + clamp pe cadru', () => {
+    expect(clientVL).toContain('setPreamp(gain: number): void')
     expect(clientVL).toContain('function clampPreamp')
     expect(clientVL).toMatch(/let preampGain = clampPreamp\(opts\.preampInitial\)/)
-    // aplicarea pe cadru: multiplicare cu clamp la ±1 (peste = clip)
     expect(clientVL).toMatch(/if \(preampGain !== 1\)/)
     expect(clientVL).toContain('setPreamp: (g: number) =>')
   })
 
-  it('autoGainControl PORNIT pe desktop (nu mai e surd), stins pe mobil pentru A2DP', () => {
-    // Fixul „surdului": AGC pe desktop (amplifică la sursă), gardat de eMobil.
+  it('AGC pe desktop, stins pe mobil (A2DP)', () => {
     expect(clientVL).toContain('autoGainControl: !eMobil')
-    // Rămâne stins pe mobil (Bluetooth A2DP) — echoCancellation tot pe !eMobil.
     expect(clientVL).toContain('echoCancellation: !eMobil')
   })
 
-  it('ChatPanel are sliderul de preamp (min→max), persistat, legat de handle', () => {
+  it('ChatPanel: slider preamp persistat, legat de handle', () => {
     expect(panou).toMatch(/preampInitial: preampNivel/)
     expect(panou).toMatch(/vlRef\.current\?\.setPreamp\(g\)/)
     expect(panou).toContain("localStorage.setItem('kelion_preamp'")
@@ -74,43 +63,30 @@ describe('preamp + amplificare pentru microfon surd (owner, 16 aug: „ce faci d
   })
 })
 
-describe('LIVE audio priority — one mouth, chat live first (owner, 17 aug)', () => {
-  it('cât LIVE (vlRef) e activ, {audio} TTS pe scris e aruncat — o singură gură, full-duplex pe live', () => {
-    // Arbiter: LIVE beats Chirp on written turns. playVoice for c.audio only when LIVE is off.
-    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,500}?if \(vlRef\.current\) return/)
-    expect(panou).toContain("contorGata('primul sunet (gura a pornit)')")
-    // No longer mutes the live ear just to play a second TTS mouth.
-    expect(panou).not.toMatch(/if \(c\.audio\)[\s\S]{0,800}?setRedareExterna\(true\)/)
+describe('audio focus — LIVE first, one mouth, interrupt', () => {
+  it('manager central: registerLiveFocus / requestTtsFocus / interruptAll', () => {
+    expect(audioFocus).toContain('export function interruptAll')
+    expect(audioFocus).toContain('export function registerLiveFocus')
+    expect(audioFocus).toContain('export function requestTtsFocus')
+    expect(audioFocus).toMatch(/active === 'live'|requestTtsFocus/)
   })
 
-  it('serverVoiceOff pe send când LIVE e activ — serverul nu mai plătește/sintetizează Chirp degeaba', () => {
-    expect(panou).toMatch(/Boolean\(vlRef\.current\)\s*\|\|/)
+  it('cât LIVE (vlRef) e activ, {audio} TTS pe scris e refuzat', () => {
+    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,600}?if \(vlRef\.current\) return/)
+    expect(panou).toContain('requestTtsFocus')
+    // no second-mouth anti-echo path on c.audio
+    expect(panou).not.toMatch(/if \(c\.audio\)[\s\S]{0,900}?setRedareExterna\(true\)/)
+  })
+
+  it('întrerupere centrală + serverVoiceOff când LIVE ține gura', () => {
+    expect(panou).toContain('interruptAll')
+    expect(panou).toMatch(/Boolean\(vlRef\.current\)/)
     expect(clientChat).toContain('serverVoiceOff')
+    expect(clientVL).toContain("interruptAll('live-server-barge-in')")
   })
 
-  it('setRedareExterna rămâne în clientul live (util pentru alte căi), nu e obligatoriu pe c.audio', () => {
+  it('setRedareExterna rămâne pe handle-ul LIVE (alte căi), nu e motorul TTS pe scris', () => {
     expect(clientVL).toContain('setRedareExterna(activ: boolean): void')
     expect(clientVL).toMatch(/let redareExterna = false/)
   })
 })
-
-describe('audio focus — LIVE priority + interrupt (owner, 17 aug)', () => {
-  it('audioFocus manager exists and exports interruptAll / LIVE vs TTS focus', () => {
-    const focus = readFileSync(join(root, 'frontend/src/lib/audioFocus.ts'), 'utf8')
-    expect(focus).toContain('export function interruptAll')
-    expect(focus).toContain('export function registerLiveFocus')
-    expect(focus).toContain('export function requestTtsFocus')
-    expect(focus).toMatch(/LIVE has priority|live' \| 'tts'|active === 'live'/)
-  })
-
-  it('written {audio} yields to LIVE (vlRef) — one mouth', () => {
-    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,600}?if \(vlRef\.current\) return/)
-    expect(panou).toContain('requestTtsFocus')
-    expect(panou).toContain('interruptAll')
-  })
-
-  it('serverVoiceOff when LIVE active so Chirp is not synthesized in parallel', () => {
-    expect(panou).toMatch(/Boolean\(vlRef\.current\)\s*\|\|/)
-  })
-})
-
