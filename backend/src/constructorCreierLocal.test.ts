@@ -24,13 +24,13 @@ function lipseste(ollamaListOutput: string, modelCerut: string): boolean {
   return JSON.parse(stdout.trim()) as boolean
 }
 
-const LISTA = 'NAME              ID   SIZE   MODIFIED\nqwen2.5-coder:7b  abc  4.7 GB 2 days ago\nllama3.2:latest   def  2.0 GB 1 week ago\n'
+const LISTA = 'NAME              ID   SIZE   MODIFIED\nqwen2.5-coder:32b  abc  19 GB 2 days ago\nllama3.2:latest    def  2.0 GB 1 week ago\n'
 
 describe('creierLocalLipseste — decizia auto-instalării creierului local', () => {
   it('modelul cerut (cu tag) e prezent → NU lipsește', () => {
-    expect(lipseste(LISTA, 'qwen2.5-coder:7b')).toBe(false)
+    expect(lipseste(LISTA, 'qwen2.5-coder:32b')).toBe(false)
     // prefixul LiteLLM (ollama_chat/) e ignorat — e același model
-    expect(lipseste(LISTA, 'ollama_chat/qwen2.5-coder:7b')).toBe(false)
+    expect(lipseste(LISTA, 'ollama_chat/qwen2.5-coder:32b')).toBe(false)
   })
 
   it('alt tag al aceluiași model → LIPSEȘTE (potrivire exactă pe tag explicit)', () => {
@@ -44,8 +44,8 @@ describe('creierLocalLipseste — decizia auto-instalării creierului local', ()
   })
 
   it('lista goală / doar antet / gunoi → LIPSEȘTE (nu inventăm că e acolo)', () => {
-    expect(lipseste('', 'qwen2.5-coder:7b')).toBe(true)
-    expect(lipseste('NAME  ID  SIZE  MODIFIED\n', 'qwen2.5-coder:7b')).toBe(true)
+    expect(lipseste('', 'qwen2.5-coder:32b')).toBe(true)
+    expect(lipseste('NAME  ID  SIZE  MODIFIED\n', 'qwen2.5-coder:32b')).toBe(true)
   })
 
   it('model cerut gol → LIPSEȘTE (nu putem confirma nimic)', () => {

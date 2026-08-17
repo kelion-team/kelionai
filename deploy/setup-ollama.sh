@@ -11,13 +11,13 @@
 # (Aider poate rula acest script singur: „rulează deploy/setup-ollama.sh".)
 #
 # CE MAI TREBUIE (resurse) — verifică ÎNAINTE:
-#   • RAM: qwen2.5-coder:7b ≈ 6 GB liberi la rulare; 14b ≈ 10-12 GB. `free -h`.
-#   • Disc: modelul ocupă ~4-9 GB în /root/.ollama. `df -h /`.
+#   • RAM: qwen2.5-coder:14b ≈ 10-12 GB; 32b ≈ 20-24 GB liberi la rulare. `free -h`.
+#   • Disc: 14b ~9 GB; 32b ~19-20 GB în /root/.ollama. `df -h /`.
 #   • Constructorul rulează pe HOST (cron → constructor-agent.mjs), deci Ollama
 #     ȘI Aider trebuie pe HOST, nu în containerul aplicației. Scriptul le pune pe host.
 set -euo pipefail
 
-MODEL="${CONSTRUCTOR_OLLAMA_MODEL:-qwen2.5-coder:7b}"
+MODEL="${CONSTRUCTOR_OLLAMA_MODEL:-qwen2.5-coder:32b}"
 ENVFILE="${KELION_ENVFILE:-/root/kelion/kelionai.env}"
 OLLAMA_URL="http://127.0.0.1:11434"
 

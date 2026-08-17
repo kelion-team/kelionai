@@ -955,7 +955,7 @@ export function creierLocalLipseste(ollamaListOutput, modelCerut) {
 
 // Numele modelului FĂRĂ prefixul LiteLLM (pentru `ollama pull` / scriptul de setup).
 function numeModelOllama() {
-  return (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b').replace(/^ollama_chat\//, '')
+  return (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:32b').replace(/^ollama_chat\//, '')
 }
 
 function commandExista(bin) {
@@ -1077,7 +1077,7 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
   const platit = !!(creierCfg && creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
   const model = platit
     ? `openai/${creierCfg.model}`
-    : (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b')
+    : (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:32b')
 
   // Igien? context: pe free mereu; pe pl?tit tot wipe history ca s? nu umfle cost/timp.
   try {
