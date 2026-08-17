@@ -26,13 +26,18 @@ import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage } from './br
 export type TreaptaRationament = 'rapid' | 'lucru' | 'plan'
 
 export interface OptiuniRationament {
-  /** Cine cheam? ? obligatoriu pentru jurnal unitar (rut?/serviciu). */
+  /** Cine cheamă — obligatoriu pentru jurnal unitar (rută/serviciu). */
   ruta: string
   maxTokens?: number
   treapta?: TreaptaRationament
   onCost?: (usd: number) => void
   temperature?: number
   reasoning?: 'low' | 'medium' | 'high'
+  /** Forțează modelul (google-direct/* sau ollama-cloud/*). Fără el = treapta. */
+  model?: string
+  toolChoice?: BrainCallOpts['toolChoice']
+  allowedFunctionNames?: string[]
+  timeoutMs?: number
 }
 
 function modelPentru(treapta: TreaptaRationament): string {
@@ -101,18 +106,29 @@ export async function rationeazaCuUnelte(
  */
 export async function rationeazaMesaje(
   messages: OrMessage[],
-  opts: OptiuniRationament & { tools?: AnthropicTool[]; stream?: false },
+  opts: OptiuniRationament & { tools?: AnthropicTool[]; stream?: false; /** model forțat (google-direct/* sau ollama-cloud/*) */ model?: string },
 ): Promise<OrChatResult> {
   const treapta = opts.treapta ?? 'lucru'
-  const modelFull = modelPentru(treapta)
+  // MODEL FORȚAT (17 aug): orchestratorul trecea modelul, dar ușa unitară îl
+  // arunca și folosea mereu defaultul treptei → Creier 2 / creierDublu erau
+  // moarte pe chat. Acum `opts.model` câștigă când e dat.
+  const modelFull = opts.model || modelPentru(treapta)
   const model = codModel(modelFull)
-  jurnal(opts.ruta, treapta, `mesaje=${messages.length} model=${model}`)
+  jurnal(opts.ruta, treapta, `mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {
     maxTokens: opts.maxTokens ?? 2048,
     temperature: opts.temperature,
     reasoning: opts.reasoning ?? (treapta === 'rapid' ? 'low' : 'medium'),
+    toolChoice: opts.toolChoice,
+    allowedFunctionNames: opts.allowedFunctionNames,
+    timeoutMs: opts.timeoutMs,
   }
-  // Scar?: modelul treptei, apoi restul expert ladder (f?r? dubluri)
+  // Cloud Ollama (Creier 2) — o singură încercare pe modelul ales; fără scară Gemini.
+  if (modelFull.startsWith('ollama-cloud/')) {
+    const { ollamaCloudChat } = await import('./ollamaCloud.js')
+    return ollamaCloudChat(modelFull, messages, opts.tools ?? [], callOpts)
+  }
+  // Scară: modelul treptei/forțat, apoi restul expert ladder (fără dubluri)
   const ladder = [modelFull, ...expertModelLadder().filter((m) => m !== modelFull)]
   return runBrainLadder(ladder, async (m) => {
     const cod = codModel(m)
@@ -126,16 +142,29 @@ export async function rationeazaMesaje(
 export async function rationeazaMesajeStream(
   messages: OrMessage[],
   onText: (delta: string) => void,
-  opts: OptiuniRationament & { tools?: AnthropicTool[] },
+  opts: OptiuniRationament & {
+    tools?: AnthropicTool[]
+    model?: string
+    toolChoice?: BrainCallOpts['toolChoice']
+    allowedFunctionNames?: string[]
+    timeoutMs?: number
+  },
 ): Promise<OrChatResult> {
   const treapta = opts.treapta ?? 'lucru'
-  const modelFull = modelPentru(treapta)
+  const modelFull = opts.model || modelPentru(treapta)
   const model = codModel(modelFull)
-  jurnal(opts.ruta, treapta, `stream mesaje=${messages.length} model=${model}`)
+  jurnal(opts.ruta, treapta, `stream mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {
     maxTokens: opts.maxTokens ?? 4096,
     temperature: opts.temperature,
     reasoning: opts.reasoning ?? (treapta === 'lucru' ? 'high' : 'medium'),
+    toolChoice: opts.toolChoice,
+    allowedFunctionNames: opts.allowedFunctionNames,
+    timeoutMs: opts.timeoutMs,
+  }
+  if (modelFull.startsWith('ollama-cloud/')) {
+    const { ollamaCloudChatStream } = await import('./ollamaCloud.js')
+    return ollamaCloudChatStream(modelFull, messages, opts.tools ?? [], onText, callOpts)
   }
   return geminiDirectChatStream(model, messages, opts.tools ?? [], onText, callOpts)
 }

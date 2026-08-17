@@ -2744,12 +2744,12 @@ export default function AdminPanel({
                       </button>
                     </div>
                     <div style={{ fontSize: 11, color: cloudProba == null ? undefined : cloudProba.ok ? '#1a7f37' : '#c1121f', opacity: cloudProba == null ? 0.7 : 1 }}>
-                      {creierCfg.creier2 === 'gemini' && creierCfg.constructorSursa === 'free'
-                        ? 'Acum: totul gratis (Gemini + local). Alege cloud + lipește cheia ca să pornești modelul puternic.'
+{creierCfg.creier2 === 'gemini' && creierCfg.constructorSursa === 'free'
+                        ? 'Acum: chat rapid Gemini + constructor FREE local pe VPS. Alege cloud + lipește cheia ca Creier 2 (cereri grele) și/sau constructor PLĂTIT.'
                         : cloudProba == null
                           ? 'cheie: probă…'
                           : cloudProba.ok
-                            ? `🟢 CONFIRMAT de Ollama: rulează „${cloudProba.modele[0] ?? 'model'}" — exact modelul ales, nu unul de sub el`
+                            ? `🟢 Cheie OK pe Ollama cloud: „${cloudProba.modele[0] ?? 'model'}”. Chat rapid = Gemini. Creier 2 pe CHAT (ture grele) + constructor PLĂTIT folosesc acest model când e ales mai sus.`
                             : `🔴 ${cloudProba.motiv}`}
                     </div>
                     {/* TOP-UP „extra usage" (owner, 16 aug: „la creier vreau bifă pentru kimi 3,
@@ -2784,8 +2784,8 @@ export default function AdminPanel({
                       </div>
                     )}
                     {creierMsg && <div style={{ fontSize: 11, opacity: 0.85 }}>{creierMsg}</div>}
-                    <div style={{ fontSize: 10, opacity: 0.6 }}>
-                      Constructorul PLĂTIT folosește exact modelul ales la creier 2. Creier 2 pe CHAT se aprinde după ce probez cheia live (ca să nu-ți rup chatul). Chat rapid rămâne Gemini.
+<div style={{ fontSize: 10, opacity: 0.6 }}>
+                      Constructor FREE = Ollama local pe VPS (qwen2.5-coder:32b), nu modelul cloud din becul de mai sus. Constructor PLĂTIT = exact Creier 2 cloud. Chat: rapid = Gemini; greu = Creier 2 cloud după cheie OK, altfel Gemini greu.
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
