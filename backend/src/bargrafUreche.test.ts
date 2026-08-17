@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 
 const aici = dirname(fileURLToPath(import.meta.url))
 const clientVL = readFileSync(join(aici, '../../frontend/src/lib/vocalLive.ts'), 'utf8')
+const clientChat = readFileSync(join(root, 'frontend/src/lib/chat.ts'), 'utf8')
 const panou = readFileSync(join(aici, '../../frontend/src/components/ChatPanel.tsx'), 'utf8')
 const bargraf = readFileSync(join(aici, '../../frontend/src/components/MicBargraf.tsx'), 'utf8')
 
@@ -73,21 +74,22 @@ describe('preamp + amplificare pentru microfon surd (owner, 16 aug: „ce faci d
   })
 })
 
-describe('audio obligatoriu pe scris — vocea turei scrise sună chiar cu sesiunea live (owner, 14 aug)', () => {
-  it('tura scrisă NU mai e aruncată cât e sesiunea live: se redă, nu se face return pe vlRef', () => {
-    // Vechiul „if (vlRef.current) return" ÎNAINTE de playVoice a fost SCOS — altfel
-    // scrisul rămânea fără voce cât sesiunea live e permanentă.
-    expect(panou).not.toMatch(/if \(vlRef\.current\) return\n\s*contorGata/)
-    expect(panou).toContain('const live = vlRef.current')
+describe('LIVE audio priority — one mouth, chat live first (owner, 17 aug)', () => {
+  it('cât LIVE (vlRef) e activ, {audio} TTS pe scris e aruncat — o singură gură, full-duplex pe live', () => {
+    // Arbiter: LIVE beats Chirp on written turns. playVoice for c.audio only when LIVE is off.
+    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,500}?if \(vlRef\.current\) return/)
     expect(panou).toContain("contorGata('primul sunet (gura a pornit)')")
+    // No longer mutes the live ear just to play a second TTS mouth.
+    expect(panou).not.toMatch(/if \(c\.audio\)[\s\S]{0,800}?setRedareExterna\(true\)/)
   })
 
-  it('anti-ecou: urechea live e mutată pe durata redării turei scrise (setRedareExterna)', () => {
-    expect(panou).toContain('live?.setRedareExterna(true)')
-    expect(panou).toContain('live?.setRedareExterna(false)')
-    // în lib: steagul intră în poarta half-duplex (kelionAudibil)
+  it('serverVoiceOff pe send când LIVE e activ — serverul nu mai plătește/sintetizează Chirp degeaba', () => {
+    expect(panou).toMatch(/Boolean\(vlRef\.current\)\s*\|\|/)
+    expect(clientChat).toContain('serverVoiceOff')
+  })
+
+  it('setRedareExterna rămâne în clientul live (util pentru alte căi), nu e obligatoriu pe c.audio', () => {
     expect(clientVL).toContain('setRedareExterna(activ: boolean): void')
     expect(clientVL).toMatch(/let redareExterna = false/)
-    expect(clientVL).toMatch(/redareExterna \|\|/) // prima condiție a porții
   })
 })

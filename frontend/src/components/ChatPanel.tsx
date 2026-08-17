@@ -520,25 +520,19 @@ export default function ChatPanel({
     // While it speaks, the microphone doesn't send (anti-echo), but stays on watch:
     // vocea lui Adrian taie redarea pe loc (barge-in, vezi ensureMic).
     if (c.audio) {
-      // THE SINGLE-VOICE RULE (Adrian, Jul 26, real bug: he sent a picture during
-      // the voice session and "a second voice came in at the same time"): as long as
-      // the Realtime session is installed, IT is the only voice — the written chat's
-      // {audio} frames are dropped. A net too for frames already synthesized by a
-      // turn started before the flag (serverVoiceOff stops the source, this drains the rest).
+      // AUDIO ARBITRATION — LIVE FIRST (owner, 17 aug: „chat live audio prioritar, rapid").
+      // One mouth only. While the LIVE session (vlRef / Gemini full-duplex) is up, it IS
+      // the voice path: drop written-chat Chirp {audio}. Playing TTS here caused two
+      // voices and forced muting the ear (half-duplex). Classic OpenAI realtime keeps
+      // the same rule via isRealtime. When LIVE is off, TTS on written chat still plays.
+      // serverVoiceOff on send already skips paid synthesis when LIVE is active.
+      if (vlRef.current) return
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
-      // AUDIO OBLIGATORIU PE SCRIS, CHIAR CU SESIUNEA LIVE PORNITĂ (owner, 14 aug:
-      // „când Kelion scrie, obligatoriu și audio"). Înainte, cât sesiunea LIVE era
-      // instalată (acum e permanentă), frame-ul {audio} al turei SCRISE se ARUNCA
-      // (`if (vlRef.current) return`) → text fără voce. Acum îl REDĂM, dar ținem
-      // urechea live MUTĂ pe durata redării (setRedareExterna) ca modelul să nu se
-      // audă pe el însuși („varză"/o a doua voce). Turele VOCALE nu trec pe aici —
-      // ele sunt rostite de sesiunea live prin WS —, deci nu apar două guri.
-      const live = vlRef.current
       contorGata('primul sunet (gura a pornit)')
       playVoice(
         c.audio,
-        () => { micRef.current?.setMuted(true); live?.setRedareExterna(true) },
-        () => { micRef.current?.setMuted(false); live?.setRedareExterna(false) },
+        () => { micRef.current?.setMuted(true) },
+        () => { micRef.current?.setMuted(false) },
       )
       return
     }
@@ -1308,15 +1302,11 @@ export default function ChatPanel({
         voiceFeatures,
         face?.descriptor,
         face?.photo,
-        // AUDIO OBLIGATORIU PE SCRIS (14 aug, 20:45, ordinul ownerului: „când
-        // apare ceva scris de la Kelion, obligatoriu e și audio" + „chat audio
-        // era prioritar") — ÎNLOCUIEȘTE economia din 9 aug („pe scris doar
-        // scris"), decizia mai nouă bate. Sinteza revine pe TOATE turele;
-        // singura excepție rămâne regula „o singură voce": când sesiunea
-        // realtime e deja vocea turei, serverul nu mai sintetizează a doua oară
-        // (altfel două guri ar vorbi peste ele). Conducta e UNICĂ, verificat:
-        // createVoiceStream pe server → frame-uri {audio} → audioIO în client.
-        (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
+        // LIVE AUDIO PRIORITY (17 aug): when LIVE (vlRef) or classic realtime is
+        // the mouth, serverVoiceOff skips Chirp synthesis — faster, cheaper, one voice.
+        // Written-only turns (no LIVE) still get TTS. LIVE replies are spoken on WS.
+        Boolean(vlRef.current) ||
+          (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
         // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
         spoken || undefined,
         // GUEST SPEAKER (the voice gate's verdict): the server strips ALL admin
