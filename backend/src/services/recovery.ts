@@ -229,7 +229,21 @@ export interface EncryptedDbBackup {
 }
 
 export async function listEncryptedDbBackups(limit = 20): Promise<EncryptedDbBackup[] | null> {
-  const dir = process.env.BACKUP_DIR || '/root/kelion/backups'
+  // On the VPS host: /root/kelion/backups. In kelionai-app the host tree is mounted at /host/kelion (ro).
+  const candidates = [process.env.BACKUP_DIR, '/root/kelion/backups', '/host/kelion/backups'].filter(
+    (x): x is string => Boolean(x && String(x).trim()),
+  )
+  let dir = ''
+  for (const c of candidates) {
+    try {
+      await readdir(c)
+      dir = c
+      break
+    } catch {
+      /* try next path */
+    }
+  }
+  if (!dir) return null
   try {
     const names = await readdir(dir)
     const rows: EncryptedDbBackup[] = []

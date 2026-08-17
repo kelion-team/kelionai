@@ -256,6 +256,45 @@ export async function execSharedAdminTool(
       await actualizeazaCerinta(id, { prioritate: p })
       return JSON.stringify({ ok: true, id, prioritate: p })
     }
+
+    case 'list_app_versions': {
+      const points = await listRecoveryPoints()
+      if (points === null) {
+        return JSON.stringify({ ok: false, error: 'recovery_unreadable',
+          hint: 'GitHub token missing or API failed. Admin → Recovery may show the same.' })
+      }
+      return JSON.stringify({
+        ok: true, kind: 'app_code_versions',
+        note: 'Git tags backup-YYYY-… on master (code). Not encrypted DB dumps.',
+        count: points.length,
+        versions: points.slice(0, 30).map((p) => ({ tag: p.tag, sha: p.sha, date: p.date, note: p.note })),
+        how_to_restore: 'Admin → Recovery → Restore. New point: save_app_version. show_document when asked.',
+      })
+    }
+    case 'list_db_backups': {
+      const rows = await listEncryptedDbBackups(Number(args.limit ?? 20) || 20)
+      if (rows === null) {
+        return JSON.stringify({ ok: false, error: 'backup_dir_unreadable',
+          dir: process.env.BACKUP_DIR || '/root/kelion/backups (or /host/kelion/backups in app container)' })
+      }
+      const mb = (n: number) => Math.round((n / 1048576) * 10) / 10
+      return JSON.stringify({
+        ok: true, kind: 'encrypted_database_dumps',
+        schedule: 'Weekly Sunday 03:00 Europe/London (CRON_TZ); deploy/backup.sh',
+        dir: process.env.BACKUP_DIR || '/root/kelion/backups (or /host/kelion/backups in app container)',
+        count: rows.length,
+        backups: rows.map((r) => ({ file: r.file, mb: mb(r.bytes), mtime: r.mtime })),
+        restore_rehearsal: 'run_runbook name=proba-restaurare',
+        run_backup_now: 'run_runbook name=backup-db',
+        restore_production_warning:
+          'Production restore overwrites live data. Prefer proba-restaurare. README: gunzip after openssl decrypt.',
+      })
+    }
+    case 'save_app_version': {
+      const note = String(args.note ?? args.message ?? '').trim()
+      const r = await createRecoveryPoint(note || 'Saved from chat by Kelion')
+      return JSON.stringify(r.ok ? { ok: true, tag: r.tag } : { ok: false, error: r.error })
+    }
     default: return null
   }
 }
@@ -402,44 +441,6 @@ export async function execUserScopedTool(
       return JSON.stringify(id
         ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' }
         : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
-    }
-    case 'list_app_versions': {
-      const points = await listRecoveryPoints()
-      if (points === null) {
-        return JSON.stringify({ ok: false, error: 'recovery_unreadable',
-          hint: 'GitHub token missing or API failed. Admin → Recovery may show the same.' })
-      }
-      return JSON.stringify({
-        ok: true, kind: 'app_code_versions',
-        note: 'Git tags backup-YYYY-… on master (code). Not encrypted DB dumps.',
-        count: points.length,
-        versions: points.slice(0, 30).map((p) => ({ tag: p.tag, sha: p.sha, date: p.date, note: p.note })),
-        how_to_restore: 'Admin → Recovery → Restore. New point: save_app_version. show_document when asked.',
-      })
-    }
-    case 'list_db_backups': {
-      const rows = await listEncryptedDbBackups(Number(args.limit ?? 20) || 20)
-      if (rows === null) {
-        return JSON.stringify({ ok: false, error: 'backup_dir_unreadable',
-          dir: process.env.BACKUP_DIR || '/root/kelion/backups' })
-      }
-      const mb = (n: number) => Math.round((n / 1048576) * 10) / 10
-      return JSON.stringify({
-        ok: true, kind: 'encrypted_database_dumps',
-        schedule: 'Weekly Sunday 03:00 Europe/London (CRON_TZ); deploy/backup.sh',
-        dir: process.env.BACKUP_DIR || '/root/kelion/backups',
-        count: rows.length,
-        backups: rows.map((r) => ({ file: r.file, mb: mb(r.bytes), mtime: r.mtime })),
-        restore_rehearsal: 'run_runbook name=proba-restaurare',
-        run_backup_now: 'run_runbook name=backup-db',
-        restore_production_warning:
-          'Production restore overwrites live data. Prefer proba-restaurare. README: gunzip after openssl decrypt.',
-      })
-    }
-    case 'save_app_version': {
-      const note = String(args.note ?? args.message ?? '').trim()
-      const r = await createRecoveryPoint(note || 'Saved from chat by Kelion')
-      return JSON.stringify(r.ok ? { ok: true, tag: r.tag } : { ok: false, error: r.error })
     }
     default: return null
   }
