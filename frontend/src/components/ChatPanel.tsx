@@ -498,7 +498,6 @@ export default function ChatPanel({
             .filter((m) => m.ts !== vt.asstTs)
             .flatMap((m) => {
               if (m.ts !== vt.userTs) return [m]
-              const auzit = m.content && m.content !== '🎙️…' ? m.content : ''
               return []  // ambiental: nu lăsăm text pe ecran când nu i se adresa
             }),
         )
