@@ -49,6 +49,9 @@ describe('cablajul comutatorului — panou scrie, host citește, Aider trece pe 
     // statusul admin trimite alegerea + proba MĂSURATĂ a cheii
     expect(c).toContain('creier: creierCfg')
     expect(c).toContain('cloud, // { ok, motiv, modele }')
+    // free-first + coadă mascată (nu expune cheia în diagnostice greșite)
+    expect(c).toContain("preferred: 'free'")
+    expect(c).toContain('cheieCoada')
   })
 
   it('agentul: Aider trece pe CLOUD (openai/<model> + cheie) când sursa=platit', () => {

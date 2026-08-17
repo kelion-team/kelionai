@@ -35,6 +35,14 @@ describe('scutirea ownerului pe TOATE căile de debit — soldul lui nu se mai m
     const panou = citeste('../../frontend/src/components/AdminPanel.tsx')
     expect(panou).toMatch(/scutit — sold istoric/)
   })
+
+  it('balance API marchează scutit pe admin — wallet nu face paywall pe sold istoric', () => {
+    const billing = citeste('routes/billing.ts')
+    expect(billing).toMatch(/scutit/)
+    expect(billing).toMatch(/percent: scutit \? 100 : percent/)
+    const wallet = citeste('../../frontend/src/components/WalletButton.tsx')
+    expect(wallet).toMatch(/!b\.scutit && b\.credits <= 0/)
+  })
 })
 
 describe('plafonul: cifra vine cu contextul ei, nu ca „măsurat" pe necitit', () => {

@@ -1231,8 +1231,10 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       fallbackPaid = { sursa: 'platit', model: String(c.model), base: String(c.base || ''), cheie: String(c.cheie) }
     }
   } catch (e) {
+    // Nu logăm corpul config (poate conține cheie paid) — doar motivul scurt.
     log(`creier-config: ${e instanceof Error ? e.message.slice(0, 80) : e} — free local`)
   }
+  // Nu loga NICIODATĂ creierCfg.cheie / fallback.cheie (secret).
   let platit = !!(creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
   let brainRaport = platit ? 'paid_cloud' : 'free_local'
   let motivEscaladare = ''

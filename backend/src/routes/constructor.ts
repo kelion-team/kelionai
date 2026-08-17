@@ -162,12 +162,21 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const paidGata = cfg.creier2 !== 'gemini' && !!cheie && !!modelCloud
     // Manual force: owner a comutat constructor pe plătit ȘI rezervă e gata.
     const fortatPlatit = cfg.constructorSursa === 'platit' && paidGata
+    // Cheia merge DOAR la worker (x-bridge-secret) — necesară pentru Aider paid.
+    // Nu o logăm nicăieri; răspunsul e pe canal autentificat, nu pe panou public.
     return reply.send({
       // sursa de START a run-ului (free-first, except forțare panou)
       sursa: fortatPlatit ? 'platit' : 'free',
       preferred: 'free' as const,
       fallback: paidGata
-        ? { sursa: 'platit' as const, model: modelCloud, base: bazaOllamaCloud(), cheie }
+        ? {
+            sursa: 'platit' as const,
+            model: modelCloud,
+            base: bazaOllamaCloud(),
+            cheie,
+            // coadă mascată pentru diagnostice fără a expune secretul întreg în loguri greșite
+            cheieCoada: cheie.length > 8 ? `…${cheie.slice(-4)}` : 'set',
+          }
         : null,
       // compat worker vechi: câmpurile model/base/cheie = ce folosește DACĂ e pe platit acum
       model: fortatPlatit ? modelCloud : '',

@@ -134,9 +134,9 @@ export function WalletButton({
           ? { amount: b.autoTopUp.amount, url: b.autoTopUp.url, code: b.autoTopUp.code, currency: b.autoTopUp.currency }
           : null,
       )
-      // reflects reality: at balance 0 it stays paywalled, otherwise it exits — otherwise
-      // a refresh with credits=0 left the top-up menu stuck open forever.
-      setPaywalled(b.credits <= 0)
+      // Owner scutit: sold istoric negativ NU e paywall (server deja scutește debitul).
+      // Customer: la 0 credite rămâne paywalled.
+      setPaywalled(!b.scutit && b.credits <= 0)
     }
   }
 

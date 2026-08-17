@@ -13,6 +13,8 @@ export interface WalletStatus {
   // True if the user has never topped up: first top-up = £20 minimum
   // (brain activation), then any multiple of £5.
   firstTopUp?: boolean
+  // Owner/admin: scutit de taxare — sold negativ = istoric, NU paywall.
+  scutit?: boolean
   // AUTO TOP-UP, DUE: present only when the user's checkbox is on AND the
   // credit dropped below his threshold — the server has already prepared the
   // unique payment code; the client offers a one-tap button to `url`. The

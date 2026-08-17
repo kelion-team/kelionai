@@ -100,7 +100,18 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         if (cod) autoTopUp = { code: cod.code, amount: cod.amount, currency: cod.currency, url: config.revolut.payLink }
       }
     }
-    return reply.send({ credits, percent, currency: config.billing.currency, firstTopUp, autoTopUp })
+    // Owner/admin e scutit de taxare (PR #648): soldul negativ e ISTORIC, nu paywall.
+    // Panoul și wallet-ul trebuie să vadă steagul — altfel cifra sperie fără context.
+    const scutit =
+      user.role === 'admin' || user.email.trim().toLowerCase() === config.adminEmail
+    return reply.send({
+      credits,
+      percent: scutit ? 100 : percent,
+      currency: config.billing.currency,
+      firstTopUp,
+      autoTopUp,
+      scutit,
+    })
   })
 
   // THE AUTO TOP-UP CHECKBOX (Adrian, Aug 1: "auto-pay selectable with a
