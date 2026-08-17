@@ -38,9 +38,20 @@ const NUME = [
   'calion',
   'caleon',
   'kelionn',
+  // ASR lung / stalciri masurate + cerute de owner (17 aug): keliolon, Kelly…
+  'keliolon',
+  'kelioln',
+  'kelolon',
+  'kelly',
+  'kelli',
+  'kelley',
+  'kely',
+  'keli',
+  // forme scurte acceptate (exact match only — vezi fuzzy doar pe nume lung)
   'kei',
   'chei',
   'key',
+  'k', // strigare minimala „K, …" (cuvant izolat la inceput)
 ]
 
 /** Câte cuvinte de la început se uită după nume. Numele strigat vine primul sau
@@ -65,12 +76,32 @@ export function numeStrigat(auzit: string): boolean {
   const t = fara_diacritice(String(auzit ?? '').trim())
   if (!t) return false
   const cuvinte = t.split(/[^a-z0-9]+/).filter(Boolean).slice(0, CUVINTE_CAP)
-  // Exact pe listă SAU stâlcire ASR pe „kelion” (m?surat: Käleon→kaleon).
-  // Fuzzy DOAR pe numele lung — ?kei/chei/key? r?m?n exact (altfel false+).
-  return cuvinte.some(
-    (c) => NUME.includes(c) || aproapeNumeLung(c, 'kelion') || aproapeNumeLung(c, 'kellion'),
-  )
+  // Exact pe listă SAU familie ASR pe rădăcina numelui.
+  // Owner 17 aug: orice începe cu kelio / variații + combinații (keliolon, kelly…).
+  // Scurt (kei/chei/key/k) rămân EXACT pe listă — altfel "cheia" dă false+.
+  return cuvinte.some((c) => esteNumeKelion(c))
 }
+
+/** Familie de nume Kelion (ASR + stalciri). Pură. */
+export function esteNumeKelion(cuvant: string): boolean {
+  const c = fara_diacritice(String(cuvant ?? '').trim())
+  if (!c) return false
+  if (NUME.includes(c)) return true
+  // Prefixe lungi cerute: kelio*, keli*, kelly*, kellio*, chelio*, kaleo*, caleo*
+  // Minim 4-5 litere ca să nu prindem "kel" din alte cuvinte.
+  if (c.length >= 5) {
+    if (/^(kelio|keli|kelly|kelli|kellio|kelyo|chello|chelio|chelion|kaleo|kalei|caleo|celeo|kaeleo)/.test(c)) return true
+    // "kelion..." cu sufixe ASR (keliolon, kelionn, kelions...)
+    if (/^kelion[a-z0-9]{0,4}$/.test(c)) return true
+    if (/^keliolon[a-z0-9]{0,3}$/.test(c)) return true
+  }
+  // Fuzzy pe țintele lungi (max 2 greșeli)
+  if (aproapeNumeLung(c, 'kelion') || aproapeNumeLung(c, 'kellion') || aproapeNumeLung(c, 'keliolon') || aproapeNumeLung(c, 'kelly')) {
+    return true
+  }
+  return false
+}
+
 
 /** Potrivire moale doar pentru nume ≥5 litere (ASR: kaleon↔kelion, max 2 greșeli). */
 function aproapeNumeLung(c: string, tinta: string): boolean {

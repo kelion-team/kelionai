@@ -40,6 +40,12 @@ describe('a fost strigat pe nume — funcție pură, probată pe rostiri reale',
       'Chelion cât costă',
       'KELION!',
       'kelian, vino',
+      'Keliolon, buna',
+      'keliolon ajuta-ma',
+      'Kelly, bună dimineața!',
+      'kelly ce faci',
+      'K, cat e ceasul',
+      'k deschide camera',
     ]) {
       expect(numeStrigat(rostire), `„${rostire}" e o strigare pe nume și n-a fost recunoscută`).toBe(true)
     }
@@ -50,6 +56,7 @@ describe('a fost strigat pe nume — funcție pură, probată pe rostiri reale',
       'am pierdut cheia de la mașină',
       'dă-mi cheile te rog',
       'nu știu ce să zic',
+      'ok merem mai departe', // „ok" != „k" ca token izolat de adresare
       'mâine mergem la piață',
       // Numele apare, dar TÂRZIU: se vorbește DESPRE el, nu CĂTRE el.
       'ieri i-am povestit lui Andrei despre Kelion și i-a plăcut mult',
@@ -94,6 +101,26 @@ describe('turaAdresata — gardul serverului pe sesiunea live (STRICT, 15 aug)',
   it('gol / neinteligibil → tăcere: un nume nemăsurat nu e un nume auzit', () => {
     expect(turaAdresata('')).toBe(false)
     expect(turaAdresata('   ')).toBe(false)
+  })
+})
+
+
+describe('familie kelio* / combinații ASR (owner 17 aug)', () => {
+  it('acceptă prefixe și combinații pe rădăcina numelui', () => {
+    for (const rostire of [
+      'kelio ajută',
+      'kelios',
+      'keliolon pornește',
+      'Kelionn salutare',
+      'kellion hey',
+      'kelly dimineata',
+    ]) {
+      expect(numeStrigat(rostire), rostire).toBe(true)
+    }
+  })
+  it('nu confunda cuvinte comune care doar conțin litere similare', () => {
+    expect(numeStrigat('am pierdut cheia')).toBe(false)
+    expect(numeStrigat('ok mergem')).toBe(false)
   })
 })
 
