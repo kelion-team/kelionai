@@ -13,6 +13,12 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 17 aug QA — Contabo VPS 18 UP măsurat: **18 CPU / 94 GB RAM**; master=live 4adfe73.
+- [x] ORDIN 17 aug QA — free constructor pe qwen2.5-coder:32b VIU (FREE32_OK ~57s pe 94GB).
+- [x] ORDIN 17 aug QA — free-first + paid rezervă pe creier-config/agent (preferred free, fallback paid).
+- [x] ORDIN 17 aug QA — Reset VPS: cale LOCALĂ ops-worker (Actions mort pe billing); proba restart-caddy ok=1.
+- [x] ORDIN 17 aug QA — Auth Google login 302; checkout Revolut 200+cod; chat admin PROBA_CHAT_OK; customer paywall cinstit.
+- [ ] ORDIN 17 aug QA — RĂMAS: audit UI buton-cu-buton pe Admin tabs în browser; voce full-duplex pe telefon/mașină; ordin constructor de probă medium pe 32b.
 - [ ] ORDIN 17 aug — INTERCONECTARE: **tryestera.com** pe lista de aplicații vii
       (meniu ▦ Aplicații → comandă → monitor/tab, nu poză). SCRIS în meniu
       (`Stage.tsx`). DE PROBAT LIVE: deschide real pe monitor; dacă site-ul
