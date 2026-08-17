@@ -1,4 +1,5 @@
 import { downsample, float32ToPcm16, base64ToBytes, pcm16ToFloat32 } from './pcm'
+import { interruptAll } from './audioFocus'
 import { OpusVoceClient, esteSuportat as opusSuportat } from './opusVoce'
 import { alimenteazaNivelVoce } from './audioIO'
 import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
@@ -483,6 +484,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         // frazei" — fără rândul ăsta, o tăiere venită de la model era
         // indistinctibilă de orice altă cauză).
         console.info('[vocalLive] modelul și-a tăiat vorba (barge-in) — a auzit voce peste el')
+        interruptAll('live-server-barge-in')
         taieRedarea()
         opts.onTuraInchisa?.() // tura tăiată nu-și lasă fragmentul pe bandă
         break

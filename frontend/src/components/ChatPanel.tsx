@@ -53,6 +53,13 @@ import {
   getVoiceLevel,
   type MicHandle,
 } from '../lib/audioIO'
+import {
+  registerLiveFocus,
+  unregisterLiveFocus,
+  requestTtsFocus,
+  releaseTtsFocus,
+  interruptAll,
+} from '../lib/audioFocus'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { watchdogEnter, watchdogBeat, watchdogExit } from '../lib/watchdog'
 import { setRealLatency, getRealLatency, subscribeRealLatency } from '../lib/latency'
@@ -520,19 +527,20 @@ export default function ChatPanel({
     // While it speaks, the microphone doesn't send (anti-echo), but stays on watch:
     // vocea lui Adrian taie redarea pe loc (barge-in, vezi ensureMic).
     if (c.audio) {
-      // AUDIO ARBITRATION — LIVE FIRST (owner, 17 aug: „chat live audio prioritar, rapid").
-      // One mouth only. While the LIVE session (vlRef / Gemini full-duplex) is up, it IS
-      // the voice path: drop written-chat Chirp {audio}. Playing TTS here caused two
-      // voices and forced muting the ear (half-duplex). Classic OpenAI realtime keeps
-      // the same rule via isRealtime. When LIVE is off, TTS on written chat still plays.
-      // serverVoiceOff on send already skips paid synthesis when LIVE is active.
+      // AUDIO FOCUS (17 aug): LIVE is the priority mouth. If LIVE holds focus,
+      // drop Chirp {audio} — one voice, full-duplex stays on LIVE, barge-in works.
+      // Classic OpenAI realtime (isRealtime) keeps the same single-mouth rule.
       if (vlRef.current) return
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
+      if (!requestTtsFocus()) return
       contorGata('primul sunet (gura a pornit)')
       playVoice(
         c.audio,
         () => { micRef.current?.setMuted(true) },
-        () => { micRef.current?.setMuted(false) },
+        () => {
+          micRef.current?.setMuted(false)
+          releaseTtsFocus()
+        },
       )
       return
     }
@@ -1115,7 +1123,7 @@ export default function ChatPanel({
       // e în pendingAudioRef chiar dacă msg e gol (altfel o tură vocală în timpul alteia
       // era aruncată tăcut — aceeași cauză ca la linia ~865).
       if (!msg && !pendingAudioRef.current) return
-      stopVoice() // cut the old turn's remaining voice, so it doesn't talk over it
+      interruptAll('barge-in-text') // cut TTS + notify LIVE mouth; one focus arbiter
       rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
       // NO return — we fall through below and start the new turn right now.
@@ -1306,6 +1314,8 @@ export default function ChatPanel({
         // the mouth, serverVoiceOff skips Chirp synthesis — faster, cheaper, one voice.
         // Written-only turns (no LIVE) still get TTS. LIVE replies are spoken on WS.
         Boolean(vlRef.current) ||
+          Boolean(vlRef.current) ||
+
           (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
         // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
         spoken || undefined,
@@ -1727,7 +1737,9 @@ export default function ChatPanel({
                 // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).
                 setLiveVoice(`⚠ voce live: ${motiv}`.slice(0, 140))
                 console.warn(`[vocalLive] ${motiv}`)
+                unregisterLiveFocus()
                 vlRef.current?.inchide()
+                unregisterLiveFocus()
                 vlRef.current = null
                 setListening(false)
                 // Oprirea manuală nu se „repară" — doar căderile.
@@ -1791,6 +1803,12 @@ export default function ChatPanel({
             })
             if (vl) {
               vlRef.current = vl
+              registerLiveFocus({
+                onInterrupt: () => {
+                  // Cut TTS if any; LIVE keeps the session (full-duplex ear stays up).
+                  stopVoice()
+                },
+              })
               setListening(true)
               // Tabul ăsta a luat VOCEA — o anunță pe canal, ca celelalte
               // taburi să se zăvorască (auditul de noapte: calea live pornea
@@ -2097,8 +2115,10 @@ export default function ChatPanel({
       // manualOff at the end and stops by itself; if the flag was stuck from an
       // old error, the button heals here instead of staying dead.
       micStartingRef.current = false
-      vlRef.current?.inchide()
-      vlRef.current = null
+      unregisterLiveFocus()
+                vlRef.current?.inchide()
+      unregisterLiveFocus()
+                vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       // intentional stop: a stuck fragment must NOT be sent after teardown
@@ -2179,8 +2199,10 @@ export default function ChatPanel({
       document.removeEventListener('visibilitychange', onVisible)
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
-      vlRef.current?.inchide()
-      vlRef.current = null
+      unregisterLiveFocus()
+                vlRef.current?.inchide()
+      unregisterLiveFocus()
+                vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       stopVoice()
@@ -2196,7 +2218,8 @@ export default function ChatPanel({
       const d = (e as CustomEvent).detail as { stare?: string }
       if (d?.stare === 'conectat') {
         micManualOffRef.current = true // blochează re-armarea automată a urechii Kelion
-        vlRef.current?.inchide()
+        unregisterLiveFocus()
+                vlRef.current?.inchide()
         vlRef.current = null
         micRef.current?.stop()
         micRef.current = null
@@ -2306,7 +2329,8 @@ export default function ChatPanel({
         window.clearTimeout(upgradeTimerRef.current)
         upgradeTimerRef.current = null
       }
-      vlRef.current?.inchide()
+      unregisterLiveFocus()
+                vlRef.current?.inchide()
       vlRef.current = null
       if (vlSondaRef.current) {
         window.clearInterval(vlSondaRef.current)

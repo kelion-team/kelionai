@@ -93,3 +93,24 @@ describe('LIVE audio priority — one mouth, chat live first (owner, 17 aug)', (
     expect(clientVL).toMatch(/let redareExterna = false/)
   })
 })
+
+describe('audio focus — LIVE priority + interrupt (owner, 17 aug)', () => {
+  it('audioFocus manager exists and exports interruptAll / LIVE vs TTS focus', () => {
+    const focus = readFileSync(join(root, 'frontend/src/lib/audioFocus.ts'), 'utf8')
+    expect(focus).toContain('export function interruptAll')
+    expect(focus).toContain('export function registerLiveFocus')
+    expect(focus).toContain('export function requestTtsFocus')
+    expect(focus).toMatch(/LIVE has priority|live' \| 'tts'|active === 'live'/)
+  })
+
+  it('written {audio} yields to LIVE (vlRef) — one mouth', () => {
+    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,600}?if \(vlRef\.current\) return/)
+    expect(panou).toContain('requestTtsFocus')
+    expect(panou).toContain('interruptAll')
+  })
+
+  it('serverVoiceOff when LIVE active so Chirp is not synthesized in parallel', () => {
+    expect(panou).toMatch(/Boolean\(vlRef\.current\)\s*\|\|/)
+  })
+})
+
