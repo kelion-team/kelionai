@@ -1193,20 +1193,70 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
 }
 
 
+// FREE-FIRST + paid rezervă (owner 17 aug): oglinda deciziei din
+// backend/src/services/escaladareConstructor.ts — ținută inline ca agentul
+// pe host să nu depindă de build-ul TS. Paid NU pornește degeaba.
+function decideEscaladareFreeFirst({ peFree, paidDisponibil, motivFree }) {
+  if (!peFree) return { escaladeaza: false, motiv: 'deja_platit' }
+  if (!paidDisponibil) return { escaladeaza: false, motiv: 'paid_indisponibil' }
+  const t = String(motivFree || '')
+  let motiv = ''
+  if (/free_indisponibil|creier local|ollama.*indispon|aider.*lips|enoent|econnrefused.*11434/i.test(t)) motiv = 'free_indisponibil'
+  else if (/timeout_throttle|429|rate.?limit|timeout|throttl|sugrumat|RESOURCE_?EXHAUSTED|overload|econnreset/i.test(t)) motiv = 'timeout_throttle'
+  else if (/no_change|no_edit|n-a modificat|context_overflow|token limit/i.test(t)) motiv = 'no_change'
+  else if (/calitate|failed|eșuat|esuat|build.*picat|teste.*roș|poart/i.test(t)) motiv = 'calitate'
+  else if (/openrouter_auth|openrouter|AuthenticationError/i.test(t)) motiv = 'openrouter_auth'
+  if (!motiv) return { escaladeaza: false, motiv: 'motiv_insuficient' }
+  return { escaladeaza: true, motiv }
+}
+
 async function construiesteCuAider(job, baseSha, jurnalVechi) {
+  // preferred free; fallback paid doar dacă API-ul raportează rezervă gata
   let creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }
+  let fallbackPaid = null // { sursa, model, base, cheie } | null
   try {
     const c = await api('/api/constructor/creier-config', {}, 2)
-    if (c && (c.sursa === 'platit' || c.sursa === 'free')) creierCfg = c
+    if (c && (c.sursa === 'platit' || c.sursa === 'free')) {
+      creierCfg = { sursa: c.sursa, model: c.model || '', base: c.base || '', cheie: c.cheie || '' }
+    }
+    if (c?.fallback && c.fallback.sursa === 'platit' && c.fallback.model && c.fallback.cheie) {
+      fallbackPaid = {
+        sursa: 'platit',
+        model: String(c.fallback.model),
+        base: String(c.fallback.base || ''),
+        cheie: String(c.fallback.cheie),
+      }
+    } else if (c?.paidDisponibil && c.model && c.cheie) {
+      // compat răspuns vechi forțat platit
+      fallbackPaid = { sursa: 'platit', model: String(c.model), base: String(c.base || ''), cheie: String(c.cheie) }
+    }
   } catch (e) {
-    log(`creier-config: ${e instanceof Error ? e.message.slice(0, 80) : e} ? free local`)
+    log(`creier-config: ${e instanceof Error ? e.message.slice(0, 80) : e} — free local`)
   }
-  const platit = !!(creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
+  let platit = !!(creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
+  let brainRaport = platit ? 'paid_cloud' : 'free_local'
+  let motivEscaladare = ''
   ULTIMUL_CREIER = platit
-    ? `aider (CLOUD pl?tit: ${creierCfg.model})`
-    : `aider (LOCAL Ollama: ${numeModelOllama()})`
+    ? `aider (CLOUD rezervă: ${creierCfg.model})`
+    : `aider (LOCAL Ollama FREE: ${numeModelOllama()})`
   if (!platit && !asiguraCreierulLocal()) {
-    throw Object.assign(new Error('creier local Ollama indisponibil ? ordinul se reia pe FREE'), { amanabil: true })
+    // Free jos: încearcă rezervă paid în ACELAȘI run dacă există; altfel amână pe free
+    const dec = decideEscaladareFreeFirst({
+      peFree: true,
+      paidDisponibil: !!fallbackPaid,
+      motivFree: 'free_indisponibil',
+    })
+    if (dec.escaladeaza && fallbackPaid) {
+      creierCfg = fallbackPaid
+      platit = true
+      brainRaport = 'paid_cloud'
+      motivEscaladare = dec.motiv
+      ULTIMUL_CREIER = `aider (CLOUD rezervă după free_indisponibil: ${creierCfg.model})`
+      log(`ESCALADARE same-run free→paid rezervă: motiv=${dec.motiv} model=${creierCfg.model}`)
+      salveazaLectie({ sig: 'escaladare_paid', cauza: 'free_indisponibil', fix: `paid:${creierCfg.model}`, ok: false })
+    } else {
+      throw Object.assign(new Error('creier local Ollama indisponibil — ordinul se reia pe FREE'), { amanabil: true, freeIssue: 'free_indisponibil' })
+    }
   }
 
   // Context Kelion scurt ? ambele creiere; free mai str?ns.
@@ -1252,20 +1302,35 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       if (tl) log(`aider: ${tl.slice(0, 140)}`)
     }
     if (a.throttled) {
-      throw Object.assign(new Error(`aider sugrumat: ${a.log.slice(-160)}`), { amanabil: true })
+      const decT = decideEscaladareFreeFirst({
+        peFree: !platit,
+        paidDisponibil: !!fallbackPaid,
+        motivFree: `timeout_throttle ${a.log.slice(-200)}`,
+      })
+      if (decT.escaladeaza && fallbackPaid && !platit) {
+        creierCfg = fallbackPaid
+        platit = true
+        brainRaport = 'paid_cloud'
+        motivEscaladare = decT.motiv
+        ULTIMUL_CREIER = `aider (CLOUD rezervă după throttle: ${creierCfg.model})`
+        log(`ESCALADARE same-run free→paid: motiv=${decT.motiv}`)
+        salveazaLectie({ sig: 'escaladare_paid', cauza: 'timeout_throttle', fix: `paid:${creierCfg.model}`, ok: false })
+        continue // reîncearcă pe paid în același run
+      }
+      throw Object.assign(new Error(`aider sugrumat: ${a.log.slice(-160)}`), { amanabil: true, freeIssue: 'timeout_throttle' })
     }
     let headAcum = sh('git rev-parse --short=7 HEAD').trim()
 
-    // No-edit: replan + retry pe ACELA?I tip de creier (free r?m?ne free, pl?tit r?m?ne pl?tit).
+    // No-edit: replan pe același creier; dacă tot free+no-edit → rezervă paid same-run.
     if (headAcum === baseSha && ramase() > 2 * 60_000) {
-      log('no-edit ? replan pa?i mici (acela?i creier), f?r? salt free?pl?tit')
+      log('no-edit — replan pași mici (același creier)')
       const h2 = await cereAjutorCreier(job.orderText, a.log.slice(-1200))
       if (h2.plan) {
         plan0 = h2.plan
         if (h2.files?.length) files0 = h2.files
         ajutorFolosit = true
         const files2 = fisiereExistenteInAtelier(files0)
-        beat('?? replan ? Aider din nou pe fi?iere ?intite', true)
+        beat('replan — Aider din nou pe fișiere țintite', true)
         a = await ruleazaAider(construiestePromptPasiMici(job, a.log.slice(-800), plan0), creierCfg, files2)
         for (const linie of String(a.log).split('\n').slice(-6)) {
           const tl = linie.trim()
@@ -1279,9 +1344,24 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       const sig = /token limit|context of \d+/i.test(a.log)
         ? 'context_overflow'
         : (/openrouter|AuthenticationError/i.test(a.log) ? 'openrouter_auth' : 'no_edit')
-      salveazaLectie({ sig, cauza: a.log.slice(-300), fix: 'small-steps all brains; no auto paid jump', ok: false })
+      const decN = decideEscaladareFreeFirst({
+        peFree: !platit,
+        paidDisponibil: !!fallbackPaid,
+        motivFree: sig,
+      })
+      if (decN.escaladeaza && fallbackPaid && !platit && ramase() > 3 * 60_000) {
+        creierCfg = fallbackPaid
+        platit = true
+        brainRaport = 'paid_cloud'
+        motivEscaladare = decN.motiv
+        ULTIMUL_CREIER = `aider (CLOUD rezervă după ${sig}: ${creierCfg.model})`
+        log(`ESCALADARE same-run free→paid: motiv=${decN.motiv} (${sig})`)
+        salveazaLectie({ sig: 'escaladare_paid', cauza: sig, fix: `paid:${creierCfg.model}`, ok: false })
+        continue
+      }
+      salveazaLectie({ sig, cauza: a.log.slice(-300), fix: platit ? 'paid-no-edit' : 'free-no-edit; paid rezervă indisponibilă sau epuizată', ok: false })
       throw Object.assign(
-        new Error(`aider n-a modificat nimic [${sig}] creier=${platit ? 'platit' : 'free'} plan=${ajutorFolosit ? 'da' : 'nu'}\n${a.log.slice(-600)}`),
+        new Error(`aider n-a modificat nimic [${sig}] creier=${platit ? 'platit' : 'free'} brain=${brainRaport} plan=${ajutorFolosit ? 'da' : 'nu'}\n${a.log.slice(-600)}`),
         { amanabil: true, freeIssue: sig },
       )
     }
@@ -1290,13 +1370,15 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
     if (!problema) {
       salveazaLectie({
         sig: platit ? 'paid_ok' : 'free_ok',
-        cauza: 'done',
+        cauza: motivEscaladare ? `done_after_${motivEscaladare}` : 'done',
         fix: ajutorFolosit ? 'brain-plan+aider' : 'aider',
         ok: true,
       })
       return {
         title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120),
-        body: `Aider ? ${ULTIMUL_CREIER}${ajutorFolosit ? ' ? plan pa?i mici creier Kelion' : ''}. Ordin #${job.id}.`,
+        body: `Aider — ${ULTIMUL_CREIER}${ajutorFolosit ? ' — plan pași mici creier Kelion' : ''}${motivEscaladare ? ` — escaladat (${motivEscaladare})` : ''}. brain=${brainRaport}. Ordin #${job.id}.`,
+        brainRaport,
+        motivEscaladare,
       }
     }
     ultimaProblema = problema
@@ -1344,20 +1426,20 @@ async function main() {
   // „report() nu moare pe variabile din alt scope" („ReferenceError:
   // tokensPaid is not defined" DUPĂ ce PR-ul fusese deschis) — e ținut prin
   // ELIMINARE: report() nu mai citește nicio variabilă de cost.)
+  // brainRaport din run: free_local (default) sau paid_cloud (doar rezervă folosită).
+  let brainRaportRun = 'free_local'
   const report = (status, extra = {}, tries = 8) =>
     api(
       '/api/constructor/report',
       {
         method: 'POST',
-        // Creierul merge în FIECARE raport (succes sau eșec). 'free' = „nu e
-        // ordinul plătit expres Fable 5" (marcaj istoric ținut de API); Gemini
-        // nu itemizează un cost per apel, deci costUsd nu se trimite — o cifră
-        // neraportată de furnizor NU se inventează (regula #1).
+        // brain = free_local | paid_cloud (owner 17 aug: paid doar rezervă, raportat).
+        // costUsd nu se inventează (regula #1).
         body: JSON.stringify({
           id: job.id,
           status,
           log: logLines.join('\n'),
-          brain: 'free',
+          brain: brainRaportRun === 'paid_cloud' ? 'paid_cloud' : 'free_local',
           ...extra,
         }),
       },
@@ -1402,6 +1484,9 @@ async function main() {
     const jurnalVechi = String(job.log ?? "").trim()
     const tokens = 0 // Aider nu itemizează tokeni — nicio cifră inventată (regula #1)
     const finish = await construiesteCuAider(job, baseSha, jurnalVechi)
+    if (finish?.brainRaport === 'paid_cloud' || finish?.brainRaport === 'free_local') {
+      brainRaportRun = finish.brainRaport
+    }
     const branch = `kelion/job-${job.id}`
     // Titlu gol = `git commit -m ""` refuză commit-ul („Aborting commit due to
     // empty commit message") și ordinul pica după ce toată munca era făcută.
@@ -1419,7 +1504,7 @@ async function main() {
 
     // CREIERUL, SCRIS ÎN PR (regula din 2 aug: alegerea modelului e VIZIBILĂ).
     // Furnizorul nu itemizează cost per apel — se raportează DOAR tokenii măsurați.
-    const linieCreier = `Motor: Aider (unic) · ${ULTIMUL_CREIER || NUME_FURNIZOR} · tokeni neitemizați (regula #1: nicio cifră inventată)`
+    const linieCreier = `Motor: Aider (unic) · ${ULTIMUL_CREIER || NUME_FURNIZOR} · brain=${brainRaportRun} · tokeni neitemizați (regula #1: nicio cifră inventată)`
     const prUrl = await deschidePR(
       titlu,
       `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, toate cele 7 porți rulate în atelier: tsc, teste, build, jscpd, exporturi, sintaxă, boot pe dist). Se îmbină singur DOAR pe poartă verde; pe roșu rămâne deschis cu problemele raportate.`,

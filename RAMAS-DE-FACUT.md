@@ -13,6 +13,11 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 17 aug — INTERCONECTARE: **tryestera.com** pe lista de aplicații vii
+      (meniu ▦ Aplicații → comandă → monitor/tab, nu poză). SCRIS în meniu
+      (`Stage.tsx`). DE PROBAT LIVE: deschide real pe monitor; dacă site-ul
+      refuză iframe (XFO/CSP) → panoul „deschide în tab" (embed-check), nu
+      ramă moartă. Eventual legături mai adânci (API/SSO) = decizie separată. [ ]
 - [ ] ORDIN 16 aug (verbatim): „la constructor NU e gemeni idiotule… Aider pe un
       model LOCAL pe VPS (Ollama)… pe serverul linux si de acolo sa lucreze aider"
       + „sa instaleze el, pe linux, aider automat cu tot ce trebuie". SCRIS (nu pot

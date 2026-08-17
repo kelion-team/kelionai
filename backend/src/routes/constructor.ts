@@ -146,21 +146,35 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // Config pentru CONSTRUCTORUL de pe host (bridge-gated): ce model + bază + cheie
-  // să folosească Aider. sursa='platit' → modelul cloud ales la creier2 + baza +
-  // cheia; sursa='free' → local (host-ul folosește default-ul lui de Ollama local).
+  // Config pentru CONSTRUCTORUL de pe host (bridge-gated).
+  // FREE-FIRST (owner 17 aug): preferred=free mereu pe calea automată; paid e
+  // DOAR rezervă (fallback) când există cheie+model cloud — NU drum principal
+  // și NU costă dacă nu se apelează. Comutatorul panou constructorSursa=platit
+  // forțează paid explicit (manual); altfel worker-ul pornește free și poate
+  // escalada same-run pe fallback.
   app.get('/api/constructor/creier-config', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
     const { getConfigCreier, getCheieOllama, tagModelCloud, bazaOllamaCloud } = await import('../services/creierCloud.js')
     const cfg = await getConfigCreier()
     const cheie = await getCheieOllama()
-    const platit = cfg.constructorSursa === 'platit' && cfg.creier2 !== 'gemini' && !!cheie
+    const modelCloud = tagModelCloud(cfg.creier2)
+    const paidGata = cfg.creier2 !== 'gemini' && !!cheie && !!modelCloud
+    // Manual force: owner a comutat constructor pe plătit ȘI rezervă e gata.
+    const fortatPlatit = cfg.constructorSursa === 'platit' && paidGata
     return reply.send({
-      sursa: platit ? 'platit' : 'free',
-      model: platit ? tagModelCloud(cfg.creier2) : '', // gol → host-ul folosește localul lui
-      base: platit ? bazaOllamaCloud() : '',
-      cheie: platit ? cheie : '',
+      // sursa de START a run-ului (free-first, except forțare panou)
+      sursa: fortatPlatit ? 'platit' : 'free',
+      preferred: 'free' as const,
+      fallback: paidGata
+        ? { sursa: 'platit' as const, model: modelCloud, base: bazaOllamaCloud(), cheie }
+        : null,
+      // compat worker vechi: câmpurile model/base/cheie = ce folosește DACĂ e pe platit acum
+      model: fortatPlatit ? modelCloud : '',
+      base: fortatPlatit ? bazaOllamaCloud() : '',
+      cheie: fortatPlatit ? cheie : '',
+      // rezervă disponibilă? (fără a o porni)
+      paidDisponibil: paidGata,
     })
   })
 

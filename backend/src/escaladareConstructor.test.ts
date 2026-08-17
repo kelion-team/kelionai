@@ -24,7 +24,7 @@ describe('constructor = Aider (motor unic) pe creier LOCAL Ollama de pe VPS', ()
     expect(agent).toContain('construiesteCuAider')
     expect(agent).toContain('function ruleazaAider')
     // Modelul lui Aider = un model Ollama local (prefix LiteLLM ollama_chat/).
-    expect(agent).toContain("env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b'")
+    expect(agent).toContain("env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:32b'")
     expect(agent).toContain('OLLAMA_API_BASE')
     // NU mai trece prin app-Gemini: fără --model openai/kelion-constructor, fără
     // OPENAI_API_KEY, fără ruta openai a app-ului.
