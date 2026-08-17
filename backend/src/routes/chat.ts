@@ -3,15 +3,15 @@ import { config, roleFor } from '../config.js'
 import type {
   Tool,
   MessageParam,
-  ToolUseBlock,
+  ToolUseBlock
 } from '../services/brain-types.js'
 import { getSessionUser, setSession, type SessionUser } from '../session.js'
 import {
   googleTools,
   runGoogleTool,
   refreshGoogleAccessToken,
-  reverseGeocodeCached,
-  } from '../services/google.js'
+  reverseGeocodeCached
+} from '../services/google.js'
 import {
   saveMessage,
   recordCost,
@@ -43,7 +43,7 @@ import {
   attachGuestPhoto,
   userKey,
   addMemory,
-  recordSimptomLive,
+  recordSimptomLive
 } from '../db.js'
 import { extrageNiveluri, curataSemne, curataZone, curataSageti, curataTrend } from './tranzactii.js'
 import { getMeserie } from '../services/meserii.js'
@@ -53,7 +53,7 @@ import {
   iaSlotDacaLiber,
   elibereazaSlot,
   asteaptaLaCoada,
-  noteazaEsuare,
+  noteazaEsuare
 } from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { memorieUnificata } from '../services/memorieUnificata.js'
@@ -89,7 +89,7 @@ import {
   browserKey,
   browserClickAt,
   browserClose,
-  type BrowserResult,
+  type BrowserResult
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { randomUUID } from 'node:crypto'
@@ -113,9 +113,7 @@ import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeCha
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { citesteEpisoade, adaugaEpisod, rezumaEpisoade } from '../services/promoEpisoade.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL,
-  LIST_APP_VERSIONS_TOOL, LIST_DB_BACKUPS_TOOL, SAVE_APP_VERSION_TOOL,
-} from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL,} from '../services/brainToolDefs.js'
 import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
@@ -381,10 +379,10 @@ const SHOW_TOOL: Tool = {
     type: 'object',
     properties: {
       url: { type: 'string', description: 'Full https:// URL to display. Empty string clears the screen.' },
-      title: { type: 'string', description: 'Short caption for the panel header.' },
-    },
-    required: ['url'],
-  },
+      title: { type: 'string', description: 'Short caption for the panel header.' }
+},
+    required: ['url']
+}
 }
 
 // „GOLEȘTE MONITORUL” (Adrian, 8 aug: „i-am cerut să golească monitorul și n-o
@@ -396,7 +394,7 @@ const GOLESTE_MONITOR_TOOL: Tool = {
   name: 'goleste_monitorul',
   description:
     "Clear the user's monitor completely: closes whatever is displayed - web page, running app, document, generated image. Call this whenever the user asks to clear, empty or close the screen/monitor (goleste monitorul, inchide ce e pe ecran, ia aia de pe ecran).",
-  input_schema: { type: 'object', properties: {} },
+  input_schema: { type: 'object', properties: {} }
 }
 
 // CITEȘTE CE E PE MONITOR (10 aug, ownerul: „nu are acces la ce se afișează pe
@@ -409,7 +407,7 @@ const GET_MONITOR_TOOL: Tool = {
   name: 'get_monitor',
   description:
     "Read what is ACTUALLY displayed on the user's monitor right now — the content of the open tabs (document text, running-app HTML, the URL/title of a map/image/page). Call this whenever the user refers to what's on screen: \"citește ce e pe monitor\", \"ce scrie aici\", \"ce e în documentul ăsta\", \"uită-te pe ecran\", \"ce arată\". Returns the active tab's real content plus the list of open tabs. If nothing is open, it says so — never guess what's on screen.",
-  input_schema: { type: 'object', properties: {} },
+  input_schema: { type: 'object', properties: {} }
 }
 
 // ARATĂ PE GRAFIC — POINTERI DE INDICAȚIE (10 aug, ownerul: „el când explică
@@ -435,13 +433,13 @@ const ARATA_GRAFIC_TOOL: Tool = {
             tip: {
               type: 'string',
               enum: ['suport', 'rezistenta', 'intrare', 'stop', 'tinta', 'nota'],
-              description: 'Kind of pointer — sets the color and the arrow direction.',
-            },
-            text: { type: 'string', description: 'Your short label in your own words (max ~60 chars).' },
-          },
-          required: ['pret'],
-        },
-      },
+              description: 'Kind of pointer — sets the color and the arrow direction.'
+},
+            text: { type: 'string', description: 'Your short label in your own words (max ~60 chars).' }
+},
+          required: ['pret']
+}
+},
       zone: {
         type: 'array',
         description: 'Up to 6 price zones (bands) to shade between two prices — e.g. a support/accumulation area.',
@@ -453,13 +451,13 @@ const ARATA_GRAFIC_TOOL: Tool = {
             tip: {
               type: 'string',
               enum: ['suport', 'rezistenta', 'intrare', 'stop', 'tinta', 'nota'],
-              description: 'Kind of zone — sets the color.',
-            },
-            text: { type: 'string', description: 'Your short label for the zone (max ~60 chars).' },
-          },
-          required: ['pret1', 'pret2'],
-        },
-      },
+              description: 'Kind of zone — sets the color.'
+},
+            text: { type: 'string', description: 'Your short label for the zone (max ~60 chars).' }
+},
+          required: ['pret1', 'pret2']
+}
+},
       sageti: {
         type: 'array',
         description: 'Up to 8 arrow markers pinned ON a real candle (not a guessed price) — use to point at a specific candle while explaining.',
@@ -468,11 +466,11 @@ const ARATA_GRAFIC_TOOL: Tool = {
           properties: {
             directie: { type: 'string', enum: ['sus', 'jos'], description: 'sus = green up-arrow below the candle; jos = red down-arrow above it.' },
             unde: { type: 'string', enum: ['cursor', 'ultima'], description: 'Which candle to pin on: the one under the user cursor, or the latest one.' },
-            text: { type: 'string', description: 'Short label on the arrow (max ~32 chars).' },
-          },
-          required: ['directie'],
-        },
-      },
+            text: { type: 'string', description: 'Short label on the arrow (max ~32 chars).' }
+},
+          required: ['directie']
+}
+},
       trend: {
         type: 'array',
         description: 'A trend line (one) drawn through two prices, from the first to the last loaded candle. Use to show a trend/channel.',
@@ -481,14 +479,14 @@ const ARATA_GRAFIC_TOOL: Tool = {
           properties: {
             pret1: { type: 'number', description: 'Price at the left end (older candle) — a real number.' },
             pret2: { type: 'number', description: 'Price at the right end (latest candle) — a real number.' },
-            text: { type: 'string', description: 'Short label for the trend line.' },
-          },
-          required: ['pret1', 'pret2'],
-        },
-      },
-      curata: { type: 'boolean', description: 'Set true to clear ALL drawings (pointers, zones, arrows, trend) from the chart.' },
-    },
-  },
+            text: { type: 'string', description: 'Short label for the trend line.' }
+},
+          required: ['pret1', 'pret2']
+}
+},
+      curata: { type: 'boolean', description: 'Set true to clear ALL drawings (pointers, zones, arrows, trend) from the chart.' }
+}
+}
 }
 
 // DISPLAYING ITS OWN RECOMMENDATIONS/PLANS on the monitor (Adrian, Jul 24: "it
@@ -504,10 +502,10 @@ export const SHOW_DOCUMENT_TOOL: Tool = {
     type: 'object',
     properties: {
       title: { type: 'string', description: 'Short document title.' },
-      text: { type: 'string', description: 'The full document content (plain text or markdown).' },
-    },
-    required: ['title', 'text'],
-  },
+      text: { type: 'string', description: 'The full document content (plain text or markdown).' }
+},
+    required: ['title', 'text']
+}
 }
 
 // CODE PLAYGROUND (Adrian, Jul 25: "Kelion should test the software he writes in
@@ -525,10 +523,10 @@ const RUN_WEB_TOOL: Tool = {
     type: 'object',
     properties: {
       title: { type: 'string', description: 'Short title for the panel header / save file name.' },
-      html: { type: 'string', description: 'The FULL HTML document (with inline CSS and JS). Self-contained.' },
-    },
-    required: ['title', 'html'],
-  },
+      html: { type: 'string', description: 'The FULL HTML document (with inline CSS and JS). Self-contained.' }
+},
+    required: ['title', 'html']
+}
 }
 
 // Lets Kelion create an image from a text description and put it straight on the
@@ -540,10 +538,10 @@ const IMAGE_TOOL: Tool = {
   input_schema: {
     type: 'object',
     properties: {
-      prompt: { type: 'string', description: 'Detailed English description of the image to generate.' },
-    },
-    required: ['prompt'],
-  },
+      prompt: { type: 'string', description: 'Detailed English description of the image to generate.' }
+},
+    required: ['prompt']
+}
 }
 
 // Video generation — Veo through the Gemini key. Veo has NO free tier
@@ -559,10 +557,10 @@ const VIDEO_TOOL: Tool = {
     type: 'object',
     properties: {
       prompt: { type: 'string', description: 'Detailed English description of the video to generate.' },
-      seconds: { type: 'number', description: 'Clip length in seconds: 4, 6 or 8 (default 8).' },
-    },
-    required: ['prompt'],
-  },
+      seconds: { type: 'number', description: 'Clip length in seconds: 4, 6 or 8 (default 8).' }
+},
+    required: ['prompt']
+}
 }
 
 // P28 (auditul aplicațiilor — RUPTURA #5): butonul 🎬 din meniu îi cere lui
@@ -575,7 +573,7 @@ const TARIFE_TOOL: Tool = {
   description:
     'Read the LIVE price list of the extra services (video clip, image, CV adaptation, presentation) in credits and £. ' +
     'Call this BEFORE quoting any price — NEVER invent figures. Also tells which video quality (Veo model tier) is currently active.',
-  input_schema: { type: 'object', properties: {} },
+  input_schema: { type: 'object', properties: {} }
 }
 
 // P22 — STUDIOUL DE CLIPURI (owner, 15 aug: „ii dai o ideie, ii spui foloseste
@@ -599,10 +597,10 @@ const STUDIO_TOOL: Tool = {
     properties: {
       idee: { type: 'string', description: 'The user\'s clip idea, one phrase is enough.' },
       reteta: { type: 'string', enum: [...RETETE_STUDIO], description: 'Optional recipe (default: Clip din idee).' },
-      cale: { type: 'string', enum: ['gratis', 'platit'], description: 'gratis = Google Flow recipe (default); platit = Veo.' },
-    },
-    required: ['idee'],
-  },
+      cale: { type: 'string', enum: ['gratis', 'platit'], description: 'gratis = Google Flow recipe (default); platit = Veo.' }
+},
+    required: ['idee']
+}
 }
 
 // P30a — OCHIUL VIDEO (owner, 15 aug: „sa vada un videoclip… sa extraga ideile
@@ -619,10 +617,10 @@ const VEDE_VIDEO_TOOL: Tool = {
   input_schema: {
     type: 'object',
     properties: {
-      url: { type: 'string', description: 'The YouTube video URL (watch/shorts/youtu.be).' },
-    },
-    required: ['url'],
-  },
+      url: { type: 'string', description: 'The YouTube video URL (watch/shorts/youtu.be).' }
+},
+    required: ['url']
+}
 }
 
 // Lets Kelion quietly record a request it genuinely CANNOT fulfil yet, into an
@@ -650,8 +648,7 @@ const VEDE_VIDEO_TOOL: Tool = {
 // (2 aug, first boot of 93be3a6). tsc and vitest both miss this (their module
 // transforms differ from Node's) — only booting dist/ the way the container
 // does proves it. Re-exported so this route stays the visible tool surface.
-import {
-  LIST_APP_VERSIONS_TOOL, LIST_DB_BACKUPS_TOOL, SAVE_APP_VERSION_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
+import {LIST_APP_VERSIONS_TOOL, LIST_DB_BACKUPS_TOOL, SAVE_APP_VERSION_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
   REQUEST_REPAIR_TOOL, APELEAZA_USER_TOOL,
 } from '../services/brainToolDefs.js'
