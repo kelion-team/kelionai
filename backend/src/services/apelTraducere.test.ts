@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Directorul fals + limbile. Mock-uim db (căutare user + limbă + cost), creierul
-// (geminiDirectChat = STT+traducere) și TTS-ul (synthesize). Restul (apelul real +
-// releul) rulează adevărat, ca să probăm lanțul cap-coadă: audio → tradus la celălalt.
+// Directorul fals + limbile. Mock-uim db, creierul UNITAR (rationeazaMesaje) ?i TTS.
+// Restul (apelul real + releul) ruleaz? adev?rat.
 const DIR = [
   { email: 'a@x.com', name: 'Ana' },
   { email: 'b@x.com', name: 'Bogdan' },
@@ -15,16 +14,20 @@ vi.mock('../db.js', () => ({
   getSpeechLang: vi.fn(async () => 'ro'),
   recordCost: vi.fn(async () => {}),
 }))
-const geminiDirectChat = vi.fn(async () => ({
-  text: 'Bună (tradus în ro)',
-  toolCalls: [],
-  costUsd: 0.001,
-  model: 'x',
-  stop: 'end',
-  inputTokens: 1,
-  outputTokens: 1,
+
+const { rationeazaMesaje } = vi.hoisted(() => ({
+  rationeazaMesaje: vi.fn(async () => ({
+    text: 'Bun? (tradus ?n ro)',
+    toolCalls: [],
+    costUsd: 0.001,
+    model: 'x',
+    stop: 'end',
+    inputTokens: 1,
+    outputTokens: 1,
+  })),
 }))
-vi.mock('./geminiDirect.js', () => ({ geminiDirectChat }))
+vi.mock('./creierRationament.js', () => ({ rationeazaMesaje }))
+
 const synthesize = vi.fn(async () => ({ ok: true, audio: Buffer.from('MP3DATA'), engine: 'google' }))
 vi.mock('./tts.js', () => ({ synthesize }))
 vi.mock('./cost.js', () => ({ ttsCost: () => 0.0001 }))
@@ -38,14 +41,23 @@ function con(): { trimite: (m: unknown) => void; mesaje: any[] } {
   return { trimite: (m) => mesaje.push(m), mesaje }
 }
 
-describe('services/apelTraducere.ts — traducerea live în apel (Faza 2)', () => {
+describe('services/apelTraducere.ts ? traducerea live ?n apel (Faza 2)', () => {
   beforeEach(() => {
     apel._reset()
-    geminiDirectChat.mockClear()
+    rationeazaMesaje.mockClear()
     synthesize.mockClear()
+    rationeazaMesaje.mockResolvedValue({
+      text: 'Bun? (tradus ?n ro)',
+      toolCalls: [],
+      costUsd: 0.001,
+      model: 'x',
+      stop: 'end',
+      inputTokens: 1,
+      outputTokens: 1,
+    })
   })
 
-  it('o frază de la A ajunge la B TRADUSĂ (text + voce)', async () => {
+  it('o fraz? de la A ajunge la B TRADUS? (text + voce)', async () => {
     const cA = con()
     const cB = con()
     apel.inregistreazaPrezenta('a@x.com', cA)
@@ -58,16 +70,15 @@ describe('services/apelTraducere.ts — traducerea live în apel (Faza 2)', () =
 
     const tradus = cB.mesaje.find((m) => m.type === 'tradus')
     expect(tradus).toBeTruthy()
-    expect(tradus.text).toBe('Bună (tradus în ro)')
+    expect(tradus.text).toBe('Bun? (tradus ?n ro)')
     expect(tradus.audio).toBe(Buffer.from('MP3DATA').toString('base64'))
-    expect(tradus.de_la).toBe('Ana') // numele celui care a vorbit
-    expect(geminiDirectChat).toHaveBeenCalledTimes(1)
-    // TTS în limba DESTINATARULUI (ro), nu a vorbitorului.
-    expect(synthesize).toHaveBeenCalledWith('Bună (tradus în ro)', 'ro', expect.anything())
+    expect(tradus.de_la).toBe('Ana')
+    expect(rationeazaMesaje).toHaveBeenCalledTimes(1)
+    expect(synthesize).toHaveBeenCalledWith('Bun? (tradus ?n ro)', 'ro', expect.anything())
   })
 
-  it('dacă Gemini nu scoate text (tăcere/zgomot) → nu se trimite nimic', async () => {
-    geminiDirectChat.mockResolvedValueOnce({
+  it('dac? Gemini nu scoate text (t?cere/zgomot) ? nu se trimite nimic', async () => {
+    rationeazaMesaje.mockResolvedValueOnce({
       text: '',
       toolCalls: [],
       costUsd: 0,
@@ -93,11 +104,11 @@ describe('services/apelTraducere.ts — traducerea live în apel (Faza 2)', () =
     apel.inregistreazaPrezenta('b@x.com', cB)
     const r = await apel.sunaUtilizator('a@x.com', 'Bogdan')
     await traduVorbire('strain@x.com', { callId: r.callId, audio: 'X', mime: 'audio/webm' })
-    expect(geminiDirectChat).not.toHaveBeenCalled()
+    expect(rationeazaMesaje).not.toHaveBeenCalled()
     expect(cB.mesaje.some((m) => m.type === 'tradus')).toBe(false)
   })
 
-  it('dacă TTS pică, tot trimite subtitrarea (fără voce)', async () => {
+  it('dac? TTS pic?, tot trimite subtitrarea (f?r? voce)', async () => {
     synthesize.mockResolvedValueOnce({ ok: false, status: 500, error: 'tts down' } as never)
     const cA = con()
     const cB = con()
@@ -108,31 +119,42 @@ describe('services/apelTraducere.ts — traducerea live în apel (Faza 2)', () =
     await traduVorbire('a@x.com', { callId: r.callId, audio: 'X', mime: 'audio/webm' })
     const tradus = cB.mesaje.find((m) => m.type === 'tradus')
     expect(tradus).toBeTruthy()
-    expect(tradus.text).toBe('Bună (tradus în ro)')
-    expect(tradus.audio).toBe('') // fără voce, dar subtitrarea ajunge
+    expect(tradus.text).toBe('Bun? (tradus ?n ro)')
+    expect(tradus.audio).toBe('')
   })
 })
 
-describe('services/apelTraducere.ts — hands-free „spui răspunde și se face legătura"', () => {
-  beforeEach(() => geminiDirectChat.mockClear())
+describe('services/apelTraducere.ts ? hands-free ?spui r?spunde ?i se face leg?tura\"', () => {
+  beforeEach(() => {
+    rationeazaMesaje.mockClear()
+    rationeazaMesaje.mockResolvedValue({
+      text: 'NONE',
+      toolCalls: [],
+      costUsd: 0.0001,
+      model: 'x',
+      stop: 'end',
+      inputTokens: 1,
+      outputTokens: 1,
+    })
+  })
 
-  it('ANSWER din voce → intenția „answer"', async () => {
-    geminiDirectChat.mockResolvedValueOnce({ text: 'ANSWER', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
+  it('ANSWER din voce ? inten?ia ?answer\"', async () => {
+    rationeazaMesaje.mockResolvedValueOnce({ text: 'ANSWER', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
     expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('answer')
   })
 
-  it('DECLINE din voce → intenția „decline"', async () => {
-    geminiDirectChat.mockResolvedValueOnce({ text: 'DECLINE', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
+  it('DECLINE din voce ? inten?ia ?decline\"', async () => {
+    rationeazaMesaje.mockResolvedValueOnce({ text: 'DECLINE', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
     expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('decline')
   })
 
-  it('zgomot/neclar → „none" (nu acceptă/refuză din greșeală)', async () => {
-    geminiDirectChat.mockResolvedValueOnce({ text: 'NONE', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
+  it('zgomot/neclar ? ?none\" (nu accept?/refuz? din gre?eal?)', async () => {
+    rationeazaMesaje.mockResolvedValueOnce({ text: 'NONE', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
     expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('none')
   })
 
-  it('fără audio → „none" fără să cheme creierul', async () => {
+  it('f?r? audio ? ?none\" f?r? s? cheme creierul', async () => {
     expect(await intentApel('a@x.com', '', 'audio/webm')).toBe('none')
-    expect(geminiDirectChat).not.toHaveBeenCalled()
+    expect(rationeazaMesaje).not.toHaveBeenCalled()
   })
 })

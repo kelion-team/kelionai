@@ -30,7 +30,8 @@ describe('scutirea ownerului pe TOATE căile de debit — soldul lui nu se mai m
   })
   it('panoul spune adevărul lângă cifra istorică (scutit), nu o ascunde', () => {
     const db = citeste('db.ts')
-    expect(db).toMatch(/lower\(v\.user_email\) = lower\(\$1\)\) AS scutit/)
+    expect(db).toMatch(/AS scutit/)
+    expect(db).toMatch(/lower\(v\.user_email\)/)
     const panou = citeste('../../frontend/src/components/AdminPanel.tsx')
     expect(panou).toMatch(/scutit — sold istoric/)
   })

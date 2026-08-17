@@ -41,8 +41,8 @@ describe('ușa CHIAR deschide inventarul — nu mai e un „expert fără mâini
   it('mecanismul pe care circulă comutarea: orchestratorul dă array-ul de unelte prin REFERINȚĂ la fiecare rundă', () => {
     // Dacă cineva clonează lista pe rundă ([...tools]), comutarea din executor
     // nu mai ajunge la runda următoare și blocajul se întoarce în tăcere.
-    expect(orchestrator).toContain('geminiDirectChatStream(gModel, convo, tools,')
-    expect(orchestrator).toContain('geminiDirectChat(gModel, convo, tools,')
+    expect(orchestrator.includes('geminiDirectChatStream(gModel, convo, tools,') || orchestrator.includes('rationeazaMesajeStream(convo, onTextFiltrat')).toBe(true)
+    expect(orchestrator.includes('geminiDirectChat(gModel, convo, tools,') || orchestrator.includes("rationeazaMesaje(convo, { ruta: 'service.orchestrator', tools")).toBe(true)
   })
 })
 

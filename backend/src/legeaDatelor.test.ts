@@ -70,7 +70,7 @@ describe('P26 — panoul: registrul + dovada backupului + cardul complet al omul
 
   it('cardul userului poartă poza de pe server și mostra de voce („se ataseaza inclusiv monstra de voce")', () => {
     expect(db).toMatch(/AS foto,/)
-    expect(db).toMatch(/EXISTS\(SELECT 1 FROM voiceprints vp WHERE lower\(vp\.user_email\) = lower\(v\.user_email\)\) AS voce/)
+    expect(db).toMatch(/EXISTS\(SELECT 1 FROM voiceprints vp WHERE lower\(vp\.user_email\) = MIN\(lower\(v\.user_email\)\)\) AS voce/)
     expect(panou).toMatch(/u\.foto \|\| pozaUser\(u\.email\)/)
     expect(panou).toMatch(/🎤 voce/)
   })

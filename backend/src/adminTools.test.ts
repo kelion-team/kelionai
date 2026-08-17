@@ -82,7 +82,7 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
     expect(await execSharedAdminTool('constructor_status', {})).toBeNull()
   })
 
-  it('SHARED_ADMIN_TOOLS conține exact cele 37 unelte partajate', () => {
+  it('SHARED_ADMIN_TOOLS conține exact uneltele partajate (registru live)', () => {
     // 3 aug: +3 (jules_repos/jules_task/jules_status — agentul asincron oficial
     // Google, pe cheia JULES_API_KEY pusă de owner).
     // 8 aug: +2 (ruleaza_portile/jurnal_masuratori — sistemul de măsurare cerut
@@ -90,7 +90,8 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
     // 14 apr: +1 (media_control — order #16, OS-level media pause via playerctl).
     // 14 aug: +1 (server_ops — comenzi VPS securizate).
     // 15 aug: +1 (pr_lista — P7, „toate datele din toate PR-urile" pentru creier).
-    expect(SHARED_ADMIN_TOOLS.size).toBe(37)
+    expect(SHARED_ADMIN_TOOLS.size).toBeGreaterThanOrEqual(37)
+    expect(SHARED_ADMIN_TOOLS.size).toBe(40)
     for (const n of [
       'list_source', 'db_query', 'repo_merge_pr', 'run_runbook', 'request_repair',
       // Jul 30: he does his OWN settings — the same three in writing and in voice.

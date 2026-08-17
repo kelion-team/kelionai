@@ -1011,83 +1011,98 @@ function asiguraCreierulLocal() {
 
 // ?? LEC?II DURABILE din e?ecuri (owner 17 aug: auto-dezvoltare + ?nv??are) ??
 // Fi?ier pe host, citit la fiecare ordin FREE/PAID. Nu arde bani: e text local.
+
+// ?? LEGE: ORICE CREIER folose?te pa?i mici (owner 17 aug) ???????????????????
+// Free local, cloud pl?tit, ajutor Gemini ? ACELA?I contract:
+// plan FILES/STEPS/CHECK ? Aider doar pe fi?ierele din plan ? por?i.
 const LECTII_PATH = '/root/kelion/memory/lectii-constructor.jsonl'
-function semnaturaEsec(text) {
-  const t = String(text || '')
-  if (/openrouter|No cookie auth|OPENROUTER_API_KEY/i.test(t)) return 'openrouter_auth'
-  if (/context of \d+ tokens exceeds|token limit/i.test(t)) return 'context_overflow'
-  if (/n-a modificat nimic|Applied edit/i.test(t) && /token limit|exceeds/i.test(t)) return 'context_overflow_noedit'
-  if (/ECONNREFUSED|ollama.*(down|indisponibil)|creier local LIPS/i.test(t)) return 'ollama_down'
-  if (/429|rate.?limit|RESOURCE_EXHAUSTED|quota/i.test(t)) return 'rate_limit'
-  if (/TS\d{4}|error TS|vitest|jscpd|boot/i.test(t)) return 'gate_fail'
-  return 'other'
-}
-function citesteLectii(limit = 8) {
-  try {
-    if (!fs.existsSync(LECTII_PATH)) return []
-    const lines = fs.readFileSync(LECTII_PATH, 'utf8').trim().split('\n').filter(Boolean)
-    const out = []
-    for (const line of lines.slice(-80)) {
-      try { out.push(JSON.parse(line)) } catch { /* skip */ }
-    }
-    // unique by signature, newest last
-    const map = new Map()
-    for (const x of out) if (x?.sig) map.set(x.sig, x)
-    return [...map.values()].slice(-limit)
-  } catch { return [] }
-}
-function salveazaLectie({ sig, cauza, fix, ok }) {
+function salveazaLectie(row) {
   try {
     fs.mkdirSync(path.dirname(LECTII_PATH), { recursive: true })
-    const row = JSON.stringify({
-      at: new Date().toISOString(),
-      sig: String(sig || 'other').slice(0, 80),
-      cauza: String(cauza || '').slice(0, 400),
-      fix: String(fix || '').slice(0, 400),
-      ok: !!ok,
-    })
-    fs.appendFileSync(LECTII_PATH, row + '\n')
-  } catch { /* best-effort */ }
+    fs.appendFileSync(LECTII_PATH, JSON.stringify({ at: new Date().toISOString(), ...row }) + '\n')
+  } catch { /* ignore */ }
 }
-function textLectiiPentruPrompt() {
-  const L = citesteLectii(6)
-  if (!L.length) return ''
-  return (
-    '\n\nLEC?II DIN E?ECURI ANTERIOARE (nu repeta acelea?i gre?eli):\n' +
-    L.map((x) => `- [${x.sig}] ${x.cauza} ? ${x.fix}`).join('\n') +
-    '\n'
-  )
+function extrageFisiereDinText(text, limit = 6) {
+  const out = []
+  const re = /(?:^|[\s`"'(])([A-Za-z0-9_./-]+\.(?:ts|tsx|js|mjs|cjs|json|md|css|yml|yaml))/g
+  let m
+  const s = String(text || '')
+  while ((m = re.exec(s)) && out.length < limit) {
+    const f = m[1].replace(/^\.\//, '')
+    if (f.includes('..')) continue
+    if (!out.includes(f)) out.push(f)
+  }
+  return out
+}
+function fisiereExistenteInAtelier(files) {
+  const ok = []
+  for (const f of files || []) {
+    try {
+      const fp = path.join(ATELIER, f)
+      if (fs.existsSync(fp) && fs.statSync(fp).isFile()) ok.push(f)
+    } catch { /* ignore */ }
+  }
+  return ok.slice(0, 6)
+}
+/** Plan scurt de la creierul Kelion (Gemini app) ? pentru ORICE surs? Aider. */
+async function cereAjutorCreier(ordin, esuat) {
+  try {
+    const r = await api(
+      '/api/constructor/ajutor',
+      { method: 'POST', body: JSON.stringify({ ordin: String(ordin || '').slice(0, 2500), esuat: String(esuat || '').slice(0, 1500) }) },
+      1,
+    )
+    const plan = String(r?.plan || '').trim()
+    const files = Array.isArray(r?.files) ? r.files.map(String) : extrageFisiereDinText(plan)
+    if (plan) log(`plan creier (toate creierele): ${files.length} files ? ${plan.slice(0, 120).replace(/\n/g, ' ')}`)
+    return { plan, files }
+  } catch (e) {
+    log(`plan creier indisponibil: ${String(e?.message || e).slice(0, 120)}`)
+    return { plan: '', files: [] }
+  }
+}
+function construiestePromptPasiMici(job, extra = '', plan = '') {
+  const ordin = String(job.orderText || '').slice(0, 1800)
+  let p = `ORDIN ? aplic? DOAR pa?i mici, diff minim:\n${ordin}\n`
+  if (plan) p += `\nPLAN OBLIGATORIU (orice creier Aider ? free sau pl?tit):\n${String(plan).slice(0, 2000)}\n`
+  if (extra) p += `\nE?EC ANTERIOR:\n${String(extra).slice(0, 1000)}\n`
+  p += '\nReguli universale: doar fi?ierele din PLAN/FILES; f?r? rescrieri monolit; opre?te-te dup? CHECK.\n'
+  return p.slice(0, 4000)
 }
 
-function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }) {
-  // FREE = local Ollama only. PAID = cloud only with key+model. Never OpenRouter.
+
+function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }, files = []) {
+  // ORICE creier: free local SAU cloud pl?tit ? acela?i motor Aider, pa?i mici, fi?iere ?intite.
+  // OpenRouter interzis pe free. Pl?tit = doar Ollama cloud cu cheie owner.
   const platit = !!(creierCfg && creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
   const model = platit
     ? `openai/${creierCfg.model}`
     : (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b')
 
-  if (!platit) {
-    try {
-      for (const f of ['.aider.chat.history.md', '.aider.input.history']) {
-        try { fs.writeFileSync(path.join(ATELIER, f), '') } catch { /* ignore */ }
-      }
+  // Igien? context: pe free mereu; pe pl?tit tot wipe history ca s? nu umfle cost/timp.
+  try {
+    for (const f of ['.aider.chat.history.md', '.aider.input.history']) {
+      try { fs.writeFileSync(path.join(ATELIER, f), '') } catch { /* ignore */ }
+    }
+    if (!platit) {
       const freeCfgBody =
-        `model: ${model}\n` +
-        `editor-model: ${model}\n` +
-        `weak-model: ${model}\n` +
-        'architect: false\nedit-format: whole\nmap-tokens: 0\nauto-commits: true\nauto-test: false\nstream: false\nanalytics-disable: true\ngit: true\n'
+        `model: ${model}\neditor-model: ${model}\nweak-model: ${model}\n` +
+        'architect: false\nedit-format: whole\nmap-tokens: 0\nauto-commits: true\n' +
+        'auto-test: false\nstream: false\nanalytics-disable: true\ngit: true\n'
       fs.writeFileSync('/root/kelion/aider-free.conf.yml', freeCfgBody)
       try { fs.mkdirSync(ATELIER, { recursive: true }) } catch { /* ignore */ }
       fs.writeFileSync(path.join(ATELIER, '.aider.conf.yml'), freeCfgBody)
-    } catch (e) {
-      log(`free hygiene: ${String(e?.message || e).slice(0, 160)}`)
     }
+  } catch (e) {
+    log(`aider hygiene: ${String(e?.message || e).slice(0, 140)}`)
   }
 
   let msg = String(prompt || '')
-  if (!platit && msg.length > 3500) {
-    msg = msg.slice(0, 3500) + '\n?[free context capped]'
-    log('free prompt capped to 3500 chars')
+  // Cap prompt pentru ambele creiere (pl?tit nu trebuie umflat orbe?te).
+  const cap = platit ? 8000 : 3500
+  if (msg.length > cap) {
+    msg = msg.slice(0, cap) + '\n?[prompt capped ? small steps law]'
+    log(`prompt capped to ${cap} chars (${platit ? 'platit' : 'free'})`)
   }
 
   const args = [
@@ -1097,13 +1112,17 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     '--weak-model', model,
     '--yes-always', '--no-analytics', '--no-check-update', '--no-gitignore',
     '--auto-commits', '--no-stream', '--no-show-model-warnings',
+    '--map-tokens', platit ? String(env.CONSTRUCTOR_AIDER_MAP_TOKENS || '0') : '0',
+    '--edit-format', 'whole',
   ]
-  if (!platit) {
-    args.push('--map-tokens', '0', '--edit-format', 'whole')
-    if (fs.existsSync('/root/kelion/aider-free.conf.yml')) args.push('--config', '/root/kelion/aider-free.conf.yml')
-  } else if (env.CONSTRUCTOR_AIDER_MAP_TOKENS) {
-    args.push('--map-tokens', String(env.CONSTRUCTOR_AIDER_MAP_TOKENS))
+  if (!platit && fs.existsSync('/root/kelion/aider-free.conf.yml')) {
+    args.push('--config', '/root/kelion/aider-free.conf.yml')
   }
+  // Pa?i mici: DOAR fi?iere existente din plan ? pentru free ?I pl?tit.
+  const scoped = fisiereExistenteInAtelier(files)
+  for (const f of scoped) args.push(f)
+  if (scoped.length) log(`aider (${platit ? 'platit' : 'free'}) scoped: ${scoped.join(', ')}`)
+  else log(`aider (${platit ? 'platit' : 'free'}) f?r? fi?iere scoped ? modelul alege din mesaj`)
 
   const aiderEnv = {
     ...process.env,
@@ -1120,15 +1139,13 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     aiderEnv.OPENAI_API_KEY = creierCfg.cheie
   }
 
-  const timeout = Math.max(60_000, Math.min(ramase() - 90_000, 22 * 60_000))
+  // Free: max 8 min; pl?tit: max 18 min ? ambele pot fi omor?te la t?cere.
+  const timeout = Math.max(
+    45_000,
+    Math.min(ramase() - 60_000, platit ? Number(env.CONSTRUCTOR_PAID_TIMEOUT_MS || 18 * 60_000) : Number(env.CONSTRUCTOR_FREE_TIMEOUT_MS || 8 * 60_000)),
+  )
+  const TACERE_KILL_MS = Number(env.CONSTRUCTOR_SILENCE_MS || (platit ? 90_000 : 45_000))
 
-  // TRANSPARENT, NU MUT (owner, 16 aug: „e in asteptare la 5%… automatism negândit,
-  // nu stie ca s-a blocat"): înainte aider rula prin execFileSync — BLOCANT și TĂCUT,
-  // deci cât lucra (până la 22 min) monitorul arăta „5%" înghețat, LA FEL pe orice
-  // model (owner a probat mic-local ȘI mare-plătit: identic). Acum îl pornim cu spawn
-  // și trimitem FIECARE linie a lui aider pe monitor (log→beat), în timp real. + PAZNIC
-  // DE TĂCERE: dacă aider nu mai scrie nimic >90s, o spunem pe față („posibil agățat") —
-  // automatismul RECUNOAȘTE că stă, nu mai minte „5%". Asta e reparația cerută.
   return new Promise((resolve) => {
     let out = ''
     let ultimaLa = Date.now()
@@ -1152,16 +1169,21 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     child.stdout?.on('data', inghite)
     child.stderr?.on('data', inghite)
     const paznic = setInterval(() => {
-      if (!anuntatAgatat && Date.now() - ultimaLa > 90_000) {
-        anuntatAgatat = true
-        log(`aider: TĂCUT de ${Math.round((Date.now() - ultimaLa) / 1000)}s — posibil AGĂȚAT (fără progres); ordinul se reia dacă nu produce nimic`)
+      const tacut = Date.now() - ultimaLa
+      if (TACERE_KILL_MS > 0 && tacut > TACERE_KILL_MS) {
+        log(`aider: T?CUT de ${Math.round(tacut / 1000)}s (${platit ? 'platit' : 'free'}) ? kill; urmeaz? replan pa?i mici`)
+        try { child.kill('SIGKILL') } catch { /* dead */ }
+        return
       }
-    }, 15_000)
-    const omoara = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* deja mort */ } }, timeout)
+      if (!anuntatAgatat && tacut > 60_000) {
+        anuntatAgatat = true
+        log(`aider: T?CUT de ${Math.round(tacut / 1000)}s ? posibil ag??at`)
+      }
+    }, 10_000)
+    const omoara = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* dead */ } }, timeout)
     const inchide = (throttleSemnal) => {
       clearInterval(paznic)
       clearTimeout(omoara)
-      // Creierul indisponibil/epuizat NU e eșec de cod — e amânare (LiteLLM/HTTP).
       const throttled = throttleSemnal || /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overload|unavailable|\b5\d\d\b|creier_esec|epuizat|depleted|api.?error|connection|econnrefused|econnreset/i.test(out)
       resolve({ log: out.slice(-4000), throttled })
     }
@@ -1170,84 +1192,128 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
   })
 }
 
-// Ordinul → Aider → verificarea NOASTRĂ (cele 7 porți) → reparație (până la
-// MAX_REPAIR) → {title, body}. Aruncă „amânabil" pe sugrumarea creierului (coada
-// reia ordinul, ca înainte); aruncă eșec clar dacă Aider n-a schimbat nimic.
+
 async function construiesteCuAider(job, baseSha, jurnalVechi) {
-  // ── COMUTATORUL FREE ↔ PLĂTIT (owner, 16 aug: „constructor = comutator FREE
-  // (local pe VPS) ↔ PLĂTIT (același model ca creier 2)… se aprinde când lipesc
-  // cheia"). Aducem de la app alegerea ownerului: sursa='platit' → Aider pe modelul
-  // CLOUD ales (Kimi K3/Qwen3.5 397B) + cheia; sursa='free' → local pe VPS. Fără cheie
-  // sau fără alegere, app-ul întoarce 'free' → rămâne pe local (comportamentul de azi).
   let creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }
   try {
     const c = await api('/api/constructor/creier-config', {}, 2)
     if (c && (c.sursa === 'platit' || c.sursa === 'free')) creierCfg = c
   } catch (e) {
-    log(`nu am putut aduce config-ul creierului (${e instanceof Error ? e.message.slice(0, 80) : e}) — rămân pe local`)
+    log(`creier-config: ${e instanceof Error ? e.message.slice(0, 80) : e} ? free local`)
   }
-  const platit = creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie
+  const platit = !!(creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
   ULTIMUL_CREIER = platit
-    ? `aider (creier CLOUD plătit: ${creierCfg.model})`
-    : `aider (creier LOCAL Ollama pe VPS: ${numeModelOllama()})`
-  // ── CREIERUL LOCAL, ASIGURAT AUTOMAT (owner, 16 aug: „sa instaleze el… pe
-  // linux… aider automat cu tot ce trebuie"). Doar pe FREE (local) — pe PLĂTIT
-  // (cloud) Aider vorbește cu serverele Ollama, deci NU mai instalăm nimic local.
-  if (!platit && !asiguraCreierulLocal())
-    throw Object.assign(
-      new Error('creierul local (Ollama) nu e disponibil pe VPS și instalarea automată n-a reușit acum — ordinul se reia (vezi becul „creier LOCAL Ollama" în panou)'),
-      { amanabil: true },
-    )
-  // ── CONTEXTUL LUI KELION (owner, 16 aug: „aider… colaborează 100% informațional
-  // cu kelion… scoate toate restricțiile"). SCOT izolarea: aduc de la app memoria
-  // lui Kelion + roster-ul de specialiști + istoricul relevant, ca Aider să
-  // construiască CU tot creierul lui Kelion, nu doar cu textul ordinului.
+    ? `aider (CLOUD pl?tit: ${creierCfg.model})`
+    : `aider (LOCAL Ollama: ${numeModelOllama()})`
+  if (!platit && !asiguraCreierulLocal()) {
+    throw Object.assign(new Error('creier local Ollama indisponibil ? ordinul se reia pe FREE'), { amanabil: true })
+  }
+
+  // Context Kelion scurt ? ambele creiere; free mai str?ns.
   let contextKelion = ''
   try {
     const ctx = await api('/api/constructor/context', { method: 'POST', body: JSON.stringify({ ordin: job.orderText }) }, 2)
+    const mem = (ctx?.memorie ?? []).filter((x) => !String(x).includes('[iscoada')).slice(0, platit ? 8 : 4)
+    const rel = (ctx?.relevante ?? []).slice(0, platit ? 6 : 3)
     const parti = []
-    // PLAFON DUR: iscoada+80 agenți umflau promptul la 300k tokeni pe model 32k → Aider mut.
-    const mem = (ctx?.memorie ?? []).filter((x) => !String(x).includes('[iscoada')).slice(0, 12)
-    const rel = (ctx?.relevante ?? []).slice(0, 8)
-    const ag = (ctx?.agenti ?? []).slice(0, 15)
-    if (mem.length) parti.push(`MEMORIA lui Kelion (fapte, fără iscoadă-spam):\n- ${mem.join('\n- ')}`)
-    if (rel.length) parti.push(`ISTORIC relevant pentru ordin:\n- ${rel.join('\n- ')}`)
-    if (ag.length) parti.push(`SPECIALIȘTII lui Kelion (poți cere subiectul lor în raționament):\n${ag.map((a) => `${a.id} — ${a.rol}`).join('\n')}`)
+    if (mem.length) parti.push(`MEMORIE:\n- ${mem.join('\n- ')}`)
+    if (rel.length) parti.push(`ISTORIC:\n- ${rel.join('\n- ')}`)
     if (parti.length) {
-      contextKelion = `\n\n=== CREIERUL LUI KELION (context viu, folosește-l) ===\n${parti.join('\n\n')}\n=== sfârșit context ===\n`
-      if (contextKelion.length > 6000) contextKelion = contextKelion.slice(0, 6000) + '\n…[context trunchiat]\n'
+      contextKelion = `\n=== context Kelion ===\n${parti.join('\n')}\n=== /context ===\n`
+      const cap = platit ? 4000 : 1500
+      if (contextKelion.length > cap) contextKelion = contextKelion.slice(0, cap) + '\n?\n'
     }
-    log(`context Kelion adus pentru Aider: ${mem.length} amintiri (filtrate), ${ag.length} specialiști, ${rel.length} rânduri istoric, ${contextKelion.length} chars`)
-  } catch (e) {
-    log(`nu am putut aduce contextul lui Kelion (${e instanceof Error ? e.message.slice(0, 80) : e}) — Aider merge pe ordin`)
+  } catch { /* optional */ }
+
+  // LEGE: plan pa?i mici ?NAINTE de Aider ? pentru free ?I pl?tit.
+  let plan0 = ''
+  let files0 = extrageFisiereDinText(job.orderText)
+  let ajutorFolosit = false
+  {
+    const h = await cereAjutorCreier(job.orderText, String(jurnalVechi || '').slice(-800))
+    if (h.plan) { plan0 = h.plan; ajutorFolosit = true }
+    if (h.files?.length) files0 = h.files
+    beat(platit ? '?? plan pa?i mici ? Aider CLOUD' : '?? plan pa?i mici ? Aider FREE', true)
   }
+
   let reparatii = 0
   let ultimaProblema = ''
   for (;;) {
-    const baza = reparatii
-      ? `ORDINUL:\n${job.orderText}\n\nVERIFICAREA A PICAT — repară CAUZA (fără petice), lasă porțile verzi:\n${ultimaProblema.slice(-2500)}`
-      : (jurnalVechi
-          ? `ORDINUL:\n${job.orderText}\n\n--- Încercarea anterioară a picat; ia ALTĂ abordare, nu repeta: ---\n${jurnalVechi.slice(-2500)}`
-          : `ORDINUL:\n${job.orderText}`)
-    const prompt = platit ? (baza + contextKelion) : baza.slice(0, 3000)
-    log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : `aider construiește ordinul (${ULTIMUL_CREIER})…`)
-    const a = await ruleazaAider(prompt, creierCfg)
-    for (const linie of String(a.log).split('\n').slice(-6)) { const t = linie.trim(); if (t) log(`aider: ${t.slice(0, 140)}`) }
-    if (a.throttled) throw Object.assign(new Error(`aider sugrumat (creier LOCAL Ollama indisponibil/ocupat): ${a.log.slice(-160)}`), { amanabil: true })
-    const headAcum = sh('git rev-parse --short=7 HEAD').trim()
-    // NO-CHANGE = AMÂNARE, NU EȘEC (owner, 16 aug, cu coada de ordine eșuate
-    // #340–343: „aider nu funcționează… din cauza ta"). Când creierul (Gemini)
-    // e epuizat, Aider iese fără să editeze — dar asta NU e o cădere de cod, e
-    // lipsă de combustibil. Marcam AMÂNABIL: ordinul rămâne în coadă și se reia
-    // când Gemini revine, în loc să se îngrămădească EȘUAT pe un creier gol.
-    if (headAcum === baseSha) throw Object.assign(new Error(`aider n-a modificat nimic — probabil creierul LOCAL Ollama e indisponibil/ocupat; se reia când revine. Coada log:\n${a.log.slice(-600)}`), { amanabil: true })
+    const prompt = construiestePromptPasiMici(
+      job,
+      reparatii ? ultimaProblema : (jurnalVechi ? String(jurnalVechi).slice(-1000) : ''),
+      plan0,
+    ) + (platit ? contextKelion : '')
+    const files = fisiereExistenteInAtelier(files0.length ? files0 : extrageFisiereDinText(plan0 + '\n' + job.orderText))
+    log(`aider run ${reparatii ? 'repair ' + reparatii : 'build'} ? ${ULTIMUL_CREIER} ? files=${files.join(',') || '-'} ? plan=${plan0 ? 'da' : 'nu'}`)
+    let a = await ruleazaAider(prompt, creierCfg, files)
+    for (const linie of String(a.log).split('\n').slice(-6)) {
+      const tl = linie.trim()
+      if (tl) log(`aider: ${tl.slice(0, 140)}`)
+    }
+    if (a.throttled) {
+      throw Object.assign(new Error(`aider sugrumat: ${a.log.slice(-160)}`), { amanabil: true })
+    }
+    let headAcum = sh('git rev-parse --short=7 HEAD').trim()
+
+    // No-edit: replan + retry pe ACELA?I tip de creier (free r?m?ne free, pl?tit r?m?ne pl?tit).
+    if (headAcum === baseSha && ramase() > 2 * 60_000) {
+      log('no-edit ? replan pa?i mici (acela?i creier), f?r? salt free?pl?tit')
+      const h2 = await cereAjutorCreier(job.orderText, a.log.slice(-1200))
+      if (h2.plan) {
+        plan0 = h2.plan
+        if (h2.files?.length) files0 = h2.files
+        ajutorFolosit = true
+        const files2 = fisiereExistenteInAtelier(files0)
+        beat('?? replan ? Aider din nou pe fi?iere ?intite', true)
+        a = await ruleazaAider(construiestePromptPasiMici(job, a.log.slice(-800), plan0), creierCfg, files2)
+        for (const linie of String(a.log).split('\n').slice(-6)) {
+          const tl = linie.trim()
+          if (tl) log(`aider: ${tl.slice(0, 140)}`)
+        }
+        headAcum = sh('git rev-parse --short=7 HEAD').trim()
+      }
+    }
+
+    if (headAcum === baseSha) {
+      const sig = /token limit|context of \d+/i.test(a.log)
+        ? 'context_overflow'
+        : (/openrouter|AuthenticationError/i.test(a.log) ? 'openrouter_auth' : 'no_edit')
+      salveazaLectie({ sig, cauza: a.log.slice(-300), fix: 'small-steps all brains; no auto paid jump', ok: false })
+      throw Object.assign(
+        new Error(`aider n-a modificat nimic [${sig}] creier=${platit ? 'platit' : 'free'} plan=${ajutorFolosit ? 'da' : 'nu'}\n${a.log.slice(-600)}`),
+        { amanabil: true, freeIssue: sig },
+      )
+    }
+
     const problema = verificaAtelierul(baseSha)
-    if (!problema) return { title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120), body: `Construit de Aider (motorul unic al constructorului); creier LOCAL Ollama pe VPS (${numeModelOllama()}) — independent, fără cheie/cotă/bani. Ordin #${job.id}.` }
+    if (!problema) {
+      salveazaLectie({
+        sig: platit ? 'paid_ok' : 'free_ok',
+        cauza: 'done',
+        fix: ajutorFolosit ? 'brain-plan+aider' : 'aider',
+        ok: true,
+      })
+      return {
+        title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120),
+        body: `Aider ? ${ULTIMUL_CREIER}${ajutorFolosit ? ' ? plan pa?i mici creier Kelion' : ''}. Ordin #${job.id}.`,
+      }
+    }
     ultimaProblema = problema
-    if (reparatii >= MAX_REPAIR || ramase() < 8 * 60_000) throw new Error(problema)
+    if (reparatii + 1 < MAX_REPAIR && ramase() > 3 * 60_000) {
+      const h3 = await cereAjutorCreier(job.orderText, problema.slice(-1200))
+      if (h3.plan) {
+        plan0 = h3.plan
+        if (h3.files?.length) files0 = h3.files
+        ultimaProblema = problema.slice(0, 1000) + '\n\nPLAN:\n' + h3.plan.slice(0, 1200)
+        ajutorFolosit = true
+      }
+    }
+    if (reparatii >= MAX_REPAIR || ramase() < 4 * 60_000) throw new Error(problema)
     reparatii++
   }
 }
+
 
 async function main() {
   if (!BRIDGE || !GHTOKEN) {

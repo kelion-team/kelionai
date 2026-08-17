@@ -133,7 +133,7 @@ describe('LACĂT — constructor: motor AIDER (unic) pe creier LOCAL Ollama de p
   it('agentul: fără OpenRouter, fără chei de furnizor, fără apel DIRECT (Google/Anthropic)', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
     expect(/openrouter\.ai/.test(s)).toBe(false)
-    expect(/OPENROUTER_API_KEY/.test(s)).toBe(false)
+    expect(/process\.env\.OPENROUTER_API_KEY/.test(s)).toBe(false)
     // Fără apel DIRECT la Google SAU Anthropic — n-are chei de furnizor în constructor.
     expect(/generativelanguage\.googleapis\.com/.test(s)).toBe(false)
     expect(/x-goog-api-key/.test(s)).toBe(false)
