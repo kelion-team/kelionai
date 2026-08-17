@@ -172,8 +172,7 @@ const SECTIONS: ManualSection[] = [
       // settings" promised a button that no longer exists.
       'Your conversations, memory, notes, voice and face data belong to your account and are never shared with another user. To exercise your legal right to erasure, write to contact@kelionai.app — deletion requests are handled personally, with confirmation, not by an automatic button.',
     ],
-  },,
-  {
+  }, {
     title: 'Your data and continuity',
     paragraphs: [
       'Kelion keeps your account data on the application server so that conversations, memory and credits survive restarts. You can always ask Kelion in chat what it remembers about you, and you can ask it to forget a specific memory when that skill is available to your account.',
@@ -303,7 +302,7 @@ export function buildManual(): ManualDoc {
   // MENIUL DE PREȚURI, VIU (owner, 14 aug): rândurile cu cifre intră în
   // secțiunea „Price menu" DIN sursa taxării (tarife.ts) la fiecare build —
   // manualul arată exact prețurile care se încasează, cu profit cu tot.
-  const sections = SECTIONS.map((s) =>
+  const sections: ManualSection[] = SECTIONS.map((s) =>
     s.title === 'Price menu'
       ? {
           ...s,
