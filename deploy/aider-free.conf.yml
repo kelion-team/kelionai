@@ -1,0 +1,14 @@
+# FREE local only ? constructor pe VPS (17 aug 2026)
+# NU OpenRouter. NU architect cu editor laguna. Un singur model Ollama local.
+model: ollama_chat/qwen2.5-coder:7b
+editor-model: ollama_chat/qwen2.5-coder:7b
+weak-model: ollama_chat/qwen2.5-coder:7b
+architect: false
+edit-format: whole
+map-tokens: 0
+auto-commits: true
+auto-test: false
+stream: false
+analytics-disable: true
+git: true
+# fara read: CLAUDE.md / AI-HANDOFF ? umflau contextul la 243k pe fereastra 32k

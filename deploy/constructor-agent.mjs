@@ -1009,41 +1009,57 @@ function asiguraCreierulLocal() {
 }
 
 function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }) {
-  // CREIERUL LUI AIDER = comutator FREE (local pe VPS) ↔ PLĂTIT (cloud), ales de
-  // owner din panou. FREE: model LOCAL Ollama pe gazdă (fără cheie/cotă/bani).
-  // PLĂTIT: modelul CLOUD ales (Kimi K3/Qwen3.5 397B) pe serverele Ollama, prin
-  // API-ul compatibil OpenAI (openai/<model> + OPENAI_API_BASE=<cloud>/v1 + cheia).
+  // CREIERUL LUI AIDER = FREE local pe VPS, PLATIT cloud doar cu cheie+model.
+  // FREE: model LOCAL Ollama pe gazda (fara cheie/cota/bani).
+  // PLATIT: model CLOUD (Kimi/Qwen) pe Ollama cloud via openai/ + cheie.
   const platit = creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie
+  // CAUZA #377 (17 aug, constructor.log): Main era ollama_chat/qwen, dar
+  // Editor/Weak cadeau pe openrouter/poolside/laguna-*:free ? 401 OpenRouter
+  // (fara cheie) ? zero edit ? amanare falsa. Forteaza TOATE rolurile pe acelasi model.
   const model = platit ? `openai/${creierCfg.model}` : (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b')
   const args = [
     '--message', prompt,
     '--model', model,
+    '--editor-model', model,
+    '--weak-model', model,
     '--yes-always', '--no-analytics', '--no-check-update', '--no-gitignore', '--auto-commits', '--no-stream',
+    '--no-show-model-warnings',
   ]
-  // TAIE REPO-MAP-UL PE FREE (măsurat 16 aug, #370): pe modelul LOCAL de pe CPU-ul
-  // VPS-ului, aider a stat ~18 min „lucrează" apoi a picat pe bugetul de 22 min —
-  // adică a MĂCINAT harta întregului monorepo (tree-sitter peste TOT proiectul,
-  // trimisă modelului) și n-a apucat să editeze. Pe un 7B pe CPU, harta aia
-  // sufocă modelul înainte de fișier; pentru ordine țintite (ex. „o linie în
-  // README") e complet inutilă. `--map-tokens 0` o dezactivează → aider merge
-  // direct la fișierul cerut, de zeci de ori mai rapid, pe ACELAȘI model/CPU,
-  // tot gratis. Pe PLĂTIT (cloud, GPU rapid) harta RĂMÂNE — ajută la calitate pe
-  // ordine complexe, iar viteza nu e problemă acolo. Suprascriibil din env
-  // (CONSTRUCTOR_AIDER_MAP_TOKENS) fără deploy, dacă vrei harta înapoi pe local.
-  if (!platit) args.push('--map-tokens', String(env.CONSTRUCTOR_AIDER_MAP_TOKENS || '0'))
+  // FREE: map 0 + edit whole (fara architect?editor pe OpenRouter).
+  // Context overflow #377: auto-conventions umflau la ~243k pe fereastra 32k.
+  if (!platit) {
+    args.push('--map-tokens', String(env.CONSTRUCTOR_AIDER_MAP_TOKENS || '0'))
+    args.push('--edit-format', 'whole')
+  }
+  // FREE conf pe disc ? anuleaza .aider.conf.yml toxic din atelier (OpenRouter laguna).
+  if (!platit) {
+    const freeCfg = '/root/kelion/aider-free.conf.yml'
+    if (fs.existsSync(freeCfg)) {
+      args.push('--config', freeCfg)
+      try { fs.writeFileSync(path.join(ATELIER, '.aider.conf.yml'), fs.readFileSync(freeCfg)) } catch { /* best-effort */ }
+    }
+  }
+ else if (env.CONSTRUCTOR_AIDER_MAP_TOKENS) {
+    args.push('--map-tokens', String(env.CONSTRUCTOR_AIDER_MAP_TOKENS))
+  }
   const aiderEnv = {
     ...process.env,
-    // Ollama rulează pe VPS (constructorul rulează tot pe host, lângă el).
     OLLAMA_API_BASE: env.OLLAMA_API_BASE || 'http://127.0.0.1:11434',
     GIT_TERMINAL_PROMPT: '0',
   }
-  if (platit) {
-    // CLOUD: Ollama expune un endpoint compatibil OpenAI. Aider (LiteLLM) îl
-    // folosește cu openai/<model> + baza + cheia. Nu atingem localul.
+  if (!platit) {
+    // Blocheaza orice cadere pe OpenRouter/OpenAI platit din greseala.
+    delete aiderEnv.OPENROUTER_API_KEY
+    delete aiderEnv.OPENAI_API_KEY
+    delete aiderEnv.OPENAI_API_BASE
+    aiderEnv.OPENROUTER_API_KEY = ''
+  } else {
+    // Paid DOAR cu cheie owner ? o singura cale cloud, fara OpenRouter.
     aiderEnv.OPENAI_API_BASE = `${String(creierCfg.base).replace(/\/+$/, '')}/v1`
     aiderEnv.OPENAI_API_KEY = creierCfg.cheie
   }
   const timeout = Math.max(60_000, Math.min(ramase() - 90_000, 22 * 60_000))
+
   // TRANSPARENT, NU MUT (owner, 16 aug: „e in asteptare la 5%… automatism negândit,
   // nu stie ca s-a blocat"): înainte aider rula prin execFileSync — BLOCANT și TĂCUT,
   // deci cât lucra (până la 22 min) monitorul arăta „5%" înghețat, LA FEL pe orice
