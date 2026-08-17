@@ -1,5 +1,5 @@
 import { config, modelUnicCod, modelRapidCod } from '../config.js'
-import { brainComplete } from './brain.js'
+import { rationeaza } from './creierRationament.js'
 import { repoOpenPR } from './github.js'
 import { resurseGazda, PRAG_INCARCARE_PCT } from './resurse.js'
 import { LUCRATORI, ruleazaLucrator, lucratoriInstalati, type Propunere } from './lucratori.js'
@@ -181,7 +181,7 @@ export async function ruleazaPanou(
       `ALEG: <numele lucrătorului>\n` +
       `MOTIV: <2-4 propoziții, concret, cu ce anume din diff te-a convins>`
 
-    const verdict = await brainComplete(intrebare, 700).catch(() => '')
+    const verdict = await rationeaza(intrebare, { ruta: 'service.panouLucratori', maxTokens: 700, treapta: 'rapid' }).catch(() => '')
     const numeAles = /ALEG:\s*([a-z0-9_-]+)/i.exec(verdict)?.[1]?.toLowerCase() ?? ''
     const motivAles = /MOTIV:\s*([\s\S]+)/i.exec(verdict)?.[1]?.trim() ?? ''
 

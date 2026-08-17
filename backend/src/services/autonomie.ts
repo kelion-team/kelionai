@@ -49,7 +49,8 @@ import {
   rezumatPlati,
   type BuildJob,
 } from '../db.js'
-import { brainCompleteWithTools, expertModelLadder } from './brain.js'
+import { rationeazaCuUnelte } from './creierRationament.js'
+import { expertModelLadder } from './brain.js'
 import {
   BROWSER_TOOLS, SECRET_LISTA_TOOL, } from './brainToolDefs.js'
 import { TOATE_UNELTELE_ADMIN } from './brainToolDefs.js'
@@ -736,7 +737,7 @@ async function verificaLivrata(): Promise<{ pornit: boolean; motiv: string } | n
     `Dacă merge: răspunde exact „VERIFICAT: <ce ai măsurat, concret>". ` +
     `Dacă NU merge: „NU MERGE: <ce ai văzut, exact>". ` +
     `Nu ai voie să scrii „VERIFICAT" fără o măsurătoare pe care ai făcut-o tu.`
-  const spus = await brainCompleteWithTools(prompt, tools, uneltele, { maxRounds: 20, maxTokens: 1500 })
+  const spus = await rationeazaCuUnelte(prompt, tools, uneltele, { ruta: 'service.autonomie', maxRounds: 20, maxTokens: 1500 })
     .catch((e: Error) => `NU MERGE: verificarea a crăpat — ${e.message}`)
 
   if (/^\s*VERIFICAT/i.test(spus)) {
@@ -950,8 +951,7 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
     `Dacă ai nevoie de owner pentru un pas pe care legea îl cere doar de la el ` +
     `(aprobarea din aplicația bancară), scrie exact: „AȘTEPT APROBAREA: <ce anume>". ` +
     `NICIODATĂ valorile cheilor — doar numele lor.`
-  return brainCompleteWithTools(prompt, tools, uneltele, {
-    maxRounds: 30,
+  return rationeazaCuUnelte(prompt, tools, uneltele, { ruta: 'service.autonomie', maxRounds: 30,
     maxTokens: 2500,
     models: scaraPentru(s.dificultate),
   })

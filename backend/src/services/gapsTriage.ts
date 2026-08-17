@@ -1,5 +1,5 @@
 import { getCapabilityGaps, setGapTriage } from '../db.js'
-import { brainComplete } from './brain.js'
+import { rationeaza } from './creierRationament.js'
 import { CAPABILITIES } from './brainCapabilities.js'
 
 // ── THE AUTONOMOUS TRIAGE OF UNCOVERED REQUESTS ─────────────────────────────
@@ -49,7 +49,7 @@ export async function triageGaps(): Promise<TriageOutcome> {
     `CERERI:\n${list}\n\n` +
     `Răspunde DOAR cu JSON valid, un array: [{"id":<număr>,"verdict":"valoros"|"inchide","motiv":"<o propoziție scurtă în română>"}] — fără alt text.`
 
-  const raw = await brainComplete(prompt, 2000)
+  const raw = await rationeaza(prompt, { ruta: 'service.gapsTriage', maxTokens: 2000, treapta: 'lucru' })
   if (!raw) return { triaged: 0, kept: 0, closed: 0, error: 'brain_unavailable' }
 
   let decisions: { id?: number; verdict?: string; motiv?: string }[] = []

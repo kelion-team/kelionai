@@ -22,7 +22,8 @@
 import { createHash } from 'node:crypto'
 import { config } from '../config.js'
 import { loadKv, saveKv } from '../db.js'
-import { geminiDirectChat, geminiDirectAvailable } from './geminiDirect.js'
+import { rationeazaMesaje } from './creierRationament.js'
+import { geminiDirectAvailable } from './geminiDirect.js'
 
 const inLucru = new Map<string, Promise<Record<string, string>>>()
 
@@ -76,8 +77,7 @@ async function traduceLot(valori: string[], lang: string): Promise<(string | nul
   // (onest: nu simulăm o traducere care nu s-a putut face).
   if (!geminiDirectAvailable()) return null
   const numerotat = valori.map((v, i) => `${i + 1}. ${v.replace(/\s*\n+\s*/g, ' ')}`).join('\n')
-  const r = await geminiDirectChat(
-    config.geminiModel,
+  const r = await rationeazaMesaje(
     [
       {
         role: 'user',
@@ -85,14 +85,13 @@ async function traduceLot(valori: string[], lang: string): Promise<(string | nul
           `Translate each numbered line into ${numeLimba(lang)}. Keep the exact same numbering: ` +
           'every output line must start with its number, and there must be exactly one output line per input line. ' +
           'Translate naturally, the way a native speaker would write it in a product manual. ' +
-          'Lines in quotation marks are example phrases a user would say out loud — translate them as natural speech and keep the quotes. ' +
-          'Keep the product name "Kelionai" and the assistant name "Kelion" exactly as they are — never translate or alter them. ' +
+          'Lines in quotation marks are example phrases a user would say out loud ? translate them as natural speech and keep the quotes. ' +
+          'Keep the product name "Kelionai" and the assistant name "Kelion" exactly as they are ? never translate or alter them. ' +
           'No commentary, no preamble.\n\n' +
           numerotat,
       },
     ],
-    [],
-    { temperature: 0, maxTokens: 8000 },
+    { ruta: 'service.manualLang', treapta: 'rapid', temperature: 0, maxTokens: 8000, tools: [] },
   ).catch(() => null)
   if (!r?.text) return null
 

@@ -1,7 +1,7 @@
 import { config } from '../config.js'
 import { addMemory, memorieIa } from '../db.js'
 import { webSearch } from './google.js'
-import { geminiDirectChat } from './geminiDirect.js'
+import { rationeazaMesaje } from './creierRationament.js'
 import { autonomActiv } from './autonomActiv.js'
 import type { OrMessage } from './brainContract.js'
 
@@ -62,7 +62,7 @@ export async function unOcolIscoada(): Promise<{ teme: number; salvate: number }
     ]
     let text = ''
     try {
-      const r = await geminiDirectChat(config.geminiModel, mesaje, [], { maxTokens: 512, temperature: 0.2, reasoning: 'low' })
+      const r = await rationeazaMesaje(mesaje, { ruta: 'service.iscoada', maxTokens: 512, temperature: 0.2, reasoning: 'low', treapta: 'rapid', tools: [] })
       text = r.text.trim()
     } catch {
       continue // creierul n-a răspuns la tema asta — ocolul merge mai departe

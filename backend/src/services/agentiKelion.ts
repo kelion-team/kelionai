@@ -1,7 +1,7 @@
 import { config } from '../config.js'
 import { formatNowContext } from './timeContext.js'
 import { listaAgentiCustom, searchMemories, getGoogleRefreshToken, adaugaAgentCustom } from '../db.js'
-import { geminiDirectChat } from './geminiDirect.js'
+import { rationeazaMesaje } from './creierRationament.js'
 import { webSearch, googleTools, runGoogleTool, refreshGoogleAccessToken } from './google.js'
 // adminTools se aduce DINAMIC la execuție (jos, în ramura măsurătorilor):
 // importul static ar închide ciclul agentiKelion → adminTools → autonomie →
@@ -418,7 +418,7 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
   const plafon = efort === 'high' ? 8192 : 2048
   let cost = 0
   for (let runda = 0; ; runda++) {
-    const r = await geminiDirectChat(model, messages, unelte, { maxTokens: plafon, temperature: 0.6, reasoning: efort })
+    const r = await rationeazaMesaje(messages, { ruta: 'service.agentiKelion', maxTokens: plafon, temperature: 0.6, reasoning: efort, treapta: 'lucru', tools: unelte })
     cost += r.costUsd
     if (r.toolCalls.length === 0 || runda >= 3) {
       // POARTA FAPTELOR ȘI PE AGENT (owner, 16 aug: „kelion zice ca face el

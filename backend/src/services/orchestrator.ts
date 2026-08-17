@@ -1,3 +1,4 @@
+import { rationeazaMesaje, rationeazaMesajeStream } from './creierRationament.js'
 import { OCHI_MARCAJ } from './brainContract.js'
 import type { AnthropicTool, OrMessage, OrToolCall } from './brainContract.js'
 import {
@@ -213,8 +214,8 @@ export async function runOrchestrator(
     let res
     try {
       res = onTextFiltrat
-        ? await geminiDirectChatStream(gModel, convo, tools, onTextFiltrat, callOpts)
-        : await geminiDirectChat(gModel, convo, tools, callOpts)
+        ? await rationeazaMesajeStream(convo, onTextFiltrat, { ruta: 'service.orchestrator', tools, maxTokens: callOpts?.maxTokens, temperature: callOpts?.temperature, reasoning: callOpts?.reasoning, treapta: 'lucru' })
+        : await rationeazaMesaje(convo, { ruta: 'service.orchestrator', tools, maxTokens: callOpts?.maxTokens, temperature: callOpts?.temperature, reasoning: callOpts?.reasoning, treapta: 'lucru' })
     } catch (e) {
       // BANII RUNDELOR DEJA PLĂTITE NU SE EVAPORĂ CU EXCEPȚIA (audit 9 aug):
       // rundele 1..N-1 au fost apeluri REALE, plătite la Google, dar totalCost

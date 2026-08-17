@@ -3,7 +3,7 @@ import { getSessionUser } from '../session.js'
 import { getPool, citesteSold, recordCost, dbEnabled } from '../db.js'
 import { gasesteAgentViu, cheamaAgent } from '../services/agentiKelion.js'
 import { taxeazaServiciu } from '../services/tarife.js'
-import { geminiDirectChat } from '../services/geminiDirect.js'
+import { rationeazaMesaje } from '../services/creierRationament.js'
 import { config } from '../config.js'
 
 // ── ADAPTAREA CV — FLUXUL SIMPLU (Adrian, 10 aug, redesign) ──────────────────
@@ -99,7 +99,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     } else if (mime === 'application/pdf' || ext === 'pdf' || mime.startsWith('image/')) {
       const mimeReal = mime || 'application/pdf'
       try {
-        const r = await geminiDirectChat(config.geminiModel, [
+        const r = await rationeazaMesaje([
           {
             role: 'user',
             content: [
@@ -107,7 +107,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
               { type: 'image_url', image_url: { url: `data:${mimeReal};base64,${base64}` } },
             ],
           },
-        ], [], { maxTokens: 4096, temperature: 0 })
+        ], { ruta: 'route.jobs.cv', maxTokens: 4096, temperature: 0, treapta: 'lucru', tools: [] })
         if (r.costUsd > 0) void recordCost(cine.email, 'gemini', r.costUsd)
         text = r.text.trim()
       } catch (e) {

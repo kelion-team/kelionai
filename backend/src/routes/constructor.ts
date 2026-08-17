@@ -302,6 +302,27 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // Aici SCOT lanțul pe care i-l pusesem: motorul (Aider) nu mai primește doar
   // textul ordinului — primește memoria lui Kelion + roster-ul de specialiști, ca
   // să construiască CU tot creierul lui Kelion, nu izolat. Bridge-gated ca restul.
+
+  // ?? AJUTOR RAPID DE LA CREIERUL KELION pentru Aider free (owner 17 aug) ????
+  // C?nd Aider local (qwen 7B) se blocheaz? / n-are solu?ie rapid, NU s?rim pe
+  // cloud pl?tit. Cerem creierului aplica?iei (Gemini, cheia casei) un PLAN SCURT
+  // de fi?iere+pa?i, pe care Aider ?l aplic? local. Bridge-gated.
+  app.post<{ Body: { ordin?: string; esuat?: string } }>('/api/constructor/ajutor', async (req, reply) => {
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ error: 'unauthorized' })
+    const ordin = String(req.body?.ordin ?? '').trim().slice(0, 2500)
+    const esuat = String(req.body?.esuat ?? '').trim().slice(0, 1500)
+    if (!ordin) return reply.code(400).send({ error: 'ordin_lipsa' })
+    try {
+      // U?a UNITAR? ? acela?i creier ca chat/autonomie/mailbox (nu un creier paralel).
+      const { planificaPasiMici } = await import('../services/creierRationament.js')
+      const r = await planificaPasiMici(ordin, esuat, 'route.constructor.ajutor')
+      return reply.send({ ok: r.ok, plan: r.plan, files: r.files })
+    } catch (e) {
+      return reply.code(502).send({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) })
+    }
+  })
+
   app.post<{ Body: { ordin?: string } }>('/api/constructor/context', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })

@@ -6,7 +6,7 @@
 // Fiecare pas e contorizat (recordCost) — costul nu se pierde.
 import type { OrMessage } from './brainContract.js'
 import { config } from '../config.js'
-import { geminiDirectChat } from './geminiDirect.js'
+import { rationeazaMesaje } from './creierRationament.js'
 import { synthesize } from './tts.js'
 import { ttsCost } from './cost.js'
 import { getSpeechLang, recordCost } from '../db.js'
@@ -69,7 +69,7 @@ export async function traduVorbire(deLaEmail: string, msg: unknown): Promise<voi
         content: [{ type: 'audio_url', audio_url: { url: `data:${mime};base64,${audio}` } }],
       },
     ]
-    const r = await geminiDirectChat(config.geminiModel, mesaje)
+    const r = await rationeazaMesaje(mesaje, { ruta: 'service.apelTraducere', treapta: 'rapid' })
     text = (r.text || '').trim()
     if (r.costUsd > 0) void recordCost(de, 'gemini', r.costUsd)
   } catch {
@@ -117,7 +117,7 @@ export async function intentApel(email: string, audioB64: string, mime: string):
         content: [{ type: 'audio_url', audio_url: { url: `data:${mime || 'audio/webm'};base64,${audioB64}` } }],
       },
     ]
-    const r = await geminiDirectChat(config.geminiModel, mesaje)
+    const r = await rationeazaMesaje(mesaje, { ruta: 'service.apelTraducere', treapta: 'rapid' })
     if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
     const t = (r.text || '').trim().toUpperCase()
     if (t.includes('ANSWER')) return 'answer'

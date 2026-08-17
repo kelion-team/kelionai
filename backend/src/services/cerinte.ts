@@ -25,7 +25,7 @@
 //      "could it be better, now, with what we know in addition?" If yes, a new
 //      requirement comes out, linked to the first. Without this, the system
 //      delivers once and freezes.
-import { brainComplete } from './brain.js'
+import { rationeaza } from './creierRationament.js'
 import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta, type Cerinta } from '../db.js'
 
 /** A resolution option, as it gets laid on the table. */
@@ -123,7 +123,7 @@ export async function evalueazaCerinta(c: Cerinta): Promise<{ ok: boolean; detal
     `[{"nume":"...","cum":"în 1-2 propoziții, concret","rezolva":0,"rapid":0,"sigur":0,` +
     `"ieftin":0,"independent":0,"dificultate":3,"risc":"..."}] — fără alt text.`
 
-  const raw = await brainComplete(prompt, 1600)
+  const raw = await rationeaza(prompt, { ruta: 'service.cerinte', maxTokens: 1600, treapta: 'lucru' })
   if (!raw) return { ok: false, detaliu: 'creierul n-a răspuns' }
   let variante: Varianta[] = []
   try {
@@ -171,7 +171,7 @@ export async function imbunatatireContinua(limita = 5): Promise<{ propuneri: num
     `Răspunde DOAR cu JSON: [{"id":<număr>,"mai_bine":true|false,"propunere":"<ce anume, ` +
     `într-o propoziție>","de_ce":"<ce s-a schimbat de atunci>"}] — fără alt text.`
 
-  const raw = await brainComplete(prompt, 1400)
+  const raw = await rationeaza(prompt, { ruta: 'service.cerinte', maxTokens: 1400, treapta: 'lucru' })
   if (!raw) return { propuneri: 0, detaliu: 'creierul n-a răspuns' }
   let d: { id?: number; mai_bine?: boolean; propunere?: string; de_ce?: string }[] = []
   try {

@@ -1,7 +1,7 @@
 import { config } from '../config.js'
 import { addMemory, memorieIa } from '../db.js'
 import { dateSimbol, rezumatPentruAgent } from './piete.js'
-import { geminiDirectChat } from './geminiDirect.js'
+import { rationeazaMesaje } from './creierRationament.js'
 import { autonomActiv } from './autonomActiv.js'
 import type { OrMessage } from './brainContract.js'
 
@@ -52,7 +52,7 @@ export async function unOcolPietar(): Promise<{ simboluri: number; observatii: n
     ]
     let text = ''
     try {
-      const r = await geminiDirectChat(config.geminiModel, mesaje, [], { maxTokens: 384, temperature: 0.3, reasoning: 'low' })
+      const r = await rationeazaMesaje(mesaje, { ruta: 'service.pietar', maxTokens: 384, temperature: 0.3, reasoning: 'low', treapta: 'rapid', tools: [] })
       text = r.text.trim()
     } catch {
       continue

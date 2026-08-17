@@ -3,7 +3,7 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import { config } from '../config.js'
 import { mailEnabled, sendMail, royalLetterHtml, makeRef, letterDate } from './mail.js'
-import { brainComplete } from './brain.js'
+import { rationeaza } from './creierRationament.js'
 import { saveInboundEmail, setInboundReplied, knownInboundUids } from '../db.js'
 import { detectLang, langLabel } from './lang.js'
 
@@ -112,7 +112,7 @@ async function draftReply(from: string, subject: string, body: string, langName:
     'Apoi 1–3 paragrafe scurte, la obiect. NU adăuga antet, semnătură sau „Kelionai" — se pun automat. ' +
     'Nu inventa promisiuni pe care nu le putem ține.\n\n' +
     `De la: ${from}\nSubiect: ${subject}\n\nMesaj:\n${body.slice(0, 4000)}`
-  const draft = await brainComplete(prompt, 1024)
+  const draft = await rationeaza(prompt, { ruta: 'service.mailbox', maxTokens: 1024, treapta: 'lucru' })
   return draft && draft.trim() ? draft.trim() : null
 }
 
