@@ -199,23 +199,33 @@ export async function runOrchestrator(
       toolChoice,
       allowedFunctionNames,
     }
-    // GEMINI-ONLY (3 aug — extirparea OpenRouter): orice model al creierului
-    // poartă prefixul google-direct/ și merge prin API-ul Google. Un id fără
-    // prefix nu mai are niciun motor în spate — eroare NUMITĂ, nu o cădere
-    // tăcută pe un furnizor care nu mai există.
-    if (!model.startsWith(GEMINI_DIRECT_PREFIX)) {
-      throw new Error(`model_necunoscut: „${model}" — creierul e Gemini-only (google-direct/*)`)
+// Gemini direct SAU Creier 2 cloud (ollama-cloud/*). Alt prefix = eroare NUMITĂ.
+    const { OLLAMA_CLOUD_PREFIX } = await import('./ollamaCloud.js')
+    if (!model.startsWith(GEMINI_DIRECT_PREFIX) && !model.startsWith(OLLAMA_CLOUD_PREFIX)) {
+      throw new Error(`model_necunoscut: „${model}" — aștept google-direct/* sau ollama-cloud/*`)
     }
-    const gModel = model.slice(GEMINI_DIRECT_PREFIX.length)
     // PROFILING (Aug 2 — the 38-second weather turn): every brain round gets
     // its real duration in the log, so a slow turn shows WHERE the seconds go
     // (the model, the tool, or the number of rounds) instead of being guessed.
     const tRunda = Date.now()
     let res
     try {
+      // MODEL FORȚAT (17 aug): trecea modelul în orchestrator dar creierRationament
+      // îl ignora → chatul rămânea pe defaultul treptei indiferent de panou.
+      const optR = {
+        ruta: 'service.orchestrator',
+        tools,
+        maxTokens: callOpts?.maxTokens,
+        temperature: callOpts?.temperature,
+        reasoning: callOpts?.reasoning,
+        treapta: 'lucru' as const,
+        model,
+        toolChoice: callOpts.toolChoice,
+        allowedFunctionNames: callOpts.allowedFunctionNames,
+      }
       res = onTextFiltrat
-        ? await rationeazaMesajeStream(convo, onTextFiltrat, { ruta: 'service.orchestrator', tools, maxTokens: callOpts?.maxTokens, temperature: callOpts?.temperature, reasoning: callOpts?.reasoning, treapta: 'lucru' })
-        : await rationeazaMesaje(convo, { ruta: 'service.orchestrator', tools, maxTokens: callOpts?.maxTokens, temperature: callOpts?.temperature, reasoning: callOpts?.reasoning, treapta: 'lucru' })
+        ? await rationeazaMesajeStream(convo, onTextFiltrat, optR)
+        : await rationeazaMesaje(convo, optR)
     } catch (e) {
       // BANII RUNDELOR DEJA PLĂTITE NU SE EVAPORĂ CU EXCEPȚIA (audit 9 aug):
       // rundele 1..N-1 au fost apeluri REALE, plătite la Google, dar totalCost

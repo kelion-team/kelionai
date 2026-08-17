@@ -251,8 +251,29 @@ async function selectedBrainModel(
     // — regula §14 păzea împotriva coborârii pe o sarcină GREA, iar aici greul
     // rămâne pe Pro. Iar dacă modelul rapid întâlnește totuși ceva peste el, are
     // unealta `ask_brain` (dată doar pe tura ușoară) care escaladează la Pro.
-    const treaptaOwner: 'chat' | 'work' = heavy ? 'work' : 'chat'
+const treaptaOwner: 'chat' | 'work' = heavy ? 'work' : 'chat'
     let ownerModel: string | null = null
+    // CREIER 2 CLOUD pe ture GRELE (owner, 16–17 aug): panoul alege kimi-k3 /
+    // qwen3.5; chatul rapid rămâne Gemini. Doar când proba cheii e OK.
+    if (heavy) {
+      try {
+        const { getConfigCreier, tagModelCloud, probaOllamaCloud } = await import('../services/creierCloud.js')
+        const { OLLAMA_CLOUD_PREFIX } = await import('../services/ollamaCloud.js')
+        const cfg = await getConfigCreier()
+        const tag = tagModelCloud(cfg.creier2)
+        if (tag) {
+          const proba = await probaOllamaCloud()
+          if (proba.ok) {
+            const m = `${OLLAMA_CLOUD_PREFIX}${tag}`
+            console.log(`[BRAIN] owner greu → Creier 2 cloud ${m} (panou creier2=${cfg.creier2})`)
+            return { model: m, heavy: true }
+          }
+          console.log(`[BRAIN] Creier 2 cloud neprobat (${proba.motiv}) — rămân pe Gemini greu`)
+        }
+      } catch (e) {
+        console.error('[BRAIN] Creier 2 cloud indisponibil:', String((e as Error)?.message ?? e).slice(0, 120))
+      }
+    }
     if (sel.work) {
       console.log(`[BRAIN] owner: ignoring the saved selection (${sel.work}) — the "I don't do manual" order; keeping the default`)
       ownerModel = await resolveModel(treaptaOwner, null)
@@ -2750,7 +2771,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // care lasă `system_health` să calce iar pe drumul unei fraze.
     const PLAFON_UNELTE_USOR = UNELTE_VORBIRE.length
     const cereActiune = hasActionIntent(lastUserText) || turnHasImage
-    const PLAFON_FURNIZOR = orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
+// Gemini acceptă 128 unelte; Ollama cloud / altele — plafon 64 (sigur pe tool schema).
+    const PLAFON_FURNIZOR =
+      orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
     // dar rămâne UȘOARĂ ca unelte: n-are de executat nimic, are de hotărât dacă
     // i se vorbește. Cele două axe sunt independente și e important să rămână așa.
@@ -3174,8 +3197,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // orchestrarea vocii unice = etapa 2.
       // `let`, nu `const`: dacă creierul PROFUND se epuizează, plasa de mai jos îl
       // comută pe fața rapidă (orChatModel) pentru o ultimă încercare — reasignabil.
+// Creier 2 cloud (ollama-cloud/*) vine deja din selectedBrainModel pe greu.
+      // Altfel creierDublu → Gemini profund; ușor → orChatModel (flash).
       let orchestratorModel =
-        config.creierDublu && heavyTurn ? `google-direct/${config.modelCreierProfund}` : orChatModel
+        orChatModel?.startsWith('ollama-cloud/')
+          ? orChatModel
+          : config.creierDublu && heavyTurn
+            ? `google-direct/${config.modelCreierProfund}`
+            : orChatModel
       // ── VEDEREA E NATIVĂ (3 aug — extirparea OpenRouter a îngropat și
       // „vederea delegată") ────────────────────────────────────────────────────
       // Orice creier al aplicației e Gemini (google-direct/*), care VEDE nativ:
@@ -3548,10 +3577,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (slotPlasa) elibereazaSlot(slotPlasa)
         }
       }
-      if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
+if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
         const modelProfund = orchestratorModel
         orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
         console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
+        await incearcaPlasa()
+      }
+      // Creier 2 cloud picat → Gemini greu (nu lăsăm chatul mort pe cloud).
+      if (!r && !textFlowed && String(orchestratorModel || '').startsWith('ollama-cloud/')) {
+        const cloudMort = orchestratorModel
+        orchestratorModel = `google-direct/${config.modelCreierProfund}`
+        console.error(`[CREIER 2 CLOUD EPUIZAT] ${cloudMort} → cad pe Gemini greu ${orchestratorModel}`)
         await incearcaPlasa()
       }
       // ── PLASA OGLINDITĂ: FAȚA RAPIDĂ EPUIZATĂ → O URCARE PE CREIERUL PROFUND

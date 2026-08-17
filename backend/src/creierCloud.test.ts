@@ -77,9 +77,10 @@ describe('cablajul comutatorului — panou scrie, host citește, Aider trece pe 
     expect(p).toContain('Pune bani extra / auto-reload')
     expect(p).toContain('https://ollama.com/settings')
     expect(p).toContain('Vezi prețul modelului (live)')
-    // Dovada „exact modelul ales, nu unul de sub el" — becul numește modelul CONFIRMAT de Ollama.
-    expect(p).toContain('CONFIRMAT de Ollama')
-    expect(p).toContain('nu unul de sub el')
+// Becul e cinstit: cheie OK pe cloud ≠ model local constructor; chat greu = Creier 2.
+    expect(p).toContain('Cheie OK pe Ollama cloud')
+    expect(p).toContain('Chat rapid = Gemini')
+    expect(p).toContain('Constructor FREE = Ollama local')
     // „nu stă butonul": pollul de 10s NU mai suprascrie alegerea nesalvată (flag EDITAT).
     expect(p).toContain('creierEditatRef')
     expect(p).toContain('!creierEditatRef.current')
