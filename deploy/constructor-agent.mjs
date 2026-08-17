@@ -1008,56 +1008,118 @@ function asiguraCreierulLocal() {
   return gata
 }
 
+
+// ?? LEC?II DURABILE din e?ecuri (owner 17 aug: auto-dezvoltare + ?nv??are) ??
+// Fi?ier pe host, citit la fiecare ordin FREE/PAID. Nu arde bani: e text local.
+const LECTII_PATH = '/root/kelion/memory/lectii-constructor.jsonl'
+function semnaturaEsec(text) {
+  const t = String(text || '')
+  if (/openrouter|No cookie auth|OPENROUTER_API_KEY/i.test(t)) return 'openrouter_auth'
+  if (/context of \d+ tokens exceeds|token limit/i.test(t)) return 'context_overflow'
+  if (/n-a modificat nimic|Applied edit/i.test(t) && /token limit|exceeds/i.test(t)) return 'context_overflow_noedit'
+  if (/ECONNREFUSED|ollama.*(down|indisponibil)|creier local LIPS/i.test(t)) return 'ollama_down'
+  if (/429|rate.?limit|RESOURCE_EXHAUSTED|quota/i.test(t)) return 'rate_limit'
+  if (/TS\d{4}|error TS|vitest|jscpd|boot/i.test(t)) return 'gate_fail'
+  return 'other'
+}
+function citesteLectii(limit = 8) {
+  try {
+    if (!fs.existsSync(LECTII_PATH)) return []
+    const lines = fs.readFileSync(LECTII_PATH, 'utf8').trim().split('\n').filter(Boolean)
+    const out = []
+    for (const line of lines.slice(-80)) {
+      try { out.push(JSON.parse(line)) } catch { /* skip */ }
+    }
+    // unique by signature, newest last
+    const map = new Map()
+    for (const x of out) if (x?.sig) map.set(x.sig, x)
+    return [...map.values()].slice(-limit)
+  } catch { return [] }
+}
+function salveazaLectie({ sig, cauza, fix, ok }) {
+  try {
+    fs.mkdirSync(path.dirname(LECTII_PATH), { recursive: true })
+    const row = JSON.stringify({
+      at: new Date().toISOString(),
+      sig: String(sig || 'other').slice(0, 80),
+      cauza: String(cauza || '').slice(0, 400),
+      fix: String(fix || '').slice(0, 400),
+      ok: !!ok,
+    })
+    fs.appendFileSync(LECTII_PATH, row + '\n')
+  } catch { /* best-effort */ }
+}
+function textLectiiPentruPrompt() {
+  const L = citesteLectii(6)
+  if (!L.length) return ''
+  return (
+    '\n\nLEC?II DIN E?ECURI ANTERIOARE (nu repeta acelea?i gre?eli):\n' +
+    L.map((x) => `- [${x.sig}] ${x.cauza} ? ${x.fix}`).join('\n') +
+    '\n'
+  )
+}
+
 function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }) {
-  // CREIERUL LUI AIDER = FREE local pe VPS, PLATIT cloud doar cu cheie+model.
-  // FREE: model LOCAL Ollama pe gazda (fara cheie/cota/bani).
-  // PLATIT: model CLOUD (Kimi/Qwen) pe Ollama cloud via openai/ + cheie.
-  const platit = creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie
-  // CAUZA #377 (17 aug, constructor.log): Main era ollama_chat/qwen, dar
-  // Editor/Weak cadeau pe openrouter/poolside/laguna-*:free ? 401 OpenRouter
-  // (fara cheie) ? zero edit ? amanare falsa. Forteaza TOATE rolurile pe acelasi model.
-  const model = platit ? `openai/${creierCfg.model}` : (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b')
+  // FREE = local Ollama only. PAID = cloud only with key+model. Never OpenRouter.
+  const platit = !!(creierCfg && creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
+  const model = platit
+    ? `openai/${creierCfg.model}`
+    : (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:7b')
+
+  if (!platit) {
+    try {
+      for (const f of ['.aider.chat.history.md', '.aider.input.history']) {
+        try { fs.writeFileSync(path.join(ATELIER, f), '') } catch { /* ignore */ }
+      }
+      const freeCfgBody =
+        `model: ${model}\n` +
+        `editor-model: ${model}\n` +
+        `weak-model: ${model}\n` +
+        'architect: false\nedit-format: whole\nmap-tokens: 0\nauto-commits: true\nauto-test: false\nstream: false\nanalytics-disable: true\ngit: true\n'
+      fs.writeFileSync('/root/kelion/aider-free.conf.yml', freeCfgBody)
+      try { fs.mkdirSync(ATELIER, { recursive: true }) } catch { /* ignore */ }
+      fs.writeFileSync(path.join(ATELIER, '.aider.conf.yml'), freeCfgBody)
+    } catch (e) {
+      log(`free hygiene: ${String(e?.message || e).slice(0, 160)}`)
+    }
+  }
+
+  let msg = String(prompt || '')
+  if (!platit && msg.length > 3500) {
+    msg = msg.slice(0, 3500) + '\n?[free context capped]'
+    log('free prompt capped to 3500 chars')
+  }
+
   const args = [
-    '--message', prompt,
+    '--message', msg,
     '--model', model,
     '--editor-model', model,
     '--weak-model', model,
-    '--yes-always', '--no-analytics', '--no-check-update', '--no-gitignore', '--auto-commits', '--no-stream',
-    '--no-show-model-warnings',
+    '--yes-always', '--no-analytics', '--no-check-update', '--no-gitignore',
+    '--auto-commits', '--no-stream', '--no-show-model-warnings',
   ]
-  // FREE: map 0 + edit whole (fara architect?editor pe OpenRouter).
-  // Context overflow #377: auto-conventions umflau la ~243k pe fereastra 32k.
   if (!platit) {
-    args.push('--map-tokens', String(env.CONSTRUCTOR_AIDER_MAP_TOKENS || '0'))
-    args.push('--edit-format', 'whole')
-  }
-  // FREE conf pe disc ? anuleaza .aider.conf.yml toxic din atelier (OpenRouter laguna).
-  if (!platit) {
-    const freeCfg = '/root/kelion/aider-free.conf.yml'
-    if (fs.existsSync(freeCfg)) {
-      args.push('--config', freeCfg)
-      try { fs.writeFileSync(path.join(ATELIER, '.aider.conf.yml'), fs.readFileSync(freeCfg)) } catch { /* best-effort */ }
-    }
-  }
- else if (env.CONSTRUCTOR_AIDER_MAP_TOKENS) {
+    args.push('--map-tokens', '0', '--edit-format', 'whole')
+    if (fs.existsSync('/root/kelion/aider-free.conf.yml')) args.push('--config', '/root/kelion/aider-free.conf.yml')
+  } else if (env.CONSTRUCTOR_AIDER_MAP_TOKENS) {
     args.push('--map-tokens', String(env.CONSTRUCTOR_AIDER_MAP_TOKENS))
   }
+
   const aiderEnv = {
     ...process.env,
     OLLAMA_API_BASE: env.OLLAMA_API_BASE || 'http://127.0.0.1:11434',
     GIT_TERMINAL_PROMPT: '0',
   }
   if (!platit) {
-    // Blocheaza orice cadere pe OpenRouter/OpenAI platit din greseala.
     delete aiderEnv.OPENROUTER_API_KEY
     delete aiderEnv.OPENAI_API_KEY
     delete aiderEnv.OPENAI_API_BASE
     aiderEnv.OPENROUTER_API_KEY = ''
   } else {
-    // Paid DOAR cu cheie owner ? o singura cale cloud, fara OpenRouter.
     aiderEnv.OPENAI_API_BASE = `${String(creierCfg.base).replace(/\/+$/, '')}/v1`
     aiderEnv.OPENAI_API_KEY = creierCfg.cheie
   }
+
   const timeout = Math.max(60_000, Math.min(ramase() - 90_000, 22 * 60_000))
 
   // TRANSPARENT, NU MUT (owner, 16 aug: „e in asteptare la 5%… automatism negândit,
@@ -1167,7 +1229,7 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       : (jurnalVechi
           ? `ORDINUL:\n${job.orderText}\n\n--- Încercarea anterioară a picat; ia ALTĂ abordare, nu repeta: ---\n${jurnalVechi.slice(-2500)}`
           : `ORDINUL:\n${job.orderText}`)
-    const prompt = baza + contextKelion
+    const prompt = platit ? (baza + contextKelion) : baza.slice(0, 3000)
     log(reparatii ? `aider — rundă de reparație ${reparatii}/${MAX_REPAIR}` : `aider construiește ordinul (${ULTIMUL_CREIER})…`)
     const a = await ruleazaAider(prompt, creierCfg)
     for (const linie of String(a.log).split('\n').slice(-6)) { const t = linie.trim(); if (t) log(`aider: ${t.slice(0, 140)}`) }
