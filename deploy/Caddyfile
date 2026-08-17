@@ -1,0 +1,18 @@
+# Caddy pe VPS — servește aplicația Kelionai, cu TLS automat.
+# Rulează containerul caddy cu --network host și acest fișier montat la
+# /etc/caddy/Caddyfile (vezi deploy/deploy.sh).
+#
+# NOTĂ: kelionai.app e în spatele Cloudflare. Ca traficul să ajungă la ACEST
+# server, Adrian trebuie să repointeze în Cloudflare recordul A/AAAA pe IP-ul
+# VPS-ului (164.68.120.87). Cât timp Cloudflare e „proxied", TLS-ul îl termină
+# Cloudflare; Caddy poate rămâne pe HTTP intern sau folosi Origin Cert. Pentru
+# TLS direct (Cloudflare „DNS only" sau test pe sslip), Caddy ia certificat auto.
+
+kelionai.app {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}
+
+# Blocul LiveKit (164-68-120-87.sslip.io → :7880) a fost SCOS pe 25 iul 2026:
+# LiveKit e eliminat din cod din 24 iul (opțiunea A), iar containerul
+# kelion-livekit a fost oprit pe VPS cu „da"-ul explicit al lui Adrian.

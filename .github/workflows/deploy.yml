@@ -1,0 +1,98 @@
+# PIPELINE FIX DE PUBLICARE PE VPS — „AUTONOMIA LUI KELION" (AI-HANDOFF §14.b F+A), 25 iul 2026.
+#
+# Regula de fond (§1.4): un release aprobat = PR + merge în master; „publicat" se
+# declară DOAR cu dovada că versiunea live s-a schimbat. Acest workflow ESTE
+# pipeline-ul de publicare al gazdei noi (VPS 164.68.120.87): rulează automat la
+# fiecare push pe master (merge-ul lui Adrian = aprobarea) sau manual
+# (workflow_dispatch), intră pe VPS cu cheia SSH (secretul VPS_SSH_KEY) și
+# execută deploy/deploy.sh, apoi VERIFICĂ ANTI-FANTOMĂ din AFARĂ:
+# https://kelionai.app/api/version trebuie să întoarcă EXACT sha-ul curent al
+# lui origin/master (injectat în container prin GIT_COMMIT_SHA) + health 200.
+# Nu „s-a schimbat ceva" — ci „e chiar master". Fără dovadă → jobul PICĂ roșu.
+#
+# Lecția „calea rulată ≠ calea din repo" (§6): deploy.sh NU se execută din clona
+# de pe VPS (pasul lui de `git checkout` l-ar rescrie chiar în timp ce bash îl
+# citește) — se extrage versiunea din origin/master într-un fișier temporar și
+# se rulează aceea.
+name: deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # ── PE ÎNTRERUPĂTOR PÂNĂ SE DEBLOCHEAZĂ ACTIONS (15 aug; același tipar ca
+    # gemini-lock din 7 aug) ──────────────────────────────────────────────────
+    # Facturarea organizației e blocată: jobul se năștea, nu primea NICIODATĂ
+    # runner (runner_id: 0, loguri 404) și murea roșu → un email „Run failed:
+    # deploy" către owner la FIECARE merge în master — iar cu constructorul
+    # îmbinând la ~10 minute, inboxul lui era bombardat toată noaptea (captura
+    # lui din 15 aug, 06:51). Publicarea REALĂ nu trece pe aici de la scoaterea
+    # Railway: o face cronul auto-publicare de pe VPS (dovada: live avansează
+    # — v=f3440b9 la 05:45 — cu Actions mort). Jobul se ține, nu se șterge:
+    # când factura se deblochează, variabila de repo ACTIONS_PORNIT=true îl
+    # repornește neschimbat (Settings → Secrets and variables → Actions →
+    # Variables). Un job SĂRIT nu trimite emailuri; unul picat, da.
+    if: ${{ vars.ACTIONS_PORNIT == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Versiunea live ÎNAINTE (pentru jurnal)
+        run: |
+          echo "ÎNAINTE: $(curl -s -m 10 https://kelionai.app/api/version || echo '(necitibilă)')"
+
+      - name: Deploy pe VPS (SSH cu cheie)
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ]; then
+            echo "::error::Lipsește secretul VPS_SSH_KEY (Settings → Secrets → Actions)."; exit 1
+          fi
+          umask 077
+          printf '%s\n' "$KEY" > /tmp/vps_key
+          chmod 600 /tmp/vps_key
+          # ServerAliveInterval=30 + ServerAliveCountMax=10 → 5 minute toleranță fără output
+          # previne "Broken pipe" în timpul docker build (care durează 4-5 min și e silent)
+          ssh -i /tmp/vps_key \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=25 -o BatchMode=yes \
+              -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+              root@164.68.120.87 'bash -s' <<'EOS'
+          set -euo pipefail
+          cd /root/kelion/repo
+          git fetch origin master
+          # Rulez versiunea din ORIGIN/MASTER a scriptului, dintr-o copie în /tmp
+          # (nu din clonă — vezi antetul workflow-ului).
+          git show origin/master:deploy/deploy.sh > /tmp/kelion-deploy-master.sh
+          KELION_DEPLOY_COPY=1 bash /tmp/kelion-deploy-master.sh master
+          EOS
+
+      - name: Verificare ANTI-FANTOMĂ (live v == sha origin/master + health 200)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          V=""; SHA=""; H=""
+          for i in $(seq 1 24); do
+            # sha-ul lui master se recitește la fiecare încercare: dacă între timp
+            # a intrat alt push, comparația rămâne corectă față de master-ul REAL.
+            SHA=$(curl -s -m 10 -H "Authorization: Bearer $GH_TOKEN" \
+                  -H 'Accept: application/vnd.github.sha' \
+                  https://api.github.com/repos/kelion-team/kelionai/commits/master | cut -c1-7)
+            V=$(curl -s -m 10 https://kelionai.app/api/version | grep -o '"v":"[^"]*"' | cut -d'"' -f4 || true)
+            H=$(curl -s -o /dev/null -w '%{http_code}' -m 10 https://kelionai.app/health || echo 000)
+            echo "încercarea $i: live v='$V', așteptat '$SHA', health=$H"
+            if [ -n "$SHA" ] && [ "$V" = "$SHA" ] && [ "$H" = "200" ]; then
+              echo "✅ PUBLICAT CU DOVADĂ: kelionai.app rulează exact master ($SHA), health 200."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::ANTI-FANTOMĂ PICĂ: live v='$V' ≠ master '$SHA' (health=$H) după 4 minute. Producția NU e declarată publicată — rulează vps-diag pentru fapte."
+          exit 1

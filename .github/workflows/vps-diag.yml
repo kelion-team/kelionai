@@ -1,0 +1,75 @@
+# DIAGNOSTIC DETERMINIST VPS — RESCRIS 25 iul 2026 pentru stack-ul REAL de azi:
+# aplicația în Docker (kelionai-app) + Caddy (kelion-caddy) pe VPS 164.68.120.87.
+#
+# Versiunea veche era MOARTĂ de două ori: (1) SSH cu parolă prin sshpass —
+# dezactivată pe VPS din 22 iul („Permission denied (publickey)"); (2) verifica
+# servicii și chei care nu mai există în cod (kelion-builder/bridge, Kimi/GLM —
+# puntea a fost ștearsă pe 23 iul, creierul e pe OpenRouter din 24 iul).
+#
+# Rolul (AI-HANDOFF §14.b B): la ORICE eșec, ÎNTÂI faptele — rulezi asta și decizi
+# pe ce tipărește, nu „din memorie". Determinist, fără LLM, doar citire (nu
+# repornește și nu modifică nimic).
+name: vps-diag
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Adună faptele de pe VPS (SSH cu cheie)
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ]; then
+            echo "::error::Lipsește secretul VPS_SSH_KEY."; exit 1
+          fi
+          umask 077
+          printf '%s\n' "$KEY" > /tmp/vps_key
+          chmod 600 /tmp/vps_key
+          ssh -i /tmp/vps_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=25 -o BatchMode=yes root@164.68.120.87 'bash -s' <<'EOS'
+          set +e
+          echo "==================== CONTAINERE (docker ps -a) ===================="
+          docker ps -a --format '{{.Names}}  {{.Status}}  {{.Image}}' | head -20
+          echo
+          echo "==================== APP: ultimele 60 linii (docker logs) ===================="
+          docker logs --tail 60 kelionai-app 2>&1
+          echo
+          echo "==================== CADDY: ultimele 15 linii ===================="
+          docker logs --tail 15 kelion-caddy 2>&1
+          echo
+          echo "==================== COD RULAT vs MASTER (anti-fantomă) ===================="
+          cd /root/kelion/repo 2>/dev/null && git fetch -q origin master 2>/dev/null
+          MASTER=$(git rev-parse origin/master 2>/dev/null | cut -c1-7)
+          CLONA=$(git rev-parse HEAD 2>/dev/null | cut -c1-7)
+          RULAT=$(docker exec kelionai-app printenv GIT_COMMIT_SHA 2>/dev/null | cut -c1-7)
+          echo "origin/master=$MASTER   clona-VPS=$CLONA (branch $(git rev-parse --abbrev-ref HEAD 2>/dev/null))   container=${RULAT:-<GIT_COMMIT_SHA neinjectat — deploy de dinainte de 25 iul>}"
+          printf 'local :8080 /api/version : '; curl -s -m 8 http://127.0.0.1:8080/api/version; echo
+          if [ -n "$RULAT" ] && [ -n "$MASTER" ]; then
+            [ "$RULAT" = "$MASTER" ] && echo "VERDICT: COD LA ZI (container == origin/master)" \
+                                     || echo "VERDICT: COD VECHI — container $RULAT != master $MASTER → rulează workflow-ul «deploy»"
+          fi
+          echo
+          echo "==================== PUBLIC (prin Cloudflare + Caddy) ===================="
+          printf 'kelionai.app/api/version : '; curl -s -m 10 https://kelionai.app/api/version; echo
+          printf 'kelionai.app/health      : '; curl -s -o /dev/null -w '%{http_code}\n' -m 10 https://kelionai.app/health
+          echo
+          echo "==================== ZOMBI (nimic din astea nu are voie să fie viu) ===================="
+          pgrep -af 'kelion-(repairer|builder|bridge|paznic|deployer)' || echo "(niciun proces-zombie)"
+          systemctl list-units --all 'kelion-*' --no-legend 2>/dev/null | head -15
+          systemctl list-timers 'kelion-*' --no-legend 2>/dev/null | head -10
+          echo
+          echo "==================== CRON ===================="
+          crontab -l 2>/dev/null || echo "(gol)"
+          echo
+          echo "==================== POSTGRES ===================="
+          systemctl is-active postgresql 2>/dev/null || echo "unitatea postgresql nu răspunde"
+          echo
+          echo "==================== RESURSE ===================="
+          uptime
+          df -h / | tail -1
+          free -h | head -2
+          EOS

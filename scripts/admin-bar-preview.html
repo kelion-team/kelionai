@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Bar — Language Selection Options Preview</title>
+  <style>
+    :root {
+      --bg-base: #0a0e17;
+      --bg-card: rgba(15, 23, 42, 0.95);
+      --bg-panel: #111827;
+      --bg-item-hover: rgba(56, 189, 248, 0.15);
+      --border-color: rgba(56, 189, 248, 0.2);
+      --text-main: #f8fafc;
+      --text-dim: #94a3b8;
+      --accent: #38bdf8;
+      --accent-active: #0ea5e9;
+      --success: #10b981;
+      --warning: #f59e0b;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg-base);
+      color: var(--text-main);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      min-height: 100vh;
+    }
+    .preview-container {
+      width: 100%;
+      max-width: 1100px;
+      background: #020617;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-color);
+    }
+    /* Top Admin Bar */
+    .admin-bar {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      position: relative;
+      z-index: 50;
+    }
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-logo {
+      font-weight: 800;
+      font-size: 16px;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--success);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--success);
+    }
+    .badge {
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid var(--border-color);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+    }
+    .center-section {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 13px;
+    }
+    .metric {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-dim);
+    }
+    .metric strong {
+      color: var(--text-main);
+    }
+    .right-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: relative;
+    }
+    .lang-dropdown-trigger {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--border-color);
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+    .lang-dropdown-trigger svg {
+      width: 14px;
+      height: 14px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+    }
+    /* Expanded Language Options Dropdown */
+    .lang-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      width: 320px;
+      max-height: 480px;
+      overflow-y: auto;
+      background: #0f172a;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.9), 0 0 16px rgba(56, 189, 248, 0.2);
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 4px;
+      z-index: 100;
+    }
+    .dropdown-header {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      padding: 6px 8px 4px 8px;
+      font-weight: 700;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 4px;
+    }
+    .lang-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: all 0.15s ease;
+      cursor: pointer;
+    }
+    .lang-option:hover {
+      background: var(--bg-item-hover);
+      color: var(--text-main);
+    }
+    .lang-option.active {
+      background: rgba(56, 189, 248, 0.2);
+      color: var(--accent);
+      font-weight: 600;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    .lang-code {
+      font-size: 10px;
+      color: #64748b;
+      font-family: monospace;
+      text-transform: uppercase;
+    }
+    .lang-option.active .lang-code {
+      color: var(--accent);
+    }
+    /* Stage view mock */
+    .stage-canvas {
+      height: 380px;
+      background: radial-gradient(circle at center, #1e293b 0%, #090d16 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      padding: 20px;
+      color: #64748b;
+      text-align: center;
+    }
+    .stage-hint {
+      font-size: 14px;
+      margin-top: 12px;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-container">
+    <!-- ADMIN BAR -->
+    <header class="admin-bar">
+      <div class="brand-section">
+        <span class="status-dot"></span>
+        <span class="brand-logo">KELION ADMIN</span>
+        <span class="badge">PROD LIVE</span>
+      </div>
+
+      <div class="center-section">
+        <div class="metric">RAM: <strong>1.4 / 7.8 GB</strong></div>
+        <div class="metric">CPU: <strong>4.2%</strong></div>
+        <div class="metric">Brain: <strong>Online</strong></div>
+        <div class="metric">Porte: <strong style="color: var(--success);">7/7 OK</strong></div>
+      </div>
+
+      <div class="right-section">
+        <!-- Trigger button -->
+        <div class="lang-dropdown-trigger" id="langTrigger">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span>Română (ro-RO)</span>
+          <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+
+        <!-- OPEN Language Selector Dropdown -->
+        <div class="lang-dropdown-menu" id="langMenu">
+          <div class="dropdown-header">Opțiuni Schimbare Limbă</div>
+          <div class="lang-option active">
+            <span>Română</span>
+            <span class="lang-code">ro-RO</span>
+          </div>
+          <div class="lang-option">
+            <span>English</span>
+            <span class="lang-code">en-US</span>
+          </div>
+          <div class="lang-option">
+            <span>Français</span>
+            <span class="lang-code">fr-FR</span>
+          </div>
+          <div class="lang-option">
+            <span>Deutsch</span>
+            <span class="lang-code">de-DE</span>
+          </div>
+          <div class="lang-option">
+            <span>Español</span>
+            <span class="lang-code">es-ES</span>
+          </div>
+          <div class="lang-option">
+            <span>Italiano</span>
+            <span class="lang-code">it-IT</span>
+          </div>
+          <div class="lang-option">
+            <span>Português</span>
+            <span class="lang-code">pt-BR</span>
+          </div>
+          <div class="lang-option">
+            <span>Nederlands</span>
+            <span class="lang-code">nl-NL</span>
+          </div>
+          <div class="lang-option">
+            <span>Polski</span>
+            <span class="lang-code">pl-PL</span>
+          </div>
+          <div class="lang-option">
+            <span>Русский</span>
+            <span class="lang-code">ru-RU</span>
+          </div>
+          <div class="lang-option">
+            <span>Українська</span>
+            <span class="lang-code">uk-UA</span>
+          </div>
+          <div class="lang-option">
+            <span>Türkçe</span>
+            <span class="lang-code">tr-TR</span>
+          </div>
+          <div class="lang-option">
+            <span>العربية</span>
+            <span class="lang-code">ar-XA</span>
+          </div>
+          <div class="lang-option">
+            <span>हिन्दी</span>
+            <span class="lang-code">hi-IN</span>
+          </div>
+          <div class="lang-option">
+            <span>日本語</span>
+            <span class="lang-code">ja-JP</span>
+          </div>
+          <div class="lang-option">
+            <span>한국어</span>
+            <span class="lang-code">ko-KR</span>
+          </div>
+          <div class="lang-option">
+            <span>中文</span>
+            <span class="lang-code">zh-CN</span>
+          </div>
+          <div class="lang-option">
+            <span>Svenska</span>
+            <span class="lang-code">sv-SE</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Stage content underneath -->
+    <div class="stage-canvas">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+      </svg>
+      <div class="stage-hint">Monitor Admin Live — Meniul de selecție a limbii este deschis și focalizat pe bara de admin. Opțiunile afișate acoperă limbile suportate în aplicație (Română, English, Français, Deutsch, Español, Italiano, Português, Nederlands, Polski, Русский, Українська, Türkçe, العربية, हिन्दी, 日本語, 한국어, 中文, Svenska).</div>
+    </div>
+  </div>
+</body>
+</html>

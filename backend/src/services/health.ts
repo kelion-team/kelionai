@@ -1,0 +1,377 @@
+import fs from 'node:fs/promises'
+import { getPool, dbEnabled, listBuildJobs, countClientErrorsLastHour } from '../db.js'
+import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from './resurse.js'
+import { geminiLive } from './geminiDirect.js'
+import { stareDispecer } from './dispecer.js'
+import { probaBrowserulMainilor } from './browser.js'
+import { probaAider } from './aiderProba.js'
+import { probaOllama } from './ollamaProba.js'
+
+// ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
+// and be able to tell the admin through chat that he has problems x,y,z and
+// ask whether to repair them") ─────────────────────────────────────────────
+// DETERMINISTIC aggregation of all the health signals we already have:
+// publishing sync (live vs master), recent red runs, failed build orders,
+// the client-error wave, the disk, the DB, the brain's pouch. Kelion calls
+// it through the system_health tool and RELAYS the list to the admin + ASKS
+// whether to repair — he repairs nothing on his own initiative.
+
+interface Problem {
+  id: string
+  grav: 'critic' | 'mediu' | 'minor'
+  desc: string
+  reparabil: string
+}
+
+const GH = 'https://api.github.com/repos/kelion-team/kelionai'
+function ghHeaders(): Record<string, string> {
+  return {
+    Authorization: `Bearer ${(process.env.GITHUB_TOKEN ?? '').trim()}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  }
+}
+
+export async function systemHealth(): Promise<string> {
+  const problems: Problem[] = []
+  const info: Record<string, unknown> = {}
+
+  // 1. Publishing: live == the tip of master? (the house's central truth)
+  const liveSha = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
+  info.live = liveSha || 'necunoscut'
+  try {
+    if ((process.env.GITHUB_TOKEN ?? '').trim()) {
+      const r = await fetch(`${GH}/commits/master`, {
+        headers: { ...ghHeaders(), Accept: 'application/vnd.github.sha' },
+        signal: AbortSignal.timeout(10_000),
+      })
+      const master = (await r.text()).slice(0, 7)
+      info.master = master
+      if (/^[0-9a-f]{7}$/.test(master) && liveSha && master !== liveSha)
+        problems.push({
+          id: 'live_in_urma',
+          grav: 'critic',
+          desc: `Live rulează ${liveSha}, dar master e ${master} — publicarea e în urmă.`,
+          reparabil: 'auto-publicarea o repară singură în ~3 min; dacă persistă, run_runbook publish-master',
+        })
+    }
+  } catch {
+    /* GitHub unreachable — we don't invent problems */
+  }
+
+  // 2. The CURRENT red runs (Adrian, 27 Jul: "why doesn't the healing
+  // system see, repair?" — the audit was showing him HISTORIC reds: old
+  // one-off runs, already superseded by green runs of the same workflow;
+  // those don't get "repaired", they are history). A workflow is a PROBLEM
+  // only if its LATEST completed run is red — i.e. it is broken NOW.
+  try {
+    if ((process.env.GITHUB_TOKEN ?? '').trim()) {
+      const [rFail, rAll] = await Promise.all([
+        fetch(`${GH}/actions/runs?status=failure&per_page=15`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
+        fetch(`${GH}/actions/runs?per_page=40`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
+      ])
+      const fail = (await rFail.json()) as { workflow_runs?: { name?: string; run_number?: number; created_at?: string; updated_at?: string }[] }
+      const all = (await rAll.json()) as { workflow_runs?: { name?: string; status?: string; conclusion?: string | null; created_at?: string }[] }
+      // The LATEST COMPLETED run of each workflow (the list comes descending).
+      const latest = new Map<string, string>()
+      for (const w of all.workflow_runs ?? []) {
+        if (w.status !== 'completed' || !w.name) continue
+        if (!latest.has(w.name)) latest.set(w.name, w.conclusion ?? '')
+      }
+      const cutoff = Date.now() - 48 * 3600_000
+      const red = (fail.workflow_runs ?? []).filter(
+        (w) => Date.parse(w.created_at ?? '') > cutoff && latest.get(w.name ?? '') === 'failure',
+      )
+      const historic = (fail.workflow_runs ?? []).filter(
+        (w) => Date.parse(w.created_at ?? '') > cutoff && latest.get(w.name ?? '') !== 'failure',
+      ).length
+      info.rosiiIstorice = historic // visible in the audit as history, not as problems
+      if (red.length) {
+        // CAUZA, MĂSURATĂ din durata rulărilor, nu ghicită (8 aug: deploy +
+        // sentinel roșii din 6 aug; fiecare job murea în 1-3s, 0 ms facturate,
+        // runner_id=0, fără nicio schimbare în workflows — blocaj de CONT
+        // GitHub, nu de cod). Semnătura: un job care nici nu pornește se
+        // „termină" în câteva secunde; unul real durează minute.
+        const toateInstant = red.every((w) => {
+          const t0 = Date.parse(w.created_at ?? '')
+          const t1 = Date.parse(w.updated_at ?? '')
+          return Number.isFinite(t0) && Number.isFinite(t1) && t1 - t0 <= 20_000
+        })
+        problems.push({
+          id: 'rulari_rosii',
+          grav: 'mediu',
+          desc:
+            `${red.length} workflow-uri stricate ACUM (ultima rulare roșie): ${red.map((w) => `${w.name} #${w.run_number}`).join(', ')}` +
+            (toateInstant ? ' — TOATE mor în ≤20s fără să pornească pe vreun runner (măsurat din durata rulărilor): blocaj de cont GitHub (minute/facturare Actions), nu de cod' : ''),
+          reparabil: toateInstant
+            ? 'nu se repară din cod: ownerul → github.com/organizations/kelion-team/settings/billing (minute Actions / limită / plată); publicarea pe site NU depinde de Actions (veghea VPS publică singură)'
+            : 'vindecătorul rerulează deploy-urile singur; pe celelalte investighează cu runbook_log/server_logs',
+        })
+      }
+    }
+  } catch {
+    /* same */
+  }
+
+  // 3. Failed build orders (the constructor).
+  try {
+    // null = coada nu s-a putut citi (semnalat separat de db_moarta, mai jos).
+    // Fereastră SCURTĂ (Adrian, 4 aug: „ce pică și nu mai e de actualitate să
+    // nu mai rămână"): doar eșecurile din ultimele 3h — cele vechi, deja
+    // parcate de autonomie, se sting singure din audit, nu se adună toată
+    // noaptea.
+    const jobs = (await listBuildJobs(10)) ?? []
+    const failed = jobs.filter((j) => j.status === 'failed' && Date.parse(j.updatedAt) > Date.now() - 3 * 3600_000)
+    if (failed.length)
+      problems.push({
+        id: 'constructor_esuat',
+        grav: 'mediu',
+        desc: `${failed.length} ordine de construcție eșuate: ${failed.map((j) => `#${j.id}`).join(', ')}`,
+        reparabil: 'vezi constructor_status + jurnalul din Admin→Constructor; repune ordinul reformulat cu build_software',
+      })
+  } catch {
+    /* dead DB — caught below */
+  }
+
+  // 4. The database + the client-error wave.
+  try {
+    if (dbEnabled()) {
+      await getPool().query('SELECT 1')
+      // Simptomele [PERF] sunt EXCLUSE de helper (owner, 13 aug): nu sunt
+      // interfață ruptă, ci un semnal separat pe care creierul îl vede oricum în
+      // contextul chatului — aici numărăm doar erorile reale de UI.
+      const n = await countClientErrorsLastHour()
+      if (n > 20)
+        problems.push({
+          id: 'erori_client',
+          grav: 'mediu',
+          desc: `${n} erori de client în ultima oră — ceva e rupt în interfață pentru useri.`,
+          reparabil: 'citește-le cu db_query pe client_errors, găsește cauza în sursă și repar-o (repo_write sau build_software)',
+        })
+    } else {
+      problems.push({ id: 'db_neconfigurata', grav: 'critic', desc: 'Baza de date nu e configurată.', reparabil: 'verifică DATABASE_URL pe VPS' })
+    }
+  } catch {
+    problems.push({ id: 'db_moarta', grav: 'critic', desc: 'Baza de date NU răspunde (SELECT 1 a eșuat).', reparabil: 'run_runbook diagnostic; serviciul postgres pe VPS' })
+  }
+
+  // 5. The disk.
+  try {
+    const s = await fs.statfs('/')
+    const usedPct = 100 - Math.round((Number(s.bavail) / Number(s.blocks)) * 100)
+    info.disc = `${usedPct}%`
+    if (usedPct >= 90)
+      problems.push({ id: 'disc_plin', grav: 'critic', desc: `Discul e ${usedPct}% plin.`, reparabil: 'run_runbook curata-zombi sau docker system prune (cere acordul ownerului)' })
+  } catch {
+    /* statfs unavailable */
+  }
+
+  // 5b. The host's memory and load — see services/resurse.ts for why they
+  // didn't exist until today and why they matter more than the disk.
+  const res = await resurseGazda()
+  if (res) {
+    info.resurse = descrieResurse(res)
+    if (res.liberPct <= PRAG_MEMORIE_PCT)
+      problems.push({
+        id: 'memorie_putina',
+        grav: 'critic',
+        desc: `Memorie: ${res.liberGb.toFixed(1)} GB liberi din ${res.totalGb.toFixed(1)} (${res.liberPct}%). Sub pragul ăsta kernelul începe să omoare procese — aplicația e cea mai mare, deci prima victimă.`,
+        reparabil: 'run_runbook curata-zombi; docker system prune; sau oprește de pe VPS serviciile care nu sunt necesare',
+      })
+    if (res.incarcarePct >= PRAG_INCARCARE_PCT)
+      problems.push({
+        id: 'incarcare_mare',
+        grav: 'mediu',
+        desc: `Încărcare ${res.incarcarePct}% din ${res.procesoare} procesoare, susținut pe 15 min. Nu moare nimic, dar tot ce face casa devine încet — inclusiv chatul, care are țintă sub o secundă.`,
+        reparabil: 'vezi ce rulează (run_runbook diagnostic); oprește ce nu e necesar, sau mărește VPS-ul',
+      })
+  } else {
+    info.resurse = 'nu se pot măsura de aici'
+  }
+
+  // 6. The brain (Gemini direct — OpenRouter extirpat, 3 aug). Semnalul ONEST
+  // măsurabil: pingul live geminiLive() — verde = cheia Tier 2 servește (bani +
+  // merge), roșu = epuizat/cotă/stricat. Nu există un „sold" citibil la Google
+  // (verificat 3 aug), deci nu afișăm o cifră inventată.
+  try {
+    const g = await geminiLive()
+    info.creier = !g.ok ? 'necitibil' : g.serving ? 'Gemini servește (Tier 2 activ)' : `Gemini NU servește (${g.reason ?? 'necunoscut'})`
+    if (g.ok && !g.serving)
+      problems.push({
+        id: 'creier_sarac',
+        grav: 'critic',
+        desc: `Gemini (creierul unic) nu servește: ${g.reason ?? 'necunoscut'} — chatul se poate opri.`,
+        reparabil: 'doar ownerul poate alimenta/verifica cheia (aistudio.google.com → Billing)',
+      })
+  } catch {
+    /* ping unavailable */
+  }
+
+  // 7. THE ADMIN'S BUTTONS, WATCHED (Adrian, Aug 1: „Kelion must monitor all
+  // the buttons — resolve their tasks, remove the dead ones"). Every button in
+  // the Admin panel calls a read endpoint; a DEAD button = its endpoint 404s,
+  // 500s or hangs. Probed from inside, without a session: alive endpoints
+  // answer 401 (no auth) — 404/500/timeout means the button lies to the admin.
+  try {
+    // FALLBACK ALINIAT LA SERVER (5 aug, auditul de onestitate): serverul
+    // ascultă pe `PORT ?? 8080` (config.ts:57). Aici era `?? 3000` — dacă PORT
+    // nu e setat, sonda lovea portul greșit și RAPORTA toate butoanele admin ca
+    // „nu răspunde" (roșu FALS — o citire eșuată prezentată ca fapt, regula #1).
+    const port = Number(process.env.PORT ?? 8080)
+    const BUTOANE: [string, string][] = [
+      ['Finanțe', '/api/admin/finance'],
+      ['Circuitul banilor', '/api/admin/money-circuit'],
+      ['Dovezile autonomiei', '/api/admin/autonomie/dovezi'],
+      ['Magazine', '/api/admin/stores'],
+      ['Vizitatori', '/api/admin/demos'],
+      ['Contacte', '/api/admin/leads'],
+      ['Chaturi vizitatori', '/api/admin/visitor-chats'],
+      ['Inbox secretar', '/api/admin/inbound'],
+      ['Cutia reală', '/api/admin/mailbox-live'],
+      ['Mesaje contact', '/api/admin/contact-messages'],
+      ['Utilizatori', '/api/admin/activity'],
+      ['Istoric', '/api/admin/users'],
+      ['Chei server', '/api/admin/env-check'],
+      ['Tokenuri live', '/api/admin/token-checks'],
+      ['Constructor', '/api/admin/constructor'],
+      ['Recuperare', '/api/admin/backups'],
+      ['Lacăt admin', '/api/admin/unlock/status'],
+      ['Amprente vocale', '/api/voiceprint/list'],
+    ]
+    const moarte: string[] = []
+    await Promise.all(
+      BUTOANE.map(async ([nume, path]) => {
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(8_000) })
+          if (r.status === 404 || r.status >= 500) moarte.push(`${nume} (${r.status})`)
+        } catch {
+          moarte.push(`${nume} (nu răspunde)`)
+        }
+      }),
+    )
+    info.butoane = `${BUTOANE.length - moarte.length}/${BUTOANE.length} vii`
+    if (moarte.length)
+      problems.push({
+        id: 'buton_mort',
+        grav: 'mediu',
+        desc: `${moarte.length} butoane din Admin au endpointul MORT: ${moarte.join(', ')}.`,
+        reparabil: 'verifică ruta în backend (repo_read); repar-o sau șterge butonul din AdminPanel (cere acordul ownerului)',
+      })
+  } catch {
+    /* the probe itself failed — we don't invent problems */
+  }
+
+  // 8. THE VOICEPRINTS SURVIVE EVERY UPGRADE (Adrian, Aug 1: "la fiecare
+  // upgrade să țină minte timbrul și vocea, să nu se mai piardă"). The prints
+  // live in Postgres, which no deploy touches — so a MISSING admin print here
+  // means it was truly lost (deleted by hand or DB rebuilt), and the voice
+  // will no longer recognise him until he re-enrols.
+  try {
+    if (dbEnabled()) {
+      const r = await getPool().query<{ n: string; admin_n: string }>(
+        `SELECT count(*) AS n,
+                count(*) FILTER (WHERE is_admin) AS admin_n
+         FROM voiceprints`,
+      )
+      const n = Number(r.rows[0]?.n ?? 0)
+      const adminN = Number(r.rows[0]?.admin_n ?? 0)
+      const g = await getPool().query<{ n: string }>('SELECT count(*) AS n FROM voice_guests WHERE approved').catch(() => null)
+      info.amprente = `${n} amprente (${adminN} admin) + ${Number(g?.rows[0]?.n ?? 0)} oaspeți aprobați`
+      if (adminN === 0)
+        problems.push({
+          id: 'amprenta_admin_lipsa',
+          grav: 'mediu',
+          desc: 'Amprenta vocală a adminului LIPSEȘTE din baza de date — vocea nu-l mai recunoaște și lacătul vocal nu se mai deschide.',
+          reparabil: 'ownerul dă Ctrl+F5 (să ia ultimul bundle) și îi vorbește lui Kelion — amprenta se re-înrolează singură la prima frază',
+        })
+    }
+  } catch {
+    /* the prints table answered nothing — the DB check above already reports */
+  }
+
+  // 9. THE DISPATCHER (Adrian, Aug 1: one brain, many users). Telemetry always
+  // visible. (Punga de rezervă pe modele plătite a fost EXTIRPATĂ odată cu
+  // OpenRouter, 3 aug: nu mai există niciun fallback plătit — creierul e
+  // Gemini-only, pe cheia ownerului.)
+  try {
+    info.dispecer = stareDispecer()
+  } catch {
+    /* telemetry unreadable — we don't invent problems */
+  }
+
+  // 10. (URECHILE CHIRP — MONITORIZARE SCOASĂ, 5 aug: STT-ul streaming a fost
+  // eliminat total odată cu voce unificată. Nu mai există ureche Chirp de
+  // supravegheat — creierul unic aude audio-ul brut și decide singur.)
+
+  // 11. BROWSERUL MÂINILOR — PROBAT CU LANSARE, NU DECLARAT (owner, 15 aug:
+  // „browserul acesta nu funcționează" + „ce-ar fi să testezi tot ce faci și
+  // lași funcțional"). Instalarea din deploy 4b putea „reuși" cu un browser
+  // care NU pornește (biblioteci de sistem lipsă) — și nimeni nu-l proba până
+  // la primul om care se lovea. Proba lansează Chromium real (cache 10 min,
+  // ca health-ul să rămână ieftin); MORT → intră la probleme, cu eroarea lui.
+  try {
+    const b = await probaBrowserulMainilor()
+    info.browserMaini = b.ok ? 'VIU (lansare probată)' : `MORT: ${b.motiv}`
+    if (!b.ok) {
+      problems.push({
+        id: 'browser-maini-mort',
+        grav: 'mediu',
+        desc: `browserul mâinilor (Chromium) nu pornește: ${b.motiv} — browser_open și pașii pe mâini cu browser pică`,
+        reparabil: 'pe gazdă: cauza în /root/kelion/browser-install.log; de regulă lipsesc bibliotecile de sistem → o re-publicare rulează 4b cu --with-deps',
+      })
+    }
+  } catch {
+    /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
+  }
+
+  // 12. AIDER — MOTORUL CONSTRUCTORULUI, PROBAT CU `aider --version` (owner, 16
+  // aug: „doar denumit nu e suficient trebuie verificat real ca e aider").
+  // Constructorul rulează Aider ca motor unic; dacă binarul lipsește pe gazdă,
+  // ordinele nu se construiesc — becul o spune MĂSURAT, cu versiunea reală.
+  try {
+    const a = await probaAider()
+    info.aiderConstructor = a.ok ? `VIU (${a.versiune})` : `LIPSĂ: ${a.motiv}`
+    if (!a.ok) {
+      problems.push({
+        id: 'aider-constructor-lipsa',
+        grav: 'critic',
+        desc: `motorul constructorului (Aider) nu răspunde la 'aider --version': ${a.motiv} — ordinele de build nu se pot construi`,
+        reparabil: 'nu e nevoie de mâna omului: constructorul instalează SINGUR Aider pe gazdă la următoarea rulare (asiguraCreierulLocal → deploy/setup-ollama.sh, care pune și Aider)',
+      })
+    }
+  } catch {
+    /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
+  }
+
+  // 13. OLLAMA — CREIERUL LOCAL al constructorului, probat cu `ollama list` pe VPS
+  // (owner, 16 aug: „aider pe un model LOCAL pe VPS (Ollama)… verifică dacă e pus
+  // pe server"). Aider gândește pe modelul local; dacă Ollama lipsește sau n-are
+  // un model, Aider n-are creier local → becul o spune MĂSURAT, cu modelele reale.
+  try {
+    const o = await probaOllama()
+    info.ollamaLocal = o.ok ? `VIU (modele: ${o.modele.join(', ') || 'niciun model instalat'})` : `LIPSĂ: ${o.motiv}`
+    if (!o.ok || o.modele.length === 0) {
+      problems.push({
+        id: 'ollama-local-lipsa',
+        grav: o.ok ? 'mediu' : 'critic',
+        desc: o.ok
+          ? 'Ollama rulează pe VPS dar N-ARE niciun model — Aider n-are creier local de cod'
+          : `creierul local (Ollama) nu răspunde la 'ollama list' pe VPS: ${o.motiv} — Aider n-are pe ce gândi local`,
+        reparabil: 'nu e nevoie de mâna omului: constructorul își instalează SINGUR creierul local la următoarea rulare (asiguraCreierulLocal → deploy/setup-ollama.sh). Dacă tot nu apare, verifică pe VPS rețeaua/discul/root (RAM ≈6GB pentru modelul de cod)',
+      })
+    }
+  } catch {
+    /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
+  }
+
+  return JSON.stringify({
+    ok: problems.length === 0,
+    verificatLa: new Date().toISOString(),
+    info,
+    probleme: problems,
+    instructiune:
+      problems.length === 0
+        ? 'Totul e sănătos — spune-i ownerului doar dacă a întrebat.'
+        : 'Enumeră-i ownerului problemele PE SCURT (x, y, z) și ÎNTREABĂ-L dacă să le repari. NU repara nimic fără acordul lui explicit.',
+  })
+}

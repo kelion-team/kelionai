@@ -1,13 +1,52 @@
+/* THE LIGHT THEME (Adrian, Aug 2: „vreau să te gândești la un fundal mai
+luminos"). The whole app was near-black; the default is now a soft, pale
+blue-gray that rests the eyes — NOT orbital white. Everything themeable reads
+these variables, so the dark identity is kept intact one attribute away:
+`data-theme="dark"` on <html> restores the original palette exactly. */
 :root {
-  --bg: #0b0d12;
-  --panel: rgba(20, 24, 33, 0.72);
-  --text: #e7e9ee;
-  --muted: #9aa3b2;
-  --accent: #6ea8fe;
-  --border: rgba(255, 255, 255, 0.1);
+  --bg: #e9edf4;
+  --bg-soft: #f5f7fb; /* gradient centre — the lightest tone */
+  --bg-deep: #dbe2ec; /* gradient edge — the deepest tone, still light */
+  --panel: rgba(255, 255, 255, 0.75);
+  --panel-solid: #ffffff; /* opaque card surface (admin panel, wallet menu) */
+  --panel-2: #f0f3f8; /* raised card on a solid panel (fin-card, wallet rows) */
+  --panel-3: #e4e9f1; /* deepest inset surface (wallet dropdown base) */
+  --text: #1b2331;
+  --muted: #5a6577;
+  --accent: #2f66d0; /* deeper than the dark theme's — contrast on light */
+  --on-accent: #ffffff; /* text/icons sitting ON the accent colour */
+  --border: rgba(20, 30, 50, 0.14);
+  --line: #d5dce8; /* hairlines inside solid panels */
+  --ok: #1d7a46; /* status green readable on white */
+  --warn: #9a6a12; /* amber readable on white */
+  --danger: #c22f2f; /* status red readable on white */
+  color-scheme: light;
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+}
+
+/* THE ORIGINAL DARK IDENTITY, PRESERVED — no toggle mechanism exists in the
+app (Aug 2), so this block is the way back: one attribute, no code forks. */
+[data-theme='dark'] {
+  --bg: #0b0d12;
+  --bg-soft: #141a28;
+  --bg-deep: #0b0d12;
+  --panel: rgba(20, 24, 33, 0.72);
+  --panel-solid: #11141b;
+  --panel-2: #12151c;
+  --panel-3: #0e1117;
+  --text: #e7e9ee;
+  --muted: #9aa3b2;
+  --accent: #6ea8fe;
+  --on-accent: #0b0d12;
+  --border: color-mix(in srgb, var(--text) 10%, transparent);
+  --line: #2a2f3a; /* the dark theme's original hairline (a self-reference here
+                      would be a cyclic variable — invalid, so the real value) */
+  --ok: #57c98a;
+  --warn: #ffd27a;
+  --danger: #ff7a7a;
+  color-scheme: dark;
 }
 
 * {
@@ -34,7 +73,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: radial-gradient(circle at 50% 40%, #131722, #0b0d12 70%);
+  background: radial-gradient(circle at 50% 40%, var(--bg-soft), var(--bg-deep) 70%);
 }
 .boot-dot {
   width: 10px;
@@ -52,7 +91,8 @@ body {
   font-size: 40px;
   font-weight: 600;
   letter-spacing: -1px;
-  background: linear-gradient(90deg, #8fb6ff, #c9d8ff);
+  /* Brand gradient readable on BOTH themes: starts at the accent, ends lighter. */
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #ffffff));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -64,7 +104,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 50% 35%, #141a28, #0b0d12 70%);
+  background: radial-gradient(circle at 50% 35%, var(--bg-soft), var(--bg-deep) 70%);
 }
 .login-card {
   width: min(92vw, 380px);
@@ -75,7 +115,7 @@ body {
   border-radius: 20px;
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 20px 60px rgba(20, 30, 50, 0.22);
 }
 .tagline {
   color: var(--muted);
@@ -103,7 +143,7 @@ body {
   transform: translateY(-1px);
 }
 .error {
-  color: #ff9a9a;
+  color: var(--danger);
   background: rgba(255, 80, 80, 0.1);
   border: 1px solid rgba(255, 80, 80, 0.3);
   border-radius: 8px;
@@ -117,12 +157,22 @@ body {
   margin-top: 18px;
 }
 
+.dynamic-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  background-repeat: no-repeat;
+}
+
 /* ---------- landing (public start page) ---------- */
 .landing {
   height: 100svh;
   display: grid;
   grid-template-columns: 1.1fr 1fr;
-  background: radial-gradient(circle at 30% 30%, #141a28, #0b0d12 70%);
+  background: radial-gradient(circle at 30% 30%, var(--bg-soft), var(--bg-deep) 70%);
   overflow: hidden;
 }
 .landing-hero {
@@ -138,7 +188,7 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent 55%, rgba(11, 13, 18, 0.85) 100%);
+  background: linear-gradient(90deg, transparent 55%, var(--bg-deep) 100%);
 }
 /* VISIBLE loading state over the 3D avatar (landing hero + in-app stage) so the
    area is NEVER a dead black screen while the ~9MB GLB downloads — otherwise a
@@ -154,18 +204,18 @@ body {
   justify-content: center;
   gap: 14px;
   pointer-events: none;
-  background: radial-gradient(circle at 50% 40%, #141a28, #0b0d12 72%);
+  background: radial-gradient(circle at 50% 40%, var(--bg-soft), var(--bg-deep) 72%);
 }
 .avatar-loading-spinner {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  border: 3px solid rgba(110, 168, 254, 0.22);
-  border-top-color: #6ea8fe;
+  border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
   animation: avatar-spin 0.9s linear infinite;
 }
 .avatar-loading-label {
-  color: #cfe0ff;
+  color: var(--text);
   font-size: 14px;
   letter-spacing: 0.4px;
   font-weight: 600;
@@ -197,11 +247,11 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #cfe0ff;
+  color: var(--accent);
   font-size: 13px;
   padding: 8px 12px;
-  border: 1px solid rgba(110, 168, 254, 0.35);
-  background: rgba(110, 168, 254, 0.1);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   border-radius: 10px;
   margin: 0 0 22px;
 }
@@ -243,7 +293,7 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: rgba(110, 168, 254, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .landing-manual li::after {
   content: '';
@@ -252,7 +302,7 @@ body {
   top: 4px;
   width: 5px;
   height: 8px;
-  border: solid #8fb6ff;
+  border: solid var(--accent);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
@@ -283,14 +333,14 @@ body {
   border-radius: 12px;
   font-size: 16px;
   font-weight: 600;
-  color: #0b0d12;
-  background: linear-gradient(90deg, #8fb6ff, #6ea8fe);
+  color: var(--on-accent);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 82%, #ffffff), var(--accent));
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
 }
 .cta-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 10px 30px rgba(110, 168, 254, 0.4);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .cta-primary:disabled {
   opacity: 0.6;
@@ -301,87 +351,23 @@ body {
     grid-template-columns: 1fr;
     grid-template-rows: 42svh 1fr;
   }
+  /* PHONE FIX (Adrian, Jul 24: „on the phone I can't manage anything”): the hero
+  kept height:100svh and, being positioned, spilled OVER the panel below —
+  completely covering the sign-in and the buttons. On mobile the hero respects
+  its own row. */
+  .landing-hero {
+    height: 42svh;
+  }
   .landing-hero-fade {
-    background: linear-gradient(180deg, transparent 55%, rgba(11, 13, 18, 0.9) 100%);
+    background: linear-gradient(180deg, transparent 55%, var(--bg-deep) 100%);
   }
   .landing-panel {
+    /* Above any spill of the positioned hero — always visible. */
+    position: relative;
+    z-index: 2;
     padding: 4vh 8vw;
     align-items: flex-start;
   }
-}
-
-.landing-download {
-  margin-top: 20px;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.landing-download a {
-  display: inline-block;
-  padding: 9px 18px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  font-size: 14px;
-  text-decoration: none;
-  transition: border-color 0.15s, background 0.15s;
-}
-.landing-download a:hover {
-  border-color: var(--accent);
-  background: rgba(134, 59, 255, 0.08);
-}
-.install-btn {
-  padding: 9px 18px;
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  background: rgba(134, 59, 255, 0.14);
-  color: var(--text);
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.install-btn:hover {
-  background: rgba(134, 59, 255, 0.26);
-}
-.ios-steps {
-  margin-top: 10px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(134, 59, 255, 0.07);
-  font-size: 13.5px;
-  color: var(--text);
-}
-/* Auto-update notification bar — shown to installed users when a new version
-   ships. Sits above everything; a single tap upgrades. */
-.update-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 10px 16px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 14px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
-}
-.update-bar button {
-  padding: 6px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.update-bar button:hover {
-  background: rgba(255, 255, 255, 0.28);
 }
 
 .landing-qr {
@@ -394,9 +380,19 @@ body {
   margin-bottom: 8px;
 }
 .landing-qr-row {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
+  /* FOUR ON THE SAME ROW (Adrian, Jul 30). With `flex-wrap: wrap` and a fixed
+  width, Android dropped alone onto the second row and left three quarters of
+  the row empty. A grid with four equal columns: each code shrinks as much as
+  it needs to fit, instead of wrapping. On the phone (under 620px) it stays on
+  two rows. */
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.landing-qr-row img { width: 100%; height: auto; max-width: 150px; }
+@media (max-width: 620px) {
+  .landing-qr-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .landing-qr figure {
   margin: 0;
@@ -415,66 +411,56 @@ body {
   font-size: 11.5px;
   color: var(--muted);
 }
-/* Live execution log line (brain steps on the monitor). */
-.claude-log-line {
-  font-size: 13px;
-  line-height: 1.5;
-  color: #cdd3df;
-  padding: 1px 0;
-  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-}
-/* Gap sent-to-execution marker: stays visible until the admin cleans it. */
-.gap-sent {
-  font-size: 12px;
-  color: #4ade80;
-}
-/* Server-load readout (bottom-left): small and discreet so it never collides
-   with the composer — real percentages, refreshed every minute. */
-.srv-load {
-  font-size: 11.5px;
-  opacity: 0.75;
-  max-width: 30vw;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* The hour on every chat message — Adrian's rule: the time lives IN the chat. */
-.bubble-time {
+/* The version number under each QR code — small, framed to the code's width,
+so it doesn't break the row; it changes by itself on any deploy (versionLabel). */
+.landing-qr .qr-version {
   display: block;
-  margin-top: 4px;
-  font-size: 10.5px;
+  max-width: 108px;
+  margin: 2px auto 0;
+  font-size: 9px;
+  line-height: 1.25;
   color: var(--muted);
+  opacity: 0.75;
+  word-break: break-word;
+}
+@keyframes brainBlinkGreen {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes brainBlinkRed {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+/* The TAIL of the FLOWING text: the RTL container clips the overflow on the
+LEFT (you always see the END of the reply), while the text inside is LTR-
+ISOLATED. `unicode-bidi: isolate` stops the bidi engine from reordering
+Romanian characters (â/ț/ș) or splitting words into individual letters. */
+.speech-tail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  direction: rtl;
   text-align: right;
 }
-/* Admin live work ticker — top bar, left of centre: what's being worked on
-   RIGHT NOW, always visible, never the admin's own message text. */
-.work-ticker {
-  margin-left: 14px;
-  padding: 4px 12px;
-  border: 1px solid rgba(255, 179, 71, 0.35);
-  border-radius: 999px;
-  font-size: 12px;
-  color: #ffb347;
-  max-width: 34vw;
+.speech-tail-text {
+  display: inline-block;
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* Monitor mode: Kelion's words in a slim black bar just above the composer,
-   full width, so they never cover what's on the monitor. */
-.monitor-speech {
-  margin: 0 auto 8px;
-  max-width: min(1100px, 94%);
-  background: rgba(0, 0, 0, 0.82);
-  color: #eef1f6;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 16px;
-  font-size: 15px;
-  line-height: 1.45;
-  max-height: 22vh;
-  overflow-y: auto;
-  backdrop-filter: blur(4px);
+  word-break: normal;
+  overflow-wrap: normal;
+  /* NEON FOSFORESCENT (Adrian, 3 aug: „scrisul e negru pe negru, nu se vede").
+     Verde neon + glow fosforescent, PLUS un contur închis, ca să se citească pe
+     ORICE fundal — bandă întunecată, avatar, temă deschisă sau închisă. */
+  color: #4dff88;
+  font-weight: 600;
+  text-shadow:
+    0 0 6px rgba(77, 255, 136, 0.8),
+    0 0 12px rgba(77, 255, 136, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 -1px 2px rgba(0, 0, 0, 0.85);
 }
 /* QR click-to-enlarge: the code opens big enough for any phone to scan. */
 .qr-btn {
@@ -518,7 +504,7 @@ body {
 }
 /* Admin "Magazine" tab: live store presence. */
 .store-live {
-  color: #4ade80;
+  color: var(--ok);
   text-decoration: none;
   font-weight: 600;
 }
@@ -526,48 +512,6 @@ body {
   text-decoration: underline;
 }
 .store-missing {
-  color: var(--muted);
-}
-/* Four-platform download block: desktop tiles (Windows, Linux) + mobile QRs. */
-.landing-download {
-  margin-top: 18px;
-}
-.dl-desktop {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
-}
-.dl-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-width: 128px;
-  padding: 12px 18px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.dl-tile:hover {
-  border-color: var(--accent);
-  background: rgba(134, 59, 255, 0.1);
-}
-.dl-ico {
-  font-size: 24px;
-  line-height: 1;
-}
-.dl-name {
-  margin-top: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-.dl-sub {
-  margin-top: 2px;
-  font-size: 11.5px;
   color: var(--muted);
 }
 
@@ -583,25 +527,6 @@ body {
 .landing-legal a:hover {
   color: var(--accent);
 }
-.landing-contact-btn {
-  position: absolute;
-  top: 20px;
-  right: 22px;
-  z-index: 20;
-  padding: 8px 18px;
-  font: inherit;
-  font-size: 14px;
-  color: #e9edf6;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.landing-contact-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.35);
-}
 .landing-contact-link {
   background: none;
   border: none;
@@ -616,17 +541,65 @@ body {
 }
 
 /* ---------- contact form (royal theme) ---------- */
-.contact-overlay {
+/* The Admin button lock (Jul 27): the secret-typing window. Above the
+admin-overlay (z 90 > 80) so nothing from the stage can cover it. */
+/* ── THE SHARED BACKDROP OF THE MODAL WINDOWS (unique, no duplicates) ──────
+The four overlays (lock, contact, admin, conversation) had EXACTLY the same
+copied rules: fixed full-screen positioning, centering, blur. Here, once;
+each keeps only what sets it apart (z-index, backdrop opacity, transition).
+If the modals' look changes, it changes in one place — not in four, with
+the risk of diverging. */
+.unlock-overlay,
+.contact-overlay,
+.admin-overlay,
+.convo-overlay {
   position: fixed;
   inset: 0;
-  z-index: 80;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
   background: rgba(0, 0, 0, 0.6);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
+}
+
+.unlock-overlay {
+  z-index: 90;
+  padding: 20px;
+}
+.unlock-card {
+  width: min(420px, 96vw);
+  background: #fffdf8;
+  color: #1a1a24;
+  border: 1px solid #e6e0d2;
+  border-radius: 8px;
+  padding: 22px 30px 26px;
+}
+.unlock-card h3 {
+  margin: 0 0 8px;
+}
+.unlock-card p {
+  margin: 0 0 14px;
+  font-size: 14px;
+  color: #55544e;
+}
+.unlock-card form {
+  display: flex;
+  gap: 8px;
+}
+.unlock-card input {
+  flex: 1;
+  min-width: 0;
+}
+.unlock-err {
+  margin: 10px 0 0;
+  color: #b3261e;
+  font-size: 14px;
+}
+
+.contact-overlay {
+  z-index: 80;
+  padding: 20px;
 }
 .contact-panel {
   width: min(560px, 96vw);
@@ -762,47 +735,66 @@ body {
   margin: 0 0 20px;
 }
 
-/* ---------- free-trial (demo) ---------- */
-.trial-pill {
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #cfe0ff;
-  background: rgba(110, 168, 254, 0.16);
-  border: 1px solid rgba(110, 168, 254, 0.4);
-  white-space: nowrap;
+/* ---------- customer settings (⚙) ---------- */
+.settings-panel {
+  width: min(520px, 96vw);
 }
-.demo-over {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(6, 8, 12, 0.82);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+.settings-sec {
+  padding: 16px 0;
+  border-top: 1px solid #ece6d8;
 }
-.demo-over-card {
-  width: min(92vw, 420px);
-  padding: 36px 32px;
-  text-align: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+.settings-sec:first-of-type {
+  border-top: none;
 }
-.demo-over-card h2 {
-  margin: 14px 0 10px;
-  font-size: 22px;
-  color: var(--text);
+.settings-sec h4 {
+  margin: 0 0 10px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+  color: #1c2740;
 }
-.demo-over-card p {
-  color: var(--muted);
+.settings-note {
+  font-size: 12.5px;
+  color: #6b6a64;
+  line-height: 1.55;
+  margin: 8px 0 0;
+}
+.settings-credits {
   font-size: 15px;
-  line-height: 1.5;
-  margin: 0 0 22px;
+  color: #1a1a24;
+}
+.settings-credits strong {
+  font-size: 22px;
+  color: #1c2740;
+}
+.settings-topup {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.settings-account {
+  font-size: 14px;
+}
+.settings-account-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.settings-danger {
+  color: #a32d2d;
+  border-color: rgba(163, 45, 45, 0.4);
+}
+.settings-confirm {
+  width: 100%;
+}
+.settings-confirm-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.settings-danger-solid {
+  background: #a32d2d;
 }
 
 /* ---------- stage ---------- */
@@ -841,14 +833,40 @@ body {
    top-left of the monitor, the status line sits bottom-left, the composer is
    bottom-center — so his corner is BOTTOM-RIGHT, clear of all of them. */
 .stage-canvas.pip {
-  transform: translate(calc(74vw - 14px), calc(74vh - 180px)) scale(0.26);
+  /* Adrian, Jul 11: „enlarge the avatar when it's bottom-right, to its initial
+  size, and make it fully visible” — the scale goes from 0.26 to 0.42 (full
+  silhouette, visibly larger), still anchored bottom-right, with the same
+  180px guard above the composer. The REAL position/scale comes as inline
+  style from Adrian's layout (double-click). */
+  transform: translate(calc(58vw - 14px), calc(58vh - 180px)) scale(0.42);
+  /* CLICKURILE TREC PRIN AVATAR (8 aug, Adrian: „×-ul de la tab nu e permanent
+     activ"). Stratul canvasului e un dreptunghi invizibil pe tot ecranul
+     (inset:0, z-index:1) DEASUPRA monitorului (z-index:0): unde cădea
+     dreptunghiul transformat al avatarului, clickurile pe taburi/× mureau —
+     „uneori merge, uneori nu", după așezare și mărimea ferestrei. În modul
+     monitor avatarul nu are nicio interacțiune proprie (aranjarea pe
+     dublu-click e scoasă din 24 iul, la ordinul lui), deci stratul devine
+     transparent la clickuri — monitorul primește TOT, întotdeauna. */
+  pointer-events: none;
+}
+/* CANVASUL three.js ÎNSUȘI (owner, 13 aug: „X nu merge NICĂIERI când Kelion
+   deschide o pagină pe ecran"). `pointer-events:none` pe containerul `.pip` NU se
+   moștenește: `<canvas>` e implicit `auto`, deci rămânea ȚINTĂ de click și înghițea
+   ×-ul/taburile de sub el — mai ales când avatarul e mare/centrat (tab „doc"), unde
+   dreptunghiul canvasului acoperă bara de taburi. Reparațiile din 8/10 aug au pus
+   `none` doar pe container, nu pe canvas — de-aia „nu merge" a supraviețuit. Acum
+   canvasul e și el transparent la click în modul monitor: clicul trece GARANTAT la
+   taburi și la ×. */
+.stage-canvas.pip > canvas,
+.stage-canvas.pip div > canvas {
+  pointer-events: none;
 }
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: #07090d;
+  background: var(--bg);
   opacity: 0;
   pointer-events: none;
   transition: opacity 500ms ease;
@@ -862,7 +880,32 @@ body {
   inset: 0;
   display: flex;
   flex-direction: column;
-  padding: 56px 16px 16px;
+  /* BOTTOM clearance for the fixed composer (Adrian, Jul 13: „I can't scroll” —
+  the writing box covered the report's text). ~150px = the composer's full
+  height; now the document ends ABOVE it and scrolls completely, nothing stays
+  hidden behind the box anymore. */
+  padding: 56px 16px 150px;
+}
+/* PAGINILE-APLICAȚIE (10 aug, ownerul: „mărește în partea de jos monitorul"):
+   tranzacțiile au layoutul LOR intern pe toată înălțimea — golul de 150px
+   lăsat pentru documente devenea o bandă moartă sub grafic. Compozitorul
+   plutește peste marginea de jos a paginii, nu peste un text de citit. */
+.workspace-inner.plin {
+  /* GRAFICUL SE TERMINĂ DEASUPRA CÂMPULUI DE CHAT (10 aug, ownerul: „butoanele
+     de trading nu merg din bară"). Măsurat cu Playwright: `.composer` (câmpul de
+     chat, fix jos, ~76px) acoperea BAZA graficului din iframe — clickul de acolo
+     cădea pe input, nu pe pagină. Composerul e ~76px de la marginea de jos;
+     lăsăm 96px liberi ca axa/baza graficului să nu mai stea sub el. */
+  padding-bottom: 96px;
+}
+/* ON THE PHONE the (fixed) top bar wraps onto 2-3 rows (badges + admin
+buttons) and reaches far below 56px — the panel's title and its buttons
+(A−/100%/A+) went UNDER the badges (Adrian's screenshot, Jul 26: „the
+crowded buttons”). The top clearance grows to match the wrapped bar. */
+@media (max-width: 640px) {
+  .workspace-inner {
+    padding-top: 195px;
+  }
 }
 .workspace-head {
   display: flex;
@@ -871,6 +914,12 @@ body {
   color: var(--text);
   font-size: 14px;
   padding: 4px 6px 10px;
+  /* BARA DE TABURI DEASUPRA AVATARULUI (owner, 13 aug: „X nu merge nicăieri").
+     Avatarul e la z-index:1; taburile stăteau la z-index:0 (în workspace-bg), deci
+     canvasul lui era deasupra lor. Cu position:relative + z-index peste avatar,
+     bara de taburi și ×-ul primesc clicul GARANTAT, orice s-ar suprapune. */
+  position: relative;
+  z-index: 3;
 }
 .workspace-tabs {
   display: flex;
@@ -914,14 +963,37 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 170px;
+  /* Buton real acum (nu span) — resetăm ca să arate identic. */
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
 }
 .ws-tab-x {
   opacity: 0.6;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1;
+  /* Buton real acum (nu span) — resetăm aspectul de buton. */
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  /* ZONĂ DE CLICK REALĂ (10 aug, ownerul: „×-ul din mod monitor nu merge").
+     Măsurat cu Playwright: ×-ul avea doar 9×11px — clickul REAL rata ținta
+     minusculă (deși cel programatic o nimerea, de-aia părea „reparat"). Padding
+     + margin negativ îi dau ~24px de apăsat, fără să miște layoutul tabului.
+     position:relative îl ține deasupra, ca să primească el clickul. */
+  padding: 6px;
+  margin: -6px -3px -6px 0;
+  border-radius: 999px;
+  position: relative;
 }
 .ws-tab-x:hover {
   opacity: 1;
+  background: var(--border);
 }
 .workspace-doc {
   flex: 1;
@@ -931,10 +1003,17 @@ body {
   border-radius: 12px;
   background: color-mix(in srgb, var(--text) 4%, transparent);
   overflow: hidden;
+  /* FULL PAGE (Adrian, Jul 27: „the monitor displays must be on the full
+  page”): no flex here — the playground's iframe (a flex:1 child in a non-flex
+  parent) fell to the default ~150px height: the HTML document appeared as a
+  strip on top, the rest of the page empty. */
+  display: flex;
+  flex-direction: column;
 }
 .doc-text {
   margin: 0;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 18px 20px;
   white-space: pre-wrap;
@@ -948,11 +1027,14 @@ body {
   position: absolute;
   top: 10px;
   right: 12px;
-  z-index: 2;
+  /* 21:47 („buton copy dar inactiv"): nimic nu are voie să stea peste ele —
+     z-index peste orice strat al documentului + clic garantat. */
+  z-index: 5;
+  pointer-events: auto;
   padding: 5px 12px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--bg, #11141b);
+  background: var(--panel-solid);
   color: var(--text);
   font-size: 12px;
   cursor: pointer;
@@ -963,11 +1045,318 @@ body {
 }
 .workspace-frame {
   flex: 1;
+  min-height: 0;
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: #fff;
 }
+/* MARKDOWN rendered on the monitor (Aug 2): comfortable reading styles over
+   the shared .doc-text surface — the raw-text era of .md files is over. */
+.md-view h1,
+.md-view h2,
+.md-view h3,
+.md-view h4 {
+  margin: 0.9em 0 0.4em;
+  line-height: 1.25;
+}
+.md-view h1:first-child,
+.md-view h2:first-child,
+.md-view h3:first-child {
+  margin-top: 0;
+}
+.md-view p {
+  margin: 0.45em 0;
+}
+.md-view ul {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.md-view code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.md-view .md-code {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+.md-view .md-code code {
+  background: none;
+  padding: 0;
+}
+.md-view a {
+  color: var(--accent);
+}
+.md-view hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.9em 0;
+}
+/* THE BUILDER'S PANEL on the monitor (Stage 4b) — Preluat→pas→Gata/Eșuat. */
+.build-surface {
+  overflow: auto;
+  padding: 18px 20px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.build-head {
+  font-weight: 600;
+  font-size: 1.05em;
+  margin-bottom: 14px;
+  opacity: 0.9;
+}
+.build-empty {
+  margin: 8px 0;
+  opacity: 0.6;
+}
+.build-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.build-item {
+  border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in srgb, var(--text) 25%, transparent);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.build-item.build-running { border-left-color: #4aa3ff; }
+.build-item.build-queued { border-left-color: #b0b6c0; }
+.build-item.build-done { border-left-color: #57c98a; }
+.build-item.build-failed { border-left-color: #ff7a7a; }
+/* BARA + FLUXUL PE ETAPE (Adrian, 12 aug: „tot fluxul, cu bari de la 0 la 100%,
+   până la deploy"). Clase NOI (fără coliziune, verificat) — bara vizuală + chip-
+   urile de etapă care se aprind din pct-ul REAL raportat de constructor. */
+.build-bar {
+  position: relative;
+  height: 14px;
+  margin: 8px 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  overflow: hidden;
+}
+.build-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4aa3ff, #57c98a);
+  transition: width 600ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.build-bar-num {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 0.7em;
+  font-weight: 700;
+  color: var(--text);
+}
+.build-faze {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.build-faza {
+  font-size: 0.72em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  opacity: 0.55;
+}
+.build-faza.ok {
+  color: var(--text);
+  border-color: color-mix(in srgb, #57c98a 55%, var(--border));
+  background: color-mix(in srgb, #57c98a 14%, transparent);
+  opacity: 1;
+}
+.build-faza.activ {
+  border-color: #4aa3ff;
+  background: color-mix(in srgb, #4aa3ff 22%, transparent);
+  font-weight: 700;
+  opacity: 1;
+}
+.build-fail {
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.86em;
+  color: #ff9a9a;
+  background: color-mix(in srgb, #ff7a7a 12%, transparent);
+  border: 1px solid color-mix(in srgb, #ff7a7a 40%, var(--border));
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+/* SUPRAFAȚA DE EXECUȚIE (owner, 14 aug): bara din 200 de punctulețe a câte
+   0,5%, grupate 8 × (5×5), + lista pașilor vii. Clase NOI (exec-*), fără
+   coliziune cu build-* — lecția din 30 iul: o clasă refolosită a rupt o pagină. */
+.exec-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+.exec-grup {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+}
+.exec-punct {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  transition: background 300ms ease;
+}
+.exec-punct.plin {
+  background: linear-gradient(135deg, #4aa3ff, #57c98a);
+}
+.exec-procent {
+  font-size: 0.85em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.exec-pasi {
+  list-style: none;
+  margin: 0;
+  /* Owner, 16 aug: „nu are scroll sa vad ce face" — lista de pași creștea și era
+     tăiată de `overflow:hidden` al panoului. Acum ia spațiul rămas (head + bară
+     stau fixe sus) și DERULEAZĂ; padding-right lasă loc barei de scroll. */
+  padding: 0 8px 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.exec-pas {
+  font-size: 0.85em;
+  color: var(--text);
+  opacity: 0.9;
+  overflow-wrap: break-word;
+}
+.exec-pas-ora {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  margin-right: 6px;
+}
+.exec-gata {
+  margin-top: 10px;
+  font-weight: 700;
+  color: #57c98a;
+}
+.build-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.build-badge {
+  flex: none;
+  font-size: 0.78em;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  opacity: 0.95;
+}
+.build-badge-running { background: color-mix(in srgb, #4aa3ff 22%, transparent); }
+.build-badge-queued { background: color-mix(in srgb, #b0b6c0 20%, transparent); }
+.build-badge-done { background: color-mix(in srgb, #57c98a 22%, transparent); }
+.build-badge-failed { background: color-mix(in srgb, #ff7a7a 22%, transparent); }
+.build-ci {
+  flex: none;
+  font-size: 0.72em;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.build-ci-ok { color: #57c98a; background: color-mix(in srgb, #57c98a 16%, transparent); }
+.build-ci-bad { color: #ff7a7a; background: color-mix(in srgb, #ff7a7a 16%, transparent); }
+.build-ci-wait { color: #d3a54a; background: color-mix(in srgb, #d3a54a 16%, transparent); }
+.build-order {
+  font-weight: 500;
+  word-break: break-word;
+  flex: 1 1 auto;
+}
+/* ×-ul de oprire per-ordin (owner, 13 aug: „nu are x de oprit individual").
+   Buton real, împins la dreapta rândului; roșu discret, evident la hover. */
+.build-stop {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: #ff7a7a;
+  font: 600 16px/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.build-stop:hover {
+  background: color-mix(in srgb, #ff7a7a 18%, transparent);
+  border-color: #ff7a7a;
+}
+.build-stop:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.build-stop:focus-visible {
+  outline: 2px solid #ff7a7a;
+  outline-offset: 2px;
+}
+.build-progress {
+  margin-top: 8px;
+  font-size: 0.92em;
+  opacity: 0.92;
+  word-break: break-word;
+}
+.build-progress-dim { opacity: 0.55; }
+.build-spin {
+  display: inline-block;
+  margin-right: 7px;
+  color: #4aa3ff;
+  font-size: 0.7em;
+  vertical-align: middle;
+  animation: build-pulse 1.1s ease-in-out infinite;
+}
+@keyframes build-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+.build-meta {
+  margin-top: 8px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+.build-pr {
+  color: #4aa3ff;
+  text-decoration: none;
+}
+.build-pr:hover { text-decoration: underline; }
 .topbar {
   position: fixed;
   top: 0;
@@ -984,7 +1373,7 @@ body {
 .topbar .brand {
   font-weight: 600;
   letter-spacing: -0.3px;
-  color: #cdd7ea;
+  color: var(--text);
 }
 .who {
   display: flex;
@@ -1033,91 +1422,18 @@ body {
   height: 26px;
   border-radius: 50%;
 }
-.cost-meter {
-  pointer-events: auto;
-  position: relative;
-}
-.cost-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 13px;
-  color: var(--muted);
-  cursor: pointer;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-}
-.cost-summary:hover {
-  border-color: var(--accent);
-}
-.cost-total {
-  color: #3ad29f;
-  font-weight: 700;
-}
-.cost-today {
-  color: var(--text);
-}
-.cost-caret {
-  opacity: 0.6;
-  font-size: 10px;
-}
-.cost-menu {
-  position: absolute;
-  top: 115%;
-  left: 0;
-  z-index: 45;
-  min-width: 240px;
-  background: #12151c;
-  border: 1px solid #2a2f3a;
-  border-radius: 12px;
-  padding: 8px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-}
-.cost-menu-head {
-  display: flex;
-  justify-content: space-between;
-  font-weight: 600;
-  color: var(--text);
-  padding: 4px 8px 8px;
-  border-bottom: 1px solid #2a2f3a;
-  margin-bottom: 6px;
-}
-.cost-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 5px 8px;
-  font-size: 13px;
-  color: var(--muted);
-}
-.cost-row span:last-child {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.cost-row.total {
-  border-top: 1px solid #2a2f3a;
-  margin-top: 6px;
-  font-weight: 600;
-}
-.cost-row.muted {
-  opacity: 0.6;
-}
 
 /* Admin chat history — grouped newest-first by day */
 .admin-day-header {
   position: sticky;
   top: 0;
-  background: var(--bg, #0b0d12);
+  background: var(--bg);
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
   text-transform: capitalize;
   padding: 8px 4px 6px;
-  border-bottom: 1px solid #2a2f3a;
+  border-bottom: 1px solid var(--line);
   margin: 10px 0 6px;
   z-index: 1;
 }
@@ -1135,7 +1451,9 @@ body {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   color: var(--muted);
   text-align: center;
   padding: 24px;
@@ -1148,7 +1466,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--accent);
-  border: 1px solid rgba(110, 168, 254, 0.4);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 6px;
   padding: 1px 6px;
 }
@@ -1162,7 +1480,7 @@ body {
   font-size: 13px;
 }
 .ghost:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .ghost.rec-on {
   color: #ff5d5d;
@@ -1192,11 +1510,11 @@ body {
   font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.3px;
-  background: linear-gradient(90deg, #8fb6ff, #c9d8ff);
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #ffffff));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 2px 14px rgba(110, 168, 254, 0.25);
+  text-shadow: 0 2px 14px color-mix(in srgb, var(--accent) 25%, transparent);
   pointer-events: none;
 }
 
@@ -1222,6 +1540,11 @@ body {
   gap: 8px;
   padding: 4px 2px;
   scrollbar-width: thin;
+  /* Adrian, Jul 11: „the up-down scroll arrow doesn't work”. The .chat parent
+  is pointer-events:none (so it doesn't cover the avatar), the bubbles
+  re-enable their clicks — but the SCROLLBAR belongs to this container, which
+  ignored the mouse: the bar's arrows/cursor were dead. Re-enabled here. */
+  pointer-events: auto;
 }
 .chat-hint {
   color: var(--muted);
@@ -1229,28 +1552,37 @@ body {
   text-align: center;
   opacity: 0.7;
 }
-.bubble {
+/* THE BUBBLES CAME BACK (Adrian, Aug 1: „the reply must reach the chat" — the
+sweeping band alone was not enough). The exchange shows as bubbles: you on the
+right, Kelion on the left, the reply streaming live, the log auto-scrolling.
+The band next to the composer keeps only the turn STATE (👤 heard / 🧠 thinking /
+K streaming); the full ticker remains only in monitor mode, where the log hides. */
+.chat-msg {
+  display: flex;
   pointer-events: auto;
+}
+.chat-msg.me {
+  justify-content: flex-end;
+}
+.chat-msg-text {
   max-width: 85%;
-  padding: 9px 13px;
-  border-radius: 14px;
+  padding: 8px 12px;
+  border-radius: 16px;
   font-size: 14px;
   line-height: 1.45;
   white-space: pre-wrap;
-  word-wrap: break-word;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  overflow-wrap: break-word;
 }
-.bubble.user {
-  align-self: flex-end;
-  background: rgba(110, 168, 254, 0.22);
-  border: 1px solid rgba(110, 168, 254, 0.35);
+.chat-msg.me .chat-msg-text {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--text);
   border-bottom-right-radius: 4px;
 }
-.bubble.assistant {
-  align-self: flex-start;
+.chat-msg.kelion .chat-msg-text {
   background: var(--panel);
   border: 1px solid var(--border);
+  color: var(--text);
   border-bottom-left-radius: 4px;
 }
 /* ChatGPT-style composer: rounded glass container, + on the side, a round
@@ -1274,6 +1606,13 @@ body {
 }
 .composer-input {
   flex: 1;
+  /* THE „send arrow isn't visible on the phone” BUG (Adrian, Jul 26,
+  screenshot): without min-width:0, the flex input does NOT shrink below the
+  placeholder's width („Scrie-i lui Kelion — începe cu „K”) → on a narrow
+  screen it pushed the row's last element out — the send button itself. The
+  flexbox rule: a flex-item has min-width:auto by default; here it must be
+  explicitly 0. */
+  min-width: 0;
   background: transparent;
   border: none;
   outline: none;
@@ -1281,14 +1620,37 @@ body {
   font-size: 15px;
   padding: 6px 4px;
 }
+/* The voice volume: the width lives HERE (not inline), so the phone gets a
+narrow variant — otherwise the slider + the mic ate the whole composer row. */
+.composer-volume {
+  width: 64px;
+  flex: 0 0 auto;
+  align-self: center;
+  accent-color: var(--accent, #7aa2ff);
+}
+/* ON THE PHONE the volume slider DISAPPEARS (Adrian, Jul 26: „hide the
+volume button on the phone and let the send arrow be there instead” + the
+screenshot with the crowded buttons) — only the mic and the arrow remain,
+with room to touch. The volume is adjusted from the phone or from the
+desktop (the value is persisted). */
+@media (max-width: 540px) {
+  .composer-volume {
+    display: none;
+  }
+}
 .composer-input::placeholder {
   color: var(--muted);
 }
-.composer-icon {
+/* ── THE COMPOSER'S ROUND BUTTONS (unique, no duplicates) ──────────────────
+The little microphone button and the send button share the SAME shape: a
+36px circle, no border, centered, that doesn't stretch into a band. The
+rules were copied; here, once. What sets them apart (color, sign size,
+weight) stays with each. This way, if the buttons' size changes, the band
+can no longer jump (the „composer bands jump 38-46px” bug came from
+divergent rules). */
+.composer-icon,
+.composer-send {
   border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 20px;
   line-height: 1;
   width: 36px;
   height: 36px;
@@ -1299,39 +1661,28 @@ body {
   align-items: center;
   justify-content: center;
 }
+
+.composer-icon {
+  background: transparent;
+  color: var(--text);
+  font-size: 20px;
+}
 .composer-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .composer-icon.live {
   color: #ff5d5d;
   animation: rec 1s ease-in-out infinite;
 }
 .composer-send {
-  border: none;
   background: var(--accent);
-  color: #0b0d12;
+  color: var(--on-accent);
   font-size: 19px;
   font-weight: 700;
-  line-height: 1;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  cursor: pointer;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 .composer-send:disabled {
   opacity: 0.35;
   cursor: default;
-}
-/* Delivery receipt — a small quiet ✓ once the server confirms it received the
-   message (the {turn} frame). Proof the message left, nothing noisy. */
-.sent-check {
-  margin-left: 6px;
-  font-size: 11px;
-  color: #3ecf72;
 }
 .composer-atts {
   display: flex;
@@ -1351,6 +1702,23 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+/* A converted document has no image — its chip shows the file name honestly
+   (audit Aug 2: <img src=""> rendered a broken icon for every attached PDF). */
+.att-doc-name {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 3px;
+  font-size: 9px;
+  line-height: 1.2;
+  text-align: center;
+  overflow: hidden;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+  word-break: break-all;
 }
 .att-remove {
   position: absolute;
@@ -1399,7 +1767,7 @@ body {
 .scenario-text {
   width: 100%;
   resize: vertical;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1429,54 +1797,6 @@ body {
   margin: 0 0 6px;
   animation: rec 1.2s ease-in-out infinite;
 }
-/* "Claude" indicator in the admin top bar: dim when idle, ORANGE + pulsing
-   while the laptop Claude Code session is actively writing code. */
-.claude-ind {
-  font-size: 13px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.4);
-  white-space: nowrap;
-}
-/* THE LIGHT = THE BRIDGE: lit steady = Claude reachable; OFF (grey) = bridge
-   down; pulsing = writing code right now. Clicking the Bridge light opens or
-   hides the live-work monitor (it is never shown permanently). */
-.claude-ind.clickable {
-  pointer-events: auto;
-  cursor: pointer;
-}
-.claude-ind.on {
-  color: #ff9d2e;
-  border-color: rgba(255, 157, 46, 0.7);
-  background: rgba(255, 157, 46, 0.12);
-}
-.claude-ind.on.work {
-  animation: rec 1.2s ease-in-out infinite;
-}
-/* Claude's live work ON KELION'S MONITOR (the workspace surface — Kelion goes
-   to his corner exactly like in presentations). Each work item is one row:
-   text on the left, a 0→100% BARGRAPH neatly aligned on the right. Finished
-   items stay listed, ticked and dimmed. History is NOT carried here — it lives
-   in the admin panel ("Jurnal Claude"). */
-.claude-console {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.claude-console-head {
-  color: #ff9d2e;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  padding: 4px 2px 10px;
-  border-bottom: 1px solid rgba(255, 157, 46, 0.25);
-  animation: rec 1.2s ease-in-out infinite;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 .live-dot {
   font-size: 10.5px;
   font-weight: 800;
@@ -1497,287 +1817,18 @@ body {
   0%, 100% { box-shadow: 0 0 6px rgba(53, 224, 127, 0.5); }
   50% { box-shadow: 0 0 16px rgba(53, 224, 127, 0.95); }
 }
-/* PROCESS PROGRESS 0→100% — the current job from intake to finish. One big
-   bar that glides forward as the process advances through its stages. */
-.owned-req {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  margin-bottom: 8px;
-  border-radius: 10px;
-  background: rgba(255, 157, 46, 0.1);
-  border: 1px solid rgba(255, 157, 46, 0.28);
-  font-size: 12.5px;
-  color: #ffe3c2;
-}
-.owned-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ff9d2e;
-  box-shadow: 0 0 8px rgba(255, 157, 46, 0.8);
-  flex: none;
-  animation: owned-pulse 1.6s ease-in-out infinite;
-}
 @keyframes owned-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
-.owned-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.owned-status {
-  color: #8fe9ff;
-}
-.proc-progress {
-  padding: 12px 2px 14px;
-  border-bottom: 1px solid rgba(255, 157, 46, 0.18);
-  margin-bottom: 10px;
-}
-.proc-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 7px;
-}
-.proc-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: #ffe3c2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.proc-file {
-  color: #8fe9ff;
-  font-weight: 600;
-}
-.proc-pct {
-  font-size: 20px;
-  font-weight: 800;
-  color: #fff;
-  font-variant-numeric: tabular-nums;
-}
-.proc-track {
-  height: 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-.proc-fill {
-  height: 100%;
-  border-radius: 999px;
-  /* fluid glide toward each new percentage as stages complete */
-  transition: width 0.9s ease;
-  background: linear-gradient(90deg, #ff9d2e, #ffd9a8);
-  box-shadow: 0 0 12px rgba(255, 157, 46, 0.5);
-}
-.proc-fill.done {
-  background: linear-gradient(90deg, #35e07f, #7dffb0);
-  box-shadow: 0 0 12px rgba(53, 224, 127, 0.6);
-}
-/* Click pe bară → detaliul analizei (ordinul 5 iul): CE analizează creierul —
-   cererea în lucru și ultimii pași din jurnal, sub bară, în același panou. */
-.proc-progress.clickable {
-  cursor: pointer;
-}
-.proc-progress.clickable:hover .proc-label {
-  color: #fff;
-}
-.proc-caret {
-  color: #ff9d2e;
-  margin-right: 6px;
-  font-size: 11px;
-}
-.proc-detail {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 157, 46, 0.3);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.35);
-  cursor: default;
-  max-height: 32vh;
-  overflow-y: auto;
-}
-.proc-detail-title {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #ff9d2e;
-  margin: 8px 0 4px;
-}
-.proc-detail-title:first-child {
-  margin-top: 0;
-}
-.proc-detail-req {
-  font-size: 13px;
-  color: #ffe3c2;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.proc-detail-line {
-  font-size: 12px;
-  color: #cfeaff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.claude-rows {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  gap: 10px;
-  padding: 12px 2px;
-  overflow-y: auto;
-}
-.claude-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.claude-row-text {
-  flex: 1;
-  min-width: 0;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.4;
-  color: #e6eefb;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.claude-row-bar {
-  flex: 0 0 220px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(255, 157, 46, 0.15);
-  overflow: hidden;
-}
-.claude-row-fill {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #ff9d2e, #ffd9a8);
-  transition: width 0.6s ease;
-}
-.claude-row-pct {
-  flex: 0 0 64px;
-  text-align: right;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12.5px;
-  color: #ffd9a8;
-  white-space: nowrap;
-}
-/* Done: stays on the list, ticked off — crossed out and dimmed. */
-.claude-row.done {
-  opacity: 0.5;
-}
-.claude-row.done .claude-row-text {
-  text-decoration: line-through;
-}
-.claude-row.done .claude-row-pct {
-  color: #7fd18b;
-}
-.claude-status {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 8px 2px 2px;
-}
-.claude-status-line {
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12.5px;
-  color: #93a5c0;
-}
-/* Admin → Release-uri: the approval gate. */
-.release-row {
-  padding: 12px 0;
-  border-top: 1px solid var(--border);
-}
-.release-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.release-title {
-  font-weight: 500;
-  font-size: 14px;
-  flex: 1;
-  min-width: 160px;
-}
-.release-badge {
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-.release-badge.b-pending {
-  color: #ffd9a8;
-  background: rgba(255, 157, 46, 0.14);
-  border: 1px solid rgba(255, 157, 46, 0.4);
-}
-.release-badge.b-approved,
-.release-badge.b-deployed {
-  color: #7ee2a8;
-  background: rgba(60, 200, 120, 0.14);
-  border: 1px solid rgba(60, 200, 120, 0.35);
-}
-.release-badge.b-rejected {
-  color: #ff8a8a;
-  background: rgba(255, 93, 93, 0.14);
-  border: 1px solid rgba(255, 93, 93, 0.35);
-}
-.release-time {
-  font-size: 12px;
-  color: var(--muted);
-}
-.release-detail {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #c5d2e6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 240px;
-  overflow-y: auto;
-}
-.release-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 10px;
-}
-/* Admin → Jurnal Claude: the full work history, newest first. */
-.devlog-line {
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: #c5d2e6;
-  padding: 2px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-@media (max-width: 900px) {
-  .claude-row-bar {
-    flex-basis: 120px;
-  }
-}
+
 .scenario-stop {
   pointer-events: auto;
   align-self: center;
   margin-bottom: 8px;
   border: 1px solid rgba(255, 93, 93, 0.6);
   background: rgba(255, 93, 93, 0.15);
-  color: #ff8a8a;
+  color: var(--danger);
   border-radius: 999px;
   padding: 6px 16px;
   font-size: 13px;
@@ -1808,7 +1859,7 @@ body {
     transparent 0deg,
     transparent 250deg,
     var(--accent) 312deg,
-    #cfe0ff 340deg,
+    color-mix(in srgb, var(--accent) 40%, #ffffff) 340deg,
     transparent 360deg
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -1872,7 +1923,7 @@ body {
   cursor: pointer;
 }
 .fn-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .fn-item:disabled {
   opacity: 0.4;
@@ -1892,36 +1943,60 @@ body {
 
 /* ---------- admin ---------- */
 .admin-overlay {
-  position: fixed;
-  inset: 0;
   z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: rgba(0, 0, 0, 0.55);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
+  transition: opacity 0.35s ease;
+}
+/* GESTURE PREVIEW (Adrian, Jul 13: „how do I see Kelion's gesture?”): on
+„▶ Arată” the panel goes almost transparent + click-through for ~3.5s, so
+you see the avatar behind performing the gesture, then it comes back by
+itself. */
+.admin-overlay.peek {
+  opacity: 0.06;
+  pointer-events: none;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .admin-panel {
   width: min(94vw, 900px);
   height: min(86vh, 640px);
   display: flex;
   flex-direction: column;
-  background: #11141b;
+  background: var(--panel-solid);
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
 }
+/* SCROLL FIX (Adrian, Jul 15): the admin tabs' content must be able to
+scroll; every <section> in admin is scrollable. */
+.admin-panel > section {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
 .admin-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 10px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
 .admin-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  /* THE KEY: without flex:1 + min-width:0, the container grew to the width of
+  ALL the tabs on ONE row (max-content) and flex-wrap never triggered — that's
+  why Close went off the page. Now it takes ONLY the available width (minus
+  Close) and the tabs really wrap onto several rows. */
+  flex: 1;
+  min-width: 0;
+}
+/* The Close button stays ALWAYS visible, top-right, never shrinking under the tabs. */
+.admin-head > .ghost {
+  flex-shrink: 0;
 }
 .admin-tab {
   padding: 6px 12px;
@@ -2005,7 +2080,7 @@ body {
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: #12151c;
+  background: var(--panel-2);
 }
 .fin-label {
   font-size: 12px;
@@ -2037,14 +2112,15 @@ body {
   padding: 5px 0;
   border-top: 1px solid var(--border);
 }
-.fin-cards-4 {
-  grid-template-columns: repeat(4, 1fr);
-}
+/* `.fin-cards-4` was deleted together with the four cards in the Money tab
+(Jul 30): three of their figures were written a second time below, in the
+wallet and in the cost table. The remaining rule (`.fin-cards`, 3 columns)
+is used by the visitor analytics. */
 /* Visitor analytics — professional two-line rows with a real flag image. */
 .flag-img {
   border-radius: 2px;
   vertical-align: -2px;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
 }
 .vis-flagline {
   display: inline-flex;
@@ -2066,31 +2142,23 @@ body {
   transition: background 0.15s ease;
 }
 .vis-row.vis-clickable:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .vis-open {
-  color: #8ab4ff;
+  color: var(--accent);
   font-size: 11px;
   font-weight: 700;
 }
 /* The clicked trial's conversation, over the admin panel. */
 .convo-overlay {
-  position: fixed;
-  inset: 0;
   z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
 }
 .convo-panel {
   width: min(760px, 94vw);
   max-height: 88vh;
   display: flex;
   flex-direction: column;
-  background: var(--panel, #12151c);
+  background: var(--panel, #ffffff);
   border: 1px solid var(--border);
   border-radius: 14px;
   overflow: hidden;
@@ -2102,15 +2170,7 @@ body {
 }
 .convo-sub {
   font-size: 12px;
-  color: #93a5c0;
-}
-.convo-insight {
-  padding: 10px 16px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #cdd7ea;
-  background: rgba(138, 180, 255, 0.08);
-  border-bottom: 1px solid var(--border);
+  color: var(--muted);
 }
 .convo-body {
   overflow-y: auto;
@@ -2136,12 +2196,12 @@ body {
   letter-spacing: 0.5px;
 }
 .vis-badge.human {
-  color: #7ee2a8;
+  color: var(--ok);
   background: rgba(60, 200, 120, 0.14);
   border: 1px solid rgba(60, 200, 120, 0.35);
 }
 .vis-badge.bot {
-  color: #ff9a9a;
+  color: var(--danger);
   background: rgba(255, 80, 80, 0.12);
   border: 1px solid rgba(255, 80, 80, 0.35);
 }
@@ -2179,37 +2239,8 @@ body {
   border-color: var(--accent);
   background: rgba(134, 59, 255, 0.08);
 }
-
-/* Native-app download links in the signed-in topbar */
-.app-dl {
-  display: inline-flex;
-  gap: 6px;
-  margin-right: 6px;
-}
-.app-dl a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  text-decoration: none;
-  font-size: 14px;
-  color: var(--text);
-  transition: border-color 0.15s;
-}
-.app-dl a:hover {
-  border-color: var(--accent);
-}
-
-.vis-badge.kind-visit {
-  color: #9ecbff;
-  background: rgba(90, 160, 255, 0.12);
-  border: 1px solid rgba(90, 160, 255, 0.35);
-}
 .vis-badge.kind-demo {
-  color: #d9b3ff;
+  color: #a855f7;
   background: rgba(160, 90, 255, 0.14);
   border: 1px solid rgba(160, 90, 255, 0.4);
 }
@@ -2220,6 +2251,154 @@ body {
   font-size: 11.5px;
   color: var(--muted);
 }
+/* ── Rebuilt visitor cards (Mar 2026): photo + info in a clean row ── */
+.visitor-card {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  align-items: flex-start;
+}
+.visitor-photo {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+.visitor-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.visitor-no-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.45;
+}
+.visitor-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.visitor-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.visitor-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.visitor-ip {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  color: var(--text);
+  opacity: 0.7;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  padding: 1px 7px;
+  border-radius: 5px;
+}
+/* „ce au vizitat" (owner, 13 aug) — evidențiat pe rând propriu, ca ownerul să
+   vadă imediat CE secțiuni a deschis vizitatorul, nu doar CINE e. */
+.visitor-pages {
+  flex-basis: 100%;
+  color: var(--text);
+  opacity: 0.9;
+  font-weight: 600;
+}
+/* P25 (owner, 15 aug — „un om = o poziție"): vizitele omului, listate ÎN cardul
+   lui — rânduri mici, aliniate, sub linia de meta. */
+.visitor-visits {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--text) 14%, transparent);
+}
+.visitor-visit-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.visitor-visit-row .visitor-pages {
+  flex-basis: auto;
+  font-weight: 500;
+}
+/* Golirea bazei de vizitatori (owner, 13 aug) — acțiune distructivă, discretă
+   dar la vedere, deasupra listei de vizite. */
+.vizitatori-golire {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 0 6px;
+}
+
+/* EVALUAREA CERINȚEI + AI-uri pe capacitate (owner, 13 aug) — sub formularul de
+   ordin în constructor. Verdictul porții sus, apoi AI-urile de sus în jos. */
+.eval-ordin {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.eval-verdict { font-weight: 700; font-size: 13px; }
+.eval-verdict.ok { color: #1fbf6b; }
+.eval-verdict.stop { color: #ff8a8a; }
+.eval-caps { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.eval-cap {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+  font-size: 11px;
+}
+.eval-ai-lista { display: flex; flex-direction: column; gap: 6px; }
+.eval-ai {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.eval-ai.recomandat {
+  border-color: color-mix(in srgb, #1fbf6b 55%, transparent);
+  background: color-mix(in srgb, #1fbf6b 12%, transparent);
+}
+.eval-ai .bec { margin-top: 3px; flex: 0 0 auto; }
+.eval-ai-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.eval-ai-cap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.eval-badge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #06210f;
+  background: #1fbf6b;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.eval-potrivire { font-size: 11.5px; color: var(--muted); }
+.eval-ai-desc { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
 .admin-body {
   flex: 1;
   display: flex;
@@ -2248,7 +2427,7 @@ body {
   color: var(--text);
 }
 .admin-user:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .admin-user.sel {
   background: rgba(110, 168, 254, 0.15);
@@ -2280,11 +2459,41 @@ body {
   width: 26px;
   height: 26px;
   object-fit: contain;
+  border-radius: 50%;
+  transition: box-shadow 0.3s ease;
+}
+/* USER CREDIT on the logo circle (Adrian, Jul 13): green = has credit;
+PULSING red = credit exhausted, so the client realizes from the circle.
+Clients only. */
+.brand-logo.credit-ok {
+  box-shadow: 0 0 0 2px rgba(53, 208, 127, 0.9), 0 0 8px rgba(53, 208, 127, 0.6);
+}
+.brand-logo.credit-out {
+  box-shadow: 0 0 0 2px rgba(255, 60, 60, 0.95), 0 0 10px rgba(255, 60, 60, 0.7);
+  animation: creditOutPulse 0.9s ease-in-out infinite;
+  cursor: help;
+}
+@keyframes creditOutPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(255, 60, 60, 0.95), 0 0 10px rgba(255, 60, 60, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(255, 60, 60, 1), 0 0 16px rgba(255, 60, 60, 0.95);
+  }
 }
 
 /* Prepaid credit wallet (customer topbar) */
 .wallet {
   position: relative;
+  /* The topbar is pointer-events:none (so it doesn't cover the stage) and
+  every interactive child RE-ENABLES clicks (.who, .cost-meter...). .wallet
+  didn't → ALL clicks on credit/„reîncarcă” went THROUGH the button (Adrian,
+  Jul 24: „I press top-up and the procedure doesn't run”). */
+  pointer-events: auto;
+}
+/* Any direct button in the topbar (the admin £ pool, etc.) — same. */
+.topbar > button {
+  pointer-events: auto;
 }
 .wallet-menu {
   position: absolute;
@@ -2294,8 +2503,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: #12151c;
-  border: 1px solid #2a2f3a;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px;
   min-width: 120px;
@@ -2305,34 +2514,79 @@ body {
   opacity: 0.7;
   padding: 2px 4px;
 }
+/* THE PAYMENT CODE (M4, Aug 2): big, unmistakable, copyable — matching
+   depends on the person writing it in the transfer reference. */
+.pay-code-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+.pay-code-big {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 1.35em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  user-select: all;
+}
+.pay-code-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.wallet-menu-balance {
+  font-size: 14px;
+  padding: 4px 4px 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.wallet-menu-balance strong { color: var(--ok); }
+.wallet-menu-note {
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.7;
+  padding: 0 4px 4px;
+}
+.wallet-amounts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.wallet-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px 2px;
+}
+.wallet-custom input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 13px;
+}
+.wallet-menu-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
 /* At ≤5% a credit indicator stays blinking red — urgent but not blocking. */
 .blink-red {
-  color: #ff5b5b !important;
-  border-color: #ff5b5b !important;
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
   animation: blink-red 1.1s ease-in-out infinite;
 }
 @keyframes blink-red {
   50% {
     opacity: 0.35;
   }
-}
-.cost-total.low {
-  color: #ffb86b;
-}
-.cost-load {
-  display: flex;
-  gap: 6px;
-  padding: 6px 4px 2px;
-}
-.cost-load input {
-  flex: 1;
-  min-width: 0;
-  background: #0e1117;
-  border: 1px solid #2a2f3a;
-  border-radius: 8px;
-  color: var(--text);
-  padding: 5px 8px;
-  font-size: 13px;
 }
 /* Discreet low-credit reminder: a small pill that fades in briefly. */
 .wallet-toast {
@@ -2341,9 +2595,9 @@ body {
   left: 0;
   z-index: 41;
   white-space: nowrap;
-  background: #12151c;
+  background: var(--panel-2);
   color: var(--text);
-  border: 1px solid #2a2f3a;
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 7px 12px;
   font-size: 12px;
@@ -2352,8 +2606,15 @@ body {
   animation: toast-in 0.35s ease;
 }
 .wallet-toast.urgent {
-  border-color: #ff5b5b;
-  color: #ffd0d0;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+/* The IN-BAR variant (permanent paywall): in the topbar's flow, not absolute —
+so it doesn't cover the monitor tab's title. */
+.wallet-toast-inline {
+  position: static;
+  margin-left: 8px;
+  animation: none;
 }
 @keyframes toast-in {
   from {
@@ -2376,7 +2637,8 @@ body {
 .card-view {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 .card-view-head {
@@ -2385,7 +2647,7 @@ body {
   gap: 8px;
   padding: 12px 16px;
   font-weight: 600;
-  border-bottom: 1px solid #2a2f3a;
+  border-bottom: 1px solid var(--line);
 }
 .card-view-icon {
   font-size: 18px;
@@ -2396,6 +2658,8 @@ body {
   font-size: 13px;
 }
 .card-view-list {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 10px;
   display: flex;
@@ -2406,13 +2670,13 @@ body {
   display: block;
   text-decoration: none;
   color: inherit;
-  background: #12151c;
-  border: 1px solid #232833;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 12px;
 }
 a.card-item:hover {
-  border-color: #3a4150;
+  border-color: var(--line);
 }
 .card-item-primary {
   font-weight: 600;
@@ -2428,46 +2692,31 @@ a.card-item:hover {
   font-size: 12px;
   margin-top: 2px;
 }
-
-/* Admin header actions + Google connect (row 15) */
-.admin-head-actions { display: flex; align-items: center; gap: 10px; }
-.admin-connect-google {
-  padding: 7px 14px;
-  border-radius: 9px;
-  background: #fff;
-  color: #1f2330;
-  font-size: 13px;
-  font-weight: 700;
-  text-decoration: none;
-  border: 1px solid #dcdce4;
-  white-space: nowrap;
-}
-.admin-connect-google:hover { box-shadow: 0 4px 14px rgba(110,168,254,0.35); }
 /* Inbox (row 19) */
 .inbox-item {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
   margin-bottom: 10px;
-  background: rgba(255,255,255,0.03);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 .inbox-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .inbox-from { font-weight: 700; color: var(--text); }
 .inbox-flag { font-size: 12px; font-weight: 700; }
-.inbox-flag.ok { color: #35e07f; }
+.inbox-flag.ok { color: var(--ok); }
 .inbox-flag.wait { color: #ffb020; }
-.inbox-subj { font-size: 13.5px; color: #cfd6dd; margin: 4px 0; }
+.inbox-subj { font-size: 13.5px; color: var(--text); margin: 4px 0; }
 .inbox-body { font-size: 12.5px; color: var(--muted); white-space: pre-wrap; }
-.inbox-reply { font-size: 12.5px; color: #bfe8cf; margin-top: 6px; white-space: pre-wrap; }
+.inbox-reply { font-size: 12.5px; color: var(--text); margin-top: 6px; white-space: pre-wrap; }
 
-/* Buton microfon în composer (intrare audio → server → creier; zero voce în front) */
+/* Microphone button in the composer (audio in → server → brain; zero voice in the front) */
 .composer-mic {
   flex: 0 0 auto;
   width: 40px;
   height: 40px;
   border-radius: 50%;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
   font-size: 17px;
   cursor: pointer;
@@ -2476,7 +2725,7 @@ a.card-item:hover {
   justify-content: center;
   transition: background 0.15s, border-color 0.15s;
 }
-.composer-mic:hover { background: rgba(255, 255, 255, 0.1); }
+.composer-mic:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 .composer-mic.live {
   border-color: #ff5d5d;
   color: #ff5d5d;
@@ -2484,42 +2733,1406 @@ a.card-item:hover {
   animation: rec 1.2s ease-in-out infinite;
 }
 
-/* Bara „trimite toate cererile la creier" */
-.gaps-bulk {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  border: 1px solid rgba(110, 168, 254, 0.35);
-  background: rgba(110, 168, 254, 0.08);
-  border-radius: 10px;
-  font-size: 13.5px;
-  color: #cfe0ff;
-}
-.gaps-bulk button { white-space: nowrap; }
-
 /* Control zoom/potrivire text pe monitor (#27) */
 .ws-zoom { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .ws-zoom .ghost { padding: 3px 9px; font-weight: 700; min-width: 34px; }
 .ws-zoom-val { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
 .doc-text { transition: font-size 0.12s ease; }
 
-/* Filigran versiune + dată update (Adrian, 7 iul): dovada vizibilă, pe toate
-   shell-urile, că ultima versiune e instalată. Discret, jos-dreapta, nu prinde
-   clicuri; pe monitoare mici rămâne citibil. */
+/* Version + update-date watermark (Adrian, Jul 7): the visible proof, on
+every shell, that the latest version is installed. Discreet, bottom-right,
+catches no clicks; stays readable on small monitors. */
 .app-watermark {
   position: fixed;
   right: 8px;
-  bottom: 6px;
+  bottom: 10px;
   z-index: 9999;
   pointer-events: none;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
-  letter-spacing: 0.2px;
-  color: rgba(255, 255, 255, 0.34);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.3px;
+  /* NEON SPRE VERDE (owner, 13 aug) — LIZIBIL PE ORICE TEMĂ. Pe fundal deschis
+     verdele neon se spăla (neonul iese corect doar pe întuneric), de-aia îi punem
+     o pastilă întunecată semi-transparentă în spate: verdele iese neon și e clar
+     și pe temă clară, și pe cea închisă. Ridicat puțin ca să nu fie tăiat jos. */
+  color: #39ff14;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-shadow:
+    0 0 5px rgba(57, 255, 20, 0.9),
+    0 0 11px rgba(57, 255, 20, 0.45);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   user-select: none;
 }
+
+/* AI pool — add/remove money controls in the „Bani” tab. */
+/* KELION'S WALLET — the real OpenRouter balance (the central brain), admin only. */
+.or-wallet {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-2);
+}
+.or-wallet.low {
+  border-color: #b4442e;
+  /* A danger TINT over the panel, not the old near-black slab — readable on
+     the light theme too (the hard #221312 looked like a hole in the page). */
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel-2));
+}
+.or-wallet-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.or-wallet-label {
+  font-size: 13px;
+  opacity: 0.7;
+}
+.or-wallet-sub {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.or-wallet-sub a {
+  color: var(--accent);
+}
+.pool-manage {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.pool-manage-head {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+/* ── THE ADMIN BUTTONS (unique, no duplicates) ──────────────────────────────
+The button in the funds panel and the action button on a user's row share
+the SAME outfit: thin border, semi-bold text, discreet background that
+lights up on hover. The rules were copied; here, once. They differ only in
+size (rounding, padding, font) — that stays with each. */
+.pool-btn,
+.user-act {
+  border: 1px solid var(--border);
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.pool-btn {
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 14px;
+}
+.pool-btn.add {
+  border-color: rgba(94, 201, 143, 0.5);
+  color: var(--ok);
+}
+.pool-btn.add:hover:not(:disabled) {
+  background: rgba(94, 201, 143, 0.14);
+}
+.pool-btn.withdraw {
+  border-color: rgba(240, 160, 90, 0.5);
+  color: #a85f0f;
+}
+.pool-btn.withdraw:hover:not(:disabled) {
+  background: rgba(240, 160, 90, 0.14);
+}
+.pool-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* User management — badges + buttons on the row in the „Utilizatori” tab. */
+.vis-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.user-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.user-badge.blocked {
+  color: var(--danger);
+  background: rgba(240, 90, 90, 0.16);
+  border: 1px solid rgba(240, 90, 90, 0.4);
+}
+.user-act {
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+.user-act:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+.user-act.danger {
+  color: var(--danger);
+  border-color: rgba(240, 90, 90, 0.4);
+}
+.user-act.danger:hover {
+  background: rgba(240, 90, 90, 0.14);
+}
+
+/* Landing — email capture (lead). */
+.landing-lead {
+  margin: 18px 0 6px;
+}
+.landing-lead-title {
+  font-size: 15px;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.landing-lead-row {
+  display: flex;
+  gap: 8px;
+}
+.landing-lead-input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+.landing-lead-note {
+  margin-top: 8px;
+  width: 100%;
+}
+.landing-lead-btn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(90deg, #6ea8fe, #9db8ff);
+  color: var(--on-accent);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.landing-lead-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.landing-lead-done {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+/* Admin — inbox de lead-uri (Vizitatori). */
+.leads-box {
+  margin-bottom: 14px;
+}
+.lead-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.lead-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lead-email {
+  font-weight: 600;
+  color: var(--text);
+}
+.lead-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+.lead-contacted {
+  font-size: 11px;
+  color: var(--ok);
+  border: 1px solid rgba(94, 201, 143, 0.4);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* Chat live vizitator — widget flotant pe landing. */
+.vchat {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.vchat-fab {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #6ea8fe, #9db8ff);
+  color: var(--on-accent);
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.vchat-panel {
+  width: min(92vw, 340px);
+  height: min(70vh, 460px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.vchat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(110, 168, 254, 0.14);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.vchat-x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+}
+.vchat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vchat-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+/* Honest failure lines in the visitor chat (audit Aug 2): a dead poll or a
+   failed send is SAID, not shown as an empty page / silent success. */
+.vchat-err {
+  color: #ff9b9b;
+}
+.vchat-bubble {
+  max-width: 82%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.vchat-bubble.me {
+  align-self: flex-end;
+  background: rgba(110, 168, 254, 0.22);
+  border: 1px solid rgba(110, 168, 254, 0.35);
+  color: var(--text);
+}
+.vchat-bubble.owner {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.vchat-row {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+.vchat-input {
+  flex: 1;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+.vchat-send {
+  width: 40px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #6ea8fe, #9db8ff);
+  color: var(--on-accent);
+  font-size: 18px;
+  cursor: pointer;
+}
+.vchat-send:disabled {
+  opacity: 0.5;
+}
+
+/* Chat live — inbox owner (admin). */
+.vchat-admin {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.vchat-admin-list {
+  width: 40%;
+  min-width: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.vchat-convo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.vchat-convo.sel {
+  border-color: rgba(110, 168, 254, 0.6);
+  background: rgba(110, 168, 254, 0.1);
+}
+.vchat-convo-last {
+  color: var(--text);
+  font-size: 14px;
+}
+.vchat-convo-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+.vchat-admin-thread {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 300px;
+}
+.vchat-admin-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 52vh;
+}
+
+/* LIVE DICTATION — cinematic „movie AI” effect: terminal band, monospace
+text with glow, blinking cursor, pulsing red dot. */
+/* FIXED RULE (Adrian, Jul 10): any live band is a SINGLE LINE, fixed height
+— it NEVER grows vertically, never covers the page. Long text scrolls like
+teletext (.ticker), never breaks onto several lines. */
+.voice-live,
+.heard-band {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  margin: 0 6px 8px;
+  padding: 0 14px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.voice-live {
+  background: linear-gradient(90deg, rgba(0, 20, 12, 0.85), rgba(0, 12, 20, 0.85));
+  border: 1px solid rgba(80, 240, 170, 0.28);
+  box-shadow: 0 0 22px rgba(60, 240, 160, 0.12), inset 0 0 18px rgba(0, 0, 0, 0.35);
+}
+.voice-live-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff4d4d;
+  box-shadow: 0 0 8px #ff4d4d;
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+.voice-live-caret {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 18px;
+  background: #7dffc0;
+  box-shadow: 0 0 8px rgba(125, 255, 192, 0.8);
+  animation: voice-caret 0.9s steps(1) infinite;
+}
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
+}
+/* BAR AT THE BRAIN'S INPUT: the server's confirmation with the EXACT text
+handed to the brain on the current turn — amber, distinct from the green
+dictation band. */
+.heard-band {
+  background: linear-gradient(90deg, rgba(24, 16, 0, 0.88), rgba(20, 10, 0, 0.88));
+  border: 1px solid rgba(255, 190, 80, 0.35);
+  box-shadow: 0 0 18px rgba(255, 180, 60, 0.1), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.heard-band-label {
+  flex: 0 0 auto;
+  font-size: 15px;
+}
+@keyframes rel-blink {
+  0%, 54% { opacity: 1; }
+  55%, 100% { opacity: 0.3; }
+}
+/* ALL CHAT BY ROLES, inside the bands' space (Adrian, Jul 11): you = 👤 on
+green, Kelion = the K pill on blue; no chat shows outside this space anymore. */
+.user-band {
+  background: linear-gradient(90deg, rgba(0, 20, 12, 0.88), rgba(0, 14, 10, 0.88));
+  border: 1px solid rgba(90, 220, 160, 0.3);
+  box-shadow: 0 0 18px rgba(70, 220, 150, 0.08), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.user-band .ticker-text {
+  color: #d9ffe9;
+}
+.kelion-band {
+  background: linear-gradient(90deg, rgba(6, 12, 26, 0.9), rgba(4, 10, 22, 0.9));
+  border: 1px solid rgba(120, 180, 255, 0.35);
+  box-shadow: 0 0 18px rgba(110, 170, 255, 0.1), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.kelion-band .ticker-text,
+.kelion-band .speech-tail-text {
+  color: #cfe0ff; /* neon text on the band's own dark glass — stays on both themes */
+}
+.heard-band-label.kelion-k {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 800;
+  font-size: 12px;
+  line-height: 1;
+}
+/* TYPED MESSAGES QUEUE (Adrian, Jul 11): visible while they wait for the
+active turn, so they don't look lost. Neutral/blue color, distinct from the voices. */
+.queued-band {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  margin: 0 6px 8px;
+  padding: 0 14px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: linear-gradient(90deg, rgba(0, 16, 32, 0.9), rgba(0, 10, 24, 0.9));
+  border: 1px solid rgba(80, 170, 255, 0.3);
+  box-shadow: 0 0 18px rgba(80, 170, 255, 0.08), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.queued-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4da6ff;
+  box-shadow: 0 0 8px #4da6ff;
+  animation: voice-pulse 1.4s ease-in-out infinite;
+}
+.queued-band .ticker-text {
+  color: #a8d8ff;
+}
+/* TICKER / TELETEXT: a single line, which scrolls instead of breaking or
+growing the page. Short text (fits) → static; long text → scrolls left. */
+.ticker {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+.ticker-text {
+  display: inline-block;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+  padding-left: 100%;
+  word-break: normal;
+  overflow-wrap: normal;
+  animation: ticker-scroll linear 1;
+  animation-duration: var(--ticker-dur, 6s);
+}
+.voice-live .ticker-text {
+  color: #7dffc0;
+  text-shadow: 0 0 6px rgba(90, 255, 180, 0.5);
+}
+.heard-band .ticker-text {
+  color: #ffd9a0;
+  text-shadow: 0 0 6px rgba(255, 200, 120, 0.35);
+}
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+@keyframes voice-caret {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+@keyframes release-banner-slide {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+/* The „Install” link under each QR code (Adrian, Jul 26) — direct click to
+install for anyone already on the target device; scanning stays the same. */
+.qr-install {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 14px;
+  border-radius: 12px;
+  background: var(--accent, #7aa2ff);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.qr-install:hover { filter: brightness(1.1); }
+
+/* The magnifier next to Install — enlarges the code for scanning from
+another device (the code itself is now an INSTALL button, per the Jul 26 order). */
+.qr-zoom-btn {
+  margin-top: 4px;
+  margin-left: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 10px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ── Dedicated /login page (Jul 26) ─────────────────────────────────────── */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 20px;
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text, #e8ecf4);
+}
+.login-brand { font-size: 22px; font-weight: 800; color: var(--accent, #7aa2ff); text-decoration: none; }
+
+/* The back-to-previous-page button (Adrian, Jul 30): the installed app has
+no browser bar, so without it the user stays stuck on the page. Discreet,
+top-left in the card, the same shape everywhere. */
+.back-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 0; padding: 4px 0; margin-bottom: 10px;
+  color: var(--muted, #8b93a7); font: inherit; font-size: 13px; cursor: pointer;
+  transition: color .15s ease;
+}
+.back-link:hover { color: var(--accent, #7aa2ff); }
+.back-link svg { flex: none; }
+.login-title { margin: 4px 0 8px; font-size: 18px; }
+.login-google {
+  display: block; text-align: center; padding: 10px; border-radius: 12px;
+  background: var(--accent, #7aa2ff); color: var(--on-accent); font-weight: 700; text-decoration: none;
+}
+.login-sep { text-align: center; font-size: 12px; color: var(--muted, #9aa3b5); margin: 4px 0; }
+.login-input {
+  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border, rgba(255,255,255,0.15));
+  background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text, #1b2331); font-size: 15px; outline: none;
+}
+.login-submit {
+  margin-top: 4px; padding: 10px; border: none; border-radius: 12px;
+  background: #3ecf72; color: #06280f; font-weight: 800; font-size: 15px; cursor: pointer;
+}
+.login-submit:disabled { opacity: 0.6; }
+.login-note { font-size: 13px; color: var(--warn); }
+.login-links { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.login-links button {
+  background: none; border: none; color: var(--accent, #7aa2ff);
+  font-size: 13px; cursor: pointer; text-align: left; padding: 2px 0;
+}
+.login-legal { margin-top: 8px; font-size: 12px; color: var(--muted, #9aa3b5); }
+.login-legal a { color: inherit; }
+
+/* The public /credite page (Jul 26) — the packs on the login card. */
+.credits-blurb { font-size: 13.5px; color: var(--muted, #9aa3b5); margin: 0 0 6px; }
+.credits-pack {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border, rgba(255,255,255,0.15));
+  background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text, #1b2331); cursor: pointer; font-size: 15px;
+}
+.credits-pack:hover { border-color: var(--accent, #7aa2ff); }
+.credits-pack-n { font-weight: 700; }
+.credits-pack-price { color: var(--accent, #7aa2ff); font-weight: 800; }
+/* The auto top-up checkbox + refill value, chosen at payment time (Aug 1). */
+.credits-autopay {
+  margin-top: 10px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--border, rgba(255,255,255,0.15)); background: color-mix(in srgb, var(--text) 4%, transparent);
+  color: var(--text, #e8ecf4);
+}
+
+/* ── FLUIDITATE (audit 27 iul) ─────────────────────────────────────────── */
+/* The „Versiune nouă” bar — announces without cutting the work; the hard
+reset applies on the button or automatically when the tab is hidden (App.tsx). */
+/* POARTA DE UPDATE — BLOCANTĂ (Adrian, 11 aug: „să nu se poată continua până nu
+   faci update-ul"). Acoperă TOT ecranul și prinde clicurile — pe versiunea veche
+   nu se mai poate lucra — cu un card centrat + buton + numărătoare. */
+/* Poarta de update ȘI poarta de consimțământ (GDPR) au aceeași carcasă
+   blocantă — o singură definiție, ca poarta jscpd să nu vadă cod duplicat;
+   diferențele (culoare/z-index/lățime) stau în `.consimt-*` mai jos. */
+.update-gate,
+.consimt-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 9, 20, 0.86);
+  backdrop-filter: blur(6px);
+  animation: update-gate-in 0.28s ease-out;
+}
+.update-gate-card,
+.consimt-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 360px;
+  padding: 26px 24px;
+  border-radius: 18px;
+  background: rgba(16, 22, 40, 0.98);
+  border: 1px solid rgba(122, 162, 255, 0.5);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+.update-gate-title { font-size: 17px; font-weight: 800; color: var(--text); }
+.update-gate-msg { font-size: 14px; line-height: 1.45; color: var(--muted, #a9b3d0); }
+.update-gate-btn {
+  margin-top: 4px;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 26px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+}
+.update-gate-btn:hover { filter: brightness(1.1); }
+.update-gate-auto { font-size: 12px; color: var(--muted, #8b93ad); }
+@keyframes update-gate-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* POARTA DE CONSIMȚĂMÂNT FOTO (GDPR) — owner, 13 aug. Carcasa vine din regula
+   comună de mai sus; aici doar diferențele: stă peste poarta de update, fundal
+   un pic mai opac, card puțin mai lat. Butonul de accept e verde (acțiunea care
+   lasă înăuntru), refuzul e discret. */
+.consimt-gate {
+  z-index: 9100;
+  background: rgba(6, 9, 20, 0.9);
+}
+.consimt-card {
+  gap: 14px;
+  max-width: 400px;
+  padding: 28px 26px;
+}
+.consimt-titlu { font-size: 18px; font-weight: 800; color: var(--text); }
+.consimt-mesaj { font-size: 14px; line-height: 1.5; color: var(--muted, #a9b3d0); }
+.consimt-actiuni {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 4px;
+}
+.consimt-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 22px;
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+}
+.consimt-accept { background: #1fbf6b; color: #06210f; }
+.consimt-accept:hover { filter: brightness(1.08); }
+.consimt-refuz {
+  background: transparent;
+  color: var(--muted, #a9b3d0);
+  border: 1px solid rgba(169, 179, 208, 0.4);
+}
+.consimt-refuz:hover { background: rgba(169, 179, 208, 0.12); }
+
+/* The floating windows enter smoothly, they don't „pop” (defect 3 from the
+audit): the same short entry on all conditionally-mounted overlays. */
+.unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
+  animation: overlay-in 0.22s ease-out;
+}
+@keyframes overlay-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-gate, .consimt-gate, .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
+    animation: none;
+  }
+}
+
+/* The real-speed chip — the proof of „first word under 1s”, discreet next to the chat. */
+.latency-chip {
+  position: absolute;
+  top: -26px;
+  right: 10px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--ok);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+  border-radius: 999px;
+  padding: 2px 9px;
+  pointer-events: none;
+}
+
+/* CLEPSIDRA + CRONOMETRU (Adrian, 3 aug): perechea amber a latency-chip-ului —
+   verde = GATA (timpul măsurat), amber = ÎN LUCRU (timpul care curge acum).
+   Colț STÂNGA ca să nu se ciocnească niciodată cu latency-chip (dreapta). */
+.kelion-workclock {
+  position: absolute;
+  top: -26px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--warn);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 999px;
+  padding: 2px 9px;
+  pointer-events: none;
+  max-width: 60vw;
+}
+.kelion-workclock-glass {
+  display: inline-block;
+  animation: kelion-workclock-turn 1.8s ease-in-out infinite;
+}
+@keyframes kelion-workclock-turn {
+  0% { transform: rotate(0deg); }
+  55% { transform: rotate(180deg); }
+  100% { transform: rotate(180deg); }
+}
+.kelion-workclock-time {
+  font-variant-numeric: tabular-nums;
+}
+.kelion-workclock-label {
+  opacity: 0.8;
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kelion-workclock-glass { animation: none; }
+}
+
+/* FLUIDITY #9: the final teletext no longer ends on EMPTY — the loop is
+continuous (the text re-enters from the right, like a real teletext). */
+.ticker-text { animation-iteration-count: infinite; }
+/* The bands' colors also apply to the fixed tail (dictation/👤/🧠 moved to
+speech-tail — fluidity #9). */
+.voice-live .speech-tail-text { color: #7dffc0; text-shadow: 0 0 6px rgba(90, 255, 180, 0.5); }
+.heard-band .speech-tail-text { color: #ffd9a0; text-shadow: 0 0 6px rgba(255, 200, 120, 0.35); }
+.user-band .speech-tail-text { color: #d9ffe9; }
+/* FLUIDITY #8: the composer bands ENTER by growing (180ms), not through a
+38-46px jump of the whole chat column. */
+.voice-live, .heard-band, .queued-band, .composer-atts {
+  animation: band-in 0.18s ease-out;
+}
+@keyframes band-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-live, .heard-band, .queued-band, .composer-atts { animation: none; }
+  .ticker-text { animation-iteration-count: 1; }
+}
+
+/* The alternative links under the Google button (email login + public prices). */
+.landing-alt-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 13.5px;
+}
+.landing-alt-links a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(157, 184, 232, 0.5);
+}
+.landing-alt-links a:hover { color: var(--text); }
+.landing-alt-links span { color: var(--muted); }
+
+/* The single wallet's breakdown (Admin → Money): which real sources the
+figure added up from. Without it, a total is just another number you have
+to trust. */
+.pool-parts { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+
+/* ── THE MANUAL (public) ────────────────────────────────────────────────────
+Top-right button on the start page + the page itself. The manual is read,
+so a light background and short lines — not the app's dark theme.
+
+THE CLASS NAME IS `-btn` FOR A REASON: `.landing-manual` ALREADY EXISTED —
+it's the capabilities list on the start page. I reused the name by mistake
+and the style below (position: absolute) ripped the list out of the page
+and slammed it over the title: „Your brilliant assistant” became illegible
+in production. A new class is never named without searching the name first. */
+.landing-manual-btn {
+  position: absolute; top: 18px; right: 20px; z-index: 6;
+  padding: 8px 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel);
+  color: var(--text); font-size: 13px; font-weight: 600; text-decoration: none;
+  backdrop-filter: blur(6px); transition: background .15s ease, border-color .15s ease;
+}
+.landing-manual-btn:hover { background: var(--panel-2); border-color: color-mix(in srgb, var(--text) 35%, transparent); }
+
+.manual-page {
+  /* SCROLL (Adrian: „on display you have no scroll”). The app shell has
+  `body { overflow: hidden }`, so a page that GROWS is simply cut. Bounded
+  height + own scrolling: the book reads. */
+  height: 100%;
+  overflow-y: auto;
+  background: #f6f7f9;
+  padding: 22px 16px 48px;
+}
+.manual-shell { max-width: 860px; margin: 0 auto; }
+.manual-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.manual-bar .login-brand { margin-right: auto; }
+
+/* ── THE BOOK ──────────────────────────────────────────────────────────────
+Adrian: „when you open the manual it must be like a book with a page-turn
+effect.” One leaf per screen, with a spine and a shadow; turning rotates
+the leaf on the spine's axis, like paper. The perspective sits on the
+container, otherwise the rotation looks flat. */
+.manual-book { perspective: 2000px; margin: 0 auto; }
+
+/* The book. It was black text on white, no cover and no landmarks
+("kindergarten level", Adrian, Jul 30). Now: a spine with thickness, an
+icon on each chapter, a drop cap like in print. No external images: nothing
+breaks at deploy and no network request is needed. */
+.manual-leaf {
+  position: relative;
+  background: #fffdfa;
+  border-radius: 3px 16px 16px 3px;
+  padding: 40px 46px 46px;
+  min-height: 60vh;
+  color: #1a1c22;
+  line-height: 1.72;
+  transform-origin: left center;
+  backface-visibility: hidden;
+  box-shadow:
+    inset 14px 0 18px -14px rgba(20, 24, 34, .28),
+    2px 0 0 #f1ece3, 4px 0 0 #fffdfa, 6px 0 0 #eae4da, 8px 0 0 #fffdfa,
+    0 2px 4px rgba(16, 20, 30, .10), 0 22px 50px rgba(16, 20, 30, .13);
+}
+.manual-leaf::before {
+  content: '';
+  position: absolute; inset: 0 auto 0 0; width: 3px;
+  background: linear-gradient(180deg, #d8cfc0, #b9ad99 45%, #d8cfc0);
+  border-radius: 3px 0 0 3px;
+}
+.manual-leaf.turn-inainte { animation: fila-inainte .5s cubic-bezier(.22,.61,.36,1) both; }
+.manual-leaf.turn-inapoi { transform-origin: right center; animation: fila-inapoi .5s cubic-bezier(.22,.61,.36,1) both; }
+/* THE DIRECTION, corrected after Adrian saw it live: the page turned the
+wrong way. The spine is on the LEFT; going forward, the leaf comes from the
+right and settles onto the spine. */
+@keyframes fila-inainte {
+  from { transform: rotateY(52deg); opacity: .2; }
+  to { transform: rotateY(0deg); opacity: 1; }
+}
+@keyframes fila-inapoi {
+  from { transform: rotateY(-52deg); opacity: .2; }
+  to { transform: rotateY(0deg); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .manual-leaf.turn-inainte, .manual-leaf.turn-inapoi { animation: none; }
+}
+.manual-leaf h2 {
+  font-size: 21px; margin: 0 0 14px; letter-spacing: -.01em; color: #12141a;
+  padding-bottom: 10px; border-bottom: 1px solid #efe9df;
+}
+.leaf-h3 {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 17px; margin: 0 0 14px; color: #12141a;
+  padding-bottom: 10px; border-bottom: 1px solid #efe9df;
+}
+.manual-icon { color: #2f6df6; flex: none; }
+.manual-leaf p { margin: 0 0 14px; font-size: 15.5px; color: #2a2e38; }
+.manual-leaf p:first-of-type::first-letter {
+  float: left; font-size: 46px; line-height: .86; padding: 4px 9px 0 0; color: #2f6df6; font-weight: 700;
+}
+
+.leaf-cover {
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  min-height: 54vh; text-align: center;
+}
+.leaf-cover h1 { font-size: 38px; margin: 0 0 12px; letter-spacing: -.025em; color: #12141a; }
+.leaf-cover p { color: #5b6270; font-size: 16.5px; margin: 0 0 30px; max-width: 460px; }
+.leaf-cover p::first-letter { float: none; font-size: inherit; padding: 0; color: inherit; font-weight: inherit; }
+.leaf-crest {
+  width: 62px; height: 62px; border-radius: 18px; margin-bottom: 22px;
+  display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 26px;
+  background: linear-gradient(140deg, #4c8dff, #2f6df6 60%, #1f4fd0);
+  box-shadow: 0 8px 22px rgba(47, 109, 246, .32);
+}
+.leaf-toc { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; max-width: 580px; }
+.leaf-toc span {
+  font-size: 12.5px; color: #46506a; background: #f4f6fb;
+  border: 1px solid #e3e8f2; border-radius: 999px; padding: 5px 12px;
+}
+.leaf-hint { margin-top: 28px; color: #9aa2b4; font-size: 12.5px; letter-spacing: .02em; }
+
+.manual-table { width: 100%; border-collapse: collapse; margin: 4px 0 0; }
+.manual-table th {
+  text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+  color: #8a91a3; padding: 0 14px 8px 0; font-weight: 700;
+}
+.manual-table td { padding: 9px 14px 9px 0; border-top: 1px solid #f2ede4; vertical-align: top; font-size: 14.5px; }
+.manual-table tr:hover td { background: #fbf9f5; }
+.manual-say { color: #2f6df6; font-style: italic; }
+
+/* THE „how a request travels” LEAF — the only page of the book that looks
+like a diagram, not like text (Adrian: „I expected it with images, much
+more professional”). No pictures to download: four numbered cards, which
+rearrange by themselves on the phone. */
+.manual-pasi {
+  list-style: none; margin: 14px 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px;
+  counter-reset: pas;
+}
+.manual-pasi li {
+  counter-increment: pas;
+  position: relative; padding: 16px 14px 14px;
+  border: 1px solid #e6ded2; border-radius: 12px; background: #fffdfa;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.manual-pasi li::before {
+  content: counter(pas);
+  position: absolute; top: -10px; left: 14px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #1a1c22; color: #fffdfa;
+  font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.manual-pas-ic { font-size: 26px; line-height: 1; }
+.manual-pasi strong { font-size: 15px; }
+.manual-pas-nota { color: #6b6357; font-size: 13px; line-height: 1.5; }
+
+.manual-nav { display: flex; align-items: center; justify-content: center; gap: 20px; margin-top: 20px; }
+.manual-nav button {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid #dcd6cb; background: #fffdfa; color: #1a1c22;
+  font-size: 20px; line-height: 1; cursor: pointer; transition: background .15s ease, border-color .15s ease;
+}
+.manual-nav button:hover:not(:disabled) { background: #f4efe6; border-color: #c9c1b3; }
+.manual-nav button:disabled { opacity: .3; cursor: default; }
+.manual-pageno { color: #6b7280; font-size: 13px; min-width: 70px; text-align: center; letter-spacing: .04em; }
+
+.manual-translating {
+  display: flex; align-items: center; gap: 9px;
+  background: #fff7e6; border: 1px solid #f0dcae; color: #7a5c14;
+  border-radius: 10px; padding: 9px 14px; font-size: 13px; margin-bottom: 12px;
+}
+.manual-spin {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid #d9c184; border-top-color: transparent;
+  animation: manual-rot .8s linear infinite; flex: none;
+}
+@keyframes manual-rot { to { transform: rotate(360deg); } }
+@media (max-width: 620px) {
+  .manual-leaf { padding: 26px 22px 32px; min-height: 66vh; }
+  .leaf-cover h1 { font-size: 28px; }
+}
+.manual-actions { display: flex; align-items: center; gap: 12px; }
+.manual-lang { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: #5b6270; }
+.manual-lang select { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid #d7dbe2; background: #fff; color: #16181d; }
+.manual-dl { padding: 7px 15px; border-radius: 8px; background: #2f6df6; color: #fff; font-size: 13px; font-weight: 600; text-decoration: none; }
+.manual-dl:hover { background: #2560e0; }
+.manual-table { width: 100%; border-collapse: collapse; margin: 6px 0 4px; }
+.manual-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; border-bottom: 1px solid #d7dbe2; padding: 5px 12px 5px 0; font-weight: 600; }
+.manual-table td { padding: 7px 12px 7px 0; border-bottom: 1px solid #eef0f4; vertical-align: top; font-size: 14px; }
+.manual-say { color: #3b4453; font-style: italic; }
+.manual-foot { margin-top: 34px; padding-top: 12px; border-top: 1px solid #d7dbe2; color: #6b7280; font-size: 12px; }
+.manual-page .back-link { color: #6b7280; }
+.manual-page .back-link:hover { color: #2f6df6; }
+
+/* ── MODUL MAȘINĂ (Adrian, 11 aug) — strat voce-first pentru volan ─────────────
+   Ecran plin, întunecat (mai puțină strălucire la condus, ca un bord de noapte),
+   glob Jarvis în fundal care pulsează pe vocea REALĂ a lui Kelion, un rând MARE
+   cu răspunsul (SPUS, nu afișat pe suprafețe), microfon mare și ieșire. Un singur
+   look dedicat (bord de noapte) — de aceea nu urmează tema light/dark. */
+.car-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  /* Randat prin portal în <body>, deci NU mai moștenește pointer-events:none din
+     `.chat` — dar îl punem explicit, ca butoanele (mic on/off + ✕) să primească
+     mereu clic, orice ar fi deasupra în arbore. */
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4vh;
+  padding: max(4vh, env(safe-area-inset-top)) 6vw max(6vh, env(safe-area-inset-bottom));
+  background: radial-gradient(120% 120% at 50% 38%, #0b1b33 0%, #05070d 72%, #000 100%);
+  color: #eaf2ff;
+  text-align: center;
+  overflow: hidden;
+}
+.car-mode .jarvis-orb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+.car-exit {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 2;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid rgba(180, 210, 255, 0.35);
+  background: rgba(10, 20, 40, 0.55);
+  color: #eaf2ff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.car-exit:hover { background: rgba(30, 50, 90, 0.7); }
+.car-talk {
+  position: relative;
+  z-index: 1;
+  max-width: 22ch;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4vh;
+}
+.car-heard {
+  margin: 0;
+  font-size: clamp(15px, 3.4vw, 22px);
+  color: #8fb4e6;
+}
+.car-reply {
+  margin: 0;
+  font-size: clamp(24px, 6vw, 46px);
+  font-weight: 600;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+/* Comutatorul ON/OFF al vocii full-duplex — buton mare + o etichetă dedesubt care
+   spune starea (Pornește vocea / Ascult — vorbește liber), ca la volan să se
+   citească dintr-o ochire dacă e pornit sau nu. */
+.car-mic-wrap {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2vh;
+}
+.car-mic {
+  flex: 0 0 auto;
+  width: clamp(84px, 22vw, 120px);
+  height: clamp(84px, 22vw, 120px);
+  border-radius: 50%;
+  border: 2px solid rgba(180, 210, 255, 0.4);
+  background: rgba(20, 40, 80, 0.5);
+  color: #eaf2ff;
+  font-size: clamp(34px, 9vw, 48px);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.car-mic:active { transform: scale(0.96); }
+/* PORNIT = ascultă full-duplex → halou albastru-verzui calm (NU roșu de „stop",
+   ca să nu pară că trebuie apăsat ca să vorbești). */
+.car-mic.live {
+  border-color: #46e0c0;
+  color: #eaf2ff;
+  background: rgba(70, 224, 192, 0.16);
+  animation: carPuls 1.8s ease-in-out infinite;
+}
+.car-mic-label {
+  font-size: clamp(14px, 3.2vw, 19px);
+  color: #9fc2ef;
+  letter-spacing: 0.01em;
+}
+.car-mic.live + .car-mic-label { color: #7be9d2; }
+@keyframes carPuls {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(70, 224, 192, 0.5); }
+  50% { box-shadow: 0 0 22px 7px rgba(70, 224, 192, 0.28); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .car-mic.live { animation: none; }
+}
+
+/* ── MESSENGER KELION↔KELION — INTERFAȚA DE APEL (Adrian, 11 aug) ──────────────
+   Strat global (portal în <body>), peste tot — inclusiv peste modul mașină, că un
+   apel e comunicare audio și trebuie să treacă. Ecran de apel clasic: avatar cu
+   inițiala, numele, starea, butoane mari (răspunde/refuză sau închide). */
+.apel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9500; /* peste modul mașină (9000) și restul */
+  display: grid;
+  place-items: center;
+  padding: max(20px, env(safe-area-inset-top)) 6vw max(24px, env(safe-area-inset-bottom));
+  background: radial-gradient(120% 120% at 50% 30%, rgba(12, 26, 48, 0.92), rgba(3, 6, 12, 0.96));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #eef4ff;
+}
+.apel-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4vh;
+  text-align: center;
+  max-width: 92vw;
+}
+.apel-avatar {
+  width: clamp(96px, 24vw, 150px);
+  height: clamp(96px, 24vw, 150px);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(40px, 10vw, 64px);
+  font-weight: 700;
+  color: #eef4ff;
+  background: radial-gradient(circle at 50% 38%, rgba(90, 168, 255, 0.5), rgba(20, 44, 86, 0.85));
+  border: 2px solid rgba(150, 185, 230, 0.35);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+.apel-avatar.suna { animation: apelPuls 1.6s ease-in-out infinite; }
+.apel-avatar.live { border-color: #4fe3c4; }
+@keyframes apelPuls {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(90, 168, 255, 0.5); }
+  50% { box-shadow: 0 0 34px 12px rgba(90, 168, 255, 0.22); }
+}
+.apel-nume {
+  margin: 0.6vh 0 0;
+  font-size: clamp(24px, 6vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.apel-sub {
+  margin: 0;
+  font-size: clamp(15px, 3vw, 21px);
+  color: #9fc2ef;
+}
+.apel-nota {
+  margin: 0.2vh 0 0;
+  font-size: clamp(12px, 2.4vw, 15px);
+  color: rgba(150, 180, 220, 0.6);
+}
+/* Subtitrarea live — ce a spus celălalt, tradus în limba mea (Faza 2). */
+.apel-subtitrare {
+  margin: 1vh 0 0;
+  max-width: 24ch;
+  font-size: clamp(16px, 3.6vw, 24px);
+  line-height: 1.3;
+  color: #dfebff;
+  text-wrap: balance;
+}
+.apel-actiuni {
+  display: flex;
+  gap: clamp(18px, 8vw, 48px);
+  margin-top: 3vh;
+}
+.apel-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: clamp(96px, 30vw, 150px);
+  padding: clamp(13px, 2.4vh, 18px) clamp(16px, 5vw, 30px);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: clamp(15px, 3.4vw, 19px);
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  transition: filter 0.15s, transform 0.1s;
+}
+.apel-btn:active { transform: scale(0.96); }
+.apel-btn:hover { filter: brightness(1.08); }
+.apel-btn.accepta { background: #22b463; }
+.apel-btn.refuza,
+.apel-btn.inchide { background: #e0474a; }
+
+/* ── BECURILE DE CREDIT AI (owner, 13 aug: „bec roșu/verde… click = reîncărcare") ──
+   Verde = are credit, roșu = fără (402/0), gri = nu pot verifica. Rândul roșu e
+   scos în evidență (e locul unde trebuie pus credit). „palpaie" = rezervat pentru
+   auto-alimentarea eșuată (card gol) — se aprinde cu acea piesă. */
+.becuri-credit { margin: 8px 0 14px; }
+.becuri-stare { font-size: 13px; opacity: 0.75; padding: 6px 2px; }
+.becuri-titlu { font-size: 13px; font-weight: 700; opacity: 0.8; margin-bottom: 8px; }
+.becuri-lista { display: flex; flex-direction: column; gap: 6px; }
+.bec-rand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  color: inherit; text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+a.bec-rand { cursor: pointer; }
+a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.bec-rand-rosu {
+  border-color: color-mix(in srgb, #e5484d 55%, var(--border));
+  background: color-mix(in srgb, #e5484d 8%, transparent);
+}
+.bec {
+  width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+}
+.bec-verde { background: #2ea043; color: #2ea043; }
+.bec-rosu { background: #e5484d; color: #e5484d; }
+.bec-gri { background: #8b8f97; color: #8b8f97; }
+.bec-rosu.palpaie { animation: bec-palpaie 1s steps(1, end) infinite; }
+@keyframes bec-palpaie { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) {
+  .bec-rosu.palpaie { animation: none; opacity: 1; }
+}
+.bec-nume { font-weight: 600; }
+.bec-alim {
+  font-size: 12px; opacity: 0.6; flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bec-stare { font-size: 12px; opacity: 0.85; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bec-rand-rosu .bec-stare { color: #e5484d; font-weight: 600; }
+
+/* BECURILE COMPACTE ÎN BARA DE SUS (admin) — fiecare bec = link INDIVIDUAL spre
+   pagina de reîncărcare a furnizorului („buton individual la fiecare ai"). */
+.becuri-bara { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%; }
+/* Fiecare bec = buton individual cu NUMELE AI pe el (owner, 13 aug), click →
+   pagina lui de reîncărcare. Chip cu contur, ca să se vadă că e apăsabil. */
+.becuri-bec-link {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px;
+  line-height: 1; text-decoration: none; transition: background 0.15s ease;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+}
+.becuri-bec-link:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.becuri-bec-static { cursor: default; }
+.becuri-bec-nume { font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.becuri-bara .bec {
+  width: 9px; height: 9px; flex: 0 0 auto;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
+}
+.becuri-bara-nr {
+  font-size: 11px; font-weight: 700; color: #e5484d;
+  font-variant-numeric: tabular-nums; margin-left: 2px;
+}
+/* Toate au credit → totalul e discret (gri), nu alarmant (roșu). */
+.becuri-bara-nr.toate-ok { color: var(--text); opacity: 0.45; font-weight: 600; }
+
+/* „APLICAȚII" — buton cu meniu (trading + Adaptare CV grupate), owner 13 aug. */
+/* `.topbar` e pointer-events:none (ca să nu acopere avatarul), iar FIECARE copil
+   interactiv RE-activează clicurile. Butonul „Aplicații" stă în `.apps-wrap`, deci
+   NU e `.topbar > button` — fără linia de mai jos, wrap-ul + butonul + meniul moștenesc
+   `none` și clicul trece PRIN ele (owner, 14 aug: „butonul Aplicații nu merge"). Aceeași
+   cauză ca bugul vechi de la `.wallet`. */
+.apps-wrap { position: relative; display: inline-flex; pointer-events: auto; }
+/* Selectorul de limbă din bară (Cerința #29) — ACELAȘI tipar ca Aplicații:
+   wrap relativ cu pointer-events:auto (lecția .apps-wrap: bara e none, fiecare
+   copil interactiv re-activează clicul), meniu absolut, închis implicit. */
+.lang-wrap { position: relative; display: inline-flex; pointer-events: auto; }
+.lang-menu { left: auto; right: 0; min-width: 150px; }
+.lang-activ { color: var(--accent, #4cc2ff); font-weight: 700; }
+.apps-backdrop { position: fixed; inset: 0; z-index: 40; }
+.apps-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 41;
+  display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 6px;
+  border-radius: 10px; background: var(--panel, #10162a);
+  border: 1px solid var(--border); box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+  /* MENIUL NU-ȘI MAI TAIE COADA (owner, 15 aug: „unde e generatorul video" —
+     🎬 e ULTIMA intrare, iar fără max-height lista de ~19 rânduri cădea sub
+     marginea ecranelor mai scunde, fără nicio derulare). Plafonat la fereastră
+     → derulează; pe ecran înalt nu se schimbă NIMIC. */
+  max-height: calc(100vh - 120px); overflow-y: auto;
+}
+.apps-item {
+  display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 0;
+  border-radius: 7px; background: transparent; color: var(--text);
+  font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; white-space: nowrap;
+}
+.apps-item:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+
+/* CIFRELE VPS, SUB ADMIN (tabul „Sistem (VPS)") — mutate din bara de sus. */
+.vps-resurse {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin: 10px 0 4px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.vps-resurse.vps-critic {
+  border-color: color-mix(in srgb, #e5484d 55%, var(--border));
+  background: color-mix(in srgb, #e5484d 8%, transparent);
+}
+.vps-cifra { font-size: 13px; font-variant-numeric: tabular-nums; }
+.vps-load { opacity: 0.7; }
+.vps-alarma { color: #e5484d; font-weight: 700; }
+

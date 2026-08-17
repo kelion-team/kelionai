@@ -1,0 +1,180 @@
+# ── CHEI NOI ÎN ENV-UL DE PE VPS, SECURIZAT ──────────────────────────────────
+# Calea SIGURĂ de a pune chei noi pe kelionai.app: valorile vin din GitHub
+# Secrets (GitHub le maschează AUTOMAT în TOATE logurile) și pleacă spre VPS
+# prin STDIN — niciodată într-o comandă care apare în jurnal. Cheia nu ajunge
+# nici în git, nici în chat, nici în logul de Actions.
+#
+# DE PE 30 IUL, NU MAI E TREABA TA. Kelion își pune singur cheile: `secret_pune`
+# le scrie criptat în secretele repo-ului, `secret_publica` pornește exact
+# workflow-ul ăsta, care le duce pe server și repornește aplicația. Îi spui ce
+# vrei configurat, el o face. (Adrian: „să creeze secretele și să le pună unde
+# trebuie, e al meu și îi permit full acces".) Restul comentariului rămâne ca să
+# poți face TU orice pas, oricând, fără el.
+#
+# LISTA DE NUME NU MAI EXISTĂ. Workflow-ul ia acum TOATE secretele de la GitHub
+# (`toJSON(secrets)`), deci o cheie nouă nu mai poate cădea în gol fiindcă a
+# uitat cineva s-o treacă într-o listă — exact ce a pățit `REVOLUT_PAY_LINK`.
+#
+# CUM SE FOLOSEȘTE MANUAL (Adrian):
+#   1. Repo → Settings → Secrets and variables → Actions → New repository secret.
+#      Numele de mai jos sunt cele pe care le CITEȘTE codul; orice cheie nouă e
+#      dusă pe server oricum, dar codul o folosește doar dacă o caută sub numele ăla:
+#        SERPER_API_KEY        (căutare web + youtube)
+#        GEMINI_API_KEY        (generare imagini)  + opțional GEMINI_MODEL
+#        GOOGLE_TTS_API_KEY    (voce TTS Google + salut landing)
+#        GOOGLE_API_KEY        (o cheie Google Cloud care poate acoperi TTS/Gemini)
+#        GOOGLE_MAPS_KEY       (opțional; harta merge și fără, pe OSM)
+#        STRIPE_PUBLISHABLE_KEY (pk_live_… de la Stripe → Developers → API keys.
+#                               NU e secretă — e făcută să stea în pagină. Cu ea
+#                               adminul vede NUMĂRUL cardului virtual direct în
+#                               panou, în cadre Stripe, fără drum prin dashboard.)
+#        REVOLUT_PAY_LINK      (linkul TĂU de plată Revolut — pe el ajunge userul
+#                               când apasă „adaugă credit". Nu e secret, dar stă
+#                               aici ca să se poată schimba fără publicare.)
+#        GITHUB_TOKEN          (fin-granulat, DOAR repo kelionai, Actions:write —
+#                               mâinile lui Kelion pe runbook-uri; + Contents/PR
+#                               write dacă vrei să și scrie cod pe ramuri)
+#   2. Actions → „vps-set-env" → Run workflow. Scrie DOAR secretele setate,
+#      apoi repornește containerul ca să le încarce. Restul rămâne neatins.
+#   Necesită și secretul VPS_SSH_KEY (deja pus).
+
+name: vps-set-env
+
+on:
+  workflow_dispatch:
+    inputs:
+      restart:
+        description: 'Repornește app-ul după scriere (ca să încarce cheile noi)?'
+        type: boolean
+        default: true
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scrie cheile în env-ul VPS (din Secrets, mascate, prin STDIN)
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          # ── TOATE SECRETELE, NU O LISTĂ SCRISĂ DE MÂNĂ (30 iul) ─────────────
+          # Aici era o listă FIXĂ de nume. Orice cheie nouă — pusă de Adrian sau
+          # de Kelion însuși — cădea în gol: scrisă în GitHub, dar niciodată
+          # ajunsă pe server, fără niciun semn că lipsește. Exact ce a pățit
+          # `REVOLUT_PAY_LINK`. Acum lista vine de la GitHub, nu de la mine, deci
+          # nu mai poate rămâne în urmă. GitHub maschează valorile în TOATE
+          # logurile, iar noi nu tipărim niciuna.
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          GITHUB_TOKEN: ${{ secrets.KELION_GITHUB_TOKEN }}
+          RESTART: ${{ inputs.restart }}
+        run: |
+          set -euo pipefail
+          [ -n "$KEY" ] || { echo "::error::VPS_SSH_KEY lipsește (Settings → Secrets → Actions)."; exit 1; }
+          umask 077
+          printf '%s\n' "$KEY" > /tmp/vps_key
+          chmod 600 /tmp/vps_key
+          SSH="ssh -i /tmp/vps_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o BatchMode=yes root@164.68.120.87"
+
+          # Liniile NUME=valoare-în-base64, pentru TOATE secretele setate.
+          # Base64 la transport, ca o valoare cu spații, ghilimele sau `=` să
+          # ajungă întreagă; se decodează pe server. `VPS_SSH_KEY` e SCOASĂ
+          # dinadins — cheia de acces la mașină n-are ce căuta în env-ul
+          # aplicației. `KELION_GITHUB_TOKEN` se scrie sub numele pe care îl
+          # citește codul: `GITHUB_TOKEN`.
+          # `SESSION_SECRET` + `ADMIN_EMAIL` sunt și ele EXCLUSE (9 aug): sunt
+          # stare de IDENTITATE a serverului, nu secrete de aplicație — o rotire
+          # tăcută a lui SESSION_SECRET omoară TOATE cookie-urile (ownerul,
+          # logat, primea 403 „ca și cum nu sunt admin"), iar un ADMIN_EMAIL cu
+          # spațiu la coadă îl făcea „customer". Se schimbă doar cu mâna, pe VPS.
+          {
+            printf '%s' "$SECRETS_JSON" | jq -r '
+              to_entries[]
+              | select(.key | test("^(VPS_SSH_KEY|github_token|KELION_GITHUB_TOKEN|SESSION_SECRET|ADMIN_EMAIL)$") | not)
+              | select(.value != null and .value != "")
+              | "\(.key)=\(.value | @base64)"'
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+              printf 'GITHUB_TOKEN=%s\n' "$(printf '%s' "$GITHUB_TOKEN" | base64 -w0)"
+            fi
+          } | $SSH '
+            set -e
+            f=/root/kelion/kelionai.env
+            touch "$f"; chmod 600 "$f"
+            c=0
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              name="${line%%=*}"
+              val=$(printf "%s" "${line#*=}" | base64 -d)
+              # O valoare pe mai multe rânduri ar rupe fișierul env — o sărim și
+              # o SPUNEM, în loc s-o scriem stricat și să pară pusă. (Testul cu
+              # wc -l, NU un pattern multi-linie în `case`: newline-ul literal
+              # din pattern ieșea la coloana 0, ieșea din blocul `run: |` și
+              # INVALIDA TOT WORKFLOW-UL — de-aia a picat la fiecare push.)
+              if [ "$(printf '%s' "$val" | wc -l)" -gt 0 ]; then
+                echo "::warning::$name are rânduri multiple — nu se poate pune în env, sărit"; continue
+              fi
+              grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
+              printf "%s=%s\n" "$name" "$val" >> "$f.tmp"
+              mv "$f.tmp" "$f"; chmod 600 "$f"
+              echo "  $name: scris (${#val} caractere) — valoarea NU se afișează"
+              c=$((c+1))
+            done
+            echo "total chei scrise/actualizate: $c"
+            if [ "$c" -eq 0 ]; then
+              echo "::warning::Niciun secret setat în GitHub. Adaugă-le în Settings → Secrets → Actions."
+            fi
+          '
+
+          # CONSTRUCTORUL PE DeepInfra, PERMANENT (12 aug). RunPod serverless nu
+          # servea modelul de 30B (pornire la rece ~6 min + apoi 500 la inferență,
+          # măsurat) → mutat pe DeepInfra găzduit. MODELUL — ales pe MĂSURĂTORI, nu
+          # pe păreri (proba comparativă, 13 aug, un endpoint nou + înregistrare în
+          # index.ts):
+          #   • deepseek-ai/DeepSeek-V4-Pro — a DUS ordinul end-to-end: 19 pași,
+          #     fișier nou + import + register, 7 porți verzi, boot OK, PR #1050
+          #     auto-merge pe master. ALES PRIMAR (decizia ownerului).
+          #   • Qwen/Qwen2.5-72B-Instruct — rapid, bun la fișiere NOI, dar STÂLCEȘTE
+          #     editările precise pe fișiere mari (erori de sintaxă).
+          #   • moonshotai/Kimi-K3 — s-a BLOCAT la pasul 5, procesul a murit, 0 PR.
+          # constructor-agent.mjs rotește pe rezerve (Qwen2.5-72B, DeepSeek-V3,
+          # Llama-3.3-70B) dacă primarul s-ar supraîncărca.
+          # URL-ul + modelul NU sunt secrete, dar stăteau ca secrete VECHI (RunPod)
+          # în GitHub și reveneau la fiecare rulare. Le FORȚĂM aici, după scriere,
+          # ca vps-set-env să nu mai poată da constructorul înapoi pe RunPod/alt model.
+          # Cheia rămâne din secretul CONSTRUCTOR_DEEPSEEK_KEY (reală, pusă de owner).
+          $SSH '
+            set -e
+            f=/root/kelion/kelionai.env
+            touch "$f"; chmod 600 "$f"
+            for kv in \
+              "CONSTRUCTOR_DEEPSEEK_URL=https://api.deepinfra.com/v1/openai/chat/completions" \
+              "CONSTRUCTOR_DEEPSEEK_MODEL=deepseek-ai/DeepSeek-V4-Pro"; do
+              name="${kv%%=*}"
+              grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
+              printf "%s\n" "$kv" >> "$f.tmp"
+              mv "$f.tmp" "$f"; chmod 600 "$f"
+              echo "  FORȚAT pe DeepInfra: $name"
+            done
+          '
+
+          if [ "${RESTART:-true}" = "true" ]; then
+            echo "== Repornesc containerul ca să încarce env-ul nou (fără rebuild) =="
+            $SSH '
+              set -e
+              docker rm -f kelionai-app >/dev/null 2>&1 || true
+              # GIT_COMMIT_SHA se păstrează și la repornirea de aici (clona
+              # `deploy` = codul imaginii) — altfel /api/version recădea pe ora
+              # bootului și verificarea anti-fantomă orbea.
+              # ACELEAȘI volume ca la deploy.sh (14 aug): pw-cache LIPSEA aici —
+              # o repornire prin secret_publica pierdea Chromium-ul (browserul
+              # mâinilor murea până la următoarea publicare completă); iar
+              # /host/kelion:ro dă self-heal-ului ochii pe logurile gazdei.
+              docker run -d --name kelionai-app --restart unless-stopped \
+                --network host --env-file /root/kelion/kelionai.env \
+                -e PORT=8080 -e NODE_ENV=production \
+                -e GIT_COMMIT_SHA="$(git -C /root/kelion/repo rev-parse HEAD 2>/dev/null || true)" \
+                -v /root/kelion/pw-cache:/root/.cache/ms-playwright \
+                -v /root/kelion:/host/kelion:ro \
+                kelionai:latest >/dev/null
+              sleep 4
+              code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/version || echo 000)
+              echo "app repornit — /api/version HTTP $code"
+            '
+          fi

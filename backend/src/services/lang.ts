@@ -9,13 +9,31 @@
 // a reply it isn't confident about.
 
 const STOPWORDS: Record<string, string[]> = {
-  ro: ['și', 'este', 'sunt', 'pentru', 'nu', 'că', 'cu', 'la', 'în', 'te', 'să', 'ție', 'poți', 'mulțumesc', 'bună', 'salut', 'acum', 'aici', 'ești', 'așa', 'către', 'dumneavoastră'],
+  // ROMANIAN WITHOUT DIACRITICS (26 Jul, the mail test: "Buna ziua...
+  // multumesc" came out null → English fallback, breaking the "reply in the
+  // received language" rule). Romanians frequently write without diacritics —
+  // we add the sign-less variants that are NOT confused with other languages
+  // here (not "si"/"la"/"in", which are also Spanish/Italian/French/English).
+  ro: ['și', 'este', 'sunt', 'pentru', 'nu', 'că', 'cu', 'la', 'în', 'te', 'să', 'ție', 'poți', 'mulțumesc', 'bună', 'salut', 'acum', 'aici', 'ești', 'așa', 'către', 'dumneavoastră', 'buna', 'ziua', 'multumesc', 'stiu', 'poti', 'esti', 'catre', 'dumneavoastra', 'dori', 'rog', 'incepe', 'servicii'],
   es: ['el', 'la', 'los', 'las', 'que', 'para', 'con', 'una', 'por', 'usted', 'gracias', 'hola', 'está', 'puedo', 'ahora', 'aquí', 'buenos', 'días', 'tarea', 'listo', 'desarrollador'],
   pt: ['você', 'não', 'para', 'com', 'uma', 'obrigado', 'olá', 'está', 'agora', 'aqui', 'bom', 'dia', 'posso', 'coisa', 'então', 'boa', 'noite'],
   fr: ['le', 'la', 'les', 'des', 'que', 'pour', 'avec', 'une', 'vous', 'merci', 'bonjour', 'est', 'maintenant', 'ici', 'je', 'suis', 'nous'],
   it: ['il', 'la', 'che', 'per', 'con', 'una', 'lei', 'grazie', 'ciao', 'sono', 'adesso', 'qui', 'posso', 'buongiorno', 'cosa'],
   en: ['the', 'and', 'you', 'for', 'with', 'that', 'this', 'thanks', 'hello', 'now', 'here', 'can', 'your', 'good', 'morning', 'done', 'task', 'developer'],
   de: ['der', 'die', 'das', 'und', 'für', 'mit', 'nicht', 'sie', 'danke', 'hallo', 'jetzt', 'hier', 'kann', 'ich', 'guten'],
+}
+
+// Strong single-word language signals. When a short utterance contains one of
+// these, we commit immediately instead of waiting for a full sentence.
+const CLEAR_KEYWORDS: Record<string, string[]> = {
+  // + the diacritic-less variants that stay clearly Romanian (see the note above).
+  ro: ['bună', 'salut', 'mulțumesc', 'noroc', 'salutare', 'ție', 'poți', 'ești', 'așa', 'către', 'buna', 'multumesc', 'ziua', 'poti', 'esti'],
+  es: ['hola', 'gracias', 'claro', 'buenos', 'días', 'está', 'puedo', 'listo', 'tarea'],
+  pt: ['olá', 'obrigado', 'bom', 'dia', 'boa', 'noite', 'você', 'então', 'coisa'],
+  fr: ['bonjour', 'merci', 'suis', 'nous', 'maintenant', 'bonsoir', 'salut'],
+  it: ['ciao', 'grazie', 'buongiorno', 'sono', 'posso', 'cosa', 'adesso'],
+  en: ['hello', 'thanks', 'morning', 'developer', 'done', 'task', 'good'],
+  de: ['hallo', 'danke', 'guten', 'kann', 'ich', 'jetzt'],
 }
 
 // Characters that strongly indicate a specific language (cheap tie-breakers).
@@ -34,20 +52,63 @@ export function primaryLang(tag: string | undefined | null): string | null {
   return m ? m[1].toLowerCase() : null
 }
 
+// Language names in English, for instructions to the models (e.g. "reply in
+// Romanian"). Shared between chat and voice so we don't duplicate the map in
+// two places. Exported: chat.ts had an identical copy ("LANG_NAMES") — it
+// uses this one (the permanent principle: unique, no duplicates).
+export const LANG_LABELS: Record<string, string> = {
+  ro: 'Romanian', en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese',
+  it: 'Italian', de: 'German', nl: 'Dutch', pl: 'Polish', ru: 'Russian',
+  uk: 'Ukrainian', tr: 'Turkish', ar: 'Arabic', zh: 'Chinese', ja: 'Japanese',
+  ko: 'Korean', hi: 'Hindi',
+}
+
+/** English label for a language tag ("ro-RO" → "Romanian"); fallback English. */
+export function langLabel(tag: string | undefined | null): string {
+  return LANG_LABELS[primaryLang(tag) ?? 'en'] ?? 'English'
+}
+
 /**
  * Best-guess language of `text`, or null when not confident. Returns a 2-letter
  * code. Needs a real amount of text and a clear winner to commit.
+ *
+ * `previousLang` is used as a fallback for very short or ambiguous utterances
+ * ("da", "ok", "thanks") so the conversation does not lose its established
+ * language. It is NOT used to override strong new-language signals.
  */
-export function detectLang(text: string): string | null {
+export function detectLang(text: string, previousLang?: string | null): string | null {
   const clean = text
     .toLowerCase()
     .replace(/[^\p{L}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  if (clean.length < 8) return null // too little to judge
+  if (!clean) return null
 
   const tokens = clean.split(' ')
   const set = new Set(tokens)
+
+  // Heuristic 1: short, clear keywords (e.g. "bună", "hola", "danke").
+  // Commit immediately when exactly one language has a clear keyword hit.
+  let keywordHit: string | null = null
+  for (const [lang, words] of Object.entries(CLEAR_KEYWORDS)) {
+    if (words.some((w) => set.has(w))) {
+      if (keywordHit) {
+        keywordHit = null // ambiguous keyword mix → fall through to scoring
+        break
+      }
+      keywordHit = lang
+    }
+  }
+  if (keywordHit) return keywordHit
+
+  // Heuristic 2: very short/ambiguous utterances inherit the previous language.
+  const shortThreshold = 8
+  if (clean.length < shortThreshold) {
+    const fallback = primaryLang(previousLang)
+    if (fallback && STOPWORDS[fallback]) return fallback
+    return null
+  }
+
   const scores: Record<string, number> = {}
   for (const [lang, words] of Object.entries(STOPWORDS)) {
     let s = 0
@@ -65,6 +126,11 @@ export function detectLang(text: string): string | null {
   // Commit only on a clear, non-trivial win (guards against false positives on
   // proper nouns, code, or mixed short text).
   if (topScore >= 2 && topScore >= second + 2) return topLang
+
+  // Heuristic 3: ambiguous longer text also falls back to the previous language
+  // when available, so a drifting middle sentence does not reset the conversation.
+  const fallback = primaryLang(previousLang)
+  if (fallback && STOPWORDS[fallback]) return fallback
   return null
 }
 
@@ -99,13 +165,21 @@ const SCRIPT_LANGS: { re: RegExp; code: string }[] = [
 ]
 
 /** Best-guess SPEECH language (BCP-47) of a message, or null when unsure. */
-export function detectSpeechLang(text: string): string | null {
+export function detectSpeechLang(text: string, previousLang?: string | null): string | null {
   const clean = (text ?? '').trim()
-  if (clean.length < 8) return null // too short to be reliable
+  if (!clean) return null
   for (const s of SCRIPT_LANGS) if (s.re.test(clean)) return s.code
-  const two = detectLang(clean)
+  const two = detectLang(clean, previousLang)
   return two ? (BCP47[two] ?? null) : null
 }
+
+// The languages the app actually SUPPORTS (i18n + voice persona). We NEVER
+// persist a language outside this set: the live proof (24 Jul) — Romanian
+// speech was heard as RUSSIAN, and a blind commit would have pinned "ru" for
+// the user and poisoned all sessions. A nonsense transcription (Russian,
+// Ukrainian etc.) is ignored; the established language stays the real one
+// (or English by default).
+const SUPPORTED_LANGS = new Set(['en', 'ro', 'fr', 'es', 'pt', 'it', 'de'])
 
 // Per-user "pending switch" state: a NEW language seen once, waiting for its
 // confirming second message. In-memory is fine — losing it merely re-asks for
@@ -122,9 +196,13 @@ export function trackSpeechLang(
   text: string,
   current: string | null | undefined,
 ): string | null {
-  const seed = detectSpeechLang(text)
+  const seed = detectSpeechLang(text, current)
   if (!seed) return null
   const base = (c: string): string => c.toLowerCase().split('-')[0]
+  // GUARD: we NEVER commit a language outside the supported set (a wrong
+  // transcription — e.g. Romanian heard as Russian — must not become the
+  // preference).
+  if (!SUPPORTED_LANGS.has(base(seed))) return null
   if (current && base(seed) === base(current)) {
     pendingSwitch.delete(email) // matches the established language — no switch
     return null

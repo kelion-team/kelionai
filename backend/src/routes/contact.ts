@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
+import { saveContactMessage, marcheazaContactEmailat } from '../db.js'
 import {
   mailEnabled,
   sendMail,
@@ -61,14 +62,36 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !message) {
       return reply.code(400).send({ error: 'bad_request', message: 'email and message required' })
     }
+
+    // 0) ALWAYS SAVE to the DB, BEFORE any email (bug 10 Jul: "contact
+    // messages are not sent"). The cause: if mail wasn't configured (empty
+    // MAIL_PASS) or sendMail failed silently (fire-and-forget), the message
+    // was lost completely — the UI said "sent", but it reached nowhere. Now
+    // it is persisted guaranteed and visible in the admin's Inbox; the email
+    // is just best-effort forwarding.
+    // AUDIT ADMIN (3 aug): `emailed` era scris ca `mailEnabled()` — adică
+    // „mailul e CONFIGURAT", nu „mailul a PLECAT". La un SMTP picat rândul
+    // rămânea cu ✉️ pentru un email care n-a ajuns nicăieri. Acum: salvăm cu
+    // emailed=false și marcăm true DOAR după ce sendMail chiar a întors true.
+    const storedId = await saveContactMessage({
+      name,
+      email,
+      subject,
+      message,
+      department,
+      lang,
+      emailed: false,
+    })
+    const stored = storedId != null
+
     if (!mailEnabled()) {
-      // The form is live but the mailbox isn't wired yet — accept gracefully so
-      // the UI can say "received" without falsely promising delivery.
-      return reply.send({ ok: true, delivered: false })
+      // Mail isn't wired, but the message IS saved — the owner sees it in the Inbox.
+      return reply.send({ ok: true, stored, delivered: false })
     }
 
-    // 1) Forward the full enquiry to the owner. Escape EVERY interpolated field —
-    // name/subject/department vin de la un vizitator anonim (XSS stocat în inbox).
+    // 1) Forward the full enquiry to the owner. Escape EVERY interpolated
+    // field — name/subject/department come from an anonymous visitor (stored
+    // XSS in the inbox).
     const esc = (s: string): string =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     const adminHtml = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;">
@@ -79,11 +102,15 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
       <p style="white-space:pre-wrap;">${esc(message)}</p>
     </div>`
+    // Fire-and-forget pentru VITEZA răspunsului către vizitator, dar rezultatul
+    // NU se aruncă: `emailed` devine true doar când sendMail a raportat succes.
     void sendMail({
       to: config.mail.forwardTo,
       subject: `[Contact · ${department}] ${subject || 'no subject'}`,
       html: adminHtml,
       replyTo: email,
+    }).then((sent) => {
+      if (sent && storedId != null) void marcheazaContactEmailat(storedId)
     })
 
     // 2) Send the sender a royal-letter acknowledgement in their language.
@@ -100,6 +127,6 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       }),
     })
 
-    return reply.send({ ok: true, delivered: true })
+    return reply.send({ ok: true, stored, delivered: true })
   })
 }

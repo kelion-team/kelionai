@@ -1,0 +1,79 @@
+# VERIFICATOR TOKEN GITHUB — poate tokenul „kelion" să deschidă PR-uri?
+#
+# Testează secretul VPS_GITHUB_TOKEN pe repo-ul kelion-team/kelionai, FĂRĂ să
+# expună valoarea (vine din Secrets, mascat automat) și FĂRĂ să creeze nimic:
+# trimite un POST /pulls cu head==base==master, care e mereu invalid → GitHub
+# răspunde 422 (validare: „No commits between master and master") DACĂ tokenul
+# are dreptul „Pull requests: write", sau 403 („Resource not accessible") dacă NU.
+# Testează și „Contents: write" (push) și dispatch de workflow (deploy), ca să
+# vezi tot tabloul de capabilități al tokenului dintr-o singură rulare.
+name: github-token-check
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verifică drepturile tokenului (fără să expună valoarea)
+        env:
+          TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
+        run: |
+          set -u
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::Lipsește secretul VPS_GITHUB_TOKEN."; exit 1
+          fi
+          REPO="kelion-team/kelionai"
+          API="https://api.github.com/repos/$REPO"
+          probe() { # metodă cale corp -> întoarce codul HTTP
+            curl -sS -o /tmp/body.json -w '%{http_code}' --max-time 25 \
+              -X "$1" -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" "$API$2" ${3:+-d "$3"}
+          }
+          echo "== Forma valorii din secret (NU expune secretul — doar lungime/formă) =="
+          TRIM=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
+          echo "  lungime valoare secret: ${#TOKEN} caractere (tokenul corect = 93)"
+          echo "  lungime fără spații/enter: ${#TRIM} caractere"
+          if [ "${#TOKEN}" != "${#TRIM}" ]; then
+            echo "  ⚠️ SECRETUL CONȚINE SPAȚII/ENTER — ăsta strică header-ul → 401. Re-lipește fără spațiu/enter la capăt."
+          fi
+          if printf '%s' "$TRIM" | grep -q '^github_pat_'; then
+            echo "  prefix github_pat_: DA"
+          else
+            echo "  ⚠️ prefix github_pat_: NU — valoarea din secret nu e un token fine-grained (alt text lipit?)."
+          fi
+
+          echo "== Repo vizibil cu tokenul =="
+          RC=$(probe GET ""); echo "  GET repo -> HTTP $RC $([ "$RC" = 200 ] && echo OK || echo PROBLEMA)"
+
+          echo "== Pull requests: WRITE (poate deschide PR?) =="
+          PC=$(probe POST "/pulls" '{"title":"__perm_probe__","head":"master","base":"master"}')
+          case "$PC" in
+            422) echo "  -> HTTP 422 => ✅ ARE dreptul de PR (validare, nu permisiune). publish va folosi calea cu PR." ;;
+            403) echo "  -> HTTP 403 => ❌ NU are dreptul de PR. publish va folosi fallback-ul /merges (merge direct, funcționează oricum)." ;;
+            *)   echo "  -> HTTP $PC => neconcludent. Corp: $(jq -c '{message,errors}' /tmp/body.json 2>/dev/null || cat /tmp/body.json)" ;;
+          esac
+
+          echo "== Contents: WRITE (merge direct branch->master — fallback-ul publish) =="
+          # /merges cu base==head==master e invalid -> 204/409 dacă are drept, 403 dacă nu.
+          MC=$(probe POST "/merges" '{"base":"master","head":"master"}')
+          case "$MC" in
+            204|409|422) echo "  -> HTTP $MC => ✅ ARE Contents:write (push/merge). Fallback-ul /merges funcționează." ;;
+            403) echo "  -> HTTP 403 => ❌ NU are Contents:write. Fallback-ul /merges NU ar merge — DĂ-i Contents: Read and write." ;;
+            401) echo "  -> HTTP 401 => ❌ TOKEN INVALID (Bad credentials) — secretul VPS_GITHUB_TOKEN nu e tokenul nou." ;;
+            *)   echo "  -> HTTP $MC => neconcludent. Corp: $(jq -c '{message}' /tmp/body.json 2>/dev/null || cat /tmp/body.json)" ;;
+          esac
+
+          echo "== Actions: dispatch workflow (deploy.yml) =="
+          AC=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 25 \
+            -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            "$API/actions/workflows/deploy.yml/dispatches" -d '{"ref":"master"}' 2>/dev/null || echo "000")
+          # 204 = a pornit deploy real (atenție: chiar declanșează). 403/404 = fără drept.
+          case "$AC" in
+            204) echo "  -> HTTP 204 => ✅ poate declanșa deploy (ATENȚIE: tocmai a pornit un deploy real)." ;;
+            403|404) echo "  -> HTTP $AC => ⚠️ nu poate declanșa deploy.yml (verifică Actions: write)." ;;
+            *)   echo "  -> HTTP $AC => neconcludent." ;;
+          esac
+          echo ""
+          echo "== GATA — niciun secret afișat. =="

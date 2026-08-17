@@ -45,6 +45,11 @@ function isPrivateIPv4(ip: string): boolean {
 }
 function isPrivateIPv6(ip: string): boolean {
   const low = ip.toLowerCase()
+  // IPv4 MAPPED INTO IPv6 (security audit 27 Jul): `::ffff:169.254.169.254`
+  // passed the filters — net.isIP sees it as IPv6, but it is a private IPv4
+  // address in disguise. We unwrap it and judge it by the IPv4 rules.
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(low)
+  if (mapped) return isPrivateIPv4(mapped[1])
   return low === '::1' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80')
 }
 async function assertPublicUrl(raw: string): Promise<URL> {
@@ -71,6 +76,25 @@ interface Session {
 const sessions = new Map<string, Session>()
 const MAX_SESSIONS = 8
 const IDLE_MS = 10 * 60_000
+
+// ── PROBA BROWSERULUI — LANSARE REALĂ, NU „instalarea a zis ok" (owner,
+// 15 aug: „browserul acesta nu funcționează" + „ce-ar fi să testezi tot ce
+// faci și lași funcțional"). system_health o cheamă ca becul „browserul
+// mâinilor" să arate starea MĂSURATĂ oricând, nu doar la publicare. Cache 10
+// minute: lansarea costă ~1s, health-ul rămâne ieftin; eșecul păstrează
+// EROAREA reală (biblioteci lipsă, binar absent), nu un „nu merge" generic.
+const PROBA_BROWSER_MS = 10 * 60_000
+let probaBrowser: { la: number; ok: boolean; motiv: string } | null = null
+export async function probaBrowserulMainilor(): Promise<{ ok: boolean; motiv: string }> {
+  if (probaBrowser && Date.now() - probaBrowser.la < PROBA_BROWSER_MS) return probaBrowser
+  try {
+    const b = await getBrowser()
+    probaBrowser = { la: Date.now(), ok: b.isConnected(), motiv: b.isConnected() ? '' : 'lansat dar deconectat' }
+  } catch (e) {
+    probaBrowser = { la: Date.now(), ok: false, motiv: String((e as Error)?.message ?? e).slice(0, 200) }
+  }
+  return probaBrowser
+}
 
 let sharedBrowser: Browser | null = null
 async function getBrowser(): Promise<Browser> {
@@ -143,6 +167,12 @@ export interface BrowserSnapshot {
   text: string
   elements: BrowserElement[]
   shotUrl: string
+  /** Captura paginii ca jpeg base64 — OCHII modelului (9 aug, ownerul:
+   *  „sistemul nu dă lui Kelion poza reală pentru analiză"): până acum captura
+   *  ajungea DOAR pe monitor (pentru om), iar modelul primea un URL pe care
+   *  nu-l poate privi. Gol în modul discret (nimic nu iese de pe pagina de
+   *  card) și la eșecul capturii. */
+  shotB64: string
 }
 export type BrowserResult = BrowserSnapshot | { error: string }
 
@@ -188,19 +218,46 @@ function isNavigationRace(e: unknown): boolean {
   )
 }
 
-async function takeSnapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
+// ── DISCREET MODE: the page where a card is typed goes NOWHERE ─────────────
+//
+// Adrian, 31 Jul: "it should operate for me only when I ask, using the voice
+// recognition system, as heightened security."
+//
+// The voiceprint solves WHO is allowed. The leak remains though: the browser
+// takes a screenshot at every step (which reaches the monitor) and returns the
+// page text to the model. On a payment page, both would carry the card number
+// — into images, into the turn journal, into the conversation history.
+//
+// While a session is "discreet": ZERO screenshots, and any 12-19 digit run is
+// masked out of the page text. This is not politeness — it is the difference
+// between "entered the card" and "left the card in three places".
+const discret = new Set<string>()
+export function setModDiscret(email: string, pornit: boolean): void {
+  if (pornit) discret.add(email)
+  else discret.delete(email)
+}
+/** Masks long runs of digits (card, IBAN) in a text. */
+export function mascheazaCifre(text: string): string {
+  return text.replace(/\b(?:\d[ -]?){12,19}\b/g, (m) => `«${m.replace(/\D/g, '').length} cifre ascunse»`)
+}
+
+async function takeSnapshot(page: Page, baseUrl: string, email = ''): Promise<BrowserSnapshot> {
   const title = await page.title()
   const url = page.url()
   const elements = ((await page.evaluate(COLLECT_SCRIPT)) as BrowserElement[]) ?? []
-  const text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
+  let text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
+  if (email && discret.has(email)) {
+    // No screenshot (nothing would reach the monitor) and no digits in the text.
+    return { url, title, text: mascheazaCifre(text), elements, shotUrl: '', shotB64: '' }
+  }
   const buf = await page.screenshot({ type: 'jpeg', quality: 60 })
   const id = putShot(buf)
-  return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}` }
+  return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}`, shotB64: buf.toString('base64') }
 }
 
-async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
+async function snapshot(page: Page, baseUrl: string, email = ''): Promise<BrowserSnapshot> {
   try {
-    return await takeSnapshot(page, baseUrl)
+    return await takeSnapshot(page, baseUrl, email)
   } catch (e) {
     if (!isNavigationRace(e)) throw e
     // Give the SPA's redirect cascade a moment to settle, then retry once —
@@ -208,10 +265,9 @@ async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
     // fail the same way again and should propagate as before.
     await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
     await page.waitForTimeout(500)
-    return await takeSnapshot(page, baseUrl)
+    return await takeSnapshot(page, baseUrl, email)
   }
 }
-
 // ── public actions ───────────────────────────────────────────────────────
 export async function browserOpen(
   email: string,
@@ -245,54 +301,32 @@ export async function browserOpen(
     return { error: 'navigation_failed' }
   }
   try {
-    return await snapshot(session.page, baseUrl)
+    return await snapshot(session.page, baseUrl, email)
   } catch (e) {
     console.error('[browser] snapshot failed:', e instanceof Error ? e.message.slice(0, 300) : e)
     return { error: 'snapshot_failed' }
   }
 }
 
-// CRAWL (cererea #24): deschide un site și îl parcurge PAGINĂ CU PAGINĂ — adună
-// linkurile interne din prima pagină și vizitează până la maxPages, întorcând
-// titlul + textul fiecăreia, ca să poată fi trecute în revistă. Refolosește
-// browserOpen (aceeași sesiune, navighează în ea), fără dublare de infrastructură.
-export async function crawlSite(
+// The routines that ACT on the page (click/type) share the same skeleton:
+// valid session → the action in try/catch (element_not_found) → wait for load
+// + 300ms → snapshot. Only `act` differs. Single source (no duplicates).
+async function withPageAction(
   email: string,
   baseUrl: string,
-  startUrl: string,
-  maxPages = 8,
-): Promise<{ pages: { url: string; title: string; text: string }[]; error?: string }> {
-  const first = await browserOpen(email, baseUrl, startUrl)
-  if ('error' in first) return { pages: [], error: first.error }
-  let host = ''
+  act: (page: Page) => Promise<void>,
+): Promise<BrowserResult> {
+  const session = sessions.get(email)
+  if (!session) return { error: 'no_session' }
+  session.lastUsed = Date.now()
   try {
-    host = new URL(first.url).host
+    await act(session.page)
   } catch {
-    return { pages: [], error: 'bad_url' }
+    return { error: 'element_not_found' }
   }
-  const pages = [{ url: first.url, title: first.title, text: first.text }]
-  const seen = new Set([first.url.replace(/#.*$/, '')])
-  const queue: string[] = []
-  for (const el of first.elements) {
-    if (!el.href) continue
-    try {
-      const abs = new URL(el.href, first.url)
-      abs.hash = ''
-      if (abs.host === host && !seen.has(abs.toString()) && !queue.includes(abs.toString())) {
-        queue.push(abs.toString())
-      }
-    } catch {
-      /* link malformat — sărit */
-    }
-  }
-  for (const link of queue) {
-    if (pages.length >= maxPages) break
-    seen.add(link)
-    const snap = await browserOpen(email, baseUrl, link)
-    if (!('error' in snap)) pages.push({ url: snap.url, title: snap.title, text: snap.text })
-  }
-  await browserClose(email).catch(() => {})
-  return { pages }
+  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
+  await session.page.waitForTimeout(300)
+  return snapshot(session.page, baseUrl, email)
 }
 
 export async function browserClick(
@@ -300,17 +334,7 @@ export async function browserClick(
   baseUrl: string,
   index: number,
 ): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
-  try {
-    await session.page.click(`[data-kelion-idx="${index}"]`, { timeout: 5000 })
-  } catch {
-    return { error: 'element_not_found' }
-  }
-  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
-  await session.page.waitForTimeout(300)
-  return snapshot(session.page, baseUrl)
+  return withPageAction(email, baseUrl, (page) => page.click(`[data-kelion-idx="${index}"]`, { timeout: 5000 }))
 }
 
 export async function browserType(
@@ -320,26 +344,18 @@ export async function browserType(
   text: string,
   submit: boolean,
 ): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
   const sel = `[data-kelion-idx="${index}"]`
-  try {
-    await session.page.fill(sel, text, { timeout: 5000 })
-    if (submit) await session.page.press(sel, 'Enter')
-  } catch {
-    return { error: 'element_not_found' }
-  }
-  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
-  await session.page.waitForTimeout(300)
-  return snapshot(session.page, baseUrl)
+  return withPageAction(email, baseUrl, async (page) => {
+    await page.fill(sel, text, { timeout: 5000 })
+    if (submit) await page.press(sel, 'Enter')
+  })
 }
 
 export async function browserRead(email: string, baseUrl: string): Promise<BrowserResult> {
   const session = sessions.get(email)
   if (!session) return { error: 'no_session' }
   session.lastUsed = Date.now()
-  return snapshot(session.page, baseUrl)
+  return snapshot(session.page, baseUrl, email)
 }
 
 export async function browserBack(email: string, baseUrl: string): Promise<BrowserResult> {
@@ -351,7 +367,7 @@ export async function browserBack(email: string, baseUrl: string): Promise<Brows
   } catch {
     /* nothing to go back to — still return the current page */
   }
-  return snapshot(session.page, baseUrl)
+  return snapshot(session.page, baseUrl, email)
 }
 
 export async function browserScroll(
@@ -365,7 +381,45 @@ export async function browserScroll(
   const dy = direction === 'down' ? 700 : -700
   await session.page.evaluate(`window.scrollBy(0, ${dy})`).catch(() => {})
   await session.page.waitForTimeout(200)
-  return snapshot(session.page, baseUrl)
+  return snapshot(session.page, baseUrl, email)
+}
+
+// FULL COMPUTER USE (Adrian, 13 Jul): besides click/type/scroll on indexed
+// elements, Kelion can press KEYS (Tab/Escape/arrows/Enter/combinations) and
+// can click on COORDINATES (x,y) — for widgets that are not in the indexable
+// DOM (canvas, maps, custom menus). These close the gap to real "computer
+// use", keeping the same session/screenshot.
+
+// Presses a key or a combination on the current page. Playwright format:
+// 'Enter', 'Tab', 'Escape', 'ArrowDown', 'Control+A', 'Shift+Tab' etc.
+export async function browserKey(email: string, baseUrl: string, key: string): Promise<BrowserResult> {
+  const session = sessions.get(email)
+  if (!session) return { error: 'no_session' }
+  session.lastUsed = Date.now()
+  // Safety barrier: only keys/combinations of the expected shape (key names
+  // + modifiers), not arbitrary injected text.
+  if (!/^([A-Za-z0-9]+|(Control|Shift|Alt|Meta)(\+(Control|Shift|Alt|Meta))*\+[A-Za-z0-9]+|Enter|Tab|Escape|Backspace|Delete|Home|End|PageUp|PageDown|Arrow(Up|Down|Left|Right)|Space)$/.test(key)) {
+    return { error: 'bad_key' }
+  }
+  try {
+    await session.page.keyboard.press(key)
+  } catch {
+    return { error: 'key_failed' }
+  }
+  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
+  await session.page.waitForTimeout(250)
+  return snapshot(session.page, baseUrl, email)
+}
+
+// Click on coordinates (x,y) in the viewport (1280×800). For elements the
+// indexed selector cannot catch (canvas, maps, custom UI).
+export async function browserClickAt(email: string, baseUrl: string, x: number, y: number): Promise<BrowserResult> {
+  // It used to have a hand-copied skeleton (session → action → wait →
+  // snapshot), even though `withPageAction` exists exactly for that. Here
+  // there is a single source.
+  const cx = Math.max(0, Math.min(1280, Math.round(x)))
+  const cy = Math.max(0, Math.min(800, Math.round(y)))
+  return withPageAction(email, baseUrl, (page) => page.mouse.click(cx, cy))
 }
 
 export async function browserClose(email: string): Promise<void> {

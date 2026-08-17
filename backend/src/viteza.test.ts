@@ -1,0 +1,67 @@
+import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+
+// ── VITEZA — garanțiile misiunii de latență (2 aug) ─────────────────────────
+// Măsurat live și prin probă directă (detaliile în config.ts și services/cursa.ts):
+//   • cursa modelelor ușoare aștepta TOȚI concurenții (Promise.all) → 18,6s
+//     la o tură de chit-chat, deși gemini-direct răspunsese în 2-4s;
+//   • tura cu unelte (vremea) pornea pe gemma-4-26b:free → 22s + 37s pe
+//     payload-ul real, uneori gol după 70s → cei ~38s ai ownerului;
+//   • gemini-direct: 1,2s + 1,0s cu apelul de unealtă CORECT, pe același payload.
+// Aici stă garda de sursă: reparațiile măsurate să nu dispară la un refactor.
+// (3 aug: cursa și pool-ul OpenRouter au fost extirpate — vezi mai jos.)
+
+const chat = readFileSync(new URL('./routes/chat.ts', import.meta.url), 'utf8')
+const orchestrator = readFileSync(new URL('./services/orchestrator.ts', import.meta.url), 'utf8')
+const config = readFileSync(new URL('./config.ts', import.meta.url), 'utf8')
+
+describe('viteza — reparațiile măsurate rămân în sursă', () => {
+  // (3 aug — extirparea OpenRouter: cursa pe 3 modele a dispărut cu tot cu
+  // pool-ul de concurenți; garanția de viteză e acum creierul Gemini unic pe
+  // TOATE turele — 1,2s + 1,0s măsurat pe payload-ul real.)
+  it('cursa pe mai mulți concurenți nu mai există (nu are pe cine să alerge)', () => {
+    expect(chat).not.toContain('primulCastigator')
+    expect(chat).not.toMatch(/Promise\.all\(curse\)/)
+  })
+
+  it('toate turele merg pe creierul Gemini (google-direct); pe turele GRELE + CREIER_DUBLU → creierul real, tot google-direct', () => {
+    // CREIER DUBLU (13 aug): fața rapidă (orChatModel) rămâne pe turele ușoare +
+    // pe cele grele cu flagul STINS; cu flagul pornit, turele grele merg pe
+    // creierul real (Pro) — care e TOT google-direct, deci invariantul „Gemini
+    // peste tot" se păstrează.
+    // `let` (nu `const`): plasa de mai jos comută modelul pe flash la epuizarea profundului.
+    expect(chat).toMatch(/let orchestratorModel =[\s\S]{0,160}config\.creierDublu && heavyTurn/)
+    expect(chat).toMatch(/google-direct\/\$\{config\.modelCreierProfund\}` : orChatModel/)
+    expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel/)
+  })
+
+  it('creierul profund are PLASĂ: dacă se epuizează, tura cade pe fața rapidă (nu moare)', () => {
+    // owner, 13 aug: „e urgent ca kelion să lucreze real" — profundul (Pro) e mai
+    // deștept dar mai expus la rate-limit; dacă se epuizează ȘI nimic n-a curs la
+    // om, cădem O DATĂ pe flash (orChatModel), ca turele de execuție să nu moară pe
+    // mesajul neutru. Rulează doar pe calea deja pierdută (`!r && !textFlowed`).
+    expect(chat).toMatch(/CREIER PROFUND EPUIZAT/)
+    expect(chat).toMatch(/orchestratorModel = orChatModel/)
+    expect(chat).toMatch(/if \(!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel\)/)
+  })
+
+  it('creierul de LUCRU = Gemini direct (regula lui Adrian, 3 aug; măsurat 1,2s + 1,0s cu apel de unealtă corect)', () => {
+    // Adrian, 3 aug: „creierul de LUCRU e Gemini PERMANENT"; 5 aug: „peste tot
+    // modelul avansat"; 6 aug (ultra-decis): un SINGUR model unic, sigilat, FĂRĂ
+    // env — toate treptele = getteri pe sursa unică (modelUnicDirect).
+    expect(config).toMatch(/get workDefault\(\)/)
+    expect(config).toMatch(/modelUnicDirect\(\)/)
+    expect(config).not.toContain('BRAIN_WORK_MODEL')
+  })
+
+  it('uneltele dintr-o rundă pleacă ÎN PARALEL, cu rezultatele în ordinea apelurilor', () => {
+    expect(orchestrator).toMatch(/Promise\.all\(\s*\(res\.toolCalls/)
+    // Ordinea rezultatelor = ordinea apelurilor (conversația e identică cu calea serială).
+    expect(orchestrator).toContain('iesiri[i]')
+  })
+
+  it('profilingul e cablat: durata fiecărei runde de creier ajunge în jurnal', () => {
+    expect(orchestrator).toContain('[TIMP]')
+    expect(chat).toContain('[TIMP] tura')
+  })
+})

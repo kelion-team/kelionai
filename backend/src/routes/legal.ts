@@ -90,9 +90,10 @@ const PRIVACY = page(
 
   <h2>Sub-processors</h2>
   <ul>
-    <li><strong>Anthropic</strong> — processes conversation content to generate replies.</li>
-    <li><strong>Google Cloud</strong> — speech-to-text and text-to-speech (voice).</li>
-    <li><strong>Railway</strong> — hosting and database.</li>
+    <li><strong>Google (Gemini API)</strong> — processes conversation content (text, and any images/audio you send) to generate replies.</li>
+    <li><strong>Google Cloud</strong> — speech-to-text and text-to-speech (voice), plus the Google skills you invoke.</li>
+    <li><strong>Serper</strong> — processes your web-search queries to return live Google results.</li>
+    <li><strong>Dedicated VPS server (EU)</strong> — hosting and database.</li>
   </ul>
 
   <h2>Retention</h2>

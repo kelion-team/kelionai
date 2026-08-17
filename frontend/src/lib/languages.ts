@@ -8,6 +8,10 @@ export interface SpeechLang {
   readonly label: string
 }
 
+// ALL languages stay (Adrian's order, Jul 25: "leave me all the languages,
+// don't remove anything"). The cut to 7 done earlier the same day was WRONG
+// — it shrank the product instead of fixing the real problem (automatic
+// language drift, which is guarded separately in services/lang.ts on the server).
 export const LANGS: readonly SpeechLang[] = [
   { code: 'en-US', label: 'English' },
   { code: 'ro-RO', label: 'Română' },
@@ -38,18 +42,18 @@ export const LANGS: readonly SpeechLang[] = [
   { code: 'vi-VN', label: 'Tiếng Việt' },
 ]
 
-// Pick the best starting language: an exact tag match for the browser locale,
-// else a base-language match, else English.
+// The recognizer's starting language (the final rule, Adrian Jul 24:
+// "default ENGLISH; after language identification the existing procedure
+// applies"). NO guessing from the browser language: we start from the
+// IDENTIFIED language (uiLang comes from the server mirror), otherwise
+// English. The later switching is done by the frame
+// {lang} from the server (applyLang), not us here.
 export function defaultSpeechLang(uiLang: string): string {
-  const nav = typeof navigator !== 'undefined' ? navigator.language : uiLang
-  const candidates = [nav, uiLang]
-  for (const c of candidates) {
-    const lc = c.toLowerCase()
-    const exact = LANGS.find((l) => l.code.toLowerCase() === lc)
-    if (exact) return exact.code
-    const base = lc.split('-')[0]
-    const byBase = LANGS.find((l) => l.code.toLowerCase().startsWith(base + '-'))
-    if (byBase) return byBase.code
-  }
+  const lc = (uiLang || 'en').toLowerCase()
+  const exact = LANGS.find((l) => l.code.toLowerCase() === lc)
+  if (exact) return exact.code
+  const base = lc.split('-')[0]
+  const byBase = LANGS.find((l) => l.code.toLowerCase().startsWith(base + '-'))
+  if (byBase) return byBase.code
   return 'en-US'
 }

@@ -1,19 +1,24 @@
-import { Suspense, useEffect, useState } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
-import AvatarModel from '../components/AvatarModel'
-import AvatarLoading from '../components/AvatarLoading'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import ContactModal from '../components/ContactModal'
-import { startGoogleLogin, startDemo } from '../lib/api'
+import VisitorChatWidget from '../components/VisitorChatWidget'
+import { startGoogleLogin } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
+import { raporteazaPagina } from '../lib/vizita'
 import { strings } from '../lib/i18n'
+import { PUBLIC_TEXT as PT } from '../lib/publicText'
+import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
+// Avatarul 3D — încărcat leneș (three.js scos din calea critică a landing-ului).
+const LandingAvatar = lazy(() => import('../components/LandingAvatar'))
 
 // The four install codes — one per platform. Click → enlarged for scanning.
 const QR_CODES = [
-  { key: 'win', label: '⊞ Windows', img: '/dl/qr-win.png' },
-  { key: 'linux', label: '🐧 Linux', img: '/dl/qr-linux.png' },
-  { key: 'ios', label: 'iOS', img: '/dl/qr-ios.png' },
-  { key: 'android', label: '🤖 Android', img: '/dl/qr-apk.png' },
+  // `href` = the INSTALL target (Adrian, Jul 26: "under each code there must be
+  // install that takes you to the install page") — the same place the code
+  // scan leads to, but on click, for someone already on the target device.
+  { key: 'win', label: '⊞ Windows', img: '/dl/qr-win.png', href: '/dl/Kelionai-Setup.exe' },
+  { key: 'linux', label: '🐧 Linux', img: '/dl/qr-linux.png', href: '/dl/Kelionai-linux.zip' },
+  { key: 'ios', label: 'iOS', img: '/dl/qr-ios.png', href: 'https://apps.apple.com/app/id6786766714' },
+  { key: 'android', label: '🤖 Android', img: '/dl/qr-apk.png', href: '/dl/Kelionai.apk' },
 ] as const
 type QrCode = (typeof QR_CODES)[number]
 
@@ -34,69 +39,76 @@ export default function Landing({ error }: { error?: string | null }) {
   // The start page is ALWAYS English — the professional international default.
   // (The conversation itself still adapts to the visitor's own language.)
   const t = strings('en')
-  const [busy, setBusy] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const [qrZoom, setQrZoom] = useState<QrCode | null>(null)
-  const [notice, setNotice] = useState<string | null>(
+  // The live version (same source as the browser watermark) — we show it under
+  // each QR code as proof that the installed app is EXACTLY the browser
+  // version; it refreshes itself on every deploy (fetchServerVersion).
+  const [srv, setSrv] = useState<ServerVersion | null>(null)
+  useEffect(() => {
+    let alive = true
+    const refresh = (): void => {
+      void fetchServerVersion().then((j) => {
+        if (alive && j) setSrv(j)
+      })
+    }
+    refresh()
+    const id = window.setInterval(refresh, 60_000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
+  // Error arriving via URL (e.g. ?error=closed). Shown once; doesn't change
+  // after mount (there's no probe flow left to update it).
+  const [notice] = useState<string | null>(
     error ? (t[ERR_KEY[error] ?? 'errGeneric'] as string) : null,
   )
+  // Lead capture: a visitor leaves an email so the owner can reach them.
+  const [leadEmail, setLeadEmail] = useState('')
+  const [leadNote, setLeadNote] = useState('')
+  const [leadBusy, setLeadBusy] = useState(false)
+  const [leadSent, setLeadSent] = useState(false)
 
-  // Visit beacon: every arrival lands in the owner's analytics (server dedupes
-  // 6h; the sessionStorage guard just avoids re-firing on SPA re-renders).
-  useEffect(() => {
-    if (sessionStorage.getItem('kelion_visited')) return
-    sessionStorage.setItem('kelion_visited', '1')
-    void deviceFingerprint().then((fp) =>
-      fetch('/api/visit', {
+  async function submitLead(): Promise<void> {
+    if (leadBusy || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadEmail)) return
+    setLeadBusy(true)
+    const fp = await deviceFingerprint()
+    try {
+      const r = await fetch('/api/lead', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fp, ref: document.referrer }),
-      }).catch(() => {}),
-    )
-  }, [])
-
-  async function tryDemo(): Promise<void> {
-    if (busy) return
-    setBusy(true)
-    setNotice(null)
-    const fp = await deviceFingerprint()
-    const res = await startDemo(fp, document.referrer)
-    if (res === 'ok') {
-      window.location.href = '/' // reload into the live app on the demo session
-      return
+        body: JSON.stringify({ email: leadEmail, note: leadNote, fp }),
+      })
+      if (r.ok) {
+        setLeadSent(true)
+        setLeadEmail('')
+        setLeadNote('')
+      }
+    } catch {
+      /* ignore */
     }
-    setBusy(false)
-    setNotice(
-      res === 'already_used' ? t.trialUsed : res === 'cap_reached' ? t.trialBusy : t.errGeneric,
-    )
+    setLeadBusy(false)
   }
+
+  // Visit beacon: every arrival lands in the owner's analytics (server dedupes
+  // 6h). Eticheta „acasă" hrănește raportul „ce au vizitat" (owner, 13 aug).
+  useEffect(() => raporteazaPagina('acasă'), [])
 
   return (
     <div className="landing">
+      {/* THE MANUAL, top-right (Adrian): anyone, without an account, can read
+      everything the app does — picks their language and downloads it in that
+      language. */}
+      <a className="landing-manual-btn" href="/manual">{PT.userManual}</a>
       <div className="landing-hero">
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
-        <Canvas shadows camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
-          <color attach="background" args={['#0b0d12']} />
-          {/* Self-contained lighting (no remote HDR): a third-party CDN failure
-              must never leave the marketing hero black. Key + fill + cool rim. */}
-          <ambientLight intensity={0.75} />
-          <directionalLight position={[2, 3, 2]} intensity={1.7} castShadow />
-          <directionalLight position={[-2.5, 1.2, -2]} intensity={0.7} color="#8fb6ff" />
-          <Suspense fallback={null}>
-            <AvatarModel />
-          </Suspense>
-          <OrbitControls
-            enablePan={false}
-            enableZoom={false}
-            minPolarAngle={Math.PI / 2.3}
-            maxPolarAngle={Math.PI / 1.95}
-            minAzimuthAngle={-Math.PI / 60}
-            maxAzimuthAngle={Math.PI / 60}
-            target={[0, 0.7, 0]}
-          />
-        </Canvas>
-        <AvatarLoading />
+        {/* Avatarul 3D + AvatarLoading trăiesc în chunk-ul lazy LandingAvatar —
+            three.js nu mai blochează prima vopsire a hero-ului. */}
+        <Suspense fallback={null}>
+          <LandingAvatar />
+        </Suspense>
         <div className="landing-hero-fade" />
       </div>
 
@@ -117,15 +129,9 @@ export default function Landing({ error }: { error?: string | null }) {
           {notice && <p className="error">{notice}</p>}
 
           <div className="landing-cta">
-            <button
-              type="button"
-              className="cta-primary"
-              onClick={() => void tryDemo()}
-              disabled={busy}
-            >
-              {busy ? t.trialStarting : t.tryFree}
-            </button>
-            <button type="button" className="google-btn" onClick={startGoogleLogin}>
+            {/* No free trial (Adrian): the only way in is the Google account, then
+            buying credits. Nobody gets free minutes anymore. */}
+            <button type="button" className="google-btn cta-primary" onClick={startGoogleLogin}>
               <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
                 <path
                   fill="#FFC107"
@@ -146,6 +152,48 @@ export default function Landing({ error }: { error?: string | null }) {
               </svg>
               {t.signIn}
             </button>
+            {/* THE ORPHAN PAGES, LINKED (Jul 27 — built on the Jul 26 order but
+            never linked from the landing; the audit found them untouched by any
+            link): the email sign-in + the public prices. */}
+            <div className="landing-alt-links">
+              <a href="/login">{PT.emailSignIn}</a>
+              <span aria-hidden>·</span>
+              <a href="/credite">{PT.creditsPricing}</a>
+            </div>
+          </div>
+
+          <div className="landing-lead">
+            {leadSent ? (
+              <p className="landing-lead-done">{PT.leadThanks}</p>
+            ) : (
+              <>
+                <h3 className="landing-lead-title">{PT.leadTitle}</h3>
+                <div className="landing-lead-row">
+                  <input
+                    className="landing-lead-input"
+                    type="email"
+                    placeholder={PT.emailPlaceholder}
+                    value={leadEmail}
+                    onChange={(e) => setLeadEmail(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="landing-lead-btn"
+                    onClick={() => void submitLead()}
+                    disabled={leadBusy || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadEmail)}
+                  >
+                    {leadBusy ? PT.leadSending : PT.leadSend}
+                  </button>
+                </div>
+                <input
+                  className="landing-lead-input landing-lead-note"
+                  type="text"
+                  placeholder={PT.leadNotePlaceholder}
+                  value={leadNote}
+                  onChange={(e) => setLeadNote(e.target.value)}
+                />
+              </>
+            )}
           </div>
 
           <div className="landing-manual">
@@ -164,14 +212,27 @@ export default function Landing({ error }: { error?: string | null }) {
               .exe self-updates. Store targets get swapped in the moment a
               listing goes public (MS Store, Play, App Store). */}
           <div className="landing-qr">
-            <span className="landing-qr-hint">Scan to install — click a code to enlarge it</span>
+            <span className="landing-qr-hint">{PT.qrHint}</span>
             <div className="landing-qr-row">
               {QR_CODES.map((q) => (
                 <figure key={q.key}>
-                  <button type="button" className="qr-btn" onClick={() => setQrZoom(q)}>
-                    <img src={q.img} alt={`QR — ${q.label}`} width="96" height="96" />
-                  </button>
+                  {/* THE CODE IS AN INSTALL BUTTON (Adrian, Jul 26: „when you press the
+                  win code the win app installs... each according to his system”).
+                  Click/tap on the code → installs that platform; the enlarge-for-scanning
+                  stays on the 🔍 button. */}
+                  <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={PT.qrInstallLabel(q.label)}>
+                    <img src={q.img} alt={PT.qrAlt(q.label)} width="96" height="96" />
+                  </a>
                   <figcaption>{q.label}</figcaption>
+                  {/* The watermark number, under EVERY code — the same as in the browser;
+                  it proves the installed app is exactly the live version. */}
+                  <span className="qr-version">{versionLabel(srv)}</span>
+                  <a className="qr-install" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
+                    {PT.installBtn}
+                  </a>
+                  <button type="button" className="qr-zoom-btn" onClick={() => setQrZoom(q)} title={PT.zoomQr}>
+                    🔍
+                  </button>
                 </figure>
               ))}
             </div>
@@ -179,7 +240,7 @@ export default function Landing({ error }: { error?: string | null }) {
 
           <p className="landing-legal">
             <button type="button" className="landing-contact-link" onClick={() => setContactOpen(true)}>
-              Contact
+              {PT.contactLink}
             </button>{' '}
             · <a href="/privacy">{t.privacyLabel}</a> · <a href="/terms">{t.termsLabel}</a>
             <br />
@@ -199,14 +260,15 @@ export default function Landing({ error }: { error?: string | null }) {
           }}
         >
           <figure className="qr-zoom">
-            <img src={qrZoom.img} alt={`QR — ${qrZoom.label}`} />
+            <img src={qrZoom.img} alt={PT.qrAlt(qrZoom.label)} />
             <figcaption>
               {qrZoom.label}
-              <span className="qr-zoom-hint">Scan with your phone — tap anywhere to close</span>
+              <span className="qr-zoom-hint">{PT.qrZoomHint}</span>
             </figcaption>
           </figure>
         </div>
       )}
+      <VisitorChatWidget />
     </div>
   )
 }

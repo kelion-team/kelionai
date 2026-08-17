@@ -1,6 +1,33 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import jwt from 'jsonwebtoken'
 import { config, roleFor } from './config.js'
+
+// ── REFRESH TOKEN-UL GOOGLE NU CĂLĂTOREȘTE ÎN CLAR (audit 9 aug) ─────────────
+// JWT-ul e doar SEMNAT (JWS), nu criptat: payload-ul e base64url, lizibil de
+// oricine capturează cookie-ul, fără SESSION_SECRET. Refresh token-ul e o
+// credencială de LUNGĂ durată pentru Gmail/Calendar/Drive — de-aia se
+// criptează AES-256-GCM (cheie derivată din SESSION_SECRET) înainte să intre
+// în payload și se decriptează la citire. Cookie-urile vechi, cu tokenul în
+// clar, rămân valabile până expiră (decriptarea le lasă cum sunt).
+const cheiaRt = (): Buffer => createHash('sha256').update(`kelionai:rt:${config.sessionSecret}`).digest()
+const cripteazaRt = (txt: string): string => {
+  const iv = randomBytes(12)
+  const c = createCipheriv('aes-256-gcm', cheiaRt(), iv)
+  const enc = Buffer.concat([c.update(txt, 'utf8'), c.final()])
+  return `enc1:${iv.toString('base64url')}:${enc.toString('base64url')}:${c.getAuthTag().toString('base64url')}`
+}
+const decripteazaRt = (val: string): string | undefined => {
+  if (!val.startsWith('enc1:')) return val // cookie vechi, în clar — acceptat până expiră
+  try {
+    const [, ivB, encB, tagB] = val.split(':')
+    const d = createDecipheriv('aes-256-gcm', cheiaRt(), Buffer.from(ivB, 'base64url'))
+    d.setAuthTag(Buffer.from(tagB, 'base64url'))
+    return Buffer.concat([d.update(Buffer.from(encB, 'base64url')), d.final()]).toString('utf8')
+  } catch {
+    return undefined // token de nedescifrat (alt secret?) = ca și absent — nu crăpăm sesiunea
+  }
+}
 
 export const SESSION_COOKIE = 'kelionai_session'
 
@@ -8,12 +35,9 @@ export interface SessionUser {
   email: string
   name: string
   picture: string
-  role: 'admin' | 'customer' | 'demo'
+  role: 'admin' | 'customer'
   // Language from the user's Google account (e.g. "ro", "en-GB"). Drives UI language.
   locale: string
-  // For a free trial ("demo") session only: the epoch-ms when the 3 minutes end,
-  // so the frontend can show a live countdown and the conversion overlay at zero.
-  demoUntil?: number
   // Google OAuth access token + expiry (ms) for calling Google skills on the
   // user's behalf. The access token is valid ~1h; the refresh token (kept in the
   // signed, httpOnly session cookie) lets the chat route mint a fresh access
@@ -34,10 +58,11 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
     picture: user.picture,
     role: user.role,
     locale: user.locale,
-    demoUntil: user.demoUntil,
     googleAccessToken: user.googleAccessToken,
     googleTokenExp: user.googleTokenExp,
-    googleRefreshToken: user.googleRefreshToken,
+    // Criptat, nu în clar — vezi antetul. (setSession poate primi userul citit
+    // dintr-un JWT vechi cu tokenul necriptat; cripteazaRt îl sigilează atunci.)
+    googleRefreshToken: user.googleRefreshToken ? cripteazaRt(user.googleRefreshToken) : undefined,
   }
   const token = jwt.sign(payload, config.sessionSecret, { expiresIn: '30d' })
   reply.setCookie(SESSION_COOKIE, token, {
@@ -49,39 +74,10 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
   })
 }
 
-// The throwaway identity for one free trial. Generated up front so the SAME
-// email is stored on the visitor's analytics row AND used for the session —
-// that's the link that lets the owner click a trial and read its conversation.
-export function makeDemoEmail(): string {
-  return `demo-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}@demo.kelionai.app`
-}
-
-// Issue a short-lived free-trial ("demo") session: full access for `seconds`,
-// no Google skills, its own throwaway identity. The JWT itself expires a little
-// after the trial so the very last request doesn't 401 early.
-export function setDemoSession(reply: FastifyReply, seconds: number, email = makeDemoEmail()): void {
-  const payload: SessionUser = {
-    email,
-    name: 'Guest',
-    picture: '',
-    role: 'demo',
-    locale: 'en',
-    demoUntil: Date.now() + seconds * 1000,
-  }
-  const token = jwt.sign(payload, config.sessionSecret, { expiresIn: seconds + 15 })
-  reply.setCookie(SESSION_COOKIE, token, {
-    path: '/',
-    httpOnly: true,
-    secure: config.isProd,
-    sameSite: 'lax',
-    maxAge: seconds + 15,
-  })
-}
-
 export function getSessionUser(req: FastifyRequest): SessionUser | null {
-  // req.cookies e populat de @fastify/cookie pe rutele HTTP normale. Pe un
-  // UPGRADE WebSocket poate fi neparsat (undefined) → `?.` evită crash-ul și
-  // cădem pe header-ul brut, ca autentificarea prin sesiune să meargă și pe WS.
+  // req.cookies is populated by @fastify/cookie on normal HTTP routes. On a
+  // WebSocket UPGRADE it may be unparsed (undefined) → `?.` avoids the crash and
+  // we fall back to the raw header, so session auth works over WS too.
   let token = req.cookies?.[SESSION_COOKIE]
   if (!token) {
     const raw = req.headers.cookie
@@ -93,12 +89,82 @@ export function getSessionUser(req: FastifyRequest): SessionUser | null {
   if (!token) return null
   try {
     const u = jwt.verify(token, config.sessionSecret) as SessionUser
-    // Re-derivă rolul din email (W10 #5): rolul „înghețat" în JWT rămânea admin
-    // 30 de zile dacă ADMIN_EMAIL se schimba — revocarea de admin nu avea efect.
-    // Demo rămâne demo (identitate throwaway); restul, rol după emailul curent.
-    u.role = u.role === 'demo' ? 'demo' : roleFor(u.email)
+    // Re-derive the role from the email (W10 #5): the role "frozen" in the JWT
+    // stayed admin for 30 days if ADMIN_EMAIL changed — revoking admin had no effect.
+    u.role = roleFor(u.email)
+    // Refresh token-ul stă criptat în cookie — consumatorii primesc valoarea
+    // REALĂ; una de nedescifrat devine „absent", nu o sesiune moartă.
+    if (u.googleRefreshToken) u.googleRefreshToken = decripteazaRt(u.googleRefreshToken)
     return u
   } catch {
     return null
   }
+}
+
+// ── GARDUL „ești admin?" — O SINGURĂ DATĂ (jscpd, 10 aug) ────────────────────
+// Preambulul „citește sesiunea → 401 dacă e moartă → 403 dacă nu e admin" era
+// copiat identic în 54 de rute din admin.ts (poarta jscpd îl prindea). Aici, o
+// dată: întoarce userul sau `null` DUPĂ ce a trimis răspunsul de eroare. 401 pe
+// sesiune moartă ≠ 403 pe rol (regula 9 aug: un cookie expirat nu are voie să
+// arate ca „nu ești admin").
+// ── LEGITIMAȚIA DE SERVICIU A LUI KELION — ADMIN 2 (P9) ─────────────────────
+// (owner, 15 aug: „kelion in continuare nu are acces la panoul de control si
+// la restul, raporteaza de ce nu are acces ca admin 2?")
+//
+// MĂSURAT atunci: accesul lui la panou era ÎMPRUMUTAT din cookie-ul sesiunii
+// ownerului, iar pe voce (vocalLive) și în bucla autonomă (autonomie.ts)
+// cookie-ul nu se transmitea → admin_vezi primea 403 exact când lucra ca
+// admin 2. Legitimația de aici e a LUI: un token aleator pe viața procesului,
+// care NU părăsește niciodată procesul (adminVedere îl pune pe fetch-urile
+// către bucla locală) și e acceptat DOAR de pe loopback — se verifică
+// adresa REALĂ a socketului (req.socket.remoteAddress), nu req.ip, care sub
+// trustProxy ar crede antetul X-Forwarded-For al oricui.
+// Rutele care mișcă bani / restaurează baza rămân ale ownerului — poarta aia
+// stă în adminVedere (DOAR_OWNERUL) și nu se atinge de legitimația asta.
+import { randomBytes as octetiAleatori } from 'node:crypto'
+export const TOKEN_ADMIN_INTERN = octetiAleatori(32).toString('hex')
+const KELION_ADMIN_INTERN: SessionUser = {
+  email: 'kelion@kelionai.app', // apare în audit ca EL, nu ca ownerul
+  name: 'Kelion (admin 2)',
+  picture: '',
+  role: 'admin',
+  locale: 'ro',
+}
+const deLoopback = (req: FastifyRequest): boolean =>
+  /^(127\.|::1$|::ffff:127\.)/.test(String(req.socket?.remoteAddress ?? ''))
+
+export function cerAdmin(req: FastifyRequest, reply: FastifyReply): SessionUser | null {
+  const user = getSessionUser(req)
+  if (!user) {
+    const intern = req.headers['x-kelion-intern']
+    if (typeof intern === 'string' && intern.length > 0 && intern === TOKEN_ADMIN_INTERN && deLoopback(req)) {
+      return KELION_ADMIN_INTERN
+    }
+    void reply.code(401).send({ error: 'unauthorized' })
+    return null
+  }
+  if (user.role !== 'admin') {
+    void reply.code(403).send({ error: 'forbidden' })
+    return null
+  }
+  return user
+}
+
+// ── GARDUL „admin + :id întreg pozitiv" — O SINGURĂ DATĂ (jscpd, 3 aug) ──────
+// Șablonul „getSessionUser → 403 → Number(:id) → 400" apărea identic în trei
+// rute (constructor șterge/reia, cereri neacoperite șterge). Aici e o dată:
+// întoarce id-ul valid, sau null DUPĂ ce a scris deja răspunsul de refuz.
+export function adminSiId(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  rawId: string,
+): number | null {
+  // Gardul de admin, o singură sursă (cerAdmin) — 401 pe sesiune moartă, 403 pe rol.
+  if (!cerAdmin(req, reply)) return null
+  const id = Number(rawId)
+  if (!Number.isInteger(id) || id <= 0) {
+    void reply.code(400).send({ error: 'id_invalid' })
+    return null
+  }
+  return id
 }

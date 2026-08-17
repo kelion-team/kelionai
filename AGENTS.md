@@ -1,32 +1,87 @@
-# Kelionai — Project Rules (Warp AGENTS.md)
+# Kelionai — ghid pentru ORICE agent AI care lucrează în repo-ul ăsta
 
-Aceste reguli se aplică automat agenților Warp în acest repo.
-Complementează `CLAUDE.md`, `HANDOFF.md`, `STATUS.md`.
+Fișierul ăsta e citit automat de agenții care respectă standardul AGENTS.md
+(Cursor, Codex, Jules, aplicații desktop de agenți etc.). Același conținut, în
+formulare pentru alte unelte: `CLAUDE.md` (Claude) și `GEMINI.md` (agenți
+Gemini). **Dacă editezi regulile, editează toate trei.**
 
-## Proprietar și limbă
-- Răspunde proprietarului în **română**.
-- Owner / sole admin: `adrianenc11@gmail.com`.
-- Nu atinge arhiva veche `C:\Users\adria\Downloads\k`.
-- Nu inventa stări „OK” fără dovezi (probe HTTP 200, loguri, teste). Kelion nu minte.
+Proiectul: **Kelion** — asistent AI viu (avatar 3D, voce, vedere, skilluri
+Google), în producție la **kelionai.app**. Ownerul: Adrian
+(adrianenc11@gmail.com), singurul admin. **Răspunde-i în ROMÂNĂ.**
+
+## Citește ÎNTÂI, în ordinea asta
+1. **`AI-HANDOFF.md`** — SURSA DE ADEVĂR, întreținută activ: arhitectura
+   completă, fiecare rută/serviciu/componentă, schema DB, banii, CI, ce e mort
+   și ce e viu. (`HANDOFF.md` și `STATUS.md` sunt vechi — nu te lua după ele.)
+2. **`RAMAS-DE-FACUT.md`** — lista ownerului cu ce NU e făcut și ce NU merge,
+   cu dovezi pe fiecare rând.
+
+## Regulile care NU se negociază
+- **Production = master.** Orice merge pe master SE PUBLICĂ AUTOMAT pe
+  kelionai.app (veghea de pe VPS, ~9 minute, măsurat). **NICIODATĂ push direct
+  pe master**: ramură → PR → ownerul decide merge-ul.
+- **Nimic nu e „gata" fără verificare LIVE cu dovadă măsurată** (curl pe
+  kelionai.app; `/api/version` arată SHA-ul care chiar rulează). Ownerul
+  testează live, nu local.
+- **O valoare care nu vine dintr-o măsurătoare reușită = „nu pot verifica".**
+  Niciodată un număr inventat; niciodată un 0 rămas dintr-un request picat
+  prezentat ca fapt; un 2xx cu `ok:false` în corp e un DEFECT, nu un succes.
+- **Nu rula operații în masă pe ce n-ai citit.** (`git add -A` pe un merge
+  conflictual a băgat odată markere `<<<<<<<` în cod viu.)
+- **Chat/voce = latență mică** (prima vorbă sub 1s). Nu adăuga NIMIC pe drumul
+  unei fraze — orice verificare grea merge în faza de decizie, nu în vorbire.
+- **Repară rescriind modulul mic responsabil** — fără petice peste petice.
+- Nu atinge `C:\Users\adria\Downloads\k` — e proiectul VECHI, arhivat.
+- Când ownerul contrazice un raport al tău, PRIMUL loc în care cauți e propriul
+  tău cod care a produs raportul. De obicei el are dreptate.
+
+## Verificări OBLIGATORII înainte de orice commit
+```bash
+cd backend  && npx tsc --noEmit && npx vitest run   # totul verde
+cd frontend && npx tsc -b --force   # NU --noEmit: tsconfig.json e „solution" (files:[]) — --noEmit nu verifică NIMIC; Docker rulează tsc -b (măsurat 8 aug: --noEmit verde local, tsc -b roșu în deploy, publicarea blocată 20 min)
+node scripts/verifica-sintaxa.mjs                    # din rădăcină; pică pe markere de conflict
+```
+
+## Structura, pe scurt (harta completă: AI-HANDOFF.md §2)
+- `backend/` — Node + Fastify + TS: rute în `src/routes/`, servicii în `src/services/`
+- `frontend/` — React + Vite + TS: `src/pages/Stage.tsx`, `src/components/ChatPanel.tsx`
+- `bridge/` — lucrătorul de pe VPS + scripturile de publicare/reparare
+- `Dockerfile` — imaginea aplicației (gazda: VPS propriu)
 
 ## Free-first + auto-escalate (OBLIGATORIU)
-1. **Free local first** — chat, constructor, creier/work: încearcă mereu creierul local free (Ollama / Aider free / model rapid free) înainte de orice cloud plătit.
-2. **Fără salt nejustificat pe plătit** — eșec free NU înseamnă flip manual pe panel sau abandon. Escaladează automat **în același run** doar dacă există cheie + model paid disponibil ȘI motivul e unul din:
+1. **Free local first** — chat, constructor, creier/work: încearcă mereu
+   creierul local free (Ollama / Aider free / model rapid free) înainte de
+   orice cloud plătit.
+2. **Fără salt nejustificat pe plătit** — eșec free NU înseamnă flip manual
+   pe panel sau abandon. Escaladează automat **în același run** doar dacă
+   există cheie + model paid disponibil ȘI motivul e unul din:
    - free indisponibil / timeout / throttle
    - free nu produce schimbare utilă (no-change)
    - eșec de calitate clar (răspuns gol, eroare de edit, overflow context)
-3. **Raportare sursă** — orice răspuns/job trebuie să poată raporta care creier a servit: `free_local` vs `paid_cloud` (model + motiv escaladare).
-4. **creier-config** — API-ul de config returnează `preferred: free` + `fallback: paid` ca worker-ul să poată escalada fără schimbare de panel.
-5. **Quality ladder** — pe chat/work: model rapid free → model mai puternic free dacă există → paid doar la nevoie reală.
-6. **Constructor free path** — forțează Ollama local pe roluri main/editor/weak; șterge config toxic OpenRouter din atelier pe job free; nu lăsa `OPENROUTER_API_KEY` activ pe calea free dacă forțează salt greșit.
-7. **Lessons journal** — la eșec: salvează permanent semnătură eroare + metodă de fix; injectează lecțiile în context constructor și în prompturile creierului la job-uri ulterioare.
-8. **Context free** — cap pe prompt/history free; wipe history toxic pe overflow; preferă pași mici specifici decât un prompt uriaș.
+3. **Raportare sursă** — orice răspuns/job trebuie să poată raporta care
+   creier a servit: `free_local` vs `paid_cloud` (model + motiv escaladare).
+4. **creier-config** — API-ul de config returnează `preferred: free` +
+   `fallback: paid` ca worker-ul să poată escalada fără schimbare de panel.
+5. **Quality ladder** — pe chat/work: model rapid free → model mai puternic
+   free dacă există → paid doar la nevoie reală.
+6. **Constructor free path** — forțează Ollama local pe roluri main/editor/weak;
+   șterge config toxic OpenRouter din atelier pe job free; nu lăsa
+   `OPENROUTER_API_KEY` activ pe calea free dacă forțează salt greșit.
+7. **Lessons journal** — la eșec: salvează permanent semnătură eroare +
+   metodă de fix; injectează lecțiile în context constructor și în prompturile
+   creierului la job-uri ulterioare.
+8. **Context free** — cap pe prompt/history free; wipe history toxic pe
+   overflow; preferă pași mici specifici decât un prompt uriaș.
 
 ## Acceptare live (probe)
-- Doar **HTTP 200** contează ca succes pe probe live (chat, health, version, constructor).
-- Chat admin live: sesiune reală cu cookie `kelionai_session` (JWT mint din backend), nu token intern pe rute care cer cookie.
-- Constructor: ordin de probă trebuie să poată ajunge `done` cu Aider+Ollama când free e ținta; dacă escaladează, raportează explicit de ce.
-- După fix pe cerință: **build + deploy**, nu stivui multe schimbări nedeployate (owner testează pe kelionai.app).
+- Doar **HTTP 200** contează ca succes pe probe live (chat, health, version,
+  constructor).
+- Chat admin live: sesiune reală cu cookie `kelionai_session` (JWT mint din
+  backend), nu token intern pe rute care cer cookie.
+- Constructor: ordin de probă trebuie să poată ajunge `done` cu Aider+Ollama
+  când free e ținta; dacă escaladează, raportează explicit de ce.
+- După fix pe cerință: **build + deploy**, nu stivui multe schimbări
+  nedeployate (owner testează pe kelionai.app).
 
 ## Stabilitate produs
 - Chat/voce: latență mică; fără delay-uri nejustificate.
@@ -35,12 +90,38 @@ Complementează `CLAUDE.md`, `HANDOFF.md`, `STATUS.md`.
 - Fix prin rescrierea modulului responsabil mic — fără band-aid-uri.
 
 ## Repo / deploy
-- Lucru principal: monorepo `C:\Users\adria\Kelionai`; pe VPS calea tipică `/root/kelion` când e accesibil.
-- Deploy: Railway service web → `https://kelionai.app` (`railway up --detach` după build).
+- Lucru principal: monorepo `C:\Users\adria\Kelionai`; pe VPS calea tipică
+  `/root/kelion` când e accesibil.
+- Deploy: Railway service web → `https://kelionai.app` (`railway up --detach`
+  după build).
 - Nu reporni servicii bridge masked fără ordin explicit.
 - Nu cere chei/parole în chat; folosește env/secret manager.
 
 ## Implementare (când modifici cod)
 - Funcții pure pentru decizia de escaladare + teste unitare.
 - Nu marca free „defect” ca scuză să sari pe paid fără ladder + jurnal.
-- Sync master/live după schimbări pe creier/constructor; verifică version/health live.
+- Sync master/live după schimbări pe creier/constructor; verifică version/health
+  live.
+
+## Dacă schimbi cod, arhitectură sau starea proiectului
+Actualizează secțiunea relevantă din `AI-HANDOFF.md` (și §13 „Starea") înainte
+să închei. Documentul viu e SINGURUL mecanism de predare între agenți — un
+handoff vechi e mai rău decât niciunul.
+
+
+## LEGEA ANTI-HARDCODARE (owner, 16 aug 2026 — LEGE pentru ORICE AI care lucrează aici)
+Ordinul verbatim: „creiaza legi si mecanisme automate de cautare a hardocodului
+pe aplicatie, si explicat oricarui ai vine foarte clare ca nu e admis hardcodat
+pe aplicatie".
+- **NU e admis hardcodat pe aplicație**: nicio cifră de bani, prag, tarif, nume
+  de model AI sau stare arătată omului nu se scrie de mână în cod — totul vine
+  dintr-o sursă VIE (config/env/kv/DB/server/unealtă). O cifră scrisă de mână
+  minte în ziua în care realitatea se schimbă (măsurat: tarife inventate
+  24/48/200 vs realele 6/12/50; modelul pensionat care a tăcut zile întregi).
+- **Poarta automată**: `node scripts/verifica-hardcodari.mjs` — pică build-ul
+  pe hardcod negăzduit. O rulezi la fiecare livrare, ca pe tsc.
+- **Excepția se declară PE LINIE, cu motiv**: `// hardcod-permis: <motivul>`.
+  Fără motiv scris lângă faptă, poarta pică. Nu există listă ascunsă.
+- În creierele live, legea e în promptul de sistem (LEGILE ADMINULUI, chat.ts):
+  LEGEA FAPTEI + LEGEA MĂSURĂTORII + LEGEA ANTI-HARDCODARE — plus POARTA
+  FAPTELOR care demască automat pretențiile fără unealtă executată.

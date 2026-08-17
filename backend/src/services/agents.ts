@@ -1,31 +1,44 @@
-import Anthropic from '@anthropic-ai/sdk'
+import type { TextBlock } from './brain-types.js'
 import { config } from '../config.js'
-import { getMemories, searchMemories, addMemory, recordCost } from '../db.js'
-import { claudeCost } from './cost.js'
-import { withAnthropicFallback } from './anthropic.js'
+import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } from '../db.js'
+import { brainCostUsd } from './cost.js'
+import { brain } from './brain.js'
 
-// Kelion's brain: the Conversation + Skills (tool-use) agents run in the chat
-// route's streaming loop (low-latency Opus); this module hosts the Memory agent
-// — it recalls what Kelion knows about the user and, after each turn, learns +
-// saves new durable facts (cheap Haiku, off the response path).
+// Memory runs on the default chat model (Gemini direct — OpenRouter extirpat, 3 aug).
+const MEMORY_MODEL = config.brain.chatDefault
 
-const HAIKU = 'claude-haiku-4-5-20251001'
-
-// ── Memory agent (recall) ─────────────────────────────────────────────────
-// Pull durable facts about the user into the system prompt so Kelion is
-// continuous across sessions instead of amnesiac every time.
-// RECENT + RELEVANT: the latest facts, PLUS any older fact matching the words
-// of the current question — so "what's my cat called?" still finds a fact
-// learned hundreds of turns ago (recency alone pushed old facts out).
-export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
-  const recent = await getMemories(email, 40, agent)
-  let mems = recent
-  if (hint.trim()) {
-    const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
-    const relevant = await searchMemories(email, agent, words, 12)
-    const seen = new Set(recent.map((m) => m.content))
-    mems = [...recent, ...relevant.filter((m) => !seen.has(m.content))]
+/** Aduce memoriile unui agent: cele recente + (când e `hint`) cele relevante pe
+ *  cuvinte + cele semantice, dedup pe conținut păstrând ordinea. Sursă UNICĂ
+ *  pentru ambele recall-uri (general 'kelion' și trading 'tranzactii') — înainte
+ *  fiecare avea propria copie a aceleiași aduceri (dublură prinsă de jscpd). */
+async function aduMemorii(
+  email: string,
+  agent: string,
+  hint: string,
+  recentN: number,
+  cuvinteN: number,
+  semanticN: number,
+): Promise<Awaited<ReturnType<typeof getMemories>>> {
+  const recent = await getMemories(email, recentN, agent)
+  if (!hint.trim()) return recent
+  const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
+  const [relevant, semantic] = await Promise.all([
+    searchMemories(email, agent, words, cuvinteN),
+    semanticMemories(email, agent, hint, semanticN),
+  ])
+  const seen = new Set(recent.map((m) => m.content))
+  const mems = [...recent]
+  for (const m of [...relevant, ...semantic]) {
+    if (!seen.has(m.content)) {
+      seen.add(m.content)
+      mems.push(m)
+    }
   }
+  return mems
+}
+
+export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
+  const mems = await aduMemorii(email, agent, hint, 40, 12, 8)
   if (mems.length === 0) return ''
   const lines = mems.map((m) => `- ${m.content}`).join('\n')
   return (
@@ -36,19 +49,33 @@ export async function recallMemories(email: string, agent = 'kelion', hint = '')
   )
 }
 
-// ── Memory agent (learn) ──────────────────────────────────────────────────
-// After a turn, Haiku distils any NEW durable facts about the user and saves
-// them. Runs off the response path (fire-and-forget) so it never adds latency.
+/** REAMINTIRE TRADING (N val 2d, ownerul: „în conversație normală nu era
+ *  reamintită memoria de tranzacții — doar butonul Analiză o citea"). Schimburile
+ *  trecute stau într-un namespace SEPARAT ('tranzactii', scris de chat.ts cât
+ *  Centrul de Tranzacționare e pe ecran) — deci recall-ul general (namespace
+ *  'kelion') nu le vede niciodată. Când tabul de trading e ancorat, aducem ȘI
+ *  memoria asta în conversație, ca răspunsul să fie continuu pe simbolul de pe
+ *  ecran. Framing distinct: astea-s discuții de trading, nu fapte durabile
+ *  despre om. Gol când nu există nimic măsurat — nu inventăm un istoric. */
+export async function recallMemoriiTranzactii(email: string, hint = ''): Promise<string> {
+  const mems = await aduMemorii(email, 'tranzactii', hint, 20, 10, 6)
+  if (mems.length === 0) return ''
+  const lines = mems.map((m) => `- ${m.content}`).join('\n')
+  return (
+    `\n\nDISCUȚIILE VOASTRE ANTERIOARE DE TRADING (memoria separată a Centrului de ` +
+    `Tranzacționare — schimburi trecute pe simboluri). Folosește-le ca să rămâi ` +
+    `continuu pe ce ați discutat, dar NU le recita nechemat, iar cifrele vechi NU ` +
+    `sunt prețul de acum:\n${lines}`
+  )
+}
+
 export async function learnFromTurn(
   email: string,
   userMsg: string,
   assistantMsg: string,
   agent = 'kelion',
 ): Promise<void> {
-  if (!config.anthropicKey || (!userMsg.trim() && !assistantMsg.trim())) return
-  // An EXPLICIT "remember this" is a guarantee, not a judgement call — store the
-  // user's own words deterministically (upsert refreshes recency if repeated).
-  // Haiku below still distils implicit facts; this path can never be skipped.
+  if (!config.geminiKey || (!userMsg.trim() && !assistantMsg.trim())) return
   const explicit = userMsg.match(
     /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
   )
@@ -56,9 +83,8 @@ export async function learnFromTurn(
   try {
     const existing = await getMemories(email, 80, agent)
     const known = existing.map((m) => m.content).join('\n') || '(nothing yet)'
-    const res = await withAnthropicFallback((c) =>
-      c.messages.create({
-      model: HAIKU,
+    const res = await brain.messages.create({
+      model: MEMORY_MODEL,
       max_tokens: 400,
       system:
         'You maintain long-term memory about ONE user for a personal assistant. ' +
@@ -81,12 +107,20 @@ export async function learnFromTurn(
             `Latest exchange:\nUser: ${userMsg}\nAssistant: ${assistantMsg}`,
         },
       ],
-      }),
-    )
-    // Meter the Memory agent's real cost too (admin accounting completeness).
-    void recordCost(email, 'memory', claudeCost(HAIKU, res.usage.input_tokens, res.usage.output_tokens))
+    })
+    // REAL COST FIRST (the owner's rule: "show real, stop fabricating"): the
+    // adapter returns the provider's own `usage.cost` for the call that
+    // answered — booked as 'memory', a MEASUREMENT (db.ts COSTURI_MASURATE).
+    // Only when the provider didn't itemize it do we estimate, and then under
+    // a different kind ('memory_est') so the ledger never mixes the two.
+    if (typeof res.costUsd === 'number' && res.costUsd > 0) {
+      void recordCost(email, 'memory', res.costUsd)
+    } else {
+      const est = await brainCostUsd(res.model || MEMORY_MODEL, res.usage.input_tokens, res.usage.output_tokens).catch(() => null)
+      if (est && est.usd > 0) void recordCost(email, 'memory_est', est.usd)
+    }
     const text = res.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .filter((b): b is TextBlock => b.type === 'text')
       .map((b) => b.text)
       .join('')
     for (const fact of parseFacts(text).slice(0, 6)) await addMemory(email, fact, agent)

@@ -1,0 +1,55 @@
+# MÂNA PE VPS PRIN CHEIE SSH — 22 iul 2026.
+#
+# De ce există: VPS-ul (164.68.120.87) NU mai acceptă autentificare cu parolă
+# (dovadă: vps-diag din 22 iul a picat cu „Permission denied (publickey)").
+# Toate workflow-urile vechi pe sshpass+parolă (vps-diag, vps-restart, ...) sunt
+# moarte. Ăsta e înlocuitorul: intră cu CHEIA din secretul `VPS_SSH_KEY`
+# (conținutul fișierului privat `kelion-vps` de pe mașina lui Adrian) și rulează
+# comanda primită, ca root. Pornit DOAR manual/API (workflow_dispatch) — nu
+# rulează niciodată singur.
+#
+# Secret necesar (o singură dată): Settings → Secrets and variables → Actions →
+#   New repository secret → Name: VPS_SSH_KEY → Value: tot conținutul fișierului
+#   C:\Users\adria\Kelionai-secrets\kelion-vps (inclusiv liniile BEGIN/END).
+name: vps-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      cmd:
+        description: 'Comanda bash de rulat pe VPS (ca root)'
+        required: true
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      # (Pasul vechi de diagnostic care tipărea NUMELE tuturor secretelor a fost
+      # scos — problema pe care o depana, `VPS_SSH_KEY` gol, e demult rezolvată,
+      # iar dump-ul umplea logul cu nume de secrete moarte, ex. `RAILWAY_TOKEN`.
+      # Verificarea cheii goale a rămas mai jos, în pasul propriu-zis.)
+      - name: Rulează comanda pe VPS (SSH cu cheie)
+        env:
+          # Citim cheia și din Secrets și din Variables — pusă din greșeală la
+          # „Variables" (tab-ul vecin), tot merge; diagnosticul de mai jos spune
+          # exact care din surse e goală (doar lungimi, conținutul nu se atinge).
+          KEY_SECRET: ${{ secrets.VPS_SSH_KEY }}
+          KEY_VAR: ${{ vars.VPS_SSH_KEY }}
+          CMD: ${{ inputs.cmd }}
+        run: |
+          set -euo pipefail
+          KEY="${KEY_SECRET:-$KEY_VAR}"
+          echo "diagnostic chei: Secrets.VPS_SSH_KEY lungime=${#KEY_SECRET}, Variables.VPS_SSH_KEY lungime=${#KEY_VAR}"
+          if [ -z "$KEY" ]; then
+            echo "::error::VPS_SSH_KEY e GOL și în Secrets și în Variables. Verifică: repo kelion-team/kelionai → Settings → Secrets and variables → Actions → tab 'Secrets' → numele exact VPS_SSH_KEY."; exit 1
+          fi
+          umask 077
+          printf '%s\n' "$KEY" > /tmp/vps_key
+          chmod 600 /tmp/vps_key
+          # Comanda pleacă NEATINSĂ pe stdin (fără expandare în runner), iar
+          # ieșirea ei e chiar jurnalul jobului — dovada pe care se ia decizia.
+          printf '%s\n' "$CMD" | ssh -i /tmp/vps_key \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=25 -o BatchMode=yes \
+            root@164.68.120.87 'bash -s'

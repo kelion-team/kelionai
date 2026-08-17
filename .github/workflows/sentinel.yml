@@ -1,0 +1,69 @@
+# SENTINELĂ — PROBĂ DE SĂNĂTATE PROACTIVĂ (AI-HANDOFF §14.b E), 25 iul 2026.
+#
+# La 30 de minute verifică din AFARA VPS-ului (runner GitHub) că kelionai.app
+# trăiește: /health = 200 (3 încercări la 30s distanță, ca un sughiț de rețea să
+# nu alarmeze). Problema se ridică SINGURĂ, nu când o observă Adrian.
+#
+# DOAR detectează și alertează — nu repornește nimic (Adrian NU a autorizat
+# reporniri automate nesupravegheate; căderile de container le acoperă deja
+# `docker --restart unless-stopped`). Alerta = un issue pe repo, DEDUPLICAT:
+# un singur issue deschis, eșecurile următoare comentează pe el; la revenire
+# comentează „revenit" și îl închide singur. Marcajele de timp: ora Londrei
+# (regula §1.8 pentru marcaje de sistem).
+name: sentinel
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verifică sănătatea și alertează dacă e nevoie
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REPO=kelion-team/kelionai
+          NOW=$(TZ=Europe/London date +'%Y-%m-%d %H:%M:%S %Z')
+          DOWN=1; H=000; V='(fără răspuns)'
+          for i in 1 2 3; do
+            H=$(curl -s -o /dev/null -w '%{http_code}' -m 15 https://kelionai.app/health || echo 000)
+            V=$(curl -s -m 15 https://kelionai.app/api/version || echo '(fără răspuns)')
+            echo "încercarea $i: health=$H, version=$V"
+            if [ "$H" = "200" ]; then DOWN=0; break; fi
+            sleep 30
+          done
+          OPEN=$(gh issue list -R "$REPO" --state open --search 'SENTINELĂ in:title' --json number --jq '.[0].number // empty' || true)
+
+          if [ "$DOWN" = "0" ]; then
+            if [ -n "$OPEN" ]; then
+              printf '✅ REVENIT (%s): health 200, version `%s`. Închid alerta.\n' "$NOW" "$V" > /tmp/body.md
+              gh issue comment "$OPEN" -R "$REPO" --body-file /tmp/body.md
+              gh issue close "$OPEN" -R "$REPO"
+            fi
+            echo "Sănătos ($NOW)."
+            exit 0
+          fi
+
+          {
+            printf '🔴 SENTINELĂ (%s): kelionai.app NU răspunde — 3 probe consecutive picate.\n\n' "$NOW"
+            printf -- '- `/health` = **%s** (așteptat 200)\n- `/api/version` = `%s`\n\n' "$H" "$V"
+            printf 'Pași determiniști (deploy/RUNBOOKS.md):\n'
+            printf '1. Actions → **vps-diag** → Run workflow — faptele reale de pe VPS.\n'
+            printf '2. Dacă e nevoie de republicare: Actions → **deploy** → Run workflow (pe master).\n'
+            printf '3. Repornire manuală țintită: Actions → **vps-run** → cmd: `docker restart kelionai-app`.\n'
+          } > /tmp/body.md
+
+          if [ -n "$OPEN" ]; then
+            gh issue comment "$OPEN" -R "$REPO" --body-file /tmp/body.md
+          else
+            gh issue create -R "$REPO" --title '🔴 SENTINELĂ: kelionai.app nu răspunde' --body-file /tmp/body.md
+          fi
+          echo "::error::kelionai.app e JOS din $NOW — alerta e deschisă în Issues."
+          exit 1

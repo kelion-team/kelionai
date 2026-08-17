@@ -6,7 +6,15 @@ import { documentToMarkdown } from '../services/markitdown.js'
 // frontend can attach a PDF / Word / Excel / PowerPoint the user shares and let
 // Kelion read it. Auth-gated; size-capped to what the body limit allows.
 export async function ingestRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: { filename?: string; data?: string } }>('/api/ingest', async (req, reply) => {
+  // P13 (owner, 15 aug: „trebuie sa-i maresti spatiu de incarcare in chat").
+  // MĂSURAT: ruta stătea pe bodyLimit-ul GLOBAL de 25MB (index.ts) — cu
+  // umflarea base64 (4/3), un fișier de ~18MB umplea țeava; frontend-ul
+  // oglindea cinstit limita și refuza. Limita proprie urcă la 100MB (ca
+  // /api/chat) — capul REAL rămâne Cloudflare (100MB pe cerere); globalul de
+  // 25MB rămâne neschimbat pentru restul rutelor.
+  app.post<{ Body: { filename?: string; data?: string } }>('/api/ingest', {
+    bodyLimit: 100_000_000,
+  }, async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     const raw = req.body?.data
@@ -20,7 +28,7 @@ export async function ingestRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ markdown: markdown.slice(0, 120_000) })
     } catch (e) {
       return reply
-        .code(500)
+        .code(502)
         .send({ error: 'convert_failed', message: e instanceof Error ? e.message.slice(0, 200) : 'failed' })
     }
   })

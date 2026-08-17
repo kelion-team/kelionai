@@ -6,6 +6,12 @@
 // itself. Best-effort: never throws.
 
 const LS_KEY = 'kelion.speechLang'
+// AL CUI e mirror-ul (10 aug, ownerul: „la prima intrare, EN până se determină
+// limba USERULUI"): localStorage e pe BROWSER, nu pe cont — un user nou logat pe
+// un browser folosit înainte în română moștenea „ro" de la contul anterior.
+// Cheia de mai jos leagă oglinda de email; alt cont => oglinda se aruncă și
+// aplicația pornește pe EN, până serverul determină limba omului ăstuia.
+const LS_CINE = 'kelion.speechLang.cine'
 
 export function loadLocalLang(): string | null {
   try {
@@ -15,32 +21,76 @@ export function loadLocalLang(): string | null {
   }
 }
 
+/** La montarea aplicației, cu emailul sesiunii în mână: dacă oglinda de limbă
+ *  aparține ALTUI cont (sau nimănui — moștenire veche, nedovedibilă), se
+ *  șterge, iar sesiunea revendică oglinda. Idempotent, sincron, best-effort. */
+export function revendicaOglindaLimbii(email: string): void {
+  try {
+    if (localStorage.getItem(LS_CINE) !== email) {
+      localStorage.removeItem(LS_KEY)
+      localStorage.setItem(LS_CINE, email)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+// The avatar's corner arrangement (vw/vh position + scale) — Adrian's,
+// saved ON THE SERVER (Jul 11: "save Kelion's current size").
+export interface AvatarBox {
+  x: number
+  y: number
+  s: number
+}
+
 export async function loadServerPrefs(): Promise<{
   speechLang: string | null
   meserieActiva: number | null
-  anthropicKeySet: boolean
+  avatarBox?: AvatarBox | null
+  /** The voice chosen by the user; `null` = the app's default. */
+  voice?: string | null
+  /** The list they can choose from. Comes from the server, so the interface
+   *  doesn't keep a parallel list that goes stale when the env changes. */
+  voices?: string[]
 } | null> {
   try {
     const res = await fetch('/api/prefs', { credentials: 'include' })
     if (!res.ok) return null
-    // Serverul NU mai trimite cheia în clar — doar dacă e setată (anthropicKeySet).
     return (await res.json()) as {
       speechLang: string | null
       meserieActiva: number | null
-      anthropicKeySet: boolean
+      avatarBox?: AvatarBox | null
+      voice?: string | null
+      voices?: string[]
     }
   } catch {
     return null
   }
 }
 
-export async function saveAnthropicKey(key: string | null): Promise<boolean> {
+/** Saves the chosen voice. `null` = return to the app's default voice. */
+export async function saveVoicePref(voice: string | null): Promise<boolean> {
+  try {
+    const r = await fetch('/api/prefs', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+// Persists the avatar arrangement per user; best-effort, never throws.
+export async function saveAvatarBox(box: AvatarBox): Promise<boolean> {
   try {
     const res = await fetch('/api/prefs', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ anthropicKey: key }),
+      body: JSON.stringify({ avatarBox: box }),
     })
     return res.ok
   } catch {
@@ -48,11 +98,45 @@ export async function saveAnthropicKey(key: string | null): Promise<boolean> {
   }
 }
 
-// Mirror the server-decided language locally, for an instant read next load.
+/**
+ * Mirror the server-decided language locally, for an instant read next load.
+ * Best-effort: catches storage errors silently.
+ */
 export function mirrorLang(code: string): void {
   try {
     localStorage.setItem(LS_KEY, code)
   } catch {
     /* ignore */
+  }
+}
+
+// Set the speech language explicitly from Settings (a paying customer choosing
+// their own language). PUT /api/prefs persists it; we mirror it locally too.
+export async function saveSpeechLang(code: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/prefs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ speechLang: code }),
+    })
+    if (res.ok) mirrorLang(code)
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+// Self-service account deletion (GDPR: the right to erasure). Wipes the user's
+// data server-side and clears the session cookie. Returns true on success.
+export async function deleteMyAccount(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/me/delete', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    return res.ok
+  } catch {
+    return false
   }
 }
