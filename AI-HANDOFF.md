@@ -1000,3 +1000,40 @@ curl -s -o /dev/null -w '%{http_code}' -X POST https://kelionai.app/api/me/delet
 - 🗓️ **3 AUG — MISIUNE REVOLUT, PASUL 2/5 (PLASA):** Verificat și confirmat suportul complet pentru `plati_neatribuite` în `backend/src/db.ts` și `openBanking.ts` (`proceseazaIntrare`). Plățile fără cod sau cu cod greșit intră automat în plasă cu `status = 'noua'`, având unicitate pe `bank_ref` (`ON CONFLICT DO NOTHING`) pentru prevenirea duplicatelor la citiri repetate. Atribuirea manuală de către admin trece prin `topUpUser` în mod idempotent. Toate testele din `fluxBaniCapCoada.test.ts` și întregul suite backend pass (863+ teste).
 
 - 🗓️ **8 AUG — REPARARE AFIȘARE HARTĂ (OPENSTREETMAP/OSRM):** Am reparat înălțimea containerului hărții prin forțarea unei dimensiuni non-zero (`100vh` pe `#map` și `100%` pe html,body) în `backend/src/routes/mapview.ts`. Am securizat URL-ul tile-urilor prin utilizarea HTTPS stabil din surse publice gratuite (CartoDB Voyager: `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png`). Verificat: typecheck, build frontend, teste backend, toate au trecut cu succes.
+
+---
+
+## §13 — Stare finală mentenanță (18 aug 2026)
+
+**Închis / documentat:** 2026-08-18 21:00:54 UTC
+
+### Live (măsurat)
+- SHA master: `43689819` (`43689819ce9f9d4166c8ff61142cc97f16ab2318`)
+- Commit: Revert PR #1253 (constructor runtime repair scos din master)
+- `/api/version` local: `{"v":"4368981","at":"2026-08-18T20:09:13.566Z","ver":"20.1","adminCfg":true}`
+- `/api/version` public: `{"v":"4368981","at":"2026-08-18T20:09:13.566Z","ver":"20.1","adminCfg":true}`
+- `/api/health`: `{"status":"ok"}`
+- Homepage https://kelionai.app/: HTTP 200
+- Containere: kelionai-app + kelion-caddy up; omniroute healthy
+- Git pe VPS: **doar** `master` / `origin/master`; **0 tag-uri**; worktree-uri extra șterse
+
+### Ce s-a întâmplat în sesiune
+1. Reparație constructor (GUI→runtime browser) pe branch izolat → PR #1253 merged ca `1c91bec`.
+2. Owner a cerut **revert** + ștergerea oricărei alte versiuni.
+3. Revert pe master: `43689819` — codul #1253 **nu mai e activ**.
+4. Curățenie: branch-uri remote/local non-master șterse, tag-uri șterse, worktree-uri extra eliminate.
+5. Verificare live: public version = master SHA; health ok.
+
+### Constructor (stare pe live după revert)
+- Motor Aider + free-first (Ollama local `qwen2.5-coder:32b`) / paid cloud ca rezervă (neschimbat față de linia de dinainte de #1253).
+- **NU** e pe live rutarea GUI→Playwright din #1253 (a fost revertuită).
+- Free vs paid rămâne: preferred free; paid doar forțat din panou sau fallback.
+
+### Tichete mentenanță
+- Issue-uri „Publicarea oprită…” (live ≠ master) închise ca obsolete: live = master `43689819`.
+- Linear: niciun issue open potrivit pe constructor/runtime la momentul închiderii.
+
+### Neînchis / în afara acestui ticket
+- Dual-voice (TTS) — investigat anterior, nerezolvat în această sesiune.
+- Reparația constructor GUI/runtime — **nu** pe live (revert explicit owner).
+
