@@ -53,6 +53,8 @@ import { pareCerereVizuala } from '../services/simptomeLive.js'
 //                     JSON { type:'cadru', data } = UN cadru de cameră (JPEG
 //                     base64 brut) → intră DIRECT în sesiunea Live ca video
 //                     (8 aug: „trebuie să poată folosi camera").
+//                     JSON { type:'intrerupe' } = utilizatorul a tăiat tura
+//                     curentă; restul cadrelor ei nu mai ajung la difuzor.
 //   server → client:  JSON —
 //     { type:'gata' }                              sesiunea Live e deschisă
 //     { type:'audio', data:<base64 PCM 24kHz> }    glasul lui Kelion, de redat
@@ -349,6 +351,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // rămâne oprit până la raport.
     let aecActiv = false
     let taiatDeVoce = false
+    // Tăierea explicită din UI diferă de barge-in-ul detectat din microfon:
+    // până la capătul turei, niciun cadru rămas din aceeași replică nu mai
+    // ajunge în browser.
+    let taiereManuala = false
     // Ceasul DIFUZORULUI: cadrele sosesc în rafale, mai repede decât se aud —
     // estimăm până CÂND se aude vocea din durata PCM reală (24 kHz, 16 bit).
     let redareEstimataPanaLa = 0
@@ -544,6 +550,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // serverul cere browserului cadrele camerei ({type:'cere_cadre'}) și
     // așteaptă răspunsul aici — zero trafic de imagini cât nu e nevoie.
     let primesteCadre: ((cadre: string[]) => void) | null = null
+    // Este instalată după ce helper-ele turei au fost create; handlerul WS o
+    // poate primi înainte sau după sesiunea Google fără să atingă obiecte moarte.
+    let intrerupeTura: (() => void) | null = null
 
     socket.on('message', (data: RawData, isBinary: boolean) => {
       if (!isBinary) {
@@ -607,6 +616,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // doar atunci tăierea la vocea omului are voie să judece.
             aecActiv = (m as { activ?: unknown }).activ === true
             app.log.info(`vocal-live: AEC raportat de browser: ${aecActiv ? 'activ — tăierea la voce armată' : 'INACTIV — tăierea la voce oprită (ecou netratat)'}`)
+          } else if (m.type === 'intrerupe') {
+            intrerupeTura?.()
           } else if (m.type === 'ping') {
             try {
               socket.send(JSON.stringify({ type: 'pong', t: (m as { t?: unknown }).t ?? Date.now() }))
@@ -962,6 +973,19 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         }, 700)
       }
+      intrerupeTura = () => {
+        if (taiereManuala) return
+        taiereManuala = true
+        taiatDeVoce = true
+        cadreInAsteptare.length = 0
+        textInAsteptare.length = 0
+        if (ceasAsteptareVerdict) {
+          clearTimeout(ceasAsteptareVerdict)
+          ceasAsteptareVerdict = null
+        }
+        opresteCeasLimba()
+        golesteRedarea()
+      }
       live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
         onGata: async () => {
           // OPUS: cât sesiunea se pregătește, încercăm codecul de server O DATĂ.
@@ -977,6 +1001,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           pulsVoce.cadreAudioDeLaGoogle++
           pulsVoce.laUltimulCadru = Date.now()
           octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
+          if (taiereManuala) {
+            pulsVoce.suprimateDupaTaiere++
+            return
+          }
           if (verdictTura === null) {
             const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem
             if (!areTemei) {
@@ -1031,6 +1059,18 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
         onTranscriereUser: (text, final) => {
           const acum = Date.now()
+          // O rostire nouă după o tăiere explicită deschide o tură nouă; nu
+          // reanimăm replica pe care omul a oprit-o, ci pornim cu buffere curate.
+          if (taiereManuala && text.trim()) {
+            taiereManuala = false
+            taiatDeVoce = false
+            verdictTura = null
+            verdictLimba = null
+            verdictDinCeas = false
+            bufUser = ''
+            bufKelion = ''
+            rostireCurenta = ''
+          }
           // Segmentare pe pauze: >2,5 s fără transcriere = rostire NOUĂ —
           // adresarea se judecă mereu pe ce se spune ACUM, nu pe resturi.
           if (acum - ultimaTranscriereUserLa > 2_500) {
@@ -1235,6 +1275,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
         onIntrerupt: () => {
           pulsVoce.intreruperiModel++
+          taiereManuala = false
           verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
           verdictLimba = null
           verdictDinCeas = false
@@ -1306,6 +1347,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
           verdictTura = null
           verdictLimba = null
+          taiereManuala = false
+          taiatDeVoce = false
           textInAsteptare.length = 0 // tura încheiată nu mai are text de vărsat
           if (anuntAmanat) {
             turaDeSistem = true // tura s-a închis — anunțul amânat se armează acum

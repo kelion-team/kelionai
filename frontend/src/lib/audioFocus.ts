@@ -18,6 +18,20 @@ let active: AudioFocusSource = 'none'
 /** Optional: LIVE session can cut its own outbound audio on interrupt. */
 let liveInterrupt: (() => void) | null = null
 
+// Cross-tab single-voice lock (ChatPanel voceUnica). When another tab owns the
+// mouth, this tab must not play Chirp TTS even if chat frames still arrive.
+let foreignVoiceLock = false
+
+/** Other tab holds the voice chain - drop local playout until released. */
+export function setForeignVoiceLock(locked: boolean): void {
+  foreignVoiceLock = locked
+  if (locked && isVoicePlaying()) stopVoice()
+}
+
+export function isForeignVoiceLocked(): boolean {
+  return foreignVoiceLock
+}
+
 function emit(next: AudioFocusSource): void {
   active = next
 }
@@ -40,6 +54,7 @@ export function unregisterLiveFocus(): void {
  * Returns false if LIVE holds focus — caller must drop {audio} (LIVE speaks).
  */
 export function requestTtsFocus(): boolean {
+  if (foreignVoiceLock) return false
   if (active === 'live') return false
   emit('tts')
   return true

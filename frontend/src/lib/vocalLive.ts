@@ -1,5 +1,4 @@
 import { downsample, float32ToPcm16, base64ToBytes, pcm16ToFloat32 } from './pcm'
-import { interruptAll } from './audioFocus'
 import { OpusVoceClient, esteSuportat as opusSuportat } from './opusVoce'
 import { alimenteazaNivelVoce } from './audioIO'
 import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
@@ -96,6 +95,10 @@ export interface VocalLiveOpts {
 
 export interface VocalLiveHandle {
   inchide(): void
+  /** Oprește imediat redarea WebAudio a turei curente, fără a închide urechea live. */
+  taieRedarea(): void
+  /** Oprește redarea locală și cere serverului să suprime restul turei curente. */
+  intrerupeRedarea(): void
   /** Mut/dezmut microfonul fără a rupe sesiunea (butonul de microfon al UI-ului). */
   setMuted(muted: boolean): void
   /** Câți octeți de microfon au plecat — dovadă că se trimite ceva, nu doar că
@@ -484,7 +487,6 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         // frazei" — fără rândul ăsta, o tăiere venită de la model era
         // indistinctibilă de orice altă cauză).
         console.info('[vocalLive] modelul și-a tăiat vorba (barge-in) — a auzit voce peste el')
-        interruptAll('live-server-barge-in')
         taieRedarea()
         opts.onTuraInchisa?.() // tura tăiată nu-și lasă fragmentul pe bandă
         break
@@ -804,6 +806,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   console.info(`[vocalLive] sesiune deschisă — microfon ${RATA_INTRARE} Hz → server, redare ${RATA_IESIRE} Hz`)
   return {
     inchide,
+    taieRedarea,
+    intrerupeRedarea: () => {
+      taieRedarea()
+      if (inchis || ws.readyState !== WebSocket.OPEN) return
+      try {
+        ws.send(JSON.stringify({ type: 'intrerupe' }))
+      } catch {
+        /* socket picat — close-ul curăță */
+      }
+    },
     octetiTrimisi: () => octeti,
     setMuted: (m: boolean) => {
       // Track-ul rămâne viu (sesiunea nu se rupe) — doar nu mai produce cadre.

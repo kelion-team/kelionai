@@ -362,6 +362,11 @@ export default function ChatPanel({
   // `localStorage.kelion_voce_live = '0'` repune calea clasică, fără deploy.
   // Rămâne SAU una, SAU alta — două voci în același timp = numărat dublu (#894).
   const vlRef = useRef<VocalLiveHandle | null>(null)
+  // Fiecare pornire/oprire live primește o generație. Callback-urile async ale
+  // unei sesiuni înlocuite nu mai pot curăța, reporni sau modifica sesiunea nouă.
+  const vlGeneratieRef = useRef(0)
+  const VL_MAX_RELUARI = 3
+  const VL_REARMARE_STABILA_MS = 30_000
   // NIVELUL DE INTRARE AL URECHII LIVE (owner, 16 aug: „vreau sa vad un mic
   // bargraf… sa se identifice daca nu se truncheaza nimic"). Măsurat în vocalLive
   // pe fiecare cadru trimis modelului; ținut într-un ref (nu state) ca bargraful
@@ -1086,7 +1091,7 @@ export default function ChatPanel({
     const STOP_CMD =
       /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
     if (msg && STOP_CMD.test(msg)) {
-      stopVoice()
+      interruptAll('stop-command')
       rvLiveRef.current?.stopSpeaking() // the live mouth shuts up too (Aug 1 — one brain)
       abortRef.current?.abort()
       pendingSendsRef.current = [] // stop means stop — empty the queue
@@ -1386,9 +1391,10 @@ export default function ChatPanel({
         // message, no writing over what's on the screen right now.
       } else {
         // Don't let the voice say more than was written (Jul 10 bug: the text
-        // disappeared on error, but the audio kept going).
-        stopVoice()
-        mouth?.stopSpeaking() // the live mouth stops too — a failed turn says no more
+        // disappeared on error, but the audio kept going). stopVoice alone
+        // misses the LIVE WebAudio queue — interruptAll cuts TTS + LIVE mouth.
+        interruptAll('chat-error')
+        mouth?.stopSpeaking() // classic/chirp mouth queue too
         const code = codErr
         const spoken = strings(resolveLang(replyLang))
         // TRANSIENT + nothing streamed yet → ONE silent retry: the network and
@@ -1401,7 +1407,13 @@ export default function ChatPanel({
             transientRetryRef.current = false
           }, 30_000)
           console.info('[CONEXIUNE] cerere ruptă cu net+server OK — reîncerc tăcut o dată')
-          window.setTimeout(() => void sendRef.current(msg), 400)
+          // Voice turns stash audio in pendingAudioRef before send clears it.
+          // Restore it so the silent retry is still a real voice turn (HTTP 200 path),
+          // not an empty typed message that the guard drops.
+          if (nativeAudio) pendingAudioRef.current = nativeAudio
+          if (speaker) pendingSpeakerRef.current = speaker
+          // NOTE: local `spoken` below is i18n strings — use isVoiceTurn for the flag.
+          window.setTimeout(() => void sendRef.current(msg, isVoiceTurn), 400)
         } else {
         const m =
           code === 'brain_not_configured'
@@ -1412,7 +1424,16 @@ export default function ChatPanel({
                 ? spoken.serverDown
                 : code === 'transient'
                   ? spoken.requestLost
-                  : t.brainError
+                  : code === 'unauthorized'
+                    ? spoken.offline // session expired / not signed in — honest, not "brain dead"
+                    : code === 'paywall'
+                      ? t.brainError
+                      : code === 'rate_limited'
+                        ? spoken.requestLost
+                        : t.brainError
+        if (code === 'paywall') {
+          window.dispatchEvent(new Event('kelion:paywall'))
+        }
         // KEEP the text already received (don't drop it) — just add a discreet note,
         // so the text stays complete versus what was heard.
         // FUNCTIONAL updater, not a snapshot — the same lesson as in the streaming
@@ -1661,23 +1682,32 @@ export default function ChatPanel({
             setLiveVoice(activ ? semn + activ : altul ? semnAltul + altul : '')
           }
           const porneste = async (): Promise<boolean> => {
+            const generatie = ++vlGeneratieRef.current
             const vl = await deschideVocalLive({
               onGata: () => {
-                reluari = 0 // sesiune sănătoasă → contorul de reluări se șterge
+                if (generatie !== vlGeneratieRef.current) return
+                // Un handshake urmat imediat de close nu e o sesiune sănătoasă:
+                // rearmăm încercările doar după o perioadă continuă de funcționare.
+                window.setTimeout(() => {
+                  if (generatie === vlGeneratieRef.current && vlRef.current) reluari = 0
+                }, VL_REARMARE_STABILA_MS)
                 vlAud = ''
                 vlSpune = ''
                 setLiveVoice('') // orice eroare veche de pe bandă se șterge
                 setListening(true)
               },
               onUser: (text, final) => {
+                if (generatie !== vlGeneratieRef.current) return
                 vlAud = final ? '' : vlAud + text
                 arataBanda('aud')
               },
               onKelion: (text, final) => {
+                if (generatie !== vlGeneratieRef.current) return
                 vlSpune = final ? '' : vlSpune + text
                 arataBanda('spune')
               },
               onTuraInchisa: () => {
+                if (generatie !== vlGeneratieRef.current) return
                 // tura s-a închis (gata sau tăiată) — banda nu păstrează resturi
                 vlAud = ''
                 vlSpune = ''
@@ -1686,6 +1716,7 @@ export default function ChatPanel({
               // NIVELUL DE INTRARE (bargraful urechii) — doar scriem în ref;
               // MicBargraf îl citește prin rAF. Măsurat, nu presupus.
               onNivelIntrare: (nv) => {
+                if (generatie !== vlGeneratieRef.current) return
                 micNivelRef.current = nv
               },
               // PREAMP inițial din preferința salvată (owner: „ce faci daca e surd").
@@ -1693,7 +1724,9 @@ export default function ChatPanel({
               // Cadrele de ECRAN din ușa creierului (cere_creierului) intră în
               // ACELAȘI handleControl ca la chatul scris — monitorul, cardurile
               // și documentele arată identic, indiferent cine le-a cerut.
-              onControl: (frame) => handleControl(frame as ChatControl),
+              onControl: (frame) => {
+                if (generatie === vlGeneratieRef.current) handleControl(frame as ChatControl)
+              },
               // GPS-ul REAL al device-ului către sesiunea live (8 aug: „nu are
               // acces la gps" + „îi trebuiesc date de la gps real") — fixul
               // satelitar al paznicului + precizia măsurată (±m, de la senzor).
@@ -1732,18 +1765,18 @@ export default function ChatPanel({
               // reale și să deseneze nivelurile pe grafic (frame {niveluri}).
               tranzactii: () => getStareTranzactii(),
               onEroare: (motiv) => {
+                if (generatie !== vlGeneratieRef.current) return
                 // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
                 // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).
                 setLiveVoice(`⚠ voce live: ${motiv}`.slice(0, 140))
                 console.warn(`[vocalLive] ${motiv}`)
                 unregisterLiveFocus()
                 vlRef.current?.inchide()
-                unregisterLiveFocus()
                 vlRef.current = null
                 setListening(false)
                 // Oprirea manuală nu se „repară" — doar căderile.
                 if (micManualOffRef.current) return
-                if (reluari < 90) {
+                if (reluari < VL_MAX_RELUARI) {
                   reluari++
                   // LA SECUNDĂ, nu în 3 încercări rare (8 aug, ownerul: „15-20
                   // sec este criminal pentru chat… chiar dacă se întrerupe 1
@@ -1755,10 +1788,16 @@ export default function ChatPanel({
                   // Banda apare abia de la a 5-a ratare, ca un sughiț de-o
                   // secundă să rămână invizibil pe ecran.
                   const pauza = reluari === 1 ? 400 : 1000
-                  if (reluari < 5) setLiveVoice('')
-                  console.info(`[vocalLive] reluare ${reluari}/90 în ${pauza} ms`)
+                  if (reluari < VL_MAX_RELUARI) setLiveVoice('')
+                  console.info(`[vocalLive] reluare ${reluari}/${VL_MAX_RELUARI} în ${pauza} ms`)
                   window.setTimeout(() => {
-                    if (!micManualOffRef.current && !vlRef.current) void porneste()
+                    if (
+                      generatie === vlGeneratieRef.current &&
+                      !micManualOffRef.current &&
+                      !vlRef.current
+                    ) {
+                      void porneste()
+                    }
                   }, pauza)
                 } else {
                   // Coborârea pe calea veche NU trece iar prin blocul live (am
@@ -1785,6 +1824,7 @@ export default function ChatPanel({
                     }
                     void vocalLiveDisponibila()
                       .then((c) => {
+                        if (generatie !== vlGeneratieRef.current) return
                         if (!c?.disponibil || vlRef.current) return
                         if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
                         vlSondaRef.current = null
@@ -1801,11 +1841,17 @@ export default function ChatPanel({
               },
             })
             if (vl) {
+              if (generatie !== vlGeneratieRef.current || micManualOffRef.current) {
+                vl.inchide()
+                return false
+              }
               vlRef.current = vl
               registerLiveFocus({
                 onInterrupt: () => {
-                  // Cut TTS if any; LIVE keeps the session (full-duplex ear stays up).
+                  // LIVE has a separate WebAudio queue from audioIO's TTS.
+                  // Cutting only stopVoice() leaves that queue audible → dual voice.
                   stopVoice()
+                  vl.intrerupeRedarea()
                 },
               })
               setListening(true)
@@ -2110,14 +2156,14 @@ export default function ChatPanel({
     // pe ramura de închidere, sesiunea (și facturarea) supraviețuiau butonului.
     if (micRef.current || micStartingRef.current || vlRef.current) {
       micManualOffRef.current = true
+      vlGeneratieRef.current++
       // Also release the start flag: if the boot really is in flight, it sees
       // manualOff at the end and stops by itself; if the flag was stuck from an
       // old error, the button heals here instead of staying dead.
       micStartingRef.current = false
       unregisterLiveFocus()
-                vlRef.current?.inchide()
-      unregisterLiveFocus()
-                vlRef.current = null
+      vlRef.current?.inchide()
+      vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       // intentional stop: a stuck fragment must NOT be sent after teardown
@@ -2198,10 +2244,10 @@ export default function ChatPanel({
       document.removeEventListener('visibilitychange', onVisible)
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
+      vlGeneratieRef.current++
       unregisterLiveFocus()
-                vlRef.current?.inchide()
-      unregisterLiveFocus()
-                vlRef.current = null
+      vlRef.current?.inchide()
+      vlRef.current = null
       micRef.current?.stop()
       micRef.current = null
       stopVoice()
@@ -2217,8 +2263,9 @@ export default function ChatPanel({
       const d = (e as CustomEvent).detail as { stare?: string }
       if (d?.stare === 'conectat') {
         micManualOffRef.current = true // blochează re-armarea automată a urechii Kelion
+        vlGeneratieRef.current++
         unregisterLiveFocus()
-                vlRef.current?.inchide()
+        vlRef.current?.inchide()
         vlRef.current = null
         micRef.current?.stop()
         micRef.current = null
@@ -2282,7 +2329,7 @@ export default function ChatPanel({
             muzicaActivaRef.current = true
             // Taci peste muzică: oprește vocea live și redarea în curs.
             rvLiveRef.current?.stopSpeaking()
-            stopVoice()
+            interruptAll('music-start')
             // Prima mișcare pornește imediat; următoarele vin pe bit.
             if (dansLiberRef.current) {
               dansLiberRef.current = false
@@ -2328,8 +2375,9 @@ export default function ChatPanel({
         window.clearTimeout(upgradeTimerRef.current)
         upgradeTimerRef.current = null
       }
+      vlGeneratieRef.current++
       unregisterLiveFocus()
-                vlRef.current?.inchide()
+      vlRef.current?.inchide()
       vlRef.current = null
       if (vlSondaRef.current) {
         window.clearInterval(vlSondaRef.current)
