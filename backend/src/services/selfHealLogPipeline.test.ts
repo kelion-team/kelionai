@@ -151,7 +151,7 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
       expect(kv.has('selfheal-log-filed:server:fp-server-err-1')).toBe(true)
     })
 
-    it('Acumulare între rulări: 1 apariție în prima rulare + 2 în a doua depășește pragul (prag=2)', async () => {
+    it('trimite erorile constructorului strategului fără ordin recursiv, după atingerea pragului', async () => {
       const engine = new SelfHealDecisionEngine({ thresholds: { constructor: 2 } })
       const groupRun1 = [
         {
@@ -178,9 +178,13 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
       ]
 
       const res2 = await engine.processAggregatedGroups(groupRun2)
-      expect(res2.filed).toBe(1)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0].scope).toBe('kelion-autovindecare-gazda')
+      expect(res2.filed).toBe(0)
+      expect(jobs).toHaveLength(0)
+      expect(JSON.parse(kv.get('selfheal-log-filed:constructor:fp-constructor-err-99') ?? '{}')).toMatchObject({
+        count: 2,
+        handedTo: 'constructor_incident_strategist',
+        evidence: 'Error: worker crashed on build step',
+      })
     })
 
     it('Dedup: o amprentă deja trimisă nu mai generează alt ordin', async () => {

@@ -1,4 +1,5 @@
-import AjvModule, { type ErrorObject, type Options, type ValidateFunction } from 'ajv'
+import { type ErrorObject } from 'ajv'
+import { compileJsonSchema } from './ajvCompat.js'
 
 export const CONSTRUCTOR_PROTOCOL_ID = 'kelion.constructor/v1' as const
 
@@ -139,12 +140,7 @@ export const CONSTRUCTOR_PROTOCOL_SCHEMA = {
   },
 } as const
 
-type AjvConstructor = new (options?: Options) => {
-  compile<T>(schema: object): ValidateFunction<T>
-}
-const Ajv = ((AjvModule as unknown as { default?: unknown }).default ?? AjvModule) as unknown as AjvConstructor
-const ajv = new Ajv({ allErrors: true, strict: true })
-const valideazaSchema = ajv.compile<ConstructorProtocol>(CONSTRUCTOR_PROTOCOL_SCHEMA)
+const valideazaSchema = compileJsonSchema<ConstructorProtocol>(CONSTRUCTOR_PROTOCOL_SCHEMA, true)
 
 export interface ProtocolVerdict {
   ok: boolean

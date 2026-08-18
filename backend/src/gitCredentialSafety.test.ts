@@ -22,4 +22,13 @@ describe('Git credential safety', () => {
       expect(source).not.toMatch(/path\.join\(ROOT,/)
     }
   })
+
+
+  it('passes the scoped askpass environment to constructor git push', () => {
+    const source = fs.readFileSync(path.join(root, 'deploy/constructor-agent.mjs'), 'utf8')
+    const pushCall = source.match(/execFileSync\('git', \['push'[\s\S]*?\]\s*,\s*\{([^}]*)\}\)/)
+
+    expect(pushCall, 'constructor git push call').not.toBeNull()
+    expect(pushCall?.[1]).toMatch(/\benv:\s*gitEnv\b/)
+  })
 })

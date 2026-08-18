@@ -6,6 +6,17 @@ export type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
+import {
+  classifyConstructorFailure,
+  constructorIncidentLesson,
+  type ConstructorCauseCode,
+  type ConstructorIncident,
+  type ConstructorIncidentState,
+} from './services/constructorIncident.js'
+import {
+  parseConstructorStrategy,
+  type ConstructorStrategy,
+} from './services/constructorStrategist.js'
 
 let pool: pg.Pool | null = null
 
@@ -586,6 +597,41 @@ export async function initDb(): Promise<void> {
     -- recuperabil): iese din panou, dar nu se pierde. Bucla de autonomie
     -- arhivează singură; panoul (listBuildJobs) le exclude.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
+    -- MAPE-K INCIDENT REGISTER: every terminal constructor failure becomes one
+    -- durable case. The normalized order fingerprint is unique, so recurrence
+    -- reopens the same case instead of spawning disconnected alerts.
+    CREATE TABLE IF NOT EXISTS constructor_incidents (
+      id BIGSERIAL PRIMARY KEY,
+      job_id BIGINT NOT NULL,
+      fingerprint TEXT NOT NULL UNIQUE,
+      state TEXT NOT NULL DEFAULT 'open',
+      stage TEXT NOT NULL DEFAULT 'unknown_stage',
+      cause_code TEXT NOT NULL DEFAULT 'unknown',
+      cause_summary TEXT NOT NULL,
+      evidence TEXT NOT NULL,
+      responsible TEXT NOT NULL DEFAULT 'kelion',
+      next_action TEXT NOT NULL,
+      verification TEXT,
+      lesson TEXT,
+      recurrence_count INT NOT NULL DEFAULT 1,
+      strategy JSONB,
+      strategy_action_fingerprint TEXT,
+      strategy_evidence_fingerprint TEXT,
+      strategy_decision_count INT NOT NULL DEFAULT 0,
+      strategy_pending BOOLEAN NOT NULL DEFAULT false,
+      opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      closed_at TIMESTAMPTZ
+    );
+    ALTER TABLE constructor_incidents ADD COLUMN IF NOT EXISTS strategy JSONB;
+    ALTER TABLE constructor_incidents ADD COLUMN IF NOT EXISTS strategy_action_fingerprint TEXT;
+    ALTER TABLE constructor_incidents ADD COLUMN IF NOT EXISTS strategy_evidence_fingerprint TEXT;
+    ALTER TABLE constructor_incidents ADD COLUMN IF NOT EXISTS strategy_decision_count INT NOT NULL DEFAULT 0;
+    ALTER TABLE constructor_incidents ADD COLUMN IF NOT EXISTS strategy_pending BOOLEAN NOT NULL DEFAULT false;
+    CREATE INDEX IF NOT EXISTS idx_constructor_incidents_state
+      ON constructor_incidents (state, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_constructor_incidents_job
+      ON constructor_incidents (job_id);
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "sent to execution" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -3915,7 +3961,7 @@ export interface BuildJob {
   id: number
   orderedBy: string
   orderText: string
-  status: 'queued' | 'running' | 'done' | 'failed'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
   attempts: number
   branch: string | null
   prUrl: string | null
@@ -3954,7 +4000,7 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     id: Number(r.id),
     orderedBy: r.ordered_by,
     orderText: r.order_text,
-    status: (['queued', 'running', 'done', 'failed'].includes(r.status) ? r.status : 'failed') as BuildJob['status'],
+    status: (['queued', 'running', 'done', 'failed', 'cancelled'].includes(r.status) ? r.status : 'failed') as BuildJob['status'],
     attempts: r.attempts,
     branch: r.branch,
     prUrl: r.pr_url,
@@ -4095,6 +4141,245 @@ export async function listFailedBuildJobsRecent(
   }
 }
 
+interface ConstructorIncidentDbRow {
+  id: string | number
+  job_id: string | number
+  fingerprint: string
+  state: string
+  stage: string
+  cause_code: string
+  cause_summary: string
+  evidence: string
+  responsible: string
+  next_action: string
+  verification: string | null
+  lesson: string | null
+  recurrence_count: number
+  strategy: unknown | null
+  strategy_action_fingerprint: string | null
+  strategy_evidence_fingerprint: string | null
+  strategy_decision_count: number
+  strategy_pending: boolean
+  opened_at: Date
+  updated_at: Date
+  closed_at: Date | null
+}
+
+function rowToConstructorIncident(row: ConstructorIncidentDbRow): ConstructorIncident {
+  const parsedStrategy = row.strategy
+    ? parseConstructorStrategy(JSON.stringify(row.strategy))
+    : null
+  const states: ConstructorIncidentState[] = ['open', 'diagnosing', 'repairing', 'blocked', 'verifying', 'closed']
+  const causes: ConstructorCauseCode[] = [
+    'semantic_non_code', 'provider_auth', 'provider_credit', 'ci_failure', 'test_failure',
+    'build_failure', 'no_changes', 'timeout', 'brain_unavailable', 'unknown',
+  ]
+  return {
+    id: Number(row.id),
+    jobId: Number(row.job_id),
+    fingerprint: row.fingerprint,
+    state: states.includes(row.state as ConstructorIncidentState)
+      ? row.state as ConstructorIncidentState
+      : 'open',
+    stage: row.stage,
+    causeCode: causes.includes(row.cause_code as ConstructorCauseCode)
+      ? row.cause_code as ConstructorCauseCode
+      : 'unknown',
+    causeSummary: row.cause_summary,
+    evidence: row.evidence,
+    responsible: row.responsible,
+    nextAction: row.next_action,
+    verification: row.verification,
+    lesson: row.lesson,
+    recurrenceCount: Number(row.recurrence_count),
+    strategy: parsedStrategy?.ok ? parsedStrategy.strategy : null,
+    strategyActionFingerprint: row.strategy_action_fingerprint,
+    strategyEvidenceFingerprint: row.strategy_evidence_fingerprint,
+    strategyDecisionCount: Number(row.strategy_decision_count ?? 0),
+    strategyPending: Boolean(row.strategy_pending),
+    openedAt: row.opened_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+    closedAt: row.closed_at?.toISOString() ?? null,
+  }
+}
+
+async function upsertConstructorIncident(
+  client: pg.PoolClient,
+  job: { id: number; orderText: string; log: string; progress: string; attempts: number },
+): Promise<ConstructorIncident> {
+  const analysis = classifyConstructorFailure(job.log, job.progress)
+  const existingJobIncident = await client.query<{ fingerprint: string }>(
+    'SELECT fingerprint FROM constructor_incidents WHERE job_id=$1 ORDER BY updated_at DESC LIMIT 1',
+    [job.id],
+  )
+  const fingerprint = existingJobIncident.rows[0]?.fingerprint ?? (amprentaOrdin(job.orderText) || `job:${job.id}`)
+  const evidence = (job.log.trim() || '[failure report contained no log]').slice(-4000)
+  const result = await client.query<ConstructorIncidentDbRow>(
+    `INSERT INTO constructor_incidents
+       (job_id, fingerprint, state, stage, cause_code, cause_summary, evidence, responsible, next_action)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (fingerprint) DO UPDATE SET
+       job_id = EXCLUDED.job_id,
+       state = EXCLUDED.state,
+       stage = EXCLUDED.stage,
+       cause_code = EXCLUDED.cause_code,
+       cause_summary = EXCLUDED.cause_summary,
+       evidence = EXCLUDED.evidence,
+       responsible = EXCLUDED.responsible,
+       next_action = EXCLUDED.next_action,
+       strategy = CASE WHEN constructor_incidents.job_id <> EXCLUDED.job_id THEN NULL ELSE constructor_incidents.strategy END,
+       strategy_action_fingerprint = CASE WHEN constructor_incidents.job_id <> EXCLUDED.job_id THEN NULL ELSE constructor_incidents.strategy_action_fingerprint END,
+       strategy_evidence_fingerprint = CASE WHEN constructor_incidents.job_id <> EXCLUDED.job_id THEN NULL ELSE constructor_incidents.strategy_evidence_fingerprint END,
+       strategy_pending = CASE WHEN constructor_incidents.job_id <> EXCLUDED.job_id THEN false ELSE constructor_incidents.strategy_pending END,
+       verification = NULL,
+       closed_at = NULL,
+       opened_at = CASE WHEN constructor_incidents.state = 'closed' THEN now() ELSE constructor_incidents.opened_at END,
+       recurrence_count = constructor_incidents.recurrence_count +
+         CASE WHEN constructor_incidents.job_id <> EXCLUDED.job_id THEN 1 ELSE 0 END,
+       updated_at = now()
+     RETURNING *`,
+    [
+      job.id, fingerprint, analysis.state, analysis.stage, analysis.causeCode,
+      analysis.causeSummary, evidence, analysis.responsible, analysis.nextAction,
+    ],
+  )
+  const row = result.rows[0]
+  if (!row) throw new Error(`incident_upsert_failed:${job.id}`)
+  return rowToConstructorIncident(row)
+}
+
+export interface ConstructorIncidentKnowledge {
+  open: ConstructorIncident[]
+  lessons: string[]
+}
+
+/** Knowledge base for the MAPE-K brain loop. `null` means unreadable, never
+ * "zero incidents". Open cases and verified lessons are fetched together. */
+export async function getConstructorIncidentKnowledge(
+  limit = 8,
+): Promise<ConstructorIncidentKnowledge | null> {
+  if (!dbEnabled()) return null
+  try {
+    const [openRows, lessonRows] = await Promise.all([
+      getPool().query<ConstructorIncidentDbRow>(
+        `SELECT * FROM constructor_incidents
+         WHERE state <> 'closed' ORDER BY updated_at ASC LIMIT $1`,
+        [Math.max(1, Math.min(limit, 20))],
+      ),
+      getPool().query<{ lesson: string }>(
+        `SELECT lesson FROM constructor_incidents
+         WHERE state = 'closed' AND lesson IS NOT NULL AND lesson <> ''
+         ORDER BY closed_at DESC NULLS LAST LIMIT 5`,
+      ),
+    ])
+    return {
+      open: openRows.rows.map(rowToConstructorIncident),
+      lessons: lessonRows.rows.map((row) => row.lesson).filter(Boolean),
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function updateConstructorIncident(
+  id: number,
+  fields: {
+    state: 'diagnosing' | 'repairing' | 'blocked' | 'verifying'
+    stage?: string
+    causeCode?: ConstructorCauseCode
+    causeSummary?: string
+    evidence: string
+    nextAction: string
+    lesson?: string
+    strategy?: ConstructorStrategy
+    strategyActionFingerprint?: string
+    strategyEvidenceFingerprint?: string
+    strategyPending?: boolean
+  },
+): Promise<{ ok: true; incident: ConstructorIncident } | { ok: false; error: string }> {
+  if (!dbEnabled()) return { ok: false, error: 'incident_register_unreadable' }
+  if (!Number.isInteger(id) || id <= 0) return { ok: false, error: 'incident_id_invalid' }
+  const evidence = String(fields.evidence ?? '').trim()
+  const nextAction = String(fields.nextAction ?? '').trim()
+  if (evidence.length < 10 || nextAction.length < 10) {
+    return { ok: false, error: 'evidence_and_next_action_required' }
+  }
+  const allowedCauses: ConstructorCauseCode[] = [
+    'semantic_non_code', 'provider_auth', 'provider_credit', 'ci_failure', 'test_failure',
+    'build_failure', 'no_changes', 'timeout', 'brain_unavailable', 'unknown',
+  ]
+  const causeCode = fields.causeCode && allowedCauses.includes(fields.causeCode)
+    ? fields.causeCode
+    : undefined
+  try {
+    const result = await getPool().query<ConstructorIncidentDbRow>(
+      `UPDATE constructor_incidents SET
+         state=$2,
+         stage=COALESCE(NULLIF($3,''), stage),
+         cause_code=COALESCE($4, cause_code),
+         cause_summary=COALESCE(NULLIF($5,''), cause_summary),
+         evidence=$6,
+         next_action=$7,
+         lesson=COALESCE(NULLIF($8,''), lesson),
+         strategy=COALESCE($9::jsonb, strategy),
+         strategy_action_fingerprint=COALESCE(NULLIF($10,''), strategy_action_fingerprint),
+         strategy_evidence_fingerprint=COALESCE(NULLIF($11,''), strategy_evidence_fingerprint),
+         strategy_decision_count=strategy_decision_count + CASE WHEN $9::jsonb IS NULL THEN 0 ELSE 1 END,
+         strategy_pending=COALESCE($12, strategy_pending),
+         updated_at=now()
+       WHERE id=$1 AND state <> 'closed'
+       RETURNING *`,
+      [
+        id, fields.state, String(fields.stage ?? '').slice(0, 120), causeCode ?? null,
+        String(fields.causeSummary ?? '').slice(0, 1000), evidence.slice(-4000),
+        nextAction.slice(0, 1000), String(fields.lesson ?? '').slice(0, 4000),
+        fields.strategy ? JSON.stringify(fields.strategy) : null,
+        String(fields.strategyActionFingerprint ?? '').slice(0, 80),
+        String(fields.strategyEvidenceFingerprint ?? '').slice(0, 80),
+        fields.strategyPending ?? null,
+      ],
+    )
+    const row = result.rows[0]
+    return row
+      ? { ok: true, incident: rowToConstructorIncident(row) }
+      : { ok: false, error: 'incident_missing_or_closed' }
+  } catch {
+    return { ok: false, error: 'incident_register_unreadable' }
+  }
+}
+
+async function advanceIncidentAfterSuccess(
+  client: pg.PoolClient,
+  jobId: number,
+  fields: { ci?: string; branch?: string; prUrl?: string },
+): Promise<void> {
+  const current = await client.query<ConstructorIncidentDbRow>(
+    `SELECT * FROM constructor_incidents WHERE job_id=$1 AND state <> 'closed' FOR UPDATE`,
+    [jobId],
+  )
+  const row = current.rows[0]
+  if (!row) return
+  if (fields.ci !== 'verde') {
+    await client.query(
+      `UPDATE constructor_incidents SET state='verifying',
+         next_action='Obține verdict CI verde pe o mașină curată; done fără CI verde nu închide incidentul.',
+         updated_at=now() WHERE id=$1`,
+      [row.id],
+    )
+    return
+  }
+  const verification =
+    `order #${jobId} done; CI verde${fields.branch ? `; branch ${fields.branch}` : ''}` +
+    `${fields.prUrl ? `; PR ${fields.prUrl}` : ''}`
+  const incident = rowToConstructorIncident(row)
+  await client.query(
+    `UPDATE constructor_incidents SET state='closed', verification=$2, lesson=$3,
+       next_action='Monitorizează reapariția aceleiași amprente; redeschide cazul la recurență.',
+       closed_at=now(), updated_at=now() WHERE id=$1`,
+    [row.id, verification, constructorIncidentLesson(incident, verification)],
+  )
+}
+
 // Cât timp de TĂCERE (fără nicio raportare de progres) până când un ordin
 // „running" e considerat BLOCAT — worker-ul lui a murit (omorât de `timeout
 // 1800` din constructor-worker.sh) și nimeni nu-l mai duce. Era 40 de minute
@@ -4113,10 +4398,26 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    await client.query(
+    const abandoned = await client.query<{
+      id: string | number
+      order_text: string
+      log: string | null
+      progress: string | null
+      attempts: number
+    }>(
       `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandoned: 3 attempts exhausted]', updated_at = now()
-       WHERE status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND attempts >= 3`,
+       WHERE status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND attempts >= 3
+       RETURNING id, order_text, log, progress, attempts`,
     )
+    for (const row of abandoned.rows) {
+      await upsertConstructorIncident(client, {
+        id: Number(row.id),
+        orderText: row.order_text,
+        log: row.log ?? '[abandoned: 3 attempts exhausted]',
+        progress: row.progress ?? '',
+        attempts: row.attempts,
+      })
+    }
     const r = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
        WHERE id = (
@@ -4188,22 +4489,48 @@ export async function reportBuildJob(
       })().catch((e) => console.error('[P27] raportarea la Kelion a picat:', String(e).slice(0, 160)))
     }
   }
-  await getPool().query(
-    `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
-       tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
-       updated_at = now()${inghetat} WHERE id = $1`,
-    [
-      id,
-      fields.status,
-      fields.branch ?? null,
-      fields.prUrl ?? null,
-      fields.tokens ?? 0,
-      log || null,
-      fields.ci ?? null,
-      fields.brain ?? null,
-      fields.costUsd ?? null,
-    ],
-  )
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const updated = await client.query<BuildJobDbRow>(
+      `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
+         tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
+         updated_at = now()${inghetat} WHERE id = $1 RETURNING *`,
+      [
+        id,
+        fields.status,
+        fields.branch ?? null,
+        fields.prUrl ?? null,
+        fields.tokens ?? 0,
+        log || null,
+        fields.ci ?? null,
+        fields.brain ?? null,
+        fields.costUsd ?? null,
+      ],
+    )
+    const row = updated.rows[0]
+    if (row && fields.status === 'failed') {
+      await upsertConstructorIncident(client, {
+        id: Number(row.id),
+        orderText: row.order_text,
+        log: row.log ?? '[failure report contained no log]',
+        progress: row.progress ?? '',
+        attempts: row.attempts,
+      })
+    } else if (row && fields.status === 'done') {
+      await advanceIncidentAfterSuccess(client, Number(row.id), {
+        ci: row.ci ?? undefined,
+        branch: row.branch ?? undefined,
+        prUrl: row.pr_url ?? undefined,
+      })
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw error
+  } finally {
+    client.release()
+  }
 }
 
 // AUDIT ADMIN (3 aug, Constructor): eroarea de DB colapsa în [] cu 200 →
@@ -4296,7 +4623,7 @@ export async function arhiveazaBuildJobsVechi(zile = 1): Promise<number> {
     const r = await getPool().query(
       `UPDATE build_jobs SET arhivat = true
         WHERE arhivat = false
-          AND status IN ('done','failed')
+          AND status IN ('done','failed','cancelled')
           AND updated_at < now() - ($1 || ' days')::interval`,
       [z],
     )
@@ -4377,7 +4704,7 @@ export async function deleteBuildJobsByScope(
   const stariCurente: Record<typeof scope, string[] | null> = {
     failed: ['failed'],
     done: ['done'],
-    failed_done: ['failed', 'done'],
+    failed_done: ['failed', 'done', 'cancelled'],
     all: null, // null = fără filtru (chiar tot)
   }
   const stari = stariCurente[scope]
@@ -4413,7 +4740,15 @@ export async function retryBuildJob(id: number, newOrderText?: string): Promise<
              order_text = CASE WHEN $2 <> '' THEN $2 ELSE order_text END,
              log = COALESCE(log,'') || E'\\n[repus în coadă de owner${text ? ' cu ordin reformulat' : ''}]',
              updated_at = now()
-       WHERE id=$1 AND status IN ('failed','done','queued','running')
+       WHERE id=$1 AND status IN ('failed','done','queued','running','cancelled')
+         AND (
+           status <> 'failed'
+           OR NOT EXISTS (SELECT 1 FROM constructor_incidents WHERE job_id=build_jobs.id)
+           OR EXISTS (
+             SELECT 1 FROM constructor_incidents
+             WHERE job_id=build_jobs.id AND state IN ('repairing','verifying')
+           )
+         )
        RETURNING *`,
       [id, text.slice(0, 4000)],
     )
@@ -4423,14 +4758,14 @@ export async function retryBuildJob(id: number, newOrderText?: string): Promise<
   }
 }
 
-/** Anulează un ordin în curs sau în coadă: îl trece pe 'failed' cu marcaj de
- *  anulare, ca lucrătorul să nu-l mai ia. `true` dacă exista ceva de oprit. */
+/** Anulează explicit un ordin în curs sau în coadă. `cancelled` este terminal,
+ *  dar NU este eșec de execuție și nu deschide un incident fals. */
 export async function cancelBuildJob(id: number): Promise<boolean> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
   try {
     const r = await getPool().query(
       `UPDATE build_jobs
-         SET status='failed',
+         SET status='cancelled',
              log = COALESCE(log,'') || E'\\n[anulat de owner]',
              updated_at = now()
        WHERE id=$1 AND status IN ('queued','running')`,

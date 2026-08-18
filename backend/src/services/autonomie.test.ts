@@ -25,7 +25,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 interface JobFals {
   id: number
   orderText: string
-  status: 'queued' | 'running' | 'done' | 'failed'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
   log: string | null
   /** WHO started it — "kelion-autonom" = the loop, an email = a human. The
    *  wall only looks at orders STARTED BY IT: human-given failures don't stop
@@ -108,6 +108,9 @@ vi.mock('../db.js', () => ({
   cheltuitAziConstructor: async () => cheltuitAzi,
   // P10: citirea cu context pentru afișaj — în teste, aceeași cifră, citită.
   cheltuialaAziConstructor: async () => ({ citit: true, usd: cheltuitAzi, joburiAzi: 0, faraCost: 0 }),
+  getConstructorIncidentKnowledge: async () => ({ open: [], lessons: [] }),
+  updateConstructorIncident: async () => ({ ok: true }),
+  retryBuildJob: async () => null,
 }))
 
 let ultimulPrompt = ''

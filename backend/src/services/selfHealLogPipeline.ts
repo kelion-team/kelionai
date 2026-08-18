@@ -198,6 +198,20 @@ export class SelfHealDecisionEngine {
         continue
       }
 
+      // Constructor logs are evidence for the mandatory incident strategist,
+      // never a source of recursive constructor orders. The old behavior created
+      // #475-#478 from earlier failures and made the broken executor repair itself
+      // by spawning more work into the same broken executor.
+      if (group.source === 'constructor') {
+        await saveKv(cheieFiled, JSON.stringify({
+          at: Date.now(),
+          count: totalCount,
+          handedTo: 'constructor_incident_strategist',
+          evidence: group.sampleMessage.slice(0, 500),
+        }))
+        continue
+      }
+
       const orderPrompt =
         `AUTO-VINDECARE (${group.source} logs): în ${group.fileOrContext} apare RECURENT eroarea (count=${totalCount}, prag=${threshold}):\n` +
         `${group.sampleMessage}\n\n` +

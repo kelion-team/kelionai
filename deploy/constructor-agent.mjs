@@ -1420,7 +1420,7 @@ async function main() {
       sh('git add -A')
       execFileSync('git', ['-c', 'user.name=Kelion Constructor', '-c', 'user.email=contact@kelionai.app', 'commit', '-m', titlu], { cwd: ATELIER, stdio: 'pipe' })
     }
-    execFileSync('git', ['push', '-u', 'origin', branch, '--force'], { cwd: ATELIER, stdio: 'pipe', timeout: 60_000 })
+    execFileSync('git', ['push', '-u', 'origin', branch, '--force'], { cwd: ATELIER, stdio: 'pipe', timeout: 60_000, env: gitEnv })
     const headSha = sh('git rev-parse HEAD').trim()
     log(`ramura ${branch} împinsă`)
 
