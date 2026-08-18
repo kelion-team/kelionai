@@ -339,6 +339,18 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       .filter((file): file is string => typeof file === 'string' && file.length > 0 && file.length <= 240)
       .slice(0, 2500)
     if (!ordin) return reply.code(400).send({ error: 'ordin_lipsa' })
+    const { clasificaActiuneConstructor } = await import('../services/evalOrdinConstructor.js')
+    const tipActiune = clasificaActiuneConstructor(ordin)
+    if (tipActiune !== 'cod') {
+      return reply.code(422).send({
+        ok: false,
+        schema: 'kelion.constructor/v1',
+        protocol: null,
+        errors: [`order classification is ${tipActiune}; constructor accepts code orders only`],
+        plan: '',
+        files: [],
+      })
+    }
     try {
       // U?a UNITAR? ? acela?i creier ca chat/autonomie/mailbox (nu un creier paralel).
       const { planificaPasiMici } = await import('../services/creierRationament.js')

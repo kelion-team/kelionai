@@ -1362,8 +1362,11 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       }
     }
 
-    if (clasificaActiuneConstructor(s.ordin) === 'directa') {
-      const motiv = 'acțiune directă de ecran/browser, nu modificare de cod'
+    const tipActiune = clasificaActiuneConstructor(s.ordin)
+    if (tipActiune !== 'cod') {
+      const motiv = tipActiune === 'directa'
+        ? 'acțiune directă de ecran/browser, nu modificare de cod'
+        : 'ordin ambiguu/non-cod; lipsește verbul tehnic explicit și ținta din repo'
       if (/^C\d+$/.test(s.cod)) {
         await actualizeazaCerinta(Number(s.cod.slice(1)), {
           stare: 'respinsa',

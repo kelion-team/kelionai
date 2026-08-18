@@ -315,7 +315,7 @@ describe('cerințele: analiză înainte de cod', () => {
   it('ordinul poartă NIVELUL DE DIFICULTATE, ca mâna să fie aleasă din start', async () => {
     misiuneaInchisa()
     cerinte = [{
-      id: 9, text: 'plata prin Revolut', stare: 'analizata', dificultate: 5,
+      id: 9, text: 'implementează în backend plata prin Revolut', stare: 'analizata', dificultate: 5,
       criteriu: 'userul primește creditele', aleasa: 'browser pe portal', optiuni: null,
     }]
     await poateSaLucreze()
@@ -325,7 +325,7 @@ describe('cerințele: analiză înainte de cod', () => {
   it('o sarcină care a picat pleacă a doua oară pe o mână mai bună', async () => {
     misiuneaInchisa()
     cerinte = [{
-      id: 9, text: 'x', stare: 'analizata', dificultate: 3,
+      id: 9, text: 'repară modulul backend de plăți', stare: 'analizata', dificultate: 3,
       criteriu: null, aleasa: null, optiuni: null,
     }]
     await poateSaLucreze()
@@ -351,10 +351,27 @@ describe('cerințele: analiză înainte de cod', () => {
     expect(cerinteAtinse).toContainEqual({ id: 57, stare: 'respinsa' })
   })
 
+  it('cererea de sfat personal ambiguă nu intră în constructor', async () => {
+    misiuneaInchisa()
+    cerinte = [{
+      id: 123,
+      text: 'Adrian întreabă ce trebuie să facă dacă îi este frică și caută sfaturi practice pentru a o gestiona.',
+      stare: 'analizata',
+      criteriu: 'Kelion oferă un răspuns calm și aplicabil.',
+      aleasa: 'Răspunde structurat în conversație.',
+      optiuni: null,
+    }]
+
+    const r = await poateSaLucreze()
+    expect(jobs).toHaveLength(0)
+    expect(r.motiv).toContain('ordin ambiguu/non-cod')
+    expect(cerinteAtinse).toContainEqual({ id: 123, stare: 'respinsa' })
+  })
+
   it('cerința ANALIZATĂ pleacă la construit cu varianta aleasă și criteriul lipite', async () => {
     misiuneaInchisa()
     cerinte = [{
-      id: 9, text: 'plata prin Revolut', stare: 'analizata',
+      id: 9, text: 'implementează în backend plata prin Revolut', stare: 'analizata',
       criteriu: 'un user plătește și primește creditele singur',
       aleasa: 'browser pe portal — DE CE: nu-i cere nimic ownerului',
       optiuni: '[{"nume":"email"}]',
@@ -376,7 +393,7 @@ describe('cerințele: analiză înainte de cod', () => {
     for (const c of ['M0', 'M1', 'M2', 'M3', 'M4', 'M5'])
       kv.set(`autonomie:pas:${c}`, JSON.stringify({ job: 0, incercari: 3 }))
     cerinte = [{
-      id: 1, text: 'uneltele constructorului active direct în chat', stare: 'analizata',
+      id: 1, text: 'modifică registrul backend pentru uneltele constructorului active direct în chat', stare: 'analizata',
       criteriu: 'build_software apare în registrul capabilităților de chat',
       aleasa: 'flag în registru — DE CE: fără cale nouă de cod', optiuni: null,
     }]
@@ -429,7 +446,7 @@ describe('cerințele: analiză înainte de cod', () => {
 
   it('ordinul terminat o duce pe „livrată", NU pe „verificată"', async () => {
     misiuneaInchisa()
-    cerinte = [{ id: 9, text: 'x', stare: 'analizata', criteriu: null, aleasa: null, optiuni: null }]
+    cerinte = [{ id: 9, text: 'repară modulul backend de plăți', stare: 'analizata', criteriu: null, aleasa: null, optiuni: null }]
     await poateSaLucreze()
     jobs[0].status = 'done'
     await poateSaLucreze()

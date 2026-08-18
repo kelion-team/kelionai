@@ -115,6 +115,8 @@ describe('LACĂT — poarta e ENFORCED la intrarea ordinului (nu doar în panou)
     'modifică fișierul backend/src/index.ts',
     'refactorizează modulul de autentificare',
     'implementează un endpoint API',
+    'construiește tabela SQL pentru plăți neatribuite',
+    'build the backend payment module',
     'fix the frontend login button',
     'refactor the backend module',
   ])('clasifică verbul tehnic + ținta repo drept cod: %s', (ordin) => {

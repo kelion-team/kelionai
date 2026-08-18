@@ -84,7 +84,7 @@ export interface EvaluareOrdin {
 // Vocabular fara echivoc: "fa" nu inseamna cod. Constructorul primeste doar
 // un verb tehnic + o tinta din repo; actiunile de ecran/browser au clasa lor.
 const ACTIUNI_COD =
-  /(?<![\p{L}\p{N}_])(implementeaz[aă]?|programeaz[aă]?|repar[aă]?|corecteaz[aă]?|modific[aă]?|refactorizeaz[aă]?|integreaz[aă]?|optimizeaz[aă]?|rescrie|refac|adaug[aă]?|[sș]terge|scrie (?:cod|teste?|un test)|creeaz[aă]? (?:un |o )?(?:endpoint|component[aă]?|func[tț]ie|modul|test|migrare)|implement|program|repair|fix|modify|refactor|integrate|optimize|rewrite|add|delete|write (?:code|tests?|a test)|create (?:an? )?(?:endpoint|component|function|module|test|migration))(?![\p{L}\p{N}_])/iu
+  /(?<![\p{L}\p{N}_])(implementeaz[aă]?|construie[sș]te|programeaz[aă]?|repar[aă]?|corecteaz[aă]?|modific[aă]?|refactorizeaz[aă]?|integreaz[aă]?|optimizeaz[aă]?|rescrie|refac|adaug[aă]?|[sș]terge|scrie (?:cod|teste?|un test)|creeaz[aă]? (?:un |o )?(?:endpoint|component[aă]?|func[tț]ie|modul|test|migrare)|implement|build|program|repair|fix|modify|refactor|integrate|optimize|rewrite|add|delete|write (?:code|tests?|a test)|create (?:an? )?(?:endpoint|component|function|module|test|migration))(?![\p{L}\p{N}_])/iu
 const TINTE_COD =
   /(?<![\p{L}\p{N}_])(cod(?:ul)?|repo(?:-ul)?|ramur[ăa]|fi[sș]ier(?:ul|e)?|modul(?:ul|e)?|func[tț]i[ea]|clas[ăa]|component[ăa]|frontend|backend|endpoint|api|buton(?:ul|oane)?|formular(?:ul|e)?|pagin[ăa]|bar[ăa]|panou(?:l)?|css|react|typescript|tsx|teste?|bug|eroare|baz[ăa] de date|sql|code|repository|branch|files?|modules?|functions?|classes?|components?|buttons?|forms?|pages?|dashboard|database)(?![\p{L}\p{N}_])/iu
 const ACTIUNI_ANALIZA_COD =
