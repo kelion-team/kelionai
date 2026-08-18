@@ -32,6 +32,10 @@ const ATELIER = '/root/kelion/atelier'
 const APP = 'http://127.0.0.1:8080'
 const REPO = 'kelion-team/kelionai'
 
+export function caleAskpassConstructor(atelier = ATELIER) {
+  return path.join(path.dirname(atelier), 'constructor-git-askpass.sh')
+}
+
 // env-ul aplicației, citit direct din fișier (cronul nu are mediul shell-ului).
 // Tolerant la lipsa fișierului: pe VPS există mereu, dar dacă cumva nu (sau la
 // importul modulului dintr-un test al gărzii de comenzi), pornim cu env gol —
@@ -679,7 +683,7 @@ function salveazaLectie(row) {
     fs.appendFileSync(LECTII_PATH, JSON.stringify({ at: new Date().toISOString(), ...row }) + '\n')
   } catch { /* ignore */ }
 }
-function extrageFisiereDinText(text, limit = 6) {
+export function extrageFisiereDinText(text, limit = 6) {
   const out = []
   const re = /(?:^|[\s`"'(])([A-Za-z0-9_./-]+\.(?:ts|tsx|js|mjs|cjs|json|md|css|yml|yaml))/g
   let m
@@ -691,42 +695,236 @@ function extrageFisiereDinText(text, limit = 6) {
   }
   return out
 }
+const ALIASE_DIRECTOARE = new Map([
+  ['servicii', 'services'],
+  ['rute', 'routes'],
+])
+
+export function rezolvaFisiereCerute(files, trackedFiles, limit = 6) {
+  const tracked = [...new Set((trackedFiles || []).map((f) => String(f).replace(/\\/g, '/')))]
+  const trackedSet = new Set(tracked)
+  const out = []
+  for (const raw of files || []) {
+    const normal = String(raw || '').trim().replace(/\\/g, '/').replace(/^\.\//, '')
+    if (!normal || normal.startsWith('/') || /^[A-Za-z]:\//.test(normal)) continue
+    const parti = normal.split('/')
+    if (parti.includes('..')) continue
+    const aliased = parti.map((part) => ALIASE_DIRECTOARE.get(part.toLowerCase()) || part).join('/')
+    let ales = trackedSet.has(normal) ? normal : (trackedSet.has(aliased) ? aliased : '')
+    if (!ales) {
+      const baza = path.posix.basename(aliased)
+      const potriviri = tracked.filter((f) => path.posix.basename(f) === baza)
+      if (potriviri.length === 1) ales = potriviri[0]
+    }
+    if (ales && !out.includes(ales)) out.push(ales)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+function fisiereUrmariteInAtelier() {
+  try {
+    return execFileSync(
+      'git',
+      ['-C', ATELIER, 'ls-files', '--cached', '--others', '--exclude-standard'],
+      { encoding: 'utf8', timeout: 30_000 },
+    ).split('\n').map((f) => f.trim()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 function fisiereExistenteInAtelier(files) {
-  const ok = []
-  for (const f of files || []) {
+  return rezolvaFisiereCerute(files, fisiereUrmariteInAtelier(), 6).filter((f) => {
     try {
       const fp = path.join(ATELIER, f)
-      if (fs.existsSync(fp) && fs.statSync(fp).isFile()) ok.push(f)
-    } catch { /* ignore */ }
-  }
-  return ok.slice(0, 6)
+      return fs.existsSync(fp) && fs.statSync(fp).isFile()
+    } catch {
+      return false
+    }
+  })
 }
-/** Plan scurt de la creierul Kelion (Gemini app) ? pentru ORICE surs? Aider. */
+const CONSTRUCTOR_PROTOCOL_ID = 'kelion.constructor/v1'
+const COMENZI_PROTOCOL = new Set([
+  'npm --prefix backend run build',
+  'npm --prefix backend run typecheck',
+  'npm --prefix backend run lint',
+  'npm --prefix backend test',
+  'npm --prefix frontend run build',
+  'npm --prefix frontend run lint',
+  'node scripts/verifica-sintaxa.mjs',
+  'node scripts/verifica-exporturi.mjs',
+])
+const ACTIUNI_PROTOCOL = new Set(['inspect', 'create', 'modify', 'delete'])
+const cheiExacte = (value, keys) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const actual = Object.keys(value).sort()
+  return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index])
+}
+const caleProtocolSigura = (value) => {
+  if (typeof value !== 'string' || !value || value.length > 240) return false
+  if (value.startsWith('/') || /^[A-Za-z]:[\/]/.test(value) || value.includes('\\')) return false
+  return /^[A-Za-z0-9_.@/+\-]+$/.test(value) && value.split('/').every((part) => part && part !== '.' && part !== '..')
+}
+
+export function valideazaProtocolConstructorPrimit(value, trackedFiles = []) {
+  const errors = []
+  if (!cheiExacte(value, ['protocol', 'naturalLanguage', 'technical']))
+    return { ok: false, protocol: null, errors: ['invalid root shape'] }
+  if (value.protocol !== CONSTRUCTOR_PROTOCOL_ID) errors.push('unsupported protocol version')
+
+  const natural = value.naturalLanguage
+  if (!cheiExacte(natural, ['task', 'rationale', 'instructions'])) errors.push('invalid naturalLanguage shape')
+  const instructions = Array.isArray(natural?.instructions) ? natural.instructions : []
+  if (typeof natural?.task !== 'string' || natural.task.length < 8 || natural.task.length > 2500) errors.push('invalid naturalLanguage.task')
+  if (typeof natural?.rationale !== 'string' || !natural.rationale || natural.rationale.length > 1200) errors.push('invalid naturalLanguage.rationale')
+  if (instructions.length < 1 || instructions.length > 10) errors.push('invalid naturalLanguage.instructions count')
+
+  const technical = value.technical
+  if (!cheiExacte(technical, ['files', 'operations', 'checks'])) errors.push('invalid technical shape')
+  const files = Array.isArray(technical?.files) ? technical.files : []
+  const operations = Array.isArray(technical?.operations) ? technical.operations : []
+  const checks = Array.isArray(technical?.checks) ? technical.checks : []
+  if (files.length < 1 || files.length > 6) errors.push('invalid technical.files count')
+  if (operations.length < 1 || operations.length > 10) errors.push('invalid technical.operations count')
+  if (checks.length < 1 || checks.length > 10) errors.push('invalid technical.checks count')
+
+  const accessByPath = new Map()
+  for (const file of files) {
+    if (!cheiExacte(file, ['path', 'access']) || !caleProtocolSigura(file.path) || !ACTIUNI_PROTOCOL.has(file.access)) {
+      errors.push('invalid technical file entry')
+      continue
+    }
+    if (accessByPath.has(file.path)) errors.push(`duplicate file path: ${file.path}`)
+    accessByPath.set(file.path, file.access)
+  }
+
+  const tracked = new Set((trackedFiles || []).map(String))
+  if (tracked.size) {
+    const trackedDirs = new Set([...tracked].flatMap((file) => {
+      const parts = file.split('/'); const dirs = []
+      for (let i = 1; i < parts.length; i++) dirs.push(parts.slice(0, i).join('/'))
+      return dirs
+    }))
+    for (const [file, access] of accessByPath) {
+      if (access === 'create') {
+        const parent = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : ''
+        if (parent && !trackedDirs.has(parent)) errors.push(`create parent directory is not tracked: ${parent}`)
+      } else if (!tracked.has(file)) {
+        errors.push(`protocol file is not tracked exactly: ${file}`)
+      }
+    }
+  }
+
+  const operationIds = new Set()
+  for (const operation of operations) {
+    const allowedKeys = operation && Object.hasOwn(operation, 'symbol')
+      ? ['id', 'action', 'file', 'symbol']
+      : ['id', 'action', 'file']
+    if (!cheiExacte(operation, allowedKeys) || !/^S[1-9][0-9]?$/.test(String(operation?.id || '')) ||
+        !ACTIUNI_PROTOCOL.has(operation?.action) || !caleProtocolSigura(operation?.file)) {
+      errors.push('invalid technical operation entry')
+      continue
+    }
+    if (Object.hasOwn(operation, 'symbol') &&
+        (typeof operation.symbol !== 'string' || operation.symbol.length < 1 || operation.symbol.length > 160))
+      errors.push('invalid technical operation symbol')
+    if (operationIds.has(operation.id)) errors.push(`duplicate operation id: ${operation.id}`)
+    operationIds.add(operation.id)
+    const access = accessByPath.get(operation.file)
+    if (!access) errors.push(`operation ${operation.id} references undeclared file: ${operation.file}`)
+    if (operation.action !== 'inspect' && access && access !== operation.action)
+      errors.push(`operation ${operation.id} conflicts with declared file access`)
+  }
+
+  const instructionIds = new Set()
+  for (const instruction of instructions) {
+    if (!cheiExacte(instruction, ['operationId', 'text']) || !/^S[1-9][0-9]?$/.test(String(instruction?.operationId || '')) ||
+        typeof instruction?.text !== 'string' || instruction.text.length < 3 || instruction.text.length > 500) {
+      errors.push('invalid natural-language instruction entry')
+      continue
+    }
+    if (instructionIds.has(instruction.operationId)) errors.push(`duplicate instruction id: ${instruction.operationId}`)
+    instructionIds.add(instruction.operationId)
+    if (!operationIds.has(instruction.operationId)) errors.push(`instruction references unknown operation: ${instruction.operationId}`)
+  }
+  for (const id of operationIds) if (!instructionIds.has(id)) errors.push(`operation has no instruction: ${id}`)
+
+  for (const check of checks) {
+    if (check?.type === 'command') {
+      if (!cheiExacte(check, ['type', 'command']) || !COMENZI_PROTOCOL.has(check.command)) errors.push('invalid command check')
+    } else if (check?.type === 'condition') {
+      if (!cheiExacte(check, ['type', 'assertion']) || typeof check.assertion !== 'string' || check.assertion.length < 3 || check.assertion.length > 500)
+        errors.push('invalid condition check')
+    } else errors.push('invalid check type')
+  }
+
+  return errors.length ? { ok: false, protocol: null, errors } : { ok: true, protocol: value, errors: [] }
+}
+
+/** Protocol structurat de la creierul Kelion pentru ORICE sursa Aider. */
 async function cereAjutorCreier(ordin, esuat) {
   try {
     const r = await api(
       '/api/constructor/ajutor',
-      { method: 'POST', body: JSON.stringify({ ordin: String(ordin || '').slice(0, 2500), esuat: String(esuat || '').slice(0, 1500) }) },
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          ordin: String(ordin || '').slice(0, 2500),
+          esuat: String(esuat || '').slice(0, 1500),
+          repositoryFiles: fisiereUrmariteInAtelier().filter(caleProtocolSigura).slice(0, 2500),
+        }),
+      },
       1,
     )
+    const structured = Object.hasOwn(r || {}, 'protocol') || r?.schema === CONSTRUCTOR_PROTOCOL_ID
+    if (structured) {
+      const verdict = valideazaProtocolConstructorPrimit(r?.protocol, fisiereUrmariteInAtelier())
+      if (!verdict.ok || !verdict.protocol) {
+        log(`protocol constructor respins: ${verdict.errors.slice(0, 4).join('; ')}`)
+        return { protocol: null, plan: '', files: [], legacy: false, strictFailure: true, errors: verdict.errors }
+      }
+      const files = verdict.protocol.technical.files.map((file) => file.path)
+      log(`protocol constructor ${verdict.protocol.protocol}: ${files.length} files, ${verdict.protocol.technical.operations.length} operations`)
+      return { protocol: verdict.protocol, plan: '', files, legacy: false, strictFailure: false, errors: [] }
+    }
+
+    // Compatibilitate temporara: aplicatia veche poate raspunde inca FILES/STEPS.
     const plan = String(r?.plan || '').trim()
-    const files = Array.isArray(r?.files) ? r.files.map(String) : extrageFisiereDinText(plan)
-    if (plan) log(`plan creier (toate creierele): ${files.length} files ? ${plan.slice(0, 120).replace(/\n/g, ' ')}`)
-    return { plan, files }
+    const declarate = Array.isArray(r?.files) ? r.files.map(String) : []
+    const files = [...new Set([...declarate, ...extrageFisiereDinText(plan, 12)])]
+    if (plan) log(`protocol legacy rolling-deploy: ${files.length} files`)
+    return { protocol: null, plan, files, legacy: true, strictFailure: false, errors: [] }
   } catch (e) {
-    log(`plan creier indisponibil: ${String(e?.message || e).slice(0, 120)}`)
-    return { plan: '', files: [] }
+    const error = String(e?.message || e).slice(0, 200)
+    log(`protocol constructor indisponibil: ${error}`)
+    return { protocol: null, plan: '', files: [], legacy: false, strictFailure: true, errors: [error] }
   }
 }
-function construiestePromptPasiMici(job, extra = '', plan = '') {
+export function construiestePromptPasiMici(job, extra = '', plan = '', protocol = null) {
+  if (protocol) {
+    let prompt =
+      'Apply the validated machine protocol below. The SAME JSON is used for local and cloud brains.\n' +
+      'Technical paths/actions/checks are authoritative and MUST NOT be translated or inferred from prose.\n' +
+      `CONSTRUCTOR_PROTOCOL_JSON:\n${JSON.stringify(protocol)}\n`
+    if (extra) prompt += `RUNTIME_FAILURE_EVIDENCE (diagnostic only):\n${String(extra).slice(0, 1000)}\n`
+    return prompt
+  }
   const ordin = String(job.orderText || '').slice(0, 1800)
-  let p = `ORDIN ? aplic? DOAR pa?i mici, diff minim:\n${ordin}\n`
-  if (plan) p += `\nPLAN OBLIGATORIU (orice creier Aider ? free sau pl?tit):\n${String(plan).slice(0, 2000)}\n`
-  if (extra) p += `\nE?EC ANTERIOR:\n${String(extra).slice(0, 1000)}\n`
-  p += '\nReguli universale: doar fi?ierele din PLAN/FILES; f?r? rescrieri monolit; opre?te-te dup? CHECK.\n'
-  return p.slice(0, 4000)
+  let prompt = `LEGACY_ROLLING_DEPLOY_ORDER:\n${ordin}\n`
+  if (plan) prompt += `LEGACY_VALIDATED_BY_OLD_APP:\n${String(plan).slice(0, 2000)}\n`
+  if (extra) prompt += `RUNTIME_FAILURE_EVIDENCE:\n${String(extra).slice(0, 1000)}\n`
+  return prompt.slice(0, 4000)
 }
 
+export function pregatesteMesajAider(prompt, platit = false) {
+  const msg = String(prompt || '')
+  const protocolat = msg.includes('CONSTRUCTOR_PROTOCOL_JSON:\n')
+  const cap = protocolat ? 16_000 : (platit ? 8000 : 3500)
+  if (msg.length <= cap) return { msg, cap, capped: false }
+  if (protocolat) throw new Error(`validated protocol prompt exceeds safe cap: ${msg.length}`)
+  return { msg: msg.slice(0, cap) + '\n[prompt capped - small steps law]', cap, capped: true }
+}
 
 function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }, files = []) {
   // ORICE creier: free local SAU cloud pl?tit ? acela?i motor Aider, pa?i mici, fi?iere ?intite.
@@ -754,14 +952,17 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     log(`aider hygiene: ${String(e?.message || e).slice(0, 140)}`)
   }
 
-  let msg = String(prompt || '')
-  // Cap prompt pentru ambele creiere (pl?tit nu trebuie umflat orbe?te).
-  const cap = platit ? 8000 : 3500
-  if (msg.length > cap) {
-    msg = msg.slice(0, cap) + '\n?[prompt capped ? small steps law]'
-    log(`prompt capped to ${cap} chars (${platit ? 'platit' : 'free'})`)
-  }
+  const pregatit = pregatesteMesajAider(prompt, platit)
+  const msg = pregatit.msg
+  if (pregatit.capped) log(`prompt capped to ${pregatit.cap} chars (${platit ? 'platit' : 'free'})`)
 
+  // Fara fisiere explicite, map-tokens=0 il lasa pe Aider complet orb si modelul
+  // poate doar sa ceara continutul. O harta mica ii permite sa aleaga tinta;
+  // cand avem fisiere, pastram contextul strict si ieftin.
+  const scoped = fisiereExistenteInAtelier(files)
+  const mapTokens = scoped.length
+    ? (platit ? String(env.CONSTRUCTOR_AIDER_MAP_TOKENS || '0') : '0')
+    : String(env.CONSTRUCTOR_AIDER_FALLBACK_MAP_TOKENS || '2048')
   const args = [
     '--message', msg,
     '--model', model,
@@ -769,17 +970,15 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     '--weak-model', model,
     '--yes-always', '--no-analytics', '--no-check-update', '--no-gitignore',
     '--auto-commits', '--no-stream', '--no-show-model-warnings',
-    '--map-tokens', platit ? String(env.CONSTRUCTOR_AIDER_MAP_TOKENS || '0') : '0',
+    '--map-tokens', mapTokens,
     '--edit-format', 'whole',
   ]
   if (!platit && fs.existsSync('/root/kelion/aider-free.conf.yml')) {
     args.push('--config', '/root/kelion/aider-free.conf.yml')
   }
-  // Pa?i mici: DOAR fi?iere existente din plan ? pentru free ?I pl?tit.
-  const scoped = fisiereExistenteInAtelier(files)
   for (const f of scoped) args.push(f)
   if (scoped.length) log(`aider (${platit ? 'platit' : 'free'}) scoped: ${scoped.join(', ')}`)
-  else log(`aider (${platit ? 'platit' : 'free'}) f?r? fi?iere scoped ? modelul alege din mesaj`)
+  else log(`aider (${platit ? 'platit' : 'free'}) fara fisiere scoped - repo-map=${mapTokens}`)
 
   const aiderEnv = {
     ...process.env,
@@ -950,13 +1149,24 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
 
   // LEGE: plan pa?i mici ?NAINTE de Aider ? pentru free ?I pl?tit.
   let plan0 = ''
-  let files0 = extrageFisiereDinText(job.orderText)
+  let protocol0 = null
+  let legacyProtocol = false
+  let files0 = []
   let ajutorFolosit = false
   {
     const h = await cereAjutorCreier(job.orderText, String(jurnalVechi || '').slice(-800))
-    if (h.plan) { plan0 = h.plan; ajutorFolosit = true }
-    if (h.files?.length) files0 = h.files
-    beat(platit ? '?? plan pa?i mici ? Aider CLOUD' : '?? plan pa?i mici ? Aider FREE', true)
+    if (h.strictFailure) {
+      throw Object.assign(new Error(`protocol constructor invalid: ${(h.errors || []).join('; ').slice(0, 500)}`), {
+        amanabil: true,
+        freeIssue: 'invalid_protocol',
+      })
+    }
+    protocol0 = h.protocol
+    plan0 = h.plan
+    legacyProtocol = h.legacy === true
+    files0 = h.files || []
+    ajutorFolosit = !!(protocol0 || plan0)
+    beat(platit ? 'protocol JSON validat -> Aider CLOUD' : 'protocol JSON validat -> Aider FREE', true)
   }
 
   let reparatii = 0
@@ -966,9 +1176,11 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       job,
       reparatii ? ultimaProblema : (jurnalVechi ? String(jurnalVechi).slice(-1000) : ''),
       plan0,
+      protocol0,
     ) + (platit ? contextKelion : '')
-    const files = fisiereExistenteInAtelier(files0.length ? files0 : extrageFisiereDinText(plan0 + '\n' + job.orderText))
-    log(`aider run ${reparatii ? 'repair ' + reparatii : 'build'} ? ${ULTIMUL_CREIER} ? files=${files.join(',') || '-'} ? plan=${plan0 ? 'da' : 'nu'}`)
+    const fallbackLegacy = legacyProtocol ? extrageFisiereDinText(plan0 + '\n' + job.orderText) : []
+    const files = fisiereExistenteInAtelier(files0.length ? files0 : fallbackLegacy)
+    log(`aider run ${reparatii ? 'repair ' + reparatii : 'build'} -> ${ULTIMUL_CREIER} -> files=${files.join(',') || '-'} -> protocol=${protocol0 ? protocol0.protocol : 'legacy'}`)
     let a = await ruleazaAider(prompt, creierCfg, files)
     for (const linie of String(a.log).split('\n').slice(-6)) {
       const tl = linie.trim()
@@ -998,13 +1210,22 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
     if (headAcum === baseSha && ramase() > 2 * 60_000) {
       log('no-edit — replan pași mici (același creier)')
       const h2 = await cereAjutorCreier(job.orderText, a.log.slice(-1200))
-      if (h2.plan) {
-        plan0 = h2.plan
-        if (h2.files?.length) files0 = h2.files
+      const ceruteLegacy = h2.legacy ? extrageFisiereDinText(a.log, 12) : []
+      if (!h2.strictFailure && (h2.protocol || h2.plan || ceruteLegacy.length)) {
+        if (h2.protocol) {
+          protocol0 = h2.protocol
+          plan0 = ''
+          legacyProtocol = false
+          files0 = h2.files || []
+        } else {
+          plan0 = h2.plan || plan0
+          legacyProtocol = true
+          files0 = [...new Set([...files0, ...ceruteLegacy, ...(h2.files || [])])]
+        }
         ajutorFolosit = true
         const files2 = fisiereExistenteInAtelier(files0)
-        beat('replan — Aider din nou pe fișiere țintite', true)
-        a = await ruleazaAider(construiestePromptPasiMici(job, a.log.slice(-800), plan0), creierCfg, files2)
+        beat('replan protocolat -> Aider din nou pe fisiere tintite', true)
+        a = await ruleazaAider(construiestePromptPasiMici(job, a.log.slice(-800), plan0, protocol0), creierCfg, files2)
         for (const linie of String(a.log).split('\n').slice(-6)) {
           const tl = linie.trim()
           if (tl) log(`aider: ${tl.slice(0, 140)}`)
@@ -1146,7 +1367,7 @@ async function main() {
     // comportamentul vechi). Așa jobul următor pornește pe master proaspăt, dar cu
     // node_modules cald (vezi comandaInstalare — sare peste `npm ci` inutil).
     const url = `https://github.com/${REPO}.git`
-    const askpass = path.join(ROOT, 'constructor-git-askpass.sh')
+    const askpass = caleAskpassConstructor()
     fs.writeFileSync(
       askpass,
       '#!/bin/sh\ncase "$1" in\n  *Username*) printf "%s\\n" "x-access-token" ;;\n  *) printf "%s\\n" "$GITHUB_TOKEN" ;;\nesac\n',
@@ -1259,7 +1480,8 @@ async function main() {
       beat(`⏳ ${NUME_FURNIZOR} e sugrumat acum. Ordinul NU e pierdut — se reia automat în ~40 min.`, true)
       return
     }
-    log(`EȘEC: ${e.message}`)
+    const detaliu = e instanceof Error ? (e.stack || e.message) : String(e)
+    log(`EȘEC: ${detaliu}`)
     await report('failed', {})
   }
 }

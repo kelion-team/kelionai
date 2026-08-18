@@ -76,7 +76,7 @@ import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuia
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { utcDay } from './timeContext.js'
-import { evalueazaOrdin } from './evalOrdinConstructor.js'
+import { clasificaActiuneConstructor, evalueazaOrdin } from './evalOrdinConstructor.js'
 import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
   browserScroll, browserKey, browserClickAt, browserClose,
@@ -1362,6 +1362,17 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       }
     }
 
+    if (clasificaActiuneConstructor(s.ordin) === 'directa') {
+      const motiv = 'acțiune directă de ecran/browser, nu modificare de cod'
+      if (/^C\d+$/.test(s.cod)) {
+        await actualizeazaCerinta(Number(s.cod.slice(1)), {
+          stare: 'respinsa',
+          dovada: `Netrimis constructorului: ${motiv}.`,
+        }).catch(() => {})
+      }
+      await scrieStare(s.cod, { job: 0, incercari: st.incercari, gata: true })
+      return { pornit: false, motiv: `${s.cod}: netrimis constructorului — ${motiv}` }
+    }
     const id = await createBuildJob('kelion-autonom', ordin)
     if (!id) return { pornit: false, motiv: 'baza de date n-a răspuns' }
     if (/^C\d+$/.test(s.cod)) {

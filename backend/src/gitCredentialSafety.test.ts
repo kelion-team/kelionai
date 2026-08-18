@@ -17,5 +17,9 @@ describe('Git credential safety', () => {
     expect(source).toContain('GIT_ASKPASS')
     expect(source).not.toContain(['https://', 'x-access-token:'].join(''))
     expect(source).not.toContain(';;;;')
+    if (file === 'deploy/constructor-agent.mjs') {
+      expect(source).toContain('caleAskpassConstructor()')
+      expect(source).not.toMatch(/path\.join\(ROOT,/)
+    }
   })
 })

@@ -3038,13 +3038,14 @@ export async function adaugaCerinta(
   const t = text.trim().slice(0, 4000)
   if (!t) return 0
   try {
-    // DEDUP FUZZY (K16): nu doar text identic, ci și reformulări (diacritice,
-    // punctuație, ordinea cuvintelor) — o cerință deja deschisă, chiar spusă
-    // altfel, nu mai intră a doua oară (dubluri = timp + bani irosiți în buclă).
-    const deschise = await getPool().query<{ id: string | number; text: string }>(
-      `SELECT id, text FROM cerinte WHERE stare <> 'respinsa' ORDER BY created_at DESC LIMIT 200`,
+    // DEDUP FUZZY (K16): compara TOATE starile. Daca ignoram `respinsa`, o
+    // propunere automata respinsa reaparea la fiecare ciclu si nastea din nou
+    // acelasi job. Redeschiderea deliberata se face pe randul existent, nu prin
+    // clonarea cerintei.
+    const existente = await getPool().query<{ id: string | number; text: string }>(
+      `SELECT id, text FROM cerinte ORDER BY created_at DESC LIMIT 200`,
     )
-    for (const row of deschise.rows) {
+    for (const row of existente.rows) {
       if (esteDuplicat(t, String(row.text))) return Number(row.id)
     }
     const r = await getPool().query<{ id: string | number }>(

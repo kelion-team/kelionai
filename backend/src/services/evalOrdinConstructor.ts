@@ -81,10 +81,30 @@ export interface EvaluareOrdin {
   aiRecomandat: AiConstructor['cheie'] | null
 }
 
-// Verbe/indicii de ACȚIUNE constructivă — fără măcar unul, ordinul e doar o temă,
-// nu o cerință („fă ceva cu X" nu spune ce să construiască).
-const VERBE_ACTIUNE =
-  /\b(repar|repară|adaug|adaugă|schimb|schimbă|modific|modifică|scrie|creeaz|creează|fac|fă|construi|implement|refactor|șterg|șterge|scoate|mut|mută|leg|leagă|integr|optimiz|corect|rescri|actualiz|updat|fix|test|verific)/i
+// Vocabular fara echivoc: "fa" nu inseamna cod. Constructorul primeste doar
+// un verb tehnic + o tinta din repo; actiunile de ecran/browser au clasa lor.
+const ACTIUNI_COD =
+  /(?<![\p{L}\p{N}_])(implementeaz[aă]?|programeaz[aă]?|repar[aă]?|corecteaz[aă]?|modific[aă]?|refactorizeaz[aă]?|integreaz[aă]?|optimizeaz[aă]?|rescrie|refac|adaug[aă]?|[sș]terge|scrie (?:cod|teste?|un test)|creeaz[aă]? (?:un |o )?(?:endpoint|component[aă]?|func[tț]ie|modul|test|migrare)|implement|program|repair|fix|modify|refactor|integrate|optimize|rewrite|add|delete|write (?:code|tests?|a test)|create (?:an? )?(?:endpoint|component|function|module|test|migration))(?![\p{L}\p{N}_])/iu
+const TINTE_COD =
+  /(?<![\p{L}\p{N}_])(cod(?:ul)?|repo(?:-ul)?|ramur[ăa]|fi[sș]ier(?:ul|e)?|modul(?:ul|e)?|func[tț]i[ea]|clas[ăa]|component[ăa]|frontend|backend|endpoint|api|buton(?:ul|oane)?|formular(?:ul|e)?|pagin[ăa]|bar[ăa]|panou(?:l)?|css|react|typescript|tsx|teste?|bug|eroare|baz[ăa] de date|sql|code|repository|branch|files?|modules?|functions?|classes?|components?|buttons?|forms?|pages?|dashboard|database)(?![\p{L}\p{N}_])/iu
+const ACTIUNI_ANALIZA_COD =
+  /(?<![\p{L}\p{N}_])(analizeaz[aă]?|investigheaz[aă]?|cerceteaz[aă]?|afl[aă]?|planific[aă]?|proiecteaz[aă]?|verific[aă]?|analyze|analyse|investigate|research|plan|design|verify)(?![\p{L}\p{N}_])/iu
+const ACTIUNI_DIRECTE =
+  /(?<![\p{L}\p{N}_])(f[aă] (?:un |o )?(?:screenshot|captur[aă])|captur[aă] (?:de )?ecran|focalizeaz[aă]?.*(?:monitor|ecran|bar[aă])|deschide (?:browser(?:ul)?|pagin[aă]|site(?:-ul|ul)?)|d[aă] click|arat[aă]?.*(?:monitor|ecran)|trimite (?:un )?e-?mail|cite[sș]te (?:un )?e-?mail|take (?:a )?screenshot|capture (?:the )?screen|open (?:the )?(?:browser|page|site)|click (?:on )?|show .* (?:monitor|screen)|send (?:an )?e-?mail|read (?:an )?e-?mail)(?![\p{L}\p{N}_])/iu
+
+export type TipActiuneConstructor = 'cod' | 'directa' | 'neclara'
+
+function cerereaDinOrdin(order: string): string {
+  const text = String(order || '').trim()
+  return /CE A CERUT:\s*([^\n]+)/i.exec(text)?.[1]?.trim() || text
+}
+
+export function clasificaActiuneConstructor(order: string): TipActiuneConstructor {
+  const text = cerereaDinOrdin(order)
+  if ((ACTIUNI_COD.test(text) || ACTIUNI_ANALIZA_COD.test(text)) && TINTE_COD.test(text)) return 'cod'
+  if (ACTIUNI_DIRECTE.test(text)) return 'directa'
+  return 'neclara'
+}
 
 // Hărțile de capacitate: eticheta ← cuvinte-cheie din ordin.
 const CAPACITATI: { eticheta: string; re: RegExp }[] = [
@@ -113,19 +133,21 @@ export function evalueazaOrdin(
   order: string,
   credit?: Record<string, BecCredit>,
 ): EvaluareOrdin {
-  const text = (order ?? '').trim()
+  const text = cerereaDinOrdin(order ?? '')
+  const tipActiune = clasificaActiuneConstructor(text)
 
   // ── Poarta de calitate (NU orice ordin trece) ──────────────────────────────
   if (text.length < 8) {
     return respins('Ordin prea scurt — spune concret ce să construiască sau să repare (minim o propoziție).')
   }
-  if (IN_AFARA.test(text)) {
-    return respins('În afara a ce pot construi: pot lucra doar cod în repo (fișiere, teste, PR), nu acțiuni din lumea reală.')
+  if (IN_AFARA.test(text) || tipActiune === 'directa') {
+    return respins('În afara constructorului de cod: aceasta este o acțiune directă de ecran/browser, nu o modificare în repo. Folosește unealta de monitor/browser, fără job de construcție.')
   }
   const capacitatiNecesare = CAPACITATI.filter((c) => c.re.test(text)).map((c) => c.eticheta)
-  const areVerb = VERBE_ACTIUNE.test(text)
-  if (!areVerb && capacitatiNecesare.length === 0) {
-    return respins('Cerință prea vagă — nu văd nici o acțiune (repară/adaugă/schimbă…) și nici o țintă (fișier, buton, endpoint). Spune ce și unde.')
+  const analizaExplicita = ACTIUNI_ANALIZA_COD.test(text) &&
+    capacitatiNecesare.some((c) => c === 'analiza' || c === 'planificare')
+  if (tipActiune === 'neclara' && !analizaExplicita) {
+    return respins('Cuvânt de acțiune vag sau neclar pentru constructor. Folosește explicit implementează/repară/modifică/refactorizează + ținta din cod; acțiunile directe merg la uneltele de monitor/browser.')
   }
 
   // ORICE muncă de cod atinge repo-ul: dacă am prins un semnal de cod (test/PR/

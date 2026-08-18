@@ -338,6 +338,19 @@ describe('cerințele: analiză înainte de cod', () => {
     expect(jobs[0].orderText).toContain('NIVEL DE DIFICULTATE: 4/5')
   })
 
+  it('acțiunea directă de screenshot nu intră în constructor', async () => {
+    misiuneaInchisa()
+    cerinte = [{
+      id: 57, text: 'fă un screenshot proaspăt la monitor și focalizează pe bara de admin', stare: 'analizata',
+      criteriu: 'să se vadă limbile', aleasa: 'deschide browserul și fă captura', optiuni: null,
+    }]
+
+    const r = await poateSaLucreze()
+    expect(jobs).toHaveLength(0)
+    expect(r.motiv).toContain('netrimis constructorului')
+    expect(cerinteAtinse).toContainEqual({ id: 57, stare: 'respinsa' })
+  })
+
   it('cerința ANALIZATĂ pleacă la construit cu varianta aleasă și criteriul lipite', async () => {
     misiuneaInchisa()
     cerinte = [{

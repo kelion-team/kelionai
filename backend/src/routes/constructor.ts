@@ -330,17 +330,28 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // C?nd Aider local (qwen 7B) se blocheaz? / n-are solu?ie rapid, NU s?rim pe
   // cloud pl?tit. Cerem creierului aplica?iei (Gemini, cheia casei) un PLAN SCURT
   // de fi?iere+pa?i, pe care Aider ?l aplic? local. Bridge-gated.
-  app.post<{ Body: { ordin?: string; esuat?: string } }>('/api/constructor/ajutor', async (req, reply) => {
+  app.post<{ Body: { ordin?: string; esuat?: string; repositoryFiles?: string[] } }>('/api/constructor/ajutor', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
     const ordin = String(req.body?.ordin ?? '').trim().slice(0, 2500)
     const esuat = String(req.body?.esuat ?? '').trim().slice(0, 1500)
+    const repositoryFiles = (Array.isArray(req.body?.repositoryFiles) ? req.body.repositoryFiles : [])
+      .filter((file): file is string => typeof file === 'string' && file.length > 0 && file.length <= 240)
+      .slice(0, 2500)
     if (!ordin) return reply.code(400).send({ error: 'ordin_lipsa' })
     try {
       // U?a UNITAR? ? acela?i creier ca chat/autonomie/mailbox (nu un creier paralel).
       const { planificaPasiMici } = await import('../services/creierRationament.js')
-      const r = await planificaPasiMici(ordin, esuat, 'route.constructor.ajutor')
-      return reply.send({ ok: r.ok, plan: r.plan, files: r.files })
+      const r = await planificaPasiMici(ordin, esuat, 'route.constructor.ajutor', repositoryFiles)
+      return reply.send({
+        ok: r.ok,
+        schema: r.protocol?.protocol ?? 'kelion.constructor/v1',
+        protocol: r.protocol,
+        errors: r.errors,
+        // Rolling-deploy compatibility only; the new worker consumes `protocol`.
+        plan: r.plan,
+        files: r.files,
+      })
     } catch (e) {
       return reply.code(502).send({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) })
     }
