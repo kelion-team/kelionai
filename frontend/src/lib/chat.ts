@@ -386,12 +386,22 @@ export async function* streamChat(
     }
 
     if (!res.ok || !res.body) {
+      // Map real HTTP/API failures to stable codes so ChatPanel can show the
+      // right recovery path (auth / paywall / rate limit) instead of a false
+      // generic "brain error" on every non-200.
       let code = 'error'
       try {
         const j = (await res.json()) as { error?: string }
-        if (j.error === 'brain_not_configured') code = 'brain_not_configured'
+        if (typeof j.error === 'string' && j.error.trim()) code = j.error.trim()
+        else if (res.status === 401 || res.status === 403) code = 'unauthorized'
+        else if (res.status === 402) code = 'paywall'
+        else if (res.status === 429) code = 'rate_limited'
+        else if (res.status >= 500) code = 'server_down'
       } catch {
-        /* non-JSON error body */
+        if (res.status === 401 || res.status === 403) code = 'unauthorized'
+        else if (res.status === 402) code = 'paywall'
+        else if (res.status === 429) code = 'rate_limited'
+        else if (res.status >= 500) code = 'server_down'
       }
       throw new Error(code)
     }

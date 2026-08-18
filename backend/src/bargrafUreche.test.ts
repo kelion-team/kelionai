@@ -82,7 +82,11 @@ describe('audio focus — LIVE first, one mouth, interrupt', () => {
     expect(panou).toContain('interruptAll')
     expect(panou).toMatch(/Boolean\(vlRef\.current\)/)
     expect(clientChat).toContain('serverVoiceOff')
-    expect(clientVL).toContain("interruptAll('live-server-barge-in')")
+    expect(clientVL).toContain('intrerupeRedarea(): void')
+    expect(clientVL).toContain("ws.send(JSON.stringify({ type: 'intrerupe' }))")
+    expect(panou).toContain('vl.intrerupeRedarea()')
+    expect(panou).toContain('const vlGeneratieRef = useRef(0)')
+    expect(panou).toContain('const VL_MAX_RELUARI = 3')
   })
 
   it('setRedareExterna rămâne pe handle-ul LIVE (alte căi), nu e motorul TTS pe scris', () => {
