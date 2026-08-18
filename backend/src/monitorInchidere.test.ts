@@ -35,3 +35,21 @@ describe('×-ul de pe pagina din monitor chiar închide (nu mai moare pe canvas)
     expect(stage).toMatch(/e\.stopPropagation\(\)[\s\S]{0,60}closeTask\(task\.id\)/)
   })
 })
+
+describe('fallback-urile monitorului rămân lizibile și apăsabile', () => {
+  it('niciun link de monitor nu mai folosește cercul fix 36x36 al composerului', () => {
+    expect(stage).not.toMatch(/<a[^>]+className="composer-send"/)
+    expect((stage.match(/className="workspace-action"/g) ?? []).length).toBe(7)
+  })
+
+  it('acțiunea monitorului are lățime după text, înălțime tactilă și wrapping', () => {
+    expect(css).toMatch(/\.workspace-action\s*\{[\s\S]*?width:\s*max-content/)
+    expect(css).toMatch(/\.workspace-action\s*\{[\s\S]*?min-height:\s*44px/)
+    expect(css).toMatch(/\.workspace-action\s*\{[\s\S]*?white-space:\s*normal/)
+  })
+
+  it('mesajul de fallback are contrast și spațiere proprii', () => {
+    expect(css).toMatch(/\.workspace-blocked\s*\{[\s\S]*?color:\s*var\(--text\)/)
+    expect(css).toMatch(/\.workspace-blocked > p\s*\{[\s\S]*?line-height:\s*1\.55/)
+  })
+})
