@@ -47,7 +47,11 @@ export interface SessionUser {
   googleRefreshToken?: string
 }
 
-export function semneazaSesiune(user: SessionUser): string {
+export function setSession(reply: FastifyReply, user: SessionUser): void {
+  // `user` may have been read back from a verified JWT (e.g. on token refresh),
+  // so it can carry reserved claims (iat/exp/nbf). jsonwebtoken refuses to sign a
+  // payload that already has `exp` together with `expiresIn`, so sign ONLY the
+  // SessionUser fields — a clean payload regardless of where `user` came from.
   const payload: SessionUser = {
     email: user.email,
     name: user.name,
@@ -56,13 +60,11 @@ export function semneazaSesiune(user: SessionUser): string {
     locale: user.locale,
     googleAccessToken: user.googleAccessToken,
     googleTokenExp: user.googleTokenExp,
+    // Criptat, nu în clar — vezi antetul. (setSession poate primi userul citit
+    // dintr-un JWT vechi cu tokenul necriptat; cripteazaRt îl sigilează atunci.)
     googleRefreshToken: user.googleRefreshToken ? cripteazaRt(user.googleRefreshToken) : undefined,
   }
-  return jwt.sign(payload, config.sessionSecret, { expiresIn: '30d' })
-}
-
-export function setSession(reply: FastifyReply, user: SessionUser): void {
-  const token = semneazaSesiune(user)
+  const token = jwt.sign(payload, config.sessionSecret, { expiresIn: '30d' })
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
     httpOnly: true,
