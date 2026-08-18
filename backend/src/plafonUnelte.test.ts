@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { plafonUnelteFurnizor } from './services/chatModelPolicy.js'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -16,14 +17,11 @@ const chat = readFileSync(
 )
 
 describe('plafonul de unelte al furnizorului e garantat structural', () => {
-  it('plafonul e AL FURNIZORULUI: 128 pe Gemini (unelte complete), 64 pe restul', () => {
-    // Adrian, 3 aug: „nu are unelte complete". 64 era limita API-ului vechi
-    // (OpenRouter); Gemini acceptă 128 de declarații → pe google-direct intră
-    // TOT inventarul adminului. Testul pinuiește AMBELE cifre și condiția.
-    // 8 aug: plafonul furnizorului a rămas EXACT ăsta, dar s-a mutat într-o
-    // constantă proprie, fiindcă tura conversațională are acum plafonul ei (12).
-    // Ambele cifre rămân pinuite — cea de furnizor NU are voie să scadă tăcut.
-    expect(chat).toMatch(/PLAFON_FURNIZOR = orChatModel\?\.startsWith\(GEMINI_DIRECT_PREFIX\) \? 128 : 64/)
+  it('plafonul e AL FURNIZORULUI: 128 pe Gemini, 64 pe Ollama Cloud sau necunoscut', () => {
+    expect(plafonUnelteFurnizor('google-direct/gemini-2.5-flash')).toBe(128)
+    expect(plafonUnelteFurnizor('ollama-cloud/qwen3.5:397b')).toBe(64)
+    expect(plafonUnelteFurnizor(null)).toBe(64)
+    expect(chat).toContain('const PLAFON_FURNIZOR = plafonUnelteFurnizor(orChatModel)')
     expect(chat).toMatch(/baseTools\.slice\(0, MAX_PROVIDER_TOOLS\)/)
   })
 

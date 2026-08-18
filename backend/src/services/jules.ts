@@ -26,7 +26,7 @@ async function julesFetch(cale: string, init?: RequestInit): Promise<{ ok: true;
       headers: {
         'X-Goog-Api-Key': config.julesKey,
         'Content-Type': 'application/json',
-        ...(init?.headers ?? {}),
+        ...init?.headers,
       },
       signal: AbortSignal.timeout(30_000),
     })

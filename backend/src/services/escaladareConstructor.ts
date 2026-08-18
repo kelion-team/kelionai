@@ -87,8 +87,3 @@ export function decideEscaladareConstructor(i: DecizieEscaladareIn): DecizieEsca
     brainRaport: 'paid_cloud',
   }
 }
-
-/** Normalizare motiv pentru API/agent. */
-export function motivEscaladareDinEsec(text: string): MotivEscaladare {
-  return clasificaEsecFree(text)
-}

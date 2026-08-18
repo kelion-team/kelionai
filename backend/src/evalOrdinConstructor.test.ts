@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { evalueazaOrdin, AI_CONSTRUCTORI } from './services/evalOrdinConstructor.js'
+import { clasificaActiuneConstructor, evalueazaOrdin, AI_CONSTRUCTORI } from './services/evalOrdinConstructor.js'
 
 function sursa(rel: string): string {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -93,4 +93,53 @@ describe('LACĂT — poarta e ENFORCED la intrarea ordinului (nu doar în panou)
     expect(/\/api\/admin\/constructor\/evalueaza/.test(rute)).toBe(true)
     expect(/hartaCreditConstructor\(\)/.test(rute)).toBe(true)
   })
+
+  it('respinge actiunea directa de screenshot, inclusiv cand boilerplate-ul autonom vorbeste despre cod', () => {
+    expect(clasificaActiuneConstructor('fă un screenshot proaspăt la monitor și focalizează pe bara de admin')).toBe('directa')
+    expect(clasificaActiuneConstructor('fă un buton în bara de admin')).toBe('neclara')
+    expect(evalueazaOrdin('fă un buton în bara de admin').trece).toBe(false)
+    const direct = evalueazaOrdin('fă un screenshot proaspăt la monitor și focalizează pe bara de admin')
+    expect(direct.trece).toBe(false)
+    expect(direct.motiv).toContain('acțiune directă de ecran/browser')
+
+    const ambalat = evalueazaOrdin(
+      'NIVEL DE DIFICULTATE: 1/5\n\nCERINȚA OWNERULUI #57.\n\n' +
+      'CE A CERUT: fă un screenshot proaspăt la monitor și focalizează pe bara de admin\n\n' +
+      'Fă-o cap-coadă: rescrie codul și scrie teste.',
+    )
+    expect(ambalat.trece).toBe(false)
+  })
+
+  it.each([
+    'repară butonul de login',
+    'modifică fișierul backend/src/index.ts',
+    'refactorizează modulul de autentificare',
+    'implementează un endpoint API',
+    'construiește tabela SQL pentru plăți neatribuite',
+    'build the backend payment module',
+    'fix the frontend login button',
+    'refactor the backend module',
+  ])('clasifică verbul tehnic + ținta repo drept cod: %s', (ordin) => {
+    expect(clasificaActiuneConstructor(ordin)).toBe('cod')
+  })
+
+  it.each([
+    'fă un screenshot la monitor',
+    'deschide browserul',
+    'dă click pe buton',
+    'trimite un email',
+    'take a screenshot of the admin bar',
+    'open the browser',
+  ])('clasifică acțiunea executată acum drept directă: %s', (ordin) => {
+    expect(clasificaActiuneConstructor(ordin)).toBe('directa')
+  })
+
+  it('permite construirea explicita a unei functionalitati de screenshot', () => {
+    const ordin = 'implementează în frontend funcționalitatea de screenshot pentru bara de admin și scrie teste automate'
+    expect(clasificaActiuneConstructor(ordin)).toBe('cod')
+    const r = evalueazaOrdin(ordin)
+    expect(r.trece).toBe(true)
+    expect(r.capacitatiNecesare).toContain('frontend')
+  })
+
 })

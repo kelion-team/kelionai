@@ -54,7 +54,7 @@ export async function notifyAdmin(
   // țină pe loc apelantul și fără să-i poată strica vreodată tura: un push
   // picat rămâne doar picat, rândul din panou există deja.
   void import('./pushTelefon.js')
-    .then(({ trimitePushAdmin }) => trimitePushAdmin(title, message, { tip: type, ...(payload ?? {}) }))
+    .then(({ trimitePushAdmin }) => trimitePushAdmin(title, message, { tip: type, ...payload }))
     .catch(() => 0)
 
   return res.rows[0]?.id || 0

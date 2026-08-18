@@ -59,7 +59,17 @@ if [ -n "$USCAT" ] && [ -n "${VEGHE_MASTER:-}" ]; then
 elif [ -n "$TOKEN" ]; then
   # CANAL GIT (ca auto-publicare): ls-remote nu e prins de rate-limit REST.
   # Fallback API doar daca git pica. (owner: master=live mereu; veghea nu mai tace pe API)
-  FULL=$(git ls-remote "https://x-access-token:${TOKEN}@github.com/kelion-team/kelionai.git" refs/heads/master 2>/dev/null | head -c 40)
+  ASKPASS="${TMPDIR:-/tmp}/kelion-veghe-git-askpass"
+  cat > "$ASKPASS" <<'ASKPASS_SCRIPT'
+#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\n' 'x-access-token' ;;
+  *) printf '%s\n' "$GITHUB_TOKEN" ;;
+esac
+ASKPASS_SCRIPT
+  chmod 700 "$ASKPASS"
+  FULL=$(GITHUB_TOKEN="$TOKEN" GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+    git ls-remote "https://github.com/kelion-team/kelionai.git" refs/heads/master 2>/dev/null | head -c 40)
   case "$FULL" in
     [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) MASTER=$(printf '%s' "$FULL" | cut -c1-7) ;;
     *)

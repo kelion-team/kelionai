@@ -47,6 +47,55 @@ are the answer. Read them before you report anything to him.
    system — he is the one looking at it.
 
 3. **Never run a bulk operation on something you have not looked at.**
+   `git add -A` on a conflicted merge committed `onai — project guide for Claude (auto-loaded)
+
+You are working on **Kelionai**, a live AI assistant (3D avatar, voice, vision,
+Google skills) deployed at **kelionai.app**. This file is your standing context.
+
+## READ THIS FIRST, ALWAYS
+**On a fresh session, read `AI-HANDOFF.md` in this folder BEFORE doing anything
+else.** It is the single, actively-maintained source of truth: full architecture,
+every route/service/component, the brain-routing rules, the database schema, all
+env vars, the money flows, the "phantom deploy" postmortem + permanent fixes, CI
+workflows, what's dead code vs. live code, and the current state of the project.
+`HANDOFF.md` and `STATUS.md` in this folder are OLDER and PARTLY OUTDATED —
+`AI-HANDOFF.md` supersedes them; don't treat them as current without checking.
+
+**Then read `RAMAS-DE-FACUT.md`** — the owner's single list of what is NOT done
+and what does NOT work, with the evidence for each row (30 iul: „pune pe listă
+tot ce nu ai făcut din proiect, tot ce nu merge, că mă ia capul"). Cross off a
+row only with a PR *and* a live check; add new rows the moment you find them;
+write „nu pot verifica" rather than „e ok" when you cannot prove it.
+
+## THE DOCUMENT IS LIVE — YOU MUST KEEP IT CURRENT
+If you change code, architecture, rules, or the project's state, **update the
+relevant section of `AI-HANDOFF.md` (and its §13 "Starea") before you finish
+your session/PR.** There is no other auto-update mechanism — this convention is
+the mechanism. A stale handoff doc is worse than none: it misleads the next AI.
+
+## THE FOUR RULES THAT COST THE OWNER A WHOLE DAY (30 iul 2026)
+
+Every one of these is written from a real failure of that day, not from theory.
+He asked, at the end: „se poate să schimbi modul ăsta de lucru defectuos?" These
+are the answer. Read them before you report anything to him.
+
+1. **A value that did not come from a successful measurement is „nu pot
+   verifica" — never a number, never a verdict.** Three times in one day the
+   panel *asserted* a state it had never measured: „Cardul Kelion AI: necreat"
+   (the code had never looked for cards), „£0.00" (the field started at 0 and
+   stayed 0 when the request failed), and three red ❌ produced by one failed
+   call. Same shape every time: **a failed read presented as an established
+   fact.** If you cannot measure it, say so.
+
+2. **When the owner contradicts a report of yours, the FIRST place you look is
+   your own code that produced that report.** He said „toate cheile au fost
+   scrise de zeci de ori" — twice. The first time I built a diagnostic tool
+   (i.e. „go check again"). Only the second time did I open `config.ts`, where
+   the answer had been all along: three keys had name aliases, the three that
+   failed had none. He was right both times. He is usually right about his own
+   system — he is the one looking at it.
+
+3. **Never run a bulk operation on something you have not looked at.**
    `git add -A` on a conflicted merge committed `<<<<<<<` markers into five
    files, including running code. A reused CSS class name tore a live page
    apart. Both were „quick". Both cost more than looking would have.

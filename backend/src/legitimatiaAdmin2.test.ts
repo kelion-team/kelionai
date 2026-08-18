@@ -6,7 +6,7 @@
 // (vocalLive.ts:1022) și în bucla autonomă (autonomie.ts:664) cookie-ul nu se
 // transmitea → admin_vezi lovea 403 exact când lucra ca admin 2. Acum are
 // legitimația LUI: token pe viața procesului + doar de pe loopback.
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'

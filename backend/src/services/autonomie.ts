@@ -46,10 +46,10 @@
 import { config } from '../config.js'
 import {
   createBuildJob, listBuildJobs, loadKv, saveKv, getCapabilityGaps, setGapResolved,
-  rezumatPlati,
-  type BuildJob,
+  rezumatPlati, getConstructorIncidentKnowledge, updateConstructorIncident, retryBuildJob,
+  type BuildJob, type ConstructorIncidentKnowledge,
 } from '../db.js'
-import { rationeazaCuUnelte } from './creierRationament.js'
+import { rationeaza, rationeazaCuUnelte } from './creierRationament.js'
 import { expertModelLadder } from './brain.js'
 import {
   BROWSER_TOOLS, SECRET_LISTA_TOOL, } from './brainToolDefs.js'
@@ -72,15 +72,20 @@ import {
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { notifyAdmin } from './adminNotification.js'
-import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuitAziConstructor, cheltuialaAziConstructor } from '../db.js'
+import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuialaAziConstructor } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { utcDay } from './timeContext.js'
+import { clasificaActiuneConstructor, evalueazaOrdin } from './evalOrdinConstructor.js'
 import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
   browserScroll, browserKey, browserClickAt, browserClose,
 } from './browser.js'
 import type { AnthropicTool } from './brainContract.js'
+import {
+  buildConstructorStrategyExecutionPrompt,
+  runConstructorStrategistStep,
+} from './constructorStrategistLoop.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -632,10 +637,11 @@ async function scrieStare(cod: string, s: StarePas): Promise<void> {
 }
 
 /** What came out of the order given for this step: done, failed (with log), or nothing yet. */
-function verdict(job: BuildJob | undefined): 'gata' | 'picat' | 'inLucru' {
+function verdict(job: BuildJob | undefined): 'gata' | 'picat' | 'anulat' | 'inLucru' {
   if (!job) return 'inLucru' // can't find it anymore (short list) → we assume nothing
   if (job.status === 'done') return 'gata'
   if (job.status === 'failed') return 'picat'
+  if (job.status === 'cancelled') return 'anulat'
   return 'inLucru'
 }
 
@@ -679,6 +685,13 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
   // doesn't eat the brain's whole context window.
   const scurt = (v: unknown): string => JSON.stringify(v).slice(0, 20_000)
   switch (name) {
+    case 'build_software': {
+      const order = String(args.order ?? '').trim()
+      const evaluare = evalueazaOrdin(order)
+      if (!evaluare.trece) return JSON.stringify({ error: 'ordin_respins', motiv: evaluare.motiv })
+      const job = await createBuildJob(email, order)
+      return JSON.stringify(job ? { ok: true, job } : { error: 'db_indisponibil' })
+    }
     case 'browser_open': return scurt(await browserOpen(email, baseUrl, String(args.url ?? '')))
     case 'browser_click': return scurt(await browserClick(email, baseUrl, Number(args.index ?? -1)))
     case 'browser_type':
@@ -957,6 +970,47 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
   })
 }
 
+type RezultatAutonomie = { pornit: boolean; motiv: string }
+
+/** Production adapter around the testable strategist loop. It gives the loop
+ * the single brain, Kelion's real tools and the durable DB transition helpers. */
+async function supervizeazaIncidentConstructor(
+  knowledge: ConstructorIncidentKnowledge,
+  constructorOcupat: boolean,
+): Promise<RezultatAutonomie | null> {
+  const incident = knowledge.open[0]
+  if (!incident) return null
+  if (mainileOcupate) return { pornit: false, motiv: `incident #${incident.id}: strategul lucrează deja` }
+  mainileOcupate = true
+  try {
+    const result = await runConstructorStrategistStep(knowledge, {
+      think: (prompt) => rationeaza(prompt, {
+        ruta: 'service.autonomie.strateg', treapta: 'lucru', maxTokens: 4500, temperature: 0,
+      }),
+      executeBrainAction: (strategy, currentIncident) => ruleazaCuMainile({
+        cod: `INCIDENT-${currentIncident.id}`,
+        titlu: `Strategie incident constructor #${currentIncident.id}`,
+        executant: 'maini',
+        dificultate: 5,
+        ordin: buildConstructorStrategyExecutionPrompt(strategy, currentIncident),
+      }),
+      retryJob: retryBuildJob,
+      updateIncident: updateConstructorIncident,
+      capabilityInventory: inventarulMeu(),
+      constructorBusy: constructorOcupat,
+      notifyBlocked: async (currentIncident, action) => {
+        await notifyAdmin('scris', `Incidentul #${currentIncident.id} este blocat`, action.slice(0, 300), {
+          incidentId: currentIncident.id,
+          jobId: currentIncident.jobId,
+        })
+      },
+    })
+    return result ? { pornit: result.started, motiv: result.message } : null
+  } finally {
+    mainileOcupate = false
+  }
+}
+
 /** One pass: repairs itself if it failed, otherwise takes the next task. */
 // PLAFON ZILNIC DE ARDERE (Adrian, B8/K15: „contor real pe admin cu cât s-a
 // construit zilnic, limitare automată, buton de oprit limita"). APROBAT explicit
@@ -1016,13 +1070,21 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   if (mainileOcupate) return { pornit: false, motiv: 'lucrează chiar acum cu browserul' }
   // null = coada necitibilă (auditul admin, 3 aug) — bucla nu pornește nimic
   // peste o coadă pe care n-a văzut-o.
-  const jobs = (await listBuildJobs(40).catch(() => null)) ?? ([] as BuildJob[])
+  const jobs = await listBuildJobs(40).catch(() => null)
+  if (!jobs) return { pornit: false, motiv: '⛔ coada constructorului este necitibilă; nu presupun că este goală' }
   const dupaId = new Map(jobs.map((j) => [j.id, j]))
+  const constructorOcupat = jobs.some((j) => j.status === 'running' || j.status === 'queued')
+
+  // Every open incident reaches the strategist before ordinary mission work.
+  const incidentKnowledge = await getConstructorIncidentKnowledge()
+  if (incidentKnowledge === null) {
+    return { pornit: false, motiv: '⛔ registrul incidentelor constructorului este necitibil; nu declar zero incidente' }
+  }
+  const supervised = await supervizeazaIncidentConstructor(incidentKnowledge, constructorOcupat)
+  if (supervised) return supervised
 
   // 1. Already busy? One thing at a time — otherwise it finishes nothing.
-  if (jobs.some((j) => j.status === 'running' || j.status === 'queued')) {
-    return { pornit: false, motiv: 'are deja un ordin în lucru' }
-  }
+  if (constructorOcupat) return { pornit: false, motiv: 'are deja un ordin în lucru' }
 
   // 1b. PLAFONUL ZILNIC DE ARDERE (B8/K15): dacă e activ și s-a atins, nu mai
   // pornim ordine azi — dar o SPUNEM clar, cu unde se oprește limita. Nu e o
@@ -1235,6 +1297,11 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     if (st.job) {
       const v = verdict(dupaId.get(st.job))
       if (v === 'inLucru') return { pornit: false, motiv: `aștept ordinul #${st.job} (${s.cod})` }
+      if (v === 'anulat') {
+        await scrieStare(s.cod, { ...st, job: 0, blocat: true })
+        console.log(`[AUTONOM] ${s.cod}: ordinul #${st.job} a fost anulat explicit — pasul rămâne blocat, nu este reluat automat`)
+        continue
+      }
       if (v === 'gata') {
         // MEASURED, NOT ASSUMED (Aug 2): a constructor 'done' = "a PR was
         // opened and CI wasn't red" — the code may still be waiting for the
@@ -1354,6 +1421,20 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       }
     }
 
+    const tipActiune = clasificaActiuneConstructor(s.ordin)
+    if (tipActiune !== 'cod') {
+      const motiv = tipActiune === 'directa'
+        ? 'acțiune directă de ecran/browser, nu modificare de cod'
+        : 'ordin ambiguu/non-cod; lipsește verbul tehnic explicit și ținta din repo'
+      if (/^C\d+$/.test(s.cod)) {
+        await actualizeazaCerinta(Number(s.cod.slice(1)), {
+          stare: 'respinsa',
+          dovada: `Netrimis constructorului: ${motiv}.`,
+        }).catch(() => {})
+      }
+      await scrieStare(s.cod, { job: 0, incercari: st.incercari, gata: true })
+      return { pornit: false, motiv: `${s.cod}: netrimis constructorului — ${motiv}` }
+    }
     const id = await createBuildJob('kelion-autonom', ordin)
     if (!id) return { pornit: false, motiv: 'baza de date n-a răspuns' }
     if (/^C\d+$/.test(s.cod)) {

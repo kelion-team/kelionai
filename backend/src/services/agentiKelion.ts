@@ -6,7 +6,13 @@ import { webSearch, googleTools, runGoogleTool, refreshGoogleAccessToken } from 
 // adminTools se aduce DINAMIC la execuție (jos, în ramura măsurătorilor):
 // importul static ar închide ciclul agentiKelion → adminTools → autonomie →
 // brainToolDefs → agentiKelion și ROSTER ar fi undefined la încărcare.
-import { pretentiiFaraFapta, textulDemascarii } from './poartaFaptelor.js'
+import {
+  clasificaRezultatUnealta,
+  pretentiiFaraFapta,
+  textulDemascarii,
+  unelteCuSucces,
+  type DovadaUnealta,
+} from './poartaFaptelor.js'
 import type { OrMessage, AnthropicTool } from './brainContract.js'
 
 // ── ARSENALUL COMPLET (5 aug, ownerul: „nu are uneltele pentru tot ce are
@@ -221,7 +227,16 @@ export async function executaCheamaAgent(
     // DOVADA la vedere (owner, 16 aug: „aduci dovezi ca ai facut"): creierul
     // mare primește NEGRU PE ALB ce unelte a executat agentul — pe listă goală
     // știe că răspunsul e vorbă nemăsurată și nu-l vinde drept verificare.
-    return { json: JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text, unelte_executate: r.unelteExecutate }), costUsd: r.costUsd }
+    return {
+      json: JSON.stringify({
+        agent: a.id,
+        nume: a.nume,
+        raspuns: r.text,
+        unelte_executate: r.unelteExecutate,
+        dovezi_unelte: r.doveziUnelte,
+      }),
+      costUsd: r.costUsd,
+    }
   } catch (e) {
     return { json: JSON.stringify({ error: 'agent_a_esuat', detaliu: e instanceof Error ? e.message.slice(0, 200) : String(e) }), costUsd: 0 }
   }
@@ -288,8 +303,10 @@ export interface RaspunsAgent {
   costUsd: number
   model: string
   /** DOVADA (owner, 16 aug: „aduci dovezi ca ai facut"): uneltele chiar
-   *  EXECUTATE de agent în rularea asta — jurnalul pe care se judecă vorbele. */
+   *  REUȘITE de agent în rularea asta — jurnalul pe care se judecă vorbele. */
   unelteExecutate: string[]
+  /** Și tentativele eșuate/blocate, ca apelantul să nu piardă motivul real. */
+  doveziUnelte: DovadaUnealta[]
 }
 
 // UNELTELE SPECIALIȘTILOR (4 aug, noaptea, owner: „e doar un chat bot, nu
@@ -402,9 +419,9 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
   const unelte = caAdmin
     ? [UNEALTA_CAUTARE, UNEALTA_PAGINA, UNEALTA_AMINTIRI, ...GOOGLE_TOOLS_PUBLICE, ...GOOGLE_TOOLS_PERSONALE, ...UNELTE_MASURARE]
     : [UNEALTA_CAUTARE, UNEALTA_PAGINA, ...GOOGLE_TOOLS_PUBLICE]
-  // Jurnalul faptelor agentului — dovada cerută de owner (16 aug). Se întoarce
-  // apelantului și pe el se judecă răspunsul (poarta faptelor, mai jos).
-  const unelteExecutate: string[] = []
+  // Fiecare intrare în jurnal arată rezultatul real. Un apel refuzat sau cu
+  // eroare rămâne în dovezi, dar nu poate satisface poarta faptelor.
+  const doveziUnelte: DovadaUnealta[] = []
   // Tokenul ownerului se aduce O DATĂ, leneș, la prima unealtă personală.
   let tokenOwner: string | null = null
   // ANALIZĂ COMPLEXĂ PE TOȚI (Adrian, 5 aug: „dă agenților analiză complexă și
@@ -418,17 +435,24 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
   const plafon = efort === 'high' ? 8192 : 2048
   let cost = 0
   for (let runda = 0; ; runda++) {
-    const r = await rationeazaMesaje(messages, { ruta: 'service.agentiKelion', maxTokens: plafon, temperature: 0.6, reasoning: efort, treapta: 'lucru', tools: unelte })
+    const r = await rationeazaMesaje(messages, { ruta: 'service.agentiKelion', model, maxTokens: plafon, temperature: 0.6, reasoning: efort, treapta: 'lucru', tools: unelte })
     cost += r.costUsd
     if (r.toolCalls.length === 0 || runda >= 3) {
       // POARTA FAPTELOR ȘI PE AGENT (owner, 16 aug: „kelion zice ca face el
       // dar nu intreprinde nimic... aduci dovezi ca ai facut"): vorbele
       // agentului se judecă pe JURNALUL LUI de unelte, exact ca la creierul
       // mare. Pretenția nedovedită pleacă spre apelant DEMASCATĂ, nu curată.
-      const nedovedite = pretentiiFaraFapta(r.text, unelteExecutate)
+      const nedovedite = pretentiiFaraFapta(r.text, doveziUnelte)
       const text = nedovedite.length ? r.text + textulDemascarii(nedovedite) : r.text
       if (nedovedite.length) console.error(`[POARTA FAPTELOR][agent ${a.id}] pretenții fără faptă: ${nedovedite.join('; ')}`)
-      return { agent: a.id, text, costUsd: cost, model: r.model, unelteExecutate }
+      return {
+        agent: a.id,
+        text,
+        costUsd: cost,
+        model: r.model,
+        unelteExecutate: unelteCuSucces(doveziUnelte),
+        doveziUnelte,
+      }
     }
     messages.push({ role: 'assistant', content: r.text || '', tool_calls: r.toolCalls })
     for (const tc of r.toolCalls) {
@@ -439,9 +463,6 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
         /* argumente stricate → cad pe răspunsul onest de mai jos */
       }
       let rezultat: string
-      // Ce se scrie în jurnal = doar fapta REALĂ: unealta refuzată sau
-      // necunoscută nu e faptă (altfel jurnalul-dovadă ar minți el însuși).
-      let faptaReala = true
       if (tc.function.name === 'cauta_web' && typeof arg.intrebare === 'string' && arg.intrebare) {
         rezultat = await webSearch(arg.intrebare, 6)
       } else if (tc.function.name === 'citeste_pagina' && typeof arg.url === 'string' && arg.url) {
@@ -482,16 +503,14 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
         const ePublica = GOOGLE_PUBLICE.has(tc.function.name)
         if (!ePublica && !caAdmin) {
           rezultat = JSON.stringify({ error: 'unealta_personala_doar_pentru_owner' })
-          faptaReala = false
         } else {
           if (!ePublica && tokenOwner === null) tokenOwner = await tokenGoogleOwner()
           rezultat = await runGoogleTool(tc.function.name, arg, ePublica ? '' : (tokenOwner ?? ''))
         }
       } else {
         rezultat = JSON.stringify({ error: 'unealta_necunoscuta_sau_argumente_goale' })
-        faptaReala = false
       }
-      if (faptaReala) unelteExecutate.push(tc.function.name)
+      doveziUnelte.push(clasificaRezultatUnealta(tc.function.name, rezultat))
       messages.push({ role: 'tool', tool_call_id: tc.id, content: rezultat.slice(0, 8000) })
     }
   }

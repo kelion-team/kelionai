@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { config } from '../config.js'
-import { getSessionUser, adminSiId, cerAdmin } from '../session.js'
+import { adminSiId, cerAdmin } from '../session.js'
 import { pollVisitorChat } from './demo.js' // visitor chat polling from the common source
 import {
   citesteAudit,

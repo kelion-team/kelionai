@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { alegeModelOrchestrator } from './services/chatModelPolicy.js'
 
 // ── VITEZA — garanțiile misiunii de latență (2 aug) ─────────────────────────
 // Măsurat live și prin probă directă (detaliile în config.ts și services/cursa.ts):
@@ -24,14 +25,13 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     expect(chat).not.toMatch(/Promise\.all\(curse\)/)
   })
 
-  it('toate turele merg pe creierul Gemini (google-direct); pe turele GRELE + CREIER_DUBLU → creierul real, tot google-direct', () => {
-    // CREIER DUBLU (13 aug): fața rapidă (orChatModel) rămâne pe turele ușoare +
-    // pe cele grele cu flagul STINS; cu flagul pornit, turele grele merg pe
-    // creierul real (Pro) — care e TOT google-direct, deci invariantul „Gemini
-    // peste tot" se păstrează.
-    // `let` (nu `const`): plasa de mai jos comută modelul pe flash la epuizarea profundului.
-    expect(chat).toMatch(/let orchestratorModel =[\s\S]{0,160}config\.creierDublu && heavyTurn/)
-    expect(chat).toMatch(/google-direct\/\$\{config\.modelCreierProfund\}` : orChatModel/)
+  it('politica de model păstrează Cloud-ul selectat și urcă pe Gemini profund doar când trebuie', () => {
+    const baza = { modelChat: 'google-direct/gemini-2.5-flash', modelProfund: 'gemini-2.5-pro' }
+    expect(alegeModelOrchestrator({ ...baza, creierDublu: false, turaGrea: true })).toBe(baza.modelChat)
+    expect(alegeModelOrchestrator({ ...baza, creierDublu: true, turaGrea: false })).toBe(baza.modelChat)
+    expect(alegeModelOrchestrator({ ...baza, creierDublu: true, turaGrea: true })).toBe('google-direct/gemini-2.5-pro')
+    expect(alegeModelOrchestrator({ ...baza, modelChat: 'ollama-cloud/qwen3.5:397b', creierDublu: true, turaGrea: true })).toBe('ollama-cloud/qwen3.5:397b')
+    expect(chat).toContain('let orchestratorModel = alegeModelOrchestrator({')
     expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel/)
   })
 

@@ -20,7 +20,6 @@
 // itself. Without that, translations would freeze at the first version and
 // silently lie after every deploy.
 import { createHash } from 'node:crypto'
-import { config } from '../config.js'
 import { loadKv, saveKv } from '../db.js'
 import { rationeazaMesaje } from './creierRationament.js'
 import { geminiDirectAvailable } from './geminiDirect.js'
@@ -104,7 +103,7 @@ async function traduceLot(valori: string[], lang: string): Promise<(string | nul
   // Now each line sits at ITS index, taken from the number it starts with.
   // What is missing stays in English — one untranslated line in a translated
   // page is annoying; a whole blocked language is a dead feature.
-  const out: (string | null)[] = new Array(valori.length).fill(null)
+  const out: (string | null)[] = Array.from({ length: valori.length }, () => null)
   let puse = 0
   for (const linie of r.text.split('\n')) {
     const m = linie.trim().match(/^(\d+)[.)]\s*(.+)$/)

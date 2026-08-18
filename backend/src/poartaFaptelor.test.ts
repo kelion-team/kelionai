@@ -5,10 +5,19 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { pretentiiFaraFapta, textulDemascarii, planFaraExecutie, TEXT_PLAN_FARA_EXECUTIE } from './services/poartaFaptelor.js'
+import {
+  clasificaRezultatUnealta,
+  pretentiiFaraFapta,
+  textulDemascarii,
+  planFaraExecutie,
+  TEXT_PLAN_FARA_EXECUTIE,
+} from './services/poartaFaptelor.js'
 
 function sursa(rel: string): string {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
+}
+function reusite(...unelte: string[]) {
+  return unelte.map((nume) => clasificaRezultatUnealta(nume, JSON.stringify({ success: true })))
 }
 
 describe('poarta faptelor — pretenția fără faptă se prinde (proba la rulare)', () => {
@@ -18,13 +27,13 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(r[0]).toContain('generate_video')
   })
 
-  it('aceeași frază CU generate_video executat → curată (fapta acoperă vorba)', () => {
-    expect(pretentiiFaraFapta('Am generat clipul cerut.', ['generate_video'])).toEqual([])
+  it('aceeași frază CU generate_video reușit → curată (fapta acoperă vorba)', () => {
+    expect(pretentiiFaraFapta('Am generat clipul cerut.', reusite('generate_video'))).toEqual([])
   })
 
   it('„clipul e gata" fără faptă → demascată; cu faptă → curată', () => {
     expect(pretentiiFaraFapta('Clipul e gata, îl vezi pe monitor.', [])).toHaveLength(1)
-    expect(pretentiiFaraFapta('Clipul e gata!', ['generate_video'])).toEqual([])
+    expect(pretentiiFaraFapta('Clipul e gata!', reusite('generate_video'))).toEqual([])
   })
 
   it('negația NU e pretenție: „n-am generat clipul" / „nu am generat" → curat', () => {
@@ -44,14 +53,14 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(pretentiiFaraFapta('Am creat tabelul cu vânzările.', [])).toHaveLength(1)
     expect(pretentiiFaraFapta('Am urcat clipul pe YouTube, privat.', [])).toHaveLength(1)
     // și acoperite de faptă:
-    expect(pretentiiFaraFapta('Am trimis emailul.', ['send_email'])).toEqual([])
+    expect(pretentiiFaraFapta('Am trimis emailul.', reusite('send_email'))).toEqual([])
   })
 
   it('ÎNGHEȚUL DE 5 LUNI (captura 06:41): „Am preluat cerința." fără build_software → demascat', () => {
     expect(pretentiiFaraFapta('Am preluat cerința.', [])).toHaveLength(1)
     expect(pretentiiFaraFapta('Am preluat cerința.', [])[0]).toContain('build_software')
     // preluarea REALĂ (unealta chiar a creat ordinul) e curată
-    expect(pretentiiFaraFapta('Am preluat cerința (ordin #341).', ['build_software'])).toEqual([])
+    expect(pretentiiFaraFapta('Am preluat cerința (ordin #341).', reusite('build_software'))).toEqual([])
     expect(pretentiiFaraFapta('Am preluat ordinul tău.', [])).toHaveLength(1)
   })
 
@@ -59,11 +68,11 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     const minciunaReala = 'În urma scanării complete a codului sursă (backend/ și frontend/), iată inventarul exact al constantelor.'
     expect(pretentiiFaraFapta(minciunaReala, [])).toHaveLength(1)
     // chiar și cu alte unelte executate (ex. documentul creat) — scanarea tot nedovedită rămâne
-    expect(pretentiiFaraFapta(minciunaReala, ['create_doc'])).toHaveLength(1)
+    expect(pretentiiFaraFapta(minciunaReala, reusite('create_doc'))).toHaveLength(1)
     expect(pretentiiFaraFapta('Am auditat codul aplicației și e curat.', [])).toHaveLength(1)
     // scanarea REALĂ: poarta anti-hardcod rulată pe server (sau verdictul din jurnal) o acoperă
-    expect(pretentiiFaraFapta(minciunaReala, ['ruleaza_portile'])).toEqual([])
-    expect(pretentiiFaraFapta('Am scanat codul — verdictul din jurnal e curat.', ['jurnal_masuratori'])).toEqual([])
+    expect(pretentiiFaraFapta(minciunaReala, reusite('ruleaza_portile'))).toEqual([])
+    expect(pretentiiFaraFapta('Am scanat codul — verdictul din jurnal e curat.', reusite('jurnal_masuratori'))).toEqual([])
     // oferta la viitor NU e pretenție
     expect(pretentiiFaraFapta('Pot scana codul dacă vrei.', [])).toEqual([])
   })
@@ -80,6 +89,24 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(t).toContain('FALSĂ')
     expect(t).toContain('generate_video')
   })
+
+  it('o unealtă care a întors eroare este tentativă eșuată, nu dovadă', () => {
+    const dovada = clasificaRezultatUnealta('generate_video', JSON.stringify({ error: 'provider_unavailable' }))
+    expect(dovada.stare).toBe('failed')
+    expect(pretentiiFaraFapta('Am generat clipul cerut.', [dovada])).toHaveLength(1)
+  })
+
+  it('o unealtă refuzată sau blocată nu acoperă pretenția', () => {
+    const dovada = clasificaRezultatUnealta('send_email', JSON.stringify({ succes: false, mesaj: 'Refuzat: confirmarea lipsește.' }))
+    expect(dovada.stare).toBe('blocked')
+    expect(pretentiiFaraFapta('Am trimis emailul către client.', [dovada])).toHaveLength(1)
+  })
+
+  it('o excepție a executorului rămâne eșec, nu succes implicit', () => {
+    const dovada = clasificaRezultatUnealta('create_doc', 'tool_error: connection reset')
+    expect(dovada.stare).toBe('failed')
+    expect(pretentiiFaraFapta('Am creat documentul în Drive.', [dovada])).toHaveLength(1)
+  })
 })
 
 describe('ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere solutia pina la deploy masurabil")', () => {
@@ -90,8 +117,13 @@ describe('ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere 
     expect(planFaraExecutie(PLAN, [], true)).toBe(true)
   })
 
-  it('aceeași vorbă, dar cu o unealtă chiar executată → NU e îngheț (a mișcat ceva)', () => {
-    expect(planFaraExecutie(PLAN, ['build_software'], true)).toBe(false)
+  it('aceeași vorbă, dar cu o unealtă reușită → NU e îngheț (a mișcat ceva)', () => {
+    expect(planFaraExecutie(PLAN, reusite('build_software'), true)).toBe(false)
+  })
+
+  it('o tentativă eșuată nu dezarmează detectorul de plan', () => {
+    const esec = clasificaRezultatUnealta('build_software', JSON.stringify({ error: 'constructor_unavailable' }))
+    expect(planFaraExecutie(PLAN, [esec], true)).toBe(true)
   })
 
   it('tura NU e de acțiune (întrebare, taifas) → planul e doar vorbă permisă', () => {
@@ -112,13 +144,16 @@ describe('ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere 
 describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice creier', () => {
   const chat = sursa('./routes/chat.ts')
 
-  it('jurnalul uneltelor EXECUTATE se scrie la fiecare execuție (nu doar oferite)', () => {
-    expect(chat).toMatch(/const unelteExecutate: string\[\] = \[\]/)
-    expect(chat).toMatch(/unelteExecutate\.push\(name\)/)
+  it('tentativele și rezultatele uneltelor sunt separate în tură', () => {
+    expect(chat).toMatch(/const unelteIncercate: string\[\] = \[\]/)
+    expect(chat).toMatch(/const doveziUnelte: DovadaUnealta\[\] = \[\]/)
+    expect(chat).toMatch(/const executaUnealtaCuDovada/)
+    expect(chat).toMatch(/const dovada = clasificaRezultatUnealta/)
+    expect(chat).toMatch(/doveziUnelte\.push\(dovada\)/)
   })
 
   it('poarta judecă DUPĂ gardul de limbă și scrie demascarea pe stream + în istoric', () => {
-    expect(chat).toMatch(/pretentiiFaraFapta\(assistantText, unelteExecutate\)/)
+    expect(chat).toMatch(/pretentiiFaraFapta\(assistantText, doveziUnelte\)/)
     expect(chat).toMatch(/assistantText \+= demascare/)
     expect(chat).toMatch(/\[POARTA FAPTELOR\] pretenții fără faptă:/)
   })
@@ -132,8 +167,8 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
     expect(chat).toMatch(/let systemPrompt = `\$\{LEGILE_ADMINULUI\}\\n\$\{SYSTEM_PROMPT\}/)
   })
 
-  it('detectorul de ÎNGHEȚ e legat în tură: judecă pe cereActiune + jurnalul uneltelor', () => {
-    expect(chat).toMatch(/planFaraExecutie\(assistantText, unelteExecutate, cereActiune\)/)
+  it('detectorul de ÎNGHEȚ e legat în tură: judecă pe cereActiune + rezultate reușite', () => {
+    expect(chat).toMatch(/planFaraExecutie\(assistantText, doveziUnelte, cereActiune\)/)
     expect(chat).toMatch(/assistantText \+= TEXT_PLAN_FARA_EXECUTIE/)
     expect(chat).toMatch(/\[POARTA FAPTELOR\] plan fără execuție/)
   })

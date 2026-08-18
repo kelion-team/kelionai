@@ -3,7 +3,6 @@ import {
   recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs,
   simptomeLiveRecente, listFailedBuildJobsRecent, activeBuildJobsByScope, logCapabilityGap,
 } from '../db.js'
-import { FISIERE_GAZDA, coadaLogGazda, semnaturiEroare } from './logGazda.js'
 
 /** UN DOCTOR PE PACIENT (owner, 14 aug: „setezi 1 singur ordin identic, că
  *  deschide ZECI"): cât timp o sursă de vindecare are deja un ordin ÎN COADĂ sau

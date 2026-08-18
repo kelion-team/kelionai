@@ -14,10 +14,32 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { asiguraPurtatorAudio } from './routes/chat.js'
+import { asiguraPurtatorAudio, sanitizeHistory } from './services/chatInput.js'
 
 type M = { role: 'user' | 'assistant'; content: string }
 
+
+
+describe('sanitizeHistory — istoricul trimis creierului rămâne valid', () => {
+  it('elimină mesajele goale și începutul assistant', () => {
+    expect(sanitizeHistory([
+      { role: 'assistant', content: 'fără întrebare' },
+      { role: 'user', content: '   ' },
+      { role: 'user', content: 'Salut' },
+    ])).toEqual([{ role: 'user', content: 'Salut' }])
+  })
+
+  it('unește rolurile consecutive fără să piardă text', () => {
+    expect(sanitizeHistory([
+      { role: 'user', content: 'prima' },
+      { role: 'user', content: 'a doua' },
+      { role: 'assistant', content: 'răspuns' },
+    ])).toEqual([
+      { role: 'user', content: 'prima\na doua' },
+      { role: 'assistant', content: 'răspuns' },
+    ])
+  })
+})
 describe('asiguraPurtatorAudio — tura vocală (audio + text gol) nu mai rămâne fără purtător', () => {
   it('CAZUL LUI: prima frază vocală, istoric GOL → primește o tură user (nu mai dă 400)', () => {
     const out = asiguraPurtatorAudio([] as M[], true)

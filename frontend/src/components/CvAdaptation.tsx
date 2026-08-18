@@ -33,7 +33,7 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('load'))))
       .then((data) => { if (data.cv) setCvImplicit(data.cv) })
       .catch(() => setErrorMessage(T.cvErrLoad))
-  }, [])
+  }, [T.cvErrLoad])
 
   const handleSaveCv = async (): Promise<void> => {
     setSavingCv(true); setErrorMessage(''); setSuccessMessage('')

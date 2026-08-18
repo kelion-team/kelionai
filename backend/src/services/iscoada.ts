@@ -1,7 +1,7 @@
 import { config } from '../config.js'
 import { addMemory, memorieIa } from '../db.js'
 import { webSearch } from './google.js'
-import { rationeazaMesaje } from './creierRationament.js'
+import { rationeazaMesajeSigur } from './creierRationament.js'
 import { autonomActiv } from './autonomActiv.js'
 import type { OrMessage } from './brainContract.js'
 
@@ -60,13 +60,14 @@ export async function unOcolIscoada(): Promise<{ teme: number; salvate: number }
       },
       { role: 'user', content: `Tema: ${tema}\nRezultate:\n${brut.slice(0, 6000)}` },
     ]
-    let text = ''
-    try {
-      const r = await rationeazaMesaje(mesaje, { ruta: 'service.iscoada', maxTokens: 512, temperature: 0.2, reasoning: 'low', treapta: 'rapid', tools: [] })
-      text = r.text.trim()
-    } catch {
-      continue // creierul n-a răspuns la tema asta — ocolul merge mai departe
-    }
+    const text = await rationeazaMesajeSigur(mesaje, {
+      ruta: 'service.iscoada',
+      maxTokens: 512,
+      temperature: 0.2,
+      reasoning: 'low',
+      treapta: 'rapid',
+      tools: [],
+    })
     if (!text || /^NIMIC\b/i.test(text)) continue
     const zi = new Date().toISOString().slice(0, 10)
     // Namespace 'kelion' (10 aug): recallMemories citește DOAR agent='kelion'

@@ -9,6 +9,7 @@ import {
   dormantOnVoice,
   dormantOnChat,
   inventarulMeu,
+  grupaExecutieUnealta,
 } from './services/brainCapabilities.js'
 import { googleTools } from './services/google.js'
 import { RUNBOOKS } from './services/runbooks.js'
@@ -98,6 +99,14 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     expect(inv).not.toContain('repo_merge_pr')
     expect(inv).not.toContain('secret_pune')
     expect(inv).toContain('send_email') // but the rest, yes
+  })
+
+  it('serializează implicit efectele și lasă în paralel numai citirile aprobate', () => {
+    expect(grupaExecutieUnealta('web_search')).toBeUndefined()
+    expect(grupaExecutieUnealta('read_source')).toBeUndefined()
+    expect(grupaExecutieUnealta('send_email')).toBe('efect')
+    expect(grupaExecutieUnealta('browser_open')).toBe('efect')
+    expect(grupaExecutieUnealta('capabilitate_viitoare')).toBe('efect')
   })
 
   it('runbook-urile reale (runbooks.ts) sunt acoperite prin run_runbook în registru', () => {

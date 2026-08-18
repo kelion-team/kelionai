@@ -95,19 +95,20 @@ function dinRaspunsOpenAi(j: {
   }
 }
 
-export async function ollamaCloudChat(
+async function cereOllamaCloud(
   model: string,
   messages: OrMessage[],
-  tools: AnthropicTool[] = [],
-  opts: BrainCallOpts = {},
-): Promise<OrChatResult> {
+  tools: AnthropicTool[],
+  opts: BrainCallOpts,
+  stream: boolean,
+): Promise<{ response: Response; model: string }> {
   const cheie = await getCheieOllama()
   if (!cheie) throw new Error('ollama_cloud: nicio cheie')
   const cod = ollamaCloudModelCod(model)
   const body: Record<string, unknown> = {
     model: cod,
     messages: mesajeOpenAi(messages),
-    stream: false,
+    stream,
     max_tokens: opts.maxTokens ?? 4096,
   }
   if (typeof opts.temperature === 'number') body.temperature = opts.temperature
@@ -115,12 +116,22 @@ export async function ollamaCloudChat(
     body.tools = unelteOpenAi(tools)
     body.tool_choice = opts.toolChoice === 'required' ? 'required' : 'auto'
   }
-  const r = await fetch(`${bazaOllamaCloud()}/v1/chat/completions`, {
+  const response = await fetch(`${bazaOllamaCloud()}/v1/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${cheie}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 120_000),
   })
+  return { response, model: cod }
+}
+
+export async function ollamaCloudChat(
+  model: string,
+  messages: OrMessage[],
+  tools: AnthropicTool[] = [],
+  opts: BrainCallOpts = {},
+): Promise<OrChatResult> {
+  const { response: r, model: cod } = await cereOllamaCloud(model, messages, tools, opts, false)
   if (!r.ok) {
     const t = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 280)
     throw new Error(`ollama_cloud ${r.status}: ${t}`)
@@ -137,26 +148,7 @@ export async function ollamaCloudChatStream(
   onText: (delta: string) => void,
   opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
-  const cheie = await getCheieOllama()
-  if (!cheie) throw new Error('ollama_cloud: nicio cheie')
-  const cod = ollamaCloudModelCod(model)
-  const body: Record<string, unknown> = {
-    model: cod,
-    messages: mesajeOpenAi(messages),
-    stream: true,
-    max_tokens: opts.maxTokens ?? 4096,
-  }
-  if (typeof opts.temperature === 'number') body.temperature = opts.temperature
-  if (tools.length) {
-    body.tools = unelteOpenAi(tools)
-    body.tool_choice = opts.toolChoice === 'required' ? 'required' : 'auto'
-  }
-  const r = await fetch(`${bazaOllamaCloud()}/v1/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${cheie}`, 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 120_000),
-  })
+  const { response: r, model: cod } = await cereOllamaCloud(model, messages, tools, opts, true)
   if (!r.ok || !r.body) {
     const t = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 280)
     throw new Error(`ollama_cloud ${r.status}: ${t}`)

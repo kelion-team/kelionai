@@ -235,6 +235,15 @@ except Exception:
 [ -z "$PRURI" ] && { echo "niciun PR deschis"; exit 0; }
 
 touch "$STARE"
+ASKPASS="${STARE}.askpass"
+cat > "$ASKPASS" <<'ASKPASS_SCRIPT'
+#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\n' 'x-access-token' ;;
+  *) printf '%s\n' "$GITHUB_TOKEN" ;;
+esac
+ASKPASS_SCRIPT
+chmod 700 "$ASKPASS"
 
 while read -r NUMAR SHA REF; do
   [ -z "${NUMAR:-}" ] && continue
@@ -246,9 +255,10 @@ while read -r NUMAR SHA REF; do
   echo "── PR #$NUMAR @ ${SHA:0:7} ──"
   rm -rf "$LUCRU"; mkdir -p "$LUCRU"
   git -C "$LUCRU" init --quiet
-  git -C "$LUCRU" remote add origin "https://x-access-token:$TOKEN@github.com/kelion-team/kelionai.git"
+  git -C "$LUCRU" remote add origin "https://github.com/kelion-team/kelionai.git"
   # refs/pull/N/head e calea canonică: merge și dacă PR-ul vine din fork.
-  if ! git -C "$LUCRU" fetch --quiet --depth 1 origin "refs/pull/$NUMAR/head"; then
+  if ! GITHUB_TOKEN="$TOKEN" GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+    git -C "$LUCRU" fetch --quiet --depth 1 origin "refs/pull/$NUMAR/head"; then
     echo "nu pot aduce PR #$NUMAR"; continue
   fi
   git -C "$LUCRU" checkout --quiet FETCH_HEAD

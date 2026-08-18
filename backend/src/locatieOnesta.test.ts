@@ -15,7 +15,7 @@ import {
   LOCATION_NONE_PROMPT,
   resolveDeviceLocation,
   weatherArgsWithLocation,
-} from './routes/chat.js'
+} from './services/chatInput.js'
 
 const sursaChat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 

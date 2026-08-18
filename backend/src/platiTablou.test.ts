@@ -27,8 +27,8 @@ describe('Tablou Plăți — Misiune Revolut (Pasul 3)', () => {
     const recentDate = new Date(nowMs - 30 * 60 * 1000).toISOString() // 30 mins ago
     const oldDate = new Date(nowMs - 3 * 3600 * 1000).toISOString() // 3 hours ago
 
-    const isRecentExpired = false || (nowMs - new Date(recentDate).getTime() > twoHoursMs)
-    const isOldExpired = false || (nowMs - new Date(oldDate).getTime() > twoHoursMs)
+    const isRecentExpired = nowMs - new Date(recentDate).getTime() > twoHoursMs
+    const isOldExpired = nowMs - new Date(oldDate).getTime() > twoHoursMs
 
     expect(isRecentExpired).toBe(false)
     expect(isOldExpired).toBe(true)

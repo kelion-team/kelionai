@@ -45,6 +45,17 @@ describe('decideEscaladareConstructor — free first, paid doar rezervă', () =>
     ).toBe(true)
   })
 
+  it('escaladează când free scrie cod, dar porțile de calitate rămân roșii', () => {
+    const d = decideEscaladareConstructor({
+      peFree: true,
+      paidDisponibil: true,
+      motivFree: 'build backend failed la poarta de teste',
+    })
+    expect(d.escaladeaza).toBe(true)
+    expect(d.sursaUrmatoare).toBe('platit')
+    expect(d.motiv).toBe('calitate')
+  })
+
   it('nu escaladează pe motiv gol / vag', () => {
     const d = decideEscaladareConstructor({
       peFree: true,

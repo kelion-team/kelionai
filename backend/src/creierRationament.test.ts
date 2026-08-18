@@ -17,11 +17,22 @@ describe('creierRationament ? u?? unic? de ra?ionament pentru TOATE rutele', () 
     expect(s).toContain('[CREIER-UNITAR]')
   })
 
+  it('planificarea constructorului produce protocol JSON Schema validat, nu FILES/STEPS parsate cu regex', () => {
+    const s = citeste('./services/creierRationament.ts')
+    expect(s).toContain('CONSTRUCTOR_PROTOCOL_SCHEMA')
+    expect(s).toContain('parseazaConstructorProtocol')
+    expect(s).toContain('Return ONE raw JSON object only')
+    expect(s).toContain('REPOSITORY_FILE_CATALOG')
+    expect(s).not.toContain('plan.matchAll(')
+  })
+
   it('constructor /ajutor folose?te planificaPasiMici', () => {
     const c = citeste('./routes/constructor.ts')
     const idx = c.indexOf("/api/constructor/ajutor")
     expect(idx).toBeGreaterThan(0)
-    const chunk = c.slice(idx, idx + 900)
+    const chunk = c.slice(idx, idx + 1800)
+    expect(chunk).toContain('clasificaActiuneConstructor')
+    expect(chunk).toContain("tipActiune !== 'cod'")
     expect(chunk).toContain('planificaPasiMici')
     expect(chunk).toContain('creierRationament')
     expect(chunk).not.toContain('brainComplete')

@@ -2,7 +2,7 @@
 # SENTINELA LOCALĂ (Adrian, 26 iul: „verificare automată dar să nu coste sau să
 # mănânce resurse"). Rulează din cron la 3 minute, pe VPS-ul deja plătit — zero
 # tokeni AI, zero minute GitHub. Două treburi:
-#   1. /health mort de 2 ori LA RÂND (≥6 min, ca un deploy normal să nu declanșeze
+#   1. /health mort de 3 ori LA RÂND (≥6 min, ca un deploy normal să nu declanșeze
 #      fals) → repornește containerul și raportează prin /api/ops/pulse (email
 #      admin, cu prag anti-spam în aplicație).
 #   2. /health viu → bate pulsul: aplicația își face verificările interne
@@ -28,9 +28,9 @@ fi
 fails=$(cat "$STATE" 2>/dev/null || echo 0)
 fails=$((fails + 1))
 echo "$fails" > "$STATE"
-[ "$fails" -lt 2 ] && exit 0   # prima ratare poate fi un deploy în curs — răbdare
+[ "$fails" -lt 3 ] && exit 0   # trei observații la 3 minute: restart abia după ≥6 minute
 
-# A doua ratare la rând → reanimare.
+# A treia ratare la rând → reanimare.
 echo 0 > "$STATE"
 docker restart kelionai-app >/dev/null 2>&1 || docker start kelionai-app >/dev/null 2>&1 || true
 # Așteptăm revenirea (max ~60s), apoi raportăm PRIN aplicația reînviată.

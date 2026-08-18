@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   ServerLogAdapter,
   ConstructorLogAdapter,
-  extractLogFingerprint,
   groupLogsByFingerprint,
   SelfHealDecisionEngine,
   runLogSelfHealPipeline,
@@ -154,6 +153,9 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
 
     it('Acumulare între rulări pe gazdă: 1 + 1 atinge pragul (prag=2)', async () => {
       const engine = new SelfHealDecisionEngine({ thresholds: { gazda: 2 } })
+
+    it('trimite erorile constructorului strategului fără ordin recursiv, după atingerea pragului', async () => {
+      const engine = new SelfHealDecisionEngine({ thresholds: { constructor: 2 } })
       const groupRun1 = [
         {
           fingerprint: 'fp-gazda-err-99',
@@ -179,9 +181,13 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
       ]
 
       const res2 = await engine.processAggregatedGroups(groupRun2)
-      expect(res2.filed).toBe(1)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0].scope).toBe('kelion-autovindecare-gazda')
+      expect(res2.filed).toBe(0)
+      expect(jobs).toHaveLength(0)
+      expect(JSON.parse(kv.get('selfheal-log-filed:constructor:fp-constructor-err-99') ?? '{}')).toMatchObject({
+        count: 2,
+        handedTo: 'constructor_incident_strategist',
+        evidence: 'Error: worker crashed on build step',
+      })
     })
 
     it('constructor.log NU deschide ordin (anti-buclă), chiar peste prag', async () => {

@@ -1,8 +1,7 @@
 import { config } from '../config.js'
-import { cheltuialaDeLaPeKinduri, cheltuialaLunaPeKinduri, loadKv } from '../db.js'
+import { cheltuialaLunaPeKinduri } from '../db.js'
 import { getSerperBalance } from './serperBalance.js'
 import { geminiLive } from './geminiDirect.js'
-import { cursUsdGbp } from './fx.js'
 import { googleServiceAccount } from './googleCreds.js'
 import type { Masuratoare } from './masurare.js'
 

@@ -1,6 +1,6 @@
 // row 19 live
 import { ImapFlow } from 'imapflow'
-import { simpleParser } from 'mailparser'
+import PostalMime from 'postal-mime'
 import { config } from '../config.js'
 import { mailEnabled, sendMail, royalLetterHtml, makeRef, letterDate } from './mail.js'
 import { rationeaza } from './creierRationament.js'
@@ -44,6 +44,32 @@ export function htmlToText(html: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .trim()
+}
+
+export interface IncomingEmail {
+  fromAddr: string
+  fromName: string
+  subject: string
+  body: string
+  headers: Map<string, unknown>
+  receivedAt?: Date
+}
+
+export async function parseIncomingEmail(source: Buffer): Promise<IncomingEmail> {
+  const parsed = await PostalMime.parse(source, {
+    maxNestingDepth: 64,
+    maxHeadersSize: 256 * 1024,
+    maxRfc822NestingDepth: 5,
+  })
+  const parsedDate = parsed.date ? new Date(parsed.date) : undefined
+  return {
+    fromAddr: parsed.from?.address ?? parsed.from?.group?.[0]?.address ?? '',
+    fromName: parsed.from?.name ?? parsed.from?.group?.[0]?.name ?? '',
+    subject: parsed.subject ?? '(fără subiect)',
+    body: (parsed.text || (parsed.html ? htmlToText(parsed.html) : '') || '').slice(0, 20000),
+    headers: new Map(parsed.headers.map(({ key, value }) => [key, value])),
+    receivedAt: parsedDate && Number.isFinite(parsedDate.getTime()) ? parsedDate : undefined,
+  }
 }
 
 // LOOP GUARD — the one thing an auto-replying mailbox must get right. We NEVER
@@ -154,11 +180,7 @@ async function fileInto(
 }
 
 async function processOne(client: ImapFlow, uid: number, source: Buffer, _alreadySeen = false): Promise<void> {
-  const parsed = await simpleParser(source)
-  const fromAddr = parsed.from?.value?.[0]?.address ?? ''
-  const fromName = parsed.from?.value?.[0]?.name ?? ''
-  const subject = parsed.subject ?? '(fără subiect)'
-  const body = (parsed.text || (parsed.html ? htmlToText(parsed.html.toString()) : '') || '').slice(0, 20000)
+  const { fromAddr, fromName, subject, body, headers, receivedAt } = await parseIncomingEmail(source)
   if (!fromAddr) return
 
   // Loop guard: mark machine mail (bounces, auto-replies, lists, our own) seen
@@ -166,7 +188,7 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, _alread
   // isInternalSender covers the JUL 25 LOOP: any @kelionai.app address (e.g.
   // alerts@) is system, not a client — it NEVER gets an auto-reply and no
   // forward either (the admin already has it directly from the alert).
-  if (isAutomated(parsed.headers, fromAddr) || isInternalSender(fromAddr)) {
+  if (isAutomated(headers, fromAddr) || isInternalSender(fromAddr)) {
     // Machine mail → the "Automated" folder (organization), never reply/forward.
     await fileInto(client, uid, FOLDER_AUTO)
     return
@@ -187,7 +209,7 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, _alread
   // a "welcome" arriving weeks after the message does more harm than silence.
   // They're saved to the DB (above) and go to Kelion-ToAnswer, where the admin
   // sees them and decides. FRESH mail keeps its full flow.
-  const ageMs = parsed.date ? Date.now() - parsed.date.getTime() : 0
+  const ageMs = receivedAt ? Date.now() - receivedAt.getTime() : 0
   if (ageMs > 7 * 24 * 3600_000) {
     console.log(`[mailbox] backlog vechi (>7 zile), fără auto-reply: ${subject}`)
     await fileInto(client, uid, FOLDER_MANUAL, ['\\Seen'])

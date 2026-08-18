@@ -136,7 +136,18 @@ crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' | crontab - 2>/dev/nul
 show_progress 25 "Aducere cod ($BRANCH)"
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
-git fetch origin --prune
+GITHUB_TOKEN="${GITHUB_TOKEN:-$(sed -n 's/^GITHUB_TOKEN=//p' "$ENVFILE" | sed -n '1p')}"
+ASKPASS="${TMPDIR:-/tmp}/kelion-deploy-git-askpass"
+cat > "$ASKPASS" <<'ASKPASS_SCRIPT'
+#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\n' 'x-access-token' ;;
+  *) printf '%s\n' "$GITHUB_TOKEN" ;;
+esac
+ASKPASS_SCRIPT
+chmod 700 "$ASKPASS"
+git remote set-url origin https://github.com/kelion-team/kelionai.git
+GITHUB_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git fetch origin --prune
 # ── ARBORELE DE PUBLICARE NU E SPAȚIU DE LUCRU (8 aug 2026) ──────────────────
 # CE S-A ÎNTÂMPLAT, MĂSURAT: publicarea a stat oprită PESTE OPT ORE (live
 # `ee283ef` la 16:48Z, master `c4e0402`), fără niciun proces agățat, fără lacăt

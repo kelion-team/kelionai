@@ -20,9 +20,9 @@ export function bazaPublica(host: string | undefined | null): string {
     gazda === '0.0.0.0' ||
     gazda === '[::1]' ||
     gazda === '::1' ||
-    /^127\./.test(gazda) ||
-    /^10\./.test(gazda) ||
-    /^192\.168\./.test(gazda) ||
+    gazda.startsWith('127.') ||
+    gazda.startsWith('10.') ||
+    gazda.startsWith('192.168.') ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(gazda)
   return eInterna ? BAZA_PUBLICA_IMPLICITA : `https://${h}`
 }

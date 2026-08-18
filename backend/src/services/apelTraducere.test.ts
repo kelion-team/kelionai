@@ -124,7 +124,7 @@ describe('services/apelTraducere.ts ? traducerea live ?n apel (Faza 2)', () => {
   })
 })
 
-describe('services/apelTraducere.ts ? hands-free ?spui r?spunde ?i se face leg?tura\"', () => {
+describe('services/apelTraducere.ts ? hands-free ?spui r?spunde ?i se face leg?tura"', () => {
   beforeEach(() => {
     rationeazaMesaje.mockClear()
     rationeazaMesaje.mockResolvedValue({
@@ -138,22 +138,22 @@ describe('services/apelTraducere.ts ? hands-free ?spui r?spunde ?i se face leg?t
     })
   })
 
-  it('ANSWER din voce ? inten?ia ?answer\"', async () => {
+  it('ANSWER din voce ? inten?ia ?answer"', async () => {
     rationeazaMesaje.mockResolvedValueOnce({ text: 'ANSWER', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
     expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('answer')
   })
 
-  it('DECLINE din voce ? inten?ia ?decline\"', async () => {
+  it('DECLINE din voce ? inten?ia ?decline"', async () => {
     rationeazaMesaje.mockResolvedValueOnce({ text: 'DECLINE', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
     expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('decline')
   })
 
-  it('zgomot/neclar ? ?none\" (nu accept?/refuz? din gre?eal?)', async () => {
+  it('zgomot/neclar ? ?none" (nu accept?/refuz? din gre?eal?)', async () => {
     rationeazaMesaje.mockResolvedValueOnce({ text: 'NONE', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
     expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('none')
   })
 
-  it('f?r? audio ? ?none\" f?r? s? cheme creierul', async () => {
+  it('f?r? audio ? ?none" f?r? s? cheme creierul', async () => {
     expect(await intentApel('a@x.com', '', 'audio/webm')).toBe('none')
     expect(rationeazaMesaje).not.toHaveBeenCalled()
   })

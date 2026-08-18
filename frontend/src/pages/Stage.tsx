@@ -196,7 +196,7 @@ function MonitorFileBlocked({ url }: { url: string }): React.JSX.Element {
   return (
     <div className="workspace-blocked">
       <p>{uiStrings().wsFileFailed}</p>
-      <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
+      <a href={url} target="_blank" rel="noreferrer" className="workspace-action">{uiStrings().wsOpenFile}</a>
     </div>
   )
 }
@@ -285,7 +285,7 @@ function MediaFailed({ url }: { url: string }) {
         {uiStrings().wsMediaFailed}
         {cauza ? ` (${cauza})` : ''}
       </p>
-      <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
+      <a href={url} target="_blank" rel="noreferrer" className="workspace-action">{uiStrings().wsOpenFile}</a>
     </div>
   )
 }
@@ -323,7 +323,7 @@ function MonitorVideo({ url, title, taskId }: { url: string; title: string; task
   return (
     <div className="workspace-doc" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#000' }}>
       <video src={url} controls style={{ maxWidth: '100%', maxHeight: '90%' }} onLoadedData={onOk} onError={onErr} />
-      <a className="composer-send" href={url} download={numeFisier} style={{ textDecoration: 'none' }}>
+      <a className="workspace-action" href={url} download={numeFisier} style={{ textDecoration: 'none' }}>
         ⬇ Salvează în Download ({numeFisier})
       </a>
     </div>
@@ -372,7 +372,7 @@ function MonitorPagina({ url, title, taskId, allow }: { url: string; title: stri
     return (
       <div className="workspace-blocked">
         <p>{uiStrings().wsPageBlocked}</p>
-        <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenTab}</a>
+        <a href={url} target="_blank" rel="noreferrer" className="workspace-action">{uiStrings().wsOpenTab}</a>
       </div>
     )
   }
@@ -1538,14 +1538,14 @@ export default function Stage({ user }: { user: User }) {
                   // the download, honestly (a zip's content doesn't render natively).
                   <div className="workspace-blocked">
                     <p>{t.wsArchiveNote.replace('{name}', task.title)}</p>
-                    <a href={task.url} download className="composer-send">{t.wsDownloadArchive}</a>
+                    <a href={task.url} download className="workspace-action">{t.wsDownloadArchive}</a>
                   </div>
                 ) : task.url && task.kind === 'file' ? (
                   // BINARIES without an in-page viewer (Aug 2 — epub/exe/apk/dmg/
                   // fonts): an honest panel + download instead of a dead frame.
                   <div className="workspace-blocked">
                     <p>{task.title} — {t.wsFileNoPreview}</p>
-                    <a href={task.url} download className="composer-send">{t.wsDownloadFile}</a>
+                    <a href={task.url} download className="workspace-action">{t.wsDownloadFile}</a>
                   </div>
                 ) : task.url && isEmbeddable(task.url) ? (
                   // P2: rama externă cu verdict MĂSURAT din anteturi (embed-check) —
@@ -1569,7 +1569,7 @@ export default function Stage({ user }: { user: User }) {
                   <div className="workspace-blocked">
                     <p>{t.wsPageBlocked}</p>
                     {/^https?:\/\//i.test(task.url) && (
-                      <a href={task.url} target="_blank" rel="noreferrer" className="composer-send">
+                      <a href={task.url} target="_blank" rel="noreferrer" className="workspace-action">
                         {t.wsOpenTab}
                       </a>
                     )}
@@ -1734,7 +1734,7 @@ export default function Stage({ user }: { user: User }) {
                   ['▶️ YouTube upload', 'Urcă un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
                   ['🏪 Profilul firmei', 'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.'],
                   // Interconectare site partener (owner 17 aug): tryestera.com pe lista de aplicații vii.
-                  ['🌐 Tryestera', 'Deschide https://tryestera.com pe monitor (suprafață vie, nu poză) și spune-mi pe scurt ce e acolo; dacă iframe-ul e refuzat, deschide în tab și raportează.'],
+                  ['🌐 Tryestera', 'Deschide https://tryestera.com cu browser_open, pune browserul viu pe monitor și spune-mi pe scurt ce e acolo.'],
                   // P22 (owner: „se poate numi aplicatia Studioul de Clipuri,
                   // care cuprinde toate 6, nu? ii dai o ideie… el face tot"):
                   // Studioul ÎNLOCUIEȘTE vechiul „Generator video" — cuprinde

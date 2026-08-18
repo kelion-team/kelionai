@@ -43,7 +43,10 @@ import {
   attachGuestPhoto,
   userKey,
   addMemory,
-  recordSimptomLive
+  recordSimptomLive,
+  inregistreazaSarcinaOperationala,
+  noteazaEvenimentOperational,
+  tranzitioneazaSarcinaOperationala,
 } from '../db.js'
 import { extrageNiveluri, curataSemne, curataZone, curataSageti, curataTrend } from './tranzactii.js'
 import { getMeserie } from '../services/meserii.js'
@@ -63,7 +66,7 @@ import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
-import { inventarulMeu, CAPABILITIES } from '../services/brainCapabilities.js'
+import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
@@ -72,7 +75,15 @@ import { taxeazaServiciu, cheiaTarifVideo, meniulDeTarife, lirePentru } from '..
 import { planStudio, numeClip, RETETE_STUDIO } from '../services/studioClipuri.js'
 import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
-import { pretentiiFaraFapta, textulDemascarii, planFaraExecutie, TEXT_PLAN_FARA_EXECUTIE } from '../services/poartaFaptelor.js'
+import {
+  clasificaRezultatUnealta,
+  pretentiiFaraFapta,
+  textulDemascarii,
+  planFaraExecutie,
+  TEXT_PLAN_FARA_EXECUTIE,
+  type DovadaUnealta,
+} from '../services/poartaFaptelor.js'
+import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -110,6 +121,10 @@ import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflecta
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { numeStrigat } from '../services/numeStrigat.js'
 import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeChat.js'
+import { alegeModelOrchestrator, plafonUnelteFurnizor } from '../services/chatModelPolicy.js'
+import { CTRL, conteazaCaVizibil, eCadruDeSuprafata } from '../services/chatFrames.js'
+import { LOCATION_NONE_PROMPT, asiguraPurtatorAudio, resolveDeviceLocation, sanitizeHistory, weatherArgsWithLocation } from '../services/chatInput.js'
+import type { ChatMessage, Coords, DeviceLocation } from '../services/chatInput.js'
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { citesteEpisoade, adaugaEpisod, rezumaEpisoade } from '../services/promoEpisoade.js'
@@ -974,72 +989,6 @@ export const PROMO_TOOL: Tool = {
   },
 }
 
-// U+001F (unit separator) brackets a JSON control frame the frontend strips out
-// of the text stream (never shown, never spoken), e.g.
-// \x1f{"monitor":{"url":"...","title":"..."}}\x1f
-const CTRL = String.fromCharCode(31)
-
-// DID THE PERSON SEE ANYTHING? (Adrian, Jul 30: "reply = nothing")
-//
-// Two kinds of things go on the wire: visible text and control frames
-// (`CTRL{...}CTRL`). Some frames are PURE protocol — {turn}, {heard}, {lang},
-// {receipt}, {ping}, {desync} — and they leave on EVERY turn, including one in
-// which the brain didn't utter a word. The rest (monitor, card, doc, app, image,
-// build, nav, promo, gesture, audio, device, paywall) are surfaces or actions:
-// the person really sees something happening.
-//
-// So "the turn produced something visible" = non-empty text OR at least one
-// non-protocol frame.
-// {executie} e PROGRES, nu răspuns: dacă ar conta ca „vizibil", o tură de
-// execuție cu text final GOL ar trece de rotația mută și de plasa anti-tăcere
-// exact ca ack-ul instant din 2 aug (vezi mai jos). Pașii se văd pe monitor,
-// dar răspunsul tot trebuie să vină.
-const CADRE_PROTOCOL = /"(turn|heard|lang|receipt|ping|desync|executie)"\s*:/
-export function areCevaDeVazut(chunk: string): boolean {
-  const cadru = new RegExp(`${CTRL}[^${CTRL}]*${CTRL}`, 'g')
-  if (chunk.replace(cadru, '').trim() !== '') return true
-  for (const f of chunk.match(cadru) ?? []) if (!CADRE_PROTOCOL.test(f)) return true
-  return false
-}
-
-// THE INSTANT ACK IS NOT THE ANSWER (Adrian, Aug 2 — written localization
-// request → „Am preluat sarcina" → then NOTHING).
-//
-// The admin's heavy-turn ack (below, "Am preluat sarcina. ") leaves BEFORE the
-// brain runs — by design, so the first word is instant. But the write
-// interceptor counted it as "something visible", and that single count killed
-// TWO safety nets in the same turn:
-//
-//   1. THE SILENT ROTATION accepted an EMPTY brain answer as a successful turn
-//      (`... || sawVisible` below — the ack had already "shown" something, so
-//      an empty completion broke out of the rotation loop instead of moving
-//      to the next model). Live proof in the server journal: `[tool]
-//      lookup_address (admin)` fired for his request, the final text came
-//      back empty, and the turn closed on the spot — while non-heavy turns
-//      (where no ack had flowed) rotated correctly: `[CHAT MUTE] ... returned
-//      empty — silent rotation`.
-//   2. THE NEVER-SILENCE NET at the end of the turn stayed off (same poisoned
-//      flag), so not even the honest "try again" reached him.
-//
-// The result looked EXACTLY like the message had been swallowed by a task
-// queue: the pickup phrase, then the void. The ack is a receipt, not a reply
-// — it never counts as visible content. Every taken-on turn must produce a
-// real answer or an honest message; never silence after „am preluat".
-export function conteazaCaVizibil(chunk: string, esteAckInstant: boolean): boolean {
-  return !esteAckInstant && areCevaDeVazut(chunk)
-}
-
-// A SURFACE FRAME (Adrian, Aug 2 — "TOT pe monitor"): {monitor} with a real
-// url, {doc}, {app}, {card} or {build} — what the end-of-turn auto-preview
-// checks so it never duplicates a visual the tools already pushed. The empty
-// {monitor:{url:''}} frame is a screen CLEAR, not a surface.
-const CADRU_SUPRAFATA = /"(doc|app|card|build)"\s*:|"monitor"\s*:\s*\{[^{]*"url"\s*:\s*"[^"]/
-export function eCadruDeSuprafata(chunk: string): boolean {
-  const cadru = new RegExp(`${CTRL}[^${CTRL}]*${CTRL}`, 'g')
-  for (const f of chunk.match(cadru) ?? []) if (CADRU_SUPRAFATA.test(f)) return true
-  return false
-}
-
 // THE BRAIN'S VOICE (Adrian, Jul 4): synthesis happens on the SERVER (Chirp 3
 // HD, the user's language), the audio is sent as {audio} FRAMES and the app only
 // decodes + plays them in a queue (audioIO.ts). The frontend synthesizes NOTHING
@@ -1265,119 +1214,6 @@ AGENT DOCTRINE (be a fluid mind, not a throttled menu — the owner, 27 Jul): yo
 // far more reliably than a locale code) come from the SINGLE source
 // `LANG_LABELS` (services/lang.ts). An identical copy used to live here —
 // removed (single source, no duplicates).
-
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-interface Coords {
-  lat: number
-  lon: number
-}
-
-// ── THE LOCATION TRUTH, ONE SOURCE (the "câte grade sunt în locația mea → 27°
-// fără GPS" incident) ────────────────────────────────────────────────────────
-// The owner asked for the weather "in my location" and got 27° for a place the
-// model had INVENTED: on a turn with no device GPS and the IP-geo cache still
-// cold, NOTHING in the context said "you have no location" — the get_weather
-// description only said "pass the user's lat/lon (given in your context)", so
-// the model filled the hole from its own memory and quoted live weather for a
-// guessed city as if it were the user's. Resolved ONCE here, then read by BOTH
-// consumers: the system-prompt block below (what the brain knows) and the
-// get_weather guard in runTool (what the tool is allowed to run with).
-export interface DeviceLocation {
-  /** Exact coordinates from the device GPS (req.body.coords), null when absent/invalid. */
-  gps: { lat: number; lon: number } | null
-  /** City-level "City, Region, Country" from the request IP ('' when unknown). */
-  approxPlace: string
-}
-
-export function resolveDeviceLocation(
-  coords: Coords | undefined,
-  geo: { city?: string; region?: string; country?: string } | null,
-): DeviceLocation {
-  const gps =
-    coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)
-      ? { lat: coords.lat, lon: coords.lon }
-      : null
-  const approxPlace = gps
-    ? ''
-    : [geo?.city, geo?.region, geo?.country].filter(Boolean).join(', ')
-  return { gps, approxPlace }
-}
-
-// The honest void, DECLARED. When neither GPS nor the IP estimate exists, the
-// brain must KNOW it has no location — otherwise it manufactures one (that is
-// exactly where the 27° came from). No invented default, ever.
-export const LOCATION_NONE_PROMPT =
-  `\n\nLOCATION: you do NOT have the user's location on this turn — the device did not share its GPS and no network estimate exists. ` +
-  `For "my location" / "here" / local-weather questions, say honestly that you don't have their location and ask them to allow location access on the device. ` +
-  `NEVER guess a city, place or coordinates, and NEVER quote weather, distances or "near me" results for an invented spot.`
-
-// THE get_weather GUARD (deterministic — the model's good will is not enough):
-// a location-less call is filled from the DEVICE GPS first, then from the
-// IP-level approximation; with neither, the tool REFUSES and tells the model to
-// answer honestly instead of geocoding a hallucinated place name.
-export function weatherArgsWithLocation(
-  input: unknown,
-  loc: DeviceLocation,
-): { input: Record<string, unknown> } | { errorJson: string } {
-  const a = (input ?? {}) as Record<string, unknown>
-  const hasCoords =
-    a.lat !== undefined &&
-    a.lon !== undefined &&
-    Number.isFinite(Number(a.lat)) &&
-    Number.isFinite(Number(a.lon))
-  const hasPlace = typeof a.location === 'string' && a.location.trim().length > 0
-  if (hasCoords || hasPlace) return { input: a }
-  // "Locația mea" → the device GPS, exactly as the owner asked.
-  if (loc.gps) return { input: { ...a, lat: loc.gps.lat, lon: loc.gps.lon } }
-  // Rough IP fallback — labelled approximate in the prompt, better than nothing.
-  if (loc.approxPlace) return { input: { ...a, location: loc.approxPlace } }
-  return {
-    errorJson: JSON.stringify({
-      error: 'location_unavailable',
-      message:
-        "The user's location is not available on this turn: the device did not share GPS and no network estimate exists. Answer honestly that you don't have their location and ask them to allow location access — never guess a city or coordinates, never quote weather for an invented spot.",
-    }),
-  }
-}
-
-// The brain API rejects empty-content messages and non-alternating roles, and the
-// first message must be a user turn. The client can produce all three: a
-// monitor-only / tool-only reply leaves an empty assistant turn, and a local
-// camera "ack" injects an assistant turn with no matching user turn (two
-// assistants in a row, or a leading assistant). Any of these poisons the
-// history and makes every later turn 400. Clean it here, centrally: drop empty
-// turns, merge consecutive same-role turns, and drop leading assistant turns.
-function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
-  const out: ChatMessage[] = []
-  for (const m of messages) {
-    const content = (m.content ?? '').trim()
-    if (!content) continue
-    const prev = out.at(-1)
-    if (prev && prev.role === m.role) prev.content = `${prev.content}\n${content}`
-    else out.push({ role: m.role, content })
-  }
-  while (out.length > 0 && out[0].role !== 'user') out.shift()
-  return out
-}
-
-// TURA VOCALĂ = AUDIO cu text GOL (voce unificată, 6 aug — „urechea o scoți
-// total, creierul unic aude"). Fraza vocală vine în câmpul `audio`, iar mesajul
-// user are text '' — sanitizeHistory tocmai l-a scos. FĂRĂ o tură user la coadă
-// care să poarte fraza, o tură vocală pica: pe istoric gol → 400 „no usable
-// messages" (iar clientul arată ORICE 400 ca „Eroare la creier"), cu istoric →
-// audio-ul se lipea de o tură user VECHE și conversația se termina cu assistant,
-// deci creierul eșua. Garantăm purtătorul: creierul AUDE fraza (blocul audio_url
-// se atașează pe ultima tură user), iar textul e legitim gol. Exportat = testabil.
-export function asiguraPurtatorAudio(messages: ChatMessage[], audioPrezent: boolean): ChatMessage[] {
-  if (!audioPrezent) return messages
-  const ultim = messages.at(-1)
-  if (!ultim || ultim.role !== 'user') return [...messages, { role: 'user', content: '' }]
-  return messages
-}
 
 // (PUNGA DE REZERVĂ a fost EXTIRPATĂ DE TOT, 3 aug — întâi ÎNCHISĂ definitiv
 // („deschisă → false"; Adrian, cu mailurile „sold scăzut $-0.20" în mână:
@@ -1798,6 +1634,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       })
       const paywallTurnId = randomUUID()
       startTurn(user.email, paywallTurnId)
+      const paywallTaskId = randomUUID()
+      await inregistreazaSarcinaOperationala({
+        id: paywallTaskId,
+        userEmail: user.email,
+        turnId: paywallTurnId,
+        objective: lastIncomingText || '(chat blocked before model execution)',
+        metadata: { source: 'chat', blockedBy: 'credit' },
+      })
+      await tranzitioneazaSarcinaOperationala({
+        taskId: paywallTaskId,
+        stare: 'interpreting',
+        code: 'credit_checked',
+      })
       // Chitanța {turn} pleacă PRIMA, ca pe orice tură (audit 9 aug: ramura
       // paywall era singura fără ea — bifele de livrare și resume-ul orbecăiau).
       reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ turn: paywallTurnId })}${CTRL}`))
@@ -1813,6 +1662,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       void saveMessage(user.email, 'assistant', paywallText)
       reply.raw.write(appendTurn(user.email, paywallTurnId, paywallText))
       reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ paywall: true })}${CTRL}`))
+      await tranzitioneazaSarcinaOperationala({
+        taskId: paywallTaskId,
+        stare: 'blocked',
+        code: 'insufficient_credit',
+        metadata: { userVisible: true },
+      })
       finishTurn(user.email, paywallTurnId)
       reply.raw.end()
       return
@@ -1823,7 +1678,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // verbatim, plus a short ack. The same stream shape as a normal turn (the
     // {turn} receipt first) so delivery ticking and resume keep working. The
     // two were identical blocks — a single source here (unique, no duplicates).
-    const instantCommand = (frameKey: 'device' | 'gesture', value: unknown, ack: string): void => {
+    const instantCommand = async (frameKey: 'device' | 'gesture', value: unknown, ack: string): Promise<void> => {
 
       reply.hijack()
       reply.raw.writeHead(200, {
@@ -1833,11 +1688,46 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       })
       const cmdTurnId = randomUUID()
       startTurn(user.email, cmdTurnId)
+      const commandTaskId = randomUUID()
+      await inregistreazaSarcinaOperationala({
+        id: commandTaskId,
+        userEmail: user.email,
+        turnId: cmdTurnId,
+        objective: lastIncomingText || `(${frameKey} command)`,
+        metadata: { source: 'chat', commandKind: frameKey },
+      })
+      await tranzitioneazaSarcinaOperationala({
+        taskId: commandTaskId,
+        stare: 'interpreting',
+        code: 'command_received',
+      })
+      await tranzitioneazaSarcinaOperationala({
+        taskId: commandTaskId,
+        stare: 'executing',
+        capability: `ui_${frameKey}`,
+        code: 'client_command_sending',
+      })
       const payload =
         `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
         `${CTRL}${JSON.stringify({ [frameKey]: value })}${CTRL}` +
         ack
       reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
+      await noteazaEvenimentOperational({
+        taskId: commandTaskId,
+        kind: 'client_command_sent',
+        capability: `ui_${frameKey}`,
+        outcomeState: 'succeeded',
+        code: 'frame_written',
+      })
+      // The server wrote the frame, but the browser has not yet acknowledged
+      // that the device/gesture effect occurred. Technical delivery is not a
+      // verified client-side effect.
+      await tranzitioneazaSarcinaOperationala({
+        taskId: commandTaskId,
+        stare: 'unverified',
+        capability: `ui_${frameKey}`,
+        code: 'client_ack_missing',
+      })
       finishTurn(user.email, cmdTurnId)
       if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
       if (ack) void saveMessage(user.email, 'assistant', ack)
@@ -1846,12 +1736,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
 
     // Camera / monitor tabs: a {device} frame.
     if (deviceCmd) {
-      instantCommand('device', deviceCmd, deviceAck(deviceCmd, ro))
+      await instantCommand('device', deviceCmd, deviceAck(deviceCmd, ro))
       return
     }
     // Avatar gesture, interpreted on the server: a {gesture} frame.
     if (gestureCmd) {
-      instantCommand('gesture', gestureCmd, gestureAck(gestureCmd, ro))
+      await instantCommand('gesture', gestureCmd, gestureAck(gestureCmd, ro))
       return
     }
 
@@ -2575,6 +2465,34 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
+    // JURNALUL OPERAȚIONAL: un task are un UUID separat de turn, dar poartă
+    // aceeași corelare. Scrierile sunt serializate ca evenimentele să nu ajungă
+    // invers când modelul cheamă mai multe unelte; output-ul brut nu pleacă
+    // niciodată spre DB, numai nume/cod/stare normalizate.
+    const sarcinaOperationalaId = randomUUID()
+    let lantJurnalOperational: Promise<unknown> = inregistreazaSarcinaOperationala({
+      id: sarcinaOperationalaId,
+      userEmail: user.email,
+      turnId,
+      objective: lastUserText || (voceAmbianta ? '(mesaj vocal)' : '(mesaj fără text)'),
+      metadata: {
+        source: 'chat',
+        spoken: req.body?.spoken === true,
+        ambientVoice: voceAmbianta,
+      },
+    })
+    const scrieJurnalOperational = async (scriere: () => Promise<unknown>): Promise<void> => {
+      lantJurnalOperational = lantJurnalOperational
+        .then(scriere)
+        .catch((eroare) => console.error('[jurnal operațional] eveniment pierdut:', String(eroare).slice(0, 160)))
+      await lantJurnalOperational
+    }
+    await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+      taskId: sarcinaOperationalaId,
+      stare: 'interpreting',
+      code: 'context_prepared',
+      metadata: { source: 'chat' },
+    }))
     // (Vorbitorul — speakerRaw/guestMatch/nevalidat — e parsat SUS, înaintea
     // construcției promptului: blocurile de OWNER se decid pe el, audit 9 aug.)
     // PROGRESS BAR ON BRAIN ENTRY — ONE {heard} for EVERYONE (admin, demo,
@@ -2772,8 +2690,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const PLAFON_UNELTE_USOR = UNELTE_VORBIRE.length
     const cereActiune = hasActionIntent(lastUserText) || turnHasImage
 // Gemini acceptă 128 unelte; Ollama cloud / altele — plafon 64 (sigur pe tool schema).
-    const PLAFON_FURNIZOR =
-      orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
+    const PLAFON_FURNIZOR = plafonUnelteFurnizor(orChatModel)
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
     // dar rămâne UȘOARĂ ca unelte: n-are de executat nimic, are de hotărât dacă
     // i se vorbește. Cele două axe sunt independente și e important să rămână așa.
@@ -2851,9 +2768,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // înainte de apelul la creier. Zero drumuri la DB aici acum.
         : createVoiceStream(reply, userLang, prefs.voicePref)
     let assistantText = ''
-    // Jurnalul uneltelor EXECUTATE în tura asta (nu doar oferite) — proba pe
-    // care poarta faptelor judecă vorbele creierului (owner, 16 aug).
-    const unelteExecutate: string[] = []
+    // O TENTATIVĂ NU ESTE O FAPTĂ: păstrăm separat apelurile și rezultatele
+    // normalizate. Poarta poate folosi exclusiv rezultatele reușite/verificate.
+    const unelteIncercate: string[] = []
+    const doveziUnelte: DovadaUnealta[] = []
     // CE A VĂZUT DEJA OMUL PE ECRAN (agenții de debug, 3 aug, verdict REAL):
     // când un model pică DUPĂ ce a curs text, catch-ul lipea „Încearcă din nou"
     // direct peste jumătatea de răspuns și salva în istoric DOAR sufixul —
@@ -2890,6 +2808,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // amprente, prompt, unelte) ÎNAINTE ca creierul să fie chemat. [TIMP] măsoară
     // doar creierul; fără linia asta, o pregătire lentă nu se vedea nicăieri.
     if (voceAmbianta) console.log(`[CONTOR-SERVER] sosire → creier: ${tCreier - tSosire} ms (pregătirea turei)`)
+    let planFaraExecutieDetectat = false
     try {
       if (!orChatModel) throw new Error('brain_not_configured: GEMINI_API_KEY missing')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
@@ -2923,7 +2842,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       }
       let callN = 0
       const execTool = async (name: string, argsJson: string): Promise<string> => {
-        unelteExecutate.push(name) // jurnalul FAPTELOR turei — poarta faptelor judecă pe el
+        // Un singur trace, ÎNAINTEA tuturor ramurilor: unele unelte (get_monitor,
+        // propose_tool etc.) se rezolvă inline și nu ajung la runTool.
+        console.log(`[tool] ${name} (${isAdminUser ? 'admin' : 'user'})`)
         let input: unknown = {}
         try {
           input = JSON.parse(argsJson || '{}')
@@ -3065,7 +2986,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           const y = args.y ?? 0
           try {
             reply.raw.write(`${CTRL}${JSON.stringify({ clickMonitor: { x, y } })}${CTRL}`)
-          } catch (e) {}
+          } catch {}
           return JSON.stringify({
             succes: true,
             mesaj: `S-a trimis comanda de click la coordonatele (${x}, ${y}) pe monitor.`
@@ -3084,7 +3005,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           const direction = args.direction ?? 'in'
           try {
             reply.raw.write(`${CTRL}${JSON.stringify({ zoomMonitor: { level, direction } })}${CTRL}`)
-          } catch (e) {}
+          } catch {}
           return JSON.stringify({
             succes: true,
             mesaj: `S-a trimis comanda de zoom (${direction}, nivel ${level}) pe monitor.`
@@ -3104,7 +3025,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (inp.curata === true) {
             try {
               reply.raw.write(`${CTRL}${JSON.stringify({ semne: { simbol, lista: [], zone: [], sageti: [], trend: [] } })}${CTRL}`)
-            } catch (e) {}
+            } catch {}
             return JSON.stringify({ succes: true, mesaj: `Am curățat graficul ${simbol} (pointeri + zone + săgeți + trend).` })
           }
           const lista = curataSemne(inp.puncte)
@@ -3116,7 +3037,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           }
           try {
             reply.raw.write(`${CTRL}${JSON.stringify({ semne: { simbol, lista, zone, sageti, trend } })}${CTRL}`)
-          } catch (e) {}
+          } catch {}
           const bucati: string[] = []
           if (lista.length) bucati.push(`${lista.length} pointer(i): ${lista.map((p) => `${p.tip} ${p.pret}${p.text ? ` (${p.text})` : ''}`).join('; ')}`)
           if (zone.length) bucati.push(`${zone.length} zonă/zone: ${zone.map((z) => `${z.tip} ${z.jos}–${z.sus}${z.text ? ` (${z.text})` : ''}`).join('; ')}`)
@@ -3181,6 +3102,63 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           deviceLoc,
         )
       }
+      // Toate căile orchestratorului (apeluri native și markup reparat) trec
+      // prin acest înveliș. O unealtă este încercată înainte de execuție, dar
+      // devine dovadă numai DUPĂ ce rezultatul ei a fost clasificat.
+      const executaUnealtaCuDovada = async (name: string, argsJson: string): Promise<string> => {
+        unelteIncercate.push(name)
+        await scrieJurnalOperational(async () => {
+          const tranzitie = await tranzitioneazaSarcinaOperationala({
+            taskId: sarcinaOperationalaId,
+            stare: 'executing',
+            capability: name,
+            code: 'tool_attempted',
+          })
+          if (!tranzitie.ok) return
+          await noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'tool_attempted',
+            capability: name,
+            outcomeState: 'attempted',
+            code: 'tool_attempted',
+          })
+        })
+        try {
+          const rezultat = await execTool(name, argsJson)
+          const dovada = clasificaRezultatUnealta(name, rezultat)
+          doveziUnelte.push(dovada)
+          await scrieJurnalOperational(async () => {
+            await noteazaEvenimentOperational({
+              taskId: sarcinaOperationalaId,
+              kind: 'tool_result',
+              capability: name,
+              outcomeState: dovada.stare,
+              code: dovada.cod,
+            })
+            if (dovada.stare === 'succeeded' || dovada.stare === 'verified') {
+              await tranzitioneazaSarcinaOperationala({
+                taskId: sarcinaOperationalaId,
+                stare: 'verifying',
+                capability: name,
+                code: dovada.stare === 'verified' ? 'effect_verified' : 'technical_success',
+              })
+            }
+          })
+          return rezultat
+        } catch (eroare) {
+          const rezultat = `tool_error: ${eroare instanceof Error ? eroare.message : String(eroare)}`
+          const dovada = clasificaRezultatUnealta(name, rezultat)
+          doveziUnelte.push(dovada)
+          await scrieJurnalOperational(() => noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'tool_result',
+            capability: name,
+            outcomeState: dovada.stare,
+            code: dovada.cod,
+          }))
+          throw eroare
+        }
+      }
       // FĂRĂ ACK-UL „Am preluat sarcina" (Adrian, 5 aug: „scoate-i «am preluat
       // sarcina»"). Pe tura de acțiune a adminului nu mai plecă nicio frază de
       // preluare — răspunsul e direct rezultatul real (sau un mesaj onest). Kelion
@@ -3199,12 +3177,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // comută pe fața rapidă (orChatModel) pentru o ultimă încercare — reasignabil.
 // Creier 2 cloud (ollama-cloud/*) vine deja din selectedBrainModel pe greu.
       // Altfel creierDublu → Gemini profund; ușor → orChatModel (flash).
-      let orchestratorModel =
-        orChatModel?.startsWith('ollama-cloud/')
-          ? orChatModel
-          : config.creierDublu && heavyTurn
-            ? `google-direct/${config.modelCreierProfund}`
-            : orChatModel
+      let orchestratorModel = alegeModelOrchestrator({
+        modelChat: orChatModel,
+        creierDublu: config.creierDublu,
+        turaGrea: heavyTurn,
+        modelProfund: config.modelCreierProfund,
+      })
+      await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+        taskId: sarcinaOperationalaId,
+        stare: 'planning',
+        code: 'brain_started',
+        metadata: { phase: incarcatura.faza, actionRequested: cereActiune },
+      }))
       // ── VEDEREA E NATIVĂ (3 aug — extirparea OpenRouter a îngropat și
       // „vederea delegată") ────────────────────────────────────────────────────
       // Orice creier al aplicației e Gemini (google-direct/*), care VEDE nativ:
@@ -3380,7 +3364,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         orchestratorModel,
         orMsgs,
         tools as unknown as AnthropicTool[],
-        execTool,
+        executaUnealtaCuDovada,
         {
           maxTokens: 5000,
           // REAL REASONING on the heavy turn (Jul 25): the work model THINKS
@@ -3402,6 +3386,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // sau să spună cinstit „nu pot" (poarta acțiunii, prinde și cardul tăcut).
           deedGate: isAdmin,
           uneltAfisaj: UNELTE_AFISAJ,
+          grupExecutie: grupaExecutieUnealta,
           actiuneCeruta: forteazaFapta,
           // FORȚAREA E ÎNAPOI, DAR ÎNGUSTĂ (owner, 13 aug, anulează frâna din 29
           // iul). Regresia din iulie venea din a forța ORICE unealtă pe aproape
@@ -3620,10 +3605,10 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // ── POARTA FAPTELOR (owner, 16 aug: „acest soft e doar o minciuna…
       // raspunde de ce"; captura 05:54 — creierul recunoaște „am mințit
       // afirmând că am generat clipul"). Vorbele se verifică pe MĂSURĂTOARE:
-      // jurnalul uneltelor executate în tura asta. Pretenție fără faptă =
+      // rezultatele reușite/verificate din tura asta. Pretenție fără faptă =
       // demascată pe loc, pe ecran ȘI în istoric — pentru ORICE model.
       if (!voceAmbianta) {
-        const nedovedite = pretentiiFaraFapta(assistantText, unelteExecutate)
+        const nedovedite = pretentiiFaraFapta(assistantText, doveziUnelte)
         if (nedovedite.length) {
           const demascare = textulDemascarii(nedovedite)
           try {
@@ -3632,13 +3617,14 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
             /* demascarea nescrisă pe stream rămâne în istoric */
           }
           assistantText += demascare
-          console.error(`[POARTA FAPTELOR] pretenții fără faptă: ${nedovedite.join('; ')} | executate: ${unelteExecutate.join(',') || 'niciuna'}`)
+          console.error(`[POARTA FAPTELOR] pretenții fără faptă: ${nedovedite.join('; ')} | încercate: ${unelteIncercate.join(',') || 'niciuna'} | rezultate: ${doveziUnelte.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciunul'}`)
         }
         // ── ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere
         // solutia pina la deploy masurabil"). Tură de EXECUȚIE + ZERO unelte +
         // limbaj de plan = fix înghețul de 5 luni. Se demască pe ecran și în
         // istoric — legea ducerii la capăt, mecanic, pentru orice model.
-        if (planFaraExecutie(assistantText, unelteExecutate, cereActiune)) {
+        planFaraExecutieDetectat = planFaraExecutie(assistantText, doveziUnelte, cereActiune)
+        if (planFaraExecutieDetectat) {
           try {
             reply.raw.write(TEXT_PLAN_FARA_EXECUTIE)
           } catch {
@@ -3710,6 +3696,12 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
         // bula omului cu textul auzit (Adrian: „nu ignora ce aude").
         if (userEcho) emitHeard(userEcho)
         reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
+        await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+          taskId: sarcinaOperationalaId,
+          stare: 'expired',
+          code: gresita ? 'voice_gate_false_negative' : 'turn_not_addressed',
+          metadata: { ambientVoice: true, nameWasHeard: gresita },
+        }))
         reply.raw.end()
         console.log(
           gresita
@@ -3755,6 +3747,12 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // uneltele deja rulate tot se debitează (nu pe gratis).
       if (voceAmbianta && !gateDecided) {
         reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
+        await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+          taskId: sarcinaOperationalaId,
+          stare: 'expired',
+          code: 'turn_not_addressed',
+          metadata: { ambientVoice: true, brainUnavailable: true },
+        }))
         reply.raw.end()
         console.error('[CHAT ERROR pe tură ambientală neadresată — stinsă cu {ignored}]', errMsg)
         inchideEroare()
@@ -3807,6 +3805,12 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // finish() varsă și cozile pending înainte de închidere.
       voice.feed(spoken)
       await voice.finish().catch(() => {})
+      await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+        taskId: sarcinaOperationalaId,
+        stare: 'failed',
+        code: 'chat_processing_failed',
+        metadata: { partialResponse: Boolean(ecranPartial.trim()) },
+      }))
       reply.raw.end()
       void saveMessage(user.email, 'assistant', ecranPartial.trim() ? ecranPartial + spoken : spoken)
       console.error('[CHAT ERROR]', errMsg, { isRateLimit, isQuota, isRefusal })
@@ -3896,6 +3900,22 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       void recordSimptomLive('chat-mut', `scris: tura s-a terminat fără nimic vizibil (model ${orChatModel})`).catch(() => {})
     }
     await voice.finish()
+    const finalOperational = rezumaStareFinalaSarcinaOperationala({
+      cereActiune,
+      dovezi: doveziUnelte,
+      planFaraExecutie: planFaraExecutieDetectat,
+    })
+    await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+      taskId: sarcinaOperationalaId,
+      stare: finalOperational.stare,
+      code: finalOperational.cod,
+      metadata: {
+        actionRequested: cereActiune,
+        visibleResponse: sawVisible,
+        toolAttempts: unelteIncercate.length,
+        toolResults: doveziUnelte.length,
+      },
+    }))
     reply.raw.end()
 
     // Persist the assistant's reply.
@@ -3932,9 +3952,12 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
 // cronul de 2 min (PR #966). O SINGURĂ sursă (jscpd, 10 aug): folosit la
 // build_software ȘI la retry. Best-effort: nu blochează, nu aruncă.
 function porneculLucratorulConstructor(): void {
-  import('child_process').then(({ exec }) => {
-    exec('bash /root/kelion/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
-    exec('bash /root/kelion/atelier/deploy/constructor-worker.sh > /dev/null 2>&1 &', () => {})
+  import('node:child_process').then(({ spawn }) => {
+    const worker = spawn('bash', ['/root/kelion/constructor-worker.sh'], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    worker.unref()
   }).catch(() => {})
 }
 
@@ -3959,10 +3982,6 @@ async function runTool(
   loc: DeviceLocation,
 ): Promise<string> {
   const args = block.input as Record<string, unknown>
-  // Journal trace for EVERY tool called (Jul 25 incident: "it does nothing" —
-  // without this trace, diagnosis required querying the database).
-  console.log(`[tool] ${block.name} (${isAdmin ? 'admin' : 'user'})`)
-
   // The SHARED queue of all browser actions (open/click/type/read/back/
   // scroll/key/click_at): on success it sends the locally served SCREENSHOT to
   // the monitor (embeddable — not the external URL the iframe refused, Jul 24

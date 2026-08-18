@@ -25,7 +25,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 interface JobFals {
   id: number
   orderText: string
-  status: 'queued' | 'running' | 'done' | 'failed'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
   log: string | null
   /** WHO started it — "kelion-autonom" = the loop, an email = a human. The
    *  wall only looks at orders STARTED BY IT: human-given failures don't stop
@@ -108,6 +108,9 @@ vi.mock('../db.js', () => ({
   cheltuitAziConstructor: async () => cheltuitAzi,
   // P10: citirea cu context pentru afișaj — în teste, aceeași cifră, citită.
   cheltuialaAziConstructor: async () => ({ citit: true, usd: cheltuitAzi, joburiAzi: 0, faraCost: 0 }),
+  getConstructorIncidentKnowledge: async () => ({ open: [], lessons: [] }),
+  updateConstructorIncident: async () => ({ ok: true }),
+  retryBuildJob: async () => null,
 }))
 
 let ultimulPrompt = ''
@@ -218,6 +221,27 @@ beforeEach(() => {
   autonomOprit = false
 })
 
+describe('executorul bridge poate crea ordine reale de build', () => {
+  it('build_software validează și pune ordinul în coada constructorului', async () => {
+    const order = 'Repară workerul de auto-publicare și adaugă teste pentru retry.'
+    const rezultat = JSON.parse(await uneltele('build_software', { order }))
+    expect(rezultat).toEqual({ ok: true, job: 1 })
+    expect(jobs).toContainEqual(expect.objectContaining({
+      id: 1,
+      orderText: order,
+      orderedBy: 'adrianenc11@gmail.com',
+      status: 'queued',
+    }))
+  })
+
+  it('build_software respinge ordinul vag fără să creeze job', async () => {
+    const rezultat = JSON.parse(await uneltele('build_software', { order: 'repară' }))
+    expect(rezultat.error).toBe('ordin_respins')
+    expect(rezultat.motiv).toContain('prea scurt')
+    expect(jobs).toHaveLength(0)
+  })
+})
+
 // THE SWITCH (Adrian, Jul 31, after seeing $27.84 burned in 3½ hours and
 // asking "first it must be verified that autonomy is on stop"). It wasn't:
 // the button wrote to the database, the panel showed "STOPPED", and the loop
@@ -294,7 +318,7 @@ describe('cerințele: analiză înainte de cod', () => {
   it('ordinul poartă NIVELUL DE DIFICULTATE, ca mâna să fie aleasă din start', async () => {
     misiuneaInchisa()
     cerinte = [{
-      id: 9, text: 'plata prin Revolut', stare: 'analizata', dificultate: 5,
+      id: 9, text: 'implementează în backend plata prin Revolut', stare: 'analizata', dificultate: 5,
       criteriu: 'userul primește creditele', aleasa: 'browser pe portal', optiuni: null,
     }]
     await poateSaLucreze()
@@ -304,7 +328,7 @@ describe('cerințele: analiză înainte de cod', () => {
   it('o sarcină care a picat pleacă a doua oară pe o mână mai bună', async () => {
     misiuneaInchisa()
     cerinte = [{
-      id: 9, text: 'x', stare: 'analizata', dificultate: 3,
+      id: 9, text: 'repară modulul backend de plăți', stare: 'analizata', dificultate: 3,
       criteriu: null, aleasa: null, optiuni: null,
     }]
     await poateSaLucreze()
@@ -317,10 +341,40 @@ describe('cerințele: analiză înainte de cod', () => {
     expect(jobs[0].orderText).toContain('NIVEL DE DIFICULTATE: 4/5')
   })
 
+  it('acțiunea directă de screenshot nu intră în constructor', async () => {
+    misiuneaInchisa()
+    cerinte = [{
+      id: 57, text: 'fă un screenshot proaspăt la monitor și focalizează pe bara de admin', stare: 'analizata',
+      criteriu: 'să se vadă limbile', aleasa: 'deschide browserul și fă captura', optiuni: null,
+    }]
+
+    const r = await poateSaLucreze()
+    expect(jobs).toHaveLength(0)
+    expect(r.motiv).toContain('netrimis constructorului')
+    expect(cerinteAtinse).toContainEqual({ id: 57, stare: 'respinsa' })
+  })
+
+  it('cererea de sfat personal ambiguă nu intră în constructor', async () => {
+    misiuneaInchisa()
+    cerinte = [{
+      id: 123,
+      text: 'Adrian întreabă ce trebuie să facă dacă îi este frică și caută sfaturi practice pentru a o gestiona.',
+      stare: 'analizata',
+      criteriu: 'Kelion oferă un răspuns calm și aplicabil.',
+      aleasa: 'Răspunde structurat în conversație.',
+      optiuni: null,
+    }]
+
+    const r = await poateSaLucreze()
+    expect(jobs).toHaveLength(0)
+    expect(r.motiv).toContain('ordin ambiguu/non-cod')
+    expect(cerinteAtinse).toContainEqual({ id: 123, stare: 'respinsa' })
+  })
+
   it('cerința ANALIZATĂ pleacă la construit cu varianta aleasă și criteriul lipite', async () => {
     misiuneaInchisa()
     cerinte = [{
-      id: 9, text: 'plata prin Revolut', stare: 'analizata',
+      id: 9, text: 'implementează în backend plata prin Revolut', stare: 'analizata',
       criteriu: 'un user plătește și primește creditele singur',
       aleasa: 'browser pe portal — DE CE: nu-i cere nimic ownerului',
       optiuni: '[{"nume":"email"}]',
@@ -342,7 +396,7 @@ describe('cerințele: analiză înainte de cod', () => {
     for (const c of ['M0', 'M1', 'M2', 'M3', 'M4', 'M5'])
       kv.set(`autonomie:pas:${c}`, JSON.stringify({ job: 0, incercari: 3 }))
     cerinte = [{
-      id: 1, text: 'uneltele constructorului active direct în chat', stare: 'analizata',
+      id: 1, text: 'modifică registrul backend pentru uneltele constructorului active direct în chat', stare: 'analizata',
       criteriu: 'build_software apare în registrul capabilităților de chat',
       aleasa: 'flag în registru — DE CE: fără cale nouă de cod', optiuni: null,
     }]
@@ -395,7 +449,7 @@ describe('cerințele: analiză înainte de cod', () => {
 
   it('ordinul terminat o duce pe „livrată", NU pe „verificată"', async () => {
     misiuneaInchisa()
-    cerinte = [{ id: 9, text: 'x', stare: 'analizata', criteriu: null, aleasa: null, optiuni: null }]
+    cerinte = [{ id: 9, text: 'repară modulul backend de plăți', stare: 'analizata', criteriu: null, aleasa: null, optiuni: null }]
     await poateSaLucreze()
     jobs[0].status = 'done'
     await poateSaLucreze()
