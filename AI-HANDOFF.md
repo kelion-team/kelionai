@@ -1037,3 +1037,8 @@ curl -s -o /dev/null -w '%{http_code}' -X POST https://kelionai.app/api/me/delet
 - Dual-voice (TTS) — investigat anterior, nerezolvat în această sesiune.
 - Reparația constructor GUI/runtime — **nu** pe live (revert explicit owner).
 
+
+### Flux arhivat
+Confirmare echipă + arhivare flux: 2026-08-18.
+Mesaj pe GitHub (issue #1248 comment + PR #1253 comment).
+Slack: conexiune Composio neautorizată la momentul trimiterii — fallback pe GitHub.
