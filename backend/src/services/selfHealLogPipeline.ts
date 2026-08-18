@@ -11,6 +11,16 @@ import { FISIERE_GAZDA, coadaLogGazda, semnaturiEroare, type FisierGazda } from 
 import { createBuildJob, loadKv, saveKv } from '../db.js'
 import { sursaOcupata, signature } from './selfHeal.js'
 
+/** Anti-bucla: nu naste ordine din constructor.log (nu blocheaza server/gazda). */
+export function eSursaConstructorLog(sursa: string, text = ''): boolean {
+  const s = `${sursa} ${text}`.toLowerCase()
+  return (
+    s.includes('constructor.log') ||
+    s.includes('(constructor logs)') ||
+    s.includes('auto-vindecare (constructor logs)')
+  )
+}
+
 export interface RawLogItem {
   source: 'server' | 'constructor' | 'gazda'
   fileOrContext: string
@@ -170,6 +180,8 @@ export class SelfHealDecisionEngine {
     let filed = 0
 
     for (const group of groups) {
+      // Anti-bucla: doar constructor.log, nu server/gazda.
+      if (eSursaConstructorLog(group.source, group.fileOrContext + ' ' + group.sampleMessage)) continue
       if (filed >= this.maxOrders) break
 
       const scope = group.source === 'server'
@@ -204,6 +216,10 @@ export class SelfHealDecisionEngine {
         `Găsește CAUZA REALĂ în cod (search_source pe mesaj; context: ${group.fileOrContext}) ` +
         `și rescrie curat modulul responsabil — fără petice. NU schimba nimic în afara cauzei.\n` +
         `Verifică: build + teste (backend și, dacă atingi, frontend).`
+
+      if (eSursaConstructorLog(group.source, group.fileOrContext + ' ' + group.sampleMessage)) {
+        continue
+      }
 
       const jobId = await createBuildJob(scope, orderPrompt)
       if (jobId) {

@@ -586,6 +586,10 @@ export async function initDb(): Promise<void> {
     -- recuperabil): iese din panou, dar nu se pierde. Bucla de autonomie
     -- arhivează singură; panoul (listBuildJobs) le exclude.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
+    -- RUNTIME BROWSER: motorul care a executat ordinul (cod=Aider, runtime_browser=Playwright)
+    -- și URL-ul capturii care dovedește execuția (evidence).
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS motor TEXT;
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS evidence_url TEXT;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "sent to execution" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -3926,6 +3930,8 @@ export interface BuildJob {
   // as measured from OpenRouter (null = not reported by the provider).
   brain: string | null
   costUsd: number | null
+  motor: string | null
+  evidenceUrl: string | null
   createdAt: string
   updatedAt: string
 }
@@ -3963,6 +3969,8 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     ci: r.ci ?? null,
     brain: r.brain ?? null,
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
+    motor: (r as any).motor ?? null,
+    evidenceUrl: (r as any).evidence_url ?? null,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -4161,7 +4169,7 @@ export function eEroarePermanenta(log: string): string | null {
 
 export async function reportBuildJob(
   id: number,
-  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number },
+  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number; motor?: string; evidenceUrl?: string },
 ): Promise<void> {
   if (!dbEnabled()) return
   let log = (fields.log ?? '').slice(-20000)
@@ -4189,7 +4197,7 @@ export async function reportBuildJob(
   }
   await getPool().query(
     `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
-       tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
+       tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd), motor = COALESCE($10, motor), evidence_url = COALESCE($11, evidence_url),
        updated_at = now()${inghetat} WHERE id = $1`,
     [
       id,
@@ -4201,6 +4209,8 @@ export async function reportBuildJob(
       fields.ci ?? null,
       fields.brain ?? null,
       fields.costUsd ?? null,
+      fields.motor ?? null,
+      fields.evidenceUrl ?? null,
     ],
   )
 }

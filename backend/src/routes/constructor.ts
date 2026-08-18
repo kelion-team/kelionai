@@ -8,10 +8,11 @@ import { autonomActiv } from '../services/autonomActiv.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
 import { procentDinProgres } from '../services/progresOrdin.js'
-import { evalueazaOrdin, AI_CONSTRUCTORI, type BecCredit } from '../services/evalOrdinConstructor.js'
+import { evalueazaOrdin, clasificareOrdin, AI_CONSTRUCTORI, type BecCredit } from '../services/evalOrdinConstructor.js'
 import { crediteAI, beculCredit } from '../services/creditAI.js'
 import { UNELTE_CONSTRUCTOR } from '../services/brainToolDefs.js'
 import { notifyAdmin } from '../services/adminNotification.js'
+import { executaRuntimeBrowser } from '../services/runtimeBrowser.js'
 
 // ── THE CONSTRUCTOR — the "order → code → PR" pipeline (Adrian, Jul 27:
 // "Kelion must be able to create any software the admin asks for, any change,
@@ -274,6 +275,29 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if ((await isOpsPaused()) || !(await autonomActiv().catch(() => true)))
       return reply.send({ job: null, paused: true })
     const job = await claimNextBuildJob()
+    if (job && clasificareOrdin(job.orderText) === 'runtime_browser') {
+      try {
+        await updateBuildJobProgress(job.id, 'runtime browser: execut?')
+        const rez = await executaRuntimeBrowser(job.orderText, config.adminEmail)
+        await reportBuildJob(job.id, {
+          status: rez.ok ? 'done' : 'failed',
+          log: (rez.logApeluri||[]).join('\n') + '\n' + rez.motiv,
+          brain: 'runtime_browser',
+          motor: 'runtime_browser',
+          evidenceUrl: rez.shotUrl || undefined,
+        })
+        return reply.send({ job: null, runtime: { id: job.id, ok: rez.ok, evidenceUrl: rez.shotUrl, motiv: rez.motiv } })
+      } catch (e) {
+        await reportBuildJob(job.id, {
+          status: 'failed',
+          log: `runtime_browser crash: ${String((e as Error)?.message ?? e).slice(0,400)}`,
+          brain: 'runtime_browser',
+          motor: 'runtime_browser',
+        })
+        return reply.send({ job: null, runtime: { id: job.id, ok: false } })
+      }
+    }
+
     // ── GÂNDIREA DE DEBLOCARE LA REÎNCERCARE (owner, 15 aug: „analizează de ce
     // anumite ordine se blochează și oferă-i gândirea… să le poată duce la
     // final") ──────────────────────────────────────────────────────────────
@@ -361,7 +385,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post<{
-    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }
+    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number; motor?: string; evidenceUrl?: string }
   }>('/api/constructor/report', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
@@ -378,7 +402,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // Gemini prin app, gratuit pe cheia casei). Costul e cel MĂSURAT de worker;
     // orice non-numeric/negativ e ignorat, ca panoul Bani să nu arate o cifră
     // fabricată. (Marcajul 'fable-5' a fost SCOS — Fable nu mai există în constructor.)
-    const brain = String(req.body?.brain) === 'free' ? 'free' : undefined
+    const brainRaw = String(req.body?.brain ?? '')
+    const brain = ['free','free_local','paid_cloud','runtime_browser'].includes(brainRaw) ? brainRaw : undefined
+    const motorRaw = String((req.body as any)?.motor ?? brain ?? '')
+    const motor = ['cod','free','free_local','paid_cloud','runtime_browser'].includes(motorRaw) ? motorRaw : undefined
+    const evidenceUrl = typeof (req.body as any)?.evidenceUrl === 'string' ? String((req.body as any).evidenceUrl).slice(0,500) : undefined
     const costRaw = Number(req.body?.costUsd)
     const costUsd = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : undefined
     await reportBuildJob(id, {
@@ -390,6 +418,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       ci,
       brain,
       costUsd,
+      motor,
+      evidenceUrl,
     })
     // ANUNȚ DE ESCALADARE (K10, Adrian: „când creierul nu poate, să te anunțe
     // «bifează creier superior»"). Dacă ordinul a picat fiindcă MODELUL nu a dus
@@ -495,7 +525,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // 16 aug 05:47 (ownerul, pe #330: „aici nu esti tu" / „cine e acolo?"):
       // cardul spune de-acum CINE a cerut ordinul — omul, sau o buclă automată
       // pe nume. Un ordin fără autor vizibil arată ca o fantomă.
-      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
+      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt, brain: j.brain, motor: j.motor, evidenceUrl: j.evidenceUrl })),
     })
   })
 }
