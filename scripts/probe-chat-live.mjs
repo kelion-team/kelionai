@@ -39,18 +39,21 @@ const probes = [
     prompt: 'PROBĂ TEHNICĂ: apelează obligatoriu show_document cu titlul „Probă audit” și textul „PROBA_DOCUMENT_OK”. Nu chema altă unealtă.',
     expectedTool: 'show_document',
     expectedFrame: 'doc',
+    stopAfterFrame: true,
   },
   {
     capability: 'run_web_app',
     prompt: 'PROBĂ TEHNICĂ: apelează obligatoriu run_web_app cu titlul „Probă audit” și HTML-ul „<main>PROBA_WEB_APP_OK</main>”. Nu chema altă unealtă.',
     expectedTool: 'run_web_app',
     expectedFrame: 'app',
+    stopAfterFrame: true,
   },
   {
     capability: 'open_app_view',
     prompt: 'PROBĂ TEHNICĂ DETERMINISTĂ: primul și singurul pas trebuie să fie apelul open_app_view cu view „settings”. Un răspuns doar textual este eșec. După apel include PROBA_APP_VIEW_OK.',
     expectedTool: 'open_app_view',
     expectedFrame: 'nav',
+    stopAfterFrame: true,
   },
   {
     capability: 'get_location',
@@ -77,6 +80,7 @@ const probes = [
     prompt: 'PROBĂ TEHNICĂ: apelează obligatoriu browser_open cu URL-ul https://tryestera.com și nu interacționa cu pagina. După deschidere include PROBA_BROWSER_OK.',
     expectedTool: 'browser_open',
     expectedFrame: 'monitor',
+    stopAfterFrame: true,
   },
   {
     capability: 'get_real_cost',
@@ -145,6 +149,23 @@ function toolNamesSince(sinceMs) {
   return [...new Set(names)]
 }
 
+async function readProbeResponse(response, probe) {
+  if (!probe.stopAfterFrame || !probe.expectedFrame || !response.body) return response.text()
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let raw = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) return raw + decoder.decode()
+    raw += decoder.decode(value, { stream: true })
+    const { frames } = parseSse(raw)
+    if (frames.some((frame) => Object.hasOwn(frame, probe.expectedFrame))) {
+      await reader.cancel()
+      return raw
+    }
+  }
+}
+
 const only = new Set((process.env.PROBE_CAPABILITIES || '').split(',').map((name) => name.trim()).filter(Boolean))
 const selectedProbes = only.size ? probes.filter((probe) => only.has(probe.capability)) : probes
 const results = []
@@ -173,7 +194,7 @@ for (const probe of selectedProbes) {
       signal: controller.signal,
     })
     httpStatus = response.status
-    raw = await response.text()
+    raw = await readProbeResponse(response, probe)
   } catch (cause) {
     error = String(cause instanceof Error ? cause.message : cause)
   } finally {
@@ -187,7 +208,8 @@ for (const probe of selectedProbes) {
   const toolSeen = !probe.expectedTool || toolTrace.includes(probe.expectedTool)
   const frameSeen = !probe.expectedFrame || frameKeys.includes(probe.expectedFrame)
   const markerSeen = !probe.expectedMarker || visible.includes(probe.expectedMarker)
-  const pass = httpStatus === 200 && toolSeen && frameSeen && markerSeen && visible.length > 0
+  const responseSeen = visible.length > 0 || (probe.stopAfterFrame && frameSeen)
+  const pass = httpStatus === 200 && toolSeen && frameSeen && markerSeen && responseSeen
   results.push({
     capability: probe.capability,
     prompt: probe.prompt,
