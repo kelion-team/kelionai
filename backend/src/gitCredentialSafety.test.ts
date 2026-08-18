@@ -6,6 +6,7 @@ const root = path.resolve(import.meta.dirname, '../..')
 const files = [
   'backend/src/services/lucratori.ts',
   'deploy/constructor-agent.mjs',
+  'deploy/deploy.sh',
   'deploy/porti-pr.sh',
   'deploy/veghe-publicare.sh',
 ]
