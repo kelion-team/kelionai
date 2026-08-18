@@ -76,6 +76,11 @@ function classifyCameraError(err: unknown): { fatal: boolean; code: string } {
   if (name === 'OverconstrainedError') {
     return { fatal: false, code: name }
   }
+  // NotFoundError: Requested device not found (e.g., facingMode 'user' not available).
+  // This should trigger fallback to relaxed constraints, not fail immediately.
+  if (name === 'NotFoundError') {
+    return { fatal: false, code: name }
+  }
   if (isTransientCameraError(err)) {
     return { fatal: false, code: name }
   }
@@ -103,15 +108,28 @@ function buildConstraints(facing: Facing): MediaStreamConstraints {
   }
 }
 
+/**
+ * Relaxed fallback constraints when specific facingMode is not available.
+ * Falls back to any available video input device.
+ */
+function buildFallbackConstraints(): MediaStreamConstraints {
+  return {
+    video: true,
+    audio: false,
+  }
+}
+
 async function tryStartCamera(
   facing: Facing,
   signal?: AbortSignal,
+  useFallback: boolean = false,
 ): Promise<MediaStream> {
   if (isAbortSignalAborted(signal)) {
     throw new CameraStartError('Camera start aborted', 'AbortError', false)
   }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia(buildConstraints(facing))
+    const constraints = useFallback ? buildFallbackConstraints() : buildConstraints(facing)
+    const stream = await navigator.mediaDevices.getUserMedia(constraints)
     if (isAbortSignalAborted(signal)) {
       stopStream(stream)
       throw new CameraStartError('Camera start aborted after acquire', 'AbortError', false)
@@ -129,6 +147,10 @@ async function tryStartCamera(
  * runs at a time, and retrying transient errors (AbortError, NotReadableError,
  * TrackStartError) with a short backoff. Pass an AbortSignal to cancel cleanly
  * when the owning component unmounts or the user flips the camera rapidly.
+ * 
+ * If the requested facingMode is not found (NotFoundError) or overconstrained,
+ * automatically falls back to relaxed constraints ({ video: true }) to acquire
+ * any available video input device.
  */
 export async function startCamera(
   facing: Facing,
@@ -141,6 +163,8 @@ export async function startCamera(
   }
 
   let lastError: CameraStartError | undefined
+  let useFallback = false
+
   for (let attempt = 0; attempt <= MAX_START_RETRIES; attempt++) {
     if (attempt > 0) {
       const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]
@@ -153,10 +177,19 @@ export async function startCamera(
       })
     }
     try {
-      return await tryStartCamera(facing, signal)
+      return await tryStartCamera(facing, signal, useFallback)
     } catch (err) {
       lastError = err instanceof CameraStartError ? err : undefined
-      if (!lastError || lastError.fatal) break
+      if (!lastError) break
+      
+      // If this is a NotFoundError or OverconstrainedError and we haven't tried fallback yet,
+      // switch to fallback constraints and retry once more
+      if (!useFallback && (lastError.code === 'NotFoundError' || lastError.code === 'OverconstrainedError')) {
+        useFallback = true
+        continue
+      }
+      
+      if (lastError.fatal) break
       // Only retry the transient errors listed above.
     }
   }
