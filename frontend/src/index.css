@@ -171,10 +171,17 @@ body {
 .landing {
   height: 100svh;
   display: grid;
+  position: relative;
   grid-template-columns: 1.1fr 1fr;
   background: radial-gradient(circle at 30% 30%, var(--bg-soft), var(--bg-deep) 70%);
   overflow: hidden;
 }
+.landing-top-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+}
+
 .landing-hero {
   position: relative;
   height: 100svh;
@@ -236,6 +243,11 @@ body {
   min-height: 0;
   min-width: 0;
 }
+@media (width > 900px) {
+  .landing-panel { grid-column: 1; grid-row: 1; }
+  .landing-hero { grid-column: 2; grid-row: 1; }
+}
+
 .landing-content {
   max-width: 460px;
   width: 100%;
