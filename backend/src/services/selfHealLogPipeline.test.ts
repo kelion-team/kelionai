@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   ServerLogAdapter,
   ConstructorLogAdapter,
-  extractLogFingerprint,
   groupLogsByFingerprint,
   SelfHealDecisionEngine,
   runLogSelfHealPipeline,

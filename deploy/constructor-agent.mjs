@@ -18,12 +18,9 @@
 // AI-HANDOFF §6. Aici: pornit de cron, flock (unul singur), timeout dur din
 // constructor-worker.sh, plafoane de pași și tokeni. Se termină și moare.
 //
-// PLAFOANE (env, cu valori implicite): CONSTRUCTOR_GEMINI_MODEL,
-// CONSTRUCTOR_MAX_STEPS (24 — pași CU UNELTE, nu ture), CONSTRUCTOR_MAX_TOKENS
-// (900000), CONSTRUCTOR_MAX_STERILE (8 — ture în care modelul doar povestește),
-// CONSTRUCTOR_MAX_REPAIR (2 — runde de reparație după un build picat),
-// CONSTRUCTOR_BUDGET_MS (1560000 = 26 min, sub timeout-ul dur de 30 min din
-// constructor-worker.sh, ca să apucăm SĂ RAPORTĂM înainte să fim omorâți).
+// PLAFOANE (env, cu valori implicite): CONSTRUCTOR_MAX_REPAIR și
+// CONSTRUCTOR_BUDGET_MS. Watchdog-urile Aider au plafoane separate pentru
+// execuția free, escaladarea paid și intervalul de după primul commit.
 import { execSync, execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -67,44 +64,11 @@ process.env.PATH = `${process.env.PATH || '/usr/bin:/bin'}:/usr/local/bin:${proc
 // bani. Constructorul își PUNE SINGUR creierul local pe VPS dacă lipsește
 // (asiguraCreierulLocal → deploy/setup-ollama.sh), fără SSH — owner: „sa instaleze
 // el, pe linux, aider automat cu tot ce trebuie".
-const LLM_TIMEOUT_MS = Number(env.CONSTRUCTOR_LLM_TIMEOUT_MS || 180_000)
 // Numele creierului, pentru mesaje ONESTE pe monitor. Owner, 16 aug: „la constructor
 // nu e gemeni… Aider pe un model LOCAL pe VPS (Ollama)" — creier local, independent.
 const NUME_FURNIZOR = 'creierul LOCAL Ollama pe VPS (independent — fără cheie, fără cotă, fără bani)'
-// PE MAXIM (Adrian, 5 aug: „setează-l pe maxim posibil"). Plafonul REAL al unei
-// rulări NU e numărul de pași — e BUGETUL DE TIMP (26 min, sub timeout-ul dur de
-// 30) și cel de TOKENI. Punem pașii atât de sus (120) încât să NU mai fie ei
-// limita: un ordin mare (tabelă + detectare + panou + teste — ex. plasa banilor
-// M2) merge până la capătul bugetului, nu iese neterminat fiindcă „s-au gătat
-// pașii". Suprascriibil din env fără deploy (CONSTRUCTOR_MAX_STEPS).
-const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 120)
-// Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
-// contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
-// construcție, dar nici să ne țină la nesfârșit.
-const MAX_STERILE = Number(env.CONSTRUCTOR_MAX_STERILE || 8)
-// Runde de reparație după o poartă roșie în atelier (promise în system prompt).
-// Ridicat 2→4 (10 aug): atelierul verifică acum TOATE cele 7 porți (jscpd,
-// exporturi, sintaxă, boot — adăugate în #978), nu doar build+teste. Cu doar 2
-// runde, un ordin care pică o poartă nouă (ex. un duplicat de scos, un boot de
-// reparat) rămânea „eșuat" deși era reparabil. Mai multe runde = chiar le termină.
+// Runde de reparație după o poartă roșie în atelier.
 const MAX_REPAIR = Number(env.CONSTRUCTOR_MAX_REPAIR || 4)
-// Ridicat la 2M odată cu pașii (5 aug): cu 120 de pași, bugetul de tokeni nu mai
-// trebuie să fie el frâna înainte de cel de TIMP. Fereastra glisantă
-// (KEEP_VERBATIM) ține contextul per-tură mărginit, deci ăsta e doar cumulul.
-const MAX_TOKENS = Number(env.CONSTRUCTOR_MAX_TOKENS || 2_000_000)
-// FEREASTRA DE CONTEXT (audit 27 iul — cauza EȘECULUI pe ORICE model): bucla
-// re-trimitea TOT istoricul la fiecare pas, cu citiri de până la 120k caractere
-// păstrate pe veci → un job trivial ajungea la ~794k tokeni, unul greu spărgea
-// plafonul. Acum: rezultatele uneltelor vechi se comprimă la un ciot; doar
-// ultimele KEEP_VERBATIM schimburi rămân întregi. Liniar, nu pătratic.
-const KEEP_VERBATIM = Number(env.CONSTRUCTOR_KEEP_VERBATIM || 6)
-const READ_CAP = 6_000 // plafon pe REZULTATUL oricărei unelte în istoric (era 120k — sursa exploziei)
-// Plafon SEPARAT, mai mare, DOAR pentru citirea unui fișier (Adrian, 5 aug: „să
-// nu mai pice"): 6k tăia fișiere mari (config.ts, db.ts) la jumătate →
-// constructorul edita pe orb și cădea. 20k acoperă majoritatea fișierelor
-// întregi; ce e mai mare se cere pe interval de linii. Fereastra glisantă
-// (KEEP_VERBATIM) comprimă oricum citirile vechi, deci nu sparge contextul.
-const READ_CAP_FISIER = Number(env.CONSTRUCTOR_READ_CAP || 40_000)
 
 // BUGETUL DE TIMP AL RULĂRII. constructor-worker.sh ne dă `timeout 1800`; dacă
 // ne prinde acolo, procesul moare SIGKILL/SIGTERM fără să raporteze, ordinul
@@ -123,7 +87,6 @@ const logLines = []
 // (lecția „un job nu poate deveni demon") — un beat pierdut nu strică nimic.
 let beatJobId = 0
 // Încercarea ordinului curent (1 = primul drum; ≥2 = escaladare pe Fable 5).
-let incercareCurenta = 1
 let lastBeatAt = 0
 function beat(text, acum = false) {
   if (!beatJobId || !BRIDGE) return
@@ -163,7 +126,7 @@ async function api(pathname, init = {}, tries = 8) {
     try {
       const r = await fetch(`${APP}${pathname}`, {
         ...init,
-        headers: { 'x-bridge-secret': BRIDGE, 'content-type': 'application/json', ...(init.headers ?? {}) },
+        headers: { 'x-bridge-secret': BRIDGE, 'content-type': 'application/json', ...init.headers },
         signal: AbortSignal.timeout(20_000),
       })
       if (r.status >= 500) throw new Error(`aplicația întoarce ${r.status} (repornire în curs?)`)
@@ -184,187 +147,6 @@ function sh(cmd, opts = {}) {
   return execSync(cmd, { cwd: ATELIER, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], ...opts })
 }
 
-// ── Uneltele modelului — tot ce atinge discul stă ÎNCHIS în atelier ─────────
-const IGNORE = new Set(['node_modules', '.git', 'dist', 'build', 'coverage'])
-function safePath(p) {
-  const full = path.resolve(ATELIER, p)
-  if (!full.startsWith(ATELIER + path.sep) && full !== ATELIER) throw new Error('cale în afara atelierului')
-  if (full.includes(`${path.sep}.git${path.sep}`) || full.endsWith(`${path.sep}.git`)) throw new Error('.git interzis')
-  return full
-}
-function toolLs(dir) {
-  const full = safePath(dir || '.')
-  const out = []
-  for (const e of fs.readdirSync(full, { withFileTypes: true })) {
-    if (IGNORE.has(e.name)) continue
-    out.push(e.isDirectory() ? `${e.name}/` : `${e.name} (${fs.statSync(path.join(full, e.name)).size}b)`)
-  }
-  return out.sort().join('\n') || '(gol)'
-}
-// Citirea cu numere de linie ȘI interval opțional (from/to) — ca modelul să
-// tragă DOAR bucata de care are nevoie, nu tot fișierul (audit: citirile
-// întregi umpleau contextul). Fără interval: primele READ_CAP caractere.
-function toolRead(p, from, to) {
-  const lines = fs.readFileSync(safePath(p), 'utf8').split('\n')
-  const a = Number.isFinite(from) && from > 0 ? Math.floor(from) : 1
-  const b = Number.isFinite(to) && to >= a ? Math.floor(to) : lines.length
-  const slice = lines.slice(a - 1, b).map((l, i) => `${a + i}\t${l}`).join('\n')
-  if (slice.length > READ_CAP_FISIER)
-    return `${slice.slice(0, READ_CAP_FISIER)}\n...[trunchiat la ${READ_CAP_FISIER} caractere — cere un interval de linii (from/to) pentru restul; fișierul are ${lines.length} linii]`
-  return slice
-}
-// GREP peste atelier (audit: fără căutare, modelul „spelunca" prin ls/read pas
-// cu pas ca să găsească fișierul). O singură căutare = fișierul + linia țintă.
-function toolGrep(pattern) {
-  const pat = String(pattern ?? '').trim()
-  if (!pat) return 'pattern gol'
-  try {
-    const out = sh(
-      `grep -rnI --exclude-dir={node_modules,.git,dist,build,coverage} -e ${JSON.stringify(pat)} . | head -60`,
-    )
-    return out.trim() || '(niciun rezultat)'
-  } catch (e) {
-    // grep întoarce exit 1 când nu găsește nimic — nu e eroare.
-    return e.status === 1 ? '(niciun rezultat)' : `EROARE grep: ${String(e.message).slice(0, 200)}`
-  }
-}
-// GARDĂ ANTI-TRUNCHIERE. 'write' cere CONȚINUTUL COMPLET al fișierului, dar
-// ieșirea modelului e plafonată la 16k tokeni: pe un fișier mare răspunsul se
-// taie la jumătate, „reparația" scrie un fișier ciuntit, buildul pică și
-// ordinul iese EȘUAT fără ca nimeni să vadă adevărata cauză. Dacă rescrierea
-// unui fișier existent îi taie peste jumătate din corp, REFUZĂM și trimitem
-// modelul la 'edit' (înlocuire punctuală, fără să retrimită tot fișierul).
-function toolWrite(p, content) {
-  const full = safePath(p)
-  const vechi = fs.existsSync(full) && fs.statSync(full).isFile() ? fs.readFileSync(full, 'utf8') : null
-  if (vechi !== null && vechi.length > 2_000 && content.length < vechi.length * 0.5)
-    return (
-      `REFUZAT: ai trimis ${content.length} caractere peste un fișier de ${vechi.length} — ` +
-      `pare tăiat de plafonul de ieșire. Pe fișiere MARI folosește 'edit_lines' (dai numerele ` +
-      `de linie din 'read' + textul nou — imun la plafon) sau 'edit'; NU retrimite tot fișierul.`
-    )
-  fs.mkdirSync(path.dirname(full), { recursive: true })
-  fs.writeFileSync(full, content)
-  return `scris: ${p} (${content.length} caractere)`
-}
-// EDIT PUNCTUAL — plasa reală împotriva truncherii de mai sus: modelul dă doar
-// textul vechi și textul nou. Cerem potrivire UNICĂ, ca să nu schimbe din
-// greșeală altă apariție (fără petice oarbe). DAR cauza #1 a ordinelor picate
-// (ex. #53, 4 aug: 4 refuzuri „old nu apare" pe api-types.ts → plafon de pași)
-// era că modelul dă „old" cu spații/indentare puțin diferite, iar potrivirea
-// STRICT exactă refuza — și el ardea pașii reîncercând. Acum: exact → tolerant
-// la spații (unic) → iar dacă tot nu, îi dăm CONTEXTUL real ca să se descurce
-// singur dintr-o singură mișcare. Astfel Kelion rezolvă ordinul, nu se blochează.
-function toolEdit(p, vechi, nou) {
-  const full = safePath(p)
-  if (!vechi) return 'REFUZAT: „old" gol — dă textul EXACT care trebuie înlocuit.'
-  const src = fs.readFileSync(full, 'utf8')
-  const r = potrivesteEdit(src, vechi)
-  if (r === 'exacta_multipla' || r === 'toleranta_multipla')
-    return `REFUZAT: textul „old" apare în mai multe locuri în ${p} — dă un fragment mai lung, unic.`
-  if (r && typeof r === 'object') {
-    fs.writeFileSync(full, src.slice(0, r.start) + nou + src.slice(r.end))
-    const et = r.mod === 'toleranta' ? ' (potrivit tolerant la spații)' : ''
-    return `editat${et}: ${p} (${r.end - r.start} → ${nou.length} caractere)`
-  }
-  // Nici tolerant — RE-ANCORARE (măsurat pe #43/#53): dăm liniile REALE din fișier
-  // din jurul primei linii recognoscibile din „old", ca modelul să copieze exact
-  // dintr-o dată, fără să ardă pașii ghicind sau pe un 'read' în plus.
-  return `REFUZAT: textul „old" nu apare în ${p}. ${contextReancorare(src, vechi)}`
-}
-// EDIT PE LINII — plasa DEFINITIVĂ pentru fișiere MARI (măsurat pe #65, 4 aug:
-// pe admin.ts de 45KB, 'write' refuza corect (răspuns tăiat de plafon) iar 'edit'
-// nu potrivea „old" → 8 ture sterile → EȘEC). Aici modelul dă doar NUMERELE de
-// linie (le vede din 'read' numerotat) + textul nou. Zero potrivire de text,
-// zero rescriere a fișierului întreg — deci imună la plafonul de ieșire și la
-// nepotrivirea lui „old". Așa Kelion editează orice fișier, oricât de mare.
-function toolEditLines(p, from, to, nou) {
-  const full = safePath(p)
-  const r = inlocuiesteLinii(fs.readFileSync(full, 'utf8'), from, to, nou)
-  if (r.err) return `REFUZAT: ${r.err} (vezi numerele din 'read').`
-  fs.writeFileSync(full, r.text)
-  const inlocuite = Math.max(0, r.bb - r.a + 1)
-  return inlocuite === 0
-    ? `adăugat la sfârșit: ${p} (+${r.n} linii)`
-    : `editat pe linii: ${p} (liniile ${r.a}–${r.bb}, ${inlocuite} → ${r.n} linii)`
-}
-// ȘTERGERE de fișier — plasă pentru un fișier creat din GREȘEALĂ (măsurat pe #45,
-// 3 aug: modelul a vrut `run rm <migrație greșită>` → „comandă nepermisă" și a
-// ars pași fără să poată curăța). `run` nu execută `rm` (shell liber interzis),
-// dar aici e o unealtă sandbox: `safePath` o ține STRICT în atelier (clona de
-// unică folosință) și ștergerea apare în diff-ul PR-ului, pe care owner-ul îl vede.
-function toolDelete(p) {
-  const full = safePath(p)
-  if (!fs.existsSync(full)) return `REFUZAT: ${p} nu există.`
-  if (!fs.statSync(full).isFile()) return `REFUZAT: ${p} nu e fișier (directoarele nu se șterg de aici).`
-  fs.unlinkSync(full)
-  return `șters: ${p}`
-}
-// Nucleul PUR (fără disc) al lui edit_lines, exportat ca să fie probat: taie
-// liniile from..to și pune „nou" în loc. Întoarce {text,a,bb,n} sau {err}.
-export function inlocuiesteLinii(src, from, to, nou) {
-  const lines = String(src).split('\n')
-  const a = Math.floor(Number(from))
-  const b = Math.floor(Number(to))
-  // `from === lines.length + 1` = ADĂUGARE la sfârșit (append pur). Măsurat pe
-  // #67 (4 aug): modelul cerea exact asta — `from=317` pe un fișier de 316 linii
-  // — și pica „interval invalid", ardea pași sterili → EȘEC. Permitem un singur
-  // rând peste ultima linie, ca adăugarea la coadă să funcționeze.
-  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < a || a > lines.length + 1)
-    return { err: `interval invalid (from=${from}, to=${to}); fișierul are ${lines.length} linii, dă 1 ≤ from ≤ to ≤ ${lines.length} (sau from=to=${lines.length + 1} ca să adaugi la sfârșit)` }
-  const bb = Math.min(b, lines.length)
-  const nouLinii = String(nou ?? '').split('\n')
-  return { text: [...lines.slice(0, a - 1), ...nouLinii, ...lines.slice(bb)].join('\n'), a, bb, n: nouLinii.length }
-}
-// POTRIVIRE ROBUSTĂ pentru 'edit'. Întoarce {start,end,mod} pentru o singură
-// potrivire (exactă SAU tolerantă la spații), 'exacta_multipla'/'toleranta_multipla'
-// când e ambiguu, sau null când nu se găsește. Pură (fără disc), EXPORTATĂ ca să
-// fie probată — garda de unicitate e prea importantă ca s-o verific „pe încredere".
-export function potrivesteEdit(src, vechi) {
-  if (typeof src !== 'string' || typeof vechi !== 'string' || vechi === '') return null
-  // 1) EXACT, unic.
-  const i = src.indexOf(vechi)
-  if (i >= 0) {
-    if (src.indexOf(vechi, i + vechi.length) >= 0) return 'exacta_multipla'
-    return { start: i, end: i + vechi.length, mod: 'exacta' }
-  }
-  // 2) TOLERANT LA SPAȚII: fiecare run de whitespace din „old" ↔ orice alt run
-  //    (\s+), restul literal. Prinde diferențe de indentare / spații la capăt /
-  //    CRLF — cauza reală a refuzurilor. Tot UNIC (mapat înapoi prin index-ul
-  //    potrivirii), ca să nu atingem din greșeală altă bucată.
-  if (vechi.length > 8000) return null // gardă anti-backtracking pe „old" uriaș
-  const pat = vechi
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // escape metacaractere (spațiile rămân literale)
-    .replace(/\s+/g, '\\s+') // orice run de spații/linii noi ↔ orice alt run
-  let re
-  try {
-    re = new RegExp(pat, 'g')
-  } catch {
-    return null
-  }
-  const gasite = [...src.matchAll(re)]
-  if (gasite.length === 0) return null
-  if (gasite.length > 1) return 'toleranta_multipla'
-  const m = gasite[0]
-  return { start: m.index, end: m.index + m[0].length, mod: 'toleranta' }
-}
-// Când „old" nu se potrivește nici tolerant, arătăm liniile REALE din fișier în
-// jurul primei linii recognoscibile din „old", ca modelul să copieze exact și să
-// se descurce SINGUR. Cade pe începutul fișierului dacă nicio linie nu se prinde.
-function contextReancorare(src, vechi) {
-  const linii = src.split('\n')
-  const candidate = String(vechi).split('\n').map((l) => l.trim()).filter((l) => l.length > 4)
-  for (const cheie of candidate) {
-    const idx = linii.findIndex((l) => l.includes(cheie))
-    if (idx >= 0) {
-      const de = Math.max(0, idx - 2)
-      const pana = Math.min(linii.length, idx + 4)
-      const bloc = linii.slice(de, pana).map((l, k) => `${de + k + 1}: ${l}`).join('\n')
-      return `Textul REAL din fișier (copiază-l EXACT ca „old"):\n${bloc}`
-    }
-  }
-  return `Copiază „old" EXACT din fișier. Începutul lui (primele 400 caractere):\n${src.slice(0, 400)}`
-}
 // Comenzi PERMISE explicit — nimic altceva nu se execută prin shell (atelierul
 // nu e un shell liber; buildul și testele sunt verificările de care e nevoie).
 const RUN_ALLOWED = new Set([
@@ -474,131 +256,6 @@ function toolRun(cmd) {
   return ruleazaUnPas(cls).text
 }
 
-let TOOLS = [
-  // NB: `let`, nu `const` — la pornire se reîncarcă din sursa unică a aplicației
-  // (incarcaUneltele), ca să aibă mereu aceleași unelte de dev/ops ca creierul.
-  { type: 'function', function: { name: 'ls', description: 'Listează un director din repo (fără node_modules/.git/dist).', parameters: { type: 'object', properties: { dir: { type: 'string' } } } } },
-  { type: 'function', function: { name: 'grep', description: 'Caută un text/regex în tot repo-ul și întoarce fișier:linie:conținut (max 60). FOLOSEȘTE ASTA ca să găsești fișierul de modificat — nu explora cu ls/read pas cu pas.', parameters: { type: 'object', properties: { pattern: { type: 'string' } }, required: ['pattern'] } } },
-  { type: 'function', function: { name: 'read', description: 'Citește un fișier (numerotat). Dă from/to ca să iei DOAR intervalul de linii care te interesează — nu tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' } }, required: ['path'] } } },
-  { type: 'function', function: { name: 'write', description: 'Scrie CONȚINUTUL COMPLET al unui fișier (rescriere integrală, nu diff). Pentru un fișier EXISTENT mare folosește mai bine „edit" — răspunsul tău are plafon și se taie.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
-  { type: 'function', function: { name: 'edit', description: 'Înlocuiește o bucată de text într-un fișier existent: „old" (textul EXACT de acum, unic în fișier) → „new". Preferă asta la fișiere mari — nu retrimiți tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } }, required: ['path', 'old', 'new'] } } },
-  { type: 'function', function: { name: 'edit_lines', description: 'CEA MAI SIGURĂ pe fișiere MARI: înlocuiește liniile from..to (numerele din „read") cu textul „new". Fără potrivire de text, fără să retrimiți tot fișierul — imună la plafonul de ieșire. Ca să ȘTERGI, dă „new" gol. Ca să INSEREZI după linia N, dă from=to=N+1 doar dacă acele linii nu-ți trebuie — altfel include-le în „new".', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' }, new: { type: 'string' } }, required: ['path', 'from', 'to', 'new'] } } },
-  { type: 'function', function: { name: 'delete_file', description: 'Șterge un fișier din atelier — de folosit când ai creat unul din greșeală (ex. o migrație inutilă). Doar în atelier; ștergerea apare în diff-ul PR-ului pe care owner-ul îl vede.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
-  { type: 'function', function: { name: 'run', description: 'Rulează o comandă permisă: verificări (npm ci/build/test pe backend/frontend, git status/diff) SAU instalare de dependențe — `npm --prefix backend install <pachet>` / `npm --prefix frontend install <pachet>` — când ordinul cere o bibliotecă nouă (adaugă pachetul în package.json + lock).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
-  { type: 'function', function: { name: 'finish', description: 'Close the work: PR title + body (body in Romanian, for the owner: what was done, how it was verified, what remains unverified). Call it ONLY after the self-check against the order — the change must actually fulfil what was asked. The system runs build+tests itself right after.', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
-  // ── UNELTELE GRELE (Adrian, 30 iul: „am cerut agenți full echipați și tu i-ai
-  // dat doar ciurucuri" · „toate, trebuie echipat la full") ───────────────────
-  // Avea dreptate: cu ls/grep/read/write/edit/run/finish poți scrie cod, dar nu
-  // poți deschide un site și nu poți pune o cheie. Un ordin care cerea un portal
-  // era IMPOSIBIL pentru el — și ar fi picat de trei ori, pe banii ownerului.
-  // Acum le are, prin aplicație (`/api/constructor/tool`, aceeași poartă
-  // x-bridge-secret): browserul e Playwright în procesul aplicației, iar
-  // secretele se scriu criptat în repo.
-  { type: 'function', function: { name: 'browser_open', description: 'Deschide un site REAL în browserul de pe server și îți întoarce textul paginii + elementele numerotate pe care poți da click.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
-  { type: 'function', function: { name: 'browser_read', description: 'Recitește pagina deschisă (text + elemente numerotate).', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'browser_click', description: 'Click pe elementul cu numărul dat, din pagina deschisă.', parameters: { type: 'object', properties: { index: { type: 'number' } }, required: ['index'] } } },
-  { type: 'function', function: { name: 'browser_type', description: 'Scrie text în câmpul cu numărul dat. submit=true apasă Enter după. NU scrie niciodată parole sau date de card.', parameters: { type: 'object', properties: { index: { type: 'number' }, text: { type: 'string' }, submit: { type: 'boolean' } }, required: ['index', 'text'] } } },
-  { type: 'function', function: { name: 'browser_scroll', description: 'Derulează pagina („down" sau „up").', parameters: { type: 'object', properties: { direction: { type: 'string' } }, required: ['direction'] } } },
-  { type: 'function', function: { name: 'browser_key', description: 'Apasă o tastă/combinație în pagină (Enter, Tab, Escape, ArrowDown, Control+A).', parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } } },
-  { type: 'function', function: { name: 'browser_click_at', description: 'Click pe coordonatele x,y din pagină (1280×800), pentru ce nu apare în lista numerotată.', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] } } },
-  { type: 'function', function: { name: 'browser_back', description: 'Înapoi la pagina anterioară.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'browser_close', description: 'Închide browserul când ai terminat de navigat.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'secret_lista', description: 'Ce chei există în secretele repo-ului (DOAR numele — valorile nu le dă nimeni, prin construcție).', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'secret_pune', description: 'Pune o cheie în secretele repo-ului, criptată. NU repeta niciodată valoarea în răspunsul tău, în PR sau într-un fișier — doar numele și lungimea.', parameters: { type: 'object', properties: { nume: { type: 'string' }, valoare: { type: 'string' } }, required: ['nume', 'valoare'] } } },
-  { type: 'function', function: { name: 'secret_publica', description: 'Duce cheile pe serverul de producție și repornește aplicația ca să le încarce.', parameters: { type: 'object', properties: {} } } },
-  // ȘI RESTUL — „toate, trebuie echipat la full" (Adrian, 30 iul). Baza de date
-  // reală, sănătatea proprie și operațiile de pe server. Fără ele, un ordin care
-  // cere „vezi ce e în tabelă" sau „repornește și verifică" era imposibil.
-  { type: 'function', function: { name: 'db_tables', description: 'Vezi tabelele bazei de date de producție și forma lor.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'db_query', description: 'Interoghează baza de date de producție (SQL). Folosește-o ca să VERIFICI ce ai construit, pe date reale.', parameters: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } } },
-  { type: 'function', function: { name: 'system_health', description: 'Sănătatea aplicației: sincronizarea publicării (live vs master), rulări roșii, ordine picate, disc, bază de date, punga creierului.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'run_runbook', description: 'Operație pe server, dintr-o listă fixă: diagnostic, restart-app, restart-caddy, loguri-app, backup-db, publish-master, curata-zombi, sentinel-now.', parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } } },
-  { type: 'function', function: { name: 'runbook_status', description: 'Starea rulărilor de operații pornite de tine.', parameters: { type: 'object', properties: { name: { type: 'string' } } } } },
-  { type: 'function', function: { name: 'runbook_log', description: 'Jurnalul unei rulări de operație, după id.', parameters: { type: 'object', properties: { run_id: { type: 'number' } }, required: ['run_id'] } } },
-  { type: 'function', function: { name: 'request_repair', description: 'Notează durabil un ordin de reparație pentru ce ai găsit și nu intră în lucrarea asta (nu se pierde, ajunge la owner).', parameters: { type: 'object', properties: { title: { type: 'string' }, details: { type: 'string' } }, required: ['title', 'details'] } } },
-  // ── AGENȚII SPECIALIȘTI (Adrian, 10 aug: „folosește la nevoie automat toți
-  // agenții"; „când îți lipsește un TIP de agent, creează-l automat") ──────────
-  { type: 'function', function: { name: 'cheama_agent', description: 'Deleagă o sub-sarcină unui agent specialist din roster (ex. un expert pe un domeniu). Folosește-l cât e cazul, automat, când sub-sarcina cade mai bine pe un specialist decât pe tine.', parameters: { type: 'object', properties: { agent: { type: 'string', description: 'id-ul agentului din roster' }, sarcina: { type: 'string', description: 'ce are de făcut, complet' } }, required: ['agent', 'sarcina'] } } },
-  { type: 'function', function: { name: 'agent_nou', description: 'Creează un agent specialist NOU când îți lipsește TIPUL de care ai nevoie (instant, fără publicare — e o persona folosită imediat de cheama_agent). Dă un nume și rolul (meseria) lui. După ce-l creezi, cheamă-l cu cheama_agent.', parameters: { type: 'object', properties: { nume: { type: 'string' }, rol: { type: 'string', description: 'meseria/rolul agentului, min 10 caractere' } }, required: ['nume', 'rol'] } } },
-]
-
-// Care unelte NU se execută aici, ci în aplicație (browser Playwright în proces,
-// secrete criptate, baza de date, operațiile de pe server). Lista se DERIVĂ din
-// TOOLS, ca să nu poată rămâne în urmă: uneltele locale sunt cele 7 de fișiere,
-// tot restul trece prin `/api/constructor/tool`.
-const UNELTE_LOCALE = new Set(['ls', 'grep', 'read', 'write', 'edit', 'edit_lines', 'delete_file', 'run', 'finish'])
-let UNELTE_PRIN_APLICATIE = new Set(
-  TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)),
-)
-
-// ── SURSA UNICĂ DE UNELTE (Adrian, 10 aug: „dă-i TOT, deblochează TOT") ────────
-// Defs-urile LOCALE (fișiere) rămân aici — se execută în proces. Restul le cerem
-// la pornire de la aplicație (GET /api/constructor/tool-defs, derivate din
-// SHARED_ADMIN_TOOLS + agenți + browser), ca lista să nu mai poată rămâne în
-// urmă față de creierul de chat. Dacă cererea pică din ORICE motiv, rămâne lista
-// de rezervă de mai sus (TOOLS neatins) — constructorul nu poate ajunge fără unelte.
-const UNELTE_LOCALE_DEFS = TOOLS.filter((t) => UNELTE_LOCALE.has(t.function.name))
-
-// ── ANTI-RĂTĂCIRE (5 aug 2026 — cauza MĂSURATĂ a joburilor picate) ────────────
-// Din jurnalul buclei: joburi cu 40 de grep-uri LA RÂND, zero editări, care au
-// ars tot bugetul MAX_STEPS fără să producă (job 96: „40 pași cu unelte, 0
-// sterili"). Cauza: un grep care „lucrează" numără ca pas UTIL exact ca un edit
-// (aLucrat=true), deci explorarea pură golește bugetul de construcție. Owner-ul,
-// 5 aug: „constructorul se pierde". Fixul: numărăm explorările CONSECUTIVE fără
-// nicio producție; la prag, un ghiont TARE spre editare. Pur, exportat, probat.
-export const UNELTE_EXPLORARE = new Set(['grep', 'ls', 'read'])
-export const UNELTE_PRODUCTIE = new Set(['write', 'edit', 'edit_lines', 'delete_file'])
-export const PRAG_EXPLORARE = 8
-
-/** Actualizează contorul de explorare-fără-producție pentru o tură.
- *  `numeUnelte` = numele uneltelor folosite în tură; `aProdus` = a lucrat vreo
- *  unealtă de PRODUCȚIE (edit/write/edit_lines/delete_file). Întoarce
- *  {contor, ghiont}: contorul nou și dacă se cuvine ghiontul anti-rătăcire
- *  (prea multă explorare fără nicio editare). PURĂ — nicio atingere de disc. */
-export function pasExplorare(numeUnelte, aProdus, contorVechi) {
-  if (aProdus) return { contor: 0, ghiont: false }
-  const aExplorat = numeUnelte.some((n) => UNELTE_EXPLORARE.has(n))
-  const contor = aExplorat ? contorVechi + 1 : contorVechi
-  if (contor >= PRAG_EXPLORARE) return { contor: 0, ghiont: true }
-  return { contor, ghiont: false }
-}
-
-
-// REZISTENT LA MODELELE GRATUITE (jobul #2, 27 iul, cauza reală din log:
-// „Unexpected end of JSON input" — endpointul :free a întors corp gol/trunchiat
-// la rate-limit și agentul crăpa pe r.json() fără nicio reîncercare). Acum:
-// corp gol, JSON rupt, 429 sau 5xx → reîncearcă cu pauze crescătoare; abia
-// după 4 încercări ratate jobul pică de-adevăratelea.
-// FEREASTRA GLISANTĂ pe istoric (audit 27 iul — fixul care taie explozia
-// pătratică de tokeni): rezultatele uneltelor mai vechi decât ultimele
-// KEEP_VERBATIM se înlocuiesc cu un ciot de o linie. Contextul rămâne mic și
-// aproape constant, indiferent câți pași durează jobul → merge și pe modelele
-// gratuite (care se sufocau la request-uri uriașe). Mesajele system+ordin și
-// apelurile de unealtă (assistant) rămân neatinse — doar CORPUL rezultatelor
-// vechi (role:'tool') se comprimă, ca modelul să nu-și piardă firul.
-
-// ── SCARA DE MODELE OPENROUTER — EXTIRPATĂ (3 aug) ──────────────────────────
-// Aici stăteau: MODEL_LADDER (pool-ul :free), MODELE_DOVEDIT_PROASTE, creierul
-// plătit „Fable 5" (FABLE_MODEL / cereCreierFable / modelePentruOrdin), rotația
-// circulară pe trepte și clasificarea erorilor OpenRouter. Toate au murit odată
-// cu furnizorul — ordinul repetat al ownerului: „openrouter și open ai scos din
-// toată aplicația". Creierul constructorului merge prin app (/api/constructor/creier:
-// Gemini principal → Fable 5 rezervă); la eșec de furnizor, ordinul se AMÂNĂ onest (rămâne în coadă, se reia automat).
-const LLM_ATTEMPTS = 6
-
-// (Owner, 14 aug: creierul constructorului e PRIN APP — Gemini (principal) →
-// Fable 5 (rezervă) —, rulat în app pe /api/constructor/creier. Aici, în
-// constructor, NU mai există creier propriu pe RunPod/DeepInfra: `llmGemini` cere
-// ruta din app, iar `llm()` doar reîncearcă pe eșec. Trezirea de placă RunPod a
-// fost SCOASĂ — nu mai există placă proprie de trezit.)
-
-// ── CREIERUL PRIN APP: GEMINI (principal) → FABLE 5 (rezervă) — owner, 14 aug ──
-// Cerem creierul APLICAȚIEI pe ruta gardată cu bridge-secret. App-ul rulează
-// Gemini „ultra" (Pro) ca principal și cade pe Fable 5 ca rezervă când Gemini nu
-// poate; cheile (Gemini + Anthropic) + creditul stau în app, nu în constructor.
-// Răspunsul vine în format OpenAI (ca de la orice creier), deci restul buclei nu
-// știe pe ce creier a mers. `modelServit` din răspuns spune care a servit efectiv.
-
 // Ultimul creier care a SERVIT efectiv (pentru afișajul ONEST din raport/PR: dacă
 // s-a căzut pe Fable 5, se vede Fable 5, nu Gemini). Setat în llm() la fiecare succes.
 let ULTIMUL_CREIER = ''
@@ -690,7 +347,7 @@ function verificaAtelierul(baseSha) {
   for (const cmd of verify) {
     log(`verific: ${cmd}`)
     const out = toolRun(cmd)
-    if (/^EȘEC/.test(out)) return `verificarea a picat la „${cmd}":\n${out.slice(-2000)}`
+    if (out.startsWith('EȘEC')) return `verificarea a picat la „${cmd}":\n${out.slice(-2000)}`
   }
   // Marcăm lock-ul ca instalat DOAR după ce instalarea + build + test au trecut
   // (dacă am instalat efectiv, nu am sărit). Așa jobul următor cu lock identic sare.
@@ -1144,12 +801,19 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     45_000,
     Math.min(ramase() - 60_000, platit ? Number(env.CONSTRUCTOR_PAID_TIMEOUT_MS || 18 * 60_000) : Number(env.CONSTRUCTOR_FREE_TIMEOUT_MS || 8 * 60_000)),
   )
-  const TACERE_KILL_MS = Number(env.CONSTRUCTOR_SILENCE_MS || (platit ? 90_000 : 45_000))
+  // Cold-start measured on this VPS: qwen2.5-coder:32b needs ~81s only to load.
+  // Killing free at 45s guaranteed a false timeout/HTTP 499 before its first token.
+  // Paid also proved a false kill at 90s AFTER Aider had already committed, while
+  // its summarizer was still closing. Once HEAD changed, allow a larger close grace.
+  const TACERE_KILL_MS = Number(env.CONSTRUCTOR_SILENCE_MS || (platit ? 180_000 : 150_000))
+  const TACERE_DUPA_COMMIT_MS = Number(env.CONSTRUCTOR_POST_COMMIT_SILENCE_MS || 300_000)
 
   return new Promise((resolve) => {
     let out = ''
     let ultimaLa = Date.now()
     let anuntatAgatat = false
+    let anuntatCommit = false
+    const headLaStart = sh('git rev-parse --short=7 HEAD').trim()
     const inghite = (buf) => {
       const s = String(buf)
       out += s
@@ -1170,8 +834,15 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     child.stderr?.on('data', inghite)
     const paznic = setInterval(() => {
       const tacut = Date.now() - ultimaLa
-      if (TACERE_KILL_MS > 0 && tacut > TACERE_KILL_MS) {
-        log(`aider: T?CUT de ${Math.round(tacut / 1000)}s (${platit ? 'platit' : 'free'}) ? kill; urmeaz? replan pa?i mici`)
+      const headAcum = sh('git rev-parse --short=7 HEAD').trim()
+      const aComis = !!headLaStart && !!headAcum && headAcum !== headLaStart
+      const pragTacere = aComis ? Math.max(TACERE_KILL_MS, TACERE_DUPA_COMMIT_MS) : TACERE_KILL_MS
+      if (aComis && !anuntatCommit) {
+        anuntatCommit = true
+        log(`aider: commit detectat (${headAcum}) — acord ${Math.round(pragTacere / 1000)}s pentru închidere/sumarizare`)
+      }
+      if (pragTacere > 0 && tacut > pragTacere) {
+        log(`aider: T?CUT de ${Math.round(tacut / 1000)}s (${platit ? 'platit' : 'free'}, commit=${aComis ? 'da' : 'nu'}) ? kill; urmeaz? replan pa?i mici`)
         try { child.kill('SIGKILL') } catch { /* dead */ }
         return
       }
@@ -1384,6 +1055,23 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       }
     }
     ultimaProblema = problema
+    // Rezultatul free a scris cod, dar porțile reale (build/tests) l-au respins.
+    // Acesta este exact cazul „răspuns incorect”: următoarea reparație folosește
+    // fallbackul paid în ACELAȘI run, fără să mai repete aceeași mână free.
+    const decQ = decideEscaladareFreeFirst({
+      peFree: !platit,
+      paidDisponibil: !!fallbackPaid,
+      motivFree: `calitate ${problema.slice(0, 300)}`,
+    })
+    if (decQ.escaladeaza && fallbackPaid && !platit) {
+      creierCfg = fallbackPaid
+      platit = true
+      brainRaport = 'paid_cloud'
+      motivEscaladare = decQ.motiv
+      ULTIMUL_CREIER = `aider (CLOUD rezervă după poarta de calitate: ${creierCfg.model})`
+      log(`ESCALADARE same-run free→paid: motiv=${decQ.motiv} (porți roșii)`)
+      salveazaLectie({ sig: 'escaladare_paid', cauza: 'calitate', fix: `paid:${creierCfg.model}`, ok: false })
+    }
     if (reparatii + 1 < MAX_REPAIR && ramase() > 3 * 60_000) {
       const h3 = await cereAjutorCreier(job.orderText, problema.slice(-1200))
       if (h3.plan) {
@@ -1407,7 +1095,6 @@ async function main() {
   const claim = await api('/api/constructor/next')
   if (!claim?.job) return // coada goală sau pauza-autonomie — tăcere totală
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
-  incercareCurenta = Math.max(1, Number(claim.job.attempts) || 1)
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
   // MOTORUL = AIDER, UNIC (owner, 16 aug, verbatim: „constructor unic aider… scoti
@@ -1458,12 +1145,24 @@ async function main() {
     // pică → cădem pe CLONA CURATĂ de dinainte (fallback SIGUR: cel mai rău caz =
     // comportamentul vechi). Așa jobul următor pornește pe master proaspăt, dar cu
     // node_modules cald (vezi comandaInstalare — sare peste `npm ci` inutil).
-    const url = `https://x-access-token:${GHTOKEN}@github.com/${REPO}.git`
+    const url = `https://github.com/${REPO}.git`
+    const askpass = path.join(ROOT, 'constructor-git-askpass.sh')
+    fs.writeFileSync(
+      askpass,
+      '#!/bin/sh\ncase "$1" in\n  *Username*) printf "%s\\n" "x-access-token" ;;\n  *) printf "%s\\n" "$GITHUB_TOKEN" ;;\nesac\n',
+      { mode: 0o700 },
+    )
+    const gitEnv = {
+      ...process.env,
+      GITHUB_TOKEN: GHTOKEN,
+      GIT_ASKPASS: askpass,
+      GIT_TERMINAL_PROMPT: '0',
+    }
     let rapid = false
     if (fs.existsSync(path.join(ATELIER, '.git'))) {
       try {
-        execFileSync('git', ['-C', ATELIER, 'remote', 'set-url', 'origin', url], { stdio: 'pipe', timeout: 30_000 })
-        execFileSync('git', ['-C', ATELIER, 'fetch', '--depth', '50', 'origin', 'master'], { stdio: 'pipe', timeout: 120_000 })
+        execFileSync('git', ['-C', ATELIER, 'remote', 'set-url', 'origin', url], { stdio: 'pipe', timeout: 30_000 , env: gitEnv })
+        execFileSync('git', ['-C', ATELIER, 'fetch', '--depth', '50', 'origin', 'master'], { stdio: 'pipe', timeout: 120_000 , env: gitEnv })
         execFileSync('git', ['-C', ATELIER, 'reset', '--hard', 'FETCH_HEAD'], { stdio: 'pipe', timeout: 60_000 })
         execFileSync('git', ['-C', ATELIER, 'clean', '-fd'], { stdio: 'pipe', timeout: 60_000 }) // FĂRĂ -x → node_modules (ignorat) rămâne
         rapid = true
@@ -1473,7 +1172,7 @@ async function main() {
     }
     if (!rapid) {
       fs.rmSync(ATELIER, { recursive: true, force: true })
-      execFileSync('git', ['clone', '--depth', '50', url, ATELIER], { stdio: 'pipe', timeout: 120_000 })
+      execFileSync('git', ['clone', '--depth', '50', url, ATELIER], { stdio: 'pipe', timeout: 120_000 , env: gitEnv })
     }
     const baseSha = sh('git rev-parse --short=7 HEAD').trim()
     log(`atelier pe ${baseSha}${rapid ? ' (persistent, node_modules cald)' : ' (clonă curată)'}`)

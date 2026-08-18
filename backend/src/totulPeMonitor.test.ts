@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { needsToolForAnswer, autoPreviewFrame } from './services/monitorAutoPreview.js'
+import { eCadruDeSuprafata } from './services/chatFrames.js'
 
 // ── TOTUL PE MONITOR (Adrian, Aug 2, 10:13 — "TOT pe monitor") ──────────────
 //
@@ -136,26 +137,23 @@ describe('auto-preview-ul nu dublează NICIODATĂ ce uneltele au pus deja', () =
     expect(chat).toMatch(/const preview = autoPreviewFrame\(assistantText\)/)
   })
 
-  // The surface-frame detector, rebuilt from source (the house pattern: the
-  // regex is tested FOR REAL, not just its existence).
-  const linia = /const CADRU_SUPRAFATA\s*=\s*(\/[\s\S]*?\/)\r?\n/.exec(chat)?.[1] ?? ''
-  const reSuprafata = new RegExp(linia.slice(1, -1))
+  // Detectorul protocolului este testat direct, nu reconstruit fragil din sursă.
   const CTRL = String.fromCharCode(31)
 
   it('{monitor} cu url real = suprafață', () => {
-    expect(reSuprafata.test(`${CTRL}{"monitor":{"url":"https://x.y","title":""}}${CTRL}`)).toBe(true)
+    expect(eCadruDeSuprafata(`${CTRL}{"monitor":{"url":"https://x.y","title":""}}${CTRL}`)).toBe(true)
   })
   it('{doc} / {card} / {app} / {build} = suprafață', () => {
-    expect(reSuprafata.test(`${CTRL}{"doc":{"title":"t","text":"x"}}${CTRL}`)).toBe(true)
-    expect(reSuprafata.test(`${CTRL}{"card":{"type":"table","title":"t","items":[]}}${CTRL}`)).toBe(true)
-    expect(reSuprafata.test(`${CTRL}{"build":{"open":true}}${CTRL}`)).toBe(true)
+    expect(eCadruDeSuprafata(`${CTRL}{"doc":{"title":"t","text":"x"}}${CTRL}`)).toBe(true)
+    expect(eCadruDeSuprafata(`${CTRL}{"card":{"type":"table","title":"t","items":[]}}${CTRL}`)).toBe(true)
+    expect(eCadruDeSuprafata(`${CTRL}{"build":{"open":true}}${CTRL}`)).toBe(true)
   })
   it('{monitor} cu url GOL = curățarea ecranului, NU suprafață', () => {
-    expect(reSuprafata.test(`${CTRL}{"monitor":{"url":"","title":""}}${CTRL}`)).toBe(false)
+    expect(eCadruDeSuprafata(`${CTRL}{"monitor":{"url":"","title":""}}${CTRL}`)).toBe(false)
   })
   it('cadrele de protocol NU sunt suprafețe', () => {
-    expect(reSuprafata.test(`${CTRL}{"heard":"salut"}${CTRL}`)).toBe(false)
-    expect(reSuprafata.test(`${CTRL}{"turn":"abc"}${CTRL}`)).toBe(false)
+    expect(eCadruDeSuprafata(`${CTRL}{"heard":"salut"}${CTRL}`)).toBe(false)
+    expect(eCadruDeSuprafata(`${CTRL}{"turn":"abc"}${CTRL}`)).toBe(false)
   })
 })
 

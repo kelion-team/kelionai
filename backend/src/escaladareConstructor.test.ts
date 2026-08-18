@@ -52,6 +52,24 @@ describe('constructor = Aider (motor unic) pe creier LOCAL Ollama de pe VPS', ()
     expect(agent).toContain('amanabil: true')
   })
 
+  it('watchdogul nu omoară cold-startul free sau sumarizarea după commit', () => {
+    const praguri = /CONSTRUCTOR_SILENCE_MS \|\| \(platit \? ([0-9_]+) : ([0-9_]+)\)/.exec(agent)
+    expect(praguri).toBeTruthy()
+    const paidMs = Number(praguri?.[1].replaceAll('_', ''))
+    const freeMs = Number(praguri?.[2].replaceAll('_', ''))
+    // Probe live: free load_duration=80_647ms; paid a fost ucis fals după 90s post-commit.
+    expect(freeMs).toBeGreaterThan(80_647)
+    expect(paidMs).toBeGreaterThan(90_000)
+    expect(agent).toContain('CONSTRUCTOR_POST_COMMIT_SILENCE_MS || 300_000')
+    expect(agent).toContain('const aComis =')
+  })
+
+  it('porți roșii după free comută următoarea reparație pe fallbackul paid', () => {
+    expect(agent).toContain('motivFree: `calitate ${problema.slice(0, 300)}`')
+    expect(agent).toContain('CLOUD rezervă după poarta de calitate')
+    expect(agent).toContain("salveazaLectie({ sig: 'escaladare_paid', cauza: 'calitate'")
+  })
+
   it('ruta veche de creier prin app (Gemini) a FOST SCOASĂ din constructor', () => {
     // Owner: „la constructor nu e gemeni". Nici handlerul, nici ușile lui.
     expect(ruta).not.toContain('const creierHandler')

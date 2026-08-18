@@ -1,11 +1,7 @@
 import { rationeazaMesaje, rationeazaMesajeStream } from './creierRationament.js'
 import { OCHI_MARCAJ } from './brainContract.js'
 import type { AnthropicTool, OrMessage, OrToolCall } from './brainContract.js'
-import {
-  GEMINI_DIRECT_PREFIX,
-  geminiDirectChat,
-  geminiDirectChatStream,
-} from './geminiDirect.js'
+import { GEMINI_DIRECT_PREFIX } from './geminiDirect.js'
 import { filtruRepetitie } from './fluxUnic.js'
 import { parseFakeToolCalls, stripToolMarkup } from './toolMarkup.js'
 
@@ -138,7 +134,6 @@ export async function runOrchestrator(
   let deedGateUsed = false
   let analizaGateUsed = false
   let actiuneGateUsed = false
-  let anyToolCalled = false
   // AFIȘARE ≠ FAPTĂ (owner, 13 aug): un apel la show_document NU e execuție.
   // `anyFaptaToolCalled` = s-a chemat o unealtă care NU e doar afișare — asta
   // dezarmează porțile, nu simpla „a chemat ceva".
@@ -147,7 +142,6 @@ export async function runOrchestrator(
   let anyFaptaToolCalled = false
   const marcheazaChemata = (name: string): void => {
     uneltChemate.add(name)
-    anyToolCalled = true
     if (!afisaj.has(name)) anyFaptaToolCalled = true
   }
   const rez = (text: string, rounds: number): OrchestratorResult => ({

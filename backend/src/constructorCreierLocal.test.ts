@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 // aceeași bază (Ollama trage ':latest'). O greșeală aici = ori reinstalează la
 // nesfârșit, ori crede că are creier când n-are — de-aia o probăm real.
 //
-// Ca la pasExplorare/potrivesteEdit: modulul VPS e ESM în afara rădăcinii backend,
+// Ca în celelalte teste ale modulului VPS: modulul VPS e ESM în afara rădăcinii backend,
 // îl exersăm printr-un subproces node care-l importă nativ și răspunde JSON.
 
 const MJS = fileURLToPath(new URL('../../deploy/constructor-agent.mjs', import.meta.url))

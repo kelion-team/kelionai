@@ -12,7 +12,7 @@
 // would either never start (believing it had spoken), or speak over a
 // successful turn.
 import { describe, expect, it } from 'vitest'
-import { areCevaDeVazut } from './routes/chat.js'
+import { areCevaDeVazut } from './services/chatFrames.js'
 
 const CTRL = String.fromCharCode(31)
 const cadru = (o: unknown): string => `${CTRL}${JSON.stringify(o)}${CTRL}`

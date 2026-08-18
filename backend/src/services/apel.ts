@@ -95,7 +95,7 @@ export function scoatePrezenta(email: string, con: ConexiuneApel): void {
     if (set.size === 0) prezenta.delete(e)
   }
   if (esteOnline(e)) return // mai are alt tab deschis — apelurile rămân
-  for (const [id, a] of [...apeluri]) {
+  for (const [id, a] of apeluri) {
     if (a.deLaEmail === e || a.catreEmail === e) {
       apeluri.delete(id)
       const celalalt = a.deLaEmail === e ? a.catreEmail : a.deLaEmail

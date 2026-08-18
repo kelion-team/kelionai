@@ -218,6 +218,27 @@ beforeEach(() => {
   autonomOprit = false
 })
 
+describe('executorul bridge poate crea ordine reale de build', () => {
+  it('build_software validează și pune ordinul în coada constructorului', async () => {
+    const order = 'Repară workerul de auto-publicare și adaugă teste pentru retry.'
+    const rezultat = JSON.parse(await uneltele('build_software', { order }))
+    expect(rezultat).toEqual({ ok: true, job: 1 })
+    expect(jobs).toContainEqual(expect.objectContaining({
+      id: 1,
+      orderText: order,
+      orderedBy: 'adrianenc11@gmail.com',
+      status: 'queued',
+    }))
+  })
+
+  it('build_software respinge ordinul vag fără să creeze job', async () => {
+    const rezultat = JSON.parse(await uneltele('build_software', { order: 'repară' }))
+    expect(rezultat.error).toBe('ordin_respins')
+    expect(rezultat.motiv).toContain('prea scurt')
+    expect(jobs).toHaveLength(0)
+  })
+})
+
 // THE SWITCH (Adrian, Jul 31, after seeing $27.84 burned in 3½ hours and
 // asking "first it must be verified that autonomy is on stop"). It wasn't:
 // the button wrote to the database, the panel showed "STOPPED", and the loop

@@ -23,7 +23,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { areCevaDeVazut, conteazaCaVizibil } from './routes/chat.js'
+import { areCevaDeVazut, conteazaCaVizibil } from './services/chatFrames.js'
 import { hasActionIntent } from './services/brainContract.js'
 
 const CTRL = String.fromCharCode(31)
@@ -75,6 +75,18 @@ describe('ack-ul instant NU e răspunsul (cauza exactă a „am preluat sarcina"
   })
 })
 
+describe('jurnalul uneltelor acoperă toate ramurile executorului', () => {
+  it('trace-ul este unic și stă în execTool înainte de ramurile inline', () => {
+    const executor = sursaChat.indexOf('const execTool = async')
+    const trace = sursaChat.indexOf('console.log(`[tool] ${name}')
+    const monitor = sursaChat.indexOf("if (name === 'get_monitor')")
+    expect(executor).toBeGreaterThanOrEqual(0)
+    expect(trace).toBeGreaterThan(executor)
+    expect(trace).toBeLessThan(monitor)
+    expect(sursaChat.match(/console\.log\(`\[tool\]/g)).toHaveLength(1)
+  })
+})
+
 describe('regula de rutare: mesajul normal de chat NU ajunge la constructor', () => {
   it('o cerere de localizare este tură de acțiune (ack instant) — dar se RĂSPUNDE, nu se construiește', () => {
     // Documentează DE CE a apărut „Am preluat sarcina." la o cerere de
@@ -119,6 +131,18 @@ describe('regula de rutare: mesajul normal de chat NU ajunge la constructor', ()
     // reală (build_jobs) și confirmă cu numărul ordinului.
     expect(sursaChat).toMatch(/case 'build_software'[\s\S]{0,1600}createBuildJob\(email, order\)/)
     expect(sursaChat).toMatch(/Am preluat cerința \(ordin #\$\{jobId\}\)\./)
+  })
+
+  it('un ordin pornește exact o dată wrapperul instalat al constructorului', () => {
+    const start = sursaChat.indexOf('function porneculLucratorulConstructor(): void {')
+    const end = sursaChat.indexOf('// ── runTool helper', start)
+    const launcher = start >= 0 && end > start ? sursaChat.slice(start, end) : ''
+    expect(launcher).toContain("spawn('bash', ['/root/kelion/constructor-worker.sh']")
+    expect(launcher).toContain('detached: true')
+    expect(launcher).toContain('worker.unref()')
+    expect(launcher.match(/constructor-worker\.sh/g)).toHaveLength(1)
+    expect(launcher).not.toContain('/root/kelion/deploy/')
+    expect(launcher).not.toContain('/root/kelion/atelier/')
   })
 
   it('definițiile uneltei spun explicit regula: constructorul primește ordine explicite SAU implicite, dar NU întrebări obișnuite de chat', () => {

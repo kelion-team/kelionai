@@ -119,7 +119,6 @@ export function validateRunbook(
 // stări care se răstoarnă nevăzut, butoane-capcană, „cine a oprit?". Nu mai
 // există stare: autonomia nu se mai poate pune pe pauză. Frânele de bani
 // rămân cele reale (plafonul zilnic + P27 + cheile separate ale timerului).
-const PAUSE_KEY = 'kelion_ops_paused' // istoric; nu se mai citește
 export async function isOpsPaused(): Promise<boolean> {
   return false
 }
@@ -177,7 +176,7 @@ export async function runRunbook(name: string, customInputs?: Record<string, str
   if (!v.ok)
     return JSON.stringify({ error: v.error, runbooks: v.known, hint: 'folosește exact un nume din listă' })
 
-  let finalInputs: Record<string, string> = { ...(v.rb.inputs ?? {}), ...(customInputs ?? {}) }
+  let finalInputs: Record<string, string> = { ...v.rb.inputs, ...customInputs }
   if (name === 'instaleaza-pachet-sistem') {
     const pkg = (customInputs?.pachet || customInputs?.pkg || customInputs?.package || '').trim()
     if (!isValidSysPackageName(pkg)) {

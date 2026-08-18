@@ -72,10 +72,11 @@ import {
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { notifyAdmin } from './adminNotification.js'
-import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuitAziConstructor, cheltuialaAziConstructor } from '../db.js'
+import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuialaAziConstructor } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { utcDay } from './timeContext.js'
+import { evalueazaOrdin } from './evalOrdinConstructor.js'
 import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
   browserScroll, browserKey, browserClickAt, browserClose,
@@ -679,6 +680,13 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
   // doesn't eat the brain's whole context window.
   const scurt = (v: unknown): string => JSON.stringify(v).slice(0, 20_000)
   switch (name) {
+    case 'build_software': {
+      const order = String(args.order ?? '').trim()
+      const evaluare = evalueazaOrdin(order)
+      if (!evaluare.trece) return JSON.stringify({ error: 'ordin_respins', motiv: evaluare.motiv })
+      const job = await createBuildJob(email, order)
+      return JSON.stringify(job ? { ok: true, job } : { error: 'db_indisponibil' })
+    }
     case 'browser_open': return scurt(await browserOpen(email, baseUrl, String(args.url ?? '')))
     case 'browser_click': return scurt(await browserClick(email, baseUrl, Number(args.index ?? -1)))
     case 'browser_type':

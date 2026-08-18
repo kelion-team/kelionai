@@ -10,16 +10,10 @@ import { fileURLToPath } from 'node:url'
 // lines out of 1049. Its diagnosis was CORRECT (the model really returned
 // empty answers on 11 orders in a row) — the execution emptied the file.
 //
-// The cause: `repo_write` requires the COMPLETE content, and the model's
-// output is capped. On a large file the answer gets cut, and a stump is
-// written — with a commit and a correct-sounding message.
-//
-// THE LESSON THAT MATTERS, and why this test is written this way: the guard
-// EXISTED. For a long time. But only in the VPS constructor, put there after
-// a previous incident of exactly the same kind. The in-app path never got the
-// same lesson. **A guard placed in a single place protects a single place.**
-// That's why the test checks BOTH paths and that the threshold is IDENTICAL —
-// two different thresholds for the same danger would mean one is wrong.
+// The active `repo_write` path requires the COMPLETE content and therefore
+// keeps the truncation guard. The constructor now delegates file editing to
+// Aider and validates its committed diff; its old local `toolWrite` path no
+// longer exists and must not be kept merely to duplicate this guard.
 const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
@@ -48,25 +42,9 @@ describe('calea din aplicație (repo_write) refuză o rescriere ciuntită', () =
   })
 })
 
-describe('AMBELE căi de scriere au paznicul, cu ACELAȘI prag', () => {
-  it('the VPS constructor has it (it had it from before)', () => {
-    expect(constructor).toMatch(/content\.length < vechi\.length \* 0\.5/)
-    expect(constructor).toMatch(/vechi\.length > 2_000/)
-  })
-
-  it('pragurile sunt identice — 50% și 2000 de octeți, în amândouă', () => {
-    const proc = (s: string): string[] => s.match(/\* 0\.5/g) ?? []
-    expect(proc(backend).length).toBeGreaterThan(0)
-    expect(proc(constructor).length).toBeGreaterThan(0)
-    expect(backend).toContain('2_000')
-    expect(constructor).toContain('2_000')
-  })
-})
-
-describe('fișierul distrus e la loc, întreg', () => {
+describe('agentul constructor rămâne complet', () => {
   it('constructor-agent.mjs are sute de rânduri, nu paisprezece', () => {
-    // (Pragul coborât de la 1000 la 900 pe 3 aug: extirparea scării OpenRouter
-    // a scos ~270 de rânduri LEGITIM — fișierul întreg are acum ~970.)
+    // Prag grosier împotriva unei rescrieri accidentale cu un ciot de fișier.
     const randuri = constructor.split('\n').length
     expect(randuri).toBeGreaterThan(900)
   })
@@ -77,12 +55,9 @@ describe('fișierul distrus e la loc, întreg', () => {
   // MODELE_DOVEDIT_PROASTE, nici creier prin app.)
 
   it('bucățile mari ale constructorului sunt toate acolo', () => {
-    // A coarse but real check: if the file were maimed again, at least one of
-    // these would be missing. (Owner 16 aug: motorul e AIDER, unic —
-    // construiesteCuAider/ruleazaAider; creierul lui e un model LOCAL Ollama pe VPS,
-    // pus automat de asiguraCreierulLocal. Primitivele de editare + porțile + gardul
-    // de comenzi rămân biblioteca casei.)
-    for (const bucata of ['function toolWrite', 'function toolEdit', 'construiesteCuAider', 'function ruleazaAider', 'RUN_ALLOWED', 'function verificaAtelierul'])
+    // Un ciot accidental ar pierde cel puțin una dintre piesele active: motorul
+    // Aider, creierul local, escaladarea, verificarea atelierului sau porțile.
+    for (const bucata of ['construiesteCuAider', 'function ruleazaAider', 'asiguraCreierulLocal', 'decideEscaladareFreeFirst', 'function verificaAtelierul', 'function verificaPortileCasei'])
       expect(constructor).toContain(bucata)
   })
 })

@@ -102,7 +102,7 @@ if (typeof window !== 'undefined') {
       } else {
         mouseElementIndicator = 'nothing';
       }
-    } catch (err) {
+    } catch {
       mouseElementIndicator = 'error reading element';
     }
   });

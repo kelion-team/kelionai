@@ -2745,7 +2745,7 @@ export default function ChatPanel({
             cleaned = parsed.message
           }
         }
-      } catch (e) {
+      } catch {
         // Not valid JSON or failed to parse, continue
       }
     }

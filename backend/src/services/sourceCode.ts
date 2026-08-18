@@ -133,9 +133,9 @@ export async function searchSource(query: string): Promise<string> {
   } catch {
     re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
   }
-  const hits: string[] = []
-  async function walk(d: string): Promise<void> {
-    if (hits.length >= 80) return
+
+  const files: string[] = []
+  async function collect(d: string): Promise<void> {
     let entries
     try {
       entries = await fs.readdir(d, { withFileTypes: true })
@@ -143,27 +143,41 @@ export async function searchSource(query: string): Promise<string> {
       return
     }
     for (const e of entries) {
-      if (hits.length >= 80) return
       if (IGNORE_DIRS.has(e.name) || e.name.startsWith('.')) continue
       const p = path.join(d, e.name)
-      if (e.isDirectory()) {
-        await walk(p)
-      } else if (TEXT_EXT.has(path.extname(e.name))) {
-        try {
-          const raw = await fs.readFile(p, 'utf8')
-          if (raw.length > 2_000_000) continue
-          const lines = raw.split('\n')
-          for (let i = 0; i < lines.length && hits.length < 80; i++) {
-            if (re.test(lines[i])) {
-              hits.push(`${relSlash(p)}:${i + 1}: ${lines[i].trim().slice(0, 160)}`)
-            }
-          }
-        } catch {
-          /* unreadable file — skip */
-        }
-      }
+      if (e.isDirectory()) await collect(p)
+      else if (TEXT_EXT.has(path.extname(e.name))) files.push(p)
     }
   }
-  await walk(ROOT)
-  return hits.join('\n') || '(niciun rezultat)'
+  await collect(ROOT)
+
+  // Citirea serială depășea timeoutul de 5s al unei ture când suita/testele
+  // încărcau discul. Un pool mărginit păstrează presiunea pe FD mică, dar nu
+  // plimbă sute de fișiere unul câte unul. `stat` evită să citim fișierele mari
+  // doar ca să aflăm DUPĂ citire că trebuiau sărite.
+  const hits: { file: number; line: number; text: string }[] = []
+  let next = 0
+  const workers = Array.from({ length: Math.min(16, files.length) }, async () => {
+    while (true) {
+      const file = next++
+      if (file >= files.length) return
+      const p = files[file]
+      try {
+        const info = await fs.stat(p)
+        if (info.size > 2_000_000) continue
+        const raw = await fs.readFile(p, 'utf8')
+        const lines = raw.split('\n')
+        for (let line = 0; line < lines.length; line++) {
+          if (re.test(lines[line])) {
+            hits.push({ file, line, text: `${relSlash(p)}:${line + 1}: ${lines[line].trim().slice(0, 160)}` })
+          }
+        }
+      } catch {
+        /* unreadable file — skip */
+      }
+    }
+  })
+  await Promise.all(workers)
+  hits.sort((a, b) => a.file - b.file || a.line - b.line)
+  return hits.slice(0, 80).map((h) => h.text).join('\n') || '(niciun rezultat)'
 }

@@ -175,7 +175,7 @@ describe('P29 — omul e DUS spre plată, nu lăsat în fundătură', () => {
     expect(chat).toMatch(/Clipul e gata — îl pun pe monitor/)
     expect(chat).toMatch(/Generarea NU a pornit — motivul, mai jos/)
     const video = sursa('./services/video.ts')
-    expect(video).toMatch(/onPas\?\: \(secundeScurse: number\) => void/)
+    expect(video).toMatch(/onPas\?: \(secundeScurse: number\) => void/)
     expect(video).toMatch(/onPas\?\.\(Math\.round\(\(Date\.now\(\) - start\) \/ 1000\)\)/)
   })
 })

@@ -31,7 +31,7 @@ import { GOOGLE_STT_MODEL, GOOGLE_STT_REGION } from './services/asr.js'
 const SEMNE_PLATIT = /fable|claude|anthropic\/|openai\/|gpt-|(?:^|\/)o[13](?:-|$)/i
 // Un creier ACCEPTAT e gratuit: fie se termină în `:free`, fie e pe calea
 // directă Gemini (`google-direct/…`), care e gratuită prin cheia Google.
-const eGratuit = (m: string) => /:free$/.test(m) || m.startsWith('google-direct/')
+const eGratuit = (m: string) => m.endsWith(':free') || m.startsWith('google-direct/')
 
 function sursa(rel: string): string {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')

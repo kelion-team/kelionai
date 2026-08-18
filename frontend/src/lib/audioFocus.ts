@@ -13,34 +13,13 @@ import { stopVoice, isVoicePlaying } from './audioIO'
 
 export type AudioFocusSource = 'live' | 'tts' | 'none'
 
-type Listener = (source: AudioFocusSource) => void
-
 let active: AudioFocusSource = 'none'
-const listeners = new Set<Listener>()
 
 /** Optional: LIVE session can cut its own outbound audio on interrupt. */
 let liveInterrupt: (() => void) | null = null
 
-export function getAudioFocus(): AudioFocusSource {
-  return active
-}
-
-export function onAudioFocusChange(fn: Listener): () => void {
-  listeners.add(fn)
-  return () => {
-    listeners.delete(fn)
-  }
-}
-
 function emit(next: AudioFocusSource): void {
   active = next
-  for (const fn of listeners) {
-    try {
-      fn(next)
-    } catch {
-      /* listener must not break audio */
-    }
-  }
 }
 
 /** LIVE session registers so TTS knows not to steal the mouth. */

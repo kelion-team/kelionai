@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { config } from '../config.js'
@@ -185,12 +185,28 @@ export async function ruleazaLucrator(
   if (!config.geminiKey) return { ...gol, motiv: 'lipsește cheia Gemini — n-are creier', secunde: sec() }
 
   let lucru = ''
+  let askpass = ''
   try {
     lucru = await mkdtemp(path.join(tmpdir(), `${lucrator.nume}-`))
-    const url = `https://x-access-token:${token}@github.com/${config.githubRepo}.git`
+    askpass = `${lucru}.askpass`
+    await writeFile(
+      askpass,
+      '#!/bin/sh\ncase "$1" in\n  *Username*) printf "%s\\n" "x-access-token" ;;\n  *) printf "%s\\n" "$GITHUB_TOKEN" ;;\nesac\n',
+    )
+    await chmod(askpass, 0o700)
+    const gitAuthEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      GITHUB_TOKEN: token,
+      GIT_ASKPASS: askpass,
+      GIT_TERMINAL_PROMPT: '0',
+    }
+    const url = `https://github.com/${config.githubRepo}.git`
     const branch = normalizeBranch(`panou/${lucrator.nume}-${Date.now().toString(36)}`)
 
-    const clona = await ruleaza('git', ['clone', '--depth', '1', url, lucru], { limitaMs: 180_000 })
+    const clona = await ruleaza('git', ['clone', '--depth', '1', url, lucru], {
+      env: gitAuthEnv,
+      limitaMs: 180_000,
+    })
     if (clona.cod !== 0) return { ...gol, motiv: 'clonarea a eșuat', log: coada(clona.text), secunde: sec() }
 
     const env: NodeJS.ProcessEnv = {
@@ -214,6 +230,12 @@ export async function ruleazaLucrator(
       // Clona de lucru e a NOASTRĂ, creată de noi per sarcină → e de încredere
       // prin construcție; fără asta, al 4-lea lucrător ar pica la fiecare rulare.
       GEMINI_CLI_TRUST_WORKSPACE: 'true',
+    }
+    delete env.GITHUB_TOKEN
+    const gitPushEnv: NodeJS.ProcessEnv = {
+      ...env,
+      GITHUB_TOKEN: token,
+      GIT_ASKPASS: askpass,
     }
     await ruleaza('git', ['checkout', '-b', branch], { cwd: lucru, env, limitaMs: 30_000 })
     const inainte = await ruleaza('git', ['rev-parse', 'HEAD'], { cwd: lucru, env, limitaMs: 20_000 })
@@ -252,7 +274,7 @@ export async function ruleazaLucrator(
     })
     const testeTrec = t.cod === 0 && /Tests\s+\d+ passed/.test(t.text) && !/\d+ failed/.test(t.text)
 
-    const push = await ruleaza('git', ['push', '-u', 'origin', branch], { cwd: lucru, env, limitaMs: 120_000 })
+    const push = await ruleaza('git', ['push', '-u', 'origin', branch], { cwd: lucru, env: gitPushEnv, limitaMs: 120_000 })
     if (push.cod !== 0) {
       return { ...gol, motiv: 'push-ul a eșuat', log: coada(`${log}\n${push.text}`), secunde: sec() }
     }
@@ -271,5 +293,6 @@ export async function ruleazaLucrator(
     return { ...gol, motiv: e instanceof Error ? e.message : String(e), secunde: sec() }
   } finally {
     if (lucru) await rm(lucru, { recursive: true, force: true }).catch(() => {})
+    if (askpass) await rm(askpass, { force: true }).catch(() => {})
   }
 }

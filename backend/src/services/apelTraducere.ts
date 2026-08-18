@@ -5,7 +5,6 @@
 // rezultatul (text + audio) pleacă la B ca `{type:'tradus'}`. Simetric pe invers.
 // Fiecare pas e contorizat (recordCost) — costul nu se pierde.
 import type { OrMessage } from './brainContract.js'
-import { config } from '../config.js'
 import { rationeazaMesaje } from './creierRationament.js'
 import { synthesize } from './tts.js'
 import { ttsCost } from './cost.js'

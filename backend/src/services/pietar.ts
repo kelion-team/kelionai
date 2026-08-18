@@ -1,7 +1,7 @@
 import { config } from '../config.js'
 import { addMemory, memorieIa } from '../db.js'
 import { dateSimbol, rezumatPentruAgent } from './piete.js'
-import { rationeazaMesaje } from './creierRationament.js'
+import { rationeazaMesajeSigur } from './creierRationament.js'
 import { autonomActiv } from './autonomActiv.js'
 import type { OrMessage } from './brainContract.js'
 
@@ -50,13 +50,14 @@ export async function unOcolPietar(): Promise<{ simboluri: number; observatii: n
       },
       { role: 'user', content: rezumatPentruAgent(d) },
     ]
-    let text = ''
-    try {
-      const r = await rationeazaMesaje(mesaje, { ruta: 'service.pietar', maxTokens: 384, temperature: 0.3, reasoning: 'low', treapta: 'rapid', tools: [] })
-      text = r.text.trim()
-    } catch {
-      continue
-    }
+    const text = await rationeazaMesajeSigur(mesaje, {
+      ruta: 'service.pietar',
+      maxTokens: 384,
+      temperature: 0.3,
+      reasoning: 'low',
+      treapta: 'rapid',
+      tools: [],
+    })
     if (!text || /^NIMIC\b/i.test(text)) continue
     const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
     await addMemory(config.adminEmail, `[tranzactii ${zi}] ${d.simbol} [pret ${d.pret}, veghe]: ${text}`.slice(0, 1200), 'tranzactii')

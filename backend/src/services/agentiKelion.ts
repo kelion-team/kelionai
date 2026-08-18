@@ -418,7 +418,7 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
   const plafon = efort === 'high' ? 8192 : 2048
   let cost = 0
   for (let runda = 0; ; runda++) {
-    const r = await rationeazaMesaje(messages, { ruta: 'service.agentiKelion', maxTokens: plafon, temperature: 0.6, reasoning: efort, treapta: 'lucru', tools: unelte })
+    const r = await rationeazaMesaje(messages, { ruta: 'service.agentiKelion', model, maxTokens: plafon, temperature: 0.6, reasoning: efort, treapta: 'lucru', tools: unelte })
     cost += r.costUsd
     if (r.toolCalls.length === 0 || runda >= 3) {
       // POARTA FAPTELOR ȘI PE AGENT (owner, 16 aug: „kelion zice ca face el

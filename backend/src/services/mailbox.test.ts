@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fetchRecentInbox, isAutomated, htmlToText } from './mailbox.js'
+import { fetchRecentInbox, isAutomated, htmlToText, parseIncomingEmail } from './mailbox.js'
 
 describe('Mailbox service', () => {
   it('spune DE CE nu poate citi când mailul nu e configurat (nu „cutie goală")', async () => {
@@ -28,6 +28,39 @@ describe('Mailbox service', () => {
     expect(isAutomated(new Map([['precedence', 'bulk']]), 'a@b.com')).toBe(true)
     expect(isAutomated(new Map([['list-id', '<list.example.com>']]), 'a@b.com')).toBe(true)
     expect(isAutomated(new Map([['x-autoreply', 'yes']]), 'a@b.com')).toBe(true)
+  })
+
+  it('parses MIME metadata, headers and multipart bodies with bounded postal-mime', async () => {
+    const source = Buffer.from(
+      [
+        'From: Client Test <client@example.com>',
+        'To: contact@example.com',
+        'Subject: MIME contract',
+        'Date: Tue, 18 Aug 2026 01:00:00 +0000',
+        'Auto-Submitted: auto-generated',
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/alternative; boundary="kelion-audit"',
+        '',
+        '--kelion-audit',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        'PROBA_MAIL_TEXT_OK',
+        '--kelion-audit',
+        'Content-Type: text/html; charset=utf-8',
+        '',
+        '<p>PROBA_MAIL_HTML_OK</p>',
+        '--kelion-audit--',
+      ].join('\r\n'),
+    )
+
+    const parsed = await parseIncomingEmail(source)
+    expect(parsed.fromAddr).toBe('client@example.com')
+    expect(parsed.fromName).toBe('Client Test')
+    expect(parsed.subject).toBe('MIME contract')
+    expect(parsed.body).toContain('PROBA_MAIL_TEXT_OK')
+    expect(parsed.headers.get('auto-submitted')).toBe('auto-generated')
+    expect(parsed.receivedAt?.toISOString()).toBe('2026-08-18T01:00:00.000Z')
+    expect(isAutomated(parsed.headers, parsed.fromAddr)).toBe(true)
   })
 
   it('converts HTML-only bodies to readable plain text', () => {

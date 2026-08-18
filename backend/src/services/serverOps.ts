@@ -22,7 +22,7 @@ export async function serverOps(cmd: string): Promise<string> {
   }
 
   return new Promise<string>((resolve) => {
-    const child = execFile(allowed.file, allowed.args, { timeout: 20000 }, async (err, stdout, stderr) => {
+    execFile(allowed.file, allowed.args, { timeout: 20000 }, async (err, stdout, stderr) => {
       let output = stdout + stderr;
       const success = !err;
 

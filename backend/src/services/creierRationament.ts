@@ -113,7 +113,6 @@ export async function rationeazaMesaje(
   // arunca și folosea mereu defaultul treptei → Creier 2 / creierDublu erau
   // moarte pe chat. Acum `opts.model` câștigă când e dat.
   const modelFull = opts.model || modelPentru(treapta)
-  const model = codModel(modelFull)
   jurnal(opts.ruta, treapta, `mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {
     maxTokens: opts.maxTokens ?? 2048,
@@ -134,6 +133,17 @@ export async function rationeazaMesaje(
     const cod = codModel(m)
     return geminiDirectChat(cod, messages, opts.tools ?? [], callOpts)
   })
+}
+
+export async function rationeazaMesajeSigur(
+  messages: OrMessage[],
+  opts: Parameters<typeof rationeazaMesaje>[1],
+): Promise<string | null> {
+  try {
+    return (await rationeazaMesaje(messages, opts)).text.trim() || null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -204,12 +214,4 @@ export async function planificaPasiMici(
     .filter((f, i, a) => a.indexOf(f) === i)
     .slice(0, 6)
   return { plan, files, ok: !!plan }
-}
-
-/** Re-export trepte pentru panou/status ? o singur? surs?. */
-export function trepteCreier(): { rapid: string; lucru: string } {
-  return {
-    rapid: config.brain.chatDefault,
-    lucru: config.brain.workDefault,
-  }
 }

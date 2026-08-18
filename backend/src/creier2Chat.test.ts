@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { OLLAMA_CLOUD_PREFIX, esteOllamaCloud, ollamaCloudModelCod } from './services/ollamaCloud.js'
+import { alegeModelOrchestrator } from './services/chatModelPolicy.js'
 
 const aici = dirname(fileURLToPath(import.meta.url))
 const s = (rel: string): string => readFileSync(join(aici, rel), 'utf8')
@@ -21,7 +22,8 @@ describe('cablaj Creier 2 pe chat greu', () => {
     const c = s('./routes/chat.ts')
     expect(c).toContain('owner greu → Creier 2 cloud')
     expect(c).toContain('OLLAMA_CLOUD_PREFIX')
-    expect(c).toContain("orChatModel?.startsWith('ollama-cloud/')")
+    expect(c).toContain('alegeModelOrchestrator({')
+    expect(alegeModelOrchestrator({ modelChat: `${OLLAMA_CLOUD_PREFIX}qwen3.5:397b`, creierDublu: true, turaGrea: true, modelProfund: 'gemini-pro' })).toBe(`${OLLAMA_CLOUD_PREFIX}qwen3.5:397b`)
     expect(c).toContain('CREIER 2 CLOUD EPUIZAT')
   })
   it('creierRationament onorează opts.model + ollama-cloud', () => {

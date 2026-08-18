@@ -19,7 +19,7 @@ import {
 import { TOATE_UNELTELE_ADMIN } from '../services/brainToolDefs.js'
 import { turaAdresata } from '../services/numeStrigat.js'
 import { inceputStrain, continuareStraina, aCerutAltaLimba } from '../services/limbaRaspuns.js'
-import { interpretDeviceCommand, deviceAck } from '../services/commands.js'
+import { interpretDeviceCommand } from '../services/commands.js'
 import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
@@ -827,7 +827,6 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // bucată de audio, pe transcrierea de până atunci; tura suprimată se
       // scrie în jurnal cu ce s-a auzit — o tăcere GREȘITĂ trebuie să se poată
       // vedea, nu să dispară (lecția numeStrigat).
-      let ultimaVorbaKelion = 0 // 0 = n-a vorbit încă deloc
       // ── GARDUL DE LIMBĂ — DETERMINIST, PE SERVER (9 aug, revizia) ────────
       // Al doilea gard pe ieșire, frate cu adresarea: dacă răspunsul ÎNCEPE
       // într-o limbă străină (markeri ficși, services/limbaRaspuns.ts) și omul
@@ -860,7 +859,6 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // Livrarea unui cadru de voce spre difuzor — TOATĂ contabilitatea la un
       // loc, folosită și de drumul normal și de vărsarea cadrelor amânate.
       const livreazaCadru = (data: string): void => {
-        ultimaVorbaKelion = Date.now()
         // Ceasul difuzorului: octeți → mostre 16-bit → ms la 24 kHz. Fără el,
         // barge-in-ul ar crede că Kelion tace când el încă vorbește din buffer.
         // Se calculează pe PCM (independent de codecul de pe sârmă), deci rămâne

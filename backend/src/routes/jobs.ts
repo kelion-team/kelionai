@@ -4,7 +4,6 @@ import { getPool, citesteSold, recordCost, dbEnabled } from '../db.js'
 import { gasesteAgentViu, cheamaAgent } from '../services/agentiKelion.js'
 import { taxeazaServiciu } from '../services/tarife.js'
 import { rationeazaMesaje } from '../services/creierRationament.js'
-import { config } from '../config.js'
 
 // ── ADAPTAREA CV — FLUXUL SIMPLU (Adrian, 10 aug, redesign) ──────────────────
 // „User introduce CV de bază, user își caută singur un job, tu primești
