@@ -4,7 +4,7 @@ import VisitorChatWidget from '../components/VisitorChatWidget'
 import { startGoogleLogin } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { raporteazaPagina } from '../lib/vizita'
-import { strings } from '../lib/i18n'
+import { strings, type Lang } from '../lib/i18n'
 import { PUBLIC_TEXT as PT } from '../lib/publicText'
 import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
 // Avatarul 3D — încărcat leneș (three.js scos din calea critică a landing-ului).
@@ -30,15 +30,26 @@ const ERR_KEY: Record<string, keyof ReturnType<typeof strings>> = {
   no_email: 'errNoEmail',
 }
 
+const LANGUAGES: { code: Lang; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'ro', label: 'Română' },
+  { code: 'es', label: 'Español' },
+  { code: 'fr', label: 'Français' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'it', label: 'Italiano' },
+  { code: 'pt', label: 'Português' },
+]
+
 // The public start page: a professional hero with a LIVE 3D Kelion, plus the two
 // ways in — a free 3-minute trial (no sign-up) and Google sign-in.
 // AUTOMATICALLY multilingual: the UI follows the visitor's browser language
 // (en/ro/es/fr/de/it/pt; anything else falls back to English). The conversation
 // itself adapts to dozens of languages independently of the UI.
 export default function Landing({ error }: { error?: string | null }) {
-  // The start page is ALWAYS English — the professional international default.
-  // (The conversation itself still adapts to the visitor's own language.)
-  const t = strings('en')
+  // Language selector state — defaults to English, visitor can change
+  const [lang, setLang] = useState<Lang>('en')
+  const [langOpen, setLangOpen] = useState(false)
+  const t = strings(lang)
   const [contactOpen, setContactOpen] = useState(false)
   const [qrZoom, setQrZoom] = useState<QrCode | null>(null)
   // The live version (same source as the browser watermark) — we show it under
@@ -95,12 +106,48 @@ export default function Landing({ error }: { error?: string | null }) {
   // 6h). Eticheta „acasă" hrănește raportul „ce au vizitat" (owner, 13 aug).
   useEffect(() => raporteazaPagina('acasă'), [])
 
+  const currentLang = LANGUAGES.find((l) => l.code === lang)
+
   return (
     <div className="landing">
       {/* THE MANUAL, top-right (Adrian): anyone, without an account, can read
       everything the app does — picks their language and downloads it in that
       language. */}
-      <a className="landing-manual-btn" href="/manual">{PT.userManual}</a>
+      <div className="landing-top-bar">
+        {/* Language selector — compact capsule with vertical dropdown */}
+        <div className="lang-selector">
+          <button
+            type="button"
+            className="lang-btn"
+            onClick={() => setLangOpen((v) => !v)}
+            aria-haspopup="listbox"
+            aria-expanded={langOpen}
+          >
+            <span className="lang-icon">🌐</span>
+            <span className="lang-label">{currentLang?.label}</span>
+            <span className="lang-arrow">{langOpen ? '▲' : '▼'}</span>
+          </button>
+          {langOpen && (
+            <ul className="lang-dropdown" role="listbox">
+              {LANGUAGES.map((l) => (
+                <li
+                  key={l.code}
+                  role="option"
+                  aria-selected={l.code === lang}
+                  className={l.code === lang ? 'selected' : ''}
+                  onClick={() => {
+                    setLang(l.code)
+                    setLangOpen(false)
+                  }}
+                >
+                  {l.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <a className="landing-manual-btn" href="/manual">{PT.userManual}</a>
+      </div>
       <div className="landing-hero">
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
@@ -217,7 +264,7 @@ export default function Landing({ error }: { error?: string | null }) {
               {QR_CODES.map((q) => (
                 <figure key={q.key}>
                   {/* THE CODE IS AN INSTALL BUTTON (Adrian, Jul 26: „when you press the
-                  win code the win app installs... each according to his system”).
+                  win code the win app installs... each according to his system").
                   Click/tap on the code → installs that platform; the enlarge-for-scanning
                   stays on the 🔍 button. */}
                   <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={PT.qrInstallLabel(q.label)}>
