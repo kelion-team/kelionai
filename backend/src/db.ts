@@ -638,7 +638,11 @@ export async function initDb(): Promise<void> {
     -- recuperabil): iese din panou, dar nu se pierde. Bucla de autonomie
     -- arhivează singură; panoul (listBuildJobs) le exclude.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
-    -- MAPE-K INCIDENT REGISTER: every terminal constructor failure becomes one
+    -- RUNTIME BROWSER: motorul care a executat ordinul (cod=Aider, runtime_browser=Playwright)
+    -- și URL-ul capturii care dovedește execuția (evidence).
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS motor TEXT;
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS evidence_url TEXT;
+-- MAPE-K INCIDENT REGISTER: every terminal constructor failure becomes one
     -- durable case. The normalized order fingerprint is unique, so recurrence
     -- reopens the same case instead of spawning disconnected alerts.
     CREATE TABLE IF NOT EXISTS constructor_incidents (
@@ -4187,6 +4191,8 @@ export interface BuildJob {
   // as measured from OpenRouter (null = not reported by the provider).
   brain: string | null
   costUsd: number | null
+  motor: string | null
+  evidenceUrl: string | null
   createdAt: string
   updatedAt: string
 }
@@ -4224,6 +4230,8 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     ci: r.ci ?? null,
     brain: r.brain ?? null,
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
+    motor: (r as any).motor ?? null,
+    evidenceUrl: (r as any).evidence_url ?? null,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -4677,7 +4685,7 @@ export function eEroarePermanenta(log: string): string | null {
 
 export async function reportBuildJob(
   id: number,
-  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number },
+  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number; motor?: string; evidenceUrl?: string },
 ): Promise<void> {
   if (!dbEnabled()) return
   let log = (fields.log ?? '').slice(-20000)
@@ -4703,7 +4711,25 @@ export async function reportBuildJob(
       })().catch((e) => console.error('[P27] raportarea la Kelion a picat:', String(e).slice(0, 160)))
     }
   }
-  const client = await getPool().connect()
+  await getPool().query(
+    `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
+       tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd), motor = COALESCE($10, motor), evidence_url = COALESCE($11, evidence_url),
+       updated_at = now()${inghetat} WHERE id = $1`,
+    [
+      id,
+      fields.status,
+      fields.branch ?? null,
+      fields.prUrl ?? null,
+      fields.tokens ?? 0,
+      log || null,
+      fields.ci ?? null,
+      fields.brain ?? null,
+      fields.costUsd ?? null,
+      fields.motor ?? null,
+      fields.evidenceUrl ?? null,
+    ],
+  )
+const client = await getPool().connect()
   try {
     await client.query('BEGIN')
     const updated = await client.query<BuildJobDbRow>(

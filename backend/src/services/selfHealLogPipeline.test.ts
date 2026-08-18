@@ -151,15 +151,18 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
       expect(kv.has('selfheal-log-filed:server:fp-server-err-1')).toBe(true)
     })
 
+    it('Acumulare între rulări pe gazdă: 1 + 1 atinge pragul (prag=2)', async () => {
+      const engine = new SelfHealDecisionEngine({ thresholds: { gazda: 2 } })
+
     it('trimite erorile constructorului strategului fără ordin recursiv, după atingerea pragului', async () => {
       const engine = new SelfHealDecisionEngine({ thresholds: { constructor: 2 } })
       const groupRun1 = [
         {
-          fingerprint: 'fp-constructor-err-99',
-          sampleMessage: 'Error: worker crashed on build step',
-          source: 'constructor' as const,
-          fileOrContext: 'constructor.log',
-          count: 1, // 1 < 2
+          fingerprint: 'fp-gazda-err-99',
+          sampleMessage: 'Error: docker compose restart failed',
+          source: 'gazda' as const,
+          fileOrContext: 'auto-publicare.log',
+          count: 1,
         },
       ]
 
@@ -169,11 +172,11 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
 
       const groupRun2 = [
         {
-          fingerprint: 'fp-constructor-err-99',
-          sampleMessage: 'Error: worker crashed on build step',
-          source: 'constructor' as const,
-          fileOrContext: 'constructor.log',
-          count: 1, // 1 + 1 = 2 >= 2 (prag atins)
+          fingerprint: 'fp-gazda-err-99',
+          sampleMessage: 'Error: docker compose restart failed',
+          source: 'gazda' as const,
+          fileOrContext: 'auto-publicare.log',
+          count: 1,
         },
       ]
 
@@ -185,6 +188,22 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
         handedTo: 'constructor_incident_strategist',
         evidence: 'Error: worker crashed on build step',
       })
+    })
+
+    it('constructor.log NU deschide ordin (anti-buclă), chiar peste prag', async () => {
+      const engine = new SelfHealDecisionEngine({ thresholds: { constructor: 1 } })
+      const groups = [
+        {
+          fingerprint: 'fp-constructor-skip',
+          sampleMessage: 'Error: worker crashed on build step',
+          source: 'constructor' as const,
+          fileOrContext: 'constructor.log',
+          count: 5,
+        },
+      ]
+      const res = await engine.processAggregatedGroups(groups)
+      expect(res.filed).toBe(0)
+      expect(jobs).toHaveLength(0)
     })
 
     it('Dedup: o amprentă deja trimisă nu mai generează alt ordin', async () => {

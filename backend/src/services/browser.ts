@@ -2,6 +2,8 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import dns from 'node:dns/promises'
 import net from 'node:net'
 import { randomUUID } from 'node:crypto'
+import { config } from '../config.js'
+import { SESSION_COOKIE, semneazaSesiune } from '../session.js'
 
 // Kelion's live browser — a real headless Chromium he can navigate, click and
 // type into, so he can actually show/read/survey sites that refuse to embed in
@@ -269,6 +271,22 @@ async function snapshot(page: Page, baseUrl: string, email = ''): Promise<Browse
   }
 }
 // ── public actions ───────────────────────────────────────────────────────
+
+async function autentificaAplicatiaPentruAdmin(session: Session, email: string, target: URL): Promise<void> {
+  if (email.trim().toLowerCase() !== config.adminEmail) return
+  let originApp = ''
+  try { originApp = new URL(config.google.redirectUri).origin } catch { return }
+  if (target.origin !== originApp) return
+  await session.context.addCookies([{
+    name: SESSION_COOKIE,
+    value: semneazaSesiune({ email: config.adminEmail, name: 'Admin intern', picture: '', role: 'admin', locale: 'ro' }),
+    url: originApp,
+    httpOnly: true,
+    secure: target.protocol === 'https:',
+    sameSite: 'Lax',
+  }])
+}
+
 export async function browserOpen(
   email: string,
   baseUrl: string,
@@ -283,6 +301,7 @@ export async function browserOpen(
   let session: Session
   try {
     session = await ensureSession(email)
+    await autentificaAplicatiaPentruAdmin(session, email, u).catch(() => {})
   } catch (e) {
     // Launch failures (missing Chromium, missing libs) must be visible in the
     // server logs — this is the difference between diagnosable and blind.

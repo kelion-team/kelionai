@@ -1317,6 +1317,24 @@ async function main() {
   if (!claim?.job) return // coada goală sau pauza-autonomie — tăcere totală
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
   const job = claim.job
+
+  // GUI/screenshot -> not Aider. App runtime path owns these.
+  {
+    const t = String(job.orderText||'')
+    const gui = /\b(screenshot|screen\s*shot|print\s*screen|captur[?a]|poz[?a]\s+la\s+(ecran|monitor|bar[?a])|browser_open|runtime_browser)\b/i.test(t) || /focalizeaz[?a].{0,50}(bar[?a]|admin|monitor)/i.test(t)
+    const clog = /AUTO-VINDECARE \(constructor logs\)/i.test(t)
+    if (clog) {
+      log('TRIAJ: constructor.log auto-heal disabled')
+      await report('failed', { brain:'free_local', log: logLines.join('\n')+'\n[skip:constructor.log]' })
+      return
+    }
+    if (gui) {
+      log('TRIAJ: GUI/screenshot -> runtime_browser (app), not Aider')
+      await report('failed', { brain:'runtime_browser', log: logLines.join('\n')+'\n[handoff:runtime_browser]' })
+      return
+    }
+  }
+
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
   // MOTORUL = AIDER, UNIC (owner, 16 aug, verbatim: „constructor unic aider… scoti
   // tot din constructor si instalezi doar aider… aider va avea absolut toate

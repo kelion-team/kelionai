@@ -211,3 +211,21 @@ export function evalueazaOrdin(
 function respins(motiv: string): EvaluareOrdin {
   return { trece: false, motiv, capacitatiNecesare: [], clasament: [], aiRecomandat: null }
 }
+
+// ── CLASIFICATORUL cod | runtime_browser (owner, 17 aug: „rutarea ordinelor
+// GUI la runtime browser") ─────────────────────────────────────────────────
+// PUR (fără browser, fără LLM, fără DB): determină dacă un ordin care A TRECUT
+// poarta de calitate se execută prin cod (Aider în repo) sau prin runtime
+// browser (Playwright in-process). GUI/screenshot ACCEPTAT — nu respins.
+// Semnalele GUI: browser, ecran, screenshot, captură, site, pagină, click,
+// navighează, verifică vizual, deschide URL, login pe site, formular web.
+export type MotorOrdin = 'cod' | 'runtime_browser'
+
+const SEMNAL_RUNTIME_BROWSER =
+  /\b(browser|browser[-_]?open|screenshot|captur[aă]|ecran|site|pagin[aă]|click|navigheaz|verific[aă] vizual|deschide [uU][rR][lL]|login pe site|formular web|scrape|extrage din site|verific[aă] pe site|deschide [șs]i verific[aă])/i
+
+/** Clasifică un ordin care A TRECUT poarta: cod (Aider în repo) sau
+ *  runtime_browser (Playwright in-process). Funcție PURĂ — doar text. */
+export function clasificareOrdin(order: string): MotorOrdin {
+  return SEMNAL_RUNTIME_BROWSER.test(order) ? 'runtime_browser' : 'cod'
+}
