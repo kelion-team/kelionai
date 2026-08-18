@@ -43,7 +43,10 @@ import {
   attachGuestPhoto,
   userKey,
   addMemory,
-  recordSimptomLive
+  recordSimptomLive,
+  inregistreazaSarcinaOperationala,
+  noteazaEvenimentOperational,
+  tranzitioneazaSarcinaOperationala,
 } from '../db.js'
 import { extrageNiveluri, curataSemne, curataZone, curataSageti, curataTrend } from './tranzactii.js'
 import { getMeserie } from '../services/meserii.js'
@@ -63,7 +66,7 @@ import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
-import { inventarulMeu, CAPABILITIES } from '../services/brainCapabilities.js'
+import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
@@ -72,7 +75,15 @@ import { taxeazaServiciu, cheiaTarifVideo, meniulDeTarife, lirePentru } from '..
 import { planStudio, numeClip, RETETE_STUDIO } from '../services/studioClipuri.js'
 import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
-import { pretentiiFaraFapta, textulDemascarii, planFaraExecutie, TEXT_PLAN_FARA_EXECUTIE } from '../services/poartaFaptelor.js'
+import {
+  clasificaRezultatUnealta,
+  pretentiiFaraFapta,
+  textulDemascarii,
+  planFaraExecutie,
+  TEXT_PLAN_FARA_EXECUTIE,
+  type DovadaUnealta,
+} from '../services/poartaFaptelor.js'
+import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -1623,6 +1634,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       })
       const paywallTurnId = randomUUID()
       startTurn(user.email, paywallTurnId)
+      const paywallTaskId = randomUUID()
+      await inregistreazaSarcinaOperationala({
+        id: paywallTaskId,
+        userEmail: user.email,
+        turnId: paywallTurnId,
+        objective: lastIncomingText || '(chat blocked before model execution)',
+        metadata: { source: 'chat', blockedBy: 'credit' },
+      })
+      await tranzitioneazaSarcinaOperationala({
+        taskId: paywallTaskId,
+        stare: 'interpreting',
+        code: 'credit_checked',
+      })
       // Chitanța {turn} pleacă PRIMA, ca pe orice tură (audit 9 aug: ramura
       // paywall era singura fără ea — bifele de livrare și resume-ul orbecăiau).
       reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ turn: paywallTurnId })}${CTRL}`))
@@ -1638,6 +1662,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       void saveMessage(user.email, 'assistant', paywallText)
       reply.raw.write(appendTurn(user.email, paywallTurnId, paywallText))
       reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ paywall: true })}${CTRL}`))
+      await tranzitioneazaSarcinaOperationala({
+        taskId: paywallTaskId,
+        stare: 'blocked',
+        code: 'insufficient_credit',
+        metadata: { userVisible: true },
+      })
       finishTurn(user.email, paywallTurnId)
       reply.raw.end()
       return
@@ -1648,7 +1678,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // verbatim, plus a short ack. The same stream shape as a normal turn (the
     // {turn} receipt first) so delivery ticking and resume keep working. The
     // two were identical blocks — a single source here (unique, no duplicates).
-    const instantCommand = (frameKey: 'device' | 'gesture', value: unknown, ack: string): void => {
+    const instantCommand = async (frameKey: 'device' | 'gesture', value: unknown, ack: string): Promise<void> => {
 
       reply.hijack()
       reply.raw.writeHead(200, {
@@ -1658,11 +1688,46 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       })
       const cmdTurnId = randomUUID()
       startTurn(user.email, cmdTurnId)
+      const commandTaskId = randomUUID()
+      await inregistreazaSarcinaOperationala({
+        id: commandTaskId,
+        userEmail: user.email,
+        turnId: cmdTurnId,
+        objective: lastIncomingText || `(${frameKey} command)`,
+        metadata: { source: 'chat', commandKind: frameKey },
+      })
+      await tranzitioneazaSarcinaOperationala({
+        taskId: commandTaskId,
+        stare: 'interpreting',
+        code: 'command_received',
+      })
+      await tranzitioneazaSarcinaOperationala({
+        taskId: commandTaskId,
+        stare: 'executing',
+        capability: `ui_${frameKey}`,
+        code: 'client_command_sending',
+      })
       const payload =
         `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
         `${CTRL}${JSON.stringify({ [frameKey]: value })}${CTRL}` +
         ack
       reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
+      await noteazaEvenimentOperational({
+        taskId: commandTaskId,
+        kind: 'client_command_sent',
+        capability: `ui_${frameKey}`,
+        outcomeState: 'succeeded',
+        code: 'frame_written',
+      })
+      // The server wrote the frame, but the browser has not yet acknowledged
+      // that the device/gesture effect occurred. Technical delivery is not a
+      // verified client-side effect.
+      await tranzitioneazaSarcinaOperationala({
+        taskId: commandTaskId,
+        stare: 'unverified',
+        capability: `ui_${frameKey}`,
+        code: 'client_ack_missing',
+      })
       finishTurn(user.email, cmdTurnId)
       if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
       if (ack) void saveMessage(user.email, 'assistant', ack)
@@ -1671,12 +1736,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
 
     // Camera / monitor tabs: a {device} frame.
     if (deviceCmd) {
-      instantCommand('device', deviceCmd, deviceAck(deviceCmd, ro))
+      await instantCommand('device', deviceCmd, deviceAck(deviceCmd, ro))
       return
     }
     // Avatar gesture, interpreted on the server: a {gesture} frame.
     if (gestureCmd) {
-      instantCommand('gesture', gestureCmd, gestureAck(gestureCmd, ro))
+      await instantCommand('gesture', gestureCmd, gestureAck(gestureCmd, ro))
       return
     }
 
@@ -2400,6 +2465,34 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
+    // JURNALUL OPERAȚIONAL: un task are un UUID separat de turn, dar poartă
+    // aceeași corelare. Scrierile sunt serializate ca evenimentele să nu ajungă
+    // invers când modelul cheamă mai multe unelte; output-ul brut nu pleacă
+    // niciodată spre DB, numai nume/cod/stare normalizate.
+    const sarcinaOperationalaId = randomUUID()
+    let lantJurnalOperational: Promise<unknown> = inregistreazaSarcinaOperationala({
+      id: sarcinaOperationalaId,
+      userEmail: user.email,
+      turnId,
+      objective: lastUserText || (voceAmbianta ? '(mesaj vocal)' : '(mesaj fără text)'),
+      metadata: {
+        source: 'chat',
+        spoken: req.body?.spoken === true,
+        ambientVoice: voceAmbianta,
+      },
+    })
+    const scrieJurnalOperational = async (scriere: () => Promise<unknown>): Promise<void> => {
+      lantJurnalOperational = lantJurnalOperational
+        .then(scriere)
+        .catch((eroare) => console.error('[jurnal operațional] eveniment pierdut:', String(eroare).slice(0, 160)))
+      await lantJurnalOperational
+    }
+    await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+      taskId: sarcinaOperationalaId,
+      stare: 'interpreting',
+      code: 'context_prepared',
+      metadata: { source: 'chat' },
+    }))
     // (Vorbitorul — speakerRaw/guestMatch/nevalidat — e parsat SUS, înaintea
     // construcției promptului: blocurile de OWNER se decid pe el, audit 9 aug.)
     // PROGRESS BAR ON BRAIN ENTRY — ONE {heard} for EVERYONE (admin, demo,
@@ -2675,9 +2768,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // înainte de apelul la creier. Zero drumuri la DB aici acum.
         : createVoiceStream(reply, userLang, prefs.voicePref)
     let assistantText = ''
-    // Jurnalul uneltelor EXECUTATE în tura asta (nu doar oferite) — proba pe
-    // care poarta faptelor judecă vorbele creierului (owner, 16 aug).
-    const unelteExecutate: string[] = []
+    // O TENTATIVĂ NU ESTE O FAPTĂ: păstrăm separat apelurile și rezultatele
+    // normalizate. Poarta poate folosi exclusiv rezultatele reușite/verificate.
+    const unelteIncercate: string[] = []
+    const doveziUnelte: DovadaUnealta[] = []
     // CE A VĂZUT DEJA OMUL PE ECRAN (agenții de debug, 3 aug, verdict REAL):
     // când un model pică DUPĂ ce a curs text, catch-ul lipea „Încearcă din nou"
     // direct peste jumătatea de răspuns și salva în istoric DOAR sufixul —
@@ -2714,6 +2808,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // amprente, prompt, unelte) ÎNAINTE ca creierul să fie chemat. [TIMP] măsoară
     // doar creierul; fără linia asta, o pregătire lentă nu se vedea nicăieri.
     if (voceAmbianta) console.log(`[CONTOR-SERVER] sosire → creier: ${tCreier - tSosire} ms (pregătirea turei)`)
+    let planFaraExecutieDetectat = false
     try {
       if (!orChatModel) throw new Error('brain_not_configured: GEMINI_API_KEY missing')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
@@ -2747,7 +2842,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       }
       let callN = 0
       const execTool = async (name: string, argsJson: string): Promise<string> => {
-        unelteExecutate.push(name) // jurnalul FAPTELOR turei — poarta faptelor judecă pe el
         // Un singur trace, ÎNAINTEA tuturor ramurilor: unele unelte (get_monitor,
         // propose_tool etc.) se rezolvă inline și nu ajung la runTool.
         console.log(`[tool] ${name} (${isAdminUser ? 'admin' : 'user'})`)
@@ -3008,6 +3102,63 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           deviceLoc,
         )
       }
+      // Toate căile orchestratorului (apeluri native și markup reparat) trec
+      // prin acest înveliș. O unealtă este încercată înainte de execuție, dar
+      // devine dovadă numai DUPĂ ce rezultatul ei a fost clasificat.
+      const executaUnealtaCuDovada = async (name: string, argsJson: string): Promise<string> => {
+        unelteIncercate.push(name)
+        await scrieJurnalOperational(async () => {
+          const tranzitie = await tranzitioneazaSarcinaOperationala({
+            taskId: sarcinaOperationalaId,
+            stare: 'executing',
+            capability: name,
+            code: 'tool_attempted',
+          })
+          if (!tranzitie.ok) return
+          await noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'tool_attempted',
+            capability: name,
+            outcomeState: 'attempted',
+            code: 'tool_attempted',
+          })
+        })
+        try {
+          const rezultat = await execTool(name, argsJson)
+          const dovada = clasificaRezultatUnealta(name, rezultat)
+          doveziUnelte.push(dovada)
+          await scrieJurnalOperational(async () => {
+            await noteazaEvenimentOperational({
+              taskId: sarcinaOperationalaId,
+              kind: 'tool_result',
+              capability: name,
+              outcomeState: dovada.stare,
+              code: dovada.cod,
+            })
+            if (dovada.stare === 'succeeded' || dovada.stare === 'verified') {
+              await tranzitioneazaSarcinaOperationala({
+                taskId: sarcinaOperationalaId,
+                stare: 'verifying',
+                capability: name,
+                code: dovada.stare === 'verified' ? 'effect_verified' : 'technical_success',
+              })
+            }
+          })
+          return rezultat
+        } catch (eroare) {
+          const rezultat = `tool_error: ${eroare instanceof Error ? eroare.message : String(eroare)}`
+          const dovada = clasificaRezultatUnealta(name, rezultat)
+          doveziUnelte.push(dovada)
+          await scrieJurnalOperational(() => noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'tool_result',
+            capability: name,
+            outcomeState: dovada.stare,
+            code: dovada.cod,
+          }))
+          throw eroare
+        }
+      }
       // FĂRĂ ACK-UL „Am preluat sarcina" (Adrian, 5 aug: „scoate-i «am preluat
       // sarcina»"). Pe tura de acțiune a adminului nu mai plecă nicio frază de
       // preluare — răspunsul e direct rezultatul real (sau un mesaj onest). Kelion
@@ -3032,6 +3183,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         turaGrea: heavyTurn,
         modelProfund: config.modelCreierProfund,
       })
+      await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+        taskId: sarcinaOperationalaId,
+        stare: 'planning',
+        code: 'brain_started',
+        metadata: { phase: incarcatura.faza, actionRequested: cereActiune },
+      }))
       // ── VEDEREA E NATIVĂ (3 aug — extirparea OpenRouter a îngropat și
       // „vederea delegată") ────────────────────────────────────────────────────
       // Orice creier al aplicației e Gemini (google-direct/*), care VEDE nativ:
@@ -3207,7 +3364,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         orchestratorModel,
         orMsgs,
         tools as unknown as AnthropicTool[],
-        execTool,
+        executaUnealtaCuDovada,
         {
           maxTokens: 5000,
           // REAL REASONING on the heavy turn (Jul 25): the work model THINKS
@@ -3229,6 +3386,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // sau să spună cinstit „nu pot" (poarta acțiunii, prinde și cardul tăcut).
           deedGate: isAdmin,
           uneltAfisaj: UNELTE_AFISAJ,
+          grupExecutie: grupaExecutieUnealta,
           actiuneCeruta: forteazaFapta,
           // FORȚAREA E ÎNAPOI, DAR ÎNGUSTĂ (owner, 13 aug, anulează frâna din 29
           // iul). Regresia din iulie venea din a forța ORICE unealtă pe aproape
@@ -3447,10 +3605,10 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // ── POARTA FAPTELOR (owner, 16 aug: „acest soft e doar o minciuna…
       // raspunde de ce"; captura 05:54 — creierul recunoaște „am mințit
       // afirmând că am generat clipul"). Vorbele se verifică pe MĂSURĂTOARE:
-      // jurnalul uneltelor executate în tura asta. Pretenție fără faptă =
+      // rezultatele reușite/verificate din tura asta. Pretenție fără faptă =
       // demascată pe loc, pe ecran ȘI în istoric — pentru ORICE model.
       if (!voceAmbianta) {
-        const nedovedite = pretentiiFaraFapta(assistantText, unelteExecutate)
+        const nedovedite = pretentiiFaraFapta(assistantText, doveziUnelte)
         if (nedovedite.length) {
           const demascare = textulDemascarii(nedovedite)
           try {
@@ -3459,13 +3617,14 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
             /* demascarea nescrisă pe stream rămâne în istoric */
           }
           assistantText += demascare
-          console.error(`[POARTA FAPTELOR] pretenții fără faptă: ${nedovedite.join('; ')} | executate: ${unelteExecutate.join(',') || 'niciuna'}`)
+          console.error(`[POARTA FAPTELOR] pretenții fără faptă: ${nedovedite.join('; ')} | încercate: ${unelteIncercate.join(',') || 'niciuna'} | rezultate: ${doveziUnelte.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciunul'}`)
         }
         // ── ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere
         // solutia pina la deploy masurabil"). Tură de EXECUȚIE + ZERO unelte +
         // limbaj de plan = fix înghețul de 5 luni. Se demască pe ecran și în
         // istoric — legea ducerii la capăt, mecanic, pentru orice model.
-        if (planFaraExecutie(assistantText, unelteExecutate, cereActiune)) {
+        planFaraExecutieDetectat = planFaraExecutie(assistantText, doveziUnelte, cereActiune)
+        if (planFaraExecutieDetectat) {
           try {
             reply.raw.write(TEXT_PLAN_FARA_EXECUTIE)
           } catch {
@@ -3537,6 +3696,12 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
         // bula omului cu textul auzit (Adrian: „nu ignora ce aude").
         if (userEcho) emitHeard(userEcho)
         reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
+        await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+          taskId: sarcinaOperationalaId,
+          stare: 'expired',
+          code: gresita ? 'voice_gate_false_negative' : 'turn_not_addressed',
+          metadata: { ambientVoice: true, nameWasHeard: gresita },
+        }))
         reply.raw.end()
         console.log(
           gresita
@@ -3582,6 +3747,12 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // uneltele deja rulate tot se debitează (nu pe gratis).
       if (voceAmbianta && !gateDecided) {
         reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
+        await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+          taskId: sarcinaOperationalaId,
+          stare: 'expired',
+          code: 'turn_not_addressed',
+          metadata: { ambientVoice: true, brainUnavailable: true },
+        }))
         reply.raw.end()
         console.error('[CHAT ERROR pe tură ambientală neadresată — stinsă cu {ignored}]', errMsg)
         inchideEroare()
@@ -3634,6 +3805,12 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // finish() varsă și cozile pending înainte de închidere.
       voice.feed(spoken)
       await voice.finish().catch(() => {})
+      await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+        taskId: sarcinaOperationalaId,
+        stare: 'failed',
+        code: 'chat_processing_failed',
+        metadata: { partialResponse: Boolean(ecranPartial.trim()) },
+      }))
       reply.raw.end()
       void saveMessage(user.email, 'assistant', ecranPartial.trim() ? ecranPartial + spoken : spoken)
       console.error('[CHAT ERROR]', errMsg, { isRateLimit, isQuota, isRefusal })
@@ -3723,6 +3900,22 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       void recordSimptomLive('chat-mut', `scris: tura s-a terminat fără nimic vizibil (model ${orChatModel})`).catch(() => {})
     }
     await voice.finish()
+    const finalOperational = rezumaStareFinalaSarcinaOperationala({
+      cereActiune,
+      dovezi: doveziUnelte,
+      planFaraExecutie: planFaraExecutieDetectat,
+    })
+    await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+      taskId: sarcinaOperationalaId,
+      stare: finalOperational.stare,
+      code: finalOperational.cod,
+      metadata: {
+        actionRequested: cereActiune,
+        visibleResponse: sawVisible,
+        toolAttempts: unelteIncercate.length,
+        toolResults: doveziUnelte.length,
+      },
+    }))
     reply.raw.end()
 
     // Persist the assistant's reply.

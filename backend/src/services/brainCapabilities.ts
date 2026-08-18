@@ -215,6 +215,31 @@ export function chatCapabilityNames(): string[] {
 export function voiceCapabilityNames(): string[] {
   return CAPABILITIES.filter((c) => c.voice).map((c) => c.name)
 }
+// EXECUȚIA NU PRESUPUNE INDEPENDENȚĂ. Modelul primește rezultatele unei runde
+// împreună, dar poate cere în aceeași rundă două scrieri care se contrazic sau
+// doi pași dependenți de browser. Doar citirile enumerate explicit rămân
+// paralele; o capabilitate nouă sau necunoscută pornește conservator, în coada
+// de efecte, până când i se demonstrează independența.
+const UNELTE_CITIRE_PARALELE = new Set<string>([
+  'web_search', 'get_weather', 'maps_search', 'maps_directions', 'lookup_address',
+  'translate_text', 'wikipedia_lookup', 'convert_currency', 'get_time',
+  'get_recent_emails', 'read_email', 'get_calendar_events', 'get_drive_files',
+  'read_drive_file', 'get_tasks', 'search_contacts',
+  'list_source', 'read_source', 'search_source', 'constructor_status',
+  'list_app_versions', 'list_db_backups', 'runbook_status', 'runbook_log',
+  'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables', 'db_query',
+  'system_health', 'pr_lista', 'server_logs', 'client_errors', 'stare_masurata',
+  'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'get_monitor',
+  'get_mouse_position', 'get_real_cost', 'list_updates', 'episoade_promo',
+  'lista_tarife', 'vede_video',
+])
+
+/** Grupul de exclusivitate pentru o unealtă de chat. `undefined` înseamnă o
+ *  citire explicit verificată drept independentă; orice altă unealtă împarte
+ *  coada `efect` cu scrierile și interacțiunile de browser/monitor. */
+export function grupaExecutieUnealta(nume: string): 'efect' | undefined {
+  return UNELTE_CITIRE_PARALELE.has(nume) ? undefined : 'efect'
+}
 
 /** WHAT HE KNOWS HE HAS — his own inventory, put in the brain's head.
  *

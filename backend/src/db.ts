@@ -7,6 +7,14 @@ import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
 import {
+  curataTextJurnal,
+  esteStareSarcinaOperationala,
+  metadateJurnalSigure,
+  tranzitieOperationalaPermisa,
+  type StareEvenimentOperational,
+  type StareSarcinaOperationala,
+} from './services/jurnalOperational.js'
+import {
   classifyConstructorFailure,
   constructorIncidentLesson,
   type ConstructorCauseCode,
@@ -86,6 +94,39 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_task_timings_kind ON task_timings (kind, created_at);
+    -- THE GENERIC OPERATIONAL JOURNAL: task state is separate from individual
+    -- tool results, so a response never becomes "completed" merely because a
+    -- model emitted text or an executor was invoked. It stores only normalized
+    -- evidence and safe metadata; raw tool output belongs to neither the DB nor
+    -- the general context.
+    CREATE TABLE IF NOT EXISTS operational_tasks (
+      id UUID PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      turn_id UUID NOT NULL,
+      objective TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'observing',
+      metadata JSONB NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      finished_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_operational_tasks_user_state
+      ON operational_tasks (user_email, state, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_operational_tasks_turn
+      ON operational_tasks (turn_id);
+    CREATE TABLE IF NOT EXISTS operational_events (
+      id BIGSERIAL PRIMARY KEY,
+      task_id UUID NOT NULL REFERENCES operational_tasks(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      capability TEXT,
+      outcome_state TEXT,
+      code TEXT,
+      reason TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_operational_events_task
+      ON operational_events (task_id, created_at);
     -- Voiceprints: timbre + gender + admin flag per account.
     -- The vector is normalized client-side; meta keeps the raw values for debug.
     CREATE TABLE IF NOT EXISTS voiceprints (
@@ -775,6 +816,179 @@ export async function initDb(): Promise<void> {
   await scutulDatelor()
 }
 
+export interface SarcinaOperationalaNoua {
+  id: string
+  userEmail: string
+  turnId: string
+  objective: string
+  metadata?: Record<string, unknown>
+}
+
+export interface EvenimentOperationalNou {
+  taskId: string
+  kind: string
+  capability?: string
+  outcomeState?: StareEvenimentOperational
+  code?: string
+  reason?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface TranzitieSarcinaOperationala {
+  taskId: string
+  stare: StareSarcinaOperationala
+  capability?: string
+  code?: string
+  reason?: string
+  metadata?: Record<string, unknown>
+}
+
+interface RandSarcinaOperationala {
+  state: string
+}
+
+function textJurnal(value: unknown, max: number): string {
+  return curataTextJurnal(value, max)
+}
+
+function uuidJurnal(value: unknown): string {
+  const id = String(value ?? '').trim()
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id : ''
+}
+
+function metadateJurnal(value: unknown): string {
+  return JSON.stringify(metadateJurnalSigure(value))
+}
+
+/** Creates the durable task before the model starts. The initial event is
+ * inserted in the same transaction as the task, so an event never exists
+ * without its objective and turn correlation. */
+export async function inregistreazaSarcinaOperationala(input: SarcinaOperationalaNoua): Promise<boolean> {
+  if (!dbEnabled()) return false
+  const id = uuidJurnal(input.id)
+  const turnId = uuidJurnal(input.turnId)
+  const email = textJurnal(input.userEmail, 320).toLowerCase()
+  const objective = textJurnal(input.objective, 1_000)
+  if (!id || !turnId || !email || !objective) return false
+  let client: pg.PoolClient | null = null
+  try {
+    client = await getPool().connect()
+    await client.query('BEGIN')
+    const task = await client.query<{ id: string }>(
+      `INSERT INTO operational_tasks (id, user_email, turn_id, objective, state, metadata)
+       VALUES ($1,$2,$3,$4,'observing',$5::jsonb)
+       ON CONFLICT (id) DO NOTHING
+       RETURNING id`,
+      [id, email, turnId, objective, metadateJurnal(input.metadata)],
+    )
+    if (!task.rows[0]) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    await client.query(
+      `INSERT INTO operational_events (task_id, kind, outcome_state, code, metadata)
+       VALUES ($1,'request_received','observed','request_received',$2::jsonb)`,
+      [id, metadateJurnal({ source: 'chat', ...input.metadata })],
+    )
+    await client.query('COMMIT')
+    return true
+  } catch (e) {
+    try { await client?.query('ROLLBACK') } catch {}
+    console.error('[jurnal operațional] nu s-a putut crea sarcina:', String(e).slice(0, 160))
+    return false
+  } finally {
+    client?.release()
+  }
+}
+
+/** Adds a normalized observation without changing task state. Raw executor
+ * payloads are deliberately unavailable to this API. */
+export async function noteazaEvenimentOperational(input: EvenimentOperationalNou): Promise<boolean> {
+  if (!dbEnabled()) return false
+  const taskId = uuidJurnal(input.taskId)
+  const kind = textJurnal(input.kind, 80)
+  if (!taskId || !kind) return false
+  try {
+    const rezultat = await getPool().query<{ id: string }>(
+      `WITH task AS (
+         UPDATE operational_tasks SET updated_at=now() WHERE id=$1 RETURNING id
+       )
+       INSERT INTO operational_events (task_id, kind, capability, outcome_state, code, reason, metadata)
+       SELECT id,$2,$3,$4,$5,$6,$7::jsonb FROM task
+       RETURNING id`,
+      [
+        taskId,
+        kind,
+        textJurnal(input.capability, 120) || null,
+        textJurnal(input.outcomeState, 40) || null,
+        textJurnal(input.code, 160) || null,
+        textJurnal(input.reason, 500) || null,
+        metadateJurnal(input.metadata),
+      ],
+    )
+    return Boolean(rezultat.rows[0])
+  } catch (e) {
+    console.error('[jurnal operațional] nu s-a putut nota evenimentul:', String(e).slice(0, 160))
+    return false
+  }
+}
+
+/** Validates every transition under a row lock, then persists its state event
+ * atomically. No caller can mark a task completed from an impossible state. */
+export async function tranzitioneazaSarcinaOperationala(
+  input: TranzitieSarcinaOperationala,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!dbEnabled()) return { ok: false, error: 'journal_disabled' }
+  const taskId = uuidJurnal(input.taskId)
+  if (!taskId || !esteStareSarcinaOperationala(input.stare)) {
+    return { ok: false, error: 'journal_transition_invalid' }
+  }
+  let client: pg.PoolClient | null = null
+  try {
+    client = await getPool().connect()
+    await client.query('BEGIN')
+    const task = await client.query<RandSarcinaOperationala>(
+      'SELECT state FROM operational_tasks WHERE id=$1 FOR UPDATE',
+      [taskId],
+    )
+    const from = task.rows[0]?.state
+    if (!esteStareSarcinaOperationala(from)) {
+      await client.query('ROLLBACK')
+      return { ok: false, error: 'journal_task_not_found' }
+    }
+    if (!tranzitieOperationalaPermisa(from, input.stare)) {
+      await client.query('ROLLBACK')
+      return { ok: false, error: `journal_transition_rejected:${from}:${input.stare}` }
+    }
+    const terminal = ['completed', 'failed', 'blocked', 'expired', 'unverified'].includes(input.stare)
+    await client.query(
+      `UPDATE operational_tasks
+       SET state=$2, updated_at=now(), finished_at=CASE WHEN $3 THEN now() ELSE NULL END
+       WHERE id=$1`,
+      [taskId, input.stare, terminal],
+    )
+    await client.query(
+      `INSERT INTO operational_events (task_id, kind, capability, outcome_state, code, reason, metadata)
+       VALUES ($1,'state_transition',$2,$3,$4,$5,$6::jsonb)`,
+      [
+        taskId,
+        textJurnal(input.capability, 120) || null,
+        input.stare,
+        textJurnal(input.code, 160) || null,
+        textJurnal(input.reason, 500) || null,
+        metadateJurnal({ from, ...input.metadata }),
+      ],
+    )
+    await client.query('COMMIT')
+    return { ok: true }
+  } catch (e) {
+    try { await client?.query('ROLLBACK') } catch {}
+    console.error('[jurnal operațional] tranziția nu s-a putut scrie:', String(e).slice(0, 160))
+    return { ok: false, error: 'journal_write_failed' }
+  } finally {
+    client?.release()
+  }
+}
 // ── SCUTUL DATELOR DE NEATINS (owner, 14 aug, verbatim: „baza de date de
 // utilizatori trebuie să nu se poată șterge niciodată, prin nicio comandă, să
 // nu se poată suprascrie prin înlocuire ci doar prin adăugare cu validare,

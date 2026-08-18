@@ -48,6 +48,9 @@ export interface OrchestratorOpts {
    *  fără nicio unealtă de faptă, e forțat o dată să execute sau să spună cinstit
    *  „nu pot" — indiferent de text (prinde și cardul fabricat, tăcut). */
   actiuneCeruta?: boolean
+  /** Grupează uneltele care nu au voie să își suprapună efectele. Fără grup,
+   *  apelurile rămân paralele; aceeași grupă rulează în ordinea modelului. */
+  grupExecutie?: (numeUnealta: string) => string | undefined
 }
 
 // Detects an ACTION claim ("am trimis/salvat/deschis/reparat...") — things
@@ -114,6 +117,24 @@ export function impingeRezultat(convo: OrMessage[], id: string, out: string): vo
   })
 }
 
+/** Rulează apelurile independente împreună, dar păstrează ordinea pentru fiecare
+ *  grup cu efect. Cozile sunt doar pentru runda curentă; rundele modelului sunt
+ *  deja secvențiale fiindcă următoarea primește rezultatele celei anterioare. */
+export async function executaApeluriCoordonate<T>(
+  apeluri: readonly T[],
+  grupa: (apel: T) => string | undefined,
+  executa: (apel: T) => Promise<string>,
+): Promise<string[]> {
+  const cozi = new Map<string, Promise<void>>()
+  return await Promise.all(apeluri.map((apel) => {
+    const cheie = grupa(apel)
+    if (!cheie) return executa(apel)
+    const anterior = cozi.get(cheie) ?? Promise.resolve()
+    const rezultat = anterior.then(() => executa(apel))
+    cozi.set(cheie, rezultat.then(() => undefined, () => undefined))
+    return rezultat
+  }))
+}
 export async function runOrchestrator(
   model: string,
   messages: OrMessage[],
@@ -415,25 +436,23 @@ export async function runOrchestrator(
     for (const c of res.toolCalls) marcheazaChemata(c.function.name)
     // The assistant message ASKING for the tools (keeps tool_calls for linkage).
     convo.push({ role: 'assistant', content: res.text ?? '', tool_calls: res.toolCalls })
-    // TOOLS IN PARALLEL (Aug 2 — the latency mission): the model's calls from
-    // ONE round are independent by definition (it receives all results at
-    // once), so running them one-by-one only stacked their latencies (a
-    // search + a map + a weather = 3 serial HTTP waits). They now leave
-    // TOGETHER; the results are appended in the EXACT order of the calls, so
-    // the conversation the model sees is byte-identical to the serial path.
-    // Correctness is untouched: the same tools run, with the same arguments,
-    // and a failing tool still becomes its own tool_error, never a lost turn.
+    // Citirile independente rămân paralele pentru latență. Scrierile, browserul
+    // și orice unealtă fără politică explicită intră în coada grupului lor, în
+    // ordinea modelului — o rundă nu mai presupune că două efecte coexistă doar
+    // pentru că modelul le-a emis în același răspuns.
     const tUnelte = Date.now()
-    const iesiri = await Promise.all(
-      (res.toolCalls as OrToolCall[]).map(async (call) => {
+    const iesiri = await executaApeluriCoordonate(
+      res.toolCalls as OrToolCall[],
+      (call) => opts.grupExecutie?.(call.function.name),
+      async (call) => {
         try {
           return await execTool(call.function.name, call.function.arguments || '{}')
         } catch (e) {
           return `tool_error: ${String(e).slice(0, 200)}`
         }
-      }),
+      },
     )
-    if (iesiri.length > 1) console.log(`[TIMP] ${iesiri.length} unelte în paralel: ${Date.now() - tUnelte}ms`)
+    if (iesiri.length > 1) console.log(`[TIMP] ${iesiri.length} unelte coordonate: ${Date.now() - tUnelte}ms`)
     for (let i = 0; i < res.toolCalls.length; i++) {
       impingeRezultat(convo, res.toolCalls[i].id, iesiri[i])
     }

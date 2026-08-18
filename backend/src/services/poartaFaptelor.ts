@@ -6,7 +6,8 @@
 //
 // Aici se închide CLASA, nu instanța: pretențiile de FAPTĂ TRECUTĂ din
 // răspunsul creierului se verifică pe MĂSURĂTOARE — jurnalul uneltelor chiar
-// EXECUTATE în tura curentă. Pretenție fără faptă = demascată automat, pe
+// REUȘITE în tura curentă. O tentativă, un refuz sau o eroare nu sunt efecte.
+// Pretenție fără faptă = demascată automat, pe
 // ecran și în istoric, indiferent de model (legea adminului: „de neignorat
 // pentru orice model ai e folosit").
 //
@@ -15,10 +16,96 @@
 // clară (generat/creat/trimis/urcat) — un fals-pozitiv ar face poarta să
 // strige la adevăr, și atunci nimeni n-ar mai crede-o.
 
+export type StareDovadaUnealta =
+  | 'succeeded'
+  | 'verified'
+  | 'failed'
+  | 'blocked'
+  | 'awaiting_confirmation'
+  | 'unverified'
+
+/** Rezultatul normalizat al unei tentative de unealtă. Fiecare intrare implică
+ *  o tentativă; numai `succeeded` și `verified` pot dovedi o faptă. */
+export interface DovadaUnealta {
+  nume: string
+  stare: StareDovadaUnealta
+  cod?: string
+}
+
+function obiectRezultat(text: string): Record<string, unknown> | null {
+  const faraImagine = text.split('\u001F[OCHI]', 1)[0].trim()
+  if (!faraImagine.startsWith('{')) return null
+  try {
+    const parsed: unknown = JSON.parse(faraImagine)
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function textCamp(obiect: Record<string, unknown>, ...campuri: string[]): string {
+  for (const camp of campuri) {
+    const valoare = obiect[camp]
+    if (typeof valoare === 'string' && valoare.trim()) return valoare.trim()
+  }
+  return ''
+}
+
+/** Interpretează rezultatul real, nu simplul apel. Contractele mai vechi nu au
+ *  încă un câmp unic `status`, deci păstrăm suportul pentru semnalele existente
+ *  (`error`, `succes`, `success`, `ok`, refuz/confirmare). */
+export function clasificaRezultatUnealta(nume: string, rezultat: string): DovadaUnealta {
+  const text = String(rezultat ?? '').trim()
+  if (/^tool_error\s*:/i.test(text)) return { nume, stare: 'failed', cod: 'tool_error' }
+
+  const obiect = obiectRezultat(text)
+  if (!obiect) return { nume, stare: 'succeeded' }
+
+  const stare = textCamp(obiect, 'status', 'state', 'outcome').toLowerCase()
+  const cod = textCamp(obiect, 'error', 'code', 'reason', 'motiv', 'mesaj')
+  const semnal = `${stare} ${cod}`.toLowerCase()
+  const refuzExplicit =
+    obiect.blocked === true ||
+    obiect.denied === true ||
+    obiect.refused === true ||
+    /blocked|denied|refused|forbidden|unauthori[sz]ed|not_authorized|permission|refuz/i.test(semnal)
+  if (refuzExplicit) return { nume, stare: 'blocked', cod: cod || stare }
+  const cereConfirmare =
+    obiect.awaiting_confirmation === true ||
+    obiect.requires_confirmation === true ||
+    obiect.needs_confirmation === true ||
+    /awaiting[_ -]?confirmation|needs?[_ -]?confirmation|confirm/i.test(semnal)
+  if (cereConfirmare) return { nume, stare: 'awaiting_confirmation', cod: cod || stare }
+
+  const blocat =
+    /consimțământ|consimtamant|credit|transcript_suspect/i.test(semnal)
+  if (blocat) return { nume, stare: 'blocked', cod: cod || stare }
+
+  const esuat =
+    obiect.success === false ||
+    obiect.succes === false ||
+    obiect.ok === false ||
+    Object.prototype.hasOwnProperty.call(obiect, 'error') ||
+    /failed|failure|error|invalid|unavailable|not_connected|nu s-a putut/i.test(semnal)
+  if (esuat) return { nume, stare: 'failed', cod: cod || stare }
+
+  if (obiect.verified === true || stare === 'verified') return { nume, stare: 'verified' }
+  if (obiect.verified === false || stare === 'unverified') return { nume, stare: 'unverified', cod: cod || stare }
+  return { nume, stare: 'succeeded' }
+}
+
+export function unelteCuSucces(dovezi: readonly DovadaUnealta[]): string[] {
+  return dovezi
+    .filter((d) => d.stare === 'succeeded' || d.stare === 'verified')
+    .map((d) => d.nume)
+}
+
 interface FamiliePretentie {
   /** Pretenția de faptă TRECUTĂ (nu intenție: „voi genera"/„pornesc" nu intră). */
   re: RegExp
-  /** Uneltele care ar DOVEDI fapta — oricare din ele, executată, o acoperă. */
+  /** Uneltele care ar DOVEDI fapta — oricare din ele, reușită, o acoperă. */
   unelte: readonly string[]
   eticheta: string
 }
@@ -93,12 +180,12 @@ const FAMILII: readonly FamiliePretentie[] = [
   },
 ]
 
-/** Pretențiile de faptă din text pe care jurnalul uneltelor NU le acoperă.
+/** Pretențiile de faptă din text pe care rezultatele reușite NU le acoperă.
  *  Gol = totul dovedit (sau nicio pretenție). */
-export function pretentiiFaraFapta(text: string, unelteExecutate: readonly string[]): string[] {
+export function pretentiiFaraFapta(text: string, dovezi: readonly DovadaUnealta[]): string[] {
   const t = String(text ?? '')
   if (!t) return []
-  const facute = new Set(unelteExecutate)
+  const facute = new Set(unelteCuSucces(dovezi))
   const nedovedite: string[] = []
   for (const f of FAMILII) {
     if (f.re.test(t) && !f.unelte.some((u) => facute.has(u))) nedovedite.push(f.eticheta)
@@ -107,20 +194,20 @@ export function pretentiiFaraFapta(text: string, unelteExecutate: readonly strin
 }
 
 /** ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere solutia
- *  pina la deploy masurabil"): pe o tură de EXECUȚIE cu ZERO unelte rulate,
+ *  pina la deploy masurabil"): pe o tură de EXECUȚIE cu ZERO rezultate reușite,
  *  un răspuns care anunță analiză/pași/plan e fix înghețul de 5 luni — vorbă
  *  care se oprește singură. Detectat mecanic, strâmt: doar ture de acțiune,
  *  doar zero unelte, doar limbaj de plan, doar răspuns consistent (nu un „da"
  *  scurt). */
-export function planFaraExecutie(text: string, unelteExecutate: readonly string[], turaDeActiune: boolean): boolean {
-  if (!turaDeActiune || unelteExecutate.length > 0) return false
+export function planFaraExecutie(text: string, dovezi: readonly DovadaUnealta[], turaDeActiune: boolean): boolean {
+  if (!turaDeActiune || unelteCuSucces(dovezi).length > 0) return false
   const t = String(text ?? '')
   if (t.trim().length < 80) return false
   return /\b(se analizeaz[ăa]|voi (investiga|verifica|analiza|repara)|pa[șs]ii (sunt|urm)|planul (este|e|meu)|urm[ăa]torii pa[șs]i|încep prin|incep prin)\b/iu.test(t)
 }
 
 export const TEXT_PLAN_FARA_EXECUTIE =
-  `\n\n⚠ PLAN FĂRĂ EXECUȚIE (verificare automată): am anunțat pași, dar n-am chemat NICIO unealtă în tura asta — ` +
+  `\n\n⚠ PLAN FĂRĂ EXECUȚIE (verificare automată): am anunțat pași, dar n-am obținut NICIUN rezultat reușit în tura asta — ` +
   `exact înghețul interzis de legea ducerii la capăt. Spune „fă-o" și pornesc execuția reală acum, sau numesc blocajul.`
 
 /** Textul demascării — același peste tot (scris + istoric), ca proba să fie
