@@ -53,7 +53,7 @@ function mesajeOpenAi(messages: OrMessage[]): Record<string, unknown>[] {
 }
 
 /** Normalizează schema de unelte pentru compatibilitate Ollama Cloud (JSON Schema valid). */
-function normalizeazaSchema(schema: unknown): Record<string, unknown> {
+export function normalizeazaSchema(schema: unknown): Record<string, unknown> {
   if (!schema || typeof schema !== 'object') {
     return { type: 'object', properties: {} }
   }
@@ -89,7 +89,7 @@ function normalizeazaSchema(schema: unknown): Record<string, unknown> {
   return cleaned
 }
 
-function unelteOpenAi(tools: AnthropicTool[]): unknown[] {
+export function unelteOpenAi(tools: AnthropicTool[]): unknown[] {
   return tools.map((t) => ({
     type: 'function',
     function: {

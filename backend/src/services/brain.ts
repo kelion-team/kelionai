@@ -150,7 +150,7 @@ export async function brainComplete(
 }
 
 /** Parsează argumentele unui tool call cu fallback curat pentru erori de serializare. */
-function parseazaArgumenteTool(argumentsStr: string): Record<string, unknown> {
+export function parseazaArgumenteTool(argumentsStr: string | null | undefined): Record<string, unknown> {
   if (!argumentsStr || typeof argumentsStr !== 'string') {
     return {}
   }
