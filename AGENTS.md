@@ -92,8 +92,12 @@ node scripts/verifica-sintaxa.mjs                    # din rădăcină; pică pe
 ## Repo / deploy
 - Lucru principal: monorepo `C:\Users\adria\Kelionai`; pe VPS calea tipică
   `/root/kelion` când e accesibil.
-- Deploy: Railway service web → `https://kelionai.app` (`railway up --detach`
-  după build).
+- Deploy: pe **VPS propriu** (`164.68.120.87`), container `kelionai-app` în spatele
+  Caddy → `https://kelionai.app`. Publicarea e AUTOMATĂ: merge-ul în `master` e
+  preluat de cronul de pe VPS (`deploy/auto-publicare.sh`), care rulează
+  `deploy/deploy.sh` (build Docker → schimbă containerul) și verifică anti-fantomă
+  că `/api/version` == `master`. **Railway a fost SCOS (22 iul 2026)** — nu mai
+  există deploy pe railway.app.
 - Nu reporni servicii bridge masked fără ordin explicit.
 - Nu cere chei/parole în chat; folosește env/secret manager.
 
