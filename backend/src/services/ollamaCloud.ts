@@ -52,13 +52,50 @@ function mesajeOpenAi(messages: OrMessage[]): Record<string, unknown>[] {
   return out
 }
 
+/** Normalizează schema de unelte pentru compatibilitate Ollama Cloud (JSON Schema valid). */
+function normalizeazaSchema(schema: unknown): Record<string, unknown> {
+  if (!schema || typeof schema !== 'object') {
+    return { type: 'object', properties: {} }
+  }
+  const s = schema as Record<string, unknown>
+  // Asigură tipul de bază
+  if (!s.type) s.type = 'object'
+  // Asigură properties există pentru object
+  if (s.type === 'object' && !s.properties) s.properties = {}
+  // Validează că properties e un obiect
+  if (s.properties && typeof s.properties !== 'object') {
+    s.properties = {}
+  }
+  // Curăță proprietăți invalide (nu sunt permise în JSON Schema pentru OpenAI/Ollama)
+  const allowedKeys = ['type', 'description', 'properties', 'required', 'items', 'enum', 'default', 'format', 'pattern', 'minimum', 'maximum', 'minLength', 'maxLength']
+  const cleaned: Record<string, unknown> = {}
+  for (const key of Object.keys(s)) {
+    if (allowedKeys.includes(key)) {
+      const val = s[key]
+      // Recursive cleanup for nested properties
+      if (key === 'properties' && val && typeof val === 'object') {
+        const nested: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+          nested[k] = normalizeazaSchema(v)
+        }
+        cleaned[key] = nested
+      } else if (key === 'items' && val && typeof val === 'object') {
+        cleaned[key] = normalizeazaSchema(val)
+      } else {
+        cleaned[key] = val
+      }
+    }
+  }
+  return cleaned
+}
+
 function unelteOpenAi(tools: AnthropicTool[]): unknown[] {
   return tools.map((t) => ({
     type: 'function',
     function: {
       name: t.name,
       description: t.description,
-      parameters: t.input_schema ?? { type: 'object', properties: {} },
+      parameters: normalizeazaSchema(t.input_schema ?? { type: 'object', properties: {} }),
     },
   }))
 }

@@ -149,6 +149,24 @@ export async function brainComplete(
   }
 }
 
+/** Parsează argumentele unui tool call cu fallback curat pentru erori de serializare. */
+function parseazaArgumenteTool(argumentsStr: string): Record<string, unknown> {
+  if (!argumentsStr || typeof argumentsStr !== 'string') {
+    return {}
+  }
+  try {
+    const parsed = JSON.parse(argumentsStr) as Record<string, unknown>
+    // Fallback dacă nu e obiect valid
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {}
+    }
+    return parsed
+  } catch {
+    // Eroare de parsing JSON → returnează obiect gol, nu aruncă
+    return {}
+  }
+}
+
 // ESCALATION WITH TOOLS (Adrian, Jul 27: "Kelion cannot see all of his source
 // code, why?" — voice escalated to a brain WITHOUT tools, which denied the
 // access). A small tool-calling loop on the same work model: the model calls
@@ -183,12 +201,8 @@ export async function brainCompleteWithTools(
       if (!r.toolCalls.length) return r.text.trim()
       messages.push({ role: 'assistant', content: r.text || '', tool_calls: r.toolCalls })
       for (const c of r.toolCalls) {
-        let args: Record<string, unknown> = {}
-        try {
-          args = JSON.parse(c.function.arguments || '{}') as Record<string, unknown>
-        } catch {
-          /* broken arguments → the tool gets an empty object */
-        }
+        // Parse curat cu fallback pentru argumente malformate (S2)
+        const args = parseazaArgumenteTool(c.function.arguments || '{}')
         const out = await execTool(c.function.name, args).catch((e: Error) => JSON.stringify({ error: e.message }))
         messages.push({ role: 'tool', tool_call_id: c.id, content: out.slice(0, 60_000) })
       }
