@@ -52,16 +52,22 @@ describe('constructor = Aider (motor unic) pe creier LOCAL Ollama de pe VPS', ()
     expect(agent).toContain('amanabil: true')
   })
 
-  it('watchdogul nu omoară cold-startul free sau sumarizarea după commit', () => {
-    const praguri = /CONSTRUCTOR_SILENCE_MS \|\| \(platit \? ([0-9_]+) : ([0-9_]+)\)/.exec(agent)
-    expect(praguri).toBeTruthy()
-    const paidMs = Number(praguri?.[1].replaceAll('_', ''))
-    const freeMs = Number(praguri?.[2].replaceAll('_', ''))
-    // Probe live: free load_duration=80_647ms; paid a fost ucis fals după 90s post-commit.
-    expect(freeMs).toBeGreaterThan(80_647)
-    expect(paidMs).toBeGreaterThan(90_000)
-    expect(agent).toContain('CONSTRUCTOR_POST_COMMIT_SILENCE_MS || 300_000')
+  it('watchdogul nu omoară cold-startul free sau sumarizarea după commit (praguri dinamice)', () => {
+    // Pragurile nu mai sunt fixe (praghAider — dinamice pe greutate + ajustate din
+    // istoric + calibrate din media plătit), dar BAZELE stau peste probele live:
+    // free load_duration ~81s → bază tăcere free ≥ 150s; paid ucis fals la 90s
+    // post-commit → bază paid ≥ 180s; grația de închidere după commit 300s.
+    const freeBaza = /CONSTRUCTOR_SILENCE_MS, ([0-9_]+)\)/.exec(agent)
+    const paidBaza = /CONSTRUCTOR_PAID_SILENCE_MS, ([0-9_]+)\)/.exec(agent)
+    expect(freeBaza).toBeTruthy()
+    expect(paidBaza).toBeTruthy()
+    expect(Number(freeBaza?.[1].replaceAll('_', ''))).toBeGreaterThan(80_647)
+    expect(Number(paidBaza?.[1].replaceAll('_', ''))).toBeGreaterThan(90_000)
+    expect(agent).toContain('CONSTRUCTOR_POST_COMMIT_SILENCE_MS, 300_000')
     expect(agent).toContain('const aComis =')
+    // Timpul e ACUM dinamic + se calibrează din plătit (cerințele ownerului, 19 aug).
+    expect(agent).toContain('export function praghAider')
+    expect(agent).toContain('export function calibrarePaid')
   })
 
   it('porți roșii după free comută următoarea reparație pe fallbackul paid', () => {

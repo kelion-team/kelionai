@@ -13,6 +13,50 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 19 aug (verbatim): „seteaza sa aibe timp sa raspunda… dinamic pe greutatea
+      intrebari sau problemei" + „sistem de ajustare continuu, cind are destul context"
+      + „daca a trecut pe plata sa se uite cit timp a durat si faca o medie, pina se
+      calibreaza". Întâi mi-am RETRAS „prea lent" (presupunere nemăsurată, regula #1).
+      FAPTE: VPS Contabo 18 CPU / 94 GB, model free qwen2.5-coder:32b local. LIVRAT
+      (`praghAider` pur+16 teste): timp Aider DINAMIC pe greutate (fișiere+prompt) +
+      AJUSTARE continuă din istoricul real (tăieri pe tăcere fără edit → mai mult timp,
+      doar cu ≥3 mostre) + CALIBRARE din media plătit (planșeu pt. free ×1.5). Mărginit
+      de env + buget (nu devine demon). Măsurători pe host (masuratori-aider.jsonl).
+      DOVEZI: 1899/1899, 7 porți 0. RĂMAS de MĂSURAT pe VPS (nu de aici): tok/s real
+      (`ollama run … --verbose`) + coada din constructor.log — diagnosticul nou le arată.
+- [x] ORDIN 19 aug (verbatim): „nu are autonomie… sa faca asta" + „in raportul pr,
+      trebuie sa apara clar ce creier si ce constructor a rezolvat" + „kelion invata
+      cum si cine, ce a aplicat". VERIFICAT LIVE (GitHub+app): lucrătorul E VIU (job
+      #501 @13:19) dar FREE face „no_edit"→escaladează pe plătit pe toate ordinele
+      recente (deci „free nu repară" e real). LIVRAT: (1) diagnostic AUTONOM pe server
+      (`diagnosticConstructor` pur+11 teste; rută `/api/admin/constructor/diagnostic`
+      + unealta constructor_status chat/voce + banner AdminPanel) — Kelion spune
+      SINGUR de ce (nu) repară; (2) raport PR CLAR (`raportCreierConstructor`): motor
+      Aider + creierul care a rezolvat (free/plătit) + ce a aplicat; (3) învățare
+      (`memorieRezolvareConstructor` → addMemory la done) — Kelion reține cum/cine/ce.
+      DOVEZI: 1883/1883, 7 porți 0. RĂMAS: de ce FREE „no_edit" (model lent/omorât pe
+      tăcere) — de reglat pe VPS cu diagnosticul nou (CONSTRUCTOR_SILENCE_MS/model).
+- [x] ORDIN 19 aug (verbatim): „are ordine in coada dar nu se apuca aider sau altcineva
+      de reparat, de ce?". CAUZA (în cod, nu pe VPS): `claimNextBuildJob` rula
+      abandonarea + `upsertConstructorIncident` în ACEEAȘI tranzacție cu preluarea →
+      un incident care arunca avorta tot claim-ul (Postgres) → `null` la fiecare tur →
+      coada înfometată la nesfârșit. FIX: bookkeeping izolat (tranzacție proprie +
+      savepoint/incident), preluarea niciodată blocată. + PULSUL lucrătorului vizibil
+      pe panou (heartbeat `/api/constructor/next` → „🟢 VIU acum Xs" / „🔴 tăcut de X
+      min, cron oprit? — N în coadă") ca să NU mai fie cutie neagră de ce nu se apucă.
+      DOVEZI: pulsLucrator.test 6/6, incident-care-aruncă→preluarea merge, suită
+      1865/1865, 7 porți 0. NU POT VERIFICA cronul de pe VPS de aici — dar panoul îl arată.
+- [x] ORDIN 19 aug (verbatim): „constructorul nu repara, nici ieftin nici platit" +
+      „obligatoriu tot ce e free si constructor trebuie sa repare… rezolva real cu
+      dovezi ca free functioneaza". CAUZA (în cod): poarta protocolului strict
+      (`0efd377`) arunca `amanabil: invalid_protocol` ÎNAINTE de despărțirea
+      free/plătit — la protocol JSON lipsă (200 cu `protocol:null` sau 422 „non-cod")
+      Aider NU rula NICIODATĂ, identic pe free ȘI plătit. FIX: `decideSursaPlanAider`
+      (pură+testată) cade pe LEGACY (ordin brut→Aider) în loc să omoare ordinul;
+      protocolul strict rămâne preferat când există; cele 7 porți verifică oricum.
+      DOVEZI de aici: `constructorFreeRepara.test.ts` 6/6, throw scos din sursă,
+      suită 1858/1858, tsc 0, 7 porți 0. NU POT VERIFICA LIVE Ollama pe VPS (n-am
+      GPU/Ollama) — RĂMAS: ordin constructor de probă pe 32b free dus cap-coadă.
 - [x] ORDIN 17 aug QA — Contabo VPS 18 UP măsurat: **18 CPU / 94 GB RAM**; master=live 4adfe73.
 - [x] ORDIN 17 aug QA — free constructor pe qwen2.5-coder:32b VIU (FREE32_OK ~57s pe 94GB).
 - [x] ORDIN 17 aug QA — free-first + paid rezervă pe creier-config/agent (preferred free, fallback paid).

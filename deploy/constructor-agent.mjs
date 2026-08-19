@@ -683,6 +683,113 @@ function salveazaLectie(row) {
     fs.appendFileSync(LECTII_PATH, JSON.stringify({ at: new Date().toISOString(), ...row }) + '\n')
   } catch { /* ignore */ }
 }
+
+// ── PRAGURI DE TIMP: DINAMICE pe greutate + AJUSTARE CONTINUĂ din istoric ────────
+// Owner, 19 aug: „seteaza sa aibe timp sa raspunda, pune timpul corect, cat de cit
+// dinamic pe greutatea intrebari sau problemei" + „sistem de ajustare continuu,
+// cind are destul context". Nucleul e PUR + EXPORTAT (probat): timpul acordat lui
+// Aider NU mai e fix — crește cu greutatea MĂSURATĂ a ordinului (nr. fișiere țintă +
+// lungimea promptului) și se AJUSTEAZĂ singur din rulările trecute (durata reală +
+// câte au fost tăiate pe tăcere degeaba), DAR numai „când are destul context"
+// (≥ minContext mostre). Totul mărginit de env (min/max) și de bugetul rămas —
+// un job NU devine demon (lecția ecosistemului vechi). Nicio cifră inventată.
+function _num(v, d) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d }
+function _clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)) }
+function _median(xs) {
+  const a = xs.filter((n) => Number.isFinite(n)).slice().sort((p, q) => p - q)
+  if (!a.length) return 0
+  const m = a.length >> 1
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2
+}
+
+/** Greutatea ordinului: 0..1 din semnale MĂSURATE (nr. fișiere țintă + lungimea promptului). */
+export function greutateOrdin({ nrFisiere = 0, lungimePrompt = 0 } = {}) {
+  const f = _clamp(nrFisiere / 6, 0, 1) // 6 = plafonul de fișiere al protocolului
+  const l = _clamp(lungimePrompt / 8000, 0, 1) // ~8000 caractere = prompt greu
+  return _clamp(Math.max(f, l * 0.8), 0, 1) // fișierele cântăresc mai mult
+}
+
+/** Ajustare CONTINUĂ din istoricul MĂSURAT — DOAR „când are destul context".
+ *  istoric = [{ durataMs, taiatPeTacere, aEditat }]. Sub prag → factor 1 (neutru):
+ *  fără destule măsurători nu ajustăm pe nimic (regula #1). */
+export function ajustareDinIstoric(istoric = [], minContext = 3) {
+  const rows = (Array.isArray(istoric) ? istoric : []).filter((r) => r && Number.isFinite(Number(r.durataMs)))
+  if (rows.length < minContext) return { factorTimeout: 1, factorTacere: 1, destulContext: false, n: rows.length }
+  // Tăiate pe tăcere FĂRĂ să editeze = pragul de tăcere prea strâns → dă mai mult.
+  const taiateDegeaba = rows.filter((r) => r.taiatPeTacere && !r.aEditat).length
+  const factorTacere = _clamp(1 + taiateDegeaba / rows.length, 1, 2)
+  // Timeout: din durata reală mediană (a celor ce AU editat, altfel toate) / 6 min.
+  const auEditat = rows.filter((r) => r.aEditat)
+  const med = _median((auEditat.length ? auEditat : rows).map((r) => Number(r.durataMs)))
+  const factorTimeout = _clamp(med / (6 * 60_000), 1, 2)
+  return { factorTimeout, factorTacere, destulContext: true, n: rows.length }
+}
+
+/** CALIBRAREA din PLĂTIT (owner, 19 aug: „daca a trecut pe plata sa se uite cit
+ *  timp a durat si faca o medie, pina se calibreaza"). Media duratei rulărilor
+ *  PLĂTITE care AU editat = cât a avut REALMENTE nevoie sarcina. Free e mai lent,
+ *  deci merită cel puțin atât înainte să fie tăiat. „Pina se calibreaza" = doar
+ *  când există ≥ minContext succese plătite (altfel neutru). PURĂ. */
+export function calibrarePaid(istoricPaid = [], minContext = 3) {
+  const succ = (Array.isArray(istoricPaid) ? istoricPaid : []).filter((r) => r && r.aEditat && Number.isFinite(Number(r.durataMs)))
+  if (succ.length < minContext) return { mediePaidMs: 0, calibrat: false, n: succ.length }
+  const medie = succ.reduce((s, r) => s + Number(r.durataMs), 0) / succ.length
+  return { mediePaidMs: Math.round(medie), calibrat: true, n: succ.length }
+}
+
+/** Pragurile finale ale unei rulări Aider: dinamice (greutate) + ajustate (istoric)
+ *  + calibrate din media PLĂTIT (pt. free), mărginite de env (bază/max) și de
+ *  bugetul rămas. PURĂ + testată. */
+export function praghAider({ platit, nrFisiere = 0, lungimePrompt = 0, ramaseMs = Infinity, istoric = [], istoricPaid = [], env = {} } = {}) {
+  const g = greutateOrdin({ nrFisiere, lungimePrompt })
+  const aj = ajustareDinIstoric(istoric, _num(env.CONSTRUCTOR_MIN_CONTEXT, 3))
+
+  const bazaTimeout = platit ? _num(env.CONSTRUCTOR_PAID_TIMEOUT_MS, 18 * 60_000) : _num(env.CONSTRUCTOR_FREE_TIMEOUT_MS, 8 * 60_000)
+  const maxTimeout = platit ? _num(env.CONSTRUCTOR_PAID_TIMEOUT_MAX_MS, 24 * 60_000) : _num(env.CONSTRUCTOR_FREE_TIMEOUT_MAX_MS, 16 * 60_000)
+  let timeoutMs = Math.min(maxTimeout, Math.round((bazaTimeout + (maxTimeout - bazaTimeout) * g) * aj.factorTimeout))
+
+  const bazaTacere = platit ? _num(env.CONSTRUCTOR_PAID_SILENCE_MS, 180_000) : _num(env.CONSTRUCTOR_SILENCE_MS, 150_000)
+  const maxTacere = _num(env.CONSTRUCTOR_SILENCE_MAX_MS, 300_000)
+  let tacereKillMs = Math.min(maxTacere, Math.round((bazaTacere + (maxTacere - bazaTacere) * g) * aj.factorTacere))
+  const tacereDupaCommitMs = _num(env.CONSTRUCTOR_POST_COMMIT_SILENCE_MS, 300_000)
+
+  // CALIBRARE (doar pe FREE): dă-i cel puțin media a ce a reușit PLĂTITUL (×factor,
+  // free e mai lent), ca să nu fie tăiat înainte să apuce. Bounded de max mai jos.
+  const cal = calibrarePaid(istoricPaid, _num(env.CONSTRUCTOR_MIN_CONTEXT, 3))
+  if (!platit && cal.calibrat) {
+    const floorTimeout = Math.min(maxTimeout, Math.round(cal.mediePaidMs * _num(env.CONSTRUCTOR_FREE_VS_PAID, 1.5)))
+    timeoutMs = Math.max(timeoutMs, floorTimeout)
+    const floorTacere = Math.min(maxTacere, Math.round(cal.mediePaidMs * _num(env.CONSTRUCTOR_FREE_SILENCE_VS_PAID, 0.8)))
+    tacereKillMs = Math.max(tacereKillMs, floorTacere)
+  }
+
+  // NICIODATĂ peste bugetul rămas (minus tampon de raport) — un job nu devine demon.
+  if (Number.isFinite(ramaseMs)) timeoutMs = Math.min(timeoutMs, Math.max(45_000, ramaseMs - 60_000))
+  timeoutMs = Math.max(45_000, timeoutMs)
+  tacereKillMs = Math.max(30_000, Math.min(tacereKillMs, timeoutMs)) // tăcerea ≤ timeout
+  return { timeoutMs, tacereKillMs, tacereDupaCommitMs, greutate: g, ajustat: aj.destulContext, n: aj.n, calibratPaid: cal.calibrat, mediePaidMs: cal.mediePaidMs }
+}
+
+// Istoricul MĂSURAT al rulărilor (durată reală + dacă a fost tăiat pe tăcere fără
+// să editeze) — pe host, ca lecțiile. Se citește la START ca să ajusteze pragurile
+// și se scrie la FINAL. `parseMasuratori` e PUR + exportat (testabil).
+const MASURATORI_PATH = '/root/kelion/memory/masuratori-aider.jsonl'
+export function parseMasuratori(text, platit, n = 20) {
+  return String(text || '').split('\n').map((l) => l.trim()).filter(Boolean)
+    .map((l) => { try { return JSON.parse(l) } catch { return null } })
+    .filter((r) => r && r.platit === !!platit && Number.isFinite(Number(r.durataMs)))
+    .slice(-n)
+    .map((r) => ({ durataMs: Number(r.durataMs), taiatPeTacere: !!r.taiatPeTacere, aEditat: !!r.aEditat }))
+}
+function salveazaMasuratoare(row) {
+  try {
+    fs.mkdirSync(path.dirname(MASURATORI_PATH), { recursive: true })
+    fs.appendFileSync(MASURATORI_PATH, JSON.stringify({ at: new Date().toISOString(), ...row }) + '\n')
+  } catch { /* ignore */ }
+}
+function citesteMasuratori(platit, n = 20) {
+  try { return parseMasuratori(fs.readFileSync(MASURATORI_PATH, 'utf8'), platit, n) } catch { return [] }
+}
 export function extrageFisiereDinText(text, limit = 6) {
   const out = []
   const re = /(?:^|[\s`"'(])([A-Za-z0-9_./-]+\.(?:ts|tsx|js|mjs|cjs|json|md|css|yml|yaml))/g
@@ -901,6 +1008,44 @@ async function cereAjutorCreier(ordin, esuat) {
     return { protocol: null, plan: '', files: [], legacy: false, strictFailure: true, errors: [error] }
   }
 }
+
+// ── DECIZIA SURSEI DE PLAN PENTRU AIDER (owner, 19 aug: „obligatoriu tot ce e
+// free si constructor trebuie sa repare… rezolva real cu dovezi ca free
+// functioneaza") ────────────────────────────────────────────────────────────
+// PURĂ + EXPORTATĂ ca să fie PROBATĂ (regula #1: nicio pretenție fără măsurătoare).
+// Poarta protocolului strict (commit 0efd377) OMORA ordinul: când creierul app
+// nu putea întoarce un protocol JSON valid (hopa LLM → răspuns 200 cu
+// `protocol:null`, sau 422 „non-cod"), workerul arunca `amanabil: invalid_protocol`
+// ÎNAINTE de despărțirea free/plătit — deci Aider NU rula NICIODATĂ, IDENTIC pe
+// free ȘI pe plătit („constructorul nu repara, nici ieftin nici platit"). Aici
+// întoarcem decizia: protocolul strict rămâne PREFERAT când există, dar când
+// LIPSEȘTE NU mai omorâm ordinul — cădem pe drumul LEGACY (Aider lucrează direct
+// pe ordinul brut + repo-map). Cele 7 porți din atelier verifică oricum rezultatul,
+// deci legacy NU e nesigur — e exact cum lucra constructorul înainte de poartă.
+// Așa FREE chiar reparĂ: dacă modelul local scrie cod care trece porțile, iese PR.
+export function decideSursaPlanAider(h, orderText) {
+  if (h && h.strictFailure) {
+    return {
+      protocol: null,
+      plan: '',
+      legacy: true,
+      files: extrageFisiereDinText(orderText, 12),
+      ajutorFolosit: false,
+      fallbackDinProtocolInvalid: true,
+      errors: h.errors || [],
+    }
+  }
+  return {
+    protocol: h?.protocol ?? null,
+    plan: h?.plan ?? '',
+    legacy: h?.legacy === true,
+    files: h?.files || [],
+    ajutorFolosit: !!(h?.protocol || h?.plan),
+    fallbackDinProtocolInvalid: false,
+    errors: [],
+  }
+}
+
 export function construiestePromptPasiMici(job, extra = '', plan = '', protocol = null) {
   if (protocol) {
     let prompt =
@@ -995,23 +1140,39 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     aiderEnv.OPENAI_API_KEY = creierCfg.cheie
   }
 
-  // Free: max 8 min; pl?tit: max 18 min ? ambele pot fi omor?te la t?cere.
-  const timeout = Math.max(
-    45_000,
-    Math.min(ramase() - 60_000, platit ? Number(env.CONSTRUCTOR_PAID_TIMEOUT_MS || 18 * 60_000) : Number(env.CONSTRUCTOR_FREE_TIMEOUT_MS || 8 * 60_000)),
-  )
+  // PRAGURI DINAMICE + AJUSTATE (owner, 19 aug): timpul acordat lui Aider crește cu
+  // greutatea MĂSURATĂ a ordinului (fișiere țintă + lungimea promptului) și se
+  // ajustează singur din istoricul rulărilor (durata reală + tăieri pe tăcere
+  // degeaba), DAR numai când are destul context. Mărginit de env + bugetul rămas.
+  const nrIstoric = _num(env.CONSTRUCTOR_HIST_N, 20)
+  const istoricRulari = citesteMasuratori(platit, nrIstoric)
+  // Pe FREE citim și istoricul PLĂTIT: media duratei plătite calibrează timpul dat
+  // lui free („daca a trecut pe plata sa se uite cit timp a durat si faca o medie").
+  const istoricPaid = platit ? [] : citesteMasuratori(true, nrIstoric)
+  const praguri = praghAider({
+    platit,
+    nrFisiere: scoped.length,
+    lungimePrompt: msg.length,
+    ramaseMs: ramase(),
+    istoric: istoricRulari,
+    istoricPaid,
+    env,
+  })
+  const timeout = praguri.timeoutMs
   // Cold-start measured on this VPS: qwen2.5-coder:32b needs ~81s only to load.
-  // Killing free at 45s guaranteed a false timeout/HTTP 499 before its first token.
-  // Paid also proved a false kill at 90s AFTER Aider had already committed, while
-  // its summarizer was still closing. Once HEAD changed, allow a larger close grace.
-  const TACERE_KILL_MS = Number(env.CONSTRUCTOR_SILENCE_MS || (platit ? 180_000 : 150_000))
-  const TACERE_DUPA_COMMIT_MS = Number(env.CONSTRUCTOR_POST_COMMIT_SILENCE_MS || 300_000)
+  // Killing free too early guaranteed a false timeout before its first token —
+  // de-aceea pragurile pornesc de la o bază sigură și cresc pe greutate/istoric/calibrare.
+  const TACERE_KILL_MS = praguri.tacereKillMs
+  const TACERE_DUPA_COMMIT_MS = praguri.tacereDupaCommitMs
+  log(`praguri aider (${platit ? 'platit' : 'free'}): timeout=${Math.round(timeout / 1000)}s tăcere=${Math.round(TACERE_KILL_MS / 1000)}s greutate=${praguri.greutate.toFixed(2)} ajustat=${praguri.ajustat ? `da(n=${praguri.n})` : 'nu'}${praguri.calibratPaid ? ` calibrat-din-plătit(media=${Math.round(praguri.mediePaidMs / 1000)}s)` : ''}`)
 
   return new Promise((resolve) => {
     let out = ''
     let ultimaLa = Date.now()
     let anuntatAgatat = false
     let anuntatCommit = false
+    let taiatPeTacere = false
+    const startRun = Date.now()
     const headLaStart = sh('git rev-parse --short=7 HEAD').trim()
     const inghite = (buf) => {
       const s = String(buf)
@@ -1041,6 +1202,7 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
         log(`aider: commit detectat (${headAcum}) — acord ${Math.round(pragTacere / 1000)}s pentru închidere/sumarizare`)
       }
       if (pragTacere > 0 && tacut > pragTacere) {
+        taiatPeTacere = true // măsurătoare: rularea a fost oprită pe tăcere (nu la timeout)
         log(`aider: T?CUT de ${Math.round(tacut / 1000)}s (${platit ? 'platit' : 'free'}, commit=${aComis ? 'da' : 'nu'}) ? kill; urmeaz? replan pa?i mici`)
         try { child.kill('SIGKILL') } catch { /* dead */ }
         return
@@ -1055,7 +1217,12 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
       clearInterval(paznic)
       clearTimeout(omoara)
       const throttled = throttleSemnal || /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|overload|unavailable|\b5\d\d\b|creier_esec|epuizat|depleted|api.?error|connection|econnrefused|econnreset/i.test(out)
-      resolve({ log: out.slice(-4000), throttled })
+      // MĂSURĂTOAREA acestei rulări → istoricul care ajustează CONTINUU pragurile
+      // următoare (owner: „sistem de ajustare continuu, cind are destul context").
+      let aEditat = false
+      try { aEditat = sh('git rev-parse --short=7 HEAD').trim() !== headLaStart } catch { /* fără git → necunoscut */ }
+      salveazaMasuratoare({ platit, durataMs: Date.now() - startRun, taiatPeTacere, aEditat, greutate: praguri.greutate, timeoutMs: timeout, tacereMs: TACERE_KILL_MS })
+      resolve({ log: out.slice(-4000), throttled, taiatPeTacere, durataMs: Date.now() - startRun, aEditat })
     }
     child.on('close', () => inchide(false))
     child.on('error', (e) => { out += `\n${e?.message ?? e}`; inchide(/econnrefused|enoent|econnreset/i.test(String(e))) })
@@ -1078,6 +1245,37 @@ function decideEscaladareFreeFirst({ peFree, paidDisponibil, motivFree }) {
   else if (/openrouter_auth|openrouter|AuthenticationError/i.test(t)) motiv = 'openrouter_auth'
   if (!motiv) return { escaladeaza: false, motiv: 'motiv_insuficient' }
   return { escaladeaza: true, motiv }
+}
+
+// ── RAPORTUL CLAR „CINE A REZOLVAT" (owner, 19 aug: „in raportul pr, trebuie sa
+// apara clar ce creier si ce constructor a rezolvat" + „kelion invata cum si cine,
+// ce a aplicat ca sa rezolve") ─────────────────────────────────────────────────
+// PUR + EXPORTAT (probat): din proveniența rezolvării dă un bloc LIMPEDE pentru
+// corpul PR-ului — constructorul (motorul), creierul care a rezolvat (free local
+// SAU rezerva plătită), cum (escaladare/plan) și CE a aplicat (fișierele). Aceeași
+// proveniență o învață Kelion (memorie), deci raportul și învățarea spun același lucru.
+const MOTIVE_ESCALADARE_TEXT = {
+  no_change: 'free n-a editat nimic',
+  timeout_throttle: 'free a fost sugrumat/timeout',
+  free_indisponibil: 'creierul local free era jos',
+  calitate: 'free a picat porțile de calitate',
+  openrouter_auth: 'auth free respins',
+}
+export function raportCreierConstructor(info = {}) {
+  const { sursaFinal, creierModel, modelFree, motivEscaladare, ajutorFolosit, fisiere } = info
+  const platit = sursaFinal === 'platit'
+  const eticheta = platit ? 'PLĂTIT (cloud)' : 'FREE (local pe VPS, fără bani)'
+  const linii = [
+    '🔧 Constructor (motor): Aider',
+    `🧠 Creier care a rezolvat: ${creierModel || '(necunoscut)'} — ${eticheta}`,
+  ]
+  if (platit && modelFree && motivEscaladare) {
+    linii.push(`🔁 Pornit pe FREE (${modelFree}) → escaladat pe PLĂTIT (motiv: ${MOTIVE_ESCALADARE_TEXT[motivEscaladare] || motivEscaladare})`)
+  }
+  if (ajutorFolosit) linii.push('📋 Cum: cu plan „pași mici" de la creierul Kelion')
+  const fis = Array.isArray(fisiere) ? fisiere.filter(Boolean) : []
+  if (fis.length) linii.push(`📝 Ce a aplicat (${fis.length} fișiere): ${fis.slice(0, 12).join(', ')}${fis.length > 12 ? ' …' : ''}`)
+  return linii.join('\n')
 }
 
 async function construiesteCuAider(job, baseSha, jurnalVechi) {
@@ -1155,18 +1353,25 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
   let ajutorFolosit = false
   {
     const h = await cereAjutorCreier(job.orderText, String(jurnalVechi || '').slice(-800))
-    if (h.strictFailure) {
-      throw Object.assign(new Error(`protocol constructor invalid: ${(h.errors || []).join('; ').slice(0, 500)}`), {
-        amanabil: true,
-        freeIssue: 'invalid_protocol',
-      })
+    const s = decideSursaPlanAider(h, job.orderText)
+    if (s.fallbackDinProtocolInvalid) {
+      // NU mai amânăm ordinul (owner, 19 aug): protocolul strict lipsește, dar
+      // constructorul TREBUIE să repare — cădem pe drumul legacy (ordinul brut →
+      // Aider), IDENTIC pe free și pe plătit. Porțile atelierului verifică rezultatul.
+      log(`protocol strict indisponibil (${s.errors.join('; ').slice(0, 200)}) — cad pe LEGACY (ordinul brut → Aider), NU amân ordinul`)
+      salveazaLectie({ sig: 'protocol_fallback_legacy', cauza: s.errors.join('; ').slice(0, 200), fix: 'legacy-raw-order', ok: false })
     }
-    protocol0 = h.protocol
-    plan0 = h.plan
-    legacyProtocol = h.legacy === true
-    files0 = h.files || []
-    ajutorFolosit = !!(protocol0 || plan0)
-    beat(platit ? 'protocol JSON validat -> Aider CLOUD' : 'protocol JSON validat -> Aider FREE', true)
+    protocol0 = s.protocol
+    plan0 = s.plan
+    legacyProtocol = s.legacy
+    files0 = s.files
+    ajutorFolosit = s.ajutorFolosit
+    beat(
+      protocol0
+        ? (platit ? 'protocol JSON validat -> Aider CLOUD' : 'protocol JSON validat -> Aider FREE')
+        : (platit ? 'fara protocol strict -> Aider CLOUD pe ordinul brut (legacy)' : 'fara protocol strict -> Aider FREE pe ordinul brut (legacy)'),
+      true,
+    )
   }
 
   let reparatii = 0
@@ -1262,17 +1467,37 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
 
     const problema = verificaAtelierul(baseSha)
     if (!problema) {
+      // CINE A REZOLVAT, CLAR (owner, 19 aug: „in raportul pr, trebuie sa apara clar
+      // ce creier si ce constructor a rezolvat"). Motorul e mereu Aider; creierul e
+      // modelul care CHIAR a produs reparația (free local SAU rezerva plătită).
+      const sursaFinal = platit ? 'platit' : 'free'
+      const creierModel = platit ? String(creierCfg.model || 'cloud') : numeModelOllama()
+      // CE A APLICAT — fișierele schimbate (WHAT), pentru raport ȘI pentru învățare.
+      let fisiereSchimbate = []
+      try { fisiereSchimbate = sh(`git diff --name-only ${baseSha} HEAD`).trim().split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 20) } catch { /* fără listă */ }
+      // KELION ÎNVAȚĂ „cum și cine, ce a aplicat" (owner, 19 aug): lecția de succes
+      // poartă acum motorul + creierul + sursa + fișierele aplicate, nu doar „done".
       salveazaLectie({
         sig: platit ? 'paid_ok' : 'free_ok',
         cauza: motivEscaladare ? `done_after_${motivEscaladare}` : 'done',
         fix: ajutorFolosit ? 'brain-plan+aider' : 'aider',
         ok: true,
+        motor: 'aider',
+        creier: creierModel,
+        sursa: sursaFinal,
+        fisiere: fisiereSchimbate,
+        ordin: (job.orderText.split('\n')[0] || '').slice(0, 160),
       })
       return {
         title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120),
         body: `Aider — ${ULTIMUL_CREIER}${ajutorFolosit ? ' — plan pași mici creier Kelion' : ''}${motivEscaladare ? ` — escaladat (${motivEscaladare})` : ''}. brain=${brainRaport}. Ordin #${job.id}.`,
         brainRaport,
         motivEscaladare,
+        sursaFinal, // 'free' | 'platit' — sursa care a REZOLVAT
+        creierModel, // numele modelului care a rezolvat (free local sau paid cloud)
+        modelFree: numeModelOllama(), // modelul local free (pt. linia de escaladare)
+        ajutorFolosit, // a folosit planul creierului Kelion?
+        fisiere: fisiereSchimbate, // CE a aplicat — pt. raport ȘI învățare
       }
     }
     ultimaProblema = problema
@@ -1424,12 +1649,20 @@ async function main() {
     const headSha = sh('git rev-parse HEAD').trim()
     log(`ramura ${branch} împinsă`)
 
-    // CREIERUL, SCRIS ÎN PR (regula din 2 aug: alegerea modelului e VIZIBILĂ).
-    // Furnizorul nu itemizează cost per apel — se raportează DOAR tokenii măsurați.
-    const linieCreier = `Motor: Aider (unic) · ${ULTIMUL_CREIER || NUME_FURNIZOR} · brain=${brainRaportRun} · tokeni neitemizați (regula #1: nicio cifră inventată)`
+    // CINE A REZOLVAT, CLAR ÎN CAPUL PR-ului (owner, 19 aug): ce constructor (motor)
+    // + ce creier (free local / plătit cloud) + cum + CE a aplicat. Blocul e sursa
+    // UNICĂ de proveniență — aceeași pe care o învață Kelion (memorie).
+    const blocCreier = raportCreierConstructor({
+      sursaFinal: finish.sursaFinal,
+      creierModel: finish.creierModel,
+      modelFree: finish.modelFree,
+      motivEscaladare: finish.motivEscaladare,
+      ajutorFolosit: finish.ajutorFolosit,
+      fisiere: finish.fisiere,
+    })
     const prUrl = await deschidePR(
       titlu,
-      `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, toate cele 7 porți rulate în atelier: tsc, teste, build, jscpd, exporturi, sintaxă, boot pe dist). Se îmbină singur DOAR pe poartă verde; pe roșu rămâne deschis cu problemele raportate.`,
+      `${blocCreier}\n\n${finish.body}\n\n---\nbrain=${brainRaportRun} · tokeni neitemizați (regula #1: nicio cifră inventată)\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, toate cele 7 porți rulate în atelier: tsc, teste, build, jscpd, exporturi, sintaxă, boot pe dist). Se îmbină singur DOAR pe poartă verde; pe roșu rămâne deschis cu problemele raportate.`,
       branch,
     )
     log(`PR deschis: ${prUrl} (tokeni: ${tokens})`)
@@ -1457,7 +1690,18 @@ async function main() {
       await report('failed', { branch, prUrl, tokens, ci, log: `${logLines.join('\n')}\n\nVerificarea independentă (CI) a picat pe PR (commit ${headSha.slice(0, 7)}).` })
     } else {
       // verde SAU 'în curs' — poarta de pe VPS confirmă și îmbină pe verde.
-      await report('done', { branch, prUrl, tokens, ci: ci === 'verde' ? 'verde' : `${ci} (poarta VPS confirmă + îmbină pe verde)` })
+      // PROVENIENȚA REZOLVĂRII merge în raport ca Kelion s-o ÎNVEȚE (owner, 19 aug:
+      // „kelion invata cum si cine, ce a aplicat ca sa rezolve") — app-ul o salvează
+      // ca memorie la /api/constructor/report.
+      await report('done', {
+        branch, prUrl, tokens,
+        ci: ci === 'verde' ? 'verde' : `${ci} (poarta VPS confirmă + îmbină pe verde)`,
+        motor: 'aider',
+        creierModel: finish.creierModel,
+        sursa: finish.sursaFinal,
+        fisiere: finish.fisiere,
+        ordin: finish.title,
+      })
     }
   } catch (e) {
     // AMÂNARE, NU MOARTE (regula din 28 iul): când
