@@ -56,4 +56,22 @@ describe('audioFocus single-voice lock', () => {
     expect(requestTtsFocus()).toBe(false)
     unregisterLiveFocus()
   })
+
+  // Finding 1 (owner, 19 aug: „se aud 2 voci… dacă îi scriu răspunde doar scris"):
+  // LIVE rostește DOAR turele vocale. O tură SCRISĂ nu e rostită de LIVE, deci
+  // Chirp-ul ei TREBUIE redat chiar și cât LIVE ține focus-ul — altfel scrisul
+  // rămâne mut sub LIVE (exact bugul). Gardul între taburi rămâne peste tot.
+  it('a WRITTEN turn plays TTS even while LIVE holds focus', () => {
+    setForeignVoiceLock(false)
+    registerLiveFocus()
+    expect(requestTtsFocus()).toBe(false) // tură vocală sub LIVE → LIVE vorbește
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(true) // tura SCRISĂ → Chirp-ul ei se redă
+    releaseTtsFocus()
+    unregisterLiveFocus()
+  })
+
+  it('the foreign-tab lock beats even a written turn (one mouth in the whole browser)', () => {
+    setForeignVoiceLock(true)
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(false)
+  })
 })

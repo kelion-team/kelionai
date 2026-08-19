@@ -197,5 +197,20 @@ export function autoPreviewFrame(raw: string): MonitorPreview | null {
     }
   }
 
+  // 6. ORICE RĂSPUNS PE MONITOR (owner, 19 aug: „Kelion nu înțelege că orice
+  // răspuns trebuie afișat DOAR pe monitor"). Până azi proza simplă lăsa
+  // monitorul gol — afișarea depindea de model să cheme show_document, iar el
+  // „nu înțelegea" s-o facă de fiecare dată. Acum plasa deterministă pune ȘI
+  // proza pe monitor, ca document lizibil: nu mai depinde de bunăvoința
+  // modelului, orice răspuns se vede. (Doar când nimic altceva n-a aprins
+  // ecranul — gardul `!surfaceShown` din chat.ts; o unealtă care a arătat deja
+  // ceva câștigă.) Titlu = prima linie scurtă, ca tabul să aibă etichetă.
+  const proza = text.trim()
+  if (proza) {
+    const primaLinie = (proza.split('\n').find((l) => l.trim()) ?? '').trim()
+    const titlu = primaLinie.length <= 48 ? primaLinie : `${primaLinie.slice(0, 47)}…`
+    return { doc: { title: titlu, text: proza } }
+  }
+
   return null
 }

@@ -799,6 +799,7 @@ let curVoice: HTMLAudioElement | null = null
 // determinist ȘI sunetul întârziat, pe mobil și pe laptop la fel.
 let curSource: AudioBufferSourceNode | null = null
 let ctxPending = false // sunet prin context, în curs de pornire (decode async)
+let ctxRetryTimer: number | null = null // reîncercare mărginită a redării prin context
 
 // ── LIP-SYNC: nivelul (0..1) al amplitudinii vocii redate acum ──────────────
 // Golden rule: it's a visual bonus — if the analysis fails for any reason,
@@ -1040,6 +1041,28 @@ function playViaContext(base64Mp3: string, done: () => void): boolean {
   return true
 }
 
+/** REÎNCERCARE MĂRGINITĂ prin context (owner, 19 aug: „se trunchiază audio…
+ *  identifică și repară truncherea"): când nici <audio> nici contextul nu pot
+ *  reda ACUM (mobil, fără gest care să deblocheze contextul), NU aruncăm chunk-ul
+ *  tăcut — ar tăia răspunsul. Îl reîncercăm la 150ms până contextul devine
+ *  'running' (un gest îl deblochează între timp), maxim ~4,5s, apoi renunțăm
+ *  (done → coada merge mai departe), ca să nu blocăm gura la infinit. Cât ținem
+ *  reîncercarea, `ctxPending` rămâne true — chunk-urile următoare se pun în COADĂ,
+ *  nu peste, deci ordinea se păstrează. stopVoice() (barge-in) taie timerul. */
+function reincearcaPrinContext(base64Mp3: string, done: () => void, ramase = 30): void {
+  ctxPending = true // gura ocupată: playVoice pune următoarele bucăți în coadă
+  if (playViaContext(base64Mp3, done)) return // playViaContext preia ctxPending de aici
+  if (ramase <= 0) {
+    ctxPending = false
+    done()
+    return
+  }
+  ctxRetryTimer = window.setTimeout(() => {
+    ctxRetryTimer = null
+    reincearcaPrinContext(base64Mp3, done, ramase - 1)
+  }, 150)
+}
+
 function playNow(base64Mp3: string): void {
   try {
     const audio = new Audio(`data:audio/mp3;base64,${base64Mp3}`)
@@ -1059,12 +1082,18 @@ function playNow(base64Mp3: string): void {
     attachLevelAnalysis(audio)
     void audio.play().catch(() => {
       // MOBIL: sunetul întârziat pe <audio> e blocat (autoplay) — de-aia „aleator".
-      // Trecem pe calea SIGURĂ (BufferSource pe contextul deblocat). Curățăm elementul
-      // mut ca să nu rămână două bucle de nivel; busy-ul rămâne prin curSource/ctxPending.
+      // (1) OPRIM COMPLET elementul înainte de calea sigură — altfel elementul putea
+      // porni totuși un pic mai târziu (cursă cu gestul) ȘI BufferSource-ul ar reda
+      // ACELAȘI chunk = DOUĂ voci pe ieșiri diferite (owner, 19 aug: „se aud 2 voci,
+      // nu știi pe unde iese"). O gură, o singură ieșire.
+      try { audio.pause(); audio.src = ''; audio.load() } catch { /* deja oprit */ }
       stopLevelLoop()
       voiceElements.delete(audio)
       if (curVoice === audio) curVoice = null
-      if (!playViaContext(base64Mp3, done)) done()
+      // (2) Calea SIGURĂ (BufferSource pe contextul deblocat). Dacă nici contextul
+      // nu e gata acum, reîncercăm mărginit — NU aruncăm chunk-ul tăcut (ar tăia
+      // răspunsul: owner „se trunchiază audio").
+      reincearcaPrinContext(base64Mp3, done)
     })
   } catch {
     playNextQueued()
@@ -1111,6 +1140,12 @@ export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () =>
 
 export function stopVoice(): void {
   clearGapTimer()
+  // Taie și reîncercarea mărginită prin context (barge-in nu are voie să lase o
+  // bucată să pornească după oprire — altfel vocea „oprită" revenea).
+  if (ctxRetryTimer !== null) {
+    window.clearTimeout(ctxRetryTimer)
+    ctxRetryTimer = null
+  }
   voiceQueue.length = 0
   // FIX "microphone mute forever" (Jul 24 audit, P1): the end callback (which
   // UNMUTES the Realtime session's microphone) was DISCARDED without being called

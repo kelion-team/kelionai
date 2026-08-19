@@ -52,10 +52,19 @@ export function unregisterLiveFocus(): void {
 /**
  * Request the mouth for written-chat TTS.
  * Returns false if LIVE holds focus — caller must drop {audio} (LIVE speaks).
+ *
+ * `turaScrisa` (owner, 19 aug: „se aud 2 voci… dacă îi scriu răspunde doar
+ * scris"): LIVE rostește DOAR turele VOCALE (prin WS — n-are `speak()` pentru
+ * text scris). O tură SCRISĂ nu e rostită de LIVE, deci Chirp-ul ei TREBUIE
+ * redat chiar și cât LIVE ține focus-ul — altfel scrisul rămâne MUT sub LIVE.
+ * Ăsta era gardul C care ÎNVINGEA relaxarea gardului A din ChatPanel (măsurat):
+ * gardul A lăsa turele scrise să treacă, iar `requestTtsFocus()` le pica aici,
+ * pe `active === 'live'`. Blocajul între taburi (foreignVoiceLock) rămâne peste
+ * tot — o singură gură în tot browserul, indiferent de felul turei.
  */
-export function requestTtsFocus(): boolean {
+export function requestTtsFocus(opts?: { turaScrisa?: boolean }): boolean {
   if (foreignVoiceLock) return false
-  if (active === 'live') return false
+  if (active === 'live' && !opts?.turaScrisa) return false
   emit('tts')
   return true
 }
