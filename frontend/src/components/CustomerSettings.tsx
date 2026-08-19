@@ -59,7 +59,7 @@ export default function CustomerSettings({
     gender?: string
     updated_at?: string
     meta?: { pitchMeanHz?: number; pitchStdHz?: number; voicedRatio?: number }
-  } | null | 'necitit'>('necitit')
+  } | null | 'necitit' | 'esuat'>('necitit')
   const [recordingVp, setRecordingVp] = useState(false)
   const [vpMsg, setVpMsg] = useState('')
 
@@ -81,9 +81,11 @@ export default function CustomerSettings({
       if (vpRes && vpRes.voiceprint) {
         setVoiceprint(vpRes.voiceprint)
       } else if (vpRes && vpRes.voiceprint === null) {
-        setVoiceprint(null)
+        setVoiceprint(null) // serverul a spus clar: contul N-ARE amprentă
       } else {
-        setVoiceprint(null)
+        // vpRes === null = citirea a PICAT (401 sesiune/500 DB/rețea) — NU „n-are
+        // amprentă". Nu mai colapsăm eșecul peste absența reală (owner, 19 aug).
+        setVoiceprint('esuat')
       }
       try {
         // CÂT SELECTORUL DE MODELE E ASCUNS, nu mai cerem catalogul/selecția
@@ -452,6 +454,12 @@ export default function CustomerSettings({
             </label>
             {voiceprint === 'necitit' ? (
               <p className="settings-note">{ro ? 'Se citește starea amprentei...' : 'Reading voiceprint status...'}</p>
+            ) : voiceprint === 'esuat' ? (
+              <p className="settings-note" style={{ color: '#c1121f' }}>
+                {ro
+                  ? 'Nu pot citi acum starea amprentei vocale (reîncearcă). NU înseamnă că n-ai una.'
+                  : 'Cannot read voiceprint status right now (try again). It does NOT mean you have none.'}
+              </p>
             ) : voiceprint ? (
               <div>
                 <p className="settings-note" style={{ color: '#67c23a', margin: '4px 0' }}>

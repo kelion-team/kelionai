@@ -2,7 +2,7 @@ import { config } from '../config.js'
 import { cheltuialaLunaPeKinduri } from '../db.js'
 import { getSerperBalance } from './serperBalance.js'
 import { geminiLive } from './geminiDirect.js'
-import { googleServiceAccount } from './googleCreds.js'
+import { contServiciuGoogleServesteLive } from './tokenChecks.js'
 import type { Masuratoare } from './masurare.js'
 
 // ── CÂT CREDIT A MAI RĂMAS, PE FIECARE AI (Adrian, 8 aug 2026) ──────────────
@@ -221,12 +221,19 @@ async function randGoogleCloud(): Promise<CreditAI> {
   // VERDE/ROȘU, nu gri (owner, 13 aug: „culorile la fel pt toți AI"). Google nu dă
   // „cât mai ai", dar pot spune dacă e OPERAȚIONAL: cont de serviciu cu JSON valid
   // (parsabil + client_email) sau cheie TTS pusă → verde; nimic → roșu. Măsurat.
-  const saValid = Boolean(googleServiceAccount())
+  // SERVEȘTE = CHECK LIVE, nu JSON.parse (owner, 19 aug: „bec verde din JSON.parse").
+  // Chiar obținem un access token de la Google; o cheie revocată/dezactivată dar
+  // parsabilă PICĂ acum (verde = Google a răspuns, nu „JSON-ul e valid").
+  const saLive = await contServiciuGoogleServesteLive()
   const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = reusit(
-    'cont de serviciu Google valid (JSON parsabil) sau cheie TTS pusă',
+    'cont de serviciu Google răspunde LIVE (access token) sau cheie TTS pusă',
     {
-      da: saValid || Boolean(config.googleTtsKey),
-      detaliu: saValid ? 'cont de serviciu valid — STT/TTS/traducere' : config.googleTtsKey ? 'cheie TTS pusă' : 'nimic configurat',
+      da: saLive.ok || Boolean(config.googleTtsKey),
+      detaliu: saLive.ok
+        ? `Google a răspuns — STT/TTS/traducere (${saLive.detaliu})`
+        : config.googleTtsKey
+          ? 'cheie TTS pusă (rezervă)'
+          : saLive.detaliu || 'nimic configurat',
     },
     0,
   )

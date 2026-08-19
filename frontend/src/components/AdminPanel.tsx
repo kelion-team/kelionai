@@ -451,8 +451,11 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: '10px 14px', margin: '10px 0', background: 'color-mix(in srgb, var(--text) 4%, transparent)', border: '1px solid var(--border)', borderRadius: 10 }}>
       <strong style={{ fontSize: 13, opacity: 0.8 }}>Credite AI</strong>
-      <span title={s?.live ? `${(s.balance ?? 0).toLocaleString()} căutări rămase (Serper)` : 'citirea Serper a eșuat'}>
-        Serper {s?.live ? serperK(s.balance ?? 0) : '⚠'}
+      <span title={s?.live && typeof s.balance === 'number' ? `${s.balance.toLocaleString()} căutări rămase (Serper)` : 'citirea Serper a eșuat'}>
+        {/* `?? 0` scos (owner, 19 aug): un `live:true` FĂRĂ sold arăta „Serper 0" =
+            fals „fără credit", exact ce interzice tipul lui (Stage.tsx: „NICIODATĂ
+            Serper 0"). Fără sold real → ⚠ „nu pot citi", nu 0. */}
+        Serper {s?.live && typeof s.balance === 'number' ? serperK(s.balance) : '⚠'}
       </span>
       <span title={geminiTitlu}>
         Gemini {geminiEticheta}
@@ -2940,6 +2943,15 @@ export default function AdminPanel({
                       >
                         Salvează
                       </button>
+                      {/* NESALVAT, LA VEDERE (owner, 19 aug: „PLĂTIT aprins dar rulează
+                          LOCAL"). Butonul se aprinde la clic, dar serverul se schimbă
+                          DOAR la „Salvează" — cât ai modificări nesalvate, o spunem, ca
+                          să nu crezi că e aplicat (creierEditatRef.current, reset la save). */}
+                      {creierEditatRef.current && (
+                        <span style={{ fontSize: 11, color: '#c1121f', fontWeight: 700 }}>
+                          · neaplicat — apasă „Salvează"
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: 11, color: cloudProba == null ? undefined : cloudProba.ok ? '#1a7f37' : '#c1121f', opacity: cloudProba == null ? 0.7 : 1 }}>
 {creierCfg.creier2 === 'gemini' && creierCfg.constructorSursa === 'free'
@@ -3469,8 +3481,10 @@ export default function AdminPanel({
                         </span>
                         {/* MONITORIZAREA PE USER (10 aug): cât a COSTAT pe
                             furnizori — roșu când a consumat peste ce are. */}
-                        <span style={(u.consumedUsd ?? 0) > 0 && u.balance <= 0 ? { color: '#e5484d', fontWeight: 600 } : undefined}>
-                          consum ${(u.consumedUsd ?? 0).toFixed(2)}
+                        <span style={typeof u.consumedUsd === 'number' && u.consumedUsd > 0 && u.balance <= 0 ? { color: '#e5484d', fontWeight: 600 } : undefined}>
+                          {/* `?? 0` scos (owner, 19 aug): un rând fără `consumedUsd` arăta
+                              „$0.00" ca fapt măsurat. Fără cifră reală → „—", nu 0. */}
+                          consum {typeof u.consumedUsd === 'number' ? `$${u.consumedUsd.toFixed(2)}` : '—'}
                         </span>
                         {u.blocked && <span className="user-badge blocked">BLOCAT</span>}
                         {/* P26: mostra de voce e parte din cardul omului — dacă
