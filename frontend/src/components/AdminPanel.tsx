@@ -202,6 +202,23 @@ function PromoStudio() {
 // veche → nouă, plus DOVADA backupului (cel mai nou fișier de pe disc, măsurat
 // de server — dată + mărime; lipsa lui se spune, nu se maschează).
 interface RandAudit { la: string; actor: string; actiune: string; tabel: string; cheie: string; vechi: string; nou: string }
+
+// ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug): forma raportului măsurat pe care
+// îl întoarce POST /api/admin/autoverificare (Kelion se testează singur pe TOATE
+// funcțiile + spune DE CE nu merge). Aceleași câmpuri ca RaportAutoverificare din backend.
+type VerdictFunctie = 'merge' | 'stricat' | 'nu_pot_verifica'
+interface VerificareFunctie {
+  functie: string; categorie: string; face: string; tip: 'citire' | 'efect'
+  verdict: VerdictFunctie; deCe: string; recomandare: string; dovada: string
+}
+interface RaportAutoverificare {
+  total: number; merg: number; stricate: number; nepotverifica: number; functii: VerificareFunctie[]
+}
+// Ordinea în listă: întâi ce nu merge (stricate), apoi nesigurele, apoi ce merge.
+function rangVerdict(v: VerdictFunctie): number {
+  return v === 'stricat' ? 0 : v === 'nu_pot_verifica' ? 1 : 2
+}
+
 function RegistruAudit() {
   const [date, setDate] = useState<{ randuri: RandAudit[]; backup: { fisier: string; la: string; octeti: number } | null } | null | 'eroare'>(null)
   useEffect(() => {
@@ -463,6 +480,11 @@ export default function AdminPanel({
   // (starePush), nu ținută minte — „activ" înseamnă chiar o abonare vie.
   const [push, setPush] = useState<StarePush>('inactiv')
   const [pushBusy, setPushBusy] = useState(false)
+  // ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug): raportul e MĂSURAT la cerere,
+  // nu ținut minte între sesiuni — „merge" apare doar cu dovadă (regula #1).
+  const [avBusy, setAvBusy] = useState(false)
+  const [avRaport, setAvRaport] = useState<RaportAutoverificare | null>(null)
+  const [avEroare, setAvEroare] = useState('')
   useEffect(() => {
     void starePush().then(setPush)
   }, [])
@@ -2485,6 +2507,112 @@ export default function AdminPanel({
               >
                 Reset VPS
               </button>
+            </div>
+
+            {/* ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug: „ceva inteligent bazat
+                pe AI" + „verifică și DE CE nu merge"). Kelion se testează SINGUR pe
+                TOATE funcțiile din registrul unic: citirile probate REAL, funcțiile
+                cu efect verificate fără să le execute (dry-run), iar pe cele picate
+                creierul dă cauza + recomandarea fermă. Verdictul e MĂSURAT (regula
+                #1): „nu pot verifica" cinstit, niciodată „merge" fabricat. */}
+            <div className="fin-breakdown" style={{ marginTop: 16 }}>
+              <div className="fin-breakdown-head">Autoverificare inteligentă</div>
+              <p className="chat-hint" style={{ marginTop: 8 }}>
+                Kelion se testează pe el însuși pe toate funcțiile și spune, pentru fiecare care nu
+                merge, <b>de ce</b> și ce e de făcut. Durează câteva secunde (probează real citirile).
+              </p>
+              <button
+                className="ghost"
+                style={{ marginTop: 12 }}
+                disabled={avBusy}
+                onClick={async () => {
+                  setAvBusy(true)
+                  setAvEroare('')
+                  try {
+                    const res = await fetch('/api/admin/autoverificare', {
+                      method: 'POST',
+                      credentials: 'include',
+                    })
+                    if (!res.ok) {
+                      setAvEroare(`Autoverificarea NU a pornit: HTTP ${res.status}`)
+                      setAvRaport(null)
+                      return
+                    }
+                    const j = (await res.json().catch(() => null)) as RaportAutoverificare | null
+                    if (!j || typeof j.total !== 'number') {
+                      setAvEroare('Răspuns necitibil de la server (nu pot afișa un raport pe care nu l-am măsurat).')
+                      setAvRaport(null)
+                      return
+                    }
+                    setAvRaport(j)
+                  } catch (e) {
+                    // Regula #1: eroarea reală ajunge la om, nu o mascăm.
+                    const motiv = e instanceof Error ? e.message : String(e)
+                    console.error('[autoverificare]', e)
+                    setAvEroare(`Eroare la autoverificare: ${motiv}`)
+                    setAvRaport(null)
+                  } finally {
+                    setAvBusy(false)
+                  }
+                }}
+              >
+                {avBusy ? 'Verific toate funcțiile…' : '🧪 Verifică toate funcțiile'}
+              </button>
+
+              {avEroare && (
+                <p className="chat-hint" style={{ marginTop: 10, color: '#e0603a' }}>
+                  ⚠ {avEroare}
+                </p>
+              )}
+
+              {avRaport && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
+                    <span>Total: <b>{avRaport.total}</b></span>
+                    <span style={{ color: '#2e9e5b' }}>Merg: <b>{avRaport.merg}</b></span>
+                    <span style={{ color: '#e0603a' }}>Stricate: <b>{avRaport.stricate}</b></span>
+                    <span style={{ color: '#c79218' }}>Nu pot verifica: <b>{avRaport.nepotverifica}</b></span>
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {avRaport.functii
+                      // Întâi ce nu merge (stricate, apoi nu-pot-verifica), apoi ce merge.
+                      .slice()
+                      .sort((a, b) => rangVerdict(a.verdict) - rangVerdict(b.verdict))
+                      .map((f) => {
+                        const c =
+                          f.verdict === 'merge' ? '#2e9e5b' : f.verdict === 'stricat' ? '#e0603a' : '#c79218'
+                        const et =
+                          f.verdict === 'merge' ? '✓ merge' : f.verdict === 'stricat' ? '✗ stricat' : '… nu pot verifica'
+                        return (
+                          <li
+                            key={f.functie}
+                            style={{ borderLeft: `3px solid ${c}`, paddingLeft: 10 }}
+                          >
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                              <b>{f.functie}</b>
+                              <span style={{ color: c, fontSize: '0.85em' }}>{et}</span>
+                              <span className="chat-hint" style={{ fontSize: '0.8em' }}>
+                                {f.tip === 'efect' ? '(cu efect — dry-run)' : '(citire — probat real)'}
+                              </span>
+                            </div>
+                            <div className="chat-hint" style={{ fontSize: '0.85em' }}>{f.face}</div>
+                            {f.verdict !== 'merge' && (
+                              <div style={{ fontSize: '0.85em', marginTop: 2 }}>
+                                <span style={{ color: c }}>De ce:</span> {f.deCe}
+                                {f.recomandare && (
+                                  <>
+                                    {' '}
+                                    <span style={{ color: c }}>→</span> <b>{f.recomandare}</b>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        )
+                      })}
+                  </ul>
+                </div>
+              )}
             </div>
           </section>
         )}
