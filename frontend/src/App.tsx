@@ -17,17 +17,14 @@ import {
   versionLabel,
   type ServerVersion,
 } from './lib/updateCheck'
-import { uiStrings } from './lib/i18n'
 import { watchdogInit } from './lib/watchdog'
 import { ConsimtamantFoto } from './components/ConsimtamantFoto'
 import { citesteConsimtamant, scrieConsimtamant, type StareConsimtamant } from './lib/consimtamant'
+import { isCalm } from './lib/activity'
 
 // MARTORUL GLOBAL de fiabilitate pornește o dată, la încărcare — prinde orice
 // blocaj al firului principal, oriunde în aplicație (vedere/voce/creier/…).
 watchdogInit()
-
-// How long the blocking update gate counts down before it applies by itself.
-const UPDATE_AUTO_SEC = 15
 
 export default function App() {
   const [loading, setLoading] = useState(true)
@@ -62,40 +59,31 @@ export default function App() {
     }
   }, [error])
 
-  // THE VERSION ROUTINE — POARTĂ BLOCANTĂ (Adrian, 11 aug: „rezolvă să fie
-  // permanent asta cu anunțarea update și să nu se poată continua până nu faci
-  // update-ul"). Înainte, bara de update se AMÂNA cât userul lucra (isCalm) —
-  // exact de-aia telefonul lui rămăsese pe cod vechi în timpul unei sesiuni de
-  // voce: numărătoarea nu pornea niciodată. Acum, la orice deploy nou, apare o
-  // POARTĂ care ACOPERĂ aplicația (nu se mai poate folosi pe versiunea veche),
-  // cu o numărătoare care aplică singură hard reset-ul — INDIFERENT de ce face
-  // userul (nicio pauză): scopul e chiar să întrerupă și să treacă pe nou. Un
-  // tab ascuns aplică imediat; butonul aplică pe loc.
-  const [updateReady, setUpdateReady] = useState(false)
-  const [updateIn, setUpdateIn] = useState(UPDATE_AUTO_SEC)
-  useEffect(() => watchForUpdate(() => setUpdateReady(true)), [])
+  // UPDATE AUTOMAT SILENȚIOS (protocol kelion.constructor/v1): la detectarea
+  // unei versiuni noi, se aplică hard reset IMEDIAT, fără niciun dialog/banner
+  // de confirmare și fără numărătoare inversă. Clientul se reîncarcă transparent
+  // în fundal — utilizatorul nu trebuie să facă nicio acțiune manuală.
+  // Verifică isCalm() înainte de reset — nu tăia sesiuni live (voce/brain/draft).
   useEffect(() => {
-    if (!updateReady) return
-    const applyIfHidden = (): void => {
-      if (document.visibilityState === 'hidden') void hardResetToLatest()
-    }
-    applyIfHidden()
-    document.addEventListener('visibilitychange', applyIfHidden)
-    const id = window.setInterval(() => {
-      // Fără pauză pe activitate: poarta blochează oricum aplicația, iar update-ul
-      // TREBUIE să se aplice — asta a cerut ownerul (nu continua pe versiunea veche).
-      setUpdateIn((n) => {
-        if (n > 1) return n - 1
-        window.clearInterval(id)
+    let resetPending = false
+    const tryReset = (): void => {
+      if (!resetPending) return
+      if (isCalm()) {
+        resetPending = false
         void hardResetToLatest()
-        return 0
-      })
-    }, 1000)
-    return () => {
-      document.removeEventListener('visibilitychange', applyIfHidden)
-      window.clearInterval(id)
+      }
+      // Dacă nu e calm, așteptăm și verificăm din nou la următorul tick
     }
-  }, [updateReady])
+    const stop = watchForUpdate(() => {
+      resetPending = true
+      tryReset()
+      // Poll until calm if not already
+      const poll = window.setInterval(tryReset, 1000)
+      // Stop polling after 5 minutes if still not calm
+      window.setTimeout(() => window.clearInterval(poll), 300_000)
+    })
+    return stop
+  }, [])
 
   // WATERMARK ALWAYS UP TO DATE (Adrian, Jul 10: "the new watermark should
   // appear automatically on any update, inside the apps" — it was written but
@@ -192,22 +180,6 @@ export default function App() {
       <div className="app-watermark" aria-hidden="true">
         {versionLabel(srv)}
       </div>
-      {/* POARTA DE UPDATE — BLOCANTĂ (Adrian, 11 aug: „să nu se poată continua
-      până nu faci update-ul"). Acoperă TOATĂ aplicația: pe versiunea veche nu se
-      mai poate lucra. Butonul aplică pe loc; numărătoarea aplică singură. În
-      limba userului după logare, engleză înainte (uiStrings le acoperă). */}
-      {updateReady && (
-        <div className="update-gate" role="alertdialog" aria-modal="true" aria-label={uiStrings().updateReady}>
-          <div className="update-gate-card">
-            <span className="update-gate-title">{uiStrings().updateReady}</span>
-            <span className="update-gate-msg">{uiStrings().updateBlock}</span>
-            <button type="button" className="update-gate-btn" onClick={() => void hardResetToLatest()}>
-              {uiStrings().updateNow}
-            </button>
-            <span className="update-gate-auto">{uiStrings().updateAuto.replace('{n}', String(updateIn))}</span>
-          </div>
-        </div>
-      )}
     </>
   )
 }
