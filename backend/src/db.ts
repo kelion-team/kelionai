@@ -4972,6 +4972,31 @@ export async function retryBuildJob(id: number, newOrderText?: string): Promise<
   }
 }
 
+/** AUTO-REMEDIERE (owner, 19 aug: „la eșec, imediat analiză + decizie + remediere,
+ *  automat"): la un eșec HARD REPARABIL, Kelion repune SINGUR ordinul în coadă,
+ *  imediat, cu o notă (recomandarea fermă) adăugată în log — pe care /next o
+ *  injectează în promptul reîncercării. `attempts=2` ca /next să pună analiza
+ *  (escaladare + coada logului). GĂRZI: atinge DOAR joburi 'failed' și NU dezgheață
+ *  erorile permanente (attempts=99, P27 — pungă/cheie). Plasa anti-BUCLĂ e contorul
+ *  kv din apelant (remediereEsec.MAX_AUTO_REMEDIERI), nu attempts — ca să nu ardă. */
+export async function remediazaAutomatBuildJob(id: number, nota: string): Promise<boolean> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
+  try {
+    const r = await getPool().query(
+      `UPDATE build_jobs
+         SET status='queued', attempts=2,
+             log = RIGHT(COALESCE(log,'') || E'\\n' || $2, 20000),
+             updated_at = now()
+       WHERE id=$1 AND status='failed' AND attempts < 99
+       RETURNING id`,
+      [id, String(nota || '').slice(0, 2000)],
+    )
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
 /** Anulează explicit un ordin în curs sau în coadă. `cancelled` este terminal,
  *  dar NU este eșec de execuție și nu deschide un incident fals. */
 export async function cancelBuildJob(id: number): Promise<boolean> {
