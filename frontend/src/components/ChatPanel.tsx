@@ -541,7 +541,11 @@ export default function ChatPanel({
       // rămânea mut cât LIVE era instalat — exact bugul.
       if (voiceTurnRef.current && vlRef.current) return
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
-      if (!requestTtsFocus()) return
+      // Gardul C: turele SCRISE (voiceTurnRef gol) trec chiar și cât LIVE ține
+      // focus-ul — LIVE nu rostește scrisul, deci Chirp-ul lui NU dublează nimic.
+      // Fără flag-ul ăsta, scrisul rămânea MUT sub LIVE (măsurat 19 aug: gardul C
+      // învingea relaxarea gardului A de mai sus). Blocajul între taburi rămâne.
+      if (!requestTtsFocus({ turaScrisa: !voiceTurnRef.current })) return
       contorGata('primul sunet (gura a pornit)')
       playVoice(
         c.audio,

@@ -1018,8 +1018,11 @@ export const PROMO_TOOL: Tool = {
 // Now the streamed text enters here AS it flows: at every sentence boundary, the
 // piece leaves for synthesis and the {audio} frame is written into the stream
 // while the text is still coming — Kelion speaks from the FIRST sentence.
-// Synthesis runs SERIALLY (sentence order = audio order); the speaking ceiling
-// stays at 4000 characters (Adrian, Jul 10: "audio output at least 1 minute").
+// Synthesis runs SERIALLY (sentence order = audio order). NO speaking ceiling
+// (Adrian, 19 aug: „se trunchiază la jumate audio — scoate limita de vorbit
+// audio"). The old 4000-char cap (10 iul, „audio măcar un minut") cut long
+// replies in half; Kelion now speaks the WHOLE reply. Each chunk stays ≤200
+// chars (splitForSpeech), so serial synthesis just streams more small pieces.
 function createVoiceStream(
   reply: { raw: { write(c: string): void } },
   lang: string | undefined,
@@ -1027,25 +1030,16 @@ function createVoiceStream(
   voicePref: string | null,
 ): { feed(t: string): void; fed(): boolean; finish(): Promise<void> } {
   let pending = '' // arrived text, not yet sent to synthesis
-  let spoken = 0 // characters already spoken (the 4000 ceiling)
   let any = false
-  let plafonRaportat = false // the 4000 ceiling was hit and logged once
   let chain: Promise<void> = Promise.resolve()
   const speak = (text: string): void => {
-    // PLAFONUL DE 4000 (Adrian, 10 iul: „audio măcar un minut") NU mai e o
-    // tăcere oarbă (Adrian, 5 aug: „audio se oprește la jumate dar scrisul e
-    // tot"). Când chiar îl atingem, o spunem în log O DATĂ — ca truncarea să
-    // NU mai fie invizibilă (regula #1: ce nu se măsoară nu se afirmă).
-    if (spoken >= 4000) {
-      if (!plafonRaportat) {
-        plafonRaportat = true
-        console.error('[VOCE] plafon 4000 caractere atins — restul răspunsului rămâne doar în scris')
-      }
-      return
-    }
+    // FĂRĂ PLAFON DE VORBIT (owner, 19 aug: „se trunchiază la jumate audio —
+    // scoate limita de vorbit audio"). Plafonul vechi de 4000 de caractere tăia
+    // răspunsurile lungi la jumate — restul rămânea doar scris. Kelion rostește
+    // ACUM tot răspunsul; fiecare bucată e deja mică (≤200 car., splitForSpeech),
+    // mult sub limita Google per cerere, deci sunt doar mai multe bucăți, în ordine.
     if (!text) return
-    const t = text.slice(0, 4000 - spoken)
-    spoken += t.length
+    const t = text
     chain = chain.then(async () => {
       // DOUĂ ÎNCERCĂRI, apoi LOG (Adrian, 5 aug: vocea se tăia la jumate iar
       // eșecul de sinteză era înghițit tăcut — `catch {}` + `if (r.ok)` fără
