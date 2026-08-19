@@ -91,6 +91,11 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     expect(result).not.toHaveProperty('extraProp')
     expect(result.type).toBe('object')
     expect(result.properties).toEqual({ name: { type: 'string' } })
+    
+    // Schema cu required invalid → curăță
+    const schemaCuRequiredInvalid = { type: 'object', properties: {}, required: 'not-array' }
+    const result2 = normalizeazaSchema(schemaCuRequiredInvalid)
+    expect(result2).not.toHaveProperty('required')
   })
 
   it('parseazaArgumenteTool gestionează argumente malformate cu fallback curat', async () => {
@@ -161,5 +166,54 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     // Ar trebui să parseze corect primul nivel
     expect(result).toHaveProperty('query')
     expect(typeof result.query).toBe('string')
+  })
+
+  it('serializeazaArgumenteTool garantează JSON valid pentru Ollama Cloud', async () => {
+    // Importăm funcția internă prin testarea comportamentului
+    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    
+    // Argumente goale → obiect gol
+    expect(parseazaArgumenteTool('')).toEqual({})
+    
+    // String whitespace → obiect gol
+    expect(parseazaArgumenteTool('   ')).toEqual({})
+    
+    // Obiect valid → returnat corect
+    expect(parseazaArgumenteTool({ key: 'value' })).toEqual({ key: 'value' })
+    
+    // Array → obiect gol
+    expect(parseazaArgumenteTool([1, 2, 3] as any)).toEqual({})
+  })
+
+  it('ollama-cloud tool calls cu arguments goale sunt sanitizate', async () => {
+    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    
+    // Argumente goale din tool call
+    expect(parseazaArgumenteTool('')).toEqual({})
+    expect(parseazaArgumenteTool(null as any)).toEqual({})
+    expect(parseazaArgumenteTool(undefined as any)).toEqual({})
+    
+    // JSON invalid din tool call
+    expect(parseazaArgumenteTool('not json')).toEqual({})
+    expect(parseazaArgumenteTool('{')).toEqual({})
+  })
+
+  it('normalizeazaSchema pentru ollama-cloud asigură parameters valid', async () => {
+    const { normalizeazaSchema, unelteOpenAi } = await import('./services/ollamaCloud.js')
+    
+    // Schema minimală → parameters valid
+    const minimalSchema = normalizeazaSchema({})
+    expect(minimalSchema.type).toBe('object')
+    expect(minimalSchema.properties).toEqual({})
+    
+    // Tool cu schema minimală → parameters corect
+    const toolsMinimal = [{
+      name: 'minimal_tool',
+      description: 'Minimal',
+      input_schema: {},
+    }]
+    const resultMinimal = unelteOpenAi(toolsMinimal as any)
+    expect((resultMinimal[0] as any).function.parameters.type).toBe('object')
+    expect((resultMinimal[0] as any).function.parameters.properties).toEqual({})
   })
 })

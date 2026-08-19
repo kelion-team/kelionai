@@ -28,7 +28,7 @@ function continutOpenAi(m: OrMessage): unknown {
   return parts.length ? parts : ''
 }
 
-/** Serializare sigură a argumentelor de tool call — garantează string JSON valid. */
+/** Serializare sigură a argumentelor de tool call — garantează string JSON valid pentru Ollama Cloud. */
 function serializeazaArgumenteTool(args: unknown): string {
   if (args === null || args === undefined) {
     return '{}'
@@ -40,6 +40,7 @@ function serializeazaArgumenteTool(args: unknown): string {
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return JSON.stringify(parsed)
       }
+      // String valid dar nu e object → obiect gol
       return '{}'
     } catch {
       // String invalid JSON → fallback la obiect gol
@@ -52,12 +53,46 @@ function serializeazaArgumenteTool(args: unknown): string {
       return '{}'
     }
     try {
-      return JSON.stringify(args)
+      const serialized = JSON.stringify(args)
+      // Verifică că nu e string gol sau doar whitespace
+      if (!serialized || serialized.trim() === '{}') {
+        return '{}'
+      }
+      return serialized
     } catch {
       return '{}'
     }
   }
+  // Tipuri primitive → obiect gol
   return '{}'
+}
+
+/** Parsează argumente tool call din string JSON — cu fallback curat pentru Ollama Cloud. */
+export function parseazaArgumenteTool(args: unknown): Record<string, unknown> {
+  if (args === null || args === undefined) {
+    return {}
+  }
+  if (typeof args === 'object') {
+    if (Array.isArray(args)) {
+      return {}
+    }
+    return args as Record<string, unknown>
+  }
+  if (typeof args === 'string') {
+    if (!args || args.trim() === '') {
+      return {}
+    }
+    try {
+      const parsed = JSON.parse(args)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+      return {}
+    } catch {
+      return {}
+    }
+  }
+  return {}
 }
 
 function mesajeOpenAi(messages: OrMessage[]): Record<string, unknown>[] {
@@ -71,14 +106,20 @@ function mesajeOpenAi(messages: OrMessage[]): Record<string, unknown>[] {
       out.push({
         role: 'assistant',
         content: typeof m.content === 'string' ? m.content : '',
-        tool_calls: m.tool_calls.map((c) => ({
-          id: c.id,
-          type: 'function',
-          function: { 
-            name: c.function.name, 
-            arguments: serializeazaArgumenteTool(c.function.arguments) 
-          },
-        })),
+        tool_calls: m.tool_calls.map((c) => {
+          // Validează și structurează argumentele pentru Ollama Cloud
+          const argsStr = serializeazaArgumenteTool(c.function.arguments)
+          // Parsează pentru a确保 e obiect valid, apoi re-serializază
+          const argsObj = parseazaArgumenteTool(argsStr)
+          return {
+            id: c.id,
+            type: 'function',
+            function: { 
+              name: c.function.name, 
+              arguments: JSON.stringify(argsObj),
+            },
+          }
+        }),
       })
       continue
     }
@@ -121,18 +162,36 @@ export function normalizeazaSchema(schema: unknown): Record<string, unknown> {
       }
     }
   }
+  // Asigură că required e array dacă există
+  if (cleaned.required && !Array.isArray(cleaned.required)) {
+    delete cleaned.required
+  }
   return cleaned
 }
 
 export function unelteOpenAi(tools: AnthropicTool[]): unknown[] {
-  return tools.map((t) => ({
-    type: 'function',
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: normalizeazaSchema(t.input_schema ?? { type: 'object', properties: {} }),
-    },
-  }))
+  return tools.map((t) => {
+    const schema = normalizeazaSchema(t.input_schema ?? { type: 'object', properties: {} })
+    // Asigură că parameters are structura corectă pentru Ollama Cloud
+    const parameters: Record<string, unknown> = {
+      type: schema.type || 'object',
+      properties: schema.properties || {},
+    }
+    if (schema.required && Array.isArray(schema.required) && (schema.required as string[]).length > 0) {
+      parameters.required = schema.required
+    }
+    if (schema.description) {
+      parameters.description = schema.description
+    }
+    return {
+      type: 'function',
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters,
+      },
+    }
+  })
 }
 
 function dinRaspunsOpenAi(j: {
@@ -148,14 +207,19 @@ function dinRaspunsOpenAi(j: {
 }, modelCerut: string): OrChatResult {
   const msg = j.choices?.[0]?.message
   const text = String(msg?.content ?? '')
-  const toolCalls: OrToolCall[] = (msg?.tool_calls ?? []).map((c, i) => ({
-    id: c.id || `oc_${i}_${Math.random().toString(36).slice(2, 8)}`,
-    type: 'function' as const,
-    function: { 
-      name: c.function?.name || 'tool', 
-      arguments: serializeazaArgumenteTool(c.function?.arguments) 
-    },
-  }))
+  const toolCalls: OrToolCall[] = (msg?.tool_calls ?? []).map((c, i) => {
+    // Parsează și validează argumentele din răspuns
+    const argsStr = c.function?.arguments ?? '{}'
+    const argsObj = parseazaArgumenteTool(argsStr)
+    return {
+      id: c.id || `oc_${i}_${Math.random().toString(36).slice(2, 8)}`,
+      type: 'function' as const,
+      function: { 
+        name: c.function?.name || 'tool', 
+        arguments: JSON.stringify(argsObj),
+      },
+    }
+  })
   const inTok = Number(j.usage?.prompt_tokens ?? 0) || 0
   const outTok = Number(j.usage?.completion_tokens ?? 0) || 0
   // Costul real e pe soldul Ollama (extra usage) — aici 0 ca să nu fabricăm USD.
@@ -288,11 +352,15 @@ export async function ollamaCloudChatStream(
   }
   const toolCalls: OrToolCall[] = [...toolAcc.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([, v]) => ({
-      id: v.id,
-      type: 'function' as const,
-      function: { name: v.name || 'tool', arguments: serializeazaArgumenteTool(v.args) },
-    }))
+    .map(([, v]) => {
+      // Parsează și validează argumentele acumulate din stream
+      const argsObj = parseazaArgumenteTool(v.args)
+      return {
+        id: v.id,
+        type: 'function' as const,
+        function: { name: v.name || 'tool', arguments: JSON.stringify(argsObj) },
+      }
+    })
   return {
     text,
     toolCalls,
