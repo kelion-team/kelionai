@@ -301,8 +301,8 @@ const BOOT_AT = new Date().toISOString()
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 // AUTO-VERSIUNE (owner, 13 aug: „se incrementează singură la fiecare publicare,
 // +0.1"). Se calculează o dată la boot, din KV (vezi mai jos, după initDb) —
-// V1.0, V1.1, V1.2 … Până când KV răspunde (sau fără DB), cade pe „1.0".
-let VERSIUNE_AUTO = '1.0'
+// V0.0, V0.1, V0.2 … Până când KV răspunde (sau fără DB), cade pe „1.0".
+let VERSIUNE_AUTO = '0.0'
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')
   // `adminCfg` (9 aug, „flux admin 403 — trebuie 200"): spune dacă emailul de
@@ -376,7 +376,7 @@ try {
   await incarcaModelUnic().catch(() => {})
   // AUTO-VERSIUNE (owner, 13 aug): contor persistent care urcă cu 1 la FIECARE
   // publicare nouă (sha de deploy nou), NU la fiecare restart pe același sha. Bază
-  // 1.0, +0.1/publicare → V1.0, V1.1 … (1.9→2.0). Fără DB rămâne „1.0" (regula 1:
+  // 0.0, +0.1/publicare → V0.0, V0.1 … (1.9→2.0). Fără DB rămâne „1.0" (regula 1:
   // nu inventăm o urcare pe o citire eșuată). Best-effort — nu blochează pornirea.
   try {
     const ultimulSha = (await loadKv('deploy_last_sha')) ?? ''
@@ -386,7 +386,7 @@ try {
       await saveKv('deploy_count', String(n))
       await saveKv('deploy_last_sha', DEPLOY_V)
     }
-    VERSIUNE_AUTO = ((10 + n) / 10).toFixed(1)
+    VERSIUNE_AUTO = (n / 10).toFixed(1)
   } catch {
     /* KV indisponibil — rămâne „1.0", se corectează la următoarea publicare cu DB viu */
   }
