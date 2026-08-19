@@ -4609,29 +4609,23 @@ const MIN_JOB_BLOCAT = 15
 // so an impossible order doesn't block the queue forever.
 export async function claimNextBuildJob(): Promise<BuildJob | null> {
   if (!dbEnabled()) return null
+  // ÎNTÂI, IZOLAT: abandonarea joburilor blocate + jurnalul incidentelor, în
+  // tranzacția LOR, BEST-EFFORT. E DESPRINSĂ de preluare pe o cauză MĂSURATĂ în
+  // Postgres: orice query care aruncă (schemă de incident stricată, constrângere,
+  // upsert întors gol) AVORTEAZĂ toată tranzacția — iar înainte abandonarea +
+  // `upsertConstructorIncident` rulau în ACEEAȘI tranzacție cu preluarea, deci un
+  // singur incident care pica rostogolea ÎNTREG claim-ul → `null` la FIECARE tur →
+  // coada rămânea neatinsă la nesfârșit („ordine în coadă dar nu se apucă nimeni").
+  // Acum bookkeeping-ul de incidente NU mai poate înfometa coada: dacă pică, se
+  // loghează și preluarea merge mai departe.
+  await abandoneazaJoburileBlocate().catch((e) => {
+    console.error('[constructor] abandonare/incidente a picat (nefatal pentru preluare):', e instanceof Error ? e.message : e)
+  })
+  // APOI: preluarea propriu-zisă, în tranzacția ei — niciodată blocată de
+  // bookkeeping-ul de mai sus.
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    const abandoned = await client.query<{
-      id: string | number
-      order_text: string
-      log: string | null
-      progress: string | null
-      attempts: number
-    }>(
-      `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandoned: 3 attempts exhausted]', updated_at = now()
-       WHERE status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND attempts >= 3
-       RETURNING id, order_text, log, progress, attempts`,
-    )
-    for (const row of abandoned.rows) {
-      await upsertConstructorIncident(client, {
-        id: Number(row.id),
-        orderText: row.order_text,
-        log: row.log ?? '[abandoned: 3 attempts exhausted]',
-        progress: row.progress ?? '',
-        attempts: row.attempts,
-      })
-    }
     const r = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
        WHERE id = (
@@ -4647,6 +4641,53 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
   } catch {
     await client.query('ROLLBACK').catch(() => {})
     return null
+  } finally {
+    client.release()
+  }
+}
+
+// Abandonează joburile 'running' blocate (≥3 încercări, tăcute peste pragul de
+// blocaj) și le trece pe 'failed', deschizând câte un incident pentru fiecare.
+// FIECARE incident e izolat cu SAVEPOINT: un upsert care aruncă NU mai avortează
+// abandonarea celorlalte — și, fiindcă rulează în tranzacția asta separată, nici
+// preluarea din `claimNextBuildJob`. Best-effort prin construcție.
+async function abandoneazaJoburileBlocate(): Promise<void> {
+  if (!dbEnabled()) return
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const abandoned = await client.query<{
+      id: string | number
+      order_text: string
+      log: string | null
+      progress: string | null
+      attempts: number
+    }>(
+      `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandoned: 3 attempts exhausted]', updated_at = now()
+       WHERE status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND attempts >= 3
+       RETURNING id, order_text, log, progress, attempts`,
+    )
+    for (const row of abandoned.rows) {
+      await client.query('SAVEPOINT incident')
+      try {
+        await upsertConstructorIncident(client, {
+          id: Number(row.id),
+          orderText: row.order_text,
+          log: row.log ?? '[abandoned: 3 attempts exhausted]',
+          progress: row.progress ?? '',
+          attempts: row.attempts,
+        })
+        await client.query('RELEASE SAVEPOINT incident')
+      } catch (e) {
+        // Un incident care pică nu blochează abandonarea (status='failed' rămâne)
+        // și nici preluarea următoare — ne întoarcem la savepoint și mergem mai departe.
+        await client.query('ROLLBACK TO SAVEPOINT incident').catch(() => {})
+        console.error(`[constructor] incident job ${row.id} a picat (izolat):`, e instanceof Error ? e.message : e)
+      }
+    }
+    await client.query('COMMIT')
+  } catch {
+    await client.query('ROLLBACK').catch(() => {})
   } finally {
     client.release()
   }

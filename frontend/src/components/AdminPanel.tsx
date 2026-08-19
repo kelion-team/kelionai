@@ -666,6 +666,11 @@ export default function AdminPanel({
   // FREE ↔ PLĂTIT… se aprinde când lipesc cheia"). `cloud` = proba MĂSURATĂ a cheii.
   const [creierCfg, setCreierCfg] = useState<{ creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }>({ creier2: 'gemini', constructorSursa: 'free' })
   const [cloudProba, setCloudProba] = useState<{ ok: boolean; motiv: string; modele: string[] } | null>(null)
+  // PULSUL LUCRĂTORULUI de pe VPS (owner, 19 aug: „are ordine in coada dar nu se
+  // apuca… de ce?"): VIU dacă a cerut ordin recent; mort → ordinele stau în coadă
+  // fiindcă nu le cere nimeni (cron/worker oprit), nu din vina app-ului.
+  const [lucratorPuls, setLucratorPuls] = useState<{ lastPoll: number; ageSec: number | null; viu: boolean; pragMs: number } | null>(null)
+  const [inCoada, setInCoada] = useState<number>(0)
   const [ollamaKeyInput, setOllamaKeyInput] = useState('')
   const [creierMsg, setCreierMsg] = useState('')
   // „nu stă butonul" (owner, 16 aug): reîncărcarea la 10s scria peste alegerea
@@ -995,7 +1000,7 @@ export default function AdminPanel({
   const refreshBuildJobs = (): void => {
     fetch('/api/admin/constructor', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string }; creier?: { creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }; cloud?: { ok: boolean; motiv: string; modele: string[] } } | null) => {
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string }; creier?: { creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }; cloud?: { ok: boolean; motiv: string; modele: string[] }; lucrator?: { lastPoll: number; ageSec: number | null; viu: boolean; pragMs: number }; inCoada?: number } | null) => {
         // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
         // nu se lasă „Niciun ordin încă" peste o citire picată.
         if (j?.jobs) {
@@ -1005,6 +1010,8 @@ export default function AdminPanel({
           setOllamaProba(j.ollama ?? null)
           if (j.creier && !creierEditatRef.current) setCreierCfg(j.creier)
           setCloudProba(j.cloud ?? null)
+          setLucratorPuls(j.lucrator ?? null)
+          setInCoada(Number(j.inCoada) || 0)
         } else setBuildJobs(null)
       })
       .catch(() => setBuildJobs(null))
@@ -2818,6 +2825,27 @@ export default function AdminPanel({
                           : ollamaProba.ok
                             ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
                             : `· 🔴 Ollama nu răspunde pe host (${ollamaProba.motiv.slice(0, 50)})`}
+                    </span>
+                    {/* PULSUL LUCRĂTORULUI (owner, 19 aug: „are ordine in coada dar nu
+                        se apuca aider… de ce?"). Dovada MĂSURATĂ că workerul de pe VPS
+                        mai cere ordine. Mort + ordine în coadă = de-aceea stau (cron/
+                        worker oprit), NU din vina app-ului. */}
+                    <span
+                      className="chat-hint"
+                      style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: lucratorPuls == null ? undefined : lucratorPuls.viu ? '#1a7f37' : '#c1121f' }}
+                      title={lucratorPuls == null
+                        ? 'pulsul lucrătorului încă nu s-a citit'
+                        : lucratorPuls.lastPoll === 0
+                          ? 'lucrătorul de pe VPS nu a cerut niciun ordin de la ultima repornire — cronul (la 2 min) pare oprit'
+                          : `ultima cerere de ordin acum ${lucratorPuls.ageSec}s (prag viu: ${Math.round(lucratorPuls.pragMs / 60000)} min)`}
+                    >
+                      {lucratorPuls == null
+                        ? '· lucrător: puls…'
+                        : lucratorPuls.viu
+                          ? `· 🟢 lucrător VIU (a cerut ordin acum ${lucratorPuls.ageSec}s)`
+                          : lucratorPuls.lastPoll === 0
+                            ? `· 🔴 lucrătorul NU cere ordine (cron/worker oprit pe VPS)${inCoada ? ` — ${inCoada} în coadă din cauza asta` : ''}`
+                            : `· 🔴 lucrătorul tăcut de ${Math.round((lucratorPuls.ageSec ?? 0) / 60)} min (cron/worker oprit?)${inCoada ? ` — ${inCoada} în coadă` : ''}`}
                     </span>
                   </div>
                   {/* ── COMUTATORUL CREIER 2 + CONSTRUCTOR (owner, 16 aug: „creier 2 →

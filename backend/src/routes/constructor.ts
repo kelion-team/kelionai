@@ -104,12 +104,20 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const { probaAider } = await import('../services/aiderProba.js')
     const { probaOllama } = await import('../services/ollamaProba.js')
     const { getConfigCreier, probaOllamaCloud } = await import('../services/creierCloud.js')
-    const [aider, ollama, creierCfg, cloud] = await Promise.all([
+    const { loadKv } = await import('../db.js')
+    const { verdictPulsLucrator } = await import('../services/pulsLucrator.js')
+    const [aider, ollama, creierCfg, cloud, lastPollRaw] = await Promise.all([
       probaAider().catch((e) => ({ ok: false, versiune: '', motiv: String(e).slice(0, 200) })),
       probaOllama().catch((e) => ({ ok: false, modele: [] as string[], motiv: String(e).slice(0, 200) })),
       getConfigCreier().catch(() => ({ creier2: 'gemini' as const, constructorSursa: 'free' as const })),
       probaOllamaCloud().catch((e) => ({ ok: false, motiv: String(e).slice(0, 200), modele: [] as string[] })),
+      loadKv('constructor:worker:lastPoll').catch(() => null),
     ])
+    // PULSUL LUCRĂTORULUI: dovada MĂSURATĂ că workerul de pe VPS mai cere ordine.
+    // Dacă e mort (bătaie veche / niciodată), panoul spune EXACT asta — de-aceea
+    // stau ordinele în coadă, nu dintr-un mister. Câte ordine chiar așteaptă (queued).
+    const lucrator = verdictPulsLucrator(Number(lastPollRaw) || 0, Date.now())
+    const inCoada = jobs.filter((j) => j.status === 'queued').length
     return reply.send({
       jobs,
       paused: await isOpsPaused().catch(() => false),
@@ -117,6 +125,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       ollama, // { ok, modele, motiv } — creierul LOCAL al lui Aider, probat pe VPS (ollama list)
       creier: creierCfg, // { creier2, constructorSursa } — alegerea ownerului (panou)
       cloud, // { ok, motiv, modele } — cheia Ollama cloud, probată MĂSURAT (nu presupus)
+      lucrator, // { lastPoll, ageSec, viu, pragMs } — VIU dacă a cerut ordin recent
+      inCoada, // câte ordine stau efectiv în coadă (queued) — context pentru puls
     })
   })
 
@@ -248,6 +258,13 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/constructor/next', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
+    // HEARTBEAT-UL LUCRĂTORULUI (owner, 19 aug: „are ordine in coada dar nu se apuca
+    // aider… de ce?"). Fiecare cerere de ordin scrie ACUM în kv — dovada VIE că
+    // cronul de pe VPS trăiește. Panoul o citește (vezi GET /api/admin/constructor):
+    // dacă bătaia e veche, workerul/cronul e oprit, iar ordinele stau în coadă DIN
+    // CAUZA ASTA (nu a app-ului). Fire-and-forget: un beat pierdut nu strică nimic.
+    const { saveKv } = await import('../db.js')
+    void saveKv('constructor:worker:lastPoll', String(Date.now())).catch(() => {})
     if ((await isOpsPaused()) || !(await autonomActiv().catch(() => true)))
       return reply.send({ job: null, paused: true })
     const job = await claimNextBuildJob()

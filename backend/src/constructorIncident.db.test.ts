@@ -50,6 +50,9 @@ const fake = vi.hoisted(() => ({
   nextIncidentId: 1,
   queries: [] as string[],
   unreadableKnowledge: false,
+  // Când e true, INSERT-ul de incident ARUNCĂ (schemă/constrângere stricată) —
+  // ca să probăm că un incident picat NU mai avortează abandonarea + preluarea.
+  incidentInsertThrows: false,
 }))
 
 vi.mock('pg', () => {
@@ -58,6 +61,9 @@ vi.mock('pg', () => {
     const sql = String(sqlRaw).replace(/\s+/g, ' ').trim()
     fake.queries.push(sql)
     if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) return result([])
+    // Savepoint-urile (izolarea per-incident) sunt no-op în mock — modelăm doar
+    // efectul: ROLLBACK TO SAVEPOINT nu atinge starea deja scrisă (abandonarea).
+    if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)\b/.test(sql)) return result([])
 
     if (sql.startsWith('UPDATE build_jobs SET status=$2')) {
       const job = fake.jobs.get(Number(params[0]))
@@ -80,6 +86,7 @@ vi.mock('pg', () => {
     }
 
     if (sql.startsWith('INSERT INTO constructor_incidents')) {
+      if (fake.incidentInsertThrows) throw new Error('simulated: constructor_incidents constraint violation')
       const [jobId, fingerprint, state, stage, causeCode, causeSummary, evidence, responsible, nextAction] = params
       const existing = [...fake.incidents.values()].find((row) => row.fingerprint === fingerprint)
       const now = new Date()
@@ -285,6 +292,7 @@ beforeEach(() => {
   fake.nextIncidentId = 1
   fake.queries.length = 0
   fake.unreadableKnowledge = false
+  fake.incidentInsertThrows = false
 })
 
 describe('constructor incident — bucla DB închisă', () => {
@@ -371,7 +379,7 @@ describe('constructor incident — bucla DB închisă', () => {
     expect(await getConstructorIncidentKnowledge()).toBeNull()
   })
 
-  it('transformă stale + 3 încercări în failure și incident în aceeași tranzacție', async () => {
+  it('transformă stale + 3 încercări în failure și incident (bookkeeping izolat de preluare)', async () => {
     const stale = job(5, 'Repair stale worker heartbeat')
     stale.attempts = 3
     fake.jobs.set(5, stale)
@@ -379,6 +387,27 @@ describe('constructor incident — bucla DB închisă', () => {
     expect(await claimNextBuildJob()).toBeNull()
     expect(fake.jobs.get(5)?.status).toBe('failed')
     expect([...fake.incidents.values()][0]?.cause_code).toBe('timeout')
+  })
+
+  // ── owner, 19 aug: „are ordine in coada dar nu se apuca aider… de ce?" ───────
+  // CAUZA MĂSURATĂ: abandonarea + upsertConstructorIncident rulau în ACEEAȘI
+  // tranzacție cu preluarea. În Postgres orice query care aruncă avortează toată
+  // tranzacția → un singur incident stricat rostogolea claim-ul → `null` la FIECARE
+  // tur → coada rămânea neatinsă la nesfârșit. Acum bookkeeping-ul e izolat: un
+  // incident care ARUNCĂ nu mai împiedică nici abandonarea, nici preluarea.
+  it('un incident care ARUNCĂ nu mai blochează preluarea (coada nu mai e înfometată)', async () => {
+    const stale = job(7, 'Repair stale worker heartbeat')
+    stale.attempts = 3
+    fake.jobs.set(7, stale)
+    fake.incidentInsertThrows = true
+
+    // NU aruncă — se rezolvă curat (null: nu există job queued în acest mock).
+    await expect(claimNextBuildJob()).resolves.toBeNull()
+    // Abandonarea a persistat, în ciuda incidentului picat.
+    expect(fake.jobs.get(7)?.status).toBe('failed')
+    // Izolarea a intrat în funcțiune (savepoint rollback), nu un ROLLBACK global.
+    expect(fake.queries).toContain('ROLLBACK TO SAVEPOINT incident')
+    fake.incidentInsertThrows = false
   })
 
   it('anularea ownerului este cancelled, nu failed și nu creează incident fals', async () => {

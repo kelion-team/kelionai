@@ -13,6 +13,16 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 19 aug (verbatim): „are ordine in coada dar nu se apuca aider sau altcineva
+      de reparat, de ce?". CAUZA (în cod, nu pe VPS): `claimNextBuildJob` rula
+      abandonarea + `upsertConstructorIncident` în ACEEAȘI tranzacție cu preluarea →
+      un incident care arunca avorta tot claim-ul (Postgres) → `null` la fiecare tur →
+      coada înfometată la nesfârșit. FIX: bookkeeping izolat (tranzacție proprie +
+      savepoint/incident), preluarea niciodată blocată. + PULSUL lucrătorului vizibil
+      pe panou (heartbeat `/api/constructor/next` → „🟢 VIU acum Xs" / „🔴 tăcut de X
+      min, cron oprit? — N în coadă") ca să NU mai fie cutie neagră de ce nu se apucă.
+      DOVEZI: pulsLucrator.test 6/6, incident-care-aruncă→preluarea merge, suită
+      1865/1865, 7 porți 0. NU POT VERIFICA cronul de pe VPS de aici — dar panoul îl arată.
 - [x] ORDIN 19 aug (verbatim): „constructorul nu repara, nici ieftin nici platit" +
       „obligatoriu tot ce e free si constructor trebuie sa repare… rezolva real cu
       dovezi ca free functioneaza". CAUZA (în cod): poarta protocolului strict
