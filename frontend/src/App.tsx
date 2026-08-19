@@ -17,7 +17,6 @@ import {
   versionLabel,
   type ServerVersion,
 } from './lib/updateCheck'
-import { uiStrings } from './lib/i18n'
 import { watchdogInit } from './lib/watchdog'
 import { ConsimtamantFoto } from './components/ConsimtamantFoto'
 import { citesteConsimtamant, scrieConsimtamant, type StareConsimtamant } from './lib/consimtamant'
