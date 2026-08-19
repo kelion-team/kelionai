@@ -70,6 +70,48 @@ export function tagModelCloud(creier2: ModelCreier2): string {
   return creier2 === 'kimi-k3' || creier2 === 'qwen3.5' ? MODELE_CLOUD[creier2] : ''
 }
 
+// ── DECIZIA free/plătit PENTRU HOST-UL CONSTRUCTORULUI (pură, PROBABILĂ) ──────
+// Extrasă din ruta /api/constructor/creier-config ca să fie testată pe FIECARE
+// combinație (owner, 19 aug: „asigură-te că orice mod de comutare free/plătit,
+// identic la creier, funcționează real, inclusiv între ele — aștept dovezile").
+// Comportament IDENTIC cu ruta: FREE-FIRST (pornește free), paid e REZERVĂ doar
+// când e gata (creier cloud ales + cheie + model); `constructorSursa='platit'`
+// forțează paid explicit DACĂ rezerva e gata. Pe Gemini nu există model cloud →
+// rămâne free (nu inventează un paid imposibil). Cheia merge întreagă DOAR pe
+// canalul autentificat (host); în diagnostic se dă doar coada mascată.
+export interface RezervaPlatit {
+  sursa: 'platit'
+  model: string
+  base: string
+  cheie: string
+  cheieCoada: string
+}
+export interface ConfigConstructorHost {
+  sursa: SursaConstructor // sursa de START a run-ului (free-first, except forțare panou)
+  preferred: 'free'
+  fallback: RezervaPlatit | null // rezerva paid, dacă e gata (fără a o porni)
+  model: string // compat worker vechi: ce folosește DACĂ e pe platit ACUM
+  base: string
+  cheie: string
+  paidDisponibil: boolean // rezerva paid e disponibilă?
+}
+export function decideConfigConstructor(cfg: ConfigCreier, cheie: string): ConfigConstructorHost {
+  const modelCloud = tagModelCloud(cfg.creier2)
+  const paidGata = cfg.creier2 !== 'gemini' && !!cheie && !!modelCloud
+  const fortatPlatit = cfg.constructorSursa === 'platit' && paidGata
+  return {
+    sursa: fortatPlatit ? 'platit' : 'free',
+    preferred: 'free',
+    fallback: paidGata
+      ? { sursa: 'platit', model: modelCloud, base: bazaOllamaCloud(), cheie, cheieCoada: cheie.length > 8 ? `…${cheie.slice(-4)}` : 'set' }
+      : null,
+    model: fortatPlatit ? modelCloud : '',
+    base: fortatPlatit ? bazaOllamaCloud() : '',
+    cheie: fortatPlatit ? cheie : '',
+    paidDisponibil: paidGata,
+  }
+}
+
 let cacheProba: { la: number; ok: boolean; motiv: string; modele: string[] } | null = null
 /** PROBA REALĂ: cheia chiar POATE RULA pe Ollama cloud modelul ales? Măsurat cu o
  *  cerere minimă `POST /v1/chat/completions` (max_tokens 1) — NU `GET /v1/models`,
