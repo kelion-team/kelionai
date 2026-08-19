@@ -155,36 +155,13 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/constructor/creier-config', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
-    const { getConfigCreier, getCheieOllama, tagModelCloud, bazaOllamaCloud } = await import('../services/creierCloud.js')
+    // Decizia free/plătit e o funcție PURĂ, probată pe fiecare combinație
+    // (creierCloud.decideConfigConstructor). Cheia merge DOAR aici, pe canalul
+    // autentificat (x-bridge-secret); nu o logăm și nu ajunge pe panoul public.
+    const { getConfigCreier, getCheieOllama, decideConfigConstructor } = await import('../services/creierCloud.js')
     const cfg = await getConfigCreier()
     const cheie = await getCheieOllama()
-    const modelCloud = tagModelCloud(cfg.creier2)
-    const paidGata = cfg.creier2 !== 'gemini' && !!cheie && !!modelCloud
-    // Manual force: owner a comutat constructor pe plătit ȘI rezervă e gata.
-    const fortatPlatit = cfg.constructorSursa === 'platit' && paidGata
-    // Cheia merge DOAR la worker (x-bridge-secret) — necesară pentru Aider paid.
-    // Nu o logăm nicăieri; răspunsul e pe canal autentificat, nu pe panou public.
-    return reply.send({
-      // sursa de START a run-ului (free-first, except forțare panou)
-      sursa: fortatPlatit ? 'platit' : 'free',
-      preferred: 'free' as const,
-      fallback: paidGata
-        ? {
-            sursa: 'platit' as const,
-            model: modelCloud,
-            base: bazaOllamaCloud(),
-            cheie,
-            // coadă mascată pentru diagnostice fără a expune secretul întreg în loguri greșite
-            cheieCoada: cheie.length > 8 ? `…${cheie.slice(-4)}` : 'set',
-          }
-        : null,
-      // compat worker vechi: câmpurile model/base/cheie = ce folosește DACĂ e pe platit acum
-      model: fortatPlatit ? modelCloud : '',
-      base: fortatPlatit ? bazaOllamaCloud() : '',
-      cheie: fortatPlatit ? cheie : '',
-      // rezervă disponibilă? (fără a o porni)
-      paidDisponibil: paidGata,
-    })
+    return reply.send(decideConfigConstructor(cfg, cheie))
   })
 
   // (COMUTATORUL „Fable 5 forțat" a fost SCOS — owner, 16 aug: „constructor unic
