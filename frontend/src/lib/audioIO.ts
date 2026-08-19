@@ -34,8 +34,8 @@ const MAX_UTTER_MS = 60_000 // buffer mare: o frază poate dura până la 60s
 // Stricter thresholds than normal VOX: echoCancellation removes Kelion's voice
 // from the microphone, but a residue can remain — we require a clear, sustained signal
 // so he doesn't cut himself off.
-const BARGE_RMS = 0.024 // dublul pragului normal: doar voce apropiată, clară
-const BARGE_HOLD_MS = 180 // vocea trebuie să țină atât ca să taie (nu un poc)
+const BARGE_RMS = 0.035 // dublul pragului normal: doar voce apropiată, clară
+const BARGE_HOLD_MS = 280 // vocea trebuie să țină atât ca să taie (nu un poc)
 const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe redarea (onset)
 
 // ── VOICEPRINT ─────────────────────────────────────────────────────────────
@@ -439,7 +439,7 @@ export async function startMic(
   onBargeIn?: () => void,
   // Adrian's order: "only my voice or my writing". true = the admin — if
   // there's no calibrated profile yet, the microphone accepts NO voice (not enrolled,
-  // not „any voice”). false = the demo role (public visitors) — the behavior
+  // not „any voice"). false = the demo role (public visitors) — the behavior
   // stays exactly as today: without a profile, accepts any voice above threshold.
   restrictToOwnerVoice = false,
   // stream pre-warmed by pressing the "mic on" button for instant activation.
