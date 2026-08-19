@@ -532,18 +532,25 @@ export default function ChatPanel({
     // While it speaks, the microphone doesn't send (anti-echo), but stays on watch:
     // vocea lui Adrian taie redarea pe loc (barge-in, vezi ensureMic).
     if (c.audio) {
-      // AUDIO FOCUS (17 aug): LIVE is the priority mouth. If LIVE holds focus,
-      // drop Chirp {audio} — one voice, full-duplex stays on LIVE, barge-in works.
-      // Classic OpenAI realtime (isRealtime) keeps the same single-mouth rule.
-      if (vlRef.current) return
+      // O TURĂ = O SINGURĂ GURĂ (owner, 19 aug: „e tot dublat… nu sti pe unde iese").
+      // Regula corectă cheie pe CE FEL DE TURĂ e, nu pe „LIVE e instalat" (LIVE e
+      // permanent, dar rostește DOAR turele VOCALE, prin WS — n-are `speak()` pentru
+      // text scris). Deci: dacă e o tură VOCALĂ pe care LIVE deja o rostește → aruncăm
+      // Chirp-ul (altfel dublăm). Pe turele SCRISE, LIVE nu spune nimic → REDĂM Chirp-ul
+      // (calea `<audio>` care ajunge pe Bluetooth ȘI mișcă gura). Fără asta, scrisul
+      // rămânea mut cât LIVE era instalat — exact bugul.
+      if (voiceTurnRef.current && vlRef.current) return
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
       if (!requestTtsFocus()) return
       contorGata('primul sunet (gura a pornit)')
       playVoice(
         c.audio,
-        () => { micRef.current?.setMuted(true) },
+        // Cât redă Chirp-ul, mutăm ȘI microfonul clasic ȘI urechea LIVE
+        // (setRedareExterna) ca modelul să nu se audă pe el însuși (anti-ecou).
+        () => { micRef.current?.setMuted(true); vlRef.current?.setRedareExterna(true) },
         () => {
           micRef.current?.setMuted(false)
+          vlRef.current?.setRedareExterna(false)
           releaseTtsFocus()
         },
       )
@@ -1315,11 +1322,13 @@ export default function ChatPanel({
         voiceFeatures,
         face?.descriptor,
         face?.photo,
-        // LIVE AUDIO PRIORITY (17 aug): when LIVE (vlRef) or classic realtime is
-        // the mouth, serverVoiceOff skips Chirp synthesis — faster, cheaper, one voice.
-        // Written-only turns (no LIVE) still get TTS. LIVE replies are spoken on WS.
-        Boolean(vlRef.current) ||
-
+        // O SINGURĂ GURĂ PE TURĂ (owner, 19 aug: „fa una singura si functionala pe
+        // live"). Serverul NU sintetizează (Chirp off) DOAR când tura curentă e o
+        // tură VOCALĂ pe care LIVE o rostește deja pe WS — atunci Chirp-ul ar fi a
+        // doua voce. Pe turele SCRISE, LIVE nu spune nimic (n-are `speak()`), deci
+        // sinteza rămâne PORNITĂ și răspunsul se aude (o singură voce, nu dublat).
+        // Cheia e felul turei (voiceTurnRef), NU „LIVE e instalat" (LIVE e permanent).
+        (Boolean(voiceTurnRef.current) && Boolean(vlRef.current)) ||
           (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
         // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
         spoken || undefined,

@@ -71,16 +71,21 @@ describe('audio focus — LIVE first, one mouth, interrupt', () => {
     expect(audioFocus).toMatch(/active === 'live'|requestTtsFocus/)
   })
 
-  it('cât LIVE (vlRef) e activ, {audio} TTS pe scris e refuzat', () => {
-    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,600}?if \(vlRef\.current\) return/)
+  it('o singură gură PE TURĂ: scrisul se aude cât LIVE e instalat; doar tura VOCALĂ rostită de LIVE e refuzată', () => {
+    // owner, 19 aug: „e tot dublat… fa una singura si functionala pe live". Regula
+    // corectă cheie pe FELUL turei (voiceTurnRef), NU pe „LIVE e instalat" (permanent):
+    // tura vocală → LIVE o rostește → Chirp refuzat (altfel dublat); tura scrisă →
+    // LIVE nu spune nimic → Chirp REDĂ (scrisul se aude).
+    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,700}?if \(voiceTurnRef\.current && vlRef\.current\) return/)
     expect(panou).toContain('requestTtsFocus')
-    // no second-mouth anti-echo path on c.audio
-    expect(panou).not.toMatch(/if \(c\.audio\)[\s\S]{0,900}?setRedareExterna\(true\)/)
+    // ANTI-ECOU pe scris: cât redă Chirp-ul, urechea LIVE e mutată (setRedareExterna).
+    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,1500}?setRedareExterna\(true\)/)
   })
 
-  it('întrerupere centrală + serverVoiceOff când LIVE ține gura', () => {
+  it('întrerupere centrală + serverVoiceOff DOAR pe tura vocală rostită de LIVE', () => {
     expect(panou).toContain('interruptAll')
-    expect(panou).toMatch(/Boolean\(vlRef\.current\)/)
+    // serverVoiceOff cheie pe voiceTurnRef && vlRef (nu doar „LIVE instalat").
+    expect(panou).toMatch(/Boolean\(voiceTurnRef\.current\) && Boolean\(vlRef\.current\)/)
     expect(clientChat).toContain('serverVoiceOff')
     expect(clientVL).toContain('intrerupeRedarea(): void')
     expect(clientVL).toContain("ws.send(JSON.stringify({ type: 'intrerupe' }))")
