@@ -198,6 +198,45 @@ export async function ruleazaAutoverificare(deps: DepsAutoverificare): Promise<R
   }
 }
 
+// ── MĂSURĂTORILE DECIZIONALE (owner, 19 aug: „implementează-i măsurătorile
+// decizionale… să nu se mai repete") ────────────────────────────────────────
+// Recurența pe care o repară: Kelion a lipit CAUZE și REPARAȚII pe care nu le-a
+// măsurat (publish n-a rulat / model empty / fișier lipsă). Funcția asta e
+// antidotul STRUCTURAL: primește DOAR verdictele MĂSURATE și derivă din ele
+// acțiunea — deci nu POATE inventa o cauză. Ce nu are o cauză clară de cod devine
+// „măsoară întâi" (cu măsurătoarea exactă numită), nu o reparație oarbă.
+export type ActiuneDecizie = 'repara' | 'reconfigureaza' | 'masoara_intai'
+export interface DecizieMasurata {
+  functie: string
+  actiune: ActiuneDecizie
+  urmatoareaMasuratoare: string // pasul concret, DERIVAT din cauza măsurată
+  deCe: string // verdictul/cauza MĂSURATĂ (niciodată inventată)
+}
+export function decideDinMasuratori(functii: VerificareFunctie[]): DecizieMasurata[] {
+  const out: DecizieMasurata[] = []
+  for (const f of functii) {
+    if (f.verdict === 'merge') continue
+    const c = f.deCe.toLowerCase()
+    if (f.verdict === 'nu_pot_verifica') {
+      if (/autentificare|drepturi|sesiun/.test(c))
+        out.push({ functie: f.functie, actiune: 'masoara_intai', urmatoareaMasuratoare: 're-probează logat, din sesiunea reală — NU e cod de reparat', deCe: f.deCe })
+      else if (/cheie|token|configurare|reconect|neconectat/.test(c))
+        out.push({ functie: f.functie, actiune: 'reconfigureaza', urmatoareaMasuratoare: 'pune cheia lipsă / reconectează contul, apoi re-probează', deCe: f.deCe })
+      else
+        out.push({ functie: f.functie, actiune: 'masoara_intai', urmatoareaMasuratoare: 're-probează cu o intrare reală (query/id/text)', deCe: f.deCe })
+      continue
+    }
+    // stricat — cauza e MĂSURATĂ; acțiunea o URMEAZĂ, nu o inventează.
+    if (/binar|fișier|enoent|instalează|repune/.test(c))
+      out.push({ functie: f.functie, actiune: 'repara', urmatoareaMasuratoare: 'instalează/repune dependența lipsă pe host, apoi re-probează', deCe: f.deCe })
+    else if (/nu răspunde|rețea|timeout|serviciu|\bjos\b/.test(c))
+      out.push({ functie: f.functie, actiune: 'masoara_intai', urmatoareaMasuratoare: 're-probează după ce serviciul revine — poate fi tranzitoriu; NU cod de reparat până nu se confirmă', deCe: f.deCe })
+    else
+      out.push({ functie: f.functie, actiune: 'repara', urmatoareaMasuratoare: 'deschide funcția din cod pe cauza măsurată și repar-o', deCe: f.deCe })
+  }
+  return out
+}
+
 // ── RULAREA LIVE, REALĂ (owner, 19 aug: „eu vreau real") ─────────────────────
 // Rulează autoverificarea PE SERVER cu execuție REALĂ: citirile prin `uneltele`
 // (execuție adevărată), efectele NU se execută (dry-run), iar pe cele picate

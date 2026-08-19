@@ -764,7 +764,7 @@ const COMUTA_SURSA_TOOL: Tool = {
 const AUTOVERIFICARE_TOOL: Tool = {
   name: 'autoverificare',
   description:
-    'ADMIN ONLY. Run a REAL, LIVE self-check of ALL your functions and report the MEASURED state — which work, which don\'t, and WHY. Read-only functions are ACTUALLY executed on the live server; effect functions (build/email/delete/pay) are NOT executed (dry-run on wiring only, no cost/side effect). Call this whenever the owner asks you to check/verify/test your functions or capabilities ("verifică-ți funcțiile", "ce capacități merg", "testează-te", "raportează capacitățile măsurate", "vreau real"). Then report the totals (merg / stricate / nu-pot-verifica) and, for anything not working, name it and say WHY + the firm fix. Never claim a capability works without this having run — the numbers must be measured, not assumed.',
+    'ADMIN ONLY. Run a REAL, LIVE self-check of ALL your functions and report the MEASURED state — which work, which don\'t, and WHY. Read-only functions are ACTUALLY executed on the live server; effect functions (build/email/delete/pay) are NOT executed (dry-run on wiring only, no cost/side effect). Call this whenever the owner asks you to check/verify/test your functions or capabilities ("verifică-ți funcțiile", "ce capacități merg", "testează-te", "raportează capacitățile măsurate", "vreau real"). Report ONLY what the tool returns: the totals (merg / stricate / nu-pot-verifica) and, for each problem, the tool\'s MEASURED verdict + its `plan` entry. LAW 5 (measured decision): do NOT invent a cause or a repair plan the tool did not measure, and do NOT ask "shall I repair everything?" — for a `plan` item marked "masoara_intai" the next step is the named measurement, NOT a fix; only "repara" items with a measured cause get fixed. Never claim a capability works, or a cause is true, without this having measured it.',
   input_schema: { type: 'object', properties: {} },
 }
 // ITS OWN HEALTH (Adrian, Jul 27: "Kelion must see this and be able to tell the
@@ -1848,7 +1848,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       `announcing steps or showing an analysis document — in the SAME turn you call the tools that start the ` +
       `work (build_software for build orders, the concrete tool otherwise), or you name the exact blocker. ` +
       `Think, decide, ACT — every turn. DONE means: PR merged, CI green, published, and MEASURED live ` +
-      `(constructor_status / the live version) — never declare finished earlier.\n`
+      `(constructor_status / the live version) — never declare finished earlier.\n` +
+      `5. LAW OF THE MEASURED DECISION (the admin, 19 Aug: "implementeaza-i masuratorile decizionale... sa ` +
+      `nu se mai repete"): every remediation DECISION must be backed by a measurement that proves the CAUSE. ` +
+      `An unmeasured cause is "nu stiu inca", not a fact — you may NOT attach an invented cause ("publish ` +
+      `didn't run", "the model returned empty", "the file is missing") or a repair plan to a finding you did ` +
+      `not measure. A short silence (e.g. 64s) is NOT proof of a hang; a stale log line is NOT proof a file ` +
+      `is missing (check it exists first); "live behind" right after a merge is a deploy in progress, not a ` +
+      `failed publish — measure before you name a cause. For a self-check (autoverificare): report ONLY the ` +
+      `measured verdicts + the tool's measured plan; never invent causes or a separate repair plan, and never ` +
+      `ask "shall I repair everything?" — for each finding, either it carries a MEASURED cause (act on that) ` +
+      `or it needs a measurement first (TAKE it, name the exact one). Measure first IS the step; the fix comes ` +
+      `after the measurement, never before it.\n`
     let systemPrompt = `${LEGILE_ADMINULUI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
@@ -4282,11 +4293,14 @@ async function runTool(
     // care NU merg (cu de ce + recomandare) — creierul le raportează ownerului.
     case 'autoverificare': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const { autoverificareLive } = await import('../services/autoverificare.js')
+      const { autoverificareLive, decideDinMasuratori } = await import('../services/autoverificare.js')
       const raport = await autoverificareLive()
       const problematice = raport.functii
         .filter((f) => f.verdict !== 'merge')
         .map((f) => ({ functie: f.functie, tip: f.tip, verdict: f.verdict, deCe: f.deCe, recomandare: f.recomandare }))
+      // MĂSURĂTORILE DECIZIONALE (LEGEA 5): planul e DERIVAT din verdictele măsurate,
+      // nu inventat. Ce n-are cauză clară de cod → „măsoară întâi", cu pasul numit.
+      const plan = decideDinMasuratori(raport.functii)
       return JSON.stringify({
         masurat: true,
         total: raport.total,
@@ -4294,6 +4308,8 @@ async function runTool(
         stricate: raport.stricate,
         nepotverifica: raport.nepotverifica,
         problematice,
+        plan,
+        nota: 'Raportează DOAR aceste verdicte măsurate + planul. NU inventa cauze/reparații; pentru „masoara_intai" pasul e măsurătoarea numită, nu o reparație.',
       })
     }
 
