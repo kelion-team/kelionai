@@ -3,6 +3,8 @@
 // funcțiile" + „verifică și DE CE nu merge". Nucleul (tipFunctie / interpreteazaProba)
 // e pur — probat aici pe fiecare tip de rezultat; runner-ul pe dependențe injectate.
 import { describe, it, expect, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   tipFunctie,
   interpreteazaProba,
@@ -67,6 +69,15 @@ describe('interpreteazaProba — funcții de CITIRE: verdict + DE CE, pe fiecare
     expect(d.verdict).toBe('stricat')
     expect(d.recomandare).toMatch(/instalează|repune/)
   })
+  it('argument lipsă/invalid → NU POT VERIFICA (cere o intrare, nu e stricăciune)', () => {
+    // owner, 19 aug „eu vreau real": o unealtă probată cu argumente goale care cere
+    // o intrare (query/id/text) NU e „stricată" — e „nu pot proba fără intrare".
+    for (const er of ['query is required', 'missing required parameter: id', 'lipsește argumentul „text"', 'invalid input', 'trebuie un id']) {
+      const d = interpreteazaProba('web_search', 'citire', { ok: false, eroare: er })
+      expect(d.verdict, `„${er}" ar trebui nu_pot_verifica`).toBe('nu_pot_verifica')
+      expect(d.deCe).toMatch(/intrare/)
+    }
+  })
   it('altă eroare → STRICAT, de reparat în cod', () => {
     const d = interpreteazaProba('db_query', 'citire', { ok: false, eroare: 'syntax error at or near FROM' })
     expect(d.verdict).toBe('stricat')
@@ -125,5 +136,38 @@ describe('ruleazaAutoverificare — probează TOATE capabilitățile + îmbogă�
     })
     // toate citirile → stricat cu „de ce" determinist, fără să crape
     expect(raport.functii.some((f) => f.verdict === 'stricat' && /nu răspunde|timeout/.test(f.deCe))).toBe(true)
+  })
+})
+
+// ── AUTOVERIFICAREA LIVE din CHAT (owner, 19 aug: „eu vreau real") ────────────
+// Kelion se probează pe el însuși REAL, pe server, dintr-o unealtă de chat — ca
+// ownerul să ceară „verifică-ți funcțiile" (scris/vorbit) și să primească starea
+// MĂSURATĂ, nu una declarată. Pinuiește cablajul în cod (o singură logică live,
+// refolosită de rută ȘI de unealtă — fără duplicare).
+describe('autoverificarea LIVE e cablată în chat + refolosită de rută', () => {
+  const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
+  const admin = readFileSync(fileURLToPath(new URL('./routes/admin.ts', import.meta.url)), 'utf8')
+
+  it('unealta autoverificare e definită, în lista admin, cu executor admin-only', () => {
+    expect(chat).toMatch(/const AUTOVERIFICARE_TOOL: Tool = \{/)
+    expect(chat).toMatch(/name: 'autoverificare'/)
+    expect(chat).toMatch(/COMUTA_SURSA_TOOL, AUTOVERIFICARE_TOOL/)
+    const idx = chat.indexOf("case 'autoverificare':")
+    expect(idx).toBeGreaterThanOrEqual(0)
+    const bloc = chat.slice(idx, idx + 700)
+    expect(bloc).toMatch(/if \(!isAdmin\) return JSON\.stringify\(\{ error: 'admin_only' \}\)/)
+    expect(bloc).toMatch(/autoverificareLive\(\)/)
+  })
+
+  it('rularea live e ÎNTR-UN SINGUR loc — ruta admin o refolosește (fără duplicare)', () => {
+    expect(admin).toMatch(/const \{ autoverificareLive \} = await import\('\.\.\/services\/autoverificare\.js'\)/)
+    expect(admin).toMatch(/await autoverificareLive\(\)/)
+  })
+
+  it('registrul are capabilitatea autoverificare (admin, prin creier pe voce)', () => {
+    const c = CAPABILITIES.find((x) => x.name === 'autoverificare')
+    expect(c, 'autoverificare lipsește din registru').toBeTruthy()
+    expect(c!.admin).toBe(true)
+    expect(c!.chat).toBe(true)
   })
 })

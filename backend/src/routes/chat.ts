@@ -761,6 +761,12 @@ const COMUTA_SURSA_TOOL: Tool = {
     },
   },
 }
+const AUTOVERIFICARE_TOOL: Tool = {
+  name: 'autoverificare',
+  description:
+    'ADMIN ONLY. Run a REAL, LIVE self-check of ALL your functions and report the MEASURED state — which work, which don\'t, and WHY. Read-only functions are ACTUALLY executed on the live server; effect functions (build/email/delete/pay) are NOT executed (dry-run on wiring only, no cost/side effect). Call this whenever the owner asks you to check/verify/test your functions or capabilities ("verifică-ți funcțiile", "ce capacități merg", "testează-te", "raportează capacitățile măsurate", "vreau real"). Then report the totals (merg / stricate / nu-pot-verifica) and, for anything not working, name it and say WHY + the firm fix. Never claim a capability works without this having run — the numbers must be measured, not assumed.',
+  input_schema: { type: 'object', properties: {} },
+}
 // ITS OWN HEALTH (Adrian, Jul 27: "Kelion must see this and be able to tell the
 // admin through chat that it has problems x,y,z and ask whether to fix them"):
 // the deterministic aggregation of all signals + the behavior rule — enumerate
@@ -2629,7 +2635,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // Sursă + putere de dezvoltator + DB/sănătate + operațiuni („de aur")
           LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
           REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL, CONSTRUCTOR_COMMAND_TOOL, COMUTA_SURSA_TOOL,
+          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL, CONSTRUCTOR_COMMAND_TOOL, COMUTA_SURSA_TOOL, AUTOVERIFICARE_TOOL,
           // Jules — agentul asincron oficial Google (3 aug, cheia pusă de owner).
           JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL,
           DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL,
@@ -4267,6 +4273,27 @@ async function runTool(
         paidDisponibil: dc.paidDisponibil,
         rezumat: cs.rezumaComutare(nou, dc.paidDisponibil),
         deCe: deCe || undefined,
+      })
+    }
+
+    // ── AUTOVERIFICAREA LIVE, REALĂ (owner, 19 aug: „eu vreau real") ──────────
+    // Kelion se probează pe el însuși PE SERVER, cu execuție reală (citirile chiar
+    // rulează; efectele NU se execută). Întoarce totalurile MĂSURATE + doar cele
+    // care NU merg (cu de ce + recomandare) — creierul le raportează ownerului.
+    case 'autoverificare': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const { autoverificareLive } = await import('../services/autoverificare.js')
+      const raport = await autoverificareLive()
+      const problematice = raport.functii
+        .filter((f) => f.verdict !== 'merge')
+        .map((f) => ({ functie: f.functie, tip: f.tip, verdict: f.verdict, deCe: f.deCe, recomandare: f.recomandare }))
+      return JSON.stringify({
+        masurat: true,
+        total: raport.total,
+        merg: raport.merg,
+        stricate: raport.stricate,
+        nepotverifica: raport.nepotverifica,
+        problematice,
       })
     }
 
