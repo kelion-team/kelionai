@@ -28,6 +28,38 @@ function continutOpenAi(m: OrMessage): unknown {
   return parts.length ? parts : ''
 }
 
+/** Serializare sigură a argumentelor de tool call — garantează string JSON valid. */
+function serializeazaArgumenteTool(args: unknown): string {
+  if (args === null || args === undefined) {
+    return '{}'
+  }
+  if (typeof args === 'string') {
+    // Dacă e deja string, încearcă să-l parseze și re-serializze pentru validare
+    try {
+      const parsed = JSON.parse(args)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return JSON.stringify(parsed)
+      }
+      return '{}'
+    } catch {
+      // String invalid JSON → fallback la obiect gol
+      return '{}'
+    }
+  }
+  if (typeof args === 'object') {
+    // Obiect → serializare directă, dar validează că e obiect (nu array)
+    if (Array.isArray(args)) {
+      return '{}'
+    }
+    try {
+      return JSON.stringify(args)
+    } catch {
+      return '{}'
+    }
+  }
+  return '{}'
+}
+
 function mesajeOpenAi(messages: OrMessage[]): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = []
   for (const m of messages) {
@@ -42,7 +74,10 @@ function mesajeOpenAi(messages: OrMessage[]): Record<string, unknown>[] {
         tool_calls: m.tool_calls.map((c) => ({
           id: c.id,
           type: 'function',
-          function: { name: c.function.name, arguments: c.function.arguments || '{}' },
+          function: { 
+            name: c.function.name, 
+            arguments: serializeazaArgumenteTool(c.function.arguments) 
+          },
         })),
       })
       continue
@@ -116,7 +151,10 @@ function dinRaspunsOpenAi(j: {
   const toolCalls: OrToolCall[] = (msg?.tool_calls ?? []).map((c, i) => ({
     id: c.id || `oc_${i}_${Math.random().toString(36).slice(2, 8)}`,
     type: 'function' as const,
-    function: { name: c.function?.name || 'tool', arguments: c.function?.arguments || '{}' },
+    function: { 
+      name: c.function?.name || 'tool', 
+      arguments: serializeazaArgumenteTool(c.function?.arguments) 
+    },
   }))
   const inTok = Number(j.usage?.prompt_tokens ?? 0) || 0
   const outTok = Number(j.usage?.completion_tokens ?? 0) || 0
@@ -253,7 +291,7 @@ export async function ollamaCloudChatStream(
     .map(([, v]) => ({
       id: v.id,
       type: 'function' as const,
-      function: { name: v.name || 'tool', arguments: v.args || '{}' },
+      function: { name: v.name || 'tool', arguments: serializeazaArgumenteTool(v.args) },
     }))
   return {
     text,
