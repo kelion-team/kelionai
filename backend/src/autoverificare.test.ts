@@ -10,6 +10,7 @@ import {
   interpreteazaProba,
   ruleazaAutoverificare,
   decideDinMasuratori,
+  formatMonitorAutoverificare,
   type VerificareFunctie,
 } from './services/autoverificare.js'
 import { CAPABILITIES, grupaExecutieUnealta } from './services/brainCapabilities.js'
@@ -84,6 +85,17 @@ describe('interpreteazaProba — funcții de CITIRE: verdict + DE CE, pe fiecare
     const d = interpreteazaProba('db_query', 'citire', { ok: false, eroare: 'syntax error at or near FROM' })
     expect(d.verdict).toBe('stricat')
     expect(d.deCe).toMatch(/a picat/)
+  })
+  it('„unealtă necunoscută" din probă → NU POT VERIFICA, calea chat (NU stricat, NU „nu produce nimic")', () => {
+    // Măsurat 19 aug: 22 citiri (Google/web/get_time/monitor) ies „necunoscute" din
+    // dispecerul `uneltele` fiindcă ele merg pe calea CHAT — nu-s stricate.
+    for (const nume of ['get_time', 'web_search', 'get_recent_emails', 'get_monitor']) {
+      const d = interpreteazaProba(nume, 'citire', { ok: false, eroare: `unealtă necunoscută: ${nume}` })
+      expect(d.verdict).toBe('nu_pot_verifica')
+      expect(d.deCe).toMatch(/calea chat/)
+      // NU eticheta greșită a lui Kelion („handler neînregistrat / nu produce nimic")
+      expect(d.deCe).not.toMatch(/handler|nu produce nimic/)
+    }
   })
   it('rezultat gol / eșec auto-declarat → NU POT VERIFICA (regula #1)', () => {
     expect(interpreteazaProba('get_weather', 'citire', { ok: true, rezultat: '' }).verdict).toBe('nu_pot_verifica')
@@ -223,10 +235,57 @@ describe('decideDinMasuratori — decizia urmează măsurătoarea, nu ghicește'
     expect(d[0].urmatoareaMasuratoare).toMatch(/logat|sesiune/)
   })
 
+  it('„calea chat" → MĂSOARĂ ÎNTÂI: probeaz-o din chat (nu reparație, nu intrare)', () => {
+    const d = decideDinMasuratori([f('get_time', 'nu_pot_verifica', 'se execută pe calea chat, nu prin dispecerul de probă')])
+    expect(d[0].actiune).toBe('masoara_intai')
+    expect(d[0].urmatoareaMasuratoare).toMatch(/din chat/)
+  })
+
   it('fiecare decizie poartă cauza MĂSURATĂ (nu inventează nimic peste findings)', () => {
     const findings = [f('x', 'stricat', 'a picat: crash intern'), f('y', 'merge', 'ok')]
     const d = decideDinMasuratori(findings)
     expect(d).toHaveLength(1) // doar cele care nu merg
     expect(d[0].deCe).toBe('a picat: crash intern') // cauza vine DIN finding, nu de altundeva
+  })
+})
+
+// ── AFIȘAREA OBLIGATORIE PE MONITOR (owner, 19 aug) ──────────────────────────
+describe('formatMonitorAutoverificare + afișarea server-side obligatorie', () => {
+  const f = (functie: string, verdict: VerificareFunctie['verdict'], deCe: string): VerificareFunctie => ({
+    functie, categorie: 'x', face: 'x', tip: 'citire', verdict, deCe, recomandare: '', dovada: '',
+  })
+  const raport = (functii: VerificareFunctie[]) => ({
+    total: functii.length,
+    merg: functii.filter((x) => x.verdict === 'merge').length,
+    stricate: functii.filter((x) => x.verdict === 'stricat').length,
+    nepotverifica: functii.filter((x) => x.verdict === 'nu_pot_verifica').length,
+    functii,
+  })
+
+  it('documentul poartă rezumatul + CE NU MERGE, întâi stricatele', () => {
+    const functii = [f('a', 'merge', 'ok'), f('b', 'stricat', 'a picat: X'), f('c', 'nu_pot_verifica', 'lipsă cheie')]
+    const r = raport(functii)
+    const doc = formatMonitorAutoverificare(r, decideDinMasuratori(functii))
+    expect(doc.title).toMatch(/Autoverificare — 3 funcții/)
+    expect(doc.text).toMatch(/✅ 1 merg.*❌ 1 stricate.*… 1 nu pot verifica.*din 3/s)
+    expect(doc.text).toMatch(/CE NU MERGE/)
+    // stricatul „b" apare înaintea nesigurului „c"
+    expect(doc.text.indexOf('b —')).toBeLessThan(doc.text.indexOf('c —'))
+  })
+
+  it('totul verde → spune că toate MERG, fără listă de probleme', () => {
+    const functii = [f('a', 'merge', 'ok'), f('b', 'merge', 'ok')]
+    const doc = formatMonitorAutoverificare(raport(functii), [])
+    expect(doc.text).toMatch(/Toate cele 2 funcții MERG/)
+    expect(doc.text).not.toMatch(/CE NU MERGE/)
+  })
+
+  it('executorul SCRIE raportul pe monitor server-side (obligatoriu), nu la alegerea modelului', () => {
+    const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
+    const idx = chat.indexOf("case 'autoverificare':")
+    const bloc = chat.slice(idx, idx + 1700)
+    expect(bloc).toMatch(/formatMonitorAutoverificare\(raport, plan\)/)
+    expect(bloc).toMatch(/reply\.raw\.write\(`\$\{CTRL\}\$\{JSON\.stringify\(\{ doc: \{ title: doc\.title, text: doc\.text \} \}\)\}\$\{CTRL\}`\)/)
+    expect(bloc).toMatch(/afisatPeMonitor: true/)
   })
 })

@@ -4293,7 +4293,7 @@ async function runTool(
     // care NU merg (cu de ce + recomandare) — creierul le raportează ownerului.
     case 'autoverificare': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const { autoverificareLive, decideDinMasuratori } = await import('../services/autoverificare.js')
+      const { autoverificareLive, decideDinMasuratori, formatMonitorAutoverificare } = await import('../services/autoverificare.js')
       const raport = await autoverificareLive()
       const problematice = raport.functii
         .filter((f) => f.verdict !== 'merge')
@@ -4301,15 +4301,21 @@ async function runTool(
       // MĂSURĂTORILE DECIZIONALE (LEGEA 5): planul e DERIVAT din verdictele măsurate,
       // nu inventat. Ce n-are cauză clară de cod → „măsoară întâi", cu pasul numit.
       const plan = decideDinMasuratori(raport.functii)
+      // AFIȘARE OBLIGATORIE PE MONITOR (owner, 19 aug: „după ce-i ceri, trebuie să
+      // afișeze OBLIGATORIU rezultatele pe monitor"). O scrie EXECUTORUL, server-side,
+      // nu la alegerea modelului — deci apare garantat, nu doar rostit.
+      const doc = formatMonitorAutoverificare(raport, plan)
+      reply.raw.write(`${CTRL}${JSON.stringify({ doc: { title: doc.title, text: doc.text } })}${CTRL}`)
       return JSON.stringify({
         masurat: true,
+        afisatPeMonitor: true,
         total: raport.total,
         merg: raport.merg,
         stricate: raport.stricate,
         nepotverifica: raport.nepotverifica,
         problematice,
         plan,
-        nota: 'Raportează DOAR aceste verdicte măsurate + planul. NU inventa cauze/reparații; pentru „masoara_intai" pasul e măsurătoarea numită, nu o reparație.',
+        nota: 'Rezultatele sunt DEJA afișate pe monitor (obligatoriu). Raportează DOAR aceste verdicte măsurate + planul. NU inventa cauze/reparații; pentru „masoara_intai" pasul e măsurătoarea numită, nu o reparație.',
       })
     }
 
