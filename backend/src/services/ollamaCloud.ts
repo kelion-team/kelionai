@@ -165,8 +165,21 @@ export function normalizeazaSchema(schema: unknown): Record<string, unknown> {
     if (s.properties && typeof s.properties === 'object' && !Array.isArray(s.properties)) {
       const props: Record<string, unknown> = {}
       for (const [key, value] of Object.entries(s.properties as Record<string, unknown>)) {
-        // Recursive cleanup for nested properties
-        props[key] = normalizeazaSchema(value)
+        // Doar normalizează dacă e un obiect schema valid (are type sau properties)
+        // Altfel păstrează schema proprietății așa cum e (ex: { type: 'string' })
+        if (value && typeof value === 'object') {
+          const valObj = value as Record<string, unknown>
+          // Dacă are 'type' sau 'properties', e o schemă - normalizeaz-o
+          if (valObj.type || valObj.properties) {
+            props[key] = normalizeazaSchema(value)
+          } else {
+            // Altfel păstrează ca atare (poate fi deja o schemă simplă validă)
+            props[key] = value
+          }
+        } else {
+          // Valoare non-obiect → schema minimală
+          props[key] = { type: 'object', properties: {} }
+        }
       }
       cleaned.properties = props
     } else {

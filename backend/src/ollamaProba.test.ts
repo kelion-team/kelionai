@@ -93,7 +93,7 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     const result = normalizeazaSchema(schemaCuExtra)
     expect(result).not.toHaveProperty('extraProp')
     expect(result.type).toBe('object')
-    expect(result.properties).toEqual({ name: { type: 'object', properties: {} } })
+    expect(result.properties).toEqual({ name: { type: 'string' } })
     
     // Schema cu required invalid → curăță
     const schemaCuRequiredInvalid = { type: 'object', properties: {}, required: 'not-array' }
@@ -116,7 +116,7 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
   })
 
   it('parseazaArgumenteTool gestionează argumente malformate cu fallback curat', async () => {
-    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    const { parseazaArgumenteTool } = await import('./services/ollamaCloud.js')
     
     // String JSON valid → parsează
     expect(parseazaArgumenteTool('{"key": "value"}')).toEqual({ key: 'value' })
@@ -211,8 +211,8 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     expect((result[0] as any).function.parameters).toEqual({
       type: 'object',
       properties: {
-        param1: { type: 'object', properties: {} },
-        param2: { type: 'object', properties: {} },
+        param1: { type: 'string', description: 'First param' },
+        param2: { type: 'number', description: 'Second param' },
       },
       required: ['param1'],
     })
@@ -238,7 +238,7 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
   })
 
   it('tool call arguments dublu serializate sunt gestionate corect', async () => {
-    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    const { parseazaArgumenteTool } = await import('./services/ollamaCloud.js')
     
     // Argumente deja serializate ca string în interiorul JSON-ului
     const doubleSerialized = '{"query": "{\\"nested\\": \\"value\\"}"}'
@@ -250,7 +250,7 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
   })
 
   it('ollama-cloud tool calls cu arguments goale sunt sanitizate', async () => {
-    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    const { parseazaArgumenteTool } = await import('./services/ollamaCloud.js')
     const { serializeazaArgumenteTool } = await import('./services/ollamaCloud.js')
     
     // Argumente goale din tool call
@@ -287,7 +287,7 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
   })
 
   it('dinRaspunsOpenAi parsează corect tool calls din răspuns', async () => {
-    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    const { parseazaArgumenteTool } = await import('./services/ollamaCloud.js')
     
     // Simulează răspuns Ollama Cloud cu tool calls
     const mockResponse = {
