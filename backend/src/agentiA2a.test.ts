@@ -89,9 +89,12 @@ describe('LEGEA UNELTEI PE JOB — agenții au unelte REALE + jurnalul dovezii',
   })
 
   it('fiecare unealtă executată intră în JURNALUL dovezii; refuzul/necunoscuta NU', () => {
-    expect(sursa).toMatch(/const unelteExecutate: string\[\] = \[\]/)
-    expect(sursa).toMatch(/if \(faptaReala\) unelteExecutate\.push\(tc\.function\.name\)/)
-    expect(sursa).toMatch(/unealta_necunoscuta_sau_argumente_goale'[\s\S]{0,40}faptaReala = false/)
+    // Refactorat: jurnalul e acum `doveziUnelte` (DovadaUnealta[]), fiecare execuție
+    // clasificată (faptă reală vs refuz/necunoscută) prin clasificaRezultatUnealta;
+    // spre creier pleacă DOAR uneltele cu succes (unelteCuSucces) — refuzul/necunoscuta NU.
+    expect(sursa).toMatch(/const doveziUnelte: DovadaUnealta\[\] = \[\]/)
+    expect(sursa).toMatch(/doveziUnelte\.push\(clasificaRezultatUnealta\(tc\.function\.name/)
+    expect(sursa).toMatch(/unelteCuSucces\(doveziUnelte\)/)
   })
 
   it('jurnalul pleacă la creierul mare în JSON (unelte_executate) și în RaspunsAgent', () => {
@@ -100,7 +103,8 @@ describe('LEGEA UNELTEI PE JOB — agenții au unelte REALE + jurnalul dovezii',
   })
 
   it('poarta faptelor judecă și răspunsul agentului, pe jurnalul LUI', () => {
-    expect(sursa).toMatch(/pretentiiFaraFapta\(r\.text, unelteExecutate\)/)
+    // Refactorat: poarta faptelor judecă răspunsul pe jurnalul de DOVEZI al agentului.
+    expect(sursa).toMatch(/pretentiiFaraFapta\(r\.text, doveziUnelte\)/)
     expect(sursa).toMatch(/textulDemascarii\(nedovedite\)/)
   })
 

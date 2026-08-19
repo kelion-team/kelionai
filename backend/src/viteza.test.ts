@@ -55,9 +55,13 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
   })
 
   it('uneltele dintr-o rundă pleacă ÎN PARALEL, cu rezultatele în ordinea apelurilor', () => {
-    expect(orchestrator).toMatch(/Promise\.all\(\s*\(res\.toolCalls/)
+    // Refactorat: paralelizarea coordonată e în helperul `executaApeluriCoordonate`
+    // (Promise.all pe apeluri, serializare doar pe grup), chemat pe uneltele rundei.
+    // Feature-ul e ACELAȘI (paralel + rezultate în ordinea apelurilor); forma, mai curată.
+    expect(orchestrator).toMatch(/Promise\.all\(apeluri\.map\(/) // rulare în paralel
+    expect(orchestrator).toMatch(/executaApeluriCoordonate\([\s\S]{0,60}res\.toolCalls/) // pe uneltele rundei
     // Ordinea rezultatelor = ordinea apelurilor (conversația e identică cu calea serială).
-    expect(orchestrator).toContain('iesiri[i]')
+    expect(orchestrator).toMatch(/res\.toolCalls\[i\]\.id, iesiri\[i\]/)
   })
 
   it('profilingul e cablat: durata fiecărei runde de creier ajunge în jurnal', () => {
