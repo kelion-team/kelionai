@@ -307,7 +307,7 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     }
     
     // Parsează arguments din fiecare tool call
-    const toolCalls = mockResponse.choices[0].message.tool_calls.map((c, i) => {
+    const toolCalls = mockResponse.choices[0].message.tool_calls.map((c) => {
       const argsObj = parseazaArgumenteTool(c.function.arguments)
       return {
         id: c.id,
