@@ -13,6 +13,17 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 19 aug (verbatim): „seteaza sa aibe timp sa raspunda… dinamic pe greutatea
+      intrebari sau problemei" + „sistem de ajustare continuu, cind are destul context"
+      + „daca a trecut pe plata sa se uite cit timp a durat si faca o medie, pina se
+      calibreaza". Întâi mi-am RETRAS „prea lent" (presupunere nemăsurată, regula #1).
+      FAPTE: VPS Contabo 18 CPU / 94 GB, model free qwen2.5-coder:32b local. LIVRAT
+      (`praghAider` pur+16 teste): timp Aider DINAMIC pe greutate (fișiere+prompt) +
+      AJUSTARE continuă din istoricul real (tăieri pe tăcere fără edit → mai mult timp,
+      doar cu ≥3 mostre) + CALIBRARE din media plătit (planșeu pt. free ×1.5). Mărginit
+      de env + buget (nu devine demon). Măsurători pe host (masuratori-aider.jsonl).
+      DOVEZI: 1899/1899, 7 porți 0. RĂMAS de MĂSURAT pe VPS (nu de aici): tok/s real
+      (`ollama run … --verbose`) + coada din constructor.log — diagnosticul nou le arată.
 - [x] ORDIN 19 aug (verbatim): „nu are autonomie… sa faca asta" + „in raportul pr,
       trebuie sa apara clar ce creier si ce constructor a rezolvat" + „kelion invata
       cum si cine, ce a aplicat". VERIFICAT LIVE (GitHub+app): lucrătorul E VIU (job
