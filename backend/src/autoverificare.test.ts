@@ -11,6 +11,7 @@ import {
   ruleazaAutoverificare,
   decideDinMasuratori,
   formatMonitorAutoverificare,
+  probaDinRezultatGoogle,
   type VerificareFunctie,
 } from './services/autoverificare.js'
 import { CAPABILITIES, grupaExecutieUnealta } from './services/brainCapabilities.js'
@@ -246,6 +247,33 @@ describe('decideDinMasuratori — decizia urmează măsurătoarea, nu ghicește'
     const d = decideDinMasuratori(findings)
     expect(d).toHaveLength(1) // doar cele care nu merg
     expect(d[0].deCe).toBe('a picat: crash intern') // cauza vine DIN finding, nu de altundeva
+  })
+})
+
+// ── PROBAREA REALĂ A UNELTELOR GOOGLE/„APLICAȚII" (owner, 19 aug: „da") ───────
+describe('probaDinRezultatGoogle — date reale = MERGE, semnal de eroare = corect clasificat', () => {
+  it('date reale (Gmail a întors emailuri) → MERGE', () => {
+    const p = probaDinRezultatGoogle(JSON.stringify([{ from: 'x', subject: 'Salut' }]))
+    expect(p.ok).toBe(true)
+    expect(p.rezultat).toMatch(/Salut/)
+    // interpretat de nucleu → merge
+    expect(interpreteazaProba('get_recent_emails', 'citire', p).verdict).toBe('merge')
+  })
+  it('google_not_connected → EROARE „reconectează" → nu_pot_verifica (nu stricat)', () => {
+    const p = probaDinRezultatGoogle(JSON.stringify({ error: 'google_not_connected' }))
+    expect(p.ok).toBe(false)
+    expect(p.eroare).toMatch(/reconectează|token/)
+    expect(interpreteazaProba('get_calendar_events', 'citire', p).verdict).toBe('nu_pot_verifica')
+  })
+  it('argument lipsă (read_email fără query) → eroare păstrată → nu_pot_verifica „cere intrare"', () => {
+    const p = probaDinRezultatGoogle(JSON.stringify({ error: 'query is required' }))
+    expect(p.ok).toBe(false)
+    expect(interpreteazaProba('read_email', 'citire', p).verdict).toBe('nu_pot_verifica')
+  })
+  it('text simplu (nu JSON) → rezultat real, MERGE', () => {
+    const p = probaDinRezultatGoogle('rezultat text nestructurat')
+    expect(p.ok).toBe(true)
+    expect(p.rezultat).toBe('rezultat text nestructurat')
   })
 })
 

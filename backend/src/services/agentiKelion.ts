@@ -42,8 +42,9 @@ const GOOGLE_TOOLS_PERSONALE: AnthropicTool[] = googleTools
 const NUME_GOOGLE = new Set(googleTools.map((t) => t.name))
 
 /** Tokenul Google al ownerului — DOAR pe căile admin, pentru uneltele personale.
- *  Lipsă/expirat → runGoogleTool întoarce semnalul cinstit google_not_connected. */
-async function tokenGoogleOwner(): Promise<string> {
+ *  Lipsă/expirat → runGoogleTool întoarce semnalul cinstit google_not_connected.
+ *  Exportat: refolosit de autoverificarea LIVE (probează uneltele Google real). */
+export async function tokenGoogleOwner(): Promise<string> {
   const refresh = await getGoogleRefreshToken(config.adminEmail).catch(() => null)
   if (!refresh) return ''
   const tok = await refreshGoogleAccessToken(refresh).catch(() => null)
