@@ -789,6 +789,16 @@ export async function startMic(
 
 // ── PLAYBACK: the brain's voice, arriving ready-synthesized from the server ──
 let curVoice: HTMLAudioElement | null = null
+// ── REDAREA SIGURĂ PE MOBIL (owner, 19 aug: „nu se aude / merge aleator… e o
+// singură versiune") ─────────────────────────────────────────────────────────
+// De ce era ALEATOR: `new Audio().play()` (elementul <audio>) e supus politicii
+// de autoplay a browserului MOBIL — un sunet ÎNTÂRZIAT (răspunsul vine la 1–2s
+// după ce ai tastat) e blocat des pe telefon, dar NU pe laptop. Același cod, alt
+// regulament la rulare. Când play() e blocat, cădem pe calea SIGURĂ: redăm prin
+// AudioContext-ul deja DEBLOCAT pe gest (BufferSource) — un context 'running' redă
+// determinist ȘI sunetul întârziat, pe mobil și pe laptop la fel.
+let curSource: AudioBufferSourceNode | null = null
+let ctxPending = false // sunet prin context, în curs de pornire (decode async)
 
 // ── LIP-SYNC: nivelul (0..1) al amplitudinii vocii redate acum ──────────────
 // Golden rule: it's a visual bonus — if the analysis fails for any reason,
@@ -884,14 +894,7 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
         stopLevelLoop()
         return
       }
-      analyser.getByteTimeDomainData(buf)
-      let sum = 0
-      for (let i = 0; i < buf.length; i++) {
-        const v = (buf[i] - 128) / 128
-        sum += v * v
-      }
-      const rms = Math.sqrt(sum / buf.length)
-      voiceLevel = Math.min(1, rms * 6)
+      voiceLevel = rmsNivel(analyser, buf)
       levelRaf = requestAnimationFrame(step)
     }
     levelRaf = requestAnimationFrame(step)
@@ -963,6 +966,80 @@ export function setVoiceVolume(v: number): void {
 // (registerVoiceAudioElement ȘTERS — 3 aug: îl folosea doar <audio>-ul sesiunii
 // OpenAI Realtime, scoasă azi; elementele interne intră în voiceElements direct.)
 
+/** RMS (0..1) al semnalului din analizor → nivelul gurii. Sursă unică pentru
+ *  ambele bucle (elementul <audio> și BufferSource-ul de context). */
+function rmsNivel(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
+  analyser.getByteTimeDomainData(buf)
+  let sum = 0
+  for (let i = 0; i < buf.length; i++) {
+    const v = (buf[i] - 128) / 128
+    sum += v * v
+  }
+  return Math.min(1, Math.sqrt(sum / buf.length) * 6)
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+/** Bucla de nivel pentru redarea prin BufferSource (mișcă gura cât ține sunetul). */
+function startCtxLevelLoop(): void {
+  if (!levelAnalyser || !levelBuf) return
+  const analyser = levelAnalyser
+  const buf = levelBuf
+  const step = (): void => {
+    if (!curSource) {
+      stopLevelLoop()
+      return
+    }
+    voiceLevel = rmsNivel(analyser, buf)
+    levelRaf = requestAnimationFrame(step)
+  }
+  levelRaf = requestAnimationFrame(step)
+}
+
+/** REDARE SIGURĂ PE MOBIL: prin AudioContext-ul deblocat pe gest (BufferSource).
+ *  Un context 'running' redă determinist ȘI sunetul întârziat — nu e supus
+ *  blocajului de autoplay al elementului <audio>. `true` = ne-am angajat pe calea
+ *  asta (decode async înăuntru; pe eșec → `done()`). `false` = context surd, cadem
+ *  pe elementul <audio>. `levelCtx` există deja: l-a creat attachLevelAnalysis. */
+function playViaContext(base64Mp3: string, done: () => void): boolean {
+  const ctx = levelCtx
+  if (!ctx || !levelAnalyser) return false
+  if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
+  if (ctx.state !== 'running') return false
+  const analyser = levelAnalyser
+  ctxPending = true
+  void (async (): Promise<void> => {
+    try {
+      const audioBuf = await ctx.decodeAudioData(base64ToBytes(base64Mp3).buffer)
+      const src = ctx.createBufferSource()
+      src.buffer = audioBuf
+      const gain = ctx.createGain()
+      gain.gain.value = voiceVolume
+      src.connect(gain)
+      gain.connect(analyser) // gura + înregistrarea (analyser e deja legat la ele)
+      gain.connect(ctx.destination) // sunetul audibil
+      curSource = src
+      ctxPending = false
+      src.onended = (): void => {
+        if (curSource === src) curSource = null
+        stopLevelLoop()
+        done()
+      }
+      startCtxLevelLoop()
+      src.start()
+    } catch {
+      ctxPending = false
+      done()
+    }
+  })()
+  return true
+}
+
 function playNow(base64Mp3: string): void {
   try {
     const audio = new Audio(`data:audio/mp3;base64,${base64Mp3}`)
@@ -977,8 +1054,18 @@ function playNow(base64Mp3: string): void {
     }
     audio.onended = done
     audio.onerror = done
-    void audio.play().catch(done)
+    // attachLevelAnalysis creează/deblochează levelCtx ÎNAINTE, ca playViaContext să-l
+    // aibă gata dacă play() e blocat pe mobil.
     attachLevelAnalysis(audio)
+    void audio.play().catch(() => {
+      // MOBIL: sunetul întârziat pe <audio> e blocat (autoplay) — de-aia „aleator".
+      // Trecem pe calea SIGURĂ (BufferSource pe contextul deblocat). Curățăm elementul
+      // mut ca să nu rămână două bucle de nivel; busy-ul rămâne prin curSource/ctxPending.
+      stopLevelLoop()
+      voiceElements.delete(audio)
+      if (curVoice === audio) curVoice = null
+      if (!playViaContext(base64Mp3, done)) done()
+    })
   } catch {
     playNextQueued()
   }
@@ -1004,8 +1091,9 @@ function playNextQueued(): void {
 
 export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () => void): void {
   pendingVoiceEnd = onEnd ?? null
-  if (curVoice) {
+  if (curVoice || curSource || ctxPending) {
     // already playing a chunk of the SAME reply — it queues up, doesn't get cut.
+    // (curSource/ctxPending = redarea prin AudioContext e activă/în pornire.)
     voiceQueue.push(base64Mp3)
     return
   }
@@ -1039,9 +1127,19 @@ export function stopVoice(): void {
     }
     curVoice = null
   }
+  // Oprim și redarea prin AudioContext (barge-in trebuie să taie și BufferSource-ul).
+  if (curSource) {
+    try {
+      curSource.stop()
+    } catch {
+      /* deja oprit */
+    }
+    curSource = null
+  }
+  ctxPending = false
   stopLevelLoop()
 }
 
 export function isVoicePlaying(): boolean {
-  return curVoice !== null
+  return curVoice !== null || curSource !== null || ctxPending
 }
