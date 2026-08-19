@@ -1185,4 +1185,54 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ ok: true, id })
     },
   )
+
+  // ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug: „ceva inteligent bazat pe AI"
+  // + „verifică și DE CE nu merge") ─────────────────────────────────────────
+  // Kelion se testează pe el însuși pe TOATE funcțiile din registrul unic:
+  // citirile se probează REAL (execuție prin `uneltele`), funcțiile cu EFECT NU
+  // se execută (dry-run — nu ardem bani/nu facem acțiuni), verdictul e MĂSURAT,
+  // iar pe cele picate creierul (AI) dă diagnostic + recomandare fermă.
+  app.post('/api/admin/autoverificare', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const { ruleazaAutoverificare } = await import('../services/autoverificare.js')
+    const { uneltele } = await import('../services/autonomie.js')
+    const { rationeazaMesajeSigur } = await import('../services/creierRationament.js')
+    const raport = await ruleazaAutoverificare({
+      // CITIRE: execută unealta real, cu argumente goale (sigur — doar citește).
+      probaCitire: async (c) => {
+        try {
+          const out = await uneltele(c.name, {})
+          return { ok: true, rezultat: String(out ?? '') }
+        } catch (e) {
+          return { ok: false, eroare: String((e as Error)?.message ?? e).slice(0, 200) }
+        }
+      },
+      // EFECT: NU se execută la test (ar produce efect/cost). Cablajul e garantat
+      // de paritatea registru↔unelte (lacătul brainCapabilities); marcăm „cablată".
+      esteCablat: () => true,
+      // DIAGNOSTIC AI pe cele picate: cauză + recomandare fermă, JSON. Null/eroare
+      // → rămâne diagnosticul determinist (regula #1: nu inventăm).
+      creierDiag: async (picate) => {
+        const lista = picate.map((p) => `- ${p.functie}: face „${p.face}"; simptom măsurat: ${p.deCe}`).join('\n')
+        const prompt =
+          `Ești diagnosticianul lui Kelion. Pentru FIECARE funcție picată de mai jos, spune DE CE nu merge ` +
+          `(cauza cea mai probabilă, scurt) și o RECOMANDARE fermă (ce să facă concret). ` +
+          `Răspunde DOAR cu JSON valid: [{"functie":"<nume>","deCe":"<scurt>","recomandare":"<ferm>"}].\n\nFuncții:\n${lista}`
+        const txt = await rationeazaMesajeSigur([{ role: 'user', content: prompt }], { ruta: 'autoverificare', treapta: 'lucru', maxTokens: 1200 })
+        const m: Record<string, { deCe?: string; recomandare?: string }> = {}
+        if (!txt) return m
+        try {
+          const j = JSON.parse(txt.slice(txt.indexOf('['), txt.lastIndexOf(']') + 1)) as { functie?: string; deCe?: string; recomandare?: string }[]
+          for (const x of j) if (x?.functie) m[x.functie] = { deCe: x.deCe, recomandare: x.recomandare }
+        } catch {
+          /* JSON invalid → rămâne diagnosticul determinist */
+        }
+        return m
+      },
+    })
+    // Ținem ultimul raport, ca panoul să-l poată reafișa fără re-rulare.
+    await saveKv('autoverificare:ultima', JSON.stringify({ la: new Date().toISOString(), raport }).slice(0, 100_000)).catch(() => {})
+    return reply.send(raport)
+  })
 }
