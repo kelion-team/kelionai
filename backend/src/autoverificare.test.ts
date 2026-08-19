@@ -9,6 +9,8 @@ import {
   tipFunctie,
   interpreteazaProba,
   ruleazaAutoverificare,
+  decideDinMasuratori,
+  type VerificareFunctie,
 } from './services/autoverificare.js'
 import { CAPABILITIES, grupaExecutieUnealta } from './services/brainCapabilities.js'
 
@@ -169,5 +171,62 @@ describe('autoverificarea LIVE e cablată în chat + refolosită de rută', () =
     expect(c, 'autoverificare lipsește din registru').toBeTruthy()
     expect(c!.admin).toBe(true)
     expect(c!.chat).toBe(true)
+  })
+
+  it('unealta întoarce PLANUL măsurat + nota anti-invenție (LEGEA 5)', () => {
+    const idx = chat.indexOf("case 'autoverificare':")
+    const bloc = chat.slice(idx, idx + 1600)
+    expect(bloc).toMatch(/decideDinMasuratori\(raport\.functii\)/)
+    expect(bloc).toMatch(/\bplan,/)
+    expect(bloc).toMatch(/NU inventa cauze/)
+  })
+
+  it('LEGEA 5 (decizia măsurată) e în legile mereu-prezente ale adminului', () => {
+    expect(chat).toMatch(/5\. LAW OF THE MEASURED DECISION/)
+    expect(chat).toMatch(/An unmeasured cause is "nu stiu inca", not a fact/)
+    expect(chat).toMatch(/Measure first IS the step/)
+  })
+})
+
+// ── MĂSURĂTORILE DECIZIONALE (owner, 19 aug: „să nu se mai repete") ───────────
+// Derivă acțiunea DIN verdictul măsurat — deci, prin construcție, nu poate inventa
+// o cauză. Ce n-are cauză clară de cod → „măsoară întâi", nu reparație oarbă.
+describe('decideDinMasuratori — decizia urmează măsurătoarea, nu ghicește', () => {
+  const f = (functie: string, verdict: VerificareFunctie['verdict'], deCe: string): VerificareFunctie => ({
+    functie, categorie: 'x', face: 'x', tip: 'citire', verdict, deCe, recomandare: '', dovada: '',
+  })
+
+  it('ce MERGE nu produce nicio acțiune', () => {
+    expect(decideDinMasuratori([f('a', 'merge', 'probat real')])).toEqual([])
+  })
+
+  it('ENOENT/binar lipsă (măsurat) → REPARĂ (instalează dependența)', () => {
+    const d = decideDinMasuratori([f('server_logs', 'stricat', 'lipsește un binar/fișier necesar: spawn ENOENT')])
+    expect(d[0].actiune).toBe('repara')
+    expect(d[0].urmatoareaMasuratoare).toMatch(/instalează|repune/)
+  })
+
+  it('rețea/serviciu jos (măsurat) → MĂSOARĂ ÎNTÂI (poate fi tranzitoriu, nu cod)', () => {
+    const d = decideDinMasuratori([f('system_health', 'stricat', 'serviciul nu răspunde (rețea/timeout): ECONNREFUSED')])
+    expect(d[0].actiune).toBe('masoara_intai')
+    expect(d[0].urmatoareaMasuratoare).toMatch(/re-probează după ce.*revine|tranzitoriu/)
+  })
+
+  it('cheie/token lipsă → RECONFIGUREAZĂ (pune cheia), nu reparație de cod', () => {
+    const d = decideDinMasuratori([f('web_search', 'nu_pot_verifica', 'lipsește cheia/tokenul necesar (Serper)')])
+    expect(d[0].actiune).toBe('reconfigureaza')
+  })
+
+  it('auth 401/403 → MĂSOARĂ ÎNTÂI (re-probează logat), nu reparație', () => {
+    const d = decideDinMasuratori([f('get_calendar_events', 'nu_pot_verifica', 'cere autentificare/drepturi')])
+    expect(d[0].actiune).toBe('masoara_intai')
+    expect(d[0].urmatoareaMasuratoare).toMatch(/logat|sesiune/)
+  })
+
+  it('fiecare decizie poartă cauza MĂSURATĂ (nu inventează nimic peste findings)', () => {
+    const findings = [f('x', 'stricat', 'a picat: crash intern'), f('y', 'merge', 'ok')]
+    const d = decideDinMasuratori(findings)
+    expect(d).toHaveLength(1) // doar cele care nu merg
+    expect(d[0].deCe).toBe('a picat: crash intern') // cauza vine DIN finding, nu de altundeva
   })
 })
