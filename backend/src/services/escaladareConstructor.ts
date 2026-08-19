@@ -1,6 +1,6 @@
 // FREE-FIRST + PAID DOAR REZERVĂ (owner 17 aug)
 // Default: free local. Paid se aprinde DOAR în același run, pe eșec real,
-// dacă există cheie+model cloud. Fără abonament „pornit degeaba”.
+// dacă există cheie+model cloud. Fără abonament „pornit degeaba".
 // Aceeași LEGE pe constructor ȘI pe creier (chat/work): free/preferred first,
 // paid = fallback la eșec măsurat — nu drum principal.
 
@@ -9,6 +9,7 @@ export type MotivEscaladare =
   | 'timeout_throttle'
   | 'no_change'
   | 'calitate'
+  | 'shutdown_error'
   | ''
 
 export interface DecizieEscaladareIn {
@@ -36,6 +37,7 @@ const MOTIVE_OK = new Set<string>([
   'no_edit',
   'throttled',
   'openrouter_auth',
+  'shutdown_error',
 ])
 
 /** Clasifică textul de eșec free → motiv scurt (pentru jurnal + decizie). */
@@ -53,6 +55,9 @@ export function clasificaEsecFree(text: string): MotivEscaladare {
   if (/failed|eșuat|esuat|build.*picat|teste.*roș|poart/i.test(t)) {
     return 'calitate'
   }
+  if (/shutdown|cannot schedule.*futures|after shutdown|summarizer.*failed|executor.*shutdown/i.test(t)) {
+    return 'shutdown_error'
+  }
   return ''
 }
 
@@ -67,7 +72,7 @@ function normalizeazaMotiv(raw: string): string {
  * Decizie PURĂ: sărim pe paid în același run?
  * - doar dacă suntem pe free
  * - doar dacă paid e disponibil (cheie+model)
- * - doar pe motive reale (nu „mi se pare greu”)
+ * - doar pe motive reale (nu „mi se pare greu")
  */
 export function decideEscaladareConstructor(i: DecizieEscaladareIn): DecizieEscaladareOut {
   if (!i.peFree) {
