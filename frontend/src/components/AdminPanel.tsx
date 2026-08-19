@@ -2815,25 +2815,42 @@ export default function AdminPanel({
                           ? `🟢 Motor: Aider VIU (${aiderProba.versiune})`
                           : `🔴 Motor: Aider LIPSĂ (${aiderProba.motiv.slice(0, 60)})`}
                     </span>
-                    {/* CREIERUL LOCAL (Ollama pe VPS) — owner, 16 aug: „aider pe un
-                        model local pe VPS (Ollama)". Probat cu `ollama list`. */}
-                    <span
-                      className="chat-hint"
-                      style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: ollamaProba == null ? undefined : ollamaProba.ok && ollamaProba.modele.length ? '#1a7f37' : '#c1121f' }}
-                      title={ollamaProba == null
-                        ? 'proba creierului local încă nu s-a citit'
-                        : ollamaProba.ok
-                          ? `Ollama pe host (/api/tags): ${ollamaProba.modele.join(', ') || 'niciun model instalat'}`
-                          : `proba Ollama pe host: ${ollamaProba.motiv}`}
-                    >
-                      {ollamaProba == null
-                        ? '· creier local: probă…'
-                        : ollamaProba.ok && ollamaProba.modele.length
-                          ? `· 🟢 creier LOCAL Ollama (${ollamaProba.modele.join(', ')})`
-                          : ollamaProba.ok
-                            ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
-                            : `· 🔴 Ollama nu răspunde pe host (${ollamaProba.motiv.slice(0, 50)})`}
-                    </span>
+                    {/* CREIERUL EFECTIV al constructorului — după comutatorul FREE/PLĂTIT,
+                        nu doar ce e INSTALAT (owner, 19 aug: „PLĂTIT dar arată LOCAL — de
+                        ce m-a mințit?"). Oglinda deciziei reale din backend
+                        (decideConfigConstructor): PLĂTIT + cheie cloud OK → rulează pe
+                        CLOUD; altfel → Ollama LOCAL. Înainte, eticheta arăta MEREU „LOCAL"
+                        cât Ollama era instalat, IGNORÂND comutatorul = concluzie falsă. */}
+                    {(() => {
+                      const paidGata = creierCfg.creier2 !== 'gemini' && !!cloudProba?.ok && cloudProba.modele.length > 0
+                      const pePlatit = creierCfg.constructorSursa === 'platit' && paidGata
+                      const localOk = !!ollamaProba?.ok && (ollamaProba?.modele.length ?? 0) > 0
+                      const necitit = ollamaProba == null && cloudProba == null
+                      const efectivOk = pePlatit ? true : localOk
+                      const modelCloud = cloudProba?.modele[0] ?? creierCfg.creier2
+                      const text = necitit
+                        ? '· creier: probă…'
+                        : pePlatit
+                          ? `· 🟢 constructor pe CLOUD PLĂTIT: ${modelCloud}${localOk ? ` · local (${ollamaProba?.modele[0]}) = rezervă` : ''}`
+                          : localOk
+                            ? `· 🟢 constructor pe LOCAL FREE: Ollama (${ollamaProba?.modele.join(', ')})`
+                            : ollamaProba?.ok
+                              ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
+                              : `· 🔴 Ollama nu răspunde pe host (${ollamaProba?.motiv.slice(0, 50) ?? '…'})`
+                      return (
+                        <span
+                          className="chat-hint"
+                          style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: necitit ? undefined : efectivOk ? '#1a7f37' : '#c1121f' }}
+                          title={pePlatit
+                            ? `constructor PLĂTIT → rulează pe CLOUD (${modelCloud}); Ollama local rămâne rezervă`
+                            : ollamaProba?.ok
+                              ? `constructor FREE → Ollama pe host (/api/tags): ${ollamaProba.modele.join(', ') || 'niciun model'}`
+                              : `proba Ollama pe host: ${ollamaProba?.motiv ?? '…'}`}
+                        >
+                          {text}
+                        </span>
+                      )
+                    })()}
                     {/* PULSUL LUCRĂTORULUI (owner, 19 aug: „are ordine in coada dar nu
                         se apuca aider… de ce?"). Dovada MĂSURATĂ că workerul de pe VPS
                         mai cere ordine. Mort + ordine în coadă = de-aceea stau (cron/
