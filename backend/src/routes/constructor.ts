@@ -395,20 +395,48 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // «bifează creier superior»"). Dacă ordinul a picat fiindcă MODELUL nu a dus
     // sarcina (nu o poartă roșie de cod), pun o notificare în panou cu ce e de
     // făcut — nu doar un email care se pierde. Distins prin semnătura din log.
+    // ── AUTO-REMEDIERE IMEDIATĂ (owner, 19 aug: „la eșec, imediat analiză +
+    // decizie + remediere, AUTOMAT") ─────────────────────────────────────────
+    // La eșec HARD, Kelion analizează IMEDIAT (decideRemediereEsec), decide FERM
+    // și, dacă e reparabil, REPUNE SINGUR ordinul în coadă — nu așteaptă omul.
+    // ATENȚIE la creier și la bani (owner): escaladare pe plătit DOAR când e vina
+    // modelului ȘI rezerva e gata; plasă anti-BUCLĂ = contor kv (MAX_AUTO_REMEDIERI).
     if (status === 'failed') {
       const motiv = String(req.body?.log ?? '')
-      const creierNuPoate =
-        /creier|brain|r[ăa]spuns gol|indisponibil|f[ăa]r[ăa] nicio modificare|nu ai scris nimic|\b(401|403)\b|model (invalid|refuzat|nu)/i.test(
-          motiv,
-        )
-      if (creierNuPoate) {
+      const { loadKv, saveKv, remediazaAutomatBuildJob } = await import('../db.js')
+      const { decideRemediereEsec, MAX_AUTO_REMEDIERI } = await import('../services/remediereEsec.js')
+      const { getConfigCreier, getCheieOllama, decideConfigConstructor } = await import('../services/creierCloud.js')
+      // Rezerva paid e gata? — măsurat, pentru decizia de escaladare a creierului.
+      const paidDisponibil = await getConfigCreier()
+        .then(async (cfg) => decideConfigConstructor(cfg, await getCheieOllama()).paidDisponibil)
+        .catch(() => false)
+      const cheieContor = `remediere:count:${id}`
+      const nrDeja = Number(await loadKv(cheieContor).catch(() => null)) || 0
+      const dec = decideRemediereEsec(motiv, paidDisponibil, nrDeja)
+      if (dec.actiune === 'reia') {
+        await saveKv(cheieContor, String(nrDeja + 1)).catch(() => {})
+        const nota = `[AUTO-REMEDIERE ${nrDeja + 1}/${MAX_AUTO_REMEDIERI}] cauză: ${dec.clasa} — ${dec.motiv}. ${dec.recomandare}`
+        const repus = await remediazaAutomatBuildJob(id, nota).catch(() => false)
         void notifyAdmin(
           'scris',
-          `Ordin #${id}: creierul constructorului nu a putut`,
-          `Ordinul de build #${id} a eșuat fiindcă modelul constructorului nu a dus sarcina (nu din cauza unei porți roșii de cod). Escaladează la un creier superior: pune CONSTRUCTOR_MODEL pe un model plătit + CONSTRUCTOR_ALLOW_PAID=1, apoi reia ordinul (constructor_manage retry). Motiv: „${motiv.slice(0, 200)}".`,
-          { jobId: id, motiv: motiv.slice(0, 300) },
+          `Ordin #${id}: auto-remediere (${dec.clasa})${repus ? ' — repus în coadă' : ''}`,
+          `${dec.recomandare}\n\nMotiv: „${motiv.slice(0, 200)}".`,
+          { jobId: id, clasa: dec.clasa, escaladeazaCreier: dec.escaladeazaCreier },
+        ).catch(() => 0)
+      } else {
+        // 'oprire' (permanent — deja înghețat de reportBuildJob) / 'raporteaza':
+        // NU se reîncearcă automat; notificare FERMĂ cu ce e de făcut.
+        void notifyAdmin(
+          'scris',
+          `Ordin #${id}: ${dec.actiune === 'oprire' ? 'OPRIT' : 'de decis de owner'} (${dec.clasa})`,
+          `${dec.recomandare}\n\nMotiv: „${motiv.slice(0, 200)}".`,
+          { jobId: id, clasa: dec.clasa },
         ).catch(() => 0)
       }
+    } else if (status === 'done') {
+      // Succes → resetăm contorul de auto-remedieri al jobului (curățenie).
+      const { saveKv } = await import('../db.js')
+      await saveKv(`remediere:count:${id}`, '0').catch(() => {})
     }
     // The report to Adrian — by email, with the PR to press (the merge is his).
     const dovadaCI =
