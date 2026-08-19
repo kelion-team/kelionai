@@ -270,7 +270,16 @@ const treaptaOwner: 'chat' | 'work' = heavy ? 'work' : 'chat'
     let ownerModel: string | null = null
     // CREIER 2 CLOUD pe ture GRELE (owner, 16–17 aug): panoul alege kimi-k3 /
     // qwen3.5; chatul rapid rămâne Gemini. Doar când proba cheii e OK.
-    if (heavy) {
+    // EXECUȚIA RĂMÂNE PE GEMINI (owner, 19 aug: „tot ce-i cer lui kelion să facă
+    // în chat =0… kelion trebuie să autodecidă… ce se întâmplă?"). Măsurat în
+    // audit: turele de ACȚIUNE ale ownerului sunt „grele", dar Creier 2 cloud
+    // (qwen3.5/kimi, prin Ollama) NU cheamă de încredere unealta forțată — răspunde
+    // în proză, iar codul o accepta = ZERO execuție, fără cădere pe Gemini (regresie
+    // 16–17 aug). Deci auto-decizia trimite la cloud DOAR turele grele de RAȚIONAMENT
+    // (fără intenție de acțiune); orice tură care trebuie să EXECUTE rămâne pe Gemini,
+    // creierul care CHIAR cheamă unealta. Cloud-ul își păstrează rolul: gândire grea,
+    // nu execuție.
+    if (heavy && !hasActionIntent(text)) {
       try {
         const { getConfigCreier, tagModelCloud, probaOllamaCloud } = await import('../services/creierCloud.js')
         const { OLLAMA_CLOUD_PREFIX } = await import('../services/ollamaCloud.js')
