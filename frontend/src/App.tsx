@@ -20,6 +20,7 @@ import {
 import { watchdogInit } from './lib/watchdog'
 import { ConsimtamantFoto } from './components/ConsimtamantFoto'
 import { citesteConsimtamant, scrieConsimtamant, type StareConsimtamant } from './lib/consimtamant'
+import { isCalm } from './lib/activity'
 
 // MARTORUL GLOBAL de fiabilitate pornește o dată, la încărcare — prinde orice
 // blocaj al firului principal, oriunde în aplicație (vedere/voce/creier/…).
@@ -62,7 +63,27 @@ export default function App() {
   // unei versiuni noi, se aplică hard reset IMEDIAT, fără niciun dialog/banner
   // de confirmare și fără numărătoare inversă. Clientul se reîncarcă transparent
   // în fundal — utilizatorul nu trebuie să facă nicio acțiune manuală.
-  useEffect(() => watchForUpdate(() => void hardResetToLatest()), [])
+  // Verifică isCalm() înainte de reset — nu tăia sesiuni live (voce/brain/draft).
+  useEffect(() => {
+    let resetPending = false
+    const tryReset = (): void => {
+      if (!resetPending) return
+      if (isCalm()) {
+        resetPending = false
+        void hardResetToLatest()
+      }
+      // Dacă nu e calm, așteptăm și verificăm din nou la următorul tick
+    }
+    const stop = watchForUpdate(() => {
+      resetPending = true
+      tryReset()
+      // Poll until calm if not already
+      const poll = window.setInterval(tryReset, 1000)
+      // Stop polling after 5 minutes if still not calm
+      window.setTimeout(() => window.clearInterval(poll), 300_000)
+    })
+    return stop
+  }, [])
 
   // WATERMARK ALWAYS UP TO DATE (Adrian, Jul 10: "the new watermark should
   // appear automatically on any update, inside the apps" — it was written but
