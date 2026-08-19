@@ -67,3 +67,99 @@ describe('proba Ollama e LEGATĂ (health + panoul constructor + auto-instalarea 
     expect(a).toContain('ollama_chat/')
   })
 })
+
+describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('normalizeazaSchema asigură JSON Schema valid pentru tool definitions', async () => {
+    const { normalizeazaSchema } = await import('./services/ollamaCloud.js')
+    
+    // Schema fără type → adaugă 'object'
+    expect(normalizeazaSchema({})).toEqual({ type: 'object', properties: {} })
+    
+    // Schema fără properties → adaugă properties gol
+    expect(normalizeazaSchema({ type: 'object' })).toEqual({ type: 'object', properties: {} })
+    
+    // Schema cu properties invalid → curăță
+    expect(normalizeazaSchema({ type: 'object', properties: 'invalid' })).toEqual({ type: 'object', properties: {} })
+    
+    // Schema cu proprietăți nepermise → curăță
+    const schemaCuExtra = { type: 'object', properties: { name: { type: 'string' } }, extraProp: 'bad' }
+    const result = normalizeazaSchema(schemaCuExtra)
+    expect(result).not.toHaveProperty('extraProp')
+    expect(result.type).toBe('object')
+    expect(result.properties).toEqual({ name: { type: 'string' } })
+  })
+
+  it('parseazaArgumenteTool gestionează argumente malformate cu fallback curat', async () => {
+    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    
+    // String JSON valid → parsează
+    expect(parseazaArgumenteTool('{"key": "value"}')).toEqual({ key: 'value' })
+    
+    // String gol → obiect gol
+    expect(parseazaArgumenteTool('')).toEqual({})
+    
+    // null/undefined → obiect gol
+    expect(parseazaArgumenteTool(null as any)).toEqual({})
+    expect(parseazaArgumenteTool(undefined as any)).toEqual({})
+    
+    // JSON invalid → obiect gol (nu aruncă)
+    expect(parseazaArgumenteTool('{invalid json}')).toEqual({})
+    
+    // Array în loc de object → obiect gol
+    expect(parseazaArgumenteTool('[1, 2, 3]')).toEqual({})
+  })
+
+  it('unelteOpenAi produce payload compatibil Ollama Cloud', async () => {
+    const { unelteOpenAi } = await import('./services/ollamaCloud.js')
+    
+    const tools = [
+      {
+        name: 'test_tool',
+        description: 'Test tool description',
+        input_schema: {
+          type: 'object',
+          properties: {
+            param1: { type: 'string', description: 'First param' },
+            param2: { type: 'number', description: 'Second param' },
+          },
+          required: ['param1'],
+        },
+      },
+    ]
+    
+    const result = unelteOpenAi(tools)
+    
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      type: 'function',
+      function: {
+        name: 'test_tool',
+        description: 'Test tool description',
+      },
+    })
+    expect((result[0] as any).function.parameters).toEqual({
+      type: 'object',
+      properties: {
+        param1: { type: 'string', description: 'First param' },
+        param2: { type: 'number', description: 'Second param' },
+      },
+      required: ['param1'],
+    })
+  })
+
+  it('tool call arguments dublu serializate sunt gestionate corect', async () => {
+    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    
+    // Argumente deja serializate ca string în interiorul JSON-ului
+    const doubleSerialized = '{"query": "{\\"nested\\": \\"value\\"}"}'
+    const result = parseazaArgumenteTool(doubleSerialized)
+    
+    // Ar trebui să parseze corect primul nivel
+    expect(result).toHaveProperty('query')
+    expect(typeof result.query).toBe('string')
+  })
+})
