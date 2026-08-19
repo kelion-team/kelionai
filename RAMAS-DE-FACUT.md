@@ -13,6 +13,17 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 19 aug (verbatim): „constructorul nu repara, nici ieftin nici platit" +
+      „obligatoriu tot ce e free si constructor trebuie sa repare… rezolva real cu
+      dovezi ca free functioneaza". CAUZA (în cod): poarta protocolului strict
+      (`0efd377`) arunca `amanabil: invalid_protocol` ÎNAINTE de despărțirea
+      free/plătit — la protocol JSON lipsă (200 cu `protocol:null` sau 422 „non-cod")
+      Aider NU rula NICIODATĂ, identic pe free ȘI plătit. FIX: `decideSursaPlanAider`
+      (pură+testată) cade pe LEGACY (ordin brut→Aider) în loc să omoare ordinul;
+      protocolul strict rămâne preferat când există; cele 7 porți verifică oricum.
+      DOVEZI de aici: `constructorFreeRepara.test.ts` 6/6, throw scos din sursă,
+      suită 1858/1858, tsc 0, 7 porți 0. NU POT VERIFICA LIVE Ollama pe VPS (n-am
+      GPU/Ollama) — RĂMAS: ordin constructor de probă pe 32b free dus cap-coadă.
 - [x] ORDIN 17 aug QA — Contabo VPS 18 UP măsurat: **18 CPU / 94 GB RAM**; master=live 4adfe73.
 - [x] ORDIN 17 aug QA — free constructor pe qwen2.5-coder:32b VIU (FREE32_OK ~57s pe 94GB).
 - [x] ORDIN 17 aug QA — free-first + paid rezervă pe creier-config/agent (preferred free, fallback paid).

@@ -901,6 +901,44 @@ async function cereAjutorCreier(ordin, esuat) {
     return { protocol: null, plan: '', files: [], legacy: false, strictFailure: true, errors: [error] }
   }
 }
+
+// ── DECIZIA SURSEI DE PLAN PENTRU AIDER (owner, 19 aug: „obligatoriu tot ce e
+// free si constructor trebuie sa repare… rezolva real cu dovezi ca free
+// functioneaza") ────────────────────────────────────────────────────────────
+// PURĂ + EXPORTATĂ ca să fie PROBATĂ (regula #1: nicio pretenție fără măsurătoare).
+// Poarta protocolului strict (commit 0efd377) OMORA ordinul: când creierul app
+// nu putea întoarce un protocol JSON valid (hopa LLM → răspuns 200 cu
+// `protocol:null`, sau 422 „non-cod"), workerul arunca `amanabil: invalid_protocol`
+// ÎNAINTE de despărțirea free/plătit — deci Aider NU rula NICIODATĂ, IDENTIC pe
+// free ȘI pe plătit („constructorul nu repara, nici ieftin nici platit"). Aici
+// întoarcem decizia: protocolul strict rămâne PREFERAT când există, dar când
+// LIPSEȘTE NU mai omorâm ordinul — cădem pe drumul LEGACY (Aider lucrează direct
+// pe ordinul brut + repo-map). Cele 7 porți din atelier verifică oricum rezultatul,
+// deci legacy NU e nesigur — e exact cum lucra constructorul înainte de poartă.
+// Așa FREE chiar reparĂ: dacă modelul local scrie cod care trece porțile, iese PR.
+export function decideSursaPlanAider(h, orderText) {
+  if (h && h.strictFailure) {
+    return {
+      protocol: null,
+      plan: '',
+      legacy: true,
+      files: extrageFisiereDinText(orderText, 12),
+      ajutorFolosit: false,
+      fallbackDinProtocolInvalid: true,
+      errors: h.errors || [],
+    }
+  }
+  return {
+    protocol: h?.protocol ?? null,
+    plan: h?.plan ?? '',
+    legacy: h?.legacy === true,
+    files: h?.files || [],
+    ajutorFolosit: !!(h?.protocol || h?.plan),
+    fallbackDinProtocolInvalid: false,
+    errors: [],
+  }
+}
+
 export function construiestePromptPasiMici(job, extra = '', plan = '', protocol = null) {
   if (protocol) {
     let prompt =
@@ -1155,18 +1193,25 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
   let ajutorFolosit = false
   {
     const h = await cereAjutorCreier(job.orderText, String(jurnalVechi || '').slice(-800))
-    if (h.strictFailure) {
-      throw Object.assign(new Error(`protocol constructor invalid: ${(h.errors || []).join('; ').slice(0, 500)}`), {
-        amanabil: true,
-        freeIssue: 'invalid_protocol',
-      })
+    const s = decideSursaPlanAider(h, job.orderText)
+    if (s.fallbackDinProtocolInvalid) {
+      // NU mai amânăm ordinul (owner, 19 aug): protocolul strict lipsește, dar
+      // constructorul TREBUIE să repare — cădem pe drumul legacy (ordinul brut →
+      // Aider), IDENTIC pe free și pe plătit. Porțile atelierului verifică rezultatul.
+      log(`protocol strict indisponibil (${s.errors.join('; ').slice(0, 200)}) — cad pe LEGACY (ordinul brut → Aider), NU amân ordinul`)
+      salveazaLectie({ sig: 'protocol_fallback_legacy', cauza: s.errors.join('; ').slice(0, 200), fix: 'legacy-raw-order', ok: false })
     }
-    protocol0 = h.protocol
-    plan0 = h.plan
-    legacyProtocol = h.legacy === true
-    files0 = h.files || []
-    ajutorFolosit = !!(protocol0 || plan0)
-    beat(platit ? 'protocol JSON validat -> Aider CLOUD' : 'protocol JSON validat -> Aider FREE', true)
+    protocol0 = s.protocol
+    plan0 = s.plan
+    legacyProtocol = s.legacy
+    files0 = s.files
+    ajutorFolosit = s.ajutorFolosit
+    beat(
+      protocol0
+        ? (platit ? 'protocol JSON validat -> Aider CLOUD' : 'protocol JSON validat -> Aider FREE')
+        : (platit ? 'fara protocol strict -> Aider CLOUD pe ordinul brut (legacy)' : 'fara protocol strict -> Aider FREE pe ordinul brut (legacy)'),
+      true,
+    )
   }
 
   let reparatii = 0
