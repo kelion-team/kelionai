@@ -93,6 +93,15 @@ export function interpreteazaProba(
         deCe: 'lipsește cheia/tokenul necesar (ex. Google/Serper) — nu e stricat codul, e configurarea',
         recomandare: 'FERM: reconectează contul / pune cheia lipsă, apoi re-verifică.',
       }
+    // ARGUMENT LIPSĂ/INVALID: unealta cere o INTRARE reală (query, id, text) — nu
+    // se poate proba corect cu argumente goale. Onest „nu pot verifica", NU „stricat"
+    // (altfel o unealtă perfect funcțională apare roșu doar fiindcă am probat-o gol).
+    if (/\brequired\b|is required|missing (required )?(parameter|argument|field|query|id)|lipse[șs]te.*(argument|parametru|c[âa]mp|intrarea|query|textul|\bid\b)|argument(e|ul)?\s*(lips|invalid|gol|obligatoriu)|obligatoriu|invalid input|invalid arguments|expected .*(argument|parameter)|f[ăa]r[ăa] (query|argument|intrare|text)|trebuie.{0,15}(id|query|text|argument|parametru|intrare|c[âa]mp|valoare)/.test(e))
+      return {
+        verdict: 'nu_pot_verifica',
+        deCe: 'cere o intrare reală (nu se poate proba corect cu argumente goale)',
+        recomandare: 'Probează cu o intrare reală (o căutare, un id, un text) din chat — nu e o stricăciune.',
+      }
     // REȚEA / SERVICIU JOS: chiar nu merge acum.
     if (/econnrefused|econnreset|etimedout|timeout|network|fetch failed|getaddrinfo|\b5\d\d\b|service unavailable|not respond|nu r[ăa]spunde/.test(e))
       return {
@@ -187,4 +196,53 @@ export async function ruleazaAutoverificare(deps: DepsAutoverificare): Promise<R
     nepotverifica: functii.filter((f) => f.verdict === 'nu_pot_verifica').length,
     functii,
   }
+}
+
+// ── RULAREA LIVE, REALĂ (owner, 19 aug: „eu vreau real") ─────────────────────
+// Rulează autoverificarea PE SERVER cu execuție REALĂ: citirile prin `uneltele`
+// (execuție adevărată), efectele NU se execută (dry-run), iar pe cele picate
+// creierul (AI) îmbogățește „de ce". Salvează ultimul raport în kv. Folosită de
+// AMBELE uși — ruta admin ȘI unealta de chat `autoverificare` — o SINGURĂ dată
+// aici (fără duplicare). Importurile sunt dinamice ca să nu închidă ciclul
+// autonomie→adminTools→autoverificare.
+export async function autoverificareLive(): Promise<RaportAutoverificare> {
+  const { uneltele } = await import('./autonomie.js')
+  const { rationeazaMesajeSigur } = await import('./creierRationament.js')
+  const { saveKv } = await import('../db.js')
+  const raport = await ruleazaAutoverificare({
+    // CITIRE: execută unealta real, cu argumente goale (sigur — doar citește).
+    probaCitire: async (c) => {
+      try {
+        const out = await uneltele(c.name, {})
+        return { ok: true, rezultat: String(out ?? '') }
+      } catch (e) {
+        return { ok: false, eroare: String((e as Error)?.message ?? e).slice(0, 200) }
+      }
+    },
+    // EFECT: NU se execută la test (ar produce efect/cost). Cablajul e garantat de
+    // paritatea registru↔unelte (lacătul brainCapabilities); marcăm „cablată".
+    esteCablat: () => true,
+    // DIAGNOSTIC AI pe cele picate: cauză + recomandare fermă, JSON. Null/eroare →
+    // rămâne diagnosticul determinist (regula #1: nu inventăm).
+    creierDiag: async (picate) => {
+      const lista = picate.map((p) => `- ${p.functie}: face „${p.face}"; simptom măsurat: ${p.deCe}`).join('\n')
+      const prompt =
+        `Ești diagnosticianul lui Kelion. Pentru FIECARE funcție picată de mai jos, spune DE CE nu merge ` +
+        `(cauza cea mai probabilă, scurt) și o RECOMANDARE fermă (ce să facă concret). ` +
+        `Răspunde DOAR cu JSON valid: [{"functie":"<nume>","deCe":"<scurt>","recomandare":"<ferm>"}].\n\nFuncții:\n${lista}`
+      const txt = await rationeazaMesajeSigur([{ role: 'user', content: prompt }], { ruta: 'autoverificare', treapta: 'lucru', maxTokens: 1200 })
+      const m: Record<string, { deCe?: string; recomandare?: string }> = {}
+      if (!txt) return m
+      try {
+        const j = JSON.parse(txt.slice(txt.indexOf('['), txt.lastIndexOf(']') + 1)) as { functie?: string; deCe?: string; recomandare?: string }[]
+        for (const x of j) if (x?.functie) m[x.functie] = { deCe: x.deCe, recomandare: x.recomandare }
+      } catch {
+        /* JSON invalid → rămâne diagnosticul determinist */
+      }
+      return m
+    },
+  })
+  // hardcod-permis: cheia kv e un identificator intern, nu o valoare arătată omului.
+  await saveKv('autoverificare:ultima', JSON.stringify({ la: Date.now(), raport }).slice(0, 100_000)).catch(() => {})
+  return raport
 }
