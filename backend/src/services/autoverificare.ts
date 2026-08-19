@@ -273,6 +273,29 @@ export function formatMonitorAutoverificare(raport: RaportAutoverificare, plan: 
   return { title: `Autoverificare — ${raport.total} funcții`, text: linii.join('\n') }
 }
 
+// ── PROBAREA REALĂ A UNELTELOR GOOGLE/„APLICAȚII" (owner, 19 aug: „verifică
+// aplicațiile dacă sunt real funcționale" → „da") ───────────────────────────
+// Rezultatul brut al unei unelte Google (runGoogleTool) → probă. Dacă e un semnal
+// de EROARE (google_not_connected / argument lipsă), îl tratăm ca EROARE ca să-l
+// clasifice corect interpreteazaProba (nu ca „rezultat"). Altfel e date reale
+// (Gmail chiar a întors emailuri) → MERGE. PUR și probat.
+export function probaDinRezultatGoogle(brut: string): RezultatProba {
+  const s = String(brut ?? '')
+  try {
+    const j = JSON.parse(s) as Record<string, unknown>
+    if (j && typeof j === 'object' && !Array.isArray(j) && j.error != null) {
+      const er = String(j.error)
+      const eroare = /not.?connect|neconectat|invalid_grant|unauthenticated|no.?credential|reconnect|token/i.test(er)
+        ? 'Google neconectat / token expirat — reconectează contul'
+        : er
+      return { ok: false, eroare }
+    }
+  } catch {
+    /* nu-i JSON → e rezultat text real */
+  }
+  return { ok: true, rezultat: s }
+}
+
 // ── RULAREA LIVE, REALĂ (owner, 19 aug: „eu vreau real") ─────────────────────
 // Rulează autoverificarea PE SERVER cu execuție REALĂ: citirile prin `uneltele`
 // (execuție adevărată), efectele NU se execută (dry-run), iar pe cele picate
@@ -284,10 +307,23 @@ export async function autoverificareLive(): Promise<RaportAutoverificare> {
   const { uneltele } = await import('./autonomie.js')
   const { rationeazaMesajeSigur } = await import('./creierRationament.js')
   const { saveKv } = await import('../db.js')
+  // UNELTELE „APLICAȚII" (Google/web) merg pe calea CHAT (runGoogleTool), nu prin
+  // `uneltele` — de aceea ieșeau fals „necunoscute". Acum le probăm REAL, cu tokenul
+  // Google al ownerului (Gmail/Calendar/Drive chiar întorc date; web/wiki n-au nevoie
+  // de token). Doar CITIRILE se execută (efectele rămân dry-run).
+  const { runGoogleTool, googleTools } = await import('./google.js')
+  const { tokenGoogleOwner } = await import('./agentiKelion.js')
+  const googleToken = await tokenGoogleOwner().catch(() => '')
+  const numeGoogle = new Set(googleTools.map((t) => t.name))
   const raport = await ruleazaAutoverificare({
     // CITIRE: execută unealta real, cu argumente goale (sigur — doar citește).
     probaCitire: async (c) => {
       try {
+        // Unealtă Google/„aplicație" → calea ei REALĂ, cu tokenul ownerului.
+        if (numeGoogle.has(c.name)) {
+          const out = await runGoogleTool(c.name, {}, googleToken)
+          return probaDinRezultatGoogle(String(out ?? ''))
+        }
         const out = await uneltele(c.name, {})
         return { ok: true, rezultat: String(out ?? '') }
       } catch (e) {
