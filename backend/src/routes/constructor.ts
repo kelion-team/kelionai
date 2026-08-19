@@ -130,6 +130,21 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     })
   })
 
+  // ── DIAGNOSTICUL AUTONOM AL CONSTRUCTORULUI (owner, 19 aug: „nu are autonomie…
+  // sa faca asta") ─────────────────────────────────────────────────────────────
+  // Kelion măsoară SINGUR de ce (nu) repară — puls lucrător + motor Aider + creier
+  // LOCAL + rezultatele free/plătit — și dă verdictul FERM. Pe server (acces real),
+  // fără să depindă de owner. Aceeași sursă unică (culegeDiagnosticConstructor) ca
+  // unealta de chat/voce. Doar citire, admin (cerAdmin = oameni + legitimația lui Kelion).
+  app.get('/api/admin/constructor/diagnostic', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
+    const diagnostic = await diagnosticConstructorViu(Date.now())
+    if ('error' in diagnostic) return reply.code(500).send(diagnostic)
+    return reply.send(diagnostic)
+  })
+
   // ── COMUTATORUL CREIER 2 (cloud) + SURSA CONSTRUCTORULUI (free/plătit) ───────
   // Owner, 16 aug: „creier 2 → Kimi K3 cu comutator Qwen3.5 Max… constructor =
   // comutator FREE (local) ↔ PLĂTIT (același model ca creier 2)… se aprinde când
@@ -378,7 +393,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post<{
-    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }
+    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number; motor?: string; creierModel?: string; sursa?: string; fisiere?: unknown; ordin?: string }
   }>('/api/constructor/report', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
@@ -452,8 +467,23 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       }
     } else if (status === 'done') {
       // Succes → resetăm contorul de auto-remedieri al jobului (curățenie).
-      const { saveKv } = await import('../db.js')
+      const { saveKv, addMemory } = await import('../db.js')
       await saveKv(`remediere:count:${id}`, '0').catch(() => {})
+      // KELION ÎNVAȚĂ „cum și cine, ce a aplicat" (owner, 19 aug): proveniența
+      // rezolvării (motor + creier + sursă + fișiere) devine o MEMORIE pe care o
+      // recall-uiește (getMemories → /api/constructor/context). Doar din proveniența
+      // MĂSURATĂ trimisă de worker — nimic inventat. Best-effort (nu blochează raportul).
+      const { memorieRezolvareConstructor } = await import('../services/invatareConstructor.js')
+      const linieMemorie = memorieRezolvareConstructor({
+        id,
+        motor: req.body?.motor,
+        creier: req.body?.creierModel,
+        sursa: req.body?.sursa,
+        fisiere: req.body?.fisiere,
+        ordin: req.body?.ordin,
+        prUrl: req.body?.prUrl,
+      })
+      if (linieMemorie) await addMemory(config.adminEmail, linieMemorie, 'kelion').catch(() => {})
     }
     // The report to Adrian — by email, with the PR to press (the merge is his).
     const dovadaCI =

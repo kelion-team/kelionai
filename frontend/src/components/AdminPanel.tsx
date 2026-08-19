@@ -671,6 +671,8 @@ export default function AdminPanel({
   // fiindcă nu le cere nimeni (cron/worker oprit), nu din vina app-ului.
   const [lucratorPuls, setLucratorPuls] = useState<{ lastPoll: number; ageSec: number | null; viu: boolean; pragMs: number } | null>(null)
   const [inCoada, setInCoada] = useState<number>(0)
+  // DIAGNOSTICUL AUTONOM (owner, 19 aug): „de ce (nu) repară", măsurat pe server.
+  const [diagnostic, setDiagnostic] = useState<{ sanatos: boolean; verdict: string; probleme: { cod: string; severitate: 'critic' | 'atentie'; ce: string; recomandare: string }[] } | null>(null)
   const [ollamaKeyInput, setOllamaKeyInput] = useState('')
   const [creierMsg, setCreierMsg] = useState('')
   // „nu stă butonul" (owner, 16 aug): reîncărcarea la 10s scria peste alegerea
@@ -1015,6 +1017,12 @@ export default function AdminPanel({
         } else setBuildJobs(null)
       })
       .catch(() => setBuildJobs(null))
+    // DIAGNOSTICUL AUTONOM: de ce (nu) repară, măsurat pe server (regula #1 — pe
+    // eșec îl ascundem, nu inventăm „sănătos").
+    fetch('/api/admin/constructor/diagnostic', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { sanatos: boolean; verdict: string; probleme: { cod: string; severitate: 'critic' | 'atentie'; ce: string; recomandare: string }[] } | null) => setDiagnostic(d && typeof d.verdict === 'string' ? d : null))
+      .catch(() => setDiagnostic(null))
   }
   // Tab „Constructor” open → the orders queue, refreshed every 10s.
   useEffect(() => {
@@ -2848,6 +2856,23 @@ export default function AdminPanel({
                             : `· 🔴 lucrătorul tăcut de ${Math.round((lucratorPuls.ageSec ?? 0) / 60)} min (cron/worker oprit?)${inCoada ? ` — ${inCoada} în coadă` : ''}`}
                     </span>
                   </div>
+                  {/* DIAGNOSTICUL AUTONOM (owner, 19 aug: „nu are autonomie… sa faca
+                      asta"): Kelion măsoară SINGUR de ce (nu) repară și o arată aici,
+                      cu recomandarea fermă — nu mai întrebi „de ce?". */}
+                  {diagnostic && (diagnostic.probleme.length > 0 || !diagnostic.sanatos) && (
+                    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, border: '1px solid', borderColor: diagnostic.sanatos ? '#d0a92066' : '#c1121f66', background: diagnostic.sanatos ? '#d0a92014' : '#c1121f10' }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: diagnostic.sanatos ? '#8a6d1a' : '#c1121f' }}>
+                        {diagnostic.sanatos ? '⚠ ' : '🔴 '}{diagnostic.verdict}
+                      </div>
+                      {diagnostic.probleme.map((p) => (
+                        <div key={p.cod} style={{ fontSize: 12, marginTop: 6 }}>
+                          <span style={{ fontWeight: 600 }}>{p.severitate === 'critic' ? '🔴' : '⚠'} {p.ce}</span>
+                          <br />
+                          <span className="chat-hint" style={{ fontSize: 11.5 }}>→ {p.recomandare}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {/* ── COMUTATORUL CREIER 2 + CONSTRUCTOR (owner, 16 aug: „creier 2 →
                       Kimi K3 cu comutator Qwen3.5 Max… constructor = FREE ↔ PLĂTIT…
                       se aprinde când lipesc cheia"). Tu alegi, tu vezi, măsurat.

@@ -4178,12 +4178,20 @@ async function runTool(
       // raportează o coadă goală pe care n-a citit-o (regula #1).
       const jobs = await listBuildJobs(12)
       if (!jobs) return JSON.stringify({ error: 'coada_necitibila', message: 'Nu pot citi coada ordinelor — citirea din baza de date a picat.' })
+      // DIAGNOSTIC AUTONOM (owner, 19 aug: „nu are autonomie… sa faca asta"):
+      // pe lângă lista ordinelor, Kelion măsoară SINGUR de ce (nu) repară — puls
+      // lucrător + motor Aider + creier local + rezultatele free/plătit — și
+      // raportează verdictul, pe server, fără să depindă de owner sau de o sesiune
+      // externă. Rulează pe calea CHAT ȘI pe voce (paritatea din brainCapabilities).
+      const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
+      const diagnostic = await diagnosticConstructorViu(Date.now()).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }))
       return JSON.stringify({
         // `progress` = the constructor's current step (Stage 4) — Kelion can
         // speak it ("now compiling", "opening the PR") instead of "working…".
         // `ci` = the verdict of the INDEPENDENT verification (Stage 6): "Done,
         // verified by CI (green)" — not on the worker's word.
         jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
+        diagnostic, // { sanatos, verdict, probleme[], masuratori } — DE CE (nu) repară
       })
     }
     // STĂPÂNIREA ORDINELOR (Adrian, 3 aug): șterge / șterge-în-grup / reia

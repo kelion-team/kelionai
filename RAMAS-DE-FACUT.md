@@ -13,6 +13,18 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 19 aug (verbatim): „nu are autonomie… sa faca asta" + „in raportul pr,
+      trebuie sa apara clar ce creier si ce constructor a rezolvat" + „kelion invata
+      cum si cine, ce a aplicat". VERIFICAT LIVE (GitHub+app): lucrătorul E VIU (job
+      #501 @13:19) dar FREE face „no_edit"→escaladează pe plătit pe toate ordinele
+      recente (deci „free nu repară" e real). LIVRAT: (1) diagnostic AUTONOM pe server
+      (`diagnosticConstructor` pur+11 teste; rută `/api/admin/constructor/diagnostic`
+      + unealta constructor_status chat/voce + banner AdminPanel) — Kelion spune
+      SINGUR de ce (nu) repară; (2) raport PR CLAR (`raportCreierConstructor`): motor
+      Aider + creierul care a rezolvat (free/plătit) + ce a aplicat; (3) învățare
+      (`memorieRezolvareConstructor` → addMemory la done) — Kelion reține cum/cine/ce.
+      DOVEZI: 1883/1883, 7 porți 0. RĂMAS: de ce FREE „no_edit" (model lent/omorât pe
+      tăcere) — de reglat pe VPS cu diagnosticul nou (CONSTRUCTOR_SILENCE_MS/model).
 - [x] ORDIN 19 aug (verbatim): „are ordine in coada dar nu se apuca aider sau altcineva
       de reparat, de ce?". CAUZA (în cod, nu pe VPS): `claimNextBuildJob` rula
       abandonarea + `upsertConstructorIncident` în ACEEAȘI tranzacție cu preluarea →

@@ -268,7 +268,8 @@ export const PANOU_COD_TOOL: Tool = {
 
 export const CONSTRUCTOR_STATUS_TOOL: Tool = {
   name: 'constructor_status',
-  description: "ADMIN ONLY. Status of the constructor's build orders (queued / working / done / failed, with the PR link).",
+  description:
+    "ADMIN ONLY. Status of the constructor's build orders (queued / working / done / failed, with the PR link) AND a MEASURED self-diagnostic (`diagnostic`): whether the constructor actually repairs and, if not, WHY — worker heartbeat (is the VPS cron alive?), Aider engine, LOCAL free brain (Ollama), and how many recent orders FREE failed to edit / escalated to paid. Use it whenever the owner asks why the constructor is stuck, why nothing is picked up, or why free/paid does not repair — report `diagnostic.verdict` + the firm recommendation, never guess.",
   input_schema: { type: 'object', properties: {} },
 }
 

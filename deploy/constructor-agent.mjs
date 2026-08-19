@@ -1118,6 +1118,37 @@ function decideEscaladareFreeFirst({ peFree, paidDisponibil, motivFree }) {
   return { escaladeaza: true, motiv }
 }
 
+// ── RAPORTUL CLAR „CINE A REZOLVAT" (owner, 19 aug: „in raportul pr, trebuie sa
+// apara clar ce creier si ce constructor a rezolvat" + „kelion invata cum si cine,
+// ce a aplicat ca sa rezolve") ─────────────────────────────────────────────────
+// PUR + EXPORTAT (probat): din proveniența rezolvării dă un bloc LIMPEDE pentru
+// corpul PR-ului — constructorul (motorul), creierul care a rezolvat (free local
+// SAU rezerva plătită), cum (escaladare/plan) și CE a aplicat (fișierele). Aceeași
+// proveniență o învață Kelion (memorie), deci raportul și învățarea spun același lucru.
+const MOTIVE_ESCALADARE_TEXT = {
+  no_change: 'free n-a editat nimic',
+  timeout_throttle: 'free a fost sugrumat/timeout',
+  free_indisponibil: 'creierul local free era jos',
+  calitate: 'free a picat porțile de calitate',
+  openrouter_auth: 'auth free respins',
+}
+export function raportCreierConstructor(info = {}) {
+  const { sursaFinal, creierModel, modelFree, motivEscaladare, ajutorFolosit, fisiere } = info
+  const platit = sursaFinal === 'platit'
+  const eticheta = platit ? 'PLĂTIT (cloud)' : 'FREE (local pe VPS, fără bani)'
+  const linii = [
+    '🔧 Constructor (motor): Aider',
+    `🧠 Creier care a rezolvat: ${creierModel || '(necunoscut)'} — ${eticheta}`,
+  ]
+  if (platit && modelFree && motivEscaladare) {
+    linii.push(`🔁 Pornit pe FREE (${modelFree}) → escaladat pe PLĂTIT (motiv: ${MOTIVE_ESCALADARE_TEXT[motivEscaladare] || motivEscaladare})`)
+  }
+  if (ajutorFolosit) linii.push('📋 Cum: cu plan „pași mici" de la creierul Kelion')
+  const fis = Array.isArray(fisiere) ? fisiere.filter(Boolean) : []
+  if (fis.length) linii.push(`📝 Ce a aplicat (${fis.length} fișiere): ${fis.slice(0, 12).join(', ')}${fis.length > 12 ? ' …' : ''}`)
+  return linii.join('\n')
+}
+
 async function construiesteCuAider(job, baseSha, jurnalVechi) {
   // preferred free; fallback paid doar dacă API-ul raportează rezervă gata
   let creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }
@@ -1307,17 +1338,37 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
 
     const problema = verificaAtelierul(baseSha)
     if (!problema) {
+      // CINE A REZOLVAT, CLAR (owner, 19 aug: „in raportul pr, trebuie sa apara clar
+      // ce creier si ce constructor a rezolvat"). Motorul e mereu Aider; creierul e
+      // modelul care CHIAR a produs reparația (free local SAU rezerva plătită).
+      const sursaFinal = platit ? 'platit' : 'free'
+      const creierModel = platit ? String(creierCfg.model || 'cloud') : numeModelOllama()
+      // CE A APLICAT — fișierele schimbate (WHAT), pentru raport ȘI pentru învățare.
+      let fisiereSchimbate = []
+      try { fisiereSchimbate = sh(`git diff --name-only ${baseSha} HEAD`).trim().split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 20) } catch { /* fără listă */ }
+      // KELION ÎNVAȚĂ „cum și cine, ce a aplicat" (owner, 19 aug): lecția de succes
+      // poartă acum motorul + creierul + sursa + fișierele aplicate, nu doar „done".
       salveazaLectie({
         sig: platit ? 'paid_ok' : 'free_ok',
         cauza: motivEscaladare ? `done_after_${motivEscaladare}` : 'done',
         fix: ajutorFolosit ? 'brain-plan+aider' : 'aider',
         ok: true,
+        motor: 'aider',
+        creier: creierModel,
+        sursa: sursaFinal,
+        fisiere: fisiereSchimbate,
+        ordin: (job.orderText.split('\n')[0] || '').slice(0, 160),
       })
       return {
         title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120),
         body: `Aider — ${ULTIMUL_CREIER}${ajutorFolosit ? ' — plan pași mici creier Kelion' : ''}${motivEscaladare ? ` — escaladat (${motivEscaladare})` : ''}. brain=${brainRaport}. Ordin #${job.id}.`,
         brainRaport,
         motivEscaladare,
+        sursaFinal, // 'free' | 'platit' — sursa care a REZOLVAT
+        creierModel, // numele modelului care a rezolvat (free local sau paid cloud)
+        modelFree: numeModelOllama(), // modelul local free (pt. linia de escaladare)
+        ajutorFolosit, // a folosit planul creierului Kelion?
+        fisiere: fisiereSchimbate, // CE a aplicat — pt. raport ȘI învățare
       }
     }
     ultimaProblema = problema
@@ -1469,12 +1520,20 @@ async function main() {
     const headSha = sh('git rev-parse HEAD').trim()
     log(`ramura ${branch} împinsă`)
 
-    // CREIERUL, SCRIS ÎN PR (regula din 2 aug: alegerea modelului e VIZIBILĂ).
-    // Furnizorul nu itemizează cost per apel — se raportează DOAR tokenii măsurați.
-    const linieCreier = `Motor: Aider (unic) · ${ULTIMUL_CREIER || NUME_FURNIZOR} · brain=${brainRaportRun} · tokeni neitemizați (regula #1: nicio cifră inventată)`
+    // CINE A REZOLVAT, CLAR ÎN CAPUL PR-ului (owner, 19 aug): ce constructor (motor)
+    // + ce creier (free local / plătit cloud) + cum + CE a aplicat. Blocul e sursa
+    // UNICĂ de proveniență — aceeași pe care o învață Kelion (memorie).
+    const blocCreier = raportCreierConstructor({
+      sursaFinal: finish.sursaFinal,
+      creierModel: finish.creierModel,
+      modelFree: finish.modelFree,
+      motivEscaladare: finish.motivEscaladare,
+      ajutorFolosit: finish.ajutorFolosit,
+      fisiere: finish.fisiere,
+    })
     const prUrl = await deschidePR(
       titlu,
-      `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, toate cele 7 porți rulate în atelier: tsc, teste, build, jscpd, exporturi, sintaxă, boot pe dist). Se îmbină singur DOAR pe poartă verde; pe roșu rămâne deschis cu problemele raportate.`,
+      `${blocCreier}\n\n${finish.body}\n\n---\nbrain=${brainRaportRun} · tokeni neitemizați (regula #1: nicio cifră inventată)\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, toate cele 7 porți rulate în atelier: tsc, teste, build, jscpd, exporturi, sintaxă, boot pe dist). Se îmbină singur DOAR pe poartă verde; pe roșu rămâne deschis cu problemele raportate.`,
       branch,
     )
     log(`PR deschis: ${prUrl} (tokeni: ${tokens})`)
@@ -1502,7 +1561,18 @@ async function main() {
       await report('failed', { branch, prUrl, tokens, ci, log: `${logLines.join('\n')}\n\nVerificarea independentă (CI) a picat pe PR (commit ${headSha.slice(0, 7)}).` })
     } else {
       // verde SAU 'în curs' — poarta de pe VPS confirmă și îmbină pe verde.
-      await report('done', { branch, prUrl, tokens, ci: ci === 'verde' ? 'verde' : `${ci} (poarta VPS confirmă + îmbină pe verde)` })
+      // PROVENIENȚA REZOLVĂRII merge în raport ca Kelion s-o ÎNVEȚE (owner, 19 aug:
+      // „kelion invata cum si cine, ce a aplicat ca sa rezolve") — app-ul o salvează
+      // ca memorie la /api/constructor/report.
+      await report('done', {
+        branch, prUrl, tokens,
+        ci: ci === 'verde' ? 'verde' : `${ci} (poarta VPS confirmă + îmbină pe verde)`,
+        motor: 'aider',
+        creierModel: finish.creierModel,
+        sursa: finish.sursaFinal,
+        fisiere: finish.fisiere,
+        ordin: finish.title,
+      })
     }
   } catch (e) {
     // AMÂNARE, NU MOARTE (regula din 28 iul): când
