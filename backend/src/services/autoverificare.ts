@@ -79,6 +79,16 @@ export function interpreteazaProba(
 
   // ── FUNCȚIE DE CITIRE: probată REAL. Clasificăm rezultatul măsurat.
   if (p.eroare) {
+    // PROBĂ INDISPONIBILĂ PE ACEASTĂ CALE: unealta EXISTĂ, dar se execută pe calea
+    // CHAT (executorul din chat.ts), nu prin dispecerul de probă (`uneltele`) —
+    // deci n-o pot atinge de aici. NU e „stricată", NU e „handler lipsă / nu produce
+    // nimic" (exact eticheta greșită pe care a pus-o Kelion pe 22 de citiri).
+    if (/unealt[ăa] necunoscut/.test(e))
+      return {
+        verdict: 'nu_pot_verifica',
+        deCe: 'se execută pe calea chat, nu prin dispecerul de probă — n-o pot atinge de aici (NU e stricată)',
+        recomandare: 'Probeaz-o direct din chat (ex. „cât e ceasul", o căutare) ca s-o confirmi.',
+      }
     // AUTH: nu e stricat, e lipsă de sesiune/drepturi — onest „nu pot verifica".
     if (/\b401\b|\b403\b|unauthorized|forbidden|autentific|sesiun|nu ești admin/.test(e))
       return {
@@ -218,7 +228,9 @@ export function decideDinMasuratori(functii: VerificareFunctie[]): DecizieMasura
     if (f.verdict === 'merge') continue
     const c = f.deCe.toLowerCase()
     if (f.verdict === 'nu_pot_verifica') {
-      if (/autentificare|drepturi|sesiun/.test(c))
+      if (/calea chat/.test(c))
+        out.push({ functie: f.functie, actiune: 'masoara_intai', urmatoareaMasuratoare: 'probeaz-o direct din chat (ea merge pe calea chat) — proba din dispecer n-o atinge', deCe: f.deCe })
+      else if (/autentificare|drepturi|sesiun/.test(c))
         out.push({ functie: f.functie, actiune: 'masoara_intai', urmatoareaMasuratoare: 're-probează logat, din sesiunea reală — NU e cod de reparat', deCe: f.deCe })
       else if (/cheie|token|configurare|reconect|neconectat/.test(c))
         out.push({ functie: f.functie, actiune: 'reconfigureaza', urmatoareaMasuratoare: 'pune cheia lipsă / reconectează contul, apoi re-probează', deCe: f.deCe })
@@ -235,6 +247,30 @@ export function decideDinMasuratori(functii: VerificareFunctie[]): DecizieMasura
       out.push({ functie: f.functie, actiune: 'repara', urmatoareaMasuratoare: 'deschide funcția din cod pe cauza măsurată și repar-o', deCe: f.deCe })
   }
   return out
+}
+
+// ── AFIȘAREA PE MONITOR, OBLIGATORIE (owner, 19 aug: „după ce-i ceri, trebuie
+// să afișeze OBLIGATORIU rezultatele pe monitor") ────────────────────────────
+// Textul MĂSURAT al raportului, pentru suprafața {doc}. Scris server-side de
+// executor (nu la alegerea modelului) → afișarea e garantată. Întâi ce NU merge.
+export function formatMonitorAutoverificare(raport: RaportAutoverificare, plan: DecizieMasurata[]): { title: string; text: string } {
+  const icon = (v: VerdictFunctie): string => (v === 'merge' ? '✅' : v === 'stricat' ? '❌' : '…')
+  const planDupaNume = new Map(plan.map((p) => [p.functie, p]))
+  const rangV = (v: VerdictFunctie): number => (v === 'stricat' ? 0 : v === 'nu_pot_verifica' ? 1 : 2)
+  const problematice = raport.functii.filter((f) => f.verdict !== 'merge').sort((a, b) => rangV(a.verdict) - rangV(b.verdict))
+  const linii: string[] = []
+  linii.push(`✅ ${raport.merg} merg   ❌ ${raport.stricate} stricate   … ${raport.nepotverifica} nu pot verifica   (din ${raport.total})`)
+  if (!problematice.length) {
+    linii.push('', `Toate cele ${raport.total} funcții MERG — probat real (citirile executate, efectele verificate fără să le rulez).`)
+  } else {
+    linii.push('', 'CE NU MERGE (măsurat):')
+    for (const f of problematice) {
+      const p = planDupaNume.get(f.functie)
+      linii.push('', `${icon(f.verdict)} ${f.functie} — ${f.deCe}`)
+      if (p) linii.push(`   → ${p.actiune.toUpperCase().replace('_', ' ')}: ${p.urmatoareaMasuratoare}`)
+    }
+  }
+  return { title: `Autoverificare — ${raport.total} funcții`, text: linii.join('\n') }
 }
 
 // ── RULAREA LIVE, REALĂ (owner, 19 aug: „eu vreau real") ─────────────────────
