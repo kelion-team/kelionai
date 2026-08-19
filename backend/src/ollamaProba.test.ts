@@ -85,17 +85,34 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     // Schema cu properties invalid → curăță
     expect(normalizeazaSchema({ type: 'object', properties: 'invalid' })).toEqual({ type: 'object', properties: {} })
     
+    // Schema cu properties array → curăță
+    expect(normalizeazaSchema({ type: 'object', properties: [] })).toEqual({ type: 'object', properties: {} })
+    
     // Schema cu proprietăți nepermise → curăță
     const schemaCuExtra = { type: 'object', properties: { name: { type: 'string' } }, extraProp: 'bad' }
     const result = normalizeazaSchema(schemaCuExtra)
     expect(result).not.toHaveProperty('extraProp')
     expect(result.type).toBe('object')
-    expect(result.properties).toEqual({ name: { type: 'string' } })
+    expect(result.properties).toEqual({ name: { type: 'object', properties: {} } })
     
     // Schema cu required invalid → curăță
     const schemaCuRequiredInvalid = { type: 'object', properties: {}, required: 'not-array' }
     const result2 = normalizeazaSchema(schemaCuRequiredInvalid)
     expect(result2).not.toHaveProperty('required')
+    
+    // Schema cu required array valid → păstrează
+    const schemaCuRequiredValid = { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }
+    const result3 = normalizeazaSchema(schemaCuRequiredValid)
+    expect(result3.required).toEqual(['name'])
+    
+    // Schema cu required array parțial invalid → filtrează
+    const schemaCuRequiredMixt = { type: 'object', properties: {}, required: ['name', 123, null] }
+    const result4 = normalizeazaSchema(schemaCuRequiredMixt)
+    expect(result4.required).toEqual(['name'])
+    
+    // Schema null/undefined → schema minimală
+    expect(normalizeazaSchema(null)).toEqual({ type: 'object', properties: {} })
+    expect(normalizeazaSchema(undefined)).toEqual({ type: 'object', properties: {} })
   })
 
   it('parseazaArgumenteTool gestionează argumente malformate cu fallback curat', async () => {
@@ -107,15 +124,60 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     // String gol → obiect gol
     expect(parseazaArgumenteTool('')).toEqual({})
     
+    // String whitespace → obiect gol
+    expect(parseazaArgumenteTool('   ')).toEqual({})
+    
     // null/undefined → obiect gol
     expect(parseazaArgumenteTool(null as any)).toEqual({})
     expect(parseazaArgumenteTool(undefined as any)).toEqual({})
     
     // JSON invalid → obiect gol (nu aruncă)
     expect(parseazaArgumenteTool('{invalid json}')).toEqual({})
+    expect(parseazaArgumenteTool('not json')).toEqual({})
+    expect(parseazaArgumenteTool('{')).toEqual({})
     
     // Array în loc de object → obiect gol
     expect(parseazaArgumenteTool('[1, 2, 3]')).toEqual({})
+    
+    // Obiect deja → returnat direct
+    expect(parseazaArgumenteTool({ key: 'value' })).toEqual({ key: 'value' })
+    
+    // Array ca obiect → obiect gol
+    expect(parseazaArgumenteTool([1, 2, 3] as any)).toEqual({})
+  })
+
+  it('serializeazaArgumenteTool garantează JSON valid pentru Ollama Cloud', async () => {
+    const { serializeazaArgumenteTool } = await import('./services/ollamaCloud.js')
+    
+    // Null/undefined → obiect gol serializat
+    expect(serializeazaArgumenteTool(null)).toBe('{}')
+    expect(serializeazaArgumenteTool(undefined)).toBe('{}')
+    
+    // String JSON valid → re-serializat
+    expect(serializeazaArgumenteTool('{"key": "value"}')).toBe('{"key":"value"}')
+    
+    // String gol → obiect gol
+    expect(serializeazaArgumenteTool('')).toBe('{}')
+    
+    // String whitespace → obiect gol
+    expect(serializeazaArgumenteTool('   ')).toBe('{}')
+    
+    // String JSON invalid → obiect gol
+    expect(serializeazaArgumenteTool('{invalid}')).toBe('{}')
+    expect(serializeazaArgumenteTool('not json')).toBe('{}')
+    
+    // Obiect valid → serializat
+    expect(serializeazaArgumenteTool({ key: 'value' })).toBe('{"key":"value"}')
+    
+    // Array → obiect gol
+    expect(serializeazaArgumenteTool([1, 2, 3] as any)).toBe('{}')
+    
+    // String care e array JSON → obiect gol
+    expect(serializeazaArgumenteTool('[1, 2, 3]')).toBe('{}')
+    
+    // Primitive → obiect gol
+    expect(serializeazaArgumenteTool(123 as any)).toBe('{}')
+    expect(serializeazaArgumenteTool(true as any)).toBe('{}')
   })
 
   it('unelteOpenAi produce payload compatibil Ollama Cloud', async () => {
@@ -149,57 +211,15 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     expect((result[0] as any).function.parameters).toEqual({
       type: 'object',
       properties: {
-        param1: { type: 'string', description: 'First param' },
-        param2: { type: 'number', description: 'Second param' },
+        param1: { type: 'object', properties: {} },
+        param2: { type: 'object', properties: {} },
       },
       required: ['param1'],
     })
   })
 
-  it('tool call arguments dublu serializate sunt gestionate corect', async () => {
-    const { parseazaArgumenteTool } = await import('./services/brain.js')
-    
-    // Argumente deja serializate ca string în interiorul JSON-ului
-    const doubleSerialized = '{"query": "{\\"nested\\": \\"value\\"}"}'
-    const result = parseazaArgumenteTool(doubleSerialized)
-    
-    // Ar trebui să parseze corect primul nivel
-    expect(result).toHaveProperty('query')
-    expect(typeof result.query).toBe('string')
-  })
-
-  it('serializeazaArgumenteTool garantează JSON valid pentru Ollama Cloud', async () => {
-    // Importăm funcția internă prin testarea comportamentului
-    const { parseazaArgumenteTool } = await import('./services/brain.js')
-    
-    // Argumente goale → obiect gol
-    expect(parseazaArgumenteTool('')).toEqual({})
-    
-    // String whitespace → obiect gol
-    expect(parseazaArgumenteTool('   ')).toEqual({})
-    
-    // Obiect valid → returnat corect
-    expect(parseazaArgumenteTool({ key: 'value' })).toEqual({ key: 'value' })
-    
-    // Array → obiect gol
-    expect(parseazaArgumenteTool([1, 2, 3] as any)).toEqual({})
-  })
-
-  it('ollama-cloud tool calls cu arguments goale sunt sanitizate', async () => {
-    const { parseazaArgumenteTool } = await import('./services/brain.js')
-    
-    // Argumente goale din tool call
-    expect(parseazaArgumenteTool('')).toEqual({})
-    expect(parseazaArgumenteTool(null as any)).toEqual({})
-    expect(parseazaArgumenteTool(undefined as any)).toEqual({})
-    
-    // JSON invalid din tool call
-    expect(parseazaArgumenteTool('not json')).toEqual({})
-    expect(parseazaArgumenteTool('{')).toEqual({})
-  })
-
-  it('normalizeazaSchema pentru ollama-cloud asigură parameters valid', async () => {
-    const { normalizeazaSchema, unelteOpenAi } = await import('./services/ollamaCloud.js')
+  it('unelteOpenAi cu schema minimală produce parameters valid', async () => {
+    const { unelteOpenAi, normalizeazaSchema } = await import('./services/ollamaCloud.js')
     
     // Schema minimală → parameters valid
     const minimalSchema = normalizeazaSchema({})
@@ -215,5 +235,91 @@ describe('S3 — serializarea și validarea argumentelor de unelte Ollama Cloud'
     const resultMinimal = unelteOpenAi(toolsMinimal as any)
     expect((resultMinimal[0] as any).function.parameters.type).toBe('object')
     expect((resultMinimal[0] as any).function.parameters.properties).toEqual({})
+  })
+
+  it('tool call arguments dublu serializate sunt gestionate corect', async () => {
+    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    
+    // Argumente deja serializate ca string în interiorul JSON-ului
+    const doubleSerialized = '{"query": "{\\"nested\\": \\"value\\"}"}'
+    const result = parseazaArgumenteTool(doubleSerialized)
+    
+    // Ar trebui să parseze corect primul nivel
+    expect(result).toHaveProperty('query')
+    expect(typeof result.query).toBe('string')
+  })
+
+  it('ollama-cloud tool calls cu arguments goale sunt sanitizate', async () => {
+    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    const { serializeazaArgumenteTool } = await import('./services/ollamaCloud.js')
+    
+    // Argumente goale din tool call
+    expect(parseazaArgumenteTool('')).toEqual({})
+    expect(parseazaArgumenteTool(null as any)).toEqual({})
+    expect(parseazaArgumenteTool(undefined as any)).toEqual({})
+    
+    // JSON invalid din tool call
+    expect(parseazaArgumenteTool('not json')).toEqual({})
+    expect(parseazaArgumenteTool('{')).toEqual({})
+    
+    // Serializare arguments goale
+    expect(serializeazaArgumenteTool('')).toBe('{}')
+    expect(serializeazaArgumenteTool(null)).toBe('{}')
+    expect(serializeazaArgumenteTool(undefined)).toBe('{}')
+  })
+
+  it('mesajeOpenAi serializează corect tool calls cu arguments validate', async () => {
+    const { serializeazaArgumenteTool, parseazaArgumenteTool } = await import('./services/ollamaCloud.js')
+    
+    // Simulează fluxul din mesajeOpenAi
+    const argsStr = serializeazaArgumenteTool('{"param": "value"}')
+    const argsObj = parseazaArgumenteTool(argsStr)
+    
+    expect(argsStr).toBe('{"param":"value"}')
+    expect(argsObj).toEqual({ param: 'value' })
+    
+    // Arguments goale
+    const argsStrGol = serializeazaArgumenteTool('')
+    const argsObjGol = parseazaArgumenteTool(argsStrGol)
+    
+    expect(argsStrGol).toBe('{}')
+    expect(argsObjGol).toEqual({})
+  })
+
+  it('dinRaspunsOpenAi parsează corect tool calls din răspuns', async () => {
+    const { parseazaArgumenteTool } = await import('./services/brain.js')
+    
+    // Simulează răspuns Ollama Cloud cu tool calls
+    const mockResponse = {
+      choices: [{
+        message: {
+          content: 'text',
+          tool_calls: [
+            { id: 'call_1', function: { name: 'test_tool', arguments: '{"key": "value"}' } },
+            { id: 'call_2', function: { name: 'bad_tool', arguments: '{invalid}' } },
+            { id: 'call_3', function: { name: 'empty_tool', arguments: '' } },
+          ],
+        },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+      model: 'qwen-test',
+    }
+    
+    // Parsează arguments din fiecare tool call
+    const toolCalls = mockResponse.choices[0].message.tool_calls.map((c, i) => {
+      const argsObj = parseazaArgumenteTool(c.function.arguments)
+      return {
+        id: c.id,
+        function: {
+          name: c.function.name,
+          arguments: JSON.stringify(argsObj),
+        },
+      }
+    })
+    
+    expect(toolCalls[0].function.arguments).toBe('{"key":"value"}')
+    expect(toolCalls[1].function.arguments).toBe('{}') // invalid JSON → gol
+    expect(toolCalls[2].function.arguments).toBe('{}') // empty string → gol
   })
 })

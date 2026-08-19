@@ -29,32 +29,38 @@ function continutOpenAi(m: OrMessage): unknown {
 }
 
 /** Serializare sigură a argumentelor de tool call — garantează string JSON valid pentru Ollama Cloud. */
-function serializeazaArgumenteTool(args: unknown): string {
+export function serializeazaArgumenteTool(args: unknown): string {
+  // Null/undefined → obiect gol serializat
   if (args === null || args === undefined) {
     return '{}'
   }
+  
+  // String → încearcă să parseze și re-serializze pentru validare
   if (typeof args === 'string') {
-    // Dacă e deja string, încearcă să-l parseze și re-serializze pentru validare
+    const trimmed = args.trim()
+    if (trimmed === '') {
+      return '{}'
+    }
     try {
-      const parsed = JSON.parse(args)
+      const parsed = JSON.parse(trimmed)
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return JSON.stringify(parsed)
       }
-      // String valid dar nu e object → obiect gol
+      // String valid dar nu e object (array/primitive) → obiect gol
       return '{}'
     } catch {
       // String invalid JSON → fallback la obiect gol
       return '{}'
     }
   }
+  
+  // Obiect → serializare directă, dar validează că e obiect (nu array)
   if (typeof args === 'object') {
-    // Obiect → serializare directă, dar validează că e obiect (nu array)
     if (Array.isArray(args)) {
       return '{}'
     }
     try {
       const serialized = JSON.stringify(args)
-      // Verifică că nu e string gol sau doar whitespace
       if (!serialized || serialized.trim() === '{}') {
         return '{}'
       }
@@ -63,27 +69,34 @@ function serializeazaArgumenteTool(args: unknown): string {
       return '{}'
     }
   }
-  // Tipuri primitive → obiect gol
+  
+  // Tipuri primitive (number, boolean, etc.) → obiect gol
   return '{}'
 }
 
 /** Parsează argumente tool call din string JSON — cu fallback curat pentru Ollama Cloud. */
 export function parseazaArgumenteTool(args: unknown): Record<string, unknown> {
+  // Null/undefined → obiect gol
   if (args === null || args === undefined) {
     return {}
   }
+  
+  // Obiect deja → returnează direct (dacă nu e array)
   if (typeof args === 'object') {
     if (Array.isArray(args)) {
       return {}
     }
     return args as Record<string, unknown>
   }
+  
+  // String → parsează JSON
   if (typeof args === 'string') {
-    if (!args || args.trim() === '') {
+    const trimmed = args.trim()
+    if (trimmed === '') {
       return {}
     }
     try {
-      const parsed = JSON.parse(args)
+      const parsed = JSON.parse(trimmed)
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>
       }
@@ -92,6 +105,8 @@ export function parseazaArgumenteTool(args: unknown): Record<string, unknown> {
       return {}
     }
   }
+  
+  // Orice alt tip → obiect gol
   return {}
 }
 
@@ -109,7 +124,7 @@ function mesajeOpenAi(messages: OrMessage[]): Record<string, unknown>[] {
         tool_calls: m.tool_calls.map((c) => {
           // Validează și structurează argumentele pentru Ollama Cloud
           const argsStr = serializeazaArgumenteTool(c.function.arguments)
-          // Parsează pentru a确保 e obiect valid, apoi re-serializază
+          // Parsează pentru a asigura că e obiect valid, apoi re-serializază
           const argsObj = parseazaArgumenteTool(argsStr)
           return {
             id: c.id,
@@ -130,59 +145,79 @@ function mesajeOpenAi(messages: OrMessage[]): Record<string, unknown>[] {
 
 /** Normalizează schema de unelte pentru compatibilitate Ollama Cloud (JSON Schema valid). */
 export function normalizeazaSchema(schema: unknown): Record<string, unknown> {
+  // Schema invalidă → returnează schema minimală validă
   if (!schema || typeof schema !== 'object') {
     return { type: 'object', properties: {} }
   }
+  
   const s = schema as Record<string, unknown>
-  // Asigură tipul de bază
-  if (!s.type) s.type = 'object'
-  // Asigură properties există pentru object
-  if (s.type === 'object' && !s.properties) s.properties = {}
-  // Validează că properties e un obiect
-  if (s.properties && typeof s.properties !== 'object') {
-    s.properties = {}
-  }
-  // Curăță proprietăți invalide (nu sunt permise în JSON Schema pentru OpenAI/Ollama)
-  const allowedKeys = ['type', 'description', 'properties', 'required', 'items', 'enum', 'default', 'format', 'pattern', 'minimum', 'maximum', 'minLength', 'maxLength']
   const cleaned: Record<string, unknown> = {}
-  for (const key of Object.keys(s)) {
-    if (allowedKeys.includes(key)) {
+  
+  // Asigură tipul de bază (default: object)
+  if (s.type && typeof s.type === 'string') {
+    cleaned.type = s.type
+  } else {
+    cleaned.type = 'object'
+  }
+  
+  // Asigură properties există pentru object și e un obiect valid
+  if (cleaned.type === 'object') {
+    if (s.properties && typeof s.properties === 'object' && !Array.isArray(s.properties)) {
+      const props: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(s.properties as Record<string, unknown>)) {
+        // Recursive cleanup for nested properties
+        props[key] = normalizeazaSchema(value)
+      }
+      cleaned.properties = props
+    } else {
+      cleaned.properties = {}
+    }
+  }
+  
+  // Validează required (trebuie să fie array de stringuri)
+  if (s.required && Array.isArray(s.required)) {
+    const requiredStrings = (s.required as unknown[]).filter(r => typeof r === 'string')
+    if (requiredStrings.length > 0) {
+      cleaned.required = requiredStrings
+    }
+  }
+  
+  // Copiază alte proprietăți permise în JSON Schema
+  const allowedKeys = ['description', 'items', 'enum', 'default', 'format', 'pattern', 'minimum', 'maximum', 'minLength', 'maxLength']
+  for (const key of allowedKeys) {
+    if (key in s) {
       const val = s[key]
-      // Recursive cleanup for nested properties
-      if (key === 'properties' && val && typeof val === 'object') {
-        const nested: Record<string, unknown> = {}
-        for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
-          nested[k] = normalizeazaSchema(v)
-        }
-        cleaned[key] = nested
-      } else if (key === 'items' && val && typeof val === 'object') {
+      if (key === 'items' && val && typeof val === 'object') {
         cleaned[key] = normalizeazaSchema(val)
-      } else {
+      } else if (key !== 'type' && key !== 'properties' && key !== 'required') {
         cleaned[key] = val
       }
     }
   }
-  // Asigură că required e array dacă există
-  if (cleaned.required && !Array.isArray(cleaned.required)) {
-    delete cleaned.required
-  }
+  
   return cleaned
 }
 
 export function unelteOpenAi(tools: AnthropicTool[]): unknown[] {
   return tools.map((t) => {
     const schema = normalizeazaSchema(t.input_schema ?? { type: 'object', properties: {} })
+    
     // Asigură că parameters are structura corectă pentru Ollama Cloud
     const parameters: Record<string, unknown> = {
       type: schema.type || 'object',
       properties: schema.properties || {},
     }
+    
+    // Adaugă required doar dacă e array valid cu elemente
     if (schema.required && Array.isArray(schema.required) && (schema.required as string[]).length > 0) {
       parameters.required = schema.required
     }
-    if (schema.description) {
+    
+    // Adaugă description dacă există
+    if (schema.description && typeof schema.description === 'string') {
       parameters.description = schema.description
     }
+    
     return {
       type: 'function',
       function: {
