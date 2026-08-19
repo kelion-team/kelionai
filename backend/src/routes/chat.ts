@@ -748,6 +748,19 @@ const CONSTRUCTOR_COMMAND_TOOL: Tool = {
     required: ['cmd'],
   },
 }
+const COMUTA_SURSA_TOOL: Tool = {
+  name: 'comuta_sursa',
+  description:
+    'ADMIN ONLY. Switch the BRAIN and the CONSTRUCTOR between FREE and PAID, in any combination — from chat, typed OR spoken. Use it whenever the owner says things like "comută pe free", "pune constructorul pe plătit", "creier free constructor plătit", "trece pe Kimi", "înapoi pe free". Mapping: creier "free" = Gemini (default, no cost); creier "kimi-k3"/"qwen3.5" = paid cloud brain. constructor "free" = local on the VPS (no cost); constructor "platit" = paid cloud (same model as the paid brain). Set only what the owner named — the other stays. When the owner is AWAY and you must decide the source yourself, call it with auto:true (cost-safe: free-first, never burns money without him). ALWAYS report back the MEASURED new state (and whether the paid reserve is actually ready).',
+  input_schema: {
+    type: 'object',
+    properties: {
+      creier: { type: 'string', enum: ['free', 'kimi-k3', 'qwen3.5'], description: 'Brain source: "free" = Gemini (no cost); "kimi-k3"/"qwen3.5" = paid cloud. Omit to leave the brain unchanged.' },
+      constructor: { type: 'string', enum: ['free', 'platit'], description: 'Constructor source: "free" = local on VPS (no cost); "platit" = paid cloud. Omit to leave it unchanged.' },
+      auto: { type: 'boolean', description: 'Decide autonomously (use ONLY when the owner is away and asked you to decide). Ignores creier/constructor and applies the cost-safe free-first policy.' },
+    },
+  },
+}
 // ITS OWN HEALTH (Adrian, Jul 27: "Kelion must see this and be able to tell the
 // admin through chat that it has problems x,y,z and ask whether to fix them"):
 // the deterministic aggregation of all signals + the behavior rule — enumerate
@@ -1799,7 +1812,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // constructorului" pica pe faza de vorbire și creierul doar POVESTEA.
       cereActiune: hasActionIntent(textulTurei) || req.body?.usaCreierului === true,
     })
-    const turaCurata = !incarcatura.instructiuniDeLucru
+    // VOCE = SCRIS COMPLET, DOAR PENTRU OWNER (owner, 19 aug: „egalizate drepturile
+    // chat audio cu chat scris" + „doar owner are drepturi pe admin"). O frază
+    // ROSTITĂ de owner nu mai e „curată" (conversație ușoară): capătă instrucțiunile
+    // de lucru ca o comandă TASTATĂ, ca „comută pe free"/„repară"/„publică" să
+    // meargă din PRIMA frază, fără pasul ask_brain care uneori nu se făcea. Ne-owner
+    // și oaspete: neatinși — blocurile de lucru sunt oricum gardate de `admin &&
+    // !turaDeOaspete` mai jos, deci un oaspete pe voce NU capătă drepturi de owner.
+    const turaCurata = !incarcatura.instructiuniDeLucru && !(user.role === 'admin' && !!audio)
     // ── LEGILE ADMINULUI (owner, 16 aug, verbatim: „orice cerinta a admin
     // trebuie sa devina lege de neignorat pentru orice model ai e folosit" +
     // „creiaza legi foarte clare ca nu e admis hardcodat pe aplicatie").
@@ -2093,6 +2113,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // confirmation; it is avoiding something nobody asked you to do.
       systemPrompt +=
         (turaCurata ? '' : `\n\nOWNER — NO CONFIRMATIONS: this overrides the general "confirm before irreversible actions" rule, which is for public users. When the owner asks for something, the request IS the authorisation: send, delete, merge, restart, run the runbook — DO IT, then report what you did. Never answer with "shall I proceed?", "are you sure?", "do you want me to?" or any other permission question about the thing he just asked for. Also never ask him to unlock, authenticate, or confirm his identity in chat — being in this conversation already proves he is the owner. The ONE exception is an action he did NOT ask for: if carrying out his request would additionally destroy something he never mentioned (dropping a table to fix a query, deleting files to free space, force-pushing over work), name that specific side effect in one sentence and ask about THAT alone — never about the request itself. Same for the health check: if system_health reports problems, say them briefly and repair them; don't ask permission first.`)
+      // COMUTAREA SURSEI (owner, 19 aug): unealta comuta_sursa e MÂNA prin care
+      // schimbi free/plătit — din scris SAU din voce, în orice combinație — și
+      // decizia autonomă când ownerul lipsește. Fără instrucția asta, modelul avea
+      // unealta dar nu știa că „comută pe free" e chiar ea.
+      systemPrompt +=
+        (turaCurata ? '' : `\n\nSOURCE SWITCHING (comuta_sursa): when the owner says anything like "comută pe free", "pune constructorul pe plătit", "creier free constructor plătit", "trece pe Kimi/Qwen", "înapoi pe free" — CALL comuta_sursa with what he named (brain and/or constructor, any combination), then tell him the MEASURED new state (and if the paid reserve isn't actually ready, say so). This works identically typed or SPOKEN. When the owner is AWAY (offline) and a source decision is needed, you MAY decide yourself with comuta_sursa auto:true — the policy is cost-safe and free-first: never put anything on PAID (which spends his money) while he is gone; stay FREE and let the constructor escalate to paid only per-job when a build genuinely fails. Never switch to paid on your own initiative just to go faster.`)
       // THE UPDATE CHANNEL: Kelion knows from the prompt WHAT it received at the
       // latest deploy (local file, cached on first read — zero latency cost).
       const upd = await latestUpdateSummary().catch(() => '')
@@ -2603,7 +2629,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // Sursă + putere de dezvoltator + DB/sănătate + operațiuni („de aur")
           LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
           REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL, CONSTRUCTOR_COMMAND_TOOL,
+          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL, CONSTRUCTOR_COMMAND_TOOL, COMUTA_SURSA_TOOL,
           // Jules — agentul asincron oficial Google (3 aug, cheia pusă de owner).
           JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL,
           DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL,
@@ -2694,7 +2720,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
     // dar rămâne UȘOARĂ ca unelte: n-are de executat nimic, are de hotărât dacă
     // i se vorbește. Cele două axe sunt independente și e important să rămână așa.
-    const turaUsoara = incarcatura.faza === 'vorbire'
+    // VOCE = SCRIS COMPLET, DOAR OWNER (owner, 19 aug). Tura ușoară (unelte puține)
+    // NU se aplică pe o frază rostită de owner: el capătă TOT inventarul, ca la scris,
+    // ca să comute/repare/publice din prima frază. `isAdmin` exclude deja oaspetele
+    // (rol admin && !guestMatch), deci un oaspete pe voce rămâne pe tura ușoară.
+    // Sondele scumpe (system_health) rămân doar OFERITE, nu auto-rulate — cele 8s de
+    // pe 8 aug veneau din APELAREA lor, nu din oferirea schemei.
+    const turaUsoara = incarcatura.faza === 'vorbire' && !(isAdmin && !!audio)
     const MAX_PROVIDER_TOOLS = turaUsoara ? PLAFON_UNELTE_USOR : PLAFON_FURNIZOR
     const seenNames = new Set<string>()
     const baseTools: Tool[] = []
@@ -4196,6 +4228,45 @@ async function runTool(
             error: error ? error.message : null
           }))
         })
+      })
+    }
+
+    // ── COMUTAREA SURSEI din chat/voce (owner, 19 aug) ────────────────────────
+    // „comută pe free creier / free constructor / combinații; când nu sunt, decide
+    // autonom." Scrie config-ul VIU (creier:cloud) + raportează MĂSURAT starea nouă
+    // și dacă plătitul chiar e gata. Admin-only (doar ownerul are drepturi pe admin).
+    case 'comuta_sursa': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const cc = await import('../services/creierCloud.js')
+      const cs = await import('../services/comutaSursa.js')
+      const { esteOnline } = await import('../services/apel.js')
+      const acum = await cc.getConfigCreier()
+      let schimbare: Partial<import('../services/creierCloud.js').ConfigCreier>
+      let deCe = ''
+      if (args.auto === true) {
+        // Decizie AUTONOMĂ (când ownerul lipsește) — cost-safe, free-first.
+        const cheie = await cc.getCheieOllama()
+        const paidDisponibil = cc.decideConfigConstructor(acum, cheie).paidDisponibil
+        const d = cs.decideSursaAutonoma({ ownerPrezent: esteOnline(config.adminEmail), acum, paidDisponibil })
+        schimbare = d.config
+        deCe = d.deCe
+      } else {
+        schimbare = cs.interpreteazaComutare({
+          creier: args.creier != null ? String(args.creier) : undefined,
+          constructor: args.constructor != null ? String(args.constructor) : undefined,
+        })
+        if (!('creier2' in schimbare) && !('constructorSursa' in schimbare))
+          return JSON.stringify({ error: 'nimic_de_comutat', mesaj: 'Nu am înțeles ce să comut. Spune clar: creier free/kimi/qwen și/sau constructor free/plătit.' })
+      }
+      const nou = await cc.setConfigCreier(schimbare)
+      const cheieAcum = await cc.getCheieOllama()
+      const dc = cc.decideConfigConstructor(nou, cheieAcum)
+      return JSON.stringify({
+        ok: true,
+        config: nou,
+        paidDisponibil: dc.paidDisponibil,
+        rezumat: cs.rezumaComutare(nou, dc.paidDisponibil),
+        deCe: deCe || undefined,
       })
     }
 

@@ -26,7 +26,7 @@ describe('matricea capabilităților promise', () => {
     try {
       execFileSync(process.execPath, [script, output], { cwd: root, stdio: 'pipe' })
       const report = JSON.parse(readFileSync(output, 'utf8')) as EvidenceReport
-      expect(report.summary.capabilities).toBe(123)
+      expect(report.summary.capabilities).toBe(124) // 19 aug: +comuta_sursa (comutare free/plătit din chat/voce)
       expect(report.summary.capabilitiesStaticPass).toBe(report.summary.capabilities)
       expect(report.summary.uiApplicationsMapped).toBe(report.summary.uiApplications)
       expect(report.summary.manualSections).toBe(11)

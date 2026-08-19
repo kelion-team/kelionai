@@ -190,6 +190,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'panou_cod', category: 'cod', does: 'deschide panoul constructorului cu un ordin de build', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_manage', category: 'cod', does: 'gestionează ordinele constructorului (reia/oprește/curăță)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_command', category: 'cod', does: 'rulează o comandă shell direct pe server (canal de comandă Kelion→constructor)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'comuta_sursa', category: 'cod', does: 'comută creierul (free Gemini ↔ plătit Kimi/Qwen) și constructorul (free local ↔ plătit cloud), în orice combinație; când ownerul lipsește, decide autonom (free-first, cost-safe)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_repos', category: 'cod', does: 'listează repo-urile legate la Jules (agentul async Google)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_task', category: 'cod', does: 'dă o sarcină lui Jules (lucrează în VM Google, deschide PR)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_status', category: 'cod', does: 'starea unei sesiuni Jules', chat: true, voice: false, voiceViaBrain: true, admin: true },
