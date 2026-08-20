@@ -166,18 +166,12 @@ describe('regula de rutare: mesajul normal de chat NU ajunge la constructor', ()
   })
 })
 
-describe('EXECUȚIA rămâne pe Gemini, nu pe Creier 2 cloud (owner, 19 aug: „tot ce-i cer lui kelion să facă în chat =0")', () => {
-  it('auto-decizia trimite la Creier 2 cloud DOAR turele grele FĂRĂ intenție de acțiune', () => {
-    // Măsurat în audit: turele de ACȚIUNE ale ownerului sunt „grele" și plecau pe
-    // cloud (qwen3.5/kimi), care NU cheamă de încredere unealta forțată → codul
-    // accepta proza = zero execuție, fără cădere pe Gemini. Gardul de rutare ține
-    // execuția pe Gemini (creierul care CHIAR cheamă unealta); cloud rămâne pentru
-    // gândire grea fără acțiune. Dacă cineva scoate gardul, tura de acțiune
-    // recade pe cloud și „nu execută nimic" revine — testul cade.
-    expect(sursaChat).toMatch(/if \(heavy && !hasActionIntent\(text\)\) \{/)
-  })
-
-  it('comenzile de acțiune sunt recunoscute ca atare (deci rămân pe Gemini care execută)', () => {
+describe('turele de ACȚIUNE ale ownerului sunt recunoscute (urcă pe Gemini greu care execută)', () => {
+  // Creier 2 cloud (qwen/kimi prin Ollama) a fost SCOS — owner, 20 aug: „rămân
+  // doar cu Linux și Gemini Live". Creierul e Gemini, unic; turele grele merg pe
+  // Gemini greu (Pro), care CHEAMĂ unealta. Recunoașterea intenției de acțiune
+  // rămâne (isOwner && hasActionIntent → tură grea pe Gemini).
+  it('comenzile de acțiune sunt recunoscute ca atare (urcă pe Gemini greu care execută)', () => {
     for (const cmd of ['deschide youtube', 'caută prețul la bitcoin', 'pune o melodie', 'fă un audit', 'repară vocea']) {
       expect(hasActionIntent(cmd), `„${cmd}" trebuie să fie tură de acțiune`).toBe(true)
     }

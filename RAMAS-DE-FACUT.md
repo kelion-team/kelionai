@@ -13,6 +13,23 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 20 aug (verbatim): „rămân doar cu Linux și Gemeni Live… tai serverele
+      închiriate pentru qwen… se poate pune Devin în loc de creiere și de constructor?"
+      + „cureți peste tot unde sunt aparițiile și în admin". FĂCUT (PR pe branch, NU merge
+      fără owner): **Ollama Cloud (Creier 2 kimi/qwen + constructor plătit) SCOS TOTAL**
+      din backend (creierCloud/ollamaCloud/comutaSursa șterse; chat.ts, orchestrator,
+      creierRationament, chatModelPolicy, routes/constructor curățate; `comuta_sursa` scos),
+      din **admin** (AdminPanel: comutatorul Creier 2, cheia Ollama, becul cloud, linkurile
+      ollama.com — toate scoase; eticheta e doar „constructor LOCAL FREE"), din worker
+      (nu mai cere `/creier-config`, pornește pe free local), din teste (5 fișiere șterse
+      + 8 ajustate). Creierul LIVE rămâne **Gemini** unic; constructorul local free rămâne
+      rezervă. DOVEZI: backend 1858/1858, tsc+build 0, oxlint 0, 5 porți 0. RĂMAS (owner +
+      viitor): (a) **owner oprește abonamentul Ollama Cloud** + orice server închiriat pentru
+      qwen (eu nu văd facturile — de confirmat pe conturi); (b) **decizia Devin** — schema
+      pregătită (Gemini Live = simțuri/voce, Devin = mâinile care scriu cod); (c) dacă owner
+      alege Varianta B, **cablarea cutiei „constructor" la API-ul Devin** (`/v1/sessions`) —
+      NEFĂCUTĂ, muncă de cod separată, doar la re-autorizarea lui; (d) VERIFICARE LIVE că
+      chatul/vocea merg neschimbate pe Gemini după tăiere (nu pot de aici).
 - [x] ORDIN 20 aug (verbatim): „nu descarca nimic pentru offline, e minciuna gogonata"
       + „mai mult chatul audio inexistent" + (mai devreme) „in avion zice ca nu poate
       accesa aplicatia". AUDIT cu 3 agenți → cauze ÎN COD (nu la el), reparate:

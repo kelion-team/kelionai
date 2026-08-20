@@ -26,14 +26,8 @@ describe('raportCreierConstructor — cine + ce constructor a rezolvat (PR clar)
     expect(r).not.toContain('escaladat') // n-a escaladat
   })
 
-  it('plătit după escaladare: arată drumul free → plătit cu motiv clar', () => {
-    const r = raport({ sursaFinal: 'platit', creierModel: 'qwen3.5:397b', modelFree: 'qwen2.5-coder:32b', motivEscaladare: 'no_change', ajutorFolosit: true, fisiere: ['a.ts', 'b.ts'] })
-    expect(r).toContain('qwen3.5:397b')
-    expect(r).toContain('PLĂTIT (cloud)')
-    expect(r).toContain('Pornit pe FREE (qwen2.5-coder:32b) → escaladat pe PLĂTIT')
-    expect(r).toContain('free n-a editat nimic') // motiv tradus, nu codul brut
-    expect(r).toContain('plan „pași mici" de la creierul Kelion')
-  })
+  // (Cazul „plătit după escaladare" a fost SCOS — Ollama Cloud a ieșit, owner 20
+  // aug: „rămân doar cu Linux și Gemini Live". Constructorul rulează DOAR free local.)
 
   it('fără fișiere → fără linia „ce a aplicat"; creier necunoscut e onest', () => {
     const r = raport({ sursaFinal: 'free', creierModel: '', fisiere: [] })

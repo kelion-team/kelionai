@@ -666,11 +666,9 @@ export default function AdminPanel({
   const [aiderProba, setAiderProba] = useState<{ ok: boolean; versiune: string; motiv: string } | null>(null)
   // Creierul LOCAL al lui Aider: `ollama list` de pe VPS (owner, 16 aug).
   const [ollamaProba, setOllamaProba] = useState<{ ok: boolean; modele: string[]; motiv: string } | null>(null)
-  // COMUTATORUL creier 2 (cloud) + sursa constructorului (free/plătit), ales de
-  // owner (owner, 16 aug: „creier 2 → Kimi K3 cu comutator Qwen3.5… constructor =
-  // FREE ↔ PLĂTIT… se aprinde când lipesc cheia"). `cloud` = proba MĂSURATĂ a cheii.
-  const [creierCfg, setCreierCfg] = useState<{ creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }>({ creier2: 'gemini', constructorSursa: 'free' })
-  const [cloudProba, setCloudProba] = useState<{ ok: boolean; motiv: string; modele: string[] } | null>(null)
+  // (COMUTATORUL creier 2 cloud + sursa plătită a constructorului au fost SCOASE —
+  // owner, 20 aug: „rămân doar cu Linux și Gemini Live". Creierul e Gemini unic;
+  // constructorul rulează DOAR pe Ollama local free de pe VPS.)
   // PULSUL LUCRĂTORULUI de pe VPS (owner, 19 aug: „are ordine in coada dar nu se
   // apuca… de ce?"): VIU dacă a cerut ordin recent; mort → ordinele stau în coadă
   // fiindcă nu le cere nimeni (cron/worker oprit), nu din vina app-ului.
@@ -678,22 +676,6 @@ export default function AdminPanel({
   const [inCoada, setInCoada] = useState<number>(0)
   // DIAGNOSTICUL AUTONOM (owner, 19 aug): „de ce (nu) repară", măsurat pe server.
   const [diagnostic, setDiagnostic] = useState<{ sanatos: boolean; verdict: string; probleme: { cod: string; severitate: 'critic' | 'atentie'; ce: string; recomandare: string }[] } | null>(null)
-  const [ollamaKeyInput, setOllamaKeyInput] = useState('')
-  const [creierMsg, setCreierMsg] = useState('')
-  // „nu stă butonul" (owner, 16 aug): reîncărcarea la 10s scria peste alegerea
-  // NESALVATĂ (o readucea la Gemini). De când atingi un comutator, marcăm EDITAT
-  // → pollul NU mai suprascrie alegerea ta până salvezi. Salvarea resetează flagul.
-  const creierEditatRef = useRef(false)
-  // Un singur buton de comutator (creier 2 + constructor îl refolosesc → fără dublură jscpd).
-  const btnComut = (cheie: string, activ: boolean, onClick: () => void, txt: string) => (
-    <button
-      key={cheie}
-      onClick={onClick}
-      style={{ padding: '3px 8px', borderRadius: 6, cursor: 'pointer', border: activ ? '1px solid #2563eb' : '1px solid #8886', background: activ ? '#2563eb' : 'transparent', color: activ ? '#fff' : 'inherit' }}
-    >
-      {txt}
-    </button>
-  )
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
   // EVALUAREA CERINȚEI (owner, 13 aug): pe măsură ce scrii ordinul, evaluăm
@@ -1007,7 +989,7 @@ export default function AdminPanel({
   const refreshBuildJobs = (): void => {
     fetch('/api/admin/constructor', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string }; creier?: { creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }; cloud?: { ok: boolean; motiv: string; modele: string[] }; lucrator?: { lastPoll: number; ageSec: number | null; viu: boolean; pragMs: number }; inCoada?: number } | null) => {
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string }; lucrator?: { lastPoll: number; ageSec: number | null; viu: boolean; pragMs: number }; inCoada?: number } | null) => {
         // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
         // nu se lasă „Niciun ordin încă" peste o citire picată.
         if (j?.jobs) {
@@ -1015,8 +997,6 @@ export default function AdminPanel({
           setBuildPaused(!!j.paused)
           setAiderProba(j.aider ?? null)
           setOllamaProba(j.ollama ?? null)
-          if (j.creier && !creierEditatRef.current) setCreierCfg(j.creier)
-          setCloudProba(j.cloud ?? null)
           setLucratorPuls(j.lucrator ?? null)
           setInCoada(Number(j.inCoada) || 0)
         } else setBuildJobs(null)
@@ -2820,37 +2800,26 @@ export default function AdminPanel({
                           ? `🟢 Motor: Aider VIU (${aiderProba.versiune})`
                           : `🔴 Motor: Aider LIPSĂ (${aiderProba.motiv.slice(0, 60)})`}
                     </span>
-                    {/* CREIERUL EFECTIV al constructorului — după comutatorul FREE/PLĂTIT,
-                        nu doar ce e INSTALAT (owner, 19 aug: „PLĂTIT dar arată LOCAL — de
-                        ce m-a mințit?"). Oglinda deciziei reale din backend
-                        (decideConfigConstructor): PLĂTIT + cheie cloud OK → rulează pe
-                        CLOUD; altfel → Ollama LOCAL. Înainte, eticheta arăta MEREU „LOCAL"
-                        cât Ollama era instalat, IGNORÂND comutatorul = concluzie falsă. */}
+                    {/* CREIERUL EFECTIV al constructorului = DOAR Ollama LOCAL free de pe
+                        VPS (owner, 20 aug: „rămân doar cu Linux și Gemini Live"; cloud-ul
+                        plătit a fost scos). Măsurat pe host (/api/tags), nu presupus. */}
                     {(() => {
-                      const paidGata = creierCfg.creier2 !== 'gemini' && !!cloudProba?.ok && cloudProba.modele.length > 0
-                      const pePlatit = creierCfg.constructorSursa === 'platit' && paidGata
                       const localOk = !!ollamaProba?.ok && (ollamaProba?.modele.length ?? 0) > 0
-                      const necitit = ollamaProba == null && cloudProba == null
-                      const efectivOk = pePlatit ? true : localOk
-                      const modelCloud = cloudProba?.modele[0] ?? creierCfg.creier2
+                      const necitit = ollamaProba == null
                       const text = necitit
                         ? '· creier: probă…'
-                        : pePlatit
-                          ? `· 🟢 constructor pe CLOUD PLĂTIT: ${modelCloud}${localOk ? ` · local (${ollamaProba?.modele[0]}) = rezervă` : ''}`
-                          : localOk
-                            ? `· 🟢 constructor pe LOCAL FREE: Ollama (${ollamaProba?.modele.join(', ')})`
-                            : ollamaProba?.ok
-                              ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
-                              : `· 🔴 Ollama nu răspunde pe host (${ollamaProba?.motiv.slice(0, 50) ?? '…'})`
+                        : localOk
+                          ? `· 🟢 constructor pe LOCAL FREE: Ollama (${ollamaProba?.modele.join(', ')})`
+                          : ollamaProba?.ok
+                            ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
+                            : `· 🔴 Ollama nu răspunde pe host (${ollamaProba?.motiv.slice(0, 50) ?? '…'})`
                       return (
                         <span
                           className="chat-hint"
-                          style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: necitit ? undefined : efectivOk ? '#1a7f37' : '#c1121f' }}
-                          title={pePlatit
-                            ? `constructor PLĂTIT → rulează pe CLOUD (${modelCloud}); Ollama local rămâne rezervă`
-                            : ollamaProba?.ok
-                              ? `constructor FREE → Ollama pe host (/api/tags): ${ollamaProba.modele.join(', ') || 'niciun model'}`
-                              : `proba Ollama pe host: ${ollamaProba?.motiv ?? '…'}`}
+                          style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: necitit ? undefined : localOk ? '#1a7f37' : '#c1121f' }}
+                          title={ollamaProba?.ok
+                            ? `constructor FREE → Ollama pe host (/api/tags): ${ollamaProba.modele.join(', ') || 'niciun model'}`
+                            : `proba Ollama pe host: ${ollamaProba?.motiv ?? '…'}`}
                         >
                           {text}
                         </span>
@@ -2895,110 +2864,14 @@ export default function AdminPanel({
                       ))}
                     </div>
                   )}
-                  {/* ── COMUTATORUL CREIER 2 + CONSTRUCTOR (owner, 16 aug: „creier 2 →
-                      Kimi K3 cu comutator Qwen3.5 Max… constructor = FREE ↔ PLĂTIT…
-                      se aprinde când lipesc cheia"). Tu alegi, tu vezi, măsurat.
-                      Doar stiluri inline (fără clasă partajată) — lecția coliziunii. */}
-                  <div style={{ marginTop: 10, padding: 10, border: '1px solid #8884', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700 }}>Creierul (comutator) — tu alegi, tu vezi</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
-                      <span style={{ minWidth: 140, opacity: 0.85 }}>Creier 2 (cereri grele):</span>
-                      {([['gemini', 'Gemini (gratis)'], ['kimi-k3', 'Kimi K3 (cloud)'], ['qwen3.5', 'Qwen3.5 397B (cloud)']] as const).map(([val, txt]) =>
-                        btnComut(val, creierCfg.creier2 === val, () => { creierEditatRef.current = true; setCreierCfg((c) => ({ ...c, creier2: val })) }, txt),
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
-                      <span style={{ minWidth: 140, opacity: 0.85 }}>Constructor:</span>
-                      {([['free', 'FREE (local pe VPS)'], ['platit', 'PLĂTIT (= creier 2 cloud)']] as const).map(([val, txt]) =>
-                        btnComut(val, creierCfg.constructorSursa === val, () => { creierEditatRef.current = true; setCreierCfg((c) => ({ ...c, constructorSursa: val })) }, txt),
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
-                      <span style={{ minWidth: 140, opacity: 0.85 }}>Cheia Ollama:</span>
-                      <input
-                        type="password"
-                        value={ollamaKeyInput}
-                        onChange={(e) => setOllamaKeyInput(e.target.value)}
-                        placeholder={cloudProba?.ok ? '•••• (pusă — lasă gol ca s-o păstrezi)' : 'lipește cheia Ollama Cloud'}
-                        style={{ flex: 1, minWidth: 180, padding: '3px 6px', fontSize: 12 }}
-                      />
-                      <button
-                        onClick={async () => {
-                          try {
-                            setCreierMsg('salvez…')
-                            const r = await fetch('/api/admin/constructor/creier-cloud', {
-                              method: 'POST',
-                              headers: { 'content-type': 'application/json' },
-                              body: JSON.stringify({ creier2: creierCfg.creier2, constructorSursa: creierCfg.constructorSursa, ollamaKey: ollamaKeyInput || undefined }),
-                            })
-                            const j = (await r.json().catch(() => null)) as { creier?: typeof creierCfg; cloud?: { ok: boolean; motiv: string; modele: string[] }; error?: string } | null
-                            if (j?.creier) setCreierCfg(j.creier)
-                            if (j?.cloud) setCloudProba(j.cloud)
-                            if (r.ok) creierEditatRef.current = false // salvat → serverul redevine sursa
-                            setOllamaKeyInput('')
-                            setCreierMsg(r.ok ? 'salvat' : `eroare: ${j?.error ?? r.status}`)
-                          } catch (e) {
-                            setCreierMsg(`eroare: ${String(e).slice(0, 80)}`)
-                          }
-                        }}
-                        style={{ padding: '3px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#1a7f37', color: '#fff', fontWeight: 600 }}
-                      >
-                        Salvează
-                      </button>
-                      {/* NESALVAT, LA VEDERE (owner, 19 aug: „PLĂTIT aprins dar rulează
-                          LOCAL"). Butonul se aprinde la clic, dar serverul se schimbă
-                          DOAR la „Salvează" — cât ai modificări nesalvate, o spunem, ca
-                          să nu crezi că e aplicat (creierEditatRef.current, reset la save). */}
-                      {creierEditatRef.current && (
-                        <span style={{ fontSize: 11, color: '#c1121f', fontWeight: 700 }}>
-                          · neaplicat — apasă „Salvează"
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: cloudProba == null ? undefined : cloudProba.ok ? '#1a7f37' : '#c1121f', opacity: cloudProba == null ? 0.7 : 1 }}>
-{creierCfg.creier2 === 'gemini' && creierCfg.constructorSursa === 'free'
-                        ? 'Acum: chat rapid Gemini + constructor FREE local pe VPS. Alege cloud + lipește cheia ca Creier 2 (cereri grele) și/sau constructor PLĂTIT.'
-                        : cloudProba == null
-                          ? 'cheie: probă…'
-                          : cloudProba.ok
-                            ? `🟢 Cheie OK pe Ollama cloud: „${cloudProba.modele[0] ?? 'model'}”. Chat rapid = Gemini. Creier 2 pe CHAT (ture grele) + constructor PLĂTIT folosesc acest model când e ales mai sus.`
-                            : `🔴 ${cloudProba.motiv}`}
-                    </div>
-                    {/* TOP-UP „extra usage" (owner, 16 aug: „la creier vreau bifă pentru kimi 3,
-                        in soft sa pot pune extra bani"). Modelele «extra usage» (ex. Kimi K3, #1)
-                        se plătesc SEPARAT de abonament, per folosire. Banii se pun la Ollama (ei
-                        țin plata — aplicația nu-ți poate lua cardul); butonul te duce direct acolo.
-                        Prețul NU-l scriu în cod (legea anti-hardcodare) — e viu pe pagina modelului. */}
-                    {creierCfg.creier2 !== 'gemini' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, background: '#8881', borderRadius: 6, padding: 8 }}>
-                        <div style={{ opacity: 0.9 }}>
-                          Modelele „extra usage" (ex. Kimi K3 — cel mai performant) se plătesc <b>separat</b> de abonament,
-                          per folosire. Soldul se pune la Ollama (ei țin plata), apoi becul de sus devine verde când modelul rulează.
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                          <a
-                            href="https://ollama.com/settings"
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ padding: '4px 10px', borderRadius: 6, background: '#1a7f37', color: '#fff', textDecoration: 'none', fontWeight: 600 }}
-                          >
-                            Pune bani extra / auto-reload
-                          </a>
-                          <a
-                            href={`https://ollama.com/library/${creierCfg.creier2}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #8886', color: 'inherit', textDecoration: 'none' }}
-                          >
-                            Vezi prețul modelului (live)
-                          </a>
-                        </div>
-                      </div>
-                    )}
-                    {creierMsg && <div style={{ fontSize: 11, opacity: 0.85 }}>{creierMsg}</div>}
-<div style={{ fontSize: 10, opacity: 0.6 }}>
-                      Constructor FREE = Ollama local pe VPS (qwen2.5-coder:32b), nu modelul cloud din becul de mai sus. Constructor PLĂTIT = exact Creier 2 cloud. Chat: rapid = Gemini; greu = Creier 2 cloud după cheie OK, altfel Gemini greu.
-                    </div>
+                  {/* (COMUTATORUL CREIER 2 CLOUD + sursa plătită a constructorului au fost
+                      SCOASE — owner, 20 aug: „rămân doar cu Linux și Gemini Live; tai
+                      serverele qwen". Creierul e Gemini unic (chat rapid + greu), iar
+                      constructorul rulează DOAR pe Ollama local free de pe VPS. Abonamentul
+                      Ollama Cloud (kimi/qwen) a ieșit din aplicație; constructorul îl
+                      înlocuiește Devin, extern — vezi AI-HANDOFF.md.) */}
+                  <div style={{ marginTop: 10, padding: 10, border: '1px solid #8884', borderRadius: 8, fontSize: 11, opacity: 0.75 }}>
+                    Creier: <b>Gemini</b> unic (rapid + greu). Constructor: <b>Ollama local free</b> pe VPS. Cloud-ul plătit (kimi/qwen) a fost scos — vezi becul „constructor pe LOCAL FREE" de mai sus.
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
                     <label className="chat-hint" style={{ fontSize: 12 }}>

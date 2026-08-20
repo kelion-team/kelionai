@@ -17,9 +17,9 @@ const chat = readFileSync(
 )
 
 describe('plafonul de unelte al furnizorului e garantat structural', () => {
-  it('plafonul e AL FURNIZORULUI: 128 pe Gemini, 64 pe Ollama Cloud sau necunoscut', () => {
+  it('plafonul e AL FURNIZORULUI: 128 pe Gemini, 64 pe orice altceva (necunoscut)', () => {
     expect(plafonUnelteFurnizor('google-direct/gemini-2.5-flash')).toBe(128)
-    expect(plafonUnelteFurnizor('ollama-cloud/qwen3.5:397b')).toBe(64)
+    expect(plafonUnelteFurnizor('alt-furnizor/model-necunoscut')).toBe(64)
     expect(plafonUnelteFurnizor(null)).toBe(64)
     expect(chat).toContain('const PLAFON_FURNIZOR = plafonUnelteFurnizor(orChatModel)')
     expect(chat).toMatch(/baseTools\.slice\(0, MAX_PROVIDER_TOOLS\)/)
