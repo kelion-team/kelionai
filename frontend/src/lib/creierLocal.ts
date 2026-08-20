@@ -37,9 +37,41 @@ export interface MesajLocal {
 export type StareLocal =
   | 'neintrodus' // încă nu s-a cerut nimic
   | 'fara_webgpu' // dispozitivul nu are WebGPU → creierul local nu poate rula
+  | 'descarcat' // modelul E în cache (descărcat înainte), dar nu încă încărcat în GPU
   | 'se_pregateste' // se descarcă/încarcă modelul
   | 'gata' // model încărcat, poate răspunde offline
   | 'eroare' // a picat încărcarea (motiv reținut)
+
+// URMA „E DESCĂRCAT" (owner 20 aug: „daca ai descarcat pentru ofline trebuie sa vada
+// ca a fost descarcat si sa nu te mai puna sa descarci daca nu sunt modificari"). La
+// fiecare reload starea din memorie se pierde (redevine 'neintrodus') deși modelul stă
+// în Cache Storage → panoul cerea IAR descărcarea. Reținem în localStorage CE model a
+// fost descărcat; dacă e chiar modelul curent, pornim optimist pe 'descarcat' (fără să
+// mai cerem descărcare). Dacă flag-ul e alt model (S-A SCHIMBAT ceva) → 'neintrodus' →
+// se ia singur noul model (auto-update). Confirmăm/infirmăm din Cache Storage, fără să
+// importăm biblioteca grea WebLLM la pornire.
+const CHEIE_DESCARCAT = 'kelion_model_offline'
+function citesteFlagDescarcat(): string | null {
+  try {
+    return localStorage.getItem(CHEIE_DESCARCAT)
+  } catch {
+    return null
+  }
+}
+function scrieFlagDescarcat(id: string): void {
+  try {
+    localStorage.setItem(CHEIE_DESCARCAT, id)
+  } catch {
+    /* storage indisponibil — se reconfirmă din Cache Storage */
+  }
+}
+function stergeFlagDescarcat(): void {
+  try {
+    localStorage.removeItem(CHEIE_DESCARCAT)
+  } catch {
+    /* nimic */
+  }
+}
 
 // Modelul local: capabilitate CLIENT (WebGPU), aleasă din lista prebuilt WebLLM —
 // nu e o cifră de bani/tarif/prag și nici o stare inventată. ~3B Q4, multilingv
@@ -47,16 +79,57 @@ export type StareLocal =
 // hardcod-permis: id de model client WebLLM (capabilitate offline), nu valoare de afișat/tarifat; mutabil la config server în faza următoare.
 const MODEL_LOCAL = 'Qwen2.5-3B-Instruct-q4f16_1-MLC'
 
-let stare: StareLocal = 'neintrodus'
+// Optimist la pornire: dacă flag-ul spune că EXACT modelul curent a fost descărcat,
+// pornim pe 'descarcat' (nu mai cerem descărcare). Se confirmă din Cache Storage prin
+// sincronizeazaStareOffline(). Flag pe alt model = s-a schimbat → 'neintrodus' → auto-ia.
+let stare: StareLocal = citesteFlagDescarcat() === MODEL_LOCAL ? 'descarcat' : 'neintrodus'
 let progres = 0 // 0..1 la descărcarea modelului
 let motivEroare = ''
 // Motorul WebLLM, tipat lax ca să nu forțăm tipurile bibliotecii peste tot.
-let motor: { chat: { completions: { create: (o: unknown) => Promise<unknown> } } } | null = null
+// `interruptGenerate` e cheia bugului „moare conversația după primul chat": la abort
+// TREBUIE să întrerupem generarea și să GOLIM fluxul, nu să-l abandonăm (vezi jos).
+let motor: {
+  chat: { completions: { create: (o: unknown) => Promise<unknown> } }
+  interruptGenerate?: () => Promise<void> | void
+} | null = null
 let pregatire: Promise<boolean> | null = null
 
 /** Starea + progresul curent (fără să forțeze ceva). Pentru UI/decizii. */
 export function stareCreierLocal(): { stare: StareLocal; progres: number; motiv: string } {
   return { stare, progres, motiv: motivEroare }
+}
+
+/** E modelul în Cache Storage? Verificare UȘOARĂ, direct pe cache-ul `webllm/model`,
+ *  FĂRĂ să importăm biblioteca grea WebLLM la pornire. Best-effort (false la orice
+ *  eroare). Completitudinea reală o revalidează WebLLM la încărcare. */
+export async function modelDescarcatInCache(): Promise<boolean> {
+  try {
+    if (typeof caches === 'undefined') return false
+    if (!(await caches.has('webllm/model'))) return false
+    const c = await caches.open('webllm/model')
+    const chei = await c.keys()
+    return chei.length > 0
+  } catch {
+    return false
+  }
+}
+
+/** Reconciliază starea cu realitatea din cache (owner: „să vadă că e descărcat, să nu
+ *  mai ceară dacă nu sunt modificări"). Model curent în cache → 'descarcat'; flag pe alt
+ *  model sau cache evacuat → 'neintrodus' (se ia din nou = auto-update la schimbare). Nu
+ *  atinge 'gata'/'se_pregateste' (deja încărcat/în lucru). */
+export async function sincronizeazaStareOffline(): Promise<void> {
+  if (stare === 'gata' || stare === 'se_pregateste') return
+  const inCache = await modelDescarcatInCache()
+  const potrivit = inCache && citesteFlagDescarcat() === MODEL_LOCAL
+  if (potrivit) {
+    if (stare !== 'descarcat') stare = 'descarcat'
+    scrieFlagDescarcat(MODEL_LOCAL)
+  } else {
+    if (stare === 'descarcat') stare = 'neintrodus'
+    // flag invalid (cache evacuat SAU alt model decât cel curent) → curăță-l
+    if (!inCache || citesteFlagDescarcat() !== MODEL_LOCAL) stergeFlagDescarcat()
+  }
 }
 
 /** Are dispozitivul WebGPU? (Necesar pentru creierul local.) Măsurat, nu presupus. */
@@ -134,6 +207,7 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
       })) as unknown as typeof motor
       stare = 'gata'
       progres = 1
+      scrieFlagDescarcat(MODEL_LOCAL) // reținem că FIX acest model e descărcat (nu recerem)
       return true
     } catch (e) {
       stare = 'eroare'
@@ -174,8 +248,27 @@ export async function* streamLocalRaspuns(
     yield `${t.offlineEroareLocal} ${e instanceof Error ? e.message.slice(0, 120) : ''}`.trim()
     return
   }
+  // ABORT FĂRĂ SĂ SCURGEM LOCK-UL (owner 20 aug: „dupa primul chat moare conversatia").
+  // WebLLM ține un LOCK per-model pe care îl eliberează DOAR la finalul NORMAL al
+  // fluxului. Dacă ieșim din buclă cu `return`/`break`, generatorul e abandonat
+  // (`.return()`) → release() nu se mai cheamă → lock-ul rămâne blocat PE VECI →
+  // următorul `create()` se blochează la `acquire()`, iar `send()` atârnă în `await`
+  // (busy rămâne true) → chatul moare definitiv. FIX: la abort NU ieșim; întrerupem
+  // generarea O DATĂ și GOLIM fluxul (`continue`) până se termină singur → WebLLM ajunge
+  // la release() și tura următoare pornește curat.
+  let intrerupt = false
   for await (const parte of flux) {
-    if (signal?.aborted) return
+    if (signal?.aborted) {
+      if (!intrerupt) {
+        intrerupt = true
+        try {
+          await motor?.interruptGenerate?.()
+        } catch {
+          /* best-effort — oricum drenăm restul mai jos */
+        }
+      }
+      continue
+    }
     const buc = parte.choices?.[0]?.delta?.content
     if (buc) yield buc
   }

@@ -696,16 +696,19 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let ultimNivelLa = 0
   let preampGain = clampPreamp(opts.preampInitial)
   // ── POARTA DE VOCE (VAD local) ── owner 20 aug: „nu se poate activa doar la voce?
-  // nu la zgomot?" + „fa profi de la inceput". Cât Kelion ASCULTĂ, trimitem spre model
-  // DOAR când se vorbește (vad.ts); pe tăcere/zgomot închidem țeava → nu se mai
-  // facturează liniștea (Gemini Live e taxat pe minut de audio de intrare, ~$27/11h
-  // măsurat). Cât Kelion VORBEȘTE (poarta half-duplex), lăsăm cadrele ca înainte — nu
-  // atingem AEC-ul. Poartă de siguranță FĂRĂ deploy: `localStorage.kelion_vad='0'`.
+  // nu la zgomot?" + „fa profi de la inceput". Cât Kelion ASCULTĂ, ar trimite spre model
+  // DOAR când se vorbește (vad.ts) → economie pe tăcere.
+  // OPRIT IMPLICIT (owner 20 aug, MĂSURAT LIVE: „in continuare nu merge vocea, am apasat
+  // butonul dar nimic"). Regula #2 — schimbarea mea e primul suspect: VAD-ul putea să NU
+  // deschidă niciodată (dacă înveți fondul din primele cadre cât vorbești, pragul urcă
+  // peste vocea ta), tăind vocea complet. Până nu-l pot proba pe un dispozitiv real că NU
+  // taie vocea, rămâne OPT-IN: `localStorage.kelion_vad='1'` îl PORNEȘTE; implicit e oprit,
+  // deci trimiterea e continuă ca înainte (voce funcțională > cost).
   const vadPornit = (() => {
     try {
-      return localStorage.getItem('kelion_vad') !== '0'
+      return localStorage.getItem('kelion_vad') === '1'
     } catch {
-      return true
+      return false
     }
   })()
   let stVad: StareVad = stareVadInitiala(performance.now())
