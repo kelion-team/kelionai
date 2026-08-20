@@ -112,6 +112,18 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
       return false
     }
     stare = 'se_pregateste'
+    // STOCARE PERSISTENTĂ (owner 20 aug: „fiecare update să fie preluat și după ce s-a
+    // downloadat, nu să șteargă ce e existent"). Update-ul ESTE preluat normal (se
+    // reîncarcă versiunea nouă), dar modelul (~2 GB în Cache Storage sub webllm/*) e deja
+    // ferit de ștergere (updateCheck + sw.js). Aici punem al doilea zid: cerem browserului
+    // să marcheze stocarea PERSISTENTĂ, ca modelul să nu fie evacuat nici sub presiune de
+    // spațiu. Best-effort — dacă browserul refuză, descărcarea merge oricum înainte.
+    try {
+      const stocare = (navigator as unknown as { storage?: { persist?: () => Promise<boolean> } }).storage
+      if (stocare?.persist) await stocare.persist()
+    } catch {
+      /* indisponibil — modelul rămâne în cache, doar fără garanția anti-evacuare */
+    }
     try {
       const webllm = await import('@mlc-ai/web-llm')
       motor = (await webllm.CreateMLCEngine(MODEL_LOCAL, {
