@@ -1653,7 +1653,10 @@ K streaming); the full ticker remains only in monitor mode, where the log hides.
 }
 .composer-row {
   display: flex;
-  align-items: center;
+  /* flex-end: când câmpul de scris (textarea) crește pe mai multe rânduri,
+     micul microfon și săgeata rămân jos, lângă ultima linie (nu plutesc la
+     mijloc). Pe o singură linie arată identic cu înainte. */
+  align-items: flex-end;
   gap: 6px;
 }
 .composer-input {
@@ -1671,6 +1674,14 @@ K streaming); the full ticker remains only in monitor mode, where the log hides.
   color: var(--text);
   font-size: 15px;
   padding: 6px 4px;
+  /* E <textarea> acum (owner, 20 aug: mesaj întreg, pe mai multe rânduri).
+     resize:none — nu tragem colțul; font-family:inherit — textarea nu cade pe
+     monospace; înălțimea o pune JS-ul (auto-creștere), plafon 140px apoi scroll. */
+  font-family: inherit;
+  resize: none;
+  line-height: 1.35;
+  max-height: 140px;
+  overflow-y: auto;
 }
 /* The voice volume: the width lives HERE (not inline), so the phone gets a
 narrow variant — otherwise the slider + the mic ate the whole composer row. */
