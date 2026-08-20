@@ -41,6 +41,7 @@ export interface Strings {
   offlineDescarca: string
   offlineReincearca: string
   offlineFaraWebgpuScurt: string
+  updateNouAnunt: string
   credits: string
   topUp: string
   lowCredit: string
@@ -303,6 +304,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineDescarca: 'Download for offline',
     offlineReincearca: 'Retry',
     offlineFaraWebgpuScurt: 'Offline brain unavailable on this device (no WebGPU)',
+    updateNouAnunt: 'New version — updating…',
     credits: 'credits',
     topUp: 'Please top up your credit',
     lowCredit: 'Your credit is running low — please top up.',
@@ -532,6 +534,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineDescarca: 'Descarcă pentru offline',
     offlineReincearca: 'Reîncearcă',
     offlineFaraWebgpuScurt: 'Creierul offline nu merge pe acest dispozitiv (fără WebGPU)',
+    updateNouAnunt: 'Versiune nouă — se actualizează…',
     credits: 'credite',
     topUp: 'Te rog reîncarcă creditul',
     lowCredit: 'Mai ai puțin credit — te rog reîncarcă.',
@@ -758,6 +761,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineDescarca: 'Descargar para sin conexión',
     offlineReincearca: 'Reintentar',
     offlineFaraWebgpuScurt: 'El cerebro sin conexión no funciona en este dispositivo (sin WebGPU)',
+    updateNouAnunt: 'Nueva versión — actualizando…',
     credits: 'créditos',
     topUp: 'Por favor recarga tu crédito',
     lowCredit: 'Te queda poco crédito — recarga, por favor.',
@@ -936,6 +940,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineDescarca: 'Télécharger pour hors ligne',
     offlineReincearca: 'Réessayer',
     offlineFaraWebgpuScurt: 'Le cerveau hors ligne ne fonctionne pas sur cet appareil (pas de WebGPU)',
+    updateNouAnunt: 'Nouvelle version — mise à jour…',
     credits: 'crédits',
     topUp: 'Veuillez recharger votre crédit',
     lowCredit: 'Votre crédit est presque épuisé — veuillez recharger.',
@@ -1114,6 +1119,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineDescarca: 'Für offline herunterladen',
     offlineReincearca: 'Erneut versuchen',
     offlineFaraWebgpuScurt: 'Offline-Gehirn auf diesem Gerät nicht verfügbar (kein WebGPU)',
+    updateNouAnunt: 'Neue Version — wird aktualisiert…',
     credits: 'Guthaben',
     topUp: 'Bitte lade dein Guthaben auf',
     lowCredit: 'Dein Guthaben wird knapp — bitte aufladen.',
@@ -1292,6 +1298,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineDescarca: 'Scarica per offline',
     offlineReincearca: 'Riprova',
     offlineFaraWebgpuScurt: 'Il cervello offline non funziona su questo dispositivo (niente WebGPU)',
+    updateNouAnunt: 'Nuova versione — aggiornamento…',
     credits: 'crediti',
     topUp: 'Ricarica il tuo credito, per favore',
     lowCredit: 'Il tuo credito sta per finire — ricarica, per favore.',
@@ -1470,6 +1477,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineDescarca: 'Baixar para offline',
     offlineReincearca: 'Tentar de novo',
     offlineFaraWebgpuScurt: 'O cérebro offline não funciona neste dispositivo (sem WebGPU)',
+    updateNouAnunt: 'Nova versão — atualizando…',
     credits: 'créditos',
     topUp: 'Por favor, recarregue o seu crédito',
     lowCredit: 'O seu crédito está acabando — recarregue, por favor.',
