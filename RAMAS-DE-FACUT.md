@@ -36,6 +36,16 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       ajunge „gata ✓" (sau spune cinstit „fără WebGPU"); (b) răspunsul scris se AUDE;
       (c) în avion app-ul se deschide. SEPARAT, de decis cu el (Agent 3, cost): sesiunea
       Gemini Live pornește automat și ascultă CONTINUU → ~£300+/lună; de pus poartă/VAD.
+- [x] ORDIN 20 aug (verbatim): „nu se poate activa doar la voce? nu la zgomot?" + „fa
+      profi de la inceput". LIVRAT: **VAD local profi** (`lib/vad.ts` pur + 10 teste) —
+      prag ADAPTIV la zgomotul camerei (ventilator/trafic intră în fond, nu deschide),
+      respinge hiss prin ZCR, debounce onset + hangover 800 ms (nu taie coada + lasă
+      tăcerea de tură), warm-up; regula de aur: la nesiguranță stă DESCHIS (nu taie
+      vorba). Montat în `vocalLive.ts` DOAR în faza de ascultare (`!poarta`, AEC neatins):
+      pe tăcere/zgomot 0 octeți → 0 cost; pre-roll ~250 ms (primul cuvânt întreg). Poartă
+      de siguranță `localStorage.kelion_vad='0'`. Porți: tsc 0, build verde, 92/92, gărzi 0.
+      RĂMAS LIVE (owner): vocea tot pornește hands-free, nu taie primul cuvânt, Gemini tot
+      prinde sfârșitul de tură, factura scade pe zile. Dovada „0 în tăcere" = testele + codul.
 - [x] ORDIN 19 aug (verbatim): „seteaza sa aibe timp sa raspunda… dinamic pe greutatea
       intrebari sau problemei" + „sistem de ajustare continuu, cind are destul context"
       + „daca a trecut pe plata sa se uite cit timp a durat si faca o medie, pina se

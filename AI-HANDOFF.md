@@ -1194,3 +1194,24 @@ hardcod+sintaxă 0. **RĂMAS LIVE (owner, pe device):** (a) bara „se descarcă
 (b) răspunsul scris se AUDE; (c) avionul deschide app-ul. **De decis cu owner-ul
 (Agent 3, cost):** sesiunea Gemini Live pornește automat + ascultă continuu →
 ~£300+/lună; recomandare: poartă VAD / pornire la activare, nu la load.
+
+### §15d — POARTA DE VOCE (VAD local) — „doar la voce, nu la zgomot" (20 aug)
+Owner, după ce a văzut costul: „nu se poate activa doar la voce? nu la zgomot?" +
+„fa profi de la inceput." Cauza costului (confirmată în cod, `vocalLive.ts`): mic-ul
+se trimitea spre Gemini Live pe FIECARE cadru (`ws.send`), inclusiv în tăcere —
+linia 669 „rămâne continuu pentru VAD-ul serverului". Livrat: **VAD local profi**
+(`frontend/src/lib/vad.ts`, pur + 10 teste `vad.test.ts`):
+- prag ADAPTIV la zgomotul din cameră (fondul se învață) → ventilator/trafic constant
+  intră în fond, NU deschide; voce clar peste fond, da;
+- respinge hiss/zgomot de bandă largă la deschidere prin ZCR;
+- debounce la onset (pocnete scurte ignorate) + hangover 800 ms (nu taie coada
+  cuvintelor ȘI lasă tăcerea de tură ca serverul să detecteze sfârșitul);
+- warm-up scurt; **regula de aur: la nesiguranță stă DESCHIS** (nu taie vorba).
+Montat în `vocalLive.ts` DOAR în faza de ascultare (`!poarta` — cât Kelion nu
+vorbește; half-duplex/AEC neatins): pe tăcere/zgomot nu se trimite nimic (0 octeți
+→ 0 cost); pre-roll ~250 ms la deschidere ca primul cuvânt să fie întreg. **Poartă
+de siguranță fără deploy:** `localStorage.kelion_vad='0'` → trimitere continuă ca înainte.
+**Porți:** tsc 0, build verde, 92/92 teste, hardcod+sintaxă 0. **RĂMAS LIVE (owner):**
+(a) vocea tot pornește hands-free și răspunde; (b) nu taie primul cuvânt; (c) Gemini
+tot detectează sfârșitul de tură (hangover-ul îi lasă tăcerea) — dacă nu, cresc
+hangover-ul; (d) factura scade pe zile. Dovada „0 octeți în tăcere" = testele + codul.

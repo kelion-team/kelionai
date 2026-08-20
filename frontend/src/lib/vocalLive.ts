@@ -2,6 +2,7 @@ import { downsample, float32ToPcm16, base64ToBytes, pcm16ToFloat32 } from './pcm
 import { OpusVoceClient, esteSuportat as opusSuportat } from './opusVoce'
 import { alimenteazaNivelVoce } from './audioIO'
 import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
+import { pasVad, stareVadInitiala, rmsDin, zcrDin, PARAM_VAD_IMPLICIT, type StareVad } from './vad'
 import { inscrieVoceaLuiKelion } from './vociKelion'
 import { deblocheazaAudioLaGest } from './audioGraph'
 import { ensureAudioContextRunning, setupAudioContextAutoResume, startVoiceHeartbeat } from './voiceHeartbeat'
@@ -694,6 +695,45 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       (surseActive.length > 0 || ctxOut.currentTime < cursorRedare + COADA_ECOU_S))
   let ultimNivelLa = 0
   let preampGain = clampPreamp(opts.preampInitial)
+  // ── POARTA DE VOCE (VAD local) ── owner 20 aug: „nu se poate activa doar la voce?
+  // nu la zgomot?" + „fa profi de la inceput". Cât Kelion ASCULTĂ, trimitem spre model
+  // DOAR când se vorbește (vad.ts); pe tăcere/zgomot închidem țeava → nu se mai
+  // facturează liniștea (Gemini Live e taxat pe minut de audio de intrare, ~$27/11h
+  // măsurat). Cât Kelion VORBEȘTE (poarta half-duplex), lăsăm cadrele ca înainte — nu
+  // atingem AEC-ul. Poartă de siguranță FĂRĂ deploy: `localStorage.kelion_vad='0'`.
+  const vadPornit = (() => {
+    try {
+      return localStorage.getItem('kelion_vad') !== '0'
+    } catch {
+      return true
+    }
+  })()
+  let stVad: StareVad = stareVadInitiala(performance.now())
+  let eraDeschis = false
+  // PRE-ROLL după DURATĂ (~250 ms), robust la mărimea cadrului: la deschidere trimitem
+  // întâi audio-ul reținut, ca primul cuvânt să nu fie tăiat de onset + debounce.
+  const PREROLL_MS = 250
+  const preRoll: Float32Array[] = []
+  let preRollMs = 0
+  const durataMs = (b: Float32Array): number => (b.length / 16000) * 1000
+  // O SINGURĂ cale de trimitere (Opus dacă e activ, altfel PCM) — folosită și de
+  // cadrul curent, și de pre-roll, ca să nu se dubleze logica.
+  const trimiteCadru = (buf: Float32Array): void => {
+    if (opusTx && opusClient) {
+      if (opusClient.incarcaMic(buf)) return
+      const pcm0 = float32ToPcm16([buf])
+      const octetiPcm = new Uint8Array(pcm0.buffer, pcm0.byteOffset, pcm0.byteLength)
+      const cadru = new Uint8Array(octetiPcm.length + 1)
+      cadru[0] = 0
+      cadru.set(octetiPcm, 1)
+      try { ws.send(cadru.buffer) } catch { /* close-ul curăță */ }
+      octeti += octetiPcm.length
+      return
+    }
+    const pcm = float32ToPcm16([buf])
+    ws.send(pcm.buffer)
+    octeti += pcm.byteLength
+  }
   const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
     let ds = downsample(brut, ctxIn!.sampleRate)
@@ -726,23 +766,31 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         opts.onNivelIntrare({ nivel: rms, pic, poarta, clip: pic >= 0.98 })
       }
     }
-    // OPUS: cât e activ, microfonul intră în encoder (care trimite singur
-    // [1][opus] prin callback). Dacă encode-ul pică pe un cadru, trimitem PCM
-    // tag-uit [0][pcm] — serverul, în modul Opus, citește mereu octetul-codec.
-    if (opusTx && opusClient) {
-      if (opusClient.incarcaMic(la16k)) return
-      const pcm0 = float32ToPcm16([la16k])
-      const octetiPcm = new Uint8Array(pcm0.buffer, pcm0.byteOffset, pcm0.byteLength)
-      const cadru = new Uint8Array(octetiPcm.length + 1)
-      cadru[0] = 0
-      cadru.set(octetiPcm, 1)
-      try { ws.send(cadru.buffer) } catch { /* close-ul curăță */ }
-      octeti += octetiPcm.length
-      return
+    // POARTA DE VOCE: doar în faza de ASCULTARE (Kelion nu vorbește). Măsurăm cadrul
+    // REAL (ds) și lăsăm VAD-ul să decidă. Pe tăcere/zgomot NU trimitem nimic (0 octeți
+    // → 0 cost). La nesiguranță poarta stă deschisă (nu tăiem vorba). Cât Kelion
+    // vorbește (poarta==true), trimitem cadrele-zero ca înainte (half-duplex/AEC neatins).
+    if (vadPornit && !poarta) {
+      const rez = pasVad(stVad, { rms: rmsDin(ds), zcr: zcrDin(ds), tMs: performance.now() }, PARAM_VAD_IMPLICIT)
+      stVad = rez.st
+      if (rez.deschis && !eraDeschis) {
+        // închis→deschis: golim pre-roll-ul întâi, ca primul cuvânt să fie întreg.
+        for (const b of preRoll) trimiteCadru(b)
+        preRoll.length = 0
+        preRollMs = 0
+      }
+      eraDeschis = rez.deschis
+      if (!rez.deschis) {
+        // reținem pentru pre-roll (mărginit la ~250 ms), apoi ieșim FĂRĂ să trimitem.
+        preRoll.push(la16k)
+        preRollMs += durataMs(la16k)
+        while (preRollMs > PREROLL_MS && preRoll.length > 1) {
+          preRollMs -= durataMs(preRoll.shift() as Float32Array)
+        }
+        return
+      }
     }
-    const pcm = float32ToPcm16([la16k])
-    ws.send(pcm.buffer)
-    octeti += pcm.byteLength
+    trimiteCadru(la16k)
   }
   cules = await pornesteCulesPcm(ctxIn, sursa, laCadru)
   if (!cules) {
