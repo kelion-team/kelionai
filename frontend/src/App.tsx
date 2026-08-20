@@ -23,6 +23,7 @@ import { BannerOffline } from './components/BannerOffline'
 import { StatusOffline } from './components/StatusOffline'
 import { citesteConsimtamant, scrieConsimtamant, type StareConsimtamant } from './lib/consimtamant'
 import { isCalm } from './lib/activity'
+import { uiStrings } from './lib/i18n'
 
 // MARTORUL GLOBAL de fiabilitate pornește o dată, la încărcare — prinde orice
 // blocaj al firului principal, oriunde în aplicație (vedere/voce/creier/…).
@@ -39,6 +40,9 @@ export default function App() {
   // POARTA DE CONSIMȚĂMÂNT FOTO (GDPR) — owner 13 aug. Alegerea locală per
   // dispozitiv; `null` = încă n-a ales → i se arată poarta blocantă.
   const [consimt, setConsimt] = useState<StareConsimtamant>(() => citesteConsimtamant())
+  // ANUNȚ DE UPDATE (owner, 20 aug: „trebuie să mă anunțe că e un update pe aplicație").
+  // Update-ul se aplică tot automat, dar întâi apare un banner scurt, ca omul să VADĂ.
+  const [updateNou, setUpdateNou] = useState(false)
 
   useEffect(() => {
     const err = new URLSearchParams(window.location.search).get('error')
@@ -77,12 +81,18 @@ export default function App() {
       // Dacă nu e calm, așteptăm și verificăm din nou la următorul tick
     }
     const stop = watchForUpdate(() => {
+      // ANUNȚĂ pe ecran că vine o versiune nouă (owner: „să mă anunțe că e un update").
+      setUpdateNou(true)
       resetPending = true
-      tryReset()
-      // Poll until calm if not already
-      const poll = window.setInterval(tryReset, 1000)
-      // Stop polling after 5 minutes if still not calm
-      window.setTimeout(() => window.clearInterval(poll), 300_000)
+      // Lasă anunțul ~2.5s vizibil ÎNAINTE de a aplica (chiar dacă e deja calm), ca omul
+      // să apuce să-l vadă — apoi update-ul se aplică automat ca înainte.
+      window.setTimeout(() => {
+        tryReset()
+        // Poll until calm if not already
+        const poll = window.setInterval(tryReset, 1000)
+        // Stop polling after 5 minutes if still not calm
+        window.setTimeout(() => window.clearInterval(poll), 300_000)
+      }, 2500)
     })
     return stop
   }, [])
@@ -152,6 +162,29 @@ export default function App() {
     <>
       <BannerOffline />
       <StatusOffline />
+      {updateNou && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 100002,
+            background: '#15291a',
+            color: '#d8f5df',
+            textAlign: 'center',
+            padding: '6px 12px',
+            fontSize: 13,
+            fontWeight: 600,
+            borderBottom: '1px solid #2f4f3a',
+            boxShadow: '0 1px 6px rgba(0,0,0,0.35)',
+          }}
+        >
+          🔄 {uiStrings().updateNouAnunt}
+        </div>
+      )}
       <DynamicBackground />
       {/* Dedicated /login page (Adrian, Jul 26) — an already logged-in user is
       sent back into the app. /credite is PUBLIC for everyone (fix Jul 27 —
