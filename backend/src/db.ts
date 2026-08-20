@@ -4756,6 +4756,42 @@ async function abandoneazaJoburileBlocate(): Promise<void> {
   }
 }
 
+// ── WATCHDOG SERVER-SIDE, INDEPENDENT DE LUCRĂTOR (owner, 20 aug: „de la preluare
+// tot se blochează, nu se execută real nimic… pune în soft ce trebuie să nu se mai
+// blocheze la acești pași"). CAUZA: singura eliberare a unui 'running' înțepenit
+// trăia în `claimNextBuildJob` (`abandoneazaJoburileBlocate` + re-preluarea), deci se
+// declanșa DOAR când lucrătorul de pe VPS cerea ordin — exact ce moare în cazul ăsta
+// (lucrătorul a trecut jobul pe 'running' apoi a murit fix după claim → nimeni nu mai
+// atinge jobul → „Preluat · 0%" pe veci). În plus `abandoneazaJoburileBlocate` cere
+// attempts≥3, deci un job claimat O DATĂ (attempts=1) de un lucrător mort nu se
+// abandonează niciodată singur. Watchdog-ul ăsta rulează pe TIMER-ul APP-ului (bucla de
+// autonomie), NU pe pulsul lucrătorului: repune în coadă joburile 'running' tăcute
+// (inclusiv attempts=1) — un lucrător viu/repornit le reia imediat — și, după 3 claim-uri
+// sterile, le trece pe 'failed' cu motiv onest. Coada nu mai rămâne blocată la „Preluat".
+export async function deblocheazaJoburileClaimate(): Promise<{ repuse: number; abandonate: number }> {
+  if (!dbEnabled()) return { repuse: 0, abandonate: 0 }
+  try {
+    const fail = await getPool().query(
+      `UPDATE build_jobs SET status='failed',
+         log = COALESCE(log,'') || E'\\n[watchdog: lucrătorul a murit după preluare, fără progres, de prea multe ori — abandonat]',
+         updated_at = now()
+       WHERE status='running' AND attempts >= 3
+         AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'`,
+    )
+    const requeue = await getPool().query(
+      `UPDATE build_jobs SET status='queued',
+         log = COALESCE(log,'') || E'\\n[watchdog: repus în coadă — running tăcut peste prag, lucrătorul nu a raportat progres după preluare]',
+         updated_at = now()
+       WHERE status='running' AND attempts < 3
+         AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'
+         AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'`,
+    )
+    return { repuse: requeue.rowCount ?? 0, abandonate: fail.rowCount ?? 0 }
+  } catch {
+    return { repuse: 0, abandonate: 0 }
+  }
+}
+
 // ── P27 (owner, 15 aug, LEGE: „la constructor, trebuie 1 singur ordin, nu se
 // fac mai multe ordine pe acelasi subiect, lege, se rezolva, se arhiveaza,
 // sau se escaladeaza sau se raporteaza la kelion") ───────────────────────────

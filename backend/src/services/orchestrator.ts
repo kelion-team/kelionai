@@ -135,6 +135,50 @@ export async function executaApeluriCoordonate<T>(
     return rezultat
   }))
 }
+// ── GARDĂ DE PROGRES REAL (pură, testabilă) ─────────────────────────────────
+// Owner 20 aug: chatul „macină 65s și nu execută nimic real". Garda veche cerea
+// simultan „zero text nou" ȘI „aceeași semnătură de unelte" — un model care
+// depistează activ (narează + rulează alt shell/SQL care întorc erori) nu le
+// atinge niciodată. Aici judecăm REZULTATUL: o rundă în care TOATE ieșirile-s
+// erori = fără progres (2 la rând → stop); aceeași unealtă eșuată de 3× → stop.
+export function iesireEsteEroare(s: string): boolean {
+  const t = (s || '').trimStart()
+  return t.startsWith('tool_error:') || /"ok"\s*:\s*false|"error"\s*:/.test(t) || /^error[:\s]/i.test(t)
+}
+export interface StareProgres {
+  rundeToateEroare: number
+  erorPerUnealta: Record<string, number>
+}
+export function stareProgresInitiala(): StareProgres {
+  return { rundeToateEroare: 0, erorPerUnealta: {} }
+}
+/** Judecă progresul unei runde din ieșirile uneltelor. Întoarce motivul de oprire
+ *  (sau null) + starea nouă. PUR — nu mută starea primită. */
+export function pasProgres(
+  st: StareProgres,
+  nume: string[],
+  iesiri: string[],
+): { stop: string | null; st: StareProgres } {
+  const erorPerUnealta = { ...st.erorPerUnealta }
+  let rundeToateEroare = st.rundeToateEroare
+  let erori = 0
+  for (let i = 0; i < iesiri.length; i++) {
+    if (iesireEsteEroare(iesiri[i])) {
+      erori++
+      const n = (erorPerUnealta[nume[i]] ?? 0) + 1
+      erorPerUnealta[nume[i]] = n
+      if (n >= 3) return { stop: `unealta ${nume[i]} a eșuat de ${n}× în tură`, st: { rundeToateEroare, erorPerUnealta } }
+    }
+  }
+  if (iesiri.length > 0 && erori === iesiri.length) {
+    rundeToateEroare++
+    if (rundeToateEroare >= 2) return { stop: `${rundeToateEroare} runde consecutive doar cu erori`, st: { rundeToateEroare, erorPerUnealta } }
+  } else {
+    rundeToateEroare = 0
+  }
+  return { stop: null, st: { rundeToateEroare, erorPerUnealta } }
+}
+
 export async function runOrchestrator(
   model: string,
   messages: OrMessage[],
@@ -142,7 +186,7 @@ export async function runOrchestrator(
   execTool: (name: string, argsJson: string) => Promise<string>,
   opts: OrchestratorOpts = {},
 ): Promise<OrchestratorResult> {
-  const maxRounds = opts.maxRounds ?? 8
+  const maxRounds = opts.maxRounds ?? 6
   const convo: OrMessage[] = [...messages]
   let totalCost = 0
   let served = model
@@ -165,6 +209,10 @@ export async function runOrchestrator(
     uneltChemate.add(name)
     if (!afisaj.has(name)) anyFaptaToolCalled = true
   }
+  // GARDĂ DE PROGRES REAL (owner 20 aug: „macină 65s și nu execută nimic real"). Logica e
+  // pură + testată în `pasProgres` (jos): o rundă în care TOATE ieșirile-s erori = fără
+  // progres (2 la rând → stop); aceeași unealtă eșuată de 3× → stop. Fail-fast, nu 65s.
+  let stProgres = stareProgresInitiala()
   const rez = (text: string, rounds: number): OrchestratorResult => ({
     text,
     costUsd: totalCost,
@@ -321,6 +369,7 @@ export async function runOrchestrator(
         // The assistant turn is kept with the markup STRIPPED — history must
         // not teach the model that typing calls is the way to make them.
         convo.push({ role: 'assistant', content: stripToolMarkup(res.text ?? ''), tool_calls: calls })
+        const iesiriF: string[] = []
         for (const call of calls) {
           let out = ''
           try {
@@ -329,6 +378,13 @@ export async function runOrchestrator(
             out = `tool_error: ${String(e).slice(0, 200)}`
           }
           impingeRezultat(convo, call.id, out)
+          iesiriF.push(out)
+        }
+        const rezProgF = pasProgres(stProgres, calls.map((c) => c.function.name), iesiriF)
+        stProgres = rezProgF.st
+        if (rezProgF.stop) {
+          console.error(`[orchestrator] runda ${round}: fără progres (${rezProgF.stop}) → opresc bucla (${served})`)
+          return rez(stripToolMarkup(allText), round)
         }
         continue
       }
@@ -455,6 +511,12 @@ export async function runOrchestrator(
     if (iesiri.length > 1) console.log(`[TIMP] ${iesiri.length} unelte coordonate: ${Date.now() - tUnelte}ms`)
     for (let i = 0; i < res.toolCalls.length; i++) {
       impingeRezultat(convo, res.toolCalls[i].id, iesiri[i])
+    }
+    const rezProg = pasProgres(stProgres, res.toolCalls.map((c) => c.function.name), iesiri)
+    stProgres = rezProg.st
+    if (rezProg.stop) {
+      console.error(`[orchestrator] runda ${round}: fără progres (${rezProg.stop}) → opresc bucla (${served})`)
+      return rez(stripToolMarkup(allText), round)
     }
   }
 
