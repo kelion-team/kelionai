@@ -76,6 +76,8 @@ import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
+import { esteConectat } from '../lib/conexiune'
+import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil } from '../lib/creierLocal'
 import JarvisOrb from './JarvisOrb'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
@@ -189,6 +191,29 @@ export default function ChatPanel({
       /* storage unavailable — the draft just doesn't survive */
     }
   }, [input])
+  // PRE-PREGĂTIREA CREIERULUI OFFLINE (mod companion, faza 1): cât timp ai net BUN
+  // (Wi-Fi/4G+, confirmat de țeavă — nu ardem datele omului) și dispozitivul are
+  // WebGPU, descărcăm O DATĂ modelul local, ca să fie GATA când pierzi semnalul.
+  // Pe net lent/economie/necunoscut NU descărcăm gigabytes (ex. iOS raportează
+  // „necunoscut" → rămâne pe declanșare manuală, faza următoare). Idempotent.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    let anulat = false
+    const id = window.setTimeout(() => {
+      void (async () => {
+        if (anulat) return
+        const st = stareCreierLocal().stare
+        if (st === 'gata' || st === 'se_pregateste' || st === 'fara_webgpu') return
+        if (!esteConectat() || getTeava() !== 'bun') return // doar pe țeavă BUNĂ confirmată
+        if (!(await webgpuDisponibil())) return
+        void pregatesteModelOffline()
+      })()
+    }, 8000)
+    return () => {
+      anulat = true
+      window.clearTimeout(id)
+    }
+  }, [])
   const [busy, setBusy] = useState(false)
   // ECOUL A CE TRANSMIT EU — ținut mai mult pe ecran (Adrian, 3 aug: „afișarea
   // foarte scurtă a ce transmit eu — triplat timpul de afișat pe interfață").
@@ -1324,7 +1349,14 @@ export default function ChatPanel({
           return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
         })
       }
-      for await (const chunk of streamChat(
+      // COMUTAREA OFFLINE (mod companion, faza 1): fără net REAL → răspunsul vine
+      // din CREIERUL LOCAL (WebLLM, pe dispozitiv), NU de la server. Aceeași formă
+      // de flux (async iterable de bucăți), deci tot ce urmează (acumulare, gură,
+      // randare, abort) rămâne IDENTIC. Calea online e neatinsă. `next` (istoricul,
+      // inclusiv mesajul curent) e preluat de model — PRELUAREA CONTEXTULUI cerută.
+      const sursaFlux = !esteConectat()
+        ? streamLocalRaspuns(next, lang, ac.signal)
+        : streamChat(
         next,
         image ?? undefined,
         turnCoords ?? undefined,
@@ -1360,7 +1392,8 @@ export default function ChatPanel({
         // volan ca să răspundă SCURT, voce-first. NU mai suprimă suprafețe — ce spune
         // că face, execută (owner: „vorbă = faptă"; garda din handleControl a fost scoasă).
         isCarMode() || undefined,
-      )) {
+      )
+      for await (const chunk of sursaFlux) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
         feedSpeech(chunk) // the mouth speaks the reply as it streams
