@@ -1058,3 +1058,44 @@ curl -s -o /dev/null -w '%{http_code}' -X POST https://kelionai.app/api/me/delet
 Confirmare echipă + arhivare flux: 2026-08-18.
 Mesaj pe GitHub (issue #1248 comment + PR #1253 comment).
 Slack: conexiune Composio neautorizată la momentul trimiterii — fallback pe GitHub.
+
+
+## §14 — COMPANION OFFLINE (fără GSM/WiFi) — design blocat + FAZA 0 (20 aug 2026)
+
+Cerința ownerului: în mașină/avion (fără net) aplicația trece pe un **model de chat
+local minimalist cu avatarul actual** — un COMPANION (chat + GPS + vedere ca să fie
+uman), NU asistentul complet. La revenirea semnalului: comutare automată înapoi +
+sync total (locație/oră/chat) pe server, cu **preluare integrală a contextului
+chatului în ambele sensuri, fluid, fără hopuri**. Cererile neonorate offline se pun
+într-o coadă, se anunță cinstit („am salvat, rezolv la net"), iar la rezolvare se
+anunță civilizat („îți pot comunica răspunsul la ce ai întrebat…").
+
+**Decizii blocate (design):** Web PWA + WebLLM (WebGPU, model ~2.5–3B Q4) — o singură
+bază de cod, WebGPU garantat pe device-urile țintă 2026 (Samsung Fold 7+, iPhone
+penultimul+, tablete 2026). GPS din `navigator.geolocation.watchPosition`
+(`coords.speed` merge offline). Vederea (face-api) e deja client-side. Cozi în
+IndexedDB (sync + amânate). `navigator.onLine` MINTE → adevărul vine din ping real.
+
+**4 faze:** 0 = fundație PWA + detector prezență + banner; 1 = creier local WebLLM
+(persona Kelion, comută pe `esteConectat()`); 2 = context GPS + vedere; 3 = cozi
+sync + amânate + `/api/offline/sync` + anunț civil la revenire + **handoff neted
+context on↔off**; 4 = notificări Android + Manual user (diferențe Android vs iOS).
+
+### FAZA 0 — LIVRAT (branch `claude/reparatie-cu-rosu-uokj4m`)
+- `frontend/src/lib/conexiune.ts` (NOU) — detector prezență online↔offline, SEPARAT
+  de `retea.ts` (aia = calitatea țevii 2G/3G/4G). Adevărul = **ping REAL HEAD la
+  /health** (SW lasă /health mereu la rețea), nu `navigator.onLine`. Scurtătură la
+  offline DOAR când `navigator.onLine === false` explicit (un „no" de încredere);
+  `undefined` (API absent) ≠ offline → merge la ping (regula #1: necunoscut ≠
+  măsurat). Export: `verificaConexiuneReala()`, `esteConectat()`, `useConectat()`.
+  Periodic 30s → prinde „conectat dar fără internet" ȘI revenirea semnalului (cârligul
+  pe care se vor lega sync-ul + coada de amânate în faza 3).
+- `frontend/src/components/BannerOffline.tsx` (NOU) — banner cinstit sus („offline =
+  companion, nu stricat"), apare doar când pingul pică; strat pur de afișaj.
+- `i18n.ts` — cheie `offlineCompanion` în toate cele 7 limbi.
+- `App.tsx` — `<BannerOffline />` montat primul în return.
+- `conexiune.test.ts` (NOU) — 3 teste: 200→online, reject→offline, ne-2xx→offline.
+- **Porți verzi:** build ✓, vitest 58/58, exporturi 0 abandonat, hardcodări 0,
+  sintaxă curată, jscpd 0 clone.
+- **Neconstruit încă (fazele 1–4):** creierul local WebLLM, contextul GPS/vedere,
+  cozile sync/amânate, handoff-ul neted de context, notificările + Manualul.
