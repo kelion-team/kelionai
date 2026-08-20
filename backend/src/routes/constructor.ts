@@ -395,11 +395,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       const motiv = String(req.body?.log ?? '')
       const { loadKv, saveKv, remediazaAutomatBuildJob } = await import('../db.js')
       const { decideRemediereEsec, MAX_AUTO_REMEDIERI } = await import('../services/remediereEsec.js')
-      // Fără rezervă plătită (Ollama Cloud scos, 20 aug) — remedierea rămâne pe free local.
-      const paidDisponibil = false
+      // Constructor FREE-LOCAL unic (Ollama Cloud scos, 20 aug) — remedierea rămâne
+      // pe creierul local free; nu mai există escaladare pe plătit.
       const cheieContor = `remediere:count:${id}`
       const nrDeja = Number(await loadKv(cheieContor).catch(() => null)) || 0
-      const dec = decideRemediereEsec(motiv, paidDisponibil, nrDeja)
+      const dec = decideRemediereEsec(motiv, nrDeja)
       if (dec.actiune === 'reia') {
         await saveKv(cheieContor, String(nrDeja + 1)).catch(() => {})
         const nota = `[AUTO-REMEDIERE ${nrDeja + 1}/${MAX_AUTO_REMEDIERI}] cauză: ${dec.clasa} — ${dec.motiv}. ${dec.recomandare}`
@@ -408,7 +408,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
           'scris',
           `Ordin #${id}: auto-remediere (${dec.clasa})${repus ? ' — repus în coadă' : ''}`,
           `${dec.recomandare}\n\nMotiv: „${motiv.slice(0, 200)}".`,
-          { jobId: id, clasa: dec.clasa, escaladeazaCreier: dec.escaladeazaCreier },
+          { jobId: id, clasa: dec.clasa },
         ).catch(() => 0)
       } else {
         // 'oprire' (permanent — deja înghețat de reportBuildJob) / 'raporteaza':

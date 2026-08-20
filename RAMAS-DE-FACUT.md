@@ -13,6 +13,18 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ORDIN 20 aug (2): „scoti tot ce nu tine de cerinta mea" + Devin cablat CA
+      constructor în aplicație. FĂCUT (PR pe branch): **al 2-lea AI plătit ratat —
+      DeepSeek/DeepInfra** scos (rute `constructorViu/Stare`, blocul din `vps-set-env.yml`)
+      + **codul plătit DORMANT din worker** scos cap-coadă (`ruleazaAider` doar local,
+      `praghAider`/măsurători fără `platit`, șterse `calibrarePaid`/`decideEscaladareFreeFirst`/
+      `fallbackPaid`/escaladarea; `remediereEsec`/`invatareConstructor` free-only). Dovezi:
+      209 fișiere / 1852 teste + 5 porți verzi (măsurat de mine). RĂMAS: (a) owner verifică
+      deepinfra.com + rotește `CONSTRUCTOR_DEEPSEEK_KEY`; (b) **integrarea Devin ca și
+      constructor în aplicație (Varianta B)** — client `services/devin.ts` + dispatch + polling
+      + dovadă pe monitor; (c) vocea single-engine; (d) `panouLucratori` + RunPod/Fable5 rămășițe
+      + cod mort. „scoti tot" = lista PĂSTREZ e gardul (Gemini chat/voce/vedere, skill-uri Google,
+      avatar, offline, bani, VPS + Devin constructor); restul cade, sistem cu sistem, verde + PR.
 - [ ] ORDIN 20 aug (verbatim): „rămân doar cu Linux și Gemeni Live… tai serverele
       închiriate pentru qwen… se poate pune Devin în loc de creiere și de constructor?"
       + „cureți peste tot unde sunt aparițiile și în admin". FĂCUT (PR pe branch, NU merge
