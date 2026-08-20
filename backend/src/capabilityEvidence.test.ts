@@ -29,7 +29,7 @@ describe('matricea capabilităților promise', () => {
       expect(report.summary.capabilities).toBe(125) // 19 aug: +comuta_sursa (comutare free/plătit din chat/voce) +autoverificare (self-check LIVE real din chat)
       expect(report.summary.capabilitiesStaticPass).toBe(report.summary.capabilities)
       expect(report.summary.uiApplicationsMapped).toBe(report.summary.uiApplications)
-      expect(report.summary.manualSections).toBe(11)
+      expect(report.summary.manualSections).toBe(12) // 20 aug: +„When you lose signal — the companion mode" (offline faza 1-4)
       expect(Object.values(report.summary.gaps).flat()).toEqual([])
       expect(report.capabilities.every((row) => row.staticVerdict === 'pass' && row.implementationRefs.length > 0)).toBe(true)
     } finally {

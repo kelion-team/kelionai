@@ -90,6 +90,7 @@ import {
   necesitaNet,
   anuntAmanat,
 } from '../lib/coadaOffline'
+import { anuntaPeTelefon } from '../lib/notificari'
 import JarvisOrb from './JarvisOrb'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
@@ -274,7 +275,12 @@ export default function ChatPanel({
           /* rămâne amânată → reîncercăm data viitoare */
         }
       }
-      if (bucati.length) openWorkspaceDoc(strings(lang).raspunsAmanat, bucati.join('\n\n───\n\n'))
+      if (bucati.length) {
+        openWorkspaceDoc(strings(lang).raspunsAmanat, bucati.join('\n\n───\n\n'))
+        // FAZA 4 — anunț pe telefon (best-effort; Android complet, iOS limitat), ca
+        // omul să știe că i-am rezolvat cererea amânată chiar dacă app-ul e în fundal.
+        void anuntaPeTelefon(strings(lang).raspunsAmanat, bucati[0])
+      }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online, lang])
