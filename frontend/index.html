@@ -11,7 +11,11 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Kelionai" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <!-- interactive-widget=resizes-content (owner 20 aug: „când pune tastatura mută în sus
+         pagina… tastatura se pune peste imagine"): pe telefon, la deschiderea tastaturii
+         CONȚINUTUL se micșorează deasupra ei (nu mai e împins/acoperit). Fără asta,
+         comportamentul implicit lasă tastatura să acopere/urce pagina. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#0b0d12" />
     <!-- FĂRĂ preload pe avatarul GLB (9 aug): `as="fetch"` nu poate nimeri
          modul de credentials al cererii reale din loaderul GLTF (cu crossorigin
