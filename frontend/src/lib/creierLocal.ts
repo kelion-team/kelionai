@@ -86,7 +86,12 @@ let stare: StareLocal = citesteFlagDescarcat() === MODEL_LOCAL ? 'descarcat' : '
 let progres = 0 // 0..1 la descărcarea modelului
 let motivEroare = ''
 // Motorul WebLLM, tipat lax ca să nu forțăm tipurile bibliotecii peste tot.
-let motor: { chat: { completions: { create: (o: unknown) => Promise<unknown> } } } | null = null
+// `interruptGenerate` e cheia bugului „moare conversația după primul chat": la abort
+// TREBUIE să întrerupem generarea și să GOLIM fluxul, nu să-l abandonăm (vezi jos).
+let motor: {
+  chat: { completions: { create: (o: unknown) => Promise<unknown> } }
+  interruptGenerate?: () => Promise<void> | void
+} | null = null
 let pregatire: Promise<boolean> | null = null
 
 /** Starea + progresul curent (fără să forțeze ceva). Pentru UI/decizii. */
@@ -243,8 +248,27 @@ export async function* streamLocalRaspuns(
     yield `${t.offlineEroareLocal} ${e instanceof Error ? e.message.slice(0, 120) : ''}`.trim()
     return
   }
+  // ABORT FĂRĂ SĂ SCURGEM LOCK-UL (owner 20 aug: „dupa primul chat moare conversatia").
+  // WebLLM ține un LOCK per-model pe care îl eliberează DOAR la finalul NORMAL al
+  // fluxului. Dacă ieșim din buclă cu `return`/`break`, generatorul e abandonat
+  // (`.return()`) → release() nu se mai cheamă → lock-ul rămâne blocat PE VECI →
+  // următorul `create()` se blochează la `acquire()`, iar `send()` atârnă în `await`
+  // (busy rămâne true) → chatul moare definitiv. FIX: la abort NU ieșim; întrerupem
+  // generarea O DATĂ și GOLIM fluxul (`continue`) până se termină singur → WebLLM ajunge
+  // la release() și tura următoare pornește curat.
+  let intrerupt = false
   for await (const parte of flux) {
-    if (signal?.aborted) return
+    if (signal?.aborted) {
+      if (!intrerupt) {
+        intrerupt = true
+        try {
+          await motor?.interruptGenerate?.()
+        } catch {
+          /* best-effort — oricum drenăm restul mai jos */
+        }
+      }
+      continue
+    }
     const buc = parte.choices?.[0]?.delta?.content
     if (buc) yield buc
   }
