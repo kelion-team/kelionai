@@ -53,8 +53,6 @@ import { tranzactiiRoutes } from './routes/tranzactii.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
-import { constructorViuRoutes } from './routes/constructorViu.js'
-import { constructorStareRoutes } from './routes/constructorStare.js'
 import { jobsRoutes } from './routes/jobs.js'
 import { offlineRoutes } from './routes/offline.js'
 import { deployRoutes } from './routes/deploy.js'
@@ -344,8 +342,6 @@ await app.register(embedCheckRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 await app.register(pingRoutes)
-await app.register(constructorViuRoutes)
-await app.register(constructorStareRoutes)
 await app.register(jobsRoutes)
 // Căile COMPLETE stau în deploy.ts (convenția întregului backend, pe care o
 // citește și verifica-butoane): componenta DeployProgressBar chema
