@@ -673,20 +673,13 @@ export default function ChatPanel({
     // While it speaks, the microphone doesn't send (anti-echo), but stays on watch:
     // vocea lui Adrian taie redarea pe loc (barge-in, vezi ensureMic).
     if (c.audio) {
-      // O TURĂ = O SINGURĂ GURĂ (owner, 19 aug: „e tot dublat… nu sti pe unde iese").
-      // Regula corectă cheie pe CE FEL DE TURĂ e, nu pe „LIVE e instalat" (LIVE e
-      // permanent, dar rostește DOAR turele VOCALE, prin WS — n-are `speak()` pentru
-      // text scris). Deci: dacă e o tură VOCALĂ pe care LIVE deja o rostește → aruncăm
-      // Chirp-ul (altfel dublăm). Pe turele SCRISE, LIVE nu spune nimic → REDĂM Chirp-ul
-      // (calea `<audio>` care ajunge pe Bluetooth ȘI mișcă gura). Fără asta, scrisul
-      // rămânea mut cât LIVE era instalat — exact bugul.
-      if (voiceTurnRef.current && vlRef.current) return
+      // O TURĂ = O SINGURĂ GURĂ. CORECȚIE (owner 20 aug „nu ajunge audio unde trebuie" pe
+      // VOCE + agent): Gemini Live (vlRef) NU rostește răspunsul serverului nici pe voce
+      // (n-are speak(text)). Deci Chirp (c.audio) e singura gură — ȘI scris ȘI voce. Vechea
+      // gardă îl tăcea pe voce → TĂCERE. Realtime OpenAI (isRealtime) chiar rostește textul → refuzăm Chirp.
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
-      // Gardul C: turele SCRISE (voiceTurnRef gol) trec chiar și cât LIVE ține
-      // focus-ul — LIVE nu rostește scrisul, deci Chirp-ul lui NU dublează nimic.
-      // Fără flag-ul ăsta, scrisul rămânea MUT sub LIVE (măsurat 19 aug: gardul C
-      // învingea relaxarea gardului A de mai sus). Blocajul între taburi rămâne.
-      if (!requestTtsFocus({ turaScrisa: !voiceTurnRef.current })) return
+      // Chirp cere focus ȘI întrerupe Live mereu (turaScrisa:true) → o singură voce.
+      if (!requestTtsFocus({ turaScrisa: true })) return
       contorGata('primul sunet (gura a pornit)')
       aSunatTuraRef.current = true // Chirp-ul de pe server a sunat → gura de siguranță NU mai intră
       playVoice(
@@ -1506,14 +1499,14 @@ export default function ChatPanel({
         voiceFeatures,
         face?.descriptor,
         face?.photo,
-        // O SINGURĂ GURĂ PE TURĂ (owner, 19 aug: „fa una singura si functionala pe
-        // live"). Serverul NU sintetizează (Chirp off) DOAR când tura curentă e o
-        // tură VOCALĂ pe care LIVE o rostește deja pe WS — atunci Chirp-ul ar fi a
-        // doua voce. Pe turele SCRISE, LIVE nu spune nimic (n-are `speak()`), deci
-        // sinteza rămâne PORNITĂ și răspunsul se aude (o singură voce, nu dublat).
-        // Cheia e felul turei (voiceTurnRef), NU „LIVE e instalat" (LIVE e permanent).
-        (Boolean(voiceTurnRef.current) && Boolean(vlRef.current)) ||
-          (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
+        // O SINGURĂ GURĂ PE TURĂ. CORECȚIE MĂSURATĂ (owner 20 aug „nu ajunge audio unde
+        // trebuie" pe VOCE + agent): Gemini Live (vlRef) NU rostește răspunsul serverului
+        // nici pe voce — n-are `speak(text)`, rostește doar audio-ul PROPRIULUI model. Deci
+        // Chirp-ul TREBUIE să rămână pornit ȘI pe turele vocale, altfel răspunsul vocal e MUT
+        // (exact bugul). Serverul oprește sinteza DOAR pentru o sesiune Realtime OpenAI, care
+        // chiar rostește textul (acolo Chirp ar dubla). O singură voce = Chirp + întreruperea
+        // Live la redare (vezi c.audio). NU mai lega Chirp-ul de „LIVE e instalat".
+        (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
         // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
         spoken || undefined,
         // GUEST SPEAKER (the voice gate's verdict): the server strips ALL admin

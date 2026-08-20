@@ -72,7 +72,7 @@ import {
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { notifyAdmin } from './adminNotification.js'
-import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuialaAziConstructor } from '../db.js'
+import { listeazaCerinte, actualizeazaCerinta, arhiveazaBuildJobsVechi, cheltuialaAziConstructor, deblocheazaJoburileClaimate } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
 import { autonomActiv } from './autonomActiv.js'
 import { utcDay } from './timeContext.js'
@@ -1482,6 +1482,10 @@ export function startAutonomie(): void {
     // zi, ca panoul Constructor să nu se încarce cu istoric. Best-effort — nu
     // blochează pasul de autonomie dacă pică.
     await arhiveazaBuildJobsVechi(1).catch(() => 0)
+    // WATCHDOG DE DEBLOCARE (owner, 20 aug: „de la preluare tot se blochează"): eliberează
+    // joburile 'running' înțepenite după preluare — INDEPENDENT de pulsul lucrătorului, ca
+    // „Preluat · 0%" să nu mai stea pe veci când lucrătorul de pe VPS a murit fix după claim.
+    await deblocheazaJoburileClaimate().catch(() => ({ repuse: 0, abandonate: 0 }))
     const r = await poateSaLucreze().catch((e) => ({ pornit: false, motiv: String(e).slice(0, 120) }))
     ultima = {
       la: new Date().toISOString(),
