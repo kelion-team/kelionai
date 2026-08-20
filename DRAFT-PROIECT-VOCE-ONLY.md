@@ -18,6 +18,21 @@ Pe o tură VORBITĂ pornesc AMÂNDOUĂ; Chirp îi cere gura lui Live → trimite
 3. **Textul se folosește DOAR la salvare** (transcript → memorie/istoric), **invizibil** — nu se afișează, nu se rostește a doua oară.
 4. **Scrisul rămâne DOAR pe offline** (rezervă, WebLLM Qwen — el n-are voce live, n-are net).
 
+## VIZIUNEA — un Jarvis, DOAR audio (owner, 20 aug)
+Numele care leagă tot: **Jarvis.** O prezență vocală mereu acolo — vorbești, îți
+vorbește, lucrează în spate fără să te încarce, adevăr-first, cu cele 4 arte.
+Persona de mai jos = Jarvis.
+- **Online = Jarvis fezabil ACUM.** Gemini Live *e* Jarvis-ul: o gură, aude,
+  vorbește, cheamă unelte în spate.
+- **Offline = companion vocal, dar veriga slabă e URECHEA.** Audio fără net cere
+  3 bucăți pe dispozitiv: URECHEA (STT), CREIERUL (Qwen/Gemma local), GURA (TTS).
+  - Gura offline = ușor (vocea de sistem merge fără net).
+  - Creierul offline = Qwen/Gemma local — merge.
+  - Urechea offline = PROBLEMA: STT din browser des trimite sunet pe net pe
+    ascuns; offline adevărat cere ceva gen Whisper pe dispozitiv (mai greu).
+  - DE VERIFICAT LIVE înainte de promisiuni: se probează urechea offline pe
+    câteva dispozitive, cu dovadă — nu „merge" din burtă.
+
 ## Treapta superioară (escaladarea) — logica
 1. Vorbești → Gemini Live te aude.
 2. Live judecă: UȘOR (conversație) sau GREU (unealtă / gândire adâncă / acțiune)?
@@ -162,8 +177,9 @@ Merg pe calea operațională/scris; pe VOCE nu sunt legate. Build = captura de
 dovadă + scoaterea ei la cerere PE VOCE („asul din mânecă").
 
 ## Ce NU s-a decis încă / următorii pași
-- **Offline:** cum rămâne (scris, Qwen local) fără să strice online-ul (voce) —
-  trecerea online↔offline, ce spune offline când nu poate verifica.
+- **Offline (Jarvis audio):** de probat LIVE urechea offline (STT pe dispozitiv,
+  gen Whisper) — veriga slabă; gura (TTS sistem) + creierul (Qwen/Gemma) merg.
+  Plus: trecerea automată online↔offline; ce spune offline când nu poate verifica.
 - Legarea concretă a cățelului + dovezii pe calea VOCE (build).
 - (În paralel, decis separat) constructorul = Devin, extern, pe cheia owner-ului.
 
