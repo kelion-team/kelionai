@@ -20,6 +20,7 @@ import {
 import { watchdogInit } from './lib/watchdog'
 import { ConsimtamantFoto } from './components/ConsimtamantFoto'
 import { BannerOffline } from './components/BannerOffline'
+import { StatusOffline } from './components/StatusOffline'
 import { citesteConsimtamant, scrieConsimtamant, type StareConsimtamant } from './lib/consimtamant'
 import { isCalm } from './lib/activity'
 
@@ -150,6 +151,7 @@ export default function App() {
   return (
     <>
       <BannerOffline />
+      <StatusOffline />
       <DynamicBackground />
       {/* Dedicated /login page (Adrian, Jul 26) — an already logged-in user is
       sent back into the app. /credite is PUBLIC for everyone (fix Jul 27 —
