@@ -28,9 +28,12 @@ describe('creditul Serper există și e alimentat (în admin)', () => {
     expect(ruta).toMatch(/live: serperBalance\.ok/)
   })
 
-  it('cardul din admin afișează creditul real, în format k peste mii', () => {
+  it('cardul din admin afișează creditul real, în format k peste mii — DOAR cu sold real', () => {
     expect(admin).toContain('CreditAICard')
-    expect(admin).toMatch(/serperK\(s\.balance \?\? 0\)/)
+    // Sold arătat DOAR când e un număr real (owner, 19 aug): `?? 0` scos, ca un
+    // `live:true` fără sold să NU mai arate „Serper 0" (fals „fără credit").
+    expect(admin).toMatch(/typeof s\.balance === 'number' \? serperK\(s\.balance\)/)
+    expect(admin).not.toMatch(/serperK\(s\.balance \?\? 0\)/)
     expect(admin).toMatch(/n >= 1000 \? `\$\{\(n \/ 1000\)\.toFixed\(1\)\}k`/)
   })
 
@@ -45,8 +48,10 @@ describe('creditul Serper există și e alimentat (în admin)', () => {
 })
 
 describe('lipsa se arată ca lipsă, nu ca zero', () => {
-  it('citirea eșuată dă „⚠", nu cifre', () => {
-    expect(admin).toMatch(/Serper \{s\?\.live \? serperK\(s\.balance \?\? 0\) : '⚠'\}/)
+  it('citirea eșuată SAU soldul lipsă dă „⚠", nu cifre', () => {
+    // Acum: „⚠" și când citirea a picat (`live:false`) ȘI când `live:true` dar
+    // fără `balance` (soldul lipsă ≠ cont gol) — nu mai apare niciun „Serper 0".
+    expect(admin).toMatch(/Serper \{s\?\.live && typeof s\.balance === 'number' \? serperK\(s\.balance\) : '⚠'\}/)
     expect(admin).toContain('citirea Serper a eșuat')
   })
 

@@ -79,7 +79,8 @@ export async function learnFromTurn(
   const explicit = userMsg.match(
     /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
   )
-  if (explicit?.[1]) await addMemory(email, explicit[1].trim(), agent)
+  // Cererea EXPLICITĂ a omului („ține minte…") = memorie importantă, prin definiție.
+  if (explicit?.[1]) await addMemory(email, explicit[1].trim(), agent, { importanta: 0.9 })
   try {
     const existing = await getMemories(email, 80, agent)
     const known = existing.map((m) => m.content).join('\n') || '(nothing yet)'
@@ -96,9 +97,17 @@ export async function learnFromTurn(
         'EXCEPTION to "already known": if the user EXPLICITLY asks to remember ' +
         'something ("remember this", "reține", "ține minte"), ALWAYS output that ' +
         'fact even if it is already known — restating refreshes it. Output ONLY a ' +
-        'JSON array of short factual strings about the user ' +
-        '(e.g. ["Locuiește în Witney, UK","Prefers concise answers"]). Output [] ' +
-        'if there is nothing new and nothing explicitly asked to be remembered.',
+        'JSON array of OBJECTS, each {"fact": string, "type": one of ' +
+        '"identity"|"preference"|"relationship"|"project"|"episodic"|"fact", ' +
+        '"importance": number between 0 and 1}. type = the KIND of fact (who the ' +
+        'user IS -> identity; how they LIKE things -> preference; people in their ' +
+        'life -> relationship; ongoing work -> project; a one-time happening -> ' +
+        'episodic; any other durable fact -> fact). importance = how much it should ' +
+        'weigh in future recall (identity/preferences high ~0.9; a passing episode ' +
+        'low ~0.3). Example: [{"fact":"Locuiește în Witney, UK","type":"identity",' +
+        '"importance":0.95},{"fact":"Prefers concise answers","type":"preference",' +
+        '"importance":0.85}]. Output [] if there is nothing new and nothing ' +
+        'explicitly asked to be remembered.',
       messages: [
         {
           role: 'user',
@@ -123,23 +132,48 @@ export async function learnFromTurn(
       .filter((b): b is TextBlock => b.type === 'text')
       .map((b) => b.text)
       .join('')
-    for (const fact of parseFacts(text).slice(0, 6)) await addMemory(email, fact, agent)
+    for (const f of parseFacts(text).slice(0, 6)) {
+      await addMemory(email, f.fact, agent, { tip: f.tip, importanta: f.importanta })
+    }
   } catch {
     // Memory is best-effort — a failure must never affect the conversation.
   }
 }
 
-function parseFacts(text: string): string[] {
+/** Un fapt învățat + metadatele lui smart (tip + importanță). Toleră AMBELE forme:
+ *  obiectul nou {fact,type,importance} ȘI vechiul șir simplu (dacă modelul mai
+ *  întoarce string-uri, ele devin fapte generice — nimic nu se pierde). PURĂ. */
+export interface FaptInvatat {
+  fact: string
+  tip: string | null
+  importanta: number | null
+}
+export function parseFacts(text: string): FaptInvatat[] {
   const start = text.indexOf('[')
   const end = text.lastIndexOf(']')
   if (start === -1 || end <= start) return []
   try {
     const arr = JSON.parse(text.slice(start, end + 1)) as unknown
     if (!Array.isArray(arr)) return []
-    return arr
-      .filter((x): x is string => typeof x === 'string')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 2 && s.length < 240)
+    const out: FaptInvatat[] = []
+    for (const x of arr) {
+      if (typeof x === 'string') {
+        const s = x.trim()
+        if (s.length > 2 && s.length < 240) out.push({ fact: s, tip: null, importanta: null })
+      } else if (x && typeof x === 'object') {
+        const o = x as { fact?: unknown; type?: unknown; importance?: unknown }
+        const s = String(o.fact ?? '').trim()
+        if (s.length > 2 && s.length < 240) {
+          const imp = Number(o.importance)
+          out.push({
+            fact: s,
+            tip: typeof o.type === 'string' ? o.type : null,
+            importanta: Number.isFinite(imp) ? imp : null,
+          })
+        }
+      }
+    }
+    return out
   } catch {
     return []
   }

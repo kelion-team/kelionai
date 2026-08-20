@@ -5,6 +5,7 @@ import type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow } from './sh
 export type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
+import { normalizeazaTip, clampImportanta, rangheazaMemorii } from './services/memoryRank.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
 import {
   curataTextJurnal,
@@ -212,6 +213,16 @@ export async function initDb(): Promise<void> {
     -- JSONB, not pgvector: no extensions to install, cosine is computed in
     -- Node over the last few hundred — instant at current volume.
     ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding JSONB;
+    -- SMART MEMORY (owner, 19 aug: „schimba... cu toate atuurile de imbunatatire").
+    -- Modelul de memorie tipizată, studiat din TencentDB Agent memory: TIP
+    -- (identity/preference/relationship/project/episodic/fact), IMPORTANȚĂ (0..1) și
+    -- EXPIRARE. Recall-ul le cântărește (services/memoryRank.ts): similaritate ×
+    -- importanță × decădere-în-timp. ADITIV, IF NOT EXISTS — memoriile vechi rămân
+    -- valide (tip NULL = generic, importanță neutră, fără expirare). Cosinusul rămâne
+    -- în Node: la scara unui user pgvector n-ar aduce nimic măsurabil (analiză 19 aug).
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS memory_type TEXT;
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance REAL;
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
     -- The prepaid credit wallet. The balance is in display currency (GBP);
     -- topup_ref = the amount credited at the LAST top-up, so we can show
     -- "% of credit left" for the escalated alerts (30/20/10/5%).
@@ -3137,7 +3148,9 @@ export async function getMemories(email: string, limit = 40, agent = 'kelion'): 
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<Memory>(
-      `SELECT content FROM memories WHERE user_email = $1 AND agent = $2 ORDER BY last_seen DESC LIMIT $3`,
+      `SELECT content FROM memories
+       WHERE user_email = $1 AND agent = $2 AND (expires_at IS NULL OR expires_at > now())
+       ORDER BY last_seen DESC LIMIT $3`,
       [email, agent, limit],
     )
     return r.rows
@@ -3183,6 +3196,7 @@ export async function searchMemories(
     const r = await getPool().query<Memory>(
       `SELECT content FROM memories
        WHERE user_email = $1 AND agent = $3
+         AND (expires_at IS NULL OR expires_at > now())
          AND to_tsvector('simple', content) @@ (${orQuery})
        ORDER BY ts_rank(to_tsvector('simple', content), (${orQuery})) DESC, last_seen DESC
        LIMIT $4`,
@@ -3419,15 +3433,42 @@ export async function setGapTriage(id: number, triage: string, resolved: boolean
   }
 }
 
-/** Save a learned fact (idempotent: re-learning just refreshes its recency). */
-export async function addMemory(email: string, content: string, agent = 'kelion'): Promise<void> {
+/** Metadatele SMART ale unei memorii (owner, 19 aug): tip, importanță, expirare.
+ *  Toate opționale — un apelant vechi (fără meta) scrie exact ca înainte. */
+export interface MemoryMeta {
+  tip?: string | null // memory_type: identity/preference/relationship/project/episodic/fact
+  importanta?: number | null // 0..1; absentă → implicita tipului (memoryRank)
+  expiraInMs?: number | null // TTL de acum → expires_at; absentă → nu expiră
+}
+
+/** Save a learned fact (idempotent: re-learning just refreshes its recency).
+ *  Cu meta (owner, 19 aug): scrie tipul, importanța și expirarea — recall-ul le
+ *  cântărește (memoryRank). La re-învățare: prospețimea se reîmprospătează, tipul
+ *  se completează dacă vine, importanța urcă la maximul dintre vechi și nou. */
+export async function addMemory(
+  email: string,
+  content: string,
+  agent = 'kelion',
+  meta: MemoryMeta = {},
+): Promise<void> {
   const c = content.trim()
   if (!dbEnabled() || !c) return
+  const tip = normalizeazaTip(meta.tip)
+  const imp = clampImportanta(meta.importanta, tip)
+  const expira =
+    typeof meta.expiraInMs === 'number' && Number.isFinite(meta.expiraInMs) && meta.expiraInMs > 0
+      ? new Date(Date.now() + meta.expiraInMs)
+      : null
   try {
     await getPool().query(
-      `INSERT INTO memories (user_email, agent, content) VALUES ($1, $2, $3)
-       ON CONFLICT (user_email, agent, content) DO UPDATE SET last_seen = now()`,
-      [email, agent, c],
+      `INSERT INTO memories (user_email, agent, content, memory_type, importance, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_email, agent, content) DO UPDATE SET
+         last_seen = now(),
+         memory_type = COALESCE(EXCLUDED.memory_type, memories.memory_type),
+         importance = GREATEST(COALESCE(EXCLUDED.importance, 0), COALESCE(memories.importance, 0)),
+         expires_at = COALESCE(EXCLUDED.expires_at, memories.expires_at)`,
+      [email, agent, c, tip, imp, expira],
     )
     // The meaning vector, ASYNCHRONOUSLY (doesn't hold the turn): if the
     // embedding fails, the memory stays anyway — full-text finds it by words.
@@ -3488,21 +3529,43 @@ export async function semanticMemories(
   try {
     const qv = await embedText(query)
     if (!qv) return []
-    const r = await getPool().query<{ content: string; embedding: number[] | null }>(
-      `SELECT content, embedding FROM memories
+    const acum = Date.now()
+    // SMART (owner, 19 aug): pe lângă vector aducem TIPUL, IMPORTANȚA și vârsta
+    // (last_seen) + expirarea, iar rangarea nu mai e doar similaritate — e
+    // similaritate × importanță × decădere-în-timp (memoryRank). Expiratele NU se
+    // reamintesc. Pragul de similaritate rămâne (0.45) ca să nu injectăm zgomot.
+    const r = await getPool().query<{
+      content: string
+      embedding: number[] | null
+      memory_type: string | null
+      importance: number | null
+      age_ms: string | number
+      expires_ms: string | number | null
+    }>(
+      `SELECT content, embedding, memory_type, importance,
+              EXTRACT(EPOCH FROM (now() - last_seen)) * 1000 AS age_ms,
+              CASE WHEN expires_at IS NULL THEN NULL ELSE EXTRACT(EPOCH FROM expires_at) * 1000 END AS expires_ms
+       FROM memories
        WHERE user_email = $1 AND agent = $2 AND embedding IS NOT NULL
+         AND (expires_at IS NULL OR expires_at > now())
        ORDER BY last_seen DESC LIMIT 400`,
       [email, agent],
     )
-    return r.rows
-      .map((row) => ({
-        content: row.content,
-        score: Array.isArray(row.embedding) ? cosine(qv, row.embedding) : 0,
-      }))
-      .filter((x) => x.score > 0.45)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map((x) => ({ content: x.content }))
+    const candidate = r.rows
+      .map((row) => {
+        const semantic = Array.isArray(row.embedding) ? cosine(qv, row.embedding) : 0
+        const tip = normalizeazaTip(row.memory_type)
+        return {
+          content: row.content,
+          tip,
+          importanta: clampImportanta(row.importance, tip),
+          semantic,
+          varstaMs: Number(row.age_ms) || 0,
+          expiresAtMs: row.expires_ms == null ? null : Number(row.expires_ms),
+        }
+      })
+      .filter((m) => m.semantic > 0.45) // hardcod-permis: prag de similaritate, ca la varianta veche
+    return rangheazaMemorii(candidate, acum, limit).map((m) => ({ content: m.content }))
   } catch {
     return []
   }
