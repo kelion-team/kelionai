@@ -105,7 +105,7 @@ cat /root/kelion/kimi-key.txt      # KIMI_API_KEY
 cat /root/kelion/glm-key.txt       # GLM_API_KEY
 ```
 
-**Regulă de fier:** nicio publicare pe lângă pipeline (Railway a fost scos, 22 iul 2026). Codul intră DOAR prin `git push` pe master.
+**Regulă de fier:** nicio publicare pe lângă pipeline (gazda PaaS veche a fost scoasă, 22 iul 2026). Codul intră DOAR prin `git push` pe master.
 
 ---
 

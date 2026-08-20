@@ -31,6 +31,7 @@ export interface Strings {
   brainNotActive: string
   brainError: string
   offline: string
+  offlineCompanion: string
   credits: string
   topUp: string
   lowCredit: string
@@ -283,6 +284,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'The brain is not active yet (Gemini key missing).',
     brainError: 'Brain error. Please try again.',
     offline: "I've lost the internet connection — I'll be right back when the signal returns.",
+    offlineCompanion: "Offline — companion mode. I'm here with you; full Kelion returns when you get signal.",
     credits: 'credits',
     topUp: 'Please top up your credit',
     lowCredit: 'Your credit is running low — please top up.',
@@ -502,6 +504,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'Creierul nu e încă activat (lipsește cheia Gemini).',
     brainError: 'Eroare la creier. Încearcă din nou.',
     offline: 'Am pierdut conexiunea la internet — revin de îndată ce revine semnalul.',
+    offlineCompanion: 'Offline — mod companion. Sunt cu tine; Kelion complet revine când prinzi semnal.',
     credits: 'credite',
     topUp: 'Te rog reîncarcă creditul',
     lowCredit: 'Mai ai puțin credit — te rog reîncarcă.',
@@ -718,6 +721,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'El cerebro aún no está activo (falta la clave de Gemini).',
     brainError: 'Error del cerebro. Inténtalo de nuevo.',
     offline: 'He perdido la conexión a internet — vuelvo en cuanto regrese la señal.',
+    offlineCompanion: 'Sin conexión — modo compañía. Estoy contigo; Kelion completo vuelve cuando haya señal.',
     credits: 'créditos',
     topUp: 'Por favor recarga tu crédito',
     lowCredit: 'Te queda poco crédito — recarga, por favor.',
@@ -886,6 +890,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'Le cerveau n’est pas encore actif (clé Gemini manquante).',
     brainError: 'Erreur du cerveau. Veuillez réessayer.',
     offline: 'J’ai perdu la connexion internet — je reviens dès que le signal revient.',
+    offlineCompanion: 'Hors ligne — mode compagnon. Je suis avec toi ; le Kelion complet revient dès qu’il y a du signal.',
     credits: 'crédits',
     topUp: 'Veuillez recharger votre crédit',
     lowCredit: 'Votre crédit est presque épuisé — veuillez recharger.',
@@ -1054,6 +1059,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'Das Gehirn ist noch nicht aktiv (Gemini-Schlüssel fehlt).',
     brainError: 'Gehirn-Fehler. Bitte versuche es erneut.',
     offline: 'Ich habe die Internetverbindung verloren — ich bin zurück, sobald das Signal wieder da ist.',
+    offlineCompanion: 'Offline — Begleitmodus. Ich bin bei dir; das volle Kelion kehrt zurück, sobald du Signal hast.',
     credits: 'Guthaben',
     topUp: 'Bitte lade dein Guthaben auf',
     lowCredit: 'Dein Guthaben wird knapp — bitte aufladen.',
@@ -1222,6 +1228,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'Il cervello non è ancora attivo (manca la chiave Gemini).',
     brainError: 'Errore del cervello. Riprova.',
     offline: 'Ho perso la connessione a internet — torno appena il segnale ritorna.',
+    offlineCompanion: 'Offline — modalità compagnia. Sono con te; il Kelion completo torna quando c’è segnale.',
     credits: 'crediti',
     topUp: 'Ricarica il tuo credito, per favore',
     lowCredit: 'Il tuo credito sta per finire — ricarica, per favore.',
@@ -1390,6 +1397,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'O cérebro ainda não está ativo (falta a chave Gemini).',
     brainError: 'Erro do cérebro. Tente novamente.',
     offline: 'Perdi a conexão com a internet — volto assim que o sinal retornar.',
+    offlineCompanion: 'Offline — modo companhia. Estou contigo; o Kelion completo volta quando houver sinal.',
     credits: 'créditos',
     topUp: 'Por favor, recarregue o seu crédito',
     lowCredit: 'O seu crédito está acabando — recarregue, por favor.',

@@ -96,8 +96,8 @@ node scripts/verifica-sintaxa.mjs                    # din rădăcină; pică pe
   Caddy → `https://kelionai.app`. Publicarea e AUTOMATĂ: merge-ul în `master` e
   preluat de cronul de pe VPS (`deploy/auto-publicare.sh`), care rulează
   `deploy/deploy.sh` (build Docker → schimbă containerul) și verifică anti-fantomă
-  că `/api/version` == `master`. **Railway a fost SCOS (22 iul 2026)** — nu mai
-  există deploy pe railway.app.
+  că `/api/version` == `master`. **Gazda e VPS-ul propriu** — nu mai există deploy
+  pe vreo gazdă PaaS externă.
 - Nu reporni servicii bridge masked fără ordin explicit.
 - Nu cere chei/parole în chat; folosește env/secret manager.
 

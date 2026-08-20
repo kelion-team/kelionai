@@ -84,9 +84,9 @@ cat /root/kelion/repo/AI-HANDOFF.md      # tot ce știe Kelion
 
 ---
 
-## 4. MEDIUL BACKENDULUI (pe VPS — fost Railway, scos 22 iul 2026)
+## 4. MEDIUL BACKENDULUI (pe VPS)
 
-- Gazda: **VPS propriu** (`164.68.120.87`), container `kelionai-app`. Cod din `master`, publicat pe VPS. Railway a fost SCOS — nu mai există serviciu, proiect sau deploy pe railway.app.
+- Gazda: **VPS propriu** (`164.68.120.87`), container `kelionai-app`. Cod din `master`, publicat pe VPS. Gazda PaaS veche a fost SCOASĂ — nu mai există serviciu, proiect sau deploy extern.
 - **Variabilele de mediu** se pun pe VPS prin `vps-set-env.yml` (din secretele GitHub) și se citesc de container.
 - **Toate variabilele de mediu** (nume, nu valori) — citite în `backend/src/config.ts`:
   `NODE_ENV, PORT, ADMIN_EMAIL, ALLOWLIST, ANTHROPIC_API_KEY, GOOGLE_CLIENT_ID,
@@ -99,7 +99,7 @@ cat /root/kelion/repo/AI-HANDOFF.md      # tot ce știe Kelion
   USER_SHARE, DEMO_CAP_PER_DAY, DEMO_SECONDS, OPEN_SIGNUP, AUTONOMY_DAILY_MAX,
   FRONTEND_DIST, FRONTEND_ORIGIN, KELION_FAST_MODEL, KELION_TOP_MODEL,
   KIMI_API_KEY, GLM_API_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET`
-- `RAILWAY_TOKEN` — **secret MORT.** Niciun workflow și niciun cod nu-l mai folosește (Railway scos). Rămâne doar ca intrare în GitHub → Settings → Secrets → Actions; **poți să-l ștergi liniștit** (Claude nu poate șterge secrete). Apare în logul workflow-urilor doar fiindcă pasul de diagnostic listează *numele* tuturor secretelor.
+- Tokenul gazdei PaaS vechi (secret GitHub rămas) — **secret MORT.** Niciun workflow și niciun cod nu-l mai folosește (gazda scoasă). Rămâne doar ca intrare în GitHub → Settings → Secrets → Actions; **poți să-l ștergi liniștit** (Claude nu poate șterge secrete). Apare în logul workflow-urilor doar fiindcă pasul de diagnostic listează *numele* tuturor secretelor.
 
 ---
 
@@ -109,7 +109,7 @@ cat /root/kelion/repo/AI-HANDOFF.md      # tot ce știe Kelion
 - Token pe VPS: `/root/kelion/github-token.txt`; în CI: secretul `VPS_GITHUB_TOKEN`.
 - **Regula #5 (importantă):** GitHub NU se accesează prin browser (repo privat → 404 + zid de login). Orice citire/operațiune trece prin `bridge/kelion-github`: `pr`, `merge`, `deploy`, `runs`, `api <cale>`.
 - **GitHub → Settings → Secrets → Actions** (cheile care dau putere reală):
-  `VPS_ROOT_PASS`, `KIMI_KEY`, `GLM_KEY`, `VPS_GITHUB_TOKEN`. (`RAILWAY_TOKEN` mai e listat acolo, dar e MORT — vezi §4; se poate șterge.)
+  `VPS_ROOT_PASS`, `KIMI_KEY`, `GLM_KEY`, `VPS_GITHUB_TOKEN`. (Un token vechi de gazdă mai e listat acolo, dar e MORT — vezi §4; se poate șterge.)
 - Workflow-uri de operațiuni pe server (`.github/workflows/`): `bridge-deploy.yml`,
   `vps-restart.yml`, `vps-auto-restart.yml`, `vps-keys.yml`, `vps-repo-sync.yml`,
   `vps-tier-test.yml`, `vps-diag.yml`, `vps-livekit-install.yml`,
@@ -152,7 +152,7 @@ ssh -i "C:\Users\adria\Kelionai-secrets\kelion-vps" root@164.68.120.87 ^
 Îți dă: secretul punții, cheia Kimi, cheia GLM, tokenul GitHub și tot `claude.env` (auth CLI).
 
 ### 7.b Valorile de mediu de pe VPS (DB, Google, Stripe, mail, LiveKit etc.)
-Env-ul backendului stă pe **VPS** (fost Railway). Valorile se pun prin `vps-set-env.yml`
+Env-ul backendului stă pe **VPS**. Valorile se pun prin `vps-set-env.yml`
 (din secretele GitHub) și se citesc de container. Ca să le vezi pe VPS:
 ```bash
 ssh -i "C:\Users\adria\Kelionai-secrets\kelion-vps" root@164.68.120.87 \
@@ -169,7 +169,7 @@ citi înapoi** din GitHub (așa e proiectat GitHub — după ce salvezi un secre
 arată niciodată; îl poți doar **suprascrie**). Dacă ai nevoie de valoarea lor:
 - **Parola root VPS:** nu-ți trebuie de fapt — ai deja acces root cu **cheia SSH** (`kelion-vps`). Dacă vrei totuși parola și n-o mai știi, o resetezi de la providerul VPS.
 - **Kimi/GLM/GitHub token:** valorile reale sunt pe VPS (7.a) — aceleași care sunt și în GitHub Secrets.
-- **`RAILWAY_TOKEN`:** MORT, nu-l mai regenera — șterge-l din GitHub Secrets (§4).
+- **Tokenul vechi de gazdă PaaS:** MORT, nu-l mai regenera — șterge-l din GitHub Secrets (§4).
 
 ### 7.d Google Cloud (skill-uri Gmail/Calendar/Drive/TTS)
 Consola: `console.cloud.google.com`, proiect **`gen-lang-client-0460348646`**.

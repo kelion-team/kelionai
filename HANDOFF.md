@@ -12,7 +12,7 @@ folder, read this file, then `STATUS.md`, then `README.md`.
 - **Project root (open THIS as the working folder):** `C:\Users\adria\Kelionai`
 - `backend/` — Node + Fastify server (chat, voice/TTS, Google skills, auth, DB)
 - `frontend/` — React + Vite UI (3D avatar, chat, camera vision, voice)
-- `Dockerfile` — imaginea aplicației (rulează pe VPS; Railway scos 22 iul 2026)
+- `Dockerfile` — imaginea aplicației (rulează pe VPS)
 - Do **NOT** use `C:\Users\adria\Downloads\k` — that is the old/archived project.
 
 ## How we work
@@ -33,7 +33,7 @@ cd ../frontend && npx vite build  # frontend build → frontend/dist
 ```
 
 - Gazda: **VPS propriu** (`164.68.120.87`), container `kelionai-app` în spatele Caddy.
-  **Railway a fost SCOS (22 iul 2026)** — nu mai există proiect/serviciu/deploy pe railway.app.
+  Gazda e VPS-ul propriu — nu mai există proiect/serviciu/deploy pe vreo gazdă PaaS externă.
 - Verify after deploy: `curl https://kelionai.app/api/version` (`v` == sha `master`) + `/health` = 200.
 
 ## Local dev

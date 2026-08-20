@@ -93,7 +93,7 @@ pe aplicatie".
 - `backend/` — Node + Fastify + TS. Routes in `src/routes/`, services in `src/services/`.
 - `frontend/` — React + Vite + TS. `src/pages/Stage.tsx`, `src/components/ChatPanel.tsx`.
 - `bridge/` — the VPS worker (`kelion-bridge-linux.mjs`) + autonomous repair/deploy scripts.
-- `Dockerfile` — imaginea aplicației (gazda: VPS propriu; Railway scos, 22 iul 2026).
+- `Dockerfile` — imaginea aplicației (gazda: VPS propriu).
 
 ## Build & deploy
 ```bash
