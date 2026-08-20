@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { CAPABILITIES } from './services/brainCapabilities.js'
-import { MANUAL_CAPS, buildManual } from './services/manual.js'
+import { MANUAL_CAPS, buildManual, buildAdminChapters } from './services/manual.js'
 
 // THE MANUAL GUARD — the test manual.ts's own comment always referenced
 // ("The guard in manual.test.ts fails if a new skill appears without a row
@@ -27,5 +27,20 @@ describe('manual — the public feature list cannot rot', () => {
     const expected = CAPABILITIES.filter((c) => !c.admin && MANUAL_CAPS[c.name]).length
     expect(listed).toBe(expected)
     expect(listed).toBeGreaterThan(0)
+  })
+
+  // Capitolele doar-admin (owner, 20 aug: „ce e admin se afișează tot"): un
+  // singur manual, care câștigă proiectul de chat voce când sesiunea e admin.
+  it('buildAdminChapters() dă capitolele proiectului, în română, non-goale', () => {
+    const cap = buildAdminChapters()
+    expect(cap.length).toBeGreaterThan(0)
+    for (const s of cap) {
+      expect(s.title, 'un capitol admin fără titlu').toBeTruthy()
+      expect(s.paragraphs.length, `capitolul „${s.title}" e gol`).toBeGreaterThan(0)
+    }
+    const tot = cap.map((s) => `${s.title} ${s.paragraphs.join(' ')}`).join(' ')
+    expect(tot).toMatch(/Jarvis/)
+    expect(tot).toMatch(/100% VORBIT/i)
+    expect(tot).toMatch(/PROIECT-CHAT-VOCE\.md/)
   })
 })
