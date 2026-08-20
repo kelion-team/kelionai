@@ -9,25 +9,50 @@
 // cache liniștit. Așa un deploy ajunge INSTANT la toți, fără versiuni vechi lipite.
 const SHELL = 'kelionai-shell-v2'
 
+// CACHE-ul CREIERULUI OFFLINE nu se atinge NICIODATĂ (owner 20 aug: „nu descarcă
+// nimic pentru offline"). WebLLM ține modelul (~2 GB) în Cache Storage sub cheile
+// `webllm/model|wasm|config`. Curățările de mai jos (upgrade de shell, rutina de
+// versiune) le ȘTERGEAU pe toate → fiecare update automat („update la foc continuu")
+// distrugea modelul descărcat, deci offline-ul nu era gata NICIODATĂ. Le protejăm.
+const ePastrat = (k) => k === SHELL || k.startsWith('webllm/')
+
 self.addEventListener('install', (e) => {
-  e.waitUntil(self.skipWaiting())
+  e.waitUntil(
+    (async () => {
+      // PRECACHE SHELL (owner 20 aug: „în avion zice că nu poate accesa aplicația").
+      // Punem shell-ul rădăcină ('/') în cache CHIAR la instalare, ca app-ul să
+      // pornească fără semnal chiar dacă n-a mai fost deschisă online între timp.
+      // La instalare există net (SW-ul se instalează online) → `add` reușește; dacă
+      // totuși nu, fetch handler-ul îl prinde la prima vizită online.
+      try {
+        const cache = await caches.open(SHELL)
+        await cache.add('/')
+      } catch {
+        /* offline la instalare (rar) — cade pe cache-ul leneș din fetch handler */
+      }
+      await self.skipWaiting()
+    })(),
+  )
 })
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     (async () => {
-      // Șterge orice cache vechi la upgrade (inclusiv shell-v1).
-      for (const k of await caches.keys()) if (k !== SHELL) await caches.delete(k)
+      // Șterge cache-urile vechi la upgrade (shell-v1), DAR păstrează shell-ul curent
+      // ȘI modelul offline (webllm/*) — altfel update-ul ar rade creierul local.
+      for (const k of await caches.keys()) if (!ePastrat(k)) await caches.delete(k)
       await self.clients.claim()
     })(),
   )
 })
 
-// Permite paginii să forțeze curățarea completă a cache-ului (rutina de versiune).
+// Permite paginii să forțeze curățarea cache-ului (rutina de versiune). Golește TOT
+// în afară de modelul offline (webllm/*) — un update NU trebuie să șteargă cei ~2 GB
+// descărcați cu greu; altfel offline-ul repornește de la zero la fiecare publicare.
 self.addEventListener('message', (e) => {
   if (e.data === 'kelion-clear-caches') {
     e.waitUntil((async () => {
-      for (const k of await caches.keys()) await caches.delete(k)
+      for (const k of await caches.keys()) if (!k.startsWith('webllm/')) await caches.delete(k)
     })())
   }
 })
