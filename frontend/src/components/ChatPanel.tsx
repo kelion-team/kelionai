@@ -333,7 +333,18 @@ export default function ChatPanel({
   // The typing field: a single click anywhere in the bar focuses it (the input's real
   // area is narrow, and a click "next to" the text didn't grab focus — it took
   // several clicks). The ref is targeted by the handler on the composer row.
-  const composerInputRef = useRef<HTMLInputElement>(null)
+  const composerInputRef = useRef<HTMLTextAreaElement>(null)
+  // AUTO-CREȘTERE a câmpului de scris (owner, 20 aug: „tabul de scris nu permite
+  // să scrii mesajul întreg"). Era un <input> pe o linie — Enter trimitea, deci
+  // NU se putea compune un mesaj lung/pe mai multe rânduri ca să supervizezi
+  // ordinele lui Kelion. Acum e <textarea> care crește cu textul (până la un plafon,
+  // apoi scroll). Se reîntinde și la golirea programatică (după trimitere).
+  useEffect(() => {
+    const el = composerInputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+  }, [input])
   // Admin promo-scenario recorder: type steps, hit Record, Kelion runs them while
   // the screen + voice are recorded, then it saves an MP4 to Downloads.
   const [scenarioOpen, setScenarioOpen] = useState(false)
@@ -3223,15 +3234,18 @@ export default function ChatPanel({
               </div>
             )}
           </div>
-          <input
+          <textarea
             ref={composerInputRef}
             className="composer-input"
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onPaste={onPasteFiles}
             onDrop={onDropFiles}
             onDragOver={(e) => e.preventDefault()}
             onKeyDown={(e) => {
+              // Enter = trimite; Shift+Enter = rând nou (acum posibil, e <textarea>),
+              // ca să poți scrie mesajul ÎNTREG pe mai multe rânduri (owner, 20 aug).
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 // Typed text has PRIORITY over the pending voice (Adrian, Jul 11: typed
