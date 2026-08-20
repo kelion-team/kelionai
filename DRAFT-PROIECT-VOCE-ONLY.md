@@ -1,7 +1,10 @@
 # DRAFT — Kelion voce-only (proiect în lucru cu Adrian, 20 aug 2026)
 
+> ⚑ VERSIUNEA BĂTUTĂ ÎN CUIE = `PROIECT-CHAT-VOCE.md`. Documentul ăsta rămâne
+> ISTORICUL raționamentului (cum am ajuns la fiecare decizie), pas cu pas.
+>
 > Document de LUCRU. Deciziile de mai jos sunt luate împreună cu owner-ul, pas cu
-> pas. NU e implementat nimic încă — întâi batem logica, apoi codul.
+> pas.
 
 ## Problema care a pornit totul
 Chatul vocal „pornește 2 sec și se rupe". Cauză MĂSURATĂ live
