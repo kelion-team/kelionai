@@ -91,6 +91,11 @@ describe('barge-in-ul rămâne întreg', () => {
 
   it('a doua întrebare chiar pleacă spre creier, cu ea în conversație', () => {
     expect(panou).toMatch(/const next: ChatMessage\[\] = \[\.\.\.messages, \{ role: 'user', content: outgoing/)
-    expect(panou).toMatch(/for await \(const chunk of streamChat\(\s*\n?\s*next,/)
+    // Creierul (calea ONLINE) primește tot `next` (conversația cu întrebarea nouă).
+    // De la faza 1 offline, apelul e într-un ternar (online = streamChat, offline =
+    // creier local), iar fluxul se consumă prin `sursaFlux` — dar `next` ajunge la
+    // creier neschimbat, deci a doua întrebare tot pleacă.
+    expect(panou).toMatch(/streamChat\(\s*\n?\s*next,/)
+    expect(panou).toMatch(/for await \(const chunk of sursaFlux\)/)
   })
 })

@@ -160,12 +160,17 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       const cheie = req.body?.ollamaKey
       if (typeof cheie === 'string' && cheie.trim()) {
         await setCheieOllama(cheie.trim())
-        _resetProbaOllamaCloud() // re-probăm cu cheia nouă
       }
       const cfg = await setConfigCreier({
         creier2: req.body?.creier2 as 'gemini' | 'kimi-k3' | 'qwen3.5' | undefined,
         constructorSursa: req.body?.constructorSursa as 'free' | 'platit' | undefined,
       })
+      // PROBĂ PROASPĂTĂ pe modelul TOCMAI ales (owner, 20 aug: „de ce spune kimi-k3
+      // când am ales qwen3.5?"). Verdictul roșu era din cache-ul vechi (TTL 5 min) —
+      // arăta modelul DINAINTE, fiindcă resetul se făcea DOAR la o cheie nouă. Acum
+      // golim cache-ul la FIECARE Salvează (schimbi cheia SAU modelul), ca roșul/verdele
+      // să reflecte EXACT modelul curent, nu unul vechi (regula #1: măsoară ce e ACUM).
+      _resetProbaOllamaCloud()
       const cloud = await probaOllamaCloud().catch((e) => ({ ok: false, motiv: String(e).slice(0, 200), modele: [] as string[] }))
       return reply.send({ ok: true, creier: cfg, cloud })
     },
