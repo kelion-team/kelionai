@@ -111,6 +111,7 @@ export default function Credits(): React.JSX.Element {
 
   const saveAr = (patch: Partial<{ enabled: boolean; topupAmount: number }>): void => {
     if (!ar) return
+    const inainte = ar // pentru revenire dacă serverul refuză
     const next = { ...ar, ...patch }
     setAr(next)
     void fetch('/api/billing/autorecharge', {
@@ -123,9 +124,13 @@ export default function Credits(): React.JSX.Element {
         if (r.ok) {
           setArSaved(true)
           window.setTimeout(() => setArSaved(false), 1500)
+        } else {
+          // Serverul N-a salvat → NU lăsăm comutatorul să mintă că e aplicat.
+          // Revenim la starea de dinainte (audit fake, 20 aug — ca la CustomerSettings).
+          setAr(inainte)
         }
       })
-      .catch(() => {})
+      .catch(() => setAr(inainte))
   }
 
   const buy = async (amount: number): Promise<void> => {
@@ -243,8 +248,9 @@ export default function Credits(): React.JSX.Element {
                 type="button"
                 className="credits-pack"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(payCode.code)
-                  setCodeCopied(true)
+                  // „Copiat" DOAR pe succes (audit fake, 20 aug).
+                  const p = navigator.clipboard?.writeText(payCode.code)
+                  if (p) void p.then(() => setCodeCopied(true)).catch(() => {})
                 }}
               >
                 {codeCopied ? T.payCodeCopied : T.payCodeCopy}

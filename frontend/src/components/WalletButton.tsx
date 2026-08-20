@@ -301,8 +301,9 @@ export function WalletButton({
                   type="button"
                   className="ghost"
                   onClick={() => {
-                    void navigator.clipboard?.writeText(payCode.code)
-                    setCodeCopied(true)
+                    // „Copiat" DOAR dacă scrierea în clipboard a reușit (audit fake, 20 aug).
+                    const p = navigator.clipboard?.writeText(payCode.code)
+                    if (p) void p.then(() => setCodeCopied(true)).catch(() => {})
                   }}
                 >
                   {codeCopied ? t.payCodeCopied : t.payCodeCopy}
