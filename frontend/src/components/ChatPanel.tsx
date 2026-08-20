@@ -2993,17 +2993,17 @@ export default function ChatPanel({
           </div>,
           document.body,
         )}
-      {/* THE CONVERSATION, VISIBLE (Adrian, Aug 1: „the reply must reach the
-      chat" — bubbles: you on the right, Kelion on the left, streaming live,
-      auto-scroll). ONLY THE LAST EXCHANGE SHOWS (Adrian, Aug 1: „trebuie doar
-      ultimul mesaj din chat afișat") — the log is not a history; history lives
-      in the saved conversation, the screen shows the CURRENT exchange.
-      In monitor mode the log hides so nothing covers the monitor — the full
-      reply then stays on the band's ticker, as before. */}
+      {/* KELION DOAR PE MONITOR (owner, 20 aug: „Kelion nu trebuie să mai AFIȘEZE,
+      doar pe monitor"). RĂSPUNSUL lui Kelion NU mai apare ca bulă în chat — merge
+      DOAR pe monitor: curge live pe banda „K" de sub compozitor (teletext, mai jos)
+      cât scrie, și se așază ca document pe monitor la finalul turei (auto-preview
+      din server → {doc} → openWorkspaceDoc). Aici, în centru, rămâne DOAR ecoul a
+      ce a scris/spus USERUL (confirmarea că a ajuns) — nu vorba lui Kelion.
+      În monitor mode logul se ascunde oricum, ca nimic să nu acopere monitorul. */}
       {!monitorMode && (
         <div className="chat-log" ref={chatLogRef}>
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
-          {[lastUser, lastAssistant].map((m, i) =>
+          {[lastUser].map((m, i) =>
             m && cleanMsg(m.content) ? (
               <div key={`${m.ts ?? 0}-${i}`} className={`chat-msg ${m.role === 'user' ? 'me' : 'kelion'}`}>
                 <span className="chat-msg-text">{cleanMsg(m.content)}</span>
