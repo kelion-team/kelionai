@@ -59,6 +59,7 @@ import {
   requestTtsFocus,
   releaseTtsFocus,
   interruptAll,
+  setForeignVoiceLock,
 } from '../lib/audioFocus'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { watchdogEnter, watchdogBeat, watchdogExit } from '../lib/watchdog'
@@ -1179,6 +1180,13 @@ export default function ChatPanel({
       rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
       // NO return — we fall through below and start the new turn right now.
+    } else {
+      // O TURĂ NOUĂ TAIE ORICE GURĂ RĂMASĂ VIE, chiar dacă NU eram „busy": vocea
+      // LIVE (Gemini Live) răspunde AUTONOM pe WebSocket și NU setează busyRef, deci
+      // ramura de mai sus o sărea. Fără asta, dacă scrii un mesaj cât LIVE încă
+      // vorbește, Chirp-ul turei noi se suprapunea peste vocea LIVE (owner, 20 aug:
+      // „voci paralele… o singură ieșire audio"). O gură nouă închide celelalte guri.
+      interruptAll('tura-noua-peste-live')
     }
     inFlightRef.current = true
     setInput('')
@@ -1916,6 +1924,7 @@ export default function ChatPanel({
               // taburi să se zăvorască (auditul de noapte: calea live pornea
               // fără takeover, deci un al doilea tab pornea liniștit a doua voce).
               emiteTakeover(canalVoceRef.current, tabVoceIdRef.current)
+              setForeignVoiceLock(false) // tabul ăsta ARE acum vocea — nu e zăvorât
               return true
             }
             return false
@@ -2451,10 +2460,17 @@ export default function ChatPanel({
         voceAiureaRef.current = true
         ultimaInimaRef.current = Date.now()
         opresteLocal()
+        // ZĂVORUL ACOPERĂ ȘI CHIRP-UL SCRIS (owner, 20 aug: voci paralele pe 2
+        // taburi). `opresteLocal` oprea doar sesiunea LIVE/mic; dar un tab de fundal
+        // în care SCRII tot reda Chirp (GURA 1), peste vocea tabului activ. Armăm
+        // zăvorul ca `requestTtsFocus` să respingă Chirp-ul aici — o singură gură în
+        // tot browserul. (Era construit dar nearmat — se aprindea doar în teste.)
+        setForeignVoiceLock(true)
       } else if (ce === 'inima') {
         ultimaInimaRef.current = Date.now()
       } else if (ce === 'reia') {
         voceAiureaRef.current = false
+        setForeignVoiceLock(false) // tabul ăsta reia vocea — nu mai e zăvorât
         void ensureMicRef.current()
       }
     }

@@ -74,4 +74,17 @@ describe('audioFocus single-voice lock', () => {
     setForeignVoiceLock(true)
     expect(requestTtsFocus({ turaScrisa: true })).toBe(false)
   })
+
+  // Owner, 20 aug: „se aud multe voci paralele… o singură ieșire audio". O tură
+  // SCRISĂ care ia gura cât LIVE e activ TREBUIE să taie ÎNTÂI playout-ul LIVE
+  // (PCM-ul rămas), altfel Chirp-ul scris se aude PESTE vocea LIVE. O gură nouă
+  // închide celelalte guri.
+  it('a WRITTEN turn CUTS the LIVE mouth before taking the mouth (one output)', () => {
+    const taieLive = vi.fn()
+    registerLiveFocus({ onInterrupt: taieLive })
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(true)
+    expect(taieLive).toHaveBeenCalledTimes(1) // gura LIVE a fost tăiată la sursă
+    releaseTtsFocus()
+    unregisterLiveFocus()
+  })
 })
