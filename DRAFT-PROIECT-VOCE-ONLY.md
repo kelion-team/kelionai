@@ -53,6 +53,27 @@ Cinstit: implicit Live REFORMULEAZĂ, nu citește cuvânt-cu-cuvânt. Când vrem
 (cifră, adresă), îi punem în instrucțiune „rostește exact textul dintre
 ghilimele". Reglabil, nu blocaj.
 
+## GREU = perioada de gândire e TRIERE ACTIVĂ în doi (decis 20 aug — ideea owner-ului)
+Cât creierul greu macină (puțin sau mult), Live NU stă degeaba și NU doar amână:
+1. Live lucrează CHIAR perioada de gândire: află detalii despre cerință, culege
+   cât mai multe date (întreabă userul + GPS/cameră/monitor pe care le are deja).
+2. Fiecare informație utilă → o **injectează subtil** creierului greu (canal
+   text/funcție) → îi scade numărul de posibilități.
+3. Creierul greu poate cere înapoi: „întreabă asta, află asta" → Live o rostește.
+4. Așa se face o **triere/scurtare** în doi → se ajunge la un răspuns cât mai PRECIS.
+- Efect: „așteptarea" devine conversație utilă, nu tăcere. Ăsta e rostul de a
+  avea un creier LIVE în față, nu doar o gură.
+- Plasă (guardrail): se pun DOAR întrebările care taie cel mai mult din
+  posibilități; te oprești când e destul de precis — nu interogatoriu.
+
+### Ce avem deja / ce e NOU (măsurat)
+- AVEM: Live culege GPS/cameră/monitor și le trimite; poate injecta text
+  (`anunta`/`trimiteRand`); bucla unealtă apel→răspuns.
+- NOU (inima build-ului): creierul greu nu mai e un apel „o dată și gata", ci o
+  BUCLĂ dus-întors (primește date incremental + cere înapoi întrebări) până
+  converge. Compromis pe față: mai multe runde = mai multe apeluri (latență+cost);
+  trocul bun = Live te ține în conversație instant, precizia vine în câteva runde.
+
 ## Ce NU s-a decis încă / următorii pași
 - Verificarea nodului de mai sus (Live rostește text injectat?).
 - Detaliul escaladării (cum decide Live „greu", cum se întoarce rezultatul în
