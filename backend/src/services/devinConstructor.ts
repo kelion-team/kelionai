@@ -12,6 +12,21 @@
 import { creeazaSesiuneDevin, stareSesiuneDevin, asiguraTokenRepoLaDevin, type StareDevin } from './devin.js'
 import { config } from '../config.js'
 import { claimNextBuildJob, reportBuildJob, updateBuildJobProgress, setDevinSessionId, getOldestRunningBuildJob } from '../db.js'
+import { notifyAdmin } from './adminNotification.js'
+
+// Înștiințare admin (ajunge în chat/notificări) — best-effort, nu crapă tick-ul.
+async function instiinteazaAdmin(
+  type: Parameters<typeof notifyAdmin>[0],
+  titlu: string,
+  mesaj: string,
+  payload?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await notifyAdmin(type, titlu, mesaj, payload)
+  } catch (e) {
+    console.error('[devin] înștiințare admin:', String(e).slice(0, 120))
+  }
+}
 
 /** Promptul trimis lui Devin dintr-un ordin al owner-ului. Îi spune clar: ramură
  *  din master, PR ÎNAPOI la master, verde (tsc+teste+porți), NU face merge. */
@@ -83,8 +98,12 @@ export async function tickDispecerDevin(): Promise<void> {
       if (prog.gata) {
         if (prog.prUrl) {
           await reportBuildJob(run.id, { status: 'done', prUrl: prog.prUrl, brain: 'devin', log: `Devin gata (${prog.stare}) → PR ${prog.prUrl}` })
+          // ȘI ÎN CHAT (owner, 20 aug: „intră și pe chat"): linkul PR vine în
+          // conversație, nu doar pe monitor — bucla se închide unde comanzi.
+          await instiinteazaAdmin('scris', `Devin a terminat ordinul #${run.id}`, `PR gata: ${prog.prUrl} — verifică și fă merge pe master.`, { jobId: run.id })
         } else {
           await reportBuildJob(run.id, { status: 'failed', brain: 'devin', log: `Devin ${prog.stare} fără PR deschis` })
+          await instiinteazaAdmin('scris', `Devin: ordinul #${run.id} nu s-a finalizat`, `Sesiunea Devin s-a încheiat (${prog.stare}) fără PR deschis. Repornește-l (Reia) după ce vezi de ce.`, { jobId: run.id })
         }
       } else {
         await updateBuildJobProgress(run.id, prog.bara)

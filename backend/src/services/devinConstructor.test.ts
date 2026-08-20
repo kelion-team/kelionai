@@ -22,6 +22,8 @@ vi.mock('../db.js', () => ({
   updateBuildJobProgress: (...a: unknown[]) => progres(...a),
   setDevinSessionId: (...a: unknown[]) => setSess(...a),
 }))
+const notify = vi.fn()
+vi.mock('./adminNotification.js', () => ({ notifyAdmin: (...a: unknown[]) => notify(...a) }))
 
 import { construiestePromptDevin, descrieProgresDevin, porneisteJobDevin, verificaJobDevin, tickDispecerDevin } from './devinConstructor.js'
 
@@ -91,14 +93,18 @@ describe('devinConstructor — dispecerul', () => {
 describe('tickDispecerDevin — o trecere pe buclă', () => {
   beforeEach(() => {
     getRun.mockReset(); claim.mockReset(); report.mockReset(); progres.mockReset(); setSess.mockReset()
-    creeaza.mockReset(); stare.mockReset(); asigura.mockReset(); asigura.mockResolvedValue({ ok: true })
+    creeaza.mockReset(); stare.mockReset(); asigura.mockReset(); asigura.mockResolvedValue({ ok: true }); notify.mockReset()
   })
 
-  it('job Devin în lucru, finished + PR → raportează DONE cu linkul PR', async () => {
+  it('job Devin în lucru, finished + PR → raportează DONE + înștiințează în chat cu linkul PR', async () => {
     getRun.mockResolvedValue({ id: 5, devinSessionId: 'sess-5', createdAt: new Date(Date.now() - 120000).toISOString() })
     stare.mockResolvedValue({ status: 'finished', gata: true, prUrl: 'https://github.com/kelion-team/kelionai/pull/1300', acu: 4, brut: {} })
     await tickDispecerDevin()
     expect(report).toHaveBeenCalledWith(5, expect.objectContaining({ status: 'done', prUrl: 'https://github.com/kelion-team/kelionai/pull/1300', brain: 'devin' }))
+    // linkul PR intră ȘI în chat (owner: „intră și pe chat")
+    expect(notify).toHaveBeenCalled()
+    const mesajNotif = notify.mock.calls[0].join(' ')
+    expect(mesajNotif).toContain('https://github.com/kelion-team/kelionai/pull/1300')
     expect(claim).not.toHaveBeenCalled() // UN job pe rând — nu ia altul cât unul rulează
   })
 
