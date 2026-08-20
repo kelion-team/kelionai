@@ -3951,6 +3951,10 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
 // cronul de 2 min (PR #966). O SINGURĂ sursă (jscpd, 10 aug): folosit la
 // build_software ȘI la retry. Best-effort: nu blochează, nu aruncă.
 function porneculLucratorulConstructor(): void {
+  // DEVIN DEȚINE COADA (owner, 20 aug): când cheia Devin e pusă, constructorul e
+  // Devin (extern) — dispecerul din app duce ordinele. NU mai trezim worker-ul
+  // Aider de pe VPS (n-ar primi oricum joburi, ruta /next e gardată).
+  if (config.devinKey) return
   import('node:child_process').then(({ spawn }) => {
     const worker = spawn('bash', ['/root/kelion/constructor-worker.sh'], {
       detached: true,

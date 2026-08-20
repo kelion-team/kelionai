@@ -10,6 +10,8 @@
 // starea reală + minutele scurse + ACU consumat. Un procent scris de mână ar minți.
 
 import { creeazaSesiuneDevin, stareSesiuneDevin, asiguraTokenRepoLaDevin, type StareDevin } from './devin.js'
+import { config } from '../config.js'
+import { claimNextBuildJob, reportBuildJob, updateBuildJobProgress, setDevinSessionId, getOldestRunningBuildJob } from '../db.js'
 
 /** Promptul trimis lui Devin dintr-un ordin al owner-ului. Îi spune clar: ramură
  *  din master, PR ÎNAPOI la master, verde (tsc+teste+porți), NU face merge. */
@@ -62,4 +64,44 @@ export async function porneisteJobDevin(orderText: string, title?: string): Prom
 export async function verificaJobDevin(sessionId: string, elapsedMs: number): Promise<ProgresDevin> {
   const s = await stareSesiuneDevin(sessionId)
   return descrieProgresDevin(s, elapsedMs)
+}
+
+// ── TICK-ul DISPECERULUI (Stage 4) — O trecere, pe bucla de autonomie ──────────
+// Owner: 1a (doar la comandă → `claimNextBuildJob` ia ce a pus ordinul), UN job
+// pe rând (ne întoarcem după jobul running), plafon de cost în client (max_acu).
+// Anularea e SOFT (nu oprim sesiunea Devin din cloud — API-ul n-are stop confirmat
+// încă): plafonul ACU ține costul în frâu; jobul iese din monitor la anulare.
+// Inert când Devin nu e configurat ȘI în teste (nu pornește nimic fără cheie).
+export async function tickDispecerDevin(): Promise<void> {
+  if (!config.devinKey) return
+  const run = await getOldestRunningBuildJob()
+  if (run) {
+    // Abia claimat / stale (fără sesiune încă) → NU pornim a doua sesiune (bani dubli).
+    if (!run.devinSessionId) return
+    try {
+      const prog = await verificaJobDevin(run.devinSessionId, Date.now() - Date.parse(run.createdAt))
+      if (prog.gata) {
+        if (prog.prUrl) {
+          await reportBuildJob(run.id, { status: 'done', prUrl: prog.prUrl, brain: 'devin', log: `Devin gata (${prog.stare}) → PR ${prog.prUrl}` })
+        } else {
+          await reportBuildJob(run.id, { status: 'failed', brain: 'devin', log: `Devin ${prog.stare} fără PR deschis` })
+        }
+      } else {
+        await updateBuildJobProgress(run.id, prog.bara)
+      }
+    } catch (e) {
+      console.error(`[devin] poll job #${run.id}:`, String(e).slice(0, 160))
+    }
+    return // UN job pe rând
+  }
+  // Nimic în lucru → ia următorul ordin din coadă și pornește Devin pe el.
+  const job = await claimNextBuildJob()
+  if (!job) return
+  try {
+    const { sessionId } = await porneisteJobDevin(job.orderText, `Ordin #${job.id}`)
+    await setDevinSessionId(job.id, sessionId)
+    await updateBuildJobProgress(job.id, 'Devin: pornit')
+  } catch (e) {
+    await reportBuildJob(job.id, { status: 'failed', brain: 'devin', log: `Devin pornire eșuată: ${String(e).slice(0, 300)}` })
+  }
 }

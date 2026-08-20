@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mochez clientul Devin (HTTP) — testăm DOAR logica dispecerului.
+// Mochez clientul Devin (HTTP), config (cheia) și db (coada) — testăm DOAR logica.
 const creeaza = vi.fn()
 const stare = vi.fn()
 const asigura = vi.fn(() => Promise.resolve({ ok: true }))
@@ -9,8 +9,21 @@ vi.mock('./devin.js', () => ({
   stareSesiuneDevin: (...a: unknown[]) => stare(...a),
   asiguraTokenRepoLaDevin: () => asigura(),
 }))
+vi.mock('../config.js', () => ({ config: { devinKey: 'test-devin-key' } }))
+const getRun = vi.fn()
+const claim = vi.fn()
+const report = vi.fn()
+const progres = vi.fn()
+const setSess = vi.fn()
+vi.mock('../db.js', () => ({
+  getOldestRunningBuildJob: () => getRun(),
+  claimNextBuildJob: () => claim(),
+  reportBuildJob: (...a: unknown[]) => report(...a),
+  updateBuildJobProgress: (...a: unknown[]) => progres(...a),
+  setDevinSessionId: (...a: unknown[]) => setSess(...a),
+}))
 
-import { construiestePromptDevin, descrieProgresDevin, porneisteJobDevin, verificaJobDevin } from './devinConstructor.js'
+import { construiestePromptDevin, descrieProgresDevin, porneisteJobDevin, verificaJobDevin, tickDispecerDevin } from './devinConstructor.js'
 
 describe('devinConstructor — dispecerul', () => {
   beforeEach(() => {
@@ -72,5 +85,44 @@ describe('devinConstructor — dispecerul', () => {
     expect(pr.stare).toBe('working')
     expect(pr.bara).toContain('1 min')
     expect(pr.bara).toContain('1.5 ACU')
+  })
+})
+
+describe('tickDispecerDevin — o trecere pe buclă', () => {
+  beforeEach(() => {
+    getRun.mockReset(); claim.mockReset(); report.mockReset(); progres.mockReset(); setSess.mockReset()
+    creeaza.mockReset(); stare.mockReset(); asigura.mockReset(); asigura.mockResolvedValue({ ok: true })
+  })
+
+  it('job Devin în lucru, finished + PR → raportează DONE cu linkul PR', async () => {
+    getRun.mockResolvedValue({ id: 5, devinSessionId: 'sess-5', createdAt: new Date(Date.now() - 120000).toISOString() })
+    stare.mockResolvedValue({ status: 'finished', gata: true, prUrl: 'https://github.com/kelion-team/kelionai/pull/1300', acu: 4, brut: {} })
+    await tickDispecerDevin()
+    expect(report).toHaveBeenCalledWith(5, expect.objectContaining({ status: 'done', prUrl: 'https://github.com/kelion-team/kelionai/pull/1300', brain: 'devin' }))
+    expect(claim).not.toHaveBeenCalled() // UN job pe rând — nu ia altul cât unul rulează
+  })
+
+  it('job în lucru, working → scrie bara REALĂ, nu raportează terminal', async () => {
+    getRun.mockResolvedValue({ id: 5, devinSessionId: 'sess-5', createdAt: new Date().toISOString() })
+    stare.mockResolvedValue({ status: 'working', gata: false, prUrl: null, acu: 2, brut: {} })
+    await tickDispecerDevin()
+    expect(progres).toHaveBeenCalledWith(5, expect.stringContaining('Devin: working'))
+    expect(report).not.toHaveBeenCalled()
+  })
+
+  it('job running FĂRĂ sesiune → NU pornește a doua sesiune (fără bani dubli)', async () => {
+    getRun.mockResolvedValue({ id: 5, devinSessionId: null, createdAt: new Date().toISOString() })
+    await tickDispecerDevin()
+    expect(claim).not.toHaveBeenCalled()
+    expect(creeaza).not.toHaveBeenCalled()
+  })
+
+  it('nimic în lucru → claimează ordinul, pornește Devin și salvează sesiunea', async () => {
+    getRun.mockResolvedValue(null)
+    claim.mockResolvedValue({ id: 7, orderText: 'repară X' })
+    creeaza.mockResolvedValue({ sessionId: 'sess-7', url: null })
+    await tickDispecerDevin()
+    expect(creeaza).toHaveBeenCalled()
+    expect(setSess).toHaveBeenCalledWith(7, 'sess-7')
   })
 })
