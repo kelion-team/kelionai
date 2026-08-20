@@ -19,8 +19,8 @@
 // constructor-worker.sh, plafoane de pași și tokeni. Se termină și moare.
 //
 // PLAFOANE (env, cu valori implicite): CONSTRUCTOR_MAX_REPAIR și
-// CONSTRUCTOR_BUDGET_MS. Watchdog-urile Aider au plafoane separate pentru
-// execuția free, escaladarea paid și intervalul de după primul commit.
+// CONSTRUCTOR_BUDGET_MS. Watchdog-urile Aider au plafoane pentru execuția
+// free-locală și pentru intervalul de tăcere de după primul commit.
 import { execSync, execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -90,7 +90,6 @@ const logLines = []
 // ~4s și cu timeout scurt: NU are voie să mănânce din bugetul de timp al rulării
 // (lecția „un job nu poate deveni demon") — un beat pierdut nu strică nimic.
 let beatJobId = 0
-// Încercarea ordinului curent (1 = primul drum; ≥2 = escaladare pe Fable 5).
 let lastBeatAt = 0
 function beat(text, acum = false) {
   if (!beatJobId || !BRIDGE) return
@@ -260,8 +259,8 @@ function toolRun(cmd) {
   return ruleazaUnPas(cls).text
 }
 
-// Ultimul creier care a SERVIT efectiv (pentru afișajul ONEST din raport/PR: dacă
-// s-a căzut pe Fable 5, se vede Fable 5, nu Gemini). Setat în llm() la fiecare succes.
+// Creierul care a SERVIT efectiv (pentru afișajul ONEST din raport/PR). Constructor
+// free-local unic: mereu modelul LOCAL Ollama de pe VPS. Setat la fiecare rulare.
 let ULTIMUL_CREIER = ''
 
 // ── VITEZĂ: node_modules cald, sar peste instalarea inutilă (owner, 13 aug:
@@ -671,10 +670,9 @@ function asiguraCreierulLocal() {
 
 
 // ?? LEC?II DURABILE din e?ecuri (owner 17 aug: auto-dezvoltare + ?nv??are) ??
-// Fi?ier pe host, citit la fiecare ordin FREE/PAID. Nu arde bani: e text local.
+// Fi?ier pe host, citit la fiecare ordin. Nu arde bani: e text local.
 
-// ?? LEGE: ORICE CREIER folose?te pa?i mici (owner 17 aug) ???????????????????
-// Free local, cloud pl?tit, ajutor Gemini ? ACELA?I contract:
+// ?? LEGE: creierul LOCAL free folose?te pa?i mici (owner 17 aug) ????????????
 // plan FILES/STEPS/CHECK ? Aider doar pe fi?ierele din plan ? por?i.
 const LECTII_PATH = '/root/kelion/memory/lectii-constructor.jsonl'
 function salveazaLectie(row) {
@@ -725,59 +723,37 @@ export function ajustareDinIstoric(istoric = [], minContext = 3) {
   return { factorTimeout, factorTacere, destulContext: true, n: rows.length }
 }
 
-/** CALIBRAREA din PLĂTIT (owner, 19 aug: „daca a trecut pe plata sa se uite cit
- *  timp a durat si faca o medie, pina se calibreaza"). Media duratei rulărilor
- *  PLĂTITE care AU editat = cât a avut REALMENTE nevoie sarcina. Free e mai lent,
- *  deci merită cel puțin atât înainte să fie tăiat. „Pina se calibreaza" = doar
- *  când există ≥ minContext succese plătite (altfel neutru). PURĂ. */
-export function calibrarePaid(istoricPaid = [], minContext = 3) {
-  const succ = (Array.isArray(istoricPaid) ? istoricPaid : []).filter((r) => r && r.aEditat && Number.isFinite(Number(r.durataMs)))
-  if (succ.length < minContext) return { mediePaidMs: 0, calibrat: false, n: succ.length }
-  const medie = succ.reduce((s, r) => s + Number(r.durataMs), 0) / succ.length
-  return { mediePaidMs: Math.round(medie), calibrat: true, n: succ.length }
-}
-
-/** Pragurile finale ale unei rulări Aider: dinamice (greutate) + ajustate (istoric)
- *  + calibrate din media PLĂTIT (pt. free), mărginite de env (bază/max) și de
- *  bugetul rămas. PURĂ + testată. */
-export function praghAider({ platit, nrFisiere = 0, lungimePrompt = 0, ramaseMs = Infinity, istoric = [], istoricPaid = [], env = {} } = {}) {
+/** Pragurile finale ale unei rulări Aider FREE-LOCAL: dinamice (greutate) + ajustate
+ *  (istoric), mărginite de env (bază/max) și de bugetul rămas. PURĂ + testată.
+ *  (Constructorul e free-local unic; nu mai există dimensiune plătită de calibrat.) */
+export function praghAider({ nrFisiere = 0, lungimePrompt = 0, ramaseMs = Infinity, istoric = [], env = {} } = {}) {
   const g = greutateOrdin({ nrFisiere, lungimePrompt })
   const aj = ajustareDinIstoric(istoric, _num(env.CONSTRUCTOR_MIN_CONTEXT, 3))
 
-  const bazaTimeout = platit ? _num(env.CONSTRUCTOR_PAID_TIMEOUT_MS, 18 * 60_000) : _num(env.CONSTRUCTOR_FREE_TIMEOUT_MS, 8 * 60_000)
-  const maxTimeout = platit ? _num(env.CONSTRUCTOR_PAID_TIMEOUT_MAX_MS, 24 * 60_000) : _num(env.CONSTRUCTOR_FREE_TIMEOUT_MAX_MS, 16 * 60_000)
+  const bazaTimeout = _num(env.CONSTRUCTOR_FREE_TIMEOUT_MS, 8 * 60_000)
+  const maxTimeout = _num(env.CONSTRUCTOR_FREE_TIMEOUT_MAX_MS, 16 * 60_000)
   let timeoutMs = Math.min(maxTimeout, Math.round((bazaTimeout + (maxTimeout - bazaTimeout) * g) * aj.factorTimeout))
 
-  const bazaTacere = platit ? _num(env.CONSTRUCTOR_PAID_SILENCE_MS, 180_000) : _num(env.CONSTRUCTOR_SILENCE_MS, 150_000)
+  const bazaTacere = _num(env.CONSTRUCTOR_SILENCE_MS, 150_000)
   const maxTacere = _num(env.CONSTRUCTOR_SILENCE_MAX_MS, 300_000)
   let tacereKillMs = Math.min(maxTacere, Math.round((bazaTacere + (maxTacere - bazaTacere) * g) * aj.factorTacere))
   const tacereDupaCommitMs = _num(env.CONSTRUCTOR_POST_COMMIT_SILENCE_MS, 300_000)
-
-  // CALIBRARE (doar pe FREE): dă-i cel puțin media a ce a reușit PLĂTITUL (×factor,
-  // free e mai lent), ca să nu fie tăiat înainte să apuce. Bounded de max mai jos.
-  const cal = calibrarePaid(istoricPaid, _num(env.CONSTRUCTOR_MIN_CONTEXT, 3))
-  if (!platit && cal.calibrat) {
-    const floorTimeout = Math.min(maxTimeout, Math.round(cal.mediePaidMs * _num(env.CONSTRUCTOR_FREE_VS_PAID, 1.5)))
-    timeoutMs = Math.max(timeoutMs, floorTimeout)
-    const floorTacere = Math.min(maxTacere, Math.round(cal.mediePaidMs * _num(env.CONSTRUCTOR_FREE_SILENCE_VS_PAID, 0.8)))
-    tacereKillMs = Math.max(tacereKillMs, floorTacere)
-  }
 
   // NICIODATĂ peste bugetul rămas (minus tampon de raport) — un job nu devine demon.
   if (Number.isFinite(ramaseMs)) timeoutMs = Math.min(timeoutMs, Math.max(45_000, ramaseMs - 60_000))
   timeoutMs = Math.max(45_000, timeoutMs)
   tacereKillMs = Math.max(30_000, Math.min(tacereKillMs, timeoutMs)) // tăcerea ≤ timeout
-  return { timeoutMs, tacereKillMs, tacereDupaCommitMs, greutate: g, ajustat: aj.destulContext, n: aj.n, calibratPaid: cal.calibrat, mediePaidMs: cal.mediePaidMs }
+  return { timeoutMs, tacereKillMs, tacereDupaCommitMs, greutate: g, ajustat: aj.destulContext, n: aj.n }
 }
 
 // Istoricul MĂSURAT al rulărilor (durată reală + dacă a fost tăiat pe tăcere fără
 // să editeze) — pe host, ca lecțiile. Se citește la START ca să ajusteze pragurile
 // și se scrie la FINAL. `parseMasuratori` e PUR + exportat (testabil).
 const MASURATORI_PATH = '/root/kelion/memory/masuratori-aider.jsonl'
-export function parseMasuratori(text, platit, n = 20) {
+export function parseMasuratori(text, n = 20) {
   return String(text || '').split('\n').map((l) => l.trim()).filter(Boolean)
     .map((l) => { try { return JSON.parse(l) } catch { return null } })
-    .filter((r) => r && r.platit === !!platit && Number.isFinite(Number(r.durataMs)))
+    .filter((r) => r && Number.isFinite(Number(r.durataMs)))
     .slice(-n)
     .map((r) => ({ durataMs: Number(r.durataMs), taiatPeTacere: !!r.taiatPeTacere, aEditat: !!r.aEditat }))
 }
@@ -787,8 +763,8 @@ function salveazaMasuratoare(row) {
     fs.appendFileSync(MASURATORI_PATH, JSON.stringify({ at: new Date().toISOString(), ...row }) + '\n')
   } catch { /* ignore */ }
 }
-function citesteMasuratori(platit, n = 20) {
-  try { return parseMasuratori(fs.readFileSync(MASURATORI_PATH, 'utf8'), platit, n) } catch { return [] }
+function citesteMasuratori(n = 20) {
+  try { return parseMasuratori(fs.readFileSync(MASURATORI_PATH, 'utf8'), n) } catch { return [] }
 }
 export function extrageFisiereDinText(text, limit = 6) {
   const out = []
@@ -1062,51 +1038,48 @@ export function construiestePromptPasiMici(job, extra = '', plan = '', protocol 
   return prompt.slice(0, 4000)
 }
 
-export function pregatesteMesajAider(prompt, platit = false) {
+export function pregatesteMesajAider(prompt) {
   const msg = String(prompt || '')
   const protocolat = msg.includes('CONSTRUCTOR_PROTOCOL_JSON:\n')
-  const cap = protocolat ? 16_000 : (platit ? 8000 : 3500)
+  const cap = protocolat ? 16_000 : 3500
   if (msg.length <= cap) return { msg, cap, capped: false }
   if (protocolat) throw new Error(`validated protocol prompt exceeds safe cap: ${msg.length}`)
   return { msg: msg.slice(0, cap) + '\n[prompt capped - small steps law]', cap, capped: true }
 }
 
 function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }, files = []) {
-  // ORICE creier: free local SAU cloud pl?tit ? acela?i motor Aider, pa?i mici, fi?iere ?intite.
-  // OpenRouter interzis pe free. Pl?tit = doar Ollama cloud cu cheie owner.
-  const platit = !!(creierCfg && creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
-  const model = platit
-    ? `openai/${creierCfg.model}`
-    : (env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:32b')
+  // CONSTRUCTOR FREE-LOCAL UNIC: motorul Aider gândește pe creierul LOCAL Ollama de
+  // pe VPS — fără cheie, fără cotă, fără bani. (owner, 20 aug: „rămân doar cu Linux
+  // și Gemini Live; tai serverele qwen" — creierul cloud plătit a fost SCOS complet.)
+  // `creierCfg` rămâne pentru defaultul free; nimic plătit nu se mai citește din el.
+  const model = env.CONSTRUCTOR_AIDER_MODEL || 'ollama_chat/qwen2.5-coder:32b'
 
-  // Igien? context: pe free mereu; pe pl?tit tot wipe history ca s? nu umfle cost/timp.
+  // Igienă context: wipe history + scriem config-ul FREE în atelier.
   try {
     for (const f of ['.aider.chat.history.md', '.aider.input.history']) {
       try { fs.writeFileSync(path.join(ATELIER, f), '') } catch { /* ignore */ }
     }
-    if (!platit) {
-      const freeCfgBody =
-        `model: ${model}\neditor-model: ${model}\nweak-model: ${model}\n` +
-        'architect: false\nedit-format: whole\nmap-tokens: 0\nauto-commits: true\n' +
-        'auto-test: false\nstream: false\nanalytics-disable: true\ngit: true\n'
-      fs.writeFileSync('/root/kelion/aider-free.conf.yml', freeCfgBody)
-      try { fs.mkdirSync(ATELIER, { recursive: true }) } catch { /* ignore */ }
-      fs.writeFileSync(path.join(ATELIER, '.aider.conf.yml'), freeCfgBody)
-    }
+    const freeCfgBody =
+      `model: ${model}\neditor-model: ${model}\nweak-model: ${model}\n` +
+      'architect: false\nedit-format: whole\nmap-tokens: 0\nauto-commits: true\n' +
+      'auto-test: false\nstream: false\nanalytics-disable: true\ngit: true\n'
+    fs.writeFileSync('/root/kelion/aider-free.conf.yml', freeCfgBody)
+    try { fs.mkdirSync(ATELIER, { recursive: true }) } catch { /* ignore */ }
+    fs.writeFileSync(path.join(ATELIER, '.aider.conf.yml'), freeCfgBody)
   } catch (e) {
     log(`aider hygiene: ${String(e?.message || e).slice(0, 140)}`)
   }
 
-  const pregatit = pregatesteMesajAider(prompt, platit)
+  const pregatit = pregatesteMesajAider(prompt)
   const msg = pregatit.msg
-  if (pregatit.capped) log(`prompt capped to ${pregatit.cap} chars (${platit ? 'platit' : 'free'})`)
+  if (pregatit.capped) log(`prompt capped to ${pregatit.cap} chars (free)`)
 
   // Fara fisiere explicite, map-tokens=0 il lasa pe Aider complet orb si modelul
   // poate doar sa ceara continutul. O harta mica ii permite sa aleaga tinta;
   // cand avem fisiere, pastram contextul strict si ieftin.
   const scoped = fisiereExistenteInAtelier(files)
   const mapTokens = scoped.length
-    ? (platit ? String(env.CONSTRUCTOR_AIDER_MAP_TOKENS || '0') : '0')
+    ? '0'
     : String(env.CONSTRUCTOR_AIDER_FALLBACK_MAP_TOKENS || '2048')
   const args = [
     '--message', msg,
@@ -1118,53 +1091,45 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
     '--map-tokens', mapTokens,
     '--edit-format', 'whole',
   ]
-  if (!platit && fs.existsSync('/root/kelion/aider-free.conf.yml')) {
+  if (fs.existsSync('/root/kelion/aider-free.conf.yml')) {
     args.push('--config', '/root/kelion/aider-free.conf.yml')
   }
   for (const f of scoped) args.push(f)
-  if (scoped.length) log(`aider (${platit ? 'platit' : 'free'}) scoped: ${scoped.join(', ')}`)
-  else log(`aider (${platit ? 'platit' : 'free'}) fara fisiere scoped - repo-map=${mapTokens}`)
+  if (scoped.length) log(`aider (free) scoped: ${scoped.join(', ')}`)
+  else log(`aider (free) fara fisiere scoped - repo-map=${mapTokens}`)
 
+  // Creierul e LOCAL (Ollama pe gazdă) — fără chei de furnizor cloud. Ștergem orice
+  // cheie OpenRouter/OpenAI moștenită din mediu ca Aider să nu iasă niciodată pe net.
   const aiderEnv = {
     ...process.env,
     OLLAMA_API_BASE: env.OLLAMA_API_BASE || 'http://127.0.0.1:11434',
     GIT_TERMINAL_PROMPT: '0',
   }
-  if (!platit) {
-    delete aiderEnv.OPENROUTER_API_KEY
-    delete aiderEnv.OPENAI_API_KEY
-    delete aiderEnv.OPENAI_API_BASE
-    aiderEnv.OPENROUTER_API_KEY = ''
-  } else {
-    aiderEnv.OPENAI_API_BASE = `${String(creierCfg.base).replace(/\/+$/, '')}/v1`
-    aiderEnv.OPENAI_API_KEY = creierCfg.cheie
-  }
+  delete aiderEnv.OPENROUTER_API_KEY
+  delete aiderEnv.OPENAI_API_KEY
+  delete aiderEnv.OPENAI_API_BASE
+  aiderEnv.OPENROUTER_API_KEY = ''
 
   // PRAGURI DINAMICE + AJUSTATE (owner, 19 aug): timpul acordat lui Aider crește cu
   // greutatea MĂSURATĂ a ordinului (fișiere țintă + lungimea promptului) și se
   // ajustează singur din istoricul rulărilor (durata reală + tăieri pe tăcere
   // degeaba), DAR numai când are destul context. Mărginit de env + bugetul rămas.
   const nrIstoric = _num(env.CONSTRUCTOR_HIST_N, 20)
-  const istoricRulari = citesteMasuratori(platit, nrIstoric)
-  // Pe FREE citim și istoricul PLĂTIT: media duratei plătite calibrează timpul dat
-  // lui free („daca a trecut pe plata sa se uite cit timp a durat si faca o medie").
-  const istoricPaid = platit ? [] : citesteMasuratori(true, nrIstoric)
+  const istoricRulari = citesteMasuratori(nrIstoric)
   const praguri = praghAider({
-    platit,
     nrFisiere: scoped.length,
     lungimePrompt: msg.length,
     ramaseMs: ramase(),
     istoric: istoricRulari,
-    istoricPaid,
     env,
   })
   const timeout = praguri.timeoutMs
   // Cold-start measured on this VPS: qwen2.5-coder:32b needs ~81s only to load.
   // Killing free too early guaranteed a false timeout before its first token —
-  // de-aceea pragurile pornesc de la o bază sigură și cresc pe greutate/istoric/calibrare.
+  // de-aceea pragurile pornesc de la o bază sigură și cresc pe greutate/istoric.
   const TACERE_KILL_MS = praguri.tacereKillMs
   const TACERE_DUPA_COMMIT_MS = praguri.tacereDupaCommitMs
-  log(`praguri aider (${platit ? 'platit' : 'free'}): timeout=${Math.round(timeout / 1000)}s tăcere=${Math.round(TACERE_KILL_MS / 1000)}s greutate=${praguri.greutate.toFixed(2)} ajustat=${praguri.ajustat ? `da(n=${praguri.n})` : 'nu'}${praguri.calibratPaid ? ` calibrat-din-plătit(media=${Math.round(praguri.mediePaidMs / 1000)}s)` : ''}`)
+  log(`praguri aider (free): timeout=${Math.round(timeout / 1000)}s tăcere=${Math.round(TACERE_KILL_MS / 1000)}s greutate=${praguri.greutate.toFixed(2)} ajustat=${praguri.ajustat ? `da(n=${praguri.n})` : 'nu'}`)
 
   return new Promise((resolve) => {
     let out = ''
@@ -1203,7 +1168,7 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
       }
       if (pragTacere > 0 && tacut > pragTacere) {
         taiatPeTacere = true // măsurătoare: rularea a fost oprită pe tăcere (nu la timeout)
-        log(`aider: T?CUT de ${Math.round(tacut / 1000)}s (${platit ? 'platit' : 'free'}, commit=${aComis ? 'da' : 'nu'}) ? kill; urmeaz? replan pa?i mici`)
+        log(`aider: T?CUT de ${Math.round(tacut / 1000)}s (free, commit=${aComis ? 'da' : 'nu'}) ? kill; urmeaz? replan pa?i mici`)
         try { child.kill('SIGKILL') } catch { /* dead */ }
         return
       }
@@ -1221,7 +1186,7 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
       // următoare (owner: „sistem de ajustare continuu, cind are destul context").
       let aEditat = false
       try { aEditat = sh('git rev-parse --short=7 HEAD').trim() !== headLaStart } catch { /* fără git → necunoscut */ }
-      salveazaMasuratoare({ platit, durataMs: Date.now() - startRun, taiatPeTacere, aEditat, greutate: praguri.greutate, timeoutMs: timeout, tacereMs: TACERE_KILL_MS })
+      salveazaMasuratoare({ durataMs: Date.now() - startRun, taiatPeTacere, aEditat, greutate: praguri.greutate, timeoutMs: timeout, tacereMs: TACERE_KILL_MS })
       resolve({ log: out.slice(-4000), throttled, taiatPeTacere, durataMs: Date.now() - startRun, aEditat })
     }
     child.on('close', () => inchide(false))
@@ -1230,48 +1195,19 @@ function ruleazaAider(prompt, creierCfg = { sursa: 'free', model: '', base: '', 
 }
 
 
-// FREE-FIRST + paid rezervă (owner 17 aug): oglinda deciziei din
-// backend/src/services/escaladareConstructor.ts — ținută inline ca agentul
-// pe host să nu depindă de build-ul TS. Paid NU pornește degeaba.
-function decideEscaladareFreeFirst({ peFree, paidDisponibil, motivFree }) {
-  if (!peFree) return { escaladeaza: false, motiv: 'deja_platit' }
-  if (!paidDisponibil) return { escaladeaza: false, motiv: 'paid_indisponibil' }
-  const t = String(motivFree || '')
-  let motiv = ''
-  if (/free_indisponibil|creier local|ollama.*indispon|aider.*lips|enoent|econnrefused.*11434/i.test(t)) motiv = 'free_indisponibil'
-  else if (/timeout_throttle|429|rate.?limit|timeout|throttl|sugrumat|RESOURCE_?EXHAUSTED|overload|econnreset/i.test(t)) motiv = 'timeout_throttle'
-  else if (/no_change|no_edit|n-a modificat|context_overflow|token limit/i.test(t)) motiv = 'no_change'
-  else if (/calitate|failed|eșuat|esuat|build.*picat|teste.*roș|poart/i.test(t)) motiv = 'calitate'
-  else if (/openrouter_auth|openrouter|AuthenticationError/i.test(t)) motiv = 'openrouter_auth'
-  if (!motiv) return { escaladeaza: false, motiv: 'motiv_insuficient' }
-  return { escaladeaza: true, motiv }
-}
-
 // ── RAPORTUL CLAR „CINE A REZOLVAT" (owner, 19 aug: „in raportul pr, trebuie sa
 // apara clar ce creier si ce constructor a rezolvat" + „kelion invata cum si cine,
 // ce a aplicat ca sa rezolve") ─────────────────────────────────────────────────
 // PUR + EXPORTAT (probat): din proveniența rezolvării dă un bloc LIMPEDE pentru
-// corpul PR-ului — constructorul (motorul), creierul care a rezolvat (free local
-// SAU rezerva plătită), cum (escaladare/plan) și CE a aplicat (fișierele). Aceeași
-// proveniență o învață Kelion (memorie), deci raportul și învățarea spun același lucru.
-const MOTIVE_ESCALADARE_TEXT = {
-  no_change: 'free n-a editat nimic',
-  timeout_throttle: 'free a fost sugrumat/timeout',
-  free_indisponibil: 'creierul local free era jos',
-  calitate: 'free a picat porțile de calitate',
-  openrouter_auth: 'auth free respins',
-}
+// corpul PR-ului — constructorul (motorul), creierul FREE local care a rezolvat, cum
+// (plan) și CE a aplicat (fișierele). Aceeași proveniență o învață Kelion (memorie),
+// deci raportul și învățarea spun același lucru. (Free-local unic — fără plătit.)
 export function raportCreierConstructor(info = {}) {
-  const { sursaFinal, creierModel, modelFree, motivEscaladare, ajutorFolosit, fisiere } = info
-  const platit = sursaFinal === 'platit'
-  const eticheta = platit ? 'PLĂTIT (cloud)' : 'FREE (local pe VPS, fără bani)'
+  const { creierModel, ajutorFolosit, fisiere } = info
   const linii = [
     '🔧 Constructor (motor): Aider',
-    `🧠 Creier care a rezolvat: ${creierModel || '(necunoscut)'} — ${eticheta}`,
+    `🧠 Creier care a rezolvat: ${creierModel || '(necunoscut)'} — FREE (local pe VPS, fără bani)`,
   ]
-  if (platit && modelFree && motivEscaladare) {
-    linii.push(`🔁 Pornit pe FREE (${modelFree}) → escaladat pe PLĂTIT (motiv: ${MOTIVE_ESCALADARE_TEXT[motivEscaladare] || motivEscaladare})`)
-  }
   if (ajutorFolosit) linii.push('📋 Cum: cu plan „pași mici" de la creierul Kelion')
   const fis = Array.isArray(fisiere) ? fisiere.filter(Boolean) : []
   if (fis.length) linii.push(`📝 Ce a aplicat (${fis.length} fișiere): ${fis.slice(0, 12).join(', ')}${fis.length > 12 ? ' …' : ''}`)
@@ -1279,58 +1215,42 @@ export function raportCreierConstructor(info = {}) {
 }
 
 async function construiesteCuAider(job, baseSha, jurnalVechi) {
-  // Constructorul rulează DOAR pe creierul LOCAL free de pe VPS. Ollama Cloud
-  // (rezerva plătită kimi/qwen) a fost SCOASĂ — owner, 20 aug: „rămân doar cu Linux
-  // și Gemini Live; tai serverele qwen". Ruta /api/constructor/creier-config nu mai
-  // există în app; nu mai întrebăm nimic, pornim direct pe free local. Escaladarea
-  // pe cloud nu mai are rezervă (fallbackPaid rămâne null). Constructorul îl
-  // înlocuiește Devin, extern — vezi AI-HANDOFF.md.
-  let creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }
-  let fallbackPaid = null // paid scos → mereu null (fără escaladare cloud)
-  // Nu loga NICIODATĂ creierCfg.cheie / fallback.cheie (secret).
-  let platit = !!(creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
-  let brainRaport = platit ? 'paid_cloud' : 'free_local'
-  let motivEscaladare = ''
-  ULTIMUL_CREIER = platit
-    ? `aider (CLOUD rezervă: ${creierCfg.model})`
-    : `aider (LOCAL Ollama FREE: ${numeModelOllama()})`
-  if (!platit && !asiguraCreierulLocal()) {
-    // Free jos: încearcă rezervă paid în ACELAȘI run dacă există; altfel amână pe free
-    const dec = decideEscaladareFreeFirst({
-      peFree: true,
-      paidDisponibil: !!fallbackPaid,
-      motivFree: 'free_indisponibil',
-    })
-    if (dec.escaladeaza && fallbackPaid) {
-      creierCfg = fallbackPaid
-      platit = true
-      brainRaport = 'paid_cloud'
-      motivEscaladare = dec.motiv
-      ULTIMUL_CREIER = `aider (CLOUD rezervă după free_indisponibil: ${creierCfg.model})`
-      log(`ESCALADARE same-run free→paid rezervă: motiv=${dec.motiv} model=${creierCfg.model}`)
-      salveazaLectie({ sig: 'escaladare_paid', cauza: 'free_indisponibil', fix: `paid:${creierCfg.model}`, ok: false })
-    } else {
-      throw Object.assign(new Error('creier local Ollama indisponibil — ordinul se reia pe FREE'), { amanabil: true, freeIssue: 'free_indisponibil' })
-    }
+  // Constructorul rulează DOAR pe creierul LOCAL free de pe VPS. Creierul cloud
+  // plătit (Ollama Cloud, rezerva kimi/qwen) a fost SCOS COMPLET — owner, 20 aug:
+  // „rămân doar cu Linux și Gemini Live; tai serverele qwen". Nu mai există sursă
+  // plătită, escaladare pe cloud sau rezervă: constructorul e FREE-LOCAL unic.
+  // `creierCfg` rămâne pe defaultul free (nimic plătit nu se mai citește din el).
+  // Ruta veche /api/constructor/creier(-config) NU mai e chemată de constructor:
+  // creierul lui e LOCAL Ollama pe VPS, fără chei de furnizor (regula 13 aug). Doar
+  // /api/constructor/{next,report,progress,ajutor,context} se cheamă, gardate cu
+  // BRIDGE_SECRET — Aider gândește local, nu prin app.
+  const creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }
+  const brainRaport = 'free_local'
+  ULTIMUL_CREIER = `aider (LOCAL Ollama FREE: ${numeModelOllama()})`
+  if (!asiguraCreierulLocal()) {
+    // Creierul local jos → AMÂNĂ onest (free indisponibil): ordinul rămâne în coadă
+    // și se reia automat. Nu există paid pe care să cadă (scos complet, 20 aug).
+    throw Object.assign(new Error('creier local Ollama indisponibil — ordinul se reia pe FREE'), { amanabil: true, freeIssue: 'free_indisponibil' })
   }
 
-  // Context Kelion scurt ? ambele creiere; free mai str?ns.
+  // Context Kelion scurt (strâns) pentru creierul LOCAL free — colaborarea
+  // informațională Kelion ↔ Aider (owner: „colaboreaza 100% intre ei informational").
   let contextKelion = ''
   try {
     const ctx = await api('/api/constructor/context', { method: 'POST', body: JSON.stringify({ ordin: job.orderText }) }, 2)
-    const mem = (ctx?.memorie ?? []).filter((x) => !String(x).includes('[iscoada')).slice(0, platit ? 8 : 4)
-    const rel = (ctx?.relevante ?? []).slice(0, platit ? 6 : 3)
+    const mem = (ctx?.memorie ?? []).filter((x) => !String(x).includes('[iscoada')).slice(0, 4)
+    const rel = (ctx?.relevante ?? []).slice(0, 3)
     const parti = []
     if (mem.length) parti.push(`MEMORIE:\n- ${mem.join('\n- ')}`)
     if (rel.length) parti.push(`ISTORIC:\n- ${rel.join('\n- ')}`)
     if (parti.length) {
       contextKelion = `\n=== context Kelion ===\n${parti.join('\n')}\n=== /context ===\n`
-      const cap = platit ? 4000 : 1500
+      const cap = 1500
       if (contextKelion.length > cap) contextKelion = contextKelion.slice(0, cap) + '\n?\n'
     }
   } catch { /* optional */ }
 
-  // LEGE: plan pa?i mici ?NAINTE de Aider ? pentru free ?I pl?tit.
+  // LEGE: plan pa?i mici ?NAINTE de Aider ? pe creierul LOCAL free.
   let plan0 = ''
   let protocol0 = null
   let legacyProtocol = false
@@ -1342,7 +1262,7 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
     if (s.fallbackDinProtocolInvalid) {
       // NU mai amânăm ordinul (owner, 19 aug): protocolul strict lipsește, dar
       // constructorul TREBUIE să repare — cădem pe drumul legacy (ordinul brut →
-      // Aider), IDENTIC pe free și pe plătit. Porțile atelierului verifică rezultatul.
+      // Aider). Porțile atelierului verifică oricum rezultatul.
       log(`protocol strict indisponibil (${s.errors.join('; ').slice(0, 200)}) — cad pe LEGACY (ordinul brut → Aider), NU amân ordinul`)
       salveazaLectie({ sig: 'protocol_fallback_legacy', cauza: s.errors.join('; ').slice(0, 200), fix: 'legacy-raw-order', ok: false })
     }
@@ -1353,8 +1273,8 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
     ajutorFolosit = s.ajutorFolosit
     beat(
       protocol0
-        ? (platit ? 'protocol JSON validat -> Aider CLOUD' : 'protocol JSON validat -> Aider FREE')
-        : (platit ? 'fara protocol strict -> Aider CLOUD pe ordinul brut (legacy)' : 'fara protocol strict -> Aider FREE pe ordinul brut (legacy)'),
+        ? 'protocol JSON validat -> Aider FREE'
+        : 'fara protocol strict -> Aider FREE pe ordinul brut (legacy)',
       true,
     )
   }
@@ -1367,7 +1287,7 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       reparatii ? ultimaProblema : (jurnalVechi ? String(jurnalVechi).slice(-1000) : ''),
       plan0,
       protocol0,
-    ) + (platit ? contextKelion : '')
+    ) + contextKelion
     const fallbackLegacy = legacyProtocol ? extrageFisiereDinText(plan0 + '\n' + job.orderText) : []
     const files = fisiereExistenteInAtelier(files0.length ? files0 : fallbackLegacy)
     log(`aider run ${reparatii ? 'repair ' + reparatii : 'build'} -> ${ULTIMUL_CREIER} -> files=${files.join(',') || '-'} -> protocol=${protocol0 ? protocol0.protocol : 'legacy'}`)
@@ -1377,26 +1297,13 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       if (tl) log(`aider: ${tl.slice(0, 140)}`)
     }
     if (a.throttled) {
-      const decT = decideEscaladareFreeFirst({
-        peFree: !platit,
-        paidDisponibil: !!fallbackPaid,
-        motivFree: `timeout_throttle ${a.log.slice(-200)}`,
-      })
-      if (decT.escaladeaza && fallbackPaid && !platit) {
-        creierCfg = fallbackPaid
-        platit = true
-        brainRaport = 'paid_cloud'
-        motivEscaladare = decT.motiv
-        ULTIMUL_CREIER = `aider (CLOUD rezervă după throttle: ${creierCfg.model})`
-        log(`ESCALADARE same-run free→paid: motiv=${decT.motiv}`)
-        salveazaLectie({ sig: 'escaladare_paid', cauza: 'timeout_throttle', fix: `paid:${creierCfg.model}`, ok: false })
-        continue // reîncearcă pe paid în același run
-      }
+      // Creierul local e sugrumat acum → AMÂNĂ onest; ordinul se reia automat.
+      // Nu există paid pe care să cadă (scos complet, 20 aug).
       throw Object.assign(new Error(`aider sugrumat: ${a.log.slice(-160)}`), { amanabil: true, freeIssue: 'timeout_throttle' })
     }
     let headAcum = sh('git rev-parse --short=7 HEAD').trim()
 
-    // No-edit: replan pe același creier; dacă tot free+no-edit → rezervă paid same-run.
+    // No-edit: replan pe același creier local free.
     if (headAcum === baseSha && ramase() > 2 * 60_000) {
       log('no-edit — replan pași mici (același creier)')
       const h2 = await cereAjutorCreier(job.orderText, a.log.slice(-1200))
@@ -1428,24 +1335,9 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       const sig = /token limit|context of \d+/i.test(a.log)
         ? 'context_overflow'
         : (/openrouter|AuthenticationError/i.test(a.log) ? 'openrouter_auth' : 'no_edit')
-      const decN = decideEscaladareFreeFirst({
-        peFree: !platit,
-        paidDisponibil: !!fallbackPaid,
-        motivFree: sig,
-      })
-      if (decN.escaladeaza && fallbackPaid && !platit && ramase() > 3 * 60_000) {
-        creierCfg = fallbackPaid
-        platit = true
-        brainRaport = 'paid_cloud'
-        motivEscaladare = decN.motiv
-        ULTIMUL_CREIER = `aider (CLOUD rezervă după ${sig}: ${creierCfg.model})`
-        log(`ESCALADARE same-run free→paid: motiv=${decN.motiv} (${sig})`)
-        salveazaLectie({ sig: 'escaladare_paid', cauza: sig, fix: `paid:${creierCfg.model}`, ok: false })
-        continue
-      }
-      salveazaLectie({ sig, cauza: a.log.slice(-300), fix: platit ? 'paid-no-edit' : 'free-no-edit; paid rezervă indisponibilă sau epuizată', ok: false })
+      salveazaLectie({ sig, cauza: a.log.slice(-300), fix: 'free-no-edit', ok: false })
       throw Object.assign(
-        new Error(`aider n-a modificat nimic [${sig}] creier=${platit ? 'platit' : 'free'} brain=${brainRaport} plan=${ajutorFolosit ? 'da' : 'nu'}\n${a.log.slice(-600)}`),
+        new Error(`aider n-a modificat nimic [${sig}] creier=free brain=${brainRaport} plan=${ajutorFolosit ? 'da' : 'nu'}\n${a.log.slice(-600)}`),
         { amanabil: true, freeIssue: sig },
       )
     }
@@ -1453,18 +1345,18 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
     const problema = verificaAtelierul(baseSha)
     if (!problema) {
       // CINE A REZOLVAT, CLAR (owner, 19 aug: „in raportul pr, trebuie sa apara clar
-      // ce creier si ce constructor a rezolvat"). Motorul e mereu Aider; creierul e
-      // modelul care CHIAR a produs reparația (free local SAU rezerva plătită).
-      const sursaFinal = platit ? 'platit' : 'free'
-      const creierModel = platit ? String(creierCfg.model || 'cloud') : numeModelOllama()
+      // ce creier si ce constructor a rezolvat"). Motorul e Aider; creierul e modelul
+      // LOCAL free care a produs reparația (constructor free-local unic).
+      const sursaFinal = 'free'
+      const creierModel = numeModelOllama()
       // CE A APLICAT — fișierele schimbate (WHAT), pentru raport ȘI pentru învățare.
       let fisiereSchimbate = []
       try { fisiereSchimbate = sh(`git diff --name-only ${baseSha} HEAD`).trim().split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 20) } catch { /* fără listă */ }
       // KELION ÎNVAȚĂ „cum și cine, ce a aplicat" (owner, 19 aug): lecția de succes
       // poartă acum motorul + creierul + sursa + fișierele aplicate, nu doar „done".
       salveazaLectie({
-        sig: platit ? 'paid_ok' : 'free_ok',
-        cauza: motivEscaladare ? `done_after_${motivEscaladare}` : 'done',
+        sig: 'free_ok',
+        cauza: 'done',
         fix: ajutorFolosit ? 'brain-plan+aider' : 'aider',
         ok: true,
         motor: 'aider',
@@ -1475,34 +1367,18 @@ async function construiesteCuAider(job, baseSha, jurnalVechi) {
       })
       return {
         title: (job.orderText.split('\n')[0] || `Ordin #${job.id}`).slice(0, 120),
-        body: `Aider — ${ULTIMUL_CREIER}${ajutorFolosit ? ' — plan pași mici creier Kelion' : ''}${motivEscaladare ? ` — escaladat (${motivEscaladare})` : ''}. brain=${brainRaport}. Ordin #${job.id}.`,
+        body: `Aider — ${ULTIMUL_CREIER}${ajutorFolosit ? ' — plan pași mici creier Kelion' : ''}. brain=${brainRaport}. Ordin #${job.id}.`,
         brainRaport,
-        motivEscaladare,
-        sursaFinal, // 'free' | 'platit' — sursa care a REZOLVAT
-        creierModel, // numele modelului care a rezolvat (free local sau paid cloud)
-        modelFree: numeModelOllama(), // modelul local free (pt. linia de escaladare)
+        sursaFinal, // mereu 'free' — sursa care a REZOLVAT (free-local unic)
+        creierModel, // numele modelului LOCAL free care a rezolvat
         ajutorFolosit, // a folosit planul creierului Kelion?
         fisiere: fisiereSchimbate, // CE a aplicat — pt. raport ȘI învățare
       }
     }
     ultimaProblema = problema
     // Rezultatul free a scris cod, dar porțile reale (build/tests) l-au respins.
-    // Acesta este exact cazul „răspuns incorect”: următoarea reparație folosește
-    // fallbackul paid în ACELAȘI run, fără să mai repete aceeași mână free.
-    const decQ = decideEscaladareFreeFirst({
-      peFree: !platit,
-      paidDisponibil: !!fallbackPaid,
-      motivFree: `calitate ${problema.slice(0, 300)}`,
-    })
-    if (decQ.escaladeaza && fallbackPaid && !platit) {
-      creierCfg = fallbackPaid
-      platit = true
-      brainRaport = 'paid_cloud'
-      motivEscaladare = decQ.motiv
-      ULTIMUL_CREIER = `aider (CLOUD rezervă după poarta de calitate: ${creierCfg.model})`
-      log(`ESCALADARE same-run free→paid: motiv=${decQ.motiv} (porți roșii)`)
-      salveazaLectie({ sig: 'escaladare_paid', cauza: 'calitate', fix: `paid:${creierCfg.model}`, ok: false })
-    }
+    // Cerem creierului Kelion un plan de reparare a cauzei și mai încercăm o rundă
+    // (același creier local — nu există paid pe care să escaladăm, scos 20 aug).
     if (reparatii + 1 < MAX_REPAIR && ramase() > 3 * 60_000) {
       const h3 = await cereAjutorCreier(job.orderText, problema.slice(-1200))
       if (h3.plan) {
@@ -1546,20 +1422,19 @@ async function main() {
   // „report() nu moare pe variabile din alt scope" („ReferenceError:
   // tokensPaid is not defined" DUPĂ ce PR-ul fusese deschis) — e ținut prin
   // ELIMINARE: report() nu mai citește nicio variabilă de cost.)
-  // brainRaport din run: free_local (default) sau paid_cloud (doar rezervă folosită).
-  let brainRaportRun = 'free_local'
+  // brain din run: mereu free_local (constructor free-local unic; paidul scos, 20 aug).
+  const brainRaportRun = 'free_local'
   const report = (status, extra = {}, tries = 8) =>
     api(
       '/api/constructor/report',
       {
         method: 'POST',
-        // brain = free_local | paid_cloud (owner 17 aug: paid doar rezervă, raportat).
-        // costUsd nu se inventează (regula #1).
+        // brain = free_local (creierul LOCAL de pe VPS). costUsd nu se inventează (regula #1).
         body: JSON.stringify({
           id: job.id,
           status,
           log: logLines.join('\n'),
-          brain: brainRaportRun === 'paid_cloud' ? 'paid_cloud' : 'free_local',
+          brain: brainRaportRun,
           ...extra,
         }),
       },
@@ -1616,9 +1491,6 @@ async function main() {
     const jurnalVechi = String(job.log ?? "").trim()
     const tokens = 0 // Aider nu itemizează tokeni — nicio cifră inventată (regula #1)
     const finish = await construiesteCuAider(job, baseSha, jurnalVechi)
-    if (finish?.brainRaport === 'paid_cloud' || finish?.brainRaport === 'free_local') {
-      brainRaportRun = finish.brainRaport
-    }
     const branch = `kelion/job-${job.id}`
     // Titlu gol = `git commit -m ""` refuză commit-ul („Aborting commit due to
     // empty commit message") și ordinul pica după ce toată munca era făcută.
@@ -1635,13 +1507,10 @@ async function main() {
     log(`ramura ${branch} împinsă`)
 
     // CINE A REZOLVAT, CLAR ÎN CAPUL PR-ului (owner, 19 aug): ce constructor (motor)
-    // + ce creier (free local / plătit cloud) + cum + CE a aplicat. Blocul e sursa
-    // UNICĂ de proveniență — aceeași pe care o învață Kelion (memorie).
+    // + ce creier (free local) + cum + CE a aplicat. Blocul e sursa UNICĂ de
+    // proveniență — aceeași pe care o învață Kelion (memorie).
     const blocCreier = raportCreierConstructor({
-      sursaFinal: finish.sursaFinal,
       creierModel: finish.creierModel,
-      modelFree: finish.modelFree,
-      motivEscaladare: finish.motivEscaladare,
       ajutorFolosit: finish.ajutorFolosit,
       fisiere: finish.fisiere,
     })
