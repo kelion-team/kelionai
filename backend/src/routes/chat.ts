@@ -84,6 +84,7 @@ import {
   type DovadaUnealta,
 } from '../services/poartaFaptelor.js'
 import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
+import { CHARTER_CHAT_VOCE_LEGI } from '../services/charterChatVoce.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -1823,7 +1824,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       `ask "shall I repair everything?" — for each finding, either it carries a MEASURED cause (act on that) ` +
       `or it needs a measurement first (TAKE it, name the exact one). Measure first IS the step; the fix comes ` +
       `after the measurement, never before it.\n`
-    let systemPrompt = `${LEGILE_ADMINULUI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
+    let systemPrompt = `${LEGILE_ADMINULUI}\n${CHARTER_CHAT_VOCE_LEGI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
     // default behavior; absent/unknown id means Kelion stays default.
