@@ -144,19 +144,21 @@ omul cu tact); **greul + convergența + cățelul** = arta gândirii (raționeaz
 corect, nu lasă minciuna să treacă). Invariantul (nu minte) e măsurabil prin
 cățel; artele sunt calitative — trăiesc în persona/promptul de sistem.
 
-## MONITORUL — ce apare pe ecran (punct ridicat de mine, acoperit 20 aug)
-„100% vorbit" = **output-ul conversațional e voce** (răspuns/explicație/confirmare
-— rostite). Asta NU se ceartă cu monitorul:
-- **Monitorul arată DOAR conținut inerent VIZUAL:** imagine, video, document,
-  hartă, grafic (trading), card, pagină web (monitor). Lucruri pe care nu are
-  sens să le „spui" — trebuie VĂZUTE. **Mereu însoțite de voce** (Jarvis zice ce
-  e și ce să faci cu el).
-- **Ce NU apare pe monitor: răspunsul-TEXT scris.** A tipări pe ecran vorba lui
-  Kelion ar reînvia coliziunea celor 2 motoare = bug-ul. Ecranul = artefacte
-  vizuale, nu vorba lui scrisă.
+## MONITORUL — ce apare pe ecran (owner, recomandare 20 aug — REVIZUIT)
+REGULA (owner): **Kelion nu CITEȘTE niciodată monitorul cu voce.** Monitorul e
+loc de AFIȘAT, nu de recitat.
+- Când are o rezolvare de arătat, vocea dă doar o predare SCURTĂ: „vă prezint pe
+  monitor rezolvarea:" → monitorul arată **un grafic SAU textul scris** (îl
+  turuie) → **ȘI ATÂT** → **revine la chatul audio.**
+- Monitorul POATE arăta și TEXT scris (o rezolvare lungă), nu doar
+  imagine/hartă/grafic/card — **dar nu se rostește.**
+- DE CE omoară bug-ul, curat: conținutul de pe monitor **NU e citit cu voce** →
+  nicio a doua voce care recită ecranul → **zero coliziune.** Monitorul = tăcut,
+  pentru ochi; vocea = doar conversația.
 - Măsurat din cod: canalul `control` (`onControl`: monitor/doc/app/card) e DEJA
-  separat de voce — `vocalLive.ts`: „**Vocea NU vine pe aici**". Arhitectura deja
-  desparte vizualul de voce; în voce-only îl păstrăm strict pentru vizual inerent.
+  separat de voce — `vocalLive.ts`: „**Vocea NU vine pe aici**".
+- Corectură (regula #2): notasem greșit „fără text pe monitor". Corect: text pe
+  monitor OK, dar **niciodată citit cu voce.**
 
 ## PERSONA / TONUL — „vocea" lui Kelion (owner, 20 aug, cuvintele lui)
 ### PRINCIPIUL SUPREM (deasupra tuturor)
