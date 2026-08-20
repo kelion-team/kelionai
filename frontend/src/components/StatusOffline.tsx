@@ -92,8 +92,11 @@ export function StatusOffline() {
     fill = 100
     text = `✓ ${t.offlineGata}`
   } else if (st.stare === 'eroare') {
+    // CONTEXT CLAR (owner 20 aug, captură: banda arăta doar „Failed to fetch", ca și cum
+    // s-ar fi stricat TOATĂ aplicația). Punem întâi eticheta care spune că e vorba de
+    // CREIERUL OFFLINE (opțional), apoi motivul brut ca detaliu. E dismisabilă (×).
     if (dismis) return null
-    text = `⚠️ ${st.motiv || t.offlineEroareLocal}`
+    text = `⚠️ ${t.offlineEroareLocal}${st.motiv ? ` ${st.motiv}` : ''}`
     actiune = { eticheta: t.offlineReincearca, onClick: descarca }
     inchidere = true
   } else if (st.stare === 'fara_webgpu' || areWebgpu === false) {
