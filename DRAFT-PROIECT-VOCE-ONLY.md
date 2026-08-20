@@ -77,6 +77,32 @@ Cât creierul greu macină (puțin sau mult), Live NU stă degeaba și NU doar a
   converge. Compromis pe față: mai multe runde = mai multe apeluri (latență+cost);
   trocul bun = Live te ține în conversație instant, precizia vine în câteva runde.
 
+## „Gata, ăsta-i răspunsul" = CONVERGENȚA (decis 20 aug, owner endorsed)
+Greul dă răspunsul final NU pe un „procent de corectitudine" (ar fi cifră
+inventată — modelul e sigur pe CUVINTE, nu pe ADEVĂR; halucinația e sigură și
+greșită). Ci pe convergență, măsurabilă onest:
+- Cât mai există o întrebare care MUTĂ răspunsul → nu e gata.
+- Când nicio întrebare rămasă nu-l mai mișcă → a convers → ăla e răspunsul.
+(Opțional, semnal de nesiguranță: self-consistency — rulezi de 2-3 ori, vezi
+dacă dă la fel; costă apeluri.)
+
+## CĂȚELUL anti-halucinație/minciună (cerință owner, 20 aug)
+Cerință verbatim: reguli foarte clare anti-halucinație/minciună, verificate de un
+„cățel" PERMANENT, care nu lasă nimic să treacă „ca musca".
+### Ce AVEM (măsurat, grep)
+- `backend/src/services/poartaFaptelor.ts` — cățelul: funcție PURĂ, ia textul
+  creierului + uneltele chiar REUȘITE, demască pretențiile de faptă fără unealtă
+  (născut din „am mințit că am generat clipul", 16 aug). **Legat doar în
+  `chat.ts` (chat SCRIS).**
+- `backend/src/services/asrHalucinatii.ts` — al doilea cățel, pe INTRAREA vocii:
+  taie cuvintele-fantomă pe tăcere/zgomot.
+- Legile (FAPTEI/MĂSURĂTORII) — în promptul de sistem.
+### GAP (măsurat)
+`poartaFaptelor` **NU e chemată în `vocalLive`** (nici rută, nici serviciu). Pe
+calea VOCE — singura cale online în voce-only — cățelul de minciună NU rulează
+azi. De extins pe Live: pe GREU verifici server-side textul + uneltele ÎNAINTE ca
+Live să-l rostească; pe UȘOR, prinzi din transcriptul lui Live + legile din prompt.
+
 ## Ce NU s-a decis încă / următorii pași
 - Verificarea nodului de mai sus (Live rostește text injectat?).
 - Detaliul escaladării (cum decide Live „greu", cum se întoarce rezultatul în
