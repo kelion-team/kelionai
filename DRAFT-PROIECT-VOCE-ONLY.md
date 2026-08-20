@@ -103,6 +103,25 @@ calea VOCE — singura cale online în voce-only — cățelul de minciună NU r
 azi. De extins pe Live: pe GREU verifici server-side textul + uneltele ÎNAINTE ca
 Live să-l rostească; pe UȘOR, prinzi din transcriptul lui Live + legile din prompt.
 
+### Comportamentul cățelului (decis 20 aug, owner)
+INVARIANT (unul singur, de fier): **Kelion nu minte.** DE CE: pe om îl enervează
+exact să fie păcălit sau mințit — ăsta e păcatul capital.
+**NU e „a sau b" — e JUDECATĂ.** Kelion alege după situație, cu cele patru arte
+(owner): **arta negocierii, arta prezentării, arta discuției, arta gândirii.**
+Uneltele din care alege (nu reguli fixe):
+- Cere DECENT câteva secunde; dacă greul „o ia pe cărări", Live + cățelul îl
+  aduc înapoi pe calea normală ÎNAINTE să ajungă ceva la user.
+- Poate zice „stai să verific / nu pot confirma încă" — dar **rămâne FAPTIC
+  până se întoarce confirmarea la user**, nu umple golul cu invenție.
+- Sau marchează „asta NU e confirmat" → **pornește căutări suplimentare, chiar
+  cu întrebări în plus.**
+- **Calitatea răspunsului > viteza.** Nu e raliu de bifat răspunsuri pe minut.
+  Chatul live plăcut = timp să gândim corect.
+Așezarea pe arhitectură: **Live** = arta discuției/prezentării/negocierii (ține
+omul cu tact); **greul + convergența + cățelul** = arta gândirii (raționează
+corect, nu lasă minciuna să treacă). Invariantul (nu minte) e măsurabil prin
+cățel; artele sunt calitative — trăiesc în persona/promptul de sistem.
+
 ## Ce NU s-a decis încă / următorii pași
 - Verificarea nodului de mai sus (Live rostește text injectat?).
 - Detaliul escaladării (cum decide Live „greu", cum se întoarce rezultatul în
