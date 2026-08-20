@@ -176,6 +176,43 @@ la un pas — o scoate când o ceri sau când e provocat.
 Merg pe calea operațională/scris; pe VOCE nu sunt legate. Build = captura de
 dovadă + scoaterea ei la cerere PE VOCE („asul din mânecă").
 
+## OFFLINE — gura, vederea, urechea (analiză 20 aug)
+- **Avatar 3D** = local (WebGL, cache-uit) → se vede offline.
+- **Gura (lip-sync) offline** = din nivelul audio al vocii redate. Merge DACĂ
+  TTS-ul offline ne dă bufferul: **TTS de sistem** cântă pe lângă graful nostru
+  (buze slabe); **TTS local Piper** (WASM, offline) ne dă bufferul → lip-sync
+  curat. ← Piper e varianta bună.
+- **Vede offline?** Camera CAPTUREAZĂ cadre offline (local), dar „a înțelege"
+  cere model de viziune. Online = Gemini Live. Offline, creierul (Qwen) e doar
+  text → **NU vede azi.** Vedere offline = VLM mic pe WebGPU (Moondream/
+  Qwen2-VL-2B) — greu, imatur, calitate modestă. Build separat, opțional.
+- **Urechea offline (STT):**
+  - Capcană: `SpeechRecognition` din browser trimite sunetul la Google → NU offline.
+  - Adevărat offline: **Vosk** (WASM, streaming, model RO — versiune de confirmat)
+    sau **Whisper** pe WebGPU (mai precis, pe bucăți, mai greu).
+  - **Nativ Android**, cel mai nou: `createOnDeviceSpeechRecognizer()` (Android 13/
+    API 33), on-device. Cârlig: doar în APK (punte nativă spre WebView) + pachet RO
+    offline pe telefon (loterie de device) + doar Android.
+  - **Decizie propusă: nativ Android întâi, Vosk rezervă în browser.** App-ul
+    MĂSOARĂ singur la pornire dacă telefonul are RO on-device (nu owner-ul caută).
+  - RO are suport BUN (corectat, owner + verificat de logică): Whisper multilingv
+    face RO bine la base/small; Google on-device (nativul Android) e solid pe RO;
+    Vosk are model RO dedicat. Precizia EXACTĂ pe vocea+telefonul owner-ului = de
+    MĂSURAT prin probă, NU de presupus (a nu repeta „modest"-ul nemăsurat).
+  - Limită reală (nu de RO): offline NU e full-duplex ca Live (reprize, latență
+    mai mare). Online rămâne Jarvis-ul real.
+
+## OPȚIUNE NEOBLIGATORIE — input scris de la tastatură (owner, 20 aug)
+NU e obligatoriu; implicit rămâne vocea. Poți SCRIE în loc să vorbești.
+- Online: trivial — Live acceptă text nativ (`clientContent … parts:[{text}]`,
+  canalul există) → răspunde cu VOCEA lui. Un motor, zero coliziune.
+- Offline: cel mai natural input (creierul offline e text) + **sare peste veriga
+  slabă (urechea)** — scrii, primești voce (Piper/sistem). Rezervă bună pt STT slab.
+- **REGULA DE AUR:** input scris DA, dar **OUTPUT rămâne VOCE** — Jarvis rostește.
+  NU afișăm răspunsuri SCRISE (altfel reînvie coliziunea celor 2 motoare = bug-ul).
+- UI: discret, secundar (iconiță tastatură). Beneficiu: nu poți vorbi / zgomot /
+  intimitate.
+
 ## Ce NU s-a decis încă / următorii pași
 - **Offline (Jarvis audio):** de probat LIVE urechea offline (STT pe dispozitiv,
   gen Whisper) — veriga slabă; gura (TTS sistem) + creierul (Qwen/Gemma) merg.
