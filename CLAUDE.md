@@ -18,6 +18,17 @@ tot ce nu ai făcut din proiect, tot ce nu merge, că mă ia capul"). Cross off 
 row only with a PR *and* a live check; add new rows the moment you find them;
 write „nu pot verifica" rather than „e ok" when you cannot prove it.
 
+**Then read `PROIECT-CHAT-VOCE.md`** — the NAILED-DOWN chat/voice project (20 aug
+2026), decided step-by-step with the owner. This is the AUTHORITATIVE spec for the
+voice-only chat: 100% spoken „Jarvis", a SINGLE engine online (Gemini Live, Chirp
+removed → kills the „2 sec and breaks" collision), escalation over a TEXT channel,
+the anti-lie „cățel" (poartaFaptelor) that must be extended onto the voice path,
+truth above cost/time, the monitor that is NEVER read aloud, and the offline
+reserve. The owner's order (20 aug): „trebuie legat proiectul să fie vizibil și
+pentru tine și pentru orice AI" + „de tine depinde cine îl construiește — Devin
+sau tu — dacă respecți 100% proiectul ăsta." Any AI that touches the chat/voice
+path MUST respect it 100%. Reasoning history: `DRAFT-PROIECT-VOCE-ONLY.md`.
+
 ## THE DOCUMENT IS LIVE — YOU MUST KEEP IT CURRENT
 If you change code, architecture, rules, or the project's state, **update the
 relevant section of `AI-HANDOFF.md` (and its §13 "Starea") before you finish
