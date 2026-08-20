@@ -217,7 +217,12 @@ export default function ChatPanel({
         if (anulat) return
         const st = stareCreierLocal().stare
         if (st === 'gata' || st === 'se_pregateste' || st === 'fara_webgpu') return
-        if (!esteConectat() || getTeava() !== 'bun') return // doar pe țeavă BUNĂ confirmată
+        // Descarcă pe orice țeavă care NU e clar lentă (owner 20 aug: „nu
+        // downloadează nimic" — pe desktop/iOS țeava e „necunoscut", iar `!== 'bun'`
+        // o bloca). Sărim doar 2G/3G/economie (getTeava 'slab'/'mediu'); Wi‑Fi/4G+
+        // și „necunoscut" (desktop/iOS) descarcă.
+        const tv = getTeava()
+        if (!esteConectat() || tv === 'slab' || tv === 'mediu') return
         if (!(await webgpuDisponibil())) return
         void pregatesteModelOffline()
       })()
@@ -1436,7 +1441,12 @@ export default function ChatPanel({
       // de flux (async iterable de bucăți), deci tot ce urmează (acumulare, gură,
       // randare, abort) rămâne IDENTIC. Calea online e neatinsă. `next` (istoricul,
       // inclusiv mesajul curent) e preluat de model — PRELUAREA CONTEXTULUI cerută.
-      const eTuraOffline = !esteConectat()
+      // FAIL-SAFE (owner 20 aug: „nu răspunde nici online nici offline"): folosim
+      // creierul LOCAL doar dacă chiar NU e semnal ȘI modelul e GATA. Dacă modelul
+      // nu-i descărcat (mereu până se descarcă) sau detectorul se-nșeală, NU tăiem
+      // chatul — cădem pe server (streamChat). Așa online-ul merge MEREU ca înainte,
+      // iar offline folosește creierul local doar când chiar are ce.
+      const eTuraOffline = !esteConectat() && stareCreierLocal().stare === 'gata'
       const sursaFlux = eTuraOffline
         ? streamLocalRaspuns(
             next,

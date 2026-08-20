@@ -93,7 +93,11 @@ self.addEventListener('fetch', (e) => {
       const cache = await caches.open(SHELL)
       try {
         const res = await fetch(e.request, isHTML ? { cache: 'no-store' } : {})
-        if (res.ok && !isHTML) void cache.put(e.request, res.clone())
+        // ONLINE: mereu proaspăt (network-first). DAR punem ȘI shell-ul (HTML) în
+        // cache, sub „/", ca aplicația să se DESCHIDĂ și OFFLINE (mod companion,
+        // owner 20 aug: „în avion zice că nu poate accesa aplicația"). Fără asta,
+        // fallback-ul de mai jos n-avea ce servi → app-ul nu pornea fără net.
+        if (res.ok) void cache.put(isHTML ? '/' : e.request, res.clone())
         return res
       } catch {
         const hit = await cache.match(e.request)
