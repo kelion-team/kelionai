@@ -148,6 +148,14 @@ const SECTIONS: ManualSection[] = [
     ],
   },
   {
+    title: 'When you lose signal — the companion mode',
+    paragraphs: [
+      'When your phone loses all signal — in a car, on a plane, underground — Kelion does not go dark. It switches automatically to a smaller brain that runs entirely on your device, keeps your avatar, and stays with you: you can still talk and type, and it remembers the conversation so far. It is honest about being offline — it will not invent web results, weather or live data it cannot reach. It is a companion in that moment, not the full assistant.',
+      'It senses what your device can sense: where you are and how fast you are moving — so it can say human things like "you are doing about 90, long drive?" — and, with the camera on, that it can see you. When you ask for something that truly needs the internet, it saves the question and tells you it will answer when the signal returns. The moment you are back online it reconnects on its own, sends the offline conversation to the server so nothing is lost, resolves the saved questions and tells you civilly: "here is the answer to what you asked while you were offline…".',
+      'Android vs iPhone — what differs. On high-end Android (for example Samsung Fold and recent tablets) the on-device brain, the movement speed and the reconnect notification all work fully, and the offline model can be prepared quietly in the background while you are on Wi‑Fi. On iPhone and iPad the on-device brain still runs (it uses WebGPU), but Safari does not report the connection type, so the offline model is not downloaded automatically — to avoid spending mobile data you prepare it once while you have signal; and background notifications are more limited by iOS. Everything else — talking, typing, location, movement speed, and the automatic reconnect and sync — works the same on both.',
+    ],
+  },
+  {
     title: 'Credits',
     paragraphs: [
       'Kelion runs on prepaid credits. You top up from the credit pill in the top bar, and usage is drawn from your balance as you go. You can turn on automatic top-up so you are never cut off mid-conversation, and turn it off again at any time.',

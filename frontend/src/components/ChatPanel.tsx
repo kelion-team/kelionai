@@ -77,8 +77,20 @@ import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
-import { esteConectat } from '../lib/conexiune'
+import { esteConectat, useConectat } from '../lib/conexiune'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil } from '../lib/creierLocal'
+import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
+import {
+  adaugaTuraSync,
+  adaugaAmanata,
+  citesteSync,
+  golesteSync,
+  citesteAmanate,
+  stergeAmanata,
+  necesitaNet,
+  anuntAmanat,
+} from '../lib/coadaOffline'
+import { anuntaPeTelefon } from '../lib/notificari'
 import JarvisOrb from './JarvisOrb'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
@@ -215,6 +227,63 @@ export default function ChatPanel({
       window.clearTimeout(id)
     }
   }, [])
+  // FAZA 3 — RECONECTARE AUTOMATĂ: la trecerea offline→online (owner: „la găsirea
+  // de semnal să se reconecteze automat, să-și trimită tot pe server… iar cererile
+  // neonorate să le rezolve și să anunțe civilizat"), (1) trimitem pe server tot ce
+  // s-a întâmplat offline (SYNC), (2) rezolvăm cererile AMÂNATE și le anunțăm pe
+  // monitor. Netezim trecerea: contextul chatului e deja împărtășit (messages).
+  const online = useConectat()
+  const eraOnlineRef = useRef(online)
+  useEffect(() => {
+    const veneaDinOffline = online && !eraOnlineRef.current
+    eraOnlineRef.current = online
+    if (!veneaDinOffline) return
+    void (async () => {
+      const ture = citesteSync()
+      if (ture.length) {
+        try {
+          const r = await fetch('/api/offline/sync', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ ture }),
+          })
+          if (r.ok) golesteSync()
+        } catch {
+          /* rămâne în coadă → reîncercăm la următoarea revenire */
+        }
+      }
+      const bucati: string[] = []
+      for (const c of citesteAmanate()) {
+        try {
+          let raspuns = ''
+          const ac = new AbortController()
+          // onControl = no-op → aruncă cadrele de audio/suprafață; luăm DOAR textul.
+          for await (const buc of streamChat(
+            [{ role: 'user', content: c.intrebare, ts: c.t }],
+            undefined,
+            coordsRef.current ?? undefined,
+            () => {},
+            undefined,
+            ac.signal,
+          )) {
+            raspuns += buc
+          }
+          if (raspuns.trim()) bucati.push(anuntAmanat(c.intrebare, raspuns, lang))
+          stergeAmanata(c.id)
+        } catch {
+          /* rămâne amânată → reîncercăm data viitoare */
+        }
+      }
+      if (bucati.length) {
+        openWorkspaceDoc(strings(lang).raspunsAmanat, bucati.join('\n\n───\n\n'))
+        // FAZA 4 — anunț pe telefon (best-effort; Android complet, iOS limitat), ca
+        // omul să știe că i-am rezolvat cererea amânată chiar dacă app-ul e în fundal.
+        void anuntaPeTelefon(strings(lang).raspunsAmanat, bucati[0])
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, lang])
   const [busy, setBusy] = useState(false)
   // ECOUL A CE TRANSMIT EU — ținut mai mult pe ecran (Adrian, 3 aug: „afișarea
   // foarte scurtă a ce transmit eu — triplat timpul de afișat pe interfață").
@@ -391,6 +460,11 @@ export default function ChatPanel({
   // Precizia MĂSURATĂ a fixului GPS (±metri, de la senzor) — merge împreună cu
   // coordonatele în sesiunea vocală, ca modelul să știe cât de bun e locul.
   const precizieRef = useRef<number | null>(null)
+  // VITEZA de deplasare (m/s din `coords.speed`) — merge și OFFLINE, o folosește
+  // creierul local ca să fie uman (faza 2, owner: „la 2 va putea spune viteza?").
+  // null = senzorul n-a dat-o (nu inventăm). Ultima poziție+timp pentru fallback.
+  const vitezaRef = useRef<number | null>(null)
+  const ultimaPozRef = useRef<{ lat: number; lon: number; t: number } | null>(null)
   // The LIVE voice session (if any) — used by the location tools to
   // refresh its position exactly when needed (updateCoords, on demand).
   const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
@@ -1362,8 +1436,21 @@ export default function ChatPanel({
       // de flux (async iterable de bucăți), deci tot ce urmează (acumulare, gură,
       // randare, abort) rămâne IDENTIC. Calea online e neatinsă. `next` (istoricul,
       // inclusiv mesajul curent) e preluat de model — PRELUAREA CONTEXTULUI cerută.
-      const sursaFlux = !esteConectat()
-        ? streamLocalRaspuns(next, lang, ac.signal)
+      const eTuraOffline = !esteConectat()
+      const sursaFlux = eTuraOffline
+        ? streamLocalRaspuns(
+            next,
+            lang,
+            ac.signal,
+            // FAZA 2 — GPS + viteză + vedere, MĂSURATE, injectate în creierul local
+            // ca să fie UMAN offline (spune viteza, unde ești, că te vede).
+            contextPentruCreier({
+              lat: coordsRef.current?.lat,
+              lon: coordsRef.current?.lon,
+              vitezaMs: vitezaRef.current,
+              fataDetectata: Boolean(face),
+            }),
+          )
         : streamChat(
         next,
         image ?? undefined,
@@ -1435,6 +1522,18 @@ export default function ChatPanel({
       // empty assistant turn in the history (it would 400 the next request).
       if (!acc.trim()) setMessages(next)
       else suggestFacial(acc) // the face follows the tone of the finished reply
+      // FAZA 3 — COZILE OFFLINE: dacă tura a fost fără net, o punem în coada de
+      // SYNC (chat + locație) ca serverul să se actualizeze la revenire; dacă
+      // cererea CEREA net (căutare/vreme/email…), o punem și în coada de AMÂNATE,
+      // s-o rezolvăm și s-o anunțăm civilizat când revine semnalul (owner).
+      if (eTuraOffline) {
+        const acum = Date.now()
+        const lat = coordsRef.current?.lat
+        const lon = coordsRef.current?.lon
+        if (msg) adaugaTuraSync({ rol: 'user', text: msg, t: acum, lat, lon })
+        if (acc.trim()) adaugaTuraSync({ rol: 'assistant', text: acc, t: acum })
+        if (msg && necesitaNet(msg)) adaugaAmanata({ intrebare: msg, t: acum, lat, lon })
+      }
     } catch (err) {
       // A REPLACED TURN MAY NO LONGER WRITE (Adrian, Jul 31: "it hears the second
       // question, briefly shows it, but doesn't pass it on" + "the message that technically
@@ -2608,6 +2707,14 @@ export default function ChatPanel({
     const id = navigator.geolocation.watchPosition(
       (pos) => {
         const nou = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+        // VITEZA (faza 2): din senzor (`coords.speed`, merge și offline) dacă o dă;
+        // altfel calculată din poziția anterioară (vitezaDinPozitii). Măsurată,
+        // niciodată inventată — null rămâne null.
+        const vSenzor = typeof pos.coords.speed === 'number' && pos.coords.speed >= 0 ? pos.coords.speed : null
+        if (vSenzor != null) vitezaRef.current = vSenzor
+        else if (ultimaPozRef.current)
+          vitezaRef.current = vitezaDinPozitii(ultimaPozRef.current, { lat: nou.lat, lon: nou.lon, t: pos.timestamp }) ?? vitezaRef.current
+        ultimaPozRef.current = { lat: nou.lat, lon: nou.lon, t: pos.timestamp }
         // AUTO-UPDATE DOAR LA MIȘCARE MARE (9 aug, ownerul: „și un km e ok, că
         // la cerere se citește real"). Paznicul de fundal e doar un CACHE CALD
         // — nu trebuie precis, fiindcă orice tură care chiar are nevoie de loc
@@ -2636,6 +2743,8 @@ export default function ChatPanel({
           const c = { lat: pos.coords.latitude, lon: pos.coords.longitude }
           coordsRef.current = c
           precizieRef.current = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null
+          // Viteza (faza 2), dacă senzorul o dă la citirea pe loc.
+          if (typeof pos.coords.speed === 'number' && pos.coords.speed >= 0) vitezaRef.current = pos.coords.speed
           resolve(c)
         },
         // Refusal/failure → we stay on the last known position (may be null).

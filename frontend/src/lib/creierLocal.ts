@@ -73,16 +73,16 @@ export async function webgpuDisponibil(): Promise<boolean> {
 
 /** Persona OFFLINE a lui Kelion, în limba userului. PURĂ (testabilă). Cinstită:
  *  spune că e offline și ce NU poate, rămâne cald și scurt (companion, nu asistent). */
-export function personaLocala(lang: Lang): string {
+export function personaLocala(lang: Lang, context?: string): string {
   // Instrucțiunea rămâne în engleză (limbajul de sistem al modelului), dar CERE
-  // răspuns în limba userului.
-  return (
+  // răspuns în limba userului. `context` (faza 2) = GPS/viteză/vedere MĂSURATE.
+  const baza =
     `You are Kelion, a warm human-like companion running fully OFFLINE on the user's device. ` +
     `There is NO internet right now: you have no web search, no Google, no maps, no weather, no live data, no email. ` +
     `You are a COMPANION, not a full assistant — talk, keep them company, remember the conversation so far, be human, brief and kind. ` +
     `If asked for something that truly needs the internet, say honestly you can't do it offline and that you'll handle it when the signal returns — never invent an answer or pretend to act. ` +
     `Reply in the user's language: ${NUME_LIMBA[lang]}. Keep replies short and natural, voice-first.`
-  )
+  return context ? `${baza}\n${context}` : baza
 }
 
 /** ChatMessage[] → mesajele pentru model, cu persona în față + ultimele N ture
@@ -92,12 +92,13 @@ export function istoricPentruLocal(
   mesaje: MesajLocal[],
   lang: Lang,
   maxTure = 16,
+  context?: string,
 ): { role: 'system' | 'user' | 'assistant'; content: string }[] {
   const curate = mesaje
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
     .slice(-maxTure)
     .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content.trim() }))
-  return [{ role: 'system' as const, content: personaLocala(lang) }, ...curate]
+  return [{ role: 'system' as const, content: personaLocala(lang, context) }, ...curate]
 }
 
 /** Descarcă + încarcă modelul (o dată; idempotent). De chemat cât AI NET, ca să
@@ -140,6 +141,7 @@ export async function* streamLocalRaspuns(
   istoric: MesajLocal[],
   lang: Lang,
   signal?: AbortSignal,
+  context?: string, // faza 2: GPS/viteză/vedere MĂSURATE, injectate în persona
 ): AsyncGenerator<string> {
   const t = strings(lang)
   if (stare !== 'gata' || !motor) {
@@ -147,7 +149,7 @@ export async function* streamLocalRaspuns(
     yield stare === 'fara_webgpu' ? t.offlineFaraWebgpu : t.offlineModelNepregatit
     return
   }
-  const mesaje = istoricPentruLocal(istoric, lang)
+  const mesaje = istoricPentruLocal(istoric, lang, 16, context)
   let flux: AsyncIterable<{ choices?: { delta?: { content?: string } }[] }>
   try {
     flux = (await motor.chat.completions.create({
