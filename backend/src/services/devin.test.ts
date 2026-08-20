@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mochez DOAR `config` (hoistat de vitest ÎNAINTE de importuri, spre deosebire de
 // stubEnv care ar rula după). Testul clientului nu are nevoie de config-ul real —
-// doar de cheie, ca `anteturi()` să pună Bearer-ul.
-vi.mock('../config.js', () => ({ config: { devinKey: 'test-devin-key' } }))
+// doar de cheie (Bearer) + tokenul GitHub (secretul de acces la repo).
+vi.mock('../config.js', () => ({ config: { devinKey: 'test-devin-key', githubToken: 'gh-test-token' } }))
 
-import { creeazaSesiuneDevin, stareSesiuneDevin, devinDisponibil } from './devin.js'
+import { creeazaSesiuneDevin, stareSesiuneDevin, devinDisponibil, asiguraTokenRepoLaDevin } from './devin.js'
 
 function fetchCare(status: number, corp: unknown): typeof fetch {
   return vi.fn(async () => ({
@@ -71,5 +71,33 @@ describe('devin — clientul constructorului extern', () => {
     }))
     const s = await stareSesiuneDevin('sess-1')
     expect(s.prUrl).toBe('https://github.com/kelion-team/kelionai/pull/1301')
+  })
+
+  it('asiguraTokenRepoLaDevin: pune secretul key-value cu sensitive=true, valoarea = tokenul', async () => {
+    const spy = fetchCare(200, { id: 'secret-1' })
+    vi.stubGlobal('fetch', spy)
+    const r = await asiguraTokenRepoLaDevin()
+    expect(r.ok).toBe(true)
+    const [url, init] = (spy as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(String(url)).toMatch(/\/secrets$/)
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.type).toBe('key-value')
+    expect(body.key).toBeTruthy()
+    expect(body.value).toBe('gh-test-token')
+    expect(body.sensitive).toBe(true) // Devin redactează tokenul în loguri
+  })
+
+  it('asiguraTokenRepoLaDevin: „există deja" (409) = OK, idempotent', async () => {
+    vi.stubGlobal('fetch', fetchCare(409, { error: 'secret key already exists' }))
+    const r = await asiguraTokenRepoLaDevin()
+    expect(r.ok).toBe(true)
+  })
+
+  it('asiguraTokenRepoLaDevin: eroare reală = ok:false, cu motiv (fără tokenul în clar)', async () => {
+    vi.stubGlobal('fetch', fetchCare(500, { error: 'boom' }))
+    const r = await asiguraTokenRepoLaDevin()
+    expect(r.ok).toBe(false)
+    expect(r.motiv).toMatch(/devin_secret_esuat: HTTP 500/)
+    expect(r.motiv).not.toContain('gh-test-token') // valoarea nu se scurge în eroare
   })
 })

@@ -22,6 +22,11 @@ const MAX_ACU = ((): number => {
   return Number.isFinite(n) && n > 0 ? n : 10 // hardcod-permis: plasă de siguranță implicită (ACU/sesiune), suprascrisă de env DEVIN_MAX_ACU
 })()
 
+// Numele secretului sub care Kelion pune tokenul GitHub la Devin (IDENTIFICATOR,
+// nu valoare — nu cade sub anti-hardcodare). Sesiunile fără secret_ids folosesc
+// TOATE secretele, deci e destul să existe.
+const SECRET_KEY_REPO = 'KELION_GH_TOKEN'
+
 export interface SesiuneDevinNoua {
   sessionId: string
   /** URL-ul sesiunii Devin (interfața), pentru monitor/istoric. */
@@ -113,6 +118,34 @@ export async function stareSesiuneDevin(sessionId: string): Promise<StareDevin> 
   }
 }
 
-// (Un „trimiteMesajDevin" pentru follow-up într-o sesiune se adaugă când
-//  dispecerul chiar are nevoie — cu endpoint-ul confirmat LIVE. Nu bag cod
-//  speculativ, neconsumat: poarta verifica-exporturi îl demască oricum.)
+// ── ACCESUL LA REPO, DIN COD (owner, 20 aug: „b", varianta fără dansul de OAuth) ──
+// Kelion pune tokenul GitHub al aplicației la Devin ca SECRET (`POST /v1/secrets`),
+// ca Devin să poată clona repo-ul privat + deschide PR-uri — FĂRĂ ca owner-ul să
+// atingă setările Devin. `sensitive:true` = Devin îl redactează în loguri. Valoarea
+// tokenului NU se scrie NICIODATĂ în log/eroare aici. Idempotent: cheia e unică, așa
+// că un „există deja" = OK. Sesiunile (fără secret_ids) văd toate secretele.
+export async function asiguraTokenRepoLaDevin(): Promise<{ ok: boolean; motiv?: string }> {
+  const token = config.githubToken
+  if (!token) return { ok: false, motiv: 'lipsă GITHUB_TOKEN în env — Devin n-are cu ce clona repo-ul privat' }
+  let r: Response
+  try {
+    r = await fetch(`${BASE}/secrets`, {
+      method: 'POST',
+      headers: anteturi(),
+      body: JSON.stringify({
+        type: 'key-value',
+        key: SECRET_KEY_REPO,
+        value: token,
+        sensitive: true,
+        note: 'GitHub token for Kelion — lets Devin clone kelion-team/kelionai and open PRs',
+      }),
+    })
+  } catch (e) {
+    return { ok: false, motiv: `devin_secret_retea: ${String(e).slice(0, 120)}` }
+  }
+  if (r.ok) return { ok: true }
+  const text = await r.text().catch(() => '')
+  // Cheia trebuie să fie UNICĂ: dacă există deja, e OK (l-am pus altă dată).
+  if (r.status === 409 || /exist|unique|already|duplicat/i.test(text)) return { ok: true }
+  return { ok: false, motiv: `devin_secret_esuat: HTTP ${r.status} ${text.slice(0, 160)}` }
+}
