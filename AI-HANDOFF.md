@@ -1162,3 +1162,35 @@ local (PR nou pe `claude/reparatie-cu-rosu-uokj4m`):
   de manual), exporturi/hardcodări/sintaxă/jscpd curate.
 - **Neverificat pe device** (WebGPU/GPS/cameră/notificări/offline real = doar pe
   telefonul owner-ului) — asta rămâne verificarea LIVE a lui.
+
+### §15c — AUDIT 3 AGENȚI + REPARAȚII: „nu descarcă nimic" + „audio inexistent" (20 aug)
+Owner (măsurat de el): „nu descarca nimic pentru offline, e minciuna gogonata" +
+„mai mult chatul audio inexistent" + (avion) „nu poate accesa aplicatia". Audit cu 3
+agenți → cauzele erau ÎN COD (regula #2), reparate:
+1. **Modelul offline era distrus la fiecare update.** WebLLM ține creierul local
+   (~2 GB) în Cache Storage sub `webllm/*`. `hardResetToLatest` (`updateCheck.ts`),
+   plus `activate` și mesajul `kelion-clear-caches` din `sw.js`, ștergeau TOATE
+   cache-urile la fiecare publicare („update la foc continuu") → offline nu era gata
+   niciodată. FIX: `webllm/*` este acum PROTEJAT în toate cele trei locuri (`ePastrat`
+   în SW, `filter(k=>!k.startsWith('webllm/'))` în updateCheck).
+2. **Descărcarea era invizibilă.** `StatusOffline` dădea `return null` pe
+   fără-WebGPU/eroare/nepornit → omul nu vedea nimic. Rescris: `%` la descărcare,
+   „gata ✓", mesaj CINSTIT „fără WebGPU" (măsurat pe montare cu `webgpuDisponibil`),
+   eroare + „Reîncearcă", buton MANUAL „Descarcă pentru offline". Chei i18n noi ×3 (7 limbi).
+3. **Avion: app-ul nu pornea.** SW nu punea shell-ul în cache la instalare. FIX:
+   `install` → `caches.open(SHELL).then(c=>c.add('/'))` (precache), pe lângă cache-ul
+   leneș din fetch handler.
+4. **Audio inexistent pe scris/offline.** Gura implicită e sesiunea Gemini Live
+   (`vlRef`), care NU rostește textul scris; gura de streaming `rvLiveRef` e null pe
+   calea implicită → `feedSpeech` mut; Chirp-ul de pe server (c.audio) vine doar dacă
+   serverul îl trimite. Când nimic nu suna → tăcere. FIX: **gură de siguranță**
+   (`lib/voceBrowser.ts`) — vocea nativă a browserului (Web Speech) rostește răspunsul
+   la +2,2s DOAR dacă `aSunatTuraRef` e false ȘI `!isVoicePlaying()` (fără dublare),
+   doar pe turele SCRISE. Acoperă și offline (unde nu există deloc c.audio).
+5. **Vizibilitate bandă „K".** Răspunsul terminat dispărea când nu era busy și nu
+   era monitor mode; acum rămâne pe bandă (ticker) până animă o dată.
+**Porți:** FE tsc 0, build verde, 82/82 teste (nou `voceBrowser.test.ts` ×4),
+hardcod+sintaxă 0. **RĂMAS LIVE (owner, pe device):** (a) bara „se descarcă %"→„gata";
+(b) răspunsul scris se AUDE; (c) avionul deschide app-ul. **De decis cu owner-ul
+(Agent 3, cost):** sesiunea Gemini Live pornește automat + ascultă continuu →
+~£300+/lună; recomandare: poartă VAD / pornire la activare, nu la load.

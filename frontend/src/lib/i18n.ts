@@ -38,6 +38,9 @@ export interface Strings {
   raspunsAmanat: string
   offlinePregatire: string
   offlineGata: string
+  offlineDescarca: string
+  offlineReincearca: string
+  offlineFaraWebgpuScurt: string
   credits: string
   topUp: string
   lowCredit: string
@@ -297,6 +300,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     raspunsAmanat: 'I can now tell you the answer to what you asked while you were offline',
     offlinePregatire: 'Downloading Kelion offline',
     offlineGata: 'Kelion is ready offline',
+    offlineDescarca: 'Download for offline',
+    offlineReincearca: 'Retry',
+    offlineFaraWebgpuScurt: 'Offline brain unavailable on this device (no WebGPU)',
     credits: 'credits',
     topUp: 'Please top up your credit',
     lowCredit: 'Your credit is running low — please top up.',
@@ -523,6 +529,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     raspunsAmanat: 'Îți pot spune acum răspunsul la ce m-ai întrebat cât erai offline',
     offlinePregatire: 'Se descarcă Kelion offline',
     offlineGata: 'Kelion e gata offline',
+    offlineDescarca: 'Descarcă pentru offline',
+    offlineReincearca: 'Reîncearcă',
+    offlineFaraWebgpuScurt: 'Creierul offline nu merge pe acest dispozitiv (fără WebGPU)',
     credits: 'credite',
     topUp: 'Te rog reîncarcă creditul',
     lowCredit: 'Mai ai puțin credit — te rog reîncarcă.',
@@ -746,6 +755,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     raspunsAmanat: 'Ahora puedo darte la respuesta a lo que me preguntaste mientras estabas sin conexión',
     offlinePregatire: 'Descargando Kelion sin conexión',
     offlineGata: 'Kelion está listo sin conexión',
+    offlineDescarca: 'Descargar para sin conexión',
+    offlineReincearca: 'Reintentar',
+    offlineFaraWebgpuScurt: 'El cerebro sin conexión no funciona en este dispositivo (sin WebGPU)',
     credits: 'créditos',
     topUp: 'Por favor recarga tu crédito',
     lowCredit: 'Te queda poco crédito — recarga, por favor.',
@@ -921,6 +933,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     raspunsAmanat: 'Je peux maintenant te donner la réponse à ce que tu m’as demandé hors ligne',
     offlinePregatire: 'Téléchargement de Kelion hors ligne',
     offlineGata: 'Kelion est prêt hors ligne',
+    offlineDescarca: 'Télécharger pour hors ligne',
+    offlineReincearca: 'Réessayer',
+    offlineFaraWebgpuScurt: 'Le cerveau hors ligne ne fonctionne pas sur cet appareil (pas de WebGPU)',
     credits: 'crédits',
     topUp: 'Veuillez recharger votre crédit',
     lowCredit: 'Votre crédit est presque épuisé — veuillez recharger.',
@@ -1096,6 +1111,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     raspunsAmanat: 'Ich kann dir jetzt die Antwort auf deine Frage von unterwegs (offline) geben',
     offlinePregatire: 'Kelion offline wird geladen',
     offlineGata: 'Kelion ist offline bereit',
+    offlineDescarca: 'Für offline herunterladen',
+    offlineReincearca: 'Erneut versuchen',
+    offlineFaraWebgpuScurt: 'Offline-Gehirn auf diesem Gerät nicht verfügbar (kein WebGPU)',
     credits: 'Guthaben',
     topUp: 'Bitte lade dein Guthaben auf',
     lowCredit: 'Dein Guthaben wird knapp — bitte aufladen.',
@@ -1271,6 +1289,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     raspunsAmanat: 'Ora posso darti la risposta a ciò che mi hai chiesto mentre eri offline',
     offlinePregatire: 'Download di Kelion offline',
     offlineGata: 'Kelion è pronto offline',
+    offlineDescarca: 'Scarica per offline',
+    offlineReincearca: 'Riprova',
+    offlineFaraWebgpuScurt: 'Il cervello offline non funziona su questo dispositivo (niente WebGPU)',
     credits: 'crediti',
     topUp: 'Ricarica il tuo credito, per favore',
     lowCredit: 'Il tuo credito sta per finire — ricarica, per favore.',
@@ -1446,6 +1467,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     raspunsAmanat: 'Agora posso te dar a resposta ao que me perguntaste enquanto estavas offline',
     offlinePregatire: 'Baixando Kelion offline',
     offlineGata: 'Kelion está pronto offline',
+    offlineDescarca: 'Baixar para offline',
+    offlineReincearca: 'Tentar de novo',
+    offlineFaraWebgpuScurt: 'O cérebro offline não funciona neste dispositivo (sem WebGPU)',
     credits: 'créditos',
     topUp: 'Por favor, recarregue o seu crédito',
     lowCredit: 'O seu crédito está acabando — recarregue, por favor.',

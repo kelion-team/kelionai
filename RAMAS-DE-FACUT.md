@@ -13,6 +13,29 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] ORDIN 20 aug (verbatim): „nu descarca nimic pentru offline, e minciuna gogonata"
+      + „mai mult chatul audio inexistent" + (mai devreme) „in avion zice ca nu poate
+      accesa aplicatia". AUDIT cu 3 agenți → cauze ÎN COD (nu la el), reparate:
+      (1) **modelul offline se descărca și era ȘTERS** la fiecare publicare — WebLLM
+      ține creierul (~2 GB) în Cache Storage sub `webllm/*`, iar hard-reset-ul de update
+      („update la foc continuu") + `activate`/`kelion-clear-caches` din SW goleau TOT →
+      offline nu ajungea NICIODATĂ „gata". FIX: `webllm/*` protejat în `updateCheck.ts`
+      + `sw.js` (nu se mai șterge). (2) **descărcarea era INVIZIBILĂ** — bara de status
+      tăcea pe fără-WebGPU/eroare/nepornit (`return null`). FIX (`StatusOffline.tsx`):
+      arată `%` la descărcare, „gata ✓", spune CINSTIT când dispozitivul n-are WebGPU,
+      arată eroarea + „Reîncearcă", și dă buton MANUAL „Descarcă pentru offline".
+      (3) **avion: app-ul nu pornea** — SW nu punea shell-ul în cache la instalare.
+      FIX (`sw.js` install): precache `'/'`. (4) **audio inexistent pe scris/offline** —
+      gura implicită (Gemini Live) NU rostește textul scris, iar Chirp-ul de pe server
+      vine doar dacă serverul chiar îl trimite → tăcere. FIX: GURĂ DE SIGURANȚĂ
+      (`voceBrowser.ts`) — vocea nativă a browserului rostește răspunsul DOAR dacă n-a
+      sunat nimic (fără dublare). (5) răspunsul terminat rămâne vizibil pe banda „K"
+      (nu mai dispărea când nu era busy/monitor). DOVEZI: tsc 0, build verde, 82 teste
+      verzi, 2 porți (hardcod+sintaxă) 0. RĂMAS de PROBAT LIVE de Adrian (nu pot de aici,
+      depinde de dispozitiv): (a) pe telefonul lui chiar apare bara „se descarcă X%" și
+      ajunge „gata ✓" (sau spune cinstit „fără WebGPU"); (b) răspunsul scris se AUDE;
+      (c) în avion app-ul se deschide. SEPARAT, de decis cu el (Agent 3, cost): sesiunea
+      Gemini Live pornește automat și ascultă CONTINUU → ~£300+/lună; de pus poartă/VAD.
 - [x] ORDIN 19 aug (verbatim): „seteaza sa aibe timp sa raspunda… dinamic pe greutatea
       intrebari sau problemei" + „sistem de ajustare continuu, cind are destul context"
       + „daca a trecut pe plata sa se uite cit timp a durat si faca o medie, pina se

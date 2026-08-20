@@ -80,6 +80,7 @@ import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 import { esteConectat, useConectat } from '../lib/conexiune'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
+import { vorbesteLocal, opresteVoceLocal } from '../lib/voceBrowser'
 import {
   adaugaTuraSync,
   adaugaAmanata,
@@ -473,6 +474,11 @@ export default function ChatPanel({
   // The LIVE voice session (if any) — used by the location tools to
   // refresh its position exactly when needed (updateCoords, on demand).
   const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
+  // A SUNAT CEVA pe tura curentă? (owner 20 aug: „chatul audio inexistent"). Se
+  // ridică true când gura reală rostește ceva — vocea live (mouth.speak) SAU Chirp-ul
+  // de pe server (c.audio → playVoice). Dacă la finalul unei ture SCRISE rămâne false,
+  // răspunsul n-a fost auzit de nimeni → intră gura de siguranță (vocea browserului).
+  const aSunatTuraRef = useRef(false)
   // VOCEA LIVE FULL-DUPLEX (7 aug) — din 8 aug seara e calea IMPLICITĂ (ownerul:
   // „asta nu e chat live, e semiduplex... pui [modelul live] în locul acestuia").
   // `localStorage.kelion_voce_live = '0'` repune calea clasică, fără deploy.
@@ -663,6 +669,7 @@ export default function ChatPanel({
       // învingea relaxarea gardului A de mai sus). Blocajul între taburi rămâne.
       if (!requestTtsFocus({ turaScrisa: !voiceTurnRef.current })) return
       contorGata('primul sunet (gura a pornit)')
+      aSunatTuraRef.current = true // Chirp-ul de pe server a sunat → gura de siguranță NU mai intră
       playVoice(
         c.audio,
         // Cât redă Chirp-ul, mutăm ȘI microfonul clasic ȘI urechea LIVE
@@ -1220,6 +1227,7 @@ export default function ChatPanel({
     if (msg && STOP_CMD.test(msg)) {
       interruptAll('stop-command')
       rvLiveRef.current?.stopSpeaking() // the live mouth shuts up too (Aug 1 — one brain)
+      opresteVoceLocal() // și gura de siguranță (vocea browserului) tace pe „stop"
       abortRef.current?.abort()
       pendingSendsRef.current = [] // stop means stop — empty the queue
       setQueued([])
@@ -1257,6 +1265,7 @@ export default function ChatPanel({
       if (!msg && !pendingAudioRef.current) return
       interruptAll('barge-in-text') // cut TTS + notify LIVE mouth; one focus arbiter
       rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
+      opresteVoceLocal() // taie gura de siguranță a turei întrerupte (barge-in)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
       // NO return — we fall through below and start the new turn right now.
     } else {
@@ -1363,6 +1372,9 @@ export default function ChatPanel({
     // nothing is spoken here (the Chirp path stays as it was). The session is
     // captured ONCE per turn — a mid-turn rotation must not steal the speech.
     const mouth = rvLiveRef.current
+    // NOUĂ TURĂ: încă n-a rostit nimeni nimic; tăiem orice gură de siguranță rămasă.
+    aSunatTuraRef.current = false
+    opresteVoceLocal()
     let speechBuf = ''
     // Sentence splitter: a sentence leaves the buffer only when it ENDS with a
     // terminator followed by whitespace (or the very end of the buffer) — so
@@ -1384,6 +1396,7 @@ export default function ChatPanel({
       if (!mouth) return
       // NU vorbi peste muzică (Adrian, 4 aug): cât e muzică în cameră, gura tace.
       if (muzicaActivaRef.current) return
+      aSunatTuraRef.current = true // gura live rostește tura → fără gură de siguranță
       speechBuf += chunk
       // Fast check: don't run regex if there is no punctuation/newline and buffer is small
       if (speechBuf.length < 200 && !/[.!?…\n]/.test(speechBuf)) return
@@ -1543,6 +1556,23 @@ export default function ChatPanel({
         if (msg) adaugaTuraSync({ rol: 'user', text: msg, t: acum, lat, lon })
         if (acc.trim()) adaugaTuraSync({ rol: 'assistant', text: acc, t: acum })
         if (msg && necesitaNet(msg)) adaugaAmanata({ intrebare: msg, t: acum, lat, lon })
+      }
+      // GURĂ DE SIGURANȚĂ (owner 20 aug: „chatul audio inexistent"): pe o tură SCRISĂ
+      // (sau offline), dacă până acum NU a rostit nimeni răspunsul — nici gura live
+      // (`rvLiveRef` e null cât e implicită sesiunea Gemini Live, care nu spune scrisul),
+      // nici Chirp-ul de pe server (c.audio) — îl rostește vocea NATIVĂ a browserului, ca
+      // răspunsul să se AUDĂ de fiecare dată. Doar pe scris (vocalul îl spun live/Chirp),
+      // DOAR dacă n-a sunat nimic → fără dublare. Verificarea e ușor amânată: Chirp-ul de
+      // pe server poate ajunge la câteva sute de ms după ce textul e gata.
+      if (!isVoiceTurn && acc.trim() && !muzicaActivaRef.current) {
+        const deRostit = cleanForSpeech(acc)
+        if (deRostit) {
+          window.setTimeout(() => {
+            if (!aSunatTuraRef.current && !ac.signal.aborted && !isVoicePlaying() && !muzicaActivaRef.current) {
+              vorbesteLocal(deRostit, lang)
+            }
+          }, 2200)
+        }
       }
     } catch (err) {
       // A REPLACED TURN MAY NO LONGER WRITE (Adrian, Jul 31: "it hears the second
@@ -3277,7 +3307,7 @@ export default function ChatPanel({
               <span className="speech-tail-text">…</span>
             </span>
           </div>
-        ) : ((lastAssistant?.content && !idleBandHidden && (busy || monitorMode)) || busy) && lastAssistant?.ts !== tickerDoneTs ? (
+        ) : ((lastAssistant?.content && !idleBandHidden) || busy) && lastAssistant?.ts !== tickerDoneTs ? (
           <div className="heard-band kelion-band" aria-live="polite">
             <span className="heard-band-label kelion-k" title={t.heardKelionTitle}>K</span>
             {busy ? (
