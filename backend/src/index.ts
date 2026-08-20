@@ -56,6 +56,7 @@ import { pingRoutes } from './routes/ping.js'
 import { constructorViuRoutes } from './routes/constructorViu.js'
 import { constructorStareRoutes } from './routes/constructorStare.js'
 import { jobsRoutes } from './routes/jobs.js'
+import { offlineRoutes } from './routes/offline.js'
 import { deployRoutes } from './routes/deploy.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive, loadKv, saveKv } from './db.js'
 import { getSessionUser } from './session.js'
@@ -334,6 +335,7 @@ await app.register(ingestRoutes)
 await app.register(browserRoutes)
 await app.register(opsRoutes)
 await app.register(constructorRoutes)
+await app.register(offlineRoutes)
 await app.register(authLocalRoutes)
 await app.register(contactRoutes)
 await app.register(voiceprintRoutes)

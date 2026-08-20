@@ -77,9 +77,19 @@ import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
-import { esteConectat } from '../lib/conexiune'
+import { esteConectat, useConectat } from '../lib/conexiune'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
+import {
+  adaugaTuraSync,
+  adaugaAmanata,
+  citesteSync,
+  golesteSync,
+  citesteAmanate,
+  stergeAmanata,
+  necesitaNet,
+  anuntAmanat,
+} from '../lib/coadaOffline'
 import JarvisOrb from './JarvisOrb'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
@@ -216,6 +226,58 @@ export default function ChatPanel({
       window.clearTimeout(id)
     }
   }, [])
+  // FAZA 3 — RECONECTARE AUTOMATĂ: la trecerea offline→online (owner: „la găsirea
+  // de semnal să se reconecteze automat, să-și trimită tot pe server… iar cererile
+  // neonorate să le rezolve și să anunțe civilizat"), (1) trimitem pe server tot ce
+  // s-a întâmplat offline (SYNC), (2) rezolvăm cererile AMÂNATE și le anunțăm pe
+  // monitor. Netezim trecerea: contextul chatului e deja împărtășit (messages).
+  const online = useConectat()
+  const eraOnlineRef = useRef(online)
+  useEffect(() => {
+    const veneaDinOffline = online && !eraOnlineRef.current
+    eraOnlineRef.current = online
+    if (!veneaDinOffline) return
+    void (async () => {
+      const ture = citesteSync()
+      if (ture.length) {
+        try {
+          const r = await fetch('/api/offline/sync', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ ture }),
+          })
+          if (r.ok) golesteSync()
+        } catch {
+          /* rămâne în coadă → reîncercăm la următoarea revenire */
+        }
+      }
+      const bucati: string[] = []
+      for (const c of citesteAmanate()) {
+        try {
+          let raspuns = ''
+          const ac = new AbortController()
+          // onControl = no-op → aruncă cadrele de audio/suprafață; luăm DOAR textul.
+          for await (const buc of streamChat(
+            [{ role: 'user', content: c.intrebare, ts: c.t }],
+            undefined,
+            coordsRef.current ?? undefined,
+            () => {},
+            undefined,
+            ac.signal,
+          )) {
+            raspuns += buc
+          }
+          if (raspuns.trim()) bucati.push(anuntAmanat(c.intrebare, raspuns, lang))
+          stergeAmanata(c.id)
+        } catch {
+          /* rămâne amânată → reîncercăm data viitoare */
+        }
+      }
+      if (bucati.length) openWorkspaceDoc(strings(lang).raspunsAmanat, bucati.join('\n\n───\n\n'))
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, lang])
   const [busy, setBusy] = useState(false)
   // ECOUL A CE TRANSMIT EU — ținut mai mult pe ecran (Adrian, 3 aug: „afișarea
   // foarte scurtă a ce transmit eu — triplat timpul de afișat pe interfață").
@@ -1368,7 +1430,8 @@ export default function ChatPanel({
       // de flux (async iterable de bucăți), deci tot ce urmează (acumulare, gură,
       // randare, abort) rămâne IDENTIC. Calea online e neatinsă. `next` (istoricul,
       // inclusiv mesajul curent) e preluat de model — PRELUAREA CONTEXTULUI cerută.
-      const sursaFlux = !esteConectat()
+      const eTuraOffline = !esteConectat()
+      const sursaFlux = eTuraOffline
         ? streamLocalRaspuns(
             next,
             lang,
@@ -1453,6 +1516,18 @@ export default function ChatPanel({
       // empty assistant turn in the history (it would 400 the next request).
       if (!acc.trim()) setMessages(next)
       else suggestFacial(acc) // the face follows the tone of the finished reply
+      // FAZA 3 — COZILE OFFLINE: dacă tura a fost fără net, o punem în coada de
+      // SYNC (chat + locație) ca serverul să se actualizeze la revenire; dacă
+      // cererea CEREA net (căutare/vreme/email…), o punem și în coada de AMÂNATE,
+      // s-o rezolvăm și s-o anunțăm civilizat când revine semnalul (owner).
+      if (eTuraOffline) {
+        const acum = Date.now()
+        const lat = coordsRef.current?.lat
+        const lon = coordsRef.current?.lon
+        if (msg) adaugaTuraSync({ rol: 'user', text: msg, t: acum, lat, lon })
+        if (acc.trim()) adaugaTuraSync({ rol: 'assistant', text: acc, t: acum })
+        if (msg && necesitaNet(msg)) adaugaAmanata({ intrebare: msg, t: acum, lat, lon })
+      }
     } catch (err) {
       // A REPLACED TURN MAY NO LONGER WRITE (Adrian, Jul 31: "it hears the second
       // question, briefly shows it, but doesn't pass it on" + "the message that technically
