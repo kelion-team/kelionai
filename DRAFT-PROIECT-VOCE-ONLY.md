@@ -65,6 +65,9 @@ Cât creierul greu macină (puțin sau mult), Live NU stă degeaba și NU doar a
   avea un creier LIVE în față, nu doar o gură.
 - Plasă (guardrail): se pun DOAR întrebările care taie cel mai mult din
   posibilități; te oprești când e destul de precis — nu interogatoriu.
+- Owner (20 aug): schimburile ușor↔greu sunt DEJA foarte rapide; chatul live
+  oferă timp cât gândește; întrebările către om trebuie să fie DECENTE
+  (rezonabile ca număr), nu un interogatoriu.
 
 ### Ce avem deja / ce e NOU (măsurat)
 - AVEM: Live culege GPS/cameră/monitor și le trimite; poate injecta text
