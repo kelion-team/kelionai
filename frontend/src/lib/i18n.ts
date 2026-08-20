@@ -36,6 +36,8 @@ export interface Strings {
   offlineModelNepregatit: string
   offlineEroareLocal: string
   raspunsAmanat: string
+  offlinePregatire: string
+  offlineGata: string
   credits: string
   topUp: string
   lowCredit: string
@@ -293,6 +295,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: "I'm offline. The local brain isn't downloaded yet — prepare it while you have signal and I'll work without a connection too.",
     offlineEroareLocal: 'The local brain hit a problem:',
     raspunsAmanat: 'I can now tell you the answer to what you asked while you were offline',
+    offlinePregatire: 'Downloading Kelion offline',
+    offlineGata: 'Kelion is ready offline',
     credits: 'credits',
     topUp: 'Please top up your credit',
     lowCredit: 'Your credit is running low — please top up.',
@@ -517,6 +521,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Sunt offline. Creierul local nu e încă descărcat — pregătește-l cât ai semnal și apoi merg și fără net.',
     offlineEroareLocal: 'Creierul local a dat de o problemă:',
     raspunsAmanat: 'Îți pot spune acum răspunsul la ce m-ai întrebat cât erai offline',
+    offlinePregatire: 'Se descarcă Kelion offline',
+    offlineGata: 'Kelion e gata offline',
     credits: 'credite',
     topUp: 'Te rog reîncarcă creditul',
     lowCredit: 'Mai ai puțin credit — te rog reîncarcă.',
@@ -738,6 +744,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Estoy sin conexión. El cerebro local aún no está descargado — prepáralo mientras tengas señal y funcionaré también sin conexión.',
     offlineEroareLocal: 'El cerebro local tuvo un problema:',
     raspunsAmanat: 'Ahora puedo darte la respuesta a lo que me preguntaste mientras estabas sin conexión',
+    offlinePregatire: 'Descargando Kelion sin conexión',
+    offlineGata: 'Kelion está listo sin conexión',
     credits: 'créditos',
     topUp: 'Por favor recarga tu crédito',
     lowCredit: 'Te queda poco crédito — recarga, por favor.',
@@ -911,6 +919,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Je suis hors ligne. Le cerveau local n’est pas encore téléchargé — prépare-le tant que tu as du signal et je fonctionnerai aussi sans connexion.',
     offlineEroareLocal: 'Le cerveau local a rencontré un problème :',
     raspunsAmanat: 'Je peux maintenant te donner la réponse à ce que tu m’as demandé hors ligne',
+    offlinePregatire: 'Téléchargement de Kelion hors ligne',
+    offlineGata: 'Kelion est prêt hors ligne',
     credits: 'crédits',
     topUp: 'Veuillez recharger votre crédit',
     lowCredit: 'Votre crédit est presque épuisé — veuillez recharger.',
@@ -1084,6 +1094,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Ich bin offline. Das lokale Gehirn ist noch nicht heruntergeladen — bereite es vor, solange du Signal hast, dann funktioniere ich auch ohne Verbindung.',
     offlineEroareLocal: 'Das lokale Gehirn hatte ein Problem:',
     raspunsAmanat: 'Ich kann dir jetzt die Antwort auf deine Frage von unterwegs (offline) geben',
+    offlinePregatire: 'Kelion offline wird geladen',
+    offlineGata: 'Kelion ist offline bereit',
     credits: 'Guthaben',
     topUp: 'Bitte lade dein Guthaben auf',
     lowCredit: 'Dein Guthaben wird knapp — bitte aufladen.',
@@ -1257,6 +1269,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Sono offline. Il cervello locale non è ancora scaricato — preparalo finché hai segnale e funzionerò anche senza connessione.',
     offlineEroareLocal: 'Il cervello locale ha avuto un problema:',
     raspunsAmanat: 'Ora posso darti la risposta a ciò che mi hai chiesto mentre eri offline',
+    offlinePregatire: 'Download di Kelion offline',
+    offlineGata: 'Kelion è pronto offline',
     credits: 'crediti',
     topUp: 'Ricarica il tuo credito, per favore',
     lowCredit: 'Il tuo credito sta per finire — ricarica, per favore.',
@@ -1430,6 +1444,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Estou offline. O cérebro local ainda não foi baixado — prepare-o enquanto tem sinal e funcionarei mesmo sem conexão.',
     offlineEroareLocal: 'O cérebro local teve um problema:',
     raspunsAmanat: 'Agora posso te dar a resposta ao que me perguntaste enquanto estavas offline',
+    offlinePregatire: 'Baixando Kelion offline',
+    offlineGata: 'Kelion está pronto offline',
     credits: 'créditos',
     topUp: 'Por favor, recarregue o seu crédito',
     lowCredit: 'O seu crédito está acabando — recarregue, por favor.',
