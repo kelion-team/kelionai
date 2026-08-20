@@ -5008,9 +5008,16 @@ export async function deleteBuildJob(id: number): Promise<boolean> {
 }
 
 /** Ștergere în GRUP după stare. `scope`: 'failed' (doar eșuate), 'done' (doar
- *  terminate), 'failed_done' (eșuate + terminate — cele „istorice", NU cele în
- *  curs), 'all' (chiar tot). Nu atinge NICIODATĂ ordinele 'queued'/'running'
- *  decât la 'all' — un ordin viu nu se șterge din greșeală. Întoarce câte a șters. */
+ *  terminate), 'failed_done' (eșuate + terminate + anulate), 'all' (tot
+ *  ISTORICUL). NICIUN scope nu atinge VREODATĂ ordinele VII ('queued'/'running')
+ *  — un ordin la care ownerul așteaptă NU se șterge într-o curățare în grup.
+ *  Întoarce câte a șters. */
+// OWNER, 20 aug: „a avut multe ordine de lucru și au dispărut, le-a șters când a
+// trecut forțat pe bani." Cauza: 'all' rula un `DELETE FROM build_jobs` GOL, care
+// mătura și ordinele 'queued'/'running' (munca în așteptare), nu doar istoricul —
+// exact regula #3 (nicio operație în masă pe ceva ce nu s-ai uitat). GARD PERMANENT:
+// ștergerea în grup exclude MEREU ordinele vii (NOT IN queued/running). Un ordin viu
+// se poate șterge DOAR țintit, pe id (deleteBuildJob) — o alegere explicită, un ordin.
 // AUDIT ADMIN (3 aug): la eroare de DB întorcea 0 → panoul afișa „Curățat: 0
 // ordine șterse." ca rezultat măsurat, deși ștergerea nu rulase deloc (zeroul
 // fals interzis de regula #1). null = eșec (ruta răspunde 500); 0 rămâne
@@ -5019,18 +5026,16 @@ export async function deleteBuildJobsByScope(
   scope: 'failed' | 'done' | 'failed_done' | 'all',
 ): Promise<number | null> {
   if (!dbEnabled()) return null
-  const stariCurente: Record<typeof scope, string[] | null> = {
+  // Stările de ISTORIC pe scope. Ordinele VII (queued/running) lipsesc din TOATE —
+  // niciun grup nu le poate atinge, nici măcar 'all'.
+  const stariCurente: Record<typeof scope, string[]> = {
     failed: ['failed'],
     done: ['done'],
     failed_done: ['failed', 'done', 'cancelled'],
-    all: null, // null = fără filtru (chiar tot)
+    all: ['failed', 'done', 'cancelled'], // „tot" = tot ISTORICUL, nu munca vie
   }
-  const stari = stariCurente[scope]
   try {
-    const r =
-      stari === null
-        ? await getPool().query('DELETE FROM build_jobs')
-        : await getPool().query('DELETE FROM build_jobs WHERE status = ANY($1)', [stari])
+    const r = await getPool().query('DELETE FROM build_jobs WHERE status = ANY($1)', [stariCurente[scope]])
     return r.rowCount ?? 0
   } catch {
     return null
