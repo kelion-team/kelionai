@@ -32,6 +32,9 @@ export interface Strings {
   brainError: string
   offline: string
   offlineCompanion: string
+  offlineFaraWebgpu: string
+  offlineModelNepregatit: string
+  offlineEroareLocal: string
   credits: string
   topUp: string
   lowCredit: string
@@ -285,6 +288,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainError: 'Brain error. Please try again.',
     offline: "I've lost the internet connection — I'll be right back when the signal returns.",
     offlineCompanion: "Offline — companion mode. I'm here with you; full Kelion returns when you get signal.",
+    offlineFaraWebgpu: "I'm in companion mode, but this device has no WebGPU — I can't run the local brain offline here.",
+    offlineModelNepregatit: "I'm offline. The local brain isn't downloaded yet — prepare it while you have signal and I'll work without a connection too.",
+    offlineEroareLocal: 'The local brain hit a problem:',
     credits: 'credits',
     topUp: 'Please top up your credit',
     lowCredit: 'Your credit is running low — please top up.',
@@ -505,6 +511,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainError: 'Eroare la creier. Încearcă din nou.',
     offline: 'Am pierdut conexiunea la internet — revin de îndată ce revine semnalul.',
     offlineCompanion: 'Offline — mod companion. Sunt cu tine; Kelion complet revine când prinzi semnal.',
+    offlineFaraWebgpu: 'Sunt în mod companion, dar dispozitivul ăsta nu are WebGPU — nu pot rula creierul local offline aici.',
+    offlineModelNepregatit: 'Sunt offline. Creierul local nu e încă descărcat — pregătește-l cât ai semnal și apoi merg și fără net.',
+    offlineEroareLocal: 'Creierul local a dat de o problemă:',
     credits: 'credite',
     topUp: 'Te rog reîncarcă creditul',
     lowCredit: 'Mai ai puțin credit — te rog reîncarcă.',
@@ -722,6 +731,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainError: 'Error del cerebro. Inténtalo de nuevo.',
     offline: 'He perdido la conexión a internet — vuelvo en cuanto regrese la señal.',
     offlineCompanion: 'Sin conexión — modo compañía. Estoy contigo; Kelion completo vuelve cuando haya señal.',
+    offlineFaraWebgpu: 'Estoy en modo compañía, pero este dispositivo no tiene WebGPU — no puedo ejecutar el cerebro local sin conexión aquí.',
+    offlineModelNepregatit: 'Estoy sin conexión. El cerebro local aún no está descargado — prepáralo mientras tengas señal y funcionaré también sin conexión.',
+    offlineEroareLocal: 'El cerebro local tuvo un problema:',
     credits: 'créditos',
     topUp: 'Por favor recarga tu crédito',
     lowCredit: 'Te queda poco crédito — recarga, por favor.',
@@ -891,6 +903,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainError: 'Erreur du cerveau. Veuillez réessayer.',
     offline: 'J’ai perdu la connexion internet — je reviens dès que le signal revient.',
     offlineCompanion: 'Hors ligne — mode compagnon. Je suis avec toi ; le Kelion complet revient dès qu’il y a du signal.',
+    offlineFaraWebgpu: 'Je suis en mode compagnon, mais cet appareil n’a pas de WebGPU — je ne peux pas faire tourner le cerveau local hors ligne ici.',
+    offlineModelNepregatit: 'Je suis hors ligne. Le cerveau local n’est pas encore téléchargé — prépare-le tant que tu as du signal et je fonctionnerai aussi sans connexion.',
+    offlineEroareLocal: 'Le cerveau local a rencontré un problème :',
     credits: 'crédits',
     topUp: 'Veuillez recharger votre crédit',
     lowCredit: 'Votre crédit est presque épuisé — veuillez recharger.',
@@ -1060,6 +1075,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainError: 'Gehirn-Fehler. Bitte versuche es erneut.',
     offline: 'Ich habe die Internetverbindung verloren — ich bin zurück, sobald das Signal wieder da ist.',
     offlineCompanion: 'Offline — Begleitmodus. Ich bin bei dir; das volle Kelion kehrt zurück, sobald du Signal hast.',
+    offlineFaraWebgpu: 'Ich bin im Begleitmodus, aber dieses Gerät hat kein WebGPU — ich kann das lokale Gehirn hier offline nicht ausführen.',
+    offlineModelNepregatit: 'Ich bin offline. Das lokale Gehirn ist noch nicht heruntergeladen — bereite es vor, solange du Signal hast, dann funktioniere ich auch ohne Verbindung.',
+    offlineEroareLocal: 'Das lokale Gehirn hatte ein Problem:',
     credits: 'Guthaben',
     topUp: 'Bitte lade dein Guthaben auf',
     lowCredit: 'Dein Guthaben wird knapp — bitte aufladen.',
@@ -1229,6 +1247,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainError: 'Errore del cervello. Riprova.',
     offline: 'Ho perso la connessione a internet — torno appena il segnale ritorna.',
     offlineCompanion: 'Offline — modalità compagnia. Sono con te; il Kelion completo torna quando c’è segnale.',
+    offlineFaraWebgpu: 'Sono in modalità compagnia, ma questo dispositivo non ha WebGPU — non posso eseguire il cervello locale offline qui.',
+    offlineModelNepregatit: 'Sono offline. Il cervello locale non è ancora scaricato — preparalo finché hai segnale e funzionerò anche senza connessione.',
+    offlineEroareLocal: 'Il cervello locale ha avuto un problema:',
     credits: 'crediti',
     topUp: 'Ricarica il tuo credito, per favore',
     lowCredit: 'Il tuo credito sta per finire — ricarica, per favore.',
@@ -1398,6 +1419,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainError: 'Erro do cérebro. Tente novamente.',
     offline: 'Perdi a conexão com a internet — volto assim que o sinal retornar.',
     offlineCompanion: 'Offline — modo companhia. Estou contigo; o Kelion completo volta quando houver sinal.',
+    offlineFaraWebgpu: 'Estou em modo companhia, mas este dispositivo não tem WebGPU — não consigo rodar o cérebro local offline aqui.',
+    offlineModelNepregatit: 'Estou offline. O cérebro local ainda não foi baixado — prepare-o enquanto tem sinal e funcionarei mesmo sem conexão.',
+    offlineEroareLocal: 'O cérebro local teve um problema:',
     credits: 'créditos',
     topUp: 'Por favor, recarregue o seu crédito',
     lowCredit: 'O seu crédito está acabando — recarregue, por favor.',

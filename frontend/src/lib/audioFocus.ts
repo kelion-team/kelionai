@@ -65,6 +65,19 @@ export function unregisterLiveFocus(): void {
 export function requestTtsFocus(opts?: { turaScrisa?: boolean }): boolean {
   if (foreignVoiceLock) return false
   if (active === 'live' && !opts?.turaScrisa) return false
+  // O GURĂ NOUĂ OPREȘTE CELELALTE GURI (owner, 20 aug: „se aud multe voci paralele,
+  // de la mai multe creiere… o singură ieșire audio"). O tură SCRISĂ care ia gura
+  // cât LIVE e activ TREBUIE să taie ÎNTÂI playout-ul LIVE (PCM-ul Gemini Live rămas
+  // în redare), altfel se aud DOUĂ voci: Chirp-ul scris PESTE vocea LIVE. Fiecare
+  // cadru {audio} trece prin aici (ChatPanel: requestTtsFocus înainte de playVoice),
+  // deci gura LIVE e silențiată exact în clipa în care Chirp-ul primește gura.
+  if (active === 'live' && opts?.turaScrisa) {
+    try {
+      liveInterrupt?.()
+    } catch {
+      /* live path optional */
+    }
+  }
   emit('tts')
   return true
 }

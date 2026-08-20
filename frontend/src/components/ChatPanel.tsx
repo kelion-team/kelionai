@@ -59,6 +59,7 @@ import {
   requestTtsFocus,
   releaseTtsFocus,
   interruptAll,
+  setForeignVoiceLock,
 } from '../lib/audioFocus'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { watchdogEnter, watchdogBeat, watchdogExit } from '../lib/watchdog'
@@ -76,6 +77,8 @@ import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
+import { esteConectat } from '../lib/conexiune'
+import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil } from '../lib/creierLocal'
 import JarvisOrb from './JarvisOrb'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
@@ -189,6 +192,29 @@ export default function ChatPanel({
       /* storage unavailable — the draft just doesn't survive */
     }
   }, [input])
+  // PRE-PREGĂTIREA CREIERULUI OFFLINE (mod companion, faza 1): cât timp ai net BUN
+  // (Wi-Fi/4G+, confirmat de țeavă — nu ardem datele omului) și dispozitivul are
+  // WebGPU, descărcăm O DATĂ modelul local, ca să fie GATA când pierzi semnalul.
+  // Pe net lent/economie/necunoscut NU descărcăm gigabytes (ex. iOS raportează
+  // „necunoscut" → rămâne pe declanșare manuală, faza următoare). Idempotent.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    let anulat = false
+    const id = window.setTimeout(() => {
+      void (async () => {
+        if (anulat) return
+        const st = stareCreierLocal().stare
+        if (st === 'gata' || st === 'se_pregateste' || st === 'fara_webgpu') return
+        if (!esteConectat() || getTeava() !== 'bun') return // doar pe țeavă BUNĂ confirmată
+        if (!(await webgpuDisponibil())) return
+        void pregatesteModelOffline()
+      })()
+    }, 8000)
+    return () => {
+      anulat = true
+      window.clearTimeout(id)
+    }
+  }, [])
   const [busy, setBusy] = useState(false)
   // ECOUL A CE TRANSMIT EU — ținut mai mult pe ecran (Adrian, 3 aug: „afișarea
   // foarte scurtă a ce transmit eu — triplat timpul de afișat pe interfață").
@@ -1154,6 +1180,13 @@ export default function ChatPanel({
       rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
       // NO return — we fall through below and start the new turn right now.
+    } else {
+      // O TURĂ NOUĂ TAIE ORICE GURĂ RĂMASĂ VIE, chiar dacă NU eram „busy": vocea
+      // LIVE (Gemini Live) răspunde AUTONOM pe WebSocket și NU setează busyRef, deci
+      // ramura de mai sus o sărea. Fără asta, dacă scrii un mesaj cât LIVE încă
+      // vorbește, Chirp-ul turei noi se suprapunea peste vocea LIVE (owner, 20 aug:
+      // „voci paralele… o singură ieșire audio"). O gură nouă închide celelalte guri.
+      interruptAll('tura-noua-peste-live')
     }
     inFlightRef.current = true
     setInput('')
@@ -1324,7 +1357,14 @@ export default function ChatPanel({
           return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
         })
       }
-      for await (const chunk of streamChat(
+      // COMUTAREA OFFLINE (mod companion, faza 1): fără net REAL → răspunsul vine
+      // din CREIERUL LOCAL (WebLLM, pe dispozitiv), NU de la server. Aceeași formă
+      // de flux (async iterable de bucăți), deci tot ce urmează (acumulare, gură,
+      // randare, abort) rămâne IDENTIC. Calea online e neatinsă. `next` (istoricul,
+      // inclusiv mesajul curent) e preluat de model — PRELUAREA CONTEXTULUI cerută.
+      const sursaFlux = !esteConectat()
+        ? streamLocalRaspuns(next, lang, ac.signal)
+        : streamChat(
         next,
         image ?? undefined,
         turnCoords ?? undefined,
@@ -1360,7 +1400,8 @@ export default function ChatPanel({
         // volan ca să răspundă SCURT, voce-first. NU mai suprimă suprafețe — ce spune
         // că face, execută (owner: „vorbă = faptă"; garda din handleControl a fost scoasă).
         isCarMode() || undefined,
-      )) {
+      )
+      for await (const chunk of sursaFlux) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
         feedSpeech(chunk) // the mouth speaks the reply as it streams
@@ -1883,6 +1924,7 @@ export default function ChatPanel({
               // taburi să se zăvorască (auditul de noapte: calea live pornea
               // fără takeover, deci un al doilea tab pornea liniștit a doua voce).
               emiteTakeover(canalVoceRef.current, tabVoceIdRef.current)
+              setForeignVoiceLock(false) // tabul ăsta ARE acum vocea — nu e zăvorât
               return true
             }
             return false
@@ -2418,10 +2460,17 @@ export default function ChatPanel({
         voceAiureaRef.current = true
         ultimaInimaRef.current = Date.now()
         opresteLocal()
+        // ZĂVORUL ACOPERĂ ȘI CHIRP-UL SCRIS (owner, 20 aug: voci paralele pe 2
+        // taburi). `opresteLocal` oprea doar sesiunea LIVE/mic; dar un tab de fundal
+        // în care SCRII tot reda Chirp (GURA 1), peste vocea tabului activ. Armăm
+        // zăvorul ca `requestTtsFocus` să respingă Chirp-ul aici — o singură gură în
+        // tot browserul. (Era construit dar nearmat — se aprindea doar în teste.)
+        setForeignVoiceLock(true)
       } else if (ce === 'inima') {
         ultimaInimaRef.current = Date.now()
       } else if (ce === 'reia') {
         voceAiureaRef.current = false
+        setForeignVoiceLock(false) // tabul ăsta reia vocea — nu mai e zăvorât
         void ensureMicRef.current()
       }
     }
@@ -2960,17 +3009,17 @@ export default function ChatPanel({
           </div>,
           document.body,
         )}
-      {/* THE CONVERSATION, VISIBLE (Adrian, Aug 1: „the reply must reach the
-      chat" — bubbles: you on the right, Kelion on the left, streaming live,
-      auto-scroll). ONLY THE LAST EXCHANGE SHOWS (Adrian, Aug 1: „trebuie doar
-      ultimul mesaj din chat afișat") — the log is not a history; history lives
-      in the saved conversation, the screen shows the CURRENT exchange.
-      In monitor mode the log hides so nothing covers the monitor — the full
-      reply then stays on the band's ticker, as before. */}
+      {/* KELION DOAR PE MONITOR (owner, 20 aug: „Kelion nu trebuie să mai AFIȘEZE,
+      doar pe monitor"). RĂSPUNSUL lui Kelion NU mai apare ca bulă în chat — merge
+      DOAR pe monitor: curge live pe banda „K" de sub compozitor (teletext, mai jos)
+      cât scrie, și se așază ca document pe monitor la finalul turei (auto-preview
+      din server → {doc} → openWorkspaceDoc). Aici, în centru, rămâne DOAR ecoul a
+      ce a scris/spus USERUL (confirmarea că a ajuns) — nu vorba lui Kelion.
+      În monitor mode logul se ascunde oricum, ca nimic să nu acopere monitorul. */}
       {!monitorMode && (
         <div className="chat-log" ref={chatLogRef}>
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
-          {[lastUser, lastAssistant].map((m, i) =>
+          {[lastUser].map((m, i) =>
             m && cleanMsg(m.content) ? (
               <div key={`${m.ts ?? 0}-${i}`} className={`chat-msg ${m.role === 'user' ? 'me' : 'kelion'}`}>
                 <span className="chat-msg-text">{cleanMsg(m.content)}</span>
