@@ -434,14 +434,16 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
   // (full_amount − aplicat); altfel ✓/⚠ pe becul viu, cu motivul în tooltip —
   // niciodată un număr inventat. Butonul „✎ credit Gemini" a MURIT: nu mai
   // există nimic de declarat de mână.
+  // Verde ✓ DOAR pe probă vie 200; sold real când e derivat din export; altfel NEUTRU
+  // „·" (nu pot verifica) — Google nu expune soldul prepay, deci pastila nu mai pretinde
+  // NICIODATĂ „epuizat"/„fără credit" (owner: „scoate alerta falsă"; regula #1). Alerta
+  // REALĂ de credit + linkul de reîncărcare vin din chatul viu, pe eșec măsurat.
   const geminiEticheta =
     g?.sold != null
       ? `${g.sold.toFixed(2)} ${g.soldMoneda ?? ''}`.trim()
       : g?.serving
         ? '✓'
-        : g?.reason === 'depleted'
-          ? '⚠ epuizat'
-          : '⚠'
+        : '·'
   const geminiTitlu = [
     g?.sold != null
       ? `sold REAL derivat din exportul BigQuery: ${g.sold.toFixed(2)} ${g.soldMoneda ?? ''}`

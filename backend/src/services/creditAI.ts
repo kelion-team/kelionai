@@ -173,11 +173,22 @@ async function randGemini(): Promise<CreditAI> {
     ramas = { ...ramas, cum: `${ramas.cum}${nota}` }
   }
 
+  // ALERTĂ FALSĂ „fără credit" SCOASĂ (owner 20 aug: „primeste o alerta falsa gemeni
+  // lipsa credit, scoate alerta de la gemeni de tot"). Google NU expune soldul prepay,
+  // deci un ping care NU întoarce 200 nu e dovadă de „fără credit" (regula #1) — nu mai
+  // aprindem ROȘU pe el. Verde apare DOAR pe 200 real; orice altceva rămâne „nu pot
+  // verifica" (gri), nu „fără credit". Alerta REALĂ de credit vine doar dintr-un eșec
+  // MĂSURAT în chatul viu (402/quota), cu link de reîncărcare (routes/chat.ts).
   const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = !live
     ? picat('un apel mic la modelul curent (maxOutputTokens: 1)', 'pingul către Gemini a picat')
     : !live.ok
       ? picat('un apel mic la modelul curent (maxOutputTokens: 1)', live.reason ?? 'cheie lipsă')
-      : reusit('un apel mic la modelul curent (maxOutputTokens: 1)', { da: live.serving, detaliu: live.reason }, 0)
+      : live.serving
+        ? reusit('un apel mic la modelul curent (maxOutputTokens: 1)', { da: true }, 0)
+        : picat(
+            'un apel mic la modelul curent (maxOutputTokens: 1)',
+            `Google a răspuns dar nu a servit (${live.reason ?? '—'}); soldul prepay nu e citibil, deci NU confirm „fără credit"`,
+          )
 
   return {
     furnizor: 'Gemini (Google AI)',
