@@ -1142,3 +1142,23 @@ mai mic / plafon nuclee Ollama / gardă de încărcare în constructor) — nef�
 **Porți (local):** frontend build + 64/64 teste; backend tsc + 1922/1922 teste;
 exporturi/hardcodări/sintaxă/jscpd curate. `RAILWAY_TOKEN` rămâne ca secret MORT în
 GitHub → owner îl poate șterge din Settings → Secrets → Actions.
+
+### §15b — OFFLINE FAZELE 2–4 COMPLETE (20 aug, aceeași sesiune)
+Owner: „nu te opri până la gata." Restul punctelor offline, construite și verzi
+local (PR nou pe `claude/reparatie-cu-rosu-uokj4m`):
+- **Faza 2 — GPS + viteză + vedere** (`lib/contextOffline.ts`): creierul local
+  primește semnale MĂSURATE (viteza din `coords.speed` sau calculată, locația,
+  fața văzută) → e uman offline („mergi cu ~90, drum lung?"). Nimic inventat.
+- **Faza 3 — cozi sync + amânate** (`lib/coadaOffline.ts` + `routes/offline.ts`):
+  offline se salvează chatul (SYNC) + cererile care cer net (AMÂNATE); la
+  reconectare automată → POST `/api/offline/sync` (serverul prinde din urmă) +
+  rezolvă amânatele prin `/api/chat` + anunț civil pe monitor („îți pot spune
+  răspunsul la ce ai întrebat…"). Context împărtășit → trecere netedă ambele sensuri.
+- **Faza 4 — notificări + Manual** (`lib/notificari.ts` + `services/manual.ts`):
+  notificare locală best-effort la reconectare (Android complet, iOS limitat,
+  guarded); secțiune nouă de Manual „When you lose signal" cu diferențele
+  Android vs iPhone (creier local, viteză, notificări, descărcarea modelului).
+- **Porți:** FE build + 78/78, BE tsc + 1922/1922 (capabilityEvidence: 12 secțiuni
+  de manual), exporturi/hardcodări/sintaxă/jscpd curate.
+- **Neverificat pe device** (WebGPU/GPS/cameră/notificări/offline real = doar pe
+  telefonul owner-ului) — asta rămâne verificarea LIVE a lui.
