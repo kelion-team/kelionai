@@ -13,6 +13,24 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
+      `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
+      Repară bug-ul MĂSURAT „vocea pornește 2 sec și se rupe" = 2 motoare (Gemini
+      Live + Chirp) se bat pe aceeași tură. Ținta: **100% vorbit**, UN motor online
+      (Chirp SCOS de pe voce → coliziunea moare din rădăcină), escaladare pe canal
+      TEXT, cățelul anti-minciună (`poartaFaptelor`) MUTAT pe voce, monitorul
+      NICIODATĂ citit cu voce, offline rezervă, tastatură opțională. Owner 20 aug:
+      „de tine depinde cine construiește — Devin sau tu — dacă respecți 100%
+      proiectul." **Pași (se bifează DOAR cu build + verify LIVE + dovadă;
+      ACTUALIZARE după FIECARE lucru făcut și verificat):**
+      - [ ] 1. fix de bază: un singur motor online (Chirp jos pe voce) — bug-ul moare
+      - [ ] 2. cățelul (`poartaFaptelor`) legat pe calea voce
+      - [ ] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
+      - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
+      - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
+      - [ ] 6. tastatura opțională (input scris, output tot voce)
+      - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
+      NIMIC început încă — se pornește la ordinul owner-ului „start build".
 - [ ] ORDIN 20 aug (2): „scoti tot ce nu tine de cerinta mea" + Devin cablat CA
       constructor în aplicație. FĂCUT (PR pe branch): **al 2-lea AI plătit ratat —
       DeepSeek/DeepInfra** scos (rute `constructorViu/Stare`, blocul din `vps-set-env.yml`)

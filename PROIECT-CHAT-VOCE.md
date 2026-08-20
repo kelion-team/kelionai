@@ -173,7 +173,10 @@ NU e obligatoriu; implicit rămâne vocea. Poți SCRIE în loc să vorbești.
 ---
 
 ## 12. CE URMEAZĂ LA BUILD (când owner zice „start")
-Nimic din astea nu e început. Ordine propusă (fiecare cu build → deploy → VERIFY LIVE):
+Nimic din astea nu e început. Ordine propusă (fiecare cu build → deploy → VERIFY LIVE).
+**REGULĂ (owner, 20 aug): ACTUALIZARE după FIECARE lucru făcut ȘI verificat** —
+se bifează pasul în `RAMAS-DE-FACUT.md` DOAR cu dovadă live, iar `AI-HANDOFF.md`
+§13 se aduce la zi. Nu se bifează nimic „în avans".
 1. **Fix-ul de bază (bug-ul):** online = un singur motor. Chirp SCOS pe calea
    vocală; pe tura vorbită Chirp nu mai pornește; rezultatul greu îl rostește Live.
 2. Cățelul (`poartaFaptelor`) LEGAT pe calea voce (greu server-side + transcript Live).
