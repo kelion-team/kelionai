@@ -28,12 +28,6 @@ function sinteza(): SpeechSynthesis | null {
   return s ?? null
 }
 
-/** Are dispozitivul voce în browser? (Măsurat, nu presupus — regula #1.) */
-export function voceBrowserDisponibila(): boolean {
-  const s = sinteza()
-  return Boolean(s && typeof window !== 'undefined' && 'SpeechSynthesisUtterance' in window)
-}
-
 /** Alege o voce care se potrivește limbii (ex. `ro`), altfel una cu prefixul corect,
  *  altfel `null` (motorul folosește vocea implicită). PURĂ pe lista dată — testabilă. */
 export function alegeVoce(voci: SpeechSynthesisVoice[], lang: Lang): SpeechSynthesisVoice | null {

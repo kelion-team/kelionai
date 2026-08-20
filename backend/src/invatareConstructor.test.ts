@@ -16,12 +16,8 @@ describe('memorieRezolvareConstructor — ce învață Kelion din rezolvare', ()
     expect(m).toContain('backend/src/routes/chat.ts')
   })
 
-  it('plătit cloud: eticheta corectă', () => {
-    const m = memorieRezolvareConstructor({ id: 7, motor: 'aider', creier: 'qwen3.5:397b', sursa: 'platit', fisiere: [] })
-    expect(m).toContain('qwen3.5:397b')
-    expect(m).toContain('plătit (cloud)')
-    expect(m).not.toContain('a aplicat pe') // fără fișiere → fără clauza aia
-  })
+  // (Cazul „plătit cloud" a fost SCOS — Ollama Cloud a ieșit, owner 20 aug: „rămân
+  // doar cu Linux și Gemini Live". Constructorul învață DOAR din rezolvări free local.)
 
   it('trunchiază lista lungă de fișiere cu un rest numărat', () => {
     const fisiere = Array.from({ length: 15 }, (_, i) => `f${i}.ts`)

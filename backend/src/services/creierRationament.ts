@@ -114,7 +114,7 @@ export async function rationeazaCuUnelte(
  */
 export async function rationeazaMesaje(
   messages: OrMessage[],
-  opts: OptiuniRationament & { tools?: AnthropicTool[]; stream?: false; /** model forțat (google-direct/* sau ollama-cloud/*) */ model?: string },
+  opts: OptiuniRationament & { tools?: AnthropicTool[]; stream?: false; /** model forțat (google-direct/*) */ model?: string },
 ): Promise<OrChatResult> {
   const treapta = opts.treapta ?? 'lucru'
   // MODEL FORȚAT (17 aug): orchestratorul trecea modelul, dar ușa unitară îl
@@ -129,11 +129,6 @@ export async function rationeazaMesaje(
     toolChoice: opts.toolChoice,
     allowedFunctionNames: opts.allowedFunctionNames,
     timeoutMs: opts.timeoutMs,
-  }
-  // Cloud Ollama (Creier 2) — o singură încercare pe modelul ales; fără scară Gemini.
-  if (modelFull.startsWith('ollama-cloud/')) {
-    const { ollamaCloudChat } = await import('./ollamaCloud.js')
-    return ollamaCloudChat(modelFull, messages, opts.tools ?? [], callOpts)
   }
   // Scară: modelul treptei/forțat, apoi restul expert ladder (fără dubluri)
   const ladder = [modelFull, ...expertModelLadder().filter((m) => m !== modelFull)]
@@ -179,10 +174,6 @@ export async function rationeazaMesajeStream(
     toolChoice: opts.toolChoice,
     allowedFunctionNames: opts.allowedFunctionNames,
     timeoutMs: opts.timeoutMs,
-  }
-  if (modelFull.startsWith('ollama-cloud/')) {
-    const { ollamaCloudChatStream } = await import('./ollamaCloud.js')
-    return ollamaCloudChatStream(modelFull, messages, opts.tools ?? [], onText, callOpts)
   }
   return geminiDirectChatStream(model, messages, opts.tools ?? [], onText, callOpts)
 }

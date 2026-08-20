@@ -1279,29 +1279,14 @@ export function raportCreierConstructor(info = {}) {
 }
 
 async function construiesteCuAider(job, baseSha, jurnalVechi) {
-  // preferred free; fallback paid doar dacă API-ul raportează rezervă gata
+  // Constructorul rulează DOAR pe creierul LOCAL free de pe VPS. Ollama Cloud
+  // (rezerva plătită kimi/qwen) a fost SCOASĂ — owner, 20 aug: „rămân doar cu Linux
+  // și Gemini Live; tai serverele qwen". Ruta /api/constructor/creier-config nu mai
+  // există în app; nu mai întrebăm nimic, pornim direct pe free local. Escaladarea
+  // pe cloud nu mai are rezervă (fallbackPaid rămâne null). Constructorul îl
+  // înlocuiește Devin, extern — vezi AI-HANDOFF.md.
   let creierCfg = { sursa: 'free', model: '', base: '', cheie: '' }
-  let fallbackPaid = null // { sursa, model, base, cheie } | null
-  try {
-    const c = await api('/api/constructor/creier-config', {}, 2)
-    if (c && (c.sursa === 'platit' || c.sursa === 'free')) {
-      creierCfg = { sursa: c.sursa, model: c.model || '', base: c.base || '', cheie: c.cheie || '' }
-    }
-    if (c?.fallback && c.fallback.sursa === 'platit' && c.fallback.model && c.fallback.cheie) {
-      fallbackPaid = {
-        sursa: 'platit',
-        model: String(c.fallback.model),
-        base: String(c.fallback.base || ''),
-        cheie: String(c.fallback.cheie),
-      }
-    } else if (c?.paidDisponibil && c.model && c.cheie) {
-      // compat răspuns vechi forțat platit
-      fallbackPaid = { sursa: 'platit', model: String(c.model), base: String(c.base || ''), cheie: String(c.cheie) }
-    }
-  } catch (e) {
-    // Nu logăm corpul config (poate conține cheie paid) — doar motivul scurt.
-    log(`creier-config: ${e instanceof Error ? e.message.slice(0, 80) : e} — free local`)
-  }
+  let fallbackPaid = null // paid scos → mereu null (fără escaladare cloud)
   // Nu loga NICIODATĂ creierCfg.cheie / fallback.cheie (secret).
   let platit = !!(creierCfg.sursa === 'platit' && creierCfg.model && creierCfg.cheie)
   let brainRaport = platit ? 'paid_cloud' : 'free_local'

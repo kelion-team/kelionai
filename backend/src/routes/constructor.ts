@@ -103,14 +103,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // panoul să nu doar SCRIE „Aider", ci s-o și DOVEDEASCĂ.
     const { probaAider } = await import('../services/aiderProba.js')
     const { probaOllama } = await import('../services/ollamaProba.js')
-    const { getConfigCreier, probaOllamaCloud } = await import('../services/creierCloud.js')
     const { loadKv } = await import('../db.js')
     const { verdictPulsLucrator } = await import('../services/pulsLucrator.js')
-    const [aider, ollama, creierCfg, cloud, lastPollRaw] = await Promise.all([
+    const [aider, ollama, lastPollRaw] = await Promise.all([
       probaAider().catch((e) => ({ ok: false, versiune: '', motiv: String(e).slice(0, 200) })),
       probaOllama().catch((e) => ({ ok: false, modele: [] as string[], motiv: String(e).slice(0, 200) })),
-      getConfigCreier().catch(() => ({ creier2: 'gemini' as const, constructorSursa: 'free' as const })),
-      probaOllamaCloud().catch((e) => ({ ok: false, motiv: String(e).slice(0, 200), modele: [] as string[] })),
       loadKv('constructor:worker:lastPoll').catch(() => null),
     ])
     // PULSUL LUCRĂTORULUI: dovada MĂSURATĂ că workerul de pe VPS mai cere ordine.
@@ -123,8 +120,6 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       paused: await isOpsPaused().catch(() => false),
       aider, // { ok, versiune, motiv } — motorul (Aider), probat live pe VPS
       ollama, // { ok, modele, motiv } — creierul LOCAL al lui Aider, probat pe VPS (ollama list)
-      creier: creierCfg, // { creier2, constructorSursa } — alegerea ownerului (panou)
-      cloud, // { ok, motiv, modele } — cheia Ollama cloud, probată MĂSURAT (nu presupus)
       lucrator, // { lastPoll, ageSec, viu, pragMs } — VIU dacă a cerut ordin recent
       inCoada, // câte ordine stau efectiv în coadă (queued) — context pentru puls
     })
@@ -145,54 +140,12 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(diagnostic)
   })
 
-  // ── COMUTATORUL CREIER 2 (cloud) + SURSA CONSTRUCTORULUI (free/plătit) ───────
-  // Owner, 16 aug: „creier 2 → Kimi K3 cu comutator Qwen3.5 Max… constructor =
-  // comutator FREE (local) ↔ PLĂTIT (același model ca creier 2)… se aprinde când
-  // lipesc cheia". AICI ownerul ALEGE din panou (nu hardcodat). Cheia se salvează
-  // DOAR dacă a fost trimisă (câmp gol = neatinsă). Doar admin.
-  app.post<{ Body: { creier2?: string; constructorSursa?: string; ollamaKey?: string } }>(
-    '/api/admin/constructor/creier-cloud',
-    async (req, reply) => {
-      const user = getSessionUser(req)
-      if (!user) return reply.code(401).send({ error: 'unauthorized' })
-      if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-      const { setConfigCreier, setCheieOllama, probaOllamaCloud, _resetProbaOllamaCloud } = await import('../services/creierCloud.js')
-      const cheie = req.body?.ollamaKey
-      if (typeof cheie === 'string' && cheie.trim()) {
-        await setCheieOllama(cheie.trim())
-      }
-      const cfg = await setConfigCreier({
-        creier2: req.body?.creier2 as 'gemini' | 'kimi-k3' | 'qwen3.5' | undefined,
-        constructorSursa: req.body?.constructorSursa as 'free' | 'platit' | undefined,
-      })
-      // PROBĂ PROASPĂTĂ pe modelul TOCMAI ales (owner, 20 aug: „de ce spune kimi-k3
-      // când am ales qwen3.5?"). Verdictul roșu era din cache-ul vechi (TTL 5 min) —
-      // arăta modelul DINAINTE, fiindcă resetul se făcea DOAR la o cheie nouă. Acum
-      // golim cache-ul la FIECARE Salvează (schimbi cheia SAU modelul), ca roșul/verdele
-      // să reflecte EXACT modelul curent, nu unul vechi (regula #1: măsoară ce e ACUM).
-      _resetProbaOllamaCloud()
-      const cloud = await probaOllamaCloud().catch((e) => ({ ok: false, motiv: String(e).slice(0, 200), modele: [] as string[] }))
-      return reply.send({ ok: true, creier: cfg, cloud })
-    },
-  )
-
-  // Config pentru CONSTRUCTORUL de pe host (bridge-gated).
-  // FREE-FIRST (owner 17 aug): preferred=free mereu pe calea automată; paid e
-  // DOAR rezervă (fallback) când există cheie+model cloud — NU drum principal
-  // și NU costă dacă nu se apelează. Comutatorul panou constructorSursa=platit
-  // forțează paid explicit (manual); altfel worker-ul pornește free și poate
-  // escalada same-run pe fallback.
-  app.get('/api/constructor/creier-config', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    // Decizia free/plătit e o funcție PURĂ, probată pe fiecare combinație
-    // (creierCloud.decideConfigConstructor). Cheia merge DOAR aici, pe canalul
-    // autentificat (x-bridge-secret); nu o logăm și nu ajunge pe panoul public.
-    const { getConfigCreier, getCheieOllama, decideConfigConstructor } = await import('../services/creierCloud.js')
-    const cfg = await getConfigCreier()
-    const cheie = await getCheieOllama()
-    return reply.send(decideConfigConstructor(cfg, cheie))
-  })
+  // (COMUTATORUL CREIER 2 CLOUD + sursa plătită a constructorului au fost SCOASE —
+  // owner, 20 aug: „rămân doar cu Linux și Gemini Live… tai serverele qwen".
+  // Abonamentul Ollama Cloud (kimi-k3 / qwen3.5) a ieșit din aplicație; constructorul
+  // rulează DOAR pe creierul LOCAL free de pe VPS. Ruta bridge /api/constructor/creier-config
+  // a dispărut — workerul cade curat pe free local când n-o găsește. Constructorul îl
+  // înlocuiește Devin, extern; vezi AI-HANDOFF.md.)
 
   // (COMUTATORUL „Fable 5 forțat" a fost SCOS — owner, 16 aug: „constructor unic
   // aider… fable iese total de peste tot… nu se comuta nimic". Constructorul
@@ -442,11 +395,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       const motiv = String(req.body?.log ?? '')
       const { loadKv, saveKv, remediazaAutomatBuildJob } = await import('../db.js')
       const { decideRemediereEsec, MAX_AUTO_REMEDIERI } = await import('../services/remediereEsec.js')
-      const { getConfigCreier, getCheieOllama, decideConfigConstructor } = await import('../services/creierCloud.js')
-      // Rezerva paid e gata? — măsurat, pentru decizia de escaladare a creierului.
-      const paidDisponibil = await getConfigCreier()
-        .then(async (cfg) => decideConfigConstructor(cfg, await getCheieOllama()).paidDisponibil)
-        .catch(() => false)
+      // Fără rezervă plătită (Ollama Cloud scos, 20 aug) — remedierea rămâne pe free local.
+      const paidDisponibil = false
       const cheieContor = `remediere:count:${id}`
       const nrDeja = Number(await loadKv(cheieContor).catch(() => null)) || 0
       const dec = decideRemediereEsec(motiv, paidDisponibil, nrDeja)

@@ -262,10 +262,9 @@ export async function runOrchestrator(
       toolChoice,
       allowedFunctionNames,
     }
-// Gemini direct SAU Creier 2 cloud (ollama-cloud/*). Alt prefix = eroare NUMITĂ.
-    const { OLLAMA_CLOUD_PREFIX } = await import('./ollamaCloud.js')
-    if (!model.startsWith(GEMINI_DIRECT_PREFIX) && !model.startsWith(OLLAMA_CLOUD_PREFIX)) {
-      throw new Error(`model_necunoscut: „${model}" — aștept google-direct/* sau ollama-cloud/*`)
+    // Creierul e Gemini direct (google-direct/*). Alt prefix = eroare NUMITĂ.
+    if (!model.startsWith(GEMINI_DIRECT_PREFIX)) {
+      throw new Error(`model_necunoscut: „${model}" — aștept google-direct/*`)
     }
     // PROFILING (Aug 2 — the 38-second weather turn): every brain round gets
     // its real duration in the log, so a slow turn shows WHERE the seconds go

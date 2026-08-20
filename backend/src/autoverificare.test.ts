@@ -172,7 +172,7 @@ describe('autoverificarea LIVE e cablată în chat + refolosită de rută', () =
   it('unealta autoverificare e definită, în lista admin, cu executor admin-only', () => {
     expect(chat).toMatch(/const AUTOVERIFICARE_TOOL: Tool = \{/)
     expect(chat).toMatch(/name: 'autoverificare'/)
-    expect(chat).toMatch(/COMUTA_SURSA_TOOL, AUTOVERIFICARE_TOOL/)
+    expect(chat).toMatch(/CONSTRUCTOR_COMMAND_TOOL, AUTOVERIFICARE_TOOL/)
     const idx = chat.indexOf("case 'autoverificare':")
     expect(idx).toBeGreaterThanOrEqual(0)
     const bloc = chat.slice(idx, idx + 700)
