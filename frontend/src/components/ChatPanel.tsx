@@ -78,7 +78,7 @@ import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 import { esteConectat, useConectat } from '../lib/conexiune'
-import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil } from '../lib/creierLocal'
+import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
 import { vorbesteLocal, opresteVoceLocal } from '../lib/voceBrowser'
 import {
@@ -218,13 +218,19 @@ export default function ChatPanel({
         if (anulat) return
         const st = stareCreierLocal().stare
         if (st === 'gata' || st === 'se_pregateste' || st === 'fara_webgpu') return
-        // Descarcă pe orice țeavă care NU e clar lentă (owner 20 aug: „nu
-        // downloadează nimic" — pe desktop/iOS țeava e „necunoscut", iar `!== 'bun'`
-        // o bloca). Sărim doar 2G/3G/economie (getTeava 'slab'/'mediu'); Wi‑Fi/4G+
-        // și „necunoscut" (desktop/iOS) descarcă.
+        if (!(await webgpuDisponibil())) return
+        // TESTEAZĂ ÎNTÂI dacă modelul e DEJA în cache (owner 20 aug: „de câte ori
+        // pornești face auto download, nu testează versiunea"). Dacă e descărcat →
+        // 'descarcat', și NU-l re-descărcăm și NU-l re-încărcăm în GPU la fiecare
+        // pornire (economie de baterie/GPU cât ești online) — se încarcă din cache abia
+        // când chiar pierzi semnalul (efectul de mai jos).
+        await sincronizeazaStareOffline()
+        if (anulat || stareCreierLocal().stare === 'descarcat') return
+        // Nu e în cache → PRIMA descărcare, doar pe net decent (nu ardem date mobile).
+        // Sărim doar 2G/3G/economie (getTeava 'slab'/'mediu'); Wi‑Fi/4G+ și „necunoscut"
+        // (desktop/iOS) descarcă.
         const tv = getTeava()
         if (!esteConectat() || tv === 'slab' || tv === 'mediu') return
-        if (!(await webgpuDisponibil())) return
         void pregatesteModelOffline()
       })()
     }, 8000)
@@ -240,6 +246,19 @@ export default function ChatPanel({
   // monitor. Netezim trecerea: contextul chatului e deja împărtășit (messages).
   const online = useConectat()
   const eraOnlineRef = useRef(online)
+  // ÎNCĂRCARE LA OFFLINE: cât ești ONLINE nu ținem modelul în GPU (economie de
+  // baterie/GPU); când treci OFFLINE și modelul e în cache ('descarcat'), îl încărcăm
+  // DIN CACHE (fără rețea) → 'gata', ca să răspundă când pierzi semnalul. Fără date.
+  useEffect(() => {
+    if (online) return
+    let viu = true
+    void sincronizeazaStareOffline().then(() => {
+      if (viu && stareCreierLocal().stare === 'descarcat') void pregatesteModelOffline()
+    })
+    return () => {
+      viu = false
+    }
+  }, [online])
   useEffect(() => {
     const veneaDinOffline = online && !eraOnlineRef.current
     eraOnlineRef.current = online
@@ -1557,14 +1576,13 @@ export default function ChatPanel({
         if (acc.trim()) adaugaTuraSync({ rol: 'assistant', text: acc, t: acum })
         if (msg && necesitaNet(msg)) adaugaAmanata({ intrebare: msg, t: acum, lat, lon })
       }
-      // GURĂ DE SIGURANȚĂ (owner 20 aug: „chatul audio inexistent"): pe o tură SCRISĂ
-      // (sau offline), dacă până acum NU a rostit nimeni răspunsul — nici gura live
-      // (`rvLiveRef` e null cât e implicită sesiunea Gemini Live, care nu spune scrisul),
-      // nici Chirp-ul de pe server (c.audio) — îl rostește vocea NATIVĂ a browserului, ca
-      // răspunsul să se AUDĂ de fiecare dată. Doar pe scris (vocalul îl spun live/Chirp),
-      // DOAR dacă n-a sunat nimic → fără dublare. Verificarea e ușor amânată: Chirp-ul de
-      // pe server poate ajunge la câteva sute de ms după ce textul e gata.
-      if (!isVoiceTurn && acc.trim() && !muzicaActivaRef.current) {
+      // GURĂ DE SIGURANȚĂ, DOAR OFFLINE (owner 20 aug: „daca ii scriu si sunt online
+      // raspund ambele versiuni"). BUG-ul meu din #1291: pe turele SCRISE ONLINE vocea
+      // browserului rostea răspunsul PESTE Chirp-ul de pe server → DOUĂ voci (una suna
+      // „offline", una „online"). Chirp funcționează online, deci plasa nu mai are ce
+      // căuta acolo. O restrângem la turele OFFLINE (`eTuraOffline`), unde chiar NU există
+      // voce de server (nici c.audio, nici gură live) → o singură voce, fără dublare.
+      if (eTuraOffline && !isVoiceTurn && acc.trim() && !muzicaActivaRef.current) {
         const deRostit = cleanForSpeech(acc)
         if (deRostit) {
           window.setTimeout(() => {

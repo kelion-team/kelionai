@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { stareCreierLocal, pregatesteModelOffline, webgpuDisponibil } from '../lib/creierLocal'
+import { stareCreierLocal, pregatesteModelOffline, webgpuDisponibil, sincronizeazaStareOffline } from '../lib/creierLocal'
 import { uiStrings } from '../lib/i18n'
 
 // ── STATUSUL CREIERULUI OFFLINE (mod companion) ─────────────────────────────
@@ -42,14 +42,20 @@ export function StatusOffline() {
     void webgpuDisponibil().then((ok) => {
       if (viu) setAreWebgpu(ok)
     })
+    // RECONCILIERE cu Cache Storage (owner 20 aug: „să vadă că e descărcat, să nu mai
+    // ceară descărcare"; „de câte ori pornești face auto download, nu testează versiunea").
+    // Dacă modelul e deja în cache → 'descarcat', NU mai arătăm butonul de descărcare.
+    void sincronizeazaStareOffline().then(() => {
+      if (viu) setSt(stareCreierLocal())
+    })
     return () => {
       viu = false
     }
   }, [])
 
-  // „Gata" se arată scurt (8s), apoi se ascunde — nu stă permanent pe ecran.
+  // „Gata"/„descărcat" se arată scurt (8s), apoi se ascunde — nu stă permanent pe ecran.
   useEffect(() => {
-    if (st.stare !== 'gata') return
+    if (st.stare !== 'gata' && st.stare !== 'descarcat') return
     const t = window.setTimeout(() => setAscunsDupaGata(true), 8000)
     return () => window.clearTimeout(t)
   }, [st.stare])
@@ -79,7 +85,9 @@ export function StatusOffline() {
   if (st.stare === 'se_pregateste') {
     fill = Math.max(3, Math.round(st.progres * 100))
     text = `⏬ ${t.offlinePregatire} ${fill}%`
-  } else if (st.stare === 'gata') {
+  } else if (st.stare === 'gata' || st.stare === 'descarcat') {
+    // 'descarcat' = modelul E în cache (descărcat înainte) → arătăm „gata offline",
+    // FĂRĂ buton de descărcare (owner: „să vadă că e descărcat, să nu mai ceară").
     if (ascunsDupaGata) return null
     fill = 100
     text = `✓ ${t.offlineGata}`
