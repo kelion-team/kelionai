@@ -19,6 +19,11 @@ Pe o tură VORBITĂ pornesc AMÂNDOUĂ; Chirp îi cere gura lui Live → trimite
 4. **Scrisul rămâne DOAR pe offline** (rezervă, WebLLM Qwen — el n-are voce live, n-are net).
 
 ## VIZIUNEA — un Jarvis, DOAR audio (owner, 20 aug)
+### PECETEA: 100% VORBIT (owner, cu siguranță)
+Ce auzi e MEREU voce, fără excepție. Ieșirea e 100% vorbită — nu devine niciodată
+chat scris. Tastatura opțională schimbă doar cum pui întrebarea ÎN (când nu poți
+vorbi); **ce iese rămâne 100% voce.**
+
 Numele care leagă tot: **Jarvis.** O prezență vocală mereu acolo — vorbești, îți
 vorbește, lucrează în spate fără să te încarce, adevăr-first, cu cele 4 arte.
 Persona de mai jos = Jarvis.
@@ -138,6 +143,20 @@ Așezarea pe arhitectură: **Live** = arta discuției/prezentării/negocierii (�
 omul cu tact); **greul + convergența + cățelul** = arta gândirii (raționează
 corect, nu lasă minciuna să treacă). Invariantul (nu minte) e măsurabil prin
 cățel; artele sunt calitative — trăiesc în persona/promptul de sistem.
+
+## MONITORUL — ce apare pe ecran (punct ridicat de mine, acoperit 20 aug)
+„100% vorbit" = **output-ul conversațional e voce** (răspuns/explicație/confirmare
+— rostite). Asta NU se ceartă cu monitorul:
+- **Monitorul arată DOAR conținut inerent VIZUAL:** imagine, video, document,
+  hartă, grafic (trading), card, pagină web (monitor). Lucruri pe care nu are
+  sens să le „spui" — trebuie VĂZUTE. **Mereu însoțite de voce** (Jarvis zice ce
+  e și ce să faci cu el).
+- **Ce NU apare pe monitor: răspunsul-TEXT scris.** A tipări pe ecran vorba lui
+  Kelion ar reînvia coliziunea celor 2 motoare = bug-ul. Ecranul = artefacte
+  vizuale, nu vorba lui scrisă.
+- Măsurat din cod: canalul `control` (`onControl`: monitor/doc/app/card) e DEJA
+  separat de voce — `vocalLive.ts`: „**Vocea NU vine pe aici**". Arhitectura deja
+  desparte vizualul de voce; în voce-only îl păstrăm strict pentru vizual inerent.
 
 ## PERSONA / TONUL — „vocea" lui Kelion (owner, 20 aug, cuvintele lui)
 ### PRINCIPIUL SUPREM (deasupra tuturor)
