@@ -235,7 +235,26 @@ echo "== 3. Construiesc imaginea =="
 # întâmplat 6 aug). `timeout 1200` (20 min) taie un build agățat → scriptul iese
 # non-zero, lacătul se eliberează, trap-ul repune constructorul, iar auto-publicarea
 # reîncearcă la ciclul următor. Un build sănătos e sub ~8 min, deci pragul e larg.
-timeout 1200 docker build -t kelionai:latest "$REPO"
+#
+# EXTINS LA 30 MIN (19 aug — diagnostic timeout 124 la pip install): pachetele
+# Python grele (openhands-ai/browsergym ~500MB+) pot depăși 20 min la descărcare
+# + instalare pe conexiuni mai lente. 30 min (1800s) acoperă și cazurile extreme,
+# fără a bloca publicarea la infinit. Log-ul de build e capturat complet pentru
+# diagnostic dacă pică din nou.
+BUILD_LOG="/root/kelion/docker-build.log"
+echo "$(date -u +'%Y-%m-%dT%H:%M:%SZ') — Începe build Docker" > "$BUILD_LOG"
+if timeout 1800 docker build -t kelionai:latest "$REPO" >> "$BUILD_LOG" 2>&1; then
+  echo "$(date -u +'%Y-%m-%dT%H:%M:%SZ') — Build Docker completat cu succes" >> "$BUILD_LOG"
+else
+  BUILD_RC=$?
+  echo "$(date -u +'%Y-%m-%dT%H:%M:%SZ') — Build Docker eșuat cu codul $BUILD_RC" >> "$BUILD_LOG"
+  if [ "$BUILD_RC" -eq 124 ]; then
+    echo "⚠️  TIMEOUT (124): build-ul a depășit 30 minute. Verifică $BUILD_LOG pentru etapa blocată."
+    echo "   Cauze frecvente: descărcare lentă pip (openhands-ai/browsergym), cache Docker gol."
+    echo "   Soluție: rulează manual 'docker pull' pentru imaginile de bază sau verifică conexiunea."
+  fi
+  exit "$BUILD_RC"
+fi
 
 show_progress 75 "Pornire aplicație și container"
 echo "== 4. Pornesc aplicația (:8080, network host, env-file) =="
