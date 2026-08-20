@@ -190,8 +190,20 @@ export default function CustomerSettings({
         }
       }
 
-      const energyMean = avgVector.reduce((a, b) => a + b, 0) / vectorLen
-      const pitchMeanHz = 120 + (avgVector[4] || 0) * 1.5
+      // NUMAI CE MĂSOR REAL (audit fake, 20 aug): vectorul de 32 de benzi e amprenta
+      // reală. Centroidul spectral îl CALCULEZ din spectru (Σ f·mag / Σ mag; frecvența
+      // benzii i = i·sampleRate/fftSize). Pitch-ul/voicedRatio cer semnal în timp, nu
+      // FFT — nu-l am aici, deci NU le inventez. (Înainte trimiteam 120+bin·1.5, 15,
+      // 500, 0.8 hardcodate, ba chiar sub nume — pitchMeanHz/spectralCentroidHz — pe
+      // care serverul oricum le ignora, citind meta.pitchMean/meta.centroid → stoca 0.)
+      const binHz = audioCtx.sampleRate / 512
+      let sumMag = 0
+      let sumFMag = 0
+      for (let i = 0; i < vectorLen; i++) {
+        sumMag += avgVector[i]
+        sumFMag += avgVector[i] * i * binHz
+      }
+      const centroidHz = sumMag > 0 ? sumFMag / sumMag : 0
 
       setVpMsg(ro ? 'Se salvează amprenta în cont...' : 'Saving voiceprint to account...')
 
@@ -201,13 +213,8 @@ export default function CustomerSettings({
         credentials: 'include',
         body: JSON.stringify({
           vector: avgVector,
-          meta: {
-            pitchMeanHz: Math.round(pitchMeanHz),
-            pitchStdHz: 15,
-            energyMean: Number(energyMean.toFixed(2)),
-            spectralCentroidHz: 500,
-            voicedRatio: 0.8,
-          },
+          // Doar câmpul măsurat REAL, cu numele pe care serverul chiar îl citește.
+          meta: { centroid: Math.round(centroidHz) },
         }),
       })
 

@@ -198,7 +198,7 @@ export default function CvAdaptation({ onClose }: CvAdaptationProps): React.Reac
               <button onClick={() => void handleDownloadPdf()} style={{ ...btn('#37b24d'), flex: 2 }}>
                 {T.cvDownload} .pdf
               </button>
-              <button onClick={() => { void navigator.clipboard.writeText(adaptedCv); setSuccessMessage(T.cvCopied) }} style={{ ...btn('#495057'), flex: 1 }}>
+              <button onClick={() => { const p = navigator.clipboard?.writeText(adaptedCv); if (p) void p.then(() => setSuccessMessage(T.cvCopied)).catch(() => {}) }} style={{ ...btn('#495057'), flex: 1 }}>
                 {T.cvCopy}
               </button>
             </div>

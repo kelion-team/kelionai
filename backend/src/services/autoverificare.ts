@@ -65,10 +65,13 @@ export function interpreteazaProba(
   // Verificăm doar cablajul — p.ok = e înregistrată + dispecerul o știe.
   if (tip === 'efect') {
     if (p.ok)
+      // NU „merge" (audit fake, 20 aug): un efect NErulat nu e verificat — știu
+      // doar că e CABLAT (garantat la build de lacătul de paritate), NU că efectul
+      // chiar se produce. Rule #1: neverificat ≠ merge → „nu pot verifica".
       return {
-        verdict: 'merge',
-        deCe: 'cablată corect; funcție cu EFECT — probă sigură (dry-run), nu se execută la test ca să nu producă efect/cost',
-        recomandare: '',
+        verdict: 'nu_pot_verifica',
+        deCe: 'cablată (garantat la build de lacătul de paritate), dar NU o rulez la test — ar produce efect/cost; deci nu pot verifica LIVE că efectul chiar se produce',
+        recomandare: 'verificare live doar la o rulare reală, cerută explicit (ex. un email de probă, o imagine de test)',
       }
     return {
       verdict: 'stricat',
@@ -261,9 +264,11 @@ export function formatMonitorAutoverificare(raport: RaportAutoverificare, plan: 
   const linii: string[] = []
   linii.push(`✅ ${raport.merg} merg   ❌ ${raport.stricate} stricate   … ${raport.nepotverifica} nu pot verifica   (din ${raport.total})`)
   if (!problematice.length) {
-    linii.push('', `Toate cele ${raport.total} funcții MERG — probat real (citirile executate, efectele verificate fără să le rulez).`)
+    linii.push('', `Toate cele ${raport.total} funcții verificate MERG — citirile executate REAL. (Efectele nu se rulează la test — apar la „nu pot verifica".)`)
   } else {
-    linii.push('', 'CE NU MERGE (măsurat):')
+    // NU „CE NU MERGE" pentru tot (audit fake, 20 aug): efectele cablate-dar-nerulate
+    // sunt „nu pot verifica", NU stricate. Titlul le numește pe amândouă cinstit.
+    linii.push('', 'CE NU MERGE sau NU POT VERIFICA (măsurat):')
     for (const f of problematice) {
       const p = planDupaNume.get(f.functie)
       linii.push('', `${icon(f.verdict)} ${f.functie} — ${f.deCe}`)

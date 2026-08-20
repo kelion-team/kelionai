@@ -4,12 +4,6 @@
 // import, so it vanishes at compile time — it adds nothing to the bundle.
 import type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
 export type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow }
-export interface UserSummary {
-  email: string
-  count: number
-  last: string
-}
-
 export interface HistoryRow {
   role: string
   content: string
@@ -508,17 +502,6 @@ export async function fetchActivity(): Promise<UserActivity | null> {
 // fără try/catch — o eroare de rețea arunca (loading blocat pe veci +
 // unhandled rejection), iar un 403/500 colapsa în [] („No history yet." /
 // „Nu a scris niciun mesaj" pentru o citire picată). null = eșec, spus ca atare.
-export async function fetchUsers(): Promise<UserSummary[] | null> {
-  try {
-    const r = await fetch('/api/admin/users', { credentials: 'include' })
-    if (!r.ok) return null
-    const j = (await r.json()) as { users?: UserSummary[] }
-    return j.users ?? []
-  } catch {
-    return null
-  }
-}
-
 export async function fetchHistory(email: string): Promise<HistoryRow[] | null> {
   try {
     const r = await fetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
@@ -562,20 +545,6 @@ export async function translateToRo(texts: string[]): Promise<TranslateRoResult>
   }
 }
 
-// Capability gaps: things users asked for that Kelion can't do yet (admin only).
-export interface CapabilityGap {
-  id: number
-  user_email: string
-  request: string
-  reason: string | null
-  hits: number
-  resolved: boolean
-  escalated?: boolean
-  // Kelion's autonomous decision: "DE IMPLEMENTAT: ..." / "ÎNCHIS AUTONOM: ...".
-  triage?: string | null
-  created_at: string
-  last_seen: string
-}
 
 // Triggers Kelion's autonomous triage over all open gaps.
 // `error` PĂSTRAT în tip (auditul admin, 3 aug): backend-ul răspunde 200 și
@@ -583,20 +552,6 @@ export interface CapabilityGap {
 // — vechiul tip îl tăia și butonul tăcea, indiferent de rezultat.
 // (runGapsTriage / fetchAudit + AuditReport — SCOS 10 aug: cod mort după
 // curățarea adminului #959; niciun apelant. `fetchGaps` de mai jos rămâne, e viu.)
-
-// null = citirea a EȘUAT (auditul admin, 3 aug): contractul tabului e „a
-// dispărut = auto-rezolvat", deci un [] fals pe 403/500 se citea ca „totul
-// rezolvat" și refresh-ul de 15s ȘTERGEA lista bună de pe ecran.
-export async function fetchGaps(all = false): Promise<CapabilityGap[] | null> {
-  try {
-    const r = await fetch(`/api/admin/gaps${all ? '?all=1' : ''}`, { credentials: 'include' })
-    if (!r.ok) return null
-    const j = (await r.json()) as { gaps?: CapabilityGap[] }
-    return j.gaps ?? []
-  } catch {
-    return null
-  }
-}
 
 // ── LISTA DE ERORI, CE E FIECARE (Adrian, 12 aug) ──────────────────────────────
 // Fața vizuală a autodiagnosticului: erorile din browser (grupate) + defectele de

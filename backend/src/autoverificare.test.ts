@@ -35,10 +35,11 @@ describe('tipFunctie — citire (probă reală) vs efect (dry-run)', () => {
 })
 
 describe('interpreteazaProba — funcții cu EFECT (dry-run, fără cost)', () => {
-  it('cablată → MERGE, cu notă că nu s-a executat (fără efect)', () => {
+  it('cablată dar NErulată → NU POT VERIFICA (efect nerulat ≠ verificat, rule #1)', () => {
     const d = interpreteazaProba('build_software', 'efect', { ok: true })
-    expect(d.verdict).toBe('merge')
-    expect(d.deCe).toMatch(/EFECT|dry-run|nu se execută/)
+    expect(d.verdict).toBe('nu_pot_verifica')
+    expect(d.deCe).toMatch(/cablat/i)
+    expect(d.deCe).toMatch(/nu.*rulez|nu pot verifica|efect\/cost/i)
   })
   it('ne-cablată → STRICAT + recomandare fermă', () => {
     const d = interpreteazaProba('build_software', 'efect', { ok: false, eroare: 'nu e în dispecer' })
@@ -116,9 +117,14 @@ describe('ruleazaAutoverificare — probează TOATE capabilitățile + îmbogă�
       probaCitire: async () => ({ ok: true, rezultat: 'ok-real' }),
       esteCablat: () => true,
     })
+    // Efectele NErulate → „nu pot verifica" (nu „merg", audit fake 20 aug): doar
+    // CITIRILE probate real se numără la „merg"; efectele cablate stau la nepotverifica.
+    const citiri = CAPABILITIES.filter((c) => tipFunctie(c.name) === 'citire').length
+    const efecte = CAPABILITIES.length - citiri
     expect(raport.total).toBe(CAPABILITIES.length)
     expect(raport.functii).toHaveLength(CAPABILITIES.length)
-    expect(raport.merg).toBe(CAPABILITIES.length)
+    expect(raport.merg).toBe(citiri)
+    expect(raport.nepotverifica).toBe(efecte)
     expect(raport.stricate).toBe(0)
   })
 
@@ -304,8 +310,8 @@ describe('formatMonitorAutoverificare + afișarea server-side obligatorie', () =
   it('totul verde → spune că toate MERG, fără listă de probleme', () => {
     const functii = [f('a', 'merge', 'ok'), f('b', 'merge', 'ok')]
     const doc = formatMonitorAutoverificare(raport(functii), [])
-    expect(doc.text).toMatch(/Toate cele 2 funcții MERG/)
-    expect(doc.text).not.toMatch(/CE NU MERGE/)
+    expect(doc.text).toMatch(/Toate cele 2 funcții verificate MERG/)
+    expect(doc.text).not.toMatch(/CE NU MERGE sau NU POT VERIFICA/)
   })
 
   it('executorul SCRIE raportul pe monitor server-side (obligatoriu), nu la alegerea modelului', () => {

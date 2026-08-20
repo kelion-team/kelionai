@@ -29,6 +29,7 @@ interface Strings {
   sentBody: string
   close: string
   errEmail: string
+  errSend: string
 }
 
 const T: Record<Lang, Strings> = {
@@ -53,6 +54,7 @@ const T: Record<Lang, Strings> = {
     sentBody: 'Your message has been received. We will reply to you shortly, in your language.',
     close: 'Close',
     errEmail: 'Please enter a valid email and a message.',
+    errSend: 'Could not send — the server did not confirm. Please try again.',
   },
   ro: {
     title: 'Contact',
@@ -75,6 +77,7 @@ const T: Record<Lang, Strings> = {
     sentBody: 'Mesajul tău a fost primit. Îți vom răspunde în scurt timp, în limba ta.',
     close: 'Închide',
     errEmail: 'Introdu un email valid și un mesaj.',
+    errSend: 'Nu s-a putut trimite — serverul n-a confirmat. Încearcă din nou.',
   },
   fr: {
     title: 'Contactez-nous',
@@ -97,6 +100,7 @@ const T: Record<Lang, Strings> = {
     sentBody: 'Votre message a été reçu. Nous vous répondrons sous peu, dans votre langue.',
     close: 'Fermer',
     errEmail: 'Veuillez saisir un e-mail valide et un message.',
+    errSend: 'Échec de l’envoi — le serveur n’a pas confirmé. Réessayez.',
   },
   es: {
     title: 'Contáctanos',
@@ -119,6 +123,7 @@ const T: Record<Lang, Strings> = {
     sentBody: 'Tu mensaje ha sido recibido. Te responderemos en breve, en tu idioma.',
     close: 'Cerrar',
     errEmail: 'Introduce un correo válido y un mensaje.',
+    errSend: 'No se pudo enviar — el servidor no confirmó. Inténtalo de nuevo.',
   },
   de: {
     title: 'Kontakt',
@@ -141,6 +146,7 @@ const T: Record<Lang, Strings> = {
     sentBody: 'Ihre Nachricht ist eingegangen. Wir antworten Ihnen in Kürze in Ihrer Sprache.',
     close: 'Schließen',
     errEmail: 'Bitte geben Sie eine gültige E-Mail und eine Nachricht ein.',
+    errSend: 'Senden fehlgeschlagen — der Server hat nicht bestätigt. Bitte erneut versuchen.',
   },
   it: {
     title: 'Contattaci',
@@ -163,6 +169,7 @@ const T: Record<Lang, Strings> = {
     sentBody: 'Il tuo messaggio è stato ricevuto. Ti risponderemo a breve, nella tua lingua.',
     close: 'Chiudi',
     errEmail: 'Inserisci un’email valida e un messaggio.',
+    errSend: 'Invio non riuscito — il server non ha confermato. Riprova.',
   },
   pt: {
     title: 'Contacte-nos',
@@ -185,6 +192,7 @@ const T: Record<Lang, Strings> = {
     sentBody: 'A sua mensagem foi recebida. Responderemos em breve, no seu idioma.',
     close: 'Fechar',
     errEmail: 'Introduza um email válido e uma mensagem.',
+    errSend: 'Não foi possível enviar — o servidor não confirmou. Tente novamente.',
   },
 }
 
@@ -212,7 +220,7 @@ export default function ContactModal({ onClose }: { readonly onClose: () => void
     }
     setState('sending')
     try {
-      await fetch('/api/contact', {
+      const res = await fetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -224,9 +232,15 @@ export default function ContactModal({ onClose }: { readonly onClose: () => void
           lang,
         }),
       })
+      // NU mai mințim „primit" (audit fake, 20 aug): fără confirmarea serverului
+      // (res.ok), mesajul S-A PIERDUT — nu există coadă/retry pe client, iar
+      // „am primit mesajul" ar fi o minciună pe un formular public. Pe eșec:
+      // rămânem pe formular și spunem cinstit să reîncerce.
+      if (!res.ok) throw new Error(String(res.status))
       setState('sent')
     } catch {
-      setState('sent') // never trap the visitor; the message is queued either way
+      setState('idle')
+      setErr(t.errSend)
     }
   }
 
