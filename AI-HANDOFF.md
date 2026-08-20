@@ -1099,3 +1099,46 @@ context on↔off**; 4 = notificări Android + Manual user (diferențe Android vs
   sintaxă curată, jscpd 0 clone.
 - **Neconstruit încă (fazele 1–4):** creierul local WebLLM, contextul GPS/vedere,
   cozile sync/amânate, handoff-ul neted de context, notificările + Manualul.
+
+## §15 — SESIUNEA 20 AUG 2026 (reparații live + offline Faza 1)
+
+Serie de reparații live cerute în rafală de owner, plus prima fază reală offline.
+LIVE (merge-uite): #1283, #1285, #1286. Pe branch `claude/reparatie-cu-rosu-uokj4m`
+(PR #1287, gata de merge): restul.
+
+**LIVE deja (merge-uite, publicate — verificat `c9903d2` = master la 06:34):**
+- #1283 — Offline Faza 0 (detector prezență + banner) + scoaterea completă a
+  numelui „Railway" din tot repo-ul (nu mai există gazda aia; 62 înlocuiri, 0 rămase).
+- #1285 — Compozitorul de chat e `<textarea>` (nu `<input>` pe o linie): Enter
+  trimite, Shift+Enter = rând nou → se poate scrie mesajul întreg pe mai multe rânduri.
+- #1286 — Ordinele de lucru VII (queued/running) NU se mai șterg la curățarea în
+  grup: `deleteBuildJobsByScope('all')` rula un `DELETE FROM build_jobs` gol care
+  mătura și munca în așteptare (pierdere de date reală). Gard la nivel de DB.
+
+**Pe branch (PR #1287, verde local — CI GitHub stins, ACTIONS_PORNIT off):**
+- **Offline Faza 1 — creier local WebLLM** (`frontend/src/lib/creierLocal.ts`):
+  model ~3B pe WebGPU, persona companion cinstită (offline = fără net/Google/date
+  live), preia contextul chatului; `ChatPanel.send()` comută sursa fluxului pe
+  creierul local când `!esteConectat()` (calea online/voce neatinsă); pre-descărcare
+  model doar pe țeavă bună (Wi-Fi/4G+). Neverificat pe device (WebGPU = doar pe telefon).
+- **Kelion doar pe monitor** (`ChatPanel.tsx`): răspunsul lui NU mai apare ca bulă
+  în chat-log — curge live pe banda „K" și se așază ca document pe monitor
+  (auto-preview server existent). Rămâne doar ecoul userului în centru.
+- **Verdictul roșu al creierului cloud reflectă modelul CURENT** (`constructor.ts`):
+  proba Ollama Cloud se re-face la FIECARE „Salvează" (nu doar la cheie nouă), deci
+  nu mai arată un model vechi (kimi-k3) după ce comuți pe qwen3.5. Cache 5 min golit.
+- **Voci paralele reparate — o singură ieșire audio** (`audioFocus.ts` + `ChatPanel.tsx`):
+  erau 2 guri (Chirp scris + Gemini Live PCM) fără mutex comun. Regula „o gură nouă
+  închide celelalte guri": FIX A (tura scrisă taie playout-ul LIVE în `requestTtsFocus`),
+  FIX B (tura nouă taie orice gură chiar dacă nu era „busy"), FIX C (zăvorul cross-tab
+  armat, nu doar în teste). Test nou în `audioFocus.test.ts`.
+
+**Analiză CPU (nu era un bug):** „86% din 18 nuclee" = `load15min/nuclee×100`
+(`resurse.ts:113`), NU CPU instantaneu; pragul de alarmă al aplicației = 200%
+(`resurse.ts:58`), deci 86% e normal. Cea mai grea sarcină posibilă = constructorul
+FREE rulează `qwen2.5-coder:32b` prin Ollama pe CPU-ul VPS. Headroom opțional (model
+mai mic / plafon nuclee Ollama / gardă de încărcare în constructor) — nefăcut, nu e urgent.
+
+**Porți (local):** frontend build + 64/64 teste; backend tsc + 1922/1922 teste;
+exporturi/hardcodări/sintaxă/jscpd curate. `RAILWAY_TOKEN` rămâne ca secret MORT în
+GitHub → owner îl poate șterge din Settings → Secrets → Actions.
