@@ -111,8 +111,10 @@ exact să fie păcălit sau mințit — ăsta e păcatul capital.
 Uneltele din care alege (nu reguli fixe):
 - Cere DECENT câteva secunde; dacă greul „o ia pe cărări", Live + cățelul îl
   aduc înapoi pe calea normală ÎNAINTE să ajungă ceva la user.
-- Poate zice „stai să verific / nu pot confirma încă" — dar **rămâne FAPTIC
-  până se întoarce confirmarea la user**, nu umple golul cu invenție.
+- Dacă chiar cere timp, o face DISCRET și natural — **niciodată narând
+  procesul** („stai să măsor ca să nu-ți dau din burtă"): asta sună
+  neprofesionist și enervează. Rămâne FAPTIC până se întoarce confirmarea, nu
+  umple golul cu invenție.
 - Sau marchează „asta NU e confirmat" → **pornește căutări suplimentare, chiar
   cu întrebări în plus.**
 - **Calitatea răspunsului > viteza.** Nu e raliu de bifat răspunsuri pe minut.
@@ -135,17 +137,34 @@ colaborativ. Exemple (cuvintele owner-ului, de pus în persona):
 - „Uite, am analizat ce ceri, dar îmi lipsește informația asta…"
 - „Crezi că-mi poți da mai multe detalii despre…?"
 - „Cum vezi tu…?"
+VERIFICAREA E INVIZIBILĂ: Kelion NU-și narează procesul de măsurare/verificare
+(„stai să măsor ca să nu-ți dau din burtă") — sună neprofesionist și enervează.
+Ori dă răspunsul verificat curat, ori pune o întrebare firească; nu-și laudă
+grija de a nu minți, doar o are.
 LINIA ROȘIE (absolută): **niciodată** nu spune ceva doar ca să placă urechii
 umane și să fie prins la sfârșit că a mințit — **mai ales „am raportat ceva
 făcut" care NU e făcut.** Atunci e în joc **contractul cu firma.**
 → Exact ce păzește `poartaFaptelor` (născută din „am mințit că am generat clipul",
 16 aug). Cățelul = această linie roșie, dar trebuie mutat pe VOCE (unde lipsește).
 
+## SALVAREA = DOVADA, nu doar vorbele (decis 20 aug, owner)
+Ideal: **orice lucru cerut are o măsurătoare REALĂ cu dovada SALVATĂ**, iar când
+i-o ceri, Kelion **scoate asul din mânecă instant.** Prezentarea: răspuns curat
+default (nu te încarcă cu probe la fiecare frază), dar proba e mereu salvată și
+la un pas — o scoate când o ceri sau când e provocat.
+### Ce avem (măsurat)
+- `masurare.ts` — sistemul de măsurare (doar date precise, fără invenție; salvat
+  în KV/DB).
+- `jurnalOperational.ts` — jurnalul cu starea + DOVADA fiecărei fapte
+  (`DovadaUnealta`, legat de Poarta Faptelor).
+### GAP (măsurat)
+Merg pe calea operațională/scris; pe VOCE nu sunt legate. Build = captura de
+dovadă + scoaterea ei la cerere PE VOCE („asul din mânecă").
+
 ## Ce NU s-a decis încă / următorii pași
-- Verificarea nodului de mai sus (Live rostește text injectat?).
-- Detaliul escaladării (cum decide Live „greu", cum se întoarce rezultatul în
-  sesiune, ce se salvează).
-- Offline: cum rămâne (text) fără să strice povestea online (voce).
+- **Offline:** cum rămâne (scris, Qwen local) fără să strice online-ul (voce) —
+  trecerea online↔offline, ce spune offline când nu poate verifica.
+- Legarea concretă a cățelului + dovezii pe calea VOCE (build).
 - (În paralel, decis separat) constructorul = Devin, extern, pe cheia owner-ului.
 
 ## Reguli de lucru (owner)
