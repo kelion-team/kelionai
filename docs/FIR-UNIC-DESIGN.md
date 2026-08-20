@@ -10,7 +10,7 @@ paralel; poartă umană doar la publicare; ZERO dublură (înlocuiește servicii
 - `kelion-builder.mjs` (225 l) = CONSTRUCTORUL: polează ordine la 20s, worktree izolat per job
   din `origin/master`, `claude --permission-mode acceptEdits`, comite pe `vps-<id>`, push,
   `ready-deploy`. CAP=3 paralel.
-- `kelion-deployer.mjs` (94 l) = publică (`railway up`) la „da". `kelion-paznic` = watchdog.
+- `kelion-deployer.mjs` (94 l) = publică (pe gazda veche, prin comanda ei) la „da". `kelion-paznic` = watchdog.
 - Backend (chat.ts): admin → [EXECUT] → work order → builder. Predarea = unde se pierde firul.
 
 ## 1. Arhitectura FIRULUI UNIC

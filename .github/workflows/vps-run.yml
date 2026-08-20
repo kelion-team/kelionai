@@ -27,7 +27,7 @@ jobs:
     steps:
       # (Pasul vechi de diagnostic care tipărea NUMELE tuturor secretelor a fost
       # scos — problema pe care o depana, `VPS_SSH_KEY` gol, e demult rezolvată,
-      # iar dump-ul umplea logul cu nume de secrete moarte, ex. `RAILWAY_TOKEN`.
+      # iar dump-ul umplea logul cu nume de secrete moarte, ex. tokenul gazdei vechi.
       # Verificarea cheii goale a rămas mai jos, în pasul propriu-zis.)
       - name: Rulează comanda pe VPS (SSH cu cheie)
         env:

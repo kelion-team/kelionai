@@ -52,7 +52,7 @@ Dacă **oricare** dintre comenzi dă eroare → STOP. Nu deploya. Repară eroare
 
 ### 4. Publicare (DOAR dacă build-ul a trecut)
 
-> **ATENȚIE (22 iul 2026): Railway a fost SCOS.** Pipeline-ul de publicare al
+> **ATENȚIE (22 iul 2026): gazda PaaS veche a fost SCOASĂ.** Pipeline-ul de publicare al
 > gazdei noi (VPS) nu e încă definit — `kelion-github deploy`/`publish` răspunde
 > FAIL CLOSED. Pașii de mai jos duc codul în `master` (obligatoriu), dar
 > publicarea efectivă pe gazdă se face separat și se dovedește la pasul 5.
