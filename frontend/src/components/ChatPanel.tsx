@@ -79,6 +79,7 @@ import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 import { esteConectat } from '../lib/conexiune'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil } from '../lib/creierLocal'
+import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
 import JarvisOrb from './JarvisOrb'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
@@ -391,6 +392,11 @@ export default function ChatPanel({
   // Precizia MĂSURATĂ a fixului GPS (±metri, de la senzor) — merge împreună cu
   // coordonatele în sesiunea vocală, ca modelul să știe cât de bun e locul.
   const precizieRef = useRef<number | null>(null)
+  // VITEZA de deplasare (m/s din `coords.speed`) — merge și OFFLINE, o folosește
+  // creierul local ca să fie uman (faza 2, owner: „la 2 va putea spune viteza?").
+  // null = senzorul n-a dat-o (nu inventăm). Ultima poziție+timp pentru fallback.
+  const vitezaRef = useRef<number | null>(null)
+  const ultimaPozRef = useRef<{ lat: number; lon: number; t: number } | null>(null)
   // The LIVE voice session (if any) — used by the location tools to
   // refresh its position exactly when needed (updateCoords, on demand).
   const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
@@ -1363,7 +1369,19 @@ export default function ChatPanel({
       // randare, abort) rămâne IDENTIC. Calea online e neatinsă. `next` (istoricul,
       // inclusiv mesajul curent) e preluat de model — PRELUAREA CONTEXTULUI cerută.
       const sursaFlux = !esteConectat()
-        ? streamLocalRaspuns(next, lang, ac.signal)
+        ? streamLocalRaspuns(
+            next,
+            lang,
+            ac.signal,
+            // FAZA 2 — GPS + viteză + vedere, MĂSURATE, injectate în creierul local
+            // ca să fie UMAN offline (spune viteza, unde ești, că te vede).
+            contextPentruCreier({
+              lat: coordsRef.current?.lat,
+              lon: coordsRef.current?.lon,
+              vitezaMs: vitezaRef.current,
+              fataDetectata: Boolean(face),
+            }),
+          )
         : streamChat(
         next,
         image ?? undefined,
@@ -2608,6 +2626,14 @@ export default function ChatPanel({
     const id = navigator.geolocation.watchPosition(
       (pos) => {
         const nou = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+        // VITEZA (faza 2): din senzor (`coords.speed`, merge și offline) dacă o dă;
+        // altfel calculată din poziția anterioară (vitezaDinPozitii). Măsurată,
+        // niciodată inventată — null rămâne null.
+        const vSenzor = typeof pos.coords.speed === 'number' && pos.coords.speed >= 0 ? pos.coords.speed : null
+        if (vSenzor != null) vitezaRef.current = vSenzor
+        else if (ultimaPozRef.current)
+          vitezaRef.current = vitezaDinPozitii(ultimaPozRef.current, { lat: nou.lat, lon: nou.lon, t: pos.timestamp }) ?? vitezaRef.current
+        ultimaPozRef.current = { lat: nou.lat, lon: nou.lon, t: pos.timestamp }
         // AUTO-UPDATE DOAR LA MIȘCARE MARE (9 aug, ownerul: „și un km e ok, că
         // la cerere se citește real"). Paznicul de fundal e doar un CACHE CALD
         // — nu trebuie precis, fiindcă orice tură care chiar are nevoie de loc
@@ -2636,6 +2662,8 @@ export default function ChatPanel({
           const c = { lat: pos.coords.latitude, lon: pos.coords.longitude }
           coordsRef.current = c
           precizieRef.current = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null
+          // Viteza (faza 2), dacă senzorul o dă la citirea pe loc.
+          if (typeof pos.coords.speed === 'number' && pos.coords.speed >= 0) vitezaRef.current = pos.coords.speed
           resolve(c)
         },
         // Refusal/failure → we stay on the last known position (may be null).
