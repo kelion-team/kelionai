@@ -52,6 +52,13 @@ export async function pregatesteUrecheOffline(onProgress?: (p: number) => void):
       }
       const { pipeline } = tf
       recunoscator = (await pipeline('automatic-speech-recognition', MODEL_URECHE, {
+        // BUG REPARAT (probă LIVE owner 21 aug + REPRODUS în Chromium aici, apoi REPARAT
+        // și re-verificat tot aici): la crearea sesiunii, optimizatorul de graf ORT
+        // (nivel extins) pică pe modelul cuantizat q8 cu „qdq_actions.cc:137
+        // TransposeDQWeightsForMatMulNBits Missing required scale". Cu nivelul 'basic'
+        // transformarea buggy nu mai rulează → sesiunea se creează (măsurat: 5s),
+        // modelul rămâne cel MIC (q8) — nu forțăm fp32 de sute de MB.
+        session_options: { graphOptimizationLevel: 'basic' },
         // progresul descărcării fișierelor modelului (0..1), la fel ca la creier.
         progress_callback: (info: { status?: string; progress?: number }) => {
           if (typeof info?.progress === 'number') {

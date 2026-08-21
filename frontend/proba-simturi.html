@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- PROBA REALĂ A SIMȚURILOR OFFLINE (doar dev, nu intră în build):
+     încarcă EXACT modulele aplicației (urecheOffline/vazOffline) într-un browser
+     adevărat și scrie starea măsurată în DOM, ca Playwright s-o citească.
+     Regula #1: nu declarăm „merge" fără să vedem AICI starea 'gata'. -->
+<html>
+  <head><meta charset="utf-8" /><title>proba simturi</title></head>
+  <body>
+    <pre id="stare">pornesc…</pre>
+    <script type="module">
+      import { env } from '@huggingface/transformers'
+      // Mediul de test n-are drum din browser spre huggingface.co (proxy-ul îl taie);
+      // modelele vin dintr-o OGLINDĂ locală (descărcate cu curl în frontend/proba-hf).
+      // Instanța de modul e aceeași cu cea din urecheOffline/vazOffline (import cache).
+      env.remoteHost = 'http://localhost:5199/proba-hf/'
+      import { pregatesteUrecheOffline, stareUrecheOffline } from '/src/lib/urecheOffline'
+      import { pregatesteVazOffline, stareVazOffline } from '/src/lib/vazOffline'
+      const el = document.getElementById('stare')
+      const scrie = () => {
+        const u = stareUrecheOffline()
+        const v = stareVazOffline()
+        el.textContent = JSON.stringify({
+          ureche: { stare: u.stare, progres: Math.round(u.progres * 100), motiv: u.motiv },
+          vaz: { stare: v.stare, progres: Math.round(v.progres * 100), motiv: v.motiv },
+        })
+      }
+      const int = setInterval(scrie, 1000)
+      const tinta = new URLSearchParams(location.search).get('ce') || 'ureche'
+      ;(async () => {
+        if (tinta === 'ureche' || tinta === 'ambele') await pregatesteUrecheOffline()
+        if (tinta === 'vaz' || tinta === 'ambele') await pregatesteVazOffline()
+        clearInterval(int)
+        scrie()
+        document.title = 'proba-gata'
+      })()
+    </script>
+  </body>
+</html>

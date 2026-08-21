@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- MATRICEA DE REPARAȚII (doar dev): probează candidați de dtype/session_options pe
+     pipeline-ul ASR real, cu oglinda locală, și scrie verdictul măsurat în DOM. -->
+<html>
+  <head><meta charset="utf-8" /><title>proba matrice</title></head>
+  <body>
+    <pre id="stare">pornesc…</pre>
+    <script type="module">
+      import { pipeline, env } from '@huggingface/transformers'
+      env.remoteHost = 'http://localhost:5199/proba-hf/'
+      try { if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.wasmPaths = '/ort/' } catch {}
+      const el = document.getElementById('stare')
+      const p = new URLSearchParams(location.search)
+      const dtype = p.get('dtype') || undefined
+      const opt = p.get('opt') || undefined
+      const model = p.get('model') || 'onnx-community/whisper-base'
+      const task = p.get('task') || 'automatic-speech-recognition'
+      const optiuni = {}
+      if (dtype) optiuni.dtype = dtype
+      if (opt) optiuni.session_options = { graphOptimizationLevel: opt }
+      el.textContent = `încerc: ${task} ${model} dtype=${dtype ?? '(implicit)'} opt=${opt ?? '(implicit)'}`
+      try {
+        const t0 = performance.now()
+        await pipeline(task, model, optiuni)
+        el.textContent = `REUSIT in ${Math.round((performance.now() - t0) / 1000)}s | dtype=${dtype ?? 'implicit'} opt=${opt ?? 'implicit'}`
+      } catch (e) {
+        el.textContent = `EROARE: ${String(e && e.message ? e.message : e).slice(0, 250)}`
+      }
+      document.title = 'proba-gata'
+    </script>
+  </body>
+</html>
