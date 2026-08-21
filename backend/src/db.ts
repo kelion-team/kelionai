@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow } from './shared/api-types.js'
 export type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow }
 import { config } from './config.js'
+import { creeazaPoolDb } from './dbConexiune.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 import { normalizeazaTip, clampImportanta, rangheazaMemorii } from './services/memoryRank.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
@@ -34,16 +35,11 @@ export function dbEnabled(): boolean {
 }
 
 // Exported for the live "PostgreSQL" check in tokenChecks (SELECT 1).
+// Viața conexiunii (validarea țintei, TLS, răbdarea la repornirea Postgres-ului
+// și eroarea 503 „infrastructură") stă în dbConexiune.ts — un singur modul
+// responsabil, nu răspândită prin cele 5800 de linii de aici.
 export function getPool(): pg.Pool {
-  if (!pool) {
-    const url = config.databaseUrl
-    // Local/no-TLS Postgres (VPS on the same machine, explicit sslmode=disable)
-    // connects without SSL; any other target gets TLS with a self-signed
-    // certificate accepted (managed proxies).
-    const noTls = /sslmode=disable/.test(url) || /@(localhost|127\.0\.0\.1)[:/]/.test(url)
-    const ssl = noTls ? false : { rejectUnauthorized: false }
-    pool = new pg.Pool({ connectionString: url, ssl })
-  }
+  if (!pool) pool = creeazaPoolDb(config.databaseUrl)
   return pool
 }
 
