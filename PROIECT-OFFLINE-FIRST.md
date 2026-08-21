@@ -199,9 +199,10 @@ Lăsat la final: dovedim modelul pe Android+Desktop (unde nativ merge ușor),
 ## 7. Ordinea de construit
 
 1. **Fundație:** repară comutarea offline (bug-ul de azi) + curăță codul mort
-   (harta celor 3 agenți, §8) — teren curat.
+   (harta celor 3 agenți, §8) — teren curat. ✅ **FĂCUT** (offline fix live PR
+   #1305; curățenia codului de voce mort live PR #1306 → master `73742a3`).
 2. **Faza 1** pe Android + Desktop: M1→M2→M3 (ușoare) → M4, M5 (grele) → M7, M8.
-   Test complet mod-avion.
+   Test complet mod-avion. ⏳ **M1 pornit** (butonul „Instalează" PWA — vezi §8).
 3. **Faza 2:** deschizi porțile una câte una, fiecare cu fallback pe bază.
 4. **Faza 3:** port iOS nativ.
 
@@ -228,7 +229,27 @@ Verde măsurat: build FE, tsc+teste BE (201/1713), porți.
 - **Poarta `verifica-exporturi` = fals-verde** (numără comentarii/teste ca
   „folosit") — de întărit.
 
-**RĂMAS:** vezi `RAMAS-DE-FACUT.md`. Faza 1 e neîncepută; teardown-ul e fundația.
+**FĂCUT (21 aug, continuare — fundația E gata, verificat live):**
+- **Fix comutare offline** (PR #1305 → master): când cade netul cu modelul
+  descărcat, chatul trece pe creierul local (nu mai minte „am pierdut conexiunea").
+  Confirmat live de owner („da merge"). Audit 3 agenți: PASS + garda anti-barge-in.
+- **Curățenia codului de voce mort** (PR #1306 → master `73742a3`, ver 4.8, LIVE
+  09:14): scoasă jumătatea de captură din `audioIO` (microfon + voiceprint mort),
+  parametrii vocali morți din `streamChat`, `contorFraza.ts`. Rămâne redarea
+  (narator/apel/gura avatarului). Audit 3 agenți independenți: 3×PASS (removal
+  corect / zidurile intacte 201·1713 teste / contract TEXT neatins). Verificat
+  live: `/api/version` = exact commit-ul de merge.
+
+**FAZA 1 — M1 pornit (PR #1307): butonul „Instalează" (PWA).** Buton INLINE pe
+Landing (lângă codurile QR): un tap → PWA instalat ca aplicație de sine stătătoare,
+fără .exe/.apk. Chrome/Android/desktop = prompt NATIV; iOS Safari = instrucțiunea
+reală (nu buton mort); deja instalat = tace. Text în 7 limbi. Audit 3 agenți: prima
+rundă a prins (layout FAIL) o bară fixă ce se ciocnea cu FAB-ul/watermark-ul/modalele
+Landing → rescris INLINE (nu cârpit) → runda 2: 3×PASS. **Următor M1:** schela
+Capacitor (APK nativ offline) — build-ul APK cere Android SDK (CI dedicat/mașina
+ownerului); apoi M3 TTS offline → M4/M5 (STT + vedere) native.
+
+**RĂMAS:** vezi `RAMAS-DE-FACUT.md`.
 
 ---
 

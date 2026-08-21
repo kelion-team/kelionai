@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
 import ContactModal from '../components/ContactModal'
 import VisitorChatWidget from '../components/VisitorChatWidget'
+import { ButonInstalarePwa } from '../components/ButonInstalarePwa'
 import { startGoogleLogin } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { raporteazaPagina } from '../lib/vizita'
@@ -259,6 +260,15 @@ export default function Landing({ error }: { error?: string | null }) {
               .exe self-updates. Store targets get swapped in the moment a
               listing goes public (MS Store, Play, App Store). */}
           <div className="landing-qr">
+            {/* Drumul UȘOR (Faza 1 M1): un tap instalează PWA-ul ca aplicație de
+                sine stătătoare, FĂRĂ .exe/.apk — distinct de codurile QR de mai
+                jos (instalatorul nativ per platformă). Apare DOAR când chiar se
+                poate instala; pe iOS, instrucțiunea reală, nu un buton mort. */}
+            <ButonInstalarePwa
+              invitatie={t.instalDeviceInvitatie}
+              eticheta={t.instalDeviceButon}
+              hintIos={t.instalDeviceIos}
+            />
             <span className="landing-qr-hint">{PT.qrHint}</span>
             <div className="landing-qr-row">
               {QR_CODES.map((q) => (
