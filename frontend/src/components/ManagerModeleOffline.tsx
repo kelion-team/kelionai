@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   MODELE_OFFLINE,
   getModelOffline,
@@ -21,8 +21,10 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
   const [descarcate, setDescarcate] = useState<string[]>(() => modeleDescarcate())
   const [st, setSt] = useState(() => stareCreierLocal())
   const [areWebgpu, setAreWebgpu] = useState<boolean | null>(null)
+  const montat = useRef(true)
 
   useEffect(() => {
+    montat.current = true
     let viu = true
     void webgpuDisponibil().then((ok) => viu && setAreWebgpu(ok))
     void sincronizeazaStareOffline().then(() => {
@@ -37,6 +39,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
     }, 600)
     return () => {
       viu = false
+      montat.current = false
       window.clearInterval(id)
     }
   }, [])
@@ -51,6 +54,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
     setActiv(id)
     setSt(stareCreierLocal())
     void pregatesteModelOffline().then(() => {
+      if (!montat.current) return // panoul s-a închis între timp — nu atinge starea
       setSt(stareCreierLocal())
       setDescarcate(modeleDescarcate())
     })
@@ -138,7 +142,13 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                       {m.nume} <span style={{ color: '#9a92c0', fontWeight: 600 }}>· {m.parametri}</span>
                     </div>
                     <div style={{ fontSize: 11.5, color: '#9a92c0', marginTop: 2 }}>
-                      {eActiv ? '● activ' : eDescarcat ? '✓ descărcat' : 'nedescărcat'}
+                      {eActiv
+                        ? eDescarcat
+                          ? '● activ'
+                          : '● activ · nedescărcat'
+                        : eDescarcat
+                          ? '✓ descărcat'
+                          : 'nedescărcat'}
                     </div>
                   </div>
                   <div style={{ flex: '0 0 auto' }}>
@@ -150,7 +160,8 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                       <button
                         type="button"
                         onClick={() => foloseste(m.id)}
-                        style={btnStil('#2a2440', '#e9e4ff')}
+                        disabled={seDescarca}
+                        style={btnStil('#2a2440', '#e9e4ff', seDescarca)}
                       >
                         Folosește
                       </button>

@@ -131,9 +131,13 @@ export function setModelOffline(id: string): void {
     /* storage indisponibil */
   }
   if (id === curent) return
-  genModel++ // invalidează orice pregătire în curs pe modelul vechi
+  genModel++ // invalidează orice pregătire în curs pe modelul vechi (garda genModel)
+  // Eliberează memoria GPU a motorului vechi (fără unload, fiecare comutare lăsa un
+  // model încărcat în VRAM). NU atingem `pregatire`: dacă o descărcare e în curs pe
+  // modelul vechi, o LĂSĂM să se termine (garda genModel îi aruncă rezultatul) — așa
+  // NU pornesc DOUĂ CreateMLCEngine deodată (bugul de OOM/crash pe telefon).
+  void motor?.unload?.()
   motor = null
-  pregatire = null
   progres = 0
   motivEroare = ''
   stare = citesteDescarcate().has(id) ? 'descarcat' : 'neintrodus'
@@ -151,6 +155,7 @@ let motivEroare = ''
 let motor: {
   chat: { completions: { create: (o: unknown) => Promise<unknown> } }
   interruptGenerate?: () => Promise<void> | void
+  unload?: () => Promise<void> | void // eliberează memoria GPU la comutarea modelului
 } | null = null
 let pregatire: Promise<boolean> | null = null
 
@@ -159,18 +164,19 @@ export function stareCreierLocal(): { stare: StareLocal; progres: number; motiv:
   return { stare, progres, motiv: motivEroare }
 }
 
-/** E modelul în Cache Storage? Verificare UȘOARĂ, direct pe cache-ul `webllm/model`,
- *  FĂRĂ să importăm biblioteca grea WebLLM la pornire. Best-effort (false la orice
- *  eroare). Completitudinea reală o revalidează WebLLM la încărcare. */
-export async function modelDescarcatInCache(): Promise<boolean> {
+/** E cache-ul WebLLM (`webllm/model`) NEGOL? Verificare UȘOARĂ, fără să importăm
+ *  biblioteca grea la pornire. Întoarce `true`/`false` doar când chiar am MĂSURAT;
+ *  `null` = NU POT măsura (Cache API lipsă sau citire eșuată) — regula #1: o citire
+ *  eșuată NU e „gol", ca să nu ștergem din greșeală evidența descărcărilor. */
+export async function modelDescarcatInCache(): Promise<boolean | null> {
   try {
-    if (typeof caches === 'undefined') return false
+    if (typeof caches === 'undefined') return null
     if (!(await caches.has('webllm/model'))) return false
     const c = await caches.open('webllm/model')
     const chei = await c.keys()
     return chei.length > 0
   } catch {
-    return false
+    return null
   }
 }
 
@@ -182,6 +188,7 @@ export async function modelDescarcatInCache(): Promise<boolean> {
 export async function sincronizeazaStareOffline(): Promise<void> {
   if (stare === 'gata' || stare === 'se_pregateste') return
   const inCache = await modelDescarcatInCache()
+  if (inCache === null) return // nu pot citi cache-ul → nu schimb nimic (regula #1)
   const activ = getModelOffline()
   const potrivit = inCache && citesteDescarcate().has(activ)
   if (potrivit) {
@@ -251,12 +258,17 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
   // generația se schimbă și NU punem motorul (vechi) ca activ la final.
   const idTinta = getModelOffline()
   const genTinta = genModel
+  // Marcăm „se pregătește" SINCRON (înainte de orice await): UI-ul vede imediat că o
+  // descărcare e în curs și blochează celelalte butoane, fără fereastra de ~600ms în
+  // care se putea porni a doua descărcare (bugul de OOM). Se corectează mai jos dacă
+  // nu e WebGPU.
+  stare = 'se_pregateste'
+  progres = 0
   pregatire = (async () => {
     if (!(await webgpuDisponibil())) {
       stare = 'fara_webgpu'
       return false
     }
-    stare = 'se_pregateste'
     // STOCARE PERSISTENTĂ (owner 20 aug: „fiecare update să fie preluat și după ce s-a
     // downloadat, nu să șteargă ce e existent"). Update-ul ESTE preluat normal (se
     // reîncarcă versiunea nouă), dar modelul (~2 GB în Cache Storage sub webllm/*) e deja
@@ -279,7 +291,9 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
       })) as unknown as typeof motor
       marcheazaDescarcat(idTinta) // chiar s-a descărcat — rămâne în cache (util și dacă owner a comutat)
       if (genModel !== genTinta) {
-        // owner a comutat pe alt model între timp → NU punem motorul ăsta ca activ
+        // owner a comutat pe alt model între timp → NU punem motorul ăsta ca activ;
+        // eliberăm memoria GPU a motorului stăl (altfel rămânea încărcat degeaba).
+        void eng?.unload?.()
         stare = citesteDescarcate().has(getModelOffline()) ? 'descarcat' : 'neintrodus'
         return false
       }
