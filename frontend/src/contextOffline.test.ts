@@ -39,6 +39,14 @@ describe('contextPentruCreier — doar ce e MĂSURAT, gol dacă nimic', () => {
     expect(c).toContain('location')
     expect(c).not.toContain('movement')
   })
+  it('vederea (M5): descrierea scenei intră în context; goală → omisă', () => {
+    const c = contextPentruCreier({ vede: 'a person sitting at a desk with a laptop' })
+    expect(c).toContain('camera scene')
+    expect(c).toContain('a person sitting at a desk with a laptop')
+    // Fără descriere de scenă → nimic despre cameră (nu inventează).
+    expect(contextPentruCreier({ vede: '' })).toBe('')
+    expect(contextPentruCreier({ fataDetectata: false })).toBe('')
+  })
 })
 
 describe('vitezaDinPozitii — fallback când senzorul nu dă speed', () => {
