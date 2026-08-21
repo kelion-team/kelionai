@@ -47,10 +47,11 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       user-facing adus la cod (descărcarea invizibilă, VAD opt-in, „always
       spoken" scos, offline=tastare, 8 limbi), comentariile-minciună corectate
       (config/iscoada/AEC/prefs), AI-HANDOFF banner + §18 cu adevărurile
-      măsurate, RAMAS/CLAUDE/PROIECT aduse la zi — **RĂMAS: merge + verificare
-      live** (manualul rescris apare pe kelionai.app; traducerile se
-      re-încălzesc singure — cache pe hash, măsurat de verificator) + tranșa 2
-      (restul constatărilor doar consemnate în §18, nu rescrise la sursă).
+      măsurate, RAMAS/CLAUDE/PROIECT aduse la zi — **MERGE (PR #1322) +
+      MĂSURAT LIVE 21 aug 23:30Z: v=214fa61, ver 6.6; manualul LIVE verificat
+      separat (servește „automatic and silent", fără bară/buton).** RĂMAS:
+      tranșa 2 (restul constatărilor doar consemnate în §18, nu rescrise la
+      sursă — muncă de doc separată).
       **Rând nou (n): butonul de ștergere cont pică TĂCUT** — serverul refuză
       mereu (403, ordinul 14 aug), UI-ul nu zice nimic (prefs.ts/CustomerSettings)
       — de decis cu owner-ul: butonul scos sau mesaj onest.
@@ -110,6 +111,12 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               scurgerile pe turele suprimate greșesc spre fals-negativ (sigur).
               Lacăte: catelulPeVoce.test.ts (cod viu, anti-M6). RĂMAS pt. bifă:
               merge + măsurat live (inclusiv ordinea turnComplete/toolCall).
+      - Registre reziduale pas 2 (re-verificatorul, nu blocante): etichetele
+        familiilor 10/11 cară fragmente de verdict („nimic nu va mișca",
+        „auditul e inventat") care pe varianta vocală contrazic „nu pot
+        verifica" — de neutralizat la următoarea trecere; booleanul anuntAmanat
+        partajat (scris + sistem) golit dintr-un singur consum — pre-existent,
+        direcția erorii = fals-negativ.
       - [ ] 2b. (decizie OWNER) nota cățelului să fie și ROSTITĂ scurt în tura
               următoare (prin canalul anunțurilor, NU citind monitorul — §8,
               fără narațiune de proces — §5): într-un produs 100% vorbit, o

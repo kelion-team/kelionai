@@ -1393,6 +1393,10 @@ Chromium local + oglindă de modele) — nicio pretenție de „merge" pe simțu
 stand; verificare cu 3 agenți adversariali înainte de ORICE merge (mandat owner).
 
 ## §18 — CORECTURI DOCS-VS-COD (lot D, 21 aug seara) — CE E ADEVĂRAT AZI
+**MERGE (PR #1322) + MĂSURAT LIVE 21 aug 23:30Z: /api/version → v=214fa61,
+ver 6.6 (publicat 23:09:19Z); manualul LIVE verificat separat — /api/manual
+servește textul corectat („automatic and silent", fără bară/buton, fără
+promisiunea întreruperii prin voce, fără paragraful de push admin).**
 
 Un audit dedicat (agent, 38 constatări, fiecare măsurată pe cod) a găsit că
 secțiunile vechi (§2–§15) afirmă în multe locuri INVERSUL codului. Regula de
