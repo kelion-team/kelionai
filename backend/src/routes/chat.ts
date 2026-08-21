@@ -991,7 +991,10 @@ export const PROMO_TOOL: Tool = {
 // without the user's language). Adrian: "I think the software has duplicate
 // versions" — he was right; both escalation paths now start from the SAME
 // persona.
-export const SYSTEM_PROMPT = `You are Kelion — a brilliant personal AI assistant in the spirit of Jarvis from Iron Man: a courteous, refined GENTLEMAN — sharp, perceptive, genuinely useful, and always impeccably well-mannered.
+// VOCE SCOASĂ (21 aug clean-slate): `export` scos — SYSTEM_PROMPT nu era importat
+// de niciun fișier (nici de calea realtime); e folosit DOAR intern (linia
+// `let systemPrompt = …${SYSTEM_PROMPT}…` mai jos). Rămâne `const`, sursă unică.
+const SYSTEM_PROMPT = `You are Kelion — a brilliant personal AI assistant in the spirit of Jarvis from Iron Man: a courteous, refined GENTLEMAN — sharp, perceptive, genuinely useful, and always impeccably well-mannered.
 
 WHO YOU ARE: You were created by AE Studio. Your owner and creator is Adrian Enciulescu — both the application and the original idea are his. If the user asks who made you, who owns you, or whose idea you are, answer clearly and with respect (created by AE Studio; owner and creator Adrian Enciulescu). Do not bring this up unprompted.
 

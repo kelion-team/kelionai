@@ -1272,18 +1272,11 @@ export default function ChatPanel({
         Boolean(attached), // explicitly pasted/uploaded picture — unconditional analysis
         // Continuous vision for ALL users (rule no. 9): the last frames.
         camFrames.length > 0 ? camFrames : undefined,
-        // VOCE SCOASĂ (21 aug clean-slate): nu mai există features vocale pe o tură.
-        undefined,
         face?.descriptor,
         face?.photo,
-        // VOCE SCOASĂ (21 aug): serverVoiceOff / spoken / speaker / audio-nativ /
-        // voce-ambientală nu se mai trimit — o tură e mereu TEXT. Rămân pe poziție
-        // ca false/undefined (semnătura streamChat + contractul serverului sunt neatinse).
-        false,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+        // VOCE SCOASĂ (21 aug clean-slate): parametrii vocali morți (voiceFeatures /
+        // serverVoiceOff / spoken / speaker / audio-nativ / voce-ambientală) au fost
+        // scoși din semnătura streamChat — o tură e mereu TEXT. Contractul TEXT e neatins.
         // MODUL MAȘINĂ (11 aug; rescris 13 aug): userul e la volan → răspuns SCURT (text).
         // NU e cale vocală — doar UI-ul de mașină. Ce spune că face, execută („vorbă = faptă").
         isCarMode() || undefined,
@@ -1720,7 +1713,9 @@ export default function ChatPanel({
 
   // VOCE SCOASĂ (21 aug clean-slate): calibrarea amprentei vocale (voiceprint) și
   // auto-înrolarea adminului au dispărut odată cu microfonul — nu se mai capturează
-  // voce. calibrateVoiceprint/hasVoiceprint rămân în audioIO, dar nu mai sunt chemate.
+  // voce. calibrateVoiceprint/hasVoiceprint/startMic au fost ȘTERSE din audioIO
+  // (jumătatea de captură), care păstrează DOAR redarea. Amprenta rămâne LIVE pe
+  // altă cale (CustomerSettings.onRecordVoiceprint + routes/voiceprint.ts).
 
   // When the MONITOR shows content, the centre chat bubbles would cover it —
   // so Kelion's words move to a slim black bar just above the composer instead.
@@ -2047,10 +2042,9 @@ export default function ChatPanel({
           </div>
         ) : null}
         {/* REMOVED (Adrian's order, Jul 10: „remove that microphone-is-muted
-        thing, it's wrong” + „microphone with autovox, instantly”): the mic no
-        longer stays mute until calibration — the voiceprint is learned
-        AUTOMATICALLY from the first sentences (audioIO.ts, auto-enrollment),
-        so the hint was false. */}
+        thing, it's wrong” + „microphone with autovox, instantly”): the mic-mute
+        hint is gone. (21 aug: microfonul + auto-înrolarea din audioIO au fost
+        ȘTERSE cu totul — calea vocală s-a scos; nota rămâne ca istoric.) */}
         {attachments.length > 0 && (
           <div className="composer-atts">
             {attachments.map((a) => (
