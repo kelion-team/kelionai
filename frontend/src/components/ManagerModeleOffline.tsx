@@ -11,6 +11,7 @@ import {
   stergeModelOffline,
 } from '../lib/creierLocal'
 import { pregatesteUrecheOffline, stareUrecheOffline } from '../lib/urecheOffline'
+import { pregatesteVazOffline, stareVazOffline } from '../lib/vazOffline'
 
 // ── MANAGER MODELE OFFLINE (owner 21 aug: „vreau să pot seta EU modelul, inclusiv
 // Gemma 2 sau plus, doar la offline… să le downloadez și să le pot încerca") ──────
@@ -23,6 +24,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
   const [descarcate, setDescarcate] = useState<string[]>(() => modeleDescarcate())
   const [st, setSt] = useState(() => stareCreierLocal())
   const [stUreche, setStUreche] = useState(() => stareUrecheOffline())
+  const [stVaz, setStVaz] = useState(() => stareVazOffline())
   const [areWebgpu, setAreWebgpu] = useState<boolean | null>(null)
   const montat = useRef(true)
 
@@ -40,6 +42,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
       setActiv(getModelOffline())
       setDescarcate(modeleDescarcate())
       setStUreche(stareUrecheOffline())
+      setStVaz(stareVazOffline())
     }, 600)
     return () => {
       viu = false
@@ -86,6 +89,15 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
     setStUreche(stareUrecheOffline())
     void pregatesteUrecheOffline().then(() => {
       if (montat.current) setStUreche(stareUrecheOffline())
+    })
+  }
+  // VĂZUL (M5): descarcă + încarcă modelul de captioning, ca să vadă/descrie scena offline.
+  const seDescarcaVaz = stVaz.stare === 'se_pregateste'
+  const procentVaz = Math.max(3, Math.round(stVaz.progres * 100))
+  const descarcaVaz = (): void => {
+    setStVaz(stareVazOffline())
+    void pregatesteVazOffline().then(() => {
+      if (montat.current) setStVaz(stareVazOffline())
     })
   }
 
@@ -275,8 +287,8 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                   <button
                     type="button"
                     onClick={descarcaUreche}
-                    disabled={seDescarca || seDescarcaUreche || areWebgpu === false}
-                    style={btnStil('#6ea8fe', '#10121a', seDescarca || seDescarcaUreche || areWebgpu === false)}
+                    disabled={seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false}
+                    style={btnStil('#6ea8fe', '#10121a', seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false)}
                   >
                     ⏬ Descarcă
                   </button>
@@ -290,6 +302,62 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
             )}
             {stUreche.stare === 'eroare' && stUreche.motiv && (
               <div style={{ marginTop: 8, fontSize: 11.5, color: '#ffcaca' }}>{stUreche.motiv}</div>
+            )}
+          </div>
+        </div>
+
+        {/* VĂZUL OFFLINE (Faza 1 · M5): model local de captioning (image-to-text), ca să
+            descrie scena din cameră fără net. Descarcă o dată (Hugging Face), apoi rulează
+            în browser (WASM). Legenda intră în contextul creierului local (vede ca un om). */}
+        <div style={{ marginTop: 16, borderTop: '1px solid #2a2440', paddingTop: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>👁 Văzul — descriu scena fără net</div>
+          <div
+            style={{
+              border: `1px solid ${stVaz.stare === 'gata' ? '#6ea8fe' : '#2a2440'}`,
+              borderRadius: 10,
+              padding: '10px 12px',
+              background: stVaz.stare === 'gata' ? 'rgba(110,168,254,0.08)' : 'transparent',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  Captioning <span style={{ color: '#9a92c0', fontWeight: 600 }}>· vit-gpt2</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: '#9a92c0', marginTop: 2 }}>
+                  {stVaz.stare === 'gata'
+                    ? '✓ gata'
+                    : seDescarcaVaz
+                      ? 'se descarcă…'
+                      : stVaz.stare === 'eroare'
+                        ? '⚠️ eroare'
+                        : 'nedescărcat'}
+                </div>
+              </div>
+              <div style={{ flex: '0 0 auto' }}>
+                {seDescarcaVaz ? (
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: '#cbbcff' }}>⏬ {procentVaz}%</span>
+                ) : stVaz.stare === 'gata' ? (
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: '#6ea8fe' }}>gata</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={descarcaVaz}
+                    disabled={seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false}
+                    style={btnStil('#6ea8fe', '#10121a', seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false)}
+                  >
+                    ⏬ Descarcă
+                  </button>
+                )}
+              </div>
+            </div>
+            {seDescarcaVaz && (
+              <div style={{ height: 3, marginTop: 8, background: '#2a2440', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${procentVaz}%`, background: 'linear-gradient(90deg,#8b7cf0,#cbbcff)', transition: 'width .4s ease' }} />
+              </div>
+            )}
+            {stVaz.stare === 'eroare' && stVaz.motiv && (
+              <div style={{ marginTop: 8, fontSize: 11.5, color: '#ffcaca' }}>{stVaz.motiv}</div>
             )}
           </div>
         </div>

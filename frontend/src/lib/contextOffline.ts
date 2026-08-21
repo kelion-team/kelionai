@@ -15,6 +15,9 @@ export interface SemnaleContext {
   fataDetectata?: boolean
   /** Opțional: eticheta expresiei feței (din face-api), dacă există. */
   expresie?: string
+  /** Văzul offline (M5): o descriere SCURTĂ a scenei din cameră (caption local,
+   *  vazOffline). Gol/absent = nu s-a văzut nimic → NU se raportează (regula #1). */
+  vede?: string
 }
 
 /** m/s → descriere MĂSURATĂ + treaptă umană. '' dacă viteza e necunoscută (nu
@@ -42,6 +45,11 @@ export function contextPentruCreier(s: SemnaleContext): string {
   if (v) parti.push(`movement: ${v}`)
   if (s.fataDetectata) {
     parti.push(s.expresie ? `you can see the person (looks ${s.expresie})` : 'you can see the person on camera')
+  }
+  if (s.vede) {
+    // Descrierea scenei din camera locală (caption offline, M5) — un fapt MĂSURAT
+    // (ce vede modelul acum), nu o invenție; creierul îl folosește ca un om care observă.
+    parti.push(`the camera scene looks like: ${s.vede}`)
   }
   if (!parti.length) return ''
   return (

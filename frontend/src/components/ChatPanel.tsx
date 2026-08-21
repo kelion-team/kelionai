@@ -62,6 +62,7 @@ import { vorbesteOffline } from '../lib/voceOffline'
 import { ascultaOffline, stareUrecheOffline, type ControlAscultare } from '../lib/urecheOffline'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline, incalzesteCodOffline } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
+import { porneseteVazSampling, descriereVazOffline } from '../lib/vazOffline'
 import {
   adaugaTuraSync,
   adaugaAmanata,
@@ -1293,6 +1294,10 @@ export default function ChatPanel({
               lon: coordsRef.current?.lon,
               vitezaMs: vitezaRef.current,
               fataDetectata: Boolean(face),
+              // VĂZUL OFFLINE (M5): ultima descriere a scenei din cameră (caption local,
+              // în fundal). Instant — nu așteaptă inferență; '' dacă modelul nu-i pregătit
+              // sau n-a văzut nimic proaspăt → omis din context (regula #1).
+              vede: descriereVazOffline(),
             }),
           )
         : streamChat(
@@ -1720,6 +1725,19 @@ export default function ChatPanel({
       frameBufRef.current = []
       latestFrameRef.current = null
     }
+  }, [cameraOn])
+
+  // VĂZUL OFFLINE (Faza 1 · M5): cât camera e pornită, captioning în FUNDAL din cadrele deja
+  // capturate (vazOffline, ~8s, model local Xenova/vit-gpt2). Se auto-închide dacă modelul
+  // nu-i descărcat, iar `esteActiv` = !esteConectat() îl ține pe TĂCERE cât suntem online
+  // (acolo vederea merge pe server → nu ardem bateria offline degeaba). Legenda ajunge INSTANT
+  // în contextul turei offline prin descriereVazOffline() (fără latență). Oprit la stingerea camerei.
+  useEffect(() => {
+    if (!cameraOn) return
+    return porneseteVazSampling(
+      () => latestFrameRef.current,
+      () => !esteConectat(),
+    )
   }, [cameraOn])
 
   // Close the functions menu on an outside click.
