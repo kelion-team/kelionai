@@ -13,28 +13,36 @@ import { fileURLToPath } from 'node:url'
 const ruta = readFileSync(fileURLToPath(new URL('./routes/vocalLive.ts', import.meta.url)), 'utf8')
 
 describe('cățelul anti-minciună pe calea vocală ușoară', () => {
-  it('poartaFaptelor e importată și chemată pe tura vorbită', () => {
-    expect(ruta).toMatch(/import \{ pretentiiFaraFapta, textulDemascarii, clasificaRezultatUnealta, type DovadaUnealta \} from '\.\.\/services\/poartaFaptelor\.js'/)
-    expect(ruta).toMatch(/const nedovedite = pretentiiFaraFapta\(k, doveziVoceTura\)/)
+  // COD VIU, NU TEXT (mutantul M6 al verificatorului: judecata COMENTATĂ trecea
+  // toate lacătele — regexurile neancorate potriveau și comentariile). Ancorele
+  // `^\s*` cu flag `m` nu pot traversa `//`; comentariile-bloc se curăță întâi.
+  const viu = ruta
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n')
+  it('poartaFaptelor e importată și chemată pe tura vorbită (cod viu, nu comentariu)', () => {
+    expect(viu).toMatch(/^\s*import \{ pretentiiFaraFapta, textulDemascarii, clasificaRezultatUnealta, type DovadaUnealta \} from '\.\.\/services\/poartaFaptelor\.js'/m)
+    expect(viu).toMatch(/^\s*const nedovedite = pretentiiFaraFapta\(k, doveziVoceTura\)/m)
   })
   it('judecă DOAR turele pur-ușoare — temeiul din afară (creier greu / anunț de sistem) sare judecata', () => {
-    expect(ruta).toMatch(/if \(k && !turaCuTemeiDinAfara\) \{/)
+    expect(viu).toMatch(/^\s*if \(k && !turaCuTemeiDinAfara\) \{/m)
     // ambele armări ale steagului există:
-    const armari = ruta.match(/turaCuTemeiDinAfara = true/g) ?? []
+    const armari = viu.match(/^\s*turaCuTemeiDinAfara = true/gm) ?? []
     expect(armari.length).toBeGreaterThanOrEqual(2)
     // …și steagul se RESETEAZĂ la fiecare tură salvată (altfel o singură ușă
     // ar orbi cățelul pe veci):
-    expect(ruta).toMatch(/doveziVoceTura = \[\]\s*\n\s*turaCuTemeiDinAfara = false/)
+    expect(viu).toMatch(/^\s*doveziVoceTura = \[\]\s*\n\s*turaCuTemeiDinAfara = false/m)
   })
   it('dovezile turei = rezultatele REALE clasificate ale uneltelor sesiunii Live (succes ȘI eșec)', () => {
-    const clasificari = ruta.match(/doveziVoceTura\.push\(clasificaRezultatUnealta\(/g) ?? []
+    const clasificari = viu.match(/^\s*(?:if \(r != null\) )?doveziVoceTura\.push\(clasificaRezultatUnealta\(/gm) ?? []
     expect(clasificari.length).toBeGreaterThanOrEqual(3)
     // tentativa picată e dovadă de EȘEC, nu acoperire:
-    expect(ruta).toMatch(/clasificaRezultatUnealta\(apel\.name, `tool_error: /)
+    expect(viu).toMatch(/clasificaRezultatUnealta\(apel\.name, `tool_error: /)
   })
   it('demascarea intră în istoric, pe monitor ca DOC (nu voce) și în jurnal', () => {
-    expect(ruta).toMatch(/k \+= demascare/)
-    expect(ruta).toMatch(/frame: \{ doc: \{ title: 'Poarta faptelor \(voce\)'/)
-    expect(ruta).toMatch(/\[POARTA FAPTELOR\]\[VOCE\]/)
+    expect(viu).toMatch(/^\s*k \+= demascare/m)
+    expect(viu).toMatch(/^\s*trimite\(\{ type: 'control', frame: \{ doc: \{ title: 'Poarta faptelor \(voce\)'/m)
+    expect(viu).toMatch(/\[POARTA FAPTELOR\]\[VOCE\]/)
   })
 })
