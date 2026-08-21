@@ -68,7 +68,9 @@ describe('stareCreierLocal — pornește onest, nu pretinde „gata"', () => {
 // ── REGRESIA prinsă de agentul de verificare (21 aug): slotul `pregatire` trebuie
 // golit pe ORICE ieșire, inclusiv ramura fără-WebGPU. Altfel (cum setModelOffline nu
 // mai atinge `pregatire`) o ieșire timpurie ar lăsa slotul plin pe veci → creierul
-// nu s-ar mai încărca deloc. Aici (jsdom, fără WebGPU) pregătirea iese pe `fara_webgpu`.
+// nu s-ar mai încărca deloc. Aici (env de test Node, fără WebGPU) pregătirea iese pe
+// `fara_webgpu`. NB: acest test MUTĂ starea modulului la 'fara_webgpu' — rămâne ULTIMUL
+// describe, ca testul „starea inițială e neintrodus" (dinainte) să nu-l vadă schimbat.
 describe('pregatesteModelOffline — nu blochează slotul la ieșirea fără-WebGPU', () => {
   it('a doua chemare NU întoarce promisiunea stală (slotul e golit în finally)', async () => {
     const p1 = pregatesteModelOffline()
