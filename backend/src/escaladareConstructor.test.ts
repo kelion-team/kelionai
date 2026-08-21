@@ -48,32 +48,33 @@ describe('constructor = Aider (motor unic) pe creier LOCAL Ollama de pe VPS', ()
     expect(agent).toContain('function asiguraCreierulLocal')
     expect(agent).toContain('setup-ollama.sh')
     // Se cheamă ÎNAINTE de a construi; dacă nu reușește, ordinul e AMÂNABIL.
-    expect(agent).toContain('if (!platit && !asiguraCreierulLocal())')
+    expect(agent).toContain('if (!asiguraCreierulLocal())')
     expect(agent).toContain('amanabil: true')
   })
 
   it('watchdogul nu omoară cold-startul free sau sumarizarea după commit (praguri dinamice)', () => {
     // Pragurile nu mai sunt fixe (praghAider — dinamice pe greutate + ajustate din
-    // istoric + calibrate din media plătit), dar BAZELE stau peste probele live:
-    // free load_duration ~81s → bază tăcere free ≥ 150s; paid ucis fals la 90s
-    // post-commit → bază paid ≥ 180s; grația de închidere după commit 300s.
+    // istoric), dar BAZA stă peste proba live: free load_duration ~81s → bază tăcere
+    // free ≥ 150s; grația de închidere după commit 300s. (Free-local unic — fără paid.)
     const freeBaza = /CONSTRUCTOR_SILENCE_MS, ([0-9_]+)\)/.exec(agent)
-    const paidBaza = /CONSTRUCTOR_PAID_SILENCE_MS, ([0-9_]+)\)/.exec(agent)
     expect(freeBaza).toBeTruthy()
-    expect(paidBaza).toBeTruthy()
     expect(Number(freeBaza?.[1].replaceAll('_', ''))).toBeGreaterThan(80_647)
-    expect(Number(paidBaza?.[1].replaceAll('_', ''))).toBeGreaterThan(90_000)
     expect(agent).toContain('CONSTRUCTOR_POST_COMMIT_SILENCE_MS, 300_000')
     expect(agent).toContain('const aComis =')
-    // Timpul e ACUM dinamic + se calibrează din plătit (cerințele ownerului, 19 aug).
+    // Timpul e ACUM dinamic + ajustat din istoric (cerințele ownerului, 19 aug).
     expect(agent).toContain('export function praghAider')
-    expect(agent).toContain('export function calibrarePaid')
+    // Dimensiunea PLĂTITĂ a fost scoasă complet: fără calibrare din plătit.
+    expect(agent).not.toContain('calibrarePaid')
+    expect(agent).not.toContain('CONSTRUCTOR_PAID_SILENCE_MS')
   })
 
-  it('porți roșii după free comută următoarea reparație pe fallbackul paid', () => {
-    expect(agent).toContain('motivFree: `calitate ${problema.slice(0, 300)}`')
-    expect(agent).toContain('CLOUD rezervă după poarta de calitate')
-    expect(agent).toContain("salveazaLectie({ sig: 'escaladare_paid', cauza: 'calitate'")
+  it('nu mai există escaladare pe creierul plătit (paidul a fost scos, 20 aug)', () => {
+    // Constructorul e FREE-LOCAL unic: nicio funcție de escaladare, niciun fallback paid.
+    expect(agent).not.toContain('decideEscaladareFreeFirst')
+    expect(agent).not.toContain('fallbackPaid')
+    expect(agent).not.toContain('CLOUD rezervă')
+    expect(agent).not.toContain('escaladare_paid')
+    expect(agent).not.toContain('paid_cloud')
   })
 
   it('ruta veche de creier prin app (Gemini) a FOST SCOASĂ din constructor', () => {

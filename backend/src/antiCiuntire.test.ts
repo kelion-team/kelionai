@@ -56,8 +56,8 @@ describe('agentul constructor rămâne complet', () => {
 
   it('bucățile mari ale constructorului sunt toate acolo', () => {
     // Un ciot accidental ar pierde cel puțin una dintre piesele active: motorul
-    // Aider, creierul local, escaladarea, verificarea atelierului sau porțile.
-    for (const bucata of ['construiesteCuAider', 'function ruleazaAider', 'asiguraCreierulLocal', 'decideEscaladareFreeFirst', 'function verificaAtelierul', 'function verificaPortileCasei'])
+    // Aider, creierul local, verificarea atelierului sau porțile.
+    for (const bucata of ['construiesteCuAider', 'function ruleazaAider', 'asiguraCreierulLocal', 'function verificaAtelierul', 'function verificaPortileCasei'])
       expect(constructor).toContain(bucata)
   })
 })

@@ -1486,6 +1486,10 @@ export function startAutonomie(): void {
     // joburile 'running' înțepenite după preluare — INDEPENDENT de pulsul lucrătorului, ca
     // „Preluat · 0%" să nu mai stea pe veci când lucrătorul de pe VPS a murit fix după claim.
     await deblocheazaJoburileClaimate().catch(() => ({ repuse: 0, abandonate: 0 }))
+    // DISPECERUL DEVIN (owner, 20 aug): o trecere — poluează jobul Devin în lucru
+    // (bara reală pe monitor) sau pornește Devin pe următorul ordin din coadă.
+    // Inert când cheia Devin nu e pusă. Best-effort — nu blochează autonomia.
+    { const { tickDispecerDevin } = await import('./devinConstructor.js'); await tickDispecerDevin().catch((e) => console.error('[devin] tick:', String(e).slice(0, 160))) }
     const r = await poateSaLucreze().catch((e) => ({ pornit: false, motiv: String(e).slice(0, 120) }))
     ultima = {
       la: new Date().toISOString(),

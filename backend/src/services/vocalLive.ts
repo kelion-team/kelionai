@@ -19,6 +19,7 @@
 import WebSocket from 'ws'
 import { config } from '../config.js'
 import { continuareStraina } from './limbaRaspuns.js'
+import { CHARTER_CHAT_VOCE_LEGI } from './charterChatVoce.js'
 
 // MODELUL Live. NU există „3.6 Live" (Google n-a scos unul — măsurat: 3.6 e
 // refuzat pe bidiGenerateContent). Owner (4 aug): „fără 3.1" → folosim
@@ -147,7 +148,9 @@ export function construiesteInstructiune(
    *  limbi ar arunca istoricul legitim al userului. Implicit ro-RO. */
   limbaPin: string | undefined = 'ro-RO',
 ): string {
-  let instructiune = `${persona}\nVorbești cu ${numeUser}.`
+  // CHARTER-ul de chat/voce „Jarvis" (owner, 20 aug) intră PRIMUL, ca legile —
+  // vocea trăiește după el la fel ca chatul scris. Sursa unică: charterChatVoce.ts.
+  let instructiune = `${CHARTER_CHAT_VOCE_LEGI}\n${persona}\nVorbești cu ${numeUser}.`
   // ANCORA REALITĂȚII (8 aug, ownerul: „nu e ancorat în realitate, după
   // coordonatele gps"). Sesiunea live pornea fără NICIO noțiune de timp sau
   // loc — modelul plutea. Aceeași lecție ca la calea clasică (4 aug, „Kelion

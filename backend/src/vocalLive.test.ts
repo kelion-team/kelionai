@@ -108,6 +108,7 @@ describe('vocalLive — interpreteazaCadru', () => {
 // care cară istoricul, Kelion ar fi un străin politicos la fiecare apăsare de
 // microfon. Funcția e pură, deci se probează aici, nu se ia pe încredere.
 import { construiesteInstructiune, oraLocalaText } from './services/vocalLive.js'
+import { CHARTER_CHAT_VOCE_LEGI } from './services/charterChatVoce.js'
 
 describe('vocalLive — instrucțiunea cară memoria omului', () => {
   const persona = 'Ești Kelion.'
@@ -161,8 +162,11 @@ describe('vocalLive — instrucțiunea cară memoria omului', () => {
     // cu fiecare regulă nouă (4200 → 4800 la REGULA SALUTULUI; → 5500 la
     // REGULA TREZIRII PE NUME + ancora limbii ÎNTĂRITĂ, 9 aug — amândouă
     // ordonate de owner: „răspunde doar când e strigat" + banda „Dime, con").
+    // + CHARTER-ul de chat/voce „Jarvis" (owner, 20 aug) — bloc FIX, ca regulile
+    // de dinainte: se adaugă la buget o dată, NU crește cu istoricul. Plafonul pe
+    // ISTORIC rămâne exact 5500 — de-aia îl scădem separat, nu-l topim în total.
     expect(i.length, 'un istoric nelimitat ar umfla setup-ul sesiunii ca vechiul prompt de 15.000 de tokeni').toBeLessThan(
-      persona.length + 5500,
+      persona.length + CHARTER_CHAT_VOCE_LEGI.length + 5500,
     )
   })
 })
