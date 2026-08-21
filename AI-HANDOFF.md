@@ -1376,8 +1376,8 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    (h) flush-ul pre-roll pe calea fără-VAD e necondiționat — un prag RMS pe
    inel ar tăia coada de tăcere/ecou (recomandarea verificatorului);
    (i) registrul de limbă PT e amestecat pt-PT/pt-BR (tu vs. você) — clasă
-   veche, cheile noi au urmat tu-ul european; (j) comentariul din era cozii la
-   trimiterea-ocupat (ChatPanel ~3204) descrie încă „you queue it".
+   veche, cheile noi au urmat tu-ul european; (j) REPARAT — comentariul din era
+   cozii la trimiterea-ocupat rescris la realitatea barge-in.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

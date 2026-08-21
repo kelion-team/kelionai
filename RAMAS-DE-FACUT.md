@@ -44,8 +44,8 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       n-o elimină. Rânduri NOI din verificarea C (nereparate): (h) pragul RMS
       0.02 pe flush-ul fără-VAD e euristic în ambele direcții (ecou TARE trece,
       voce slabă/departe își pierde pre-roll-ul) — se confirmă doar pe telefonul
-      owner-ului; (i) registrul PT amestecat pt-PT/pt-BR; (j) comentariul
-      din era cozii la trimiterea-ocupat (~ChatPanel:3204); (k) fallback-ul
+      owner-ului; (i) registrul PT amestecat pt-PT/pt-BR; (j) REPARAT
+      (comentariul din era cozii rescris la barge-in); (k) fallback-ul
       base=next din flushMesaje rămâne instantaneu pe secvențe contradictorii
       (ștergere în prefix cât curge text); (l) turaAvutSemneRef per-component —
       cadre ale sesiunii live/ture abortate pot suprima fals rândul onest (doar

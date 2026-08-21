@@ -3230,8 +3230,10 @@ export default function ChatPanel({
   // The right-hand button concerns ONLY the WRITTEN chat. You have something to send (text or
   // attached file) → it's active. Empty field → the chat is AUDIO (the microphone is always
   // on, the voice comes in by itself), so the button stays a neutral arrow, NOT a
-  // dead stop-square. The ■ square appears ONLY when you really have text to stack over
-  // a turn in progress (then click = you queue it, it interrupts nothing).
+  // dead stop-square. The ■ square appears ONLY when you really have something to send over
+  // a turn in progress — click = BARGE-IN (the current turn is cut and the new
+  // one starts now; the queue era is gone — full-duplex, Adrian Jul 13). The
+  // `queueing` name survives only as the CSS state of the square.
   const hasDraft = input.trim().length > 0 || attachments.length > 0
   const queueing = busy && hasDraft
 
