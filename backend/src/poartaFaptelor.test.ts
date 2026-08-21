@@ -9,6 +9,7 @@ import {
   clasificaRezultatUnealta,
   pretentiiFaraFapta,
   textulDemascarii,
+  textulNuPotVerifica,
   planFaraExecutie,
   TEXT_PLAN_FARA_EXECUTIE,
 } from './services/poartaFaptelor.js'
@@ -88,6 +89,15 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(t).toContain('VERIFICAREA FAPTELOR')
     expect(t).toContain('FALSĂ')
     expect(t).toContain('generate_video')
+  })
+
+  it('varianta VOCALĂ spune „nu pot verifica", NU un verdict de fals (pe voce pretenția poate fi un recall adevărat)', () => {
+    const t = textulNuPotVerifica(['„am trimis emailul" — fără send_email'])
+    expect(t).toContain('VERIFICAREA FAPTELOR')
+    expect(t).toContain('nu pot verifica')
+    expect(t).not.toContain('FALSĂ')
+    expect(t).not.toContain('o retrag')
+    expect(t).toContain('send_email')
   })
 
   it('o unealtă care a întors eroare este tentativă eșuată, nu dovadă', () => {

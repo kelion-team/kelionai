@@ -64,7 +64,9 @@ describe('P20 — porțile de verdict ale rutei vocale (constatările critice)',
   })
 
   it('anunțul de sistem sosit în timpul unei ture în zbor se AMÂNĂ, nu deturnează verdictul', () => {
-    expect(ruta).toMatch(/if \(turaInZbor\) anuntAmanat = true/)
+    // JARVIS pas 2: amânarea armează și steagul de temei (anuntSistemAmanat),
+    // ca exempția cățelului să călătorească CU anunțul — forma e acum pe bloc.
+    expect(ruta).toMatch(/if \(turaInZbor\) \{\s*\n\s*anuntAmanat = true\s*\n\s*anuntSistemAmanat = true/)
     // transferul la tura curată există în onTuraGata și onIntrerupt
     const transferuri = ruta.match(/anuntAmanat = false/g) ?? []
     expect(transferuri.length).toBeGreaterThanOrEqual(2)

@@ -27,6 +27,7 @@ import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, setSpeechLangPref, citesteSold, debitWallet, recordSimptomLive } from '../db.js'
 import { trackSpeechLang } from '../services/lang.js'
 import { pareCerereVizuala } from '../services/simptomeLive.js'
+import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type DovadaUnealta } from '../services/poartaFaptelor.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -376,6 +377,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // Anunțul de ordin terminat sosit CÂT o tură e în zbor nu mai deturnează
     // verdictul acelei ture — se amână și se armează la prima tură curată.
     let anuntAmanat = false
+    // Cine a amânat: DOAR anunțul de SISTEM (ordinul terminat) exonerează tura
+    // viitoare de judecata cățelului — tura SCRISĂ folosește același protocol
+    // anuntAmanat dar TREBUIE judecată (agentul de logică: armarea necondi-
+    // ționată la consum ar fi exonerat și scrisul).
+    let anuntSistemAmanat = false
     // Tura de SISTEM se declară EXPLICIT (anunțul de ordin terminat), nu se
     // mai deduce din „transcriere goală" — deducția era o poartă fail-open:
     // transcrierea Google sosește adesea DUPĂ primul cadru audio, deci tura
@@ -418,12 +424,56 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // sesiune (vocală SAU scrisă) continuă conversația, n-o ia de la zero.
     let bufUser = ''
     let bufKelion = ''
+    // ── CĂȚELUL PE VOCE (JARVIS pasul 2 — PROIECT-CHAT-VOCE §5) ─────────────
+    // Gap-ul MĂSURAT din spec: poartaFaptelor rula doar pe scris. Pe voce:
+    // dovezile UNELTELOR chemate direct de sesiunea Live în tura vorbită
+    // curentă + steagul „temeiul turei e ÎN AFARA ei" (creierul GREU prin
+    // cere_creierului — poarta LUI rulează deja în /api/chat, iar re-rostirea
+    // răspunsului lui ar fi demascată FALS aici; sau un anunț de SISTEM, al
+    // cărui temei e starea măsurată a ordinelor). Judecăm DOAR turele
+    // PUR-UȘOARE — fals-pozitivul e interzis prin design („o poartă care
+    // strigă la adevăr nu mai e crezută de nimeni").
+    let doveziVoceTura: DovadaUnealta[] = []
+    let turaCuTemeiDinAfara = false
+    // Ușile spre creierul GREU încă în ZBOR (agentul de logică, #3): ordinea
+    // turnComplete vs toolCall la Google NU e garantată/măsurată — cât o ușă e
+    // deschisă, orice tură rostită are temeiul în afară și steagul NU se
+    // consumă (robust la ambele ordini; se măsoară live la publicare).
+    let usiGreleInZbor = 0
     const salveazaTura = (): void => {
       const u = bufUser.trim()
-      const k = bufKelion.trim()
+      let k = bufKelion.trim()
       bufUser = ''
       bufKelion = ''
       rostireCurenta = ''
+      // Pe tura PUR-UȘOARĂ, pretențiile de FAPTĂ din ce a ROSTIT Kelion se
+      // judecă pe uneltele chiar reușite ale turei. Vorba rostită nu se poate
+      // lua înapoi — dar pretenția nu rămâne necontestată: nota intră în
+      // ISTORIC (sesiunea următoare o vede și o poate corecta), pe MONITOR ca
+      // document (niciodată citit cu voce — spec §8) și în jurnal. TEXTUL e
+      // varianta „nu pot verifica" (nu „e FALSĂ") — pe voce pretenția poate fi
+      // un RECALL adevărat al unei fapte din altă tură; un verdict de fals ar
+      // fi EL minciuna (regula #1). CONSUMUL steagului: DOAR pe tura cu
+      // rostire și DOAR fără uși în zbor (agentul de logică, #2/#4: o tură
+      // administrativă închisă fără vorbă nu fură protecția turei care chiar
+      // rostește temeiul).
+      if (k) {
+        if (!turaCuTemeiDinAfara && usiGreleInZbor === 0) {
+          const nedovedite = pretentiiFaraFapta(k, doveziVoceTura)
+          if (nedovedite.length) {
+            const demascare = textulNuPotVerifica(nedovedite)
+            k += demascare
+            try {
+              trimite({ type: 'control', frame: { doc: { title: 'Poarta faptelor (voce)', text: demascare.trim() } } })
+            } catch {
+              /* socket picat — nota rămâne în istoric + jurnal */
+            }
+            app.log.error(`[POARTA FAPTELOR][VOCE] pretenții nedovedite pe tura ușoară (nu pot verifica): ${nedovedite.join('; ')} | dovezi: ${doveziVoceTura.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciuna'}`)
+          }
+        }
+        doveziVoceTura = []
+        if (usiGreleInZbor === 0) turaCuTemeiDinAfara = false
+      }
       if (u) void saveMessage(user.email, 'user', u).catch(() => {})
       if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
       // ÎNVĂȚAREA PE VOCE (10 aug, ownerul: „nu ține minte nimic"): pe scris,
@@ -520,8 +570,21 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // Tura în zbor → amânare; se armează la prima tură curată.
             const turaInZbor =
               verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || rostireCurenta.trim().length > 0
-            if (turaInZbor) anuntAmanat = true
-            else turaDeSistem = true // tura care urmează e ANUNȚ, declarat pe față — nu dedus din buffer gol
+            // Temeiul anunțului e starea MĂSURATĂ a ordinului (sistemul), nu o
+            // unealtă a turei — cățelul vocal nu judecă rostirea lui (§5).
+            // STEAGUL CĂLĂTOREȘTE CU ANUNȚUL, nu cu ceasul (agentul de logică,
+            // #4 — fals-pozitiv DOVEDIT): pe amânare, tura în zbor ar fi
+            // consumat steagul armat aici, iar tura anunțului rămânea judecată
+            // și „clipul e gata" (adevărat, măsurat) era demascat fals. Armarea
+            // pe ramura amânată se face LA CONSUMUL anuntAmanat (vezi cele 3
+            // site-uri anuntAmanat → turaDeSistem).
+            if (turaInZbor) {
+              anuntAmanat = true
+              anuntSistemAmanat = true
+            } else {
+              turaDeSistem = true // tura care urmează e ANUNȚ, declarat pe față — nu dedus din buffer gol
+              turaCuTemeiDinAfara = true
+            }
             live?.anunta(
               `[ANUNȚ DE SISTEM — nu e vocea omului] Ordinul de construcție #${j.id} ` +
                 `(„${j.orderText.slice(0, 80)}") s-a terminat: ${j.status === 'done' ? 'GATA' : 'A EȘUAT'}` +
@@ -1154,6 +1217,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             if (anuntAmanat && verdictTura === null && !cadreInAsteptare.length && !bufKelion.trim()) {
               turaDeSistem = true
               anuntAmanat = false
+              if (anuntSistemAmanat) {
+                turaCuTemeiDinAfara = true // temeiul anunțului de SISTEM = starea ordinului (§5)
+                anuntSistemAmanat = false
+              }
             }
           }
           ultimaTranscriereUserLa = acum
@@ -1262,12 +1329,22 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           // modelului live — regula vocii unice), nici cele de mers (receipt/
           // heartbeat/lang), care ar deruta handleControl.
           if (apel.name === 'cere_creierului') {
+            // Temeiul turei trece la creierul GREU — poarta faptelor a LUI
+            // rulează în /api/chat; cățelul vocal nu judecă re-rostirea (§5).
+            turaCuTemeiDinAfara = true
             const cerere = String((apel.args as { cerere?: unknown }).cerere ?? '').trim()
             if (!cerere) {
               live?.raspundeUnealta(apel.id, apel.name, { eroare: 'cerere goală' })
               return
             }
             app.log.info(`vocal-live: ușa creierului — „${cerere.slice(0, 80)}"`)
+            // UȘĂ ÎN ZBOR (agentul de logică, #3): cât cererea grea e deschisă,
+            // steagul NU se consumă la salvarea vreunei ture intercalate —
+            // ordinea turnComplete/toolCall la Google nu e garantată, iar sub
+            // „trierea în doi" ușa poate măcina zeci de secunde cu schimburi
+            // vorbite pe deasupra. Contorul ține exempția vie cap-coadă.
+            usiGreleInZbor++
+            try {
             // VEDEREA: cere browserului cadrele camerei și așteaptă maxim
             // 1,5 s — fără cameră (sau fără răspuns) tura pleacă fără imagini,
             // nu se blochează.
@@ -1316,6 +1393,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               void recordSimptomLive('chat-mut', `voce: ușa creierului a picat — ${r.motiv}`.slice(0, 180)).catch(() => {})
               live?.raspundeUnealta(apel.id, apel.name, { eroare: r.motiv })
             }
+            } finally {
+              usiGreleInZbor--
+            }
             return
           }
           try {
@@ -1327,17 +1407,23 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // voce" deși pe scris merg. Exact ca bucla de noapte (autonomie.ts).
             if (USER_SCOPED_TOOLS.has(apel.name)) {
               const r = await execUserScopedTool(apel.name, apel.args as any, user.email, user.role === 'admin')
+              // Dovada cățelului vocal (§5): rezultatul REAL, clasificat — o
+              // pretenție de faptă rostită se acoperă doar cu o unealtă reușită.
+              if (r != null) doveziVoceTura.push(clasificaRezultatUnealta(apel.name, String(r)))
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: r ?? 'Unealtă nesuportată în voce.' })
               return
             }
             const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
             if (rezultat !== null) {
+              doveziVoceTura.push(clasificaRezultatUnealta(apel.name, String(rezultat)))
               live?.raspundeUnealta(apel.id, apel.name, { rezultat })
             } else {
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: 'Unealtă nesuportată în voce.' })
             }
           } catch (err: any) {
             app.log.error(`Eroare unealtă ${apel.name}: ${err.message}`)
+            // Tentativă picată = dovadă de EȘEC (nu acoperă nicio pretenție).
+            doveziVoceTura.push(clasificaRezultatUnealta(apel.name, `tool_error: ${String(err?.message ?? err)}`))
             live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
           }
         },
@@ -1358,6 +1444,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           if (anuntAmanat) {
             turaDeSistem = true // tura moartă a eliberat locul — anunțul amânat se armează
             anuntAmanat = false
+            if (anuntSistemAmanat) {
+              turaCuTemeiDinAfara = true // temeiul anunțului de SISTEM = starea ordinului (§5)
+              anuntSistemAmanat = false
+            }
           }
           golesteRedarea() // browserul golește redarea — și ceasul difuzorului tace
         },
@@ -1421,6 +1511,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           if (anuntAmanat) {
             turaDeSistem = true // tura s-a închis — anunțul amânat se armează acum
             anuntAmanat = false
+            if (anuntSistemAmanat) {
+              turaCuTemeiDinAfara = true // temeiul anunțului de SISTEM = starea ordinului (§5)
+              anuntSistemAmanat = false
+            }
           }
           trimite({ type: 'tura_gata' })
         },
