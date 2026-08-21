@@ -1241,3 +1241,70 @@ de siguranță fără deploy:** `localStorage.kelion_vad='0'` → trimitere cont
 (a) vocea tot pornește hands-free și răspunde; (b) nu taie primul cuvânt; (c) Gemini
 tot detectează sfârșitul de tură (hangover-ul îi lasă tăcerea) — dacă nu, cresc
 hangover-ul; (d) factura scade pe zile. Dovada „0 octeți în tăcere" = testele + codul.
+
+## §16 — SESIUNEA 21 AUG 2026: OFFLINE-FIRST Faza 1 — cele trei simțuri (LIVE)
+
+Owner: „hai să finalizăm voce, ureche și văz pe offline" + „pornește M4 și 5" +
+„scos butonul de sub admin pentru a fi văzut de toți că e free". Fiecare livrare
+verificată de **3 agenți adversariali independenți** (mandat owner: „folosește
+permanent metoda 3 agenți independenți") ÎNAINTE de merge; fiecare deploy măsurat
+LIVE pe `/api/version` (fără predicții — regula măsurătorii).
+
+**LIVE (măsurat pe kelionai.app):**
+- M3 (gura offline) + buton Șterge model: `v=cbec9dd`, `ver=5.2`, PR #1310.
+- **M4 (urechea offline) + reparații durabilitate: `v=a91396f`, `ver=5.3`,
+  `at=2026-08-21T12:31:57Z`, merge commit `a91396f0`, PR #1311.**
+
+**Ce e LIVE acum (Faza 1 — companion offline gratis, zero cost pentru noi):**
+- **M1 — buton „Instalează"** inline pe Landing (`ButonInstalarePwa.tsx`, PWA
+  `beforeinstallprompt`), i18n ×7. (Prima variantă, bară fixă jos, a fost respinsă
+  de un agent: se ciocnea cu compozitorul/FAB — pivotat pe buton inline.)
+- **M2 — creierul local** (`creierLocal.ts`, WebLLM/WebGPU) cu **selector de model
+   owner** (`ManagerModeleOffline.tsx`, buton „🧠 Modele"): registru `MODELE_OFFLINE`
+  (Gemma-2 2B, Qwen2.5-3B implicit, Qwen2.5-7B, Gemma-2 9B, toate `-q4f16_1-MLC`,
+  id-uri REALE din prebuilt WebLLM). Descarci mai multe, **„Folosește"** comută activ,
+  **🗑** dă jos un model. Butonul e **pentru TOȚI** (scos de sub admin — e free).
+  Modelele vin de la Hugging Face (gratis pentru noi), NU de pe VPS.
+- **M3 — gura offline** (`voceOffline.ts`, Web Speech `speechSynthesis`): offline,
+  Kelion ROSTEȘTE răspunsul (zero descărcare). O gură: `interruptAll` taie TTS-ul.
+- **M4 — urechea offline** (`urecheOffline.ts`, Whisper prin `@huggingface/transformers`,
+  onnxruntime-WEB WASM servit LOCAL de la `/ort/`, copiat la build în `dist/ort/`):
+  buton 🎤 în chat (apare doar când urechea e „gata") → ascultă → transcrie offline
+  în casetă. Model din HF, o dată cu net, apoi în mod-avion. Secțiune „🎤 Urechea"
+  în managerul de modele. Notă onestă: transformers.js aduce în arbore `onnxruntime-node`
+  + `sharp` (backend-uri NODE cu vulnerabilități) — NU ajung în pachetul din browser
+  (folosim doar WEB/WASM), zero expunere pentru user; doar zgomot în `npm audit` la dev.
+
+**DURABILITATEA MODELELOR LA UPDATE (cererea owner: „la fiecare update nu trebuie
+descărcate din nou modelele... verifică când e un model descărcat"):** la publicare,
+modelele offline supraviețuiesc COMPLET — atât byte-ii cât și evidența:
+- **Byte-ii** (Cache Storage): cele patru puncte de golire cruță ACUM `webllm/*`
+  (creier) ȘI `transformers*` (ureche): `sw.js` `ePastrat` (activate) + handler
+  `kelion-clear-caches`, plus filtrul de Cache Storage din `updateCheck.hardResetToLatest`.
+  (§15c proteja doar `webllm/*` — M4 a extins la `transformers*`.)
+- **Evidența** (localStorage): `creierLocal` exportă `CHEI_OFFLINE_PERSISTENTE`
+  (model activ + set descărcat + cheia veche de migrare), iar `updateCheck` le cruță
+  la `localStorage.clear()` lângă voiceprint+draft → după update modelul rămâne
+  „descărcat" și activ, ZERO re-descărcare (doar reîncărcare din cache la nevoie).
+- Nu există auto-update de model „ca la Windows" (verificat în cod); dacă owner-ul îl
+  vrea vreodată, e feature separat.
+
+**Reparații găsite de metoda 3-agenți în această sesiune (toate cauze în cod, regula #2):**
+- selector model — cursă de concurență (nulare `pregatire` → încărcări multiple GB
+  simultane / OOM); apoi propriul fix a introdus un deadlock (pregatire necurățat pe
+  ieșirea fără-WebGPU) → un singur `try/finally` peste tot IIFE-ul.
+- Șterge model — cursă de re-adăugare (marcaj înainte de garda de generație).
+- „nedescărcat" fals — sonda fragilă de cache ștergea setul; acum crede localStorage.
+- M4 — scurgere microfon la dublu-click/demontare (lacăt sincron `pornireRef` +
+  strajă `montatRef`) + `interruptAll` mutat în `try` (lacătul nu mai rămâne blocat).
+- reconectare — nu se reconecta automat la revenirea netului: `conexiune.ts` poll
+  adaptiv (30s online / 5s offline) + `visibilitychange` recheck.
+
+**Fundație Faza 2 (pregătită, nu activă):** `adaugaTuraSync` — detaliile făcute
+offline se urcă automat ca istoric la conectarea în zona plătită (owner: „trebuie
+prins cum se urcă detaliile automat ca istoric când se leagă la zona plătită").
+
+**RĂMAS din Faza 1:** **M5 — văzul offline** (model de viziune local „descrie scena"
+prin transformers.js image-to-text; `@vladmandic/face-api` există deja). Ultima piesă
+ca offline-ul să vadă, pe lângă vorbit (M3) + auzit (M4). **Neverificat pe device**
+(WebGPU/microfon/cameră = doar pe telefonul owner-ului) — verificarea LIVE rămâne a lui.
