@@ -70,9 +70,9 @@
       // PWA INSTALL (Faza 1 offline-first, M1): Chrome/Edge/Android emit
       // `beforeinstallprompt` EARLY — often before React mounts — and the event
       // can only be used ONCE. We catch it here, stash it on a global, and ping
-      // the app so the in-app "Install" button (BannerInstalare) can fire the
-      // NATIVE prompt on demand. iOS Safari never sends this event (handled in
-      // the component with the real Add-to-Home-Screen hint, no fake button).
+      // the app so the inline "Install" button (ButonInstalarePwa, on Landing)
+      // can fire the NATIVE prompt on demand. iOS Safari never sends this event
+      // (handled in the component with the real Add-to-Home-Screen hint, no fake button).
       window.__kelionDeferredInstall = null
       window.addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault()

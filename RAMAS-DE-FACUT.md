@@ -38,10 +38,23 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       PĂSTRAT: naratorul `/api/tts`, creierul TEXT offline (WebLLM), recorderul,
       camera, monitorul, chatul text. Verde măsurat (build FE, tsc+teste BE 201/1713,
       porți exporturi=0/hardcodări=0/sintaxă+oxlint curate). Owner verifică LIVE:
-      „mă auzi?" (vorbit SAU scris pe calea vocală) = tăcere totală. RĂMAS de curățat
-      la §2: rute backend orfane fără client — `routes/realtime.ts` + `routes/asr.ts`.
+      „mă auzi?" (vorbit SAU scris pe calea vocală) = tăcere totală.
+      **CURĂȚENIE FĂCUTĂ + LIVE (21 aug, PR #1306 → master `73742a3`, ver 4.8):**
+      scoasă jumătatea de captură moartă din `audioIO` (microfon + voiceprint
+      client-side) + parametrii vocali morți din `streamChat` + `contorFraza.ts`.
+      **NU** s-au scos `routes/realtime.ts`/`routes/asr.ts` — auditul celor 3 agenți
+      a arătat că sunt VII, păzite de zidurile ownerului (`voce.test.ts`/`lacat.test.ts`)
+      și de amprenta vocală neuronală (`routes/voiceprint.ts`); rămân pentru reluarea §2.
       FĂCUT din proiect: charter-ul (legile creierului chat+voce + capitolele admin
       din Manual). Pașii 1–7 de mai sus = reconstrucția §2, de la ZERO pe slate curat.
+- [ ] OFFLINE-FIRST — Faza 1 (spec: `PROIECT-OFFLINE-FIRST.md`). FUNDAȚIA GATA +
+      LIVE: fix comutare offline (PR #1305) + curățenia de mai sus (PR #1306). **M1
+      pornit (PR #1307): butonul „Instalează" (PWA)** — inline pe Landing, prompt nativ
+      pe Android/desktop, instrucțiune reală pe iOS; 3 agenți: 3×PASS (runda 1 a prins
+      o ciocnire de layout, rescris inline). NU MERGE ÎNCĂ / de făcut: **APK nativ
+      offline (Capacitor)** — schela se poate genera aici, dar build-ul APK cere Android
+      SDK (neconfigurat în CI → runner dedicat sau mașina ownerului); apoi M3 TTS offline,
+      M4/M5 (STT + vedere) native, test complet mod-avion.
 - [ ] DEVIN = constructorul extern (owner 20 aug: „punel pe devin cu cheie" + „b").
       CONSTRUIT ÎN COD (pe branch, verificat: tsc 0, suită 1867, 5 porți verzi):
       client `services/devin.ts` (sesiune cu plafon `max_acu_limit` + stare/ACU
