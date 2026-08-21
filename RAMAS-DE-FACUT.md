@@ -41,9 +41,16 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       92/92, BE 1910/1910+, gărzi 0) — **RĂMAS: merge + măsurat live** (rândul
       se taie doar cu PR + probă live). C8 spus onest: pre-roll-ul recuperează
       ultimele ~250 ms — micșorează pierderea capului de frază la barge-in,
-      n-o elimină. Rânduri NOI din verificarea C (nereparate): (h) prag RMS pe
-      flush-ul fără-VAD; (i) registrul PT amestecat pt-PT/pt-BR; (j) comentariul
-      din era cozii la trimiterea-ocupat (~ChatPanel:3204).
+      n-o elimină. Rânduri NOI din verificarea C (nereparate): (h) pragul RMS
+      0.02 pe flush-ul fără-VAD e euristic în ambele direcții (ecou TARE trece,
+      voce slabă/departe își pierde pre-roll-ul) — se confirmă doar pe telefonul
+      owner-ului; (i) registrul PT amestecat pt-PT/pt-BR; (j) comentariul
+      din era cozii la trimiterea-ocupat (~ChatPanel:3204); (k) fallback-ul
+      base=next din flushMesaje rămâne instantaneu pe secvențe contradictorii
+      (ștergere în prefix cât curge text); (l) turaAvutSemneRef per-component —
+      cadre ale sesiunii live/ture abortate pot suprima fals rândul onest (doar
+      false-negative); (m) sonda health (server_down) reia fără ștergere de
+      bule — divergență veche, neatinsă.
       **Lot A (descărcare offline invizibilă+automată)**: construit + verificat cu
       3 agenți (FAIL→reparate cele 3 minime; re-verificare PASS cu 7 minore, din
       care reparate pe loc: comentariul „nu consumă rețea", gardul online pe
