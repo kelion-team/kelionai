@@ -36,12 +36,12 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       citire și faptă; slotul încercării 1 rămâne pe modelul de pornire la
       escaladarea din mijloc; click_monitor „doar-afișare" dar apasă butoane
       reale (o reluare îl poate re-apăsa). Detalii: AI-HANDOFF §17 pct. 6.
-      **LOT C — restul registrului frontend (C1–C8) CONSTRUIT pe branch**
-      (cc50a2fc + paznici + minimele verificatorilor; porți verzi: FE build +
-      92/92, BE 1910/1910+, gărzi 0) — **RĂMAS: merge + măsurat live** (rândul
-      se taie doar cu PR + probă live). C8 spus onest: pre-roll-ul recuperează
-      ultimele ~250 ms — micșorează pierderea capului de frază la barge-in,
-      n-o elimină.
+      **LOT C — restul registrului frontend (C1–C8)** (cc50a2fc + paznici +
+      minimele verificatorilor; porți verzi) — **MERGE (PR #1321) + MĂSURAT
+      LIVE 21 aug 22:56Z: v=141f09d, ver 6.5.** Proba pe dispozitiv (vocea,
+      barge-in, pragul RMS) rămâne la owner. C8 spus onest: pre-roll-ul
+      recuperează ultimele ~250 ms — micșorează pierderea capului de frază la
+      barge-in, n-o elimină.
       **LOT D — registrul docs-vs-cod (38 constatări, audit proaspăt) — tranșa 1
       CONSTRUITĂ pe branch** (fb7f7e0b + minimele verificatorilor): manualul
       user-facing adus la cod (descărcarea invizibilă, VAD opt-in, „always

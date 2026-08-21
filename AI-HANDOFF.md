@@ -1359,10 +1359,10 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    dar chat.ts spune el însuși că apasă ELEMENTE REALE (orice buton, inclusiv din
    admin) → o reluare îl poate re-apăsa — tensiune de clasificare, de lămurit cu
    owner-ul (aceeași familie cu (e)).
-6b. **LOT C — restul registrului frontend (8 reparații) CONSTRUIT pe branch
-   (cc50a2fc + paznicii deb36ec8 + minimele verificatorilor), porți verzi —
-   NEmers în master la ora scrierii, NEmăsurat live** (rândul din RAMAS se taie
-   doar cu PR + probă live): C1 codecul Opus mort în zbor → anunț `opus_cazut`
+6b. **LOT C — restul registrului frontend (8 reparații) — MERGE (PR #1321) +
+   MĂSURAT LIVE 21 aug 22:56Z: /api/version → v=141f09d, ver 6.5, publicat
+   22:28:53Z** (proba pe dispozitiv — vocea/barge-in/pragul RMS — rămâne la
+   owner): C1 codecul Opus mort în zbor → anunț `opus_cazut`
    + PCM pe ambele sensuri (înainte: difuzor permanent mut); C2 tura online
    complet goală → rând onest `turnEmpty` (×7 limbi; cadrele PUR-protocol
    {heard}/{lang}/{ping} NU sting rândul — altfel era literă moartă); C3
