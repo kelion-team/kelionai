@@ -17,7 +17,7 @@
 import { CAPABILITIES } from './brainCapabilities.js'
 import { meniulDeTarife, lirePentru } from './tarife.js'
 
-// ── THE MANUAL'S 7 LANGUAGES ───────────────────────────────────────────────
+// ── THE MANUAL'S CLOSED LANGUAGE LIST (8 codes) ────────────────────────────
 // Adrian, Jul 30: "the manual will show 7 major languages, translate
 // everything into those 7, don't spend resources beyond that."
 //
@@ -26,10 +26,10 @@ import { meniulDeTarife, lirePentru } from './tarife.js'
 // the selector would start them all. Any code outside the list gets English,
 // without calling the translator.
 //
-// The list: the six international circulation languages + ROMANIAN. The first
-// version I put up (the UN official languages: + Chinese and Arabic, without
-// Italian and without Romanian) was an academic choice, not one fit for the
-// product — Adrian rightly asked "where is ro? Italian?".
+// The list started as the six international circulation languages + ROMANIAN
+// (Adrian rightly asked "where is ro? Italian?" over the academic UN pick);
+// KOREAN was added later, so the closed list holds 8 codes today — the RULE
+// (closed list, paid translation per entry) is what stands, not the number.
 export const MANUAL_LANGS = ['en', 'fr', 'de', 'es', 'it', 'ru', 'ro', 'ko'] as const
 
 export function isManualLang(v: string): boolean {
@@ -115,7 +115,10 @@ const SECTIONS: ManualSection[] = [
     paragraphs: [
       'Everything you can do by typing, you can also do by speaking. The two are the same assistant with the same abilities — not a full version and a cut-down one. If a request needs deeper thinking than a quick spoken reply allows, Kelion quietly hands it to its full reasoning brain and comes back with the answer.',
       'Kelion understands and replies in many languages, spoken and written. It follows the language you use — switch mid-conversation and it switches with you.',
-      'Kelion listens hands-free, but it only sends your voice onward while you are actually speaking. Silence and steady background noise — a fan, traffic, a room’s hum — are recognised on the device and not transmitted; the moment you start to speak it opens, and it holds through the natural pauses inside a sentence so it never clips your first or last word. And a reply is always spoken back to you: if the live voice is busy, your device’s own voice reads the answer, so a written question is never answered in silence.',
+      // ADUS LA COD (registrul docs-vs-cod, lot D): VAD-ul e OPT-IN (implicit
+      // microfonul trimite continuu — vocalLive.ts „OPRIT IMPLICIT"), iar gura
+      // de siguranță a browserului e DOAR offline — „always spoken" era fals.
+      'Kelion listens hands-free while the voice session is on, and you can interrupt it mid-sentence — it stops and listens. Replies in a voice session are spoken with its one live voice, and if you type while the voice session is active, the answer comes back in that same voice. When you are offline, your device’s own voice reads the offline answers aloud.',
     ],
   },
   {
@@ -151,10 +154,15 @@ const SECTIONS: ManualSection[] = [
   {
     title: 'When you lose signal — the companion mode',
     paragraphs: [
-      'When your phone loses all signal — in a car, on a plane, underground — Kelion does not go dark. It switches automatically to a smaller brain that runs entirely on your device, keeps your avatar, and stays with you: you can still talk and type, and it remembers the conversation so far. It is honest about being offline — it will not invent web results, weather or live data it cannot reach. It is a companion in that moment, not the full assistant.',
+      // „talk and type" → tastare (urechea offline nu există încă — pasul 7 din
+      // proiectul voce; răspunsurile SE rostesc cu vocea dispozitivului).
+      'When your phone loses all signal — in a car, on a plane, underground — Kelion does not go dark. It switches automatically to a smaller brain that runs entirely on your device, keeps your avatar, and stays with you: you can type to it, it speaks its answers aloud, and it remembers the conversation so far. Understanding your voice offline is not available yet — the ear needs the internet. It is honest about being offline — it will not invent web results, weather or live data it cannot reach. It is a companion in that moment, not the full assistant.',
       'It senses what your device can sense: where you are and how fast you are moving — so it can say human things like "you are doing about 90, long drive?" — and, with the camera on, that it can see you. When you ask for something that truly needs the internet, it saves the question and tells you it will answer when the signal returns. The moment you are back online it reconnects on its own, sends the offline conversation to the server so nothing is lost, resolves the saved questions and tells you civilly: "here is the answer to what you asked while you were offline…".',
-      'Android vs iPhone — what differs. On high-end Android (for example Samsung Fold and recent tablets) the on-device brain, the movement speed and the reconnect notification all work fully, and the offline model can be prepared quietly in the background while you are on Wi‑Fi. On iPhone and iPad the on-device brain still runs (it uses WebGPU), but Safari does not report the connection type, so the offline model is not downloaded automatically — to avoid spending mobile data you prepare it once while you have signal; and background notifications are more limited by iOS. Everything else — talking, typing, location, movement speed, and the automatic reconnect and sync — works the same on both.',
-      'Preparing the offline brain is visible, never silent. While the model downloads you see a bar at the top counting from a few percent up to “ready ✓”. If your device cannot run it at all — it needs WebGPU — it tells you so plainly instead of staying quiet; and if the download did not start on its own, you can begin it yourself with a “Download for offline” button. Once it is downloaded it stays put: an app update is still applied normally, but it no longer erases the model, and the storage is marked persistent so the browser will not evict it either — you download it only once.',
+      // ADUS LA COD (lot A + registrul lot D): descărcarea e AUTOMATĂ pe ORICE
+      // net (poarta Wi-Fi scoasă la ordin) și complet INVIZIBILĂ (StatusOffline
+      // șters) — bara, butonul și „îți spune pe față" nu mai există.
+      'Android vs iPhone — what differs. The on-device brain runs through WebGPU on both, and the offline model downloads automatically on any connection, on both platforms. Background notifications are more limited by iOS. Everything else — typing offline, location, movement speed, and the automatic reconnect and sync — works the same on both.',
+      'Preparing the offline brain is automatic and silent. While you are online, Kelion checks on its own whether your device already holds the current offline model; if not, it downloads it quietly in the background — no bar, no button, nothing to press. Once it is downloaded it stays put: an app update is still applied normally, but it no longer erases the model, and the storage is marked persistent so the browser will not evict it either — it is downloaded only once. It needs a device with WebGPU; on devices without it, the offline companion simply is not available.',
       'Offline is also the most contained Kelion can be. With no network it reaches no server, no Google account, no stored memory and no tools — so it cannot read your saved data, send anything, or act on your behalf. It works only from the conversation on the device and what the device’s own sensors measure, and it says so honestly. Your account, its memory and its powers stay behind the connection it cannot reach until you are back online.',
     ],
   },

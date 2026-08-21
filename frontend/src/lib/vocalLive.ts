@@ -160,8 +160,9 @@ function clampPreamp(v: unknown): number {
 // Ce e acum: vocea live iese printr-un <audio> obișnuit alimentat de WebAudio
 // (`MediaStreamDestination` de pe analizor) — audio de MEDIA, exact ca mp3-ul —
 // deci urmează ruta de muzică la căști / mașină. Compromis, spus pe
-// față: AEC-ul prin WebRTC dispare (rămâne anularea de ecou din microfon,
-// `echoCancellation:true`); pe boxe Bluetooth/mașină AEC-ul oricum nu era
+// față: AEC-ul prin WebRTC dispare (rămâne anularea de ecou din microfon —
+// `echoCancellation: !eMobil`, deci pe MOBIL e OPRITĂ și ea); pe boxe
+// Bluetooth/mașină AEC-ul oricum nu era
 // necesar (boxele sunt departe de microfon). Dacă pe difuzorul telefonului
 // revine ecoul, pasul următor e ruta-conștientă (AEC pe difuzor, media pe
 // Bluetooth) — dar întâi trebuie ca vocea să AJUNGĂ în mașină.
@@ -669,8 +670,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   })
   // Serverul află că nu mai e AEC prin WebRTC: fără el, „vocea de peste el" ar
   // putea fi chiar ecoul, deci NU-i dăm voie serverului să-i taie vorba pe voce
-  // (barge-in server OFF). Pe căști/mașină oricum nu e ecou; pe difuzor rămâne
-  // anularea din microfon (echoCancellation:true).
+  // (barge-in server OFF). Pe căști/mașină oricum nu e ecou; pe desktop rămâne
+  // anularea din microfon, dar pe MOBIL e oprită și ea (`echoCancellation:
+  // !eMobil` — de-asta pre-roll-ul de barge-in are gardul RMS).
   const spuneAec = (): void => {
     try {
       ws.send(JSON.stringify({ type: 'aec', activ: false }))
