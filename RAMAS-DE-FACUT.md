@@ -131,13 +131,24 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               (injectiiUsa, aceeași gardă ca la comenzi — ambientalul nu
               „informează") și la întoarcere creierul greu primește runde de
               convergență cu ce s-a aflat (plafon 2 — „nu e raliu").
+              REPARAT după FAIL-ul verificatorului (re-execuția faptelor —
+              demonstrase emailul trimis de 2 ori): runda de convergență CARĂ
+              istoricul rundei 1 + instrucțiunea „doar DIFERENȚA", chat.ts nu
+              mai forțează unelte de faptă pe continuare (continuareUsa),
+              runda picată cade pe ultimul răspuns bun (nu raportează „a
+              picat" peste o faptă făcută), proprietar pe triere (două uși
+              concurente nu-și mai fură/șterg injecțiile), contor pulsVoce.
               LIMITE DECLARATE: injecția ÎN ZBOR în tura /api/chat care deja
               macină NU există (ar cere un inbox pe tură în chat.ts — pas
               viitor); dacă modelul Live nu poate conversa cât unealta e
               blocată, lista rămâne goală și bucla nu rulează („nu pot
-              verifica" din repo — se măsoară live). Lacăte:
-              triereInDoi.test.ts. RĂMAS pt. bifă: 3 agenți + merge + măsurat
-              live (jurnal „trierea în doi — runda").
+              verifica" din repo — se măsoară live); răspunsurile omului FĂRĂ
+              numele lui Kelion la întrebările puse cât ușa macină nu intră în
+              convergență (garda strictă a numelui, ordinul din 15 aug —
+              consecință declarată). Lacăte: triereInDoi.test.ts (anti-amnezie,
+              anti-forțare, proprietar, ultimBun). RĂMAS pt. bifă: 3 agenți +
+              merge + măsurat live (jurnal „trierea în doi — runda" +
+              pulsVoce.rundeTriere).
       - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)

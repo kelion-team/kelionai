@@ -1318,6 +1318,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // soluții" în loc să execute. Sigur: cererea e autentificată ca userul
       // însuși, iar uneltele rămân filtrate pe rol exact ca până acum.
       usaCreierului?: boolean
+      // TRIEREA ÎN DOI (JARVIS pas 3): runda de CONVERGENȚĂ a ușii — cară
+      // istoricul rundei anterioare și NU mai forțează unelte de faptă
+      // (toolChoice='required' pe o faptă poate DEJA făcută = re-execuție,
+      // clasa interzisă de registrul B#2). Inventarul plin al ușii rămâne.
+      continuareUsa?: boolean
       // SPOKEN TURN (the ONE-brain voice architecture, Aug 1): this turn came
       // from the microphone and its reply will be SPOKEN ALOUD verbatim by the
       // Realtime voice. The brain answers the same way (same tools, same
@@ -1780,7 +1785,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Ușa creierului = acțiune prin definiție: modelul live a decis DEJA că
       // cererea are nevoie de unelte — fără asta, „trimite lista
       // constructorului" pica pe faza de vorbire și creierul doar POVESTEA.
-      cereActiune: hasActionIntent(textulTurei) || req.body?.usaCreierului === true,
+      // EXCEPȚIA (trierea în doi): runda de CONTINUARE nu mai e „acțiune prin
+      // definiție" — fapta poate fi DEJA făcută în runda 1; forțarea uneltei
+      // aici ar re-executa-o (emailul de 2 ori — verificatorul pasului 3).
+      cereActiune: hasActionIntent(textulTurei) || (req.body?.usaCreierului === true && req.body?.continuareUsa !== true),
     })
     // VOCE = SCRIS COMPLET, DOAR PENTRU OWNER (owner, 19 aug: „egalizate drepturile
     // chat audio cu chat scris" + „doar owner are drepturi pe admin"). O frază

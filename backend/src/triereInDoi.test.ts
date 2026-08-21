@@ -20,10 +20,25 @@ describe('trierea în doi pe calea vocală', () => {
     expect(viu).toMatch(/^\s*let injectiiUsa: string\[\] = \[\]/m)
     expect(viu).toMatch(/^\s*if \(usiGreleInZbor > 0 && rostireCurenta\.trim\(\)\) \{\s*\n\s*injectiiUsa\.push\(rostireCurenta\.trim\(\)\)/m)
   })
-  it('ușa pornește curată și convergența rulează doar pe informație NOUĂ, cu plafon (nu e raliu)', () => {
+  it('ușa pornește curată și convergența rulează doar pe informație NOUĂ, cu plafon (nu e raliu) și doar la PROPRIETARUL trierii', () => {
     expect(viu).toMatch(/^\s*injectiiUsa\.length = 0/m)
-    expect(viu).toMatch(/^\s*while \(r\.ok && injectiiUsa\.length > 0 && runde < RUNDE_TRIERE\) \{/m)
+    expect(viu).toMatch(/^\s*while \(r\.ok && usaTrierii === usaId && injectiiUsa\.length > 0 && runde < RUNDE_TRIERE\) \{/m)
     expect(viu).toMatch(/\[TRIEREA ÎN DOI — ce a spus omul cât gândeai\]/)
+    // proprietatea se eliberează pe ORICE drum (finally):
+    expect(viu).toMatch(/usiGreleInZbor--\s*\n\s*if \(usaTrierii === usaId\) usaTrierii = 0/)
+  })
+  it('runda de convergență NU e amnezică și NU re-execută faptele (clasa interzisă B#2 — verificatorul a demonstrat emailul dublu)', () => {
+    // runda 2 cară istoricul rundei 1 + instrucțiunea „doar DIFERENȚA":
+    expect(viu).toMatch(/istoric: \[\s*\n\s*\{ role: 'user', content: cerere \},\s*\n\s*\{ role: 'assistant', content: r\.text \}/)
+    expect(viu).toMatch(/NU repeta faptele deja făcute/)
+    // turaCreierului declară continuarea, iar chat.ts NU mai forțează unelte
+    // de faptă pe ea (fapta poate fi DEJA făcută):
+    expect(viu).toMatch(/^\s*continuareUsa: triere \? true : undefined/m)
+    const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
+    expect(chat).toMatch(/req\.body\?\.usaCreierului === true && req\.body\?\.continuareUsa !== true/)
+    // runda picată NU aruncă răspunsul bun deja obținut (regula #1):
+    expect(viu).toMatch(/rămân pe ultimul răspuns bun/)
+    expect(viu).toMatch(/if \(!r2\.ok\) \{[\s\S]{0,220}break/)
   })
   it('protocolul e în fișa uneltei (declarat o dată la setup): întreabă întâi, completează, oprește-te la convergență, fără narațiune de proces', () => {
     expect(viu).toMatch(/TRIEREA ÎN DOI: dacă cererea e ambiguă/)

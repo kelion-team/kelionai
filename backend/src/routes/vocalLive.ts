@@ -140,6 +140,9 @@ export const pulsVoce = {
   // vocea omului l-a oprit pe Kelion + câte cadre Google s-au aruncat după.
   taieriPeVoceaOmului: 0,
   suprimateDupaTaiere: 0,
+  // TRIEREA ÎN DOI (pas 3): câte runde de convergență au rulat — măsurabil
+  // fără acces la jurnalul VPS (GET /api/vocal-live/stare).
+  rundeTriere: 0,
   varianta: '',
   ultimaEroare: '',
   laUltimulCadru: 0,
@@ -157,6 +160,11 @@ export async function turaCreierului(
   laControl: (frame: Record<string, unknown>) => void,
   monitor?: Record<string, unknown> | null,
   tranzactii?: Record<string, unknown> | null,
+  // TRIEREA ÎN DOI (pas 3): runda de convergență CARĂ istoricul rundei
+  // anterioare (altfel runda 2 e o tură amnezică ce RE-EXECUTĂ faptele —
+  // verificatorul a demonstrat emailul trimis de 2 ori) și se declară
+  // `continuareUsa` ca chat.ts să nu mai forțeze uneltele de faptă.
+  triere?: { istoric: { role: 'user' | 'assistant'; content: string }[] },
 ): Promise<{ ok: true; text: string } | { ok: false; motiv: string }> {
   let r: Response
   try {
@@ -164,7 +172,8 @@ export async function turaCreierului(
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({
-        messages: [{ role: 'user', content: cerere }],
+        messages: triere ? triere.istoric : [{ role: 'user', content: cerere }],
+        continuareUsa: triere ? true : undefined,
         // Glasul e al modelului live — Chirp-ul chatului rămâne stins (regula
         // vocii unice) și nu plătim o sinteză pe care n-o redă nimeni.
         serverVoiceOff: true,
@@ -456,6 +465,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // (nemăsurat — „nu pot verifica" din repo), lista rămâne goală și bucla
     // nu rulează — nimic nu se strică.
     let injectiiUsa: string[] = []
+    // PROPRIETARUL trierii (verificatorul pasului 3, concurența): două uși pot
+    // măcina în paralel (onUnealta e fire-and-forget) — fără proprietar, a doua
+    // ușă ștergea tăcut informația strânsă pentru prima și își consuma reciproc
+    // injecțiile (completarea omului se lipea de cererea GREȘITĂ). Doar ușa
+    // care DEȚINE trierea curăță/consumă lista; celelalte nu fac trierea.
+    let usaTrierii = 0
+    let usaUrmatoareId = 0
     const salveazaTura = (): void => {
       const u = bufUser.trim()
       let k = bufKelion.trim()
@@ -1366,6 +1382,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // „trierea în doi" ușa poate măcina zeci de secunde cu schimburi
             // vorbite pe deasupra. Contorul ține exempția vie cap-coadă.
             usiGreleInZbor++
+            // PROPRIETATEA trierii (concurența): doar PRIMA ușă deschisă face
+            // convergența; una concurentă nici nu curăță, nici nu consumă lista.
+            const usaId = ++usaUrmatoareId
+            if (usaTrierii === 0) {
+              usaTrierii = usaId
+              injectiiUsa.length = 0 // ușa pornește curată — se strânge doar ce se află DE-ACUM
+            }
             try {
             // VEDEREA: cere browserului cadrele camerei și așteaptă maxim
             // 1,5 s — fără cameră (sau fără răspuns) tura pleacă fără imagini,
@@ -1398,29 +1421,51 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             const laEcran = (frame: Record<string, unknown>): void => {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
             }
-            injectiiUsa.length = 0 // ușa pornește curată — se strânge doar ce se află DE-ACUM
             let r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, laEcran, monitorLive, tranzactiiLive)
             // TRIEREA ÎN DOI (§4) — CONVERGENȚA: dacă în timpul măcinării omul a
             // spus lucruri noi (întrebat de Live sau de la sine), creierul greu
-            // primește încă o rundă cu TOT ce s-a aflat. STOP-ul specului: nimic
-            // nou = răspunsul e gata; plafonul de runde ține „calitatea >
-            // viteza, dar nu e raliu".
+            // primește încă o rundă CU ISTORICUL rundei anterioare (altfel runda
+            // 2 e amnezică și RE-EXECUTĂ faptele — emailul de 2 ori, clasa
+            // interzisă B#2) și cu instrucțiunea „doar DIFERENȚA". STOP-ul
+            // specului: nimic nou = răspunsul e gata; plafonul ține „calitatea
+            // > viteza, dar nu e raliu". Runda picată NU aruncă răspunsul bun
+            // deja obținut (regula #1: fapta e făcută — nu raportăm „a picat").
             // hardcod-permis: plafon tehnic de runde de convergență (nu bani/stare afișată)
             const RUNDE_TRIERE = 2
             let runde = 0
-            while (r.ok && injectiiUsa.length > 0 && runde < RUNDE_TRIERE) {
+            while (r.ok && usaTrierii === usaId && injectiiUsa.length > 0 && runde < RUNDE_TRIERE) {
               const noi = injectiiUsa.splice(0).join(' • ')
               runde++
               app.log.info(`vocal-live: trierea în doi — runda ${runde}, informații noi de la om („${noi.slice(0, 80)}")`)
-              r = await turaCreierului(
+              pulsVoce.rundeTriere++
+              const r2 = await turaCreierului(
                 req.headers.cookie ?? '',
-                `${cerere}\n\n[TRIEREA ÎN DOI — ce a spus omul cât gândeai]: ${noi}\nDă răspunsul ținând cont de TOT. Dacă o întrebare rămasă încă MUTĂ răspunsul, pune-o scurt și decent; altfel răspunde final.`,
+                cerere,
                 coords,
                 cadre,
                 laEcran,
                 monitorLive,
                 tranzactiiLive,
+                {
+                  istoric: [
+                    { role: 'user', content: cerere },
+                    { role: 'assistant', content: r.text },
+                    {
+                      role: 'user',
+                      content:
+                        `[TRIEREA ÎN DOI — ce a spus omul cât gândeai]: ${noi}\n` +
+                        `Continuă de unde ai rămas, ținând cont de TOT. NU repeta faptele deja făcute în runda de dinainte ` +
+                        `(email trimis, eveniment creat, orice unealtă cu efect) — fă doar DIFERENȚA nouă. ` +
+                        `Dacă o întrebare rămasă încă MUTĂ răspunsul, pune-o scurt și decent; altfel răspunde final.`,
+                    },
+                  ],
+                },
               )
+              if (!r2.ok) {
+                app.log.warn(`vocal-live: trierea în doi — runda ${runde} a picat (${r2.motiv}); rămân pe ultimul răspuns bun`)
+                break
+              }
+              r = r2
             }
             if (r.ok) {
               // Ordinele de constructor pornite prin ușă intră sub urmărire —
@@ -1441,6 +1486,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             }
             } finally {
               usiGreleInZbor--
+              if (usaTrierii === usaId) usaTrierii = 0 // proprietatea se eliberează pe ORICE drum
             }
             return
           }
