@@ -48,13 +48,29 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       FĂCUT din proiect: charter-ul (legile creierului chat+voce + capitolele admin
       din Manual). Pașii 1–7 de mai sus = reconstrucția §2, de la ZERO pe slate curat.
 - [ ] OFFLINE-FIRST — Faza 1 (spec: `PROIECT-OFFLINE-FIRST.md`). FUNDAȚIA GATA +
-      LIVE: fix comutare offline (PR #1305) + curățenia de mai sus (PR #1306). **M1
-      pornit (PR #1307): butonul „Instalează" (PWA)** — inline pe Landing, prompt nativ
-      pe Android/desktop, instrucțiune reală pe iOS; 3 agenți: 3×PASS (runda 1 a prins
-      o ciocnire de layout, rescris inline). NU MERGE ÎNCĂ / de făcut: **APK nativ
-      offline (Capacitor)** — schela se poate genera aici, dar build-ul APK cere Android
-      SDK (neconfigurat în CI → runner dedicat sau mașina ownerului); apoi M3 TTS offline,
-      M4/M5 (STT + vedere) native, test complet mod-avion.
+      LIVE: fix comutare offline (PR #1305) + curățenia (PR #1306). **CELE 3 SIMȚURI
+      OFFLINE — LIVE cu dovadă (§16 în AI-HANDOFF):**
+      - [x] **M1 — buton „Instalează" (PWA)** LIVE (PR #1307, ver 4.9) — inline pe
+            Landing (prima variantă bară-jos respinsă de agent pe ciocnire de layout).
+      - [x] **M2 — creier local + SELECTOR de model owner** LIVE (ver 5.1): Gemma-2
+            2B/9B, Qwen2.5-3B/7B (id-uri reale WebLLM); descarci mai multe, „Folosește"
+            comută, 🗑 dă jos. Butonul „🧠 Modele" scos de sub admin → **pentru TOȚI**
+            (owner: „să fie văzut de toți că e free"). Modelele din Hugging Face (gratis).
+      - [x] **M3 — gura offline** LIVE (`v=cbec9dd`, ver 5.2, PR #1310): Kelion
+            ROSTEȘTE răspunsul offline (Web Speech, zero descărcare).
+      - [x] **M4 — urechea offline** LIVE (`v=a91396f`, ver 5.3, PR #1311,
+            `at=2026-08-21T12:31:57Z`): buton 🎤 în chat → Whisper local
+            (transformers.js, WASM la `/ort/`) transcrie fără net. + **modelele nu se
+            mai re-descarcă la update** (byte-ii `webllm/*`+`transformers*` ȘI evidența
+            `CHEI_OFFLINE_PERSISTENTE` supraviețuiesc publicării — răspunde direct
+            „verifică când e un model descărcat… la fiecare update nu trebuie descărcate
+            din nou"). Verificat de 3+3 agenți (2 buguri reale prinse+reparate).
+      - [ ] **M5 — văzul offline** (model de viziune local „descrie scena",
+            transformers.js image-to-text; `@vladmandic/face-api` există) — DE FĂCUT,
+            ultima piesă din Faza 1.
+      NU MERGE ÎNCĂ / de făcut (după M5): **APK/native offline (Capacitor)** — schela se
+      poate genera aici, dar build-ul cere Android SDK (neconfigurat în CI → runner dedicat
+      sau mașina ownerului); test complet mod-avion pe device (WebGPU/mic/cameră = doar owner).
 - [ ] DEVIN = constructorul extern (owner 20 aug: „punel pe devin cu cheie" + „b").
       CONSTRUIT ÎN COD (pe branch, verificat: tsc 0, suită 1867, 5 porți verzi):
       client `services/devin.ts` (sesiune cu plafon `max_acu_limit` + stare/ACU
