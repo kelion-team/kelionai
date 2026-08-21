@@ -1181,7 +1181,7 @@ Owner (măsurat de el): „nu descarca nimic pentru offline, e minciuna gogonata
 „mai mult chatul audio inexistent" + (avion) „nu poate accesa aplicatia". Audit cu 3
 agenți → cauzele erau ÎN COD (regula #2), reparate:
 1. **Modelul offline era distrus la fiecare update.** WebLLM ține creierul local
-   (~2 GB — cifra modelului de ATUNCI, Qwen 3B; azi e gemma-2-9b ≈ 5,2 GB, vezi §16)
+   (~2 GB — cifra modelului de ATUNCI, Qwen 3B; azi e gemma-2-9b ≈ 5,2 GB, vezi §17)
    în Cache Storage sub `webllm/*`. `hardResetToLatest` (`updateCheck.ts`),
    plus `activate` și mesajul `kelion-clear-caches` din `sw.js`, ștergeau TOATE
    cache-urile la fiecare publicare („update la foc continuu") → offline nu era gata
@@ -1230,7 +1230,46 @@ de siguranță fără deploy:** `localStorage.kelion_vad='0'` → trimitere cont
 tot detectează sfârșitul de tură (hangover-ul îi lasă tăcerea) — dacă nu, cresc
 hangover-ul; (d) factura scade pe zile. Dovada „0 octeți în tăcere" = testele + codul.
 
-## §16 — SESIUNEA 21 AUG 2026: RESTAURARE + FINALIZARE (starea CURENTĂ — citește asta, nu §14–§15)
+## §16 — CONEXIUNEA LA POSTGRES, RESCRISĂ (21 aug 2026) — cauza ordinului „ECONNREFUSED 127.0.0.1:5432"
+Ordin de autovindecare (server.logbuffer, count=2, prag=2):
+`route error err: connect ECONNREFUSED 127.0.0.1:5432`.
+**CAUZA REALĂ, măsurată (nu presupusă):** pool-ul se năștea direct în `db.ts`
+(`new pg.Pool({ connectionString: config.databaseUrl })`), iar `config.databaseUrl`
+e `''` când `DATABASE_URL`/`POSTGRES_URL` lipsește sau e stricată (ghilimele/spații
+în env-file — clasa care a rupt deja adminul o dată). Măsurat pe `pg` 8 în repo:
+- `new pg.Pool({ connectionString: '' }).query('SELECT 1')` → `AggregateError
+  [ECONNREFUSED]` cu **mesaj GOL** și sub-erori `::1:5432` + `127.0.0.1:5432`;
+- `parse('"postgres://u:p@10.0.0.5:5432/kelion"')` (cu ghilimele) → `host: 'base'`.
+Adică: pe țintă goală/stricată driverul nu se plânge — **inventează** `localhost:5432`
+și lovește un Postgres fantomă până la refuz. Eroarea urca brută în rută (500 +
+`route error`), umplea inelul de loguri și autovindecarea deschidea ordine de
+REPARAT COD pentru un defect care **nu e în cod** (Postgres oprit / env stricat).
+**Rescris (modulul mic responsabil, nu petic):** `backend/src/dbConexiune.ts` —
+singurul drum spre Postgres, folosit de `getPool()`:
+1. `citesteTintaDb()` — curăță ghilimelele, validează schema/gazda/portul; țintă
+   goală sau nevalidă = **eroare cu motiv**, NU un pool ghicit pe 127.0.0.1:5432.
+   TLS ca înainte (local/`sslmode=disable` → fără TLS).
+2. `motivConexiune()` — recunoaște clasa „conexiunea nu s-a deschis" (ECONNREFUSED,
+   ENOTFOUND, EAI_AGAIN, EHOSTUNREACH/ENETUNREACH, 57P03, timeout de conectare)
+   **inclusiv îngropată în `AggregateError`/`cause`**. Erorile de SQL/date rămân
+   neatinse (nicio reîncercare care ar putea executa a doua oară o scriere de bani).
+3. Răbdare mărginită din env (`DB_CONNECT_RETRIES`=2, `DB_RETRY_DELAY_MS`=120,
+   `DB_CONNECT_TIMEOUT_MS`=4000, cu margini): o repornire scurtă de Postgres nu
+   mai pică cererea, iar bugetul implicit (~360 ms) respectă latența chat/voce.
+4. `BazaIndisponibila` (503, `cause` păstrat) cu **ținta reală în mesaj**
+   (`gazdă:port/bază`, fără parolă) — gata cu logurile goale.
+`index.ts`: `setErrorHandler` notează `BazaIndisponibila` la `warn` și **nu o mai
+bagă în simptome** — infrastructura căzută nu mai generează ordine de reparat cod.
+**Porți:** `tsc --noEmit` 0; `vitest run` 1886/1887 (singurul roșu, `tokenChecks`,
+e din `GCP_SERVICE_ACCOUNT_JSON` din mediul agentului — verde cu env-ul curat);
+`verifica-sintaxa/hardcodari/exporturi/butoane/gemini` toate verzi. Teste noi:
+`dbConexiune.test.ts` + `dbConexiune.rabdare.test.ts` (18).
+**RĂMAS LIVE (owner):** dacă ordinul reapare, mesajul spune acum ȚINTA — dacă e
+`127.0.0.1:5432` cu bază validă, e Postgres-ul de pe VPS oprit (`systemctl status
+postgresql`); dacă apare „adresa bazei de date e goală/nu începe cu postgres://",
+e `DATABASE_URL` din `/root/kelion/kelionai.env`.
+
+## §17 — SESIUNEA 21 AUG 2026: RESTAURARE + FINALIZARE (starea CURENTĂ — citește asta, nu §14–§15)
 
 **Ordinul care guvernează tot de acum înainte (owner, verbatim):** „finalizare, și ai
 cuvântul meu că e ultimul pe care îl mai auzi de la mine dacă aplicația ce am zis până

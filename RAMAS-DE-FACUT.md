@@ -30,7 +30,7 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       contorul de eșecuri, 3 corecturi de onestitate în documente) — RĂMAS:
       merge + măsurat live; teste pe contorul de eșecuri (autoDescarcareaPermisa,
       6 muchii, zero acoperire); cheile i18n moarte offlineGata/Descarca/Reincearca.
-      Starea curentă detaliată: AI-HANDOFF.md §16.
+      Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
       Repară bug-ul MĂSURAT „vocea pornește 2 sec și se rupe" = 2 motoare (Gemini
@@ -118,7 +118,7 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       „procesul se face automat, nu se mai afișează deloc" → `StatusOffline.tsx`
       ȘTERS, descărcare automată pe orice net, modelul e gemma-2-9b ~5,2 GB (nu
       ~2 GB); proba live NU mai e bara %, ci: modelul apare singur în Cache
-      Storage (`webllm/*`) + turele offline răspund. Vezi AI-HANDOFF §16.]
+      Storage (`webllm/*`) + turele offline răspund. Vezi AI-HANDOFF §17.]
       (3) **avion: app-ul nu pornea** — SW nu punea shell-ul în cache la instalare.
       FIX (`sw.js` install): precache `'/'`. (4) **audio inexistent pe scris/offline** —
       gura implicită (Gemini Live) NU rostește textul scris, iar Chirp-ul de pe server

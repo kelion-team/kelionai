@@ -57,6 +57,7 @@ import { jobsRoutes } from './routes/jobs.js'
 import { offlineRoutes } from './routes/offline.js'
 import { deployRoutes } from './routes/deploy.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive, loadKv, saveKv } from './db.js'
+import { esteBazaIndisponibila } from './dbConexiune.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
@@ -121,9 +122,18 @@ process.on('uncaughtException', (err: Error) => {
 // browser. NU schimbă răspunsul spre client: notează, apoi răspunde ca Fastify
 // implicit (reply.send(err)). 4xx-urile (input greșit, rate-limit) NU se notează
 // — nu sunt eșecuri ale aplicației.
+// BAZA CĂZUTĂ NU E DEFECT DE COD: dbConexiune.ts marchează indisponibilitatea
+// Postgres-ului ca 503 cu ținta reală în mesaj. Se notează la `warn` și NU intră
+// în simptome — altfel autovindecarea deschidea ordine de REPARAT COD pentru un
+// serviciu oprit (măsurat: „route error err: connect ECONNREFUSED 127.0.0.1:5432").
 app.setErrorHandler((err, req, reply) => {
   const e = err as { statusCode?: number; message?: string }
   const cod = e.statusCode ?? 500
+  if (esteBazaIndisponibila(err)) {
+    app.log.warn({ err, url: req.url }, 'baza de date indisponibilă (infrastructură, nu cod)')
+    reply.send(err)
+    return
+  }
   if (cod >= 500) {
     const ruta = (req.url || '').split('?')[0]
     void recordSimptomLive('ruta-crapata', `${req.method} ${ruta}: ${e.message ?? 'eroare'}`, {
