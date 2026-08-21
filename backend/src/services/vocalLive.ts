@@ -540,6 +540,9 @@ export function deschideVocalLive(
   // orice sughiț TCP la primul connect condamna sesiunea la modul degradat).
   let mortiPreGataFaraHandle = 0
   const coada: Buffer[] = [] // audio strâns cât sesiunea nu e gata (și în reconectări)
+  // Aceeași plasă pentru RÂNDURILE de text (JARVIS pasul 1: tura scrisă) — un rând
+  // sosit în reconectarea internă (gata=false) nu se aruncă, se varsă la 'gata'.
+  const coadaRanduri: { text: string; turnComplete: boolean }[] = []
 
   const trimiteAudio = (pcm: Buffer): void => {
     try {
@@ -562,7 +565,21 @@ export function deschideVocalLive(
   // la care modelul RĂSPUNDE (anunța) · `false` = context tăcut, fără răspuns
   // (ancoreaza ora reală). Unic, ca să nu se dubleze (jscpd, 9 aug).
   const trimiteRand = (text: string, turnComplete: boolean): void => {
-    if (inchisa || !gata || !text.trim()) return
+    if (inchisa || !text.trim()) return
+    if (!gata) {
+      // Sesiunea nu-i gata (deschidere/reconectare): rândul-INTERVENȚIE
+      // (turnComplete:true — tura scrisă) NU moare tăcut: stă la coadă ca
+      // audio-ul și pleacă la 'gata' (clientul a ecou-at deja mesajul).
+      // ANCORELE (turnComplete:false — ex. ora „chiar acum") NU se pun la
+      // coadă: o ancoră veche livrată după reconectare ar MINȚI despre „acum"
+      // (aceeași regulă ca la scrieCadru: efemerele nu se amână) — se
+      // reîmprospătează singure la bătaia periodică.
+      if (turnComplete) {
+        coadaRanduri.push({ text, turnComplete })
+        if (coadaRanduri.length > 20) coadaRanduri.shift()
+      }
+      return
+    }
     try {
       ws?.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete } }))
     } catch {
@@ -627,6 +644,7 @@ export function deschideVocalLive(
             }
             reconectari = 0 // sesiune vie → contorul intern se șterge
             for (const b of coada.splice(0)) trimiteAudio(b)
+            for (const r of coadaRanduri.splice(0)) trimiteRand(r.text, r.turnComplete)
             ev.onGata?.()
             break
           case 'handleReluare':

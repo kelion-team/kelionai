@@ -113,6 +113,10 @@ export interface VocalLiveHandle {
    *  se redă vocea unei ture SCRISE prin audioIO — poarta half-duplex ține atunci
    *  urechea live mută (anti-ecou), ca modelul să nu se audă pe el însuși. */
   setRedareExterna(activ: boolean): void
+  /** JARVIS pasul 1 + §10 (tastatura opțională): trimite un rând SCRIS în sesiunea
+   *  Live — modelul îi răspunde cu VOCEA lui (un singur motor; fără Chirp, fără
+   *  coliziune). Întoarce true dacă rândul chiar a plecat (socket deschis). */
+  trimiteText(text: string): boolean
 }
 
 /** Serverul are cheia și modelul Live? Se întreabă ÎNAINTE de a deschide socketul,
@@ -527,6 +531,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       urcaEroarea('sesiune vocală întreruptă de rețea (cod 1006 abnormal closure) — reîncercare conexiune')
     } else if (ev.code !== 1000) {
       urcaEroarea(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
+    } else {
+      // BUG REPARAT (registrul frontend #2, blocant): închiderea „politicoasă" (1000)
+      // venită de la SERVER (noi n-am cerut-o — `inchis` e false aici) lăsa omul SURD
+      // și MUT tăcut: vlRef rămânea setat, becul aprins, ensureMic ieșea pe gardă, iar
+      // nimeni nu era anunțat — până la refresh. O ridicăm ca pe orice cădere, ca
+      // apelantul (ChatPanel) să curețe și să re-armeze lanțul vocal.
+      urcaEroarea('sesiunea vocală a fost închisă de server (cod 1000) — reiau conexiunea')
     }
     inchide()
   }
@@ -877,6 +888,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     },
     setRedareExterna: (activ: boolean) => {
       redareExterna = activ
+    },
+    trimiteText: (text: string): boolean => {
+      const t = (text || '').trim()
+      if (!t || inchis || ws.readyState !== WebSocket.OPEN) return false
+      try {
+        ws.send(JSON.stringify({ type: 'text', text: t.slice(0, 4000) }))
+        return true
+      } catch {
+        return false
+      }
     },
   }
 }

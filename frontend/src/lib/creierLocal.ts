@@ -74,10 +74,13 @@ function stergeFlagDescarcat(): void {
 }
 
 // Modelul local: capabilitate CLIENT (WebGPU), aleasă din lista prebuilt WebLLM —
-// nu e o cifră de bani/tarif/prag și nici o stare inventată. ~3B Q4, multilingv
-// (owner RO + userii pe 7 limbi), destul de mic cât să încapă pe telefon.
+// nu e o cifră de bani/tarif/prag și nici o stare inventată. ORDINUL owner-ului
+// (21 aug, regândirea creierului): „gemma offline cel mai mare" — cel mai mare Gemma
+// REAL din lista prebuilt v0.2.84 e gemma-2-9b (27B nu există în motor; VERIFICAT în
+// node_modules: vram_required_MB≈6422, țintă telefoane/PC-uri 2026+ — owner: „nu e
+// criteriu telefoanele vechi"). Multilingv (owner RO + userii pe 7 limbi).
 // hardcod-permis: id de model client WebLLM (capabilitate offline), nu valoare de afișat/tarifat; mutabil la config server în faza următoare.
-const MODEL_LOCAL = 'Qwen2.5-3B-Instruct-q4f16_1-MLC'
+const MODEL_LOCAL = 'gemma-2-9b-it-q4f16_1-MLC'
 
 // Optimist la pornire: dacă flag-ul spune că EXACT modelul curent a fost descărcat,
 // pornim pe 'descarcat' (nu mai cerem descărcare). Se confirmă din Cache Storage prin

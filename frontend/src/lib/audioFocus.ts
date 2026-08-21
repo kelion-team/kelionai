@@ -83,7 +83,12 @@ export function requestTtsFocus(opts?: { turaScrisa?: boolean }): boolean {
 }
 
 export function releaseTtsFocus(): void {
-  if (active === 'tts') emit(isVoicePlaying() ? 'tts' : 'none')
+  // BUG REPARAT (registrul frontend #3, blocant — „vocile paralele", owner 20 aug):
+  // după prima redare Chirp, starea cădea pe 'none' deși sesiunea LIVE era încă vie
+  // (liveInterrupt înregistrat) → următorul requestTtsFocus nu mai intra pe ramura
+  // `active==='live'` → nu mai tăia playout-ul Live → Chirp cânta PESTE vocea Live.
+  // Gura se întoarce la 'live' cât timp sesiunea Live există; 'none' doar fără ea.
+  if (active === 'tts') emit(isVoicePlaying() ? 'tts' : liveInterrupt ? 'live' : 'none')
 }
 
 /**

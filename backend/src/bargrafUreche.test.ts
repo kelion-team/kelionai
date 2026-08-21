@@ -71,19 +71,24 @@ describe('audio focus — LIVE first, one mouth, interrupt', () => {
     expect(audioFocus).toMatch(/active === 'live'|requestTtsFocus/)
   })
 
-  it('o singură gură PE TURĂ: Chirp redă răspunsul serverului ȘI pe scris ȘI pe voce (LIVE nu-l rostește)', () => {
-    // CORECȚIE MĂSURATĂ (owner 20 aug „nu ajunge audio unde trebuie" pe VOCE + agent):
-    // Gemini Live (vlRef) NU rostește răspunsul serverului nici pe voce — n-are speak(text),
-    // rostește doar audio-ul PROPRIULUI model. Deci Chirp (c.audio) e SINGURA gură pentru
-    // răspunsul serverului, ȘI pe scris ȘI pe voce. Vechea gardă `voiceTurnRef && vlRef return`
-    // îl tăcea pe voce → TĂCERE (bugul). O singură voce = Chirp + întreruperea Live la redare.
-    expect(panou).not.toContain('if (voiceTurnRef.current && vlRef.current) return')
-    // Chirp cere focus întrerupând Live MEREU (turaScrisa:true) → o singură voce, fără dublare.
+  it('UN SINGUR MOTOR (JARVIS pasul 1): cât LIVE e viu gura e a lui; fără Live, Chirp rămâne gura', () => {
+    // PROIECT-CHAT-VOCE §2 (ordinul owner-ului, 21 aug „toate"): cât sesiunea LIVE
+    // trăiește, turele scrise merg PRIN Live (trimiteText → vocea lui), iar cadrul
+    // Chirp sosit pe /api/chat NU se mai redă peste vocea Live (sursa coliziunii
+    // măsurate „2 sec și se rupe"). FĂRĂ Live, Chirp rămâne gura turelor — neatins.
+    // Ecoul și trimiterea folosesc ACELAȘI rând plafonat (anti-minciună: ecoul nu
+    // arată mai mult decât a plecat) — lacăt pe ambele capete ale aceleiași valori.
+    expect(panou).toContain('const rand = msg.slice(0, 4000)')
+    expect(panou).toContain('vlRef.current.trimiteText(rand)')
+    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,2000}?if \(vlRef\.current\) \{\s*\n\s*aSunatTuraRef\.current = true\s*\n\s*return/)
+    // Chirp (fără Live) cere focus întrerupând orice rest de playout (turaScrisa:true).
     expect(panou).toContain('requestTtsFocus({ turaScrisa: true })')
     // Sesiunea Realtime OpenAI (isRealtime) chiar rostește textul → acolo Chirp e refuzat.
     expect(panou).toMatch(/isRealtime === true\) return/)
-    // ANTI-ECOU: cât redă Chirp-ul, urechea LIVE e mutată (setRedareExterna).
-    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,1500}?setRedareExterna\(true\)/)
+    // ANTI-ECOU: cât redă Chirp-ul (fără Live), urechea clasică e mutată (setRedareExterna).
+    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,2500}?setRedareExterna\(true\)/)
+    // Clientul VL are canalul de text (tastatura opțională §10) → serverul îl acceptă.
+    expect(clientVL).toContain('trimiteText(text: string): boolean')
   })
 
   it('serverVoiceOff NU mai e legat de „LIVE instalat" — Chirp iese ȘI pe voce (o voce prin întreruperea Live)', () => {
