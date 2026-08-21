@@ -124,6 +124,20 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               absolută: măsurarea live a fals-pozitivelor (o acuzație falsă
               rostită ar fi mai rea decât tăcerea).
       - [ ] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
+              — v1 CONSTRUIT pe branch (21 aug noaptea): (a) protocolul §4 în
+              fișa ușii (întreabă întâi 1-2 lucruri care CHIAR mută răspunsul,
+              completează după, STOP la convergență, fără narațiune de proces);
+              (b) rostirile ADRESATE sosite cât ușa macină se strâng
+              (injectiiUsa, aceeași gardă ca la comenzi — ambientalul nu
+              „informează") și la întoarcere creierul greu primește runde de
+              convergență cu ce s-a aflat (plafon 2 — „nu e raliu").
+              LIMITE DECLARATE: injecția ÎN ZBOR în tura /api/chat care deja
+              macină NU există (ar cere un inbox pe tură în chat.ts — pas
+              viitor); dacă modelul Live nu poate conversa cât unealta e
+              blocată, lista rămâne goală și bucla nu rulează („nu pot
+              verifica" din repo — se măsoară live). Lacăte:
+              triereInDoi.test.ts. RĂMAS pt. bifă: 3 agenți + merge + măsurat
+              live (jurnal „trierea în doi — runda").
       - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)

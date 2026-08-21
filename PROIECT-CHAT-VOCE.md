@@ -15,7 +15,11 @@
 > verdict de fals — pe istoric+monitor, nu voce; exempția călătorește cu
 > anunțul de sistem și stă armată cât ușa grea e în zbor), NEmăsurat live —
 > inclusiv ordinea turnComplete/toolCall la Google („nu pot verifica" din
-> repo). Pașii 3–5, 7: neîncepuți; 2b (nota rostită) = decizie owner în RAMAS.
+> repo). Pasul 3 (trierea în doi): v1 CONSTRUIT pe branch (protocolul în fișa
+> ușii + strângerea rostirilor adresate cât ușa macină + runde de convergență,
+> plafon 2), cu limitele declarate în RAMAS (injecția în zbor = pas viitor;
+> conversația cât unealta e blocată = „nu pot verifica", se măsoară live).
+> Pașii 4–5, 7: neîncepuți; 2b (nota rostită) = decizie owner în RAMAS.
 > Bifele cu dovadă: RAMAS-DE-FACUT.md.
 
 ---

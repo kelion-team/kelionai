@@ -103,7 +103,14 @@ const UNEALTA_CREIER: UnealtaVocala = {
     'Execută ORICE sarcină care cere unelte, informație din lume sau acțiune: căutare pe web, știri, ' +
     'METEO, muzică/YouTube, hărți/trasee/GPS, e-mail, calendar, generat imagini, deschis pagini sau ' +
     'panouri pe monitor, costuri, orice lucru concret. Cheam-o cu cererea utilizatorului formulată ' +
-    'COMPLET, în limba lui. Creierul aplicației o execută cu uneltele lui și îți întoarce rezultatul.',
+    'COMPLET, în limba lui. Creierul aplicației o execută cu uneltele lui și îți întoarce rezultatul. ' +
+    // TRIEREA ÎN DOI (JARVIS pasul 3 — PROIECT-CHAT-VOCE §4): protocolul de
+    // gândire în doi, pe scurt, chiar în fișa uneltei (declarată o dată la setup).
+    'TRIEREA ÎN DOI: dacă cererea e ambiguă, ÎNTÂI pune omului 1-2 întrebări scurte și decente care ' +
+    'chiar schimbă răspunsul, apoi cheamă unealta cu tot ce ai aflat. Dacă rezultatul întors numește o ' +
+    'informație lipsă, întreabă omul și cheamă unealta din nou cu completarea. Te oprești când nicio ' +
+    'întrebare rămasă nu mai mută răspunsul — ăla e răspunsul. Nu-ți nara procesul („stai să verific") — ' +
+    'ori întrebi firesc, ori dai răspunsul curat.',
   parameters: {
     type: 'object',
     properties: { cerere: { type: 'string', description: 'cererea utilizatorului, completă, în limba lui' } },
@@ -440,6 +447,15 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // deschisă, orice tură rostită are temeiul în afară și steagul NU se
     // consumă (robust la ambele ordini; se măsoară live la publicare).
     let usiGreleInZbor = 0
+    // TRIEREA ÎN DOI (JARVIS pasul 3 — PROIECT-CHAT-VOCE §4): cât o ușă grea
+    // MACINĂ, ce spune omul (adresat lui Kelion) e informație PROASPĂTĂ pentru
+    // gândirea în curs — se strânge aici și, la întoarcerea ușii, creierul greu
+    // primește runde de CONVERGENȚĂ cu tot ce s-a aflat între timp. Criteriul
+    // de stop e al specului: nimic nou aflat = răspunsul e gata (nu un procent
+    // inventat). Dacă modelul Live nu poate conversa cât unealta e blocată
+    // (nemăsurat — „nu pot verifica" din repo), lista rămâne goală și bucla
+    // nu rulează — nimic nu se strică.
+    let injectiiUsa: string[] = []
     const salveazaTura = (): void => {
       const u = bufUser.trim()
       let k = bufKelion.trim()
@@ -1238,6 +1254,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               if (deviceCmd) {
                 trimite({ type: 'control', frame: { device: deviceCmd } })
               }
+              // TRIEREA ÎN DOI (§4): rostirea ADRESATĂ sosită cât ușa grea
+              // macină intră în convergență (aceeași gardă ca la comenzi —
+              // ambientalul/altă limbă nu „informează" gândirea).
+              if (usiGreleInZbor > 0 && rostireCurenta.trim()) {
+                injectiiUsa.push(rostireCurenta.trim())
+              }
             }
             // COMITEREA LIMBII DIN VORBIT (auditul 15 aug: doar scrisul comitea
             // preferința — un user „mut pe engleză" la voce nu se vindeca
@@ -1373,9 +1395,33 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // (animația avatarului) — aceeași scurgere prin lista albă, adăugate
             // 10 aug ca cadrele creierului să ajungă la browser și pe voce.
             const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture', 'apel']
-            const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, (frame) => {
+            const laEcran = (frame: Record<string, unknown>): void => {
               if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
-            }, monitorLive, tranzactiiLive)
+            }
+            injectiiUsa.length = 0 // ușa pornește curată — se strânge doar ce se află DE-ACUM
+            let r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, laEcran, monitorLive, tranzactiiLive)
+            // TRIEREA ÎN DOI (§4) — CONVERGENȚA: dacă în timpul măcinării omul a
+            // spus lucruri noi (întrebat de Live sau de la sine), creierul greu
+            // primește încă o rundă cu TOT ce s-a aflat. STOP-ul specului: nimic
+            // nou = răspunsul e gata; plafonul de runde ține „calitatea >
+            // viteza, dar nu e raliu".
+            // hardcod-permis: plafon tehnic de runde de convergență (nu bani/stare afișată)
+            const RUNDE_TRIERE = 2
+            let runde = 0
+            while (r.ok && injectiiUsa.length > 0 && runde < RUNDE_TRIERE) {
+              const noi = injectiiUsa.splice(0).join(' • ')
+              runde++
+              app.log.info(`vocal-live: trierea în doi — runda ${runde}, informații noi de la om („${noi.slice(0, 80)}")`)
+              r = await turaCreierului(
+                req.headers.cookie ?? '',
+                `${cerere}\n\n[TRIEREA ÎN DOI — ce a spus omul cât gândeai]: ${noi}\nDă răspunsul ținând cont de TOT. Dacă o întrebare rămasă încă MUTĂ răspunsul, pune-o scurt și decent; altfel răspunde final.`,
+                coords,
+                cadre,
+                laEcran,
+                monitorLive,
+                tranzactiiLive,
+              )
+            }
             if (r.ok) {
               // Ordinele de constructor pornite prin ușă intră sub urmărire —
               // la terminare, Kelion anunță cu vocea lui (ceasOrdine, mai sus).
