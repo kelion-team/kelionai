@@ -106,7 +106,7 @@ export async function hardResetToLatest(): Promise<void> {
     if ('caches' in window) {
       const keys = await caches.keys()
       // NU șterge modelul offline (owner 20 aug: „nu descarcă nimic pentru offline").
-      // WebLLM ține creierul local (~2 GB) în Cache Storage sub `webllm/*`. Hard-reset-ul
+      // WebLLM ține creierul local (~5,2 GB, gemma-2-9b) în Cache Storage sub `webllm/*`. Hard-reset-ul
       // rula la FIECARE publicare („update la foc continuu") și golea TOT → offline-ul
       // nu ajungea niciodată „gata". Păstrăm cheile webllm/*, ștergem restul.
       await Promise.all(keys.filter((k) => !k.startsWith('webllm/')).map((k) => caches.delete(k)))

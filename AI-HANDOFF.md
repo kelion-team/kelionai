@@ -1181,7 +1181,8 @@ Owner (măsurat de el): „nu descarca nimic pentru offline, e minciuna gogonata
 „mai mult chatul audio inexistent" + (avion) „nu poate accesa aplicatia". Audit cu 3
 agenți → cauzele erau ÎN COD (regula #2), reparate:
 1. **Modelul offline era distrus la fiecare update.** WebLLM ține creierul local
-   (~2 GB) în Cache Storage sub `webllm/*`. `hardResetToLatest` (`updateCheck.ts`),
+   (~2 GB — cifra modelului de ATUNCI, Qwen 3B; azi e gemma-2-9b ≈ 5,2 GB, vezi §17)
+   în Cache Storage sub `webllm/*`. `hardResetToLatest` (`updateCheck.ts`),
    plus `activate` și mesajul `kelion-clear-caches` din `sw.js`, ștergeau TOATE
    cache-urile la fiecare publicare („update la foc continuu") → offline nu era gata
    niciodată. FIX: `webllm/*` este acum PROTEJAT în toate cele trei locuri (`ePastrat`
@@ -1267,3 +1268,69 @@ e din `GCP_SERVICE_ACCOUNT_JSON` din mediul agentului — verde cu env-ul curat)
 `127.0.0.1:5432` cu bază validă, e Postgres-ul de pe VPS oprit (`systemctl status
 postgresql`); dacă apare „adresa bazei de date e goală/nu începe cu postgres://",
 e `DATABASE_URL` din `/root/kelion/kelionai.env`.
+
+## §17 — SESIUNEA 21 AUG 2026: RESTAURARE + FINALIZARE (starea CURENTĂ — citește asta, nu §14–§15)
+
+**Ordinul care guvernează tot de acum înainte (owner, verbatim):** „finalizare, și ai
+cuvântul meu că e ultimul pe care îl mai auzi de la mine dacă aplicația ce am zis până
+acum nu funcționează." → mod FINALIZARE: **zero funcții noi** (se refuză politicos
+orice, până și de la owner, până când registrul de erori e la zero), se arde registrul
+de 54 de constatări, fiecare reparație trece prin: porți → 3 agenți adversariali →
+merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, niciodată
+„ce va merge" — doar „ce s-a întâmplat".
+
+### Ce s-a întâmplat pe 21 aug (v6.0/v6.1/v6.2 = măsurate live prin /api/version; ce NU e încă live sau nu se poate măsura de aici e spus pe rând):
+1. **RESTAURARE la versiunea de sfârșit de 20 aug, cu Devin funcțional** (ordinul
+   owner-ului după o zi de eșecuri pe simțurile offline). Commit forward cu tree-ul
+   exact al lui `eec4552c` (anti-phantom-deploy: masterul NU se dă înapoi). Efect:
+   simțurile offline din 21 aug (ureche/văz Whisper+ONNX, /ort/, transformers.js)
+   NU mai sunt în tree — rândurile lor din registru sunt N/A pe tree-ul curent.
+2. **Devin constructor confirmat funcțional cap-coadă**: sistemul de auto-vindecare
+   a generat SINGUR ordinul (simptom `server.logbuffer` count=2/prag=2), Devin a
+   construit PR #1301 (rescrierea conexiunii Postgres, `dbConexiune.ts`, 18 teste),
+   merge făcut de contul kelion-team la 19:21:51Z. Live v6.1.
+3. **Creier offline = `gemma-2-9b-it-q4f16_1-MLC`** (ordin: „gemma ofline cel mai
+   mare" → cel mai mare Gemma REAL din prebuilt WebLLM v0.2.84; 27B nu există în
+   motor). Mărime reală MĂSURATĂ din manifestele de shard-uri: **~5,2 GB**;
+   vram_required≈6,4 GB, cere shader-f16. `creierLocal.ts`.
+4. **JARVIS pasul 1 (PROIECT-CHAT-VOCE.md §2+§10+§12) — UN singur motor online**:
+   cât sesiunea Gemini Live (`vlRef`) trăiește, turele SCRISE pleacă PRIN Live
+   (`{type:'text'}` pe WS → `live.anunta()`, protocolul turaDeSistem/anuntAmanat,
+   bufUser persistat) și modelul răspunde cu VOCEA lui; Chirp `c.audio` e suprimat
+   cât Live e viu (rămâne fallback când Live e mort — scoaterea completă vine cu
+   pasul 7/Piper). Reparate pe drum: onclose-1000 surdo-mut → reconectare anunțată
+   (`vocalLive.ts` client), `releaseTtsFocus` care pierdea starea 'live'
+   (`audioFocus.ts`), lacătele server care lăsau tura scrisă MUTĂ (`taiereManuala`
+   + poarta de adresare, `routes/vocalLive.ts`). Live v6.2 (v=de1984f).
+5. **Lot A — descărcarea offline e complet INVIZIBILĂ și complet AUTOMATĂ** (ordin
+   verbatim: „să se analizeze automat dacă versiunea locală are diferențe în minus
+   față de cea care se downloadează; dacă da se auto-downloadează. Acest proces se
+   face automat nu se mai afișează deloc"):
+   - `StatusOffline.tsx` **ȘTERS** (bara %, butonul manual, afișarea erorii — tot);
+     §15c pct. 2 („descărcarea era invizibilă" reparată cu UI) e astfel DEPĂȘIT —
+     invizibilitatea e acum CERINȚA, nu bug-ul.
+   - poarta de „doar țeavă bună (Wi-Fi/4G+)" SCOASĂ: descarcă pe ORICE net;
+   - analiza = `sincronizeazaStareOffline()` (model LIPSĂ sau flag pe ALT model;
+     limită cunoscută: un cache PARȚIAL evacuat nu e detectat — verificarea e doar
+     `chei.length > 0`, completitudinea o revalidează WebLLM abia la încărcare);
+   - urmă TEHNICĂ invizibilă pentru om: `console.info` la pornire+gata,
+     `console.error` cu motivul la eșec (`creierLocal.ts`);
+   - **contor de eșecuri persistat** (`kelion_model_offline_esecuri`): după 3 căderi
+     consecutive pe același model, auto-descărcarea încearcă doar o dată pe zi
+     (dispozitivele blocate pe quota nu mai ard date la fiecare pornire; succesul
+     sau schimbarea modelului șterge contorul). `autoDescarcareaPermisa()`.
+6. **Registrele de erori (54 constatări, fiecare cu fișier:linie)** — produse de
+   agenți pe ordinul „toți agenții trebuie să depisteze toate erorile din chatul
+   live": frontend 22 (primele 3 REPARATE în pasul Jarvis 1), backend 16 (vârfuri
+   nereparate: escaladarea ocolește plasele de fallback; re-execuția uneltelor la
+   retry dublează efectele; plasa dual-brain moartă; erori ne-tranzitorii spun
+   „mai încearcă"; poartaFaptelor absent pe voce), docs-vs-cod 16 (VAD documentat
+   invers față de cod ș.a.). Lista completă: în istoricul sesiunii + RAMAS-DE-FACUT.
+7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
+   ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
+   bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor
+   („cine e de serviciu știe").
+
+**Reguli noi de lucru probate în sesiune:** stand de test în browser (Playwright
+Chromium local + oglindă de modele) — nicio pretenție de „merge" pe simțuri fără
+stand; verificare cu 3 agenți adversariali înainte de ORICE merge (mandat owner).
