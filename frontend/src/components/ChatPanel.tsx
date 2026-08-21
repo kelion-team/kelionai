@@ -352,11 +352,20 @@ export default function ChatPanel({
   const [urecheGata, setUrecheGata] = useState(() => stareUrecheOffline().stare === 'gata')
   const [asculta, setAsculta] = useState(false)
   const ascultareRef = useRef<ControlAscultare | null>(null)
+  // Lacăt SINCRON de pornire + strajă de montare: `ascultaOffline` are un await lung
+  // (getUserMedia → promptul de permisiune). Fără ele, un al doilea click în fereastra
+  // aia (iconul rămâne 🎤, ref-ul e încă null) ar deschide un AL DOILEA microfon +
+  // AudioContext și l-ar orfaniza pe primul (mic/context scurs până la închiderea paginii);
+  // iar o demontare în timpul await-ului ar lipi controlul pe un ref demontat → tot scurs.
+  const pornireRef = useRef(false)
+  const montatRef = useRef(true)
   useEffect(() => {
+    montatRef.current = true
     // Starea urechii trăiește în modulul urecheOffline (nereactivă) — o citim periodic.
     const id = window.setInterval(() => setUrecheGata(stareUrecheOffline().stare === 'gata'), 1500)
     return () => {
       window.clearInterval(id)
+      montatRef.current = false
       ascultareRef.current?.anuleaza()
       ascultareRef.current = null
     }
@@ -371,11 +380,22 @@ export default function ChatPanel({
       if (text) setInput((prev) => (prev ? prev.trimEnd() + ' ' : '') + text)
       return
     }
+    if (pornireRef.current) return // o singură pornire în zbor (anti dublu-click)
+    pornireRef.current = true
     interruptAll('asculta-offline') // gura tace cât ascult (să nu se-audă pe el)
-    const ctrl = await ascultaOffline(resolveLang(speechLangRef.current))
-    if (ctrl) {
+    try {
+      const ctrl = await ascultaOffline(resolveLang(speechLangRef.current))
+      if (!ctrl) return
+      // Demontat sau altă ascultare deja pornită cât așteptam → eliberează ACEST control,
+      // nu-l lăsa microfon deschis nefolosit.
+      if (!montatRef.current || ascultareRef.current) {
+        ctrl.anuleaza()
+        return
+      }
       ascultareRef.current = ctrl
       setAsculta(true)
+    } finally {
+      pornireRef.current = false
     }
   }, [])
   const [facing, setFacing] = useState<Facing>('user')

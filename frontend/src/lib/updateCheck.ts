@@ -105,11 +105,20 @@ export async function hardResetToLatest(): Promise<void> {
   try {
     if ('caches' in window) {
       const keys = await caches.keys()
-      // NU șterge modelul offline (owner 20 aug: „nu descarcă nimic pentru offline").
-      // WebLLM ține creierul local (~2 GB) în Cache Storage sub `webllm/*`. Hard-reset-ul
-      // rula la FIECARE publicare („update la foc continuu") și golea TOT → offline-ul
-      // nu ajungea niciodată „gata". Păstrăm cheile webllm/*, ștergem restul.
-      await Promise.all(keys.filter((k) => !k.startsWith('webllm/')).map((k) => caches.delete(k)))
+      // NU șterge modelele offline (owner 20/21 aug: „nu descarcă nimic pentru offline" +
+      // „la fiecare update nu trebuie descărcate din nou modelele"). Hard-reset-ul rula la
+      // FIECARE publicare („update la foc continuu") și golea TOT → offline-ul nu ajungea
+      // niciodată „gata". Păstrăm cheile ambelor modele — la fel ca `ePastrat` din sw.js:
+      //  • CREIERUL: WebLLM ține modelul (~GB) sub `webllm/*`.
+      //  • URECHEA (M4): transformers.js/Whisper ține modelul sub cache-uri care încep cu
+      //    `transformers` (`transformers-cache`, `experimental_transformers-...`).
+      // Cache Storage e comun paginii și SW-ului; dacă golirea de-aici NU cruța `transformers*`,
+      // urechea s-ar re-descărca la fiecare publicare, anulând protecția din sw.js. Ștergem restul.
+      await Promise.all(
+        keys
+          .filter((k) => !k.startsWith('webllm/') && !k.startsWith('transformers'))
+          .map((k) => caches.delete(k)),
+      )
     }
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration()
