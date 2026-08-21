@@ -440,6 +440,20 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
               try { ws.send(cadru.buffer) } catch { /* close-ul curăță */ }
             },
             (pcm) => redaFloat32(pcm), // Opus de jos decodat → difuzor
+            (sens) => {
+              // CODEC MORT ÎN ZBOR (registrul frontend, lot C): înainte, moartea
+              // decoderului lăsa difuzorul PERMANENT mut — serverul continua să
+              // trimită Opus, iar fiecare pachet se arunca tăcut. Acum: cădem
+              // TOTAL pe PCM pe AMBELE sensuri și-i spunem serverului
+              // (opus_cazut → el nu mai tag-uiește nimic Opus). Cadrele Opus
+              // încă în zbor se pierd (scurt), apoi vocea curge pe PCM.
+              if (inchis) return
+              console.error(`[vocalLive] codecul Opus a murit în zbor (${sens}) — cad pe PCM, vocea continuă`)
+              opusClient?.inchide()
+              opusClient = null
+              opusTx = false
+              try { ws.send(JSON.stringify({ type: 'opus_cazut' })) } catch { /* close-ul curăță */ }
+            },
           ).then((c) => {
             if (!c || inchis) { c?.inchide(); return }
             opusClient = c
@@ -473,8 +487,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         if (!m.data) break
         // OPUS: cadrele de jos vin tag-uite `codec:'opus'` cât e activ; le dăm
         // decoderului (ieșirea lui cade pe redaFloat32). Fără tag = PCM base64,
-        // ca azi. Dacă decoderul lipsește dintr-un motiv, cadrul Opus se pierde
-        // (nu-l putem reda ca PCM) — dar asta doar cât Opus e pornit explicit.
+        // ca azi. După `opus_cazut` (codec mort în zbor), cadrele Opus ÎNCĂ în
+        // zbor se pierd scurt (opusClient e null), apoi serverul trimite PCM.
         if (m.codec === 'opus') {
           opusClient?.incarcaOpusJos(base64ToBytes(m.data))
         } else {
@@ -724,6 +738,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   })()
   let stVad: StareVad = stareVadInitiala(performance.now())
   let eraDeschis = false
+  let eraPoarta = false // tranziția porții (Kelion audibil → liniște), pt. pre-roll-ul de barge-in
   // PRE-ROLL după DURATĂ (~250 ms), robust la mărimea cadrului: la deschidere trimitem
   // întâi audio-ul reținut, ca primul cuvânt să nu fie tăiat de onset + debounce.
   const PREROLL_MS = 250
@@ -780,6 +795,35 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         opts.onNivelIntrare({ nivel: rms, pic, poarta, clip: pic >= 0.98 })
       }
     }
+    // BARGE-IN PRE-ROLL (registrul frontend, lot C): cât Kelion e audibil,
+    // cadrele trimise sunt ZERO (half-duplex) — dar exact vorbele care ÎL
+    // întrerup se rostesc în fereastra asta și se PIERDEAU: modelul auzea fraza
+    // de la jumătate. Reținem cadrele REALE în același inel mărginit (~250 ms);
+    // la prima deschidere după întrerupere, inelul pleacă întâi — primul cuvânt
+    // al barge-in-ului ajunge întreg. (AEC-ul browserului ține ecoul difuzorului
+    // mic, iar inelul e scurt tocmai ca să nu care ecou vechi.)
+    if (poarta) {
+      preRoll.push(ds)
+      preRollMs += durataMs(ds)
+      while (preRollMs > PREROLL_MS && preRoll.length > 1) {
+        preRollMs -= durataMs(preRoll.shift() as Float32Array)
+      }
+    } else if (eraPoarta && !vadPornit) {
+      // Poarta tocmai s-a ridicat pe calea FĂRĂ VAD (kelion_vad='0'): golim
+      // inelul aici (cu VAD, golirea se face la închis→deschis, mai jos) —
+      // DAR doar dacă inelul chiar pare să conțină VOCE. Pe mobil AEC-ul e
+      // OPRIT (echoCancellation: !eMobil) și fără gardul ăsta coada de ecou a
+      // lui Kelion din difuzor ar pleca la model la FIECARE sfârșit de tură
+      // (agentul lotului C). Vocea care întrerupe e tare (peste difuzor);
+      // ecoul rezidual/tăcerea rămân sub prag și inelul se aruncă.
+      // hardcod-permis: prag tehnic client (RMS) al inelului de barge-in, nu valoare afișată/tarifată
+      const PRAG_RMS_PREROLL = 0.02
+      const areVoce = preRoll.some((b) => rmsDin(b) >= PRAG_RMS_PREROLL)
+      if (areVoce) for (const b of preRoll) trimiteCadru(b)
+      preRoll.length = 0
+      preRollMs = 0
+    }
+    eraPoarta = poarta
     // POARTA DE VOCE: doar în faza de ASCULTARE (Kelion nu vorbește). Măsurăm cadrul
     // REAL (ds) și lăsăm VAD-ul să decidă. Pe tăcere/zgomot NU trimitem nimic (0 octeți
     // → 0 cost). La nesiguranță poarta stă deschisă (nu tăiem vorba). Cât Kelion
@@ -810,7 +854,11 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   if (!cules) {
     console.warn('[vocalLive] AudioWorklet indisponibil — cad pe ScriptProcessor (deprecat, dar merge)')
     proc = ctxIn.createScriptProcessor(4096, 1, 1)
-    proc.onaudioprocess = (ev: AudioProcessingEvent): void => laCadru(ev.inputBuffer.getChannelData(0))
+    // .slice() la SURSĂ (agentul lotului C): browserul REFOLOSEȘTE bufferul
+    // canalului între evenimente, iar downsample îl întoarce CA ATARE la 16 kHz —
+    // fără copie, cadrele reținute (pre-roll, inelul de barge-in) se suprascriau
+    // până la trimitere (audio corupt). Un singur punct repară ambele căi.
+    proc.onaudioprocess = (ev: AudioProcessingEvent): void => laCadru(ev.inputBuffer.getChannelData(0).slice())
     sursa.connect(proc)
     proc.connect(ctxIn.destination) // necesar ca onaudioprocess să ruleze în unele browsere
   }

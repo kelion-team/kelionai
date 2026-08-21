@@ -31,6 +31,14 @@ export interface Strings {
   brainNotActive: string
   brainError: string
   offline: string
+  // ── VERDICTE ONESTE PE COD DE EROARE (registrul frontend, lot C): sesiune
+  // expirată ≠ „am pierdut netul", paywall ≠ „eroare la creier", prea multe
+  // cereri ≠ „cererea s-a rupt pe drum" — fiecare cauză cu vorba EI. Plus
+  // rândul onest pentru tura online încheiată complet GOALĂ (nimic pe ecran,
+  // nimic pe monitor, niciun sunet) — tăcerea totală era minciună prin omisiune.
+  paywallRow: string
+  rateLimited: string
+  turnEmpty: string
   offlineCompanion: string
   offlineFaraWebgpu: string
   offlineModelNepregatit: string
@@ -294,6 +302,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'The brain is not active yet (Gemini key missing).',
     brainError: 'Brain error. Please try again.',
     offline: "I've lost the internet connection — I'll be right back when the signal returns.",
+    paywallRow: "You've reached the free plan's limit — check the options to continue.",
+    rateLimited: 'Too many requests in a short time — wait a moment and try again.',
+    turnEmpty: 'I came back without an answer this time — please ask me again.',
     offlineCompanion: "Offline — companion mode. I'm here with you; full Kelion returns when you get signal.",
     offlineFaraWebgpu: "I'm in companion mode, but this device has no WebGPU — I can't run the local brain offline here.",
     offlineModelNepregatit: "I'm offline. The local brain isn't downloaded yet — prepare it while you have signal and I'll work without a connection too.",
@@ -524,6 +535,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'Creierul nu e încă activat (lipsește cheia Gemini).',
     brainError: 'Eroare la creier. Încearcă din nou.',
     offline: 'Am pierdut conexiunea la internet — revin de îndată ce revine semnalul.',
+    paywallRow: 'Ai atins limita planului gratuit — vezi opțiunile ca să continui.',
+    rateLimited: 'Prea multe cereri într-un timp scurt — așteaptă puțin și încearcă din nou.',
+    turnEmpty: 'Am rămas fără răspuns de data asta — mai întreabă-mă o dată.',
     offlineCompanion: 'Offline — mod companion. Sunt cu tine; Kelion complet revine când prinzi semnal.',
     offlineFaraWebgpu: 'Sunt în mod companion, dar dispozitivul ăsta nu are WebGPU — nu pot rula creierul local offline aici.',
     offlineModelNepregatit: 'Sunt offline. Creierul local nu e încă descărcat — pregătește-l cât ai semnal și apoi merg și fără net.',
@@ -751,6 +765,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'El cerebro aún no está activo (falta la clave de Gemini).',
     brainError: 'Error del cerebro. Inténtalo de nuevo.',
     offline: 'He perdido la conexión a internet — vuelvo en cuanto regrese la señal.',
+    paywallRow: 'Has alcanzado el límite del plan gratuito — mira las opciones para continuar.',
+    rateLimited: 'Demasiadas solicitudes en poco tiempo — espera un momento e inténtalo de nuevo.',
+    turnEmpty: 'Esta vez me quedé sin respuesta — pregúntame de nuevo, por favor.',
     offlineCompanion: 'Sin conexión — modo compañía. Estoy contigo; Kelion completo vuelve cuando haya señal.',
     offlineFaraWebgpu: 'Estoy en modo compañía, pero este dispositivo no tiene WebGPU — no puedo ejecutar el cerebro local sin conexión aquí.',
     offlineModelNepregatit: 'Estoy sin conexión. El cerebro local aún no está descargado — prepáralo mientras tengas señal y funcionaré también sin conexión.',
@@ -930,6 +947,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'Le cerveau n’est pas encore actif (clé Gemini manquante).',
     brainError: 'Erreur du cerveau. Veuillez réessayer.',
     offline: 'J’ai perdu la connexion internet — je reviens dès que le signal revient.',
+    paywallRow: 'Tu as atteint la limite du plan gratuit — regarde les options pour continuer.',
+    rateLimited: 'Trop de requêtes en peu de temps — attends un instant et réessaie.',
+    turnEmpty: 'Je suis resté sans réponse cette fois — repose-moi la question.',
     offlineCompanion: 'Hors ligne — mode compagnon. Je suis avec toi ; le Kelion complet revient dès qu’il y a du signal.',
     offlineFaraWebgpu: 'Je suis en mode compagnon, mais cet appareil n’a pas de WebGPU — je ne peux pas faire tourner le cerveau local hors ligne ici.',
     offlineModelNepregatit: 'Je suis hors ligne. Le cerveau local n’est pas encore téléchargé — prépare-le tant que tu as du signal et je fonctionnerai aussi sans connexion.',
@@ -1109,6 +1129,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'Das Gehirn ist noch nicht aktiv (Gemini-Schlüssel fehlt).',
     brainError: 'Gehirn-Fehler. Bitte versuche es erneut.',
     offline: 'Ich habe die Internetverbindung verloren — ich bin zurück, sobald das Signal wieder da ist.',
+    paywallRow: 'Du hast das Limit des Gratisplans erreicht — sieh dir die Optionen an, um weiterzumachen.',
+    rateLimited: 'Zu viele Anfragen in kurzer Zeit — warte kurz und versuch es erneut.',
+    turnEmpty: 'Diesmal bin ich ohne Antwort geblieben — frag mich bitte noch einmal.',
     offlineCompanion: 'Offline — Begleitmodus. Ich bin bei dir; das volle Kelion kehrt zurück, sobald du Signal hast.',
     offlineFaraWebgpu: 'Ich bin im Begleitmodus, aber dieses Gerät hat kein WebGPU — ich kann das lokale Gehirn hier offline nicht ausführen.',
     offlineModelNepregatit: 'Ich bin offline. Das lokale Gehirn ist noch nicht heruntergeladen — bereite es vor, solange du Signal hast, dann funktioniere ich auch ohne Verbindung.',
@@ -1288,6 +1311,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'Il cervello non è ancora attivo (manca la chiave Gemini).',
     brainError: 'Errore del cervello. Riprova.',
     offline: 'Ho perso la connessione a internet — torno appena il segnale ritorna.',
+    paywallRow: 'Hai raggiunto il limite del piano gratuito — guarda le opzioni per continuare.',
+    rateLimited: 'Troppe richieste in poco tempo — aspetta un attimo e riprova.',
+    turnEmpty: 'Questa volta sono rimasto senza risposta — chiedimelo di nuovo.',
     offlineCompanion: 'Offline — modalità compagnia. Sono con te; il Kelion completo torna quando c’è segnale.',
     offlineFaraWebgpu: 'Sono in modalità compagnia, ma questo dispositivo non ha WebGPU — non posso eseguire il cervello locale offline qui.',
     offlineModelNepregatit: 'Sono offline. Il cervello locale non è ancora scaricato — preparalo finché hai segnale e funzionerò anche senza connessione.',
@@ -1467,6 +1493,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     brainNotActive: 'O cérebro ainda não está ativo (falta a chave Gemini).',
     brainError: 'Erro do cérebro. Tente novamente.',
     offline: 'Perdi a conexão com a internet — volto assim que o sinal retornar.',
+    paywallRow: 'Atingiste o limite do plano gratuito — vê as opções para continuar.',
+    rateLimited: 'Demasiados pedidos em pouco tempo — espera um momento e tenta de novo.',
+    turnEmpty: 'Desta vez fiquei sem resposta — pergunta-me novamente.',
     offlineCompanion: 'Offline — modo companhia. Estou contigo; o Kelion completo volta quando houver sinal.',
     offlineFaraWebgpu: 'Estou em modo companhia, mas este dispositivo não tem WebGPU — não consigo rodar o cérebro local offline aqui.',
     offlineModelNepregatit: 'Estou offline. O cérebro local ainda não foi baixado — prepare-o enquanto tem sinal e funcionarei mesmo sem conexão.',

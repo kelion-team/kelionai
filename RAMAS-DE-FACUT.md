@@ -28,13 +28,29 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       (+ omul avertizat cinstit când o faptă s-a executat deja); plasa dual-brain
       moartă → treapta a treia modelRapidDirect, fără ricoșeu; mesaj onest pe
       erori ne-tranzitorii; {error} din SSE aruncat; căderea Chirp jurnalizată;
-      infrastructura nu mai naște ordine de cod în auto-vindecare. RĂMAS: merge +
-      măsurat live. Rânduri NOI din verificare (nereparate): 402/credit mort tot
+      infrastructura nu mai naște ordine de cod în auto-vindecare. **MERGE
+      (PR #1320) + MĂSURAT LIVE 21 aug 22:01Z: v=c4c5f78, ver 6.4.**
+      Rânduri NOI din verificare (nereparate): 402/credit mort tot
       „încearcă din nou" zice; mesajele de eroare doar ro/en; {error} după răspuns
       complet → sufix fals; plasele nu consultă eSanatos; db_query clasificat și
       citire și faptă; slotul încercării 1 rămâne pe modelul de pornire la
       escaladarea din mijloc; click_monitor „doar-afișare" dar apasă butoane
       reale (o reluare îl poate re-apăsa). Detalii: AI-HANDOFF §17 pct. 6.
+      **LOT C — restul registrului frontend (C1–C8) CONSTRUIT pe branch**
+      (cc50a2fc + paznici + minimele verificatorilor; porți verzi: FE build +
+      92/92, BE 1910/1910+, gărzi 0) — **RĂMAS: merge + măsurat live** (rândul
+      se taie doar cu PR + probă live). C8 spus onest: pre-roll-ul recuperează
+      ultimele ~250 ms — micșorează pierderea capului de frază la barge-in,
+      n-o elimină. Rânduri NOI din verificarea C (nereparate): (h) pragul RMS
+      0.02 pe flush-ul fără-VAD e euristic în ambele direcții (ecou TARE trece,
+      voce slabă/departe își pierde pre-roll-ul) — se confirmă doar pe telefonul
+      owner-ului; (i) registrul PT amestecat pt-PT/pt-BR; (j) comentariul
+      din era cozii la trimiterea-ocupat (~ChatPanel:3204); (k) fallback-ul
+      base=next din flushMesaje rămâne instantaneu pe secvențe contradictorii
+      (ștergere în prefix cât curge text); (l) turaAvutSemneRef per-component —
+      cadre ale sesiunii live/ture abortate pot suprima fals rândul onest (doar
+      false-negative); (m) sonda health (server_down) reia fără ștergere de
+      bule — divergență veche, neatinsă.
       **Lot A (descărcare offline invizibilă+automată)**: construit + verificat cu
       3 agenți (FAIL→reparate cele 3 minime; re-verificare PASS cu 7 minore, din
       care reparate pe loc: comentariul „nu consumă rețea", gardul online pe
