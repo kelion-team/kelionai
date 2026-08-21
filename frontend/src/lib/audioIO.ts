@@ -77,19 +77,10 @@ export interface VoiceFeatures {
   clip?: string
 }
 
+// VOCE SCOASĂ (21 aug clean-slate): getPendingVoiceFeatures/set/clear erau
+// citite doar de calea vocală (acum ștearsă). `pendingVoiceFeatures` rămâne
+// intern (finalizeVoiceFeatures îl scrie/întoarce) pentru amprenta vocală.
 let pendingVoiceFeatures: VoiceFeatures | null = null
-
-export function getPendingVoiceFeatures(): VoiceFeatures | null {
-  return pendingVoiceFeatures
-}
-
-export function setPendingVoiceFeatures(features: VoiceFeatures | null): void {
-  pendingVoiceFeatures = features
-}
-
-export function clearPendingVoiceFeatures(): void {
-  pendingVoiceFeatures = null
-}
 
 const VOICEPRINT_KEY = 'kelion.voiceprint'
 const CALIBRATION_MIN_FRAMES = 30 // cadre vocale minime ca să considerăm calibrarea reușită
@@ -816,14 +807,9 @@ export function getVoiceLevel(): number {
   return voiceLevel
 }
 
-/** ── GURA CĂII LIVE (8 aug) ────────────────────────────────────────────────
- *  Calea full-duplex redă prin WebAudio (bufere PCM), nu prin <audio>, deci
- *  analizatorul de mai jos n-o vede și avatarul ar vorbi cu gura închisă.
- *  Sesiunea live își împinge singură nivelul aici; același `getVoiceLevel()`
- *  hrănește gura, indiferent pe ce drum vine vocea. */
-export function alimenteazaNivelVoce(v: number): void {
-  voiceLevel = Math.max(0, Math.min(1, v))
-}
+// VOCE SCOASĂ (21 aug clean-slate): alimenteazaNivelVoce hrănea `voiceLevel`
+// din sesiunea live (ștearsă). Naratorul (/api/tts → playVoice) încă umple
+// `voiceLevel` prin analizorul RMS de mai jos, deci gura avatarului merge.
 
 function stopLevelLoop(): void {
   if (levelRaf) cancelAnimationFrame(levelRaf)
