@@ -63,6 +63,12 @@ export async function pregatesteVazOffline(onProgress?: (p: number) => void): Pr
       }
       const { pipeline } = tf
       descriptor = (await pipeline('image-to-text', MODEL_VAZ, {
+        // BUG REPARAT (probă LIVE owner 21 aug + REPRODUS și REPARAT în Chromium aici):
+        // optimizatorul de graf ORT (nivel extins) pică pe modelul cuantizat q8 la
+        // crearea sesiunii („TransposeDQWeightsForMatMulNBits Missing required scale").
+        // Cu 'basic', transformarea buggy nu rulează → sesiunea se creează (măsurat: 5s),
+        // modelul rămâne cel MIC (q8). Aceeași reparație ca la ureche.
+        session_options: { graphOptimizationLevel: 'basic' },
         // progresul descărcării fișierelor modelului (0..1), la fel ca la creier/ureche.
         progress_callback: (info: { status?: string; progress?: number }) => {
           if (typeof info?.progress === 'number') {

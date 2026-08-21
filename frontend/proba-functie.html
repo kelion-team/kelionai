@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- PROBA FUNCȚIONALĂ (doar dev): după 'gata', chiar TRANSCRIE audio și DESCRIE o imagine. -->
+<html>
+  <head><meta charset="utf-8" /><title>proba functie</title></head>
+  <body>
+    <pre id="stare">pornesc…</pre>
+    <script type="module">
+      import { pipeline, env } from '@huggingface/transformers'
+      env.remoteHost = 'http://localhost:5199/proba-hf/'
+      try { if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.wasmPaths = '/ort/' } catch {}
+      import { pregatesteUrecheOffline, transcrieOffline } from '/src/lib/urecheOffline'
+      const el = document.getElementById('stare')
+      const out = {}
+      try {
+        // 1) URECHEA: ton 440Hz 1s la 16kHz (nu e vorbire; contract = nu crapă, întoarce string)
+        await pregatesteUrecheOffline()
+        const audio = new Float32Array(16000)
+        for (let i = 0; i < 16000; i++) audio[i] = 0.3 * Math.sin((2 * Math.PI * 440 * i) / 16000)
+        const t0 = performance.now()
+        const text = await transcrieOffline(audio, 'en')
+        out.ureche = { ok: true, secunde: Math.round((performance.now() - t0) / 1000), text: String(text).slice(0, 80) }
+      } catch (e) { out.ureche = { ok: false, eroare: String(e).slice(0, 200) } }
+      try {
+        // 2) VĂZUL: imagine reală desenată (cer albastru + soare galben + iarbă verde) → legendă
+        const c = document.createElement('canvas'); c.width = 224; c.height = 224
+        const ctx = c.getContext('2d')
+        ctx.fillStyle = '#7ec8ff'; ctx.fillRect(0, 0, 224, 224)
+        ctx.fillStyle = '#3fa34d'; ctx.fillRect(0, 154, 224, 70)
+        ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.arc(170, 50, 28, 0, 7); ctx.fill()
+        const cap = await pipeline('image-to-text', 'Xenova/vit-gpt2-image-captioning', { session_options: { graphOptimizationLevel: 'basic' } })
+        const t1 = performance.now()
+        const r = await cap(c.toDataURL('image/jpeg', 0.9))
+        const legenda = Array.isArray(r) ? r[0]?.generated_text : r?.generated_text
+        out.vaz = { ok: true, secunde: Math.round((performance.now() - t1) / 1000), legenda: String(legenda).slice(0, 120) }
+      } catch (e) { out.vaz = { ok: false, eroare: String(e).slice(0, 200) } }
+      el.textContent = JSON.stringify(out)
+      document.title = 'proba-gata'
+    </script>
+  </body>
+</html>
