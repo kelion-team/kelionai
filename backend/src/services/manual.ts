@@ -121,7 +121,9 @@ const SECTIONS: ManualSection[] = [
       // FĂRĂ promisiunea „interrupt mid-sentence by voice" (verificatorul D):
       // pe sesiunea Live vocea NU poate întrerupe cât Kelion vorbește (half-
       // duplex + NO_INTERRUPTION) — întrerupi TASTÂND sau cu butonul.
-      'Kelion listens hands-free while the voice session is on. Replies in a voice session are spoken with its one live voice, and if you type while the voice session is active, the answer comes back in that same voice — typing also interrupts it mid-sentence when you need to cut in. When you are offline, your device’s own voice reads the offline answers aloud.',
+      // F4: fraza restrânsă la TEXT simplu — tura cu ATAȘAMENT cât Live e viu
+      // merge pe canalul clasic și rămâne vizuală (Chirp suprimat), nu vocală.
+      'Kelion listens hands-free while the voice session is on. Replies in a voice session are spoken with its one live voice, and if you type a message while the voice session is active, the answer comes back in that same voice — typing also interrupts it mid-sentence when you need to cut in. (A message with an attachment is answered on screen instead.) When you are offline, your device’s own voice reads the offline answers aloud.',
     ],
   },
   {
@@ -166,7 +168,10 @@ const SECTIONS: ManualSection[] = [
       // ADUS LA COD (lot A + registrul lot D): descărcarea e AUTOMATĂ pe ORICE
       // net (poarta Wi-Fi scoasă la ordin) și complet INVIZIBILĂ (StatusOffline
       // șters) — bara, butonul și „îți spune pe față" nu mai există.
-      'Android vs iPhone — what differs. The on-device brain runs through WebGPU on both, and the offline model downloads automatically on any connection, on both platforms. Background notifications are more limited by iOS. Everything else — typing offline, location, movement speed, and the automatic reconnect and sync — works the same on both.',
+      // FĂRĂ pretenția „runs on both" (F3, regula #1): modelul cere multă
+      // memorie GPU + shader-f16, iar pe iPhone nimeni n-a măsurat-o — se spune
+      // condiționat pe capabilitatea dispozitivului, nu ca fapt.
+      'Android vs iPhone — what differs. The on-device brain needs WebGPU and enough graphics memory for the model; on capable devices the offline model downloads automatically, on any connection, on both platforms — on devices that cannot hold it, the offline companion simply is not available. Background notifications are more limited by iOS. Everything else — typing offline, location, movement speed, and the automatic reconnect and sync — works the same on both.',
       'Preparing the offline brain is automatic and silent. While you are online, Kelion checks on its own whether your device already holds the current offline model; if not, it downloads it quietly in the background — no bar, no button, nothing to press. Once it is downloaded it stays put: an app update is still applied normally, but it no longer erases the model, and the storage is marked persistent so the browser will not evict it either — it is downloaded only once. It needs a device with WebGPU; on devices without it, the offline companion simply is not available.',
       'Offline is also the most contained Kelion can be. With no network it reaches no server, no Google account, no stored memory and no tools — so it cannot read your saved data, send anything, or act on your behalf. It works only from the conversation on the device and what the device’s own sensors measure, and it says so honestly. Your account, its memory and its powers stay behind the connection it cannot reach until you are back online.',
     ],

@@ -1447,9 +1447,11 @@ Adevărurile măsurate (pe scurt — ce spun secțiunile vechi e fals unde contr
   (`2.5-flash-image` întorcea 200 FĂRĂ imagine — de-asta nu e el).
 - **AEC pe mobil e OPRIT** (`echoCancellation: !eMobil`) — comentariile care
   ziceau `true` corectate în lot D; de-asta pre-roll-ul de barge-in are gard RMS.
-- **Agenți**: rosterul are ~91 intrări (nu „33"); memoria (`learnFromTurn`)
-  rulează pe Gemini direct (nu Haiku); `adminLocked`/`markFirstWord`/`sayToAdmin`
-  nu mai există ca identificatori.
+- **Agenți**: rosterul are exact 91 intrări (nu „33"); memoria (`learnFromTurn`)
+  rulează pe Gemini direct (nu Haiku); `markFirstWord`/`sayToAdmin` nu mai
+  există ca identificatori; `adminLocked` NU mai există în chat.ts (mecanismul
+  vechi), dar trăiește ca CHEIE i18n folosită în Stage.tsx (corectura F2 a
+  verificatorului — formularea absolută de dinainte era falsă).
 - **Rânduri de registru noi din audit (nereparate)**: (n) butonul de ștergere
   cont pică tăcut (UI mort — de decis cu owner-ul: scos sau mesaj onest);
   (o) codul mort al căii `cadruLive`/`{type:'cadru'}` din vocalLive server
