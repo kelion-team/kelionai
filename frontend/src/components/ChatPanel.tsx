@@ -1234,9 +1234,14 @@ export default function ChatPanel({
       const stLoc0 = stareCreierLocal().stare
       if (!esteConectat() && (stLoc0 === 'descarcat' || stLoc0 === 'se_pregateste')) {
         await pregatesteModelOffline()
+        // Trezirea în GPU durează secunde: dacă între timp a venit „stop" sau
+        // barge-in (tură nouă), NU continua cu snapshot-ul vechi — altfel ar clipi
+        // peste tura curentă (audit 3 agenți, 21 aug). Cleanup-ul îl face finally-ul.
+        if (ac.signal.aborted || abortRef.current !== ac) return
       }
-      // OFFLINE = creierul LOCAL, nu serverul de neatins. esteConectat() e o
-      // măsurătoare REALĂ (ping /health), deci false = chiar nu e net → serverul
+      // OFFLINE = creierul LOCAL, nu serverul de neatins. esteConectat() întoarce
+      // ULTIMA măsurătoare reală (ping /health, reîmprospătat periodic), deci
+      // false = chiar nu e net → serverul
       // oricum n-ar răspunde; streamLocalRaspuns răspunde dacă e 'gata', altfel spune
       // CINSTIT (nepregătit), niciodată eroarea falsă „am pierdut conexiunea".
       // FAIL-SAFE (owner 20 aug): pe device FĂRĂ WebGPU creierul local nu merge
