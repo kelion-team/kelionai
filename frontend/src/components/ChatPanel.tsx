@@ -57,7 +57,7 @@ import { getTeava } from '../lib/retea'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
-import { esteConectat, useConectat } from '../lib/conexiune'
+import { esteConectat, useConectat, verificaConexiuneReala } from '../lib/conexiune'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline, incalzesteCodOffline } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
 import {
@@ -1184,6 +1184,12 @@ export default function ChatPanel({
           return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
         })
       }
+      // RECONECTARE AUTOMATĂ LA TRIMITERE (owner, 21 aug: „când îi vine accesul la
+      // net nu se reconectează automat"). esteConectat() e ULTIMA măsurătoare — dacă
+      // CREDEM că suntem offline, netul poate să fi revenit TĂCUT între poll-uri.
+      // Reverificăm REAL o dată, DOAR când pare offline (zero cost pe calea online),
+      // ca mesajul să nu plece pe creierul local când serverul e iar la îndemână.
+      if (!esteConectat()) await verificaConexiuneReala()
       // COMUTAREA OFFLINE (mod companion, faza 1): fără net REAL → răspunsul vine
       // din CREIERUL LOCAL (WebLLM, pe dispozitiv), NU de la server. Aceeași formă
       // de flux (async iterable de bucăți), deci tot ce urmează (acumulare, gură,
