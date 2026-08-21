@@ -686,6 +686,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               opusActiv = true
               app.log.info('vocal-live: Opus ACTIV pe hopul browser↔server (client + server gata)')
             }
+          } else if (m.type === 'opus_cazut') {
+            // Codecul WebCodecs al clientului a MURIT în zbor (registrul
+            // frontend, lot C): fără anunțul ăsta, serverul continua să trimită
+            // Opus iar difuzorul clientului rămânea permanent mut. Hop înapoi pe
+            // PCM pe ambele sensuri — aceeași ordine WS garantează că uploadurile
+            // de după anunț vin ne-tag-uite.
+            opusActiv = false
+            app.log.warn('vocal-live: clientul a anunțat căderea codecului Opus — hopul revine pe PCM')
           }
         } catch {
           /* cadru text neînțeles — îl ignorăm, audio rămâne pe binar */

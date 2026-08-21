@@ -41,10 +41,15 @@ describe('abortul nu mai e confundat cu o pană de rețea', () => {
     expect(gardieni.length).toBe(2)
   })
 
-  it('mecanismul de reluare rămâne — dar numai pentru offline ADEVĂRAT', () => {
-    // Deleting the two messages is correct when you really lost the signal.
-    // What was wrong was a deliberate cancellation triggering it.
-    expect(panou).toContain('cur.slice(0, -2)')
+  it('mecanismul de reluare rămâne — dar numai pentru offline ADEVĂRAT, cu ștergere ȚINTITĂ', () => {
+    // Lot C (registrul frontend): slice(0,-2) ștergea ORB ultimele două bule —
+    // dacă între cădere și revenire intrau altele (transcript vocal, altă
+    // întrebare), le rupea pe alea. Acum: exact bula de eroare (ts reținut) +
+    // ULTIMA bulă user cu textul reluat.
+    expect(panou).not.toContain('cur.slice(0, -2)')
+    expect(panou).toMatch(/retryEroareTsRef\.current = tsEroare/)
+    expect(panou).toMatch(/mm\.role === 'assistant' && mm\.ts === tsEroare/)
+    expect(panou).toMatch(/faraEroare\[i\]\.role === 'user' && faraEroare\[i\]\.content === retry/)
     expect(panou).toMatch(/if \(code === 'offline'\)/)
   })
 })

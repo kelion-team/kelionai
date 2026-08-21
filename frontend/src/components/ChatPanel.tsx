@@ -504,6 +504,11 @@ export default function ChatPanel({
   // de pe server (c.audio → playVoice). Dacă la finalul unei ture SCRISE rămâne false,
   // răspunsul n-a fost auzit de nimeni → intră gura de siguranță (vocea browserului).
   const aSunatTuraRef = useRef(false)
+  // Tura curentă a produs VREUN semn vizibil (cadru de control: monitor, hartă,
+  // document, gest, tab…)? Resetat la începutul turei, ridicat în handleControl.
+  // La final: text gol + zero semne + zero sunet = tăcere TOTALĂ → rând onest
+  // (registrul frontend, lot C — înainte tura dispărea fără nicio urmă).
+  const turaAvutSemneRef = useRef(false)
   // VOCEA LIVE FULL-DUPLEX (7 aug) — din 8 aug seara e calea IMPLICITĂ (ownerul:
   // „asta nu e chat live, e semiduplex... pui [modelul live] în locul acestuia").
   // `localStorage.kelion_voce_live = '0'` repune calea clasică, fără deploy.
@@ -572,6 +577,11 @@ export default function ChatPanel({
   // the browser regains connectivity. retryTextRef holds the message to re-send.
   const offlineRef = useRef(false)
   const retryTextRef = useRef<string | null>(null)
+  // Timestamp-ul bulei de eroare a turei picate offline — ca la revenirea online
+  // să ștergem EXACT bula aia + bula user reluată, nu orbește „ultimele două"
+  // (registrul frontend, lot C: între cădere și revenire pot intra alte bule —
+  // transcript vocal, {ignored}, altă întrebare — și slice(0,-2) le rupea pe alea).
+  const retryEroareTsRef = useRef<number | null>(null)
   // THE HONEST CONNECTION VERDICT (Adrian, 2 aug: „raportează fals că pierde
   // conexiunea la net"). 'server_down' resumes on a health poll (the browser's
   // 'online' event never fires — the net was never down); 'transient' gets ONE
@@ -589,6 +599,9 @@ export default function ChatPanel({
     // Delivery receipt: the server's first frame arrived — the message got there.
     // (No separate UI: the user text already shows ONCE in the single band below.)
     if (c.receipt) return
+    // Orice ALT cadru de control = tura a produs ceva (suprafață/gest/sunet) —
+    // rândul onest de „tură complet goală" nu mai are motiv (vezi turaAvutSemneRef).
+    turaAvutSemneRef.current = true
     // MODUL MAȘINĂ — GARDA DE SUPRIMARE SCOASĂ (Adrian, 13 aug: „când spune orice,
     // trebuie să fie executat acel orice"). Aici stătea plasa care, la volan, arunca
     // ORICE frame de suprafață vizuală (monitor/hartă/document/card/imagine/tab) deși
@@ -638,9 +651,9 @@ export default function ChatPanel({
       window.dispatchEvent(new CustomEvent('kelion:apel-stare', { detail: c.apel }))
       return
     }
-    // VOCE UNIFICATĂ: creierul a decis că NU i se vorbea → ștergem bulele optimiste
-    // (userul substituent „🎙️…" + răspunsul gol) și nu se redă nimic. Tura se
-    // stinge curat, ca și cum n-ar fi fost (Adrian: „să nu vorbească neîntrebat").
+    // VOCE UNIFICATĂ: creierul a decis că NU i se vorbea → răspunsul gol și
+    // substituentul „🎙️…" pleacă, nimic nu se redă (Adrian: „să nu vorbească
+    // neîntrebat") — dar bula CONFIRMATĂ de {heard} rămâne (vezi mai jos).
     if (c.ignored) {
       // NU SE MAI ARUNCĂ CE S-A AUZIT (Adrian, 8 aug: „nu ignora ce aude când
       // nu apare Kelion"). Înainte, tura stinsă ștergea AMBELE bule — ce ai
@@ -657,7 +670,14 @@ export default function ChatPanel({
             .filter((m) => m.ts !== vt.asstTs)
             .flatMap((m) => {
               if (m.ts !== vt.userTs) return [m]
-              return []  // ambiental: nu lăsăm text pe ecran când nu i se adresa
+              // REGISTRUL, LOT C — codul contrazicea comentariul de mai sus (și
+              // ordinul owner-ului din 8 aug): bula userului se ștergea MEREU,
+              // inclusiv când {heard} o umpluse deja cu transcriptul confirmat —
+              // „m-a auzit și a tăcut" arăta identic cu „nu m-a auzit deloc".
+              // Acum: bula CONFIRMATĂ (text real, nu substituentul 🎙️) RĂMÂNE;
+              // se șterge doar substituentul fără text.
+              const confirmata = m.content.trim() && !m.content.startsWith('🎙')
+              return confirmata ? [m] : []
             }),
         )
       return
@@ -1286,11 +1306,15 @@ export default function ChatPanel({
       // BARGE-IN — we cancel the current turn and start the new one IMMEDIATELY. We no longer queue
       // it: the queue BLOCKED full-duplex (the second message didn't reach the brain
       // until the first finished). The backend + worker already accept concurrent
-      // turns. No text (attachment only) → we leave the current turn alone, we don't cut it.
+      // turns.
       // O FRAZĂ VOCALĂ rostită cât Kelion lucrează = barge-in, NU o pierdem: audio-ul
       // e în pendingAudioRef chiar dacă msg e gol (altfel o tură vocală în timpul alteia
       // era aruncată tăcut — aceeași cauză ca la linia ~865).
-      if (!msg && !pendingAudioRef.current) return
+      // ATAȘAMENTUL SINGUR la fel (registrul, lot C): apăsarea „trimite" cu o
+      // imagine fără text, cât Kelion lucra, se ARUNCA tăcut — zero urmă, zero
+      // feedback. Regula casei e una singură: orice input în timpul lucrului =
+      // barge-in. Return doar când chiar nu e NIMIC de trimis.
+      if (!msg && !pendingAudioRef.current && atts.length === 0) return
       interruptAll('barge-in-text') // cut TTS + notify LIVE mouth; one focus arbiter
       rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
       opresteVoceLocal() // taie gura de siguranță a turei întrerupte (barge-in)
@@ -1423,6 +1447,7 @@ export default function ChatPanel({
     const mouth = rvLiveRef.current
     // NOUĂ TURĂ: încă n-a rostit nimeni nimic; tăiem orice gură de siguranță rămasă.
     aSunatTuraRef.current = false
+    turaAvutSemneRef.current = false
     opresteVoceLocal()
     let speechBuf = ''
     // Sentence splitter: a sentence leaves the buffer only when it ENDS with a
@@ -1592,7 +1617,19 @@ export default function ChatPanel({
       }
       // A monitor-only / tool-only reply streams no visible text. Don't leave an
       // empty assistant turn in the history (it would 400 the next request).
-      if (!acc.trim()) setMessages(next)
+      // Dar TĂCEREA TOTALĂ e altceva (registrul, lot C): text gol + niciun cadru
+      // de control + niciun sunet = tura a murit fără nicio urmă — omul rămânea
+      // cu întrebarea în aer, fără să știe dacă a fost măcar primită. Rând onest.
+      if (!acc.trim()) {
+        if (!eTuraOffline && !turaAvutSemneRef.current && !aSunatTuraRef.current) {
+          // FUNCȚIONAL, nu instantaneu (lacătul aDouaIntrebare): o scriere-listă
+          // ar șterge mesajele sosite între timp — exact bugul păzit acolo.
+          setMessages((cur) => {
+            const baza = cur.length >= next.length && cur.slice(0, next.length).every((mm, i) => mm === next[i]) ? cur : next
+            return [...baza, { role: 'assistant', content: `⚠️ ${strings(lang).turnEmpty}`, ts: Date.now() }]
+          })
+        } else setMessages(next)
+      }
       else suggestFacial(acc) // the face follows the tone of the finished reply
       // FAZA 3 — COZILE OFFLINE: dacă tura a fost fără net, o punem în coada de
       // SYNC (chat + locație) ca serverul să se actualizeze la revenire; dacă
@@ -1677,11 +1714,15 @@ export default function ChatPanel({
                 : code === 'transient'
                   ? spoken.requestLost
                   : code === 'unauthorized'
-                    ? spoken.offline // session expired / not signed in — honest, not "brain dead"
+                    // VERDICTE ONESTE (registrul, lot C): sesiunea expirată NU e
+                    // „am pierdut netul", paywall-ul NU e „eroare la creier",
+                    // prea-multe-cereri NU e „cererea s-a rupt pe drum" — trei
+                    // minciuni de cod HTTP, fiecare cu vorba EI acum.
+                    ? spoken.sessionExpired
                     : code === 'paywall'
-                      ? t.brainError
+                      ? spoken.paywallRow
                       : code === 'rate_limited'
-                        ? spoken.requestLost
+                        ? spoken.rateLimited
                         : t.brainError
         if (code === 'paywall') {
           window.dispatchEvent(new Event('kelion:paywall'))
@@ -1691,14 +1732,16 @@ export default function ChatPanel({
         // FUNCTIONAL updater, not a snapshot — the same lesson as in the streaming
         // loop (line ~912): a message arriving meanwhile (voice transcript,
         // a new question) must not disappear because this turn failed.
+        const tsEroare = Date.now()
         setMessages((cur) => {
           const baza = cur.length >= next.length && cur.slice(0, next.length).every((mm, i) => mm === next[i]) ? cur : next
           const rest = baza.slice(next.length).filter((mm) => !(mm.role === 'assistant' && mm.ts === turnTs))
-          return [...next, ...rest, { role: 'assistant', content: acc.trim() ? `${acc}\n⚠️ ${m}` : `⚠️ ${m}`, ts: Date.now() }]
+          return [...next, ...rest, { role: 'assistant', content: acc.trim() ? `${acc}\n⚠️ ${m}` : `⚠️ ${m}`, ts: tsEroare }]
         })
         if (code === 'offline') {
           offlineRef.current = true
           retryTextRef.current = msg // resume THIS message when the signal returns
+          retryEroareTsRef.current = tsEroare // ștergerea ȚINTITĂ la revenire (nu slice orb)
         }
         if (code === 'server_down') {
           // The 'online' browser event will never fire — the net was never
@@ -2426,6 +2469,11 @@ export default function ChatPanel({
     micManualOffRef.current = false
     // Apăsarea manuală bate zăvorul dintre taburi: omul a ales TABUL ĂSTA.
     voceAiureaRef.current = false
+    // …și bate și lacătul „live căzut de 3×" (registrul frontend, lot C): omul
+    // care apasă BUTONUL cere explicit vocea — sesiunea live primește o șansă
+    // proaspătă (dacă iar pică de 3×, plasa coboară la fel pe calea veche;
+    // fără reset, doar un refresh de pagină mai readucea vreodată vocea live).
+    vlCazutRef.current = false
 
     // PRE-WARM: we open the microphone before startMicStream, so that pressing
     // the "mic on" button activates almost instantly. If the user presses
@@ -2713,10 +2761,23 @@ export default function ChatPanel({
       offlineRef.current = false
       const retry = retryTextRef.current
       retryTextRef.current = null
+      const tsEroare = retryEroareTsRef.current
+      retryEroareTsRef.current = null
       if (retry) {
-        // Resume from where we were cut off: drop the failed user+error bubbles
-        // and re-send, so Kelion answers the message that got interrupted.
-        setMessages((cur) => cur.slice(0, -2))
+        // Resume from where we were cut off: drop EXACT the failed turn's error
+        // bubble (by its recorded ts) + the LAST user bubble carrying the retried
+        // text, then re-send. NOT slice(0,-2): bubbles that arrived between the
+        // failure and the recovery (voice transcript, another question) must
+        // survive (registrul frontend, lot C).
+        setMessages((cur) => {
+          const faraEroare = tsEroare === null ? cur : cur.filter((mm) => !(mm.role === 'assistant' && mm.ts === tsEroare))
+          for (let i = faraEroare.length - 1; i >= 0; i--) {
+            if (faraEroare[i].role === 'user' && faraEroare[i].content === retry) {
+              return [...faraEroare.slice(0, i), ...faraEroare.slice(i + 1)]
+            }
+          }
+          return faraEroare
+        })
         window.setTimeout(() => void sendRef.current(retry), 400)
       }
     }
