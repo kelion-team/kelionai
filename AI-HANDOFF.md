@@ -1299,12 +1299,27 @@ modelele offline supraviețuiesc COMPLET — atât byte-ii cât și evidența:
   strajă `montatRef`) + `interruptAll` mutat în `try` (lacătul nu mai rămâne blocat).
 - reconectare — nu se reconecta automat la revenirea netului: `conexiune.ts` poll
   adaptiv (30s online / 5s offline) + `visibilitychange` recheck.
+- M5 — zăvorul de descărcare al creierului nu verifica ureche/văz → o descărcare
+  WebLLM (multi-GB) putea concura cu una de ureche/văz; acum toate cele trei butoane
+  + Reîncearcă sunt blocate cât se descarcă oricare (o singură descărcare mare odată).
 
 **Fundație Faza 2 (pregătită, nu activă):** `adaugaTuraSync` — detaliile făcute
 offline se urcă automat ca istoric la conectarea în zona plătită (owner: „trebuie
 prins cum se urcă detaliile automat ca istoric când se leagă la zona plătită").
 
-**RĂMAS din Faza 1:** **M5 — văzul offline** (model de viziune local „descrie scena"
-prin transformers.js image-to-text; `@vladmandic/face-api` există deja). Ultima piesă
-ca offline-ul să vadă, pe lângă vorbit (M3) + auzit (M4). **Neverificat pe device**
-(WebGPU/microfon/cameră = doar pe telefonul owner-ului) — verificarea LIVE rămâne a lui.
+**M5 — VĂZUL OFFLINE: LIVE (`v=e88e4d2`, ver 5.5, `at=2026-08-21T13:05:03Z`, merge
+`e88e4d2b`, PR #1313).** Cele TREI simțuri offline sunt acum complete: Kelion offline
+VORBEȘTE (M3) + AUDE (M4) + VEDE (M5). Văzul: `frontend/src/lib/vazOffline.ts` — model
+local de captioning (`Xenova/vit-gpt2-image-captioning`, transformers.js, WASM la `/ort/`,
+cache `transformers-cache` deja protejat la update). Eșantionare în FUNDAL (oglindă a
+`faceprint.startFaceSampling`, ~8s din cadrele deja capturate), cache-ul citit INSTANT în
+tura offline prin `descriereVazOffline()` (zero latență). Rulează DOAR offline
+(`esteActiv=!esteConectat()`), doar cu camera pornită, sare pe tab ascuns, un singur caption
+în zbor. Legenda intră în promptul de sistem al creierului local prin câmpul nou `vede` din
+`contextOffline` (creierul e doar-text → vede prin descriere). Card „👁 Văzul" în manager.
+Cinstit: nepregătit/fără cadru/fără OffscreenCanvas → '' (omis, nu inventează). 3 agenți
+adversariali: 3×PASS (logică/lifecycle, durabilitate/perf/integrare, verde/regresie).
+
+**RĂMAS din Faza 1 (după simțuri):** APK/native offline (Capacitor) — build-ul cere Android
+SDK (neconfigurat în CI → runner dedicat / mașina owner-ului); + testul owner pe device
+(WebGPU/microfon/cameră/mod-avion = doar pe telefonul lui). Simțurile offline sunt GATA + LIVE.
