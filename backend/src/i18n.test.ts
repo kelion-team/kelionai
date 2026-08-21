@@ -72,7 +72,11 @@ describe('i18n translations completeness', () => {
       'payCodeOpen',
       'payCodeWaiting',
       'serverDown',
-      'requestLost'
+      'requestLost',
+      // Lot C (registrul frontend): verdictele oneste + rândul turei goale.
+      'paywallRow',
+      'rateLimited',
+      'turnEmpty'
     ]
 
     for (const key of sampleKeys) {

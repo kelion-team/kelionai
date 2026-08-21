@@ -1337,7 +1337,8 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    să repeți"); {error} din SSE aruncat numit; căderea Chirp ASR jurnalizată
    înainte de fallback; **infrastructura nu mai naște ordine de cod** în
    auto-vindecare (eEroareDeInfrastructura în selfHealLogPipeline — extinderea
-   regulii §16 de la Postgres la toți furnizorii). RĂMAS: merge + măsurat live.
+   regulii §16 de la Postgres la toți furnizorii). **MERGE (PR #1320) + MĂSURAT
+   LIVE 21 aug 22:01Z: /api/version → v=c4c5f78, ver 6.4, publicat 21:47:54Z.**
    **Rânduri NOI de registru** (găsite de verificatori, nereparate — de cântărit,
    unele cu owner-ul): (a) pe eroare 402/credit mort userul tot „încearcă din nou"
    primește (sonda geminiLive dezvăluie cauza doar adminului, doar pe rate-limit);
