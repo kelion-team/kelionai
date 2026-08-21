@@ -135,7 +135,12 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
       }),
     })
     if (!res.ok) {
-      // Google a refuzat (ex: rol IAM pierdut) → urechea Gemini preia.
+      // Google a refuzat (ex: rol IAM pierdut) → urechea Gemini preia — dar
+      // CAUZA se scrie în jurnal ÎNTÂI (registrul backend #6): înainte, refuzul
+      // Chirp cădea MUT pe rezervă și nimeni n-ar fi văzut zile întregi că
+      // urechea principală e moartă (exact clasa PERMISSION_DENIED din 3 aug).
+      const corp = (await res.text().catch(() => '')).slice(0, 200)
+      console.error(`[ASR CHIRP CĂZUT] HTTP ${res.status} de la Speech v2 (${corp || 'corp gol'}) — trec pe urechea Gemini`)
       return transcribeFallbackGemini(audio, opts)
     }
     const j = (await res.json()) as {
@@ -143,7 +148,9 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
     }
     const r0 = j.results?.find((r) => r.alternatives?.[0]?.transcript)
     return { ok: true, lang: r0?.languageCode ?? null, transcript: r0?.alternatives?.[0]?.transcript ?? '' }
-  } catch {
+  } catch (e) {
+    // Aceeași regulă ca la refuzul HTTP: rezerva preia, dar cauza se vede.
+    console.error(`[ASR CHIRP CĂZUT] ${String(e).slice(0, 200)} — trec pe urechea Gemini`)
     return transcribeFallbackGemini(audio, opts)
   }
 }

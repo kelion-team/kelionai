@@ -61,4 +61,12 @@ describe('mesajele vizibile userului sunt neutre', () => {
   it('clasificarea 429/402/refusal rămâne DOAR pentru log', () => {
     expect(sursa).toMatch(/console\.error\('\[CHAT ERROR\]'[\s\S]{0,120}isRateLimit/)
   })
+
+  it('eroarea NE-tranzitorie nu mai promite fals că „din nou în câteva secunde" ajută (registrul backend #4) — mesajul rămâne neutru, dar onest', () => {
+    expect(sursa).toMatch(/const eNetranzitorie =/)
+    // cazul măsurat: modelul pensionat (not found) a tăcut zile întregi cu „încearcă din nou"
+    expect(sursa).toMatch(/not.?found/)
+    expect(sursa).toContain('Cererea asta nu a putut fi dusă la capăt')
+    expect(sursa).toContain('This request could not be completed')
+  })
 })

@@ -120,14 +120,18 @@ describe('telemetry', () => {
 const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 
 describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
-  it('ia slot înainte de încercarea creierului', () => {
-    expect(chat).toMatch(/iaSlotDacaLiber\(orchestratorModel\)/)
+  it('ia slot înainte de încercarea creierului — pe modelul EFECTIV (escaladarea ask_brain mută rundele pe alt model; slotul trebuie să-l urmeze, registrul backend #1)', () => {
+    expect(chat).toMatch(/const modelEfectiv = \(\): string => escaladare\.model \|\| orchestratorModel/)
+    expect(chat).toMatch(/const modelIncercare = modelEfectiv\(\)/)
+    expect(chat).toMatch(/iaSlotDacaLiber\(modelIncercare\)/)
   })
   it('eliberează slotul pe orice drum (finally)', () => {
     expect(chat).toMatch(/finally \{\s*elibereazaSlot\(slotTinut\)/)
   })
-  it('coada e consultată când creierul Gemini e ocupat — pe ACELAȘI model, nu pe alt furnizor', () => {
-    expect(chat).toMatch(/asteaptaLaCoada\(async \(\) => \[orchestratorModel\]/)
+  it('coada e consultată când creierul Gemini e ocupat — pe ACELAȘI model efectiv, nu pe alt furnizor', () => {
+    expect(chat).toMatch(/asteaptaLaCoada\(async \(\) => \[modelIncercare\]/)
+    // …și plasa (profund↔rapid) tot pe modelul efectiv își ia slotul.
+    expect(chat).toMatch(/asteaptaLaCoada\(async \(\) => \[modelPlasa\]/)
   })
   it('NICIO rotație pe alt furnizor: pool-ul de candidați și rezerva plătită au dispărut din cod', () => {
     expect(chat).not.toMatch(/listaCandidati|rezervaDeschisa|adaugaLaRezerva|getCatalog|openrouterChat/)
@@ -136,9 +140,23 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
   // Gemini" au fost absorbite de extirparea totală, 3 aug seara: cursa, pool-ul
   // de candidați și punga de rezervă NU MAI EXISTĂ în cod — gardul de mai sus
   // le pinuiează absența, iar reîncercările de mai jos pinuiează noua formă.)
-  it('un răspuns gol sau o eroare se notează (telemetrie) și se reîncearcă pe Gemini', () => {
+  it('un răspuns gol sau o eroare se notează (telemetrie) pe modelul care CHIAR a rulat și se reîncearcă pe Gemini', () => {
     expect(chat).toMatch(/returned empty — reîncercare/)
-    expect(chat).toMatch(/noteazaEsuare\(orchestratorModel\)/)
+    expect(chat).toMatch(/noteazaEsuare\(modelIncercare\)/)
+    // Telemetria nu mai are voie să dea vina pe modelul de PORNIRE.
+    expect(chat).not.toMatch(/noteazaEsuare\(orchestratorModel\)/)
+  })
+  it('profundul epuizat NU se re-încearcă tot pe profund — cade pe o față rapidă REALĂ (a treia treaptă modelRapidDirect pe turele grele, unde plasa veche era moartă)', () => {
+    expect(chat).toMatch(/modelEfectiv\(\) === profund/)
+    expect(chat).toMatch(/PROFUNDUL EPUIZAT/)
+    expect(chat).toMatch(/orchestratorModel !== profund \? orchestratorModel : modelRapidDirect\(\)/)
+  })
+  it('fapta deja executată oprește orice reluare completă a turei (registrul backend #2) — și bucla, și plasele', () => {
+    expect(chat).toMatch(/let faptaInIncercareEsuata = false/)
+    expect(chat).toMatch(/const unelteLaStart = unelteIncercate\.length/)
+    // ambele plase citesc flag-ul
+    const plaseGardate = chat.match(/!faptaInIncercareEsuata/g) ?? []
+    expect(plaseGardate.length).toBeGreaterThanOrEqual(2)
   })
   it('la epuizarea încercărilor tura se încheie ONEST (mesajul neutru din catch), nu pe alt creier', () => {
     expect(chat).toMatch(/brain_gemini_exhausted/)

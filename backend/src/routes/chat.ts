@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { config, roleFor } from '../config.js'
+import { config, roleFor, modelRapidDirect } from '../config.js'
 import type {
   Tool,
   MessageParam,
@@ -3502,16 +3502,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // o cursă nu mai e cursă — calea secvențială de mai jos e ACELAȘI creier
       // Gemini, cu unelte. services/cursa.ts a fost șters.)
       const MAX_INCERCARI_GEMINI = 3
+      // MODELUL EFECTIV al rundelor (registrul backend #1): `ask_brain` poate urca
+      // tura LA MIJLOC prin `escaladare`, iar orchestratorul citește
+      // `escaladare.model` pe FIECARE rundă — deci sloturile, telemetria eșecurilor
+      // și plasele trebuie să vorbească despre modelul care CHIAR rulează, nu
+      // despre cel de pornire (înainte: slotul se ținea pe flash cât rundele
+      // loveau profundul nepăzit, iar plasa „urc la profund" re-încerca exact
+      // modelul care tocmai murise).
+      const modelEfectiv = (): string => escaladare.model || orchestratorModel
+      // REGISTRUL BACKEND #2 — FĂRĂ RE-EXECUȚIA UNELTELOR: o „reîncercare" e
+      // runBrainOnce DE LA ZERO — dacă încercarea eșuată a apucat să CHEME unelte
+      // (email, ordin de build, bani), reluarea le-ar executa A DOUA oară.
+      // Odată armat, nici bucla, nici plasele nu mai reiau — tura iese pe drumul
+      // onest de jos, cu faptele o singură dată.
+      let faptaInIncercareEsuata = false
       let slotTinut: string | null = null
       try {
         for (let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt++) {
-          // Take a slot on the Gemini model; if it's busy, wait in the
+          // Take a slot on the EFFECTIVE Gemini model; if it's busy, wait in the
           // dispatcher's queue for a slot on the SAME model.
-          if (!iaSlotDacaLiber(orchestratorModel)) {
-            const tinut = await asteaptaLaCoada(async () => [orchestratorModel], new Set<string>())
+          const modelIncercare = modelEfectiv()
+          const unelteLaStart = unelteIncercate.length
+          if (!iaSlotDacaLiber(modelIncercare)) {
+            const tinut = await asteaptaLaCoada(async () => [modelIncercare], new Set<string>())
             if (!tinut) break // queue full or waited too long — the honest error below
           }
-          slotTinut = orchestratorModel
+          slotTinut = modelIncercare
           try {
             const cand = await runBrainOnce()
             // A reply made ONLY of fake tool markup counts as EMPTY — retry
@@ -3525,8 +3541,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             // e marfă stricată: NU pleacă la om — rotim, ca la răspunsul gol.
             // Doar dacă nu a curs deja text (streaming) — ce-a plecat, a plecat.
             if (!textFlowed && textCurat && neagaUneltele(textCurat)) {
-              console.error(`[CHAT NEGARE] ${orchestratorModel} și-a negat uneltele — nu trimit minciuna, reîncerc`)
-              noteazaEsuare(orchestratorModel)
+              console.error(`[CHAT NEGARE] ${modelIncercare} și-a negat uneltele — nu trimit minciuna, reîncerc`)
+              noteazaEsuare(modelIncercare)
             } else if (!textFlowed && textCurat && deflecteazaConstructor(textCurat) && !aAlocatConstructie(new Set(cand.toolsCalled))) {
               // GARDUL ANTI-DEFLECTARE (Adrian, 5 aug: „kelion nu alocă
               // constructorului cererile — spune că echipa de dezvoltare repară.
@@ -3534,28 +3550,35 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
               // constructorul. Dacă amână spre o „echipă" FĂRĂ să fi chemat o
               // unealtă de construcție, e marfă stricată: aruncă + reîncearcă
               // (promptul deja îi spune să construiască; codul îl forțează).
-              console.error(`[CHAT DEFLECTARE] ${orchestratorModel} a amânat spre o „echipă" inexistentă fără să aloce la constructor — reîncerc`)
-              noteazaEsuare(orchestratorModel)
+              console.error(`[CHAT DEFLECTARE] ${modelIncercare} a amânat spre o „echipă" inexistentă fără să aloce la constructor — reîncerc`)
+              noteazaEsuare(modelIncercare)
             } else if (textCurat || textFlowed || sawVisible) { r = cand; break }
-            console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
-            noteazaEsuare(orchestratorModel)
+            console.error(`[CHAT MUTE] ${modelIncercare} returned empty — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
+            noteazaEsuare(modelIncercare)
           } catch (ge) {
             lastBrainErr = ge
             if (textFlowed) throw ge // partial text already at the user — no retry
             const errMsg = String(ge)
             const is503OrHighDemand = errMsg.includes('503') || /high demand/i.test(errMsg) || /UNAVAILABLE/i.test(errMsg)
-            if (attempt + 1 < MAX_INCERCARI_GEMINI) {
-              console.warn(`[brain] ${orchestratorModel} failed (${errMsg.slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
+            const potiRelua = attempt + 1 < MAX_INCERCARI_GEMINI && unelteIncercate.length === unelteLaStart
+            if (potiRelua) {
+              console.warn(`[brain] ${modelIncercare} failed (${errMsg.slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
               const basePauza = is503OrHighDemand ? 1000 : 800
               const pauzaMs = Math.min(basePauza * Math.pow(2, attempt) + Math.floor(Math.random() * 400), 3000)
               await new Promise((res) => setTimeout(res, pauzaMs))
             } else {
-              console.error(`[brain] ${orchestratorModel} failed (${errMsg.slice(0, 120)}) — încercări epuizate (${MAX_INCERCARI_GEMINI}/${MAX_INCERCARI_GEMINI})`)
+              console.error(`[brain] ${modelIncercare} failed (${errMsg.slice(0, 120)}) — ${unelteIncercate.length > unelteLaStart ? `${unelteIncercate.length - unelteLaStart} unelte deja chemate în încercarea asta: NU reiau (efectele s-ar dubla)` : `încercări epuizate (${MAX_INCERCARI_GEMINI}/${MAX_INCERCARI_GEMINI})`}`)
             }
-            noteazaEsuare(orchestratorModel)
+            noteazaEsuare(modelIncercare)
           } finally {
             elibereazaSlot(slotTinut)
             slotTinut = null
+          }
+          // Fapte deja făcute în încercarea eșuată → gata cu reluările (vezi
+          // declarația faptaInIncercareEsuata de sus). Plasele citesc flag-ul.
+          if (!r && unelteIncercate.length > unelteLaStart) {
+            faptaInIncercareEsuata = true
+            break
           }
         }
       } finally {
@@ -3575,8 +3598,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       const incearcaPlasa = async (): Promise<void> => {
         let slotPlasa: string | null = null
         try {
-          if (iaSlotDacaLiber(orchestratorModel)) slotPlasa = orchestratorModel
-          else if (await asteaptaLaCoada(async () => [orchestratorModel], new Set<string>())) slotPlasa = orchestratorModel
+          // Slotul pe modelul EFECTIV (plasele golesc escaladarea înainte să mă
+          // cheme, deci de regulă e chiar orchestratorModel — dar regula rămâne una).
+          const modelPlasa = modelEfectiv()
+          if (iaSlotDacaLiber(modelPlasa)) slotPlasa = modelPlasa
+          else if (await asteaptaLaCoada(async () => [modelPlasa], new Set<string>())) slotPlasa = modelPlasa
           if (slotPlasa) {
             const cand = await runBrainOnce()
             const textCurat = stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim()
@@ -3588,7 +3614,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (slotPlasa) elibereazaSlot(slotPlasa)
         }
       }
-if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
+if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !== orchestratorModel) {
         const modelProfund = orchestratorModel
         orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
         escaladare.model = undefined // golim escaladarea, ca rezerva rapidă să câștige (altfel ar reurca la greu)
@@ -3605,11 +3631,34 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // mers (unelte multe, context mare) murea fără să fi atins vreodată
       // inteligența reală. Urcăm O SINGURĂ dată, doar pe calea deja pierdută
       // (!r && !textFlowed) — o tură care mergea nu poate fi stricată de plasă. */
-      if (!r && !textFlowed && config.modelCreierProfund && orchestratorModel === orChatModel) {
-        const modelRapid = orchestratorModel
+      if (!r && !textFlowed && !faptaInIncercareEsuata && config.modelCreierProfund && orchestratorModel === orChatModel) {
         const profund = `google-direct/${config.modelCreierProfund}`
-        if (profund !== modelRapid) {
+        if (modelEfectiv() === profund) {
+          // REGISTRUL BACKEND #1 + #3: tura a rulat DEJA pe profund și a murit
+          // acolo — fie a pornit GREA (orChatModel e chiar profundul: pe turele
+          // grele work = modelUnic = modelCreierProfund, deci plasa veche
+          // „profund !== modelRapid" era MOARTĂ — același string, nicio plasă,
+          // mesajul neutru), fie a URCAT prin `ask_brain` și sinteza a picat pe
+          // profund. „Urc pe creierul profund" ar re-încerca exact modelul care
+          // tocmai a picat, cu un log care minte. Sensul cinstit rămas: golim
+          // escaladarea și cădem O dată pe o FAȚĂ RAPIDĂ REALĂ — modelul rapid
+          // al turei dacă e altul decât profundul, altfel a treia treaptă:
+          // modelRapidDirect() (fața rapidă a sistemului).
+          const rapidReal = orchestratorModel !== profund ? orchestratorModel : modelRapidDirect()
+          if (rapidReal !== profund) {
+            orchestratorModel = rapidReal // runBrainOnce + reasoning citesc valoarea nouă
+            escaladare.model = undefined
+            escaladare.reasoning = undefined
+            console.error(`[PROFUNDUL EPUIZAT] ${profund} a picat → cad pe fața rapidă ${rapidReal}`)
+            await incearcaPlasa()
+          }
+        } else if (profund !== orchestratorModel) {
+          const modelRapid = orchestratorModel
           orchestratorModel = profund // runBrainOnce + reasoning citesc valoarea nouă
+          // Golim escaladarea: un `escaladare.model` rămas (alt model greu) ar
+          // câștiga în orchestrator peste `profund` și logul de mai jos ar minți.
+          escaladare.model = undefined
+          escaladare.reasoning = undefined
           console.error(`[FAȚA RAPIDĂ EPUIZATĂ] ${modelRapid} a întors gol/eroare de ${MAX_INCERCARI_GEMINI}× → urc pe creierul profund ${orchestratorModel}`)
           await incearcaPlasa()
         }
@@ -3795,13 +3844,29 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // dacă textul deja a curs, sufixul se SEPARĂ de el (nu se lipește în
       // aceeași propoziție) și spune cinstit că s-a întrerupt — iar istoricul
       // salvează ecranul ÎNTREG (parțial + notă), nu doar sufixul.
+      // REGISTRUL BACKEND #4 — MESAJ ONEST PE EROARE NE-TRANZITORIE: „Încearcă
+      // din nou în câteva secunde" promite că repetarea ajută — minte când cauza
+      // NU trece de la sine (cerere refuzată/nevalidă, cheie/permisiune, model
+      // inexistent — cazul măsurat: modelul pensionat care a tăcut ZILE întregi
+      // tot cu „încearcă din nou"). Clasificarea rămâne DOAR pe server (regula
+      // din 1 aug: userul nu citește despre modele/cote/bani) — omul primește
+      // tot un mesaj neutru, dar unul care nu-l minte cu falsă speranță.
+      const eNetranzitorie =
+        !isRateLimit &&
+        (isRefusal ||
+          /invalid.?argument|permission.?denied|api.?key|failed.?precondition|not.?found|unsupported|safety|prohibited|blocklist/.test(low) ||
+          /\b40[034]\b/.test(low))
       let spoken = ecranPartial.trim()
         ? (ro
             ? '\n\n[Răspunsul s-a întrerupt aici — cere-mi să continui.]'
             : '\n\n[The reply was cut off here — ask me to continue.]')
-        : ro
-          ? 'Încearcă din nou în câteva secunde.'
-          : 'Try again in a few seconds.'
+        : eNetranzitorie
+          ? (ro
+              ? 'Cererea asta nu a putut fi dusă la capăt — repetată neschimbată, ar pica la fel. Reformuleaz-o sau cere altceva.'
+              : 'This request could not be completed — retried unchanged it would fail the same way. Rephrase it or ask for something else.')
+          : ro
+            ? 'Încearcă din nou în câteva secunde.'
+            : 'Try again in a few seconds.'
       // CREDITUL MORT SPUS PE FAȚĂ, DOAR ADMINULUI (9 aug, capturile ownerului:
       // sold AI Studio −£1.32, card refuzat la auto-reîncărcare — iar Kelion
       // inventa scuze („nu ești logat ca admin") peste turele care mureau pe
