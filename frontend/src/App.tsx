@@ -20,7 +20,6 @@ import {
 import { watchdogInit } from './lib/watchdog'
 import { ConsimtamantFoto } from './components/ConsimtamantFoto'
 import { BannerOffline } from './components/BannerOffline'
-import { StatusOffline } from './components/StatusOffline'
 import { citesteConsimtamant, scrieConsimtamant, type StareConsimtamant } from './lib/consimtamant'
 import { isCalm } from './lib/activity'
 import { uiStrings } from './lib/i18n'
@@ -161,7 +160,6 @@ export default function App() {
   return (
     <>
       <BannerOffline />
-      <StatusOffline />
       {updateNou && (
         <div
           role="status"

@@ -226,11 +226,13 @@ export default function ChatPanel({
         // când chiar pierzi semnalul (efectul de mai jos).
         await sincronizeazaStareOffline()
         if (anulat || stareCreierLocal().stare === 'descarcat') return
-        // Nu e în cache → PRIMA descărcare, doar pe net decent (nu ardem date mobile).
-        // Sărim doar 2G/3G/economie (getTeava 'slab'/'mediu'); Wi‑Fi/4G+ și „necunoscut"
-        // (desktop/iOS) descarcă.
-        const tv = getTeava()
-        if (!esteConectat() || tv === 'slab' || tv === 'mediu') return
+        // ORDINUL owner-ului (21 aug, „finalizare"): „se analizează automat dacă
+        // versiunea locală are diferențe în minus față de cea care se downloadează;
+        // dacă da, se auto-downloadează. Procesul se face AUTOMAT, nu se mai afișează
+        // deloc." Analiza = sincronizarea de mai sus (model lipsă/diferit/parțial);
+        // descărcarea pornește pe ORICE net (poarta de „doar țeavă bună" scoasă la
+        // ordin), fără niciun element de interfață — bara StatusOffline a fost scoasă.
+        if (!esteConectat()) return
         void pregatesteModelOffline()
       })()
     }, 8000)
