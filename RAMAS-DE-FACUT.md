@@ -65,12 +65,18 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
             `CHEI_OFFLINE_PERSISTENTE` supraviețuiesc publicării — răspunde direct
             „verifică când e un model descărcat… la fiecare update nu trebuie descărcate
             din nou"). Verificat de 3+3 agenți (2 buguri reale prinse+reparate).
-      - [ ] **M5 — văzul offline** (model de viziune local „descrie scena",
-            transformers.js image-to-text; `@vladmandic/face-api` există) — DE FĂCUT,
-            ultima piesă din Faza 1.
-      NU MERGE ÎNCĂ / de făcut (după M5): **APK/native offline (Capacitor)** — schela se
-      poate genera aici, dar build-ul cere Android SDK (neconfigurat în CI → runner dedicat
-      sau mașina ownerului); test complet mod-avion pe device (WebGPU/mic/cameră = doar owner).
+      - [x] **M5 — văzul offline** LIVE (`v=e88e4d2`, ver 5.5, PR #1313,
+            `at=2026-08-21T13:05:03Z`): model local de captioning (Xenova/vit-gpt2,
+            transformers.js/WASM) descrie scena din cameră OFFLINE; legenda intră în
+            contextul creierului local (câmp `vede`), Kelion o menționează ca un om.
+            Rulează în fundal (~8s), doar offline + camera pornită, zero latență pe tură,
+            cinstit (fără cadru/OffscreenCanvas → gol). Card „👁 Văzul" în manager.
+            Verificat de 3 agenți (3×PASS). Cache-ul (`transformers-cache`) supraviețuiește
+            update-urilor ca și urechea.
+      **CELE 3 SIMȚURI OFFLINE SUNT GATA + LIVE: vorbește (M3) + aude (M4) + vede (M5).**
+      NU MERGE ÎNCĂ / de făcut: **APK/native offline (Capacitor)** — schela se poate genera
+      aici, dar build-ul cere Android SDK (neconfigurat în CI → runner dedicat sau mașina
+      ownerului); + testul owner pe device (WebGPU/mic/cameră/mod-avion = doar pe telefonul lui).
 - [ ] DEVIN = constructorul extern (owner 20 aug: „punel pe devin cu cheie" + „b").
       CONSTRUIT ÎN COD (pe branch, verificat: tsc 0, suită 1867, 5 porți verzi):
       client `services/devin.ts` (sesiune cu plafon `max_acu_limit` + stare/ACU
