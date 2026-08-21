@@ -58,6 +58,7 @@ import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 import { esteConectat, useConectat, verificaConexiuneReala } from '../lib/conexiune'
+import { vorbesteOffline } from '../lib/voceOffline'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline, incalzesteCodOffline } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
 import {
@@ -1295,10 +1296,14 @@ export default function ChatPanel({
         if (msg) adaugaTuraSync({ rol: 'user', text: msg, t: acum, lat, lon })
         if (acc.trim()) adaugaTuraSync({ rol: 'assistant', text: acc, t: acum })
         if (msg && necesitaNet(msg)) adaugaAmanata({ intrebare: msg, t: acum, lat, lon })
+        // GURA OFFLINE (Faza 1 · M3): Kelion VORBEȘTE răspunsul fără net, prin TTS
+        // local (Web Speech `speechSynthesis` — offline, gratis, zero descărcare),
+        // reconstruit curat după teardown. Doar dacă tura NU a fost înlocuită/anulată
+        // între timp (o singură gură). No-op cinstit dacă browserul n-are TTS.
+        if (acc.trim() && !ac.signal.aborted && abortRef.current === ac) {
+          vorbesteOffline(acc, resolveLang(replyLang))
+        }
       }
-      // VOCE SCOASĂ (21 aug clean-slate): gura de siguranță offline (vocea browserului
-      // SpeechSynthesis) a fost eliminată — offline-ul răspunde DOAR ca text (creierul
-      // TEXT local rămâne intact); nu mai există nicio ieșire audio pe calea vocală.
     } catch (err) {
       // A REPLACED TURN MAY NO LONGER WRITE (Adrian, Jul 31: "it hears the second
       // question, briefly shows it, but doesn't pass it on" + "the message that technically

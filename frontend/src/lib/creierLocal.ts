@@ -143,6 +143,48 @@ export function setModelOffline(id: string): void {
   stare = citesteDescarcate().has(id) ? 'descarcat' : 'neintrodus'
 }
 
+/** Owner ȘTERGE un model descărcat (owner 21 aug: „să pot da jos modelul care nu-mi
+ *  place"). Îl scoate din setul de descărcate ȘI îi șterge fișierele din cache-ul
+ *  browserului (ELIBEREAZĂ spațiul — gigabytes). Dacă era ACTIV: coboară motorul din
+ *  GPU și trece pe alt model descărcat, ori pe implicit. Best-effort pe cache. */
+export async function stergeModelOffline(id: string): Promise<void> {
+  if (!IDURI_VALIDE.has(id)) return
+  // 1) Scoate din setul de descărcate (persistat).
+  const s = citesteDescarcate()
+  s.delete(id)
+  try {
+    localStorage.setItem(CHEIE_MODELE_DESCARCATE, JSON.stringify([...s]))
+    if (localStorage.getItem(CHEIE_DESCARCAT_VECHE) === id) localStorage.removeItem(CHEIE_DESCARCAT_VECHE)
+  } catch {
+    /* storage indisponibil */
+  }
+  // 2) Dacă era ACTIV, coboară motorul și mută activul pe alt descărcat sau pe implicit.
+  if (getModelOffline() === id) {
+    genModel++
+    void motor?.unload?.()
+    motor = null
+    progres = 0
+    motivEroare = ''
+    const alt = [...s][0] ?? MODEL_IMPLICIT
+    try {
+      localStorage.setItem(CHEIE_MODEL_ACTIV, alt)
+    } catch {
+      /* storage indisponibil */
+    }
+    stare = s.has(alt) ? 'descarcat' : 'neintrodus'
+  }
+  // 3) Șterge fișierele din Cache Storage (eliberează spațiul real). Best-effort:
+  //    dacă nu se poate, setul e deja curat, iar WebLLM revalidează la o re-descărcare.
+  try {
+    const webllm = await import('@mlc-ai/web-llm')
+    const del = (webllm as unknown as { deleteModelAllInfoInCache?: (id: string) => Promise<void> })
+      .deleteModelAllInfoInCache
+    if (del) await del(id)
+  } catch {
+    /* cache-ul nu s-a putut atinge — spațiul se eliberează la evacuare/re-descărcare */
+  }
+}
+
 // Optimist la pornire: dacă flag-ul spune că EXACT modelul curent a fost descărcat,
 // pornim pe 'descarcat' (nu mai cerem descărcare). Se confirmă din Cache Storage prin
 // sincronizeazaStareOffline(). Flag pe alt model = s-a schimbat → 'neintrodus' → auto-ia.
@@ -293,14 +335,17 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
           onProgress?.(progres)
         },
       })) as unknown as typeof motor
-      marcheazaDescarcat(idTinta) // chiar s-a descărcat — rămâne în cache (util și dacă owner a comutat)
       if (genModel !== genTinta) {
-        // owner a comutat pe alt model între timp → NU punem motorul ăsta ca activ;
-        // eliberăm memoria GPU a motorului stăl (altfel rămânea încărcat degeaba).
+        // owner a COMUTAT sau a ȘTERS modelul între timp (ambele cresc genModel) → NU
+        // punem motorul ăsta ca activ ȘI NU-l marcăm descărcat. Marcarea `marcheazaDescarcat`
+        // era ÎNAINTE de gardă și RE-ADĂUGA în set un model tocmai șters (cursa prinsă de
+        // agent) — acum e DUPĂ gardă, deci un „Șterge" în timpul descărcării câștigă.
+        // Eliberăm memoria GPU a motorului stăl (altfel rămânea încărcat degeaba).
         void eng?.unload?.()
         stare = citesteDescarcate().has(getModelOffline()) ? 'descarcat' : 'neintrodus'
         return false
       }
+      marcheazaDescarcat(idTinta) // s-a descărcat ȘI e încă modelul curent (negșters) → marcăm
       motor = eng
       stare = 'gata'
       progres = 1
