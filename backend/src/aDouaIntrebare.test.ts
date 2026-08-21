@@ -48,8 +48,10 @@ describe('abortul nu mai e confundat cu o pană de rețea', () => {
     // ULTIMA bulă user cu textul reluat.
     expect(panou).not.toContain('cur.slice(0, -2)')
     expect(panou).toMatch(/retryEroareTsRef\.current = tsEroare/)
-    expect(panou).toMatch(/mm\.role === 'assistant' && mm\.ts === tsEroare/)
-    expect(panou).toMatch(/faraEroare\[i\]\.role === 'user' && faraEroare\[i\]\.content === retry/)
+    // ambele bule pe TS (nu pe conținut — turele cu documente diferă), ambele coduri
+    expect(panou).toMatch(/retryUserTsRef\.current = userTs/)
+    expect(panou).toMatch(/mm\.role === 'assistant' && tsEroare !== null && mm\.ts === tsEroare/)
+    expect(panou).toMatch(/mm\.role === 'user' && tsUser !== null && mm\.ts === tsUser/)
     expect(panou).toMatch(/if \(code === 'offline'\)/)
   })
 })

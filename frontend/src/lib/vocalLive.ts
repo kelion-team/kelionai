@@ -810,8 +810,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       }
     } else if (eraPoarta && !vadPornit) {
       // Poarta tocmai s-a ridicat pe calea FĂRĂ VAD (kelion_vad='0'): golim
-      // inelul aici (cu VAD, golirea se face la închis→deschis, mai jos).
-      for (const b of preRoll) trimiteCadru(b)
+      // inelul aici (cu VAD, golirea se face la închis→deschis, mai jos) —
+      // DAR doar dacă inelul chiar pare să conțină VOCE. Pe mobil AEC-ul e
+      // OPRIT (echoCancellation: !eMobil) și fără gardul ăsta coada de ecou a
+      // lui Kelion din difuzor ar pleca la model la FIECARE sfârșit de tură
+      // (agentul lotului C). Vocea care întrerupe e tare (peste difuzor);
+      // ecoul rezidual/tăcerea rămân sub prag și inelul se aruncă.
+      // hardcod-permis: prag tehnic client (RMS) al inelului de barge-in, nu valoare afișată/tarifată
+      const PRAG_RMS_PREROLL = 0.02
+      const areVoce = preRoll.some((b) => rmsDin(b) >= PRAG_RMS_PREROLL)
+      if (areVoce) for (const b of preRoll) trimiteCadru(b)
       preRoll.length = 0
       preRollMs = 0
     }
@@ -846,7 +854,11 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   if (!cules) {
     console.warn('[vocalLive] AudioWorklet indisponibil — cad pe ScriptProcessor (deprecat, dar merge)')
     proc = ctxIn.createScriptProcessor(4096, 1, 1)
-    proc.onaudioprocess = (ev: AudioProcessingEvent): void => laCadru(ev.inputBuffer.getChannelData(0))
+    // .slice() la SURSĂ (agentul lotului C): browserul REFOLOSEȘTE bufferul
+    // canalului între evenimente, iar downsample îl întoarce CA ATARE la 16 kHz —
+    // fără copie, cadrele reținute (pre-roll, inelul de barge-in) se suprascriau
+    // până la trimitere (audio corupt). Un singur punct repară ambele căi.
+    proc.onaudioprocess = (ev: AudioProcessingEvent): void => laCadru(ev.inputBuffer.getChannelData(0).slice())
     sursa.connect(proc)
     proc.connect(ctxIn.destination) // necesar ca onaudioprocess să ruleze în unele browsere
   }

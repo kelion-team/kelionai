@@ -577,11 +577,14 @@ export default function ChatPanel({
   // the browser regains connectivity. retryTextRef holds the message to re-send.
   const offlineRef = useRef(false)
   const retryTextRef = useRef<string | null>(null)
-  // Timestamp-ul bulei de eroare a turei picate offline — ca la revenirea online
-  // să ștergem EXACT bula aia + bula user reluată, nu orbește „ultimele două"
+  // Timestamp-urile bulelor turei picate offline (eroarea + bula user) — ca la
+  // revenirea online să ștergem EXACT bulele alea, nu orbește „ultimele două"
   // (registrul frontend, lot C: între cădere și revenire pot intra alte bule —
   // transcript vocal, {ignored}, altă întrebare — și slice(0,-2) le rupea pe alea).
+  // Bula user pe TS, nu pe conținut: la turele cu documente conținutul bulei
+  // (docBlock+msg) diferă de textul reluat (agentul lotului C, marginea 1).
   const retryEroareTsRef = useRef<number | null>(null)
+  const retryUserTsRef = useRef<number | null>(null)
   // THE HONEST CONNECTION VERDICT (Adrian, 2 aug: „raportează fals că pierde
   // conexiunea la net"). 'server_down' resumes on a health poll (the browser's
   // 'online' event never fires — the net was never down); 'transient' gets ONE
@@ -1523,9 +1526,16 @@ export default function ChatPanel({
       let ultimulYield = performance.now()
       const flushMesaje = (): void => {
         setMessages((cur) => {
-          const base = cur.length >= next.length && cur.slice(0, next.length).every((m, i) => m === next[i]) ? cur : next
+          // Compară pe (rol, ts), NU pe identitatea obiectului (agentul lotului C):
+          // {heard} umple bula userului IN-PLACE (obiect NOU, același ts) — pe
+          // identitate, comparația pica fix pe poziția aia, „base" cădea pe next
+          // și flush-ul REVERTEA transcriptul confirmat la substituentul gol
+          // (C5 murea la milisecunde după ce se năștea). Când base = cur, prefixul
+          // păstrat e AL LUI cur (cu editările in-place), nu al lui next.
+          const aceeasi = (a: { role: string; ts?: number }, b: { role: string; ts?: number }): boolean => a.role === b.role && a.ts === b.ts
+          const base = cur.length >= next.length && cur.slice(0, next.length).every((m, i) => aceeasi(m, next[i])) ? cur : next
           const rest = base.slice(next.length).filter((m) => !(m.role === 'assistant' && m.ts === turnTs))
-          return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
+          return [...base.slice(0, next.length), ...rest, { role: 'assistant', content: acc, ts: turnTs }]
         })
       }
       // COMUTAREA OFFLINE (mod companion, faza 1): fără net REAL → răspunsul vine
@@ -1608,7 +1618,11 @@ export default function ChatPanel({
           await new Promise<void>((resolve) => setTimeout(resolve, 0))
         }
       }
-      flushMesaje() // FLUSH FINAL — garantează conținutul complet al răspunsului
+      // FLUSH FINAL — garantează conținutul complet al răspunsului. DOAR dacă a
+      // curs text: pe o tură {ignored}/goală n-are ce garanta, iar rescrierea
+      // ar RESUSCITA bulele șterse de {ignored} (bula păstrată de C5 trăia doar
+      // până aici — constatarea agentului lotului C).
+      if (acc.trim()) flushMesaje()
       // The LAST piece of the reply (it may end without a terminator) — the
       // mouth says it too, then nothing is left unsaid.
       if (mouth && speechBuf.trim()) {
@@ -1626,14 +1640,16 @@ export default function ChatPanel({
       // de control + niciun sunet = tura a murit fără nicio urmă — omul rămânea
       // cu întrebarea în aer, fără să știe dacă a fost măcar primită. Rând onest.
       if (!acc.trim()) {
+        // FUNCȚIONAL și ȚINTIT pe ambele ramuri (agentul lotului C): vechiul
+        // `setMessages(next)` era un instantaneu care ștergea tot ce apăruse
+        // între timp — inclusiv bula confirmată păstrată de {ignored} (C5) și
+        // transcriptul pus de {heard}. Singurul lucru de curățat e bula
+        // assistant GOALĂ a turei (ts=turnTs) — restul stării rămâne cum e.
+        const faraAsistentGol = (cur: typeof next): typeof next =>
+          cur.filter((mm) => !(mm.role === 'assistant' && mm.ts === turnTs && !mm.content.trim()))
         if (!eTuraOffline && !turaAvutSemneRef.current && !aSunatTuraRef.current) {
-          // FUNCȚIONAL, nu instantaneu (lacătul aDouaIntrebare): o scriere-listă
-          // ar șterge mesajele sosite între timp — exact bugul păzit acolo.
-          setMessages((cur) => {
-            const baza = cur.length >= next.length && cur.slice(0, next.length).every((mm, i) => mm === next[i]) ? cur : next
-            return [...baza, { role: 'assistant', content: `⚠️ ${strings(lang).turnEmpty}`, ts: Date.now() }]
-          })
-        } else setMessages(next)
+          setMessages((cur) => [...faraAsistentGol(cur), { role: 'assistant', content: `⚠️ ${strings(lang).turnEmpty}`, ts: Date.now() }])
+        } else setMessages((cur) => faraAsistentGol(cur))
       }
       else suggestFacial(acc) // the face follows the tone of the finished reply
       // FAZA 3 — COZILE OFFLINE: dacă tura a fost fără net, o punem în coada de
@@ -1747,8 +1763,14 @@ export default function ChatPanel({
           offlineRef.current = true
           retryTextRef.current = msg // resume THIS message when the signal returns
           retryEroareTsRef.current = tsEroare // ștergerea ȚINTITĂ la revenire (nu slice orb)
+          retryUserTsRef.current = userTs // bula user se șterge pe TS (conținutul poate diferi — ex. turele cu documente)
         }
         if (code === 'server_down') {
+          // Aceeași pereche de ts-uri și aici (agentul lotului C, marginea 2):
+          // altfel secvența offline→server_down lăsa ts-ul VECHI de eroare și
+          // revenirea ștergea bula de eroare veche + bula user a textului nou.
+          retryEroareTsRef.current = tsEroare
+          retryUserTsRef.current = userTs
           // The 'online' browser event will never fire — the net was never
           // down. We poll OUR server's health (5s, max 2 min — a deploy takes
           // ~30-60s) and resume the SAME message the moment it answers.
@@ -2768,21 +2790,21 @@ export default function ChatPanel({
       retryTextRef.current = null
       const tsEroare = retryEroareTsRef.current
       retryEroareTsRef.current = null
+      const tsUser = retryUserTsRef.current
+      retryUserTsRef.current = null
       if (retry) {
         // Resume from where we were cut off: drop EXACT the failed turn's error
-        // bubble (by its recorded ts) + the LAST user bubble carrying the retried
-        // text, then re-send. NOT slice(0,-2): bubbles that arrived between the
-        // failure and the recovery (voice transcript, another question) must
-        // survive (registrul frontend, lot C).
-        setMessages((cur) => {
-          const faraEroare = tsEroare === null ? cur : cur.filter((mm) => !(mm.role === 'assistant' && mm.ts === tsEroare))
-          for (let i = faraEroare.length - 1; i >= 0; i--) {
-            if (faraEroare[i].role === 'user' && faraEroare[i].content === retry) {
-              return [...faraEroare.slice(0, i), ...faraEroare.slice(i + 1)]
-            }
-          }
-          return faraEroare
-        })
+        // bubble + its user bubble (both by their recorded ts), then re-send.
+        // NOT slice(0,-2): bubbles that arrived between the failure and the
+        // recovery (voice transcript, another question) must survive; and the
+        // user bubble goes by TS, not content (document turns differ).
+        setMessages((cur) =>
+          cur.filter(
+            (mm) =>
+              !(mm.role === 'assistant' && tsEroare !== null && mm.ts === tsEroare) &&
+              !(mm.role === 'user' && tsUser !== null && mm.ts === tsUser),
+          ),
+        )
         window.setTimeout(() => void sendRef.current(retry), 400)
       }
     }
