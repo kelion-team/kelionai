@@ -678,6 +678,16 @@ export default function ChatPanel({
       // (n-are speak(text)). Deci Chirp (c.audio) e singura gură — ȘI scris ȘI voce. Vechea
       // gardă îl tăcea pe voce → TĂCERE. Realtime OpenAI (isRealtime) chiar rostește textul → refuzăm Chirp.
       if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
+      // JARVIS pasul 1 (§2): cât sesiunea LIVE e VIE, gura e a EI — un singur motor.
+      // Turele scrise merg deja PRIN Live (send() → trimiteText → vocea lui); ce mai
+      // ajunge aici cât Live trăiește (tură cu atașament, re-trimitere) rămâne VIZUAL
+      // (monitor/bandă), nu se redă peste vocea Live → coliziunea „2 sec și se rupe"
+      // nu mai are nicio sursă. Marcăm „a sunat" ca gura de siguranță să NU devină
+      // ea a doua voce. Fără Live (vlRef null), Chirp rămâne gura turelor — neatins.
+      if (vlRef.current) {
+        aSunatTuraRef.current = true
+        return
+      }
       // Chirp cere focus ȘI întrerupe Live mereu (turaScrisa:true) → o singură voce.
       if (!requestTtsFocus({ turaScrisa: true })) return
       contorGata('primul sunet (gura a pornit)')
@@ -1287,6 +1297,24 @@ export default function ChatPanel({
       // vorbește, Chirp-ul turei noi se suprapunea peste vocea LIVE (owner, 20 aug:
       // „voci paralele… o singură ieșire audio"). O gură nouă închide celelalte guri.
       interruptAll('tura-noua-peste-live')
+    }
+    // ── JARVIS pasul 1 (PROIECT-CHAT-VOCE §2 + §10): UN SINGUR MOTOR online ────
+    // Cât sesiunea LIVE e vie, tura SCRISĂ fără atașamente NU mai trece prin
+    // /api/chat (care sintetiza Chirp → a doua gură → coliziunea măsurată „2 sec
+    // și se rupe"). Rândul scris intră direct ÎN sesiunea Live, iar modelul
+    // răspunde cu VOCEA lui (regula de aur §10: input scris DA, output VOCE).
+    // Turele cu atașamente/imagini rămân pe calea veche (Live nu le ia pe acest
+    // canal); tot ce e vocal e deja în sesiune, nu trece pe aici.
+    if (!spoken && vlRef.current && msg && atts.length === 0 && !pendingAudioRef.current) {
+      if (vlRef.current.trimiteText(msg)) {
+        setInput('')
+        setHeard('')
+        // Ecoul tău rămâne în chat (bula userului); răspunsul vine ca VOCE + banda „K".
+        setMessages((cur) => [...cur, { role: 'user', content: msg, ts: Date.now() }])
+        return
+      }
+      // Socketul Live tocmai a picat → cade CINSTIT pe calea veche de mai jos
+      // (care are plasele ei); onclose-ul sesiunii anunță separat căderea.
     }
     inFlightRef.current = true
     setInput('')

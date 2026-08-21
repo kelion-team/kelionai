@@ -618,6 +618,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             app.log.info(`vocal-live: AEC raportat de browser: ${aecActiv ? 'activ — tăierea la voce armată' : 'INACTIV — tăierea la voce oprită (ecou netratat)'}`)
           } else if (m.type === 'intrerupe') {
             intrerupeTura?.()
+          } else if (m.type === 'text' && typeof (m as { text?: unknown }).text === 'string') {
+            // JARVIS pasul 1 + §10 (tastatura opțională): input SCRIS de la client cât
+            // sesiunea Live e vie → rând de user în sesiune → modelul răspunde cu VOCEA
+            // lui. Așa tura scrisă NU mai trece prin /api/chat → nu se mai sintetizează
+            // Chirp → coliziunea celor două guri („2 sec și se rupe") nu mai are de unde
+            // să apară pe turele scrise. Output-ul rămâne VOCE (regula de aur §10).
+            const textScris = ((m as { text: string }).text || '').trim().slice(0, 4000)
+            if (textScris) live?.anunta(textScris)
           } else if (m.type === 'ping') {
             try {
               socket.send(JSON.stringify({ type: 'pong', t: (m as { t?: unknown }).t ?? Date.now() }))
