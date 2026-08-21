@@ -1349,7 +1349,10 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    tensiune de clasificare de lămurit; (f) în interiorul încercării 1, escaladarea
    la mijloc rulează rundele pe modelul greu cu slotul încă pe modelul de pornire
    (slotul se ia la START de încercare — gol structural mărginit, corectat de la
-   încercarea 2).
+   încercarea 2); (g) `click_monitor` e clasificat DOAR-afișare (UNELTE_AFISAJ),
+   dar chat.ts spune el însuși că apasă ELEMENTE REALE (orice buton, inclusiv din
+   admin) → o reluare îl poate re-apăsa — tensiune de clasificare, de lămurit cu
+   owner-ul (aceeași familie cu (e)).
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

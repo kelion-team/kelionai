@@ -101,7 +101,11 @@ export class ConstructorLogAdapter implements LogScannerAdapter {
  * Funcție PURĂ, testată în selfHealLogPipeline.test.ts.
  */
 export function eEroareDeInfrastructura(mesaj: string): boolean {
-  return /permission[_ ]?denied|\b40[13]\b|\b429\b|unauthori[sz]ed|resource[_ ]?exhausted|rate[- ]?limit|quota|overloaded|high demand|unavailable|\b50[234]\b|econnrefused|enotfound|eai_again|ehostunreach|enetunreach|etimedout|socket hang up|fetch failed|not_found|\b404\b|\[ASR CHIRP CĂZUT\]|\[PROFUNDUL EPUIZAT\]|\[CREIER PROFUND EPUIZAT\]|baz[ăa] de date indisponibil|infrastructur[ăa], nu cod/i.test(mesaj)
+  // `\brate`/`\bquota` cu graniță de cuvânt (re-verificatorul, BLOCANT măsurat):
+  // logul `[CHAT ERROR]` serializează în inel flag-urile {isRateLimit, isQuota}
+  // ca text — fără graniță, ORICE eroare de chat (și un TypeError real de cod)
+  // se potrivea pe „isratelimit"/„isquota" și era stinsă ca „infrastructură".
+  return /permission[_ ]?denied|\b40[13]\b|\b429\b|unauthori[sz]ed|resource[_ ]?exhausted|\brate[- ]?limit|\bquota|overloaded|high demand|unavailable|\b50[234]\b|econnrefused|enotfound|eai_again|ehostunreach|enetunreach|etimedout|socket hang up|fetch failed|not_found|\b404\b|\[ASR CHIRP CĂZUT\]|\[PROFUNDUL EPUIZAT\]|\[CREIER PROFUND EPUIZAT\]|baz[ăa] de date indisponibil|infrastructur[ăa], nu cod/i.test(mesaj)
 }
 
 /**

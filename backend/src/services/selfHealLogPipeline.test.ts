@@ -246,6 +246,15 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
       expect(eEroareDeInfrastructura('Error: fatal pool connection failed')).toBe(false)
       expect(eEroareDeInfrastructura('Unhandled rejection in /api/chat: Database timeout')).toBe(false)
     })
+    it('FORMA REALĂ din inel a [CHAT ERROR] nu e stinsă pe nedrept (blocantul re-verificatorului): flag-urile serializate isRateLimit/isQuota NU sunt „rate limit"/„quota"', () => {
+      // capturaConsole serializează TOATE argumentele console.error — deci fiecare
+      // [CHAT ERROR] din inel conține literal "isRateLimit"/"isQuota". Fără \b,
+      // un TypeError REAL de cod era clasificat infrastructură și nu mai deschidea
+      // niciodată ordin — filtrul orbea vindecarea pe calea principală a chatului.
+      expect(eEroareDeInfrastructura('[CHAT ERROR] TypeError: Cannot read properties of undefined (reading \'map\') {"isRateLimit":false,"isQuota":false,"isRefusal":false}')).toBe(false)
+      // …iar rate-limit-ul REAL (cuvânt întreg) rămâne infrastructură:
+      expect(eEroareDeInfrastructura('[CHAT ERROR] gemini rate limit exceeded {"isRateLimit":true}')).toBe(true)
+    })
     it('un log de server de infrastructură la prag NU deschide ordin — se reține ca evidență', async () => {
       const engine = new SelfHealDecisionEngine()
       const groups = groupLogsByFingerprint([

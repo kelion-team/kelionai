@@ -33,7 +33,8 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       „încearcă din nou" zice; mesajele de eroare doar ro/en; {error} după răspuns
       complet → sufix fals; plasele nu consultă eSanatos; db_query clasificat și
       citire și faptă; slotul încercării 1 rămâne pe modelul de pornire la
-      escaladarea din mijloc. Detalii: AI-HANDOFF §17 pct. 6.
+      escaladarea din mijloc; click_monitor „doar-afișare" dar apasă butoane
+      reale (o reluare îl poate re-apăsa). Detalii: AI-HANDOFF §17 pct. 6.
       **Lot A (descărcare offline invizibilă+automată)**: construit + verificat cu
       3 agenți (FAIL→reparate cele 3 minime; re-verificare PASS cu 7 minore, din
       care reparate pe loc: comentariul „nu consumă rețea", gardul online pe

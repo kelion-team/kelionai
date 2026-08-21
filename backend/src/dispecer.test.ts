@@ -167,6 +167,9 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
     const plaseGardate = chat.match(/!faptaInIncercareEsuata/g) ?? []
     expect(plaseGardate.length).toBeGreaterThanOrEqual(2)
   })
+  it('UNELTE_AFISAJ are EXACT cei 7 membri de afișare (mutantul M2 al re-verificatorului: un nume cu efect strecurat aici — ex. send_email — ar omorî și gardul anti-re-execuție și avertismentul faptei, cu toată suita verde)', () => {
+    expect(chat).toMatch(/const UNELTE_AFISAJ = new Set\(\[\s*'show_document', 'show_on_screen', 'open_app_view',\s*'goleste_monitorul', 'click_monitor', 'zoom_monitor', 'arata_pe_grafic',\s*\]\)/)
+  })
   it('plasele nu ricoșează una în alta (F4): profund→rapid armează plasaRulata, iar plasa oglindită o respectă', () => {
     expect(chat).toMatch(/let plasaRulata = false/)
     expect(chat).toMatch(/plasaRulata = true/)
