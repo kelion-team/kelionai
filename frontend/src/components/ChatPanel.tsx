@@ -382,8 +382,11 @@ export default function ChatPanel({
     }
     if (pornireRef.current) return // o singură pornire în zbor (anti dublu-click)
     pornireRef.current = true
-    interruptAll('asculta-offline') // gura tace cât ascult (să nu se-audă pe el)
     try {
+      // interruptAll ÎN try: dacă ar arunca (ex. un callback de voce care crapă),
+      // `finally` tot eliberează lacătul — altfel butonul de microfon rămânea mort
+      // până la reîncărcare. Rămâne ÎNAINTE de ascultaOffline (o singură gură).
+      interruptAll('asculta-offline') // gura tace cât ascult (să nu se-audă pe el)
       const ctrl = await ascultaOffline(resolveLang(speechLangRef.current))
       if (!ctrl) return
       // Demontat sau altă ascultare deja pornită cât așteptam → eliberează ACEST control,
