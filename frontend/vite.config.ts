@@ -1,6 +1,53 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
+
+// ── WASM ONNXRUNTIME SERVIT LOCAL (Faza 1 · M4, urechea offline) ─────────────
+// transformers.js (Whisper) rulează pe onnxruntime-web, care implicit își ia
+// runtime-ul .wasm de pe un CDN — BLOCAT offline + de CSP. Îl servim LOCAL, la
+// `/ort/`: în dev printr-un middleware, la build copiat în `dist/ort/`. NU intră
+// în git (e generat din node_modules). SW-ul îl cache-uiește la cerere (vezi sw.js).
+const require = createRequire(import.meta.url)
+// Doar cele două runtime-uri folosite: WASM pur + JSEP (WebGPU). Restul (asyncify/
+// jspi) nu ne trebuie. Fișierele sunt mari (~13/26 MB) → descărcate O DATĂ, offline apoi.
+const ORT_WASM = ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.jsep.wasm']
+function ortDir(): string {
+  return require.resolve('onnxruntime-web').replace(/[/\\]dist[/\\].*$/, '/dist')
+}
+function servesteWasmOrt(): Plugin {
+  return {
+    name: 'kelion-ort-wasm-local',
+    // DEV: servește /ort/*.wasm direct din node_modules.
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const m = req.url && /^\/ort\/([\w.-]+\.wasm)(?:\?|$)/.exec(req.url)
+        if (!m) return next()
+        try {
+          const buf = readFileSync(`${ortDir()}/${m[1]}`)
+          res.setHeader('Content-Type', 'application/wasm')
+          res.end(buf)
+        } catch {
+          next()
+        }
+      })
+    },
+    // BUILD: copiază runtime-urile în dist/ort/.
+    writeBundle(options) {
+      const outDir = options.dir ?? 'dist'
+      const dst = `${outDir}/ort`
+      try {
+        mkdirSync(dst, { recursive: true })
+        for (const f of ORT_WASM) {
+          const src = `${ortDir()}/${f}`
+          if (existsSync(src)) copyFileSync(src, `${dst}/${f}`)
+        }
+      } catch {
+        /* dacă node_modules lipsește la build, urechea nu va merge — se vede la probă */
+      }
+    },
+  }
+}
 
 // Versiunea aplicației = sursa unică din tauri.conf.json (aceeași pe .exe/apk/web);
 // data build-ului se ștampilează la fiecare compilare. Filigranate în app (Adrian,
@@ -26,7 +73,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(appVersion),
     __BUILD_DATE__: JSON.stringify(buildDate),
   },
-  plugins: [react()],
+  plugins: [react(), servesteWasmOrt()],
   server: {
     port: 5173,
     proxy: {

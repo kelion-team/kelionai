@@ -39,7 +39,18 @@ export async function pregatesteUrecheOffline(onProgress?: (p: number) => void):
   progres = 0
   pregatire = (async () => {
     try {
-      const { pipeline } = await import('@huggingface/transformers')
+      const tf = await import('@huggingface/transformers')
+      // OFFLINE REAL: onnxruntime-web își ia runtime-ul .wasm LOCAL, de la /ort/ (copiat
+      // la build din node_modules, servit + cache-uit de SW), NU de pe CDN — care e
+      // blocat offline + de CSP. Modelul vine de la Hugging Face o dată (cu net), apoi
+      // rămâne în cache-ul browserului și merge fără net.
+      try {
+        const env = (tf as unknown as { env?: { backends?: { onnx?: { wasm?: { wasmPaths?: string } } } } }).env
+        if (env?.backends?.onnx?.wasm) env.backends.onnx.wasm.wasmPaths = '/ort/'
+      } catch {
+        /* dacă structura env diferă între versiuni, transformers.js cade pe implicit */
+      }
+      const { pipeline } = tf
       recunoscator = (await pipeline('automatic-speech-recognition', MODEL_URECHE, {
         // progresul descărcării fișierelor modelului (0..1), la fel ca la creier.
         progress_callback: (info: { status?: string; progress?: number }) => {
@@ -73,5 +84,97 @@ export async function transcrieOffline(audio: Float32Array, lang?: string): Prom
     return (r?.text ?? '').trim()
   } catch {
     return ''
+  }
+}
+
+// Reeșantionare liniară simplă la 16 kHz (Whisper vrea 16 kHz). Dacă AudioContext-ul
+// chiar dă 16 kHz (Chrome/Firefox onorează cererea), e no-op.
+function la16k(input: Float32Array, rataIn: number): Float32Array {
+  if (rataIn === 16000 || input.length === 0) return input
+  const raport = 16000 / rataIn
+  const nOut = Math.max(1, Math.round(input.length * raport))
+  const out = new Float32Array(nOut)
+  for (let i = 0; i < nOut; i++) {
+    const poz = i / raport
+    const j = Math.floor(poz)
+    const frac = poz - j
+    out[i] = (input[j] ?? 0) * (1 - frac) + (input[j + 1] ?? input[j] ?? 0) * frac
+  }
+  return out
+}
+
+export interface ControlAscultare {
+  /** Oprește microfonul și întoarce transcrierea (offline, prin Whisper). */
+  opreste(): Promise<string>
+  /** Renunță fără transcriere (eliberează microfonul). */
+  anuleaza(): void
+}
+
+/** Ascultă la microfon (offline) și, la `opreste()`, transcrie ce s-a spus prin Whisper
+ *  local. Întoarce null dacă urechea nu-i pregătită sau nu e microfon. O singură gură/
+ *  ureche — apelantul oprește vocea offline înainte, ca să nu se-audă pe el. */
+export async function ascultaOffline(lang?: string): Promise<ControlAscultare | null> {
+  if (stare !== 'gata') return null
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return null
+  let stream: MediaStream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    })
+  } catch {
+    return null
+  }
+  const AC =
+    globalThis.AudioContext ??
+    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AC) {
+    stream.getTracks().forEach((t) => t.stop())
+    return null
+  }
+  // Cerem direct 16 kHz (Chrome/Firefox reeșantionează microfonul); dacă browserul
+  // ignoră cererea, `la16k` corectează la oprire.
+  let ctx: AudioContext
+  try {
+    ctx = new AC({ sampleRate: 16000 })
+  } catch {
+    ctx = new AC()
+  }
+  void ctx.resume().catch(() => {})
+  const source = ctx.createMediaStreamSource(stream)
+  const proc = ctx.createScriptProcessor(4096, 1, 1)
+  const bucati: Float32Array[] = []
+  proc.onaudioprocess = (e) => {
+    // copie (bufferul e reutilizat de browser) — nu scriem outputBuffer → tăcere, fără ecou.
+    bucati.push(new Float32Array(e.inputBuffer.getChannelData(0)))
+  }
+  source.connect(proc)
+  proc.connect(ctx.destination) // în unele browsere callback-ul pornește doar conectat
+  const curata = (): void => {
+    try {
+      proc.disconnect()
+      source.disconnect()
+    } catch {
+      /* deja deconectat */
+    }
+    stream.getTracks().forEach((t) => t.stop())
+    void ctx.close().catch(() => {})
+  }
+  return {
+    async opreste(): Promise<string> {
+      const rata = ctx.sampleRate
+      curata()
+      const total = bucati.reduce((n, b) => n + b.length, 0)
+      if (total === 0) return ''
+      const brut = new Float32Array(total)
+      let off = 0
+      for (const b of bucati) {
+        brut.set(b, off)
+        off += b.length
+      }
+      return transcrieOffline(la16k(brut, rata), lang)
+    },
+    anuleaza(): void {
+      curata()
+    },
   }
 }
