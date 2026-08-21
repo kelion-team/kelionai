@@ -149,9 +149,11 @@ const SECTIONS: ManualSection[] = [
       // BARA DE EXECUȚIE (owner, 14 aug) — the manual must describe the app as
       // it IS: every execution turn shows its steps live on the monitor.
       'When you ask Kelion to actually do something, the work is not a black box: every step it takes appears live on the monitor behind it, with a dotted progress bar filling from 0 to 100%. The bar reaches 100% only when the turn has truly finished — it never claims "done" in advance.',
-      // PUSH PE TELEFON (14 aug, a treia bifă din „toate aplicațiile"): și
-      // manualul trebuie să știe că anunțurile pot ajunge pe telefon.
-      'Platform announcements can also reach your phone: turning on "🔔 Pe telefon" in the admin panel subscribes that device through standard Web Push, so alerts arrive even when the site is closed. It only ever happens after you grant the browser permission, and you can switch it off from the same button.',
+      // (Paragraful despre push-ul „🔔 Pe telefon" a fost SCOS din manualul de
+      // UTILIZATORI — verificatorul lotului D: butonul trăiește DOAR în
+      // AdminPanel, iar regula proprie a manualului (linia ~16) spune că
+      // uneltele de admin NU intră aici. Descriea un control inexistent pentru
+      // cititorul lui.)
     ],
   },
   {
@@ -172,7 +174,10 @@ const SECTIONS: ManualSection[] = [
   {
     title: 'Credits',
     paragraphs: [
-      'Kelion runs on prepaid credits. You top up from the credit pill in the top bar, and usage is drawn from your balance as you go. You can turn on automatic top-up so you are never cut off mid-conversation, and turn it off again at any time.',
+      // „never cut off" era mai tare decât codul (verificatorul D): bifarea doar
+      // PREGĂTEȘTE plata (linkul Revolut nu poate trage bani singur) — omul tot
+      // apasă plata, deci poate fi tăiat. Spus cum E.
+      'Kelion runs on prepaid credits. You top up from the credit pill in the top bar, and usage is drawn from your balance as you go. You can also turn on automatic top-up: when your balance runs low, Kelion prepares the payment and asks you to confirm it — the actual payment always stays in your hands.',
       // GUSTAREA GRATIS (owner, 14 aug): the taster exists — the manual says so.
       'Your first visit comes with a small welcome credit, on the house, so you can try Kelion before paying anything. It is granted once per account.',
     ],

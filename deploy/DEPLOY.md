@@ -1,8 +1,10 @@
 # Deploy Kelionai pe VPS propriu
 
+> ⚠ Document parțial ISTORIC (banner 21 aug): verifică orice afirmație în cod/AI-HANDOFF §16–§18 înainte s-o crezi.
+
 Producția se mută de pe originea veche (fantomă, în spatele Cloudflare) pe **VPS-ul
-propriu** (164.68.120.87), sursa unică fiind acest repo. Postgres, LiveKit și boții
-rulează deja pe VPS; aici adăugăm containerul **aplicației** + Caddy.
+propriu** (164.68.120.87), sursa unică fiind acest repo. Postgres și boții
+rulează deja pe VPS (LiveKit a fost scos din cod — istorie); aici adăugăm containerul **aplicației** + Caddy.
 
 ## Pași
 

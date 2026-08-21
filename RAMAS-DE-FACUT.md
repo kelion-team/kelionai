@@ -173,8 +173,9 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       sunat nimic (fără dublare). (5) răspunsul terminat rămâne vizibil pe banda „K"
       (nu mai dispărea când nu era busy/monitor). DOVEZI: tsc 0, build verde, 82 teste
       verzi, 2 porți (hardcod+sintaxă) 0. RĂMAS de PROBAT LIVE de Adrian (nu pot de aici,
-      depinde de dispozitiv): (a) pe telefonul lui chiar apare bara „se descarcă X%" și
-      ajunge „gata ✓" (sau spune cinstit „fără WebGPU"); (b) răspunsul scris se AUDE;
+      depinde de dispozitiv): (a) [DEPĂȘIT 21 aug — bara „se descarcă X%" a fost
+      ȘTEARSĂ la ordin; proba nouă: modelul apare singur în Cache Storage
+      `webllm/*` + turele offline răspund]; (b) răspunsul scris se AUDE;
       (c) în avion app-ul se deschide. SEPARAT, de decis cu el (Agent 3, cost): sesiunea
       Gemini Live pornește automat și ascultă CONTINUU → ~£300+/lună; de pus poartă/VAD.
 - [x] ORDIN 20 aug (verbatim): „nu se poate activa doar la voce? nu la zgomot?" + „fa
