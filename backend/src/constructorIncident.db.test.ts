@@ -55,7 +55,7 @@ const fake = vi.hoisted(() => ({
   incidentInsertThrows: false,
 }))
 
-vi.mock('pg', () => {
+vi.mock('pg', async () => {
   const result = <T>(rows: T[], rowCount = rows.length) => ({ rows, rowCount })
   const query = async (sqlRaw: string, params: unknown[] = []) => {
     const sql = String(sqlRaw).replace(/\s+/g, ' ').trim()
@@ -248,10 +248,12 @@ vi.mock('pg', () => {
     throw new Error(`Unhandled SQL in constructor incident test: ${sql}`)
   }
 
-  class Pool {
+  // Dublură fidelă: în pg-ul real, pool-ul și clientul sunt EventEmitter-e.
+  const { EventEmitter } = await import('node:events')
+  class Pool extends EventEmitter {
     query = query
     async connect() {
-      return { query, release: () => undefined }
+      return Object.assign(new EventEmitter(), { query, release: () => undefined })
     }
   }
   return { default: { Pool } }

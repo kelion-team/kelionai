@@ -1228,3 +1228,39 @@ de siguranță fără deploy:** `localStorage.kelion_vad='0'` → trimitere cont
 (a) vocea tot pornește hands-free și răspunde; (b) nu taie primul cuvânt; (c) Gemini
 tot detectează sfârșitul de tură (hangover-ul îi lasă tăcerea) — dacă nu, cresc
 hangover-ul; (d) factura scade pe zile. Dovada „0 octeți în tăcere" = testele + codul.
+
+### §16 — AUTO-VINDECARE: `uncaughtException: terminating connection due to administrator command` (21 aug)
+Ordinul (autovindecare, `server.logbuffer`, count=4, prag=2): eroarea RECURENTĂ
+apărea ca `uncaughtException` prins global în `index.ts`, cu o stivă fără nicio
+linie de-a noastră (pg-protocol parser → `Socket.emit`).
+
+**CAUZA REALĂ (găsită în cod, nu presupusă):** `db.ts` năștea pool-ul cu
+`new pg.Pool({...})` și FĂRĂ ascultător pe evenimentul `error`. În `pg-pool`
+(`makeIdleListener`, `node_modules/pg-pool/index.js:52-63`), când serverul închide
+o conexiune care STĂ ÎN REPAUS (repornire/mentenanță Postgres,
+`pg_terminate_backend`), pool-ul face `pool.emit('error', err, client)` — iar un
+`EventEmitter` care emite `error` fără ureche ARUNCĂ. Eroarea nu venea din niciun
+query, deci nu putea fi prinsă de vreun `try/catch`: urca direct la
+`process.on('uncaughtException')`. A doua gaură, aceeași clasă: la `pool.connect()`,
+pg-pool ȘTERGE ascultătorul clientului împrumutat (`_acquireClient` →
+`removeListener`), deci clientul ținut între două query-uri (tranzacțiile din
+`db.ts`) era complet descoperit.
+
+**FIX (modul mic, rescris curat — `backend/src/dbPool.ts`):** viața conexiunilor
+iese din `db.ts` (5800 de linii) într-un singur modul responsabil: pool cu ureche
+pe `error` PUSĂ LA NAȘTERE, `conexiuneDb()` care acoperă clientul pe toată durata
+împrumutului și îl predă pool-ului CU eroarea la eliberare (client rupt = distrus,
+nu reciclat; `release()` idempotent), reciclare/timeout-uri din env
+(`DB_POOL_MAX`, `DB_IDLE_TIMEOUT_MS`, `DB_CONNECT_TIMEOUT_MS`,
+`DB_MAX_LIFETIME_SEC`) + `keepAlive`. Conexiunea închisă de server se notează la
+nivel **warn** (infrastructură, nu defect al aplicației), deci nu mai umple inelul
+de erori care declanșa autovindecarea; numărătoarea rămâne în `starePool()`.
+`db.ts` doar reexportă `getPool`/`conexiuneDb`.
+
+**Lacăte:** `dbPool.test.ts` (12 teste: clasificarea erorilor, opțiunile pool-ului,
+„pool-ul emite error și NU aruncă", clientul împrumutat acoperit/eliberat o dată).
+Dublurile de `pg` din testele de bani/constructor au devenit FIDELE (pool și client
+sunt `EventEmitter`-e, ca în pg-ul real).
+**Porți (local):** backend tsc 0 · 1881/1881 teste · hardcodări/sintaxă curate.
+Frontend neatins. (`services/tokenChecks.test.ts` cere un mediu fără
+`GCP_SERVICE_ACCOUNT_JSON` — nelegat de fixul asta.)

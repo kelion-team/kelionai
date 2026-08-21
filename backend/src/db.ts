@@ -26,26 +26,16 @@ import {
   parseConstructorStrategy,
   type ConstructorStrategy,
 } from './services/constructorStrategist.js'
-
-let pool: pg.Pool | null = null
+import { getPool, conexiuneDb, starePool, inchidePool } from './dbPool.js'
 
 export function dbEnabled(): boolean {
   return Boolean(config.databaseUrl)
 }
 
-// Exported for the live "PostgreSQL" check in tokenChecks (SELECT 1).
-export function getPool(): pg.Pool {
-  if (!pool) {
-    const url = config.databaseUrl
-    // Local/no-TLS Postgres (VPS on the same machine, explicit sslmode=disable)
-    // connects without SSL; any other target gets TLS with a self-signed
-    // certificate accepted (managed proxies).
-    const noTls = /sslmode=disable/.test(url) || /@(localhost|127\.0\.0\.1)[:/]/.test(url)
-    const ssl = noTls ? false : { rejectUnauthorized: false }
-    pool = new pg.Pool({ connectionString: url, ssl })
-  }
-  return pool
-}
+// Viața conexiunilor (pool + erorile de socket) stă în `dbPool.ts` — un singur
+// modul responsabil. `getPool` rămâne exportat de aici pentru verificarea live
+// „PostgreSQL" din tokenChecks (SELECT 1) și pentru restul apelanților.
+export { getPool, conexiuneDb, starePool, inchidePool }
 
 export async function initDb(): Promise<void> {
   if (!dbEnabled()) return
@@ -888,7 +878,7 @@ export async function inregistreazaSarcinaOperationala(input: SarcinaOperational
   if (!id || !turnId || !email || !objective) return false
   let client: pg.PoolClient | null = null
   try {
-    client = await getPool().connect()
+    client = await conexiuneDb()
     await client.query('BEGIN')
     const task = await client.query<{ id: string }>(
       `INSERT INTO operational_tasks (id, user_email, turn_id, objective, state, metadata)
@@ -961,7 +951,7 @@ export async function tranzitioneazaSarcinaOperationala(
   }
   let client: pg.PoolClient | null = null
   try {
-    client = await getPool().connect()
+    client = await conexiuneDb()
     await client.query('BEGIN')
     const task = await client.query<RandSarcinaOperationala>(
       'SELECT state FROM operational_tasks WHERE id=$1 FOR UPDATE',
@@ -1991,7 +1981,7 @@ export async function topUpUser(
   if (!dbEnabled() || !(gross > 0) || !ref) return false
   const userCredit = gross * config.billing.userShare
   const profit = gross - userCredit
-  const client = await getPool().connect()
+  const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
     if (await billingRefSeen(client, ref)) {
@@ -4695,7 +4685,7 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
   })
   // APOI: preluarea propriu-zisă, în tranzacția ei — niciodată blocată de
   // bookkeeping-ul de mai sus.
-  const client = await getPool().connect()
+  const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
     const r = await client.query<BuildJobDbRow>(
@@ -4725,7 +4715,7 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
 // preluarea din `claimNextBuildJob`. Best-effort prin construcție.
 async function abandoneazaJoburileBlocate(): Promise<void> {
   if (!dbEnabled()) return
-  const client = await getPool().connect()
+  const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
     const abandoned = await client.query<{
@@ -4852,7 +4842,7 @@ export async function reportBuildJob(
       })().catch((e) => console.error('[P27] raportarea la Kelion a picat:', String(e).slice(0, 160)))
     }
   }
-  const client = await getPool().connect()
+  const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
     const updated = await client.query<BuildJobDbRow>(
@@ -5269,7 +5259,7 @@ export async function dbQuery(sql: string): Promise<string> {
       })
     }
   }
-  const client = await getPool().connect()
+  const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
     await client.query(`SET LOCAL statement_timeout = '10s'`)
@@ -5365,7 +5355,7 @@ export async function crediteazaDupaCod(
   const m = referinta.toUpperCase().replace(/\s+/g, '-').match(/KLN-[A-Z2-9]{4}-[A-Z2-9]{4}/)
   if (!m) return null
   const code = m[0]
-  const client = await getPool().connect()
+  const client = await conexiuneDb()
   let email = ''
   try {
     await client.query('BEGIN')

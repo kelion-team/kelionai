@@ -41,7 +41,7 @@ describe('stratul 1: triggerele din Postgres refuză DELETE/TRUNCATE', () => {
 
 describe('stratul 2: poarta din dbQuery — comenzile brute doar CITESC protejatele', () => {
   it('poarta stă ÎNAINTE de conexiunea la pool și refuză ne-citirile', () => {
-    const bloc = /export async function dbQuery[\s\S]*?getPool\(\)\.connect\(\)/.exec(db)?.[0] ?? ''
+    const bloc = /export async function dbQuery[\s\S]*?conexiuneDb\(\)/.exec(db)?.[0] ?? ''
     expect(bloc.length).toBeGreaterThan(200)
     expect(bloc).toMatch(/TABELE_PROTEJATE\.filter/)
     expect(bloc).toMatch(/tabel_protejat/)
