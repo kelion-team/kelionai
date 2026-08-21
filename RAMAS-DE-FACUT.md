@@ -41,7 +41,20 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       92/92, BE 1910/1910+, gărzi 0) — **RĂMAS: merge + măsurat live** (rândul
       se taie doar cu PR + probă live). C8 spus onest: pre-roll-ul recuperează
       ultimele ~250 ms — micșorează pierderea capului de frază la barge-in,
-      n-o elimină. Rânduri NOI din verificarea C (nereparate): (h) pragul RMS
+      n-o elimină.
+      **LOT D — registrul docs-vs-cod (38 constatări, audit proaspăt) — tranșa 1
+      CONSTRUITĂ pe branch** (fb7f7e0b + minimele verificatorilor): manualul
+      user-facing adus la cod (descărcarea invizibilă, VAD opt-in, „always
+      spoken" scos, offline=tastare, 8 limbi), comentariile-minciună corectate
+      (config/iscoada/AEC/prefs), AI-HANDOFF banner + §18 cu adevărurile
+      măsurate, RAMAS/CLAUDE/PROIECT aduse la zi — **RĂMAS: merge + verificare
+      live** (manualul rescris apare pe kelionai.app; traducerile se
+      re-încălzesc singure — cache pe hash, măsurat de verificator) + tranșa 2
+      (restul constatărilor doar consemnate în §18, nu rescrise la sursă).
+      **Rând nou (n): butonul de ștergere cont pică TĂCUT** — serverul refuză
+      mereu (403, ordinul 14 aug), UI-ul nu zice nimic (prefs.ts/CustomerSettings)
+      — de decis cu owner-ul: butonul scos sau mesaj onest.
+      Rânduri NOI din verificarea C (nereparate): (h) pragul RMS
       0.02 pe flush-ul fără-VAD e euristic în ambele direcții (ecou TARE trece,
       voce slabă/departe își pierde pre-roll-ul) — se confirmă doar pe telefonul
       owner-ului; (i) registrul PT amestecat pt-PT/pt-BR; (j) REPARAT
@@ -1396,7 +1409,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 | D2 | **Testul de raționament pe creier plătit** | nefăcut. Cât timp punga OpenRouter e goală, creierul merge pe modele gratuite slabe. |
 | D3 | **Google Photos, YouTube personal** | ✅ **procesat/verificat** (5 aug): Scope-urile YouTube (`youtube.readonly`) și Cloud Platform sunt incluse în `FULL_SCOPES` pe `/auth/google` și `/auth/google/connect`. Google Photos Library API read-only a fost eliminat de Google pe 31 martie 2025 (necesită Photos Picker API). Ownerul trebuie doar să reconecteze Google pentru re-autorizare. |
 | D4 | **Etapa 5b — instalări de sistem ca runbook** | constructorul poate instala pachete npm, dar nu unelte de sistem (apt). Operație privilegiată pe VPS, de făcut cu grijă. |
-| D5 | **Barge-in prin STT streaming** | [NOTĂ 21 aug: rândul descrie ALTĂ aplicație — OpenAI Realtime e scos total, `/api/asr-stream` șters din 5 aug. Barge-in-ul EXISTĂ azi local (micStream BARGE_*) + pe server (detectorVoce, routes/vocalLive.ts) + pre-roll-ul din lotul C. Istorie, nu sarcină.] |
+| D5 | **Barge-in prin STT streaming** | [NOTĂ 21 aug: rândul descrie ALTĂ aplicație — OpenAI Realtime e scos total, `/api/asr-stream` șters din 5 aug. Barge-in-ul EXISTĂ azi pe calea de rezervă Chirp (micStream BARGE_*); pe sesiunea LIVE detectorVoce e DEZARMAT (clientul trimite aec:false) + NO_INTERRUPTION + half-duplex — prin voce NU întrerupi cât vorbește; întrerupi tastând/buton, iar pre-roll-ul lotului C păstrează ~250 ms. Istorie, nu sarcină.] |
 | D6 | **Pauza de autonomie invizibilă în UI** | ✅ **reparat** (30 iul, PR #574): la amânare, lucrătorul trimite un pas marcat „⏳" care sare peste throttle, iar panoul arată insigna **„Așteaptă cotă"** (în toate cele 7 limbi) în loc de „Lucrează" cu pasul înghețat 40 de minute. |
 | D7 | **Corpul erorii 502 aruncat de client** | ✅ **reparat** (30 iul, PR #573): serverul trimite acum și `code` (ce anume a picat) și `retryable`; clientul le citește și afișează motivul pe înțelesul omului — „furnizorul vocii n-a răspuns la timp", „nu mai ai credit" — în loc de „realtime 502". |
 | D8 | **DOUĂ VOCI simultan cu două taburi deschise** (Adrian, 4 aug seara: „am 2 voci") | fix scris 4 aug (zăvor pe TOT lanțul vocii între taburi: takeover + inimă la 10s + rămas-bun; regulile pure în `frontend/src/lib/voceUnica.ts`) — cauza: zăvorul vechi acoperea doar sesiunea live, dictarea de rezervă scăpa și vorbeau amândouă. **Nu pot verifica live până la merge+deploy+test cu 2 taburi** |

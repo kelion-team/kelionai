@@ -118,7 +118,10 @@ const SECTIONS: ManualSection[] = [
       // ADUS LA COD (registrul docs-vs-cod, lot D): VAD-ul e OPT-IN (implicit
       // microfonul trimite continuu — vocalLive.ts „OPRIT IMPLICIT"), iar gura
       // de siguranță a browserului e DOAR offline — „always spoken" era fals.
-      'Kelion listens hands-free while the voice session is on, and you can interrupt it mid-sentence — it stops and listens. Replies in a voice session are spoken with its one live voice, and if you type while the voice session is active, the answer comes back in that same voice. When you are offline, your device’s own voice reads the offline answers aloud.',
+      // FĂRĂ promisiunea „interrupt mid-sentence by voice" (verificatorul D):
+      // pe sesiunea Live vocea NU poate întrerupe cât Kelion vorbește (half-
+      // duplex + NO_INTERRUPTION) — întrerupi TASTÂND sau cu butonul.
+      'Kelion listens hands-free while the voice session is on. Replies in a voice session are spoken with its one live voice, and if you type while the voice session is active, the answer comes back in that same voice — typing also interrupts it mid-sentence when you need to cut in. When you are offline, your device’s own voice reads the offline answers aloud.',
     ],
   },
   {
