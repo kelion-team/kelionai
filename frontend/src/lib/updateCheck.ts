@@ -5,6 +5,8 @@
 // changes on every publish, even if the interface wasn't touched), not just
 // the bundle name. When it changes → automatic hard reset.
 
+import { CHEI_OFFLINE_PERSISTENTE } from './creierLocal'
+
 export interface ServerVersion {
   v: string
   at: string
@@ -148,12 +150,16 @@ export async function hardResetToLatest(): Promise<void> {
   // And the COMPOSER DRAFT (kelion.draft, Aug 1): the reset now applies by
   // itself (the auto-update countdown), so what you were typing is kept too —
   // the composer restores it on boot.
+  // ȘI EVIDENȚA MODELELOR OFFLINE (CHEI_OFFLINE_PERSISTENTE, 21 aug): byte-ii modelelor
+  // (creier webllm/* + ureche transformers*) supraviețuiesc în Cache Storage la update,
+  // deci și evidența „ce e descărcat + care e activ" trebuie să supraviețuiască — altfel
+  // după fiecare publicare modelul apărea „nedescărcat" deși era pe disc (owner: „verifică
+  // când e un model descărcat…", „la fiecare update nu trebuie descărcate din nou modelele").
   try {
-    const voiceprint = localStorage.getItem('kelion.voiceprint')
-    const draft = localStorage.getItem('kelion.draft')
+    const pastrate = ['kelion.voiceprint', 'kelion.draft', ...CHEI_OFFLINE_PERSISTENTE]
+    const salvate = pastrate.map((k) => [k, localStorage.getItem(k)] as const)
     localStorage.clear()
-    if (voiceprint) localStorage.setItem('kelion.voiceprint', voiceprint)
-    if (draft) localStorage.setItem('kelion.draft', draft)
+    for (const [k, v] of salvate) if (v !== null) localStorage.setItem(k, v)
   } catch {
     /* indisponibil */
   }

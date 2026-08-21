@@ -70,6 +70,18 @@ const CHEIE_MODEL_ACTIV = 'kelion_model_offline_activ'
 const CHEIE_MODELE_DESCARCATE = 'kelion_modele_descarcate'
 const CHEIE_DESCARCAT_VECHE = 'kelion_model_offline'
 
+// Cheile localStorage ale offline-ului care trebuie să SUPRAVIEȚUIASCĂ resetului de
+// publicare (updateCheck.hardResetToLatest): modelul ALES + SETUL descărcat + cheia veche
+// de migrare. Byte-ii modelelor stau în Cache Storage (webllm/*, păstrat la update), deci
+// și EVIDENȚA lor trebuie păstrată — altfel după fiecare publicare modelul apare
+// „nedescărcat" deși e pe disc (owner 21 aug: „verifică când e un model descărcat…", „la
+// fiecare update nu trebuie descărcate din nou modelele"). Sursă unică — updateCheck le importă.
+export const CHEI_OFFLINE_PERSISTENTE = [
+  CHEIE_MODEL_ACTIV,
+  CHEIE_MODELE_DESCARCATE,
+  CHEIE_DESCARCAT_VECHE,
+] as const
+
 function citesteActiv(): string {
   try {
     const v = localStorage.getItem(CHEIE_MODEL_ACTIV)
