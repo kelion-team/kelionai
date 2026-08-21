@@ -204,8 +204,8 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                       <button
                         type="button"
                         onClick={() => descarca(m.id)}
-                        disabled={seDescarca || areWebgpu === false}
-                        style={btnStil('#6ea8fe', '#10121a', seDescarca || areWebgpu === false)}
+                        disabled={seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false}
+                        style={btnStil('#6ea8fe', '#10121a', seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false)}
                       >
                         ⏬ Descarcă
                       </button>
@@ -241,7 +241,12 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                 {eActiv && st.stare === 'eroare' && (
                   <div style={{ marginTop: 8, fontSize: 11.5, color: '#ffcaca' }}>
                     ⚠️ {st.motiv || 'a picat încărcarea'}{' '}
-                    <button type="button" onClick={() => descarca(m.id)} style={{ ...btnStil('#2a2440', '#e9e4ff'), marginLeft: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => descarca(m.id)}
+                      disabled={seDescarca || seDescarcaUreche || seDescarcaVaz}
+                      style={{ ...btnStil('#2a2440', '#e9e4ff', seDescarca || seDescarcaUreche || seDescarcaVaz), marginLeft: 6 }}
+                    >
                       Reîncearcă
                     </button>
                   </div>
