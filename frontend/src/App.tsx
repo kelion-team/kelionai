@@ -159,11 +159,24 @@ export default function App() {
     )
   }
 
+  // Bara „Instalează" e o bară JOS — dar SINGURUL element fixat pe `bottom: 0`
+  // e compozitorul de chat (`.chat`), care trăiește DOAR pe Stage. Ca să NU
+  // acopere caseta de scris (lecția #3: un element fix refolosit rupe o pagină
+  // vie), o arătăm pe intrare + paginile publice (Landing/Login/Credite/Manual),
+  // NU pe Stage. Acolo omul e deja „înăuntru"; nudge-ul de instalare e pentru
+  // intrare (owner: „intrarea = pagina web → download").
+  const caleaCurenta = window.location.pathname
+  const peStage =
+    !!user &&
+    caleaCurenta !== '/manual' &&
+    caleaCurenta !== '/credite' &&
+    caleaCurenta !== '/credits'
+
   return (
     <>
       <BannerOffline />
       <StatusOffline />
-      <BannerInstalare />
+      {!peStage && <BannerInstalare />}
       {updateNou && (
         <div
           role="status"
