@@ -335,14 +335,17 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
           onProgress?.(progres)
         },
       })) as unknown as typeof motor
-      marcheazaDescarcat(idTinta) // chiar s-a descărcat — rămâne în cache (util și dacă owner a comutat)
       if (genModel !== genTinta) {
-        // owner a comutat pe alt model între timp → NU punem motorul ăsta ca activ;
-        // eliberăm memoria GPU a motorului stăl (altfel rămânea încărcat degeaba).
+        // owner a COMUTAT sau a ȘTERS modelul între timp (ambele cresc genModel) → NU
+        // punem motorul ăsta ca activ ȘI NU-l marcăm descărcat. Marcarea `marcheazaDescarcat`
+        // era ÎNAINTE de gardă și RE-ADĂUGA în set un model tocmai șters (cursa prinsă de
+        // agent) — acum e DUPĂ gardă, deci un „Șterge" în timpul descărcării câștigă.
+        // Eliberăm memoria GPU a motorului stăl (altfel rămânea încărcat degeaba).
         void eng?.unload?.()
         stare = citesteDescarcate().has(getModelOffline()) ? 'descarcat' : 'neintrodus'
         return false
       }
+      marcheazaDescarcat(idTinta) // s-a descărcat ȘI e încă modelul curent (negșters) → marcăm
       motor = eng
       stare = 'gata'
       progres = 1
