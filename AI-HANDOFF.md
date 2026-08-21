@@ -1321,11 +1321,33 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
      sau schimbarea modelului șterge contorul). `autoDescarcareaPermisa()`.
 6. **Registrele de erori (54 constatări, fiecare cu fișier:linie)** — produse de
    agenți pe ordinul „toți agenții trebuie să depisteze toate erorile din chatul
-   live": frontend 22 (primele 3 REPARATE în pasul Jarvis 1), backend 16 (vârfuri
-   nereparate: escaladarea ocolește plasele de fallback; re-execuția uneltelor la
-   retry dublează efectele; plasa dual-brain moartă; erori ne-tranzitorii spun
-   „mai încearcă"; poartaFaptelor absent pe voce), docs-vs-cod 16 (VAD documentat
-   invers față de cod ș.a.). Lista completă: în istoricul sesiunii + RAMAS-DE-FACUT.
+   live": frontend 22 (primele 3 REPARATE în pasul Jarvis 1), backend 16, docs-vs-cod
+   16 (VAD documentat invers față de cod ș.a.). Lista completă: în istoricul
+   sesiunii + RAMAS-DE-FACUT.
+   **LOT B (21 aug, seara) — vârfurile backend CONSTRUITE pe branch** (2 runde de
+   verificare cu 3 agenți; runda 1 FAIL pe gardul prea larg — reparat): escaladarea
+   nu mai ocolește sloturile/plasele (modelEfectiv/modelVinovat); re-execuția
+   uneltelor cu EFECT EXTERN la retry oprită (clasificare pe grupaExecutieUnealta,
+   NU „orice unealtă" — cazul fondator db_query ×18 → plasă rămâne viu; ask_brain
+   nu armează gardul); plasa dual-brain moartă pe turele grele → a treia treaptă
+   modelRapidDirect(), fără ricoșeu între plase (plasaRulata); mesaj onest pe
+   erori ne-tranzitorii + pe fapta parțial executată („verifică rezultatul înainte
+   să repeți"); {error} din SSE aruncat numit; căderea Chirp ASR jurnalizată
+   înainte de fallback; **infrastructura nu mai naște ordine de cod** în
+   auto-vindecare (eEroareDeInfrastructura în selfHealLogPipeline — extinderea
+   regulii §16 de la Postgres la toți furnizorii). RĂMAS: merge + măsurat live.
+   **Rânduri NOI de registru** (găsite de verificatori, nereparate — de cântărit,
+   unele cu owner-ul): (a) pe eroare 402/credit mort userul tot „încearcă din nou"
+   primește (sonda geminiLive dezvăluie cauza doar adminului, doar pe rate-limit);
+   (b) mesajele de eroare există doar ro/en — celelalte 5 limbi cad pe engleză
+   (clasă veche, consecventă); (c) geminiDirect aruncă și când {error} vine DUPĂ
+   un răspuns complet (margine rară → sufix „s-a întrerupt" fals); (d) plasele nu
+   consultă eSanatos (pot chema un model în cooldown); (e) db_query e ȘI în
+   UNELTE_CITIRE_PARALELE (citire independentă) ȘI în UNELTE_FAPTA (faptă) —
+   tensiune de clasificare de lămurit; (f) în interiorul încercării 1, escaladarea
+   la mijloc rulează rundele pe modelul greu cu slotul încă pe modelul de pornire
+   (slotul se ia la START de încercare — gol structural mărginit, corectat de la
+   încercarea 2).
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

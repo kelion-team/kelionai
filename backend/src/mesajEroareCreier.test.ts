@@ -66,9 +66,18 @@ describe('mesajele vizibile userului sunt neutre', () => {
     // cazul măsurat: modelul pensionat (not found) a tăcut zile întregi cu
     // „încearcă din nou". Ancorat ÎN clasificator (CE-2 al verificatorului:
     // un /not.?found/ pe tot fișierul se hrănea din promptul youtube — vacuu).
-    expect(sursa).toMatch(/const eNetranzitorie =[\s\S]{0,400}not\.\?found/)
+    // Forma `not[_ ]found`, NU `not.?found` — aceea prindea și ENOTFOUND
+    // (pană DNS tranzitorie) și mințea cu „reformuleaz-o" (F5a).
+    expect(sursa).toMatch(/const eNetranzitorie =[\s\S]{0,500}not\[_ \]found/)
     expect(sursa).toContain('Cererea asta nu a putut fi dusă la capăt')
     expect(sursa).toContain('This request could not be completed')
+  })
+
+  it('fapta deja executată în tura moartă se SPUNE omului — fără detalii tehnice (registrul #2, partea omului)', () => {
+    expect(sursa).toMatch(/const fapteDejaExecutate = doveziUnelte\.some\(/)
+    expect(sursa).toMatch(/eUnealtaCuEfectExtern\(d\.nume\)/)
+    expect(sursa).toContain('Am apucat să execut o parte din ce ai cerut înainte de întrerupere')
+    expect(sursa).toContain('Part of what you asked was already carried out before the interruption')
   })
 })
 

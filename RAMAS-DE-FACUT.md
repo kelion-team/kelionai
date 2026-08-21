@@ -19,11 +19,21 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       fiecare reparație: porți → 3 agenți adversariali → merge → măsurat LIVE.
       **Registrul (54 constatări, 21 aug, fiecare cu fișier:linie):** frontend 22
       (primele 3 — coliziunea vocilor, onclose-1000 surdo-mut, releaseTtsFocus —
-      REPARATE, live v6.2), backend 16 (vârfuri: escaladarea ocolește plasele de
-      fallback; re-execuția uneltelor la retry dublează efectele; plasa dual-brain
-      moartă; erori ne-tranzitorii spun „mai încearcă"; poartaFaptelor absent pe
-      voce), docs-vs-cod 16 (VAD documentat invers ș.a.). Simțurile offline din
-      21 aug = N/A pe tree-ul curent (restaurarea le-a scos deliberat).
+      REPARATE, live v6.2), backend 16, docs-vs-cod 16 (VAD documentat invers
+      ș.a.). Simțurile offline din 21 aug = N/A pe tree-ul curent (restaurarea
+      le-a scos deliberat).
+      **LOT B — vârfurile backend CONSTRUITE pe branch (21 aug seara, 2 runde ×
+      3 agenți; runda 1 FAIL pe gardul prea larg → reparat):** escaladarea nu mai
+      ocolește sloturile/plasele; re-execuția uneltelor CU EFECT la retry oprită
+      (+ omul avertizat cinstit când o faptă s-a executat deja); plasa dual-brain
+      moartă → treapta a treia modelRapidDirect, fără ricoșeu; mesaj onest pe
+      erori ne-tranzitorii; {error} din SSE aruncat; căderea Chirp jurnalizată;
+      infrastructura nu mai naște ordine de cod în auto-vindecare. RĂMAS: merge +
+      măsurat live. Rânduri NOI din verificare (nereparate): 402/credit mort tot
+      „încearcă din nou" zice; mesajele de eroare doar ro/en; {error} după răspuns
+      complet → sufix fals; plasele nu consultă eSanatos; db_query clasificat și
+      citire și faptă; slotul încercării 1 rămâne pe modelul de pornire la
+      escaladarea din mijloc. Detalii: AI-HANDOFF §17 pct. 6.
       **Lot A (descărcare offline invizibilă+automată)**: construit + verificat cu
       3 agenți (FAIL→reparate cele 3 minime; re-verificare PASS cu 7 minore, din
       care reparate pe loc: comentariul „nu consumă rețea", gardul online pe

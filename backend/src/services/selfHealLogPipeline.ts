@@ -92,6 +92,19 @@ export class ConstructorLogAdapter implements LogScannerAdapter {
 }
 
 /**
+ * INFRASTRUCTURA NU NAȘTE ORDINE DE COD (regula §16, extinsă de la Postgres la
+ * toți furnizorii — verdictul agenților lot B): starea căzută a unui serviciu
+ * EXTERN (permisiune/cotă/credit/rețea/serviciu indisponibil/model retras) nu
+ * e un defect al codului nostru — un ordin de „reparat cod" pe ea ar fi FALS,
+ * exact clasa ECONNREFUSED→ordine pe care Devin tocmai a închis-o la Postgres.
+ * Amprentele astea se rețin ca EVIDENȚĂ (KV), nu deschid build_software.
+ * Funcție PURĂ, testată în selfHealLogPipeline.test.ts.
+ */
+export function eEroareDeInfrastructura(mesaj: string): boolean {
+  return /permission[_ ]?denied|\b40[13]\b|\b429\b|unauthori[sz]ed|resource[_ ]?exhausted|rate[- ]?limit|quota|overloaded|high demand|unavailable|\b50[234]\b|econnrefused|enotfound|eai_again|ehostunreach|enetunreach|etimedout|socket hang up|fetch failed|not_found|\b404\b|\[ASR CHIRP CĂZUT\]|\[PROFUNDUL EPUIZAT\]|\[CREIER PROFUND EPUIZAT\]|baz[ăa] de date indisponibil|infrastructur[ăa], nu cod/i.test(mesaj)
+}
+
+/**
  * Extrage amprenta canonică dintr-un mesaj de eroare.
  */
 export function extractLogFingerprint(message: string): string {
@@ -195,6 +208,18 @@ export class SelfHealDecisionEngine {
       await saveKv(cheieContor, String(totalCount))
 
       if (totalCount < threshold) {
+        continue
+      }
+
+      // Infrastructura căzută (permisiune/cotă/rețea/serviciu extern) NU naște
+      // ordine de reparat cod — doar evidență. Vezi eEroareDeInfrastructura.
+      if (group.source === 'server' && eEroareDeInfrastructura(group.sampleMessage)) {
+        await saveKv(cheieFiled, JSON.stringify({
+          at: Date.now(),
+          count: totalCount,
+          handedTo: 'infrastructura_nu_cod',
+          evidence: group.sampleMessage.slice(0, 500),
+        }))
         continue
       }
 

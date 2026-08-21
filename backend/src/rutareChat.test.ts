@@ -66,8 +66,10 @@ describe('ack-ul instant NU e răspunsul (cauza exactă a „am preluat sarcina"
     // Condiția de acceptare există în continuare (text / text curgat / suprafață
     // pusă de unelte) — dar sawVisible nu mai poate fi otrăvit de ack (testele
     // de mai sus). Dacă cineva scoate conteazaCaVizibil din interceptor, cade aici.
-    // (3 aug: „silent rotation" a devenit „reîncercare" pe același creier Gemini.)
-    expect(sursaChat).toMatch(/returned empty — reîncercare/)
+    // (3 aug: „silent rotation" a devenit „reîncercare" pe același creier Gemini;
+    // 21 aug, lot B: logul MUTE spune și când reîncercarea NU vine — fapta cu
+    // efect deja chemată o anulează — deci textul e condițional, nu contiguu.)
+    expect(sursaChat).toMatch(/\[CHAT MUTE\][\s\S]{0,200}reîncercare \$\{attempt \+ 1\}/)
   })
 
   it('plasa anti-tăcere rămâne ultima linie: orice tură fără conținut primește mesaj onest', () => {

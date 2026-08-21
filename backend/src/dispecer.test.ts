@@ -140,26 +140,37 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
   // Gemini" au fost absorbite de extirparea totală, 3 aug seara: cursa, pool-ul
   // de candidați și punga de rezervă NU MAI EXISTĂ în cod — gardul de mai sus
   // le pinuiează absența, iar reîncercările de mai jos pinuiează noua formă.)
-  it('un răspuns gol sau o eroare se notează (telemetrie) pe modelul care CHIAR a rulat și se reîncearcă pe Gemini', () => {
-    expect(chat).toMatch(/returned empty — reîncercare/)
-    expect(chat).toMatch(/noteazaEsuare\(modelIncercare\)/)
+  it('un răspuns gol sau o eroare se notează (telemetrie) pe modelul VINOVAT — cel efectiv la momentul eșecului, nu cel de pornire', () => {
+    expect(chat).toMatch(/const modelVinovat = modelEfectiv\(\)/)
+    expect(chat).toMatch(/noteazaEsuare\(modelVinovat\)/)
     // Telemetria nu mai are voie să dea vina pe modelul de PORNIRE.
     expect(chat).not.toMatch(/noteazaEsuare\(orchestratorModel\)/)
+    expect(chat).not.toMatch(/noteazaEsuare\(modelIncercare\)/)
   })
   it('profundul epuizat NU se re-încearcă tot pe profund — cade pe o față rapidă REALĂ (a treia treaptă modelRapidDirect pe turele grele, unde plasa veche era moartă)', () => {
     expect(chat).toMatch(/modelEfectiv\(\) === profund/)
     expect(chat).toMatch(/PROFUNDUL EPUIZAT/)
     expect(chat).toMatch(/orchestratorModel !== profund \? orchestratorModel : modelRapidDirect\(\)/)
   })
-  it('fapta deja executată oprește orice reluare completă a turei (registrul backend #2) — și bucla, și plasele', () => {
+  it('fapta CU EFECT EXTERN deja executată oprește orice reluare completă a turei (registrul backend #2) — și bucla, și plasele', () => {
     expect(chat).toMatch(/let faptaInIncercareEsuata = false/)
-    expect(chat).toMatch(/const unelteLaStart = unelteIncercate\.length/)
+    // Contorul e DOAR pe uneltele cu efect extern (runda 2 a verificatorilor:
+    // gardul pe „orice unealtă" omora cazul fondator db_query ×18 → plasă,
+    // și lăsa turele escaladate fără nicio reluare — ask_brain arma flag-ul).
+    expect(chat).toMatch(/const unelteLaStart = unelteEfectIncercate\.length/)
+    expect(chat).toMatch(/const eUnealtaCuEfectExtern = \(nume: string\): boolean =>\s*grupaExecutieUnealta\(nume\) === 'efect' && nume !== 'ask_brain' && !UNELTE_AFISAJ\.has\(nume\)/)
+    expect(chat).toMatch(/if \(eUnealtaCuEfectExtern\(name\)\) unelteEfectIncercate\.push\(name\)/)
     // ARMAREA + break-ul (contra-exemplul CE-1 al verificatorului: fără astea,
     // flag-ul e veșnic false și toate celelalte lacăte rămân verzi degeaba).
-    expect(chat).toMatch(/if \(!r && unelteIncercate\.length > unelteLaStart\) \{\s*faptaInIncercareEsuata = true\s*break\s*\}/)
+    expect(chat).toMatch(/if \(!r && unelteEfectIncercate\.length > unelteLaStart\) \{\s*faptaInIncercareEsuata = true\s*break\s*\}/)
     // ambele plase citesc flag-ul
     const plaseGardate = chat.match(/!faptaInIncercareEsuata/g) ?? []
     expect(plaseGardate.length).toBeGreaterThanOrEqual(2)
+  })
+  it('plasele nu ricoșează una în alta (F4): profund→rapid armează plasaRulata, iar plasa oglindită o respectă', () => {
+    expect(chat).toMatch(/let plasaRulata = false/)
+    expect(chat).toMatch(/plasaRulata = true/)
+    expect(chat).toMatch(/!faptaInIncercareEsuata && !plasaRulata && config\.modelCreierProfund/)
   })
   it('modelIncercare se calculează ÎN buclă, la fiecare încercare (CE-3: mutat înaintea buclei, escaladarea din mijloc ar lăsa slotul pe modelul de la start)', () => {
     expect(chat).toMatch(/for \(let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt\+\+\) \{[\s\S]{0,400}const modelIncercare = modelEfectiv\(\)/)
