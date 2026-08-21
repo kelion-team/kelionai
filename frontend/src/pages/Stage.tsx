@@ -1878,16 +1878,16 @@ export default function Stage({ user }: { user: User }) {
               {adminLock?.armed && !adminLock.unlocked ? '🔒 Admin' : 'Admin'}
             </button>
           )}
-          {user.role === 'admin' && (
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => setModeleOpen(true)}
-              title="Modelul creierului offline (descarcă / alege)"
-            >
-              🧠 Modele
-            </button>
-          )}
+          {/* Modelul offline e GRATIS și per-device → vizibil TUTUROR, nu doar adminului
+              (owner 21 aug: „scos butonul de sub admin, să fie văzut de toți că e free"). */}
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setModeleOpen(true)}
+            title="Modelul creierului offline (descarcă / alege)"
+          >
+            🧠 Modele
+          </button>
           {!user.googleConnected && (
             <button
               type="button"
