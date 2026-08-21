@@ -10,6 +10,7 @@
 // Law of the house: wire what exists; do not invent a second voice stack.
 
 import { stopVoice, isVoicePlaying } from './audioIO'
+import { opresteVoceaOffline } from './voceOffline'
 
 export type AudioFocusSource = 'live' | 'tts' | 'none'
 
@@ -62,6 +63,7 @@ export function unregisterLiveFocus(): void {
 export function interruptAll(reason = 'barge-in'): void {
   void reason
   if (isVoicePlaying()) stopVoice()
+  opresteVoceaOffline() // taie și GURA OFFLINE (Web Speech), nu doar naratorul — o singură gură
   try {
     liveInterrupt?.()
   } catch {
