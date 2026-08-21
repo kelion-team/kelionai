@@ -63,9 +63,12 @@ describe('chat.ts chiar folosește starea, și NU slăbește securitatea', () =>
     expect(chat).toMatch(/pastreazaStareSesiune\(user\.email, stare, acumMs\)/)
   })
 
-  it('preferința de voce NU mai e a treia interogare pe user_prefs în aceeași tură', () => {
-    // Înainte: `await getVoicePref(user.email)` chiar înainte de apelul la creier.
-    expect(chat).toMatch(/createVoiceStream\(reply, userLang, prefs\.voicePref\)/)
+  it('preferințele (inclusiv vocea) NU se recitesc per-tură — vin din starea sesiunii', () => {
+    // Voce SCOASĂ (clean-slate 21 aug): sinteza Chirp de pe calea scrisă a
+    // dispărut, deci nu mai există `createVoiceStream`. Ce rămâne verificat e
+    // regula de viteză: preferințele nu se cer printr-un `await getVoicePref`
+    // separat înainte de creier — vin din batch-ul de sesiune.
+    expect(chat).not.toMatch(/createVoiceStream/)
     expect(chat).not.toMatch(/await getVoicePref\(user\.email\)/)
   })
 
