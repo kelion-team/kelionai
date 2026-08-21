@@ -567,11 +567,17 @@ export function deschideVocalLive(
   const trimiteRand = (text: string, turnComplete: boolean): void => {
     if (inchisa || !text.trim()) return
     if (!gata) {
-      // Sesiunea nu-i gata (deschidere/reconectare): rândul NU moare tăcut —
-      // stă la coadă ca audio-ul și pleacă la 'gata' (anti-minciună: clientul
-      // a ecou-at deja mesajul; a-l pierde ar fi un „trimis" care n-a fost).
-      coadaRanduri.push({ text, turnComplete })
-      if (coadaRanduri.length > 20) coadaRanduri.shift()
+      // Sesiunea nu-i gata (deschidere/reconectare): rândul-INTERVENȚIE
+      // (turnComplete:true — tura scrisă) NU moare tăcut: stă la coadă ca
+      // audio-ul și pleacă la 'gata' (clientul a ecou-at deja mesajul).
+      // ANCORELE (turnComplete:false — ex. ora „chiar acum") NU se pun la
+      // coadă: o ancoră veche livrată după reconectare ar MINȚI despre „acum"
+      // (aceeași regulă ca la scrieCadru: efemerele nu se amână) — se
+      // reîmprospătează singure la bătaia periodică.
+      if (turnComplete) {
+        coadaRanduri.push({ text, turnComplete })
+        if (coadaRanduri.length > 20) coadaRanduri.shift()
+      }
       return
     }
     try {

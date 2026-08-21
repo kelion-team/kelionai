@@ -632,6 +632,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // fost MUTĂ — două lacăte interne îi mâncau răspunsul); dezarmăm amândouă:
             const textScris = ((m as { text: string }).text || '').trim().slice(0, 4000)
             if (textScris) {
+              // „ÎN ZBOR" se măsoară ÎNAINTE de curățare (re-verificatorul: curățarea
+              // șterge chiar dovada turei în zbor → amânarea nu se mai declanșa, iar
+              // coada turei vechi putea consuma dreptul turei scrise → tura scrisă mută).
+              const eraInZbor =
+                verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || rostireCurenta.trim().length > 0
               // LACĂTUL A: clientul taie gura înaintea oricărei ture noi (interruptAll →
               // {type:'intrerupe'} → taiereManuala). Tura SCRISĂ care sosește după E
               // următoarea intervenție a omului — exact ca vorbirea (vezi
@@ -651,10 +656,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               // din bufferele de TRANSCRIERE — textul scris nu trece prin ele. Protocolul
               // EXISTENT al anunțurilor (mai sus): tura se declară PE FAȚĂ, nu se lasă
               // dedusă din buffer gol. Scrisul e prin natură adresat lui.
-              const turaInZborScris =
-                verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || rostireCurenta.trim().length > 0
-              if (turaInZborScris) anuntAmanat = true
+              if (eraInZbor) anuntAmanat = true
               else turaDeSistem = true
+              // MEMORIA (re-verificatorul: rândul scris nu se salva nicăieri — istoria
+              // ținea răspunsuri la întrebări invizibile, iar învățarea primea user gol):
+              // rândul intră în bufferul de user, ca vorbirea; adresarea nu e afectată
+              // (turaDeSistem/anuntAmanat scurtcircuitează poarta numelui).
+              bufUser = bufUser ? bufUser + ' ' + textScris : textScris
               // Ferestrele „sesiunea nu-i gata încă" (live null la deschidere / reconectare
               // internă): audio-ul are coadă (preCoada + coada motorului) — textul primește
               // aceeași plasă, altfel rândul scris ar muri TĂCUT deși clientul l-a ecou-at.
