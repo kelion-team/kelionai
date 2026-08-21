@@ -30,9 +30,18 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)
       - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
-      Voce-only: încă neîncepută (fixul cu un motor așteaptă reproul owner-ului:
-      rupe TASTÂND cât vorbește, sau PUR vorbind?). FĂCUT din proiect: charter-ul
-      (în legile creierului chat+voce + capitolele admin din Manual).
+      **CLEAN-SLATE FĂCUT + PUBLICAT (21 aug, PR #1302 → master `35e85fdb`):** owner
+      a cerut teardown TOTAL înainte de reconstrucție („scoate tot la voce… surd, mut,
+      nu scrie… și e curat"). ȘTERS tot: Gemini Live (front+back + ruta WS), Chirp de
+      pe chat, calea veche `realtimeVoice`, gura OFFLINE din browser `voceBrowser`,
+      urechea (`ensureMic`/`micStream`) + ajutoarele + UI-ul vocal din ChatPanel.
+      PĂSTRAT: naratorul `/api/tts`, creierul TEXT offline (WebLLM), recorderul,
+      camera, monitorul, chatul text. Verde măsurat (build FE, tsc+teste BE 201/1713,
+      porți exporturi=0/hardcodări=0/sintaxă+oxlint curate). Owner verifică LIVE:
+      „mă auzi?" (vorbit SAU scris pe calea vocală) = tăcere totală. RĂMAS de curățat
+      la §2: rute backend orfane fără client — `routes/realtime.ts` + `routes/asr.ts`.
+      FĂCUT din proiect: charter-ul (legile creierului chat+voce + capitolele admin
+      din Manual). Pașii 1–7 de mai sus = reconstrucția §2, de la ZERO pe slate curat.
 - [ ] DEVIN = constructorul extern (owner 20 aug: „punel pe devin cu cheie" + „b").
       CONSTRUIT ÎN COD (pe branch, verificat: tsc 0, suită 1867, 5 porți verzi):
       client `services/devin.ts` (sesiune cu plafon `max_acu_limit` + stare/ACU
