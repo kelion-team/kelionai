@@ -154,9 +154,18 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
   it('fapta deja executată oprește orice reluare completă a turei (registrul backend #2) — și bucla, și plasele', () => {
     expect(chat).toMatch(/let faptaInIncercareEsuata = false/)
     expect(chat).toMatch(/const unelteLaStart = unelteIncercate\.length/)
+    // ARMAREA + break-ul (contra-exemplul CE-1 al verificatorului: fără astea,
+    // flag-ul e veșnic false și toate celelalte lacăte rămân verzi degeaba).
+    expect(chat).toMatch(/if \(!r && unelteIncercate\.length > unelteLaStart\) \{\s*faptaInIncercareEsuata = true\s*break\s*\}/)
     // ambele plase citesc flag-ul
     const plaseGardate = chat.match(/!faptaInIncercareEsuata/g) ?? []
     expect(plaseGardate.length).toBeGreaterThanOrEqual(2)
+  })
+  it('modelIncercare se calculează ÎN buclă, la fiecare încercare (CE-3: mutat înaintea buclei, escaladarea din mijloc ar lăsa slotul pe modelul de la start)', () => {
+    expect(chat).toMatch(/for \(let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt\+\+\) \{[\s\S]{0,400}const modelIncercare = modelEfectiv\(\)/)
+  })
+  it('treapta a treia chiar ÎNCEARCĂ plasa, nu doar loghează (CE-4)', () => {
+    expect(chat).toMatch(/PROFUNDUL EPUIZAT[\s\S]{0,200}await incearcaPlasa\(\)/)
   })
   it('la epuizarea încercărilor tura se încheie ONEST (mesajul neutru din catch), nu pe alt creier', () => {
     expect(chat).toMatch(/brain_gemini_exhausted/)
