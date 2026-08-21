@@ -36,6 +36,14 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       citire și faptă; slotul încercării 1 rămâne pe modelul de pornire la
       escaladarea din mijloc; click_monitor „doar-afișare" dar apasă butoane
       reale (o reluare îl poate re-apăsa). Detalii: AI-HANDOFF §17 pct. 6.
+      **LOT C — restul registrului frontend (C1–C8) CONSTRUIT pe branch**
+      (cc50a2fc + paznici + minimele verificatorilor; porți verzi: FE build +
+      92/92, BE 1910/1910+, gărzi 0) — **RĂMAS: merge + măsurat live** (rândul
+      se taie doar cu PR + probă live). C8 spus onest: pre-roll-ul recuperează
+      ultimele ~250 ms — micșorează pierderea capului de frază la barge-in,
+      n-o elimină. Rânduri NOI din verificarea C (nereparate): (h) prag RMS pe
+      flush-ul fără-VAD; (i) registrul PT amestecat pt-PT/pt-BR; (j) comentariul
+      din era cozii la trimiterea-ocupat (~ChatPanel:3204).
       **Lot A (descărcare offline invizibilă+automată)**: construit + verificat cu
       3 agenți (FAIL→reparate cele 3 minime; re-verificare PASS cu 7 minore, din
       care reparate pe loc: comentariul „nu consumă rețea", gardul online pe

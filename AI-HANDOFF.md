@@ -1354,6 +1354,30 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    dar chat.ts spune el însuși că apasă ELEMENTE REALE (orice buton, inclusiv din
    admin) → o reluare îl poate re-apăsa — tensiune de clasificare, de lămurit cu
    owner-ul (aceeași familie cu (e)).
+6b. **LOT C — restul registrului frontend (8 reparații) CONSTRUIT pe branch
+   (cc50a2fc + paznicii deb36ec8 + minimele verificatorilor), porți verzi —
+   NEmers în master la ora scrierii, NEmăsurat live** (rândul din RAMAS se taie
+   doar cu PR + probă live): C1 codecul Opus mort în zbor → anunț `opus_cazut`
+   + PCM pe ambele sensuri (înainte: difuzor permanent mut); C2 tura online
+   complet goală → rând onest `turnEmpty` (×7 limbi; cadrele PUR-protocol
+   {heard}/{lang}/{ping} NU sting rândul — altfel era literă moartă); C3
+   slice(0,-2) orb → ștergere țintită pe ts; C4 verdicte oneste
+   sessionExpired/paywallRow/rateLimited; C5 {ignored} păstrează bula
+   confirmată de {heard}; C6 toggleMic redă vocii live o șansă (reset
+   vlCazutRef); C7 atașamentul singur în timpul lucrului = barge-in (nu
+   aruncat); C8 pre-roll de barge-in — ONEST spus: recuperează ultimele
+   ~250 ms dinaintea deschiderii porții, deci MICȘOREAZĂ pierderea capului de
+   frază, n-o elimină (cine începe să-l întrerupă mai devreme tot pierde
+   începutul; nota corectează și §15d, care descrie comportamentul pre-C8 —
+   „cadre-zero pure cât Kelion vorbește" — acum inelul reține cadrele reale).
+   Lacăte: lotC.test.ts (lanțul opus pe 3 verigi, pre-roll, rândurile oneste)
+   + i18n.test.ts + aDouaIntrebare rescris.
+   **Rânduri NOI de registru din verificarea lotului C (nereparate):**
+   (h) flush-ul pre-roll pe calea fără-VAD e necondiționat — un prag RMS pe
+   inel ar tăia coada de tăcere/ecou (recomandarea verificatorului);
+   (i) registrul de limbă PT e amestecat pt-PT/pt-BR (tu vs. você) — clasă
+   veche, cheile noi au urmat tu-ul european; (j) comentariul din era cozii la
+   trimiterea-ocupat (ChatPanel ~3204) descrie încă „you queue it".
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

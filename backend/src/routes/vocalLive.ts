@@ -693,7 +693,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // PCM pe ambele sensuri — aceeași ordine WS garantează că uploadurile
             // de după anunț vin ne-tag-uite.
             opusActiv = false
-            app.log.warn('vocal-live: clientul a anunțat căderea codecului Opus — hopul revine pe PCM')
+            // INFO, nu warn (verificatorul C): la warn (nivel 40) intra în inelul
+            // scanat de auto-vindecare și, nefiind în amprentele de infrastructură,
+            // după 2 sesiuni cu codec mort ar fi deschis un ordin FALS de „reparat
+            // cod" pentru un eveniment de mediu-browser DEJA tratat prin fallback
+            // (vocea continuă pe PCM). Simptomul ajunge oricum la diagnoză prin
+            // client_errors (console.error-ul clientului la aceeași cădere).
+            app.log.info('vocal-live: clientul a anunțat căderea codecului Opus — hopul revine pe PCM')
           }
         } catch {
           /* cadru text neînțeles — îl ignorăm, audio rămâne pe binar */

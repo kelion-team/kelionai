@@ -599,9 +599,13 @@ export default function ChatPanel({
     // Delivery receipt: the server's first frame arrived — the message got there.
     // (No separate UI: the user text already shows ONCE in the single band below.)
     if (c.receipt) return
-    // Orice ALT cadru de control = tura a produs ceva (suprafață/gest/sunet) —
-    // rândul onest de „tură complet goală" nu mai are motiv (vezi turaAvutSemneRef).
-    turaAvutSemneRef.current = true
+    // Un cadru REAL (suprafață/gest/sunet/ignored) = tura a produs ceva → rândul
+    // onest de „tură complet goală" nu mai are motiv. Cadrele PUR-PROTOCOL
+    // ({heard}/{lang}/{ping}) NU contează — oglinda taxonomiei serverului
+    // (chat.ts backend: „PURE-protocol frames do NOT count"). Fără excluderea
+    // asta, {heard} (trimis pe FIECARE tură ne-ambientală) ridica flag-ul mereu
+    // și rândul onest era literă moartă fix pe cazul lui (verificatorul C).
+    if (c.heard === undefined && c.lang === undefined && c.ping === undefined) turaAvutSemneRef.current = true
     // MODUL MAȘINĂ — GARDA DE SUPRIMARE SCOASĂ (Adrian, 13 aug: „când spune orice,
     // trebuie să fie executat acel orice"). Aici stătea plasa care, la volan, arunca
     // ORICE frame de suprafață vizuală (monitor/hartă/document/card/imagine/tab) deși
@@ -659,8 +663,9 @@ export default function ChatPanel({
       // nu apare Kelion"). Înainte, tura stinsă ștergea AMBELE bule — ce ai
       // spus dispărea fără urmă, iar „m-a auzit și a tăcut" arăta identic cu
       // „nu m-a auzit deloc". Acum: răspunsul gol pleacă, dar bula ta RĂMÂNE
-      // dacă serverul a confirmat ce a auzit ({heard} vine înaintea {ignored}),
-      // marcată că n-a primit răspuns. Se șterge doar substituentul fără text.
+      // dacă serverul a confirmat ce a auzit ({heard} vine înaintea {ignored});
+      // fără marcaj special — simpla prezență a bulei fără răspuns SPUNE că a
+      // fost auzită și tura s-a stins. Se șterge doar substituentul fără text.
       const vt = voiceTurnRef.current
       voiceTurnRef.current = null
       stopVoice()
