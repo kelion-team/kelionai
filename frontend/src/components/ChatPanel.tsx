@@ -308,11 +308,6 @@ export default function ChatPanel({
   // BRAIN-INPUT TICKER (Adrian, Jul 10): the EXACT text handed
   // to the brain on the current turn — it comes from the SERVER ({heard}), not a local echo.
   const [heard, setHeard] = useState('')
-  // Banda-teletext a rulat DEJA răspunsul ăsta? (Adrian, 8 aug: „repetă scris,
-  // baleind mesajul la infinit" — orice re-montare a benzii repornea animația
-  // one-shot, deci același text mătura ecranul iar și iar.) Ținem minte ts-ul
-  // răspunsului deja baleiat: o trecere pe răspuns, apoi banda tace.
-  const [tickerDoneTs, setTickerDoneTs] = useState<number | null>(null)
   // THE VISIBLE CONVERSATION (Aug 1): the chat log stays pinned to the newest
   // bubble — auto-scroll on every new message and on every streaming update.
   const chatLogRef = useRef<HTMLDivElement | null>(null)
@@ -320,11 +315,6 @@ export default function ChatPanel({
     const el = chatLogRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages])
-  // THE BAND GOES TO SLEEP WHEN IDLE (Adrian, Aug 1: "the sweeping stays on
-  // screen"). The K band (the reply ticker) used to stay on screen FOREVER
-  // after the reply. It still shows the flow live, but 12s after the turn ends
-  // it lies down — the page breathes. Any new activity wakes it.
-  const [idleBandHidden, setIdleBandHidden] = useState(false)
   // THE CALM SIGNAL for the auto-update countdown (lib/activity.ts): voice
   // session open / request in flight / draft in the composer — while any of
   // these is true, the countdown stands still so the reset never cuts work.
@@ -334,17 +324,6 @@ export default function ChatPanel({
     reportActivity({ voice: false, busy, draft: input.trim().length > 0 })
   }, [busy, input])
   useEffect(() => () => reportActivity({ voice: false, busy: false, draft: false }), [])
-  // The sleep timer for the K band: runs only when a turn just ENDED (not busy,
-  // last word is the assistant's). New work resets it and wakes the band.
-  useEffect(() => {
-    const last = messages.at(-1)
-    if (busy || !last || last.role !== 'assistant') {
-      setIdleBandHidden(false)
-      return
-    }
-    const id = window.setTimeout(() => setIdleBandHidden(true), 12_000)
-    return () => window.clearTimeout(id)
-  }, [busy, messages])
   // AVATARUL SE DĂ ÎN COLȚ LA O ANALIZĂ (Adrian, 12 aug: „mută avatarul… când se
   // afișează o analiză, că acoperă ce scrie"; alegerea lui: avatar în colț, mic).
   // Chatul (z-index 30) stă peste avatarul central; la un răspuns LUNG (o
@@ -358,14 +337,6 @@ export default function ChatPanel({
   // TICKER (fixed rule, Jul 10): the scroll duration scales with the text
   // length, so it stays readable — neither too fast, nor forever.
   const tickerDur = (s: string): string => `${Math.min(22, Math.max(3.5, s.length / 14))}s`
-  // QUICK SUMMARY (Adrian, Jul 10: "if the pause outlasts the thinking, don't
-  // leave a gap on the brain's line — a few-word summary, hold it until
-  // the next one"). Extracted INSTANTLY from {heard} (the request already confirmed by
-  // the server as handed to the brain) — zero latency, doesn't wait for the model.
-  const synthesize = (s: string, maxWords = 8): string => {
-    const words = s.trim().split(/\s+/).filter(Boolean)
-    return words.length <= maxWords ? s.trim() : `${words.slice(0, maxWords).join(' ')}…`
-  }
   // VOCE SCOASĂ (21 aug clean-slate): microfonul, sesiunile live (Gemini/Realtime),
   // amprenta vocală și tura vocală au fost șterse cu totul de pe frontend. Rămâne
   // DOAR chatul TEXT; nu mai există micRef, realtime*, voiceprint sau voiceTurnRef.
@@ -2018,29 +1989,13 @@ export default function ChatPanel({
               <span className="speech-tail-text">…</span>
             </span>
           </div>
-        ) : ((lastAssistant?.content && !idleBandHidden) || busy) && lastAssistant?.ts !== tickerDoneTs ? (
-          <div className="heard-band kelion-band" aria-live="polite">
-            <span className="heard-band-label kelion-k" title={t.heardKelionTitle}>K</span>
-            {busy ? (
-              <span className="speech-tail">
-                <span className="speech-tail-text">
-                  {cleanMsg(lastAssistant?.content ?? '') || (heard ? synthesize(heard) : '…')}
-                </span>
-              </span>
-            ) : (
-              <span className="ticker">
-                <span
-                  className="ticker-text"
-                  key={lastAssistant?.ts ?? 'empty'}
-                  style={{ '--ticker-dur': tickerDur(cleanMsg(lastAssistant?.content ?? '')) } as CSSProperties}
-                  onAnimationEnd={() => setTickerDoneTs(lastAssistant?.ts ?? null)}
-                >
-                  {cleanMsg(lastAssistant?.content ?? '')}
-                </span>
-              </span>
-            )}
-          </div>
         ) : null}
+        {/* RĂSPUNSUL lui Kelion NU se mai arată/baleiază în banda de jos (Adrian,
+            21 aug: „când răspunde Kelion, răspunde pe monitor, e ok; în bara de
+            chat de jos nu trebuie să mai afișeze sau să baleze textul; și când e
+            vorbit, gata audio"). Răspunsul rămâne pe MONITOR (+ audio la revenirea
+            vocii). Banda de jos ține DOAR ecoul a ce transmiți TU (👤, regula ta
+            veche „textul o singură dată") și semnul de gândire (🧠) — nu răspunsul. */}
         {/* REMOVED (Adrian's order, Jul 10: „remove that microphone-is-muted
         thing, it's wrong” + „microphone with autovox, instantly”): the mic-mute
         hint is gone. (21 aug: microfonul + auto-înrolarea din audioIO au fost
