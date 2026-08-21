@@ -36,16 +36,29 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       citire și faptă; slotul încercării 1 rămâne pe modelul de pornire la
       escaladarea din mijloc; click_monitor „doar-afișare" dar apasă butoane
       reale (o reluare îl poate re-apăsa). Detalii: AI-HANDOFF §17 pct. 6.
-      **LOT C — restul registrului frontend (C1–C8) CONSTRUIT pe branch**
-      (cc50a2fc + paznici + minimele verificatorilor; porți verzi: FE build +
-      92/92, BE 1910/1910+, gărzi 0) — **RĂMAS: merge + măsurat live** (rândul
-      se taie doar cu PR + probă live). C8 spus onest: pre-roll-ul recuperează
-      ultimele ~250 ms — micșorează pierderea capului de frază la barge-in,
-      n-o elimină. Rânduri NOI din verificarea C (nereparate): (h) pragul RMS
+      **LOT C — restul registrului frontend (C1–C8)** (cc50a2fc + paznici +
+      minimele verificatorilor; porți verzi) — **MERGE (PR #1321) + MĂSURAT
+      LIVE 21 aug 22:56Z: v=141f09d, ver 6.5.** Proba pe dispozitiv (vocea,
+      barge-in, pragul RMS) rămâne la owner. C8 spus onest: pre-roll-ul
+      recuperează ultimele ~250 ms — micșorează pierderea capului de frază la
+      barge-in, n-o elimină.
+      **LOT D — registrul docs-vs-cod (38 constatări, audit proaspăt) — tranșa 1
+      CONSTRUITĂ pe branch** (fb7f7e0b + minimele verificatorilor): manualul
+      user-facing adus la cod (descărcarea invizibilă, VAD opt-in, „always
+      spoken" scos, offline=tastare, 8 limbi), comentariile-minciună corectate
+      (config/iscoada/AEC/prefs), AI-HANDOFF banner + §18 cu adevărurile
+      măsurate, RAMAS/CLAUDE/PROIECT aduse la zi — **RĂMAS: merge + verificare
+      live** (manualul rescris apare pe kelionai.app; traducerile se
+      re-încălzesc singure — cache pe hash, măsurat de verificator) + tranșa 2
+      (restul constatărilor doar consemnate în §18, nu rescrise la sursă).
+      **Rând nou (n): butonul de ștergere cont pică TĂCUT** — serverul refuză
+      mereu (403, ordinul 14 aug), UI-ul nu zice nimic (prefs.ts/CustomerSettings)
+      — de decis cu owner-ul: butonul scos sau mesaj onest.
+      Rânduri NOI din verificarea C (nereparate): (h) pragul RMS
       0.02 pe flush-ul fără-VAD e euristic în ambele direcții (ecou TARE trece,
       voce slabă/departe își pierde pre-roll-ul) — se confirmă doar pe telefonul
-      owner-ului; (i) registrul PT amestecat pt-PT/pt-BR; (j) comentariul
-      din era cozii la trimiterea-ocupat (~ChatPanel:3204); (k) fallback-ul
+      owner-ului; (i) registrul PT amestecat pt-PT/pt-BR; (j) REPARAT
+      (comentariul din era cozii rescris la barge-in); (k) fallback-ul
       base=next din flushMesaje rămâne instantaneu pe secvențe contradictorii
       (ștergere în prefix cât curge text); (l) turaAvutSemneRef per-component —
       cadre ale sesiunii live/ture abortate pot suprima fals rândul onest (doar
@@ -85,9 +98,11 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)
       - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
-      Voce-only: încă neîncepută (fixul cu un motor așteaptă reproul owner-ului:
-      rupe TASTÂND cât vorbește, sau PUR vorbind?). FĂCUT din proiect: charter-ul
-      (în legile creierului chat+voce + capitolele admin din Manual).
+      [NOTĂ 21 aug — propoziția veche „Voce-only: încă neîncepută" e DEPĂȘITĂ:
+      pasul 1 (un singur motor) e bifat mai sus, CONSTRUIT și LIVE v6.2; pasul 6
+      (input scris → output voce) funcționează de facto pe aceeași cale cât
+      sesiunea Live e vie. FĂCUT din proiect: charter-ul (în legile creierului
+      chat+voce + capitolele admin din Manual).]
 - [ ] DEVIN = constructorul extern (owner 20 aug: „punel pe devin cu cheie" + „b").
       CONSTRUIT ÎN COD (pe branch, verificat: tsc 0, suită 1867, 5 porți verzi):
       client `services/devin.ts` (sesiune cu plafon `max_acu_limit` + stare/ACU
@@ -158,8 +173,9 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       sunat nimic (fără dublare). (5) răspunsul terminat rămâne vizibil pe banda „K"
       (nu mai dispărea când nu era busy/monitor). DOVEZI: tsc 0, build verde, 82 teste
       verzi, 2 porți (hardcod+sintaxă) 0. RĂMAS de PROBAT LIVE de Adrian (nu pot de aici,
-      depinde de dispozitiv): (a) pe telefonul lui chiar apare bara „se descarcă X%" și
-      ajunge „gata ✓" (sau spune cinstit „fără WebGPU"); (b) răspunsul scris se AUDE;
+      depinde de dispozitiv): (a) [DEPĂȘIT 21 aug — bara „se descarcă X%" a fost
+      ȘTEARSĂ la ordin; proba nouă: modelul apare singur în Cache Storage
+      `webllm/*` + turele offline răspund]; (b) răspunsul scris se AUDE;
       (c) în avion app-ul se deschide. SEPARAT, de decis cu el (Agent 3, cost): sesiunea
       Gemini Live pornește automat și ascultă CONTINUU → ~£300+/lună; de pus poartă/VAD.
 - [x] ORDIN 20 aug (verbatim): „nu se poate activa doar la voce? nu la zgomot?" + „fa
@@ -1394,7 +1410,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 | D2 | **Testul de raționament pe creier plătit** | nefăcut. Cât timp punga OpenRouter e goală, creierul merge pe modele gratuite slabe. |
 | D3 | **Google Photos, YouTube personal** | ✅ **procesat/verificat** (5 aug): Scope-urile YouTube (`youtube.readonly`) și Cloud Platform sunt incluse în `FULL_SCOPES` pe `/auth/google` și `/auth/google/connect`. Google Photos Library API read-only a fost eliminat de Google pe 31 martie 2025 (necesită Photos Picker API). Ownerul trebuie doar să reconecteze Google pentru re-autorizare. |
 | D4 | **Etapa 5b — instalări de sistem ca runbook** | constructorul poate instala pachete npm, dar nu unelte de sistem (apt). Operație privilegiată pe VPS, de făcut cu grijă. |
-| D5 | **Barge-in prin STT streaming** | **Analizat 30 iul, NEATINS deliberat.** Barge-in-ul pe vocea live (full-duplex) MERGE — îl face OpenAI Realtime nativ (`interrupt_response: true`). Lipsește doar pe calea de auz a chatului (`micStream` → `/api/asr-stream`): cât timp Kelion vorbește, microfonul e pe mut, deci nu curge audio și n-are ce detecta întreruperea. Reparația reală înseamnă să ținem microfonul deschis cât vorbește și să ne bazăm pe anularea de ecou — cu riscul concret ca **Kelion să se audă pe el însuși și să-și taie singur vorba**. Nu se poate proba fără microfon; nu se publică nedovedit pe un produs viu. De făcut cu tine în față, cu microfonul pornit. |
+| D5 | **Barge-in prin STT streaming** | [NOTĂ 21 aug: rândul descrie ALTĂ aplicație — OpenAI Realtime e scos total, `/api/asr-stream` șters din 5 aug. Barge-in-ul EXISTĂ azi pe calea de rezervă Chirp (micStream BARGE_*); pe sesiunea LIVE detectorVoce e DEZARMAT (clientul trimite aec:false) + NO_INTERRUPTION + half-duplex — prin voce NU întrerupi cât vorbește; întrerupi tastând/buton, iar pre-roll-ul lotului C păstrează ~250 ms. Istorie, nu sarcină.] |
 | D6 | **Pauza de autonomie invizibilă în UI** | ✅ **reparat** (30 iul, PR #574): la amânare, lucrătorul trimite un pas marcat „⏳" care sare peste throttle, iar panoul arată insigna **„Așteaptă cotă"** (în toate cele 7 limbi) în loc de „Lucrează" cu pasul înghețat 40 de minute. |
 | D7 | **Corpul erorii 502 aruncat de client** | ✅ **reparat** (30 iul, PR #573): serverul trimite acum și `code` (ce anume a picat) și `retryable`; clientul le citește și afișează motivul pe înțelesul omului — „furnizorul vocii n-a răspuns la timp", „nu mai ai credit" — în loc de „realtime 502". |
 | D8 | **DOUĂ VOCI simultan cu două taburi deschise** (Adrian, 4 aug seara: „am 2 voci") | fix scris 4 aug (zăvor pe TOT lanțul vocii între taburi: takeover + inimă la 10s + rămas-bun; regulile pure în `frontend/src/lib/voceUnica.ts`) — cauza: zăvorul vechi acoperea doar sesiunea live, dictarea de rezervă scăpa și vorbeau amândouă. **Nu pot verifica live până la merge+deploy+test cu 2 taburi** |
@@ -1463,7 +1479,7 @@ se șterge singur; ce nu e într-un commit dispare. Le scriu aici ca să nu se p
 
 | Ce | Stare | Decizia ta |
 |---|---|---|
-| „editii-pre-rebazare" — cascada de modele Realtime (`realtimeModelFallbacks`) | **deja în master**, verificat: `config.ts` are câmpul. Stash-ul era o copie. | nimic de făcut |
+| „editii-pre-rebazare" — cascada de modele Realtime (`realtimeModelFallbacks`) | [NOTĂ 21 aug: câmpul NU mai există — OpenAI extirpat total; rândul e istorie] | nimic de făcut |
 | **„fallback abonament liber"** — 28 iul, „nu mai dau un ban" + contul Claude blocat pe limită | **NU e în master.** Verificat: `subBrainFailed` nu apare în `chat.ts`. Era marcat de autorul lui „se aplică doar dacă Adrian zice da", fiindcă venea peste o restaurare făcută de tine. | **a ta** |
 
 **Ce făcea a doua**, exact: când tura grea a adminului mergea pe creierul de
@@ -1640,7 +1656,11 @@ poate citi). Runbook-ul e scris, corect și sub test. Se rulează când revin.
 
 ### Soluțiile pentru arderea de credit (K15) — decizia ta, cu cifre
 
-Constructorul rulează structural pe `:free`; pe VPS e pus **conștient** `CONSTRUCTOR_MODEL=fable-5` + `CONSTRUCTOR_ALLOW_PAID=1` (alegerea ta din 2 aug, „fable 5 peste tot"). Asta arde ~$4-5 de fiecare ordin de build. Trei pârghii, oricare sau combinate:
+[NOTĂ 21 aug: secțiunea e ISTORIE — knob-urile `CONSTRUCTOR_MODEL`/`CONSTRUCTOR_ALLOW_PAID`
+NU mai există în cod (constructorul e DOAR Aider+Ollama local free / Devin;
+plătitul e interzis de lacăt). Nu mai e nimic de decis aici.]
+
+Constructorul rula structural pe `:free`; pe VPS era pus **conștient** `CONSTRUCTOR_MODEL=fable-5` + `CONSTRUCTOR_ALLOW_PAID=1` (alegerea ta din 2 aug, „fable 5 peste tot"). Asta ardea ~$4-5 de fiecare ordin de build. Trei pârghii, oricare sau combinate:
 1. **Plafon zilnic de cheltuială** pe buclă: când s-a ars X$ azi, oprește ordinele plătite și te anunță (exact „faliment curat" prevenit). Se poate face și cu buton manual.
 2. **Constructorul pe `:free` implicit**, escaladează la Fable 5 **doar** când pasul pică pe neputința modelului (design-ul de escaladare există deja) — plătești doar unde chiar e nevoie.
 3. **Analiza cerințelor pe model ieftin** (deja e pe `:free`), doar construirea pe plătit.
@@ -1779,21 +1799,18 @@ memoria iscoadelor scrisă pe 'kelion' (era scriere-oarbă); memoria de lungă d
 `niveluri`/`gest`/`gesture` în `CADRE_ECRAN`; `proba-restaurare` anunțat în `run_runbook`.
 
 **VAL 2 — RĂMAS (dovadă în raportul workflow-ului, `tasks/wi0dv62rm.output`):**
+[NOTĂ 21 aug, auditul docs-vs-cod: 3 din rândurile de mai jos s-au REPARAT
+între timp — marcate individual; nu le relua.]
 
-- **Frame `niveluri` nu se EMITE pe voce.** Adăugat în `CADRE_ECRAN`, dar
-  `turaCreierului` (vocalLive.ts) NU pasează contextul `tranzactii` către /api/chat,
-  deci `piata` e undefined și cadrul {niveluri} nici nu se produce. De cablat:
-  clientul vocal trimite starea de tranzacționare + turaCreierului o pune în body.
-- **Persona vocală supra-declară vedere continuă.** Textul personei promite „primești
-  CADRELE ei în timp real — aia e ce VEZI acum", dar ceasul de cadre a fost scos pe
-  9 aug (`cadruLive` + calea `{type:'cadru'}`/`scrieCadru` = cod mort); vederea reală
-  e doar la cerere, prin ușă. De ales: ori repui ceasul, ori corectezi persona +
-  scoți codul mort (ca modelul să nu pretindă o vedere pe care n-o are).
-- **Deblocarea admin prin voce = listener fără emițător.** `Stage.tsx` ascultă
-  `kelion:admin-unlock`, dar nimeni nu-l emite (amprenta vocală a fost scoasă din
-  calea vocii pe 6 aug). Lacătul e azi dezarmat, dar la rearmare doar secretul tastat
-  ar merge. De ales: ori emiți evenimentul la potrivirea amprentei, ori scoți
-  listener-ul + comentariile care promit calea.
+- [REPARAT între timp — vocalLive.ts:151/180/1301 pasează `tranzactii`]
+  **Frame `niveluri` nu se EMITE pe voce.** Adăugat în `CADRE_ECRAN`, dar
+  `turaCreierului` (vocalLive.ts) NU pasa contextul `tranzactii` către /api/chat.
+- [REPARAT PE JUMĂTATE — persona corectată („VEDEREA la CERERE, NU continuu",
+  vocalLive.ts:250-254); RĂMAS doar codul mort `cadruLive`/`{type:'cadru'}`/
+  `scrieCadru` (clientul nu-l trimite niciodată) — registrul (o)]
+  **Persona vocală supra-declară vedere continuă.**
+- [REPARAT între timp — listener-ul mort a fost SCOS (Stage.tsx:904)]
+  **Deblocarea admin prin voce = listener fără emițător.**
 - **Memoria 'tranzactii' nu e reamintită în conversație** (doar butonul Analiză o
   citește). Într-o discuție normală despre BTC, observațiile pietarului nu apar. De
   decis dacă e intenționat (memorie doar-prin-buton) sau de cablat un recall pe

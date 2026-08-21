@@ -3,6 +3,14 @@
 > Versiunea FINALĂ, autoritară. Deciziile de mai jos sunt luate cu owner-ul, pas
 > cu pas. Istoricul raționamentului (cum am ajuns la fiecare) = `DRAFT-PROIECT-VOCE-ONLY.md`.
 > **Nimic nu se codează până owner-ul nu zice „start build".**
+>
+> **STARE (21 aug — owner a zis „toate"):** pasul 1 (un singur motor online) e
+> CONSTRUIT + LIVE v6.2 (turele scrise merg PRIN Live, Chirp suprimat cât Live
+> trăiește; scoaterea totală a lui Chirp = pasul 7/Piper). Pasul 6 funcționează
+> de facto pe aceeași cale (scrii → răspunde cu vocea Live). Nuanță la §5/pasul
+> 2: pe calea GREA vocea trece prin /api/chat unde poartaFaptelor RULEAZĂ —
+> gap-ul real rămas e calea ușoară (transcriptul Live) + reformularea de după
+> unealtă. Pașii 2–5, 7: neîncepuți. Bifele cu dovadă: RAMAS-DE-FACUT.md.
 
 ---
 

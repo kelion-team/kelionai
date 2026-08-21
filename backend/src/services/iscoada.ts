@@ -88,8 +88,10 @@ export function pornesteIscoadele(): void {
   if (pornit) return
   pornit = true
   const minute = Math.max(60, Number(process.env.ISCOADA_MIN) || 360)
-  // OFF BY DEFAULT (9 aug): fără comutatorul autonom pornit, patrula nu cheltuie
-  // niciun token (nici Serper, nici Gemini) — timerul bate, tura e no-op.
+  // [ADUS LA COD, lot D] Gardul de mai jos consultă autonomActiv() — care de pe
+  // 16 aug întoarce TRUE necondiționat (LEGEA: off-ul autonom a fost scos).
+  // Deci patrula RULEAZĂ și cheltuie (Serper+Gemini) la fiecare bătaie, prin
+  // construcție; vechiul „OFF BY DEFAULT (9 aug)" nu mai e adevărat.
   const ocol = async (): Promise<void> => {
     if (!(await autonomActiv())) return
     await unOcolIscoada().catch(() => {})

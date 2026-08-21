@@ -10,6 +10,11 @@
 > Devin sau tu — dacă respecți 100% proiectul." Orice AI care atinge calea
 > chat/voce îl respectă 100%. Progresul + bifele: în `RAMAS-DE-FACUT.md`
 > (actualizare după FIECARE pas făcut ȘI verificat live).
+>
+> ⚠ **ORDINEA DE CITIRE (21 aug): starea curentă e în §16–§18.** Secțiunile
+> §2–§15 sunt parțial DEPĂȘITE (auditul docs-vs-cod din §18 a măsurat zeci de
+> divergențe) — orice afirmație de acolo despre fișiere/arhitectură/comportament
+> se verifică în COD înainte de a fi crezută.
 
 ## Cerința #42 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - CONCLUZIE DEFINITIVĂ (a 3-a încercare, același verdict ca la #32/#33/#36/#39/#41): capturarea unui screenshot al monitorului live este o acțiune a asistentului Kelion din aplicație (unelte de ecran/browser), NU o modificare de cod din atelierul constructorului. Atelierul nu are ecran, sesiune de admin sau DevTools — orice „screenshot" produs de aici ar fi o simulare interzisă de regula anti-fake.
@@ -1354,10 +1359,10 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    dar chat.ts spune el însuși că apasă ELEMENTE REALE (orice buton, inclusiv din
    admin) → o reluare îl poate re-apăsa — tensiune de clasificare, de lămurit cu
    owner-ul (aceeași familie cu (e)).
-6b. **LOT C — restul registrului frontend (8 reparații) CONSTRUIT pe branch
-   (cc50a2fc + paznicii deb36ec8 + minimele verificatorilor), porți verzi —
-   NEmers în master la ora scrierii, NEmăsurat live** (rândul din RAMAS se taie
-   doar cu PR + probă live): C1 codecul Opus mort în zbor → anunț `opus_cazut`
+6b. **LOT C — restul registrului frontend (8 reparații) — MERGE (PR #1321) +
+   MĂSURAT LIVE 21 aug 22:56Z: /api/version → v=141f09d, ver 6.5, publicat
+   22:28:53Z** (proba pe dispozitiv — vocea/barge-in/pragul RMS — rămâne la
+   owner): C1 codecul Opus mort în zbor → anunț `opus_cazut`
    + PCM pe ambele sensuri (înainte: difuzor permanent mut); C2 tura online
    complet goală → rând onest `turnEmpty` (×7 limbi; cadrele PUR-protocol
    {heard}/{lang}/{ping} NU sting rândul — altfel era literă moartă); C3
@@ -1376,8 +1381,8 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    (h) flush-ul pre-roll pe calea fără-VAD e necondiționat — un prag RMS pe
    inel ar tăia coada de tăcere/ecou (recomandarea verificatorului);
    (i) registrul de limbă PT e amestecat pt-PT/pt-BR (tu vs. você) — clasă
-   veche, cheile noi au urmat tu-ul european; (j) comentariul din era cozii la
-   trimiterea-ocupat (ChatPanel ~3204) descrie încă „you queue it".
+   veche, cheile noi au urmat tu-ul european; (j) REPARAT — comentariul din era
+   cozii la trimiterea-ocupat rescris la realitatea barge-in.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor
@@ -1386,3 +1391,69 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
 **Reguli noi de lucru probate în sesiune:** stand de test în browser (Playwright
 Chromium local + oglindă de modele) — nicio pretenție de „merge" pe simțuri fără
 stand; verificare cu 3 agenți adversariali înainte de ORICE merge (mandat owner).
+
+## §18 — CORECTURI DOCS-VS-COD (lot D, 21 aug seara) — CE E ADEVĂRAT AZI
+
+Un audit dedicat (agent, 38 constatări, fiecare măsurată pe cod) a găsit că
+secțiunile vechi (§2–§15) afirmă în multe locuri INVERSUL codului. Regula de
+citire: **§16–§18 sunt starea curentă; orice afirmație din §2–§15 despre
+arhitectură/fișiere/comportament se verifică în COD înainte de a fi crezută.**
+Adevărurile măsurate (pe scurt — ce spun secțiunile vechi e fals unde contrazice):
+
+- **Manual (`services/manual.ts`) ADUS LA COD în lot D**: descărcarea offline e
+  automată+invizibilă (nu bară/buton), VAD-ul e OPT-IN (`kelion_vad='1'`;
+  implicit microfonul trimite CONTINUU), gura de siguranță a browserului e
+  DOAR offline (online nu mai există garanția „always spoken"), offline se
+  TASTEAZĂ (urechea offline nu există — pasul 7 nefăcut), lista de limbi a
+  manualului are 8 coduri.
+- **Ștergerea de cont NU există**: `routes/me.ts` refuză mereu (403,
+  ordinul 14 aug „baza nu se șterge prin nicio comandă"); §2 o descrie ca
+  „auto-ștergere GDPR" — fals. Butonul din CustomerSettings pică TĂCUT —
+  rând deschis de registru (n).
+- **Amprentele vocale**: `/api/voiceprint/save|identify` au fost ȘTERSE (27
+  iul); DELETE răspunde `amprentele_se_pastreaza` — §2 descrie rute inexistente.
+- **`bridge/` NU există** (șters 23 iul) — §2.3 „ACTIV pe VPS" și comanda din
+  §12 sunt istorie; scripturile de publicare stau în `deploy/`.
+- **`modelRouter.ts` NU există**; cheia Anthropic e SCOASĂ; modelele sunt
+  sigilate în `config.ts`: UNIC=`gemini-3.5-flash`, RAPID=`gemini-3.5-flash-lite`;
+  env-urile BRAIN_*/GEMINI_MODEL_GREU/KELION_FAST|TOP_MODEL NU se mai citesc
+  (lacăt pe absența lor). „Pinuit pe 2.5-flash prin env" (§6 lecția 8) e istorie.
+- **Slotul greu NU e Pro** — comentariile din config.ts corectate în lot D.
+- **Banii**: Stripe/webhook/BYOK/`paysOwnWay` NU există (Stripe e istorie din
+  31 iul; Revolut + cod unic); §5/§2/§8 le descriu ca vii — fals.
+- **LiveKit/voce-totală (§14 pct. 9) a DISPĂRUT integral** din cod (0 fișiere);
+  la fel `liveVoice.ts`, `/api/bridge/voice-turn`, `/api/admin/livekit/status`.
+- **Proba gratuită/demo**: `startDemo` nu există; `routes/demo.ts` servește
+  doar visit/lead/visitor-chat.
+- **Căutarea**: Serper e SINGURUL motor (`search_unavailable` la cădere) — nu
+  există fallback „Gemini grounded" (§4.5 fals).
+- **Workflow-urile CI**: doar cele 16 fișiere din `.github/workflows/` există;
+  public-latency-test / bridge-deploy / vps-restart / vps-qa-patrol /
+  vps-livekit-* / vps-voice-agent-run NU.
+- **DB**: `admin_pool` e DĂRÂMATĂ la pornire (`DROP TABLE IF EXISTS`); schema
+  reală are în plus task_timings, faceprints, voice_guests, payment_codes,
+  transactions, cerinte, build_jobs, client_errors, local_accounts,
+  login_tokens ș.a. — §9 e incomplet și parțial fals.
+- **Bucla de autonomie**: `orders/supervisor/autonomy/feedback/replayStore/
+  correct/greet/anthropic.ts` NU există; realitatea = `services/autonomie.ts`
+  (zidul schimbă ținta la PRAG_ESEC=2, fără giveup) + Devin/Aider prin
+  `deploy/`; frânele reale sunt pe BANI (`plafonConstructor`), nu „20/24h".
+- **Patrula (iscoada) rulează NECONDIȚIONAT** (autonomActiv()==true prin LEGEA
+  din 16 aug) — „off by default" era fals; comentariul corectat în lot D.
+- **micStream**: pauza frazei = 1400 ms; NU mai există STT/dictare/
+  `utteranceCoalescer` (audio brut la creier); raportarea erorilor =
+  `lib/errorReport.ts` → `/api/client-errors`.
+- **Imagini**: primar `imagen-4.0-generate-001`, rezervă `gemini-3.1-flash-image`
+  (`2.5-flash-image` întorcea 200 FĂRĂ imagine — de-asta nu e el).
+- **AEC pe mobil e OPRIT** (`echoCancellation: !eMobil`) — comentariile care
+  ziceau `true` corectate în lot D; de-asta pre-roll-ul de barge-in are gard RMS.
+- **Agenți**: rosterul are exact 91 intrări (nu „33"); memoria (`learnFromTurn`)
+  rulează pe Gemini direct (nu Haiku); `markFirstWord`/`sayToAdmin` nu mai
+  există ca identificatori; `adminLocked` NU mai există în chat.ts (mecanismul
+  vechi), dar trăiește ca CHEIE i18n folosită în Stage.tsx (corectura F2 a
+  verificatorului — formularea absolută de dinainte era falsă).
+- **Rânduri de registru noi din audit (nereparate)**: (n) butonul de ștergere
+  cont pică tăcut (UI mort — de decis cu owner-ul: scos sau mesaj onest);
+  (o) codul mort al căii `cadruLive`/`{type:'cadru'}` din vocalLive server
+  (clientul nu-l trimite niciodată); (p) §2/§9 din documentul ăsta merită
+  rescrise complet la inventarul real (muncă de doc separată, nefăcută).
