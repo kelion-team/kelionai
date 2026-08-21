@@ -8,6 +8,7 @@ import {
   pregatesteModelOffline,
   webgpuDisponibil,
   sincronizeazaStareOffline,
+  stergeModelOffline,
 } from '../lib/creierLocal'
 
 // ── MANAGER MODELE OFFLINE (owner 21 aug: „vreau să pot seta EU modelul, inclusiv
@@ -64,6 +65,16 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
     setModelOffline(id)
     setActiv(id)
     setSt(stareCreierLocal())
+  }
+  // Șterge un model descărcat (eliberează spațiul din cache). Owner: „să pot da jos
+  // modelul care nu-mi place".
+  const sterge = (id: string): void => {
+    void stergeModelOffline(id).then(() => {
+      if (!montat.current) return
+      setActiv(getModelOffline())
+      setDescarcate(modeleDescarcate())
+      setSt(stareCreierLocal())
+    })
   }
 
   return (
@@ -151,7 +162,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                           : 'nedescărcat'}
                     </div>
                   </div>
-                  <div style={{ flex: '0 0 auto' }}>
+                  <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                     {seDescarcaAcum ? (
                       <span style={{ fontSize: 12.5, fontWeight: 700, color: '#cbbcff' }}>⏬ {procent}%</span>
                     ) : eActiv && eDescarcat ? (
@@ -173,6 +184,27 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                         style={btnStil('#6ea8fe', '#10121a', seDescarca || areWebgpu === false)}
                       >
                         ⏬ Descarcă
+                      </button>
+                    )}
+                    {/* Șterge (dă jos modelul, eliberează spațiul) — doar dacă e descărcat
+                        și nu se descarcă nimic acum. Merge și pe cel activ (mută activul). */}
+                    {eDescarcat && !seDescarca && (
+                      <button
+                        type="button"
+                        onClick={() => sterge(m.id)}
+                        aria-label="Șterge modelul"
+                        title="Șterge — eliberează spațiul"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#c98a8a',
+                          fontSize: 15,
+                          lineHeight: 1,
+                          cursor: 'pointer',
+                          padding: '0 2px',
+                        }}
+                      >
+                        🗑
                       </button>
                     )}
                   </div>
