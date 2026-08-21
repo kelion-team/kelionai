@@ -1,10 +1,16 @@
-// ── CONTEXTUL OFFLINE: GPS + VITEZĂ + VEDERE (mod companion, faza 2) ─────────
-// Owner: „doar de chat, GPS cu vedere, să-l facă uman" + „la 2 va putea spune
-// viteza de deplasare?" — DA. Aici strângem semnalele pe care creierul LOCAL le
-// primește ca să fie UMAN offline: unde ești (coordonate), cât de repede te miști
-// (din `coords.speed`, care merge și fără net), și dacă te VEDE (fața prinsă de
-// cameră). Totul MĂSURAT — un semnal lipsă e omis, nu inventat (regula #1): dacă
-// nu știm viteza, nu spunem o cifră.
+// ── ANCORA ÎN REALITATE (spatio-temporală) a lui Kelion ──────────────────────
+// Owner 21 aug: „toți senzorii ăștia ar trebui să creeze logic un MEDIU pentru el,
+// localizat real — un sistem de ANCORARE ÎN REALITATE, spațio-temporală." Deci NU
+// mai listăm semnale răzlețe: le strângem într-un „AICI-ȘI-ACUM" real — CÂND (ora),
+// UNDE (coordonate), CUM te miști (viteza), CINE e prezent (fața), și ce e în JUR
+// (vederea, ca simț AMBIENTAL). Creierul local le folosește ca să fie ancorat în
+// realitate — ca un om care pur și simplu își știe împrejurimile.
+//
+// Vederea COMPLETEAZĂ celelalte simțuri (owner: „funcția văz completează auzit/vorbit/
+// locația ambientală… NU pentru a nara «te văd în pat»"): e conștientizare de fundal,
+// NU se narează; scena se descrie DOAR dacă userul întreabă explicit ce vede.
+//
+// Totul MĂSURAT — un semnal lipsă e OMIS, nu inventat (regula #1).
 
 export interface SemnaleContext {
   lat?: number
@@ -16,8 +22,11 @@ export interface SemnaleContext {
   /** Opțional: eticheta expresiei feței (din face-api), dacă există. */
   expresie?: string
   /** Văzul offline (M5): o descriere SCURTĂ a scenei din cameră (caption local,
-   *  vazOffline). Gol/absent = nu s-a văzut nimic → NU se raportează (regula #1). */
+   *  vazOffline). Simț AMBIENTAL — NU se narează; se descrie doar la cerere. */
   vede?: string
+  /** Ancora TEMPORALĂ (spatio-temporal): ora/data locală a userului, ca text scurt.
+   *  Gol/absent = necunoscut → omis (regula #1). */
+  ora?: string
 }
 
 /** m/s → descriere MĂSURATĂ + treaptă umană. '' dacă viteza e necunoscută (nu
@@ -37,26 +46,36 @@ export function descrieViteza(vitezaMs?: number | null): string {
  *  engleză; creierul răspunde în limba userului). PUR (testabil). Doar ce e
  *  MĂSURAT; gol dacă n-avem nimic. */
 export function contextPentruCreier(s: SemnaleContext): string {
+  // AICI-ȘI-ACUM: când / unde / mișcare / prezență / împrejurimi (ancoră spatio-temporală).
   const parti: string[] = []
+  if (s.ora) parti.push(`time now: ${s.ora}`)
   if (typeof s.lat === 'number' && typeof s.lon === 'number') {
-    parti.push(`location: ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}`)
+    parti.push(`place: ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}`)
   }
   const v = descrieViteza(s.vitezaMs)
   if (v) parti.push(`movement: ${v}`)
   if (s.fataDetectata) {
-    parti.push(s.expresie ? `you can see the person (looks ${s.expresie})` : 'you can see the person on camera')
+    parti.push(s.expresie ? `the person is here with you (looks ${s.expresie})` : 'the person is here with you')
   }
   if (s.vede) {
-    // Descrierea scenei din camera locală (caption offline, M5) — un fapt MĂSURAT
-    // (ce vede modelul acum), nu o invenție; creierul îl folosește ca un om care observă.
-    parti.push(`the camera scene looks like: ${s.vede}`)
+    // Simț AMBIENTAL (owner: completează, NU narează) — ce e în jur, pe scurt.
+    parti.push(`surroundings (camera, ambient): ${s.vede}`)
   }
   if (!parti.length) return ''
-  return (
-    `LIVE CONTEXT you can sense right now (offline, from the device's sensors): ` +
+  let text =
+    `YOUR REAL HERE-AND-NOW — a spatio-temporal anchor built from the device's own senses ` +
+    `(this is where and when you actually are; stay grounded in it, like a person who simply ` +
+    `knows their surroundings): ` +
     parti.join('; ') +
-    `. Use it naturally and briefly when it helps (like a human companion who notices), never robotically; never invent a value that is not listed here.`
-  )
+    `. Use it naturally and only when it helps, never robotically; never invent a value that is not listed here.`
+  if (s.vede) {
+    // Regula owner (21 aug): văzul NU se narează de la sine — doar la cerere.
+    text +=
+      ` The camera view is AMBIENT awareness only — it completes your other senses; do NOT announce or ` +
+      `narrate what you see on your own (never say things like "I see you in bed"). Describe the scene ONLY ` +
+      `if the person explicitly asks what you see.`
+  }
+  return text
 }
 
 /** Viteză din DOUĂ poziții + interval (fallback când senzorul nu dă `speed`).

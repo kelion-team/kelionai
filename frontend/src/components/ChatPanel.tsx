@@ -1287,16 +1287,24 @@ export default function ChatPanel({
             next,
             lang,
             ac.signal,
-            // FAZA 2 — GPS + viteză + vedere, MĂSURATE, injectate în creierul local
-            // ca să fie UMAN offline (spune viteza, unde ești, că te vede).
+            // ANCORA ÎN REALITATE (owner 21 aug: „senzorii creează un mediu localizat real,
+            // ancorare spatio-temporală"): CÂND (ora locală) + UNDE (GPS) + mișcare + prezență
+            // + împrejurimi (vederea, ambiental), toate MĂSURATE, injectate în creierul local.
             contextPentruCreier({
+              // ora locală REALĂ a device-ului (fusul userului) — ancora TEMPORALĂ.
+              ora: new Date().toLocaleString(undefined, {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
               lat: coordsRef.current?.lat,
               lon: coordsRef.current?.lon,
               vitezaMs: vitezaRef.current,
               fataDetectata: Boolean(face),
-              // VĂZUL OFFLINE (M5): ultima descriere a scenei din cameră (caption local,
-              // în fundal). Instant — nu așteaptă inferență; '' dacă modelul nu-i pregătit
-              // sau n-a văzut nimic proaspăt → omis din context (regula #1).
+              // VĂZUL (M5) ca simț AMBIENTAL (owner: completează, NU narează; descrie doar la
+              // cerere). Ultima descriere din fundal, instant; '' dacă nu-i gata → omis (regula #1).
               vede: descriereVazOffline(),
             }),
           )
@@ -1729,15 +1737,13 @@ export default function ChatPanel({
 
   // VĂZUL OFFLINE (Faza 1 · M5): cât camera e pornită, captioning în FUNDAL din cadrele deja
   // capturate (vazOffline, ~8s, model local Xenova/vit-gpt2). Se auto-închide dacă modelul
-  // nu-i descărcat, iar `esteActiv` = !esteConectat() îl ține pe TĂCERE cât suntem online
-  // (acolo vederea merge pe server → nu ardem bateria offline degeaba). Legenda ajunge INSTANT
-  // în contextul turei offline prin descriereVazOffline() (fără latență). Oprit la stingerea camerei.
+  // nu-i descărcat. Owner 21 aug: „toate default și la offline și la online" → rulează în
+  // AMBELE moduri (fără poartă de conexiune), ca văzul local să fie mereu cald/gata. Legenda
+  // ajunge INSTANT în contextul turei offline prin descriereVazOffline() (fără latență;
+  // online vederea merge oricum pe server, mai clară). Oprit la stingerea camerei.
   useEffect(() => {
     if (!cameraOn) return
-    return porneseteVazSampling(
-      () => latestFrameRef.current,
-      () => !esteConectat(),
-    )
+    return porneseteVazSampling(() => latestFrameRef.current)
   }, [cameraOn])
 
   // Close the functions menu on an outside click.

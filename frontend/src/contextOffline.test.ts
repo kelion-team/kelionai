@@ -36,16 +36,24 @@ describe('contextPentruCreier — doar ce e MĂSURAT, gol dacă nimic', () => {
   })
   it('viteză necunoscută nu apare în context', () => {
     const c = contextPentruCreier({ lat: 44, lon: 26, vitezaMs: null })
-    expect(c).toContain('location')
+    expect(c).toContain('place')
     expect(c).not.toContain('movement')
   })
-  it('vederea (M5): descrierea scenei intră în context; goală → omisă', () => {
+  it('vederea (M5): AMBIENTALĂ, NU se narează; se descrie doar la cerere; goală → omisă', () => {
     const c = contextPentruCreier({ vede: 'a person sitting at a desk with a laptop' })
-    expect(c).toContain('camera scene')
+    expect(c).toContain('surroundings')
     expect(c).toContain('a person sitting at a desk with a laptop')
+    // Owner 21 aug: NU narează de la sine; descrie DOAR dacă e întrebat.
+    expect(c).toMatch(/do NOT announce or narrate/i)
+    expect(c).toMatch(/only if the person explicitly asks/i)
     // Fără descriere de scenă → nimic despre cameră (nu inventează).
     expect(contextPentruCreier({ vede: '' })).toBe('')
     expect(contextPentruCreier({ fataDetectata: false })).toBe('')
+  })
+  it('ancora TEMPORALĂ (ora) intră în context — spatio-temporal', () => {
+    const c = contextPentruCreier({ ora: 'Friday, 21 August, 05:35 PM' })
+    expect(c).toContain('time now: Friday, 21 August, 05:35 PM')
+    expect(c).toMatch(/here-and-now|spatio-temporal/i)
   })
 })
 
