@@ -265,23 +265,27 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
   stare = 'se_pregateste'
   progres = 0
   pregatire = (async () => {
-    if (!(await webgpuDisponibil())) {
-      stare = 'fara_webgpu'
-      return false
-    }
-    // STOCARE PERSISTENTĂ (owner 20 aug: „fiecare update să fie preluat și după ce s-a
-    // downloadat, nu să șteargă ce e existent"). Update-ul ESTE preluat normal (se
-    // reîncarcă versiunea nouă), dar modelul (~2 GB în Cache Storage sub webllm/*) e deja
-    // ferit de ștergere (updateCheck + sw.js). Aici punem al doilea zid: cerem browserului
-    // să marcheze stocarea PERSISTENTĂ, ca modelul să nu fie evacuat nici sub presiune de
-    // spațiu. Best-effort — dacă browserul refuză, descărcarea merge oricum înainte.
+    // TOT corpul e într-un SINGUR try/finally: `pregatire` se golește pe ORICE ieșire
+    // (inclusiv ramura fără-WebGPU de mai jos) — altfel, cum `setModelOffline` nu mai
+    // atinge `pregatire`, o ieșire timpurie ar lăsa slotul plin pe veci și creierul nu
+    // s-ar mai încărca deloc în sesiunea aia (regresie prinsă de agentul de verificare).
     try {
-      const stocare = (navigator as unknown as { storage?: { persist?: () => Promise<boolean> } }).storage
-      if (stocare?.persist) await stocare.persist()
-    } catch {
-      /* indisponibil — modelul rămâne în cache, doar fără garanția anti-evacuare */
-    }
-    try {
+      if (!(await webgpuDisponibil())) {
+        stare = 'fara_webgpu'
+        return false
+      }
+      // STOCARE PERSISTENTĂ (owner 20 aug: „fiecare update să fie preluat și după ce s-a
+      // downloadat, nu să șteargă ce e existent"). Update-ul ESTE preluat normal (se
+      // reîncarcă versiunea nouă), dar modelul (~2 GB în Cache Storage sub webllm/*) e deja
+      // ferit de ștergere (updateCheck + sw.js). Aici punem al doilea zid: cerem browserului
+      // să marcheze stocarea PERSISTENTĂ, ca modelul să nu fie evacuat nici sub presiune de
+      // spațiu. Best-effort — dacă browserul refuză, descărcarea merge oricum înainte.
+      try {
+        const stocare = (navigator as unknown as { storage?: { persist?: () => Promise<boolean> } }).storage
+        if (stocare?.persist) await stocare.persist()
+      } catch {
+        /* indisponibil — modelul rămâne în cache, doar fără garanția anti-evacuare */
+      }
       const webllm = await import('@mlc-ai/web-llm')
       const eng = (await webllm.CreateMLCEngine(idTinta, {
         initProgressCallback: (r: { progress?: number }) => {
@@ -307,7 +311,7 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
       motor = null
       return false
     } finally {
-      pregatire = null
+      pregatire = null // ÎNTOTDEAUNA, pe orice cale de ieșire — nu lăsa slotul blocat
     }
   })()
   return pregatire

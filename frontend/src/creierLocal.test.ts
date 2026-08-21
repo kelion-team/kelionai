@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { istoricPentruLocal, personaLocala, stareCreierLocal, type MesajLocal } from './lib/creierLocal'
+import {
+  istoricPentruLocal,
+  personaLocala,
+  stareCreierLocal,
+  pregatesteModelOffline,
+  type MesajLocal,
+} from './lib/creierLocal'
 
 // ── CREIERUL LOCAL OFFLINE — părțile PURE (faza 1) ──────────────────────────
 // Nu putem proba WebGPU/modelul aici (doar pe device), dar CONTRACTUL pur —
@@ -56,5 +62,22 @@ describe('stareCreierLocal — pornește onest, nu pretinde „gata"', () => {
     const s = stareCreierLocal()
     expect(s.stare).toBe('neintrodus')
     expect(s.progres).toBe(0)
+  })
+})
+
+// ── REGRESIA prinsă de agentul de verificare (21 aug): slotul `pregatire` trebuie
+// golit pe ORICE ieșire, inclusiv ramura fără-WebGPU. Altfel (cum setModelOffline nu
+// mai atinge `pregatire`) o ieșire timpurie ar lăsa slotul plin pe veci → creierul
+// nu s-ar mai încărca deloc. Aici (jsdom, fără WebGPU) pregătirea iese pe `fara_webgpu`.
+describe('pregatesteModelOffline — nu blochează slotul la ieșirea fără-WebGPU', () => {
+  it('a doua chemare NU întoarce promisiunea stală (slotul e golit în finally)', async () => {
+    const p1 = pregatesteModelOffline()
+    expect(await p1).toBe(false)
+    expect(stareCreierLocal().stare).toBe('fara_webgpu')
+    // Dacă `pregatire` ar rămâne plin, guard-ul `if (pregatire) return pregatire` ar
+    // întoarce EXACT p1 (stală). Golit corect → a doua chemare e o promisiune NOUĂ.
+    const p2 = pregatesteModelOffline()
+    expect(p2).not.toBe(p1)
+    expect(await p2).toBe(false)
   })
 })
