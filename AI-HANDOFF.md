@@ -1302,7 +1302,9 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    (`vocalLive.ts` client), `releaseTtsFocus` care pierdea starea 'live'
    (`audioFocus.ts`), lacătele server care lăsau tura scrisă MUTĂ (`taiereManuala`
    + poarta de adresare, `routes/vocalLive.ts`). Live v6.2 (v=de1984f).
-5. **Lot A — descărcarea offline e complet INVIZIBILĂ și complet AUTOMATĂ** (ordin
+5. **Lot A — descărcarea offline e complet INVIZIBILĂ și complet AUTOMATĂ — LIVE
+   v6.3** (MĂSURAT 21 aug 21:20Z: /api/version → v=688febd, publicat 21:02:45Z;
+   PR #1319; proba pe dispozitiv rămâne la owner) (ordin
    verbatim: „să se analizeze automat dacă versiunea locală are diferențe în minus
    față de cea care se downloadează; dacă da se auto-downloadează. Acest proces se
    face automat nu se mai afișează deloc"):
