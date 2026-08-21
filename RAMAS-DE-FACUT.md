@@ -92,7 +92,15 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               (scoaterea totală = pasul 7/Piper). Verificat cu 3 agenți (2 runde
               FAIL reparate: lacătele `taiereManuala`+adresare, ancorele stale,
               bufUser, cursa eraInZbor). RĂMAS: proba pe telefonul owner-ului.
-      - [ ] 2. cățelul (`poartaFaptelor`) legat pe calea voce
+      - [ ] 2. cățelul (`poartaFaptelor`) legat pe calea voce — CONSTRUIT pe
+              branch (21 aug seara): pe tura vocală PUR-UȘOARĂ, rostirea lui
+              Kelion se judecă pe uneltele chiar reușite ale turei
+              (doveziVoceTura, clasificate); turele cu temei din afară (creier
+              greu prin cere_creierului — poarta LUI rulează în /api/chat — sau
+              anunț de sistem) NU se judecă (fals-pozitivul interzis prin
+              design); demascarea → istoric + monitor ca DOC (nu voce, §8) +
+              jurnal. Lacăte: catelulPeVoce.test.ts. RĂMAS pt. bifă: verificare
+              cu 3 agenți + merge + măsurat live.
       - [ ] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
       - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce

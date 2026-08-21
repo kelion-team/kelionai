@@ -10,7 +10,10 @@
 > de facto pe aceeași cale (scrii → răspunde cu vocea Live). Nuanță la §5/pasul
 > 2: pe calea GREA vocea trece prin /api/chat unde poartaFaptelor RULEAZĂ —
 > gap-ul real rămas e calea ușoară (transcriptul Live) + reformularea de după
-> unealtă. Pașii 2–5, 7: neîncepuți. Bifele cu dovadă: RAMAS-DE-FACUT.md.
+> unealtă. Pasul 2 (cățelul pe calea ușoară a vocii): CONSTRUIT pe branch
+> 21 aug seara (judecă doar turele pur-ușoare; demascarea pe istoric+monitor,
+> nu voce), nemăsurat live. Pașii 3–5, 7: neîncepuți. Bifele cu dovadă:
+> RAMAS-DE-FACUT.md.
 
 ---
 

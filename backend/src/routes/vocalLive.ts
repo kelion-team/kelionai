@@ -27,6 +27,7 @@ import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, setSpeechLangPref, citesteSold, debitWallet, recordSimptomLive } from '../db.js'
 import { trackSpeechLang } from '../services/lang.js'
 import { pareCerereVizuala } from '../services/simptomeLive.js'
+import { pretentiiFaraFapta, textulDemascarii, clasificaRezultatUnealta, type DovadaUnealta } from '../services/poartaFaptelor.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -418,12 +419,43 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // sesiune (vocală SAU scrisă) continuă conversația, n-o ia de la zero.
     let bufUser = ''
     let bufKelion = ''
+    // ── CĂȚELUL PE VOCE (JARVIS pasul 2 — PROIECT-CHAT-VOCE §5) ─────────────
+    // Gap-ul MĂSURAT din spec: poartaFaptelor rula doar pe scris. Pe voce:
+    // dovezile UNELTELOR chemate direct de sesiunea Live în tura vorbită
+    // curentă + steagul „temeiul turei e ÎN AFARA ei" (creierul GREU prin
+    // cere_creierului — poarta LUI rulează deja în /api/chat, iar re-rostirea
+    // răspunsului lui ar fi demascată FALS aici; sau un anunț de SISTEM, al
+    // cărui temei e starea măsurată a ordinelor). Judecăm DOAR turele
+    // PUR-UȘOARE — fals-pozitivul e interzis prin design („o poartă care
+    // strigă la adevăr nu mai e crezută de nimeni").
+    let doveziVoceTura: DovadaUnealta[] = []
+    let turaCuTemeiDinAfara = false
     const salveazaTura = (): void => {
       const u = bufUser.trim()
-      const k = bufKelion.trim()
+      let k = bufKelion.trim()
       bufUser = ''
       bufKelion = ''
       rostireCurenta = ''
+      // Pe tura PUR-UȘOARĂ, pretențiile de FAPTĂ din ce a ROSTIT Kelion se
+      // judecă pe uneltele chiar reușite ale turei. Vorba rostită nu se poate
+      // lua înapoi — dar minciuna nu rămâne în picioare: demascarea intră în
+      // ISTORIC (sesiunea următoare o vede și o poate corecta), pe MONITOR ca
+      // document (niciodată citit cu voce — spec §8) și în jurnal.
+      if (k && !turaCuTemeiDinAfara) {
+        const nedovedite = pretentiiFaraFapta(k, doveziVoceTura)
+        if (nedovedite.length) {
+          const demascare = textulDemascarii(nedovedite)
+          k += demascare
+          try {
+            trimite({ type: 'control', frame: { doc: { title: 'Poarta faptelor (voce)', text: demascare.trim() } } })
+          } catch {
+            /* socket picat — demascarea rămâne în istoric + jurnal */
+          }
+          app.log.error(`[POARTA FAPTELOR][VOCE] pretenții fără faptă pe tura ușoară: ${nedovedite.join('; ')} | dovezi: ${doveziVoceTura.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciuna'}`)
+        }
+      }
+      doveziVoceTura = []
+      turaCuTemeiDinAfara = false
       if (u) void saveMessage(user.email, 'user', u).catch(() => {})
       if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
       // ÎNVĂȚAREA PE VOCE (10 aug, ownerul: „nu ține minte nimic"): pe scris,
@@ -522,6 +554,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || rostireCurenta.trim().length > 0
             if (turaInZbor) anuntAmanat = true
             else turaDeSistem = true // tura care urmează e ANUNȚ, declarat pe față — nu dedus din buffer gol
+            // Temeiul anunțului e starea MĂSURATĂ a ordinului (sistemul), nu o
+            // unealtă a turei — cățelul vocal nu judecă rostirea lui (§5).
+            turaCuTemeiDinAfara = true
             live?.anunta(
               `[ANUNȚ DE SISTEM — nu e vocea omului] Ordinul de construcție #${j.id} ` +
                 `(„${j.orderText.slice(0, 80)}") s-a terminat: ${j.status === 'done' ? 'GATA' : 'A EȘUAT'}` +
@@ -1262,6 +1297,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           // modelului live — regula vocii unice), nici cele de mers (receipt/
           // heartbeat/lang), care ar deruta handleControl.
           if (apel.name === 'cere_creierului') {
+            // Temeiul turei trece la creierul GREU — poarta faptelor a LUI
+            // rulează în /api/chat; cățelul vocal nu judecă re-rostirea (§5).
+            turaCuTemeiDinAfara = true
             const cerere = String((apel.args as { cerere?: unknown }).cerere ?? '').trim()
             if (!cerere) {
               live?.raspundeUnealta(apel.id, apel.name, { eroare: 'cerere goală' })
@@ -1327,17 +1365,23 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // voce" deși pe scris merg. Exact ca bucla de noapte (autonomie.ts).
             if (USER_SCOPED_TOOLS.has(apel.name)) {
               const r = await execUserScopedTool(apel.name, apel.args as any, user.email, user.role === 'admin')
+              // Dovada cățelului vocal (§5): rezultatul REAL, clasificat — o
+              // pretenție de faptă rostită se acoperă doar cu o unealtă reușită.
+              if (r != null) doveziVoceTura.push(clasificaRezultatUnealta(apel.name, String(r)))
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: r ?? 'Unealtă nesuportată în voce.' })
               return
             }
             const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
             if (rezultat !== null) {
+              doveziVoceTura.push(clasificaRezultatUnealta(apel.name, String(rezultat)))
               live?.raspundeUnealta(apel.id, apel.name, { rezultat })
             } else {
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: 'Unealtă nesuportată în voce.' })
             }
           } catch (err: any) {
             app.log.error(`Eroare unealtă ${apel.name}: ${err.message}`)
+            // Tentativă picată = dovadă de EȘEC (nu acoperă nicio pretenție).
+            doveziVoceTura.push(clasificaRezultatUnealta(apel.name, `tool_error: ${String(err?.message ?? err)}`))
             live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
           }
         },
