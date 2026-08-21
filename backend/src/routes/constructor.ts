@@ -86,9 +86,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // etapei, ca cifra să poată fi confruntată oricând cu sursa ei.
     const jobs = raw.map((j) => ({
       ...j,
-      // Job Devin → bară INDETERMINATĂ (pct null), nu un procent înghețat/mințit
-      // (vezi nota de la /api/constructor/live).
-      pct: j.devinSessionId ? null : procentDinProgres(j.status, j.progress),
+      pct: procentDinProgres(j.status, j.progress),
       // P8 (owner, 15 aug: „trebuie sa fie foarte clar ce executa"): numele
       // rândului = FAPTA extrasă din ordin, nu ambalajul promptului.
       nume: numeleOrdinului(j.orderText),
@@ -242,12 +240,6 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     void saveKv('constructor:worker:lastPoll', String(Date.now())).catch(() => {})
     if ((await isOpsPaused()) || !(await autonomActiv().catch(() => true)))
       return reply.send({ job: null, paused: true })
-    // DEVIN DEȚINE COADA (owner, 20 aug: „punel pe devin cu cheie"). Când cheia
-    // Devin e pusă, constructorul e Devin (extern) — dispecerul din app claimează
-    // și duce ordinele. Worker-ul vechi (Aider pe VPS) NU mai primește joburi, ca
-    // să nu lucreze doi pe același ordin. NU flipăm nimic pe `running` degeaba:
-    // returnăm ÎNAINTE de `claimNextBuildJob`.
-    if (config.devinKey) return reply.send({ job: null, devin: true })
     const job = await claimNextBuildJob()
     // ── GÂNDIREA DE DEBLOCARE LA REÎNCERCARE (owner, 15 aug: „analizează de ce
     // anumite ordine se blochează și oferă-i gândirea… să le poată duce la
@@ -403,11 +395,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       const motiv = String(req.body?.log ?? '')
       const { loadKv, saveKv, remediazaAutomatBuildJob } = await import('../db.js')
       const { decideRemediereEsec, MAX_AUTO_REMEDIERI } = await import('../services/remediereEsec.js')
-      // Constructor FREE-LOCAL unic (Ollama Cloud scos, 20 aug) — remedierea rămâne
-      // pe creierul local free; nu mai există escaladare pe plătit.
+      // Fără rezervă plătită (Ollama Cloud scos, 20 aug) — remedierea rămâne pe free local.
+      const paidDisponibil = false
       const cheieContor = `remediere:count:${id}`
       const nrDeja = Number(await loadKv(cheieContor).catch(() => null)) || 0
-      const dec = decideRemediereEsec(motiv, nrDeja)
+      const dec = decideRemediereEsec(motiv, paidDisponibil, nrDeja)
       if (dec.actiune === 'reia') {
         await saveKv(cheieContor, String(nrDeja + 1)).catch(() => {})
         const nota = `[AUTO-REMEDIERE ${nrDeja + 1}/${MAX_AUTO_REMEDIERI}] cauză: ${dec.clasa} — ${dec.motiv}. ${dec.recomandare}`
@@ -416,7 +408,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
           'scris',
           `Ordin #${id}: auto-remediere (${dec.clasa})${repus ? ' — repus în coadă' : ''}`,
           `${dec.recomandare}\n\nMotiv: „${motiv.slice(0, 200)}".`,
-          { jobId: id, clasa: dec.clasa },
+          { jobId: id, clasa: dec.clasa, escaladeazaCreier: dec.escaladeazaCreier },
         ).catch(() => 0)
       } else {
         // 'oprire' (permanent — deja înghețat de reportBuildJob) / 'raporteaza':
@@ -533,12 +525,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // 16 aug 05:47 (ownerul, pe #330: „aici nu esti tu" / „cine e acolo?"):
       // cardul spune de-acum CINE a cerut ordinul — omul, sau o buclă automată
       // pe nume. Un ordin fără autor vizibil arată ca o fantomă.
-      // BARA ONESTĂ PE DEVIN (owner 20 aug: „bara reală"): un job rulat de Devin
-      // NU are procent fin — `procentDinProgres` n-ar recunoaște textul lui și ar
-      // întoarce un 5% ÎNGHEȚAT, adică un procent MINȚIT. Trimitem `pct: null` →
-      // frontend-ul ascunde bara determinată și arată doar textul + rotița
-      // (indeterminat = „lucrează"), exact legea măsurătorii.
-      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: j.devinSessionId ? null : procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
+      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
     })
   })
 }

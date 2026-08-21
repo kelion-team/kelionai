@@ -5,14 +5,12 @@ import { fileURLToPath } from 'node:url'
 // owner, 19 aug: „seteaza sa aibe timp sa raspunda… dinamic pe greutatea intrebari
 // sau problemei" + „sistem de ajustare continuu, cind are destul context".
 // Funcțiile sunt PURE în modulul VPS (ESM) — le exersăm real prin subproces node.
-// Constructorul e FREE-LOCAL unic (paidul a fost scos, 20 aug): pragurile nu mai au
-// dimensiune plătită de calibrat.
 const MJS = fileURLToPath(new URL('../../deploy/constructor-agent.mjs', import.meta.url))
 
 function ev(expr: string): unknown {
   const script = `
     const m = await import(${JSON.stringify('file:///' + MJS.replace(/\\/g, '/'))});
-    const { greutateOrdin, ajustareDinIstoric, praghAider, parseMasuratori } = m;
+    const { greutateOrdin, ajustareDinIstoric, praghAider, parseMasuratori, calibrarePaid } = m;
     console.log(JSON.stringify(${expr}));
   `
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 30000 }).trim())
@@ -48,42 +46,74 @@ describe('ajustareDinIstoric — CONTINUĂ, doar cu destul context', () => {
   })
 })
 
-describe('praghAider — dinamic + ajustat + mărginit (free-local)', () => {
-  it('trivial (greutate 0), fără istoric → bază exactă (8 min / 150s), neajustat', () => {
-    const r = ev('praghAider({ nrFisiere:0, lungimePrompt:0, ramaseMs: 26*60000, istoric: [] })') as { timeoutMs: number; tacereKillMs: number; ajustat: boolean }
+describe('praghAider — dinamic + ajustat + mărginit', () => {
+  it('free trivial (greutate 0), fără istoric → bază exactă (8 min / 150s), neajustat', () => {
+    const r = ev('praghAider({ platit:false, nrFisiere:0, lungimePrompt:0, ramaseMs: 26*60000, istoric: [] })') as { timeoutMs: number; tacereKillMs: number; ajustat: boolean }
     expect(r.ajustat).toBe(false)
     expect(r.timeoutMs).toBe(8 * 60000)
     expect(r.tacereKillMs).toBe(150000)
   })
-  it('GREU (6 fișiere) → timeout urcă spre max (16 min), tăcere spre max', () => {
-    const r = ev('praghAider({ nrFisiere:6, lungimePrompt:8000, ramaseMs: 60*60000, istoric: [] })') as { timeoutMs: number; tacereKillMs: number }
+  it('free GREU (6 fișiere) → timeout urcă spre max (16 min), tăcere spre max', () => {
+    const r = ev('praghAider({ platit:false, nrFisiere:6, lungimePrompt:8000, ramaseMs: 60*60000, istoric: [] })') as { timeoutMs: number; tacereKillMs: number }
     expect(Math.round(r.timeoutMs / 60000)).toBe(16)
     expect(r.tacereKillMs).toBeGreaterThan(150000)
   })
   it('istoric cu tăieri degeaba → tăcerea crește față de fără istoric', () => {
-    const fara = ev('praghAider({ nrFisiere:2, lungimePrompt:1000, ramaseMs: 60*60000, istoric: [] }).tacereKillMs') as number
-    const cu = ev('praghAider({ nrFisiere:2, lungimePrompt:1000, ramaseMs: 60*60000, istoric: [{durataMs:150000,taiatPeTacere:true,aEditat:false},{durataMs:150000,taiatPeTacere:true,aEditat:false},{durataMs:150000,taiatPeTacere:true,aEditat:false}] }).tacereKillMs') as number
+    const fara = ev('praghAider({ platit:false, nrFisiere:2, lungimePrompt:1000, ramaseMs: 60*60000, istoric: [] }).tacereKillMs') as number
+    const cu = ev('praghAider({ platit:false, nrFisiere:2, lungimePrompt:1000, ramaseMs: 60*60000, istoric: [{durataMs:150000,taiatPeTacere:true,aEditat:false},{durataMs:150000,taiatPeTacere:true,aEditat:false},{durataMs:150000,taiatPeTacere:true,aEditat:false}] }).tacereKillMs') as number
     expect(cu).toBeGreaterThan(fara)
   })
   it('bugetul rămas mărginește timeout-ul (un job nu devine demon)', () => {
-    const r = ev('praghAider({ nrFisiere:6, lungimePrompt:8000, ramaseMs: 5*60000, istoric: [] })') as { timeoutMs: number }
+    const r = ev('praghAider({ platit:false, nrFisiere:6, lungimePrompt:8000, ramaseMs: 5*60000, istoric: [] })') as { timeoutMs: number }
     // ramaseMs=5min → timeout ≤ 5min - 60s = 4 min
     expect(r.timeoutMs).toBeLessThanOrEqual(4 * 60000)
   })
   it('tăcerea nu depășește niciodată timeout-ul', () => {
-    const r = ev('praghAider({ nrFisiere:6, lungimePrompt:8000, ramaseMs: 3*60000, istoric: [] })') as { timeoutMs: number; tacereKillMs: number }
+    const r = ev('praghAider({ platit:false, nrFisiere:6, lungimePrompt:8000, ramaseMs: 3*60000, istoric: [] })') as { timeoutMs: number; tacereKillMs: number }
     expect(r.tacereKillMs).toBeLessThanOrEqual(r.timeoutMs)
   })
 })
 
-describe('parseMasuratori — istoric măsurat (toate free acum)', () => {
-  it('parsează jsonl, sare peste liniile corupte, ia ultimele n', () => {
+describe('calibrarePaid — media plătit, „pina se calibreaza"', () => {
+  it('sub prag de succese plătite → necalibrat', () => {
+    const r = ev('calibrarePaid([{durataMs:240000,aEditat:true},{durataMs:200000,aEditat:true}])') as { calibrat: boolean; mediePaidMs: number }
+    expect(r.calibrat).toBe(false)
+  })
+  it('≥3 succese plătite → media reală (ignoră cele fără edit)', () => {
+    const r = ev('calibrarePaid([{durataMs:240000,aEditat:true},{durataMs:300000,aEditat:true},{durataMs:360000,aEditat:true},{durataMs:999999,aEditat:false}])') as { calibrat: boolean; mediePaidMs: number }
+    expect(r.calibrat).toBe(true)
+    expect(r.mediePaidMs).toBe(300000) // (240+300+360)/3 = 300s
+  })
+})
+
+describe('praghAider — FREE calibrat din media PLĂTIT', () => {
+  it('free primește cel puțin ~media plătit × factor înainte să fie tăiat', () => {
+    // media paid 300s (5 min) × 1.5 = 450s (7.5 min) — dar baza free trivial e 8 min,
+    // deci pe ordin trivial baza domină; pe ordin unde baza ar fi sub calibrare, urcă.
+    const paid = '[{durataMs:600000,aEditat:true},{durataMs:660000,aEditat:true},{durataMs:720000,aEditat:true}]' // medie 660s=11min
+    const cu = ev(`praghAider({ platit:false, nrFisiere:0, lungimePrompt:200, ramaseMs: 60*60000, istoric: [], istoricPaid: ${paid} })`) as { timeoutMs: number; calibratPaid: boolean }
+    const fara = ev('praghAider({ platit:false, nrFisiere:0, lungimePrompt:200, ramaseMs: 60*60000, istoric: [], istoricPaid: [] }).timeoutMs') as number
+    expect(cu.calibratPaid).toBe(true)
+    // media paid 11min × 1.5 = 16.5min, plafonat la max free 16min → mai mare decât baza 8min
+    expect(cu.timeoutMs).toBeGreaterThan(fara)
+    expect(Math.round(cu.timeoutMs / 60000)).toBe(16) // plafonat la max free
+  })
+  it('calibrarea NU se aplică pe plătit (paid nu se calibrează pe el însuși)', () => {
+    const r = ev('praghAider({ platit:true, nrFisiere:0, lungimePrompt:200, ramaseMs: 60*60000, istoric: [], istoricPaid: [{durataMs:600000,aEditat:true},{durataMs:660000,aEditat:true},{durataMs:720000,aEditat:true}] })') as { calibratPaid: boolean }
+    expect(r.calibratPaid).toBe(true) // măsurat, dar…
+    // …pe paid nu ridică floor-ul: baza paid (18 min) domină oricum. Verificăm doar că nu crapă.
+  })
+})
+
+describe('parseMasuratori — istoric măsurat, filtrat pe sursă', () => {
+  it('parsează jsonl, filtrează pe platit, ia ultimele n', () => {
     const jsonl = [
-      '{"durataMs":1000,"taiatPeTacere":true,"aEditat":false}',
+      '{"platit":false,"durataMs":1000,"taiatPeTacere":true,"aEditat":false}',
+      '{"platit":true,"durataMs":2000,"aEditat":true}',
       'linie-coruptă',
-      '{"durataMs":3000,"aEditat":true}',
+      '{"platit":false,"durataMs":3000,"aEditat":true}',
     ].join('\n')
-    const r = ev(`parseMasuratori(${JSON.stringify(jsonl)}, 20)`) as unknown[]
+    const r = ev(`parseMasuratori(${JSON.stringify(jsonl)}, false, 20)`) as unknown[]
     expect(r).toHaveLength(2)
     expect((r[0] as { durataMs: number }).durataMs).toBe(1000)
   })

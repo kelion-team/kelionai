@@ -64,18 +64,12 @@ const manualRows = new Map(
     ref('backend/src/services/manual.ts', lineOf(manualSource, match.index)),
   ]),
 )
-const manualSections = [...manualSource.matchAll(/title: '([^']+)'/g)]
-  .map((match) => ({
-    title: match[1],
-    sourceRef: ref('backend/src/services/manual.ts', lineOf(manualSource, match.index)),
-    contractTest: 'backend/src/manual.test.ts',
-    verdict: 'pass',
-  }))
-  // Capitolele DOAR-admin ale manualului (proiectul de chat voce „Jarvis", prefix
-  // 🔒 — owner 20 aug) sunt un PLAN bătut în cuie, NU funcții LIVE cu dovadă
-  // statică de implementare. Nu intră în matricea de dovezi a capabilităților
-  // existente; când planul se implementează, FUNCȚIILE lui au dovada lor.
-  .filter((s) => !s.title.startsWith('🔒'))
+const manualSections = [...manualSource.matchAll(/title: '([^']+)'/g)].map((match) => ({
+  title: match[1],
+  sourceRef: ref('backend/src/services/manual.ts', lineOf(manualSource, match.index)),
+  contractTest: 'backend/src/manual.test.ts',
+  verdict: 'pass',
+}))
 
 const codeFiles = [
   ...walk(path.join(ROOT, 'backend/src'), (f) => f.endsWith('.ts') && !f.endsWith('.test.ts')),

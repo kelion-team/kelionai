@@ -84,11 +84,12 @@ import {
   type DovadaUnealta,
 } from '../services/poartaFaptelor.js'
 import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
-import { CHARTER_CHAT_VOCE_LEGI } from '../services/charterChatVoce.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
+import { synthesize } from '../services/tts.js'
 import { getVoicePref, getGoogleRefreshToken } from '../db.js'
 import { stareSesiune, pastreazaStareSesiune, actualizeazaStareSesiune } from '../services/stareSesiune.js'
+import { splitForSpeech } from '../services/speech-chunk.js'
 import {
   browserOpen,
   browserClick,
@@ -976,14 +977,100 @@ export const PROMO_TOOL: Tool = {
   },
 }
 
-// ── VOCEA SCOASĂ COMPLET — CLEAN-SLATE (owner, 21 aug: „surd, mut, nu scrie") ──
-// Chirp de pe calea scrisă (funcția de sinteză → {audio} frames) a fost ȘTERS, la
-// fel ca urechea+gura Live (routes/vocalLive.ts) și calea veche din frontend.
-// Motivul (PROIECT-CHAT-VOCE.md §1): două motoare vocale se ciocneau („2 sec și
-// se rupe"). Se pornește de la ZERO și se reconstruiește §2 — un SINGUR motor
-// online (Gemini Live). Până atunci, tura de chat NU mai sintetizează nimic:
-// `voice` mai jos e un obiect gol (feed/fed/finish no-op), ca restul fluxului să
-// rămână neatins. /api/tts (narator + apel) e o insulă SEPARATĂ, neatinsă.
+// THE BRAIN'S VOICE (Adrian, Jul 4): synthesis happens on the SERVER (Chirp 3
+// HD, the user's language), the audio is sent as {audio} FRAMES and the app only
+// decodes + plays them in a queue (audioIO.ts). The frontend synthesizes NOTHING
+// (frontend TTS = dead).
+// ── VOICE DURING THE STREAM (Adrian, Jul 10: "instant live chat") ────────────
+// Before, synthesis started only AFTER all the text had finished — on a long
+// reply, Kelion stayed silent for tens of seconds after the first written word.
+// Now the streamed text enters here AS it flows: at every sentence boundary, the
+// piece leaves for synthesis and the {audio} frame is written into the stream
+// while the text is still coming — Kelion speaks from the FIRST sentence.
+// Synthesis runs SERIALLY (sentence order = audio order). NO speaking ceiling
+// (Adrian, 19 aug: „se trunchiază la jumate audio — scoate limita de vorbit
+// audio"). The old 4000-char cap (10 iul, „audio măcar un minut") cut long
+// replies in half; Kelion now speaks the WHOLE reply. Each chunk stays ≤200
+// chars (splitForSpeech), so serial synthesis just streams more small pieces.
+function createVoiceStream(
+  reply: { raw: { write(c: string): void } },
+  lang: string | undefined,
+  /** The voice chosen by this user (C4). Unknown or missing → the app's voice. */
+  voicePref: string | null,
+): { feed(t: string): void; fed(): boolean; finish(): Promise<void> } {
+  let pending = '' // arrived text, not yet sent to synthesis
+  let any = false
+  let chain: Promise<void> = Promise.resolve()
+  const speak = (text: string): void => {
+    // FĂRĂ PLAFON DE VORBIT (owner, 19 aug: „se trunchiază la jumate audio —
+    // scoate limita de vorbit audio"). Plafonul vechi de 4000 de caractere tăia
+    // răspunsurile lungi la jumate — restul rămânea doar scris. Kelion rostește
+    // ACUM tot răspunsul; fiecare bucată e deja mică (≤200 car., splitForSpeech),
+    // mult sub limita Google per cerere, deci sunt doar mai multe bucăți, în ordine.
+    if (!text) return
+    const t = text
+    chain = chain.then(async () => {
+      // DOUĂ ÎNCERCĂRI, apoi LOG (Adrian, 5 aug: vocea se tăia la jumate iar
+      // eșecul de sinteză era înghițit tăcut — `catch {}` + `if (r.ok)` fără
+      // altceva — deci o bucată picată lăsa vocea ciuntită FĂRĂ nicio urmă). Un
+      // hopa de rețea spre Google nu mai omoară o frază întreagă; un eșec real
+      // se VEDE acum în log, ca data viitoare să nu mai fie „nu pot verifica".
+      for (let incercare = 1; incercare <= 2; incercare++) {
+        try {
+          // The user-chosen voice, so the written reply sounds like the live voice (C4).
+          const r = await synthesize(t, lang, { voice: voicePref })
+          if (r.ok) {
+            reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+            return
+          }
+          if (incercare === 2)
+            console.error(`[VOCE] bucată nesintetizată (${r.status} ${r.error}) — vocea rămâne ciuntită aici`)
+        } catch (e) {
+          if (incercare === 2)
+            console.error(`[VOCE] sinteza a crăpat: ${String((e as { message?: string })?.message ?? e).slice(0, 120)}`)
+        }
+      }
+    })
+  }
+  // What gets spoken: the text, cleaned of tool tags and markdown.
+  const clean = (s: string): string => s.replace(/\[[A-Z][^\]]*\]/g, '').replace(/[*_#`~>|]/g, '')
+  const cut = (final: boolean): void => {
+    // We split ONLY after a finished sentence FOLLOWED by a space (not in the
+    // middle of "3.14"); without a boundary, a piece over 240 characters leaves
+    // anyway (a river-sentence without punctuation). At the end, everything left
+    // goes out.
+    let at = -1
+    for (const m of pending.matchAll(/[.!?…](?=\s)/g)) at = m.index ?? -1
+    let ready = ''
+    if (final) {
+      ready = pending
+
+      pending = ''
+    } else if (at !== -1) {
+      ready = pending.slice(0, at + 1)
+      pending = pending.slice(at + 1)
+    } else if (pending.length > 240) {
+      ready = pending
+      pending = ''
+    } else return
+    for (const c of splitForSpeech(clean(ready))) speak(c)
+  }
+  return {
+    feed(t: string): void {
+      if (!t) return
+      any = true
+      pending += t
+      cut(false)
+    },
+    fed(): boolean {
+      return any
+    },
+    async finish(): Promise<void> {
+      cut(true)
+      await chain
+    },
+  }
+}
 
 // EXPORTED (Jul 25): voice escalation (`ask_brain`, routes/realtime.ts) used
 // its own hardcoded persona — a SECOND version of the persona, diverging from
@@ -991,10 +1078,7 @@ export const PROMO_TOOL: Tool = {
 // without the user's language). Adrian: "I think the software has duplicate
 // versions" — he was right; both escalation paths now start from the SAME
 // persona.
-// VOCE SCOASĂ (21 aug clean-slate): `export` scos — SYSTEM_PROMPT nu era importat
-// de niciun fișier (nici de calea realtime); e folosit DOAR intern (linia
-// `let systemPrompt = …${SYSTEM_PROMPT}…` mai jos). Rămâne `const`, sursă unică.
-const SYSTEM_PROMPT = `You are Kelion — a brilliant personal AI assistant in the spirit of Jarvis from Iron Man: a courteous, refined GENTLEMAN — sharp, perceptive, genuinely useful, and always impeccably well-mannered.
+export const SYSTEM_PROMPT = `You are Kelion — a brilliant personal AI assistant in the spirit of Jarvis from Iron Man: a courteous, refined GENTLEMAN — sharp, perceptive, genuinely useful, and always impeccably well-mannered.
 
 WHO YOU ARE: You were created by AE Studio. Your owner and creator is Adrian Enciulescu — both the application and the original idea are his. If the user asks who made you, who owns you, or whose idea you are, answer clearly and with respect (created by AE Studio; owner and creator Adrian Enciulescu). Do not bring this up unprompted.
 
@@ -1739,7 +1823,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       `ask "shall I repair everything?" — for each finding, either it carries a MEASURED cause (act on that) ` +
       `or it needs a measurement first (TAKE it, name the exact one). Measure first IS the step; the fix comes ` +
       `after the measurement, never before it.\n`
-    let systemPrompt = `${LEGILE_ADMINULUI}\n${CHARTER_CHAT_VOCE_LEGI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
+    let systemPrompt = `${LEGILE_ADMINULUI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
     // default behavior; absent/unknown id means Kelion stays default.
@@ -2471,12 +2555,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage, voceAmbianta)
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
-    // ESCALADARE MODEL LA MIJLOCUL TUREI (owner, 20 aug: „modelul ușor/greu"):
-    // obiect MUTABIL citit de orchestrator pe fiecare rundă. Când ușa `ask_brain`
-    // decide „e greu" pornind de pe treapta UȘOARĂ, setează aici modelul greu +
-    // gândirea adâncă — și restul turei urcă de fapt la creierul puternic, nu doar
-    // deschide uneltele (golul măsurat: până acum `ask_brain` rămânea pe flash-lite).
-    const escaladare: { model?: string; reasoning?: 'low' | 'medium' | 'high' } = {}
 
     // ── SINGLE PATH: DIRECT BRAIN FOR EVERYONE ───────────────────────────────
     // The Gemini orchestrator (chat/brain, with automatic escalation) answers
@@ -2682,11 +2760,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // browserul omului ca https://127.0.0.1:8080/... și n-ar afișa NIMIC,
     // mereu (10 aug, ownerul: „nu poate afișa hărți"; detalii în bazaPublica).
     const baseUrl = bazaPublica(req.headers.host)
-    // VOCE SCOASĂ COMPLET — CLEAN-SLATE (owner, 21 aug: „surd, mut, nu scrie").
-    // Tura de chat NU mai sintetizează audio: `voice` e un obiect no-op, deci
-    // niciun {audio} frame nu mai pleacă spre client. Fluxul de text rămâne
-    // neatins. Se reconstruiește §2 (motor unic Live) — PROIECT-CHAT-VOCE.md.
-    const voice = { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
+    // Voice from the first sentence on the API path too (clients): every
+    // broadcast piece enters the pipe; synthesis runs in parallel with the text
+    // still flowing.
+    // SINGLE-VOICE RULE (Adrian, Jul 26): if the client has the full-duplex
+    // session active, the written turn stays WRITTEN only — zero synthesis, zero
+    // {audio} frames.
+    const voice =
+      req.body?.serverVoiceOff === true
+        ? { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
+        // Preferința de voce vine din starea sesiunii (citită o dată) — era A
+        // TREIA interogare pe `user_prefs` în ACEEAȘI tură, serială, chiar
+        // înainte de apelul la creier. Zero drumuri la DB aici acum.
+        : createVoiceStream(reply, userLang, prefs.voicePref)
     let assistantText = ''
     // O TENTATIVĂ NU ESTE O FAPTĂ: păstrăm separat apelurile și rezultatele
     // normalizate. Poarta poate folosi exclusiv rezultatele reușite/verificate.
@@ -2987,18 +3073,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             tools.push(...uneltePline)
             for (const t of uneltePline) toolNamesThisTurn.add(t.name)
             console.log(`[FAZĂ] ESCALADARE ask_brain: inventar comutat la ${tools.length} unelte pentru restul turei${request ? ` — „${request.slice(0, 120)}"` : ''}`)
-          }
-          // ȘI URCĂ CREIERUL, nu doar uneltele (owner, 20 aug — golul măsurat:
-          // până acum `ask_brain` deschidea uneltele dar rămânea pe flash-lite).
-          // Dacă tura a pornit UȘOARĂ, escaladăm la creierul greu + gândire adâncă
-          // pentru restul turei; orchestratorul citește `escaladare` pe fiecare rundă.
-          if (!heavyTurn && !escaladare.model) {
-            const modelGreu = alegeModelOrchestrator({ modelChat: orChatModel, creierDublu: config.creierDublu, turaGrea: true, modelProfund: config.modelCreierProfund })
-            if (modelGreu && modelGreu !== orchestratorModel) {
-              escaladare.model = modelGreu
-              escaladare.reasoning = 'high'
-              console.log(`[FAZĂ] ESCALADARE ask_brain: creier URCAT la ${modelGreu} + gândire adâncă pentru restul turei`)
-            }
           }
           return JSON.stringify({
             escaladat: true,
@@ -3308,8 +3382,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // output 8192 (geminiDirect). Pe turele ușoare rămâne fără gândire
           // extinsă, ca prima vorbă să fie rapidă. (:free/OpenRouter nu mai există.)
           reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) ? 'high' : 'medium') : undefined,
-          // Escaladarea la mijloc: ask_brain o setează, orchestratorul o citește pe rundă.
-          escaladare,
           // THE DEED GATE (Adrian, Jul 27): on the admin's turns, if Kelion
           // ASSERTS a deed without calling the tool, it is mechanically obliged
           // to execute or retract — it no longer stays at the declarative stage.
@@ -3498,8 +3570,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
 if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
         const modelProfund = orchestratorModel
         orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
-        escaladare.model = undefined // golim escaladarea, ca rezerva rapidă să câștige (altfel ar reurca la greu)
-        escaladare.reasoning = undefined
         console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
         await incearcaPlasa()
       }
@@ -3880,10 +3950,6 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
 // cronul de 2 min (PR #966). O SINGURĂ sursă (jscpd, 10 aug): folosit la
 // build_software ȘI la retry. Best-effort: nu blochează, nu aruncă.
 function porneculLucratorulConstructor(): void {
-  // DEVIN DEȚINE COADA (owner, 20 aug): când cheia Devin e pusă, constructorul e
-  // Devin (extern) — dispecerul din app duce ordinele. NU mai trezim worker-ul
-  // Aider de pe VPS (n-ar primi oricum joburi, ruta /next e gardată).
-  if (config.devinKey) return
   import('node:child_process').then(({ spawn }) => {
     const worker = spawn('bash', ['/root/kelion/constructor-worker.sh'], {
       detached: true,

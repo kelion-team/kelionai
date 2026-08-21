@@ -12,8 +12,7 @@ import {
 import { createPortal } from 'react-dom'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
 import { ceas } from '../lib/ceas'
-// VOCE SCOASĂ (21 aug clean-slate): contorFraza (frazaInchisa/gata) măsura latența
-// frazei vocale — nu mai există cale vocală, deci importul a dispărut.
+import { frazaInchisa, gata as contorGata } from '../lib/contorFraza'
 import { strings, resolveLang, uiStrings, type Lang } from '../lib/i18n'
 import CameraView from './CameraView'
 import { WorkClock } from './WorkClock'
@@ -36,33 +35,52 @@ import {
   getWorkspace,
   subscribeWorkspace,
   isMonitorWorking,
-  // VOCE SCOASĂ (21 aug): getMonitorContent/getStareTranzactii hrăneau sesiunea
-  // vocală live cu contextul ecranului — nu mai sunt chemate din ChatPanel.
+  getMonitorContent,
+  getStareTranzactii,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import {
   playVoice,
+  stopVoice,
+  isVoicePlaying,
+  calibrateVoiceprint,
+  hasVoiceprint,
+  getPendingVoiceFeatures,
+  setPendingVoiceFeatures,
+  clearPendingVoiceFeatures,
   getVoiceVolume,
   setVoiceVolume,
   getVoiceLevel,
+  type MicHandle,
 } from '../lib/audioIO'
-import { interruptAll } from '../lib/audioFocus'
+import {
+  registerLiveFocus,
+  unregisterLiveFocus,
+  requestTtsFocus,
+  releaseTtsFocus,
+  interruptAll,
+  setForeignVoiceLock,
+} from '../lib/audioFocus'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { watchdogEnter, watchdogBeat, watchdogExit } from '../lib/watchdog'
 import { setRealLatency, getRealLatency, subscribeRealLatency } from '../lib/latency'
-// VOCE — CLEAN SLATE (21 aug): toată calea vocală de pe FRONTEND a fost scoasă
-// (surd/mut/nu scrie nimic de pe voce). Au rămas DOAR chatul TEXT, naratorul
-// (/api/tts → playVoice), creierul TEXT offline, recorderul, camera și monitorul.
-import { getTeava } from '../lib/retea'
+import { keepScreenOn } from '../lib/wakelock'
+// VOCE UNIFICATĂ (Adrian, 5 aug): urechea STT a fost scoasă TOTAL — o singură cale
+// vocală (startRealtimeVoice → micStream local-VAD → audio la creierul unic).
+// Dictarea batch (/api/asr) și streamingul standalone (STT) au dispărut.
+import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
+import { deschideVocalLive, vocalLiveDisponibila, type VocalLiveHandle } from '../lib/vocalLive'
+import MicBargraf, { type NivelIntrare } from './MicBargraf'
+import { getTeava, calitateCamera } from '../lib/retea'
+import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, emiteTakeover, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
+import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
-import { esteConectat, useConectat, verificaConexiuneReala } from '../lib/conexiune'
-import { vorbesteOffline } from '../lib/voceOffline'
-import { ascultaOffline, stareUrecheOffline, type ControlAscultare } from '../lib/urecheOffline'
-import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline, incalzesteCodOffline } from '../lib/creierLocal'
+import { esteConectat, useConectat } from '../lib/conexiune'
+import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
-import { porneseteVazSampling, descriereVazOffline } from '../lib/vazOffline'
+import { vorbesteLocal, opresteVoceLocal } from '../lib/voceBrowser'
 import {
   adaugaTuraSync,
   adaugaAmanata,
@@ -207,13 +225,7 @@ export default function ChatPanel({
         // pornire (economie de baterie/GPU cât ești online) — se încarcă din cache abia
         // când chiar pierzi semnalul (efectul de mai jos).
         await sincronizeazaStareOffline()
-        if (anulat || stareCreierLocal().stare === 'descarcat') {
-          // Modelul E în cache. Aducem ȘI chunk-ul de cod WebLLM în cache (cheap,
-          // fără GPU), ca importul offline să nu poată pica după un redeploy. NU-l
-          // urcăm în GPU cât ești online (economie de baterie) — se urcă la offline.
-          void incalzesteCodOffline()
-          return
-        }
+        if (anulat || stareCreierLocal().stare === 'descarcat') return
         // Nu e în cache → PRIMA descărcare, doar pe net decent (nu ardem date mobile).
         // Sărim doar 2G/3G/economie (getTeava 'slab'/'mediu'); Wi‑Fi/4G+ și „necunoscut"
         // (desktop/iOS) descarcă.
@@ -305,12 +317,21 @@ export default function ChatPanel({
   // vizibil cel puțin USER_ECHO_HOLD_MS (~3× cât stătea), ca să pot să-l citesc.
   const [userEchoHold, setUserEchoHold] = useState(false)
   const userEchoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Microphone (input) — capture → server (STT) → brain. It is NOT "voice in front".
+  const [listening, setListening] = useState(false)
   // VOICE VOLUME (Jul 25): the value persisted from audioIO, mirrored in the slider.
-  // Rămâne pentru NARATOR (playVoice) — volumul de redare, nu vocea scoasă (21 aug).
   const [voiceVol, setVoiceVolState] = useState(() => getVoiceVolume())
+  // LIVE DICTATION: the current sentence, word by word, with a cinematic effect on
+  // the ticker while Adrian speaks; it empties when the sentence leaves for the brain.
+  const [liveVoice, setLiveVoice] = useState('')
   // BRAIN-INPUT TICKER (Adrian, Jul 10): the EXACT text handed
   // to the brain on the current turn — it comes from the SERVER ({heard}), not a local echo.
   const [heard, setHeard] = useState('')
+  // Banda-teletext a rulat DEJA răspunsul ăsta? (Adrian, 8 aug: „repetă scris,
+  // baleind mesajul la infinit" — orice re-montare a benzii repornea animația
+  // one-shot, deci același text mătura ecranul iar și iar.) Ținem minte ts-ul
+  // răspunsului deja baleiat: o trecere pe răspuns, apoi banda tace.
+  const [tickerDoneTs, setTickerDoneTs] = useState<number | null>(null)
   // THE VISIBLE CONVERSATION (Aug 1): the chat log stays pinned to the newest
   // bubble — auto-scroll on every new message and on every streaming update.
   const chatLogRef = useRef<HTMLDivElement | null>(null)
@@ -318,15 +339,29 @@ export default function ChatPanel({
     const el = chatLogRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages])
+  // THE BAND GOES TO SLEEP WHEN IDLE (Adrian, Aug 1: "the sweeping stays on
+  // screen"). The K band (the reply ticker) used to stay on screen FOREVER
+  // after the reply. It still shows the flow live, but 12s after the turn ends
+  // it lies down — the page breathes. Any new activity wakes it.
+  const [idleBandHidden, setIdleBandHidden] = useState(false)
   // THE CALM SIGNAL for the auto-update countdown (lib/activity.ts): voice
   // session open / request in flight / draft in the composer — while any of
   // these is true, the countdown stands still so the reset never cuts work.
   useEffect(() => {
-    // VOCE SCOASĂ (21 aug clean-slate): nu mai există sesiune vocală → semnalul
-    // „voce" e mereu fals; textul/naratorul rămân semnalul de calm al update-ului.
-    reportActivity({ voice: false, busy, draft: input.trim().length > 0 })
-  }, [busy, input])
+    reportActivity({ voice: listening, busy, draft: input.trim().length > 0 })
+  }, [listening, busy, input])
   useEffect(() => () => reportActivity({ voice: false, busy: false, draft: false }), [])
+  // The sleep timer for the K band: runs only when a turn just ENDED (not busy,
+  // last word is the assistant's). New work resets it and wakes the band.
+  useEffect(() => {
+    const last = messages.at(-1)
+    if (busy || !last || last.role !== 'assistant') {
+      setIdleBandHidden(false)
+      return
+    }
+    const id = window.setTimeout(() => setIdleBandHidden(true), 12_000)
+    return () => window.clearTimeout(id)
+  }, [busy, messages])
   // AVATARUL SE DĂ ÎN COLȚ LA O ANALIZĂ (Adrian, 12 aug: „mută avatarul… când se
   // afișează o analiză, că acoperă ce scrie"; alegerea lui: avatar în colț, mic).
   // Chatul (z-index 30) stă peste avatarul central; la un răspuns LUNG (o
@@ -340,68 +375,70 @@ export default function ChatPanel({
   // TICKER (fixed rule, Jul 10): the scroll duration scales with the text
   // length, so it stays readable — neither too fast, nor forever.
   const tickerDur = (s: string): string => `${Math.min(22, Math.max(3.5, s.length / 14))}s`
-  // VOCE SCOASĂ (21 aug clean-slate): microfonul, sesiunile live (Gemini/Realtime),
-  // amprenta vocală și tura vocală au fost șterse cu totul de pe frontend. Rămâne
-  // DOAR chatul TEXT; nu mai există micRef, realtime*, voiceprint sau voiceTurnRef.
+  // QUICK SUMMARY (Adrian, Jul 10: "if the pause outlasts the thinking, don't
+  // leave a gap on the brain's line — a few-word summary, hold it until
+  // the next one"). Extracted INSTANTLY from {heard} (the request already confirmed by
+  // the server as handed to the brain) — zero latency, doesn't wait for the model.
+  const synthesize = (s: string, maxWords = 8): string => {
+    const words = s.trim().split(/\s+/).filter(Boolean)
+    return words.length <= maxWords ? s.trim() : `${words.slice(0, maxWords).join(' ')}…`
+  }
+  const micRef = useRef<MicHandle | null>(null)
+  // VOCE = OpenAI Realtime `cedar` — chat FULL-DUPLEX nativ cu escaladare, pe
+  // cele 2 chei (Adrian, 24 iul: „chat fullduplex realtime cu escaladare").
+  // Chirp would have required a 3rd Google key (no AIza key was ever given in
+  // chat — verified). ONLY if Realtime fails (no key / WebRTC failure) we fall
+  // back ONCE to STT→brain→TTS for the session (a fallback, not the rule).
+  const realtimeOffRef = useRef(false)
+  // FIX "chat full duplex doesn't exist" (Adrian, Jul 24): before, ANY error
+  // Realtime (even a transient one — a 502, an ICE hop, a benign input-ended)
+  // set `realtimeOffRef=true` PERMANENTLY for the whole session → full-duplex
+  // died for good and fell silent onto half-duplex STT. Now we count failures:
+  // we give full-duplex 3 chances before latching onto STT, and a successful
+  // connection (`live`) resets the counter. This way a transient failure no longer kills the duplex.
+  const realtimeFailCountRef = useRef(0)
+  const REALTIME_MAX_FAILS = 3
+  // AUTOMATIC RECOVERY (Jul 25 — the real cause of "the voice is robotic"): once latched
+  // onto the TTS fallback (robotic), `realtimeOffRef` stayed true FOREVER in
+  // that tab — even after the session was fixed on the server, the user heard
+  // the robot until a HARD reload, which they had no way to know about. Now
+  // the latch is time-based: after `REALTIME_RECOVER_MS` we retry the REAL voice, and
+  // the failure counter resets — a fixed deploy recovers on its own.
+  const realtimeOffAtRef = useRef(0)
+  const REALTIME_RECOVER_MS = 90_000
+  // THE ONE HONEST STATUS (Aug 2 — live data: 57 "voce realtime a picat" in
+  // 24h and the human heard NOTHING, just silence): when BOTH mouths are down
+  // (the Google probe failed AND the OpenAI reserve won't connect), the panel
+  // says so ONCE in chat instead of looping silent retries. The latch → STT
+  // dictation keeps the ears working; a later `live` re-arms the notice.
+  const voiceDownAckedRef = useRef(false)
+  // NO SEMI-DUPLEX ANYMORE (Aug 1 — one brain): the old escalation muted the
+  // microphone while the heavy brain thought. The voice session no longer
+  // thinks at all — the spoken turn goes through send() like a typed one, and
+  // full-duplex never breaks: barge-in is handled by the normal send() logic.
+  // Joins the VOX pieces cut at a thinking pause (not an end-of-sentence one)
+  // into a single thought, before sending it to the brain. Rebuilt on every
+  // (re)start of the microphone — see ensureMic below.
+  // TURA VOCALĂ CURENTĂ (Adrian, 5 aug — voce unificată): fără transcript, o frază
+  // vocală pleacă la creier ca AUDIO, cu o bulă-substituent „🎙️". Ținem ts-urile
+  // bulei userului și ale răspunsului ca handleControl să le poată: (a) umple bula
+  // userului cu ce a auzit creierul ({heard}), (b) le ȘTEARGĂ dacă nu i se vorbea
+  // ({ignored}). Nul pe turele scrise.
+  const voiceTurnRef = useRef<{ userTs: number; asstTs: number } | null>(null)
+  // The voiceprint — restricts the permanent microphone to Adrian's
+  // voice. Without a UI entry point, hasVoiceprint() stays false forever: the button
+  // below is the only place where the profile can be enrolled/reset.
+  const [voiceCalState, setVoiceCalState] = useState<'idle' | 'listening' | 'ok' | 'fail'>('idle')
+  // Fix hydration: localStorage is client-only; read it after hydration.
+  const [hasVoicePrint, setHasVoicePrint] = useState(false)
+  useEffect(() => {
+    setHasVoicePrint(hasVoiceprint())
+  }, [])
   // Messages typed during an active turn — visible, not lost in a queue.
   const [queued, setQueued] = useState<string[]>([])
   // Adrian, Jul 11: "the camera didn't start [after restart] — that's wrong" → the camera
   // starts BY DEFAULT on every load; the button remains for turning it off.
   const [cameraOn, setCameraOn] = useState(true)
-  // URECHEA OFFLINE (Faza 1 · M4): microfonul apare DOAR când urechea (Whisper) e
-  // descărcată; apăsat → ascultă, apăsat iar → transcrie offline în caseta de scris.
-  const [urecheGata, setUrecheGata] = useState(() => stareUrecheOffline().stare === 'gata')
-  const [asculta, setAsculta] = useState(false)
-  const ascultareRef = useRef<ControlAscultare | null>(null)
-  // Lacăt SINCRON de pornire + strajă de montare: `ascultaOffline` are un await lung
-  // (getUserMedia → promptul de permisiune). Fără ele, un al doilea click în fereastra
-  // aia (iconul rămâne 🎤, ref-ul e încă null) ar deschide un AL DOILEA microfon +
-  // AudioContext și l-ar orfaniza pe primul (mic/context scurs până la închiderea paginii);
-  // iar o demontare în timpul await-ului ar lipi controlul pe un ref demontat → tot scurs.
-  const pornireRef = useRef(false)
-  const montatRef = useRef(true)
-  useEffect(() => {
-    montatRef.current = true
-    // Starea urechii trăiește în modulul urecheOffline (nereactivă) — o citim periodic.
-    const id = window.setInterval(() => setUrecheGata(stareUrecheOffline().stare === 'gata'), 1500)
-    return () => {
-      window.clearInterval(id)
-      montatRef.current = false
-      ascultareRef.current?.anuleaza()
-      ascultareRef.current = null
-    }
-  }, [])
-  const toggleAscultare = useCallback(async (): Promise<void> => {
-    if (ascultareRef.current) {
-      // A doua apăsare: oprește + transcrie offline → în caseta de scris.
-      const ctrl = ascultareRef.current
-      ascultareRef.current = null
-      setAsculta(false)
-      const text = await ctrl.opreste()
-      if (text) setInput((prev) => (prev ? prev.trimEnd() + ' ' : '') + text)
-      return
-    }
-    if (pornireRef.current) return // o singură pornire în zbor (anti dublu-click)
-    pornireRef.current = true
-    try {
-      // interruptAll ÎN try: dacă ar arunca (ex. un callback de voce care crapă),
-      // `finally` tot eliberează lacătul — altfel butonul de microfon rămânea mort
-      // până la reîncărcare. Rămâne ÎNAINTE de ascultaOffline (o singură gură).
-      interruptAll('asculta-offline') // gura tace cât ascult (să nu se-audă pe el)
-      const ctrl = await ascultaOffline(resolveLang(speechLangRef.current))
-      if (!ctrl) return
-      // Demontat sau altă ascultare deja pornită cât așteptam → eliberează ACEST control,
-      // nu-l lăsa microfon deschis nefolosit.
-      if (!montatRef.current || ascultareRef.current) {
-        ctrl.anuleaza()
-        return
-      }
-      ascultareRef.current = ctrl
-      setAsculta(true)
-    } finally {
-      pornireRef.current = false
-    }
-  }, [])
   const [facing, setFacing] = useState<Facing>('user')
   const [menuOpen, setMenuOpen] = useState(false)
   // Attached images (ChatGPT-style composer). Sent to the brain's vision on send.
@@ -453,13 +490,55 @@ export default function ChatPanel({
   // null = senzorul n-a dat-o (nu inventăm). Ultima poziție+timp pentru fallback.
   const vitezaRef = useRef<number | null>(null)
   const ultimaPozRef = useRef<{ lat: number; lon: number; t: number } | null>(null)
-  // VOCE SCOASĂ (21 aug clean-slate): sesiunile live (rvLiveRef/vlRef), bargraful
-  // urechii (micNivelRef), preampul, contoarele/sondele de reluare și canalele
-  // audio ale turei vocale (pendingSpeakerRef/pendingAudioRef) au dispărut cu totul.
+  // The LIVE voice session (if any) — used by the location tools to
+  // refresh its position exactly when needed (updateCoords, on demand).
+  const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
+  // A SUNAT CEVA pe tura curentă? (owner 20 aug: „chatul audio inexistent"). Se
+  // ridică true când gura reală rostește ceva — vocea live (mouth.speak) SAU Chirp-ul
+  // de pe server (c.audio → playVoice). Dacă la finalul unei ture SCRISE rămâne false,
+  // răspunsul n-a fost auzit de nimeni → intră gura de siguranță (vocea browserului).
+  const aSunatTuraRef = useRef(false)
+  // VOCEA LIVE FULL-DUPLEX (7 aug) — din 8 aug seara e calea IMPLICITĂ (ownerul:
+  // „asta nu e chat live, e semiduplex... pui [modelul live] în locul acestuia").
+  // `localStorage.kelion_voce_live = '0'` repune calea clasică, fără deploy.
+  // Rămâne SAU una, SAU alta — două voci în același timp = numărat dublu (#894).
+  const vlRef = useRef<VocalLiveHandle | null>(null)
+  // Fiecare pornire/oprire live primește o generație. Callback-urile async ale
+  // unei sesiuni înlocuite nu mai pot curăța, reporni sau modifica sesiunea nouă.
+  const vlGeneratieRef = useRef(0)
+  const VL_MAX_RELUARI = 3
+  const VL_REARMARE_STABILA_MS = 30_000
+  // NIVELUL DE INTRARE AL URECHII LIVE (owner, 16 aug: „vreau sa vad un mic
+  // bargraf… sa se identifice daca nu se truncheaza nimic"). Măsurat în vocalLive
+  // pe fiecare cadru trimis modelului; ținut într-un ref (nu state) ca bargraful
+  // să-l citească prin rAF fără să re-randeze tot chatul.
+  const micNivelRef = useRef<NivelIntrare>({ nivel: 0, pic: 0, poarta: false, clip: false })
+  // PREAMP MICROFON (owner, 16 aug: „reglaj preamp de la minim la maxim… ce faci
+  // daca e surd?"). Factorul de amplificare, persistat în localStorage, aplicat
+  // pe calea live prin handle.setPreamp; sliderul de sub bargraf îl schimbă viu.
+  const [preampNivel, setPreampNivel] = useState<number>(() => {
+    const v = Number(localStorage.getItem('kelion_preamp'))
+    return Number.isFinite(v) && v > 0 ? Math.min(12, Math.max(0.5, v)) : 1
+  })
+  // Contorul de minute al sesiunii live + steagul „live a căzut de tot în tabul
+  // ăsta" (după 3 reluări picate se coboară pe calea veche și nu se mai insistă
+  // până la un refresh — altfel am pendula între cele două căi la nesfârșit).
+  const vlTickRef = useRef<number | null>(null)
+  const vlCazutRef = useRef(false)
+  /** Sonda de ÎNTOARCERE pe live după o cădere (restart de publicare = 1006):
+   *  bate capabilitatea la 5s și, când serverul revine, repune vocea live. */
+  const vlSondaRef = useRef<number | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
   // The abort controller of the current turn — "stop" aborts it on the spot.
   const abortRef = useRef<AbortController | null>(null)
+  // GUEST SPEAKER (Adrian, Aug 1): set by the voice gate right before a spoken
+  // turn — "guest:<id>:<name> (<relation>)" / "guest-pending:...". It rides
+  // with exactly ONE send() (the turn it belongs to), then clears.
+  const pendingSpeakerRef = useRef<string | null>(null)
+  // AUDIO NATIV → CREIER (Adrian, 3 aug): vocea BRUTĂ a frazei vocale curente,
+  // pusă de onAddressed și citită de send(), ca să ajungă la creierul care aude.
+  const pendingAudioRef = useRef<string | null>(null)
   // Synchronous guard against overlapping turns. `busy` state lags a render, so
   // two voice utterances firing in the same tick could both start a stream and
   // fragment the reply ("chat starts from several parts"). This ref locks now.
@@ -553,18 +632,69 @@ export default function ChatPanel({
       window.dispatchEvent(new CustomEvent('kelion:apel-stare', { detail: c.apel }))
       return
     }
-    // VOCE SCOASĂ (21 aug clean-slate): cadrul {ignored} (creierul a decis că nu i
-    // se vorbea) apărea DOAR pe turele vocale — nu mai există cale vocală, deci nu
-    // mai există bulă-substituent de șters. Handlerul a fost eliminat.
+    // VOCE UNIFICATĂ: creierul a decis că NU i se vorbea → ștergem bulele optimiste
+    // (userul substituent „🎙️…" + răspunsul gol) și nu se redă nimic. Tura se
+    // stinge curat, ca și cum n-ar fi fost (Adrian: „să nu vorbească neîntrebat").
+    if (c.ignored) {
+      // NU SE MAI ARUNCĂ CE S-A AUZIT (Adrian, 8 aug: „nu ignora ce aude când
+      // nu apare Kelion"). Înainte, tura stinsă ștergea AMBELE bule — ce ai
+      // spus dispărea fără urmă, iar „m-a auzit și a tăcut" arăta identic cu
+      // „nu m-a auzit deloc". Acum: răspunsul gol pleacă, dar bula ta RĂMÂNE
+      // dacă serverul a confirmat ce a auzit ({heard} vine înaintea {ignored}),
+      // marcată că n-a primit răspuns. Se șterge doar substituentul fără text.
+      const vt = voiceTurnRef.current
+      voiceTurnRef.current = null
+      stopVoice()
+      if (vt)
+        setMessages((prev) =>
+          prev
+            .filter((m) => m.ts !== vt.asstTs)
+            .flatMap((m) => {
+              if (m.ts !== vt.userTs) return [m]
+              return []  // ambiental: nu lăsăm text pe ecran când nu i se adresa
+            }),
+        )
+      return
+    }
     // The brain-input ticker: the server says EXACTLY what text it hands
     // to the brain — shown on the dedicated ticker until the next turn.
     if (c.heard !== undefined) {
       setHeard(c.heard)
+      // VOCE: creierul a confirmat ce a auzit → umplem bula-substituent a userului
+      // cu transcriptul PRECIS (din voce, nu dintr-un STT stâlcit).
+      const vt = voiceTurnRef.current
+      if (vt && c.heard) {
+        const auzit = c.heard
+        setMessages((prev) => prev.map((m) => (m.ts === vt.userTs ? { ...m, content: auzit } : m)))
+      }
       return
     }
-    // VOCE SCOASĂ (21 aug clean-slate): cadrul {audio} (gura Chirp de pe server →
-    // playVoice) era gura chatului vocal. Pe calea vocală MUTĂ nu se mai redă. Gura
-    // rămasă e DOAR naratorul promo (/api/tts → playVoice, insulă separată, mai jos).
+    // THE BRAIN'S VOICE: MP3 pre-synthesized on the server (Chirp 3) — we ONLY play it.
+    // While it speaks, the microphone doesn't send (anti-echo), but stays on watch:
+    // vocea lui Adrian taie redarea pe loc (barge-in, vezi ensureMic).
+    if (c.audio) {
+      // O TURĂ = O SINGURĂ GURĂ. CORECȚIE (owner 20 aug „nu ajunge audio unde trebuie" pe
+      // VOCE + agent): Gemini Live (vlRef) NU rostește răspunsul serverului nici pe voce
+      // (n-are speak(text)). Deci Chirp (c.audio) e singura gură — ȘI scris ȘI voce. Vechea
+      // gardă îl tăcea pe voce → TĂCERE. Realtime OpenAI (isRealtime) chiar rostește textul → refuzăm Chirp.
+      if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
+      // Chirp cere focus ȘI întrerupe Live mereu (turaScrisa:true) → o singură voce.
+      if (!requestTtsFocus({ turaScrisa: true })) return
+      contorGata('primul sunet (gura a pornit)')
+      aSunatTuraRef.current = true // Chirp-ul de pe server a sunat → gura de siguranță NU mai intră
+      playVoice(
+        c.audio,
+        // Cât redă Chirp-ul, mutăm ȘI microfonul clasic ȘI urechea LIVE
+        // (setRedareExterna) ca modelul să nu se audă pe el însuși (anti-ecou).
+        () => { micRef.current?.setMuted(true); vlRef.current?.setRedareExterna(true) },
+        () => {
+          micRef.current?.setMuted(false)
+          vlRef.current?.setRedareExterna(false)
+          releaseTtsFocus()
+        },
+      )
+      return
+    }
     // A SERVER-interpreted device command (the camera/monitor regexes moved off
     // the browser): just execute it. Any spoken ack arrives as normal text.
     if (c.device) {
@@ -1048,13 +1178,16 @@ export default function ChatPanel({
     setScenarioRunning(false)
   }
 
-  async function send(text: string): Promise<void> {
+  async function send(text: string, spoken = false): Promise<void> {
     const msg = text.trim()
     const atts = attachments
-    // VOCE SCOASĂ (21 aug clean-slate): o trimitere e MEREU o tură TEXT — nu mai
-    // există tură vocală (audio brut / pendingAudioRef). Fără text și fără atașamente
-    // nu e nimic de trimis.
-    if (!msg && atts.length === 0) return
+    // O tură PUR VOCALĂ vine cu text GOL și fără atașamente — audio-ul brut al frazei
+    // e DOAR în pendingAudioRef (setat de onAddressed chiar înainte de send('', true)).
+    // Fără să-l verificăm aici, guardul „nimic de trimis" arunca TĂCUT fraza vocală
+    // ÎNAINTE de orice fetch → exact „nu aude" (6 aug: consolă goală, zero request la
+    // /api/chat). Cu pendingAudioRef, tura vocală trece spre isVoiceTurn (mai jos) și
+    // pleacă la creier ca AUDIO. (Scrisul nu era afectat: msg ne-gol trecea guardul.)
+    if (!msg && atts.length === 0 && !pendingAudioRef.current) return
     // Admin recorder commands — handled locally, never sent to the brain.
     if (msg && isAdmin) {
       // Mid-take cut: something changed — stop everything; the rec-stopped
@@ -1104,12 +1237,15 @@ export default function ChatPanel({
     const STOP_CMD =
       /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
     if (msg && STOP_CMD.test(msg)) {
-      interruptAll('stop-command') // taie orice redare a naratorului (insula /api/tts)
+      interruptAll('stop-command')
+      rvLiveRef.current?.stopSpeaking() // the live mouth shuts up too (Aug 1 — one brain)
+      opresteVoceLocal() // și gura de siguranță (vocea browserului) tace pe „stop"
       abortRef.current?.abort()
       pendingSendsRef.current = [] // stop means stop — empty the queue
       setQueued([])
       inFlightRef.current = false
       setBusy(false)
+      setLiveVoice('')
       setInput('')
       // Closes the request/loop on the server (the backend's stop handler).
       void fetch('/api/chat', {
@@ -1135,14 +1271,22 @@ export default function ChatPanel({
       // it: the queue BLOCKED full-duplex (the second message didn't reach the brain
       // until the first finished). The backend + worker already accept concurrent
       // turns. No text (attachment only) → we leave the current turn alone, we don't cut it.
-      // Atașament fără text → NU tăiem tura curentă (barge-in doar pe text).
-      if (!msg) return
-      interruptAll('barge-in-text') // taie redarea naratorului dacă e activă
+      // O FRAZĂ VOCALĂ rostită cât Kelion lucrează = barge-in, NU o pierdem: audio-ul
+      // e în pendingAudioRef chiar dacă msg e gol (altfel o tură vocală în timpul alteia
+      // era aruncată tăcut — aceeași cauză ca la linia ~865).
+      if (!msg && !pendingAudioRef.current) return
+      interruptAll('barge-in-text') // cut TTS + notify LIVE mouth; one focus arbiter
+      rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
+      opresteVoceLocal() // taie gura de siguranță a turei întrerupte (barge-in)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
       // NO return — we fall through below and start the new turn right now.
     } else {
-      // O tură nouă taie orice redare rămasă a naratorului (o singură ieșire audio).
-      interruptAll('tura-noua')
+      // O TURĂ NOUĂ TAIE ORICE GURĂ RĂMASĂ VIE, chiar dacă NU eram „busy": vocea
+      // LIVE (Gemini Live) răspunde AUTONOM pe WebSocket și NU setează busyRef, deci
+      // ramura de mai sus o sărea. Fără asta, dacă scrii un mesaj cât LIVE încă
+      // vorbește, Chirp-ul turei noi se suprapunea peste vocea LIVE (owner, 20 aug:
+      // „voci paralele… o singură ieșire audio"). O gură nouă închide celelalte guri.
+      interruptAll('tura-noua-peste-live')
     }
     inFlightRef.current = true
     setInput('')
@@ -1178,15 +1322,34 @@ export default function ChatPanel({
     // vision gate does not attach the frame → no narration. The frame still
     // leaves silently (camFrames / faceDescriptor / facePhoto) for the
     // faceprint↔voiceprint security binding the server saves without a word.
-    // VOCE SCOASĂ (21 aug): o trimitere e mereu TEXT — fără ramura de tură vocală.
-    const base = msg || (docBlock ? t.docPrompt : attached ? t.imagePrompt : t.greetPrompt)
-    const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
+    // VOCE UNIFICATĂ (Adrian, 5 aug): o tură vocală vine cu AUDIO și FĂRĂ text —
+    // NU o transformăm în „salut" (greetPrompt); creierul aude fraza brută. Textul
+    // trimis creierului rămâne GOL; UI-ul arată o bulă-substituent (mai jos).
+    // O tură vocală = fraza vine ca AUDIO și FĂRĂ text tastat. Dacă omul a SCRIS
+    // ceva (msg ne-gol), e o tură SCRISĂ chiar dacă un audio a rămas pending —
+    // altfel textul lui era golit („outgoing=''") și se pierdea (Adrian, 6 aug:
+    // „textul scris nu merge la creier"). Textul tastat are prioritate.
+    const isVoiceTurn = !!pendingAudioRef.current && !msg
+    const base = isVoiceTurn
+      ? ''
+      : msg || (docBlock ? t.docPrompt : attached ? t.imagePrompt : t.greetPrompt)
+    const outgoing = docBlock && !isVoiceTurn ? `${docBlock}\n\n${base}` : base
     // CONTINUOUS VISION (Adrian, Jul 11): with the camera on, the LAST 8 FRAMES leave
     // (≈2s of motion at 4 fps), not a single one — the brain sees MOTION, not a
     // frozen blink. The same for ALL users (rule no. 9): the frames go through
     // `images`, while an explicitly attached picture goes through `image`.
     const camFrames = cameraOnRef.current && !attached ? frameBufRef.current.slice(-8) : []
 
+    // Voice features collected from the last spoken sentence (live dictation or batch).
+    const voiceFeatures = getPendingVoiceFeatures() ?? undefined
+    clearPendingVoiceFeatures()
+    // The guest label set by the voice gate (null for the holder / typed turns).
+    const speaker = pendingSpeakerRef.current ?? undefined
+    pendingSpeakerRef.current = null
+    // Vocea brută a acestei ture (DOAR pe o tură vocală). Pe o tură SCRISĂ nu
+    // cărăm un audio rătăcit — l-ar auzi creierul peste textul tastat.
+    const nativeAudio = isVoiceTurn ? (pendingAudioRef.current ?? undefined) : undefined
+    pendingAudioRef.current = null
     // The facial descriptor READY in the background (if the camera is on and it caught a
     // face). Instant — it waits for no inference, it doesn't slow down the send.
     const face = getPendingFaceDescriptor()
@@ -1198,7 +1361,10 @@ export default function ChatPanel({
     // below recognizes and replaces it, without deleting the messages
     // (e.g. voice transcripts) that arrived meanwhile.
     const turnTs = Date.now()
-    const uiUser: ChatMessage = { role: 'user', content: outgoing, ts: userTs }
+    // UI: pe voce arătăm o bulă-substituent „🎙️…" până creierul confirmă ce a auzit
+    // ({heard} o umple) sau decide că nu i se vorbea ({ignored} o șterge).
+    const uiUser: ChatMessage = { role: 'user', content: isVoiceTurn ? '🎙️…' : outgoing, ts: userTs }
+    voiceTurnRef.current = isVoiceTurn ? { userTs, asstTs: turnTs } : null
     setMessages([...messages, uiUser, { role: 'assistant', content: '', ts: turnTs }])
     setChatImage(null) // a new turn clears any previously shown image
     // The abort controller of THIS turn — "stop" aborts it on the spot.
@@ -1212,8 +1378,62 @@ export default function ChatPanel({
     setUserEchoHold(true)
     userEchoTimerRef.current = setTimeout(() => setUserEchoHold(false), USER_ECHO_HOLD_MS)
     let acc = ''
-    // VOCE SCOASĂ (21 aug clean-slate): gura live (mouth/feedSpeech) + gura de
-    // siguranță a browserului nu mai există — răspunsul curge DOAR ca text.
+    // THE MOUTH, FED BY THE BRAIN (Aug 1 — one brain): while the reply streams,
+    // complete sentences go to the live voice session's speak() queue and are
+    // spoken VERBATIM, in order, with the model's one voice. No live session →
+    // nothing is spoken here (the Chirp path stays as it was). The session is
+    // captured ONCE per turn — a mid-turn rotation must not steal the speech.
+    const mouth = rvLiveRef.current
+    // NOUĂ TURĂ: încă n-a rostit nimeni nimic; tăiem orice gură de siguranță rămasă.
+    aSunatTuraRef.current = false
+    opresteVoceLocal()
+    let speechBuf = ''
+    // Sentence splitter: a sentence leaves the buffer only when it ENDS with a
+    // terminator followed by whitespace (or the very end of the buffer) — so
+    // "3.14" or "e.g." don't cut early, and the first words reach the mouth
+    // within the first second of the stream.
+    const SENT_RE = /^[\s\S]*?[.!?…]+["'»)\]]*(?=\s|$)/
+    const cleanForSpeech = (s: string): string =>
+      s
+        .replace(/<[a-zA-Z0-9_-]+[\s\S]*?<\/[a-zA-Z0-9_-]+>/g, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\[[a-zA-Z0-9_-]+\][\s\S]*?\[\/[a-zA-Z0-9_-]+\]/g, ' ')
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images — nothing to say
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links keep their label
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/[*_`#>~]/g, '') // markdown ornaments are not words
+        .replace(/\s+/g, ' ')
+        .trim()
+    const feedSpeech = (chunk: string): void => {
+      if (!mouth) return
+      // NU vorbi peste muzică (Adrian, 4 aug): cât e muzică în cameră, gura tace.
+      if (muzicaActivaRef.current) return
+      aSunatTuraRef.current = true // gura live rostește tura → fără gură de siguranță
+      speechBuf += chunk
+      // Fast check: don't run regex if there is no punctuation/newline and buffer is small
+      if (speechBuf.length < 200 && !/[.!?…\n]/.test(speechBuf)) return
+      for (;;) {
+        const mm = SENT_RE.exec(speechBuf)
+        if (mm) {
+          speechBuf = speechBuf.slice(mm[0].length)
+          const sent = cleanForSpeech(mm[0])
+          if (sent) mouth.speak(sent)
+        } else if (speechBuf.length > 300) {
+          // Break on newline or space when buffer gets too large without terminal punctuation
+          const cutIdx = speechBuf.lastIndexOf('\n', 250) !== -1 ? speechBuf.lastIndexOf('\n', 250) + 1 : speechBuf.lastIndexOf(' ', 250)
+          if (cutIdx > 0) {
+            const piece = speechBuf.slice(0, cutIdx)
+            speechBuf = speechBuf.slice(cutIdx)
+            const sent = cleanForSpeech(piece)
+            if (sent) mouth.speak(sent)
+          } else {
+            break
+          }
+        } else {
+          break
+        }
+      }
+    }
     // REAL RESPONSE TIME (measured here, in the browser — what the user feels): from
     // send → first visible word → complete reply. Shown on the counter.
     const t0 = performance.now()
@@ -1241,12 +1461,6 @@ export default function ChatPanel({
           return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
         })
       }
-      // RECONECTARE AUTOMATĂ LA TRIMITERE (owner, 21 aug: „când îi vine accesul la
-      // net nu se reconectează automat"). esteConectat() e ULTIMA măsurătoare — dacă
-      // CREDEM că suntem offline, netul poate să fi revenit TĂCUT între poll-uri.
-      // Reverificăm REAL o dată, DOAR când pare offline (zero cost pe calea online),
-      // ca mesajul să nu plece pe creierul local când serverul e iar la îndemână.
-      if (!esteConectat()) await verificaConexiuneReala()
       // COMUTAREA OFFLINE (mod companion, faza 1): fără net REAL → răspunsul vine
       // din CREIERUL LOCAL (WebLLM, pe dispozitiv), NU de la server. Aceeași formă
       // de flux (async iterable de bucăți), deci tot ce urmează (acumulare, gură,
@@ -1257,55 +1471,19 @@ export default function ChatPanel({
       // nu-i descărcat (mereu până se descarcă) sau detectorul se-nșeală, NU tăiem
       // chatul — cădem pe server (streamChat). Așa online-ul merge MEREU ca înainte,
       // iar offline folosește creierul local doar când chiar are ce.
-      // BUG REPARAT 21 aug 2026 (owner: „am oprit netul să testez și nu s-a comutat
-      // pe offline"): modelul era 'descărcat' (în Cache Storage) dar NU 'gata'
-      // (încărcat în GPU) în clipa în care cădea netul — cât ești online e ținut în
-      // cache ca să nu ardă bateria, iar urcarea în GPU pornea abia la căderea
-      // netului și durează secunde. În fereastra aia tura cădea pe `streamChat` →
-      // serverul de neatins → „am pierdut conexiunea". FIX: dacă suntem offline și
-      // modelul e în cache/se pregătește, îl TREZIM în GPU ÎNAINTE de decizie
-      // (pregatesteModelOffline e idempotent), apoi decidem.
-      const stLoc0 = stareCreierLocal().stare
-      if (!esteConectat() && (stLoc0 === 'descarcat' || stLoc0 === 'se_pregateste')) {
-        await pregatesteModelOffline()
-        // Trezirea în GPU durează secunde: dacă între timp a venit „stop" sau
-        // barge-in (tură nouă), NU continua cu snapshot-ul vechi — altfel ar clipi
-        // peste tura curentă (audit 3 agenți, 21 aug). Cleanup-ul îl face finally-ul.
-        if (ac.signal.aborted || abortRef.current !== ac) return
-      }
-      // OFFLINE = creierul LOCAL, nu serverul de neatins. esteConectat() întoarce
-      // ULTIMA măsurătoare reală (ping /health, reîmprospătat periodic), deci
-      // false = chiar nu e net → serverul
-      // oricum n-ar răspunde; streamLocalRaspuns răspunde dacă e 'gata', altfel spune
-      // CINSTIT (nepregătit), niciodată eroarea falsă „am pierdut conexiunea".
-      // FAIL-SAFE (owner 20 aug): pe device FĂRĂ WebGPU creierul local nu merge
-      // NICIODATĂ → acolo singura șansă de creier e serverul, deci lăsăm calea veche
-      // (server + mesaj onest la eșec) în caz că detectorul s-a înșelat.
-      const eTuraOffline = !esteConectat() && stareCreierLocal().stare !== 'fara_webgpu'
+      const eTuraOffline = !esteConectat() && stareCreierLocal().stare === 'gata'
       const sursaFlux = eTuraOffline
         ? streamLocalRaspuns(
             next,
             lang,
             ac.signal,
-            // ANCORA ÎN REALITATE (owner 21 aug: „senzorii creează un mediu localizat real,
-            // ancorare spatio-temporală"): CÂND (ora locală) + UNDE (GPS) + mișcare + prezență
-            // + împrejurimi (vederea, ambiental), toate MĂSURATE, injectate în creierul local.
+            // FAZA 2 — GPS + viteză + vedere, MĂSURATE, injectate în creierul local
+            // ca să fie UMAN offline (spune viteza, unde ești, că te vede).
             contextPentruCreier({
-              // ora locală REALĂ a device-ului (fusul userului) — ancora TEMPORALĂ.
-              ora: new Date().toLocaleString(undefined, {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long',
-                hour: '2-digit',
-                minute: '2-digit',
-              }),
               lat: coordsRef.current?.lat,
               lon: coordsRef.current?.lon,
               vitezaMs: vitezaRef.current,
               fataDetectata: Boolean(face),
-              // VĂZUL (M5) ca simț AMBIENTAL (owner: completează, NU narează; descrie doar la
-              // cerere). Ultima descriere din fundal, instant; '' dacă nu-i gata → omis (regula #1).
-              vede: descriereVazOffline(),
             }),
           )
         : streamChat(
@@ -1318,18 +1496,37 @@ export default function ChatPanel({
         Boolean(attached), // explicitly pasted/uploaded picture — unconditional analysis
         // Continuous vision for ALL users (rule no. 9): the last frames.
         camFrames.length > 0 ? camFrames : undefined,
+        voiceFeatures,
         face?.descriptor,
         face?.photo,
-        // VOCE SCOASĂ (21 aug clean-slate): parametrii vocali morți (voiceFeatures /
-        // serverVoiceOff / spoken / speaker / audio-nativ / voce-ambientală) au fost
-        // scoși din semnătura streamChat — o tură e mereu TEXT. Contractul TEXT e neatins.
-        // MODUL MAȘINĂ (11 aug; rescris 13 aug): userul e la volan → răspuns SCURT (text).
-        // NU e cale vocală — doar UI-ul de mașină. Ce spune că face, execută („vorbă = faptă").
+        // O SINGURĂ GURĂ PE TURĂ. CORECȚIE MĂSURATĂ (owner 20 aug „nu ajunge audio unde
+        // trebuie" pe VOCE + agent): Gemini Live (vlRef) NU rostește răspunsul serverului
+        // nici pe voce — n-are `speak(text)`, rostește doar audio-ul PROPRIULUI model. Deci
+        // Chirp-ul TREBUIE să rămână pornit ȘI pe turele vocale, altfel răspunsul vocal e MUT
+        // (exact bugul). Serverul oprește sinteza DOAR pentru o sesiune Realtime OpenAI, care
+        // chiar rostește textul (acolo Chirp ar dubla). O singură voce = Chirp + întreruperea
+        // Live la redare (vezi c.audio). NU mai lega Chirp-ul de „LIVE e instalat".
+        (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
+        // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
+        spoken || undefined,
+        // GUEST SPEAKER (the voice gate's verdict): the server strips ALL admin
+        // powers from this turn, whoever is logged in.
+        speaker,
+        // AUDIO NATIV → CREIER: vocea brută a frazei (WAV), pentru creierul care
+        // aude nativ (Gemini). Gol pe turele scrise.
+        nativeAudio,
+        // VOCE AMBIENTALĂ: creierul unic decide singur, din audio, dacă i se vorbea
+        // (altfel tace — {ignored}). Doar pe turele vocale.
+        isVoiceTurn || undefined,
+        // MODUL MAȘINĂ (11 aug; rescris 13 aug): semnalăm creierului că userul e la
+        // volan ca să răspundă SCURT, voce-first. NU mai suprimă suprafețe — ce spune
+        // că face, execută (owner: „vorbă = faptă"; garda din handleControl a fost scoasă).
         isCarMode() || undefined,
       )
       for await (const chunk of sursaFlux) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
+        feedSpeech(chunk) // the mouth speaks the reply as it streams
         watchdogBeat('creier') // măsoară pauza față de server (diagnostic blocaj)
         // THROTTLING (11 aug, îmbunătățit 15 aug): re-randăm la intervale optime
         // și cedăm controlul buclei de evenimente a browserului (macrotask) pentru
@@ -1345,6 +1542,13 @@ export default function ChatPanel({
         }
       }
       flushMesaje() // FLUSH FINAL — garantează conținutul complet al răspunsului
+      // The LAST piece of the reply (it may end without a terminator) — the
+      // mouth says it too, then nothing is left unsaid.
+      if (mouth && speechBuf.trim()) {
+        const rest = cleanForSpeech(speechBuf)
+        speechBuf = ''
+        if (rest) mouth.speak(rest)
+      }
       // Publishes the REAL time on the counter (only if visible text arrived).
       if (firstAt) {
         setRealLatency({ firstMs: firstAt - t0, totalMs: performance.now() - t0, at: Date.now() })
@@ -1364,12 +1568,21 @@ export default function ChatPanel({
         if (msg) adaugaTuraSync({ rol: 'user', text: msg, t: acum, lat, lon })
         if (acc.trim()) adaugaTuraSync({ rol: 'assistant', text: acc, t: acum })
         if (msg && necesitaNet(msg)) adaugaAmanata({ intrebare: msg, t: acum, lat, lon })
-        // GURA OFFLINE (Faza 1 · M3): Kelion VORBEȘTE răspunsul fără net, prin TTS
-        // local (Web Speech `speechSynthesis` — offline, gratis, zero descărcare),
-        // reconstruit curat după teardown. Doar dacă tura NU a fost înlocuită/anulată
-        // între timp (o singură gură). No-op cinstit dacă browserul n-are TTS.
-        if (acc.trim() && !ac.signal.aborted && abortRef.current === ac) {
-          vorbesteOffline(acc, resolveLang(replyLang))
+      }
+      // GURĂ DE SIGURANȚĂ, DOAR OFFLINE (owner 20 aug: „daca ii scriu si sunt online
+      // raspund ambele versiuni"). BUG-ul meu din #1291: pe turele SCRISE ONLINE vocea
+      // browserului rostea răspunsul PESTE Chirp-ul de pe server → DOUĂ voci (una suna
+      // „offline", una „online"). Chirp funcționează online, deci plasa nu mai are ce
+      // căuta acolo. O restrângem la turele OFFLINE (`eTuraOffline`), unde chiar NU există
+      // voce de server (nici c.audio, nici gură live) → o singură voce, fără dublare.
+      if (eTuraOffline && !isVoiceTurn && acc.trim() && !muzicaActivaRef.current) {
+        const deRostit = cleanForSpeech(acc)
+        if (deRostit) {
+          window.setTimeout(() => {
+            if (!aSunatTuraRef.current && !ac.signal.aborted && !isVoicePlaying() && !muzicaActivaRef.current) {
+              vorbesteLocal(deRostit, lang)
+            }
+          }, 2200)
         }
       }
     } catch (err) {
@@ -1392,8 +1605,11 @@ export default function ChatPanel({
         // Stopped by Adrian or replaced by the new question — no error
         // message, no writing over what's on the screen right now.
       } else {
-        // Taie orice redare a naratorului dacă tura pică (o singură ieșire audio).
+        // Don't let the voice say more than was written (Jul 10 bug: the text
+        // disappeared on error, but the audio kept going). stopVoice alone
+        // misses the LIVE WebAudio queue — interruptAll cuts TTS + LIVE mouth.
         interruptAll('chat-error')
+        mouth?.stopSpeaking() // classic/chirp mouth queue too
         const code = codErr
         const spoken = strings(resolveLang(replyLang))
         // TRANSIENT + nothing streamed yet → ONE silent retry: the network and
@@ -1406,8 +1622,13 @@ export default function ChatPanel({
             transientRetryRef.current = false
           }, 30_000)
           console.info('[CONEXIUNE] cerere ruptă cu net+server OK — reîncerc tăcut o dată')
-          // VOCE SCOASĂ (21 aug): reîncercarea tăcută e o simplă tură TEXT.
-          window.setTimeout(() => void sendRef.current(msg), 400)
+          // Voice turns stash audio in pendingAudioRef before send clears it.
+          // Restore it so the silent retry is still a real voice turn (HTTP 200 path),
+          // not an empty typed message that the guard drops.
+          if (nativeAudio) pendingAudioRef.current = nativeAudio
+          if (speaker) pendingSpeakerRef.current = speaker
+          // NOTE: local `spoken` below is i18n strings — use isVoiceTurn for the flag.
+          window.setTimeout(() => void sendRef.current(msg, isVoiceTurn), 400)
         } else {
         const m =
           code === 'brain_not_configured'
@@ -1464,6 +1685,9 @@ export default function ChatPanel({
                 const retry = retryTextRef.current
                 retryTextRef.current = null
                 console.info('[CONEXIUNE] serverul a revenit — reiau mesajul singur')
+                // Serverul a înviat după restart → vocea live primește iar
+                // dreptul de a porni (căderea ei fusese restartul, nu ea).
+                vlCazutRef.current = false
                 if (retry) void sendRef.current(retry)
               })
               .catch(() => {})
@@ -1510,10 +1734,929 @@ export default function ChatPanel({
     return () => window.removeEventListener('kelion:comanda', onComanda)
   }, [])
 
-  // VOCE SCOASĂ (21 aug clean-slate): microfonul permanent, ensureMic/toggleMic,
-  // sesiunile live (Gemini/Realtime), zăvorul cross-tab al vocii, dansul pe muzica
-  // din microfon și trezirea la volan au fost ȘTERSE cu totul. App-ul e SURD pe
-  // calea vocală — nu mai există captură microfon → creier. A rămas DOAR chatul TEXT.
+  // The microphone is PERMANENT ON: it starts by itself on entry and reopens
+  // by itself when the track dies (phone call, Bluetooth headset removed, another app takes
+  // the microphone) or when the tab becomes visible again. The button remains only as a manual
+  // pause — the only case where the microphone stays off intentionally.
+  const micManualOffRef = useRef(false)
+  const micStartingRef = useRef(false)
+  const micRetryRef = useRef<number | null>(null)
+  const micBackoffRef = useRef(1000)
+  // THE EAR COMES BACK BY ITSELF (4 Aug — the day of 4 server restarts): once the
+  // voice session degraded to batch dictation, the 90s unlatch in ensureMic was
+  // DEAD CODE — ensureMic returns at its first line while the batch mic handle
+  // exists, so full-duplex never returned without a manual page refresh (the
+  // chat message even promised it would). This timer breaks that guard: after
+  // the cooldowns expire it stops the batch mic, re-arms streaming candidacy
+  // and calls ensureMic — if the server is back, full-duplex resumes; if not,
+  // the failure cascade re-arms the timer and we retry every ~100s forever.
+  // ── O VOCE ÎN TOATE TABURILE (Adrian, 4 aug: „am 2 voci") — zăvorul dintre
+  // taburi. Regulile pure stau în lib/voceUnica.ts; aici doar refs + efectul.
+  const tabVoceIdRef = useRef(idTabVoce())
+  const voceAiureaRef = useRef(false) // vocea trăiește în ALT tab → aici tăcem
+  const ultimaInimaRef = useRef(0)
+  const canalVoceRef = useRef<BroadcastChannel | null>(null)
+  // ── DANS PE MUZICA DIN CAMERĂ (Adrian, 4 aug: „motor de sincronizare bitrate
+  // pe dans") — refs: dacă e muzică acum (gura tace) și dacă avatarul e liber
+  // pentru următoarea mișcare (o pornim pe un BIT, ca să fie sincron).
+  const muzicaActivaRef = useRef(false)
+  const dansLiberRef = useRef(true)
+  const dansIdxRef = useRef(0)
+  // (upgradeTimerRef rămâne DOAR ca no-op de cleanup — „urcarea" din STT înapoi la
+  // full-duplex a dispărut odată cu STT-ul: calea vocală e una singură acum.)
+  const upgradeTimerRef = useRef<number | null>(null)
+  // "VOICE PER SENTENCE" — TRIED AND ROLLED BACK (Jul 25): it closed the paid session
+  // after every exchange + reopened it by itself on local speech detection
+  // (`speechWake.ts`). Two real regressions on the same day (it cut the sentence after 2
+  // words; then "hears but doesn't speak") → Adrian: "go back to the full-duplex
+  // chat". The session stays open continuously, as before the experiment.
+
+  // HONEST MIC FAILURES (audit Aug 2). Two silences lived here:
+  //  1. a failed /api/asr transcription tore NOTHING down but said nothing —
+  //     the red dot stayed on while the spoken sentence vanished;
+  //  2. 'not-allowed'/'unsupported' returned WITHOUT A WORD — a blocked mic
+  //     looked exactly like a working one that ignores you.
+  const lastAsrLostAckRef = useRef(0)
+  const micTerminalAckedRef = useRef(false)
+  // Reprogramează pornirea microfonului cu backoff (evită bucla strânsă) — o
+  // SINGURĂ definiție, folosită pe toate căile de reîncercare (fără clonă jscpd).
+  const reprogrameazaMic = (): void => {
+    if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+    micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
+    micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
+  }
+  const onMicErr = (reason: string): void => {
+    // A lost TRANSCRIPTION is not a dead microphone: the mic keeps listening,
+    // the human hears the truth and repeats the sentence — not into a void.
+    if (reason === 'asr-failed') {
+      const now = Date.now()
+      if (now - lastAsrLostAckRef.current > 30_000) {
+        lastAsrLostAckRef.current = now
+        ack(t.asrLost)
+      }
+      return
+    }
+    micRef.current = null
+    setListening(false)
+    setLiveVoice('')
+    if (reason === 'not-allowed' || reason === 'unsupported') {
+      // Terminal: retrying can't grant a permission or add browser support —
+      // but the human is TOLD, once, instead of silence.
+      if (!micTerminalAckedRef.current) {
+        micTerminalAckedRef.current = true
+        ack(reason === 'unsupported' ? t.micUnsupported : t.micBlocked)
+      }
+      return
+    }
+    if (reason === 'no-device' && !micTerminalAckedRef.current) {
+      // Said once; the retry loop below stays armed — plugging a headset in
+      // later brings the ear back by itself.
+      micTerminalAckedRef.current = true
+      ack(t.micNoDevice)
+    }
+    reprogrameazaMic()
+  }
+
+  async function ensureMic(preWarmedStream?: MediaStream): Promise<void> {
+    // Vocea trăiește în alt tab (zăvor, 4 aug) → tabul ăsta nu pornește nimic;
+    // veghea din efectul „o voce în toate taburile" o reia dacă acel tab moare.
+    if (voceAiureaRef.current) return
+    if (micRef.current || micStartingRef.current || micManualOffRef.current) return
+    // GARDA LIPSĂ (8 aug, consola ownerului: „[voce] urechi Chirp 3…" APĂRUT
+    // PESTE „calea veche NU pornește" + audio mort la fiecare ~5 numere).
+    // Garda de mai sus verifică doar mânerul căii VECHI (micRef) — dacă vocea
+    // LIVE rulează (vlRef), o a doua chemare a lui ensureMic sărea peste blocul
+    // live („e deja pornit") și cădea în blocul vechi, pornind A DOUA voce
+    // PESTE cea vie: două urechi, două guri, vechea își închidea „fraza"
+    // periodic și o tăia pe cea nouă. O sesiune live sănătoasă = nimic de făcut.
+    if (vlRef.current) return
+    if (micRetryRef.current) {
+      window.clearTimeout(micRetryRef.current)
+      micRetryRef.current = null
+    }
+    micStartingRef.current = true
+
+    // Adrian, Jul 11: "on restart the microphone button freezes / gets
+    // disabled". Cause: if the start threw an exception, the "starting
+    // now" flag stayed stuck on true forever → every press fell onto
+    // the STOP branch (nothing to stop) and the button looked dead. try/finally
+    // guarantees the flag is released on EVERY exit path.
+    try {
+      // ── VOCE LIVE OpenAI Realtime (full-duplex): microfon + WebRTC direct la
+      // OpenAI (the voice brain), which plays the reply itself + has native barge-in/anti-
+      // echo. The transcript flows onto the ticker and gets saved on the server. If it's
+      // not available (no key / failure), we fall back ONCE to STT→brain→TTS.
+      // Kelion takes back its real voice BY ITSELF: if it was latched onto the fallback but
+      // the recovery window has passed, it unlatches and retries full-duplex.
+      if (realtimeOffRef.current && Date.now() - realtimeOffAtRef.current > REALTIME_RECOVER_MS) {
+        realtimeOffRef.current = false
+        realtimeFailCountRef.current = 0
+      }
+      // ── VOCEA LIVE FULL-DUPLEX — DRUMUL IMPLICIT (8 aug: „execută cu Gemini") ──
+      // Un singur model AUDE + GÂNDEȘTE + VORBEȘTE + CHEAMĂ UNELTE, într-o
+      // sesiune (măsurat pe cheia ownerului: 90 ms handshake, 491 ms primul
+      // răspuns). Ownerul a ales azi drumul ăsta ca implicit — dispar prin
+      // construcție VAD-ul local, frazele împachetate, pauza de 1,4 s și tot
+      // lanțul ureche→creier→gură care a produs întârzierile măsurate azi.
+      // Ieșirea de siguranță a rămas: `localStorage.kelion_voce_live = '0'`
+      // repune calea veche, fără deploy.
+      // RECONECTARE: sesiunile Live au limită de durată la Google — o cădere
+      // mid-sesiune NU înseamnă „vocea a murit", ci „redeschide". Se reia
+      // singură de câteva ori; abia dacă și reluarea pică se coboară pe calea
+      // veche, cu motivul scris.
+      // LIVE E DIN NOU IMPLICITĂ (8 aug seara, ownerul, pe calea clasică:
+      // „asta nu e chat live, e semiduplex — modelul anterior rapid avea chat
+      // live; ți-am dat solicitarea să-l pui în locul acestuia, dar
+      // funcționalitățile să le păstrezi"). Are dreptate pe fapt: lanțul
+      // ureche→creier→gură de mai jos e semiduplex prin construcție (ascultă,
+      // împachetează, așteaptă răspunsul), pe când sesiunea Live aude continuu.
+      // Funcționalitățile SUNT păstrate pe live: inventarul complet de unelte
+      // (#893), reluarea după cădere (#892), regula limbii (#890), AEC (#889).
+      // Ieșirea de siguranță s-a întors la forma din 8 aug dimineața:
+      // localStorage.kelion_voce_live = '0' repune calea clasică, fără deploy —
+      // iar la căderi repetate coborârea pe clasic + sonda de întoarcere rămân.
+      if (localStorage.getItem('kelion_voce_live') !== '0' && !vlRef.current && !vlCazutRef.current) {
+        const cap = await vocalLiveDisponibila()
+        if (cap?.disponibil) {
+          let reluari = 0
+          // BANDA ACUMULEAZĂ DELTELE, PE CANALE (auditul 15 aug, confirmat pe
+          // cod de 2 verificatori): serverul trimite FRAGMENTE incrementale
+          // (ruta le adună cu +=), dar banda făcea setLiveVoice(text) —
+          // înlocuire, nu acumulare: din „Nu știu ce să zic" se vedea doar
+          // „ ce să", iar un delta de INTRARE (inclusiv halucinațiile urechii
+          // pe ture apoi suprimate) suprascria vorbirea lui Kelion fără nicio
+          // etichetă — exact „bălăriile" fotografiate. Două tampoane + semn:
+          // 🎙 = ce aude, ⚡ = ce spune Kelion; ultima activitate câștigă banda.
+          let vlAud = ''
+          let vlSpune = ''
+          const arataBanda = (canal: 'aud' | 'spune'): void => {
+            const activ = canal === 'aud' ? vlAud : vlSpune
+            const altul = canal === 'aud' ? vlSpune : vlAud
+            const semn = canal === 'aud' ? '🎙 ' : '⚡ '
+            const semnAltul = canal === 'aud' ? '⚡ ' : '🎙 '
+            setLiveVoice(activ ? semn + activ : altul ? semnAltul + altul : '')
+          }
+          const porneste = async (): Promise<boolean> => {
+            const generatie = ++vlGeneratieRef.current
+            const vl = await deschideVocalLive({
+              onGata: () => {
+                if (generatie !== vlGeneratieRef.current) return
+                // Un handshake urmat imediat de close nu e o sesiune sănătoasă:
+                // rearmăm încercările doar după o perioadă continuă de funcționare.
+                window.setTimeout(() => {
+                  if (generatie === vlGeneratieRef.current && vlRef.current) reluari = 0
+                }, VL_REARMARE_STABILA_MS)
+                vlAud = ''
+                vlSpune = ''
+                setLiveVoice('') // orice eroare veche de pe bandă se șterge
+                setListening(true)
+              },
+              onUser: (text, final) => {
+                if (generatie !== vlGeneratieRef.current) return
+                vlAud = final ? '' : vlAud + text
+                arataBanda('aud')
+              },
+              onKelion: (text, final) => {
+                if (generatie !== vlGeneratieRef.current) return
+                vlSpune = final ? '' : vlSpune + text
+                arataBanda('spune')
+              },
+              onTuraInchisa: () => {
+                if (generatie !== vlGeneratieRef.current) return
+                // tura s-a închis (gata sau tăiată) — banda nu păstrează resturi
+                vlAud = ''
+                vlSpune = ''
+                setLiveVoice('')
+              },
+              // NIVELUL DE INTRARE (bargraful urechii) — doar scriem în ref;
+              // MicBargraf îl citește prin rAF. Măsurat, nu presupus.
+              onNivelIntrare: (nv) => {
+                if (generatie !== vlGeneratieRef.current) return
+                micNivelRef.current = nv
+              },
+              // PREAMP inițial din preferința salvată (owner: „ce faci daca e surd").
+              preampInitial: preampNivel,
+              // Cadrele de ECRAN din ușa creierului (cere_creierului) intră în
+              // ACELAȘI handleControl ca la chatul scris — monitorul, cardurile
+              // și documentele arată identic, indiferent cine le-a cerut.
+              onControl: (frame) => {
+                if (generatie === vlGeneratieRef.current) handleControl(frame as ChatControl)
+              },
+              // GPS-ul REAL al device-ului către sesiunea live (8 aug: „nu are
+              // acces la gps" + „îi trebuiesc date de la gps real") — fixul
+              // satelitar al paznicului + precizia măsurată (±m, de la senzor).
+              coordonate: () =>
+                coordsRef.current
+                  ? { ...coordsRef.current, acc: precizieRef.current ?? undefined }
+                  : null,
+              // Ochii ușii creierului (8 aug: „hai și cu vedere"): un cadru
+              // captat PE LOC + ultimele din tampon. Fără captură proaspătă
+              // (camera oprită/negata) NU se trimit cadre stătute — mai bine o
+              // tură fără vedere decât o vedere veche dată drept acum.
+              cadre: () => {
+                const proaspat = captureRef.current?.()
+                if (!proaspat) return []
+                // CALITATE ADAPTIVĂ LA ȚEAVĂ (12 aug): pe 4G/Wi-Fi trimitem până
+                // la 4 cadre (fresh + 3 din tampon); pe 3G/2G doar 1–2, ca
+                // vederea să nu sufoce urcarea slabă. Dimensiunea/calitatea JPEG
+                // a fiecărui cadru se adaptează în CameraView (aceeași sursă).
+                const n = calitateCamera(getTeava()).cadre
+                // atenție: slice(-0) === slice(0) (întoarce TOT) — deci pe n=1
+                // trimitem DOAR cadrul proaspăt, fără tampon.
+                const dinTampon = n > 1 ? frameBufRef.current.slice(-(n - 1)) : []
+                return [...dinTampon, proaspat]
+              },
+              // VEDEREA CONTINUĂ (8 aug: „trebuie să poată folosi camera"):
+              // sesiunea live primește un cadru proaspăt la ~2,5s cât camera
+              // e pornită — captura întoarce null când camera e oprită, deci
+              // nu pleacă nimic stătut.
+              cadruLive: () => captureRef.current?.() ?? null,
+              // CE E PE MONITOR și pe VOCE (10 aug): același conținut ca la
+              // chatul scris — get_monitor îl citește prin ușa creierului.
+              monitor: () => getMonitorContent(),
+              // ANCORA CENTRULUI DE TRANZACȚIONARE pe VOCE (N val 2a): aceeași
+              // sursă ca la chatul scris (getStareTranzactii — se stinge singură
+              // când tabul nu mai e pe ecran), ca vocea să răspundă pe CIFRELE
+              // reale și să deseneze nivelurile pe grafic (frame {niveluri}).
+              tranzactii: () => getStareTranzactii(),
+              onEroare: (motiv) => {
+                if (generatie !== vlGeneratieRef.current) return
+                // PE ECRAN, nu doar în consolă (8 aug: „pornește la voce, dar
+                // nimic" — eroarea reală era un warn pe care nu-l vedea nimeni).
+                setLiveVoice(`⚠ voce live: ${motiv}`.slice(0, 140))
+                console.warn(`[vocalLive] ${motiv}`)
+                unregisterLiveFocus()
+                vlRef.current?.inchide()
+                vlRef.current = null
+                setListening(false)
+                // Oprirea manuală nu se „repară" — doar căderile.
+                if (micManualOffRef.current) return
+                if (reluari < VL_MAX_RELUARI) {
+                  reluari++
+                  // LA SECUNDĂ, nu în 3 încercări rare (8 aug, ownerul: „15-20
+                  // sec este criminal pentru chat… chiar dacă se întrerupe 1
+                  // sec, e suficient să se redeschidă și să continue logic").
+                  // Prima reluare la 400 ms (sughițurile se sting sub secundă),
+                  // apoi la fiecare secundă până la 90 — în clipa în care
+                  // serverul respiră după o publicare, sesiunea e înapoi, iar
+                  // handle-ul persistat pe server îi redă conversația întreagă.
+                  // Banda apare abia de la a 5-a ratare, ca un sughiț de-o
+                  // secundă să rămână invizibil pe ecran.
+                  const pauza = reluari === 1 ? 400 : 1000
+                  if (reluari < VL_MAX_RELUARI) setLiveVoice('')
+                  console.info(`[vocalLive] reluare ${reluari}/${VL_MAX_RELUARI} în ${pauza} ms`)
+                  window.setTimeout(() => {
+                    if (
+                      generatie === vlGeneratieRef.current &&
+                      !micManualOffRef.current &&
+                      !vlRef.current
+                    ) {
+                      void porneste()
+                    }
+                  }, pauza)
+                } else {
+                  // Coborârea pe calea veche NU trece iar prin blocul live (am
+                  // pica în aceeași groapă în buclă): se marchează sesiunea asta
+                  // de tab ca „live căzut" și ensureMic pornește lanțul vechi.
+                  console.error('[vocalLive] 3 reluări picate — cobor pe calea vocală veche')
+                  setLiveVoice('⚠ vocea live a picat de 3 ori — trec pe calea veche')
+                  vlCazutRef.current = true
+                  void ensureMic()
+                  // ÎNTOARCEREA PE LIVE (8 aug: „trimite err 1006 pe live… și
+                  // moare, nu mă mai aude"). Până acum, după cădere rămâneai pe
+                  // calea veche până la reîncărcarea paginii — vocea live revenea
+                  // doar dacă pica un mesaj SCRIS (sonda aia trăia în trimitere).
+                  // Acum sondăm chiar capabilitatea live la 5s: când serverul
+                  // revine, oprim calea veche și repornim lanțul — live-ul își ia
+                  // locul înapoi singur.
+                  if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                  vlSondaRef.current = window.setInterval(() => {
+                    if (micManualOffRef.current) {
+                      // Omul a închis microfonul cu mâna — nu pornim nimic peste el.
+                      if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                      vlSondaRef.current = null
+                      return
+                    }
+                    void vocalLiveDisponibila()
+                      .then((c) => {
+                        if (generatie !== vlGeneratieRef.current) return
+                        if (!c?.disponibil || vlRef.current) return
+                        if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
+                        vlSondaRef.current = null
+                        console.info('[vocalLive] serverul a revenit — mă întorc pe vocea live')
+                        vlCazutRef.current = false
+                        reluari = 0
+                        micRef.current?.stop()
+                        micRef.current = null
+                        void ensureMic()
+                      })
+                      .catch(() => {})
+                  }, 5000)
+                }
+              },
+            })
+            if (vl) {
+              if (generatie !== vlGeneratieRef.current || micManualOffRef.current) {
+                vl.inchide()
+                return false
+              }
+              vlRef.current = vl
+              registerLiveFocus({
+                onInterrupt: () => {
+                  // LIVE has a separate WebAudio queue from audioIO's TTS.
+                  // Cutting only stopVoice() leaves that queue audible → dual voice.
+                  stopVoice()
+                  vl.intrerupeRedarea()
+                },
+              })
+              setListening(true)
+              // Tabul ăsta a luat VOCEA — o anunță pe canal, ca celelalte
+              // taburi să se zăvorască (auditul de noapte: calea live pornea
+              // fără takeover, deci un al doilea tab pornea liniștit a doua voce).
+              emiteTakeover(canalVoceRef.current, tabVoceIdRef.current)
+              setForeignVoiceLock(false) // tabul ăsta ARE acum vocea — nu e zăvorât
+              return true
+            }
+            return false
+          }
+          if (await porneste()) {
+            console.info(`[vocalLive] pornit pe ${cap.model} (voce ${cap.voce}) — calea veche NU pornește`)
+            // Contorul de minute: vocea live se taxează ca orice voce (adminul e
+            // scutit pe server). Bate cât timp sesiunea trăiește.
+            if (vlTickRef.current) window.clearInterval(vlTickRef.current)
+            let ultimulTick = Date.now()
+            vlTickRef.current = ceas('puls minute voce live', () => {
+              if (!vlRef.current) {
+                if (vlTickRef.current) window.clearInterval(vlTickRef.current)
+                vlTickRef.current = null
+                return
+              }
+              const secs = Math.round((Date.now() - ultimulTick) / 1000)
+              ultimulTick = Date.now()
+              void fetch('/api/realtime/tick', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ seconds: secs }),
+              }).catch(() => {})
+            }, 60_000)
+            return
+          }
+        }
+        console.info('[vocalLive] indisponibil pe server — rămân pe calea vocală obișnuită')
+      }
+      if (!realtimeOffRef.current) {
+        try {
+          const rv = await startRealtimeVoice({
+            language: speechLangRef.current,
+            // GPS FROM THE DEVICE (Jul 25): when the session starts we send the current
+            // position → the server puts it into the voice context (weather/"where am I").
+            coords: coordsRef.current ?? undefined,
+            // THE EARS (Aug 1 — one brain): the live transcript only feeds the
+            // dictation band; the FINAL text no longer enters the chat here —
+            // if it passes the name gate, onAddressed sends it through send(),
+            // which adds the user bubble exactly like a typed message (single
+            // display, single save, single brain).
+            onUserTranscript: (text, done) => {
+              if (done) setLiveVoice('')
+              else setLiveVoice(text)
+            },
+            // THE MOUTH: what the session speaks is the brain's reply, fed by
+            // send() sentence by sentence (rv.speak) — nothing to add to the
+            // chat from here; the bubbles already stream via send().
+            onAssistantTranscript: (_text, done) => {
+              if (done) setLiveVoice('')
+            },
+            // SPOKEN = WRITTEN: the utterance addressed to Kelion takes the
+            // EXACT path of a typed message — the same brain, the same tools,
+            // the same escalation, the same bubbles. The voiceprint rides along
+            // (speaker check, like on the STT dictation path); the second
+            // argument marks the turn as spoken so the server shapes the reply
+            // for speech (clean sentences, no markdown tables).
+            onAddressed: (_text, vf, speaker, audio) => {
+              // VOCE UNIFICATĂ (Adrian, 5 aug): fără transcript de unit — fraza
+              // pleacă DIRECT la creier ca AUDIO. Poarta de timbru (realtimeVoice) a
+              // filtrat deja străinii; creierul unic aude fraza și decide singur
+              // dacă i se vorbește (altfel tace). Fără audio nu are ce trimite.
+              if (!audio) return
+              frazaInchisa() // contor: zero
+              setPendingVoiceFeatures(vf)
+              pendingSpeakerRef.current = speaker ?? null
+              pendingAudioRef.current = audio
+              void sendRef.current('', true)
+            },
+            // NO onToolCall (Aug 1 — one brain): the voice session has NO tools
+            // at all. Every action the user asks for by voice goes through
+            // onAddressed → send() → the ONE brain, which drives the monitor,
+            // camera, maps and app panels through the same control frames as a
+            // typed turn. The second entity that thought in parallel with the
+            // brain (the live "two voices at once" bug) is gone by construction.
+            onState: (s, note) => {
+              // SOLID Realtime connection (WebRTC `connected`) → resets the failure
+              // counter: full-duplex works, any earlier mishap is forgiven.
+              if (s === 'live') {
+                realtimeFailCountRef.current = 0
+                voiceDownAckedRef.current = false // the voice is back — a future outage is announced again
+                // THE RED DOT ON PROOF, NOT ON HOPE (audit Aug 2): `listening`
+                // used to light up right after the SDP answer, before ICE ever
+                // connected — the UI asserted "I hear you" without a successful
+                // measurement. 'live' is the measurement (pc connected / Chirp
+                // ear started), so the dot and the backoff reset move HERE.
+                micBackoffRef.current = 1000
+                setListening(true)
+                return
+              }
+              if (s === 'error') {
+                // SESSION ROTATION ≠ FAILURE (live F12 proof, Jul 24: "Your
+                // session hit the maximum duration of 60 minutes" → the counter
+                // reached 3 after 3 hours of continuous use and extinguished
+                // full-duplex for good). OpenAI's 60-min limit is a NORMAL
+                // life cycle: we restart WITHOUT penalizing.
+                const isRotation = /maximum duration|session.*(expired|limit)|60 minutes/i.test(note ?? '')
+                let gaveUp = false
+                if (!isRotation) {
+                  // We count the REAL failure. Latch onto STT ONLY after 3 failures; below
+                  // the threshold the next start RETRIES full-duplex.
+                  realtimeFailCountRef.current += 1
+                  const giveUp = realtimeFailCountRef.current >= REALTIME_MAX_FAILS
+                  console.error(
+                    `voce realtime a picat (${realtimeFailCountRef.current}/${REALTIME_MAX_FAILS}):`,
+                    note ?? 'fără detalii',
+                  )
+                  if (giveUp) { realtimeOffRef.current = true; realtimeOffAtRef.current = Date.now(); gaveUp = true }
+                }
+                if (micRef.current) {
+                  // Cleans up the Realtime session if it still exists (mic + WebRTC),
+                  // otherwise it stayed captured in parallel with the STT microphone.
+                  micRef.current?.stop?.()
+                  micRef.current = null
+                  setListening(false)
+                  setLiveVoice('')
+                  micStartingRef.current = false
+                  // ONE honest status when we give up (Aug 2): both mouths are
+                  // down — the human hears it ONCE, in chat, instead of silence.
+                  if (gaveUp && !voiceDownAckedRef.current) {
+                    voiceDownAckedRef.current = true
+                    ack(t.voiceDownTemp)
+                  }
+                  // BACKOFF, not a tight loop (Aug 2 — 57 restarts in 24h came
+                  // from this instant re-entry): the restart waits on the same
+                  // backoff as the STT path's onMicErr.
+                  reprogrameazaMic()
+                }
+              }
+            },
+          })
+          if (micManualOffRef.current || micRef.current) {
+            rv.stop()
+            // The Chirp mouth emits 'live' DURING start — if this stale session
+            // is rejected here, the dot it lit must not survive it.
+            if (!micRef.current) setListening(false)
+            return
+          }
+          // THE SINGLE-VOICE RULE (Adrian, Jul 26: "there must never be
+          // 2 voices at the same time"): we mark the handle as a Realtime session — while it's
+          // installed, the written chat's Chirp voice is NOT played (see c.audio) and
+          // is no longer synthesized on the server either (serverVoiceOff on send).
+          // CHIRP MOUTH (Adrian, Aug 2 — "gura pe Google Chirp 3 HD, OpenAI doar
+          // rezervă"): a guraChirp session is NOT marked — its voice ARRIVES as
+          // the server's {audio} frames, so they must PLAY (not be suppressed at
+          // c.audio) and serverVoiceOff must stay false so the server keeps
+          // synthesizing. The OpenAI reserve keeps the old rule.
+          ;(rv as unknown as { isRealtime?: boolean }).isRealtime = rv.guraChirp !== true
+          micRef.current = rv as unknown as MicHandle
+          rvLiveRef.current = rv
+          // The pre-warmed stream is only for the STT path; Realtime opens
+          // its own microphone — without the closing here, the pre-warm capture stayed
+          // STUCK in parallel (mic open twice) for as long as the voice session lasted.
+          preWarmedStream?.getTracks().forEach((t) => t.stop())
+          // If the fallback TTS is still playing at install time, we start MUTED
+          // (anti-echo), as on the STT paths — the unmute comes from stopVoice/onEnd.
+          if (isVoicePlaying()) rv.setMuted(true)
+          // PROACTIVE ROTATION at 55 min (OpenAI's limit is 60): we restart the session
+          // BEFORE the server cuts it — the user feels no break
+          // and no "failure" gets counted. The timer dies with the session.
+          // CHIRP MOUTH (Aug 2): no OpenAI session, no 60-min limit — rotating
+          // would just blip the microphone for nothing, so no timer is armed.
+          const rotateTimer = rv.guraChirp === true ? null : window.setTimeout(() => {
+            if (micRef.current === (rv as unknown as MicHandle) && !micManualOffRef.current) {
+              rv.stop()
+              micRef.current = null
+              setListening(false)
+              micStartingRef.current = false
+              void ensureMicRef.current()
+            }
+          }, 55 * 60_000)
+          // VOICE BILLING PER MINUTE (Adrian, Jul 25): while the voice is active,
+          // we pulse every 20s → the server debits the seconds from the credits. On "stop"
+          // from the server (out of credit) we stop the voice; on any stop, the timer dies.
+          // (GPS is NO longer pushed on this pulse — Adrian, Jul 26: "only
+          // when GPS apps are used or location detection is needed".
+          // The position is read on demand, in the location tools — see
+          // onToolCall + getFreshCoords.)
+          let lastTick = Date.now()
+          // THE VOICE METER RUNS IN EVERY MODE (Adrian, Aug 2): the per-minute
+          // pulse is the PRODUCT price of voice — the user's credits pay for
+          // the service, not for a specific provider. Chirp mode costs US ≈ 0
+          // (Google free tier), which is exactly the margin the owner wants;
+          // an earlier change stopped the pulse in Chirp mode and silently
+          // made voice FREE for every user — reverted. The wallet side is in
+          // routes/realtime.ts (admin exempt — the owner doesn't pay himself).
+          const voiceTick = ceas('puls minute voce', () => {
+            const secs = Math.round((Date.now() - lastTick) / 1000)
+            lastTick = Date.now()
+            void fetch('/api/realtime/tick', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ seconds: secs }),
+            })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((j: { stop?: boolean } | null) => {
+                window.dispatchEvent(new CustomEvent('kelion:credits-changed'))
+                if (j?.stop) {
+                  rv.stop()
+                  micRef.current = null
+                  setListening(false)
+                }
+              })
+              .catch(() => {})
+          }, 20_000)
+          const rotStop = rv.stop.bind(rv)
+          const origStop = () => {
+            if (voiceTick !== null) clearInterval(voiceTick)
+            rotStop()
+          }
+          rv.stop = () => {
+            if (rotateTimer !== null) clearTimeout(rotateTimer)
+            // Sesiunea s-a oprit → marcajul cade IMEDIAT, pe orice drum de stop
+            // (manual, rotation, out of credit) — even if micRef gets cleaned up
+            // later, the chat's Chirp voice doesn't stay stuck on mute.
+            ;(rv as unknown as { isRealtime?: boolean }).isRealtime = false
+            if (rvLiveRef.current === rv) rvLiveRef.current = null
+            origStop()
+          }
+          // `listening` is NOT asserted here (audit Aug 2): the dot lights up
+          // on the proven 'live' state — see onState above.
+          return
+        } catch (e) {
+          const err = e as Error & { code?: string; retryable?: boolean }
+          // MICROFON REFUZAT/ABSENT (DOMException de la getUserMedia): mesaj clar, o
+          // singură dată, prin onMicErr (care reprogramează și retry-ul) — nu-l
+          // tratăm ca un eșec de „voce" (n-are rost să numărăm 3 rateuri pentru o
+          // permisiune lipsă). Singura cale vocală rămâne cea unică; nu există STT.
+          if (e instanceof DOMException && /NotAllowed|NotFound|NotReadable|Security|Permission/i.test(e.name)) {
+            onMicErr(/NotFound|NotReadable/i.test(e.name) ? 'no-device' : 'not-allowed')
+            return
+          }
+          if (err?.code === 'need_login' || err?.code === 'need_credit') {
+            // NOT transient (audit Aug 2): retrying can't sign a session in or
+            // refill a wallet — before, a user out of credit burned the 3
+            // chances and then heard "temporarily unavailable… I will retry",
+            // a promise that could never come true. Latch STT now and tell the
+            // REAL reason. The 90s recovery stays armed on purpose: once he
+            // tops up (or signs in), the voice comes back by itself — exactly
+            // what the message promises.
+            realtimeOffRef.current = true
+            realtimeOffAtRef.current = Date.now()
+            if (!voiceDownAckedRef.current) {
+              voiceDownAckedRef.current = true
+              ack(err.code === 'need_credit' ? t.voiceNeedCredit : t.voiceNeedLogin)
+            }
+          } else {
+            // The Realtime start threw (no key / WebRTC blocked). We count the
+            // same way: 3 chances before latching onto STT — a transient start failure
+            // no longer extinguishes full-duplex for the whole session.
+            realtimeFailCountRef.current += 1
+            if (realtimeFailCountRef.current >= REALTIME_MAX_FAILS) {
+              realtimeOffRef.current = true
+              realtimeOffAtRef.current = Date.now()
+              // ONE honest status (Aug 2): both mouths failed — say it once,
+              // then dictation carries the conversation.
+              if (!voiceDownAckedRef.current) {
+                voiceDownAckedRef.current = true
+                ack(t.voiceDownTemp)
+              }
+            }
+          }
+        }
+      }
+
+      // ── VOCE UNIFICATĂ — O SINGURĂ CALE (Adrian, 5 aug: „urechea o scoți total
+      // ca modelul are tot; tot decis de creierul unic"). STT-ul a DISPĂRUT complet:
+      // nici streaming (WS /api/asr-stream), nici batch (/api/asr). Singura cale
+      // vocală e startRealtimeVoice de mai sus — microfon → micStream (VAD local) →
+      // AUDIO brut la creierul unic, care aude și decide singur dacă i se vorbește.
+      // Dacă am ajuns aici, calea vocală nu s-a instalat (microfon refuzat / eroare
+      // de start): NU cădem pe niciun STT — reîncercăm calea unică mai târziu, cu
+      // backoff (veghea permanentă și revenirea în tab o repornesc oricum).
+      if (!micManualOffRef.current && !micRef.current) {
+        reprogrameazaMic()
+      }
+    } finally {
+      micStartingRef.current = false
+    }
+  }
+  const ensureMicRef = useRef(ensureMic)
+  ensureMicRef.current = ensureMic
+
+  function toggleMic(): void {
+    // Adrian, Jul 11: "the microphone button doesn't work right". Cause: the start
+    // is async (~0.5–2s); a press in that window didn't find micRef yet
+    // and fell onto the START branch — i.e. stopping was impossible to express
+    // while the boot was in flight, and a double-click left the microphone forever
+    // on. Now: pressed during the start = STOP (manualOff), and
+    // ensureMic checks manualOff after every await before installing.
+    // + vlRef (9 aug, ownerul: „dacă ar merge să-l oprești, că nici asta nu
+    // merge"): pe vocea LIVE micRef e null — condiția veche nu intra NICIODATĂ
+    // pe ramura de închidere, sesiunea (și facturarea) supraviețuiau butonului.
+    if (micRef.current || micStartingRef.current || vlRef.current) {
+      micManualOffRef.current = true
+      vlGeneratieRef.current++
+      // Also release the start flag: if the boot really is in flight, it sees
+      // manualOff at the end and stops by itself; if the flag was stuck from an
+      // old error, the button heals here instead of staying dead.
+      micStartingRef.current = false
+      unregisterLiveFocus()
+      vlRef.current?.inchide()
+      vlRef.current = null
+      micRef.current?.stop()
+      micRef.current = null
+      // intentional stop: a stuck fragment must NOT be sent after teardown
+      setListening(false)
+      return
+    }
+    micManualOffRef.current = false
+    // Apăsarea manuală bate zăvorul dintre taburi: omul a ales TABUL ĂSTA.
+    voceAiureaRef.current = false
+
+    // PRE-WARM: we open the microphone before startMicStream, so that pressing
+    // the "mic on" button activates almost instantly. If the user presses
+    // STOP during the warmup, we stop the pre-warmed stream and give up.
+    if (navigator.mediaDevices?.getUserMedia) {
+      micStartingRef.current = true
+      void (async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          })
+          if (micManualOffRef.current || micRef.current) {
+            stream.getTracks().forEach((t) => t.stop())
+            micStartingRef.current = false
+            return
+          }
+          // WE HAND OVER THE BATON (Jul 25 — Adrian: "after I stop the microphone I can't
+          // start it again"): ensureMic guards on micStartingRef and exited IMMEDIATELY
+          // while our pre-warm flag was still true → the button's start
+          // died in vain, and the flag stayed stuck on true and every
+          // next press fell alternately onto stop/nothing. We release the flag
+          // right before the handover — the section is synchronous, ensureMic takes it
+          // back by itself on entry, so the race window is zero.
+          micStartingRef.current = false
+          await ensureMicRef.current(stream)
+          if (!micRef.current) {
+            stream.getTracks().forEach((t) => t.stop())
+          }
+        } catch {
+          // Pre-warm failed → we let the normal path report the error/correctly.
+          micStartingRef.current = false
+          void ensureMicRef.current()
+        }
+      })()
+      return
+    }
+    void ensureMicRef.current()
+  }
+
+  // Permanent hearing: starts TOGETHER WITH THE AVATAR LOADING (Adrian, Jul 28:
+  // "move the opening to when the GLB loads"). WHY: starting at the raw
+  // mount ran DURING the heavy parsing of the 3D model (`/kelion-rpm.glb`) —
+  // main thread busy → getUserMedia/AudioContext stumbled, the first
+  // call failed and went into backoff retries (1s→2s→4s…), hence "starts
+  // slowly". Now we wait for the `kelion:avatar-ready` signal (emitted by AvatarModel
+  // when the base GLB has loaded, the thread is free) and ONLY THEN arm
+  // the microphone — the first try catches, no backoff. For the owner (permission
+  // already granted) it starts with no click. 4s net: if the avatar doesn't load
+  // (page without an avatar / GLB failure), the microphone starts anyway, it's not lost.
+  useEffect(() => {
+    let armed = false
+    const arm = (): void => {
+      if (armed) return
+      armed = true
+      void ensureMicRef.current()
+    }
+    // If the avatar already loaded before we attach the listener (a race on
+    // a fast start), we start on the spot; otherwise we wait for the event.
+    if ((window as unknown as { __kelionAvatarReady?: boolean }).__kelionAvatarReady) arm()
+    else window.addEventListener('kelion:avatar-ready', arm, { once: true })
+    const armFallback = window.setTimeout(arm, 4000)
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void ensureMicRef.current()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('kelion:avatar-ready', arm)
+      window.clearTimeout(armFallback)
+      document.removeEventListener('visibilitychange', onVisible)
+      if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+      if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
+      vlGeneratieRef.current++
+      unregisterLiveFocus()
+      vlRef.current?.inchide()
+      vlRef.current = null
+      micRef.current?.stop()
+      micRef.current = null
+      stopVoice()
+    }
+  }, [])
+
+  // MESSENGER — VOCEA CU KELION SE SUSPENDĂ CÂT VORBEȘTI CU OMUL (Faza 2). Când
+  // un apel se CONECTEАZĂ, oprim microfonul/sesiunea Kelion (altfel două microfoane
+  // s-ar bate, iar Kelion ar „auzi" conversația și ar răspunde). Captura apelului
+  // (lib/apelMic) preia microfonul. La ÎNCHIDEREA apelului, revenim la vocea Kelion.
+  useEffect(() => {
+    const laApel = (e: Event): void => {
+      const d = (e as CustomEvent).detail as { stare?: string }
+      if (d?.stare === 'conectat') {
+        micManualOffRef.current = true // blochează re-armarea automată a urechii Kelion
+        vlGeneratieRef.current++
+        unregisterLiveFocus()
+        vlRef.current?.inchide()
+        vlRef.current = null
+        micRef.current?.stop()
+        micRef.current = null
+        setListening(false)
+        stopVoice()
+      } else if (d?.stare === 'inchis' || d?.stare === 'refuzat') {
+        // Apelul s-a terminat → readucem vocea cu Kelion (dacă nu era oprită manual).
+        micManualOffRef.current = false
+        void ensureMicRef.current()
+      }
+    }
+    window.addEventListener('kelion:apel-stare', laApel)
+    return () => window.removeEventListener('kelion:apel-stare', laApel)
+  }, [])
+
+  // ULTRA-FAST FULL-DUPLEX STREAMING FOR EVERYONE, THE SAME (Adrian, Jul 14: "audio
+  // full duplex streaming ultra fast for everyone, now; everyone equally fast").
+  // REMOVED the admin-only LiveKit detour: it entered the LiveKit room ALONE and stopped
+  // the HTTP microphone, but when the voice agent on the VPS did NOT process audio, the state
+  // stayed `live` (fallback ONLY on `error`/`closed`) → the admin "left but couldn't
+  // hear", a different (deaf) experience than the clients'. NOW admin AND clients use
+  // EXACTLY the same path: instant streaming (`micStream` → /api/asr-stream Google STT,
+  // VOX + barge-in, fast first word), started default-on by the "Permanent hearing"
+  // above — proven to work (the real voiceprints are created on it). Zero separate
+  // admin channel, zero dependency on the LiveKit agent.
+
+  // ── DANS PE MUZICA DIN CAMERĂ (Adrian, 4 aug): cât microfonul ascultă,
+  // deschidem un tap de analiză pe microfon (motorBit) și, când e MUZICĂ, gura
+  // tace (nu vorbi peste ea) iar avatarul dansează — fiecare mișcare PORNEȘTE
+  // pe un bit, ca să fie sincron. Permisiunea de microfon e deja dată (mic-ul
+  // ascultă), deci al doilea getUserMedia nu mai întreabă.
+  const DANSURI = ['dans', 'dans-2', 'dans-3', 'dans-4', 'dans-5', 'dans-6', 'dans-7', 'dans-8', 'dans-9', 'dans-10']
+  useEffect(() => {
+    if (!listening || !navigator.mediaDevices?.getUserMedia) return
+    let opreste = (): void => {}
+    let anulat = false
+    let stream: MediaStream | null = null
+    const peDansGata = (): void => {
+      dansLiberRef.current = true
+    }
+    window.addEventListener('kelion-gesture-done', peDansGata)
+    void navigator.mediaDevices
+      .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .then((s) => {
+        if (anulat) {
+          s.getTracks().forEach((t) => t.stop())
+          return
+        }
+        stream = s
+        opreste = pornesteDansPeMuzica(s, {
+          peBit: () => {
+            // O mișcare nouă pornește DOAR pe un bit și doar dacă avatarul e
+            // liber (mișcarea precedentă s-a terminat) — așa dansul e sincron
+            // pe ritm, nu un vârtej de clipuri suprapuse.
+            if (!muzicaActivaRef.current || !dansLiberRef.current) return
+            dansLiberRef.current = false
+            dansIdxRef.current = (dansIdxRef.current + 1) % DANSURI.length
+            window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: DANSURI[dansIdxRef.current] }))
+          },
+          muzicaOn: () => {
+            muzicaActivaRef.current = true
+            // Taci peste muzică: oprește vocea live și redarea în curs.
+            rvLiveRef.current?.stopSpeaking()
+            interruptAll('music-start')
+            // Prima mișcare pornește imediat; următoarele vin pe bit.
+            if (dansLiberRef.current) {
+              dansLiberRef.current = false
+              window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: DANSURI[dansIdxRef.current] }))
+            }
+          },
+          muzicaOff: () => {
+            muzicaActivaRef.current = false
+            dansLiberRef.current = true
+          },
+        })
+      })
+      .catch(() => {
+        /* fără al doilea microfon → fără dans pe muzică; nimic stricat */
+      })
+    return () => {
+      anulat = true
+      window.removeEventListener('kelion-gesture-done', peDansGata)
+      opreste()
+      stream?.getTracks().forEach((t) => t.stop())
+      muzicaActivaRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listening])
+
+  // ── O VOCE ÎN TOATE TABURILE (Adrian, 4 aug: două taburi deschise = două
+  // voci, una live + una robotică din dictarea de rezervă — măsurat din captura
+  // lui). Zăvorul vechi (BroadcastChannel din realtimeVoice) acoperea DOAR
+  // sesiunea live; aici acoperim TOT lanțul vocii: la {takeover} străin tabul
+  // ăsta oprește orice microfon și se zăvorăște; cât ține vocea, bate {inima};
+  // dacă inima tabului activ tace (>25s) sau vine {ramasBun} la închidere, un
+  // tab zăvorât reia vocea singur. Regulile pure: lib/voceUnica.ts.
+  useEffect(() => {
+    const bc = deschideCanalVoce()
+    canalVoceRef.current = bc
+    if (!bc) return
+    const opresteLocal = (): void => {
+      if (micRetryRef.current) {
+        window.clearTimeout(micRetryRef.current)
+        micRetryRef.current = null
+      }
+      if (upgradeTimerRef.current) {
+        window.clearTimeout(upgradeTimerRef.current)
+        upgradeTimerRef.current = null
+      }
+      vlGeneratieRef.current++
+      unregisterLiveFocus()
+      vlRef.current?.inchide()
+      vlRef.current = null
+      if (vlSondaRef.current) {
+        window.clearInterval(vlSondaRef.current)
+        vlSondaRef.current = null
+      }
+      micRef.current?.stop()
+      micRef.current = null
+      setListening(false)
+      setLiveVoice('')
+    }
+    const onMesaj = (ev: MessageEvent): void => {
+      const ce = judecaMesajVoce(ev.data as MesajVoce | null, tabVoceIdRef.current, voceAiureaRef.current)
+      if (ce === 'zavoraste') {
+        voceAiureaRef.current = true
+        ultimaInimaRef.current = Date.now()
+        opresteLocal()
+        // ZĂVORUL ACOPERĂ ȘI CHIRP-UL SCRIS (owner, 20 aug: voci paralele pe 2
+        // taburi). `opresteLocal` oprea doar sesiunea LIVE/mic; dar un tab de fundal
+        // în care SCRII tot reda Chirp (GURA 1), peste vocea tabului activ. Armăm
+        // zăvorul ca `requestTtsFocus` să respingă Chirp-ul aici — o singură gură în
+        // tot browserul. (Era construit dar nearmat — se aprindea doar în teste.)
+        setForeignVoiceLock(true)
+      } else if (ce === 'inima') {
+        ultimaInimaRef.current = Date.now()
+      } else if (ce === 'reia') {
+        voceAiureaRef.current = false
+        setForeignVoiceLock(false) // tabul ăsta reia vocea — nu mai e zăvorât
+        void ensureMicRef.current()
+      }
+    }
+    bc.addEventListener('message', onMesaj)
+    const puls = ceas('puls interfață', () => {
+      // ÎNTREG lanțul vocii ține inima — și calea veche (micRef), și sesiunea
+      // LIVE (vlRef). Auditul de noapte (9 aug): inima bătea doar pe micRef,
+      // iar calea live (implicită din 8 aug) era în afara zăvorului — două
+      // taburi = două voci, bugul din 4 aug reapărut prin construcție.
+      if (micRef.current || vlRef.current) bc.postMessage({ inima: tabVoceIdRef.current })
+      else if (voceAiureaRef.current && inimaAMurit(ultimaInimaRef.current, Date.now())) {
+        // Tabul care ținea vocea a murit fără rămas-bun → vocea revine AICI.
+        voceAiureaRef.current = false
+        void ensureMicRef.current()
+      }
+    }, INIMA_BATE_MS)
+    const laPlecare = (): void => {
+      if (micRef.current || vlRef.current) bc.postMessage({ ramasBun: tabVoceIdRef.current })
+    }
+    window.addEventListener('pagehide', laPlecare)
+    return () => {
+      window.removeEventListener('pagehide', laPlecare)
+      window.clearInterval(puls)
+      bc.removeEventListener('message', onMesaj)
+      laPlecare()
+      bc.close()
+      canalVoceRef.current = null
+    }
+  }, [])
+
+  // While it listens, the screen doesn't fall asleep — a phone with the screen off cuts its
+  // microphone, and "permanent on" would die at the first screen-off.
+  useEffect(() => {
+    keepScreenOn(listening)
+    return () => keepScreenOn(false)
+  }, [listening])
 
   // Apply a language the SERVER decided (it already persisted the pref) —
   // update the recognizer + the local mirror. No-op if already active.
@@ -1678,15 +2821,31 @@ export default function ChatPanel({
     let fps = 4
     let last: { lat: number; lon: number; t: number } | null = null
 
+    let ultimaCaptura = 0
     const tick = (): void => {
-      // PAUZĂ CÂT REDĂ NARATORUL (owner, 13 aug — desincronizarea feței sub
+      // PAUZĂ CÂT VORBEȘTE KELION (owner, 13 aug — desincronizarea feței sub
       // sarcină): captarea = `toDataURL` SINCRON, care citește înapoi de pe
-      // GPU-ul avatarului; cât redă naratorul (playVoice → getVoiceLevel > 0.06)
-      // blochează firul principal și lip-sync-ul sare. Nu capturăm atunci —
-      // vederea nu e cerută; se reia instant la tăcere.
+      // GPU-ul avatarului; cât gura se mișcă, blochează firul principal și
+      // lip-sync-ul sare (măsurat live: „captare cadre cameră a ținut firul
+      // 3440 ms, vârf 4275 ms"). Cât vorbește Kelion nu capturăm — vederea nu e
+      // cerută atunci (o tură pornită ia oricum un cadru proaspăt); se reia
+      // instant la tăcere.
       if (getVoiceLevel() > 0.06) return
-      // VOCE SCOASĂ (21 aug): throttle-ul pe sesiunea live (vlRef) a dispărut odată
-      // cu vocea — captarea merge la ritmul normal (4–8 fps, adaptat la mișcare).
+      // ÎN VOCEA LIVE, CAPTAREA SE RĂREȘTE (măsurat 8 aug, consola ownerului:
+      // „[ceas lent] captare cadre cameră a ținut firul 51–92 ms" în timpul
+      // sesiunii live). Împachetarea JPEG (toDataURL = citire sincronă GPU→CPU
+      // + encode la 768px) rula la 4–8 fps degeaba: sesiunea live nu trimite
+      // cadre (contractul WS e doar audio) — cadrele pleacă doar cu turele de
+      // chat. Cât e live activ și nicio tură în zbor, un cadru pe secundă
+      // ajunge (proaspăt pentru faceprint și pentru o tură scrisă pornită);
+      // firul rămâne liber pentru redarea vocii.
+      // Cât e VOCEA LIVE activă, cel mult 1 cadru/sec — ȘI în timpul unei ture
+      // (busy). Vechea gardă sărea throttle-ul pe `busy`, dar într-o conversație
+      // vocală reală (barge-in-uri) e mereu busy → captarea rula la 4 fps și
+      // înfometa redarea vocii (audio crăpat, 10 aug). Sesiunea live e audio-only,
+      // nu trimite cadre — un cadru/sec ajunge pentru faceprint/o tură scrisă.
+      if (vlRef.current && performance.now() - ultimaCaptura < 950) return
+      ultimaCaptura = performance.now()
       const f = captureRef.current?.()
       if (f) {
         latestFrameRef.current = f
@@ -1735,17 +2894,6 @@ export default function ChatPanel({
     }
   }, [cameraOn])
 
-  // VĂZUL OFFLINE (Faza 1 · M5): cât camera e pornită, captioning în FUNDAL din cadrele deja
-  // capturate (vazOffline, ~8s, model local Xenova/vit-gpt2). Se auto-închide dacă modelul
-  // nu-i descărcat. Owner 21 aug: „toate default și la offline și la online" → rulează în
-  // AMBELE moduri (fără poartă de conexiune), ca văzul local să fie mereu cald/gata. Legenda
-  // ajunge INSTANT în contextul turei offline prin descriereVazOffline() (fără latență;
-  // online vederea merge oricum pe server, mai clară). Oprit la stingerea camerei.
-  useEffect(() => {
-    if (!cameraOn) return
-    return porneseteVazSampling(() => latestFrameRef.current)
-  }, [cameraOn])
-
   // Close the functions menu on an outside click.
   useEffect(() => {
     if (!menuOpen) return
@@ -1772,11 +2920,26 @@ export default function ChatPanel({
     setCameraOn(false)
   }, [])
 
-  // VOCE SCOASĂ (21 aug clean-slate): calibrarea amprentei vocale (voiceprint) și
-  // auto-înrolarea adminului au dispărut odată cu microfonul — nu se mai capturează
-  // voce. calibrateVoiceprint/hasVoiceprint/startMic au fost ȘTERSE din audioIO
-  // (jumătatea de captură), care păstrează DOAR redarea. Amprenta rămâne LIVE pe
-  // altă cale (CustomerSettings.onRecordVoiceprint + routes/voiceprint.ts).
+  // Voiceprint calibration: 3s of capturing Adrian's voice, then the profile
+  // saves locally (audioIO.ts) and the permanent microphone starts filtering it.
+  async function calibrateVoice(): Promise<void> {
+    if (voiceCalState === 'listening') return
+    setVoiceCalState('listening')
+    const ok = await calibrateVoiceprint(3000)
+    setHasVoicePrint(hasVoiceprint())
+    setVoiceCalState(ok ? 'ok' : 'fail')
+    window.setTimeout(() => setVoiceCalState('idle'), 2000)
+  }
+  // AUTOMATIC (Adrian, Jul 12: "the one with the button happens automatically"): voice
+  // recognition no longer asks for a click. When the admin enters and has no voiceprint yet, we
+  // calibrate it OURSELVES (from the first seconds of speech); if it doesn't catch (silence),
+  // it retries until it succeeds. The manual button was removed.
+  useEffect(() => {
+    if (!isAdmin || hasVoicePrint || voiceCalState !== 'idle') return
+    const id = window.setTimeout(() => void calibrateVoice(), 1500)
+    return () => window.clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, hasVoicePrint, voiceCalState])
 
   // When the MONITOR shows content, the centre chat bubbles would cover it —
   // so Kelion's words move to a slim black bar just above the composer instead.
@@ -1924,8 +3087,20 @@ export default function ChatPanel({
 
     return cleaned
   }
-  // VOCE SCOASĂ (21 aug clean-slate): butonul de microfon (micButton) a dispărut —
-  // nu mai există captură microfon → creier. Chatul e DOAR text.
+  // BUTONUL DE MICROFON — o SINGURĂ definiție, folosită și în compozitor și în
+  // stratul de mașină (fără cod duplicat, poarta jscpd). Diferă doar clasa CSS;
+  // starea (listening), acțiunea (toggleMic) și eticheta sunt aceleași peste tot.
+  const micButton = (cls: string) => (
+    <button
+      type="button"
+      className={`${cls} ${listening ? 'live' : ''}`}
+      onClick={toggleMic}
+      aria-label={listening ? t.micStop : t.micTalk}
+      title={listening ? t.micStop : t.micTalk}
+    >
+      {listening ? '●' : '🎤'}
+    </button>
+  )
   const hint = t.chatHint
   // The right-hand button concerns ONLY the WRITTEN chat. You have something to send (text or
   // attached file) → it's active. Empty field → the chat is AUDIO (the microphone is always
@@ -1968,14 +3143,29 @@ export default function ChatPanel({
               ✕
             </button>
             <div className="car-talk">
-              {heard || lastUser?.content ? (
+              {listening && (heard || lastUser?.content) ? (
                 <p className="car-heard">{(heard || lastUser?.content || '').slice(0, 200)}</p>
               ) : null}
               <p className="car-reply">{cleanMsg(lastAssistant?.content ?? '') || t.carHint}</p>
             </div>
-            {/* VOCE SCOASĂ (21 aug clean-slate): butonul de microfon full-duplex din
-                modul mașină a dispărut odată cu vocea. Overlay-ul rămâne (glob, ieșire,
-                răspunsul lui Kelion pe monitor); calea vocală se reconstruiește ulterior. */}
+            {/* ON/OFF pentru vocea FULL-DUPLEX (Adrian, 11 aug: „butonul să fie
+                on/off, nu când vreau să vorbesc — e full duplex"). O pornești o
+                dată; Kelion ascultă și răspunde continuu, vorbești liber (nu
+                apeși de fiecare dată). toggleMic pornește/oprește exact sesiunea
+                live full-duplex — aceeași ca în restul aplicației. */}
+            <div className="car-mic-wrap">
+              <button
+                type="button"
+                className={`car-mic ${listening ? 'live' : ''}`}
+                onClick={toggleMic}
+                aria-pressed={listening}
+                aria-label={listening ? t.carVoiceOff : t.carVoiceOn}
+                title={listening ? t.carVoiceOff : t.carVoiceOn}
+              >
+                🎙️
+              </button>
+              <span className="car-mic-label">{listening ? t.carListening : t.carVoiceOn}</span>
+            </div>
           </div>,
           document.body,
         )}
@@ -2049,9 +3239,58 @@ export default function ChatPanel({
         </button>
       )}
       <div className={`composer ${busy ? 'working' : ''}`}>
-        {/* VOCE SCOASĂ (21 aug clean-slate): banda de dictare live (liveVoice) și
-        bargraful urechii + sliderul de preamp au dispărut odată cu microfonul. A
-        rămas DOAR banda de text de mai jos (👤/🧠/K). */}
+        {/* LIVE DICTATION with a cinematic effect (like AI movies): as Adrian
+        speaks, the sentence appears word by word, with a blinking cursor; on a
+        pause over 3s it leaves for the brain and the band empties. */}
+        {/* FIXED RULE (Adrian, Jul 10: „I don't want to see anything on the
+        interface that covers the page — text flows like teletext, on a single
+        line”): ANY live band is a fixed line, single-line text, scrolling
+        (teletext) when it doesn't fit — it NEVER grows vertically, never
+        covers the page. */}
+        {liveVoice && (
+          <div className="voice-live" aria-live="polite">
+            <span className="voice-live-dot" />
+            {/* FIXED TAIL, not a remounted teletext (fluidity #9): during dictation
+            the text grows in place, showing its tail — it no longer jumps off-screen
+            at every new word. */}
+            <span className="speech-tail">
+              <span className="speech-tail-text">{liveVoice}</span>
+            </span>
+            <span className="voice-live-caret" />
+          </div>
+        )}
+        {/* BARGRAF DE INTRARE AL URECHII LIVE (owner, 16 aug): cât ascultă
+            sesiunea live, arată nivelul REAL al microfonului spre model + dacă
+            poarta half-duplex îl taie (gri „mut") sau clipează (roșu). Ca ownerul
+            să VADĂ, măsurat, dacă vocea ajunge și dacă se trunchiază ceva. */}
+        {listening && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <MicBargraf nivelRef={micNivelRef} activ={listening} />
+            {/* PREAMP min→max (owner, 16 aug: „reglaj preamp… ce faci daca e surd?"):
+                ridică/coboară manual nivelul microfonului; efectul se vede în bargraf. */}
+            <label
+              title="Preamp microfon (min→max): ridică nivelul dacă e prea surd (peste amplificarea automată)"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#c9ccd1' }}
+            >
+              <span style={{ opacity: 0.8 }}>preamp</span>
+              <input
+                type="range"
+                min={0.5}
+                max={12}
+                step={0.5}
+                value={preampNivel}
+                onChange={(e) => {
+                  const g = Number(e.target.value)
+                  setPreampNivel(g)
+                  vlRef.current?.setPreamp(g)
+                  try { localStorage.setItem('kelion_preamp', String(g)) } catch { /* ignore */ }
+                }}
+                style={{ width: 96 }}
+              />
+              <span style={{ minWidth: 30, opacity: 0.85, fontVariantNumeric: 'tabular-nums' }}>×{preampNivel.toFixed(1)}</span>
+            </label>
+          </div>
+        )}
         {/* ONE BAND, BOTH DIRECTIONS (Adrian, Jul 11 evening: "things must be
             swept here, from the brain and towards the brain — no other written
             chat shows"). The band changes its sign with the turn's phase:
@@ -2079,17 +3318,34 @@ export default function ChatPanel({
               <span className="speech-tail-text">…</span>
             </span>
           </div>
+        ) : ((lastAssistant?.content && !idleBandHidden) || busy) && lastAssistant?.ts !== tickerDoneTs ? (
+          <div className="heard-band kelion-band" aria-live="polite">
+            <span className="heard-band-label kelion-k" title={t.heardKelionTitle}>K</span>
+            {busy ? (
+              <span className="speech-tail">
+                <span className="speech-tail-text">
+                  {cleanMsg(lastAssistant?.content ?? '') || (heard ? synthesize(heard) : '…')}
+                </span>
+              </span>
+            ) : (
+              <span className="ticker">
+                <span
+                  className="ticker-text"
+                  key={lastAssistant?.ts ?? 'empty'}
+                  style={{ '--ticker-dur': tickerDur(cleanMsg(lastAssistant?.content ?? '')) } as CSSProperties}
+                  onAnimationEnd={() => setTickerDoneTs(lastAssistant?.ts ?? null)}
+                >
+                  {cleanMsg(lastAssistant?.content ?? '')}
+                </span>
+              </span>
+            )}
+          </div>
         ) : null}
-        {/* RĂSPUNSUL lui Kelion NU se mai arată/baleiază în banda de jos (Adrian,
-            21 aug: „când răspunde Kelion, răspunde pe monitor, e ok; în bara de
-            chat de jos nu trebuie să mai afișeze sau să baleze textul; și când e
-            vorbit, gata audio"). Răspunsul rămâne pe MONITOR (+ audio la revenirea
-            vocii). Banda de jos ține DOAR ecoul a ce transmiți TU (👤, regula ta
-            veche „textul o singură dată") și semnul de gândire (🧠) — nu răspunsul. */}
         {/* REMOVED (Adrian's order, Jul 10: „remove that microphone-is-muted
-        thing, it's wrong” + „microphone with autovox, instantly”): the mic-mute
-        hint is gone. (21 aug: microfonul + auto-înrolarea din audioIO au fost
-        ȘTERSE cu totul — calea vocală s-a scos; nota rămâne ca istoric.) */}
+        thing, it's wrong” + „microphone with autovox, instantly”): the mic no
+        longer stays mute until calibration — the voiceprint is learned
+        AUTOMATICALLY from the first sentences (audioIO.ts, auto-enrollment),
+        so the hint was false. */}
         {attachments.length > 0 && (
           <div className="composer-atts">
             {attachments.map((a) => (
@@ -2187,19 +3443,6 @@ export default function ChatPanel({
               </div>
             )}
           </div>
-          {/* MICROFON OFFLINE (Faza 1 · M4): apare doar când urechea (Whisper) e
-              descărcată. Apasă → ascultă; apasă iar → transcrie offline în caseta de scris. */}
-          {urecheGata && (
-            <button
-              type="button"
-              className={`composer-icon ${asculta ? 'live' : ''}`}
-              onClick={() => void toggleAscultare()}
-              title={asculta ? 'Oprește și transcrie (offline)' : 'Vorbește — Kelion aude offline'}
-              aria-label="Microfon offline"
-            >
-              {asculta ? '⏺' : '🎤'}
-            </button>
-          )}
           <textarea
             ref={composerInputRef}
             className="composer-input"
@@ -2222,7 +3465,7 @@ export default function ChatPanel({
             }}
             placeholder={t.chatPlaceholder}
           />
-          {/* VOCE SCOASĂ (21 aug clean-slate): butonul de microfon din compozitor a dispărut. */}
+          {micButton('composer-mic')}
           {/* VOLUMUL VOCII — ASCUNS din compozitor (Adrian, 6 aug: „ascunde-l că
           nu-și are rostul aici"). Păstrăm starea și logica (volumul persistat se
           aplică în continuare la redare prin getVoiceVolume/setVoiceVolume), doar

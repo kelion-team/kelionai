@@ -13,11 +13,9 @@ vi.mock('./audioIO', () => {
   }
 })
 
-// VOCE SCOASĂ (21 aug clean-slate): requestTtsFocus/releaseTtsFocus au dispărut
-// odată cu vocea de pe frontend, deci cazurile lor au fost eliminate. Rămân testate
-// comportamentele PĂSTRATE: zăvorul cross-tab (setForeignVoiceLock/isForeignVoiceLocked)
-// și interruptAll (taie orice redare — ex. naratorul), inclusiv tăierea sesiunii LIVE.
 import {
+  requestTtsFocus,
+  releaseTtsFocus,
   registerLiveFocus,
   unregisterLiveFocus,
   setForeignVoiceLock,
@@ -27,41 +25,66 @@ import {
 import * as audioIO from './audioIO'
 
 const setPlaying = (audioIO as unknown as { __setPlaying: (v: boolean) => void }).__setPlaying
-const isPlaying = (audioIO as unknown as { isVoicePlaying: () => boolean }).isVoicePlaying
 
 describe('audioFocus single-voice lock', () => {
   beforeEach(() => {
     setForeignVoiceLock(false)
     unregisterLiveFocus()
+    releaseTtsFocus()
     setPlaying(false)
     interruptAll('test-reset')
     setForeignVoiceLock(false)
   })
 
-  it('setForeignVoiceLock toggles the cross-tab voice lock flag', () => {
+  it('blocks TTS while a foreign tab holds the voice lock', () => {
     setForeignVoiceLock(true)
     expect(isForeignVoiceLocked()).toBe(true)
-    setForeignVoiceLock(false)
-    expect(isForeignVoiceLocked()).toBe(false)
+    expect(requestTtsFocus()).toBe(false)
   })
 
-  it('taking the foreign lock cuts any local playout (one mouth in the browser)', () => {
-    setPlaying(true)
+  it('allows TTS again after the foreign lock is released', () => {
     setForeignVoiceLock(true)
-    expect(isPlaying()).toBe(false)
+    expect(requestTtsFocus()).toBe(false)
+    setForeignVoiceLock(false)
+    expect(requestTtsFocus()).toBe(true)
+    releaseTtsFocus()
   })
 
-  it('interruptAll stops every active playout (barge-in)', () => {
-    setPlaying(true)
-    interruptAll('barge-in')
-    expect(isPlaying()).toBe(false)
+  it('LIVE still beats TTS when unlocked', () => {
+    setForeignVoiceLock(false)
+    registerLiveFocus()
+    expect(requestTtsFocus()).toBe(false)
+    unregisterLiveFocus()
   })
 
-  it('a registered LIVE session gets its outbound audio cut on interruptAll', () => {
-    const cut = vi.fn()
-    registerLiveFocus({ onInterrupt: cut })
-    interruptAll('barge-in')
-    expect(cut).toHaveBeenCalledTimes(1)
+  // Finding 1 (owner, 19 aug: „se aud 2 voci… dacă îi scriu răspunde doar scris"):
+  // LIVE rostește DOAR turele vocale. O tură SCRISĂ nu e rostită de LIVE, deci
+  // Chirp-ul ei TREBUIE redat chiar și cât LIVE ține focus-ul — altfel scrisul
+  // rămâne mut sub LIVE (exact bugul). Gardul între taburi rămâne peste tot.
+  it('a WRITTEN turn plays TTS even while LIVE holds focus', () => {
+    setForeignVoiceLock(false)
+    registerLiveFocus()
+    expect(requestTtsFocus()).toBe(false) // tură vocală sub LIVE → LIVE vorbește
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(true) // tura SCRISĂ → Chirp-ul ei se redă
+    releaseTtsFocus()
+    unregisterLiveFocus()
+  })
+
+  it('the foreign-tab lock beats even a written turn (one mouth in the whole browser)', () => {
+    setForeignVoiceLock(true)
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(false)
+  })
+
+  // Owner, 20 aug: „se aud multe voci paralele… o singură ieșire audio". O tură
+  // SCRISĂ care ia gura cât LIVE e activ TREBUIE să taie ÎNTÂI playout-ul LIVE
+  // (PCM-ul rămas), altfel Chirp-ul scris se aude PESTE vocea LIVE. O gură nouă
+  // închide celelalte guri.
+  it('a WRITTEN turn CUTS the LIVE mouth before taking the mouth (one output)', () => {
+    const taieLive = vi.fn()
+    registerLiveFocus({ onInterrupt: taieLive })
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(true)
+    expect(taieLive).toHaveBeenCalledTimes(1) // gura LIVE a fost tăiată la sursă
+    releaseTtsFocus()
     unregisterLiveFocus()
   })
 })

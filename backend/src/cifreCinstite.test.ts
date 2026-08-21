@@ -23,10 +23,8 @@ describe('scutirea ownerului pe TOATE căile de debit — soldul lui nu se mai m
   it('tarife: esteAdmin iese gratis înainte de orice debit', () => {
     expect(citeste('services/tarife.ts')).toMatch(/if \(esteAdmin\) return \{ ok: true, scazutGbp: 0/)
   })
-  it('chat: debitul e gardat pe rol/owner', () => {
-    // Voce SCOASĂ (clean-slate 21 aug): ruta vocală (routes/vocalLive.ts) a fost
-    // ștearsă, deci gardul ei de debit nu mai există de verificat. Pe calea
-    // scrisă gardul rămâne dovedit.
+  it('voce live + chat: debitul e gardat pe rol/owner', () => {
+    expect(citeste('routes/vocalLive.ts')).toMatch(/if \(user\.role !== 'admin'\) void debitWallet/)
     const chat = citeste('routes/chat.ts')
     expect((chat.match(/!isOwnerEmail\(user\.email\)\) void debitWallet/g) ?? []).length).toBeGreaterThanOrEqual(2)
   })

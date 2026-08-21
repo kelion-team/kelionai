@@ -10,7 +10,7 @@ export interface ProvenientaRezolvare {
   id: number
   motor?: string | null // 'aider' (motorul)
   creier?: string | null // modelul care a rezolvat (ex. qwen2.5-coder:32b / qwen3.5:397b)
-  sursa?: string | null // 'free' (constructor free-local unic — paidul a fost scos)
+  sursa?: string | null // 'free' | 'platit'
   fisiere?: unknown // string[] — ce a aplicat
   ordin?: string | null // fapta ordinului (prima linie)
   prUrl?: string | null
@@ -23,7 +23,7 @@ export function memorieRezolvareConstructor(p: ProvenientaRezolvare): string {
   if (!Number.isInteger(id) || id <= 0) return ''
   const motor = String(p.motor || 'Aider').trim() || 'Aider'
   const creier = String(p.creier || '').trim()
-  const sursa = p.sursa === 'free' ? 'free (local pe VPS)' : ''
+  const sursa = p.sursa === 'platit' ? 'plătit (cloud)' : p.sursa === 'free' ? 'free (local pe VPS)' : ''
   const fisiere = Array.isArray(p.fisiere) ? p.fisiere.map((f) => String(f).trim()).filter(Boolean) : []
   const ordin = String(p.ordin || '').replace(/\s+/g, ' ').trim().slice(0, 160)
 

@@ -108,10 +108,9 @@ export interface ChatControl {
   // un apel; frame-ul ăsta ridică la APELANT interfața „sun pe…". Celălalt primește
   // invitația pe WS-ul lui de prezență (lib/apel.ts). Permis și în modul mașină.
   apel?: { stare: string; callId?: string; cu?: { email: string; nume: string } }
-  // VOCE SCOASĂ (21 aug clean-slate): câmpul `audio` (frame-ul {audio} al vocii
-  // creierului, server→client) a fost scos — serverul nu mai sintetizează vocea pe
-  // tura de chat, iar clientul nu citea niciodată câmpul. Naratorul și apelul redau
-  // prin playVoice direct (audioIO), nu prin acest frame de control.
+  // THE BRAIN'S VOICE: MP3 (base64) synthesized on the server (Chirp 3) and sent over
+  // the bridge. The app only decodes + plays it — it synthesizes nothing locally.
+  audio?: string
   // Owner promo pipeline: an APPROVED clip script + shot list — arm the recorder;
   // when recording starts the script is spoken (voice only, no text on screen)
   // while the scenes appear on the monitor at their times.
@@ -126,6 +125,8 @@ export interface ChatControl {
   }
 }
 
+import type { VoiceFeatures } from './audioIO.js'
+import { moment as contorMoment } from './contorFraza'
 import { getStareTranzactii, getMonitorContent } from './workspace'
 import { getTeava } from './retea'
 
@@ -189,14 +190,32 @@ export async function* streamChat(
   // CONTINUOUS VISION (Adrian, Jul 11): the camera's last 4 frames — for
   // ALL users (rule no. 9: same capabilities), not just the admin.
   images?: string[],
+  // Features vocale extrase client-side pentru identificare speaker + gen.
+  voiceFeatures?: VoiceFeatures,
   // 128-d face descriptor (face-api) + thumbnail, extracted in the background when the camera
   // is on. Triggered by voice, no button, off-hot-path.
   faceDescriptor?: number[],
   facePhoto?: string,
-  // VOCE SCOASĂ (21 aug clean-slate): parametrii vocali morți au fost scoși din
-  // semnătură — voiceFeatures / serverVoiceOff / spoken / speaker / audio (nativ) /
-  // voceAmbianta veneau MEREU undefined/false de la apelanți (nu mai există cale
-  // vocală). Serverul îi tratează oricum ca absenți; contractul TEXT rămâne neatins.
+  // THE SINGLE VOICE RULE (Adrian, Jul 26): the full-duplex voice session is active →
+  // the server doesn't synthesize the Chirp voice for this turn (no cost, no frames).
+  serverVoiceOff?: boolean,
+  // THE SPOKEN TURN (Aug 1 — one brain): this message came from the live voice
+  // session's ears. The server shapes the reply for speech (clean sentences,
+  // no markdown tables/links) — the client speaks it verbatim through the
+  // voice session's mouth. Typed turns omit the flag.
+  spoken?: boolean,
+  // THE GUEST SPEAKER (Aug 1 — the timbre gate): the voice session recognised
+  // the speaker as an approved/pending GUEST of the account — the server
+  // strips every admin power from this turn and tells the brain who's talking.
+  speaker?: string,
+  // AUDIO NATIV → CREIER (Adrian, 3 aug: „deep learning legat de creier direct"):
+  // vocea BRUTĂ a frazei (WAV data-URI). Gemini 2.5 o aude nativ (ton/accent);
+  // celelalte modele primesc textul (serverul scoate blocul audio). Creier unic.
+  audio?: string,
+  // VOCE AMBIENTALĂ (Adrian, 5 aug: „tot decis de creierul unic"): tura a venit din
+  // ascultarea continuă, fără poartă de nume pe client — creierul aude audio-ul și
+  // decide SINGUR dacă i se vorbește; dacă nu, tace ({ignored}). Doar pe voce.
+  voceAmbianta?: boolean,
   // MODUL MAȘINĂ (Adrian, 11 aug; rescris 13 aug): tura vine din stratul de mașină.
   // Serverul răspunde SCURT, voce-first — dar NU mai suprimă suprafețe: ce spune că
   // face, execută (owner: „vorbă = faptă").
@@ -317,7 +336,7 @@ export async function* streamChat(
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           signal,
-          body: JSON.stringify({
+          body: (voceAmbianta && contorMoment('cerere trimisă'), JSON.stringify({
             messages,
             image,
             images,
@@ -335,14 +354,18 @@ export async function* streamChat(
             // folosește"): treapta detectată, ca să poți întreba „ce țeavă am?"
             // și Kelion să răspundă REAL + să-și scurteze răspunsul pe țeavă slabă.
             retea: getTeava(),
-            // VOCE SCOASĂ (21 aug): voiceFeatures / serverVoiceOff / spoken / speaker /
-            // audio (nativ) / voceAmbianta nu se mai trimit — o tură e mereu TEXT.
+            voiceFeatures,
             faceDescriptor,
             facePhoto,
+            serverVoiceOff,
+            spoken: spoken || undefined,
+            speaker,
+            audio,
+            voceAmbianta: voceAmbianta || undefined,
             carMode: carMode || undefined,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          }),
+          })),
         })
       }
     } catch (e) {
@@ -383,6 +406,7 @@ export async function* streamChat(
       throw new Error(code)
     }
 
+    if (voceAmbianta) contorMoment('server a răspuns (headere)')
     reader = res.body.getReader()
     decoder = new TextDecoder()
   }
@@ -430,6 +454,7 @@ export async function* streamChat(
       if (await resume()) continue
       throw new Error(await diagnozaConexiune())
     } finally {
+      if (voceAmbianta) contorMoment('primul semn în stream')
       window.clearTimeout(watchdog)
     }
     if (chunk.done) break

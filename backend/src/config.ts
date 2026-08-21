@@ -37,11 +37,6 @@ export const ENV_ALIASES: Record<string, string[]> = {
   // de peste tot… curata peste tot in aplicatie". Nu mai există niciun consumator
   // Fable/Anthropic în cod; constructorul e pe motorul Aider + creier Gemini.)
   julesKey: ['JULES_API_KEY', 'JULES_KEY'],
-  // Devin — constructorul EXTERN (owner, 20 aug: „punel pe devin cu cheie").
-  // Cheia stă în secretele repo-ului → vps-set-env → env-ul VPS, ca restul.
-  // `devinOrgId` e opțional (API-ul de bază /v1/sessions merge doar cu cheia).
-  devinKey: ['DEVIN_API_KEY', 'DEVIN_KEY'],
-  devinOrgId: ['DEVIN_ORG_ID'],
   mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
   bridgeSecret: ['BRIDGE_SECRET'],
   sessionSecret: ['SESSION_SECRET'],
@@ -228,9 +223,6 @@ export const config = {
   // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
   julesKey: env(...ENV_ALIASES.julesKey),
-  // Devin — constructorul extern (owner, 20 aug). Cheia din env; org opțional.
-  devinKey: env(...ENV_ALIASES.devinKey),
-  devinOrgId: env(...ENV_ALIASES.devinOrgId),
   // Creierul DIRECT (chat + VEDERE + AUDIO — Gemini e multimodal, un singur
   // model face tot). 5 aug 2026: Adrian a RETRACTAT hibridul — „peste tot în
   // aplicație pui modelul avansat". UN SINGUR creier = Gemini 3 Pro

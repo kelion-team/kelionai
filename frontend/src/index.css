@@ -391,46 +391,6 @@ body {
   color: var(--muted);
   margin-bottom: 8px;
 }
-/* PWA one-tap install (Faza 1 M1) — INLINE în secțiunea de instalare, nu bară
-   fixă. Buton conturat cu accentul: textul-accent e ales să aibă contrast pe
-   fundalul FIECĂREI teme (light + dark), deci se citește pe amândouă. */
-.landing-instal {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-.landing-instal-invit {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  text-align: center;
-}
-.landing-instal-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  padding: 9px 18px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.landing-instal-btn:hover {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-}
-.landing-instal-hint {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--muted);
-  text-align: center;
-}
 .landing-qr-row {
   /* FOUR ON THE SAME ROW (Adrian, Jul 30). With `flex-wrap: wrap` and a fixed
   width, Android dropped alone onto the second row and left three quarters of

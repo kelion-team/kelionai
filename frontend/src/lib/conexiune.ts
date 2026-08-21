@@ -51,25 +51,10 @@ function porneste(): void {
   pornit = true
   window.addEventListener('online', () => void verificaConexiuneReala())
   window.addEventListener('offline', () => seteaza(false))
-  // La revenirea în prim-plan (owner, 21 aug: „când îi vine accesul la net nu se
-  // reconectează automat"): reverificăm IMEDIAT. De multe ori omul restaurează netul
-  // din altă parte și revine la filă, iar evenimentul `online` al browserului nu e
-  // de încredere (poate să nu se declanșeze) — vizibilitatea e semnalul sigur.
-  if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') void verificaConexiuneReala()
-    })
-  }
-  // Poll ADAPTIV: rar cât suntem online (30s — doar să prindem „conectat fără net"),
-  // DES cât suntem offline (5s — ca revenirea semnalului să se prindă în câteva
-  // secunde, nu în până la 30s). Timeout care se reprogramează singur, cu pasul ales
-  // din starea CURENTĂ după fiecare măsurătoare.
-  const programeaza = (): void => {
-    window.setTimeout(() => {
-      void verificaConexiuneReala().finally(programeaza)
-    }, online ? 30_000 : 5_000)
-  }
-  void verificaConexiuneReala().finally(programeaza)
+  void verificaConexiuneReala()
+  // Periodic: prinde „conectat dar fără internet" ȘI revenirea semnalului (la care,
+  // în fazele următoare, se declanșează sync-ul + coada de amânate).
+  window.setInterval(() => void verificaConexiuneReala(), 30_000)
 }
 
 function abonare(f: (o: boolean) => void): () => void {

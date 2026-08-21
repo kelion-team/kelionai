@@ -18,29 +18,6 @@ tot ce nu ai făcut din proiect, tot ce nu merge, că mă ia capul"). Cross off 
 row only with a PR *and* a live check; add new rows the moment you find them;
 write „nu pot verifica" rather than „e ok" when you cannot prove it.
 
-**Then read `PROIECT-CHAT-VOCE.md`** — the NAILED-DOWN chat/voice project (20 aug
-2026), decided step-by-step with the owner. This is the AUTHORITATIVE spec for the
-voice-only chat: 100% spoken „Jarvis", a SINGLE engine online (Gemini Live, Chirp
-removed → kills the „2 sec and breaks" collision), escalation over a TEXT channel,
-the anti-lie „cățel" (poartaFaptelor) that must be extended onto the voice path,
-truth above cost/time, the monitor that is NEVER read aloud, and the offline
-reserve. The owner's order (20 aug): „trebuie legat proiectul să fie vizibil și
-pentru tine și pentru orice AI" + „de tine depinde cine îl construiește — Devin
-sau tu — dacă respecți 100% proiectul ăsta." Any AI that touches the chat/voice
-path MUST respect it 100%. Reasoning history: `DRAFT-PROIECT-VOCE-ONLY.md`.
-
-**Then read `PROIECT-OFFLINE-FIRST.md`** — the NAILED-DOWN master plan (21 aug
-2026), decided step-by-step with the owner. Kelion becomes a **local, standalone,
-OFFLINE-FIRST program** (enter via web → Google auth → FREE download → install):
-**Faza 1** = a complete OFFLINE Jarvis (Android + Desktop; FREE, full local
-models, ZERO cost to us — „dacă e free, nici pe noi să nu ne coste"); **Faza 2** =
-the paid ONLINE gates (Gemini big-brain, Google, search, live voice, Devin —
-credits, aligned to REAL cost, bought only for net); **Faza 3** = iOS native
-(last). Built by the THIRD WAY — a clean new core with proven modules
-TRANSPLANTED in (copy + validate), NOT a full rewrite and NOT patching.
-`PROIECT-CHAT-VOCE.md` is now the **P2 voice gate**, subordinate to this ensemble.
-Any AI that touches the architecture/phases/modules MUST respect it 100%.
-
 ## THE DOCUMENT IS LIVE — YOU MUST KEEP IT CURRENT
 If you change code, architecture, rules, or the project's state, **update the
 relevant section of `AI-HANDOFF.md` (and its §13 "Starea") before you finish

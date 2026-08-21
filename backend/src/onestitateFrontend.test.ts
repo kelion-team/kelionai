@@ -5,18 +5,30 @@ import { fileURLToPath } from 'node:url'
 // ── AUDITUL DE HARDCODĂRI PE FRONTEND (2 aug) — plasele care țin reparațiile ─
 // Cele două audituri „roșii” din ziua asta au găsit: valori afirmate fără
 // măsurătoare, dubluri client-server fără contract, și eșecuri mascate.
-// Testele de aici citesc SURSA și pică dacă cineva reintroduce vreuna din
-// minciunile reparate.
-//
-// VOCE SCOASĂ (clean-slate 21 aug — owner: „surd, mut, nu scrie"): lacătele
-// despre transcrierea/gura/urechea vocală (realtimeVoice.ts + tiparele de voce
-// din ChatPanel) au fost RETRASE odată cu codul lor. Rămân aici DOAR lacătele
-// non-voce: naratorul (/api/tts), atașamentele, gesturile, diagnoza conexiunii
-// și panoul banilor — neatinse de teardown.
+// Testele de aici citesc SURSA (ca urechiChirp.test.ts) și pică dacă cineva
+// reintroduce vreuna din minciunile reparate.
 
 const cale = (p: string): string => fileURLToPath(new URL(p, import.meta.url))
+const voce = readFileSync(cale('../../frontend/src/lib/realtimeVoice.ts'), 'utf8')
 const panou = readFileSync(cale('../../frontend/src/components/ChatPanel.tsx'), 'utf8')
+const audio = readFileSync(cale('../../frontend/src/lib/audioIO.ts'), 'utf8')
+const rutaRealtime = readFileSync(cale('./routes/realtime.ts'), 'utf8')
 const rutaTts = readFileSync(cale('./routes/tts.ts'), 'utf8')
+const serviciuRealtime = readFileSync(cale('./services/realtime.ts'), 'utf8')
+
+describe('transcrierea: fără model OpenAI (Chirp detectează limba per rostire)', () => {
+  it('ruta nu mai trimite header de model de transcriere OpenAI', () => {
+    expect(rutaRealtime).not.toContain('x-transcribe-model')
+    expect(rutaRealtime).not.toContain('realtimeTranscribeModel')
+  })
+  it('clientul nu mai are model de transcriere OpenAI — urechea Chirp folosește getLang', () => {
+    expect(voce).not.toContain('x-transcribe-model')
+    expect(voce).not.toContain('transcribeModel')
+    // Limba = preferința persistată (opts.language). Fostul `anchoredLang` (dedus din
+    // verdictul de timbru) a dispărut odată cu scoaterea intermediarului (6 aug).
+    expect(voce).toMatch(/getLang: \(\) => opts\.language/)
+  })
+})
 
 describe('plafonul TTS: publicat de server, nu dublat în client', () => {
   it('tăierea și statusul folosesc ACEEAȘI constantă', () => {
@@ -36,6 +48,45 @@ describe('plafonul TTS: publicat de server, nu dublat în client', () => {
   it('limba narațiunii nu mai cade pe un locale hardcodat', () => {
     expect(panou).not.toMatch(/lang: p\.lang \?\? 'ro-RO'/)
     expect(panou).toMatch(/lang: p\.lang \?\? speechLangRef\.current/)
+  })
+})
+
+describe('protocolul gurii: clientul NU mai rostește (gura e a serverului)', () => {
+  it('clientul nu mai are prefix de rostire — mouth = cadre {audio} ale serverului', () => {
+    expect(voce).not.toContain('SPEAK_PREFIX')
+    expect(voce).not.toContain('ROSTEȘTE')
+  })
+  it('persona istorică (pură, doar pentru teste) încă poartă tokenul ROSTEȘTE', () => {
+    expect(serviciuRealtime).toContain('ROSTEȘTE:')
+  })
+})
+
+describe('vocea picată spune motivul REAL (401/402 ≠ „temporar")', () => {
+  // Codurile need_login/need_credit veneau din paywall-ul /api/realtime/session
+  // (acum dezactivat). Panoul le tratează încă la nevoie; contorul /tick
+  // oprește vocea la epuizarea creditului. Aserțiile de panou rămân valide.
+  it('panoul arată mesajul specific, nu promisiunea falsă de reîncercare', () => {
+    expect(panou).toMatch(/err\.code === 'need_credit' \? t\.voiceNeedCredit : t\.voiceNeedLogin/)
+  })
+  it('mesajul generic vine din i18n, nu dintr-un literal englez dublat', () => {
+    expect(panou).not.toContain('My live voice is temporarily unavailable')
+    expect(panou).toMatch(/ack\(t\.voiceDownTemp\)/)
+  })
+})
+
+describe('punctul roșu al microfonului = măsurătoare, nu speranță', () => {
+  it('pe calea realtime, listening se aprinde DOAR pe starea live', () => {
+    // În handler-ul 'live' există setListening(true); la instalare nu mai există.
+    expect(panou).toMatch(/if \(s === 'live'\) \{[\s\S]{0,700}setListening\(true\)/)
+  })
+  it('fraza pierdută la transcriere se spune, nu se înghite', () => {
+    expect(audio).toMatch(/onError\('asr-failed'\)/)
+    expect(panou).toMatch(/reason === 'asr-failed'/)
+    expect(panou).toMatch(/ack\(t\.asrLost\)/)
+  })
+  it('microfonul blocat / lipsă nu mai e tăcere', () => {
+    expect(panou).toMatch(/ack\(reason === 'unsupported' \? t\.micUnsupported : t\.micBlocked\)/)
+    expect(panou).toMatch(/ack\(t\.micNoDevice\)/)
   })
 })
 

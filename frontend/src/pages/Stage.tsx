@@ -1,7 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
-import { ManagerModeleOffline } from '../components/ManagerModeleOffline'
 import { DeployProgressBar } from '../components/DeployProgressBar'
 import ContactModal from '../components/ContactModal'
 import CustomerSettings from '../components/CustomerSettings'
@@ -763,8 +762,6 @@ export default function Stage({ user }: { user: User }) {
     void saveSpeechLang(nouaLimba)
   }
   const [adminOpen, setAdminOpen] = useState(false)
-  // Managerul de modele offline (owner alege/descarcă modelul creierului local).
-  const [modeleOpen, setModeleOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
   // admin button must not activate either"). armed = the secret is set (in
@@ -1878,16 +1875,6 @@ export default function Stage({ user }: { user: User }) {
               {adminLock?.armed && !adminLock.unlocked ? '🔒 Admin' : 'Admin'}
             </button>
           )}
-          {/* Modelul offline e GRATIS și per-device → vizibil TUTUROR, nu doar adminului
-              (owner 21 aug: „scos butonul de sub admin, să fie văzut de toți că e free"). */}
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => setModeleOpen(true)}
-            title="Modelul creierului offline (descarcă / alege)"
-          >
-            🧠 Modele
-          </button>
           {!user.googleConnected && (
             <button
               type="button"
@@ -2008,8 +1995,6 @@ export default function Stage({ user }: { user: User }) {
           brainCredit={brainCredit}
         />
       )}
-
-      {modeleOpen && <ManagerModeleOffline onClose={() => setModeleOpen(false)} />}
 
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
 

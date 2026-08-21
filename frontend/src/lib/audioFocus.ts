@@ -10,7 +10,6 @@
 // Law of the house: wire what exists; do not invent a second voice stack.
 
 import { stopVoice, isVoicePlaying } from './audioIO'
-import { opresteVoceaOffline } from './voceOffline'
 
 export type AudioFocusSource = 'live' | 'tts' | 'none'
 
@@ -50,10 +49,42 @@ export function unregisterLiveFocus(): void {
   if (active === 'live') emit(isVoicePlaying() ? 'tts' : 'none')
 }
 
-// VOCE SCOASĂ (21 aug clean-slate): requestTtsFocus/releaseTtsFocus (arbitrarea
-// gurii Chirp pentru turele scrise) au dispărut odată cu vocea de pe frontend.
-// Au rămas DOAR: interruptAll (taie orice redare rămasă — ex. naratorul) și
-// setForeignVoiceLock/isForeignVoiceLocked (o singură gură în tot browserul).
+/**
+ * Request the mouth for written-chat TTS.
+ * Returns false if LIVE holds focus — caller must drop {audio} (LIVE speaks).
+ *
+ * `turaScrisa` (owner, 19 aug: „se aud 2 voci… dacă îi scriu răspunde doar
+ * scris"): LIVE rostește DOAR turele VOCALE (prin WS — n-are `speak()` pentru
+ * text scris). O tură SCRISĂ nu e rostită de LIVE, deci Chirp-ul ei TREBUIE
+ * redat chiar și cât LIVE ține focus-ul — altfel scrisul rămâne MUT sub LIVE.
+ * Ăsta era gardul C care ÎNVINGEA relaxarea gardului A din ChatPanel (măsurat):
+ * gardul A lăsa turele scrise să treacă, iar `requestTtsFocus()` le pica aici,
+ * pe `active === 'live'`. Blocajul între taburi (foreignVoiceLock) rămâne peste
+ * tot — o singură gură în tot browserul, indiferent de felul turei.
+ */
+export function requestTtsFocus(opts?: { turaScrisa?: boolean }): boolean {
+  if (foreignVoiceLock) return false
+  if (active === 'live' && !opts?.turaScrisa) return false
+  // O GURĂ NOUĂ OPREȘTE CELELALTE GURI (owner, 20 aug: „se aud multe voci paralele,
+  // de la mai multe creiere… o singură ieșire audio"). O tură SCRISĂ care ia gura
+  // cât LIVE e activ TREBUIE să taie ÎNTÂI playout-ul LIVE (PCM-ul Gemini Live rămas
+  // în redare), altfel se aud DOUĂ voci: Chirp-ul scris PESTE vocea LIVE. Fiecare
+  // cadru {audio} trece prin aici (ChatPanel: requestTtsFocus înainte de playVoice),
+  // deci gura LIVE e silențiată exact în clipa în care Chirp-ul primește gura.
+  if (active === 'live' && opts?.turaScrisa) {
+    try {
+      liveInterrupt?.()
+    } catch {
+      /* live path optional */
+    }
+  }
+  emit('tts')
+  return true
+}
+
+export function releaseTtsFocus(): void {
+  if (active === 'tts') emit(isVoicePlaying() ? 'tts' : 'none')
+}
 
 /**
  * User started speaking (barge-in / VAD): stop every outbound stream immediately.
@@ -63,7 +94,6 @@ export function unregisterLiveFocus(): void {
 export function interruptAll(reason = 'barge-in'): void {
   void reason
   if (isVoicePlaying()) stopVoice()
-  opresteVoceaOffline() // taie și GURA OFFLINE (Web Speech), nu doar naratorul — o singură gură
   try {
     liveInterrupt?.()
   } catch {

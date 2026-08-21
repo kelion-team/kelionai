@@ -7,13 +7,6 @@
 // 24 de constatări găsite de 6 auditori, 23 CONFIRMATE adversarial de câte un
 // verificator care a încercat să le respingă pe cod. Lacătele de aici țin
 // reparațiile confirmate pe loc — fiecare `it` numește constatarea lui.
-//
-// VOCE SCOASĂ (clean-slate 21 aug — owner: „surd, mut, nu scrie"): lacătele
-// despre ruta vocală (routes/vocalLive.ts), motorul (services/vocalLive.ts) și
-// clientul/banda din frontend au fost RETRASE odată cu codul lor. Rămân aici
-// DOAR lacătele care apără calea SCRISĂ (chat.ts) și memoria — neatinse de
-// teardown. Când se reconstruiește vocea (§2, PROIECT-CHAT-VOCE.md) se scriu
-// lacăte noi pentru ea.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -21,7 +14,76 @@ import { dirname, join } from 'node:path'
 import { memorieUnificata } from './services/memorieUnificata.js'
 
 const aici = dirname(fileURLToPath(import.meta.url))
+const ruta = readFileSync(join(aici, 'routes/vocalLive.ts'), 'utf8')
 const chat = readFileSync(join(aici, 'routes/chat.ts'), 'utf8')
+const serviciu = readFileSync(join(aici, 'services/vocalLive.ts'), 'utf8')
+const clientVL = readFileSync(join(aici, '../../frontend/src/lib/vocalLive.ts'), 'utf8')
+const panou = readFileSync(join(aici, '../../frontend/src/components/ChatPanel.tsx'), 'utf8')
+
+describe('P20 — porțile de verdict ale rutei vocale (constatările critice)', () => {
+  it('tura cu verdict NEDECIS nu se mai salvează fără numele măsurat (istoricul nu se otrăvește)', () => {
+    // onTuraGata ȘI incheieTura: null + fără nume → nesalvat, cu jurnal
+    const aparitii = ruta.match(/verdictTura === null && !turaAdresata\(bufUser\.trim\(\)\)/g) ?? []
+    expect(aparitii.length).toBeGreaterThanOrEqual(2)
+    expect(ruta).toMatch(/tură nesalvată (?:la închidere )?\(tăcere corectă, fără nume\)/)
+  })
+
+  it('false-ul ceasului de 1500ms e PROVIZORIU — numele sosit târziu învie tura', () => {
+    expect(ruta).toMatch(/verdictDinCeas = true/)
+    // rejudecarea acceptă și false-ul provizoriu, nu doar null
+    expect(ruta).toMatch(/verdictTura === null \|\| \(verdictTura === false && verdictDinCeas\)/)
+    // cadrele NU se mai aruncă la expirare — se țin, mărginit, pentru înviere
+    expect(ruta).toMatch(/ținute pentru învierea pe nume târziu — mărginit/)
+  })
+
+  it('negativul NU se mai încuie pe fragment PARȚIAL de transcriere („Hei" înaintea lui „Kelion")', () => {
+    // la primul cadru cu temei, lipsa numelui NU pune verdict false — cadrul așteaptă
+    expect(ruta).toMatch(/const adresata = turaAdresataAcum\(\)\s*\n\s*if \(!adresata && !turaDeSistem\) \{/)
+    // în onTranscriereUser, false definitiv doar pe transcript FINAL
+    expect(ruta).toMatch(/else if \(final && verdictTura === null\) \{/)
+  })
+
+  it('gardul de limbă judecă ÎNAINTE de livrare: cadrele așteaptă verdictul, cu fail-open 700ms', () => {
+    expect(ruta).toMatch(/asteaptaVerdictLimba/)
+    expect(ruta).toMatch(/gard de limbă fail-open: transcrierea răspunsului n-a sosit în 700 ms/)
+  })
+
+  it('suprimarea de limbă corectează și sesiunea Google (ancoră) și aruncă handle-ul otrăvit la a 2-a', () => {
+    expect(ruta).toMatch(/live\?\.ancoreaza\(`\[SISTEM\] Replica ta anterioară a fost respinsă/)
+    expect(ruta).toMatch(/suprimariLimba >= 2/)
+    expect(ruta).toMatch(/arunc handle-ul de reluare \(context otrăvit\)/)
+  })
+
+  it('limba se RE-JUDECĂ pe continuare (≤240 car.) — „Bine. Não sei…" nu mai trece', () => {
+    expect(ruta).toMatch(/continuareStraina/)
+    expect(ruta).toMatch(/bufKelion\.trim\(\)\.length <= 240/)
+  })
+
+  it('comutarea LEGITIMĂ nu se mai suprimă: omul care vorbește el însuși limba aia deschide gardul', () => {
+    expect(ruta).toMatch(/limbaUser !== straina/)
+  })
+
+  it('anunțul de sistem sosit în timpul unei ture în zbor se AMÂNĂ, nu deturnează verdictul', () => {
+    expect(ruta).toMatch(/if \(turaInZbor\) anuntAmanat = true/)
+    // transferul la tura curată există în onTuraGata și onIntrerupt
+    const transferuri = ruta.match(/anuntAmanat = false/g) ?? []
+    expect(transferuri.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('ambientalul nu se mai LIPEȘTE de fraza adresată: bufferul fără nume se golește la pauză', () => {
+    expect(ruta).toMatch(/vorbire neadresată aruncată la pauză/)
+  })
+
+  it('limba vorbită se COMITE ca preferință (ca pe scris) — starea mută se vindecă singură', () => {
+    expect(ruta).toMatch(/trackSpeechLang\(user\.email, rostire, prefLimbaCurenta\)/)
+    expect(ruta).toMatch(/setSpeechLangPref\(user\.email, comisa\)/)
+  })
+
+  it('userul NOU fără preferință primește limba implicită a aplicației (en-US), adminul româna', () => {
+    expect(ruta).toMatch(/limbaPin = 'en-US' \/\/ user nou → limba implicită a aplicației/)
+    expect(ruta).toMatch(/if \(user\.role === 'admin'\) limbaPin = 'ro-RO'/)
+  })
+})
 
 describe('P20 — calea scrisă (chat.ts)', () => {
   it('gardul determinist de limbă există și pe scris, cu notă cinstită la suprimare', () => {
@@ -44,9 +106,21 @@ describe('P20 — calea scrisă (chat.ts)', () => {
     expect(chat).toMatch(/\.toUpperCase\(\)\s*\n\s*if \(SENTINELA_TAC\.startsWith\(capat\)\)/)
     expect(chat).toMatch(/<\\s\*tac\\s\*\\\/\?\\s\*>/)
   })
+
+  it('bula de eroare se și ROSTEȘTE, iar cozile audio sintetizate se varsă (voice.finish în catch)', () => {
+    expect(chat).toMatch(/voice\.feed\(spoken\)\s*\n\s*await voice\.finish\(\)\.catch/)
+  })
 })
 
-describe('P20 — memoria', () => {
+describe('P20 — instrucțiunea și memoria (services)', () => {
+  it('ANCORA LIMBII se coace DOAR pe pinul românesc — userul străin nu mai primește „ROMÂNA"', () => {
+    expect(serviciu).toMatch(/if \(limbaPin === 'ro-RO'\) \{\s*\n\s*instructiune \+=\s*\n?\s*`\\nANCORA LIMBII/)
+  })
+
+  it('filtrul anti-otravă al istoricului judecă pe CONTINUARE, nu doar pe primul cuvânt', () => {
+    expect(serviciu).toMatch(/!continuareStraina\(String\(r\.content\)\)/)
+  })
+
   it('memoria unificată sare replicile străine ale lui Kelion sub lacătul românesc (comportament)', () => {
     const db = [
       { role: 'user', content: 'Kelion, ce ora e?' },
@@ -60,5 +134,22 @@ describe('P20 — memoria', () => {
     // fără lacăt (user pe altă limbă) — nimic nu se filtrează
     const faraLacat = memorieUnificata(db, [], 12, false)
     expect(faraLacat).toContain('não')
+  })
+})
+
+describe('P20 — frontend: banda și poarta half-duplex', () => {
+  it('banda ACUMULEAZĂ deltele pe canale, cu etichetă, și se golește la închiderea turei', () => {
+    expect(panou).toMatch(/vlAud = final \? '' : vlAud \+ text/)
+    expect(panou).toMatch(/vlSpune = final \? '' : vlSpune \+ text/)
+    expect(panou).toMatch(/onTuraInchisa: \(\) => \{/)
+  })
+
+  it('clientul anunță închiderea turei pe AMBELE drumuri (tura_gata + barge-in)', () => {
+    const apeluri = clientVL.match(/opts\.onTuraInchisa\?\.\(\)/g) ?? []
+    expect(apeluri.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('poarta half-duplex nu se mai zăvorăște pe context SUSPENDAT (mut și surd simultan)', () => {
+    expect(clientVL).toMatch(/ctxOut\.state === 'running' &&\s*\n\s*\(surseActive\.length > 0/)
   })
 })

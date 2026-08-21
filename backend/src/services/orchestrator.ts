@@ -29,12 +29,6 @@ export interface OrchestratorOpts {
   temperature?: number
   /** Internal reasoning for the thinking models (Fable/Claude/GPT-o). */
   reasoning?: 'low' | 'medium' | 'high'
-  /** ESCALADARE PE RUNDĂ (owner, 20 aug: „modelul ușor/greu"): obiect MUTABIL,
-   *  ca `tools`. Când ușa `ask_brain` decide „e greu" LA MIJLOC, setează aici
-   *  modelul greu + gândirea adâncă; orchestratorul le citește pe FIECARE rundă,
-   *  deci rundele următoare urcă de fapt la creierul puternic, nu doar deschid
-   *  uneltele. Gol = fără escaladare (rămâne pe modelul/reasoning-ul de bază). */
-  escaladare?: { model?: string; reasoning?: 'low' | 'medium' | 'high' }
   onText?: (text: string) => void
   /** THE DEED GATE (Adrian, Jul 27): if the model CLAIMS an action without
    *  having called any tool, we mechanically force it to execute or retract. */
@@ -261,21 +255,16 @@ export async function runOrchestrator(
       toolChoice === 'required' && opts.forceToolNames?.length
         ? opts.forceToolNames.filter((n) => tools.some((t) => t.name === n))
         : undefined
-    // ESCALADARE PE RUNDĂ: dacă `ask_brain` a urcat tura la creierul greu la
-    // mijloc, obiectul mutabil `escaladare` (ca `tools`) e citit AICI — rundele
-    // următoare pleacă pe modelul + gândirea adâncă, nu doar cu uneltele deschise.
-    const modelRunda = opts.escaladare?.model || model
-    const reasoningRunda = opts.escaladare?.reasoning ?? opts.reasoning
     const callOpts = {
       maxTokens: opts.maxTokens,
       temperature: opts.temperature,
-      reasoning: reasoningRunda,
+      reasoning: opts.reasoning,
       toolChoice,
       allowedFunctionNames,
     }
     // Creierul e Gemini direct (google-direct/*). Alt prefix = eroare NUMITĂ.
-    if (!modelRunda.startsWith(GEMINI_DIRECT_PREFIX)) {
-      throw new Error(`model_necunoscut: „${modelRunda}" — aștept google-direct/*`)
+    if (!model.startsWith(GEMINI_DIRECT_PREFIX)) {
+      throw new Error(`model_necunoscut: „${model}" — aștept google-direct/*`)
     }
     // PROFILING (Aug 2 — the 38-second weather turn): every brain round gets
     // its real duration in the log, so a slow turn shows WHERE the seconds go
@@ -292,7 +281,7 @@ export async function runOrchestrator(
         temperature: callOpts?.temperature,
         reasoning: callOpts?.reasoning,
         treapta: 'lucru' as const,
-        model: modelRunda,
+        model,
         toolChoice: callOpts.toolChoice,
         allowedFunctionNames: callOpts.allowedFunctionNames,
       }

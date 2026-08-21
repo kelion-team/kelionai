@@ -15,6 +15,7 @@ import { ttsRoutes } from './routes/tts.js'
 import { adminRoutes } from './routes/admin.js'
 import { prefsRoutes } from './routes/prefs.js'
 import { asrRoutes } from './routes/asr.js'
+import { vocalLiveRoutes } from './routes/vocalLive.js'
 import { apelRoutes } from './routes/apel.js'
 import { legalRoutes } from './routes/legal.js'
 import { imageRoutes } from './routes/image.js'
@@ -52,6 +53,8 @@ import { tranzactiiRoutes } from './routes/tranzactii.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
+import { constructorViuRoutes } from './routes/constructorViu.js'
+import { constructorStareRoutes } from './routes/constructorStare.js'
 import { jobsRoutes } from './routes/jobs.js'
 import { offlineRoutes } from './routes/offline.js'
 import { deployRoutes } from './routes/deploy.js'
@@ -319,6 +322,7 @@ await app.register(ttsRoutes)
 await app.register(adminRoutes)
 await app.register(prefsRoutes)
 await app.register(asrRoutes)
+await app.register(vocalLiveRoutes)
 await app.register(apelRoutes)
 await app.register(legalRoutes)
 await app.register(imageRoutes)
@@ -340,6 +344,8 @@ await app.register(embedCheckRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 await app.register(pingRoutes)
+await app.register(constructorViuRoutes)
+await app.register(constructorStareRoutes)
 await app.register(jobsRoutes)
 // Căile COMPLETE stau în deploy.ts (convenția întregului backend, pe care o
 // citește și verifica-butoane): componenta DeployProgressBar chema

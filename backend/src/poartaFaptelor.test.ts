@@ -164,9 +164,7 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
     expect(chat).toMatch(/LAW OF MEASUREMENT/)
     expect(chat).toMatch(/LAW AGAINST HARDCODING/)
     expect(chat).toMatch(/LAW OF CARRYING THROUGH/)
-    // Charter-ul de chat/voce „Jarvis" (owner, 20 aug) intră imediat DUPĂ legi,
-    // înaintea promptului de sistem — legile rămân PRIMELE, charter-ul al doilea.
-    expect(chat).toMatch(/let systemPrompt = `\$\{LEGILE_ADMINULUI\}\\n\$\{CHARTER_CHAT_VOCE_LEGI\}\\n\$\{SYSTEM_PROMPT\}/)
+    expect(chat).toMatch(/let systemPrompt = `\$\{LEGILE_ADMINULUI\}\\n\$\{SYSTEM_PROMPT\}/)
   })
 
   it('detectorul de ÎNGHEȚ e legat în tură: judecă pe cereActiune + rezultate reușite', () => {

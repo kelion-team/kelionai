@@ -42,9 +42,6 @@ export interface Strings {
   offlineReincearca: string
   offlineFaraWebgpuScurt: string
   updateNouAnunt: string
-  instalDeviceInvitatie: string
-  instalDeviceButon: string
-  instalDeviceIos: string
   credits: string
   topUp: string
   lowCredit: string
@@ -308,9 +305,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineReincearca: 'Retry',
     offlineFaraWebgpuScurt: 'Offline brain unavailable on this device (no WebGPU)',
     updateNouAnunt: 'New version — updating…',
-    instalDeviceInvitatie: 'Install Kelion on this device — it works offline too.',
-    instalDeviceButon: 'Install',
-    instalDeviceIos: 'Tap Share, then “Add to Home Screen”.',
     credits: 'credits',
     topUp: 'Please top up your credit',
     lowCredit: 'Your credit is running low — please top up.',
@@ -541,9 +535,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineReincearca: 'Reîncearcă',
     offlineFaraWebgpuScurt: 'Creierul offline nu merge pe acest dispozitiv (fără WebGPU)',
     updateNouAnunt: 'Versiune nouă — se actualizează…',
-    instalDeviceInvitatie: 'Instalează Kelion pe acest dispozitiv — merge și offline.',
-    instalDeviceButon: 'Instalează',
-    instalDeviceIos: 'Apasă Partajează, apoi „Adaugă pe ecranul principal”.',
     credits: 'credite',
     topUp: 'Te rog reîncarcă creditul',
     lowCredit: 'Mai ai puțin credit — te rog reîncarcă.',
@@ -771,9 +762,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineReincearca: 'Reintentar',
     offlineFaraWebgpuScurt: 'El cerebro sin conexión no funciona en este dispositivo (sin WebGPU)',
     updateNouAnunt: 'Nueva versión — actualizando…',
-    instalDeviceInvitatie: 'Instala Kelion en este dispositivo — también funciona sin conexión.',
-    instalDeviceButon: 'Instalar',
-    instalDeviceIos: 'Toca Compartir y luego «Añadir a pantalla de inicio».',
     credits: 'créditos',
     topUp: 'Por favor recarga tu crédito',
     lowCredit: 'Te queda poco crédito — recarga, por favor.',
@@ -953,9 +941,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineReincearca: 'Réessayer',
     offlineFaraWebgpuScurt: 'Le cerveau hors ligne ne fonctionne pas sur cet appareil (pas de WebGPU)',
     updateNouAnunt: 'Nouvelle version — mise à jour…',
-    instalDeviceInvitatie: 'Installe Kelion sur cet appareil — il fonctionne aussi hors ligne.',
-    instalDeviceButon: 'Installer',
-    instalDeviceIos: 'Appuie sur Partager, puis « Sur l’écran d’accueil ».',
     credits: 'crédits',
     topUp: 'Veuillez recharger votre crédit',
     lowCredit: 'Votre crédit est presque épuisé — veuillez recharger.',
@@ -1135,9 +1120,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineReincearca: 'Erneut versuchen',
     offlineFaraWebgpuScurt: 'Offline-Gehirn auf diesem Gerät nicht verfügbar (kein WebGPU)',
     updateNouAnunt: 'Neue Version — wird aktualisiert…',
-    instalDeviceInvitatie: 'Installiere Kelion auf diesem Gerät — funktioniert auch offline.',
-    instalDeviceButon: 'Installieren',
-    instalDeviceIos: 'Tippe auf Teilen, dann „Zum Home-Bildschirm“.',
     credits: 'Guthaben',
     topUp: 'Bitte lade dein Guthaben auf',
     lowCredit: 'Dein Guthaben wird knapp — bitte aufladen.',
@@ -1317,9 +1299,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineReincearca: 'Riprova',
     offlineFaraWebgpuScurt: 'Il cervello offline non funziona su questo dispositivo (niente WebGPU)',
     updateNouAnunt: 'Nuova versione — aggiornamento…',
-    instalDeviceInvitatie: 'Installa Kelion su questo dispositivo — funziona anche offline.',
-    instalDeviceButon: 'Installa',
-    instalDeviceIos: 'Tocca Condividi, poi «Aggiungi a Home».',
     credits: 'crediti',
     topUp: 'Ricarica il tuo credito, per favore',
     lowCredit: 'Il tuo credito sta per finire — ricarica, per favore.',
@@ -1499,9 +1478,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineReincearca: 'Tentar de novo',
     offlineFaraWebgpuScurt: 'O cérebro offline não funciona neste dispositivo (sem WebGPU)',
     updateNouAnunt: 'Nova versão — atualizando…',
-    instalDeviceInvitatie: 'Instala o Kelion neste dispositivo — também funciona offline.',
-    instalDeviceButon: 'Instalar',
-    instalDeviceIos: 'Toca em Partilhar e depois “Adicionar ao ecrã principal”.',
     credits: 'créditos',
     topUp: 'Por favor, recarregue o seu crédito',
     lowCredit: 'O seu crédito está acabando — recarregue, por favor.',

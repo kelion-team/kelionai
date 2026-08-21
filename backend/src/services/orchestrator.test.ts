@@ -1,20 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-
-// Mochez creierul (apelul modelului) ca să pot verifica DOAR ce model pleacă pe
-// fiecare rundă — pentru escaladarea ușor→greu la mijloc.
-const modeleFolosite: string[] = []
-vi.mock('./creierRationament.js', () => ({
-  rationeazaMesaje: async (_convo: unknown, optR: { model: string; reasoning?: string }) => {
-    modeleFolosite.push(optR.model)
-    // Runda 1: cheamă ask_brain (declanșează escaladarea). Runda 2: fără unelte → gata.
-    if (modeleFolosite.length === 1)
-      return { text: '', costUsd: 0, model: optR.model, toolCalls: [{ id: '1', function: { name: 'ask_brain', arguments: '{}' } }] }
-    return { text: 'gata', costUsd: 0, model: optR.model, toolCalls: [] }
-  },
-  rationeazaMesajeStream: async () => ({ text: 'x', costUsd: 0, model: 'x', toolCalls: [] }),
-}))
-
-import { executaApeluriCoordonate, iesireEsteEroare, pasProgres, stareProgresInitiala, runOrchestrator } from './orchestrator.js'
+import { describe, expect, it } from 'vitest'
+import { executaApeluriCoordonate, iesireEsteEroare, pasProgres, stareProgresInitiala } from './orchestrator.js'
 
 describe('garda de progres (fail-fast pe erori, nu 65s de măcinat)', () => {
   it('recunoaște ieșirile de eroare, nu confundă succesul cu eroarea', () => {
@@ -86,42 +71,5 @@ describe('executaApeluriCoordonate', () => {
       },
     )
     expect(maxim).toBe(2)
-  })
-})
-
-describe('runOrchestrator — escaladarea ușor→greu la mijloc (owner 20 aug)', () => {
-  it('când execTool (ask_brain) setează escaladare.model, runda următoare URCĂ pe modelul greu', async () => {
-    modeleFolosite.length = 0
-    const escaladare: { model?: string; reasoning?: 'low' | 'medium' | 'high' } = {}
-    const execTool = async (name: string): Promise<string> => {
-      if (name === 'ask_brain') {
-        escaladare.model = 'google-direct/gemini-greu'
-        escaladare.reasoning = 'high'
-      }
-      return 'ok'
-    }
-    const res = await runOrchestrator(
-      'google-direct/gemini-usor',
-      [{ role: 'user', content: 'x' }] as never,
-      [{ name: 'ask_brain', description: 'd', input_schema: { type: 'object' } }] as never,
-      execTool,
-      { escaladare, maxRounds: 3 },
-    )
-    expect(modeleFolosite[0]).toBe('google-direct/gemini-usor') // runda 1 pe treapta ușoară
-    expect(modeleFolosite[1]).toBe('google-direct/gemini-greu') // runda 2 a URCAT pe creierul greu
-    expect(res.text).toContain('gata')
-  })
-
-  it('fără escaladare, rămâne pe modelul de bază pe toate rundele', async () => {
-    modeleFolosite.length = 0
-    const execTool = async (): Promise<string> => 'ok'
-    await runOrchestrator(
-      'google-direct/gemini-usor',
-      [{ role: 'user', content: 'x' }] as never,
-      [{ name: 'ask_brain', description: 'd', input_schema: { type: 'object' } }] as never,
-      execTool,
-      { maxRounds: 3 },
-    )
-    expect(modeleFolosite.every((m) => m === 'google-direct/gemini-usor')).toBe(true)
   })
 })

@@ -9,15 +9,12 @@
 // cache liniștit. Așa un deploy ajunge INSTANT la toți, fără versiuni vechi lipite.
 const SHELL = 'kelionai-shell-v2'
 
-// CACHE-urile MODELELOR OFFLINE nu se ating NICIODATĂ (owner 20/21 aug: „nu descarcă
-// nimic pentru offline" + „la fiecare update nu trebuie descărcate din nou modelele").
-//  • CREIERUL: WebLLM ține modelul (~GB) sub `webllm/model|wasm|config`.
-//  • URECHEA (Faza 1 · M4): transformers.js (Whisper) ține modelul sub cache-uri care
-//    încep cu `transformers` (`transformers-cache`, `experimental_transformers-...`).
-//    Runtime-ul .wasm (/ort/) e cache-uit în SHELL de fetch handler → deja protejat.
-// Curățările de mai jos (upgrade de shell / rutina de versiune) le ȘTERGEAU pe toate →
-// fiecare update automat distrugea modelele descărcate. Le protejăm pe TOATE.
-const ePastrat = (k) => k === SHELL || k.startsWith('webllm/') || k.startsWith('transformers')
+// CACHE-ul CREIERULUI OFFLINE nu se atinge NICIODATĂ (owner 20 aug: „nu descarcă
+// nimic pentru offline"). WebLLM ține modelul (~2 GB) în Cache Storage sub cheile
+// `webllm/model|wasm|config`. Curățările de mai jos (upgrade de shell, rutina de
+// versiune) le ȘTERGEAU pe toate → fiecare update automat („update la foc continuu")
+// distrugea modelul descărcat, deci offline-ul nu era gata NICIODATĂ. Le protejăm.
+const ePastrat = (k) => k === SHELL || k.startsWith('webllm/')
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -50,14 +47,12 @@ self.addEventListener('activate', (e) => {
 })
 
 // Permite paginii să forțeze curățarea cache-ului (rutina de versiune). Golește TOT
-// în afară de modelele offline (creier `webllm/*` + ureche `transformers*`) — un update
-// NU trebuie să șteargă gigabytes descărcați cu greu; altfel offline-ul repornește de la
-// zero la fiecare publicare. (SHELL-ul se golește aici intenționat, se reface din rețea.)
+// în afară de modelul offline (webllm/*) — un update NU trebuie să șteargă cei ~2 GB
+// descărcați cu greu; altfel offline-ul repornește de la zero la fiecare publicare.
 self.addEventListener('message', (e) => {
   if (e.data === 'kelion-clear-caches') {
     e.waitUntil((async () => {
-      for (const k of await caches.keys())
-        if (!k.startsWith('webllm/') && !k.startsWith('transformers')) await caches.delete(k)
+      for (const k of await caches.keys()) if (!k.startsWith('webllm/')) await caches.delete(k)
     })())
   }
 })

@@ -5,8 +5,6 @@
 // changes on every publish, even if the interface wasn't touched), not just
 // the bundle name. When it changes → automatic hard reset.
 
-import { CHEI_OFFLINE_PERSISTENTE } from './creierLocal'
-
 export interface ServerVersion {
   v: string
   at: string
@@ -107,20 +105,11 @@ export async function hardResetToLatest(): Promise<void> {
   try {
     if ('caches' in window) {
       const keys = await caches.keys()
-      // NU șterge modelele offline (owner 20/21 aug: „nu descarcă nimic pentru offline" +
-      // „la fiecare update nu trebuie descărcate din nou modelele"). Hard-reset-ul rula la
-      // FIECARE publicare („update la foc continuu") și golea TOT → offline-ul nu ajungea
-      // niciodată „gata". Păstrăm cheile ambelor modele — la fel ca `ePastrat` din sw.js:
-      //  • CREIERUL: WebLLM ține modelul (~GB) sub `webllm/*`.
-      //  • URECHEA (M4): transformers.js/Whisper ține modelul sub cache-uri care încep cu
-      //    `transformers` (`transformers-cache`, `experimental_transformers-...`).
-      // Cache Storage e comun paginii și SW-ului; dacă golirea de-aici NU cruța `transformers*`,
-      // urechea s-ar re-descărca la fiecare publicare, anulând protecția din sw.js. Ștergem restul.
-      await Promise.all(
-        keys
-          .filter((k) => !k.startsWith('webllm/') && !k.startsWith('transformers'))
-          .map((k) => caches.delete(k)),
-      )
+      // NU șterge modelul offline (owner 20 aug: „nu descarcă nimic pentru offline").
+      // WebLLM ține creierul local (~2 GB) în Cache Storage sub `webllm/*`. Hard-reset-ul
+      // rula la FIECARE publicare („update la foc continuu") și golea TOT → offline-ul
+      // nu ajungea niciodată „gata". Păstrăm cheile webllm/*, ștergem restul.
+      await Promise.all(keys.filter((k) => !k.startsWith('webllm/')).map((k) => caches.delete(k)))
     }
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration()
@@ -150,16 +139,12 @@ export async function hardResetToLatest(): Promise<void> {
   // And the COMPOSER DRAFT (kelion.draft, Aug 1): the reset now applies by
   // itself (the auto-update countdown), so what you were typing is kept too —
   // the composer restores it on boot.
-  // ȘI EVIDENȚA MODELELOR OFFLINE (CHEI_OFFLINE_PERSISTENTE, 21 aug): byte-ii modelelor
-  // (creier webllm/* + ureche transformers*) supraviețuiesc în Cache Storage la update,
-  // deci și evidența „ce e descărcat + care e activ" trebuie să supraviețuiască — altfel
-  // după fiecare publicare modelul apărea „nedescărcat" deși era pe disc (owner: „verifică
-  // când e un model descărcat…", „la fiecare update nu trebuie descărcate din nou modelele").
   try {
-    const pastrate = ['kelion.voiceprint', 'kelion.draft', ...CHEI_OFFLINE_PERSISTENTE]
-    const salvate = pastrate.map((k) => [k, localStorage.getItem(k)] as const)
+    const voiceprint = localStorage.getItem('kelion.voiceprint')
+    const draft = localStorage.getItem('kelion.draft')
     localStorage.clear()
-    for (const [k, v] of salvate) if (v !== null) localStorage.setItem(k, v)
+    if (voiceprint) localStorage.setItem('kelion.voiceprint', voiceprint)
+    if (draft) localStorage.setItem('kelion.draft', draft)
   } catch {
     /* indisponibil */
   }
