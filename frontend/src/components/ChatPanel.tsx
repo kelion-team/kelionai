@@ -1306,11 +1306,14 @@ export default function ChatPanel({
     // Turele cu atașamente/imagini rămân pe calea veche (Live nu le ia pe acest
     // canal); tot ce e vocal e deja în sesiune, nu trece pe aici.
     if (!spoken && vlRef.current && msg && atts.length === 0 && !pendingAudioRef.current) {
-      if (vlRef.current.trimiteText(msg)) {
+      // Ecoul și trimiterea folosesc ACELAȘI text (plafonul de 4000 al canalului):
+      // ecoul nu are voie să arate mai mult decât a plecat cu adevărat (anti-minciună).
+      const rand = msg.slice(0, 4000)
+      if (vlRef.current.trimiteText(rand)) {
         setInput('')
         setHeard('')
         // Ecoul tău rămâne în chat (bula userului); răspunsul vine ca VOCE + banda „K".
-        setMessages((cur) => [...cur, { role: 'user', content: msg, ts: Date.now() }])
+        setMessages((cur) => [...cur, { role: 'user', content: rand, ts: Date.now() }])
         return
       }
       // Socketul Live tocmai a picat → cade CINSTIT pe calea veche de mai jos

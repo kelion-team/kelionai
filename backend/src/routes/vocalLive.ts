@@ -342,6 +342,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // altfel primele cuvinte ale omului ar dispărea exact ca în bugul vechi
     // „nu mă aude la prima frază".
     const preCoada: Buffer[] = []
+    // Aceeași plasă pentru TEXTUL scris (JARVIS pasul 1): rândurile tastate în
+    // fereastra „sesiunea încă se deschide" nu se aruncă — se varsă la deschidere.
+    const preCoadaText: string[] = []
     // ── TĂIEREA LA VOCEA OMULUI (9 aug seara, ownerul: „vorbește peste mine") ─
     // NO_INTERRUPTION (#946) l-a făcut imun la ecou, dar și la OM. Serverul
     // decide în locul lui Google: voce susținută peste replica lui → redarea
@@ -624,8 +627,43 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // lui. Așa tura scrisă NU mai trece prin /api/chat → nu se mai sintetizează
             // Chirp → coliziunea celor două guri („2 sec și se rupe") nu mai are de unde
             // să apară pe turele scrise. Output-ul rămâne VOCE (regula de aur §10).
+            //
+            // BUG CRITIC prins de agentul de logică ÎNAINTE de merge (tura scrisă ar fi
+            // fost MUTĂ — două lacăte interne îi mâncau răspunsul); dezarmăm amândouă:
             const textScris = ((m as { text: string }).text || '').trim().slice(0, 4000)
-            if (textScris) live?.anunta(textScris)
+            if (textScris) {
+              // LACĂTUL A: clientul taie gura înaintea oricărei ture noi (interruptAll →
+              // {type:'intrerupe'} → taiereManuala). Tura SCRISĂ care sosește după E
+              // următoarea intervenție a omului — exact ca vorbirea (vezi
+              // onTranscriereUser) — deci tăierea veche se ridică, altfel răspunsul
+              // turei noi ar fi „suprimat după tăiere" cadru cu cadru.
+              if (taiereManuala) {
+                taiereManuala = false
+                taiatDeVoce = false
+                verdictTura = null
+                verdictLimba = null
+                verdictDinCeas = false
+                bufUser = ''
+                bufKelion = ''
+                rostireCurenta = ''
+              }
+              // LACĂTUL B: poarta de adresare („vorbește doar când i te adresezi") judecă
+              // din bufferele de TRANSCRIERE — textul scris nu trece prin ele. Protocolul
+              // EXISTENT al anunțurilor (mai sus): tura se declară PE FAȚĂ, nu se lasă
+              // dedusă din buffer gol. Scrisul e prin natură adresat lui.
+              const turaInZborScris =
+                verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || rostireCurenta.trim().length > 0
+              if (turaInZborScris) anuntAmanat = true
+              else turaDeSistem = true
+              // Ferestrele „sesiunea nu-i gata încă" (live null la deschidere / reconectare
+              // internă): audio-ul are coadă (preCoada + coada motorului) — textul primește
+              // aceeași plasă, altfel rândul scris ar muri TĂCUT deși clientul l-a ecou-at.
+              if (live) live.anunta(textScris)
+              else {
+                preCoadaText.push(textScris)
+                if (preCoadaText.length > 20) preCoadaText.shift()
+              }
+            }
           } else if (m.type === 'ping') {
             try {
               socket.send(JSON.stringify({ type: 'pong', t: (m as { t?: unknown }).t ?? Date.now() }))
@@ -1400,6 +1438,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       for (const b of preCoada.splice(0)) {
         live.scrieAudio(b)
         octetiIn += b.length
+      }
+      // Rândurile SCRISE din fereastra de deschidere: fiecare e o tură adresată pe
+      // față (protocolul anunțurilor) — se varsă acum, în ordinea sosirii.
+      for (const t of preCoadaText.splice(0)) {
+        turaDeSistem = true
+        live.anunta(t)
       }
       app.log.info(
         `vocal-live: WS conectat (user=${user.role}, model=${VOCAL_LIVE_MODEL}, voce=${VOCAL_LIVE_VOICE}, memorie=${istoric.length} rânduri)`,

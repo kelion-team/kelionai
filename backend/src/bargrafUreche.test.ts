@@ -76,7 +76,10 @@ describe('audio focus — LIVE first, one mouth, interrupt', () => {
     // trăiește, turele scrise merg PRIN Live (trimiteText → vocea lui), iar cadrul
     // Chirp sosit pe /api/chat NU se mai redă peste vocea Live (sursa coliziunii
     // măsurate „2 sec și se rupe"). FĂRĂ Live, Chirp rămâne gura turelor — neatins.
-    expect(panou).toContain('vlRef.current.trimiteText(msg)')
+    // Ecoul și trimiterea folosesc ACELAȘI rând plafonat (anti-minciună: ecoul nu
+    // arată mai mult decât a plecat) — lacăt pe ambele capete ale aceleiași valori.
+    expect(panou).toContain('const rand = msg.slice(0, 4000)')
+    expect(panou).toContain('vlRef.current.trimiteText(rand)')
     expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,2000}?if \(vlRef\.current\) \{\s*\n\s*aSunatTuraRef\.current = true\s*\n\s*return/)
     // Chirp (fără Live) cere focus întrerupând orice rest de playout (turaScrisa:true).
     expect(panou).toContain('requestTtsFocus({ turaScrisa: true })')
