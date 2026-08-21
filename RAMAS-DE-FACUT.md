@@ -13,6 +13,43 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
+      `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
+      Repară bug-ul MĂSURAT „vocea pornește 2 sec și se rupe" = 2 motoare (Gemini
+      Live + Chirp) se bat pe aceeași tură. Ținta: **100% vorbit**, UN motor online
+      (Chirp SCOS de pe voce → coliziunea moare din rădăcină), escaladare pe canal
+      TEXT, cățelul anti-minciună (`poartaFaptelor`) MUTAT pe voce, monitorul
+      NICIODATĂ citit cu voce, offline rezervă, tastatură opțională. Owner 20 aug:
+      „de tine depinde cine construiește — Devin sau tu — dacă respecți 100%
+      proiectul." **Pași (se bifează DOAR cu build + verify LIVE + dovadă;
+      ACTUALIZARE după FIECARE lucru făcut și verificat):**
+      - [ ] 1. fix de bază: un singur motor online (Chirp jos pe voce) — bug-ul moare
+      - [ ] 2. cățelul (`poartaFaptelor`) legat pe calea voce
+      - [ ] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
+      - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
+      - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
+      - [ ] 6. tastatura opțională (input scris, output tot voce)
+      - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
+      Voce-only: încă neîncepută (fixul cu un motor așteaptă reproul owner-ului:
+      rupe TASTÂND cât vorbește, sau PUR vorbind?). FĂCUT din proiect: charter-ul
+      (în legile creierului chat+voce + capitolele admin din Manual).
+- [ ] DEVIN = constructorul extern (owner 20 aug: „punel pe devin cu cheie" + „b").
+      CONSTRUIT ÎN COD (pe branch, verificat: tsc 0, suită 1867, 5 porți verzi):
+      client `services/devin.ts` (sesiune cu plafon `max_acu_limit` + stare/ACU
+      reale + PR defensiv + acces la repo din cod = secret `POST /v1/secrets`,
+      varianta a, fără OAuth pe org) · dispecer `services/devinConstructor.ts`
+      (prompt: ramură din master + PR pe master + verde + NU merge; bara REALĂ
+      indeterminată, fără procent inventat; tick pe bucla de autonomie) · Devin
+      DEȚINE coada când cheia e pusă (ruta `/next` gardată, worker-ul Aider nu mai
+      pornește) · monitor: bara + `pct:null` onest · rezultatul intră ȘI în chat
+      (notifyAdmin cu linkul PR). Plafoane: 10 ACU/sesiune + 1 job pe rând + doar
+      la comandă + anulare (soft). RĂMAS: (a) owner conectează accesul — FĂCUT din
+      cod (varianta a), owner a pus `DEVIN_API_KEY`; (b) VERIFICARE LIVE după
+      merge+publicare: owner zice „repară X" → sesiune Devin → PR → aprobă; (c)
+      confirmă LIVE câmpul exact al linkului PR + clonarea cu tokenul-secret; (d)
+      hard-cancel al sesiunii Devin (endpoint stop neconfirmat) — acum e soft.
+      NEFĂCUT: modelul chat ușor/greu (escaladare+convergență din proiect) — în
+      mapare.
 - [ ] ORDIN 20 aug (2): „scoti tot ce nu tine de cerinta mea" + Devin cablat CA
       constructor în aplicație. FĂCUT (PR pe branch): **al 2-lea AI plătit ratat —
       DeepSeek/DeepInfra** scos (rute `constructorViu/Stare`, blocul din `vps-set-env.yml`)

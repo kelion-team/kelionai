@@ -1,5 +1,16 @@
 ﻿# AI-HANDOFF — Starea curentă a proiectului Kelion
 
+> ⚑ **PROIECT ACTIV — CHAT VOCE „Jarvis" (bătut în cuie 20 aug 2026):**
+> spec autoritar `PROIECT-CHAT-VOCE.md` (istoricul deciziilor:
+> `DRAFT-PROIECT-VOCE-ONLY.md`). Repară bug-ul MĂSURAT „vocea pornește 2 sec și se
+> rupe" = 2 motoare (Gemini Live + Chirp) se bat. Țintă: **100% vorbit, UN motor
+> online** (Chirp scos de pe voce), escaladare pe canal TEXT, cățelul
+> `poartaFaptelor` MUTAT pe voce, monitorul niciodată citit cu voce, offline
+> rezervă, tastatură opțională. Owner: „de tine depinde cine îl construiește —
+> Devin sau tu — dacă respecți 100% proiectul." Orice AI care atinge calea
+> chat/voce îl respectă 100%. Progresul + bifele: în `RAMAS-DE-FACUT.md`
+> (actualizare după FIECARE pas făcut ȘI verificat live).
+
 ## Cerința #42 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - CONCLUZIE DEFINITIVĂ (a 3-a încercare, același verdict ca la #32/#33/#36/#39/#41): capturarea unui screenshot al monitorului live este o acțiune a asistentului Kelion din aplicație (unelte de ecran/browser), NU o modificare de cod din atelierul constructorului. Atelierul nu are ecran, sesiune de admin sau DevTools — orice „screenshot" produs de aici ar fi o simulare interzisă de regula anti-fake.
 - Codul barei de admin și al selectorului de limbi este complet și fără lipsuri: `frontend/src/lib/langList.ts`, `frontend/src/lib/languages.ts`, integrare în `Stage.tsx`/`AdminPanel.tsx`; previzualizarea statică cu dropdown-ul deschis (17 limbi) există în `scripts/admin-bar-preview.html`.

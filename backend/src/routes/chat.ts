@@ -84,6 +84,7 @@ import {
   type DovadaUnealta,
 } from '../services/poartaFaptelor.js'
 import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
+import { CHARTER_CHAT_VOCE_LEGI } from '../services/charterChatVoce.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -1823,7 +1824,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       `ask "shall I repair everything?" — for each finding, either it carries a MEASURED cause (act on that) ` +
       `or it needs a measurement first (TAKE it, name the exact one). Measure first IS the step; the fix comes ` +
       `after the measurement, never before it.\n`
-    let systemPrompt = `${LEGILE_ADMINULUI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
+    let systemPrompt = `${LEGILE_ADMINULUI}\n${CHARTER_CHAT_VOCE_LEGI}\n${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
     // default behavior; absent/unknown id means Kelion stays default.
@@ -2555,6 +2556,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage, voceAmbianta)
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
+    // ESCALADARE MODEL LA MIJLOCUL TUREI (owner, 20 aug: „modelul ușor/greu"):
+    // obiect MUTABIL citit de orchestrator pe fiecare rundă. Când ușa `ask_brain`
+    // decide „e greu" pornind de pe treapta UȘOARĂ, setează aici modelul greu +
+    // gândirea adâncă — și restul turei urcă de fapt la creierul puternic, nu doar
+    // deschide uneltele (golul măsurat: până acum `ask_brain` rămânea pe flash-lite).
+    const escaladare: { model?: string; reasoning?: 'low' | 'medium' | 'high' } = {}
 
     // ── SINGLE PATH: DIRECT BRAIN FOR EVERYONE ───────────────────────────────
     // The Gemini orchestrator (chat/brain, with automatic escalation) answers
@@ -3074,6 +3081,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             for (const t of uneltePline) toolNamesThisTurn.add(t.name)
             console.log(`[FAZĂ] ESCALADARE ask_brain: inventar comutat la ${tools.length} unelte pentru restul turei${request ? ` — „${request.slice(0, 120)}"` : ''}`)
           }
+          // ȘI URCĂ CREIERUL, nu doar uneltele (owner, 20 aug — golul măsurat:
+          // până acum `ask_brain` deschidea uneltele dar rămânea pe flash-lite).
+          // Dacă tura a pornit UȘOARĂ, escaladăm la creierul greu + gândire adâncă
+          // pentru restul turei; orchestratorul citește `escaladare` pe fiecare rundă.
+          if (!heavyTurn && !escaladare.model) {
+            const modelGreu = alegeModelOrchestrator({ modelChat: orChatModel, creierDublu: config.creierDublu, turaGrea: true, modelProfund: config.modelCreierProfund })
+            if (modelGreu && modelGreu !== orchestratorModel) {
+              escaladare.model = modelGreu
+              escaladare.reasoning = 'high'
+              console.log(`[FAZĂ] ESCALADARE ask_brain: creier URCAT la ${modelGreu} + gândire adâncă pentru restul turei`)
+            }
+          }
           return JSON.stringify({
             escaladat: true,
             unelte_disponibile_acum: tools.length,
@@ -3382,6 +3401,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // output 8192 (geminiDirect). Pe turele ușoare rămâne fără gândire
           // extinsă, ca prima vorbă să fie rapidă. (:free/OpenRouter nu mai există.)
           reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) ? 'high' : 'medium') : undefined,
+          // Escaladarea la mijloc: ask_brain o setează, orchestratorul o citește pe rundă.
+          escaladare,
           // THE DEED GATE (Adrian, Jul 27): on the admin's turns, if Kelion
           // ASSERTS a deed without calling the tool, it is mechanically obliged
           // to execute or retract — it no longer stays at the declarative stage.
@@ -3570,6 +3591,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
 if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
         const modelProfund = orchestratorModel
         orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
+        escaladare.model = undefined // golim escaladarea, ca rezerva rapidă să câștige (altfel ar reurca la greu)
+        escaladare.reasoning = undefined
         console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
         await incearcaPlasa()
       }
@@ -3950,6 +3973,10 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
 // cronul de 2 min (PR #966). O SINGURĂ sursă (jscpd, 10 aug): folosit la
 // build_software ȘI la retry. Best-effort: nu blochează, nu aruncă.
 function porneculLucratorulConstructor(): void {
+  // DEVIN DEȚINE COADA (owner, 20 aug): când cheia Devin e pusă, constructorul e
+  // Devin (extern) — dispecerul din app duce ordinele. NU mai trezim worker-ul
+  // Aider de pe VPS (n-ar primi oricum joburi, ruta /next e gardată).
+  if (config.devinKey) return
   import('node:child_process').then(({ spawn }) => {
     const worker = spawn('bash', ['/root/kelion/constructor-worker.sh'], {
       detached: true,

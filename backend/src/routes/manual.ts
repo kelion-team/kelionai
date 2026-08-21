@@ -1,13 +1,18 @@
 import type { FastifyInstance } from 'fastify'
-import { buildManual, manualHtml, isManualLang, MANUAL_LANGS, type ManualDoc } from '../services/manual.js'
+import { buildManual, buildAdminChapters, manualHtml, isManualLang, MANUAL_LANGS, type ManualDoc } from '../services/manual.js'
 import { translateStrings, translationReady, normalizeLang } from '../services/manualLang.js'
+import { getSessionUser } from '../session.js'
 
-// ── THE MANUAL, PUBLIC ─────────────────────────────────────────────────────
+// ── THE MANUAL — PUBLIC BOOK + ADMIN-ONLY CHAPTERS ─────────────────────────
 // GET /api/manual?lang=xx  → the manual as data (the in-app page)
 // GET /manual.html?lang=xx → the same book as a standalone page, to print or
 //                            save (the download button)
 // Public on purpose: it's the app's presentation material, readable even
-// without an account. It contains nothing admin.
+// without an account. ONE manual, role-aware (owner, 20 aug: „ce e admin se
+// afișează tot, ce nu e admin doar ce trebuie… nu sunt adeptul butoanelor"):
+// when the request carries an ADMIN session, the book gains the project/charter
+// chapters (buildAdminChapters) — automatically, WITHOUT any button. A visitor
+// without an admin session sees exactly the public book, unchanged.
 
 /** Flattens the manual into key→text pairs, so it can be sent to translation
  *  in one piece, then reassembled identically. */
@@ -78,15 +83,22 @@ function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): M
 
 /** The manual in the requested language, WAITING for the translation (for
  *  download: the file must be complete in the chosen language, not half). */
-async function manualIn(lang: string): Promise<ManualDoc> {
+// Capitolele DOAR-admin se adaugă DUPĂ traducere (sunt în română — adminul =
+// owner-ul) și doar când sesiunea e admin. Un vizitator fără sesiune de admin
+// primește exact cartea publică.
+function cuAdmin(doc: ManualDoc, isAdmin: boolean): ManualDoc {
+  return isAdmin ? { ...doc, sections: [...doc.sections, ...buildAdminChapters()] } : doc
+}
+
+async function manualIn(lang: string, isAdmin: boolean): Promise<ManualDoc> {
   const en = buildManual()
   const cod = normalizeLang(lang)
   // Only the manual's 7 languages. A language outside the list doesn't call
   // the translator at all — otherwise a single visitor playing with the
   // selector would start dozens of paid translations of the whole manual.
-  if (!cod || cod === 'en' || !isManualLang(cod)) return en
+  if (!cod || cod === 'en' || !isManualLang(cod)) return cuAdmin(en, isAdmin)
   const tr = await translateStrings(cod, aplatizeaza(en)).catch(() => ({}))
-  return Object.keys(tr).length ? reasambleaza(en, tr, cod) : en
+  return cuAdmin(Object.keys(tr).length ? reasambleaza(en, tr, cod) : en, isAdmin)
 }
 
 /** For the SCREEN: answers INSTANTLY. If the language is already translated,
@@ -97,18 +109,18 @@ async function manualIn(lang: string): Promise<ManualDoc> {
  *  Without this, the user picked the language and the request hung for tens of
  *  seconds — nothing changed on screen, so the selector seemed to do nothing.
  *  (Measured live: French, in series, over 100 seconds.) */
-async function manualRapid(lang: string): Promise<ManualDoc & { ready: boolean }> {
+async function manualRapid(lang: string, isAdmin: boolean): Promise<ManualDoc & { ready: boolean }> {
   const en = buildManual()
   const cod = normalizeLang(lang)
-  if (!cod || cod === 'en' || !isManualLang(cod)) return { ...en, ready: true }
+  if (!cod || cod === 'en' || !isManualLang(cod)) return { ...cuAdmin(en, isAdmin), ready: true }
   const plat = aplatizeaza(en)
   const gata = await translationReady(cod, plat).catch(() => null)
-  if (gata && Object.keys(gata).length) return { ...reasambleaza(en, gata, cod), ready: true }
+  if (gata && Object.keys(gata).length) return { ...cuAdmin(reasambleaza(en, gata, cod), isAdmin), ready: true }
   // Starts the translation and does NOT wait for it. `translateStrings`
   // makes sure several requests for the same language await the same job
   // instead of each starting another one.
   void translateStrings(cod, plat).catch(() => ({}))
-  return { ...en, lang: cod, ready: false }
+  return { ...cuAdmin({ ...en, lang: cod }, isAdmin), ready: false }
 }
 
 /** ── TRANSLATE EVERYTHING, ONCE, AT STARTUP ───────────────────────────────
@@ -140,11 +152,13 @@ export async function manualRoutes(app: FastifyInstance): Promise<void> {
   // Starts the warm-up without blocking the server's startup.
   void incalzesteTraducerile().catch(() => {})
   app.get<{ Querystring: { lang?: string } }>('/api/manual', async (req, reply) => {
-    return reply.send(await manualRapid(String(req.query.lang ?? 'en')))
+    const isAdmin = getSessionUser(req)?.role === 'admin'
+    return reply.send(await manualRapid(String(req.query.lang ?? 'en'), isAdmin))
   })
 
   app.get<{ Querystring: { lang?: string } }>('/manual.html', async (req, reply) => {
-    const d = await manualIn(String(req.query.lang ?? 'en'))
+    const isAdmin = getSessionUser(req)?.role === 'admin'
+    const d = await manualIn(String(req.query.lang ?? 'en'), isAdmin)
     return reply.type('text/html; charset=utf-8').send(manualHtml(d))
   })
 }
