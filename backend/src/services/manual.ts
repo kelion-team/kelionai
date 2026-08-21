@@ -341,6 +341,51 @@ export function buildManual(): ManualDoc {
   }
 }
 
+// ── CAPITOLELE DOAR-ADMIN ALE MANUALULUI (owner, 20 aug 2026) ────────────────
+// Owner: „ce e admin se afișează tot, ce nu e admin doar ce trebuie" + „nu sunt
+// adeptul butoanelor". Un SINGUR manual: non-adminul vede cartea de utilizator;
+// adminul o vede pe aceeași PLUS capitolele de mai jos, care apar SINGURE (fără
+// buton) fiindcă ruta știe din sesiune că e admin. Aici trăiește, VIZIBIL în
+// aplicație, munca de colaborare bătută în cuie cu owner-ul (proiectul de chat
+// voce „Jarvis"). Textul întreg, canonic: `PROIECT-CHAT-VOCE.md`. E în ROMÂNĂ și
+// se adaugă DUPĂ traducere (nu trece prin traducător) — adminul = owner-ul.
+export function buildAdminChapters(): ManualSection[] {
+  return [
+    {
+      title: '🔒 Doar admin — Proiectul de chat voce „Jarvis"',
+      paragraphs: [
+        'Bătut în cuie cu owner-ul, pas cu pas (20 aug 2026). Ținta: 100% VORBIT — o prezență vocală mereu acolo, ca un Jarvis. Ce auzi e mereu voce; nu devine niciodată chat scris.',
+        'Repară din rădăcină bug-ul măsurat „vocea pornește 2 secunde și se rupe": pe o tură vorbită se băteau DOUĂ motoare de voce (Gemini Live + Chirp). Online rămâne UN singur motor — Gemini Live; Chirp iese de pe calea vocală → coliziunea dispare.',
+        'Documentul întreg, canonic: PROIECT-CHAT-VOCE.md (versionat în cod). Istoricul deciziilor: DRAFT-PROIECT-VOCE-ONLY.md.',
+      ],
+    },
+    {
+      title: '🔒 Doar admin — Legile lui Kelion',
+      paragraphs: [
+        'Adevărul mai presus de orice: contează oricât ar costa și oricât ar dura. Nici timpul, nici banii nu scuză minciuna. Încrederea se clădește cu argumente măsurate, verificabile — și se pierde într-o clipă.',
+        'Linia roșie: Kelion nu spune ceva doar ca să placă urechii și să fie prins că a mințit — mai ales „am făcut" ceva ce nu e făcut. Verificarea e invizibilă: nu-și narează procesul („stai să măsor"), ci ori dă răspunsul verificat, ori pune o întrebare firească.',
+        'Cele patru arte: negocierea, prezentarea, discuția, gândirea. Calitatea răspunsului înaintea vitezei — nu e raliu. Monitorul NU se citește niciodată cu voce: se anunță scurt „uite pe monitor" și se arată; ecranul e pentru ochi, vocea pentru conversație.',
+      ],
+    },
+    {
+      title: '🔒 Doar admin — Cum lucrează (ușor/greu + cățelul)',
+      paragraphs: [
+        'Ușor = Live răspunde singur, cu vocea lui. Greu = Live cheamă creierul puternic pe canal de TEXT (nu audio), primește rezultatul ca text și îl rostește el — un singur motor și la greu.',
+        'Perioada de gândire e triere în doi: Live culege date și le picură creierului greu, care cere înapoi ce-i mai lipsește; se oprește când nicio întrebare nu mai mișcă răspunsul (convergență). Întrebările către om trebuie decente, nu interogatoriu.',
+        'Cățelul anti-minciună (poarta faptelor) demască pretențiile fără unealtă reușită — azi merge pe chatul scris, de mutat și pe voce. Fiecare lucru cerut are măsurătoare cu dovada salvată, scoasă la cerere („asul din mânecă").',
+      ],
+    },
+    {
+      title: '🔒 Doar admin — Offline & opțiuni',
+      paragraphs: [
+        'Offline = rezervă (online rămâne Jarvis-ul real). Gura mișcă cu un TTS local (Piper); urechea = nativ Android întâi, Vosk în browser ca rezervă (româna are suport bun; precizia exactă se măsoară pe dispozitiv). Camera prinde cadre, dar „a vedea" offline cere un model de viziune pe dispozitiv — nu azi.',
+        'Opțiune neobligatorie: poți scrie de la tastatură în loc să vorbești; răspunsul vine tot ca VOCE (nu afișăm text-răspuns pe ecran).',
+        'Separat, decis: constructorul aplicației = Devin (extern, pe cheia owner-ului).',
+      ],
+    },
+  ]
+}
+
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 

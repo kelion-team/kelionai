@@ -649,6 +649,11 @@ export async function initDb(): Promise<void> {
     -- recuperabil): iese din panou, dar nu se pierde. Bucla de autonomie
     -- arhivează singură; panoul (listBuildJobs) le exclude.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
+    -- DEVIN (owner, 20 aug: „punel pe devin cu cheie"): id-ul sesiunii Devin
+    -- care duce ordinul. Când e ne-null, ordinul e rulat de Devin (constructorul
+    -- extern) — dispecerul îl poluează după el, iar bara e indeterminată (nu un
+    -- procent inventat). Null = job liber sau rulat de calea veche.
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS devin_session_id TEXT;
     -- MAPE-K INCIDENT REGISTER: every terminal constructor failure becomes one
     -- durable case. The normalized order fingerprint is unique, so recurrence
     -- reopens the same case instead of spawning disconnected alerts.
@@ -4250,6 +4255,8 @@ export interface BuildJob {
   // as measured from OpenRouter (null = not reported by the provider).
   brain: string | null
   costUsd: number | null
+  /** Id-ul sesiunii Devin (constructorul extern) care duce ordinul; null = calea veche. */
+  devinSessionId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -4268,6 +4275,7 @@ interface BuildJobDbRow {
   ci?: string | null
   brain?: string | null
   cost_usd?: string | number | null
+  devin_session_id?: string | null
   created_at: Date
   updated_at: Date
 }
@@ -4287,6 +4295,7 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     ci: r.ci ?? null,
     brain: r.brain ?? null,
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
+    devinSessionId: r.devin_session_id ?? null,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -4999,6 +5008,32 @@ export async function updateBuildJobProgress(id: number, progress: string): Prom
     )
   } catch {
     /* progress is best-effort — it stops nothing if it fails */
+  }
+}
+
+// DEVIN (Stage 4): leagă sesiunea Devin de ordin, ca dispecerul s-o poată polua
+// după ea (și panoul să știe că e job Devin → bară indeterminată, nu procent fals).
+export async function setDevinSessionId(id: number, sessionId: string): Promise<void> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return
+  try {
+    await getPool().query(`UPDATE build_jobs SET devin_session_id=$2, updated_at=now() WHERE id=$1`, [id, sessionId.slice(0, 200)])
+  } catch (e) {
+    console.error('[devin] setDevinSessionId a picat:', String(e).slice(0, 160))
+  }
+}
+
+// Cel mai vechi ordin ÎN LUCRU (running). Când Devin e configurat, EL deține
+// coada (ruta /next nu mai dă joburi worker-ului vechi), deci ordinul running e
+// al lui Devin — dispecerul îl poluează după `devin_session_id`. Null = nimic în lucru.
+export async function getOldestRunningBuildJob(): Promise<BuildJob | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query<BuildJobDbRow>(
+      `SELECT * FROM build_jobs WHERE status='running' AND arhivat=false ORDER BY created_at ASC LIMIT 1`,
+    )
+    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
+  } catch {
+    return null
   }
 }
 
