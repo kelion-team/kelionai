@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   MODELE_OFFLINE,
   getModelOffline,
@@ -12,6 +12,7 @@ import {
 } from '../lib/creierLocal'
 import { pregatesteUrecheOffline, stareUrecheOffline } from '../lib/urecheOffline'
 import { pregatesteVazOffline, stareVazOffline } from '../lib/vazOffline'
+import { esteConectat } from '../lib/conexiune'
 
 // ── MANAGER MODELE OFFLINE (owner 21 aug: „vreau să pot seta EU modelul, inclusiv
 // Gemma 2 sau plus, doar la offline… să le downloadez și să le pot încerca") ──────
@@ -27,13 +28,37 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
   const [stVaz, setStVaz] = useState(() => stareVazOffline())
   const [areWebgpu, setAreWebgpu] = useState<boolean | null>(null)
   const montat = useRef(true)
+  const simturiPornite = useRef(false)
+
+  // DEFAULT INCLUS (owner 21 aug: „toate default, și la offline și la online — nu întreba
+  // vrei văz și auz"): urechea + văzul vin AUTOMAT cu offline-ul, fără opt-in. Le aducem
+  // secvențial (o descărcare mare odată; pregateste* sunt idempotente → dacă-s deja gata se
+  // întorc instant). Doar cu NET (altfel nu se pot aduce de la Hugging Face).
+  const asiguraSimturi = useCallback(async (): Promise<void> => {
+    if (!esteConectat()) return
+    if (stareUrecheOffline().stare !== 'gata') {
+      await pregatesteUrecheOffline()
+      if (montat.current) setStUreche(stareUrecheOffline())
+    }
+    if (stareVazOffline().stare !== 'gata') {
+      await pregatesteVazOffline()
+      if (montat.current) setStVaz(stareVazOffline())
+    }
+  }, [])
 
   useEffect(() => {
     montat.current = true
     let viu = true
     void webgpuDisponibil().then((ok) => viu && setAreWebgpu(ok))
     void sincronizeazaStareOffline().then(() => {
-      if (viu) setSt(stareCreierLocal())
+      if (!viu) return
+      setSt(stareCreierLocal())
+      // Dacă offline-ul e DEJA pus (un creier descărcat), aducem automat urechea + văzul o
+      // singură dată (default, fără să întrebe). Fără creier descărcat, vin când descarci unul.
+      if (!simturiPornite.current && esteConectat() && modeleDescarcate().length > 0) {
+        simturiPornite.current = true
+        void asiguraSimturi()
+      }
     })
     // Reîmprospătăm starea (progres descărcare, activ, descărcate) cât e deschis.
     const id = window.setInterval(() => {
@@ -49,7 +74,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
       montat.current = false
       window.clearInterval(id)
     }
-  }, [])
+  }, [asiguraSimturi])
 
   const seDescarca = st.stare === 'se_pregateste'
   const procent = Math.max(3, Math.round(st.progres * 100))
@@ -64,6 +89,8 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
       if (!montat.current) return // panoul s-a închis între timp — nu atinge starea
       setSt(stareCreierLocal())
       setDescarcate(modeleDescarcate())
+      simturiPornite.current = true
+      void asiguraSimturi() // urechea + văzul vin AUTOMAT după creier (default, fără opt-in)
     })
   }
   // Comută modelul ACTIV pe unul deja descărcat (se încarcă la prima folosire offline).
@@ -71,6 +98,8 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
     setModelOffline(id)
     setActiv(id)
     setSt(stareCreierLocal())
+    simturiPornite.current = true
+    void asiguraSimturi() // și la comutare ne asigurăm că urechea + văzul sunt aduse
   }
   // Șterge un model descărcat (eliberează spațiul din cache). Owner: „să pot da jos
   // modelul care nu-mi place".
@@ -280,7 +309,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                       ? 'se descarcă…'
                       : stUreche.stare === 'eroare'
                         ? '⚠️ eroare'
-                        : 'nedescărcat'}
+                        : 'inclus cu offline-ul'}
                 </div>
               </div>
               <div style={{ flex: '0 0 auto' }}>
@@ -288,16 +317,16 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                   <span style={{ fontSize: 12.5, fontWeight: 700, color: '#cbbcff' }}>⏬ {procentUreche}%</span>
                 ) : stUreche.stare === 'gata' ? (
                   <span style={{ fontSize: 12.5, fontWeight: 700, color: '#6ea8fe' }}>gata</span>
-                ) : (
+                ) : stUreche.stare === 'eroare' ? (
                   <button
                     type="button"
                     onClick={descarcaUreche}
-                    disabled={seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false}
-                    style={btnStil('#6ea8fe', '#10121a', seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false)}
+                    disabled={seDescarca || seDescarcaUreche || seDescarcaVaz}
+                    style={btnStil('#2a2440', '#e9e4ff', seDescarca || seDescarcaUreche || seDescarcaVaz)}
                   >
-                    ⏬ Descarcă
+                    Reîncearcă
                   </button>
-                )}
+                ) : null}
               </div>
             </div>
             {seDescarcaUreche && (
@@ -336,7 +365,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                       ? 'se descarcă…'
                       : stVaz.stare === 'eroare'
                         ? '⚠️ eroare'
-                        : 'nedescărcat'}
+                        : 'inclus cu offline-ul'}
                 </div>
               </div>
               <div style={{ flex: '0 0 auto' }}>
@@ -344,16 +373,16 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
                   <span style={{ fontSize: 12.5, fontWeight: 700, color: '#cbbcff' }}>⏬ {procentVaz}%</span>
                 ) : stVaz.stare === 'gata' ? (
                   <span style={{ fontSize: 12.5, fontWeight: 700, color: '#6ea8fe' }}>gata</span>
-                ) : (
+                ) : stVaz.stare === 'eroare' ? (
                   <button
                     type="button"
                     onClick={descarcaVaz}
-                    disabled={seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false}
-                    style={btnStil('#6ea8fe', '#10121a', seDescarca || seDescarcaUreche || seDescarcaVaz || areWebgpu === false)}
+                    disabled={seDescarca || seDescarcaUreche || seDescarcaVaz}
+                    style={btnStil('#2a2440', '#e9e4ff', seDescarca || seDescarcaUreche || seDescarcaVaz)}
                   >
-                    ⏬ Descarcă
+                    Reîncearcă
                   </button>
-                )}
+                ) : null}
               </div>
             </div>
             {seDescarcaVaz && (
