@@ -97,6 +97,28 @@ o dată/user), mitigat prin app store/CDN/HuggingFace. Per-utilizare = 0. (Dacă
 baza gratis ar face fie și un apel la server, ne-ar costa — de-aia standalone e
 cheia, nu preferință.)
 
+### 2.2 Cum aduc bani (owner, 21 aug: „te las pe tine să aduci bani la noi")
+
+Adus pe legile Kelion — cinstit, măsurat, fără trucuri.
+
+- **Unde se cumpără — pe WEB, nu în app.** Apple/Google iau **15–30%** + interzic
+  procesatorul propriu la cumpărături digitale în app. Pe web = procesatorul
+  nostru → ținem **~97%** (strategia Netflix/Spotify/Kindle).
+- **Puntea = contul comun** (Google auth, același web + app). User free offline
+  vrea o poartă online → e oricum pe net → app-ul îl trimite pe web (buton/link pe
+  Android/desktop; **QR** pe iOS, că Apple interzice butonul „cumpără") → cumpără
+  credite în ACELAȘI cont → app-ul sincronizează → poarta se deschide.
+- **Model:** credite **PREPLĂTITE** (nu intri pe minus — lecția „40 ture/1 penny"),
+  scăzute DOAR la deschiderea porților online. Offline = 0 credite.
+- **Procesator (recomandare, revizuibil):** **Stripe + Stripe Tax** (reutilizăm
+  infra existentă = transplant; Stripe Tax face TVA-ul/GST automat). Rezervă:
+  **Merchant of Record** (Paddle/LemonSqueezy) dacă taxele globale devin grele —
+  ei duc taxa lumii, pe comision mai mare.
+- **Prețul creditelor = din COSTUL REAL măsurat + marjă corectă — NICIODATĂ
+  inventat** (legea măsurătorii; lecția „tarife inventate 24/48/200 vs reale
+  6/12/50"). Transparent, fără dark patterns.
+- **Implementarea = Faza 2.** Acum = doar designul, bătut.
+
 ---
 
 ## 3. FAZA 1 — programul offline (100% local, fără net) · Android + Desktop
