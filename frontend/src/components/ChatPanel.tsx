@@ -78,7 +78,7 @@ import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 import { esteConectat, useConectat } from '../lib/conexiune'
-import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline } from '../lib/creierLocal'
+import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline, autoDescarcareaPermisa } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
 import { vorbesteLocal, opresteVoceLocal } from '../lib/voceBrowser'
 import {
@@ -205,11 +205,11 @@ export default function ChatPanel({
       /* storage unavailable — the draft just doesn't survive */
     }
   }, [input])
-  // PRE-PREGĂTIREA CREIERULUI OFFLINE (mod companion, faza 1): cât timp ai net BUN
-  // (Wi-Fi/4G+, confirmat de țeavă — nu ardem datele omului) și dispozitivul are
-  // WebGPU, descărcăm O DATĂ modelul local, ca să fie GATA când pierzi semnalul.
-  // Pe net lent/economie/necunoscut NU descărcăm gigabytes (ex. iOS raportează
-  // „necunoscut" → rămâne pe declanșare manuală, faza următoare). Idempotent.
+  // PRE-PREGĂTIREA CREIERULUI OFFLINE — complet AUTOMATĂ și complet INVIZIBILĂ
+  // (ordinul owner-ului, 21 aug, „finalizare"). Condiții rămase: WebGPU + orice
+  // conexiune la net (poarta de „doar țeavă bună" a fost SCOASĂ la ordin) + modelul
+  // să lipsească/difere față de cel curent (analiza = sincronizeazaStareOffline).
+  // Niciun element de interfață: bara StatusOffline a fost ștearsă. Idempotent.
   useEffect(() => {
     if (typeof window === 'undefined') return
     let anulat = false
@@ -233,6 +233,10 @@ export default function ChatPanel({
         // descărcarea pornește pe ORICE net (poarta de „doar țeavă bună" scoasă la
         // ordin), fără niciun element de interfață — bara StatusOffline a fost scoasă.
         if (!esteConectat()) return
+        // Fără UI = fără frână umană: pe un dispozitiv blocat (quota plină), fiecare
+        // pornire ar re-lua ~5,2 GB și ar pica iar. Contorul persistat de eșecuri
+        // (creierLocal) oprește bucla: după 3 căderi, o singură re-încercare pe zi.
+        if (!autoDescarcareaPermisa()) return
         void pregatesteModelOffline()
       })()
     }, 8000)

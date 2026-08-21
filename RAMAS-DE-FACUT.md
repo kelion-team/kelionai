@@ -13,6 +13,20 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [ ] ⭐ **FINALIZARE (ordinul unic, 21 aug, verbatim): „finalizare, și ai cuvântul
+      meu că e ultimul pe care îl mai auzi de la mine dacă aplicația ce am zis până
+      acum nu funcționează."** → ZERO funcții noi până registrul de erori e la zero;
+      fiecare reparație: porți → 3 agenți adversariali → merge → măsurat LIVE.
+      **Registrul (54 constatări, 21 aug, fiecare cu fișier:linie):** frontend 22
+      (primele 3 — coliziunea vocilor, onclose-1000 surdo-mut, releaseTtsFocus —
+      REPARATE, live v6.2), backend 16 (vârfuri: escaladarea ocolește plasele de
+      fallback; re-execuția uneltelor la retry dublează efectele; plasa dual-brain
+      moartă; erori ne-tranzitorii spun „mai încearcă"; poartaFaptelor absent pe
+      voce), docs-vs-cod 16 (VAD documentat invers ș.a.). Simțurile offline din
+      21 aug = N/A pe tree-ul curent (restaurarea le-a scos deliberat).
+      **Lot A (descărcare offline invizibilă+automată)**: construit + verificat cu
+      3 agenți (FAIL→reparate cele 3 minime) — RĂMAS: merge + măsurat live.
+      Starea curentă detaliată: AI-HANDOFF.md §16.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
       Repară bug-ul MĂSURAT „vocea pornește 2 sec și se rupe" = 2 motoare (Gemini
@@ -23,7 +37,13 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       „de tine depinde cine construiește — Devin sau tu — dacă respecți 100%
       proiectul." **Pași (se bifează DOAR cu build + verify LIVE + dovadă;
       ACTUALIZARE după FIECARE lucru făcut și verificat):**
-      - [ ] 1. fix de bază: un singur motor online (Chirp jos pe voce) — bug-ul moare
+      - [x] 1. fix de bază: un singur motor online — FĂCUT + LIVE 21 aug (v6.2,
+              v=de1984f, măsurat /api/version): cât sesiunea Live trăiește, turele
+              SCRISE pleacă PRIN Live (`{type:'text'}` → `live.anunta()`) și Chirp
+              `c.audio` e suprimat; Chirp rămâne DOAR fallback când Live e mort
+              (scoaterea totală = pasul 7/Piper). Verificat cu 3 agenți (2 runde
+              FAIL reparate: lacătele `taiereManuala`+adresare, ancorele stale,
+              bufUser, cursa eraInZbor). RĂMAS: proba pe telefonul owner-ului.
       - [ ] 2. cățelul (`poartaFaptelor`) legat pe calea voce
       - [ ] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
       - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
@@ -90,6 +110,11 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       tăcea pe fără-WebGPU/eroare/nepornit (`return null`). FIX (`StatusOffline.tsx`):
       arată `%` la descărcare, „gata ✓", spune CINSTIT când dispozitivul n-are WebGPU,
       arată eroarea + „Reîncearcă", și dă buton MANUAL „Descarcă pentru offline".
+      [NOTĂ 21 aug: pct. (2) e DEPĂȘIT — ordinul nou cere exact INVERSUL:
+      „procesul se face automat, nu se mai afișează deloc" → `StatusOffline.tsx`
+      ȘTERS, descărcare automată pe orice net, modelul e gemma-2-9b ~5,2 GB (nu
+      ~2 GB); proba live NU mai e bara %, ci: modelul apare singur în Cache
+      Storage (`webllm/*`) + turele offline răspund. Vezi AI-HANDOFF §16.]
       (3) **avion: app-ul nu pornea** — SW nu punea shell-ul în cache la instalare.
       FIX (`sw.js` install): precache `'/'`. (4) **audio inexistent pe scris/offline** —
       gura implicită (Gemini Live) NU rostește textul scris, iar Chirp-ul de pe server
