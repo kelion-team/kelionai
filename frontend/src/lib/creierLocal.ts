@@ -70,6 +70,18 @@ const CHEIE_MODEL_ACTIV = 'kelion_model_offline_activ'
 const CHEIE_MODELE_DESCARCATE = 'kelion_modele_descarcate'
 const CHEIE_DESCARCAT_VECHE = 'kelion_model_offline'
 
+// Cheile localStorage ale offline-ului care trebuie să SUPRAVIEȚUIASCĂ resetului de
+// publicare (updateCheck.hardResetToLatest): modelul ALES + SETUL descărcat + cheia veche
+// de migrare. Byte-ii modelelor stau în Cache Storage (webllm/*, păstrat la update), deci
+// și EVIDENȚA lor trebuie păstrată — altfel după fiecare publicare modelul apare
+// „nedescărcat" deși e pe disc (owner 21 aug: „verifică când e un model descărcat…", „la
+// fiecare update nu trebuie descărcate din nou modelele"). Sursă unică — updateCheck le importă.
+export const CHEI_OFFLINE_PERSISTENTE = [
+  CHEIE_MODEL_ACTIV,
+  CHEIE_MODELE_DESCARCATE,
+  CHEIE_DESCARCAT_VECHE,
+] as const
+
 function citesteActiv(): string {
   try {
     const v = localStorage.getItem(CHEIE_MODEL_ACTIV)
@@ -206,46 +218,22 @@ export function stareCreierLocal(): { stare: StareLocal; progres: number; motiv:
   return { stare, progres, motiv: motivEroare }
 }
 
-/** E cache-ul WebLLM (`webllm/model`) NEGOL? Verificare UȘOARĂ, fără să importăm
- *  biblioteca grea la pornire. Întoarce `true`/`false` doar când chiar am MĂSURAT;
- *  `null` = NU POT măsura (Cache API lipsă sau citire eșuată) — regula #1: o citire
- *  eșuată NU e „gol", ca să nu ștergem din greșeală evidența descărcărilor. */
-export async function modelDescarcatInCache(): Promise<boolean | null> {
-  try {
-    if (typeof caches === 'undefined') return null
-    if (!(await caches.has('webllm/model'))) return false
-    const c = await caches.open('webllm/model')
-    const chei = await c.keys()
-    return chei.length > 0
-  } catch {
-    return null
-  }
-}
-
-/** Reconciliază starea cu realitatea din cache (owner: „să vadă că e descărcat, să nu
- *  mai ceară dacă nu sunt modificări"). Modelul ACTIV e în setul de descărcate ȘI cache-ul
- *  nu-i gol → 'descarcat'; altfel → 'neintrodus' (cere descărcare). Dacă tot cache-ul WebLLM
- *  a fost evacuat, curățăm setul (niciun model nu mai e descărcat). Nu atinge
- *  'gata'/'se_pregateste' (deja încărcat/în lucru). */
+/** Reconciliază starea modelului ACTIV cu evidența descărcărilor. SURSA DE ADEVĂR e
+ *  SETUL din localStorage (scris la fiecare descărcare reușită), NU un probe de cache.
+ *  BUG REPARAT (owner, 21 aug: modele descărcate arătau „nedescărcat" după reload, deci
+ *  butonul „Folosește" nu apărea și nu le puteai selecta): vechea `sincronizeaza` ștergea
+ *  TOT setul dacă `caches.has('webllm/model')` întorcea fals — dar WebLLM poate ține modelul
+ *  în IndexedDB (nu Cache Storage), iar un fals-negativ RĂDEA lista de descărcate; la reload
+ *  rămânea doar modelul implicit (reîncărcat singur). Nu mai ștergem nimic pe probe fragil:
+ *  ce a descărcat owner-ul rămâne descărcat. Dacă fișierele chiar lipsesc, WebLLM re-descarcă
+ *  la încărcare (cu net) sau spune cinstit offline. Nu atinge 'gata'/'se_pregateste'. */
 export async function sincronizeazaStareOffline(): Promise<void> {
   if (stare === 'gata' || stare === 'se_pregateste') return
-  const inCache = await modelDescarcatInCache()
-  if (inCache === null) return // nu pot citi cache-ul → nu schimb nimic (regula #1)
   const activ = getModelOffline()
-  const potrivit = inCache && citesteDescarcate().has(activ)
-  if (potrivit) {
+  if (citesteDescarcate().has(activ)) {
     if (stare !== 'descarcat') stare = 'descarcat'
-  } else {
-    if (stare === 'descarcat') stare = 'neintrodus'
-    // tot cache-ul WebLLM evacuat → niciun model nu mai e cu adevărat descărcat
-    if (!inCache) {
-      try {
-        localStorage.removeItem(CHEIE_MODELE_DESCARCATE)
-        localStorage.removeItem(CHEIE_DESCARCAT_VECHE)
-      } catch {
-        /* nimic */
-      }
-    }
+  } else if (stare === 'descarcat') {
+    stare = 'neintrodus'
   }
 }
 

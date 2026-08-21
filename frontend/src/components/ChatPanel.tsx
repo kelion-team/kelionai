@@ -59,6 +59,7 @@ import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 import { esteConectat, useConectat, verificaConexiuneReala } from '../lib/conexiune'
 import { vorbesteOffline } from '../lib/voceOffline'
+import { ascultaOffline, stareUrecheOffline, type ControlAscultare } from '../lib/urecheOffline'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline, incalzesteCodOffline } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
 import {
@@ -346,6 +347,60 @@ export default function ChatPanel({
   // Adrian, Jul 11: "the camera didn't start [after restart] — that's wrong" → the camera
   // starts BY DEFAULT on every load; the button remains for turning it off.
   const [cameraOn, setCameraOn] = useState(true)
+  // URECHEA OFFLINE (Faza 1 · M4): microfonul apare DOAR când urechea (Whisper) e
+  // descărcată; apăsat → ascultă, apăsat iar → transcrie offline în caseta de scris.
+  const [urecheGata, setUrecheGata] = useState(() => stareUrecheOffline().stare === 'gata')
+  const [asculta, setAsculta] = useState(false)
+  const ascultareRef = useRef<ControlAscultare | null>(null)
+  // Lacăt SINCRON de pornire + strajă de montare: `ascultaOffline` are un await lung
+  // (getUserMedia → promptul de permisiune). Fără ele, un al doilea click în fereastra
+  // aia (iconul rămâne 🎤, ref-ul e încă null) ar deschide un AL DOILEA microfon +
+  // AudioContext și l-ar orfaniza pe primul (mic/context scurs până la închiderea paginii);
+  // iar o demontare în timpul await-ului ar lipi controlul pe un ref demontat → tot scurs.
+  const pornireRef = useRef(false)
+  const montatRef = useRef(true)
+  useEffect(() => {
+    montatRef.current = true
+    // Starea urechii trăiește în modulul urecheOffline (nereactivă) — o citim periodic.
+    const id = window.setInterval(() => setUrecheGata(stareUrecheOffline().stare === 'gata'), 1500)
+    return () => {
+      window.clearInterval(id)
+      montatRef.current = false
+      ascultareRef.current?.anuleaza()
+      ascultareRef.current = null
+    }
+  }, [])
+  const toggleAscultare = useCallback(async (): Promise<void> => {
+    if (ascultareRef.current) {
+      // A doua apăsare: oprește + transcrie offline → în caseta de scris.
+      const ctrl = ascultareRef.current
+      ascultareRef.current = null
+      setAsculta(false)
+      const text = await ctrl.opreste()
+      if (text) setInput((prev) => (prev ? prev.trimEnd() + ' ' : '') + text)
+      return
+    }
+    if (pornireRef.current) return // o singură pornire în zbor (anti dublu-click)
+    pornireRef.current = true
+    try {
+      // interruptAll ÎN try: dacă ar arunca (ex. un callback de voce care crapă),
+      // `finally` tot eliberează lacătul — altfel butonul de microfon rămânea mort
+      // până la reîncărcare. Rămâne ÎNAINTE de ascultaOffline (o singură gură).
+      interruptAll('asculta-offline') // gura tace cât ascult (să nu se-audă pe el)
+      const ctrl = await ascultaOffline(resolveLang(speechLangRef.current))
+      if (!ctrl) return
+      // Demontat sau altă ascultare deja pornită cât așteptam → eliberează ACEST control,
+      // nu-l lăsa microfon deschis nefolosit.
+      if (!montatRef.current || ascultareRef.current) {
+        ctrl.anuleaza()
+        return
+      }
+      ascultareRef.current = ctrl
+      setAsculta(true)
+    } finally {
+      pornireRef.current = false
+    }
+  }, [])
   const [facing, setFacing] = useState<Facing>('user')
   const [menuOpen, setMenuOpen] = useState(false)
   // Attached images (ChatGPT-style composer). Sent to the brain's vision on send.
@@ -2108,6 +2163,19 @@ export default function ChatPanel({
               </div>
             )}
           </div>
+          {/* MICROFON OFFLINE (Faza 1 · M4): apare doar când urechea (Whisper) e
+              descărcată. Apasă → ascultă; apasă iar → transcrie offline în caseta de scris. */}
+          {urecheGata && (
+            <button
+              type="button"
+              className={`composer-icon ${asculta ? 'live' : ''}`}
+              onClick={() => void toggleAscultare()}
+              title={asculta ? 'Oprește și transcrie (offline)' : 'Vorbește — Kelion aude offline'}
+              aria-label="Microfon offline"
+            >
+              {asculta ? '⏺' : '🎤'}
+            </button>
+          )}
           <textarea
             ref={composerInputRef}
             className="composer-input"

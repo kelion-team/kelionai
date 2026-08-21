@@ -10,6 +10,7 @@ import {
   sincronizeazaStareOffline,
   stergeModelOffline,
 } from '../lib/creierLocal'
+import { pregatesteUrecheOffline, stareUrecheOffline } from '../lib/urecheOffline'
 
 // ── MANAGER MODELE OFFLINE (owner 21 aug: „vreau să pot seta EU modelul, inclusiv
 // Gemma 2 sau plus, doar la offline… să le downloadez și să le pot încerca") ──────
@@ -21,6 +22,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
   const [activ, setActiv] = useState(() => getModelOffline())
   const [descarcate, setDescarcate] = useState<string[]>(() => modeleDescarcate())
   const [st, setSt] = useState(() => stareCreierLocal())
+  const [stUreche, setStUreche] = useState(() => stareUrecheOffline())
   const [areWebgpu, setAreWebgpu] = useState<boolean | null>(null)
   const montat = useRef(true)
 
@@ -37,6 +39,7 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
       setSt(stareCreierLocal())
       setActiv(getModelOffline())
       setDescarcate(modeleDescarcate())
+      setStUreche(stareUrecheOffline())
     }, 600)
     return () => {
       viu = false
@@ -74,6 +77,15 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
       setActiv(getModelOffline())
       setDescarcate(modeleDescarcate())
       setSt(stareCreierLocal())
+    })
+  }
+  // URECHEA (M4): descarcă + încarcă modelul Whisper, ca să audă offline.
+  const seDescarcaUreche = stUreche.stare === 'se_pregateste'
+  const procentUreche = Math.max(3, Math.round(stUreche.progres * 100))
+  const descarcaUreche = (): void => {
+    setStUreche(stareUrecheOffline())
+    void pregatesteUrecheOffline().then(() => {
+      if (montat.current) setStUreche(stareUrecheOffline())
     })
   }
 
@@ -225,6 +237,61 @@ export function ManagerModeleOffline({ onClose }: { onClose: () => void }) {
               </div>
             )
           })}
+        </div>
+
+        {/* URECHEA OFFLINE (Faza 1 · M4): Whisper local, ca să audă fără net. Descarcă
+            o dată (de la Hugging Face), apoi transcrie în browser (WASM/WebGPU). */}
+        <div style={{ marginTop: 16, borderTop: '1px solid #2a2440', paddingTop: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>🎤 Urechea — aud fără net</div>
+          <div
+            style={{
+              border: `1px solid ${stUreche.stare === 'gata' ? '#6ea8fe' : '#2a2440'}`,
+              borderRadius: 10,
+              padding: '10px 12px',
+              background: stUreche.stare === 'gata' ? 'rgba(110,168,254,0.08)' : 'transparent',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  Whisper <span style={{ color: '#9a92c0', fontWeight: 600 }}>· base</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: '#9a92c0', marginTop: 2 }}>
+                  {stUreche.stare === 'gata'
+                    ? '✓ gata'
+                    : seDescarcaUreche
+                      ? 'se descarcă…'
+                      : stUreche.stare === 'eroare'
+                        ? '⚠️ eroare'
+                        : 'nedescărcat'}
+                </div>
+              </div>
+              <div style={{ flex: '0 0 auto' }}>
+                {seDescarcaUreche ? (
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: '#cbbcff' }}>⏬ {procentUreche}%</span>
+                ) : stUreche.stare === 'gata' ? (
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: '#6ea8fe' }}>gata</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={descarcaUreche}
+                    disabled={seDescarca || seDescarcaUreche || areWebgpu === false}
+                    style={btnStil('#6ea8fe', '#10121a', seDescarca || seDescarcaUreche || areWebgpu === false)}
+                  >
+                    ⏬ Descarcă
+                  </button>
+                )}
+              </div>
+            </div>
+            {seDescarcaUreche && (
+              <div style={{ height: 3, marginTop: 8, background: '#2a2440', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${procentUreche}%`, background: 'linear-gradient(90deg,#8b7cf0,#cbbcff)', transition: 'width .4s ease' }} />
+              </div>
+            )}
+            {stUreche.stare === 'eroare' && stUreche.motiv && (
+              <div style={{ marginTop: 8, fontSize: 11.5, color: '#ffcaca' }}>{stUreche.motiv}</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
