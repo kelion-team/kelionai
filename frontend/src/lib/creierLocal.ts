@@ -221,6 +221,23 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
   return pregatire
 }
 
+// Aduce DOAR chunk-ul de cod WebLLM (~6MB JS) în cache-ul service-worker-ului, FĂRĂ
+// a-l urca în GPU. De chemat cât ești ONLINE când modelul e deja 'descarcat' — ca
+// importul offline din `pregatesteModelOffline` să NU poată pica după un redeploy
+// (chunk-ul e re-hash-uit la fiecare build, iar pre-încălzirea modelului nu-l
+// re-aducea; audit 3 agenți, 21 aug: importul offline al chunk-ului neprins în cache
+// era a doua cauză a bug-ului „nu comută offline"). Cheap + idempotent. Nu atinge GPU.
+let codIncalzit = false
+export async function incalzesteCodOffline(): Promise<void> {
+  if (codIncalzit || stare === 'gata') return
+  try {
+    await import('@mlc-ai/web-llm')
+    codIncalzit = true
+  } catch {
+    /* rămâne pe importul din pregatesteModelOffline */
+  }
+}
+
 /** RĂSPUNS OFFLINE, în flux (același contract ca `streamChat`: async iterable de
  *  bucăți de text). Dacă modelul nu e gata, spune CINSTIT — nu inventează. */
 export async function* streamLocalRaspuns(
