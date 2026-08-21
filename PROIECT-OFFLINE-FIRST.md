@@ -76,6 +76,27 @@ prin schelet nou + transplant, nu prin foc la tot.
   - **iOS** — app nativă prin Capacitor, prin **App Store/TestFlight** (owner are
     cont de developer Apple). **Faza 3 (ultima)** — vezi §5.
 
+### 2.1 Model economic + flux de intrare (bătut, 21 aug)
+
+**Flux:** web `kelionai.app` → **Google auth** → **download GRATIS** → instalezi →
+Faza 1 offline merge **fără credite**. Auth-ul e online, o dată (te înregistrează
++ te lasă să descarci); după instalare, programul rulează offline fără să mai
+ceară auth.
+
+**Freemium aliniat pe COSTUL REAL:**
+- **Faza 1 (offline) = GRATIS, modele locale FULL.** Rulează pe device → **zero
+  cost pe noi pe utilizare** (owner: „*dacă e free, nici pe noi să nu ne coste*").
+  Modelele locale sunt mai slabe (~3B) dar complete, nefragmentate — nu le ciuntim.
+- **Porțile online (Faza 2) = cu CREDITE.** Acolo plătim noi API real (Gemini,
+  Google, căutare) → acolo taxăm. Creditele se cumpără **DUPĂ** download, **doar
+  pentru net**.
+
+**Condiția ca „free" să nu ne coste:** baza offline 100% pe device, **zero apel la
+server**. Un singur cost real la free = bandwidth-ul descărcării modelului (~2GB,
+o dată/user), mitigat prin app store/CDN/HuggingFace. Per-utilizare = 0. (Dacă
+baza gratis ar face fie și un apel la server, ne-ar costa — de-aia standalone e
+cheia, nu preferință.)
+
 ---
 
 ## 3. FAZA 1 — programul offline (100% local, fără net) · Android + Desktop
