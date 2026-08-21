@@ -219,3 +219,17 @@ export function textulDemascarii(nedovedite: readonly string[]): string {
     `Spune „fă-o" și execut pe bune, cu unealta.`
   )
 }
+
+/** Varianta VOCALĂ a demascării (JARVIS pas 2 — verdictul agentului de
+ *  consecințe): pe voce, o pretenție de faptă poate fi un RECALL adevărat al
+ *  unei fapte din altă tură („da, am trimis emailul" — trimis prin ușa grea,
+ *  acum câteva ture). Verdictul „e FALSĂ — o retrag" ar fi EL minciuna
+ *  (regula #1: nemăsurat ≠ fals). Se spune exact ce S-A măsurat: nicio
+ *  unealtă în tura asta — nu pot verifica. */
+export function textulNuPotVerifica(nedovedite: readonly string[]): string {
+  return (
+    `\n\n⚠ VERIFICAREA FAPTELOR (voce, pe jurnalul uneltelor turei): ` +
+    `${nedovedite.join('; ')}. Nicio unealtă nu a rulat în tura asta care să o dovedească — ` +
+    `nu pot verifica. Spune „fă-o" și execut pe bune, cu unealta.`
+  )
+}

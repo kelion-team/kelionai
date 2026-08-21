@@ -93,14 +93,29 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               FAIL reparate: lacătele `taiereManuala`+adresare, ancorele stale,
               bufUser, cursa eraInZbor). RĂMAS: proba pe telefonul owner-ului.
       - [ ] 2. cățelul (`poartaFaptelor`) legat pe calea voce — CONSTRUIT pe
-              branch (21 aug seara): pe tura vocală PUR-UȘOARĂ, rostirea lui
-              Kelion se judecă pe uneltele chiar reușite ale turei
-              (doveziVoceTura, clasificate); turele cu temei din afară (creier
-              greu prin cere_creierului — poarta LUI rulează în /api/chat — sau
-              anunț de sistem) NU se judecă (fals-pozitivul interzis prin
-              design); demascarea → istoric + monitor ca DOC (nu voce, §8) +
-              jurnal. Lacăte: catelulPeVoce.test.ts. RĂMAS pt. bifă: verificare
-              cu 3 agenți + merge + măsurat live.
+              branch (21 aug seara, + reparațiile celor 3 agenți): pe tura
+              vocală PUR-UȘOARĂ, rostirea lui Kelion se judecă pe uneltele
+              chiar reușite ale turei (doveziVoceTura); turele cu temei din
+              afară NU se judecă — steagul călătorește CU anunțul de sistem
+              (anuntSistemAmanat; fals-pozitivul pe anunțul amânat era DOVEDIT
+              de agent), se consumă DOAR pe tura cu rostire și stă armat cât o
+              ușă grea e în zbor (usiGreleInZbor — ordinea turnComplete/toolCall
+              la Google NU e garantată: „nu pot verifica" din repo, se măsoară
+              live). TEXTUL notei = „nu pot verifica" (nu „e FALSĂ" — pe voce
+              pretenția poate fi un RECALL adevărat al unei fapte din altă
+              tură; un verdict de fals ar fi el însuși minciună, regula #1).
+              Nota → istoric + monitor ca DOC (nu voce, §8) + jurnal. Limite
+              declarate: recall-ul fără clitic („da, am trimis emailul" despre
+              tura trecută) primește nota „nu pot verifica" — onestă, nu falsă;
+              scurgerile pe turele suprimate greșesc spre fals-negativ (sigur).
+              Lacăte: catelulPeVoce.test.ts (cod viu, anti-M6). RĂMAS pt. bifă:
+              merge + măsurat live (inclusiv ordinea turnComplete/toolCall).
+      - [ ] 2b. (decizie OWNER) nota cățelului să fie și ROSTITĂ scurt în tura
+              următoare (prin canalul anunțurilor, NU citind monitorul — §8,
+              fără narațiune de proces — §5): într-un produs 100% vorbit, o
+              corecție doar pe un ecran neprivit nu e adevăr livrat. Precondiție
+              absolută: măsurarea live a fals-pozitivelor (o acuzație falsă
+              rostită ar fi mai rea decât tăcerea).
       - [ ] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
       - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce

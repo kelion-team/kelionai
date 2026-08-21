@@ -22,17 +22,29 @@ describe('cățelul anti-minciună pe calea vocală ușoară', () => {
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n')
   it('poartaFaptelor e importată și chemată pe tura vorbită (cod viu, nu comentariu)', () => {
-    expect(viu).toMatch(/^\s*import \{ pretentiiFaraFapta, textulDemascarii, clasificaRezultatUnealta, type DovadaUnealta \} from '\.\.\/services\/poartaFaptelor\.js'/m)
+    expect(viu).toMatch(/^\s*import \{ pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type DovadaUnealta \} from '\.\.\/services\/poartaFaptelor\.js'/m)
     expect(viu).toMatch(/^\s*const nedovedite = pretentiiFaraFapta\(k, doveziVoceTura\)/m)
+    // TEXTUL e „nu pot verifica", NU un verdict de fals (agentul de consecințe:
+    // pe voce pretenția poate fi un recall ADEVĂRAT al unei fapte din altă tură).
+    expect(viu).toMatch(/^\s*const demascare = textulNuPotVerifica\(nedovedite\)/m)
   })
-  it('judecă DOAR turele pur-ușoare — temeiul din afară (creier greu / anunț de sistem) sare judecata', () => {
-    expect(viu).toMatch(/^\s*if \(k && !turaCuTemeiDinAfara\) \{/m)
-    // ambele armări ale steagului există:
+  it('judecă DOAR turele pur-ușoare, cu consumul PE ROSTIRE și exempția vie cât ușa grea e în zbor (agentul de logică #2-#4)', () => {
+    expect(viu).toMatch(/^\s*if \(k\) \{/m)
+    expect(viu).toMatch(/^\s*if \(!turaCuTemeiDinAfara && usiGreleInZbor === 0\) \{/m)
+    // armările steagului: cere_creierului + ceasOrdine (ramura directă) + cele
+    // 3 site-uri de consum al anunțului de SISTEM amânat:
     const armari = viu.match(/^\s*turaCuTemeiDinAfara = true/gm) ?? []
-    expect(armari.length).toBeGreaterThanOrEqual(2)
-    // …și steagul se RESETEAZĂ la fiecare tură salvată (altfel o singură ușă
-    // ar orbi cățelul pe veci):
-    expect(viu).toMatch(/^\s*doveziVoceTura = \[\]\s*\n\s*turaCuTemeiDinAfara = false/m)
+    expect(armari.length).toBeGreaterThanOrEqual(5)
+    // anunțul de SISTEM amânat călătorește pe steagul lui — tura SCRISĂ
+    // (același protocol anuntAmanat) rămâne judecată:
+    expect(viu).toMatch(/^\s*let anuntSistemAmanat = false/m)
+    const perechi = viu.match(/^\s*if \(anuntSistemAmanat\) \{/gm) ?? []
+    expect(perechi.length).toBeGreaterThanOrEqual(3)
+    // ușa grea în zbor: contor armat la intrare, eliberat în finally:
+    expect(viu).toMatch(/^\s*usiGreleInZbor\+\+/m)
+    expect(viu).toMatch(/\} finally \{\s*\n\s*usiGreleInZbor--/)
+    // consumul: dovezile se golesc pe rostire; steagul DOAR fără uși în zbor:
+    expect(viu).toMatch(/^\s*doveziVoceTura = \[\]\s*\n\s*if \(usiGreleInZbor === 0\) turaCuTemeiDinAfara = false/m)
   })
   it('dovezile turei = rezultatele REALE clasificate ale uneltelor sesiunii Live (succes ȘI eșec)', () => {
     const clasificari = viu.match(/^\s*(?:if \(r != null\) )?doveziVoceTura\.push\(clasificaRezultatUnealta\(/gm) ?? []
@@ -40,7 +52,7 @@ describe('cățelul anti-minciună pe calea vocală ușoară', () => {
     // tentativa picată e dovadă de EȘEC, nu acoperire:
     expect(viu).toMatch(/clasificaRezultatUnealta\(apel\.name, `tool_error: /)
   })
-  it('demascarea intră în istoric, pe monitor ca DOC (nu voce) și în jurnal', () => {
+  it('nota intră în istoric, pe monitor ca DOC (nu voce) și în jurnal', () => {
     expect(viu).toMatch(/^\s*k \+= demascare/m)
     expect(viu).toMatch(/^\s*trimite\(\{ type: 'control', frame: \{ doc: \{ title: 'Poarta faptelor \(voce\)'/m)
     expect(viu).toMatch(/\[POARTA FAPTELOR\]\[VOCE\]/)

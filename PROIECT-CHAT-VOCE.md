@@ -11,9 +11,12 @@
 > 2: pe calea GREA vocea trece prin /api/chat unde poartaFaptelor RULEAZĂ —
 > gap-ul real rămas e calea ușoară (transcriptul Live) + reformularea de după
 > unealtă. Pasul 2 (cățelul pe calea ușoară a vocii): CONSTRUIT pe branch
-> 21 aug seara (judecă doar turele pur-ușoare; demascarea pe istoric+monitor,
-> nu voce), nemăsurat live. Pașii 3–5, 7: neîncepuți. Bifele cu dovadă:
-> RAMAS-DE-FACUT.md.
+> 21 aug seara (judecă doar turele pur-ușoare; nota — „nu pot verifica", nu
+> verdict de fals — pe istoric+monitor, nu voce; exempția călătorește cu
+> anunțul de sistem și stă armată cât ușa grea e în zbor), NEmăsurat live —
+> inclusiv ordinea turnComplete/toolCall la Google („nu pot verifica" din
+> repo). Pașii 3–5, 7: neîncepuți; 2b (nota rostită) = decizie owner în RAMAS.
+> Bifele cu dovadă: RAMAS-DE-FACUT.md.
 
 ---
 
