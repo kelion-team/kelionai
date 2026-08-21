@@ -58,7 +58,7 @@ import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
 import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 import { esteConectat, useConectat } from '../lib/conexiune'
-import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline } from '../lib/creierLocal'
+import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline, incalzesteCodOffline } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
 import {
   adaugaTuraSync,
@@ -204,7 +204,13 @@ export default function ChatPanel({
         // pornire (economie de baterie/GPU cât ești online) — se încarcă din cache abia
         // când chiar pierzi semnalul (efectul de mai jos).
         await sincronizeazaStareOffline()
-        if (anulat || stareCreierLocal().stare === 'descarcat') return
+        if (anulat || stareCreierLocal().stare === 'descarcat') {
+          // Modelul E în cache. Aducem ȘI chunk-ul de cod WebLLM în cache (cheap,
+          // fără GPU), ca importul offline să nu poată pica după un redeploy. NU-l
+          // urcăm în GPU cât ești online (economie de baterie) — se urcă la offline.
+          void incalzesteCodOffline()
+          return
+        }
         // Nu e în cache → PRIMA descărcare, doar pe net decent (nu ardem date mobile).
         // Sărim doar 2G/3G/economie (getTeava 'slab'/'mediu'); Wi‑Fi/4G+ și „necunoscut"
         // (desktop/iOS) descarcă.
@@ -1217,7 +1223,26 @@ export default function ChatPanel({
       // nu-i descărcat (mereu până se descarcă) sau detectorul se-nșeală, NU tăiem
       // chatul — cădem pe server (streamChat). Așa online-ul merge MEREU ca înainte,
       // iar offline folosește creierul local doar când chiar are ce.
-      const eTuraOffline = !esteConectat() && stareCreierLocal().stare === 'gata'
+      // BUG REPARAT 21 aug 2026 (owner: „am oprit netul să testez și nu s-a comutat
+      // pe offline"): modelul era 'descărcat' (în Cache Storage) dar NU 'gata'
+      // (încărcat în GPU) în clipa în care cădea netul — cât ești online e ținut în
+      // cache ca să nu ardă bateria, iar urcarea în GPU pornea abia la căderea
+      // netului și durează secunde. În fereastra aia tura cădea pe `streamChat` →
+      // serverul de neatins → „am pierdut conexiunea". FIX: dacă suntem offline și
+      // modelul e în cache/se pregătește, îl TREZIM în GPU ÎNAINTE de decizie
+      // (pregatesteModelOffline e idempotent), apoi decidem.
+      const stLoc0 = stareCreierLocal().stare
+      if (!esteConectat() && (stLoc0 === 'descarcat' || stLoc0 === 'se_pregateste')) {
+        await pregatesteModelOffline()
+      }
+      // OFFLINE = creierul LOCAL, nu serverul de neatins. esteConectat() e o
+      // măsurătoare REALĂ (ping /health), deci false = chiar nu e net → serverul
+      // oricum n-ar răspunde; streamLocalRaspuns răspunde dacă e 'gata', altfel spune
+      // CINSTIT (nepregătit), niciodată eroarea falsă „am pierdut conexiunea".
+      // FAIL-SAFE (owner 20 aug): pe device FĂRĂ WebGPU creierul local nu merge
+      // NICIODATĂ → acolo singura șansă de creier e serverul, deci lăsăm calea veche
+      // (server + mesaj onest la eșec) în caz că detectorul s-a înșelat.
+      const eTuraOffline = !esteConectat() && stareCreierLocal().stare !== 'fara_webgpu'
       const sursaFlux = eTuraOffline
         ? streamLocalRaspuns(
             next,
