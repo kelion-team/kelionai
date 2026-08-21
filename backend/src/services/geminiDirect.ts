@@ -353,10 +353,18 @@ export async function geminiDirectChatStream(
   const collected: GPart[] = []
   let stop = 'stop'
   let usage: GResp['usageMetadata']
+  // REGISTRUL BACKEND #5 — EROAREA DIN MIJLOCUL STREAM-ULUI NU SE MAI ÎNGHITE:
+  // Gemini poate emite pe SSE un eveniment {error:{code,status,message}} în loc
+  // de candidates (cotă atinsă la mijloc, cerere respinsă în zbor). Înainte,
+  // handler-ul se uita DOAR la candidates → eroarea era aruncată la gunoi,
+  // funcția întorcea un rezultat „reușit" gol/parțial cu stop='stop', iar sus
+  // apărea [CHAT MUTE] + reîncercări oarbe în locul cauzei reale.
+  let eroareStream: GResp['error'] | undefined
   // The SSE stream reading comes from the shared source (services/sse.ts);
   // the event processing (Gemini format: candidates/parts) stays here.
   await readSSE(r.body, (raw) => {
     const ev = raw as GResp
+    if (ev.error && !eroareStream) eroareStream = ev.error
     if (ev.usageMetadata) usage = ev.usageMetadata // the final chunk carries it
     const cand = ev.candidates?.[0]
     if (cand?.finishReason) stop = cand.finishReason
@@ -368,6 +376,11 @@ export async function geminiDirectChatStream(
       if (p.functionCall) collected.push(p)
     }
   })
+  if (eroareStream) {
+    throw new Error(
+      `gemini stream ${eroareStream.code ?? ''} ${eroareStream.status ?? ''}: ${String(eroareStream.message ?? '').slice(0, 300)}`.replace(/\s+/g, ' ').trim(),
+    )
+  }
   const res = partsToResult(collected, model, stop, usage)
   return { ...res, text }
 }

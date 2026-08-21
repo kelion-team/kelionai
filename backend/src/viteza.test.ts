@@ -41,7 +41,9 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     // mesajul neutru. Rulează doar pe calea deja pierdută (`!r && !textFlowed`).
     expect(chat).toMatch(/CREIER PROFUND EPUIZAT/)
     expect(chat).toMatch(/orchestratorModel = orChatModel/)
-    expect(chat).toMatch(/if \(!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel\)/)
+    // Gardul nou din condiție (registrul backend #2): plasa nu mai reia tura
+    // dacă încercarea eșuată a apucat să cheme unelte (efectele s-ar dubla).
+    expect(chat).toMatch(/if \(!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !== orchestratorModel\)/)
   })
 
   it('creierul de LUCRU = Gemini direct (regula lui Adrian, 3 aug; măsurat 1,2s + 1,0s cu apel de unealtă corect)', () => {
