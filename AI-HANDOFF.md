@@ -1181,7 +1181,8 @@ Owner (măsurat de el): „nu descarca nimic pentru offline, e minciuna gogonata
 „mai mult chatul audio inexistent" + (avion) „nu poate accesa aplicatia". Audit cu 3
 agenți → cauzele erau ÎN COD (regula #2), reparate:
 1. **Modelul offline era distrus la fiecare update.** WebLLM ține creierul local
-   (~2 GB) în Cache Storage sub `webllm/*`. `hardResetToLatest` (`updateCheck.ts`),
+   (~2 GB — cifra modelului de ATUNCI, Qwen 3B; azi e gemma-2-9b ≈ 5,2 GB, vezi §16)
+   în Cache Storage sub `webllm/*`. `hardResetToLatest` (`updateCheck.ts`),
    plus `activate` și mesajul `kelion-clear-caches` din `sw.js`, ștergeau TOATE
    cache-urile la fiecare publicare („update la foc continuu") → offline nu era gata
    niciodată. FIX: `webllm/*` este acum PROTEJAT în toate cele trei locuri (`ePastrat`
@@ -1239,7 +1240,7 @@ de 54 de constatări, fiecare reparație trece prin: porți → 3 agenți advers
 merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, niciodată
 „ce va merge" — doar „ce s-a întâmplat".
 
-### Ce s-a întâmplat pe 21 aug (toate MĂSURATE live prin /api/version):
+### Ce s-a întâmplat pe 21 aug (v6.0/v6.1/v6.2 = măsurate live prin /api/version; ce NU e încă live sau nu se poate măsura de aici e spus pe rând):
 1. **RESTAURARE la versiunea de sfârșit de 20 aug, cu Devin funcțional** (ordinul
    owner-ului după o zi de eșecuri pe simțurile offline). Commit forward cu tree-ul
    exact al lui `eec4552c` (anti-phantom-deploy: masterul NU se dă înapoi). Efect:
@@ -1270,7 +1271,9 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
      §15c pct. 2 („descărcarea era invizibilă" reparată cu UI) e astfel DEPĂȘIT —
      invizibilitatea e acum CERINȚA, nu bug-ul.
    - poarta de „doar țeavă bună (Wi-Fi/4G+)" SCOASĂ: descarcă pe ORICE net;
-   - analiza = `sincronizeazaStareOffline()` (model lipsă/diferit/parțial);
+   - analiza = `sincronizeazaStareOffline()` (model LIPSĂ sau flag pe ALT model;
+     limită cunoscută: un cache PARȚIAL evacuat nu e detectat — verificarea e doar
+     `chei.length > 0`, completitudinea o revalidează WebLLM abia la încărcare);
    - urmă TEHNICĂ invizibilă pentru om: `console.info` la pornire+gata,
      `console.error` cu motivul la eșec (`creierLocal.ts`);
    - **contor de eșecuri persistat** (`kelion_model_offline_esecuri`): după 3 căderi

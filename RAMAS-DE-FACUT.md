@@ -25,7 +25,11 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       voce), docs-vs-cod 16 (VAD documentat invers ș.a.). Simțurile offline din
       21 aug = N/A pe tree-ul curent (restaurarea le-a scos deliberat).
       **Lot A (descărcare offline invizibilă+automată)**: construit + verificat cu
-      3 agenți (FAIL→reparate cele 3 minime) — RĂMAS: merge + măsurat live.
+      3 agenți (FAIL→reparate cele 3 minime; re-verificare PASS cu 7 minore, din
+      care reparate pe loc: comentariul „nu consumă rețea", gardul online pe
+      contorul de eșecuri, 3 corecturi de onestitate în documente) — RĂMAS:
+      merge + măsurat live; teste pe contorul de eșecuri (autoDescarcareaPermisa,
+      6 muchii, zero acoperire); cheile i18n moarte offlineGata/Descarca/Reincearca.
       Starea curentă detaliată: AI-HANDOFF.md §16.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).

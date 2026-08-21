@@ -109,8 +109,10 @@ function stergeEsecuri(): void {
     /* nimic */
   }
 }
-/** Auto-descărcarea mai are voie să pornească? (Cache load din 'descarcat' NU trece
- *  pe aici — ăla nu consumă rețea.) Sub prag → da. Peste prag → o încercare pe zi. */
+/** Auto-descărcarea mai are voie să pornească? Sub prag → da. Peste prag → o
+ *  încercare pe zi. Calea de încărcare din cache (trecerea OFFLINE) nu trece pe
+ *  aici — rulează doar fără net; dacă din cache lipsesc shard-uri, WebLLM le-ar
+ *  cere de pe rețea și pică — acel eșec NU e numărat spre gate (vezi catch). */
 export function autoDescarcareaPermisa(): boolean {
   const e = citesteEsecuri()
   if (!e || e.model !== MODEL_LOCAL) return true
@@ -267,7 +269,10 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
       stare = 'eroare'
       motivEroare = e instanceof Error ? e.message.slice(0, 200) : String(e)
       motor = null
-      noteazaEsec()
+      // Contorul păzește DESCĂRCAREA. Un eșec de ÎNCĂRCARE din cache pe OFFLINE
+      // (fără rețea, shard lipsă) nu spune nimic despre descărcare — nu-l numărăm,
+      // altfel ar amâna pe nedrept re-descărcarea când netul revine.
+      if (typeof navigator === 'undefined' || navigator.onLine !== false) noteazaEsec()
       console.error('[creier-local] pregătirea modelului a picat:', motivEroare)
       return false
     } finally {
