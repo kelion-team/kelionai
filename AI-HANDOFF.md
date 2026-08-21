@@ -10,6 +10,19 @@
 > Devin sau tu — dacă respecți 100% proiectul." Orice AI care atinge calea
 > chat/voce îl respectă 100%. Progresul + bifele: în `RAMAS-DE-FACUT.md`
 > (actualizare după FIECARE pas făcut ȘI verificat live).
+>
+> ✅ **CLEAN-SLATE VOCE FĂCUT (21 aug 2026, PR #1302 → master `35e85fdb`):** înainte
+> de reconstrucția §2, TOATĂ vocea a fost scoasă (owner: „surd, mut, nu scrie… și e
+> curat"). ȘTERS: Gemini Live (`vocalLive` front+back + ruta WS `/api/vocal-live`),
+> Chirp de pe chat (`createVoiceStream`), calea veche (`realtimeVoice`), gura OFFLINE
+> din browser (`voceBrowser`), urechea (`ensureMic`/`micStream`) + ajutoarele
+> (`pcm`/`opusVoce`/`vad`/`pcmWorklet`/`voiceHeartbeat`/`voceUnica`/`MicBargraf`) +
+> UI-ul vocal din `ChatPanel`. PĂSTRAT (insule neatinse): naratorul
+> `/api/tts`→`playVoice`, creierul TEXT offline (WebLLM), recorderul, camera,
+> monitorul, chatul text. Verde: build FE ✓ / tsc+teste BE (201/1713) ✓ / porți
+> (exporturi=0, hardcodări=0, sintaxă+oxlint curate). RĂMAS pt §2: rute backend
+> orfane fără client — `routes/realtime.ts` + `routes/asr.ts` (moarte, de scos curat
+> la reconstrucție). De la ZERO se construiește §2 (un singur motor online, Live).
 
 ## Cerința #42 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - CONCLUZIE DEFINITIVĂ (a 3-a încercare, același verdict ca la #32/#33/#36/#39/#41): capturarea unui screenshot al monitorului live este o acțiune a asistentului Kelion din aplicație (unelte de ecran/browser), NU o modificare de cod din atelierul constructorului. Atelierul nu are ecran, sesiune de admin sau DevTools — orice „screenshot" produs de aici ar fi o simulare interzisă de regula anti-fake.
