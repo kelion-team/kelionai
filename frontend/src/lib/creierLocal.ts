@@ -42,47 +42,107 @@ export type StareLocal =
   | 'gata' // model încărcat, poate răspunde offline
   | 'eroare' // a picat încărcarea (motiv reținut)
 
-// URMA „E DESCĂRCAT" (owner 20 aug: „daca ai descarcat pentru ofline trebuie sa vada
-// ca a fost descarcat si sa nu te mai puna sa descarci daca nu sunt modificari"). La
-// fiecare reload starea din memorie se pierde (redevine 'neintrodus') deși modelul stă
-// în Cache Storage → panoul cerea IAR descărcarea. Reținem în localStorage CE model a
-// fost descărcat; dacă e chiar modelul curent, pornim optimist pe 'descarcat' (fără să
-// mai cerem descărcare). Dacă flag-ul e alt model (S-A SCHIMBAT ceva) → 'neintrodus' →
-// se ia singur noul model (auto-update). Confirmăm/infirmăm din Cache Storage, fără să
-// importăm biblioteca grea WebLLM la pornire.
-const CHEIE_DESCARCAT = 'kelion_model_offline'
-function citesteFlagDescarcat(): string | null {
-  try {
-    return localStorage.getItem(CHEIE_DESCARCAT)
-  } catch {
-    return null
-  }
+// ── MODELELE OFFLINE, ALESE DE OWNER (owner 21 aug: „vreau să pot seta eu modelul,
+// inclusiv Gemma 2 sau plus, doar la offline… să le downloadez și să le pot încerca").
+// Registru de capabilități CLIENT (WebGPU/WebLLM) — id-uri REALE din lista prebuilt
+// WebLLM v0.2.84, VERIFICATE în node_modules (nu inventate, regula #1). Owner-ul alege
+// PE DEVICE (localStorage), descarcă ce modele vrea și comută între ele la offline.
+// Țintă: telefoane 2026+ (owner: „nu e criteriu telefoanele vechi") → putem urca la 7B/9B.
+// hardcod-permis: id-uri de model client WebLLM (capabilități offline), nu valori de bani/tarif/prag; alese de owner, nu stare inventată.
+export interface ModelOffline {
+  id: string // id REAL din prebuiltAppConfig WebLLM (dat la CreateMLCEngine)
+  nume: string // eticheta scurtă arătată owner-ului
+  parametri: string // mărimea (FAPT din numele modelului: 2B/3B/7B/9B), nu o cifră inventată
 }
-function scrieFlagDescarcat(id: string): void {
+export const MODELE_OFFLINE: ModelOffline[] = [
+  { id: 'gemma-2-2b-it-q4f16_1-MLC', nume: 'Gemma 2', parametri: '2B' },
+  { id: 'Qwen2.5-3B-Instruct-q4f16_1-MLC', nume: 'Qwen 2.5', parametri: '3B' },
+  { id: 'Qwen2.5-7B-Instruct-q4f16_1-MLC', nume: 'Qwen 2.5', parametri: '7B' },
+  { id: 'gemma-2-9b-it-q4f16_1-MLC', nume: 'Gemma 2', parametri: '9B' },
+]
+const MODEL_IMPLICIT = 'Qwen2.5-3B-Instruct-q4f16_1-MLC' // echilibrul de acum, până alege owner-ul
+const IDURI_VALIDE = new Set(MODELE_OFFLINE.map((m) => m.id))
+
+// Cheile: modelul ACTIV (pe care rulează offline) + SETUL de modele deja descărcate
+// (owner descarcă mai multe și comută). Cheia veche ('kelion_model_offline') ținea UN
+// singur model descărcat — o migrăm (dacă e un id valid, îl considerăm activ + descărcat).
+const CHEIE_MODEL_ACTIV = 'kelion_model_offline_activ'
+const CHEIE_MODELE_DESCARCATE = 'kelion_modele_descarcate'
+const CHEIE_DESCARCAT_VECHE = 'kelion_model_offline'
+
+function citesteActiv(): string {
   try {
-    localStorage.setItem(CHEIE_DESCARCAT, id)
+    const v = localStorage.getItem(CHEIE_MODEL_ACTIV)
+    if (v && IDURI_VALIDE.has(v)) return v
+    const vechi = localStorage.getItem(CHEIE_DESCARCAT_VECHE) // migrare din cheia veche
+    if (vechi && IDURI_VALIDE.has(vechi)) return vechi
+  } catch {
+    /* storage indisponibil */
+  }
+  return MODEL_IMPLICIT
+}
+/** Id-ul modelului offline ACTIV (ales de owner, sau implicitul). */
+export function getModelOffline(): string {
+  return citesteActiv()
+}
+
+function citesteDescarcate(): Set<string> {
+  const s = new Set<string>()
+  try {
+    const raw = localStorage.getItem(CHEIE_MODELE_DESCARCATE)
+    if (raw)
+      for (const id of JSON.parse(raw) as unknown[])
+        if (typeof id === 'string' && IDURI_VALIDE.has(id)) s.add(id)
+    const vechi = localStorage.getItem(CHEIE_DESCARCAT_VECHE) // migrare
+    if (vechi && IDURI_VALIDE.has(vechi)) s.add(vechi)
+  } catch {
+    /* nimic */
+  }
+  return s
+}
+/** Lista id-urilor de modele DEJA descărcate (în cache-ul browserului). */
+export function modeleDescarcate(): string[] {
+  return [...citesteDescarcate()]
+}
+function marcheazaDescarcat(id: string): void {
+  const s = citesteDescarcate()
+  s.add(id)
+  try {
+    localStorage.setItem(CHEIE_MODELE_DESCARCATE, JSON.stringify([...s]))
   } catch {
     /* storage indisponibil — se reconfirmă din Cache Storage */
   }
 }
-function stergeFlagDescarcat(): void {
-  try {
-    localStorage.removeItem(CHEIE_DESCARCAT)
-  } catch {
-    /* nimic */
-  }
-}
 
-// Modelul local: capabilitate CLIENT (WebGPU), aleasă din lista prebuilt WebLLM —
-// nu e o cifră de bani/tarif/prag și nici o stare inventată. ~3B Q4, multilingv
-// (owner RO + userii pe 7 limbi), destul de mic cât să încapă pe telefon.
-// hardcod-permis: id de model client WebLLM (capabilitate offline), nu valoare de afișat/tarifat; mutabil la config server în faza următoare.
-const MODEL_LOCAL = 'Qwen2.5-3B-Instruct-q4f16_1-MLC'
+// „Generația" modelului: crește la fiecare comutare. O pregătire (descărcare/urcare în
+// GPU) pornită pe modelul VECHI și terminată DUPĂ ce owner-ul a comutat NU trebuie să
+// pună motorul vechi ca activ — verifică generația la final și se retrage dacă e stală.
+let genModel = 0
+
+/** Owner-ul alege modelul offline (doar din registru). Dacă e ALT model decât cel activ:
+ *  coborâm motorul curent din GPU și resetăm starea — 'descarcat' dacă noul e deja luat,
+ *  altfel 'neintrodus' (cere descărcare). Comutarea între modele descărcate e instantanee. */
+export function setModelOffline(id: string): void {
+  if (!IDURI_VALIDE.has(id)) return
+  const curent = citesteActiv()
+  try {
+    localStorage.setItem(CHEIE_MODEL_ACTIV, id)
+  } catch {
+    /* storage indisponibil */
+  }
+  if (id === curent) return
+  genModel++ // invalidează orice pregătire în curs pe modelul vechi
+  motor = null
+  pregatire = null
+  progres = 0
+  motivEroare = ''
+  stare = citesteDescarcate().has(id) ? 'descarcat' : 'neintrodus'
+}
 
 // Optimist la pornire: dacă flag-ul spune că EXACT modelul curent a fost descărcat,
 // pornim pe 'descarcat' (nu mai cerem descărcare). Se confirmă din Cache Storage prin
 // sincronizeazaStareOffline(). Flag pe alt model = s-a schimbat → 'neintrodus' → auto-ia.
-let stare: StareLocal = citesteFlagDescarcat() === MODEL_LOCAL ? 'descarcat' : 'neintrodus'
+let stare: StareLocal = citesteDescarcate().has(getModelOffline()) ? 'descarcat' : 'neintrodus'
 let progres = 0 // 0..1 la descărcarea modelului
 let motivEroare = ''
 // Motorul WebLLM, tipat lax ca să nu forțăm tipurile bibliotecii peste tot.
@@ -115,20 +175,28 @@ export async function modelDescarcatInCache(): Promise<boolean> {
 }
 
 /** Reconciliază starea cu realitatea din cache (owner: „să vadă că e descărcat, să nu
- *  mai ceară dacă nu sunt modificări"). Model curent în cache → 'descarcat'; flag pe alt
- *  model sau cache evacuat → 'neintrodus' (se ia din nou = auto-update la schimbare). Nu
- *  atinge 'gata'/'se_pregateste' (deja încărcat/în lucru). */
+ *  mai ceară dacă nu sunt modificări"). Modelul ACTIV e în setul de descărcate ȘI cache-ul
+ *  nu-i gol → 'descarcat'; altfel → 'neintrodus' (cere descărcare). Dacă tot cache-ul WebLLM
+ *  a fost evacuat, curățăm setul (niciun model nu mai e descărcat). Nu atinge
+ *  'gata'/'se_pregateste' (deja încărcat/în lucru). */
 export async function sincronizeazaStareOffline(): Promise<void> {
   if (stare === 'gata' || stare === 'se_pregateste') return
   const inCache = await modelDescarcatInCache()
-  const potrivit = inCache && citesteFlagDescarcat() === MODEL_LOCAL
+  const activ = getModelOffline()
+  const potrivit = inCache && citesteDescarcate().has(activ)
   if (potrivit) {
     if (stare !== 'descarcat') stare = 'descarcat'
-    scrieFlagDescarcat(MODEL_LOCAL)
   } else {
     if (stare === 'descarcat') stare = 'neintrodus'
-    // flag invalid (cache evacuat SAU alt model decât cel curent) → curăță-l
-    if (!inCache || citesteFlagDescarcat() !== MODEL_LOCAL) stergeFlagDescarcat()
+    // tot cache-ul WebLLM evacuat → niciun model nu mai e cu adevărat descărcat
+    if (!inCache) {
+      try {
+        localStorage.removeItem(CHEIE_MODELE_DESCARCATE)
+        localStorage.removeItem(CHEIE_DESCARCAT_VECHE)
+      } catch {
+        /* nimic */
+      }
+    }
   }
 }
 
@@ -179,6 +247,10 @@ export function istoricPentruLocal(
 export async function pregatesteModelOffline(onProgress?: (p: number) => void): Promise<boolean> {
   if (stare === 'gata') return true
   if (pregatire) return pregatire
+  // Ce model pregătim ACUM + generația: dacă owner-ul comută în timpul descărcării,
+  // generația se schimbă și NU punem motorul (vechi) ca activ la final.
+  const idTinta = getModelOffline()
+  const genTinta = genModel
   pregatire = (async () => {
     if (!(await webgpuDisponibil())) {
       stare = 'fara_webgpu'
@@ -199,15 +271,21 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
     }
     try {
       const webllm = await import('@mlc-ai/web-llm')
-      motor = (await webllm.CreateMLCEngine(MODEL_LOCAL, {
+      const eng = (await webllm.CreateMLCEngine(idTinta, {
         initProgressCallback: (r: { progress?: number }) => {
           progres = typeof r.progress === 'number' ? r.progress : progres
           onProgress?.(progres)
         },
       })) as unknown as typeof motor
+      marcheazaDescarcat(idTinta) // chiar s-a descărcat — rămâne în cache (util și dacă owner a comutat)
+      if (genModel !== genTinta) {
+        // owner a comutat pe alt model între timp → NU punem motorul ăsta ca activ
+        stare = citesteDescarcate().has(getModelOffline()) ? 'descarcat' : 'neintrodus'
+        return false
+      }
+      motor = eng
       stare = 'gata'
       progres = 1
-      scrieFlagDescarcat(MODEL_LOCAL) // reținem că FIX acest model e descărcat (nu recerem)
       return true
     } catch (e) {
       stare = 'eroare'
