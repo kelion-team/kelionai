@@ -211,43 +211,6 @@ describe('LACĂT — auz batch (chirp_3, regiunea eu) — streamingul STT a fost
   })
 })
 
-describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier, DOAR a lui)', () => {
-  const voce = sursa('../../frontend/src/lib/realtimeVoice.ts')
-  const server = sursa('./routes/realtime.ts')
-
-  it('CREIERUL UNIC decide adresarea din AUDIO — poarta de nume (regex) a fost scoasă de pe client', () => {
-    // Adrian, 5 aug: „urechea o scoți total ca modelul are tot; tot decis de
-    // creierul unic; dacă nu aude «Kelion»/«Kei», să nu vorbească neîntrebat."
-    // Poarta de nume NU mai stă pe client, pe un transcript stâlcit — creierul
-    // aude fraza brută (audio) și decide singur. Sigilat: dacă revine TREZIRE_RE
-    // pe client, sau dispare poarta creierului, testul cade.
-    expect(/TREZIRE_RE/.test(voce)).toBe(false)
-    expect(/poartaDupaFraza/.test(voce)).toBe(true)
-    const chat = sursa('./routes/chat.ts')
-    expect(/voceAmbianta/.test(chat)).toBe(true)
-    expect(chat.includes('<TAC/>')).toBe(true)
-    expect(chat.includes('AMBIENT VOICE MODE')).toBe(true)
-  })
-
-  it('serverul dă semnalul POZITIV doar când e chiar proprietarul contului', () => {
-    // holder = există referință ȘI se potrivește (isHolder). Admin în admin,
-    // fiecare user în contul lui — verdictul se calculează pe user.email al sesiunii.
-    expect(/holder = hasRef && isHolder/.test(server)).toBe(true)
-  })
-
-  it('vocea pleacă DIRECT la creier — clientul nu mai etichetează timbrul, nimic n-o blochează', () => {
-    // INTERMEDIARI SCOȘI (Adrian, 6 aug: „elimină intermediarii, îl pui direct pe
-    // Kelion să primească; scoate orice urmă de limitare a audio, scoate-i și din
-    // soft"). Clientul NU mai calculează `nevalidat`/`foreignVoice` pe voce și nu mai
-    // face al doilea upload — fraza brută pleacă direct, creierul decide adresarea.
-    // Gardul de admin din chat.ts (isAdmin && !nevalidat) rămâne (dormant pe voce);
-    // card/bani rămân pe potrivirea reală holder, server-side.
-    expect(/nevalidat/.test(voce)).toBe(false)
-    expect(/foreignVoice/.test(voce)).toBe(false)
-    expect(/ignorată complet/.test(voce)).toBe(false)
-  })
-})
-
 describe('LACĂT — Gemini-only: la eșec, mesaj ONEST, nu alt furnizor (3 aug)', () => {
   // (Vechiul lacăt „Gemini pică → rezerva nemotron :free" a MURIT odată cu
   // extirparea totală OpenRouter — ordinul repetat al ownerului: „openrouter
@@ -274,88 +237,6 @@ describe('LACĂT — Gemini-only: la eșec, mesaj ONEST, nu alt furnizor (3 aug)
     // cursa, rotația și punga de rezervă NU MAI EXISTĂ în cod deloc.
     // (simboluri FUNCȚIONALE, nu mențiuni istorice din comentarii)
     expect(/openrouterChat|getCatalog|listaCandidati|rezervaRapida|rezervaDeschisa|primulCastigator/.test(chat)).toBe(false)
-  })
-})
-
-describe('LACĂT — voce unificată: fraza pleacă DIRECT la creierul unic ca audio (5 aug)', () => {
-  const panel = sursa('../../frontend/src/components/ChatPanel.tsx')
-  const mic = sursa('../../frontend/src/lib/micStream.ts')
-
-  it('onAddressed trimite fraza (audio) la aceeași send(), marcată voce ambientală', () => {
-    // Fără unire de fraze (transcriptul a dispărut): fiecare frază pleacă direct
-    // la creier ca audio; creierul decide adresarea. voceMergeRef a dispărut.
-    expect(panel.includes('voceMergeRef')).toBe(false)
-    // Fereastra de 600 de caractere a fost SCOASĂ (Adrian, 8 aug: „scoate
-    // lacătul că e degeaba") — a picat de două ori în aceeași zi pe cod CORECT,
-    // fiindcă un comentariu împingea apelul cu 8 caractere peste limită. Un gard
-    // care măsoară distanțe de caractere nu păzește comportamentul, păzește
-    // formatarea. Rămâne verificarea de comportament: handlerul există și fraza
-    // pleacă prin aceeași send().
-    expect(/onAddressed: \(_text, vf, speaker, audio\)/.test(panel)).toBe(true)
-    expect(/sendRef\.current\('', true\)/.test(panel)).toBe(true)
-    // Tura vocală e marcată (isVoiceTurn) și dusă la creier ca voce ambientală.
-    expect(/isVoiceTurn/.test(panel)).toBe(true)
-    // Flagul voceAmbianta trece prin transportul unic de chat (lib/chat.ts).
-    const feChat = sursa('../../frontend/src/lib/chat.ts')
-    expect(/voceAmbianta/.test(feChat)).toBe(true)
-  })
-
-  it('microfonul e VAD LOCAL — fără WebSocket la STT, fără transcript de server', () => {
-    // Sigilat: dacă cineva recablează asr-stream / un WebSocket STT în micStream,
-    // sau readuce transcriptul în onPhrase, testul cade.
-    expect(/asr-stream/.test(mic)).toBe(false)
-    expect(/new WebSocket/.test(mic)).toBe(false)
-    expect(/PAUZA_FRAZA_MS/.test(mic)).toBe(true)
-    expect(/const closePhrase = \(\): void =>/.test(mic)).toBe(true)
-    expect(/opts\.onPhrase\('', features, audio\)/.test(mic)).toBe(true)
-  })
-
-  it('nu mai există cale STT streaming pe backend (asr-stream a fost șters)', () => {
-    // Sigilat: ruta streaming STT nu mai există; dacă reapare, testul cade.
-    let existaStream = true
-    try {
-      sursa('./routes/asr-stream.ts')
-    } catch {
-      existaStream = false
-    }
-    expect(existaStream).toBe(false)
-  })
-})
-
-describe('LACĂT — AEC half-duplex: microfonul tace cât Kelion vorbește (owner, 13 aug)', () => {
-  // „aec e problema" — microfonul e deschis FĂRĂ echoCancellation (ca ieșirea să
-  // prindă A2DP pe Bluetooth), deci propria voce a lui Kelion intra în microfon
-  // și strica recunoașterea („varză"). Plasa: cât Kelion e audibil, se trimite
-  // TĂCERE la creier. Dacă cineva scoate poarta asta (sau readuce echoCancellation
-  // care rupe Bluetooth-ul), testul cade.
-  const vl = sursa('../../frontend/src/lib/vocalLive.ts')
-
-  it('există poarta half-duplex (kelionAudibil) legată de coada de redare', () => {
-    expect(/kelionAudibil/.test(vl)).toBe(true)
-    // predicatul se sprijină pe cursorRedare (ora până la care e programat sunetul)
-    expect(/ctxOut\.currentTime < cursorRedare \+ COADA_ECOU_S/.test(vl)).toBe(true)
-  })
-
-  it('cadrul de microfon devine TĂCERE cât Kelion e audibil (array nou, nu mută captura)', () => {
-    // Poarta e derivată din kelionAudibil() și înlocuiește microfonul cu un array
-    // NOU de zerouri (nu mută bufferul capturii). Refactor 16 aug: extras în
-    // `poarta` ca bargraful urechii să raporteze EXACT aceeași decizie care taie
-    // trimiterea (truncherea half-duplex e vizibilă, măsurată).
-    expect(/const poarta = kelionAudibil\(\)/.test(vl)).toBe(true)
-    expect(/const la16k = poarta \? new Float32Array\(ds\.length\) : ds/.test(vl)).toBe(true)
-  })
-
-  it('AEC pornit pe desktop, stins DOAR pe mobil (echoCancellation: !eMobil)', () => {
-    // ISTORIA CONTRACTULUI: pe 11 aug s-a pinuit `false` peste tot (procesarea
-    // WebRTC rupea A2DP pe Android, iar barge-in-ul serverului era OFF — prețul
-    // ecoului părea zero). Pe 15 aug prețul a devenit real: VAD-ul sesiunii live
-    // auzea ecoul și îi TĂIA vorba lui Kelion pe desktop (măsurat în consola
-    // ownerului, ×3), iar ordinul lui verbatim: „am nevoie de un sistem care
-    // anulează echo". Adevărul nou, ținut și de lacătul din verifica-gemini:
-    // AEC pe desktop (modul-apel nu există acolo), brut pe mobil (A2DP trăiește),
-    // și poarta half-duplex rămâne peste amândouă.
-    expect(/echoCancellation:\s*!eMobil/.test(vl)).toBe(true)
-    expect(/eMobil = \/Android\|iPhone\|iPad\|Mobile\/i\.test\(navigator\.userAgent\)/.test(vl)).toBe(true)
   })
 })
 

@@ -87,10 +87,8 @@ import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperatio
 import { CHARTER_CHAT_VOCE_LEGI } from '../services/charterChatVoce.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
-import { synthesize } from '../services/tts.js'
 import { getVoicePref, getGoogleRefreshToken } from '../db.js'
 import { stareSesiune, pastreazaStareSesiune, actualizeazaStareSesiune } from '../services/stareSesiune.js'
-import { splitForSpeech } from '../services/speech-chunk.js'
 import {
   browserOpen,
   browserClick,
@@ -978,100 +976,14 @@ export const PROMO_TOOL: Tool = {
   },
 }
 
-// THE BRAIN'S VOICE (Adrian, Jul 4): synthesis happens on the SERVER (Chirp 3
-// HD, the user's language), the audio is sent as {audio} FRAMES and the app only
-// decodes + plays them in a queue (audioIO.ts). The frontend synthesizes NOTHING
-// (frontend TTS = dead).
-// ── VOICE DURING THE STREAM (Adrian, Jul 10: "instant live chat") ────────────
-// Before, synthesis started only AFTER all the text had finished — on a long
-// reply, Kelion stayed silent for tens of seconds after the first written word.
-// Now the streamed text enters here AS it flows: at every sentence boundary, the
-// piece leaves for synthesis and the {audio} frame is written into the stream
-// while the text is still coming — Kelion speaks from the FIRST sentence.
-// Synthesis runs SERIALLY (sentence order = audio order). NO speaking ceiling
-// (Adrian, 19 aug: „se trunchiază la jumate audio — scoate limita de vorbit
-// audio"). The old 4000-char cap (10 iul, „audio măcar un minut") cut long
-// replies in half; Kelion now speaks the WHOLE reply. Each chunk stays ≤200
-// chars (splitForSpeech), so serial synthesis just streams more small pieces.
-function createVoiceStream(
-  reply: { raw: { write(c: string): void } },
-  lang: string | undefined,
-  /** The voice chosen by this user (C4). Unknown or missing → the app's voice. */
-  voicePref: string | null,
-): { feed(t: string): void; fed(): boolean; finish(): Promise<void> } {
-  let pending = '' // arrived text, not yet sent to synthesis
-  let any = false
-  let chain: Promise<void> = Promise.resolve()
-  const speak = (text: string): void => {
-    // FĂRĂ PLAFON DE VORBIT (owner, 19 aug: „se trunchiază la jumate audio —
-    // scoate limita de vorbit audio"). Plafonul vechi de 4000 de caractere tăia
-    // răspunsurile lungi la jumate — restul rămânea doar scris. Kelion rostește
-    // ACUM tot răspunsul; fiecare bucată e deja mică (≤200 car., splitForSpeech),
-    // mult sub limita Google per cerere, deci sunt doar mai multe bucăți, în ordine.
-    if (!text) return
-    const t = text
-    chain = chain.then(async () => {
-      // DOUĂ ÎNCERCĂRI, apoi LOG (Adrian, 5 aug: vocea se tăia la jumate iar
-      // eșecul de sinteză era înghițit tăcut — `catch {}` + `if (r.ok)` fără
-      // altceva — deci o bucată picată lăsa vocea ciuntită FĂRĂ nicio urmă). Un
-      // hopa de rețea spre Google nu mai omoară o frază întreagă; un eșec real
-      // se VEDE acum în log, ca data viitoare să nu mai fie „nu pot verifica".
-      for (let incercare = 1; incercare <= 2; incercare++) {
-        try {
-          // The user-chosen voice, so the written reply sounds like the live voice (C4).
-          const r = await synthesize(t, lang, { voice: voicePref })
-          if (r.ok) {
-            reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
-            return
-          }
-          if (incercare === 2)
-            console.error(`[VOCE] bucată nesintetizată (${r.status} ${r.error}) — vocea rămâne ciuntită aici`)
-        } catch (e) {
-          if (incercare === 2)
-            console.error(`[VOCE] sinteza a crăpat: ${String((e as { message?: string })?.message ?? e).slice(0, 120)}`)
-        }
-      }
-    })
-  }
-  // What gets spoken: the text, cleaned of tool tags and markdown.
-  const clean = (s: string): string => s.replace(/\[[A-Z][^\]]*\]/g, '').replace(/[*_#`~>|]/g, '')
-  const cut = (final: boolean): void => {
-    // We split ONLY after a finished sentence FOLLOWED by a space (not in the
-    // middle of "3.14"); without a boundary, a piece over 240 characters leaves
-    // anyway (a river-sentence without punctuation). At the end, everything left
-    // goes out.
-    let at = -1
-    for (const m of pending.matchAll(/[.!?…](?=\s)/g)) at = m.index ?? -1
-    let ready = ''
-    if (final) {
-      ready = pending
-
-      pending = ''
-    } else if (at !== -1) {
-      ready = pending.slice(0, at + 1)
-      pending = pending.slice(at + 1)
-    } else if (pending.length > 240) {
-      ready = pending
-      pending = ''
-    } else return
-    for (const c of splitForSpeech(clean(ready))) speak(c)
-  }
-  return {
-    feed(t: string): void {
-      if (!t) return
-      any = true
-      pending += t
-      cut(false)
-    },
-    fed(): boolean {
-      return any
-    },
-    async finish(): Promise<void> {
-      cut(true)
-      await chain
-    },
-  }
-}
+// ── VOCEA SCOASĂ COMPLET — CLEAN-SLATE (owner, 21 aug: „surd, mut, nu scrie") ──
+// Chirp de pe calea scrisă (funcția de sinteză → {audio} frames) a fost ȘTERS, la
+// fel ca urechea+gura Live (routes/vocalLive.ts) și calea veche din frontend.
+// Motivul (PROIECT-CHAT-VOCE.md §1): două motoare vocale se ciocneau („2 sec și
+// se rupe"). Se pornește de la ZERO și se reconstruiește §2 — un SINGUR motor
+// online (Gemini Live). Până atunci, tura de chat NU mai sintetizează nimic:
+// `voice` mai jos e un obiect gol (feed/fed/finish no-op), ca restul fluxului să
+// rămână neatins. /api/tts (narator + apel) e o insulă SEPARATĂ, neatinsă.
 
 // EXPORTED (Jul 25): voice escalation (`ask_brain`, routes/realtime.ts) used
 // its own hardcoded persona — a SECOND version of the persona, diverging from
@@ -2767,19 +2679,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // browserul omului ca https://127.0.0.1:8080/... și n-ar afișa NIMIC,
     // mereu (10 aug, ownerul: „nu poate afișa hărți"; detalii în bazaPublica).
     const baseUrl = bazaPublica(req.headers.host)
-    // Voice from the first sentence on the API path too (clients): every
-    // broadcast piece enters the pipe; synthesis runs in parallel with the text
-    // still flowing.
-    // SINGLE-VOICE RULE (Adrian, Jul 26): if the client has the full-duplex
-    // session active, the written turn stays WRITTEN only — zero synthesis, zero
-    // {audio} frames.
-    const voice =
-      req.body?.serverVoiceOff === true
-        ? { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
-        // Preferința de voce vine din starea sesiunii (citită o dată) — era A
-        // TREIA interogare pe `user_prefs` în ACEEAȘI tură, serială, chiar
-        // înainte de apelul la creier. Zero drumuri la DB aici acum.
-        : createVoiceStream(reply, userLang, prefs.voicePref)
+    // VOCE SCOASĂ COMPLET — CLEAN-SLATE (owner, 21 aug: „surd, mut, nu scrie").
+    // Tura de chat NU mai sintetizează audio: `voice` e un obiect no-op, deci
+    // niciun {audio} frame nu mai pleacă spre client. Fluxul de text rămâne
+    // neatins. Se reconstruiește §2 (motor unic Live) — PROIECT-CHAT-VOCE.md.
+    const voice = { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
     let assistantText = ''
     // O TENTATIVĂ NU ESTE O FAPTĂ: păstrăm separat apelurile și rezultatele
     // normalizate. Poarta poate folosi exclusiv rezultatele reușite/verificate.
