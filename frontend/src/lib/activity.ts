@@ -19,3 +19,10 @@ export function reportActivity(p: { voice?: boolean; busy?: boolean; draft?: boo
   if (p.busy !== undefined) busy = p.busy
   if (p.draft !== undefined) draft = p.draft
 }
+
+/** True only when nothing live would be cut by a hard reset. Read by the
+ *  auto-update watcher (updateCheck.ts): the new version applies BY ITSELF,
+ *  but never over an open voice session, an in-flight request, or unsent text. */
+export function isCalm(): boolean {
+  return !voice && !busy && !draft
+}

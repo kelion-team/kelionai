@@ -13,6 +13,16 @@ singur, strigă singur, repară singur** — fără Adrian pe post de babysitter
 self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată calendarul.
 
 **Lista cunoscută rămasă până la probă (14 aug, seara):**
+- [x] **PUBLICAREA blocată de la 18:02 (22 aug) — REPARAT (PR #1344).** Cauză
+      măsurată (nu presupusă): `docker build` pica cu `rc=2` fiindcă `tsc -b` al
+      frontend-ului cădea cu `TS6133` în `activity.ts` — ștersesem `isCalm()` la
+      PR #1343, iar ea era singurul cititor al fanioanelor `voice/busy/draft`
+      (regresie proprie). Fix: `isCalm()` la loc + reconectat în `updateCheck.ts`
+      (update-ul se aplică singur, dar nu peste lucru viu). Verde local:
+      `frontend npm run build` ✓, `backend tsc` ✓, 4 porți root ✓. **Rămâne de
+      confirmat LIVE** că master nou se parașutează și `/api/version` urcă de pe
+      `0ace006`. Lecție: rulează `frontend npm run build` local înainte de merge,
+      nu doar backend `tsc` — poarta `verifica-exporturi` nu prinde tsc-ul de front.
 - [ ] ⭐ **FINALIZARE (ordinul unic, 21 aug, verbatim): „finalizare, și ai cuvântul
       meu că e ultimul pe care îl mai auzi de la mine dacă aplicația ce am zis până
       acum nu funcționează."** → ZERO funcții noi până registrul de erori e la zero;

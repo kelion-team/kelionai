@@ -1767,3 +1767,39 @@ Adevărurile măsurate (pe scurt — ce spun secțiunile vechi e fals unde contr
 - **Constructorul pe Devin (22 aug):** `executeBrainAction` din `autonomie.ts` trimite ordinul la `devinConstructor` când `strategy.decision.executor === 'constructor'`, nu la `ruleazaCuMainile`; doar `brain_tools` rămâne pe mâinile lui Kelion; creierul de strategie rămâne `gemini-3.7-flash` conform deciziei ownerului.
 - **Bara de update (22 aug):** la apariția unei versiuni noi `App.tsx` afișează un banner **în partea de sus** cu bară de progres reală 0-100% (`downloadLatestBundle` în `frontend/src/lib/updateCheck.ts` măsoară `loaded/total` pe `XMLHttpRequest`); UI-ul e blocat și se aplică `hardResetToLatest()` la final.
 - **Testare chat uman reală (22 aug):** `scripts/testare-chat-uman.mjs` lovește endpointurile live cu cookie real (nu Playwright/simulare); testează `/api/version`, `/api/health`, `/api/chat/history`, `/api/chat` text/imagine, `/api/admin/erori`; plus listă manuală pentru voce/cameră/constructor.
+
+## §19 — POSTMORTEM: „de la 18.02 nu a mai parașutat nimic" (22 aug 2026)
+
+**Simptom (owner, măsurat):** live blocat pe `0ace006` / V9.0 (publicat 17:02Z =
+18:02 local), master ajuns la `f07f797` — nimic nou nu se mai publica.
+
+**Diagnostic (prin `vps-run.yml`, nu presupus):**
+- disc 14% folosit, docker OK, cronul `auto-publicare.sh` viu la fiecare minut →
+  NU era disc plin (ipoteza inițială, respinsă cu măsurătoare).
+- `auto-publicare.log`: `eșec rc=2 pentru f07f797` la fiecare tentativă. Log-ul de
+  tentativă (`auto-publicare-attempts/f07f797-*.log`) se oprea la „== 3.
+  Construiesc imaginea ==”, fără eroare — pentru că `deploy/deploy.sh:238-250`
+  scrie ieșirea `docker build` într-un fișier SEPARAT: `/root/kelion/docker-build.log`.
+  `rc=2` = eroare reală de build (timeout ar fi fost 124).
+
+**Cauza reală (regresie proprie — Legea #2):** build-ul Docker rulează și
+`frontend` (`npm run build` = `tsc -b && vite build`). La PR #1343 am șters
+`isCalm()` din `frontend/src/lib/activity.ts` (o marca poarta `verifica-exporturi`
+drept export mort), dar `isCalm` era SINGURUL cititor al fanioanelor
+`voice/busy/draft` → au rămas write-only → `tsc -b` a picat cu `TS6133`
+(`noUnusedLocals`) → imaginea n-a mai ieșit → publicarea s-a oprit. Poarta root
+`verifica-exporturi` (backend-only în intenție) NU prinde `tsc` de frontend, iar
+în sandbox `frontend/node_modules` n-avea dependințele offline instalate, așa că
+la PR nu s-a văzut — de-asta a scăpat.
+
+**Reparația (PR #1344):** reconectez semnalul „calm" la calea lui reală, nu-l
+cârpesc: `isCalm()` la loc + `watchForUpdate` (`updateCheck.ts`) sare tick-ul dacă
+nu e calm (voce/cerere/text nescris), fără `fired`, deci se aplică singur imediat
+ce devine calm. Restaurează regula owner-ului (1 aug): update-ul se aplică singur,
+dar NICIODATĂ peste lucru viu. Ambele porți trec (isCalm are din nou consumator).
+Dovadă locală: `frontend npm run build` ✓, `backend tsc` ✓, cele 4 porți root ✓.
+
+**Lecție permanentă:** un export „mort” care e SINGURUL cititor al unor variabile
+nu se șterge fără să repari și cititul lor; `verifica-exporturi` și `tsc` de
+frontend se pot bate cap în cap (export folosit ⇄ variabilă citită) — se rulează
+`frontend npm run build` local ÎNAINTE de merge, nu doar backend `tsc`.

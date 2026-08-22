@@ -5,6 +5,8 @@
 // changes on every publish, even if the interface wasn't touched), not just
 // the bundle name. When it changes → automatic hard reset.
 
+import { isCalm } from './activity'
+
 export interface ServerVersion {
   v: string
   at: string
@@ -181,6 +183,11 @@ export function watchForUpdate(onUpdate: () => void): () => void {
 
   const check = async (): Promise<void> => {
     if (stopped || fired) return
+    // NEVER over live work (activity.ts, owner Aug 1): the update applies by
+    // itself, but if a voice session/request/draft is open we skip THIS beat
+    // and try again in 45s — without marking `fired`, so it fires the moment
+    // things go calm. A hard reset mid-word is exactly what this avoids.
+    if (!isCalm()) return
     // The main path: the server's deploy version.
     const j = await fetchServerVersion()
     if (j?.v) {
