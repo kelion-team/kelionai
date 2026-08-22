@@ -120,7 +120,7 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 | `auth.ts` | Google OAuth, allowlist, consimțământ incremental |
 | `admin.ts` | Panou admin (useri, finanțe, gaps, inbox live, traducere, **amprente vocale**) |
 | `prefs.ts` | Limbă/meserie/BYOK per user |
-| `billing.ts` | Credite Stripe, webhook 75/25 |
+| `billing.ts` | Credite Revolut Pro — cod unic de plată, auto top-up, 75/25 |
 | `me.ts` | Auto-ștergere cont (GDPR) |
 | `demo.ts` | Pornire probă gratuită + leads + chat vizitator |
 | `asr.ts` | Transcriere batch (Google STT v2, `chirp_3`, regiune `eu`) — costă bani; DOAR dictarea /api/asr (STT-ul streaming a fost șters 5 aug) |
@@ -147,7 +147,7 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 | `mail.ts` | Client SMTP (Namecheap), scrisori „royal letter" cu referință KA-AN-NNNN |
 | `lang.ts` | Detecție limbă deterministă server-side |
 | `pronounce.ts` | Mod academic: pronunție acronime litere-cu-litere |
-| `stripe.ts` | Checkout + verificare webhook |
+| `openBanking.ts` | Citește plăți Revolut Pro și atribuie top-up-uri după cod |
 | `autonomy.ts` | Lesa autonomiei: `budgetCheck` (20/24h), `sameFailure` (stop la eșec repetat) |
 | `commands.ts` | Interpretor comenzi dispozitiv server-side (cameră/monitor) — instant, fără cost model |
 | `feedback.ts` (+`.verify.ts`) | Re-cheamă creierul admin când constructor/tester termină (ready/pass/fail) |
@@ -285,7 +285,7 @@ Patru brațe, stări diferite — nu le confunda:
 | **Abonamentul Claude al lui Adrian (Max 20x)** + usage credits | Claude Code (sesiunile de lucru) + puntea VPS (chat admin + public/demo) | claude.ai → Settings → Usage |
 | **Cheia API platformă** (istoric `ANTHROPIC_API_KEY`; Anthropic scos 12 iul, gazda PaaS veche scoasă 22 iul) | clienții plătitori fără BYOK | (de redefinit pe gazda nouă) |
 | **Cheia clientului (BYOK)** | doar acel client | contul lui |
-| **Portofelele clienților în app** (Stripe) | creditele lor de chat; **din fiecare reîncărcare 75% credit client, 25% platformă** | kelionai.app (billing.ts, webhook `/api/credits/webhook`) |
+| **Portofelele clienților în app** (Revolut Pro) | creditele lor de chat; **din fiecare reîncărcare 75% credit client, 25% platformă** | kelionai.app (billing.ts, cod unic de plată în `payment_codes`, atribuit prin `openBanking.ts`) |
 
 Alte costuri reale (contorizate în `cost.ts`, plătite din abonament/cheie platformă după caz): ASR (`ASR_USD_PER_CALL`), TTS Chirp 3 HD, Serper (`SERPER_USD_PER_CALL`), generare imagini Gemini, corectare Gemini.
 
