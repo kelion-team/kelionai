@@ -60,16 +60,15 @@ describe('clasamentul pe capacitate + credit', () => {
     expect(e.aiRecomandat).toBe('creier2')
   })
 
-  it('creditul ROȘU coboară AI-ul recomandat (nu-l trimitem fără cu ce lucra)', () => {
+  it('DEVIN e recomandat pentru ordine de cod (constructorul unic, 22 aug)', () => {
     const ordin = 'repară butonul și rulează testele'
-    const faraCredit = evalueazaOrdin(ordin)
-    expect(faraCredit.aiRecomandat).toBe('constructor')
-    // constructorul local pe roșu → nu mai e recomandat primul
-    const cuRosu = evalueazaOrdin(ordin, { 'creierul constructorului': 'rosu' })
-    expect(cuRosu.aiRecomandat).not.toBe('constructor')
-    // becul e purtat în clasament, ca panoul să-l poată arăta
-    const randConstructor = cuRosu.clasament.find((r) => r.cheie === 'constructor')
-    expect(randConstructor?.bec).toBe('rosu')
+    const e = evalueazaOrdin(ordin)
+    expect(e.aiRecomandat).toBe('constructor')
+    // Devin nu are bec de credit în creditAI (becFurnizor=''), deci nu inventăm
+    // un verde/roșu pentru el — becul rămâne null, măsurat, nu presupus.
+    const randConstructor = e.clasament.find((r) => r.cheie === 'constructor')
+    expect(randConstructor?.bec).toBeNull()
+    expect(randConstructor?.nume).toMatch(/Devin/)
   })
 
   it('clasamentul acoperă exact AI-urile VIZIBILE (Jules e rezervă tăcută, 15 aug)', () => {

@@ -4206,13 +4206,16 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
   )
 }
 
-// Pornește lucrătorul constructorului ÎN FUNDAL, acum — ca ordinul să nu aștepte
-// cronul de 2 min (PR #966). O SINGURĂ sursă (jscpd, 10 aug): folosit la
-// build_software ȘI la retry. Best-effort: nu blochează, nu aruncă.
+// Pornește constructorul ÎN FUNDAL, acum — ca ordinul să nu aștepte bucla de
+// autonomie. O SINGURĂ sursă (jscpd, 10 aug): folosit la build_software ȘI la
+// retry. Best-effort: nu blochează, nu aruncă.
 function porneculLucratorulConstructor(): void {
-  // DEVIN DEȚINE COADA (owner, 20 aug): când cheia Devin e pusă, constructorul e
-  // Devin (extern) — dispecerul din app duce ordinele. NU mai trezim worker-ul
-  // Aider de pe VPS (n-ar primi oricum joburi, ruta /next e gardată).
+  // CONSTRUCTORUL E DEVIN, PUNCT (owner, 22 aug: „am cerut devin peste tot in
+  // constructor… sa-i stergi de tot [pe Aider+Ollama]") — ramura veche care
+  // trezea prin spawn lucrătorul local de pe VPS A FOST ȘTEARSĂ cu toată
+  // mașinăria lui. Fără cheia Devin, tick-ul e inert prin
+  // design și ordinul rămâne în coadă — diagnosticul o spune cu roșu, nu se
+  // construiește pe ascuns cu altceva.
   // PORNIRE IMEDIATĂ (22 aug, „Devin full funcțional"): dispecerul Devin trăia
   // DOAR în trecerea buclei de autonomie, iar pauza dintre treceri urcă la 60
   // de minute pe „nimic de făcut" — ordinul owner-ului putea zăcea în coadă o
@@ -4224,15 +4227,7 @@ function porneculLucratorulConstructor(): void {
     void import('../services/devinConstructor.js')
       .then(({ tickDispecerDevin }) => tickDispecerDevin())
       .catch((e) => console.error('[devin] tick imediat:', String(e).slice(0, 160)))
-    return
   }
-  import('node:child_process').then(({ spawn }) => {
-    const worker = spawn('bash', ['/root/kelion/constructor-worker.sh'], {
-      detached: true,
-      stdio: 'ignore',
-    })
-    worker.unref()
-  }).catch(() => {})
 }
 
 // ── runTool helper (extracted from the main handler for clarity) ────────────
@@ -4416,7 +4411,7 @@ async function runTool(
         // Jules pentru că niciun răspuns de unealtă nu purta numele lui Devin).
         constructor: config.devinKey
           ? 'DEVIN (extern, ACTIV — cheia e pusă; ordinele pleacă prin build_software, rezultatul e un PR pe care ownerul îl aprobă)'
-          : 'lucrătorul local (cheia Devin NU e pusă)',
+          : 'NIMENI nu construiește — cheia Devin NU e pusă, dispecerul e inert (mașinăria locală a fost ȘTEARSĂ pe 22 aug)',
         // `progress` = the constructor's current step (Stage 4) — Kelion can
         // speak it ("now compiling", "opening the PR") instead of "working…".
         // `ci` = the verdict of the INDEPENDENT verification (Stage 6): "Done,

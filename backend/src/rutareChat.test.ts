@@ -135,16 +135,18 @@ describe('regula de rutare: mesajul normal de chat NU ajunge la constructor', ()
     expect(sursaChat).toMatch(/Am preluat cerința \(ordin #\$\{jobId\}\)\./)
   })
 
-  it('un ordin pornește exact o dată wrapperul instalat al constructorului', () => {
+  it('un ordin pornește IMEDIAT dispecerul Devin — NU mai există wrapper local de spawn', () => {
+    // Owner, 22 aug: „am cerut devin peste tot in constructor… sa-i stergi de
+    // tot". Ramura care lansa constructor-worker.sh de pe VPS a fost ȘTEARSĂ;
+    // ordinul pornește tick-ul Devin în fundal, chiar acum (idempotent).
     const start = sursaChat.indexOf('function porneculLucratorulConstructor(): void {')
     const end = sursaChat.indexOf('// ── runTool helper', start)
     const launcher = start >= 0 && end > start ? sursaChat.slice(start, end) : ''
-    expect(launcher).toContain("spawn('bash', ['/root/kelion/constructor-worker.sh']")
-    expect(launcher).toContain('detached: true')
-    expect(launcher).toContain('worker.unref()')
-    expect(launcher.match(/constructor-worker\.sh/g)).toHaveLength(1)
-    expect(launcher).not.toContain('/root/kelion/deploy/')
-    expect(launcher).not.toContain('/root/kelion/atelier/')
+    expect(launcher).toContain('if (config.devinKey)')
+    expect(launcher).toContain('tickDispecerDevin')
+    // mașinăria locală e cu adevărat plecată din launcher:
+    expect(launcher).not.toContain('constructor-worker.sh')
+    expect(launcher).not.toContain('spawn(')
   })
 
   it('definițiile uneltei spun explicit regula: constructorul primește ordine explicite SAU implicite, dar NU întrebări obișnuite de chat', () => {

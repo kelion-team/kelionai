@@ -65,9 +65,14 @@ describe('lanțul Devin — fiecare za, pe cod viu', () => {
     expect(dispecer).toMatch(/if \(!config\.devinKey\) return/)
   })
 
-  it('za 6: worker-ul local NU se bate cu Devin pe coadă (ruta /next gardată)', () => {
+  it('za 6: worker-ul local A FOST ȘTERS DE TOT — nu mai există rută /next, nu se bate nimeni cu Devin', () => {
+    // Owner, 22 aug: „am cerut devin peste tot in constructor… sa-i stergi de
+    // tot". Nu mai gardăm ruta /next — o ștergem: nu mai există lucrător local.
     const constructorRoute = codViu('routes/constructor.ts')
-    expect(constructorRoute).toMatch(/if \(config\.devinKey\) return reply\.send\(\{ job: null, devin: true \}\)/)
+    expect(constructorRoute).not.toContain('/api/constructor/next')
+    expect(constructorRoute).not.toContain('claimNextBuildJob')
+    // Iar dispecerul Devin rămâne singurul care ia din coadă:
+    expect(dispecer).toMatch(/claimNextBuildJob/)
   })
 
   it('za 7: terminarea ajunge ÎN CHAT cu linkul PR (nu doar pe monitor)', () => {

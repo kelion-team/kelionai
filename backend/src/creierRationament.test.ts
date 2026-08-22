@@ -13,30 +13,13 @@ describe('creierRationament ? u?? unic? de ra?ionament pentru TOATE rutele', () 
     expect(s).toContain('export async function rationeazaCuUnelte')
     expect(s).toContain('export async function rationeazaMesaje')
     expect(s).toContain('export async function rationeazaMesajeStream')
-    expect(s).toContain('export async function planificaPasiMici')
     expect(s).toContain('[CREIER-UNITAR]')
   })
 
-  it('planificarea constructorului produce protocol JSON Schema validat, nu FILES/STEPS parsate cu regex', () => {
-    const s = citeste('./services/creierRationament.ts')
-    expect(s).toContain('CONSTRUCTOR_PROTOCOL_SCHEMA')
-    expect(s).toContain('parseazaConstructorProtocol')
-    expect(s).toContain('Return ONE raw JSON object only')
-    expect(s).toContain('REPOSITORY_FILE_CATALOG')
-    expect(s).not.toContain('plan.matchAll(')
-  })
-
-  it('constructor /ajutor folose?te planificaPasiMici', () => {
-    const c = citeste('./routes/constructor.ts')
-    const idx = c.indexOf("/api/constructor/ajutor")
-    expect(idx).toBeGreaterThan(0)
-    const chunk = c.slice(idx, idx + 1800)
-    expect(chunk).toContain('clasificaActiuneConstructor')
-    expect(chunk).toContain("tipActiune !== 'cod'")
-    expect(chunk).toContain('planificaPasiMici')
-    expect(chunk).toContain('creierRationament')
-    expect(chunk).not.toContain('brainComplete')
-  })
+  // (Testele „planificaPasiMici" + „/api/constructor/ajutor" au fost ȘTERSE pe
+  // 22 aug: planificatorul de pași pentru Aider a plecat cu toată mașinăria
+  // constructorului local — ownerul a ordonat ștergerea integrală; constructorul
+  // e DEVIN, care nu are nevoie de un plan JSON produs de app.)
 
   it('servicii produs pe creierRationament (nu brainComplete direct)', () => {
     for (const f of ['mailbox.ts', 'cerinte.ts', 'gapsTriage.ts', 'panouLucratori.ts']) {

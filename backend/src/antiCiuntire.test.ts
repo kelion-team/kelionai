@@ -18,7 +18,6 @@ const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
 const backend = sursa('./services/github.ts')
-const constructor = sursa('../../deploy/constructor-agent.mjs')
 
 describe('calea din aplicație (repo_write) refuză o rescriere ciuntită', () => {
   it('compară mărimea nouă cu cea veche înainte să scrie', () => {
@@ -42,22 +41,7 @@ describe('calea din aplicație (repo_write) refuză o rescriere ciuntită', () =
   })
 })
 
-describe('agentul constructor rămâne complet', () => {
-  it('constructor-agent.mjs are sute de rânduri, nu paisprezece', () => {
-    // Prag grosier împotriva unei rescrieri accidentale cu un ciot de fișier.
-    const randuri = constructor.split('\n').length
-    expect(randuri).toBeGreaterThan(900)
-  })
-
-  // (Testul „scara de modele conține schimbarea PR #613" a fost ȘTERS, 3 aug —
-  // scara de modele OpenRouter a fost extirpată cu totul din constructor. Creierul
-  // constructorului e acum un model LOCAL Ollama de pe VPS, deci nu mai există nici
-  // MODELE_DOVEDIT_PROASTE, nici creier prin app.)
-
-  it('bucățile mari ale constructorului sunt toate acolo', () => {
-    // Un ciot accidental ar pierde cel puțin una dintre piesele active: motorul
-    // Aider, creierul local, verificarea atelierului sau porțile.
-    for (const bucata of ['construiesteCuAider', 'function ruleazaAider', 'asiguraCreierulLocal', 'function verificaAtelierul', 'function verificaPortileCasei'])
-      expect(constructor).toContain(bucata)
-  })
-})
+// (Blocul „agentul constructor rămâne complet" a fost ȘTERS pe 22 aug, odată
+// cu fișierul păzit: deploy/constructor-agent.mjs nu mai există — ownerul a
+// ordonat ștergerea integrală a mașinăriei locale; constructorul e DEVIN.
+// Garda anti-ciuntire de pe repo_write — calea vie — rămâne sub test mai sus.)
