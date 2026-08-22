@@ -77,7 +77,9 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       cele 6 muchii, creierLocal.test.ts; frontend 16 fișiere / 98 teste
       verzi). Cheile i18n moarte offlineGata/Descarca/Reincearca: ȘTERSE
       (22 aug, ×8 limbi + interfața — zero utilizări măsurate; frontend
-      tsc 0, 16/98 teste, build verde). Nimic mărunt rămas pe rândul ăsta.
+      tsc 0, 16/98 teste, build verde; MERGE PR #1329 + MĂSURAT LIVE 22 aug
+      03:31Z: v=13c0d25, ver 7.3, publicat 03:09:08Z). Nimic mărunt rămas pe
+      rândul ăsta.
       Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
@@ -293,7 +295,8 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               EXEMPTĂ de poarta vocală (turaCuTemeiDinAfara) — o rezumare
               greșită e azi nedetectată (onestitate F3, declarat); uneltele
               de dovadă directe fără frază de voce (onestitate F4):
-              COMPLETATE 22 aug — ruleaza_portile, jurnal_masuratori,
+              COMPLETATE 22 aug (MERGE PR #1329, MĂSURAT LIVE v=13c0d25,
+              ver 7.3) — ruleaza_portile, jurnal_masuratori,
               vaneaza_buguri au acum fraza „on voice, never read the raw …
               aloud" în fișă (rămâne INSTRUCȚIE, ca la toate — mecanismul
               splitului acoperă doar ușa cu doc); „textul creierului rămâne pe ecran" e adevărat
