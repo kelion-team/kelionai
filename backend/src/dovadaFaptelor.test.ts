@@ -52,23 +52,30 @@ describe('tura vocală cu unelte lasă dovadă durabilă (jurnalul operațional)
   it('sarcina se creează LENEȘ (doar când chiar rulează o unealtă) și trece prin stările permise', () => {
     expect(vocal).toMatch(/^\s*if \(!sarcinaVoceId\) \{/m)
     expect(vocal).toMatch(/inregistreazaSarcinaOperationala\(\{\s*\n\s*id,\s*\n\s*userEmail: user\.email/)
-    expect(vocal).toMatch(/stare: 'interpreting', code: 'voice_tool_call'/)
-    expect(vocal).toMatch(/stare: 'executing', code: 'voice_tool_call'/)
+    expect(vocal).toMatch(/tranzitieVoce\(id, 'interpreting', 'voice_tool_call'\)/)
+    expect(vocal).toMatch(/tranzitieVoce\(id, 'executing', 'voice_tool_call'\)/)
   })
-  it('fiecare rezultat clasificat devine eveniment; scrierile sunt fire-and-forget înlănțuite (zero latență pe frază, ordine păstrată)', () => {
+  it('fiecare rezultat clasificat devine eveniment; scrierile sunt fire-and-forget înlănțuite (zero latență pe frază, ordine păstrată) și respingerile {ok:false} nu mor tăcut', () => {
     expect(vocal).toMatch(/kind: 'tool_result',\s*\n\s*capability: dovada\.nume,\s*\n\s*outcomeState: dovada\.stare/)
     expect(vocal).toMatch(/lantJurnalVoce = lantJurnalVoce\s*\n\s*\.then\(scriere\)\s*\n\s*\.catch/)
+    expect(vocal).toMatch(/if \(!r\.ok\) app\.log\.warn\(`\[jurnal operațional\]\[voce\] tranziție respinsă/)
   })
-  it('la închiderea turei, starea finală se derivă din dovezile CAPTATE înainte de golire — aceeași regulă ca pe scris', () => {
-    // referința se ia înainte ca blocul cățelului să reatribuie lista:
-    expect(vocal).toMatch(/const doveziSarcina = doveziVoceTura\s*\n\s*const final = rezumaStareFinalaSarcinaOperationala\(\{ cereActiune: false, dovezi: doveziSarcina/)
-    expect(vocal).toMatch(/sarcinaVoceId = null/)
+  it('sarcina are registrul EI de dovezi (gaura 1 a verificatorului: carry-over-ul cățelului nu contaminează verdictul altei ture) — aceeași regulă de derivare ca pe scris', () => {
+    // ambele registre se umplu în același loc, dar trăiesc separat:
+    expect(vocal).toMatch(/doveziVoceTura\.push\(dovada\)\s*\n\s*const taskId = sarcinaVoceaPentruFapta\(\)\s*\n\s*doveziSarcinaVoce\.push\(dovada\)/)
+    // detașare EAGER la închidere (lanțul leneș nu numără push-uri de după):
+    expect(vocal).toMatch(/const dovezi = doveziSarcinaVoce\s*\n\s*doveziSarcinaVoce = \[\]\s*\n\s*const cate = dovezi\.length/)
+    expect(vocal).toMatch(/rezumaStareFinalaSarcinaOperationala\(\{ cereActiune: false, dovezi, planFaraExecutie: false \}\)/)
     // regula derivării (funcția pură): succes tehnic fără verificare = unverified, NU completed:
     expect(rezumaStareFinalaSarcinaOperationala({
       cereActiune: false,
       dovezi: [{ nume: 'send_email', stare: 'succeeded' }],
       planFaraExecutie: false,
     })).toEqual({ stare: 'unverified', cod: 'independent_verification_missing' })
+  })
+  it('nicio sarcină eternă pe executing (gaura 2): închiderea rulează pe TOATE drumurile care încheie tura — salvată, suprimată sau la close/error', () => {
+    const inchideri = vocal.match(/^\s*inchideSarcinaVoce\(\)/gm) ?? []
+    expect(inchideri.length).toBeGreaterThanOrEqual(5)
   })
 })
 

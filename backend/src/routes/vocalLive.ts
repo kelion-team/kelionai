@@ -486,17 +486,38 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // (cere_creierului) NU trece pe aici: fapta ei are sarcina EI în chat.ts,
     // marcată usaCreierului în metadate.
     let sarcinaVoceId: string | null = null
+    // Registrul PER-SARCINĂ al dovezilor (agentul de logică, gaura 1):
+    // doveziVoceTura are carry-over DELIBERAT între ture (cățelul, pasul 2 —
+    // dovada supraviețuiește turei fără rostire), deci derivarea stării
+    // finale din EL contamina sarcina T2 cu dovezile lui T1 (probat:
+    // [failed(vechi), verified(nou)] → failed FALS pe T2). Sarcina își ține
+    // dovezile SEPARAT, detașate EAGER la închidere — cățelul rămâne neatins.
+    let doveziSarcinaVoce: DovadaUnealta[] = []
+    let ultimaRostireTura = ''
     let lantJurnalVoce: Promise<unknown> = Promise.resolve()
     const scrieJurnalVoce = (scriere: () => Promise<unknown>): void => {
       lantJurnalVoce = lantJurnalVoce
         .then(scriere)
         .catch((e) => app.log.warn(`[jurnal operațional][voce] scriere pierdută: ${String(e).slice(0, 160)}`))
     }
+    const tranzitieVoce = (taskId: string, stare: Parameters<typeof tranzitioneazaSarcinaOperationala>[0]['stare'], code: string, metadata?: Record<string, unknown>): void => {
+      scrieJurnalVoce(async () => {
+        const r = await tranzitioneazaSarcinaOperationala({ taskId, stare, code, metadata })
+        // {ok:false} nu ARUNCĂ (agentul de logică, minor): fără rândul ăsta,
+        // o tranziție respinsă dispărea complet fără urmă.
+        if (!r.ok) app.log.warn(`[jurnal operațional][voce] tranziție respinsă (${stare}): ${r.error}`)
+      })
+    }
     const sarcinaVoceaPentruFapta = (): string => {
       if (!sarcinaVoceId) {
         const id = randomUUID()
         sarcinaVoceId = id
-        const obiectiv = bufUser.trim() || rostireCurenta.trim() || '(tură vocală)'
+        // Fallback-ul obiectivului: dacă turnComplete a golit deja bufferele
+        // (ordinea toolCall/turnComplete nu e garantată), rostirea care a
+        // CERUT unealta e cea abia salvată (ultimaRostireTura) — nu un
+        // „(tură vocală)" mut. Turele suprimate nu o setează (nu erau
+        // adresate lui Kelion).
+        const obiectiv = bufUser.trim() || rostireCurenta.trim() || ultimaRostireTura || '(tură vocală)'
         scrieJurnalVoce(() => inregistreazaSarcinaOperationala({
           id,
           userEmail: user.email,
@@ -504,14 +525,15 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           objective: obiectiv,
           metadata: { source: 'voce', direct: true },
         }))
-        scrieJurnalVoce(() => tranzitioneazaSarcinaOperationala({ taskId: id, stare: 'interpreting', code: 'voice_tool_call' }))
-        scrieJurnalVoce(() => tranzitioneazaSarcinaOperationala({ taskId: id, stare: 'executing', code: 'voice_tool_call' }))
+        tranzitieVoce(id, 'interpreting', 'voice_tool_call')
+        tranzitieVoce(id, 'executing', 'voice_tool_call')
       }
       return sarcinaVoceId
     }
     const noteazaDovadaVoce = (dovada: DovadaUnealta): void => {
       doveziVoceTura.push(dovada)
       const taskId = sarcinaVoceaPentruFapta()
+      doveziSarcinaVoce.push(dovada)
       scrieJurnalVoce(() => noteazaEvenimentOperational({
         taskId,
         kind: 'tool_result',
@@ -520,31 +542,36 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         code: dovada.stare,
       }))
     }
+    // Închiderea sarcinii pe ORICE drum care încheie tura (agentul de logică,
+    // gaura 2): turele SUPRIMATE și close/error nu treceau prin salveazaTura,
+    // deci sarcina rămânea pe `executing` PENTRU TOTDEAUNA (nu există nicio
+    // măturare de expirare, iar executing→expired e ilegal în mașina de
+    // stări) — „asul" ar fi servit la nesfârșit un „în lucru" vechi de zile.
+    // Dovezile sarcinii se detașează EAGER (lungimea inclusiv), ca lanțul
+    // leneș să nu numere push-uri de după captură.
+    const inchideSarcinaVoce = (): void => {
+      if (!sarcinaVoceId) return
+      const taskId = sarcinaVoceId
+      sarcinaVoceId = null
+      const dovezi = doveziSarcinaVoce
+      doveziSarcinaVoce = []
+      const cate = dovezi.length
+      const final = rezumaStareFinalaSarcinaOperationala({ cereActiune: false, dovezi, planFaraExecutie: false })
+      tranzitieVoce(taskId, final.stare, final.cod, { source: 'voce', toolResults: cate })
+    }
     const salveazaTura = (): void => {
       const u = bufUser.trim()
       let k = bufKelion.trim()
       bufUser = ''
       bufKelion = ''
       rostireCurenta = ''
-      // Închiderea sarcinii vocale (pasul 4): referința dovezilor se ia
-      // ÎNAINTE ca blocul cățelului să reatribuie doveziVoceTura = [] —
-      // reatribuirea nu golește array-ul capturat. Starea finală = aceeași
-      // derivare ca pe scris (o unealtă „succeeded" fără verificare
-      // independentă = unverified, nu completed). cereActiune e fals aici:
-      // tura ușoară e conversațională prin definiție — faptele ei sunt DOAR
-      // cele chiar executate, iar lipsa lor nu e o acțiune ratată.
-      if (sarcinaVoceId) {
-        const taskId = sarcinaVoceId
-        sarcinaVoceId = null
-        const doveziSarcina = doveziVoceTura
-        const final = rezumaStareFinalaSarcinaOperationala({ cereActiune: false, dovezi: doveziSarcina, planFaraExecutie: false })
-        scrieJurnalVoce(() => tranzitioneazaSarcinaOperationala({
-          taskId,
-          stare: final.stare,
-          code: final.cod,
-          metadata: { source: 'voce', toolResults: doveziSarcina.length },
-        }))
-      }
+      // Închiderea sarcinii vocale (pasul 4): din registrul PER-SARCINĂ, nu
+      // din doveziVoceTura (carry-over-ul cățelului ar contamina verdictul —
+      // gaura 1 a agentului de logică). cereActiune e fals aici: tura ușoară
+      // e conversațională prin definiție — faptele ei sunt DOAR cele chiar
+      // executate, iar lipsa lor nu e o acțiune ratată.
+      inchideSarcinaVoce()
+      if (u) ultimaRostireTura = u
       // Pe tura PUR-UȘOARĂ, pretențiile de FAPTĂ din ce a ROSTIT Kelion se
       // judecă pe uneltele chiar reușite ale turei. Vorba rostită nu se poate
       // lua înapoi — dar pretenția nu rămâne necontestată: nota intră în
@@ -596,6 +623,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         bufUser = ''
         bufKelion = ''
         rostireCurenta = ''
+        // Suprimarea privește ROSTIREA, nu fapta: unealta chiar a rulat, iar
+        // sarcina ei nu are voie să rămână „executing" pe veci (gaura 2).
+        inchideSarcinaVoce()
         return
       }
       // AUDITUL 15 aug (critică, de 3 verificatori): verdictul NULL nu e „tura
@@ -611,6 +641,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         bufUser = ''
         bufKelion = ''
         rostireCurenta = ''
+        inchideSarcinaVoce()
         return
       }
       salveazaTura()
@@ -1648,6 +1679,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             bufUser = ''
             bufKelion = ''
             rostireCurenta = ''
+            inchideSarcinaVoce()
           } else if (verdictTura === null && !turaAdresata(bufUser.trim())) {
             // AUDITUL 15 aug (critică, confirmată de 3 verificatori): modelul a
             // TĂCUT corect pe vorbire neadresată — verdictul null nu înseamnă
@@ -1659,6 +1691,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             bufUser = ''
             bufKelion = ''
             rostireCurenta = ''
+            inchideSarcinaVoce()
           } else {
             salveazaTura()
           }

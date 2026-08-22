@@ -109,6 +109,11 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_operational_tasks_user_state
       ON operational_tasks (user_email, state, updated_at DESC);
+    -- dovada_faptelor citește ultimele N sarcini ale userului pe created_at:
+    -- fără indexul ăsta, un user intens (o sarcină pe tură) ar plăti un sort
+    -- peste toate rândurile lui la fiecare provocare (agentul de integrare).
+    CREATE INDEX IF NOT EXISTS idx_operational_tasks_user_created
+      ON operational_tasks (user_email, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_operational_tasks_turn
       ON operational_tasks (turn_id);
     CREATE TABLE IF NOT EXISTS operational_events (
@@ -966,10 +971,14 @@ export async function tranzitioneazaSarcinaOperationala(
     const from = task.rows[0]?.state
     if (!esteStareSarcinaOperationala(from)) {
       await client.query('ROLLBACK')
+      // Respingerea se ÎNTOARCE ca valoare, nu ca excepție — fără log aici,
+      // apelantul care ignoră {ok:false} o pierdea complet fără urmă.
+      console.error(`[jurnal operațional] tranziție pe sarcină inexistentă: ${taskId} → ${input.stare}`)
       return { ok: false, error: 'journal_task_not_found' }
     }
     if (!tranzitieOperationalaPermisa(from, input.stare)) {
       await client.query('ROLLBACK')
+      console.error(`[jurnal operațional] tranziție respinsă: ${taskId} ${from} → ${input.stare}`)
       return { ok: false, error: `journal_transition_rejected:${from}:${input.stare}` }
     }
     const terminal = ['completed', 'failed', 'blocked', 'expired', 'unverified'].includes(input.stare)

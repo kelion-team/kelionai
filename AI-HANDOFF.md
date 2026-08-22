@@ -1440,11 +1440,20 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    din dovezi (aceeași regulă ca pe scris); metadatele ușii poartă
    usaCreierului/continuareUsa; demascarea porții = eveniment durabil
    facts_gate (înainte murea în inelul de log — saveMessage e sărit pe ușă).
-   Limite declarate în RAMAS (verdictul blând al ușii fără unelte — nereparat
-   ca să nu nască `failed` fals; turele fără unelte n-au sarcină). Porți la
-   construcție: tsc 0, 214 fișiere/1928 teste, hardcodări/sintaxă/exporturi
-   verzi; contoare actualizate: registru 123 (brainCapabilities), matrice 125
-   (capabilityEvidence), rând nou de manual.
+   RUNDA CELOR 3 AGENȚI (logică FAIL + onestitate FAIL + integrare PASS) —
+   reparat: registru separat doveziSarcinaVoce (starea finală nu se mai
+   contaminează cu dovezile turei precedente — carry-over-ul cățelului rămâne
+   neatins), inchideSarcinaVoce() pe toate cele 5 drumuri de sfârșit de tură
+   (nicio sarcină eternă pe `executing`), fișa nu mai promite show_document
+   pe sesiunea Live (detaliul pe monitor DOAR prin ușă), respingerile
+   {ok:false} logate, index (user_email, created_at DESC), obiectiv cu
+   fallback pe ultima rostire salvată. Limite declarate în RAMAS (verdictul
+   blând al ușii fără unelte; turele fără unelte n-au sarcină; suprimarea
+   privește rostirea, nu fapta; „never read aloud" e instrucție până la pasul
+   5; setul-rezervă Live cară o schemă nemăsurată live; clasa veche a
+   oaspetelui pe voce). Porți după reparație: tsc 0, 214 fișiere/1929 teste,
+   hardcodări/sintaxă/exporturi verzi; contoare: registru 123, matrice 125,
+   rând nou de manual.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

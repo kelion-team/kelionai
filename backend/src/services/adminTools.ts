@@ -412,7 +412,7 @@ export async function execUserScopedTool(
         count: r.sarcini.length,
         sarcini: r.sarcini,
         nota: r.sarcini.length === 0
-          ? 'Nicio faptă ÎNREGISTRATĂ pentru filtrul cerut — jurnalul a răspuns, dar nu are rânduri. Nu înseamnă că nimic nu s-a întâmplat vreodată: faptele dinaintea jurnalului nu au dovadă salvată.'
+          ? `Nicio faptă ÎNREGISTRATĂ${cauta ? ' pentru filtrul cerut' : ''} — jurnalul a răspuns, dar nu are rânduri. Nu înseamnă că nimic nu s-a întâmplat vreodată: faptele dinaintea jurnalului (18 aug 2026) nu au dovadă salvată.`
           : undefined,
       })
     }
