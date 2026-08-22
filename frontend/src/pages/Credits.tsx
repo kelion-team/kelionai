@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
-import { startCheckout, fetchBalance, fetchHistory, CREDITS_PER_POUND, creditsForPounds, type CheckoutStart, type PurchaseRecord, type WalletStatus } from '../lib/billing'
+import { startCheckout, fetchBalance, fetchHistory, getCreditePeLira, setCreditePeLira, creditsForPounds, pacheteDinPraguri, type CheckoutStart, type PurchaseRecord, type WalletStatus } from '../lib/billing'
 import { raporteazaPagina } from '../lib/vizita'
 import BackLink from '../components/BackLink'
 
@@ -32,9 +32,11 @@ export default function Credits(): React.JSX.Element {
   useEffect(() => {
     void fetch('/api/tarife')
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { tarife?: { cheie: string; eticheta: string; credite: number; lire: number | null }[]; praguri?: { primaAlimentare: number; minim: number; pas: number } } | null) => {
+      .then((j: { tarife?: { cheie: string; eticheta: string; credite: number; lire: number | null }[]; praguri?: { primaAlimentare: number; minim: number; pas: number }; creditePeLira?: number } | null) => {
         if (Array.isArray(j?.tarife)) setTarife(j.tarife)
         if (j?.praguri && Number.isFinite(j.praguri.pas) && j.praguri.pas > 0) setPraguri(j.praguri)
+        // LEGEA ANTI-HARDCODARE: creditePeLira din sursă vie (userShare/creditValue)
+        if (typeof j?.creditePeLira === 'number' && j.creditePeLira > 0) setCreditePeLira(j.creditePeLira)
       })
       .catch(() => {})
   }, [])
@@ -161,7 +163,7 @@ export default function Credits(): React.JSX.Element {
         <a className="login-brand" href="/">Kelionai</a>
         <h2 className="login-title">{T.creditsTitle}</h2>
         <p className="credits-blurb">
-          {T.creditsBlurb} {T.creditsRate(CREDITS_PER_POUND)}
+          {T.creditsBlurb} {T.creditsRate(getCreditePeLira())}
         </p>
 
         {balance !== null && (
@@ -229,7 +231,7 @@ export default function Credits(): React.JSX.Element {
           {customErr && <div className="login-note" style={{ color: '#d32f2f', marginTop: 6 }}>{customErr}</div>}
           {!customErr && praguri && minAmount !== null && (
             <div className="login-note" style={{ fontSize: 12, marginTop: 4 }}>
-              * Minimum £{minAmount}, multiples of £{praguri.pas} ({Math.floor(minAmount * CREDITS_PER_POUND)} credits = £{minAmount}).
+              * Minimum £{minAmount}, multiples of £{praguri.pas} ({Math.floor(minAmount * getCreditePeLira())} credits = £{minAmount}).
             </div>
           )}
         </div>
@@ -274,9 +276,9 @@ export default function Credits(): React.JSX.Element {
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', marginTop: 8, fontSize: 14 }}>
                 <span>{T.autoTopUpAmount}</span>
                 <select value={ar.topupAmount} onChange={(e) => saveAr({ topupAmount: Number(e.target.value) })}>
-                  {[5, 10, 20, 50].map((p) => (
+                  {(praguri ? pacheteDinPraguri(praguri) : [5, 10, 20, 50]).map((p) => (
                     <option key={p} value={p}>
-                      {T.creditsUnit(Math.floor(p * CREDITS_PER_POUND))} — £{p}
+                      {T.creditsUnit(Math.floor(p * getCreditePeLira()))} — £{p}
                     </option>
                   ))}
                 </select>
