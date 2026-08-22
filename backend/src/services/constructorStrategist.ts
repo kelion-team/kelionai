@@ -139,9 +139,42 @@ const EXECUTOR_SINONIME: Record<string, string> = {
   constructor: 'constructor', devin: 'constructor', builder: 'constructor',
   blocked: 'blocked', block: 'blocked', pause: 'blocked', await: 'blocked',
 }
+// Curăță RECURSIV cheile pe care schema le interzice (additionalProperties:false),
+// ÎNAINTE de validare. Gemini adaugă câteodată o cheie în plus (ex. un „reasoning"
+// pe o ipoteză) — o singură cheie străină pica TOATĂ strategia și autonomia se
+// bloca (constatat de auditul din 22 aug). Tăiem DOAR ce e interzis; nu inventăm
+// nimic care lipsește — un câmp cerut absent rămâne eroare cinstită (→ re-cerere).
+function pruneToSchema(value: unknown, schema: unknown): void {
+  const s = schema as Record<string, unknown> | undefined
+  if (!s || value == null || typeof value !== 'object') return
+  if (Array.isArray((s as { anyOf?: unknown[] }).anyOf)) {
+    if (Array.isArray(value)) return
+    const branch = ((s as { anyOf: Record<string, unknown>[] }).anyOf)
+      .find((b) => b && b.type === 'object' && b.properties)
+    if (branch) pruneToSchema(value, branch)
+    return
+  }
+  if (s.type === 'array' && s.items) {
+    if (Array.isArray(value)) for (const item of value) pruneToSchema(item, s.items)
+    return
+  }
+  if (s.type === 'object' && s.properties && !Array.isArray(value)) {
+    const allowed = s.properties as Record<string, unknown>
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      if (s.additionalProperties === false && !(key in allowed)) {
+        delete (value as Record<string, unknown>)[key]
+      } else if (key in allowed) {
+        pruneToSchema((value as Record<string, unknown>)[key], allowed[key])
+      }
+    }
+  }
+}
+
 function normalizeStrategy(value: unknown): void {
   const v = value as any
   if (!v || typeof v !== 'object') return
+  // Întâi tăiem cheile străine (altfel o singură cheie în plus pică toată strategia).
+  pruneToSchema(v, CONSTRUCTOR_STRATEGY_SCHEMA)
   if (typeof v.decision?.phase === 'string') {
     const f = FAZE_SINONIME[v.decision.phase.toLowerCase()]
     if (f) v.decision.phase = f
