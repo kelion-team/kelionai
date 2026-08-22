@@ -36,6 +36,7 @@ import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
 import { currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
 import { isCarMode, subscribeCarMode } from '../lib/carMode'
+import { useConectat } from '../lib/conexiune'
 import { reteaLenta } from '../lib/retea'
 import ApelOverlay from '../components/ApelOverlay'
 import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
@@ -761,7 +762,18 @@ export default function Stage({ user }: { user: User }) {
     setLangState(nouaLimba)
     void saveSpeechLang(nouaLimba)
   }
+  // OFFLINE = doar ce merge dovedit (owner, 22 aug: „funtiile dedicate de
+  // internet nu trebuiesc sa se reafiseze, ele sunt afisate doar cind aplicatia
+  // e live" + „vreau sa ramina ce merge dovedit"): starea vine din pingul REAL
+  // la /health (conexiune.ts), nu din navigator.onLine care minte.
+  const online = useConectat()
   const [adminOpen, setAdminOpen] = useState(false)
+  // Meniul „Aplicații" e demontat offline — fără resetul ăsta, `appsOpen`
+  // rămas true îl făcea să SARĂ deschis singur la revenirea netului
+  // (cosmetica semnalată de verificatorul de logică, 22 aug).
+  useEffect(() => {
+    if (!online) setAppsOpen(false)
+  }, [online])
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
   // admin button must not activate either"). armed = the secret is set (in
@@ -1662,6 +1674,13 @@ export default function Stage({ user }: { user: User }) {
         {/* APLICAȚII — trading (doar admin) + Adaptare CV (toți) sub UN buton
             (owner, 13 aug). Meniul se închide la clic pe un element, pe fundal,
             sau re-apăsând butonul. */}
+        {/* OFFLINE: meniul dispare ÎNTREG (owner, 22 aug) — intrările sunt
+            comenzi către creierul de pe SERVER (kelion:comanda → /api/chat →
+            unelte Google), cu două excepții locale mărunte care nu justifică
+            meniul (copiază-scenariul = clipboard local; re-clicul pe
+            Tranzacții = închidere locală); fără net, restul ar fi
+            butoane-minciună. Reapare singur când pingul /health răspunde. */}
+        {online && (
         <div className="apps-wrap">
           <button
             type="button"
@@ -1776,6 +1795,7 @@ export default function Stage({ user }: { user: User }) {
             </>
           )}
         </div>
+        )}
         {/* Adrian's ALWAYS-ON status (admin, top-left): shows what's being worked
             on when there's live work, else the real Linux server load — so the
             server status + current task never vanish (they used to hide when the
@@ -1825,7 +1845,10 @@ export default function Stage({ user }: { user: User }) {
         THE ADMIN NO LONGER HAS THE „⚙ Setări" PILL HERE (Adrian's order):
         his settings live in the Admin panel now, so the header keeps only
         measurements (Gemini / Serper / VPS). */}
-        {user.role !== 'admin' && (
+        {/* OFFLINE: portofelul + „Add credits" se ascund (owner, 22 aug) —
+            soldul, pachetele și codul de plată vin toate de pe server; offline
+            butoanele astea n-ar putea decât să pice tăcut. */}
+        {user.role !== 'admin' && online && (
           <WalletButton
             onOpenSettings={() => setSettingsOpen(true)}
             googleConnected={user.googleConnected}
@@ -1835,7 +1858,7 @@ export default function Stage({ user }: { user: User }) {
         {/* „Add credits" for regular users (Adrian's order — the exact label,
         English for all users): opens the existing credits panel (the wallet
         menu with the 75/150/375 packs + custom amount ×5). */}
-        {user.role !== 'admin' && (
+        {user.role !== 'admin' && online && (
           <button
             type="button"
             className="ghost"

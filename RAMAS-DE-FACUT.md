@@ -114,9 +114,12 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
         `cerinta*` concatenat) — rescriere de doc separată, nefăcută.
       - (B11) **48 de chei i18n doar en/ro** — celelalte 6 limbi cad tăcut pe
         engleză în ecrane întregi (Credits, setări).
-      - (C7) UNELTE_CITIRE_PARALELE nu conține youtube_search, list_notes,
-        memorie_ia, memorie_lista, admin_vezi, studioul_de_clipuri — citiri
-        curate care nu beneficiază de paralelizare.
+      - (C7) REPARAT pe branch (2588c07d; bifarea finală la PR+live):
+        youtube_search, list_notes, memorie_ia, memorie_lista, admin_vezi
+        ADĂUGATE în UNELTE_CITIRE_PARALELE — fiecare verificată pe HANDLER.
+        Corectură la constatarea inițială a agentului: studioul_de_clipuri
+        NU e citire curată (scrie cadrul {scenariu} pe fir, clientul
+        re-armează butonul 🎬) — RESPINS cu motiv în comentariu.
       - (C8–C13, minore chat) gateDecided/taced/userEcho nu se resetează între
         încercări (resetStareStream acoperă restul); planFaraExecutie nu se
         aprinde pe ambient; metadata `planning` poate diverge de
@@ -126,8 +129,9 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       - (F5) **vitest-ul frontend NU rulează în nicio poartă CI/VPS** — cele
         16/98 teste trec doar când un AI le rulează cu mâna; fix: pin
         devDependency + script + pas în porti-pr.sh.
-      - (F11a) ceasPingWs e redundant (serverul doar RĂSPUNDE la ping-uri;
-        voiceHeartbeat e cel viu) — de scos la următoarea trecere vocală.
+      - (F11a) REPARAT pe branch (2588c07d; bifarea finală la PR+live):
+        ceasPingWs SCOS — voiceHeartbeat (10s, cadru identic) e singurul
+        keepalive; serverul doar răspunde la ping-uri, nu le cere.
       - (SQL-margine, declarată) eSqlDeCitire oprește scrierile, dar funcțiile
         cu efect ÎN SELECT (setval, pg_terminate_backend, pg_read_file,
         lo_import) TREC de predicat — margine declarată, nu gaură nouă:
@@ -137,6 +141,31 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
         apăreau ca text brut portocaliu — mapate acum (Credits +
         CustomerSettings, en/ro); comentariul stătut din prefs.ts despre
         rândul (n) adus la zi.
+      **ORDINELE DIN 22 AUG, DIMINEAȚA (owner, în timpul lucrului — 6 mesaje,
+      verbatim, LEGE peste tot ce urmează):**
+      1. „cind este in mod ofline, funtiile dedicate de internet nu trebuiesc
+         sa se reafiseze, ele sunt afisate doar cind aplicatia e live" —
+         FĂCUT (commit pe branch, lacăt offlineAscunde.test.ts): microfonul
+         (compozitor + mașină), meniul „+" (📎/📷/🎬), meniul „Aplicații",
+         portofelul + „Add credits" stau după `online` (pingul REAL /health,
+         useConectat); ușa din dos paste/drop de fișiere închisă și ea.
+         Reapar singure la revenirea rețelei. MĂSURAT: frontend tsc 0,
+         17 fișiere / 105 teste, build verde; live după merge.
+      2. „sau daca se pot instala biblioteci pentru ofline sa se instaleza sa
+         poata lucra ofline, doawload automat de ofline" — DEBLOCHEAZĂ pasul 7
+         felia B (gura Piper WASM + lip-sync) și evaluarea feliei C1 (urechea
+         Vosk): unde biblioteca există, funcția se face să MEARGĂ offline (cu
+         download automat, ca creierul); unde nu, rămâne regula 1 (ascunsă).
+         Angajament ținut: stand local Playwright + măsurători ÎNAINTE de merge.
+      3. „funtiile care sunt in aplicatii nefunctionale se repara integral cu
+         proba, ce nu funtioneaza garantat se scoate total daca nu exista
+         dovada" + „dar repet dupa reparatii si incercari reale de reparare" +
+         „acelasi principiu aplici pe toata aplicatia, 0 minciuna 0 cod mort
+         0 pacaleala ca avem in aplicatie" + „vreau sa ramina ce merge dovedit"
+         + „si masurat" — CRITERIUL FINALIZĂRII, întărit: întâi reparația cu
+         probă (încercări REALE), abia apoi scoaterea a ce nu se poate dovedi;
+         la final rămâne doar ce merge DOVEDIT și MĂSURAT. Registrul viu de
+         mai sus (MAREA VERIFICARE) e exact lista de lucru a acestui ordin.
       Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
@@ -155,6 +184,16 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               (scoaterea totală = pasul 7/Piper). Verificat cu 3 agenți (2 runde
               FAIL reparate: lacătele `taiereManuala`+adresare, ancorele stale,
               bufUser, cursa eraInZbor). RĂMAS: proba pe telefonul owner-ului.
+              [AMENDAT 22 aug, MĂSURAT LIVE pe V7.5 (capturile owner-ului:
+              „scris ignora ce cer" + „audio nu merge"): rutarea scrisului PRIN
+              Live s-a dovedit greșită în producție — răspunsul venea doar ca
+              voce, ușa spre unelte rămânea la alegerea modelului, iar un Live
+              viu-dar-mut făcea aplicația să pară moartă. FORMA NOUĂ (pe
+              branch): tot ce e TASTAT trece prin /api/chat (creier întreg,
+              unelte, monitor, text vizibil), Chirp E gura răspunsului scris
+              și cu Live viu — vocea unică prin ÎNTRERUPEREA redării Live, nu
+              prin suprimarea gurii. Turele VOCALE rămân în sesiunea Live.
+              Canalul {type:'text'} rămâne pe server, nefolosit de client.]
       - [x] 2. cățelul (`poartaFaptelor`) legat pe calea voce — MERGE (PR
               #1323) + PUBLICAT LIVE, MĂSURAT 22 aug 00:0xZ: /api/version →
               v=ad5dff1 (exact commitul merge-ului), ver 6.7, publicat

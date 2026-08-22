@@ -4815,7 +4815,11 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
       `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
        WHERE id = (
          SELECT id FROM build_jobs
-         WHERE (status='queued' OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'))
+         WHERE (status='queued'
+                -- GARDA DEVIN (22 aug): running-stătut se fură DOAR fără sesiune
+                -- Devin — sesiunea externă trăiește și e polată de dispecer;
+                -- furtul ei ar porni a doua sesiune plătită pe același ordin.
+                OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND devin_session_id IS NULL))
            AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
          ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
        )
@@ -4906,7 +4910,14 @@ export async function deblocheazaJoburileClaimate(): Promise<{ repuse: number; a
          updated_at = now()
        WHERE status='running' AND attempts < 3
          AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'
-         AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'`,
+         AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
+         -- GARDA DEVIN (22 aug, „bani dubli"): un job cu sesiune Devin VIE nu e
+         -- „lucrător mort" — sesiunea trăiește EXTERN și e polată de dispecer;
+         -- dacă bucla de autonomie doarme o oră (pauza „nimic"), pragul de 15
+         -- min l-ar fi repus în coadă și tick-ul următor pornea A DOUA sesiune
+         -- plătită pe același ordin. Terminarea/eșecul le judecă dispecerul
+         -- (verificaJobDevin), nu tăcerea lui updated_at.
+         AND devin_session_id IS NULL`,
     )
     return { repuse: requeue.rowCount ?? 0, abandonate: fail.rowCount ?? 0 }
   } catch {

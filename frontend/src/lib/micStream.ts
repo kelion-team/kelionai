@@ -29,10 +29,13 @@ import {
 } from './audioIO.js'
 
 import { TARGET_RATE, downsample, float32ToPcm16 } from './pcm'
-// PAUZA care ÎNCHIDE fraza (Adrian, 3 aug — latența „nu mă aude"): o tăcere mai
-// lungă de-atât = sfârșit de rostire → fraza pleacă la creier. Nu prea scurt
-// (ar tăia o propoziție la o respirație), nu prea lung (ar întârzia răspunsul).
-const PAUZA_FRAZA_MS = 1400
+// PAUZA care ÎNCHIDE fraza: o tăcere mai lungă de-atât = sfârșit de rostire →
+// fraza pleacă la creier. Istoric: 1400 ms (3 aug, latența „nu mă aude");
+// URCATĂ LA 3000 ms pe ordinul verbatim al ownerului (22 aug: „fraza se
+// închide la pauza de 1,4 secunde, trubie la 3 sec sa se inchida") — omul
+// vrea loc de respirat în mijlocul propoziției fără să-i fie tăiată fraza;
+// costul asumat: răspunsul pornește cu ~1,6 s mai târziu după ce taci.
+const PAUZA_FRAZA_MS = 3000 // hardcod-permis: prag de produs fixat verbatim de owner (3 s)
 // PLAFONUL DE LIVRARE (Adrian, 8 aug: „vreau ce pleacă de la mic să ajungă
 // DIRECT audio în creier"). Măsurat în consola lui: fraza se DESCHIDEA
 // (frazaDeschisa: true) și nu se mai închidea niciodată — pe microfonul lui
