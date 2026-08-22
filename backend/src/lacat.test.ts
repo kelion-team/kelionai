@@ -94,10 +94,13 @@ describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: �
     expect(/\{ model: wanted, fellBack: false \}/.test(s)).toBe(false)
   })
 
-  it('brain.ts: scara de experți = un singur model, fără trepte din env', () => {
+  it('brain.ts: scara de experți = 4 trepte (flash → Pro → ultra), fără trepte din env', () => {
     const s = sursa('./services/brain.ts')
     expect(/process\.env\.BRAIN_EXPERT_FALLBACKS/.test(s)).toBe(false)
-    expect(/return \[config\.brain\.workDefault\]/.test(s)).toBe(true)
+    // 22 aug: scara are 3+ trepte (work → profund → ultra), cu dedup
+    expect(/config\.brain\.workDefault/.test(s)).toBe(true)
+    expect(/config\.brain\.profundDefault/.test(s)).toBe(true)
+    expect(/config\.brain\.ultraDefault/.test(s)).toBe(true)
   })
 
   it('ruta /api/models: PUT selection BLOCAT (423 model_locked) — UI nu poate schimba modelul', () => {
@@ -361,20 +364,24 @@ describe('LACĂT — creier Pro + Extended Thinking (Adrian, 5 aug: „la creier
   // conversația pe `flash-lite`, gândirea grea pe `flash` fără lite. Pro a ieșit
   // de pe treapta grea pe măsurătoare (proba de 10 sarcini cu verificare automată:
   // flash 20/20 la fel ca Pro, dar Pro cu ture de 72-75 s față de 6,3 s).
-  it('două sloturi sigilate și DISJUNCTE: conversația pe flash-lite, gândirea grea pe flash', () => {
+  it('patru sloturi sigilate: flash-lite (chat) → flash (work) → Pro (profund) → ultra', () => {
     const s = sursa('./config.ts')
     expect(/MODEL_UNIC_DEFAULT = 'gemini-[\d.]+-flash'/.test(s)).toBe(true)
     expect(/MODEL_RAPID_DEFAULT = 'gemini-[\d.]+-flash-lite'/.test(s)).toBe(true)
+    expect(/MODEL_PROFUND_DEFAULT = 'gemini-[\d.]+-pro/.test(s)).toBe(true)
     // CHAT = lite. NICIODATĂ Pro (de-acolo venea lentoarea).
     expect(config.brain.chatDefault).toMatch(/flash-lite/)
     expect(config.brain.chatDefault).not.toMatch(/pro/i)
     // GREUL = flash, dar NU lite — altfel cele două trepte ar fi una singură.
     expect(config.brain.workDefault).toMatch(/flash/)
     expect(config.brain.workDefault).not.toMatch(/-lite/)
-    expect(config.brain.topDefault).toMatch(/flash/)
-    expect(config.brain.topDefault).not.toMatch(/-lite/)
-    // Și, explicit: cele două trepte NU pot ajunge pe același model.
+    // PROFUND = Pro (22 aug: escaladare pe modele superioare)
+    expect(config.brain.profundDefault).toMatch(/pro/i)
+    // TOP rămâne alias pe profund pentru compatibilitate
+    expect(config.brain.topDefault).toBe(config.brain.profundDefault)
+    // Cele trei trepte principale NU pot ajunge pe același model.
     expect(config.brain.chatDefault).not.toBe(config.brain.workDefault)
+    expect(config.brain.workDefault).not.toBe(config.brain.profundDefault)
   })
 
   it('poarta fiecărui slot acceptă DOAR familia lui (un upgrade nu poate încrucișa sloturile)', () => {
@@ -397,8 +404,9 @@ describe('LACĂT — creier Pro + Extended Thinking (Adrian, 5 aug: „la creier
     const chat = sursa('./routes/chat.ts')
     expect(/escalationTools = incarcatura\.faza === 'vorbire' \? \[ASK_BRAIN_TOOL\] : \[\]/.test(chat)).toBe(true)
     expect(chat.includes('tools.push(...uneltePline)')).toBe(true)
+    // 22 aug: scara are acum 3+ trepte (work → profund → ultra)
     const brain = sursa('./services/brain.ts')
-    expect(/return \[config\.brain\.workDefault\]/.test(brain)).toBe(true)
+    expect(/config\.brain\.profundDefault/.test(brain)).toBe(true)
   })
 
   it('Extended Thinking pe turele grele: reasoning «high» pe creierul direct → thinkingLevel «high»', () => {

@@ -13,7 +13,10 @@ import {
 import { UNELTE_VORBIRE } from './services/fazeChat.js'
 
 function sursa(rel: string): string {
-  return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
+  // Normalizare CRLF → LF: pe Windows fișierele pot avea line-ending-uri CRLF,
+  // iar regex-urile de mai jos conțin `\n` explicit (ex. REGULA LIVRABILULUI).
+  // Fără normalizare, `\r` se interpune între `+` și `\n` și potrivirea pică.
+  return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 }
 
 describe('P22 — numele sugestiv cu data și ora (ordinul verbatim)', () => {

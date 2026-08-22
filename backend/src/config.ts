@@ -171,6 +171,42 @@ export function setModelRapidValidat(m: string): boolean {
   return true
 }
 
+// ── AL TREILEA SLOT: MODELUL PROFUND (owner, 22 aug 2026: „escaladări pe modele
+// superioare"). Scara creierului trece de la 1 treaptă la 4: flash-lite (vorbă
+// simplă) → flash (gândire + unelte) → PROFUND (Pro, raționament complex, cod,
+// strategie) → ULTRA (env-configurable, pentru modele viitoare).
+// Pro e MĂSURAT 20/20 pe calitate (proba-calitate.py), dar 2x mai lent cu outliers
+// de 72-75s — de-aia stă DOAR pe treapta a 3-a, escaladat automat la dificultate
+// mare (ESCALATE_TOP_AT) sau când modelul cere singur prin ask_brain.
+export const MODEL_PROFUND_DEFAULT = 'gemini-3.1-pro-preview'
+let modelProfundActiv = MODEL_PROFUND_DEFAULT
+/** Codul modelului profund (ex: „gemini-3.1-pro-preview"). */
+export function modelProfundCod(): string {
+  return process.env.MODEL_CREIER_PROFUND ?? modelProfundActiv
+}
+/** Modelul profund cu prefix google-direct/ (forma treptelor creierului). */
+export function modelProfundDirect(): string {
+  return `google-direct/${modelProfundCod()}`
+}
+/** Setează modelul profund — DOAR din auto-upgrade validat. Acceptă un Gemini Pro
+ *  de producție/preview. */
+export function setModelProfundValidat(m: string): boolean {
+  const cod = String(m || '').replace(/^google-direct\//, '').trim()
+  if (!/^gemini-\d+(?:\.\d+)?-pro(?:-|$)/.test(cod)) return false
+  modelProfundActiv = cod
+  return true
+}
+
+// ── AL PATRULEA SLOT: MODELUL ULTRA — pentru probleme maximale (strategie
+//  complexă, analiză de sistem, decizii critice). Env-configurable pentru modele
+//  viitoare; default = tot Pro (până apare ceva mai puternic măsurat).
+export function modelUltraCod(): string {
+  return process.env.MODEL_CREIER_ULTRA ?? modelProfundCod()
+}
+export function modelUltraDirect(): string {
+  return `google-direct/${modelUltraCod()}`
+}
+
 export const config = {
   isProd,
   port: Number(process.env.PORT ?? 8080),
@@ -300,8 +336,17 @@ export const config = {
     get workDefault(): string {
       return modelUnicDirect()
     },
+    // PROFUND (22 aug): treapta a 3-a — Pro pentru raționament complex, escaladat
+    // automat la dificultate mare sau prin ask_brain.
+    get profundDefault(): string {
+      return modelProfundDirect()
+    },
+    // ULTRA (22 aug): treapta a 4-a — pentru probleme maximale. Env-configurable.
+    get ultraDefault(): string {
+      return modelUltraDirect()
+    },
     get topDefault(): string {
-      return modelUnicDirect()
+      return modelProfundDirect()
     },
   },
   // ── COLLECTING MONEY THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out

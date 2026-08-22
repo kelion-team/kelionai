@@ -21,8 +21,13 @@
 // Rulare: node scripts/verifica-hardcodari.mjs   (exit 1 = hardcod negăzduit)
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const RADACINA = new URL('..', import.meta.url).pathname
+// Pe Windows, `new URL('..', import.meta.url).pathname` returnează `/C:/Users/...`
+// (fără slash de drive corect), iar `path.join` îl tratează ca absolut și
+// alipește `C:\` în față → `C:\C:\Users\...` (ENOENT). `fileURLToPath` rezolvă
+// corect calea pe ambele platforme.
+const RADACINA = fileURLToPath(new URL('..', import.meta.url))
 
 function* fisiere(dir, ext) {
   for (const nume of readdirSync(dir)) {
@@ -40,7 +45,12 @@ function* fisiere(dir, ext) {
 const abateri = []
 
 function scaneaza(cale, regula, re, scutit) {
-  const text = readFileSync(cale, 'utf8')
+  // Normalizare CRLF → LF: pe Windows, `split('\n')` lasă `\r` la sfârșitul
+  // fiecărei linii. În JS, `.` nu se potrivește cu `\r` (line terminator), deci
+  // regex-ul de curățare a comentariilor `^\s*(\*).*$` nu se potrivește — `$`
+  // e după `\r`, dar `.*` se oprește înainte. Rezultat: comentariile NU sunt
+  // curățate → false positive pe hardcod care de fapt e în comentariu.
+  const text = readFileSync(cale, 'utf8').replace(/\r\n/g, '\n')
   const linii = text.split('\n')
   linii.forEach((linie, i) => {
     // comentariile pure nu afișează nimic omului — nu-s hardcod viu

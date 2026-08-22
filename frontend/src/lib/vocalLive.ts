@@ -174,6 +174,43 @@ function clampPreamp(v: unknown): number {
 // curgând). Modelul e exact cel al căii vechi (realtimeVoice.ts: activeVoice).
 let sesiuneActiva: { inchide: () => void } | null = null
 
+// ── WARM START (22 aug 2026, owner: „latență sub 1s") ───────────────────────
+// Pre-conectează WebSocket-ul în fundal când utilizatorul e pe pagina de voce,
+// ÎNAINTE să apese butonul. Când apasă, conexiunea e deja caldă → primul
+// cuvânt vine cu ~300ms mai repede (handshake-ul e deja făcut).
+let wsCalda: WebSocket | null = null
+let warmStartTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Pornește warm-start: pre-conectează WebSocket-ul în fundal. */
+export function pornesteWarmStart(): void {
+  if (wsCalda?.readyState === WebSocket.OPEN || wsCalda?.readyState === WebSocket.CONNECTING) return
+  try {
+    wsCalda = new WebSocket(urlWs())
+    wsCalda.onclose = () => { wsCalda = null }
+    wsCalda.onerror = () => { wsCalda = null }
+  } catch { wsCalda = null }
+}
+
+/** Oprește warm-start și închide conexiunea caldă. */
+export function opresteWarmStart(): void {
+  if (warmStartTimer) { clearTimeout(warmStartTimer); warmStartTimer = null }
+  if (wsCalda) {
+    try { wsCalda.close() } catch { /* tăcut */ }
+    wsCalda = null
+  }
+}
+
+/** Dacă există o conexiune caldă, o folosește; altfel deschide una nouă. */
+function wsCaldSauNou(): WebSocket {
+  if (wsCalda?.readyState === WebSocket.OPEN) {
+    const ws = wsCalda
+    wsCalda = null // o predăm apelantului
+    return ws
+  }
+  wsCalda = null
+  return new WebSocket(urlWs())
+}
+
 export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia) {
     opts.onEroare('browserul nu dă acces la microfon')
@@ -186,7 +223,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
 
   let ws: WebSocket
   try {
-    ws = new WebSocket(urlWs())
+    ws = wsCaldSauNou()
   } catch (e) {
     opts.onEroare(`nu pot deschide sesiunea vocală: ${String(e).slice(0, 60)}`)
     return null

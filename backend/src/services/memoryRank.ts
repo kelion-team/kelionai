@@ -12,7 +12,10 @@
 
 /** Felurile de memorie (studiate din TencentDB: episodic/semantic/procedural/
  *  preferință), adaptate la un asistent personal. `null`/necunoscut = fapt
- *  generic (memoriile vechi, dinaintea tipizării, rămân valide). */
+ *  generic (memoriile vechi, dinaintea tipizării, rămân valide).
+ *
+ *  22 aug 2026 (owner: „simte mediul"): tipuri SENZORIALE — vizual, auditiv,
+ *  emoțional, temporal — pentru memoria unificată cross-modal. */
 export type MemoryType =
   | 'identity' // cine e omul (nume, unde locuiește, ce e)
   | 'preference' // cum îi place (răspunsuri scurte, limba, stil)
@@ -20,9 +23,14 @@ export type MemoryType =
   | 'project' // la ce lucrează (proiecte în curs)
   | 'episodic' // ce s-a întâmplat (o discuție, un eveniment)
   | 'fact' // orice alt fapt durabil
+  | 'visual' // ce a văzut Kelion (cadru cu mișcare, obiect, persoană)
+  | 'auditory' // ce a auzit Kelion (alarmă, sonerie, conversație, sunet)
+  | 'emotional' // starea emoțională detectată (supărat, vesel, stresat)
+  | 'temporal' // rutine și patternuri temporale (la 8 merge la muncă)
 
 const TIPURI: ReadonlySet<string> = new Set<MemoryType>([
   'identity', 'preference', 'relationship', 'project', 'episodic', 'fact',
+  'visual', 'auditory', 'emotional', 'temporal',
 ])
 
 /** Importanța implicită a unei memorii tipizate: identitatea/preferințele/relațiile
@@ -35,6 +43,10 @@ export function importantaImplicita(tip: MemoryType | null): number {
     case 'project': return 0.7 // hardcod-permis: reglaj de rangare al memoriei
     case 'fact': return 0.55 // hardcod-permis: reglaj de rangare al memoriei
     case 'episodic': return 0.4 // hardcod-permis: reglaj de rangare al memoriei
+    case 'emotional': return 0.65 // hardcod-permis: starea emoțională contează pentru adaptare
+    case 'temporal': return 0.6 // hardcod-permis: rutinele ajută proactivitatea
+    case 'visual': return 0.45 // hardcod-permis: observații vizuale — context, nu fapt durabil
+    case 'auditory': return 0.5 // hardcod-permis: evenimente sonore — mai importante ca vizualul
     default: return 0.5 // hardcod-permis: memorie negenerică/veche — importanță neutră
   }
 }
@@ -50,6 +62,10 @@ export function injumatatireMsPeTip(tip: MemoryType | null): number {
     case 'project': return 120 * ZI // hardcod-permis: ~4 luni (proiectele se schimbă)
     case 'fact': return 365 * ZI // hardcod-permis: ~1 an
     case 'episodic': return 30 * ZI // hardcod-permis: ~1 lună (un episod se stinge repede)
+    case 'emotional': return 7 * ZI // hardcod-permis: ~1 săptămână (starea se schimbă)
+    case 'temporal': return 180 * ZI // hardcod-permis: ~6 luni (rutinele se schimbă sezonier)
+    case 'visual': return 3 * ZI // hardcod-permis: ~3 zile (ce ai văzut se uită repede)
+    case 'auditory': return 7 * ZI // hardcod-permis: ~1 săptămână (evenimentele sonore mai durabile)
     default: return 365 * ZI // hardcod-permis: memorie veche fără tip — ~1 an
   }
 }

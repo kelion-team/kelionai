@@ -22,7 +22,7 @@ import {
 import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectChatStream } from './geminiDirect.js'
 import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage } from './brainContract.js'
 
-export type TreaptaRationament = 'rapid' | 'lucru' | 'plan'
+export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'ultra' | 'plan'
 
 export interface OptiuniRationament {
   /** Cine cheamă — obligatoriu pentru jurnal unitar (rută/serviciu). */
@@ -41,7 +41,10 @@ export interface OptiuniRationament {
 
 function modelPentru(treapta: TreaptaRationament): string {
   if (treapta === 'rapid') return config.brain.chatDefault
-  // lucru + plan: creierul de munc? (Pro / unic) ? acela?i pentru chat greu, autonomie, plan constructor
+  if (treapta === 'lucru') return config.brain.workDefault
+  if (treapta === 'profund') return config.brain.profundDefault
+  if (treapta === 'ultra') return config.brain.ultraDefault
+  // plan: creierul de munc? (Pro / unic) ? acela?i pentru chat greu, autonomie, plan constructor
   return config.brain.workDefault
 }
 

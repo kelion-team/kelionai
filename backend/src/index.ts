@@ -57,8 +57,14 @@ import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
 import { jobsRoutes } from './routes/jobs.js'
 import { offlineRoutes } from './routes/offline.js'
+import { vedereRoutes } from './routes/vedere.js'
+import { auzRoutes } from './routes/auz.js'
+import { emotieRoutes } from './routes/emotie.js'
 import { deployRoutes } from './routes/deploy.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive, loadKv, saveKv } from './db.js'
+import { salveazaMemorieSensoriala } from './services/memorieSensoriala.js'
+import { pornesteMonitorizareaRezilientei, stareRezilinta } from './services/rezilientaCreier.js'
+import { pornesteProactivitatea, type NotificareProactiva } from './services/proactivitate.js'
 import { esteBazaIndisponibila } from './dbConexiune.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
@@ -346,6 +352,9 @@ await app.register(browserRoutes)
 await app.register(opsRoutes)
 await app.register(constructorRoutes)
 await app.register(offlineRoutes)
+await app.register(vedereRoutes)
+await app.register(auzRoutes)
+await app.register(emotieRoutes)
 await app.register(authLocalRoutes)
 await app.register(contactRoutes)
 await app.register(voiceprintRoutes)
@@ -420,6 +429,51 @@ setTimeout(() => {
   }
   void tick()
   setInterval(() => { void tick() }, 10 * 60_000)
+
+  // MEMORIA SENZORIALĂ (22 aug): salvează periodic observațiile vizuale și
+  // evenimentele sonore ca memorie tipizată (visual/auditory) pentru owner.
+  // Best-effort — dacă nu e nimic semnificativ, nu salvează (nu înecă memoria).
+  setInterval(() => {
+    void salveazaMemorieSensoriala(config.adminEmail).catch(() => {})
+  }, 2 * 60_000)
+
+  // REZILIENȚA CREIERULUI (22 aug): monitorizează Gemini + Ollama, comută
+  // automat pe fallback când Gemini pică.
+  pornesteMonitorizareaRezilientei()
+
+  // Ruta pentru starea rezilienței (monitoring)
+  app.get('/api/creier/stare', async (_req, reply) => {
+    return reply.send(stareRezilinta())
+  })
+
+  // PROACTIVITATE (22 aug): SSE pentru notificări proactive — Kelion trimite
+  // alerte când detectează ceva demn de atenție (urgente sonore, schimbări
+  // emoționale, observații vizuale). Clientul le afișează ca toast.
+  const abonatiProactivi: ((n: NotificareProactiva) => void)[] = []
+  pornesteProactivitatea((n) => {
+    for (const cb of abonatiProactivi) {
+      try { cb(n) } catch { /* tăcut */ }
+    }
+  })
+  app.get('/api/proactiv/stream', { websocket: false }, async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    })
+    const cb = (n: NotificareProactiva) => {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(n)}\n\n`)
+      } catch { /* client deconectat */ }
+    }
+    abonatiProactivi.push(cb)
+    req.raw.on('close', () => {
+      const idx = abonatiProactivi.indexOf(cb)
+      if (idx >= 0) abonatiProactivi.splice(idx, 1)
+    })
+  })
 }, 30_000)
 
 // Download endpoint: the installer MASTER lives on the Linux server and is

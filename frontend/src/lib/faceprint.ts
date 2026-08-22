@@ -72,6 +72,7 @@ const FRESH_MS = 8000 // un descriptor mai vechi de atât e considerat expirat
 export function startFaceSampling(
   video: HTMLVideoElement,
   capture: () => string | null,
+  onLandmark?: (lm: { positions: Array<{ x: number; y: number }> } | null) => void,
 ): () => void {
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -138,6 +139,10 @@ export function startFaceSampling(
                 photo: capture() || '',
                 at: Date.now(),
               }
+            }
+            // 22 aug: expune landmark-ul pentru detecția emoțională
+            if (onLandmark) {
+              onLandmark(det?.landmarks ?? null)
             }
           }
         }

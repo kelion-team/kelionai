@@ -21,15 +21,20 @@ export function isTransientBrainError(err: unknown): boolean {
   )
 }
 
-// The expert's model ladder — Gemini-only: work → top (flash → pro). Extra
-// rungs from env (BRAIN_EXPERT_FALLBACKS) are accepted ONLY if they are
-// google-direct/* — anything else (an old OpenRouter id left in env) is
-// silently dropped, so the ladder can never route to a dead provider.
+// The expert's model ladder — Gemini-only, 4 trepte (22 aug 2026, owner:
+// „escaladări pe modele superioare"): work (flash) → profund (Pro) → ultra.
+// Când flash pică (429/saturat), urcă automat pe Pro. Când Pro pică, urcă pe
+// ultra. Extra rungs din env (BRAIN_EXPERT_FALLBACKS) acceptate DOAR dacă sunt
+// google-direct/* — orice altceva e ignorat.
 export function expertModelLadder(): string[] {
-  // SIGILAT (6 aug, regula ultra-decisă): UN SINGUR model unic — fără trepte din env
-  // (BRAIN_EXPERT_FALLBACKS a fost scos: nimeni nu mai injectează alt model). Toate
-  // treptele config = același model unic, deci scara are exact o treaptă.
-  return [config.brain.workDefault]
+  // 4 TREPTE: flash → Pro → ultra. Fără duplicate (dacă Pro = ultra, o singură treaptă).
+  const rungs = [config.brain.workDefault, config.brain.profundDefault, config.brain.ultraDefault]
+  // Dedup păstrând ordinea: dacă work = profund (ex. ambele flash), nu dublăm.
+  const unice: string[] = []
+  for (const r of rungs) {
+    if (!unice.includes(r)) unice.push(r)
+  }
+  return unice
 }
 
 // The one call every rung goes through: strips the google-direct/ prefix and
@@ -259,6 +264,7 @@ export async function verifyModels(): Promise<Record<string, string>> {
   return {
     [config.brain.chatDefault]: await ping(config.brain.chatDefault),
     [config.brain.workDefault]: await ping(config.brain.workDefault),
+    [config.brain.profundDefault]: await ping(config.brain.profundDefault),
   }
 }
 

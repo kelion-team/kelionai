@@ -1,0 +1,5 @@
+# Forțează LF peste tot — previne conversia LF→CRLF pe Windows (core.autocrlf=true),
+# care strică regex-urile cu `\n` din teste (chat.ts etc. ajunge cu \r\n pe disk,
+# iar `.` în JS nu se potrivește cu `\r` → comentariile nu se curăță, regex-urile
+# cu `\n` nu se potrivesc). Standard pentru repo-uri cross-platform.
+* text=auto eol=lf

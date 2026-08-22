@@ -430,6 +430,36 @@ const GET_MONITOR_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} }
 }
 
+// VEDEREA CONTINUĂ (22 aug 2026, owner: „simte mediul"): ultimele observații
+// vizuale ale lui Kelion — ce a văzut din cameră în ultimele 5 minute (mișcare,
+// locație, timestamp). Nu înlocuiește `look` (cadru la cerere) — dă CONTEXT.
+const OBSERVATII_VIZUALE_TOOL: Tool = {
+  name: 'observatii_vizuale',
+  description:
+    "Returns Kelion's RECENT visual observations from the continuous vision system — what it has SEEN from the camera in the last 5 minutes (motion intensity, location, timestamps). Use this when the user asks \"ce ai văzut azi\", \"ai observat ceva\", \"ce s-a întâmplat în cameră\" or when visual context would help the conversation. Returns a list of observations with motion levels and locations. If the continuous vision is not active, it says so honestly.",
+  input_schema: { type: 'object', properties: {} }
+}
+
+// AUZUL AMBIENTAL (22 aug 2026): evenimentele sonore detectate de Kelion în
+// fundal — alarmă, sonerie, ciocănit, plâns, spargere, conversație, muzică.
+// Pentru „ce ai auzit", „s-a auzit ceva?", sau când contextul sonor contează.
+const EVENIMENTE_SONORE_TOOL: Tool = {
+  name: 'evenimente_sonore',
+  description:
+    "Returns Kelion's RECENT auditory events from the ambient hearing system — sounds detected in the last 10 minutes (alarms, doorbells, knocking, crying, glass breaking, conversation, music, silence). Use this when the user asks \"ce ai auzit\", \"s-a auzit ceva\", \"a sunat cineva\" or when auditory context would help. Returns events with type, intensity, and timestamp. Urgent events (alarm, breaking, crying) are flagged. If ambient hearing is not active, it says so honestly.",
+  input_schema: { type: 'object', properties: {} }
+}
+
+// STAREA EMOȚIONALĂ (22 aug 2026): emoția detectată din expresia facială a
+// utilizatorului — vesel, supărat, surprins, trist, calm, stresat. Pentru
+// adaptarea tonului răspunsului la starea emoțională a omului.
+const STARE_EMOTIONALA_TOOL: Tool = {
+  name: 'stare_emotionala',
+  description:
+    "Returns the user's RECENT emotional state detected from facial expression — happy, upset, surprised, sad, calm, stressed. Use this to ADAPT your tone: calm and empathetic when upset, energetic when happy, concise when stressed. Returns the current emotion, its intensity, and the dominant emotion over the last 10 minutes. If emotional detection is not active, it says so honestly.",
+  input_schema: { type: 'object', properties: {} }
+}
+
 // ARATĂ PE GRAFIC — POINTERI DE INDICAȚIE (10 aug, ownerul: „el când explică
 // trebuie să arate clar pe monitor ce zice, adică poziționează pointeri de
 // indicație"). Kelion NU doar spune nivelurile — le DESENEAZĂ pe graficul din
@@ -2607,7 +2637,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...googleTools,
           ...escalationTools,
           // Bază + vedere
-          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL,
+          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, OBSERVATII_VIZUALE_TOOL, EVENIMENTE_SONORE_TOOL, STARE_EMOTIONALA_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL,
           // L1e: procesare de date tabelare (CSV/JSON) — capabilitate generală, în zona de aur.
           PROCESEAZA_DATE_TOOL,
           // Messenger Kelion↔Kelion: „apelează-l pe X" (conversațional, gold zone).
@@ -2653,7 +2683,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
           ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, OBSERVATII_VIZUALE_TOOL, EVENIMENTE_SONORE_TOOL, STARE_EMOTIONALA_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -2994,6 +3024,63 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
               : activ?.url
                 ? 'Tabul activ afișează un URL/o suprafață media; nu are text de citit — descrie ce e după titlu/URL.'
                 : 'Nimic de citit pe monitor acum.',
+          })
+        }
+
+        // VEDEREA CONTINUĂ (22 aug): ultimele observații vizuale ale lui Kelion
+        if (name === 'observatii_vizuale') {
+          const { observatiiRecente, numarObservatii } = await import('../services/vedereContinua.js')
+          const obs = observatiiRecente()
+          const total = numarObservatii()
+          if (obs.length === 0) return JSON.stringify({ observatii: [], nota: 'Nu am observații vizuale recente — vederea continuă nu e activă sau nu a detectat mișcare.' })
+          return JSON.stringify({
+            total_observatii: total,
+            observatii: obs.map((o) => ({
+              acum: `${Math.round((Date.now() - o.ts) / 1000)}s în urmă`,
+              miscare: o.miscare,
+              locatie: o.lat ? `${o.lat.toFixed(4)}, ${o.lon?.toFixed(4)}` : 'necunoscută',
+            })),
+            nota: 'Acestea sunt observațiile vizuale continue din ultimele 5 minute — ce a văzut Kelion din mediu.',
+          })
+        }
+
+        // AUZUL AMBIENTAL (22 aug): evenimentele sonore detectate de Kelion
+        if (name === 'evenimente_sonore') {
+          const { evenimenteSonoreRecente, evenimenteUrgente } = await import('../services/auzAmbiental.js')
+          const ev = evenimenteSonoreRecente()
+          const urg = evenimenteUrgente()
+          if (ev.length === 0) return JSON.stringify({ evenimente: [], nota: 'Nu am evenimente sonore recente — auzul ambiental nu e activ sau nu s-a detectat nimic.' })
+          return JSON.stringify({
+            total: ev.length,
+            urgente: urg.length,
+            evenimente: ev.map((e) => ({
+              acum: `${Math.round((Date.now() - e.ts) / 1000)}s în urmă`,
+              tip: e.tip,
+              intensitate: e.intensitate,
+              frecventa: e.frecventaDominanta,
+              urgent: ['alarma', 'spargere', 'plans'].includes(e.tip),
+            })),
+            nota: urg.length > 0 ? 'ATENȚIE: evenimente URGENTE detectate — alarmă, spargere sau plâns.' : 'Acestea sunt evenimentele sonore din ultimele 10 minute.',
+          })
+        }
+
+        // STAREA EMOȚIONALĂ (22 aug): emoția detectată din expresia facială
+        if (name === 'stare_emotionala') {
+          const { stariEmotionaleRecente, emotieDominanta, ultimaStareEmotionala } = await import('../services/memorieEmotionala.js')
+          const stari = stariEmotionaleRecente()
+          const dominanta = emotieDominanta()
+          const ultima = ultimaStareEmotionala()
+          if (stari.length === 0) return JSON.stringify({ stare: 'neutru', nota: 'Nu am detecții emoționale recente — camera/detecția facială nu e activă.' })
+          return JSON.stringify({
+            curenta: ultima?.emotie ?? 'neutru',
+            intensitate: ultima?.intensitate ?? 0,
+            dominanta_10min: dominanta ?? 'neutru',
+            istoric: stari.map((s) => ({
+              acum: `${Math.round((Date.now() - s.ts) / 1000)}s în urmă`,
+              emotie: s.emotie,
+              intensitate: s.intensitate,
+            })),
+            nota: 'Adaptează-ți tonul la starea emoțională: calm/empatic la supărat, energic la vesel, concis la stresat.',
           })
         }
 

@@ -224,13 +224,15 @@ const FOOTER = 'Kelionai — kelionai.app'
 const GROUP_TITLES: Record<string, string> = {
   google: 'Google, search and everyday answers',
   vedere: 'Eyes and awareness',
+  auz: 'Hearing and ambient sound',
+  emotie: 'Emotional awareness',
   afisare: 'Showing things on screen',
   memorie: 'Notes and memory',
   browser: 'Browsing the web for you',
   cod: 'Deeper thinking',
   diverse: 'Other',
 }
-const GROUP_ORDER = ['google', 'vedere', 'afisare', 'memorie', 'browser', 'cod', 'diverse']
+const GROUP_ORDER = ['google', 'vedere', 'auz', 'emotie', 'afisare', 'memorie', 'browser', 'cod', 'diverse']
 
 /** What each capability does + a phrase you'd ask for it with, in plain human
  *  terms. The registry says WHAT EXISTS; here is only HOW IT'S EXPLAINED. The
@@ -274,6 +276,9 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
 
   // Eyes and grounding
   look: { what: 'Looks through your camera at you or at what you show it', say: '"what is this part?"' },
+  observatii_vizuale: { what: 'Recalls what Kelion has seen recently from the continuous vision system', say: '"what have you noticed today?"' },
+  evenimente_sonore: { what: 'Recalls sounds Kelion heard recently from the ambient hearing system', say: '"did you hear something?"' },
+  stare_emotionala: { what: 'Reads your emotional state from your facial expression to adapt its tone', say: '"how do I seem to you?"' },
   get_monitor: { what: 'Checks what is actually on your screen right now', say: '"what am I looking at?"' },
   click_monitor: { what: 'Clicks a precise spot on your screen', say: '"click at coordinates 300 400"' },
   zoom_monitor: { what: 'Zooms in or out on your screen', say: '"zoom in on the page"' },

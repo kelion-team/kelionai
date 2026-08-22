@@ -15,11 +15,11 @@ import { fileURLToPath } from 'node:url'
 //     dar păzit ca să nu fie scos „din greșeală";
 //   • operațiile sensibile (card/bani) rămân gardate de potrivirea reală holder.
 // Testele de mai jos păzesc noul contract: NIMIC în calea vocii nu blochează audio-ul.
-const voce = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/realtimeVoice.ts', import.meta.url)), 'utf8')
-const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
-const realtime = readFileSync(fileURLToPath(new URL('./routes/realtime.ts', import.meta.url)), 'utf8')
-const oaspeti = readFileSync(fileURLToPath(new URL('./services/guestVoices.ts', import.meta.url)), 'utf8')
-const health = readFileSync(fileURLToPath(new URL('./services/health.ts', import.meta.url)), 'utf8')
+const voce = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/realtimeVoice.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+const realtime = readFileSync(fileURLToPath(new URL('./routes/realtime.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+const oaspeti = readFileSync(fileURLToPath(new URL('./services/guestVoices.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+const health = readFileSync(fileURLToPath(new URL('./services/health.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 
 describe('calea vocii merge DIRECT la creier (fără verdict de timbru în cale)', () => {
   it('fraza pleacă DIRECT la creier — NICIUN verdict de timbru în cale (Adrian, 6 aug)', () => {
@@ -113,8 +113,8 @@ describe('amprentele supraviețuiesc upgrade-urilor', () => {
 // masculin" — amprenta lui sărea male↔female pentru că FIECARE tură potrivită
 // rescria referința cu citirea curentă (uneori armonica greșită).
 describe('amprenta titularului nu mai oscilează', () => {
-  const db = readFileSync(fileURLToPath(new URL('./db.ts', import.meta.url)), 'utf8')
-  const audio = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/audioIO.ts', import.meta.url)), 'utf8')
+  const db = readFileSync(fileURLToPath(new URL('./db.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+  const audio = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/audioIO.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 
   it('genul se deduce din pitch-ul MEDIAN, nu din medie (spike-urile trackeriului nu mai răstoarnă genul)', () => {
     expect(audio).toMatch(/pitchMedian/)

@@ -8,6 +8,9 @@ import {
   type Facing,
 } from '../lib/camera'
 import { startFaceSampling } from '../lib/faceprint'
+import { pornesteVedereaContinua, opresteVedereaContinua } from '../lib/vedereContinua'
+import { pornesteAuzulAmbiental, opresteAuzulAmbiental } from '../lib/auzAmbiental'
+import { pornesteDetectiaEmotionala, opresteDetectiaEmotionala } from '../lib/detectieEmotionala'
 import { getTeava, calitateCamera } from '../lib/retea'
 import { raporteazaPozaVizitei } from '../lib/vizita'
 
@@ -78,6 +81,8 @@ export default function CameraView({
           faceStopRef.current = startFaceSampling(
             videoRef.current,
             () => captureRef?.current?.() ?? null,
+            // 22 aug: pasez landmark-ul către detecția emoțională
+            (lm) => { if (lm) pornesteDetectiaEmotionala(async () => lm) },
           )
         }
         // POZA VIZITEI (P3; owner, 15 aug: „de ce nu e legata de vizitator
@@ -85,6 +90,12 @@ export default function CameraView({
         // pleacă spre rândul vizitei. La 1,5s, ca senzorul să apuce să expună
         // (primul cadru după pornire iese des negru). Best-effort.
         setTimeout(() => raporteazaPozaVizitei(videoRef.current), 1500)
+        // VEDEREA CONTINUĂ (22 aug): pornește sampling-ul de mediu — Kelion
+        // „simte" ce se întâmplă în cadru între chemări. Invizibil, best-effort.
+        pornesteVedereaContinua(stream)
+        // AUZUL AMBIENTAL (22 aug): detectează evenimente sonore în fundal.
+        // Best-effort — dacă microfonul e ocupat de sesiunea live, nu pornește.
+        void pornesteAuzulAmbiental()
       } catch (err) {
         // If our own cleanup aborted the request, this is not a real error.
         if (controller.signal.aborted) return
@@ -101,6 +112,9 @@ export default function CameraView({
       controller.abort()
       faceStopRef.current?.()
       faceStopRef.current = null
+      opresteVedereaContinua()
+      opresteAuzulAmbiental()
+      opresteDetectiaEmotionala()
       stopStream(streamRef.current)
       streamRef.current = null
     }

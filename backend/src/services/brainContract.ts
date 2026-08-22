@@ -1,4 +1,4 @@
-import { modelUnicDirect, modelRapidDirect } from '../config.js'
+import { modelUnicDirect, modelRapidDirect, modelProfundDirect, modelUltraDirect } from '../config.js'
 
 // ── CONTRACTUL CREIERULUI — tipuri + reguli PURE, fără rețea ─────────────────
 // (Extirparea totală OpenRouter + OpenAI, 3 aug — ordinul repetat al ownerului:
@@ -12,9 +12,13 @@ import { modelUnicDirect, modelRapidDirect } from '../config.js'
 // specific unui furnizor — s-a mutat aici. Numele `Or*` rămân: sunt formatul
 // „al casei" (stil OpenAI-chat), folosit în zeci de fișiere și teste.
 
-// 'top' = ultima treaptă a scării (escaladarea grea) — validată la fel ca
-// 'work'; diferă doar defaultul (gemini-2.5-pro).
-export type ModelTier = 'chat' | 'work' | 'top'
+// 4 TREPTE (22 aug 2026, owner: „escaladări pe modele superioare"):
+//   chat = flash-lite (vorbă simplă, 0.6s)
+//   work = flash (gândire + unelte + vedere)
+//   profund = Pro (raționament complex, cod, strategie)
+//   ultra = env-configurable (probleme maximale)
+// 'top' rămâne ca alias pentru compatibilitate → profund.
+export type ModelTier = 'chat' | 'work' | 'profund' | 'ultra' | 'top'
 
 // ── THE CONTRACT OF A BRAIN CALL (Batch B) ────────────────────────────────────
 // A turn's knobs were written LITERALLY in 7 signatures. It wasn't negligence:
@@ -105,13 +109,13 @@ export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: 
  *  e google-direct/*, nu-l lăsăm să deraieze creierul — cădem pe defaultul din
  *  cod (lacătul Gemini, 3 aug). */
 function fallbackTreapta(tier: ModelTier): string {
-  // DOUĂ SLOTURI, SIGILATE (7 aug — măsurat de owner pe cheia lui: chat pe Pro =
-  // 3,6s…45s; pe flash-lite = 0,6s, cu unelte+vedere+auz intacte). Treapta de CHAT
-  // merge pe modelul RAPID; `work` și `top` rămân pe Pro, unde se face gândirea
-  // grea (agenți, autonomie, și escaladarea `ask_brain` chemată din chat).
-  // Sursa rămâne config-ul, în cod, FĂRĂ env — fiecare slot cu poarta lui de familie.
+  // 4 TREPTE (22 aug): chat = flash-lite, work = flash, profund = Pro, ultra = top.
+  // 'top' rămâne alias pe profund pentru compatibilitate cu codul existent.
   if (tier === 'chat') return modelRapidDirect()
-  return modelUnicDirect()
+  if (tier === 'work') return modelUnicDirect()
+  if (tier === 'ultra') return modelUltraDirect()
+  // 'profund' și 'top' → Pro
+  return modelProfundDirect()
 }
 
 export async function resolveModelChecked(

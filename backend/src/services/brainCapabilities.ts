@@ -159,6 +159,9 @@ export const CAPABILITIES: readonly Capability[] = [
 
   // 2.6 Sight & place
   { name: 'look', category: 'vedere', does: 'camera (vede utilizatorul / ce i se arată)', chat: false, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'observatii_vizuale', category: 'vedere', does: 'ultimele observații vizuale continue (ce a văzut Kelion în ultimele 5 min — mișcare, locație, timestamp)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'evenimente_sonore', category: 'auz', does: 'evenimente sonore ambientale (alarmă, sonerie, ciocănit, plâns, spargere — ce a auzit Kelion în ultimele 10 min)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'stare_emotionala', category: 'emotie', does: 'starea emoțională a utilizatorului din expresia facială (vesel, supărat, surprins, trist, calm, stresat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'get_monitor', category: 'vedere', does: 'ce e FAPTIC pe monitor (conținutul tabului activ)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'click_monitor', category: 'vedere', does: 'dă click la coordonate x,y pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'zoom_monitor', category: 'vedere', does: 'mărește/micșorează (zoom) pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },

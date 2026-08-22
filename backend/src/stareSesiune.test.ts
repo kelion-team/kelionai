@@ -56,7 +56,7 @@ describe('starea de sesiune se citește o dată, nu la fiecare întrebare', () =
 })
 
 describe('chat.ts chiar folosește starea, și NU slăbește securitatea', () => {
-  const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
+  const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 
   it('preferințele de cont vin din starea sesiunii, nu dintr-o citire per-tură', () => {
     expect(chat).toMatch(/const cache = stareSesiune\(user\.email, acumMs\)/)
