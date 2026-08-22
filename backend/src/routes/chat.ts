@@ -2921,12 +2921,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         } catch {
           input = {}
         }
-        // FIECARE PAS PE MONITOR (owner, 14 aug): pe turele de EXECUȚIE, fiecare
-        // unealtă chemată se anunță PE LOC ca frame {executie} — numele pasului
-        // vine din inventarul de capabilități (o singură sursă, nu o listă
-        // paralelă), procentul urcă asimptotic (totalul nu se știe dinainte) și
-        // 100% îl scrie DOAR interceptorul de end, la închiderea reală a turei.
-        if (cereActiune) {
+        // FIECARE PAS PE MONITOR — LA ORICE UNEALTĂ (owner, 14 aug „să arate
+        // fiecare pas" + 22 aug, pe captura cu știrile: „trebuie sa apara o
+        // clepsidra care arata ca cauta"): numele pasului vine din inventarul
+        // de capabilități (o singură sursă), procentul urcă asimptotic
+        // (totalul nu se știe dinainte) și 100% îl scrie DOAR interceptorul
+        // de end, la închiderea reală a turei. Gardul vechi `if (cereActiune)`
+        // e SCOS: o căutare de știri fără verb de acțiune nu arăta NIMIC cât
+        // lucra — omul stătea în fața unui ecran mut, exact ce a măsurat.
+        {
           pasiExecutie += 1
           const capabilitate = CAPABILITIES.find((c) => c.name === name)
           // Ownerul, 21:42 („trebuie sa apara la text generare sau reparare sa

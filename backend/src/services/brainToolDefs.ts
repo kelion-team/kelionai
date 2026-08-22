@@ -694,7 +694,7 @@ export const JULES_REPOS_TOOL: Tool = {
 export const JULES_TASK_TOOL: Tool = {
   name: 'jules_task',
   description:
-    "ADMIN ONLY. Give Jules (Google's official async coding agent) a task on a connected repo: it works in an isolated Google VM and opens a PR. The merge stays with the owner. Use jules_repos first for the exact source name.",
+    "ADMIN ONLY. NOT the constructor — DEVIN is (use build_software for any repair/code order; this tool REFUSES while Devin is configured). Jules is a silent backup coding agent, callable only when the owner explicitly names Jules and Devin is unconfigured. Use jules_repos first for the exact source name.",
   input_schema: {
     type: 'object',
     properties: {

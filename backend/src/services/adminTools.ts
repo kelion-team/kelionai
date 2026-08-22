@@ -13,6 +13,7 @@
 // adminUnlocked via voiceprint in voice) — this function does NOT gate, it
 // only executes.
 
+import { config } from '../config.js'
 import { listSource, readSource, searchSource } from './sourceCode.js'
 import { dbTablesOverview, dbQuery, memoriePune, memorieIa, memorieLista } from '../db.js'
 import { systemHealth } from './health.js'
@@ -145,7 +146,21 @@ export async function execSharedAdminTool(
       const stare = await julesServeste()
       return stare.ok ? julesSurse() : `Jules nu servește acum: ${stare.detaliu}`
     }
-    case 'jules_task': return julesSarcina(String(args.prompt ?? ''), String(args.sursa ?? ''), args.ramura ? String(args.ramura) : 'master')
+    case 'jules_task': {
+      // CONSTRUCTORUL E DEVIN (owner, 22 aug, pe live: „kelion trimite catre
+      // jules err si nu lui devin"): cât cheia Devin e pusă, ordinele de
+      // cod/reparație NU pleacă la Jules — poartă în COD, nu instrucțiune în
+      // fișă (modelul alegea singur jules_task pentru erori). Jules rămâne
+      // rezerva tăcută din 15 aug: se redeschide doar dacă ownerul scoate
+      // cheia Devin sau cere explicit ridicarea gărzii.
+      if (config.devinKey) {
+        return JSON.stringify({
+          error: 'constructorul_e_devin',
+          message: 'Ordinele de reparație/cod merg la DEVIN (unealta build_software) — Jules e rezervă tăcută cât timp cheia Devin e pusă. Reformulează ordinul prin build_software.',
+        })
+      }
+      return julesSarcina(String(args.prompt ?? ''), String(args.sursa ?? ''), args.ramura ? String(args.ramura) : 'master')
+    }
     case 'jules_status': return julesStare(String(args.sesiune ?? ''))
     // ── POARTA OBLIGATORIE (Adrian, 8 aug: „va trebui să folosească OBLIGATORIU
     // toate testele și să măsoare orice răspuns") ──────────────────────────────

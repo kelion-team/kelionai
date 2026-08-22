@@ -74,4 +74,16 @@ describe('lanțul Devin — fiecare za, pe cod viu', () => {
     expect(dispecer).toMatch(/PR gata: \$\{prog\.prUrl\}/)
     expect(dispecer).toMatch(/instiinteazaAdmin\('scris', `Devin a terminat ordinul/)
   })
+
+  it('za 8: erorile NU pleacă la Jules — jules_task refuză cât cheia Devin e pusă', () => {
+    // Owner, 22 aug, măsurat pe live: „kelion trimite catre jules err si nu
+    // lui devin". Poarta e în COD (adminTools), nu în fișa uneltei — modelul
+    // alegea singur jules_task pentru reparații.
+    const adminTools = codViu('services/adminTools.ts')
+    expect(adminTools).toMatch(/case 'jules_task': \{\s*if \(config\.devinKey\) \{/)
+    expect(adminTools).toMatch(/constructorul_e_devin/)
+    // ...iar fișa spune adevărul, ca modelul să nu-l mai aleagă:
+    const defs = codViu('services/brainToolDefs.ts')
+    expect(defs).toMatch(/NOT the constructor — DEVIN is/)
+  })
 })
