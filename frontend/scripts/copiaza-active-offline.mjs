@@ -21,13 +21,27 @@ const radacina = join(dirname(fileURLToPath(import.meta.url)), '..')
 // Setul minim pe care backend-ul WASM al ORT 1.18 îl poate cere (simd
 // threaded/nethreaded + fallback fără simd). JSEP/training NU — Piper merge pe
 // CPU-wasm, nu pe WebGPU.
+// piper_phonemize.{wasm,data} NU mai vin de aici: pachetul-donor
+// (@diffusionstudio/piper-wasm) are 235 MB despachetat și umfla `npm ci` din
+// build-ul Docker spre plafonul de 30 min (publicarea din 22 aug a rămas în
+// urmă fix după adăugarea lui) — cele DOUĂ fișiere necesare (18,6 MB) sunt
+// COMISE în git sub public/piper/, iar dependența a fost scoasă.
 const ACTIVE = [
   ['node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm', 'public/ort/ort-wasm-simd-threaded.wasm'],
   ['node_modules/onnxruntime-web/dist/ort-wasm-simd.wasm', 'public/ort/ort-wasm-simd.wasm'],
   ['node_modules/onnxruntime-web/dist/ort-wasm.wasm', 'public/ort/ort-wasm.wasm'],
-  ['node_modules/@diffusionstudio/piper-wasm/build/piper_phonemize.wasm', 'public/piper/piper_phonemize.wasm'],
-  ['node_modules/@diffusionstudio/piper-wasm/build/piper_phonemize.data', 'public/piper/piper_phonemize.data'],
 ]
+
+// Fișierele Piper comise: dacă lipsesc din arbore, build-ul pică TARE — un kit
+// fără fonemizator ar însemna gură offline moartă descoperită abia pe device.
+for (const f of ['public/piper/piper_phonemize.wasm', 'public/piper/piper_phonemize.data']) {
+  try {
+    await stat(join(radacina, f))
+  } catch {
+    console.error(`[kit-offline] LIPSĂ ${f} — fișier comis în git, nu se regenerează; vezi istoricul din 22 aug`)
+    process.exit(1)
+  }
+}
 
 let copiate = 0
 for (const [sursa, tinta] of ACTIVE) {
