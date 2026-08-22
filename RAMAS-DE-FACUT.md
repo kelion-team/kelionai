@@ -250,8 +250,16 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               ≥5 închideri + garda inchis + respingeri logate). RĂMAS pt.
               bifă: verdictele finale ale celor 2 agenți + merge + măsurat
               live.
-      - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce —
-              v1 CONSTRUIT pe branch (22 aug noaptea), apoi REPARAT după runda
+      - [x] 5. monitorul: predare scurtă + afișare, fără citire cu voce —
+              PASS dublu adversarial + MERGE (PR #1327) + PUBLICAT LIVE,
+              MĂSURAT 22 aug 02:30Z: /api/version → v=b99fad6 (exact commitul
+              merge-ului), ver 7.1, publicat 02:07:42Z. Ce rămâne „nu pot
+              verifica" de aici (/api/vocal-live/stare după conversații reale
+              + proba owner-ului): pulsVoce.usiCuDoc/predariEcran în mișcare
+              REALĂ, gradul de ascultare a predării de către modelul Live,
+              acceptarea obiectului imbricat de către Google (primul de felul
+              lui pe drumul ăsta). v1 CONSTRUIT pe branch (22 aug noaptea),
+              apoi REPARAT după runda
               celor 3 agenți (integrare PASS, logică FAIL, onestitate FAIL —
               ambele FAIL-uri pe ACEEAȘI minciună mecanică: formula „conținutul
               e DEJA afișat pe monitor" era falsă pe ramurile în care suprafața

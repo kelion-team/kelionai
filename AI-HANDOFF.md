@@ -1462,8 +1462,13 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    hardcodări/sintaxă/exporturi verzi; contoare: registru 123, matrice 125,
    rând nou de manual.
 6f. **JARVIS pasul 5 — monitorul: predare scurtă, fără citire cu voce
-   (PROIECT-CHAT-VOCE §8) — v1 CONSTRUIT (22 aug noaptea), în verificarea
-   celor 3 agenți**: cercetașul a măsurat că ecranul și gura erau complet
+   (PROIECT-CHAT-VOCE §8) — PASS dublu adversarial + MERGE (PR #1327) +
+   PUBLICAT LIVE, MĂSURAT 22 aug 02:30Z: /api/version → v=b99fad6 (exact
+   commitul merge-ului), ver 7.1, publicat 02:07:42Z (rămân „nu pot
+   verifica" de aici: contoarele în mișcare reală, ascultarea predării de
+   către modelul Live, acceptarea obiectului imbricat de Google — proba pe
+   dispozitiv / /api/vocal-live/stare după conversații reale)**: cercetașul
+   a măsurat că ecranul și gura erau complet
    independente — același text pleca simultan pe monitor și în poziția
    „rezultat de spus" a modelului Live, cu recitarea oprită DOAR de
    instrucțiune. RUNDA CELOR 3 AGENȚI (integrare PASS, logică FAIL,
