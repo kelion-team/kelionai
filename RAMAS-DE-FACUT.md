@@ -137,6 +137,31 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
         apăreau ca text brut portocaliu — mapate acum (Credits +
         CustomerSettings, en/ro); comentariul stătut din prefs.ts despre
         rândul (n) adus la zi.
+      **ORDINELE DIN 22 AUG, DIMINEAȚA (owner, în timpul lucrului — 6 mesaje,
+      verbatim, LEGE peste tot ce urmează):**
+      1. „cind este in mod ofline, funtiile dedicate de internet nu trebuiesc
+         sa se reafiseze, ele sunt afisate doar cind aplicatia e live" —
+         FĂCUT (commit pe branch, lacăt offlineAscunde.test.ts): microfonul
+         (compozitor + mașină), meniul „+" (📎/📷/🎬), meniul „Aplicații",
+         portofelul + „Add credits" stau după `online` (pingul REAL /health,
+         useConectat); ușa din dos paste/drop de fișiere închisă și ea.
+         Reapar singure la revenirea rețelei. MĂSURAT: frontend tsc 0,
+         17 fișiere / 105 teste, build verde; live după merge.
+      2. „sau daca se pot instala biblioteci pentru ofline sa se instaleza sa
+         poata lucra ofline, doawload automat de ofline" — DEBLOCHEAZĂ pasul 7
+         felia B (gura Piper WASM + lip-sync) și evaluarea feliei C1 (urechea
+         Vosk): unde biblioteca există, funcția se face să MEARGĂ offline (cu
+         download automat, ca creierul); unde nu, rămâne regula 1 (ascunsă).
+         Angajament ținut: stand local Playwright + măsurători ÎNAINTE de merge.
+      3. „funtiile care sunt in aplicatii nefunctionale se repara integral cu
+         proba, ce nu funtioneaza garantat se scoate total daca nu exista
+         dovada" + „dar repet dupa reparatii si incercari reale de reparare" +
+         „acelasi principiu aplici pe toata aplicatia, 0 minciuna 0 cod mort
+         0 pacaleala ca avem in aplicatie" + „vreau sa ramina ce merge dovedit"
+         + „si masurat" — CRITERIUL FINALIZĂRII, întărit: întâi reparația cu
+         probă (încercări REALE), abia apoi scoaterea a ce nu se poate dovedi;
+         la final rămâne doar ce merge DOVEDIT și MĂSURAT. Registrul viu de
+         mai sus (MAREA VERIFICARE) e exact lista de lucru a acestui ordin.
       Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).

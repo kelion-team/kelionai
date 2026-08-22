@@ -1147,6 +1147,11 @@ export default function ChatPanel({
   // We read BOTH sources → the pasted capture is caught every time. Dedup on
   // (name+size) so we don't add the same image twice.
   function onPasteFiles(e: ReactClipboardEvent): void {
+    // OFFLINE (owner, 22 aug): atașarea de fișiere e funcție de internet
+    // (vision/MarkItDown pe server) — butonul 📎 e ascuns, iar lipirea NU
+    // trebuie să intre pe ușa din dos: un fișier atașat offline ar pleca
+    // spre nicăieri. Textul lipit trece normal (nu chemăm preventDefault).
+    if (!esteConectat()) return
     const seen = new Set<string>()
     const collected: File[] = []
     for (const f of e.clipboardData.files) {
@@ -1171,6 +1176,7 @@ export default function ChatPanel({
     }
   }
   function onDropFiles(e: ReactDragEvent): void {
+    if (!esteConectat()) return // aceeași regulă ca la onPasteFiles (22 aug)
     const all = [...e.dataTransfer.files]
     if (all.length > 0) {
       e.preventDefault()
@@ -3239,7 +3245,14 @@ export default function ChatPanel({
   // BUTONUL DE MICROFON — o SINGURĂ definiție, folosită și în compozitor și în
   // stratul de mașină (fără cod duplicat, poarta jscpd). Diferă doar clasa CSS;
   // starea (listening), acțiunea (toggleMic) și eticheta sunt aceleași peste tot.
-  const micButton = (cls: string) => (
+  // OFFLINE = FĂRĂ MICROFON (owner, 22 aug: „cind este in mod ofline, funtiile
+  // dedicate de internet nu trebuiesc sa se reafiseze, ele sunt afisate doar
+  // cind aplicatia e live"): vocea e Gemini Live (server), iar urechea offline
+  // nu există (pasul 7) — un buton de microfon afișat offline ar fi o funcție
+  // moartă, adică exact păcăleala interzisă. Reapare singur la revenirea rețelei
+  // (useConectat re-randează).
+  const micButton = (cls: string) =>
+    !online ? null : (
     <button
       type="button"
       className={`${cls} ${listening ? 'live' : ''}`}
@@ -3304,19 +3317,23 @@ export default function ChatPanel({
                 dată; Kelion ascultă și răspunde continuu, vorbești liber (nu
                 apeși de fiecare dată). toggleMic pornește/oprește exact sesiunea
                 live full-duplex — aceeași ca în restul aplicației. */}
-            <div className="car-mic-wrap">
-              <button
-                type="button"
-                className={`car-mic ${listening ? 'live' : ''}`}
-                onClick={toggleMic}
-                aria-pressed={listening}
-                aria-label={listening ? t.carVoiceOff : t.carVoiceOn}
-                title={listening ? t.carVoiceOff : t.carVoiceOn}
-              >
-                🎙️
-              </button>
-              <span className="car-mic-label">{listening ? t.carListening : t.carVoiceOn}</span>
-            </div>
+            {/* OFFLINE: microfonul din mașină dispare și el (același ordin, 22 aug)
+                — vocea e funcție de internet; fără net butonul ar minți. */}
+            {online && (
+              <div className="car-mic-wrap">
+                <button
+                  type="button"
+                  className={`car-mic ${listening ? 'live' : ''}`}
+                  onClick={toggleMic}
+                  aria-pressed={listening}
+                  aria-label={listening ? t.carVoiceOff : t.carVoiceOn}
+                  title={listening ? t.carVoiceOff : t.carVoiceOn}
+                >
+                  🎙️
+                </button>
+                <span className="car-mic-label">{listening ? t.carListening : t.carVoiceOn}</span>
+              </div>
+            )}
           </div>,
           document.body,
         )}
@@ -3538,6 +3555,12 @@ export default function ChatPanel({
             composerInputRef.current?.focus()
           }}
         >
+          {/* OFFLINE: meniul „+" dispare ÎNTREG (owner, 22 aug — funcțiile de
+              internet nu se afișează offline): TOATE intrările lui cer serverul
+              (📎 fișierele merg la vision/MarkItDown, 📷 camera trimite cadre la
+              creier, 🎬 scenariul e generare pe server). Offline rămâne exact ce
+              chiar merge: tastezi → creierul local răspunde. Reapare la net. */}
+          {online && (
           <div className="fn-wrap" ref={menuRef}>
             <button
               type="button"
@@ -3594,6 +3617,7 @@ export default function ChatPanel({
               </div>
             )}
           </div>
+          )}
           <textarea
             ref={composerInputRef}
             className="composer-input"

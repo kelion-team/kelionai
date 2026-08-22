@@ -1556,6 +1556,24 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    admin-only). Lecție de proces plătită în sesiune: un commit a AFIRMAT
    suita verde când un lacăt pica pe starea comisă — corectat deschis în
    commit dedicat (d8bc382f), regula #1 se aplică și rapoartelor proprii.
+6i. **ORDINELE DIN 22 AUG DIMINEAȚA (6 mesaje ale owner-ului, în timpul
+   lucrului) + REGULA OFFLINE LIVRATĂ**: (1) offline NU se afișează funcțiile
+   de internet — livrat pe branch: micButton întoarce null, meniul „+"
+   (📎/📷/🎬), „Aplicații", WalletButton și „Add credits" stau după `online`
+   (useConectat = ping real /health), paste/drop de fișiere ies devreme pe
+   !esteConectat(); lacăt pe cod viu offlineAscunde.test.ts (comentariile se
+   aruncă întâi — lecția M6). (2) biblioteci offline cu download automat unde
+   se poate — deblochează pasul 7 felia B (Piper WASM) + evaluarea C1 (Vosk);
+   se construiește DOAR pe stand local Playwright cu măsurători înainte de
+   merge. (3) criteriul întărit al finalizării: reparație integrală CU PROBĂ
+   după încercări REALE; ce nu se poate dovedi se scoate total; „0 minciuna
+   0 cod mort 0 pacaleala"; rămâne doar „ce merge dovedit… si masurat".
+   Registrul viu din RAMAS (MAREA VERIFICARE + ordinele 22 aug) e lista de
+   lucru. Tot azi, pe registrul declarat: C7 aplicat cu verificare pe handler
+   (5 din 6 propuneri intrate în UNELTE_CITIRE_PARALELE; studioul_de_clipuri
+   RESPINS cu motiv — scrie cadrul {scenariu} pe fir, e interacțiune de
+   browser) + F11a (ceasPingWs scos — voiceHeartbeat e singurul keepalive,
+   trimite exact același cadru).
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor
