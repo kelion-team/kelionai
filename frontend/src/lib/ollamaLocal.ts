@@ -17,6 +17,7 @@
 // (server, env) — NU hardcodate aici.
 
 import { getOllamaConfig } from './ollamaConfig'
+import { reteaLenta, getTeava } from './retea'
 
 export interface StareOllamaLocal {
   instalat: boolean // Ollama rulează pe device
@@ -33,7 +34,7 @@ export interface StareOllamaLocal {
 
 const OLLAMA_LOCAL = 'http://127.0.0.1:11434' // hardcod-permis: gazda LOCALĂ pe device, universală
 const INTERVAL_VERIFICARE_MS = 30 * 60_000 // re-verifică la 30 min
-const TIMEOUT_PROBA_MS = 3000 // 3s — device local e rapid sau nu răspunde
+const TIMEOUT_PROBA_MS = 5000 // 5s — device local (telefon vechi pe Bluetooth) poate fi lent la primul răspuns
 
 let stare: StareOllamaLocal = {
   instalat: false,
@@ -90,16 +91,26 @@ function matchModel(name: string, model: string): boolean {
   return name === model || name.startsWith(model.split(':')[0])
 }
 
-/** Trage modelul de la Ollama library. Anunță progresul. */
+/** Trage modelul de la Ollama library. Anunță progresul.
+ *  Pe conexiune lentă (Bluetooth tethering, 2G/3G) mărește timeout-ul și
+ *  avertizează utilizatorul că va dura mai mult. */
 async function pullModel(model: string): Promise<boolean> {
   stare.inDownload = true
-  anunta(`Descarc ${model} pentru rezerva locală — backdrop la pornire`, 'info')
+  const lent = reteaLenta()
+  const teava = getTeava()
+  // Timeout adaptiv: 30 min pe rețea bună, 90 min pe lentă (Bluetooth tethering)
+  const timeoutMs = lent ? 90 * 60_000 : 30 * 60_000
+  if (lent) {
+    anunta(`Descarc ${model} pe conexiune lentă (${teava}) — poate dura ~30 min. Rămâi pe WiFi pentru mai rapid.`, 'info')
+  } else {
+    anunta(`Descarc ${model} pentru rezerva locală — backdrop la pornire`, 'info')
+  }
   try {
     const r = await fetch(`${OLLAMA_LOCAL}/api/pull`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: model, stream: true }),
-      signal: AbortSignal.timeout(30 * 60_000), // 30 min max — pe conexiune lentă
+      signal: AbortSignal.timeout(timeoutMs),
     })
     if (!r.ok || !r.body) {
       stare.inDownload = false
@@ -109,6 +120,8 @@ async function pullModel(model: string): Promise<boolean> {
     const reader = r.body.getReader()
     const dec = new TextDecoder()
     let buf = ''
+    // Pe lentă, raportează la fiecare 5% (nu 10%) — utilizatorul vede progres
+    const pasRaportare = lent ? 5 : 10
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -121,8 +134,8 @@ async function pullModel(model: string): Promise<boolean> {
           if (j.status === 'pulling' && j.total && j.completed) {
             const pct = Math.round((j.completed / j.total) * 100)
             stare.progresDownload = pct
-            if (pct % 10 === 0) {
-              anunta(`Download ${model}: ${pct}%`, 'progress')
+            if (pct % pasRaportare === 0) {
+              anunta(`Download ${model}: ${pct}%${lent ? ' (rețea lentă)' : ''}`, 'progress')
             }
           } else if (j.status === 'success') {
             stare.progresDownload = 100
@@ -135,7 +148,12 @@ async function pullModel(model: string): Promise<boolean> {
     return true
   } catch (e) {
     stare.inDownload = false
-    anunta(`Eroare download ${model}: ${String(e).slice(0, 100)}`, 'eroare')
+    const msg = String(e).slice(0, 100)
+    if (msg.includes('abort') || msg.includes('timeout')) {
+      anunta(`Download ${model} întrerupt (timeout pe ${lent ? 'rețea lentă' : 'rețea'}) — reîncerc la următoarea verificare`, 'eroare')
+    } else {
+      anunta(`Eroare download ${model}: ${msg}`, 'eroare')
+    }
     return false
   }
 }

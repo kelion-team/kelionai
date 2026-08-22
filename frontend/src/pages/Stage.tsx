@@ -2045,13 +2045,26 @@ export default function Stage({ user }: { user: User }) {
       <ApelOverlay lang={lang} />
 
       {/* NOTIFICARE OLLAMA LOCAL (22 aug): anunță utilizatorul când se descarcă
-          modelul de rezervă pe device. Discret — dispare singur la terminare. */}
+          modelul de rezervă pe device. Responsiv — pe telefon ocupă toată lățimea,
+          pe desktop e un toast în colț. Dispare singur la terminare. */}
       {ollamaNotif && (
         <div style={{
-          position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
+          position: 'fixed',
+          bottom: 'max(8px, env(safe-area-inset-bottom, 8px))',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
           background: ollamaNotif.tip === 'eroare' ? '#d32f2f' : ollamaNotif.tip === 'gata' ? '#2e7d32' : '#1a1a1a',
-          color: '#fff', padding: '12px 16px', borderRadius: 8, fontSize: 14,
-          maxWidth: 360, boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          color: '#fff',
+          padding: '10px 14px',
+          borderRadius: 8,
+          fontSize: 'clamp(12px, 3.5vw, 14px)',
+          maxWidth: 'min(92vw, 420px)',
+          width: 'auto',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          textAlign: 'center',
+          lineHeight: 1.4,
+          wordBreak: 'break-word',
         }}>
           {ollamaNotif.mesaj}
         </div>
