@@ -53,6 +53,11 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       // LEGEA ANTI-HARDCODARE (16 aug): pragurile alimentării pleacă DE AICI —
       // frontendul nu mai are voie să scrie de mână „£20"/„£5"; cifra afișată
       // e cifra care chiar validează (config.billing, reglabilă din env).
+      userShare: config.billing.userShare,
+      // Credite per liră = userShare / creditValue (0.75 / 0.1 = 7.5). Sursa
+      // VIE: dacă ownerul schimbă USER_SHARE sau CREDIT_VALUE în env, cifra de
+      // pe ecran se schimbă singură — fără hardcod 7.5 în frontend.
+      creditePeLira: config.billing.userShare / config.billing.creditValue,
       praguri: {
         primaAlimentare: config.billing.firstTopupMin,
         minim: config.billing.topupMin,

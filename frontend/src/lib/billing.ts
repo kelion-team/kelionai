@@ -1,6 +1,23 @@
-export const CREDITS_PER_POUND = 7.5
-export const creditsForPounds = (pounds: number, rate = CREDITS_PER_POUND): number =>
+// LEGEA ANTI-HARDCODARE: creditePeLira vine din /api/tarife (sursă vie:
+// userShare / creditValue, reglabil din env). Default 7.5 doar până la primul
+// fetch — hardcod-permis: fallback înainte de primul /api/tarife (nu se afișează
+// niciodată ca fapt dacă fetch-ul reușește).
+let _creditePeLira = 7.5 // hardcod-permis: fallback până la primul /api/tarife (sursă vie); nu se afișează ca fapt
+export function getCreditePeLira(): number {
+  return _creditePeLira
+}
+export function setCreditePeLira(v: number): void {
+  if (Number.isFinite(v) && v > 0) _creditePeLira = v
+}
+export const creditsForPounds = (pounds: number, rate = _creditePeLira): number =>
   Math.floor(pounds * rate)
+
+/** Pachetele de alimentare derivate din pragurile serverului (nu hardcodate). */
+export function pacheteDinPraguri(praguri: { minim: number; pas: number; primaAlimentare: number }): number[] {
+  const { pas } = praguri
+  if (!Number.isFinite(pas) || pas <= 0) return [5, 10, 20, 50] // hardcod-permis: fallback dacă /api/tarife a picat
+  return [pas * 1, pas * 2, pas * 4, pas * 10]
+}
 
 // Client helpers for the credit system. The USER sees CREDITS (+ the % of their
 // last top-up still left, for the low-credit alerts). The ADMIN sees real money

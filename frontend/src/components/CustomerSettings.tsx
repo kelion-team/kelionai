@@ -9,11 +9,9 @@ import {
   loadLocalLang,
   saveVoicePref,
 } from '../lib/prefs'
-import { fetchBalance, fetchHistory, type WalletStatus, type PurchaseRecord } from '../lib/billing'
+import { fetchBalance, fetchHistory, getCreditePeLira, setCreditePeLira, pacheteDinPraguri, type WalletStatus, type PurchaseRecord } from '../lib/billing'
 import { LANGS } from '../lib/languages'
 import { resolveLang, strings } from '../lib/i18n'
-// the user never sees pounds anywhere on their screen, only the resulting credits.
-const CREDITE_PE_LIRA = 7.5
 
 // MODEL SELECTOR ASCUNS (Adrian, 3 aug: „migrăm complet pe Gemini"). Secțiunea 3
 // de mai jos era un <select> cu catalogul de modele rutate prin OpenRouter
@@ -63,17 +61,23 @@ export default function CustomerSettings({
   } | null | 'necitit' | 'esuat'>('necitit')
   const [recordingVp, setRecordingVp] = useState(false)
   const [vpMsg, setVpMsg] = useState('')
+  // LEGEA ANTI-HARDCODARE: pragurile + creditePeLira vin din /api/tarife (sursă vie)
+  const [praguri, setPraguri] = useState<{ primaAlimentare: number; minim: number; pas: number } | null>(null)
 
   useEffect(() => {
     void (async () => {
-      const [p, b, h, vpRes] = await Promise.all([
+      const [p, b, h, vpRes, tarifeRes] = await Promise.all([
         loadServerPrefs(),
         fetchBalance(),
         fetchHistory(),
         fetch('/api/voiceprint/me', { credentials: 'include' })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
+        fetch('/api/tarife').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ])
+      // LEGEA ANTI-HARDCODARE: creditePeLira + praguri din sursă vie
+      if (tarifeRes && typeof tarifeRes.creditePeLira === 'number' && tarifeRes.creditePeLira > 0) setCreditePeLira(tarifeRes.creditePeLira)
+      if (tarifeRes?.praguri && Number.isFinite(tarifeRes.praguri.pas) && tarifeRes.praguri.pas > 0) setPraguri(tarifeRes.praguri)
       if (p?.speechLang) setLang(p.speechLang)
       if (p?.voices?.length) setVoices(p.voices)
       setVoice(p?.voice ?? '')
@@ -376,9 +380,9 @@ export default function CustomerSettings({
                 value={ar.topupAmount}
                 onChange={(e) => void onAr({ topupAmount: Number(e.target.value) })}
               >
-                {[5, 10, 20, 50].map((lire) => (
+                {(praguri ? pacheteDinPraguri(praguri) : [5, 10, 20, 50]).map((lire) => (
                   <option key={lire} value={lire}>
-                    {Math.floor(lire * CREDITE_PE_LIRA)} {ro ? 'credite' : 'credits'}
+                    {Math.floor(lire * getCreditePeLira())} {ro ? 'credite' : 'credits'}
                   </option>
                 ))}
               </select>

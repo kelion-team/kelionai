@@ -1789,7 +1789,7 @@ export default function AdminPanel({
                           ) : (
                             plati.coduriNeplatite.map((c) => (
                               <span key={c.code} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
-                                {c.expirata ? '🔴 [Expirat]' : '⏳ [În așteptare]'} <b>{c.code}</b> · User: {c.email} · Sumă: {c.amount} {c.currency} · De când: {new Date(c.createdAt).toLocaleString()}
+                                {c.expirata ? '🟠 [În așteptare >2h]' : '⏳ [În așteptare]'} <b>{c.code}</b> · User: {c.email} · Sumă: {c.amount} {c.currency} · De când: {new Date(c.createdAt).toLocaleString()}
                               </span>
                             ))
                           )}

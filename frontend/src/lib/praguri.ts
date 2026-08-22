@@ -3,6 +3,8 @@
 // Sursa e UNA: /api/tarife → config.billing (aceeași care VALIDEAZĂ plata pe
 // server). Necitit = null: textele cad pe forme FĂRĂ cifre — o cifră
 // inventată în UI e exact minciuna pe care legea o interzice.
+import { setCreditePeLira } from './billing'
+
 export interface Praguri {
   primaAlimentare: number
   minim: number
@@ -21,8 +23,10 @@ export function pragurileServerului(): Praguri | null {
 export async function aduPragurile(): Promise<Praguri | null> {
   if (cache) return cache
   promisiune ??= fetch('/api/tarife')
-    .then((r) => (r.ok ? (r.json() as Promise<{ praguri?: Partial<Praguri> }>) : null))
+    .then((r) => (r.ok ? (r.json() as Promise<{ praguri?: Partial<Praguri>; creditePeLira?: number }>) : null))
     .then((j) => {
+      // LEGEA ANTI-HARDCODARE: creditePeLira din sursă vie (userShare/creditValue)
+      if (typeof j?.creditePeLira === 'number' && j.creditePeLira > 0) setCreditePeLira(j.creditePeLira)
       const p = j?.praguri
       if (
         p &&

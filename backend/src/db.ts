@@ -5823,6 +5823,10 @@ export async function listeazaCoduriNeplatite(): Promise<CodNeplatit[] | null> {
       const createdAt = String(x.created_at ?? '')
       const createdMs = new Date(createdAt).getTime()
       const baza = codPlataBaza(x, 'pending')
+      // (B3, registrul): codul NU expiră în DB — `crediteazaDupaCod` îl onorează
+      // cât timp e 'pending'. Flagul `expirata` e o etichetă ADMIN (>2h = vechi,
+      // probabil abandonat), NU o expirare reală. UI-ul spune „În așteptare >2h",
+      // nu „Expirat" — codul ÎNCĂ poate potrivit o plată întârziată.
       const expirata =
         baza.status === 'expired' ||
         (baza.status === 'pending' && !isNaN(createdMs) && nowMs - createdMs > 2 * 3600 * 1000)
