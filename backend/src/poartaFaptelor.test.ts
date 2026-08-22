@@ -188,11 +188,9 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
     expect(chat).toMatch(/\[POARTA FAPTELOR\] plan fără execuție/)
   })
 
-  it('poarta bootului din constructor poartă DOVADA reală (jurnalul), nu ghicit, și dă 45s', () => {
-    const agent = sursa('../../deploy/constructor-agent.mjs')
-    expect(agent).toMatch(/timeout 45 node dist\/index\.js/)
-    expect(agent).toMatch(/Jurnalul REAL al bootului/)
-  })
+  // (Testul „poarta bootului din constructor" a fost ȘTERS pe 22 aug: fișierul
+  // pe care-l păzea, deploy/constructor-agent.mjs, nu mai există — mașinăria
+  // constructorului local a fost ștearsă integral, constructorul e DEVIN.)
 })
 
 describe('LEGEA ANTI-HARDCODARE — poarta automată + legea în documentele oricărui AI', () => {

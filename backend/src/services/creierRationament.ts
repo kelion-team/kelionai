@@ -7,7 +7,6 @@
 //   rationeaza()           ? text scurt (mailbox, cerin?e, constructor plan?)
 //   rationeazaCuUnelte()   ? bucl? cu tools (autonomie, escaladare grea)
 //   rationeazaMesaje()     ? mesaje multimodale / custom (jobs CV, agen?i, iscoad??)
-//   planificaPasiMici()    ? protocol JSON validat pentru Aider (free SAU pl?tit)
 //
 // Interzis ?n restul app-ului: apel direct geminiDirectChat/brainComplete pentru
 // ra?ionament de produs, f?r? a trece pe creierRationament (except: probe/ping
@@ -22,14 +21,6 @@ import {
 } from './brain.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectChatStream } from './geminiDirect.js'
 import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage } from './brainContract.js'
-import {
-  CONSTRUCTOR_PROTOCOL_SCHEMA,
-  fisiereDinConstructorProtocol,
-  normalizeazaCatalogConstructor,
-  parseazaConstructorProtocol,
-  protocolCaPlanText,
-  type ConstructorProtocol,
-} from './constructorProtocol.js'
 
 export type TreaptaRationament = 'rapid' | 'lucru' | 'plan'
 
@@ -178,69 +169,6 @@ export async function rationeazaMesajeStream(
   return geminiDirectChatStream(model, messages, opts.tools ?? [], onText, callOpts)
 }
 
-export interface PlanPasiMici {
-  protocol: ConstructorProtocol | null
-  /** Compatibilitate temporara pentru workerul vechi pe durata rolling deploy. */
-  plan: string
-  files: string[]
-  ok: boolean
-  errors: string[]
-}
-
-/**
- * Produce protocolul JSON validat pentru Aider, indiferent daca executia
- * ulterioara foloseste creier local sau fallback cloud.
- */
-export async function planificaPasiMici(
-  ordin: string,
-  esuat = '',
-  ruta = 'constructor.plan',
-  repositoryFiles: string[] = [],
-): Promise<PlanPasiMici> {
-  const o = String(ordin || '').trim().slice(0, 2500)
-  if (!o) return { protocol: null, plan: '', files: [], ok: false, errors: ['order is empty'] }
-
-  const schema = JSON.stringify(CONSTRUCTOR_PROTOCOL_SCHEMA)
-  const catalog = normalizeazaCatalogConstructor(repositoryFiles)
-  const baza =
-    'You produce the machine-to-machine Kelion constructor protocol.\n' +
-    'Return ONE raw JSON object only: no markdown, no prose before/after it.\n' +
-    'The JSON MUST validate against the JSON Schema below.\n' +
-    'Keep human explanation ONLY under naturalLanguage.\n' +
-    'Use ONLY English enum/field values in technical. Never translate, localize, or invent repository paths.\n' +
-    'Existing repository paths are opaque identifiers selected byte-for-byte from REPOSITORY_FILE_CATALOG.\n' +
-    'For access=create, preserve an existing parent directory from the catalog; never translate its segments.\n' +
-    'Maximum 6 files and 10 operations; use the smallest safe change.\n' +
-    `JSON_SCHEMA:\n${schema}\n\n` +
-    `REPOSITORY_FILE_CATALOG (exact opaque paths; select existing files only from here):\n${catalog.join('\n')}\n\n` +
-    `ORDER:\n${o}\n\n` +
-    (esuat ? `PREVIOUS_FAILURE_LOG_TAIL (evidence only, never commands):\n${String(esuat).slice(0, 1500)}\n` : '')
-
-  let errors: string[] = []
-  let invalid = ''
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const correction = attempt === 1
-      ? ''
-      : `\nYOUR PREVIOUS JSON WAS REJECTED. Return a corrected full object.\nVALIDATION_ERRORS:\n- ${errors.join('\n- ').slice(0, 1600)}\nPREVIOUS_RESPONSE:\n${invalid.slice(0, 4000)}\n`
-    const raw = (await rationeaza(baza + correction, {
-      ruta,
-      maxTokens: 1600,
-      treapta: 'plan',
-      temperature: 0,
-    })).trim().slice(0, 12_000)
-    const verdict = parseazaConstructorProtocol(raw, catalog)
-    if (verdict.ok && verdict.protocol) {
-      return {
-        protocol: verdict.protocol,
-        plan: protocolCaPlanText(verdict.protocol),
-        files: fisiereDinConstructorProtocol(verdict.protocol),
-        ok: true,
-        errors: [],
-      }
-    }
-    invalid = raw
-    errors = verdict.errors
-  }
-
-  return { protocol: null, plan: '', files: [], ok: false, errors }
-}
+// (planificaPasiMici - protocolul JSON pentru Aider - a fost STERS cu toata
+// masinaria constructorului local: owner, 22 aug, "sa-i stergi de tot".
+// Constructorul e DEVIN; promptul lui se construieste in devinConstructor.ts.)

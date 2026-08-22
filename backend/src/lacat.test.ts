@@ -122,51 +122,33 @@ describe('LACĂT — MODEL UNIC BLOCAT (Adrian, 6 aug, regulă ultra-decisă: �
   })
 })
 
-describe('LACĂT — constructor: motor AIDER (unic) pe creier LOCAL Ollama de pe VPS', () => {
-  // Owner, 16 aug: „constructor unic aider… aider va avea absolut toate
-  // instrumentele necesare pentru a repara si construi, real". CORECȚIA (16 aug):
-  // „la constructor NU e gemeni idiotule… Aider pe un model LOCAL pe VPS (Ollama)…
-  // pe serverul linux si de acolo sa lucreze aider" + „sa instaleze el, pe linux,
-  // aider automat cu tot ce trebuie". Zidul (legea 13 aug) rămâne: constructorul NU
-  // ține chei de furnizor și NU cheamă DIRECT niciun API extern — dar creierul lui
-  // NU mai e Gemini prin app, ci un model LOCAL Ollama de pe gazdă (fără chei/cotă/bani).
-  it('agentul: fără OpenRouter, fără chei de furnizor, fără apel DIRECT (Google/Anthropic)', () => {
-    const s = sursa('../../deploy/constructor-agent.mjs')
-    expect(/openrouter\.ai/.test(s)).toBe(false)
-    expect(/process\.env\.OPENROUTER_API_KEY/.test(s)).toBe(false)
-    // Fără apel DIRECT la Google SAU Anthropic — n-are chei de furnizor în constructor.
-    expect(/generativelanguage\.googleapis\.com/.test(s)).toBe(false)
-    expect(/x-goog-api-key/.test(s)).toBe(false)
-    expect(/api\.anthropic\.com/.test(s)).toBe(false)
-    expect(/claude-fable-5/.test(s)).toBe(false)
-    // Creierul propriu pe RunPod/DeepInfra a fost SCOS — nu mai citește chei din env.
-    expect(/CONSTRUCTOR_RUNPOD_KEY|CONSTRUCTOR_DEEPSEEK_KEY/.test(s)).toBe(false)
+describe('LACĂT — constructorul e DEVIN (mașinăria locală Aider+Ollama ȘTEARSĂ)', () => {
+  // Owner, 22 aug, verbatim: „am cerut devin peste tot in constructor… sa-i
+  // stergi de tot [pe Aider+Ollama]". Lacătul s-a răsturnat: ce înainte TREBUIA
+  // să existe (motorul Aider, creierul Ollama, agentul, ruta /next) acum TREBUIE
+  // să LIPSEASCĂ — constructorul e DEVIN, extern, prin dispecerul din app.
+  it('fișierele lucrătorului local NU mai există în repo', async () => {
+    const fs = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    for (const rel of [
+      '../../deploy/constructor-agent.mjs',
+      '../../deploy/constructor-worker.sh',
+      '../../deploy/setup-ollama.sh',
+    ]) {
+      const cale = fileURLToPath(new URL(rel, import.meta.url))
+      expect(fs.existsSync(cale), rel).toBe(false)
+    }
   })
 
-  it('motorul e AIDER pe model LOCAL Ollama (nu app, nu Gemini, nu OPENAI_API_KEY)', () => {
-    const s = sursa('../../deploy/constructor-agent.mjs')
-    expect(/construiesteCuAider/.test(s)).toBe(true)
-    // Creierul lui Aider = model Ollama local + gazda Ollama, nu ruta app-Gemini.
-    expect(/ollama_chat\//.test(s)).toBe(true)
-    expect(/OLLAMA_API_BASE/.test(s)).toBe(true)
-    expect(/\/api\/constructor\/openai/.test(s)).toBe(false)
-    expect(/OPENAI_API_KEY: BRIDGE/.test(s)).toBe(false)
-  })
-
-  it('constructorul își instalează SINGUR creierul local pe VPS (fără SSH)', () => {
-    const s = sursa('../../deploy/constructor-agent.mjs')
-    expect(/function asiguraCreierulLocal/.test(s)).toBe(true)
-    expect(/setup-ollama\.sh/.test(s)).toBe(true)
-  })
-
-  it('ruta de creier prin app (Gemini) a fost SCOASĂ din constructor — Fable la fel', () => {
+  it('ruta constructorului nu mai are lucrător local: fără /next, fără creier prin app, fără Fable', () => {
     const ruta = sursa('./routes/constructor.ts')
-    // Constructorul nu mai are creier Gemini prin app.
+    expect(/\/api\/constructor\/next/.test(ruta)).toBe(false)
     expect(/const creierHandler/.test(ruta)).toBe(false)
     expect(/geminiDirectChat/.test(ruta)).toBe(false)
-    // Fable a ieșit TOTAL: nicio funcție Fable, niciun comutator.
     expect(/fable5Disponibil|fable5Chat/.test(ruta)).toBe(false)
-    expect(/forta.?fable/i.test(ruta)).toBe(false)
+    // Dispecerul Devin e singurul constructor — dovada în serviciul lui.
+    const dispecer = sursa('./services/devinConstructor.ts')
+    expect(/porneisteJobDevin|creeazaSesiuneDevin/.test(dispecer)).toBe(true)
   })
 })
 

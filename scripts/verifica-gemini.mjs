@@ -123,43 +123,12 @@ function regulaFaraEnvModel() {
   }
 }
 
-// ISTORIA REGULII, ca lacătul să nu mai rămână în urmă mut:
-//   • 12 aug (owner): constructorul mutat de pe Gemini pe RunPod/DeepInfra —
-//     regula de atunci cerea cheia OpenAI-compatibilă în constructor.
-//   • 14 aug (owner, verbatim): „schimbă-mi constructorul cu gemeni ultra… când
-//     nu merge repara să cadă pe fable 5, înlocuiește peste tot" + „nu mai bag
-//     bani" (RunPod 402 îi omora ordinele, dovada în emailurile #213).
-// ADEVĂRUL NOU, păzit de-acum: constructorul NU ține NICIO cheie de furnizor
-// (regula din 13 aug); creierul lui vine PRIN APP, pe /api/constructor/creier
-// (Gemini principal → Fable 5 rezervă, ambele rulate în app). Lacătul s-a
-// schimbat ODATĂ cu ordinul ownerului — exact procedura scrisă la finalul
-// raportului: acordul lui + modificarea lacătului, împreună.
-function regulaConstructorFaraGemini() {
-  return {
-    nume: 'Constructorul (autonomia): creierul PRIN APP (/api/constructor/creier), FĂRĂ chei de furnizor',
-    fisier: 'deploy/constructor-agent.mjs',
-    verifica(src) {
-      // Trebuie să-și ceară creierul de la app (endpointul gardat cu bridge-secret).
-      if (!/\/api\/constructor\/creier/.test(src))
-        return 'constructorul nu mai cheamă /api/constructor/creier — creierul trebuie să vină PRIN APP (Gemini → Fable 5), nu direct de la vreun furnizor'
-      // Și NU are voie să redevină client direct de furnizor (regula 13 aug:
-      // constructorul nu ține chei) — nici RunPod/DeepInfra, nici Gemini direct,
-      // nici Anthropic direct.
-      if (/env\.CONSTRUCTOR_RUNPOD_KEY|env\.CONSTRUCTOR_DEEPSEEK_KEY|deepinfra\.com|api\.runpod/.test(src))
-        return 'a reapărut clientul direct RunPod/DeepInfra în constructor — creierul merge DOAR prin app (ordinul din 14 aug: „nu mai bag bani")'
-      if (/generativelanguage\.googleapis\.com/.test(src))
-        return 'a reapărut un apel Gemini DIRECT în constructor — Gemini rulează în app, constructorul nu ține cheia'
-      if (/api\.anthropic\.com/.test(src))
-        return 'a reapărut un apel Anthropic DIRECT în constructor — Fable 5 rulează în app, constructorul nu ține cheia'
-      // Ruta prin app e gardată: fără BRIDGE_SECRET constructorul n-ar mai putea
-      // intra (regula venită din PR-ul constructorului, păstrată la re-unirea
-      // celor două variante ale lacătului — 14 aug).
-      if (!/BRIDGE_SECRET/.test(src))
-        return 'constructorul nu se mai autentifică cu BRIDGE_SECRET la /api/constructor/creier — ruta gardată l-ar refuza'
-      return null
-    },
-  }
-}
+// (Regula „constructorul fără chei de furnizor" a fost SCOASĂ pe 22 aug,
+// odată cu ȘTERGEREA integrală a lucrătorului local Aider+Ollama — owner,
+// verbatim: „am cerut devin peste tot in constructor… sa-i stergi de tot".
+// Fișierul păzit (deploy/constructor-agent.mjs) nu mai există; constructorul
+// e DEVIN, extern, prin dispecerul din backend/src/services/devinConstructor.ts
+// — care nu ține niciun model Gemini, deci nu are ce păzi lacătul ăsta.)
 
 // SEMNĂTURA DE GÂNDIRE (Adrian, 7 aug — dovedit A/B pe cheia lui, de pe VPS).
 // Gemini 3.x CERE `thoughtSignature` înapoi la replay; fără ea, pasul 2 al
@@ -241,7 +210,6 @@ const REGULI = [
   regulaTreaptaGetter('workDefault', 'modelUnicDirect'),
   regulaTreaptaGetter('topDefault', 'modelUnicDirect'),
   regulaFaraEnvModel(),
-  regulaConstructorFaraGemini(),
   regulaPoartaUpgrade(),
   regulaSemnaturaGandirii(),
   regulaVoceLive(),

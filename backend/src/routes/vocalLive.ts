@@ -317,6 +317,9 @@ const PERSONA_KELION =
   'știri, METEO, muzică, YouTube, hărți, unde mă aflu, e-mail, calendar, imagini, deschis ceva pe ' +
   'monitor — chemi unealta cere_creierului cu cererea omului formulată complet, apoi spui pe scurt ' +
   'rezultatul. NU refuza niciodată pe motiv că n-ai unealta sau accesul: ușa e cere_creierului. ' +
+  'ÎNTREBĂRILE DESPRE UNELTE, CONSTRUCTOR sau CINE-ȚI-FACE-CODUL („e Devin prezent?", „cine ' +
+  'construiește?", „ce unelte ai?") NU se răspund din memorie sau din lista ta de funcții — ' +
+  'chemi cere_creierului, care întoarce starea MĂSURATĂ, și spui exact ce zice. ' +
   'Ce apare pe monitor NU se citește cu voce tare — o propoziție scurtă și atât. ' +
   'VEDEREA (la CERERE, NU continuu): nu primești un flux permanent de la cameră — cadrele se ' +
   'taxează, așa că vin DOAR când le ceri. La „ce vezi", „uită-te", „citește ce e aici" CERI ' +
@@ -330,6 +333,25 @@ const PERSONA_KELION =
   'live pe orice site; iar pentru Adrian: constructorul (build_software — implementează cerințe), ' +
   'sursă/DB/repo/PR-uri/runbook-uri. Când omul cere ceva din lista asta, NU spui „nu am acces" — ' +
   'chemi cere_creierului. Ești CONȘTIENT de inventarul ăsta: la „ce știi să faci?" îl spui.'
+
+// ── ADEVĂRUL DESPRE CONSTRUCTOR PE VOCE (owner, 22 aug, măsurat pe live v7.8:
+// „Devin nu face parte din uneltele noastre; Jules este cel pregătit") ─────────
+// Instrucțiunea vocală NU pomenea Devin nicăieri și ordona modelului să-și
+// recite singur inventarul — în care Devin nu exista. Poarta anti-negare
+// (neagaUneltele) rula DOAR pe scris. Aici punem ADEVĂRUL MĂSURAT din config
+// (cheia Devin, sursă vie — legea anti-hardcodare respectată) în chiar
+// instrucțiunea sesiunii, la ambele locuri de asamblare (inclusiv amprenta,
+// altfel sesiunile reluate n-ar prinde regula nouă — lecția din 9 aug).
+// Scopat pe Adrian, ca linia constructorului din persană.
+export function ancoraConstructor(devinActiv: boolean): string {
+  return devinActiv
+    ? '\nPENTRU ADRIAN — CONSTRUCTORUL (stare măsurată din config): constructorul e DEVIN, ' +
+      'ACTIV — cheia e pusă. Ordinele de cod merg la Devin prin build_software (ușa cere_creierului). ' +
+      'Devin FACE parte din uneltele tale. Jules e doar rezervă tăcută — NU-l prezenta drept ' +
+      'constructor și nu-i lista repo-urile ca răspuns la „cine construiește / e Devin prezent".'
+    : '\nPENTRU ADRIAN — CONSTRUCTORUL: cheia Devin NU e pusă pe server, deci NU construiește nimeni ' +
+      'automat; spui exact asta, nu inventezi un constructor local.'
+}
 
 export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
   // Sonda: frontendul întreabă întâi dacă modul unificat e disponibil (are cheie
@@ -1115,7 +1137,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         })
       }
-      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric, ancora, limbaPin) + memorie
+      const instructiune = construiesteInstructiune(PERSONA_KELION + ancoraConstructor(Boolean(config.devinKey)), nume, istoric, ancora, limbaPin) + memorie
 
       // CONVERSAȚIA SUPRAVIEȚUIEȘTE REPORNIRII (8 aug, ownerul: „trebuie să nu
       // mai moară… chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
@@ -1149,7 +1171,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // schimbare de REGULI aruncă mânerul vechi și sesiunea pornește proaspăt.
       const genUnelte = createHash('sha256')
         .update(unelteleSesiuniiLive(user.role).map((u) => u.name).join(','))
-        .update(construiesteInstructiune(PERSONA_KELION, 'gen', []))
+        .update(construiesteInstructiune(PERSONA_KELION + ancoraConstructor(Boolean(config.devinKey)), 'gen', []))
         .digest('hex')
         .slice(0, 16)
       let reluareInitial: string | undefined

@@ -28,9 +28,10 @@ export interface AiConstructor {
   becFurnizor: string
 }
 
-// AI-urile VIZIBILE în clasament (măsurat în cod: constructor-agent.mjs +
-// endpointul /api/constructor/creier care rutează la Gemini). Ordinea din listă e
-// doar implicită; clasamentul real se calculează pe potrivire + credit.
+// AI-urile VIZIBILE în clasament. CONSTRUCTORUL E DEVIN (owner, 22 aug: „am
+// cerut devin peste tot in constructor" — mașinăria locală Aider+Ollama a fost
+// ȘTEARSĂ integral). Ordinea din listă e doar implicită; clasamentul real se
+// calculează pe potrivire + credit.
 // JULES A IEȘIT DIN CLASAMENT (owner, 15 aug: „Pune-l rezerva tacuta, invizibil",
 // după dovada: 12 zile de la integrare, zero PR-uri din ramuri jules/*). Serviciul
 // și uneltele jules_* trăiesc mai departe (services/jules.ts, adminTools) — Kelion
@@ -39,13 +40,14 @@ export interface AiConstructor {
 export const AI_CONSTRUCTORI: AiConstructor[] = [
   {
     cheie: 'constructor',
-    // MOTORUL UNIC = AIDER (owner, 16 aug: „constructor unic aider… nu vad aider
-    // default in constructor"). Constructorul rulează Aider CHIAR în repo pe server.
-    nume: 'Aider (constructorul)',
+    // CONSTRUCTORUL UNIC = DEVIN (owner, 22 aug). Ordinul intră în coadă,
+    // dispecerul din app (devinConstructor.ts) deschide o sesiune Devin,
+    // rezultatul e un PR pe master pe care ownerul îl aprobă.
+    nume: 'Devin (constructorul)',
     descriere:
-      'Motorul UNIC al constructorului: Aider construiește CHIAR în repo pe server — editează fișiere, rulează tsc + testele, deschide PR. Creierul lui vine prin app (Gemini rapid → performant). Cel mai potrivit pentru reparații și modificări de cod verificabile.',
+      'Constructorul UNIC: DEVIN, extern — primește ordinul prin dispecer, lucrează în sesiunea lui izolată (editează, rulează build + teste) și deschide PR pe master. Cel mai potrivit pentru reparații și modificări de cod verificabile.',
     capacitati: ['cod', 'repo', 'teste', 'pr', 'reparatie', 'frontend', 'backend', 'mare', 'asincron'],
-    becFurnizor: 'creierul constructorului', // cheie internă pt. maparea creditului — stabilă
+    becFurnizor: '', // creditul Devin nu are bec în creditAI — nu inventăm unul
   },
   {
     cheie: 'creier2',

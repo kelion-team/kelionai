@@ -14,8 +14,6 @@ ATTEMPT_DIR="${AUTO_ATTEMPT_DIR:-$BASE/auto-publicare-attempts}"
 DEPLOY_SCRIPT="${AUTO_DEPLOY_SCRIPT:-$REPO/deploy/deploy.sh}"
 HEALTH_SCRIPT="${AUTO_HEALTH_SCRIPT:-$REPO/deploy/plasa-sanatate.mjs}"
 HEALTH_LOG="${AUTO_HEALTH_LOG:-$BASE/plasa-sanatate.log}"
-CONSTRUCTOR_WORKER="${AUTO_CONSTRUCTOR_WORKER:-$BASE/constructor-worker.sh}"
-CONSTRUCTOR_LOG="${AUTO_CONSTRUCTOR_LOG:-$BASE/constructor.log}"
 VERSION_URL="${AUTO_VERSION_URL:-http://127.0.0.1:8080/api/version}"
 TOOL_URL="${AUTO_TOOL_URL:-http://127.0.0.1:8080/api/constructor/tool}"
 DOCKER_BIN="${AUTO_DOCKER_BIN:-docker}"
@@ -239,9 +237,8 @@ enqueue_repair() {
     fi
     log "reparație pusă prin fallback-ul DB canonic în ordinul #$job (live încă are dispatcherul vechi)"
   fi
-  if [ -x "$CONSTRUCTOR_WORKER" ]; then
-    nohup "$CONSTRUCTOR_WORKER" >> "$CONSTRUCTOR_LOG" 2>&1 </dev/null &
-  fi
+  # (Lansarea workerului local a fost ȘTEARSĂ — 22 aug; ordinul depus mai sus
+  # e preluat de dispecerul DEVIN din aplicație, pornit de build_software.)
   return 0
 }
 

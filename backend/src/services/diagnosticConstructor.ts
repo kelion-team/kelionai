@@ -1,32 +1,21 @@
-// ── DIAGNOSTICUL CONSTRUCTORULUI — AUTONOM, PE SERVER (owner, 19 aug: „nu poate
-// ca nu are autonomie si nu l-ai construit corect sa faca asta, cu toate ca eu
-// am cerut de 1000 de ori") ───────────────────────────────────────────────────
-// Ownerul are dreptate: sistemul trebuie să-și diagnosticheze SINGUR constructorul,
-// pe server (unde ARE acces real la DB + probele host-ului), nu să depindă de o
-// sesiune externă care nu ajunge la VPS. Aici e acea autonomie: dintr-un set de
-// MĂSURĂTORI (pulsul lucrătorului, proba motorului Aider, proba creierului LOCAL
-// Ollama, ultimele ordine reale) → un verdict FERM cu DE CE nu repară + recomandare.
+// ── DIAGNOSTICUL AUTONOM AL CONSTRUCTORULUI = DEVIN (owner, 22 aug) ──────────
 //
-// Nucleul e PUR (regula #1: nicio stare fără măsurătoare; nicio cauză inventată).
-// Kelion îl cheamă din chat/voce (constructor_status) ȘI din bucla autonomă, iar
-// panoul admin îl expune — deci „de ce nu se apucă / nu repară" nu mai e mister.
-import { verdictPulsLucrator } from './pulsLucrator.js'
-
-/** Un ordin recent, redus la ce contează pentru diagnostic (măsurat din DB). */
-export interface OrdinRecentMasurat {
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
-  brain: string | null // 'free_local' | 'paid_cloud' | null — cine a servit efectiv
-  logTail: string // coada logului (semnalul „no_edit"/„no_change")
-  ageSec: number // acum − updatedAt, în secunde
-}
-
-export interface MasuratoriConstructor {
-  lucratorViu: boolean
-  lucratorAgeSec: number | null
-  aiderOk: boolean // motorul (Aider) răspunde pe VPS?
-  ollamaOk: boolean // creierul LOCAL (free) e sus + are model?
-  ordine: OrdinRecentMasurat[] // cele mai recente ordine, cel mai nou primul
-}
+// Owner, 19 aug: „nu are autonomie… sa faca asta" — Kelion măsoară SINGUR de ce
+// (nu) construiește și dă verdictul FERM, pe server, fără să depindă de owner.
+//
+// REscris 22 aug pe ordinul verbatim: „am cerut devin peste tot in constructor"
+// + „am cerut sa-i stergi de tot [pe Aider+Ollama]". Toată mașinăria locală
+// (proba Aider, proba Ollama, pulsul lucrătorului de pe VPS) A FOST ȘTEARSĂ —
+// constructorul e DEVIN, extern: ordin → dispecerul din app → sesiune Devin →
+// PR pe master. Diagnosticul măsoară exact lanțul ăsta:
+//   1. cheia Devin (fără ea, dispecerul e inert prin design — se spune, roșu);
+//   2. ordinele agățate: running FĂRĂ sesiune Devin (dispecerul n-a apucat /
+//      a murit între claim și pornire) sau running cu sesiune de prea mult timp;
+//   3. pornirile eșuate recent („Devin pornire eșuată" în log — cheie greșită,
+//      quota, repo inaccesibil: motivul e în log, NUMIT);
+//   4. coada care stă deși nimic nu rulează (bucla de autonomie / tick-ul mort).
+// Regula #1 rămâne legea: nicio problemă nu se raportează fără măsurătoarea ei,
+// iar coada necitibilă = {error}, nu „sănătos".
 
 export interface ProblemaConstructor {
   cod: string
@@ -35,92 +24,113 @@ export interface ProblemaConstructor {
   recomandare: string
 }
 
+export interface OrdinRecentMasurat {
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+  brain: string | null
+  logTail: string
+  ageSec: number
+  devinSessionId: string | null
+}
+
 export interface DiagnosticConstructor {
   sanatos: boolean
   verdict: string
   probleme: ProblemaConstructor[]
   masuratori: {
+    devinActiv: boolean
     inCoada: number
     inLucru: number
-    freeNoEdit: number // ordine recente unde FREE n-a editat (a escaladat/„no_change")
-    escaladatePaid: number // ordine servite de rezerva plătită
     esuate: number
+    porniriEsuate: number // eșecuri recente de PORNIRE a sesiunii Devin
+    cuPrDeschis: number // ordine done cu PR deschis (așteaptă merge-ul ownerului)
     oldestQueuedSec: number | null
     runningSec: number | null
   }
 }
 
-/** Semnătura „free n-a modificat nimic" din logul/raportul workerului (măsurat). */
-const RE_NO_EDIT = /no[_ ]?edit|no[_ ]?change|n-a modificat|nu a modificat|escaladat \((?:no_change|timeout_throttle|free_indisponibil)\)/i
+/** Semnătura măsurată a unei porniri Devin eșuate (reportBuildJob din dispecer
+ *  scrie exact prefixul ăsta în log — vezi devinConstructor.ts). */
+const RE_PORNIRE_ESUATA = /devin pornire e[șs]uat[ăa]|devin_fara_acces_repo/i
 
-export function ordinFreeNoEdit(o: OrdinRecentMasurat): boolean {
-  // FREE n-a reparat dacă: fie logul poartă semnătura de non-editare, fie ordinul
-  // a fost servit de rezerva plătită (adică free a cedat înaintea lui).
-  return RE_NO_EDIT.test(o.logTail || '') || o.brain === 'paid_cloud'
+export function ordinPornireEsuata(o: OrdinRecentMasurat): boolean {
+  return o.status === 'failed' && RE_PORNIRE_ESUATA.test(o.logTail || '')
+}
+
+export interface MasuratoriConstructor {
+  devinActiv: boolean // config.devinKey e pusă (măsurat, nu presupus)
+  ordine: OrdinRecentMasurat[]
 }
 
 export function diagnosticConstructor(m: MasuratoriConstructor): DiagnosticConstructor {
   const ordine = Array.isArray(m.ordine) ? m.ordine : []
   const queued = ordine.filter((o) => o.status === 'queued')
   const running = ordine.filter((o) => o.status === 'running')
-  const finalizate = ordine.filter((o) => o.status === 'done' || o.status === 'failed')
   const esuate = ordine.filter((o) => o.status === 'failed').length
-  const escaladatePaid = finalizate.filter((o) => o.brain === 'paid_cloud').length
-  const freeNoEdit = finalizate.filter(ordinFreeNoEdit).length
+  const porniriEsuate = ordine.filter(ordinPornireEsuata).length
+  const cuPrDeschis = ordine.filter((o) => o.status === 'done').length
   const oldestQueuedSec = queued.length ? Math.max(...queued.map((o) => o.ageSec)) : null
   const runningSec = running.length ? Math.max(...running.map((o) => o.ageSec)) : null
 
   const probleme: ProblemaConstructor[] = []
 
-  // 1) MOTORUL — fără Aider, nimeni nu construiește (nici free, nici plătit).
-  if (!m.aiderOk) {
+  // 1) CHEIA — fără ea, dispecerul e inert prin design: niciun ordin nu pleacă.
+  if (!m.devinActiv) {
     probleme.push({
-      cod: 'aider_jos',
+      cod: 'devin_fara_cheie',
       severitate: 'critic',
-      ce: 'Motorul Aider nu răspunde pe VPS — constructorul nu poate edita nimic, nici free, nici plătit.',
-      recomandare: 'Rulează pe VPS: bash deploy/setup-ollama.sh (instalează/repară Aider pe host).',
+      ce: 'Cheia Devin NU e pusă pe server — dispecerul e inert, niciun ordin nu pleacă spre constructor.',
+      recomandare: 'Pune DEVIN_API_KEY în mediul backend-ului (VPS) și repornește aplicația; ordinele din coadă pleacă singure la următorul tick.',
     })
   }
 
-  // 2) CREIERUL LOCAL (FREE) — fără el, free NU poate repara (exact „nu repara ieftin").
-  if (!m.ollamaOk) {
+  // 2a) ORDIN AGĂȚAT FĂRĂ SESIUNE — claimat, dar dispecerul n-a pornit sesiunea
+  //     (a murit între claim și pornire / tick-ul nu mai rulează). Watchdog-ul
+  //     din db îl repune în coadă la stale, dar starea se SPUNE, nu se așteaptă
+  //     în tăcere. Pragul: 5 min (tick-ul buclei e mai des; hardcod-permis:
+  //     prag de diagnostic, nu de produs — schimbarea lui nu minte pe nimeni).
+  const agatatFaraSesiune = running.filter((o) => !o.devinSessionId && o.ageSec > 5 * 60)
+  if (m.devinActiv && agatatFaraSesiune.length) {
     probleme.push({
-      cod: 'ollama_jos',
+      cod: 'ordin_fara_sesiune',
       severitate: 'critic',
-      ce: 'Creierul LOCAL (Ollama, free) e jos sau fără model — de aceea FREE nu repară.',
-      recomandare: 'Pe VPS: pornește Ollama și trage modelul (bash deploy/setup-ollama.sh); apoi free lucrează fără bani.',
+      ce: `${agatatFaraSesiune.length} ordin(e) stau „în lucru" de peste 5 min FĂRĂ sesiune Devin pornită — dispecerul nu le-a preluat (tick mort sau pornire care crapă tăcut).`,
+      recomandare: 'Vezi logul serverului la [devin]; „Reia" ordinul din panou îl repune în coadă pentru următorul tick.',
     })
   }
 
-  // 3) LUCRĂTORUL — dacă nu cere ordine, ele stau în coadă orice ai face.
-  if (!m.lucratorViu) {
-    const cat = m.lucratorAgeSec == null ? 'de la ultima repornire' : `de ${Math.round((m.lucratorAgeSec ?? 0) / 60)} min`
+  // 2b) SESIUNE CARE MACINĂ DE PREA MULT — Devin lucrează, dar de peste 2h pe
+  //     același ordin; costul (ACU) crește. Atenționare, nu critic: poate fi
+  //     un ordin chiar mare. (hardcod-permis: prag de diagnostic)
+  const macinaDeMult = running.filter((o) => !!o.devinSessionId && o.ageSec > 2 * 3600)
+  if (macinaDeMult.length) {
     probleme.push({
-      cod: 'lucrator_mort',
-      severitate: 'critic',
-      ce: `Lucrătorul de pe VPS nu a mai cerut ordine ${cat} — cronul (*/2 min) pare oprit; de aceea ordinele stau în coadă.`,
-      recomandare: 'Pe VPS: verifică cronul constructor-worker.sh (crontab -l) și /root/kelion/constructor.log; repornește-l.',
-    })
-  }
-
-  // 4) FREE NU EDITEAZĂ — deși motorul + creierul local sunt sus, ultimele ordine
-  //    au fost toate cedate pe plătit / marcate „no_edit". Măsurat, nu presupus.
-  if (m.aiderOk && m.ollamaOk && finalizate.length >= 3 && freeNoEdit === finalizate.length) {
-    probleme.push({
-      cod: 'free_nu_editeaza',
+      cod: 'sesiune_lunga',
       severitate: 'atentie',
-      ce: `FREE nu a editat pe ultimele ${finalizate.length} ordine finalizate (toate „no_edit"/escaladate pe plătit) — modelul local nu produce reparația.`,
-      recomandare: 'Crește răbdarea free (CONSTRUCTOR_SILENCE_MS / CONSTRUCTOR_FREE_TIMEOUT_MS) sau folosește un model local mai capabil; verifică în constructor.log dacă e omorât pe tăcere înainte să scrie.',
+      ce: `O sesiune Devin macină de peste ${Math.round((runningSec ?? 0) / 3600)}h pe același ordin — costul (ACU) crește.`,
+      recomandare: 'Deschide sesiunea din monitor (linkul ordinului) și vezi dacă a rămas blocată; „Anulează" o scoate din monitor (plafonul ACU ține costul).',
     })
   }
 
-  // 5) COADĂ BLOCATĂ — lucrătorul viu, dar un ordin ține coada de mult timp.
-  if (m.lucratorViu && queued.length > 0 && running.length > 0 && (runningSec ?? 0) > 30 * 60) {
+  // 3) PORNIRI EȘUATE — cheia e pusă, dar sesiunile NU pornesc (cheie invalidă,
+  //    quota, token de repo). Motivul REAL e în logul ordinului, nu-l ghicim.
+  if (m.devinActiv && porniriEsuate >= 2) {
     probleme.push({
-      cod: 'coada_blocata',
-      severitate: 'atentie',
-      ce: `Un ordin e „în lucru" de ${Math.round((runningSec ?? 0) / 60)} min și ține ${queued.length} în coadă în spate.`,
-      recomandare: 'Anulează/repune ordinul agățat (Admin→Constructor) ca să elibereze coada.',
+      cod: 'devin_porniri_esuate',
+      severitate: 'critic',
+      ce: `${porniriEsuate} ordine recente au eșuat chiar la PORNIREA sesiunii Devin — cheia/quota/accesul la repo sunt de vină, nu ordinele.`,
+      recomandare: 'Deschide un ordin eșuat și citește logul („Devin pornire eșuată: …") — motivul e numit acolo; repară-l, apoi „Reia".',
+    })
+  }
+
+  // 4) COADA STĂ — cheia pusă, nimic nu rulează, dar ordinele așteaptă de mult:
+  //    tick-ul dispecerului (bucla de autonomie + kick-ul din build_software)
+  //    nu se mai învârte. (hardcod-permis: prag de diagnostic)
+  if (m.devinActiv && !running.length && queued.length > 0 && (oldestQueuedSec ?? 0) > 10 * 60) {
+    probleme.push({
+      cod: 'coada_sta',
+      severitate: 'critic',
+      ce: `${queued.length} ordin(e) așteaptă de peste ${Math.round((oldestQueuedSec ?? 0) / 60)} min deși nimic nu rulează — tick-ul dispecerului nu se învârte.`,
+      recomandare: 'Verifică pauza de autonomie (tabul Bani) și logul serverului la [devin] — cu pauza pornită, dispecerul stă intenționat.',
     })
   }
 
@@ -128,20 +138,23 @@ export function diagnosticConstructor(m: MasuratoriConstructor): DiagnosticConst
   const sanatos = critice.length === 0
   const verdict = sanatos
     ? probleme.length
-      ? `Constructorul funcționează, dar cu ${probleme.length} atenționare(i): ${probleme[0].ce}`
-      : 'Constructorul pare sănătos: motor + creier local probate, lucrătorul viu.'
-    : `Constructorul NU repară: ${critice[0].ce}`
+      ? `Constructorul (DEVIN) funcționează, dar cu ${probleme.length} atenționare(i): ${probleme[0].ce}`
+      : m.devinActiv
+        ? 'Constructorul DEVIN e sănătos: cheia pusă, dispecerul duce ordinele, nimic agățat.'
+        : 'Constructorul DEVIN e oprit (fără cheie) — vezi problema critică.'
+    : `Constructorul NU construiește: ${critice[0].ce}`
 
   return {
     sanatos,
     verdict,
     probleme,
     masuratori: {
+      devinActiv: m.devinActiv,
       inCoada: queued.length,
       inLucru: running.length,
-      freeNoEdit,
-      escaladatePaid,
       esuate,
+      porniriEsuate,
+      cuPrDeschis,
       oldestQueuedSec,
       runningSec,
     },
@@ -153,51 +166,35 @@ export function diagnosticConstructor(m: MasuratoriConstructor): DiagnosticConst
 // unealta de chat îl refolosesc — poarta jscpd). Întoarce {error} pe citire picată
 // (regula #1: nu raportează „sănătos" peste o citire care a eșuat). ──────────────
 export interface DepsDiagnosticConstructor {
-  loadKv: (cheie: string) => Promise<string | null>
-  listBuildJobs: (n: number) => Promise<Array<{ status: string; brain: string | null; log: string | null; updatedAt: string }> | null>
-  probaAider: () => Promise<{ ok: boolean }>
-  probaOllama: () => Promise<{ ok: boolean; modele: string[] }>
+  devinActiv: boolean
+  listBuildJobs: (n: number) => Promise<Array<{ status: string; brain: string | null; log: string | null; updatedAt: string; devinSessionId: string | null }> | null>
   now: number
 }
 
 export async function culegeDiagnosticConstructor(
   deps: DepsDiagnosticConstructor,
 ): Promise<DiagnosticConstructor | { error: string }> {
-  const [lastPollRaw, jobs, aider, ollama] = await Promise.all([
-    deps.loadKv('constructor:worker:lastPoll').catch(() => null),
-    deps.listBuildJobs(16).catch(() => null),
-    deps.probaAider().catch(() => ({ ok: false })),
-    deps.probaOllama().catch(() => ({ ok: false, modele: [] as string[] })),
-  ])
+  const jobs = await deps.listBuildJobs(16).catch(() => null)
   if (!jobs) return { error: 'coada_necitibila' }
-  const puls = verdictPulsLucrator(Number(lastPollRaw) || 0, deps.now)
   const ordine: OrdinRecentMasurat[] = jobs.map((j) => ({
     status: (['queued', 'running', 'done', 'failed', 'cancelled'].includes(j.status) ? j.status : 'failed') as OrdinRecentMasurat['status'],
     brain: j.brain ?? null,
     logTail: String(j.log ?? '').slice(-600),
     ageSec: Math.max(0, Math.round((deps.now - new Date(j.updatedAt).getTime()) / 1000)),
+    devinSessionId: j.devinSessionId ?? null,
   }))
-  return diagnosticConstructor({
-    lucratorViu: puls.viu,
-    lucratorAgeSec: puls.ageSec,
-    aiderOk: !!aider.ok,
-    ollamaOk: !!ollama.ok && ollama.modele.length > 0,
-    ordine,
-  })
+  return diagnosticConstructor({ devinActiv: deps.devinActiv, ordine })
 }
 
 // Wiring-ul REAL (o SINGURĂ implementare — ruta admin ȘI unealta de chat/voce îl
 // refolosesc, fără cod duplicat, poarta jscpd). Injectează dependențele vii peste
 // gatherer-ul testabil de mai sus.
 export async function diagnosticConstructorViu(now: number): Promise<DiagnosticConstructor | { error: string }> {
-  const { loadKv, listBuildJobs } = await import('../db.js')
-  const { probaAider } = await import('./aiderProba.js')
-  const { probaOllama } = await import('./ollamaProba.js')
+  const { listBuildJobs } = await import('../db.js')
+  const { config } = await import('../config.js')
   return culegeDiagnosticConstructor({
-    loadKv,
-    listBuildJobs: (n) => listBuildJobs(n).then((r) => r?.map((j) => ({ status: j.status, brain: j.brain, log: j.log, updatedAt: j.updatedAt })) ?? null),
-    probaAider: () => probaAider().then((a) => ({ ok: a.ok })),
-    probaOllama: () => probaOllama().then((o) => ({ ok: o.ok, modele: o.modele })),
+    devinActiv: !!config.devinKey,
+    listBuildJobs: (n) => listBuildJobs(n).then((r) => r?.map((j) => ({ status: j.status, brain: j.brain, log: j.log, updatedAt: j.updatedAt, devinSessionId: j.devinSessionId ?? null })) ?? null),
     now,
   })
 }
