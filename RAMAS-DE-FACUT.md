@@ -242,32 +242,51 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               bifă: verdictele finale ale celor 2 agenți + merge + măsurat
               live.
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce —
-              v1 CONSTRUIT pe branch (22 aug noaptea), în verificarea celor 3
-              agenți. Gaura MĂSURATĂ de cercetaș: ecranul și gura erau complet
-              INDEPENDENTE — același șir de caractere pleca simultan pe
-              monitor (cadrul doc din autoPreview) și în poziția „rezultat de
-              spus" a modelului Live (vocalLive raspundeUnealta cu r.text
-              întreg), iar singura frână a recitării era instrucțiunea.
-              CONSTRUIT (tăietura minimă, cod pur, zero latență): steagul
-              cadruEcranInUsa se ridică exact în lista albă CADRE_ECRAN; cu
-              ecran aprins și text peste PRAG_PREDARE_ECRAN (300, hardcod-
-              permis pe linie), textul pleacă ÎNTREG (nicio trunchiere —
-              tăierea poate inversa sensul, Legea #1) în câmpul
-              „pe_ecran_nu_se_recita", iar „de_rostit" cere predarea într-o
-              propoziție; fișa ușii poartă regula; stare_masurata a primit
-              fraza de voce care îi lipsea; măsurătoare: pulsVoce.usiCuEcran +
-              predariEcran pe GET /api/vocal-live/stare. LIMITE DECLARATE:
+              v1 CONSTRUIT pe branch (22 aug noaptea), apoi REPARAT după runda
+              celor 3 agenți (integrare PASS, logică FAIL, onestitate FAIL —
+              ambele FAIL-uri pe ACEEAȘI minciună mecanică: formula „conținutul
+              e DEJA afișat pe monitor" era falsă pe ramurile în care suprafața
+              arătată NU e textul răspunsului — meteo/hartă/video prin
+              {monitor:{url}} setează surfaceShown și SARE plasa autoPreview,
+              deci textul nu era afișat NICĂIERI, iar pe voce conținutul n-ar
+              mai fi ajuns pe niciun canal). Gaura de fond a cercetașului:
+              ecranul și gura erau complet INDEPENDENTE — același șir pleca
+              simultan pe monitor și în poziția „rezultat de spus" a modelului
+              Live, cu recitarea oprită doar de instrucție. REPARAT (cod pur,
+              zero latență): steagul docPeEcranInUsa se ridică DOAR pe cadrul
+              purtător de TEXT ({doc} — show_document sau plasa autoPreview);
+              fără doc → drumul vechi (vocea spune răspunsul ÎNTREG — conținutul
+              nu se mai poate pierde); cu doc și text peste PRAG_PREDARE_ECRAN
+              (300, hardcod-permis pe linie), textul pleacă ÎNTREG (nicio
+              trunchiere — tăierea poate inversa sensul, Legea #1) în câmpul
+              „pe_ecran_nu_se_recita", iar „de_rostit" afirmă DOAR ce s-a
+              măsurat („un document a fost trimis pe monitor", fără propoziții
+              dictate care pot minți); demascarea porții faptelor (marcajul ⚠)
+              SARE splitul — adevărul rostit bate evitarea recitării; contorul
+              predariEcran numără doar predări chiar trimise (live există);
+              fișa ușii poartă regula; stare_masurata a primit fraza de voce
+              care îi lipsea; măsurătoare: pulsVoce.usiCuDoc + predariEcran pe
+              GET /api/vocal-live/stare. LIMITE DECLARATE:
               mecanismul REDUCE presiunea recitării, n-o elimină (modelul
               vede și câmpul de ecran — numele câmpului + fișa rămân stratul
               de instrucție; gradul REAL de ascultare = „nu pot verifica" din
-              repo, se măsoară pe dispozitiv); uneltele directe fără cadru de
-              ecran (stare_masurata, dovada_faptelor) au DOAR instrucție —
-              ele nu aprind monitorul, deci split-ul nu li se aplică; ușa NU
-              trimite spoken:true (blocul de stil „pentru ureche" din chat.ts
-              rămâne nearmat pe voce — interacțiunea cu garda de limbă e
-              netestată, schimbare amânată deliberat); textul creierului
-              rămâne neatins pe ecran (autoPreview „totul pe monitor", ordinul
-              din 19 aug, nu se stinge). DECIZIE OWNER: get_monitor —
+              repo, se măsoară pe dispozitiv); „esențialul într-o frază" e
+              REZUMATUL modelului Live peste textul altui creier, pe o tură
+              EXEMPTĂ de poarta vocală (turaCuTemeiDinAfara) — o rezumare
+              greșită e azi nedetectată (onestitate F3, declarat); uneltele
+              de dovadă directe FĂRĂ nicio frază de voce în fișă: NU doar
+              stare_masurata (reparată) — și ruleaza_portile,
+              jurnal_masuratori, vaneaza_buguri (admin, prin inventarul plin;
+              onestitate F4) — au doar convenția generală, de completat la o
+              trecere viitoare; „textul creierului rămâne pe ecran" e adevărat
+              DOAR pe ramura de proză fără suprafață de unealtă — pe
+              URL/cod/tabel ecranul arată pagina/fragmentul, nu textul
+              (onestitate F6; acum, fără doc, vocea spune tot — pierderea e
+              închisă); ușa NU trimite spoken:true (blocul de stil „pentru
+              ureche" din chat.ts rămâne nearmat pe voce — interacțiunea cu
+              garda de limbă e netestată, schimbare amânată deliberat);
+              autoPreview „totul pe monitor" (ordinul din 19 aug) nu se
+              stinge. DECIZIE OWNER: get_monitor —
               „citește-mi ce scrie pe ecran" cerut EXPLICIT cu voce e azi
               posibil prin ușă (textul ecranului ajunge în gura lui Kelion);
               rămâne așa (excepție la §8 la cerere explicită) sau se
