@@ -72,9 +72,11 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       (PR #1319) + MĂSURAT LIVE 21 aug 21:20Z: /api/version → v=688febd,
       ver 6.3, publicat 21:02:45Z.** Proba pe dispozitiv rămâne la owner
       (modelul apare singur în Cache Storage `webllm/*` + turele offline
-      răspund — fără nicio interacțiune). RĂMAS mărunt: teste pe contorul de
-      eșecuri (autoDescarcareaPermisa, 6 muchii, zero acoperire); cheile i18n
-      moarte offlineGata/Descarca/Reincearca.
+      răspund — fără nicio interacțiune). Testele pe contorul de eșecuri:
+      FĂCUTE (22 aug, felia A a pasului 7 — autoDescarcareaPermisa, toate
+      cele 6 muchii, creierLocal.test.ts; frontend 16 fișiere / 98 teste
+      verzi). RĂMAS mărunt: cheile i18n moarte offlineGata/Descarca/
+      Reincearca.
       Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
@@ -248,8 +250,16 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               ≥5 închideri + garda inchis + respingeri logate). RĂMAS pt.
               bifă: verdictele finale ale celor 2 agenți + merge + măsurat
               live.
-      - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce —
-              v1 CONSTRUIT pe branch (22 aug noaptea), apoi REPARAT după runda
+      - [x] 5. monitorul: predare scurtă + afișare, fără citire cu voce —
+              PASS dublu adversarial + MERGE (PR #1327) + PUBLICAT LIVE,
+              MĂSURAT 22 aug 02:30Z: /api/version → v=b99fad6 (exact commitul
+              merge-ului), ver 7.1, publicat 02:07:42Z. Ce rămâne „nu pot
+              verifica" de aici (/api/vocal-live/stare după conversații reale
+              + proba owner-ului): pulsVoce.usiCuDoc/predariEcran în mișcare
+              REALĂ, gradul de ascultare a predării de către modelul Live,
+              acceptarea obiectului imbricat de către Google (primul de felul
+              lui pe drumul ăsta). v1 CONSTRUIT pe branch (22 aug noaptea),
+              apoi REPARAT după runda
               celor 3 agenți (integrare PASS, logică FAIL, onestitate FAIL —
               ambele FAIL-uri pe ACEEAȘI minciună mecanică: formula „conținutul
               e DEJA afișat pe monitor" era falsă pe ramurile în care suprafața
@@ -300,7 +310,45 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               interzice? RĂMAS pt. bifă: 3 agenți + merge + măsurat live
               (pulsVoce.usiCuDoc/predariEcran + proba pe dispozitiv).
       - [ ] 6. tastatura opțională (input scris, output tot voce)
-      - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
+      - [ ] 7. offline: probe (ureche/gură/RO) + rezerva — CARTOGRAFIAT de
+              cercetaș (22 aug noaptea, totul cu fișier:linie) și TĂIAT în
+              felii; ordinea spec-ului (§12: „probele, apoi implementarea").
+              STAREA REALĂ DE AZI, măsurată pe cod: creierul local (gemma-2-9b
+              WebLLM) + auto-download invizibil + arbitrul de conexiune (ping
+              real /health, nu navigator.onLine) EXISTĂ și sunt cablate; gura
+              offline = vocea BROWSERULUI (speechSynthesis), NU Piper — și NU
+              mișcă buzele avatarului (nu trece prin getVoiceLevel — exact
+              predicția §9); urechea offline NU există (Whisper/ONNX scoase la
+              restaurare; Web Speech API exclus de spec — trimite la Google;
+              calea nativă Android BLOCATĂ de ambalajul TWA — nu există punte
+              JS↔nativ); Chirp e viu ca gură de rezervă când Live e mort cu
+              net viu; lanțul vocal nu are niciun gard esteConectat() — se
+              reînnoadă la infinit contra unui server inaccesibil în loc să
+              predea modului offline. REPARAT PE LOC (docs-vs-cod): manualul
+              LIVE promitea userului Piper + Vosk + nativ Android (niciunul în
+              tree) — rescris la adevăr; paragraful cățelului adus la zi
+              (pașii 2/4 live). FELIILE (fiecare cu criteriu de măsurare,
+              raportul cercetașului în istoricul sesiunii):
+              — A: PROBELE pe ce există (proba pe DISPOZITIVUL owner-ului:
+                creierul pornește în avion mode; 10 ture RO tastate cu barem
+                scris ÎNAINTE; vocea browserului sună pe telefon; buzele nu
+                mișcă — confirmare vizuală; contorul de eșecuri) + restanța
+                de teste pe autoDescarcareaPermisa (rândul mai vechi).
+              — B (decizie OWNER): gura Piper WASM + lip-sync real (PCM →
+                alimenteazaNivelVoce → buzele mișcă; cusătura există, e făcută
+                pentru Live). ATENȚIE: reintroduce ONNX-runtime în browser —
+                exact tehnologia care a picat pe 21 aug și a cerut
+                RESTAURAREA; nu se construiește fără acordul lui explicit.
+              — C (decizie OWNER): urechea offline — C1 Vosk WASM (~50 MB,
+                precizie RO „nu pot verifica"), C2 nativ Android (cere APK cu
+                punte, proiect separat — azi TWA), C4 = FĂRĂ ureche (spec §10
+                o susține: tastatura sare deliberat veriga slabă; offline =
+                scrii → auzi). Recomandarea cercetașului: C se DECIDE, nu se
+                construiește orbește.
+              — D (după B + decizie): scoaterea totală a lui Chirp —
+                condiționată de o gură de rezervă pe cazul „Live mort, net
+                viu" (azi Chirp e ultima gură acolo; scos fără înlocuitor =
+                muțenie TĂCUTĂ exact când omul are nevoie).
       [NOTĂ 21 aug — propoziția veche „Voce-only: încă neîncepută" e DEPĂȘITĂ:
       pasul 1 (un singur motor) e bifat mai sus, CONSTRUIT și LIVE v6.2; pasul 6
       (input scris → output voce) funcționează de facto pe aceeași cale cât

@@ -33,10 +33,15 @@
 > vocală cu dovezi + facts_gate durabil; limitele în RAMAS). Rămân „nu pot
 > verifica" de aici: prima sarcină vocală reală, proba dovada_faptelor pe
 > cont real — jurnalul VPS / proba owner-ului. Pasul 5 (monitorul, §8):
-> v1 CONSTRUIT + REPARAT după runda celor 3 agenți (formula predării nu mai
-> afirmă nimic nemăsurat; demascarea nu moare în câmpul nerostit), în
-> re-verificare finală înainte de merge. Pasul 7: neînceput; 2b (nota
-> rostită) = decizie owner în RAMAS.
+> PASS dublu adversarial + MERGE (PR #1327) + PUBLICAT LIVE — măsurat 22 aug
+> 02:30Z: /api/version → v=b99fad6, ver 7.1 (legătura mecanică ecran-gură:
+> textul lung cu document pe monitor pleacă în câmpul „pe_ecran_nu_se_recita",
+> nu în poziția „rezultat de spus"; demascarea sare splitul). Rămân „nu pot
+> verifica": contoarele usiCuDoc/predariEcran în mișcare reală + ascultarea
+> predării — proba pe dispozitiv. Pasul 7: CARTOGRAFIAT și tăiat în felii în
+> RAMAS (A probe / B gura Piper / C urechea / D scoaterea Chirp — B, C, D =
+> decizii OWNER, cu riscurile pe masă); manualul nu mai promite Piper/Vosk
+> inexistente. 2b (nota rostită) = decizie owner în RAMAS.
 > Bifele cu dovadă: RAMAS-DE-FACUT.md.
 
 ---

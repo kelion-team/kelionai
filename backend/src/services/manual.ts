@@ -394,13 +394,13 @@ export function buildAdminChapters(): ManualSection[] {
       paragraphs: [
         'Ușor = Live răspunde singur, cu vocea lui. Greu = Live cheamă creierul puternic pe canal de TEXT (nu audio), primește rezultatul ca text și îl rostește el — un singur motor și la greu.',
         'Perioada de gândire e triere în doi: Live culege date și le picură creierului greu, care cere înapoi ce-i mai lipsește; se oprește când nicio întrebare nu mai mișcă răspunsul (convergență). Întrebările către om trebuie decente, nu interogatoriu.',
-        'Cățelul anti-minciună (poarta faptelor) demască pretențiile fără unealtă reușită — azi merge pe chatul scris, de mutat și pe voce. Fiecare lucru cerut are măsurătoare cu dovada salvată, scoasă la cerere („asul din mânecă").',
+        'Cățelul anti-minciună (poarta faptelor) demască pretențiile fără unealtă reușită — pe chatul scris ȘI pe voce (pe voce nota e „nu pot verifica", pe ecran, niciodată citită cu glas). Faptele lasă dovadă salvată în jurnalul operațional, scoasă la cerere („asul din mânecă").',
       ],
     },
     {
       title: '🔒 Doar admin — Offline & opțiuni',
       paragraphs: [
-        'Offline = rezervă (online rămâne Jarvis-ul real). Gura mișcă cu un TTS local (Piper); urechea = nativ Android întâi, Vosk în browser ca rezervă (româna are suport bun; precizia exactă se măsoară pe dispozitiv). Camera prinde cadre, dar „a vedea" offline cere un model de viziune pe dispozitiv — nu azi.',
+        'Offline = rezervă (online rămâne Jarvis-ul real). AZI, offline: scrii de la tastatură (urechea offline nu există încă — tastatura sare deliberat veriga slabă), creierul local răspunde, iar vocea e cea a browserului — care deocamdată NU mișcă buzele avatarului. Piper (gura cu buze) și urechea on-device sunt pasul 7 din proiect — plan, nu realitate măsurată. Camera prinde cadre, dar „a vedea" offline cere un model de viziune pe dispozitiv — nu azi.',
         'Opțiune neobligatorie: poți scrie de la tastatură în loc să vorbești; răspunsul vine tot ca VOCE (nu afișăm text-răspuns pe ecran).',
         'Separat, decis: constructorul aplicației = Devin (extern, pe cheia owner-ului).',
       ],
