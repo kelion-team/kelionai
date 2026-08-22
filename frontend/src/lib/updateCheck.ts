@@ -109,7 +109,11 @@ export async function hardResetToLatest(): Promise<void> {
       // WebLLM ține creierul local (~5,2 GB, gemma-2-9b) în Cache Storage sub `webllm/*`. Hard-reset-ul
       // rula la FIECARE publicare („update la foc continuu") și golea TOT → offline-ul
       // nu ajungea niciodată „gata". Păstrăm cheile webllm/*, ștergem restul.
-      await Promise.all(keys.filter((k) => !k.startsWith('webllm/')).map((k) => caches.delete(k)))
+      // + 'transformers-cache' (kitul offline, 22 aug): urechea Whisper
+      // (~564 MB) stă în Cache API sub cheia asta — un update nu are voie s-o
+      // radă, ca și creierul. (Gura Piper stă în OPFS — resetul de cache n-o
+      // atinge; consemnat ca să RĂMÂNĂ așa.)
+      await Promise.all(keys.filter((k) => !k.startsWith('webllm/') && k !== 'transformers-cache').map((k) => caches.delete(k)))
     }
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration()

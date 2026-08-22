@@ -80,7 +80,11 @@ import { isCarMode, setCarMode, subscribeCarMode } from '../lib/carMode'
 import { esteConectat, useConectat } from '../lib/conexiune'
 import { streamLocalRaspuns, pregatesteModelOffline, stareCreierLocal, webgpuDisponibil, sincronizeazaStareOffline, autoDescarcareaPermisa } from '../lib/creierLocal'
 import { contextPentruCreier, vitezaDinPozitii } from '../lib/contextOffline'
-import { vorbesteLocal, opresteVoceLocal } from '../lib/voceBrowser'
+import { opresteVoceLocal } from '../lib/voceBrowser'
+import { vorbesteOffline, oprestePiper, piperVorbeste } from '../lib/guraOffline'
+import { sincronizeazaKitOffline } from '../lib/kitOffline'
+import { pregatesteUrecheaOffline, urecheaOfflineGata, transcrieOffline, wavBase64LaFloat32 } from '../lib/urecheaOffline'
+import type { MicStreamHandle } from '../lib/micStream'
 import {
   adaugaTuraSync,
   adaugaAmanata,
@@ -1338,7 +1342,7 @@ export default function ChatPanel({
     if (msg && STOP_CMD.test(msg)) {
       interruptAll('stop-command')
       rvLiveRef.current?.stopSpeaking() // the live mouth shuts up too (Aug 1 — one brain)
-      opresteVoceLocal() // și gura de siguranță (vocea browserului) tace pe „stop"
+      opresteVoceLocal(); oprestePiper() // și gurile offline (browser + Piper) tac pe „stop"
       abortRef.current?.abort()
       pendingSendsRef.current = [] // stop means stop — empty the queue
       setQueued([])
@@ -1380,7 +1384,7 @@ export default function ChatPanel({
       if (!msg && !pendingAudioRef.current && atts.length === 0) return
       interruptAll('barge-in-text') // cut TTS + notify LIVE mouth; one focus arbiter
       rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
-      opresteVoceLocal() // taie gura de siguranță a turei întrerupte (barge-in)
+      opresteVoceLocal(); oprestePiper() // taie gurile offline ale turei întrerupte (barge-in)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
       // NO return — we fall through below and start the new turn right now.
     } else {
@@ -1505,6 +1509,7 @@ export default function ChatPanel({
     aSunatTuraRef.current = false
     turaAvutSemneRef.current = false
     opresteVoceLocal()
+    oprestePiper()
     let speechBuf = ''
     // Sentence splitter: a sentence leaves the buffer only when it ENDS with a
     // terminator followed by whitespace (or the very end of the buffer) — so
@@ -1723,7 +1728,10 @@ export default function ChatPanel({
         if (deRostit) {
           window.setTimeout(() => {
             if (!aSunatTuraRef.current && !ac.signal.aborted && !isVoicePlaying() && !muzicaActivaRef.current) {
-              vorbesteLocal(deRostit, lang)
+              // GURA ADEVĂRATĂ ÎNTÂI (kitul offline, 22 aug): Piper „Mihai" —
+              // voce masculină constantă + buzele avatarului mișcă; doar dacă
+              // modelul nu e (încă) descărcat cade pe vocea browserului.
+              void vorbesteOffline(deRostit, lang)
             }
           }, 2200)
         }
@@ -1904,8 +1912,55 @@ export default function ChatPanel({
   // unui server de neatins. La căderea netului sesiunea vocală (live sau
   // veche) se stinge COMPLET — fără micManualOff (aia înseamnă „omul a ales
   // oprit"), ca urechea permanentă să revină SINGURĂ la net.
+  // URECHEA LOCALĂ (kitul offline, 22 aug): captură proprie, fără server —
+  // fraza PCM 16 kHz de la micStream → Whisper local → textul intră pe
+  // ACELAȘI drum ca tastarea (send) → creierul local → gura Piper.
+  const urecheaLocalaRef = useRef<MicStreamHandle | null>(null)
+  // Vizibilitatea butonului de microfon pe offline: doar când urechea locală
+  // chiar EXISTĂ (modelul e în cache) — un buton pentru o funcție moartă ar fi
+  // exact „doar poza" interzisă azi de owner.
+  const [urecheaLocalaGata, setUrecheaLocalaGata] = useState(false)
+  const pornesteUrecheaLocala = async (): Promise<void> => {
+    if (esteConectat() || micManualOffRef.current || urecheaLocalaRef.current) return
+    const gata = await pregatesteUrecheaOffline()
+    if (!gata) return
+    setUrecheaLocalaGata(true)
+    if (esteConectat() || micManualOffRef.current || urecheaLocalaRef.current) return
+    const { startMicStream } = await import('../lib/micStream')
+    const ureche = await startMicStream({
+      onLive: () => {},
+      onPhrase: (_text, _f, audio) => {
+        if (!audio || !urecheaOfflineGata()) return
+        // Half-duplex local: cât vorbește gura Piper, frazele se aruncă
+        // (propria lui voce ar intra înapoi — v1 declarat, fără barge-in).
+        if (piperVorbeste()) return
+        void transcrieOffline(wavBase64LaFloat32(audio), speechLangRef.current).then((text) => {
+          if (text && !esteConectat()) void send(text)
+        })
+      },
+      onError: () => {},
+      getLang: () => speechLangRef.current,
+      storePendingFeatures: false,
+    })
+    if (!ureche) return
+    if (esteConectat() || micManualOffRef.current) {
+      ureche.stop()
+      return
+    }
+    urecheaLocalaRef.current = ureche
+    setListening(true)
+  }
+  const pornesteUrecheaLocalaRef = useRef(pornesteUrecheaLocala)
+  pornesteUrecheaLocalaRef.current = pornesteUrecheaLocala
   useEffect(() => {
     if (online) {
+      // Revenirea: urechea LOCALĂ tace (serverul aude de-acum), kitul își
+      // face sincronizarea invizibilă (descarcă ce lipsește), urechea
+      // permanentă online se re-armează.
+      urecheaLocalaRef.current?.stop()
+      urecheaLocalaRef.current = null
+      oprestePiper()
+      void sincronizeazaKitOffline()
       if (!micManualOffRef.current) void ensureMicRef.current()
       return
     }
@@ -1919,7 +1974,20 @@ export default function ChatPanel({
     micStartingRef.current = false
     setListening(false)
     stopVoice()
+    // Urechea locală pornește singură (modelul se ÎNCARCĂ din cache, fără
+    // rețea — dacă nu fusese descărcat cât era net, pregătirea pică onest și
+    // offline rămâne pe scris). Oprirea manuală a omului se respectă.
+    void pornesteUrecheaLocalaRef.current()
+    return () => {
+      urecheaLocalaRef.current?.stop()
+      urecheaLocalaRef.current = null
+    }
   }, [online])
+  // La montare (online): kitul își verifică singur componentele — invizibil.
+  useEffect(() => {
+    if (online) void sincronizeazaKitOffline()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // THE EAR COMES BACK BY ITSELF (4 Aug — the day of 4 server restarts): once the
   // voice session degraded to batch dictation, the 90s unlatch in ensureMic was
   // DEAD CODE — ensureMic returns at its first line while the batch mic handle
@@ -2559,6 +2627,20 @@ export default function ChatPanel({
   ensureMicRef.current = ensureMic
 
   function toggleMic(): void {
+    // OFFLINE: butonul comandă urechea LOCALĂ (kitul, 22 aug) — pornit/oprit,
+    // fără nicio mașinărie de server.
+    if (!esteConectat()) {
+      if (urecheaLocalaRef.current) {
+        micManualOffRef.current = true
+        urecheaLocalaRef.current.stop()
+        urecheaLocalaRef.current = null
+        setListening(false)
+      } else {
+        micManualOffRef.current = false
+        void pornesteUrecheaLocalaRef.current()
+      }
+      return
+    }
     // Adrian, Jul 11: "the microphone button doesn't work right". Cause: the start
     // is async (~0.5–2s); a press in that window didn't find micRef yet
     // and fell onto the START branch — i.e. stopping was impossible to express
@@ -3318,8 +3400,10 @@ export default function ChatPanel({
   // nu există (pasul 7) — un buton de microfon afișat offline ar fi o funcție
   // moartă, adică exact păcăleala interzisă. Reapare singur la revenirea rețelei
   // (useConectat re-randează).
+  // Offline, butonul rămâne DOAR dacă urechea locală există (kitul, 22 aug) —
+  // altfel ar fi „doar poză" (funcție moartă), exact ce a interzis ownerul.
   const micButton = (cls: string) =>
-    !online ? null : (
+    !online && !urecheaLocalaGata ? null : (
     <button
       type="button"
       className={`${cls} ${listening ? 'live' : ''}`}
