@@ -1603,8 +1603,13 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    „stricat" pe proba cu argumente goale (empty_*/missing_*).
 6k. **VALURILE #1333/#1334/#1335 (22 aug ~06:40-07:40Z) — MĂSURAT LIVE:
    #1333 (merge c6648b36) = v7.7, v=c6648b3, publicat 07:33:34Z; #1334
-   (merge 0ba57d5d) = v7.8, v=0ba57d5, publicat 07:40:31Z; #1335: rândul 8
-   din RAMAS (ordinele 22 aug, ziua) ține măsurătoarea finală.**
+   (merge 0ba57d5d) = v7.8, v=0ba57d5, publicat 07:40:31Z; #1335 (merge
+   993ddf13) = v7.9, v=993ddf1, publicat 07:53:16Z — toate 3 pe live.
+   GAURĂ RĂMASĂ, măsurată de owner pe v7.8: VOCEA neagă Devin — poarta
+   neagaUneltele e doar pe scris (chat.ts:3650), instrucțiunea Live nu
+   poartă adevărul constructorului; detaliu + stare: RAMAS, rândul 9 al
+   ordinelor din 22 aug (ziua). NU declara identitatea lui Devin reparată
+   pe voce fără măsurătoare live a răspunsului vocal.**
    Conținut, pe scurt:
    (1) **#1333 — KITUL OFFLINE v1 + „închide monitorul" + Devin în inventar**:
    gura Piper (`guraOffline.ts`, vocea ro_RO-mihai-medium cu lip-sync, fallback
