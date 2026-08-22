@@ -46,7 +46,7 @@ export function construiestePromptDevin(orderText: string, jobId?: number): stri
     `Branch: create a NEW branch ${branch} off master.`,
     'The environment secret KELION_GH_TOKEN is a GitHub token with write access. Use it for git auth: clone via https://x-access-token:$KELION_GH_TOKEN@github.com/kelion-team/kelionai, push your branch, and open the PR with it.',
     'Open a Pull Request TO master when done. Use the repository PR template.',
-    'Do NOT merge. The owner reviews and merges the PR himself.',
+    'Do NOT merge manually. Kelion\\'s santinelaPR will auto-merge the kelion/job-* PR when the "porti-vps" check on GitHub is green and the branch is mergeable.',
     '',
     'Requirements:',
     '- Follow the repo conventions: no hardcoded values, use env/config/DB, keep chat/voice latency low, respect the AI-HANDOFF decisions.',
@@ -54,6 +54,7 @@ export function construiestePromptDevin(orderText: string, jobId?: number): stri
     '- Do NOT touch C:/Users/adria/Downloads/k (old archived project).',
     '- Do NOT modify admin/demo keys or routing without explicit owner approval.',
     '- When finished, write the PR URL clearly at the end of your final message.',
+    '- Do NOT merge yourself — let Kelion auto-merge on green.',
   ].join('\n')
 }
 
