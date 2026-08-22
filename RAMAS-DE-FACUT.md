@@ -72,9 +72,11 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       (PR #1319) + MĂSURAT LIVE 21 aug 21:20Z: /api/version → v=688febd,
       ver 6.3, publicat 21:02:45Z.** Proba pe dispozitiv rămâne la owner
       (modelul apare singur în Cache Storage `webllm/*` + turele offline
-      răspund — fără nicio interacțiune). RĂMAS mărunt: teste pe contorul de
-      eșecuri (autoDescarcareaPermisa, 6 muchii, zero acoperire); cheile i18n
-      moarte offlineGata/Descarca/Reincearca.
+      răspund — fără nicio interacțiune). Testele pe contorul de eșecuri:
+      FĂCUTE (22 aug, felia A a pasului 7 — autoDescarcareaPermisa, toate
+      cele 6 muchii, creierLocal.test.ts; frontend 16 fișiere / 98 teste
+      verzi). RĂMAS mărunt: cheile i18n moarte offlineGata/Descarca/
+      Reincearca.
       Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
