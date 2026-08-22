@@ -4011,8 +4011,10 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
     // an image link, map coordinates, a markdown table, a code block), the
     // monitor gets ONE sensible visual of it — deterministic, no extra model
     // call. Never duplicates what show_document/show_on_screen/a screen_url
-    // tool already pushed (surfaceShown), never fires on plain prose
-    // (autoPreviewFrame returns null). See services/monitorAutoPreview.ts.
+    // tool already pushed (surfaceShown). Since Aug 19 („totul pe monitor"),
+    // plain prose itself becomes a {doc} (autoPreviewFrame branch 6) — the
+    // old claim „never fires on plain prose" was rotten and is corrected.
+    // See services/monitorAutoPreview.ts.
     if (!surfaceShown && assistantText.trim()) {
       const preview = autoPreviewFrame(assistantText)
       if (preview) {

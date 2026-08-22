@@ -1428,8 +1428,12 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    fals bloc care înghite ~24k de caractere de COD VIU și lacătul „trece" pe
    cod inexistent.
 6e. **JARVIS pasul 4 — salvarea = dovada, „asul din mânecă" pe voce
-   (PROIECT-CHAT-VOCE §7) — v1 CONSTRUIT (22 aug noaptea), în verificarea
-   celor 3 agenți**: cercetașul a măsurat că jurnalul operațional
+   (PROIECT-CHAT-VOCE §7) — PASS dublu adversarial + MERGE (PR #1326) +
+   PUBLICAT LIVE, MĂSURAT 22 aug 01:57Z: /api/version → v=577f0fc (exact
+   commitul merge-ului), ver 7.0, publicat 01:37:17Z (rămân „nu pot
+   verifica" de aici: prima sarcină vocală reală, garda la close pe fir
+   viu, ordinea toolCall/turnComplete, proba dovada_faptelor pe cont real —
+   jurnalul VPS / proba owner-ului)**: cercetașul a măsurat că jurnalul operațional
    (operational_tasks/events, scris de chat.ts la fiecare tură) era
    WRITE-ONLY — zero cititori — iar dovezile uneltelor executate direct de
    sesiunea Live mureau la golirea doveziVoceTura. Construit: cititorul
@@ -1457,6 +1461,30 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    oaspetelui pe voce). Porți după reparație: tsc 0, 214 fișiere/1929 teste,
    hardcodări/sintaxă/exporturi verzi; contoare: registru 123, matrice 125,
    rând nou de manual.
+6f. **JARVIS pasul 5 — monitorul: predare scurtă, fără citire cu voce
+   (PROIECT-CHAT-VOCE §8) — v1 CONSTRUIT (22 aug noaptea), în verificarea
+   celor 3 agenți**: cercetașul a măsurat că ecranul și gura erau complet
+   independente — același text pleca simultan pe monitor și în poziția
+   „rezultat de spus" a modelului Live, cu recitarea oprită DOAR de
+   instrucțiune. RUNDA CELOR 3 AGENȚI (integrare PASS, logică FAIL,
+   onestitate FAIL) a prins minciuna mecanică a v1: „conținutul e DEJA
+   afișat" era FALS pe suprafețele-URL (surfaceShown sare plasa autoPreview
+   → textul nu era afișat nicăieri, iar vocea l-ar fi tăcut). REPARAT
+   (cod pur, zero latență): steag `docPeEcranInUsa` ridicat DOAR pe cadrul
+   purtător de text ({doc}); fără doc → drumul vechi (vocea spune tot);
+   cu doc, peste PRAG_PREDARE_ECRAN (300, hardcod-permis), textul pleacă
+   ÎNTREG în `pe_ecran_nu_se_recita` + `de_rostit` care afirmă DOAR
+   măsuratul („un document a fost trimis pe monitor"); demascarea porții
+   (marcajul ⚠) sare splitul — adevărul rostit bate evitarea recitării;
+   contorul predariEcran doar la trimitere reală. Fișa ușii poartă regula
+   predării; stare_masurata poartă regula EI („nu recita JSON-ul").
+   Măsurătoare pulsVoce.usiCuDoc/predariEcran. Limite declarate în RAMAS
+   (mecanismul reduce presiunea, n-o elimină; rezumatul e al modelului Live
+   pe tură exemptă de poarta vocală — rezumarea greșită nedetectată;
+   ruleaza_portile/jurnal_masuratori/vaneaza_buguri rămân fără frază de
+   voce; spoken:true nearmat pe ușă — deliberat; get_monitor = decizie
+   owner). Porți după reparație: tsc 0, 215 fișiere/1934 teste,
+   hardcodări/sintaxă/exporturi verzi.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

@@ -111,7 +111,11 @@ const UNEALTA_CREIER: UnealtaVocala = {
     'chiar schimbă răspunsul, apoi cheamă unealta cu tot ce ai aflat. Dacă rezultatul întors numește o ' +
     'informație lipsă, întreabă omul și cheamă unealta din nou cu completarea. Te oprești când nicio ' +
     'întrebare rămasă nu mai mută răspunsul — ăla e răspunsul. Nu-ți nara procesul („stai să verific") — ' +
-    'ori întrebi firesc, ori dai răspunsul curat.',
+    'ori întrebi firesc, ori dai răspunsul curat. ' +
+    // MONITORUL PE VOCE (pasul 5 — §8): regula predării, chiar în fișă.
+    'Când rezultatul are câmpul „pe_ecran_nu_se_recita", un document a fost trimis pe monitor în tura ' +
+    'asta: rostești DOAR ce spune „de_rostit" — predarea și esențialul într-o frază — și NICIODATĂ ' +
+    'textul întreg din câmp.',
   parameters: {
     type: 'object',
     properties: { cerere: { type: 'string', description: 'cererea utilizatorului, completă, în limba lui' } },
@@ -144,6 +148,12 @@ export const pulsVoce = {
   // TRIEREA ÎN DOI (pas 3): câte runde de convergență au rulat — măsurabil
   // fără acces la jurnalul VPS (GET /api/vocal-live/stare).
   rundeTriere: 0,
+  // MONITORUL PE VOCE (pas 5, §8): câte uși au trimis măcar un DOCUMENT pe
+  // monitor ({doc} — singurul cadru purtător de text) și de câte ori textul
+  // lung a fost chiar mutat din poziția „rezultat de spus" în câmpul „pe
+  // ecran, nu se recită" (predarea scurtă, trimisă unui model viu). Cifre.
+  usiCuDoc: 0,
+  predariEcran: 0,
   varianta: '',
   ultimaEroare: '',
   laUltimulCadru: 0,
@@ -1522,8 +1532,27 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // (animația avatarului) — aceeași scurgere prin lista albă, adăugate
             // 10 aug ca cadrele creierului să ajungă la browser și pe voce.
             const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture', 'apel']
+            // MONITORUL PE VOCE (JARVIS pasul 5 — PROIECT-CHAT-VOCE §8):
+            // până aici, ecranul și gura erau complet independente — același
+            // șir de caractere pleca SIMULTAN pe monitor (cadrul de mai jos)
+            // și în poziția „rezultat de spus" a modelului Live, iar singura
+            // frână a recitării era o instrucțiune. Steagul leagă CAUZAL cele
+            // două și se ridică DOAR pe cadrul purtător de TEXT ({doc} — al
+            // lui show_document sau al plasei autoPreview): verificatorul de
+            // logică a dovedit că pe suprafețele-URL (meteo/hartă) textul
+            // răspunsului NU e afișat nicăieri (surfaceShown sare plasa),
+            // deci un steag ridicat pe orice cadru ar fi pus formula predării
+            // să mintă — iar pe voce conținutul n-ar mai fi ajuns pe NICIUN
+            // canal. Fără doc → drumul vechi: Live rostește răspunsul întreg.
+            let docPeEcranInUsa = false
             const laEcran = (frame: Record<string, unknown>): void => {
-              if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
+              if (CADRE_ECRAN.some((k) => k in frame)) {
+                if ('doc' in frame) {
+                  if (!docPeEcranInUsa) pulsVoce.usiCuDoc++
+                  docPeEcranInUsa = true
+                }
+                trimite({ type: 'control', frame })
+              }
             }
             let r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, laEcran, monitorLive, tranzactiiLive)
             // TRIEREA ÎN DOI (§4) — CONVERGENȚA: dacă în timpul măcinării omul a
@@ -1579,7 +1608,32 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                 ordineUrmarite.add(Number(ordin[1]))
                 app.log.info(`vocal-live: urmăresc ordinul de construcție #${ordin[1]} — anunț la terminare`)
               }
-              live?.raspundeUnealta(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
+              // PREDAREA SCURTĂ (§8): peste PRAG, cu un DOCUMENT trimis pe
+              // monitor în tura asta, textul NU se dă ca „rezultat de spus" —
+              // se dă ÎNTREG (nicio trunchiere: primele N caractere pot
+              // inversa sensul — „nu am putut trimite" tăiat înainte de „nu"
+              // ar fi minciună, Legea #1) în câmpul al cărui nume spune
+              // singur regula. Formula predării afirmă DOAR ce s-a măsurat
+              // (un cadru doc a plecat) — nu „conținutul e afișat", care pe
+              // ramurile URL/cod era fals (verificatorii pasului 5).
+              const PRAG_PREDARE_ECRAN = 300 // hardcod-permis: plafon tehnic — peste ~o frază rostibilă; sub el rostirea integrală e deja scurtă
+              // Demascarea porții faptelor (marcajul ⚠) nu are voie să moară
+              // în câmpul nerostit: dacă răspunsul o conține, splitul se
+              // sare — adevărul rostit bate evitarea recitării.
+              const contineDemascare = r.text.includes('\n\n⚠ ')
+              if (docPeEcranInUsa && !contineDemascare && r.text.length > PRAG_PREDARE_ECRAN) {
+                if (live) {
+                  pulsVoce.predariEcran++
+                  live.raspundeUnealta(apel.id, apel.name, {
+                    rezultat: {
+                      de_rostit: 'Un document a fost trimis pe monitor în tura asta, iar textul COMPLET al răspunsului îl ai în „pe_ecran_nu_se_recita". Predă scurt: o propoziție de predare + esențialul într-o frază — nu recita textul întreg.',
+                      pe_ecran_nu_se_recita: r.text,
+                    },
+                  })
+                }
+              } else {
+                live?.raspundeUnealta(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
+              }
             } else {
               app.log.warn(`vocal-live: ușa creierului a picat: ${r.motiv}`)
               // CHATUL CARE NU RĂSPUNDE, FĂCUT VIZIBIL (12 aug): ușa creierului a

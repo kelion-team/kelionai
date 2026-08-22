@@ -27,7 +27,16 @@
 > pulsVoce.rundeTriere pe /api/vocal-live/stare + dacă modelul Live chiar
 > conversează cât unealta e blocată; limitele declarate în RAMAS (injecția
 > în zbor = pas viitor).
-> Pașii 4–5, 7: neîncepuți; 2b (nota rostită) = decizie owner în RAMAS.
+> Pasul 4 (salvarea = dovada, §7): PASS dublu adversarial + MERGE (PR #1326)
+> + PUBLICAT LIVE — măsurat 22 aug 01:57Z: /api/version → v=577f0fc, ver 7.0
+> (cititorul jurnalului operațional + unealta dovada_faptelor + sarcina
+> vocală cu dovezi + facts_gate durabil; limitele în RAMAS). Rămân „nu pot
+> verifica" de aici: prima sarcină vocală reală, proba dovada_faptelor pe
+> cont real — jurnalul VPS / proba owner-ului. Pasul 5 (monitorul, §8):
+> v1 CONSTRUIT + REPARAT după runda celor 3 agenți (formula predării nu mai
+> afirmă nimic nemăsurat; demascarea nu moare în câmpul nerostit), în
+> re-verificare finală înainte de merge. Pasul 7: neînceput; 2b (nota
+> rostită) = decizie owner în RAMAS.
 > Bifele cu dovadă: RAMAS-DE-FACUT.md.
 
 ---
