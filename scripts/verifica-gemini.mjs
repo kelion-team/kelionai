@@ -205,16 +205,25 @@ function regulaVoceLive() {
 // măsurate, plătite scump, care nu mai au voie să se piardă tăcut:
 function regulaAuzul() {
   return {
-    nume: 'Auzul: AEC pe desktop / brut pe mobil (A2DP), poarta half-duplex cu coadă reală',
+    nume: 'Auzul: AEC ADAPTIV pe ruta audio (22 aug), poarta half-duplex pe drumul fără AEC, coadă reală',
     fisier: 'frontend/src/lib/vocalLive.ts',
     verifica(src) {
-      // (1) AEC pornit pe desktop, stins DOAR pe mobil (11 aug #1006: procesarea
-      // WebRTC rupe A2DP pe Android; 15 aug: fără AEC pe desktop, ecoul taie vocea).
-      if (!/echoCancellation:\s*!eMobil/.test(src))
-        return 'AEC nu mai e „pornit pe desktop / stins pe mobil" — ori ecoul taie iar vocea (desktop), ori moare Bluetooth-ul din mașină (mobil)'
-      // (2) Poarta half-duplex există: cât Kelion e audibil, urcă TĂCERE.
-      if (!/kelionAudibil/.test(src) || !/new Float32Array\(ds\.length\)/.test(src))
-        return 'poarta half-duplex a dispărut — microfonul îi cară serverului propria voce a lui Kelion și VAD-ul i-o taie'
+      // (1) CONTRACTUL NOU (ordinul ownerului, 22 aug: „identifica toate
+      // optiunile de device… 0 greseli de auz… ok executa" — înlocuiește
+      // forma veche „desktop ON / mobil OFF"): procesarea se decide după RUTA
+      // AUDIO — desktop pornită; mobil pornită DOAR când e CERT că nu există
+      // Bluetooth (rutaAudio.ts, direcția sigură de eroare). Regula din 11 aug
+      // (#1006, BT+procesare rupe A2DP) rămâne astfel respectată prin gard,
+      // nu prin stingerea oarbă care lăsa difuzorul telefonului cu ecou.
+      if (!/const procesare = !eMobil \|\| \(await faraBluetoothSigur\(\)\)/.test(src) || !/echoCancellation:\s*procesare/.test(src))
+        return 'AEC-ul nu mai e adaptiv pe ruta audio (procesare = !eMobil || faraBluetoothSigur) — ori ecoul revine pe difuzor, ori pornirea oarbă pe mobil rupe A2DP (11 aug #1006)'
+      if (/echoCancellation:\s*!eMobil/.test(src))
+        return 'forma veche „echoCancellation: !eMobil" a reapărut — contractul din 22 aug e cel adaptiv (rutaAudio.ts)'
+      // (2) Poarta half-duplex există PE DRUMUL FĂRĂ AEC: cât Kelion e audibil
+      // și procesarea nu e vie, urcă TĂCERE (cu AEC viu, browserul scoate
+      // ecoul la sursă și microfonul nu mai tace — „aude tot, oricând").
+      if (!/const poarta = !procesareActiva && kelionAudibil\(\)/.test(src) || !/new Float32Array\(ds\.length\)/.test(src))
+        return 'poarta half-duplex condiționată de AEC a dispărut — fie microfonul cară ecoul pe drumul fără AEC, fie tace degeaba sub AEC viu'
       // (3) Coada ecoului acoperă latența reală a boxelor (element audio + A2DP).
       const m = /COADA_ECOU_S = ([0-9.]+)/.exec(src)
       if (!m || Number(m[1]) < 0.5)

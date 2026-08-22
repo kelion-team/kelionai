@@ -6,6 +6,7 @@ import { pasVad, stareVadInitiala, rmsDin, zcrDin, PARAM_VAD_IMPLICIT, type Star
 import { inscrieVoceaLuiKelion } from './vociKelion'
 import { deblocheazaAudioLaGest } from './audioGraph'
 import { ensureAudioContextRunning, setupAudioContextAutoResume, startVoiceHeartbeat } from './voiceHeartbeat'
+import { faraBluetoothSigur } from './rutaAudio'
 
 // ── VOCEA LIVE FULL-DUPLEX — PARTEA DIN BROWSER (7 aug 2026) ─────────────────
 //
@@ -159,13 +160,12 @@ function clampPreamp(v: unknown): number {
 //
 // Ce e acum: vocea live iese printr-un <audio> obișnuit alimentat de WebAudio
 // (`MediaStreamDestination` de pe analizor) — audio de MEDIA, exact ca mp3-ul —
-// deci urmează ruta de muzică la căști / mașină. Compromis, spus pe
-// față: AEC-ul prin WebRTC dispare (rămâne anularea de ecou din microfon —
-// `echoCancellation: !eMobil`, deci pe MOBIL e OPRITĂ și ea); pe boxe
-// Bluetooth/mașină AEC-ul oricum nu era
-// necesar (boxele sunt departe de microfon). Dacă pe difuzorul telefonului
-// revine ecoul, pasul următor e ruta-conștientă (AEC pe difuzor, media pe
-// Bluetooth) — dar întâi trebuie ca vocea să AJUNGĂ în mașină.
+// deci urmează ruta de muzică la căști / mașină. Din 22 aug „ruta-conștientă"
+// anticipată aici chiar EXISTĂ: anularea de ecou din microfon e ADAPTIVĂ
+// (`echoCancellation: procesare` — desktop pornită; pe mobil pornită DOAR
+// când e cert că nu e niciun Bluetooth, vezi rutaAudio.ts); pe boxe
+// Bluetooth/mașină rămâne oprită (acolo nu era necesară și pornirea ei ar
+// rupe A2DP — bugul măsurat pe 11 aug).
 
 // O SINGURĂ sesiune live per tab, garantată AICI, nu în apelant (auditul de
 // noapte, 9 aug): gărzile apelantului sunt check-then-act peste await-uri de
@@ -241,6 +241,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let curataHeartbeat: (() => void) | null = null
   let curataAutoResumeOut: (() => void) | null = null
   let curataAutoResumeIn: (() => void) | null = null
+  // Procesarea WebRTC (AEC/AGC) chiar aplicată pe microfonul sesiunii ăsteia —
+  // decisă la getUserMedia după ruta audio (rutaAudio.ts). Condiționează poarta
+  // half-duplex (cu AEC viu, microfonul NU mai tace cât vorbește Kelion) și
+  // raportarea onestă {type:'aec'} către server.
+  let procesareActiva = false
+  let curataDispozitive: (() => void) | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -249,6 +255,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
     curataHeartbeat?.()
+    curataDispozitive?.()
     curataAutoResumeOut?.()
     curataAutoResumeIn?.()
     if (resumeTimer) clearInterval(resumeTimer)
@@ -593,6 +600,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   })
   if (inchis || ws.readyState !== WebSocket.OPEN) return null
 
+  const eMobil = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
   try {
     // PROCESAREA DE SUNET OPRITĂ CA VOCEA SĂ AJUNGĂ PE BLUETOOTH (11 aug, MĂSURAT
     // de owner: „nu funcționează ieșirea pe bluetooth" — chiar și DUPĂ ce redarea
@@ -620,9 +628,19 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // (unde procesarea ține telefonul în MODE_IN_COMMUNICATION). noiseSuppression
     // rămâne OFF: pe vocea joasă ar putea tăia chiar vorba (ar înrăutăți „surdul").
     // Peste asta, preamp-ul manual (setPreamp) dă boost suplimentar la cerere.
-    const eMobil = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
+    // AEC ADAPTIV PE RUTA AUDIO (owner, 22 aug: „identifica toate optiunile de
+    // device… 0 greseli de auz"). Regula veche „mobil = fără procesare" plătea
+    // pe DIFUZORUL telefonului (ecoul nu era anulat → half-duplex → microfonul
+    // tăcea cât vorbea Kelion). Regula nouă: pe mobil procesarea pornește DOAR
+    // când e CERT că nu există niciun dispozitiv Bluetooth (citirea listei a
+    // reușit + niciun nume nu pare BT — rutaAudio.ts); orice îndoială =
+    // comportamentul de azi (oprită), ca bugul măsurat pe 11 aug („nu
+    // funcționează ieșirea pe bluetooth", MODE_IN_COMMUNICATION rupe A2DP) să
+    // nu se poată întoarce. Desktop: pornită, ca până acum.
+    const procesare = !eMobil || (await faraBluetoothSigur())
+    procesareActiva = procesare
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: !eMobil, noiseSuppression: false, autoGainControl: !eMobil },
+      audio: { channelCount: 1, echoCancellation: procesare, noiseSuppression: false, autoGainControl: procesare },
     })
   } catch {
     urcaEroarea('microfonul nu a fost permis')
@@ -674,20 +692,46 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   void boxe.play().catch(() => {
     /* politica de autoplay — reîncercat de ceasul de deblocaj (mai jos) */
   })
-  // Serverul află că nu mai e AEC prin WebRTC: fără el, „vocea de peste el" ar
-  // putea fi chiar ecoul, deci NU-i dăm voie serverului să-i taie vorba pe voce
-  // (barge-in server OFF). Pe căști/mașină oricum nu e ecou; pe desktop rămâne
-  // anularea din microfon, dar pe MOBIL e oprită și ea (`echoCancellation:
-  // !eMobil` — de-asta pre-roll-ul de barge-in are gardul RMS).
+  // Serverul află starea REALĂ a anulării de ecou (22 aug — înainte se raporta
+  // `activ:false` pentru toți, chiar și pe desktop unde AEC era pornit): cu
+  // AEC viu, serverul are voie să judece „vocea de peste el" (tăierea la voce);
+  // fără AEC, vocea de peste el poate fi chiar ecoul → tăierea rămâne oprită.
   const spuneAec = (): void => {
     try {
-      ws.send(JSON.stringify({ type: 'aec', activ: false }))
+      ws.send(JSON.stringify({ type: 'aec', activ: procesareActiva }))
     } catch {
       /* sesiunea se închide oricum */
     }
   }
   if (ws.readyState === WebSocket.OPEN) spuneAec()
   else ws.addEventListener('open', spuneAec, { once: true })
+  // SCHIMBAREA RUTEI AUDIO ÎN ZBOR (22 aug): conectezi/deconectezi un Bluetooth
+  // cât sesiunea e vie → regula procesării tocmai a devenit greșită (cel mai
+  // rău caz: BT conectat cu procesarea PORNITĂ = bugul din 11 aug, live —
+  // ieșirea nu mai ajunge pe A2DP). La fiecare schimbare de dispozitive se
+  // reevaluează; verdict diferit → sesiunea se închide cu motiv onest, iar
+  // plasa de reluare din ChatPanel o repornește în secunde cu regula rutei noi.
+  const laSchimbareDispozitive = (): void => {
+    void faraBluetoothSigur().then((faraBt) => {
+      if (inchis) return
+      if ((!eMobil || faraBt) !== procesareActiva) {
+        urcaEroarea('ruta audio s-a schimbat (Bluetooth) — reiau sesiunea cu regula potrivită')
+        inchide()
+      }
+    })
+  }
+  try {
+    navigator.mediaDevices.addEventListener('devicechange', laSchimbareDispozitive)
+    curataDispozitive = () => {
+      try {
+        navigator.mediaDevices.removeEventListener('devicechange', laSchimbareDispozitive)
+      } catch {
+        /* deja scos */
+      }
+    }
+  } catch {
+    /* API absent (browser vechi) — regula rămâne cea aleasă la pornire */
+  }
   const sursa = ctxIn.createMediaStreamSource(stream)
   // Culesul microfonului (9 aug, „scoate alertele prin rezolvări reale"):
   // ÎNTÂI AudioWorklet (API-ul curent, pe firul audio — fără [Deprecation] și
@@ -749,7 +793,10 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let eraPoarta = false // tranziția porții (Kelion audibil → liniște), pt. pre-roll-ul de barge-in
   // PRE-ROLL după DURATĂ (~250 ms), robust la mărimea cadrului: la deschidere trimitem
   // întâi audio-ul reținut, ca primul cuvânt să nu fie tăiat de onset + debounce.
-  const PREROLL_MS = 250
+  // 250 → 500 (owner, 22 aug, punctul 2 „ok — trebuie verificat"): dublăm
+  // fereastra recuperată la barge-in ca prima silabă a frazei tale să nu se
+  // piardă; verificat prin teste + proba pe dispozitiv la owner.
+  const PREROLL_MS = 500
   const preRoll: Float32Array[] = []
   let preRollMs = 0
   const durataMs = (b: Float32Array): number => (b.length / 16000) * 1000
@@ -784,9 +831,14 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       for (let i = 0; i < ds.length; i++) { const v = ds[i] * g; amp[i] = v > 1 ? 1 : v < -1 ? -1 : v }
       ds = amp
     }
-    // Tăcere cât Kelion e audibil. Array NOU, nu mutăm bufferul microfonului —
-    // downsample îl întoarce ca ATARE când rata e deja 16 kHz (ar corupe captura).
-    const poarta = kelionAudibil()
+    // Tăcere cât Kelion e audibil — DOAR pe drumul FĂRĂ anulare de ecou
+    // (Bluetooth/nesigur): acolo half-duplexul e singura plasă contra „verzei".
+    // Cu procesarea VIE (desktop, difuzorul telefonului fără BT — 22 aug),
+    // browserul scoate vocea lui Kelion din microfon la sursă → microfonul NU
+    // mai tace deloc: auzi tot, oricând, inclusiv peste vocea lui (ordinul
+    // „0 greșeli de auz", punctul 1). Array NOU, nu mutăm bufferul
+    // microfonului — downsample îl întoarce ca ATARE la 16 kHz (ar corupe captura).
+    const poarta = !procesareActiva && kelionAudibil()
     const la16k = poarta ? new Float32Array(ds.length) : ds
     // BARGRAF DE INTRARE (owner, 16 aug): măsurăm nivelul REAL al microfonului pe
     // ACEST cadru — exact semnalul care (dacă poarta nu-l taie) pleacă la model —
@@ -819,8 +871,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     } else if (eraPoarta && !vadPornit) {
       // Poarta tocmai s-a ridicat pe calea FĂRĂ VAD (kelion_vad='0'): golim
       // inelul aici (cu VAD, golirea se face la închis→deschis, mai jos) —
-      // DAR doar dacă inelul chiar pare să conțină VOCE. Pe mobil AEC-ul e
-      // OPRIT (echoCancellation: !eMobil) și fără gardul ăsta coada de ecou a
+      // DAR doar dacă inelul chiar pare să conțină VOCE. Pe drumul FĂRĂ
+      // procesare (mobil cu Bluetooth/nesigur — echoCancellation: procesare,
+      // 22 aug) și fără gardul ăsta coada de ecou a
       // lui Kelion din difuzor ar pleca la model la FIECARE sfârșit de tură
       // (agentul lotului C). Vocea care întrerupe e tare (peste difuzor);
       // ecoul rezidual/tăcerea rămân sub prag și inelul se aruncă.
