@@ -329,12 +329,21 @@ export async function runOrchestrator(
     // arse degeaba. După prima rundă modelul l-a auzit deja; rundele următoare
     // păstrează doar textul (transcriptul e oricum în mesaj).
     if (round === 1) {
-      for (const m of convo) {
+      for (let i = 0; i < convo.length; i++) {
+        const m = convo[i]
         if (!Array.isArray(m.content)) continue
         const blocuri = m.content as { type: string; text?: string }[]
         if (!blocuri.some((b) => b.type === 'audio_url')) continue
         const faraAudio = blocuri.filter((b) => b.type !== 'audio_url')
-        m.content = faraAudio.length ? faraAudio : '(mesaj vocal — audio deja ascultat)'
+        // PE COPIE, nu in-place (C1 al marii verificări — BLOCANT): `convo`
+        // e o copie SHALLOW a lui `messages`, deci mutația obiectului ștergea
+        // audio-ul și din lista APELANTULUI — orice reîncercare/plasă din
+        // chat.ts rechema creierul FĂRĂ vocea omului (pe tura ambientală cu
+        // transcript gol rămânea DOAR placeholder-ul → <TAC/> fals sau
+        // răspuns halucinat). Rundele 2+ ale ACESTEI rulări văd copia
+        // (economia de bandă rămâne); încercarea următoare pornește iar de
+        // la mesajul întreg, cu audio.
+        convo[i] = { ...m, content: faraAudio.length ? faraAudio : '(mesaj vocal — audio deja ascultat)' }
       }
     }
 

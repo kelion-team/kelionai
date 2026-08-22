@@ -8,6 +8,7 @@ import { creeazaPoolDb } from './dbConexiune.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 import { normalizeazaTip, clampImportanta, rangheazaMemorii } from './services/memoryRank.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
+import { eSqlDeCitire, allCapabilityNames } from './services/brainCapabilities.js'
 import {
   curataTextJurnal,
   esteStareSarcinaOperationala,
@@ -3760,6 +3761,10 @@ export async function proposeKelionTool(t: {
   if (!dbEnabled()) return null
   const name = t.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40)
   if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // HTTPS only
+  // Numele din inventarul FIX nu se pot propune (C4 al marii verificări):
+  // o unealtă dinamică „send_email" aprobată dintr-un click ar fi umbrit
+  // executorul real — datele omului plecau la un URL extern.
+  if (allCapabilityNames().includes(name)) return null
   try {
     const r = await getPool().query<{ id: number }>(
       `INSERT INTO kelion_tools (name, description, params_json, http_method, http_url, http_headers, rationale, status)
@@ -5366,8 +5371,11 @@ export async function dbQuery(sql: string): Promise<string> {
   // citească. Orice altceva (UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT ocolind
   // validarea plăților) se refuză aici, iar DELETE/TRUNCATE ar fi oprite
   // ORICUM de triggerele din scutulDatelor — două straturi, nu unul.
-  const primulCuvant = (text.match(/^[a-z]+/i)?.[0] ?? '').toUpperCase()
-  const eCitire = primulCuvant === 'SELECT' || primulCuvant === 'WITH' || primulCuvant === 'EXPLAIN' || primulCuvant === 'SHOW'
+  // ÎNTĂRIT 22 aug (verificatorul reclasificării db_query): pe primul cuvânt,
+  // „WITH x AS (UPDATE wallets …) SELECT" și „EXPLAIN ANALYZE INSERT" treceau
+  // drept citire și OCOLEAU scutul — acum decide predicatul comun eSqlDeCitire
+  // (fără cuvinte de scriere nicăieri, fără a doua instrucțiune).
+  const eCitire = eSqlDeCitire(text)
   if (!eCitire) {
     const atinse = TABELE_PROTEJATE.filter((t) => new RegExp(`\\b${t}\\b`, 'i').test(text))
     if (atinse.length) {

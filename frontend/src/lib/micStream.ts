@@ -262,6 +262,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
 
   // ÎNCHIDE fraza: împachetează audio-ul brut + amprenta și le predă creierului.
   const closePhrase = (): void => {
+    // Urechea închisă nu mai livrează nimic (F6 al marii verificări): fără
+    // gardă, plafonul de 5s armat înaintea lui stop() trimitea fraza la
+    // creier DUPĂ ce omul a închis microfonul.
+    if (closed) return
     if (phraseTimer) {
       clearTimeout(phraseTimer)
       phraseTimer = null
@@ -530,6 +534,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     closed = true
     clearInterval(resumeTimer)
     if (phraseTimer) clearTimeout(phraseTimer)
+    if (plafonLivrare) {
+      clearTimeout(plafonLivrare)
+      plafonLivrare = null
+    }
     try {
       proc.disconnect()
       source.disconnect()

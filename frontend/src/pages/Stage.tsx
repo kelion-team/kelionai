@@ -1913,7 +1913,10 @@ export default function Stage({ user }: { user: User }) {
                     { code: 'fr', label: 'Français', flag: '🇫🇷' },
                     { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
                     { code: 'it', label: 'Italiano', flag: '🇮🇹' },
-                    { code: 'ru', label: 'Русский', flag: '🇷🇺' },
+                    // B6 (marea verificare): 'ru' NU există în Lang/dict — la
+                    // click, UI-ul cădea pe engleză cu insigna „RU" activă
+                    // (stare care minte); iar 'pt' (tradus, în Lang) LIPSEA.
+                    { code: 'pt', label: 'Português', flag: '🇵🇹' },
                   ] as const).map((l) => (
                     <button
                       key={l.code}

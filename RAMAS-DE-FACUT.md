@@ -52,9 +52,12 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       separat (servește „automatic and silent", fără bară/buton).** RĂMAS:
       tranșa 2 (restul constatărilor doar consemnate în §18, nu rescrise la
       sursă — muncă de doc separată).
-      **Rând nou (n): butonul de ștergere cont pică TĂCUT** — serverul refuză
-      mereu (403, ordinul 14 aug), UI-ul nu zice nimic (prefs.ts/CustomerSettings)
-      — de decis cu owner-ul: butonul scos sau mesaj onest.
+      **Rândul (n) ÎNCHIS (22 aug, pe ordinul „finalizeaza tot"):** butonul de
+      ștergere cont nu mai pică tăcut — „Cere ștergerea datelor", confirmarea
+      spune adevărul (manual, nimic automat), iar pe refuzul serverului (403,
+      mereu — scutul datelor) se afișează deleteAccClosed: ștergerea automată
+      e închisă prin construcție, cererea merge la contact@kelionai.app.
+      MĂSURAT: pe branch + re-verificat de agentul frontend; live după merge.
       Rânduri NOI din verificarea C (nereparate): (h) pragul RMS
       0.02 pe flush-ul fără-VAD e euristic în ambele direcții (ecou TARE trece,
       voce slabă/departe își pierde pre-roll-ul) — se confirmă doar pe telefonul
@@ -80,6 +83,60 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       tsc 0, 16/98 teste, build verde; MERGE PR #1329 + MĂSURAT LIVE 22 aug
       03:31Z: v=13c0d25, ver 7.3, publicat 03:09:08Z). Nimic mărunt rămas pe
       rândul ăsta.
+      **MAREA VERIFICARE (22 aug, ordinul „continua si finalizeaza tot, verifica
+      cu toti agenti tot")** — 3 agenți de măturare (chat / voce / frontend+bani)
+      peste TOATĂ aplicația, ~30 constatări noi (2 blocante), fiecare cu
+      fișier:linie; apoi re-verificări adversariale pe fiecare lot. REPARATE pe
+      branch (commit-urile: 1f306a30 tensiunile (e)+(g); 33284c83 eSqlDeCitire
+      întărit — prefixul mințea, WITH+INSERT/multi-statement/EXPLAIN ANALYZE
+      ocoleau și gardul de retry și scutul banilor din db.ts, acum predicat unic
+      exportat + teste executabile; eb1fff01 + d8bc382f lotul vocal F1-F4/F6-F11
+      + corectura onestă pe lacătul C8; 8d26d68c C1 blocant (mutarea în loc a
+      istoricului partajat la aruncarea audio-ului) + C2 + C6; 4def1faf C3
+      (cățelul pe rezerva vocală) + C4/C5 (uneltele dinamice nu mai mint pe
+      HTTP≥400 + refuzul umbririi registrului); 4ba79d11 lotul frontend/bani
+      B2/B4/B5/B6/B8/B9/B10 + rândul (n); fc1faf95 C4 complet — cele 5 unelte
+      oferite dar nescrise în registru ADĂUGATE (128 chat / 130 dovezi) — +
+      rezidualele vocale R1-R4). Verdictele re-verificării: voce PASS; chat
+      PASS după completarea C4; frontend „corect, dar documentele înainte de
+      merge" — lotul ăsta de doc. **Rânduri DECLARATE, nereparate (registrul
+      viu al finalizării):**
+      - (B1) rata userShare **7.5 hardcodată de 2 ori în client** (praguri.ts +
+        Credits.tsx) + pachetele [5,10,20,50] scrise de mână — și GAURA PORȚII:
+        verifica-hardcodari R1 nu scanează constante numerice, deci legea nu
+        vede exact clasa asta. Fix decis: /api/tarife expune
+        userShare/creditePeLira, clientul derivă, constantele + pachetele se
+        șterg; poarta primește regulă pe constante numerice cu bani.
+      - (B3) eticheta „Expirat" pe codurile de plată >2h MINTE (codul nu
+        expiră în DB) + drumul teoretic al dublei creditări la re-folosire;
+        fix sigur: refuz explicit >2h în crediteazaDupaCod SAU etichetă onestă.
+      - (B7-rest) secțiunile auto-lipite din capul AI-HANDOFF (istoricul
+        `cerinta*` concatenat) — rescriere de doc separată, nefăcută.
+      - (B11) **48 de chei i18n doar en/ro** — celelalte 6 limbi cad tăcut pe
+        engleză în ecrane întregi (Credits, setări).
+      - (C7) UNELTE_CITIRE_PARALELE nu conține youtube_search, list_notes,
+        memorie_ia, memorie_lista, admin_vezi, studioul_de_clipuri — citiri
+        curate care nu beneficiază de paralelizare.
+      - (C8–C13, minore chat) gateDecided/taced/userEcho nu se resetează între
+        încercări (resetStareStream acoperă restul); planFaraExecutie nu se
+        aprinde pe ambient; metadata `planning` poate diverge de
+        actionRequested; autoverificarea poate retrograda db_query; contorul
+        dbQueryAScris e per-tură, nu per-apel; click_monitor dezarmează poarta
+        faptei deși e faptă.
+      - (F5) **vitest-ul frontend NU rulează în nicio poartă CI/VPS** — cele
+        16/98 teste trec doar când un AI le rulează cu mâna; fix: pin
+        devDependency + script + pas în porti-pr.sh.
+      - (F11a) ceasPingWs e redundant (serverul doar RĂSPUNDE la ping-uri;
+        voiceHeartbeat e cel viu) — de scos la următoarea trecere vocală.
+      - (SQL-margine, declarată) eSqlDeCitire oprește scrierile, dar funcțiile
+        cu efect ÎN SELECT (setval, pg_terminate_backend, pg_read_file,
+        lo_import) TREC de predicat — margine declarată, nu gaură nouă:
+        db_query e admin-only, iar scutul banilor acoperă tabelele protejate.
+      - (moștenite, ÎNCHISE în lotul ăsta) statusurile Stripe-era
+        `succeeded`/`refunded`/`failed` din rândurile vechi de tranzacții
+        apăreau ca text brut portocaliu — mapate acum (Credits +
+        CustomerSettings, en/ro); comentariul stătut din prefs.ts despre
+        rândul (n) adus la zi.
       Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).

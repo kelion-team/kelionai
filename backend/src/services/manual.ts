@@ -300,6 +300,10 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   delete_note: { what: 'Deletes a note', say: '"delete the meter note"' },
   list_memories: { what: 'Tells you what it remembers about you', say: '"what do you remember about me?"' },
   cauta_istoric: { what: 'Searches your full past chat history with it', say: '"what did we talk about last week?"' },
+  apeleaza_user: { what: 'Calls another Kelion user — a live audio channel with translation between your languages', say: '"call Maria"' },
+  allow_guest_voice: { what: 'Lets someone you name talk to it by voice for a while', say: '"let my son talk to you"' },
+  approve_guest_voice: { what: 'Confirms keeping a guest\'s voice after their first words', say: '"yes, keep his voice"' },
+  forget_guest: { what: 'Forgets a guest\'s voice', say: '"forget my friend\'s voice"' },
   dovada_faptelor: { what: 'Shows the saved record of what it actually did for you — each task with its measured outcome', say: '"show me proof you sent that email"' },
   forget_memory: { what: 'Forgets something on request', say: '"forget what I said about the car"' },
 

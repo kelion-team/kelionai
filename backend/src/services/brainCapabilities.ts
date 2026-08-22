@@ -176,6 +176,16 @@ export const CAPABILITIES: readonly Capability[] = [
   // Miscellaneous
   { name: 'log_unsupported_request', category: 'diverse', does: 'notează o cerință imposibilă acum', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'set_active_role', category: 'diverse', does: 'schimbă rolul activ', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  // COMPLETAREA REGISTRULUI (C4 al marii verificări, 22 aug): 5 unelte
+  // OFERITE creierului dar neînregistrate — o unealtă din afara registrului
+  // putea fi UMBRITĂ de o unealtă dinamică omonimă (gardul anti-umbrire
+  // judecă pe allCapabilityNames), iar legea sursei unice cere oricum ca
+  // registrul să țină REALLY everything.
+  { name: 'apeleaza_user', category: 'diverse', does: 'apelează alt utilizator Kelion (canal audio full-duplex cu traducere live)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'allow_guest_voice', category: 'diverse', does: 'deschide o fereastră limitată în care altă persoană poate vorbi cu Kelion (amprenta ei intră ca PENDING)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'approve_guest_voice', category: 'diverse', does: 'titularul confirmă păstrarea amprentei unui oaspete', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'forget_guest', category: 'diverse', does: 'uită amprenta unui oaspete', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'media_control', category: 'ops', does: 'controlează redarea media la nivel de sistem (playerctl): verifică/oprește ce rulează', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
   // LEGATE DAR NEÎNREGISTRATE (5 aug, ordinul „leagă tot la creier"): astea 15
   // erau OFERITE creierului și funcționale, dar lipseau din registru — deci
@@ -229,7 +239,7 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
   'read_drive_file', 'get_tasks', 'search_contacts',
   'list_source', 'read_source', 'search_source', 'constructor_status',
   'list_app_versions', 'list_db_backups', 'runbook_status', 'runbook_log',
-  'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables', 'db_query',
+  'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables',
   'system_health', 'pr_lista', 'server_logs', 'client_errors', 'stare_masurata',
   'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'dovada_faptelor', 'get_monitor',
   'get_mouse_position', 'get_real_cost', 'list_updates', 'episoade_promo',
@@ -239,6 +249,21 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
 /** Grupul de exclusivitate pentru o unealtă de chat. `undefined` înseamnă o
  *  citire explicit verificată drept independentă; orice altă unealtă împarte
  *  coada `efect` cu scrierile și interacțiunile de browser/monitor. */
+/** SQL-ul e o CITIRE pură? Trei condiții, toate necesare (verificatorul din
+ *  22 aug a demonstrat că prefixul singur MINTE): prefix de citire, niciun
+ *  cuvânt de scriere NICĂIERI (WITH poate împacheta INSERT — Postgres 9.1+;
+ *  EXPLAIN ANALYZE chiar execută DML-ul; SELECT INTO creează tabel) și fără
+ *  a doua instrucțiune (simple query protocol le-ar rula pe amândouă).
+ *  Direcția erorii e cea sigură: un SELECT cu literalul '%delete%' pică spre
+ *  „scriere" — pierde doar reluarea și primește avertisment, nu minte. */
+export function eSqlDeCitire(sql: string): boolean {
+  return (
+    /^\s*(select|with|show|explain)\b/i.test(sql) &&
+    !/\b(insert|update|delete|merge|drop|truncate|alter|create|grant|revoke|copy|call|do|vacuum|refresh|into)\b/i.test(sql) &&
+    !/;\s*\S/.test(sql)
+  )
+}
+
 export function grupaExecutieUnealta(nume: string): 'efect' | undefined {
   return UNELTE_CITIRE_PARALELE.has(nume) ? undefined : 'efect'
 }

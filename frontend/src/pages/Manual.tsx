@@ -17,8 +17,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import BackLink from '../components/BackLink'
 import ManualIcon from '../components/ManualIcon'
 import { raporteazaPagina } from '../lib/vizita'
-// The manual's 7 languages (same list as on the server). The general
-// language selector stays for the contact form, where it costs nothing.
+// The manual's 8 languages — the SAME closed list as the server's
+// MANUAL_LANGS (backend/src/services/manual.ts). B8 (marea verificare):
+// comentariul vechi zicea „7, same as server" în timp ce serverul avea 8 —
+// koreeana era servită dar inaccesibilă din UI (doar ?lang=ko).
 const MANUAL_LANGS: { code: string; label: string }[] = [
   { code: 'en', label: 'English' },
   { code: 'fr', label: 'Français' },
@@ -27,6 +29,7 @@ const MANUAL_LANGS: { code: string; label: string }[] = [
   { code: 'it', label: 'Italiano' },
   { code: 'ru', label: 'Русский' },
   { code: 'ro', label: 'Română' },
+  { code: 'ko', label: '한국어' },
 ]
 
 interface ManualDoc {

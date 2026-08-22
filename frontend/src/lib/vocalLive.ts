@@ -355,10 +355,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     const acum = ctxOut.currentTime
     if (cursorRedare < acum) {
       cursorRedare = acum
-    } else if (cursorRedare > acum + 2.0) {
-      // Buffer drift / latency buildup protection during burst inference
-      cursorRedare = acum + 0.05
     }
+    // NU există „protecție de drift" aici (F1 al marii verificări, 22 aug):
+    // vechea ramură `cursorRedare > acum + 2` resetă cursorul FĂRĂ să
+    // oprească sursele deja programate — pe orice replică mai lungă de ~2s
+    // de buffer, cadrele noi se așezau PESTE coada încă redată (două fluxuri
+    // simultan din aceeași gură). A programa înainte E normal la bursturi;
+    // singurul reset legitim al cursorului e la întrerupere (taieRedarea → 0).
     src.start(cursorRedare)
     cursorRedare += buf.duration
     surseActive.push(src)
@@ -539,7 +542,18 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (inchis) return
     // Specific WebSocket code handling: 1006 is abnormal closure (network drop / timeout)
     if (ev.code === 1008) {
-      urcaEroarea('sesiune vocală: nu ești autentificat')
+      // Serverul închide cu 1008 pe DOUĂ cauze diferite (F4 al marii
+      // verificări): lipsa sesiunii ȘI creditul epuizat. „Nu ești
+      // autentificat" pe un client plătitor cu soldul golit era un
+      // diagnostic FALS (Legea #1) — se ramifică pe motivul real.
+      // ATENȚIE (R4): textele „credit epuizat" / „nu ești autentificat" sunt
+      // CUPLATE cu detecția din ChatPanel.onEroare (motiv.includes) care taie
+      // reconectările pe cauze ne-tranzitorii — schimbi aici, schimbi și acolo.
+      urcaEroarea(
+        ev.reason === 'fara_credit'
+          ? 'sesiune vocală: credit epuizat — reîncarcă pentru voce'
+          : 'sesiune vocală: nu ești autentificat',
+      )
     } else if (ev.code === 1011) {
       urcaEroarea('sesiune vocală indisponibilă pe server (lipsește cheia?)')
     } else if (ev.code === 1006) {
@@ -834,8 +848,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       const rez = pasVad(stVad, { rms: rmsDin(ds), zcr: zcrDin(ds), tMs: performance.now() }, PARAM_VAD_IMPLICIT)
       stVad = rez.st
       if (rez.deschis && !eraDeschis) {
-        // închis→deschis: golim pre-roll-ul întâi, ca primul cuvânt să fie întreg.
-        for (const b of preRoll) trimiteCadru(b)
+        // închis→deschis: golim pre-roll-ul întâi, ca primul cuvânt să fie
+        // întreg — cu ACELAȘI gard RMS ca pe calea fără VAD (F10 al marii
+        // verificări): pe mobil AEC-ul e oprit, iar fără gard coada de ecou
+        // a lui Kelion reținută cât era audibil pleca la model la fiecare
+        // deschidere VAD.
+        // hardcod-permis: același prag tehnic client (RMS) ca la calea fără VAD
+        const PRAG_RMS_PREROLL_VAD = 0.02
+        if (preRoll.some((b) => rmsDin(b) >= PRAG_RMS_PREROLL_VAD)) {
+          for (const b of preRoll) trimiteCadru(b)
+        }
         preRoll.length = 0
         preRollMs = 0
       }

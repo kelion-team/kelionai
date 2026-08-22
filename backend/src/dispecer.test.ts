@@ -10,6 +10,7 @@ import {
   stareDispecer,
   _resetDispecer,
 } from './services/dispecer.js'
+import { eSqlDeCitire } from './services/brainCapabilities.js'
 
 // ── THE DISPATCHER (Adrian, Aug 1: „ce se întâmplă când vor fi zeci sau
 // sute de useri? … să scaleze pe o pungă comună") ────────────────────────────
@@ -159,7 +160,31 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
     // și lăsa turele escaladate fără nicio reluare — ask_brain arma flag-ul).
     expect(chat).toMatch(/const unelteLaStart = unelteEfectIncercate\.length/)
     expect(chat).toMatch(/const eUnealtaCuEfectExtern = \(nume: string\): boolean =>\s*grupaExecutieUnealta\(nume\) === 'efect' && nume !== 'ask_brain' && !UNELTE_AFISAJ\.has\(nume\)/)
-    expect(chat).toMatch(/if \(eUnealtaCuEfectExtern\(name\)\) unelteEfectIncercate\.push\(name\)/)
+    expect(chat).toMatch(/\} else if \(eUnealtaCuEfectExtern\(name\)\) unelteEfectIncercate\.push\(name\)/)
+    // DB_QUERY pe SQL (tensiunea (e), închisă 22 aug pe ordinul „finalizeaza
+    // tot"): SELECT-ul rămâne reluabil (cazul fondator db_query ×18 → plasa
+    // TRĂIEȘTE), scrierea armează gardul + avertismentul; neparsabil = scriere.
+    // Predicatul e EXPORTAT (brainCapabilities) — probat EXECUTABIL mai jos,
+    // nu doar pinuit ca text (verificatorul a demonstrat că prefixul minte).
+    expect(chat).toMatch(/scrie = !eSqlDeCitire\(String\(/)
+    expect(chat).toMatch(/if \(scrie\) \{\s*\n\s*dbQueryAScris = true\s*\n\s*unelteEfectIncercate\.push\(name\)/)
+    expect(chat).toMatch(/d\.nume === 'db_query' \? dbQueryAScris : eUnealtaCuEfectExtern\(d\.nume\)/)
+  })
+  it('eSqlDeCitire nu se lasă mințit de prefix (probele verificatorului, rulate pe funcția vie) și păzește și scutul banilor din db.ts', () => {
+    // cazul fondator al plasei rămâne CITIRE (reluabil):
+    expect(eSqlDeCitire('SELECT * FROM build_jobs ORDER BY id DESC LIMIT 5')).toBe(true)
+    expect(eSqlDeCitire('  select count(*) from messages')).toBe(true)
+    // cele 5 forme de scriere deghizată, demonstrate de verificator:
+    expect(eSqlDeCitire('WITH ins AS (INSERT INTO x VALUES (1) RETURNING id) SELECT * FROM ins')).toBe(false)
+    expect(eSqlDeCitire("with d as (delete from build_jobs where id=1 returning id) select count(*) from d")).toBe(false)
+    expect(eSqlDeCitire("select 1; update users set role='admin' where email='x'")).toBe(false)
+    expect(eSqlDeCitire('EXPLAIN ANALYZE INSERT INTO x VALUES (1)')).toBe(false)
+    expect(eSqlDeCitire('SELECT * INTO copie FROM users')).toBe(false)
+    // scutul tabelelor protejate din db.ts folosește ACELAȘI predicat (înainte
+    // judeca primul cuvânt și „WITH x AS (UPDATE wallets …)" îl ocolea):
+    const db = readFileSync(fileURLToPath(new URL('./db.ts', import.meta.url)), 'utf8')
+    expect(db).toMatch(/const eCitire = eSqlDeCitire\(text\)/)
+    expect(db).not.toMatch(/primulCuvant === 'SELECT'/)
     // ARMAREA + break-ul (contra-exemplul CE-1 al verificatorului: fără astea,
     // flag-ul e veșnic false și toate celelalte lacăte rămân verzi degeaba).
     expect(chat).toMatch(/if \(!r && unelteEfectIncercate\.length > unelteLaStart\) \{\s*faptaInIncercareEsuata = true\s*break\s*\}/)
@@ -167,8 +192,9 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
     const plaseGardate = chat.match(/!faptaInIncercareEsuata/g) ?? []
     expect(plaseGardate.length).toBeGreaterThanOrEqual(2)
   })
-  it('UNELTE_AFISAJ are EXACT cei 7 membri de afișare (mutantul M2 al re-verificatorului: un nume cu efect strecurat aici — ex. send_email — ar omorî și gardul anti-re-execuție și avertismentul faptei, cu toată suita verde)', () => {
-    expect(chat).toMatch(/const UNELTE_AFISAJ = new Set\(\[\s*'show_document', 'show_on_screen', 'open_app_view',\s*'goleste_monitorul', 'click_monitor', 'zoom_monitor', 'arata_pe_grafic',\s*\]\)/)
+  it('UNELTE_AFISAJ are EXACT cei 6 membri de afișare (mutantul M2: un nume cu efect strecurat aici ar omorî gardul; click_monitor SCOS 22 aug — apasă elemente REALE, re-apăsarea nu e nevinovată, tensiunea (g) închisă)', () => {
+    expect(chat).toMatch(/const UNELTE_AFISAJ = new Set\(\[\s*'show_document', 'show_on_screen', 'open_app_view',\s*'goleste_monitorul', 'zoom_monitor', 'arata_pe_grafic',\s*\]\)/)
+    expect(chat).not.toMatch(/UNELTE_AFISAJ = new Set\(\[[^\]]*'click_monitor'/)
   })
   it('plasele nu ricoșează una în alta (F4): profund→rapid armează plasaRulata, iar plasa oglindită o respectă', () => {
     expect(chat).toMatch(/let plasaRulata = false/)

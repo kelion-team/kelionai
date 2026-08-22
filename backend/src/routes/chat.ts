@@ -66,7 +66,7 @@ import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
-import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta } from '../services/brainCapabilities.js'
+import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta, eSqlDeCitire, allCapabilityNames } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
@@ -2716,6 +2716,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // propriul nostru text, nu pe vorbele omului. Forțarea uneltei aici =
     // emailul trimis de 2 ori (clasa B#2, demonstrată de verificator).
     const cereActiune = (hasActionIntent(lastUserText) || turnHasImage) && req.body?.continuareUsa !== true
+    // ACȚIUNE CERUTĂ EXPLICIT ≠ „e o imagine în tură" (C6 al marii verificări):
+    // imaginea rămâne motiv de fază grea/inventar plin (cereActiune), dar
+    // forțarea uneltei de faptă, detectorul de îngheț și verdictul final de
+    // jurnal cer INTENȚIE de acțiune în vorbele omului — altfel „uite poza,
+    // ce e asta?" forța memorie_pune/generate_image și scria `failed` fals
+    // pe o descriere corectă.
+    const actiuneCerutaExplicit = cereActiune && hasActionIntent(lastUserText)
 // Gemini acceptă 128 unelte; Ollama cloud / altele — plafon 64 (sigur pe tool schema).
     const PLAFON_FURNIZOR = plafonUnelteFurnizor(orChatModel)
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
@@ -2809,10 +2816,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Uneltele DOAR-afișare: un apel la ele NU înseamnă că a executat cererea —
     // gardele din orchestrator nu le socotesc drept faptă. (Declarat aici, în
     // afara try-ului, ca și catch-ul de eroare să poată judeca faptele.)
+    // click_monitor SCOS din listă (tensiunea (g), închisă pe ordinul
+    // „finalizeaza tot", 22 aug): apasă ELEMENTE REALE — inclusiv butoane de
+    // admin — deci re-apăsarea la reluare NU e nevinovată și apelul E faptă.
     const UNELTE_AFISAJ = new Set([
       'show_document', 'show_on_screen', 'open_app_view',
-      'goleste_monitorul', 'click_monitor', 'zoom_monitor', 'arata_pe_grafic',
+      'goleste_monitorul', 'zoom_monitor', 'arata_pe_grafic',
     ])
+    // DB_QUERY: numele singur nu spune dacă e citire sau scriere (tensiunea
+    // (e), închisă pe același ordin: SQL-ul decide, cu predicatul ÎNTĂRIT din
+    // brainCapabilities — verificatorul a demonstrat că prefixul singur minte
+    // (WITH+INSERT, EXPLAIN ANALYZE, „select 1; update"). Citirea = reluabilă
+    // (cazul fondator al plasei — db_query ×18 — trăiește); scrierea = efect
+    // extern (nu se re-execută, omul e avertizat); neparsabil = scriere.
+    let dbQueryAScris = false
     // EFECT EXTERN = ce nu are voie să se execute de două ori (verdictele
     // agenților lot B: gardul anti-re-execuție pe „orice unealtă" omora cazul
     // fondator al plasei — db_query ×18 + sinteză goală rămânea fără plasă — și
@@ -3099,7 +3116,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           return JSON.stringify({ succes: true, mesaj: `Am desenat pe graficul ${simbol} — ${bucati.join(' · ')}.` })
         }
         // APPROVED DYNAMIC TOOL: generic execution through a safe HTTP call.
-        if (dynNames.has(name)) {
+        // NICIODATĂ peste un executor REAL (C4 al marii verificări): o unealtă
+        // dinamică aprobată cu numele „send_email" ar fi UMBRIT executorul
+        // adevărat — argumentele reale (destinatar, corp) plecau la un URL
+        // extern, modelul vedea schema adevărată dar execuția era alta, iar
+        // poarta faptelor o număra drept dovadă. Inventarul fix are prioritate.
+        if (dynNames.has(name) && !allCapabilityNames().includes(name)) {
           return await runDynamicTool(name, input as Record<string, unknown>)
         }
         // UȘA DE ESCALADARE CHIAR DESCHIDE UNELTELE (8 aug, ownerul: „nu știe
@@ -3172,7 +3194,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // devine dovadă numai DUPĂ ce rezultatul ei a fost clasificat.
       const executaUnealtaCuDovada = async (name: string, argsJson: string): Promise<string> => {
         unelteIncercate.push(name)
-        if (eUnealtaCuEfectExtern(name)) unelteEfectIncercate.push(name)
+        if (name === 'db_query') {
+          let scrie = true
+          try {
+            scrie = !eSqlDeCitire(String((JSON.parse(argsJson || '{}') as { sql?: unknown }).sql ?? ''))
+          } catch {
+            /* SQL neparsabil = tratat ca scriere (direcția sigură) */
+          }
+          if (scrie) {
+            dbQueryAScris = true
+            unelteEfectIncercate.push(name)
+          }
+        } else if (eUnealtaCuEfectExtern(name)) unelteEfectIncercate.push(name)
         await scrieJurnalOperational(async () => {
           const tranzitie = await tranzitioneazaSarcinaOperationala({
             taskId: sarcinaOperationalaId,
@@ -3402,9 +3435,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         'add_task', 'browser_open', 'browser_type', 'browser_click', 'generate_image',
         'generate_video', 'memorie_pune', 'db_query',
       ].filter((n) => toolNamesThisTurn.has(n))
-      // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului.
-      const forteazaFapta = isAdmin && cereActiune
-      const markupStrip = makeToolMarkupStripper(
+      // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului — nu pe
+      // simpla prezență a unei imagini (C6; vezi actiuneCerutaExplicit, sus).
+      const forteazaFapta = isAdmin && cereActiune && actiuneCerutaExplicit
+      let markupStrip = makeToolMarkupStripper(
         (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
         toolNamesThisTurn,
       )
@@ -3419,6 +3453,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       let limbaScrisaDecisa = !ro
       let limbaScrisaSuprimata = false
       let limbaScrisaBuf = ''
+      // C2 al marii verificări: acumulatoarele de STREAM trăiesc în afara
+      // buclei de reîncercări — fără resetul ăsta, fragmentele reținute din
+      // încercarea picată („Bun" sub pragul gardului de limbă, „<TA" în
+      // poarta de ecou) se lipeau de răspunsul încercării următoare pe ecran
+      // și în gura vocii („BunSalut! …"). Se cheamă la ÎNCEPUTUL fiecărei
+      // încercări și în plase — fragmentele încercării moarte se aruncă.
+      const resetStareStream = (): void => {
+        gateBuf = ''
+        coadaEcou = ''
+        limbaScrisaBuf = ''
+        markupStrip = makeToolMarkupStripper(
+          (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
+          toolNamesThisTurn,
+        )
+      }
       const NOTA_LIMBA = 'Mi-a scăpat începutul răspunsului în altă limbă și l-am oprit. Pune-mi, te rog, întrebarea încă o dată.'
       const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
         orchestratorModel,
@@ -3561,6 +3610,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       let slotTinut: string | null = null
       try {
         for (let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt++) {
+          resetStareStream()
           // Take a slot on the EFFECTIVE Gemini model; if it's busy, wait in the
           // dispatcher's queue for a slot on the SAME model.
           const modelIncercare = modelEfectiv()
@@ -3652,6 +3702,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (iaSlotDacaLiber(modelPlasa)) slotPlasa = modelPlasa
           else if (await asteaptaLaCoada(async () => [modelPlasa], new Set<string>())) slotPlasa = modelPlasa
           if (slotPlasa) {
+            resetStareStream()
             const cand = await runBrainOnce()
             const textCurat = stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim()
             if (textCurat || textFlowed || sawVisible) r = cand
@@ -3758,7 +3809,7 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         // solutia pina la deploy masurabil"). Tură de EXECUȚIE + ZERO unelte +
         // limbaj de plan = fix înghețul de 5 luni. Se demască pe ecran și în
         // istoric — legea ducerii la capăt, mecanic, pentru orice model.
-        planFaraExecutieDetectat = planFaraExecutie(assistantText, doveziUnelte, cereActiune)
+        planFaraExecutieDetectat = planFaraExecutie(assistantText, doveziUnelte, actiuneCerutaExplicit)
         if (planFaraExecutieDetectat) {
           try {
             reply.raw.write(TEXT_PLAN_FARA_EXECUTIE)
@@ -3817,7 +3868,33 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         if (userEcho) emitHeard(userEcho)
       }
       // Pe voce, corpul rostit e în ecranPartial (poarta l-a scos curat).
-      if (voceAmbianta && !taced) assistantText = ecranPartial
+      if (voceAmbianta && !taced) {
+        assistantText = ecranPartial
+        // CĂȚELUL PE REZERVA VOCALĂ (C3 al marii verificări): blocul de la
+        // `if (!voceAmbianta)` sare poarta faptelor pe EXACT calea folosită
+        // când sesiunea Live e moartă (Chirp) — „am trimis emailul" rostit
+        // prin rezervă nu se demasca nicăieri. Nota intră în ISTORIC și pe
+        // ecranul turei (assistantText), NU în gura care a vorbit deja —
+        // varianta onestă „nu pot verifica" (§8: nota nu se rostește).
+        const nedoveditePeVoce = pretentiiFaraFapta(assistantText, doveziUnelte)
+        if (nedoveditePeVoce.length) {
+          const nota = textulNuPotVerifica(nedoveditePeVoce)
+          assistantText += nota
+          try {
+            reply.raw.write(nota)
+          } catch {
+            /* nescrisă pe stream — rămâne în istoric */
+          }
+          console.error(`[POARTA FAPTELOR][REZERVA VOCALĂ] pretenții nedovedite (nu pot verifica): ${nedoveditePeVoce.join('; ')} | rezultate: ${doveziUnelte.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciunul'}`)
+          await scrieJurnalOperational(() => noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'facts_gate',
+            outcomeState: 'observed',
+            code: 'claims_unverifiable_voice_fallback',
+            reason: nedoveditePeVoce.join('; '),
+          }))
+        }
+      }
       // Creierul a hotărât că NU i se vorbea → tura se stinge: {ignored}, fără
       // rostire (poarta a reținut tot), fără salvare. Clientul șterge bulele.
       if (voceAmbianta && taced) {
@@ -3929,7 +4006,8 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       // creat). Dacă o unealtă cu EFECT EXTERN a reușit în tura moartă, omul
       // e avertizat cinstit, fără niciun detaliu tehnic (regula 1 aug).
       const fapteDejaExecutate = doveziUnelte.some(
-        (d) => (d.stare === 'succeeded' || d.stare === 'verified') && eUnealtaCuEfectExtern(d.nume),
+        (d) => (d.stare === 'succeeded' || d.stare === 'verified') &&
+          (d.nume === 'db_query' ? dbQueryAScris : eUnealtaCuEfectExtern(d.nume)),
       )
       let spoken = ecranPartial.trim()
         ? (ro
@@ -4068,7 +4146,9 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
     }
     await voice.finish()
     const finalOperational = rezumaStareFinalaSarcinaOperationala({
-      cereActiune,
+      // pe INTENȚIA explicită, nu pe simpla prezență a imaginii (C6):
+      // descrierea corectă a unei poze fără unelte nu e o acțiune ratată.
+      cereActiune: actiuneCerutaExplicit,
       dovezi: doveziUnelte,
       planFaraExecutie: planFaraExecutieDetectat,
     })

@@ -24,7 +24,12 @@
 ## Cerința #41 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - Opțiunile de schimbare a limbii din bara de admin sunt configurate și afișate în interfață (`scripts/admin-bar-preview.html`, `frontend/src/lib/langList.ts`, `frontend/src/lib/languages.ts`, `Stage.tsx`).
 - Selectorul de limbă oferă acces complet și focalizat pe opțiunile de selecție a limbii (Română, English, Français, Deutsch, Español, Italiano, Português, Nederlands, Polski, Русский, etc.).
-- Teste automate dedicate adăugate în `backend/src/cerinta41.test.ts`.
+- [CORECTAT 22 aug, marea verificare B7: fișierul `backend/src/cerinta41.test.ts`
+  afirmat aici NU a existat niciodată; testele reale ale barei de limbă sunt
+  `backend/src/adminBarLimba.test.ts` + `backend/tests/cerinta31.test.ts`.
+  Tot 22 aug: lista de mai sus e și ea FALSĂ pe UI — bara are 7 intrări
+  (Stage.tsx), nu 17; 'ru' a fost SCOS (nu există în Lang — la click cădea pe
+  engleză cu insigna RU activă) și 'pt' ADĂUGAT.]
 
 ## Cerința #39 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - Opțiunile de schimbare a limbii din bara de admin sunt configurate și afișate în interfață (`scripts/admin-bar-preview.html`, `frontend/src/lib/langList.ts`, `Stage.tsx`).
@@ -1350,15 +1355,18 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    (b) mesajele de eroare există doar ro/en — celelalte 5 limbi cad pe engleză
    (clasă veche, consecventă); (c) geminiDirect aruncă și când {error} vine DUPĂ
    un răspuns complet (margine rară → sufix „s-a întrerupt" fals); (d) plasele nu
-   consultă eSanatos (pot chema un model în cooldown); (e) db_query e ȘI în
-   UNELTE_CITIRE_PARALELE (citire independentă) ȘI în UNELTE_FAPTA (faptă) —
-   tensiune de clasificare de lămurit; (f) în interiorul încercării 1, escaladarea
-   la mijloc rulează rundele pe modelul greu cu slotul încă pe modelul de pornire
-   (slotul se ia la START de încercare — gol structural mărginit, corectat de la
-   încercarea 2); (g) `click_monitor` e clasificat DOAR-afișare (UNELTE_AFISAJ),
-   dar chat.ts spune el însuși că apasă ELEMENTE REALE (orice buton, inclusiv din
-   admin) → o reluare îl poate re-apăsa — tensiune de clasificare, de lămurit cu
-   owner-ul (aceeași familie cu (e)).
+   consultă eSanatos (pot chema un model în cooldown); (e) ÎNCHIS 22 aug pe
+   ordinul „finalizeaza tot": db_query scos din UNELTE_CITIRE_PARALELE
+   (serializat — poate SCRIE), iar gardul de reluare decide pe SQL
+   (eSqlDeCitire: SELECT/WITH/SHOW/EXPLAIN = reluabil, cazul fondator al
+   plasei trăiește; scrierea armează gardul + avertismentul „verifică înainte
+   să repeți"; neparsabil = scriere, direcția sigură); (f) în interiorul
+   încercării 1, escaladarea la mijloc rulează rundele pe modelul greu cu
+   slotul încă pe modelul de pornire (slotul se ia la START de încercare —
+   gol structural mărginit, corectat de la încercarea 2); (g) ÎNCHIS 22 aug
+   pe același ordin: click_monitor SCOS din UNELTE_AFISAJ — apasă ELEMENTE
+   REALE, deci apelul E faptă (acoperă pretenții la poartă), nu se re-execută
+   la reluare și avertizează omul; lacătele din dispecer.test.ts actualizate.
 6b. **LOT C — restul registrului frontend (8 reparații) — MERGE (PR #1321) +
    MĂSURAT LIVE 21 aug 22:56Z: /api/version → v=141f09d, ver 6.5, publicat
    22:28:53Z** (proba pe dispozitiv — vocea/barge-in/pragul RMS — rămâne la
@@ -1509,6 +1517,45 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    -am …`); (3) `git fetch origin master && git checkout -B <branch>
    origin/master`; (4) `npm install` la nevoie. Adevărul e pe ORIGIN și pe
    LIVE (măsurat prin /api/version), nu pe discul containerului.
+6h. **MAREA VERIFICARE (22 aug dimineața, ordinul owner-ului: „continua si
+   finalizeaza tot, verifica cu toti agenti tot")**: 3 agenți de măturare
+   (calea chat, calea vocală, frontend+bani) peste toată aplicația → ~30
+   constatări noi (2 blocante), apoi re-verificare adversarială pe fiecare
+   lot înainte de orice commit. REPARATE pe branch (8 commit-uri peste
+   f0f8f68c): tensiunile (e)+(g) închise pe ordinul owner-ului (db_query
+   judecat pe SQL, click_monitor = faptă); **eSqlDeCitire întărit** — vechiul
+   test de prefix mințea (WITH+INSERT, `select 1; update`, EXPLAIN ANALYZE
+   INSERT, SELECT INTO treceau ca „citiri" și de gardul de retry din chat.ts
+   și de scutul banilor din db.ts — aceeași boală în două locuri) → predicat
+   unic exportat din brainCapabilities.ts (prefix de citire + zero cuvinte de
+   scriere + o singură instrucțiune), folosit de ambele, cu sonde executabile
+   în teste; lotul vocal F1-F4/F6-F11 + R1-R4 (deriva cursorului de redare
+   scoasă, `finished` pe transcrieri, 1008/fara_credit onest + gardul
+   ne-tranzitoriu la reluare, closePhrase idempotent, sonda de generație
+   care se auto-curăță, flush-ul VAD cu gard RMS, bufScris nu se mai aruncă
+   tăcut, dedup pe `final`, turaAdresata pe eraInZbor); calea chat C1
+   (blocant: orchestratorul MUTA istoricul partajat când arunca audio-ul —
+   acum copie), C2, C3 (cățelul pe rezerva vocală — pretenții fără faptă pe
+   drumul ecranPartial primesc „nu pot verifica" + eveniment facts_gate), C4
+   COMPLET (uneltele dinamice nu pot umbri registrul + cele 5 oferite dar
+   nescrise ADĂUGATE — registrul e acum 128 chat / 130 dovezi), C5 (HTTP≥400
+   la unealta dinamică = {error}, nu corp-de-succes), C6
+   (actiuneCerutaExplicit: imaginea singură nu mai forțează fapte/verdicte);
+   frontend/bani B2/B4/B5/B6/B8/B9/B10 (stările tranzacțiilor mapate onest
+   en/ro inclusiv moștenirile Stripe-era succeeded/refunded/failed, Credits
+   în engleză, ru scos/pt adăugat în selector, adminText pe LIRE, rândul (n)
+   închis — deleteAccClosed). Verdictele finale: voce PASS, chat PASS după
+   completarea C4, frontend „corect + doc-urile cerute înainte de merge"
+   (lotul de doc = commitul ăsta). DECLARATE nereparate (registrul viu, cu
+   fix decis, în RAMAS sub „MAREA VERIFICARE"): B1 (rata 7.5 ×2 + gaura
+   porții pe constante numerice → /api/tarife), B3 (eticheta „Expirat"
+   minte), B7-rest, B11 (48 chei i18n), C7 (6 citiri lipsă din
+   UNELTE_CITIRE_PARALELE), C8-C13 minore, F5 (vitest frontend nu e în nicio
+   poartă CI), F11a (ceasPingWs redundant), marginea SQL declarată
+   (funcții cu efect în SELECT trec de predicat — db_query rămâne
+   admin-only). Lecție de proces plătită în sesiune: un commit a AFIRMAT
+   suita verde când un lacăt pica pe starea comisă — corectat deschis în
+   commit dedicat (d8bc382f), regula #1 se aplică și rapoartelor proprii.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor
