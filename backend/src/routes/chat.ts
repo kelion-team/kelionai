@@ -66,7 +66,7 @@ import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
-import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta, eSqlDeCitire } from '../services/brainCapabilities.js'
+import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta, eSqlDeCitire, allCapabilityNames } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
@@ -3116,7 +3116,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           return JSON.stringify({ succes: true, mesaj: `Am desenat pe graficul ${simbol} — ${bucati.join(' · ')}.` })
         }
         // APPROVED DYNAMIC TOOL: generic execution through a safe HTTP call.
-        if (dynNames.has(name)) {
+        // NICIODATĂ peste un executor REAL (C4 al marii verificări): o unealtă
+        // dinamică aprobată cu numele „send_email" ar fi UMBRIT executorul
+        // adevărat — argumentele reale (destinatar, corp) plecau la un URL
+        // extern, modelul vedea schema adevărată dar execuția era alta, iar
+        // poarta faptelor o număra drept dovadă. Inventarul fix are prioritate.
+        if (dynNames.has(name) && !allCapabilityNames().includes(name)) {
           return await runDynamicTool(name, input as Record<string, unknown>)
         }
         // UȘA DE ESCALADARE CHIAR DESCHIDE UNELTELE (8 aug, ownerul: „nu știe
@@ -3863,7 +3868,33 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         if (userEcho) emitHeard(userEcho)
       }
       // Pe voce, corpul rostit e în ecranPartial (poarta l-a scos curat).
-      if (voceAmbianta && !taced) assistantText = ecranPartial
+      if (voceAmbianta && !taced) {
+        assistantText = ecranPartial
+        // CĂȚELUL PE REZERVA VOCALĂ (C3 al marii verificări): blocul de la
+        // `if (!voceAmbianta)` sare poarta faptelor pe EXACT calea folosită
+        // când sesiunea Live e moartă (Chirp) — „am trimis emailul" rostit
+        // prin rezervă nu se demasca nicăieri. Nota intră în ISTORIC și pe
+        // ecranul turei (assistantText), NU în gura care a vorbit deja —
+        // varianta onestă „nu pot verifica" (§8: nota nu se rostește).
+        const nedoveditePeVoce = pretentiiFaraFapta(assistantText, doveziUnelte)
+        if (nedoveditePeVoce.length) {
+          const nota = textulNuPotVerifica(nedoveditePeVoce)
+          assistantText += nota
+          try {
+            reply.raw.write(nota)
+          } catch {
+            /* nescrisă pe stream — rămâne în istoric */
+          }
+          console.error(`[POARTA FAPTELOR][REZERVA VOCALĂ] pretenții nedovedite (nu pot verifica): ${nedoveditePeVoce.join('; ')} | rezultate: ${doveziUnelte.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciunul'}`)
+          await scrieJurnalOperational(() => noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'facts_gate',
+            outcomeState: 'observed',
+            code: 'claims_unverifiable_voice_fallback',
+            reason: nedoveditePeVoce.join('; '),
+          }))
+        }
+      }
       // Creierul a hotărât că NU i se vorbea → tura se stinge: {ignored}, fără
       // rostire (poarta a reținut tot), fără salvare. Clientul șterge bulele.
       if (voceAmbianta && taced) {

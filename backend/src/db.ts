@@ -8,7 +8,7 @@ import { creeazaPoolDb } from './dbConexiune.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 import { normalizeazaTip, clampImportanta, rangheazaMemorii } from './services/memoryRank.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
-import { eSqlDeCitire } from './services/brainCapabilities.js'
+import { eSqlDeCitire, allCapabilityNames } from './services/brainCapabilities.js'
 import {
   curataTextJurnal,
   esteStareSarcinaOperationala,
@@ -3761,6 +3761,10 @@ export async function proposeKelionTool(t: {
   if (!dbEnabled()) return null
   const name = t.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40)
   if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // HTTPS only
+  // Numele din inventarul FIX nu se pot propune (C4 al marii verificări):
+  // o unealtă dinamică „send_email" aprobată dintr-un click ar fi umbrit
+  // executorul real — datele omului plecau la un URL extern.
+  if (allCapabilityNames().includes(name)) return null
   try {
     const r = await getPool().query<{ id: number }>(
       `INSERT INTO kelion_tools (name, description, params_json, http_method, http_url, http_headers, rationale, status)
