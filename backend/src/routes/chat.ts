@@ -4411,6 +4411,12 @@ async function runTool(
       const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
       const diagnostic = await diagnosticConstructorViu(Date.now()).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }))
       return JSON.stringify({
+        // CINE e constructorul — MĂSURAT din config, nu din memoria modelului
+        // (owner, 22 aug: a întrebat „e Devin prezent?" și modelul a răspuns cu
+        // Jules pentru că niciun răspuns de unealtă nu purta numele lui Devin).
+        constructor: config.devinKey
+          ? 'DEVIN (extern, ACTIV — cheia e pusă; ordinele pleacă prin build_software, rezultatul e un PR pe care ownerul îl aprobă)'
+          : 'lucrătorul local (cheia Devin NU e pusă)',
         // `progress` = the constructor's current step (Stage 4) — Kelion can
         // speak it ("now compiling", "opening the PR") instead of "working…".
         // `ci` = the verdict of the INDEPENDENT verification (Stage 6): "Done,

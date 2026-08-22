@@ -143,6 +143,17 @@ export async function execSharedAdminTool(
     // SINGURA lui ușă — se deschid doar la ordinul explicit al ownerului. Sonda
     // julesServeste (fostul bec) trăiește aici: întâi măsurăm că servește.
     case 'jules_repos': {
+      // ACEEAȘI POARTĂ ca jules_task (owner, 22 aug, a doua oară, pe voce:
+      // „devin nu este activ si kelion raporteaza 7 repo a lui jules" —
+      // gardul pus dimineață acoperea doar sarcinile, iar modelul răspundea
+      // la „e Devin prezent?" listând repo-urile lui Jules din unealta asta).
+      // Răspunsul o și ÎNVAȚĂ: constructorul e Devin, prin build_software.
+      if (config.devinKey) {
+        return JSON.stringify({
+          error: 'constructorul_e_devin',
+          message: 'Constructorul aplicației este DEVIN — activ, cu cheia pusă; ordinele de cod/reparație se dau prin unealta build_software (Devin deschide PR, ownerul aprobă). Jules e doar rezervă tăcută, dezactivată cât Devin e configurat — nu-i lista repo-urile drept răspuns despre constructor.',
+        })
+      }
       const stare = await julesServeste()
       return stare.ok ? julesSurse() : `Jules nu servește acum: ${stare.detaliu}`
     }
