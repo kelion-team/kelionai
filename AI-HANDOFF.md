@@ -1350,15 +1350,18 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    (b) mesajele de eroare există doar ro/en — celelalte 5 limbi cad pe engleză
    (clasă veche, consecventă); (c) geminiDirect aruncă și când {error} vine DUPĂ
    un răspuns complet (margine rară → sufix „s-a întrerupt" fals); (d) plasele nu
-   consultă eSanatos (pot chema un model în cooldown); (e) db_query e ȘI în
-   UNELTE_CITIRE_PARALELE (citire independentă) ȘI în UNELTE_FAPTA (faptă) —
-   tensiune de clasificare de lămurit; (f) în interiorul încercării 1, escaladarea
-   la mijloc rulează rundele pe modelul greu cu slotul încă pe modelul de pornire
-   (slotul se ia la START de încercare — gol structural mărginit, corectat de la
-   încercarea 2); (g) `click_monitor` e clasificat DOAR-afișare (UNELTE_AFISAJ),
-   dar chat.ts spune el însuși că apasă ELEMENTE REALE (orice buton, inclusiv din
-   admin) → o reluare îl poate re-apăsa — tensiune de clasificare, de lămurit cu
-   owner-ul (aceeași familie cu (e)).
+   consultă eSanatos (pot chema un model în cooldown); (e) ÎNCHIS 22 aug pe
+   ordinul „finalizeaza tot": db_query scos din UNELTE_CITIRE_PARALELE
+   (serializat — poate SCRIE), iar gardul de reluare decide pe SQL
+   (eSqlDeCitire: SELECT/WITH/SHOW/EXPLAIN = reluabil, cazul fondator al
+   plasei trăiește; scrierea armează gardul + avertismentul „verifică înainte
+   să repeți"; neparsabil = scriere, direcția sigură); (f) în interiorul
+   încercării 1, escaladarea la mijloc rulează rundele pe modelul greu cu
+   slotul încă pe modelul de pornire (slotul se ia la START de încercare —
+   gol structural mărginit, corectat de la încercarea 2); (g) ÎNCHIS 22 aug
+   pe același ordin: click_monitor SCOS din UNELTE_AFISAJ — apasă ELEMENTE
+   REALE, deci apelul E faptă (acoperă pretenții la poartă), nu se re-execută
+   la reluare și avertizează omul; lacătele din dispecer.test.ts actualizate.
 6b. **LOT C — restul registrului frontend (8 reparații) — MERGE (PR #1321) +
    MĂSURAT LIVE 21 aug 22:56Z: /api/version → v=141f09d, ver 6.5, publicat
    22:28:53Z** (proba pe dispozitiv — vocea/barge-in/pragul RMS — rămâne la

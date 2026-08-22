@@ -159,7 +159,13 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
     // și lăsa turele escaladate fără nicio reluare — ask_brain arma flag-ul).
     expect(chat).toMatch(/const unelteLaStart = unelteEfectIncercate\.length/)
     expect(chat).toMatch(/const eUnealtaCuEfectExtern = \(nume: string\): boolean =>\s*grupaExecutieUnealta\(nume\) === 'efect' && nume !== 'ask_brain' && !UNELTE_AFISAJ\.has\(nume\)/)
-    expect(chat).toMatch(/if \(eUnealtaCuEfectExtern\(name\)\) unelteEfectIncercate\.push\(name\)/)
+    expect(chat).toMatch(/\} else if \(eUnealtaCuEfectExtern\(name\)\) unelteEfectIncercate\.push\(name\)/)
+    // DB_QUERY pe SQL (tensiunea (e), închisă 22 aug pe ordinul „finalizeaza
+    // tot"): SELECT-ul rămâne reluabil (cazul fondator db_query ×18 → plasa
+    // TRĂIEȘTE), scrierea armează gardul + avertismentul; neparsabil = scriere.
+    expect(chat).toMatch(/const eSqlDeCitire = \(sql: string\): boolean => \/\^\\s\*\(select\|with\|show\|explain\)\\b\/i\.test\(sql\)/)
+    expect(chat).toMatch(/if \(scrie\) \{\s*\n\s*dbQueryAScris = true\s*\n\s*unelteEfectIncercate\.push\(name\)/)
+    expect(chat).toMatch(/d\.nume === 'db_query' \? dbQueryAScris : eUnealtaCuEfectExtern\(d\.nume\)/)
     // ARMAREA + break-ul (contra-exemplul CE-1 al verificatorului: fără astea,
     // flag-ul e veșnic false și toate celelalte lacăte rămân verzi degeaba).
     expect(chat).toMatch(/if \(!r && unelteEfectIncercate\.length > unelteLaStart\) \{\s*faptaInIncercareEsuata = true\s*break\s*\}/)
@@ -167,8 +173,9 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
     const plaseGardate = chat.match(/!faptaInIncercareEsuata/g) ?? []
     expect(plaseGardate.length).toBeGreaterThanOrEqual(2)
   })
-  it('UNELTE_AFISAJ are EXACT cei 7 membri de afișare (mutantul M2 al re-verificatorului: un nume cu efect strecurat aici — ex. send_email — ar omorî și gardul anti-re-execuție și avertismentul faptei, cu toată suita verde)', () => {
-    expect(chat).toMatch(/const UNELTE_AFISAJ = new Set\(\[\s*'show_document', 'show_on_screen', 'open_app_view',\s*'goleste_monitorul', 'click_monitor', 'zoom_monitor', 'arata_pe_grafic',\s*\]\)/)
+  it('UNELTE_AFISAJ are EXACT cei 6 membri de afișare (mutantul M2: un nume cu efect strecurat aici ar omorî gardul; click_monitor SCOS 22 aug — apasă elemente REALE, re-apăsarea nu e nevinovată, tensiunea (g) închisă)', () => {
+    expect(chat).toMatch(/const UNELTE_AFISAJ = new Set\(\[\s*'show_document', 'show_on_screen', 'open_app_view',\s*'goleste_monitorul', 'zoom_monitor', 'arata_pe_grafic',\s*\]\)/)
+    expect(chat).not.toMatch(/UNELTE_AFISAJ = new Set\(\[[^\]]*'click_monitor'/)
   })
   it('plasele nu ricoșează una în alta (F4): profund→rapid armează plasaRulata, iar plasa oglindită o respectă', () => {
     expect(chat).toMatch(/let plasaRulata = false/)

@@ -2809,10 +2809,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Uneltele DOAR-afișare: un apel la ele NU înseamnă că a executat cererea —
     // gardele din orchestrator nu le socotesc drept faptă. (Declarat aici, în
     // afara try-ului, ca și catch-ul de eroare să poată judeca faptele.)
+    // click_monitor SCOS din listă (tensiunea (g), închisă pe ordinul
+    // „finalizeaza tot", 22 aug): apasă ELEMENTE REALE — inclusiv butoane de
+    // admin — deci re-apăsarea la reluare NU e nevinovată și apelul E faptă.
     const UNELTE_AFISAJ = new Set([
       'show_document', 'show_on_screen', 'open_app_view',
-      'goleste_monitorul', 'click_monitor', 'zoom_monitor', 'arata_pe_grafic',
+      'goleste_monitorul', 'zoom_monitor', 'arata_pe_grafic',
     ])
+    // DB_QUERY: numele singur nu spune dacă e citire sau scriere (tensiunea
+    // (e), închisă pe același ordin: SQL-ul decide). SELECT/WITH/SHOW/EXPLAIN
+    // = citirea reluabilă a cazului fondator al plasei (db_query ×18 → plasa
+    // rămâne vie); orice altceva = efect extern — nu se re-execută la reluare
+    // și omul e avertizat. Ce nu se poate parsa se tratează ca SCRIERE
+    // (direcția sigură a erorii).
+    const eSqlDeCitire = (sql: string): boolean => /^\s*(select|with|show|explain)\b/i.test(sql)
+    let dbQueryAScris = false
     // EFECT EXTERN = ce nu are voie să se execute de două ori (verdictele
     // agenților lot B: gardul anti-re-execuție pe „orice unealtă" omora cazul
     // fondator al plasei — db_query ×18 + sinteză goală rămânea fără plasă — și
@@ -3172,7 +3183,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // devine dovadă numai DUPĂ ce rezultatul ei a fost clasificat.
       const executaUnealtaCuDovada = async (name: string, argsJson: string): Promise<string> => {
         unelteIncercate.push(name)
-        if (eUnealtaCuEfectExtern(name)) unelteEfectIncercate.push(name)
+        if (name === 'db_query') {
+          let scrie = true
+          try {
+            scrie = !eSqlDeCitire(String((JSON.parse(argsJson || '{}') as { sql?: unknown }).sql ?? ''))
+          } catch {
+            /* SQL neparsabil = tratat ca scriere (direcția sigură) */
+          }
+          if (scrie) {
+            dbQueryAScris = true
+            unelteEfectIncercate.push(name)
+          }
+        } else if (eUnealtaCuEfectExtern(name)) unelteEfectIncercate.push(name)
         await scrieJurnalOperational(async () => {
           const tranzitie = await tranzitioneazaSarcinaOperationala({
             taskId: sarcinaOperationalaId,
@@ -3929,7 +3951,8 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       // creat). Dacă o unealtă cu EFECT EXTERN a reușit în tura moartă, omul
       // e avertizat cinstit, fără niciun detaliu tehnic (regula 1 aug).
       const fapteDejaExecutate = doveziUnelte.some(
-        (d) => (d.stare === 'succeeded' || d.stare === 'verified') && eUnealtaCuEfectExtern(d.nume),
+        (d) => (d.stare === 'succeeded' || d.stare === 'verified') &&
+          (d.nume === 'db_query' ? dbQueryAScris : eUnealtaCuEfectExtern(d.nume)),
       )
       let spoken = ecranPartial.trim()
         ? (ro

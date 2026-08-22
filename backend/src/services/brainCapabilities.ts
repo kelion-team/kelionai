@@ -229,7 +229,7 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
   'read_drive_file', 'get_tasks', 'search_contacts',
   'list_source', 'read_source', 'search_source', 'constructor_status',
   'list_app_versions', 'list_db_backups', 'runbook_status', 'runbook_log',
-  'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables', 'db_query',
+  'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables',
   'system_health', 'pr_lista', 'server_logs', 'client_errors', 'stare_masurata',
   'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'dovada_faptelor', 'get_monitor',
   'get_mouse_position', 'get_real_cost', 'list_updates', 'episoade_promo',
