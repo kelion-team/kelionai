@@ -128,8 +128,15 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               corecție doar pe un ecran neprivit nu e adevăr livrat. Precondiție
               absolută: măsurarea live a fals-pozitivelor (o acuzație falsă
               rostită ar fi mai rea decât tăcerea).
-      - [ ] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
-              — v1 CONSTRUIT pe branch (21 aug noaptea): (a) protocolul §4 în
+      - [x] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
+              — PASS la verificarea adversarială finală + MERGE (PR #1324) +
+              PUBLICAT LIVE, MĂSURAT 22 aug 00:3xZ: /api/version → v=3c155b1
+              (exact commitul merge-ului), ver 6.8, publicat 00:12:47Z.
+              Ce rămâne „nu pot verifica" de aici (jurnalul VPS / proba
+              owner-ului): comportamentul REAL al buclei — jurnalul „trierea
+              în doi — runda", pulsVoce.rundeTriere pe GET /api/vocal-live/stare,
+              și dacă modelul Live chiar conversează cât unealta e blocată.
+              CONSTRUIT (21 aug noaptea): (a) protocolul §4 în
               fișa ușii (întreabă întâi 1-2 lucruri care CHIAR mută răspunsul,
               completează după, STOP la convergență, fără narațiune de proces);
               (b) rostirile ADRESATE sosite cât ușa macină se strâng
@@ -157,9 +164,8 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               numele lui Kelion la întrebările puse cât ușa macină nu intră în
               convergență (garda strictă a numelui, ordinul din 15 aug —
               consecință declarată). Lacăte: triereInDoi.test.ts (anti-amnezie,
-              anti-forțare, proprietar, ultimBun). RĂMAS pt. bifă: 3 agenți +
-              merge + măsurat live (jurnal „trierea în doi — runda" +
-              pulsVoce.rundeTriere).
+              anti-forțare pe LINIA VIE, proprietar, ultimBun, pin executabil
+              că regexul de intenție nu decide singur soarta continuării).
       - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)

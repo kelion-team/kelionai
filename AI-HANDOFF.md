@@ -1398,8 +1398,14 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    `textulNuPotVerifica` (poartaFaptelor.ts) pentru ce nu e minciună dovedită.
    Lacăte: catelulPeVoce.test.ts pe COD VIU (lecția anti-M6: se dezbracă
    întâi comentariile, apoi se potrivesc regexuri ancorate).
-6d. **JARVIS pasul 3 — trierea în doi (PROIECT-CHAT-VOCE §4) — CONSTRUIT pe
-   branch, DOUĂ FAIL-uri de verificator reparate pe rând**: rostirile ADRESATE
+6d. **JARVIS pasul 3 — trierea în doi (PROIECT-CHAT-VOCE §4) — PASS la
+   verificarea adversarială finală + MERGE (PR #1324) + PUBLICAT LIVE,
+   MĂSURAT 22 aug 00:3xZ: /api/version → v=3c155b1 (exact commitul
+   merge-ului), ver 6.8, publicat 00:12:47Z (comportamentul REAL al buclei —
+   jurnal „trierea în doi — runda", pulsVoce.rundeTriere, conversația
+   modelului Live cât unealta e blocată — rămâne „nu pot verifica" de aici;
+   se urmărește în jurnalul VPS / proba owner-ului). DOUĂ FAIL-uri de
+   verificator reparate pe rând**: rostirile ADRESATE
    sosite cât ușa grea macină se strâng (`injectiiUsa`, aceeași gardă ca la
    comenzi) și la întoarcere creierul primește runde de convergență (plafon 2,
    proprietar pe ușă — `usaTrierii`). **FAIL 1 (demonstrat: emailul trimis de
