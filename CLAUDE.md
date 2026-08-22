@@ -100,10 +100,11 @@ pe aplicatie".
   LEGEA FAPTEI + LEGEA MĂSURĂTORII + LEGEA ANTI-HARDCODARE — plus POARTA
   FAPTELOR care demască automat pretențiile fără unealtă executată.
 
-## Layout (see AI-HANDOFF.md §2 for the complete file-by-file map)
+## Layout (harta file-by-file din AI-HANDOFF §2 e PARȚIAL DEPĂȘITĂ — vezi §18)
 - `backend/` — Node + Fastify + TS. Routes in `src/routes/`, services in `src/services/`.
 - `frontend/` — React + Vite + TS. `src/pages/Stage.tsx`, `src/components/ChatPanel.tsx`.
-- `bridge/` — the VPS worker (`kelion-bridge-linux.mjs`) + autonomous repair/deploy scripts.
+- `deploy/` — scripturile de publicare/reparație de pe VPS. (`bridge/` NU mai
+  există — șters 23 iul; orice referință la el e istorie, nu arhitectură.)
 - `Dockerfile` — imaginea aplicației (gazda: VPS propriu).
 
 ## Build & deploy

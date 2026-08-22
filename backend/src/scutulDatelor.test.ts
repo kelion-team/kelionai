@@ -45,8 +45,11 @@ describe('stratul 2: poarta din dbQuery — comenzile brute doar CITESC protejat
     expect(bloc.length).toBeGreaterThan(200)
     expect(bloc).toMatch(/TABELE_PROTEJATE\.filter/)
     expect(bloc).toMatch(/tabel_protejat/)
-    // Citirea rămâne liberă — SELECT/WITH/EXPLAIN/SHOW nu trec prin refuz.
-    expect(bloc).toMatch(/'SELECT' \|\| primulCuvant === 'WITH'/)
+    // Citirea rămâne liberă — dar de la 22 aug decide predicatul ÎNTĂRIT
+    // eSqlDeCitire (nu primul cuvânt: verificatorul a demonstrat că
+    // „WITH x AS (UPDATE wallets …) SELECT" ocolea scutul pe prefixul vechi).
+    expect(bloc).toMatch(/const eCitire = eSqlDeCitire\(text\)/)
+    expect(bloc).not.toMatch(/primulCuvant/)
   })
 })
 

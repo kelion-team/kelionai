@@ -462,7 +462,7 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
       <span title={geminiTitlu}>
         Gemini {geminiEticheta}
       </span>
-      {/* (Constructorul rulează pe motorul Aider, cu creierul Gemini prin app —
+      {/* (Constructorul e Devin (extern), iar creierul live e Gemini prin app —
           pastila de sus. Fable a fost scos total, 16 aug: nu mai are rând.) */}
       <a href="https://aistudio.google.com/billing" target="_blank" rel="noreferrer" style={{ fontSize: 12, opacity: 0.75 }}>alimentează Gemini</a>
     </div>
@@ -655,6 +655,10 @@ export default function AdminPanel({
     // null = eșuat (eticheta spune adevărul, fără procent inventat).
     progress?: string | null
     pct?: number | null
+    // DEVIN dovedit PE ORDIN (owner, 22 aug: „am cerut devin peste tot in
+    // constructor"): id-ul sesiunii Devin, pus de dispecer la pornire — rândul
+    // arată MĂSURAT că Devin duce sarcina, nu se presupune.
+    devinSessionId?: string | null
   }
   // null = coada nu s-a putut citi (auditul admin, 3 aug) — nu „Niciun ordin".
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>('necitit')
@@ -662,18 +666,11 @@ export default function AdminPanel({
   // pornită lucrătorul nu ia nimic — ordinul stătea „în coadă · 0%" la
   // nesfârșit după promisiunea „max. 2 minute", fără nicio explicație.
   const [buildPaused, setBuildPaused] = useState(false)
-  // Dovada vie a motorului: `aider --version` de pe gazdă (owner, 16 aug).
-  const [aiderProba, setAiderProba] = useState<{ ok: boolean; versiune: string; motiv: string } | null>(null)
-  // Creierul LOCAL al lui Aider: `ollama list` de pe VPS (owner, 16 aug).
-  const [ollamaProba, setOllamaProba] = useState<{ ok: boolean; modele: string[]; motiv: string } | null>(null)
-  // (COMUTATORUL creier 2 cloud + sursa plătită a constructorului au fost SCOASE —
-  // owner, 20 aug: „rămân doar cu Linux și Gemini Live". Creierul e Gemini unic;
-  // constructorul rulează DOAR pe Ollama local free de pe VPS.)
-  // PULSUL LUCRĂTORULUI de pe VPS (owner, 19 aug: „are ordine in coada dar nu se
-  // apuca… de ce?"): VIU dacă a cerut ordin recent; mort → ordinele stau în coadă
-  // fiindcă nu le cere nimeni (cron/worker oprit), nu din vina app-ului.
-  const [lucratorPuls, setLucratorPuls] = useState<{ lastPoll: number; ageSec: number | null; viu: boolean; pragMs: number } | null>(null)
-  const [inCoada, setInCoada] = useState<number>(0)
+  // CINE E CONSTRUCTORUL — MĂSURAT de server din config (owner, 22 aug: „am
+  // cerut devin peste tot in constructor… sa-i stergi de tot pe ce e local").
+  // Luminile vechi (proba locală, puls lucrător) au fost ȘTERSE cu toată
+  // mașinăria locală: constructorul e DEVIN, iar panoul arată starea LUI.
+  const [constructorId, setConstructorId] = useState<{ cine: 'devin' | 'local'; motiv: string } | null>(null)
   // DIAGNOSTICUL AUTONOM (owner, 19 aug): „de ce (nu) repară", măsurat pe server.
   const [diagnostic, setDiagnostic] = useState<{ sanatos: boolean; verdict: string; probleme: { cod: string; severitate: 'critic' | 'atentie'; ce: string; recomandare: string }[] } | null>(null)
   const [buildOrder, setBuildOrder] = useState('')
@@ -989,16 +986,13 @@ export default function AdminPanel({
   const refreshBuildJobs = (): void => {
     fetch('/api/admin/constructor', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string }; lucrator?: { lastPoll: number; ageSec: number | null; viu: boolean; pragMs: number }; inCoada?: number } | null) => {
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; constructor?: { cine: 'devin' | 'local'; motiv: string } } | null) => {
         // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
         // nu se lasă „Niciun ordin încă" peste o citire picată.
         if (j?.jobs) {
           setBuildJobs(j.jobs)
           setBuildPaused(!!j.paused)
-          setAiderProba(j.aider ?? null)
-          setOllamaProba(j.ollama ?? null)
-          setLucratorPuls(j.lucrator ?? null)
-          setInCoada(Number(j.inCoada) || 0)
+          setConstructorId(j.constructor ?? null)
         } else setBuildJobs(null)
       })
       .catch(() => setBuildJobs(null))
@@ -1827,7 +1821,7 @@ export default function AdminPanel({
                           ) : (
                             plati.neatribuite.map((p) => (
                               <span key={p.id} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
-                                £{p.amount} · „{p.referinta || p.bankRef || '—'}” · Văzut la: {new Date(p.seenAt).toLocaleString()}{' '}
+                                {p.amount} {p.currency || '£'} · „{p.referinta || p.bankRef || '—'}” · Văzut la: {new Date(p.seenAt).toLocaleString()}{' '}
                                 <button
                                   type="button"
                                   className="ghost"
@@ -2780,71 +2774,22 @@ export default function AdminPanel({
                     >
                       {plafon.activ ? 'Oprește limita' : 'Pornește limita'}
                     </button>
-                    {/* MOTORUL, DOVEDIT VIU (owner, 16 aug: „doar denumit nu e
-                        suficient trebuie verificat real ca e aider… cu dovada").
-                        Becul vine din `aider --version` rulat pe gazdă — verde cu
-                        versiunea reală, roșu cu eroarea. Fără comutator: constructor
-                        unic Aider, creier Gemini (rapid → performant). */}
+                    {/* CONSTRUCTORUL = DEVIN, MĂSURAT (owner, 22 aug: „am cerut devin
+                        peste tot in constructor" + „sa-i stergi de tot pe ce e local").
+                        Becul vine din config-ul REAL al serverului (cheia Devin), nu
+                        dintr-un text scris de mână: verde = Devin deține coada (ordinele
+                        pleacă în sesiuni Devin → PR pe master); roșu = cheia lipsește pe
+                        server și trebuie pusă — se spune exact asta, nu se inventează. */}
                     <span
                       className="chat-hint"
-                      style={{ fontSize: 12, fontWeight: 600, color: aiderProba == null ? undefined : aiderProba.ok ? '#1a7f37' : '#c1121f' }}
-                      title={aiderProba == null
-                        ? 'proba motorului încă nu s-a citit'
-                        : aiderProba.ok
-                          ? `aider --version pe gazdă: ${aiderProba.versiune}`
-                          : `aider --version a picat: ${aiderProba.motiv}`}
+                      style={{ fontSize: 12, fontWeight: 600, color: constructorId == null ? undefined : constructorId.cine === 'devin' ? '#1a7f37' : '#c1121f' }}
+                      title={constructorId?.motiv ?? 'identitatea constructorului încă nu s-a citit'}
                     >
-                      {aiderProba == null
-                        ? 'Motor: Aider (probă…)'
-                        : aiderProba.ok
-                          ? `🟢 Motor: Aider VIU (${aiderProba.versiune})`
-                          : `🔴 Motor: Aider LIPSĂ (${aiderProba.motiv.slice(0, 60)})`}
-                    </span>
-                    {/* CREIERUL EFECTIV al constructorului = DOAR Ollama LOCAL free de pe
-                        VPS (owner, 20 aug: „rămân doar cu Linux și Gemini Live"; cloud-ul
-                        plătit a fost scos). Măsurat pe host (/api/tags), nu presupus. */}
-                    {(() => {
-                      const localOk = !!ollamaProba?.ok && (ollamaProba?.modele.length ?? 0) > 0
-                      const necitit = ollamaProba == null
-                      const text = necitit
-                        ? '· creier: probă…'
-                        : localOk
-                          ? `· 🟢 constructor pe LOCAL FREE: Ollama (${ollamaProba?.modele.join(', ')})`
-                          : ollamaProba?.ok
-                            ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
-                            : `· 🔴 Ollama nu răspunde pe host (${ollamaProba?.motiv.slice(0, 50) ?? '…'})`
-                      return (
-                        <span
-                          className="chat-hint"
-                          style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: necitit ? undefined : localOk ? '#1a7f37' : '#c1121f' }}
-                          title={ollamaProba?.ok
-                            ? `constructor FREE → Ollama pe host (/api/tags): ${ollamaProba.modele.join(', ') || 'niciun model'}`
-                            : `proba Ollama pe host: ${ollamaProba?.motiv ?? '…'}`}
-                        >
-                          {text}
-                        </span>
-                      )
-                    })()}
-                    {/* PULSUL LUCRĂTORULUI (owner, 19 aug: „are ordine in coada dar nu
-                        se apuca aider… de ce?"). Dovada MĂSURATĂ că workerul de pe VPS
-                        mai cere ordine. Mort + ordine în coadă = de-aceea stau (cron/
-                        worker oprit), NU din vina app-ului. */}
-                    <span
-                      className="chat-hint"
-                      style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: lucratorPuls == null ? undefined : lucratorPuls.viu ? '#1a7f37' : '#c1121f' }}
-                      title={lucratorPuls == null
-                        ? 'pulsul lucrătorului încă nu s-a citit'
-                        : lucratorPuls.lastPoll === 0
-                          ? 'lucrătorul de pe VPS nu a cerut niciun ordin de la ultima repornire — cronul (la 2 min) pare oprit'
-                          : `ultima cerere de ordin acum ${lucratorPuls.ageSec}s (prag viu: ${Math.round(lucratorPuls.pragMs / 60000)} min)`}
-                    >
-                      {lucratorPuls == null
-                        ? '· lucrător: puls…'
-                        : lucratorPuls.viu
-                          ? `· 🟢 lucrător VIU (a cerut ordin acum ${lucratorPuls.ageSec}s)`
-                          : lucratorPuls.lastPoll === 0
-                            ? `· 🔴 lucrătorul NU cere ordine (cron/worker oprit pe VPS)${inCoada ? ` — ${inCoada} în coadă din cauza asta` : ''}`
-                            : `· 🔴 lucrătorul tăcut de ${Math.round((lucratorPuls.ageSec ?? 0) / 60)} min (cron/worker oprit?)${inCoada ? ` — ${inCoada} în coadă` : ''}`}
+                      {constructorId == null
+                        ? 'Constructor: se citește…'
+                        : constructorId.cine === 'devin'
+                          ? '🟢 Constructorul e DEVIN (extern — cheia pusă; ordin → sesiune Devin → PR)'
+                          : '🔴 Cheia Devin NU e pusă pe server — pune DEVIN_API_KEY ca Devin să preia coada'}
                     </span>
                   </div>
                   {/* DIAGNOSTICUL AUTONOM (owner, 19 aug: „nu are autonomie… sa faca
@@ -2864,14 +2809,11 @@ export default function AdminPanel({
                       ))}
                     </div>
                   )}
-                  {/* (COMUTATORUL CREIER 2 CLOUD + sursa plătită a constructorului au fost
-                      SCOASE — owner, 20 aug: „rămân doar cu Linux și Gemini Live; tai
-                      serverele qwen". Creierul e Gemini unic (chat rapid + greu), iar
-                      constructorul rulează DOAR pe Ollama local free de pe VPS. Abonamentul
-                      Ollama Cloud (kimi/qwen) a ieșit din aplicație; constructorul îl
-                      înlocuiește Devin, extern — vezi AI-HANDOFF.md.) */}
+                  {/* Explicația vine DIN DATE (constructorId.motiv, măsurat de server),
+                      nu dintr-o frază scrisă de mână — fraza veche („Constructor: Ollama
+                      local free") a mințit exact când ownerul întreba de Devin. */}
                   <div style={{ marginTop: 10, padding: 10, border: '1px solid #8884', borderRadius: 8, fontSize: 11, opacity: 0.75 }}>
-                    Creier: <b>Gemini</b> unic (rapid + greu). Constructor: <b>Ollama local free</b> pe VPS. Cloud-ul plătit (kimi/qwen) a fost scos — vezi becul „constructor pe LOCAL FREE" de mai sus.
+                    Creier: <b>Gemini</b> unic (rapid + greu). Constructor: {constructorId == null ? 'se citește de pe server…' : constructorId.cine === 'devin' ? <><b>DEVIN</b> (extern) — {constructorId.motiv}</> : <>{constructorId.motiv}</>}
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
                     <label className="chat-hint" style={{ fontSize: 12 }}>
@@ -3002,9 +2944,10 @@ export default function AdminPanel({
                           dar așteaptă publicarea) — orice, dar nu „GATA". */}
                       {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'în așteptare' : 'eșuat'}
                     </span>{' '}
-                    {/* (Badge-ul „Fable 5" a fost SCOS — owner, 16 aug: „fable iese
-                        total de peste tot… curata peste tot in aplicatie".
-                        Constructorul rulează pe motorul Aider + creier Gemini.) */}
+                    {/* DEVIN, DOVEDIT PE RÂND (owner, 22 aug: „am cerut devin peste
+                        tot in constructor"): badge-ul apare DOAR când dispecerul a
+                        pus id-ul sesiunii Devin pe ordin — măsurat, nu presupus. */}
+                    {j.devinSessionId ? <span className="vis-badge human" title={`sesiune Devin: ${j.devinSessionId}`}>DEVIN</span> : null}{' '}
                     {/* P8 (owner, 15 aug: „foarte clar ce executa"): FAPTA
                         extrasă de server (nume), nu ambalajul promptului. */}
                     {j.nume || j.orderText.slice(0, 90)}

@@ -73,11 +73,61 @@ function stergeFlagDescarcat(): void {
   }
 }
 
+// CONTOR DE EȘECURI PERSISTAT (lot A, „descărcare invizibilă"): fără niciun UI, un
+// dispozitiv blocat (ex. quota de stocare plină) ar re-porni la FIECARE pornire
+// descărcarea de ~5,2 GB și ar pica iar — la nesfârșit, arzând date și baterie fără
+// ca nimeni să vadă. După N eșecuri consecutive pe ACELAȘI model, auto-descărcarea
+// se oprește o zi (apoi mai încearcă O dată pe zi — dacă omul a eliberat spațiu,
+// se repară singură, tot fără UI). Succesul șterge contorul; schimbarea modelului la fel.
+const CHEIE_ESECURI = 'kelion_model_offline_esecuri'
+const PRAG_ESECURI = 3 // hardcod-permis: prag tehnic client de re-încercare (nu bani/tarif/stare afișată)
+const PAUZA_ESECURI_MS = 24 * 60 * 60 * 1000 // hardcod-permis: fereastră tehnică de back-off (o zi), nu valoare afișată
+function citesteEsecuri(): { model: string; n: number; la: number } | null {
+  try {
+    const brut = localStorage.getItem(CHEIE_ESECURI)
+    if (!brut) return null
+    const v = JSON.parse(brut) as { model?: unknown; n?: unknown; la?: unknown }
+    if (typeof v.model !== 'string' || typeof v.n !== 'number' || typeof v.la !== 'number') return null
+    return { model: v.model, n: v.n, la: v.la }
+  } catch {
+    return null
+  }
+}
+function noteazaEsec(): void {
+  try {
+    const e = citesteEsecuri()
+    const n = e && e.model === MODEL_LOCAL ? e.n + 1 : 1
+    localStorage.setItem(CHEIE_ESECURI, JSON.stringify({ model: MODEL_LOCAL, n, la: Date.now() }))
+  } catch {
+    /* storage indisponibil — rămâne doar urma din consolă */
+  }
+}
+function stergeEsecuri(): void {
+  try {
+    localStorage.removeItem(CHEIE_ESECURI)
+  } catch {
+    /* nimic */
+  }
+}
+/** Auto-descărcarea mai are voie să pornească? Sub prag → da. Peste prag → o
+ *  încercare pe zi. Calea de încărcare din cache (trecerea OFFLINE) nu trece pe
+ *  aici — rulează doar fără net; dacă din cache lipsesc shard-uri, WebLLM le-ar
+ *  cere de pe rețea și pică — acel eșec NU e numărat spre gate (vezi catch). */
+export function autoDescarcareaPermisa(): boolean {
+  const e = citesteEsecuri()
+  if (!e || e.model !== MODEL_LOCAL) return true
+  if (e.n < PRAG_ESECURI) return true
+  return Date.now() - e.la >= PAUZA_ESECURI_MS
+}
+
 // Modelul local: capabilitate CLIENT (WebGPU), aleasă din lista prebuilt WebLLM —
-// nu e o cifră de bani/tarif/prag și nici o stare inventată. ~3B Q4, multilingv
-// (owner RO + userii pe 7 limbi), destul de mic cât să încapă pe telefon.
+// nu e o cifră de bani/tarif/prag și nici o stare inventată. ORDINUL owner-ului
+// (21 aug, regândirea creierului): „gemma offline cel mai mare" — cel mai mare Gemma
+// REAL din lista prebuilt v0.2.84 e gemma-2-9b (27B nu există în motor; VERIFICAT în
+// node_modules: vram_required_MB≈6422, țintă telefoane/PC-uri 2026+ — owner: „nu e
+// criteriu telefoanele vechi"). Multilingv (owner RO + userii pe 7 limbi).
 // hardcod-permis: id de model client WebLLM (capabilitate offline), nu valoare de afișat/tarifat; mutabil la config server în faza următoare.
-const MODEL_LOCAL = 'Qwen2.5-3B-Instruct-q4f16_1-MLC'
+const MODEL_LOCAL = 'gemma-2-9b-it-q4f16_1-MLC'
 
 // Optimist la pornire: dacă flag-ul spune că EXACT modelul curent a fost descărcat,
 // pornim pe 'descarcat' (nu mai cerem descărcare). Se confirmă din Cache Storage prin
@@ -187,7 +237,8 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
     stare = 'se_pregateste'
     // STOCARE PERSISTENTĂ (owner 20 aug: „fiecare update să fie preluat și după ce s-a
     // downloadat, nu să șteargă ce e existent"). Update-ul ESTE preluat normal (se
-    // reîncarcă versiunea nouă), dar modelul (~2 GB în Cache Storage sub webllm/*) e deja
+    // reîncarcă versiunea nouă), dar modelul (~5,2 GB în Cache Storage sub webllm/* —
+    // măsurat din manifestul de shard-uri gemma-2-9b-it-q4f16_1) e deja
     // ferit de ștergere (updateCheck + sw.js). Aici punem al doilea zid: cerem browserului
     // să marcheze stocarea PERSISTENTĂ, ca modelul să nu fie evacuat nici sub presiune de
     // spațiu. Best-effort — dacă browserul refuză, descărcarea merge oricum înainte.
@@ -198,6 +249,9 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
       /* indisponibil — modelul rămâne în cache, doar fără garanția anti-evacuare */
     }
     try {
+      // URMA TEHNICĂ (verificatorul lot A: procesul e invizibil pentru om, dar NU are
+      // voie să fie invizibil pentru diagnostic — consola e singurul martor rămas).
+      console.info('[creier-local] pornesc pregătirea modelului:', MODEL_LOCAL)
       const webllm = await import('@mlc-ai/web-llm')
       motor = (await webllm.CreateMLCEngine(MODEL_LOCAL, {
         initProgressCallback: (r: { progress?: number }) => {
@@ -208,11 +262,18 @@ export async function pregatesteModelOffline(onProgress?: (p: number) => void): 
       stare = 'gata'
       progres = 1
       scrieFlagDescarcat(MODEL_LOCAL) // reținem că FIX acest model e descărcat (nu recerem)
+      stergeEsecuri() // a mers → contorul de eșecuri se șterge
+      console.info('[creier-local] model gata:', MODEL_LOCAL)
       return true
     } catch (e) {
       stare = 'eroare'
       motivEroare = e instanceof Error ? e.message.slice(0, 200) : String(e)
       motor = null
+      // Contorul păzește DESCĂRCAREA. Un eșec de ÎNCĂRCARE din cache pe OFFLINE
+      // (fără rețea, shard lipsă) nu spune nimic despre descărcare — nu-l numărăm,
+      // altfel ar amâna pe nedrept re-descărcarea când netul revine.
+      if (typeof navigator === 'undefined' || navigator.onLine !== false) noteazaEsec()
+      console.error('[creier-local] pregătirea modelului a picat:', motivEroare)
       return false
     } finally {
       pregatire = null

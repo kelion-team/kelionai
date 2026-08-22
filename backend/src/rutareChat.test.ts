@@ -66,8 +66,10 @@ describe('ack-ul instant NU e răspunsul (cauza exactă a „am preluat sarcina"
     // Condiția de acceptare există în continuare (text / text curgat / suprafață
     // pusă de unelte) — dar sawVisible nu mai poate fi otrăvit de ack (testele
     // de mai sus). Dacă cineva scoate conteazaCaVizibil din interceptor, cade aici.
-    // (3 aug: „silent rotation" a devenit „reîncercare" pe același creier Gemini.)
-    expect(sursaChat).toMatch(/returned empty — reîncercare/)
+    // (3 aug: „silent rotation" a devenit „reîncercare" pe același creier Gemini;
+    // 21 aug, lot B: logul MUTE spune și când reîncercarea NU vine — fapta cu
+    // efect deja chemată o anulează — deci textul e condițional, nu contiguu.)
+    expect(sursaChat).toMatch(/\[CHAT MUTE\][\s\S]{0,200}reîncercare \$\{attempt \+ 1\}/)
   })
 
   it('plasa anti-tăcere rămâne ultima linie: orice tură fără conținut primește mesaj onest', () => {
@@ -129,20 +131,22 @@ describe('regula de rutare: mesajul normal de chat NU ajunge la constructor', ()
   it('mesajul de admin cu ordin EXPLICIT („construiește/repară X în aplicație") AJUNGE la constructor', () => {
     // Calea legitimă, neschimbată: unealta build_software pune ordinul în coada
     // reală (build_jobs) și confirmă cu numărul ordinului.
-    expect(sursaChat).toMatch(/case 'build_software'[\s\S]{0,1600}createBuildJob\(email, order\)/)
+    expect(sursaChat).toMatch(/case 'build_software'[\s\S]{0,2600}createBuildJob\(email, orderCuPlan\)/)
     expect(sursaChat).toMatch(/Am preluat cerința \(ordin #\$\{jobId\}\)\./)
   })
 
-  it('un ordin pornește exact o dată wrapperul instalat al constructorului', () => {
+  it('un ordin pornește IMEDIAT dispecerul Devin — NU mai există wrapper local de spawn', () => {
+    // Owner, 22 aug: „am cerut devin peste tot in constructor… sa-i stergi de
+    // tot". Ramura care lansa constructor-worker.sh de pe VPS a fost ȘTEARSĂ;
+    // ordinul pornește tick-ul Devin în fundal, chiar acum (idempotent).
     const start = sursaChat.indexOf('function porneculLucratorulConstructor(): void {')
     const end = sursaChat.indexOf('// ── runTool helper', start)
     const launcher = start >= 0 && end > start ? sursaChat.slice(start, end) : ''
-    expect(launcher).toContain("spawn('bash', ['/root/kelion/constructor-worker.sh']")
-    expect(launcher).toContain('detached: true')
-    expect(launcher).toContain('worker.unref()')
-    expect(launcher.match(/constructor-worker\.sh/g)).toHaveLength(1)
-    expect(launcher).not.toContain('/root/kelion/deploy/')
-    expect(launcher).not.toContain('/root/kelion/atelier/')
+    expect(launcher).toContain('if (config.devinKey)')
+    expect(launcher).toContain('tickDispecerDevin')
+    // mașinăria locală e cu adevărat plecată din launcher:
+    expect(launcher).not.toContain('constructor-worker.sh')
+    expect(launcher).not.toContain('spawn(')
   })
 
   it('definițiile uneltei spun explicit regula: constructorul primește ordine explicite SAU implicite, dar NU întrebări obișnuite de chat', () => {

@@ -4,18 +4,23 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copiaza-active-offline.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copiaza-active-offline.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@mintplex-labs/piper-tts-web": "^1.0.5",
     "@mlc-ai/web-llm": "^0.2.84",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
     "@vladmandic/face-api": "^1.7.15",
     "jspdf": "^4.2.1",
     "lightweight-charts": "^5.2.0",
+    "onnxruntime-web": "^1.18.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "three": "^0.185.0"

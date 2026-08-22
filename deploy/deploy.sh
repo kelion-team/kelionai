@@ -37,15 +37,9 @@ CADDY_DIR=/root/kelion-caddy
 exec 8>/root/kelion/publicare.lock
 flock 8
 
-# TRAP DE RESTAURARE A CONSTRUCTORULUI (Adrian, 7 aug — audit: pasul 0 scoate
-# constructorul din cron, dar dacă build-ul PICĂ sub `set -e`, scriptul moare
-# ÎNAINTE de pasul 6d care-l repune → constructorul rămâne oprit până la următorul
-# deploy verde). Trap-ul pe EXIT îl repune la ORICE ieșire (succes sau eșec),
-# idempotent (grep -v scoate linia existentă, apoi adaugă exact una).
-restore_constructor() {
-  ( crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' ; echo '*/2 * * * * /root/kelion/constructor-worker.sh >> /root/kelion/constructor.log 2>&1' ) | crontab - 2>/dev/null || true
-}
-trap restore_constructor EXIT
+# (Trap-ul de restaurare a constructorului local A FOST ȘTERS — owner, 22 aug:
+# „am cerut devin peste tot in constructor… sa-i stergi de tot". Cronul
+# lucrătorului se SCOATE definitiv la pasul 6d; constructorul e DEVIN, extern.)
 
 # Helper pentru afișarea barei de progres dinamice pe monitor / consolă
 show_progress() {
@@ -116,9 +110,9 @@ pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux|keli
 #    ORE — constructorul rula build-uri în paralel la FIECARE 2 min și sufoca CPU-ul,
 #    iar `docker build`-ul publicării nu se mai termina; live rămânea în urmă cu zeci
 #    de commituri, iar reboot-ul nu ajuta pe termen lung fiindcă cronul îl reînvia).
-#    Îl scoatem din cron ACUM + îi omorâm procesele în curs, ca build-ul publicării
-#    să aibă serverul pentru el. NU-i pierdem funcția: pasul 6d îl REPUNE în cron la
-#    finalul publicării — doar tăcem gălăgia cât se publică.
+#    Îl scoatem din cron ACUM + îi omorâm procesele rămase. (22 aug: lucrătorul
+#    local e ȘTERS DEFINITIV — pasul 6d nu-l mai repune; curățarea de aici rămâne
+#    ca plasă pentru gazdele care încă au procese vechi.)
 crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' | crontab - 2>/dev/null || true
 # Omoară TOT arborele constructorului, nu doar părintele (Adrian, 7 aug — audit:
 # `constructor-agent.mjs` lansează prin execSync copii CPU-grei — npm/tsc/vite/
@@ -336,14 +330,13 @@ echo "== 6f. Materializarea punctelor de recuperare pe VPS (cron la 10 min) =="
 install -m 700 "$REPO/deploy/backup-versiuni.sh" /root/kelion/backup-versiuni.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/backup-versiuni.sh' ; echo '*/10 * * * * /root/kelion/backup-versiuni.sh >> /root/kelion/backup-versiuni.log 2>&1' ) | crontab -
 
-echo "== 6d. Constructorul (cron la 2 min — Kelion construiește soft la ordin) =="
-# Adrian, 27 iul: „Kelion trebuie să poată crea orice soft îi cere admin".
-# Job-uri scurte cu flock + timeout (NU demonii vechi care ardeau abonamentul):
-# agentul ia ordinul din coadă (API), construiește în atelier cu build+teste,
-# deschide PR-ul; merge-ul rămâne la Adrian. Idempotent, ca backup-ul.
-install -m 700 "$REPO/deploy/constructor-worker.sh" /root/kelion/constructor-worker.sh
-install -m 700 "$REPO/deploy/constructor-agent.mjs" /root/kelion/constructor-agent.mjs
-( crontab -l 2>/dev/null | grep -v '/root/kelion/constructor-worker.sh' ; echo '*/2 * * * * /root/kelion/constructor-worker.sh >> /root/kelion/constructor.log 2>&1' ) | crontab -
+echo "== 6d. Constructorul local: DEMONTAT DEFINITIV (constructorul e DEVIN) =="
+# Owner, 22 aug, verbatim: „am cerut devin peste tot in constructor… sa-i stergi
+# de tot". Constructorul local de pe VPS nu mai există în repo — aici îi
+# scoatem DEFINITIV cronul și fișierele de pe gazdă (idempotent; la gazdele
+# curate, comenzile nu găsesc nimic și tac).
+crontab -l 2>/dev/null | grep -v '/root/kelion/constructor-worker.sh' | crontab - 2>/dev/null || true
+rm -f /root/kelion/constructor-worker.sh /root/kelion/constructor-agent.mjs
 
 echo "== 6e. Vindecătorul de rulări roșii (cron la 10 min — roșu → verde singur) =="
 # Adrian, 27 iul: „dacă are ceva roșu să escaladeze și să repare până ajunge

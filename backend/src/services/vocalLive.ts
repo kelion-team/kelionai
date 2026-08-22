@@ -460,18 +460,23 @@ export function interpreteazaCadru(m: Record<string, unknown>): Array<
 
   const sc = m.serverContent as
     | {
-        inputTranscription?: { text?: string }
-        outputTranscription?: { text?: string }
+        inputTranscription?: { text?: string; finished?: boolean }
+        outputTranscription?: { text?: string; finished?: boolean }
         modelTurn?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> }
         turnComplete?: boolean
         interrupted?: boolean
       }
     | undefined
   if (sc) {
+    // `final` citește ȘI câmpul propriu `finished` al transcrierii (F3 al
+    // marii verificări): transcrierea userului sosește tipic în CADRE
+    // SEPARATE de turnComplete, deci pe `turnComplete` singur tot ce era
+    // gardat pe `final` (comenzile de dispozitiv, comiterea limbii, injecțiile
+    // trierii) putea rămâne mort tăcut dacă Google nu le combină niciodată.
     const it = sc.inputTranscription?.text
-    if (it) ev.push({ fel: 'user', text: it, final: Boolean(sc.turnComplete) })
+    if (it) ev.push({ fel: 'user', text: it, final: Boolean(sc.inputTranscription?.finished || sc.turnComplete) })
     const ot = sc.outputTranscription?.text
-    if (ot) ev.push({ fel: 'kelion', text: ot, final: Boolean(sc.turnComplete) })
+    if (ot) ev.push({ fel: 'kelion', text: ot, final: Boolean(sc.outputTranscription?.finished || sc.turnComplete) })
     for (const p of sc.modelTurn?.parts ?? []) {
       const d = p.inlineData?.data
       if (d && /audio/i.test(p.inlineData?.mimeType ?? '')) ev.push({ fel: 'audio', data: d })
@@ -540,6 +545,9 @@ export function deschideVocalLive(
   // orice sughiț TCP la primul connect condamna sesiunea la modul degradat).
   let mortiPreGataFaraHandle = 0
   const coada: Buffer[] = [] // audio strâns cât sesiunea nu e gata (și în reconectări)
+  // Aceeași plasă pentru RÂNDURILE de text (JARVIS pasul 1: tura scrisă) — un rând
+  // sosit în reconectarea internă (gata=false) nu se aruncă, se varsă la 'gata'.
+  const coadaRanduri: { text: string; turnComplete: boolean }[] = []
 
   const trimiteAudio = (pcm: Buffer): void => {
     try {
@@ -562,7 +570,21 @@ export function deschideVocalLive(
   // la care modelul RĂSPUNDE (anunța) · `false` = context tăcut, fără răspuns
   // (ancoreaza ora reală). Unic, ca să nu se dubleze (jscpd, 9 aug).
   const trimiteRand = (text: string, turnComplete: boolean): void => {
-    if (inchisa || !gata || !text.trim()) return
+    if (inchisa || !text.trim()) return
+    if (!gata) {
+      // Sesiunea nu-i gata (deschidere/reconectare): rândul-INTERVENȚIE
+      // (turnComplete:true — tura scrisă) NU moare tăcut: stă la coadă ca
+      // audio-ul și pleacă la 'gata' (clientul a ecou-at deja mesajul).
+      // ANCORELE (turnComplete:false — ex. ora „chiar acum") NU se pun la
+      // coadă: o ancoră veche livrată după reconectare ar MINȚI despre „acum"
+      // (aceeași regulă ca la scrieCadru: efemerele nu se amână) — se
+      // reîmprospătează singure la bătaia periodică.
+      if (turnComplete) {
+        coadaRanduri.push({ text, turnComplete })
+        if (coadaRanduri.length > 20) coadaRanduri.shift()
+      }
+      return
+    }
     try {
       ws?.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete } }))
     } catch {
@@ -627,6 +649,7 @@ export function deschideVocalLive(
             }
             reconectari = 0 // sesiune vie → contorul intern se șterge
             for (const b of coada.splice(0)) trimiteAudio(b)
+            for (const r of coadaRanduri.splice(0)) trimiteRand(r.text, r.turnComplete)
             ev.onGata?.()
             break
           case 'handleReluare':

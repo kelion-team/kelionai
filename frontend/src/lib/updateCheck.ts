@@ -5,6 +5,8 @@
 // changes on every publish, even if the interface wasn't touched), not just
 // the bundle name. When it changes → automatic hard reset.
 
+import { isCalm } from './activity'
+
 export interface ServerVersion {
   v: string
   at: string
@@ -106,10 +108,14 @@ export async function hardResetToLatest(): Promise<void> {
     if ('caches' in window) {
       const keys = await caches.keys()
       // NU șterge modelul offline (owner 20 aug: „nu descarcă nimic pentru offline").
-      // WebLLM ține creierul local (~2 GB) în Cache Storage sub `webllm/*`. Hard-reset-ul
+      // WebLLM ține creierul local (~5,2 GB, gemma-2-9b) în Cache Storage sub `webllm/*`. Hard-reset-ul
       // rula la FIECARE publicare („update la foc continuu") și golea TOT → offline-ul
       // nu ajungea niciodată „gata". Păstrăm cheile webllm/*, ștergem restul.
-      await Promise.all(keys.filter((k) => !k.startsWith('webllm/')).map((k) => caches.delete(k)))
+      // + 'transformers-cache' (kitul offline, 22 aug): urechea Whisper
+      // (~564 MB) stă în Cache API sub cheia asta — un update nu are voie s-o
+      // radă, ca și creierul. (Gura Piper stă în OPFS — resetul de cache n-o
+      // atinge; consemnat ca să RĂMÂNĂ așa.)
+      await Promise.all(keys.filter((k) => !k.startsWith('webllm/') && k !== 'transformers-cache').map((k) => caches.delete(k)))
     }
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration()
@@ -177,6 +183,11 @@ export function watchForUpdate(onUpdate: () => void): () => void {
 
   const check = async (): Promise<void> => {
     if (stopped || fired) return
+    // NEVER over live work (activity.ts, owner Aug 1): the update applies by
+    // itself, but if a voice session/request/draft is open we skip THIS beat
+    // and try again in 45s — without marking `fired`, so it fires the moment
+    // things go calm. A hard reset mid-word is exactly what this avoids.
+    if (!isCalm()) return
     // The main path: the server's deploy version.
     const j = await fetchServerVersion()
     if (j?.v) {
@@ -214,4 +225,36 @@ export function watchForUpdate(onUpdate: () => void): () => void {
     window.clearInterval(id)
     document.removeEventListener('visibilitychange', onVis)
   }
+}
+
+/** Preia bundle-ul nou ÎNAINTE de reset, cu progres real (Content-Length).
+ *  Nu înlocuiește hard-reset: cache-ul e golit tot la reload, dar userul vede
+ *  cât s-a descărcat înainte să pice pagina. */
+export function downloadLatestBundle(onProgress: (p: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('GET', `/?_v=${Date.now()}`)
+    xhr.onerror = () => reject(new Error('nu pot citi noul index'))
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState !== 4) return
+      if (xhr.status !== 200) { reject(new Error(`index ${xhr.status}`)); return }
+      const m = xhr.responseText.match(/index-[A-Za-z0-9_-]+\.js/)
+      if (!m) { reject(new Error('nu găsesc index.js în noul HTML')); return }
+      const js = `/assets/${m[0]}?_v=${Date.now()}`
+      const xhr2 = new XMLHttpRequest()
+      xhr2.open('GET', js)
+      onProgress(0)
+      let last = 0
+      xhr2.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const p = Math.max(0, Math.min(1, e.loaded / e.total))
+          if (p > last) { last = p; onProgress(p) }
+        }
+      }
+      xhr2.onload = () => { onProgress(1); resolve() }
+      xhr2.onerror = () => reject(new Error('nu pot descărca bundle-ul nou'))
+      xhr2.send()
+    }
+    xhr.send()
+  })
 }

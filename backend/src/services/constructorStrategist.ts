@@ -126,6 +126,35 @@ export const CONSTRUCTOR_STRATEGY_SCHEMA = {
   },
 } as const
 
+// hardcod-permis: sinonime validate empiric pentru enumurile pe care Gemini
+// le scoate câteodată greșit (ex. 'diagnosis' în loc de 'diagnose'). Nu sunt
+// valori de business, ci reparație de parsing — le normalizăm înainte de schema.
+const FAZE_SINONIME: Record<string, string> = {
+  diagnose: 'diagnose', diagnosis: 'diagnose', detect: 'diagnose', identify: 'diagnose',
+  repair: 'repair', fix: 'repair', fixing: 'repair', remediate: 'repair',
+  verify: 'verify', verification: 'verify', validate: 'verify', check: 'verify',
+}
+const EXECUTOR_SINONIME: Record<string, string> = {
+  brain_tools: 'brain_tools', brain: 'brain_tools', tools: 'brain_tools', kelion: 'brain_tools',
+  constructor: 'constructor', devin: 'constructor', builder: 'constructor',
+  blocked: 'blocked', block: 'blocked', pause: 'blocked', await: 'blocked',
+}
+function normalizeStrategy(value: unknown): void {
+  const v = value as any
+  if (!v || typeof v !== 'object') return
+  if (typeof v.decision?.phase === 'string') {
+    const f = FAZE_SINONIME[v.decision.phase.toLowerCase()]
+    if (f) v.decision.phase = f
+  }
+  if (typeof v.decision?.executor === 'string') {
+    const e = EXECUTOR_SINONIME[v.decision.executor.toLowerCase()]
+    if (e) v.decision.executor = e
+  }
+  // reformulatedOrder poate veni gol/șir scurt; schema cere null sau >=20 car.
+  const r = v.decision?.reformulatedOrder
+  if (r !== undefined && (typeof r !== 'string' || r.length < 20)) v.decision.reformulatedOrder = null
+}
+
 const validate = compileJsonSchema<ConstructorStrategy>(CONSTRUCTOR_STRATEGY_SCHEMA, false)
 
 export function parseConstructorStrategy(raw: string):
@@ -140,6 +169,7 @@ export function parseConstructorStrategy(raw: string):
   } catch {
     return { ok: false, error: 'strategy_not_json' }
   }
+  normalizeStrategy(value)
   if (!validate(value)) {
     const detail = (validate.errors ?? []).map((error: ErrorObject) => `${error.instancePath || '/'} ${error.message}`).join('; ')
     return { ok: false, error: `strategy_schema_invalid: ${detail}`.slice(0, 1200) }

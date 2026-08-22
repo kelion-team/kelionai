@@ -10,11 +10,13 @@
 const SHELL = 'kelionai-shell-v2'
 
 // CACHE-ul CREIERULUI OFFLINE nu se atinge NICIODATĂ (owner 20 aug: „nu descarcă
-// nimic pentru offline"). WebLLM ține modelul (~2 GB) în Cache Storage sub cheile
+// nimic pentru offline"). WebLLM ține modelul (~5,2 GB, gemma-2-9b) în Cache Storage sub cheile
 // `webllm/model|wasm|config`. Curățările de mai jos (upgrade de shell, rutina de
 // versiune) le ȘTERGEAU pe toate → fiecare update automat („update la foc continuu")
 // distrugea modelul descărcat, deci offline-ul nu era gata NICIODATĂ. Le protejăm.
-const ePastrat = (k) => k === SHELL || k.startsWith('webllm/')
+// + 'transformers-cache' (kitul offline, 22 aug): urechea Whisper locală —
+// aceeași regulă ca la creier: update-ul nu radă modelele descărcate.
+const ePastrat = (k) => k === SHELL || k.startsWith('webllm/') || k === 'transformers-cache'
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -47,7 +49,7 @@ self.addEventListener('activate', (e) => {
 })
 
 // Permite paginii să forțeze curățarea cache-ului (rutina de versiune). Golește TOT
-// în afară de modelul offline (webllm/*) — un update NU trebuie să șteargă cei ~2 GB
+// în afară de modelul offline (webllm/*) — un update NU trebuie să șteargă cei ~5,2 GB
 // descărcați cu greu; altfel offline-ul repornește de la zero la fiecare publicare.
 self.addEventListener('message', (e) => {
   if (e.data === 'kelion-clear-caches') {

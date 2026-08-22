@@ -1,30 +1,23 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser, adminSiId, cerAdmin } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob } from '../db.js'
+import { createBuildJob, listBuildJobs, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { numeleOrdinului, cineACerut } from '../services/numeOrdin.js'
-import { autonomActiv } from '../services/autonomActiv.js'
-import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
 import { procentDinProgres } from '../services/progresOrdin.js'
 import { evalueazaOrdin, AI_CONSTRUCTORI, type BecCredit } from '../services/evalOrdinConstructor.js'
 import { crediteAI, beculCredit } from '../services/creditAI.js'
-import { UNELTE_CONSTRUCTOR } from '../services/brainToolDefs.js'
-import { notifyAdmin } from '../services/adminNotification.js'
 
 // ── THE CONSTRUCTOR — the "order → code → PR" pipeline (Adrian, Jul 27:
 // "Kelion must be able to create any software the admin asks for, any change,
 // any improvement") ──────────────────────────────────────────────────────────
 // The order enters here (from chat/voice through the build_software tool or
-// from the Admin→Constructor panel); the EXECUTION is on the VPS:
-// deploy/constructor-worker.sh (cron every 2 min, flock, short jobs with
-// timeouts — NOT permanent daemons, the lesson of the old ecosystem that
-// burned the subscription) calls deploy/constructor-agent.mjs — the Aider
-// engine on a LOCAL Ollama model on the VPS (owner, Aug 16: "la constructor nu
-// e gemeni… Aider pe un model LOCAL pe VPS (Ollama)" — no key, no quota, no
-// money), which works in a separate clone (the workshop), runs build + tests
-// and opens the PR. THE MERGE STAYS WITH ADRIAN (his rule, Jul 27: "me doing the merge is ok").
+// from the Admin→Constructor panel); the EXECUTION is DEVIN, external (owner,
+// 22 aug, verbatim: „am cerut devin peste tot in constructor… sa-i stergi de
+// tot [pe Aider+Ollama]"): the in-app dispatcher (tickDispecerDevin) claims the
+// queued order, opens a Devin session, polls its progress, and the result is a
+// PR. THE MERGE STAYS WITH ADRIAN (his rule, Jul 27: "me doing the merge is ok").
 // Becul LIVE per AI-constructor, cheiat pe subșirul stabil (becFurnizor):
 // creditAI dă numele complet al furnizorului, îl potrivim cu `includes`. Un AI
 // fără rând de credit rămâne necunoscut (fără cheie), nu „verde" inventat.
@@ -52,8 +45,20 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // rămâne rapidă — fără apel de rețea pe fiecare trimitere.
     const ev = evalueazaOrdin(order)
     if (!ev.trece) return reply.code(400).send({ error: 'ordin_respins', motiv: ev.motiv })
-    const id = await createBuildJob(user.email, order)
+    // Creierul gândește MAI ÎNTÂI pentru Devin — planul se anexează ordinului.
+    const { planificaOrdinConstructor } = await import('../services/devinConstructor.js')
+    const orderCuPlan = await planificaOrdinConstructor(order)
+    const id = await createBuildJob(user.email, orderCuPlan)
     if (!id) return reply.code(500).send({ error: 'db_indisponibil' })
+    // PORNIRE IMEDIATĂ (owner, 22 aug: ordinul din PANOU nu pornea dispecerul —
+    // doar cel din chat o făcea, iar ordinul aștepta bucla lentă de autonomie).
+    // Un ordin EXPLICIT al ownerului pornește Devin ACUM, în fundal (idempotent:
+    // UN job pe rând, claimNextBuildJob e atomic). Inert fără cheia Devin.
+    if (config.devinKey) {
+      void import('../services/devinConstructor.js')
+        .then(({ tickDispecerDevin }) => tickDispecerDevin())
+        .catch((e) => app.log.warn(`[devin] tick imediat (panou): ${String(e).slice(0, 160)}`))
+    }
     return reply.send({ ok: true, id })
   })
 
@@ -95,44 +100,31 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // 16 aug: și AUTORUL, pe față — „cine e acolo?" nu se mai întreabă.
       cerutDe: cineACerut(j.orderedBy),
     }))
-    // `paused` (auditul admin, 3 aug): pauza de autonomie oprea și lucrătorul
-    // (/api/constructor/next nu predă nimic), dar Constructorul n-o arăta
-    // nicăieri — ordinul stătea „în coadă · 0%" la nesfârșit după promisiunea
-    // „max. 2 minute". Panoul afișează bannerul și corectează promisiunea.
-    // DOVADA VIE A MOTORULUI (owner, 16 aug: „doar denumit nu e suficient
-    // trebuie verificat real ca e aider… cu dovada"): rulăm `aider --version`
-    // pe gazdă și trimitem starea MĂSURATĂ (versiunea reală sau eroarea), ca
-    // panoul să nu doar SCRIE „Aider", ci s-o și DOVEDEASCĂ.
-    const { probaAider } = await import('../services/aiderProba.js')
-    const { probaOllama } = await import('../services/ollamaProba.js')
-    const { loadKv } = await import('../db.js')
-    const { verdictPulsLucrator } = await import('../services/pulsLucrator.js')
-    const [aider, ollama, lastPollRaw] = await Promise.all([
-      probaAider().catch((e) => ({ ok: false, versiune: '', motiv: String(e).slice(0, 200) })),
-      probaOllama().catch((e) => ({ ok: false, modele: [] as string[], motiv: String(e).slice(0, 200) })),
-      loadKv('constructor:worker:lastPoll').catch(() => null),
-    ])
-    // PULSUL LUCRĂTORULUI: dovada MĂSURATĂ că workerul de pe VPS mai cere ordine.
-    // Dacă e mort (bătaie veche / niciodată), panoul spune EXACT asta — de-aceea
-    // stau ordinele în coadă, nu dintr-un mister. Câte ordine chiar așteaptă (queued).
-    const lucrator = verdictPulsLucrator(Number(lastPollRaw) || 0, Date.now())
-    const inCoada = jobs.filter((j) => j.status === 'queued').length
+    // `paused` (auditul admin, 3 aug): pauza de autonomie oprește dispecerul,
+    // dar Constructorul n-o arăta nicăieri — ordinul stătea „în coadă · 0%" la
+    // nesfârșit fără explicație. Panoul afișează bannerul.
+    // (Probele locale au fost ȘTERSE cu toată mașinăria locală: owner, 22 aug,
+    // „am cerut devin peste tot in constructor… sa-i stergi de tot".)
     return reply.send({
       jobs,
       paused: await isOpsPaused().catch(() => false),
-      aider, // { ok, versiune, motiv } — motorul (Aider), probat live pe VPS
-      ollama, // { ok, modele, motiv } — creierul LOCAL al lui Aider, probat pe VPS (ollama list)
-      lucrator, // { lastPoll, ageSec, viu, pragMs } — VIU dacă a cerut ordin recent
-      inCoada, // câte ordine stau efectiv în coadă (queued) — context pentru puls
+      // CINE E CONSTRUCTORUL — MĂSURAT din config, nu scris de mână în panou
+      // (owner, 22 aug: panoul afișa „Ollama local free" HARDCODAT, fără nicio
+      // măsurătoare, deci nu putea răspunde la „de ce nu e Devin?"). Cu cheia
+      // pusă, dispecerul duce ordinele în sesiuni Devin (→ PR pe master); fără
+      // cheie NU construiește nimeni — se spune, roșu, cu numele variabilei.
+      constructor: config.devinKey
+        ? { cine: 'devin' as const, motiv: 'cheia Devin e pusă — dispecerul duce ordinele în sesiuni Devin (rezultatul: PR pe master)' }
+        : { cine: 'local' as const, motiv: 'cheia Devin NU e pusă pe server — dispecerul e inert și niciun ordin nu pleacă; pune DEVIN_API_KEY în mediul backend-ului' },
     })
   })
 
   // ── DIAGNOSTICUL AUTONOM AL CONSTRUCTORULUI (owner, 19 aug: „nu are autonomie…
   // sa faca asta") ─────────────────────────────────────────────────────────────
-  // Kelion măsoară SINGUR de ce (nu) repară — puls lucrător + motor Aider + creier
-  // LOCAL + rezultatele free/plătit — și dă verdictul FERM. Pe server (acces real),
-  // fără să depindă de owner. Aceeași sursă unică (culegeDiagnosticConstructor) ca
-  // unealta de chat/voce. Doar citire, admin (cerAdmin = oameni + legitimația lui Kelion).
+  // Kelion măsoară SINGUR de ce (nu) construiește DEVIN — cheia, ordinele agățate
+  // fără sesiune, pornirile eșuate, coada care stă — și dă verdictul FERM. Pe
+  // server (acces real), fără să depindă de owner. Aceeași sursă unică
+  // (culegeDiagnosticConstructor) ca unealta de chat/voce. Doar citire, admin.
   app.get('/api/admin/constructor/diagnostic', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
@@ -142,16 +134,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(diagnostic)
   })
 
-  // (COMUTATORUL CREIER 2 CLOUD + sursa plătită a constructorului au fost SCOASE —
-  // owner, 20 aug: „rămân doar cu Linux și Gemini Live… tai serverele qwen".
-  // Abonamentul Ollama Cloud (kimi-k3 / qwen3.5) a ieșit din aplicație; constructorul
-  // rulează DOAR pe creierul LOCAL free de pe VPS. Ruta bridge /api/constructor/creier-config
-  // a dispărut — workerul cade curat pe free local când n-o găsește. Constructorul îl
-  // înlocuiește Devin, extern; vezi AI-HANDOFF.md.)
-
-  // (COMUTATORUL „Fable 5 forțat" a fost SCOS — owner, 16 aug: „constructor unic
-  // aider… fable iese total de peste tot… nu se comuta nimic". Constructorul
-  // rulează pe motorul Aider, iar creierul lui e DOAR Gemini, fără comutator.)
+  // (Istoric, pe scurt: comutatorul „creier 2 cloud" + sursa plătită au fost
+  // scoase pe 20 aug; comutatorul „Fable 5 forțat" pe 16 aug; iar pe 22 aug
+  // ÎNTREAGA mașinărie locală a fost ștearsă — constructorul e DEVIN, extern.
+  // Vezi AI-HANDOFF.md.)
 
   // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
   // ștergere" + „scoate 30/31 dacă nu le poate face, ai funcțiile făcute") ─────
@@ -201,312 +187,29 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (id === null) return
     const job = await retryBuildJob(id, req.body?.order)
     if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
+    // „Reia" = ordin explicit → pornește Devin ACUM (la fel ca ordinul nou).
+    if (config.devinKey) {
+      void import('../services/devinConstructor.js')
+        .then(({ tickDispecerDevin }) => tickDispecerDevin())
+        .catch((e) => app.log.warn(`[devin] tick imediat (reia): ${String(e).slice(0, 160)}`))
+    }
     return reply.send({ ok: true, job })
   })
 
-  // SURSA UNICĂ DE UNELTE pentru lucrător (Adrian, 10 aug: „dă-i TOT"). Worker-ul
-  // le cere la pornire și le lipește peste uneltele lui locale de fișiere. Așa
-  // constructorul are automat aceleași unelte de dev/ops ca creierul de chat,
-  // fără să le mai țină cineva la zi de mână. x-bridge-secret, ca /next.
-  app.get('/api/constructor/tool-defs', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    // Formatul OpenAI (function) — exact ce așteaptă agentul (Gemini/DeepSeek).
-    const tools = UNELTE_CONSTRUCTOR.map((t) => ({
-      type: 'function',
-      function: { name: t.name, description: t.description, parameters: t.input_schema },
-    }))
-    return reply.send({ tools })
-  })
+  // ── LUCRĂTORUL LOCAL A FOST ȘTERS DE TOT (owner, 22 aug, verbatim: „am cerut
+  // devin peste tot in constructor") ─────────────────────────────────────────
+  // Rutele lui de bridge (tool-defs / next / ajutor / context / report /
+  // progress, toate pe x-bridge-secret) serveau exclusiv workerul local —
+  // mașinăria aia nu mai există: constructorul e DEVIN, extern, iar drumul
+  // ordinului e build_software → coadă → dispecerul din app (tickDispecerDevin)
+  // → sesiune Devin → PR pe master. Cronul vechi de pe VPS primește 404 aici —
+  // semnalul lui de moarte; deploy.sh îl scoate din crontab la publicare.
 
-  // ── The VPS worker's endpoint (x-bridge-secret auth, like ops/pulse) ─────
-  // Adrian's "autonomy pause" stops the constructor too: while paused, no
-  // orders are handed to the worker (queued ones wait, they aren't lost).
-  //
-  // AMBELE COMUTATOARE OPRESC LUCRĂTORUL (owner, 13 aug, incident VPS 1000%):
-  // erau DOUĂ butoane diferite — „pauză autonomie" (isOpsPaused / kelion_ops_paused)
-  // ȘI „motoare autonome" (autonomActiv / autonom:activ). Lucrătorul asculta DOAR
-  // primul. Owner-ul a apăsat al doilea („motoare autonome OFF") ca să oprească
-  // totul — dar lucrătorul a continuat să ceară ordine și să construiască, până a
-  // sufocat VPS-ul. Exact regula #1: butonul spunea „oprit", iar lucrătorul nu se
-  // uita la el. Acum ORICARE dintre comutatoare oprește lucrătorul.
-  app.get('/api/constructor/next', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    // HEARTBEAT-UL LUCRĂTORULUI (owner, 19 aug: „are ordine in coada dar nu se apuca
-    // aider… de ce?"). Fiecare cerere de ordin scrie ACUM în kv — dovada VIE că
-    // cronul de pe VPS trăiește. Panoul o citește (vezi GET /api/admin/constructor):
-    // dacă bătaia e veche, workerul/cronul e oprit, iar ordinele stau în coadă DIN
-    // CAUZA ASTA (nu a app-ului). Fire-and-forget: un beat pierdut nu strică nimic.
-    const { saveKv } = await import('../db.js')
-    void saveKv('constructor:worker:lastPoll', String(Date.now())).catch(() => {})
-    if ((await isOpsPaused()) || !(await autonomActiv().catch(() => true)))
-      return reply.send({ job: null, paused: true })
-    // DEVIN DEȚINE COADA (owner, 20 aug: „punel pe devin cu cheie"). Când cheia
-    // Devin e pusă, constructorul e Devin (extern) — dispecerul din app claimează
-    // și duce ordinele. Worker-ul vechi (Aider pe VPS) NU mai primește joburi, ca
-    // să nu lucreze doi pe același ordin. NU flipăm nimic pe `running` degeaba:
-    // returnăm ÎNAINTE de `claimNextBuildJob`.
-    if (config.devinKey) return reply.send({ job: null, devin: true })
-    const job = await claimNextBuildJob()
-    // ── GÂNDIREA DE DEBLOCARE LA REÎNCERCARE (owner, 15 aug: „analizează de ce
-    // anumite ordine se blochează și oferă-i gândirea… să le poată duce la
-    // final") ──────────────────────────────────────────────────────────────
-    // Măsurat pe coada lui: ordinul #293 murea IDENTIC de 3 ori pentru că
-    // reîncercarea primea EXACT textul original — fără „schimbă metoda"
-    // (escaladare() se aplica doar pe misiunile autonomiei, nu pe coada asta),
-    // fără logul eșecului trecut (fiecare încercare era amnezică) și cu
-    // ancora „ai ALES un drum — ĂSTA E" încă lipită (contrazicea schimbarea).
-    // Ușa e UNA (aici): orice reîncercare pleacă cu (1) cerința de a numi CE
-    // face altfel, (2) coada logului încercării moarte — dovada, nu amintirea,
-    // (3) ancora drumului scoasă, (4) pre-verificarea cauzei: pe master-ul
-    // proaspăt din atelier, cauza poate fi deja REZOLVATĂ de altcineva —
-    // atunci ordinul se ÎNCHIDE cinstit, nu se re-muncește.
-    if (job && job.attempts > 1) {
-      const { escaladare } = await import('../services/autonomie.js')
-      const coadaLog = (job.log ?? '').slice(-1500).trim()
-      job.orderText =
-        escaladare(job.attempts - 1) +
-        `PASUL 0, ÎNAINTE DE ORICE: verifică dacă CAUZA mai există pe master-ul proaspăt ` +
-        `din atelier (rulează proba minimă: comanda/testul care o arăta). Dacă a dispărut ` +
-        `(a reparat-o alt PR între timp), raportează „cauza dispărută — nimic de făcut" și ` +
-        `închide ordinul cu succes: a re-munci o reparație existentă naște PR-uri dublate.\n` +
-        `Dacă ordinul cere ceva ce mediul tău NU are (ecranul viu al aplicației, camera, ` +
-        `microfonul, sesiunea de admin din browser), spune EXACT asta în raport — calea aia ` +
-        `se face din aplicație (Kelion are uneltele de ecran), nu din atelier; nu o repeta orbește.\n\n` +
-        (coadaLog ? `COADA LOGULUI ÎNCERCĂRII MOARTE (dovada a ce s-a întâmplat — diagnostichează ÎNTÂI):\n${coadaLog}\n\n` : '') +
-        job.orderText.replace(
-          'Ai analizat-o deja și ai ALES un drum — ăsta e.',
-          'Drumul ales inițial A EȘUAT (dovada în logul de mai sus) — nu mai e drumul tău; alege ALTUL din ce spune eșecul.',
-        )
-    }
-    return reply.send({ job })
-  })
-
-  // ── CREIERUL CONSTRUCTORULUI = MODEL LOCAL PE VPS (Ollama), NU app-ul ───────
-  // Owner, 16 aug: „la constructor nu e gemeni idiotule… e doar aider si cu
-  // openhands ca si completare… Aider pe un model LOCAL pe VPS (Ollama)… pe
-  // serverul linux si de acolo sa lucreze aider". Motorul (Aider) NU mai cere
-  // creierul prin app — gândește pe creierul LOCAL Ollama de pe gazdă
-  // (deploy/constructor-agent.mjs → ruleazaAider pe modelul local). De-aceea ruta
-  // veche de creier prin app (handlerul + cele două uși ale lui) a fost SCOASĂ,
-  // împreună cu puntea de formate OpenAI↔Gemini și alarma ei — constructorul nu
-  // mai atinge Gemini nicăieri.
-  // Colaborarea informațională cu Kelion rămâne pe /api/constructor/context (mai jos).
-
-  // ── CONTEXTUL LUI KELION PENTRU MOTOR (owner, 16 aug: „aider trebuie să fie
-  // permanent de creiere ȘI kelion, colaborează 100% informațional… scoate toate
-  // restricțiile… dă drumul la aplicație să funcționeze independent de tine").
-  // Aici SCOT lanțul pe care i-l pusesem: motorul (Aider) nu mai primește doar
-  // textul ordinului — primește memoria lui Kelion + roster-ul de specialiști, ca
-  // să construiască CU tot creierul lui Kelion, nu izolat. Bridge-gated ca restul.
-
-  // ?? AJUTOR RAPID DE LA CREIERUL KELION pentru Aider free (owner 17 aug) ????
-  // C?nd Aider local (qwen 7B) se blocheaz? / n-are solu?ie rapid, NU s?rim pe
-  // cloud pl?tit. Cerem creierului aplica?iei (Gemini, cheia casei) un PLAN SCURT
-  // de fi?iere+pa?i, pe care Aider ?l aplic? local. Bridge-gated.
-  app.post<{ Body: { ordin?: string; esuat?: string; repositoryFiles?: string[] } }>('/api/constructor/ajutor', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    const ordin = String(req.body?.ordin ?? '').trim().slice(0, 2500)
-    const esuat = String(req.body?.esuat ?? '').trim().slice(0, 1500)
-    const repositoryFiles = (Array.isArray(req.body?.repositoryFiles) ? req.body.repositoryFiles : [])
-      .filter((file): file is string => typeof file === 'string' && file.length > 0 && file.length <= 240)
-      .slice(0, 2500)
-    if (!ordin) return reply.code(400).send({ error: 'ordin_lipsa' })
-    const { clasificaActiuneConstructor } = await import('../services/evalOrdinConstructor.js')
-    const tipActiune = clasificaActiuneConstructor(ordin)
-    if (tipActiune !== 'cod') {
-      return reply.code(422).send({
-        ok: false,
-        schema: 'kelion.constructor/v1',
-        protocol: null,
-        errors: [`order classification is ${tipActiune}; constructor accepts code orders only`],
-        plan: '',
-        files: [],
-      })
-    }
-    try {
-      // U?a UNITAR? ? acela?i creier ca chat/autonomie/mailbox (nu un creier paralel).
-      const { planificaPasiMici } = await import('../services/creierRationament.js')
-      const r = await planificaPasiMici(ordin, esuat, 'route.constructor.ajutor', repositoryFiles)
-      return reply.send({
-        ok: r.ok,
-        schema: r.protocol?.protocol ?? 'kelion.constructor/v1',
-        protocol: r.protocol,
-        errors: r.errors,
-        // Rolling-deploy compatibility only; the new worker consumes `protocol`.
-        plan: r.plan,
-        files: r.files,
-      })
-    } catch (e) {
-      return reply.code(502).send({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) })
-    }
-  })
-
-  app.post<{ Body: { ordin?: string } }>('/api/constructor/context', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    const ordin = String(req.body?.ordin ?? '').trim()
-    const { getMemories, cautaIstoric } = await import('../db.js')
-    const { rosterViu } = await import('../services/agentiKelion.js')
-    const [memorie, agenti, relevante] = await Promise.all([
-      getMemories(config.adminEmail, 40).then((m) => m.map((x) => x.content)).catch(() => [] as string[]),
-      rosterViu().then((r) => r.map((a) => ({ id: a.id, rol: a.rol }))).catch(() => [] as { id: string; rol: string }[]),
-      ordin ? cautaIstoric(config.adminEmail, ordin, 8).then((h) => h.map((x) => `${x.role === 'user' ? 'owner' : 'Kelion'}: ${String(x.content).slice(0, 300)}`)).catch(() => [] as string[]) : Promise.resolve([] as string[]),
-    ])
-    return reply.send({ memorie, agenti, relevante })
-  })
-
-  app.post<{
-    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number; motor?: string; creierModel?: string; sursa?: string; fisiere?: unknown; ordin?: string }
-  }>('/api/constructor/report', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    const id = Number(req.body?.id ?? 0)
-    const status = req.body?.status === 'done' ? 'done' : 'failed'
-    if (!id) return reply.code(400).send({ error: 'id_lipsa' })
-    // THE INDEPENDENT VERIFICATION VERDICT (Stage 6): 'verde' = CI re-ran
-    // build+tests on a clean machine and it passed; 'roșu' = it failed;
-    // 'în curs' = it couldn't be confirmed within the worker's budget (the
-    // workshop had passed anyway).
-    const ci = ['verde', 'roșu', 'în curs'].includes(String(req.body?.ci)) ? String(req.body?.ci) : undefined
-    // CREIERUL FOLOSIT — owner, 16 aug: „fable iese total de peste tot". Singura
-    // etichetă onestă rămasă e 'free' (constructorul e pe motorul Aider + creier
-    // Gemini prin app, gratuit pe cheia casei). Costul e cel MĂSURAT de worker;
-    // orice non-numeric/negativ e ignorat, ca panoul Bani să nu arate o cifră
-    // fabricată. (Marcajul 'fable-5' a fost SCOS — Fable nu mai există în constructor.)
-    const brain = String(req.body?.brain) === 'free' ? 'free' : undefined
-    const costRaw = Number(req.body?.costUsd)
-    const costUsd = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : undefined
-    await reportBuildJob(id, {
-      status,
-      branch: req.body?.branch,
-      prUrl: req.body?.prUrl,
-      tokens: Number(req.body?.tokens ?? 0),
-      log: req.body?.log,
-      ci,
-      brain,
-      costUsd,
-    })
-    // ANUNȚ DE ESCALADARE (K10, Adrian: „când creierul nu poate, să te anunțe
-    // «bifează creier superior»"). Dacă ordinul a picat fiindcă MODELUL nu a dus
-    // sarcina (nu o poartă roșie de cod), pun o notificare în panou cu ce e de
-    // făcut — nu doar un email care se pierde. Distins prin semnătura din log.
-    // ── AUTO-REMEDIERE IMEDIATĂ (owner, 19 aug: „la eșec, imediat analiză +
-    // decizie + remediere, AUTOMAT") ─────────────────────────────────────────
-    // La eșec HARD, Kelion analizează IMEDIAT (decideRemediereEsec), decide FERM
-    // și, dacă e reparabil, REPUNE SINGUR ordinul în coadă — nu așteaptă omul.
-    // ATENȚIE la creier și la bani (owner): escaladare pe plătit DOAR când e vina
-    // modelului ȘI rezerva e gata; plasă anti-BUCLĂ = contor kv (MAX_AUTO_REMEDIERI).
-    if (status === 'failed') {
-      const motiv = String(req.body?.log ?? '')
-      const { loadKv, saveKv, remediazaAutomatBuildJob } = await import('../db.js')
-      const { decideRemediereEsec, MAX_AUTO_REMEDIERI } = await import('../services/remediereEsec.js')
-      // Constructor FREE-LOCAL unic (Ollama Cloud scos, 20 aug) — remedierea rămâne
-      // pe creierul local free; nu mai există escaladare pe plătit.
-      const cheieContor = `remediere:count:${id}`
-      const nrDeja = Number(await loadKv(cheieContor).catch(() => null)) || 0
-      const dec = decideRemediereEsec(motiv, nrDeja)
-      if (dec.actiune === 'reia') {
-        await saveKv(cheieContor, String(nrDeja + 1)).catch(() => {})
-        const nota = `[AUTO-REMEDIERE ${nrDeja + 1}/${MAX_AUTO_REMEDIERI}] cauză: ${dec.clasa} — ${dec.motiv}. ${dec.recomandare}`
-        const repus = await remediazaAutomatBuildJob(id, nota).catch(() => false)
-        void notifyAdmin(
-          'scris',
-          `Ordin #${id}: auto-remediere (${dec.clasa})${repus ? ' — repus în coadă' : ''}`,
-          `${dec.recomandare}\n\nMotiv: „${motiv.slice(0, 200)}".`,
-          { jobId: id, clasa: dec.clasa },
-        ).catch(() => 0)
-      } else {
-        // 'oprire' (permanent — deja înghețat de reportBuildJob) / 'raporteaza':
-        // NU se reîncearcă automat; notificare FERMĂ cu ce e de făcut.
-        void notifyAdmin(
-          'scris',
-          `Ordin #${id}: ${dec.actiune === 'oprire' ? 'OPRIT' : 'de decis de owner'} (${dec.clasa})`,
-          `${dec.recomandare}\n\nMotiv: „${motiv.slice(0, 200)}".`,
-          { jobId: id, clasa: dec.clasa },
-        ).catch(() => 0)
-      }
-    } else if (status === 'done') {
-      // Succes → resetăm contorul de auto-remedieri al jobului (curățenie).
-      const { saveKv, addMemory } = await import('../db.js')
-      await saveKv(`remediere:count:${id}`, '0').catch(() => {})
-      // KELION ÎNVAȚĂ „cum și cine, ce a aplicat" (owner, 19 aug): proveniența
-      // rezolvării (motor + creier + sursă + fișiere) devine o MEMORIE pe care o
-      // recall-uiește (getMemories → /api/constructor/context). Doar din proveniența
-      // MĂSURATĂ trimisă de worker — nimic inventat. Best-effort (nu blochează raportul).
-      const { memorieRezolvareConstructor } = await import('../services/invatareConstructor.js')
-      const linieMemorie = memorieRezolvareConstructor({
-        id,
-        motor: req.body?.motor,
-        creier: req.body?.creierModel,
-        sursa: req.body?.sursa,
-        fisiere: req.body?.fisiere,
-        ordin: req.body?.ordin,
-        prUrl: req.body?.prUrl,
-      })
-      if (linieMemorie) await addMemory(config.adminEmail, linieMemorie, 'kelion').catch(() => {})
-    }
-    // The report to Adrian — by email, with the PR to press (the merge is his).
-    const dovadaCI =
-      ci === 'verde'
-        ? 'Verificare INDEPENDENTĂ: CI verde pe o mașină curată (build + teste re-rulate). ✅'
-        : ci === 'în curs'
-          ? 'Verificare independentă (CI): încă rulează pe PR — atelierul trecuse deja build + teste.'
-          : 'Build + teste verificate în atelier.'
-    const subject =
-      status === 'done'
-        ? `[Kelion] Constructorul a terminat ordinul #${id} — PR gata de merge`
-        : `[Kelion] Constructorul a EȘUAT la ordinul #${id}`
-    // The brain is stated in the email too (Aug 2 rule: the model choice must
-    // be VISIBLE everywhere the order is reported). A Fable order says what it
-    // cost — measured, or honestly "not reported by the provider".
-    const linieCreier =
-      brain === 'free'
-        ? `Motor: Aider · creier Gemini (rapid → performant), prin app.\n\n`
-        : ''
-    const body =
-      status === 'done'
-        ? `Ordinul #${id} e construit. ${dovadaCI}\n\n${linieCreier}PR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
-        : ci === 'roșu'
-          ? `Ordinul #${id}: verificarea INDEPENDENTĂ (CI) a picat pe PR, deși atelierul trecuse.\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nNU da merge până nu e verde — ordinul rămâne în panou.`
-          : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`
-    void sendMail({ to: config.adminEmail, subject, html: body.replace(/\n/g, '<br>'), text: body }).catch(() => {})
-    return reply.send({ ok: true })
-  })
-
-  // ── LIVE PROGRESS (autonomy Stage 4, Jul 29) ─────────────────────────────
-  // The VPS worker sends its current step HERE (cloned → editing X → build →
-  // opening PR...) as it works — the mirror of /report, same x-bridge-secret
-  // auth. It does NOT change the terminal status (updateBuildJobProgress only
-  // writes on `running` jobs). That way the state is no longer a black box
-  // between "Picked up" and "Done": the monitor can show it, and Kelion can
-  // NARRATE it.
-  app.post<{ Body: { id?: number; progress?: string } }>('/api/constructor/progress', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ error: 'unauthorized' })
-    const id = Number(req.body?.id ?? 0)
-    const progress = String(req.body?.progress ?? '').trim()
-    if (!id || !progress) return reply.code(400).send({ error: 'bad_request' })
-    await updateBuildJobProgress(id, progress)
-    return reply.send({ ok: true })
-  })
-
-  // ── THE HEAVY TOOLS, IN THE CONSTRUCTOR'S HAND (Adrian, Jul 30: "I asked
-  // for fully equipped agents and you gave them only trinkets") ──────────────
-  // He was right. The constructor had 7 tools — ls/grep/read/write/edit/run/
-  // finish — so it could write code, but it couldn't open a site and couldn't
-  // set a key. An order asking for a portal was impossible for it, and it
-  // would have failed three times on the owner's money.
-  //
-  // Here it gets the browser (the 9 real tools, Playwright in-process) and the
-  // secrets (secret_pune/lista/publica). The dispatch is THE SAME as the
-  // autonomous loop's — a single implementation, imported, not copied.
-  //
-  // The gate: `x-bridge-secret`, like the rest of the worker endpoint. Beyond
-  // it sit tools that touch the internet and the keys — so no other access
-  // path.
+  // ── UNELTELE CASEI PENTRU SCRIPTURILE DE PE GAZDĂ (NU e a lucrătorului!) ──
+  // deploy/auto-publicare.sh cheamă build_software prin ruta asta (TOOL_URL)
+  // ca să depună ordine de reparație când publicarea pică — rămâne, pe
+  // x-bridge-secret, exact ca /api/ops/pulse. (Inventarul din 22 aug era s-o
+  // șteargă cu restul — auto-publicarea ar fi rămas fără mâini.)
   app.post<{ Body: { name?: string; args?: Record<string, unknown> } }>('/api/constructor/tool', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })

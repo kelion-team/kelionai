@@ -56,40 +56,6 @@ export function signature(message: string): string {
   return crypto.createHash('sha1').update(norm).digest('hex').slice(0, 16)
 }
 
-// ── MÂNA RAPIDĂ A AUTOVINDECĂRII: AIDER (owner, 16 aug: „pentru autovindecare
-// ... daca e gratuit ... il lasi pe el, face asta corect?") ──────────────────
-// Aider e deja lucrătorul #1 din panou (lucratori.ts) și deja instalat în
-// imagine (Dockerfile: pip3 install aider-chat). AICI primește PRIMUL ordinul
-// de vindecare: clonă separată, editează în bucla lui, TESTELE le rulăm NOI
-// (ruleazaLucrator), ramura se împinge și PR-ul se deschide — deci drumul legal
-// (PR → porți → master → publicare) rămâne neatins, iar constructorul NU e
-// scos: el ține coada, porțile și legile, și rămâne drumul de REZERVĂ (Aider
-// fără produs sau cu teste roșii → ordinul se depune la constructor ca până
-// azi). Verdictul e MĂSURAT (diff din git + vitest rulat de noi), nu povestit.
-async function vindecaCuAider(ordin: string): Promise<string> {
-  try {
-    const { LUCRATORI, ruleazaLucrator, lucratoriInstalati } = await import('./lucratori.js')
-    if (!(await lucratoriInstalati()).includes('aider')) return ''
-    const aider = LUCRATORI.find((l) => l.nume === 'aider')
-    if (!aider) return ''
-    const { config } = await import('../config.js')
-    const p = await ruleazaLucrator(aider, `gemini/${config.constructorGeminiModel}`, ordin)
-    if (!p.aSchimbat || p.testeTrec !== true || !p.branch) return ''
-    const { repoOpenPR } = await import('./github.js')
-    const pr = await repoOpenPR(
-      p.branch,
-      `Auto-vindecare (aider): ${ordin.replace(/\s+/g, ' ').slice(0, 70)}`,
-      `Vindecare propusă de lucrătorul Aider pe ordinul de auto-vindecare de mai jos. ` +
-        `Diff măsurat: ${p.fisiere} fișiere, +${p.adaugate}/−${p.sterse}; testele backend TREC (rulate de noi, nu de unealtă).\n\n` +
-        '```\n' + ordin.slice(0, 1500) + '\n```',
-    )
-    return /^https?:\/\//.test(pr) ? pr : ''
-  } catch (e) {
-    console.error(`[self-heal] aider a picat, cad pe constructor: ${e instanceof Error ? e.message.slice(0, 150) : String(e)}`)
-    return ''
-  }
-}
-
 export async function runSelfHeal(): Promise<{ filed: number }> {
   // AMBELE COMUTATOARE opresc self-heal-ul (owner, 13 aug, incident VPS 1000%):
   // altfel, cu „motoare autonome" OFF, self-heal-ul tot reumplea coada (repunea
@@ -123,6 +89,9 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     return { filed: 0 }
   }
 
+  // Planificarea creierului pentru Devin — la fiecare ordin de auto-vindecare.
+  const { planificaOrdinConstructor } = await import('./devinConstructor.js')
+
   let filed = 0
 
   // ── ERORILE RAPORTATE DIN BROWSER (F12/consolă) ─────────────────────────────
@@ -152,15 +121,8 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
       `Verifică: npm --prefix backend run build (+ test dacă atingi backend), ` +
       `npm --prefix frontend run build dacă atingi frontend.`
 
-    // Întâi mâna rapidă (Aider, PR direct cu teste verzi); constructorul rămâne rezerva.
-    const prAider = await vindecaCuAider(order)
-    if (prAider) {
-      await saveKv(key, JSON.stringify({ at: Date.now(), aiderPr: prAider, count: e.count }))
-      console.log(`[self-heal] aider a vindecat direct (PR: ${prAider}) — fără ordin la constructor`)
-      filed += 1
-      continue
-    }
-    const id = await createBuildJob('kelion-autovindecare', order)
+    const orderCuPlan = await planificaOrdinConstructor(order)
+    const id = await createBuildJob('kelion-autovindecare', orderCuPlan)
     if (id) {
       await saveKv(key, JSON.stringify({ at: Date.now(), job: id, count: e.count }))
       filed += 1
@@ -185,16 +147,8 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     if (await loadKv(key)) continue // deja trimis — nu duplicăm
 
     const ordinLive = ordinSimptomLive(s.fel, s.message, s.count, s.sampleUrl)
-    // Aceeași ordine ca la erorile de browser: întâi Aider, apoi constructorul.
-    const prAiderLive = await vindecaCuAider(ordinLive)
-    if (prAiderLive) {
-      await saveKv(key, JSON.stringify({ at: Date.now(), aiderPr: prAiderLive, fel: s.fel, count: s.count }))
-      console.log(`[self-heal] aider a vindecat simptomul live (PR: ${prAiderLive}) — fără ordin la constructor`)
-      filed += 1
-      filedLive += 1
-      continue
-    }
-    const id = await createBuildJob('kelion-autovindecare-live', ordinLive)
+    const ordinLiveCuPlan = await planificaOrdinConstructor(ordinLive)
+    const id = await createBuildJob('kelion-autovindecare-live', ordinLiveCuPlan)
     if (id) {
       await saveKv(key, JSON.stringify({ at: Date.now(), job: id, fel: s.fel, count: s.count }))
       filed += 1

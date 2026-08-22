@@ -4,8 +4,7 @@ import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } fr
 import { geminiLive } from './geminiDirect.js'
 import { stareDispecer } from './dispecer.js'
 import { probaBrowserulMainilor } from './browser.js'
-import { probaAider } from './aiderProba.js'
-import { probaOllama } from './ollamaProba.js'
+import { config } from '../config.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -324,44 +323,22 @@ export async function systemHealth(): Promise<string> {
     /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
   }
 
-  // 12. AIDER — MOTORUL CONSTRUCTORULUI, PROBAT CU `aider --version` (owner, 16
-  // aug: „doar denumit nu e suficient trebuie verificat real ca e aider").
-  // Constructorul rulează Aider ca motor unic; dacă binarul lipsește pe gazdă,
-  // ordinele nu se construiesc — becul o spune MĂSURAT, cu versiunea reală.
-  try {
-    const a = await probaAider()
-    info.aiderConstructor = a.ok ? `VIU (${a.versiune})` : `LIPSĂ: ${a.motiv}`
-    if (!a.ok) {
-      problems.push({
-        id: 'aider-constructor-lipsa',
-        grav: 'critic',
-        desc: `motorul constructorului (Aider) nu răspunde la 'aider --version': ${a.motiv} — ordinele de build nu se pot construi`,
-        reparabil: 'nu e nevoie de mâna omului: constructorul instalează SINGUR Aider pe gazdă la următoarea rulare (asiguraCreierulLocal → deploy/setup-ollama.sh, care pune și Aider)',
-      })
-    }
-  } catch {
-    /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
-  }
-
-  // 13. OLLAMA — CREIERUL LOCAL al constructorului, probat cu `ollama list` pe VPS
-  // (owner, 16 aug: „aider pe un model LOCAL pe VPS (Ollama)… verifică dacă e pus
-  // pe server"). Aider gândește pe modelul local; dacă Ollama lipsește sau n-are
-  // un model, Aider n-are creier local → becul o spune MĂSURAT, cu modelele reale.
-  try {
-    const o = await probaOllama()
-    info.ollamaLocal = o.ok ? `VIU (modele: ${o.modele.join(', ') || 'niciun model instalat'})` : `LIPSĂ: ${o.motiv}`
-    if (!o.ok || o.modele.length === 0) {
-      problems.push({
-        id: 'ollama-local-lipsa',
-        grav: o.ok ? 'mediu' : 'critic',
-        desc: o.ok
-          ? 'Ollama rulează pe VPS dar N-ARE niciun model — Aider n-are creier local de cod'
-          : `creierul local (Ollama) nu răspunde la 'ollama list' pe VPS: ${o.motiv} — Aider n-are pe ce gândi local`,
-        reparabil: 'nu e nevoie de mâna omului: constructorul își instalează SINGUR creierul local la următoarea rulare (asiguraCreierulLocal → deploy/setup-ollama.sh). Dacă tot nu apare, verifică pe VPS rețeaua/discul/root (RAM ≈6GB pentru modelul de cod)',
-      })
-    }
-  } catch {
-    /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
+  // 12. DEVIN — CONSTRUCTORUL (owner, 22 aug: „am cerut devin peste tot in
+  // constructor… sa-i stergi de tot pe ce e local"). Mașinăria locală A FOST
+  // ȘTEARSĂ — constructorul e DEVIN, extern: ordin → dispecer → sesiune Devin →
+  // PR. Semnalul măsurabil de aici:
+  // cheia (fără ea dispecerul e inert prin design). Pornirile eșuate de sesiuni
+  // au diagnosticul lor (diagnosticConstructor) — nu-l dublăm aici.
+  info.constructorDevin = config.devinKey
+    ? 'DEVIN activ (cheia pusă — dispecerul duce ordinele în sesiuni Devin → PR)'
+    : 'FĂRĂ cheie — dispecerul e inert'
+  if (!config.devinKey) {
+    problems.push({
+      id: 'devin_fara_cheie',
+      grav: 'critic',
+      desc: 'Cheia Devin NU e pusă pe server — constructorul e inert, niciun ordin de build nu pleacă.',
+      reparabil: 'doar ownerul: pune DEVIN_API_KEY în mediul backend-ului (VPS) și repornește aplicația',
+    })
   }
 
   return JSON.stringify({

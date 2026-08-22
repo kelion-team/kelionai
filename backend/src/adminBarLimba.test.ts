@@ -15,7 +15,11 @@ describe('optiunile de schimbare a limbii in bara de admin', () => {
   })
 
   it('toate cele 7 limbi suportate sunt prezente in selector', () => {
-    const limbi = ['ro', 'en', 'es', 'fr', 'de', 'it', 'ru']
+    // B6 (marea verificare, 22 aug): 'ru' era o limbă pe care UI-ul N-O ARE
+    // (nu e în Lang/dict — la click cădea pe engleză cu insigna „RU" activă,
+    // stare care minte), iar 'pt' (tradusă, în Lang) lipsea din selector.
+    // Lacătul pina lista falsă — acum pinuiește adevărul.
+    const limbi = ['ro', 'en', 'es', 'fr', 'de', 'it', 'pt']
     for (const l of limbi) {
       expect(bara).toContain(`code: '${l}'`)
     }

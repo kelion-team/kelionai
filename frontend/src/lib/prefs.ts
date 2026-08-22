@@ -127,8 +127,12 @@ export async function saveSpeechLang(code: string): Promise<boolean> {
   }
 }
 
-// Self-service account deletion (GDPR: the right to erasure). Wipes the user's
-// data server-side and clears the session cookie. Returns true on success.
+// Cererea de ștergere de cont. [ADUS LA COD, lot D] Serverul REFUZĂ mereu
+// (routes/me.ts → 403 `stergerea_prin_comanda_inchisa`, ordinul din 14 aug:
+// „baza nu se șterge prin nicio comandă") — deci întoarce false întotdeauna;
+// nimic nu se șterge de aici. Rândul (n) e ÎNCHIS din 22 aug: butonul spune
+// acum adevărul (deleteAccClosed — ștergerea automată e închisă prin
+// construcție; cererea merge la contact@kelionai.app), nu mai pică tăcut.
 export async function deleteMyAccount(): Promise<boolean> {
   try {
     const res = await fetch('/api/me/delete', {

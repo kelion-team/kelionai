@@ -50,6 +50,8 @@ function porneste(): void {
   if (pornit || typeof window === 'undefined') return
   pornit = true
   window.addEventListener('online', () => void verificaConexiuneReala())
+  // `navigator.onLine === false` este un „nu" de încredere — declarăm offline
+  // imediat. Revenirea e verificată cu ping pe evenimentul `online` + periodic.
   window.addEventListener('offline', () => seteaza(false))
   void verificaConexiuneReala()
   // Periodic: prinde „conectat dar fără internet" ȘI revenirea semnalului (la care,

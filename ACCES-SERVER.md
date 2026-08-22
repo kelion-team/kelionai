@@ -1,5 +1,9 @@
 # ACCES SERVER & DATE — harta completă (Kelionai)
 
+> ⚠ PARȚIAL DEPĂȘIT (banner 21 aug, auditul docs-vs-cod): bridge/, LiveKit,
+> admin_pool, Stripe și workflow-urile vps-livekit-*/vps-qa-patrol NU mai există
+> în cod. Verifică orice rând aici contra codului / AI-HANDOFF §18 înainte să-l crezi.
+
 > **Scop:** un singur loc din care ajungi la TOT — server (VPS), baze de date,
 > GitHub, Google, cheile. **Nu conține valori secrete** (parole/token-uri) —
 > acelea rămân doar în locurile lor sigure (le deții tu). Aici scrie **unde stă

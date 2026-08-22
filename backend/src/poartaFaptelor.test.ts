@@ -9,6 +9,7 @@ import {
   clasificaRezultatUnealta,
   pretentiiFaraFapta,
   textulDemascarii,
+  textulNuPotVerifica,
   planFaraExecutie,
   TEXT_PLAN_FARA_EXECUTIE,
 } from './services/poartaFaptelor.js'
@@ -88,6 +89,15 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     expect(t).toContain('VERIFICAREA FAPTELOR')
     expect(t).toContain('FALSĂ')
     expect(t).toContain('generate_video')
+  })
+
+  it('varianta VOCALĂ spune „nu pot verifica", NU un verdict de fals (pe voce pretenția poate fi un recall adevărat)', () => {
+    const t = textulNuPotVerifica(['„am trimis emailul" — fără send_email'])
+    expect(t).toContain('VERIFICAREA FAPTELOR')
+    expect(t).toContain('nu pot verifica')
+    expect(t).not.toContain('FALSĂ')
+    expect(t).not.toContain('o retrag')
+    expect(t).toContain('send_email')
   })
 
   it('o unealtă care a întors eroare este tentativă eșuată, nu dovadă', () => {
@@ -170,16 +180,17 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
   })
 
   it('detectorul de ÎNGHEȚ e legat în tură: judecă pe cereActiune + rezultate reușite', () => {
-    expect(chat).toMatch(/planFaraExecutie\(assistantText, doveziUnelte, cereActiune\)/)
+    // pe INTENȚIA explicită, nu pe simpla prezență a imaginii (C6 al marii
+    // verificări — „uite poza" nu e o acțiune care poate „îngheța"):
+    expect(chat).toMatch(/planFaraExecutie\(assistantText, doveziUnelte, actiuneCerutaExplicit\)/)
+    expect(chat).toMatch(/const actiuneCerutaExplicit = cereActiune && hasActionIntent\(lastUserText\)/)
     expect(chat).toMatch(/assistantText \+= TEXT_PLAN_FARA_EXECUTIE/)
     expect(chat).toMatch(/\[POARTA FAPTELOR\] plan fără execuție/)
   })
 
-  it('poarta bootului din constructor poartă DOVADA reală (jurnalul), nu ghicit, și dă 45s', () => {
-    const agent = sursa('../../deploy/constructor-agent.mjs')
-    expect(agent).toMatch(/timeout 45 node dist\/index\.js/)
-    expect(agent).toMatch(/Jurnalul REAL al bootului/)
-  })
+  // (Testul „poarta bootului din constructor" a fost ȘTERS pe 22 aug: fișierul
+  // pe care-l păzea, deploy/constructor-agent.mjs, nu mai există — mașinăria
+  // constructorului local a fost ștearsă integral, constructorul e DEVIN.)
 })
 
 describe('LEGEA ANTI-HARDCODARE — poarta automată + legea în documentele oricărui AI', () => {

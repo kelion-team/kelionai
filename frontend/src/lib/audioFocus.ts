@@ -39,7 +39,16 @@ function emit(next: AudioFocusSource): void {
 /** LIVE session registers so TTS knows not to steal the mouth. */
 export function registerLiveFocus(opts?: { onInterrupt?: () => void }): void {
   liveInterrupt = opts?.onInterrupt ?? null
-  // LIVE always wins: kill any Chirp still playing from a written turn.
+  // TRUNCHEREA MĂSURATĂ (vânătoarea din 22 aug, BLOCANT, confirmată de
+  // verificator): sesiunea Live cade singură des (1006 de rețea, 1000 de la
+  // server, schimbare de rută audio) și ChatPanel o repornește TĂCUT în
+  // ~400ms-1s; „LIVE always wins" de aici omora atunci Chirp-ul turei SCRISE
+  // fix în mijlocul propoziției — exact „chatul se trunchează audio" al
+  // ownerului. Regula nouă: tura scrisă ÎN REDARE ține gura; releaseTtsFocus
+  // o întoarce singură pe 'live' la final (liveInterrupt e deja setat).
+  // O stare 'tts' RĂMASĂ fără redare reală (onEnd pierdut) se repară mai jos
+  // pe 'live' — altfel ar ține gura departe de Live pe termen nelimitat.
+  if (active === 'tts' && isVoicePlaying()) return
   if (isVoicePlaying()) stopVoice()
   emit('live')
 }
@@ -83,7 +92,12 @@ export function requestTtsFocus(opts?: { turaScrisa?: boolean }): boolean {
 }
 
 export function releaseTtsFocus(): void {
-  if (active === 'tts') emit(isVoicePlaying() ? 'tts' : 'none')
+  // BUG REPARAT (registrul frontend #3, blocant — „vocile paralele", owner 20 aug):
+  // după prima redare Chirp, starea cădea pe 'none' deși sesiunea LIVE era încă vie
+  // (liveInterrupt înregistrat) → următorul requestTtsFocus nu mai intra pe ramura
+  // `active==='live'` → nu mai tăia playout-ul Live → Chirp cânta PESTE vocea Live.
+  // Gura se întoarce la 'live' cât timp sesiunea Live există; 'none' doar fără ea.
+  if (active === 'tts') emit(isVoicePlaying() ? 'tts' : liveInterrupt ? 'live' : 'none')
 }
 
 /**

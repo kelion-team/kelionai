@@ -53,10 +53,15 @@ export class OpusVoceClient {
 
   /** Creează codecul; null dacă browserul nu poate (→ sesiunea rămâne pe PCM).
    *  `laPachet` primește octeții Opus de microfon (spre server); `laPcm` primește
-   *  PCM decodat (Float32 @24 kHz) de redat. */
+   *  PCM decodat (Float32 @24 kHz) de redat. `laMoarte` (registrul frontend,
+   *  lot C): un codec care MOARE ÎN ZBOR trebuie anunțat — înainte, error-ul de
+   *  decoder era înghițit gol și difuzorul rămânea PERMANENT mut cât serverul
+   *  continua să trimită Opus (comentariul vechi „serverul o simte" MINȚEA:
+   *  serverul nu simțea nimic). Apelantul cade pe PCM și spune serverului. */
   static async creeaza(
     laPachet: (octeti: Uint8Array) => void,
     laPcm: (pcm: Float32Array) => void,
+    laMoarte?: (sens: 'encoder' | 'decoder') => void,
   ): Promise<OpusVoceClient | null> {
     if (!esteSuportat()) return null
     try {
@@ -69,6 +74,18 @@ export class OpusVoceClient {
       ])
       if (!okE || !okD) return null
 
+      // Moartea se anunță O dată (encoderul și decoderul pot pica împreună).
+      let moarteAnuntata = false
+      const anuntaMoartea = (sens: 'encoder' | 'decoder'): void => {
+        if (moarteAnuntata) return
+        moarteAnuntata = true
+        try {
+          laMoarte?.(sens)
+        } catch {
+          /* apelantul picat — sesiunea se curăță pe drumul ei */
+        }
+      }
+
       const enc = new AudioEncoder({
         output: (chunk) => {
           try {
@@ -79,9 +96,7 @@ export class OpusVoceClient {
             /* un pachet pierdut ≫ sesiune moartă */
           }
         },
-        error: () => {
-          /* encoder căzut — apelantul cade pe PCM la următorul cadru */
-        },
+        error: () => anuntaMoartea('encoder'),
       })
       enc.configure(cfgEnc)
 
@@ -97,9 +112,7 @@ export class OpusVoceClient {
             data.close()
           }
         },
-        error: () => {
-          /* decoder căzut — vocea de jos revine pe PCM (serverul o simte) */
-        },
+        error: () => anuntaMoartea('decoder'),
       })
       dec.configure(cfgDec)
 
@@ -143,6 +156,13 @@ export class OpusVoceClient {
     } catch {
       /* pachet corupt — se sare, difuzorul nu moare */
     }
+  }
+
+  /** Golește coada decoderului — redă cadrele Opus rămase în buffer. Fără
+   *  asta, finalul fiecărei fraze se poate tăia (WebCodecs nu le scoase pe toate
+   *  dacă nu primește flush la final de stream). */
+  async flush(): Promise<void> {
+    try { await this.dec.flush() } catch { /* nimic de făcut */ }
   }
 
   inchide(): void {

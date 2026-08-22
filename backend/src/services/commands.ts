@@ -22,10 +22,15 @@ export interface DeviceCommand {
 // NB: Unicode lookbehind, not \b — JS \b is ASCII-only and never matches
 // before "î", so the spoken "închide" (real diacritics from Chirp STT) would
 // be dead with a plain word boundary.
+// + golește/scoate/ia (vânătorul din 22 aug, MĂSURAT: „golește monitorul" —
+// chiar verbul canonic al uneltei — pica pe model, care confabula „n-am
+// acces"; la fel „scoate aia de pe ecran", „ia știrile de pe monitor").
 const CLOSE_VERB =
-  /(?<![\p{L}\p{N}])(închide|inchide|închid|ascunde|opre[șs]t[eiî]|close|hide|dismiss|cierra|cerrar|ferme|fermer|schlie[sß]|закро)\w*/iu
+  /(?<![\p{L}\p{N}])(închide|inchide|închid|ascunde|opre[șs]t[eiî]|gole[șs]te|goleste|scoate|close|hide|dismiss|cierra|cerrar|ferme|fermer|schlie[sß]|закро)\w*/iu
+const IA_VERB = /(?<![\p{L}\p{N}])ia(?![\p{L}\p{N}])/iu
+// + tab*/știr* (același vânător: „închide tabul cu știrile" → null).
 const SCREEN_NOUN =
-  /(?<![\p{L}\p{N}])(harta|hart[ăa]|ecran\p{L}*|monitor\p{L}*|map|screen|video|imagin\p{L}*|image|fereastr\p{L}*|window|pagin\p{L}*|page|asta|aceasta|acesta|it|that|tot)(?![\p{L}\p{N}])/iu
+  /(?<![\p{L}\p{N}])(harta|hart[ăa]|ecran\p{L}*|monitor\p{L}*|tab\p{L}*|[șs]tir\p{L}*|map|screen|video|imagin\p{L}*|image|fereastr\p{L}*|window|pagin\p{L}*|page|asta|aceasta|acesta|it|that|tot)(?![\p{L}\p{N}])/iu
 // "Switch to <task>" — narrow verbs only, so "arată-mi harta Romei" (new
 // content) still reaches Kelion; a bare switch just changes the active surface.
 const SWITCH_VERB =
@@ -126,7 +131,11 @@ export function interpretDeviceCommand(
     const kind = taskKindFromText(msg)
     if (kind && open.some((t) => t.kind === kind)) return { screen: { op: 'switchKind', kind } }
   }
-  if (CLOSE_VERB.test(msg)) {
+  // „ia X de pe ecran/monitor" — verbul „ia" e prea scurt/ambiguu ca să stea
+  // în CLOSE_VERB (ar prinde „ia uite"), dar cu destinația explicită e
+  // comandă de închidere fără echivoc (vânătorul din 22 aug).
+  const eIaDePeEcran = IA_VERB.test(msg) && /de pe (ecran|monitor)\p{L}*/iu.test(msg)
+  if (CLOSE_VERB.test(msg) || eIaDePeEcran) {
     if (CLOSE_ALL.test(msg)) return { screen: { op: 'closeAll' } }
     const kind = taskKindFromText(msg)
     // W4 #2: if Adrian names a specific surface (e.g. "închide harta"), we
@@ -137,7 +146,11 @@ export function interpretDeviceCommand(
       if (open.some((t) => t.kind === kind)) return { screen: { op: 'closeKind', kind } }
       return null
     }
-    if (SCREEN_NOUN.test(msg) || msg.split(/\s+/).length <= 4) return { screen: { op: 'close' } }
+    // ≤6 cuvinte când ținta „de pe ecran/monitor" e explicită (era ≤4 pentru
+    // orice — „scoate aia de pe ecran te rog" pica pe model; vânătorul 22 aug).
+    const cuvinteMsg = msg.split(/\s+/).length
+    if (SCREEN_NOUN.test(msg) || cuvinteMsg <= 4 || (eIaDePeEcran && cuvinteMsg <= 6) || (/de pe (ecran|monitor)\p{L}*/iu.test(msg) && cuvinteMsg <= 6))
+      return { screen: { op: 'close' } }
   }
   return null
 }

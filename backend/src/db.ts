@@ -4,9 +4,11 @@ import { randomBytes } from 'node:crypto'
 import type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow } from './shared/api-types.js'
 export type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow }
 import { config } from './config.js'
+import { creeazaPoolDb } from './dbConexiune.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 import { normalizeazaTip, clampImportanta, rangheazaMemorii } from './services/memoryRank.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
+import { eSqlDeCitire, allCapabilityNames } from './services/brainCapabilities.js'
 import {
   curataTextJurnal,
   esteStareSarcinaOperationala,
@@ -103,6 +105,11 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_operational_tasks_user_state
       ON operational_tasks (user_email, state, updated_at DESC);
+    -- dovada_faptelor citește ultimele N sarcini ale userului pe created_at:
+    -- fără indexul ăsta, un user intens (o sarcină pe tură) ar plăti un sort
+    -- peste toate rândurile lui la fiecare provocare (agentul de integrare).
+    CREATE INDEX IF NOT EXISTS idx_operational_tasks_user_created
+      ON operational_tasks (user_email, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_operational_tasks_turn
       ON operational_tasks (turn_id);
     CREATE TABLE IF NOT EXISTS operational_events (
@@ -960,10 +967,14 @@ export async function tranzitioneazaSarcinaOperationala(
     const from = task.rows[0]?.state
     if (!esteStareSarcinaOperationala(from)) {
       await client.query('ROLLBACK')
+      // Respingerea se ÎNTOARCE ca valoare, nu ca excepție — fără log aici,
+      // apelantul care ignoră {ok:false} o pierdea complet fără urmă.
+      console.error(`[jurnal operațional] tranziție pe sarcină inexistentă: ${taskId} → ${input.stare}`)
       return { ok: false, error: 'journal_task_not_found' }
     }
     if (!tranzitieOperationalaPermisa(from, input.stare)) {
       await client.query('ROLLBACK')
+      console.error(`[jurnal operațional] tranziție respinsă: ${taskId} ${from} → ${input.stare}`)
       return { ok: false, error: `journal_transition_rejected:${from}:${input.stare}` }
     }
     const terminal = ['completed', 'failed', 'blocked', 'expired', 'unverified'].includes(input.stare)
@@ -993,6 +1004,109 @@ export async function tranzitioneazaSarcinaOperationala(
     return { ok: false, error: 'journal_write_failed' }
   } finally {
     client?.release()
+  }
+}
+
+// ── DOVADA FAPTELOR — cititorul jurnalului operațional (JARVIS pasul 4, §7:
+// „salvarea = dovada, asul din mânecă"). Până aici jurnalul era write-only:
+// chat.ts scria stări+evenimente pentru fiecare tură, dar nimeni nu le putea
+// SCOATE la provocare. Citirea e per-utilizator (user_email), întoarce doar
+// ce e deja normalizat/igienizat la scriere — niciodată output brut de unealtă.
+export interface DovadaFaptaRand {
+  obiectiv: string
+  stare: string
+  inceput: string
+  incheiat: string | null
+  sursa: string
+  usaCreierului: boolean
+  evenimente: Array<{
+    fel: string
+    unealta: string | null
+    stare: string | null
+    cod: string | null
+    motiv: string | null
+    la: string
+  }>
+}
+
+/** Legea #1: o citire picată se SPUNE (citit:false + motiv), nu se maschează
+ *  într-o listă goală — „nicio dovadă" de la o bază căzută nu înseamnă
+ *  „nicio faptă". */
+export async function dovezileFaptelor(
+  userEmail: string,
+  cate = 10,
+  cauta?: string,
+): Promise<{ citit: true; sarcini: DovadaFaptaRand[] } | { citit: false; motiv: string }> {
+  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e pornită' }
+  const email = String(userEmail ?? '').trim().toLowerCase()
+  if (!email) return { citit: false, motiv: 'utilizator necunoscut' }
+  const limita = Math.min(Math.max(Math.floor(cate) || 10, 1), 30)
+  try {
+    const filtru = String(cauta ?? '').trim()
+    const sarcini = await getPool().query<{
+      id: string
+      objective: string
+      state: string
+      metadata: Record<string, unknown> | null
+      created_at: string
+      finished_at: string | null
+    }>(
+      filtru
+        ? `SELECT id, objective, state, metadata, created_at, finished_at
+           FROM operational_tasks
+           WHERE user_email=$1 AND objective ILIKE '%' || $3 || '%'
+           ORDER BY created_at DESC LIMIT $2`
+        : `SELECT id, objective, state, metadata, created_at, finished_at
+           FROM operational_tasks
+           WHERE user_email=$1
+           ORDER BY created_at DESC LIMIT $2`,
+      filtru ? [email, limita, filtru.slice(0, 160)] : [email, limita],
+    )
+    const ids = sarcini.rows.map((r) => r.id)
+    const evenimente = ids.length
+      ? await getPool().query<{
+          task_id: string
+          kind: string
+          capability: string | null
+          outcome_state: string | null
+          code: string | null
+          reason: string | null
+          created_at: string
+        }>(
+          `SELECT task_id, kind, capability, outcome_state, code, reason, created_at
+           FROM operational_events
+           WHERE task_id = ANY($1::uuid[])
+           ORDER BY created_at ASC, id ASC`,
+          [ids],
+        )
+      : { rows: [] as Array<{ task_id: string; kind: string; capability: string | null; outcome_state: string | null; code: string | null; reason: string | null; created_at: string }> }
+    const peSarcina = new Map<string, DovadaFaptaRand['evenimente']>()
+    for (const e of evenimente.rows) {
+      const lista = peSarcina.get(e.task_id) ?? []
+      lista.push({
+        fel: e.kind,
+        unealta: e.capability,
+        stare: e.outcome_state,
+        cod: e.code,
+        motiv: e.reason,
+        la: String(e.created_at),
+      })
+      peSarcina.set(e.task_id, lista)
+    }
+    return {
+      citit: true,
+      sarcini: sarcini.rows.map((r) => ({
+        obiectiv: r.objective,
+        stare: r.state,
+        inceput: String(r.created_at),
+        incheiat: r.finished_at ? String(r.finished_at) : null,
+        sursa: String((r.metadata as Record<string, unknown> | null)?.source ?? 'chat'),
+        usaCreierului: (r.metadata as Record<string, unknown> | null)?.usaCreierului === true,
+        evenimente: peSarcina.get(r.id) ?? [],
+      })),
+    }
+  } catch (e) {
+    return { citit: false, motiv: String(e).slice(0, 200) }
   }
 }
 // ── SCUTUL DATELOR DE NEATINS (owner, 14 aug, verbatim: „baza de date de
@@ -3013,13 +3127,22 @@ export async function saveMessage(
   email: string,
   role: 'user' | 'assistant',
   content: string,
+  /** Timestamp (ms) of the original message, e.g. from an offline sync. */
+  createdAt?: number,
 ): Promise<void> {
   if (!dbEnabled() || !content.trim()) return
   try {
-    await getPool().query(
-      'INSERT INTO messages (user_email, role, content) VALUES ($1, $2, $3)',
-      [email, role, content],
-    )
+    if (typeof createdAt === 'number' && Number.isFinite(createdAt) && createdAt > 0) {
+      await getPool().query(
+        'INSERT INTO messages (user_email, role, content, created_at) VALUES ($1, $2, $3, to_timestamp($4 / 1000.0))',
+        [email, role, content, createdAt],
+      )
+    } else {
+      await getPool().query(
+        'INSERT INTO messages (user_email, role, content) VALUES ($1, $2, $3)',
+        [email, role, content],
+      )
+    }
   } catch {
     // Never break the chat because persistence failed.
   }
@@ -3642,6 +3765,10 @@ export async function proposeKelionTool(t: {
   if (!dbEnabled()) return null
   const name = t.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40)
   if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // HTTPS only
+  // Numele din inventarul FIX nu se pot propune (C4 al marii verificări):
+  // o unealtă dinamică „send_email" aprobată dintr-un click ar fi umbrit
+  // executorul real — datele omului plecau la un URL extern.
+  if (allCapabilityNames().includes(name)) return null
   try {
     const r = await getPool().query<{ id: number }>(
       `INSERT INTO kelion_tools (name, description, params_json, http_method, http_url, http_headers, rationale, status)
@@ -4692,7 +4819,11 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
       `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
        WHERE id = (
          SELECT id FROM build_jobs
-         WHERE (status='queued' OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'))
+         WHERE (status='queued'
+                -- GARDA DEVIN (22 aug): running-stătut se fură DOAR fără sesiune
+                -- Devin — sesiunea externă trăiește și e polată de dispecer;
+                -- furtul ei ar porni a doua sesiune plătită pe același ordin.
+                OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND devin_session_id IS NULL))
            AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
          ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
        )
@@ -4783,7 +4914,14 @@ export async function deblocheazaJoburileClaimate(): Promise<{ repuse: number; a
          updated_at = now()
        WHERE status='running' AND attempts < 3
          AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'
-         AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'`,
+         AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
+         -- GARDA DEVIN (22 aug, „bani dubli"): un job cu sesiune Devin VIE nu e
+         -- „lucrător mort" — sesiunea trăiește EXTERN și e polată de dispecer;
+         -- dacă bucla de autonomie doarme o oră (pauza „nimic"), pragul de 15
+         -- min l-ar fi repus în coadă și tick-ul următor pornea A DOUA sesiune
+         -- plătită pe același ordin. Terminarea/eșecul le judecă dispecerul
+         -- (verificaJobDevin), nu tăcerea lui updated_at.
+         AND devin_session_id IS NULL`,
     )
     return { repuse: requeue.rowCount ?? 0, abandonate: fail.rowCount ?? 0 }
   } catch {
@@ -5142,30 +5280,11 @@ export async function retryBuildJob(id: number, newOrderText?: string): Promise<
   }
 }
 
-/** AUTO-REMEDIERE (owner, 19 aug: „la eșec, imediat analiză + decizie + remediere,
- *  automat"): la un eșec HARD REPARABIL, Kelion repune SINGUR ordinul în coadă,
- *  imediat, cu o notă (recomandarea fermă) adăugată în log — pe care /next o
- *  injectează în promptul reîncercării. `attempts=2` ca /next să pună analiza
- *  (escaladare + coada logului). GĂRZI: atinge DOAR joburi 'failed' și NU dezgheață
- *  erorile permanente (attempts=99, P27 — pungă/cheie). Plasa anti-BUCLĂ e contorul
- *  kv din apelant (remediereEsec.MAX_AUTO_REMEDIERI), nu attempts — ca să nu ardă. */
-export async function remediazaAutomatBuildJob(id: number, nota: string): Promise<boolean> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
-  try {
-    const r = await getPool().query(
-      `UPDATE build_jobs
-         SET status='queued', attempts=2,
-             log = RIGHT(COALESCE(log,'') || E'\\n' || $2, 20000),
-             updated_at = now()
-       WHERE id=$1 AND status='failed' AND attempts < 99
-       RETURNING id`,
-      [id, String(nota || '').slice(0, 2000)],
-    )
-    return (r.rowCount ?? 0) > 0
-  } catch {
-    return false
-  }
-}
+// (remediazaAutomatBuildJob — auto-remedierea la eșec HARD, pe calea /report a
+// workerului local — a fost ȘTEARSĂ pe 22 aug: ruta /report + serviciul
+// remediereEsec au plecat cu toată mașinăria Aider+Ollama. Dacă o sesiune Devin
+// eșuează, dispecerul o raportează 'failed' și ownerul dă „Reia"; nu mai există
+// bucla de auto-remediere a lucrătorului local.)
 
 /** Anulează explicit un ordin în curs sau în coadă. `cancelled` este terminal,
  *  dar NU este eșec de execuție și nu deschide un incident fals. */
@@ -5248,8 +5367,11 @@ export async function dbQuery(sql: string): Promise<string> {
   // citească. Orice altceva (UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT ocolind
   // validarea plăților) se refuză aici, iar DELETE/TRUNCATE ar fi oprite
   // ORICUM de triggerele din scutulDatelor — două straturi, nu unul.
-  const primulCuvant = (text.match(/^[a-z]+/i)?.[0] ?? '').toUpperCase()
-  const eCitire = primulCuvant === 'SELECT' || primulCuvant === 'WITH' || primulCuvant === 'EXPLAIN' || primulCuvant === 'SHOW'
+  // ÎNTĂRIT 22 aug (verificatorul reclasificării db_query): pe primul cuvânt,
+  // „WITH x AS (UPDATE wallets …) SELECT" și „EXPLAIN ANALYZE INSERT" treceau
+  // drept citire și OCOLEAU scutul — acum decide predicatul comun eSqlDeCitire
+  // (fără cuvinte de scriere nicăieri, fără a doua instrucțiune).
+  const eCitire = eSqlDeCitire(text)
   if (!eCitire) {
     const atinse = TABELE_PROTEJATE.filter((t) => new RegExp(`\\b${t}\\b`, 'i').test(text))
     if (atinse.length) {

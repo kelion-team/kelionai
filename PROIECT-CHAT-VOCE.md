@@ -3,6 +3,46 @@
 > Versiunea FINALĂ, autoritară. Deciziile de mai jos sunt luate cu owner-ul, pas
 > cu pas. Istoricul raționamentului (cum am ajuns la fiecare) = `DRAFT-PROIECT-VOCE-ONLY.md`.
 > **Nimic nu se codează până owner-ul nu zice „start build".**
+>
+> **STARE (21 aug — owner a zis „toate"):** pasul 1 (un singur motor online) e
+> CONSTRUIT + LIVE v6.2 (turele scrise merg PRIN Live, Chirp suprimat cât Live
+> trăiește; scoaterea totală a lui Chirp = pasul 7/Piper). Pasul 6 funcționează
+> de facto pe aceeași cale (scrii → răspunde cu vocea Live). Nuanță la §5/pasul
+> 2: pe calea GREA vocea trece prin /api/chat unde poartaFaptelor RULEAZĂ —
+> gap-ul real rămas e calea ușoară (transcriptul Live) + reformularea de după
+> unealtă. Pasul 2 (cățelul pe calea ușoară a vocii): MERGE (PR #1323) +
+> PUBLICAT LIVE — măsurat 22 aug 00:0xZ: /api/version → v=ad5dff1, ver 6.7
+> (judecă doar turele pur-ușoare; nota — „nu pot verifica", nu verdict de
+> fals — pe istoric+monitor, nu voce; exempția călătorește cu anunțul de
+> sistem și stă armată cât ușa grea e în zbor). Rămân „nu pot verifica" de
+> aici: ordinea turnComplete/toolCall la Google și prima notă reală — se
+> urmăresc în jurnalul live `[POARTA FAPTELOR][VOCE]` / proba owner-ului.
+> Pasul 3 (trierea în doi): PASS adversarial + MERGE (PR #1324) + PUBLICAT
+> LIVE — măsurat 22 aug 00:3xZ: /api/version → v=3c155b1, ver 6.8 (protocolul
+> în fișa ușii + strângerea rostirilor adresate cât ușa macină + runde de
+> convergență, plafon 2; două FAIL-uri de verificator reparate: re-execuția
+> faptei → istoric+continuareUsa; excepția pusă pe linia moartă → mutată pe
+> cereActiune-ul viu din chat.ts). Rămân „nu pot verifica" de aici:
+> comportamentul REAL al buclei — jurnalul „trierea în doi — runda" +
+> pulsVoce.rundeTriere pe /api/vocal-live/stare + dacă modelul Live chiar
+> conversează cât unealta e blocată; limitele declarate în RAMAS (injecția
+> în zbor = pas viitor).
+> Pasul 4 (salvarea = dovada, §7): PASS dublu adversarial + MERGE (PR #1326)
+> + PUBLICAT LIVE — măsurat 22 aug 01:57Z: /api/version → v=577f0fc, ver 7.0
+> (cititorul jurnalului operațional + unealta dovada_faptelor + sarcina
+> vocală cu dovezi + facts_gate durabil; limitele în RAMAS). Rămân „nu pot
+> verifica" de aici: prima sarcină vocală reală, proba dovada_faptelor pe
+> cont real — jurnalul VPS / proba owner-ului. Pasul 5 (monitorul, §8):
+> PASS dublu adversarial + MERGE (PR #1327) + PUBLICAT LIVE — măsurat 22 aug
+> 02:30Z: /api/version → v=b99fad6, ver 7.1 (legătura mecanică ecran-gură:
+> textul lung cu document pe monitor pleacă în câmpul „pe_ecran_nu_se_recita",
+> nu în poziția „rezultat de spus"; demascarea sare splitul). Rămân „nu pot
+> verifica": contoarele usiCuDoc/predariEcran în mișcare reală + ascultarea
+> predării — proba pe dispozitiv. Pasul 7: CARTOGRAFIAT și tăiat în felii în
+> RAMAS (A probe / B gura Piper / C urechea / D scoaterea Chirp — B, C, D =
+> decizii OWNER, cu riscurile pe masă); manualul nu mai promite Piper/Vosk
+> inexistente. 2b (nota rostită) = decizie owner în RAMAS.
+> Bifele cu dovadă: RAMAS-DE-FACUT.md.
 
 ---
 

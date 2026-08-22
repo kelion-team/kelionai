@@ -87,4 +87,30 @@ describe('audioFocus single-voice lock', () => {
     releaseTtsFocus()
     unregisterLiveFocus()
   })
+
+  // TRUNCHEREA MĂSURATĂ (owner, 22 aug: „chatul se truncheaza audio"; vânător +
+  // verificator adversarial, BLOCANT): sesiunea Live cade singură des (1006,
+  // 1000 de la server, schimbare de rută) și e repornită TĂCUT — iar
+  // registerLiveFocus omora Chirp-ul turei scrise fix în mijlocul propoziției.
+  it('re-registering LIVE while a WRITTEN turn is PLAYING does NOT kill the mouth', () => {
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(true)
+    setPlaying(true)
+    registerLiveFocus() // sesiunea Live s-a redeschis singură sub Chirp viu
+    expect(audioIO.isVoicePlaying()).toBe(true) // redarea NU a fost tăiată
+    // ...și tura scrisă următoare tot are voie la gură (starea a rămas 'tts'):
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(true)
+    setPlaying(false)
+    releaseTtsFocus()
+    unregisterLiveFocus()
+  })
+
+  it('a STALE tts state (no real playback) is repaired to live on re-register', () => {
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(true)
+    setPlaying(false) // onEnd pierdut — starea 'tts' a rămas fără redare reală
+    registerLiveFocus()
+    // gura s-a întors la Live: o tură VOCALĂ (fără turaScrisa) e refuzată,
+    // exact contractul „LIVE vorbește el" — starea nu mai e blocată pe 'tts'.
+    expect(requestTtsFocus()).toBe(false)
+    unregisterLiveFocus()
+  })
 })

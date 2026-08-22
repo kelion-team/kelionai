@@ -120,6 +120,8 @@ interface Sarcina {
    *  hard task, a free one for a trivial task. No marker → 3 (medium), on the
    *  safe side. */
   dificultate?: number
+  /** Forțează un model anume (ex. constructor pe creierul 2). */
+  model?: string
   /** How completion is PROVEN — a measurement, not its word.
    *  Returns `true` only if the thing really happened. */
   dovada?: () => Promise<boolean>
@@ -689,7 +691,9 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
       const order = String(args.order ?? '').trim()
       const evaluare = evalueazaOrdin(order)
       if (!evaluare.trece) return JSON.stringify({ error: 'ordin_respins', motiv: evaluare.motiv })
-      const job = await createBuildJob(email, order)
+      const { planificaOrdinConstructor } = await import('./devinConstructor.js')
+      const orderCuPlan = await planificaOrdinConstructor(order)
+      const job = await createBuildJob(email, orderCuPlan)
       return JSON.stringify(job ? { ok: true, job } : { error: 'db_indisponibil' })
     }
     case 'browser_open': return scurt(await browserOpen(email, baseUrl, String(args.url ?? '')))
@@ -966,6 +970,7 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
     `NICIODATĂ valorile cheilor — doar numele lor.`
   return rationeazaCuUnelte(prompt, tools, uneltele, { ruta: 'service.autonomie', maxRounds: 30,
     maxTokens: 2500,
+    model: s.model,
     models: scaraPentru(s.dificultate),
   })
 }
@@ -986,14 +991,38 @@ async function supervizeazaIncidentConstructor(
     const result = await runConstructorStrategistStep(knowledge, {
       think: (prompt) => rationeaza(prompt, {
         ruta: 'service.autonomie.strateg', treapta: 'lucru', maxTokens: 4500, temperature: 0,
+        model: config.constructorGeminiModel,
       }),
-      executeBrainAction: (strategy, currentIncident) => ruleazaCuMainile({
-        cod: `INCIDENT-${currentIncident.id}`,
-        titlu: `Strategie incident constructor #${currentIncident.id}`,
-        executant: 'maini',
-        dificultate: 5,
-        ordin: buildConstructorStrategyExecutionPrompt(strategy, currentIncident),
-      }),
+      executeBrainAction: async (strategy, currentIncident) => {
+        // CONSTRUCTOR = Devin (ordonat de owner): când strategul spune 'constructor',
+        // ordinul NU se execută cu mâinile lui Kelion, ci se trimite la Devin.
+        if (strategy.decision.executor === 'constructor') {
+          const ordin = strategy.decision.reformulatedOrder
+            ?? buildConstructorStrategyExecutionPrompt(strategy, currentIncident)
+          const tip = clasificaActiuneConstructor(ordin)
+          if (tip !== 'cod') {
+            return `Netrimis constructorului: ${
+              tip === 'directa'
+                ? 'acțiune directă de ecran/browser, nu modificare de cod'
+                : 'ordin ambiguu/non-cod; lipsește verbul tehnic explicit și ținta din repo'
+            }`
+          }
+          const { planificaOrdinConstructor } = await import('./devinConstructor.js')
+          const ordinCuPlan = await planificaOrdinConstructor(ordin)
+          const id = await createBuildJob('kelion-autonom', ordinCuPlan)
+          if (!id) return 'baza de date n-a răspuns'
+          return `ordin #${id} trimis constructorului Devin`
+        }
+        // BRAIN_TOOLS: Kelion execută cu browserul și secretele.
+        return ruleazaCuMainile({
+          cod: `INCIDENT-${currentIncident.id}`,
+          titlu: `Strategie incident constructor #${currentIncident.id}`,
+          executant: 'maini',
+          dificultate: 5,
+          model: config.constructorGeminiModel,
+          ordin: buildConstructorStrategyExecutionPrompt(strategy, currentIncident),
+        })
+      },
       retryJob: retryBuildJob,
       updateIncident: updateConstructorIncident,
       capabilityInventory: inventarulMeu(),
@@ -1435,7 +1464,9 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       await scrieStare(s.cod, { job: 0, incercari: st.incercari, gata: true })
       return { pornit: false, motiv: `${s.cod}: netrimis constructorului — ${motiv}` }
     }
-    const id = await createBuildJob('kelion-autonom', ordin)
+    const { planificaOrdinConstructor } = await import('./devinConstructor.js')
+    const ordinCuPlan = await planificaOrdinConstructor(ordin)
+    const id = await createBuildJob('kelion-autonom', ordinCuPlan)
     if (!id) return { pornit: false, motiv: 'baza de date n-a răspuns' }
     if (/^C\d+$/.test(s.cod)) {
       await actualizeazaCerinta(Number(s.cod.slice(1)), { stare: 'in_lucru', job_id: id }).catch(() => {})

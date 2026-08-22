@@ -44,7 +44,8 @@ node scripts/verifica-sintaxa.mjs                    # din rădăcină; pică pe
 ## Structura, pe scurt (harta completă: AI-HANDOFF.md §2)
 - `backend/` — Node + Fastify + TS: rute în `src/routes/`, servicii în `src/services/`
 - `frontend/` — React + Vite + TS: `src/pages/Stage.tsx`, `src/components/ChatPanel.tsx`
-- `bridge/` — lucrătorul de pe VPS + scripturile de publicare/reparare
+- `deploy/` — scripturile de publicare/reparare de pe VPS (`bridge/` NU mai
+  există — șters 23 iul; referințele la el sunt istorie, nu arhitectură)
 - `Dockerfile` — imaginea aplicației (gazda: VPS propriu)
 
 ## Dacă schimbi cod, arhitectură sau starea proiectului

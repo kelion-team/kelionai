@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { config, roleFor } from '../config.js'
+import { config, roleFor, modelRapidDirect } from '../config.js'
 import type {
   Tool,
   MessageParam,
@@ -66,7 +66,7 @@ import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
-import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta } from '../services/brainCapabilities.js'
+import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta, eSqlDeCitire, allCapabilityNames } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
@@ -79,6 +79,7 @@ import {
   clasificaRezultatUnealta,
   pretentiiFaraFapta,
   textulDemascarii,
+  textulNuPotVerifica,
   planFaraExecutie,
   TEXT_PLAN_FARA_EXECUTIE,
   type DovadaUnealta,
@@ -129,7 +130,7 @@ import type { ChatMessage, Coords, DeviceLocation } from '../services/chatInput.
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { citesteEpisoade, adaugaEpisod, rezumaEpisoade } from '../services/promoEpisoade.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL,} from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, DOVADA_FAPTELOR_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL,} from '../services/brainToolDefs.js'
 import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
@@ -1318,6 +1319,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // soluții" în loc să execute. Sigur: cererea e autentificată ca userul
       // însuși, iar uneltele rămân filtrate pe rol exact ca până acum.
       usaCreierului?: boolean
+      // TRIEREA ÎN DOI (JARVIS pas 3): runda de CONVERGENȚĂ a ușii — cară
+      // istoricul rundei anterioare și NU mai forțează unelte de faptă
+      // (toolChoice='required' pe o faptă poate DEJA făcută = re-execuție,
+      // clasa interzisă de registrul B#2). Inventarul plin al ușii rămâne.
+      continuareUsa?: boolean
       // SPOKEN TURN (the ONE-brain voice architecture, Aug 1): this turn came
       // from the microphone and its reply will be SPOKEN ALOUD verbatim by the
       // Realtime voice. The brain answers the same way (same tools, same
@@ -1780,6 +1786,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Ușa creierului = acțiune prin definiție: modelul live a decis DEJA că
       // cererea are nevoie de unelte — fără asta, „trimite lista
       // constructorului" pica pe faza de vorbire și creierul doar POVESTEA.
+      // Excepția trierii NU stă aici: aici se alege doar FAZA (inventarul de
+      // unelte), iar runda de continuare tot pe faza grea trebuie să meargă,
+      // ca să VADĂ uneltele. Ne-forțarea lor se decide la cereActiune-ul de
+      // execuție (cel care armează forteazaFapta), nu la inventar.
       cereActiune: hasActionIntent(textulTurei) || req.body?.usaCreierului === true,
     })
     // VOCE = SCRIS COMPLET, DOAR PENTRU OWNER (owner, 19 aug: „egalizate drepturile
@@ -2480,6 +2490,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         source: 'chat',
         spoken: req.body?.spoken === true,
         ambientVoice: voceAmbianta,
+        // Originea vocală a ușii (JARVIS pasul 4): fără marcajul ăsta, o faptă
+        // făcută cu VOCEA apărea în jurnal identic cu una scrisă — dovada
+        // scoasă la provocare nu putea spune „asta ai cerut-o vorbind".
+        usaCreierului: eUsaCreierului,
+        continuareUsa: req.body?.continuareUsa === true,
       },
     })
     const scrieJurnalOperational = async (scriere: () => Promise<unknown>): Promise<void> => {
@@ -2569,7 +2584,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // above) — instantly, with all tools. The real cost is debited from paying
     // clients' credits (debitWallet at the end of the turn); the admin is exempt.
 
-    const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL]
+    const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, DOVADA_FAPTELOR_TOOL, FORGET_MEMORY_TOOL]
     // UȘA DE ESCALADARE pe FAZA de vorbire, nu pe treapta de model (8 aug,
     // ownerul: „verifică de ce nu știe să escaladeze să ceară acces la unelte").
     // Vechea condiție (pe heavyTurn) lăsa turele VOCALE fără ușă: ele sunt
@@ -2695,7 +2710,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // listă: două liste ar diverge, iar prima care ar diverge tăcut ar fi cea
     // care lasă `system_health` să calce iar pe drumul unei fraze.
     const PLAFON_UNELTE_USOR = UNELTE_VORBIRE.length
-    const cereActiune = hasActionIntent(lastUserText) || turnHasImage
+    // EXCEPȚIA TRIERII (JARVIS pasul 3): runda de CONTINUARE a ușii vocale NU
+    // e „acțiune" — fapta poate fi DEJA făcută în runda 1, iar șablonul rundei
+    // conține el însuși „fă"/„pune", deci regexul de intenție s-ar aprinde pe
+    // propriul nostru text, nu pe vorbele omului. Forțarea uneltei aici =
+    // emailul trimis de 2 ori (clasa B#2, demonstrată de verificator).
+    const cereActiune = (hasActionIntent(lastUserText) || turnHasImage) && req.body?.continuareUsa !== true
+    // ACȚIUNE CERUTĂ EXPLICIT ≠ „e o imagine în tură" (C6 al marii verificări):
+    // imaginea rămâne motiv de fază grea/inventar plin (cereActiune), dar
+    // forțarea uneltei de faptă, detectorul de îngheț și verdictul final de
+    // jurnal cer INTENȚIE de acțiune în vorbele omului — altfel „uite poza,
+    // ce e asta?" forța memorie_pune/generate_image și scria `failed` fals
+    // pe o descriere corectă.
+    const actiuneCerutaExplicit = cereActiune && hasActionIntent(lastUserText)
 // Gemini acceptă 128 unelte; Ollama cloud / altele — plafon 64 (sigur pe tool schema).
     const PLAFON_FURNIZOR = plafonUnelteFurnizor(orChatModel)
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
@@ -2785,6 +2812,40 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // normalizate. Poarta poate folosi exclusiv rezultatele reușite/verificate.
     const unelteIncercate: string[] = []
     const doveziUnelte: DovadaUnealta[] = []
+    // AFIȘARE ≠ FAPTĂ (owner, 13 aug: „doar afișează un card, nu execută").
+    // Uneltele DOAR-afișare: un apel la ele NU înseamnă că a executat cererea —
+    // gardele din orchestrator nu le socotesc drept faptă. (Declarat aici, în
+    // afara try-ului, ca și catch-ul de eroare să poată judeca faptele.)
+    // click_monitor SCOS din listă (tensiunea (g), închisă pe ordinul
+    // „finalizeaza tot", 22 aug): apasă ELEMENTE REALE — inclusiv butoane de
+    // admin — deci re-apăsarea la reluare NU e nevinovată și apelul E faptă.
+    // goleste_monitorul a IEȘIT din afișaj (vânătorul din 22 aug, măsurat pe
+    // captura ownerului: clasificat „doar-afișare", nu conta ca faptă →
+    // POARTA ACȚIUNII îi prescria modelului chiar refuzul „oprește-l manual").
+    // Golirea ecranului EXECUTĂ ceva cerut — e faptă (vezi UNELTE_FAPTA).
+    const UNELTE_AFISAJ = new Set([
+      'show_document', 'show_on_screen', 'open_app_view',
+      'zoom_monitor', 'arata_pe_grafic',
+    ])
+    // DB_QUERY: numele singur nu spune dacă e citire sau scriere (tensiunea
+    // (e), închisă pe același ordin: SQL-ul decide, cu predicatul ÎNTĂRIT din
+    // brainCapabilities — verificatorul a demonstrat că prefixul singur minte
+    // (WITH+INSERT, EXPLAIN ANALYZE, „select 1; update"). Citirea = reluabilă
+    // (cazul fondator al plasei — db_query ×18 — trăiește); scrierea = efect
+    // extern (nu se re-execută, omul e avertizat); neparsabil = scriere.
+    let dbQueryAScris = false
+    // EFECT EXTERN = ce nu are voie să se execute de două ori (verdictele
+    // agenților lot B: gardul anti-re-execuție pe „orice unealtă" omora cazul
+    // fondator al plasei — db_query ×18 + sinteză goală rămânea fără plasă — și
+    // lăsa turele escaladate fără nicio reluare, fiindcă și ask_brain arma
+    // flag-ul). O unealtă are efect extern dacă NU e: citire verificată
+    // independentă (grupaExecutieUnealta → undefined), comutatorul intern pur
+    // ask_brain (zero efect în lume), sau doar-afișare (cardul re-desenat
+    // identic nu dublează nimic).
+    const eUnealtaCuEfectExtern = (nume: string): boolean =>
+      grupaExecutieUnealta(nume) === 'efect' && nume !== 'ask_brain' && !UNELTE_AFISAJ.has(nume)
+    // Contorul gardului anti-re-execuție: DOAR tentativele cu efect extern.
+    const unelteEfectIncercate: string[] = []
     // CE A VĂZUT DEJA OMUL PE ECRAN (agenții de debug, 3 aug, verdict REAL):
     // când un model pică DUPĂ ce a curs text, catch-ul lipea „Încearcă din nou"
     // direct peste jumătatea de răspuns și salva în istoric DOAR sufixul —
@@ -2864,12 +2925,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         } catch {
           input = {}
         }
-        // FIECARE PAS PE MONITOR (owner, 14 aug): pe turele de EXECUȚIE, fiecare
-        // unealtă chemată se anunță PE LOC ca frame {executie} — numele pasului
-        // vine din inventarul de capabilități (o singură sursă, nu o listă
-        // paralelă), procentul urcă asimptotic (totalul nu se știe dinainte) și
-        // 100% îl scrie DOAR interceptorul de end, la închiderea reală a turei.
-        if (cereActiune) {
+        // FIECARE PAS PE MONITOR — LA ORICE UNEALTĂ (owner, 14 aug „să arate
+        // fiecare pas" + 22 aug, pe captura cu știrile: „trebuie sa apara o
+        // clepsidra care arata ca cauta"): numele pasului vine din inventarul
+        // de capabilități (o singură sursă), procentul urcă asimptotic
+        // (totalul nu se știe dinainte) și 100% îl scrie DOAR interceptorul
+        // de end, la închiderea reală a turei. Gardul vechi `if (cereActiune)`
+        // e SCOS: o căutare de știri fără verb de acțiune nu arăta NIMIC cât
+        // lucra — omul stătea în fața unui ecran mut, exact ce a măsurat.
+        {
           pasiExecutie += 1
           const capabilitate = CAPABILITIES.find((c) => c.name === name)
           // Ownerul, 21:42 („trebuie sa apara la text generare sau reparare sa
@@ -3059,7 +3123,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           return JSON.stringify({ succes: true, mesaj: `Am desenat pe graficul ${simbol} — ${bucati.join(' · ')}.` })
         }
         // APPROVED DYNAMIC TOOL: generic execution through a safe HTTP call.
-        if (dynNames.has(name)) {
+        // NICIODATĂ peste un executor REAL (C4 al marii verificări): o unealtă
+        // dinamică aprobată cu numele „send_email" ar fi UMBRIT executorul
+        // adevărat — argumentele reale (destinatar, corp) plecau la un URL
+        // extern, modelul vedea schema adevărată dar execuția era alta, iar
+        // poarta faptelor o număra drept dovadă. Inventarul fix are prioritate.
+        if (dynNames.has(name) && !allCapabilityNames().includes(name)) {
           return await runDynamicTool(name, input as Record<string, unknown>)
         }
         // UȘA DE ESCALADARE CHIAR DESCHIDE UNELTELE (8 aug, ownerul: „nu știe
@@ -3132,6 +3201,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // devine dovadă numai DUPĂ ce rezultatul ei a fost clasificat.
       const executaUnealtaCuDovada = async (name: string, argsJson: string): Promise<string> => {
         unelteIncercate.push(name)
+        if (name === 'db_query') {
+          let scrie = true
+          try {
+            scrie = !eSqlDeCitire(String((JSON.parse(argsJson || '{}') as { sql?: unknown }).sql ?? ''))
+          } catch {
+            /* SQL neparsabil = tratat ca scriere (direcția sigură) */
+          }
+          if (scrie) {
+            dbQueryAScris = true
+            unelteEfectIncercate.push(name)
+          }
+        } else if (eUnealtaCuEfectExtern(name)) unelteEfectIncercate.push(name)
         await scrieJurnalOperational(async () => {
           const tranzitie = await tranzitioneazaSarcinaOperationala({
             taskId: sarcinaOperationalaId,
@@ -3345,13 +3426,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // this turn never reaches the user — stream, final text and voice.
       // The set comes from the tools offered, never hardcoded.
       const toolNamesThisTurn = new Set(tools.map((t) => t.name))
-      // AFIȘARE ≠ FAPTĂ (owner, 13 aug: „doar afișează un card, nu execută").
-      // Uneltele DOAR-afișare: un apel la ele NU înseamnă că a executat cererea —
-      // gardele din orchestrator nu le socotesc drept faptă.
-      const UNELTE_AFISAJ = new Set([
-        'show_document', 'show_on_screen', 'open_app_view',
-        'goleste_monitorul', 'click_monitor', 'zoom_monitor', 'arata_pe_grafic',
-      ])
+      // (UNELTE_AFISAJ e declarat sus, lângă doveziUnelte — și catch-ul de
+      // eroare judecă acum faptele, deci lista trăiește în afara try-ului.)
       // FORȚARE PE UNEALTA DE EXECUȚIE (owner, 13 aug: „îl scoți de pe auto, îl pui
       // pe obligatoriu să cheme unealta CORECTĂ"): pe runda 1 a turelor de ACȚIUNE
       // ale ownerului, forțăm o unealtă de FAPTĂ (lista ∩ cele oferite) — niciodată
@@ -3365,10 +3441,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         'create_doc', 'edit_doc', 'create_sheet', 'edit_sheet', 'create_calendar_event',
         'add_task', 'browser_open', 'browser_type', 'browser_click', 'generate_image',
         'generate_video', 'memorie_pune', 'db_query',
+        // Vânătorul 22 aug: pe „oprește/închide monitorul" runda forțată nu
+        // AVEA VOIE să cheme unealta de închidere → modelul era împins spre
+        // refuzul „oprește-l manual". Golirea ecranului e faptă cerută.
+        'goleste_monitorul',
       ].filter((n) => toolNamesThisTurn.has(n))
-      // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului.
-      const forteazaFapta = isAdmin && cereActiune
-      const markupStrip = makeToolMarkupStripper(
+      // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului — nu pe
+      // simpla prezență a unei imagini (C6; vezi actiuneCerutaExplicit, sus).
+      const forteazaFapta = isAdmin && cereActiune && actiuneCerutaExplicit
+      let markupStrip = makeToolMarkupStripper(
         (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
         toolNamesThisTurn,
       )
@@ -3383,6 +3464,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       let limbaScrisaDecisa = !ro
       let limbaScrisaSuprimata = false
       let limbaScrisaBuf = ''
+      // C2 al marii verificări: acumulatoarele de STREAM trăiesc în afara
+      // buclei de reîncercări — fără resetul ăsta, fragmentele reținute din
+      // încercarea picată („Bun" sub pragul gardului de limbă, „<TA" în
+      // poarta de ecou) se lipeau de răspunsul încercării următoare pe ecran
+      // și în gura vocii („BunSalut! …"). Se cheamă la ÎNCEPUTUL fiecărei
+      // încercări și în plase — fragmentele încercării moarte se aruncă.
+      const resetStareStream = (): void => {
+        gateBuf = ''
+        coadaEcou = ''
+        limbaScrisaBuf = ''
+        markupStrip = makeToolMarkupStripper(
+          (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
+          toolNamesThisTurn,
+        )
+      }
       const NOTA_LIMBA = 'Mi-a scăpat începutul răspunsului în altă limbă și l-am oprit. Pune-mi, te rog, întrebarea încă o dată.'
       const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
         orchestratorModel,
@@ -3502,16 +3598,39 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // o cursă nu mai e cursă — calea secvențială de mai jos e ACELAȘI creier
       // Gemini, cu unelte. services/cursa.ts a fost șters.)
       const MAX_INCERCARI_GEMINI = 3
+      // MODELUL EFECTIV al rundelor (registrul backend #1): `ask_brain` poate urca
+      // tura LA MIJLOC prin `escaladare`, iar orchestratorul citește
+      // `escaladare.model` pe FIECARE rundă — deci sloturile, telemetria eșecurilor
+      // și plasele trebuie să vorbească despre modelul care CHIAR rulează, nu
+      // despre cel de pornire (înainte: slotul se ținea pe flash cât rundele
+      // loveau profundul nepăzit, iar plasa „urc la profund" re-încerca exact
+      // modelul care tocmai murise).
+      const modelEfectiv = (): string => escaladare.model || orchestratorModel
+      // REGISTRUL BACKEND #2 — FĂRĂ RE-EXECUȚIA UNELTELOR: o „reîncercare" e
+      // runBrainOnce DE LA ZERO — dacă încercarea eșuată a apucat să CHEME unelte
+      // (email, ordin de build, bani), reluarea le-ar executa A DOUA oară.
+      // Odată armat, nici bucla, nici plasele nu mai reiau — tura iese pe drumul
+      // onest de jos, cu faptele o singură dată.
+      let faptaInIncercareEsuata = false
+      // FĂRĂ RICOȘEU ÎNTRE PLASE (agentul de logică, F4): plasa profund→rapid
+      // seta orchestratorModel = orChatModel, ceea ce APRINDEA condiția plasei
+      // rapid→profund → a 5-a chemare a unui model deja epuizat, cu un log care
+      // mințea („fața rapidă a întors gol de 3×" după O încercare). O singură
+      // plasă pe tură — care pică, pică cinstit.
+      let plasaRulata = false
       let slotTinut: string | null = null
       try {
         for (let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt++) {
-          // Take a slot on the Gemini model; if it's busy, wait in the
+          resetStareStream()
+          // Take a slot on the EFFECTIVE Gemini model; if it's busy, wait in the
           // dispatcher's queue for a slot on the SAME model.
-          if (!iaSlotDacaLiber(orchestratorModel)) {
-            const tinut = await asteaptaLaCoada(async () => [orchestratorModel], new Set<string>())
+          const modelIncercare = modelEfectiv()
+          const unelteLaStart = unelteEfectIncercate.length
+          if (!iaSlotDacaLiber(modelIncercare)) {
+            const tinut = await asteaptaLaCoada(async () => [modelIncercare], new Set<string>())
             if (!tinut) break // queue full or waited too long — the honest error below
           }
-          slotTinut = orchestratorModel
+          slotTinut = modelIncercare
           try {
             const cand = await runBrainOnce()
             // A reply made ONLY of fake tool markup counts as EMPTY — retry
@@ -3524,9 +3643,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             // Un răspuns care NEAGĂ uneltele, când tura chiar i le-a oferit,
             // e marfă stricată: NU pleacă la om — rotim, ca la răspunsul gol.
             // Doar dacă nu a curs deja text (streaming) — ce-a plecat, a plecat.
+            // VINOVATUL LA MOMENTUL EȘECULUI: escaladarea ask_brain poate muta
+            // rundele pe alt model ÎN TIMPUL încercării — sinteza moare pe modelul
+            // EFECTIV de acum, nu pe cel pe care s-a luat slotul la start.
+            const modelVinovat = modelEfectiv()
             if (!textFlowed && textCurat && neagaUneltele(textCurat)) {
-              console.error(`[CHAT NEGARE] ${orchestratorModel} și-a negat uneltele — nu trimit minciuna, reîncerc`)
-              noteazaEsuare(orchestratorModel)
+              console.error(`[CHAT NEGARE] ${modelVinovat} și-a negat uneltele — nu trimit minciuna, reîncerc`)
+              noteazaEsuare(modelVinovat)
             } else if (!textFlowed && textCurat && deflecteazaConstructor(textCurat) && !aAlocatConstructie(new Set(cand.toolsCalled))) {
               // GARDUL ANTI-DEFLECTARE (Adrian, 5 aug: „kelion nu alocă
               // constructorului cererile — spune că echipa de dezvoltare repară.
@@ -3534,28 +3657,37 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
               // constructorul. Dacă amână spre o „echipă" FĂRĂ să fi chemat o
               // unealtă de construcție, e marfă stricată: aruncă + reîncearcă
               // (promptul deja îi spune să construiască; codul îl forțează).
-              console.error(`[CHAT DEFLECTARE] ${orchestratorModel} a amânat spre o „echipă" inexistentă fără să aloce la constructor — reîncerc`)
-              noteazaEsuare(orchestratorModel)
+              console.error(`[CHAT DEFLECTARE] ${modelVinovat} a amânat spre o „echipă" inexistentă fără să aloce la constructor — reîncerc`)
+              noteazaEsuare(modelVinovat)
             } else if (textCurat || textFlowed || sawVisible) { r = cand; break }
-            console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
-            noteazaEsuare(orchestratorModel)
+            // Logul nu promite o reîncercare pe care break-ul de faptă o anulează.
+            console.error(`[CHAT MUTE] ${modelVinovat} returned empty${unelteEfectIncercate.length > unelteLaStart ? ' — unelte cu efect deja chemate, NU reiau' : ` — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`}`)
+            noteazaEsuare(modelVinovat)
           } catch (ge) {
             lastBrainErr = ge
             if (textFlowed) throw ge // partial text already at the user — no retry
             const errMsg = String(ge)
             const is503OrHighDemand = errMsg.includes('503') || /high demand/i.test(errMsg) || /UNAVAILABLE/i.test(errMsg)
-            if (attempt + 1 < MAX_INCERCARI_GEMINI) {
-              console.warn(`[brain] ${orchestratorModel} failed (${errMsg.slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
+            const modelVinovat = modelEfectiv() // sinteza a murit pe modelul efectiv de ACUM
+            const potiRelua = attempt + 1 < MAX_INCERCARI_GEMINI && unelteEfectIncercate.length === unelteLaStart
+            if (potiRelua) {
+              console.warn(`[brain] ${modelVinovat} failed (${errMsg.slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
               const basePauza = is503OrHighDemand ? 1000 : 800
               const pauzaMs = Math.min(basePauza * Math.pow(2, attempt) + Math.floor(Math.random() * 400), 3000)
               await new Promise((res) => setTimeout(res, pauzaMs))
             } else {
-              console.error(`[brain] ${orchestratorModel} failed (${errMsg.slice(0, 120)}) — încercări epuizate (${MAX_INCERCARI_GEMINI}/${MAX_INCERCARI_GEMINI})`)
+              console.error(`[brain] ${modelVinovat} failed (${errMsg.slice(0, 120)}) — ${unelteEfectIncercate.length > unelteLaStart ? `${unelteEfectIncercate.length - unelteLaStart} unelte cu efect deja chemate în încercarea asta: NU reiau (efectele s-ar dubla)` : `încercări epuizate (${MAX_INCERCARI_GEMINI}/${MAX_INCERCARI_GEMINI})`}`)
             }
-            noteazaEsuare(orchestratorModel)
+            noteazaEsuare(modelVinovat)
           } finally {
             elibereazaSlot(slotTinut)
             slotTinut = null
+          }
+          // Fapte cu EFECT deja făcute în încercarea eșuată → gata cu reluările
+          // (vezi declarația faptaInIncercareEsuata de sus). Plasele citesc flag-ul.
+          if (!r && unelteEfectIncercate.length > unelteLaStart) {
+            faptaInIncercareEsuata = true
+            break
           }
         }
       } finally {
@@ -3575,9 +3707,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       const incearcaPlasa = async (): Promise<void> => {
         let slotPlasa: string | null = null
         try {
-          if (iaSlotDacaLiber(orchestratorModel)) slotPlasa = orchestratorModel
-          else if (await asteaptaLaCoada(async () => [orchestratorModel], new Set<string>())) slotPlasa = orchestratorModel
+          // Slotul pe modelul EFECTIV (plasele golesc escaladarea înainte să mă
+          // cheme, deci de regulă e chiar orchestratorModel — dar regula rămâne una).
+          const modelPlasa = modelEfectiv()
+          if (iaSlotDacaLiber(modelPlasa)) slotPlasa = modelPlasa
+          else if (await asteaptaLaCoada(async () => [modelPlasa], new Set<string>())) slotPlasa = modelPlasa
           if (slotPlasa) {
+            resetStareStream()
             const cand = await runBrainOnce()
             const textCurat = stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim()
             if (textCurat || textFlowed || sawVisible) r = cand
@@ -3588,11 +3724,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (slotPlasa) elibereazaSlot(slotPlasa)
         }
       }
-if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
+if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !== orchestratorModel) {
         const modelProfund = orchestratorModel
         orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
         escaladare.model = undefined // golim escaladarea, ca rezerva rapidă să câștige (altfel ar reurca la greu)
         escaladare.reasoning = undefined
+        plasaRulata = true // comutarea de mai sus aprindea condiția plasei oglindite → ricoșeu înapoi pe profund
         console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
         await incearcaPlasa()
       }
@@ -3605,11 +3742,34 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // mers (unelte multe, context mare) murea fără să fi atins vreodată
       // inteligența reală. Urcăm O SINGURĂ dată, doar pe calea deja pierdută
       // (!r && !textFlowed) — o tură care mergea nu poate fi stricată de plasă. */
-      if (!r && !textFlowed && config.modelCreierProfund && orchestratorModel === orChatModel) {
-        const modelRapid = orchestratorModel
+      if (!r && !textFlowed && !faptaInIncercareEsuata && !plasaRulata && config.modelCreierProfund && orchestratorModel === orChatModel) {
         const profund = `google-direct/${config.modelCreierProfund}`
-        if (profund !== modelRapid) {
+        if (modelEfectiv() === profund) {
+          // REGISTRUL BACKEND #1 + #3: tura a rulat DEJA pe profund și a murit
+          // acolo — fie a pornit GREA (orChatModel e chiar profundul: pe turele
+          // grele work = modelUnic = modelCreierProfund, deci plasa veche
+          // „profund !== modelRapid" era MOARTĂ — același string, nicio plasă,
+          // mesajul neutru), fie a URCAT prin `ask_brain` și sinteza a picat pe
+          // profund. „Urc pe creierul profund" ar re-încerca exact modelul care
+          // tocmai a picat, cu un log care minte. Sensul cinstit rămas: golim
+          // escaladarea și cădem O dată pe o FAȚĂ RAPIDĂ REALĂ — modelul rapid
+          // al turei dacă e altul decât profundul, altfel a treia treaptă:
+          // modelRapidDirect() (fața rapidă a sistemului).
+          const rapidReal = orchestratorModel !== profund ? orchestratorModel : modelRapidDirect()
+          if (rapidReal !== profund) {
+            orchestratorModel = rapidReal // runBrainOnce + reasoning citesc valoarea nouă
+            escaladare.model = undefined
+            escaladare.reasoning = undefined
+            console.error(`[PROFUNDUL EPUIZAT] ${profund} a picat → cad pe fața rapidă ${rapidReal}`)
+            await incearcaPlasa()
+          }
+        } else if (profund !== orchestratorModel) {
+          const modelRapid = orchestratorModel
           orchestratorModel = profund // runBrainOnce + reasoning citesc valoarea nouă
+          // Golim escaladarea: un `escaladare.model` rămas (alt model greu) ar
+          // câștiga în orchestrator peste `profund` și logul de mai jos ar minți.
+          escaladare.model = undefined
+          escaladare.reasoning = undefined
           console.error(`[FAȚA RAPIDĂ EPUIZATĂ] ${modelRapid} a întors gol/eroare de ${MAX_INCERCARI_GEMINI}× → urc pe creierul profund ${orchestratorModel}`)
           await incearcaPlasa()
         }
@@ -3631,7 +3791,11 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       if (!voceAmbianta) {
         const nedovedite = pretentiiFaraFapta(assistantText, doveziUnelte)
         if (nedovedite.length) {
-          const demascare = textulDemascarii(nedovedite)
+          // Pe runda de CONTINUARE a trierii, „pretenția" poate fi RELATAREA
+          // cinstită a faptei din runda 1 (dovezile au rămas în tura aceea) —
+          // verdictul dur „e FALSĂ" ar minți el însuși. Acolo: varianta
+          // cinstită „nu pot verifica" (Legea #1), nu demascarea.
+          const demascare = req.body?.continuareUsa === true ? textulNuPotVerifica(nedovedite) : textulDemascarii(nedovedite)
           try {
             reply.raw.write(demascare)
           } catch {
@@ -3639,12 +3803,24 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
           }
           assistantText += demascare
           console.error(`[POARTA FAPTELOR] pretenții fără faptă: ${nedovedite.join('; ')} | încercate: ${unelteIncercate.join(',') || 'niciuna'} | rezultate: ${doveziUnelte.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciunul'}`)
+          // Nota porții devine EVENIMENT durabil în jurnalul operațional
+          // (JARVIS pasul 4): pe tura ușii, textul demascării nu intra nicăieri
+          // durabil (saveMessage e sărit pe eUsaCreierului mai jos) — rămânea
+          // doar în inelul de log din memorie. Acum dovada provocării există
+          // și poate fi scoasă cu dovada_faptelor.
+          await scrieJurnalOperational(() => noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'facts_gate',
+            outcomeState: 'observed',
+            code: req.body?.continuareUsa === true ? 'claims_unverifiable' : 'claims_without_deed',
+            reason: nedovedite.join('; '),
+          }))
         }
         // ── ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere
         // solutia pina la deploy masurabil"). Tură de EXECUȚIE + ZERO unelte +
         // limbaj de plan = fix înghețul de 5 luni. Se demască pe ecran și în
         // istoric — legea ducerii la capăt, mecanic, pentru orice model.
-        planFaraExecutieDetectat = planFaraExecutie(assistantText, doveziUnelte, cereActiune)
+        planFaraExecutieDetectat = planFaraExecutie(assistantText, doveziUnelte, actiuneCerutaExplicit)
         if (planFaraExecutieDetectat) {
           try {
             reply.raw.write(TEXT_PLAN_FARA_EXECUTIE)
@@ -3703,7 +3879,33 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
         if (userEcho) emitHeard(userEcho)
       }
       // Pe voce, corpul rostit e în ecranPartial (poarta l-a scos curat).
-      if (voceAmbianta && !taced) assistantText = ecranPartial
+      if (voceAmbianta && !taced) {
+        assistantText = ecranPartial
+        // CĂȚELUL PE REZERVA VOCALĂ (C3 al marii verificări): blocul de la
+        // `if (!voceAmbianta)` sare poarta faptelor pe EXACT calea folosită
+        // când sesiunea Live e moartă (Chirp) — „am trimis emailul" rostit
+        // prin rezervă nu se demasca nicăieri. Nota intră în ISTORIC și pe
+        // ecranul turei (assistantText), NU în gura care a vorbit deja —
+        // varianta onestă „nu pot verifica" (§8: nota nu se rostește).
+        const nedoveditePeVoce = pretentiiFaraFapta(assistantText, doveziUnelte)
+        if (nedoveditePeVoce.length) {
+          const nota = textulNuPotVerifica(nedoveditePeVoce)
+          assistantText += nota
+          try {
+            reply.raw.write(nota)
+          } catch {
+            /* nescrisă pe stream — rămâne în istoric */
+          }
+          console.error(`[POARTA FAPTELOR][REZERVA VOCALĂ] pretenții nedovedite (nu pot verifica): ${nedoveditePeVoce.join('; ')} | rezultate: ${doveziUnelte.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciunul'}`)
+          await scrieJurnalOperational(() => noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'facts_gate',
+            outcomeState: 'observed',
+            code: 'claims_unverifiable_voice_fallback',
+            reason: nedoveditePeVoce.join('; '),
+          }))
+        }
+      }
       // Creierul a hotărât că NU i se vorbea → tura se stinge: {ignored}, fără
       // rostire (poarta a reținut tot), fără salvare. Clientul șterge bulele.
       if (voceAmbianta && taced) {
@@ -3795,13 +3997,44 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
       // dacă textul deja a curs, sufixul se SEPARĂ de el (nu se lipește în
       // aceeași propoziție) și spune cinstit că s-a întrerupt — iar istoricul
       // salvează ecranul ÎNTREG (parțial + notă), nu doar sufixul.
+      // REGISTRUL BACKEND #4 — MESAJ ONEST PE EROARE NE-TRANZITORIE: „Încearcă
+      // din nou în câteva secunde" promite că repetarea ajută — minte când cauza
+      // NU trece de la sine (cerere refuzată/nevalidă, cheie/permisiune, model
+      // inexistent — cazul măsurat: modelul pensionat care a tăcut ZILE întregi
+      // tot cu „încearcă din nou"). Clasificarea rămâne DOAR pe server (regula
+      // din 1 aug: userul nu citește despre modele/cote/bani) — omul primește
+      // tot un mesaj neutru, dar unul care nu-l minte cu falsă speranță.
+      const eNetranzitorie =
+        !isRateLimit &&
+        (isRefusal ||
+          // `not[_ ]found` (statusul Google / „not found"), NU `not.?found` —
+          // acela prindea și ENOTFOUND (pană DNS/rețea TRANZITORIE, agentul F5a).
+          /invalid.?argument|permission.?denied|api.?key|failed.?precondition|not[_ ]found|unsupported|safety|prohibited|blocklist/.test(low) ||
+          /\b40[034]\b/.test(low))
+      // REGISTRUL #2, PARTEA OMULUI (verdictele agenților lot B): mașina nu mai
+      // dublează faptele la retry — dar „încearcă din nou" îl INVITA pe om să
+      // retrimită o tură ale cărei fapte s-au executat DEJA (email trimis, ordin
+      // creat). Dacă o unealtă cu EFECT EXTERN a reușit în tura moartă, omul
+      // e avertizat cinstit, fără niciun detaliu tehnic (regula 1 aug).
+      const fapteDejaExecutate = doveziUnelte.some(
+        (d) => (d.stare === 'succeeded' || d.stare === 'verified') &&
+          (d.nume === 'db_query' ? dbQueryAScris : eUnealtaCuEfectExtern(d.nume)),
+      )
       let spoken = ecranPartial.trim()
         ? (ro
             ? '\n\n[Răspunsul s-a întrerupt aici — cere-mi să continui.]'
             : '\n\n[The reply was cut off here — ask me to continue.]')
-        : ro
-          ? 'Încearcă din nou în câteva secunde.'
-          : 'Try again in a few seconds.'
+        : fapteDejaExecutate
+          ? (ro
+              ? 'Am apucat să execut o parte din ce ai cerut înainte de întrerupere — verifică rezultatul înainte să repeți cererea.'
+              : 'Part of what you asked was already carried out before the interruption — check the result before repeating the request.')
+          : eNetranzitorie
+            ? (ro
+                ? 'Cererea asta nu a putut fi dusă la capăt — repetată neschimbată, ar pica la fel. Reformuleaz-o sau cere altceva.'
+                : 'This request could not be completed — retried unchanged it would fail the same way. Rephrase it or ask for something else.')
+            : ro
+              ? 'Încearcă din nou în câteva secunde.'
+              : 'Try again in a few seconds.'
       // CREDITUL MORT SPUS PE FAȚĂ, DOAR ADMINULUI (9 aug, capturile ownerului:
       // sold AI Studio −£1.32, card refuzat la auto-reîncărcare — iar Kelion
       // inventa scuze („nu ești logat ca admin") peste turele care mureau pe
@@ -3867,8 +4100,10 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
     // an image link, map coordinates, a markdown table, a code block), the
     // monitor gets ONE sensible visual of it — deterministic, no extra model
     // call. Never duplicates what show_document/show_on_screen/a screen_url
-    // tool already pushed (surfaceShown), never fires on plain prose
-    // (autoPreviewFrame returns null). See services/monitorAutoPreview.ts.
+    // tool already pushed (surfaceShown). Since Aug 19 („totul pe monitor"),
+    // plain prose itself becomes a {doc} (autoPreviewFrame branch 6) — the
+    // old claim „never fires on plain prose" was rotten and is corrected.
+    // See services/monitorAutoPreview.ts.
     if (!surfaceShown && assistantText.trim()) {
       const preview = autoPreviewFrame(assistantText)
       if (preview) {
@@ -3922,7 +4157,9 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
     }
     await voice.finish()
     const finalOperational = rezumaStareFinalaSarcinaOperationala({
-      cereActiune,
+      // pe INTENȚIA explicită, nu pe simpla prezență a imaginii (C6):
+      // descrierea corectă a unei poze fără unelte nu e o acțiune ratată.
+      cereActiune: actiuneCerutaExplicit,
       dovezi: doveziUnelte,
       planFaraExecutie: planFaraExecutieDetectat,
     })
@@ -3969,21 +4206,28 @@ if (!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel) {
   )
 }
 
-// Pornește lucrătorul constructorului ÎN FUNDAL, acum — ca ordinul să nu aștepte
-// cronul de 2 min (PR #966). O SINGURĂ sursă (jscpd, 10 aug): folosit la
-// build_software ȘI la retry. Best-effort: nu blochează, nu aruncă.
+// Pornește constructorul ÎN FUNDAL, acum — ca ordinul să nu aștepte bucla de
+// autonomie. O SINGURĂ sursă (jscpd, 10 aug): folosit la build_software ȘI la
+// retry. Best-effort: nu blochează, nu aruncă.
 function porneculLucratorulConstructor(): void {
-  // DEVIN DEȚINE COADA (owner, 20 aug): când cheia Devin e pusă, constructorul e
-  // Devin (extern) — dispecerul din app duce ordinele. NU mai trezim worker-ul
-  // Aider de pe VPS (n-ar primi oricum joburi, ruta /next e gardată).
-  if (config.devinKey) return
-  import('node:child_process').then(({ spawn }) => {
-    const worker = spawn('bash', ['/root/kelion/constructor-worker.sh'], {
-      detached: true,
-      stdio: 'ignore',
-    })
-    worker.unref()
-  }).catch(() => {})
+  // CONSTRUCTORUL E DEVIN, PUNCT (owner, 22 aug: „am cerut devin peste tot in
+  // constructor… sa-i stergi de tot [pe Aider+Ollama]") — ramura veche care
+  // trezea prin spawn lucrătorul local de pe VPS A FOST ȘTEARSĂ cu toată
+  // mașinăria lui. Fără cheia Devin, tick-ul e inert prin
+  // design și ordinul rămâne în coadă — diagnosticul o spune cu roșu, nu se
+  // construiește pe ascuns cu altceva.
+  // PORNIRE IMEDIATĂ (22 aug, „Devin full funcțional"): dispecerul Devin trăia
+  // DOAR în trecerea buclei de autonomie, iar pauza dintre treceri urcă la 60
+  // de minute pe „nimic de făcut" — ordinul owner-ului putea zăcea în coadă o
+  // ORĂ înainte ca Devin să fie măcar pornit. Ordinul e „doar la comandă", deci
+  // comanda îl și pornește: un tick în fundal, chiar acum (idempotent — UN job
+  // pe rând, tick-ul concurent cu bucla nu poate porni două sesiuni pe același
+  // ordin: claimNextBuildJob e atomic pe rând).
+  if (config.devinKey) {
+    void import('../services/devinConstructor.js')
+      .then(({ tickDispecerDevin }) => tickDispecerDevin())
+      .catch((e) => console.error('[devin] tick imediat:', String(e).slice(0, 160)))
+  }
 }
 
 // ── runTool helper (extracted from the main handler for clarity) ────────────
@@ -4126,7 +4370,12 @@ async function runTool(
           })
         }
       }
-      const jobId = await createBuildJob(email, order)
+      // Creierul (Gemini) gândește MAI ÎNTÂI — Devin pornește cu un plan
+      // anexat, nu cu ordinul gol. Legătura bidirecțională: constructorul
+      // pornește din gândirea creierului și raportează înapoi PR-ul în chat.
+      const { planificaOrdinConstructor } = await import('../services/devinConstructor.js')
+      const orderCuPlan = await planificaOrdinConstructor(order)
+      const jobId = await createBuildJob(email, orderCuPlan)
       if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
 
       // Trigger the constructor worker immediately in the background so the order executes right away
@@ -4156,12 +4405,18 @@ async function runTool(
       if (!jobs) return JSON.stringify({ error: 'coada_necitibila', message: 'Nu pot citi coada ordinelor — citirea din baza de date a picat.' })
       // DIAGNOSTIC AUTONOM (owner, 19 aug: „nu are autonomie… sa faca asta"):
       // pe lângă lista ordinelor, Kelion măsoară SINGUR de ce (nu) repară — puls
-      // lucrător + motor Aider + creier local + rezultatele free/plătit — și
-      // raportează verdictul, pe server, fără să depindă de owner sau de o sesiune
-      // externă. Rulează pe calea CHAT ȘI pe voce (paritatea din brainCapabilities).
+      // sesiune Devin + dispecerul backend + coada build_jobs — și raportează
+      // verdictul, pe server, fără să depindă de owner. Rulează pe calea CHAT ȘI
+      // pe voce (paritatea din brainCapabilities).
       const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
       const diagnostic = await diagnosticConstructorViu(Date.now()).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }))
       return JSON.stringify({
+        // CINE e constructorul — MĂSURAT din config, nu din memoria modelului
+        // (owner, 22 aug: a întrebat „e Devin prezent?" și modelul a răspuns cu
+        // Jules pentru că niciun răspuns de unealtă nu purta numele lui Devin).
+        constructor: config.devinKey
+          ? 'DEVIN (extern, ACTIV — cheia e pusă; ordinele pleacă prin build_software, rezultatul e un PR pe care ownerul îl aprobă)'
+          : 'NIMENI nu construiește — cheia Devin NU e pusă, dispecerul e inert (mașinăria locală a fost ȘTEARSĂ pe 22 aug)',
         // `progress` = the constructor's current step (Stage 4) — Kelion can
         // speak it ("now compiling", "opening the PR") instead of "working…".
         // `ci` = the verdict of the INDEPENDENT verification (Stage 6): "Done,

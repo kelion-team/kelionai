@@ -66,7 +66,10 @@ export function golesteSync(): void {
 
 // ── AMÂNATE ───────────────────────────────────────────────────────────────────
 export function adaugaAmanata(c: { intrebare: string; t: number; lat?: number; lon?: number }): CerereAmanata {
-  const cerere: CerereAmanata = { id: `${c.t}-${Math.floor(c.t % 100000)}-${c.intrebare.length}`, ...c }
+  // ID unic: combină timestamp-ul, lungimea și un fragment aleator, ca două
+  // întrebări cu aceeași lungime primite în același milisecund să nu colizioneze.
+  const r = Math.random().toString(36).slice(2, 10)
+  const cerere: CerereAmanata = { id: `${c.t}-${c.intrebare.length}-${r}`, ...c }
   const q = citesteBruta<CerereAmanata>(CHEIE_AMANATE)
   q.push(cerere)
   scrieBruta(CHEIE_AMANATE, q)
