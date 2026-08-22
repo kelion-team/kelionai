@@ -60,6 +60,17 @@ vi.mock('./github.js', () => ({
   },
 }))
 vi.mock('../config.js', () => ({ config: { constructorGeminiModel: 'gemini-test' } }))
+// DEVIN E CONSTRUCTORUL când cheia e pusă (22 aug): mâna Aider stă, ordinul intră
+// în coadă și dispecerul Devin pleacă IMEDIAT. Mocul poartă comutatorul cheii.
+let devinActiv = false
+const devinPornit = vi.fn()
+vi.mock('./devinConstructor.js', () => ({
+  constructorulEsteDevin: () => devinActiv,
+  pornesteDevinInFundal: () => {
+    if (devinActiv) devinPornit()
+    return devinActiv
+  },
+}))
 
 import { runSelfHeal } from './selfHeal.js'
 
@@ -73,6 +84,8 @@ beforeEach(() => {
   plafon = { activ: false, plafon: 10, cheltuit: 0 }
   aiderPropune = null
   prDeschise.length = 0
+  devinActiv = false
+  devinPornit.mockReset()
 })
 
 const simptom = (fel: string, message: string, count: number, sampleUrl = '') => ({
@@ -209,5 +222,27 @@ describe('MÂNA AIDER (owner, 16 aug: „pentru autovindecare... il lasi pe el")
     simptome = [simptom('ruta-crapata', 'POST /api/chat: boom', 3, '/api/chat')]
     await runSelfHeal()
     expect(jobs).toHaveLength(1)
+  })
+})
+
+// ── DEVIN E CONSTRUCTORUL (owner, 22 aug: „Devin handles all constructor tasks") ─
+describe('cu cheia Devin pusă — mâna Aider stă, ordinul e al lui Devin, pornit imediat', () => {
+  it('Aider NU mai deschide PR chiar dacă ar putea: ordinul intră în coadă + Devin pleacă acum', async () => {
+    devinActiv = true
+    aiderPropune = { aSchimbat: true, testeTrec: true, branch: 'panou/aider-x9' } // Aider ar fi „reușit"
+    simptome = [simptom('ruta-crapata', 'POST /api/chat: boom', 3, '/api/chat')]
+    const r = await runSelfHeal()
+    expect(r.filed).toBe(1)
+    expect(prDeschise).toHaveLength(0) // mâna Aider n-a atins nimic — nu lucrează doi pe aceeași cauză
+    expect(jobs).toHaveLength(1) // ordinul e în coadă — al dispecerului Devin
+    expect(devinPornit).toHaveBeenCalled() // dispecerul a plecat ACUM, nu la ora buclei
+  })
+
+  it('fără cheie Devin, drumul vechi rămâne neatins (Aider întâi) și Devin nu e pornit', async () => {
+    aiderPropune = { aSchimbat: true, testeTrec: true, branch: 'panou/aider-x1' }
+    simptome = [simptom('ruta-crapata', 'POST /api/chat: boom', 3, '/api/chat')]
+    await runSelfHeal()
+    expect(prDeschise).toEqual(['panou/aider-x1'])
+    expect(devinPornit).not.toHaveBeenCalled()
   })
 })

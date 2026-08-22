@@ -8,7 +8,8 @@ import { autonomActiv } from '../services/autonomActiv.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
 import { procentDinProgres } from '../services/progresOrdin.js'
-import { evalueazaOrdin, AI_CONSTRUCTORI, type BecCredit } from '../services/evalOrdinConstructor.js'
+import { evalueazaOrdin, aiConstructori, type AiConstructor, type BecCredit } from '../services/evalOrdinConstructor.js'
+import { pornesteDevinInFundal, constructorulEsteDevin } from '../services/devinConstructor.js'
 import { crediteAI, beculCredit } from '../services/creditAI.js'
 import { UNELTE_CONSTRUCTOR } from '../services/brainToolDefs.js'
 import { notifyAdmin } from '../services/adminNotification.js'
@@ -28,10 +29,10 @@ import { notifyAdmin } from '../services/adminNotification.js'
 // Becul LIVE per AI-constructor, cheiat pe subșirul stabil (becFurnizor):
 // creditAI dă numele complet al furnizorului, îl potrivim cu `includes`. Un AI
 // fără rând de credit rămâne necunoscut (fără cheie), nu „verde" inventat.
-async function hartaCreditConstructor(): Promise<Record<string, BecCredit>> {
+async function hartaCreditConstructor(aiuri: AiConstructor[]): Promise<Record<string, BecCredit>> {
   const rows = await crediteAI()
   const m: Record<string, BecCredit> = {}
-  for (const ai of AI_CONSTRUCTORI) {
+  for (const ai of aiuri) {
     if (!ai.becFurnizor) continue
     const row = rows.find((r) => r.furnizor.includes(ai.becFurnizor))
     if (row) m[ai.becFurnizor] = beculCredit(row)
@@ -54,6 +55,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!ev.trece) return reply.code(400).send({ error: 'ordin_respins', motiv: ev.motiv })
     const id = await createBuildJob(user.email, order)
     if (!id) return reply.code(500).send({ error: 'db_indisponibil' })
+    // DEVIN, ACUM (owner, 22 aug: ordinul nu așteaptă ora buclei): dacă Devin e
+    // constructorul, dispecerul pleacă imediat, în fundal — aceeași regulă ca la
+    // ordinele din chat (porneculLucratorulConstructor). Fără cheie e inert.
+    pornesteDevinInFundal()
     return reply.send({ ok: true, id })
   })
 
@@ -67,8 +72,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const order = String(req.body?.order ?? '')
     // Creditul live e „nice to have": dacă becurile nu se pot citi, evaluăm doar pe
     // capacitate (fără să inventăm verde/roșu).
-    const credit = await hartaCreditConstructor().catch(() => undefined)
-    return reply.send({ ...evalueazaOrdin(order, credit), aiuri: AI_CONSTRUCTORI })
+    // Rosterul VIU: când cheia Devin e pusă, rândul „constructor" e Devin (extern)
+    // — panoul nu mai recomandă un motor (Aider) care nu primește ordine.
+    const aiuri = aiConstructori(constructorulEsteDevin())
+    const credit = await hartaCreditConstructor(aiuri).catch(() => undefined)
+    return reply.send({ ...evalueazaOrdin(order, credit, aiuri), aiuri })
   })
 
   app.get('/api/admin/constructor', async (req, reply) => {
@@ -117,6 +125,13 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // stau ordinele în coadă, nu dintr-un mister. Câte ordine chiar așteaptă (queued).
     const lucrator = verdictPulsLucrator(Number(lastPollRaw) || 0, Date.now())
     const inCoada = jobs.filter((j) => j.status === 'queued').length
+    // DEVIN, MĂSURAT (nu doar „cheia există"): când Devin e constructorul, panoul
+    // primește și proba VIE a API-ului lui (probaDevin) — altfel ar arăta doar
+    // Aider/Ollama/lucrător „jos" și ar minți că nimeni nu construiește, deși
+    // ordinele pleacă la Devin. Fără cheie: { activ:false } — drumul vechi.
+    const devin = constructorulEsteDevin()
+      ? await import('../services/devin.js').then(({ probaDevin }) => probaDevin()).then((p) => ({ activ: true, ...p }))
+      : { activ: false }
     return reply.send({
       jobs,
       paused: await isOpsPaused().catch(() => false),
@@ -124,6 +139,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       ollama, // { ok, modele, motiv } — creierul LOCAL al lui Aider, probat pe VPS (ollama list)
       lucrator, // { lastPoll, ageSec, viu, pragMs } — VIU dacă a cerut ordin recent
       inCoada, // câte ordine stau efectiv în coadă (queued) — context pentru puls
+      devin, // { activ, ok?, motiv? } — constructorul EXTERN, probat pe API-ul lui
     })
   })
 
@@ -201,6 +217,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (id === null) return
     const job = await retryBuildJob(id, req.body?.order)
     if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
+    // Ordinul repus nu așteaptă nici el ora buclei: Devin pleacă acum, în fundal.
+    pornesteDevinInFundal()
     return reply.send({ ok: true, job })
   })
 

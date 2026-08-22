@@ -149,3 +149,20 @@ export async function asiguraTokenRepoLaDevin(): Promise<{ ok: boolean; motiv?: 
   if (r.status === 409 || /exist|unique|already|duplicat/i.test(text)) return { ok: true }
   return { ok: false, motiv: `devin_secret_esuat: HTTP ${r.status} ${text.slice(0, 160)}` }
 }
+
+// ── PROBA VIE A LUI DEVIN (regula #1: nicio stare fără măsurătoare) ───────────
+// Panoul și diagnosticul nu au voie să SCRIE „Devin activ" doar pentru că cheia
+// există în env — cheia poate fi greșită/expirată. Aici se MĂSOARĂ: un GET real
+// pe API (listarea sesiunilor) cu cheia casei. `ok:false` vine mereu cu motivul
+// NUMIT (HTTP sau rețea), niciodată cu o eroare înghițită.
+export async function probaDevin(): Promise<{ ok: boolean; motiv?: string }> {
+  if (!config.devinKey) return { ok: false, motiv: 'devin_fara_cheie: DEVIN_API_KEY lipsește din env' }
+  try {
+    const r = await fetch(`${BASE}/sessions?limit=1`, { headers: anteturi() })
+    if (r.ok) return { ok: true }
+    const text = await r.text().catch(() => '')
+    return { ok: false, motiv: `devin_proba_esuata: HTTP ${r.status} ${text.slice(0, 160)}` }
+  } catch (e) {
+    return { ok: false, motiv: `devin_proba_retea: ${String(e).slice(0, 160)}` }
+  }
+}

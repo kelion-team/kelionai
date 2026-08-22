@@ -99,4 +99,29 @@ describe('lanțul Devin — fiecare za, pe cod viu', () => {
     const negare = codViu('services/negareUnelte.ts')
     expect(negare).toMatch(/devin\\s\+nu\\s\+face\\s\+parte\\s\+din\\s\+unelte/)
   })
+
+  it('za 10: TOATE ușile de depunere pornesc Devin imediat — panoul admin, Reia și self-heal', () => {
+    // Owner, 22 aug: „Devin handles all constructor tasks" — nu doar chat-ul.
+    // Un ordin depus din panou nu are voie să zacă până la ora buclei.
+    const rute = codViu('routes/constructor.ts')
+    expect(rute).toMatch(/createBuildJob\(user\.email, order\)[\s\S]{0,700}pornesteDevinInFundal\(\)/)
+    expect(rute).toMatch(/retryBuildJob\(id, req\.body\?\.order\)[\s\S]{0,700}pornesteDevinInFundal\(\)/)
+    const heal = codViu('services/selfHeal.ts')
+    expect(heal).toMatch(/pornesteDevinInFundal\(\)/)
+  })
+
+  it('za 11: self-heal NU mai pune mâna Aider cât Devin e constructorul (un singur constructor pe cauză)', () => {
+    const heal = codViu('services/selfHeal.ts')
+    expect(heal).toMatch(/if \(constructorulEsteDevin\(\)\) return ''/)
+  })
+
+  it('za 12: diagnosticul și panoul judecă DEVINUL, nu lanțul vechi, cât cheia e pusă', () => {
+    // Fără asta, „aider_jos"/„lucrator_mort" ar fi alarme false exact când
+    // ordinele pleacă la Devin — iar panoul ar minți că nimeni nu construiește.
+    const diag = codViu('services/diagnosticConstructor.ts')
+    expect(diag).toMatch(/devin_jos/)
+    expect(diag).toMatch(/devinActiv: devinDisponibil\(\)/)
+    const rute = codViu('routes/constructor.ts')
+    expect(rute).toMatch(/probaDevin/)
+  })
 })

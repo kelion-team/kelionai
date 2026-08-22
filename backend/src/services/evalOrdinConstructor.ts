@@ -57,6 +57,29 @@ export const AI_CONSTRUCTORI: AiConstructor[] = [
   },
 ]
 
+/** Rosterul VIU al panoului: când Devin e constructorul (cheia pusă — starea vine
+ *  din config, MĂSURATĂ de apelant, nu presupusă aici), rândul „constructor" spune
+ *  ADEVĂRUL: motorul e Devin (extern, sesiune izolată, PR pe master), nu Aider.
+ *  Fără asta, panoul ar recomanda un motor care nu mai primește ordine (ruta
+ *  /api/constructor/next îi refuză jobul cât cheia Devin există). Funcție PURĂ:
+ *  starea intră ca argument, ca poarta de calitate să rămână deterministă. */
+export function aiConstructori(devinActiv: boolean): AiConstructor[] {
+  if (!devinActiv) return AI_CONSTRUCTORI
+  return AI_CONSTRUCTORI.map((ai) =>
+    ai.cheie === 'constructor'
+      ? {
+          ...ai,
+          nume: 'Devin (constructorul extern)',
+          descriere:
+            'Motorul constructorului cât cheia Devin e pusă: Devin lucrează extern, în sesiune izolată — ramură din master, build + teste + porți, PR înapoi la master; merge-ul rămâne al ownerului. Plafonul de cost e ACU/sesiune, nu creditul din becuri.',
+          // Devin n-are rând în becurile de credit (costul lui e plafonat pe
+          // sesiune, în API) — fără furnizor, becul rămâne necunoscut, nu inventat.
+          becFurnizor: '',
+        }
+      : ai,
+  )
+}
+
 export interface RandClasament {
   cheie: AiConstructor['cheie']
   nume: string
@@ -132,6 +155,7 @@ const IN_AFARA =
 export function evalueazaOrdin(
   order: string,
   credit?: Record<string, BecCredit>,
+  aiuri: AiConstructor[] = AI_CONSTRUCTORI,
 ): EvaluareOrdin {
   const text = cerereaDinOrdin(order ?? '')
   const tipActiune = clasificaActiuneConstructor(text)
@@ -164,7 +188,7 @@ export function evalueazaOrdin(
   }
 
   // ── Clasamentul AI-urilor pe potrivire + credit live ───────────────────────
-  const clasament = AI_CONSTRUCTORI.map((ai) => {
+  const clasament = aiuri.map((ai) => {
     const comune = ai.capacitati.filter((c) => capacitatiNecesare.includes(c))
     let scor = comune.length
     // Constructorul local e executorul implicit (are teste + PR pe repo): un mic

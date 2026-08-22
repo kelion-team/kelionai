@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // doar de cheie (Bearer) + tokenul GitHub (secretul de acces la repo).
 vi.mock('../config.js', () => ({ config: { devinKey: 'test-devin-key', githubToken: 'gh-test-token' } }))
 
-import { creeazaSesiuneDevin, stareSesiuneDevin, devinDisponibil, asiguraTokenRepoLaDevin } from './devin.js'
+import { creeazaSesiuneDevin, stareSesiuneDevin, devinDisponibil, asiguraTokenRepoLaDevin, probaDevin } from './devin.js'
 
 function fetchCare(status: number, corp: unknown): typeof fetch {
   return vi.fn(async () => ({
@@ -99,5 +99,30 @@ describe('devin — clientul constructorului extern', () => {
     expect(r.ok).toBe(false)
     expect(r.motiv).toMatch(/devin_secret_esuat: HTTP 500/)
     expect(r.motiv).not.toContain('gh-test-token') // valoarea nu se scurge în eroare
+  })
+
+  // Proba VIE (regula #1): „Devin activ" se MĂSOARĂ pe API, nu se deduce din cheie.
+  it('probaDevin: API-ul răspunde (GET sessions cu Bearer) → ok:true', async () => {
+    const spy = fetchCare(200, { sessions: [] })
+    vi.stubGlobal('fetch', spy)
+    const r = await probaDevin()
+    expect(r.ok).toBe(true)
+    const [url, init] = (spy as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(String(url)).toMatch(/\/sessions\?limit=1$/)
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer test-devin-key' })
+  })
+
+  it('probaDevin: HTTP ne-ok → ok:false cu motiv NUMIT (nu o eroare înghițită)', async () => {
+    vi.stubGlobal('fetch', fetchCare(401, { error: 'bad key' }))
+    const r = await probaDevin()
+    expect(r.ok).toBe(false)
+    expect(r.motiv).toMatch(/devin_proba_esuata: HTTP 401/)
+  })
+
+  it('probaDevin: rețea picată → ok:false cu motiv, nu excepție', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch)
+    const r = await probaDevin()
+    expect(r.ok).toBe(false)
+    expect(r.motiv).toMatch(/devin_proba_retea/)
   })
 })

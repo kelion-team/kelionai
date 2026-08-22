@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { clasificaActiuneConstructor, evalueazaOrdin, AI_CONSTRUCTORI } from './services/evalOrdinConstructor.js'
+import { clasificaActiuneConstructor, evalueazaOrdin, AI_CONSTRUCTORI, aiConstructori } from './services/evalOrdinConstructor.js'
 
 function sursa(rel: string): string {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -89,9 +89,11 @@ describe('LACĂT — poarta e ENFORCED la intrarea ordinului (nu doar în panou)
     expect(/if \(!ev\.trece\) return reply\.code\(400\)\.send\(\{ error: 'ordin_respins', motiv: ev\.motiv \}\)/.test(rute)).toBe(true)
   })
 
-  it('endpointul de evaluare există și dă AI-urile + creditul live', () => {
+  it('endpointul de evaluare există și dă AI-urile + creditul live, pe rosterul VIU', () => {
     expect(/\/api\/admin\/constructor\/evalueaza/.test(rute)).toBe(true)
-    expect(/hartaCreditConstructor\(\)/.test(rute)).toBe(true)
+    expect(/hartaCreditConstructor\(aiuri\)/.test(rute)).toBe(true)
+    // rosterul vine din starea reală a cheii Devin, nu din lista statică
+    expect(/aiConstructori\(constructorulEsteDevin\(\)\)/.test(rute)).toBe(true)
   })
 
   it('respinge actiunea directa de screenshot, inclusiv cand boilerplate-ul autonom vorbeste despre cod', () => {
@@ -142,4 +144,30 @@ describe('LACĂT — poarta e ENFORCED la intrarea ordinului (nu doar în panou)
     expect(r.capacitatiNecesare).toContain('frontend')
   })
 
+})
+
+// ── ROSTERUL VIU (owner, 22 aug: Devin e constructorul cât cheia e pusă) ──────
+describe('aiConstructori — rândul „constructor" spune adevărul despre motor', () => {
+  it('cu Devin activ: rândul constructor e Devin (extern), fără bec de credit inventat', () => {
+    const aiuri = aiConstructori(true)
+    const c = aiuri.find((a) => a.cheie === 'constructor')!
+    expect(c.nume).toMatch(/Devin/i)
+    expect(c.descriere).toMatch(/PR/i)
+    expect(c.becFurnizor).toBe('') // costul lui e ACU/sesiune, nu becurile — fără verde inventat
+    // capacitățile rămân aceleași — tot el duce cod/repo/teste/PR
+    expect(c.capacitati).toContain('pr')
+  })
+
+  it('fără Devin: rosterul e cel vechi, neschimbat (Aider rămâne constructorul)', () => {
+    expect(aiConstructori(false)).toBe(AI_CONSTRUCTORI)
+    expect(AI_CONSTRUCTORI.find((a) => a.cheie === 'constructor')!.nume).toMatch(/Aider/i)
+  })
+
+  it('clasamentul pe rosterul Devin recomandă tot „constructor" la ordinele de cod', () => {
+    const aiuri = aiConstructori(true)
+    const e = evalueazaOrdin('repară butonul de login din frontend și adaugă teste', undefined, aiuri)
+    expect(e.trece).toBe(true)
+    expect(e.aiRecomandat).toBe('constructor')
+    expect(e.clasament[0].nume).toMatch(/Devin/i)
+  })
 })

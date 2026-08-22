@@ -1601,6 +1601,31 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    la drop-ul offline; imaginea pe tura offline = notă onestă
    (offlineNoVision en/ro), nu confabulare; autoverificarea nu mai declară
    „stricat" pe proba cu argumente goale (empty_*/missing_*).
+6k. **DEVIN PE TOATE DRUMURILE CONSTRUCTORULUI (22 aug, PR pe branch — NU
+   merge fără owner)** — ordinul: „Devin handles all constructor tasks and
+   repository verifications". Găurile închise (toate cu cheia `DEVIN_API_KEY`
+   pusă; fără cheie, drumul vechi Aider/Ollama rămâne neatins): (1) panoul
+   admin (`POST /api/admin/constructor`) și Reia pornesc Devin IMEDIAT
+   (`pornesteDevinInFundal` — fire-and-forget, ordinul nu mai zace până la
+   ora buclei de autonomie; până acum doar chat-ul avea pornire imediată);
+   (2) self-heal NU mai pune mâna Aider (`constructorulEsteDevin` în
+   `vindecaCuAider` — un singur constructor pe cauză; ordinul intră în coadă
+   la Devin + tick imediat după depuneri); (3) diagnosticul
+   (`diagnosticConstructor.ts`) judecă DEVINUL: probă VIE `probaDevin` (GET
+   real pe API, `devin.ts`) → `devin_jos` CRITIC cu motivul măsurat, în loc
+   de alarmele FALSE `aider_jos`/`ollama_jos`/`lucrator_mort` (care ziceau
+   „nimeni nu construiește" exact când Devin construiește); `coada_blocata`
+   trăiește și pe Devin (>30 min în lucru + coadă în spate); (4) statusul
+   panoului (`GET /api/admin/constructor`) întoarce câmpul `devin:
+   { activ, ok?, motiv? }` măsurat; (5) rosterul evaluării
+   (`aiConstructori(devinActiv)` în `evalOrdinConstructor.ts`): rândul
+   „constructor" spune adevărul — Devin (extern), fără bec de credit
+   inventat (costul lui e ACU/sesiune). DOVEZI (măsurate în repo): backend
+   tsc 0 + frontend tsc -b 0, **216 fișiere / 1963 teste verzi** (inclusiv
+   zalele noi 10–12 din devinLantComplet + testele selfHeal/diagnostic/
+   roster), cele 5 porți verifica-*.mjs verzi. „Nu pot verifica" de aici:
+   API-ul real Devin pe VPS (cheia doar acolo) — se măsoară la primul ordin
+   live după merge.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

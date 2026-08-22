@@ -25,7 +25,7 @@ vi.mock('../db.js', () => ({
 const notify = vi.fn()
 vi.mock('./adminNotification.js', () => ({ notifyAdmin: (...a: unknown[]) => notify(...a) }))
 
-import { construiestePromptDevin, descrieProgresDevin, porneisteJobDevin, verificaJobDevin, tickDispecerDevin } from './devinConstructor.js'
+import { construiestePromptDevin, descrieProgresDevin, porneisteJobDevin, verificaJobDevin, tickDispecerDevin, constructorulEsteDevin, pornesteDevinInFundal } from './devinConstructor.js'
 
 describe('devinConstructor — dispecerul', () => {
   beforeEach(() => {
@@ -130,5 +130,26 @@ describe('tickDispecerDevin — o trecere pe buclă', () => {
     await tickDispecerDevin()
     expect(creeaza).toHaveBeenCalled()
     expect(setSess).toHaveBeenCalledWith(7, 'sess-7')
+  })
+})
+
+// ── PORNIREA IMEDIATĂ DIN ORICE UȘĂ (panou, Reia, self-heal) ──────────────
+describe('pornesteDevinInFundal — ordinul nu așteaptă ora buclei', () => {
+  beforeEach(() => {
+    getRun.mockReset(); claim.mockReset(); creeaza.mockReset()
+    asigura.mockReset(); asigura.mockResolvedValue({ ok: true })
+  })
+
+  it('constructorulEsteDevin spune adevărul din config (cheia pusă → true)', () => {
+    expect(constructorulEsteDevin()).toBe(true)
+  })
+
+  it('cu cheia pusă → true + dispecerul chiar pleacă (în fundal, fără să blocheze ușa)', async () => {
+    getRun.mockResolvedValue(null)
+    claim.mockResolvedValue(null)
+    expect(pornesteDevinInFundal()).toBe(true)
+    // fire-and-forget: lăsăm microtask-urile să curgă și probăm că tick-ul a rulat
+    await new Promise((r) => setImmediate(r))
+    expect(getRun).toHaveBeenCalled()
   })
 })

@@ -68,6 +68,12 @@ export function signature(message: string): string {
 // azi). Verdictul e MĂSURAT (diff din git + vitest rulat de noi), nu povestit.
 async function vindecaCuAider(ordin: string): Promise<string> {
   try {
+    // CÂND DEVIN E CONSTRUCTORUL (cheia pusă), mâna Aider STĂ: ordinul de vindecare
+    // se depune în coadă și îl ia dispecerul Devin (sesiune izolată → PR pe master),
+    // ca să nu lucreze doi constructori pe aceeași cauză — aceeași regulă ca la
+    // /api/constructor/next, care refuză jobul lucrătorului vechi cât cheia există.
+    const { constructorulEsteDevin } = await import('./devinConstructor.js')
+    if (constructorulEsteDevin()) return ''
     const { LUCRATORI, ruleazaLucrator, lucratoriInstalati } = await import('./lucratori.js')
     if (!(await lucratoriInstalati()).includes('aider')) return ''
     const aider = LUCRATORI.find((l) => l.nume === 'aider')
@@ -258,6 +264,11 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
         (filedLive ? ` (din care ${filedLive} din eșecuri MUTE de pe viu)` : '') +
         (filedLogs ? ` (din care ${filedLogs} din logurile scanate server/constructor)` : ''),
     )
+    // Ordinele de vindecare nu așteaptă ora buclei: dacă Devin e constructorul,
+    // dispecerul pleacă ACUM, în fundal (inert fără cheie — drumul vechi al
+    // lucrătorului de pe VPS rămâne neatins).
+    const { pornesteDevinInFundal } = await import('./devinConstructor.js')
+    pornesteDevinInFundal()
   }
   return { filed }
 }

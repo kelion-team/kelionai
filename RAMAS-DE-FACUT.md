@@ -473,11 +473,21 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       DEȚINE coada când cheia e pusă (ruta `/next` gardată, worker-ul Aider nu mai
       pornește) · monitor: bara + `pct:null` onest · rezultatul intră ȘI în chat
       (notifyAdmin cu linkul PR). Plafoane: 10 ACU/sesiune + 1 job pe rând + doar
-      la comandă + anulare (soft). RĂMAS: (a) owner conectează accesul — FĂCUT din
-      cod (varianta a), owner a pus `DEVIN_API_KEY`; (b) VERIFICARE LIVE după
-      merge+publicare: owner zice „repară X" → sesiune Devin → PR → aprobă; (c)
-      confirmă LIVE câmpul exact al linkului PR + clonarea cu tokenul-secret; (d)
-      hard-cancel al sesiunii Devin (endpoint stop neconfirmat) — acum e soft.
+      la comandă + anulare (soft). FĂCUT 22 aug (PR pe branch — „Devin pe TOATE
+      drumurile constructorului"): panoul admin + Reia pornesc Devin IMEDIAT
+      (`pornesteDevinInFundal` din `routes/constructor.ts`, nu mai zace ordinul
+      până la ora buclei) · self-heal cu cheia pusă NU mai pune mâna Aider
+      (`constructorulEsteDevin` în `selfHeal.ts` — un singur constructor pe
+      cauză; ordinul intră în coadă la Devin + tick imediat) · diagnosticul +
+      statusul panoului judecă DEVINUL, nu lanțul vechi (probă VIE `probaDevin`
+      pe API — `devin_jos` cu motiv măsurat în loc de alarmele false
+      `aider_jos`/`lucrator_mort`) · rosterul panoului spune adevărul
+      (`aiConstructori`: rândul „constructor" = Devin extern cât cheia e pusă).
+      Dovezi: tsc 0 (backend+frontend), 216 fișiere / 1963 teste verzi, 5 porți
+      verzi. RĂMAS: (a) VERIFICARE LIVE după merge+publicare: owner zice „repară
+      X" → sesiune Devin → PR → aprobă; (b) confirmă LIVE câmpul exact al
+      linkului PR + clonarea cu tokenul-secret; (c) hard-cancel al sesiunii
+      Devin (endpoint stop neconfirmat) — acum e soft.
       NEFĂCUT: modelul chat ușor/greu (escaladare+convergență din proiect) — în
       mapare.
 - [ ] ORDIN 20 aug (2): „scoti tot ce nu tine de cerinta mea" + Devin cablat CA

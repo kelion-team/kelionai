@@ -26,6 +26,12 @@ export interface MasuratoriConstructor {
   aiderOk: boolean // motorul (Aider) răspunde pe VPS?
   ollamaOk: boolean // creierul LOCAL (free) e sus + are model?
   ordine: OrdinRecentMasurat[] // cele mai recente ordine, cel mai nou primul
+  /** Devin e constructorul (cheia pusă)? Atunci lanțul vechi (Aider/Ollama/
+   *  lucrător VPS) NU mai e calea ordinelor — verdictul se dă pe Devin. */
+  devinActiv?: boolean
+  /** Proba VIE a API-ului Devin (probaDevin) — doar când devinActiv. */
+  devinOk?: boolean
+  devinMotiv?: string
 }
 
 export interface ProblemaConstructor {
@@ -71,6 +77,51 @@ export function diagnosticConstructor(m: MasuratoriConstructor): DiagnosticConst
   const runningSec = running.length ? Math.max(...running.map((o) => o.ageSec)) : null
 
   const probleme: ProblemaConstructor[] = []
+
+  // ── CONSTRUCTORUL E DEVIN (cheia pusă): verdictul se dă pe DEVIN, nu pe lanțul
+  // vechi. Aider/Ollama/lucrătorul de pe VPS nu mai primesc ordine cât cheia
+  // există (/api/constructor/next îi refuză), deci „aider_jos"/„lucrator_mort"
+  // ar fi alarme FALSE — ar spune „nimeni nu construiește" exact când Devin
+  // construiește. Se măsoară în schimb API-ul lui Devin + coada. ────────────
+  if (m.devinActiv) {
+    if (m.devinOk !== true) {
+      probleme.push({
+        cod: 'devin_jos',
+        severitate: 'critic',
+        ce: `Devin e constructorul (cheia pusă), dar API-ul lui NU răspunde — ordinele stau în coadă. Motiv măsurat: ${m.devinMotiv ?? 'necunoscut'}.`,
+        recomandare: 'Verifică cheia DEVIN_API_KEY (secrete + vps-set-env) și rețeaua spre api.devin.ai; până la remediere, ordinele rămân în coadă (nu se pierd).',
+      })
+    }
+    if (queued.length > 0 && running.length > 0 && (runningSec ?? 0) > 30 * 60) {
+      probleme.push({
+        cod: 'coada_blocata',
+        severitate: 'atentie',
+        ce: `Un ordin e „în lucru" la Devin de ${Math.round((runningSec ?? 0) / 60)} min și ține ${queued.length} în coadă în spate (dispecerul duce UN job pe rând).`,
+        recomandare: 'Vezi sesiunea Devin (linkul de pe ordin) — dacă e agățată, anulează/repune ordinul (Admin→Constructor) ca să elibereze coada.',
+      })
+    }
+    const critice = probleme.filter((p) => p.severitate === 'critic')
+    const sanatos = critice.length === 0
+    const verdict = sanatos
+      ? probleme.length
+        ? `Constructorul (Devin) funcționează, dar cu ${probleme.length} atenționare(i): ${probleme[0].ce}`
+        : 'Constructorul e DEVIN (extern) și e sănătos: cheia pusă, API-ul răspunde; ordinele pleacă în sesiuni Devin și se întorc ca PR pe master.'
+      : `Constructorul NU repară: ${critice[0].ce}`
+    return {
+      sanatos,
+      verdict,
+      probleme,
+      masuratori: {
+        inCoada: queued.length,
+        inLucru: running.length,
+        freeNoEdit,
+        escaladatePaid,
+        esuate,
+        oldestQueuedSec,
+        runningSec,
+      },
+    }
+  }
 
   // 1) MOTORUL — fără Aider, nimeni nu construiește (nici free, nici plătit).
   if (!m.aiderOk) {
@@ -158,16 +209,25 @@ export interface DepsDiagnosticConstructor {
   probaAider: () => Promise<{ ok: boolean }>
   probaOllama: () => Promise<{ ok: boolean; modele: string[] }>
   now: number
+  /** Devin e constructorul (config.devinKey)? Atunci se probează Devin, nu Aider/Ollama. */
+  devinActiv?: boolean
+  probaDevin?: () => Promise<{ ok: boolean; motiv?: string }>
 }
 
 export async function culegeDiagnosticConstructor(
   deps: DepsDiagnosticConstructor,
 ): Promise<DiagnosticConstructor | { error: string }> {
-  const [lastPollRaw, jobs, aider, ollama] = await Promise.all([
+  const devinActiv = Boolean(deps.devinActiv)
+  const [lastPollRaw, jobs, aider, ollama, devinProba] = await Promise.all([
     deps.loadKv('constructor:worker:lastPoll').catch(() => null),
     deps.listBuildJobs(16).catch(() => null),
-    deps.probaAider().catch(() => ({ ok: false })),
-    deps.probaOllama().catch(() => ({ ok: false, modele: [] as string[] })),
+    // Cu Devin activ NU mai probam lanțul vechi (Aider/Ollama pe VPS): nu el duce
+    // ordinele, iar probele lui ar costa timp și ar hrăni alarme false.
+    devinActiv ? Promise.resolve({ ok: false }) : deps.probaAider().catch(() => ({ ok: false })),
+    devinActiv ? Promise.resolve({ ok: false, modele: [] as string[] }) : deps.probaOllama().catch(() => ({ ok: false, modele: [] as string[] })),
+    devinActiv && deps.probaDevin
+      ? deps.probaDevin().catch((e) => ({ ok: false, motiv: String(e).slice(0, 160) }))
+      : Promise.resolve(null),
   ])
   if (!jobs) return { error: 'coada_necitibila' }
   const puls = verdictPulsLucrator(Number(lastPollRaw) || 0, deps.now)
@@ -183,6 +243,11 @@ export async function culegeDiagnosticConstructor(
     aiderOk: !!aider.ok,
     ollamaOk: !!ollama.ok && ollama.modele.length > 0,
     ordine,
+    devinActiv,
+    // devinOk doar dintr-o probă REALĂ: fără probaDevin injectată, rămâne undefined
+    // (≠ true) — diagnosticul spune „nu răspunde", nu inventează un verde.
+    devinOk: devinProba ? devinProba.ok : undefined,
+    devinMotiv: devinProba && 'motiv' in devinProba ? devinProba.motiv : undefined,
   })
 }
 
@@ -193,11 +258,16 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
   const { loadKv, listBuildJobs } = await import('../db.js')
   const { probaAider } = await import('./aiderProba.js')
   const { probaOllama } = await import('./ollamaProba.js')
+  const { devinDisponibil, probaDevin } = await import('./devin.js')
   return culegeDiagnosticConstructor({
     loadKv,
     listBuildJobs: (n) => listBuildJobs(n).then((r) => r?.map((j) => ({ status: j.status, brain: j.brain, log: j.log, updatedAt: j.updatedAt })) ?? null),
     probaAider: () => probaAider().then((a) => ({ ok: a.ok })),
     probaOllama: () => probaOllama().then((o) => ({ ok: o.ok, modele: o.modele })),
     now,
+    // Devin e constructorul când cheia e pusă — atunci diagnosticul îl probează
+    // pe EL (probaDevin), nu lanțul vechi Aider/Ollama/lucrător.
+    devinActiv: devinDisponibil(),
+    probaDevin,
   })
 }

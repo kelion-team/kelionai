@@ -124,3 +124,21 @@ export async function tickDispecerDevin(): Promise<void> {
     await reportBuildJob(job.id, { status: 'failed', brain: 'devin', log: `Devin pornire eșuată: ${String(e).slice(0, 300)}` })
   }
 }
+
+/** Devin e constructorul? Sursa UNICĂ a răspunsului (config.devinKey), ca rutele
+ *  și self-heal-ul să nu-și țină fiecare propria copie a regulii. */
+export function constructorulEsteDevin(): boolean {
+  return Boolean(config.devinKey)
+}
+
+// ── PORNIREA IMEDIATĂ, DIN ORICE UȘĂ (owner, 22 aug: ordinul nu are voie să zacă
+// în coadă până la ora buclei de autonomie) ───────────────────────────────────
+// Orice loc care DEPUNE un ordin (panoul admin, Reia, self-heal) cheamă asta după
+// createBuildJob/retryBuildJob: dacă Devin e constructorul, dispecerul pleacă ACUM,
+// în fundal (fire-and-forget — ușa care a depus nu așteaptă sesiunea). Fără cheie
+// e inert și întoarce false (drumul vechi al lucrătorului de pe VPS rămâne al lui).
+export function pornesteDevinInFundal(): boolean {
+  if (!config.devinKey) return false
+  void tickDispecerDevin().catch((e) => console.error('[devin] tick imediat:', String(e).slice(0, 160)))
+  return true
+}
