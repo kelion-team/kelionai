@@ -147,6 +147,7 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 | `mail.ts` | Client SMTP (Namecheap), scrisori „royal letter" cu referință KA-AN-NNNN |
 | `lang.ts` | Detecție limbă deterministă server-side |
 | `pronounce.ts` | Mod academic: pronunție acronime litere-cu-litere |
+| `paznic.ts` | Ochii care văd defectele în timp real: strânge loguri, health, client errors, build jobs; deduplică și expune `/api/admin/paznic` |
 | `openBanking.ts` | Citește plăți Revolut Pro și atribuie top-up-uri după cod |
 | `autonomy.ts` | Lesa autonomiei: `budgetCheck` (20/24h), `sameFailure` (stop la eșec repetat) |
 | `commands.ts` | Interpretor comenzi dispozitiv server-side (cameră/monitor) — instant, fără cost model |

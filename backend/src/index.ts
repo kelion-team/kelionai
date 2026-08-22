@@ -34,6 +34,8 @@ import { startMailbox } from './services/mailbox.js'
 import { startCitirePlati } from './services/openBanking.js'
 import { startPlatiEmail } from './services/platiEmail.js'
 import { startAutonomie } from './services/autonomie.js'
+import { paznicRoutes } from './routes/paznic.js'
+import { pornestePaznic } from './services/paznic.js'
 import { autonomActiv } from './services/autonomActiv.js'
 import { incarcaModelUnic, startAutoUpgradeModel } from './services/modelAutoUpgrade.js'
 import { startAutoInvatare } from './services/autoInvatare.js'
@@ -364,6 +366,7 @@ await app.register(manualRoutes)
 await app.register(enterpriseRoutes)
 await app.register(a2aRoutes)
 await app.register(tranzactiiRoutes)
+await app.register(paznicRoutes)
 
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
@@ -550,6 +553,8 @@ try {
   // AUTO-ÎNVĂȚARE DIN TIMPI (Adrian, 3 aug): în spate, invizibil, citește
   // registrul task_timings și învață tiparele (lent/eșec) ca să nu le repete.
   startAutoInvatare()
+  // PAZNIC — ochii care văd defectele în timp real, la fiecare minut.
+  pornestePaznic(60_000)
   // L1h — reproșurile („nu asta am cerut") persistate se încarcă în cache, ca
   // lecțiile să supraviețuiască unei reporniri (fără DB → cache gol, nefatal).
   void incarcaReprosuri().catch(() => {})
