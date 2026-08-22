@@ -56,19 +56,6 @@ export interface Lucrator {
 // The three. Order doesn't matter — they run in parallel.
 export const LUCRATORI: Lucrator[] = [
   {
-    nume: 'aider',
-    verificare: ['aider', ['--version']],
-    // `--auto-commits`: YES here (unlike the manual use in `.aider.conf.yml`),
-    // because otherwise we'd have nothing to compare: the proposal IS the
-    // commit. `--model` is FORCED, not inherited from a file — the model must
-    // be explicit, not something that changes under us from a file.
-    comanda: (s, m) => [
-      'aider',
-      ['--message', s, '--model', m, '--yes-always', '--no-analytics', '--no-check-update', '--auto-commits'],
-    ],
-    descriere: 'git-nativ, editează prin blocuri căutare→înlocuire; rulează testele în bucla lui și repară din erori',
-  },
-  {
     nume: 'cline',
     verificare: ['cline', ['--version']],
     // `--auto-approve true`: nobody sits by the terminal. `--json`: structured

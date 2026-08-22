@@ -462,7 +462,7 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
       <span title={geminiTitlu}>
         Gemini {geminiEticheta}
       </span>
-      {/* (Constructorul rulează pe motorul Aider, cu creierul Gemini prin app —
+      {/* (Constructorul e Devin (extern), iar creierul live e Gemini prin app —
           pastila de sus. Fable a fost scos total, 16 aug: nu mai are rând.) */}
       <a href="https://aistudio.google.com/billing" target="_blank" rel="noreferrer" style={{ fontSize: 12, opacity: 0.75 }}>alimentează Gemini</a>
     </div>
@@ -667,9 +667,9 @@ export default function AdminPanel({
   // nesfârșit după promisiunea „max. 2 minute", fără nicio explicație.
   const [buildPaused, setBuildPaused] = useState(false)
   // CINE E CONSTRUCTORUL — MĂSURAT de server din config (owner, 22 aug: „am
-  // cerut devin peste tot in constructor… sa-i stergi de tot [pe Aider+Ollama]").
-  // Luminile vechi (probă Aider, probă Ollama, puls lucrător) au fost ȘTERSE cu
-  // toată mașinăria locală: constructorul e DEVIN, iar panoul arată starea LUI.
+  // cerut devin peste tot in constructor… sa-i stergi de tot pe ce e local").
+  // Luminile vechi (proba locală, puls lucrător) au fost ȘTERSE cu toată
+  // mașinăria locală: constructorul e DEVIN, iar panoul arată starea LUI.
   const [constructorId, setConstructorId] = useState<{ cine: 'devin' | 'local'; motiv: string } | null>(null)
   // DIAGNOSTICUL AUTONOM (owner, 19 aug): „de ce (nu) repară", măsurat pe server.
   const [diagnostic, setDiagnostic] = useState<{ sanatos: boolean; verdict: string; probleme: { cod: string; severitate: 'critic' | 'atentie'; ce: string; recomandare: string }[] } | null>(null)
@@ -2775,7 +2775,7 @@ export default function AdminPanel({
                       {plafon.activ ? 'Oprește limita' : 'Pornește limita'}
                     </button>
                     {/* CONSTRUCTORUL = DEVIN, MĂSURAT (owner, 22 aug: „am cerut devin
-                        peste tot in constructor" + „sa-i stergi de tot [Aider+Ollama]").
+                        peste tot in constructor" + „sa-i stergi de tot pe ce e local").
                         Becul vine din config-ul REAL al serverului (cheia Devin), nu
                         dintr-un text scris de mână: verde = Devin deține coada (ordinele
                         pleacă în sesiuni Devin → PR pe master); roșu = cheia lipsește pe

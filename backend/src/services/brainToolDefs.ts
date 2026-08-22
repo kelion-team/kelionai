@@ -258,7 +258,7 @@ export const BUILD_SOFTWARE_TOOL: Tool = {
 export const PANOU_COD_TOOL: Tool = {
   name: 'panou_cod',
   description:
-    'ADMIN ONLY. Send ONE coding task to THREE independent workers at once (aider, cline, openhands), each on a DIFFERENT free model, each in its own clone. They never see each other. Then YOU compare the three diffs — with measured facts: files touched, lines, and whether the project tests PASS — and the best one becomes a single PR. Never merges. Use for real problems worth three opinions (a bug with an unclear cause, a design choice, a repair that already failed once) — NOT for a typo. Takes several minutes; say so and show progress on the monitor with show_document.',
+    'ADMIN ONLY. Send ONE coding task to THREE independent workers at once (cline, openhands, gemini-cli), each on a DIFFERENT free model, each in its own clone. They never see each other. Then YOU compare the three diffs — with measured facts: files touched, lines, and whether the project tests PASS — and the best one becomes a single PR. Never merges. Use for real problems worth three opinions (a bug with an unclear cause, a design choice, a repair that already failed once) — NOT for a typo. Takes several minutes; say so and show progress on the monitor with show_document.',
   input_schema: {
     type: 'object',
     properties: { sarcina: { type: 'string', description: "The task, in the owner's own words, complete enough to work from alone." } },
@@ -269,7 +269,7 @@ export const PANOU_COD_TOOL: Tool = {
 export const CONSTRUCTOR_STATUS_TOOL: Tool = {
   name: 'constructor_status',
   description:
-    "ADMIN ONLY. Status of the constructor's build orders (queued / working / done / failed, with the PR link), the MEASURED `constructor` identity (DEVIN when the key is set — the ONLY builder; the local Aider+Ollama machinery was DELETED on the owner's order, 22 Aug), AND a MEASURED self-diagnostic (`diagnostic`): whether DEVIN actually builds and, if not, WHY — missing key, orders stuck without a Devin session, failed session starts, a queue that sits still. Use it whenever the owner asks why the constructor is stuck or whether Devin is active — report `constructor` + `diagnostic.verdict` + the firm recommendation, never guess.",
+    "ADMIN ONLY. Status of the constructor's build orders (queued / working / done / failed, with the PR link), the MEASURED `constructor` identity (DEVIN when the key is set — the ONLY builder; the local machinery was DELETED on the owner's order, 22 Aug), AND a MEASURED self-diagnostic (`diagnostic`): whether DEVIN actually builds and, if not, WHY — missing key, orders stuck without a Devin session, failed session starts, a queue that sits still. Use it whenever the owner asks why the constructor is stuck or whether Devin is active — report `constructor` + `diagnostic.verdict` + the firm recommendation, never guess.",
   input_schema: { type: 'object', properties: {} },
 }
 

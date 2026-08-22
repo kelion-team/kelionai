@@ -8,24 +8,22 @@ WORKDIR /app
 # `git` e obligatoriu: toți trei sunt git-nativi, iar `.dockerignore` exclude
 # `.git`, deci fiecare lucrător își clonează propriul repo la cerere.
 #
-# Aider (pip) și Cline (npm) — comenzi verificate în documentația lor oficială,
-# 31 iul. Cline cere Node 20+; imaginea e pe 22.
+# Cline (npm) și Gemini CLI (npm) — comenzi verificate în documentația lor oficială,
+# 31 iul / 3 aug. Cline cere Node 20+; imaginea e pe 22.
 #
-# OpenHands — COMPLETARE la Aider (owner, 16 aug, cerut repetat: „pune openhands
-# ca si completare aider pentru functiile suplimentare"). Instalat NON-FATAL
-# (`|| echo`): dacă pip-ul lui pică sau trage dependințe grele, imaginea TOT se
-# construiește cu Aider (motorul primar) — nu riscăm build-ul pe un pachet greu.
-# Panoul îl detectează la rulare (`openhands --version`); dacă lipsește sau CLI-ul
-# diferă de versiune, merge cu Aider și o spune. Runtime-ul lui de sandbox poate
-# cere Docker pe VPS — aia se confirmă pe server.
+# OpenHands — COMPLETARE (owner, 16 aug, cerut repetat: „pune openhands pentru
+# funcțiile suplimentare"). Instalat NON-FATAL (`|| echo`): dacă pip-ul lui pică
+# sau trage dependințe grele, imaginea TOT se construiește — nu riscăm build-ul
+# pe un pachet greu. Panoul îl detectează la rulare (`openhands --version`); dacă
+# lipsește, panoul merge cu ceilalți lucrători.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-pip curl git libgomp1 \
-    && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' aider-chat \
+    && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' \
     && npm install -g cline @google/gemini-cli \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 # OpenHands, separat și non-fatal, ca un eșec al lui să NU rupă imaginea.
 RUN pip3 install --break-system-packages --no-cache-dir openhands-ai \
-    || echo "[Dockerfile] openhands-ai nu s-a instalat — imaginea rămâne validă cu Aider; panoul raportează lipsa"
+    || echo "[Dockerfile] openhands-ai nu s-a instalat — imaginea rămâne validă; panoul raportează lipsa"
 # libgomp1: runtime OpenMP pentru binarul nativ sherpa-onnx (amprentă vocală
 # neurală, services/voiceEmbedding.ts). Fără el, `require('sherpa-onnx-node')` ar
 # arunca la ÎNCĂRCARE — dar serviciul e lazy și cade grațios; îl punem oricum ca

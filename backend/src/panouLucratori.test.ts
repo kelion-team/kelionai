@@ -21,10 +21,10 @@ const chat = sursa('./routes/chat.ts')
 const docker = sursa('../../Dockerfile')
 
 describe('sunt patru, și chiar sunt independenți', () => {
-  it('exact patru lucrători, cu nume distincte — inclusiv agentul OFICIAL Google', () => {
+  it('exact trei lucrători, cu nume distincte — inclusiv agentul OFICIAL Google', () => {
     // Adrian, 3 aug: „dă-mi... și suita oficială de la Google" → Gemini CLI
-    // intră ca al 4-lea lucrător, nativ pe cheia Gemini a ownerului.
-    expect(LUCRATORI.map((l) => l.nume).sort()).toEqual(['aider', 'cline', 'gemini-cli', 'openhands'])
+    // rămâne ca lucrător nativ pe cheia Gemini a ownerului.
+    expect(LUCRATORI.map((l) => l.nume).sort()).toEqual(['cline', 'gemini-cli', 'openhands'])
   })
 
   it('fiecare are comandă proprie de lucru și de verificare', () => {
@@ -41,7 +41,6 @@ describe('sunt patru, și chiar sunt independenți', () => {
       const l = LUCRATORI.find((x) => x.nume === n)!
       return l.comanda('sarcina', 'm').join(' ')
     }
-    expect(cmd('aider')).toContain('--yes-always')
     expect(cmd('cline')).toContain('--auto-approve')
     expect(cmd('openhands')).toContain('--headless')
     // Gemini CLI: -p = prompt non-interactiv, --yolo = uneltele rulează singure.
@@ -150,18 +149,12 @@ describe('ordinul „manual eu nu fac"', () => {
 })
 
 describe('instalarea e verificată, nu presupusă', () => {
-  it('git, aider și cline intră în imagine', () => {
+  it('git și cline intră în imagine', () => {
     expect(docker).toMatch(/curl git/)
-    expect(docker).toContain('aider-chat')
     expect(docker).toContain('npm install -g cline')
   })
 
-  // Owner, 16 aug (cerut repetat): „de ce nu ai pus openhands ca si completare
-  // aider pentru functiile suplimentare". OpenHands intră acum în imagine ca
-  // COMPLETARE la Aider — dar NON-FATAL (`|| echo`): dacă pip-ul lui pică sau
-  // trage dependințe grele, imaginea TOT se construiește cu Aider (motorul
-  // primar). Panoul îl detectează la rulare și merge mai departe dacă lipsește.
-  it('OpenHands e instalat ca completare la Aider, dar non-fatal', () => {
+  it('OpenHands e instalat, dar non-fatal', () => {
     expect(docker).toMatch(/pip3 install[^\n]*openhands-ai/)
     // Dovada că e non-fatal: fallback-ul „|| echo" care ține imaginea validă.
     expect(docker).toContain('openhands-ai nu s-a instalat')
