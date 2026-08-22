@@ -1490,6 +1490,25 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    voce; spoken:true nearmat pe ușă — deliberat; get_monitor = decizie
    owner). Porți după reparație: tsc 0, 215 fișiere/1934 teste,
    hardcodări/sintaxă/exporturi verzi.
+6g. **ÎNCHIDEREA NOPȚII 21→22 AUG (starea la 03:3xZ) + O LECȚIE DE MEDIU
+   pentru orice AI care lucrează aici**: PR #1328 MĂSURAT LIVE (v=6d8c599,
+   ver 7.2, publicat 02:47:50Z — bifa pasului 5 + harta pasului 7 + manualul
+   fără promisiuni false + testele feliei A); PR #1329 MĂSURAT LIVE
+   (v=13c0d25, ver 7.3, publicat 03:09:08Z — cheile i18n moarte șterse +
+   frazele de voce pe ruleaza_portile/jurnal_masuratori/vaneaza_buguri).
+   Bilanțul nopții v6.2→7.3: pașii Jarvis 1–5 LIVE măsurați, pasul 6 de
+   facto, pasul 7 cartografiat; FINALIZAREA așteaptă DECIZIILE owner-ului
+   (feliile B/C/D pas 7, 2b, get_monitor, ștergerea contului,
+   db_query/click_monitor) — nu se construiește nimic din ele fără el.
+   LECȚIA DE MEDIU: containerul sesiunii remote a fost restaurat de TREI ori
+   în aceeași noapte la un instantaneu vechi (reflog 21 aug 04:14Z — HEAD
+   fc84a637 cu ștergeri de vocalLive în zbor, node_modules incomplet).
+   Semnele: git status cu `D backend/src/routes/vocalLive.ts` + HEAD pe un
+   merge vechi. Recuperarea care NU pierde nimic: (1) NU împinge nimic din
+   starea aia; (2) arhivează local (`git checkout -b resturi-… && git commit
+   -am …`); (3) `git fetch origin master && git checkout -B <branch>
+   origin/master`; (4) `npm install` la nevoie. Adevărul e pe ORIGIN și pe
+   LIVE (măsurat prin /api/version), nu pe discul containerului.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor
