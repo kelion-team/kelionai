@@ -93,7 +93,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'list_source', category: 'cod', does: 'listează directoare din codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'read_source', category: 'cod', does: 'citește un fișier din codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'search_source', category: 'cod', does: 'caută în tot codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'build_software', category: 'cod', does: 'dă un ordin de construcție', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'build_software', category: 'cod', does: 'dă ordinul constructorului DEVIN (sesiune izolată → PR pe master, ownerul aprobă)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_status', category: 'cod', does: 'starea ordinelor de construcție', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'repo_write', category: 'cod', does: 'scrie cod în repo', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'repo_open_pr', category: 'cod', does: 'deschide un PR', chat: true, voice: false, voiceViaBrain: true, admin: true },

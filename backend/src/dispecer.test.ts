@@ -192,9 +192,12 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
     const plaseGardate = chat.match(/!faptaInIncercareEsuata/g) ?? []
     expect(plaseGardate.length).toBeGreaterThanOrEqual(2)
   })
-  it('UNELTE_AFISAJ are EXACT cei 6 membri de afișare (mutantul M2: un nume cu efect strecurat aici ar omorî gardul; click_monitor SCOS 22 aug — apasă elemente REALE, re-apăsarea nu e nevinovată, tensiunea (g) închisă)', () => {
-    expect(chat).toMatch(/const UNELTE_AFISAJ = new Set\(\[\s*'show_document', 'show_on_screen', 'open_app_view',\s*'goleste_monitorul', 'zoom_monitor', 'arata_pe_grafic',\s*\]\)/)
+  it('UNELTE_AFISAJ are EXACT cei 5 membri de afișare (mutantul M2; click_monitor SCOS 22 aug — apasă elemente reale; goleste_monitorul MUTAT 22 aug la FAPTE — vânătorul a măsurat că poarta acțiunii îi prescria modelului refuzul „oprește-l manual")', () => {
+    expect(chat).toMatch(/const UNELTE_AFISAJ = new Set\(\[\s*'show_document', 'show_on_screen', 'open_app_view',\s*'zoom_monitor', 'arata_pe_grafic',\s*\]\)/)
     expect(chat).not.toMatch(/UNELTE_AFISAJ = new Set\(\[[^\]]*'click_monitor'/)
+    expect(chat).not.toMatch(/UNELTE_AFISAJ = new Set\(\[[^\]]*'goleste_monitorul'/)
+    // ...și golirea e pe lista rundei forțate (unealta chemabilă pe acțiune):
+    expect(chat).toMatch(/'goleste_monitorul',\s*\]\.filter\(\(n\) => toolNamesThisTurn\.has\(n\)\)/)
   })
   it('plasele nu ricoșează una în alta (F4): profund→rapid armează plasaRulata, iar plasa oglindită o respectă', () => {
     expect(chat).toMatch(/let plasaRulata = false/)

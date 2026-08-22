@@ -86,4 +86,17 @@ describe('lanțul Devin — fiecare za, pe cod viu', () => {
     const defs = codViu('services/brainToolDefs.ts')
     expect(defs).toMatch(/NOT the constructor — DEVIN is/)
   })
+
+  it('za 9: inventarul ȘTIE că Devin e constructorul (măsurat pe live: „Devin nu face parte din uneltele noastre")', () => {
+    // Captura ownerului (V7.6): întrebat dacă Devin e prezent, modelul a negat
+    // — corect după inventarul de ATUNCI: nicio unealtă nu purta numele Devin
+    // (dispecerul stă în spatele lui build_software). Fișa + registrul spun
+    // acum adevărul, iar negarea măsurată e în gardul anti-negare.
+    const defs = codViu('services/brainToolDefs.ts')
+    expect(defs).toMatch(/THIS IS HOW YOU CALL DEVIN/)
+    const registru = codViu('services/brainCapabilities.ts')
+    expect(registru).toMatch(/dă ordinul constructorului DEVIN/)
+    const negare = codViu('services/negareUnelte.ts')
+    expect(negare).toMatch(/devin\\s\+nu\\s\+face\\s\+parte\\s\+din\\s\+unelte/)
+  })
 })

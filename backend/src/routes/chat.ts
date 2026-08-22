@@ -2819,9 +2819,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // click_monitor SCOS din listă (tensiunea (g), închisă pe ordinul
     // „finalizeaza tot", 22 aug): apasă ELEMENTE REALE — inclusiv butoane de
     // admin — deci re-apăsarea la reluare NU e nevinovată și apelul E faptă.
+    // goleste_monitorul a IEȘIT din afișaj (vânătorul din 22 aug, măsurat pe
+    // captura ownerului: clasificat „doar-afișare", nu conta ca faptă →
+    // POARTA ACȚIUNII îi prescria modelului chiar refuzul „oprește-l manual").
+    // Golirea ecranului EXECUTĂ ceva cerut — e faptă (vezi UNELTE_FAPTA).
     const UNELTE_AFISAJ = new Set([
       'show_document', 'show_on_screen', 'open_app_view',
-      'goleste_monitorul', 'zoom_monitor', 'arata_pe_grafic',
+      'zoom_monitor', 'arata_pe_grafic',
     ])
     // DB_QUERY: numele singur nu spune dacă e citire sau scriere (tensiunea
     // (e), închisă pe același ordin: SQL-ul decide, cu predicatul ÎNTĂRIT din
@@ -3437,6 +3441,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         'create_doc', 'edit_doc', 'create_sheet', 'edit_sheet', 'create_calendar_event',
         'add_task', 'browser_open', 'browser_type', 'browser_click', 'generate_image',
         'generate_video', 'memorie_pune', 'db_query',
+        // Vânătorul 22 aug: pe „oprește/închide monitorul" runda forțată nu
+        // AVEA VOIE să cheme unealta de închidere → modelul era împins spre
+        // refuzul „oprește-l manual". Golirea ecranului e faptă cerută.
+        'goleste_monitorul',
       ].filter((n) => toolNamesThisTurn.has(n))
       // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului — nu pe
       // simpla prezență a unei imagini (C6; vezi actiuneCerutaExplicit, sus).
