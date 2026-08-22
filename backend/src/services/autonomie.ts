@@ -120,6 +120,8 @@ interface Sarcina {
    *  hard task, a free one for a trivial task. No marker → 3 (medium), on the
    *  safe side. */
   dificultate?: number
+  /** Forțează un model anume (ex. constructor pe creierul 2). */
+  model?: string
   /** How completion is PROVEN — a measurement, not its word.
    *  Returns `true` only if the thing really happened. */
   dovada?: () => Promise<boolean>
@@ -968,6 +970,7 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
     `NICIODATĂ valorile cheilor — doar numele lor.`
   return rationeazaCuUnelte(prompt, tools, uneltele, { ruta: 'service.autonomie', maxRounds: 30,
     maxTokens: 2500,
+    model: s.model,
     models: scaraPentru(s.dificultate),
   })
 }
@@ -988,12 +991,14 @@ async function supervizeazaIncidentConstructor(
     const result = await runConstructorStrategistStep(knowledge, {
       think: (prompt) => rationeaza(prompt, {
         ruta: 'service.autonomie.strateg', treapta: 'lucru', maxTokens: 4500, temperature: 0,
+        model: config.constructorGeminiModel,
       }),
       executeBrainAction: (strategy, currentIncident) => ruleazaCuMainile({
         cod: `INCIDENT-${currentIncident.id}`,
         titlu: `Strategie incident constructor #${currentIncident.id}`,
         executant: 'maini',
         dificultate: 5,
+        model: config.constructorGeminiModel,
         ordin: buildConstructorStrategyExecutionPrompt(strategy, currentIncident),
       }),
       retryJob: retryBuildJob,

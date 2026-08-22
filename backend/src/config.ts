@@ -255,17 +255,14 @@ export const config = {
   get geminiModelGreu(): string {
     return modelUnicCod()
   },
-  // ── CREIERUL 2 (constructorul) = gemini-3.7-flash (DECIZIA ownerului, 14 aug:
-  // „a apărut 3.7… l-am verificat eu, pune-l la creierul 2") ─────────────────
-  // CHATUL rămâne pe modelul unic SIGILAT (3.5-flash) — auto-upgrade-ul l-a
-  // refuzat CORECT pe 3.7 acolo (poarta „toate probele sau nimic": 3.7 a picat
-  // „fără-invenție", 19/20 vs 20/20 — măsurat 14 aug cu proba-calitate).
-  // Ownerul l-a verificat el și l-a ales EXPLICIT pentru constructor, unde
-  // porțile de cod (7 porți + verdict pe mașină curată) prind oricum orice
-  // invenție. NU știe live (fără bidiGenerateContent — măsurat pe API): vocea
-  // nu-l atinge. Suprascriibil prin env (CONSTRUCTOR_GEMINI_MODEL).
+  // ── CREIERUL 2 (constructorul) ───────────────────────────────────────────
+  // Constructorul moștenește modelul unic VALIDAT (modelUnicCod) — același
+  // care trece poarta „toate probele sau nimic". Dacă ownerul vrea un model
+  // special pentru constructor (ex. 3.7 la plătit), îl suprascrie prin env.
+  // Astfel evităm un model blocat de cotă/eroare în config, iar auto-upgrade-ul
+  // e singura sursă de schimbare.
   get constructorGeminiModel(): string {
-    return process.env.CONSTRUCTOR_GEMINI_MODEL ?? 'gemini-3.7-flash'
+    return process.env.CONSTRUCTOR_GEMINI_MODEL ?? modelUnicCod()
   },
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă

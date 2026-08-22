@@ -63,14 +63,16 @@ export async function rationeaza(
 ): Promise<string> {
   const treapta = opts.treapta ?? 'lucru'
   const maxTokens = opts.maxTokens ?? 1024
-  jurnal(opts.ruta, treapta, `maxTokens=${maxTokens}`)
-  if (treapta === 'rapid') {
+  jurnal(opts.ruta, treapta, `maxTokens=${maxTokens} model=${opts.model ?? 'default'}`)
+  if (treapta === 'rapid' || opts.model) {
     const r = await rationeazaMesaje([{ role: 'user', content: prompt }], {
       ruta: opts.ruta,
       maxTokens,
-      treapta: 'rapid',
+      treapta,
       onCost: opts.onCost,
-      reasoning: 'low',
+      temperature: opts.temperature,
+      reasoning: opts.reasoning ?? (treapta === 'rapid' ? 'low' : 'medium'),
+      model: opts.model,
     })
     if (opts.onCost && r.costUsd > 0) opts.onCost(r.costUsd)
     return (r.text || '').trim()
@@ -90,12 +92,19 @@ export async function rationeazaCuUnelte(
   opts: OptiuniRationament & { maxRounds?: number; models?: string[] },
 ): Promise<string> {
   const treapta = opts.treapta ?? 'lucru'
-  jurnal(opts.ruta, treapta, `tools=${tools.length} rounds=${opts.maxRounds ?? 6}`)
+  jurnal(opts.ruta, treapta, `tools=${tools.length} rounds=${opts.maxRounds ?? 6} model=${opts.model ?? 'default'}`)
+  // Dacă e forțat un model, îl punem primul pe scară și cădem pe modelul de
+  // lucru validat dacă epuizează cota sau refuză cererea.
+  let models = opts.models ?? expertModelLadder()
+  if (opts.model) {
+    const first = `google-direct/${codModel(opts.model)}`
+    models = [first, ...models.filter((m) => m !== first)]
+  }
   return brainCompleteWithTools(prompt, tools, execTool, {
     maxTokens: opts.maxTokens ?? 2000,
     maxRounds: opts.maxRounds,
     onCost: opts.onCost,
-    models: opts.models ?? expertModelLadder(),
+    models,
   })
 }
 
