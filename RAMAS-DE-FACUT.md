@@ -221,6 +221,23 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
          întrebărilor de inventar spre creierul întreg + „scrisul nu e
          preluat ca vocea" (divergența de context scris↔voce). Se bifează
          DOAR cu răspunsul corect al vocii măsurat pe live.**
+      10. „am cerut devin peste tot in constructor, pr, deploy… sa-i stergi de
+         tot [pe Aider+Ollama]… Devin functional am cerut peste tot in loc
+         aider si celalt" — FĂCUT (PR #1338, MERGE e7e460d, LIVE v8.1
+         `e7e460d`, publicat 08:48:53Z). Mașinăria locală Aider+Ollama ȘTEARSĂ
+         integral (31 fișiere: constructor-agent.mjs, constructor-worker.sh,
+         setup-ollama.sh, probele Aider/Ollama, pulsul lucrătorului,
+         remediereEsec/invatareConstructor/constructorProtocol +
+         planificaPasiMici + remediazaAutomatBuildJob, rutele bridge ale
+         workerului, cronul din deploy.sh). Devin LEGAT peste tot, MĂSURAT din
+         config.devinKey: panoul („🟢 Constructorul e DEVIN" + badge DEVIN pe
+         ordine), diagnosticul (cheie/sesiuni agățate/porniri eșuate/coadă),
+         health.ts, AI_CONSTRUCTORI, constructor_status, chat ȘI VOCE
+         (instrucțiunea Live poartă adevărul Devin la ambele locuri +
+         amprentă, întrebările despre constructor escaladează la creierul
+         măsurat — repară gaura din rândul 9). „Nu pot verifica" din repo:
+         DEVIN_API_KEY trebuie pusă pe VPS ca Devin să CONSTRUIASCĂ efectiv;
+         fără ea panoul + Kelion spun roșu „cheia NU e pusă", nu se prefac.
       Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
