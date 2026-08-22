@@ -60,6 +60,7 @@ import { offlineRoutes } from './routes/offline.js'
 import { vedereRoutes } from './routes/vedere.js'
 import { auzRoutes } from './routes/auz.js'
 import { emotieRoutes } from './routes/emotie.js'
+import { ollamaConfigRoutes } from './routes/ollamaConfig.js'
 import { deployRoutes } from './routes/deploy.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive, loadKv, saveKv } from './db.js'
 import { salveazaMemorieSensoriala } from './services/memorieSensoriala.js'
@@ -355,6 +356,7 @@ await app.register(offlineRoutes)
 await app.register(vedereRoutes)
 await app.register(auzRoutes)
 await app.register(emotieRoutes)
+await app.register(ollamaConfigRoutes)
 await app.register(authLocalRoutes)
 await app.register(contactRoutes)
 await app.register(voiceprintRoutes)
