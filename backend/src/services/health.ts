@@ -324,9 +324,9 @@ export async function systemHealth(): Promise<string> {
   }
 
   // 12. DEVIN — CONSTRUCTORUL (owner, 22 aug: „am cerut devin peste tot in
-  // constructor… sa-i stergi de tot [Aider+Ollama]"). Mașinăria locală (probele
-  // Aider/Ollama, lucrătorul de pe VPS) A FOST ȘTEARSĂ — constructorul e DEVIN,
-  // extern: ordin → dispecer → sesiune Devin → PR. Semnalul măsurabil de aici:
+  // constructor… sa-i stergi de tot pe ce e local"). Mașinăria locală A FOST
+  // ȘTEARSĂ — constructorul e DEVIN, extern: ordin → dispecer → sesiune Devin →
+  // PR. Semnalul măsurabil de aici:
   // cheia (fără ea dispecerul e inert prin design). Pornirile eșuate de sesiuni
   // au diagnosticul lor (diagnosticConstructor) — nu-l dublăm aici.
   info.constructorDevin = config.devinKey

@@ -332,7 +332,7 @@ install -m 700 "$REPO/deploy/backup-versiuni.sh" /root/kelion/backup-versiuni.sh
 
 echo "== 6d. Constructorul local: DEMONTAT DEFINITIV (constructorul e DEVIN) =="
 # Owner, 22 aug, verbatim: „am cerut devin peste tot in constructor… sa-i stergi
-# de tot". Lucrătorul Aider+Ollama de pe VPS nu mai există în repo — aici îi
+# de tot". Constructorul local de pe VPS nu mai există în repo — aici îi
 # scoatem DEFINITIV cronul și fișierele de pe gazdă (idempotent; la gazdele
 # curate, comenzile nu găsesc nimic și tac).
 crontab -l 2>/dev/null | grep -v '/root/kelion/constructor-worker.sh' | crontab - 2>/dev/null || true

@@ -53,7 +53,7 @@ export const AI_CONSTRUCTORI: AiConstructor[] = [
     cheie: 'creier2',
     nume: 'Creierul de raționament (Gemini)',
     descriere:
-      'Creierul de raționament: analizează, planifică și deblochează Aider când se împotmolește. NU construiește singur în repo — pregătește terenul.',
+      'Creierul de raționament: analizează, planifică și deblochează Devin când se împotmolește. NU construiește singur în repo — pregătește terenul.',
     capacitati: ['analiza', 'planificare', 'deblocare'],
     becFurnizor: 'Gemini',
   },

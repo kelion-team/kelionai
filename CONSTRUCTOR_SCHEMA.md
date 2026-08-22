@@ -1,6 +1,6 @@
 # SCHEMĂ CONSTRUCTOR — Kelionai
 
-> Fișier de referință pentru constructorul autonom (Devin/Aider/motor extern) și pentru orice AI care lucrează în repo.
+> Fișier de referință pentru constructorul autonom (Devin) și pentru orice AI care lucrează în repo.
 > Acesta NU înlocuiește `AI-HANDOFF.md`, `CLAUDE.md` sau `AGENTS.md` — le completează cu o vedere de ansamblu.
 > Ultima actualizare: 22 aug 2026.
 
@@ -91,16 +91,15 @@
 
 ## 6. CONSTRUCTORUL / AUTONOMIE
 
-### Flux curent (în curs de rescriere)
+### Flux curent
 1. Ownerul cere în chat: "repară X" sau "adaugă Y".
-2. Kelion cheamă unealta `build_software` (definită în `brainToolDefs.ts` și executată în `autonomie.ts`).
+2. Kelion cheamă unealta `build_software` (definită în `brainToolDefs.ts` și executată în `autonomie.ts` și `chat.ts`).
 3. `build_software` validează ordinul prin `evalOrdinConstructor.ts` și creează un rând în tabelul `build_jobs`.
-4. Cron VPS `deploy/constructor-worker.sh` la fiecare 2 minute rulează `deploy/constructor-agent.mjs`.
-5. Workerul ia un ordin din `/api/constructor/next` (gătat cu `x-bridge-secret`).
-6. **NOU (țintă):** va rula **Devin CLI** pe repo-ul clonat în `/root/kelion/atelier`, în loc de Aider + Ollama.
-7. Devin editează, rulează porțile, face commit, push branch `kelion/job-<id>` și deschide PR.
-8. `deploy/porti-pr.sh` rulează porțile reale și auto-merge pe verde pentru ramuri `kelion/job-*`.
-9. `deploy/auto-publicare.sh` compară live vs master, rulează `deploy/deploy.sh` și verifică `/api/version`.
+4. `tickDispecerDevin` din `services/devinConstructor.ts` rulează la fiecare 2 minute în bucla de autonomie și la fiecare kick din `build_software`.
+5. Dispecerul asigură tokenul GitHub (`KELION_GH_TOKEN`) la Devin (`services/devin.ts`), apoi deschide o sesiune Devin Cloud (`POST /v1/sessions`) cu promptul construit de `construiestePromptDevin`.
+6. Devin clonează repo-ul, lucrează pe branch `kelion/job-<id>`, rulează porțile, deschide PR pe master și nu dă merge.
+7. `santinelaPR` (`services/santinelaPR.ts`) măsoară checkul `porti-vps` și îmbină automat ramurile `kelion/job-*` când sunt verzi și îmbinabile.
+8. `deploy/auto-publicare.sh` compară live vs master, rulează `deploy/deploy.sh` și verifică `/api/version`.
 
 ### Porți obligatorii (trebuie să treacă înainte de PR)
 - tipuri: `npx tsc --noEmit` (backend) și `npx tsc -b` (frontend)

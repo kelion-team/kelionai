@@ -100,9 +100,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // `paused` (auditul admin, 3 aug): pauza de autonomie oprește dispecerul,
     // dar Constructorul n-o arăta nicăieri — ordinul stătea „în coadă · 0%" la
     // nesfârșit fără explicație. Panoul afișează bannerul.
-    // (Probele locale — aider --version, ollama list, pulsul lucrătorului de pe
-    // VPS — au fost ȘTERSE cu toată mașinăria locală: owner, 22 aug, „am cerut
-    // devin peste tot in constructor… sa-i stergi de tot".)
+    // (Probele locale au fost ȘTERSE cu toată mașinăria locală: owner, 22 aug,
+    // „am cerut devin peste tot in constructor… sa-i stergi de tot".)
     return reply.send({
       jobs,
       paused: await isOpsPaused().catch(() => false),
@@ -134,8 +133,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   // (Istoric, pe scurt: comutatorul „creier 2 cloud" + sursa plătită au fost
   // scoase pe 20 aug; comutatorul „Fable 5 forțat" pe 16 aug; iar pe 22 aug
-  // ÎNTREAGA mașinărie locală Aider+Ollama a fost ștearsă — constructorul e
-  // DEVIN, extern. Vezi AI-HANDOFF.md.)
+  // ÎNTREAGA mașinărie locală a fost ștearsă — constructorul e DEVIN, extern.
+  // Vezi AI-HANDOFF.md.)
 
   // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
   // ștergere" + „scoate 30/31 dacă nu le poate face, ai funcțiile făcute") ─────
@@ -197,11 +196,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // ── LUCRĂTORUL LOCAL A FOST ȘTERS DE TOT (owner, 22 aug, verbatim: „am cerut
   // devin peste tot in constructor") ─────────────────────────────────────────
   // Rutele lui de bridge (tool-defs / next / ajutor / context / report /
-  // progress, toate pe x-bridge-secret) serveau exclusiv workerul
-  // Aider+Ollama de pe VPS (deploy/constructor-agent.mjs) — mașinăria aia nu
-  // mai există: constructorul e DEVIN, extern, iar drumul ordinului e
-  // build_software → coadă → dispecerul din app (tickDispecerDevin) →
-  // sesiune Devin → PR pe master. Cronul vechi de pe VPS primește 404 aici —
+  // progress, toate pe x-bridge-secret) serveau exclusiv workerul local —
+  // mașinăria aia nu mai există: constructorul e DEVIN, extern, iar drumul
+  // ordinului e build_software → coadă → dispecerul din app (tickDispecerDevin)
+  // → sesiune Devin → PR pe master. Cronul vechi de pe VPS primește 404 aici —
   // semnalul lui de moarte; deploy.sh îl scoate din crontab la publicare.
 
   // ── UNELTELE CASEI PENTRU SCRIPTURILE DE PE GAZDĂ (NU e a lucrătorului!) ──

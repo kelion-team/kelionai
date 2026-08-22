@@ -35,7 +35,8 @@ export const ENV_ALIASES: Record<string, string[]> = {
   geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
   // (CHEIA FABLE 5 / Anthropic a fost SCOASĂ — owner, 16 aug: „fable iese total
   // de peste tot… curata peste tot in aplicatie". Nu mai există niciun consumator
-  // Fable/Anthropic în cod; constructorul e pe motorul Aider + creier Gemini.)
+  // Fable/Anthropic în cod; constructorul e Devin, iar creierul de raționament e
+  // Gemini.)
   julesKey: ['JULES_API_KEY', 'JULES_KEY'],
   // Devin — constructorul EXTERN (owner, 20 aug: „punel pe devin cu cheie").
   // Cheia stă în secretele repo-ului → vps-set-env → env-ul VPS, ca restul.

@@ -4400,9 +4400,9 @@ async function runTool(
       if (!jobs) return JSON.stringify({ error: 'coada_necitibila', message: 'Nu pot citi coada ordinelor — citirea din baza de date a picat.' })
       // DIAGNOSTIC AUTONOM (owner, 19 aug: „nu are autonomie… sa faca asta"):
       // pe lângă lista ordinelor, Kelion măsoară SINGUR de ce (nu) repară — puls
-      // lucrător + motor Aider + creier local + rezultatele free/plătit — și
-      // raportează verdictul, pe server, fără să depindă de owner sau de o sesiune
-      // externă. Rulează pe calea CHAT ȘI pe voce (paritatea din brainCapabilities).
+      // sesiune Devin + dispecerul backend + coada build_jobs — și raportează
+      // verdictul, pe server, fără să depindă de owner. Rulează pe calea CHAT ȘI
+      // pe voce (paritatea din brainCapabilities).
       const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
       const diagnostic = await diagnosticConstructorViu(Date.now()).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }))
       return JSON.stringify({

@@ -62,7 +62,7 @@ function stageFrom(log: string, progress: string): string {
   if (/test|vitest|jest|pytest|assert/i.test(source)) return 'tests'
   if (/typecheck|tsc|lint|oxlint|eslint/i.test(source)) return 'quality_gate'
   if (/build|compil|vite|webpack/i.test(source)) return 'build'
-  if (/aider|edit|modific|patch|fără nicio modificare|nu ai scris nimic/i.test(source)) return 'implementation'
+  if (/(?:edit|modific|patch|fără nicio modificare|nu ai scris nimic)/i.test(source)) return 'implementation'
   if (/clone|checkout|git\b|branch/i.test(source)) return 'repository'
   if (/creier|brain|model|gemini/i.test(source)) return 'planning_brain'
   return progress.trim() ? progress.trim().slice(0, 120) : 'unknown_stage'
