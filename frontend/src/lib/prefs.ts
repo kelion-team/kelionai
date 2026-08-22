@@ -130,8 +130,9 @@ export async function saveSpeechLang(code: string): Promise<boolean> {
 // Cererea de ștergere de cont. [ADUS LA COD, lot D] Serverul REFUZĂ mereu
 // (routes/me.ts → 403 `stergerea_prin_comanda_inchisa`, ordinul din 14 aug:
 // „baza nu se șterge prin nicio comandă") — deci întoarce false întotdeauna;
-// nimic nu se șterge de aici. Butonul din CustomerSettings pică tăcut —
-// rând deschis de registru (lot D #4).
+// nimic nu se șterge de aici. Rândul (n) e ÎNCHIS din 22 aug: butonul spune
+// acum adevărul (deleteAccClosed — ștergerea automată e închisă prin
+// construcție; cererea merge la contact@kelionai.app), nu mai pică tăcut.
 export async function deleteMyAccount(): Promise<boolean> {
   try {
     const res = await fetch('/api/me/delete', {

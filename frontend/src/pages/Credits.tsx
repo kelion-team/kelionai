@@ -300,8 +300,11 @@ export default function Credits(): React.JSX.Element {
                   {/* B2 (marea verificare): DB-ul scrie 'paid' și 'admin_grant' —
                       'completed' nu se scria niciodată, deci plata REUȘITĂ apărea
                       cu tokenul brut, în portocaliul de neterminat. */}
-                  <div style={{ alignSelf: 'center', fontWeight: 600, color: h.status === 'paid' || h.status === 'admin_grant' ? '#2e7d32' : '#f57c00' }}>
-                    {h.status === 'paid' ? 'Completed' : h.status === 'admin_grant' ? 'Credit granted' : h.status}
+                  {/* + statusurile MOȘTENITE din era Stripe (re-verificatorul B2):
+                      tabela n-a fost golită, deci 'succeeded' (plată REUȘITĂ!),
+                      'refunded' și 'failed' pot fi vii pe rânduri vechi. */}
+                  <div style={{ alignSelf: 'center', fontWeight: 600, color: h.status === 'paid' || h.status === 'admin_grant' || h.status === 'succeeded' ? '#2e7d32' : h.status === 'failed' ? '#d32f2f' : '#f57c00' }}>
+                    {h.status === 'paid' || h.status === 'succeeded' ? 'Completed' : h.status === 'admin_grant' ? 'Credit granted' : h.status === 'refunded' ? 'Refunded' : h.status === 'failed' ? 'Failed' : h.status}
                   </div>
                 </div>
               ))}

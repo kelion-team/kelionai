@@ -410,7 +410,7 @@ export default function CustomerSettings({
                     <li key={r.id} className="settings-note" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                       <span>{new Date(r.created_at).toLocaleDateString()}</span>
                       <span>£{r.amount} → {r.credits.toLocaleString()} {ro ? 'credite' : 'credits'}</span>
-                      <span>{r.status === 'paid' ? (ro ? 'Finalizată' : 'Completed') : r.status === 'admin_grant' ? (ro ? 'Credit oferit' : 'Credit granted') : r.status}</span>
+                      <span>{r.status === 'paid' || r.status === 'succeeded' ? (ro ? 'Finalizată' : 'Completed') : r.status === 'admin_grant' ? (ro ? 'Credit oferit' : 'Credit granted') : r.status === 'refunded' ? (ro ? 'Rambursată' : 'Refunded') : r.status === 'failed' ? (ro ? 'Eșuată' : 'Failed') : r.status}</span>
                     </li>
                   ))}
                 </ul>
@@ -524,7 +524,7 @@ export default function CustomerSettings({
                 type="button"
                 className="ghost settings-danger"
                 disabled={busy}
-                onClick={() => setConfirmDel(true)}
+                onClick={() => { setDelInfo(false); setConfirmDel(true) }}
               >
                 {t.deleteAcc}
               </button>
