@@ -76,6 +76,9 @@ describe('tura vocală cu unelte lasă dovadă durabilă (jurnalul operațional)
   it('nicio sarcină eternă pe executing (gaura 2): închiderea rulează pe TOATE drumurile care încheie tura — salvată, suprimată sau la close/error', () => {
     const inchideri = vocal.match(/^\s*inchideSarcinaVoce\(\)/gm) ?? []
     expect(inchideri.length).toBeGreaterThanOrEqual(5)
+    // drumul rezidual (re-verificatorul): rezultatul uneltei sosit DUPĂ
+    // închiderea socketului nu lasă o sarcină nou-deschisă pe veci:
+    expect(vocal).toMatch(/^\s*if \(inchis\) inchideSarcinaVoce\(\)/m)
   })
 })
 

@@ -541,6 +541,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         outcomeState: dovada.stare,
         code: dovada.stare,
       }))
+      // Unealta ÎN ZBOR la close/error (re-verificatorul, drumul rezidual al
+      // găurii 2): rezultatul sosit DUPĂ incheieTura ar deschide o sarcină
+      // nouă pe care niciun sfârșit de tură n-o mai închide vreodată — se
+      // închide pe loc, derivată din propria dovadă (lanțul serializat
+      // păstrează ordinea create→…→tool_result→final).
+      if (inchis) inchideSarcinaVoce()
     }
     // Închiderea sarcinii pe ORICE drum care încheie tura (agentul de logică,
     // gaura 2): turele SUPRIMATE și close/error nu treceau prin salveazaTura,

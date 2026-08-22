@@ -222,10 +222,19 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               jurnalul titularului (clasa veche list_memories/cauta_istoric,
               nu gaură nouă); registrul spune voice:false pentru toate
               membrele UNELTE_LIVE (convenție stătută, de lămurit pe lista
-              mare). Lacăte: dovadaFaptelor.test.ts (cod viu + funcția pură a
-              derivării + ≥5 închideri + respingeri logate). RĂMAS pt. bifă:
-              re-verificarea celor 2 agenți care au dat FAIL + merge +
-              măsurat live.
+              mare); la BARGE-IN sarcina supraviețuiește deliberat (tura
+              întreruptă poate să nu aibă tura_gata) → o sarcină poate acoperi
+              două ture (obiectivul A, dovezile A+B) — verdictul rămâne
+              derivat exact din evenimentele scrise pe ea, aceeași regulă
+              pesimistă ca pe scris (re-verificatorul: „nu e minciună de
+              registru", doar întindere declarată). REPARAT la re-verificare
+              (FAIL îngust): unealta ÎN ZBOR la close/error redeschidea o
+              sarcină pe care nimic n-o mai închidea → garda `if (inchis)
+              inchideSarcinaVoce()` în noteazaDovadaVoce. Lacăte:
+              dovadaFaptelor.test.ts (cod viu + funcția pură a derivării +
+              ≥5 închideri + garda inchis + respingeri logate). RĂMAS pt.
+              bifă: verdictele finale ale celor 2 agenți + merge + măsurat
+              live.
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)
       - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
