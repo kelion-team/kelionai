@@ -29,7 +29,7 @@ describe('trierea în doi pe calea vocală', () => {
   })
   it('ușa pornește curată și convergența rulează doar pe informație NOUĂ, cu plafon (nu e raliu) și doar la PROPRIETARUL trierii', () => {
     expect(viu).toMatch(/^\s*injectiiUsa\.length = 0/m)
-    expect(viu).toMatch(/^\s*while \(r\.ok && usaTrierii === usaId && injectiiUsa\.length > 0 && runde < RUNDE_TRIERE\) \{/m)
+    expect(viu).toMatch(/^\s*while \(!inchis && r\.ok && usaTrierii === usaId && injectiiUsa\.length > 0 && runde < RUNDE_TRIERE\) \{/m)
     expect(viu).toMatch(/\[TRIEREA ÎN DOI — ce a spus omul cât gândeai\]/)
     // proprietatea se eliberează pe ORICE drum (finally):
     expect(viu).toMatch(/usiGreleInZbor--\s*\n\s*if \(usaTrierii === usaId\) usaTrierii = 0/)

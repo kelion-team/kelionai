@@ -728,8 +728,10 @@ export default function ChatPanel({
       aSunatTuraRef.current = true // Chirp-ul de pe server a sunat → gura de siguranță NU mai intră
       playVoice(
         c.audio,
-        // Cât redă Chirp-ul, mutăm ȘI microfonul clasic ȘI urechea LIVE
-        // (setRedareExterna) ca modelul să nu se audă pe el însuși (anti-ecou).
+        // Cât redă Chirp-ul, mutăm microfonul clasic (anti-ecou). Ramura asta
+        // se atinge DOAR cu vlRef null (pasul 1: cât Live e viu, Chirp e
+        // suprimat la 721) — apelurile setRedareExterna de mai jos sunt deci
+        // no-op defensiv, nu mecanismul viu (F11: comentariul vechi mințea).
         () => { micRef.current?.setMuted(true); vlRef.current?.setRedareExterna(true) },
         () => {
           micRef.current?.setMuted(false)
@@ -2098,17 +2100,21 @@ export default function ChatPanel({
                 setListening(false)
                 // Oprirea manuală nu se „repară" — doar căderile.
                 if (micManualOffRef.current) return
+                // Cauzele NE-tranzitorii nu se „repară" prin reconectare (F4):
+                // creditul epuizat și sesiunea moartă pică identic la fiecare
+                // reluare — 3 reconectări degeaba doar amânau mesajul onest.
+                if (motiv.includes('credit epuizat') || motiv.includes('nu ești autentificat')) return
                 if (reluari < VL_MAX_RELUARI) {
                   reluari++
-                  // LA SECUNDĂ, nu în 3 încercări rare (8 aug, ownerul: „15-20
-                  // sec este criminal pentru chat… chiar dacă se întrerupe 1
+                  // RAPID, nu rar (8 aug, ownerul: „chiar dacă se întrerupe 1
                   // sec, e suficient să se redeschidă și să continue logic").
-                  // Prima reluare la 400 ms (sughițurile se sting sub secundă),
-                  // apoi la fiecare secundă până la 90 — în clipa în care
-                  // serverul respiră după o publicare, sesiunea e înapoi, iar
-                  // handle-ul persistat pe server îi redă conversația întreagă.
-                  // Banda apare abia de la a 5-a ratare, ca un sughiț de-o
-                  // secundă să rămână invizibil pe ecran.
+                  // REALITATEA CODULUI (comentariul vechi promitea „până la
+                  // 90" — fals, F11): prima reluare la 400 ms, apoi la 1 s,
+                  // TREI în total (VL_MAX_RELUARI); după ele se coboară pe
+                  // calea veche, iar SONDA de 5 s readuce live-ul când
+                  // serverul revine — acela e drumul de lungă durată, nu
+                  // bucla de reluări. Banda apare abia la ultima ratare, ca
+                  // un sughiț de-o secundă să rămână invizibil pe ecran.
                   const pauza = reluari === 1 ? 400 : 1000
                   if (reluari < VL_MAX_RELUARI) setLiveVoice('')
                   console.info(`[vocalLive] reluare ${reluari}/${VL_MAX_RELUARI} în ${pauza} ms`)
@@ -2137,19 +2143,28 @@ export default function ChatPanel({
                   // revine, oprim calea veche și repornim lanțul — live-ul își ia
                   // locul înapoi singur.
                   if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
-                  vlSondaRef.current = window.setInterval(() => {
+                  const sonda = window.setInterval(() => {
+                    if (generatie !== vlGeneratieRef.current) {
+                      // Sesiune NOUĂ pornită între timp (F9): sonda veche se
+                      // sinucide pe PROPRIUL handle — altfel, cu ref-ul
+                      // suprascris de sesiunea nouă, intervalul orfan polla
+                      // /capability la 5s pe termen nelimitat.
+                      window.clearInterval(sonda)
+                      if (vlSondaRef.current === sonda) vlSondaRef.current = null
+                      return
+                    }
                     if (micManualOffRef.current) {
                       // Omul a închis microfonul cu mâna — nu pornim nimic peste el.
-                      if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
-                      vlSondaRef.current = null
+                      window.clearInterval(sonda)
+                      if (vlSondaRef.current === sonda) vlSondaRef.current = null
                       return
                     }
                     void vocalLiveDisponibila()
                       .then((c) => {
                         if (generatie !== vlGeneratieRef.current) return
                         if (!c?.disponibil || vlRef.current) return
-                        if (vlSondaRef.current) window.clearInterval(vlSondaRef.current)
-                        vlSondaRef.current = null
+                        window.clearInterval(sonda)
+                        if (vlSondaRef.current === sonda) vlSondaRef.current = null
                         console.info('[vocalLive] serverul a revenit — mă întorc pe vocea live')
                         vlCazutRef.current = false
                         reluari = 0
@@ -2159,6 +2174,7 @@ export default function ChatPanel({
                       })
                       .catch(() => {})
                   }, 5000)
+                  vlSondaRef.current = sonda
                 }
               },
             })
@@ -2602,6 +2618,12 @@ export default function ChatPanel({
       } else if (d?.stare === 'inchis' || d?.stare === 'refuzat') {
         // Apelul s-a terminat → readucem vocea cu Kelion (dacă nu era oprită manual).
         micManualOffRef.current = false
+        // Vocea live primește o șansă PROASPĂTĂ (F9b al marii verificări):
+        // dacă live-ul căzuse înaintea apelului, sonda de revenire a murit la
+        // conectare (micManualOff) și fără resetul ăsta ensureMic rămânea pe
+        // calea veche cu serverul sănătos — până la un toggle manual
+        // (aceeași regulă ca la toggleMic).
+        vlCazutRef.current = false
         void ensureMicRef.current()
       }
     }

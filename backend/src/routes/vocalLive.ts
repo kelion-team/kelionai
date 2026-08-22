@@ -451,6 +451,17 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // sesiune (vocală SAU scrisă) continuă conversația, n-o ia de la zero.
     let bufUser = ''
     let bufKelion = ''
+    // Rândurile SCRISE ale turei (F2 al marii verificări): tastatul intră și
+    // în bufUser (pentru tura curentă), dar căile de SUPRIMARE (tură
+    // neadresată/limbă străină/închidere) aruncau bufferul AMESTECAT cu tot
+    // cu întrebarea scrisă — UI-ul o arăta, istoria n-o mai avea, iar
+    // învățarea primea user gol. Bufferul separat se salvează NECONDIȚIONAT
+    // pe drumurile de aruncare (un rând tastat e, prin definiție, adresat).
+    let bufScris = ''
+    const salveazaScrisulAruncat = (): void => {
+      if (bufScris.trim()) void saveMessage(user.email, 'user', bufScris.trim()).catch(() => {})
+      bufScris = ''
+    }
     // ── CĂȚELUL PE VOCE (JARVIS pasul 2 — PROIECT-CHAT-VOCE §5) ─────────────
     // Gap-ul MĂSURAT din spec: poartaFaptelor rula doar pe scris. Pe voce:
     // dovezile UNELTELOR chemate direct de sesiunea Live în tura vorbită
@@ -617,6 +628,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         if (usiGreleInZbor === 0) turaCuTemeiDinAfara = false
       }
       if (u) void saveMessage(user.email, 'user', u).catch(() => {})
+      bufScris = '' // scrisul e în u — salvat pe drumul normal, nu se dublează
       if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
       // ÎNVĂȚAREA PE VOCE (10 aug, ownerul: „nu ține minte nimic"): pe scris,
       // fiecare tură trece prin learnFromTurn (extrage fapte durabile → memorie
@@ -636,6 +648,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             ? `[VOCE] tură suprimată aruncată la închidere (limbă străină): „${bufKelion.trim().slice(0, 120)}"`
             : `[VOCE] tură suprimată aruncată la închidere (nu i se vorbea lui): auzit „${bufUser.trim().slice(0, 120)}"`,
         )
+        salveazaScrisulAruncat()
         bufUser = ''
         bufKelion = ''
         rostireCurenta = ''
@@ -654,6 +667,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         if (bufUser.trim() || bufKelion.trim()) {
           app.log.info(`[VOCE] tură nesalvată la închidere (tăcere corectă, fără nume): auzit „${bufUser.trim().slice(0, 120)}"`)
         }
+        salveazaScrisulAruncat()
         bufUser = ''
         bufKelion = ''
         rostireCurenta = ''
@@ -872,6 +886,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               // rândul intră în bufferul de user, ca vorbirea; adresarea nu e afectată
               // (turaDeSistem/anuntAmanat scurtcircuitează poarta numelui).
               bufUser = bufUser ? bufUser + ' ' + textScris : textScris
+              bufScris = bufScris ? bufScris + ' ' + textScris : textScris
               // Ferestrele „sesiunea nu-i gata încă" (live null la deschidere / reconectare
               // internă): audio-ul are coadă (preCoada + coada motorului) — textul primește
               // aceeași plasă, altfel rândul scris ar muri TĂCUT deși clientul l-a ecou-at.
@@ -1481,14 +1496,17 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           // modelului live — regula vocii unice), nici cele de mers (receipt/
           // heartbeat/lang), care ar deruta handleControl.
           if (apel.name === 'cere_creierului') {
-            // Temeiul turei trece la creierul GREU — poarta faptelor a LUI
-            // rulează în /api/chat; cățelul vocal nu judecă re-rostirea (§5).
-            turaCuTemeiDinAfara = true
             const cerere = String((apel.args as { cerere?: unknown }).cerere ?? '').trim()
             if (!cerere) {
               live?.raspundeUnealta(apel.id, apel.name, { eroare: 'cerere goală' })
               return
             }
+            // Temeiul turei trece la creierul GREU — poarta faptelor a LUI
+            // rulează în /api/chat; cățelul vocal nu judecă re-rostirea (§5).
+            // Steagul se pune DUPĂ validarea cererii (F8 al marii verificări):
+            // pe cererea goală, exempția armată degeaba lăsa prima rostire
+            // următoare nejudecată de cățel, fără nicio tură de creier.
+            turaCuTemeiDinAfara = true
             app.log.info(`vocal-live: ușa creierului — „${cerere.slice(0, 80)}"`)
             // UȘĂ ÎN ZBOR (agentul de logică, #3): cât cererea grea e deschisă,
             // steagul NU se consumă la salvarea vreunei ture intercalate —
@@ -1566,7 +1584,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // hardcod-permis: plafon tehnic de runde de convergență (nu bani/stare afișată)
             const RUNDE_TRIERE = 2
             let runde = 0
-            while (r.ok && usaTrierii === usaId && injectiiUsa.length > 0 && runde < RUNDE_TRIERE) {
+            // `!inchis`: după moartea socketului nu mai pornim runde de
+            // convergență (F7 al marii verificări) — 2 ture de creier a câte
+            // 90s, cu fapte posibile, al căror rezultat ar muri mut.
+            while (!inchis && r.ok && usaTrierii === usaId && injectiiUsa.length > 0 && runde < RUNDE_TRIERE) {
               const noi = injectiiUsa.splice(0).join(' • ')
               runde++
               app.log.info(`vocal-live: trierea în doi — runda ${runde}, informații noi de la om („${noi.slice(0, 80)}")`)
@@ -1736,6 +1757,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                 ? `[VOCE] tură suprimată (limbă străină necerută): „${bufKelion.trim().slice(0, 120)}"`
                 : `[VOCE] tură suprimată (nu i se vorbea lui): auzit „${bufUser.trim().slice(0, 120)}"`,
             )
+            salveazaScrisulAruncat()
             bufUser = ''
             bufKelion = ''
             rostireCurenta = ''
@@ -1748,6 +1770,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             if (bufUser.trim()) {
               app.log.info(`[VOCE] tură nesalvată (tăcere corectă, fără nume): auzit „${bufUser.trim().slice(0, 120)}"`)
             }
+            salveazaScrisulAruncat()
             bufUser = ''
             bufKelion = ''
             rostireCurenta = ''

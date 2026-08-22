@@ -460,18 +460,23 @@ export function interpreteazaCadru(m: Record<string, unknown>): Array<
 
   const sc = m.serverContent as
     | {
-        inputTranscription?: { text?: string }
-        outputTranscription?: { text?: string }
+        inputTranscription?: { text?: string; finished?: boolean }
+        outputTranscription?: { text?: string; finished?: boolean }
         modelTurn?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> }
         turnComplete?: boolean
         interrupted?: boolean
       }
     | undefined
   if (sc) {
+    // `final` citește ȘI câmpul propriu `finished` al transcrierii (F3 al
+    // marii verificări): transcrierea userului sosește tipic în CADRE
+    // SEPARATE de turnComplete, deci pe `turnComplete` singur tot ce era
+    // gardat pe `final` (comenzile de dispozitiv, comiterea limbii, injecțiile
+    // trierii) putea rămâne mort tăcut dacă Google nu le combină niciodată.
     const it = sc.inputTranscription?.text
-    if (it) ev.push({ fel: 'user', text: it, final: Boolean(sc.turnComplete) })
+    if (it) ev.push({ fel: 'user', text: it, final: Boolean(sc.inputTranscription?.finished || sc.turnComplete) })
     const ot = sc.outputTranscription?.text
-    if (ot) ev.push({ fel: 'kelion', text: ot, final: Boolean(sc.turnComplete) })
+    if (ot) ev.push({ fel: 'kelion', text: ot, final: Boolean(sc.outputTranscription?.finished || sc.turnComplete) })
     for (const p of sc.modelTurn?.parts ?? []) {
       const d = p.inlineData?.data
       if (d && /audio/i.test(p.inlineData?.mimeType ?? '')) ev.push({ fel: 'audio', data: d })
