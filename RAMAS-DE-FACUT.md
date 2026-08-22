@@ -75,8 +75,9 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       răspund — fără nicio interacțiune). Testele pe contorul de eșecuri:
       FĂCUTE (22 aug, felia A a pasului 7 — autoDescarcareaPermisa, toate
       cele 6 muchii, creierLocal.test.ts; frontend 16 fișiere / 98 teste
-      verzi). RĂMAS mărunt: cheile i18n moarte offlineGata/Descarca/
-      Reincearca.
+      verzi). Cheile i18n moarte offlineGata/Descarca/Reincearca: ȘTERSE
+      (22 aug, ×8 limbi + interfața — zero utilizări măsurate; frontend
+      tsc 0, 16/98 teste, build verde). Nimic mărunt rămas pe rândul ăsta.
       Starea curentă detaliată: AI-HANDOFF.md §17.
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
@@ -291,11 +292,11 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               REZUMATUL modelului Live peste textul altui creier, pe o tură
               EXEMPTĂ de poarta vocală (turaCuTemeiDinAfara) — o rezumare
               greșită e azi nedetectată (onestitate F3, declarat); uneltele
-              de dovadă directe FĂRĂ nicio frază de voce în fișă: NU doar
-              stare_masurata (reparată) — și ruleaza_portile,
-              jurnal_masuratori, vaneaza_buguri (admin, prin inventarul plin;
-              onestitate F4) — au doar convenția generală, de completat la o
-              trecere viitoare; „textul creierului rămâne pe ecran" e adevărat
+              de dovadă directe fără frază de voce (onestitate F4):
+              COMPLETATE 22 aug — ruleaza_portile, jurnal_masuratori,
+              vaneaza_buguri au acum fraza „on voice, never read the raw …
+              aloud" în fișă (rămâne INSTRUCȚIE, ca la toate — mecanismul
+              splitului acoperă doar ușa cu doc); „textul creierului rămâne pe ecran" e adevărat
               DOAR pe ramura de proză fără suprafață de unealtă — pe
               URL/cod/tabel ecranul arată pagina/fragmentul, nu textul
               (onestitate F6; acum, fără doc, vocea spune tot — pierderea e
@@ -327,7 +328,12 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               predea modului offline. REPARAT PE LOC (docs-vs-cod): manualul
               LIVE promitea userului Piper + Vosk + nativ Android (niciunul în
               tree) — rescris la adevăr; paragraful cățelului adus la zi
-              (pașii 2/4 live). FELIILE (fiecare cu criteriu de măsurare,
+              (pașii 2/4 live). MERGE (PR #1328) + PUBLICAT, MĂSURAT 22 aug
+              02:58Z: /api/version → v=6d8c599 (exact commitul merge-ului),
+              ver 7.2, publicat 02:47:50Z; textul corectat al manualului e în
+              codul care servește (confirmat prin v) — citirea DIRECTĂ a
+              secțiunii „Doar admin" din /api/manual cere sesiune de admin,
+              deci de aici e „nu pot verifica" (proba owner-ului). FELIILE (fiecare cu criteriu de măsurare,
               raportul cercetașului în istoricul sesiunii):
               — A: PROBELE pe ce există (proba pe DISPOZITIVUL owner-ului:
                 creierul pornește în avion mode; 10 ture RO tastate cu barem

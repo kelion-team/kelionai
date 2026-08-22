@@ -45,9 +45,6 @@ export interface Strings {
   offlineEroareLocal: string
   raspunsAmanat: string
   offlinePregatire: string
-  offlineGata: string
-  offlineDescarca: string
-  offlineReincearca: string
   offlineFaraWebgpuScurt: string
   updateNouAnunt: string
   credits: string
@@ -311,9 +308,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineEroareLocal: 'The local brain hit a problem:',
     raspunsAmanat: 'I can now tell you the answer to what you asked while you were offline',
     offlinePregatire: 'Downloading Kelion offline',
-    offlineGata: 'Kelion is ready offline',
-    offlineDescarca: 'Download for offline',
-    offlineReincearca: 'Retry',
     offlineFaraWebgpuScurt: 'Offline brain unavailable on this device (no WebGPU)',
     updateNouAnunt: 'New version — updating…',
     credits: 'credits',
@@ -544,9 +538,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineEroareLocal: 'Creierul local a dat de o problemă:',
     raspunsAmanat: 'Îți pot spune acum răspunsul la ce m-ai întrebat cât erai offline',
     offlinePregatire: 'Se descarcă Kelion offline',
-    offlineGata: 'Kelion e gata offline',
-    offlineDescarca: 'Descarcă pentru offline',
-    offlineReincearca: 'Reîncearcă',
     offlineFaraWebgpuScurt: 'Creierul offline nu merge pe acest dispozitiv (fără WebGPU)',
     updateNouAnunt: 'Versiune nouă — se actualizează…',
     credits: 'credite',
@@ -774,9 +765,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineEroareLocal: 'El cerebro local tuvo un problema:',
     raspunsAmanat: 'Ahora puedo darte la respuesta a lo que me preguntaste mientras estabas sin conexión',
     offlinePregatire: 'Descargando Kelion sin conexión',
-    offlineGata: 'Kelion está listo sin conexión',
-    offlineDescarca: 'Descargar para sin conexión',
-    offlineReincearca: 'Reintentar',
     offlineFaraWebgpuScurt: 'El cerebro sin conexión no funciona en este dispositivo (sin WebGPU)',
     updateNouAnunt: 'Nueva versión — actualizando…',
     credits: 'créditos',
@@ -956,9 +944,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineEroareLocal: 'Le cerveau local a rencontré un problème :',
     raspunsAmanat: 'Je peux maintenant te donner la réponse à ce que tu m’as demandé hors ligne',
     offlinePregatire: 'Téléchargement de Kelion hors ligne',
-    offlineGata: 'Kelion est prêt hors ligne',
-    offlineDescarca: 'Télécharger pour hors ligne',
-    offlineReincearca: 'Réessayer',
     offlineFaraWebgpuScurt: 'Le cerveau hors ligne ne fonctionne pas sur cet appareil (pas de WebGPU)',
     updateNouAnunt: 'Nouvelle version — mise à jour…',
     credits: 'crédits',
@@ -1138,9 +1123,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineEroareLocal: 'Das lokale Gehirn hatte ein Problem:',
     raspunsAmanat: 'Ich kann dir jetzt die Antwort auf deine Frage von unterwegs (offline) geben',
     offlinePregatire: 'Kelion offline wird geladen',
-    offlineGata: 'Kelion ist offline bereit',
-    offlineDescarca: 'Für offline herunterladen',
-    offlineReincearca: 'Erneut versuchen',
     offlineFaraWebgpuScurt: 'Offline-Gehirn auf diesem Gerät nicht verfügbar (kein WebGPU)',
     updateNouAnunt: 'Neue Version — wird aktualisiert…',
     credits: 'Guthaben',
@@ -1320,9 +1302,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineEroareLocal: 'Il cervello locale ha avuto un problema:',
     raspunsAmanat: 'Ora posso darti la risposta a ciò che mi hai chiesto mentre eri offline',
     offlinePregatire: 'Download di Kelion offline',
-    offlineGata: 'Kelion è pronto offline',
-    offlineDescarca: 'Scarica per offline',
-    offlineReincearca: 'Riprova',
     offlineFaraWebgpuScurt: 'Il cervello offline non funziona su questo dispositivo (niente WebGPU)',
     updateNouAnunt: 'Nuova versione — aggiornamento…',
     credits: 'crediti',
@@ -1502,9 +1481,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineEroareLocal: 'O cérebro local teve um problema:',
     raspunsAmanat: 'Agora posso te dar a resposta ao que me perguntaste enquanto estavas offline',
     offlinePregatire: 'Baixando Kelion offline',
-    offlineGata: 'Kelion está pronto offline',
-    offlineDescarca: 'Baixar para offline',
-    offlineReincearca: 'Tentar de novo',
     offlineFaraWebgpuScurt: 'O cérebro offline não funciona neste dispositivo (sem WebGPU)',
     updateNouAnunt: 'Nova versão — atualizando…',
     credits: 'créditos',

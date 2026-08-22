@@ -725,7 +725,7 @@ export const JULES_STATUS_TOOL: Tool = {
 export const RULEAZA_PORTILE_TOOL: Tool = {
   name: 'ruleaza_portile',
   description:
-    "ADMIN ONLY. Rulează PE SERVER porțile reale ale proiectului și întoarce rezultatul MĂSURAT: tipuri (tsc), teste (vitest), lacătul Gemini, exporturi fără utilizator, sintaxă, build frontend, hardcodări (LEGEA ANTI-HARDCODARE — SINGURUL răspuns adevărat la „ce e hardcodat în aplicație”: rulezi poarta 'hardcodari' și citezi verdictul; un „audit al codului” povestit fără poarta asta e inventat și se demască). FOLOSEȘTE-O DE DOUĂ ORI la orice schimbare: o dată ÎNAINTE (starea de plecare) și o dată DUPĂ (dovada că n-ai stricat nimic). Verdictul are TREI stări: TRECE, PICĂ și NU POT VERIFICA — o poartă care n-a pornit NU e nici trecută, nici picată, iar raportul devine INCOMPLET, nu 'e bine'. Nu raporta niciodată o stare pe care unealta asta nu ți-a întors-o.",
+    "ADMIN ONLY. Rulează PE SERVER porțile reale ale proiectului și întoarce rezultatul MĂSURAT: tipuri (tsc), teste (vitest), lacătul Gemini, exporturi fără utilizator, sintaxă, build frontend, hardcodări (LEGEA ANTI-HARDCODARE — SINGURUL răspuns adevărat la „ce e hardcodat în aplicație”: rulezi poarta 'hardcodari' și citezi verdictul; un „audit al codului” povestit fără poarta asta e inventat și se demască). FOLOSEȘTE-O DE DOUĂ ORI la orice schimbare: o dată ÎNAINTE (starea de plecare) și o dată DUPĂ (dovada că n-ai stricat nimic). Verdictul are TREI stări: TRECE, PICĂ și NU POT VERIFICA — o poartă care n-a pornit NU e nici trecută, nici picată, iar raportul devine INCOMPLET, nu 'e bine'. Nu raporta niciodată o stare pe care unealta asta nu ți-a întors-o. On voice, NEVER read the raw report aloud — say the verdict in one short sentence (what passed, what failed, what could not be verified).",
   input_schema: {
     type: 'object',
     properties: {
@@ -741,7 +741,7 @@ export const RULEAZA_PORTILE_TOOL: Tool = {
 export const VANEAZA_BUGURI_TOOL: Tool = {
   name: 'vaneaza_buguri',
   description:
-    'ADMIN ONLY. Caută AUTOMAT ce se poate căuta automat: erorile REALE ale utilizatorilor (adunate din browser), tiparele de bug ale analizorului, tipurile, testele, codul abandonat, sintaxa. Întoarce ce a găsit ȘI ce n-a putut căuta. ATENȚIE la citire: „0 erori de la utilizatori” apare DOAR dacă baza a răspuns — altfel scrie NU POT VERIFICA, fiindcă o listă goală de la o bază căzută nu înseamnă „curat”. Nu declara niciodată că nu sunt buguri pe baza ei: bugul de logică pe care niciun test nu-l acoperă NU se caută automat, se prinde măsurând comportamentul.',
+    'ADMIN ONLY. Caută AUTOMAT ce se poate căuta automat: erorile REALE ale utilizatorilor (adunate din browser), tiparele de bug ale analizorului, tipurile, testele, codul abandonat, sintaxa. Întoarce ce a găsit ȘI ce n-a putut căuta. ATENȚIE la citire: „0 erori de la utilizatori” apare DOAR dacă baza a răspuns — altfel scrie NU POT VERIFICA, fiindcă o listă goală de la o bază căzută nu înseamnă „curat”. Nu declara niciodată că nu sunt buguri pe baza ei: bugul de logică pe care niciun test nu-l acoperă NU se caută automat, se prinde măsurând comportamentul. On voice, NEVER read the raw findings aloud — say in one short sentence what was found and what could not be searched.',
   input_schema: {
     type: 'object',
     properties: { ore: { type: 'number', description: 'Câte ore în urmă să se uite după erorile utilizatorilor (implicit 48).' } },
@@ -751,7 +751,7 @@ export const VANEAZA_BUGURI_TOOL: Tool = {
 export const JURNAL_MASURATORI_TOOL: Tool = {
   name: 'jurnal_masuratori',
   description:
-    "ADMIN ONLY. Ultimele măsurători făcute de tine, cu metoda folosită, ora, durata și ce a ieșit (sau motivul pentru care n-a ieșit). Folosește-o când vrei să spui ceva despre starea sistemului: dacă afirmația ta nu se regăsește aici, înseamnă că n-ai măsurat-o — spune 'nu pot verifica', nu o cifră. Jurnal gol = n-ai măsurat nimic, NU 'totul e bine'.",
+    "ADMIN ONLY. Ultimele măsurători făcute de tine, cu metoda folosită, ora, durata și ce a ieșit (sau motivul pentru care n-a ieșit). Folosește-o când vrei să spui ceva despre starea sistemului: dacă afirmația ta nu se regăsește aici, înseamnă că n-ai măsurat-o — spune 'nu pot verifica', nu o cifră. Jurnal gol = n-ai măsurat nimic, NU 'totul e bine'. On voice, NEVER read the raw journal aloud — answer the question asked in one or two short spoken sentences.",
   input_schema: {
     type: 'object',
     properties: { cate: { type: 'number', description: 'Câte rânduri (implicit 30).' } },
