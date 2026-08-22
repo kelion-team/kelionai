@@ -1384,8 +1384,11 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    veche, cheile noi au urmat tu-ul european; (j) REPARAT — comentariul din era
    cozii la trimiterea-ocupat rescris la realitatea barge-in.
 6c. **JARVIS pasul 2 — cățelul (poarta faptelor) întins pe calea VOCALĂ —
-   MERGE (PR #1323, master ad5dff1d, 21 aug ~23:3xZ; măsurarea live armată,
-   rezultatul se scrie aici DOAR după ce e citit)**: `salveazaTura` rulează
+   MERGE (PR #1323) + PUBLICAT LIVE, MĂSURAT 22 aug 00:0xZ: /api/version →
+   v=ad5dff1, ver 6.7, publicat 21 aug 23:38:17Z (comportamentul pe o tură
+   vocală REALĂ — ordinea turnComplete/toolCall, prima notă a cățelului —
+   rămâne „nu pot verifica" de aici: proba pe dispozitiv e la owner)**:
+   `salveazaTura` rulează
    `pretentiiFaraFapta` pe textul ROSTIT cu dovezile turei de voce
    (`doveziVoceTura`); nota se scrie pe ecran+istoric, NU se citește cu voce
    (§8). Fals-pozitivele găsite de verificatori și reparate ÎNAINTE de merge:

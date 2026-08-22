@@ -93,8 +93,14 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               (scoaterea totală = pasul 7/Piper). Verificat cu 3 agenți (2 runde
               FAIL reparate: lacătele `taiereManuala`+adresare, ancorele stale,
               bufUser, cursa eraInZbor). RĂMAS: proba pe telefonul owner-ului.
-      - [ ] 2. cățelul (`poartaFaptelor`) legat pe calea voce — CONSTRUIT pe
-              branch (21 aug seara, + reparațiile celor 3 agenți): pe tura
+      - [x] 2. cățelul (`poartaFaptelor`) legat pe calea voce — MERGE (PR
+              #1323) + PUBLICAT LIVE, MĂSURAT 22 aug 00:0xZ: /api/version →
+              v=ad5dff1 (exact commitul merge-ului), ver 6.7, publicat
+              21 aug 23:38:17Z. Ce rămâne „nu pot verifica" de aici (proba
+              pe dispozitiv, la owner / jurnalul VPS): ordinea reală
+              turnComplete/toolCall la Google și prima notă reală a
+              cățelului pe o tură vocală. CONSTRUIT (21 aug seara,
+              + reparațiile celor 3 agenți): pe tura
               vocală PUR-UȘOARĂ, rostirea lui Kelion se judecă pe uneltele
               chiar reușite ale turei (doveziVoceTura); turele cu temei din
               afară NU se judecă — steagul călătorește CU anunțul de sistem
@@ -109,8 +115,7 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               declarate: recall-ul fără clitic („da, am trimis emailul" despre
               tura trecută) primește nota „nu pot verifica" — onestă, nu falsă;
               scurgerile pe turele suprimate greșesc spre fals-negativ (sigur).
-              Lacăte: catelulPeVoce.test.ts (cod viu, anti-M6). RĂMAS pt. bifă:
-              merge + măsurat live (inclusiv ordinea turnComplete/toolCall).
+              Lacăte: catelulPeVoce.test.ts (cod viu, anti-M6).
       - Registre reziduale pas 2 (re-verificatorul, nu blocante): etichetele
         familiilor 10/11 cară fragmente de verdict („nimic nu va mișca",
         „auditul e inventat") care pe varianta vocală contrazic „nu pot
