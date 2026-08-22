@@ -354,8 +354,18 @@ function MonitorAudio({ url, taskId }: { url: string; taskId: string }) {
 // o înlocuiește când sosește.
 function MonitorPagina({ url, title, taskId, allow }: { url: string; title: string; taskId: string; allow: string }) {
   const [blocat, setBlocat] = useState(false)
+  // CITITORUL DE PAGINI (owner, 22 aug: „sa functioneze pagina de internet sa
+  // afiseze"): o pagină care refuză rama nu mai moare în „nu poate fi
+  // afișată" — serverul o citește (gardă SSRF + plafon în flux + cache) și
+  // conținutul lizibil se arată aici, cu linkul spre original păstrat.
+  const [citita, setCitita] = useState<{ titlu: string; html: string } | null>(null)
+  const [citind, setCitind] = useState(false)
+  const [motivNecitit, setMotivNecitit] = useState<string | null>(null)
   useEffect(() => {
     setBlocat(false)
+    setCitita(null)
+    setCitind(false)
+    setMotivNecitit(null)
     // URL relativ (ex. /api/route) e pagina NOASTRĂ, same-origin — mereu înrămabilă.
     if (!/^https?:\/\//i.test(url)) return
     let viu = true
@@ -365,15 +375,46 @@ function MonitorPagina({ url, title, taskId, allow }: { url: string; title: stri
         if (!viu || !v || v.incadrabil !== false) return
         setBlocat(true)
         setTaskStatus(taskId, 'error')
+        setCitind(true)
+        return fetch(`/api/citeste-pagina?url=${encodeURIComponent(url)}`)
+          .then(async (rc) => {
+            if (!viu) return
+            if (rc.ok) {
+              const j = (await rc.json()) as { titlu?: string; text?: string }
+              if (j.text) {
+                setCitita({ titlu: j.titlu ?? title, html: renderMarkdown(j.text.slice(0, 500_000)) })
+                setTaskStatus(taskId, 'ok')
+                return
+              }
+            }
+            const j = (await rc.json().catch(() => null)) as { motiv?: string } | null
+            setMotivNecitit(j?.motiv ?? `serverul a răspuns ${rc.status}`)
+          })
+          .finally(() => { if (viu) setCitind(false) })
       })
       .catch(() => { /* verificare picată ≠ refuz — rama rămâne */ })
     return () => { viu = false }
-  }, [url, taskId])
+  }, [url, taskId, title])
   if (blocat) {
     return (
-      <div className="workspace-blocked">
-        <p>{uiStrings().wsPageBlocked}</p>
-        <a href={url} target="_blank" rel="noreferrer" className="workspace-action">{uiStrings().wsOpenTab}</a>
+      <div className={citita ? 'workspace-doc' : 'workspace-blocked'}>
+        <p style={{ marginBottom: 8 }}>
+          <a href={url} target="_blank" rel="noreferrer" className="workspace-action">{uiStrings().wsOpenTab}</a>
+        </p>
+        {citita ? (
+          <>
+            <h2 style={{ marginTop: 0 }}>{citita.titlu}</h2>
+            {/* eslint-disable-next-line react/no-danger -- renderMarkdown escapes the source first */}
+            <div dangerouslySetInnerHTML={{ __html: citita.html }} />
+          </>
+        ) : citind ? (
+          <p>⏳ {title}…</p>
+        ) : (
+          <>
+            <p>{uiStrings().wsPageBlocked}</p>
+            {motivNecitit && <p style={{ opacity: 0.75, fontSize: 13 }}>({motivNecitit})</p>}
+          </>
+        )}
       </div>
     )
   }

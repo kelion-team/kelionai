@@ -214,22 +214,65 @@ export async function turaCreierului(
     return { ok: false, motiv: `creierul nu răspunde: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}` }
   }
   if (!r.ok) return { ok: false, motiv: `creierul a răspuns ${r.status}` }
-  const brut = await r.text()
-  // Fluxul e text + cadre `CTRL json CTRL`: la split pe CTRL, segmentele impare
-  // sunt cadrele. Un segment impar care nu e JSON valid se păstrează ca text —
-  // mai bine un rând ciudat în rezultat decât un cadru pierdut tăcut.
+  // STREAMING, NU BUFAT (clepsidra pe voce — vânătoarea 22 aug, BLOCANT):
+  // `await r.text()` aștepta TOATĂ tura și abia apoi despacheta cadrele, deci
+  // pașii de lucru {executie} ar fi ajuns la browser DUPĂ ce căutarea se
+  // terminase — un flash inutil. Acum fluxul se taie incremental pe CTRL:
+  // fiecare cadru complet pleacă la laControl PE LOC (pașii curg pe monitor
+  // cât ușa chiar macină), textul se adună exact ca înainte. Segmentul impar
+  // care nu e JSON valid se păstrează ca text — mai bine un rând ciudat decât
+  // un cadru pierdut tăcut. Semnătura și întoarcerea rămân neschimbate.
   let text = ''
-  const segmente = brut.split(CTRL)
-  for (let i = 0; i < segmente.length; i++) {
-    if (i % 2 === 0) {
-      text += segmente[i]
-      continue
+  let rest = ''
+  const consuma = (bucata: string, final: boolean): void => {
+    rest += bucata
+    for (;;) {
+      const deschis = rest.indexOf(CTRL)
+      if (deschis === -1) {
+        // Niciun marcaj în ce avem (CTRL e UN caracter — nu se poate rupe
+        // între chunk-uri): totul e text.
+        text += rest
+        rest = ''
+        return
+      }
+      const inchisLa = rest.indexOf(CTRL, deschis + CTRL.length)
+      if (inchisLa === -1) {
+        // Cadru încă incomplet: textul de dinainte pleacă, cadrul așteaptă.
+        text += rest.slice(0, deschis)
+        rest = rest.slice(deschis)
+        if (final) {
+          // Flux încheiat cu un cadru neterminat — rămâne text (nu-l pierdem).
+          text += rest
+          rest = ''
+        }
+        return
+      }
+      text += rest.slice(0, deschis)
+      const corp = rest.slice(deschis + CTRL.length, inchisLa)
+      rest = rest.slice(inchisLa + CTRL.length)
+      try {
+        laControl(JSON.parse(corp) as Record<string, unknown>)
+      } catch {
+        text += corp
+      }
     }
-    try {
-      laControl(JSON.parse(segmente[i]) as Record<string, unknown>)
-    } catch {
-      text += segmente[i]
+  }
+  try {
+    const cititor = r.body?.getReader()
+    if (cititor) {
+      const decodor = new TextDecoder()
+      for (;;) {
+        const { done, value } = await cititor.read()
+        if (done) break
+        consuma(decodor.decode(value, { stream: true }), false)
+      }
+      consuma(decodor.decode(), true)
+    } else {
+      consuma(await r.text(), true)
     }
+  } catch (e) {
+    if (!text.trim()) return { ok: false, motiv: `fluxul creierului s-a rupt: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}` }
+    // Ce s-a primit deja e răspuns real — nu-l aruncăm pentru o coadă ruptă.
   }
   return { ok: true, text: text.trim() }
 }
@@ -1566,7 +1609,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // 'niveluri' (nivelurile de tranzacționare pe grafic), 'gest'/'gesture'
             // (animația avatarului) — aceeași scurgere prin lista albă, adăugate
             // 10 aug ca cadrele creierului să ajungă la browser și pe voce.
-            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture', 'apel']
+            // 'executie' (22 aug — clepsidra pe voce): pașii de lucru curg pe
+            // monitor și când cererea e SPUSĂ, nu doar scrisă (împreună cu
+            // streaming-ul din turaCreierului, care îi lasă să plece PE LOC).
+            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture', 'apel', 'executie']
             // MONITORUL PE VOCE (JARVIS pasul 5 — PROIECT-CHAT-VOCE §8):
             // până aici, ecranul și gura erau complet independente — același
             // șir de caractere pleca SIMULTAN pe monitor (cadrul de mai jos)

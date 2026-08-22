@@ -53,7 +53,9 @@ describe('offline: funcțiile de internet nu se afișează (ChatPanel)', () => {
     expect(chat).toMatch(/urecheaLocalaRef\.current\?\.stop\(\)[\s\S]{0,300}if \(!micManualOffRef\.current\) void ensureMicRef\.current\(\)/)
     expect(chat).toMatch(/vlGeneratieRef\.current\+\+[\s\S]{0,400}micRef\.current\?\.stop\(\)/)
     expect(chat).toMatch(/void pornesteUrecheaLocalaRef\.current\(\)/)
-    expect(chat).toMatch(/if \(piperVorbeste\(\)\) return/)
+    // half-duplex și față de coada Chirp rămasă să sune (verificatorul:
+    // stopVoice nu o mai taie la căderea netului — redarea e locală).
+    expect(chat).toMatch(/if \(piperVorbeste\(\) \|\| isVoicePlaying\(\)\) return/)
     expect(chat).toMatch(/if \(!esteConectat\(\)\) return\s*\n\s*if \(micRef\.current \|\| micStartingRef\.current \|\| micManualOffRef\.current\) return/)
   })
 

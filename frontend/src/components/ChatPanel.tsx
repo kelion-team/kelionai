@@ -1756,10 +1756,14 @@ export default function ChatPanel({
         // Stopped by Adrian or replaced by the new question — no error
         // message, no writing over what's on the screen right now.
       } else {
-        // Don't let the voice say more than was written (Jul 10 bug: the text
-        // disappeared on error, but the audio kept going). stopVoice alone
-        // misses the LIVE WebAudio queue — interruptAll cuts TTS + LIVE mouth.
-        interruptAll('chat-error')
+        // Regula veche „vocea să nu spună mai mult decât e scris" (10 iul) nu
+        // mai cere tăierea: ramura de eroare PĂSTREAZĂ acum tot textul primit
+        // pe ecran (acc + ⚠️ mai jos), iar serverul emite audio-ul unei
+        // propoziții DUPĂ textul ei — deci audio-ul deja livrat e acoperit de
+        // text. Tăierea lui la o rupere de stream producea exact asimetria
+        // inversă, măsurată de owner: „chatul se trunchează audio" (vânătoarea
+        // 22 aug, MEDIU confirmat). Tăiem doar când chiar nu s-a scris NIMIC.
+        if (!acc.trim()) interruptAll('chat-error')
         mouth?.stopSpeaking() // classic/chirp mouth queue too
         const code = codErr
         const spoken = strings(resolveLang(replyLang))
@@ -1931,9 +1935,10 @@ export default function ChatPanel({
       onLive: () => {},
       onPhrase: (_text, _f, audio) => {
         if (!audio || !urecheaOfflineGata()) return
-        // Half-duplex local: cât vorbește gura Piper, frazele se aruncă
-        // (propria lui voce ar intra înapoi — v1 declarat, fără barge-in).
-        if (piperVorbeste()) return
+        // Half-duplex local: cât vorbește ORICE gură locală (Piper sau coada
+        // Chirp rămasă să sune după căderea netului — stopVoice nu o mai taie),
+        // frazele se aruncă (propria voce ar intra înapoi — v1, fără barge-in).
+        if (piperVorbeste() || isVoicePlaying()) return
         void transcrieOffline(wavBase64LaFloat32(audio), speechLangRef.current).then((text) => {
           if (text && !esteConectat()) void send(text)
         })
@@ -1973,7 +1978,13 @@ export default function ChatPanel({
     micRef.current = null
     micStartingRef.current = false
     setListening(false)
-    stopVoice()
+    // stopVoice() a fost SCOS de aici (vânătoarea 22 aug, BLOCANT confirmat):
+    // detectorul basculează pe UN singur semnal (evenimentul 'offline' la
+    // comutarea Wi-Fi↔celular, sau UN ping /health ratat la 4s) — iar audio-ul
+    // Chirp deja primit e ÎN MEMORIE (data:-URI), redarea lui nu are nevoie de
+    // rețea. Tăierea lui la un fâlfâit de o secundă era truncare pură:
+    // răspunsul tăiat nu se mai auzea niciodată. Redarea locală se termină
+    // singură; orice tură nouă o taie oricum prin interruptAll.
     // Urechea locală pornește singură (modelul se ÎNCARCĂ din cache, fără
     // rețea — dacă nu fusese descărcat cât era net, pregătirea pică onest și
     // offline rămâne pe scris). Oprirea manuală a omului se respectă.
@@ -2335,6 +2346,13 @@ export default function ChatPanel({
                   vl.intrerupeRedarea()
                 },
               })
+              // ANTI-ECOU la (re)deschidere sub Chirp viu (vânătoarea 22 aug):
+              // registerLiveFocus NU mai taie tura scrisă în redare — deci
+              // urechea sesiunii NOI trebuie să tacă cât mai sună Chirp-ul,
+              // altfel modelul își aude coada („varză"). Eliberarea există
+              // deja: onEnd-ul playVoice face setRedareExterna(false) pe
+              // vlRef.current — adică exact sesiunea asta.
+              if (isVoicePlaying()) vl.setRedareExterna(true)
               setListening(true)
               // Tabul ăsta a luat VOCEA — o anunță pe canal, ca celelalte
               // taburi să se zăvorască (auditul de noapte: calea live pornea
