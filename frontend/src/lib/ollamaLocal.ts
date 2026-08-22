@@ -18,6 +18,7 @@
 
 import { getOllamaConfig } from './ollamaConfig'
 import { reteaLenta, getTeava } from './retea'
+import { initiazaGestiuneaEnergiei, poateRulaVerificare, poateRulaDownloadGreu, intervalVerificareAdaptiv } from './energie'
 
 export interface StareOllamaLocal {
   instalat: boolean // Ollama rulează pe device
@@ -95,6 +96,11 @@ function matchModel(name: string, model: string): boolean {
  *  Pe conexiune lentă (Bluetooth tethering, 2G/3G) mărește timeout-ul și
  *  avertizează utilizatorul că va dura mai mult. */
 async function pullModel(model: string): Promise<boolean> {
+  // Gestiunea energiei: nu descărca 2GB pe baterie scăzută
+  if (!poateRulaDownloadGreu()) {
+    anunta(`Download ${model} amânat — baterie prea scăzută. Se va descărca când te încarci.`, 'info')
+    return false
+  }
   stare.inDownload = true
   const lent = reteaLenta()
   const teava = getTeava()
@@ -190,6 +196,11 @@ export async function verificaOllamaLocal(): Promise<StareOllamaLocal> {
   const acum = Date.now()
   stare.ultimaVerificare = acum
 
+  // Gestiunea energiei: nu verifica când ecranul e stins sau bateria e critică
+  if (!poateRulaVerificare()) {
+    return stare
+  }
+
   // Configul de la server (model + digest) — LEGEA ANTI-HARDCODARE
   const cfg = await getOllamaConfig()
   if (!cfg.model) {
@@ -274,10 +285,19 @@ export function stareOllamaLocal(): StareOllamaLocal {
 }
 
 /** Pornește verificarea periodică + imediată la startup.
- *  Discret: nu anunță dacă totul e OK, doar dacă trebuie download/update. */
+ *  Discret: nu anunță dacă totul e OK, doar dacă trebuie download/update.
+ *  Gestiunea energiei: interval adaptiv (30/60/90 min după baterie),
+ *  oprește verificarea când ecranul e stins sau bateria e critică. */
 export function pornesteVerificareaOllamaLocal(): void {
+  initiazaGestiuneaEnergiei()
   void verificaOllamaLocal().catch(() => {})
-  setInterval(() => {
-    if (!stare.inDownload) void verificaOllamaLocal().catch(() => {})
-  }, INTERVAL_VERIFICARE_MS)
+  // Interval adaptiv: se re-citește la fiecare verificare (bateria se schimbă)
+  const programeazaUrmatoarea = (): void => {
+    const interval = intervalVerificareAdaptiv(INTERVAL_VERIFICARE_MS)
+    setTimeout(() => {
+      if (!stare.inDownload) void verificaOllamaLocal().catch(() => {})
+      programeazaUrmatoarea()
+    }, interval)
+  }
+  programeazaUrmatoarea()
 }

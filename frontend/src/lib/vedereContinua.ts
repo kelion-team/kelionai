@@ -92,6 +92,9 @@ async function trimiteObservatie(obs: ObservatieVizuala): Promise<void> {
 
 async function tick(): Promise<void> {
   if (!video || document.hidden) return
+  // Gestiunea energiei: pe baterie critică, sare ciclul (camera consumă mult)
+  const { poateRulaVerificare } = await import('./energie')
+  if (!poateRulaVerificare()) return
   const captura = captureazaCadru()
   if (!captura) return
   const acum = Date.now()
