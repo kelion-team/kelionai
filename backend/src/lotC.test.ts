@@ -39,8 +39,8 @@ describe('C8 — pre-roll-ul de barge-in: primul cuvânt al întreruperii ajunge
     expect(vl).toMatch(/else if \(eraPoarta && !vadPornit\) \{/)
     expect(vl).toMatch(/eraPoarta = poarta/)
   })
-  it('pe calea cu VAD, deschiderea golește inelul întâi (regula veche rămâne)', () => {
-    expect(vl).toMatch(/if \(rez\.deschis && !eraDeschis\) \{[\s\S]{0,200}for \(const b of preRoll\) trimiteCadru\(b\)/)
+  it('pe calea cu VAD, deschiderea golește inelul întâi — cu gardul RMS anti-ecou (F10 al marii verificări: mobilul fără AEC nu trimite coada de ecou)', () => {
+    expect(vl).toMatch(/if \(rez\.deschis && !eraDeschis\) \{[\s\S]{0,700}if \(preRoll\.some\(\(b\) => rmsDin\(b\) >= PRAG_RMS_PREROLL_VAD\)\) \{\s*\n\s*for \(const b of preRoll\) trimiteCadru\(b\)/)
   })
 })
 
