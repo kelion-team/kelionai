@@ -1660,7 +1660,8 @@ Adevărurile măsurate (pe scurt — ce spun secțiunile vechi e fals unde contr
   `deploy/`; frânele reale sunt pe BANI (`plafonConstructor`), nu „20/24h".
 - **Patrula (iscoada) rulează NECONDIȚIONAT** (autonomActiv()==true prin LEGEA
   din 16 aug) — „off by default" era fals; comentariul corectat în lot D.
-- **micStream**: pauza frazei = 1400 ms; NU mai există STT/dictare/
+- **micStream**: pauza frazei = 3000 ms (urcată de la 1400 pe ordinul verbatim
+  al owner-ului, 22 aug: „trubie la 3 sec sa se inchida"); NU mai există STT/dictare/
   `utteranceCoalescer` (audio brut la creier); raportarea erorilor =
   `lib/errorReport.ts` → `/api/client-errors`.
 - **Imagini**: primar `imagen-4.0-generate-001`, rezervă `gemini-3.1-flash-image`
