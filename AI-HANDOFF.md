@@ -1444,7 +1444,10 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    reparat: registru separat doveziSarcinaVoce (starea finală nu se mai
    contaminează cu dovezile turei precedente — carry-over-ul cățelului rămâne
    neatins), inchideSarcinaVoce() pe toate cele 5 drumuri de sfârșit de tură
-   (nicio sarcină eternă pe `executing`), fișa nu mai promite show_document
+   + garda `if (inchis)` pe rezultatul sosit după close (nicio sarcină eternă
+   pe DRUMURILE DE TURĂ; onest: un crash de proces sau o tranziție finală
+   picată pe DB pot lăsa un rând ne-final — logat, fără măturare de
+   expirare), fișa nu mai promite show_document
    pe sesiunea Live (detaliul pe monitor DOAR prin ușă), respingerile
    {ok:false} logate, index (user_email, created_at DESC), obiectiv cu
    fallback pe ultima rostire salvată. Limite declarate în RAMAS (verdictul

@@ -214,7 +214,13 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               emailul trimis e trimis; verificatorul de onestitate ceruse
               `expired`, dar executing→expired e ilegal în mașina de stări) și
               obiectivul capturat lacom poate păstra o rostire ulterior
-              suprimată (aceeași clasă de expunere per-user ca istoricul);
+              suprimată (aceeași clasă de expunere per-user ca istoricul), iar
+              fallback-ul ultimaRostireTura poate atribui unei rostiri VECHI o
+              faptă declanșată pe o tură ulterior suprimată (fereastră îngustă,
+              zgomot de atribuire — nu verdict fals); un crash de proces sau o
+              tranziție finală picată pe DB pot lăsa un rând ne-final în
+              jurnal (logat, fără măturare de expirare — de cântărit o
+              măturare la pornire pe lista mare);
               „NEVER read aloud" din fișă e INSTRUCȚIE, nu mecanism (mecanismul
               = pasul 5); UNELTE_LIVE (setul-rezervă „dovedit") cară acum o
               schemă nemăsurată live, iar non-adminul n-are plasă sub el — NU
