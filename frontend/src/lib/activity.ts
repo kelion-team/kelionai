@@ -19,8 +19,3 @@ export function reportActivity(p: { voice?: boolean; busy?: boolean; draft?: boo
   if (p.busy !== undefined) busy = p.busy
   if (p.draft !== undefined) draft = p.draft
 }
-
-/** True only when nothing live would be cut by a hard reset. */
-export function isCalm(): boolean {
-  return !voice && !busy && !draft
-}
