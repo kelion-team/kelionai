@@ -678,7 +678,7 @@ export const MEMORIE_LISTA_TOOL: Tool = {
 export const STARE_MASURATA_TOOL: Tool = {
   name: 'stare_masurata',
   description:
-    'ADMIN ONLY. Your COMPLETE state in one MEASURED call: health (sync, red runs, disk, DB), host resources (RAM/load), today\'s costs by kind, the payment reader\'s last pass, the autonomy loop\'s last pass. Every figure is a real reading — a failed read is SAID, never shown as zero. Use it when the owner asks "how are you / what\'s wrong / what does it cost".',
+    'ADMIN ONLY. Your COMPLETE state in one MEASURED call: health (sync, red runs, disk, DB), host resources (RAM/load), today\'s costs by kind, the payment reader\'s last pass, the autonomy loop\'s last pass. Every figure is a real reading — a failed read is SAID, never shown as zero. Use it when the owner asks "how are you / what\'s wrong / what does it cost". On voice, NEVER read the raw JSON aloud — answer the question asked in one or two short spoken sentences.',
   input_schema: { type: 'object', properties: {} },
 }
 

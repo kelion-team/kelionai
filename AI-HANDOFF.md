@@ -1457,6 +1457,21 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    oaspetelui pe voce). Porți după reparație: tsc 0, 214 fișiere/1929 teste,
    hardcodări/sintaxă/exporturi verzi; contoare: registru 123, matrice 125,
    rând nou de manual.
+6f. **JARVIS pasul 5 — monitorul: predare scurtă, fără citire cu voce
+   (PROIECT-CHAT-VOCE §8) — v1 CONSTRUIT (22 aug noaptea), în verificarea
+   celor 3 agenți**: cercetașul a măsurat că ecranul și gura erau complet
+   independente — același text pleca simultan pe monitor și în poziția
+   „rezultat de spus" a modelului Live, cu recitarea oprită DOAR de
+   instrucțiune. Mecanismul nou (cod pur, zero latență): steag
+   `cadruEcranInUsa` ridicat exact în lista albă CADRE_ECRAN; peste
+   PRAG_PREDARE_ECRAN (300, hardcod-permis), textul pleacă ÎNTREG în
+   `pe_ecran_nu_se_recita` + `de_rostit` cu predarea într-o propoziție
+   (nicio trunchiere — ar putea inversa sensul); fișa ușii + stare_masurata
+   poartă regula; măsurătoare pulsVoce.usiCuEcran/predariEcran. Limite
+   declarate în RAMAS (mecanismul reduce presiunea, n-o elimină; uneltele
+   directe fără ecran au doar instrucție; spoken:true rămâne nearmat pe ușă —
+   deliberat; get_monitor = decizie owner). Porți la construcție: tsc 0,
+   215 fișiere/1933 teste, hardcodări/sintaxă/exporturi verzi.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

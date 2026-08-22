@@ -241,7 +241,38 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               ≥5 închideri + garda inchis + respingeri logate). RĂMAS pt.
               bifă: verdictele finale ale celor 2 agenți + merge + măsurat
               live.
-      - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
+      - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce —
+              v1 CONSTRUIT pe branch (22 aug noaptea), în verificarea celor 3
+              agenți. Gaura MĂSURATĂ de cercetaș: ecranul și gura erau complet
+              INDEPENDENTE — același șir de caractere pleca simultan pe
+              monitor (cadrul doc din autoPreview) și în poziția „rezultat de
+              spus" a modelului Live (vocalLive raspundeUnealta cu r.text
+              întreg), iar singura frână a recitării era instrucțiunea.
+              CONSTRUIT (tăietura minimă, cod pur, zero latență): steagul
+              cadruEcranInUsa se ridică exact în lista albă CADRE_ECRAN; cu
+              ecran aprins și text peste PRAG_PREDARE_ECRAN (300, hardcod-
+              permis pe linie), textul pleacă ÎNTREG (nicio trunchiere —
+              tăierea poate inversa sensul, Legea #1) în câmpul
+              „pe_ecran_nu_se_recita", iar „de_rostit" cere predarea într-o
+              propoziție; fișa ușii poartă regula; stare_masurata a primit
+              fraza de voce care îi lipsea; măsurătoare: pulsVoce.usiCuEcran +
+              predariEcran pe GET /api/vocal-live/stare. LIMITE DECLARATE:
+              mecanismul REDUCE presiunea recitării, n-o elimină (modelul
+              vede și câmpul de ecran — numele câmpului + fișa rămân stratul
+              de instrucție; gradul REAL de ascultare = „nu pot verifica" din
+              repo, se măsoară pe dispozitiv); uneltele directe fără cadru de
+              ecran (stare_masurata, dovada_faptelor) au DOAR instrucție —
+              ele nu aprind monitorul, deci split-ul nu li se aplică; ușa NU
+              trimite spoken:true (blocul de stil „pentru ureche" din chat.ts
+              rămâne nearmat pe voce — interacțiunea cu garda de limbă e
+              netestată, schimbare amânată deliberat); textul creierului
+              rămâne neatins pe ecran (autoPreview „totul pe monitor", ordinul
+              din 19 aug, nu se stinge). DECIZIE OWNER: get_monitor —
+              „citește-mi ce scrie pe ecran" cerut EXPLICIT cu voce e azi
+              posibil prin ușă (textul ecranului ajunge în gura lui Kelion);
+              rămâne așa (excepție la §8 la cerere explicită) sau se
+              interzice? RĂMAS pt. bifă: 3 agenți + merge + măsurat live
+              (pulsVoce.usiCuEcran/predariEcran + proba pe dispozitiv).
       - [ ] 6. tastatura opțională (input scris, output tot voce)
       - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
       [NOTĂ 21 aug — propoziția veche „Voce-only: încă neîncepută" e DEPĂȘITĂ:
