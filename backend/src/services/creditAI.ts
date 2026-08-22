@@ -2,7 +2,7 @@ import { config } from '../config.js'
 import { cheltuialaLunaPeKinduri } from '../db.js'
 import { getSerperBalance } from './serperBalance.js'
 import { geminiLive } from './geminiDirect.js'
-import { googleServiceAccount } from './googleCreds.js'
+import { contServiciuGoogleServesteLive } from './tokenChecks.js'
 import type { Masuratoare } from './masurare.js'
 
 // ── CÂT CREDIT A MAI RĂMAS, PE FIECARE AI (Adrian, 8 aug 2026) ──────────────
@@ -173,11 +173,22 @@ async function randGemini(): Promise<CreditAI> {
     ramas = { ...ramas, cum: `${ramas.cum}${nota}` }
   }
 
+  // ALERTĂ FALSĂ „fără credit" SCOASĂ (owner 20 aug: „primeste o alerta falsa gemeni
+  // lipsa credit, scoate alerta de la gemeni de tot"). Google NU expune soldul prepay,
+  // deci un ping care NU întoarce 200 nu e dovadă de „fără credit" (regula #1) — nu mai
+  // aprindem ROȘU pe el. Verde apare DOAR pe 200 real; orice altceva rămâne „nu pot
+  // verifica" (gri), nu „fără credit". Alerta REALĂ de credit vine doar dintr-un eșec
+  // MĂSURAT în chatul viu (402/quota), cu link de reîncărcare (routes/chat.ts).
   const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = !live
     ? picat('un apel mic la modelul curent (maxOutputTokens: 1)', 'pingul către Gemini a picat')
     : !live.ok
       ? picat('un apel mic la modelul curent (maxOutputTokens: 1)', live.reason ?? 'cheie lipsă')
-      : reusit('un apel mic la modelul curent (maxOutputTokens: 1)', { da: live.serving, detaliu: live.reason }, 0)
+      : live.serving
+        ? reusit('un apel mic la modelul curent (maxOutputTokens: 1)', { da: true }, 0)
+        : picat(
+            'un apel mic la modelul curent (maxOutputTokens: 1)',
+            `Google a răspuns dar nu a servit (${live.reason ?? '—'}); soldul prepay nu e citibil, deci NU confirm „fără credit"`,
+          )
 
   return {
     furnizor: 'Gemini (Google AI)',
@@ -221,12 +232,19 @@ async function randGoogleCloud(): Promise<CreditAI> {
   // VERDE/ROȘU, nu gri (owner, 13 aug: „culorile la fel pt toți AI"). Google nu dă
   // „cât mai ai", dar pot spune dacă e OPERAȚIONAL: cont de serviciu cu JSON valid
   // (parsabil + client_email) sau cheie TTS pusă → verde; nimic → roșu. Măsurat.
-  const saValid = Boolean(googleServiceAccount())
+  // SERVEȘTE = CHECK LIVE, nu JSON.parse (owner, 19 aug: „bec verde din JSON.parse").
+  // Chiar obținem un access token de la Google; o cheie revocată/dezactivată dar
+  // parsabilă PICĂ acum (verde = Google a răspuns, nu „JSON-ul e valid").
+  const saLive = await contServiciuGoogleServesteLive()
   const serveste: Masuratoare<{ da: boolean; detaliu?: string }> = reusit(
-    'cont de serviciu Google valid (JSON parsabil) sau cheie TTS pusă',
+    'cont de serviciu Google răspunde LIVE (access token) sau cheie TTS pusă',
     {
-      da: saValid || Boolean(config.googleTtsKey),
-      detaliu: saValid ? 'cont de serviciu valid — STT/TTS/traducere' : config.googleTtsKey ? 'cheie TTS pusă' : 'nimic configurat',
+      da: saLive.ok || Boolean(config.googleTtsKey),
+      detaliu: saLive.ok
+        ? `Google a răspuns — STT/TTS/traducere (${saLive.detaliu})`
+        : config.googleTtsKey
+          ? 'cheie TTS pusă (rezervă)'
+          : saLive.detaliu || 'nimic configurat',
     },
     0,
   )

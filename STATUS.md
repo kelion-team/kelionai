@@ -27,7 +27,7 @@ _Last updated: 2026-07-25_
 
 ## 🔑 Credentials (configurate)
 
-- `KIMI_API_KEY` / `GLM_API_KEY` — active în Railway.
+- `KIMI_API_KEY` / `GLM_API_KEY` — active în env-ul de pe VPS.
 - `GOOGLE_SERVICE_ACCOUNT_JSON` — set (Chirp 3 HD).
 - `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` — set.
 - `BRIDGE_SECRET` — set, puntea VPS conectată.

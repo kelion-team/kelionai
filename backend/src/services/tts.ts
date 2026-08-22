@@ -61,7 +61,7 @@ export type TtsEngine = 'google' | 'local'
 
 export type TtsResult =
   | { ok: true; audio: Buffer; engine: TtsEngine }
-  | { ok: false; status: number; error: string }
+  | { ok: false; status: number; error: string; detaliu?: string }
 
 export interface SynthOpts {
   // MP3 for the browser <audio> tag (default); LINEAR16 = raw 24kHz PCM.
@@ -126,10 +126,21 @@ async function ttsPost(
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     })
-  } catch {
-    return { ok: false, status: 502, error: 'tts_failed' }
+  } catch (e) {
+    // De ce a picat CHIAR (rețea/timeout) — nu mai ascundem motivul (owner, 19 aug:
+    // „Chirp 3 HD nu e funcțional — de ce?"). Fără el, cauza rămânea invizibilă.
+    const motiv = String((e as Error)?.message ?? e).slice(0, 200)
+    console.error(`[tts] Chirp fetch a picat: ${motiv}`)
+    return { ok: false, status: 502, error: 'tts_failed', detaliu: motiv }
   }
-  if (!res.ok) return { ok: false, status: 502, error: 'tts_failed' }
+  if (!res.ok) {
+    // MOTIVUL REAL AL LUI GOOGLE (înainte se arunca): 403 = API Text-to-Speech
+    // neactivat / cont de serviciu fără drept; 429 = cotă/billing; 400 = voce/limbă
+    // invalidă. Acum apare în server_logs, ca să știm cauza, nu s-o ghicim.
+    const corp = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300)
+    console.error(`[tts] Chirp HTTP ${res.status}: ${corp}`)
+    return { ok: false, status: 502, error: `tts_http_${res.status}`, detaliu: corp }
+  }
   return res
 }
 

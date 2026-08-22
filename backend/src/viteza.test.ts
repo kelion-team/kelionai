@@ -25,12 +25,11 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     expect(chat).not.toMatch(/Promise\.all\(curse\)/)
   })
 
-  it('politica de model păstrează Cloud-ul selectat și urcă pe Gemini profund doar când trebuie', () => {
+  it('politica de model urcă pe Gemini profund doar pe tura grea cu creier dublu', () => {
     const baza = { modelChat: 'google-direct/gemini-2.5-flash', modelProfund: 'gemini-2.5-pro' }
     expect(alegeModelOrchestrator({ ...baza, creierDublu: false, turaGrea: true })).toBe(baza.modelChat)
     expect(alegeModelOrchestrator({ ...baza, creierDublu: true, turaGrea: false })).toBe(baza.modelChat)
     expect(alegeModelOrchestrator({ ...baza, creierDublu: true, turaGrea: true })).toBe('google-direct/gemini-2.5-pro')
-    expect(alegeModelOrchestrator({ ...baza, modelChat: 'ollama-cloud/qwen3.5:397b', creierDublu: true, turaGrea: true })).toBe('ollama-cloud/qwen3.5:397b')
     expect(chat).toContain('let orchestratorModel = alegeModelOrchestrator({')
     expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel/)
   })
@@ -42,7 +41,9 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     // mesajul neutru. Rulează doar pe calea deja pierdută (`!r && !textFlowed`).
     expect(chat).toMatch(/CREIER PROFUND EPUIZAT/)
     expect(chat).toMatch(/orchestratorModel = orChatModel/)
-    expect(chat).toMatch(/if \(!r && !textFlowed && orChatModel && orChatModel !== orchestratorModel\)/)
+    // Gardul nou din condiție (registrul backend #2): plasa nu mai reia tura
+    // dacă încercarea eșuată a apucat să cheme unelte (efectele s-ar dubla).
+    expect(chat).toMatch(/if \(!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !== orchestratorModel\)/)
   })
 
   it('creierul de LUCRU = Gemini direct (regula lui Adrian, 3 aug; măsurat 1,2s + 1,0s cu apel de unealtă corect)', () => {
@@ -55,9 +56,13 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
   })
 
   it('uneltele dintr-o rundă pleacă ÎN PARALEL, cu rezultatele în ordinea apelurilor', () => {
-    expect(orchestrator).toMatch(/Promise\.all\(\s*\(res\.toolCalls/)
+    // Refactorat: paralelizarea coordonată e în helperul `executaApeluriCoordonate`
+    // (Promise.all pe apeluri, serializare doar pe grup), chemat pe uneltele rundei.
+    // Feature-ul e ACELAȘI (paralel + rezultate în ordinea apelurilor); forma, mai curată.
+    expect(orchestrator).toMatch(/Promise\.all\(apeluri\.map\(/) // rulare în paralel
+    expect(orchestrator).toMatch(/executaApeluriCoordonate\([\s\S]{0,60}res\.toolCalls/) // pe uneltele rundei
     // Ordinea rezultatelor = ordinea apelurilor (conversația e identică cu calea serială).
-    expect(orchestrator).toContain('iesiri[i]')
+    expect(orchestrator).toMatch(/res\.toolCalls\[i\]\.id, iesiri\[i\]/)
   })
 
   it('profilingul e cablat: durata fiecărei runde de creier ajunge în jurnal', () => {

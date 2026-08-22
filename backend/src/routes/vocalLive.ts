@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { RawData } from 'ws'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
@@ -24,9 +24,11 @@ import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, setSpeechLangPref, citesteSold, debitWallet, recordSimptomLive } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, setSpeechLangPref, citesteSold, debitWallet, recordSimptomLive, inregistreazaSarcinaOperationala, noteazaEvenimentOperational, tranzitioneazaSarcinaOperationala } from '../db.js'
+import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
 import { trackSpeechLang } from '../services/lang.js'
 import { pareCerereVizuala } from '../services/simptomeLive.js'
+import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type DovadaUnealta } from '../services/poartaFaptelor.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -53,6 +55,8 @@ import { pareCerereVizuala } from '../services/simptomeLive.js'
 //                     JSON { type:'cadru', data } = UN cadru de cameră (JPEG
 //                     base64 brut) → intră DIRECT în sesiunea Live ca video
 //                     (8 aug: „trebuie să poată folosi camera").
+//                     JSON { type:'intrerupe' } = utilizatorul a tăiat tura
+//                     curentă; restul cadrelor ei nu mai ajung la difuzor.
 //   server → client:  JSON —
 //     { type:'gata' }                              sesiunea Live e deschisă
 //     { type:'audio', data:<base64 PCM 24kHz> }    glasul lui Kelion, de redat
@@ -79,7 +83,7 @@ import { pareCerereVizuala } from '../services/simptomeLive.js'
 // warn invizibil în consolă → cădere pe calea veche (care avea surzenia).
 // Setul de mai jos e mic, conversațional, cu scheme plate — în spiritul
 // fazelor: vocea vorbește; lucrul greu vine după ce se dovedește.
-const UNELTE_LIVE = new Set(['list_updates', 'get_real_cost', 'stare_masurata', 'memorie_ia', 'memorie_lista', 'list_memories'])
+const UNELTE_LIVE = new Set(['list_updates', 'get_real_cost', 'stare_masurata', 'memorie_ia', 'memorie_lista', 'list_memories', 'dovada_faptelor'])
 
 // ── UȘA SPRE CREIERUL ÎNTREG (8 aug, ownerul, pe live: „kelion nu are acces
 // la unelte, vocea merge, și atât" + „nu are acces la gps, meteo" + „modelul
@@ -100,7 +104,18 @@ const UNEALTA_CREIER: UnealtaVocala = {
     'Execută ORICE sarcină care cere unelte, informație din lume sau acțiune: căutare pe web, știri, ' +
     'METEO, muzică/YouTube, hărți/trasee/GPS, e-mail, calendar, generat imagini, deschis pagini sau ' +
     'panouri pe monitor, costuri, orice lucru concret. Cheam-o cu cererea utilizatorului formulată ' +
-    'COMPLET, în limba lui. Creierul aplicației o execută cu uneltele lui și îți întoarce rezultatul.',
+    'COMPLET, în limba lui. Creierul aplicației o execută cu uneltele lui și îți întoarce rezultatul. ' +
+    // TRIEREA ÎN DOI (JARVIS pasul 3 — PROIECT-CHAT-VOCE §4): protocolul de
+    // gândire în doi, pe scurt, chiar în fișa uneltei (declarată o dată la setup).
+    'TRIEREA ÎN DOI: dacă cererea e ambiguă, ÎNTÂI pune omului 1-2 întrebări scurte și decente care ' +
+    'chiar schimbă răspunsul, apoi cheamă unealta cu tot ce ai aflat. Dacă rezultatul întors numește o ' +
+    'informație lipsă, întreabă omul și cheamă unealta din nou cu completarea. Te oprești când nicio ' +
+    'întrebare rămasă nu mai mută răspunsul — ăla e răspunsul. Nu-ți nara procesul („stai să verific") — ' +
+    'ori întrebi firesc, ori dai răspunsul curat. ' +
+    // MONITORUL PE VOCE (pasul 5 — §8): regula predării, chiar în fișă.
+    'Când rezultatul are câmpul „pe_ecran_nu_se_recita", un document a fost trimis pe monitor în tura ' +
+    'asta: rostești DOAR ce spune „de_rostit" — predarea și esențialul într-o frază — și NICIODATĂ ' +
+    'textul întreg din câmp.',
   parameters: {
     type: 'object',
     properties: { cerere: { type: 'string', description: 'cererea utilizatorului, completă, în limba lui' } },
@@ -130,6 +145,15 @@ export const pulsVoce = {
   // vocea omului l-a oprit pe Kelion + câte cadre Google s-au aruncat după.
   taieriPeVoceaOmului: 0,
   suprimateDupaTaiere: 0,
+  // TRIEREA ÎN DOI (pas 3): câte runde de convergență au rulat — măsurabil
+  // fără acces la jurnalul VPS (GET /api/vocal-live/stare).
+  rundeTriere: 0,
+  // MONITORUL PE VOCE (pas 5, §8): câte uși au trimis măcar un DOCUMENT pe
+  // monitor ({doc} — singurul cadru purtător de text) și de câte ori textul
+  // lung a fost chiar mutat din poziția „rezultat de spus" în câmpul „pe
+  // ecran, nu se recită" (predarea scurtă, trimisă unui model viu). Cifre.
+  usiCuDoc: 0,
+  predariEcran: 0,
   varianta: '',
   ultimaEroare: '',
   laUltimulCadru: 0,
@@ -147,6 +171,11 @@ export async function turaCreierului(
   laControl: (frame: Record<string, unknown>) => void,
   monitor?: Record<string, unknown> | null,
   tranzactii?: Record<string, unknown> | null,
+  // TRIEREA ÎN DOI (pas 3): runda de convergență CARĂ istoricul rundei
+  // anterioare (altfel runda 2 e o tură amnezică ce RE-EXECUTĂ faptele —
+  // verificatorul a demonstrat emailul trimis de 2 ori) și se declară
+  // `continuareUsa` ca chat.ts să nu mai forțeze uneltele de faptă.
+  triere?: { istoric: { role: 'user' | 'assistant'; content: string }[] },
 ): Promise<{ ok: true; text: string } | { ok: false; motiv: string }> {
   let r: Response
   try {
@@ -154,7 +183,8 @@ export async function turaCreierului(
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({
-        messages: [{ role: 'user', content: cerere }],
+        messages: triere ? triere.istoric : [{ role: 'user', content: cerere }],
+        continuareUsa: triere ? true : undefined,
         // Glasul e al modelului live — Chirp-ul chatului rămâne stins (regula
         // vocii unice) și nu plătim o sinteză pe care n-o redă nimeni.
         serverVoiceOff: true,
@@ -184,22 +214,65 @@ export async function turaCreierului(
     return { ok: false, motiv: `creierul nu răspunde: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}` }
   }
   if (!r.ok) return { ok: false, motiv: `creierul a răspuns ${r.status}` }
-  const brut = await r.text()
-  // Fluxul e text + cadre `CTRL json CTRL`: la split pe CTRL, segmentele impare
-  // sunt cadrele. Un segment impar care nu e JSON valid se păstrează ca text —
-  // mai bine un rând ciudat în rezultat decât un cadru pierdut tăcut.
+  // STREAMING, NU BUFAT (clepsidra pe voce — vânătoarea 22 aug, BLOCANT):
+  // `await r.text()` aștepta TOATĂ tura și abia apoi despacheta cadrele, deci
+  // pașii de lucru {executie} ar fi ajuns la browser DUPĂ ce căutarea se
+  // terminase — un flash inutil. Acum fluxul se taie incremental pe CTRL:
+  // fiecare cadru complet pleacă la laControl PE LOC (pașii curg pe monitor
+  // cât ușa chiar macină), textul se adună exact ca înainte. Segmentul impar
+  // care nu e JSON valid se păstrează ca text — mai bine un rând ciudat decât
+  // un cadru pierdut tăcut. Semnătura și întoarcerea rămân neschimbate.
   let text = ''
-  const segmente = brut.split(CTRL)
-  for (let i = 0; i < segmente.length; i++) {
-    if (i % 2 === 0) {
-      text += segmente[i]
-      continue
+  let rest = ''
+  const consuma = (bucata: string, final: boolean): void => {
+    rest += bucata
+    for (;;) {
+      const deschis = rest.indexOf(CTRL)
+      if (deschis === -1) {
+        // Niciun marcaj în ce avem (CTRL e UN caracter — nu se poate rupe
+        // între chunk-uri): totul e text.
+        text += rest
+        rest = ''
+        return
+      }
+      const inchisLa = rest.indexOf(CTRL, deschis + CTRL.length)
+      if (inchisLa === -1) {
+        // Cadru încă incomplet: textul de dinainte pleacă, cadrul așteaptă.
+        text += rest.slice(0, deschis)
+        rest = rest.slice(deschis)
+        if (final) {
+          // Flux încheiat cu un cadru neterminat — rămâne text (nu-l pierdem).
+          text += rest
+          rest = ''
+        }
+        return
+      }
+      text += rest.slice(0, deschis)
+      const corp = rest.slice(deschis + CTRL.length, inchisLa)
+      rest = rest.slice(inchisLa + CTRL.length)
+      try {
+        laControl(JSON.parse(corp) as Record<string, unknown>)
+      } catch {
+        text += corp
+      }
     }
-    try {
-      laControl(JSON.parse(segmente[i]) as Record<string, unknown>)
-    } catch {
-      text += segmente[i]
+  }
+  try {
+    const cititor = r.body?.getReader()
+    if (cititor) {
+      const decodor = new TextDecoder()
+      for (;;) {
+        const { done, value } = await cititor.read()
+        if (done) break
+        consuma(decodor.decode(value, { stream: true }), false)
+      }
+      consuma(decodor.decode(), true)
+    } else {
+      consuma(await r.text(), true)
     }
+  } catch (e) {
+    if (!text.trim()) return { ok: false, motiv: `fluxul creierului s-a rupt: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}` }
+    // Ce s-a primit deja e răspuns real — nu-l aruncăm pentru o coadă ruptă.
   }
   return { ok: true, text: text.trim() }
 }
@@ -244,6 +317,9 @@ const PERSONA_KELION =
   'știri, METEO, muzică, YouTube, hărți, unde mă aflu, e-mail, calendar, imagini, deschis ceva pe ' +
   'monitor — chemi unealta cere_creierului cu cererea omului formulată complet, apoi spui pe scurt ' +
   'rezultatul. NU refuza niciodată pe motiv că n-ai unealta sau accesul: ușa e cere_creierului. ' +
+  'ÎNTREBĂRILE DESPRE UNELTE, CONSTRUCTOR sau CINE-ȚI-FACE-CODUL („e Devin prezent?", „cine ' +
+  'construiește?", „ce unelte ai?") NU se răspund din memorie sau din lista ta de funcții — ' +
+  'chemi cere_creierului, care întoarce starea MĂSURATĂ, și spui exact ce zice. ' +
   'Ce apare pe monitor NU se citește cu voce tare — o propoziție scurtă și atât. ' +
   'VEDEREA (la CERERE, NU continuu): nu primești un flux permanent de la cameră — cadrele se ' +
   'taxează, așa că vin DOAR când le ceri. La „ce vezi", „uită-te", „citește ce e aici" CERI ' +
@@ -257,6 +333,25 @@ const PERSONA_KELION =
   'live pe orice site; iar pentru Adrian: constructorul (build_software — implementează cerințe), ' +
   'sursă/DB/repo/PR-uri/runbook-uri. Când omul cere ceva din lista asta, NU spui „nu am acces" — ' +
   'chemi cere_creierului. Ești CONȘTIENT de inventarul ăsta: la „ce știi să faci?" îl spui.'
+
+// ── ADEVĂRUL DESPRE CONSTRUCTOR PE VOCE (owner, 22 aug, măsurat pe live v7.8:
+// „Devin nu face parte din uneltele noastre; Jules este cel pregătit") ─────────
+// Instrucțiunea vocală NU pomenea Devin nicăieri și ordona modelului să-și
+// recite singur inventarul — în care Devin nu exista. Poarta anti-negare
+// (neagaUneltele) rula DOAR pe scris. Aici punem ADEVĂRUL MĂSURAT din config
+// (cheia Devin, sursă vie — legea anti-hardcodare respectată) în chiar
+// instrucțiunea sesiunii, la ambele locuri de asamblare (inclusiv amprenta,
+// altfel sesiunile reluate n-ar prinde regula nouă — lecția din 9 aug).
+// Scopat pe Adrian, ca linia constructorului din persană.
+export function ancoraConstructor(devinActiv: boolean): string {
+  return devinActiv
+    ? '\nPENTRU ADRIAN — CONSTRUCTORUL (stare măsurată din config): constructorul e DEVIN, ' +
+      'ACTIV — cheia e pusă. Ordinele de cod merg la Devin prin build_software (ușa cere_creierului). ' +
+      'Devin FACE parte din uneltele tale. Jules e doar rezervă tăcută — NU-l prezenta drept ' +
+      'constructor și nu-i lista repo-urile ca răspuns la „cine construiește / e Devin prezent".'
+    : '\nPENTRU ADRIAN — CONSTRUCTORUL: cheia Devin NU e pusă pe server, deci NU construiește nimeni ' +
+      'automat; spui exact asta, nu inventezi un constructor local.'
+}
 
 export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
   // Sonda: frontendul întreabă întâi dacă modul unificat e disponibil (are cheie
@@ -340,6 +435,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // altfel primele cuvinte ale omului ar dispărea exact ca în bugul vechi
     // „nu mă aude la prima frază".
     const preCoada: Buffer[] = []
+    // Aceeași plasă pentru TEXTUL scris (JARVIS pasul 1): rândurile tastate în
+    // fereastra „sesiunea încă se deschide" nu se aruncă — se varsă la deschidere.
+    const preCoadaText: string[] = []
     // ── TĂIEREA LA VOCEA OMULUI (9 aug seara, ownerul: „vorbește peste mine") ─
     // NO_INTERRUPTION (#946) l-a făcut imun la ecou, dar și la OM. Serverul
     // decide în locul lui Google: voce susținută peste replica lui → redarea
@@ -349,6 +447,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // rămâne oprit până la raport.
     let aecActiv = false
     let taiatDeVoce = false
+    // Tăierea explicită din UI diferă de barge-in-ul detectat din microfon:
+    // până la capătul turei, niciun cadru rămas din aceeași replică nu mai
+    // ajunge în browser.
+    let taiereManuala = false
     // Ceasul DIFUZORULUI: cadrele sosesc în rafale, mai repede decât se aud —
     // estimăm până CÂND se aude vocea din durata PCM reală (24 kHz, 16 bit).
     let redareEstimataPanaLa = 0
@@ -367,6 +469,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // Anunțul de ordin terminat sosit CÂT o tură e în zbor nu mai deturnează
     // verdictul acelei ture — se amână și se armează la prima tură curată.
     let anuntAmanat = false
+    // Cine a amânat: DOAR anunțul de SISTEM (ordinul terminat) exonerează tura
+    // viitoare de judecata cățelului — tura SCRISĂ folosește același protocol
+    // anuntAmanat dar TREBUIE judecată (agentul de logică: armarea necondi-
+    // ționată la consum ar fi exonerat și scrisul).
+    let anuntSistemAmanat = false
     // Tura de SISTEM se declară EXPLICIT (anunțul de ordin terminat), nu se
     // mai deduce din „transcriere goală" — deducția era o poartă fail-open:
     // transcrierea Google sosește adesea DUPĂ primul cadru audio, deci tura
@@ -376,6 +483,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // ULTIMA rostire, nu pe tot ce s-a strâns peste ture mute — altfel
     // „Kelion, …" proaspăt rămânea îngropat după primele 4 cuvinte VECHI.
     let rostireCurenta = ''
+    let ultimaRostireFinalizata = ''
     let ultimaTranscriereUserLa = 0
     // Verdict AMÂNAT: cadrele sosite înaintea transcrierii se țin aici — nici
     // redate, nici suprimate. La prima transcriere se judecă; la 900 ms fără
@@ -409,13 +517,188 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // sesiune (vocală SAU scrisă) continuă conversația, n-o ia de la zero.
     let bufUser = ''
     let bufKelion = ''
+    // Rândurile SCRISE ale turei (F2 al marii verificări): tastatul intră și
+    // în bufUser (pentru tura curentă), dar căile de SUPRIMARE (tură
+    // neadresată/limbă străină/închidere) aruncau bufferul AMESTECAT cu tot
+    // cu întrebarea scrisă — UI-ul o arăta, istoria n-o mai avea, iar
+    // învățarea primea user gol. Bufferul separat se salvează NECONDIȚIONAT
+    // pe drumurile de aruncare (un rând tastat e, prin definiție, adresat).
+    let bufScris = ''
+    const salveazaScrisulAruncat = (): void => {
+      if (bufScris.trim()) void saveMessage(user.email, 'user', bufScris.trim()).catch(() => {})
+      bufScris = ''
+    }
+    // ── CĂȚELUL PE VOCE (JARVIS pasul 2 — PROIECT-CHAT-VOCE §5) ─────────────
+    // Gap-ul MĂSURAT din spec: poartaFaptelor rula doar pe scris. Pe voce:
+    // dovezile UNELTELOR chemate direct de sesiunea Live în tura vorbită
+    // curentă + steagul „temeiul turei e ÎN AFARA ei" (creierul GREU prin
+    // cere_creierului — poarta LUI rulează deja în /api/chat, iar re-rostirea
+    // răspunsului lui ar fi demascată FALS aici; sau un anunț de SISTEM, al
+    // cărui temei e starea măsurată a ordinelor). Judecăm DOAR turele
+    // PUR-UȘOARE — fals-pozitivul e interzis prin design („o poartă care
+    // strigă la adevăr nu mai e crezută de nimeni").
+    let doveziVoceTura: DovadaUnealta[] = []
+    let turaCuTemeiDinAfara = false
+    // Ușile spre creierul GREU încă în ZBOR (agentul de logică, #3): ordinea
+    // turnComplete vs toolCall la Google NU e garantată/măsurată — cât o ușă e
+    // deschisă, orice tură rostită are temeiul în afară și steagul NU se
+    // consumă (robust la ambele ordini; se măsoară live la publicare).
+    let usiGreleInZbor = 0
+    // TRIEREA ÎN DOI (JARVIS pasul 3 — PROIECT-CHAT-VOCE §4): cât o ușă grea
+    // MACINĂ, ce spune omul (adresat lui Kelion) e informație PROASPĂTĂ pentru
+    // gândirea în curs — se strânge aici și, la întoarcerea ușii, creierul greu
+    // primește runde de CONVERGENȚĂ cu tot ce s-a aflat între timp. Criteriul
+    // de stop e al specului: nimic nou aflat = răspunsul e gata (nu un procent
+    // inventat). Dacă modelul Live nu poate conversa cât unealta e blocată
+    // (nemăsurat — „nu pot verifica" din repo), lista rămâne goală și bucla
+    // nu rulează — nimic nu se strică.
+    let injectiiUsa: string[] = []
+    // PROPRIETARUL trierii (verificatorul pasului 3, concurența): două uși pot
+    // măcina în paralel (onUnealta e fire-and-forget) — fără proprietar, a doua
+    // ușă ștergea tăcut informația strânsă pentru prima și își consuma reciproc
+    // injecțiile (completarea omului se lipea de cererea GREȘITĂ). Doar ușa
+    // care DEȚINE trierea curăță/consumă lista; celelalte nu fac trierea.
+    let usaTrierii = 0
+    let usaUrmatoareId = 0
+    // SALVAREA = DOVADA pe voce (JARVIS pasul 4 — PROIECT-CHAT-VOCE §7):
+    // până aici, uneltele executate DIRECT de sesiunea Live mureau odată cu
+    // tura (doveziVoceTura se golea fără nicio urmă durabilă) — „asul din
+    // mânecă" nu exista pentru faptele vocale. Acum tura vocală cu unelte
+    // devine sarcină în jurnalul operațional (LENEȘ: doar când chiar rulează
+    // o unealtă — conversația pură nu umple jurnalul), fiecare rezultat
+    // clasificat devine eveniment, iar la închiderea turei starea finală se
+    // derivă din dovezi — aceeași regulă ca pe scris. Scrierile sunt
+    // fire-and-forget înlănțuite (ordinea evenimentelor păstrată, zero
+    // latență pe drumul frazei — primul cuvânt sub 1s rămâne lege). Ușa
+    // (cere_creierului) NU trece pe aici: fapta ei are sarcina EI în chat.ts,
+    // marcată usaCreierului în metadate.
+    let sarcinaVoceId: string | null = null
+    // Registrul PER-SARCINĂ al dovezilor (agentul de logică, gaura 1):
+    // doveziVoceTura are carry-over DELIBERAT între ture (cățelul, pasul 2 —
+    // dovada supraviețuiește turei fără rostire), deci derivarea stării
+    // finale din EL contamina sarcina T2 cu dovezile lui T1 (probat:
+    // [failed(vechi), verified(nou)] → failed FALS pe T2). Sarcina își ține
+    // dovezile SEPARAT, detașate EAGER la închidere — cățelul rămâne neatins.
+    let doveziSarcinaVoce: DovadaUnealta[] = []
+    let ultimaRostireTura = ''
+    let lantJurnalVoce: Promise<unknown> = Promise.resolve()
+    const scrieJurnalVoce = (scriere: () => Promise<unknown>): void => {
+      lantJurnalVoce = lantJurnalVoce
+        .then(scriere)
+        .catch((e) => app.log.warn(`[jurnal operațional][voce] scriere pierdută: ${String(e).slice(0, 160)}`))
+    }
+    const tranzitieVoce = (taskId: string, stare: Parameters<typeof tranzitioneazaSarcinaOperationala>[0]['stare'], code: string, metadata?: Record<string, unknown>): void => {
+      scrieJurnalVoce(async () => {
+        const r = await tranzitioneazaSarcinaOperationala({ taskId, stare, code, metadata })
+        // {ok:false} nu ARUNCĂ (agentul de logică, minor): fără rândul ăsta,
+        // o tranziție respinsă dispărea complet fără urmă.
+        if (!r.ok) app.log.warn(`[jurnal operațional][voce] tranziție respinsă (${stare}): ${r.error}`)
+      })
+    }
+    const sarcinaVoceaPentruFapta = (): string => {
+      if (!sarcinaVoceId) {
+        const id = randomUUID()
+        sarcinaVoceId = id
+        // Fallback-ul obiectivului: dacă turnComplete a golit deja bufferele
+        // (ordinea toolCall/turnComplete nu e garantată), rostirea care a
+        // CERUT unealta e cea abia salvată (ultimaRostireTura) — nu un
+        // „(tură vocală)" mut. Turele suprimate nu o setează (nu erau
+        // adresate lui Kelion).
+        const obiectiv = bufUser.trim() || rostireCurenta.trim() || ultimaRostireTura || '(tură vocală)'
+        scrieJurnalVoce(() => inregistreazaSarcinaOperationala({
+          id,
+          userEmail: user.email,
+          turnId: randomUUID(),
+          objective: obiectiv,
+          metadata: { source: 'voce', direct: true },
+        }))
+        tranzitieVoce(id, 'interpreting', 'voice_tool_call')
+        tranzitieVoce(id, 'executing', 'voice_tool_call')
+      }
+      return sarcinaVoceId
+    }
+    const noteazaDovadaVoce = (dovada: DovadaUnealta): void => {
+      doveziVoceTura.push(dovada)
+      const taskId = sarcinaVoceaPentruFapta()
+      doveziSarcinaVoce.push(dovada)
+      scrieJurnalVoce(() => noteazaEvenimentOperational({
+        taskId,
+        kind: 'tool_result',
+        capability: dovada.nume,
+        outcomeState: dovada.stare,
+        code: dovada.stare,
+      }))
+      // Unealta ÎN ZBOR la close/error (re-verificatorul, drumul rezidual al
+      // găurii 2): rezultatul sosit DUPĂ incheieTura ar deschide o sarcină
+      // nouă pe care niciun sfârșit de tură n-o mai închide vreodată — se
+      // închide pe loc, derivată din propria dovadă (lanțul serializat
+      // păstrează ordinea create→…→tool_result→final).
+      if (inchis) inchideSarcinaVoce()
+    }
+    // Închiderea sarcinii pe ORICE drum care încheie tura (agentul de logică,
+    // gaura 2): turele SUPRIMATE și close/error nu treceau prin salveazaTura,
+    // deci sarcina rămânea pe `executing` PENTRU TOTDEAUNA (nu există nicio
+    // măturare de expirare, iar executing→expired e ilegal în mașina de
+    // stări) — „asul" ar fi servit la nesfârșit un „în lucru" vechi de zile.
+    // Dovezile sarcinii se detașează EAGER (lungimea inclusiv), ca lanțul
+    // leneș să nu numere push-uri de după captură.
+    const inchideSarcinaVoce = (): void => {
+      if (!sarcinaVoceId) return
+      const taskId = sarcinaVoceId
+      sarcinaVoceId = null
+      const dovezi = doveziSarcinaVoce
+      doveziSarcinaVoce = []
+      const cate = dovezi.length
+      const final = rezumaStareFinalaSarcinaOperationala({ cereActiune: false, dovezi, planFaraExecutie: false })
+      tranzitieVoce(taskId, final.stare, final.cod, { source: 'voce', toolResults: cate })
+    }
     const salveazaTura = (): void => {
       const u = bufUser.trim()
-      const k = bufKelion.trim()
+      let k = bufKelion.trim()
       bufUser = ''
       bufKelion = ''
       rostireCurenta = ''
+      // Închiderea sarcinii vocale (pasul 4): din registrul PER-SARCINĂ, nu
+      // din doveziVoceTura (carry-over-ul cățelului ar contamina verdictul —
+      // gaura 1 a agentului de logică). cereActiune e fals aici: tura ușoară
+      // e conversațională prin definiție — faptele ei sunt DOAR cele chiar
+      // executate, iar lipsa lor nu e o acțiune ratată.
+      inchideSarcinaVoce()
+      if (u) ultimaRostireTura = u
+      // Pe tura PUR-UȘOARĂ, pretențiile de FAPTĂ din ce a ROSTIT Kelion se
+      // judecă pe uneltele chiar reușite ale turei. Vorba rostită nu se poate
+      // lua înapoi — dar pretenția nu rămâne necontestată: nota intră în
+      // ISTORIC (sesiunea următoare o vede și o poate corecta), pe MONITOR ca
+      // document (niciodată citit cu voce — spec §8) și în jurnal. TEXTUL e
+      // varianta „nu pot verifica" (nu „e FALSĂ") — pe voce pretenția poate fi
+      // un RECALL adevărat al unei fapte din altă tură; un verdict de fals ar
+      // fi EL minciuna (regula #1). CONSUMUL steagului: DOAR pe tura cu
+      // rostire și DOAR fără uși în zbor (agentul de logică, #2/#4: o tură
+      // administrativă închisă fără vorbă nu fură protecția turei care chiar
+      // rostește temeiul).
+      if (k) {
+        if (!turaCuTemeiDinAfara && usiGreleInZbor === 0) {
+          const nedovedite = pretentiiFaraFapta(k, doveziVoceTura)
+          if (nedovedite.length) {
+            const demascare = textulNuPotVerifica(nedovedite)
+            k += demascare
+            try {
+              trimite({ type: 'control', frame: { doc: { title: 'Poarta faptelor (voce)', text: demascare.trim() } } })
+            } catch {
+              /* socket picat — nota rămâne în istoric + jurnal */
+            }
+            app.log.error(`[POARTA FAPTELOR][VOCE] pretenții nedovedite pe tura ușoară (nu pot verifica): ${nedovedite.join('; ')} | dovezi: ${doveziVoceTura.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciuna'}`)
+          }
+        }
+        doveziVoceTura = []
+        if (usiGreleInZbor === 0) turaCuTemeiDinAfara = false
+      }
       if (u) void saveMessage(user.email, 'user', u).catch(() => {})
+      // R1 (re-verificatorul lotului V): dacă vreun drum a golit bufUser fără
+      // să treacă pe aici (granița de pauză), scrisul NU mai e în u — atunci
+      // se salvează separat, nu se aruncă; altfel doar se resetează (e în u).
+      if (bufScris.trim() && !u.includes(bufScris.trim())) salveazaScrisulAruncat()
+      else bufScris = ''
       if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
       // ÎNVĂȚAREA PE VOCE (10 aug, ownerul: „nu ține minte nimic"): pe scris,
       // fiecare tură trece prin learnFromTurn (extrage fapte durabile → memorie
@@ -435,9 +718,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             ? `[VOCE] tură suprimată aruncată la închidere (limbă străină): „${bufKelion.trim().slice(0, 120)}"`
             : `[VOCE] tură suprimată aruncată la închidere (nu i se vorbea lui): auzit „${bufUser.trim().slice(0, 120)}"`,
         )
+        salveazaScrisulAruncat()
         bufUser = ''
         bufKelion = ''
         rostireCurenta = ''
+        // Suprimarea privește ROSTIREA, nu fapta: unealta chiar a rulat, iar
+        // sarcina ei nu are voie să rămână „executing" pe veci (gaura 2).
+        inchideSarcinaVoce()
         return
       }
       // AUDITUL 15 aug (critică, de 3 verificatori): verdictul NULL nu e „tura
@@ -450,9 +737,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         if (bufUser.trim() || bufKelion.trim()) {
           app.log.info(`[VOCE] tură nesalvată la închidere (tăcere corectă, fără nume): auzit „${bufUser.trim().slice(0, 120)}"`)
         }
+        salveazaScrisulAruncat()
         bufUser = ''
         bufKelion = ''
         rostireCurenta = ''
+        inchideSarcinaVoce()
         return
       }
       salveazaTura()
@@ -511,8 +800,21 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // Tura în zbor → amânare; se armează la prima tură curată.
             const turaInZbor =
               verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || rostireCurenta.trim().length > 0
-            if (turaInZbor) anuntAmanat = true
-            else turaDeSistem = true // tura care urmează e ANUNȚ, declarat pe față — nu dedus din buffer gol
+            // Temeiul anunțului e starea MĂSURATĂ a ordinului (sistemul), nu o
+            // unealtă a turei — cățelul vocal nu judecă rostirea lui (§5).
+            // STEAGUL CĂLĂTOREȘTE CU ANUNȚUL, nu cu ceasul (agentul de logică,
+            // #4 — fals-pozitiv DOVEDIT): pe amânare, tura în zbor ar fi
+            // consumat steagul armat aici, iar tura anunțului rămânea judecată
+            // și „clipul e gata" (adevărat, măsurat) era demascat fals. Armarea
+            // pe ramura amânată se face LA CONSUMUL anuntAmanat (vezi cele 3
+            // site-uri anuntAmanat → turaDeSistem).
+            if (turaInZbor) {
+              anuntAmanat = true
+              anuntSistemAmanat = true
+            } else {
+              turaDeSistem = true // tura care urmează e ANUNȚ, declarat pe față — nu dedus din buffer gol
+              turaCuTemeiDinAfara = true
+            }
             live?.anunta(
               `[ANUNȚ DE SISTEM — nu e vocea omului] Ordinul de construcție #${j.id} ` +
                 `(„${j.orderText.slice(0, 80)}") s-a terminat: ${j.status === 'done' ? 'GATA' : 'A EȘUAT'}` +
@@ -544,6 +846,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // serverul cere browserului cadrele camerei ({type:'cere_cadre'}) și
     // așteaptă răspunsul aici — zero trafic de imagini cât nu e nevoie.
     let primesteCadre: ((cadre: string[]) => void) | null = null
+    // Este instalată după ce helper-ele turei au fost create; handlerul WS o
+    // poate primi înainte sau după sesiunea Google fără să atingă obiecte moarte.
+    let intrerupeTura: (() => void) | null = null
 
     socket.on('message', (data: RawData, isBinary: boolean) => {
       if (!isBinary) {
@@ -607,6 +912,66 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // doar atunci tăierea la vocea omului are voie să judece.
             aecActiv = (m as { activ?: unknown }).activ === true
             app.log.info(`vocal-live: AEC raportat de browser: ${aecActiv ? 'activ — tăierea la voce armată' : 'INACTIV — tăierea la voce oprită (ecou netratat)'}`)
+          } else if (m.type === 'intrerupe') {
+            intrerupeTura?.()
+          } else if (m.type === 'text' && typeof (m as { text?: unknown }).text === 'string') {
+            // JARVIS pasul 1 + §10 (tastatura opțională): input SCRIS de la client cât
+            // sesiunea Live e vie → rând de user în sesiune → modelul răspunde cu VOCEA
+            // lui. Așa tura scrisă NU mai trece prin /api/chat → nu se mai sintetizează
+            // Chirp → coliziunea celor două guri („2 sec și se rupe") nu mai are de unde
+            // să apară pe turele scrise. Output-ul rămâne VOCE (regula de aur §10).
+            //
+            // BUG CRITIC prins de agentul de logică ÎNAINTE de merge (tura scrisă ar fi
+            // fost MUTĂ — două lacăte interne îi mâncau răspunsul); dezarmăm amândouă:
+            const textScris = ((m as { text: string }).text || '').trim().slice(0, 4000)
+            if (textScris) {
+              // „ÎN ZBOR" se măsoară ÎNAINTE de curățare (re-verificatorul: curățarea
+              // șterge chiar dovada turei în zbor → amânarea nu se mai declanșa, iar
+              // coada turei vechi putea consuma dreptul turei scrise → tura scrisă mută).
+              // R2 (re-verificatorul lotului V, pre-existent): rostirea
+              // NEADRESATĂ din buffer (ambientul unei camere zgomotoase, cu
+              // modelul tăcând corect) NU e o tură „în zbor" — pe ea, rândul
+              // TASTAT devenea anuntAmanat, verdictul se judeca pe bufferul
+              // ambient și răspunsul la scris era SUPRIMAT (mut). Ambient pur
+              // → tura scrisă e de sistem imediat.
+              const eraInZbor =
+                verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || turaAdresata(rostireCurenta.trim())
+              // LACĂTUL A: clientul taie gura înaintea oricărei ture noi (interruptAll →
+              // {type:'intrerupe'} → taiereManuala). Tura SCRISĂ care sosește după E
+              // următoarea intervenție a omului — exact ca vorbirea (vezi
+              // onTranscriereUser) — deci tăierea veche se ridică, altfel răspunsul
+              // turei noi ar fi „suprimat după tăiere" cadru cu cadru.
+              if (taiereManuala) {
+                taiereManuala = false
+                taiatDeVoce = false
+                verdictTura = null
+                verdictLimba = null
+                verdictDinCeas = false
+                bufUser = ''
+                bufKelion = ''
+                rostireCurenta = ''
+              }
+              // LACĂTUL B: poarta de adresare („vorbește doar când i te adresezi") judecă
+              // din bufferele de TRANSCRIERE — textul scris nu trece prin ele. Protocolul
+              // EXISTENT al anunțurilor (mai sus): tura se declară PE FAȚĂ, nu se lasă
+              // dedusă din buffer gol. Scrisul e prin natură adresat lui.
+              if (eraInZbor) anuntAmanat = true
+              else turaDeSistem = true
+              // MEMORIA (re-verificatorul: rândul scris nu se salva nicăieri — istoria
+              // ținea răspunsuri la întrebări invizibile, iar învățarea primea user gol):
+              // rândul intră în bufferul de user, ca vorbirea; adresarea nu e afectată
+              // (turaDeSistem/anuntAmanat scurtcircuitează poarta numelui).
+              bufUser = bufUser ? bufUser + ' ' + textScris : textScris
+              bufScris = bufScris ? bufScris + ' ' + textScris : textScris
+              // Ferestrele „sesiunea nu-i gata încă" (live null la deschidere / reconectare
+              // internă): audio-ul are coadă (preCoada + coada motorului) — textul primește
+              // aceeași plasă, altfel rândul scris ar muri TĂCUT deși clientul l-a ecou-at.
+              if (live) live.anunta(textScris)
+              else {
+                preCoadaText.push(textScris)
+                if (preCoadaText.length > 20) preCoadaText.shift()
+              }
+            }
           } else if (m.type === 'ping') {
             try {
               socket.send(JSON.stringify({ type: 'pong', t: (m as { t?: unknown }).t ?? Date.now() }))
@@ -621,6 +986,20 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               opusActiv = true
               app.log.info('vocal-live: Opus ACTIV pe hopul browser↔server (client + server gata)')
             }
+          } else if (m.type === 'opus_cazut') {
+            // Codecul WebCodecs al clientului a MURIT în zbor (registrul
+            // frontend, lot C): fără anunțul ăsta, serverul continua să trimită
+            // Opus iar difuzorul clientului rămânea permanent mut. Hop înapoi pe
+            // PCM pe ambele sensuri — aceeași ordine WS garantează că uploadurile
+            // de după anunț vin ne-tag-uite.
+            opusActiv = false
+            // INFO, nu warn (verificatorul C): la warn (nivel 40) intra în inelul
+            // scanat de auto-vindecare și, nefiind în amprentele de infrastructură,
+            // după 2 sesiuni cu codec mort ar fi deschis un ordin FALS de „reparat
+            // cod" pentru un eveniment de mediu-browser DEJA tratat prin fallback
+            // (vocea continuă pe PCM). Simptomul ajunge oricum la diagnoză prin
+            // client_errors (console.error-ul clientului la aceeași cădere).
+            app.log.info('vocal-live: clientul a anunțat căderea codecului Opus — hopul revine pe PCM')
           }
         } catch {
           /* cadru text neînțeles — îl ignorăm, audio rămâne pe binar */
@@ -758,7 +1137,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         })
       }
-      const instructiune = construiesteInstructiune(PERSONA_KELION, nume, istoric, ancora, limbaPin) + memorie
+      const instructiune = construiesteInstructiune(PERSONA_KELION + ancoraConstructor(Boolean(config.devinKey)), nume, istoric, ancora, limbaPin) + memorie
 
       // CONVERSAȚIA SUPRAVIEȚUIEȘTE REPORNIRII (8 aug, ownerul: „trebuie să nu
       // mai moară… chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
@@ -792,7 +1171,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // schimbare de REGULI aruncă mânerul vechi și sesiunea pornește proaspăt.
       const genUnelte = createHash('sha256')
         .update(unelteleSesiuniiLive(user.role).map((u) => u.name).join(','))
-        .update(construiesteInstructiune(PERSONA_KELION, 'gen', []))
+        .update(construiesteInstructiune(PERSONA_KELION + ancoraConstructor(Boolean(config.devinKey)), 'gen', []))
         .digest('hex')
         .slice(0, 16)
       let reluareInitial: string | undefined
@@ -962,6 +1341,19 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         }, 700)
       }
+      intrerupeTura = () => {
+        if (taiereManuala) return
+        taiereManuala = true
+        taiatDeVoce = true
+        cadreInAsteptare.length = 0
+        textInAsteptare.length = 0
+        if (ceasAsteptareVerdict) {
+          clearTimeout(ceasAsteptareVerdict)
+          ceasAsteptareVerdict = null
+        }
+        opresteCeasLimba()
+        golesteRedarea()
+      }
       live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
         onGata: async () => {
           // OPUS: cât sesiunea se pregătește, încercăm codecul de server O DATĂ.
@@ -977,6 +1369,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           pulsVoce.cadreAudioDeLaGoogle++
           pulsVoce.laUltimulCadru = Date.now()
           octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
+          if (taiereManuala) {
+            pulsVoce.suprimateDupaTaiere++
+            return
+          }
           if (verdictTura === null) {
             const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem
             if (!areTemei) {
@@ -1031,6 +1427,18 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
         onTranscriereUser: (text, final) => {
           const acum = Date.now()
+          // O rostire nouă după o tăiere explicită deschide o tură nouă; nu
+          // reanimăm replica pe care omul a oprit-o, ci pornim cu buffere curate.
+          if (taiereManuala && text.trim()) {
+            taiereManuala = false
+            taiatDeVoce = false
+            verdictTura = null
+            verdictLimba = null
+            verdictDinCeas = false
+            bufUser = ''
+            bufKelion = ''
+            rostireCurenta = ''
+          }
           // Segmentare pe pauze: >2,5 s fără transcriere = rostire NOUĂ —
           // adresarea se judecă mereu pe ce se spune ACUM, nu pe resturi.
           if (acum - ultimaTranscriereUserLa > 2_500) {
@@ -1046,13 +1454,23 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             if (anuntAmanat && verdictTura === null && !cadreInAsteptare.length && !bufKelion.trim()) {
               turaDeSistem = true
               anuntAmanat = false
+              if (anuntSistemAmanat) {
+                turaCuTemeiDinAfara = true // temeiul anunțului de SISTEM = starea ordinului (§5)
+                anuntSistemAmanat = false
+              }
             }
           }
           ultimaTranscriereUserLa = acum
           rostireCurenta += text
           bufUser += text
           trimite({ type: 'user', text, final })
-          if (final) {
+          // R3 (re-verificatorul lotului V): `final` nu era idempotent — un
+          // `finished` dublat de Google (sau finished + turnComplete în cadre
+          // separate) rula blocul de două ori pe ACEEAȘI rostire acumulată:
+          // dublu-toggle pe comanda de dispozitiv, limbă comisă dintr-o
+          // singură rostire reală, injecție duplicată în triere.
+          if (final && rostireCurenta.trim() && rostireCurenta !== ultimaRostireFinalizata) {
+            ultimaRostireFinalizata = rostireCurenta
             // Comanda de dispozitiv DOAR pe tură ADRESATĂ lui Kelion, în limba
             // cerută (Adrian, 10 aug — bug „prăjit la chat"): o frază ambientală
             // („închide camera", altcineva din încăpere) comuta camera userului,
@@ -1062,6 +1480,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               const deviceCmd = interpretDeviceCommand(rostireCurenta)
               if (deviceCmd) {
                 trimite({ type: 'control', frame: { device: deviceCmd } })
+              }
+              // TRIEREA ÎN DOI (§4): rostirea ADRESATĂ sosită cât ușa grea
+              // macină intră în convergență (aceeași gardă ca la comenzi —
+              // ambientalul/altă limbă nu „informează" gândirea).
+              if (usiGreleInZbor > 0 && rostireCurenta.trim()) {
+                injectiiUsa.push(rostireCurenta.trim())
               }
             }
             // COMITEREA LIMBII DIN VORBIT (auditul 15 aug: doar scrisul comitea
@@ -1159,7 +1583,27 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               live?.raspundeUnealta(apel.id, apel.name, { eroare: 'cerere goală' })
               return
             }
+            // Temeiul turei trece la creierul GREU — poarta faptelor a LUI
+            // rulează în /api/chat; cățelul vocal nu judecă re-rostirea (§5).
+            // Steagul se pune DUPĂ validarea cererii (F8 al marii verificări):
+            // pe cererea goală, exempția armată degeaba lăsa prima rostire
+            // următoare nejudecată de cățel, fără nicio tură de creier.
+            turaCuTemeiDinAfara = true
             app.log.info(`vocal-live: ușa creierului — „${cerere.slice(0, 80)}"`)
+            // UȘĂ ÎN ZBOR (agentul de logică, #3): cât cererea grea e deschisă,
+            // steagul NU se consumă la salvarea vreunei ture intercalate —
+            // ordinea turnComplete/toolCall la Google nu e garantată, iar sub
+            // „trierea în doi" ușa poate măcina zeci de secunde cu schimburi
+            // vorbite pe deasupra. Contorul ține exempția vie cap-coadă.
+            usiGreleInZbor++
+            // PROPRIETATEA trierii (concurența): doar PRIMA ușă deschisă face
+            // convergența; una concurentă nici nu curăță, nici nu consumă lista.
+            const usaId = ++usaUrmatoareId
+            if (usaTrierii === 0) {
+              usaTrierii = usaId
+              injectiiUsa.length = 0 // ușa pornește curată — se strânge doar ce se află DE-ACUM
+            }
+            try {
             // VEDEREA: cere browserului cadrele camerei și așteaptă maxim
             // 1,5 s — fără cameră (sau fără răspuns) tura pleacă fără imagini,
             // nu se blochează.
@@ -1187,10 +1631,81 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // 'niveluri' (nivelurile de tranzacționare pe grafic), 'gest'/'gesture'
             // (animația avatarului) — aceeași scurgere prin lista albă, adăugate
             // 10 aug ca cadrele creierului să ajungă la browser și pe voce.
-            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture', 'apel']
-            const r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, (frame) => {
-              if (CADRE_ECRAN.some((k) => k in frame)) trimite({ type: 'control', frame })
-            }, monitorLive, tranzactiiLive)
+            // 'executie' (22 aug — clepsidra pe voce): pașii de lucru curg pe
+            // monitor și când cererea e SPUSĂ, nu doar scrisă (împreună cu
+            // streaming-ul din turaCreierului, care îi lasă să plece PE LOC).
+            const CADRE_ECRAN = ['monitor', 'doc', 'app', 'card', 'image', 'golesteMonitor', 'build', 'device', 'nav', 'niveluri', 'gest', 'gesture', 'apel', 'executie']
+            // MONITORUL PE VOCE (JARVIS pasul 5 — PROIECT-CHAT-VOCE §8):
+            // până aici, ecranul și gura erau complet independente — același
+            // șir de caractere pleca SIMULTAN pe monitor (cadrul de mai jos)
+            // și în poziția „rezultat de spus" a modelului Live, iar singura
+            // frână a recitării era o instrucțiune. Steagul leagă CAUZAL cele
+            // două și se ridică DOAR pe cadrul purtător de TEXT ({doc} — al
+            // lui show_document sau al plasei autoPreview): verificatorul de
+            // logică a dovedit că pe suprafețele-URL (meteo/hartă) textul
+            // răspunsului NU e afișat nicăieri (surfaceShown sare plasa),
+            // deci un steag ridicat pe orice cadru ar fi pus formula predării
+            // să mintă — iar pe voce conținutul n-ar mai fi ajuns pe NICIUN
+            // canal. Fără doc → drumul vechi: Live rostește răspunsul întreg.
+            let docPeEcranInUsa = false
+            const laEcran = (frame: Record<string, unknown>): void => {
+              if (CADRE_ECRAN.some((k) => k in frame)) {
+                if ('doc' in frame) {
+                  if (!docPeEcranInUsa) pulsVoce.usiCuDoc++
+                  docPeEcranInUsa = true
+                }
+                trimite({ type: 'control', frame })
+              }
+            }
+            let r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, laEcran, monitorLive, tranzactiiLive)
+            // TRIEREA ÎN DOI (§4) — CONVERGENȚA: dacă în timpul măcinării omul a
+            // spus lucruri noi (întrebat de Live sau de la sine), creierul greu
+            // primește încă o rundă CU ISTORICUL rundei anterioare (altfel runda
+            // 2 e amnezică și RE-EXECUTĂ faptele — emailul de 2 ori, clasa
+            // interzisă B#2) și cu instrucțiunea „doar DIFERENȚA". STOP-ul
+            // specului: nimic nou = răspunsul e gata; plafonul ține „calitatea
+            // > viteza, dar nu e raliu". Runda picată NU aruncă răspunsul bun
+            // deja obținut (regula #1: fapta e făcută — nu raportăm „a picat").
+            // hardcod-permis: plafon tehnic de runde de convergență (nu bani/stare afișată)
+            const RUNDE_TRIERE = 2
+            let runde = 0
+            // `!inchis`: după moartea socketului nu mai pornim runde de
+            // convergență (F7 al marii verificări) — 2 ture de creier a câte
+            // 90s, cu fapte posibile, al căror rezultat ar muri mut.
+            while (!inchis && r.ok && usaTrierii === usaId && injectiiUsa.length > 0 && runde < RUNDE_TRIERE) {
+              const noi = injectiiUsa.splice(0).join(' • ')
+              runde++
+              app.log.info(`vocal-live: trierea în doi — runda ${runde}, informații noi de la om („${noi.slice(0, 80)}")`)
+              pulsVoce.rundeTriere++
+              const r2 = await turaCreierului(
+                req.headers.cookie ?? '',
+                cerere,
+                coords,
+                cadre,
+                laEcran,
+                monitorLive,
+                tranzactiiLive,
+                {
+                  istoric: [
+                    { role: 'user', content: cerere },
+                    { role: 'assistant', content: r.text },
+                    {
+                      role: 'user',
+                      content:
+                        `[TRIEREA ÎN DOI — ce a spus omul cât gândeai]: ${noi}\n` +
+                        `Continuă de unde ai rămas, ținând cont de TOT. NU repeta faptele deja făcute în runda de dinainte ` +
+                        `(email trimis, eveniment creat, orice unealtă cu efect) — fă doar DIFERENȚA nouă. ` +
+                        `Dacă o întrebare rămasă încă MUTĂ răspunsul, pune-o scurt și decent; altfel răspunde final.`,
+                    },
+                  ],
+                },
+              )
+              if (!r2.ok) {
+                app.log.warn(`vocal-live: trierea în doi — runda ${runde} a picat (${r2.motiv}); rămân pe ultimul răspuns bun`)
+                break
+              }
+              r = r2
+            }
             if (r.ok) {
               // Ordinele de constructor pornite prin ușă intră sub urmărire —
               // la terminare, Kelion anunță cu vocea lui (ceasOrdine, mai sus).
@@ -1199,7 +1714,32 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                 ordineUrmarite.add(Number(ordin[1]))
                 app.log.info(`vocal-live: urmăresc ordinul de construcție #${ordin[1]} — anunț la terminare`)
               }
-              live?.raspundeUnealta(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
+              // PREDAREA SCURTĂ (§8): peste PRAG, cu un DOCUMENT trimis pe
+              // monitor în tura asta, textul NU se dă ca „rezultat de spus" —
+              // se dă ÎNTREG (nicio trunchiere: primele N caractere pot
+              // inversa sensul — „nu am putut trimite" tăiat înainte de „nu"
+              // ar fi minciună, Legea #1) în câmpul al cărui nume spune
+              // singur regula. Formula predării afirmă DOAR ce s-a măsurat
+              // (un cadru doc a plecat) — nu „conținutul e afișat", care pe
+              // ramurile URL/cod era fals (verificatorii pasului 5).
+              const PRAG_PREDARE_ECRAN = 300 // hardcod-permis: plafon tehnic — peste ~o frază rostibilă; sub el rostirea integrală e deja scurtă
+              // Demascarea porții faptelor (marcajul ⚠) nu are voie să moară
+              // în câmpul nerostit: dacă răspunsul o conține, splitul se
+              // sare — adevărul rostit bate evitarea recitării.
+              const contineDemascare = r.text.includes('\n\n⚠ ')
+              if (docPeEcranInUsa && !contineDemascare && r.text.length > PRAG_PREDARE_ECRAN) {
+                if (live) {
+                  pulsVoce.predariEcran++
+                  live.raspundeUnealta(apel.id, apel.name, {
+                    rezultat: {
+                      de_rostit: 'Un document a fost trimis pe monitor în tura asta, iar textul COMPLET al răspunsului îl ai în „pe_ecran_nu_se_recita". Predă scurt: o propoziție de predare + esențialul într-o frază — nu recita textul întreg.',
+                      pe_ecran_nu_se_recita: r.text,
+                    },
+                  })
+                }
+              } else {
+                live?.raspundeUnealta(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
+              }
             } else {
               app.log.warn(`vocal-live: ușa creierului a picat: ${r.motiv}`)
               // CHATUL CARE NU RĂSPUNDE, FĂCUT VIZIBIL (12 aug): ușa creierului a
@@ -1207,6 +1747,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               // ca autovindecarea să ajungă la cauză.
               void recordSimptomLive('chat-mut', `voce: ușa creierului a picat — ${r.motiv}`.slice(0, 180)).catch(() => {})
               live?.raspundeUnealta(apel.id, apel.name, { eroare: r.motiv })
+            }
+            } finally {
+              usiGreleInZbor--
+              if (usaTrierii === usaId) usaTrierii = 0 // proprietatea se eliberează pe ORICE drum
             }
             return
           }
@@ -1219,22 +1763,29 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // voce" deși pe scris merg. Exact ca bucla de noapte (autonomie.ts).
             if (USER_SCOPED_TOOLS.has(apel.name)) {
               const r = await execUserScopedTool(apel.name, apel.args as any, user.email, user.role === 'admin')
+              // Dovada cățelului vocal (§5): rezultatul REAL, clasificat — o
+              // pretenție de faptă rostită se acoperă doar cu o unealtă reușită.
+              if (r != null) noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, String(r)))
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: r ?? 'Unealtă nesuportată în voce.' })
               return
             }
             const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
             if (rezultat !== null) {
+              noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, String(rezultat)))
               live?.raspundeUnealta(apel.id, apel.name, { rezultat })
             } else {
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: 'Unealtă nesuportată în voce.' })
             }
           } catch (err: any) {
             app.log.error(`Eroare unealtă ${apel.name}: ${err.message}`)
+            // Tentativă picată = dovadă de EȘEC (nu acoperă nicio pretenție).
+            noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, `tool_error: ${String(err?.message ?? err)}`))
             live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
           }
         },
         onIntrerupt: () => {
           pulsVoce.intreruperiModel++
+          taiereManuala = false
           verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
           verdictLimba = null
           verdictDinCeas = false
@@ -1249,6 +1800,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           if (anuntAmanat) {
             turaDeSistem = true // tura moartă a eliberat locul — anunțul amânat se armează
             anuntAmanat = false
+            if (anuntSistemAmanat) {
+              turaCuTemeiDinAfara = true // temeiul anunțului de SISTEM = starea ordinului (§5)
+              anuntSistemAmanat = false
+            }
           }
           golesteRedarea() // browserul golește redarea — și ceasul difuzorului tace
         },
@@ -1287,9 +1842,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                 ? `[VOCE] tură suprimată (limbă străină necerută): „${bufKelion.trim().slice(0, 120)}"`
                 : `[VOCE] tură suprimată (nu i se vorbea lui): auzit „${bufUser.trim().slice(0, 120)}"`,
             )
+            salveazaScrisulAruncat()
             bufUser = ''
             bufKelion = ''
             rostireCurenta = ''
+            inchideSarcinaVoce()
           } else if (verdictTura === null && !turaAdresata(bufUser.trim())) {
             // AUDITUL 15 aug (critică, confirmată de 3 verificatori): modelul a
             // TĂCUT corect pe vorbire neadresată — verdictul null nu înseamnă
@@ -1298,18 +1855,26 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             if (bufUser.trim()) {
               app.log.info(`[VOCE] tură nesalvată (tăcere corectă, fără nume): auzit „${bufUser.trim().slice(0, 120)}"`)
             }
+            salveazaScrisulAruncat()
             bufUser = ''
             bufKelion = ''
             rostireCurenta = ''
+            inchideSarcinaVoce()
           } else {
             salveazaTura()
           }
           verdictTura = null
           verdictLimba = null
+          taiereManuala = false
+          taiatDeVoce = false
           textInAsteptare.length = 0 // tura încheiată nu mai are text de vărsat
           if (anuntAmanat) {
             turaDeSistem = true // tura s-a închis — anunțul amânat se armează acum
             anuntAmanat = false
+            if (anuntSistemAmanat) {
+              turaCuTemeiDinAfara = true // temeiul anunțului de SISTEM = starea ordinului (§5)
+              anuntSistemAmanat = false
+            }
           }
           trimite({ type: 'tura_gata' })
         },
@@ -1349,6 +1914,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       for (const b of preCoada.splice(0)) {
         live.scrieAudio(b)
         octetiIn += b.length
+      }
+      // Rândurile SCRISE din fereastra de deschidere: fiecare e o tură adresată pe
+      // față (protocolul anunțurilor) — se varsă acum, în ordinea sosirii.
+      for (const t of preCoadaText.splice(0)) {
+        turaDeSistem = true
+        live.anunta(t)
       }
       app.log.info(
         `vocal-live: WS conectat (user=${user.role}, model=${VOCAL_LIVE_MODEL}, voce=${VOCAL_LIVE_VOICE}, memorie=${istoric.length} rânduri)`,

@@ -10,6 +10,7 @@ import {
   stareDispecer,
   _resetDispecer,
 } from './services/dispecer.js'
+import { eSqlDeCitire } from './services/brainCapabilities.js'
 
 // ── THE DISPATCHER (Adrian, Aug 1: „ce se întâmplă când vor fi zeci sau
 // sute de useri? … să scaleze pe o pungă comună") ────────────────────────────
@@ -120,14 +121,18 @@ describe('telemetry', () => {
 const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 
 describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
-  it('ia slot înainte de încercarea creierului', () => {
-    expect(chat).toMatch(/iaSlotDacaLiber\(orchestratorModel\)/)
+  it('ia slot înainte de încercarea creierului — pe modelul EFECTIV (escaladarea ask_brain mută rundele pe alt model; slotul trebuie să-l urmeze, registrul backend #1)', () => {
+    expect(chat).toMatch(/const modelEfectiv = \(\): string => escaladare\.model \|\| orchestratorModel/)
+    expect(chat).toMatch(/const modelIncercare = modelEfectiv\(\)/)
+    expect(chat).toMatch(/iaSlotDacaLiber\(modelIncercare\)/)
   })
   it('eliberează slotul pe orice drum (finally)', () => {
     expect(chat).toMatch(/finally \{\s*elibereazaSlot\(slotTinut\)/)
   })
-  it('coada e consultată când creierul Gemini e ocupat — pe ACELAȘI model, nu pe alt furnizor', () => {
-    expect(chat).toMatch(/asteaptaLaCoada\(async \(\) => \[orchestratorModel\]/)
+  it('coada e consultată când creierul Gemini e ocupat — pe ACELAȘI model efectiv, nu pe alt furnizor', () => {
+    expect(chat).toMatch(/asteaptaLaCoada\(async \(\) => \[modelIncercare\]/)
+    // …și plasa (profund↔rapid) tot pe modelul efectiv își ia slotul.
+    expect(chat).toMatch(/asteaptaLaCoada\(async \(\) => \[modelPlasa\]/)
   })
   it('NICIO rotație pe alt furnizor: pool-ul de candidați și rezerva plătită au dispărut din cod', () => {
     expect(chat).not.toMatch(/listaCandidati|rezervaDeschisa|adaugaLaRezerva|getCatalog|openrouterChat/)
@@ -136,9 +141,74 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
   // Gemini" au fost absorbite de extirparea totală, 3 aug seara: cursa, pool-ul
   // de candidați și punga de rezervă NU MAI EXISTĂ în cod — gardul de mai sus
   // le pinuiează absența, iar reîncercările de mai jos pinuiează noua formă.)
-  it('un răspuns gol sau o eroare se notează (telemetrie) și se reîncearcă pe Gemini', () => {
-    expect(chat).toMatch(/returned empty — reîncercare/)
-    expect(chat).toMatch(/noteazaEsuare\(orchestratorModel\)/)
+  it('un răspuns gol sau o eroare se notează (telemetrie) pe modelul VINOVAT — cel efectiv la momentul eșecului, nu cel de pornire', () => {
+    expect(chat).toMatch(/const modelVinovat = modelEfectiv\(\)/)
+    expect(chat).toMatch(/noteazaEsuare\(modelVinovat\)/)
+    // Telemetria nu mai are voie să dea vina pe modelul de PORNIRE.
+    expect(chat).not.toMatch(/noteazaEsuare\(orchestratorModel\)/)
+    expect(chat).not.toMatch(/noteazaEsuare\(modelIncercare\)/)
+  })
+  it('profundul epuizat NU se re-încearcă tot pe profund — cade pe o față rapidă REALĂ (a treia treaptă modelRapidDirect pe turele grele, unde plasa veche era moartă)', () => {
+    expect(chat).toMatch(/modelEfectiv\(\) === profund/)
+    expect(chat).toMatch(/PROFUNDUL EPUIZAT/)
+    expect(chat).toMatch(/orchestratorModel !== profund \? orchestratorModel : modelRapidDirect\(\)/)
+  })
+  it('fapta CU EFECT EXTERN deja executată oprește orice reluare completă a turei (registrul backend #2) — și bucla, și plasele', () => {
+    expect(chat).toMatch(/let faptaInIncercareEsuata = false/)
+    // Contorul e DOAR pe uneltele cu efect extern (runda 2 a verificatorilor:
+    // gardul pe „orice unealtă" omora cazul fondator db_query ×18 → plasă,
+    // și lăsa turele escaladate fără nicio reluare — ask_brain arma flag-ul).
+    expect(chat).toMatch(/const unelteLaStart = unelteEfectIncercate\.length/)
+    expect(chat).toMatch(/const eUnealtaCuEfectExtern = \(nume: string\): boolean =>\s*grupaExecutieUnealta\(nume\) === 'efect' && nume !== 'ask_brain' && !UNELTE_AFISAJ\.has\(nume\)/)
+    expect(chat).toMatch(/\} else if \(eUnealtaCuEfectExtern\(name\)\) unelteEfectIncercate\.push\(name\)/)
+    // DB_QUERY pe SQL (tensiunea (e), închisă 22 aug pe ordinul „finalizeaza
+    // tot"): SELECT-ul rămâne reluabil (cazul fondator db_query ×18 → plasa
+    // TRĂIEȘTE), scrierea armează gardul + avertismentul; neparsabil = scriere.
+    // Predicatul e EXPORTAT (brainCapabilities) — probat EXECUTABIL mai jos,
+    // nu doar pinuit ca text (verificatorul a demonstrat că prefixul minte).
+    expect(chat).toMatch(/scrie = !eSqlDeCitire\(String\(/)
+    expect(chat).toMatch(/if \(scrie\) \{\s*\n\s*dbQueryAScris = true\s*\n\s*unelteEfectIncercate\.push\(name\)/)
+    expect(chat).toMatch(/d\.nume === 'db_query' \? dbQueryAScris : eUnealtaCuEfectExtern\(d\.nume\)/)
+  })
+  it('eSqlDeCitire nu se lasă mințit de prefix (probele verificatorului, rulate pe funcția vie) și păzește și scutul banilor din db.ts', () => {
+    // cazul fondator al plasei rămâne CITIRE (reluabil):
+    expect(eSqlDeCitire('SELECT * FROM build_jobs ORDER BY id DESC LIMIT 5')).toBe(true)
+    expect(eSqlDeCitire('  select count(*) from messages')).toBe(true)
+    // cele 5 forme de scriere deghizată, demonstrate de verificator:
+    expect(eSqlDeCitire('WITH ins AS (INSERT INTO x VALUES (1) RETURNING id) SELECT * FROM ins')).toBe(false)
+    expect(eSqlDeCitire("with d as (delete from build_jobs where id=1 returning id) select count(*) from d")).toBe(false)
+    expect(eSqlDeCitire("select 1; update users set role='admin' where email='x'")).toBe(false)
+    expect(eSqlDeCitire('EXPLAIN ANALYZE INSERT INTO x VALUES (1)')).toBe(false)
+    expect(eSqlDeCitire('SELECT * INTO copie FROM users')).toBe(false)
+    // scutul tabelelor protejate din db.ts folosește ACELAȘI predicat (înainte
+    // judeca primul cuvânt și „WITH x AS (UPDATE wallets …)" îl ocolea):
+    const db = readFileSync(fileURLToPath(new URL('./db.ts', import.meta.url)), 'utf8')
+    expect(db).toMatch(/const eCitire = eSqlDeCitire\(text\)/)
+    expect(db).not.toMatch(/primulCuvant === 'SELECT'/)
+    // ARMAREA + break-ul (contra-exemplul CE-1 al verificatorului: fără astea,
+    // flag-ul e veșnic false și toate celelalte lacăte rămân verzi degeaba).
+    expect(chat).toMatch(/if \(!r && unelteEfectIncercate\.length > unelteLaStart\) \{\s*faptaInIncercareEsuata = true\s*break\s*\}/)
+    // ambele plase citesc flag-ul
+    const plaseGardate = chat.match(/!faptaInIncercareEsuata/g) ?? []
+    expect(plaseGardate.length).toBeGreaterThanOrEqual(2)
+  })
+  it('UNELTE_AFISAJ are EXACT cei 5 membri de afișare (mutantul M2; click_monitor SCOS 22 aug — apasă elemente reale; goleste_monitorul MUTAT 22 aug la FAPTE — vânătorul a măsurat că poarta acțiunii îi prescria modelului refuzul „oprește-l manual")', () => {
+    expect(chat).toMatch(/const UNELTE_AFISAJ = new Set\(\[\s*'show_document', 'show_on_screen', 'open_app_view',\s*'zoom_monitor', 'arata_pe_grafic',\s*\]\)/)
+    expect(chat).not.toMatch(/UNELTE_AFISAJ = new Set\(\[[^\]]*'click_monitor'/)
+    expect(chat).not.toMatch(/UNELTE_AFISAJ = new Set\(\[[^\]]*'goleste_monitorul'/)
+    // ...și golirea e pe lista rundei forțate (unealta chemabilă pe acțiune):
+    expect(chat).toMatch(/'goleste_monitorul',\s*\]\.filter\(\(n\) => toolNamesThisTurn\.has\(n\)\)/)
+  })
+  it('plasele nu ricoșează una în alta (F4): profund→rapid armează plasaRulata, iar plasa oglindită o respectă', () => {
+    expect(chat).toMatch(/let plasaRulata = false/)
+    expect(chat).toMatch(/plasaRulata = true/)
+    expect(chat).toMatch(/!faptaInIncercareEsuata && !plasaRulata && config\.modelCreierProfund/)
+  })
+  it('modelIncercare se calculează ÎN buclă, la fiecare încercare (CE-3: mutat înaintea buclei, escaladarea din mijloc ar lăsa slotul pe modelul de la start)', () => {
+    expect(chat).toMatch(/for \(let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt\+\+\) \{[\s\S]{0,400}const modelIncercare = modelEfectiv\(\)/)
+  })
+  it('treapta a treia chiar ÎNCEARCĂ plasa, nu doar loghează (CE-4)', () => {
+    expect(chat).toMatch(/PROFUNDUL EPUIZAT[\s\S]{0,200}await incearcaPlasa\(\)/)
   })
   it('la epuizarea încercărilor tura se încheie ONEST (mesajul neutru din catch), nu pe alt creier', () => {
     expect(chat).toMatch(/brain_gemini_exhausted/)

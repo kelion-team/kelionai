@@ -22,7 +22,7 @@ describe('bargraful urechii live — nivel de intrare măsurat', () => {
   })
 
   it('poarta half-duplex e aceeași decizie care taie trimiterea', () => {
-    expect(clientVL).toMatch(/const poarta = kelionAudibil\(\)/)
+    expect(clientVL).toMatch(/const poarta = !procesareActiva && kelionAudibil\(\)/) // 22 aug: half-duplex DOAR fără AEC viu
     expect(clientVL).toMatch(/const la16k = poarta \? new Float32Array\(ds\.length\) : ds/)
   })
 
@@ -50,9 +50,10 @@ describe('preamp microfon (surd / prea tare)', () => {
     expect(clientVL).toContain('setPreamp: (g: number) =>')
   })
 
-  it('AGC pe desktop, stins pe mobil (A2DP)', () => {
-    expect(clientVL).toContain('autoGainControl: !eMobil')
-    expect(clientVL).toContain('echoCancellation: !eMobil')
+  it('AEC/AGC adaptive pe ruta audio (22 aug) — nu mai sunt legate orbește de eMobil', () => {
+    expect(clientVL).toContain('autoGainControl: procesare')
+    expect(clientVL).toContain('echoCancellation: procesare')
+    expect(clientVL).not.toContain('echoCancellation: !eMobil')
   })
 
   it('ChatPanel: slider preamp persistat, legat de handle', () => {
@@ -71,18 +72,38 @@ describe('audio focus — LIVE first, one mouth, interrupt', () => {
     expect(audioFocus).toMatch(/active === 'live'|requestTtsFocus/)
   })
 
-  it('cât LIVE (vlRef) e activ, {audio} TTS pe scris e refuzat', () => {
-    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,600}?if \(vlRef\.current\) return/)
-    expect(panou).toContain('requestTtsFocus')
-    // no second-mouth anti-echo path on c.audio
-    expect(panou).not.toMatch(/if \(c\.audio\)[\s\S]{0,900}?setRedareExterna\(true\)/)
+  it('SCRISUL MERGE LA CREIERUL ÎNTREG + o singură voce prin ÎNTRERUPERE (22 aug)', () => {
+    // ISTORIC: pasul 1 v1 ruta turele scrise PRIN Live (trimiteText) și SUPRIMA
+    // Chirp cât vlRef era viu. MĂSURAT LIVE pe V7.5 (owner, 22 aug, capturi):
+    // cererea SCRISĂ nu se executa, nu se afișa, nu se auzea — un Live viu dar
+    // mut făcea aplicația să pară moartă. Forma nouă: tot ce e TASTAT trece
+    // prin /api/chat (creierul întreg, unelte, monitor), iar Chirp E gura
+    // răspunsului scris chiar și cu Live viu — vocea unică se ține prin
+    // întreruperea redării Live (requestTtsFocus), nu prin suprimarea gurii.
+    expect(panou).toContain('SCRISUL MERGE LA CREIERUL ÎNTREG')
+    expect(panou).not.toContain('vlRef.current.trimiteText(')
+    // Suprimarea veche („cât Live e viu, c.audio se aruncă") NU mai există:
+    expect(panou).not.toMatch(/if \(c\.audio\)[\s\S]{0,2000}?if \(vlRef\.current\) \{\s*\n\s*aSunatTuraRef\.current = true\s*\n\s*return/)
+    // Chirp cere focus întrerupând orice rest de playout (turaScrisa:true).
+    expect(panou).toContain('requestTtsFocus({ turaScrisa: true })')
+    // Sesiunea Realtime OpenAI (isRealtime) chiar rostește textul → acolo Chirp e refuzat.
+    expect(panou).toMatch(/isRealtime === true\) return/)
+    // ANTI-ECOU: cât redă Chirp-ul, urechea clasică ȘI urechea Live se mută.
+    expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,2500}?setRedareExterna\(true\)/)
+    // Canalul {type:'text'} al serverului rămâne (nefolosit de client azi).
+    expect(clientVL).toContain('trimiteText(text: string): boolean')
   })
 
-  it('întrerupere centrală + serverVoiceOff când LIVE ține gura', () => {
+  it('serverVoiceOff NU mai e legat de „LIVE instalat" — Chirp iese ȘI pe voce (o voce prin întreruperea Live)', () => {
     expect(panou).toContain('interruptAll')
-    expect(panou).toMatch(/Boolean\(vlRef\.current\)/)
+    // serverVoiceOff NU mai cheie pe voiceTurnRef && vlRef (aia tăcea vocea); doar Realtime OpenAI.
+    expect(panou).not.toMatch(/Boolean\(voiceTurnRef\.current\) && Boolean\(vlRef\.current\)/)
     expect(clientChat).toContain('serverVoiceOff')
-    expect(clientVL).toContain("interruptAll('live-server-barge-in')")
+    expect(clientVL).toContain('intrerupeRedarea(): void')
+    expect(clientVL).toContain("ws.send(JSON.stringify({ type: 'intrerupe' }))")
+    expect(panou).toContain('vl.intrerupeRedarea()')
+    expect(panou).toContain('const vlGeneratieRef = useRef(0)')
+    expect(panou).toContain('const VL_MAX_RELUARI = 3')
   })
 
   it('setRedareExterna rămâne pe handle-ul LIVE (alte căi), nu e motorul TTS pe scris', () => {

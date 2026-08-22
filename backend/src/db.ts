@@ -4,8 +4,11 @@ import { randomBytes } from 'node:crypto'
 import type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow } from './shared/api-types.js'
 export type { DemoRecent, DemoStats, UserActivityRow, UserDeviceRow }
 import { config } from './config.js'
+import { creeazaPoolDb } from './dbConexiune.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
+import { normalizeazaTip, clampImportanta, rangheazaMemorii } from './services/memoryRank.js'
 import { esteDuplicat } from './services/cerinteDedup.js'
+import { eSqlDeCitire, allCapabilityNames } from './services/brainCapabilities.js'
 import {
   curataTextJurnal,
   esteStareSarcinaOperationala,
@@ -33,16 +36,11 @@ export function dbEnabled(): boolean {
 }
 
 // Exported for the live "PostgreSQL" check in tokenChecks (SELECT 1).
+// Viața conexiunii (validarea țintei, TLS, răbdarea la repornirea Postgres-ului
+// și eroarea 503 „infrastructură") stă în dbConexiune.ts — un singur modul
+// responsabil, nu răspândită prin cele 5800 de linii de aici.
 export function getPool(): pg.Pool {
-  if (!pool) {
-    const url = config.databaseUrl
-    // Local/no-TLS Postgres (VPS on the same machine, explicit sslmode=disable)
-    // connects without SSL; any other target gets TLS with a self-signed
-    // certificate accepted (managed proxies).
-    const noTls = /sslmode=disable/.test(url) || /@(localhost|127\.0\.0\.1)[:/]/.test(url)
-    const ssl = noTls ? false : { rejectUnauthorized: false }
-    pool = new pg.Pool({ connectionString: url, ssl })
-  }
+  if (!pool) pool = creeazaPoolDb(config.databaseUrl)
   return pool
 }
 
@@ -112,6 +110,11 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_operational_tasks_user_state
       ON operational_tasks (user_email, state, updated_at DESC);
+    -- dovada_faptelor citește ultimele N sarcini ale userului pe created_at:
+    -- fără indexul ăsta, un user intens (o sarcină pe tură) ar plăti un sort
+    -- peste toate rândurile lui la fiecare provocare (agentul de integrare).
+    CREATE INDEX IF NOT EXISTS idx_operational_tasks_user_created
+      ON operational_tasks (user_email, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_operational_tasks_turn
       ON operational_tasks (turn_id);
     CREATE TABLE IF NOT EXISTS operational_events (
@@ -212,6 +215,16 @@ export async function initDb(): Promise<void> {
     -- JSONB, not pgvector: no extensions to install, cosine is computed in
     -- Node over the last few hundred — instant at current volume.
     ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding JSONB;
+    -- SMART MEMORY (owner, 19 aug: „schimba... cu toate atuurile de imbunatatire").
+    -- Modelul de memorie tipizată, studiat din TencentDB Agent memory: TIP
+    -- (identity/preference/relationship/project/episodic/fact), IMPORTANȚĂ (0..1) și
+    -- EXPIRARE. Recall-ul le cântărește (services/memoryRank.ts): similaritate ×
+    -- importanță × decădere-în-timp. ADITIV, IF NOT EXISTS — memoriile vechi rămân
+    -- valide (tip NULL = generic, importanță neutră, fără expirare). Cosinusul rămâne
+    -- în Node: la scara unui user pgvector n-ar aduce nimic măsurabil (analiză 19 aug).
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS memory_type TEXT;
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance REAL;
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
     -- The prepaid credit wallet. The balance is in display currency (GBP);
     -- topup_ref = the amount credited at the LAST top-up, so we can show
     -- "% of credit left" for the escalated alerts (30/20/10/5%).
@@ -638,6 +651,11 @@ export async function initDb(): Promise<void> {
     -- recuperabil): iese din panou, dar nu se pierde. Bucla de autonomie
     -- arhivează singură; panoul (listBuildJobs) le exclude.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS arhivat BOOLEAN NOT NULL DEFAULT false;
+    -- DEVIN (owner, 20 aug: „punel pe devin cu cheie"): id-ul sesiunii Devin
+    -- care duce ordinul. Când e ne-null, ordinul e rulat de Devin (constructorul
+    -- extern) — dispecerul îl poluează după el, iar bara e indeterminată (nu un
+    -- procent inventat). Null = job liber sau rulat de calea veche.
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS devin_session_id TEXT;
     -- MAPE-K INCIDENT REGISTER: every terminal constructor failure becomes one
     -- durable case. The normalized order fingerprint is unique, so recurrence
     -- reopens the same case instead of spawning disconnected alerts.
@@ -954,10 +972,14 @@ export async function tranzitioneazaSarcinaOperationala(
     const from = task.rows[0]?.state
     if (!esteStareSarcinaOperationala(from)) {
       await client.query('ROLLBACK')
+      // Respingerea se ÎNTOARCE ca valoare, nu ca excepție — fără log aici,
+      // apelantul care ignoră {ok:false} o pierdea complet fără urmă.
+      console.error(`[jurnal operațional] tranziție pe sarcină inexistentă: ${taskId} → ${input.stare}`)
       return { ok: false, error: 'journal_task_not_found' }
     }
     if (!tranzitieOperationalaPermisa(from, input.stare)) {
       await client.query('ROLLBACK')
+      console.error(`[jurnal operațional] tranziție respinsă: ${taskId} ${from} → ${input.stare}`)
       return { ok: false, error: `journal_transition_rejected:${from}:${input.stare}` }
     }
     const terminal = ['completed', 'failed', 'blocked', 'expired', 'unverified'].includes(input.stare)
@@ -987,6 +1009,109 @@ export async function tranzitioneazaSarcinaOperationala(
     return { ok: false, error: 'journal_write_failed' }
   } finally {
     client?.release()
+  }
+}
+
+// ── DOVADA FAPTELOR — cititorul jurnalului operațional (JARVIS pasul 4, §7:
+// „salvarea = dovada, asul din mânecă"). Până aici jurnalul era write-only:
+// chat.ts scria stări+evenimente pentru fiecare tură, dar nimeni nu le putea
+// SCOATE la provocare. Citirea e per-utilizator (user_email), întoarce doar
+// ce e deja normalizat/igienizat la scriere — niciodată output brut de unealtă.
+export interface DovadaFaptaRand {
+  obiectiv: string
+  stare: string
+  inceput: string
+  incheiat: string | null
+  sursa: string
+  usaCreierului: boolean
+  evenimente: Array<{
+    fel: string
+    unealta: string | null
+    stare: string | null
+    cod: string | null
+    motiv: string | null
+    la: string
+  }>
+}
+
+/** Legea #1: o citire picată se SPUNE (citit:false + motiv), nu se maschează
+ *  într-o listă goală — „nicio dovadă" de la o bază căzută nu înseamnă
+ *  „nicio faptă". */
+export async function dovezileFaptelor(
+  userEmail: string,
+  cate = 10,
+  cauta?: string,
+): Promise<{ citit: true; sarcini: DovadaFaptaRand[] } | { citit: false; motiv: string }> {
+  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e pornită' }
+  const email = String(userEmail ?? '').trim().toLowerCase()
+  if (!email) return { citit: false, motiv: 'utilizator necunoscut' }
+  const limita = Math.min(Math.max(Math.floor(cate) || 10, 1), 30)
+  try {
+    const filtru = String(cauta ?? '').trim()
+    const sarcini = await getPool().query<{
+      id: string
+      objective: string
+      state: string
+      metadata: Record<string, unknown> | null
+      created_at: string
+      finished_at: string | null
+    }>(
+      filtru
+        ? `SELECT id, objective, state, metadata, created_at, finished_at
+           FROM operational_tasks
+           WHERE user_email=$1 AND objective ILIKE '%' || $3 || '%'
+           ORDER BY created_at DESC LIMIT $2`
+        : `SELECT id, objective, state, metadata, created_at, finished_at
+           FROM operational_tasks
+           WHERE user_email=$1
+           ORDER BY created_at DESC LIMIT $2`,
+      filtru ? [email, limita, filtru.slice(0, 160)] : [email, limita],
+    )
+    const ids = sarcini.rows.map((r) => r.id)
+    const evenimente = ids.length
+      ? await getPool().query<{
+          task_id: string
+          kind: string
+          capability: string | null
+          outcome_state: string | null
+          code: string | null
+          reason: string | null
+          created_at: string
+        }>(
+          `SELECT task_id, kind, capability, outcome_state, code, reason, created_at
+           FROM operational_events
+           WHERE task_id = ANY($1::uuid[])
+           ORDER BY created_at ASC, id ASC`,
+          [ids],
+        )
+      : { rows: [] as Array<{ task_id: string; kind: string; capability: string | null; outcome_state: string | null; code: string | null; reason: string | null; created_at: string }> }
+    const peSarcina = new Map<string, DovadaFaptaRand['evenimente']>()
+    for (const e of evenimente.rows) {
+      const lista = peSarcina.get(e.task_id) ?? []
+      lista.push({
+        fel: e.kind,
+        unealta: e.capability,
+        stare: e.outcome_state,
+        cod: e.code,
+        motiv: e.reason,
+        la: String(e.created_at),
+      })
+      peSarcina.set(e.task_id, lista)
+    }
+    return {
+      citit: true,
+      sarcini: sarcini.rows.map((r) => ({
+        obiectiv: r.objective,
+        stare: r.state,
+        inceput: String(r.created_at),
+        incheiat: r.finished_at ? String(r.finished_at) : null,
+        sursa: String((r.metadata as Record<string, unknown> | null)?.source ?? 'chat'),
+        usaCreierului: (r.metadata as Record<string, unknown> | null)?.usaCreierului === true,
+        evenimente: peSarcina.get(r.id) ?? [],
+      })),
+    }
+  } catch (e) {
+    return { citit: false, motiv: String(e).slice(0, 200) }
   }
 }
 // ── SCUTUL DATELOR DE NEATINS (owner, 14 aug, verbatim: „baza de date de
@@ -3137,7 +3262,9 @@ export async function getMemories(email: string, limit = 40, agent = 'kelion'): 
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<Memory>(
-      `SELECT content FROM memories WHERE user_email = $1 AND agent = $2 ORDER BY last_seen DESC LIMIT $3`,
+      `SELECT content FROM memories
+       WHERE user_email = $1 AND agent = $2 AND (expires_at IS NULL OR expires_at > now())
+       ORDER BY last_seen DESC LIMIT $3`,
       [email, agent, limit],
     )
     return r.rows
@@ -3183,6 +3310,7 @@ export async function searchMemories(
     const r = await getPool().query<Memory>(
       `SELECT content FROM memories
        WHERE user_email = $1 AND agent = $3
+         AND (expires_at IS NULL OR expires_at > now())
          AND to_tsvector('simple', content) @@ (${orQuery})
        ORDER BY ts_rank(to_tsvector('simple', content), (${orQuery})) DESC, last_seen DESC
        LIMIT $4`,
@@ -3419,15 +3547,42 @@ export async function setGapTriage(id: number, triage: string, resolved: boolean
   }
 }
 
-/** Save a learned fact (idempotent: re-learning just refreshes its recency). */
-export async function addMemory(email: string, content: string, agent = 'kelion'): Promise<void> {
+/** Metadatele SMART ale unei memorii (owner, 19 aug): tip, importanță, expirare.
+ *  Toate opționale — un apelant vechi (fără meta) scrie exact ca înainte. */
+export interface MemoryMeta {
+  tip?: string | null // memory_type: identity/preference/relationship/project/episodic/fact
+  importanta?: number | null // 0..1; absentă → implicita tipului (memoryRank)
+  expiraInMs?: number | null // TTL de acum → expires_at; absentă → nu expiră
+}
+
+/** Save a learned fact (idempotent: re-learning just refreshes its recency).
+ *  Cu meta (owner, 19 aug): scrie tipul, importanța și expirarea — recall-ul le
+ *  cântărește (memoryRank). La re-învățare: prospețimea se reîmprospătează, tipul
+ *  se completează dacă vine, importanța urcă la maximul dintre vechi și nou. */
+export async function addMemory(
+  email: string,
+  content: string,
+  agent = 'kelion',
+  meta: MemoryMeta = {},
+): Promise<void> {
   const c = content.trim()
   if (!dbEnabled() || !c) return
+  const tip = normalizeazaTip(meta.tip)
+  const imp = clampImportanta(meta.importanta, tip)
+  const expira =
+    typeof meta.expiraInMs === 'number' && Number.isFinite(meta.expiraInMs) && meta.expiraInMs > 0
+      ? new Date(Date.now() + meta.expiraInMs)
+      : null
   try {
     await getPool().query(
-      `INSERT INTO memories (user_email, agent, content) VALUES ($1, $2, $3)
-       ON CONFLICT (user_email, agent, content) DO UPDATE SET last_seen = now()`,
-      [email, agent, c],
+      `INSERT INTO memories (user_email, agent, content, memory_type, importance, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_email, agent, content) DO UPDATE SET
+         last_seen = now(),
+         memory_type = COALESCE(EXCLUDED.memory_type, memories.memory_type),
+         importance = GREATEST(COALESCE(EXCLUDED.importance, 0), COALESCE(memories.importance, 0)),
+         expires_at = COALESCE(EXCLUDED.expires_at, memories.expires_at)`,
+      [email, agent, c, tip, imp, expira],
     )
     // The meaning vector, ASYNCHRONOUSLY (doesn't hold the turn): if the
     // embedding fails, the memory stays anyway — full-text finds it by words.
@@ -3488,21 +3643,43 @@ export async function semanticMemories(
   try {
     const qv = await embedText(query)
     if (!qv) return []
-    const r = await getPool().query<{ content: string; embedding: number[] | null }>(
-      `SELECT content, embedding FROM memories
+    const acum = Date.now()
+    // SMART (owner, 19 aug): pe lângă vector aducem TIPUL, IMPORTANȚA și vârsta
+    // (last_seen) + expirarea, iar rangarea nu mai e doar similaritate — e
+    // similaritate × importanță × decădere-în-timp (memoryRank). Expiratele NU se
+    // reamintesc. Pragul de similaritate rămâne (0.45) ca să nu injectăm zgomot.
+    const r = await getPool().query<{
+      content: string
+      embedding: number[] | null
+      memory_type: string | null
+      importance: number | null
+      age_ms: string | number
+      expires_ms: string | number | null
+    }>(
+      `SELECT content, embedding, memory_type, importance,
+              EXTRACT(EPOCH FROM (now() - last_seen)) * 1000 AS age_ms,
+              CASE WHEN expires_at IS NULL THEN NULL ELSE EXTRACT(EPOCH FROM expires_at) * 1000 END AS expires_ms
+       FROM memories
        WHERE user_email = $1 AND agent = $2 AND embedding IS NOT NULL
+         AND (expires_at IS NULL OR expires_at > now())
        ORDER BY last_seen DESC LIMIT 400`,
       [email, agent],
     )
-    return r.rows
-      .map((row) => ({
-        content: row.content,
-        score: Array.isArray(row.embedding) ? cosine(qv, row.embedding) : 0,
-      }))
-      .filter((x) => x.score > 0.45)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map((x) => ({ content: x.content }))
+    const candidate = r.rows
+      .map((row) => {
+        const semantic = Array.isArray(row.embedding) ? cosine(qv, row.embedding) : 0
+        const tip = normalizeazaTip(row.memory_type)
+        return {
+          content: row.content,
+          tip,
+          importanta: clampImportanta(row.importance, tip),
+          semantic,
+          varstaMs: Number(row.age_ms) || 0,
+          expiresAtMs: row.expires_ms == null ? null : Number(row.expires_ms),
+        }
+      })
+      .filter((m) => m.semantic > 0.45) // hardcod-permis: prag de similaritate, ca la varianta veche
+    return rangheazaMemorii(candidate, acum, limit).map((m) => ({ content: m.content }))
   } catch {
     return []
   }
@@ -3584,6 +3761,10 @@ export async function proposeKelionTool(t: {
   if (!dbEnabled()) return null
   const name = t.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40)
   if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // HTTPS only
+  // Numele din inventarul FIX nu se pot propune (C4 al marii verificări):
+  // o unealtă dinamică „send_email" aprobată dintr-un click ar fi umbrit
+  // executorul real — datele omului plecau la un URL extern.
+  if (allCapabilityNames().includes(name)) return null
   try {
     const r = await getPool().query<{ id: number }>(
       `INSERT INTO kelion_tools (name, description, params_json, http_method, http_url, http_headers, rationale, status)
@@ -4187,6 +4368,8 @@ export interface BuildJob {
   // as measured from OpenRouter (null = not reported by the provider).
   brain: string | null
   costUsd: number | null
+  /** Id-ul sesiunii Devin (constructorul extern) care duce ordinul; null = calea veche. */
+  devinSessionId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -4205,6 +4388,7 @@ interface BuildJobDbRow {
   ci?: string | null
   brain?: string | null
   cost_usd?: string | number | null
+  devin_session_id?: string | null
   created_at: Date
   updated_at: Date
 }
@@ -4224,6 +4408,7 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     ci: r.ci ?? null,
     brain: r.brain ?? null,
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
+    devinSessionId: r.devin_session_id ?? null,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -4609,6 +4794,54 @@ const MIN_JOB_BLOCAT = 15
 // so an impossible order doesn't block the queue forever.
 export async function claimNextBuildJob(): Promise<BuildJob | null> {
   if (!dbEnabled()) return null
+  // ÎNTÂI, IZOLAT: abandonarea joburilor blocate + jurnalul incidentelor, în
+  // tranzacția LOR, BEST-EFFORT. E DESPRINSĂ de preluare pe o cauză MĂSURATĂ în
+  // Postgres: orice query care aruncă (schemă de incident stricată, constrângere,
+  // upsert întors gol) AVORTEAZĂ toată tranzacția — iar înainte abandonarea +
+  // `upsertConstructorIncident` rulau în ACEEAȘI tranzacție cu preluarea, deci un
+  // singur incident care pica rostogolea ÎNTREG claim-ul → `null` la FIECARE tur →
+  // coada rămânea neatinsă la nesfârșit („ordine în coadă dar nu se apucă nimeni").
+  // Acum bookkeeping-ul de incidente NU mai poate înfometa coada: dacă pică, se
+  // loghează și preluarea merge mai departe.
+  await abandoneazaJoburileBlocate().catch((e) => {
+    console.error('[constructor] abandonare/incidente a picat (nefatal pentru preluare):', e instanceof Error ? e.message : e)
+  })
+  // APOI: preluarea propriu-zisă, în tranzacția ei — niciodată blocată de
+  // bookkeeping-ul de mai sus.
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const r = await client.query<BuildJobDbRow>(
+      `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
+       WHERE id = (
+         SELECT id FROM build_jobs
+         WHERE (status='queued'
+                -- GARDA DEVIN (22 aug): running-stătut se fură DOAR fără sesiune
+                -- Devin — sesiunea externă trăiește și e polată de dispecer;
+                -- furtul ei ar porni a doua sesiune plătită pe același ordin.
+                OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND devin_session_id IS NULL))
+           AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
+         ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+       )
+       RETURNING *`,
+    )
+    await client.query('COMMIT')
+    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
+  } catch {
+    await client.query('ROLLBACK').catch(() => {})
+    return null
+  } finally {
+    client.release()
+  }
+}
+
+// Abandonează joburile 'running' blocate (≥3 încercări, tăcute peste pragul de
+// blocaj) și le trece pe 'failed', deschizând câte un incident pentru fiecare.
+// FIECARE incident e izolat cu SAVEPOINT: un upsert care aruncă NU mai avortează
+// abandonarea celorlalte — și, fiindcă rulează în tranzacția asta separată, nici
+// preluarea din `claimNextBuildJob`. Best-effort prin construcție.
+async function abandoneazaJoburileBlocate(): Promise<void> {
+  if (!dbEnabled()) return
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
@@ -4624,31 +4857,71 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
        RETURNING id, order_text, log, progress, attempts`,
     )
     for (const row of abandoned.rows) {
-      await upsertConstructorIncident(client, {
-        id: Number(row.id),
-        orderText: row.order_text,
-        log: row.log ?? '[abandoned: 3 attempts exhausted]',
-        progress: row.progress ?? '',
-        attempts: row.attempts,
-      })
+      await client.query('SAVEPOINT incident')
+      try {
+        await upsertConstructorIncident(client, {
+          id: Number(row.id),
+          orderText: row.order_text,
+          log: row.log ?? '[abandoned: 3 attempts exhausted]',
+          progress: row.progress ?? '',
+          attempts: row.attempts,
+        })
+        await client.query('RELEASE SAVEPOINT incident')
+      } catch (e) {
+        // Un incident care pică nu blochează abandonarea (status='failed' rămâne)
+        // și nici preluarea următoare — ne întoarcem la savepoint și mergem mai departe.
+        await client.query('ROLLBACK TO SAVEPOINT incident').catch(() => {})
+        console.error(`[constructor] incident job ${row.id} a picat (izolat):`, e instanceof Error ? e.message : e)
+      }
     }
-    const r = await client.query<BuildJobDbRow>(
-      `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
-       WHERE id = (
-         SELECT id FROM build_jobs
-         WHERE (status='queued' OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'))
-           AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
-         ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
-       )
-       RETURNING *`,
-    )
     await client.query('COMMIT')
-    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
   } catch {
     await client.query('ROLLBACK').catch(() => {})
-    return null
   } finally {
     client.release()
+  }
+}
+
+// ── WATCHDOG SERVER-SIDE, INDEPENDENT DE LUCRĂTOR (owner, 20 aug: „de la preluare
+// tot se blochează, nu se execută real nimic… pune în soft ce trebuie să nu se mai
+// blocheze la acești pași"). CAUZA: singura eliberare a unui 'running' înțepenit
+// trăia în `claimNextBuildJob` (`abandoneazaJoburileBlocate` + re-preluarea), deci se
+// declanșa DOAR când lucrătorul de pe VPS cerea ordin — exact ce moare în cazul ăsta
+// (lucrătorul a trecut jobul pe 'running' apoi a murit fix după claim → nimeni nu mai
+// atinge jobul → „Preluat · 0%" pe veci). În plus `abandoneazaJoburileBlocate` cere
+// attempts≥3, deci un job claimat O DATĂ (attempts=1) de un lucrător mort nu se
+// abandonează niciodată singur. Watchdog-ul ăsta rulează pe TIMER-ul APP-ului (bucla de
+// autonomie), NU pe pulsul lucrătorului: repune în coadă joburile 'running' tăcute
+// (inclusiv attempts=1) — un lucrător viu/repornit le reia imediat — și, după 3 claim-uri
+// sterile, le trece pe 'failed' cu motiv onest. Coada nu mai rămâne blocată la „Preluat".
+export async function deblocheazaJoburileClaimate(): Promise<{ repuse: number; abandonate: number }> {
+  if (!dbEnabled()) return { repuse: 0, abandonate: 0 }
+  try {
+    const fail = await getPool().query(
+      `UPDATE build_jobs SET status='failed',
+         log = COALESCE(log,'') || E'\\n[watchdog: lucrătorul a murit după preluare, fără progres, de prea multe ori — abandonat]',
+         updated_at = now()
+       WHERE status='running' AND attempts >= 3
+         AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'`,
+    )
+    const requeue = await getPool().query(
+      `UPDATE build_jobs SET status='queued',
+         log = COALESCE(log,'') || E'\\n[watchdog: repus în coadă — running tăcut peste prag, lucrătorul nu a raportat progres după preluare]',
+         updated_at = now()
+       WHERE status='running' AND attempts < 3
+         AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'
+         AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
+         -- GARDA DEVIN (22 aug, „bani dubli"): un job cu sesiune Devin VIE nu e
+         -- „lucrător mort" — sesiunea trăiește EXTERN și e polată de dispecer;
+         -- dacă bucla de autonomie doarme o oră (pauza „nimic"), pragul de 15
+         -- min l-ar fi repus în coadă și tick-ul următor pornea A DOUA sesiune
+         -- plătită pe același ordin. Terminarea/eșecul le judecă dispecerul
+         -- (verificaJobDevin), nu tăcerea lui updated_at.
+         AND devin_session_id IS NULL`,
+    )
+    return { repuse: requeue.rowCount ?? 0, abandonate: fail.rowCount ?? 0 }
+  } catch {
+    return { repuse: 0, abandonate: 0 }
   }
 }
 
@@ -4862,6 +5135,32 @@ export async function updateBuildJobProgress(id: number, progress: string): Prom
   }
 }
 
+// DEVIN (Stage 4): leagă sesiunea Devin de ordin, ca dispecerul s-o poată polua
+// după ea (și panoul să știe că e job Devin → bară indeterminată, nu procent fals).
+export async function setDevinSessionId(id: number, sessionId: string): Promise<void> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return
+  try {
+    await getPool().query(`UPDATE build_jobs SET devin_session_id=$2, updated_at=now() WHERE id=$1`, [id, sessionId.slice(0, 200)])
+  } catch (e) {
+    console.error('[devin] setDevinSessionId a picat:', String(e).slice(0, 160))
+  }
+}
+
+// Cel mai vechi ordin ÎN LUCRU (running). Când Devin e configurat, EL deține
+// coada (ruta /next nu mai dă joburi worker-ului vechi), deci ordinul running e
+// al lui Devin — dispecerul îl poluează după `devin_session_id`. Null = nimic în lucru.
+export async function getOldestRunningBuildJob(): Promise<BuildJob | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query<BuildJobDbRow>(
+      `SELECT * FROM build_jobs WHERE status='running' AND arhivat=false ORDER BY created_at ASC LIMIT 1`,
+    )
+    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
+  } catch {
+    return null
+  }
+}
+
 // The jobs for the LIVE DISPLAY on the monitor (Stage 4b): the active ones
 // (queued / running) PLUS the RECENTLY finished (last 10 min). Without
 // "recently finished", the panel would delete the job at the very moment it
@@ -4904,9 +5203,16 @@ export async function deleteBuildJob(id: number): Promise<boolean> {
 }
 
 /** Ștergere în GRUP după stare. `scope`: 'failed' (doar eșuate), 'done' (doar
- *  terminate), 'failed_done' (eșuate + terminate — cele „istorice", NU cele în
- *  curs), 'all' (chiar tot). Nu atinge NICIODATĂ ordinele 'queued'/'running'
- *  decât la 'all' — un ordin viu nu se șterge din greșeală. Întoarce câte a șters. */
+ *  terminate), 'failed_done' (eșuate + terminate + anulate), 'all' (tot
+ *  ISTORICUL). NICIUN scope nu atinge VREODATĂ ordinele VII ('queued'/'running')
+ *  — un ordin la care ownerul așteaptă NU se șterge într-o curățare în grup.
+ *  Întoarce câte a șters. */
+// OWNER, 20 aug: „a avut multe ordine de lucru și au dispărut, le-a șters când a
+// trecut forțat pe bani." Cauza: 'all' rula un `DELETE FROM build_jobs` GOL, care
+// mătura și ordinele 'queued'/'running' (munca în așteptare), nu doar istoricul —
+// exact regula #3 (nicio operație în masă pe ceva ce nu s-ai uitat). GARD PERMANENT:
+// ștergerea în grup exclude MEREU ordinele vii (NOT IN queued/running). Un ordin viu
+// se poate șterge DOAR țintit, pe id (deleteBuildJob) — o alegere explicită, un ordin.
 // AUDIT ADMIN (3 aug): la eroare de DB întorcea 0 → panoul afișa „Curățat: 0
 // ordine șterse." ca rezultat măsurat, deși ștergerea nu rulase deloc (zeroul
 // fals interzis de regula #1). null = eșec (ruta răspunde 500); 0 rămâne
@@ -4915,18 +5221,16 @@ export async function deleteBuildJobsByScope(
   scope: 'failed' | 'done' | 'failed_done' | 'all',
 ): Promise<number | null> {
   if (!dbEnabled()) return null
-  const stariCurente: Record<typeof scope, string[] | null> = {
+  // Stările de ISTORIC pe scope. Ordinele VII (queued/running) lipsesc din TOATE —
+  // niciun grup nu le poate atinge, nici măcar 'all'.
+  const stariCurente: Record<typeof scope, string[]> = {
     failed: ['failed'],
     done: ['done'],
     failed_done: ['failed', 'done', 'cancelled'],
-    all: null, // null = fără filtru (chiar tot)
+    all: ['failed', 'done', 'cancelled'], // „tot" = tot ISTORICUL, nu munca vie
   }
-  const stari = stariCurente[scope]
   try {
-    const r =
-      stari === null
-        ? await getPool().query('DELETE FROM build_jobs')
-        : await getPool().query('DELETE FROM build_jobs WHERE status = ANY($1)', [stari])
+    const r = await getPool().query('DELETE FROM build_jobs WHERE status = ANY($1)', [stariCurente[scope]])
     return r.rowCount ?? 0
   } catch {
     return null
@@ -4971,6 +5275,12 @@ export async function retryBuildJob(id: number, newOrderText?: string): Promise<
     return null
   }
 }
+
+// (remediazaAutomatBuildJob — auto-remedierea la eșec HARD, pe calea /report a
+// workerului local — a fost ȘTEARSĂ pe 22 aug: ruta /report + serviciul
+// remediereEsec au plecat cu toată mașinăria Aider+Ollama. Dacă o sesiune Devin
+// eșuează, dispecerul o raportează 'failed' și ownerul dă „Reia"; nu mai există
+// bucla de auto-remediere a lucrătorului local.)
 
 /** Anulează explicit un ordin în curs sau în coadă. `cancelled` este terminal,
  *  dar NU este eșec de execuție și nu deschide un incident fals. */
@@ -5053,8 +5363,11 @@ export async function dbQuery(sql: string): Promise<string> {
   // citească. Orice altceva (UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT ocolind
   // validarea plăților) se refuză aici, iar DELETE/TRUNCATE ar fi oprite
   // ORICUM de triggerele din scutulDatelor — două straturi, nu unul.
-  const primulCuvant = (text.match(/^[a-z]+/i)?.[0] ?? '').toUpperCase()
-  const eCitire = primulCuvant === 'SELECT' || primulCuvant === 'WITH' || primulCuvant === 'EXPLAIN' || primulCuvant === 'SHOW'
+  // ÎNTĂRIT 22 aug (verificatorul reclasificării db_query): pe primul cuvânt,
+  // „WITH x AS (UPDATE wallets …) SELECT" și „EXPLAIN ANALYZE INSERT" treceau
+  // drept citire și OCOLEAU scutul — acum decide predicatul comun eSqlDeCitire
+  // (fără cuvinte de scriere nicăieri, fără a doua instrucțiune).
+  const eCitire = eSqlDeCitire(text)
   if (!eCitire) {
     const atinse = TABELE_PROTEJATE.filter((t) => new RegExp(`\\b${t}\\b`, 'i').test(text))
     if (atinse.length) {

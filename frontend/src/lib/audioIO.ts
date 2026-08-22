@@ -34,8 +34,8 @@ const MAX_UTTER_MS = 60_000 // buffer mare: o frază poate dura până la 60s
 // Stricter thresholds than normal VOX: echoCancellation removes Kelion's voice
 // from the microphone, but a residue can remain — we require a clear, sustained signal
 // so he doesn't cut himself off.
-const BARGE_RMS = 0.024 // dublul pragului normal: doar voce apropiată, clară
-const BARGE_HOLD_MS = 180 // vocea trebuie să țină atât ca să taie (nu un poc)
+const BARGE_RMS = 0.035 // dublul pragului normal: doar voce apropiată, clară
+const BARGE_HOLD_MS = 280 // vocea trebuie să țină atât ca să taie (nu un poc)
 const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe redarea (onset)
 
 // ── VOICEPRINT ─────────────────────────────────────────────────────────────
@@ -439,7 +439,7 @@ export async function startMic(
   onBargeIn?: () => void,
   // Adrian's order: "only my voice or my writing". true = the admin — if
   // there's no calibrated profile yet, the microphone accepts NO voice (not enrolled,
-  // not „any voice”). false = the demo role (public visitors) — the behavior
+  // not „any voice"). false = the demo role (public visitors) — the behavior
   // stays exactly as today: without a profile, accepts any voice above threshold.
   restrictToOwnerVoice = false,
   // stream pre-warmed by pressing the "mic on" button for instant activation.
@@ -789,6 +789,17 @@ export async function startMic(
 
 // ── PLAYBACK: the brain's voice, arriving ready-synthesized from the server ──
 let curVoice: HTMLAudioElement | null = null
+// ── REDAREA SIGURĂ PE MOBIL (owner, 19 aug: „nu se aude / merge aleator… e o
+// singură versiune") ─────────────────────────────────────────────────────────
+// De ce era ALEATOR: `new Audio().play()` (elementul <audio>) e supus politicii
+// de autoplay a browserului MOBIL — un sunet ÎNTÂRZIAT (răspunsul vine la 1–2s
+// după ce ai tastat) e blocat des pe telefon, dar NU pe laptop. Același cod, alt
+// regulament la rulare. Când play() e blocat, cădem pe calea SIGURĂ: redăm prin
+// AudioContext-ul deja DEBLOCAT pe gest (BufferSource) — un context 'running' redă
+// determinist ȘI sunetul întârziat, pe mobil și pe laptop la fel.
+let curSource: AudioBufferSourceNode | null = null
+let ctxPending = false // sunet prin context, în curs de pornire (decode async)
+let ctxRetryTimer: number | null = null // reîncercare mărginită a redării prin context
 
 // ── LIP-SYNC: nivelul (0..1) al amplitudinii vocii redate acum ──────────────
 // Golden rule: it's a visual bonus — if the analysis fails for any reason,
@@ -884,14 +895,7 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
         stopLevelLoop()
         return
       }
-      analyser.getByteTimeDomainData(buf)
-      let sum = 0
-      for (let i = 0; i < buf.length; i++) {
-        const v = (buf[i] - 128) / 128
-        sum += v * v
-      }
-      const rms = Math.sqrt(sum / buf.length)
-      voiceLevel = Math.min(1, rms * 6)
+      voiceLevel = rmsNivel(analyser, buf)
       levelRaf = requestAnimationFrame(step)
     }
     levelRaf = requestAnimationFrame(step)
@@ -963,6 +967,102 @@ export function setVoiceVolume(v: number): void {
 // (registerVoiceAudioElement ȘTERS — 3 aug: îl folosea doar <audio>-ul sesiunii
 // OpenAI Realtime, scoasă azi; elementele interne intră în voiceElements direct.)
 
+/** RMS (0..1) al semnalului din analizor → nivelul gurii. Sursă unică pentru
+ *  ambele bucle (elementul <audio> și BufferSource-ul de context). */
+function rmsNivel(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
+  analyser.getByteTimeDomainData(buf)
+  let sum = 0
+  for (let i = 0; i < buf.length; i++) {
+    const v = (buf[i] - 128) / 128
+    sum += v * v
+  }
+  return Math.min(1, Math.sqrt(sum / buf.length) * 6)
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+/** Bucla de nivel pentru redarea prin BufferSource (mișcă gura cât ține sunetul). */
+function startCtxLevelLoop(): void {
+  if (!levelAnalyser || !levelBuf) return
+  const analyser = levelAnalyser
+  const buf = levelBuf
+  const step = (): void => {
+    if (!curSource) {
+      stopLevelLoop()
+      return
+    }
+    voiceLevel = rmsNivel(analyser, buf)
+    levelRaf = requestAnimationFrame(step)
+  }
+  levelRaf = requestAnimationFrame(step)
+}
+
+/** REDARE SIGURĂ PE MOBIL: prin AudioContext-ul deblocat pe gest (BufferSource).
+ *  Un context 'running' redă determinist ȘI sunetul întârziat — nu e supus
+ *  blocajului de autoplay al elementului <audio>. `true` = ne-am angajat pe calea
+ *  asta (decode async înăuntru; pe eșec → `done()`). `false` = context surd, cadem
+ *  pe elementul <audio>. `levelCtx` există deja: l-a creat attachLevelAnalysis. */
+function playViaContext(base64Mp3: string, done: () => void): boolean {
+  const ctx = levelCtx
+  if (!ctx || !levelAnalyser) return false
+  if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
+  if (ctx.state !== 'running') return false
+  const analyser = levelAnalyser
+  ctxPending = true
+  void (async (): Promise<void> => {
+    try {
+      const audioBuf = await ctx.decodeAudioData(base64ToBytes(base64Mp3).buffer)
+      const src = ctx.createBufferSource()
+      src.buffer = audioBuf
+      const gain = ctx.createGain()
+      gain.gain.value = voiceVolume
+      src.connect(gain)
+      gain.connect(analyser) // gura + înregistrarea (analyser e deja legat la ele)
+      gain.connect(ctx.destination) // sunetul audibil
+      curSource = src
+      ctxPending = false
+      src.onended = (): void => {
+        if (curSource === src) curSource = null
+        stopLevelLoop()
+        done()
+      }
+      startCtxLevelLoop()
+      src.start()
+    } catch {
+      ctxPending = false
+      done()
+    }
+  })()
+  return true
+}
+
+/** REÎNCERCARE MĂRGINITĂ prin context (owner, 19 aug: „se trunchiază audio…
+ *  identifică și repară truncherea"): când nici <audio> nici contextul nu pot
+ *  reda ACUM (mobil, fără gest care să deblocheze contextul), NU aruncăm chunk-ul
+ *  tăcut — ar tăia răspunsul. Îl reîncercăm la 150ms până contextul devine
+ *  'running' (un gest îl deblochează între timp), maxim ~4,5s, apoi renunțăm
+ *  (done → coada merge mai departe), ca să nu blocăm gura la infinit. Cât ținem
+ *  reîncercarea, `ctxPending` rămâne true — chunk-urile următoare se pun în COADĂ,
+ *  nu peste, deci ordinea se păstrează. stopVoice() (barge-in) taie timerul. */
+function reincearcaPrinContext(base64Mp3: string, done: () => void, ramase = 30): void {
+  ctxPending = true // gura ocupată: playVoice pune următoarele bucăți în coadă
+  if (playViaContext(base64Mp3, done)) return // playViaContext preia ctxPending de aici
+  if (ramase <= 0) {
+    ctxPending = false
+    done()
+    return
+  }
+  ctxRetryTimer = window.setTimeout(() => {
+    ctxRetryTimer = null
+    reincearcaPrinContext(base64Mp3, done, ramase - 1)
+  }, 150)
+}
+
 function playNow(base64Mp3: string): void {
   try {
     const audio = new Audio(`data:audio/mp3;base64,${base64Mp3}`)
@@ -977,8 +1077,24 @@ function playNow(base64Mp3: string): void {
     }
     audio.onended = done
     audio.onerror = done
-    void audio.play().catch(done)
+    // attachLevelAnalysis creează/deblochează levelCtx ÎNAINTE, ca playViaContext să-l
+    // aibă gata dacă play() e blocat pe mobil.
     attachLevelAnalysis(audio)
+    void audio.play().catch(() => {
+      // MOBIL: sunetul întârziat pe <audio> e blocat (autoplay) — de-aia „aleator".
+      // (1) OPRIM COMPLET elementul înainte de calea sigură — altfel elementul putea
+      // porni totuși un pic mai târziu (cursă cu gestul) ȘI BufferSource-ul ar reda
+      // ACELAȘI chunk = DOUĂ voci pe ieșiri diferite (owner, 19 aug: „se aud 2 voci,
+      // nu știi pe unde iese"). O gură, o singură ieșire.
+      try { audio.pause(); audio.src = ''; audio.load() } catch { /* deja oprit */ }
+      stopLevelLoop()
+      voiceElements.delete(audio)
+      if (curVoice === audio) curVoice = null
+      // (2) Calea SIGURĂ (BufferSource pe contextul deblocat). Dacă nici contextul
+      // nu e gata acum, reîncercăm mărginit — NU aruncăm chunk-ul tăcut (ar tăia
+      // răspunsul: owner „se trunchiază audio").
+      reincearcaPrinContext(base64Mp3, done)
+    })
   } catch {
     playNextQueued()
   }
@@ -1004,8 +1120,9 @@ function playNextQueued(): void {
 
 export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () => void): void {
   pendingVoiceEnd = onEnd ?? null
-  if (curVoice) {
+  if (curVoice || curSource || ctxPending) {
     // already playing a chunk of the SAME reply — it queues up, doesn't get cut.
+    // (curSource/ctxPending = redarea prin AudioContext e activă/în pornire.)
     voiceQueue.push(base64Mp3)
     return
   }
@@ -1023,6 +1140,12 @@ export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () =>
 
 export function stopVoice(): void {
   clearGapTimer()
+  // Taie și reîncercarea mărginită prin context (barge-in nu are voie să lase o
+  // bucată să pornească după oprire — altfel vocea „oprită" revenea).
+  if (ctxRetryTimer !== null) {
+    window.clearTimeout(ctxRetryTimer)
+    ctxRetryTimer = null
+  }
   voiceQueue.length = 0
   // FIX "microphone mute forever" (Jul 24 audit, P1): the end callback (which
   // UNMUTES the Realtime session's microphone) was DISCARDED without being called
@@ -1039,9 +1162,19 @@ export function stopVoice(): void {
     }
     curVoice = null
   }
+  // Oprim și redarea prin AudioContext (barge-in trebuie să taie și BufferSource-ul).
+  if (curSource) {
+    try {
+      curSource.stop()
+    } catch {
+      /* deja oprit */
+    }
+    curSource = null
+  }
+  ctxPending = false
   stopLevelLoop()
 }
 
 export function isVoicePlaying(): boolean {
-  return curVoice !== null
+  return curVoice !== null || curSource !== null || ctxPending
 }

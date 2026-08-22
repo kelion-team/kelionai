@@ -243,7 +243,7 @@ export const CARD_GATA_TOOL: Tool = {
 export const BUILD_SOFTWARE_TOOL: Tool = {
   name: 'build_software',
   description:
-    "ADMIN ONLY. Queue a build order for the autonomous constructor: the VPS worker builds it (with build+tests) and opens a PR; the owner merges. Use when the owner orders new software, OR gives a task that plainly requires changing the app's code or behavior EVEN WITHOUT the word «construiește» (e.g. «mută avatarul în stânga», «textul e acoperit, găsește o modalitate», «repară Y», «fă butonul să facă X») — for the owner a task about the app means ACT, not talk, so queue it here instead of merely discussing it or promising it. ROUTING RULE: the constructor receives an explicit OR implicit build/repair order for the app — NEVER for an ordinary question or chat request (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation. When a request would change the product and you are unsure between talking and building, BUILD. Confirm 'Am preluat cerința.' ONLY when the job is truly queued — never on a failed/rejected queue.",
+    "ADMIN ONLY. THIS IS HOW YOU CALL DEVIN — the app's external constructor (when the Devin key is configured, EVERY order queued here is executed by DEVIN: isolated session, branch off master, PR back to master, the owner merges; the PR link comes back into the chat). So when the owner asks whether Devin exists / is present / can take orders, the TRUE answer is YES — through this very tool; Devin IS part of your tools via build_software, and Jules is NOT the constructor. Queue a build order: Use when the owner orders new software, OR gives a task that plainly requires changing the app's code or behavior EVEN WITHOUT the word «construiește» (e.g. «mută avatarul în stânga», «textul e acoperit, găsește o modalitate», «repară Y», «fă butonul să facă X») — for the owner a task about the app means ACT, not talk, so queue it here instead of merely discussing it or promising it. ROUTING RULE: the constructor receives an explicit OR implicit build/repair order for the app — NEVER for an ordinary question or chat request (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation. When a request would change the product and you are unsure between talking and building, BUILD. Confirm 'Am preluat cerința.' ONLY when the job is truly queued — never on a failed/rejected queue.",
   input_schema: { type: 'object', properties: { order: { type: 'string', description: "The build order, in the owner's own words." } }, required: ['order'] },
 }
 
@@ -268,7 +268,8 @@ export const PANOU_COD_TOOL: Tool = {
 
 export const CONSTRUCTOR_STATUS_TOOL: Tool = {
   name: 'constructor_status',
-  description: "ADMIN ONLY. Status of the constructor's build orders (queued / working / done / failed, with the PR link).",
+  description:
+    "ADMIN ONLY. Status of the constructor's build orders (queued / working / done / failed, with the PR link), the MEASURED `constructor` identity (DEVIN when the key is set — the ONLY builder; the local Aider+Ollama machinery was DELETED on the owner's order, 22 Aug), AND a MEASURED self-diagnostic (`diagnostic`): whether DEVIN actually builds and, if not, WHY — missing key, orders stuck without a Devin session, failed session starts, a queue that sits still. Use it whenever the owner asks why the constructor is stuck or whether Devin is active — report `constructor` + `diagnostic.verdict` + the firm recommendation, never guess.",
   input_schema: { type: 'object', properties: {} },
 }
 
@@ -677,7 +678,7 @@ export const MEMORIE_LISTA_TOOL: Tool = {
 export const STARE_MASURATA_TOOL: Tool = {
   name: 'stare_masurata',
   description:
-    'ADMIN ONLY. Your COMPLETE state in one MEASURED call: health (sync, red runs, disk, DB), host resources (RAM/load), today\'s costs by kind, the payment reader\'s last pass, the autonomy loop\'s last pass. Every figure is a real reading — a failed read is SAID, never shown as zero. Use it when the owner asks "how are you / what\'s wrong / what does it cost".',
+    'ADMIN ONLY. Your COMPLETE state in one MEASURED call: health (sync, red runs, disk, DB), host resources (RAM/load), today\'s costs by kind, the payment reader\'s last pass, the autonomy loop\'s last pass. Every figure is a real reading — a failed read is SAID, never shown as zero. Use it when the owner asks "how are you / what\'s wrong / what does it cost". On voice, NEVER read the raw JSON aloud — answer the question asked in one or two short spoken sentences.',
   input_schema: { type: 'object', properties: {} },
 }
 
@@ -693,7 +694,7 @@ export const JULES_REPOS_TOOL: Tool = {
 export const JULES_TASK_TOOL: Tool = {
   name: 'jules_task',
   description:
-    "ADMIN ONLY. Give Jules (Google's official async coding agent) a task on a connected repo: it works in an isolated Google VM and opens a PR. The merge stays with the owner. Use jules_repos first for the exact source name.",
+    "ADMIN ONLY. NOT the constructor — DEVIN is (use build_software for any repair/code order; this tool REFUSES while Devin is configured). Jules is a silent backup coding agent, callable only when the owner explicitly names Jules and Devin is unconfigured. Use jules_repos first for the exact source name.",
   input_schema: {
     type: 'object',
     properties: {
@@ -724,7 +725,7 @@ export const JULES_STATUS_TOOL: Tool = {
 export const RULEAZA_PORTILE_TOOL: Tool = {
   name: 'ruleaza_portile',
   description:
-    "ADMIN ONLY. Rulează PE SERVER porțile reale ale proiectului și întoarce rezultatul MĂSURAT: tipuri (tsc), teste (vitest), lacătul Gemini, exporturi fără utilizator, sintaxă, build frontend, hardcodări (LEGEA ANTI-HARDCODARE — SINGURUL răspuns adevărat la „ce e hardcodat în aplicație”: rulezi poarta 'hardcodari' și citezi verdictul; un „audit al codului” povestit fără poarta asta e inventat și se demască). FOLOSEȘTE-O DE DOUĂ ORI la orice schimbare: o dată ÎNAINTE (starea de plecare) și o dată DUPĂ (dovada că n-ai stricat nimic). Verdictul are TREI stări: TRECE, PICĂ și NU POT VERIFICA — o poartă care n-a pornit NU e nici trecută, nici picată, iar raportul devine INCOMPLET, nu 'e bine'. Nu raporta niciodată o stare pe care unealta asta nu ți-a întors-o.",
+    "ADMIN ONLY. Rulează PE SERVER porțile reale ale proiectului și întoarce rezultatul MĂSURAT: tipuri (tsc), teste (vitest), lacătul Gemini, exporturi fără utilizator, sintaxă, build frontend, hardcodări (LEGEA ANTI-HARDCODARE — SINGURUL răspuns adevărat la „ce e hardcodat în aplicație”: rulezi poarta 'hardcodari' și citezi verdictul; un „audit al codului” povestit fără poarta asta e inventat și se demască). FOLOSEȘTE-O DE DOUĂ ORI la orice schimbare: o dată ÎNAINTE (starea de plecare) și o dată DUPĂ (dovada că n-ai stricat nimic). Verdictul are TREI stări: TRECE, PICĂ și NU POT VERIFICA — o poartă care n-a pornit NU e nici trecută, nici picată, iar raportul devine INCOMPLET, nu 'e bine'. Nu raporta niciodată o stare pe care unealta asta nu ți-a întors-o. On voice, NEVER read the raw report aloud — say the verdict in one short sentence (what passed, what failed, what could not be verified).",
   input_schema: {
     type: 'object',
     properties: {
@@ -740,7 +741,7 @@ export const RULEAZA_PORTILE_TOOL: Tool = {
 export const VANEAZA_BUGURI_TOOL: Tool = {
   name: 'vaneaza_buguri',
   description:
-    'ADMIN ONLY. Caută AUTOMAT ce se poate căuta automat: erorile REALE ale utilizatorilor (adunate din browser), tiparele de bug ale analizorului, tipurile, testele, codul abandonat, sintaxa. Întoarce ce a găsit ȘI ce n-a putut căuta. ATENȚIE la citire: „0 erori de la utilizatori” apare DOAR dacă baza a răspuns — altfel scrie NU POT VERIFICA, fiindcă o listă goală de la o bază căzută nu înseamnă „curat”. Nu declara niciodată că nu sunt buguri pe baza ei: bugul de logică pe care niciun test nu-l acoperă NU se caută automat, se prinde măsurând comportamentul.',
+    'ADMIN ONLY. Caută AUTOMAT ce se poate căuta automat: erorile REALE ale utilizatorilor (adunate din browser), tiparele de bug ale analizorului, tipurile, testele, codul abandonat, sintaxa. Întoarce ce a găsit ȘI ce n-a putut căuta. ATENȚIE la citire: „0 erori de la utilizatori” apare DOAR dacă baza a răspuns — altfel scrie NU POT VERIFICA, fiindcă o listă goală de la o bază căzută nu înseamnă „curat”. Nu declara niciodată că nu sunt buguri pe baza ei: bugul de logică pe care niciun test nu-l acoperă NU se caută automat, se prinde măsurând comportamentul. On voice, NEVER read the raw findings aloud — say in one short sentence what was found and what could not be searched.',
   input_schema: {
     type: 'object',
     properties: { ore: { type: 'number', description: 'Câte ore în urmă să se uite după erorile utilizatorilor (implicit 48).' } },
@@ -750,10 +751,23 @@ export const VANEAZA_BUGURI_TOOL: Tool = {
 export const JURNAL_MASURATORI_TOOL: Tool = {
   name: 'jurnal_masuratori',
   description:
-    "ADMIN ONLY. Ultimele măsurători făcute de tine, cu metoda folosită, ora, durata și ce a ieșit (sau motivul pentru care n-a ieșit). Folosește-o când vrei să spui ceva despre starea sistemului: dacă afirmația ta nu se regăsește aici, înseamnă că n-ai măsurat-o — spune 'nu pot verifica', nu o cifră. Jurnal gol = n-ai măsurat nimic, NU 'totul e bine'.",
+    "ADMIN ONLY. Ultimele măsurători făcute de tine, cu metoda folosită, ora, durata și ce a ieșit (sau motivul pentru care n-a ieșit). Folosește-o când vrei să spui ceva despre starea sistemului: dacă afirmația ta nu se regăsește aici, înseamnă că n-ai măsurat-o — spune 'nu pot verifica', nu o cifră. Jurnal gol = n-ai măsurat nimic, NU 'totul e bine'. On voice, NEVER read the raw journal aloud — answer the question asked in one or two short spoken sentences.",
   input_schema: {
     type: 'object',
     properties: { cate: { type: 'number', description: 'Câte rânduri (implicit 30).' } },
+  },
+}
+
+export const DOVADA_FAPTELOR_TOOL: Tool = {
+  name: 'dovada_faptelor',
+  description:
+    "Pull the SAVED operational record of your past deeds for THIS user: each task's objective, final state (completed/unverified/failed/…) and the measured tool events behind it. This is your ace up the sleeve — use it when the user asks for PROOF or challenges a claim (\"de unde știi că ai făcut\", \"arată-mi dovada\", \"chiar ai trimis emailul?\"). Present it honestly: an 'unverified' state means the tool reported success but no independent check confirmed the effect — say so. An EMPTY list means no deed was RECORDED — not that nothing ever happened; older deeds may predate the journal. On voice, NEVER read the raw record aloud: give a one-sentence summary; if the user wants the detail on screen, pass the request through the brain door (cere_creierului — the brain has show_document; the live session itself does NOT, so never promise a screen you cannot fill).",
+  input_schema: {
+    type: 'object',
+    properties: {
+      cate: { type: 'number', description: 'How many recent tasks to return (default 10, max 30).' },
+      cauta: { type: 'string', description: 'Optional keyword filtered against the task objectives (e.g. "email", "calendar").' },
+    },
   },
 }
 
@@ -773,7 +787,7 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
   // ask for a missing tool on his own. Without these he remembers nothing from
   // one turn to the next — that's why he repeated the same mistakes.
   LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL,
-  COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL,
+  COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL, DOVADA_FAPTELOR_TOOL,
   // The whole admin panel — he sees what you see, and can change what can be undone.
   ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
   // His own wishlist, granted (Aug 2): project memory + measured observability.
@@ -956,25 +970,7 @@ export const AGENT_NOU_TOOL: Tool = {
   },
 }
 
-// ── UNELTELE CONSTRUCTORULUI, DIN SURSA UNICĂ (Adrian, 10 aug: „dă-i TOT,
-// deblochează TOT — nu mai pot pierde vremea") ──────────────────────────────────
-// Constructorul (deploy/constructor-agent.mjs) le cere la pornire prin
-// GET /api/constructor/tool-defs și le lipește peste uneltele lui LOCALE de
-// fișiere (ls/grep/read/write/edit/edit_lines/delete_file/run/finish). Toate
-// astea se EXECUTĂ deja prin `uneltele()` (autonomie.ts → execSharedAdminTool +
-// execUserScopedTool + browser + agenți), deci aici doar le DECLARĂM dintr-un
-// singur loc — ca lista constructorului să nu mai poată rămâne în urmă față de
-// creierul de chat, și ca nimic să nu poată fi scos pe furiș (un test păzește
-// că acoperă tot SHARED_ADMIN_TOOLS).
-// INCLUSIV repo_write / repo_open_pr / repo_merge_pr (Adrian, 10 aug: „după ce
-// face PR trebuie să fie capabil să DEA PR-ul [să-l îmbine]; dacă sunt probleme,
-// să anunțe" + „dă-i TOT"). Deci constructorul își poate îmbina singur PR-ul în
-// master când verificarea e verde, iar dacă rămân probleme le raportează
-// (request_repair) și NU îmbină. Totul prin master (regula casei).
-export const UNELTE_CONSTRUCTOR: Tool[] = [
-  ...TOATE_UNELTELE_ADMIN,
-  LIST_APP_VERSIONS_TOOL, LIST_DB_BACKUPS_TOOL, SAVE_APP_VERSION_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
-  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-  CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL,
-  ...BROWSER_TOOLS,
-]
+// (UNELTE_CONSTRUCTOR — lista servită workerului local prin
+// GET /api/constructor/tool-defs — a fost ȘTEARSĂ cu toată mașinăria
+// Aider+Ollama: owner, 22 aug, „sa-i stergi de tot". Constructorul e DEVIN,
+// extern — el vine cu uneltele lui, în sesiunea lui.)

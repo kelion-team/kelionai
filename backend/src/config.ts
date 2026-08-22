@@ -37,6 +37,11 @@ export const ENV_ALIASES: Record<string, string[]> = {
   // de peste tot… curata peste tot in aplicatie". Nu mai există niciun consumator
   // Fable/Anthropic în cod; constructorul e pe motorul Aider + creier Gemini.)
   julesKey: ['JULES_API_KEY', 'JULES_KEY'],
+  // Devin — constructorul EXTERN (owner, 20 aug: „punel pe devin cu cheie").
+  // Cheia stă în secretele repo-ului → vps-set-env → env-ul VPS, ca restul.
+  // `devinOrgId` e opțional (API-ul de bază /v1/sessions merge doar cu cheia).
+  devinKey: ['DEVIN_API_KEY', 'DEVIN_KEY'],
+  devinOrgId: ['DEVIN_ORG_ID'],
   mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
   bridgeSecret: ['BRIDGE_SECRET'],
   sessionSecret: ['SESSION_SECRET'],
@@ -136,11 +141,12 @@ export function setModelUnicValidat(m: string): boolean {
 // răspuns GOL. `3.5-flash-lite` intră pe ramura `gemini-3`, primește configul
 // corect, e cel mai NOU lite, și e la 100 ms de vârf. Corectitudine peste 100 ms.
 //
-// CE RĂMÂNE PE PRO (nu s-a atins nimic): `geminiModelGreu`, `workDefault`,
-// `topDefault` — deci gândirea grea, agenții cu efort înalt și autonomia. Iar
-// unealta `ask_brain` (oferită de chat.ts DOAR pe tura ușoară) escaladează
-// singură de pe slotul rapid pe Pro când sarcina chiar cere gândire. Supapa era
-// deja cablată în cod; separarea doar o face reală.
+// CE RĂMÂNE PE SLOTUL GREU: `geminiModelGreu`, `workDefault`, `topDefault` —
+// gândirea grea, agenții cu efort înalt și autonomia. Iar unealta `ask_brain`
+// (oferită de chat.ts DOAR pe tura ușoară) escaladează singură de pe slotul
+// rapid pe cel greu când sarcina chiar cere gândire. [ADUS LA COD, lot D:
+// slotul greu NU mai e Pro — MODEL_UNIC_DEFAULT e `gemini-3.5-flash` (mutat de
+// pe Pro pe 7 aug, vezi mai sus); „Pro" de aici era rămășița acelei ere.]
 export const MODEL_RAPID_DEFAULT = 'gemini-3.5-flash-lite'
 let modelRapidActiv = MODEL_RAPID_DEFAULT
 /** Codul modelului rapid de conversație (ex: „gemini-3.5-flash-lite"). */
@@ -223,6 +229,9 @@ export const config = {
   // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
   julesKey: env(...ENV_ALIASES.julesKey),
+  // Devin — constructorul extern (owner, 20 aug). Cheia din env; org opțional.
+  devinKey: env(...ENV_ALIASES.devinKey),
+  devinOrgId: env(...ENV_ALIASES.devinOrgId),
   // Creierul DIRECT (chat + VEDERE + AUDIO — Gemini e multimodal, un singur
   // model face tot). 5 aug 2026: Adrian a RETRACTAT hibridul — „peste tot în
   // aplicație pui modelul avansat". UN SINGUR creier = Gemini 3 Pro
@@ -235,7 +244,8 @@ export const config = {
   // GETTERI pe sursa unică (fără env): se aplică AUTOMAT peste tot; auto-upgrade-ul
   // validat schimbă modelul într-un singur loc → se schimbă peste tot.
   // DOUĂ SLOTURI (7 aug): `geminiModel` = conversația (RAPID, ~0,6s), iar
-  // `geminiModelGreu` = gândirea grea (Pro, neatins). Bifurcația care le folosește
+  // `geminiModelGreu` = gândirea grea (azi = modelul unic `gemini-3.5-flash`,
+  // NU Pro — lot D a corectat rămășița). Bifurcația care le folosește
   // există de mult în chat.ts (`heavy ? Greu : geminiModel`) — până azi ambele
   // ramuri dădeau același model, deci era o bifurcație moartă. Acum e vie.
   get geminiModel(): string {
@@ -277,11 +287,12 @@ export const config = {
     // apel de unealtă + imagine + audio, toate 200✓ pe cheia ownerului). „Tot pe
     // cel mai evoluat" (ordinul ownerului, 4 aug). Rămâne Gemini direct (lacătul).
     // 6 aug: SIGILAT pe sursa unică, FĂRĂ env — toate treptele = același model unic
-    // (cel mai performant Pro). Nu mai există split flash/pro, nici suprascriere din
-    // env. Getteri → auto-upgrade-ul se aplică peste tot instant.
-    // 7 aug: treapta de CHAT trece pe modelul RAPID (măsurat: 0,6s vs 3,6–45s pe
-    // Pro), iar `work`/`top` rămân pe Pro — acolo se face gândirea grea, agenții
-    // cu efort înalt, autonomia și escaladarea `ask_brain` din chat.
+    // Nu mai există split flash/pro, nici suprascriere din env. Getteri →
+    // auto-upgrade-ul se aplică peste tot instant.
+    // 7 aug: treapta de CHAT trece pe modelul RAPID (măsurat: 0,6s vs 3,6–45s),
+    // iar `work`/`top` rămân pe modelul UNIC (azi `gemini-3.5-flash`, nu Pro —
+    // lot D) — acolo se face gândirea grea, agenții cu efort înalt, autonomia
+    // și escaladarea `ask_brain` din chat.
     get chatDefault(): string {
       return modelRapidDirect()
     },

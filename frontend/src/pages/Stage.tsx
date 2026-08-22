@@ -36,6 +36,7 @@ import { deviceFingerprint } from '../lib/fingerprint'
 import { renderMarkdown } from '../lib/markdown'
 import { currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
 import { isCarMode, subscribeCarMode } from '../lib/carMode'
+import { useConectat } from '../lib/conexiune'
 import { reteaLenta } from '../lib/retea'
 import ApelOverlay from '../components/ApelOverlay'
 import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
@@ -353,8 +354,18 @@ function MonitorAudio({ url, taskId }: { url: string; taskId: string }) {
 // o înlocuiește când sosește.
 function MonitorPagina({ url, title, taskId, allow }: { url: string; title: string; taskId: string; allow: string }) {
   const [blocat, setBlocat] = useState(false)
+  // CITITORUL DE PAGINI (owner, 22 aug: „sa functioneze pagina de internet sa
+  // afiseze"): o pagină care refuză rama nu mai moare în „nu poate fi
+  // afișată" — serverul o citește (gardă SSRF + plafon în flux + cache) și
+  // conținutul lizibil se arată aici, cu linkul spre original păstrat.
+  const [citita, setCitita] = useState<{ titlu: string; html: string } | null>(null)
+  const [citind, setCitind] = useState(false)
+  const [motivNecitit, setMotivNecitit] = useState<string | null>(null)
   useEffect(() => {
     setBlocat(false)
+    setCitita(null)
+    setCitind(false)
+    setMotivNecitit(null)
     // URL relativ (ex. /api/route) e pagina NOASTRĂ, same-origin — mereu înrămabilă.
     if (!/^https?:\/\//i.test(url)) return
     let viu = true
@@ -364,15 +375,46 @@ function MonitorPagina({ url, title, taskId, allow }: { url: string; title: stri
         if (!viu || !v || v.incadrabil !== false) return
         setBlocat(true)
         setTaskStatus(taskId, 'error')
+        setCitind(true)
+        return fetch(`/api/citeste-pagina?url=${encodeURIComponent(url)}`)
+          .then(async (rc) => {
+            if (!viu) return
+            if (rc.ok) {
+              const j = (await rc.json()) as { titlu?: string; text?: string }
+              if (j.text) {
+                setCitita({ titlu: j.titlu ?? title, html: renderMarkdown(j.text.slice(0, 500_000)) })
+                setTaskStatus(taskId, 'ok')
+                return
+              }
+            }
+            const j = (await rc.json().catch(() => null)) as { motiv?: string } | null
+            setMotivNecitit(j?.motiv ?? `serverul a răspuns ${rc.status}`)
+          })
+          .finally(() => { if (viu) setCitind(false) })
       })
       .catch(() => { /* verificare picată ≠ refuz — rama rămâne */ })
     return () => { viu = false }
-  }, [url, taskId])
+  }, [url, taskId, title])
   if (blocat) {
     return (
-      <div className="workspace-blocked">
-        <p>{uiStrings().wsPageBlocked}</p>
-        <a href={url} target="_blank" rel="noreferrer" className="workspace-action">{uiStrings().wsOpenTab}</a>
+      <div className={citita ? 'workspace-doc' : 'workspace-blocked'}>
+        <p style={{ marginBottom: 8 }}>
+          <a href={url} target="_blank" rel="noreferrer" className="workspace-action">{uiStrings().wsOpenTab}</a>
+        </p>
+        {citita ? (
+          <>
+            <h2 style={{ marginTop: 0 }}>{citita.titlu}</h2>
+            {/* eslint-disable-next-line react/no-danger -- renderMarkdown escapes the source first */}
+            <div dangerouslySetInnerHTML={{ __html: citita.html }} />
+          </>
+        ) : citind ? (
+          <p>⏳ {title}…</p>
+        ) : (
+          <>
+            <p>{uiStrings().wsPageBlocked}</p>
+            {motivNecitit && <p style={{ opacity: 0.75, fontSize: 13 }}>({motivNecitit})</p>}
+          </>
+        )}
       </div>
     )
   }
@@ -761,7 +803,18 @@ export default function Stage({ user }: { user: User }) {
     setLangState(nouaLimba)
     void saveSpeechLang(nouaLimba)
   }
+  // OFFLINE = doar ce merge dovedit (owner, 22 aug: „funtiile dedicate de
+  // internet nu trebuiesc sa se reafiseze, ele sunt afisate doar cind aplicatia
+  // e live" + „vreau sa ramina ce merge dovedit"): starea vine din pingul REAL
+  // la /health (conexiune.ts), nu din navigator.onLine care minte.
+  const online = useConectat()
   const [adminOpen, setAdminOpen] = useState(false)
+  // Meniul „Aplicații" e demontat offline — fără resetul ăsta, `appsOpen`
+  // rămas true îl făcea să SARĂ deschis singur la revenirea netului
+  // (cosmetica semnalată de verificatorul de logică, 22 aug).
+  useEffect(() => {
+    if (!online) setAppsOpen(false)
+  }, [online])
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
   // admin button must not activate either"). armed = the secret is set (in
@@ -1662,6 +1715,13 @@ export default function Stage({ user }: { user: User }) {
         {/* APLICAȚII — trading (doar admin) + Adaptare CV (toți) sub UN buton
             (owner, 13 aug). Meniul se închide la clic pe un element, pe fundal,
             sau re-apăsând butonul. */}
+        {/* OFFLINE: meniul dispare ÎNTREG (owner, 22 aug) — intrările sunt
+            comenzi către creierul de pe SERVER (kelion:comanda → /api/chat →
+            unelte Google), cu două excepții locale mărunte care nu justifică
+            meniul (copiază-scenariul = clipboard local; re-clicul pe
+            Tranzacții = închidere locală); fără net, restul ar fi
+            butoane-minciună. Reapare singur când pingul /health răspunde. */}
+        {online && (
         <div className="apps-wrap">
           <button
             type="button"
@@ -1776,6 +1836,7 @@ export default function Stage({ user }: { user: User }) {
             </>
           )}
         </div>
+        )}
         {/* Adrian's ALWAYS-ON status (admin, top-left): shows what's being worked
             on when there's live work, else the real Linux server load — so the
             server status + current task never vanish (they used to hide when the
@@ -1825,7 +1886,10 @@ export default function Stage({ user }: { user: User }) {
         THE ADMIN NO LONGER HAS THE „⚙ Setări" PILL HERE (Adrian's order):
         his settings live in the Admin panel now, so the header keeps only
         measurements (Gemini / Serper / VPS). */}
-        {user.role !== 'admin' && (
+        {/* OFFLINE: portofelul + „Add credits" se ascund (owner, 22 aug) —
+            soldul, pachetele și codul de plată vin toate de pe server; offline
+            butoanele astea n-ar putea decât să pice tăcut. */}
+        {user.role !== 'admin' && online && (
           <WalletButton
             onOpenSettings={() => setSettingsOpen(true)}
             googleConnected={user.googleConnected}
@@ -1835,7 +1899,7 @@ export default function Stage({ user }: { user: User }) {
         {/* „Add credits" for regular users (Adrian's order — the exact label,
         English for all users): opens the existing credits panel (the wallet
         menu with the 75/150/375 packs + custom amount ×5). */}
-        {user.role !== 'admin' && (
+        {user.role !== 'admin' && online && (
           <button
             type="button"
             className="ghost"
@@ -1913,7 +1977,10 @@ export default function Stage({ user }: { user: User }) {
                     { code: 'fr', label: 'Français', flag: '🇫🇷' },
                     { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
                     { code: 'it', label: 'Italiano', flag: '🇮🇹' },
-                    { code: 'ru', label: 'Русский', flag: '🇷🇺' },
+                    // B6 (marea verificare): 'ru' NU există în Lang/dict — la
+                    // click, UI-ul cădea pe engleză cu insigna „RU" activă
+                    // (stare care minte); iar 'pt' (tradus, în Lang) LIPSEA.
+                    { code: 'pt', label: 'Português', flag: '🇵🇹' },
                   ] as const).map((l) => (
                     <button
                       key={l.code}

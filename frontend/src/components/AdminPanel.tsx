@@ -202,6 +202,23 @@ function PromoStudio() {
 // veche → nouă, plus DOVADA backupului (cel mai nou fișier de pe disc, măsurat
 // de server — dată + mărime; lipsa lui se spune, nu se maschează).
 interface RandAudit { la: string; actor: string; actiune: string; tabel: string; cheie: string; vechi: string; nou: string }
+
+// ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug): forma raportului măsurat pe care
+// îl întoarce POST /api/admin/autoverificare (Kelion se testează singur pe TOATE
+// funcțiile + spune DE CE nu merge). Aceleași câmpuri ca RaportAutoverificare din backend.
+type VerdictFunctie = 'merge' | 'stricat' | 'nu_pot_verifica'
+interface VerificareFunctie {
+  functie: string; categorie: string; face: string; tip: 'citire' | 'efect'
+  verdict: VerdictFunctie; deCe: string; recomandare: string; dovada: string
+}
+interface RaportAutoverificare {
+  total: number; merg: number; stricate: number; nepotverifica: number; functii: VerificareFunctie[]
+}
+// Ordinea în listă: întâi ce nu merge (stricate), apoi nesigurele, apoi ce merge.
+function rangVerdict(v: VerdictFunctie): number {
+  return v === 'stricat' ? 0 : v === 'nu_pot_verifica' ? 1 : 2
+}
+
 function RegistruAudit() {
   const [date, setDate] = useState<{ randuri: RandAudit[]; backup: { fisier: string; la: string; octeti: number } | null } | null | 'eroare'>(null)
   useEffect(() => {
@@ -417,14 +434,16 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
   // (full_amount − aplicat); altfel ✓/⚠ pe becul viu, cu motivul în tooltip —
   // niciodată un număr inventat. Butonul „✎ credit Gemini" a MURIT: nu mai
   // există nimic de declarat de mână.
+  // Verde ✓ DOAR pe probă vie 200; sold real când e derivat din export; altfel NEUTRU
+  // „·" (nu pot verifica) — Google nu expune soldul prepay, deci pastila nu mai pretinde
+  // NICIODATĂ „epuizat"/„fără credit" (owner: „scoate alerta falsă"; regula #1). Alerta
+  // REALĂ de credit + linkul de reîncărcare vin din chatul viu, pe eșec măsurat.
   const geminiEticheta =
     g?.sold != null
       ? `${g.sold.toFixed(2)} ${g.soldMoneda ?? ''}`.trim()
       : g?.serving
         ? '✓'
-        : g?.reason === 'depleted'
-          ? '⚠ epuizat'
-          : '⚠'
+        : '·'
   const geminiTitlu = [
     g?.sold != null
       ? `sold REAL derivat din exportul BigQuery: ${g.sold.toFixed(2)} ${g.soldMoneda ?? ''}`
@@ -434,8 +453,11 @@ function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: '10px 14px', margin: '10px 0', background: 'color-mix(in srgb, var(--text) 4%, transparent)', border: '1px solid var(--border)', borderRadius: 10 }}>
       <strong style={{ fontSize: 13, opacity: 0.8 }}>Credite AI</strong>
-      <span title={s?.live ? `${(s.balance ?? 0).toLocaleString()} căutări rămase (Serper)` : 'citirea Serper a eșuat'}>
-        Serper {s?.live ? serperK(s.balance ?? 0) : '⚠'}
+      <span title={s?.live && typeof s.balance === 'number' ? `${s.balance.toLocaleString()} căutări rămase (Serper)` : 'citirea Serper a eșuat'}>
+        {/* `?? 0` scos (owner, 19 aug): un `live:true` FĂRĂ sold arăta „Serper 0" =
+            fals „fără credit", exact ce interzice tipul lui (Stage.tsx: „NICIODATĂ
+            Serper 0"). Fără sold real → ⚠ „nu pot citi", nu 0. */}
+        Serper {s?.live && typeof s.balance === 'number' ? serperK(s.balance) : '⚠'}
       </span>
       <span title={geminiTitlu}>
         Gemini {geminiEticheta}
@@ -463,6 +485,11 @@ export default function AdminPanel({
   // (starePush), nu ținută minte — „activ" înseamnă chiar o abonare vie.
   const [push, setPush] = useState<StarePush>('inactiv')
   const [pushBusy, setPushBusy] = useState(false)
+  // ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug): raportul e MĂSURAT la cerere,
+  // nu ținut minte între sesiuni — „merge" apare doar cu dovadă (regula #1).
+  const [avBusy, setAvBusy] = useState(false)
+  const [avRaport, setAvRaport] = useState<RaportAutoverificare | null>(null)
+  const [avEroare, setAvEroare] = useState('')
   useEffect(() => {
     void starePush().then(setPush)
   }, [])
@@ -628,6 +655,10 @@ export default function AdminPanel({
     // null = eșuat (eticheta spune adevărul, fără procent inventat).
     progress?: string | null
     pct?: number | null
+    // DEVIN dovedit PE ORDIN (owner, 22 aug: „am cerut devin peste tot in
+    // constructor"): id-ul sesiunii Devin, pus de dispecer la pornire — rândul
+    // arată MĂSURAT că Devin duce sarcina, nu se presupune.
+    devinSessionId?: string | null
   }
   // null = coada nu s-a putut citi (auditul admin, 3 aug) — nu „Niciun ordin".
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>('necitit')
@@ -635,31 +666,13 @@ export default function AdminPanel({
   // pornită lucrătorul nu ia nimic — ordinul stătea „în coadă · 0%" la
   // nesfârșit după promisiunea „max. 2 minute", fără nicio explicație.
   const [buildPaused, setBuildPaused] = useState(false)
-  // Dovada vie a motorului: `aider --version` de pe gazdă (owner, 16 aug).
-  const [aiderProba, setAiderProba] = useState<{ ok: boolean; versiune: string; motiv: string } | null>(null)
-  // Creierul LOCAL al lui Aider: `ollama list` de pe VPS (owner, 16 aug).
-  const [ollamaProba, setOllamaProba] = useState<{ ok: boolean; modele: string[]; motiv: string } | null>(null)
-  // COMUTATORUL creier 2 (cloud) + sursa constructorului (free/plătit), ales de
-  // owner (owner, 16 aug: „creier 2 → Kimi K3 cu comutator Qwen3.5… constructor =
-  // FREE ↔ PLĂTIT… se aprinde când lipesc cheia"). `cloud` = proba MĂSURATĂ a cheii.
-  const [creierCfg, setCreierCfg] = useState<{ creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }>({ creier2: 'gemini', constructorSursa: 'free' })
-  const [cloudProba, setCloudProba] = useState<{ ok: boolean; motiv: string; modele: string[] } | null>(null)
-  const [ollamaKeyInput, setOllamaKeyInput] = useState('')
-  const [creierMsg, setCreierMsg] = useState('')
-  // „nu stă butonul" (owner, 16 aug): reîncărcarea la 10s scria peste alegerea
-  // NESALVATĂ (o readucea la Gemini). De când atingi un comutator, marcăm EDITAT
-  // → pollul NU mai suprascrie alegerea ta până salvezi. Salvarea resetează flagul.
-  const creierEditatRef = useRef(false)
-  // Un singur buton de comutator (creier 2 + constructor îl refolosesc → fără dublură jscpd).
-  const btnComut = (cheie: string, activ: boolean, onClick: () => void, txt: string) => (
-    <button
-      key={cheie}
-      onClick={onClick}
-      style={{ padding: '3px 8px', borderRadius: 6, cursor: 'pointer', border: activ ? '1px solid #2563eb' : '1px solid #8886', background: activ ? '#2563eb' : 'transparent', color: activ ? '#fff' : 'inherit' }}
-    >
-      {txt}
-    </button>
-  )
+  // CINE E CONSTRUCTORUL — MĂSURAT de server din config (owner, 22 aug: „am
+  // cerut devin peste tot in constructor… sa-i stergi de tot [pe Aider+Ollama]").
+  // Luminile vechi (probă Aider, probă Ollama, puls lucrător) au fost ȘTERSE cu
+  // toată mașinăria locală: constructorul e DEVIN, iar panoul arată starea LUI.
+  const [constructorId, setConstructorId] = useState<{ cine: 'devin' | 'local'; motiv: string } | null>(null)
+  // DIAGNOSTICUL AUTONOM (owner, 19 aug): „de ce (nu) repară", măsurat pe server.
+  const [diagnostic, setDiagnostic] = useState<{ sanatos: boolean; verdict: string; probleme: { cod: string; severitate: 'critic' | 'atentie'; ce: string; recomandare: string }[] } | null>(null)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
   // EVALUAREA CERINȚEI (owner, 13 aug): pe măsură ce scrii ordinul, evaluăm
@@ -973,19 +986,22 @@ export default function AdminPanel({
   const refreshBuildJobs = (): void => {
     fetch('/api/admin/constructor', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; aider?: { ok: boolean; versiune: string; motiv: string }; ollama?: { ok: boolean; modele: string[]; motiv: string }; creier?: { creier2: 'gemini' | 'kimi-k3' | 'qwen3.5'; constructorSursa: 'free' | 'platit' }; cloud?: { ok: boolean; motiv: string; modele: string[] } } | null) => {
+      .then((j: { jobs?: BuildJobRow[]; paused?: boolean; constructor?: { cine: 'devin' | 'local'; motiv: string } } | null) => {
         // null/eșec = coada NU s-a citit (auditul admin, 3 aug) — se spune,
         // nu se lasă „Niciun ordin încă" peste o citire picată.
         if (j?.jobs) {
           setBuildJobs(j.jobs)
           setBuildPaused(!!j.paused)
-          setAiderProba(j.aider ?? null)
-          setOllamaProba(j.ollama ?? null)
-          if (j.creier && !creierEditatRef.current) setCreierCfg(j.creier)
-          setCloudProba(j.cloud ?? null)
+          setConstructorId(j.constructor ?? null)
         } else setBuildJobs(null)
       })
       .catch(() => setBuildJobs(null))
+    // DIAGNOSTICUL AUTONOM: de ce (nu) repară, măsurat pe server (regula #1 — pe
+    // eșec îl ascundem, nu inventăm „sănătos").
+    fetch('/api/admin/constructor/diagnostic', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { sanatos: boolean; verdict: string; probleme: { cod: string; severitate: 'critic' | 'atentie'; ce: string; recomandare: string }[] } | null) => setDiagnostic(d && typeof d.verdict === 'string' ? d : null))
+      .catch(() => setDiagnostic(null))
   }
   // Tab „Constructor” open → the orders queue, refreshed every 10s.
   useEffect(() => {
@@ -1805,7 +1821,7 @@ export default function AdminPanel({
                           ) : (
                             plati.neatribuite.map((p) => (
                               <span key={p.id} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
-                                £{p.amount} · „{p.referinta || p.bankRef || '—'}” · Văzut la: {new Date(p.seenAt).toLocaleString()}{' '}
+                                {p.amount} {p.currency || '£'} · „{p.referinta || p.bankRef || '—'}” · Văzut la: {new Date(p.seenAt).toLocaleString()}{' '}
                                 <button
                                   type="button"
                                   className="ghost"
@@ -2486,6 +2502,112 @@ export default function AdminPanel({
                 Reset VPS
               </button>
             </div>
+
+            {/* ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug: „ceva inteligent bazat
+                pe AI" + „verifică și DE CE nu merge"). Kelion se testează SINGUR pe
+                TOATE funcțiile din registrul unic: citirile probate REAL, funcțiile
+                cu efect verificate fără să le execute (dry-run), iar pe cele picate
+                creierul dă cauza + recomandarea fermă. Verdictul e MĂSURAT (regula
+                #1): „nu pot verifica" cinstit, niciodată „merge" fabricat. */}
+            <div className="fin-breakdown" style={{ marginTop: 16 }}>
+              <div className="fin-breakdown-head">Autoverificare inteligentă</div>
+              <p className="chat-hint" style={{ marginTop: 8 }}>
+                Kelion se testează pe el însuși pe toate funcțiile și spune, pentru fiecare care nu
+                merge, <b>de ce</b> și ce e de făcut. Durează câteva secunde (probează real citirile).
+              </p>
+              <button
+                className="ghost"
+                style={{ marginTop: 12 }}
+                disabled={avBusy}
+                onClick={async () => {
+                  setAvBusy(true)
+                  setAvEroare('')
+                  try {
+                    const res = await fetch('/api/admin/autoverificare', {
+                      method: 'POST',
+                      credentials: 'include',
+                    })
+                    if (!res.ok) {
+                      setAvEroare(`Autoverificarea NU a pornit: HTTP ${res.status}`)
+                      setAvRaport(null)
+                      return
+                    }
+                    const j = (await res.json().catch(() => null)) as RaportAutoverificare | null
+                    if (!j || typeof j.total !== 'number') {
+                      setAvEroare('Răspuns necitibil de la server (nu pot afișa un raport pe care nu l-am măsurat).')
+                      setAvRaport(null)
+                      return
+                    }
+                    setAvRaport(j)
+                  } catch (e) {
+                    // Regula #1: eroarea reală ajunge la om, nu o mascăm.
+                    const motiv = e instanceof Error ? e.message : String(e)
+                    console.error('[autoverificare]', e)
+                    setAvEroare(`Eroare la autoverificare: ${motiv}`)
+                    setAvRaport(null)
+                  } finally {
+                    setAvBusy(false)
+                  }
+                }}
+              >
+                {avBusy ? 'Verific toate funcțiile…' : '🧪 Verifică toate funcțiile'}
+              </button>
+
+              {avEroare && (
+                <p className="chat-hint" style={{ marginTop: 10, color: '#e0603a' }}>
+                  ⚠ {avEroare}
+                </p>
+              )}
+
+              {avRaport && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
+                    <span>Total: <b>{avRaport.total}</b></span>
+                    <span style={{ color: '#2e9e5b' }}>Merg: <b>{avRaport.merg}</b></span>
+                    <span style={{ color: '#e0603a' }}>Stricate: <b>{avRaport.stricate}</b></span>
+                    <span style={{ color: '#c79218' }}>Nu pot verifica: <b>{avRaport.nepotverifica}</b></span>
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {avRaport.functii
+                      // Întâi ce nu merge (stricate, apoi nu-pot-verifica), apoi ce merge.
+                      .slice()
+                      .sort((a, b) => rangVerdict(a.verdict) - rangVerdict(b.verdict))
+                      .map((f) => {
+                        const c =
+                          f.verdict === 'merge' ? '#2e9e5b' : f.verdict === 'stricat' ? '#e0603a' : '#c79218'
+                        const et =
+                          f.verdict === 'merge' ? '✓ merge' : f.verdict === 'stricat' ? '✗ stricat' : '… nu pot verifica'
+                        return (
+                          <li
+                            key={f.functie}
+                            style={{ borderLeft: `3px solid ${c}`, paddingLeft: 10 }}
+                          >
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                              <b>{f.functie}</b>
+                              <span style={{ color: c, fontSize: '0.85em' }}>{et}</span>
+                              <span className="chat-hint" style={{ fontSize: '0.8em' }}>
+                                {f.tip === 'efect' ? '(cu efect — dry-run)' : '(citire — probat real)'}
+                              </span>
+                            </div>
+                            <div className="chat-hint" style={{ fontSize: '0.85em' }}>{f.face}</div>
+                            {f.verdict !== 'merge' && (
+                              <div style={{ fontSize: '0.85em', marginTop: 2 }}>
+                                <span style={{ color: c }}>De ce:</span> {f.deCe}
+                                {f.recomandare && (
+                                  <>
+                                    {' '}
+                                    <span style={{ color: c }}>→</span> <b>{f.recomandare}</b>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        )
+                      })}
+                  </ul>
+                </div>
+              )}
+            </div>
           </section>
         )}
         {tab === 'erori' && (
@@ -2652,141 +2774,46 @@ export default function AdminPanel({
                     >
                       {plafon.activ ? 'Oprește limita' : 'Pornește limita'}
                     </button>
-                    {/* MOTORUL, DOVEDIT VIU (owner, 16 aug: „doar denumit nu e
-                        suficient trebuie verificat real ca e aider… cu dovada").
-                        Becul vine din `aider --version` rulat pe gazdă — verde cu
-                        versiunea reală, roșu cu eroarea. Fără comutator: constructor
-                        unic Aider, creier Gemini (rapid → performant). */}
+                    {/* CONSTRUCTORUL = DEVIN, MĂSURAT (owner, 22 aug: „am cerut devin
+                        peste tot in constructor" + „sa-i stergi de tot [Aider+Ollama]").
+                        Becul vine din config-ul REAL al serverului (cheia Devin), nu
+                        dintr-un text scris de mână: verde = Devin deține coada (ordinele
+                        pleacă în sesiuni Devin → PR pe master); roșu = cheia lipsește pe
+                        server și trebuie pusă — se spune exact asta, nu se inventează. */}
                     <span
                       className="chat-hint"
-                      style={{ fontSize: 12, fontWeight: 600, color: aiderProba == null ? undefined : aiderProba.ok ? '#1a7f37' : '#c1121f' }}
-                      title={aiderProba == null
-                        ? 'proba motorului încă nu s-a citit'
-                        : aiderProba.ok
-                          ? `aider --version pe gazdă: ${aiderProba.versiune}`
-                          : `aider --version a picat: ${aiderProba.motiv}`}
+                      style={{ fontSize: 12, fontWeight: 600, color: constructorId == null ? undefined : constructorId.cine === 'devin' ? '#1a7f37' : '#c1121f' }}
+                      title={constructorId?.motiv ?? 'identitatea constructorului încă nu s-a citit'}
                     >
-                      {aiderProba == null
-                        ? 'Motor: Aider (probă…)'
-                        : aiderProba.ok
-                          ? `🟢 Motor: Aider VIU (${aiderProba.versiune})`
-                          : `🔴 Motor: Aider LIPSĂ (${aiderProba.motiv.slice(0, 60)})`}
-                    </span>
-                    {/* CREIERUL LOCAL (Ollama pe VPS) — owner, 16 aug: „aider pe un
-                        model local pe VPS (Ollama)". Probat cu `ollama list`. */}
-                    <span
-                      className="chat-hint"
-                      style={{ fontSize: 12, fontWeight: 600, marginLeft: 10, color: ollamaProba == null ? undefined : ollamaProba.ok && ollamaProba.modele.length ? '#1a7f37' : '#c1121f' }}
-                      title={ollamaProba == null
-                        ? 'proba creierului local încă nu s-a citit'
-                        : ollamaProba.ok
-                          ? `Ollama pe host (/api/tags): ${ollamaProba.modele.join(', ') || 'niciun model instalat'}`
-                          : `proba Ollama pe host: ${ollamaProba.motiv}`}
-                    >
-                      {ollamaProba == null
-                        ? '· creier local: probă…'
-                        : ollamaProba.ok && ollamaProba.modele.length
-                          ? `· 🟢 creier LOCAL Ollama (${ollamaProba.modele.join(', ')})`
-                          : ollamaProba.ok
-                            ? '· 🔴 Ollama pornit dar FĂRĂ model (ollama pull …)'
-                            : `· 🔴 Ollama nu răspunde pe host (${ollamaProba.motiv.slice(0, 50)})`}
+                      {constructorId == null
+                        ? 'Constructor: se citește…'
+                        : constructorId.cine === 'devin'
+                          ? '🟢 Constructorul e DEVIN (extern — cheia pusă; ordin → sesiune Devin → PR)'
+                          : '🔴 Cheia Devin NU e pusă pe server — pune DEVIN_API_KEY ca Devin să preia coada'}
                     </span>
                   </div>
-                  {/* ── COMUTATORUL CREIER 2 + CONSTRUCTOR (owner, 16 aug: „creier 2 →
-                      Kimi K3 cu comutator Qwen3.5 Max… constructor = FREE ↔ PLĂTIT…
-                      se aprinde când lipesc cheia"). Tu alegi, tu vezi, măsurat.
-                      Doar stiluri inline (fără clasă partajată) — lecția coliziunii. */}
-                  <div style={{ marginTop: 10, padding: 10, border: '1px solid #8884', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700 }}>Creierul (comutator) — tu alegi, tu vezi</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
-                      <span style={{ minWidth: 140, opacity: 0.85 }}>Creier 2 (cereri grele):</span>
-                      {([['gemini', 'Gemini (gratis)'], ['kimi-k3', 'Kimi K3 (cloud)'], ['qwen3.5', 'Qwen3.5 397B (cloud)']] as const).map(([val, txt]) =>
-                        btnComut(val, creierCfg.creier2 === val, () => { creierEditatRef.current = true; setCreierCfg((c) => ({ ...c, creier2: val })) }, txt),
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
-                      <span style={{ minWidth: 140, opacity: 0.85 }}>Constructor:</span>
-                      {([['free', 'FREE (local pe VPS)'], ['platit', 'PLĂTIT (= creier 2 cloud)']] as const).map(([val, txt]) =>
-                        btnComut(val, creierCfg.constructorSursa === val, () => { creierEditatRef.current = true; setCreierCfg((c) => ({ ...c, constructorSursa: val })) }, txt),
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
-                      <span style={{ minWidth: 140, opacity: 0.85 }}>Cheia Ollama:</span>
-                      <input
-                        type="password"
-                        value={ollamaKeyInput}
-                        onChange={(e) => setOllamaKeyInput(e.target.value)}
-                        placeholder={cloudProba?.ok ? '•••• (pusă — lasă gol ca s-o păstrezi)' : 'lipește cheia Ollama Cloud'}
-                        style={{ flex: 1, minWidth: 180, padding: '3px 6px', fontSize: 12 }}
-                      />
-                      <button
-                        onClick={async () => {
-                          try {
-                            setCreierMsg('salvez…')
-                            const r = await fetch('/api/admin/constructor/creier-cloud', {
-                              method: 'POST',
-                              headers: { 'content-type': 'application/json' },
-                              body: JSON.stringify({ creier2: creierCfg.creier2, constructorSursa: creierCfg.constructorSursa, ollamaKey: ollamaKeyInput || undefined }),
-                            })
-                            const j = (await r.json().catch(() => null)) as { creier?: typeof creierCfg; cloud?: { ok: boolean; motiv: string; modele: string[] }; error?: string } | null
-                            if (j?.creier) setCreierCfg(j.creier)
-                            if (j?.cloud) setCloudProba(j.cloud)
-                            if (r.ok) creierEditatRef.current = false // salvat → serverul redevine sursa
-                            setOllamaKeyInput('')
-                            setCreierMsg(r.ok ? 'salvat' : `eroare: ${j?.error ?? r.status}`)
-                          } catch (e) {
-                            setCreierMsg(`eroare: ${String(e).slice(0, 80)}`)
-                          }
-                        }}
-                        style={{ padding: '3px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#1a7f37', color: '#fff', fontWeight: 600 }}
-                      >
-                        Salvează
-                      </button>
-                    </div>
-                    <div style={{ fontSize: 11, color: cloudProba == null ? undefined : cloudProba.ok ? '#1a7f37' : '#c1121f', opacity: cloudProba == null ? 0.7 : 1 }}>
-{creierCfg.creier2 === 'gemini' && creierCfg.constructorSursa === 'free'
-                        ? 'Acum: chat rapid Gemini + constructor FREE local pe VPS. Alege cloud + lipește cheia ca Creier 2 (cereri grele) și/sau constructor PLĂTIT.'
-                        : cloudProba == null
-                          ? 'cheie: probă…'
-                          : cloudProba.ok
-                            ? `🟢 Cheie OK pe Ollama cloud: „${cloudProba.modele[0] ?? 'model'}”. Chat rapid = Gemini. Creier 2 pe CHAT (ture grele) + constructor PLĂTIT folosesc acest model când e ales mai sus.`
-                            : `🔴 ${cloudProba.motiv}`}
-                    </div>
-                    {/* TOP-UP „extra usage" (owner, 16 aug: „la creier vreau bifă pentru kimi 3,
-                        in soft sa pot pune extra bani"). Modelele «extra usage» (ex. Kimi K3, #1)
-                        se plătesc SEPARAT de abonament, per folosire. Banii se pun la Ollama (ei
-                        țin plata — aplicația nu-ți poate lua cardul); butonul te duce direct acolo.
-                        Prețul NU-l scriu în cod (legea anti-hardcodare) — e viu pe pagina modelului. */}
-                    {creierCfg.creier2 !== 'gemini' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, background: '#8881', borderRadius: 6, padding: 8 }}>
-                        <div style={{ opacity: 0.9 }}>
-                          Modelele „extra usage" (ex. Kimi K3 — cel mai performant) se plătesc <b>separat</b> de abonament,
-                          per folosire. Soldul se pune la Ollama (ei țin plata), apoi becul de sus devine verde când modelul rulează.
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                          <a
-                            href="https://ollama.com/settings"
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ padding: '4px 10px', borderRadius: 6, background: '#1a7f37', color: '#fff', textDecoration: 'none', fontWeight: 600 }}
-                          >
-                            Pune bani extra / auto-reload
-                          </a>
-                          <a
-                            href={`https://ollama.com/library/${creierCfg.creier2}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #8886', color: 'inherit', textDecoration: 'none' }}
-                          >
-                            Vezi prețul modelului (live)
-                          </a>
-                        </div>
+                  {/* DIAGNOSTICUL AUTONOM (owner, 19 aug: „nu are autonomie… sa faca
+                      asta"): Kelion măsoară SINGUR de ce (nu) repară și o arată aici,
+                      cu recomandarea fermă — nu mai întrebi „de ce?". */}
+                  {diagnostic && (diagnostic.probleme.length > 0 || !diagnostic.sanatos) && (
+                    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, border: '1px solid', borderColor: diagnostic.sanatos ? '#d0a92066' : '#c1121f66', background: diagnostic.sanatos ? '#d0a92014' : '#c1121f10' }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: diagnostic.sanatos ? '#8a6d1a' : '#c1121f' }}>
+                        {diagnostic.sanatos ? '⚠ ' : '🔴 '}{diagnostic.verdict}
                       </div>
-                    )}
-                    {creierMsg && <div style={{ fontSize: 11, opacity: 0.85 }}>{creierMsg}</div>}
-<div style={{ fontSize: 10, opacity: 0.6 }}>
-                      Constructor FREE = Ollama local pe VPS (qwen2.5-coder:32b), nu modelul cloud din becul de mai sus. Constructor PLĂTIT = exact Creier 2 cloud. Chat: rapid = Gemini; greu = Creier 2 cloud după cheie OK, altfel Gemini greu.
+                      {diagnostic.probleme.map((p) => (
+                        <div key={p.cod} style={{ fontSize: 12, marginTop: 6 }}>
+                          <span style={{ fontWeight: 600 }}>{p.severitate === 'critic' ? '🔴' : '⚠'} {p.ce}</span>
+                          <br />
+                          <span className="chat-hint" style={{ fontSize: 11.5 }}>→ {p.recomandare}</span>
+                        </div>
+                      ))}
                     </div>
+                  )}
+                  {/* Explicația vine DIN DATE (constructorId.motiv, măsurat de server),
+                      nu dintr-o frază scrisă de mână — fraza veche („Constructor: Ollama
+                      local free") a mințit exact când ownerul întreba de Devin. */}
+                  <div style={{ marginTop: 10, padding: 10, border: '1px solid #8884', borderRadius: 8, fontSize: 11, opacity: 0.75 }}>
+                    Creier: <b>Gemini</b> unic (rapid + greu). Constructor: {constructorId == null ? 'se citește de pe server…' : constructorId.cine === 'devin' ? <><b>DEVIN</b> (extern) — {constructorId.motiv}</> : <>{constructorId.motiv}</>}
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
                     <label className="chat-hint" style={{ fontSize: 12 }}>
@@ -2917,9 +2944,10 @@ export default function AdminPanel({
                           dar așteaptă publicarea) — orice, dar nu „GATA". */}
                       {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'în așteptare' : 'eșuat'}
                     </span>{' '}
-                    {/* (Badge-ul „Fable 5" a fost SCOS — owner, 16 aug: „fable iese
-                        total de peste tot… curata peste tot in aplicatie".
-                        Constructorul rulează pe motorul Aider + creier Gemini.) */}
+                    {/* DEVIN, DOVEDIT PE RÂND (owner, 22 aug: „am cerut devin peste
+                        tot in constructor"): badge-ul apare DOAR când dispecerul a
+                        pus id-ul sesiunii Devin pe ordin — măsurat, nu presupus. */}
+                    {j.devinSessionId ? <span className="vis-badge human" title={`sesiune Devin: ${j.devinSessionId}`}>DEVIN</span> : null}{' '}
                     {/* P8 (owner, 15 aug: „foarte clar ce executa"): FAPTA
                         extrasă de server (nume), nu ambalajul promptului. */}
                     {j.nume || j.orderText.slice(0, 90)}
@@ -3271,8 +3299,10 @@ export default function AdminPanel({
                         </span>
                         {/* MONITORIZAREA PE USER (10 aug): cât a COSTAT pe
                             furnizori — roșu când a consumat peste ce are. */}
-                        <span style={(u.consumedUsd ?? 0) > 0 && u.balance <= 0 ? { color: '#e5484d', fontWeight: 600 } : undefined}>
-                          consum ${(u.consumedUsd ?? 0).toFixed(2)}
+                        <span style={typeof u.consumedUsd === 'number' && u.consumedUsd > 0 && u.balance <= 0 ? { color: '#e5484d', fontWeight: 600 } : undefined}>
+                          {/* `?? 0` scos (owner, 19 aug): un rând fără `consumedUsd` arăta
+                              „$0.00" ca fapt măsurat. Fără cifră reală → „—", nu 0. */}
+                          consum {typeof u.consumedUsd === 'number' ? `$${u.consumedUsd.toFixed(2)}` : '—'}
                         </span>
                         {u.blocked && <span className="user-badge blocked">BLOCAT</span>}
                         {/* P26: mostra de voce e parte din cardul omului — dacă

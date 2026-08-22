@@ -1,11 +1,12 @@
 import { downsample, float32ToPcm16, base64ToBytes, pcm16ToFloat32 } from './pcm'
-import { interruptAll } from './audioFocus'
 import { OpusVoceClient, esteSuportat as opusSuportat } from './opusVoce'
 import { alimenteazaNivelVoce } from './audioIO'
 import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
+import { pasVad, stareVadInitiala, rmsDin, zcrDin, PARAM_VAD_IMPLICIT, type StareVad } from './vad'
 import { inscrieVoceaLuiKelion } from './vociKelion'
 import { deblocheazaAudioLaGest } from './audioGraph'
 import { ensureAudioContextRunning, setupAudioContextAutoResume, startVoiceHeartbeat } from './voiceHeartbeat'
+import { faraBluetoothSigur } from './rutaAudio'
 
 // ── VOCEA LIVE FULL-DUPLEX — PARTEA DIN BROWSER (7 aug 2026) ─────────────────
 //
@@ -96,6 +97,10 @@ export interface VocalLiveOpts {
 
 export interface VocalLiveHandle {
   inchide(): void
+  /** Oprește imediat redarea WebAudio a turei curente, fără a închide urechea live. */
+  taieRedarea(): void
+  /** Oprește redarea locală și cere serverului să suprime restul turei curente. */
+  intrerupeRedarea(): void
   /** Mut/dezmut microfonul fără a rupe sesiunea (butonul de microfon al UI-ului). */
   setMuted(muted: boolean): void
   /** Câți octeți de microfon au plecat — dovadă că se trimite ceva, nu doar că
@@ -109,6 +114,10 @@ export interface VocalLiveHandle {
    *  se redă vocea unei ture SCRISE prin audioIO — poarta half-duplex ține atunci
    *  urechea live mută (anti-ecou), ca modelul să nu se audă pe el însuși. */
   setRedareExterna(activ: boolean): void
+  /** JARVIS pasul 1 + §10 (tastatura opțională): trimite un rând SCRIS în sesiunea
+   *  Live — modelul îi răspunde cu VOCEA lui (un singur motor; fără Chirp, fără
+   *  coliziune). Întoarce true dacă rândul chiar a plecat (socket deschis). */
+  trimiteText(text: string): boolean
 }
 
 /** Serverul are cheia și modelul Live? Se întreabă ÎNAINTE de a deschide socketul,
@@ -151,12 +160,12 @@ function clampPreamp(v: unknown): number {
 //
 // Ce e acum: vocea live iese printr-un <audio> obișnuit alimentat de WebAudio
 // (`MediaStreamDestination` de pe analizor) — audio de MEDIA, exact ca mp3-ul —
-// deci urmează ruta de muzică la căști / mașină. Compromis, spus pe
-// față: AEC-ul prin WebRTC dispare (rămâne anularea de ecou din microfon,
-// `echoCancellation:true`); pe boxe Bluetooth/mașină AEC-ul oricum nu era
-// necesar (boxele sunt departe de microfon). Dacă pe difuzorul telefonului
-// revine ecoul, pasul următor e ruta-conștientă (AEC pe difuzor, media pe
-// Bluetooth) — dar întâi trebuie ca vocea să AJUNGĂ în mașină.
+// deci urmează ruta de muzică la căști / mașină. Din 22 aug „ruta-conștientă"
+// anticipată aici chiar EXISTĂ: anularea de ecou din microfon e ADAPTIVĂ
+// (`echoCancellation: procesare` — desktop pornită; pe mobil pornită DOAR
+// când e cert că nu e niciun Bluetooth, vezi rutaAudio.ts); pe boxe
+// Bluetooth/mașină rămâne oprită (acolo nu era necesară și pornirea ei ar
+// rupe A2DP — bugul măsurat pe 11 aug).
 
 // O SINGURĂ sesiune live per tab, garantată AICI, nu în apelant (auditul de
 // noapte, 9 aug): gărzile apelantului sunt check-then-act peste await-uri de
@@ -232,16 +241,21 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let curataHeartbeat: (() => void) | null = null
   let curataAutoResumeOut: (() => void) | null = null
   let curataAutoResumeIn: (() => void) | null = null
-  let ceasPingWs: ReturnType<typeof setInterval> | null = null
+  // Procesarea WebRTC (AEC/AGC) chiar aplicată pe microfonul sesiunii ăsteia —
+  // decisă la getUserMedia după ruta audio (rutaAudio.ts). Condiționează poarta
+  // half-duplex (cu AEC viu, microfonul NU mai tace cât vorbește Kelion) și
+  // raportarea onestă {type:'aec'} către server.
+  let procesareActiva = false
+  let curataDispozitive: (() => void) | null = null
 
   const inchide = (): void => {
     if (inchis) return
     inchis = true
-    if (ceasPingWs) clearInterval(ceasPingWs)
     if (sesiuneActiva?.inchide === inchide) sesiuneActiva = null // zăvorul se predă curat
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
     curataHeartbeat?.()
+    curataDispozitive?.()
     curataAutoResumeOut?.()
     curataAutoResumeIn?.()
     if (resumeTimer) clearInterval(resumeTimer)
@@ -346,10 +360,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     const acum = ctxOut.currentTime
     if (cursorRedare < acum) {
       cursorRedare = acum
-    } else if (cursorRedare > acum + 2.0) {
-      // Buffer drift / latency buildup protection during burst inference
-      cursorRedare = acum + 0.05
     }
+    // NU există „protecție de drift" aici (F1 al marii verificări, 22 aug):
+    // vechea ramură `cursorRedare > acum + 2` resetă cursorul FĂRĂ să
+    // oprească sursele deja programate — pe orice replică mai lungă de ~2s
+    // de buffer, cadrele noi se așezau PESTE coada încă redată (două fluxuri
+    // simultan din aceeași gură). A programa înainte E normal la bursturi;
+    // singurul reset legitim al cursorului e la întrerupere (taieRedarea → 0).
     src.start(cursorRedare)
     cursorRedare += buf.duration
     surseActive.push(src)
@@ -432,6 +449,20 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
               try { ws.send(cadru.buffer) } catch { /* close-ul curăță */ }
             },
             (pcm) => redaFloat32(pcm), // Opus de jos decodat → difuzor
+            (sens) => {
+              // CODEC MORT ÎN ZBOR (registrul frontend, lot C): înainte, moartea
+              // decoderului lăsa difuzorul PERMANENT mut — serverul continua să
+              // trimită Opus, iar fiecare pachet se arunca tăcut. Acum: cădem
+              // TOTAL pe PCM pe AMBELE sensuri și-i spunem serverului
+              // (opus_cazut → el nu mai tag-uiește nimic Opus). Cadrele Opus
+              // încă în zbor se pierd (scurt), apoi vocea curge pe PCM.
+              if (inchis) return
+              console.error(`[vocalLive] codecul Opus a murit în zbor (${sens}) — cad pe PCM, vocea continuă`)
+              opusClient?.inchide()
+              opusClient = null
+              opusTx = false
+              try { ws.send(JSON.stringify({ type: 'opus_cazut' })) } catch { /* close-ul curăță */ }
+            },
           ).then((c) => {
             if (!c || inchis) { c?.inchide(); return }
             opusClient = c
@@ -465,8 +496,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         if (!m.data) break
         // OPUS: cadrele de jos vin tag-uite `codec:'opus'` cât e activ; le dăm
         // decoderului (ieșirea lui cade pe redaFloat32). Fără tag = PCM base64,
-        // ca azi. Dacă decoderul lipsește dintr-un motiv, cadrul Opus se pierde
-        // (nu-l putem reda ca PCM) — dar asta doar cât Opus e pornit explicit.
+        // ca azi. După `opus_cazut` (codec mort în zbor), cadrele Opus ÎNCĂ în
+        // zbor se pierd scurt (opusClient e null), apoi serverul trimite PCM.
         if (m.codec === 'opus') {
           opusClient?.incarcaOpusJos(base64ToBytes(m.data))
         } else {
@@ -484,7 +515,6 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         // frazei" — fără rândul ăsta, o tăiere venită de la model era
         // indistinctibilă de orice altă cauză).
         console.info('[vocalLive] modelul și-a tăiat vorba (barge-in) — a auzit voce peste el')
-        interruptAll('live-server-barge-in')
         taieRedarea()
         opts.onTuraInchisa?.() // tura tăiată nu-și lasă fragmentul pe bandă
         break
@@ -517,29 +547,41 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (inchis) return
     // Specific WebSocket code handling: 1006 is abnormal closure (network drop / timeout)
     if (ev.code === 1008) {
-      urcaEroarea('sesiune vocală: nu ești autentificat')
+      // Serverul închide cu 1008 pe DOUĂ cauze diferite (F4 al marii
+      // verificări): lipsa sesiunii ȘI creditul epuizat. „Nu ești
+      // autentificat" pe un client plătitor cu soldul golit era un
+      // diagnostic FALS (Legea #1) — se ramifică pe motivul real.
+      // ATENȚIE (R4): textele „credit epuizat" / „nu ești autentificat" sunt
+      // CUPLATE cu detecția din ChatPanel.onEroare (motiv.includes) care taie
+      // reconectările pe cauze ne-tranzitorii — schimbi aici, schimbi și acolo.
+      urcaEroarea(
+        ev.reason === 'fara_credit'
+          ? 'sesiune vocală: credit epuizat — reîncarcă pentru voce'
+          : 'sesiune vocală: nu ești autentificat',
+      )
     } else if (ev.code === 1011) {
       urcaEroarea('sesiune vocală indisponibilă pe server (lipsește cheia?)')
     } else if (ev.code === 1006) {
       urcaEroarea('sesiune vocală întreruptă de rețea (cod 1006 abnormal closure) — reîncercare conexiune')
     } else if (ev.code !== 1000) {
       urcaEroarea(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
+    } else {
+      // BUG REPARAT (registrul frontend #2, blocant): închiderea „politicoasă" (1000)
+      // venită de la SERVER (noi n-am cerut-o — `inchis` e false aici) lăsa omul SURD
+      // și MUT tăcut: vlRef rămânea setat, becul aprins, ensureMic ieșea pe gardă, iar
+      // nimeni nu era anunțat — până la refresh. O ridicăm ca pe orice cădere, ca
+      // apelantul (ChatPanel) să curețe și să re-armeze lanțul vocal.
+      urcaEroarea('sesiunea vocală a fost închisă de server (cod 1000) — reiau conexiunea')
     }
     inchide()
   }
 
-  // PING/KEEPALIVE WS: la fiecare 15s trimitem ping ca proxy-ul/Caddy să nu
-  // închidă socket-ul pe liniște cu cod 1006 (abnormal closure).
-  ceasPingWs = setInterval(() => {
-    if (inchis) return
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify({ type: 'ping', t: Date.now() }))
-      } catch {
-        /* tratat la onclose */
-      }
-    }
-  }, 15_000)
+  // KEEPALIVE WS: un SINGUR ceas — voiceHeartbeat (pornit la onopen, 10s)
+  // trimite {type:'ping'} ca proxy-ul/Caddy să nu închidă socket-ul pe liniște
+  // cu 1006. Al doilea ceas de ping (15s, identic cadru cu cadru) a fost scos
+  // la marea verificare din 22 aug (F11a): serverul doar RĂSPUNDE la ping-uri,
+  // nu le cere, iar două cronometre pe același rol înseamnă două locuri de
+  // curățat și zero câștig.
 
   // Microfonul pornește DUPĂ ce socketul e deschis: altfel primele cadre s-ar
   // pierde în gol și primele cuvinte ale omului ar dispărea.
@@ -558,6 +600,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   })
   if (inchis || ws.readyState !== WebSocket.OPEN) return null
 
+  const eMobil = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
   try {
     // PROCESAREA DE SUNET OPRITĂ CA VOCEA SĂ AJUNGĂ PE BLUETOOTH (11 aug, MĂSURAT
     // de owner: „nu funcționează ieșirea pe bluetooth" — chiar și DUPĂ ce redarea
@@ -585,9 +628,19 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // (unde procesarea ține telefonul în MODE_IN_COMMUNICATION). noiseSuppression
     // rămâne OFF: pe vocea joasă ar putea tăia chiar vorba (ar înrăutăți „surdul").
     // Peste asta, preamp-ul manual (setPreamp) dă boost suplimentar la cerere.
-    const eMobil = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
+    // AEC ADAPTIV PE RUTA AUDIO (owner, 22 aug: „identifica toate optiunile de
+    // device… 0 greseli de auz"). Regula veche „mobil = fără procesare" plătea
+    // pe DIFUZORUL telefonului (ecoul nu era anulat → half-duplex → microfonul
+    // tăcea cât vorbea Kelion). Regula nouă: pe mobil procesarea pornește DOAR
+    // când e CERT că nu există niciun dispozitiv Bluetooth (citirea listei a
+    // reușit + niciun nume nu pare BT — rutaAudio.ts); orice îndoială =
+    // comportamentul de azi (oprită), ca bugul măsurat pe 11 aug („nu
+    // funcționează ieșirea pe bluetooth", MODE_IN_COMMUNICATION rupe A2DP) să
+    // nu se poată întoarce. Desktop: pornită, ca până acum.
+    const procesare = !eMobil || (await faraBluetoothSigur())
+    procesareActiva = procesare
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: !eMobil, noiseSuppression: false, autoGainControl: !eMobil },
+      audio: { channelCount: 1, echoCancellation: procesare, noiseSuppression: false, autoGainControl: procesare },
     })
   } catch {
     urcaEroarea('microfonul nu a fost permis')
@@ -639,19 +692,46 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   void boxe.play().catch(() => {
     /* politica de autoplay — reîncercat de ceasul de deblocaj (mai jos) */
   })
-  // Serverul află că nu mai e AEC prin WebRTC: fără el, „vocea de peste el" ar
-  // putea fi chiar ecoul, deci NU-i dăm voie serverului să-i taie vorba pe voce
-  // (barge-in server OFF). Pe căști/mașină oricum nu e ecou; pe difuzor rămâne
-  // anularea din microfon (echoCancellation:true).
+  // Serverul află starea REALĂ a anulării de ecou (22 aug — înainte se raporta
+  // `activ:false` pentru toți, chiar și pe desktop unde AEC era pornit): cu
+  // AEC viu, serverul are voie să judece „vocea de peste el" (tăierea la voce);
+  // fără AEC, vocea de peste el poate fi chiar ecoul → tăierea rămâne oprită.
   const spuneAec = (): void => {
     try {
-      ws.send(JSON.stringify({ type: 'aec', activ: false }))
+      ws.send(JSON.stringify({ type: 'aec', activ: procesareActiva }))
     } catch {
       /* sesiunea se închide oricum */
     }
   }
   if (ws.readyState === WebSocket.OPEN) spuneAec()
   else ws.addEventListener('open', spuneAec, { once: true })
+  // SCHIMBAREA RUTEI AUDIO ÎN ZBOR (22 aug): conectezi/deconectezi un Bluetooth
+  // cât sesiunea e vie → regula procesării tocmai a devenit greșită (cel mai
+  // rău caz: BT conectat cu procesarea PORNITĂ = bugul din 11 aug, live —
+  // ieșirea nu mai ajunge pe A2DP). La fiecare schimbare de dispozitive se
+  // reevaluează; verdict diferit → sesiunea se închide cu motiv onest, iar
+  // plasa de reluare din ChatPanel o repornește în secunde cu regula rutei noi.
+  const laSchimbareDispozitive = (): void => {
+    void faraBluetoothSigur().then((faraBt) => {
+      if (inchis) return
+      if ((!eMobil || faraBt) !== procesareActiva) {
+        urcaEroarea('ruta audio s-a schimbat (Bluetooth) — reiau sesiunea cu regula potrivită')
+        inchide()
+      }
+    })
+  }
+  try {
+    navigator.mediaDevices.addEventListener('devicechange', laSchimbareDispozitive)
+    curataDispozitive = () => {
+      try {
+        navigator.mediaDevices.removeEventListener('devicechange', laSchimbareDispozitive)
+      } catch {
+        /* deja scos */
+      }
+    }
+  } catch {
+    /* API absent (browser vechi) — regula rămâne cea aleasă la pornire */
+  }
   const sursa = ctxIn.createMediaStreamSource(stream)
   // Culesul microfonului (9 aug, „scoate alertele prin rezolvări reale"):
   // ÎNTÂI AudioWorklet (API-ul curent, pe firul audio — fără [Deprecation] și
@@ -692,6 +772,52 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       (surseActive.length > 0 || ctxOut.currentTime < cursorRedare + COADA_ECOU_S))
   let ultimNivelLa = 0
   let preampGain = clampPreamp(opts.preampInitial)
+  // ── POARTA DE VOCE (VAD local) ── owner 20 aug: „nu se poate activa doar la voce?
+  // nu la zgomot?" + „fa profi de la inceput". Cât Kelion ASCULTĂ, ar trimite spre model
+  // DOAR când se vorbește (vad.ts) → economie pe tăcere.
+  // OPRIT IMPLICIT (owner 20 aug, MĂSURAT LIVE: „in continuare nu merge vocea, am apasat
+  // butonul dar nimic"). Regula #2 — schimbarea mea e primul suspect: VAD-ul putea să NU
+  // deschidă niciodată (dacă înveți fondul din primele cadre cât vorbești, pragul urcă
+  // peste vocea ta), tăind vocea complet. Până nu-l pot proba pe un dispozitiv real că NU
+  // taie vocea, rămâne OPT-IN: `localStorage.kelion_vad='1'` îl PORNEȘTE; implicit e oprit,
+  // deci trimiterea e continuă ca înainte (voce funcțională > cost).
+  const vadPornit = (() => {
+    try {
+      return localStorage.getItem('kelion_vad') === '1'
+    } catch {
+      return false
+    }
+  })()
+  let stVad: StareVad = stareVadInitiala(performance.now())
+  let eraDeschis = false
+  let eraPoarta = false // tranziția porții (Kelion audibil → liniște), pt. pre-roll-ul de barge-in
+  // PRE-ROLL după DURATĂ (~250 ms), robust la mărimea cadrului: la deschidere trimitem
+  // întâi audio-ul reținut, ca primul cuvânt să nu fie tăiat de onset + debounce.
+  // 250 → 500 (owner, 22 aug, punctul 2 „ok — trebuie verificat"): dublăm
+  // fereastra recuperată la barge-in ca prima silabă a frazei tale să nu se
+  // piardă; verificat prin teste + proba pe dispozitiv la owner.
+  const PREROLL_MS = 500
+  const preRoll: Float32Array[] = []
+  let preRollMs = 0
+  const durataMs = (b: Float32Array): number => (b.length / 16000) * 1000
+  // O SINGURĂ cale de trimitere (Opus dacă e activ, altfel PCM) — folosită și de
+  // cadrul curent, și de pre-roll, ca să nu se dubleze logica.
+  const trimiteCadru = (buf: Float32Array): void => {
+    if (opusTx && opusClient) {
+      if (opusClient.incarcaMic(buf)) return
+      const pcm0 = float32ToPcm16([buf])
+      const octetiPcm = new Uint8Array(pcm0.buffer, pcm0.byteOffset, pcm0.byteLength)
+      const cadru = new Uint8Array(octetiPcm.length + 1)
+      cadru[0] = 0
+      cadru.set(octetiPcm, 1)
+      try { ws.send(cadru.buffer) } catch { /* close-ul curăță */ }
+      octeti += octetiPcm.length
+      return
+    }
+    const pcm = float32ToPcm16([buf])
+    ws.send(pcm.buffer)
+    octeti += pcm.byteLength
+  }
   const laCadru = (brut: Float32Array): void => {
     if (inchis || ws.readyState !== WebSocket.OPEN) return
     let ds = downsample(brut, ctxIn!.sampleRate)
@@ -705,9 +831,14 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       for (let i = 0; i < ds.length; i++) { const v = ds[i] * g; amp[i] = v > 1 ? 1 : v < -1 ? -1 : v }
       ds = amp
     }
-    // Tăcere cât Kelion e audibil. Array NOU, nu mutăm bufferul microfonului —
-    // downsample îl întoarce ca ATARE când rata e deja 16 kHz (ar corupe captura).
-    const poarta = kelionAudibil()
+    // Tăcere cât Kelion e audibil — DOAR pe drumul FĂRĂ anulare de ecou
+    // (Bluetooth/nesigur): acolo half-duplexul e singura plasă contra „verzei".
+    // Cu procesarea VIE (desktop, difuzorul telefonului fără BT — 22 aug),
+    // browserul scoate vocea lui Kelion din microfon la sursă → microfonul NU
+    // mai tace deloc: auzi tot, oricând, inclusiv peste vocea lui (ordinul
+    // „0 greșeli de auz", punctul 1). Array NOU, nu mutăm bufferul
+    // microfonului — downsample îl întoarce ca ATARE la 16 kHz (ar corupe captura).
+    const poarta = !procesareActiva && kelionAudibil()
     const la16k = poarta ? new Float32Array(ds.length) : ds
     // BARGRAF DE INTRARE (owner, 16 aug): măsurăm nivelul REAL al microfonului pe
     // ACEST cadru — exact semnalul care (dacă poarta nu-l taie) pleacă la model —
@@ -724,29 +855,79 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         opts.onNivelIntrare({ nivel: rms, pic, poarta, clip: pic >= 0.98 })
       }
     }
-    // OPUS: cât e activ, microfonul intră în encoder (care trimite singur
-    // [1][opus] prin callback). Dacă encode-ul pică pe un cadru, trimitem PCM
-    // tag-uit [0][pcm] — serverul, în modul Opus, citește mereu octetul-codec.
-    if (opusTx && opusClient) {
-      if (opusClient.incarcaMic(la16k)) return
-      const pcm0 = float32ToPcm16([la16k])
-      const octetiPcm = new Uint8Array(pcm0.buffer, pcm0.byteOffset, pcm0.byteLength)
-      const cadru = new Uint8Array(octetiPcm.length + 1)
-      cadru[0] = 0
-      cadru.set(octetiPcm, 1)
-      try { ws.send(cadru.buffer) } catch { /* close-ul curăță */ }
-      octeti += octetiPcm.length
-      return
+    // BARGE-IN PRE-ROLL (registrul frontend, lot C): cât Kelion e audibil,
+    // cadrele trimise sunt ZERO (half-duplex) — dar exact vorbele care ÎL
+    // întrerup se rostesc în fereastra asta și se PIERDEAU: modelul auzea fraza
+    // de la jumătate. Reținem cadrele REALE în același inel mărginit (~250 ms);
+    // la prima deschidere după întrerupere, inelul pleacă întâi — primul cuvânt
+    // al barge-in-ului ajunge întreg. (AEC-ul browserului ține ecoul difuzorului
+    // mic, iar inelul e scurt tocmai ca să nu care ecou vechi.)
+    if (poarta) {
+      preRoll.push(ds)
+      preRollMs += durataMs(ds)
+      while (preRollMs > PREROLL_MS && preRoll.length > 1) {
+        preRollMs -= durataMs(preRoll.shift() as Float32Array)
+      }
+    } else if (eraPoarta && !vadPornit) {
+      // Poarta tocmai s-a ridicat pe calea FĂRĂ VAD (kelion_vad='0'): golim
+      // inelul aici (cu VAD, golirea se face la închis→deschis, mai jos) —
+      // DAR doar dacă inelul chiar pare să conțină VOCE. Pe drumul FĂRĂ
+      // procesare (mobil cu Bluetooth/nesigur — echoCancellation: procesare,
+      // 22 aug) și fără gardul ăsta coada de ecou a
+      // lui Kelion din difuzor ar pleca la model la FIECARE sfârșit de tură
+      // (agentul lotului C). Vocea care întrerupe e tare (peste difuzor);
+      // ecoul rezidual/tăcerea rămân sub prag și inelul se aruncă.
+      // hardcod-permis: prag tehnic client (RMS) al inelului de barge-in, nu valoare afișată/tarifată
+      const PRAG_RMS_PREROLL = 0.02
+      const areVoce = preRoll.some((b) => rmsDin(b) >= PRAG_RMS_PREROLL)
+      if (areVoce) for (const b of preRoll) trimiteCadru(b)
+      preRoll.length = 0
+      preRollMs = 0
     }
-    const pcm = float32ToPcm16([la16k])
-    ws.send(pcm.buffer)
-    octeti += pcm.byteLength
+    eraPoarta = poarta
+    // POARTA DE VOCE: doar în faza de ASCULTARE (Kelion nu vorbește). Măsurăm cadrul
+    // REAL (ds) și lăsăm VAD-ul să decidă. Pe tăcere/zgomot NU trimitem nimic (0 octeți
+    // → 0 cost). La nesiguranță poarta stă deschisă (nu tăiem vorba). Cât Kelion
+    // vorbește (poarta==true), trimitem cadrele-zero ca înainte (half-duplex/AEC neatins).
+    if (vadPornit && !poarta) {
+      const rez = pasVad(stVad, { rms: rmsDin(ds), zcr: zcrDin(ds), tMs: performance.now() }, PARAM_VAD_IMPLICIT)
+      stVad = rez.st
+      if (rez.deschis && !eraDeschis) {
+        // închis→deschis: golim pre-roll-ul întâi, ca primul cuvânt să fie
+        // întreg — cu ACELAȘI gard RMS ca pe calea fără VAD (F10 al marii
+        // verificări): pe mobil AEC-ul e oprit, iar fără gard coada de ecou
+        // a lui Kelion reținută cât era audibil pleca la model la fiecare
+        // deschidere VAD.
+        // hardcod-permis: același prag tehnic client (RMS) ca la calea fără VAD
+        const PRAG_RMS_PREROLL_VAD = 0.02
+        if (preRoll.some((b) => rmsDin(b) >= PRAG_RMS_PREROLL_VAD)) {
+          for (const b of preRoll) trimiteCadru(b)
+        }
+        preRoll.length = 0
+        preRollMs = 0
+      }
+      eraDeschis = rez.deschis
+      if (!rez.deschis) {
+        // reținem pentru pre-roll (mărginit la ~250 ms), apoi ieșim FĂRĂ să trimitem.
+        preRoll.push(la16k)
+        preRollMs += durataMs(la16k)
+        while (preRollMs > PREROLL_MS && preRoll.length > 1) {
+          preRollMs -= durataMs(preRoll.shift() as Float32Array)
+        }
+        return
+      }
+    }
+    trimiteCadru(la16k)
   }
   cules = await pornesteCulesPcm(ctxIn, sursa, laCadru)
   if (!cules) {
     console.warn('[vocalLive] AudioWorklet indisponibil — cad pe ScriptProcessor (deprecat, dar merge)')
     proc = ctxIn.createScriptProcessor(4096, 1, 1)
-    proc.onaudioprocess = (ev: AudioProcessingEvent): void => laCadru(ev.inputBuffer.getChannelData(0))
+    // .slice() la SURSĂ (agentul lotului C): browserul REFOLOSEȘTE bufferul
+    // canalului între evenimente, iar downsample îl întoarce CA ATARE la 16 kHz —
+    // fără copie, cadrele reținute (pre-roll, inelul de barge-in) se suprascriau
+    // până la trimitere (audio corupt). Un singur punct repară ambele căi.
+    proc.onaudioprocess = (ev: AudioProcessingEvent): void => laCadru(ev.inputBuffer.getChannelData(0).slice())
     sursa.connect(proc)
     proc.connect(ctxIn.destination) // necesar ca onaudioprocess să ruleze în unele browsere
   }
@@ -804,6 +985,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   console.info(`[vocalLive] sesiune deschisă — microfon ${RATA_INTRARE} Hz → server, redare ${RATA_IESIRE} Hz`)
   return {
     inchide,
+    taieRedarea,
+    intrerupeRedarea: () => {
+      taieRedarea()
+      if (inchis || ws.readyState !== WebSocket.OPEN) return
+      try {
+        ws.send(JSON.stringify({ type: 'intrerupe' }))
+      } catch {
+        /* socket picat — close-ul curăță */
+      }
+    },
     octetiTrimisi: () => octeti,
     setMuted: (m: boolean) => {
       // Track-ul rămâne viu (sesiunea nu se rupe) — doar nu mai produce cadre.
@@ -814,6 +1005,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     },
     setRedareExterna: (activ: boolean) => {
       redareExterna = activ
+    },
+    trimiteText: (text: string): boolean => {
+      const t = (text || '').trim()
+      if (!t || inchis || ws.readyState !== WebSocket.OPEN) return false
+      try {
+        ws.send(JSON.stringify({ type: 'text', text: t.slice(0, 4000) }))
+        return true
+      } catch {
+        return false
+      }
     },
   }
 }

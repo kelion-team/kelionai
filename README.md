@@ -17,9 +17,9 @@ the **3D avatar**, and **Brain v1** — streaming chat with Claude in a text tab
 first **voice** increment (browser Web Speech API: Kelion speaks replies and listens,
 with a **continuous-listening** toggle; voice and text are delivered in parallel).
 
-Next voice steps: Google Chirp 3 HD male voice, "Hey Kelion" wake word, and the
-LiveKit full-duplex transmission. The `speak()` layer is isolated so the TTS engine
-can be swapped to Chirp 3 HD without touching the chat UI.
+Voice today: Google Chirp 3 HD + the Gemini Live full-duplex session (LiveKit
+was removed from the codebase — any mention of it is history). The `speak()`
+layer stays isolated from the chat UI.
 
 ## Stack
 
@@ -29,7 +29,7 @@ can be swapped to Chirp 3 HD without touching the chat UI.
 | Backend | Node + Fastify + TypeScript |
 | Auth | Google OAuth (Sign in with Google) + signed session cookie |
 | DB | PostgreSQL (later milestones) |
-| Deploy | VPS propriu (Railway scos, 22 iul 2026), domain `kelionai.app` |
+| Deploy | VPS propriu, domain `kelionai.app` |
 
 ## Engineering rules (non-negotiable)
 

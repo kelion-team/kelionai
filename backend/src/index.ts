@@ -53,11 +53,11 @@ import { tranzactiiRoutes } from './routes/tranzactii.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
-import { constructorViuRoutes } from './routes/constructorViu.js'
-import { constructorStareRoutes } from './routes/constructorStare.js'
 import { jobsRoutes } from './routes/jobs.js'
+import { offlineRoutes } from './routes/offline.js'
 import { deployRoutes } from './routes/deploy.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive, loadKv, saveKv } from './db.js'
+import { esteBazaIndisponibila } from './dbConexiune.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
@@ -122,9 +122,18 @@ process.on('uncaughtException', (err: Error) => {
 // browser. NU schimbă răspunsul spre client: notează, apoi răspunde ca Fastify
 // implicit (reply.send(err)). 4xx-urile (input greșit, rate-limit) NU se notează
 // — nu sunt eșecuri ale aplicației.
+// BAZA CĂZUTĂ NU E DEFECT DE COD: dbConexiune.ts marchează indisponibilitatea
+// Postgres-ului ca 503 cu ținta reală în mesaj. Se notează la `warn` și NU intră
+// în simptome — altfel autovindecarea deschidea ordine de REPARAT COD pentru un
+// serviciu oprit (măsurat: „route error err: connect ECONNREFUSED 127.0.0.1:5432").
 app.setErrorHandler((err, req, reply) => {
   const e = err as { statusCode?: number; message?: string }
   const cod = e.statusCode ?? 500
+  if (esteBazaIndisponibila(err)) {
+    app.log.warn({ err, url: req.url }, 'baza de date indisponibilă (infrastructură, nu cod)')
+    reply.send(err)
+    return
+  }
   if (cod >= 500) {
     const ruta = (req.url || '').split('?')[0]
     void recordSimptomLive('ruta-crapata', `${req.method} ${ruta}: ${e.message ?? 'eroare'}`, {
@@ -301,8 +310,8 @@ const BOOT_AT = new Date().toISOString()
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 // AUTO-VERSIUNE (owner, 13 aug: „se incrementează singură la fiecare publicare,
 // +0.1"). Se calculează o dată la boot, din KV (vezi mai jos, după initDb) —
-// V1.0, V1.1, V1.2 … Până când KV răspunde (sau fără DB), cade pe „1.0".
-let VERSIUNE_AUTO = '1.0'
+// V0.0, V0.1, V0.2 … Până când KV răspunde (sau fără DB), cade pe „1.0".
+let VERSIUNE_AUTO = '0.0'
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')
   // `adminCfg` (9 aug, „flux admin 403 — trebuie 200"): spune dacă emailul de
@@ -334,6 +343,7 @@ await app.register(ingestRoutes)
 await app.register(browserRoutes)
 await app.register(opsRoutes)
 await app.register(constructorRoutes)
+await app.register(offlineRoutes)
 await app.register(authLocalRoutes)
 await app.register(contactRoutes)
 await app.register(voiceprintRoutes)
@@ -342,8 +352,6 @@ await app.register(embedCheckRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 await app.register(pingRoutes)
-await app.register(constructorViuRoutes)
-await app.register(constructorStareRoutes)
 await app.register(jobsRoutes)
 // Căile COMPLETE stau în deploy.ts (convenția întregului backend, pe care o
 // citește și verifica-butoane): componenta DeployProgressBar chema
@@ -376,7 +384,7 @@ try {
   await incarcaModelUnic().catch(() => {})
   // AUTO-VERSIUNE (owner, 13 aug): contor persistent care urcă cu 1 la FIECARE
   // publicare nouă (sha de deploy nou), NU la fiecare restart pe același sha. Bază
-  // 1.0, +0.1/publicare → V1.0, V1.1 … (1.9→2.0). Fără DB rămâne „1.0" (regula 1:
+  // 0.0, +0.1/publicare → V0.0, V0.1 … (1.9→2.0). Fără DB rămâne „1.0" (regula 1:
   // nu inventăm o urcare pe o citire eșuată). Best-effort — nu blochează pornirea.
   try {
     const ultimulSha = (await loadKv('deploy_last_sha')) ?? ''
@@ -386,7 +394,7 @@ try {
       await saveKv('deploy_count', String(n))
       await saveKv('deploy_last_sha', DEPLOY_V)
     }
-    VERSIUNE_AUTO = ((10 + n) / 10).toFixed(1)
+    VERSIUNE_AUTO = (n / 10).toFixed(1)
   } catch {
     /* KV indisponibil — rămâne „1.0", se corectează la următoarea publicare cu DB viu */
   }
@@ -515,6 +523,27 @@ try {
   // from RAMAS-DE-FACUT.md and sends it to the builder. Without waiting for
   // anyone.
   startAutonomie()
+  // ── BĂTAIA DE INIMĂ A DISPECERULUI DEVIN (owner, 22 aug: „devin nu merge…
+  // orice in chat nu merge" — MĂSURAT pe live: diagnosticul „tick-ul dispecerului
+  // nu se învârte", un ordin aștepta 87 min) ──────────────────────────────────
+  // Cauza REALĂ: dispecerul Devin trăia DOAR în bucla de autonomie, care pe
+  // „nimic de făcut" pune pauze de până la ~60 min între treceri — deci un ordin
+  // din coadă putea zăcea o oră. Aici e un puls DEDICAT, la 2 min, care duce
+  // ordinele Devin la timp, independent de cadența lenei buclei mari. Respectă
+  // pauza clasică de operațiuni (isOpsPaused) — cu ea pornită, dispecerul stă
+  // intenționat, exact cum spune diagnosticul; ordinele EXPLICITE din chat/panou
+  // pornesc oricum imediat (kick-ul lor propriu). Inert fără cheia Devin.
+  setTimeout(() => {
+    const pulsDevin = async (): Promise<void> => {
+      if (!config.devinKey) return
+      const { isOpsPaused } = await import('./services/runbooks.js')
+      if (await isOpsPaused().catch(() => false)) return
+      const { tickDispecerDevin } = await import('./services/devinConstructor.js')
+      await tickDispecerDevin().catch((e) => app.log.warn(`[devin] puls: ${String(e).slice(0, 160)}`))
+    }
+    void pulsDevin()
+    setInterval(() => { void pulsDevin() }, 2 * 60_000)
+  }, 45_000)
   // Veghea de auto-upgrade a modelului unic (validat, doar Pro mai nou) — decizia
   // permanentă a ownerului „mereu cel mai bun, preluat automat, peste tot".
   startAutoUpgradeModel()

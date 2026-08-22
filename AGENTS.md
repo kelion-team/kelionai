@@ -45,7 +45,8 @@ node scripts/verifica-sintaxa.mjs                    # din rădăcină; pică pe
 ## Structura, pe scurt (harta completă: AI-HANDOFF.md §2)
 - `backend/` — Node + Fastify + TS: rute în `src/routes/`, servicii în `src/services/`
 - `frontend/` — React + Vite + TS: `src/pages/Stage.tsx`, `src/components/ChatPanel.tsx`
-- `bridge/` — lucrătorul de pe VPS + scripturile de publicare/reparare
+- `deploy/` — scripturile de publicare/reparare de pe VPS (`bridge/` NU mai
+  există — șters 23 iul; referințele la el sunt istorie, nu arhitectură)
 - `Dockerfile` — imaginea aplicației (gazda: VPS propriu)
 
 ## Free-first + auto-escalate (OBLIGATORIU)
@@ -92,8 +93,12 @@ node scripts/verifica-sintaxa.mjs                    # din rădăcină; pică pe
 ## Repo / deploy
 - Lucru principal: monorepo `C:\Users\adria\Kelionai`; pe VPS calea tipică
   `/root/kelion` când e accesibil.
-- Deploy: Railway service web → `https://kelionai.app` (`railway up --detach`
-  după build).
+- Deploy: pe **VPS propriu** (`164.68.120.87`), container `kelionai-app` în spatele
+  Caddy → `https://kelionai.app`. Publicarea e AUTOMATĂ: merge-ul în `master` e
+  preluat de cronul de pe VPS (`deploy/auto-publicare.sh`), care rulează
+  `deploy/deploy.sh` (build Docker → schimbă containerul) și verifică anti-fantomă
+  că `/api/version` == `master`. **Gazda e VPS-ul propriu** — nu mai există deploy
+  pe vreo gazdă PaaS externă.
 - Nu reporni servicii bridge masked fără ordin explicit.
 - Nu cere chei/parole în chat; folosește env/secret manager.
 

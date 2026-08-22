@@ -83,8 +83,12 @@ describe('auto-preview-ul de sfârșit de tură — EXACT un vizual, sau nimic',
     expect(f).toEqual({ monitor: { url: 'https://example.com/raport', title: '' } })
   })
 
-  it('o pagină Google care refuză iframe-ul NU ajunge pe monitor (cadru mort)', () => {
-    expect(autoPreviewFrame('Iată: https://www.google.com/search?q=test — rezultatele.')).toBeNull()
+  it('o pagină Google care refuză iframe-ul NU devine cadru mort (rămâne document, nu iframe)', () => {
+    const f = autoPreviewFrame('Iată: https://www.google.com/search?q=test — rezultatele.')
+    // NU se deschide un iframe mort spre Google (X-Frame-Options) — dar răspunsul
+    // tot ajunge pe monitor, ca DOCUMENT lizibil (regula „orice răspuns pe monitor").
+    expect(f?.monitor).toBeUndefined()
+    expect(f?.doc?.text).toContain('google.com/search')
   })
 
   it('coordonate din proză devin harta NOASTRĂ same-origin (nu un iframe străin)', () => {
@@ -116,17 +120,28 @@ describe('auto-preview-ul de sfârșit de tură — EXACT un vizual, sau nimic',
     expect(f?.card).toBeUndefined()
   })
 
-  it('proza simplă NU aprinde monitorul', () => {
+  // ORICE RĂSPUNS PE MONITOR (owner, 19 aug: „obligatoriu absolut orice mesaj se
+  // pune pe monitor… Kelion nu înțelege că orice răspuns trebuie afișat pe
+  // monitor"). Contractul s-a SCHIMBAT față de 2 aug: proza simplă NU mai lasă
+  // monitorul gol — acum aprinde un document lizibil cu răspunsul, ca afișarea să
+  // nu mai depindă de model să cheme show_document.
+  it('proza simplă aprinde monitorul ca document (orice răspuns se vede)', () => {
     const proza = [
       'Afară sunt 24 de grade, cer senin. E o zi frumoasă.',
       'Încearcă din nou în câteva secunde.',
       'Am preluat cerința (ordin #12).',
       'Rezultatul e 804.',
-      'Coordonatele rotunjite 44, 26 nu sunt o hartă.',
     ]
     for (const p of proza) {
-      expect(autoPreviewFrame(p)).toBeNull()
+      const f = autoPreviewFrame(p)
+      expect(f?.doc?.text).toBe(p)
+      expect((f?.doc?.title ?? '').length).toBeGreaterThan(0)
     }
+  })
+
+  it('răspuns gol / doar spații → NU aprinde nimic (nu inventează un ecran)', () => {
+    expect(autoPreviewFrame('')).toBeNull()
+    expect(autoPreviewFrame('   \n  ')).toBeNull()
   })
 })
 

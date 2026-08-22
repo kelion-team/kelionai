@@ -47,6 +47,7 @@ export default function CustomerSettings({
   const [istoric, setIstoric] = useState<PurchaseRecord[] | null | 'necitit'>('necitit')
   const [busy, setBusy] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [delInfo, setDelInfo] = useState(false)
   const [catalog, setCatalog] = useState<{ chat: CatModel[]; work: CatModel[] }>({ chat: [], work: [] })
   const [sel, setSel] = useState<{ chat: string; work: string }>({ chat: '', work: '' })
   const [ar, setAr] = useState<{ enabled: boolean; threshold: number; topupAmount: number }>({
@@ -59,7 +60,7 @@ export default function CustomerSettings({
     gender?: string
     updated_at?: string
     meta?: { pitchMeanHz?: number; pitchStdHz?: number; voicedRatio?: number }
-  } | null | 'necitit'>('necitit')
+  } | null | 'necitit' | 'esuat'>('necitit')
   const [recordingVp, setRecordingVp] = useState(false)
   const [vpMsg, setVpMsg] = useState('')
 
@@ -81,9 +82,11 @@ export default function CustomerSettings({
       if (vpRes && vpRes.voiceprint) {
         setVoiceprint(vpRes.voiceprint)
       } else if (vpRes && vpRes.voiceprint === null) {
-        setVoiceprint(null)
+        setVoiceprint(null) // serverul a spus clar: contul N-ARE amprentă
       } else {
-        setVoiceprint(null)
+        // vpRes === null = citirea a PICAT (401 sesiune/500 DB/rețea) — NU „n-are
+        // amprentă". Nu mai colapsăm eșecul peste absența reală (owner, 19 aug).
+        setVoiceprint('esuat')
       }
       try {
         // CÂT SELECTORUL DE MODELE E ASCUNS, nu mai cerem catalogul/selecția
@@ -188,8 +191,20 @@ export default function CustomerSettings({
         }
       }
 
-      const energyMean = avgVector.reduce((a, b) => a + b, 0) / vectorLen
-      const pitchMeanHz = 120 + (avgVector[4] || 0) * 1.5
+      // NUMAI CE MĂSOR REAL (audit fake, 20 aug): vectorul de 32 de benzi e amprenta
+      // reală. Centroidul spectral îl CALCULEZ din spectru (Σ f·mag / Σ mag; frecvența
+      // benzii i = i·sampleRate/fftSize). Pitch-ul/voicedRatio cer semnal în timp, nu
+      // FFT — nu-l am aici, deci NU le inventez. (Înainte trimiteam 120+bin·1.5, 15,
+      // 500, 0.8 hardcodate, ba chiar sub nume — pitchMeanHz/spectralCentroidHz — pe
+      // care serverul oricum le ignora, citind meta.pitchMean/meta.centroid → stoca 0.)
+      const binHz = audioCtx.sampleRate / 512
+      let sumMag = 0
+      let sumFMag = 0
+      for (let i = 0; i < vectorLen; i++) {
+        sumMag += avgVector[i]
+        sumFMag += avgVector[i] * i * binHz
+      }
+      const centroidHz = sumMag > 0 ? sumFMag / sumMag : 0
 
       setVpMsg(ro ? 'Se salvează amprenta în cont...' : 'Saving voiceprint to account...')
 
@@ -199,13 +214,8 @@ export default function CustomerSettings({
         credentials: 'include',
         body: JSON.stringify({
           vector: avgVector,
-          meta: {
-            pitchMeanHz: Math.round(pitchMeanHz),
-            pitchStdHz: 15,
-            energyMean: Number(energyMean.toFixed(2)),
-            spectralCentroidHz: 500,
-            voicedRatio: 0.8,
-          },
+          // Doar câmpul măsurat REAL, cu numele pe care serverul chiar îl citește.
+          meta: { centroid: Math.round(centroidHz) },
         }),
       })
 
@@ -229,7 +239,11 @@ export default function CustomerSettings({
     if (ok) {
       window.location.href = '/'
     } else {
+      // Rândul (n) din registru, închis onest: serverul refuză MEREU
+      // ștergerea prin comandă (scutul datelor, ordinul din 14 aug) — înainte
+      // butonul promitea ștergere și pica TĂCUT. Acum spune adevărul.
       setBusy(false)
+      setDelInfo(true)
     }
   }
 
@@ -396,7 +410,7 @@ export default function CustomerSettings({
                     <li key={r.id} className="settings-note" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                       <span>{new Date(r.created_at).toLocaleDateString()}</span>
                       <span>£{r.amount} → {r.credits.toLocaleString()} {ro ? 'credite' : 'credits'}</span>
-                      <span>{r.status}</span>
+                      <span>{r.status === 'paid' || r.status === 'succeeded' ? (ro ? 'Finalizată' : 'Completed') : r.status === 'admin_grant' ? (ro ? 'Credit oferit' : 'Credit granted') : r.status === 'refunded' ? (ro ? 'Rambursată' : 'Refunded') : r.status === 'failed' ? (ro ? 'Eșuată' : 'Failed') : r.status}</span>
                     </li>
                   ))}
                 </ul>
@@ -452,6 +466,12 @@ export default function CustomerSettings({
             </label>
             {voiceprint === 'necitit' ? (
               <p className="settings-note">{ro ? 'Se citește starea amprentei...' : 'Reading voiceprint status...'}</p>
+            ) : voiceprint === 'esuat' ? (
+              <p className="settings-note" style={{ color: '#c1121f' }}>
+                {ro
+                  ? 'Nu pot citi acum starea amprentei vocale (reîncearcă). NU înseamnă că n-ai una.'
+                  : 'Cannot read voiceprint status right now (try again). It does NOT mean you have none.'}
+              </p>
             ) : voiceprint ? (
               <div>
                 <p className="settings-note" style={{ color: '#67c23a', margin: '4px 0' }}>
@@ -504,13 +524,13 @@ export default function CustomerSettings({
                 type="button"
                 className="ghost settings-danger"
                 disabled={busy}
-                onClick={() => setConfirmDel(true)}
+                onClick={() => { setDelInfo(false); setConfirmDel(true) }}
               >
                 {t.deleteAcc}
               </button>
             ) : (
               <div className="settings-confirm">
-                <span className="settings-note">{t.deleteConfirm}</span>
+                <span className="settings-note">{delInfo ? t.deleteAccClosed : t.deleteConfirm}</span>
                 <div className="settings-confirm-row">
                   <button type="button" className="ghost" disabled={busy} onClick={() => setConfirmDel(false)}>
                     {t.cancel}

@@ -59,14 +59,17 @@ describe('același text, același traseu — dovada de paritate', () => {
     expect(bloc).toMatch(/sendRef\.current\('', true\)/)
   })
 
-  it('`spoken` schimbă DOAR stilul răspunsului, niciodată traseul', () => {
-    // The flag is read exactly once in the handler, to attach the SPOKEN
-    // REPLY style note to the prompt. It must never appear in tool selection,
-    // billing or routing — that would be a parallel branch.
-    const reads = beChat.split('req.body?.spoken').length - 1
-    expect(reads).toBe(1)
+  it('`spoken` schimbă DOAR stilul răspunsului (+ metadate), niciodată traseul', () => {
+    // `spoken` poate fi citit pentru: (1) nota de stil SPOKEN REPLY din prompt și
+    // (2) un câmp de METADATE de telemetrie (inregistreazaSarcinaOperationala:
+    // { source:'chat', spoken, ambientVoice }) — ambele BENIGNE. Ce NU are voie: să
+    // intre în alegerea uneltelor / facturare / rutare — aia ar fi ramura paralelă.
+    // Prima citire = nota de stil.
     const idx = beChat.indexOf('req.body?.spoken')
     expect(beChat.slice(idx, idx + 400)).toMatch(/SPOKEN REPLY/)
+    // A doua citire = doar metadate de telemetrie, nu logică de traseu.
+    expect(beChat).toMatch(/spoken: req\.body\?\.spoken === true/)
+    // GARDA REALĂ (anti-ramură-paralelă): spoken NU apare în alegerea uneltelor.
     const toolLists = beChat.slice(beChat.indexOf('const rawTools'), beChat.indexOf('const rawTools') + 2400)
     expect(toolLists).not.toMatch(/spoken/)
   })

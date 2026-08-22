@@ -80,6 +80,11 @@ export async function runDynamicTool(name: string, args: Record<string, unknown>
     }
     const r = await fetch(url, init)
     const body = (await r.text().catch(() => '')).slice(0, 4000)
+    // HTTP-ul eșuat e EROARE, nu succes tăcut (C5 al marii verificări):
+    // clasificatorul dovezilor citește doar câmpuri string, deci {status:500}
+    // fără `error` trecea drept „succeeded" — un apel dinamic picat satisfăcea
+    // poarta faptelor și scria succes fals în jurnalul operațional.
+    if (r.status >= 400) return JSON.stringify({ error: `http_${r.status}`, status: r.status, body })
     return JSON.stringify({ status: r.status, body })
   } catch (e) {
     return JSON.stringify({ error: String(e).slice(0, 200) })

@@ -9,12 +9,13 @@
 //      sha-ul curent (checkul `porti-vps` scris de poarta de pe VPS) + starea de
 //      îmbinare (mergeable_state). Nimic declarat — totul măsurat de la GitHub.
 //   2. PR verde și îmbinabil:
-//        • ownerul e ONLINE (prezența WS, apel.ts) → îl ANUNȚĂ (panoul de
-//          notificări), o singură dată per PR+sha — decizia de merge e a lui.
-//        • ownerul NU e online → Kelion e admin 2: îmbină EL, prin repoMergePR
-//          (care își face singur checkpoint de recuperare și respectă pauza de
-//          operațiuni). Cel mult UN merge per ciclu — master-ul se mișcă serial,
-//          nu în rafală (regula „producția = master, 100% sincron").
+//        • ramură PROPRIE (kelion/panou/claude) → Kelion (admin 2) îmbină EL,
+//          online SAU offline — AUTO-APROBARE (owner, 19 aug: „autoaprobare
+//          merged, da DACĂ e fără err; dacă are, se rezolvă întâi"), prin
+//          repoMergePR (checkpoint de recuperare + respectă pauza de ops). Cel
+//          mult UN merge per ciclu — master serial, nu în rafală. GARDA e poarta:
+//          nimic roșu / neverificat nu ajunge la merge (regula #1).
+//        • ramură STRĂINĂ verde → doar ANUNȚ (nu se îmbină orb); decizia e a ownerului.
 //   3. PR verde dar RĂMAS ÎN URMĂ față de master („behind") → „îl trage de pe
 //      master": update-branch; porțile se re-rulează pe sha-ul nou și decizia
 //      se ia la un ciclu viitor, pe măsurătoarea NOUĂ — niciodată pe cea veche.
@@ -62,6 +63,34 @@ async function starePorti(sha: string): Promise<string> {
   return p?.state ?? 'lipsa'
 }
 
+// ── DECIZIA PURĂ per-PR a santinelei (probată pe fiecare combinație) ──────────
+// AUTO-APROBARE (owner, 19 aug: „autoaprobare merged, da DACĂ e fără err; dacă
+// are erori, se rezolvă întâi și după, da"). Autonomia e permanentă (LEGEA din 16
+// aug), deci Kelion (admin 2) îmbină propriile ramuri pe VERDE, online SAU offline
+// — nu mai așteaptă ownerul doar fiindcă e logat. GARDA cerută de owner e chiar
+// poarta: NIMIC roșu / neverificat nu se atinge (regula #1). Ordinea contează:
+//   1. porți ne-verzi → skip (nu se atinge; erorile se rezolvă întâi, altundeva);
+//   2. rămas în urmă → trage (update-branch; decizia la ciclul următor, pe sha nou);
+//   3. ne-îmbinabil → skip;
+//   4. ramură STRĂINĂ (nu kelion/panou/claude) verde → doar anunț (niciodată orb);
+//   5. deja s-a îmbinat unul în ciclu → skip (master serial, 1/ciclu);
+//   6. altfel → îmbină (ramură proprie, verde, îmbinabilă).
+export type ActiuneSantinela = 'skip' | 'trage' | 'anunta' | 'imbina'
+export function decideActiuneSantinela(i: {
+  portiSucces: boolean
+  mergeable: boolean
+  inUrma: boolean
+  esteRamuraProprie: boolean
+  ajaImbinatUnul: boolean
+}): ActiuneSantinela {
+  if (!i.portiSucces) return 'skip'
+  if (i.inUrma) return 'trage'
+  if (!i.mergeable) return 'skip'
+  if (!i.esteRamuraProprie) return 'anunta'
+  if (i.ajaImbinatUnul) return 'skip'
+  return 'imbina'
+}
+
 export async function ruleazaSantinelaPR(): Promise<RaportSantinela> {
   const gol: RaportSantinela = { ok: false, verificate: 0, anuntate: [], imbinate: [], trase: [] }
   if (!ghToken()) return { ...gol, motiv: 'fara_token' }
@@ -78,7 +107,8 @@ export async function ruleazaSantinelaPR(): Promise<RaportSantinela> {
     const sha = pr.head?.sha ?? ''
     if (!sha) continue
     const porti = await starePorti(sha)
-    if (porti !== 'success') continue // roșu, pe drum sau „nu pot verifica" → nu se atinge
+    const portiSucces = porti === 'success'
+    if (!portiSucces) continue // roșu, pe drum sau „nu pot verifica" → nu se atinge (fără fetch în plus)
 
     // Starea de îmbinare vine doar din detaliul PR-ului (lista n-o are).
     const det = await gh(`/pulls/${pr.number}`).catch(() => null)
@@ -101,7 +131,17 @@ export async function ruleazaSantinelaPR(): Promise<RaportSantinela> {
       const cj = cmp?.ok ? ((await cmp.json()) as { behind_by?: number }) : null
       inUrma = (cj?.behind_by ?? 0) > 0
     }
-    if (inUrma) {
+
+    const esteRamuraProprie = PREFIXE_PROPRII.some((p) => pr.head.ref.startsWith(p))
+    const actiune = decideActiuneSantinela({
+      portiSucces,
+      mergeable: dj.mergeable === true,
+      inUrma,
+      esteRamuraProprie,
+      ajaImbinatUnul: aImbinatUnul,
+    })
+
+    if (actiune === 'trage') {
       const cheie = `santinela:tras:${pr.number}:${sha}`
       if (await loadKv(cheie)) continue
       const u = await gh(`/pulls/${pr.number}/update-branch`, { method: 'PUT' }).catch(() => null)
@@ -109,16 +149,16 @@ export async function ruleazaSantinelaPR(): Promise<RaportSantinela> {
       if (u?.ok) raport.trase.push(pr.number)
       continue
     }
-    if (dj.mergeable !== true) continue
 
-    if (ownerOnline) {
-      // Ownerul e aici → a lui e decizia; Kelion doar anunță, o dată per PR+sha.
+    if (actiune === 'anunta') {
+      // Ramură STRĂINĂ verde (nu a automatizării noastre): NU o îmbinăm orb — doar
+      // anunț, o dată per PR+sha; decizia rămâne a ownerului.
       const cheie = `santinela:anunt:${pr.number}:${sha}`
       if (await loadKv(cheie)) continue
       await notifyAdmin(
         'pr_gata',
         `PR #${pr.number} e verde — gata de merge`,
-        `„${pr.title}" (${pr.head.ref}) a trecut porțile pe VPS și e îmbinabil. Îl îmbini tu, sau îl las santinelei când ieși?`,
+        `„${pr.title}" (${pr.head.ref}) a trecut porțile pe VPS și e îmbinabil. E ramură din afara automatizării — o îmbini tu.`,
         { pr: pr.number, sha, url: `https://github.com/kelion-team/kelionai/pull/${pr.number}` },
       ).catch(() => 0)
       await saveKv(cheie, JSON.stringify({ la: new Date().toISOString() }))
@@ -126,25 +166,27 @@ export async function ruleazaSantinelaPR(): Promise<RaportSantinela> {
       continue
     }
 
-    // Ownerul NU e online → admin 2. Doar ramurile propriei automatizări și
-    // cel mult un merge per ciclu (master serial, nu rafală).
-    if (aImbinatUnul) continue
-    if (!PREFIXE_PROPRII.some((p) => pr.head.ref.startsWith(p))) continue
-    const rezultat = await repoMergePR(pr.number).catch(() => '')
-    let ok = false
-    try { ok = JSON.parse(rezultat)?.ok === true } catch { /* răspuns ne-JSON = eșec */ }
-    if (ok) {
-      aImbinatUnul = true
-      raport.imbinate.push(pr.number)
-      // Jurnalul faptei rămâne în panou — ownerul vede la întoarcere CE s-a
-      // îmbinat în lipsa lui, cu linkul, nu o istorie mută.
-      await notifyAdmin(
-        'pr_gata',
-        `Am îmbinat PR #${pr.number} (erai plecat)`,
-        `„${pr.title}" (${pr.head.ref}): porți verzi pe VPS, îmbinabil, checkpoint de recuperare făcut înainte. Link: https://github.com/kelion-team/kelionai/pull/${pr.number}`,
-        { pr: pr.number, sha },
-      ).catch(() => 0)
+    if (actiune === 'imbina') {
+      // AUTO-APROBARE (owner, 19 aug): ramură proprie + porți VERZI + îmbinabil →
+      // Kelion (admin 2) îmbină SINGUR, online SAU offline (autonomia e permanentă).
+      // Roșul NU ajunge aici. repoMergePR face checkpoint de recuperare + respectă
+      // pauza de ops; cel mult un merge per ciclu. Anunț DUPĂ, ca ownerul să vadă.
+      const rezultat = await repoMergePR(pr.number).catch(() => '')
+      let ok = false
+      try { ok = JSON.parse(rezultat)?.ok === true } catch { /* răspuns ne-JSON = eșec */ }
+      if (ok) {
+        aImbinatUnul = true
+        raport.imbinate.push(pr.number)
+        await notifyAdmin(
+          'pr_gata',
+          `Am îmbinat PR #${pr.number} (autonom, porți verzi)`,
+          `„${pr.title}" (${pr.head.ref}): porți verzi pe VPS, îmbinabil, checkpoint de recuperare făcut înainte.${ownerOnline ? '' : ' (erai plecat)'} Link: https://github.com/kelion-team/kelionai/pull/${pr.number}`,
+          { pr: pr.number, sha },
+        ).catch(() => 0)
+      }
+      continue
     }
+    // 'skip' → nu se atinge nimic
   }
   return raport
 }

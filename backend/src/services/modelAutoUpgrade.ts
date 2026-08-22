@@ -1,6 +1,7 @@
 import { config, modelUnicCod, setModelUnicValidat, esteModelGeneralGreu } from '../config.js'
 import { probeazaModelComplet, SARCINI } from './probaModel.js'
 import { loadKv, saveKv } from '../db.js'
+import { autonomActiv } from './autonomActiv.js'
 
 export { esteModelGeneralGreu } from '../config.js'
 
@@ -67,8 +68,26 @@ async function listeazaModeleGrele(): Promise<string[]> {
   }
 }
 
+/** KV: când a rulat ULTIMA DATĂ bateria scumpă — ca restarturile să NU o mai
+ *  declanșeze iar și iar (owner, 22 aug, MĂSURAT: „[COTĂ GEMINI ATINSĂ] limita
+ *  pe minut" — bateria (~28 cereri în rafală ×2 modele) sărea la fiecare din
+ *  cele ~10 reporniri de deploy dintr-o zi și satura cota pe minut, iar cererea
+ *  reală a ownerului pica). „nu e de la bani" — e RATE-ul, deci îl tăiem la
+ *  sursă: cel mult o dată la ~20h, indiferent de câte reporniri. */
+const KV_ULTIMA_PROBA = 'model_upgrade_ultima_proba'
+const RARITATE_MS = 20 * 60 * 60 * 1000 // cel mult o dată la ~20h
+
 /** O trecere: dacă există un Pro STRICT mai nou ȘI trece proba reală → comută. */
 export async function ruleazaAutoUpgradeModel(): Promise<void> {
+  // RESPECTĂ PAUZA (owner, 22 aug): dacă autonomia e oprită, NU ardem Gemini în
+  // fundal — comutatorul lui de autonomie oprește ACUM și bateria de upgrade,
+  // ca restul buclelor. Fail-safe: la citire picată, NU probăm (nu cheltuim).
+  if (!(await autonomActiv().catch(() => false))) return
+  // THROTTLE DUR pe timp real, nu pe pornire: restarturile nu mai declanșează
+  // bateria. Prima verificare de disponibilitate a modelelor (ieftină) trece;
+  // bateria SCUMPĂ (probeazaModelComplet) e păzită mai jos de același timp.
+  const ultima = Number(await loadKv(KV_ULTIMA_PROBA).catch(() => null)) || 0
+  if (Date.now() - ultima < RARITATE_MS) return
   const activ = modelUnicCod()
   const vActiv = versiune(activ)
   if (!vActiv) return
@@ -79,6 +98,10 @@ export async function ruleazaAutoUpgradeModel(): Promise<void> {
     if (v && maiNou(v, vActiv) && (!best || maiNou(v, best.v))) best = { cod, v }
   }
   if (!best) return // nimic mai nou — rămâne cel curent, tăcut
+
+  // Stampăm ÎNAINTE de bateria scumpă: din clipa asta, ~20h nu se mai probează
+  // (chiar dacă app-ul repornește de zece ori) — exact reparația cotei pe minut.
+  await saveKv(KV_ULTIMA_PROBA, String(Date.now())).catch(() => {})
 
   // ── POARTA (Adrian, 7 aug): „dacă nu se respectă TOT, să nu se facă upgrade;
   // doar când apare modelul corespunzător, să treacă tot." ────────────────────

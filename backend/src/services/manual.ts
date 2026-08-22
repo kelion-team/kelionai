@@ -17,7 +17,7 @@
 import { CAPABILITIES } from './brainCapabilities.js'
 import { meniulDeTarife, lirePentru } from './tarife.js'
 
-// ── THE MANUAL'S 7 LANGUAGES ───────────────────────────────────────────────
+// ── THE MANUAL'S CLOSED LANGUAGE LIST (8 codes) ────────────────────────────
 // Adrian, Jul 30: "the manual will show 7 major languages, translate
 // everything into those 7, don't spend resources beyond that."
 //
@@ -26,10 +26,10 @@ import { meniulDeTarife, lirePentru } from './tarife.js'
 // the selector would start them all. Any code outside the list gets English,
 // without calling the translator.
 //
-// The list: the six international circulation languages + ROMANIAN. The first
-// version I put up (the UN official languages: + Chinese and Arabic, without
-// Italian and without Romanian) was an academic choice, not one fit for the
-// product — Adrian rightly asked "where is ro? Italian?".
+// The list started as the six international circulation languages + ROMANIAN
+// (Adrian rightly asked "where is ro? Italian?" over the academic UN pick);
+// KOREAN was added later, so the closed list holds 8 codes today — the RULE
+// (closed list, paid translation per entry) is what stands, not the number.
 export const MANUAL_LANGS = ['en', 'fr', 'de', 'es', 'it', 'ru', 'ro', 'ko'] as const
 
 export function isManualLang(v: string): boolean {
@@ -115,6 +115,15 @@ const SECTIONS: ManualSection[] = [
     paragraphs: [
       'Everything you can do by typing, you can also do by speaking. The two are the same assistant with the same abilities — not a full version and a cut-down one. If a request needs deeper thinking than a quick spoken reply allows, Kelion quietly hands it to its full reasoning brain and comes back with the answer.',
       'Kelion understands and replies in many languages, spoken and written. It follows the language you use — switch mid-conversation and it switches with you.',
+      // ADUS LA COD (registrul docs-vs-cod, lot D): VAD-ul e OPT-IN (implicit
+      // microfonul trimite continuu — vocalLive.ts „OPRIT IMPLICIT"), iar gura
+      // de siguranță a browserului e DOAR offline — „always spoken" era fals.
+      // FĂRĂ promisiunea „interrupt mid-sentence by voice" (verificatorul D):
+      // pe sesiunea Live vocea NU poate întrerupe cât Kelion vorbește (half-
+      // duplex + NO_INTERRUPTION) — întrerupi TASTÂND sau cu butonul.
+      // F4: fraza restrânsă la TEXT simplu — tura cu ATAȘAMENT cât Live e viu
+      // merge pe canalul clasic și rămâne vizuală (Chirp suprimat), nu vocală.
+      'Kelion listens hands-free while the voice session is on. Replies in a voice session are spoken with its one live voice, and if you type a message while the voice session is active, the answer comes back in that same voice — typing also interrupts it mid-sentence when you need to cut in. (A message with an attachment is answered on screen instead.) When you are offline, your device’s own voice reads the offline answers aloud.',
     ],
   },
   {
@@ -142,15 +151,38 @@ const SECTIONS: ManualSection[] = [
       // BARA DE EXECUȚIE (owner, 14 aug) — the manual must describe the app as
       // it IS: every execution turn shows its steps live on the monitor.
       'When you ask Kelion to actually do something, the work is not a black box: every step it takes appears live on the monitor behind it, with a dotted progress bar filling from 0 to 100%. The bar reaches 100% only when the turn has truly finished — it never claims "done" in advance.',
-      // PUSH PE TELEFON (14 aug, a treia bifă din „toate aplicațiile"): și
-      // manualul trebuie să știe că anunțurile pot ajunge pe telefon.
-      'Platform announcements can also reach your phone: turning on "🔔 Pe telefon" in the admin panel subscribes that device through standard Web Push, so alerts arrive even when the site is closed. It only ever happens after you grant the browser permission, and you can switch it off from the same button.',
+      // (Paragraful despre push-ul „🔔 Pe telefon" a fost SCOS din manualul de
+      // UTILIZATORI — verificatorul lotului D: butonul trăiește DOAR în
+      // AdminPanel, iar regula proprie a manualului (linia ~16) spune că
+      // uneltele de admin NU intră aici. Descriea un control inexistent pentru
+      // cititorul lui.)
+    ],
+  },
+  {
+    title: 'When you lose signal — the companion mode',
+    paragraphs: [
+      // „talk and type" → tastare (urechea offline nu există încă — pasul 7 din
+      // proiectul voce; răspunsurile SE rostesc cu vocea dispozitivului).
+      'When your phone loses all signal — in a car, on a plane, underground — Kelion does not go dark. It switches automatically to a smaller brain that runs entirely on your device, keeps your avatar, and stays with you: you can type to it, it speaks its answers aloud, and it remembers the conversation so far. Understanding your voice offline is not available yet — the ear needs the internet. It is honest about being offline — it will not invent web results, weather or live data it cannot reach. It is a companion in that moment, not the full assistant.',
+      'It senses what your device can sense: where you are and how fast you are moving — so it can say human things like "you are doing about 90, long drive?" — and, with the camera on, that it can see you. When you ask for something that truly needs the internet, it saves the question and tells you it will answer when the signal returns. The moment you are back online it reconnects on its own, sends the offline conversation to the server so nothing is lost, resolves the saved questions and tells you civilly: "here is the answer to what you asked while you were offline…".',
+      // ADUS LA COD (lot A + registrul lot D): descărcarea e AUTOMATĂ pe ORICE
+      // net (poarta Wi-Fi scoasă la ordin) și complet INVIZIBILĂ (StatusOffline
+      // șters) — bara, butonul și „îți spune pe față" nu mai există.
+      // FĂRĂ pretenția „runs on both" (F3, regula #1): modelul cere multă
+      // memorie GPU + shader-f16, iar pe iPhone nimeni n-a măsurat-o — se spune
+      // condiționat pe capabilitatea dispozitivului, nu ca fapt.
+      'Android vs iPhone — what differs. The on-device brain needs WebGPU and enough graphics memory for the model; on capable devices the offline model downloads automatically, on any connection, on both platforms — on devices that cannot hold it, the offline companion simply is not available. Background notifications are more limited by iOS. Everything else — typing offline, location, movement speed, and the automatic reconnect and sync — works the same on both.',
+      'Preparing the offline brain is automatic and silent. While you are online, Kelion checks on its own whether your device already holds the current offline model; if not, it downloads it quietly in the background — no bar, no button, nothing to press. Once it is downloaded it stays put: an app update is still applied normally, but it no longer erases the model, and the storage is marked persistent so the browser will not evict it either — it is downloaded only once. It needs a device with WebGPU; on devices without it, the offline companion simply is not available.',
+      'Offline is also the most contained Kelion can be. With no network it reaches no server, no Google account, no stored memory and no tools — so it cannot read your saved data, send anything, or act on your behalf. It works only from the conversation on the device and what the device’s own sensors measure, and it says so honestly. Your account, its memory and its powers stay behind the connection it cannot reach until you are back online.',
     ],
   },
   {
     title: 'Credits',
     paragraphs: [
-      'Kelion runs on prepaid credits. You top up from the credit pill in the top bar, and usage is drawn from your balance as you go. You can turn on automatic top-up so you are never cut off mid-conversation, and turn it off again at any time.',
+      // „never cut off" era mai tare decât codul (verificatorul D): bifarea doar
+      // PREGĂTEȘTE plata (linkul Revolut nu poate trage bani singur) — omul tot
+      // apasă plata, deci poate fi tăiat. Spus cum E.
+      'Kelion runs on prepaid credits. You top up from the credit pill in the top bar, and usage is drawn from your balance as you go. You can also turn on automatic top-up: when your balance runs low, Kelion prepares the payment and asks you to confirm it — the actual payment always stays in your hands.',
       // GUSTAREA GRATIS (owner, 14 aug): the taster exists — the manual says so.
       'Your first visit comes with a small welcome credit, on the house, so you can try Kelion before paying anything. It is granted once per account.',
     ],
@@ -268,6 +300,11 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   delete_note: { what: 'Deletes a note', say: '"delete the meter note"' },
   list_memories: { what: 'Tells you what it remembers about you', say: '"what do you remember about me?"' },
   cauta_istoric: { what: 'Searches your full past chat history with it', say: '"what did we talk about last week?"' },
+  apeleaza_user: { what: 'Calls another Kelion user — a live audio channel with translation between your languages', say: '"call Maria"' },
+  allow_guest_voice: { what: 'Lets someone you name talk to it by voice for a while', say: '"let my son talk to you"' },
+  approve_guest_voice: { what: 'Confirms keeping a guest\'s voice after their first words', say: '"yes, keep his voice"' },
+  forget_guest: { what: 'Forgets a guest\'s voice', say: '"forget my friend\'s voice"' },
+  dovada_faptelor: { what: 'Shows the saved record of what it actually did for you — each task with its measured outcome', say: '"show me proof you sent that email"' },
   forget_memory: { what: 'Forgets something on request', say: '"forget what I said about the car"' },
 
   // Browser
@@ -328,6 +365,51 @@ export function buildManual(): ManualDoc {
     groups,
     footer: FOOTER,
   }
+}
+
+// ── CAPITOLELE DOAR-ADMIN ALE MANUALULUI (owner, 20 aug 2026) ────────────────
+// Owner: „ce e admin se afișează tot, ce nu e admin doar ce trebuie" + „nu sunt
+// adeptul butoanelor". Un SINGUR manual: non-adminul vede cartea de utilizator;
+// adminul o vede pe aceeași PLUS capitolele de mai jos, care apar SINGURE (fără
+// buton) fiindcă ruta știe din sesiune că e admin. Aici trăiește, VIZIBIL în
+// aplicație, munca de colaborare bătută în cuie cu owner-ul (proiectul de chat
+// voce „Jarvis"). Textul întreg, canonic: `PROIECT-CHAT-VOCE.md`. E în ROMÂNĂ și
+// se adaugă DUPĂ traducere (nu trece prin traducător) — adminul = owner-ul.
+export function buildAdminChapters(): ManualSection[] {
+  return [
+    {
+      title: '🔒 Doar admin — Proiectul de chat voce „Jarvis"',
+      paragraphs: [
+        'Bătut în cuie cu owner-ul, pas cu pas (20 aug 2026). Ținta: 100% VORBIT — o prezență vocală mereu acolo, ca un Jarvis. Ce auzi e mereu voce; nu devine niciodată chat scris.',
+        'Repară din rădăcină bug-ul măsurat „vocea pornește 2 secunde și se rupe": pe o tură vorbită se băteau DOUĂ motoare de voce (Gemini Live + Chirp). Online rămâne UN singur motor — Gemini Live; Chirp iese de pe calea vocală → coliziunea dispare.',
+        'Documentul întreg, canonic: PROIECT-CHAT-VOCE.md (versionat în cod). Istoricul deciziilor: DRAFT-PROIECT-VOCE-ONLY.md.',
+      ],
+    },
+    {
+      title: '🔒 Doar admin — Legile lui Kelion',
+      paragraphs: [
+        'Adevărul mai presus de orice: contează oricât ar costa și oricât ar dura. Nici timpul, nici banii nu scuză minciuna. Încrederea se clădește cu argumente măsurate, verificabile — și se pierde într-o clipă.',
+        'Linia roșie: Kelion nu spune ceva doar ca să placă urechii și să fie prins că a mințit — mai ales „am făcut" ceva ce nu e făcut. Verificarea e invizibilă: nu-și narează procesul („stai să măsor"), ci ori dă răspunsul verificat, ori pune o întrebare firească.',
+        'Cele patru arte: negocierea, prezentarea, discuția, gândirea. Calitatea răspunsului înaintea vitezei — nu e raliu. Monitorul NU se citește niciodată cu voce: se anunță scurt „uite pe monitor" și se arată; ecranul e pentru ochi, vocea pentru conversație.',
+      ],
+    },
+    {
+      title: '🔒 Doar admin — Cum lucrează (ușor/greu + cățelul)',
+      paragraphs: [
+        'Ușor = Live răspunde singur, cu vocea lui. Greu = Live cheamă creierul puternic pe canal de TEXT (nu audio), primește rezultatul ca text și îl rostește el — un singur motor și la greu.',
+        'Perioada de gândire e triere în doi: Live culege date și le picură creierului greu, care cere înapoi ce-i mai lipsește; se oprește când nicio întrebare nu mai mișcă răspunsul (convergență). Întrebările către om trebuie decente, nu interogatoriu.',
+        'Cățelul anti-minciună (poarta faptelor) demască pretențiile fără unealtă reușită — pe chatul scris ȘI pe voce (pe voce nota e „nu pot verifica", pe ecran, niciodată citită cu glas). Faptele lasă dovadă salvată în jurnalul operațional, scoasă la cerere („asul din mânecă").',
+      ],
+    },
+    {
+      title: '🔒 Doar admin — Offline & opțiuni',
+      paragraphs: [
+        'Offline = rezervă (online rămâne Jarvis-ul real). AZI, offline: scrii de la tastatură (urechea offline nu există încă — tastatura sare deliberat veriga slabă), creierul local răspunde, iar vocea e cea a browserului — care deocamdată NU mișcă buzele avatarului. Piper (gura cu buze) și urechea on-device sunt pasul 7 din proiect — plan, nu realitate măsurată. Camera prinde cadre, dar „a vedea" offline cere un model de viziune pe dispozitiv — nu azi.',
+        'Opțiune neobligatorie: poți scrie de la tastatură în loc să vorbești; răspunsul vine tot ca VOCE (nu afișăm text-răspuns pe ecran).',
+        'Separat, decis: constructorul aplicației = Devin (extern, pe cheia owner-ului).',
+      ],
+    },
+  ]
 }
 
 const esc = (s: string): string =>

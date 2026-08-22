@@ -1185,4 +1185,20 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ ok: true, id })
     },
   )
+
+  // ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug: „ceva inteligent bazat pe AI"
+  // + „verifică și DE CE nu merge") ─────────────────────────────────────────
+  // Kelion se testează pe el însuși pe TOATE funcțiile din registrul unic:
+  // citirile se probează REAL (execuție prin `uneltele`), funcțiile cu EFECT NU
+  // se execută (dry-run — nu ardem bani/nu facem acțiuni), verdictul e MĂSURAT,
+  // iar pe cele picate creierul (AI) dă diagnostic + recomandare fermă.
+  app.post('/api/admin/autoverificare', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    // Rularea REALĂ (execuție live) + salvarea în kv stau într-un SINGUR loc
+    // (services/autoverificare.autoverificareLive), refolosit ȘI de unealta de chat
+    // `autoverificare` — o listă/logică nu se scrie de două ori (fără duplicare).
+    const { autoverificareLive } = await import('../services/autoverificare.js')
+    return reply.send(await autoverificareLive())
+  })
 }

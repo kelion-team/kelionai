@@ -68,26 +68,35 @@ function checkPlati(): TokenCheck[] {
 }
 
 // 3. Google service account — used for TTS, ASR, Gemini, images
-async function checkGoogleServiceAccount(): Promise<TokenCheck> {
-  if (!config.googleServiceAccountJson) {
-    return { name: 'Google service account', status: 'not_configured', requiredScope: 'cloud-platform + generative-language' }
-  }
+/** CHECK LIVE al contului de serviciu Google: chiar OBȚINE un access token de la
+ *  Google (nu doar parsează JSON-ul). Exportat DINADINS ca becul de credit
+ *  (creditAI) ȘI tabelul de token-uri să folosească ACEEAȘI măsurătoare reală —
+ *  „verde" = Google a răspuns, nu „JSON-ul e valid". O cheie revocată/dezactivată
+ *  parsează în continuare, dar aici PICĂ (owner, 19 aug: becul verde din JSON.parse). */
+export async function contServiciuGoogleServesteLive(): Promise<{ ok: boolean; detaliu: string }> {
+  if (!config.googleServiceAccountJson) return { ok: false, detaliu: 'niciun cont de serviciu configurat' }
   try {
     const { GoogleAuth } = await import('google-auth-library')
     const creds = JSON.parse(config.googleServiceAccountJson) as Record<string, unknown>
-    const auth = new GoogleAuth({
-      credentials: creds,
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    })
+    const auth = new GoogleAuth({ credentials: creds, scopes: ['https://www.googleapis.com/auth/cloud-platform'] })
     const token = await timed(15_000, async () => (await auth.getClient()).getAccessToken())
-    if (!token?.token) {
-      return { name: 'Google service account', status: 'fail', detail: 'nu a putut obține access token', requiredScope: 'cloud-platform + generative-language' }
-    }
-    return { name: 'Google service account', status: 'ok', detail: `client_email: ${creds.client_email ?? 'n/a'}`, requiredScope: 'cloud-platform + generative-language' }
+    return token?.token
+      ? { ok: true, detaliu: `client_email: ${creds.client_email ?? 'n/a'}` }
+      : { ok: false, detaliu: 'nu a putut obține access token (cheie revocată/dezactivată?)' }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return { name: 'Google service account', status: 'fail', detail: msg, requiredScope: 'cloud-platform + generative-language' }
+    return { ok: false, detaliu: e instanceof Error ? e.message : String(e) }
   }
+}
+
+async function checkGoogleServiceAccount(): Promise<TokenCheck> {
+  const scope = 'cloud-platform + generative-language'
+  if (!config.googleServiceAccountJson) {
+    return { name: 'Google service account', status: 'not_configured', requiredScope: scope }
+  }
+  const r = await contServiciuGoogleServesteLive()
+  return r.ok
+    ? { name: 'Google service account', status: 'ok', detail: r.detaliu, requiredScope: scope }
+    : { name: 'Google service account', status: 'fail', detail: r.detaliu, requiredScope: scope }
 }
 
 // 4. Google TTS API key (fallback when there is no service account)

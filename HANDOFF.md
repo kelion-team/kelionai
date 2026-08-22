@@ -12,7 +12,7 @@ folder, read this file, then `STATUS.md`, then `README.md`.
 - **Project root (open THIS as the working folder):** `C:\Users\adria\Kelionai`
 - `backend/` — Node + Fastify server (chat, voice/TTS, Google skills, auth, DB)
 - `frontend/` — React + Vite UI (3D avatar, chat, camera vision, voice)
-- `Dockerfile`, `railway.json` — deploy
+- `Dockerfile` — imaginea aplicației (rulează pe VPS)
 - Do **NOT** use `C:\Users\adria\Downloads\k` — that is the old/archived project.
 
 ## How we work
@@ -25,15 +25,16 @@ folder, read this file, then `STATUS.md`, then `README.md`.
 ## Build & deploy
 
 ```bash
-# from C:\Users\adria\Kelionai
+# from the repo root, on a branch:
 cd backend  && npx tsc            # backend build  → backend/dist
 cd ../frontend && npx vite build  # frontend build → frontend/dist
-# deploy (Railway, Dockerfile build, service "web" → https://kelionai.app)
-cd ..       && railway up --detach
+# deploy: NU manual. Merge-ul în `master` e publicat AUTOMAT de cronul de pe VPS
+# (deploy/auto-publicare.sh → deploy/deploy.sh, build Docker pe VPS → kelionai.app).
 ```
 
-- Railway project **Kelionai**, env **production**, service **web**.
-- Verify after deploy: `railway status`, `railway logs`, and load https://kelionai.app.
+- Gazda: **VPS propriu** (`164.68.120.87`), container `kelionai-app` în spatele Caddy.
+  Gazda e VPS-ul propriu — nu mai există proiect/serviciu/deploy pe vreo gazdă PaaS externă.
+- Verify after deploy: `curl https://kelionai.app/api/version` (`v` == sha `master`) + `/health` = 200.
 
 ## Local dev
 

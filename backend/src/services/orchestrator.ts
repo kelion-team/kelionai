@@ -29,6 +29,12 @@ export interface OrchestratorOpts {
   temperature?: number
   /** Internal reasoning for the thinking models (Fable/Claude/GPT-o). */
   reasoning?: 'low' | 'medium' | 'high'
+  /** ESCALADARE PE RUNDĂ (owner, 20 aug: „modelul ușor/greu"): obiect MUTABIL,
+   *  ca `tools`. Când ușa `ask_brain` decide „e greu" LA MIJLOC, setează aici
+   *  modelul greu + gândirea adâncă; orchestratorul le citește pe FIECARE rundă,
+   *  deci rundele următoare urcă de fapt la creierul puternic, nu doar deschid
+   *  uneltele. Gol = fără escaladare (rămâne pe modelul/reasoning-ul de bază). */
+  escaladare?: { model?: string; reasoning?: 'low' | 'medium' | 'high' }
   onText?: (text: string) => void
   /** THE DEED GATE (Adrian, Jul 27): if the model CLAIMS an action without
    *  having called any tool, we mechanically force it to execute or retract. */
@@ -135,6 +141,50 @@ export async function executaApeluriCoordonate<T>(
     return rezultat
   }))
 }
+// ── GARDĂ DE PROGRES REAL (pură, testabilă) ─────────────────────────────────
+// Owner 20 aug: chatul „macină 65s și nu execută nimic real". Garda veche cerea
+// simultan „zero text nou" ȘI „aceeași semnătură de unelte" — un model care
+// depistează activ (narează + rulează alt shell/SQL care întorc erori) nu le
+// atinge niciodată. Aici judecăm REZULTATUL: o rundă în care TOATE ieșirile-s
+// erori = fără progres (2 la rând → stop); aceeași unealtă eșuată de 3× → stop.
+export function iesireEsteEroare(s: string): boolean {
+  const t = (s || '').trimStart()
+  return t.startsWith('tool_error:') || /"ok"\s*:\s*false|"error"\s*:/.test(t) || /^error[:\s]/i.test(t)
+}
+export interface StareProgres {
+  rundeToateEroare: number
+  erorPerUnealta: Record<string, number>
+}
+export function stareProgresInitiala(): StareProgres {
+  return { rundeToateEroare: 0, erorPerUnealta: {} }
+}
+/** Judecă progresul unei runde din ieșirile uneltelor. Întoarce motivul de oprire
+ *  (sau null) + starea nouă. PUR — nu mută starea primită. */
+export function pasProgres(
+  st: StareProgres,
+  nume: string[],
+  iesiri: string[],
+): { stop: string | null; st: StareProgres } {
+  const erorPerUnealta = { ...st.erorPerUnealta }
+  let rundeToateEroare = st.rundeToateEroare
+  let erori = 0
+  for (let i = 0; i < iesiri.length; i++) {
+    if (iesireEsteEroare(iesiri[i])) {
+      erori++
+      const n = (erorPerUnealta[nume[i]] ?? 0) + 1
+      erorPerUnealta[nume[i]] = n
+      if (n >= 3) return { stop: `unealta ${nume[i]} a eșuat de ${n}× în tură`, st: { rundeToateEroare, erorPerUnealta } }
+    }
+  }
+  if (iesiri.length > 0 && erori === iesiri.length) {
+    rundeToateEroare++
+    if (rundeToateEroare >= 2) return { stop: `${rundeToateEroare} runde consecutive doar cu erori`, st: { rundeToateEroare, erorPerUnealta } }
+  } else {
+    rundeToateEroare = 0
+  }
+  return { stop: null, st: { rundeToateEroare, erorPerUnealta } }
+}
+
 export async function runOrchestrator(
   model: string,
   messages: OrMessage[],
@@ -142,7 +192,7 @@ export async function runOrchestrator(
   execTool: (name: string, argsJson: string) => Promise<string>,
   opts: OrchestratorOpts = {},
 ): Promise<OrchestratorResult> {
-  const maxRounds = opts.maxRounds ?? 8
+  const maxRounds = opts.maxRounds ?? 6
   const convo: OrMessage[] = [...messages]
   let totalCost = 0
   let served = model
@@ -165,6 +215,10 @@ export async function runOrchestrator(
     uneltChemate.add(name)
     if (!afisaj.has(name)) anyFaptaToolCalled = true
   }
+  // GARDĂ DE PROGRES REAL (owner 20 aug: „macină 65s și nu execută nimic real"). Logica e
+  // pură + testată în `pasProgres` (jos): o rundă în care TOATE ieșirile-s erori = fără
+  // progres (2 la rând → stop); aceeași unealtă eșuată de 3× → stop. Fail-fast, nu 65s.
+  let stProgres = stareProgresInitiala()
   const rez = (text: string, rounds: number): OrchestratorResult => ({
     text,
     costUsd: totalCost,
@@ -207,17 +261,21 @@ export async function runOrchestrator(
       toolChoice === 'required' && opts.forceToolNames?.length
         ? opts.forceToolNames.filter((n) => tools.some((t) => t.name === n))
         : undefined
+    // ESCALADARE PE RUNDĂ: dacă `ask_brain` a urcat tura la creierul greu la
+    // mijloc, obiectul mutabil `escaladare` (ca `tools`) e citit AICI — rundele
+    // următoare pleacă pe modelul + gândirea adâncă, nu doar cu uneltele deschise.
+    const modelRunda = opts.escaladare?.model || model
+    const reasoningRunda = opts.escaladare?.reasoning ?? opts.reasoning
     const callOpts = {
       maxTokens: opts.maxTokens,
       temperature: opts.temperature,
-      reasoning: opts.reasoning,
+      reasoning: reasoningRunda,
       toolChoice,
       allowedFunctionNames,
     }
-// Gemini direct SAU Creier 2 cloud (ollama-cloud/*). Alt prefix = eroare NUMITĂ.
-    const { OLLAMA_CLOUD_PREFIX } = await import('./ollamaCloud.js')
-    if (!model.startsWith(GEMINI_DIRECT_PREFIX) && !model.startsWith(OLLAMA_CLOUD_PREFIX)) {
-      throw new Error(`model_necunoscut: „${model}" — aștept google-direct/* sau ollama-cloud/*`)
+    // Creierul e Gemini direct (google-direct/*). Alt prefix = eroare NUMITĂ.
+    if (!modelRunda.startsWith(GEMINI_DIRECT_PREFIX)) {
+      throw new Error(`model_necunoscut: „${modelRunda}" — aștept google-direct/*`)
     }
     // PROFILING (Aug 2 — the 38-second weather turn): every brain round gets
     // its real duration in the log, so a slow turn shows WHERE the seconds go
@@ -234,7 +292,7 @@ export async function runOrchestrator(
         temperature: callOpts?.temperature,
         reasoning: callOpts?.reasoning,
         treapta: 'lucru' as const,
-        model,
+        model: modelRunda,
         toolChoice: callOpts.toolChoice,
         allowedFunctionNames: callOpts.allowedFunctionNames,
       }
@@ -271,12 +329,21 @@ export async function runOrchestrator(
     // arse degeaba. După prima rundă modelul l-a auzit deja; rundele următoare
     // păstrează doar textul (transcriptul e oricum în mesaj).
     if (round === 1) {
-      for (const m of convo) {
+      for (let i = 0; i < convo.length; i++) {
+        const m = convo[i]
         if (!Array.isArray(m.content)) continue
         const blocuri = m.content as { type: string; text?: string }[]
         if (!blocuri.some((b) => b.type === 'audio_url')) continue
         const faraAudio = blocuri.filter((b) => b.type !== 'audio_url')
-        m.content = faraAudio.length ? faraAudio : '(mesaj vocal — audio deja ascultat)'
+        // PE COPIE, nu in-place (C1 al marii verificări — BLOCANT): `convo`
+        // e o copie SHALLOW a lui `messages`, deci mutația obiectului ștergea
+        // audio-ul și din lista APELANTULUI — orice reîncercare/plasă din
+        // chat.ts rechema creierul FĂRĂ vocea omului (pe tura ambientală cu
+        // transcript gol rămânea DOAR placeholder-ul → <TAC/> fals sau
+        // răspuns halucinat). Rundele 2+ ale ACESTEI rulări văd copia
+        // (economia de bandă rămâne); încercarea următoare pornește iar de
+        // la mesajul întreg, cu audio.
+        convo[i] = { ...m, content: faraAudio.length ? faraAudio : '(mesaj vocal — audio deja ascultat)' }
       }
     }
 
@@ -321,6 +388,7 @@ export async function runOrchestrator(
         // The assistant turn is kept with the markup STRIPPED — history must
         // not teach the model that typing calls is the way to make them.
         convo.push({ role: 'assistant', content: stripToolMarkup(res.text ?? ''), tool_calls: calls })
+        const iesiriF: string[] = []
         for (const call of calls) {
           let out = ''
           try {
@@ -329,6 +397,13 @@ export async function runOrchestrator(
             out = `tool_error: ${String(e).slice(0, 200)}`
           }
           impingeRezultat(convo, call.id, out)
+          iesiriF.push(out)
+        }
+        const rezProgF = pasProgres(stProgres, calls.map((c) => c.function.name), iesiriF)
+        stProgres = rezProgF.st
+        if (rezProgF.stop) {
+          console.error(`[orchestrator] runda ${round}: fără progres (${rezProgF.stop}) → opresc bucla (${served})`)
+          return rez(stripToolMarkup(allText), round)
         }
         continue
       }
@@ -455,6 +530,12 @@ export async function runOrchestrator(
     if (iesiri.length > 1) console.log(`[TIMP] ${iesiri.length} unelte coordonate: ${Date.now() - tUnelte}ms`)
     for (let i = 0; i < res.toolCalls.length; i++) {
       impingeRezultat(convo, res.toolCalls[i].id, iesiri[i])
+    }
+    const rezProg = pasProgres(stProgres, res.toolCalls.map((c) => c.function.name), iesiri)
+    stProgres = rezProg.st
+    if (rezProg.stop) {
+      console.error(`[orchestrator] runda ${round}: fără progres (${rezProg.stop}) → opresc bucla (${served})`)
+      return rez(stripToolMarkup(allText), round)
     }
   }
 

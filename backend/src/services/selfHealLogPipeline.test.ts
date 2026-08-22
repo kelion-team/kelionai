@@ -5,6 +5,7 @@ import {
   groupLogsByFingerprint,
   SelfHealDecisionEngine,
   runLogSelfHealPipeline,
+  eEroareDeInfrastructura,
   type RawLogItem,
 } from './selfHealLogPipeline.js'
 
@@ -223,6 +224,59 @@ describe('Pipeline de auto-vindecare pentru loguri de server și constructor', (
       const res = await runLogSelfHealPipeline()
       expect(res.filed).toBeGreaterThanOrEqual(1)
       expect(jobs.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  // ── INFRASTRUCTURA NU NAȘTE ORDINE DE COD (regula §16, extinsă — lot B) ──
+  // Clasa exactă: [ASR CHIRP CĂZUT] HTTP 403 (rol IAM pierdut) se repetă la
+  // fiecare tură vocală → prag 2 atins imediat → ordin FALS de reparat cod
+  // pentru o problemă de permisiuni. Ca la Postgres (§16, Devin): evidență, nu ordin.
+  describe('infrastructura căzută = evidență, nu build_software', () => {
+    it('clasificatorul pur recunoaște clasele de infrastructură', () => {
+      expect(eEroareDeInfrastructura('[ASR CHIRP CĂZUT] HTTP 403 de la Speech v2 (PERMISSION_DENIED) — trec pe urechea Gemini')).toBe(true)
+      expect(eEroareDeInfrastructura('route error err: connect ECONNREFUSED 127.0.0.1:5432')).toBe(true)
+      expect(eEroareDeInfrastructura('gemini 429 RESOURCE_EXHAUSTED: quota exceeded')).toBe(true)
+      expect(eEroareDeInfrastructura('[PROFUNDUL EPUIZAT] google-direct/gemini a picat → cad pe fața rapidă')).toBe(true)
+      expect(eEroareDeInfrastructura('gemini 404 NOT_FOUND: model retired')).toBe(true)
+      expect(eEroareDeInfrastructura('getaddrinfo ENOTFOUND api.example.com')).toBe(true)
+    })
+    it('…și NU stinge defectele reale de cod', () => {
+      expect(eEroareDeInfrastructura("TypeError: Cannot read properties of undefined (reading 'map')")).toBe(false)
+      expect(eEroareDeInfrastructura('ReferenceError: sarcina is not defined')).toBe(false)
+      expect(eEroareDeInfrastructura('Error: fatal pool connection failed')).toBe(false)
+      expect(eEroareDeInfrastructura('Unhandled rejection in /api/chat: Database timeout')).toBe(false)
+    })
+    it('FORMA REALĂ din inel a [CHAT ERROR] nu e stinsă pe nedrept (blocantul re-verificatorului): flag-urile serializate isRateLimit/isQuota NU sunt „rate limit"/„quota"', () => {
+      // capturaConsole serializează TOATE argumentele console.error — deci fiecare
+      // [CHAT ERROR] din inel conține literal "isRateLimit"/"isQuota". Fără \b,
+      // un TypeError REAL de cod era clasificat infrastructură și nu mai deschidea
+      // niciodată ordin — filtrul orbea vindecarea pe calea principală a chatului.
+      expect(eEroareDeInfrastructura('[CHAT ERROR] TypeError: Cannot read properties of undefined (reading \'map\') {"isRateLimit":false,"isQuota":false,"isRefusal":false}')).toBe(false)
+      // …iar rate-limit-ul REAL (cuvânt întreg) rămâne infrastructură:
+      expect(eEroareDeInfrastructura('[CHAT ERROR] gemini rate limit exceeded {"isRateLimit":true}')).toBe(true)
+    })
+    it('un log de server de infrastructură la prag NU deschide ordin — se reține ca evidență', async () => {
+      const engine = new SelfHealDecisionEngine()
+      const groups = groupLogsByFingerprint([
+        { source: 'server', fileOrContext: 'server.logbuffer', message: '[ASR CHIRP CĂZUT] HTTP 403 de la Speech v2 (PERMISSION_DENIED) — trec pe urechea Gemini', timestamp: 1 },
+        { source: 'server', fileOrContext: 'server.logbuffer', message: '[ASR CHIRP CĂZUT] HTTP 403 de la Speech v2 (PERMISSION_DENIED) — trec pe urechea Gemini', timestamp: 2 },
+      ] satisfies RawLogItem[])
+      const res = await engine.processAggregatedGroups(groups)
+      expect(res.filed).toBe(0)
+      expect(jobs).toHaveLength(0)
+      const filedKeys = Array.from(kv.keys()).filter((k) => k.startsWith('selfheal-log-filed:'))
+      expect(filedKeys).toHaveLength(1)
+      expect(JSON.parse(kv.get(filedKeys[0]) ?? '{}').handedTo).toBe('infrastructura_nu_cod')
+    })
+    it('un defect REAL de cod la prag deschide ordin exact ca înainte (filtrul nu orbește vindecarea)', async () => {
+      const engine = new SelfHealDecisionEngine()
+      const groups = groupLogsByFingerprint([
+        { source: 'server', fileOrContext: 'server.logbuffer', message: "TypeError: Cannot read properties of undefined (reading 'map')", timestamp: 1 },
+        { source: 'server', fileOrContext: 'server.logbuffer', message: "TypeError: Cannot read properties of undefined (reading 'map')", timestamp: 2 },
+      ] satisfies RawLogItem[])
+      const res = await engine.processAggregatedGroups(groups)
+      expect(res.filed).toBe(1)
+      expect(jobs).toHaveLength(1)
     })
   })
 })

@@ -13,6 +13,7 @@
 // adminUnlocked via voiceprint in voice) — this function does NOT gate, it
 // only executes.
 
+import { config } from '../config.js'
 import { listSource, readSource, searchSource } from './sourceCode.js'
 import { dbTablesOverview, dbQuery, memoriePune, memorieIa, memorieLista } from '../db.js'
 import { systemHealth } from './health.js'
@@ -142,10 +143,35 @@ export async function execSharedAdminTool(
     // SINGURA lui ușă — se deschid doar la ordinul explicit al ownerului. Sonda
     // julesServeste (fostul bec) trăiește aici: întâi măsurăm că servește.
     case 'jules_repos': {
+      // ACEEAȘI POARTĂ ca jules_task (owner, 22 aug, a doua oară, pe voce:
+      // „devin nu este activ si kelion raporteaza 7 repo a lui jules" —
+      // gardul pus dimineață acoperea doar sarcinile, iar modelul răspundea
+      // la „e Devin prezent?" listând repo-urile lui Jules din unealta asta).
+      // Răspunsul o și ÎNVAȚĂ: constructorul e Devin, prin build_software.
+      if (config.devinKey) {
+        return JSON.stringify({
+          error: 'constructorul_e_devin',
+          message: 'Constructorul aplicației este DEVIN — activ, cu cheia pusă; ordinele de cod/reparație se dau prin unealta build_software (Devin deschide PR, ownerul aprobă). Jules e doar rezervă tăcută, dezactivată cât Devin e configurat — nu-i lista repo-urile drept răspuns despre constructor.',
+        })
+      }
       const stare = await julesServeste()
       return stare.ok ? julesSurse() : `Jules nu servește acum: ${stare.detaliu}`
     }
-    case 'jules_task': return julesSarcina(String(args.prompt ?? ''), String(args.sursa ?? ''), args.ramura ? String(args.ramura) : 'master')
+    case 'jules_task': {
+      // CONSTRUCTORUL E DEVIN (owner, 22 aug, pe live: „kelion trimite catre
+      // jules err si nu lui devin"): cât cheia Devin e pusă, ordinele de
+      // cod/reparație NU pleacă la Jules — poartă în COD, nu instrucțiune în
+      // fișă (modelul alegea singur jules_task pentru erori). Jules rămâne
+      // rezerva tăcută din 15 aug: se redeschide doar dacă ownerul scoate
+      // cheia Devin sau cere explicit ridicarea gărzii.
+      if (config.devinKey) {
+        return JSON.stringify({
+          error: 'constructorul_e_devin',
+          message: 'Ordinele de reparație/cod merg la DEVIN (unealta build_software) — Jules e rezervă tăcută cât timp cheia Devin e pusă. Reformulează ordinul prin build_software.',
+        })
+      }
+      return julesSarcina(String(args.prompt ?? ''), String(args.sursa ?? ''), args.ramura ? String(args.ramura) : 'master')
+    }
     case 'jules_status': return julesStare(String(args.sesiune ?? ''))
     // ── POARTA OBLIGATORIE (Adrian, 8 aug: „va trebui să folosească OBLIGATORIU
     // toate testele și să măsoare orice răspuns") ──────────────────────────────
@@ -312,13 +338,13 @@ import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
 import { recentClientErrorRows } from '../db.js'
 import { recentClientErrors } from '../routes/clientErrors.js'
-import { getMemories, deleteMemory, cautaIstoric, logCapabilityGap, citesteRezumatCost, proposeKelionTool } from '../db.js'
+import { getMemories, deleteMemory, cautaIstoric, logCapabilityGap, citesteRezumatCost, proposeKelionTool, dovezileFaptelor } from '../db.js'
 import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
 import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor, vaneazaBuguri, raportVanatoare } from './masurare.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   'list_updates', 'read_inbox', 'server_logs', 'client_errors', 'get_real_cost',
-  'list_memories', 'cauta_istoric', 'forget_memory', 'log_unsupported_request', 'propose_tool',
+  'list_memories', 'cauta_istoric', 'dovada_faptelor', 'forget_memory', 'log_unsupported_request', 'propose_tool',
   // GUEST VOICES (Adrian, Aug 1): holder-only by construction — they act on
   // the SESSION user's own account (every user is the holder of theirs).
   // The names come from the single source in guestVoices.ts.
@@ -399,6 +425,21 @@ export async function execUserScopedTool(
           text: String(r.content).slice(0, 500),
           cand: r.created_at,
         })),
+      })
+    }
+    case 'dovada_faptelor': {
+      // JARVIS pasul 4 (§7): asul din mânecă — dovada salvată, per-utilizator.
+      // O citire picată se SPUNE (Legea #1), nu se maschează în listă goală.
+      const cate = Math.min(Math.max(Number(args.cate) || 10, 1), 30)
+      const cauta = String(args.cauta ?? '').trim()
+      const r = await dovezileFaptelor(email, cate, cauta || undefined)
+      if (!r.citit) return JSON.stringify({ error: 'jurnal_operational_necitit', motiv: r.motiv })
+      return JSON.stringify({
+        count: r.sarcini.length,
+        sarcini: r.sarcini,
+        nota: r.sarcini.length === 0
+          ? `Nicio faptă ÎNREGISTRATĂ${cauta ? ' pentru filtrul cerut' : ''} — jurnalul a răspuns, dar nu are rânduri. Nu înseamnă că nimic nu s-a întâmplat vreodată: faptele dinaintea jurnalului (18 aug 2026) nu au dovadă salvată.`
+          : undefined,
       })
     }
     case 'forget_memory': {

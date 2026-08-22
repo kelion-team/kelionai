@@ -93,7 +93,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'list_source', category: 'cod', does: 'listează directoare din codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'read_source', category: 'cod', does: 'citește un fișier din codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'search_source', category: 'cod', does: 'caută în tot codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'build_software', category: 'cod', does: 'dă un ordin de construcție', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'build_software', category: 'cod', does: 'dă ordinul constructorului DEVIN (sesiune izolată → PR pe master, ownerul aprobă)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_status', category: 'cod', does: 'starea ordinelor de construcție', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'repo_write', category: 'cod', does: 'scrie cod în repo', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'repo_open_pr', category: 'cod', does: 'deschide un PR', chat: true, voice: false, voiceViaBrain: true, admin: true },
@@ -153,6 +153,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'delete_note', category: 'memorie', does: 'șterge o notiță', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'list_memories', category: 'memorie', does: 'memoria de lungă durată', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'cauta_istoric', category: 'memorie', does: 'caută în istoricul complet de chat (voce+scris) după cuvinte-cheie', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'dovada_faptelor', category: 'memorie', does: 'scoate dovada SALVATĂ a faptelor (jurnalul operațional): obiectiv + stare finală + evenimentele măsurate ale uneltelor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'forget_memory', category: 'memorie', does: 'uită o memorie', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_inbox', category: 'memorie', does: 'își citește propria cutie poștală (contact@kelionai.app)', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
@@ -175,6 +176,16 @@ export const CAPABILITIES: readonly Capability[] = [
   // Miscellaneous
   { name: 'log_unsupported_request', category: 'diverse', does: 'notează o cerință imposibilă acum', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'set_active_role', category: 'diverse', does: 'schimbă rolul activ', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  // COMPLETAREA REGISTRULUI (C4 al marii verificări, 22 aug): 5 unelte
+  // OFERITE creierului dar neînregistrate — o unealtă din afara registrului
+  // putea fi UMBRITĂ de o unealtă dinamică omonimă (gardul anti-umbrire
+  // judecă pe allCapabilityNames), iar legea sursei unice cere oricum ca
+  // registrul să țină REALLY everything.
+  { name: 'apeleaza_user', category: 'diverse', does: 'apelează alt utilizator Kelion (canal audio full-duplex cu traducere live)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'allow_guest_voice', category: 'diverse', does: 'deschide o fereastră limitată în care altă persoană poate vorbi cu Kelion (amprenta ei intră ca PENDING)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'approve_guest_voice', category: 'diverse', does: 'titularul confirmă păstrarea amprentei unui oaspete', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'forget_guest', category: 'diverse', does: 'uită amprenta unui oaspete', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'media_control', category: 'ops', does: 'controlează redarea media la nivel de sistem (playerctl): verifică/oprește ce rulează', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
   // LEGATE DAR NEÎNREGISTRATE (5 aug, ordinul „leagă tot la creier"): astea 15
   // erau OFERITE creierului și funcționale, dar lipseau din registru — deci
@@ -190,6 +201,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'panou_cod', category: 'cod', does: 'deschide panoul constructorului cu un ordin de build', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_manage', category: 'cod', does: 'gestionează ordinele constructorului (reia/oprește/curăță)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_command', category: 'cod', does: 'rulează o comandă shell direct pe server (canal de comandă Kelion→constructor)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'autoverificare', category: 'cod', does: 'se probează pe el însuși, LIVE și real, pe TOATE funcțiile din registru: citirile executate real, efectele dry-run; raportează starea MĂSURATĂ (merg/stricate/nu-pot-verifica) + de ce nu merge fiecare', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_repos', category: 'cod', does: 'listează repo-urile legate la Jules (agentul async Google)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_task', category: 'cod', does: 'dă o sarcină lui Jules (lucrează în VM Google, deschide PR)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'jules_status', category: 'cod', does: 'starea unei sesiuni Jules', chat: true, voice: false, voiceViaBrain: true, admin: true },
@@ -227,16 +239,42 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
   'read_drive_file', 'get_tasks', 'search_contacts',
   'list_source', 'read_source', 'search_source', 'constructor_status',
   'list_app_versions', 'list_db_backups', 'runbook_status', 'runbook_log',
-  'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables', 'db_query',
+  'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables',
   'system_health', 'pr_lista', 'server_logs', 'client_errors', 'stare_masurata',
-  'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'get_monitor',
+  'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'dovada_faptelor', 'get_monitor',
   'get_mouse_position', 'get_real_cost', 'list_updates', 'episoade_promo',
   'lista_tarife', 'vede_video',
+  // C7 (marea verificare, 22 aug) — citiri VERIFICATE pe handler, nu pe
+  // registru: youtube_search (Serper + sonde de redabilitate; screen_url e
+  // doar date întoarse — cadrul de monitor se emite la locul de push, ca la
+  // get_weather/maps_search de mai sus), list_notes (SELECT pe notițe),
+  // memorie_ia/memorie_lista (citiri din memoria de proiect), admin_vezi
+  // (GET pe bucla locală cu legitimație — poarta de admin rămâne poartă).
+  // studioul_de_clipuri, propus tot de C7, a fost RESPINS la verificare:
+  // handlerul lui scrie cadrul {scenariu} direct pe fir, iar clientul
+  // salvează scenariul și re-armează butonul 🎬 (generarea pornește la
+  // click-ul omului — P32) — interacțiune de browser, rămâne în coada efect.
+  'youtube_search', 'list_notes', 'memorie_ia', 'memorie_lista', 'admin_vezi',
 ])
 
 /** Grupul de exclusivitate pentru o unealtă de chat. `undefined` înseamnă o
  *  citire explicit verificată drept independentă; orice altă unealtă împarte
  *  coada `efect` cu scrierile și interacțiunile de browser/monitor. */
+/** SQL-ul e o CITIRE pură? Trei condiții, toate necesare (verificatorul din
+ *  22 aug a demonstrat că prefixul singur MINTE): prefix de citire, niciun
+ *  cuvânt de scriere NICĂIERI (WITH poate împacheta INSERT — Postgres 9.1+;
+ *  EXPLAIN ANALYZE chiar execută DML-ul; SELECT INTO creează tabel) și fără
+ *  a doua instrucțiune (simple query protocol le-ar rula pe amândouă).
+ *  Direcția erorii e cea sigură: un SELECT cu literalul '%delete%' pică spre
+ *  „scriere" — pierde doar reluarea și primește avertisment, nu minte. */
+export function eSqlDeCitire(sql: string): boolean {
+  return (
+    /^\s*(select|with|show|explain)\b/i.test(sql) &&
+    !/\b(insert|update|delete|merge|drop|truncate|alter|create|grant|revoke|copy|call|do|vacuum|refresh|into)\b/i.test(sql) &&
+    !/;\s*\S/.test(sql)
+  )
+}
+
 export function grupaExecutieUnealta(nume: string): 'efect' | undefined {
   return UNELTE_CITIRE_PARALELE.has(nume) ? undefined : 'efect'
 }
