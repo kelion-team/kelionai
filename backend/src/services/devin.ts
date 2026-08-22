@@ -58,11 +58,11 @@ function anteturi(): Record<string, string> {
   }
 }
 
-/** Deschide o sesiune Devin cu o cerință. `idempotent:true` + o cheie stabilă a
- *  ordinului fac ca o reîncercare să NU pornească o a doua sesiune (bani dubli). */
+/** Deschide o sesiune Devin cu o cerință. `idempotent:true` face ca o
+ *  reîncercare cu ACELAȘI prompt să NU pornească o a doua sesiune (bani dubli). */
 export async function creeazaSesiuneDevin(
   prompt: string,
-  opts?: { title?: string; idempotentKey?: string; maxAcu?: number },
+  opts?: { title?: string; maxAcu?: number },
 ): Promise<SesiuneDevinNoua> {
   const corp: Record<string, unknown> = {
     prompt,
