@@ -1645,6 +1645,36 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    live: la „e Devin prezent?" Kelion a listat repo-urile lui Jules);
    constructor_status răspunde cu câmpul `constructor` MĂSURAT din
    config.devinKey — „e Devin activ?" nu mai depinde de memoria modelului.
+6l. **CONSTRUCTORUL E DEVIN, PESTE TOT (22 aug, PR #1338, MERGE e7e460d, LIVE
+   v8.1 `e7e460d` publicat 08:48:53Z) — ordinul verbatim: „am cerut devin
+   peste tot in constructor, pr, deploy… sa-i stergi de tot [pe Aider+Ollama]…
+   Devin functional am cerut peste tot in loc aider si celalt".** Mașinăria
+   constructorului LOCAL a fost ȘTEARSĂ INTEGRAL (31 fișiere): agentul
+   `deploy/constructor-agent.mjs`, wrapperul `constructor-worker.sh`,
+   `setup-ollama.sh`, `aider-free.conf.yml`, `scripts/install-aider.sh`,
+   `.aider(.glm).conf.yml`; serviciile `aiderProba`/`ollamaProba`/
+   `pulsLucrator`/`remediereEsec`/`invatareConstructor`/`constructorProtocol`
+   + `planificaPasiMici` (din creierRationament) + `remediazaAutomatBuildJob`
+   (cod mort din db); rutele bridge ale workerului din `routes/constructor.ts`
+   (`/next` `/report` `/progress` `/tool-defs` `/ajutor` `/context` — RĂMÂNE
+   DOAR `/api/constructor/tool`, o folosește auto-publicare.sh); cronul din
+   `deploy.sh` (trap + pasul 6d → demontare DEFINITIVĂ) + lansarea din
+   auto-publicare.sh; regula pe constructor-agent.mjs din verifica-gemini.mjs;
+   testele lumii vechi. CONSTRUCTORUL E DEVIN, extern: ordin (build_software /
+   panou) → coadă → dispecerul din app (`devinConstructor.ts` tickDispecerDevin)
+   → sesiune Devin → PR pe master → ownerul aprobă. Devin LEGAT peste tot,
+   MĂSURAT din `config.devinKey` (NU hardcodat): panoul Admin→Constructor
+   („🟢 Constructorul e DEVIN" + badge DEVIN pe ordinele cu sesiune + caseta
+   din date), diagnosticConstructor rescris (cheie/ordine agățate fără
+   sesiune/porniri eșuate/coadă care stă), health.ts (bec Devin în loc de
+   Aider+Ollama), AI_CONSTRUCTORI (Aider→Devin), constructor_status +
+   brainToolDefs, ȘI VOCEA (`ancoraConstructor(devinActiv)` în instrucțiunea
+   Live la AMBELE locuri de asamblare incl. amprenta + regula că întrebările
+   despre constructor escaladează la creierul măsurat — repară gaura măsurată
+   pe v7.8 unde vocea nega Devin și lăuda Jules). „Nu pot verifica" din repo:
+   `DEVIN_API_KEY` pe VPS — fără ea Devin nu construiește, iar panoul + Kelion
+   spun roșu „cheia NU e pusă", nu se prefac. Porți verzi: rădăcină + backend
+   tsc/1824 teste + frontend tsc/122 teste/build.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor
