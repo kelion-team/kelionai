@@ -219,3 +219,35 @@ export function watchForUpdate(onUpdate: () => void): () => void {
     document.removeEventListener('visibilitychange', onVis)
   }
 }
+
+/** Preia bundle-ul nou ÎNAINTE de reset, cu progres real (Content-Length).
+ *  Nu înlocuiește hard-reset: cache-ul e golit tot la reload, dar userul vede
+ *  cât s-a descărcat înainte să pice pagina. */
+export function downloadLatestBundle(onProgress: (p: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('GET', `/?_v=${Date.now()}`)
+    xhr.onerror = () => reject(new Error('nu pot citi noul index'))
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState !== 4) return
+      if (xhr.status !== 200) { reject(new Error(`index ${xhr.status}`)); return }
+      const m = xhr.responseText.match(/index-[A-Za-z0-9_-]+\.js/)
+      if (!m) { reject(new Error('nu găsesc index.js în noul HTML')); return }
+      const js = `/assets/${m[0]}?_v=${Date.now()}`
+      const xhr2 = new XMLHttpRequest()
+      xhr2.open('GET', js)
+      onProgress(0)
+      let last = 0
+      xhr2.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const p = Math.max(0, Math.min(1, e.loaded / e.total))
+          if (p > last) { last = p; onProgress(p) }
+        }
+      }
+      xhr2.onload = () => { onProgress(1); resolve() }
+      xhr2.onerror = () => reject(new Error('nu pot descărca bundle-ul nou'))
+      xhr2.send()
+    }
+    xhr.send()
+  })
+}

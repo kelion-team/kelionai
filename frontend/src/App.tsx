@@ -15,13 +15,14 @@ import {
   hardResetToLatest,
   fetchServerVersion,
   versionLabel,
+  downloadLatestBundle,
   type ServerVersion,
 } from './lib/updateCheck'
 import { watchdogInit } from './lib/watchdog'
 import { ConsimtamantFoto } from './components/ConsimtamantFoto'
 import { BannerOffline } from './components/BannerOffline'
 import { citesteConsimtamant, scrieConsimtamant, type StareConsimtamant } from './lib/consimtamant'
-import { isCalm } from './lib/activity'
+
 import { uiStrings } from './lib/i18n'
 
 // MARTORUL GLOBAL de fiabilitate pornește o dată, la încărcare — prinde orice
@@ -41,7 +42,9 @@ export default function App() {
   const [consimt, setConsimt] = useState<StareConsimtamant>(() => citesteConsimtamant())
   // ANUNȚ DE UPDATE (owner, 20 aug: „trebuie să mă anunțe că e un update pe aplicație").
   // Update-ul se aplică tot automat, dar întâi apare un banner scurt, ca omul să VADĂ.
+  // progress = 0..1, null = nu e descărcare activă.
   const [updateNou, setUpdateNou] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null)
 
   useEffect(() => {
     const err = new URLSearchParams(window.location.search).get('error')
@@ -64,34 +67,16 @@ export default function App() {
     }
   }, [error])
 
-  // UPDATE AUTOMAT SILENȚIOS (protocol kelion.constructor/v1): la detectarea
-  // unei versiuni noi, se aplică hard reset IMEDIAT, fără niciun dialog/banner
-  // de confirmare și fără numărătoare inversă. Clientul se reîncarcă transparent
-  // în fundal — utilizatorul nu trebuie să facă nicio acțiune manuală.
-  // Verifică isCalm() înainte de reset — nu tăia sesiuni live (voce/brain/draft).
+  // UPDATE AUTOMAT CU BARA DE PROGRES: când serverul are versiune nouă,
+  // preluăm bundle-ul cu progres vizibil și oprim orice lucru — la final reload.
   useEffect(() => {
-    let resetPending = false
-    const tryReset = (): void => {
-      if (!resetPending) return
-      if (isCalm()) {
-        resetPending = false
-        void hardResetToLatest()
-      }
-      // Dacă nu e calm, așteptăm și verificăm din nou la următorul tick
-    }
     const stop = watchForUpdate(() => {
-      // ANUNȚĂ pe ecran că vine o versiune nouă (owner: „să mă anunțe că e un update").
       setUpdateNou(true)
-      resetPending = true
-      // Lasă anunțul ~2.5s vizibil ÎNAINTE de a aplica (chiar dacă e deja calm), ca omul
-      // să apuce să-l vadă — apoi update-ul se aplică automat ca înainte.
-      window.setTimeout(() => {
-        tryReset()
-        // Poll until calm if not already
-        const poll = window.setInterval(tryReset, 1000)
-        // Stop polling after 5 minutes if still not calm
-        window.setTimeout(() => window.clearInterval(poll), 300_000)
-      }, 2500)
+      setUpdateProgress(0)
+      // Începe descărcarea reală. Chiar dacă progresul eșuează, dăm reset.
+      void downloadLatestBundle((p) => setUpdateProgress(p))
+        .then(() => hardResetToLatest())
+        .catch(() => hardResetToLatest())
     })
     return stop
   }, [])
@@ -169,18 +154,46 @@ export default function App() {
             top: 0,
             left: 0,
             right: 0,
+            bottom: 0,
             zIndex: 100002,
-            background: '#15291a',
+            background: 'rgba(10, 22, 15, 0.92)',
             color: '#d8f5df',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 16,
+            padding: 24,
             textAlign: 'center',
-            padding: '6px 12px',
-            fontSize: 13,
+            fontSize: 14,
             fontWeight: 600,
-            borderBottom: '1px solid #2f4f3a',
-            boxShadow: '0 1px 6px rgba(0,0,0,0.35)',
           }}
         >
-          🔄 {uiStrings().updateNouAnunt}
+          <div>🔄 {uiStrings().updateNouAnunt}</div>
+          <div
+            style={{
+              width: 'min(320px, 80vw)',
+              height: 10,
+              borderRadius: 5,
+              background: '#1f3b2a',
+              overflow: 'hidden',
+              border: '1px solid #3a6b4a',
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.round((updateProgress ?? 0) * 100)}%`,
+                height: '100%',
+                background: '#5ee08c',
+                transition: 'width 120ms linear',
+              }}
+            />
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 400, color: '#a8d4b5' }}>
+            {updateProgress === null
+              ? 'se pregătește…'
+              : `${Math.round((updateProgress ?? 0) * 100)}% — se opresc toate lucrurile`}
+          </div>
         </div>
       )}
       <DynamicBackground />
