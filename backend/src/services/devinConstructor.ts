@@ -13,6 +13,33 @@ import { creeazaSesiuneDevin, stareSesiuneDevin, asiguraTokenRepoLaDevin, type S
 import { config } from '../config.js'
 import { claimNextBuildJob, createBuildJob, reportBuildJob, updateBuildJobProgress, setDevinSessionId, getOldestRunningBuildJob, type BuildJob } from '../db.js'
 import { notifyAdmin } from './adminNotification.js'
+import { construiesteLocal, numeModelLocal } from './constructorLocal.js'
+
+// ── REZERVA LOCALĂ RAPIDĂ (owner, 22 aug: „când pică Devin, treci AUTOMAT pe
+// modelul free de pe VPS; când Devin revine, întoarce-te — RAPID, nu 3 ore") ──
+// La ORICE eșec Devin (pornire eșuată SAU sesiune fără PR), încercăm IMEDIAT
+// constructorul local free (Ollama pe VPS) — în secunde, nu cu timeout de ore.
+// Dacă local reușește → jobul e 'done' cu brain 'local' + PR în chat. Dacă și
+// local pică → abia atunci creierul/notificarea. Devin rămâne PRIMUL la fiecare
+// tick (dispecerul îl încearcă întâi), deci revenirea la Devin e automată când
+// cheia/quota lui e OK din nou — fără comutator manual.
+async function rezervaLocalaSauEsec(job: BuildJob, motivDevin: string): Promise<void> {
+  // AFIȘEAZĂ CARE CONSTRUCTOR LUCREAZĂ (owner, 22 aug: „când comută să afișeze
+  // care e") — pe bară/monitor scrie explicit că a trecut pe modelul local + numele lui.
+  const numeLocal = numeModelLocal()
+  await updateBuildJobProgress(job.id, `Devin indisponibil → COMUTAT pe rezerva LOCALĂ (${numeLocal}, VPS)…`).catch(() => {})
+  const local = await construiesteLocal(job.orderText, job.id).catch((e) => ({ ok: false as const, motiv: String(e).slice(0, 200) }))
+  if (local.ok && local.prUrl) {
+    await reportBuildJob(job.id, { status: 'done', prUrl: local.prUrl, brain: `local:${numeLocal}`, log: `Devin a picat (${motivDevin.slice(0, 120)}); rezerva LOCALĂ (${numeLocal}) a dus ordinul → PR ${local.prUrl}` })
+    await instiinteazaAdmin('scris', `Rezerva LOCALĂ (${numeLocal}) a terminat ordinul #${job.id}`, `Devin era indisponibil, așa că modelul free de pe VPS (${numeLocal}) a rezolvat. PR gata: ${local.prUrl} — verifică și fă merge pe master.`, { jobId: job.id })
+    return
+  }
+  // Nici Devin, nici local — raportăm CINSTIT ambele motive, apoi la creier.
+  const failLog = `Devin: ${motivDevin.slice(0, 150)} | rezerva locală: ${local.ok ? 'fără PR' : (local.motiv ?? 'necunoscut')}`
+  await reportBuildJob(job.id, { status: 'failed', brain: 'local', log: failLog })
+  await instiinteazaAdmin('scris', `Ordinul #${job.id}: și Devin, și rezerva locală au picat`, failLog, { jobId: job.id })
+  await colaborareCreierDevin(job, failLog)
+}
 
 // Înștiințare admin (ajunge în chat/notificări) — best-effort, nu crapă tick-ul.
 async function instiinteazaAdmin(
@@ -202,11 +229,8 @@ export async function tickDispecerDevin(): Promise<void> {
           // conversație, nu doar pe monitor — bucla se închide unde comanzi.
           await instiinteazaAdmin('scris', `Devin a terminat ordinul #${run.id}`, `PR gata: ${prog.prUrl} — verifică și fă merge pe master.`, { jobId: run.id })
         } else {
-          const failLog = `Devin ${prog.stare} fără PR deschis`
-          await reportBuildJob(run.id, { status: 'failed', brain: 'devin', log: failLog })
-          await instiinteazaAdmin('scris', `Devin: ordinul #${run.id} nu s-a finalizat`, `Sesiunea Devin s-a încheiat (${prog.stare}) fără PR deschis. Creierul analizează acum pentru o nouă încercare.`, { jobId: run.id })
-          // EȘECUL MERGE LA CREIER — creierul + Devin colaborează să refacă ordinul.
-          await colaborareCreierDevin(run, failLog)
+          // Sesiunea Devin s-a încheiat fără PR → rezerva locală preia RAPID.
+          await rezervaLocalaSauEsec(run, `sesiune încheiată (${prog.stare}) fără PR`)
         }
       } else {
         await updateBuildJobProgress(run.id, prog.bara)
@@ -224,9 +248,8 @@ export async function tickDispecerDevin(): Promise<void> {
     await setDevinSessionId(job.id, sessionId)
     await updateBuildJobProgress(job.id, 'Devin: pornit')
   } catch (e) {
-    const failLog = `Devin pornire eșuată: ${String(e).slice(0, 300)}`
-    await reportBuildJob(job.id, { status: 'failed', brain: 'devin', log: failLog })
-    // Chiar și pornirea eșuată trece pe creier — poate fi cheie/quota/repo.
-    await colaborareCreierDevin(job, failLog)
+    // Pornirea sesiunii Devin a eșuat (cheie/quota/repo) → rezerva locală preia
+    // RAPID, în secunde, în loc să lase ordinul „eșuat" (owner: „nu 3 ore").
+    await rezervaLocalaSauEsec(job, `pornire eșuată: ${String(e).slice(0, 200)}`)
   }
 }
