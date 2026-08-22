@@ -158,6 +158,13 @@ export class OpusVoceClient {
     }
   }
 
+  /** Golește coada decoderului — redă cadrele Opus rămase în buffer. Fără
+   *  asta, finalul fiecărei fraze se poate tăia (WebCodecs nu le scoase pe toate
+   *  dacă nu primește flush la final de stream). */
+  async flush(): Promise<void> {
+    try { await this.dec.flush() } catch { /* nimic de făcut */ }
+  }
+
   inchide(): void {
     try { this.enc.close() } catch { /* ignorat */ }
     try { this.dec.close() } catch { /* ignorat */ }

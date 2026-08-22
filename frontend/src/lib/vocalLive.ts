@@ -432,6 +432,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     }
     switch (m.type) {
       case 'gata':
+        // AUDIOCONTEXT gata ÎNAINTE să spunem „Kelion te așteaptă". Pe mobil/
+        // desktop, contextul poate rămâne 'suspended' dacă începi să vorbești
+        // imediat — primele cuvinte se pierd (userul repetă și a doua oară merge).
+        void (async (): Promise<void> => {
+          await ensureAudioContextRunning(ctxIn)
+          await ensureAudioContextRunning(ctxOut)
+          // Abia acum Kelion arată că ascultă — microfonul e deblocat.
+          opts.onGata?.()
+        })()
         trimiteCoords()
         if (!ceasCoords) ceasCoords = setInterval(trimiteCoords, 120_000)
         // OPUS: serverul a oferit Opus ȘI browserul are WebCodecs → pornim
@@ -477,7 +486,6 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         // dar DOAR când modelul o cere: ușa cere_creierului declanșează
         // `cere_cadre` → atunci trimitem cadrele proaspete (vezi handlerul
         // 'cere_cadre' mai jos). Fără cerere = zero cadre = zero cost.
-        opts.onGata?.()
         break
       case 'control':
         if (m.frame) opts.onControl?.(m.frame)
@@ -519,6 +527,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         opts.onTuraInchisa?.() // tura tăiată nu-și lasă fragmentul pe bandă
         break
       case 'tura_gata':
+        // FLUSH OPUS: dacă decoderul mai are cadre în coadă, le redăm acum,
+        // altfel finalul frazei se trunchiază (tăiat pe difuzor).
+        void opusClient?.flush().catch(() => {})
         opts.onTuraInchisa?.() // tura încheiată își ia textul de pe bandă
         break
       case 'ping':
