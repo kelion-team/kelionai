@@ -149,8 +149,12 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
          (compozitor + mașină), meniul „+" (📎/📷/🎬), meniul „Aplicații",
          portofelul + „Add credits" stau după `online` (pingul REAL /health,
          useConectat); ușa din dos paste/drop de fișiere închisă și ea.
-         Reapar singure la revenirea rețelei. MĂSURAT: frontend tsc 0,
-         17 fișiere / 105 teste, build verde; live după merge.
+         Reapar singure la revenirea rețelei. MĂSURAT LIVE 22 aug 06:36Z
+         (PR #1332, merge 83a199d): /api/version → v=83a199d, ver 7.6,
+         publicat 06:26:33Z — în același val: scrisul la creierul întreg +
+         audio pe scris, Devin pornire imediată + anti-bani-dubli, câmpul
+         gol la pornire, semnul cu antena tăiată, pauza frazei 3s.
+         Proba pe dispozitiv rămâne la owner.
       2. „sau daca se pot instala biblioteci pentru ofline sa se instaleza sa
          poata lucra ofline, doawload automat de ofline" — DEBLOCHEAZĂ pasul 7
          felia B (gura Piper WASM + lip-sync) și evaluarea feliei C1 (urechea

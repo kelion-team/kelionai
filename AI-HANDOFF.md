@@ -1577,7 +1577,9 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    RESPINS cu motiv — scrie cadrul {scenariu} pe fir, e interacțiune de
    browser) + F11a (ceasPingWs scos — voiceHeartbeat e singurul keepalive,
    trimite exact același cadru).
-6j. **VALUL „SCRISUL LA CREIER + DEVIN FUNCȚIONAL" (22 aug ~05:30-06:00Z, pe
+6j. **MERGE (PR #1332) + MĂSURAT LIVE 22 aug 06:36Z: /api/version →
+   v=83a199d (exact commitul merge-ului), ver 7.6, publicat 06:26:33Z.**
+   VALUL „SCRISUL LA CREIER + DEVIN FUNCȚIONAL" (22 aug ~05:30-06:00Z, pe
    ordinele live ale owner-ului: „scris ignora ce cer" / „audio nu merge" /
    „full devin activ si funtional" / „astept dovada… pina la deploy" /
    „nu respecti masterul… violeaza decizia mea")**: (1) MĂSURAT LIVE pe V7.5

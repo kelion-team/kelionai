@@ -2819,9 +2819,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // click_monitor SCOS din listă (tensiunea (g), închisă pe ordinul
     // „finalizeaza tot", 22 aug): apasă ELEMENTE REALE — inclusiv butoane de
     // admin — deci re-apăsarea la reluare NU e nevinovată și apelul E faptă.
+    // goleste_monitorul a IEȘIT din afișaj (vânătorul din 22 aug, măsurat pe
+    // captura ownerului: clasificat „doar-afișare", nu conta ca faptă →
+    // POARTA ACȚIUNII îi prescria modelului chiar refuzul „oprește-l manual").
+    // Golirea ecranului EXECUTĂ ceva cerut — e faptă (vezi UNELTE_FAPTA).
     const UNELTE_AFISAJ = new Set([
       'show_document', 'show_on_screen', 'open_app_view',
-      'goleste_monitorul', 'zoom_monitor', 'arata_pe_grafic',
+      'zoom_monitor', 'arata_pe_grafic',
     ])
     // DB_QUERY: numele singur nu spune dacă e citire sau scriere (tensiunea
     // (e), închisă pe același ordin: SQL-ul decide, cu predicatul ÎNTĂRIT din
@@ -2921,12 +2925,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         } catch {
           input = {}
         }
-        // FIECARE PAS PE MONITOR (owner, 14 aug): pe turele de EXECUȚIE, fiecare
-        // unealtă chemată se anunță PE LOC ca frame {executie} — numele pasului
-        // vine din inventarul de capabilități (o singură sursă, nu o listă
-        // paralelă), procentul urcă asimptotic (totalul nu se știe dinainte) și
-        // 100% îl scrie DOAR interceptorul de end, la închiderea reală a turei.
-        if (cereActiune) {
+        // FIECARE PAS PE MONITOR — LA ORICE UNEALTĂ (owner, 14 aug „să arate
+        // fiecare pas" + 22 aug, pe captura cu știrile: „trebuie sa apara o
+        // clepsidra care arata ca cauta"): numele pasului vine din inventarul
+        // de capabilități (o singură sursă), procentul urcă asimptotic
+        // (totalul nu se știe dinainte) și 100% îl scrie DOAR interceptorul
+        // de end, la închiderea reală a turei. Gardul vechi `if (cereActiune)`
+        // e SCOS: o căutare de știri fără verb de acțiune nu arăta NIMIC cât
+        // lucra — omul stătea în fața unui ecran mut, exact ce a măsurat.
+        {
           pasiExecutie += 1
           const capabilitate = CAPABILITIES.find((c) => c.name === name)
           // Ownerul, 21:42 („trebuie sa apara la text generare sau reparare sa
@@ -3434,6 +3441,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         'create_doc', 'edit_doc', 'create_sheet', 'edit_sheet', 'create_calendar_event',
         'add_task', 'browser_open', 'browser_type', 'browser_click', 'generate_image',
         'generate_video', 'memorie_pune', 'db_query',
+        // Vânătorul 22 aug: pe „oprește/închide monitorul" runda forțată nu
+        // AVEA VOIE să cheme unealta de închidere → modelul era împins spre
+        // refuzul „oprește-l manual". Golirea ecranului e faptă cerută.
+        'goleste_monitorul',
       ].filter((n) => toolNamesThisTurn.has(n))
       // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului — nu pe
       // simpla prezență a unei imagini (C6; vezi actiuneCerutaExplicit, sus).

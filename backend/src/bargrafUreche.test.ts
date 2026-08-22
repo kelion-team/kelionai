@@ -22,7 +22,7 @@ describe('bargraful urechii live — nivel de intrare măsurat', () => {
   })
 
   it('poarta half-duplex e aceeași decizie care taie trimiterea', () => {
-    expect(clientVL).toMatch(/const poarta = kelionAudibil\(\)/)
+    expect(clientVL).toMatch(/const poarta = !procesareActiva && kelionAudibil\(\)/) // 22 aug: half-duplex DOAR fără AEC viu
     expect(clientVL).toMatch(/const la16k = poarta \? new Float32Array\(ds\.length\) : ds/)
   })
 
@@ -50,9 +50,10 @@ describe('preamp microfon (surd / prea tare)', () => {
     expect(clientVL).toContain('setPreamp: (g: number) =>')
   })
 
-  it('AGC pe desktop, stins pe mobil (A2DP)', () => {
-    expect(clientVL).toContain('autoGainControl: !eMobil')
-    expect(clientVL).toContain('echoCancellation: !eMobil')
+  it('AEC/AGC adaptive pe ruta audio (22 aug) — nu mai sunt legate orbește de eMobil', () => {
+    expect(clientVL).toContain('autoGainControl: procesare')
+    expect(clientVL).toContain('echoCancellation: procesare')
+    expect(clientVL).not.toContain('echoCancellation: !eMobil')
   })
 
   it('ChatPanel: slider preamp persistat, legat de handle', () => {

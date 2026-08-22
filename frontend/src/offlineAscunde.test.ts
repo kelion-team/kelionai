@@ -22,8 +22,11 @@ const chat = codViu('components/ChatPanel.tsx')
 const stage = codViu('pages/Stage.tsx')
 
 describe('offline: funcțiile de internet nu se afișează (ChatPanel)', () => {
-  it('microfonul (o singură definiție, compozitor + mașină) e null offline', () => {
-    expect(chat).toMatch(/const micButton = \(cls: string\) =>\s*!online \? null : \(/)
+  it('microfonul offline există DOAR cu urechea locală (kitul, 22 aug) — altfel null', () => {
+    // Evoluția regulii: până la kit, offline = fără microfon (funcție de
+    // internet). Cu urechea Whisper locală în cache, microfonul E o funcție
+    // offline reală — butonul apare doar când chiar merge (anti-„doar poze").
+    expect(chat).toMatch(/const micButton = \(cls: string\) =>\s*!online && !urecheaLocalaGata \? null : \(/)
   })
 
   it('microfonul din modul mașină stă și el după `online`', () => {
@@ -42,12 +45,15 @@ describe('offline: funcțiile de internet nu se afișează (ChatPanel)', () => {
     expect(chat).toMatch(/function onDropFiles\(e: ReactDragEvent\): void \{\s*if \(!esteConectat\(\)\) \{\s*e\.preventDefault\(\)\s*return\s*\}/)
   })
 
-  it('vocea se ÎNCHIDE pe offline (nu doar se ascunde butonul) și revine la net', () => {
-    // Blocantul verificatorului: butonul ascuns + urechea vie = microfon fără
-    // oprire. Efectul pe `online` stinge sesiunea (fără micManualOff — omul
-    // n-a ales oprit), iar ensureMic refuză pornirea offline.
-    expect(chat).toMatch(/if \(online\) \{\s*if \(!micManualOffRef\.current\) void ensureMicRef\.current\(\)\s*return\s*\}/)
+  it('vocea ONLINE se ÎNCHIDE pe offline, iar urechea LOCALĂ îi ia locul (kitul, 22 aug)', () => {
+    // Blocantul verificatorului rămâne acoperit: sesiunea de server se stinge
+    // la căderea netului (fără micManualOff — omul n-a ales oprit), ensureMic
+    // refuză pornirea offline; în plus, urechea Whisper locală pornește ea
+    // (din cache, fără rețea), cu buton viu și half-duplex față de gura Piper.
+    expect(chat).toMatch(/urecheaLocalaRef\.current\?\.stop\(\)[\s\S]{0,300}if \(!micManualOffRef\.current\) void ensureMicRef\.current\(\)/)
     expect(chat).toMatch(/vlGeneratieRef\.current\+\+[\s\S]{0,400}micRef\.current\?\.stop\(\)/)
+    expect(chat).toMatch(/void pornesteUrecheaLocalaRef\.current\(\)/)
+    expect(chat).toMatch(/if \(piperVorbeste\(\)\) return/)
     expect(chat).toMatch(/if \(!esteConectat\(\)\) return\s*\n\s*if \(micRef\.current \|\| micStartingRef\.current \|\| micManualOffRef\.current\) return/)
   })
 

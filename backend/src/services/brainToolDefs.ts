@@ -243,7 +243,7 @@ export const CARD_GATA_TOOL: Tool = {
 export const BUILD_SOFTWARE_TOOL: Tool = {
   name: 'build_software',
   description:
-    "ADMIN ONLY. Queue a build order for the autonomous constructor: the VPS worker builds it (with build+tests) and opens a PR; the owner merges. Use when the owner orders new software, OR gives a task that plainly requires changing the app's code or behavior EVEN WITHOUT the word «construiește» (e.g. «mută avatarul în stânga», «textul e acoperit, găsește o modalitate», «repară Y», «fă butonul să facă X») — for the owner a task about the app means ACT, not talk, so queue it here instead of merely discussing it or promising it. ROUTING RULE: the constructor receives an explicit OR implicit build/repair order for the app — NEVER for an ordinary question or chat request (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation. When a request would change the product and you are unsure between talking and building, BUILD. Confirm 'Am preluat cerința.' ONLY when the job is truly queued — never on a failed/rejected queue.",
+    "ADMIN ONLY. THIS IS HOW YOU CALL DEVIN — the app's external constructor (when the Devin key is configured, EVERY order queued here is executed by DEVIN: isolated session, branch off master, PR back to master, the owner merges; the PR link comes back into the chat). So when the owner asks whether Devin exists / is present / can take orders, the TRUE answer is YES — through this very tool; Devin IS part of your tools via build_software, and Jules is NOT the constructor. Queue a build order: Use when the owner orders new software, OR gives a task that plainly requires changing the app's code or behavior EVEN WITHOUT the word «construiește» (e.g. «mută avatarul în stânga», «textul e acoperit, găsește o modalitate», «repară Y», «fă butonul să facă X») — for the owner a task about the app means ACT, not talk, so queue it here instead of merely discussing it or promising it. ROUTING RULE: the constructor receives an explicit OR implicit build/repair order for the app — NEVER for an ordinary question or chat request (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation. When a request would change the product and you are unsure between talking and building, BUILD. Confirm 'Am preluat cerința.' ONLY when the job is truly queued — never on a failed/rejected queue.",
   input_schema: { type: 'object', properties: { order: { type: 'string', description: "The build order, in the owner's own words." } }, required: ['order'] },
 }
 
@@ -694,7 +694,7 @@ export const JULES_REPOS_TOOL: Tool = {
 export const JULES_TASK_TOOL: Tool = {
   name: 'jules_task',
   description:
-    "ADMIN ONLY. Give Jules (Google's official async coding agent) a task on a connected repo: it works in an isolated Google VM and opens a PR. The merge stays with the owner. Use jules_repos first for the exact source name.",
+    "ADMIN ONLY. NOT the constructor — DEVIN is (use build_software for any repair/code order; this tool REFUSES while Devin is configured). Jules is a silent backup coding agent, callable only when the owner explicitly names Jules and Devin is unconfigured. Use jules_repos first for the exact source name.",
   input_schema: {
     type: 'object',
     properties: {

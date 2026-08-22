@@ -74,4 +74,29 @@ describe('lanțul Devin — fiecare za, pe cod viu', () => {
     expect(dispecer).toMatch(/PR gata: \$\{prog\.prUrl\}/)
     expect(dispecer).toMatch(/instiinteazaAdmin\('scris', `Devin a terminat ordinul/)
   })
+
+  it('za 8: erorile NU pleacă la Jules — jules_task refuză cât cheia Devin e pusă', () => {
+    // Owner, 22 aug, măsurat pe live: „kelion trimite catre jules err si nu
+    // lui devin". Poarta e în COD (adminTools), nu în fișa uneltei — modelul
+    // alegea singur jules_task pentru reparații.
+    const adminTools = codViu('services/adminTools.ts')
+    expect(adminTools).toMatch(/case 'jules_task': \{\s*if \(config\.devinKey\) \{/)
+    expect(adminTools).toMatch(/constructorul_e_devin/)
+    // ...iar fișa spune adevărul, ca modelul să nu-l mai aleagă:
+    const defs = codViu('services/brainToolDefs.ts')
+    expect(defs).toMatch(/NOT the constructor — DEVIN is/)
+  })
+
+  it('za 9: inventarul ȘTIE că Devin e constructorul (măsurat pe live: „Devin nu face parte din uneltele noastre")', () => {
+    // Captura ownerului (V7.6): întrebat dacă Devin e prezent, modelul a negat
+    // — corect după inventarul de ATUNCI: nicio unealtă nu purta numele Devin
+    // (dispecerul stă în spatele lui build_software). Fișa + registrul spun
+    // acum adevărul, iar negarea măsurată e în gardul anti-negare.
+    const defs = codViu('services/brainToolDefs.ts')
+    expect(defs).toMatch(/THIS IS HOW YOU CALL DEVIN/)
+    const registru = codViu('services/brainCapabilities.ts')
+    expect(registru).toMatch(/dă ordinul constructorului DEVIN/)
+    const negare = codViu('services/negareUnelte.ts')
+    expect(negare).toMatch(/devin\\s\+nu\\s\+face\\s\+parte\\s\+din\\s\+unelte/)
+  })
 })

@@ -341,11 +341,11 @@ describe('LACĂT — AEC half-duplex: microfonul tace cât Kelion vorbește (own
     // NOU de zerouri (nu mută bufferul capturii). Refactor 16 aug: extras în
     // `poarta` ca bargraful urechii să raporteze EXACT aceeași decizie care taie
     // trimiterea (truncherea half-duplex e vizibilă, măsurată).
-    expect(/const poarta = kelionAudibil\(\)/.test(vl)).toBe(true)
+    expect(/const poarta = !procesareActiva && kelionAudibil\(\)/.test(vl)).toBe(true) // 22 aug: poarta doar fără AEC
     expect(/const la16k = poarta \? new Float32Array\(ds\.length\) : ds/.test(vl)).toBe(true)
   })
 
-  it('AEC pornit pe desktop, stins DOAR pe mobil (echoCancellation: !eMobil)', () => {
+  it('AEC ADAPTIV pe ruta audio (contractul din 22 aug)', () => {
     // ISTORIA CONTRACTULUI: pe 11 aug s-a pinuit `false` peste tot (procesarea
     // WebRTC rupea A2DP pe Android, iar barge-in-ul serverului era OFF — prețul
     // ecoului părea zero). Pe 15 aug prețul a devenit real: VAD-ul sesiunii live
@@ -354,7 +354,13 @@ describe('LACĂT — AEC half-duplex: microfonul tace cât Kelion vorbește (own
     // anulează echo". Adevărul nou, ținut și de lacătul din verifica-gemini:
     // AEC pe desktop (modul-apel nu există acolo), brut pe mobil (A2DP trăiește),
     // și poarta half-duplex rămâne peste amândouă.
-    expect(/echoCancellation:\s*!eMobil/.test(vl)).toBe(true)
+    // CONTRACTUL NOU (owner, 22 aug: „identifica toate optiunile de device…
+    // ok executa"): procesarea decisă de rută — desktop ON; mobil ON doar
+    // fără Bluetooth CERT (rutaAudio.ts). Regula 11 aug (BT+procesare rupe
+    // A2DP) e ținută prin gard, nu prin stingerea oarbă.
+    expect(/const procesare = !eMobil \|\| \(await faraBluetoothSigur\(\)\)/.test(vl)).toBe(true)
+    expect(/echoCancellation:\s*procesare/.test(vl)).toBe(true)
+    expect(/echoCancellation:\s*!eMobil/.test(vl)).toBe(false)
     expect(/eMobil = \/Android\|iPhone\|iPad\|Mobile\/i\.test\(navigator\.userAgent\)/.test(vl)).toBe(true)
   })
 })
