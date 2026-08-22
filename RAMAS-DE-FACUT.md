@@ -300,7 +300,45 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               interzice? RĂMAS pt. bifă: 3 agenți + merge + măsurat live
               (pulsVoce.usiCuDoc/predariEcran + proba pe dispozitiv).
       - [ ] 6. tastatura opțională (input scris, output tot voce)
-      - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
+      - [ ] 7. offline: probe (ureche/gură/RO) + rezerva — CARTOGRAFIAT de
+              cercetaș (22 aug noaptea, totul cu fișier:linie) și TĂIAT în
+              felii; ordinea spec-ului (§12: „probele, apoi implementarea").
+              STAREA REALĂ DE AZI, măsurată pe cod: creierul local (gemma-2-9b
+              WebLLM) + auto-download invizibil + arbitrul de conexiune (ping
+              real /health, nu navigator.onLine) EXISTĂ și sunt cablate; gura
+              offline = vocea BROWSERULUI (speechSynthesis), NU Piper — și NU
+              mișcă buzele avatarului (nu trece prin getVoiceLevel — exact
+              predicția §9); urechea offline NU există (Whisper/ONNX scoase la
+              restaurare; Web Speech API exclus de spec — trimite la Google;
+              calea nativă Android BLOCATĂ de ambalajul TWA — nu există punte
+              JS↔nativ); Chirp e viu ca gură de rezervă când Live e mort cu
+              net viu; lanțul vocal nu are niciun gard esteConectat() — se
+              reînnoadă la infinit contra unui server inaccesibil în loc să
+              predea modului offline. REPARAT PE LOC (docs-vs-cod): manualul
+              LIVE promitea userului Piper + Vosk + nativ Android (niciunul în
+              tree) — rescris la adevăr; paragraful cățelului adus la zi
+              (pașii 2/4 live). FELIILE (fiecare cu criteriu de măsurare,
+              raportul cercetașului în istoricul sesiunii):
+              — A: PROBELE pe ce există (proba pe DISPOZITIVUL owner-ului:
+                creierul pornește în avion mode; 10 ture RO tastate cu barem
+                scris ÎNAINTE; vocea browserului sună pe telefon; buzele nu
+                mișcă — confirmare vizuală; contorul de eșecuri) + restanța
+                de teste pe autoDescarcareaPermisa (rândul mai vechi).
+              — B (decizie OWNER): gura Piper WASM + lip-sync real (PCM →
+                alimenteazaNivelVoce → buzele mișcă; cusătura există, e făcută
+                pentru Live). ATENȚIE: reintroduce ONNX-runtime în browser —
+                exact tehnologia care a picat pe 21 aug și a cerut
+                RESTAURAREA; nu se construiește fără acordul lui explicit.
+              — C (decizie OWNER): urechea offline — C1 Vosk WASM (~50 MB,
+                precizie RO „nu pot verifica"), C2 nativ Android (cere APK cu
+                punte, proiect separat — azi TWA), C4 = FĂRĂ ureche (spec §10
+                o susține: tastatura sare deliberat veriga slabă; offline =
+                scrii → auzi). Recomandarea cercetașului: C se DECIDE, nu se
+                construiește orbește.
+              — D (după B + decizie): scoaterea totală a lui Chirp —
+                condiționată de o gură de rezervă pe cazul „Live mort, net
+                viu" (azi Chirp e ultima gură acolo; scos fără înlocuitor =
+                muțenie TĂCUTĂ exact când omul are nevoie).
       [NOTĂ 21 aug — propoziția veche „Voce-only: încă neîncepută" e DEPĂȘITĂ:
       pasul 1 (un singur motor) e bifat mai sus, CONSTRUIT și LIVE v6.2; pasul 6
       (input scris → output voce) funcționează de facto pe aceeași cale cât
