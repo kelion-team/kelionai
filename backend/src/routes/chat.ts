@@ -66,7 +66,7 @@ import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
-import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta } from '../services/brainCapabilities.js'
+import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta, eSqlDeCitire } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
@@ -2817,12 +2817,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       'goleste_monitorul', 'zoom_monitor', 'arata_pe_grafic',
     ])
     // DB_QUERY: numele singur nu spune dacă e citire sau scriere (tensiunea
-    // (e), închisă pe același ordin: SQL-ul decide). SELECT/WITH/SHOW/EXPLAIN
-    // = citirea reluabilă a cazului fondator al plasei (db_query ×18 → plasa
-    // rămâne vie); orice altceva = efect extern — nu se re-execută la reluare
-    // și omul e avertizat. Ce nu se poate parsa se tratează ca SCRIERE
-    // (direcția sigură a erorii).
-    const eSqlDeCitire = (sql: string): boolean => /^\s*(select|with|show|explain)\b/i.test(sql)
+    // (e), închisă pe același ordin: SQL-ul decide, cu predicatul ÎNTĂRIT din
+    // brainCapabilities — verificatorul a demonstrat că prefixul singur minte
+    // (WITH+INSERT, EXPLAIN ANALYZE, „select 1; update"). Citirea = reluabilă
+    // (cazul fondator al plasei — db_query ×18 — trăiește); scrierea = efect
+    // extern (nu se re-execută, omul e avertizat); neparsabil = scriere.
     let dbQueryAScris = false
     // EFECT EXTERN = ce nu are voie să se execute de două ori (verdictele
     // agenților lot B: gardul anti-re-execuție pe „orice unealtă" omora cazul

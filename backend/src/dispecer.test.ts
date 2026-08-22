@@ -10,6 +10,7 @@ import {
   stareDispecer,
   _resetDispecer,
 } from './services/dispecer.js'
+import { eSqlDeCitire } from './services/brainCapabilities.js'
 
 // ── THE DISPATCHER (Adrian, Aug 1: „ce se întâmplă când vor fi zeci sau
 // sute de useri? … să scaleze pe o pungă comună") ────────────────────────────
@@ -163,9 +164,27 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
     // DB_QUERY pe SQL (tensiunea (e), închisă 22 aug pe ordinul „finalizeaza
     // tot"): SELECT-ul rămâne reluabil (cazul fondator db_query ×18 → plasa
     // TRĂIEȘTE), scrierea armează gardul + avertismentul; neparsabil = scriere.
-    expect(chat).toMatch(/const eSqlDeCitire = \(sql: string\): boolean => \/\^\\s\*\(select\|with\|show\|explain\)\\b\/i\.test\(sql\)/)
+    // Predicatul e EXPORTAT (brainCapabilities) — probat EXECUTABIL mai jos,
+    // nu doar pinuit ca text (verificatorul a demonstrat că prefixul minte).
+    expect(chat).toMatch(/scrie = !eSqlDeCitire\(String\(/)
     expect(chat).toMatch(/if \(scrie\) \{\s*\n\s*dbQueryAScris = true\s*\n\s*unelteEfectIncercate\.push\(name\)/)
     expect(chat).toMatch(/d\.nume === 'db_query' \? dbQueryAScris : eUnealtaCuEfectExtern\(d\.nume\)/)
+  })
+  it('eSqlDeCitire nu se lasă mințit de prefix (probele verificatorului, rulate pe funcția vie) și păzește și scutul banilor din db.ts', () => {
+    // cazul fondator al plasei rămâne CITIRE (reluabil):
+    expect(eSqlDeCitire('SELECT * FROM build_jobs ORDER BY id DESC LIMIT 5')).toBe(true)
+    expect(eSqlDeCitire('  select count(*) from messages')).toBe(true)
+    // cele 5 forme de scriere deghizată, demonstrate de verificator:
+    expect(eSqlDeCitire('WITH ins AS (INSERT INTO x VALUES (1) RETURNING id) SELECT * FROM ins')).toBe(false)
+    expect(eSqlDeCitire("with d as (delete from build_jobs where id=1 returning id) select count(*) from d")).toBe(false)
+    expect(eSqlDeCitire("select 1; update users set role='admin' where email='x'")).toBe(false)
+    expect(eSqlDeCitire('EXPLAIN ANALYZE INSERT INTO x VALUES (1)')).toBe(false)
+    expect(eSqlDeCitire('SELECT * INTO copie FROM users')).toBe(false)
+    // scutul tabelelor protejate din db.ts folosește ACELAȘI predicat (înainte
+    // judeca primul cuvânt și „WITH x AS (UPDATE wallets …)" îl ocolea):
+    const db = readFileSync(fileURLToPath(new URL('./db.ts', import.meta.url)), 'utf8')
+    expect(db).toMatch(/const eCitire = eSqlDeCitire\(text\)/)
+    expect(db).not.toMatch(/primulCuvant === 'SELECT'/)
     // ARMAREA + break-ul (contra-exemplul CE-1 al verificatorului: fără astea,
     // flag-ul e veșnic false și toate celelalte lacăte rămân verzi degeaba).
     expect(chat).toMatch(/if \(!r && unelteEfectIncercate\.length > unelteLaStart\) \{\s*faptaInIncercareEsuata = true\s*break\s*\}/)

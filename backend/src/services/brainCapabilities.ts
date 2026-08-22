@@ -239,6 +239,21 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
 /** Grupul de exclusivitate pentru o unealtă de chat. `undefined` înseamnă o
  *  citire explicit verificată drept independentă; orice altă unealtă împarte
  *  coada `efect` cu scrierile și interacțiunile de browser/monitor. */
+/** SQL-ul e o CITIRE pură? Trei condiții, toate necesare (verificatorul din
+ *  22 aug a demonstrat că prefixul singur MINTE): prefix de citire, niciun
+ *  cuvânt de scriere NICĂIERI (WITH poate împacheta INSERT — Postgres 9.1+;
+ *  EXPLAIN ANALYZE chiar execută DML-ul; SELECT INTO creează tabel) și fără
+ *  a doua instrucțiune (simple query protocol le-ar rula pe amândouă).
+ *  Direcția erorii e cea sigură: un SELECT cu literalul '%delete%' pică spre
+ *  „scriere" — pierde doar reluarea și primește avertisment, nu minte. */
+export function eSqlDeCitire(sql: string): boolean {
+  return (
+    /^\s*(select|with|show|explain)\b/i.test(sql) &&
+    !/\b(insert|update|delete|merge|drop|truncate|alter|create|grant|revoke|copy|call|do|vacuum|refresh|into)\b/i.test(sql) &&
+    !/;\s*\S/.test(sql)
+  )
+}
+
 export function grupaExecutieUnealta(nume: string): 'efect' | undefined {
   return UNELTE_CITIRE_PARALELE.has(nume) ? undefined : 'efect'
 }
