@@ -45,7 +45,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // rămâne rapidă — fără apel de rețea pe fiecare trimitere.
     const ev = evalueazaOrdin(order)
     if (!ev.trece) return reply.code(400).send({ error: 'ordin_respins', motiv: ev.motiv })
-    const id = await createBuildJob(user.email, order)
+    // Creierul gândește MAI ÎNTÂI pentru Devin — planul se anexează ordinului.
+    const { planificaOrdinConstructor } = await import('../services/devinConstructor.js')
+    const orderCuPlan = await planificaOrdinConstructor(order)
+    const id = await createBuildJob(user.email, orderCuPlan)
     if (!id) return reply.code(500).send({ error: 'db_indisponibil' })
     // PORNIRE IMEDIATĂ (owner, 22 aug: ordinul din PANOU nu pornea dispecerul —
     // doar cel din chat o făcea, iar ordinul aștepta bucla lentă de autonomie).

@@ -89,6 +89,9 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     return { filed: 0 }
   }
 
+  // Planificarea creierului pentru Devin — la fiecare ordin de auto-vindecare.
+  const { planificaOrdinConstructor } = await import('./devinConstructor.js')
+
   let filed = 0
 
   // ── ERORILE RAPORTATE DIN BROWSER (F12/consolă) ─────────────────────────────
@@ -118,7 +121,8 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
       `Verifică: npm --prefix backend run build (+ test dacă atingi backend), ` +
       `npm --prefix frontend run build dacă atingi frontend.`
 
-    const id = await createBuildJob('kelion-autovindecare', order)
+    const orderCuPlan = await planificaOrdinConstructor(order)
+    const id = await createBuildJob('kelion-autovindecare', orderCuPlan)
     if (id) {
       await saveKv(key, JSON.stringify({ at: Date.now(), job: id, count: e.count }))
       filed += 1
@@ -143,7 +147,8 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
     if (await loadKv(key)) continue // deja trimis — nu duplicăm
 
     const ordinLive = ordinSimptomLive(s.fel, s.message, s.count, s.sampleUrl)
-    const id = await createBuildJob('kelion-autovindecare-live', ordinLive)
+    const ordinLiveCuPlan = await planificaOrdinConstructor(ordinLive)
+    const id = await createBuildJob('kelion-autovindecare-live', ordinLiveCuPlan)
     if (id) {
       await saveKv(key, JSON.stringify({ at: Date.now(), job: id, fel: s.fel, count: s.count }))
       filed += 1

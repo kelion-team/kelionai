@@ -248,7 +248,9 @@ export class SelfHealDecisionEngine {
         `și rescrie curat modulul responsabil — fără petice. NU schimba nimic în afara cauzei.\n` +
         `Verifică: build + teste (backend și, dacă atingi, frontend).`
 
-      const jobId = await createBuildJob(scope, orderPrompt)
+      const { planificaOrdinConstructor } = await import('./devinConstructor.js')
+      const orderPromptCuPlan = await planificaOrdinConstructor(orderPrompt)
+      const jobId = await createBuildJob(scope, orderPromptCuPlan)
       if (jobId) {
         await saveKv(cheieFiled, JSON.stringify({ at: Date.now(), job: jobId, count: totalCount }))
         filed += 1

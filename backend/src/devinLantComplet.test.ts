@@ -32,9 +32,10 @@ const dispecer = codViu('services/devinConstructor.ts')
 const index = codViu('index.ts')
 
 describe('lanțul Devin — fiecare za, pe cod viu', () => {
-  it('za 1: ordinul din chat intră prin build_software cu poarta calității + coada dedup', () => {
+  it('za 1: ordinul din chat intră prin build_software cu poarta calității, plan de creier + coada dedup', () => {
     expect(chat).toMatch(/case 'build_software':[\s\S]{0,1600}evalueazaOrdin\(order\)/)
-    expect(chat).toMatch(/case 'build_software':[\s\S]{0,2600}createBuildJob\(email, order\)/)
+    expect(chat).toMatch(/case 'build_software':[\s\S]{0,1600}planificaOrdinConstructor\(order\)/)
+    expect(chat).toMatch(/case 'build_software':[\s\S]{0,2600}createBuildJob\(email, orderCuPlan\)/)
   })
 
   it('za 2: comanda PORNEȘTE Devin imediat — nu așteaptă ora buclei de autonomie', () => {

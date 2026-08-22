@@ -4370,7 +4370,12 @@ async function runTool(
           })
         }
       }
-      const jobId = await createBuildJob(email, order)
+      // Creierul (Gemini) gândește MAI ÎNTÂI — Devin pornește cu un plan
+      // anexat, nu cu ordinul gol. Legătura bidirecțională: constructorul
+      // pornește din gândirea creierului și raportează înapoi PR-ul în chat.
+      const { planificaOrdinConstructor } = await import('../services/devinConstructor.js')
+      const orderCuPlan = await planificaOrdinConstructor(order)
+      const jobId = await createBuildJob(email, orderCuPlan)
       if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
 
       // Trigger the constructor worker immediately in the background so the order executes right away

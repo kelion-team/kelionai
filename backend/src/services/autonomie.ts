@@ -689,7 +689,9 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
       const order = String(args.order ?? '').trim()
       const evaluare = evalueazaOrdin(order)
       if (!evaluare.trece) return JSON.stringify({ error: 'ordin_respins', motiv: evaluare.motiv })
-      const job = await createBuildJob(email, order)
+      const { planificaOrdinConstructor } = await import('./devinConstructor.js')
+      const orderCuPlan = await planificaOrdinConstructor(order)
+      const job = await createBuildJob(email, orderCuPlan)
       return JSON.stringify(job ? { ok: true, job } : { error: 'db_indisponibil' })
     }
     case 'browser_open': return scurt(await browserOpen(email, baseUrl, String(args.url ?? '')))
@@ -1435,7 +1437,9 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       await scrieStare(s.cod, { job: 0, incercari: st.incercari, gata: true })
       return { pornit: false, motiv: `${s.cod}: netrimis constructorului — ${motiv}` }
     }
-    const id = await createBuildJob('kelion-autonom', ordin)
+    const { planificaOrdinConstructor } = await import('./devinConstructor.js')
+    const ordinCuPlan = await planificaOrdinConstructor(ordin)
+    const id = await createBuildJob('kelion-autonom', ordinCuPlan)
     if (!id) return { pornit: false, motiv: 'baza de date n-a răspuns' }
     if (/^C\d+$/.test(s.cod)) {
       await actualizeazaCerinta(Number(s.cod.slice(1)), { stare: 'in_lucru', job_id: id }).catch(() => {})

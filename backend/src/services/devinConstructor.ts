@@ -58,6 +58,34 @@ export function construiestePromptDevin(orderText: string, jobId?: number): stri
   ].join('\n')
 }
 
+import { rationeaza } from './creierRationament.js'
+
+/** Creierul de raționament (Gemini) face un plan înainte ca Devin să-și
+ *  consume sesiunea. Rezultatul se anexează ordinului, ca Devin să pornească
+ *  cu contextul gândirii deja făcut. Dacă creierul cade, ordinul intră gol
+ *  (best-effort — nu oprim constructorul pentru o eroare de raționament). */
+export async function planificaOrdinConstructor(orderText: string): Promise<string> {
+  if (!orderText.trim()) return orderText
+  const prompt = [
+    'Ești creierul de raționament al aplicației Kelionai. Constructorul extern (Devin) va primi ordinul de mai jos.',
+    'Înainte să pornească Devin, fă un plan concis pentru el:',
+    '1. Ce fișiere/arhitectură să verifice (folosește referințe la CONSTRUCTOR_SCHEMA.md, AI-HANDOFF.md, CLAUDE.md, AGENTS.md).',
+    '2. Ce anume să modifice și ce să NU modifice.',
+    '3. Care porți trebuie să treacă (tsc, vitest, verifica-sintaxa, verifica-hardcodari, build frontend).',
+    '4. Branch `kelion/job-<id>` și PR pe master; NU merge.',
+    'Răspunde în cel mult 800 de cuvinte, clar și direct, în română sau engleză după limb ordinului.',
+    '',
+    `Ordinul: ${orderText}`,
+  ].join('\n')
+  try {
+    const plan = await rationeaza(prompt, { ruta: 'constructor-plan', treapta: 'plan', maxTokens: 1200 })
+    return `PLAN (făcut de creierul Kelion, înainte de Devin):\n${plan.trim()}\n\n---\n\nORDIN ORIGINAL:\n${orderText}`
+  } catch (e) {
+    console.error('[devin] planificare eșuată:', String(e).slice(0, 160))
+    return orderText
+  }
+}
+
 export interface ProgresDevin {
   /** Textul pentru bară/monitor — MĂSURAT (stare · minute · ACU), fără procent inventat. */
   bara: string
