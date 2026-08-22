@@ -148,6 +148,7 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 | `lang.ts` | Detecție limbă deterministă server-side |
 | `pronounce.ts` | Mod academic: pronunție acronime litere-cu-litere |
 | `paznic.ts` | Ochii care văd defectele în timp real: strânge loguri, health, client errors, build jobs; deduplică și expune `/api/admin/paznic` |
+| `dispecerPaznic.ts` | Execută acțiunea propusă de paznic: notifică admin, selfHeal sau trimite constructorului |
 | `openBanking.ts` | Citește plăți Revolut Pro și atribuie top-up-uri după cod |
 | `autonomy.ts` | Lesa autonomiei: `budgetCheck` (20/24h), `sameFailure` (stop la eșec repetat) |
 | `commands.ts` | Interpretor comenzi dispozitiv server-side (cameră/monitor) — instant, fără cost model |

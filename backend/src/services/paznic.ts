@@ -12,6 +12,7 @@ import { recentLogs } from './logbuffer.js'
 import { problemeGlobaleAcum, type ProblemaKelion } from './autodiagnostic.js'
 import { systemHealth } from './health.js'
 import { recentClientErrorRows, loadKv, saveKv } from '../db.js'
+import { dispecereazaEvenimente } from './dispecerPaznic.js'
 
 export type NivelPaznic = 'critic' | 'atentie' | 'info'
 export type ActiunePaznic = 'selfHeal' | 'constructor' | 'notifica' | 'monitorizeaza'
@@ -216,7 +217,11 @@ export function pornestePaznic(ms = 60_000): () => void {
     if (rulareInCurs) return
     rulareInCurs = true
     try {
-      await cicluPaznic()
+      const raport = await cicluPaznic()
+      if (raport.evenimente.length) {
+        const actiuni = await dispecereazaEvenimente(raport.evenimente)
+        for (const a of actiuni) if (!a.ok) console.error('[paznic] acțiune eșuată:', a)
+      }
     } catch (e) {
       console.error('[paznic] ciclu eșuat:', e)
     } finally {

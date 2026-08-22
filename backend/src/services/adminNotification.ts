@@ -12,6 +12,8 @@ export type AdminNotificationType =
   // ajunge LA OM (panou + push pe telefon), nu doar în coloana de stare.
   | 'cerinta_live'
   | 'cerinta_picata'
+  // Bucla paznicului — evenimente critice/atentie descoperite în timp real.
+  | 'paznic'
 
 export interface AdminNotification {
   id?: number
