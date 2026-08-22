@@ -3132,13 +3132,22 @@ export async function saveMessage(
   email: string,
   role: 'user' | 'assistant',
   content: string,
+  /** Timestamp (ms) of the original message, e.g. from an offline sync. */
+  createdAt?: number,
 ): Promise<void> {
   if (!dbEnabled() || !content.trim()) return
   try {
-    await getPool().query(
-      'INSERT INTO messages (user_email, role, content) VALUES ($1, $2, $3)',
-      [email, role, content],
-    )
+    if (typeof createdAt === 'number' && Number.isFinite(createdAt) && createdAt > 0) {
+      await getPool().query(
+        'INSERT INTO messages (user_email, role, content, created_at) VALUES ($1, $2, $3, to_timestamp($4 / 1000.0))',
+        [email, role, content, createdAt],
+      )
+    } else {
+      await getPool().query(
+        'INSERT INTO messages (user_email, role, content) VALUES ($1, $2, $3)',
+        [email, role, content],
+      )
+    }
   } catch {
     // Never break the chat because persistence failed.
   }

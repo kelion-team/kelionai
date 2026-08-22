@@ -1713,8 +1713,10 @@ export default function ChatPanel({
         const acum = Date.now()
         const lat = coordsRef.current?.lat
         const lon = coordsRef.current?.lon
-        if (msg) adaugaTuraSync({ rol: 'user', text: msg, t: acum, lat, lon })
+        // SYNC include textul COMPLET trimis (docBlock + mesaj), nu doar `msg`.
+        if (outgoing.trim()) adaugaTuraSync({ rol: 'user', text: outgoing, t: acum, lat, lon })
         if (acc.trim()) adaugaTuraSync({ rol: 'assistant', text: acc, t: acum })
+        // Întrebarea amânată e cea pe care o poate citi ownerul — `msg` curat.
         if (msg && necesitaNet(msg)) adaugaAmanata({ intrebare: msg, t: acum, lat, lon })
       }
       // GURĂ DE SIGURANȚĂ, DOAR OFFLINE (owner 20 aug: „daca ii scriu si sunt online

@@ -30,7 +30,7 @@ export async function offlineRoutes(fastify: FastifyInstance): Promise<void> {
       const text = typeof t?.text === 'string' ? t.text.trim() : ''
       if (!text) continue
       const rol = t.rol === 'assistant' ? 'assistant' : 'user'
-      await saveMessage(user.email, rol, text)
+      await saveMessage(user.email, rol, text, typeof t?.t === 'number' ? t.t : undefined)
       salvate++
     }
     return reply.send({ ok: true, salvate })
