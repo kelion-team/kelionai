@@ -10,12 +10,21 @@
 > de facto pe aceeași cale (scrii → răspunde cu vocea Live). Nuanță la §5/pasul
 > 2: pe calea GREA vocea trece prin /api/chat unde poartaFaptelor RULEAZĂ —
 > gap-ul real rămas e calea ușoară (transcriptul Live) + reformularea de după
-> unealtă. Pasul 2 (cățelul pe calea ușoară a vocii): CONSTRUIT pe branch
-> 21 aug seara (judecă doar turele pur-ușoare; nota — „nu pot verifica", nu
-> verdict de fals — pe istoric+monitor, nu voce; exempția călătorește cu
-> anunțul de sistem și stă armată cât ușa grea e în zbor), NEmăsurat live —
-> inclusiv ordinea turnComplete/toolCall la Google („nu pot verifica" din
-> repo). Pașii 3–5, 7: neîncepuți; 2b (nota rostită) = decizie owner în RAMAS.
+> unealtă. Pasul 2 (cățelul pe calea ușoară a vocii): MERGE (PR #1323) +
+> PUBLICAT LIVE — măsurat 22 aug 00:0xZ: /api/version → v=ad5dff1, ver 6.7
+> (judecă doar turele pur-ușoare; nota — „nu pot verifica", nu verdict de
+> fals — pe istoric+monitor, nu voce; exempția călătorește cu anunțul de
+> sistem și stă armată cât ușa grea e în zbor). Rămân „nu pot verifica" de
+> aici: ordinea turnComplete/toolCall la Google și prima notă reală — se
+> urmăresc în jurnalul live `[POARTA FAPTELOR][VOCE]` / proba owner-ului.
+> Pasul 3 (trierea în doi): v1 CONSTRUIT pe branch (protocolul în fișa
+> ușii + strângerea rostirilor adresate cât ușa macină + runde de convergență,
+> plafon 2); două FAIL-uri de verificator reparate (re-execuția faptei →
+> istoric+continuareUsa; excepția pusă pe linia moartă → mutată pe
+> cereActiune-ul viu din chat.ts), în re-verificare finală înainte de merge;
+> limitele declarate în RAMAS (injecția în zbor = pas viitor; conversația
+> cât unealta e blocată = „nu pot verifica", se măsoară live).
+> Pașii 4–5, 7: neîncepuți; 2b (nota rostită) = decizie owner în RAMAS.
 > Bifele cu dovadă: RAMAS-DE-FACUT.md.
 
 ---

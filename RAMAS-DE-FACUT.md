@@ -93,8 +93,14 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               (scoaterea totală = pasul 7/Piper). Verificat cu 3 agenți (2 runde
               FAIL reparate: lacătele `taiereManuala`+adresare, ancorele stale,
               bufUser, cursa eraInZbor). RĂMAS: proba pe telefonul owner-ului.
-      - [ ] 2. cățelul (`poartaFaptelor`) legat pe calea voce — CONSTRUIT pe
-              branch (21 aug seara, + reparațiile celor 3 agenți): pe tura
+      - [x] 2. cățelul (`poartaFaptelor`) legat pe calea voce — MERGE (PR
+              #1323) + PUBLICAT LIVE, MĂSURAT 22 aug 00:0xZ: /api/version →
+              v=ad5dff1 (exact commitul merge-ului), ver 6.7, publicat
+              21 aug 23:38:17Z. Ce rămâne „nu pot verifica" de aici (proba
+              pe dispozitiv, la owner / jurnalul VPS): ordinea reală
+              turnComplete/toolCall la Google și prima notă reală a
+              cățelului pe o tură vocală. CONSTRUIT (21 aug seara,
+              + reparațiile celor 3 agenți): pe tura
               vocală PUR-UȘOARĂ, rostirea lui Kelion se judecă pe uneltele
               chiar reușite ale turei (doveziVoceTura); turele cu temei din
               afară NU se judecă — steagul călătorește CU anunțul de sistem
@@ -109,8 +115,7 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               declarate: recall-ul fără clitic („da, am trimis emailul" despre
               tura trecută) primește nota „nu pot verifica" — onestă, nu falsă;
               scurgerile pe turele suprimate greșesc spre fals-negativ (sigur).
-              Lacăte: catelulPeVoce.test.ts (cod viu, anti-M6). RĂMAS pt. bifă:
-              merge + măsurat live (inclusiv ordinea turnComplete/toolCall).
+              Lacăte: catelulPeVoce.test.ts (cod viu, anti-M6).
       - Registre reziduale pas 2 (re-verificatorul, nu blocante): etichetele
         familiilor 10/11 cară fragmente de verdict („nimic nu va mișca",
         „auditul e inventat") care pe varianta vocală contrazic „nu pot
@@ -124,6 +129,37 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               absolută: măsurarea live a fals-pozitivelor (o acuzație falsă
               rostită ar fi mai rea decât tăcerea).
       - [ ] 3. trierea în doi (bucla creierului greu, dus-întors, convergență)
+              — v1 CONSTRUIT pe branch (21 aug noaptea): (a) protocolul §4 în
+              fișa ușii (întreabă întâi 1-2 lucruri care CHIAR mută răspunsul,
+              completează după, STOP la convergență, fără narațiune de proces);
+              (b) rostirile ADRESATE sosite cât ușa macină se strâng
+              (injectiiUsa, aceeași gardă ca la comenzi — ambientalul nu
+              „informează") și la întoarcere creierul greu primește runde de
+              convergență cu ce s-a aflat (plafon 2 — „nu e raliu").
+              REPARAT după FAIL-ul verificatorului (re-execuția faptelor —
+              demonstrase emailul trimis de 2 ori): runda de convergență CARĂ
+              istoricul rundei 1 + instrucțiunea „doar DIFERENȚA"; chat.ts nu
+              mai tratează continuarea (continuareUsa) ca acțiune PE LINIA
+              VIE — cereActiune-ul care armează forteazaFapta/toolChoice=
+              'required' (al 2-lea FAIL al verificatorului dovedise că
+              excepția pusă doar la fazaTurei era cod mort, iar regexul de
+              intenție se aprindea pe însuși șablonul rundei 2: „fă"/„pune");
+              pe continuare, relatarea cinstită a faptei din runda 1 primește
+              „nu pot verifica" (textulNuPotVerifica), nu verdict de fals;
+              runda picată cade pe ultimul răspuns bun (nu raportează „a
+              picat" peste o faptă făcută), proprietar pe triere (două uși
+              concurente nu-și mai fură/șterg injecțiile), contor pulsVoce.
+              LIMITE DECLARATE: injecția ÎN ZBOR în tura /api/chat care deja
+              macină NU există (ar cere un inbox pe tură în chat.ts — pas
+              viitor); dacă modelul Live nu poate conversa cât unealta e
+              blocată, lista rămâne goală și bucla nu rulează („nu pot
+              verifica" din repo — se măsoară live); răspunsurile omului FĂRĂ
+              numele lui Kelion la întrebările puse cât ușa macină nu intră în
+              convergență (garda strictă a numelui, ordinul din 15 aug —
+              consecință declarată). Lacăte: triereInDoi.test.ts (anti-amnezie,
+              anti-forțare, proprietar, ultimBun). RĂMAS pt. bifă: 3 agenți +
+              merge + măsurat live (jurnal „trierea în doi — runda" +
+              pulsVoce.rundeTriere).
       - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)
