@@ -13,6 +13,7 @@ import { problemeGlobaleAcum, type ProblemaKelion } from './autodiagnostic.js'
 import { systemHealth } from './health.js'
 import { recentClientErrorRows, loadKv, saveKv } from '../db.js'
 import { dispecereazaEvenimente } from './dispecerPaznic.js'
+import { runSelfHeal } from './selfHeal.js'
 
 export type NivelPaznic = 'critic' | 'atentie' | 'info'
 export type ActiunePaznic = 'selfHeal' | 'constructor' | 'notifica' | 'monitorizeaza'
@@ -219,7 +220,7 @@ export function pornestePaznic(ms = 60_000): () => void {
     try {
       const raport = await cicluPaznic()
       if (raport.evenimente.length) {
-        const actiuni = await dispecereazaEvenimente(raport.evenimente)
+        const actiuni = await dispecereazaEvenimente(raport.evenimente, { selfHeal: runSelfHeal })
         for (const a of actiuni) if (!a.ok) console.error('[paznic] acțiune eșuată:', a)
       }
     } catch (e) {
