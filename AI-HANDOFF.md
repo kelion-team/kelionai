@@ -1601,6 +1601,45 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    la drop-ul offline; imaginea pe tura offline = notă onestă
    (offlineNoVision en/ro), nu confabulare; autoverificarea nu mai declară
    „stricat" pe proba cu argumente goale (empty_*/missing_*).
+6k. **VALURILE #1333/#1334/#1335 (22 aug ~06:40-07:40Z) — MĂSURAT LIVE:
+   #1333 (merge c6648b36) = v7.7, v=c6648b3, publicat 07:33:34Z; #1334
+   (merge 0ba57d5d) = v7.8, v=0ba57d5, publicat 07:40:31Z; #1335: rândul 8
+   din RAMAS (ordinele 22 aug, ziua) ține măsurătoarea finală.**
+   Conținut, pe scurt:
+   (1) **#1333 — KITUL OFFLINE v1 + „închide monitorul" + Devin în inventar**:
+   gura Piper (`guraOffline.ts`, vocea ro_RO-mihai-medium cu lip-sync, fallback
+   vorbesteLocal) + urechea Whisper (`urecheaOffline.ts` + worker,
+   whisper-large-v3-turbo q4f16 pe WebGPU) + `kitOffline.ts` (auto-download
+   invizibil, gură ro+en întâi, apoi urechea; gardat de autoDescarcareaPermisa);
+   runtime-urile WASM servite DE LA NOI (/ort/ copiat la build de
+   `scripts/copiaza-active-offline.mjs`); cache-urile protejate la update
+   (`transformers-cache` în sw.js + updateCheck). „Închide/golește monitorul"
+   se EXECUTĂ din chat (5 mecanisme măsurate care refuzau: verbe/substantive
+   lipsă în commands.ts, închide/golește absente din ACTION_INTENT,
+   goleste_monitorul în UNELTE_AFISAJ pe runda forțată, poarta care PRESCRIA
+   refuzul, negarea nedetectată — toate reparate). Inventarul ȘTIE că Devin e
+   constructorul (build_software = „THIS IS HOW YOU CALL DEVIN", jules_task
+   gardat cu constructorul_e_devin, negareUnelte prinde „Devin nu face parte").
+   AEC ADAPTIV (rutaAudio.ts: procesare doar fără Bluetooth sigur pe mobil;
+   poarta half-duplex pe drumul fără AEC; serverul află starea reală {aec}).
+   (2) **#1334 — valul vânătorii (toți agenții, ordinul „chatul se truncheaza
+   audio")**: 3 tăieri reale reparate (registerLiveFocus omora Chirp-ul la
+   redeschiderea tăcută a sesiunii Live — acum starea 'tts' cu redare VIE nu
+   se mai atinge; stopVoice scos de pe flap-ul offline; interruptAll doar cu
+   acumulator gol la eroare de flux); capul/taburile monitorului VII (regula
+   .pip cu pointer-events, capturile „doar poze"); clepsidra {executie} pe
+   ORICE unealtă + pe VOCE (turaCreierului STREAMING cu parser incremental
+   de cadre CTRL); cititorul de pagini întărit (plafon 2MB în-flux, cache
+   10 min + dedup în zbor, SSRF per redirect) și AFIȘAT în MonitorPagina.
+   (3) **#1335 — deblocarea publicării**: pachetul-donor @diffusionstudio/
+   piper-wasm (235 MB despachetat) a împins npm ci din Docker spre plafonul
+   de 30 min (măsurat: #1333 publicat în ~14 min în loc de ~8-9) — SCOS;
+   cele 2 fișiere necesare (piper_phonemize.wasm+data, 18,6 MB) COMISE în
+   git sub frontend/public/piper/ (copiaza-active-offline.mjs pică tare dacă
+   lipsesc); jules_repos primește aceeași gardă ca jules_task (măsurat pe
+   live: la „e Devin prezent?" Kelion a listat repo-urile lui Jules);
+   constructor_status răspunde cu câmpul `constructor` MĂSURAT din
+   config.devinKey — „e Devin activ?" nu mai depinde de memoria modelului.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor
