@@ -1383,6 +1383,41 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    (i) registrul de limbă PT e amestecat pt-PT/pt-BR (tu vs. você) — clasă
    veche, cheile noi au urmat tu-ul european; (j) REPARAT — comentariul din era
    cozii la trimiterea-ocupat rescris la realitatea barge-in.
+6c. **JARVIS pasul 2 — cățelul (poarta faptelor) întins pe calea VOCALĂ —
+   MERGE (PR #1323, master ad5dff1d, 21 aug ~23:3xZ; măsurarea live armată,
+   rezultatul se scrie aici DOAR după ce e citit)**: `salveazaTura` rulează
+   `pretentiiFaraFapta` pe textul ROSTIT cu dovezile turei de voce
+   (`doveziVoceTura`); nota se scrie pe ecran+istoric, NU se citește cu voce
+   (§8). Fals-pozitivele găsite de verificatori și reparate ÎNAINTE de merge:
+   relatarea cinstită a unei fapte din ALTĂ tură (`turaCuTemeiDinAfara`) și
+   anunțul de sistem sosit în timpul unei uși grele (`anuntSistemAmanat` —
+   se consumă la prima rostire, nu se pierde); varianta onestă
+   `textulNuPotVerifica` (poartaFaptelor.ts) pentru ce nu e minciună dovedită.
+   Lacăte: catelulPeVoce.test.ts pe COD VIU (lecția anti-M6: se dezbracă
+   întâi comentariile, apoi se potrivesc regexuri ancorate).
+6d. **JARVIS pasul 3 — trierea în doi (PROIECT-CHAT-VOCE §4) — CONSTRUIT pe
+   branch, DOUĂ FAIL-uri de verificator reparate pe rând**: rostirile ADRESATE
+   sosite cât ușa grea macină se strâng (`injectiiUsa`, aceeași gardă ca la
+   comenzi) și la întoarcere creierul primește runde de convergență (plafon 2,
+   proprietar pe ușă — `usaTrierii`). **FAIL 1 (demonstrat: emailul trimis de
+   2 ori)** → runda 2 CARĂ istoricul rundei 1 + „doar DIFERENȚA", declară
+   `continuareUsa`, runda picată cade pe ultimul răspuns bun. **FAIL 2
+   (excepția era COD MORT)** → în chat.ts sunt DOUĂ `cereActiune`; excepția
+   fusese pusă pe cel din fazaTurei (inventar), nu pe cel care armează
+   `forteazaFapta`/toolChoice='required' — iar regexul de intenție se aprinde
+   pe ÎNSUȘI șablonul rundei 2 („fă doar DIFERENȚA", „pune-o scurt"), deci
+   forțarea s-ar fi armat pe textul nostru, nu pe vorbele omului. Reparat:
+   excepția mutată pe linia VIE (`(hasActionIntent(lastUserText) ||
+   turnHasImage) && continuareUsa !== true`), faza rămasă fără excepție
+   (continuarea tot uneltele fazei grele trebuie să le VADĂ), iar demascarea
+   pe continuare folosește `textulNuPotVerifica` (relatarea faptei din runda 1
+   nu e minciună — dovezile au rămas în tura aceea). Lacăte:
+   triereInDoi.test.ts pe cod viu + pin că intenția NU decide singură soarta
+   continuării. Lecție anti-M6 NOUĂ, plătită pe loc: ordinea dezbrăcării
+   comentariilor CONTEAZĂ — întâi liniile `//`, abia apoi blocurile `/* */`;
+   altfel `/api/admin/*` dintr-un comentariu de linie din chat.ts pornește un
+   fals bloc care înghite ~24k de caractere de COD VIU și lacătul „trece" pe
+   cod inexistent.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

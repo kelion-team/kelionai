@@ -30,7 +30,10 @@ describe('plafonul de unelte al furnizorului e garantat structural', () => {
     // creierul". Tăierea la 12 e DOAR pe tura ușoară; când se cere o acțiune
     // (sau modelul escaladează), plafonul redevine cel al furnizorului.
     expect(chat).toMatch(/MAX_PROVIDER_TOOLS = turaUsoara \? PLAFON_UNELTE_USOR : PLAFON_FURNIZOR/)
-    expect(chat).toMatch(/cereActiune = hasActionIntent\(lastUserText\)/)
+    // (excepția `continuareUsa` e a trierii în doi — lacătele ei stau în
+    // triereInDoi.test.ts; aici se pinuiește doar că intenția de acțiune
+    // rămâne temeiul turei de lucru)
+    expect(chat).toMatch(/cereActiune = \(hasActionIntent\(lastUserText\) \|\| turnHasImage\)/)
     expect(chat).toMatch(/baseTools\.filter\(\(t\) => permisaLaVorbire\(t\.name\)\)/)
   })
 

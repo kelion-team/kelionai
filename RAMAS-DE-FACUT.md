@@ -133,8 +133,14 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               convergență cu ce s-a aflat (plafon 2 — „nu e raliu").
               REPARAT după FAIL-ul verificatorului (re-execuția faptelor —
               demonstrase emailul trimis de 2 ori): runda de convergență CARĂ
-              istoricul rundei 1 + instrucțiunea „doar DIFERENȚA", chat.ts nu
-              mai forțează unelte de faptă pe continuare (continuareUsa),
+              istoricul rundei 1 + instrucțiunea „doar DIFERENȚA"; chat.ts nu
+              mai tratează continuarea (continuareUsa) ca acțiune PE LINIA
+              VIE — cereActiune-ul care armează forteazaFapta/toolChoice=
+              'required' (al 2-lea FAIL al verificatorului dovedise că
+              excepția pusă doar la fazaTurei era cod mort, iar regexul de
+              intenție se aprindea pe însuși șablonul rundei 2: „fă"/„pune");
+              pe continuare, relatarea cinstită a faptei din runda 1 primește
+              „nu pot verifica" (textulNuPotVerifica), nu verdict de fals;
               runda picată cade pe ultimul răspuns bun (nu raportează „a
               picat" peste o faptă făcută), proprietar pe triere (două uși
               concurente nu-și mai fură/șterg injecțiile), contor pulsVoce.

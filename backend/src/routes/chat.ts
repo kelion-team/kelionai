@@ -79,6 +79,7 @@ import {
   clasificaRezultatUnealta,
   pretentiiFaraFapta,
   textulDemascarii,
+  textulNuPotVerifica,
   planFaraExecutie,
   TEXT_PLAN_FARA_EXECUTIE,
   type DovadaUnealta,
@@ -1785,10 +1786,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Ușa creierului = acțiune prin definiție: modelul live a decis DEJA că
       // cererea are nevoie de unelte — fără asta, „trimite lista
       // constructorului" pica pe faza de vorbire și creierul doar POVESTEA.
-      // EXCEPȚIA (trierea în doi): runda de CONTINUARE nu mai e „acțiune prin
-      // definiție" — fapta poate fi DEJA făcută în runda 1; forțarea uneltei
-      // aici ar re-executa-o (emailul de 2 ori — verificatorul pasului 3).
-      cereActiune: hasActionIntent(textulTurei) || (req.body?.usaCreierului === true && req.body?.continuareUsa !== true),
+      // Excepția trierii NU stă aici: aici se alege doar FAZA (inventarul de
+      // unelte), iar runda de continuare tot pe faza grea trebuie să meargă,
+      // ca să VADĂ uneltele. Ne-forțarea lor se decide la cereActiune-ul de
+      // execuție (cel care armează forteazaFapta), nu la inventar.
+      cereActiune: hasActionIntent(textulTurei) || req.body?.usaCreierului === true,
     })
     // VOCE = SCRIS COMPLET, DOAR PENTRU OWNER (owner, 19 aug: „egalizate drepturile
     // chat audio cu chat scris" + „doar owner are drepturi pe admin"). O frază
@@ -2703,7 +2705,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // listă: două liste ar diverge, iar prima care ar diverge tăcut ar fi cea
     // care lasă `system_health` să calce iar pe drumul unei fraze.
     const PLAFON_UNELTE_USOR = UNELTE_VORBIRE.length
-    const cereActiune = hasActionIntent(lastUserText) || turnHasImage
+    // EXCEPȚIA TRIERII (JARVIS pasul 3): runda de CONTINUARE a ușii vocale NU
+    // e „acțiune" — fapta poate fi DEJA făcută în runda 1, iar șablonul rundei
+    // conține el însuși „fă"/„pune", deci regexul de intenție s-ar aprinde pe
+    // propriul nostru text, nu pe vorbele omului. Forțarea uneltei aici =
+    // emailul trimis de 2 ori (clasa B#2, demonstrată de verificator).
+    const cereActiune = (hasActionIntent(lastUserText) || turnHasImage) && req.body?.continuareUsa !== true
 // Gemini acceptă 128 unelte; Ollama cloud / altele — plafon 64 (sigur pe tool schema).
     const PLAFON_FURNIZOR = plafonUnelteFurnizor(orChatModel)
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
@@ -3717,7 +3724,11 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       if (!voceAmbianta) {
         const nedovedite = pretentiiFaraFapta(assistantText, doveziUnelte)
         if (nedovedite.length) {
-          const demascare = textulDemascarii(nedovedite)
+          // Pe runda de CONTINUARE a trierii, „pretenția" poate fi RELATAREA
+          // cinstită a faptei din runda 1 (dovezile au rămas în tura aceea) —
+          // verdictul dur „e FALSĂ" ar minți el însuși. Acolo: varianta
+          // cinstită „nu pot verifica" (Legea #1), nu demascarea.
+          const demascare = req.body?.continuareUsa === true ? textulNuPotVerifica(nedovedite) : textulDemascarii(nedovedite)
           try {
             reply.raw.write(demascare)
           } catch {
