@@ -168,6 +168,10 @@ export interface Strings {
   /** `{name}` = file name. */
   docTooLarge: string
   docPrompt: string
+  /** Offline: o imagine atașată nu are drum spre creierul local (text-only).
+   *  OPȚIONALĂ (doar en/ro azi — restul limbilor cad pe fallback-ul en de la
+   *  locul de folosire; clasa B11, declarată în RAMAS). */
+  offlineNoVision?: string
   // ── THE VOICE, HONEST (audit Aug 2: the real reason was thrown away) ─────
   voiceDownTemp: string
   voiceNeedLogin: string
@@ -418,6 +422,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     attRemove: 'Remove attachment',
     docAttachFailed: 'I couldn’t read “{name}” — it was NOT attached.',
     docTooLarge: '“{name}” is too large to attach (the limit is about 18 MB).',
+    offlineNoVision: 'You are offline — I cannot look at images right now (the offline brain is text-only). The picture was not sent anywhere; try again when the connection returns.',
     docPrompt: 'I attached a document — read it and tell me what it contains.',
     voiceDownTemp:
       'My live voice is temporarily unavailable — dictation and typing still work, and I will retry the full voice by myself shortly.',
@@ -639,6 +644,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     attRemove: 'Scoate atașamentul',
     docAttachFailed: 'Nu am putut citi „{name}” — NU a fost atașat.',
     docTooLarge: '„{name}” e prea mare pentru atașare (limita e cam 18 MB).',
+    offlineNoVision: 'Ești offline — nu mă pot uita la imagini acum (creierul offline e doar pe text). Poza n-a plecat nicăieri; încearcă iar când revine conexiunea.',
     docPrompt: 'Am atașat un document — citește-l și spune-mi ce conține.',
     voiceDownTemp:
       'Vocea mea live e momentan indisponibilă — dictarea și scrisul merg, iar eu reîncerc singur vocea completă în curând.',

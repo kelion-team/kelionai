@@ -109,7 +109,11 @@ export function interpreteazaProba(
     // ARGUMENT LIPSĂ/INVALID: unealta cere o INTRARE reală (query, id, text) — nu
     // se poate proba corect cu argumente goale. Onest „nu pot verifica", NU „stricat"
     // (altfel o unealtă perfect funcțională apare roșu doar fiindcă am probat-o gol).
-    if (/\brequired\b|is required|missing (required )?(parameter|argument|field|query|id)|lipse[șs]te.*(argument|parametru|c[âa]mp|intrarea|query|textul|\bid\b)|argument(e|ul)?\s*(lips|invalid|gol|obligatoriu)|obligatoriu|invalid input|invalid arguments|expected .*(argument|parameter)|f[ăa]r[ăa] (query|argument|intrare|text)|trebuie.{0,15}(id|query|text|argument|parametru|intrare|c[âa]mp|valoare)/.test(e))
+    // `^empty_|^missing_`: semnalele scurte ale uneltelor Google (empty_query,
+    // empty_location, missing_text_or_target…) — proba cu argumente goale NU e
+    // „stricat" (C7 al marii verificări le-a băgat pe youtube_search & co. în
+    // proba reală, iar fără ramura asta o unealtă funcțională apărea roșie).
+    if (/^empty_|^missing_|\brequired\b|is required|missing (required )?(parameter|argument|field|query|id)|lipse[șs]te.*(argument|parametru|c[âa]mp|intrarea|query|textul|\bid\b)|argument(e|ul)?\s*(lips|invalid|gol|obligatoriu)|obligatoriu|invalid input|invalid arguments|expected .*(argument|parameter)|f[ăa]r[ăa] (query|argument|intrare|text)|trebuie.{0,15}(id|query|text|argument|parametru|intrare|c[âa]mp|valoare)/.test(e))
       return {
         verdict: 'nu_pot_verifica',
         deCe: 'cere o intrare reală (nu se poate proba corect cu argumente goale)',

@@ -768,6 +768,12 @@ export default function Stage({ user }: { user: User }) {
   // la /health (conexiune.ts), nu din navigator.onLine care minte.
   const online = useConectat()
   const [adminOpen, setAdminOpen] = useState(false)
+  // Meniul „Aplicații" e demontat offline — fără resetul ăsta, `appsOpen`
+  // rămas true îl făcea să SARĂ deschis singur la revenirea netului
+  // (cosmetica semnalată de verificatorul de logică, 22 aug).
+  useEffect(() => {
+    if (!online) setAppsOpen(false)
+  }, [online])
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
   // admin button must not activate either"). armed = the secret is set (in
@@ -1668,10 +1674,12 @@ export default function Stage({ user }: { user: User }) {
         {/* APLICAȚII — trading (doar admin) + Adaptare CV (toți) sub UN buton
             (owner, 13 aug). Meniul se închide la clic pe un element, pe fundal,
             sau re-apăsând butonul. */}
-        {/* OFFLINE: meniul dispare ÎNTREG (owner, 22 aug) — fiecare intrare e o
-            comandă către creierul de pe SERVER (kelion:comanda → /api/chat →
-            unelte Google); fără net, toate ar fi butoane-minciună. Reapare
-            singur când pingul real la /health răspunde iar. */}
+        {/* OFFLINE: meniul dispare ÎNTREG (owner, 22 aug) — intrările sunt
+            comenzi către creierul de pe SERVER (kelion:comanda → /api/chat →
+            unelte Google), cu două excepții locale mărunte care nu justifică
+            meniul (copiază-scenariul = clipboard local; re-clicul pe
+            Tranzacții = închidere locală); fără net, restul ar fi
+            butoane-minciună. Reapare singur când pingul /health răspunde. */}
         {online && (
         <div className="apps-wrap">
           <button

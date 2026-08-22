@@ -251,8 +251,9 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
   // memorie_ia/memorie_lista (citiri din memoria de proiect), admin_vezi
   // (GET pe bucla locală cu legitimație — poarta de admin rămâne poartă).
   // studioul_de_clipuri, propus tot de C7, a fost RESPINS la verificare:
-  // handlerul lui scrie cadrul {scenariu} direct pe fir și clientul pornește
-  // automat generarea (P32) — interacțiune de browser, rămâne în coada efect.
+  // handlerul lui scrie cadrul {scenariu} direct pe fir, iar clientul
+  // salvează scenariul și re-armează butonul 🎬 (generarea pornește la
+  // click-ul omului — P32) — interacțiune de browser, rămâne în coada efect.
   'youtube_search', 'list_notes', 'memorie_ia', 'memorie_lista', 'admin_vezi',
 ])
 
