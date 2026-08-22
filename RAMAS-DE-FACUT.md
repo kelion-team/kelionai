@@ -166,7 +166,14 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               consecință declarată). Lacăte: triereInDoi.test.ts (anti-amnezie,
               anti-forțare pe LINIA VIE, proprietar, ultimBun, pin executabil
               că regexul de intenție nu decide singur soarta continuării).
-      - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce — v1 CONSTRUIT pe
+      - [x] 4. salvarea dovezii + „asul din mânecă" pe voce — PASS dublu
+              adversarial + MERGE (PR #1326) + PUBLICAT LIVE, MĂSURAT 22 aug
+              01:57Z: /api/version → v=577f0fc (exact commitul merge-ului),
+              ver 7.0, publicat 01:37:17Z. Ce rămâne „nu pot verifica" de
+              aici (jurnalul VPS / proba owner-ului): prima sarcină vocală
+              REALĂ în jurnal, garda la close pe fir viu, ordinea
+              toolCall/turnComplete la Google, proba dovada_faptelor pe cont
+              real. v1 CONSTRUIT pe
               branch (22 aug noaptea), apoi REPARAT după runda celor 3 agenți
               (logică FAIL + onestitate FAIL + integrare PASS): (gaura 1)
               starea finală a sarcinii se deriva din doveziVoceTura, care are

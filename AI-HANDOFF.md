@@ -1428,8 +1428,12 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    fals bloc care înghite ~24k de caractere de COD VIU și lacătul „trece" pe
    cod inexistent.
 6e. **JARVIS pasul 4 — salvarea = dovada, „asul din mânecă" pe voce
-   (PROIECT-CHAT-VOCE §7) — v1 CONSTRUIT (22 aug noaptea), în verificarea
-   celor 3 agenți**: cercetașul a măsurat că jurnalul operațional
+   (PROIECT-CHAT-VOCE §7) — PASS dublu adversarial + MERGE (PR #1326) +
+   PUBLICAT LIVE, MĂSURAT 22 aug 01:57Z: /api/version → v=577f0fc (exact
+   commitul merge-ului), ver 7.0, publicat 01:37:17Z (rămân „nu pot
+   verifica" de aici: prima sarcină vocală reală, garda la close pe fir
+   viu, ordinea toolCall/turnComplete, proba dovada_faptelor pe cont real —
+   jurnalul VPS / proba owner-ului)**: cercetașul a măsurat că jurnalul operațional
    (operational_tasks/events, scris de chat.ts la fiecare tură) era
    WRITE-ONLY — zero cititori — iar dovezile uneltelor executate direct de
    sesiunea Live mureau la golirea doveziVoceTura. Construit: cititorul
