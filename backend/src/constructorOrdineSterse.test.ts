@@ -13,15 +13,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const spion = vi.hoisted(() => ({ apeluri: [] as { sql: string; params?: unknown[] }[] }))
 
-vi.mock('pg', () => {
+// Dublură fidelă: pg.Pool și clientul împrumutat sunt EventEmitter-e (dbPool.ts
+// pune ureche pe „error" pe amândouă).
+vi.mock('pg', async () => {
+  const { EventEmitter } = await import('node:events')
   const query = (sql: string, params?: unknown[]) => {
     spion.apeluri.push({ sql, params })
     return Promise.resolve({ rowCount: 0, rows: [] })
   }
-  class Pool {
+  class Pool extends EventEmitter {
     query = query
     async connect() {
-      return { query, release: () => {} }
+      return Object.assign(new EventEmitter(), { query, release: () => {} })
     }
   }
   return { default: { Pool } }
