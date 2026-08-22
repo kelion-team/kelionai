@@ -156,43 +156,55 @@ export default function App() {
             right: 0,
             bottom: 0,
             zIndex: 100002,
-            background: 'rgba(10, 22, 15, 0.92)',
+            background: 'rgba(10, 22, 15, 0.88)',
             color: '#d8f5df',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
-            gap: 16,
-            padding: 24,
+            justifyContent: 'flex-start',
+            paddingTop: 12,
             textAlign: 'center',
             fontSize: 14,
             fontWeight: 600,
+            pointerEvents: 'auto',
           }}
         >
-          <div>🔄 {uiStrings().updateNouAnunt}</div>
           <div
             style={{
-              width: 'min(320px, 80vw)',
-              height: 10,
-              borderRadius: 5,
-              background: '#1f3b2a',
-              overflow: 'hidden',
+              width: '100%',
+              maxWidth: 720,
+              padding: '12px 16px 16px',
+              borderRadius: 12,
+              background: 'rgba(15, 35, 22, 0.95)',
               border: '1px solid #3a6b4a',
             }}
           >
+            <div>🔄 {uiStrings().updateNouAnunt}</div>
             <div
               style={{
-                width: `${Math.round((updateProgress ?? 0) * 100)}%`,
-                height: '100%',
-                background: '#5ee08c',
-                transition: 'width 120ms linear',
+                width: '100%',
+                height: 12,
+                borderRadius: 6,
+                background: '#1f3b2a',
+                overflow: 'hidden',
+                border: '1px solid #3a6b4a',
+                margin: '10px 0',
               }}
-            />
-          </div>
-          <div style={{ fontSize: 12, fontWeight: 400, color: '#a8d4b5' }}>
-            {updateProgress === null
-              ? 'se pregătește…'
-              : `${Math.round((updateProgress ?? 0) * 100)}% — se opresc toate lucrurile`}
+            >
+              <div
+                style={{
+                  width: `${Math.round((updateProgress ?? 0) * 100)}%`,
+                  height: '100%',
+                  background: '#5ee08c',
+                  transition: 'width 120ms linear',
+                }}
+              />
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 400, color: '#a8d4b5' }}>
+              {updateProgress === null
+                ? 'se pregătește…'
+                : `${Math.round((updateProgress ?? 0) * 100)}% — se opresc toate lucrurile`}
+            </div>
           </div>
         </div>
       )}
