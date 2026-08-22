@@ -1427,6 +1427,24 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    altfel `/api/admin/*` dintr-un comentariu de linie din chat.ts pornește un
    fals bloc care înghite ~24k de caractere de COD VIU și lacătul „trece" pe
    cod inexistent.
+6e. **JARVIS pasul 4 — salvarea = dovada, „asul din mânecă" pe voce
+   (PROIECT-CHAT-VOCE §7) — v1 CONSTRUIT (22 aug noaptea), în verificarea
+   celor 3 agenți**: cercetașul a măsurat că jurnalul operațional
+   (operational_tasks/events, scris de chat.ts la fiecare tură) era
+   WRITE-ONLY — zero cititori — iar dovezile uneltelor executate direct de
+   sesiunea Live mureau la golirea doveziVoceTura. Construit: cititorul
+   `dovezileFaptelor` (db.ts, citire picată = „citit:false+motiv") + unealta
+   `dovada_faptelor` (user-scoped; inventar+manual+UNELTE_LIVE — pe voce asul
+   e la un pas, fără ușă; fișa interzice recitarea); tura vocală cu unelte =
+   sarcină LENEȘĂ în jurnal cu evenimente tool_result și stare finală derivată
+   din dovezi (aceeași regulă ca pe scris); metadatele ușii poartă
+   usaCreierului/continuareUsa; demascarea porții = eveniment durabil
+   facts_gate (înainte murea în inelul de log — saveMessage e sărit pe ușă).
+   Limite declarate în RAMAS (verdictul blând al ușii fără unelte — nereparat
+   ca să nu nască `failed` fals; turele fără unelte n-au sarcină). Porți la
+   construcție: tsc 0, 214 fișiere/1928 teste, hardcodări/sintaxă/exporturi
+   verzi; contoare actualizate: registru 123 (brainCapabilities), matrice 125
+   (capabilityEvidence), rând nou de manual.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

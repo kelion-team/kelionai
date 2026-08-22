@@ -166,7 +166,36 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               consecință declarată). Lacăte: triereInDoi.test.ts (anti-amnezie,
               anti-forțare pe LINIA VIE, proprietar, ultimBun, pin executabil
               că regexul de intenție nu decide singur soarta continuării).
-      - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
+      - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce — v1 CONSTRUIT pe
+              branch (22 aug noaptea), în verificarea celor 3 agenți. Găurile
+              MĂSURATE de cercetaș (toate cu fișier:linie): jurnalul
+              operațional era WRITE-ONLY (zero cititori — asul nu putea fi
+              scos); dovezile turei vocale ușoare mureau la golirea
+              doveziVoceTura (nicio urmă durabilă); fapta prin ușă apărea în
+              jurnal identic cu una scrisă (fără marcaj de origine); nota
+              porții faptelor pe tura ușii murea în inelul de log (saveMessage
+              sărit pe eUsaCreierului). CONSTRUIT: (a) cititorul
+              `dovezileFaptelor` în db.ts (per-utilizator, citire picată =
+              „citit:false + motiv", Legea #1) + unealta `dovada_faptelor`
+              (user-scoped, în inventar + manual + UNELTE_LIVE — asul e la UN
+              PAS pe voce, fără să macine ușa; fișa interzice recitarea: pe
+              voce rezumat scurt + show_document); (b) tura vocală cu unelte
+              devine sarcină LENEȘĂ în jurnal (doar când chiar rulează o
+              unealtă), fiecare rezultat clasificat = eveniment tool_result,
+              starea finală derivată din dovezi la închiderea turei (aceeași
+              regulă ca pe scris: succes tehnic fără verificare = unverified);
+              scrieri fire-and-forget înlănțuite (zero latență pe frază);
+              (c) metadatele sarcinii ușii poartă usaCreierului/continuareUsa;
+              (d) demascarea porții = eveniment durabil `facts_gate`.
+              NEREPARAT, declarat (regula #1 — un fals e mai rău decât un
+              blând): verdictul final al ușii fără unelte rămâne
+              „completed/response_delivered" (usaCreierului nu intră în
+              cereActiune-ul verdictului — a-l băga ar face `failed` FALS pe
+              ușile de gândire fără unelte); tura ușoară FĂRĂ unelte cu
+              pretenții demascate de cățel nu are sarcină (nota rămâne doar în
+              istoric — limita lenei declarată). Lacăte: dovadaFaptelor.test.ts
+              (cod viu + funcția pură a derivării). RĂMAS pt. bifă: 3 agenți +
+              merge + măsurat live.
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)
       - [ ] 7. offline: probe (ureche/gură/RO) + rezerva

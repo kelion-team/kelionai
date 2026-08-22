@@ -1001,6 +1001,109 @@ export async function tranzitioneazaSarcinaOperationala(
     client?.release()
   }
 }
+
+// ── DOVADA FAPTELOR — cititorul jurnalului operațional (JARVIS pasul 4, §7:
+// „salvarea = dovada, asul din mânecă"). Până aici jurnalul era write-only:
+// chat.ts scria stări+evenimente pentru fiecare tură, dar nimeni nu le putea
+// SCOATE la provocare. Citirea e per-utilizator (user_email), întoarce doar
+// ce e deja normalizat/igienizat la scriere — niciodată output brut de unealtă.
+export interface DovadaFaptaRand {
+  obiectiv: string
+  stare: string
+  inceput: string
+  incheiat: string | null
+  sursa: string
+  usaCreierului: boolean
+  evenimente: Array<{
+    fel: string
+    unealta: string | null
+    stare: string | null
+    cod: string | null
+    motiv: string | null
+    la: string
+  }>
+}
+
+/** Legea #1: o citire picată se SPUNE (citit:false + motiv), nu se maschează
+ *  într-o listă goală — „nicio dovadă" de la o bază căzută nu înseamnă
+ *  „nicio faptă". */
+export async function dovezileFaptelor(
+  userEmail: string,
+  cate = 10,
+  cauta?: string,
+): Promise<{ citit: true; sarcini: DovadaFaptaRand[] } | { citit: false; motiv: string }> {
+  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e pornită' }
+  const email = String(userEmail ?? '').trim().toLowerCase()
+  if (!email) return { citit: false, motiv: 'utilizator necunoscut' }
+  const limita = Math.min(Math.max(Math.floor(cate) || 10, 1), 30)
+  try {
+    const filtru = String(cauta ?? '').trim()
+    const sarcini = await getPool().query<{
+      id: string
+      objective: string
+      state: string
+      metadata: Record<string, unknown> | null
+      created_at: string
+      finished_at: string | null
+    }>(
+      filtru
+        ? `SELECT id, objective, state, metadata, created_at, finished_at
+           FROM operational_tasks
+           WHERE user_email=$1 AND objective ILIKE '%' || $3 || '%'
+           ORDER BY created_at DESC LIMIT $2`
+        : `SELECT id, objective, state, metadata, created_at, finished_at
+           FROM operational_tasks
+           WHERE user_email=$1
+           ORDER BY created_at DESC LIMIT $2`,
+      filtru ? [email, limita, filtru.slice(0, 160)] : [email, limita],
+    )
+    const ids = sarcini.rows.map((r) => r.id)
+    const evenimente = ids.length
+      ? await getPool().query<{
+          task_id: string
+          kind: string
+          capability: string | null
+          outcome_state: string | null
+          code: string | null
+          reason: string | null
+          created_at: string
+        }>(
+          `SELECT task_id, kind, capability, outcome_state, code, reason, created_at
+           FROM operational_events
+           WHERE task_id = ANY($1::uuid[])
+           ORDER BY created_at ASC, id ASC`,
+          [ids],
+        )
+      : { rows: [] as Array<{ task_id: string; kind: string; capability: string | null; outcome_state: string | null; code: string | null; reason: string | null; created_at: string }> }
+    const peSarcina = new Map<string, DovadaFaptaRand['evenimente']>()
+    for (const e of evenimente.rows) {
+      const lista = peSarcina.get(e.task_id) ?? []
+      lista.push({
+        fel: e.kind,
+        unealta: e.capability,
+        stare: e.outcome_state,
+        cod: e.code,
+        motiv: e.reason,
+        la: String(e.created_at),
+      })
+      peSarcina.set(e.task_id, lista)
+    }
+    return {
+      citit: true,
+      sarcini: sarcini.rows.map((r) => ({
+        obiectiv: r.objective,
+        stare: r.state,
+        inceput: String(r.created_at),
+        incheiat: r.finished_at ? String(r.finished_at) : null,
+        sursa: String((r.metadata as Record<string, unknown> | null)?.source ?? 'chat'),
+        usaCreierului: (r.metadata as Record<string, unknown> | null)?.usaCreierului === true,
+        evenimente: peSarcina.get(r.id) ?? [],
+      })),
+    }
+  } catch (e) {
+    return { citit: false, motiv: String(e).slice(0, 200) }
+  }
+}
 // ── SCUTUL DATELOR DE NEATINS (owner, 14 aug, verbatim: „baza de date de
 // utilizatori trebuie să nu se poată șterge niciodată, prin nicio comandă, să
 // nu se poată suprascrie prin înlocuire ci doar prin adăugare cu validare,

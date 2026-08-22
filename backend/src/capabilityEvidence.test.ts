@@ -26,7 +26,7 @@ describe('matricea capabilităților promise', () => {
     try {
       execFileSync(process.execPath, [script, output], { cwd: root, stdio: 'pipe' })
       const report = JSON.parse(readFileSync(output, 'utf8')) as EvidenceReport
-      expect(report.summary.capabilities).toBe(124) // 20 aug: −comuta_sursa (comutatorul free/plătit scos odată cu Ollama Cloud). // 19 aug: +autoverificare (self-check LIVE real din chat)
+      expect(report.summary.capabilities).toBe(125) // 22 aug: +dovada_faptelor (JARVIS pasul 4 — cititorul jurnalului operațional). // 20 aug: −comuta_sursa (comutatorul free/plătit scos odată cu Ollama Cloud). // 19 aug: +autoverificare (self-check LIVE real din chat)
       expect(report.summary.capabilitiesStaticPass).toBe(report.summary.capabilities)
       expect(report.summary.uiApplicationsMapped).toBe(report.summary.uiApplications)
       expect(report.summary.manualSections).toBe(12) // 20 aug: +„When you lose signal — the companion mode" (offline faza 1-4)

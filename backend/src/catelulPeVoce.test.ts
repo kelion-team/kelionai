@@ -47,8 +47,11 @@ describe('cățelul anti-minciună pe calea vocală ușoară', () => {
     expect(viu).toMatch(/^\s*doveziVoceTura = \[\]\s*\n\s*if \(usiGreleInZbor === 0\) turaCuTemeiDinAfara = false/m)
   })
   it('dovezile turei = rezultatele REALE clasificate ale uneltelor sesiunii Live (succes ȘI eșec)', () => {
-    const clasificari = viu.match(/^\s*(?:if \(r != null\) )?doveziVoceTura\.push\(clasificaRezultatUnealta\(/gm) ?? []
+    const clasificari = viu.match(/^\s*(?:if \(r != null\) )?noteazaDovadaVoce\(clasificaRezultatUnealta\(/gm) ?? []
     expect(clasificari.length).toBeGreaterThanOrEqual(3)
+    // noteazaDovadaVoce ține AMBELE registre: dovada turei pentru cățel
+    // (doveziVoceTura) + evenimentul DURABIL din jurnal (pasul 4):
+    expect(viu).toMatch(/^\s*doveziVoceTura\.push\(dovada\)/m)
     // tentativa picată e dovadă de EȘEC, nu acoperire:
     expect(viu).toMatch(/clasificaRezultatUnealta\(apel\.name, `tool_error: /)
   })

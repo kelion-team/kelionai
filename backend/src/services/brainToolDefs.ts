@@ -758,6 +758,19 @@ export const JURNAL_MASURATORI_TOOL: Tool = {
   },
 }
 
+export const DOVADA_FAPTELOR_TOOL: Tool = {
+  name: 'dovada_faptelor',
+  description:
+    "Pull the SAVED operational record of your past deeds for THIS user: each task's objective, final state (completed/unverified/failed/…) and the measured tool events behind it. This is your ace up the sleeve — use it when the user asks for PROOF or challenges a claim (\"de unde știi că ai făcut\", \"arată-mi dovada\", \"chiar ai trimis emailul?\"). Present it honestly: an 'unverified' state means the tool reported success but no independent check confirmed the effect — say so. An EMPTY list means no deed was RECORDED — not that nothing ever happened; older deeds may predate the journal. On voice, NEVER read the raw record aloud: summarize in one short sentence and show the detail with show_document.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      cate: { type: 'number', description: 'How many recent tasks to return (default 10, max 30).' },
+      cauta: { type: 'string', description: 'Optional keyword filtered against the task objectives (e.g. "email", "calendar").' },
+    },
+  },
+}
+
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
   DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, MEDIA_CONTROL_TOOL, SERVER_OPS_TOOL, PR_LISTA_TOOL,
@@ -774,7 +787,7 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
   // ask for a missing tool on his own. Without these he remembers nothing from
   // one turn to the next — that's why he repeated the same mistakes.
   LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL,
-  COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL,
+  COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL, DOVADA_FAPTELOR_TOOL,
   // The whole admin panel — he sees what you see, and can change what can be undone.
   ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
   // His own wishlist, granted (Aug 2): project memory + measured observability.

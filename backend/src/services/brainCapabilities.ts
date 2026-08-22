@@ -153,6 +153,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'delete_note', category: 'memorie', does: 'șterge o notiță', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'list_memories', category: 'memorie', does: 'memoria de lungă durată', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'cauta_istoric', category: 'memorie', does: 'caută în istoricul complet de chat (voce+scris) după cuvinte-cheie', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'dovada_faptelor', category: 'memorie', does: 'scoate dovada SALVATĂ a faptelor (jurnalul operațional): obiectiv + stare finală + evenimentele măsurate ale uneltelor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'forget_memory', category: 'memorie', does: 'uită o memorie', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_inbox', category: 'memorie', does: 'își citește propria cutie poștală (contact@kelionai.app)', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
@@ -230,7 +231,7 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
   'list_app_versions', 'list_db_backups', 'runbook_status', 'runbook_log',
   'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables', 'db_query',
   'system_health', 'pr_lista', 'server_logs', 'client_errors', 'stare_masurata',
-  'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'get_monitor',
+  'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'dovada_faptelor', 'get_monitor',
   'get_mouse_position', 'get_real_cost', 'list_updates', 'episoade_promo',
   'lista_tarife', 'vede_video',
 ])
