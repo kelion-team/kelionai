@@ -418,6 +418,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // ULTIMA rostire, nu pe tot ce s-a strâns peste ture mute — altfel
     // „Kelion, …" proaspăt rămânea îngropat după primele 4 cuvinte VECHI.
     let rostireCurenta = ''
+    let ultimaRostireFinalizata = ''
     let ultimaTranscriereUserLa = 0
     // Verdict AMÂNAT: cadrele sosite înaintea transcrierii se țin aici — nici
     // redate, nici suprimate. La prima transcriere se judecă; la 900 ms fără
@@ -628,7 +629,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         if (usiGreleInZbor === 0) turaCuTemeiDinAfara = false
       }
       if (u) void saveMessage(user.email, 'user', u).catch(() => {})
-      bufScris = '' // scrisul e în u — salvat pe drumul normal, nu se dublează
+      // R1 (re-verificatorul lotului V): dacă vreun drum a golit bufUser fără
+      // să treacă pe aici (granița de pauză), scrisul NU mai e în u — atunci
+      // se salvează separat, nu se aruncă; altfel doar se resetează (e în u).
+      if (bufScris.trim() && !u.includes(bufScris.trim())) salveazaScrisulAruncat()
+      else bufScris = ''
       if (k) void saveMessage(user.email, 'assistant', k).catch(() => {})
       // ÎNVĂȚAREA PE VOCE (10 aug, ownerul: „nu ține minte nimic"): pe scris,
       // fiecare tură trece prin learnFromTurn (extrage fapte durabile → memorie
@@ -858,8 +863,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               // „ÎN ZBOR" se măsoară ÎNAINTE de curățare (re-verificatorul: curățarea
               // șterge chiar dovada turei în zbor → amânarea nu se mai declanșa, iar
               // coada turei vechi putea consuma dreptul turei scrise → tura scrisă mută).
+              // R2 (re-verificatorul lotului V, pre-existent): rostirea
+              // NEADRESATĂ din buffer (ambientul unei camere zgomotoase, cu
+              // modelul tăcând corect) NU e o tură „în zbor" — pe ea, rândul
+              // TASTAT devenea anuntAmanat, verdictul se judeca pe bufferul
+              // ambient și răspunsul la scris era SUPRIMAT (mut). Ambient pur
+              // → tura scrisă e de sistem imediat.
               const eraInZbor =
-                verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || rostireCurenta.trim().length > 0
+                verdictTura !== null || cadreInAsteptare.length > 0 || bufKelion.trim().length > 0 || turaAdresata(rostireCurenta.trim())
               // LACĂTUL A: clientul taie gura înaintea oricărei ture noi (interruptAll →
               // {type:'intrerupe'} → taiereManuala). Tura SCRISĂ care sosește după E
               // următoarea intervenție a omului — exact ca vorbirea (vezi
@@ -1388,7 +1399,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           rostireCurenta += text
           bufUser += text
           trimite({ type: 'user', text, final })
-          if (final) {
+          // R3 (re-verificatorul lotului V): `final` nu era idempotent — un
+          // `finished` dublat de Google (sau finished + turnComplete în cadre
+          // separate) rula blocul de două ori pe ACEEAȘI rostire acumulată:
+          // dublu-toggle pe comanda de dispozitiv, limbă comisă dintr-o
+          // singură rostire reală, injecție duplicată în triere.
+          if (final && rostireCurenta.trim() && rostireCurenta !== ultimaRostireFinalizata) {
+            ultimaRostireFinalizata = rostireCurenta
             // Comanda de dispozitiv DOAR pe tură ADRESATĂ lui Kelion, în limba
             // cerută (Adrian, 10 aug — bug „prăjit la chat"): o frază ambientală
             // („închide camera", altcineva din încăpere) comuta camera userului,

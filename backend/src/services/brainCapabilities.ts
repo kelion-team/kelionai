@@ -176,6 +176,16 @@ export const CAPABILITIES: readonly Capability[] = [
   // Miscellaneous
   { name: 'log_unsupported_request', category: 'diverse', does: 'notează o cerință imposibilă acum', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'set_active_role', category: 'diverse', does: 'schimbă rolul activ', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  // COMPLETAREA REGISTRULUI (C4 al marii verificări, 22 aug): 5 unelte
+  // OFERITE creierului dar neînregistrate — o unealtă din afara registrului
+  // putea fi UMBRITĂ de o unealtă dinamică omonimă (gardul anti-umbrire
+  // judecă pe allCapabilityNames), iar legea sursei unice cere oricum ca
+  // registrul să țină REALLY everything.
+  { name: 'apeleaza_user', category: 'diverse', does: 'apelează alt utilizator Kelion (canal audio full-duplex cu traducere live)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'allow_guest_voice', category: 'diverse', does: 'deschide o fereastră limitată în care altă persoană poate vorbi cu Kelion (amprenta ei intră ca PENDING)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'approve_guest_voice', category: 'diverse', does: 'titularul confirmă păstrarea amprentei unui oaspete', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'forget_guest', category: 'diverse', does: 'uită amprenta unui oaspete', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'media_control', category: 'ops', does: 'controlează redarea media la nivel de sistem (playerctl): verifică/oprește ce rulează', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
   // LEGATE DAR NEÎNREGISTRATE (5 aug, ordinul „leagă tot la creier"): astea 15
   // erau OFERITE creierului și funcționale, dar lipseau din registru — deci

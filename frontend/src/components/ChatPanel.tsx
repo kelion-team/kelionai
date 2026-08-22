@@ -2103,6 +2103,8 @@ export default function ChatPanel({
                 // Cauzele NE-tranzitorii nu se „repară" prin reconectare (F4):
                 // creditul epuizat și sesiunea moartă pică identic la fiecare
                 // reluare — 3 reconectări degeaba doar amânau mesajul onest.
+                // ATENȚIE (R4): stringurile sunt CUPLATE cu lib/vocalLive.ts
+                // (onclose 1008) — schimbi acolo, schimbi și aici.
                 if (motiv.includes('credit epuizat') || motiv.includes('nu ești autentificat')) return
                 if (reluari < VL_MAX_RELUARI) {
                   reluari++

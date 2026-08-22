@@ -546,6 +546,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       // verificări): lipsa sesiunii ȘI creditul epuizat. „Nu ești
       // autentificat" pe un client plătitor cu soldul golit era un
       // diagnostic FALS (Legea #1) — se ramifică pe motivul real.
+      // ATENȚIE (R4): textele „credit epuizat" / „nu ești autentificat" sunt
+      // CUPLATE cu detecția din ChatPanel.onEroare (motiv.includes) care taie
+      // reconectările pe cauze ne-tranzitorii — schimbi aici, schimbi și acolo.
       urcaEroarea(
         ev.reason === 'fara_credit'
           ? 'sesiune vocală: credit epuizat — reîncarcă pentru voce'
