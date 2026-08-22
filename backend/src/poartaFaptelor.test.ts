@@ -180,7 +180,10 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
   })
 
   it('detectorul de ÎNGHEȚ e legat în tură: judecă pe cereActiune + rezultate reușite', () => {
-    expect(chat).toMatch(/planFaraExecutie\(assistantText, doveziUnelte, cereActiune\)/)
+    // pe INTENȚIA explicită, nu pe simpla prezență a imaginii (C6 al marii
+    // verificări — „uite poza" nu e o acțiune care poate „îngheța"):
+    expect(chat).toMatch(/planFaraExecutie\(assistantText, doveziUnelte, actiuneCerutaExplicit\)/)
+    expect(chat).toMatch(/const actiuneCerutaExplicit = cereActiune && hasActionIntent\(lastUserText\)/)
     expect(chat).toMatch(/assistantText \+= TEXT_PLAN_FARA_EXECUTIE/)
     expect(chat).toMatch(/\[POARTA FAPTELOR\] plan fără execuție/)
   })

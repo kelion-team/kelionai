@@ -2716,6 +2716,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // propriul nostru text, nu pe vorbele omului. Forțarea uneltei aici =
     // emailul trimis de 2 ori (clasa B#2, demonstrată de verificator).
     const cereActiune = (hasActionIntent(lastUserText) || turnHasImage) && req.body?.continuareUsa !== true
+    // ACȚIUNE CERUTĂ EXPLICIT ≠ „e o imagine în tură" (C6 al marii verificări):
+    // imaginea rămâne motiv de fază grea/inventar plin (cereActiune), dar
+    // forțarea uneltei de faptă, detectorul de îngheț și verdictul final de
+    // jurnal cer INTENȚIE de acțiune în vorbele omului — altfel „uite poza,
+    // ce e asta?" forța memorie_pune/generate_image și scria `failed` fals
+    // pe o descriere corectă.
+    const actiuneCerutaExplicit = cereActiune && hasActionIntent(lastUserText)
 // Gemini acceptă 128 unelte; Ollama cloud / altele — plafon 64 (sigur pe tool schema).
     const PLAFON_FURNIZOR = plafonUnelteFurnizor(orChatModel)
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
@@ -3423,9 +3430,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         'add_task', 'browser_open', 'browser_type', 'browser_click', 'generate_image',
         'generate_video', 'memorie_pune', 'db_query',
       ].filter((n) => toolNamesThisTurn.has(n))
-      // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului.
-      const forteazaFapta = isAdmin && cereActiune
-      const markupStrip = makeToolMarkupStripper(
+      // Auto-armare: DOAR când e clar o cerere de ACȚIUNE a ownerului — nu pe
+      // simpla prezență a unei imagini (C6; vezi actiuneCerutaExplicit, sus).
+      const forteazaFapta = isAdmin && cereActiune && actiuneCerutaExplicit
+      let markupStrip = makeToolMarkupStripper(
         (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
         toolNamesThisTurn,
       )
@@ -3440,6 +3448,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       let limbaScrisaDecisa = !ro
       let limbaScrisaSuprimata = false
       let limbaScrisaBuf = ''
+      // C2 al marii verificări: acumulatoarele de STREAM trăiesc în afara
+      // buclei de reîncercări — fără resetul ăsta, fragmentele reținute din
+      // încercarea picată („Bun" sub pragul gardului de limbă, „<TA" în
+      // poarta de ecou) se lipeau de răspunsul încercării următoare pe ecran
+      // și în gura vocii („BunSalut! …"). Se cheamă la ÎNCEPUTUL fiecărei
+      // încercări și în plase — fragmentele încercării moarte se aruncă.
+      const resetStareStream = (): void => {
+        gateBuf = ''
+        coadaEcou = ''
+        limbaScrisaBuf = ''
+        markupStrip = makeToolMarkupStripper(
+          (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
+          toolNamesThisTurn,
+        )
+      }
       const NOTA_LIMBA = 'Mi-a scăpat începutul răspunsului în altă limbă și l-am oprit. Pune-mi, te rog, întrebarea încă o dată.'
       const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
         orchestratorModel,
@@ -3582,6 +3605,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       let slotTinut: string | null = null
       try {
         for (let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt++) {
+          resetStareStream()
           // Take a slot on the EFFECTIVE Gemini model; if it's busy, wait in the
           // dispatcher's queue for a slot on the SAME model.
           const modelIncercare = modelEfectiv()
@@ -3673,6 +3697,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (iaSlotDacaLiber(modelPlasa)) slotPlasa = modelPlasa
           else if (await asteaptaLaCoada(async () => [modelPlasa], new Set<string>())) slotPlasa = modelPlasa
           if (slotPlasa) {
+            resetStareStream()
             const cand = await runBrainOnce()
             const textCurat = stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim()
             if (textCurat || textFlowed || sawVisible) r = cand
@@ -3779,7 +3804,7 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         // solutia pina la deploy masurabil"). Tură de EXECUȚIE + ZERO unelte +
         // limbaj de plan = fix înghețul de 5 luni. Se demască pe ecran și în
         // istoric — legea ducerii la capăt, mecanic, pentru orice model.
-        planFaraExecutieDetectat = planFaraExecutie(assistantText, doveziUnelte, cereActiune)
+        planFaraExecutieDetectat = planFaraExecutie(assistantText, doveziUnelte, actiuneCerutaExplicit)
         if (planFaraExecutieDetectat) {
           try {
             reply.raw.write(TEXT_PLAN_FARA_EXECUTIE)
@@ -4090,7 +4115,9 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
     }
     await voice.finish()
     const finalOperational = rezumaStareFinalaSarcinaOperationala({
-      cereActiune,
+      // pe INTENȚIA explicită, nu pe simpla prezență a imaginii (C6):
+      // descrierea corectă a unei poze fără unelte nu e o acțiune ratată.
+      cereActiune: actiuneCerutaExplicit,
       dovezi: doveziUnelte,
       planFaraExecutie: planFaraExecutieDetectat,
     })
