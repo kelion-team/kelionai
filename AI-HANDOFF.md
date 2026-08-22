@@ -1764,3 +1764,4 @@ Adevărurile măsurate (pe scurt — ce spun secțiunile vechi e fals unde contr
   (o) codul mort al căii `cadruLive`/`{type:'cadru'}` din vocalLive server
   (clientul nu-l trimite niciodată); (p) §2/§9 din documentul ăsta merită
   rescrise complet la inventarul real (muncă de doc separată, nefăcută).
+- **Bara de update (22 aug):** la apariția unei versiuni noi `App.tsx` afișează un overlay cu bară de progres reală (`downloadLatestBundle` în `frontend/src/lib/updateCheck.ts` măsoară `loaded/total` pe `XMLHttpRequest`); UI-ul e blocat și se aplică `hardResetToLatest()` la final.
