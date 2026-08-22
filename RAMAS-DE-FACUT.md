@@ -114,9 +114,12 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
         `cerinta*` concatenat) — rescriere de doc separată, nefăcută.
       - (B11) **48 de chei i18n doar en/ro** — celelalte 6 limbi cad tăcut pe
         engleză în ecrane întregi (Credits, setări).
-      - (C7) UNELTE_CITIRE_PARALELE nu conține youtube_search, list_notes,
-        memorie_ia, memorie_lista, admin_vezi, studioul_de_clipuri — citiri
-        curate care nu beneficiază de paralelizare.
+      - (C7) REPARAT pe branch (2588c07d; bifarea finală la PR+live):
+        youtube_search, list_notes, memorie_ia, memorie_lista, admin_vezi
+        ADĂUGATE în UNELTE_CITIRE_PARALELE — fiecare verificată pe HANDLER.
+        Corectură la constatarea inițială a agentului: studioul_de_clipuri
+        NU e citire curată (scrie cadrul {scenariu} pe fir, clientul
+        re-armează butonul 🎬) — RESPINS cu motiv în comentariu.
       - (C8–C13, minore chat) gateDecided/taced/userEcho nu se resetează între
         încercări (resetStareStream acoperă restul); planFaraExecutie nu se
         aprinde pe ambient; metadata `planning` poate diverge de
@@ -126,8 +129,9 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
       - (F5) **vitest-ul frontend NU rulează în nicio poartă CI/VPS** — cele
         16/98 teste trec doar când un AI le rulează cu mâna; fix: pin
         devDependency + script + pas în porti-pr.sh.
-      - (F11a) ceasPingWs e redundant (serverul doar RĂSPUNDE la ping-uri;
-        voiceHeartbeat e cel viu) — de scos la următoarea trecere vocală.
+      - (F11a) REPARAT pe branch (2588c07d; bifarea finală la PR+live):
+        ceasPingWs SCOS — voiceHeartbeat (10s, cadru identic) e singurul
+        keepalive; serverul doar răspunde la ping-uri, nu le cere.
       - (SQL-margine, declarată) eSqlDeCitire oprește scrierile, dar funcțiile
         cu efect ÎN SELECT (setval, pg_terminate_backend, pg_read_file,
         lo_import) TREC de predicat — margine declarată, nu gaură nouă:
@@ -180,6 +184,16 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               (scoaterea totală = pasul 7/Piper). Verificat cu 3 agenți (2 runde
               FAIL reparate: lacătele `taiereManuala`+adresare, ancorele stale,
               bufUser, cursa eraInZbor). RĂMAS: proba pe telefonul owner-ului.
+              [AMENDAT 22 aug, MĂSURAT LIVE pe V7.5 (capturile owner-ului:
+              „scris ignora ce cer" + „audio nu merge"): rutarea scrisului PRIN
+              Live s-a dovedit greșită în producție — răspunsul venea doar ca
+              voce, ușa spre unelte rămânea la alegerea modelului, iar un Live
+              viu-dar-mut făcea aplicația să pară moartă. FORMA NOUĂ (pe
+              branch): tot ce e TASTAT trece prin /api/chat (creier întreg,
+              unelte, monitor, text vizibil), Chirp E gura răspunsului scris
+              și cu Live viu — vocea unică prin ÎNTRERUPEREA redării Live, nu
+              prin suprimarea gurii. Turele VOCALE rămân în sesiunea Live.
+              Canalul {type:'text'} rămâne pe server, nefolosit de client.]
       - [x] 2. cățelul (`poartaFaptelor`) legat pe calea voce — MERGE (PR
               #1323) + PUBLICAT LIVE, MĂSURAT 22 aug 00:0xZ: /api/version →
               v=ad5dff1 (exact commitul merge-ului), ver 6.7, publicat

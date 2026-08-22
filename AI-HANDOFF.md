@@ -24,11 +24,14 @@
 ## Cerința #41 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - Opțiunile de schimbare a limbii din bara de admin sunt configurate și afișate în interfață (`scripts/admin-bar-preview.html`, `frontend/src/lib/langList.ts`, `frontend/src/lib/languages.ts`, `Stage.tsx`).
 - Selectorul de limbă oferă acces complet și focalizat pe opțiunile de selecție a limbii (Română, English, Français, Deutsch, Español, Italiano, Português, Nederlands, Polski, Русский, etc.).
-- [CORECTAT 22 aug, marea verificare B7: fișierul `backend/src/cerinta41.test.ts`
-  afirmat aici NU a existat niciodată; testele reale ale barei de limbă sunt
+- [CORECTAT 22 aug, marea verificare B7 — apoi RE-corectat de verificatorul de
+  onestitate pe ISTORIC: fișierul `backend/src/cerinta41.test.ts` A EXISTAT
+  între 15–20 aug (creat de 8c84c51b odată cu secțiunea asta, șters de
+  85eb997e la perierea testelor) — deci afirmația veche era adevărată la data
+  scrierii, doar STĂTUTĂ azi. Testele reale de azi ale barei de limbă:
   `backend/src/adminBarLimba.test.ts` + `backend/tests/cerinta31.test.ts`.
-  Tot 22 aug: lista de mai sus e și ea FALSĂ pe UI — bara are 7 intrări
-  (Stage.tsx), nu 17; 'ru' a fost SCOS (nu există în Lang — la click cădea pe
+  Tot 22 aug: lista de mai sus e FALSĂ pe UI-ul de azi — bara are 7 intrări
+  (Stage.tsx); 'ru' a fost SCOS (nu există în Lang — la click cădea pe
   engleză cu insigna RU activă) și 'pt' ADĂUGAT.]
 
 ## Cerința #39 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
@@ -1574,6 +1577,28 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    RESPINS cu motiv — scrie cadrul {scenariu} pe fir, e interacțiune de
    browser) + F11a (ceasPingWs scos — voiceHeartbeat e singurul keepalive,
    trimite exact același cadru).
+6j. **VALUL „SCRISUL LA CREIER + DEVIN FUNCȚIONAL" (22 aug ~05:30-06:00Z, pe
+   ordinele live ale owner-ului: „scris ignora ce cer" / „audio nu merge" /
+   „full devin activ si funtional" / „astept dovada… pina la deploy" /
+   „nu respecti masterul… violeaza decizia mea")**: (1) MĂSURAT LIVE pe V7.5
+   (capturile lui): cererea scrisă nu se executa/afișa/auzea — pasul 1 v1
+   ruta scrisul PRIN sesiunea Live; FORMA NOUĂ: tastatul trece prin
+   /api/chat, Chirp e gura răspunsului scris și cu Live viu (vocea unică
+   prin ÎNTRERUPEREA redării Live — suprimarea de la c.audio SCOASĂ);
+   lacăt: bargrafUreche.test.ts rescris. (2) DEVIN — 2 găuri reale închise:
+   pornirea imediată la ordin (tick în fundal din build_software — înainte
+   ordinul putea zăcea până la 60 min după pauza buclei) și anti-bani-dubli
+   (garda devin_session_id IS NULL în watchdog-ul de requeue ȘI în
+   claimNextBuildJob — un job cu sesiune externă VIE nu se mai fură).
+   DOVADA până la deploy: devinLantComplet.test.ts (7 zale pe cod viu) +
+   testele executabile ale dispecerului; „nu pot verifica" din repo:
+   API-ul real Devin (cheia doar pe VPS) — se măsoară la primul ordin live.
+   (3) Câmpul de scris pornește GOL garantat (bugul „Cel iarl, ceva ce?" —
+   mătura DOM≠stare + autoComplete off); vocea se ÎNCHIDE pe offline (nu
+   doar butonul ascuns) + gard esteConectat() în ensureMic; preventDefault
+   la drop-ul offline; imaginea pe tura offline = notă onestă
+   (offlineNoVision en/ro), nu confabulare; autoverificarea nu mai declară
+   „stricat" pe proba cu argumente goale (empty_*/missing_*).
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor
