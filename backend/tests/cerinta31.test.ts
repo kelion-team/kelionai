@@ -15,8 +15,12 @@ describe('Cerința #31 - Opțiunile de schimbare a limbii din bara de admin', ()
     expect(stageCode).toContain('lang-wrap')
   })
 
-  it('toate opțiunile de schimbare a limbii (ro, en, es, fr, de, it, ru) sunt disponibile', () => {
-    const limbi = ['ro', 'en', 'es', 'fr', 'de', 'it', 'ru']
+  it('toate opțiunile de schimbare a limbii (ro, en, es, fr, de, it, pt) sunt disponibile', () => {
+    // B6 (marea verificare, 22 aug): 'ru' era o limbă pe care UI-ul N-O ARE
+    // (nu e în Lang/dict — la click cădea pe engleză cu insigna „RU" activă,
+    // stare care minte), iar 'pt' (tradusă, în Lang) lipsea din selector.
+    // Lacătul pina lista falsă — acum pinuiește adevărul.
+    const limbi = ['ro', 'en', 'es', 'fr', 'de', 'it', 'pt']
     for (const limba of limbi) {
       expect(stageCode).toContain(`code: '${limba}'`)
     }

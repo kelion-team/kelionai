@@ -47,6 +47,7 @@ export default function CustomerSettings({
   const [istoric, setIstoric] = useState<PurchaseRecord[] | null | 'necitit'>('necitit')
   const [busy, setBusy] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [delInfo, setDelInfo] = useState(false)
   const [catalog, setCatalog] = useState<{ chat: CatModel[]; work: CatModel[] }>({ chat: [], work: [] })
   const [sel, setSel] = useState<{ chat: string; work: string }>({ chat: '', work: '' })
   const [ar, setAr] = useState<{ enabled: boolean; threshold: number; topupAmount: number }>({
@@ -238,7 +239,11 @@ export default function CustomerSettings({
     if (ok) {
       window.location.href = '/'
     } else {
+      // Rândul (n) din registru, închis onest: serverul refuză MEREU
+      // ștergerea prin comandă (scutul datelor, ordinul din 14 aug) — înainte
+      // butonul promitea ștergere și pica TĂCUT. Acum spune adevărul.
       setBusy(false)
+      setDelInfo(true)
     }
   }
 
@@ -405,7 +410,7 @@ export default function CustomerSettings({
                     <li key={r.id} className="settings-note" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                       <span>{new Date(r.created_at).toLocaleDateString()}</span>
                       <span>£{r.amount} → {r.credits.toLocaleString()} {ro ? 'credite' : 'credits'}</span>
-                      <span>{r.status}</span>
+                      <span>{r.status === 'paid' ? (ro ? 'Finalizată' : 'Completed') : r.status === 'admin_grant' ? (ro ? 'Credit oferit' : 'Credit granted') : r.status}</span>
                     </li>
                   ))}
                 </ul>
@@ -525,7 +530,7 @@ export default function CustomerSettings({
               </button>
             ) : (
               <div className="settings-confirm">
-                <span className="settings-note">{t.deleteConfirm}</span>
+                <span className="settings-note">{delInfo ? t.deleteAccClosed : t.deleteConfirm}</span>
                 <div className="settings-confirm-row">
                   <button type="button" className="ghost" disabled={busy} onClick={() => setConfirmDel(false)}>
                     {t.cancel}

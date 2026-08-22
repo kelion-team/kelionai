@@ -1827,7 +1827,7 @@ export default function AdminPanel({
                           ) : (
                             plati.neatribuite.map((p) => (
                               <span key={p.id} style={{ display: 'block', paddingLeft: 12, marginTop: 2 }}>
-                                £{p.amount} · „{p.referinta || p.bankRef || '—'}” · Văzut la: {new Date(p.seenAt).toLocaleString()}{' '}
+                                {p.amount} {p.currency || '£'} · „{p.referinta || p.bankRef || '—'}” · Văzut la: {new Date(p.seenAt).toLocaleString()}{' '}
                                 <button
                                   type="button"
                                   className="ghost"

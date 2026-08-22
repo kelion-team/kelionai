@@ -7,7 +7,6 @@ export type Lang = 'en' | 'ro' | 'es' | 'fr' | 'de' | 'it' | 'pt'
 
 export interface Strings {
   signIn: string
-  restricted: string
   signOut: string
   chatHint: string
   chatPlaceholder: string
@@ -44,8 +43,6 @@ export interface Strings {
   offlineModelNepregatit: string
   offlineEroareLocal: string
   raspunsAmanat: string
-  offlinePregatire: string
-  offlineFaraWebgpuScurt: string
   updateNouAnunt: string
   credits: string
   topUp: string
@@ -55,12 +52,8 @@ export interface Strings {
   manualTitle: string
   multilingual: string
   features: readonly string[]
-  updateReady: string
-  updateNow: string
   /** The self-applying countdown in the version bar — `{n}` = seconds left. */
-  updateAuto: string
   /** Blocking gate: you cannot continue on the old version until you update. */
-  updateBlock: string
   cookieNote: string
   privacyLabel: string
   termsLabel: string
@@ -259,6 +252,7 @@ export interface Strings {
   logout: string
   deleteAcc: string
   deleteConfirm: string
+  deleteAccClosed: string
   cancel: string
   deleting: string
 }
@@ -275,7 +269,6 @@ export interface Strings {
 const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
   en: {
     signIn: 'Sign in with Google',
-    restricted: 'Access is restricted. Only authorized accounts may enter.',
     signOut: 'Sign out',
     chatHint: 'Say something to Kelion…',
     chatPlaceholder: 'Message Kelion',
@@ -307,8 +300,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: "I'm offline. The local brain isn't downloaded yet — prepare it while you have signal and I'll work without a connection too.",
     offlineEroareLocal: 'The local brain hit a problem:',
     raspunsAmanat: 'I can now tell you the answer to what you asked while you were offline',
-    offlinePregatire: 'Downloading Kelion offline',
-    offlineFaraWebgpuScurt: 'Offline brain unavailable on this device (no WebGPU)',
     updateNouAnunt: 'New version — updating…',
     credits: 'credits',
     topUp: 'Please top up your credit',
@@ -321,10 +312,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
       'Talk to Kelion in your own language — ask, show, navigate, create. Sign in with Google and add credit to start.',
     manualTitle: 'Everything Kelion can do',
     multilingual: 'Multinational support — understands and replies in dozens of languages, written and spoken.',
-    updateReady: 'A new version is available',
-    updateNow: 'Update',
-    updateAuto: 'applies automatically in {n} s',
-    updateBlock: 'You must update to keep using the app.',
     features: [
       'Natural conversation with a genuinely brilliant mind',
       'Speaks and listens — fully hands-free',
@@ -498,14 +485,14 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     signedInAs: 'Signed in as:',
     loggingOut: 'Logging out...',
     logout: 'Log out',
-    deleteAcc: 'Delete account from server',
-    deleteConfirm: 'Are you sure you want to delete your account? All your data will be permanently removed!',
+    deleteAcc: 'Request data deletion',
+    deleteConfirm: 'Send a data-deletion request? Deletion is handled manually by the operator — nothing is removed automatically.',
+    deleteAccClosed: 'Automatic deletion is disabled by design. To have your data deleted, write to contact@kelionai.app — the request is handled manually.',
     cancel: 'Cancel',
     deleting: 'Deleting...',
   },
   ro: {
     signIn: 'Conectează-te cu Google',
-    restricted: 'Acces restricționat. Doar conturile autorizate pot intra.',
     signOut: 'Deconectare',
     chatHint: 'Spune-i ceva lui Kelion…',
     chatPlaceholder: 'Scrie-i lui Kelion',
@@ -537,8 +524,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Sunt offline. Creierul local nu e încă descărcat — pregătește-l cât ai semnal și apoi merg și fără net.',
     offlineEroareLocal: 'Creierul local a dat de o problemă:',
     raspunsAmanat: 'Îți pot spune acum răspunsul la ce m-ai întrebat cât erai offline',
-    offlinePregatire: 'Se descarcă Kelion offline',
-    offlineFaraWebgpuScurt: 'Creierul offline nu merge pe acest dispozitiv (fără WebGPU)',
     updateNouAnunt: 'Versiune nouă — se actualizează…',
     credits: 'credite',
     topUp: 'Te rog reîncarcă creditul',
@@ -548,10 +533,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
       'Vorbește cu Kelion în limba ta — întreabă, arată, navighează, creează. Conectează-te cu Google și pune credit ca să începi.',
     manualTitle: 'Tot ce știe Kelion să facă',
     multilingual: 'Suport multinațional — înțelege și răspunde în zeci de limbi, scris și vorbit.',
-    updateReady: 'O versiune nouă este disponibilă',
-    updateNow: 'Actualizează',
-    updateAuto: 'se aplică automat în {n} s',
-    updateBlock: 'Trebuie să actualizezi ca să folosești aplicația mai departe.',
     features: [
       'Conversație naturală cu o minte cu adevărat genială',
       'Vorbește și ascultă — complet hands-free',
@@ -725,14 +706,14 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     signedInAs: 'Autentificat ca:',
     loggingOut: 'Deconectare...',
     logout: 'Deconectare',
-    deleteAcc: 'Șterge contul de pe server',
-    deleteConfirm: 'Sigur vrei să-ți ștergi contul? Toate datele tale vor fi șterse definitiv!',
+    deleteAcc: 'Cere ștergerea datelor',
+    deleteConfirm: 'Trimiți o cerere de ștergere a datelor? Ștergerea se face manual de operator — nimic nu se șterge automat.',
+    deleteAccClosed: 'Ștergerea automată e închisă prin construcție. Ca să-ți fie șterse datele, scrie la contact@kelionai.app — cererea se tratează manual.',
     cancel: 'Anulează',
     deleting: 'Se șterge...',
   },
   es: {
     signIn: 'Iniciar sesión con Google',
-    restricted: 'Acceso restringido. Solo pueden entrar cuentas autorizadas.',
     signOut: 'Cerrar sesión',
     chatHint: 'Dile algo a Kelion…',
     chatPlaceholder: 'Escríbele a Kelion',
@@ -764,8 +745,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Estoy sin conexión. El cerebro local aún no está descargado — prepáralo mientras tengas señal y funcionaré también sin conexión.',
     offlineEroareLocal: 'El cerebro local tuvo un problema:',
     raspunsAmanat: 'Ahora puedo darte la respuesta a lo que me preguntaste mientras estabas sin conexión',
-    offlinePregatire: 'Descargando Kelion sin conexión',
-    offlineFaraWebgpuScurt: 'El cerebro sin conexión no funciona en este dispositivo (sin WebGPU)',
     updateNouAnunt: 'Nueva versión — actualizando…',
     credits: 'créditos',
     topUp: 'Por favor recarga tu crédito',
@@ -775,10 +754,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
       'Habla con Kelion en tu idioma — pregunta, muestra, navega, crea. Inicia sesión con Google y añade crédito para empezar.',
     manualTitle: 'Todo lo que Kelion sabe hacer',
     multilingual: 'Soporte multinacional — entiende y responde en decenas de idiomas, escrito y hablado.',
-    updateReady: 'Hay una nueva versión disponible',
-    updateNow: 'Actualizar',
-    updateAuto: 'se aplicará automáticamente en {n} s',
-    updateBlock: 'Debes actualizar para seguir usando la aplicación.',
     features: [
       'Conversación natural con una mente realmente brillante',
       'Habla y escucha — totalmente manos libres',
@@ -911,7 +886,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
   },
   fr: {
     signIn: 'Se connecter avec Google',
-    restricted: 'Accès restreint. Seuls les comptes autorisés peuvent entrer.',
     signOut: 'Se déconnecter',
     chatHint: 'Dites quelque chose à Kelion…',
     chatPlaceholder: 'Écrivez à Kelion',
@@ -943,8 +917,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Je suis hors ligne. Le cerveau local n’est pas encore téléchargé — prépare-le tant que tu as du signal et je fonctionnerai aussi sans connexion.',
     offlineEroareLocal: 'Le cerveau local a rencontré un problème :',
     raspunsAmanat: 'Je peux maintenant te donner la réponse à ce que tu m’as demandé hors ligne',
-    offlinePregatire: 'Téléchargement de Kelion hors ligne',
-    offlineFaraWebgpuScurt: 'Le cerveau hors ligne ne fonctionne pas sur cet appareil (pas de WebGPU)',
     updateNouAnunt: 'Nouvelle version — mise à jour…',
     credits: 'crédits',
     topUp: 'Veuillez recharger votre crédit',
@@ -954,10 +926,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
       'Parlez à Kelion dans votre langue — demandez, montrez, naviguez, créez. Connectez-vous avec Google et ajoutez du crédit pour commencer.',
     manualTitle: 'Tout ce que Kelion sait faire',
     multilingual: 'Support multinational — comprend et répond dans des dizaines de langues, à l’écrit comme à l’oral.',
-    updateReady: 'Une nouvelle version est disponible',
-    updateNow: 'Mettre à jour',
-    updateAuto: "s'applique automatiquement dans {n} s",
-    updateBlock: "Vous devez mettre à jour pour continuer à utiliser l'application.",
     features: [
       'Conversation naturelle avec un esprit vraiment brillant',
       'Parle et écoute — entièrement mains libres',
@@ -1090,7 +1058,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
   },
   de: {
     signIn: 'Mit Google anmelden',
-    restricted: 'Zugang beschränkt. Nur autorisierte Konten haben Zutritt.',
     signOut: 'Abmelden',
     chatHint: 'Sag Kelion etwas…',
     chatPlaceholder: 'Schreib an Kelion',
@@ -1122,8 +1089,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Ich bin offline. Das lokale Gehirn ist noch nicht heruntergeladen — bereite es vor, solange du Signal hast, dann funktioniere ich auch ohne Verbindung.',
     offlineEroareLocal: 'Das lokale Gehirn hatte ein Problem:',
     raspunsAmanat: 'Ich kann dir jetzt die Antwort auf deine Frage von unterwegs (offline) geben',
-    offlinePregatire: 'Kelion offline wird geladen',
-    offlineFaraWebgpuScurt: 'Offline-Gehirn auf diesem Gerät nicht verfügbar (kein WebGPU)',
     updateNouAnunt: 'Neue Version — wird aktualisiert…',
     credits: 'Guthaben',
     topUp: 'Bitte lade dein Guthaben auf',
@@ -1133,10 +1098,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
       'Sprich mit Kelion in deiner Sprache — frag, zeig, navigiere, erschaffe. Melde dich mit Google an und lade Guthaben auf, um zu starten.',
     manualTitle: 'Alles, was Kelion kann',
     multilingual: 'Multinationale Unterstützung — versteht und antwortet in Dutzenden Sprachen, schriftlich und gesprochen.',
-    updateReady: 'Eine neue Version ist verfügbar',
-    updateNow: 'Aktualisieren',
-    updateAuto: 'wird automatisch in {n} s angewendet',
-    updateBlock: 'Du musst aktualisieren, um die App weiter zu nutzen.',
     features: [
       'Natürliche Gespräche mit einem wirklich brillanten Verstand',
       'Spricht und hört zu — komplett freihändig',
@@ -1269,7 +1230,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
   },
   it: {
     signIn: 'Accedi con Google',
-    restricted: 'Accesso limitato. Solo gli account autorizzati possono entrare.',
     signOut: 'Esci',
     chatHint: 'Di’ qualcosa a Kelion…',
     chatPlaceholder: 'Scrivi a Kelion',
@@ -1301,8 +1261,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Sono offline. Il cervello locale non è ancora scaricato — preparalo finché hai segnale e funzionerò anche senza connessione.',
     offlineEroareLocal: 'Il cervello locale ha avuto un problema:',
     raspunsAmanat: 'Ora posso darti la risposta a ciò che mi hai chiesto mentre eri offline',
-    offlinePregatire: 'Download di Kelion offline',
-    offlineFaraWebgpuScurt: 'Il cervello offline non funziona su questo dispositivo (niente WebGPU)',
     updateNouAnunt: 'Nuova versione — aggiornamento…',
     credits: 'crediti',
     topUp: 'Ricarica il tuo credito, per favore',
@@ -1312,10 +1270,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
       'Parla con Kelion nella tua lingua — chiedi, mostra, naviga, crea. Accedi con Google e aggiungi credito per iniziare.',
     manualTitle: 'Tutto ciò che Kelion sa fare',
     multilingual: 'Supporto multinazionale — capisce e risponde in decine di lingue, scritte e parlate.',
-    updateReady: 'È disponibile una nuova versione',
-    updateNow: 'Aggiorna',
-    updateAuto: 'si applica automaticamente tra {n} s',
-    updateBlock: 'Devi aggiornare per continuare a usare l\'app.',
     features: [
       'Conversazione naturale con una mente davvero brillante',
       'Parla e ascolta — completamente a mani libere',
@@ -1448,7 +1402,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
   },
   pt: {
     signIn: 'Entrar com Google',
-    restricted: 'Acesso restrito. Apenas contas autorizadas podem entrar.',
     signOut: 'Sair',
     chatHint: 'Diga algo ao Kelion…',
     chatPlaceholder: 'Escreva ao Kelion',
@@ -1480,8 +1433,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Estou offline. O cérebro local ainda não foi baixado — prepare-o enquanto tem sinal e funcionarei mesmo sem conexão.',
     offlineEroareLocal: 'O cérebro local teve um problema:',
     raspunsAmanat: 'Agora posso te dar a resposta ao que me perguntaste enquanto estavas offline',
-    offlinePregatire: 'Baixando Kelion offline',
-    offlineFaraWebgpuScurt: 'O cérebro offline não funciona neste dispositivo (sem WebGPU)',
     updateNouAnunt: 'Nova versão — atualizando…',
     credits: 'créditos',
     topUp: 'Por favor, recarregue o seu crédito',
@@ -1491,10 +1442,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
       'Fale com o Kelion no seu idioma — pergunte, mostre, navegue, crie. Entre com o Google e adicione crédito para começar.',
     manualTitle: 'Tudo o que o Kelion sabe fazer',
     multilingual: 'Suporte multinacional — entende e responde em dezenas de idiomas, escrito e falado.',
-    updateReady: 'Uma nova versão está disponível',
-    updateNow: 'Atualizar',
-    updateAuto: 'aplica-se automaticamente em {n} s',
-    updateBlock: 'Precisas de atualizar para continuar a usar a aplicação.',
     features: [
       'Conversa natural com uma mente realmente brilhante',
       'Fala e ouve — totalmente mãos livres',

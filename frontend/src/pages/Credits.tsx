@@ -49,7 +49,7 @@ export default function Credits(): React.JSX.Element {
     if (b) {
       if (prevCreditsRef.current !== null && b.credits > prevCreditsRef.current) {
         setPayCode(null)
-        setSuccessMsg('Plată primită cu succes! Creditele au fost adăugate în cont.')
+        setSuccessMsg('Payment received! Your credits have been added to your account.')
       }
       prevCreditsRef.current = b.credits
       setBalance(b)
@@ -100,11 +100,11 @@ export default function Credits(): React.JSX.Element {
   let customErr = ''
   if (isCustomFilled) {
     if (!Number.isFinite(customVal) || customVal <= 0) {
-      customErr = 'Introdu o sumă validă.'
+      customErr = 'Enter a valid amount.'
     } else if (praguri && customVal % praguri.pas !== 0) {
-      customErr = `Suma trebuie să fie un multiplu de £${praguri.pas}.`
+      customErr = `The amount must be a multiple of £${praguri.pas}.`
     } else if (praguri && minAmount !== null && customVal < minAmount) {
-      customErr = firstTopUp ? `Prima reîncărcare trebuie să fie de minim £${minAmount}.` : `Suma minimă este £${minAmount}.`
+      customErr = firstTopUp ? `Your first top-up must be at least £${minAmount}.` : `The minimum amount is £${minAmount}.`
     }
   }
   const isCustomValid = isCustomFilled && !customErr
@@ -166,7 +166,7 @@ export default function Credits(): React.JSX.Element {
 
         {balance !== null && (
           <div className="login-note" style={{ marginBottom: 16 }}>
-            Sold curent: <strong>{balance.credits} credite</strong>
+            Current balance: <strong>{balance.credits} credits</strong>
           </div>
         )}
 
@@ -177,13 +177,13 @@ export default function Credits(): React.JSX.Element {
         {tarife && tarife.length > 0 && (
           <div className="custom-amount-box" style={{ marginBottom: 16, padding: '12px', border: '1px solid var(--border-color, #e0e0e0)', borderRadius: 8 }}>
             <label style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
-              Prețuri extra-servicii (se scad din credite la folosire)
+              Extra-service prices (deducted from credits when used)
             </label>
             {tarife.map((t) => (
               <div key={t.cheie} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '2px 0' }}>
                 <span>{t.eticheta}</span>
                 <strong>
-                  {t.credite} {t.credite === 1 ? 'credit' : 'credite'}
+                  {t.credite} {t.credite === 1 ? 'credit' : 'credits'}
                   {t.lire != null ? ` (£${t.lire.toFixed(2)})` : ''}
                 </strong>
               </div>
@@ -204,7 +204,7 @@ export default function Credits(): React.JSX.Element {
         {/* CUSTOM AMOUNT / SUMĂ LIBERĂ */}
         <div className="custom-amount-box" style={{ marginBottom: 16, padding: '12px', border: '1px solid var(--border-color, #e0e0e0)', borderRadius: 8 }}>
           <label style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
-            Altă sumă (sumă liberă)
+            Custom amount
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
@@ -223,13 +223,13 @@ export default function Credits(): React.JSX.Element {
               disabled={!isCustomValid || busy > 0}
               onClick={() => void buy(customVal)}
             >
-              Cumpără £{isCustomValid ? customVal : ''}
+              Buy £{isCustomValid ? customVal : ''}
             </button>
           </div>
           {customErr && <div className="login-note" style={{ color: '#d32f2f', marginTop: 6 }}>{customErr}</div>}
           {!customErr && praguri && minAmount !== null && (
             <div className="login-note" style={{ fontSize: 12, marginTop: 4 }}>
-              * Minim £{minAmount}, multiplu de £{praguri.pas} ({Math.floor(minAmount * CREDITS_PER_POUND)} credite = £{minAmount}).
+              * Minimum £{minAmount}, multiples of £{praguri.pas} ({Math.floor(minAmount * CREDITS_PER_POUND)} credits = £{minAmount}).
             </div>
           )}
         </div>
@@ -289,16 +289,19 @@ export default function Credits(): React.JSX.Element {
         {/* TRANSACTION HISTORY */}
         {signedIn === true && history && history.length > 0 && (
           <div style={{ marginTop: 24, textAlign: 'left' }}>
-            <h3 style={{ fontSize: 16, marginBottom: 8 }}>Istoric tranzacții</h3>
+            <h3 style={{ fontSize: 16, marginBottom: 8 }}>Transaction history</h3>
             <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', borderRadius: 6, fontSize: 13 }}>
               {history.map((h) => (
                 <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid #eee' }}>
                   <div>
-                    <div><strong>£{h.amount}</strong> ({h.credits} credite)</div>
-                    <div style={{ fontSize: 11, color: '#666' }}>{new Date(h.created_at).toLocaleString('ro-RO')} {h.code ? `• ${h.code}` : ''}</div>
+                    <div><strong>£{h.amount}</strong> ({h.credits} credits)</div>
+                    <div style={{ fontSize: 11, color: '#666' }}>{new Date(h.created_at).toLocaleString('en-GB')} {h.code ? `• ${h.code}` : ''}</div>
                   </div>
-                  <div style={{ alignSelf: 'center', fontWeight: 600, color: h.status === 'completed' ? '#2e7d32' : '#f57c00' }}>
-                    {h.status === 'completed' ? 'Finalizată' : h.status}
+                  {/* B2 (marea verificare): DB-ul scrie 'paid' și 'admin_grant' —
+                      'completed' nu se scria niciodată, deci plata REUȘITĂ apărea
+                      cu tokenul brut, în portocaliul de neterminat. */}
+                  <div style={{ alignSelf: 'center', fontWeight: 600, color: h.status === 'paid' || h.status === 'admin_grant' ? '#2e7d32' : '#f57c00' }}>
+                    {h.status === 'paid' ? 'Completed' : h.status === 'admin_grant' ? 'Credit granted' : h.status}
                   </div>
                 </div>
               ))}
