@@ -140,13 +140,86 @@ async function masoaraIncadrarea(brut: string): Promise<Verdict> {
 // documentelor) și întoarce conținutul lizibil. Monitorul îl arată ca
 // document; butonul „Deschide într-un tab nou" rămâne deasupra.
 const MAX_PAGINA_B = 2_000_000 // hardcod-permis: plafon tehnic de citire (2 MB) — o pagină de articol, nu un depozit
-export async function citestePagina(brut: string): Promise<{ ok: true; titlu: string; text: string; urlFinal: string } | { ok: false; motiv: string }> {
+
+/** Corpul răspunsului, citit ÎN FLUX cu plafon REAL (verificatorul adversarial,
+ *  22 aug, BLOCANT: `arrayBuffer()` descărca TOT înainte de măsurare — un URL
+ *  de 500 MB umplea memoria procesului; plafonul „anunțat" nu proteja nimic).
+ *  Depășirea taie conexiunea pe loc. */
+async function corpCuPlafon(r: globalThis.Response): Promise<Buffer | null> {
+  const anuntat = Number(r.headers.get('content-length') ?? 0)
+  if (anuntat > MAX_PAGINA_B) {
+    await r.body?.cancel().catch(() => {})
+    return null
+  }
+  const cititor = r.body?.getReader()
+  if (!cititor) {
+    const tot = Buffer.from(await r.arrayBuffer())
+    return tot.length > MAX_PAGINA_B ? null : tot
+  }
+  const bucati: Buffer[] = []
+  let n = 0
+  for (;;) {
+    const { done, value } = await cititor.read()
+    if (done) break
+    n += value.byteLength
+    if (n > MAX_PAGINA_B) {
+      await cititor.cancel().catch(() => {})
+      return null
+    }
+    bucati.push(Buffer.from(value))
+  }
+  return Buffer.concat(bucati)
+}
+
+/** Entitățile uzuale din titlu → text (verificatorul: `Știri &amp; Politică`
+ *  ajungea LITERAL pe ecran). Pură. */
+export function decodeazaEntitati(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d: string) => String.fromCodePoint(Number(d)))
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+}
+
+type PaginaCitita = { ok: true; titlu: string; text: string; urlFinal: string } | { ok: false; motiv: string }
+// Cache 10 min + deduplicare în zbor (verificatorul: fiecare click re-descărca
+// pagina și pornea ALT proces markitdown de până la 30s — pe un singur VPS,
+// stivă de procese; embed-check avea cache, cititorul nu).
+const cachePagini = new Map<string, { v: PaginaCitita; la: number }>()
+const inZbor = new Map<string, Promise<PaginaCitita>>()
+
+export async function citestePagina(brut: string): Promise<PaginaCitita> {
+  const dinCache = cachePagini.get(brut)
+  if (dinCache && Date.now() - dinCache.la < CACHE_MS) return dinCache.v
+  const deja = inZbor.get(brut)
+  if (deja) return deja
+  const promisiune = citestePaginaReal(brut)
+    .then((v) => {
+      if (cachePagini.size > 200) cachePagini.clear()
+      cachePagini.set(brut, { v, la: Date.now() })
+      return v
+    })
+    .finally(() => inZbor.delete(brut))
+  inZbor.set(brut, promisiune)
+  return promisiune
+}
+
+async function citestePaginaReal(brut: string): Promise<PaginaCitita> {
   let u: URL
   try {
     u = new URL(brut)
   } catch {
     return { ok: false, motiv: 'nu e un URL valid' }
   }
+  // MARGINE DECLARATĂ (verificatorul): între rezolvarea DNS din urlSigur și
+  // fetch-ul propriu-zis există o fereastră teoretică de DNS-rebinding
+  // (TOCTOU). Garda rulează totuși la FIECARE pas de redirect, ținta e o rută
+  // autentificată, iar închiderea completă ar cere un dispatcher cu IP fixat —
+  // schimbare de infrastructură, nu de rută; rămâne consemnată, nu ascunsă.
   try {
     for (let pas = 0; pas < 5; pas++) {
       if (!(await urlSigur(u))) return { ok: false, motiv: 'adresă privată sau protocol neacceptat' }
@@ -163,10 +236,11 @@ export async function citestePagina(brut: string): Promise<{ ok: true; titlu: st
       if (!/text\/html|text\/plain|application\/xhtml/.test(tip)) {
         return { ok: false, motiv: `nu e o pagină de citit (content-type: ${tip.slice(0, 60) || 'necunoscut'})` }
       }
-      const brutBytes = Buffer.from(await r.arrayBuffer())
-      if (brutBytes.length > MAX_PAGINA_B) return { ok: false, motiv: 'pagina e prea mare pentru citire (peste 2 MB)' }
+      const brutBytes = await corpCuPlafon(r)
+      if (!brutBytes) return { ok: false, motiv: 'pagina e prea mare pentru citire (peste 2 MB)' }
       const html = brutBytes.toString('utf8')
-      const titlu = (/<title[^>]*>([\s\S]{0,300}?)<\/title>/i.exec(html)?.[1] ?? '').replace(/\s+/g, ' ').trim()
+      const titluBrut = (/<title[^>]*>([\s\S]{0,300}?)<\/title>/i.exec(html)?.[1] ?? '').replace(/\s+/g, ' ').trim()
+      const titlu = decodeazaEntitati(titluBrut)
       const text = await documentToMarkdown(brutBytes, 'pagina.html')
       if (!text.trim()) return { ok: false, motiv: 'pagina nu a produs niciun text lizibil' }
       return { ok: true, titlu: titlu || u.hostname, text, urlFinal: u.href }

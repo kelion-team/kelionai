@@ -873,6 +873,22 @@ the risk of diverging. */
 .stage-canvas.pip div > canvas {
   pointer-events: none;
 }
+/* CAUZA REALĂ, DOVEDITĂ PE CHUNK-UL LIVE (vânătoarea 22 aug, BLOCANT —
+   capturile ownerului: taburi, ×, A−/A+, „Închide tot" toate „doar poze"):
+   react-three-fiber își împachetează canvasul în DOUĂ div-uri, iar wrapper-ul
+   are `pointer-events:auto` ÎN STIL INLINE — pe care regulile de mai sus nu-l
+   bat: regula „> canvas" nu se potrivea cu nimic (canvasul e la 2 niveluri
+   adâncime), iar „div > canvas" scotea doar canvasul din hit-testing și clicul
+   cădea pe DIV-UL părinte (auto, moștenit din inline). Dreptunghiul transparent
+   al avatarului stă la z-index:1 PESTE tot capul monitorului (z-index:3 din
+   .workspace-head nu ajută — e alt context de stivuire, sub 1) → orice clic în
+   dreptunghi murea într-un div fără niciun handler. `!important` e singurul
+   care bate stilul inline; limitat la `.pip`, deci pe avatarul full-screen și
+   pe landing interacțiunea 3D rămâne. */
+.stage-canvas.pip div,
+.stage-canvas.pip canvas {
+  pointer-events: none !important;
+}
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {
   position: absolute;
