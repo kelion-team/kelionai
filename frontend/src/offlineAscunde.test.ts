@@ -36,7 +36,27 @@ describe('offline: funcțiile de internet nu se afișează (ChatPanel)', () => {
 
   it('ușa din dos a fișierelor e închisă: paste/drop ies devreme offline', () => {
     expect(chat).toMatch(/function onPasteFiles\(e: ReactClipboardEvent\): void \{\s*if \(!esteConectat\(\)\) return/)
-    expect(chat).toMatch(/function onDropFiles\(e: ReactDragEvent\): void \{\s*if \(!esteConectat\(\)\) return/)
+    // La drop, preventDefault vine ÎNAINTE de return: onDragOver previne mereu,
+    // deci fără prevenire și aici browserul NAVIGA la fișierul aruncat
+    // (aplicația înlocuită, stare pierdută) — verificatorul de logică, 22 aug.
+    expect(chat).toMatch(/function onDropFiles\(e: ReactDragEvent\): void \{\s*if \(!esteConectat\(\)\) \{\s*e\.preventDefault\(\)\s*return\s*\}/)
+  })
+
+  it('vocea se ÎNCHIDE pe offline (nu doar se ascunde butonul) și revine la net', () => {
+    // Blocantul verificatorului: butonul ascuns + urechea vie = microfon fără
+    // oprire. Efectul pe `online` stinge sesiunea (fără micManualOff — omul
+    // n-a ales oprit), iar ensureMic refuză pornirea offline.
+    expect(chat).toMatch(/if \(online\) \{\s*if \(!micManualOffRef\.current\) void ensureMicRef\.current\(\)\s*return\s*\}/)
+    expect(chat).toMatch(/vlGeneratieRef\.current\+\+[\s\S]{0,400}micRef\.current\?\.stop\(\)/)
+    expect(chat).toMatch(/if \(!esteConectat\(\)\) return\s*\n\s*if \(micRef\.current \|\| micStartingRef\.current \|\| micManualOffRef\.current\) return/)
+  })
+
+  it('câmpul de scris pornește GOL garantat (mătura pe nepotrivirea DOM≠stare)', () => {
+    // Bug live (captura ownerului, 22 aug): „Cel iarl, ceva ce?" pre-scris la
+    // pornire — restaurarea de formulare a browserului scrie DOM-ul fără
+    // evenimente. Stare goală + DOM plin = scris din afară → se aruncă.
+    expect(chat).toMatch(/if \(el && el\.value && !inputViuRef\.current\) el\.value = ''/)
+    expect(chat).toMatch(/autoComplete="off"/)
   })
 })
 

@@ -4202,7 +4202,19 @@ function porneculLucratorulConstructor(): void {
   // DEVIN DEȚINE COADA (owner, 20 aug): când cheia Devin e pusă, constructorul e
   // Devin (extern) — dispecerul din app duce ordinele. NU mai trezim worker-ul
   // Aider de pe VPS (n-ar primi oricum joburi, ruta /next e gardată).
-  if (config.devinKey) return
+  // PORNIRE IMEDIATĂ (22 aug, „Devin full funcțional"): dispecerul Devin trăia
+  // DOAR în trecerea buclei de autonomie, iar pauza dintre treceri urcă la 60
+  // de minute pe „nimic de făcut" — ordinul owner-ului putea zăcea în coadă o
+  // ORĂ înainte ca Devin să fie măcar pornit. Ordinul e „doar la comandă", deci
+  // comanda îl și pornește: un tick în fundal, chiar acum (idempotent — UN job
+  // pe rând, tick-ul concurent cu bucla nu poate porni două sesiuni pe același
+  // ordin: claimNextBuildJob e atomic pe rând).
+  if (config.devinKey) {
+    void import('../services/devinConstructor.js')
+      .then(({ tickDispecerDevin }) => tickDispecerDevin())
+      .catch((e) => console.error('[devin] tick imediat:', String(e).slice(0, 160)))
+    return
+  }
   import('node:child_process').then(({ spawn }) => {
     const worker = spawn('bash', ['/root/kelion/constructor-worker.sh'], {
       detached: true,
