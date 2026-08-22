@@ -61,11 +61,17 @@ import { vedereRoutes } from './routes/vedere.js'
 import { auzRoutes } from './routes/auz.js'
 import { emotieRoutes } from './routes/emotie.js'
 import { ollamaConfigRoutes } from './routes/ollamaConfig.js'
+import { wawRoutes } from './routes/waw.js'
 import { deployRoutes } from './routes/deploy.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings, recordSimptomLive, loadKv, saveKv } from './db.js'
 import { salveazaMemorieSensoriala } from './services/memorieSensoriala.js'
 import { pornesteMonitorizareaRezilientei, stareRezilinta } from './services/rezilientaCreier.js'
 import { pornesteProactivitatea, type NotificareProactiva } from './services/proactivitate.js'
+import { ruleazaVisul, marcheazaActivitate } from './services/modulVis.js'
+import { genereazaJurnalZilei } from './services/jurnalAuto.js'
+import { analizeazaSanatate } from './services/detectieSanatate.js'
+import { verificaMostenire, marcheazaActivitateMostenire } from './services/mostenireDigitala.js'
+import { incarcaProfilPersonalitate } from './services/personalitateEvolutiva.js'
 import { esteBazaIndisponibila } from './dbConexiune.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
@@ -357,6 +363,7 @@ await app.register(vedereRoutes)
 await app.register(auzRoutes)
 await app.register(emotieRoutes)
 await app.register(ollamaConfigRoutes)
+await app.register(wawRoutes)
 await app.register(authLocalRoutes)
 await app.register(contactRoutes)
 await app.register(voiceprintRoutes)
@@ -442,6 +449,28 @@ setTimeout(() => {
   // REZILIENȚA CREIERULUI (22 aug): monitorizează Gemini + Ollama, comută
   // automat pe fallback când Gemini pică.
   pornesteMonitorizareaRezilientei()
+
+  // CELE 10 „WAW" (22 aug): cron-uri pentru funcțiile autonome ──────────────
+  // #1 MODUL VIS: consolidare memorie la 3 noaptea
+  // #4 JURNAL: generare automată la 23:00
+  // #5 SĂNĂTATE: analiză zilnică la 10:00
+  // #9 MOȘTENIRE: verificare zilnică la 12:00
+  // #10 PERSONALITATE: încarcă profilul la startup
+  void incarcaProfilPersonalitate()
+  const cronWaw = (): void => {
+    const acum = new Date()
+    const h = acum.getHours()
+    const m = acum.getMinutes()
+    // Vis la 3 noaptea
+    if (h === 3 && m < 5) void ruleazaVisul(config.adminEmail).catch(() => {})
+    // Jurnal la 23:00
+    if (h === 23 && m < 5) void genereazaJurnalZilei(config.adminEmail).catch(() => {})
+    // Sănătate la 10:00
+    if (h === 10 && m < 5) void analizeazaSanatate(config.adminEmail).catch(() => {})
+    // Moștenire la 12:00
+    if (h === 12 && m < 5) void verificaMostenire(config.adminEmail).catch(() => {})
+  }
+  setInterval(cronWaw, 5 * 60_000) // verifică la 5 min (rulează doar la ora potrivită)
 
   // Ruta pentru starea rezilienței (monitoring)
   app.get('/api/creier/stare', async (_req, reply) => {
