@@ -1427,6 +1427,36 @@ merge → măsurat LIVE. Comunicare: puține cuvinte, doar fapte măsurate, nici
    altfel `/api/admin/*` dintr-un comentariu de linie din chat.ts pornește un
    fals bloc care înghite ~24k de caractere de COD VIU și lacătul „trece" pe
    cod inexistent.
+6e. **JARVIS pasul 4 — salvarea = dovada, „asul din mânecă" pe voce
+   (PROIECT-CHAT-VOCE §7) — v1 CONSTRUIT (22 aug noaptea), în verificarea
+   celor 3 agenți**: cercetașul a măsurat că jurnalul operațional
+   (operational_tasks/events, scris de chat.ts la fiecare tură) era
+   WRITE-ONLY — zero cititori — iar dovezile uneltelor executate direct de
+   sesiunea Live mureau la golirea doveziVoceTura. Construit: cititorul
+   `dovezileFaptelor` (db.ts, citire picată = „citit:false+motiv") + unealta
+   `dovada_faptelor` (user-scoped; inventar+manual+UNELTE_LIVE — pe voce asul
+   e la un pas, fără ușă; fișa interzice recitarea); tura vocală cu unelte =
+   sarcină LENEȘĂ în jurnal cu evenimente tool_result și stare finală derivată
+   din dovezi (aceeași regulă ca pe scris); metadatele ușii poartă
+   usaCreierului/continuareUsa; demascarea porții = eveniment durabil
+   facts_gate (înainte murea în inelul de log — saveMessage e sărit pe ușă).
+   RUNDA CELOR 3 AGENȚI (logică FAIL + onestitate FAIL + integrare PASS) —
+   reparat: registru separat doveziSarcinaVoce (starea finală nu se mai
+   contaminează cu dovezile turei precedente — carry-over-ul cățelului rămâne
+   neatins), inchideSarcinaVoce() pe toate cele 5 drumuri de sfârșit de tură
+   + garda `if (inchis)` pe rezultatul sosit după close (nicio sarcină eternă
+   pe DRUMURILE DE TURĂ; onest: un crash de proces sau o tranziție finală
+   picată pe DB pot lăsa un rând ne-final — logat, fără măturare de
+   expirare), fișa nu mai promite show_document
+   pe sesiunea Live (detaliul pe monitor DOAR prin ușă), respingerile
+   {ok:false} logate, index (user_email, created_at DESC), obiectiv cu
+   fallback pe ultima rostire salvată. Limite declarate în RAMAS (verdictul
+   blând al ușii fără unelte; turele fără unelte n-au sarcină; suprimarea
+   privește rostirea, nu fapta; „never read aloud" e instrucție până la pasul
+   5; setul-rezervă Live cară o schemă nemăsurată live; clasa veche a
+   oaspetelui pe voce). Porți după reparație: tsc 0, 214 fișiere/1929 teste,
+   hardcodări/sintaxă/exporturi verzi; contoare: registru 123, matrice 125,
+   rând nou de manual.
 7. **Arhitectura viitoare NOTATĂ, nu construită** (după finalizare): Gemini
    ultra-rapid + escaladare pe cel mai bun Gemini, oglindă de context live↔offline
    bidirecțională, registru comun de lucru Devin vizibil tuturor creierelor

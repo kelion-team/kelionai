@@ -130,7 +130,7 @@ import type { ChatMessage, Coords, DeviceLocation } from '../services/chatInput.
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { citesteEpisoade, adaugaEpisod, rezumaEpisoade } from '../services/promoEpisoade.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL,} from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, DOVADA_FAPTELOR_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL,} from '../services/brainToolDefs.js'
 import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
@@ -2490,6 +2490,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         source: 'chat',
         spoken: req.body?.spoken === true,
         ambientVoice: voceAmbianta,
+        // Originea vocală a ușii (JARVIS pasul 4): fără marcajul ăsta, o faptă
+        // făcută cu VOCEA apărea în jurnal identic cu una scrisă — dovada
+        // scoasă la provocare nu putea spune „asta ai cerut-o vorbind".
+        usaCreierului: eUsaCreierului,
+        continuareUsa: req.body?.continuareUsa === true,
       },
     })
     const scrieJurnalOperational = async (scriere: () => Promise<unknown>): Promise<void> => {
@@ -2579,7 +2584,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // above) — instantly, with all tools. The real cost is debited from paying
     // clients' credits (debitWallet at the end of the turn); the admin is exempt.
 
-    const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, FORGET_MEMORY_TOOL]
+    const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, DOVADA_FAPTELOR_TOOL, FORGET_MEMORY_TOOL]
     // UȘA DE ESCALADARE pe FAZA de vorbire, nu pe treapta de model (8 aug,
     // ownerul: „verifică de ce nu știe să escaladeze să ceară acces la unelte").
     // Vechea condiție (pe heavyTurn) lăsa turele VOCALE fără ușă: ele sunt
@@ -3736,6 +3741,18 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
           }
           assistantText += demascare
           console.error(`[POARTA FAPTELOR] pretenții fără faptă: ${nedovedite.join('; ')} | încercate: ${unelteIncercate.join(',') || 'niciuna'} | rezultate: ${doveziUnelte.map((d) => `${d.nume}:${d.stare}`).join(',') || 'niciunul'}`)
+          // Nota porții devine EVENIMENT durabil în jurnalul operațional
+          // (JARVIS pasul 4): pe tura ușii, textul demascării nu intra nicăieri
+          // durabil (saveMessage e sărit pe eUsaCreierului mai jos) — rămânea
+          // doar în inelul de log din memorie. Acum dovada provocării există
+          // și poate fi scoasă cu dovada_faptelor.
+          await scrieJurnalOperational(() => noteazaEvenimentOperational({
+            taskId: sarcinaOperationalaId,
+            kind: 'facts_gate',
+            outcomeState: 'observed',
+            code: req.body?.continuareUsa === true ? 'claims_unverifiable' : 'claims_without_deed',
+            reason: nedovedite.join('; '),
+          }))
         }
         // ── ÎNGHEȚUL-PLAN (owner, 16 aug: „sa nu mai intepeneasca... sa ofere
         // solutia pina la deploy masurabil"). Tură de EXECUȚIE + ZERO unelte +

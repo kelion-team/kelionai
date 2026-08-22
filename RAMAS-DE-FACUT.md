@@ -166,7 +166,81 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               consecință declarată). Lacăte: triereInDoi.test.ts (anti-amnezie,
               anti-forțare pe LINIA VIE, proprietar, ultimBun, pin executabil
               că regexul de intenție nu decide singur soarta continuării).
-      - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce
+      - [ ] 4. salvarea dovezii + „asul din mânecă" pe voce — v1 CONSTRUIT pe
+              branch (22 aug noaptea), apoi REPARAT după runda celor 3 agenți
+              (logică FAIL + onestitate FAIL + integrare PASS): (gaura 1)
+              starea finală a sarcinii se deriva din doveziVoceTura, care are
+              carry-over DELIBERAT între ture pentru cățel → sarcina T2 putea
+              fi scrisă durabil `failed` de la o dovadă rătăcită din T1
+              (probat pe funcția vie) → registru separat doveziSarcinaVoce,
+              detașat EAGER la închidere, carry-over-ul cățelului neatins;
+              (gaura 2) turele suprimate + close/error nu treceau prin
+              salveazaTura → sarcini ETERNE pe `executing` (nu există măturare
+              de expirare, iar executing→expired e ilegal în mașina de stări)
+              → inchideSarcinaVoce() pe TOATE cele 5 drumuri de sfârșit de
+              tură; (F3) fișa promitea show_document pe sesiunea Live, care NU
+              îl are → fișa rescrisă (pe voce: rezumat scurt; detaliul pe
+              monitor DOAR prin ușă); + respingerile {ok:false} logate (voce +
+              db.ts), indexul (user_email, created_at DESC), obiectivul cade
+              pe ultima rostire salvată (nu „(tură vocală)" mut), nota pe gol
+              nu mai invocă un filtru necerut. Găurile
+              MĂSURATE de cercetaș (toate cu fișier:linie): jurnalul
+              operațional era WRITE-ONLY (zero cititori — asul nu putea fi
+              scos); dovezile turei vocale ușoare mureau la golirea
+              doveziVoceTura (nicio urmă durabilă); fapta prin ușă apărea în
+              jurnal identic cu una scrisă (fără marcaj de origine); nota
+              porții faptelor pe tura ușii murea în inelul de log (saveMessage
+              sărit pe eUsaCreierului). CONSTRUIT: (a) cititorul
+              `dovezileFaptelor` în db.ts (per-utilizator, citire picată =
+              „citit:false + motiv", Legea #1) + unealta `dovada_faptelor`
+              (user-scoped, în inventar + manual + UNELTE_LIVE — asul e la UN
+              PAS pe voce, fără să macine ușa; fișa interzice recitarea: pe
+              voce rezumat scurt + show_document); (b) tura vocală cu unelte
+              devine sarcină LENEȘĂ în jurnal (doar când chiar rulează o
+              unealtă), fiecare rezultat clasificat = eveniment tool_result,
+              starea finală derivată din dovezi la închiderea turei (aceeași
+              regulă ca pe scris: succes tehnic fără verificare = unverified);
+              scrieri fire-and-forget înlănțuite (zero latență pe frază);
+              (c) metadatele sarcinii ușii poartă usaCreierului/continuareUsa;
+              (d) demascarea porții = eveniment durabil `facts_gate`.
+              NEREPARAT, declarat (regula #1 — un fals e mai rău decât un
+              blând): verdictul final al ușii fără unelte rămâne
+              „completed/response_delivered" (usaCreierului nu intră în
+              cereActiune-ul verdictului — a-l băga ar face `failed` FALS pe
+              ușile de gândire fără unelte); tura ușoară FĂRĂ unelte cu
+              pretenții demascate de cățel nu are sarcină (nota rămâne doar în
+              istoric — limita lenei declarată); pe tura SUPRIMATĂ, sarcina se
+              închide tot din dovezi (suprimarea privește ROSTIREA, nu fapta —
+              emailul trimis e trimis; verificatorul de onestitate ceruse
+              `expired`, dar executing→expired e ilegal în mașina de stări) și
+              obiectivul capturat lacom poate păstra o rostire ulterior
+              suprimată (aceeași clasă de expunere per-user ca istoricul), iar
+              fallback-ul ultimaRostireTura poate atribui unei rostiri VECHI o
+              faptă declanșată pe o tură ulterior suprimată (fereastră îngustă,
+              zgomot de atribuire — nu verdict fals); un crash de proces sau o
+              tranziție finală picată pe DB pot lăsa un rând ne-final în
+              jurnal (logat, fără măturare de expirare — de cântărit o
+              măturare la pornire pe lista mare);
+              „NEVER read aloud" din fișă e INSTRUCȚIE, nu mecanism (mecanismul
+              = pasul 5); UNELTE_LIVE (setul-rezervă „dovedit") cară acum o
+              schemă nemăsurată live, iar non-adminul n-are plasă sub el — NU
+              se bifează fără proba live; oaspetele pe voce poate scoate
+              jurnalul titularului (clasa veche list_memories/cauta_istoric,
+              nu gaură nouă); registrul spune voice:false pentru toate
+              membrele UNELTE_LIVE (convenție stătută, de lămurit pe lista
+              mare); la BARGE-IN sarcina supraviețuiește deliberat (tura
+              întreruptă poate să nu aibă tura_gata) → o sarcină poate acoperi
+              două ture (obiectivul A, dovezile A+B) — verdictul rămâne
+              derivat exact din evenimentele scrise pe ea, aceeași regulă
+              pesimistă ca pe scris (re-verificatorul: „nu e minciună de
+              registru", doar întindere declarată). REPARAT la re-verificare
+              (FAIL îngust): unealta ÎN ZBOR la close/error redeschidea o
+              sarcină pe care nimic n-o mai închidea → garda `if (inchis)
+              inchideSarcinaVoce()` în noteazaDovadaVoce. Lacăte:
+              dovadaFaptelor.test.ts (cod viu + funcția pură a derivării +
+              ≥5 închideri + garda inchis + respingeri logate). RĂMAS pt.
+              bifă: verdictele finale ale celor 2 agenți + merge + măsurat
+              live.
       - [ ] 5. monitorul: predare scurtă + afișare, fără citire cu voce
       - [ ] 6. tastatura opțională (input scris, output tot voce)
       - [ ] 7. offline: probe (ureche/gură/RO) + rezerva

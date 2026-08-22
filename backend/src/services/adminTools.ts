@@ -312,13 +312,13 @@ import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
 import { recentClientErrorRows } from '../db.js'
 import { recentClientErrors } from '../routes/clientErrors.js'
-import { getMemories, deleteMemory, cautaIstoric, logCapabilityGap, citesteRezumatCost, proposeKelionTool } from '../db.js'
+import { getMemories, deleteMemory, cautaIstoric, logCapabilityGap, citesteRezumatCost, proposeKelionTool, dovezileFaptelor } from '../db.js'
 import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
 import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor, vaneazaBuguri, raportVanatoare } from './masurare.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   'list_updates', 'read_inbox', 'server_logs', 'client_errors', 'get_real_cost',
-  'list_memories', 'cauta_istoric', 'forget_memory', 'log_unsupported_request', 'propose_tool',
+  'list_memories', 'cauta_istoric', 'dovada_faptelor', 'forget_memory', 'log_unsupported_request', 'propose_tool',
   // GUEST VOICES (Adrian, Aug 1): holder-only by construction — they act on
   // the SESSION user's own account (every user is the holder of theirs).
   // The names come from the single source in guestVoices.ts.
@@ -399,6 +399,21 @@ export async function execUserScopedTool(
           text: String(r.content).slice(0, 500),
           cand: r.created_at,
         })),
+      })
+    }
+    case 'dovada_faptelor': {
+      // JARVIS pasul 4 (§7): asul din mânecă — dovada salvată, per-utilizator.
+      // O citire picată se SPUNE (Legea #1), nu se maschează în listă goală.
+      const cate = Math.min(Math.max(Number(args.cate) || 10, 1), 30)
+      const cauta = String(args.cauta ?? '').trim()
+      const r = await dovezileFaptelor(email, cate, cauta || undefined)
+      if (!r.citit) return JSON.stringify({ error: 'jurnal_operational_necitit', motiv: r.motiv })
+      return JSON.stringify({
+        count: r.sarcini.length,
+        sarcini: r.sarcini,
+        nota: r.sarcini.length === 0
+          ? `Nicio faptă ÎNREGISTRATĂ${cauta ? ' pentru filtrul cerut' : ''} — jurnalul a răspuns, dar nu are rânduri. Nu înseamnă că nimic nu s-a întâmplat vreodată: faptele dinaintea jurnalului (18 aug 2026) nu au dovadă salvată.`
+          : undefined,
       })
     }
     case 'forget_memory': {

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { RawData } from 'ws'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
@@ -24,7 +24,8 @@ import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, setSpeechLangPref, citesteSold, debitWallet, recordSimptomLive } from '../db.js'
+import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, setSpeechLangPref, citesteSold, debitWallet, recordSimptomLive, inregistreazaSarcinaOperationala, noteazaEvenimentOperational, tranzitioneazaSarcinaOperationala } from '../db.js'
+import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
 import { trackSpeechLang } from '../services/lang.js'
 import { pareCerereVizuala } from '../services/simptomeLive.js'
 import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type DovadaUnealta } from '../services/poartaFaptelor.js'
@@ -82,7 +83,7 @@ import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type
 // warn invizibil în consolă → cădere pe calea veche (care avea surzenia).
 // Setul de mai jos e mic, conversațional, cu scheme plate — în spiritul
 // fazelor: vocea vorbește; lucrul greu vine după ce se dovedește.
-const UNELTE_LIVE = new Set(['list_updates', 'get_real_cost', 'stare_masurata', 'memorie_ia', 'memorie_lista', 'list_memories'])
+const UNELTE_LIVE = new Set(['list_updates', 'get_real_cost', 'stare_masurata', 'memorie_ia', 'memorie_lista', 'list_memories', 'dovada_faptelor'])
 
 // ── UȘA SPRE CREIERUL ÎNTREG (8 aug, ownerul, pe live: „kelion nu are acces
 // la unelte, vocea merge, și atât" + „nu are acces la gps, meteo" + „modelul
@@ -472,12 +473,111 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // care DEȚINE trierea curăță/consumă lista; celelalte nu fac trierea.
     let usaTrierii = 0
     let usaUrmatoareId = 0
+    // SALVAREA = DOVADA pe voce (JARVIS pasul 4 — PROIECT-CHAT-VOCE §7):
+    // până aici, uneltele executate DIRECT de sesiunea Live mureau odată cu
+    // tura (doveziVoceTura se golea fără nicio urmă durabilă) — „asul din
+    // mânecă" nu exista pentru faptele vocale. Acum tura vocală cu unelte
+    // devine sarcină în jurnalul operațional (LENEȘ: doar când chiar rulează
+    // o unealtă — conversația pură nu umple jurnalul), fiecare rezultat
+    // clasificat devine eveniment, iar la închiderea turei starea finală se
+    // derivă din dovezi — aceeași regulă ca pe scris. Scrierile sunt
+    // fire-and-forget înlănțuite (ordinea evenimentelor păstrată, zero
+    // latență pe drumul frazei — primul cuvânt sub 1s rămâne lege). Ușa
+    // (cere_creierului) NU trece pe aici: fapta ei are sarcina EI în chat.ts,
+    // marcată usaCreierului în metadate.
+    let sarcinaVoceId: string | null = null
+    // Registrul PER-SARCINĂ al dovezilor (agentul de logică, gaura 1):
+    // doveziVoceTura are carry-over DELIBERAT între ture (cățelul, pasul 2 —
+    // dovada supraviețuiește turei fără rostire), deci derivarea stării
+    // finale din EL contamina sarcina T2 cu dovezile lui T1 (probat:
+    // [failed(vechi), verified(nou)] → failed FALS pe T2). Sarcina își ține
+    // dovezile SEPARAT, detașate EAGER la închidere — cățelul rămâne neatins.
+    let doveziSarcinaVoce: DovadaUnealta[] = []
+    let ultimaRostireTura = ''
+    let lantJurnalVoce: Promise<unknown> = Promise.resolve()
+    const scrieJurnalVoce = (scriere: () => Promise<unknown>): void => {
+      lantJurnalVoce = lantJurnalVoce
+        .then(scriere)
+        .catch((e) => app.log.warn(`[jurnal operațional][voce] scriere pierdută: ${String(e).slice(0, 160)}`))
+    }
+    const tranzitieVoce = (taskId: string, stare: Parameters<typeof tranzitioneazaSarcinaOperationala>[0]['stare'], code: string, metadata?: Record<string, unknown>): void => {
+      scrieJurnalVoce(async () => {
+        const r = await tranzitioneazaSarcinaOperationala({ taskId, stare, code, metadata })
+        // {ok:false} nu ARUNCĂ (agentul de logică, minor): fără rândul ăsta,
+        // o tranziție respinsă dispărea complet fără urmă.
+        if (!r.ok) app.log.warn(`[jurnal operațional][voce] tranziție respinsă (${stare}): ${r.error}`)
+      })
+    }
+    const sarcinaVoceaPentruFapta = (): string => {
+      if (!sarcinaVoceId) {
+        const id = randomUUID()
+        sarcinaVoceId = id
+        // Fallback-ul obiectivului: dacă turnComplete a golit deja bufferele
+        // (ordinea toolCall/turnComplete nu e garantată), rostirea care a
+        // CERUT unealta e cea abia salvată (ultimaRostireTura) — nu un
+        // „(tură vocală)" mut. Turele suprimate nu o setează (nu erau
+        // adresate lui Kelion).
+        const obiectiv = bufUser.trim() || rostireCurenta.trim() || ultimaRostireTura || '(tură vocală)'
+        scrieJurnalVoce(() => inregistreazaSarcinaOperationala({
+          id,
+          userEmail: user.email,
+          turnId: randomUUID(),
+          objective: obiectiv,
+          metadata: { source: 'voce', direct: true },
+        }))
+        tranzitieVoce(id, 'interpreting', 'voice_tool_call')
+        tranzitieVoce(id, 'executing', 'voice_tool_call')
+      }
+      return sarcinaVoceId
+    }
+    const noteazaDovadaVoce = (dovada: DovadaUnealta): void => {
+      doveziVoceTura.push(dovada)
+      const taskId = sarcinaVoceaPentruFapta()
+      doveziSarcinaVoce.push(dovada)
+      scrieJurnalVoce(() => noteazaEvenimentOperational({
+        taskId,
+        kind: 'tool_result',
+        capability: dovada.nume,
+        outcomeState: dovada.stare,
+        code: dovada.stare,
+      }))
+      // Unealta ÎN ZBOR la close/error (re-verificatorul, drumul rezidual al
+      // găurii 2): rezultatul sosit DUPĂ incheieTura ar deschide o sarcină
+      // nouă pe care niciun sfârșit de tură n-o mai închide vreodată — se
+      // închide pe loc, derivată din propria dovadă (lanțul serializat
+      // păstrează ordinea create→…→tool_result→final).
+      if (inchis) inchideSarcinaVoce()
+    }
+    // Închiderea sarcinii pe ORICE drum care încheie tura (agentul de logică,
+    // gaura 2): turele SUPRIMATE și close/error nu treceau prin salveazaTura,
+    // deci sarcina rămânea pe `executing` PENTRU TOTDEAUNA (nu există nicio
+    // măturare de expirare, iar executing→expired e ilegal în mașina de
+    // stări) — „asul" ar fi servit la nesfârșit un „în lucru" vechi de zile.
+    // Dovezile sarcinii se detașează EAGER (lungimea inclusiv), ca lanțul
+    // leneș să nu numere push-uri de după captură.
+    const inchideSarcinaVoce = (): void => {
+      if (!sarcinaVoceId) return
+      const taskId = sarcinaVoceId
+      sarcinaVoceId = null
+      const dovezi = doveziSarcinaVoce
+      doveziSarcinaVoce = []
+      const cate = dovezi.length
+      const final = rezumaStareFinalaSarcinaOperationala({ cereActiune: false, dovezi, planFaraExecutie: false })
+      tranzitieVoce(taskId, final.stare, final.cod, { source: 'voce', toolResults: cate })
+    }
     const salveazaTura = (): void => {
       const u = bufUser.trim()
       let k = bufKelion.trim()
       bufUser = ''
       bufKelion = ''
       rostireCurenta = ''
+      // Închiderea sarcinii vocale (pasul 4): din registrul PER-SARCINĂ, nu
+      // din doveziVoceTura (carry-over-ul cățelului ar contamina verdictul —
+      // gaura 1 a agentului de logică). cereActiune e fals aici: tura ușoară
+      // e conversațională prin definiție — faptele ei sunt DOAR cele chiar
+      // executate, iar lipsa lor nu e o acțiune ratată.
+      inchideSarcinaVoce()
+      if (u) ultimaRostireTura = u
       // Pe tura PUR-UȘOARĂ, pretențiile de FAPTĂ din ce a ROSTIT Kelion se
       // judecă pe uneltele chiar reușite ale turei. Vorba rostită nu se poate
       // lua înapoi — dar pretenția nu rămâne necontestată: nota intră în
@@ -529,6 +629,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         bufUser = ''
         bufKelion = ''
         rostireCurenta = ''
+        // Suprimarea privește ROSTIREA, nu fapta: unealta chiar a rulat, iar
+        // sarcina ei nu are voie să rămână „executing" pe veci (gaura 2).
+        inchideSarcinaVoce()
         return
       }
       // AUDITUL 15 aug (critică, de 3 verificatori): verdictul NULL nu e „tura
@@ -544,6 +647,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         bufUser = ''
         bufKelion = ''
         rostireCurenta = ''
+        inchideSarcinaVoce()
         return
       }
       salveazaTura()
@@ -1501,13 +1605,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               const r = await execUserScopedTool(apel.name, apel.args as any, user.email, user.role === 'admin')
               // Dovada cățelului vocal (§5): rezultatul REAL, clasificat — o
               // pretenție de faptă rostită se acoperă doar cu o unealtă reușită.
-              if (r != null) doveziVoceTura.push(clasificaRezultatUnealta(apel.name, String(r)))
+              if (r != null) noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, String(r)))
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: r ?? 'Unealtă nesuportată în voce.' })
               return
             }
             const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
             if (rezultat !== null) {
-              doveziVoceTura.push(clasificaRezultatUnealta(apel.name, String(rezultat)))
+              noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, String(rezultat)))
               live?.raspundeUnealta(apel.id, apel.name, { rezultat })
             } else {
               live?.raspundeUnealta(apel.id, apel.name, { rezultat: 'Unealtă nesuportată în voce.' })
@@ -1515,7 +1619,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           } catch (err: any) {
             app.log.error(`Eroare unealtă ${apel.name}: ${err.message}`)
             // Tentativă picată = dovadă de EȘEC (nu acoperă nicio pretenție).
-            doveziVoceTura.push(clasificaRezultatUnealta(apel.name, `tool_error: ${String(err?.message ?? err)}`))
+            noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, `tool_error: ${String(err?.message ?? err)}`))
             live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
           }
         },
@@ -1581,6 +1685,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             bufUser = ''
             bufKelion = ''
             rostireCurenta = ''
+            inchideSarcinaVoce()
           } else if (verdictTura === null && !turaAdresata(bufUser.trim())) {
             // AUDITUL 15 aug (critică, confirmată de 3 verificatori): modelul a
             // TĂCUT corect pe vorbire neadresată — verdictul null nu înseamnă
@@ -1592,6 +1697,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             bufUser = ''
             bufKelion = ''
             rostireCurenta = ''
+            inchideSarcinaVoce()
           } else {
             salveazaTura()
           }
