@@ -15,6 +15,11 @@ vi.mock('./db.js', () => ({
   debitWallet: async (email: string, suma: number, meta: string) => {
     scazute.push({ email, suma, meta })
   },
+  debitWalletAtomar: async (email: string, suma: number, meta: string) => {
+    if (portofel.sold < suma) return { ok: false, motiv: `sold insuficient: serviciul costă £${suma.toFixed(2)}, ai £${portofel.sold.toFixed(2)} — reîncarcă măcar £${Math.round((suma - portofel.sold) * 100) / 100}` }
+    scazute.push({ email, suma, meta })
+    return { ok: true }
+  },
   grantCredit: async (email: string, suma: number) => {
     acordate.push({ email, suma })
   },
