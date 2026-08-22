@@ -30,18 +30,30 @@ async function instiinteazaAdmin(
 
 /** Promptul trimis lui Devin dintr-un ordin al owner-ului. Îi spune clar: ramură
  *  din master, PR ÎNAPOI la master, verde (tsc+teste+porți), NU face merge. */
-export function construiestePromptDevin(orderText: string): string {
+export function construiestePromptDevin(orderText: string, jobId?: number): string {
+  const branch = `kelion/job-${jobId ?? 'devin'}`
   return [
-    'Repository: kelion-team/kelionai. Base branch: master.',
+    'You are the Kelionai constructor (Devin). Work on the repository kelion-team/kelionai.',
+    'Base branch: master.',
     `Task (from the app owner): ${orderText}`,
     '',
+    'Before coding, read these files from the repo to understand the architecture, state and rules:',
+    '- CONSTRUCTOR_SCHEMA.md — high-level application schema',
+    '- AI-HANDOFF.md — current state, architecture and decisions',
+    '- CLAUDE.md, AGENTS.md — rules for any AI working in this repo',
+    '- RAMAS-DE-FACUT.md — what is not done / not working',
+    '',
+    `Branch: create a NEW branch ${branch} off master.`,
+    'The environment secret KELION_GH_TOKEN is a GitHub token with write access. Use it for git auth: clone via https://x-access-token:$KELION_GH_TOKEN@github.com/kelion-team/kelionai, push your branch, and open the PR with it.',
+    'Open a Pull Request TO master when done. Use the repository PR template.',
+    'Do NOT merge. The owner reviews and merges the PR himself.',
+    '',
     'Requirements:',
-    '- The environment secret KELION_GH_TOKEN is a GitHub token with write access to this repo. Use it for git auth: clone via https://x-access-token:$KELION_GH_TOKEN@github.com/kelion-team/kelionai, push your branch, and open the PR with it.',
-    '- Work on a NEW branch off master and open a Pull Request TO master when done.',
-    '- Follow the repo conventions in CLAUDE.md, AI-HANDOFF.md and PROIECT-CHAT-VOCE.md.',
-    '- Keep the build GREEN: TypeScript (tsc --noEmit), tests (vitest run), and the repo gates (scripts/verifica-*.mjs) must all pass.',
-    '- Use the repository PR template for the PR description.',
-    '- Do NOT merge. The owner reviews and merges the PR himself.',
+    '- Follow the repo conventions: no hardcoded values, use env/config/DB, keep chat/voice latency low, respect the AI-HANDOFF decisions.',
+    '- Keep the build GREEN: `npx tsc --noEmit` (backend), `npx tsc -b --force` (frontend), `npx vitest run`, `node scripts/verifica-sintaxa.mjs`, `node scripts/verifica-hardcodari.mjs`, `npm run build` in frontend/.',
+    '- Do NOT touch C:/Users/adria/Downloads/k (old archived project).',
+    '- Do NOT modify admin/demo keys or routing without explicit owner approval.',
+    '- When finished, write the PR URL clearly at the end of your final message.',
   ].join('\n')
 }
 
@@ -66,12 +78,12 @@ export function descrieProgresDevin(s: StareDevin, elapsedMs: number): ProgresDe
 
 /** Pornește o sesiune Devin pentru un ordin. Întoarce id-ul sesiunii (de ținut pe
  *  job) + URL-ul ei (pentru monitor/istoric). */
-export async function porneisteJobDevin(orderText: string, title?: string): Promise<{ sessionId: string; url: string | null }> {
+export async function porneisteJobDevin(orderText: string, title?: string, jobId?: number): Promise<{ sessionId: string; url: string | null }> {
   // Întâi ne asigurăm că Devin are cu ce clona repo-ul (tokenul-secret). Fără el,
   // sesiunea ar porni și ar eșua la clonare — mai bine oprim aici, NUMIT.
   const acces = await asiguraTokenRepoLaDevin()
   if (!acces.ok) throw new Error(`devin_fara_acces_repo: ${acces.motiv ?? 'necunoscut'}`)
-  const s = await creeazaSesiuneDevin(construiestePromptDevin(orderText), { title })
+  const s = await creeazaSesiuneDevin(construiestePromptDevin(orderText, jobId), { title })
   return { sessionId: s.sessionId, url: s.url }
 }
 
@@ -117,7 +129,7 @@ export async function tickDispecerDevin(): Promise<void> {
   const job = await claimNextBuildJob()
   if (!job) return
   try {
-    const { sessionId } = await porneisteJobDevin(job.orderText, `Ordin #${job.id}`)
+    const { sessionId } = await porneisteJobDevin(job.orderText, `Ordin #${job.id}`, job.id)
     await setDevinSessionId(job.id, sessionId)
     await updateBuildJobProgress(job.id, 'Devin: pornit')
   } catch (e) {
