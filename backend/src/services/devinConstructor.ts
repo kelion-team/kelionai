@@ -11,7 +11,7 @@
 
 import { creeazaSesiuneDevin, stareSesiuneDevin, asiguraTokenRepoLaDevin, type StareDevin } from './devin.js'
 import { config } from '../config.js'
-import { claimNextBuildJob, reportBuildJob, updateBuildJobProgress, setDevinSessionId, getOldestRunningBuildJob } from '../db.js'
+import { claimNextBuildJob, createBuildJob, reportBuildJob, updateBuildJobProgress, setDevinSessionId, getOldestRunningBuildJob, type BuildJob } from '../db.js'
 import { notifyAdmin } from './adminNotification.js'
 
 // Înștiințare admin (ajunge în chat/notificări) — best-effort, nu crapă tick-ul.
@@ -86,6 +86,65 @@ export async function planificaOrdinConstructor(orderText: string): Promise<stri
   }
 }
 
+/** Când Devin eșuează, ordinul se DUCE ÎNAPOI la creier. Creierul analizează
+ *  logul + planul original și produce un ordin REFINAT. Dacă e posibil,
+ *  depune un nou job #2 (`kelion-escalare-creier`) pentru Devin — colaborare
+ *  creier ⇄ Devin. Dacă creierul spune STOP, înștiințează ownerul și nu
+ *  arde banii pe un eșec repetitiv. */
+export async function colaborareCreierDevin(run: BuildJob, log: string): Promise<void> {
+  if (run.orderedBy.startsWith('kelion-escalare-creier')) {
+    console.log(`[devin] ordinul #${run.id} a eșuat și după intervenția creierului — nu mai reescaladez.`)
+    await instiinteazaAdmin(
+      'scris',
+      `Devin + creier: ordinul #${run.id} rămâne blocat`,
+      `Eșecul persistă chiar după refinarea de către creier. Log: ${log.slice(-400)}`,
+      { jobId: run.id },
+    )
+    return
+  }
+
+  const prompt = [
+    'Ești creierul de raționament Kelionai. Devin a încercat ordinul de mai jos și a eșuat.',
+    'Analizează ORDINUL ORIGINAL, PLANUL și LOGUL. Dacă poți formula un ordin MAI BUN (mai specific, altă abordare, detalii suplimentare), răspunde DOAR cu textul ordinului refiat, fără explicații.',
+    'Dacă eșecul e definitiv (de ex. cheie respinsă, repo inaccesibil, imposibil de făcut așa cum e cerut) răspunde cu exact: STOP: <motiv scurt>.',
+    '',
+    `Ordin original:\n${run.orderText}\n`,
+    `Log Devin (eșec):\n${log.slice(-2000)}\n`,
+  ].join('\n')
+
+  try {
+    const raspuns = (await rationeaza(prompt, { ruta: 'constructor-escalare', treapta: 'lucru', maxTokens: 1500 })).trim()
+    if (/^STOP[:\s]/i.test(raspuns)) {
+      await instiinteazaAdmin(
+        'scris',
+        `Creierul a oprit reîncercarea pentru ordinul #${run.id}`,
+        `Motiv: ${raspuns.replace(/^STOP[:\s]*/i, '').slice(0, 500)}\nLog: ${log.slice(-400)}`,
+        { jobId: run.id },
+      )
+      return
+    }
+
+    const orderRefinat = [
+      `[[ESCALARE CREIER — ordinul #${run.id} a eșuat, creierul a reformulat]]`,
+      raspuns,
+    ].join('\n\n')
+    const orderCuPlan = await planificaOrdinConstructor(orderRefinat)
+    const newId = await createBuildJob('kelion-escalare-creier', orderCuPlan)
+    if (newId) {
+      console.log(`[devin] creierul a reformulat ordinul #${run.id} → nou ordin #${newId}`)
+      // Pornește dispecerul imediat, dar nu recursiv în același stack.
+      setTimeout(() => {
+        tickDispecerDevin().catch((e) => console.error('[devin] tick după escalare:', String(e).slice(0, 160)))
+      }, 0)
+    } else {
+      await instiinteazaAdmin('scris', `Escalare creier ratată pentru #${run.id}`, 'Noul ordin nu s-a putut depune în coadă.', { jobId: run.id })
+    }
+  } catch (e) {
+    console.error('[devin] colaborare creier eșuată:', String(e).slice(0, 160))
+    await instiinteazaAdmin('scris', `Eroare la escalarea creierului pentru #${run.id}`, String(e).slice(0, 300), { jobId: run.id })
+  }
+}
+
 export interface ProgresDevin {
   /** Textul pentru bară/monitor — MĂSURAT (stare · minute · ACU), fără procent inventat. */
   bara: string
@@ -143,8 +202,11 @@ export async function tickDispecerDevin(): Promise<void> {
           // conversație, nu doar pe monitor — bucla se închide unde comanzi.
           await instiinteazaAdmin('scris', `Devin a terminat ordinul #${run.id}`, `PR gata: ${prog.prUrl} — verifică și fă merge pe master.`, { jobId: run.id })
         } else {
-          await reportBuildJob(run.id, { status: 'failed', brain: 'devin', log: `Devin ${prog.stare} fără PR deschis` })
-          await instiinteazaAdmin('scris', `Devin: ordinul #${run.id} nu s-a finalizat`, `Sesiunea Devin s-a încheiat (${prog.stare}) fără PR deschis. Repornește-l (Reia) după ce vezi de ce.`, { jobId: run.id })
+          const failLog = `Devin ${prog.stare} fără PR deschis`
+          await reportBuildJob(run.id, { status: 'failed', brain: 'devin', log: failLog })
+          await instiinteazaAdmin('scris', `Devin: ordinul #${run.id} nu s-a finalizat`, `Sesiunea Devin s-a încheiat (${prog.stare}) fără PR deschis. Creierul analizează acum pentru o nouă încercare.`, { jobId: run.id })
+          // EȘECUL MERGE LA CREIER — creierul + Devin colaborează să refacă ordinul.
+          await colaborareCreierDevin(run, failLog)
         }
       } else {
         await updateBuildJobProgress(run.id, prog.bara)
@@ -162,6 +224,9 @@ export async function tickDispecerDevin(): Promise<void> {
     await setDevinSessionId(job.id, sessionId)
     await updateBuildJobProgress(job.id, 'Devin: pornit')
   } catch (e) {
-    await reportBuildJob(job.id, { status: 'failed', brain: 'devin', log: `Devin pornire eșuată: ${String(e).slice(0, 300)}` })
+    const failLog = `Devin pornire eșuată: ${String(e).slice(0, 300)}`
+    await reportBuildJob(job.id, { status: 'failed', brain: 'devin', log: failLog })
+    // Chiar și pornirea eșuată trece pe creier — poate fi cheie/quota/repo.
+    await colaborareCreierDevin(job, failLog)
   }
 }
