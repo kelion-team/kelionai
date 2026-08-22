@@ -17,13 +17,16 @@
 > sistem și stă armată cât ușa grea e în zbor). Rămân „nu pot verifica" de
 > aici: ordinea turnComplete/toolCall la Google și prima notă reală — se
 > urmăresc în jurnalul live `[POARTA FAPTELOR][VOCE]` / proba owner-ului.
-> Pasul 3 (trierea în doi): v1 CONSTRUIT pe branch (protocolul în fișa
-> ușii + strângerea rostirilor adresate cât ușa macină + runde de convergență,
-> plafon 2); două FAIL-uri de verificator reparate (re-execuția faptei →
-> istoric+continuareUsa; excepția pusă pe linia moartă → mutată pe
-> cereActiune-ul viu din chat.ts), în re-verificare finală înainte de merge;
-> limitele declarate în RAMAS (injecția în zbor = pas viitor; conversația
-> cât unealta e blocată = „nu pot verifica", se măsoară live).
+> Pasul 3 (trierea în doi): PASS adversarial + MERGE (PR #1324) + PUBLICAT
+> LIVE — măsurat 22 aug 00:3xZ: /api/version → v=3c155b1, ver 6.8 (protocolul
+> în fișa ușii + strângerea rostirilor adresate cât ușa macină + runde de
+> convergență, plafon 2; două FAIL-uri de verificator reparate: re-execuția
+> faptei → istoric+continuareUsa; excepția pusă pe linia moartă → mutată pe
+> cereActiune-ul viu din chat.ts). Rămân „nu pot verifica" de aici:
+> comportamentul REAL al buclei — jurnalul „trierea în doi — runda" +
+> pulsVoce.rundeTriere pe /api/vocal-live/stare + dacă modelul Live chiar
+> conversează cât unealta e blocată; limitele declarate în RAMAS (injecția
+> în zbor = pas viitor).
 > Pașii 4–5, 7: neîncepuți; 2b (nota rostită) = decizie owner în RAMAS.
 > Bifele cu dovadă: RAMAS-DE-FACUT.md.
 
