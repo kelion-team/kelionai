@@ -241,12 +241,10 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let curataHeartbeat: (() => void) | null = null
   let curataAutoResumeOut: (() => void) | null = null
   let curataAutoResumeIn: (() => void) | null = null
-  let ceasPingWs: ReturnType<typeof setInterval> | null = null
 
   const inchide = (): void => {
     if (inchis) return
     inchis = true
-    if (ceasPingWs) clearInterval(ceasPingWs)
     if (sesiuneActiva?.inchide === inchide) sesiuneActiva = null // zăvorul se predă curat
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
@@ -571,18 +569,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     inchide()
   }
 
-  // PING/KEEPALIVE WS: la fiecare 15s trimitem ping ca proxy-ul/Caddy să nu
-  // închidă socket-ul pe liniște cu cod 1006 (abnormal closure).
-  ceasPingWs = setInterval(() => {
-    if (inchis) return
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify({ type: 'ping', t: Date.now() }))
-      } catch {
-        /* tratat la onclose */
-      }
-    }
-  }, 15_000)
+  // KEEPALIVE WS: un SINGUR ceas — voiceHeartbeat (pornit la onopen, 10s)
+  // trimite {type:'ping'} ca proxy-ul/Caddy să nu închidă socket-ul pe liniște
+  // cu 1006. Al doilea ceas de ping (15s, identic cadru cu cadru) a fost scos
+  // la marea verificare din 22 aug (F11a): serverul doar RĂSPUNDE la ping-uri,
+  // nu le cere, iar două cronometre pe același rol înseamnă două locuri de
+  // curățat și zero câștig.
 
   // Microfonul pornește DUPĂ ce socketul e deschis: altfel primele cadre s-ar
   // pierde în gol și primele cuvinte ale omului ar dispărea.

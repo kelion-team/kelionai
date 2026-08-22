@@ -244,6 +244,16 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
   'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'dovada_faptelor', 'get_monitor',
   'get_mouse_position', 'get_real_cost', 'list_updates', 'episoade_promo',
   'lista_tarife', 'vede_video',
+  // C7 (marea verificare, 22 aug) — citiri VERIFICATE pe handler, nu pe
+  // registru: youtube_search (Serper + sonde de redabilitate; screen_url e
+  // doar date întoarse — cadrul de monitor se emite la locul de push, ca la
+  // get_weather/maps_search de mai sus), list_notes (SELECT pe notițe),
+  // memorie_ia/memorie_lista (citiri din memoria de proiect), admin_vezi
+  // (GET pe bucla locală cu legitimație — poarta de admin rămâne poartă).
+  // studioul_de_clipuri, propus tot de C7, a fost RESPINS la verificare:
+  // handlerul lui scrie cadrul {scenariu} direct pe fir și clientul pornește
+  // automat generarea (P32) — interacțiune de browser, rămâne în coada efect.
+  'youtube_search', 'list_notes', 'memorie_ia', 'memorie_lista', 'admin_vezi',
 ])
 
 /** Grupul de exclusivitate pentru o unealtă de chat. `undefined` înseamnă o
