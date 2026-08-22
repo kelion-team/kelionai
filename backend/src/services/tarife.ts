@@ -19,7 +19,7 @@
 // Ownerul e scutit peste tot (e casa lui).
 
 import { config } from '../config.js'
-import { citesteSold, debitWallet, grantCredit } from '../db.js'
+import { citesteSold, debitWalletAtomar, grantCredit } from '../db.js'
 
 export interface Tarif {
   /** Cheia internă (stabilă — pe ea taxează codul). */
@@ -87,22 +87,18 @@ export type Taxare =
   | { ok: false; motiv: string }
 
 /** Taxează serviciul ÎNAINTE de consum (zidul de plată al extra-serviciilor):
- *  întâi se citește soldul (necititul NU e zero — regula #1), apoi se scade.
- *  `ramburseaza()` întoarce banii DOAR dacă generarea a picat — nimeni nu
- *  plătește un clip care nu s-a născut. Ownerul nu se taxează (casa lui);
- *  tarif 0 = serviciu inclus, fără taxare. */
+ *  verifică soldul ȘI scade ATOMIC (tranzacție cu FOR UPDATE) — două comenzi
+ *  simultane pe același sold nu mai trec ambele. `ramburseaza()` întoarce
+ *  banii DOAR dacă generarea a picat — nimeni nu plătește un clip care nu
+ *  s-a născut. Ownerul nu se taxează (casa lui); tarif 0 = serviciu inclus. */
 export async function taxeazaServiciu(email: string, cheie: string, esteAdmin: boolean): Promise<Taxare> {
   if (esteAdmin) return { ok: true, scazutGbp: 0, ramburseaza: async () => {} }
   const lire = lirePentru(cheie)
   if (lire === null) return { ok: false, motiv: `serviciu fără tarif definit: ${cheie} — nu taxez pe ghicite` }
   if (lire <= 0) return { ok: true, scazutGbp: 0, ramburseaza: async () => {} }
-  const sold = await citesteSold(email)
-  if (!sold.citit) return { ok: false, motiv: `nu pot verifica portofelul (${sold.motiv}) — nu pornesc un serviciu plătit pe necitit` }
-  if (sold.sold < lire) {
-    const lipsesc = Math.round((lire - sold.sold) * 100) / 100
-    return { ok: false, motiv: `sold insuficient: serviciul costă £${lire.toFixed(2)}, mai ai £${sold.sold.toFixed(2)} — reîncarcă măcar £${lipsesc.toFixed(2)}` }
-  }
-  await debitWallet(email, lire, `tarif:${cheie}`)
+  // DEBIT ATOMIC: verifică soldul + scade într-o singură tranzacție (raceafe).
+  const rez = await debitWalletAtomar(email, lire, `tarif:${cheie}`)
+  if (!rez.ok) return { ok: false, motiv: rez.motiv }
   return {
     ok: true,
     scazutGbp: lire,

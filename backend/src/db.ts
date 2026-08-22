@@ -2071,6 +2071,51 @@ export async function debitWallet(email: string, amount: number, meta = ''): Pro
   }
 }
 
+/** Debit ATOMIC: verifică soldul ȘI scade într-o singură tranzacție.
+ *  Race condition (măsurat în audit 22 aug): `taxeazaServiciu` citea soldul
+ *  apoi debita separat — două comenzi simultane de £5 pe un sold de £5 treceau
+ *  ambele verificarea și debitau de 2 ori → sold -£5. Versiunea asta face
+ *  SELECT ... FOR UPDATE + UPDATE în aceeași tranzacție: al doilea apel
+ *  așteaptă la rând, găsește soldul deja scăzut, și refuză.
+ *  Returnează { ok: true } la succes, { ok: false, motiv } la refuz. */
+export async function debitWalletAtomar(
+  email: string,
+  amount: number,
+  meta = '',
+): Promise<{ ok: true } | { ok: false; motiv: string }> {
+  if (!dbEnabled()) return { ok: false, motiv: 'baza de date nu e configurată' }
+  if (!(amount > 0)) return { ok: false, motiv: 'sumă invalidă' }
+  const client = await conexiuneDb()
+  try {
+    await client.query('BEGIN')
+    const r = await client.query<{ balance: string }>(
+      `SELECT balance FROM wallets WHERE user_email = $1 FOR UPDATE`,
+      [walletKey(email)],
+    )
+    const sold = Number(r.rows[0]?.balance ?? 0)
+    if (sold < amount) {
+      await client.query('ROLLBACK')
+      return { ok: false, motiv: `sold insuficient: serviciul costă £${amount.toFixed(2)}, ai £${sold.toFixed(2)}` }
+    }
+    await client.query(
+      `UPDATE wallets SET balance = balance - $2::numeric, updated_at = now() WHERE user_email = $1`,
+      [walletKey(email), amount],
+    )
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, meta) VALUES ($1, 'usage', $2, $3)`,
+      [walletKey(email), -amount, meta],
+    )
+    await client.query('COMMIT')
+    return { ok: true }
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error(`[money] debitWalletAtomar FAILED for ${email}, amount ${amount}: ${String(e).slice(0, 200)}`)
+    return { ok: false, motiv: `eroare la debitare: ${e instanceof Error ? e.message.slice(0, 120) : String(e)}` }
+  } finally {
+    client.release()
+  }
+}
+
 // The payment idempotency guard: an already-recorded reference is NOT credited
 // a second time. Called inside an open transaction (the caller ROLLBACKs if
 // true). A single source here (the permanent principle: single, no duplicates).

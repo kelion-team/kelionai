@@ -16,8 +16,7 @@ import { aduPragurile, pragurileServerului, type Praguri } from '../lib/praguri'
 //
 // WE SELL CREDITS, NOT POUNDS (Adrian, Jul 24: "you must be able to sell X
 // credits for money"): the displayed product is the CREDIT pack, with the price next to it.
-// Conversion: the user gets 75% of the payment as credit, 1 credit = £0.10 →
-// £ × 7.5 credits. The presets are chosen to give WHOLE credit numbers.
+// Conversion: creditePeLira vine din /api/tarife (userShare/creditValue, dinamic).
 const creditsFor = (pounds: number): number => creditsForPounds(pounds)
 // LEGEA ANTI-HARDCODARE (16 aug, ownerul: „m-ai umplut de hardcodate, scoate
 // tot"): pachetele se DERIVĂ din pragurile serverului (prima/minim/pas), nu se
