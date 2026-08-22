@@ -47,6 +47,15 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!ev.trece) return reply.code(400).send({ error: 'ordin_respins', motiv: ev.motiv })
     const id = await createBuildJob(user.email, order)
     if (!id) return reply.code(500).send({ error: 'db_indisponibil' })
+    // PORNIRE IMEDIATĂ (owner, 22 aug: ordinul din PANOU nu pornea dispecerul —
+    // doar cel din chat o făcea, iar ordinul aștepta bucla lentă de autonomie).
+    // Un ordin EXPLICIT al ownerului pornește Devin ACUM, în fundal (idempotent:
+    // UN job pe rând, claimNextBuildJob e atomic). Inert fără cheia Devin.
+    if (config.devinKey) {
+      void import('../services/devinConstructor.js')
+        .then(({ tickDispecerDevin }) => tickDispecerDevin())
+        .catch((e) => app.log.warn(`[devin] tick imediat (panou): ${String(e).slice(0, 160)}`))
+    }
     return reply.send({ ok: true, id })
   })
 
@@ -176,6 +185,12 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (id === null) return
     const job = await retryBuildJob(id, req.body?.order)
     if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
+    // „Reia" = ordin explicit → pornește Devin ACUM (la fel ca ordinul nou).
+    if (config.devinKey) {
+      void import('../services/devinConstructor.js')
+        .then(({ tickDispecerDevin }) => tickDispecerDevin())
+        .catch((e) => app.log.warn(`[devin] tick imediat (reia): ${String(e).slice(0, 160)}`))
+    }
     return reply.send({ ok: true, job })
   })
 

@@ -523,6 +523,27 @@ try {
   // from RAMAS-DE-FACUT.md and sends it to the builder. Without waiting for
   // anyone.
   startAutonomie()
+  // ── BĂTAIA DE INIMĂ A DISPECERULUI DEVIN (owner, 22 aug: „devin nu merge…
+  // orice in chat nu merge" — MĂSURAT pe live: diagnosticul „tick-ul dispecerului
+  // nu se învârte", un ordin aștepta 87 min) ──────────────────────────────────
+  // Cauza REALĂ: dispecerul Devin trăia DOAR în bucla de autonomie, care pe
+  // „nimic de făcut" pune pauze de până la ~60 min între treceri — deci un ordin
+  // din coadă putea zăcea o oră. Aici e un puls DEDICAT, la 2 min, care duce
+  // ordinele Devin la timp, independent de cadența lenei buclei mari. Respectă
+  // pauza clasică de operațiuni (isOpsPaused) — cu ea pornită, dispecerul stă
+  // intenționat, exact cum spune diagnosticul; ordinele EXPLICITE din chat/panou
+  // pornesc oricum imediat (kick-ul lor propriu). Inert fără cheia Devin.
+  setTimeout(() => {
+    const pulsDevin = async (): Promise<void> => {
+      if (!config.devinKey) return
+      const { isOpsPaused } = await import('./services/runbooks.js')
+      if (await isOpsPaused().catch(() => false)) return
+      const { tickDispecerDevin } = await import('./services/devinConstructor.js')
+      await tickDispecerDevin().catch((e) => app.log.warn(`[devin] puls: ${String(e).slice(0, 160)}`))
+    }
+    void pulsDevin()
+    setInterval(() => { void pulsDevin() }, 2 * 60_000)
+  }, 45_000)
   // Veghea de auto-upgrade a modelului unic (validat, doar Pro mai nou) — decizia
   // permanentă a ownerului „mereu cel mai bun, preluat automat, peste tot".
   startAutoUpgradeModel()
