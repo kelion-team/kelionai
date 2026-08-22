@@ -112,7 +112,7 @@ export async function cicluPaznic(deps: Partial<DepsPaznic> = {}): Promise<Rapor
   try {
     const raw = await d.health()
     const h = JSON.parse(raw) as { problems?: { id: string; grav: string; desc: string; reparabil?: string }[] } | undefined
-    for (const p of h?.probleme ?? []) {
+    for (const p of h?.problems ?? []) {
       const semn = semnatura(`health:${p.id}:${p.desc}`)
       const nivel = ['critic', 'important'].includes(p.grav) ? 'critic' : p.grav === 'mediu' ? 'atentie' : 'info'
       if (nivel === 'info') continue
@@ -220,7 +220,7 @@ export function pornestePaznic(ms = 60_000): () => void {
     try {
       const raport = await cicluPaznic()
       if (raport.evenimente.length) {
-        const actiuni = await dispecereazaEvenimente(raport.evenimente, { selfHeal: runSelfHeal })
+        const actiuni = await dispecereazaEvenimente(raport.evenimente, { selfHeal: runSelfHeal, constructor: async () => {} })
         for (const a of actiuni) if (!a.ok) console.error('[paznic] acțiune eșuată:', a)
       }
     } catch (e) {
