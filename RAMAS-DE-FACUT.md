@@ -298,7 +298,7 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
               posibil prin ușă (textul ecranului ajunge în gura lui Kelion);
               rămâne așa (excepție la §8 la cerere explicită) sau se
               interzice? RĂMAS pt. bifă: 3 agenți + merge + măsurat live
-              (pulsVoce.usiCuEcran/predariEcran + proba pe dispozitiv).
+              (pulsVoce.usiCuDoc/predariEcran + proba pe dispozitiv).
       - [ ] 6. tastatura opțională (input scris, output tot voce)
       - [ ] 7. offline: probe (ureche/gură/RO) + rezerva
       [NOTĂ 21 aug — propoziția veche „Voce-only: încă neîncepută" e DEPĂȘITĂ:
