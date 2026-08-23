@@ -1896,8 +1896,6 @@ export default function Stage({ user }: { user: User }) {
                   ['📷 Photos', 'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.'],
                   ['▶️ YouTube upload', 'Urcă un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
                   ['🏪 Profilul firmei', 'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.'],
-                  // Interconectare site partener (owner 17 aug): tryestera.com pe lista de aplicații vii.
-                  ['🌐 Tryestera', 'Deschide https://tryestera.com cu browser_open, pune browserul viu pe monitor și spune-mi pe scurt ce e acolo.'],
                   // P22 (owner: „se poate numi aplicatia Studioul de Clipuri,
                   // care cuprinde toate 6, nu? ii dai o ideie… el face tot"):
                   // Studioul ÎNLOCUIEȘTE vechiul „Generator video" — cuprinde

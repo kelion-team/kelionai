@@ -51,8 +51,6 @@ const DOVEZI: Record<string, { fisier: string; semnatura: RegExp }> = {
   '📷 Photos': { fisier: 'services/googlePhotos.ts', semnatura: /photospicker\.googleapis\.com\/v1/ },
   '▶️ YouTube upload': { fisier: 'services/googleYouTube.ts', semnatura: /upload\/youtube\/v3\/videos/ },
   '🏪 Profilul firmei': { fisier: 'services/googleBusiness.ts', semnatura: /googleapis\.com\/v1\/accounts/ },
-  // Site partener deschis prin browserul viu; acesta afișează și site-uri care refuză iframe.
-  '🌐 Tryestera': { fisier: 'routes/chat.ts', semnatura: /case 'browser_open':[\s\S]{0,250}browserOpen\(email, baseUrl, url\)/ },
   // P22: Studioul a ÎNLOCUIT vechiul „Generator video" — planul studioului
   // (services/studioClipuri.ts) conduce spre generate_video (Veo, plătit) sau
   // spre rețeta gratuită Google Flow; lanțul Veo rămâne cel dovedit.
@@ -61,11 +59,10 @@ const DOVEZI: Record<string, { fisier: string; semnatura: RegExp }> = {
 
 describe('lanțul aplicațiilor din meniu — real cap la cap, nu poze', () => {
   it('meniul există și are intrările măsurate', () => {
-    expect(etichete.length).toBeGreaterThanOrEqual(18)
+    expect(etichete.length).toBeGreaterThanOrEqual(17)
   })
 
   it('FIECARE intrare din meniu are dovada ei — una nouă fără lanț pică aici', () => {
-    expect(stage).toContain("['🌐 Tryestera', 'Deschide https://tryestera.com cu browser_open")
     const faraDovada = etichete.filter((e) => !DOVEZI[e])
     expect(faraDovada, `intrări de meniu fără lanț dovedit: ${faraDovada.join(', ')} — adaugă dovada (serviciu + endpoint) în tabelul din acest test DUPĂ ce ai legat-o real`).toEqual([])
   })
