@@ -2436,6 +2436,50 @@ export async function purgeVisits(): Promise<number> {
   return r.rowCount ?? 0
 }
 
+// ── CURĂȚAREA AUTOMATĂ A JURNALEROR (owner, 23 aug 2026: „tabelele sunt
+// burdusite de err, cine le verifică și le monitorizează, mama?") ──────────
+// Fără asta, tabelele de jurnal creșteau la nesfârșit: operational_events
+// 25.415 rânduri, client_errors 1.359, audit_log 3.225, task_timings 7.364 —
+// NICIUN cron nu le curăța. Acum: la 4 noaptea, ștergem tot ce e mai vechi de
+// 30 de zile din tabelele de jurnal (NU din datele de oameni/bani/identitate).
+// Retenția e în env (ZILE_RETENTIE_JURNAL), cu 30 de zile ca implicit rezonabil.
+const ZILE_RETENTIE_JURNAL = ((): number => {
+  const n = Number(process.env.ZILE_RETENTIE_JURNAL)
+  return Number.isFinite(n) && n > 0 ? n : 30 // hardcod-permis: plasă de siguranță, suprascrisă de env
+})()
+
+// Tabelele de JURNAL care se curăță automat — NU date de oameni, bani,
+// identitate, biometrie (acelea sunt sub scutulDatelor, protejate de triggere).
+const TABELE_JURNAL = [
+  'operational_events', // 25k+ rânduri, state_transition domină
+  'client_errors',      // erori de browser (microfon/cameră refuzate)
+  'task_timings',        // timing pe runde de creier
+  'audit_log',           // audit acțiuni admin
+  'server_ops_audit',    // audit comenzi server
+  'health_beats',        // bătăi de inimă de sănătate
+] as const
+
+export async function curataJurnaleVechi(): Promise<{ tabela: string; sterse: number }[]> {
+  if (!dbEnabled()) return []
+  const rezultate: { tabela: string; sterse: number }[] = []
+  for (const tabela of TABELE_JURNAL) {
+    try {
+      const r = await getPool().query(
+        `DELETE FROM ${tabela} WHERE created_at < now() - interval '${ZILE_RETENTIE_JURNAL} days'`,
+      )
+      rezultate.push({ tabela, sterse: r.rowCount ?? 0 })
+    } catch (e) {
+      // O tabelă care nu există (redenumită/ștersă) nu oprește curățarea celorlalte
+      console.error(`[curataJurnale] ${tabela}: ${String((e as Error).message).slice(0, 120)}`)
+    }
+  }
+  if (rezultate.some((r) => r.sterse > 0)) {
+    const total = rezultate.reduce((s, r) => s + r.sterse, 0)
+    noteazaAudit('sistem', 'curățare automată jurnale', 'jurnale', '*', `${total} rânduri mai vechi de ${ZILE_RETENTIE_JURNAL} zile`, 'șters')
+  }
+  return rezultate
+}
+
 
 // The owner's per-USER activity: WHO signed in, from what IP/place/device,
 // how long they stayed (presence pings), how active they were — un singur

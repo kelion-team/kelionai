@@ -72,6 +72,7 @@ import { genereazaJurnalZilei } from './services/jurnalAuto.js'
 import { analizeazaSanatate } from './services/detectieSanatate.js'
 import { verificaMostenire, marcheazaActivitateMostenire } from './services/mostenireDigitala.js'
 import { incarcaProfilPersonalitate } from './services/personalitateEvolutiva.js'
+import { curataJurnaleVechi } from './db.js'
 import { esteBazaIndisponibila } from './dbConexiune.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
@@ -472,6 +473,10 @@ setTimeout(() => {
     if (h === 10 && m < 5) void analizeazaSanatate(config.adminEmail).catch(() => {})
     // Moștenire la 12:00
     if (h === 12 && m < 5) void verificaMostenire(config.adminEmail).catch(() => {})
+    // CURĂȚARE JURNALE la 4 noaptea (23 aug: „tabelele sunt burdusite de err")
+    // — șterge rândurile mai vechi de 30 zile din operational_events,
+    // client_errors, task_timings, audit_log, server_ops_audit, health_beats.
+    if (h === 4 && m < 5) void curataJurnaleVechi().catch((e) => console.error('[cron] curățare jurnale:', String(e).slice(0, 120)))
   }
   setInterval(cronWaw, 5 * 60_000) // verifică la 5 min (rulează doar la ora potrivită)
 

@@ -135,6 +135,12 @@ function cautaDuplicari(fisierTinta, semnale) {
     if (!definitInTinta) continue // e doar import/lazy în țintă — nu e duplicare
     for (const f of fisiereCodLista) {
       if (f === fisierTinta) continue
+      // Fișierele .test.ts referențiază simboluri prin stringuri/regex — nu le definesc
+      if (/\.test\.(ts|tsx|js)$/.test(f)) continue
+      // Tipurile PascalCase (interface/type) redefinite în frontend pentru API
+      // responses — pattern normal (backend exportă, frontend importă ca tip),
+      // nu duplicare. Ex: ContactMessage, HistoryRow, InboundEmail.
+      if (/^[A-Z][a-zA-Z]+(Row|Message|Meta|Neatribuita|Incasata|Neplatit|Email|Plati)$/.test(fn) && /frontend/.test(f)) continue
       const continut = readFileSync(f, 'utf8').replace(/\r\n/g, '\n').replace(/import\s*\{[^}]*\}\s*from\s*['"][^'"]+['"]/g, '')
       const regex = new RegExp(`(?:function|const|class|interface|type)\\s+${fn}\\b`)
       if (regex.test(continut)) {
@@ -146,6 +152,8 @@ function cautaDuplicari(fisierTinta, semnale) {
           if (l.includes('export {') || l.includes('export *')) return false
           // Fișierele de test verifică simboluri prin regex pe stringuri — nu le definesc
           if (l.includes('expect(') || l.includes('.test(') || l.includes('toMatch(')) return false
+          // Și alte referințe prin stringuri (.slice, .indexOf, .match) — nu definiții
+          if (l.includes('.slice(') || l.includes('.indexOf(') || l.includes('.match(') || l.includes('.includes(')) return false
           return true
         })
         if (!linieCuDef) continue
