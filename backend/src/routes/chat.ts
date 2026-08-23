@@ -3981,9 +3981,10 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
       // because recordCost was not called anywhere on the chat path.
-      // PASTILA GEMINI (Adrian, 3 aug): tot creierul e google-direct → totul se
-      // contabilizează sub 'gemini' și alimentează pastila din bară.
-      void recordCost(user.email, 'gemini', r.costUsd)
+      // COMUTATOR DE CREIER (23 aug 2026): costul merge pe provider-ul real
+      // (openai pentru openai/*, gemini pentru google-direct/*).
+      const brainCostKind = r.model.startsWith('openai/') ? 'openai' : 'gemini'
+      void recordCost(user.email, brainCostKind, r.costUsd)
       const totalMs = Date.now() - tCreier
       console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${totalMs}ms`)
       // EVIDENȚA TIMPILOR (Adrian, 3 aug): măsurabil + din el învață bucla din spate.
@@ -4099,7 +4100,8 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       const costPierdut = e instanceof Error ? Number((e as Error & { costUsd?: number }).costUsd ?? 0) : 0
       if (costPierdut > 0) {
         usage.usd += costPierdut
-        void recordCost(user.email, 'gemini', costPierdut)
+        const errCostKind = (orChatModel ?? '').startsWith('openai/') ? 'openai' : 'gemini'
+        void recordCost(user.email, errCostKind, costPierdut)
       }
       // Măsoară + debitează pe eroare — O SINGURĂ sursă (jscpd, 10 aug), folosită
       // pe ambele ramuri de eșec (tura ambientală și eroarea generală). Timpul se

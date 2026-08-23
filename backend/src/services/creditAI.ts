@@ -116,6 +116,7 @@ async function cheltuiala(kinds: string[]): Promise<Masuratoare<{ usd: number }>
  *  scrisă O DATĂ și exportată, ca pastila din bară și raportul pe furnizori să
  *  scadă EXACT aceleași rânduri — două liste ar fi divergat în tăcere. */
 export const FELURI_GEMINI = ['gemini', 'chat', 'memory', 'memory_est', 'image', 'image_est', 'video']
+export const FELURI_OPENAI = ['openai']
 
 async function randGemini(): Promise<CreditAI> {
   const cheieConfigurata = Boolean(config.geminiKey)
@@ -274,6 +275,38 @@ async function randGoogleCloud(): Promise<CreditAI> {
 // pe modelul performant gemini". Constructorul rulează pe motorul Aider, iar
 // creierul lui e DOAR Gemini — nu mai există rezervă Fable de arătat.)
 
+async function randOpenAI(): Promise<CreditAI> {
+  const cheieConfigurata = Boolean(config.openai.key)
+  const t0 = Date.now()
+  let serveste: Masuratoare<{ da: boolean; detaliu?: string }> | undefined
+  if (cheieConfigurata) {
+    const r = await fetch('https://api.openai.com/v1/models?limit=1', {
+      headers: { Authorization: `Bearer ${config.openai.key}` },
+      signal: AbortSignal.timeout(5_000),
+    }).catch(() => null)
+    const ms = Date.now() - t0
+    if (r && r.ok) {
+      serveste = reusit('GET /v1/models cu OPENAI_API_KEY', { da: true }, ms)
+    } else {
+      serveste = reusit('GET /v1/models cu OPENAI_API_KEY', { da: false, detaliu: r ? `HTTP ${r.status}` : 'fetch failed' }, ms)
+    }
+  }
+  return {
+    furnizor: 'OpenAI',
+    alimenteaza: 'Creier chat (text + vedere + reasoning)',
+    cheieConfigurata,
+    ramas: picat(
+      'OpenAI nu expune sold prin API',
+      cheieConfigurata
+        ? 'platform.openai.com nu oferă endpoint de sold; creditul real se vede în dashboard'
+        : 'cheia OPENAI_API_KEY nu e configurată',
+    ),
+    cheltuitLuna: await cheltuiala(FELURI_OPENAI),
+    serveste,
+    facturare: 'https://platform.openai.com/settings/organization/billing/overview',
+  }
+}
+
 /** Raportul complet, un rând pe furnizor. Un rând care n-a putut fi citit
  *  RĂMÂNE în listă, cu motivul lui — dispariția tăcută ar fi tot o minciună. */
 export async function crediteAI(): Promise<CreditAI[]> {
@@ -283,5 +316,5 @@ export async function crediteAI(): Promise<CreditAI[]> {
   // (services/jules.ts) și uneltele jules_* RĂMÂN — Kelion îl poate chema DOAR
   // la ordinul explicit al ownerului. randJules există mai jos pentru sonda
   // la cerere (julesServeste prin unealtă), nu pentru afișaj.
-  return Promise.all([randGemini(), randSerper(), randGoogleCloud()])
+  return Promise.all([randGemini(), randSerper(), randGoogleCloud(), randOpenAI()])
 }
