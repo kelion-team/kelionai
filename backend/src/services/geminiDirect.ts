@@ -400,14 +400,14 @@ export function isGeminiQuotaError(e: unknown): boolean {
 // Return shape: OrImage (brainContract.ts) — mime + bytes, so image.ts's
 // storage/URL logic is unchanged. costUsd is 0 — these endpoints report no
 // per-call cost, and an unmeasured number would be a fabrication (rule no. 1).
-// MODELELE DE IMAGINE — CITITE de pe cheia ownerului, nu presupuse (8 aug,
-// „i-am dat să genereze imagini și nu a mers"; jurnalul: `imagen-3.0-generate-002`
-// → HTTP 404, model RETRAS de Google). ListModels pe cheia lui (măsurat 8 aug,
-// 20:22) dă: imagen-4.0-generate-001 / -ultra- / -fast- și familia
-// gemini-3.x-image. Primul = succesorul direct al lui 3.0; rezerva urcă pe
-// 3.1-flash-image (2.5-flash-image există dar întorcea 200 fără imagine).
-const IMAGEN_MODEL = 'imagen-4.0-generate-001'
-const GEMINI_IMAGE_MODEL = 'gemini-3.1-flash-image' // hardcod-permis: implicitul modelului de imagini, suprascris din env
+// MODELELE DE IMAGINE — CITITE din env, nu hardcodate (LEGEA ANTI-HARDCODARE).
+// Măsurat 23 aug 2026: `imagen-4.0-generate-001` a fost RETRAS de Google (HTTP
+// 404 pe fiecare apel → 2-3 secunde pierdute înainte de fallback). ListModels
+// pe cheia ownerului dă acum DOAR familia gemini-3.x-image (gemini-3.1-flash-image,
+// gemini-3-pro-image, etc.) — NICIUN Imagen. Ordinea swap-uită: Gemini image
+// PRIMUL (viu), Imagen DOAR dacă e setat în env (ca să nu pierdem timp pe 404).
+const IMAGEN_MODEL = process.env.IMAGEN_MODEL || '' // gol = sărim Imagen (retras de Google)
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image' // hardcod-permis: implicitul modelului de imagini VIU, suprascris din env
 
 /** Imagen's predict endpoint. Bytes on success, null on any miss (missing key
  *  is handled by the caller). */
@@ -501,7 +501,10 @@ async function geminiImageContent(prompt: string): Promise<{ mime: string; buf: 
 const IMAGE_USD_ESTIMAT = 0.04
 export async function geminiImage(prompt: string): Promise<OrImage> {
   if (!config.geminiKey) return { error: 'image_not_configured' }
-  const hit = (await imagenPredict(prompt)) ?? (await geminiImageContent(prompt))
+  // Ordine swap-uită (23 aug): Gemini image PRIMUL (viu), Imagen DOAR dacă
+  // IMAGEN_MODEL e setat în env (retras de Google — 404 pe fiecare apel).
+  const hit = (await geminiImageContent(prompt))
+    ?? (IMAGEN_MODEL ? await imagenPredict(prompt) : null)
   if (!hit) return { error: 'image_generation_failed' }
   return { mime: hit.mime, buf: hit.buf, costUsd: IMAGE_USD_ESTIMAT }
 }
