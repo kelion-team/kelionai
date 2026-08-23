@@ -2150,6 +2150,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // dacă vrea imagini. Nu creează din prima — cere preferințele.
       systemPrompt +=
         `\n\nPREZENTĂRI (create_presentation): CAND userul cere o prezentare/prezentare/slides/deck, NU o creezi din prima. ÎNTREABĂ ÎNTÂI: (1) În ce LIMBĂ vrei prezentarea? (dacă nu specifică, întreabă — nu presupune). (2) Câte SLIDE-URI vrei? (dacă nu specifică, sugerează un număr rezonabil pentru subiect și întreabă). (3) Vrei IMAGINI pe slide-uri? Dacă da, ce fel — diagrame, foto, grafice? (dacă vrea imagini, folosește câmpul image_url per slide cu URL-uri publice, sau cheamă generate_image ca să creezi imagini pentru slide-uri). După ce userul răspunde, construiești conținutul bine structurat ÎN LIMBA aleasă și apelezi create_presentation cu title, language, și slides (fiecare cu title, body, optional image_url, optional layout). FIECARE slide are conținut real, bine scris — nu placeholder-uri.`
+      // FORMULARE (owner, 23 aug 2026: „trebuie sa fie in stare sa identifice
+      // subiectul necesar si sa crieze automat un set de intrebari care acopera
+      // complet subiectul"):
+      // Kelion identifică SUBIECTUL din cerere, generează AUTOMAT un set COMPLET
+      // de întrebări care acoperă tot subiectul, cu tipul potrivit per întrebare.
+      systemPrompt +=
+        `\n\nFORMULARE (create_form): CAND userul cere un formular/form/sondaj/chestionar/înscriere, IDENTIFICĂ subiectul din cerere și GENEREAZĂ AUTOMAT un set COMPLET de întrebări care ACOPERĂ ÎNTREGUL subiect — nu 2-3 întrebări vagi, ci un set thorough, bine structurat. ALEGE tipul potrivit pentru fiecare întrebare: text (nume, date scurte), paragraph (feedback detaliat, comentarii), multiple_choice (o singură alegere), checkboxes (multi-selecție), dropdown (liste lungi), scale (evaluări 1-5), date (date calendaristice), time (ore). Pentru multiple_choice/checkboxes/dropdown, genereazi TU opțiunile relevante pentru subiect. ÎNTREABĂ userul DOAR ce nu a specificat: limba (dacă nu e clar), scopul (sondaj/înscriere/feedback/quiz), și numărul aproximativ de întrebări (sugerează tu un număr comprehensive pentru subiect). Scrie TOATE întrebările și opțiunile ÎN LIMBA userului. Exemplu: „fă-mi un formular de feedback pentru un curs" → identifici: feedback curs → generezi 8-12 întrebări: scale (calitate curs, instructor, materiale), paragraph (ce ți-a plăcut, ce poți îmbunătăți), multiple_choice (ai recomanda cursul?), text (nume, optional).`
 
     // Monitor awareness — Kelion works INSIDE whatever is already on screen. The
     // frontend sends the open task tabs so Kelion swaps content (same tool again)

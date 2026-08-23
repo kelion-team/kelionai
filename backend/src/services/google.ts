@@ -172,13 +172,31 @@ export const googleTools: Tool[] = [
   {
     name: 'create_form',
     description:
-      "Create a Google Form in the user's account: a title, an optional description and a list of text questions. Use for sign-up forms, surveys, questionnaires. Returns the link to fill it in (url) and the edit link (editUrl).",
+      "Create a Google Form in the user's account with MIXED question types. BEFORE creating, IDENTIFY the subject the user needs and AUTOMATICALLY build a COMPLETE set of questions that COVERS the entire subject — not a few vague ones. Ask the user ONLY what they did NOT specify: the language (if unclear), the number of questions (suggest a comprehensive count for the subject), and the form's purpose (survey, registration, feedback, quiz). Then generate ALL questions yourself — well-structured, in the user's language, with the RIGHT question type for each (text for names/short answers, paragraph for detailed feedback, multiple_choice for single selection, checkboxes for multi-select, scale for ratings, dropdown for long lists, date for dates). Returns the link to fill it in (url) and the edit link (editUrl).",
     input_schema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Form title.' },
-        description: { type: 'string', description: 'Optional form description.' },
-        questions: { type: 'array', items: { type: 'string' }, description: 'The questions, in order (short text answers).' },
+        title: { type: 'string', description: 'Form title (in the user\'s chosen language).' },
+        description: { type: 'string', description: 'Optional form description shown at the top (in the user\'s chosen language).' },
+        language: { type: 'string', description: 'The language code for the form content (e.g. "ro", "en", "es", "de", "fr"). Write ALL questions and options in this language.' },
+        questions: {
+          type: 'array',
+          description: 'The questions, in order. Each question has a type and type-specific fields. Generate a COMPLETE set that covers the subject thoroughly.',
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', description: 'The question text (in the user\'s chosen language).' },
+              type: { type: 'string', enum: ['text', 'paragraph', 'multiple_choice', 'checkboxes', 'dropdown', 'scale', 'date', 'time'], description: 'Question type: text (short answer), paragraph (long answer), multiple_choice (radio — one answer), checkboxes (multiple answers), dropdown (one from a long list), scale (1-5 rating), date, time.' },
+              required: { type: 'boolean', description: 'Whether the question is required (default false).' },
+              options: { type: 'array', items: { type: 'string' }, description: 'For multiple_choice, checkboxes, dropdown: the choices (in the user\'s language).' },
+              scale_low: { type: 'integer', description: 'For scale: the lowest value (default 1).' },
+              scale_high: { type: 'integer', description: 'For scale: the highest value (default 5).' },
+              scale_low_label: { type: 'string', description: 'For scale: label for the lowest value (e.g. "Not at all").' },
+              scale_high_label: { type: 'string', description: 'For scale: label for the highest value (e.g. "Very much").' },
+            },
+            required: ['question', 'type'],
+          },
+        },
       },
       required: ['title'],
     },
@@ -1125,8 +1143,11 @@ async function createPresentation(
 // propriul ajutor `batchUpdateGoogleResource` — doi doctori pe același pacient.
 // A rămas UNUL singur: batchUpdateGoogle, definit mai sus.)
 
-// ── GOOGLE FORMS (owner, 14 aug: produsele alese) ────────────────────────────
-// Creează formularul + întrebări text simple; întoarce linkul de completat.
+// ── GOOGLE FORMS (owner, 14 aug: produsele alese; 23 aug: tipuri multiple) ──
+// Creează formularul + întrebări cu TIPURI diferite (text, paragraph, choice,
+// scale, date, time); întoarce linkul de completat + cel de editare.
+type TipIntrebare = 'text' | 'paragraph' | 'multiple_choice' | 'checkboxes' | 'dropdown' | 'scale' | 'date' | 'time'
+
 async function createForm(title: string, description: string, questions: unknown, token: string): Promise<string> {
   if (!title) return JSON.stringify({ error: 'missing_title' })
   const cRes = await tfetch('https://forms.googleapis.com/v1/forms', {
@@ -1138,19 +1159,71 @@ async function createForm(title: string, description: string, questions: unknown
   const cj = (await cRes.json()) as { formId?: string; responderUri?: string }
   if (!cj.formId) return JSON.stringify({ error: 'forms_no_id' })
   const intrebari = (Array.isArray(questions) ? questions : [])
-    .map((q) => String(q ?? '').trim().slice(0, 300))
-    .filter(Boolean)
-    .slice(0, 30)
+    .map((q) => {
+      const o = (q ?? {}) as Record<string, unknown>
+      const tipRaw = String(o.type ?? 'text') as TipIntrebare
+      const tip: TipIntrebare = (['text', 'paragraph', 'multiple_choice', 'checkboxes', 'dropdown', 'scale', 'date', 'time'] as const).includes(tipRaw as TipIntrebare)
+        ? tipRaw
+        : 'text'
+      const optiuni = Array.isArray(o.options) ? (o.options as unknown[]).map((x) => String(x ?? '').trim().slice(0, 200)).filter(Boolean).slice(0, 50) : []
+      return {
+        text: String(o.question ?? o.intrebare ?? '').trim().slice(0, 300),
+        tip,
+        obligatoriu: o.required === true,
+        optiuni,
+        scaleLow: typeof o.scale_low === 'number' ? o.scale_low : 1,
+        scaleHigh: typeof o.scale_high === 'number' ? o.scale_high : 5,
+        scaleLowLabel: String(o.scale_low_label ?? '').slice(0, 50),
+        scaleHighLabel: String(o.scale_high_label ?? '').slice(0, 50),
+      }
+    })
+    .filter((q) => q.text)
+    .slice(0, 50)
   const requests: unknown[] = []
   if (description) requests.push({ updateFormInfo: { info: { description: description.slice(0, 1000) }, updateMask: 'description' } })
-  intrebari.forEach((q, i) =>
+  intrebari.forEach((q, i) => {
+    // Construiește obiectul question în funcție de tip
+    let questionObj: Record<string, unknown>
+    switch (q.tip) {
+      case 'paragraph':
+        questionObj = { required: q.obligatoriu, textQuestion: { paragraph: true } }
+        break
+      case 'multiple_choice':
+        questionObj = { required: q.obligatoriu, choiceQuestion: { type: 'RADIO', options: q.optiuni.map((v) => ({ value: v })) } }
+        break
+      case 'checkboxes':
+        questionObj = { required: q.obligatoriu, choiceQuestion: { type: 'CHECKBOX', options: q.optiuni.map((v) => ({ value: v })) } }
+        break
+      case 'dropdown':
+        questionObj = { required: q.obligatoriu, choiceQuestion: { type: 'DROP_DOWN', options: q.optiuni.map((v) => ({ value: v })) } }
+        break
+      case 'scale':
+        questionObj = {
+          required: q.obligatoriu,
+          scaleQuestion: {
+            low: q.scaleLow,
+            high: q.scaleHigh,
+            lowLabel: q.scaleLowLabel || undefined,
+            highLabel: q.scaleHighLabel || undefined,
+          },
+        }
+        break
+      case 'date':
+        questionObj = { required: q.obligatoriu, dateQuestion: {} }
+        break
+      case 'time':
+        questionObj = { required: q.obligatoriu, timeQuestion: {} }
+        break
+      default: // text
+        questionObj = { required: q.obligatoriu, textQuestion: { paragraph: false } }
+    }
     requests.push({
       createItem: {
-        item: { title: q, questionItem: { question: { required: false, textQuestion: { paragraph: false } } } },
+        item: { title: q.text, questionItem: { question: questionObj } },
         location: { index: i },
       },
-    }),
-  )
+    })
+  })
   if (requests.length) {
     const status = await batchUpdateGoogle(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, requests, token)
     if (status !== null) {

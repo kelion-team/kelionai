@@ -1,0 +1,39 @@
+Formulare Google: identifica subiectul + genereaza intrebari complete + tipuri.
+
+Problema (owner, 23 aug 2026): „formulare google, trebuie sa fie in stare
+sa identifice subiectul necesar si sa crieze automat un set de intrebari
+care acopera complet subiectul."
+
+Cauze:
+1. Descrierea uneltei spunea „a list of text questions" — doar text scurt,
+   fara tipuri de intrebari.
+2. Nu instructiune sa analizeze subiectul si sa genereze intrebari complete.
+3. Doar un tip de intrebare: textQuestion paragraph:false (text scurt).
+
+Fix 1 (google.ts — descrierea uneltei): acum spune „IDENTIFY the subject
+and AUTOMATICALLY build a COMPLETE set of questions that COVERS the entire
+subject". Schema include: language, tipuri de intrebari (text, paragraph,
+multiple_choice, checkboxes, dropdown, scale, date, time), options per
+intrebare, scale_low/high cu labels, required flag.
+
+Fix 2 (google.ts — createForm): suporta TOATE tipurile de intrebari prin
+Google Forms API:
+- text: textQuestion paragraph:false (scurt)
+- paragraph: textQuestion paragraph:true (lung)
+- multiple_choice: choiceQuestion type:RADIO
+- checkboxes: choiceQuestion type:CHECKBOX
+- dropdown: choiceQuestion type:DROP_DOWN
+- scale: scaleQuestion cu low/high + labels
+- date: dateQuestion
+- time: timeQuestion
+
+Fix 3 (chat.ts — prompt sistem): instructiuni explicite „IDENTIFICĂ
+subiectul din cerere si GENEREAZA AUTOMAT un set COMPLET de intrebari
+care ACOPERĂ INTREGUL subiect". ALEGE tipul potrivit per intrebare.
+INTREABA userul DOAR ce nu a specificat: limba, scopul, nr aproximativ.
+Exemplu concret inclus: „feedback pentru un curs" → 8-12 intrebari cu
+scale, paragraph, multiple_choice, text.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
