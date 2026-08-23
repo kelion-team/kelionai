@@ -4,7 +4,7 @@ import { emotieKelionDominanta, parametriAvatar, actualizeazaEmotieKelion } from
 import { getSalutDimineata, detecteazaTrezierea, marcheazaActivitate } from '../services/modulVis.js'
 import { getJurnaleRecente, getJurnalPentruZi } from '../services/jurnalAuto.js'
 import { analizeazaSanatate } from '../services/detectieSanatate.js'
-import { getConfigMostenire, setConfigMostenire, stareMostenire } from '../services/mostenireDigitala.js'
+import { getConfigMostenire, setConfigMostenire, stareMostenire, marcheazaActivitateMostenire } from '../services/mostenireDigitala.js'
 import { getProfilPersonalitate, promptPersonalitate } from '../services/personalitateEvolutiva.js'
 
 // ── RUTELE CELOR 10 „WAW" (owner, 22 aug 2026: „uimește-mă") ────────────────
@@ -15,6 +15,7 @@ export async function wawRoutes(fastify: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     marcheazaActivitate()
+    void marcheazaActivitateMostenire().catch(() => undefined)
     const trezit = detecteazaTrezierea()
     const salut = trezit ? getSalutDimineata() : null
     return reply.send({ trezit, salut })
@@ -27,7 +28,9 @@ export async function wawRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.send(emotieKelionDominanta())
   })
 
-  fastify.get('/api/kelion/avatar-parametri', async (_req, reply) => {
+  fastify.get('/api/kelion/avatar-parametri', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
     return reply.send(parametriAvatar())
   })
 
@@ -67,21 +70,21 @@ export async function wawRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/api/mostenire/config', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    return reply.send(getConfigMostenire())
+    return reply.send(await getConfigMostenire())
   })
 
   fastify.post('/api/mostenire/config', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     const corp = (req.body ?? {}) as Record<string, unknown>
-    setConfigMostenire(corp)
+    await setConfigMostenire(corp)
     return reply.send({ ok: true })
   })
 
   fastify.get('/api/mostenire/stare', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    return reply.send(stareMostenire())
+    return reply.send(await stareMostenire())
   })
 
   // #10 PERSONALITATE EVOLUTIVĂ
@@ -91,7 +94,9 @@ export async function wawRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.send(getProfilPersonalitate())
   })
 
-  fastify.get('/api/personalitate/prompt', async (_req, reply) => {
+  fastify.get('/api/personalitate/prompt', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
     return reply.send({ prompt: promptPersonalitate() })
   })
 

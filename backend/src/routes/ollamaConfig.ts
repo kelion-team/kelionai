@@ -8,17 +8,19 @@ import { raporteazaStareDevice } from '../services/rezilientaCreier.js'
 // Frontend-ul (pe device-ul utilizatorului) fetch-uiește configul de aici:
 //   - numele modelului (din env CONSTRUCTOR_OLLAMA_MODEL)
 //   - digest-ul cerut (din env OLLAMA_MODEL_DIGEST — gol = doar prezență)
-//   - gazda VPS (din env OLLAMA_API_BASE — pentru cascade device → VPS)
 //
 // Nimic hardcodat — totul din env. Frontend-ul nu știe modelul decât de aici.
+// Auth necesar — doar user logat. IP VPS nu se expune (cascade e pe backend).
 
 export async function ollamaConfigRoutes(fastify: FastifyInstance): Promise<void> {
-  fastify.get('/api/ollama/config', async (_req, reply) => {
+  fastify.get('/api/ollama/config', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
     reply.header('Cache-Control', 'no-store')
     return reply.send({
       model: config.constructorOllamaModel,
       digestCerut: process.env.OLLAMA_MODEL_DIGEST ?? '',
-      gazdaVps: config.ollamaApiBase,
+      // gazdaVps SCOASĂ — nu e folosită în frontend și expunea IP-ul intern VPS
     })
   })
 

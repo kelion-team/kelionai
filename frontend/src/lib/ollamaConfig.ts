@@ -6,7 +6,6 @@
 export interface OllamaConfig {
   model: string
   digestCerut: string // gol = nu verificăm digest, doar prezență
-  gazdaVps: string // OLLAMA_API_BASE de pe VPS (pentru cascade)
 }
 
 let configCache: OllamaConfig | null = null
@@ -22,6 +21,6 @@ export async function getOllamaConfig(): Promise<OllamaConfig> {
     }
   } catch { /* offline — fallback */ }
   // Fallback: nu putem face nimic fără server
-  configCache = { model: '', digestCerut: '', gazdaVps: '' }
+  configCache = { model: '', digestCerut: '' }
   return configCache
 }
