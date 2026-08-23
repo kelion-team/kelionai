@@ -280,10 +280,10 @@ export const config = {
   // modelele default sunt prețuri reale OpenAI, suprascrise prin env.
   openai: {
     key: env(...ENV_ALIASES.openaiKey),
-    luna: env(...ENV_ALIASES.openaiLuna) || 'gpt-5.6-luna', // hardcod-permis: default chat ușor
-    medium: env(...ENV_ALIASES.openaiMedium) || 'o4-mini', // hardcod-permis: default chat mediu
-    heavy: env(...ENV_ALIASES.openaiHeavy) || 'o3', // hardcod-permis: default chat greu
-    max: env(...ENV_ALIASES.openaiMax) || 'gpt-5.6-sol', // hardcod-permis: default chat maxim
+    luna: env(...ENV_ALIASES.openaiLuna) || 'gpt-4o-mini', // hardcod-permis: model real OpenAI
+    medium: env(...ENV_ALIASES.openaiMedium) || 'gpt-4o', // hardcod-permis: model real OpenAI
+    heavy: env(...ENV_ALIASES.openaiHeavy) || 'o3', // hardcod-permis: model real OpenAI
+    max: env(...ENV_ALIASES.openaiMax) || 'o1', // hardcod-permis: model real OpenAI
   },
   // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
