@@ -125,4 +125,69 @@ export async function wawRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.code(500).send({ error: 'eroare_stocare' })
     }
   })
+
+  // #6 CLONARE VOCE — SINTEZĂ cu Coqui TTS (XTTS v2)
+  // Primește text + email user, încarcă sample-ul din KV, îl trimite la
+  // microserviciul Coqui (port 5100 intern), primește audio sintetizat
+  // în vocea userului. Folosit pentru conversații de demo (studioul de clipuri).
+  fastify.post('/api/voce/sintetizeaza', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const corp = (req.body ?? {}) as { text?: string; limba?: string }
+    const text = (corp.text ?? '').trim()
+    if (!text) return reply.code(400).send({ error: 'lipsa_text' })
+    if (text.length > 500) return reply.code(400).send({ error: 'text_prea_lung', max: 500 })
+
+    try {
+      const { loadKv } = await import('../db.js')
+      const raw = await loadKv(`voce_sample_${user.email}`)
+      if (!raw) return reply.code(404).send({ error: 'nu_exista_sample' })
+
+      const sampleData = JSON.parse(raw) as { audio?: string; text?: string }
+      if (!sampleData.audio) return reply.code(404).send({ error: 'sample_corupt' })
+
+      // Trimite la microserviciul Coqui (port 5100 intern)
+      const coquiUrl = process.env.COQUI_URL ?? 'http://127.0.0.1:5100'
+      const r = await fetch(`${coquiUrl}/sintetizeaza`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          sample_base64: sampleData.audio,
+          limba: corp.limba ?? 'ro',
+        }),
+        signal: AbortSignal.timeout(30_000), // sinteza pe CPU poate dura
+      })
+
+      if (!r.ok) {
+        const errText = await r.text().catch(() => '')
+        return reply.code(502).send({ error: 'coqui_eroare', status: r.status, detaliu: errText })
+      }
+
+      const audioBuf = Buffer.from(await r.arrayBuffer())
+      reply.header('Content-Type', 'audio/wav')
+      reply.header('Cache-Control', 'no-store')
+      return reply.send(audioBuf)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // Coqui nu rulează? Spune cinstit, nu masca.
+      if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
+        return reply.code(503).send({ error: 'coqui_nedisponibil', detaliu: 'Microserviciul Coqui TTS nu rulează pe VPS' })
+      }
+      return reply.code(500).send({ error: 'eroare_sinteza', detaliu: msg })
+    }
+  })
+
+  // #6 CLONARE VOCE — STATUS Coqui (e disponibil pentru sinteză?)
+  fastify.get('/api/voce/coqui-status', async (_req, reply) => {
+    try {
+      const coquiUrl = process.env.COQUI_URL ?? 'http://127.0.0.1:5100'
+      const r = await fetch(`${coquiUrl}/health`, { signal: AbortSignal.timeout(5000) })
+      if (!r.ok) return reply.send({ ok: false, status: r.status })
+      const j = (await r.json()) as { ok?: boolean; model?: string }
+      return reply.send({ ok: !!j.ok, model: j.model ?? 'necunoscut' })
+    } catch {
+      return reply.send({ ok: false, model: 'none' })
+    }
+  })
 }

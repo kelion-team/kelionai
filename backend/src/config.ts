@@ -49,6 +49,10 @@ export const ENV_ALIASES: Record<string, string[]> = {
   githubToken: ['GITHUB_TOKEN', 'KELION_GITHUB_TOKEN'],
   useLocalVosk: ['USE_LOCAL_VOSK'],
   localVoskUrl: ['LOCAL_VOSK_URL'],
+  // Coqui TTS (clonare voce, 23 aug 2026) — microserviciu Python pe port 5100 intern.
+  // Default: 127.0.0.1:5100 (container same-host). Non-fatal: dacă nu rulează,
+  // /api/voce/sintetizeaza returnează 503 cinstit.
+  coquiUrl: ['COQUI_URL'],
 }
 
 function required(name: string): string {

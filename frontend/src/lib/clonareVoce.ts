@@ -108,6 +108,40 @@ export function inregistrareVoceInMers(): boolean {
   return inregistrareInMers
 }
 
+// ── SINTEZĂ CU CLONA (owner, 23 aug 2026) ──────────────────────────────────
+// Trimite text la /api/voce/sintetizeaza → primește audio WAV în vocea
+// userului (sintetizat de Coqui TTS XTTS v2 pe VPS). Folosit pentru
+// conversații de demo (studioul de clipuri): clona pune întrebări,
+// Kelion răspunde cu vocea lui.
+
+/** Sintetizează text în vocea clonată a userului. Returnează URL blob audio. */
+export async function sintetizeazaCuClona(text: string, limba?: string): Promise<string | null> {
+  try {
+    const r = await fetch('/api/voce/sintetizeaza', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, limba }),
+    })
+    if (!r.ok) return null
+    const blob = await r.blob()
+    return URL.createObjectURL(blob)
+  } catch {
+    return null
+  }
+}
+
+/** Verifică dacă microserviciul Coqui e disponibil pe VPS. */
+export async function coquiDisponibil(): Promise<boolean> {
+  try {
+    const r = await fetch('/api/voce/coqui-status', { cache: 'no-store' })
+    if (!r.ok) return false
+    const j = (await r.json()) as { ok?: boolean }
+    return !!j.ok
+  } catch {
+    return false
+  }
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve) => {
     const reader = new FileReader()

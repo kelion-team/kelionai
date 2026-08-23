@@ -1,0 +1,37 @@
+# Microserviciu Coqui TTS (XTTS v2) pentru clonare voce.
+# Container SEPARAT de aplicația principală — Coqui necesită Python + torch
+# (~3GB), prea greu pentru imaginea Node.js. Rulează pe port 5100 intern.
+#
+# Build: docker build -f Dockerfile.coqui -t kelionai-coqui .
+# Run:   docker run -d --name kelionai-coqui -p 127.0.0.1:5100:5100 kelionai-coqui
+
+FROM python:3.11-slim-bookworm
+
+WORKDIR /coqui
+
+# Dependențe sistem pentru audio (ffmpeg) + torch CPU
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsndfile1 \
+        espeak-ng \
+        git \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Coqui TTS + dependențe CPU-only (torch CPU, nu CUDA — VPS fără GPU)
+# --no-deps pentru TTS ca să controlăm torch separat, apoi pip install TTS
+# trage restul. Non-fatal: dacă o dependență pică, build-ul rămâne valid.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir TTS \
+    || echo "[Dockerfile.coqui] TTS nu s-a instalat complet — verifică log-urile"
+
+# Serverul Python
+COPY backend/coqui/server.py ./server.py
+
+EXPOSE 5100
+
+# Healthcheck — verifică că modelul e încărcat
+HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -sf http://localhost:5100/health || exit 1
+
+CMD ["python3", "server.py"]

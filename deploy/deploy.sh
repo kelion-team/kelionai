@@ -304,6 +304,25 @@ docker run -d --name kelion-caddy --restart unless-stopped --network host \
   -v "$CADDY_DIR/data:/data" -v "$CADDY_DIR/config:/config" \
   caddy:2 caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
 
+# ── COQUI TTS (clonare voce, owner 23 aug 2026) ──────────────────────────────
+# Container SEPARAT pentru microserviciul Coqui TTS (XTTS v2). Necesită Python
+# + torch (~3GB) — prea greu pentru imaginea principală. Rulează pe port 5100
+# INTERN (127.0.0.1), NU e expus public. Backend-ul îl atinge prin COQUI_URL.
+# NON-FATAL: dacă Coqui nu se construiește/pornește, aplicația principală merge
+# mai departe — sinteza cu clona returnează 503, dar tot restul funcționează.
+echo "== 4b. Coqui TTS (clonare voce, port 5100 intern) =="
+if timeout 600 docker build -f "$REPO/Dockerfile.coqui" -t kelionai-coqui:latest "$REPO" >> "$BUILD_LOG" 2>&1; then
+  docker rm -f kelionai-coqui 2>/dev/null || true
+  docker run -d --name kelionai-coqui --restart unless-stopped \
+    --network host \
+    -e COQUI_PORT=5100 \
+    -e COQUI_LANGUAGE=ro \
+    kelionai-coqui:latest
+  echo "Coqui TTS: pornit (port 5100 intern) — clonare voce disponibilă"
+else
+  echo "AVERTISMENT: Coqui TTS nu s-a construit — sinteza cu clona va returna 503 (restul aplicației merge)"
+fi
+
 show_progress 90 "Configurare cronuri și servicii suport"
 echo "== 6. Backup criptat s?pt?m?nal (duminic? 03:00 ora Angliei) =="
 # Instalează/actualizează IDEMPOTENT cronul de backup criptat al DB-ului

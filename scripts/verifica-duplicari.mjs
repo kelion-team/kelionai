@@ -112,7 +112,7 @@ function cautaDuplicari(fisierTinta, semnale) {
 
   // D1: Funcții/componente cu același nume în alt fișier
   // Nume generice ignorate — apar peste tot fără să fie duplicări reale
-  const NUME_GENERICE = new Set(['tick', 'init', 'load', 'save', 'open', 'close', 'stop', 'start', 'send', 'read', 'write', 'parse', 'format', 'render', 'mount', 'unmount', 'handle', 'update', 'create', 'delete', 'remove', 'fetch', 'check', 'test', 'run', 'exec', 'main', 'wrap', 'unwrap', 'map', 'filter', 'reduce', 'pipe', 'flow', 'done', 'next', 'prev', 'data', 'item', 'list', 'opts', 'opts2', 'args', 'props', 'state', 'ref', 'refs', 'val', 'vals', 'key', 'keys', 'idx', 'len', 'buf', 'buf2', 'ctx', 'req', 'res', 'err', 'msg', 'id', 'ts', 'fn', 'cb', 'el', 'ui'])
+  const NUME_GENERICE = new Set(['tick', 'init', 'load', 'save', 'open', 'close', 'stop', 'start', 'send', 'read', 'write', 'parse', 'format', 'render', 'mount', 'unmount', 'handle', 'update', 'create', 'delete', 'remove', 'fetch', 'check', 'test', 'run', 'exec', 'main', 'wrap', 'unwrap', 'map', 'filter', 'reduce', 'pipe', 'flow', 'done', 'next', 'prev', 'data', 'item', 'list', 'opts', 'opts2', 'args', 'props', 'state', 'ref', 'refs', 'val', 'vals', 'key', 'keys', 'idx', 'len', 'buf', 'buf2', 'ctx', 'req', 'res', 'err', 'msg', 'id', 'ts', 'fn', 'cb', 'el', 'ui', 'radacina', 'root', 'port', 'config'])
   // Extragem semnalele din FIȘIERUL ȚINTĂ ca să excludem simbolurile care
   // sunt doar importuri/lazy în fișierul țintă (nu definiri noi)
   const continutTinta = readFileSync(fisierTinta, 'utf8').replace(/\r\n/g, '\n')
@@ -140,6 +140,8 @@ function cautaDuplicari(fisierTinta, semnale) {
           if (l.includes('import ')) return false
           if (l.includes('lazy(')) return false
           if (l.includes('export {') || l.includes('export *')) return false
+          // Fișierele de test verifică simboluri prin regex pe stringuri — nu le definesc
+          if (l.includes('expect(') || l.includes('.test(') || l.includes('toMatch(')) return false
           return true
         })
         if (!linieCuDef) continue
