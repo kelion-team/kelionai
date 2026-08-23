@@ -75,6 +75,26 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
 }
 
 export function getSessionUser(req: FastifyRequest): SessionUser | null {
+  // ── TEST-AUTH (owner, 23 aug 2026: „trebuie gasita modalitate prin care sa
+  //    nu mai zici doar tu poti sa faci asta") — permite agenților AI să
+  //    testeze rutele cu auth FĂRĂ cookie de admin. Mecanism:
+  //    1. Header `x-test-auth: <token>` în request
+  //    2. Token-ul vine din env `TEST_AUTH_TOKEN` (setat pe VPS via GitHub Secrets)
+  //    3. Dacă matchează → autentific ca admin (adrianenc11@gmail.com)
+  //    4. Dacă env nu e setat → mecanism INACTIV (zero risc pe producție fără token)
+  //    5. Token-ul NU e în cod, NU e în repo — doar în env pe VPS.
+  const testToken = process.env.TEST_AUTH_TOKEN
+  if (testToken && typeof req.headers['x-test-auth'] === 'string') {
+    if (req.headers['x-test-auth'] === testToken) {
+      return {
+        email: config.adminEmail,
+        name: 'Adrian (test)',
+        picture: '',
+        role: 'admin',
+        locale: 'ro',
+      }
+    }
+  }
   // req.cookies is populated by @fastify/cookie on normal HTTP routes. On a
   // WebSocket UPGRADE it may be unparsed (undefined) → `?.` avoids the crash and
   // we fall back to the raw header, so session auth works over WS too.
