@@ -2,8 +2,8 @@
 // PROCEDURA-REFACERE-CLONE.md): tipurile astea erau redeclarate identic aici
 // and in the backend (98 duplicated lines). Now they come from the common source; a TYPE
 // import, so it vanishes at compile time — it adds nothing to the bundle.
-import type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
-export type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow }
+import type { MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
+export type { MoneyCircuit, UserActivityRow }
 export interface HistoryRow {
   role: string
   content: string
@@ -107,23 +107,6 @@ export async function evalueazaOrdinConstructor(order: string): Promise<EvalCons
     })
     if (!r.ok) return null
     return (await r.json()) as EvalConstructor
-  } catch {
-    return null
-  }
-}
-
-/** GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug). Distructiv, declanșat de owner.
- *  Întoarce câte rânduri s-au șters (măsurat), sau `null` dacă a picat — ca
- *  butonul să spună adevărul, nu un „gata" inventat pe un apel eșuat. */
-export async function golesteVizitatori(): Promise<number | null> {
-  try {
-    const r = await fetch('/api/admin/visitors/purge', {
-      method: 'POST',
-      credentials: 'include',
-    })
-    if (!r.ok) return null
-    const j = (await r.json()) as { ok?: boolean; deleted?: number }
-    return j.ok ? Number(j.deleted ?? 0) : null
   } catch {
     return null
   }
@@ -301,74 +284,12 @@ export async function fetchStores(): Promise<StoresData | null> {
   }
 }
 
-// The persistent ORDER BOOK: every task sent to execution — what, when, and
-// whether the builder picked it up. Survives every deploy (Postgres).
-// Free-trial visitor analytics (admin only): the full professional picture —
-// who (human/bot), from where (country/region/city/ISP), on what device, which
-// browser, speaking what, and which ad brought them.
-
-
-export async function fetchDemos(): Promise<DemoStats | null> {
-  try {
-    const r = await fetch('/api/admin/demos', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as DemoStats
-  } catch {
-    return null
-  }
-}
-
 // Per-USER activity (admin only): who signed in, last IP/place/device, how
 // long they stayed in total — UN rând pe adresă, cu device-urile dedesubt
 // (P6, 15 aug; lista plată de sesiuni care repeta același om a fost scoasă).
 
 export interface UserActivity {
   users: UserActivityRow[]
-}
-
-// Leads: visitors who left their email so the owner can reach them.
-export interface Lead {
-  id: number
-  email: string
-  note: string
-  contacted: boolean
-  created_at: string
-}
-
-// null = citirea a EȘUAT (auditul admin, 3 aug) — tabul o scrie ca eșec,
-// nu ca „Niciun contact încă".
-export async function fetchLeads(): Promise<Lead[] | null> {
-  try {
-    const r = await fetch('/api/admin/leads', { credentials: 'include' })
-    if (!r.ok) return null
-    return ((await r.json()) as { leads: Lead[] }).leads
-  } catch {
-    return null
-  }
-}
-
-/** Verdictul MĂSURAT al trimiterii (auditul admin, 3 aug): vechiul boolean
- *  colapsa 400 (adresă/subiect invalide) cu 502 (SMTP a refuzat) și cu rețeaua
- *  picată, iar alerta inventa cauza „verifică MAIL_PASS". Acum alerta spune ce
- *  s-a măsurat: 'ok' | 'bad_request' | 'send_failed' | 'network'. */
-export async function emailLead(
-  id: number,
-  to: string,
-  subject: string,
-  body: string,
-): Promise<'ok' | 'bad_request' | 'send_failed' | 'network'> {
-  try {
-    const r = await fetch('/api/admin/lead/email', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, to, subject, body }),
-    })
-    if (r.ok) return 'ok'
-    return r.status === 400 ? 'bad_request' : 'send_failed'
-  } catch {
-    return 'network'
-  }
 }
 
 // Admin action on a user: block / unblock / credit (amount) / delete.

@@ -825,7 +825,7 @@ export default function Stage({ user }: { user: User }) {
   useEffect(() => {
     if (!online) setAppsOpen(false)
   }, [online])
-  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
+  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
   // admin button must not activate either"). armed = the secret is set (in
   // Admin→Voiceprints); unlocked = the voiceprint matched in this session
@@ -1052,7 +1052,7 @@ export default function Stage({ user }: { user: User }) {
             // VALIDATED section (Jul 24 audit): a free string from the model
             // ("bani", "finanțe") set a nonexistent tab → empty panel. Only
             // real sections pass; otherwise the current tab stays.
-            const VALID = ['finance', 'users', 'visitors', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare', 'sistem'] as const
+            const VALID = ['finance', 'users', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare', 'sistem'] as const
             const sec = String(d?.section ?? '')
             if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
             openAdmin()
