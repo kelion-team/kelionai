@@ -496,3 +496,19 @@ describe('vocalLive — ping/pong heartbeat previne înghețarea fluxului de voc
     expect(ruta).toContain("type: 'pong'")
   })
 })
+
+// ── SIGILIUL TIMEOUT-ULUI DE TĂCERE (owner, 23 aug 2026: „la 15 secunde se
+//    inchide sesiunea" + „sa fie batuta in cuie sa nu se mai schimbe fara
+//    aprobarea mea") — bug-ul a ars $588 pe tăcere. Valoarea e SIGILATĂ la
+//    15_000 ms. ORICE modificare fără aprobarea ownerului (în scris, în
+//    commit message) pică build-ul. Nu există „optimizare" care să justifice
+//    schimbarea: 15s e decizia ownerului, nu o valoare tehnică.
+describe('vocalLive — SIGILIUL timeout-ului de tăcere (15s, batut in cuie)', () => {
+  const ruta = readFileSync(new URL('./routes/vocalLive.ts', import.meta.url), 'utf8')
+
+  it('MAX_TACERE_MS = 15_000 (15 secunde) — nu se schimbă fără aprobarea ownerului', () => {
+    expect(ruta, 'MAX_TACERE_MS trebuie să fie 15_000 (15 secunde). ' +
+      'Schimbarea necesită aprobarea EXPLICITĂ a ownerului în commit message. ' +
+      'Bug-ul ăsta a ars $588 pe tăcere — nu se repetă.').toContain('MAX_TACERE_MS = 15_000')
+  })
+})
