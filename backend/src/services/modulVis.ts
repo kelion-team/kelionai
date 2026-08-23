@@ -33,7 +33,7 @@ export function marcheazaActivitate(): void {
 }
 
 /** Detectează dacă userul a dormit (inactivitate > 6 ore). */
-export function aDormit(): boolean {
+function aDormit(): boolean {
   return Date.now() - ultimaActivitate > PRAG_INACTIVITATE_MS
 }
 

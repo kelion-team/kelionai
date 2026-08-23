@@ -180,25 +180,7 @@ let sesiuneActiva: { inchide: () => void } | null = null
 // cuvânt vine cu ~300ms mai repede (handshake-ul e deja făcut).
 let wsCalda: WebSocket | null = null
 let warmStartTimer: ReturnType<typeof setTimeout> | null = null
-
-/** Pornește warm-start: pre-conectează WebSocket-ul în fundal. */
-export function pornesteWarmStart(): void {
-  if (wsCalda?.readyState === WebSocket.OPEN || wsCalda?.readyState === WebSocket.CONNECTING) return
-  try {
-    wsCalda = new WebSocket(urlWs())
-    wsCalda.onclose = () => { wsCalda = null }
-    wsCalda.onerror = () => { wsCalda = null }
-  } catch { wsCalda = null }
-}
-
-/** Oprește warm-start și închide conexiunea caldă. */
-export function opresteWarmStart(): void {
-  if (warmStartTimer) { clearTimeout(warmStartTimer); warmStartTimer = null }
-  if (wsCalda) {
-    try { wsCalda.close() } catch { /* tăcut */ }
-    wsCalda = null
-  }
-}
+void warmStartTimer // rezervat pentru warm-start viitor
 
 /** Dacă există o conexiune caldă, o folosește; altfel deschide una nouă. */
 function wsCaldSauNou(): WebSocket {
@@ -887,6 +869,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // „0 greșeli de auz", punctul 1). Array NOU, nu mutăm bufferul
     // microfonului — downsample îl întoarce ca ATARE la 16 kHz (ar corupe captura).
     const poarta = !procesareActiva && kelionAudibil()
+    // eslint-disable-next-line no-console
+    if (poarta !== eraPoarta) console.log(`[vocalLive] poarta half-duplex: ${poarta ? 'TĂCERE (Kelion audibil)' : 'MICROFON (ascultă)'} | surseActive=${surseActive.length} | redareExterna=${redareExterna} | ctxState=${ctxOut?.state ?? 'null'} | cursorRedare=${cursorRedare.toFixed(2)} | currentTime=${ctxOut?.currentTime.toFixed(2) ?? 'null'} | coada=${COADA_ECOU_S}`)
     const la16k = poarta ? new Float32Array(ds.length) : ds
     // BARGRAF DE INTRARE (owner, 16 aug): măsurăm nivelul REAL al microfonului pe
     // ACEST cadru — exact semnalul care (dacă poarta nu-l taie) pleacă la model —

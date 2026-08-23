@@ -155,6 +155,7 @@ export function opresteVedereaContinua(): void {
   cadruAnterior = null
 }
 
+// export-permis: folosit intern
 /** Dacă vederea continuă e activă. */
 export function vedereContinuaActiva(): boolean {
   return inMers

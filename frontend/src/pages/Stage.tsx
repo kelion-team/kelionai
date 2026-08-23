@@ -372,6 +372,12 @@ function MonitorPagina({ url, title, taskId, allow }: { url: string; title: stri
     setMotivNecitit(null)
     // URL relativ (ex. /api/route) e pagina NOASTRĂ, same-origin — mereu înrămabilă.
     if (!/^https?:\/\//i.test(url)) return
+    // YOUTUBE: embed-check verifică URL-ul ORIGINAL (watch?v=XXX), care trimite
+    // X-Frame-Options: SAMEORIGIN → „nu se poate înrăma" → blocat. Dar
+    // normalizeEmbedUrl îl transformă în /embed/XXX CARE FUNCȚIONEAZĂ în iframe.
+    // Deci pentru YouTube, sărim peste embed-check — știm sigur că embed-ul merge.
+    const normalized = normalizeEmbedUrl(url)
+    if (normalized !== url) return // URL-ul a fost transformat — încredere în transformare
     let viu = true
     fetch(`/api/embed-check?url=${encodeURIComponent(url)}`)
       .then((r) => (r.ok ? (r.json() as Promise<{ incadrabil?: boolean | null }>) : null))
@@ -819,7 +825,7 @@ export default function Stage({ user }: { user: User }) {
   useEffect(() => {
     if (!online) setAppsOpen(false)
   }, [online])
-  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
+  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
   // admin button must not activate either"). armed = the secret is set (in
   // Admin→Voiceprints); unlocked = the voiceprint matched in this session
@@ -1046,7 +1052,7 @@ export default function Stage({ user }: { user: User }) {
             // VALIDATED section (Jul 24 audit): a free string from the model
             // ("bani", "finanțe") set a nonexistent tab → empty panel. Only
             // real sections pass; otherwise the current tab stays.
-            const VALID = ['finance', 'users', 'visitors', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare', 'sistem'] as const
+            const VALID = ['finance', 'users', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare', 'sistem'] as const
             const sec = String(d?.section ?? '')
             if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
             openAdmin()
@@ -1890,8 +1896,6 @@ export default function Stage({ user }: { user: User }) {
                   ['📷 Photos', 'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.'],
                   ['▶️ YouTube upload', 'Urcă un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.'],
                   ['🏪 Profilul firmei', 'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.'],
-                  // Interconectare site partener (owner 17 aug): tryestera.com pe lista de aplicații vii.
-                  ['🌐 Tryestera', 'Deschide https://tryestera.com cu browser_open, pune browserul viu pe monitor și spune-mi pe scurt ce e acolo.'],
                   // P22 (owner: „se poate numi aplicatia Studioul de Clipuri,
                   // care cuprinde toate 6, nu? ii dai o ideie… el face tot"):
                   // Studioul ÎNLOCUIEȘTE vechiul „Generator video" — cuprinde

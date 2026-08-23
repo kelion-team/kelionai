@@ -752,7 +752,10 @@ export default function ChatPanel({
       // VOCE + agent): Gemini Live (vlRef) NU rostește răspunsul serverului nici pe voce
       // (n-are speak(text)). Deci Chirp (c.audio) e singura gură — ȘI scris ȘI voce. Vechea
       // gardă îl tăcea pe voce → TĂCERE. Realtime OpenAI (isRealtime) chiar rostește textul → refuzăm Chirp.
-      if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
+      const _isRealtime = (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true
+      // eslint-disable-next-line no-console
+      console.log(`[audio] c.audio primit: ${c.audio.length} chars | isRealtime=${_isRealtime} | vlRef=${!!vlRef.current} | micRef=${!!micRef.current}`)
+      if (_isRealtime) return
       // SCRISUL S-A ÎNTORS PE /api/chat (owner, 22 aug — MĂSURAT LIVE: cererea
       // scrisă nu se executa, nu se afișa, nu se auzea cât Live era viu dar
       // mut). Vechea gardă „cât LIVE e viu, Chirp tace" avea sens doar cât
@@ -763,7 +766,10 @@ export default function ChatPanel({
       // (setRedareExterna) mută urechea sesiunii Live cât redă Chirp — de azi
       // iar mecanism VIU, nu no-op defensiv. Turele VOCALE rămân în sesiunea
       // Live, cu vocea modelului — neatinse.
-      if (!requestTtsFocus({ turaScrisa: true })) return
+      const _focusOk = requestTtsFocus({ turaScrisa: true })
+      // eslint-disable-next-line no-console
+      console.log(`[audio] requestTtsFocus(turaScrisa): ${_focusOk}`)
+      if (!_focusOk) return
       contorGata('primul sunet (gura a pornit)')
       aSunatTuraRef.current = true // Chirp-ul de pe server a sunat → gura de siguranță NU mai intră
       playVoice(
@@ -2135,6 +2141,14 @@ export default function ChatPanel({
     // acoperă tot; efectul pe `online` o re-armează la revenirea netului.
     if (!esteConectat()) return
     if (micRef.current || micStartingRef.current || micManualOffRef.current) return
+    // MICROFON REFUZAT TERMINAL (fix buclă infinită): browserul a refuzat
+    // accesul la microfon — `onMicErr('not-allowed')` a setat steagul. Nu are
+    // rost să reîncercăm la fiecare visibilitychange/avatar-ready — browserul
+    // ține minte refuzul. Userul trebuie să schimbe permisiunea în setările
+    // browserului, apoi să reîncarce pagina. Fără garda asta, ensureMic()
+    // se chema la nesfârșit (de la evenimente) și reluari se reseta la 0
+    // de fiecare dată → buclă infinită de "microfonul nu a fost permis".
+    if (micTerminalAckedRef.current) return
     // GARDA LIPSĂ (8 aug, consola ownerului: „[voce] urechi Chirp 3…" APĂRUT
     // PESTE „calea veche NU pornește" + audio mort la fiecare ~5 numere).
     // Garda de mai sus verifică doar mânerul căii VECHI (micRef) — dacă vocea

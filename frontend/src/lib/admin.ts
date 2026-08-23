@@ -2,8 +2,8 @@
 // PROCEDURA-REFACERE-CLONE.md): tipurile astea erau redeclarate identic aici
 // and in the backend (98 duplicated lines). Now they come from the common source; a TYPE
 // import, so it vanishes at compile time — it adds nothing to the bundle.
-import type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
-export type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow }
+import type { MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
+export type { MoneyCircuit, UserActivityRow }
 export interface HistoryRow {
   role: string
   content: string
@@ -107,23 +107,6 @@ export async function evalueazaOrdinConstructor(order: string): Promise<EvalCons
     })
     if (!r.ok) return null
     return (await r.json()) as EvalConstructor
-  } catch {
-    return null
-  }
-}
-
-/** GOLEȘTE BAZA DE VIZITATORI (owner, 13 aug). Distructiv, declanșat de owner.
- *  Întoarce câte rânduri s-au șters (măsurat), sau `null` dacă a picat — ca
- *  butonul să spună adevărul, nu un „gata" inventat pe un apel eșuat. */
-export async function golesteVizitatori(): Promise<number | null> {
-  try {
-    const r = await fetch('/api/admin/visitors/purge', {
-      method: 'POST',
-      credentials: 'include',
-    })
-    if (!r.ok) return null
-    const j = (await r.json()) as { ok?: boolean; deleted?: number }
-    return j.ok ? Number(j.deleted ?? 0) : null
   } catch {
     return null
   }
@@ -263,20 +246,6 @@ export async function ignoraPlata(id: number): Promise<boolean> {
     return false
   }
 }
-// AICI A STAT `fetchCardKey` — cheia efemera prin care se afisa numarul cardului
-// virtual Stripe (Issuing Elements). It went away with the card: the component that
-// folosea (CardReveal) a fost stearsa.
-
-// AICI AU STAT `CardAddress`, `createAiCard`, `adminPayout` si `ownerDeposit` —
-// crearea cardului virtual Stripe, retragerea profitului si depunerea in punga.
-// Toate trei mergeau prin Stripe, iar Stripe a iesit pe 30 iul: userii platesc pe
-// linkul Revolut, banii intra direct in contul lui Adrian, iar furnizorii se
-// pay with his card. The back-end routes stay until the transition is confirmed
-// live, but the interface no longer calls them.
-
-// HERE STOOD `sellCredits` — X credits → a Stripe payment link for the user.
-// Deleted together with Stripe (31 Jul): credit sales go through the unique
-// code + Revolut transfer flow, and manual crediting stays on /api/admin/user.
 
 // Owner adds money to, or withdraws money from, the provider-credit pool.
 // Returns true on success so the caller can refresh the finance view.
@@ -315,23 +284,6 @@ export async function fetchStores(): Promise<StoresData | null> {
   }
 }
 
-// The persistent ORDER BOOK: every task sent to execution — what, when, and
-// whether the builder picked it up. Survives every deploy (Postgres).
-// Free-trial visitor analytics (admin only): the full professional picture —
-// who (human/bot), from where (country/region/city/ISP), on what device, which
-// browser, speaking what, and which ad brought them.
-
-
-export async function fetchDemos(): Promise<DemoStats | null> {
-  try {
-    const r = await fetch('/api/admin/demos', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as DemoStats
-  } catch {
-    return null
-  }
-}
-
 // Per-USER activity (admin only): who signed in, last IP/place/device, how
 // long they stayed in total — UN rând pe adresă, cu device-urile dedesubt
 // (P6, 15 aug; lista plată de sesiuni care repeta același om a fost scoasă).
@@ -339,55 +291,6 @@ export async function fetchDemos(): Promise<DemoStats | null> {
 export interface UserActivity {
   users: UserActivityRow[]
 }
-
-// Leads: visitors who left their email so the owner can reach them.
-export interface Lead {
-  id: number
-  email: string
-  note: string
-  contacted: boolean
-  created_at: string
-}
-
-// null = citirea a EȘUAT (auditul admin, 3 aug) — tabul o scrie ca eșec,
-// nu ca „Niciun contact încă".
-export async function fetchLeads(): Promise<Lead[] | null> {
-  try {
-    const r = await fetch('/api/admin/leads', { credentials: 'include' })
-    if (!r.ok) return null
-    return ((await r.json()) as { leads: Lead[] }).leads
-  } catch {
-    return null
-  }
-}
-
-/** Verdictul MĂSURAT al trimiterii (auditul admin, 3 aug): vechiul boolean
- *  colapsa 400 (adresă/subiect invalide) cu 502 (SMTP a refuzat) și cu rețeaua
- *  picată, iar alerta inventa cauza „verifică MAIL_PASS". Acum alerta spune ce
- *  s-a măsurat: 'ok' | 'bad_request' | 'send_failed' | 'network'. */
-export async function emailLead(
-  id: number,
-  to: string,
-  subject: string,
-  body: string,
-): Promise<'ok' | 'bad_request' | 'send_failed' | 'network'> {
-  try {
-    const r = await fetch('/api/admin/lead/email', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, to, subject, body }),
-    })
-    if (r.ok) return 'ok'
-    return r.status === 400 ? 'bad_request' : 'send_failed'
-  } catch {
-    return 'network'
-  }
-}
-
-// (Chat live vizitatori — SCOS 10 aug: tabul a fost eliminat din admin #959,
-// iar funcțiile lib rămăseseră cod mort. Curățate ca poarta „exporturi fără
-// utilizator" să fie verde.)
 
 // Admin action on a user: block / unblock / credit (amount) / delete.
 // Returns the refreshed activity so the caller can update the list in place.
@@ -545,14 +448,6 @@ export async function translateToRo(texts: string[]): Promise<TranslateRoResult>
   }
 }
 
-
-// Triggers Kelion's autonomous triage over all open gaps.
-// `error` PĂSTRAT în tip (auditul admin, 3 aug): backend-ul răspunde 200 și
-// când creierul pică ({triaged:0, error:'brain_unavailable'|'bad_brain_json'})
-// — vechiul tip îl tăia și butonul tăcea, indiferent de rezultat.
-// (runGapsTriage / fetchAudit + AuditReport — SCOS 10 aug: cod mort după
-// curățarea adminului #959; niciun apelant. `fetchGaps` de mai jos rămâne, e viu.)
-
 // ── LISTA DE ERORI, CE E FIECARE (Adrian, 12 aug) ──────────────────────────────
 // Fața vizuală a autodiagnosticului: erorile din browser (grupate) + defectele de
 // sistem, fiecare cu „ce este". null = citirea a EȘUAT (nu confunda „n-am putut
@@ -657,8 +552,6 @@ export async function setPlafon(body: { plafon?: number; activ?: boolean }): Pro
   }
 }
 
-// (resolveGap — SCOS 10 aug: cod mort după curățarea adminului #959, niciun apelant.)
-
 // Registered voiceprints (admin only).
 export interface VoiceprintRow {
   email: string
@@ -709,10 +602,6 @@ export async function fetchVoiceprintAudio(email: string): Promise<string | null
     return null
   }
 }
-
-// (`deleteVoiceprint` a fost SCOS de tot, 14 aug — ordinul ownerului:
-// „amprentele vocale trebuie să se păstreze"; serverul răspunde 403 pe ruta
-// de ștergere, iar butonul „șterge" din panou a devenit starea „se păstrează".)
 
 // ── Verificare tokenuri cu drepturi (admin only) ───────────────────────────
 export interface TokenCheck {
@@ -781,6 +670,3 @@ export interface CodNeplatit {
   status: string
   created_at: string
 }
-
-// (CereriNeacoperiteData / fetchCereriNeacoperite — SCOS 10 aug: cod mort după
-// curățarea adminului #959, niciun apelant.)

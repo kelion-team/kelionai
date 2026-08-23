@@ -105,7 +105,7 @@ export function geminiDisponibil(): boolean {
 }
 
 /** Dacă Ollama VPS e disponibil ca fallback. */
-export function ollamaDisponibil(): boolean {
+function ollamaDisponibil(): boolean {
   return stare.ollamaVpsDisponibil
 }
 

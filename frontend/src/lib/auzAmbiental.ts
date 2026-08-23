@@ -200,11 +200,6 @@ export function opresteAuzulAmbiental(): void {
   istoricEnergie = []
 }
 
-/** Dacă auzul ambiental e activ. */
-export function auzAmbientalActiv(): boolean {
-  return inMers
-}
-
 /** Ultima clasificare ambientală curentă. */
 export function contextAmbientalCurent(): EvenimentSonor['tip'] {
   return ultimaClasificare

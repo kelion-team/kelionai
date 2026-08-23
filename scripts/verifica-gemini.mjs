@@ -208,7 +208,7 @@ const REGULI = [
   regulaModelRapid(),
   regulaTreaptaGetter('chatDefault', 'modelRapidDirect'),
   regulaTreaptaGetter('workDefault', 'modelUnicDirect'),
-  regulaTreaptaGetter('topDefault', 'modelUnicDirect'),
+  regulaTreaptaGetter('topDefault', 'modelProfundDirect'),
   regulaFaraEnvModel(),
   regulaPoartaUpgrade(),
   regulaSemnaturaGandirii(),

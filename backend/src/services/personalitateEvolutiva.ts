@@ -58,7 +58,7 @@ async function salveazaProfil(): Promise<void> {
 
 /** Actualizează profilul pe baza unei interacțiuni.
  *  Analizează mesajul userului + răspunsul lui Kelion și ajustează dimensiunile. */
-export async function actualizeazaProfil(
+async function actualizeazaProfil(
   mesajUser: string,
   raspunsKelion: string,
   emotieUser?: string,

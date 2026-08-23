@@ -194,7 +194,7 @@ export function modelProfundDirect(): string {
 }
 /** Setează modelul profund — DOAR din auto-upgrade validat. Acceptă un Gemini Pro
  *  de producție/preview. */
-export function setModelProfundValidat(m: string): boolean {
+function setModelProfundValidat(m: string): boolean {
   const cod = String(m || '').replace(/^google-direct\//, '').trim()
   if (!/^gemini-\d+(?:\.\d+)?-pro(?:-|$)/.test(cod)) return false
   modelProfundActiv = cod

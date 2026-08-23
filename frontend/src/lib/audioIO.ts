@@ -1065,6 +1065,8 @@ function reincearcaPrinContext(base64Mp3: string, done: () => void, ramase = 30)
 
 function playNow(base64Mp3: string): void {
   try {
+    // eslint-disable-next-line no-console
+    console.log(`[audioIO] playNow: base64=${base64Mp3.length} chars | voiceVolume=${voiceVolume}`)
     const audio = new Audio(`data:audio/mp3;base64,${base64Mp3}`)
     audio.volume = voiceVolume
     voiceElements.add(audio)
@@ -1080,7 +1082,9 @@ function playNow(base64Mp3: string): void {
     // attachLevelAnalysis creează/deblochează levelCtx ÎNAINTE, ca playViaContext să-l
     // aibă gata dacă play() e blocat pe mobil.
     attachLevelAnalysis(audio)
-    void audio.play().catch(() => {
+    void audio.play().catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn(`[audioIO] play() blocat (autoplay): ${String(e).slice(0, 80)} → cad pe context`)
       // MOBIL: sunetul întârziat pe <audio> e blocat (autoplay) — de-aia „aleator".
       // (1) OPRIM COMPLET elementul înainte de calea sigură — altfel elementul putea
       // porni totuși un pic mai târziu (cursă cu gestul) ȘI BufferSource-ul ar reda

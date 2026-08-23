@@ -676,11 +676,9 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
 - [x] ORDIN 17 aug QA — Reset VPS: cale LOCALĂ ops-worker (Actions mort pe billing); proba restart-caddy ok=1.
 - [x] ORDIN 17 aug QA — Auth Google login 302; checkout Revolut 200+cod; chat admin PROBA_CHAT_OK; customer paywall cinstit.
 - [ ] ORDIN 17 aug QA — RĂMAS: audit UI buton-cu-buton pe Admin tabs în browser; voce full-duplex pe telefon/mașină; ordin constructor de probă medium pe 32b.
-- [ ] ORDIN 17 aug — INTERCONECTARE: **tryestera.com** pe lista de aplicații vii
-      (meniu ▦ Aplicații → comandă → monitor/tab, nu poză). SCRIS în meniu
-      (`Stage.tsx`). DE PROBAT LIVE: deschide real pe monitor; dacă site-ul
-      refuză iframe (XFO/CSP) → panoul „deschide în tab" (embed-check), nu
-      ramă moartă. Eventual legături mai adânci (API/SSO) = decizie separată. [ ]
+- [x] ~~ORDIN 17 aug — INTERCONECTARE: **tryestera.com** pe lista de aplicații vii~~
+      SCOS din aplicații (23 aug 2026, ordin owner: „scoate din aplicatii trystera").
+      Intrarea a fost ștearsă din Stage.tsx meniul ▦ Aplicații.
 - [ ] ORDIN 16 aug (verbatim): „la constructor NU e gemeni idiotule… Aider pe un
       model LOCAL pe VPS (Ollama)… pe serverul linux si de acolo sa lucreze aider"
       + „sa instaleze el, pe linux, aider automat cu tot ce trebuie". SCRIS (nu pot

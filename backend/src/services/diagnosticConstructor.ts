@@ -174,7 +174,12 @@ export interface DepsDiagnosticConstructor {
 export async function culegeDiagnosticConstructor(
   deps: DepsDiagnosticConstructor,
 ): Promise<DiagnosticConstructor | { error: string }> {
-  const jobs = await deps.listBuildJobs(16).catch(() => null)
+  const jobs = await deps.listBuildJobs(16).catch((e) => {
+    // Motivul real al citeții picate — înainte se arunca tăcut, iar
+    // diagnosticul spunea doar "coada_necitibila" fără nicio urmă.
+    console.error(`[diagnosticConstructor] listBuildJobs a picat: ${String((e as { message?: string })?.message ?? e).slice(0, 200)}`)
+    return null
+  })
   if (!jobs) return { error: 'coada_necitibila' }
   const ordine: OrdinRecentMasurat[] = jobs.map((j) => ({
     status: (['queued', 'running', 'done', 'failed', 'cancelled'].includes(j.status) ? j.status : 'failed') as OrdinRecentMasurat['status'],

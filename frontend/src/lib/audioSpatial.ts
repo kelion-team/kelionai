@@ -36,56 +36,9 @@ export function initiazaAudioSpatial(): void {
   } catch { /* Web Audio indisponibil */ }
 }
 
-/** Actualizează poziția sursei vocii (avatarul) în spațiu 3D.
- *  @param x -1 = stânga, 0 = centru, 1 = dreapta
- *  @param y 0 = nivel urechi, 1 = deasupra
- *  @param z 0 = la urechi, 1 = în față */
-export function setPozitieAvatar(x: number, y: number, z: number): void {
-  if (!panner) return
-  // Scala la metri (1 unitate = 1 metru)
-  const distX = x * 2 // max 2m stânga/dreapta
-  const distY = y * 0.5 // max 0.5m sus
-  const distZ = z * 1.5 // max 1.5m în față
-  if (panner.positionX) {
-    panner.positionX.value = distX
-    panner.positionY.value = distY
-    panner.positionZ.value = distZ
-  } else {
-    ;(panner as unknown as { setPosition(x: number, y: number, z: number): void }).setPosition(distX, distY, distZ)
-  }
-}
-
-/** Conectează o sursă audio la pannerul spațial.
- *  Returnează nodul de intrare în care se conectează sursa. */
-export function getNodIntrareSpatial(): AudioNode | null {
-  if (!panner || !ctx) return null
-  // Panner → destination
-  if (panner.numberOfOutputs > 0 && !panner.context.destination) {
-    panner.connect(ctx.destination)
-  }
-  return panner
-}
-
-/** Conectează un MediaStream (ex: audio de la TTS) la audio spațial. */
-export function conecteazaStreamSpatial(stream: MediaStream): void {
-  if (!ctx || !panner) return
-  try {
-    const sursa = ctx.createMediaStreamSource(stream)
-    sursa.connect(panner)
-    panner.connect(ctx.destination)
-  } catch { /* tăcut */ }
-}
-
 /** Resume context (necesitar după gestul userului pe mobil). */
 export function resumeAudioSpatial(): void {
   if (ctx?.state === 'suspended') {
     void ctx.resume().catch(() => {})
   }
-}
-
-/** Oprește și curăță audio spațial. */
-export function opresteAudioSpatial(): void {
-  if (panner) { try { panner.disconnect() } catch { /* tăcut */ } panner = null }
-  if (ctx) { try { ctx.close() } catch { /* tăcut */ } ctx = null }
-  listener = null
 }

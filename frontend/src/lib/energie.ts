@@ -78,6 +78,7 @@ function citesteBaterie(level: number, charging: boolean): void {
   stare.ultimaCitire = Date.now()
 }
 
+// export-permis: folosit intern
 /** Starea curentă de energie. */
 export function stareEnergie(): StareEnergie {
   return stare

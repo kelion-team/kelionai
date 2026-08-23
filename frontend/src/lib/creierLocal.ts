@@ -306,7 +306,16 @@ export async function* streamLocalRaspuns(
       max_tokens: 512,
     })) as AsyncIterable<{ choices?: { delta?: { content?: string } }[] }>
   } catch (e) {
-    yield `${t.offlineEroareLocal} ${e instanceof Error ? e.message.slice(0, 120) : ''}`.trim()
+    // DEVICE LOST (GPU fără memorie suficientă): modelul de 5.2GB poate crăpa
+    // GPU-ul la generare. Marcăm eroarea ca să nu reîncercăm automat — userul
+    // trebuie să restarteze browserul sau să elibereze VRAM.
+    const msg = e instanceof Error ? e.message : String(e)
+    if (/device.*lost|GPUDeviceLost|insufficient.*memory/i.test(msg)) {
+      stare = 'eroare'
+      motivEroare = 'GPU device lost — memorie video insuficientă'
+      motor = null
+    }
+    yield `${t.offlineEroareLocal} ${msg.slice(0, 120)}`.trim()
     return
   }
   // ABORT FĂRĂ SĂ SCURGEM LOCK-UL (owner 20 aug: „dupa primul chat moare conversatia").

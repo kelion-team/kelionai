@@ -20,7 +20,6 @@ import { loadLocalLang } from './prefs'
 export interface AdminStrings {
   // Taburile
   tabEnterprise: string
-  tabTrading: string
   tabMoney: string
   // Becuri de credit AI (owner, 13 aug: „bec roșu/verde… click = reîncărcare")
   becuriTitlu: string
@@ -33,11 +32,7 @@ export interface AdminStrings {
   becuriBaraTitlu: string
   becuriBaraFaraCredit: string
   tabUsers: string
-  tabVisitors: string
-  tabLiveChat: string
-  tabChatHistory: string
   tabShare: string
-  tabGaps: string
   tabStores: string
   tabInbox: string
   tabVoiceprints: string
@@ -48,8 +43,6 @@ export interface AdminStrings {
   // Common states
   loading: string
   noSpendYet: string
-  noContactsYet: string
-  noVisitorsYet: string
   noConversationsYet: string
   noVoiceprintsYet: string
   noVersionsYet: string
@@ -115,8 +108,6 @@ export interface AdminStrings {
   historyReadFail: string
   selectUserHint: string
   // Vizitatori
-  botsDetected: string
-  byCountry: string
   liveVisitorChats: string
   pickConversation: string
   replyToVisitor: string
@@ -183,16 +174,11 @@ export interface AdminStrings {
   confirmResetCounters: string
   gapDeleteFailed: string
   mailFieldsRequired: string
-  alertEmailSent: string
-  alertEmailNotSent400: string
-  alertEmailNotSent502: string
-  alertEmailNotSentNetwork: string
   mailReplyFailed: string
 }
 
 const en: AdminStrings = {
   tabEnterprise: '➕ Add agent',
-  tabTrading: '📈 Trading',
   tabMoney: 'Money',
   becuriTitlu: 'AI credit — lights (click = top-up page)',
   becuriLoad: 'reading balances…',
@@ -204,11 +190,7 @@ const en: AdminStrings = {
   becuriBaraTitlu: 'AI credit — click for Money',
   becuriBaraFaraCredit: '{n} AI out of credit — click for Money',
   tabUsers: 'Users',
-  tabVisitors: 'Visitors',
-  tabLiveChat: 'Live chat',
-  tabChatHistory: 'Chat history',
   tabShare: 'Share',
-  tabGaps: 'Unmet requests',
   tabStores: 'Stores',
   tabInbox: 'Inbox',
   tabVoiceprints: 'Voiceprints',
@@ -218,8 +200,6 @@ const en: AdminStrings = {
   tabRecovery: 'Recovery',
   loading: 'Loading…',
   noSpendYet: 'No spend yet.',
-  noContactsYet: 'No contacts yet.',
-  noVisitorsYet: 'No visitors yet.',
   noConversationsYet: 'No conversations yet.',
   noVoiceprintsYet: 'No voiceprint recorded yet.',
   noVersionsYet: 'No version saved yet.',
@@ -275,8 +255,6 @@ const en: AdminStrings = {
   usersReadFail: 'Could not read the user list — a failed read, NOT an empty history. It retries when you reopen the tab.',
   historyReadFail: 'Could not read the conversation — a failed read, not an empty chat. Try again.',
   selectUserHint: 'Select a user to view their history.',
-  botsDetected: 'Bots detected',
-  byCountry: 'By country',
   liveVisitorChats: 'Live conversations with visitors',
   pickConversation: 'Pick a conversation to reply to.',
   replyToVisitor: 'Reply to the visitor…',
@@ -343,16 +321,11 @@ const en: AdminStrings = {
   confirmResetCounters: 'Reset consumption counters to 0?\n\nDeletes only supplier cost log.\nDoes NOT touch user credits, payment ledger or purchase history.\nAlready consumed credits are NOT refunded.',
   gapDeleteFailed: 'Could not delete request — try again.',
   mailFieldsRequired: 'Email and subject fields are required.',
-  alertEmailSent: 'Email sent.',
-  alertEmailNotSent400: 'Not sent: email address, subject or message invalid (server returned 400).',
-  alertEmailNotSent502: 'Not sent: mail server refused sending (502).',
-  alertEmailNotSentNetwork: 'Not sent: network down — request did not reach server.',
   mailReplyFailed: 'Not sent — message was NOT saved; try again.',
 }
 
 const ro: AdminStrings = {
   tabEnterprise: '➕ Agent nou',
-  tabTrading: '📈 Tranzacționare',
   tabMoney: 'Bani',
   becuriTitlu: 'Credit AI — becuri (click = pagina de reîncărcare)',
   becuriLoad: 'se citesc soldurile…',
@@ -364,11 +337,7 @@ const ro: AdminStrings = {
   becuriBaraTitlu: 'Credit AI — click pentru Bani',
   becuriBaraFaraCredit: '{n} AI fără credit — click pentru Bani',
   tabUsers: 'Utilizatori',
-  tabVisitors: 'Vizitatori',
-  tabLiveChat: 'Chat live',
-  tabChatHistory: 'Istoric chat',
   tabShare: 'Distribuie',
-  tabGaps: 'Cereri neacoperite',
   tabStores: 'Magazine',
   tabInbox: 'Inbox',
   tabVoiceprints: 'Amprente vocale',
@@ -378,8 +347,6 @@ const ro: AdminStrings = {
   tabRecovery: 'Recuperare',
   loading: 'Se încarcă…',
   noSpendYet: 'Niciun consum încă.',
-  noContactsYet: 'Niciun contact încă.',
-  noVisitorsYet: 'Niciun vizitator încă.',
   noConversationsYet: 'Nicio conversație încă.',
   noVoiceprintsYet: 'Nicio amprentă vocală înregistrată încă.',
   noVersionsYet: 'Nicio versiune salvată încă.',
@@ -429,8 +396,6 @@ const ro: AdminStrings = {
   usersReadFail: 'Nu am putut citi lista de utilizatori — citire eșuată, NU istoric gol. Se reîncearcă la redeschiderea tabului.',
   historyReadFail: 'Nu am putut citi conversația — citire eșuată, nu chat gol. Reîncearcă.',
   selectUserHint: 'Alege un utilizator ca să-i vezi istoricul.',
-  botsDetected: 'Boți detectați',
-  byCountry: 'După țară',
   liveVisitorChats: 'Conversații live cu vizitatorii',
   pickConversation: 'Alege o conversație ca să răspunzi.',
   replyToVisitor: 'Răspunde vizitatorului…',
@@ -494,10 +459,6 @@ const ro: AdminStrings = {
   confirmResetCounters: 'Pui pe 0 contoarele de consum?\n\nSe șterge doar jurnalul „cât ne-a costat pe noi la furnizori”.\nNU se ating: creditele userilor, registrul plăților, istoricul de cumpărare.\nCreditele deja consumate NU se dau înapoi.',
   gapDeleteFailed: 'Nu s-a putut șterge cererea — reîncearcă.',
   mailFieldsRequired: 'Câmpurile email și subiect sunt obligatorii.',
-  alertEmailSent: 'Email trimis.',
-  alertEmailNotSent400: 'Nu s-a trimis: adresa, subiectul sau mesajul nu sunt valide (serverul a răspuns 400).',
-  alertEmailNotSent502: 'Nu s-a trimis: serverul de mail a refuzat trimiterea (502).',
-  alertEmailNotSentNetwork: 'Nu s-a trimis: rețeaua a picat — cererea nu a ajuns la server.',
   mailReplyFailed: 'Nu s-a trimis — mesajul NU s-a salvat; reîncearcă.',
 }
 

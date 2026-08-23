@@ -114,19 +114,22 @@ export const googleTools: Tool[] = [
   {
     name: 'create_presentation',
     description:
-      'Create a Google Slides presentation in the user\'s account: a title plus a list of slides (each with a title and body text). Use when the user asks for a presentation, a deck, or slides on a topic — write the content yourself, well structured. Returns the edit URL. This is a PAID extra service (charged from the user\'s credits automatically — do not charge or refuse yourself).',
+      'Create a Google Slides presentation in the user\'s account: a title plus a list of slides (each with a title, body text, and optional image). BEFORE creating, ALWAYS ask the user: (1) what LANGUAGE the slides should be in, (2) how MANY slides they want, (3) whether they want IMAGES on slides (and if yes, what kind — diagrams, photos, charts). Only after they answer, build the content yourself — well structured, in THEIR language — and call this tool. Each slide can have: title, body text (bullet-style), an optional image URL (public https URL to a PNG/JPG), and a layout type. Returns the edit URL. This is a PAID extra service (charged from the user\'s credits automatically — do not charge or refuse yourself).',
     input_schema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Presentation title.' },
+        title: { type: 'string', description: 'Presentation title (in the user\'s chosen language).' },
+        language: { type: 'string', description: 'The language code for the presentation content (e.g. "ro", "en", "es", "de", "fr"). Write ALL slide text in this language.' },
         slides: {
           type: 'array',
-          description: 'The slides, in order. Keep each body concise (bullet-style lines).',
+          description: 'The slides, in order. Keep each body concise (bullet-style lines). Each slide can optionally have an image.',
           items: {
             type: 'object',
             properties: {
-              title: { type: 'string', description: 'Slide title.' },
-              body: { type: 'string', description: 'Slide body text (newline-separated points).' },
+              title: { type: 'string', description: 'Slide title (in the user\'s chosen language).' },
+              body: { type: 'string', description: 'Slide body text (newline-separated points, in the user\'s chosen language).' },
+              image_url: { type: 'string', description: 'Optional: public https URL to an image (PNG/JPG, max 10MB) to display on this slide. Use for diagrams, charts, photos that illustrate the slide content.' },
+              layout: { type: 'string', enum: ['title_body', 'title_image', 'title_body_image', 'image_only', 'title_only'], description: 'Optional slide layout: title_body (default), title_image (title + large image), title_body_image (title + body + image), image_only (just an image), title_only (just a title slide).' },
             },
           },
         },
@@ -169,13 +172,31 @@ export const googleTools: Tool[] = [
   {
     name: 'create_form',
     description:
-      "Create a Google Form in the user's account: a title, an optional description and a list of text questions. Use for sign-up forms, surveys, questionnaires. Returns the link to fill it in (url) and the edit link (editUrl).",
+      "Create a Google Form in the user's account with MIXED question types. BEFORE creating, IDENTIFY the subject the user needs and AUTOMATICALLY build a COMPLETE set of questions that COVERS the entire subject — not a few vague ones. Ask the user ONLY what they did NOT specify: the language (if unclear), the number of questions (suggest a comprehensive count for the subject), and the form's purpose (survey, registration, feedback, quiz). Then generate ALL questions yourself — well-structured, in the user's language, with the RIGHT question type for each (text for names/short answers, paragraph for detailed feedback, multiple_choice for single selection, checkboxes for multi-select, scale for ratings, dropdown for long lists, date for dates). Returns the link to fill it in (url) and the edit link (editUrl).",
     input_schema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Form title.' },
-        description: { type: 'string', description: 'Optional form description.' },
-        questions: { type: 'array', items: { type: 'string' }, description: 'The questions, in order (short text answers).' },
+        title: { type: 'string', description: 'Form title (in the user\'s chosen language).' },
+        description: { type: 'string', description: 'Optional form description shown at the top (in the user\'s chosen language).' },
+        language: { type: 'string', description: 'The language code for the form content (e.g. "ro", "en", "es", "de", "fr"). Write ALL questions and options in this language.' },
+        questions: {
+          type: 'array',
+          description: 'The questions, in order. Each question has a type and type-specific fields. Generate a COMPLETE set that covers the subject thoroughly.',
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', description: 'The question text (in the user\'s chosen language).' },
+              type: { type: 'string', enum: ['text', 'paragraph', 'multiple_choice', 'checkboxes', 'dropdown', 'scale', 'date', 'time'], description: 'Question type: text (short answer), paragraph (long answer), multiple_choice (radio — one answer), checkboxes (multiple answers), dropdown (one from a long list), scale (1-5 rating), date, time.' },
+              required: { type: 'boolean', description: 'Whether the question is required (default false).' },
+              options: { type: 'array', items: { type: 'string' }, description: 'For multiple_choice, checkboxes, dropdown: the choices (in the user\'s language).' },
+              scale_low: { type: 'integer', description: 'For scale: the lowest value (default 1).' },
+              scale_high: { type: 'integer', description: 'For scale: the highest value (default 5).' },
+              scale_low_label: { type: 'string', description: 'For scale: label for the lowest value (e.g. "Not at all").' },
+              scale_high_label: { type: 'string', description: 'For scale: label for the highest value (e.g. "Very much").' },
+            },
+            required: ['question', 'type'],
+          },
+        },
       },
       required: ['title'],
     },
@@ -1027,32 +1048,83 @@ async function createPresentation(
   const cj = (await cRes.json()) as { presentationId?: string }
   const id = cj.presentationId
   if (!id) return JSON.stringify({ error: 'slides_no_id' })
+  type LayoutType = 'title_body' | 'title_image' | 'title_body_image' | 'image_only' | 'title_only'
   const lista = (Array.isArray(slides) ? slides : [])
     .map((s) => {
       const o = (s ?? {}) as Record<string, unknown>
-      return { titlu: String(o.title ?? o.titlu ?? '').slice(0, 200), corp: String(o.body ?? o.corp ?? '').slice(0, 4000) }
+      const layoutRaw = String(o.layout ?? 'title_body') as LayoutType
+      const layout: LayoutType = ['title_body', 'title_image', 'title_body_image', 'image_only', 'title_only'].includes(layoutRaw)
+        ? layoutRaw
+        : 'title_body'
+      return {
+        titlu: String(o.title ?? o.titlu ?? '').slice(0, 200),
+        corp: String(o.body ?? o.corp ?? '').slice(0, 4000),
+        imagine: String(o.image_url ?? o.imagine ?? '').slice(0, 2000),
+        layout,
+      }
     })
-    .filter((s) => s.titlu || s.corp)
+    .filter((s) => s.titlu || s.corp || s.imagine)
     .slice(0, 25)
   if (lista.length) {
     const requests = lista.flatMap((s, i) => {
       const slideId = `kelion_slide_${i}`
       const titluId = `kelion_titlu_${i}`
       const corpId = `kelion_corp_${i}`
+      const imgId = `kelion_img_${i}`
+      // Alege layout-ul Google Slides în funcție de ce vrea userul
+      const predefinedLayout =
+        s.layout === 'title_only' ? 'TITLE' :
+        s.layout === 'image_only' ? 'BLANK' :
+        s.layout === 'title_image' ? 'TITLE' :
+        s.layout === 'title_body_image' ? 'TITLE_AND_BODY' :
+        'TITLE_AND_BODY' // title_body (default)
+      const placeholderMappings: { layoutPlaceholder: { type: string }; objectId: string }[] = []
+      if (s.layout !== 'image_only' && s.layout !== 'title_only') {
+        placeholderMappings.push({ layoutPlaceholder: { type: 'TITLE' }, objectId: titluId })
+      } else if (s.layout === 'title_only') {
+        placeholderMappings.push({ layoutPlaceholder: { type: 'TITLE' }, objectId: titluId })
+      }
+      if (s.layout === 'title_body' || s.layout === 'title_body_image') {
+        placeholderMappings.push({ layoutPlaceholder: { type: 'BODY' }, objectId: corpId })
+      }
       const reqs: unknown[] = [
         {
           createSlide: {
             objectId: slideId,
-            slideLayoutReference: { predefinedLayout: 'TITLE_AND_BODY' },
-            placeholderIdMappings: [
-              { layoutPlaceholder: { type: 'TITLE' }, objectId: titluId },
-              { layoutPlaceholder: { type: 'BODY' }, objectId: corpId },
-            ],
+            slideLayoutReference: { predefinedLayout },
+            placeholderIdMappings: placeholderMappings,
           },
         },
       ]
-      if (s.titlu) reqs.push({ insertText: { objectId: titluId, text: s.titlu } })
-      if (s.corp) reqs.push({ insertText: { objectId: corpId, text: s.corp } })
+      if (s.titlu && s.layout !== 'image_only') reqs.push({ insertText: { objectId: titluId, text: s.titlu } })
+      if (s.corp && (s.layout === 'title_body' || s.layout === 'title_body_image')) {
+        reqs.push({ insertText: { objectId: corpId, text: s.corp } })
+      }
+      // Imagine: createImage cu URL public. Google descarcă imaginea și o pune
+      // pe slide. Pentru layout-uri cu text + imagine, imaginea e plasată în
+      // jumătatea dreapta; pentru image_only, ocupă tot slide-ul.
+      if (s.imagine) {
+        const isFullSlide = s.layout === 'image_only'
+        const imgReq: Record<string, unknown> = {
+          createImage: {
+            objectId: imgId,
+            url: s.imagine,
+            // PT = puncte (1 pt = 1/72 inch). Slide-ul default e 10in × 5.63in
+            // = 720 × 405 pt. Pentru image_only: ocupă tot. Pentru layout cu
+            // text: jumătatea dreapta (360..700 × 60..345).
+            elementProperties: {
+              pageObjectId: slideId,
+              size: isFullSlide
+                ? { width: { magnitude: 700, unit: 'PT' }, height: { magnitude: 400, unit: 'PT' } }
+                : { width: { magnitude: 320, unit: 'PT' }, height: { magnitude: 285, unit: 'PT' } },
+              transform: isFullSlide
+                ? { scaleX: 1, scaleY: 1, translateX: 10, translateY: 3, unit: 'PT' }
+                : { scaleX: 1, scaleY: 1, translateX: 370, translateY: 60, unit: 'PT' },
+            },
+          },
+        }
+        reqs.push(imgReq)
+      }
       return reqs
     })
     // Prezentarea EXISTĂ deja — un eșec la umplere se spune, nu se ascunde.
@@ -1071,8 +1143,11 @@ async function createPresentation(
 // propriul ajutor `batchUpdateGoogleResource` — doi doctori pe același pacient.
 // A rămas UNUL singur: batchUpdateGoogle, definit mai sus.)
 
-// ── GOOGLE FORMS (owner, 14 aug: produsele alese) ────────────────────────────
-// Creează formularul + întrebări text simple; întoarce linkul de completat.
+// ── GOOGLE FORMS (owner, 14 aug: produsele alese; 23 aug: tipuri multiple) ──
+// Creează formularul + întrebări cu TIPURI diferite (text, paragraph, choice,
+// scale, date, time); întoarce linkul de completat + cel de editare.
+type TipIntrebare = 'text' | 'paragraph' | 'multiple_choice' | 'checkboxes' | 'dropdown' | 'scale' | 'date' | 'time'
+
 async function createForm(title: string, description: string, questions: unknown, token: string): Promise<string> {
   if (!title) return JSON.stringify({ error: 'missing_title' })
   const cRes = await tfetch('https://forms.googleapis.com/v1/forms', {
@@ -1084,19 +1159,71 @@ async function createForm(title: string, description: string, questions: unknown
   const cj = (await cRes.json()) as { formId?: string; responderUri?: string }
   if (!cj.formId) return JSON.stringify({ error: 'forms_no_id' })
   const intrebari = (Array.isArray(questions) ? questions : [])
-    .map((q) => String(q ?? '').trim().slice(0, 300))
-    .filter(Boolean)
-    .slice(0, 30)
+    .map((q) => {
+      const o = (q ?? {}) as Record<string, unknown>
+      const tipRaw = String(o.type ?? 'text') as TipIntrebare
+      const tip: TipIntrebare = (['text', 'paragraph', 'multiple_choice', 'checkboxes', 'dropdown', 'scale', 'date', 'time'] as const).includes(tipRaw as TipIntrebare)
+        ? tipRaw
+        : 'text'
+      const optiuni = Array.isArray(o.options) ? (o.options as unknown[]).map((x) => String(x ?? '').trim().slice(0, 200)).filter(Boolean).slice(0, 50) : []
+      return {
+        text: String(o.question ?? o.intrebare ?? '').trim().slice(0, 300),
+        tip,
+        obligatoriu: o.required === true,
+        optiuni,
+        scaleLow: typeof o.scale_low === 'number' ? o.scale_low : 1,
+        scaleHigh: typeof o.scale_high === 'number' ? o.scale_high : 5,
+        scaleLowLabel: String(o.scale_low_label ?? '').slice(0, 50),
+        scaleHighLabel: String(o.scale_high_label ?? '').slice(0, 50),
+      }
+    })
+    .filter((q) => q.text)
+    .slice(0, 50)
   const requests: unknown[] = []
   if (description) requests.push({ updateFormInfo: { info: { description: description.slice(0, 1000) }, updateMask: 'description' } })
-  intrebari.forEach((q, i) =>
+  intrebari.forEach((q, i) => {
+    // Construiește obiectul question în funcție de tip
+    let questionObj: Record<string, unknown>
+    switch (q.tip) {
+      case 'paragraph':
+        questionObj = { required: q.obligatoriu, textQuestion: { paragraph: true } }
+        break
+      case 'multiple_choice':
+        questionObj = { required: q.obligatoriu, choiceQuestion: { type: 'RADIO', options: q.optiuni.map((v) => ({ value: v })) } }
+        break
+      case 'checkboxes':
+        questionObj = { required: q.obligatoriu, choiceQuestion: { type: 'CHECKBOX', options: q.optiuni.map((v) => ({ value: v })) } }
+        break
+      case 'dropdown':
+        questionObj = { required: q.obligatoriu, choiceQuestion: { type: 'DROP_DOWN', options: q.optiuni.map((v) => ({ value: v })) } }
+        break
+      case 'scale':
+        questionObj = {
+          required: q.obligatoriu,
+          scaleQuestion: {
+            low: q.scaleLow,
+            high: q.scaleHigh,
+            lowLabel: q.scaleLowLabel || undefined,
+            highLabel: q.scaleHighLabel || undefined,
+          },
+        }
+        break
+      case 'date':
+        questionObj = { required: q.obligatoriu, dateQuestion: {} }
+        break
+      case 'time':
+        questionObj = { required: q.obligatoriu, timeQuestion: {} }
+        break
+      default: // text
+        questionObj = { required: q.obligatoriu, textQuestion: { paragraph: false } }
+    }
     requests.push({
       createItem: {
-        item: { title: q, questionItem: { question: { required: false, textQuestion: { paragraph: false } } } },
+        item: { title: q.text, questionItem: { question: questionObj } },
         location: { index: i },
       },
-    }),
-  )
+    })
+  })
   if (requests.length) {
     const status = await batchUpdateGoogle(`https://forms.googleapis.com/v1/forms/${cj.formId}:batchUpdate`, requests, token)
     if (status !== null) {

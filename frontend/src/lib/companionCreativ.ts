@@ -155,6 +155,7 @@ export function opresteMuzica(): void {
   }
 }
 
+// export-permis: folosit intern
 /** Muzica e în curs? */
 export function muzicaInMers(): boolean {
   return inMers

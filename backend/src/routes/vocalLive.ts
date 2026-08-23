@@ -1387,6 +1387,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               return
             }
             const adresata = turaAdresataAcum()
+            const _spusaPrim = rostireCurenta.trim() || bufUser.trim()
+            app.log.info(`[VOCE-DIAG] prim cadru: adresata=${adresata} | turaDeSistem=${turaDeSistem} | spusa="${_spusaPrim.slice(0, 80)}"`)
             if (!adresata && !turaDeSistem) {
               // AUDITUL 15 aug (critică): transcrierea de până acum poate fi
               // PARȚIALĂ — „Hei" sosit înaintea lui „Kelion" încuia false pe
@@ -1508,7 +1510,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           // de ceas); NEGATIVUL doar pe transcript FINAL — un fragment parțial
           // („Hei" fără „Kelion" încă) nu mai omoară replica (auditul 15 aug).
           if ((verdictTura === null || (verdictTura === false && verdictDinCeas)) && (cadreInAsteptare.length || textInAsteptare.length)) {
-            if (turaAdresataAcum()) {
+            const _adresat = turaAdresataAcum()
+            const _spusa = rostireCurenta.trim() || bufUser.trim()
+            app.log.info(`[VOCE-DIAG] judecat adresare: verdict=${_adresat} | final=${final} | spusa="${_spusa.slice(0, 80)}" | cadreAsteptare=${cadreInAsteptare.length} | textAsteptare=${textInAsteptare.length}`)
+            if (_adresat) {
               verdictTura = true
               verdictDinCeas = false
               turaDeSistem = false
@@ -1518,6 +1523,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             } else if (final && verdictTura === null) {
               verdictTura = false
               taiatDeVoce = false
+              app.log.info(`[VOCE-DIAG] TURĂ SUPRIMATĂ (nu i se vorbea lui): "${_spusa.slice(0, 120)}"`)
               varsaCadreleInAsteptare()
               varsaTextulInAsteptare()
             }
