@@ -157,7 +157,10 @@ function cautaDuplicari(fisierTinta, semnale) {
           return true
         })
         if (!linieCuDef) continue
-        if (linieCuDef.includes('reutilizare-permis:')) continue
+        // Excepția se declară PE LINIE sau pe o linie de COMENTARIU deasupra (până la 3 linii)
+        const idxLinie = linii.indexOf(linieCuDef)
+        const linSus = idxLinie > 0 ? linii.slice(Math.max(0, idxLinie - 3), idxLinie).join('\n') : ''
+        if (linieCuDef.includes('reutilizare-permis:') || linSus.includes('reutilizare-permis:')) continue
         abateri.push({
           tip: 'D1',
           fisier: caleRelativa,

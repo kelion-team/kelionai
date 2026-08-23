@@ -11,6 +11,8 @@ import { readSSE } from './sse.js'
 // secundar: dacă Gemini pică, tura se încheie onest (mesajul neutru din
 // chat.ts), nu cade pe alt creier.
 
+// reutilizare-permis: URL-ul Google API e o constantă de 60 chars, nu o funcție;
+// importul din modelAutoUpgrade ar crea o dependență circulară (ambele import config)
 const G_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
 export function geminiDirectAvailable(): boolean {
@@ -55,7 +57,7 @@ export async function geminiLive(): Promise<GeminiLive> {
       val = { ok: true, serving: true }
     } else {
       const body = (await r.text().catch(() => '')).toLowerCase()
-      const reason: GeminiLive['reason'] = /prepay|deplet/.test(body)
+      const reason: GeminiLive['reason'] = /prepay|deplet|monthly.*spending.*cap|billing.*account.*exceeded/.test(body)
         ? 'depleted'
         : r.status === 429 || /resource_exhausted|free_tier|quota/.test(body)
           ? 'quota'

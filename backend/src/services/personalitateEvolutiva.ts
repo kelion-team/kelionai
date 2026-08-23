@@ -33,6 +33,7 @@ let profil: ProfilPersonalitate = {
   ultimaActualizare: Date.now(),
 }
 
+// reutilizare-permis: cheie KV locală, valoare diferită de modelAutoUpgrade; nu se importă
 const KV_KEY = 'profil_personalitate'
 const RATA_INVATARE = 0.02 // hardcod-permis: rată tehnică de învățare — cât de repede se adaptează
 

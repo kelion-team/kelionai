@@ -26,7 +26,10 @@ export { esteModelGeneralGreu } from '../config.js'
 //   4. CU DOVADĂ — scorul candidatului ȘI al modelului activ, probate în aceeași
 //      trecere, se scriu în KV („model_upgrade_dovada"). Nu „a mers": cifra.
 
+// reutilizare-permis: cheie KV locală, valoare diferită de personalitateEvolutiva; nu se importă
 const KV_KEY = 'model_unic_activ'
+// reutilizare-permis: URL-ul Google API e o constantă de 60 chars; importul din
+// geminiDirect ar crea dependență circulară (ambele import config + db)
 const G_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const VERIFICA_LA_MS = 24 * 60 * 60 * 1000 // zilnic
 const PRIMA_LA_MS = 3 * 60 * 1000 // prima trecere la 3 min după pornire
