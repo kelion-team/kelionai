@@ -286,7 +286,10 @@ echo "== 4b. Browserul mâinilor (Chromium) — prezent, nu promis =="
 # NU se mai aruncă la /dev/null (merge în browser-install.log), iar verdictul
 # vine dintr-o LANSARE REALĂ a Chromium-ului, nu din codul de ieșire al
 # instalării — „install ok" nu înseamnă „browserul chiar pornește".
-docker exec kelionai-app sh -c 'cd /app/backend && npx playwright install --with-deps chromium' \
+# BIBLIOTECILE DE SISTEM sunt acum în Dockerfile (libnss3, libgbm1, etc.) —
+# `--with-deps` pică des pe slim-images; fără el, `playwright install chromium`
+# doar descarcă binarul, iar bibliotecile sunt deja în imagine.
+docker exec kelionai-app sh -c 'cd /app/backend && npx playwright install chromium' \
   > /root/kelion/browser-install.log 2>&1 \
   || echo "AVERTISMENT: instalarea Chromium a picat — vezi /root/kelion/browser-install.log"
 if docker exec kelionai-app sh -c 'cd /app/backend && timeout 30 node -e "const {chromium}=require(\"playwright\");chromium.launch({headless:true,args:[\"--no-sandbox\",\"--disable-dev-shm-usage\"]}).then(async b=>{await b.close();console.log(\"BROWSER-VIU\")}).catch(e=>{console.error(\"BROWSER-MORT:\",String(e).slice(0,300));process.exit(1)})"' 2>&1 | tee -a /root/kelion/browser-install.log | grep -q 'BROWSER-VIU'; then

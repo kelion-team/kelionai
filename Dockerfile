@@ -18,6 +18,15 @@ WORKDIR /app
 # lipsește, panoul merge cu ceilalți lucrători.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-pip curl git libgomp1 \
+        # BROWSERUL MÂINILOR (Playwright/Chromium): bibliotecile de sistem necesare
+        # pentru ca chromium.launch() să pornească. Înainte se bazau pe `playwright
+        # install --with-deps` rulat de deploy.sh pe containerul pornit — dar
+        # `--with-deps` pică des pe slim-images (apt-get update nu găsește toate
+        # pachetele). Cu ele în imagine, `playwright install chromium` (fără
+        # --with-deps) e suficient — browserul mâinilor pornește din primul deploy.
+        libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 \
+        libxfixes3 libxrandr2 libgbm1 libxss1 libgtk-3-0 libasound2 \
     && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' \
     && npm install -g cline @google/gemini-cli \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
