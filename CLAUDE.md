@@ -76,8 +76,11 @@ are the answer. Read them before you report anything to him.
 - The owner **tests live** on kelionai.app, not locally. After each fixed
   requirement: **build → deploy → VERIFY LIVE with real proof** (curl, decode,
   measurement) — never declare something "done" without evidence.
-- **Production = master, 100% in sync, always.** Nothing may ever publish code
-  older than `origin/master` (see the "phantom deploy" lesson, AI-HANDOFF.md §6).
+- **Production = master, 100% in sync, always.** **O SINGURĂ RAMURĂ: master.**
+  Interzis să creezi ramuri auxiliare (enhance/*, fix/*, etc.) — lucrezi direct
+  pe master, commit + push pe master. Greșeala din 22 aug 2026 (3 ramuri create
+  inutil) a costat timp și confuzie. **NU se repetă.** Nothing may ever publish
+  code older than `origin/master` (see the "phantom deploy" lesson, AI-HANDOFF.md §6).
 - Keep the chat/voice path **low-latency** (target: first word under 1s).
 - Fix by rewriting the small responsible module — no band-aid patches.
 - Don't touch `C:\Users\adria\Downloads\k` — that's the OLD archived project.

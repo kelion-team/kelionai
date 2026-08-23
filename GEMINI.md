@@ -17,8 +17,10 @@ Google), în producție la **kelionai.app**. Ownerul: Adrian
 
 ## Regulile care NU se negociază
 - **Production = master.** Orice merge pe master SE PUBLICĂ AUTOMAT pe
-  kelionai.app (veghea de pe VPS, ~9 minute, măsurat). **NICIODATĂ push direct
-  pe master**: ramură → PR → ownerul decide merge-ul.
+  kelionai.app (veghea de pe VPS, ~9 minute, măsurat). **O SINGURĂ RAMURĂ:
+  master.** Interzis să creezi ramuri auxiliare (enhance/*, fix/*, etc.) —
+  lucrezi direct pe master, commit + push pe master. Greșeala din 22 aug 2026
+  (3 ramuri create inutil) a costat timp și confuzie. **NU se repetă.**
 - **Nimic nu e „gata" fără verificare LIVE cu dovadă măsurată** (curl pe
   kelionai.app; `/api/version` arată SHA-ul care chiar rulează). Ownerul
   testează live, nu local.
