@@ -249,6 +249,15 @@ self-heal duce singur ce apare. Nimeni nu declară „gata" în avans; o arată 
          DEVIN_API_KEY trebuie pusă pe VPS ca Devin să CONSTRUIASCĂ efectiv;
          fără ea panoul + Kelion spun roșu „cheia NU e pusă", nu se prefac.
       Starea curentă detaliată: AI-HANDOFF.md §17.
+- [x] **BUG CRITIC REPARAT (23 aug 2026): sesiune voce Gemini Live fără timeout de tăcere.**
+      Bug: sesiunea de voce nu se închidea când utilizatorul tăcea — Gemini Live
+      factura $0.1167/minut de tăcere ($7/ora). Sesiuni uitate deschise 16.8h/zile.
+      Dovadă palpabilă (DB cost_events): 2869 minute voce în august, $588 estimați,
+      £419.91 facturați real de Google (plafon Tier 1 £188.02 depășit 2.2×).
+      Fix: timeout 15 secunde tăcere → închidere automată (vocalLive.ts).
+      Sigilat în test: `vocalLive.test.ts` — build pică dacă MAX_TACERE_MS ≠ 15_000.
+      Commits: a2b1df78, cd85e89d, d4a6feca, 5433dc5d.
+      Credit adjustment cerut de la Google (postat pe discuss.ai.google.dev).
 - [ ] PROIECT CHAT VOCE „Jarvis" (BĂTUT ÎN CUIE 20 aug — spec autoritar:
       `PROIECT-CHAT-VOCE.md`; istoricul deciziilor: `DRAFT-PROIECT-VOCE-ONLY.md`).
       Repară bug-ul MĂSURAT „vocea pornește 2 sec și se rupe" = 2 motoare (Gemini
