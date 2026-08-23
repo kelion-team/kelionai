@@ -552,6 +552,42 @@ export async function setPlafon(body: { plafon?: number; activ?: boolean }): Pro
   }
 }
 
+// ── COMUTATOR DE CREIER (23 aug 2026) ─────────────────────────────────────
+export interface CreierProvider {
+  prefix: string
+  nume: string
+  disponibil: boolean
+  info: string
+}
+export interface CreierAdmin {
+  activ: string
+  modelCustom: string
+  provideri: CreierProvider[]
+}
+export async function fetchCreier(): Promise<CreierAdmin | null> {
+  try {
+    const r = await fetch('/api/admin/creier', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as CreierAdmin
+  } catch {
+    return null
+  }
+}
+export async function setCreier(activ: string, modelCustom = ''): Promise<CreierAdmin | null> {
+  try {
+    const r = await fetch('/api/admin/creier', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ activ, modelCustom }),
+    })
+    if (!r.ok) return null
+    return (await r.json()) as CreierAdmin
+  } catch {
+    return null
+  }
+}
+
 // Registered voiceprints (admin only).
 export interface VoiceprintRow {
   email: string

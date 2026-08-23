@@ -52,6 +52,9 @@ import {
   fetchPlafon,
   setPlafon,
   type PlafonConstructor,
+  fetchCreier,
+  setCreier,
+  type CreierAdmin,
   fetchCreditAI,
   type CreditAIFurnizor,
   evalueazaOrdinConstructor,
@@ -469,11 +472,11 @@ export default function AdminPanel({
   brainCredit,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori' | 'notificari'
+  readonly initialTab?: 'finance' | 'users' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori' | 'notificari' | 'creier'
   readonly brainCredit?: BrainCredit | null
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori' | 'notificari'
+    'finance' | 'users' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare' | 'sistem' | 'erori' | 'notificari' | 'creier'
   >(initialTab ?? 'finance')
   // Notificările pe telefon (Web Push): starea vine MĂSURATĂ din browser
   // (starePush), nu ținută minte — „activ" înseamnă chiar o abonare vie.
@@ -518,6 +521,10 @@ export default function AdminPanel({
   const [notificari, setNotificari] = useState<NotificareAdmin[] | null | 'necitit'>('necitit')
   // Plafonul zilnic de ardere al constructorului (B8/K15): contor + cifră + comutator.
   const [plafon, setPlafonState] = useState<PlafonConstructor | null>(null)
+  // Comutator de creier (23 aug 2026): provider activ + scalare pe dificultate.
+  const [creier, setCreierState] = useState<CreierAdmin | null | 'necitit'>('necitit')
+  const [creierBusy, setCreierBusy] = useState(false)
+  const [creierMsg, setCreierMsg] = useState('')
   const previewAndPeek = (clip: string): void => {
     previewGesture(clip)
     setPeek(true)
@@ -890,6 +897,9 @@ export default function AdminPanel({
         setTokenChecks(r)
         setTokenChecksLoading(false)
       })
+    } else if (tab === 'creier') {
+      setCreierState('necitit')
+      void fetchCreier().then(setCreierState)
     } else if (tab === 'users') {
       // REÎNCĂRCARE LA DESCHIDEREA TABULUI (auditul admin, 3 aug): activitatea
       // se citea O SINGURĂ dată, la montare — un eșec lăsa „Se încarcă…" pe
@@ -1370,6 +1380,13 @@ export default function AdminPanel({
               onClick={() => setTab('sistem')}
             >
               Sistem (VPS)
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'creier' ? 'sel' : ''}`}
+              onClick={() => setTab('creier')}
+            >
+              Creier
             </button>
             {/* Notificări: ASCUNS COMPLET (ordinul ownerului, 14 aug, seara:
                 „ascunde notificările; tot ce ai ascuns creierul trebuie să le
@@ -2587,6 +2604,71 @@ export default function AdminPanel({
                       ))}
                     </div>
                   )}
+                </>
+              )}
+            </div>
+          </section>
+        )}
+        {tab === 'creier' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">Creier — comutator provider</div>
+              {creier === 'necitit' && <p className="chat-hint">Se încarcă…</p>}
+              {creier === null && <p className="chat-hint">Nu s-a putut citi starea comutatorului.</p>}
+              {typeof creier === 'object' && creier !== null && (
+                <>
+                  <p className="chat-hint">Activ: <b>{creier.activ}</b>{creier.modelCustom ? ` / ${creier.modelCustom}` : ''}</p>
+                  <div style={{ marginTop: 12 }}>
+                    <select
+                      value={creier.activ}
+                      disabled={creierBusy}
+                      onChange={(e) => {
+                        const activ = e.target.value
+                        setCreierState({ ...creier, activ })
+                      }}
+                    >
+                      {creier.provideri.map((p) => (
+                        <option key={p.prefix} value={p.prefix} disabled={!p.disponibil}>
+                          {p.nume} {!p.disponibil ? '(neconfigurat)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <input
+                      type="text"
+                      placeholder="model custom (opțional, ex. gpt-5.6-luna)"
+                      value={creier.modelCustom}
+                      disabled={creierBusy}
+                      onChange={(e) => setCreierState({ ...creier, modelCustom: e.target.value })}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ marginTop: 12 }}
+                    disabled={creierBusy}
+                    onClick={async () => {
+                      setCreierBusy(true)
+                      setCreierMsg('')
+                      const r = await setCreier(creier.activ, creier.modelCustom)
+                      setCreierBusy(false)
+                      if (r) {
+                        setCreierState(r)
+                        setCreierMsg('Salvat.')
+                      } else {
+                        setCreierMsg('Eroare la salvare.')
+                      }
+                      window.setTimeout(() => setCreierMsg(''), 3000)
+                    }}
+                  >
+                    {creierBusy ? 'Se salvează…' : 'Salvează comutatorul'}
+                  </button>
+                  {creierMsg && <p className="chat-hint" style={{ marginTop: 8 }}>{creierMsg}</p>}
+                  <div className="chat-hint" style={{ marginTop: 12 }}>
+                    OpenAI scalează automat: gpt-5.6-luna (ușor) → o4-mini → o3 → gpt-5.6-sol (maxim).
+                  </div>
                 </>
               )}
             </div>
