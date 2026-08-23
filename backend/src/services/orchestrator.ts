@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { rationeazaMesaje, rationeazaMesajeStream } from './creierRationament.js'
 import { OCHI_MARCAJ } from './brainContract.js'
 import type { AnthropicTool, OrMessage, OrToolCall } from './brainContract.js'
@@ -185,6 +186,89 @@ export function pasProgres(
   return { stop: null, st: { rundeToateEroare, erorPerUnealta } }
 }
 
+// ── GARDA DE „ÎNVÂRTIT ÎN LOC" (pură, testabilă) ────────────────────────────
+// CAUZA REALĂ a rândului „runda 7: nimic nou + aceleași unelte → opresc bucla"
+// din jurnalul serverului (auto-vindecare, 23 aug): garda veche compara două
+// lucruri care NU spun dacă s-a lucrat.
+//   1. „nimic nou" = zero TEXT nou în rundă. Dar o rundă de unelte e mută prin
+//      construcție (modelul cheamă unealta, nu povestește) → condiția era
+//      practic mereu adevărată.
+//   2. „aceleași unelte" = numele + PRIMELE 300 de caractere ale argumentelor.
+//      Pe tura autonomă de execuție, argumentul lui `repo_write` e fișierul
+//      ÎNTREG: două scrieri complet diferite în același fișier au aceeași
+//      deschidere de JSON (`{"branch":…,"path":…,"content":"import …`) → aceeași
+//      „semnătură". Deci munca reală (scrie fișierul 1 → scrie fișierul 2 →
+//      rulează porțile) arăta identic cu învârtitul în loc, iar tura se tăia la
+//      mijloc: cod scris, PR nedeschis, omul fără răspuns.
+// Aici judecăm INFORMAȚIA: învârtit în loc = aceleași apeluri (argumentele
+// ÎNTREGI, normalizate) care întorc EXACT aceleași rezultate ca runda trecută.
+// Un apel repetat care aduce alt rezultat (starea unui build, un log care
+// crește) e progres și merge înainte.
+export interface ApelDeUnealta {
+  name: string
+  argsJson: string
+}
+
+/** Formă stabilă a unui argument JSON: ordinea cheilor nu mai face două apeluri
+ *  identice să pară diferite (nici invers). JSON invalid → textul brut. */
+function formaStabila(argsJson: string): string {
+  let valoare: unknown
+  try {
+    valoare = JSON.parse(argsJson || '{}')
+  } catch {
+    return (argsJson || '').trim()
+  }
+  const canonic = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(canonic)
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(
+        Object.entries(v as Record<string, unknown>)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, val]) => [k, canonic(val)]),
+      )
+    }
+    return v
+  }
+  return JSON.stringify(canonic(valoare))
+}
+
+/** Amprenta apelurilor unei runde — argumentele ÎNTREGI, nu un prefix. Hash, ca
+ *  să nu ținem în memorie fișiere întregi doar pentru comparație. */
+export function amprentaApeluri(apeluri: readonly ApelDeUnealta[]): string {
+  if (!apeluri.length) return ''
+  const text = apeluri.map((a) => `${a.name}(${formaStabila(a.argsJson)})`).join('|')
+  return createHash('sha1').update(text).digest('hex')
+}
+
+/** Amprenta REZULTATELOR rundei — ce a aflat efectiv modelul. */
+export function amprentaIesiri(iesiri: readonly string[]): string {
+  if (!iesiri.length) return ''
+  return createHash('sha1').update(iesiri.join('\u0000')).digest('hex')
+}
+
+export interface StareRepetitie {
+  apeluri: string
+  iesiri: string
+}
+export function stareRepetitieInitiala(): StareRepetitie {
+  return { apeluri: '', iesiri: '' }
+}
+/** Judecă dacă runda a adus informație nouă. Stop = aceleași apeluri ȘI aceleași
+ *  rezultate ca runda trecută. PUR — nu mută starea primită. */
+export function pasRepetitie(
+  st: StareRepetitie,
+  apeluri: readonly ApelDeUnealta[],
+  iesiri: readonly string[],
+): { stop: string | null; st: StareRepetitie } {
+  const apeluriNoi = amprentaApeluri(apeluri)
+  const iesiriNoi = amprentaIesiri(iesiri)
+  const st2: StareRepetitie = { apeluri: apeluriNoi, iesiri: iesiriNoi }
+  if (apeluriNoi && apeluriNoi === st.apeluri && iesiriNoi === st.iesiri) {
+    return { stop: 'aceleași apeluri au întors aceleași rezultate ca runda trecută', st: st2 }
+  }
+  return { stop: null, st: st2 }
+}
+
 export async function runOrchestrator(
   model: string,
   messages: OrMessage[],
@@ -219,6 +303,11 @@ export async function runOrchestrator(
   // pură + testată în `pasProgres` (jos): o rundă în care TOATE ieșirile-s erori = fără
   // progres (2 la rând → stop); aceeași unealtă eșuată de 3× → stop. Fail-fast, nu 65s.
   let stProgres = stareProgresInitiala()
+  // GARDA DE „ÎNVÂRTIT ÎN LOC" (rescrisă, 23 aug — vezi `pasRepetitie` sus):
+  // aceleași apeluri (argumentele ÎNTREGI) care întorc aceleași rezultate ca
+  // runda trecută = model blocat. Se judecă DUPĂ execuție, pe informația chiar
+  // adusă — nu pe un prefix de 300 de caractere din argumente.
+  let stRepetitie = stareRepetitieInitiala()
   const rez = (text: string, rounds: number): OrchestratorResult => ({
     text,
     costUsd: totalCost,
@@ -243,9 +332,6 @@ export async function runOrchestrator(
         if (nou) emite(nou)
       }
     : undefined
-  // The signature of last round's tool calls: "same sentence + same tools" =
-  // spinning in place, not working.
-  let semnaturaTrecuta = ''
 
   for (let round = 1; round <= maxRounds; round++) {
     // With onText → streaming (first word instantly, like the old brain).
@@ -320,7 +406,6 @@ export async function runOrchestrator(
     // Close the round: what was left pending is a clean repeat and gets dropped.
     const coada = flux.inchideRunda()
     if (coada && emite) emite(coada)
-    const rundaGoala = flux.rundaAFostGoala()
     allText = flux.emis()
 
     // AUDIO-UL SE AUDE O SINGURĂ DATĂ (agenții de debug, 3 aug): blocul
@@ -369,16 +454,6 @@ export async function runOrchestrator(
           `[orchestrator] runda ${round}: modelul a TASTAT apelul în loc să-l cheme ` +
             `— îl execut eu (${fakeCalls.map((f) => f.name).join(', ')}) [${served}]`,
         )
-        // Same spin guard as the real-call path: nothing new + the very same
-        // typed calls twice in a row = a stuck model, we stop paying rounds.
-        const semnF = fakeCalls
-          .map((f) => `${f.name}(${f.argsJson.slice(0, 300)})`)
-          .join('|')
-        if (rundaGoala && semnF === semnaturaTrecuta) {
-          console.error(`[orchestrator] runda ${round}: aceleași apeluri tastate de două ori → opresc bucla (${served})`)
-          return rez(stripToolMarkup(allText), round)
-        }
-        semnaturaTrecuta = semnF
         for (const f of fakeCalls) marcheazaChemata(f.name)
         const calls: OrToolCall[] = fakeCalls.map((f, i) => ({
           id: `fake_${round}_${i}`,
@@ -403,6 +478,18 @@ export async function runOrchestrator(
         stProgres = rezProgF.st
         if (rezProgF.stop) {
           console.error(`[orchestrator] runda ${round}: fără progres (${rezProgF.stop}) → opresc bucla (${served})`)
+          return rez(stripToolMarkup(allText), round)
+        }
+        // Aceeași gardă de învârtit în loc ca pe calea apelurilor reale: apeluri
+        // identice care întorc rezultate identice = model blocat.
+        const rezRepF = pasRepetitie(
+          stRepetitie,
+          fakeCalls.map((f) => ({ name: f.name, argsJson: f.argsJson })),
+          iesiriF,
+        )
+        stRepetitie = rezRepF.st
+        if (rezRepF.stop) {
+          console.error(`[orchestrator] runda ${round}: ${rezRepF.stop} → opresc bucla (${served})`)
           return rez(stripToolMarkup(allText), round)
         }
         continue
@@ -491,23 +578,6 @@ export async function runOrchestrator(
       return rez(stripToolMarkup(allText), round)
     }
 
-    // ── SPINNING IN PLACE? ───────────────────────────────────────────────────
-    // Adrian, Jul 31: "writes the same sentence nonstop".
-    // The filter above makes the repetition no longer VISIBLE. But if we stop
-    // there, we still pay eight rounds to throw away seven — and on the free
-    // models, eight calls in a burst hit the per-minute cap, so your next
-    // question gets a 429, i.e. "technical problem".
-    // So: a round that brought NOTHING new AND asks for exactly the same tools
-    // as the round before = a stuck model. We don't let it keep spinning.
-    const semnatura = res.toolCalls
-      .map((c) => `${c.function.name}(${(c.function.arguments || '').slice(0, 300)})`)
-      .join('|')
-    if (rundaGoala && semnatura && semnatura === semnaturaTrecuta) {
-      console.error(`[orchestrator] runda ${round}: nimic nou + aceleași unelte → opresc bucla (${served})`)
-      return rez(stripToolMarkup(allText), round)
-    }
-    semnaturaTrecuta = semnatura
-
     for (const c of res.toolCalls) marcheazaChemata(c.function.name)
     // The assistant message ASKING for the tools (keeps tool_calls for linkage).
     convo.push({ role: 'assistant', content: res.text ?? '', tool_calls: res.toolCalls })
@@ -535,6 +605,20 @@ export async function runOrchestrator(
     stProgres = rezProg.st
     if (rezProg.stop) {
       console.error(`[orchestrator] runda ${round}: fără progres (${rezProg.stop}) → opresc bucla (${served})`)
+      return rez(stripToolMarkup(allText), round)
+    }
+    // ÎNVÂRTIT ÎN LOC (rescris — vezi `pasRepetitie`): aceleași apeluri, cu
+    // argumentele ÎNTREGI, care au întors aceleași rezultate ca runda trecută =
+    // modelul nu mai află nimic, oprim. Un apel repetat cu rezultat SCHIMBAT
+    // (build în curs, log care crește) e progres și continuă.
+    const rezRep = pasRepetitie(
+      stRepetitie,
+      res.toolCalls.map((c) => ({ name: c.function.name, argsJson: c.function.arguments || '' })),
+      iesiri,
+    )
+    stRepetitie = rezRep.st
+    if (rezRep.stop) {
+      console.error(`[orchestrator] runda ${round}: ${rezRep.stop} → opresc bucla (${served})`)
       return rez(stripToolMarkup(allText), round)
     }
   }

@@ -2,10 +2,25 @@ import { describe, expect, it, vi } from 'vitest'
 
 // Mochez creierul (apelul modelului) ca să pot verifica DOAR ce model pleacă pe
 // fiecare rundă — pentru escaladarea ușor→greu la mijloc.
+// `apeluriPeRunda` (când e pus) dictează ce cheamă modelul pe fiecare rundă —
+// așa se poate verifica garda de „învârtit în loc" pe comportament, nu pe sursă.
 const modeleFolosite: string[] = []
+const apeluriPeRunda: { name: string; arguments: string }[][] = []
 vi.mock('./creierRationament.js', () => ({
   rationeazaMesaje: async (_convo: unknown, optR: { model: string; reasoning?: string }) => {
     modeleFolosite.push(optR.model)
+    if (apeluriPeRunda.length) {
+      const runda = apeluriPeRunda[modeleFolosite.length - 1]
+      if (runda?.length) {
+        return {
+          text: '',
+          costUsd: 0,
+          model: optR.model,
+          toolCalls: runda.map((f, i) => ({ id: `t${modeleFolosite.length}_${i}`, function: f })),
+        }
+      }
+      return { text: 'gata', costUsd: 0, model: optR.model, toolCalls: [] }
+    }
     // Runda 1: cheamă ask_brain (declanșează escaladarea). Runda 2: fără unelte → gata.
     if (modeleFolosite.length === 1)
       return { text: '', costUsd: 0, model: optR.model, toolCalls: [{ id: '1', function: { name: 'ask_brain', arguments: '{}' } }] }
@@ -14,7 +29,16 @@ vi.mock('./creierRationament.js', () => ({
   rationeazaMesajeStream: async () => ({ text: 'x', costUsd: 0, model: 'x', toolCalls: [] }),
 }))
 
-import { executaApeluriCoordonate, iesireEsteEroare, pasProgres, stareProgresInitiala, runOrchestrator } from './orchestrator.js'
+import {
+  amprentaApeluri,
+  executaApeluriCoordonate,
+  iesireEsteEroare,
+  pasProgres,
+  pasRepetitie,
+  stareProgresInitiala,
+  stareRepetitieInitiala,
+  runOrchestrator,
+} from './orchestrator.js'
 
 describe('garda de progres (fail-fast pe erori, nu 65s de măcinat)', () => {
   it('recunoaște ieșirile de eroare, nu confundă succesul cu eroarea', () => {
@@ -123,5 +147,78 @@ describe('runOrchestrator — escaladarea ușor→greu la mijloc (owner 20 aug)'
       { maxRounds: 3 },
     )
     expect(modeleFolosite.every((m) => m === 'google-direct/gemini-usor')).toBe(true)
+  })
+})
+
+// ── „RUNDA 7: NIMIC NOU + ACELEAȘI UNELTE" (owner, log recurent) ────────────
+//
+// Garda veche compara DOAR primele 300 de caractere din argumente și cerea ca
+// runda să fie „goală" după filtrul de TEXT. Două scrieri diferite de fișier
+// întreg au același prefix de 300 (`{"path":"...","content":"..."`), iar o rundă
+// de unelte n-are text nou aproape niciodată — deci munca legitimă era tăiată la
+// jumătate. Acum comparăm argumentele ÎNTREGI *și* rezultatele.
+describe('garda de învârtit în loc (pasRepetitie)', () => {
+  const APEL = [{ name: 'repo_write', argsJson: '{"path":"a.ts","content":"x"}' }]
+
+  it('prima rundă nu oprește nimic — nu există trecut cu ce compara', () => {
+    const r = pasRepetitie(stareRepetitieInitiala(), APEL, ['ok'])
+    expect(r.stop).toBeNull()
+  })
+
+  it('aceleași apeluri cu aceleași rezultate a doua oară → stop', () => {
+    const r1 = pasRepetitie(stareRepetitieInitiala(), APEL, ['ok'])
+    const r2 = pasRepetitie(r1.st, APEL, ['ok'])
+    expect(r2.stop).toMatch(/aceleași apeluri/)
+  })
+
+  it('același apel cu rezultat SCHIMBAT = progres, nu oprire', () => {
+    const r1 = pasRepetitie(stareRepetitieInitiala(), APEL, ['build 40%'])
+    const r2 = pasRepetitie(r1.st, APEL, ['build 80%'])
+    expect(r2.stop).toBeNull()
+  })
+
+  it('argumentele lungi se compară ÎNTREGI, nu pe primele 300 de caractere', () => {
+    const cap = '{"path":"fisier.ts","content":"'
+    const umplutura = 'a'.repeat(400)
+    const unu = [{ name: 'repo_write', argsJson: `${cap}${umplutura}UNU"}` }]
+    const doi = [{ name: 'repo_write', argsJson: `${cap}${umplutura}DOI"}` }]
+    expect(amprentaApeluri(unu)).not.toBe(amprentaApeluri(doi))
+    const r1 = pasRepetitie(stareRepetitieInitiala(), unu, ['ok'])
+    expect(pasRepetitie(r1.st, doi, ['ok']).stop).toBeNull()
+  })
+
+  it('ordinea cheilor din JSON nu inventează o diferență', () => {
+    const a = [{ name: 'repo_write', argsJson: '{"path":"a.ts","content":"x"}' }]
+    const b = [{ name: 'repo_write', argsJson: '{"content":"x","path":"a.ts"}' }]
+    expect(amprentaApeluri(a)).toBe(amprentaApeluri(b))
+  })
+
+  it('în buclă reală: două runde identice se opresc, dar munca de dinainte s-a executat', async () => {
+    modeleFolosite.length = 0
+    apeluriPeRunda.length = 0
+    const scrie = { name: 'repo_write', arguments: '{"path":"a.ts","content":"x"}' }
+    // Rundele 1-2: scrieri DIFERITE cu același prefix lung (garda veche le-ar fi
+    // confundat). Rundele 3-4: identice, cu același rezultat → stop pe 4.
+    const lung = 'a'.repeat(400)
+    apeluriPeRunda.push(
+      [{ name: 'repo_write', arguments: `{"path":"f.ts","content":"${lung}UNU"}` }],
+      [{ name: 'repo_write', arguments: `{"path":"f.ts","content":"${lung}DOI"}` }],
+      [scrie],
+      [scrie],
+      [scrie],
+    )
+    let executii = 0
+    await runOrchestrator(
+      'google-direct/gemini-usor',
+      [{ role: 'user', content: 'x' }] as never,
+      [{ name: 'repo_write', description: 'd', input_schema: { type: 'object' } }] as never,
+      async () => {
+        executii++
+        return 'ok'
+      },
+      { maxRounds: 8 },
+    )
+    expect(executii).toBe(4) // rundele 1-3 au lucrat; runda 4 s-a repetat → oprit
+    apeluriPeRunda.length = 0
   })
 })
