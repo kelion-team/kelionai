@@ -40,8 +40,8 @@ const LANGUAGES: { code: Lang; label: string }[] = [
   { code: 'pt', label: 'Português' },
 ]
 
-// The public start page: a professional hero with a LIVE 3D Kelion, plus the two
-// ways in — a free 3-minute trial (no sign-up) and Google sign-in.
+// The public start page: a professional hero with a LIVE 3D Kelion, plus the
+// way in — Google sign-in (no free trial; users buy to try).
 // AUTOMATICALLY multilingual: the UI follows the visitor's browser language
 // (en/ro/es/fr/de/it/pt; anything else falls back to English). The conversation
 // itself adapts to dozens of languages independently of the UI.

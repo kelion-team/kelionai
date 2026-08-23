@@ -128,7 +128,7 @@ export async function pollVisitorChat(
 
 // Build the full visitor profile for one request: real IP (Cloudflare-aware),
 // geo, browser/OS/device, language, referrer, bot flag. Shared by the visit
-// beacon and the demo start.
+// beacon and the presence ping.
 async function visitorProfile(
   req: FastifyRequest,
   referrer: string,

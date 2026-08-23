@@ -1,8 +1,6 @@
-// A light device fingerprint for the free-trial anti-reuse speed-bump. This is
-// NOT a biometric and NOT unique — it only makes casual re-use (refresh, new
-// tab) harder. A hash of stable browser signals plus a canvas render. A
-// determined visitor (new browser/device, incognito+VPN) can still get another
-// trial; the daily cap is what actually bounds the cost.
+// A light device fingerprint for visitor analytics and anti-abuse. This is
+// NOT a biometric and NOT unique — it only makes casual re-use harder. A hash
+// of stable browser signals plus a canvas render.
 export async function deviceFingerprint(): Promise<string> {
   const parts: string[] = [
     navigator.userAgent,

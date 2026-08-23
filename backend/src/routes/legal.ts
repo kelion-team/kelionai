@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify'
 // Policy includes the Google API Services "Limited Use" disclosure that
 // restricted scopes (Gmail/Drive/Contacts) need for verification.
 
-const UPDATED = '30 June 2026'
+const UPDATED = '23 August 2026'
 const CONTACT = 'adrianenc11@gmail.com'
 
 function page(title: string, body: string): string {
@@ -60,10 +60,10 @@ const PRIVACY = page(
       location/visual questions. Camera frames are sent per turn, not streamed.</li>
     <li><strong>Usage + cost metering</strong> — technical counts used to operate
       and bill the service.</li>
-    <li><strong>Free-trial visitors</strong> — if you start a free trial without
-      signing in, we record your IP address, approximate country/city and a device
-      fingerprint. We use these only to run the trial, prevent repeat abuse and
-      understand where interest comes from — never to identify you personally.</li>
+    <li><strong>Visitors</strong> — when you open the site without signing in,
+      we record your IP address, approximate country/city and a device
+      fingerprint. We use these only to understand where interest comes from
+      and to secure the service — never to identify you personally.</li>
   </ul>
 
   <h2>How we use it</h2>
