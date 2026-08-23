@@ -485,6 +485,28 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     let rostireCurenta = ''
     let ultimaRostireFinalizata = ''
     let ultimaTranscriereUserLa = 0
+    // ── TIMEOUT DE TĂCERE (owner, 23 aug 2026: „explica cum softul arde bani
+    //    noaptea") — sesiunea de voce Gemini Live taxează $0.35/minut ACTIV
+    //    și $0.1167/minut IDLE (tăcere). O sesiune uitată deschisă arde $7/ora
+    //    de tăcere. Măsurat: 1009 minute într-o zi (16.8h), $588 pe voce în
+    //    august — majoritatea TĂCERE. Acum: 5 minute fără nicio vorbire →
+    //    sesiunea se închide singură, cu un mesaj onest.
+    const MAX_TACERE_MS = 5 * 60_000 // 5 minute fără transcriere = închidere
+    let ceasTacere: NodeJS.Timeout | null = null
+    let ultimaActivitateLa = Date.now()
+    const reseteazaCeasTacere = (): void => {
+      ultimaActivitateLa = Date.now()
+      if (ceasTacere) clearTimeout(ceasTacere)
+      ceasTacere = setTimeout(() => {
+        if (inchis) return
+        app.log.info(`vocal-live: închidere automată după ${MAX_TACERE_MS / 60_000} min de tăcere (cost idle oprit)`)
+        try {
+          socket.send(JSON.stringify({ type: 'eroare', motiv: 'Sesiunea s-a închis după 5 minute de tăcere — deschide-o din nou când vrei să vorbești.' }))
+        } catch { /* socket deja mort */ }
+        socket.close(1000, 'idle_timeout')
+      }, MAX_TACERE_MS)
+    }
+    reseteazaCeasTacere() // pornește la deschiderea sesiunii
     // Verdict AMÂNAT: cadrele sosite înaintea transcrierii se țin aici — nici
     // redate, nici suprimate. La prima transcriere se judecă; la 900 ms fără
     // nicio transcriere → fail-open (lecția 308/308: mai bine o tură ambientală
@@ -1043,6 +1065,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       scadeSesiunea()
       clearInterval(ceasCost)
       clearInterval(ceasOrdine)
+      if (ceasTacere) {
+        clearTimeout(ceasTacere)
+        ceasTacere = null
+      }
       if (ceasAsteptareVerdict) {
         clearTimeout(ceasAsteptareVerdict)
         ceasAsteptareVerdict = null
@@ -1059,6 +1085,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       scadeSesiunea()
       clearInterval(ceasCost)
       clearInterval(ceasOrdine)
+      if (ceasTacere) {
+        clearTimeout(ceasTacere)
+        ceasTacere = null
+      }
       if (ceasAsteptareVerdict) {
         clearTimeout(ceasAsteptareVerdict)
         ceasAsteptareVerdict = null
@@ -1465,6 +1495,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           ultimaTranscriereUserLa = acum
           rostireCurenta += text
           bufUser += text
+          reseteazaCeasTacere() // utilizatorul vorbește → resetăm timeout-ul de tăcere
           trimite({ type: 'user', text, final })
           // R3 (re-verificatorul lotului V): `final` nu era idempotent — un
           // `finished` dublat de Google (sau finished + turnComplete în cadre
