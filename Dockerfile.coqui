@@ -9,13 +9,17 @@ FROM python:3.11-slim-bookworm
 
 WORKDIR /coqui
 
-# Dependențe sistem pentru audio (ffmpeg) + torch CPU
+# Dependențe sistem pentru audio (ffmpeg) + torch CPU + compilare TTS
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
         libsndfile1 \
         espeak-ng \
         git \
+        build-essential \
+        python3-dev \
+        cmake \
+        curl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Coqui TTS + dependențe CPU-only (torch CPU, nu CUDA — VPS fără GPU)
@@ -30,8 +34,9 @@ COPY backend/coqui/server.py ./server.py
 
 EXPOSE 5100
 
-# Healthcheck — verifică că modelul e încărcat
-HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
+# Healthcheck — verifică că modelul e încărcat.
+# Start-period 300s: prima pornire descarcă modelul XTTS v2 (~2GB) — durează.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=300s --retries=5 \
     CMD curl -sf http://localhost:5100/health || exit 1
 
 CMD ["python3", "server.py"]
