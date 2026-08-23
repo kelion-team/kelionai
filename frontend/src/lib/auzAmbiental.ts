@@ -105,6 +105,16 @@ async function trimiteEveniment(ev: EvenimentSonor): Promise<void> {
 
 function tick(): void {
   if (!analyser || !bufferFrecvente || !bufferTemporal || document.hidden) return
+  // Gestiunea energiei: pe baterie critică, sare ciclul (analiza FFT consumă)
+  // Import dinamic ca să nu încărcăm modulul dacă nu e nevoie
+  void import('./energie').then(({ poateRulaVerificare }) => {
+    if (!poateRulaVerificare()) return
+    tickIntern()
+  }).catch(() => tickIntern())
+}
+
+function tickIntern(): void {
+  if (!analyser || !bufferFrecvente || !bufferTemporal || document.hidden) return
   analyser.getByteFrequencyData(bufferFrecvente)
   analyser.getFloatTimeDomainData(bufferTemporal)
   const sampleRate = audioCtx?.sampleRate ?? 44100

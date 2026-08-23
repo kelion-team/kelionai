@@ -40,6 +40,7 @@ import { useConectat } from '../lib/conexiune'
 import { reteaLenta } from '../lib/retea'
 import ApelOverlay from '../components/ApelOverlay'
 import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
+import { pornesteVerificareaOllamaLocal, setNotificareOllama } from '../lib/ollamaLocal'
 
 // ── BECURILE DE CREDIT, COMPACT ÎN BARĂ (owner, 13 aug: „în spațiul rămas pe
 // linia aia pui butoanele astea") ────────────────────────────────────────────
@@ -1204,6 +1205,19 @@ export default function Stage({ user }: { user: User }) {
     pornestePrezentaApel()
     return () => oprestePrezentaApel()
   }, [])
+  // OLLAMA LOCAL PE DEVICE (22 aug): verificare discretă la pornire — dacă
+  // Ollama nu e instalat, tăcut; dacă trebuie downloadat, ANUNȚĂ utilizatorul.
+  // Cascade: device → VPS → Gemini. Auto-download la pornire cu notificare.
+  const [ollamaNotif, setOllamaNotif] = useState<{ mesaj: string; tip: string } | null>(null)
+  useEffect(() => {
+    setNotificareOllama((mesaj, tip) => {
+      setOllamaNotif({ mesaj, tip })
+      if (tip === 'gata' || tip === 'eroare') {
+        setTimeout(() => setOllamaNotif(null), 5000)
+      }
+    })
+    pornesteVerificareaOllamaLocal()
+  }, [])
   // IEȘIREA DIN CENTRUL DE TRANZACȚIONARE (9 aug, ownerul: „buton ieșire nu
   // merge"): pagina din iframe nu-și poate închide singură tabul — trimite
   // mesaj, iar aici tabul se închide ca la apăsarea ×-ului.
@@ -2029,6 +2043,32 @@ export default function Stage({ user }: { user: User }) {
           Se randează prin portal în <body>, deci apare peste tot, inclusiv peste
           modul mașină. Ascultă singur evenimentele de apel. */}
       <ApelOverlay lang={lang} />
+
+      {/* NOTIFICARE OLLAMA LOCAL (22 aug): anunță utilizatorul când se descarcă
+          modelul de rezervă pe device. Responsiv — pe telefon ocupă toată lățimea,
+          pe desktop e un toast în colț. Dispare singur la terminare. */}
+      {ollamaNotif && (
+        <div style={{
+          position: 'fixed',
+          bottom: 'max(8px, env(safe-area-inset-bottom, 8px))',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          background: ollamaNotif.tip === 'eroare' ? '#d32f2f' : ollamaNotif.tip === 'gata' ? '#2e7d32' : '#1a1a1a',
+          color: '#fff',
+          padding: '10px 14px',
+          borderRadius: 8,
+          fontSize: 'clamp(12px, 3.5vw, 14px)',
+          maxWidth: 'min(92vw, 420px)',
+          width: 'auto',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          textAlign: 'center',
+          lineHeight: 1.4,
+          wordBreak: 'break-word',
+        }}>
+          {ollamaNotif.mesaj}
+        </div>
+      )}
 
       {unlockOpen && (
         <div className="unlock-overlay" onClick={() => setUnlockOpen(false)}>

@@ -463,6 +463,10 @@ export const config = {
     nominatimBaseUrl: (process.env.NOMINATIM_BASE_URL ?? 'https://nominatim.openstreetmap.org').replace(/\/+$/, ''),
     osrmRoutingUrl: (process.env.OSRM_ROUTING_URL ?? 'https://router.project-osrm.org/route/v1/driving').replace(/\/+$/, ''),
   },
+  // OLLAMA (22 aug): config servit frontend-ului prin /api/ollama/config.
+  // LEGEA ANTI-HARDCODARE: modelul + gazda vin din env, nu hardcodate în FE.
+  constructorOllamaModel: (process.env.CONSTRUCTOR_OLLAMA_MODEL ?? 'qwen3-coder:30b').trim(), // hardcod-permis: modelul free implicit pe VPS, suprascris de env
+  ollamaApiBase: (process.env.OLLAMA_API_BASE ?? 'http://127.0.0.1:11434').trim(), // hardcod-permis: gazda Ollama LOCALĂ implicită pe VPS, suprascrisă de env
 } as const
 
 export function isAllowed(email: string): boolean {

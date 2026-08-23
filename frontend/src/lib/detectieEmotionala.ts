@@ -96,6 +96,11 @@ export function pornesteDetectiaEmotionala(
   inMers = true
   timer = setInterval(async () => {
     if (document.hidden) return
+    // Gestiunea energiei: pe baterie critică, sare ciclul
+    try {
+      const { poateRulaVerificare } = await import('./energie')
+      if (!poateRulaVerificare()) return
+    } catch { /* modul indisponibil — continuăm */ }
     try {
       const lm = await obtineLandmark()
       const stare = detecteazaEmotieDinLandmark(lm)
