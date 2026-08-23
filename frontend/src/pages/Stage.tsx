@@ -43,7 +43,7 @@ import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
 import { pornesteVerificareaOllamaLocal, setNotificareOllama } from '../lib/ollamaLocal'
 import { initiazaAudioSpatial, resumeAudioSpatial } from '../lib/audioSpatial'
 import { pornesteMuzica, opresteMuzica, schimbaDispozitie, type DispozitieMuzicala } from '../lib/companionCreativ'
-import { pushFacial, type FacialLabel } from '../lib/facialQueue'
+import { setEmotiePersistenta, type FacialLabel } from '../lib/facialQueue'
 
 // ── BECURILE DE CREDIT, COMPACT ÎN BARĂ (owner, 13 aug: „în spațiul rămas pe
 // linia aia pui butoanele astea") ────────────────────────────────────────────
@@ -1238,9 +1238,11 @@ export default function Stage({ user }: { user: User }) {
     const emotieLaFacial: Record<string, FacialLabel> = {
       satisfacție: 'smile',
       veselie: 'smile',
+      bucurie: 'smile',
       grijă: 'empathy',
       curiozitate: 'raisedBrow',
       îngrijorare: 'think',
+      tristețe: 'empathy',
       surpriză: 'surprise',
       calm: 'warmth',
     }
@@ -1249,12 +1251,13 @@ export default function Stage({ user }: { user: User }) {
         .then((r) => r.ok ? r.json() : null)
         .then((j) => {
           if (!j?.emotie) return
-          // Declanșăm expresia DOAR la schimbare — nu la fiecare poll (altfel
-          // micro-expresia se re-armează la 30s și pare mecanic)
+          // Declanșăm expresia DOAR la schimbare — nu la fiecare poll.
+          // setEmotiePersistenta pune emoția pe față PERMANENT (nu 2.45s flash)
+          // — cât timp emoția e activă, fața o arată. La schimbare, trece smooth.
           if (j.emotie !== emotieKelionAnterioara.current) {
             emotieKelionAnterioara.current = j.emotie
             const facial = emotieLaFacial[j.emotie]
-            if (facial) pushFacial(facial)
+            setEmotiePersistenta(facial ?? null)
           }
         })
         .catch(() => {})

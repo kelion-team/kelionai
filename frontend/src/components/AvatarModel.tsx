@@ -5,7 +5,7 @@ import { LoopOnce, LoopRepeat, LoadingManager } from 'three'
 import { GLTFLoader } from 'three-stdlib'
 import type { Group, Bone, Mesh, SkinnedMesh, AnimationClip, AnimationAction } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
-import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
+import { useFacialQueue, useEmotiePersistenta, type FacialLabel } from '../lib/facialQueue'
 import { fetchDisabledGestures } from '../lib/gestures'
 
 // ── FACIAL EXPRESSIONS (ARKit blendshapes) — kept from the constructor's "avatar
@@ -241,6 +241,13 @@ export default function AvatarModel() {
   const face = useRef<{ label: FacialLabel; t: number } | null>(null)
   useFacialQueue((label) => {
     face.current = { label, t: 0 }
+  })
+  // ── EMOȚIA PERSISTENTĂ (owner, 23 aug 2026) — stratul de BAZĂ al feței.
+  //    Sta pe față cât timp emoția e activă (nu e micro-expresie de 2.45s).
+  //    Neted: trece smooth de la o expresie la alta (lerp 0.5s).
+  const emotieBase = useRef<{ label: FacialLabel | null; weight: number }>({ label: null, weight: 0 })
+  useEmotiePersistenta((label) => {
+    emotieBase.current.label = label
   })
 
   const play = (name: string, once = false, fade = 0.35, timeScale = 1): void => {
@@ -497,6 +504,25 @@ export default function AvatarModel() {
         const idx = d[k] ?? d[MORPH_ALT[k] ?? '']
         if (idx !== undefined) inf[idx] = 0
       }
+
+      // ── EMOȚIA PERSISTENTĂ (stratul de BAZĂ) — aplicată ÎNAINTE de
+      //    micro-expresii. Sta pe față cât timp emoția e activă.
+      //    Tranziție smooth: weight urcă spre 1 cu lerp (0.5s ~ 30 frame-uri).
+      const eb = emotieBase.current
+      if (eb.label) {
+        eb.weight = Math.min(1, eb.weight + delta * 2) // smooth in ~0.5s
+        const baseTargets = FACE_EXPRESSIONS[eb.label]
+        if (baseTargets) {
+          for (const [k, v] of Object.entries(baseTargets)) {
+            if (v === undefined || k === 'jawOpen') continue
+            const idx = d[k] ?? d[MORPH_ALT[k] ?? '']
+            if (idx !== undefined) inf[idx] = v * eb.weight
+          }
+        }
+      } else {
+        eb.weight = Math.max(0, eb.weight - delta * 2) // smooth out ~0.5s
+      }
+
       // Voice always has priority on the mouth; the expression only complements.
       let jawExtra = 0
       if (faceTargets) {
@@ -507,7 +533,7 @@ export default function AvatarModel() {
             continue
           }
           const idx = d[k] ?? d[MORPH_ALT[k] ?? '']
-          if (idx !== undefined) inf[idx] = v * faceW
+          if (idx !== undefined) inf[idx] = Math.max(inf[idx] ?? 0, v * faceW)
         }
       }
       if (jaw !== undefined) inf[jaw] = Math.max(jawOpen, jawExtra)
