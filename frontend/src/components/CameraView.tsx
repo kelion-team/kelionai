@@ -11,6 +11,8 @@ import { startFaceSampling } from '../lib/faceprint'
 import { pornesteVedereaContinua, opresteVedereaContinua } from '../lib/vedereContinua'
 import { pornesteAuzulAmbiental, opresteAuzulAmbiental } from '../lib/auzAmbiental'
 import { pornesteDetectiaEmotionala, opresteDetectiaEmotionala } from '../lib/detectieEmotionala'
+import { pornesteCititBuze, opresteCititBuze } from '../lib/cititBuze'
+import { inregistreazaSampleVoce, salveazaSampleVoce, areSampleVoce, getTextCitire } from '../lib/clonareVoce'
 import { getTeava, calitateCamera } from '../lib/retea'
 import { raporteazaPozaVizitei } from '../lib/vizita'
 
@@ -34,6 +36,11 @@ export default function CameraView({
   const streamRef = useRef<MediaStream | null>(null)
   const faceStopRef = useRef<(() => void) | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
+  // #2 CITIT PE BUZE — cuvinte detectate (comunicare silentă)
+  const [cuvantBuze, setCuvantBuze] = useState<string | null>(null)
+  // #6 CLONARE VOCE — la prima pornire camera, oferă opțiunea de a înregistra
+  const [arataPromptVoce, setArataPromptVoce] = useState(false)
+  const [inregistrareVoce, setInregistrareVoce] = useState(false)
   // CRONOMETRUL PORNIRII (owner, 14 aug: „nici nu capturează după ce dau accept"
   // + „delay enorm"). Ca următorul raport să vină cu CIFRA fazei vinovate, nu cu
   // ghicit: măsurăm de la activare → flux → play → PRIMUL CADRU capturat, și
@@ -81,9 +88,24 @@ export default function CameraView({
           faceStopRef.current = startFaceSampling(
             videoRef.current,
             () => captureRef?.current?.() ?? null,
-            // 22 aug: pasez landmark-ul către detecția emoțională
-            (lm) => { if (lm) pornesteDetectiaEmotionala(async () => lm) },
+            // 22 aug: pasez landmark-ul către detecția emoțională + citit buze
+            (lm) => {
+              if (lm) {
+                pornesteDetectiaEmotionala(async () => lm)
+                // #2 CITIT BUZE: detectează cuvinte simple din forma buzelor
+                pornesteCititBuze(async () => lm, (rez) => {
+                  if (rez.cuvant) {
+                    setCuvantBuze(rez.cuvant)
+                    setTimeout(() => setCuvantBuze(null), 3000)
+                  }
+                })
+              }
+            },
           )
+        }
+        // #6 CLONARE VOCE: la prima pornire, verifică dacă userul are sample
+        if (!arataPromptVoce) {
+          areSampleVoce().then((are) => { if (!are) setArataPromptVoce(true) }).catch(() => {})
         }
         // POZA VIZITEI (P3; owner, 15 aug: „de ce nu e legata de vizitator
         // poza"): camera e ACORDATĂ și vie — un singur cadru mic pe sesiune
@@ -115,6 +137,7 @@ export default function CameraView({
       opresteVedereaContinua()
       opresteAuzulAmbiental()
       opresteDetectiaEmotionala()
+      opresteCititBuze()
       stopStream(streamRef.current)
       streamRef.current = null
     }
@@ -313,5 +336,66 @@ export default function CameraView({
   if (!active) return null
   // Hidden from the user — Kelion's eyes only. Kept off-screen (not display:none)
   // so the browser keeps decoding frames for capture.
-  return <video ref={videoRef} muted playsInline aria-hidden className="camera-hidden" />
+  return (
+    <>
+      <video ref={videoRef} muted playsInline aria-hidden className="camera-hidden" />
+      {/* #2 CITIT PE BUZE — afișează cuvântul detectat (comunicare silentă) */}
+      {cuvantBuze && (
+        <div style={{
+          position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          zIndex: 9999, background: 'rgba(0,0,0,0.85)', color: '#fff',
+          padding: '16px 32px', borderRadius: 12, fontSize: 'clamp(18px, 5vw, 28px)',
+          fontWeight: 600, pointerEvents: 'none', textAlign: 'center',
+        }}>
+          {cuvantBuze === 'da' ? '✅ DA' : cuvantBuze === 'nu' ? '❌ NU' : cuvantBuze === 'ajutor' ? '🆘 AJUTOR' : cuvantBuze === 'opreste' ? '⏹ OPREȘTE' : cuvantBuze === 'bine' ? '👍 BINE' : '👋 SALUT'}
+        </div>
+      )}
+      {/* #6 CLONARE VOCE — prompt la prima pornire a camerei */}
+      {arataPromptVoce && !inregistrareVoce && (
+        <div style={{
+          position: 'fixed', bottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
+          left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+          background: 'rgba(26,35,126,0.95)', color: '#fff',
+          padding: '16px 20px', borderRadius: 12, maxWidth: 'min(92vw, 400px)',
+          textAlign: 'center', fontSize: 'clamp(12px, 3.5vw, 14px)', lineHeight: 1.5,
+        }}>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>🎙️</div>
+          <div style={{ marginBottom: 12 }}>Vrei să-ți clonez vocea? Citește un text scurt (30s) și apoi îți pot aminti lucruri în vocea ta.</div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <button onClick={async () => {
+              setInregistrareVoce(true)
+              const sample = await inregistreazaSampleVoce()
+              if (sample) {
+                const ok = await salveazaSampleVoce(sample)
+                if (ok) setArataPromptVoce(false)
+              }
+              setInregistrareVoce(false)
+            }} style={{
+              background: '#fff', color: '#1a237e', border: 'none',
+              borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+            }}>Înregistrează</button>
+            <button onClick={() => setArataPromptVoce(false)} style={{
+              background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 14,
+            }}>Mai târziu</button>
+          </div>
+        </div>
+      )}
+      {/* #6 Înregistrare voce în curs */}
+      {inregistrareVoce && (
+        <div style={{
+          position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          zIndex: 9999, background: 'rgba(0,0,0,0.9)', color: '#fff',
+          padding: '24px 32px', borderRadius: 12, textAlign: 'center', maxWidth: 'min(92vw, 400px)',
+        }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>🎙️</div>
+          <div style={{ fontSize: 14, marginBottom: 16 }}>Citește cu voce naturală:</div>
+          <div style={{ fontSize: 16, fontStyle: 'italic', lineHeight: 1.6, marginBottom: 16 }}>
+            "{getTextCitire()}"
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Înregistrare în curs... (30 secunde)</div>
+        </div>
+      )}
+    </>
+  )
 }
