@@ -732,7 +732,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     await saveKv('creier_activ', activ)
     if (modelCustom !== undefined) await saveKv('creier_model', modelCustom.trim())
     app.log.info(`admin: creier comutat pe „${activ}" (model: ${modelCustom || 'default'})`)
-    return reply.send({ ok: true, activ, modelCustom: modelCustom?.trim() ?? '' })
+    // FRONTEND: setCreier face setCreierState(r) și așteaptă același shape ca
+    // GET (cu provideri + modele). Fără ele, creier.provideri.map explodează
+    // după salvare → React crash → ecran negru (owner, 23 aug: „dupa ce dai
+    // salveaza model apare ecran negru"). Returnăm întregul obiect, ca GET.
+    const m = config.openai
+    return reply.send({
+      ok: true,
+      activ,
+      modelCustom: modelCustom?.trim() ?? '',
+      provideri: [
+        { prefix: 'google-direct', nume: 'Gemini Direct', disponibil: geminiDirectAvailable(), info: 'Default — are vedere + audio + unelte' },
+        { prefix: 'openai', nume: 'OpenAI ChatGPT', disponibil: openaiAvailable(), info: 'Chat + vedere + reasoning; cheie în env (OPENAI_API_KEY)' },
+      ],
+      modele: [
+        { id: 'auto', nume: 'Auto (luna → medium → heavy → max)', isAuto: true },
+        { id: m.luna, nume: m.luna, tag: 'ușor / ieftin' },
+        { id: m.medium, nume: m.medium, tag: 'mediu / reasoning' },
+        { id: m.heavy, nume: m.heavy, tag: 'greu / reasoning' },
+        { id: m.max, nume: m.max, tag: 'maxim calitate' },
+        { id: 'custom', nume: 'Model custom', isCustom: true },
+      ],
+    })
   })
 
   // Verify the brain key live (admin only): pings the Gemini chat default
