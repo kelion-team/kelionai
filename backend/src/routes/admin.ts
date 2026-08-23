@@ -701,12 +701,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return
     const activ = await loadKv('creier_activ') ?? 'google-direct'
     const modelCustom = await loadKv('creier_model') ?? ''
+    const m = config.openai
     return reply.send({
       activ,
       modelCustom,
       provideri: [
         { prefix: 'google-direct', nume: 'Gemini Direct', disponibil: geminiDirectAvailable(), info: 'Default — are vedere + audio + unelte' },
         { prefix: 'openai', nume: 'OpenAI ChatGPT', disponibil: openaiAvailable(), info: 'Chat + vedere + reasoning; cheie în env (OPENAI_API_KEY)' },
+      ],
+      modele: [
+        { id: 'auto', nume: 'Auto (luna → medium → heavy → max)', isAuto: true },
+        { id: m.luna, nume: m.luna, tag: 'ușor / ieftin' },
+        { id: m.medium, nume: m.medium, tag: 'mediu / reasoning' },
+        { id: m.heavy, nume: m.heavy, tag: 'greu / reasoning' },
+        { id: m.max, nume: m.max, tag: 'maxim calitate' },
+        { id: 'custom', nume: 'Model custom', isCustom: true },
       ],
     })
   })

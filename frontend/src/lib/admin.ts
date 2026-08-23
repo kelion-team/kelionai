@@ -559,10 +559,18 @@ export interface CreierProvider {
   disponibil: boolean
   info: string
 }
+export interface CreierModel {
+  id: string
+  nume: string
+  tag?: string
+  isAuto?: boolean
+  isCustom?: boolean
+}
 export interface CreierAdmin {
   activ: string
   modelCustom: string
   provideri: CreierProvider[]
+  modele: CreierModel[]
 }
 export async function fetchCreier(): Promise<CreierAdmin | null> {
   try {

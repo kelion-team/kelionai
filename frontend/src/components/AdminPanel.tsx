@@ -2616,60 +2616,89 @@ export default function AdminPanel({
               {creier === 'necitit' && <p className="chat-hint">Se încarcă…</p>}
               {creier === null && <p className="chat-hint">Nu s-a putut citi starea comutatorului.</p>}
               {typeof creier === 'object' && creier !== null && (
-                <>
-                  <p className="chat-hint">Activ: <b>{creier.activ}</b>{creier.modelCustom ? ` / ${creier.modelCustom}` : ''}</p>
-                  <div style={{ marginTop: 12 }}>
-                    <select
-                      value={creier.activ}
-                      disabled={creierBusy}
-                      onChange={(e) => {
-                        const activ = e.target.value
-                        setCreierState({ ...creier, activ })
-                      }}
-                    >
-                      {creier.provideri.map((p) => (
-                        <option key={p.prefix} value={p.prefix} disabled={!p.disponibil}>
-                          {p.nume} {!p.disponibil ? '(neconfigurat)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div style={{ marginTop: 12 }}>
-                    <input
-                      type="text"
-                      placeholder="model custom (opțional, ex. gpt-5.6-luna)"
-                      value={creier.modelCustom}
-                      disabled={creierBusy}
-                      onChange={(e) => setCreierState({ ...creier, modelCustom: e.target.value })}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className="ghost"
-                    style={{ marginTop: 12 }}
-                    disabled={creierBusy}
-                    onClick={async () => {
-                      setCreierBusy(true)
-                      setCreierMsg('')
-                      const r = await setCreier(creier.activ, creier.modelCustom)
-                      setCreierBusy(false)
-                      if (r) {
-                        setCreierState(r)
-                        setCreierMsg('Salvat.')
-                      } else {
-                        setCreierMsg('Eroare la salvare.')
-                      }
-                      window.setTimeout(() => setCreierMsg(''), 3000)
-                    }}
-                  >
-                    {creierBusy ? 'Se salvează…' : 'Salvează comutatorul'}
-                  </button>
-                  {creierMsg && <p className="chat-hint" style={{ marginTop: 8 }}>{creierMsg}</p>}
-                  <div className="chat-hint" style={{ marginTop: 12 }}>
-                    OpenAI scalează automat: gpt-5.6-luna (ușor) → o4-mini → o3 → gpt-5.6-sol (maxim).
-                  </div>
-                </>
+                (() => {
+                  const isOpenAI = creier.activ === 'openai'
+                  const ids = creier.modele.map((m) => m.id)
+                  const modelSelect =
+                    creier.modelCustom === '' ? 'auto' :
+                    ids.includes(creier.modelCustom) ? creier.modelCustom :
+                    'custom'
+                  return (
+                    <>
+                      <p className="chat-hint">Activ: <b>{creier.activ}</b>{creier.modelCustom ? ` / ${creier.modelCustom}` : ''}</p>
+                      <div style={{ marginTop: 12 }}>
+                        <select
+                          value={creier.activ}
+                          disabled={creierBusy}
+                          onChange={(e) => {
+                            const activ = e.target.value
+                            setCreierState({ ...creier, activ })
+                          }}
+                        >
+                          {creier.provideri.map((p) => (
+                            <option key={p.prefix} value={p.prefix} disabled={!p.disponibil}>
+                              {p.nume} {!p.disponibil ? '(neconfigurat)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {isOpenAI && (
+                        <div style={{ marginTop: 12 }}>
+                          <select
+                            value={modelSelect}
+                            disabled={creierBusy}
+                            onChange={(e) => {
+                              const id = e.target.value
+                              const modelCustom = id === 'auto' ? '' : id === 'custom' ? (creier.modelCustom || '') : id
+                              setCreierState({ ...creier, modelCustom })
+                            }}
+                          >
+                            {creier.modele.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.isAuto ? '▶ ' : ''}{m.nume}{m.tag ? ` — ${m.tag}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          {modelSelect === 'custom' && (
+                            <input
+                              type="text"
+                              placeholder="ex. gpt-5.6-luna"
+                              value={creier.modelCustom}
+                              disabled={creierBusy}
+                              onChange={(e) => setCreierState({ ...creier, modelCustom: e.target.value })}
+                              style={{ width: '100%', marginTop: 8 }}
+                            />
+                          )}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ marginTop: 12 }}
+                        disabled={creierBusy}
+                        onClick={async () => {
+                          setCreierBusy(true)
+                          setCreierMsg('')
+                          const r = await setCreier(creier.activ, creier.modelCustom)
+                          setCreierBusy(false)
+                          if (r) {
+                            setCreierState(r)
+                            setCreierMsg('Salvat.')
+                          } else {
+                            setCreierMsg('Eroare la salvare.')
+                          }
+                          window.setTimeout(() => setCreierMsg(''), 3000)
+                        }}
+                      >
+                        {creierBusy ? 'Se salvează…' : 'Salvează comutatorul'}
+                      </button>
+                      {creierMsg && <p className="chat-hint" style={{ marginTop: 8 }}>{creierMsg}</p>}
+                      <div className="chat-hint" style={{ marginTop: 12 }}>
+                        OpenAI: {creier.modele.filter((m) => !m.isAuto && !m.isCustom).map((m) => m.nume).join(' → ')}.
+                      </div>
+                    </>
+                  )
+                })()
               )}
             </div>
           </section>
