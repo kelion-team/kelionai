@@ -280,10 +280,10 @@ export const config = {
   // modelele default sunt prețuri reale OpenAI, suprascrise prin env.
   openai: {
     key: env(...ENV_ALIASES.openaiKey),
-    luna: env(...ENV_ALIASES.openaiLuna) || 'gpt-4o-mini', // hardcod-permis: model real OpenAI
-    medium: env(...ENV_ALIASES.openaiMedium) || 'gpt-4o', // hardcod-permis: model real OpenAI
-    heavy: env(...ENV_ALIASES.openaiHeavy) || 'o3', // hardcod-permis: model real OpenAI
-    max: env(...ENV_ALIASES.openaiMax) || 'o1', // hardcod-permis: model real OpenAI
+    luna: env(...ENV_ALIASES.openaiLuna) || 'gpt-5.6-luna', // hardcod-permis: default chat ușor
+    medium: env(...ENV_ALIASES.openaiMedium) || 'o4-mini', // hardcod-permis: default chat mediu
+    heavy: env(...ENV_ALIASES.openaiHeavy) || 'o3-mini', // hardcod-permis: default chat greu (o3-mini în loc de o3)
+    max: env(...ENV_ALIASES.openaiMax) || 'gpt-5.6-sol', // hardcod-permis: default chat maxim
   },
   // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
@@ -391,110 +391,12 @@ export const config = {
   },
   // ── READING TRANSACTIONS FROM THE REVOLUT ACCOUNT (Open Banking) ─────────
   // How the app finds out a user paid, when Revolut Pro has no webhook: it
-  // looks at the account transactions and searches for the code in the
-  // reference.
-  // Provider: ENABLE BANKING (enablebanking.com) — GoCardless/Nordigen closed
-  // new accounts at the end of 2025, so it's dead for us (verified 31 Jul
-  // 2026). The Enable Banking account is free in "Restricted Production" mode
-  // (reading your own accounts). READ-ONLY ACCESS — no money moves.
-  //
-  // Authentication is via RS256 JWT: `appId` = the application id from the
-  // Control Panel, `privateKeyB64` = the RSA private key as base64 (one line
-  // — env files can't hold multi-line PEM). `accountUid` may be missing: the
-  // account is linked through PSD2 consent and saved in kv_state (see
-  // openBanking.ts).
-  enableBanking: {
-    appId: (process.env.ENABLE_BANKING_APP_ID ?? '').trim(),
-    privateKeyB64: (process.env.ENABLE_BANKING_PRIVATE_KEY_B64 ?? '').trim(),
-    accountUid: (process.env.ENABLE_BANKING_ACCOUNT_UID ?? '').trim(),
-    aspspName: (process.env.ENABLE_BANKING_ASPSP_NAME ?? 'Revolut').trim(),
-    aspspCountry: (process.env.ENABLE_BANKING_ASPSP_COUNTRY ?? 'GB').trim(),
+  // revolut: { payLink: ..., ... }
+  // (A doua secțiune revolut — menținută pentru compatibilitate).
+  openBanking: {
+    enabled: (process.env.REVOLUT_OB_ENABLED ?? '') === '1',
+    clientId: process.env.REVOLUT_OB_CLIENT_ID ?? '',
+    privateKeyPem: process.env.REVOLUT_OB_PRIVATE_KEY ?? '',
+    signingCertPem: process.env.REVOLUT_OB_SIGNING_CERT ?? '',
   },
-  // ── THE APP'S MONEY (Revolut + unique code; Stripe is HISTORY — 31 Jul
-  // 2026) ───────────────────────────────────────────────────────────────────
-  // Only the wallet math lives here: display currency, what one credit is
-  // worth, and the top-up split (75% user credits / 25% admin fund that pays
-  // the AI keys). Collection and payment detection: Revolut (payLink) + the
-  // Enable Banking reader in openBanking.ts. No processor between the user
-  // and Adrian's money.
-  billing: {
-    currency: (process.env.BILLING_CURRENCY ?? 'gbp').toLowerCase(),
-    userShare: Number(process.env.USER_SHARE ?? 0.75),
-    creditValue: Number(process.env.CREDIT_VALUE ?? 0.1),
-    // ── THE TOP-UP RULES, AS OWNER SETTINGS (not buried constants) ──────────
-    // Adrian, 24 Jul: "first top-up = £20 minimum (brain activation), then any
-    // multiple of £5". Adrian, Aug 1 (auto top-up): the prepared pack obeys the
-    // same rule and is capped at £500. Until now these lived as bare numbers
-    // inside routes/billing.ts — money values written in code, invisible to
-    // the man whose money they move. They are OWNER DECISIONS, so they live
-    // here: documented, env-editable without a deploy.
-    firstTopupMin: Number(process.env.BILLING_FIRST_TOPUP_MIN ?? 20),
-    topupStep: Number(process.env.BILLING_TOPUP_STEP ?? 5),
-    topupMin: Number(process.env.BILLING_TOPUP_MIN ?? 5),
-    topupMax: Number(process.env.BILLING_TOPUP_MAX ?? 500),
-    // The auto top-up DEFAULTS a brand-new user starts from (threshold in
-    // CREDITS, amount in display currency). Same rule: owner settings, not
-    // magic numbers inside db.ts.
-    autoRechargeThreshold: Number(process.env.AUTORECHARGE_DEFAULT_THRESHOLD ?? 20),
-    autoRechargeAmount: Number(process.env.AUTORECHARGE_DEFAULT_AMOUNT ?? 10),
-    // The USD→£ hand rate was deleted: the only place that used it converted
-    // REAL provider costs (USD) into £ with a hand-written rate — a converted
-    // figure presented as a measured one (the exact fabrication punga.ts
-    // killed). The owner's cost view is USD end to end now (spentUsd).
-  },
-  mail: {
-    imapHost: process.env.MAIL_IMAP_HOST ?? 'mail.privateemail.com',
-    imapPort: Number(process.env.MAIL_IMAP_PORT ?? 993),
-    smtpHost: process.env.MAIL_SMTP_HOST ?? 'mail.privateemail.com',
-    smtpPort: Number(process.env.MAIL_SMTP_PORT ?? 465),
-    user: (process.env.MAIL_USER ?? 'contact@kelionai.app').trim(),
-    pass: env(...ENV_ALIASES.mailPass),
-    forwardTo: (process.env.MAIL_FORWARD_TO ?? process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com')
-      .trim()
-      .toLowerCase(),
-  },
-  openSignup: (process.env.OPEN_SIGNUP ?? '1') !== '0',
-  allowlist: (process.env.ALLOWLIST ?? 'adrianenc11@gmail.com')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean),
-  // .trim() OBLIGATORIU (9 aug): era SINGURUL câmp de email fără trim — un
-  // spațiu la coada lui ADMIN_EMAIL (env-ul e scris de mașini) făcea tăcut din
-  // owner un „customer". Vecinii (allowlist, mail.*) trimau deja toți.
-  // + ghilimelele se dezbracă (9 aug, „flux admin 403 — trebuie 200"):
-  // `docker --env-file` NU scoate ghilimelele — ADMIN_EMAIL="adrian…" rămânea
-  // cu ele în valoare și rolul ieșea „customer" cu sesiune perfect validă.
-  adminEmail: ((): string => {
-    const curatat = (process.env.ADMIN_EMAIL ?? '')
-      .trim()
-      .replace(/^["']+|["']+$/g, '')
-      .trim()
-      .toLowerCase()
-    // GOL după curățare = implicitul domnește (audit 9 aug, măsurat cu tsx pe
-    // modulul real): `ADMIN_EMAIL=` sau `ADMIN_EMAIL=""` treceau de `??` și
-    // lăsau adminEmail='' → ownerul „customer" cu sesiune perfect validă.
-    // O valoare goală nu e o alegere de configurare — e o linie stricată.
-    return curatat || 'adrianenc11@gmail.com'
-  })(),
-  bridgeSecret: env(...ENV_ALIASES.bridgeSecret),
-  githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
-  githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),
-  frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',
-  frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
-  geo: {
-    nominatimBaseUrl: (process.env.NOMINATIM_BASE_URL ?? 'https://nominatim.openstreetmap.org').replace(/\/+$/, ''),
-    osrmRoutingUrl: (process.env.OSRM_ROUTING_URL ?? 'https://router.project-osrm.org/route/v1/driving').replace(/\/+$/, ''),
-  },
-  // OLLAMA (22 aug): config servit frontend-ului prin /api/ollama/config.
-  // LEGEA ANTI-HARDCODARE: modelul + gazda vin din env, nu hardcodate în FE.
-  constructorOllamaModel: (process.env.CONSTRUCTOR_OLLAMA_MODEL ?? 'qwen3-coder:30b').trim(), // hardcod-permis: modelul free implicit pe VPS, suprascris de env
-  ollamaApiBase: (process.env.OLLAMA_API_BASE ?? 'http://127.0.0.1:11434').trim(), // hardcod-permis: gazda Ollama LOCALĂ implicită pe VPS, suprascrisă de env
-} as const
-
-export function isAllowed(email: string): boolean {
-  return config.openSignup || config.allowlist.includes(email.toLowerCase())
-}
-
-export function roleFor(email: string): 'admin' | 'customer' {
-  return email.trim().toLowerCase() === config.adminEmail ? 'admin' : 'customer'
 }
