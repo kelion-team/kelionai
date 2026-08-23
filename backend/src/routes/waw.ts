@@ -94,4 +94,35 @@ export async function wawRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/api/personalitate/prompt', async (_req, reply) => {
     return reply.send({ prompt: promptPersonalitate() })
   })
+
+  // #6 CLONARE VOCE — stocare + verificare sample
+  fastify.get('/api/voce/sample', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    try {
+      const { loadKv } = await import('../db.js')
+      const raw = await loadKv(`voce_sample_${user.email}`)
+      return reply.send({ are: !!raw })
+    } catch {
+      return reply.send({ are: false })
+    }
+  })
+
+  fastify.post('/api/voce/sample', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const corp = (req.body ?? {}) as { audioBase64?: string; textCitit?: string }
+    if (!corp.audioBase64) return reply.code(400).send({ error: 'lipsa audio' })
+    try {
+      const { saveKv } = await import('../db.js')
+      await saveKv(`voce_sample_${user.email}`, JSON.stringify({
+        audio: corp.audioBase64.slice(0, 500000), // max 500KB — sample de 30s
+        text: corp.textCitit ?? '',
+        ts: Date.now(),
+      }))
+      return reply.send({ ok: true })
+    } catch {
+      return reply.code(500).send({ error: 'eroare_stocare' })
+    }
+  })
 }
