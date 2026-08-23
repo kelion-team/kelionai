@@ -45,11 +45,13 @@ const citit = new Map(toate.map((f) => [f, readFileSync(f, 'utf8')]))
 const INTRARI = new Set(['backend/src/index.ts', 'frontend/src/main.tsx'])
 
 const DECL = /^export (?:async )?function (\w+)|^export (?:const|class|interface|type|enum) (\w+)/gm
+const PERMIS = /^\/\/ export-permis:/
 const abandonate = []
 
 for (const f of prod) {
   if (INTRARI.has(f.replaceAll('\\', '/'))) continue
   const src = citit.get(f)
+  const linii = src.split('\n')
   for (const m of src.matchAll(DECL)) {
     const nume = m[1] ?? m[2]
     const tipar = new RegExp(`\\b${nume.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
@@ -57,6 +59,19 @@ for (const f of prod) {
     const localAparitii = (src.match(new RegExp(tipar.source, 'g')) ?? []).length
     if (inAltele || localAparitii > 1) continue
     if (teste.some((g) => tipar.test(citit.get(g)))) continue // ținut sub test = legitim
+    // Găsește linia definiției și verifică dacă e precedată de marcajul de permisiune
+    // (cautăm înapoi peste JSDoc, comentarii și linii goale)
+    const linieDecl = linii.findIndex((l) => tipar.test(l) && /^export/.test(l.trim()))
+    if (linieDecl > 0) {
+      let k = linieDecl - 1
+      while (k >= 0) {
+        const t = linii[k].trim()
+        if (t === '' || t.startsWith('*') || t.startsWith('/**') || t.startsWith('*/')) { k--; continue }
+        if (PERMIS.test(t)) break // găsit marcajul de permisiune
+        k = -1 // alt comentariu sau cod → nu e permisiune
+      }
+      if (k >= 0) continue // export-permis: marcat manual
+    }
     abandonate.push(`${f}: ${nume}`)
   }
 }

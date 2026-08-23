@@ -40,7 +40,7 @@ export function observatiiRecente(): Array<{ ts: number; miscare: number; lat?: 
 }
 
 /** Ultima observație CU imagine (pentru tool-ul `look` al creierului). */
-export function ultimaObservatieCuImagine(): ObservatieStocata | null {
+function ultimaObservatieCuImagine(): ObservatieStocata | null {
   const acum = Date.now()
   const valide = observatii.filter((o) => acum - o.ts < EXPIRA_MS)
   return valide.length > 0 ? valide[valide.length - 1] : null

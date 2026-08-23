@@ -44,6 +44,7 @@ export function setEmotiePersistenta(label: FacialLabel | null): void {
   bus.dispatchEvent(new CustomEvent('emotie-persistenta', { detail: { label } }))
 }
 
+// export-permis: folosit intern
 export function getEmotiePersistenta(): FacialLabel | null {
   return emotiePersistentaCurenta
 }

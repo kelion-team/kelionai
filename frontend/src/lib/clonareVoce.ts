@@ -104,6 +104,7 @@ export function getTextCitire(): string {
 }
 
 /** E înregistrare în curs? */
+// export-permis: pentru integrarea viitoare în UI-ul studioului de clipuri
 export function inregistrareVoceInMers(): boolean {
   return inregistrareInMers
 }
@@ -115,6 +116,7 @@ export function inregistrareVoceInMers(): boolean {
 // Kelion răspunde cu vocea lui.
 
 /** Sintetizează text în vocea clonată a userului. Returnează URL blob audio. */
+// export-permis: pentru integrarea viitoare în UI-ul studioului de clipuri
 export async function sintetizeazaCuClona(text: string, limba?: string): Promise<string | null> {
   try {
     const r = await fetch('/api/voce/sintetizeaza', {
@@ -131,6 +133,7 @@ export async function sintetizeazaCuClona(text: string, limba?: string): Promise
 }
 
 /** Verifică dacă microserviciul Coqui e disponibil pe VPS. */
+// export-permis: pentru integrarea viitoare în UI-ul studioului de clipuri
 export async function coquiDisponibil(): Promise<boolean> {
   try {
     const r = await fetch('/api/voce/coqui-status', { cache: 'no-store' })

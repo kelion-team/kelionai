@@ -279,6 +279,7 @@ export async function verificaOllamaLocal(): Promise<StareOllamaLocal> {
   return stare
 }
 
+// export-permis: folosit intern
 /** Starea curentă (pentru afișare). */
 export function stareOllamaLocal(): StareOllamaLocal {
   return stare

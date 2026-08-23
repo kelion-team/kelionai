@@ -193,7 +193,10 @@ await app.register(rateLimit, {
       u === '/health' ||
       u === '/api/health' || // connectivity-recovery poll (ChatPanel) — never throttled
       u === '/api/version' || // polled every 45s by every client for the update routine
-      u === '/api/visit/ping'
+      u === '/api/visit/ping' ||
+      u === '/api/realtime/tick' || // per-minute voice billing pulse — legit, never throttle
+      u === '/api/tts/status' || // polled by frontend to decide which mouth to open
+      u === '/api/voce/coqui-status' // polled by frontend for Coqui availability
     )
   },
   keyGenerator: (req) => {

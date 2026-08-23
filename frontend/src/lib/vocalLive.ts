@@ -180,25 +180,7 @@ let sesiuneActiva: { inchide: () => void } | null = null
 // cuvânt vine cu ~300ms mai repede (handshake-ul e deja făcut).
 let wsCalda: WebSocket | null = null
 let warmStartTimer: ReturnType<typeof setTimeout> | null = null
-
-/** Pornește warm-start: pre-conectează WebSocket-ul în fundal. */
-export function pornesteWarmStart(): void {
-  if (wsCalda?.readyState === WebSocket.OPEN || wsCalda?.readyState === WebSocket.CONNECTING) return
-  try {
-    wsCalda = new WebSocket(urlWs())
-    wsCalda.onclose = () => { wsCalda = null }
-    wsCalda.onerror = () => { wsCalda = null }
-  } catch { wsCalda = null }
-}
-
-/** Oprește warm-start și închide conexiunea caldă. */
-export function opresteWarmStart(): void {
-  if (warmStartTimer) { clearTimeout(warmStartTimer); warmStartTimer = null }
-  if (wsCalda) {
-    try { wsCalda.close() } catch { /* tăcut */ }
-    wsCalda = null
-  }
-}
+void warmStartTimer // rezervat pentru warm-start viitor
 
 /** Dacă există o conexiune caldă, o folosește; altfel deschide una nouă. */
 function wsCaldSauNou(): WebSocket {
