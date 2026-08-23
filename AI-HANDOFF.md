@@ -11,10 +11,13 @@
 > chat/voce îl respectă 100%. Progresul + bifele: în `RAMAS-DE-FACUT.md`
 > (actualizare după FIECARE pas făcut ȘI verificat live).
 >
-> ⚠ **ORDINEA DE CITIRE (21 aug): starea curentă e în §16–§18.** Secțiunile
-> §2–§15 sunt parțial DEPĂȘITE (auditul docs-vs-cod din §18 a măsurat zeci de
-> divergențe) — orice afirmație de acolo despre fișiere/arhitectură/comportament
-> se verifică în COD înainte de a fi crezută.
+> ⚠ **ORDINEA DE CITIRE (actualizat 23 aug): starea curentă e în §16–§19.**
+> Secțiunile §2–§15 sunt parțial DEPĂȘITE (auditul docs-vs-cod din §18 a măsurat
+> zeci de divergențe) — orice afirmație de acolo despre fișiere/arhitectură/
+> comportament se verifică în COD înainte de a fi crezută. **§19 (23 aug) e
+> auditul de configurație măsurat din cod** — harta vie a env-ului, creierului,
+> vocii, banilor, constructorului și publicării; §8 (env/secrete) e ștătut și
+> corectat de §19.
 
 ## Cerința #42 — Screenshot proaspăt monitor: bara de admin și opțiuni schimbare limbă
 - CONCLUZIE DEFINITIVĂ (a 3-a încercare, același verdict ca la #32/#33/#36/#39/#41): capturarea unui screenshot al monitorului live este o acțiune a asistentului Kelion din aplicație (unelte de ecran/browser), NU o modificare de cod din atelierul constructorului. Atelierul nu are ecran, sesiune de admin sau DevTools — orice „screenshot" produs de aici ar fi o simulare interzisă de regula anti-fake.
@@ -349,6 +352,15 @@ Am identificat și remediat cauza blocării vocii live după câteva schimburi d
 - **Notă:** `workflow_dispatch` merge doar de pe branch-ul default (master); de pe ramuri se declanșează prin `push:` cu filtru de `paths`. Workflow-urile `bridge-ops`/`read-caiet`/`vps-tier-test`/`vps-repo-sync` din descrierile vechi NU mai există (șterse odată cu puntea).
 
 ## 8. MEDIU/SECRETE (nume, niciodată valori aici)
+> ⚠ **STĂTUT (audit 23 aug 2026, §19).** Lista de mai jos e din 25 iul și NU mai
+> descrie env-ul citit azi de `config.ts`: cheile `ANTHROPIC_API_KEY`, `STRIPE_*`,
+> `GOOGLE_API_KEY`, `GOOGLE_MAPS_KEY`, `GEMINI_MODEL`, `KELION_FAST/TOP_MODEL`,
+> `BRIDGE_SECRET`, `USD_TO_CURRENCY`, LiveKit și Kimi/GLM au fost EXTIRPATE din cod
+> (nu le mai citește nimeni). Lipsesc, în schimb, cheile noi: `OPENAI_API_KEY`,
+> `DEVIN_API_KEY`/`DEVIN_ORG_ID`, `ENABLE_BANKING_*`, `REVOLUT_PAY_LINK`,
+> `COQUI_URL`, `VIDEO_MODEL`/`VIDEO_ALLOW_PAID`, `CONSTRUCTOR_GEMINI_MODEL`,
+> `MODEL_CREIER_PROFUND`/`ULTRA`, `OLLAMA_API_BASE`, `NOMINATIM_BASE_URL`,
+> `OSRM_ROUTING_URL`, `DB_POOL_MAX` ș.a. **Lista vie, măsurată din `config.ts`, e în §19.**
 **Env-ul backendului pe gazdă (VPS)** — toate citite în `config.ts`:
 `NODE_ENV`, `PORT`, `ADMIN_EMAIL`, `ALLOWLIST`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_API_KEY`, `GOOGLE_MAPS_KEY`, `GOOGLE_SERVICE_ACCOUNT_JSON` (TTS Chirp), `GOOGLE_TTS_API_KEY`, `GOOGLE_TTS_VOICE`, `KELION_GOOGLE_CHIRP_TTS_STYLE`, `SESSION_SECRET`, `DATABASE_URL`, `SERPER_API_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `BRIDGE_SECRET` (28 car. — aceeași valoare TREBUIE să fie în `/root/kelion/bridge-secret.txt` pe VPS), `MAIL_IMAP_HOST/PORT`, `MAIL_SMTP_HOST/PORT`, `MAIL_USER`, `MAIL_PASS`, `MAIL_FORWARD_TO`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY` (30 iul — cheia PUBLICĂ `pk_live_…`; NU e secret, Stripe o proiectează pentru pagină; cu ea adminul vede NUMĂRUL cardului virtual direct în panou, prin Issuing Elements), `STRIPE_CURRENCY`, `CREDIT_VALUE`, `USD_TO_CURRENCY`, `USER_SHARE`, `DEMO_CAP_PER_DAY`, `DEMO_SECONDS`, `OPEN_SIGNUP`, `AUTONOMY_DAILY_MAX`, `FRONTEND_DIST`, `FRONTEND_ORIGIN`, `KELION_FAST_MODEL` (opțional, §4.3), `KELION_TOP_MODEL` (opțional, §4.3), `GITHUB_TOKEN` (25 iul — fin-granulat, DOAR repo kelionai, Actions:write; mâinile lui Kelion pe runbook-uri; se pune prin `vps-set-env` din secretul GitHub `KELION_GITHUB_TOKEN`).
 **Cardul ownerului (31 iul, `services/cardFurnizor.ts`)** — `CARD_NUMAR`, `CARD_EXPIRARE`, `CARD_CVC`, `CARD_NUME`, `CARD_COD_POSTAL` (ultimul opțional). Se pun **DOAR de mâna ownerului**, ca secrete GitHub + `vps-set-env`; `secret_pune` refuză din construcție orice arată a card (13-19 cifre + Luhn) și rămâne așa. Valorile nu se citesc de nicăieri (nici `env-check` nu le arată — nume + lungime, ca la toate), nu se trimit modelului și nu ies din proces decât scrise direct în pagina furnizorului, sub fereastra de voce de 15 minute.
@@ -1298,3 +1310,86 @@ Frontend neatins. (`services/tokenChecks.test.ts` cere un mediu fără
 - Scalare automată pe dificultate (luna → medium → heavy → max) sau model manual/custom setat în KV `creier_model`.
 - Costul se înregistrează pe `openai` în `cost_events`, apare în raportul `/api/admin/credit-ai`.
 - Vocea rămâne pe Gemini Live. Constructorul rămâne Devin — independent de comutatorul de chat.
+
+---
+
+## §19 — AUDIT DE CONFIGURAȚIE (23 aug 2026, din cod la `c352e6a` = origin/master)
+
+**Ce e:** o citire a configurației EFECTIVE din fișierele repo-ului, nu din live.
+Aplicația NU a fost atinsă (audit read-only). Ce nu se poate proba din cod e marcat
+„nu pot verifica live" (regula #1). Desen vizual însoțitor (artefact): harta cu
+calea cererii + subsistemele, fiecare fapt legat de fișierul-sursă.
+**Porți rulate în această sesiune (dovadă reală):** `verifica-hardcodari.mjs` CURAT,
+`verifica-gemini.mjs` (lacătul modelului) INTACT, `verifica-sintaxa.mjs` CURAT.
+`tsc`/`vitest` NU au fost rulate aici. **Măsurat:** 40 module de rute, 155 de servicii.
+
+### §19.1 Calea cererii (index.ts, Caddyfile, config.ts)
+`Utilizator (web/PWA/exe/apk) → Cloudflare (TLS, cf-connecting-ip) → VPS 164.68.120.87
+→ Caddy (reverse_proxy 127.0.0.1:8080, zstd/gzip) → Fastify 5 pe Node 22, port 8080,
+--network host → Postgres pe gazdă 127.0.0.1:5432 (pg pool, dbPool.ts)`. Un SINGUR
+proces servește API-ul ȘI frontend-ul construit (`FRONTEND_DIST`, fastify-static).
+La intrare: CORS(`FRONTEND_ORIGIN`, credentials), rate-limit 120/min pe cf-connecting-ip
+(cu allowlist pentru pollerele legitime), HSTS + nosniff + X-Frame SAMEORIGIN +
+Permissions-Policy, lacăt admin (`/api/admin/*` fără unlock → 423), body 25 MB
+(chat 100 MB), FĂRĂ CSP (intenționat), `/dl/*`+HTML+`sw.js` → `Cache-Control: no-store`.
+`/api/version` întoarce `v = GIT_COMMIT_SHA` (dovada anti-fantomă) + versiune auto (+0,1/publicare).
+
+### §19.2 Creierul — 4 trepte Gemini (config.ts, sigilat, FĂRĂ env de model)
+- rapid (chat, ~0,6s) = `gemini-3.5-flash-lite` (`MODEL_RAPID_DEFAULT`)
+- unic / greu (work) = `gemini-3.5-flash` (`MODEL_UNIC_DEFAULT`) — SIGILAT, se schimbă
+  doar prin auto-upgrade validat (`modelAutoUpgrade`, scor perfect pe bateria completă)
+- profund (raționament) = `gemini-3.1-pro-preview` (`MODEL_PROFUND_DEFAULT`; env `MODEL_CREIER_PROFUND`)
+- ultra (max) = env `MODEL_CREIER_ULTRA` (cade pe profund)
+- creier intern al constructorului = `gemini-3.7-flash` (env `CONSTRUCTOR_GEMINI_MODEL`)
+- video = `veo-3.1-fast-generate-preview` (plată doar cu `VIDEO_ALLOW_PAID=1`)
+- `CREIER_DUBLU` pornit din start (≠0). Anthropic/Fable — EXTIRPAT (nu mai există consumator).
+
+### §19.3 OpenAI — provider comutabil (config.ts, openaiChat.ts, KV `creier_activ`/`creier_model`)
+Reintrodus 23 aug ca alternativă la Gemini pentru chat/text, comutabil din AdminPanel
+(tab „Creier"). **Default-uri în COD (`config.ts`):** `gpt-4o-mini` / `gpt-4o` / `o3` / `o1`,
+suprascriabile din env (`OPENAI_LUNA/MEDIUM/HEAVY/MAX_MODEL`).
+⚠ DIVERGENȚĂ: §13b descrie `gpt-5.6-luna / o4-mini / o3 / gpt-5.6-sol` — diferă de
+default-urile din cod. Ambele pot fi suprascrise din env; **nu pot verifica live** ce
+env-uri OpenAI sunt puse pe VPS. Vocea rămâne pe Gemini Live indiferent de comutator.
+
+### §19.4 Voce (config.ts, tts.ts, Dockerfile.coqui, deploy.sh)
+Chirp 3 HD, stil `Charon` (masculin; gardă care rescrie orice voce feminină → Charon).
+Voce live = Gemini Live (WS, PCM). Clonare voce = microserviciu Coqui XTTS v2 pe port
+`5100` INTERN (`COQUI_URL`, container separat, non-fatal → 503 dacă nu rulează).
+Opus pe banda 3G = opțional (`VOICE_OPUS=1`, cădere sigură pe PCM).
+
+### §19.5 Bani (config.ts billing/revolut/enableBanking, openBanking.ts)
+Monedă `gbp`, `CREDIT_VALUE=0.1`, `USER_SHARE=0.75` (75% user / 25% fond admin).
+Prima alimentare £20 min, pas £5, min £5, max £500; auto-reîncărcare prag 20 credite → £10.
+Colectare = Revolut pay link (env) + etichetă Gmail `Revolut_kelionai_plati`; detecția
+plății = Enable Banking (PSD2, DOAR citire, RS256 JWT) + citire email. **Stripe = EXTIRPAT total.**
+
+### §19.6 Căutare, hărți, constructor, local (config.ts, ollamaConfig.ts)
+Căutare web = Serper (singurul motor). Hărți/geocode = Nominatim OSM + OSRM, FĂRĂ cheie
+(`GOOGLE_MAPS_KEY` șters — n-avea consumator). Constructor = **Devin** (extern, `DEVIN_API_KEY`,
+`DEVIN_ORG_ID` opțional; puls dispecer la 2 min). Constructorul local + puntea = EXTIRPATE
+(22 aug; `deploy.sh` pasul 6d le demontează definitiv). Ollama servit FE prin `/api/ollama/config`:
+model `qwen3-coder:30b`, gazdă `127.0.0.1:11434` (ambele din env).
+
+### §19.7 Auth, admin, mail (config.ts)
+Login Google OAuth (`GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI` obligatorii). `SESSION_SECRET`
+obligatoriu — fail-fast în producție. Admin = `adrianenc11@gmail.com` (implicit în cod;
+`deploy.sh` ȘTERGE orice `ADMIN_EMAIL` din env ca implicitul să domnească). Mail IMAP/SMTP
+`mail.privateemail.com`, user `contact@kelionai.app`, forward `adrianenc11@gmail.com`.
+DB pool acordabil din env (`DB_POOL_MAX`, `DB_IDLE_TIMEOUT_MS`, `DB_CONNECT_TIMEOUT_MS`,
+`DB_MAX_LIFETIME_SEC`).
+
+### §19.8 Publicarea (deploy.yml, deploy.sh, auto-publicare.sh)
+Ramura reală: cronul de pe VPS `auto-publicare.sh` (la 1 min) compară live vs `origin/master`
+și, dacă e în urmă, rulează `deploy.sh` → `docker build` → container nou cu `GIT_COMMIT_SHA`
+→ verificare ANTI-FANTOMĂ (`/api/version` v == sha `origin/master` + health 200). GitHub
+Actions `deploy.yml` e pe întrerupător (`vars.ACTIONS_PORNIT != 'true'`) cât timp factura
+organizației e blocată. Cronuri instalate de `deploy.sh`: auto-publicare (1m), ops-worker (1m),
+sentinela-locala (3m), backup-versiuni/vindecator/veghe/porti-pr (10m), vps-curatenie (04:30),
+backup DB criptat (duminică 03:00 UK). Containere pe VPS: `kelionai-app` (:8080), `kelion-caddy`,
+`kelionai-coqui` (:5100 intern); Postgres pe host.
+
+### §19.9 Ce NU se poate proba din cod (nu pot verifica live)
+Ce container rulează acum, ce env e efectiv pe VPS, dacă OpenAI/Coqui/Devin/Enable Banking au
+chei puse, versiunea live reală. Se probează cu `curl https://kelionai.app/api/version` +
+workflow `vps-diag` (citește cod-rulat-vs-master din container) — nu din această sesiune.
