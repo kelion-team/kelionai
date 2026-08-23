@@ -1288,3 +1288,13 @@ sunt `EventEmitter`-e, ca în pg-ul real).
 **Porți (local):** backend tsc 0 · 1881/1881 teste · hardcodări/sintaxă curate.
 Frontend neatins. (`services/tokenChecks.test.ts` cere un mediu fără
 `GCP_SERVICE_ACCOUNT_JSON` — nelegat de fixul asta.)
+
+---
+
+## §13b — Creier comutabil OpenAI/Gemini (23 aug 2026)
+
+- Comutator de creier în AdminPanel (tab „Creier"). Provideri: `google-direct` (default) și `openai`.
+- OpenAI: `openaiChat.ts` cu chat + tools + streaming. Modele default: `gpt-5.6-luna` / `o4-mini` / `o3` / `gpt-5.6-sol`. Suprascrise via env.
+- Scalare automată pe dificultate (luna → medium → heavy → max) sau model manual/custom setat în KV `creier_model`.
+- Costul se înregistrează pe `openai` în `cost_events`, apare în raportul `/api/admin/credit-ai`.
+- Vocea rămâne pe Gemini Live. Constructorul rămâne Devin — independent de comutatorul de chat.

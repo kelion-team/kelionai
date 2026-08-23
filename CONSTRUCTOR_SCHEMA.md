@@ -54,7 +54,7 @@
 ### Rute principale
 | Fișier | Rute | Rol |
 |---|---|---|
-| `routes/chat.ts` | `/api/chat` | Creierul: chat, tool loop, rutare admin/public/client, limbă, voce |
+| `routes/chat.ts` | `/api/chat` | Creierul: chat, tool loop, comutator Gemini/OpenAI, limbă, voce |
 | `routes/constructor.ts` | `/api/constructor/*` | Coadă ordine, next, ajutor, raport, tool-defs pentru constructor |
 | `routes/bridge.ts` | `/api/bridge/*`, `/api/admin/*` | Job queue, release alerts, client errors |
 | `routes/voiceprint.ts` | `/api/voiceprint/*` | Amprentă vocală, identificare |
@@ -71,7 +71,8 @@
 | `services/brainToolDefs.ts` | TOATE uneltele lui Kelion (`build_software`, `ruleaza_portile`, `system_health`, etc.) |
 | `services/brainContract.ts` | Contract de mesaje/tool-uri pentru orice creier |
 | `services/modelRouter.ts` | Alegere model după capabilitate/cost |
-| `services/geminiDirect.ts` | Client Gemini (creierul unic după 22 iul) |
+| `services/geminiDirect.ts` | Client Gemini (default — vedere, audio, unelte)
+|| `services/openaiChat.ts` | Client OpenAI (alternativ chat/text, comutabil 23 aug 2026) |
 | `services/google.ts` | Skill-uri Google + web search (Serper) |
 | `services/agents.ts` | Memorie: `recallMemories`, `learnFromTurn` |
 | `services/agentiKelion.ts` | Rosterul celor 33 de agenți A2A |
@@ -131,7 +132,8 @@ Aplicația este o **PWA**. Comportamentul la conexiune e măsurat, nu inventat:
 - `DATABASE_URL`
 - `SESSION_SECRET`
 - `ADMIN_EMAIL`
-- `GEMINI_API_KEY` (creier aplicație)
+- `GEMINI_API_KEY` (creier aplicație — default)
+- `OPENAI_API_KEY`, `OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`, `OPENAI_HEAVY_MODEL`, `OPENAI_MAX_MODEL` (creier alternativ, 23 aug 2026)
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
 - `GOOGLE_TTS_API_KEY`, `GOOGLE_API_KEY`
 - `SERPER_API_KEY`
