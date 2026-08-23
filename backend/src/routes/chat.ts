@@ -2899,6 +2899,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // ca și catch-ul să o poată consulta: pana de creier pe o tură neadresată
     // se stinge cu {ignored}, nu cu bulă rostită (audit 9 aug).
     let gateDecided = !voceAmbianta
+    // POARTA DE NUME PE TEXT (owner, 23 aug 2026: „numele lui e cheia care
+    // deschide chatul sau orice cerinta" — repetat de 10000 de ori).
+    // Pe VOCE există deja turaAdresata; pe TEXT poarta era bypassed.
+    // Acum: fără „Kelion" la început → {ignored}, ca pe voce.
+    // Excepții: ușa creierului (eUsaCreierului — tur formulat de modelul live,
+    // nu de om) și continuarea ușii (continuareUsa). Visitor chat e rută
+    // separată (/api/visitor-chat/send) — nu trece pe aici, deci e exempt.
+    if (!voceAmbianta && !eUsaCreierului && !req.body?.continuareUsa && lastUserText && !numeStrigat(lastUserText)) {
+      reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true, reason: 'name_required' })}${CTRL}`)
+      await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
+        taskId: sarcinaOperationalaId,
+        stare: 'expired',
+        code: 'text_gate_no_name',
+        metadata: { ambientVoice: false, nameWasHeard: false },
+      }))
+      reply.raw.end()
+      console.log(`[TEXT] tura ${turnId.slice(0, 8)}: tăcere — fără nume la început. TEXT: „${lastUserText.slice(0, 60)}"`)
+      return
+    }
     // THE BRAIN CLOCK (admin): the first real word measures speed; the bar moves
     // to "Composing the reply". Once per turn, only for the admin (his telemetry).
     let firstWordMarked = false

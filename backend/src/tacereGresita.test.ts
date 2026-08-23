@@ -189,3 +189,38 @@ describe('primul sunet nu mai așteaptă o transcriere întreagă', () => {
     expect(/if \(coadaEcou\) \{/.test(chat), 'coada reținută s-ar pierde tăcut la sfârșit de tură').toBe(true)
   })
 })
+
+// ── POARTA DE NUME PE TEXT (owner, 23 aug 2026: „numele lui e cheia care
+//    deschide chatul sau orice cerinta" — repetat de 10000 de ori) ──────────
+// Pe VOCE există deja turaAdresata. Pe TEXT poarta era bypassed. Acum
+// și textul cere numele la început, cu excepțiile: ușa creierului
+// (tur formulat de modelul live) și continuarea ușii.
+describe('poarta de nume pe TEXT (owner, 23 aug 2026)', () => {
+  const chat = src('routes/chat.ts')
+
+  it('text fără „Kelion" la început → {ignored}, ca pe voce', () => {
+    // Garda trebuie să existe pe calea text (nu doar voce)
+    expect(/!voceAmbianta && !eUsaCreierului && !req\.body\?\.continuareUsa.*numeStrigat\(lastUserText\)/.test(chat),
+      'textul fără nume nu e verificat — poarta de text lipsește').toBe(true)
+    // Răspunsul trebuie să fie {ignored} — același pattern ca pe voce
+    expect(/reason: 'name_required'/.test(chat), 'fără reason, clientul nu știe de ce tace').toBe(true)
+  })
+
+  it('excepțiile sunt respectate: ușa creierului + continuarea', () => {
+    // eUsaCreierului și continuareUsa trebuie să apară în condiția de excepție
+    expect(/!eUsaCreierului/.test(chat), 'ușa creierului ar fi blocată de poarta de nume').toBe(true)
+    expect(/!req\.body\?\.continuareUsa/.test(chat), 'continuarea ușii ar fi blocată de poarta de nume').toBe(true)
+  })
+
+  it('text cu „Kelion" la început → trece poarta (funcție pură)', () => {
+    expect(numeStrigat('Kelion, cât e ceasul?')).toBe(true)
+    expect(numeStrigat('kelion ajută-mă')).toBe(true)
+    expect(numeStrigat('hei Kelion, ce faci?')).toBe(true)
+  })
+
+  it('text fără nume → nu trece poarta (funcție pură)', () => {
+    expect(numeStrigat('ce vreme e afară?')).toBe(false)
+    expect(numeStrigat('salut, ce mai zici?')).toBe(false)
+    expect(numeStrigat('')).toBe(false)
+  })
+})
