@@ -6,6 +6,10 @@ vi.stubEnv('GOOGLE_CLIENT_SECRET', 'test-secret')
 vi.stubEnv('GOOGLE_REDIRECT_URI', 'test-uri')
 vi.stubEnv('SESSION_SECRET', 'test-session-secret')
 
+// Mock loadKv — brain.ts îl folosește pentru comutatorul de creier. În teste
+// nu avem DB, deci returnăm null (creier_activ = google-direct default).
+vi.mock('./db.js', () => ({ loadKv: () => Promise.resolve(null) }))
+
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
 
 describe('Expertul fiabil — clasificarea erorilor', () => {
@@ -24,11 +28,11 @@ describe('Expertul fiabil — clasificarea erorilor', () => {
 })
 
 describe('Expertul fiabil — scara de modele', () => {
-  it('e deduplicată, ordinea păstrată — un singur model e valid (3.6-flash face tot)', () => {
+  it('e deduplicată, ordinea păstrată — un singur model e valid (3.6-flash face tot)', async () => {
     // 4 aug: work și top sunt același model (gemini-3.6-flash) — ownerul: „dacă e
     // bun, ieftin și face tot, de ce 2 trepte?". Scara deduplicată are atunci o
     // singură treaptă, ceea ce e corect; păstrăm doar garanția „fără duplicate".
-    const ladder = expertModelLadder()
+    const ladder = await expertModelLadder()
     expect(ladder.length).toBeGreaterThanOrEqual(1)
     expect(new Set(ladder).size).toBe(ladder.length) // fără duplicate
   })

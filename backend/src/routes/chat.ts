@@ -3889,7 +3889,12 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       // inteligența reală. Urcăm O SINGURĂ dată, doar pe calea deja pierdută
       // (!r && !textFlowed) — o tură care mergea nu poate fi stricată de plasă. */
       if (!r && !textFlowed && !faptaInIncercareEsuata && !plasaRulata && config.modelCreierProfund && orchestratorModel === orChatModel) {
-        const profund = `google-direct/${config.modelCreierProfund}`
+        // COMUTATOR REAL: pe OpenAI nu forțăm google-direct/ profund — OpenAI
+        // n-are creierDublu Gemini. Plasă doar între treptele OpenAI (heavy→medium).
+        const eOpenAI = orChatModel.startsWith('openai/')
+        const profund = eOpenAI
+          ? `openai/${config.openai.heavy}`
+          : `google-direct/${config.modelCreierProfund}`
         if (modelEfectiv() === profund) {
           // REGISTRUL BACKEND #1 + #3: tura a rulat DEJA pe profund și a murit
           // acolo — fie a pornit GREA (orChatModel e chiar profundul: pe turele

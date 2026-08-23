@@ -14,12 +14,15 @@
 
 import { config } from '../config.js'
 import {
+  brainChat,
   brainComplete,
   brainCompleteWithTools,
+  creierActivKv,
   expertModelLadder,
   runBrainLadder,
 } from './brain.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectChatStream } from './geminiDirect.js'
+import { openaiChatStream } from './openaiChat.js'
 import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage } from './brainContract.js'
 
 export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'ultra' | 'plan'
@@ -39,12 +42,21 @@ export interface OptiuniRationament {
   timeoutMs?: number
 }
 
-function modelPentru(treapta: TreaptaRationament): string {
+// COMUTATOR REAL: modelPentru respectă creier_activ. Pe OpenAI returnează
+// treptele OpenAI (luna/medium/heavy/max), pe Gemini pe cele Gemini.
+function modelPentru(treapta: TreaptaRationament, activ: string): string {
+  if (activ === 'openai') {
+    const o = config.openai
+    if (treapta === 'rapid') return `openai/${o.luna}`
+    if (treapta === 'lucru') return `openai/${o.medium}`
+    if (treapta === 'profund') return `openai/${o.heavy}`
+    if (treapta === 'ultra') return `openai/${o.max}`
+    return `openai/${o.medium}`
+  }
   if (treapta === 'rapid') return config.brain.chatDefault
   if (treapta === 'lucru') return config.brain.workDefault
   if (treapta === 'profund') return config.brain.profundDefault
   if (treapta === 'ultra') return config.brain.ultraDefault
-  // plan: creierul de munc? (Pro / unic) ? acela?i pentru chat greu, autonomie, plan constructor
   return config.brain.workDefault
 }
 
@@ -98,9 +110,12 @@ export async function rationeazaCuUnelte(
   jurnal(opts.ruta, treapta, `tools=${tools.length} rounds=${opts.maxRounds ?? 6} model=${opts.model ?? 'default'}`)
   // Dacă e forțat un model, îl punem primul pe scară și cădem pe modelul de
   // lucru validat dacă epuizează cota sau refuză cererea.
-  let models = opts.models ?? expertModelLadder()
+  let models = opts.models ?? await expertModelLadder()
   if (opts.model) {
-    const first = `google-direct/${codModel(opts.model)}`
+    // Respectă prefixul modelului forțat (poate fi openai/ sau google-direct/)
+    const first = opts.model.startsWith('openai/') || opts.model.startsWith(GEMINI_DIRECT_PREFIX)
+      ? opts.model
+      : `${GEMINI_DIRECT_PREFIX}${codModel(opts.model)}`
     models = [first, ...models.filter((m) => m !== first)]
   }
   return brainCompleteWithTools(prompt, tools, execTool, {
@@ -123,7 +138,10 @@ export async function rationeazaMesaje(
   // MODEL FORȚAT (17 aug): orchestratorul trecea modelul, dar ușa unitară îl
   // arunca și folosea mereu defaultul treptei → Creier 2 / creierDublu erau
   // moarte pe chat. Acum `opts.model` câștigă când e dat.
-  const modelFull = opts.model || modelPentru(treapta)
+  const activ = opts.model
+    ? (opts.model.startsWith('openai/') ? 'openai' : 'google-direct')
+    : await creierActivKv()
+  const modelFull = opts.model || modelPentru(treapta, activ)
   jurnal(opts.ruta, treapta, `mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {
     maxTokens: opts.maxTokens ?? 2048,
@@ -134,10 +152,11 @@ export async function rationeazaMesaje(
     timeoutMs: opts.timeoutMs,
   }
   // Scară: modelul treptei/forțat, apoi restul expert ladder (fără dubluri)
-  const ladder = [modelFull, ...expertModelLadder().filter((m) => m !== modelFull)]
+  const ladder = [modelFull, ...(await expertModelLadder()).filter((m) => m !== modelFull)]
+  // COMUTATOR REAL: brainChat dispatch pe prefix (openai/ sau google-direct/)
+  // — nu mai chemăm geminiDirectChat direct, ca să respecte creier_activ.
   return runBrainLadder(ladder, async (m) => {
-    const cod = codModel(m)
-    return geminiDirectChat(cod, messages, opts.tools ?? [], callOpts)
+    return brainChat(m, messages, opts.tools ?? [], callOpts)
   })
 }
 
@@ -167,7 +186,10 @@ export async function rationeazaMesajeStream(
   },
 ): Promise<OrChatResult> {
   const treapta = opts.treapta ?? 'lucru'
-  const modelFull = opts.model || modelPentru(treapta)
+  const activ = opts.model
+    ? (opts.model.startsWith('openai/') ? 'openai' : 'google-direct')
+    : await creierActivKv()
+  const modelFull = opts.model || modelPentru(treapta, activ)
   const model = codModel(modelFull)
   jurnal(opts.ruta, treapta, `stream mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {
@@ -177,6 +199,11 @@ export async function rationeazaMesajeStream(
     toolChoice: opts.toolChoice,
     allowedFunctionNames: opts.allowedFunctionNames,
     timeoutMs: opts.timeoutMs,
+  }
+  // COMUTATOR REAL: stream-ul respectă prefixul modelului. Pe OpenAI folosim
+  // openaiChatStream, pe Gemini geminiDirectChatStream.
+  if (modelFull.startsWith('openai/')) {
+    return openaiChatStream(codModel(modelFull), messages, opts.tools ?? [], onText, callOpts)
   }
   return geminiDirectChatStream(model, messages, opts.tools ?? [], onText, callOpts)
 }

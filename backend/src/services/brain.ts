@@ -3,6 +3,7 @@ import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectAvailable } from '.
 import { openaiChat, openaiAvailable } from './openaiChat.js'
 import type { AnthropicTool, OrChatResult, OrMessage } from './brainContract.js'
 import type { Message } from './brain-types.js'
+import { loadKv } from '../db.js'
 
 // ── THE BRAIN — MULTI-PROVIDER CU COMUTATOR (23 aug 2026) ───────────────────
 // Lacătul Gemini-only (3 aug) a fost DESCHIS de owner (23 aug: „oprește lacătul
@@ -23,15 +24,46 @@ export function isTransientBrainError(err: unknown): boolean {
   )
 }
 
-// The expert's model ladder — Gemini-only, 4 trepte (22 aug 2026, owner:
-// „escaladări pe modele superioare"): work (flash) → profund (Pro) → ultra.
-// Când flash pică (429/saturat), urcă automat pe Pro. Când Pro pică, urcă pe
-// ultra. Extra rungs din env (BRAIN_EXPERT_FALLBACKS) acceptate DOAR dacă sunt
-// google-direct/* — orice altceva e ignorat.
-export function expertModelLadder(): string[] {
-  // 4 TREPTE: flash → Pro → ultra. Fără duplicate (dacă Pro = ultra, o singură treaptă).
+// COMUTATOR REAL (owner, 23 aug: „când e unul, trage după el tot; când e
+// celălalt, trage tot"). Ladder-ul respectă creier_activ din KV. Pe OpenAI
+// returnează treptele OpenAI (luna → medium → heavy → max); pe Gemini
+// rămâne scară veche (flash → Pro → ultra). Modelul custom din KV vine primul.
+export async function creierActivKv(): Promise<string> {
+  try {
+    return (await loadKv('creier_activ')) ?? 'google-direct'
+  } catch {
+    return 'google-direct'
+  }
+}
+
+export async function creierModelCustomKv(): Promise<string> {
+  try {
+    return (await loadKv('creier_model')) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+// The expert's model ladder — respectă comutatorul (23 aug 2026). Pe Gemini:
+// flash → Pro → ultra. Pe OpenAI: luna → medium → heavy → max. Modelul custom
+// din KV vine PRIMUL (prioritate maximă). Extra rungs din env acceptate.
+export async function expertModelLadder(): Promise<string[]> {
+  const activ = await creierActivKv()
+  if (activ === 'openai') {
+    const custom = await creierModelCustomKv()
+    const rungs = [
+      ...(custom ? [`openai/${custom}`] : []),
+      `openai/${config.openai.luna}`,
+      `openai/${config.openai.medium}`,
+      `openai/${config.openai.heavy}`,
+      `openai/${config.openai.max}`,
+    ]
+    const unice: string[] = []
+    for (const r of rungs) { if (!unice.includes(r)) unice.push(r) }
+    return unice
+  }
+  // Gemini (default): 4 trepte flash → Pro → ultra
   const rungs = [config.brain.workDefault, config.brain.profundDefault, config.brain.ultraDefault]
-  // Dedup păstrând ordinea: dacă work = profund (ex. ambele flash), nu dublăm.
   const unice: string[] = []
   for (const r of rungs) {
     if (!unice.includes(r)) unice.push(r)
@@ -45,7 +77,7 @@ export const OPENAI_PREFIX = 'openai/'
 // The one call every rung goes through: dispatch pe prefix.
 //   google-direct/* → Gemini (default)
 //   openai/*        → OpenAI ChatGPT
-function brainChat(
+export function brainChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
@@ -111,8 +143,8 @@ export const brain = {
       // no longer leaves memory without learning. If a specific model was
       // requested, it is tried first.
       const ladder = params.model
-        ? [params.model, ...expertModelLadder().filter((m) => m !== params.model)]
-        : expertModelLadder()
+        ? [params.model, ...(await expertModelLadder()).filter((m) => m !== params.model)]
+        : await expertModelLadder()
       const r = await runBrainLadder(ladder, (m) => brainChat(m, msgs, [], { maxTokens: params.max_tokens }))
       return {
         id: '',
@@ -152,7 +184,7 @@ export async function brainComplete(
     // answering — Adrian's requirement "true, complete reasoning".
     // The model LADDER (Jul 29): on 429 on the current rung, it moves to the
     // next one instead of going silent on the first attempt.
-    const r = await runBrainLadder(expertModelLadder(), (m) =>
+    const r = await runBrainLadder(await expertModelLadder(), (m) =>
       brainChat(m, [{ role: 'user', content: prompt }], [], { maxTokens, reasoning: 'medium' }),
     )
     if (onCost && r.costUsd > 0) onCost(r.costUsd)
@@ -216,7 +248,7 @@ export async function brainCompleteWithTools(
   const messages: OrMessage[] = [{ role: 'user', content: prompt }]
   // The same model ladder as brainComplete — every ROUND tries it, so a 429
   // on one rung no longer breaks the expert's whole tool loop.
-  const ladder = opts.models?.length ? opts.models : expertModelLadder()
+  const ladder = opts.models?.length ? opts.models : await expertModelLadder()
   try {
     for (let round = 0; round < maxRounds; round++) {
       const r = await runBrainLadder(ladder, (m) =>

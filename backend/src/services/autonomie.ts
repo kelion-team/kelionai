@@ -909,10 +909,10 @@ function zidul(jobs: BuildJob[], granita = 0): { blocat: boolean; cate: number; 
  *  a foreign portal, something that touches money — that means starting with
  *  the second hand and finding out only after the turns are wasted. Here we
  *  put the TOP at the head, and the rest of the ladder stays below as a net. */
-function scaraPentru(dificultate = 3): string[] | undefined {
+async function scaraPentru(dificultate = 3): Promise<string[] | undefined> {
   if (dificultate < 4) return undefined // the usual ladder fits
   const top = config.brain.topDefault
-  const restul = expertModelLadder()
+  const restul = await expertModelLadder()
   return top ? [top, ...restul.filter((m) => m !== top)] : restul
 }
 
@@ -971,7 +971,7 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
   return rationeazaCuUnelte(prompt, tools, uneltele, { ruta: 'service.autonomie', maxRounds: 30,
     maxTokens: 2500,
     model: s.model,
-    models: scaraPentru(s.dificultate),
+    models: await scaraPentru(s.dificultate),
   })
 }
 
