@@ -473,39 +473,45 @@ setTimeout(() => {
   setInterval(cronWaw, 5 * 60_000) // verifică la 5 min (rulează doar la ora potrivită)
 
   // Ruta pentru starea rezilienței (monitoring)
-  app.get('/api/creier/stare', async (_req, reply) => {
-    return reply.send(stareRezilinta())
-  })
+  // NOTĂ: rutele Fastify TREBUIE înregistrate ÎNAINTE de app.listen() —
+  // dacă sunt în interiorul setTimeout, se înregistrează după pornire → 404.
+  // Bug găsit 23 aug 2026: era în setTimeout(30s) → 404 live pe kelionai.app.
 
   // PROACTIVITATE (22 aug): SSE pentru notificări proactive — Kelion trimite
   // alerte când detectează ceva demn de atenție (urgente sonore, schimbări
   // emoționale, observații vizuale). Clientul le afișează ca toast.
-  const abonatiProactivi: ((n: NotificareProactiva) => void)[] = []
   pornesteProactivitatea((n) => {
-    for (const cb of abonatiProactivi) {
+    for (const cb of abonatiProactiviWaw) {
       try { cb(n) } catch { /* tăcut */ }
     }
   })
-  app.get('/api/proactiv/stream', { websocket: false }, async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    })
-    const cb = (n: NotificareProactiva) => {
-      try {
-        reply.raw.write(`data: ${JSON.stringify(n)}\n\n`)
-      } catch { /* client deconectat */ }
-    }
-    abonatiProactivi.push(cb)
-    req.raw.on('close', () => {
-      const idx = abonatiProactivi.indexOf(cb)
-      if (idx >= 0) abonatiProactivi.splice(idx, 1)
-    })
-  })
 }, 30_000)
+
+// RUTELE CRITICE — ÎNAINTE DE app.listen() (altfel Fastify le respinge → 404)
+// Bug 23 aug 2026: erau în interiorul setTimeout(30s) de mai sus.
+const abonatiProactiviWaw: ((n: NotificareProactiva) => void)[] = []
+app.get('/api/creier/stare', async (_req, reply) => {
+  return reply.send(stareRezilinta())
+})
+app.get('/api/proactiv/stream', { websocket: false }, async (req, reply) => {
+  const user = getSessionUser(req)
+  if (!user) return reply.code(401).send({ error: 'unauthorized' })
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  })
+  const cb = (n: NotificareProactiva) => {
+    try {
+      reply.raw.write(`data: ${JSON.stringify(n)}\n\n`)
+    } catch { /* client deconectat */ }
+  }
+  abonatiProactiviWaw.push(cb)
+  req.raw.on('close', () => {
+    const idx = abonatiProactiviWaw.indexOf(cb)
+    if (idx >= 0) abonatiProactiviWaw.splice(idx, 1)
+  })
+})
 
 // Download endpoint: the installer MASTER lives on the Linux server and is
 // pushed into app_files, so this serves the LATEST bytes with NO app redeploy.
