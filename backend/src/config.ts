@@ -280,10 +280,17 @@ export const config = {
   // modelele default sunt prețuri reale OpenAI, suprascrise prin env.
   openai: {
     key: env(...ENV_ALIASES.openaiKey),
-    luna: env(...ENV_ALIASES.openaiLuna) || 'gpt-4o-mini', // hardcod-permis: model real OpenAI
-    medium: env(...ENV_ALIASES.openaiMedium) || 'gpt-4o', // hardcod-permis: model real OpenAI
-    heavy: env(...ENV_ALIASES.openaiHeavy) || 'o3', // hardcod-permis: model real OpenAI
-    max: env(...ENV_ALIASES.openaiMax) || 'o1', // hardcod-permis: model real OpenAI
+    // Modele GPT-5.6 (generația curentă OpenAI, documentația oficială aug 2026):
+    //   luna  = efficient, high-volume workloads (ieftin, rapid)
+    //   terra = balance of intelligence and cost
+    //   sol   = flagship capability (gpt-5.6 alias → sol)
+    // o4-mini = reasoning rapid; o3 = reasoning profund.
+    // Cheia ownerului refuză gpt-4o-mini ("invalid model ID") — modelele 5.6 sunt
+    // cele accesibile. Suprascrise prin env dacă cheia accesează alt set.
+    luna: env(...ENV_ALIASES.openaiLuna) || 'gpt-5.6-luna', // hardcod-permis: model oficial OpenAI
+    medium: env(...ENV_ALIASES.openaiMedium) || 'gpt-5.6-terra', // hardcod-permis: model oficial OpenAI
+    heavy: env(...ENV_ALIASES.openaiHeavy) || 'gpt-5.6-sol', // hardcod-permis: model oficial OpenAI
+    max: env(...ENV_ALIASES.openaiMax) || 'o4-mini', // hardcod-permis: model oficial OpenAI
   },
   // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.

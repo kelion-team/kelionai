@@ -991,7 +991,6 @@ async function supervizeazaIncidentConstructor(
     const result = await runConstructorStrategistStep(knowledge, {
       think: (prompt) => rationeaza(prompt, {
         ruta: 'service.autonomie.strateg', treapta: 'lucru', maxTokens: 4500, temperature: 0,
-        model: config.constructorGeminiModel,
       }),
       executeBrainAction: async (strategy, currentIncident) => {
         // CONSTRUCTOR = Devin (ordonat de owner): când strategul spune 'constructor',
@@ -1019,7 +1018,6 @@ async function supervizeazaIncidentConstructor(
           titlu: `Strategie incident constructor #${currentIncident.id}`,
           executant: 'maini',
           dificultate: 5,
-          model: config.constructorGeminiModel,
           ordin: buildConstructorStrategyExecutionPrompt(strategy, currentIncident),
         })
       },
