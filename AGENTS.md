@@ -39,12 +39,20 @@ Google), în producție la **kelionai.app**. Ownerul: Adrian
 - Nu atinge `C:\Users\adria\Downloads\k` — e proiectul VECHI, arhivat.
 - Când ownerul contrazice un raport al tău, PRIMUL loc în care cauți e propriul
   tău cod care a produs raportul. De obicei el are dreptate.
+- **VERIFICĂ ÎNAINTE ce există deja** (owner, 23 aug 2026: „implementeaza-ti
+  sa verifici pentru orice faci daca nu exista oportunitatea de a folosi ce
+  exista sau a fost deja implementat"). Înainte să creezi o funcție, componentă,
+  rută, pattern sau badge — caută în codebase dacă există deja. Caz real: am
+  creat un badge text pentru emoții când avatarul avea morph targets ARKit.
+  Poarta: `node scripts/verifica-duplicari.mjs` — pică build-ul pe duplicări.
 
 ## Verificări OBLIGATORII înainte de orice commit
 ```bash
 cd backend  && npx tsc --noEmit && npx vitest run   # totul verde
 cd frontend && npx tsc -b --force   # NU --noEmit: tsconfig.json e „solution" (files:[]) — --noEmit nu verifică NIMIC; Docker rulează tsc -b (măsurat 8 aug: --noEmit verde local, tsc -b roșu în deploy, publicarea blocată 20 min)
 node scripts/verifica-sintaxa.mjs                    # din rădăcină; pică pe markere de conflict
+node scripts/verifica-hardcodari.mjs                 # pică pe cifre/stări hardcodate
+node scripts/verifica-duplicari.mjs                  # pică pe funcții/rute/pattern-uri duplicate
 ```
 
 ## Structura, pe scurt (harta completă: AI-HANDOFF.md §2)

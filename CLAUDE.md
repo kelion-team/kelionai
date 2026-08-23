@@ -84,6 +84,12 @@ are the answer. Read them before you report anything to him.
 - Keep the chat/voice path **low-latency** (target: first word under 1s).
 - Fix by rewriting the small responsible module — no band-aid patches.
 - Don't touch `C:\Users\adria\Downloads\k` — that's the OLD archived project.
+- **CHECK BEFORE YOU CREATE** (owner, 23 aug 2026: „implementeaza-ti sa
+  verifici pentru orice faci daca nu exista oportunitatea de a folosi ce
+  exista sau a fost deja implementat"). Before creating any function,
+  component, route, pattern, or UI element — search the codebase for existing
+  implementations. Real case: a text badge for emotions was created when the
+  avatar already had ARKit morph targets. Gate: `node scripts/verifica-duplicari.mjs`.
 
 
 ## LEGEA ANTI-HARDCODARE (owner, 16 aug 2026 — LEGE pentru ORICE AI care lucrează aici)
