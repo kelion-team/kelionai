@@ -54,7 +54,11 @@ function extrageSemnale(continut) {
     patternAuth: false,
     patternBadge: false,
   }
-  const linii = continut.replace(/\r\n/g, '\n').split('\n')
+  // Elimină importurile multi-line înainte de scanare: `import { ... } from '...'`
+  // (fără asta, linii ca `  type DovadaUnealta,` din interiorul unui import sunt
+  // detectate ca definiții — fals-pozitiv D1, măsurat 23 aug pe poartaFaptelor.)
+  const continutFaraImporturi = continut.replace(/\r\n/g, '\n').replace(/import\s*\{[^}]*\}\s*from\s*['"][^'"]+['"]/g, '')
+  const linii = continutFaraImporturi.split('\n')
   for (const linie of linii) {
     const curata = linie.replace(/^\s*(\/\/|\*|\/\*).*$/, '').trim()
     if (!curata) continue
@@ -131,7 +135,7 @@ function cautaDuplicari(fisierTinta, semnale) {
     if (!definitInTinta) continue // e doar import/lazy în țintă — nu e duplicare
     for (const f of fisiereCodLista) {
       if (f === fisierTinta) continue
-      const continut = readFileSync(f, 'utf8')
+      const continut = readFileSync(f, 'utf8').replace(/\r\n/g, '\n').replace(/import\s*\{[^}]*\}\s*from\s*['"][^'"]+['"]/g, '')
       const regex = new RegExp(`(?:function|const|class|interface|type)\\s+${fn}\\b`)
       if (regex.test(continut)) {
         const linii = continut.replace(/\r\n/g, '\n').split('\n')

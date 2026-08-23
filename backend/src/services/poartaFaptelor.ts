@@ -114,7 +114,7 @@ interface FamiliePretentie {
 // e negație, nu pretenție) — aceeași lecție de diacritice ca la ACTION_INTENT.
 const FAMILII: readonly FamiliePretentie[] = [
   {
-    re: /(?<![-\p{L}])am\s+(generat|creat|f[ăa]cut|produs)\b[^.!?\n]{0,80}\b(clip|video)/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+(generat|creat|f[ăa]cut|produs)\b[^.!?\n]{0,80}\b(clip|video)/iu,
     unelte: ['generate_video'],
     eticheta: '„am generat clipul" — fără generate_video',
   },
@@ -124,37 +124,41 @@ const FAMILII: readonly FamiliePretentie[] = [
     eticheta: '„clipul e gata" — fără generate_video',
   },
   {
-    re: /(?<![-\p{L}])am\s+(generat|creat|desenat|f[ăa]cut)\b[^.!?\n]{0,80}\b(imagine|imaginea|poz[ăa]|poza|logo)/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+(generat|creat|desenat|f[ăa]cut)\b[^.!?\n]{0,80}\b(imagine|imaginea|poz[ăa]|poza|logo)/iu,
     unelte: ['generate_image'],
     eticheta: '„am generat imaginea" — fără generate_image',
   },
   {
-    re: /(?<![-\p{L}])am\s+trimis\b[^.!?\n]{0,60}\b(email|e-?mail)/iu,
+    // BUG REPARAT (23 aug, audit live): creierul a mințit „am trimis...către
+    // adrianenc11@gmail.com" — poarta NU l-a prins fiindcă pattern-ul vechi cerea
+    // cuvântul „email", dar textul conținea o ADRESĂ de email, nu cuvântul.
+    // Acum prinde ȘI cuvântul, ȘI adresa (x@x.x), ȘI „către"/„la" + adresă.
+    re: /(?<!n-)(?<!\p{L})am\s+trimis\b[^.!?\n]{0,60}(\b(email|e-?mail)\p{L}*|[\w.+-]+@[\w.-]+\.\w{2,})/iu,
     unelte: ['send_email'],
     eticheta: '„am trimis emailul" — fără send_email',
   },
   {
-    re: /(?<![-\p{L}])am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\b(document\p{L}*|doc)\b/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\b(document\p{L}*|doc)\b/iu,
     unelte: ['create_doc'],
     eticheta: '„am creat documentul" — fără create_doc',
   },
   {
-    re: /(?<![-\p{L}])am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\bprezentare/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\bprezentare/iu,
     unelte: ['create_presentation'],
     eticheta: '„am creat prezentarea" — fără create_presentation',
   },
   {
-    re: /(?<![-\p{L}])am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\bformular/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\bformular/iu,
     unelte: ['create_form'],
     eticheta: '„am creat formularul" — fără create_form',
   },
   {
-    re: /(?<![-\p{L}])am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\b(tabel|sheet)/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\b(tabel|sheet)/iu,
     unelte: ['create_sheet'],
     eticheta: '„am creat tabelul" — fără create_sheet',
   },
   {
-    re: /(?<![-\p{L}])am\s+urcat\b[^.!?\n]{0,60}\b(youtube|clipul)/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+urcat\b[^.!?\n]{0,60}\b(youtube|clipul)/iu,
     unelte: ['youtube_urca'],
     eticheta: '„am urcat pe YouTube" — fără youtube_urca',
   },
@@ -163,7 +167,7 @@ const FAMILII: readonly FamiliePretentie[] = [
   // „Am preluat cerința." poate fi SPUSĂ fără build_software — fără număr de
   // ordin, fără panou, fără lucrător. Preluarea nedovedită e minciună.
   {
-    re: /(?<![-\p{L}])am\s+preluat\b[^.!?\n]{0,40}\b(cerin|ordin)/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+preluat\b[^.!?\n]{0,40}\b(cerin|ordin)/iu,
     unelte: ['build_software'],
     eticheta: '„am preluat cerința" — fără build_software (niciun ordin creat, nimic nu va mișca)',
   },
@@ -174,7 +178,7 @@ const FAMILII: readonly FamiliePretentie[] = [
   // 'hardcodari') sau verdictul ei din jurnal (jurnal_masuratori). Un „audit"
   // povestit fără una din ele = inventat, se demască.
   {
-    re: /((?<![-\p{L}])am\s+(scanat|auditat)|[îi]n\s+urma\s+(scan|audit)[ăa]?\p{L}*)\b[^.!?\n]{0,80}\b(cod|surs)/iu,
+    re: /((?<!n-)(?<!\p{L})am\s+(scanat|auditat)|[îi]n\s+urma\s+(scan|audit)[ăa]?\p{L}*)\b[^.!?\n]{0,80}\b(cod|surs)/iu,
     unelte: ['ruleaza_portile', 'jurnal_masuratori'],
     eticheta: '„am scanat codul sursă" — fără ruleaza_portile/jurnal_masuratori: auditul e inventat',
   },
