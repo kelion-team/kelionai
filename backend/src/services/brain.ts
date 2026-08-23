@@ -1,19 +1,17 @@
 import { config } from '../config.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectAvailable } from './geminiDirect.js'
-import { openrouterChat, openrouterAvailable } from './openrouter.js'
-import { ollamaChat, ollamaAvailable } from './ollamaChat.js'
+import { openaiChat, openaiAvailable } from './openaiChat.js'
 import type { AnthropicTool, OrChatResult, OrMessage } from './brainContract.js'
 import type { Message } from './brain-types.js'
 
 // ── THE BRAIN — MULTI-PROVIDER CU COMUTATOR (23 aug 2026) ───────────────────
 // Lacătul Gemini-only (3 aug) a fost DESCHIS de owner (23 aug: „oprește lacătul
-// de pe gemini, momentan" + „trebuie un comutator de creier in admin"). Trei
-// provider-e pe prefix:
+// de pe gemeni, momentan" + „trebuie un comutator de creier in admin"). Doi
+// provider-i pe prefix:
 //   google-direct/*  → Gemini (default, are vedere + audio)
-//   openrouter/*     → OpenRouter (fallback, cheie în env)
-//   ollama/*         → Ollama local (free, pe VPS)
-// Vocea rămâne pe Gemini Live (are cameră în sesiune — OpenRouter/Ollama n-au
-// realtime). Comutatorul alege provider-ul pentru CHAT/TEXT, nu pentru voce.
+//   openai/*         → OpenAI ChatGPT (chat + vedere + reasoning)
+// Vocea rămâne pe Gemini Live (are cameră în sesiune). Comutatorul alege
+// provider-ul pentru CHAT/TEXT, nu pentru voce.
 
 // A TRANSIENT error (provider saturated/down) — worth a pause before the next
 // rung. 400/401/404 (our request/key) are NOT here: they're not transient, but
@@ -42,13 +40,11 @@ export function expertModelLadder(): string[] {
 }
 
 // Prefixele provider-elor (23 aug 2026 — comutator de creier).
-export const OPENROUTER_PREFIX = 'openrouter/'
-export const OLLAMA_PREFIX = 'ollama/'
+export const OPENAI_PREFIX = 'openai/'
 
 // The one call every rung goes through: dispatch pe prefix.
 //   google-direct/* → Gemini (default)
-//   openrouter/*    → OpenRouter (fallback)
-//   ollama/*        → Ollama local (free)
+//   openai/*        → OpenAI ChatGPT
 function brainChat(
   model: string,
   messages: OrMessage[],
@@ -58,13 +54,10 @@ function brainChat(
   if (model.startsWith(GEMINI_DIRECT_PREFIX)) {
     return geminiDirectChat(model.slice(GEMINI_DIRECT_PREFIX.length), messages, tools, opts)
   }
-  if (model.startsWith(OPENROUTER_PREFIX)) {
-    return openrouterChat(model.slice(OPENROUTER_PREFIX.length), messages, tools, opts)
+  if (model.startsWith(OPENAI_PREFIX)) {
+    return openaiChat(model.slice(OPENAI_PREFIX.length), messages, tools, opts)
   }
-  if (model.startsWith(OLLAMA_PREFIX)) {
-    return ollamaChat(model.slice(OLLAMA_PREFIX.length), messages, tools, opts)
-  }
-  return Promise.reject(new Error(`model_necunoscut: „${model}" — prefix necunoscut (acceptă: google-direct/ openrouter/ ollama/)`))
+  return Promise.reject(new Error(`model_necunoscut: „${model}" — prefix necunoscut (acceptă: google-direct/ openai/)`))
 }
 
 // Runs a call across the model ladder: tries each rung, skips the saturated/

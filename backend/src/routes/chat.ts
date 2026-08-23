@@ -141,6 +141,15 @@ import { bazaPublica } from '../services/bazaPublica.js'
 
 // THE BRAIN — Gemini direct, UNIC (extirparea totală OpenRouter + OpenAI, 3 aug).
 // The selectable chat model is read from KV (same source as /api/models/selection):
+// ── OpenAI model ladder: de la luna la sol pe dificultate ──────────────────
+function alegeOpenAIModel(difficulty: number, ownerAction: boolean): string {
+  const m = config.openai
+  if (ownerAction) return m.heavy // owner cu intenție de acțiune → reasoning
+  if (difficulty >= ESCALATE_TOP_AT) return m.max
+  if (difficulty >= ESCALATE_AT) return m.medium
+  return m.luna
+}
+
 // the model CHOSEN by the user, otherwise the tier default. Returns NULL only if
 // NO brain exists at all (no Gemini key) → honest message.
 async function selectedBrainModel(
@@ -150,15 +159,16 @@ async function selectedBrainModel(
   needsVision = false,
   decideAdresarea = false,
 ): Promise<{ model: string; heavy: boolean } | null> {
+  const difficulty = taskDifficulty(text)
+  const isOwner = roleFor(email) === 'admin'
   // ── COMUTATOR DE CREIER (23 aug 2026 — owner: „trebuie un comutator de
-  //    creier in admin"). Dacă ownerul a comutat pe alt provider (openrouter/
-  //    ollama) din admin, folosim acel provider + modelul custom din KV.
-  //    Gemini rămâne default; vocea rămâne pe Gemini Live (are cameră).
+  //    creier in admin"). Dacă ownerul a comutat pe OpenAI, scalăm modelul
+  //    de la luna la sol pe baza dificultății. Gemini rămâne default.
   const creierActiv = await loadKv('creier_activ') ?? 'google-direct'
-  if (creierActiv !== 'google-direct') {
+  if (creierActiv === 'openai') {
     const modelCustom = (await loadKv('creier_model')) ?? ''
-    const model = modelCustom || (creierActiv === 'ollama' ? 'qwen2.5-coder:32b' : 'google/gemma-4-26b-a4b-it:free')
-    return { model: `${creierActiv}/${model}`, heavy: true }
+    const model = modelCustom || alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
+    return { model: `openai/${model}`, heavy: true }
   }
   // Null doar pentru „chiar n-am niciun creier" — creierul e Gemini-only.
   if (!geminiDirectAvailable()) return null
@@ -197,7 +207,6 @@ async function selectedBrainModel(
   // free (chat) → cheap-capable (work, default gpt-5-mini) → Fable 5 (top) ONLY
   // on truly extreme difficulty (ESCALATE_TOP_AT). Vision and admin action climb
   // to the MIDDLE rung (work), not straight to the top.
-  const difficulty = taskDifficulty(text)
   // ECONOMIC AND HONEST SPLIT (Adrian, Jul 27: "cheap chat is fine, but where a
   // thought-out answer is needed you send it through the brain"): simple talk →
   // cheap model (fast, nearly free); WHEN thinking OR an ACTION is needed (owner
@@ -205,7 +214,6 @@ async function selectedBrainModel(
   // EXECUTES, not narrates. "Always Fable 5" was removed: it burned credit
   // (OpenRouter went negative on Jul 27) and that's not what he asked for. The
   // top only on extreme difficulty.
-  const isOwner = roleFor(email) === 'admin'
   // ── DE CE `decideAdresarea` (măsurat 8 aug, din jurnalul de pe VPS) ───────
   // Adrian: „vorbesc și nu se întâmplă nimic". În jurnal:
   //     [CHAT-IN] audio=da „"

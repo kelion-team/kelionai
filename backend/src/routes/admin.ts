@@ -62,8 +62,7 @@ import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { geminiLive, geminiDirectAvailable } from '../services/geminiDirect.js'
-import { openrouterAvailable } from '../services/openrouter.js'
-import { ollamaPing } from '../services/ollamaChat.js'
+import { openaiAvailable } from '../services/openaiChat.js'
 import { getSerperBalance } from '../services/serperBalance.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { resurseGazda } from '../services/resurse.js'
@@ -707,8 +706,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       modelCustom,
       provideri: [
         { prefix: 'google-direct', nume: 'Gemini Direct', disponibil: geminiDirectAvailable(), info: 'Default — are vedere + audio + unelte' },
-        { prefix: 'openrouter', nume: 'OpenRouter', disponibil: openrouterAvailable(), info: 'Fallback — cheie în env (OPENROUTER_API_KEY)' },
-        { prefix: 'ollama', nume: 'Ollama Local', disponibil: await ollamaPing(), info: 'Free — rulează pe VPS, fără internet' },
+        { prefix: 'openai', nume: 'OpenAI ChatGPT', disponibil: openaiAvailable(), info: 'Chat + vedere + reasoning; cheie în env (OPENAI_API_KEY)' },
       ],
     })
   })
@@ -718,7 +716,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = cerAdmin(req, reply)
     if (!user) return
     const { activ, modelCustom } = (req.body ?? {}) as { activ?: string; modelCustom?: string }
-    const valide = ['google-direct', 'openrouter', 'ollama']
+    const valide = ['google-direct', 'openai']
     if (!activ || !valide.includes(activ)) {
       return reply.code(400).send({ eroare: `Provider invalid. Accepta: ${valide.join(', ')}` })
     }
