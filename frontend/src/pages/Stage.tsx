@@ -41,6 +41,8 @@ import { reteaLenta } from '../lib/retea'
 import ApelOverlay from '../components/ApelOverlay'
 import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
 import { pornesteVerificareaOllamaLocal, setNotificareOllama } from '../lib/ollamaLocal'
+import { initiazaAudioSpatial, resumeAudioSpatial } from '../lib/audioSpatial'
+import { pornesteMuzica, opresteMuzica, schimbaDispozitie, type DispozitieMuzicala } from '../lib/companionCreativ'
 
 // ── BECURILE DE CREDIT, COMPACT ÎN BARĂ (owner, 13 aug: „în spațiul rămas pe
 // linia aia pui butoanele astea") ────────────────────────────────────────────
@@ -1218,6 +1220,63 @@ export default function Stage({ user }: { user: User }) {
     })
     pornesteVerificareaOllamaLocal()
   }, [])
+  // ── CELE 10 WAW — integrare UI (22 aug 2026) ──────────────────────────────
+  // #1 MODUL VIS: la startup, verifică dacă userul s-a trezit → salut dimineața
+  const [salutDimineata, setSalutDimineata] = useState<string | null>(null)
+  useEffect(() => {
+    fetch('/api/kelion/salut-dimineata', { credentials: 'include', cache: 'no-store' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((j) => { if (j?.trezit && j.salut) setSalutDimineata(j.salut) })
+      .catch(() => {})
+  }, [])
+  // #3 EMOȚIILE LUI KELION: fetch periodic → afișare pe avatar
+  const [emotieKelion, setEmotieKelion] = useState<{ emotie: string; intensitate: number } | null>(null)
+  useEffect(() => {
+    const citeste = (): void => {
+      fetch('/api/kelion/emotie', { credentials: 'include', cache: 'no-store' })
+        .then((r) => r.ok ? r.json() : null)
+        .then((j) => { if (j) setEmotieKelion({ emotie: j.emotie, intensitate: j.intensitate }) })
+        .catch(() => {})
+    }
+    citeste()
+    const t = setInterval(citeste, 30_000)
+    return () => clearInterval(t)
+  }, [])
+  // #5 ALERTĂ SĂNĂTATE: la startup, verifică dacă există alertă
+  const [alertaSanatate, setAlertaSanatate] = useState<string | null>(null)
+  useEffect(() => {
+    fetch('/api/sanatate/analiza', { credentials: 'include', cache: 'no-store' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((j) => { if (j?.alerta?.mesaj) setAlertaSanatate(j.alerta.mesaj) })
+      .catch(() => {})
+  }, [])
+  // #7 AUDIO SPAȚIAL: inițializează la primul gest (necesar pe mobil)
+  useEffect(() => {
+    const onFirstGesture = (): void => {
+      resumeAudioSpatial()
+      initiazaAudioSpatial()
+      document.removeEventListener('click', onFirstGesture)
+      document.removeEventListener('touchstart', onFirstGesture)
+    }
+    document.addEventListener('click', onFirstGesture)
+    document.addEventListener('touchstart', onFirstGesture)
+    return () => {
+      document.removeEventListener('click', onFirstGesture)
+      document.removeEventListener('touchstart', onFirstGesture)
+    }
+  }, [])
+  // #8 COMPANION CREATIV: muzică după dispoziție (manual — buton)
+  const [muzicaPornita, setMuzicaPornita] = useState(false)
+  const [dispozitieMuzica, setDispozitieMuzica] = useState<DispozitieMuzicala>('calm')
+  const comutaMuzica = (): void => {
+    if (muzicaPornita) {
+      opresteMuzica()
+      setMuzicaPornita(false)
+    } else {
+      pornesteMuzica(dispozitieMuzica)
+      setMuzicaPornita(true)
+    }
+  }
   // IEȘIREA DIN CENTRUL DE TRANZACȚIONARE (9 aug, ownerul: „buton ieșire nu
   // merge"): pagina din iframe nu-și poate închide singură tabul — trimite
   // mesaj, iar aici tabul se închide ca la apăsarea ×-ului.
@@ -2069,6 +2128,110 @@ export default function Stage({ user }: { user: User }) {
           {ollamaNotif.mesaj}
         </div>
       )}
+      {/* #1 SALUT DIMINEAȚA — la trezire, Kelion te întâmpină cu ce a observat */}
+      {salutDimineata && (
+        <div style={{
+          position: 'fixed',
+          top: 'max(8px, env(safe-area-inset-top, 8px))',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9998,
+          background: 'linear-gradient(135deg, #1a237e, #283593)',
+          color: '#fff',
+          padding: '14px 20px',
+          borderRadius: 10,
+          fontSize: 'clamp(13px, 3.5vw, 16px)',
+          maxWidth: 'min(92vw, 480px)',
+          boxShadow: '0 6px 20px rgba(26,35,126,0.4)',
+          textAlign: 'center',
+          lineHeight: 1.5,
+        }}>
+          <div style={{ fontSize: 20, marginBottom: 4 }}>☀️</div>
+          {salutDimineata}
+          <button onClick={() => setSalutDimineata(null)} style={{
+            marginLeft: 12, background: 'transparent', border: '1px solid rgba(255,255,255,0.3)',
+            color: '#fff', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontSize: 12,
+          }}>OK</button>
+        </div>
+      )}
+      {/* #3 EMOȚIA LUI KELION — indicator discret lângă avatar */}
+      {emotieKelion && emotieKelion.emotie !== 'calm' && (
+        <div style={{
+          position: 'fixed',
+          top: 'max(8px, env(safe-area-inset-top, 8px))',
+          right: 8,
+          zIndex: 9997,
+          background: 'rgba(0,0,0,0.7)',
+          color: '#fff',
+          padding: '6px 12px',
+          borderRadius: 16,
+          fontSize: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}>
+          <span>{emotieKelion.emotie === 'satisfacție' ? '😊' : emotieKelion.emotie === 'grijă' ? '🤗' : emotieKelion.emotie === 'curiozitate' ? '🤔' : emotieKelion.emotie === 'îngrijorare' ? '😟' : '😌'}</span>
+          <span>{emotieKelion.emotie}</span>
+        </div>
+      )}
+      {/* #5 ALERTĂ SĂNĂTATE — notificare importantă, nu dispare singur */}
+      {alertaSanatate && (
+        <div style={{
+          position: 'fixed',
+          bottom: 'max(60px, env(safe-area-inset-bottom, 60px))',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9998,
+          background: '#d32f2f',
+          color: '#fff',
+          padding: '14px 20px',
+          borderRadius: 10,
+          fontSize: 'clamp(12px, 3.5vw, 14px)',
+          maxWidth: 'min(92vw, 440px)',
+          boxShadow: '0 6px 20px rgba(211,47,47,0.4)',
+          textAlign: 'center',
+          lineHeight: 1.5,
+        }}>
+          <div style={{ fontSize: 18, marginBottom: 4 }}>💙</div>
+          {alertaSanatate}
+          <button onClick={() => setAlertaSanatate(null)} style={{
+            display: 'block', margin: '8px auto 0', background: 'rgba(255,255,255,0.2)',
+            border: 'none', color: '#fff', borderRadius: 6, padding: '4px 16px', cursor: 'pointer', fontSize: 12,
+          }}>Am înțeles</button>
+        </div>
+      )}
+      {/* #8 COMPANION CREATIV — buton muzică (discret, colț stânga-jos) */}
+      <div style={{
+        position: 'fixed',
+        bottom: 'max(8px, env(safe-area-inset-bottom, 8px))',
+        left: 8,
+        zIndex: 9996,
+        display: 'flex',
+        gap: 4,
+      }}>
+        <button onClick={comutaMuzica} style={{
+          background: muzicaPornita ? '#2e7d32' : 'rgba(0,0,0,0.6)',
+          border: 'none', color: '#fff', borderRadius: 20,
+          width: 40, height: 40, cursor: 'pointer', fontSize: 18,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>{muzicaPornita ? '⏸' : '🎵'}</button>
+        {muzicaPornita && (
+          <select
+            value={dispozitieMuzica}
+            onChange={(e) => { const d = e.target.value as DispozitieMuzicala; setDispozitieMuzica(d); schimbaDispozitie(d) }}
+            style={{
+              background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none',
+              borderRadius: 20, padding: '0 10px', fontSize: 12, cursor: 'pointer',
+            }}
+          >
+            <option value="calm">Calm</option>
+            <option value="trist">Trist</option>
+            <option value="vesel">Vesel</option>
+            <option value="energic">Energic</option>
+            <option value="pensive">Pensive</option>
+          </select>
+        )}
+      </div>
 
       {unlockOpen && (
         <div className="unlock-overlay" onClick={() => setUnlockOpen(false)}>
