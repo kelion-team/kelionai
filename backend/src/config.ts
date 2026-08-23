@@ -33,6 +33,11 @@ export const ENV_ALIASES: Record<string, string[]> = {
   // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
   // de la fostul câmp config.googleMapsKey de mai jos.)
   geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
+  // OpenRouter — REINTRODUS 23 aug 2026 ca provider fallback pentru comutatorul
+  // de creier (owner: „trebuie un comutator de creier in admin"). Cheia există
+  // deja în env VPS (OPENROUTER_API_KEY). Nu e primar — Gemini rămâne default;
+  // OpenRouter intră doar când ownerul comută din admin.
+  openrouterKey: ['OPENROUTER_API_KEY', 'OPENROUTER_KEY'],
   // (CHEIA FABLE 5 / Anthropic a fost SCOASĂ — owner, 16 aug: „fable iese total
   // de peste tot… curata peste tot in aplicatie". Nu mai există niciun consumator
   // Fable/Anthropic în cod; constructorul e Devin, iar creierul de raționament e
@@ -267,6 +272,11 @@ export const config = {
   // + OSRM, cu sau fără cheie; rândul lui din env-check împingea ownerul să
   // configureze o cheie fără niciun efect — încălcarea regulii #4.)
   geminiKey: env(...ENV_ALIASES.geminiKey),
+  // OpenRouter — cheia pentru comutatorul de creier (fallback când Gemini pică).
+  // REINTRODUS 23 aug 2026. Modelul se alege din admin (comutator), nu aici.
+  openrouter: {
+    key: env(...ENV_ALIASES.openrouterKey),
+  },
   // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
   julesKey: env(...ENV_ALIASES.julesKey),

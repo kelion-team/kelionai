@@ -61,7 +61,9 @@ import { autonomActiv, seteazaAutonom } from '../services/autonomActiv.js'
 import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
-import { geminiLive } from '../services/geminiDirect.js'
+import { geminiLive, geminiDirectAvailable } from '../services/geminiDirect.js'
+import { openrouterAvailable } from '../services/openrouter.js'
+import { ollamaPing } from '../services/ollamaChat.js'
 import { getSerperBalance } from '../services/serperBalance.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { resurseGazda } from '../services/resurse.js'
@@ -691,6 +693,39 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // sarcini a picat. `null` când nu s-a verificat încă — „nu pot verifica",
     // nu o cifră liniștitoare inventată.
     return reply.send({ ...(await verifyModels()), dovadaUpgrade: await dovadaUltimuluiUpgrade() })
+  })
+
+  // ── COMUTATOR DE CREIER (23 aug 2026 — owner: „trebuie un comutator de
+  //    creier in admin") — citește provider-ul activ din KV. ───────────────
+  app.get('/api/admin/creier', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const activ = await loadKv('creier_activ') ?? 'google-direct'
+    const modelCustom = await loadKv('creier_model') ?? ''
+    return reply.send({
+      activ,
+      modelCustom,
+      provideri: [
+        { prefix: 'google-direct', nume: 'Gemini Direct', disponibil: geminiDirectAvailable(), info: 'Default — are vedere + audio + unelte' },
+        { prefix: 'openrouter', nume: 'OpenRouter', disponibil: openrouterAvailable(), info: 'Fallback — cheie în env (OPENROUTER_API_KEY)' },
+        { prefix: 'ollama', nume: 'Ollama Local', disponibil: await ollamaPing(), info: 'Free — rulează pe VPS, fără internet' },
+      ],
+    })
+  })
+
+  // ── COMUTATOR DE CREIER — schimbă provider-ul activ. ───────────────────
+  app.post('/api/admin/creier', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const { activ, modelCustom } = (req.body ?? {}) as { activ?: string; modelCustom?: string }
+    const valide = ['google-direct', 'openrouter', 'ollama']
+    if (!activ || !valide.includes(activ)) {
+      return reply.code(400).send({ eroare: `Provider invalid. Accepta: ${valide.join(', ')}` })
+    }
+    await saveKv('creier_activ', activ)
+    if (modelCustom !== undefined) await saveKv('creier_model', modelCustom.trim())
+    app.log.info(`admin: creier comutat pe „${activ}" (model: ${modelCustom || 'default'})`)
+    return reply.send({ ok: true, activ, modelCustom: modelCustom?.trim() ?? '' })
   })
 
   // Verify the brain key live (admin only): pings the Gemini chat default

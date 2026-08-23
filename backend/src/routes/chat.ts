@@ -150,6 +150,16 @@ async function selectedBrainModel(
   needsVision = false,
   decideAdresarea = false,
 ): Promise<{ model: string; heavy: boolean } | null> {
+  // ── COMUTATOR DE CREIER (23 aug 2026 — owner: „trebuie un comutator de
+  //    creier in admin"). Dacă ownerul a comutat pe alt provider (openrouter/
+  //    ollama) din admin, folosim acel provider + modelul custom din KV.
+  //    Gemini rămâne default; vocea rămâne pe Gemini Live (are cameră).
+  const creierActiv = await loadKv('creier_activ') ?? 'google-direct'
+  if (creierActiv !== 'google-direct') {
+    const modelCustom = (await loadKv('creier_model')) ?? ''
+    const model = modelCustom || (creierActiv === 'ollama' ? 'qwen2.5-coder:32b' : 'google/gemma-4-26b-a4b-it:free')
+    return { model: `${creierActiv}/${model}`, heavy: true }
+  }
   // Null doar pentru „chiar n-am niciun creier" — creierul e Gemini-only.
   if (!geminiDirectAvailable()) return null
   let sel: { chat?: string; work?: string } = {}

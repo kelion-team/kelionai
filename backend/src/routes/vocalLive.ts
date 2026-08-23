@@ -734,6 +734,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // close/error; înainte, o replică spaniolă suprimată intra totuși în
     // istoric la închiderea WS-ului și otrăvea sesiunea următoare.
     const incheieTura = (): void => {
+      reseteazaCeasTacere() // tura s-a încheiat → resetăm ceasul de tăcere (15s de acum)
       if (verdictTura === false || verdictLimba === false) {
         app.log.info(
           verdictLimba === false
@@ -1399,6 +1400,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           pulsVoce.cadreAudioDeLaGoogle++
           pulsVoce.laUltimulCadru = Date.now()
           octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
+          reseteazaCeasTacere() // Kelion vorbește → sesiunea e ACTIVĂ, nu idle
           if (taiereManuala) {
             pulsVoce.suprimateDupaTaiere++
             return
@@ -1561,6 +1563,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         },
         onTranscriereKelion: (text, final) => {
+          reseteazaCeasTacere() // Kelion transcrie → sesiunea e ACTIVĂ, nu idle
           bufKelion += text
           // Verdictul de LIMBĂ: la ≥6 caractere sau primul final, apoi
           // RE-JUDECAT pe continuare cât replica e la început (≤240 car.) —
@@ -1609,6 +1612,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           trimite({ type: 'kelion', text, final })
         },
         onUnealta: async (apel) => {
+          reseteazaCeasTacere() // Kelion face tool calls → sesiunea e ACTIVĂ, nu idle
           // UȘA SPRE CREIERUL ÎNTREG: cererea trece prin /api/chat cu sesiunea
           // omului — toate uneltele chatului, aceeași contabilizare. Cadrele de
           // ECRAN se retrimit browserului; cadrele de VOCE nu trec (glasul e al

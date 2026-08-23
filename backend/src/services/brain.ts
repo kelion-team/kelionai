@@ -1,15 +1,19 @@
 import { config } from '../config.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectAvailable } from './geminiDirect.js'
+import { openrouterChat, openrouterAvailable } from './openrouter.js'
+import { ollamaChat, ollamaAvailable } from './ollamaChat.js'
 import type { AnthropicTool, OrChatResult, OrMessage } from './brainContract.js'
 import type { Message } from './brain-types.js'
 
-// ── THE BRAIN — GEMINI DIRECT, UNIC ─────────────────────────────────────────
-// (Extirparea totală OpenRouter + OpenAI, 3 aug: „openrouter și open ai scos
-// din toată aplicația".) Tot creierul merge pe cheia Gemini a ownerului
-// (config.geminiKey). The selectable chat model is managed in chat.ts
-// (orchestrator); only the non-streaming utilities used outside the chat
-// remain here: memory (agents), short summaries (mailbox/admin) and the key
-// check.
+// ── THE BRAIN — MULTI-PROVIDER CU COMUTATOR (23 aug 2026) ───────────────────
+// Lacătul Gemini-only (3 aug) a fost DESCHIS de owner (23 aug: „oprește lacătul
+// de pe gemini, momentan" + „trebuie un comutator de creier in admin"). Trei
+// provider-e pe prefix:
+//   google-direct/*  → Gemini (default, are vedere + audio)
+//   openrouter/*     → OpenRouter (fallback, cheie în env)
+//   ollama/*         → Ollama local (free, pe VPS)
+// Vocea rămâne pe Gemini Live (are cameră în sesiune — OpenRouter/Ollama n-au
+// realtime). Comutatorul alege provider-ul pentru CHAT/TEXT, nu pentru voce.
 
 // A TRANSIENT error (provider saturated/down) — worth a pause before the next
 // rung. 400/401/404 (our request/key) are NOT here: they're not transient, but
@@ -37,19 +41,30 @@ export function expertModelLadder(): string[] {
   return unice
 }
 
-// The one call every rung goes through: strips the google-direct/ prefix and
-// talks to Gemini. A rung WITHOUT the prefix has no engine behind it anymore —
-// named error, never a silent fall to a provider that no longer exists.
+// Prefixele provider-elor (23 aug 2026 — comutator de creier).
+export const OPENROUTER_PREFIX = 'openrouter/'
+export const OLLAMA_PREFIX = 'ollama/'
+
+// The one call every rung goes through: dispatch pe prefix.
+//   google-direct/* → Gemini (default)
+//   openrouter/*    → OpenRouter (fallback)
+//   ollama/*        → Ollama local (free)
 function brainChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
   opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high' } = {},
 ): Promise<OrChatResult> {
-  if (!model.startsWith(GEMINI_DIRECT_PREFIX)) {
-    return Promise.reject(new Error(`model_necunoscut: „${model}" — creierul e Gemini-only (google-direct/*)`))
+  if (model.startsWith(GEMINI_DIRECT_PREFIX)) {
+    return geminiDirectChat(model.slice(GEMINI_DIRECT_PREFIX.length), messages, tools, opts)
   }
-  return geminiDirectChat(model.slice(GEMINI_DIRECT_PREFIX.length), messages, tools, opts)
+  if (model.startsWith(OPENROUTER_PREFIX)) {
+    return openrouterChat(model.slice(OPENROUTER_PREFIX.length), messages, tools, opts)
+  }
+  if (model.startsWith(OLLAMA_PREFIX)) {
+    return ollamaChat(model.slice(OLLAMA_PREFIX.length), messages, tools, opts)
+  }
+  return Promise.reject(new Error(`model_necunoscut: „${model}" — prefix necunoscut (acceptă: google-direct/ openrouter/ ollama/)`))
 }
 
 // Runs a call across the model ladder: tries each rung, skips the saturated/
