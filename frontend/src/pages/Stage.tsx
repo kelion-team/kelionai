@@ -43,6 +43,7 @@ import { pornestePrezentaApel, oprestePrezentaApel } from '../lib/apel'
 import { pornesteVerificareaOllamaLocal, setNotificareOllama } from '../lib/ollamaLocal'
 import { initiazaAudioSpatial, resumeAudioSpatial } from '../lib/audioSpatial'
 import { pornesteMuzica, opresteMuzica, schimbaDispozitie, type DispozitieMuzicala } from '../lib/companionCreativ'
+import { pushFacial, type FacialLabel } from '../lib/facialQueue'
 
 // ── BECURILE DE CREDIT, COMPACT ÎN BARĂ (owner, 13 aug: „în spațiul rămas pe
 // linia aia pui butoanele astea") ────────────────────────────────────────────
@@ -1229,13 +1230,33 @@ export default function Stage({ user }: { user: User }) {
       .then((j) => { if (j?.trezit && j.salut) setSalutDimineata(j.salut) })
       .catch(() => {})
   }, [])
-  // #3 EMOȚIILE LUI KELION: fetch periodic → afișare pe avatar
-  const [emotieKelion, setEmotieKelion] = useState<{ emotie: string; intensitate: number } | null>(null)
+  // #3 EMOȚIILE LUI KELION: fetch periodic → expresie pe FAȚA avatarului (nu badge)
+  // Avatarul are morph targets ARKit (smile, raisedBrow, think, empathy, warmth)
+  // — le declanșăm direct prin coada facială, fără indicator text care acoperea butoane.
+  const emotieKelionAnterioara = useRef<string>('')
   useEffect(() => {
+    const emotieLaFacial: Record<string, FacialLabel> = {
+      satisfacție: 'smile',
+      veselie: 'smile',
+      grijă: 'empathy',
+      curiozitate: 'raisedBrow',
+      îngrijorare: 'think',
+      surpriză: 'surprise',
+      calm: 'warmth',
+    }
     const citeste = (): void => {
       fetch('/api/kelion/emotie', { credentials: 'include', cache: 'no-store' })
         .then((r) => r.ok ? r.json() : null)
-        .then((j) => { if (j) setEmotieKelion({ emotie: j.emotie, intensitate: j.intensitate }) })
+        .then((j) => {
+          if (!j?.emotie) return
+          // Declanșăm expresia DOAR la schimbare — nu la fiecare poll (altfel
+          // micro-expresia se re-armează la 30s și pare mecanic)
+          if (j.emotie !== emotieKelionAnterioara.current) {
+            emotieKelionAnterioara.current = j.emotie
+            const facial = emotieLaFacial[j.emotie]
+            if (facial) pushFacial(facial)
+          }
+        })
         .catch(() => {})
     }
     citeste()
@@ -2154,26 +2175,9 @@ export default function Stage({ user }: { user: User }) {
           }}>OK</button>
         </div>
       )}
-      {/* #3 EMOȚIA LUI KELION — indicator discret lângă avatar */}
-      {emotieKelion && emotieKelion.emotie !== 'calm' && (
-        <div style={{
-          position: 'fixed',
-          top: 'max(8px, env(safe-area-inset-top, 8px))',
-          right: 8,
-          zIndex: 9997,
-          background: 'rgba(0,0,0,0.7)',
-          color: '#fff',
-          padding: '6px 12px',
-          borderRadius: 16,
-          fontSize: 12,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}>
-          <span>{emotieKelion.emotie === 'satisfacție' ? '😊' : emotieKelion.emotie === 'grijă' ? '🤗' : emotieKelion.emotie === 'curiozitate' ? '🤔' : emotieKelion.emotie === 'îngrijorare' ? '😟' : '😌'}</span>
-          <span>{emotieKelion.emotie}</span>
-        </div>
-      )}
+      {/* #3 EMOȚIA LUI KELION — pe FAȚA avatarului (morph targets ARKit),
+         NU în badge text care acoperea butoane (owner, 23 aug: „satisfacție
+         acoperă butoane, nu se poate să se folosească ce are avatarul în pachet?") */}
       {/* #5 ALERTĂ SĂNĂTATE — notificare importantă, nu dispare singur */}
       {alertaSanatate && (
         <div style={{
