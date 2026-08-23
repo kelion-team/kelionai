@@ -38,7 +38,9 @@ describe('P20 — porțile de verdict ale rutei vocale (constatările critice)',
 
   it('negativul NU se mai încuie pe fragment PARȚIAL de transcriere („Hei" înaintea lui „Kelion")', () => {
     // la primul cadru cu temei, lipsa numelui NU pune verdict false — cadrul așteaptă
-    expect(ruta).toMatch(/const adresata = turaAdresataAcum\(\)\s*\n\s*if \(!adresata && !turaDeSistem\) \{/)
+    // (linia 1389: const adresata = turaAdresataAcum(), urmată de if pe linia 1392
+    //  — cu app.log.info între, deci \s* în loc de \n direct)
+    expect(ruta).toMatch(/const adresata = turaAdresataAcum\(\)[\s\S]{0,500}?if \(!adresata && !turaDeSistem\) \{/)
     // în onTranscriereUser, false definitiv doar pe transcript FINAL
     expect(ruta).toMatch(/else if \(final && verdictTura === null\) \{/)
   })

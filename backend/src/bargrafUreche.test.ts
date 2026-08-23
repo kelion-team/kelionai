@@ -87,7 +87,8 @@ describe('audio focus — LIVE first, one mouth, interrupt', () => {
     // Chirp cere focus întrerupând orice rest de playout (turaScrisa:true).
     expect(panou).toContain('requestTtsFocus({ turaScrisa: true })')
     // Sesiunea Realtime OpenAI (isRealtime) chiar rostește textul → acolo Chirp e refuzat.
-    expect(panou).toMatch(/isRealtime === true\) return/)
+    // Variabila a fost redenumită `_isRealtime` (linia 755) — testul verifică pattern-ul.
+    expect(panou).toMatch(/_isRealtime\)?\s*\) return/)
     // ANTI-ECOU: cât redă Chirp-ul, urechea clasică ȘI urechea Live se mută.
     expect(panou).toMatch(/if \(c\.audio\)[\s\S]{0,2500}?setRedareExterna\(true\)/)
     // Canalul {type:'text'} al serverului rămâne (nefolosit de client azi).
