@@ -491,7 +491,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     //    de tăcere. Măsurat: 1009 minute într-o zi (16.8h), $588 pe voce în
     //    august — majoritatea TĂCERE. Acum: 5 minute fără nicio vorbire →
     //    sesiunea se închide singură, cu un mesaj onest.
-    const MAX_TACERE_MS = 5 * 60_000 // 5 minute fără transcriere = închidere
+    const MAX_TACERE_MS = 60_000 // 1 minut fără transcriere = închidere (owner, 23 aug: „1 minut e suficient")
     let ceasTacere: NodeJS.Timeout | null = null
     let ultimaActivitateLa = Date.now()
     const reseteazaCeasTacere = (): void => {
@@ -501,7 +501,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         if (inchis) return
         app.log.info(`vocal-live: închidere automată după ${MAX_TACERE_MS / 60_000} min de tăcere (cost idle oprit)`)
         try {
-          socket.send(JSON.stringify({ type: 'eroare', motiv: 'Sesiunea s-a închis după 5 minute de tăcere — deschide-o din nou când vrei să vorbești.' }))
+          socket.send(JSON.stringify({ type: 'eroare', motiv: 'Sesiunea s-a închis după 1 minut de tăcere — deschide-o din nou când vrei să vorbești.' }))
         } catch { /* socket deja mort */ }
         socket.close(1000, 'idle_timeout')
       }, MAX_TACERE_MS)
