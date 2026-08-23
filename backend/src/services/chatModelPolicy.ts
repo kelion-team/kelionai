@@ -12,7 +12,11 @@ export interface OptiuniModelOrchestrator {
 }
 
 export function alegeModelOrchestrator(opt: OptiuniModelOrchestrator): string {
-  return opt.creierDublu && opt.turaGrea
-    ? `${GEMINI_DIRECT_PREFIX}${opt.modelProfund}`
-    : opt.modelChat
+  // COMUTATOR DE CREIER (23 aug 2026): creierDublu (Gemini Pro) se aplică DOAR
+  // când modelul de chat e Gemini. Pe OpenAI, modelul ales de selectedBrainModel
+  // e deja treapta corectă (luna/medium/heavy/max) — nu-l suprascriem cu Gemini.
+  if (opt.modelChat.startsWith(GEMINI_DIRECT_PREFIX) && opt.creierDublu && opt.turaGrea) {
+    return `${GEMINI_DIRECT_PREFIX}${opt.modelProfund}`
+  }
+  return opt.modelChat
 }
