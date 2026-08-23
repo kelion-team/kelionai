@@ -464,6 +464,15 @@ export default function ChatPanel({
   // area is narrow, and a click "next to" the text didn't grab focus — it took
   // several clicks). The ref is targeted by the handler on the composer row.
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
+  // ── ZGOMOTUL OPREȘTE TASTAREA (owner, 23 aug 2026: „orice zgomot îți alterează
+  //    posibilitatea de a scrie") — cât timp userul scrie activ în composer,
+  //    microfonul se MUTĂ ca să nu mai intercepteze sunete de tastatură care
+  //    ar porni VOX/barge-in și ar tăia scrierea. La oprirea tastării (1.5s
+  //    fără tastă) sau pierderea focusului, microfonul revine automat.
+  //    NU folosește micManualOffRef (aia e pentru oprire manuală permanentă) —
+  //    e un ref separat, temporar, care nu interacționează cu logica de recover.
+  const tastareActivaRef = useRef(false)
+  const tastareDebounceRef = useRef<number | null>(null)
   // AUTO-CREȘTERE a câmpului de scris (owner, 20 aug: „tabul de scris nu permite
   // să scrii mesajul întreg"). Era un <input> pe o linie — Enter trimitea, deci
   // NU se putea compune un mesaj lung/pe mai multe rânduri ca să supervizezi
@@ -1926,6 +1935,47 @@ export default function ChatPanel({
   // chiar EXISTĂ (modelul e în cache) — un buton pentru o funcție moartă ar fi
   // exact „doar poza" interzisă azi de owner.
   const [urecheaLocalaGata, setUrecheaLocalaGata] = useState(false)
+  // ── ZGOMOTUL OPREȘTE TASTAREA (owner, 23 aug 2026) — useEffect care mută
+  //    microfonul cât timp userul tastează. Definit AICI (după urecheaLocalaRef)
+  //    ca să evite TDZ pe ref-urile declarate mai târziu în componentă.
+  useEffect(() => {
+    const el = composerInputRef.current
+    if (!el) return
+    const aplicaPauzaTastare = (pauza: boolean): void => {
+      if (tastareActivaRef.current === pauza) return
+      tastareActivaRef.current = pauza
+      // Mută ambele căi: microfonul clasic (micStream) ȘI sesiunea Live (Gemini)
+      micRef.current?.setMuted(pauza)
+      vlRef.current?.setMuted(pauza)
+      // Urechea locală (offline) — și ea produce fraze din zgomot de tastatură
+      urecheaLocalaRef.current?.setMuted(pauza)
+    }
+    const onKeyDown = (): void => {
+      // Prima tastă → mută microfonul
+      if (!tastareActivaRef.current) aplicaPauzaTastare(true)
+      // Reset debounce — 1.5s fără tastă = terminat de scris
+      if (tastareDebounceRef.current) window.clearTimeout(tastareDebounceRef.current)
+      tastareDebounceRef.current = window.setTimeout(() => {
+        aplicaPauzaTastare(false)
+        tastareDebounceRef.current = null
+      }, 1500)
+    }
+    const onBlur = (): void => {
+      // Pierde focusul → dezmută imediat (nu mai scrie)
+      if (tastareDebounceRef.current) {
+        window.clearTimeout(tastareDebounceRef.current)
+        tastareDebounceRef.current = null
+      }
+      aplicaPauzaTastare(false)
+    }
+    el.addEventListener('keydown', onKeyDown)
+    el.addEventListener('blur', onBlur)
+    return () => {
+      el.removeEventListener('keydown', onKeyDown)
+      el.removeEventListener('blur', onBlur)
+      if (tastareDebounceRef.current) window.clearTimeout(tastareDebounceRef.current)
+    }
+  }, [])
   const pornesteUrecheaLocala = async (): Promise<void> => {
     if (esteConectat() || micManualOffRef.current || urecheaLocalaRef.current) return
     const gata = await pregatesteUrecheaOffline()
