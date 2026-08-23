@@ -114,19 +114,22 @@ export const googleTools: Tool[] = [
   {
     name: 'create_presentation',
     description:
-      'Create a Google Slides presentation in the user\'s account: a title plus a list of slides (each with a title and body text). Use when the user asks for a presentation, a deck, or slides on a topic — write the content yourself, well structured. Returns the edit URL. This is a PAID extra service (charged from the user\'s credits automatically — do not charge or refuse yourself).',
+      'Create a Google Slides presentation in the user\'s account: a title plus a list of slides (each with a title, body text, and optional image). BEFORE creating, ALWAYS ask the user: (1) what LANGUAGE the slides should be in, (2) how MANY slides they want, (3) whether they want IMAGES on slides (and if yes, what kind — diagrams, photos, charts). Only after they answer, build the content yourself — well structured, in THEIR language — and call this tool. Each slide can have: title, body text (bullet-style), an optional image URL (public https URL to a PNG/JPG), and a layout type. Returns the edit URL. This is a PAID extra service (charged from the user\'s credits automatically — do not charge or refuse yourself).',
     input_schema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Presentation title.' },
+        title: { type: 'string', description: 'Presentation title (in the user\'s chosen language).' },
+        language: { type: 'string', description: 'The language code for the presentation content (e.g. "ro", "en", "es", "de", "fr"). Write ALL slide text in this language.' },
         slides: {
           type: 'array',
-          description: 'The slides, in order. Keep each body concise (bullet-style lines).',
+          description: 'The slides, in order. Keep each body concise (bullet-style lines). Each slide can optionally have an image.',
           items: {
             type: 'object',
             properties: {
-              title: { type: 'string', description: 'Slide title.' },
-              body: { type: 'string', description: 'Slide body text (newline-separated points).' },
+              title: { type: 'string', description: 'Slide title (in the user\'s chosen language).' },
+              body: { type: 'string', description: 'Slide body text (newline-separated points, in the user\'s chosen language).' },
+              image_url: { type: 'string', description: 'Optional: public https URL to an image (PNG/JPG, max 10MB) to display on this slide. Use for diagrams, charts, photos that illustrate the slide content.' },
+              layout: { type: 'string', enum: ['title_body', 'title_image', 'title_body_image', 'image_only', 'title_only'], description: 'Optional slide layout: title_body (default), title_image (title + large image), title_body_image (title + body + image), image_only (just an image), title_only (just a title slide).' },
             },
           },
         },
@@ -1027,32 +1030,83 @@ async function createPresentation(
   const cj = (await cRes.json()) as { presentationId?: string }
   const id = cj.presentationId
   if (!id) return JSON.stringify({ error: 'slides_no_id' })
+  type LayoutType = 'title_body' | 'title_image' | 'title_body_image' | 'image_only' | 'title_only'
   const lista = (Array.isArray(slides) ? slides : [])
     .map((s) => {
       const o = (s ?? {}) as Record<string, unknown>
-      return { titlu: String(o.title ?? o.titlu ?? '').slice(0, 200), corp: String(o.body ?? o.corp ?? '').slice(0, 4000) }
+      const layoutRaw = String(o.layout ?? 'title_body') as LayoutType
+      const layout: LayoutType = ['title_body', 'title_image', 'title_body_image', 'image_only', 'title_only'].includes(layoutRaw)
+        ? layoutRaw
+        : 'title_body'
+      return {
+        titlu: String(o.title ?? o.titlu ?? '').slice(0, 200),
+        corp: String(o.body ?? o.corp ?? '').slice(0, 4000),
+        imagine: String(o.image_url ?? o.imagine ?? '').slice(0, 2000),
+        layout,
+      }
     })
-    .filter((s) => s.titlu || s.corp)
+    .filter((s) => s.titlu || s.corp || s.imagine)
     .slice(0, 25)
   if (lista.length) {
     const requests = lista.flatMap((s, i) => {
       const slideId = `kelion_slide_${i}`
       const titluId = `kelion_titlu_${i}`
       const corpId = `kelion_corp_${i}`
+      const imgId = `kelion_img_${i}`
+      // Alege layout-ul Google Slides în funcție de ce vrea userul
+      const predefinedLayout =
+        s.layout === 'title_only' ? 'TITLE' :
+        s.layout === 'image_only' ? 'BLANK' :
+        s.layout === 'title_image' ? 'TITLE' :
+        s.layout === 'title_body_image' ? 'TITLE_AND_BODY' :
+        'TITLE_AND_BODY' // title_body (default)
+      const placeholderMappings: { layoutPlaceholder: { type: string }; objectId: string }[] = []
+      if (s.layout !== 'image_only' && s.layout !== 'title_only') {
+        placeholderMappings.push({ layoutPlaceholder: { type: 'TITLE' }, objectId: titluId })
+      } else if (s.layout === 'title_only') {
+        placeholderMappings.push({ layoutPlaceholder: { type: 'TITLE' }, objectId: titluId })
+      }
+      if (s.layout === 'title_body' || s.layout === 'title_body_image') {
+        placeholderMappings.push({ layoutPlaceholder: { type: 'BODY' }, objectId: corpId })
+      }
       const reqs: unknown[] = [
         {
           createSlide: {
             objectId: slideId,
-            slideLayoutReference: { predefinedLayout: 'TITLE_AND_BODY' },
-            placeholderIdMappings: [
-              { layoutPlaceholder: { type: 'TITLE' }, objectId: titluId },
-              { layoutPlaceholder: { type: 'BODY' }, objectId: corpId },
-            ],
+            slideLayoutReference: { predefinedLayout },
+            placeholderIdMappings: placeholderMappings,
           },
         },
       ]
-      if (s.titlu) reqs.push({ insertText: { objectId: titluId, text: s.titlu } })
-      if (s.corp) reqs.push({ insertText: { objectId: corpId, text: s.corp } })
+      if (s.titlu && s.layout !== 'image_only') reqs.push({ insertText: { objectId: titluId, text: s.titlu } })
+      if (s.corp && (s.layout === 'title_body' || s.layout === 'title_body_image')) {
+        reqs.push({ insertText: { objectId: corpId, text: s.corp } })
+      }
+      // Imagine: createImage cu URL public. Google descarcă imaginea și o pune
+      // pe slide. Pentru layout-uri cu text + imagine, imaginea e plasată în
+      // jumătatea dreapta; pentru image_only, ocupă tot slide-ul.
+      if (s.imagine) {
+        const isFullSlide = s.layout === 'image_only'
+        const imgReq: Record<string, unknown> = {
+          createImage: {
+            objectId: imgId,
+            url: s.imagine,
+            // PT = puncte (1 pt = 1/72 inch). Slide-ul default e 10in × 5.63in
+            // = 720 × 405 pt. Pentru image_only: ocupă tot. Pentru layout cu
+            // text: jumătatea dreapta (360..700 × 60..345).
+            elementProperties: {
+              pageObjectId: slideId,
+              size: isFullSlide
+                ? { width: { magnitude: 700, unit: 'PT' }, height: { magnitude: 400, unit: 'PT' } }
+                : { width: { magnitude: 320, unit: 'PT' }, height: { magnitude: 285, unit: 'PT' } },
+              transform: isFullSlide
+                ? { scaleX: 1, scaleY: 1, translateX: 10, translateY: 3, unit: 'PT' }
+                : { scaleX: 1, scaleY: 1, translateX: 370, translateY: 60, unit: 'PT' },
+            },
+          },
+        }
+        reqs.push(imgReq)
+      }
       return reqs
     })
     // Prezentarea EXISTĂ deja — un eșec la umplere se spune, nu se ascunde.

@@ -1,0 +1,32 @@
+Prezentari: intreaba limba/nr slide-uri/imagini + suport imagini.
+
+Problema (owner, 23 aug 2026): „prezentari nu merge, nu face corect
+cu imagini, cu scris, nu intreaba limba, nr de sliduri etc."
+
+Cauze:
+1. Descrierea uneltei spunea „write the content yourself" — modelul
+   NU intreba userul nimic, creea direct cu presupuneri.
+2. createPresentation suporta DOAR titlu + text — fara imagini.
+3. Nu exista camp pentru limbă, numar de slide-uri, sau layout.
+
+Fix 1 (google.ts — descrierea uneltei): acum spune clar „BEFORE
+creating, ALWAYS ask the user: (1) what LANGUAGE, (2) how MANY slides,
+(3) whether they want IMAGES". Schema include: language, image_url
+per slide, layout (title_body/title_image/title_body_image/image_only/
+title_only).
+
+Fix 2 (google.ts — createPresentation): suporta imagini prin Google
+Slides createImage API. Layout-uri variate:
+- title_body: titlu + corp (default, vechi)
+- title_image: titlu + imagine mare
+- title_body_image: titlu + corp + imagine in dreapta
+- image_only: imagine pe tot slide-ul
+- title_only: doar titlu (slide de coperta)
+
+Fix 3 (chat.ts — prompt sistem): instructiuni explicite pentru admin
+„NU o creezi din prima. INTREABA INTAI: limba, nr slide-uri, imagini".
+Dupa ce userul raspunde, construieste continutul IN LIMBA aleasa.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
