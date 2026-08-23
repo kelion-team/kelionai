@@ -72,8 +72,16 @@ export function unregisterLiveFocus(): void {
  * tot — o singură gură în tot browserul, indiferent de felul turei.
  */
 export function requestTtsFocus(opts?: { turaScrisa?: boolean }): boolean {
-  if (foreignVoiceLock) return false
-  if (active === 'live' && !opts?.turaScrisa) return false
+  if (foreignVoiceLock) {
+    // eslint-disable-next-line no-console
+    console.warn(`[audioFocus] requestTtsFocus respins: foreignVoiceLock=true (alt tab are vocea)`)
+    return false
+  }
+  if (active === 'live' && !opts?.turaScrisa) {
+    // eslint-disable-next-line no-console
+    console.warn(`[audioFocus] requestTtsFocus respins: active=live și nu e turaScrisa`)
+    return false
+  }
   // O GURĂ NOUĂ OPREȘTE CELELALTE GURI (owner, 20 aug: „se aud multe voci paralele,
   // de la mai multe creiere… o singură ieșire audio"). O tură SCRISĂ care ia gura
   // cât LIVE e activ TREBUIE să taie ÎNTÂI playout-ul LIVE (PCM-ul Gemini Live rămas
