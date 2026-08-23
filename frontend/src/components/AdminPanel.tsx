@@ -614,12 +614,6 @@ export default function AdminPanel({
   const [resetMsg, setResetMsg] = useState('')
   // Legarea contului Revolut (PSD2) — starea celor două butoane noi.
   const [legMsg, setLegMsg] = useState('')
-  // HERE STOOD `cardBusy` and `cardDeschis` — the state of the „Creează cardul”
-  // button and of the window that showed the Stripe virtual card number. The
-  // Issuing card left with Stripe (Jul 30): providers are paid with Adrian's card.
-  // Stripe transactions were REMOVED from the panel on Jul 31 with the channel —
-  // they are no longer read, so their state is no longer kept (nor requested
-  // from the server on every tab load).
   // AI pool — how much you add/remove (typed value) + the buttons' state.
   // Leads — visitors who left their email. Tri-stat (auditul admin, 3 aug).
   const [leads, setLeads] = useState<Lead[] | null | 'necitit'>('necitit')
@@ -691,14 +685,6 @@ export default function AdminPanel({
     }, 400)
     return () => window.clearTimeout(id)
   }, [buildOrder, tab])
-  // THE PAID BRAIN TOGGLE (Adrian, Aug 2: "Everything FREE. The admin can
-  // EXPRESSLY request the paid Fable 5 brain for the CONSTRUCTOR only"). Off by
-  // default; when on, the order text carries the "Fable 5" marker that the VPS
-  // constructor parses.
-  // (Toggle-ul „Use Fable 5 brain (paid)" a fost SCOS, 3 aug — extirparea
-  // OpenRouter: creierul plătit Fable 5 mergea prin OpenRouter, care nu mai
-  // există. Constructorul e Gemini-only; marcajul 'fable-5' rămâne acceptat
-  // doar în API-ul workerului, pentru compatibilitate cu rapoartele vechi.)
   // RECOVERY (Adrian, Jul 27): saved versions + saving the current version.
   interface RecoveryRow {
     tag: string
@@ -1428,9 +1414,6 @@ export default function AdminPanel({
                 («notificari»), iar alarmele (creier căzut, ordin mort, PR gata)
                 se scriu tot acolo — panoul se mai deschide doar prin voce. */}
           </div>
-          {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
-          onOpenSettings rămâne în props (fereastra CustomerSettings poate fi
-          redeschisă de altundeva la nevoie), dar butonul nu se mai arată. */}
           {/* Notificările pe telefon: anunțurile santinelei („PR gata") și
               alarmele ajung la owner și când NU e pe site — Web Push, pornit
               conștient de aici (browserul oricum cere permisiunea lui). */}
@@ -1498,20 +1481,6 @@ export default function AdminPanel({
                 cifră de desenat — o pastilă cu un „$0.00" fabricat ar fi exact
                 minciuna interzisă de regula #1. Starea creierului (Gemini) se
                 vede pe pastila Gemini din bară. */}
-                {/* HERE STOOD „Depune în pungă” and „Trage profitul”. Both went
-                through Stripe — Checkout for the deposit, `/v1/payouts` for the
-                withdrawal. With Stripe out they have nothing to move: the users'
-                money comes on the Revolut link, straight into his account, and the
-                profit no longer passes through us. A button that does nothing
-                anymore is worse than its absence — it looks like it works. */}
-                {/* HERE STOOD „The money circuit: users → Stripe → AI” — the four
-                links, the „What I can read from Stripe” block, the Issuing state,
-                the virtual card creation and its number reveal. Removed on Jul 30:
-                „Stripe goes out completely and Pro comes in”. The circuit no longer
-                passes through the app — the user pays on the Revolut link, the money
-                goes straight to the owner, and the providers are paid with his card.
-                What remains useful here is the shortest path to where the card gets
-                changed, at each provider. */}
                 {/* THE GUARD THAT KILLED THE PANEL (Adrian, Aug 2: „mai jos nu
                 mai e nimic"): this block was gated on `expenses` — a field
                 built in stripe.ts that silently DIED when Stripe was removed
@@ -2858,9 +2827,6 @@ export default function AdminPanel({
                   Trimite ordinul
                 </button>
               </form>
-              {/* (Checkbox-ul „Use Fable 5 brain (paid)" a fost SCOS, 3 aug —
-                  extirparea OpenRouter: Fable 5 mergea prin OpenRouter, care nu
-                  mai există. Constructorul rulează pe Gemini, cheia ownerului.) */}
               {buildMsg && <div className="chat-hint">{buildMsg}</div>}
               {/* EVALUAREA CERINȚEI + AI-uri pe capacitate (owner, 13 aug): cerința
               e evaluată, poarta de calitate spune dacă trece, iar AI-urile potrivite
@@ -3630,7 +3596,6 @@ export default function AdminPanel({
             )}
           </section>
         )}
-        {/* (Tabul „Chat live" SCOS — 10 aug, ordinul ownerului.) */}
         {tab === 'share' && (
           <section className="admin-finance">
             {(() => {
@@ -3737,8 +3702,6 @@ export default function AdminPanel({
             })()}
           </section>
         )}
-        {/* (Tabul „Cereri neacoperite" SCOS — 10 aug, ordinul ownerului.) */}
-        {/* (Tabul „Istoric chat" a fost SCOS ca tab de sus — 10 aug, ownerul: „se mută în butonul user, cu istoric pe user"; istoricul per user se deschide din tabul Utilizatori, click pe rând.) */}
       </div>
       {userConvo && (
         <div className="convo-overlay" onClick={closeUserConvo}>

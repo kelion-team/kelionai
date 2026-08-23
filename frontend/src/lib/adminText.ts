@@ -20,7 +20,6 @@ import { loadLocalLang } from './prefs'
 export interface AdminStrings {
   // Taburile
   tabEnterprise: string
-  tabTrading: string
   tabMoney: string
   // Becuri de credit AI (owner, 13 aug: „bec roșu/verde… click = reîncărcare")
   becuriTitlu: string
@@ -34,10 +33,7 @@ export interface AdminStrings {
   becuriBaraFaraCredit: string
   tabUsers: string
   tabVisitors: string
-  tabLiveChat: string
-  tabChatHistory: string
   tabShare: string
-  tabGaps: string
   tabStores: string
   tabInbox: string
   tabVoiceprints: string
@@ -192,7 +188,6 @@ export interface AdminStrings {
 
 const en: AdminStrings = {
   tabEnterprise: '➕ Add agent',
-  tabTrading: '📈 Trading',
   tabMoney: 'Money',
   becuriTitlu: 'AI credit — lights (click = top-up page)',
   becuriLoad: 'reading balances…',
@@ -205,10 +200,7 @@ const en: AdminStrings = {
   becuriBaraFaraCredit: '{n} AI out of credit — click for Money',
   tabUsers: 'Users',
   tabVisitors: 'Visitors',
-  tabLiveChat: 'Live chat',
-  tabChatHistory: 'Chat history',
   tabShare: 'Share',
-  tabGaps: 'Unmet requests',
   tabStores: 'Stores',
   tabInbox: 'Inbox',
   tabVoiceprints: 'Voiceprints',
@@ -352,7 +344,6 @@ const en: AdminStrings = {
 
 const ro: AdminStrings = {
   tabEnterprise: '➕ Agent nou',
-  tabTrading: '📈 Tranzacționare',
   tabMoney: 'Bani',
   becuriTitlu: 'Credit AI — becuri (click = pagina de reîncărcare)',
   becuriLoad: 'se citesc soldurile…',
@@ -365,10 +356,7 @@ const ro: AdminStrings = {
   becuriBaraFaraCredit: '{n} AI fără credit — click pentru Bani',
   tabUsers: 'Utilizatori',
   tabVisitors: 'Vizitatori',
-  tabLiveChat: 'Chat live',
-  tabChatHistory: 'Istoric chat',
   tabShare: 'Distribuie',
-  tabGaps: 'Cereri neacoperite',
   tabStores: 'Magazine',
   tabInbox: 'Inbox',
   tabVoiceprints: 'Amprente vocale',
