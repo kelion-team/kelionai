@@ -391,14 +391,23 @@ export function normalizeEmbedUrl(raw: string): string {
 
   // YouTube → /embed/<id>. enablejsapi=1 lets us duck its volume (postMessage)
   // while Kelion speaks, so his voice sits in front — like a car radio dropping
-  // the music when the nav talks.
+  // the music when the nav talks. autoplay=1: clipul pornește SINGUR pe monitor
+  // (owner, 27 iul: „play doesn't work" — playerul se deschidea OPRIT).
   if (host === 'youtube.com' || host === 'm.youtube.com') {
     const id = u.searchParams.get('v')
-    if (id) return `https://www.youtube.com/embed/${id}?enablejsapi=1`
+    if (id) return `https://www.youtube.com/embed/${id}?autoplay=1&enablejsapi=1`
+    // /shorts/XXX și /live/XXX — formate pe care normalizeEmbedUrl vechi le rata
+    const shorts = u.pathname.match(/^\/(?:shorts|live)\/([\w-]{6,})/)
+    if (shorts) return `https://www.youtube.com/embed/${shorts[1]}?autoplay=1&enablejsapi=1`
   }
   if (host === 'youtu.be') {
     const id = u.pathname.slice(1)
-    if (id) return `https://www.youtube.com/embed/${id}?enablejsapi=1`
+    if (id) return `https://www.youtube.com/embed/${id}?autoplay=1&enablejsapi=1`
+  }
+  // YouTube Music — host e music.youtube.com, nu trece de verificarea de sus
+  if (host === 'music.youtube.com') {
+    const id = u.searchParams.get('v')
+    if (id) return `https://www.youtube.com/embed/${id}?autoplay=1&enablejsapi=1`
   }
 
   // Google Maps Embed API URLs (/maps/embed/…) are already embeddable — leave them.

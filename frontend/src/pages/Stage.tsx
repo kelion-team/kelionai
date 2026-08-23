@@ -372,6 +372,12 @@ function MonitorPagina({ url, title, taskId, allow }: { url: string; title: stri
     setMotivNecitit(null)
     // URL relativ (ex. /api/route) e pagina NOASTRĂ, same-origin — mereu înrămabilă.
     if (!/^https?:\/\//i.test(url)) return
+    // YOUTUBE: embed-check verifică URL-ul ORIGINAL (watch?v=XXX), care trimite
+    // X-Frame-Options: SAMEORIGIN → „nu se poate înrăma" → blocat. Dar
+    // normalizeEmbedUrl îl transformă în /embed/XXX CARE FUNCȚIONEAZĂ în iframe.
+    // Deci pentru YouTube, sărim peste embed-check — știm sigur că embed-ul merge.
+    const normalized = normalizeEmbedUrl(url)
+    if (normalized !== url) return // URL-ul a fost transformat — încredere în transformare
     let viu = true
     fetch(`/api/embed-check?url=${encodeURIComponent(url)}`)
       .then((r) => (r.ok ? (r.json() as Promise<{ incadrabil?: boolean | null }>) : null))
