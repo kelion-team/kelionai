@@ -133,34 +133,38 @@ const FAMILII: readonly FamiliePretentie[] = [
     // adrianenc11@gmail.com" — poarta NU l-a prins fiindcă pattern-ul vechi cerea
     // cuvântul „email", dar textul conținea o ADRESĂ de email, nu cuvântul.
     // Acum prinde ȘI cuvântul, ȘI adresa (x@x.x), ȘI „către"/„la" + adresă.
-    re: /(?<!n-)(?<!\p{L})am\s+trimis\b[^.!?\n]{0,60}(\b(email|e-?mail)\p{L}*|[\w.+-]+@[\w.-]+\.\w{2,})/iu,
+    // Prinde ȘI pasivul („a fost trimis"/„s-a trimis") — a doua minciune dovedită
+    // live: creierul a chemat get_recent_emails dar a spus „a fost trimis cu succes".
+    re: /(?:(?<!n-)(?<!\p{L})am\s+trimis|[ai]\s+fost\s+trimis|s-?a\s+trimis)\b[^.!?\n]{0,60}(\b(email|e-?mail)\p{L}*|[\w.+-]+@[\w.-]+\.\w{2,}|c[ăa]tre|lucr)/iu,
     unelte: ['send_email'],
-    eticheta: '„am trimis emailul" — fără send_email',
+    eticheta: '„am trimis/a fost trimis emailul" — fără send_email',
   },
   {
-    re: /(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\b(document\p{L}*|doc)\b/iu,
+    // ȘI activ (am creat), ȘI pasiv (a fost creat / s-a creat) — a doua minciune
+    // dovedită: creierul ocolea poarta prin pasiv.
+    re: /(?:(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)|[ai]\s+fost\s+(creat|f[ăa]cut)|s-?a\s+(creat|f[ăa]cut))\b[^.!?\n]{0,60}\b(document\p{L}*|doc)\b/iu,
     unelte: ['create_doc'],
-    eticheta: '„am creat documentul" — fără create_doc',
+    eticheta: '„am/a fost creat documentul" — fără create_doc',
   },
   {
-    re: /(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\bprezentare/iu,
+    re: /(?:(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)|[ai]\s+fost\s+(creat|f[ăa]cut)|s-?a\s+(creat|f[ăa]cut))\b[^.!?\n]{0,60}\bprezentare/iu,
     unelte: ['create_presentation'],
-    eticheta: '„am creat prezentarea" — fără create_presentation',
+    eticheta: '„am/a fost creat prezentarea" — fără create_presentation',
   },
   {
-    re: /(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\bformular/iu,
+    re: /(?:(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)|[ai]\s+fost\s+(creat|f[ăa]cut)|s-?a\s+(creat|f[ăa]cut))\b[^.!?\n]{0,60}\bformular/iu,
     unelte: ['create_form'],
-    eticheta: '„am creat formularul" — fără create_form',
+    eticheta: '„am/a fost creat formularul" — fără create_form',
   },
   {
-    re: /(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\b(tabel|sheet)/iu,
+    re: /(?:(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)|[ai]\s+fost\s+(creat|f[ăa]cut)|s-?a\s+(creat|f[ăa]cut))\b[^.!?\n]{0,60}\b(tabel|sheet)/iu,
     unelte: ['create_sheet'],
-    eticheta: '„am creat tabelul" — fără create_sheet',
+    eticheta: '„am/a fost creat tabelul" — fără create_sheet',
   },
   {
-    re: /(?<!n-)(?<!\p{L})am\s+urcat\b[^.!?\n]{0,60}\b(youtube|clipul)/iu,
+    re: /(?:(?<!n-)(?<!\p{L})am\s+urcat|[ai]\s+fost\s+urcat|s-?a\s+urcat)\b[^.!?\n]{0,60}\b(youtube|clipul)/iu,
     unelte: ['youtube_urca'],
-    eticheta: '„am urcat pe YouTube" — fără youtube_urca',
+    eticheta: '„am/a fost urcat pe YouTube" — fără youtube_urca',
   },
   // ÎNGHEȚUL DE 5 LUNI (owner, 16 aug 06:41, cu captura: „asa incremeneste,
   // nu face nimic mai departe... ai zis mincinos ca ai rezolvat"): fraza-ritual
