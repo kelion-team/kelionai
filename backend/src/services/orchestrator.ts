@@ -273,9 +273,13 @@ export async function runOrchestrator(
       toolChoice,
       allowedFunctionNames,
     }
-    // Creierul e Gemini direct (google-direct/*). Alt prefix = eroare NUMITĂ.
-    if (!modelRunda.startsWith(GEMINI_DIRECT_PREFIX)) {
-      throw new Error(`model_necunoscut: „${modelRunda}" — aștept google-direct/*`)
+    // COMUTATOR REAL: orchestrator acceptă ORICE prefix pe care brainChat îl
+    // dispatch-uie (google-direct/* sau openai/*). Vechea gardă refuza OpenAI
+    // → pe creier_activ=openai, chatul murea cu „model_necunoscut" și vocea
+    // (cere_creierului → /api/chat) cădea cu totul.
+    const OPENAI_PREFIX = 'openai/'
+    if (!modelRunda.startsWith(GEMINI_DIRECT_PREFIX) && !modelRunda.startsWith(OPENAI_PREFIX)) {
+      throw new Error(`model_necunoscut: „${modelRunda}" — prefix necunoscut (acceptă: google-direct/ openai/)`)
     }
     // PROFILING (Aug 2 — the 38-second weather turn): every brain round gets
     // its real duration in the log, so a slow turn shows WHERE the seconds go
