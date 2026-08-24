@@ -151,6 +151,10 @@ jobs:
         run: |
           set -euo pipefail
           cleanup() {
+            local rc=$?
+            if [ "$rc" -ne 0 ]; then
+              docker compose --project-name kelion-ci --file deploy/compose.production.yml ps --all || true
+            fi
             docker compose --project-name kelion-ci --file deploy/compose.production.yml down --volumes --remove-orphans || true
             docker rm --force kelion-ci-postgres >/dev/null 2>&1 || true
             docker network rm kelion-proxy >/dev/null 2>&1 || true

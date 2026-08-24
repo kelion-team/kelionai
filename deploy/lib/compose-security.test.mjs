@@ -117,4 +117,9 @@ test('CI inițializează starea release deținută de root prin sudo', () => {
     /docker exec kelion-ci-postgres pg_dump[^\n]+--format=custom \\\n\s*> \/tmp\/kelion-ci-postgres\/backup\/pre-migration\.dump/,
   )
   assert.doesNotMatch(prVerify, /docker cp kelion-ci-postgres:\/tmp\/pre-migration\.dump/)
+  assert.match(
+    prVerify,
+    /cleanup\(\) \{[\s\S]*?local rc=\$\?[\s\S]*?docker compose[^\n]+ps --all[\s\S]*?docker compose[^\n]+down/,
+  )
+  assert.doesNotMatch(prVerify, /docker(?: compose)?\s+logs\b/)
 })
