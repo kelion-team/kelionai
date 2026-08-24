@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
 
@@ -20,6 +21,13 @@ describe('Expertul fiabil — scara de modele', () => {
     const ladder = await expertModelLadder()
     expect(new Set(ladder).size).toBe(ladder.length)
     expect(ladder.every((model) => model.startsWith('openai/gpt-'))).toBe(true)
+  })
+
+  it('are exact cele trei roluri Luna, Terra și Sol, fără o treaptă duplicată', () => {
+    const source = readFileSync(new URL('./services/brain.ts', import.meta.url), 'utf8')
+    const rationament = readFileSync(new URL('./services/creierRationament.ts', import.meta.url), 'utf8')
+    expect(source).toContain('const configured = [config.openai.luna, config.openai.medium, config.openai.heavy]')
+    expect(rationament).toContain("export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'plan'")
   })
 })
 

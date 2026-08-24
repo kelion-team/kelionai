@@ -16,7 +16,7 @@ import {
 
 const stare = (over = {}) => ({
   speechLang: 'ro', meserieId: null, disabledGestures: [],
-  modelChoiceKv: null, voicePref: null, balance: null, ...over,
+  voicePref: null, balance: null, ...over,
 })
 
 let emailSeq = 0

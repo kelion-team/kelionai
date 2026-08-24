@@ -23,7 +23,7 @@ function isAllowedOpenAIModel(model: string): boolean {
 // Preserve the workload roles: Luna (fast/high-volume), Terra (balanced), Sol
 // (frontier). Model identifiers come only from validated runtime configuration.
 export async function expertModelLadder(): Promise<string[]> {
-  const configured = [config.openai.luna, config.openai.medium, config.openai.heavy, config.openai.max]
+  const configured = [config.openai.luna, config.openai.medium, config.openai.heavy]
   const rungs = configured.filter(isAllowedOpenAIModel).map((model) => `openai/${model}`)
   const unice: string[] = []
   for (const r of rungs) {

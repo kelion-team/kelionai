@@ -62,7 +62,6 @@ export interface AdminStrings {
   // Magazine
   checkingStores: string
   notListedYet: string
-  downloadsHead: string
   // Inbox
   readingMailbox: string
   mailboxEmpty: string
@@ -179,7 +178,6 @@ const en: AdminStrings = {
   vpsPillDead: 'Cannot measure the VPS resources (/proc is not answering)',
   checkingStores: 'Checking the stores live…',
   notListedYet: '○ not listed yet',
-  downloadsHead: 'Who downloaded (last 100)',
   readingMailbox: 'Reading the mailbox…',
   // TREI STĂRI, TREI TEXTE (auditul admin, 3 aug): golul real, IMAP-ul picat
   // și MAIL_PASS lipsă nu mai sunt strivite într-un singur mesaj ambiguu.
@@ -290,7 +288,6 @@ const ro: AdminStrings = {
   vpsPillDead: 'Nu pot măsura resursele VPS-ului (nu răspunde /proc)',
   checkingStores: 'Se verifică magazinele live…',
   notListedYet: '○ nelistat încă',
-  downloadsHead: 'Cine a descărcat (ultimele 100)',
   readingMailbox: 'Se citește cutia…',
   mailboxEmpty: 'Folderul INBOX e gol. (Mailurile deja procesate de Secretar stau în folderele Kelion-Answered / Kelion-ToAnswer / Kelion-Automated.)',
   mailboxReadFail: 'Citirea IMAP a PICAT: {motiv} — e o citire eșuată, nu o cutie goală. Reîncearcă.',

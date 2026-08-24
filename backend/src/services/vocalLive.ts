@@ -91,7 +91,6 @@ export interface VocalLiveEvenimente {
 
 export interface VocalLive {
   scrieAudio(pcm16k: Buffer): void
-  scrieCadru(jpegBase64: string): void
   anunta(text: string): void
   ancoreaza(text: string): void
   raspundeUnealta(id: string, name: string, rezultat: unknown): void
@@ -328,13 +327,6 @@ export function deschideVocalLive(
         return
       }
       send({ type: 'input_audio_buffer.append', audio: pcm24k.toString('base64') })
-    },
-    scrieCadru(jpegBase64): void {
-      if (!ready || !/^[A-Za-z0-9+/]+={0,2}$/.test(jpegBase64) || octetiDinBase64(jpegBase64) > 512 * 1024) return
-      send({
-        type: 'conversation.item.create',
-        item: { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: `data:image/jpeg;base64,${jpegBase64}` }] },
-      })
     },
     anunta(text): void { sendText(text, true) },
     ancoreaza(text): void { sendText(text, false) },

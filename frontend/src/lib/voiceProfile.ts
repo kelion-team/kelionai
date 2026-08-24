@@ -17,6 +17,15 @@ export type SpectralProfileStatus = {
   availability: SpectralProfileAvailability
 }
 
+type SpectralProfileApiResponse = {
+  voiceprint: null | {
+    name: string
+    hasAudio: boolean
+    updatedAt: string
+  }
+  availability: SpectralProfileAvailability
+}
+
 export function buildSpectralProfilePayload(
   samples: readonly (readonly number[])[],
   sampleRate: number,
@@ -60,18 +69,27 @@ export function isSpectralProfileAvailability(value: unknown): value is Spectral
 
 export function parseSpectralProfileStatus(value: unknown): SpectralProfileStatus | null {
   if (!value || typeof value !== 'object') return null
-  const candidate = value as Partial<SpectralProfileStatus>
-  const valid = typeof candidate.enrolled === 'boolean'
-    && (candidate.name === null || typeof candidate.name === 'string')
-    && typeof candidate.hasAudio === 'boolean'
-    && (candidate.updatedAt === null || typeof candidate.updatedAt === 'string')
-    && isSpectralProfileAvailability(candidate.availability)
-  if (!valid) return null
+  const candidate = value as Partial<SpectralProfileApiResponse>
+  if (!isSpectralProfileAvailability(candidate.availability)) return null
+  if (candidate.voiceprint === null) {
+    return {
+      enrolled: false,
+      name: null,
+      hasAudio: false,
+      updatedAt: null,
+      availability: candidate.availability,
+    }
+  }
+  if (!candidate.voiceprint || typeof candidate.voiceprint !== 'object') return null
+  const profile = candidate.voiceprint
+  if (typeof profile.name !== 'string'
+    || typeof profile.hasAudio !== 'boolean'
+    || typeof profile.updatedAt !== 'string') return null
   return {
-    enrolled: candidate.enrolled as boolean,
-    name: candidate.name as string | null,
-    hasAudio: candidate.hasAudio as boolean,
-    updatedAt: candidate.updatedAt as string | null,
-    availability: candidate.availability as SpectralProfileAvailability,
+    enrolled: true,
+    name: profile.name,
+    hasAudio: profile.hasAudio,
+    updatedAt: profile.updatedAt,
+    availability: candidate.availability,
   }
 }

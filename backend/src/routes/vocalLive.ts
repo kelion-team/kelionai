@@ -28,6 +28,7 @@ import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperatio
 import { trackSpeechLang } from '../services/lang.js'
 import { pareCerereVizuala } from '../services/simptomeLive.js'
 import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type DovadaUnealta } from '../services/poartaFaptelor.js'
+import { parseInputImageDataUrl } from '../services/inputImage.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -50,9 +51,9 @@ import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type
 //                     JSON { type:'coords', lat, lon } = GPS-ul device-ului
 //                     (8 aug: „nu are acces la gps, meteo" — fără el, ușa
 //                     creierului rula meteo/hărți fără loc);
-//                     JSON { type:'cadru', data } = UN cadru de cameră (JPEG
-//                     base64 brut) → intră ca instantaneu de imagine, nu video
-//                     (8 aug: „trebuie să poată folosi camera").
+//                     JSON { type:'cadre', cadre:[dataUrl] } = răspuns limitat
+//                     la cererea explicită `cere_cadre`; nu există flux video
+//                     continuu sau upload de cameră nesolicitat.
 //                     JSON { type:'intrerupe' } = utilizatorul a tăiat tura
 //                     curentă; restul cadrelor ei nu mai ajung la difuzor.
 //   server → client:  JSON —
@@ -322,6 +323,23 @@ export function ancoraConstructor(codexActiv: boolean): string {
     : '\nPENTRU ADMIN — CONSTRUCTOR: workerul Codex nu este configurat; spune setup_required și nu inventa execuție locală.'
 }
 
+export function capacitateVocalLive(): { disponibil: boolean; model: string; voce: string } {
+  return {
+    disponibil: vocalLiveDisponibila(),
+    model: config.openai.realtime,
+    voce: config.openaiVoice,
+  }
+}
+
+/** Contract comun cu frontendul: un singur instantaneu data URL, validat și plafonat. */
+export function cadreVedereLive(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const cadru = value.find((item): item is string =>
+    typeof item === 'string'
+    && parseInputImageDataUrl(item) !== null)
+  return cadru ? [cadru] : []
+}
+
 export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
   // Frontendul verifică disponibilitatea înainte de a deschide socketul.
   // Pulsul vocii — DOAR cifre (vezi pulsVoce, mai sus). Public: niciun conținut,
@@ -337,7 +355,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/vocal-live/capability', async (req, reply) => {
     if (!getSessionUser(req)) return reply.code(401).send({ error: 'unauthorized' })
     reply.header('Cache-Control', 'no-store')
-    return { disponibil: vocalLiveDisponibila() }
+    return capacitateVocalLive()
   })
 
   app.get('/api/vocal-live', {
@@ -879,18 +897,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               )
             }
           } else if (m.type === 'cadre') {
-            const cadre = Array.isArray(m.cadre)
-              ? m.cadre
-                .filter((c): c is string => typeof c === 'string' && c.length <= 700_000 && /^[A-Za-z0-9+/]+={0,2}$/.test(c))
-                .slice(-4)
-              : []
+            const cadre = cadreVedereLive(m.cadre)
             primesteCadre?.(cadre)
             primesteCadre = null
-          } else if (m.type === 'cadru' && typeof (m as { data?: unknown }).data === 'string') {
-            // OCHII SESIUNII (8 aug: „trebuie să poată folosi camera"): cadrul
-            // intră DIRECT în sesiunea Live, ca video în flux — modelul vede
-            // în timp ce vorbește, fără să treacă prin ușă.
-            live?.scrieCadru((m as { data: string }).data)
           } else if (m.type === 'aec') {
             // Browserul raportează dacă bucla de anulare a ecoului e vie —
             // doar atunci tăierea la vocea omului are voie să judece.

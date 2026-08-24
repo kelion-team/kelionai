@@ -1,48 +1,49 @@
 import { useEffect, useState } from 'react';
 import { apiFetch, consumeApiEventStream } from '../lib/transport';
-
-export interface DeployState {
-  status: 'idle' | 'running' | 'success' | 'failed';
-  step: string;
-  stepIndex: number;
-  totalSteps: number;
-  percent: number;
-  message: string;
-  startedAt: string | null;
-  updatedAt: string;
-  error?: string | null;
-}
+import {
+  parseDeployStatusPayload,
+  transitionDeployProgress,
+  type DeployProgressSnapshot,
+} from '../lib/deployProgress';
 
 export function DeployProgressBar() {
-  const [state, setState] = useState<DeployState>({
-    status: 'idle',
-    step: '',
-    stepIndex: 0,
-    totalSteps: 0,
-    percent: 0,
-    message: '',
-    startedAt: null,
-    updatedAt: new Date().toISOString(),
-    error: null,
+  const [snapshot, setSnapshot] = useState<DeployProgressSnapshot>({
+    unavailable: false,
+    state: {
+      status: 'idle',
+      jobId: null,
+      step: '',
+      stepIndex: 0,
+      totalSteps: 0,
+      percent: 0,
+      message: '',
+      startedAt: null,
+      updatedAt: new Date().toISOString(),
+      error: null,
+      commit: null,
+      liveVersion: null,
+    },
   });
   const [dismissed, setDismissed] = useState(false);
+  const { state, unavailable } = snapshot;
 
   useEffect(() => {
     const streamController = new AbortController();
     let pollInterval: ReturnType<typeof setInterval> | null = null;
 
+    const applyPayload = (value: unknown): void => {
+      const next = parseDeployStatusPayload(value);
+      setSnapshot((current) => transitionDeployProgress(current, next));
+      if (next.kind === 'unavailable' || (next.kind === 'state' && next.state.status === 'running')) {
+        setDismissed(false);
+      }
+    };
+
     const fetchProgress = async () => {
       try {
         const res = await apiFetch('/api/deploy/progress');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ok && data.state) {
-            setState(data.state);
-            if (data.state.status === 'running') {
-              setDismissed(false);
-            }
-          }
-        }
+        if (res.status === 401 || res.status === 403) return;
+        applyPayload(await res.json());
       } catch {
         // Silently fail polling
       }
@@ -56,16 +57,12 @@ export function DeployProgressBar() {
     };
 
     void consumeApiEventStream('/api/deploy/status', (payload) => {
-        try {
-          const data = JSON.parse(payload) as DeployState;
-          setState(data);
-          if (data.status === 'running') {
-            setDismissed(false);
-          }
-        } catch {
-          // ignore parsing error
-        }
-      }, streamController.signal)
+      try {
+        applyPayload(JSON.parse(payload));
+      } catch {
+        // ignore parsing error
+      }
+    }, streamController.signal)
       .catch(() => { if (!streamController.signal.aborted) startPolling() });
 
     return () => {
@@ -76,21 +73,25 @@ export function DeployProgressBar() {
     };
   }, []);
 
-  if (state.status === 'idle' || dismissed) {
+  if ((!unavailable && state.status === 'idle') || dismissed) {
     return null;
   }
 
-  const isRunning = state.status === 'running';
-  const isSuccess = state.status === 'success';
-  const isFailed = state.status === 'failed';
+  const isRunning = !unavailable && state.status === 'running';
+  const isSuccess = !unavailable && state.status === 'success';
+  const isFailed = !unavailable && state.status === 'failed';
 
-  const statusColor = isRunning
+  const statusColor = unavailable
+    ? '#f59e0b'
+    : isRunning
     ? 'var(--accent, #3b82f6)'
     : isSuccess
     ? '#10b981'
     : '#ef4444';
 
-  const statusTitle = isRunning
+  const statusTitle = unavailable
+    ? '⚠ Starea deploy-ului nu poate fi citită'
+    : isRunning
     ? '🚀 Deploy în desfășurare...'
     : isSuccess
     ? '✅ Deploy finalizat cu succes!'
@@ -126,8 +127,8 @@ export function DeployProgressBar() {
           {statusTitle}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 700, fontSize: 13 }}>{state.percent}%</span>
-          {!isRunning && (
+          {!unavailable && <span style={{ fontWeight: 700, fontSize: 13 }}>{state.percent}%</span>}
+          {!unavailable && !isRunning && (
             <button
               onClick={() => setDismissed(true)}
               style={{
@@ -147,40 +148,54 @@ export function DeployProgressBar() {
         </div>
       </div>
 
-      {/* Progress Bar Track */}
-      <div
-        style={{
-          width: '100%',
-          height: 8,
-          background: 'rgba(255, 255, 255, 0.1)',
-          borderRadius: 4,
-          overflow: 'hidden',
-        }}
-      >
+      {unavailable ? (
         <div
           style={{
-            width: `${Math.min(100, Math.max(0, state.percent))}%`,
-            height: '100%',
-            background: statusColor,
-            borderRadius: 4,
-            transition: 'width 0.4s ease-in-out',
+            color: '#fcd34d',
+            fontSize: 12,
+            lineHeight: 1.4,
           }}
-        />
-      </div>
+        >
+          Citirea stării durabile a eșuat. Reîncerc automat; ultima stare nu este afișată ca fiind curentă.
+        </div>
+      ) : (
+        <>
+          {/* Progress Bar Track */}
+          <div
+            style={{
+              width: '100%',
+              height: 8,
+              background: 'rgba(255, 255, 255, 0.1)',
+              borderRadius: 4,
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.min(100, Math.max(0, state.percent))}%`,
+                height: '100%',
+                background: statusColor,
+                borderRadius: 4,
+                transition: 'width 0.4s ease-in-out',
+              }}
+            />
+          </div>
 
-      {/* Details & Step info */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#9ca3af' }}>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
-          {state.step || state.message || 'Procesare...'}
-        </span>
-        {state.totalSteps > 0 && (
-          <span>
-            Pas {state.stepIndex}/{state.totalSteps}
-          </span>
-        )}
-      </div>
+          {/* Details & Step info */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#9ca3af' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
+              {state.step || state.message || 'Procesare...'}
+            </span>
+            {state.totalSteps > 0 && (
+              <span>
+                Pas {state.stepIndex}/{state.totalSteps}
+              </span>
+            )}
+          </div>
+        </>
+      )}
 
-      {isFailed && state.error && (
+      {!unavailable && isFailed && state.error && (
         <div
           style={{
             fontSize: 11,

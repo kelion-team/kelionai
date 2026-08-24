@@ -57,3 +57,13 @@ test('web runtime nu primește cache-ul sau tokenul Codex', () => {
   assert.doesNotMatch(provision, /CODEX_ACCESS_TOKEN|OPENAI_ADMIN_KEY|chatgptAuthTokens/)
   assert.match(compose, /^\s+CODEX_WORKER_SECRET_FILE: \/run\/secrets\/codex-worker-secret$/m)
 })
+
+test('imaginea de porți autorizează numai worktree-ul copiat', () => {
+  const gates = read('deploy/gates/run-gates.sh')
+
+  assert.match(gates, /^WORK=\/work\/repo$/m)
+  assert.match(gates, /^export GIT_CONFIG_COUNT=1$/m)
+  assert.match(gates, /^export GIT_CONFIG_KEY_0=safe\.directory$/m)
+  assert.match(gates, /^export GIT_CONFIG_VALUE_0="\$WORK"$/m)
+  assert.doesNotMatch(gates, /safe\.directory\s*[=*]\s*\*/)
+})

@@ -5,7 +5,7 @@
 //
 // MĂSURAT (audit 7 aug, traseul /api/chat): pe FIECARE tură de chat se făceau
 // drumuri separate la DB pentru valori care NU depind de întrebare — preferința
-// de limbă, meseria activă, gesturile dezactivate, alegerea de model, preferința
+// de limbă, meseria activă, gesturile dezactivate, preferința
 // de voce (a TREIA citire pe aceeași tabelă `user_prefs` în aceeași tură!) și
 // soldul. Toate se schimbă rar și sunt legate de CONT, nu de ce a întrebat omul.
 //
@@ -26,7 +26,6 @@ export interface StareSesiune {
   speechLang: string | null
   meserieId: number | null
   disabledGestures: string[]
-  modelChoiceKv: string | null
   voicePref: string | null
   /** Soldul, doar pentru useri plătitori (adminul e scutit — nu se citește deloc). */
   balance: number | null

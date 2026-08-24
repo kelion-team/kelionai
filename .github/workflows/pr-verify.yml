@@ -56,6 +56,7 @@ jobs:
             scripts/verifica-contract-deploy.test.mjs \
             ios/appstore-build.test.mjs \
             deploy/lib/create-migration-proof.test.mjs \
+            deploy/lib/backup-schedule.test.mjs \
             deploy/lib/caddy-security.test.mjs \
             deploy/lib/codex-boundary.test.mjs \
             deploy/lib/constructor-publication.test.mjs \
@@ -194,7 +195,6 @@ jobs:
           OPENAI_LUNA_MODEL=${ci_model_prefix}-luna
           OPENAI_MEDIUM_MODEL=${ci_model_prefix}-medium
           OPENAI_HEAVY_MODEL=${ci_model_prefix}-heavy
-          OPENAI_MAX_MODEL=${ci_model_prefix}-max
           OPENAI_REALTIME_MODEL=${ci_model_prefix}-realtime
           OPENAI_REALTIME_TRANSCRIPTION_MODEL=${ci_model_prefix}-realtime-transcription
           OPENAI_CALL_TRANSCRIPTION_MODEL=${ci_model_prefix}-call-transcription

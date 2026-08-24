@@ -156,9 +156,8 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
 // Owner adds money to, or withdraws money from, the provider-credit pool.
 // Returns true on success so the caller can refresh the finance view.
 
-// Market control (admin only): LIVE presence in the four install locations
-// (checked against the real store pages, not dashboards) + the verifiable
-// download log from our own /dl (who: email when signed in, else IP+country).
+// Market control (admin only): LIVE presence in the four install locations,
+// checked against the real store pages rather than dashboard promises.
 export interface StoreRow {
   key: string
   name: string
@@ -166,23 +165,32 @@ export interface StoreRow {
   url: string
   listed: boolean
 }
-export interface DownloadRow {
-  file: string
-  user_email: string
-  created_at: string
-}
 export interface StoresData {
   stores: StoreRow[]
-  /** `dbOk:false` = jurnalul de descărcări NU s-a putut citi (auditul admin,
-   *  3 aug) — counts goale nu înseamnă atunci „nicio descărcare". */
-  downloads: { dbOk: boolean; counts: { file: string; total: number }[]; recent: DownloadRow[] }
+}
+
+export function parseStoresData(value: unknown): StoresData | null {
+  if (!value || typeof value !== 'object') return null
+  const stores = (value as { stores?: unknown }).stores
+  if (!Array.isArray(stores)) return null
+
+  const valid = stores.every((store) => {
+    if (!store || typeof store !== 'object') return false
+    const candidate = store as Partial<StoreRow>
+    return typeof candidate.key === 'string'
+      && typeof candidate.name === 'string'
+      && typeof candidate.store === 'string'
+      && typeof candidate.url === 'string'
+      && typeof candidate.listed === 'boolean'
+  })
+  return valid ? { stores: stores as StoreRow[] } : null
 }
 
 export async function fetchStores(): Promise<StoresData | null> {
   try {
     const r = await apiFetch('/api/admin/stores', { credentials: 'include' })
     if (!r.ok) return null
-    return (await r.json()) as StoresData
+    return parseStoresData(await r.json())
   } catch {
     return null
   }
@@ -426,11 +434,9 @@ export interface CreierModel {
   nume: string
   tag?: string
   isAuto?: boolean
-  isCustom?: boolean
 }
 export interface CreierAdmin {
   activ: 'openai'
-  modelCustom: string
   modele: CreierModel[]
 }
 export async function fetchCreier(): Promise<CreierAdmin | null> {

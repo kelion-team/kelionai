@@ -10,7 +10,15 @@ vi.mock('./session.js', () => ({
 }))
 vi.mock('./db.js', () => ({
   saveVoiceprint: vi.fn(async (input: { email: string; name: string; features: number[]; featureMeta: { centroid: number } }) => {
-    state.rows.set(input.email, { email: input.email, name: input.name, features: input.features, featureMeta: input.featureMeta })
+    state.rows.set(input.email, {
+      email: input.email,
+      name: input.name,
+      features: input.features,
+      featureMeta: input.featureMeta,
+      hasAudio: false,
+      createdAt: '2026-08-24T10:00:00.000Z',
+      updatedAt: '2026-08-24T10:00:00.000Z',
+    })
   }),
   getVoiceprint: vi.fn(async (email: string) => state.rows.get(email) ?? null),
   deleteVoiceprint: vi.fn(async (email: string) => state.rows.delete(email)),
@@ -37,9 +45,16 @@ describe('profil vocal user-scoped', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({
       ok: true,
-      voiceprint: { email: 'a@example.test' },
+      voiceprint: {
+        name: 'Customer',
+        hasAudio: false,
+        updatedAt: '2026-08-24T10:00:00.000Z',
+      },
       availability: { method: 'spectral_profile', neuralSpeakerIdentification: false, authority: 'personalisation_only' },
     })
+    expect(response.body).not.toContain('features')
+    expect(response.body).not.toContain('centroid')
+    expect(response.body).not.toContain('a@example.test')
     expect(response.body).not.toContain('gender')
     expect(response.body).not.toContain('isAdmin')
   })
