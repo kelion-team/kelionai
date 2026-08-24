@@ -9,7 +9,7 @@
     "prebuild": "node scripts/copiaza-active-offline.mjs",
     "build": "tsc -b && vite build --configLoader native && node ../scripts/genereaza-config-platforme.mjs --target web-dist && node scripts/genereaza-precache.mjs --verify",
     "lint": "oxlint",
-    "test": "vitest run",
+    "test": "vitest run --configLoader native",
     "preview": "vite preview"
   },
   "dependencies": {

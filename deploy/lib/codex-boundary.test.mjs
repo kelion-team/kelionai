@@ -83,6 +83,8 @@ test('metadatele TypeScript rămân în worktree-ul temporar, nu în dependențe
 
   assert.match(ignore, /^frontend\/\.tmp\/$/m)
   assert.match(frontendPackage.scripts.build, /vite build --configLoader native/)
+  assert.match(frontendPackage.scripts.test, /vitest run --configLoader native/)
   assert.match(viteConfig, /cacheDir:\s*['"]\.tmp\/vite-cache['"]/)
   assert.doesNotMatch(frontendPackage.scripts.build, /--configLoader bundle/)
+  assert.doesNotMatch(frontendPackage.scripts.test, /--configLoader bundle/)
 })
