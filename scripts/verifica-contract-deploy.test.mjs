@@ -79,3 +79,13 @@ test('dovezile publice de deploy validează semantic readiness-ul activ', () => 
   assert.match(e2eMonitor, /r\.body\?\.ready === true && r\.body\?\.release\?\.sideEffectsActive === true/)
   assert.match(e2eMonitor, /const fail = !r\.ok \|\| falseOk \|\| inactiveReadiness/)
 })
+
+test('semnarea și verificarea OCI folosesc sintaxa Cosign v3 pentru annotations', () => {
+  const build = readFileSync(new URL('../.github/workflows/build-images.yml', import.meta.url), 'utf8')
+  const deploy = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
+  const semnari = build.match(/cosign sign --yes --annotations "git_sha=\$RELEASE_SHA"/g) ?? []
+
+  assert.equal(semnari.length, 2)
+  assert.doesNotMatch(build, /--annotation(?:\s|=)/)
+  assert.match(deploy, /cosign verify[\s\S]*--annotations "git_sha=\$CANDIDATE_SHA"/)
+})
