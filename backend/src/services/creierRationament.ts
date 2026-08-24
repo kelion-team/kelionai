@@ -11,7 +11,6 @@
 // Interzis ?n restul app-ului: apel direct la API pentru ra?ionament de produs,
 // f?r? a trece pe creierRationament. Vocea live trece prin OpenAI Realtime.
 
-import { config } from '../config.js'
 import {
   brainChat,
   brainCompleteWithTools,
@@ -20,6 +19,7 @@ import {
   runBrainLadder,
 } from './brain.js'
 import { openaiResponsesStream } from './openaiResponses.js'
+import { modelOpenAI, modelOpenAIExista, type TreaptaOpenAI } from './openaiModele.js'
 import type { BrainTool, BrainCallOpts, OrChatResult, OrMessage } from './brainContract.js'
 
 export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'plan'
@@ -40,10 +40,28 @@ export interface OptiuniRationament {
   usageContext?: BrainCallOpts['usageContext']
 }
 
-function modelPentru(treapta: TreaptaRationament): string {
-  if (treapta === 'rapid') return `${OPENAI_PREFIX}${config.openai.luna}`
-  if (treapta === 'lucru' || treapta === 'plan') return `${OPENAI_PREFIX}${config.openai.medium}`
-  return `${OPENAI_PREFIX}${config.openai.heavy}`
+function rolPentru(treapta: TreaptaRationament): TreaptaOpenAI {
+  if (treapta === 'rapid') return 'luna'
+  if (treapta === 'lucru' || treapta === 'plan') return 'medium'
+  return 'heavy'
+}
+
+async function modelPentru(treapta: TreaptaRationament): Promise<string> {
+  const rol = rolPentru(treapta)
+  const model = await modelOpenAI(rol)
+  if (!model) throw new Error(`model_openai_nevalidat_catalog: ${rol}`)
+  return `${OPENAI_PREFIX}${model}`
+}
+
+async function modelSolicitat(treapta: TreaptaRationament, solicitat?: string): Promise<string> {
+  if (!solicitat) return modelPentru(treapta)
+  const model = solicitat.startsWith(OPENAI_PREFIX)
+    ? solicitat
+    : `${OPENAI_PREFIX}${solicitat}`
+  if (!(await modelOpenAIExista(model))) {
+    throw new Error(`model_openai_nevalidat_catalog: ${codModel(model)}`)
+  }
+  return model
 }
 
 function codModel(m: string): string {
@@ -95,7 +113,7 @@ export async function rationeazaCuUnelte(
   // lucru validat dacă epuizează cota sau refuză cererea.
   let models = opts.models ?? await expertModelLadder()
   if (opts.model) {
-    const first = opts.model.startsWith(OPENAI_PREFIX) ? opts.model : `${OPENAI_PREFIX}${opts.model}`
+    const first = await modelSolicitat(treapta, opts.model)
     models = [first, ...models.filter((m) => m !== first)]
   }
   return brainCompleteWithTools(prompt, tools, execTool, {
@@ -118,9 +136,7 @@ export async function rationeazaMesaje(
   // MODEL FORȚAT (17 aug): orchestratorul trecea modelul, dar ușa unitară îl
   // arunca și folosea mereu defaultul treptei → Creier 2 / creierDublu erau
   // moarte pe chat. Acum `opts.model` câștigă când e dat.
-  const modelFull = opts.model
-    ? (opts.model.startsWith(OPENAI_PREFIX) ? opts.model : `${OPENAI_PREFIX}${opts.model}`)
-    : modelPentru(treapta)
+  const modelFull = await modelSolicitat(treapta, opts.model)
   jurnal(opts.ruta, treapta, `mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {
     maxTokens: opts.maxTokens ?? 2048,
@@ -164,9 +180,7 @@ export async function rationeazaMesajeStream(
   },
 ): Promise<OrChatResult> {
   const treapta = opts.treapta ?? 'lucru'
-  const modelFull = opts.model
-    ? (opts.model.startsWith(OPENAI_PREFIX) ? opts.model : `${OPENAI_PREFIX}${opts.model}`)
-    : modelPentru(treapta)
+  const modelFull = await modelSolicitat(treapta, opts.model)
   const model = codModel(modelFull)
   jurnal(opts.ruta, treapta, `stream mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {

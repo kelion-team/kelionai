@@ -434,10 +434,12 @@ export interface CreierModel {
   nume: string
   tag?: string
   isAuto?: boolean
+  validat?: boolean
 }
 export interface CreierAdmin {
   activ: 'openai'
   modele: CreierModel[]
+  catalogEroare?: string
 }
 export async function fetchCreier(): Promise<CreierAdmin | null> {
   try {

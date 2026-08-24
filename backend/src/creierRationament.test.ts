@@ -16,6 +16,14 @@ describe('creierRationament este ușa unică pentru apelurile OpenAI de produs',
     expect(s).toContain('[CREIER-UNITAR]')
   })
 
+  it('validează prin catalog atât apelurile normale, cât și streamul', () => {
+    const s = citeste('./services/creierRationament.ts')
+    expect(s.match(/const modelFull = await modelSolicitat/g)).toHaveLength(2)
+    expect(s).toContain('await modelOpenAI(rol)')
+    expect(s).toContain('await modelOpenAIExista(model)')
+    expect(s).not.toMatch(/`openai\/\$\{config\.openai\.(?:luna|medium|heavy)\}`/)
+  })
+
   it('serviciile produs folosesc adaptorul comun, nu un client paralel', () => {
     for (const f of ['mailbox.ts', 'manualLang.ts', 'apelTraducere.ts', 'vedeVideo.ts']) {
       const s = citeste(`./services/${f}`)

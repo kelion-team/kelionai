@@ -1,5 +1,6 @@
 import { config } from '../config.js'
 import { openaiChat, openaiAvailable } from './openaiChat.js'
+import { modelOpenAIExista, scaraOpenAI } from './openaiModele.js'
 import type { BrainTool, BrainCallOpts, OrChatResult, OrMessage } from './brainContract.js'
 import type { Message } from './brain-types.js'
 
@@ -17,14 +18,15 @@ export function isTransientBrainError(err: unknown): boolean {
 }
 
 function isAllowedOpenAIModel(model: string): boolean {
-  return /^gpt-[a-z0-9][a-z0-9._-]*$/i.test(model)
+  return /^[a-z0-9][a-z0-9._:-]{0,199}$/i.test(model)
 }
 
 // Preserve the workload roles: Luna (fast/high-volume), Terra (balanced), Sol
 // (frontier). Model identifiers come only from validated runtime configuration.
 export async function expertModelLadder(): Promise<string[]> {
-  const configured = [config.openai.luna, config.openai.medium, config.openai.heavy]
-  const rungs = configured.filter(isAllowedOpenAIModel).map((model) => `openai/${model}`)
+  const rungs = (await scaraOpenAI())
+    .filter(isAllowedOpenAIModel)
+    .map((model) => `openai/${model}`)
   const unice: string[] = []
   for (const r of rungs) {
     if (!unice.includes(r)) unice.push(r)
@@ -40,17 +42,17 @@ function openAIModelCode(model: string): string {
   return code
 }
 
-export function brainChat(
+export async function brainChat(
   model: string,
   messages: OrMessage[],
   tools: BrainTool[] = [],
   opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
-  try {
-    return openaiChat(openAIModelCode(model), messages, tools, opts)
-  } catch (error) {
-    return Promise.reject(error)
+  const code = openAIModelCode(model)
+  if (!(await modelOpenAIExista(code))) {
+    throw new Error(`model_openai_nevalidat_catalog: ${code}`)
   }
+  return openaiChat(code, messages, tools, opts)
 }
 
 // Runs a call across the model ladder: tries each rung, skips the saturated/

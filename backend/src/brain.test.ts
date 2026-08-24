@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 
+import { config } from './config.js'
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
 
 describe('Expertul fiabil — clasificarea erorilor', () => {
@@ -18,15 +19,28 @@ describe('Expertul fiabil — clasificarea erorilor', () => {
 
 describe('Expertul fiabil — scara de modele', () => {
   it('este deduplicată și acceptă numai identificatori OpenAI validați', async () => {
-    const ladder = await expertModelLadder()
-    expect(new Set(ladder).size).toBe(ladder.length)
-    expect(ladder.every((model) => model.startsWith('openai/gpt-'))).toBe(true)
+    const initial = { ...config.openai }
+    config.openai.key = 'cheie-brain-test'
+    config.openai.luna = 'model-luna'
+    config.openai.medium = 'model-terra'
+    config.openai.heavy = 'model-terra'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{ id: 'model-luna' }, { id: 'model-terra' }, { id: 'model-neconfigurat' }],
+    }), { status: 200 })))
+    try {
+      const ladder = await expertModelLadder()
+      expect(ladder).toEqual(['openai/model-luna', 'openai/model-terra'])
+      expect(new Set(ladder).size).toBe(ladder.length)
+    } finally {
+      Object.assign(config.openai, initial)
+      vi.unstubAllGlobals()
+    }
   })
 
   it('are exact cele trei roluri Luna, Terra și Sol, fără o treaptă duplicată', () => {
     const source = readFileSync(new URL('./services/brain.ts', import.meta.url), 'utf8')
     const rationament = readFileSync(new URL('./services/creierRationament.ts', import.meta.url), 'utf8')
-    expect(source).toContain('const configured = [config.openai.luna, config.openai.medium, config.openai.heavy]')
+    expect(source).toContain('const rungs = (await scaraOpenAI())')
     expect(rationament).toContain("export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'plan'")
   })
 })

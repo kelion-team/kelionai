@@ -16,8 +16,11 @@ describe('brain.messages.create — adaptorul NU mai fabulează usage-ul', () =>
     // Before the fix, this adapter returned literal zeros for both token
     // counts — the memory agent's ledger silently recorded $0 forever. Pin
     // the honest shape down: the provider's own usageMetadata travels through.
-    fetchMock.mockResolvedValue(
-      new Response(
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      if (String(input).endsWith('/models')) {
+        return new Response(JSON.stringify({ data: [{ id: 'gpt-5.6-luna' }] }), { status: 200 })
+      }
+      return new Response(
         JSON.stringify({
           id: 'resp_test_usage',
           model: 'gpt-5.6-luna',
@@ -26,8 +29,8 @@ describe('brain.messages.create — adaptorul NU mai fabulează usage-ul', () =>
           usage: { input_tokens: 321, output_tokens: 9 },
         }),
         { status: 200 },
-      ),
-    )
+      )
+    })
     const res = await brain.messages.create({
       model: 'openai/gpt-5.6-luna',
       max_tokens: 50,

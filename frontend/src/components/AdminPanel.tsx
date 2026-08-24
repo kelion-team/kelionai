@@ -2312,11 +2312,16 @@ export default function AdminPanel({
                       <p className="chat-hint">
                         Provider: <b>OpenAI</b> · selecție automată
                       </p>
+                      {creier.catalogEroare && (
+                        <p className="chat-hint" style={{ marginTop: 8 }}>
+                          Catalog OpenAI: {creier.catalogEroare}
+                        </p>
+                      )}
                       <div className="chat-hint" style={{ marginTop: 12 }}>
                         Trepte configurate de server:{' '}
                         {modele
                           .filter((model) => !model.isAuto)
-                          .map((model) => model.nume)
+                          .map((model) => `${model.validat ? '✓' : '⚠'} ${model.nume}`)
                           .join(' → ')}
                         . Configurația este read-only în browser.
                       </div>

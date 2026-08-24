@@ -53,6 +53,8 @@ describe('admin product contract', () => {
     const admin = source('components/AdminPanel.tsx')
     const contract = source('lib/admin.ts')
     expect(admin).toContain('Provider: <b>OpenAI</b> · selecție automată')
+    expect(admin).toContain('Catalog OpenAI: {creier.catalogEroare}')
+    expect(admin).toContain("model.validat ? '✓' : '⚠'")
     expect(`${admin}\n${contract}`).not.toMatch(/modelCustom|isCustom/)
   })
 })

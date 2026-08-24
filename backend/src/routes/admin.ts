@@ -34,6 +34,7 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { cheltuieliAplicatiei } from '../services/cheltuieli.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { openaiAvailable } from '../services/openaiChat.js'
+import { motivCatalogOpenAI, reimprospateazaCatalogOpenAI } from '../services/openaiModele.js'
 import { getSerperBalance } from '../services/serperBalance.js'
 import { resurseGazda } from '../services/resurse.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
@@ -84,8 +85,14 @@ async function checkStores(): Promise<StoreCheck[]> {
   return checks
 }
 
-function configuratieCreier(): Record<string, unknown> {
+async function configuratieCreier(): Promise<Record<string, unknown>> {
   const m = config.openai
+  const catalog = await reimprospateazaCatalogOpenAI()
+  const configurate = [m.luna, m.medium, m.heavy].filter(Boolean)
+  const lipsa = configurate.filter((id) => !catalog.includes(id))
+  const eroareCitire = motivCatalogOpenAI()
+  const catalogEroare = eroareCitire
+    || (lipsa.length ? `Modele configurate absente din catalog: ${lipsa.join(', ')}` : '')
   return {
     activ: 'openai',
     provideri: [
@@ -93,10 +100,11 @@ function configuratieCreier(): Record<string, unknown> {
     ],
     modele: [
       { id: 'auto', nume: 'Auto (Luna → Terra → Sol)', isAuto: true },
-      { id: m.luna, nume: m.luna, tag: 'rapid' },
-      { id: m.medium, nume: m.medium, tag: 'echilibrat' },
-      { id: m.heavy, nume: m.heavy, tag: 'profund' },
+      { id: m.luna, nume: m.luna, tag: 'rapid', validat: catalog.includes(m.luna) },
+      { id: m.medium, nume: m.medium, tag: 'echilibrat', validat: catalog.includes(m.medium) },
+      { id: m.heavy, nume: m.heavy, tag: 'profund', validat: catalog.includes(m.heavy) },
     ],
+    ...(catalogEroare ? { catalogEroare } : {}),
   }
 }
 
@@ -457,7 +465,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/creier', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    return reply.send(configuratieCreier())
+    return reply.send(await configuratieCreier())
   })
 
   // Verify configured integrations without ever exposing secret values.

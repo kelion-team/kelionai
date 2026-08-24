@@ -48,6 +48,7 @@ import {
 import { runOrchestrator } from '../services/orchestrator.js'
 import { memorieUnificata } from '../services/memorieUnificata.js'
 import { autoPreviewFrame } from '../services/monitorAutoPreview.js'
+import { modelOpenAI } from '../services/openaiModele.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
@@ -124,16 +125,14 @@ import { latestUpdateSummary } from '../services/updates.js'
 import { bazaPublica } from '../services/bazaPublica.js'
 import { inputImageBlock, parseInputImageDataUrl } from '../services/inputImage.js'
 
-const CHAT_IDEMPOTENCY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-// OpenAI model ladder: Luna → Terra → Sol, selected per turn.
-function alegeOpenAIModel(difficulty: number, ownerAction: boolean): string {
-  const m = config.openai
-  if (ownerAction) return m.heavy // owner cu intenție de acțiune → reasoning
-  if (difficulty >= ESCALATE_TOP_AT) return m.heavy
-  if (difficulty >= ESCALATE_AT) return m.medium
-  return m.luna
+async function alegeOpenAIModel(difficulty: number, ownerAction: boolean): Promise<string> {
+  if (ownerAction) return modelOpenAI('heavy')
+  if (difficulty >= ESCALATE_TOP_AT) return modelOpenAI('heavy')
+  if (difficulty >= ESCALATE_AT) return modelOpenAI('medium')
+  return modelOpenAI('luna')
 }
+
+const CHAT_IDEMPOTENCY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 // The runtime-owned Luna → Terra → Sol ladder is the only model selector.
 // Returns null when the canonical OpenAI project key is unavailable.
@@ -148,7 +147,8 @@ async function selectedBrainModel(
   if (!config.openai.key) return null
   const heavy =
     needsVision || decideAdresarea || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
-  const model = alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
+  const model = await alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
+  if (!model) return null
   return { model: `openai/${model}`, heavy }
 }
 
