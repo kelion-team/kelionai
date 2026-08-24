@@ -259,7 +259,7 @@ jobs:
           MAIL_ENABLED=false
           RELEASE_CANDIDATE_MODE=1
           ENV
-          printf '%s\n' inactive > /tmp/kelion-ci-runtime/release-state/active
+          printf '%s\n' inactive | sudo tee /tmp/kelion-ci-runtime/release-state/active >/dev/null
           sudo chown root:10050 /tmp/kelion-ci-secrets /tmp/kelion-ci-secrets/* /tmp/kelion-ci-config/runtime.env /tmp/kelion-ci-runtime/release-state/active
           sudo chmod 0750 /tmp/kelion-ci-secrets
           sudo chmod 0440 /tmp/kelion-ci-secrets/*

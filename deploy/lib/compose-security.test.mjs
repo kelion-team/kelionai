@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const compose = readFileSync(new URL('../compose.production.yml', import.meta.url), 'utf8')
+const prVerify = readFileSync(new URL('../../.github/workflows/pr-verify.yml', import.meta.url), 'utf8')
 
 function service(name) {
   const match = new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:|^networks:)`, 'm').exec(compose)
@@ -68,4 +69,19 @@ test('browserul nu are rută directă de egress, iar proxy-ul este singura punte
   assert.doesNotMatch(service('browser-worker'), /\n      browser-egress: \{\}/)
   assert.match(service('browser-egress'), /\n      browser-egress: \{\}/)
   assert.doesNotMatch(compose, /network_mode: host/)
+})
+
+test('CI inițializează starea release deținută de root prin sudo', () => {
+  assert.match(
+    prVerify,
+    /sudo install -d -o root -g 10050 -m 2770[\s\S]*?\/tmp\/kelion-ci-runtime\/release-state/,
+  )
+  assert.match(
+    prVerify,
+    /printf '%s\\n' inactive \| sudo tee \/tmp\/kelion-ci-runtime\/release-state\/active >\/dev\/null/,
+  )
+  assert.doesNotMatch(
+    prVerify,
+    /printf '%s\\n' inactive > \/tmp\/kelion-ci-runtime\/release-state\/active/,
+  )
 })
