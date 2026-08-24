@@ -309,11 +309,11 @@ export function probaDinRezultatGoogle(brut: string): RezultatProba {
 // Rulează autoverificarea PE SERVER cu execuție REALĂ: citirile prin `uneltele`
 // (execuție adevărată), efectele NU se execută (dry-run), iar pe cele picate
 // creierul (AI) îmbogățește „de ce". Salvează ultimul raport în kv. Folosită de
-// AMBELE uși — ruta admin ȘI unealta de chat `autoverificare` — o SINGURĂ dată
-// aici (fără duplicare). Importurile sunt dinamice ca să nu închidă ciclul
-// autonomie→adminTools→autoverificare.
+// Ruta admin folosește această implementare unică. Citirile locale trec numai
+// prin executorul sigur al
+// procesului web; uneltele de repo/shell nu mai există aici.
 export async function autoverificareLive(): Promise<RaportAutoverificare> {
-  const { uneltele } = await import('./autonomie.js')
+  const { execSharedAdminTool, SHARED_ADMIN_TOOLS } = await import('./adminTools.js')
   const { rationeazaMesajeSigur } = await import('./creierRationament.js')
   const { saveKv } = await import('../db.js')
   // UNELTELE „APLICAȚII" (Google/web) merg pe calea CHAT (runGoogleTool), nu prin
@@ -333,7 +333,10 @@ export async function autoverificareLive(): Promise<RaportAutoverificare> {
           const out = await runGoogleTool(c.name, {}, googleToken)
           return probaDinRezultatGoogle(String(out ?? ''))
         }
-        const out = await uneltele(c.name, {})
+         if (!SHARED_ADMIN_TOOLS.has(c.name)) {
+           return { ok: false, eroare: 'capabilitatea nu are o probă read-only sigură în procesul web' }
+         }
+         const out = await execSharedAdminTool(c.name, {})
         return { ok: true, rezultat: String(out ?? '') }
       } catch (e) {
         return { ok: false, eroare: String((e as Error)?.message ?? e).slice(0, 200) }

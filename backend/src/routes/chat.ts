@@ -5,7 +5,7 @@ import type {
   MessageParam,
   ToolUseBlock
 } from '../services/brain-types.js'
-import { getSessionUser, setSession, type SessionUser } from '../session.js'
+import { getSessionUser } from '../session.js'
 import {
   googleTools,
   runGoogleTool,
@@ -13,11 +13,10 @@ import {
   reverseGeocodeCached
 } from '../services/google.js'
 import {
-  saveMessage,
   recordCost,
   recordTiming,
-  citesteSold,
-  debitWallet,
+  debitWalletMinorAtomar,
+  grantCreditMinor,
   getSpeechLang,
   setSpeechLangPref,
   getMeserieActiva,
@@ -27,20 +26,9 @@ import {
   listNotes,
   deleteNote,
   getRecentHistory,
-  getVoiceprint,
-  saveVoiceprint,
-  vectorDistance,
-  getFaceprint,
-  saveFaceprint,
-  faceDistance,
   loadKv,
   createBuildJob,
   listBuildJobs,
-  deleteBuildJob,
-  deleteBuildJobsByScope,
-  retryBuildJob,
-  cancelBuildJob,
-  attachGuestPhoto,
   userKey,
   addMemory,
   recordSimptomLive,
@@ -50,7 +38,7 @@ import {
 } from '../db.js'
 import { extrageNiveluri, curataSemne, curataZone, curataSageti, curataTrend } from './tranzactii.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, OCHI_MARCAJ, type OrMessage, type AnthropicTool } from '../services/brainContract.js'
+import { taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, OCHI_MARCAJ, type OrMessage, type BrainTool } from '../services/brainContract.js'
 import { stripToolMarkup, makeToolMarkupStripper } from '../services/toolMarkup.js'
 import {
   iaSlotDacaLiber,
@@ -61,17 +49,14 @@ import {
 import { runOrchestrator } from '../services/orchestrator.js'
 import { memorieUnificata } from '../services/memorieUnificata.js'
 import { autoPreviewFrame } from '../services/monitorAutoPreview.js'
-import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, geminiLive } from '../services/geminiDirect.js'
-import { ruleazaPanou } from '../services/panouLucratori.js'
-import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
-import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
-import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta, eSqlDeCitire, allCapabilityNames } from '../services/brainCapabilities.js'
+import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
 import { esteNemultumire, noteazaRepros, lectiiReprosuri } from '../services/feedbackImplicit.js'
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
-import { taxeazaServiciu, cheiaTarifVideo, meniulDeTarife, lirePentru } from '../services/tarife.js'
+import { taxeazaServiciu, cheiaTarifGenerareVideo, meniulDeTarife, lirePentru } from '../services/tarife.js'
+import { esteAdminKelion } from '../services/adminIdentity.js'
 import { planStudio, numeClip, RETETE_STUDIO } from '../services/studioClipuri.js'
 import { trackSpeechLang, detectSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { inceputStrain, aCerutAltaLimba } from '../services/limbaRaspuns.js'
@@ -87,7 +72,6 @@ import {
 import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
 import { CHARTER_CHAT_VOCE_LEGI } from '../services/charterChatVoce.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
-import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
 import { getVoicePref, getGoogleRefreshToken } from '../db.js'
 import { stareSesiune, pastreazaStareSesiune, actualizeazaStareSesiune } from '../services/stareSesiune.js'
@@ -105,16 +89,20 @@ import {
   type BrowserResult
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
+import {
+  claimChatTurn,
+  completeChatTurn,
+  createChatReplayCapture,
+  encodeChatTerminalReplay,
+  executeChatSideEffect,
+  failChatTurn,
+  hashChatReplayRequest,
+  refreshChatTurnLease,
+  saveChatMessageOnce,
+} from '../services/chatTurnReplay.js'
 import { randomUUID } from 'node:crypto'
+import { GESTURE_TO_CLIP } from '../shared/gestures.js'
 
-// THE OWNER NEVER DEBITS HIMSELF (PR #648, Aug 2 — his own testing drained
-// £5.73 of voice from his own wallet in one morning; the rule died first in
-// realtime.ts, this is the same predicate for the chat path). Usage is still
-// RECORDED for the Money tab — recorded, yes; charged, no.
-export const isOwnerEmail = (email: string): boolean => email.toLowerCase() === config.adminEmail
-import { inferGender, type VoiceFeatures } from './voiceprint.js'
-import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
-import { marcheazaFata } from '../services/adminLock.js'
 import { recentClientErrors } from './clientErrors.js'
 import { explicaEroare } from '../services/explicaEroare.js'
 import { problemeGlobaleCache, formateazaProbleme } from '../services/autodiagnostic.js'
@@ -130,18 +118,15 @@ import type { ChatMessage, Coords, DeviceLocation } from '../services/chatInput.
 import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { citesteEpisoade, adaugaEpisod, rezumaEpisoade } from '../services/promoEpisoade.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, DOVADA_FAPTELOR_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL, PROCESEAZA_DATE_TOOL,} from '../services/brainToolDefs.js'
+import { SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, CAUTA_ISTORIC_TOOL, DOVADA_FAPTELOR_TOOL, FORGET_MEMORY_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL, MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL, PROCESEAZA_DATE_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, APELEAZA_USER_TOOL } from '../services/brainToolDefs.js'
 import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js'
-// Re-exported for the voice route, which takes its tool definitions from chat.js
-// (single source — SINGLE BRAIN §1, no duplication).
-export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
 export { CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL }
 import { latestUpdateSummary } from '../services/updates.js'
 import { bazaPublica } from '../services/bazaPublica.js'
 
-// THE BRAIN — Gemini direct, UNIC (extirparea totală OpenRouter + OpenAI, 3 aug).
-// The selectable chat model is read from KV (same source as /api/models/selection):
-// ── OpenAI model ladder: de la luna la sol pe dificultate ──────────────────
+const CHAT_IDEMPOTENCY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+// OpenAI model ladder: Luna → Terra → Sol, selected per turn.
 function alegeOpenAIModel(difficulty: number, ownerAction: boolean): string {
   const m = config.openai
   if (ownerAction) return m.heavy // owner cu intenție de acțiune → reasoning
@@ -150,8 +135,8 @@ function alegeOpenAIModel(difficulty: number, ownerAction: boolean): string {
   return m.luna
 }
 
-// the model CHOSEN by the user, otherwise the tier default. Returns NULL only if
-// NO brain exists at all (no Gemini key) → honest message.
+// A saved choice is honored only when it is an OpenAI model. Returns null when
+// the canonical runtime key is unavailable.
 async function selectedBrainModel(
   email: string,
   text: string,
@@ -161,17 +146,7 @@ async function selectedBrainModel(
 ): Promise<{ model: string; heavy: boolean } | null> {
   const difficulty = taskDifficulty(text)
   const isOwner = roleFor(email) === 'admin'
-  // ── COMUTATOR DE CREIER (23 aug 2026 — owner: „trebuie un comutator de
-  //    creier in admin"). Dacă ownerul a comutat pe OpenAI, scalăm modelul
-  //    de la luna la sol pe baza dificultății. Gemini rămâne default.
-  const creierActiv = await loadKv('creier_activ') ?? 'google-direct'
-  if (creierActiv === 'openai') {
-    const modelCustom = (await loadKv('creier_model')) ?? ''
-    const model = modelCustom || alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
-    return { model: `openai/${model}`, heavy: true }
-  }
-  // Null doar pentru „chiar n-am niciun creier" — creierul e Gemini-only.
-  if (!geminiDirectAvailable()) return null
+  if (!config.openai.key) return null
   let sel: { chat?: string; work?: string } = {}
   try {
     // FLUENCY (A5): the kv comes pre-read from the turn's Promise.all (no extra
@@ -181,206 +156,12 @@ async function selectedBrainModel(
   } catch {
     sel = {}
   }
-  // Automatic CHAT → BRAIN ESCALATION, on TWO paths (Adrian, Jul 25: "think at
-  // every request = real reasoning", not just regex):
-  // (1) fast pre-routing: the taskDifficulty heuristic catches obviously heavy
-  //     requests and starts directly on the work model, with internal reasoning;
-  // (2) the MODEL's judgment: on the chat tier, the model gets the `ask_brain`
-  //     tool (the same as voice's) and escalates BY ITSELF what it judges heavy
-  //     — covers exactly the short-but-heavy requests the regex missed.
-  // Persona/voice/language/memory/tools are IDENTICAL — only the model changes.
-  // ECONOMIC ESCALATION (Jul 25 — corrected after forcing the big brain on EVERY
-  // admin turn burned $23+/hour even on ordinary conversation; Adrian: "for a
-  // command to fix the mouth animation, that's enormous"). The correct rule: the
-  // cheapest capable model by default; escalate ONLY on real action requests
-  // from the owner (hasActionIntent — "repair", "run", "publish", "write
-  // code"...); returns BY ITSELF to the cheap tier on the next ordinary reply
-  // (heavy is computed per-turn from the current text, it doesn't stay latched).
-  // MODEL↔FEATURE COMPATIBILITY (Adrian, Jul 25: "the selected models must be
-  // compatible with all the app's features"): the cheap chat default
-  // (`openai/gpt-oss-20b:free`) has NO vision (the catalog marks it vision:false)
-  // — a camera frame sent to it would be ignored/would crash. When the CURRENT
-  // turn sends an image (attached photo or camera frame on "what do you see?"),
-  // we force-escalate to the work tier — ALL candidate work models (Fable 5,
-  // Sonnet 5, GPT-5, Haiku 4.5) have confirmed vision:true.
-  // 3-RUNG LADDER (Adrian, Jul 25: "at the brain, gpt-5-mini up to Fable"):
-  // free (chat) → cheap-capable (work, default gpt-5-mini) → Fable 5 (top) ONLY
-  // on truly extreme difficulty (ESCALATE_TOP_AT). Vision and admin action climb
-  // to the MIDDLE rung (work), not straight to the top.
-  // ECONOMIC AND HONEST SPLIT (Adrian, Jul 27: "cheap chat is fine, but where a
-  // thought-out answer is needed you send it through the brain"): simple talk →
-  // cheap model (fast, nearly free); WHEN thinking OR an ACTION is needed (owner
-  // asks "repair/publish/show/open/build...") → the brain that actually
-  // EXECUTES, not narrates. "Always Fable 5" was removed: it burned credit
-  // (OpenRouter went negative on Jul 27) and that's not what he asked for. The
-  // top only on extreme difficulty.
-  // ── DE CE `decideAdresarea` (măsurat 8 aug, din jurnalul de pe VPS) ───────
-  // Adrian: „vorbesc și nu se întâmplă nimic". În jurnal:
-  //     [CHAT-IN] audio=da „"
-  //     [TIMP] tura …: creier=google-direct/gemini-3.5-flash-lite, total=1619ms
-  //     [VOCE] tura …: creierul a decis că NU i se vorbea — tăcere
-  // Cauza NU e o părere despre modele — e structurală: linia de mai jos judecă
-  // greutatea din TEXT, iar o tură de voce ambientală n-are text deloc (fraza e
-  // audio brut, în alt câmp). `difficulty('')` e mic, `hasActionIntent('')` e
-  // fals, `needsVision` e fals → `heavy` iese MEREU fals. Adică cea mai
-  // consecventă decizie binară din aplicație — „mi se vorbește mie sau nu" — nu
-  // putea ajunge NICIODATĂ pe modelul bun; cădea automat pe cel ieftin.
-  // Nu se atinge sigiliul: alegerea rămâne între cele două trepte deja sigilate.
   const heavy =
     needsVision || decideAdresarea || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
-  // ── THE OWNER'S BRAIN = POWERFUL AGENT, ALWAYS (iron rule §14, AI-HANDOFF:
-  // "on the owner's path, the model IS the agent... NO classifier to demote him
-  // to a cheap model"). The cause of "the paid brain is as dumb as the free
-  // one": the owner's route had fallen to :free models
-  // (gemma/nemotron/gemini-flash-free) → it ignored the time anchor, didn't
-  // listen. FIX: the owner ALWAYS gets the capable PAID model from the live
-  // catalog (guaranteed valid ID), respecting his manual choice (sel.work). The
-  // `heavy` classifier stays ONLY for the reasoning effort (latency), NOT to
-  // demote the model. Public/demo keeps the free ladder (rule §5: the demo cost
-  // doesn't change). If the catalog has no paid model, it falls to free.
-  if (isOwner) {
-    // HIS CHOICE, BUT NOT AT ANY COST (Adrian, Jul 30: "Kelion doesn't execute
-    // requirements"). Before, `sel.work` went through `resolveModel`, which — if
-    // the chosen model was no longer in the live catalog (removed by the
-    // provider, or the catalog unreadable) — SILENTLY returned the `:free`
-    // default. The owner was left on a weak model that narrates instead of
-    // calling the tool, with no sign anywhere. And the automatic paid-model
-    // choice wasn't even attempted here.
-    // NOW: if his choice is no longer valid, fall to the capable PAID model (he
-    // has the money: we don't demote him to free just because an id got stale),
-    // and it is said in the log — a silent brain replacement is exactly the
-    // pattern of the day.
-    // ── THE JUL 31, 15:40 ORDER: "I DON'T DO MANUAL" ─────────────────────────
-    //
-    // His words, after I asked him to change his model in Settings himself:
-    // "you wrote hundreds of lines so escalation is automatic, and you still put
-    // me on manual" · "let's be clear, manual is something I don't do, stay on
-    // performant free models" · "including at escalations".
-    //
-    // He had an old selection saved in Settings (Gemma 4 31B), which pinned him
-    // there however good the app's default became. And I kept reporting to him
-    // that he has Ultra — false, because the saved choice beats the default.
-    //
-    // From now on, on HIS path: the saved selection is IGNORED, and the app
-    // itself keeps the best free model, both on the work rung and at escalation.
-    // He has nothing left to administer.
-    //
-    // It does NOT apply to anyone else: public users keep their choice, as
-    // before. It's a rule for the owner, requested by the owner, in writing.
-    //
-    // IF he ever wants to pick by hand again, this block comes out — but only at
-    // HIS request, not because some future AI thinks "the user should decide".
-    // He already decided: he doesn't want to decide every time.
-    // ── DOUĂ SLOTURI ȘI PE CALEA OWNERULUI (Adrian, 7 aug) ───────────────────
-    // AICI era blocajul care ar fi făcut inutilă toată separarea: ambele ramuri
-    // de mai jos cereau necondiționat treapta `work` (= Pro), iar `return`-ul de
-    // la finalul blocului iese ÎNAINTE de bifurcația rapid/greu de mai jos. Deci
-    // ownerul — singurul care testează live — ar fi rămas pe Pro și n-ar fi văzut
-    // NICIO diferență, oricât am fi separat config-ul. Găsit la verificarea
-    // dinaintea implementării, exact ca să nu-i raportez „e rapid" și el să
-    // măsoare iar 18 secunde.
-    //
-    // Acum treapta se alege din `heavy` (calculat mai sus, la fel pentru toți):
-    // tura ușoară („ce faci", „cât e ceasul") → slotul RAPID; tura grea (vedere,
-    // dificultate ≥ prag, intenție de acțiune) → Pro. NU e o retrogradare tăcută
-    // — regula §14 păzea împotriva coborârii pe o sarcină GREA, iar aici greul
-    // rămâne pe Pro. Iar dacă modelul rapid întâlnește totuși ceva peste el, are
-    // unealta `ask_brain` (dată doar pe tura ușoară) care escaladează la Pro.
-const treaptaOwner: 'chat' | 'work' = heavy ? 'work' : 'chat'
-    let ownerModel: string | null = null
-    // Creierul e Gemini, unic (owner, 20 aug: „rămân doar cu Linux și Gemini
-    // Live"). Cloud-ul plătit (Creier 2 kimi/qwen prin Ollama) a fost SCOS — turele
-    // grele rămân pe Gemini greu (Pro), care CHEAMĂ unealta, nu narează.
-    if (sel.work) {
-      console.log(`[BRAIN] owner: ignoring the saved selection (${sel.work}) — the "I don't do manual" order; keeping the default`)
-      ownerModel = await resolveModel(treaptaOwner, null)
-    } else {
-      // ── HIS BRAIN, CHOSEN BY HIM (Adrian, Jul 31: "set
-      // nvidia/nemotron-3-ultra-550b-a55b:free as the brain") ──────────────────
-      //
-      // Here was the automatic PAID-model choice: without a manual selection, he
-      // automatically got the best PAID model (Claude/OpenAI). Iron rule §14 of
-      // AI-HANDOFF says exactly that — "on the owner's path the model does NOT
-      // skimp on free" — and it's a good rule, because it was born from sessions
-      // where he was SILENTLY demoted to a weak model that narrated instead of
-      // executing.
-      //
-      // But that rule guarded against a SILENT demotion, not against HIS choice.
-      // Today he chose explicitly, after asking four times for "the most
-      // performant full-free model in the world": Nemotron 3 Ultra — 550B (55B
-      // active), 1M context, tools, reasoning. It's not a skimping; it's the
-      // largest free brain that exists, 18 times larger in active parameters
-      // than what he had.
-      //
-      // The effect he wanted: the $10 in OpenRouter is NO LONGER spent on the
-      // brain. The `:free` models cost zero; that money only keeps the 1,000
-      // requests/day threshold open (vs 50).
-      //
-      // ANY FUTURE AI: do not put the automatic paid choice back here "to be
-      // better". He asked for it, in writing, and switching to paid is one env
-      // variable away (OPENROUTER_WORK_MODEL) or a choice in Settings → Model,
-      // which still takes priority over everything.
-      ownerModel = await resolveModel(treaptaOwner, null)
-    }
-    // ── ESCALATION CLIMBS FROM HIS CHOICE TOO (Adrian, Jul 31) ───────────────
-    //
-    // Him: "you wrote hundreds of lines so escalation is automatic, and you
-    // still put me on manual".
-    //
-    // He was right, and the cause was right here: the `return` below exited the
-    // function BEFORE the escalation block. So on the owner's path — the only
-    // one that really gives heavy tasks — automatic escalation NEVER ran. His
-    // Settings choice pinned him to the same model for "hello" and for "find the
-    // cause of this bug across the whole repo" alike.
-    //
-    // The correct rule, and it's symmetric:
-    //   NEVER lower than what he chose — that's iron rule §14, which guards
-    //   against the silent demotion to a weak model.
-    //   ALWAYS higher when the task demands it — that's the escalation he asked
-    //   for, and which we were bypassing.
-    //
-    // So: at high difficulty, it climbs to the top rung. If his choice is
-    // already there (or higher), it stays his — we demote nothing.
-    if (ownerModel) {
-      const cereSusul = difficulty >= ESCALATE_TOP_AT && !needsVision
-      if (cereSusul) {
-        const varf = await resolveModel('top', null)
-        if (varf && varf !== ownerModel) {
-          // It is SAID. A brain change behind the back is exactly the pattern of the day.
-          console.log(`[BRAIN] heavy task (${difficulty}) → climbing from ${ownerModel} to ${varf}`)
-          return { model: varf, heavy: true }
-        }
-      }
-      return { model: ownerModel, heavy }
-    }
-    console.error('[BRAIN] owner WITHOUT a model → falling to the free ladder (may narrate instead of executing)')
-  }
-  // THE FULL FREE BRAIN (Adrian, Jul 27): the top tier (nemotron-ultra-550b:free)
-  // has NO vision — a turn with an image, however heavy, stays on the omni core
-  // (work), which SEES. Otherwise the picture would be lost on the way to the
-  // "blind genius".
-  const top = difficulty >= ESCALATE_TOP_AT && !needsVision
-  // GEMINI PRIMARY, NEMOTRON SECONDARY (Adrian, Jul 27: "switch to the other
-  // free one... gemini... primary, and what's now secondary"): when the free
-  // Google key exists, the work core is gemini direct (sees + tools + thinking,
-  // above any :free in OpenRouter, $0). The manual choice from Admin→Models
-  // (sel.work) stays respected; the fall to the secondary on exhausted quota is
-  // at the call site (retry in the handler). Voice does NOT go through here —
-  // it stays as it is.
-  // HIBRIDUL (Adrian, 5 aug: „leagă hibridul, maximă precizie și calitate"):
-  // greu/top → Gemini 3 Pro (geminiModelGreu) unde contează precizia (gândire,
-  // vedere, acțiuni, mesaje lungi/analiză/cod); ușor → flash (geminiModel), rapid
-  // și ieftin pe vorbă simplă. Ambele prin Gemini direct. Dacă Gemini nu e
-  // disponibil, cade pe vechea scară (resolveModel).
-  const geminiOK = !sel.work && geminiDirectAvailable()
-  const model = geminiOK
-    ? `${GEMINI_DIRECT_PREFIX}${heavy || top ? config.geminiModelGreu : config.geminiModel}`
-    : top
-      ? await resolveModel('top')
-      : heavy
-        ? await resolveModel('work', sel.work)
-        : await resolveModel('chat', sel.chat)
-  return { model, heavy: heavy || top }
+  const stored = heavy ? sel.work : sel.chat
+  const custom = stored?.startsWith('openai/') ? stored.slice('openai/'.length) : ''
+  const model = custom || alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
+  return { model: `openai/${model}`, heavy }
 }
 
 // GESTURE GATE (Adrian, Jul 13: "don't repeat obsessively, be discreet").
@@ -448,33 +229,12 @@ const GET_MONITOR_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} }
 }
 
-// VEDEREA CONTINUĂ (22 aug 2026, owner: „simte mediul"): ultimele observații
-// vizuale ale lui Kelion — ce a văzut din cameră în ultimele 5 minute (mișcare,
-// locație, timestamp). Nu înlocuiește `look` (cadru la cerere) — dă CONTEXT.
-const OBSERVATII_VIZUALE_TOOL: Tool = {
-  name: 'observatii_vizuale',
-  description:
-    "Returns Kelion's RECENT visual observations from the continuous vision system — what it has SEEN from the camera in the last 5 minutes (motion intensity, location, timestamps). Use this when the user asks \"ce ai văzut azi\", \"ai observat ceva\", \"ce s-a întâmplat în cameră\" or when visual context would help the conversation. Returns a list of observations with motion levels and locations. If the continuous vision is not active, it says so honestly.",
-  input_schema: { type: 'object', properties: {} }
-}
-
-// AUZUL AMBIENTAL (22 aug 2026): evenimentele sonore detectate de Kelion în
-// fundal — alarmă, sonerie, ciocănit, plâns, spargere, conversație, muzică.
+// AUZUL AMBIENTAL: indicii FFT grosiere, fără clasificări de siguranță.
 // Pentru „ce ai auzit", „s-a auzit ceva?", sau când contextul sonor contează.
 const EVENIMENTE_SONORE_TOOL: Tool = {
   name: 'evenimente_sonore',
   description:
-    "Returns Kelion's RECENT auditory events from the ambient hearing system — sounds detected in the last 10 minutes (alarms, doorbells, knocking, crying, glass breaking, conversation, music, silence). Use this when the user asks \"ce ai auzit\", \"s-a auzit ceva\", \"a sunat cineva\" or when auditory context would help. Returns events with type, intensity, and timestamp. Urgent events (alarm, breaking, crying) are flagged. If ambient hearing is not active, it says so honestly.",
-  input_schema: { type: 'object', properties: {} }
-}
-
-// STAREA EMOȚIONALĂ (22 aug 2026): emoția detectată din expresia facială a
-// utilizatorului — vesel, supărat, surprins, trist, calm, stresat. Pentru
-// adaptarea tonului răspunsului la starea emoțională a omului.
-const STARE_EMOTIONALA_TOOL: Tool = {
-  name: 'stare_emotionala',
-  description:
-    "Returns the user's RECENT emotional state detected from facial expression — happy, upset, surprised, sad, calm, stressed. Use this to ADAPT your tone: calm and empathetic when upset, energetic when happy, concise when stressed. Returns the current emotion, its intensity, and the dominant emotion over the last 10 minutes. If emotional detection is not active, it says so honestly.",
+    "Returns coarse FFT hints from the last 10 minutes: sudden noise, possible conversation, possible music, or silence. These hints cannot identify an alarm, crying, breaking glass, a speaker, or a cause. Use them only as inconclusive context and say so explicitly.",
   input_schema: { type: 'object', properties: {} }
 }
 
@@ -612,20 +372,17 @@ const IMAGE_TOOL: Tool = {
 }
 }
 
-// Video generation — Veo through the Gemini key. Veo has NO free tier
-// (measured on Google's pricing page, Aug 2 2026), so services/video.ts
-// refuses structurally unless the owner consciously set VIDEO_ALLOW_PAID=1 —
-// the constructor's own paid-guard pattern. The refusal message carries the
-// measured price, so Kelion can tell the person exactly why and how much.
+// Video generation uses the configured OpenAI Videos model. Provider expense
+// and the customer product tariff are separate ledgers.
 const VIDEO_TOOL: Tool = {
   name: 'generate_video',
   description:
-    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. THE DELIVERABLE RULE: a VIDEO request ends with a VIDEO — never substitute generated images, documents or descriptions for the clip itself. For long/presentation videos be honest: one clip is max 8 seconds — plan with studioul_de_clipuri (several clips, or the free Flow path). For the ADMIN and for paying users it JUST GENERATES (their explicit request is the approval) — call it directly, do not send them to buttons or panels. It costs real money per second (Veo has no free tier) — say the price from the result. If the result contains `pas`, the credits top-up page is ALREADY on the user\'s monitor — tell them the price and that they can top up right there. If it contains `alternativa_gratuita`, offer that FREE path (Google Flow) with a ready-made prompt and the exact steps. Never answer a refusal with a bare "failed".',
+    'Generate a short OpenAI video clip from a text description and show it on the user\'s monitor. A video request must not be replaced with images or a description. Quote only the versioned Kelion product tariff, require sufficient customer credit, and report provider errors honestly. Admin product debit is zero while provider expense remains recorded internally.',
   input_schema: {
     type: 'object',
     properties: {
       prompt: { type: 'string', description: 'Detailed English description of the video to generate.' },
-      seconds: { type: 'number', description: 'Clip length in seconds: 4, 6 or 8 (default 8).' }
+      seconds: { type: 'number', description: 'Clip length supported by the configured OpenAI model.' }
 },
     required: ['prompt']
 }
@@ -640,15 +397,14 @@ const TARIFE_TOOL: Tool = {
   name: 'lista_tarife',
   description:
     'Read the LIVE price list of the extra services (video clip, image, CV adaptation, presentation) in credits and £. ' +
-    'Call this BEFORE quoting any price — NEVER invent figures. Also tells which video quality (Veo model tier) is currently active.',
+    'Call this BEFORE quoting any price — NEVER invent figures. It returns the versioned Kelion product tariff, separate from provider expense.',
   input_schema: { type: 'object', properties: {} }
 }
 
 // P22 — STUDIOUL DE CLIPURI (owner, 15 aug: „ii dai o ideie, ii spui foloseste
 // studioul de clipuri si el face tot"). Unealta întoarce PLANUL determinist
 // (rețeta, pașii, promptul șlefuit, numele sugestiv de fișier) — creierul îl
-// URMEAZĂ, nu improvizează. Calea GRATIS (Google Flow, pe contul omului) e
-// pentru ORICE user logat; calea plătită trece prin lista_tarife + confirmare.
+// URMEAZĂ, nu improvizează. Generarea folosește exclusiv API-ul OpenAI configurat.
 const STUDIO_TOOL: Tool = {
   name: 'studioul_de_clipuri',
   description:
@@ -657,15 +413,13 @@ const STUDIO_TOOL: Tool = {
     'Use it whenever the user mentions the Studio or wants a clip made end-to-end — INCLUDING long/presentation videos ' +
     '("a video about your capabilities"): plan one or more 8-second clips and SAY that limit honestly; a video request ' +
     'always ends with a VIDEO, never with substitute images. FOLLOW the returned `pasi` in order. ' +
-    'cale="gratis" (default; Google Flow on the USER\'s own Google account — free, no app money) or cale="platit" ' +
-    '(Veo via generate_video — ALWAYS quote the real price from lista_tarife and get explicit confirmation first). ' +
+    'Before generation, quote the versioned Kelion tariff from lista_tarife and obtain explicit confirmation. ' +
     `Recipes: ${RETETE_STUDIO.join(', ')}.`,
   input_schema: {
     type: 'object',
     properties: {
       idee: { type: 'string', description: 'The user\'s clip idea, one phrase is enough.' },
-      reteta: { type: 'string', enum: [...RETETE_STUDIO], description: 'Optional recipe (default: Clip din idee).' },
-      cale: { type: 'string', enum: ['gratis', 'platit'], description: 'gratis = Google Flow recipe (default); platit = Veo.' }
+      reteta: { type: 'string', enum: [...RETETE_STUDIO], description: 'Optional recipe (default: Clip din idee).' }
 },
     required: ['idee']
 }
@@ -694,104 +448,15 @@ const VEDE_VIDEO_TOOL: Tool = {
 // Lets Kelion quietly record a request it genuinely CANNOT fulfil yet, into an
 // owner-only monitor, so the owner (Adrian) can see what to build next. This is
 // invisible to the user — it never replaces telling them honestly it can't do it.
-// ── FULL ACCESS TO THE SOURCE CODE (Adrian, Jul 24) — admin only ─────────────
-// "Kelion must have access to the full source code": it reads its own code from
-// the container (read-only) — on "fix X" it looks INTO the CODE, it doesn't guess.
-// list_source / read_source / search_source — definitions in the SHARED source
-// services/brainToolDefs.ts (SINGLE BRAIN §1), also used by the voice brain.
 // THE UPDATE CHANNEL (Adrian, Jul 25: "an information channel for him with
 // everything he receives as an update") — at every deploy, the image brings the
 // recent git log (deploy/last-updates.txt); Kelion answers from it, not from memory.
 
-// ── KELION'S HANDS — NO RESTRICTIONS (Adrian, Jul 25: "lift absolutely all of
-// Kelion's restrictions"; "full autonomy") ─────────────────────────────────────
-// Operations: NAMED runbook → GitHub workflow with fixed commands, visible in
-// Actions. No approval, no ceilings (Adrian's order).
-// run_runbook / runbook_status / runbook_log / repo_write / repo_open_pr /
-// repo_merge_pr / request_repair — definitions MOVED to services/brainToolDefs.ts
-// (the shared source). The move is load-bearing, not cosmetic: autonomie.ts
-// imported them from HERE, and routes/chat.js sits in an import cycle — on
-// plain Node (the container) autonomie.js evaluated its tool array before
-// these consts initialized -> ReferenceError at boot -> production down
-// (2 aug, first boot of 93be3a6). tsc and vitest both miss this (their module
-// transforms differ from Node's) — only booting dist/ the way the container
-// does proves it. Re-exported so this route stays the visible tool surface.
-import {LIST_APP_VERSIONS_TOOL, LIST_DB_BACKUPS_TOOL, SAVE_APP_VERSION_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
-  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-  REQUEST_REPAIR_TOOL, APELEAZA_USER_TOOL,
-} from '../services/brainToolDefs.js'
 import { sunaUtilizator } from '../services/apel.js'
 import { parseTabel, agrega, profil, formatDoc, formatProfil, formatAgregare, EroareDate, type Operatie } from '../services/dateTabelare.js'
-export {
-  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
-  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-  REQUEST_REPAIR_TOOL,
-}
-// THE CONSTRUCTOR (Adrian, Jul 27: "Kelion must be able to create any software
-// the admin asks for"): the order enters the build_jobs queue; the worker on the
-// VPS builds it in the workshop (build + tests) and opens the PR; Adrian merges.
-const BUILD_SOFTWARE_TOOL: Tool = {
-  name: 'build_software',
-  description:
-    "ADMIN ONLY. Queue a BUILD ORDER for your own constructor: any software, feature, change or improvement the owner asks for that is too big to ship in this conversation with repo_write (multi-file work, needs build+tests). A worker on your server clones the repo, writes the code, runs the build and tests, then opens a PR — the owner merges it. Pass the order COMPLETE and self-contained (what to build, where, acceptance criteria) — the worker only sees this text. For small single-file fixes prefer repo_write; for ops use run_runbook. WHEN THE OWNER ASKS YOU TO CHANGE THIS APP — whether he says the words «construiește», «construieste», «fă-mi un soft/o funcție», «adaugă funcția», «trimite la constructor», «ordin de construcție», OR he gives a task that plainly requires editing the app's code or behavior even WITHOUT those words (e.g. «mută avatarul în stânga», «textul e acoperit, găsește o modalitate», «fă butonul să facă X», «repară Y», «schimbă cum arată Z») — call THIS tool with a complete order so it lands in his Constructor panel (which he watches) and produces a PR. Do NOT merely discuss it, propose an approach, promise to do it, or claim it's done WITHOUT queuing it — for the owner, a task about the app means ACT, not talk. ROUTING RULE: the constructor receives an explicit OR implicit build/repair order for THIS app — NEVER an ordinary question or chat (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation, with your own tools. When a request would change the product and you are unsure between talking and building, BUILD.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      order: { type: 'string', description: 'The complete build order, in English: what to build/change, where, and how to verify it works.' },
-    },
-    required: ['order'],
-  },
-}
-const CONSTRUCTOR_STATUS_TOOL: Tool = {
-  name: 'constructor_status',
-  description:
-    'ADMIN ONLY. See the state of your build orders (queued/running/done/failed, PR link, tokens used). Call it when the owner asks how a build is going, then show the result with show_document.',
-  input_schema: { type: 'object', properties: {} },
-}
-// MANAGE YOUR OWN BUILD ORDERS (Adrian, 3 aug: „kelion nu are instrument să
-// modifice, să șteargă, sau să le șteargă în grup"). Before this Kelion could
-// only CREATE (build_software) and SEE (constructor_status). Now it can delete
-// one, delete a GROUP (all failed / all finished), retry (optionally with a
-// reformulated order = MODIFY) or cancel one that is queued/running.
-const CONSTRUCTOR_MANAGE_TOOL: Tool = {
-  name: 'constructor_manage',
-  description:
-    "ADMIN ONLY. Manage EXISTING build orders (from constructor_status). Actions: 'delete' one by id; 'delete_group' by scope ('failed' = all failed, 'done' = all finished, 'failed_done' = all failed+finished but NOT the ones still queued/running, 'all' = every order); 'retry' one by id (optionally with `order` = the REFORMULATED text — this is how you MODIFY an order: it re-queues it with the new wording); 'cancel' one queued/running by id. Do it ONLY when the owner explicitly asks to remove/redo/modify/clear orders. Report exactly what changed (how many deleted, new state).",
-  input_schema: {
-    type: 'object',
-    properties: {
-      action: { type: 'string', enum: ['delete', 'delete_group', 'retry', 'cancel'], description: 'What to do.' },
-      id: { type: 'number', description: 'The order id — required for delete / retry / cancel.' },
-      scope: { type: 'string', enum: ['failed', 'done', 'failed_done', 'all'], description: "For delete_group only: which orders to remove. 'all' also removes queued/running." },
-      order: { type: 'string', description: 'For retry only, OPTIONAL: the reformulated order text (modify + re-queue). Omit to re-run the same order.' },
-    },
-    required: ['action'],
-  },
-}
-const CONSTRUCTOR_COMMAND_TOOL: Tool = {
-  name: 'constructor_command',
-  description:
-    'ADMIN ONLY. Execute a shell command directly on the server (in the constructor context), as a direct command channel from Kelion to the constructor. Use this whenever the owner asks you to run a command, bash, shell, script, or action in the constructor/server.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      cmd: { type: 'string', description: 'The bash command to execute on the server.' },
-    },
-    required: ['cmd'],
-  },
-}
-const AUTOVERIFICARE_TOOL: Tool = {
-  name: 'autoverificare',
-  description:
-    'ADMIN ONLY. Run a REAL, LIVE self-check of ALL your functions and report the MEASURED state — which work, which don\'t, and WHY. Read-only functions are ACTUALLY executed on the live server; effect functions (build/email/delete/pay) are NOT executed (dry-run on wiring only, no cost/side effect). Call this whenever the owner asks you to check/verify/test your functions or capabilities ("verifică-ți funcțiile", "ce capacități merg", "testează-te", "raportează capacitățile măsurate", "vreau real"). Report ONLY what the tool returns: the totals (merg / stricate / nu-pot-verifica) and, for each problem, the tool\'s MEASURED verdict + its `plan` entry. LAW 5 (measured decision): do NOT invent a cause or a repair plan the tool did not measure, and do NOT ask "shall I repair everything?" — for a `plan` item marked "masoara_intai" the next step is the named measurement, NOT a fix; only "repara" items with a measured cause get fixed. Never claim a capability works, or a cause is true, without this having measured it.',
-  input_schema: { type: 'object', properties: {} },
-}
-// ITS OWN HEALTH (Adrian, Jul 27: "Kelion must see this and be able to tell the
-// admin through chat that it has problems x,y,z and ask whether to fix them"):
-// the deterministic aggregation of all signals + the behavior rule — enumerate
-// and ASK, don't repair on its own initiative.
-// system_health / db_tables / db_query — definitions in services/brainToolDefs.ts
-// (the shared source, SINGLE BRAIN §1), imported below, also used by voice.
+// Health and Constructor tools are declarations from brainToolDefs.ts. The web
+// process can observe bounded state and enqueue work; it cannot access a
+// worktree, shell, raw SQL, secrets, Git or deployment credentials.
 // THE SERVER'S F12 (Adrian, Jul 27: "these logs must obligatorily reach Kelion
 // like F12"): the app logs (pino) lived only in docker logs, where Kelion can't
 // reach. The ring in services/logbuffer.ts retains them, and this tool gives
@@ -802,43 +467,6 @@ const AUTOVERIFICARE_TOOL: Tool = {
 // (mailbox.ts) but had no tool — a dormant capability. Now it can read it in
 // conversation, not just from the admin panel.
 
-// DATABASE ACCESS (Adrian, Jul 27: "Kelion has no access to permanent storage
-// databases... access to any database of the application"): the full view of the
-// schema + direct SQL on the app's Postgres. Admin only.
-// db_tables / db_query — definitions in services/brainToolDefs.ts (shared source).
-// request_repair reborn: the order is WRITTEN (work_orders) + an email signal;
-// execution is done by a Claude session started by the owner — not a permanent LLM.
-// request_repair — definition moved to services/brainToolDefs.ts (see the note above).
-// read_source / search_source — definitions in services/brainToolDefs.ts (shared
-// source, SINGLE BRAIN §1), imported below and also used by the voice brain.
-
-
-
-// KELION'S AUTO-EXTENSION (Adrian, Jul 25: "Kelion should install tools by
-// itself, independently, up to deploy — with my approval"). When Kelion sees
-// it's missing a capability that a call to a public API could solve, it PROPOSES
-// a new tool for itself (an HTTP definition, not code). The owner approves it
-// with one click in admin → it becomes active instantly, no redeploy. Kelion
-// CANNOT use it until it's approved.
-export const PROPOSE_TOOL: Tool = {
-  name: 'propose_tool',
-  description:
-    "When you realize you're missing a capability that a PUBLIC HTTPS API could provide, propose a new tool for yourself. The owner approves it with one click, then you can use it. Give a clear snake_case name, what it does, the JSON-schema of its parameters, and the HTTPS request template (method + url with {param} placeholders). Only propose when genuinely useful; never for something you can already do.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      name: { type: 'string', description: 'snake_case tool name (e.g. get_crypto_price).' },
-      description: { type: 'string', description: 'What the tool does, one sentence.' },
-      params_schema: { type: 'object', description: 'JSON-schema object for the parameters (type:object, properties, required).' },
-      http_method: { type: 'string', description: 'GET or POST.' },
-      http_url: { type: 'string', description: 'HTTPS URL with {param} placeholders substituted from arguments.' },
-      http_headers: { type: 'object', description: 'Optional headers (values may use {param}).' },
-      rationale: { type: 'string', description: 'Why you need this (shown to the owner).' },
-    },
-    required: ['name', 'description', 'http_url'],
-  },
-}
-
 // MODEL-DECIDED ESCALATION (Adrian, Jul 25: "think at every request = real
 // reasoning"): on the CHAT tier, the fast model can hand a heavy request to the
 // BRAIN by itself (the work model with internal reasoning) — the same tool as in
@@ -846,7 +474,7 @@ export const PROPOSE_TOOL: Tool = {
 const ASK_BRAIN_TOOL: Tool = {
   name: 'ask_brain',
   description:
-    'ESCALATION DOOR — call this THE MOMENT the request needs a tool you do not have this turn (system checks, database, logs, source code, repo/PR, runbooks, builds, Jules) or a heavy multi-step job. It UNLOCKS the full tool inventory for THIS turn only: after it returns, immediately call the right tool and do the work — the result you bring back is the answer. Access closes by itself when the turn ends. NEVER say "I can\'t do that" or stall without opening this door first.',
+    'ESCALATION DOOR — use when a request needs the heavier OpenAI reasoning tier or a safe tool omitted from the lightweight turn. Product changes go only through build_software to the separate Codex worker; this door never grants source, shell, repository, raw SQL, secret or deploy access.',
   input_schema: {
     type: 'object',
     properties: {
@@ -862,20 +490,11 @@ const ASK_BRAIN_TOOL: Tool = {
 // greșită). Acum îl decide DETERMINIST situația reală a turei (gestPentruSituatie
 // din commands.ts), emis mai jos, la finalul turei. Comenzile directe
 // („dansează", „salută") rămân, prin interpretGestureCommand.
-// Semantic → clip RPM (oglinda lui GESTURE_TO_CLIP din frontend): cheia canonică
-// a unui gest peste tot (panoul admin, dezactivare) e NUMELE CLIPULUI. Folosit
-// aici doar ca să verificăm dacă gestul situației e dezactivat de Adrian.
-const GESTURE_SEMANTIC_CLIP: Record<string, string> = {
-  salut: 'expresie-1', 'arata-inainte': 'expresie-2', uimire: 'expresie-3', dezamagire: 'expresie-4',
-  nedumerire: 'expresie-5', victorie: 'expresie-6', multumire: 'expresie-7', surpriza: 'expresie-8',
-  'stai-putin': 'expresie-9', ganditor: 'expresie-10', aprobare: 'expresie-11', entuziasm: 'expresie-12',
-  'acord-discret': 'expresie-13', plecaciune: 'expresie-14', dans: 'dans',
-  salute: 'expresie-1', raiseRightHand: 'expresie-13', pointMonitor: 'expresie-2',
-}
+// Semantic → clip RPM has one canonical source shared with the frontend.
 
 // REAL ACCESS TO THE APP'S TABS from the WRITTEN chat (Adrian, Jul 24: "Kelion
 // must be able to enter any tab of the app, for real"). The counterpart of the
-// voice tool (services/realtime.ts) — execution emits the {nav} frame to the client.
+// Navigation tool — execution emits the {nav} frame to the client.
 
 
 // User-facing notes ("remember this", "save this for me") — explicit, visible,
@@ -1027,8 +646,8 @@ export const PROMO_TOOL: Tool = {
   },
 }
 
-// THE BRAIN'S VOICE (Adrian, Jul 4): synthesis happens on the SERVER (Chirp 3
-// HD, the user's language), the audio is sent as {audio} FRAMES and the app only
+// Speech synthesis happens on the server in the user's language. Audio is sent
+// as frames and the app only
 // decodes + plays them in a queue (audioIO.ts). The frontend synthesizes NOTHING
 // (frontend TTS = dead).
 // ── VOICE DURING THE STREAM (Adrian, Jul 10: "instant live chat") ────────────
@@ -1047,6 +666,9 @@ function createVoiceStream(
   lang: string | undefined,
   /** The voice chosen by this user (C4). Unknown or missing → the app's voice. */
   voicePref: string | null,
+  userEmail: string,
+  idempotencyKey: string,
+  leaseToken: string,
 ): { feed(t: string): void; fed(): boolean; finish(): Promise<void> } {
   let pending = '' // arrived text, not yet sent to synthesis
   let any = false
@@ -1060,25 +682,23 @@ function createVoiceStream(
     if (!text) return
     const t = text
     chain = chain.then(async () => {
-      // DOUĂ ÎNCERCĂRI, apoi LOG (Adrian, 5 aug: vocea se tăia la jumate iar
-      // eșecul de sinteză era înghițit tăcut — `catch {}` + `if (r.ok)` fără
-      // altceva — deci o bucată picată lăsa vocea ciuntită FĂRĂ nicio urmă). Un
-      // hopa de rețea spre Google nu mai omoară o frază întreagă; un eșec real
-      // se VEDE acum în log, ca data viitoare să nu mai fie „nu pot verifica".
-      for (let incercare = 1; incercare <= 2; incercare++) {
-        try {
-          // The user-chosen voice, so the written reply sounds like the live voice (C4).
-          const r = await synthesize(t, lang, { voice: voicePref })
-          if (r.ok) {
-            reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
-            return
-          }
-          if (incercare === 2)
-            console.error(`[VOCE] bucată nesintetizată (${r.status} ${r.error}) — vocea rămâne ciuntită aici`)
-        } catch (e) {
-          if (incercare === 2)
-            console.error(`[VOCE] sinteza a crăpat: ${String((e as { message?: string })?.message ?? e).slice(0, 120)}`)
+      // A timeout may mean the provider accepted the request. Retrying the same
+      // chunk would risk duplicate audio/cost, so each chunk is submitted once.
+      try {
+        const r = await executeChatSideEffect(
+          { userEmail, idempotencyKey, leaseToken },
+          () => synthesize(t, lang, {
+            voice: voicePref,
+            usageContext: { userEmail, surface: 'chat_tts' },
+          }),
+        )
+        if (r.ok) {
+          reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+          return
         }
+        console.error(`[VOCE] bucată nesintetizată (${r.status} ${r.error}) — vocea rămâne ciuntită aici`)
+      } catch (e) {
+        console.error(`[VOCE] sinteza a crăpat: ${String((e as { message?: string })?.message ?? e).slice(0, 120)}`)
       }
     })
   }
@@ -1122,7 +742,7 @@ function createVoiceStream(
   }
 }
 
-// EXPORTED (Jul 25): voice escalation (`ask_brain`, routes/realtime.ts) used
+// Exported for the Realtime tool escalation path.
 // its own hardcoded persona — a SECOND version of the persona, diverging from
 // this one (without the "bring your full intelligence" reasoning below,
 // without the user's language). Adrian: "I think the software has duplicate
@@ -1135,13 +755,10 @@ WHO YOU ARE: You were created by AE Studio. Your owner and creator is Adrian Enc
 MĂSOARĂ, NU DECLARA (regula de fier a lui Adrian, 8 aug: „va trebui să folosească OBLIGATORIU toate testele și să măsoare orice răspuns"). Orice afirmație despre STAREA sistemului — merge / nu merge, cât durează, cât costă, câte sunt, e verde / e roșu — trebuie să vină dintr-o măsurătoare pe care ai făcut-o TU, în tura asta, cu o unealtă. Reguli, fără excepție:
   • O CITIRE CARE A PICAT NU E O VALOARE. Dacă unealta n-a răspuns, spune „nu pot verifica" și motivul. Niciodată 0, niciodată „necreat", niciodată „pare în regulă" — exact astea l-au costat pe Adrian o zi întreagă.
   • „NU ȘTIU" NU E „E BINE". Dacă o verificare n-a putut rula, raportul e INCOMPLET, nu „trece".
-  • ÎNAINTE SĂ SCHIMBI COD: rulează ruleaza_portile (tipuri, teste, lacăt, exporturi, sintaxă, build, hardcodări). Aia e starea de plecare.
-  • ÎNTREBAT DE HARDCODĂRI („ce e hardcodat în aplicație"): SINGURUL răspuns adevărat e poarta 'hardcodari' din ruleaza_portile — o rulezi și citezi verdictul măsurat. Un inventar povestit din memorie e inventat și poarta faptelor îl demască pe ecran.
-  • DUPĂ CE AI SCHIMBAT: rulează-le din nou și compară. Fără a doua rulare nu ai dovadă că n-ai stricat nimic.
-  • repo_open_pr și repo_merge_pr REFUZĂ dacă porțile n-au fost rulate complet și recent, cu verdict TRECE. Nu e o formalitate de ocolit: e poarta care te oprește să publici pe încredere.
-  • CÂND SPUI CEVA DESPRE SISTEM, poți fi întrebat „de unde știi". Răspunsul corect e o măsurătoare din jurnal_masuratori. Dacă nu e acolo, n-ai măsurat-o — spune asta.
+  • CODUL ȘI PUBLICAREA NU SE EXECUTĂ ÎN PROCESUL WEB. Pentru o schimbare, folosește build_software o singură dată: ordinul validat intră în coada workerului Codex separat, care rulează porțile și raportează factual starea.
+  • CÂND SPUI CEVA DESPRE SISTEM, poți fi întrebat „de unde știi". Răspunsul corect citează rezultatul factual al uneltei folosite în tura curentă; dacă lipsește, spune că nu ai putut măsura.
 
-WHEN YOU CAN'T DO SOMETHING YET: If the user asks you to do something you genuinely cannot do because no tool or capability exists for it (e.g. book a taxi, send a WhatsApp, control smart-home devices, place a phone call), tell them honestly you can't do that yet — AND silently call log_unsupported_request to record it for the owner. Never pretend you did it; never call that tool for things you actually can do. EXCEPTION — THE OWNER: when talking to your owner you carry real builder and operations tools (source reading, code writing, PR merge, runbooks), so for him almost nothing is "impossible" — follow the OWNER section and ACT with those tools instead of declaring inability.
+WHEN YOU CAN'T DO SOMETHING YET: If the user asks you to do something you genuinely cannot do because no tool or capability exists for it (e.g. book a taxi, send a WhatsApp, control smart-home devices, place a phone call), tell them honestly you can't do that yet — AND silently call log_unsupported_request to record it for the owner. Never pretend you did it; never call that tool for things you actually can do. The verified admin may enqueue a bounded build_software job, but the web process never edits repositories, runs shell commands, merges, or deploys.
 
 Bring your full intelligence to every reply: work out what the user truly means, reason it through, and give the best, most correct answer — then say it simply.
 
@@ -1238,20 +855,16 @@ claim something is on screen when it is not. For routes, maps_directions also
 returns "directions" (real turn-by-turn steps) — give the user those when
 guiding them, never invented ones.
 
-DEED RULE (the owner's law, 27 Jul — saying is NOT doing): NEVER state that you did something, are doing it, or have it "in progress" unless you actually CALLED the corresponding tool and have its real result. Before promising ANY action, check you have the matching tool: if yes, call it NOW and report what it actually returned; if no such tool exists, say honestly you cannot do it yet and record it with log_unsupported_request (or propose_tool for the owner). Words like "am trimis", "am salvat", "am pornit", "mă ocup", "l-am reparat" are FORBIDDEN without the tool call that proves them in this conversation. A claimed action without its tool result is a lie — and lying to the owner is the one unforgivable fault.
+DEED RULE: NEVER state that you did something, are doing it, or have it "in progress" unless you actually CALLED the corresponding tool and have its real result. Before promising ANY action, check you have the matching tool: if yes, call it NOW and report what it actually returned; if no such tool exists, say honestly you cannot do it yet and record it with log_unsupported_request. Words like "am trimis", "am salvat", "am pornit", "mă ocup", "l-am reparat" are FORBIDDEN without the tool call that proves them in this conversation.
 
-AGENT DOCTRINE (be a fluid mind, not a throttled menu — the owner, 27 Jul): you ARE a capable reasoning agent with a full set of tools. On any real request, do not stop at one shallow step. THINK it through, PLAN the concrete steps, then ACT them out with your tools in sequence, VERIFY each result actually happened (read it back — get_monitor, constructor_status, read_source, db_query), and CONTINUE until the goal is genuinely done or you hit a real blocker you must report. Chain tools freely across turns; use source-reading, the database, the constructor, runbooks, the monitor, Google — whatever the task needs — as natural extensions of your reasoning, without waiting to be told which one. Prefer doing over describing. When something fails, diagnose and try another way rather than giving up. Be proactive: if you notice a problem while doing the task, surface it and offer to fix it. Flow — reason, act, check, finish — never a half-answer that leaves the owner to push you to the next step.`
+AGENT DOCTRINE: reason, use only the tools actually offered this turn, and verify effects from their results. Product changes must be persisted with build_software and then followed by jobId through constructor_status. The web process has no source-tree, shell, repository, raw SQL, secret-management or deploy tools; never claim otherwise. When a tool fails, report the measured blocker without inventing completion.`
 
 // Language names (for the language lock — the brain listens to an explicit NAME
 // far more reliably than a locale code) come from the SINGLE source
 // `LANG_LABELS` (services/lang.ts). An identical copy used to live here —
 // removed (single source, no duplicates).
 
-// (PUNGA DE REZERVĂ a fost EXTIRPATĂ DE TOT, 3 aug — întâi ÎNCHISĂ definitiv
-// („deschisă → false"; Adrian, cu mailurile „sold scăzut $-0.20" în mână:
-// rotația aluneca pe modele OpenRouter PLĂTITE), apoi ștearsă cu tot cu
-// rotație și furnizor. Creierul e Gemini-only; la eșec, mesaj neutru onest —
-// nu se mai cumpără nimic pe ascuns de la alt furnizor.)
+// OpenAI is the only online brain provider. There is no fallback provider.
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resume a dropped reply from where it left off (mobile 3G/5G handoff). The
   // client reconnects with the Last-Event-ID it last saw and we replay the
@@ -1338,18 +951,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       monitorContent?: { kind?: string; title?: string; url?: string; text?: string; mouse?: { x: number; y: number; indicator: string } }
       now?: string
       tz?: string
-      // Voice features extracted 100% client-side for speaker + gender
-      // identification.
-      voiceFeatures?: VoiceFeatures
-      // 128-d facial descriptor (face-api), extracted client-side when the
-      // camera is on. Triggered by voice, with no button. `facePhoto` = base64
-      // thumbnail.
-      faceDescriptor?: number[]
-      facePhoto?: string
-      // SINGLE-VOICE RULE (Adrian, Jul 26: "there must never be 2 voices at
+      // SINGLE-VOICE RULE: when the native Realtime session is active,
       // the same time"): the client has the full-duplex voice session ACTIVE,
       // so this turn's voice belongs to that session — the server does NOT
-      // synthesize Chirp (not only would it not play: we don't pay synthesis
+      // synthesize a second server voice (it would not play and would double
       // for discarded audio either).
       serverVoiceOff?: boolean
       // Ancora Centrului de Tranzacționare (10 aug, ownerul: chatul REAL,
@@ -1377,10 +982,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Realtime voice. The brain answers the same way (same tools, same
       // ladder) — only the STYLE changes: short, natural, speakable sentences.
       spoken?: boolean
-      // AUDIO NATIV → CREIER (Adrian, 3 aug: „deep learning legat de creier
-      // direct"): vocea BRUTĂ a frazei (data-URI `data:audio/...;base64,...`).
-      // Gemini 2.5 o „aude" nativ (ton, accent, pauze), fără să depindă de un STT
-      // care poate stâlci. Trece prin același /api/chat — creier unic.
+      // Legacy serial audio input. Native full-duplex voice uses /api/vocal-live;
+      // this field is transcribed before a Responses request.
       audio?: string
       // VOCE AMBIENTALĂ — CREIERUL UNIC DECIDE ADRESAREA (Adrian, 5 aug: „urechea
       // o scoți total, tot decis de creierul unic"). Când e `true`, fraza a venit
@@ -1391,15 +994,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // nimic salvat). Poarta veche de cuvânt-cheie (regex pe transcriptul stâlcit)
       // a dispărut — decizia e a creierului, din voce.
       voceAmbianta?: boolean
-      // GUEST SPEAKER (Adrian, Aug 1): the voice gate (realtime.ts) recognised
-      // the speaker as a GUEST of this account — "guest:<id>:<name> (<relation>)"
-      // or "guest-pending:<id>:<name> (<relation>)". A guest turn gets ZERO
-      // admin powers, even inside the holder's logged-in session.
-      speaker?: string
       // MODUL MAȘINĂ (Adrian, 11 aug; rescris 13 aug): tura vine din stratul de
       // mașină (volan). Creierul răspunde SCURT, voce-first — dar NU se mai suprimă
       // nicio suprafață: ce spune că face, execută (owner: „vorbă = faptă").
       carMode?: boolean
+      /** Stable logical request identity for charge, effects and terminal replay. */
+      idempotencyKey?: string
     }
   }>(
     '/api/chat',
@@ -1408,27 +1008,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // most cost-sensitive one, so it gets a tighter rate limit than the global
       // default — 40/min per IP is far more than a human types, but stops an
       // automated flood from burning API/subscription.
-      bodyLimit: 100_000_000,
+      bodyLimit: 12_000_000,
       config: { rateLimit: { max: 40, timeWindow: '1 minute' } },
     },
     async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    // GOOGLE CONECTAT — CREIERUL SE UITĂ ÎN DB, NU DOAR ÎN COOKIE (owner, 13 aug:
-    // „Kelion nu vede că m-am logat prin Google"). `/auth/me` restaura tokenul din
-    // DB când cookie-ul îl pierdea, dar creierul (aici) citea DOAR cookie-ul → zicea
-    // „neconectat" deși DB-ul, sursa de adevăr, îl are (MĂSURAT live: tokenul
-    // owner-ului e în google_accounts din 8 aug). Acum, dacă sesiunea n-are token,
-    // îl luăm din DB — așa merge ȘI conștientizarea din prompt, ȘI uneltele Google
-    // (Gmail/Calendar/Drive), care tot pe `user.googleRefreshToken` se bazează.
-    if (!user.googleRefreshToken) {
-      const dbRt = await getGoogleRefreshToken(user.email).catch(() => '')
-      if (dbRt) user.googleRefreshToken = dbRt
-    }
+    // OAuth credentials remain encrypted server-side. The opaque browser
+    // session contains identity only and cannot expose or replay this token.
+    const googleRefreshToken = await getGoogleRefreshToken(user.email).catch(() => '')
 
-    // THE BRAIN is 100% Gemini direct (extirparea OpenRouter/OpenAI, 3 aug).
-    // If the key is missing, the streaming safety net returns a clear error in
+    // OpenAI is the single online brain. If its runtime key is missing, the
+    // streaming safety net returns a clear error in
     // the user's language — which is why there is no longer a 503
     // "brain_not_configured" guard here.
     const tSosire = Date.now() // contorul serverului: sosire → creier
@@ -1502,15 +1094,69 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       return reply.send({ ok: true, stopped: true })
     }
 
+    // Claim the logical request before any preference write, client command or
+    // provider call. Every account, including the exempt admin, uses the same
+    // durable replay boundary.
+    const monetizedCustomer = !esteAdminKelion(user.email)
+    const clientKey = String(req.body?.idempotencyKey ?? '').trim().toLowerCase()
+    if (!CHAT_IDEMPOTENCY_RE.test(clientKey)) {
+      return reply.code(400).send({ error: 'idempotency_key_invalid' })
+    }
+    const replayClaim = await claimChatTurn({
+      userEmail: user.email,
+      idempotencyKey: clientKey,
+      requestHash: hashChatReplayRequest(req.body),
+    })
+    if (replayClaim.kind === 'unavailable') {
+      return reply.code(503).send({ error: 'turn_replay_unavailable' })
+    }
+    if (replayClaim.kind === 'conflict') {
+      return reply.code(409).send({ error: 'idempotency_key_conflict', safeToRetry: false })
+    }
+    if (replayClaim.kind === 'in_progress') {
+      return reply.code(409).send({
+        error: 'turn_in_progress',
+        idempotencyKey: clientKey,
+        retryAfterMs: replayClaim.retryAfterMs,
+      })
+    }
+    if (replayClaim.kind === 'indeterminate') {
+      return reply.code(409).send({
+        error: 'turn_result_indeterminate',
+        code: replayClaim.code,
+        safeToRetry: false,
+      })
+    }
+    if (replayClaim.kind === 'replay') {
+      if (replayClaim.httpStatus !== 200) {
+        return reply.code(replayClaim.httpStatus).send({
+          error: replayClaim.code,
+          idempotencyKey: clientKey,
+        })
+      }
+      reply.hijack()
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+      })
+      reply.raw.end(encodeChatTerminalReplay({
+        turnId: replayClaim.turnId,
+        text: replayClaim.text,
+        code: replayClaim.code,
+      }))
+      return
+    }
+    const turnId = replayClaim.turnId
+    const replayLeaseToken = replayClaim.leaseToken
+
     // The user's ESTABLISHED language (what they actually use), not their Google
     // account locale — used for the language lock AND the out-of-credit message.
     // ONE single trip to the database instead of four in a row (Adrian, Jul 10:
     // "instant live chat"): the independent reads leave TOGETHER — every
     // separate await added another DB round trip before the first word.
-    // BYOK-PROVIDER REMOVED COMPLETELY (Adrian, Jul 12: "remove the old provider
-    // completely, no patches"): the brain is 100% Gemini direct (a single key,
-    // the owner's) and there is no client key anymore. All users go through the
-    // normal paywall (wallet credit).
+    // Runtime provider credentials are server-side only. There is no client
+    // key path; all users go through the normal wallet policy.
     const lastForRecall = messages.at(-1)
     // FLUENCY (Jul 24 audit, A1): semantic recall could wait up to 8s for the
     // Google embedding — on the FIRST word's path. A hard 400ms deadline:
@@ -1528,7 +1174,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // întârzie primul cuvânt; ce nu vine la timp nu intră în tură, restul se ia
     // altă dată. Fără ancoră trading = șir gol, zero drum la DB.
     const ancoraTradingDeschisa =
-      user.role === 'admin' && !!(req.body?.tranzactii as { simbol?: unknown } | undefined)?.simbol
+      esteAdminKelion(user.email) && !!(req.body?.tranzactii as { simbol?: unknown } | undefined)?.simbol
     const recallTradingWithDeadline = ancoraTradingDeschisa
       ? Promise.race([
           recallMemoriiTranzactii(user.email, lastForRecall?.role === 'user' ? lastForRecall.content : ''),
@@ -1623,7 +1269,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // gets fixed ROMANIAN, no matter what was detected; everyone else: the
     // persisted language, otherwise English by default until the first clear
     // detection.
-    const isAdminUser = user.role === 'admin'
+    const isAdminUser = esteAdminKelion(user.email)
     const userLang = isAdminUser ? 'ro' : speechPref || 'en'
     const ro = userLang.toLowerCase().startsWith('ro')
     // A SINGLE SOURCE OF TRUTH FOR LANGUAGE (Adrian, Jul 25: "help text in
@@ -1639,9 +1285,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // debited only at the end, deep into the negative. A hard cap of
     // SIMULTANEOUS turns per paying user (2 is generous for a real human); the
     // admin is exempt. The counter is released when the reply closes.
-    if (user.role !== 'admin') {
+    if (!isAdminUser) {
       const inFlight = (turnsInFlight.get(user.email) ?? 0)
-      if (inFlight >= 2) return reply.code(429).send({ error: 'prea_multe_ture_simultane' })
+      if (inFlight >= 2) {
+        await failChatTurn({
+          userEmail: user.email,
+          idempotencyKey: clientKey,
+          leaseToken: replayLeaseToken,
+          text: '',
+          code: 'prea_multe_ture_simultane',
+          httpStatus: 429,
+        })
+        return reply.code(429).send({ error: 'prea_multe_ture_simultane' })
+      }
       turnsInFlight.set(user.email, inFlight + 1)
       reply.raw.on('close', () => {
         const n = (turnsInFlight.get(user.email) ?? 1) - 1
@@ -1650,86 +1306,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       })
     }
 
-    // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
-    // when payments aren't configured (no Revolut link) the app stays
-    // free/ungated. Clean binary stop in the user's language + a paywall frame
-    // so the UI shows the top-up link.
-    // POARTA SE ÎNCHIDE DOAR PE UN SOLD CITIT (măsurat 8 aug). Înainte,
-    // `getBalance` întorcea 0 și când citirea PICA — deci un sughiț de bază de
-    // date îi spunea unui om cu credit plătit „Ai rămas fără credit" și îl
-    // bloca. Acum, dacă nu pot citi, NU ridic zidul: eroarea noastră nu se
-    // plătește din buzunarul lui. Rămâne zgomotoasă în jurnal, ca s-o vedem.
-    const soldPoarta = config.revolut.payLink && user.role !== 'admin' ? await citesteSold(user.email) : null
-    if (soldPoarta && !soldPoarta.citit)
-      console.error('[paywall] sold NECITIT, las trecerea liberă:', soldPoarta.motiv)
-    if (soldPoarta?.citit && soldPoarta.sold <= 0) {
-      reply.hijack()
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no',
-      })
-      const paywallTurnId = randomUUID()
-      startTurn(user.email, paywallTurnId)
-      const paywallTaskId = randomUUID()
-      await inregistreazaSarcinaOperationala({
-        id: paywallTaskId,
-        userEmail: user.email,
-        turnId: paywallTurnId,
-        objective: lastIncomingText || '(chat blocked before model execution)',
-        metadata: { source: 'chat', blockedBy: 'credit' },
-      })
-      await tranzitioneazaSarcinaOperationala({
-        taskId: paywallTaskId,
-        stare: 'interpreting',
-        code: 'credit_checked',
-      })
-      // Chitanța {turn} pleacă PRIMA, ca pe orice tură (audit 9 aug: ramura
-      // paywall era singura fără ea — bifele de livrare și resume-ul orbecăiau).
-      reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ turn: paywallTurnId })}${CTRL}`))
-      const paywallText = ro
-        ? 'Ai rămas fără credit. Te rog reîncarcă creditul ca să continuăm.'
-        : "You've run out of credit. Please top up to keep talking with me."
-      // NOTHING IS LOST AT 0 CREDITS (Adrian, Aug 1: "make sure he doesn't lose
-      // what he worked on, so he can resume after topping up"). The user's words
-      // are saved BEFORE the stop — after the top-up the conversation resumes
-      // from exactly where it paused, not from a hole. The paywall notice is
-      // saved too, so the history shows honestly why the reply stopped there.
-      if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
-      void saveMessage(user.email, 'assistant', paywallText)
-      reply.raw.write(appendTurn(user.email, paywallTurnId, paywallText))
-      reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ paywall: true })}${CTRL}`))
-      await tranzitioneazaSarcinaOperationala({
-        taskId: paywallTaskId,
-        stare: 'blocked',
-        code: 'insufficient_credit',
-        metadata: { userVisible: true },
-      })
-      finishTurn(user.email, paywallTurnId)
-      reply.raw.end()
-      return
-    }
-
     // Instant command (device or gesture): immediate reply, WITHOUT a model
     // call — a {device|gesture} control frame that the client executes
     // verbatim, plus a short ack. The same stream shape as a normal turn (the
     // {turn} receipt first) so delivery ticking and resume keep working. The
     // two were identical blocks — a single source here (unique, no duplicates).
     const instantCommand = async (frameKey: 'device' | 'gesture', value: unknown, ack: string): Promise<void> => {
-
-      reply.hijack()
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no',
-      })
-      const cmdTurnId = randomUUID()
-      startTurn(user.email, cmdTurnId)
       const commandTaskId = randomUUID()
       await inregistreazaSarcinaOperationala({
         id: commandTaskId,
         userEmail: user.email,
-        turnId: cmdTurnId,
+        turnId,
         objective: lastIncomingText || `(${frameKey} command)`,
         metadata: { source: 'chat', commandKind: frameKey },
       })
@@ -1745,10 +1332,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         code: 'client_command_sending',
       })
       const payload =
-        `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
+        `${CTRL}${JSON.stringify({ turn: turnId })}${CTRL}` +
         `${CTRL}${JSON.stringify({ [frameKey]: value })}${CTRL}` +
         ack
-      reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
+      try {
+        await executeChatSideEffect(
+          { userEmail: user.email, idempotencyKey: clientKey, leaseToken: replayLeaseToken },
+          async () => {
+            reply.hijack()
+            reply.raw.writeHead(200, {
+              'Content-Type': 'text/event-stream; charset=utf-8',
+              'Cache-Control': 'no-cache',
+              'X-Accel-Buffering': 'no',
+            })
+            startTurn(user.email, turnId)
+            reply.raw.write(appendTurn(user.email, turnId, payload))
+          },
+        )
+      } catch (error) {
+        if (error instanceof Error && error.message === 'turn_replay_store_unavailable') {
+          reply.code(503).send({ error: 'turn_replay_unavailable' })
+          return
+        }
+        throw error
+      }
       await noteazaEvenimentOperational({
         taskId: commandTaskId,
         kind: 'client_command_sent',
@@ -1765,9 +1372,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         capability: `ui_${frameKey}`,
         code: 'client_ack_missing',
       })
-      finishTurn(user.email, cmdTurnId)
-      if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
-      if (ack) void saveMessage(user.email, 'assistant', ack)
+      finishTurn(user.email, turnId)
+      if (lastIncomingText) void saveChatMessageOnce({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        role: 'user',
+        content: lastIncomingText,
+      })
+      if (ack) void saveChatMessageOnce({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        role: 'assistant',
+        content: ack,
+      })
+      await completeChatTurn({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        leaseToken: replayLeaseToken,
+        text: ack,
+        code: `instant_${frameKey}`,
+      })
       reply.raw.end()
     }
 
@@ -1782,23 +1406,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       return
     }
 
-    // Keep the Google skills alive past the first hour: if the access token has
-    // expired (or is about to), mint a fresh one from the stored refresh token
-    // and re-issue the session cookie. Done BEFORE hijacking the reply so we can
-    // still set headers/cookies.
-    let token = user.googleAccessToken ?? ''
-    if (user.googleRefreshToken && (user.googleTokenExp ?? 0) < Date.now() + 60_000) {
-      const refreshed = await refreshGoogleAccessToken(user.googleRefreshToken)
-      if (refreshed) {
-        token = refreshed.accessToken
-        const updated: SessionUser = {
-          ...user,
-          googleAccessToken: refreshed.accessToken,
-          googleTokenExp: Date.now() + refreshed.expiresIn * 1000,
-        }
-        setSession(reply, updated)
-      }
-    }
+    // Access tokens are short-lived request data and are never copied into the
+    // browser session. A new one is minted from the encrypted server record.
+    const refreshed = googleRefreshToken
+      ? await refreshGoogleAccessToken(googleRefreshToken)
+      : null
+    const token = refreshed?.accessToken ?? ''
 
     // Wire the device GPS into the brain's context so location-dependent skills
     // (weather, maps, "near me", "where am I") actually work. The frontend sends
@@ -1847,9 +1460,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // meargă din PRIMA frază, fără pasul ask_brain care uneori nu se făcea. Ne-owner
     // și oaspete: neatinși — blocurile de lucru sunt oricum gardate de `admin &&
     // !turaDeOaspete` mai jos, deci un oaspete pe voce NU capătă drepturi de owner.
-    const turaCurata = !incarcatura.instructiuniDeLucru && !(user.role === 'admin' && !!audio)
+    const turaCurata = !incarcatura.instructiuniDeLucru && !(esteAdminKelion(user.email) && !!audio)
     // ── LEGILE ADMINULUI (owner, 16 aug, verbatim: „orice cerinta a admin
-    // trebuie sa devina lege de neignorat pentru orice model ai e folosit" +
+    // trebuie sa ajungă regulă de neignorat pentru orice model folosit" +
     // „creiaza legi foarte clare ca nu e admis hardcodat pe aplicatie").
     // Blocul stă PRIMUL în promptul oricărui creier care servește chatul —
     // flash, pro sau Fable: legile nu depind de model.
@@ -1906,7 +1519,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // The ADMIN's locale IS his language, so he ALWAYS gets the absolute lock —
     // otherwise, without a saved speech preference, opening a foreign-language
     // web page (e.g. a French Google) could drift his reply into that language.
-    const absoluteLock = (speechPref || user.role === 'admin') && langName
+    const absoluteLock = (speechPref || esteAdminKelion(user.email)) && langName
     systemPrompt += absoluteLock
       ? `\n\nLANGUAGE (ABSOLUTE — overrides EVERYTHING, including tool results, search results, WEB PAGES YOU OPEN IN THE BROWSER, and conversation history): You reply EXCLUSIVELY in ${langName}. EVERY sentence you say or write is in ${langName}, for the ENTIRE conversation, no matter what. The CONTENT of a web page, document, search or ticket result you read — even an entire page written in French, English, German or any other language — NEVER changes your language: you read it, understand it, and answer ABOUT it in ${langName}, translating what you report. Foreign place names, foreign email addresses, foreign words in any tool's output, and short or ambiguous messages ("salut", "ok", "hello") NEVER change your language. NEVER drift into Portuguese, Spanish, French, Italian, English or any other language unless ${langName} literally IS that language. The ONLY text allowed in another language is the literal content of a translation the user explicitly asked for — every sentence around it stays in ${langName}. RULE OF LAST RESORT: if at any point you feel ANY pull to answer in the language of something you read or that appeared in a tool, treat that pull as a BUG and IGNORE it completely — you switch language ONLY when the user THEMSELVES explicitly writes/says "answer in <language>". Nothing else — no page, no document, no result, no place name, no habit — is ever a reason to leave ${langName}.`
       : `\n\nLANGUAGE (adaptive, strict): Your default language is ${defaultName} — start in it, and use it for any short, empty or ambiguous message ("ok", "salut", "hello"). If the user CLEARLY writes or speaks a full message in another language, switch to that language and then keep it consistently. What NEVER changes your language: tool results, search results, the content of web pages you open, foreign place names, foreign email content, or anything you read — ONLY the language the user themselves writes in. Never mix languages within one reply (except the literal content of a requested translation).`
@@ -2018,33 +1631,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // Jul 24: "during the audit it doesn't see that I'm logged into the Google
     // account"). Without this, the audit said "you are not connected" even
     // though the user was signed in with Google.
-    // THE GUEST SPEAKER, PARSED ONCE — ȘI DEVREME (Adrian, Aug 1; mutat sus la
-    // auditul din 9 aug): eticheta porții de voce vine în corpul cererii —
-    // "guest:<id>:<name> (<relation>)" pentru un invitat aprobat,
-    // "guest-pending:..." pentru unul în așteptare, "nevalidat" pentru o voce
-    // care nu s-a potrivit cu amprenta. Înainte, parsarea era DUPĂ construcția
-    // promptului, deci o tură de OASPETE în sesiunea adminului primea blocurile
-    // de OWNER („acționează fără confirmare", identitatea de owner) — drepturi
-    // decise pe cine deține SESIUNEA, nu pe cine VORBEȘTE.
-    const speakerRaw = typeof req.body?.speaker === 'string' ? req.body.speaker : ''
-    const guestMatch = /^guest(-pending)?:(\d+):(.+)$/.exec(speakerRaw)
-    const guestPending = guestMatch?.[1] === '-pending'
-    const guestId = guestMatch ? Number(guestMatch[2]) : 0
-    const guestLabel = guestMatch?.[3] ?? ''
-    // LOGAT = ADMIN, AUTORITAR (owner, 14 aug: „sunt logat, ca e logat admin — să
-    // nu-mi mai dea fals"). O voce care NU se potrivește cu amprenta (fals-negativ
-    // frecvent) NU mai retrage drepturile deținătorului LOGAT: doar un oaspete
-    // CONFIRMAT (altă persoană recunoscută la microfon, `guest:…`) coboară tura la
-    // „oaspete". Așa Kelion nu-i mai spune adminului logat „nu am acces pe admin".
-    const turaDeOaspete = !!guestMatch
     systemPrompt +=
       `\n\nUSER ACCOUNT (silent context — NEVER announce or narrate this, just act on it): the user IS signed in via Google as ${user.email}` +
-      `${user.role === 'admin' && !turaDeOaspete ? ' (the OWNER/admin of this app)' : ''}. ` +
+      `${esteAdminKelion(user.email) ? ' (the OWNER/admin of this app)' : ''}. ` +
       // "Connected to Gmail" = ONLY if there is a refresh token from the Connect
       // flow (the heavy scopes). Plain login gives an IDENTITY access token with
       // no Gmail rights — that does not mean connected (Adrian, Jul 24: "it says
       // I'm connected to Gmail but it can't fetch data").
-      (user.googleRefreshToken
+      (googleRefreshToken
         ? 'Google services (Gmail, Calendar, Drive, Tasks, Contacts) are CONNECTED — use those tools directly when asked, without saying "you are connected".'
         : 'IMPORTANT: the heavy Google services (Gmail, Calendar, Drive, Tasks, Contacts) are NOT connected — you CANNOT read email/calendar/etc yet. If asked for any of them, do NOT claim they work or that you are connected; instead ask the user to press "Connect Gmail & Calendar" in the wallet menu once. Everything else works normally.') +
       ' NEVER proactively state whether the user is logged in or connected — the interface already shows it. Just answer what they asked.'
@@ -2070,11 +1664,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // acasă. De-acum sesiunea de admin ține blocurile ARMATE întotdeauna;
     // oaspetele confirmat primește doar prudența de mai jos (fără date
     // personale, confirmare la acțiuni grele), nu amputarea puterilor.
-    if (user.role === 'admin' && turaDeOaspete) {
-      systemPrompt +=
-        `\n\nGUEST AT THE MIC (the voice gate matched a known guest: ${guestLabel || 'guest'}): the OWNER's session stays fully armed, but the person SPEAKING now may not be the owner. Do not reveal the owner's personal data on voice, and for destructive or costly actions ask the owner to confirm first.`
-    }
-    if (user.role === 'admin') {
+    if (esteAdminKelion(user.email)) {
       const probl = formateazaProbleme(problemeGlobaleCache())
       if (probl) {
         systemPrompt +=
@@ -2085,14 +1675,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // implicite (fără cuvântul „construiește") plecau la vorbă — regula de mai
       // jos + rutarea din build_software le trimit acum la constructor.
       systemPrompt +=
-        `\n\nOWNER TASKS = ACT, NOT TALK: when the owner gives you a task that changes THIS app (fix / add / move / adjust / repair / improve something in the product) — even without the word «construiește» — START it THIS turn: call build_software with a complete, self-contained order (or repo_write for a tiny single-file change), then tell him the order is queued and a PR will follow. Do NOT just describe how you would do it, do NOT promise to do it later, and NEVER claim it is done unless you actually queued the order or wrote the code this turn. Describing a change is not making it.`
+        `\n\nOWNER TASKS = ACT, NOT TALK: when the owner requests a product change, call build_software with a complete order and acceptance criteria. Report the returned jobId and measured status. The web process never writes code, merges or deploys itself.`
       // OCHII DE ADMIN, MEREU DISPONIBILI (owner, 14 aug: „kelion spune că nu poate
       // vedea err din server, F12, și nu are acces pe admin" — deși LE ARE). Regula
       // „folosește-ți uneltele" stătea în blocul de LUCRU, tăiat pe turele de
       // conversație — de-aia pe un simplu „vezi erorile" răspundea „nu pot". Acum e
       // AICI, mereu-pornit pentru admin, ca să știe ce POATE citi și că trebuie s-o facă.
       systemPrompt +=
-        `\n\nYOU ARE THE ADMIN WITH FULL READ ACCESS — ON EVERY TURN, including plain chat. You CAN see, and you MUST USE these whenever the owner asks about errors, logs, admin data, or «why doesn't X work»: server_logs (YOUR server-side errors/logs — the server F12), client_errors (the users' BROWSER F12 errors, on demand), admin_vezi (any Admin-panel section: finance, users, money-circuit…), db_query/db_tables (the database), read_source/search_source (your own code). The owner's RECENT browser (F12) errors are ALSO injected into your context under «BROWSER CONSOLE» — read them there. NEVER answer «I can't see the server errors», «I can't see F12», or «I don't have admin access» — you have all of these. If a tool returns nothing, say plainly «no errors in that window» — that is NOT «I can't see». You are logged-in as admin, and that alone gives you these powers: a voiceprint mismatch never removes them.`
+        `\n\nADMIN SESSION: Google authentication is the only authority. You may use only the bounded observability and Constructor tools offered this turn. You do not have raw database, source-tree, shell, repository, secret or deployment access in the web process. Biometrics never grant or remove authority.`
     }
     // GPS must NEVER delay the reply: only synchronous cache reads happen here.
     // The place-name/IP lookups run in the background and are ready for the
@@ -2100,7 +1690,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // The location truth is resolved ONCE (resolveDeviceLocation) and shared
     // with the get_weather guard in runTool — prompt and tool can never
     // disagree about where the user is.
-    const deviceLoc = resolveDeviceLocation(req.body?.coords, geoLookupCached(clientIp(req)))
+    const deviceLoc = resolveDeviceLocation(req.body?.coords, null)
     if (deviceLoc.gps) {
       const place = reverseGeocodeCached(deviceLoc.gps.lat, deviceLoc.gps.lon)
       systemPrompt +=
@@ -2136,13 +1726,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // anything; the old instruction "you sent it to be built" predated the real
     // tools and taught him exactly that anti-behavior). Now: EXECUTE, do not
     // promise.
-    if (user.role === 'admin' && !turaDeOaspete) {
+    if (esteAdminKelion(user.email)) {
       systemPrompt +=
         // BLOCURILE DE LUCRU (reparat, PR, runbook, constructor, clipuri) NU
         // pleacă pe o tură de conversație — acolo sunt doar greutate. Vin
         // înapoi, întregi, în clipa în care se cere o acțiune sau creierul
         // escaladează prin `ask_brain`.
-        (turaCurata ? '' : `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). THE COMPLETE AUTONOMY FLOW for a code fix: (1) read_source/search_source to find the cause; (2) repo_write to write the fix on a branch; (3) ruleaza_portile to verify your change passes all gates (tsc, tests, lint, hardcodari) — this is MANDATORY before merge, the merge tool REFUSES without a recent passing gate run; (4) repo_open_pr to open the PR; (5) repo_merge_pr to merge it (auto-deploys to production); (6) runbook_status or list_updates to VERIFY the deploy landed live. NEVER stop at step 2 — a fix that is written but not merged and deployed is NOT done. If the gates fail at step 3, fix what failed and re-run them before merging. As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. IF YOU SAY YOU WILL ANALYSE, ANALYSE — ON SCREEN (Adrian, 31 Jul: "when he says he will analyse, he must FACTUALLY open the monitor and show what he is doing"). The words "analizez", "mă uit", "verific", "let me look into it" are a PROMISE, and until now they were where turns died: it sounded like work, and he was left staring at an empty screen. From now on, the moment you say any of them, IN THE SAME TURN: (1) call show_document FIRST with what you are about to look at, so the monitor lights up before the waiting starts; (2) actually call the tools (read_source, search_source, db_query, system_health, runbook_log — whatever fits); (3) call show_document AGAIN with what you FOUND — file and line, the log excerpt, the query result. If you have nothing to look with, say so plainly instead of promising. Never announce an analysis you do not immediately perform and display. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. ANSWER WHAT HE ASKED — DON'T RAMBLE SYSTEM STATUS (Adrian, 3 aug: „bate câmpii" — every reply opened with the same system-problems monologue instead of answering): answer EXACTLY what Adrian asked and ONLY that. Do NOT open replies with unsolicited system status, health, deploy state, failed build orders, or reserve/limit reports, and do NOT call system_health or constructor_status on your own initiative unless he ASKS about status/health/builds, or it is directly needed to carry out what he asked. Surface a system problem ONLY when it directly blocks the request he just made — then in ONE short sentence, after doing the task — or when he explicitly asks how things are, in which case say them briefly and, if he wants, repair them with your own tools (no permission question). Never lead an answer with problems he did not ask about. SELF-INSTALL WHAT YOU LACK (never stop at "I don't have that library/tool"): when a task needs a dependency you don't have — an npm package, or a system tool — ADD it yourself the DURABLE way, through the constructor: order build_software to add the npm package to backend/package.json (or the system package to the Dockerfile's apt-get line), which builds with tests and opens a PR; once it merges, the image rebuilds and the dependency is LIVE and permanent (it survives redeploys). For a tiny change you may instead use repo_write on package.json/Dockerfile + repo_open_pr directly. Say which package and why, order it, then finish the task once it is deployed. NEVER run an ad-hoc live "apt install"/"npm install" on the server as the way to gain a capability — that is ephemeral and unsafe; the package.json/Dockerfile route is the only permanent, auditable one. Only say you cannot when a thing is truly impossible, not merely missing a package.`)
+        (turaCurata ? '' : `\n\nOWNER CHANGE FLOW: use build_software to enqueue a validated order for the separate Codex worker. Follow the same jobId with constructor_status; only the worker may edit the worktree and only the master/deploy pipeline may publish after gates. Report commit and liveVersion only when measured. Never claim direct shell, repository, merge or deploy powers in this web process.`)
       // NO CONFIRMATIONS TO THE OWNER (Adrian, Jul 31). The general rule above
       // ("confirm only before irreversible ones") is written for public users.
       // Here it is the owner: if he asked for something, the request IS the
@@ -2151,7 +1741,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // destructive step you inferred yourself. That is not a security
       // confirmation; it is avoiding something nobody asked you to do.
       systemPrompt +=
-        (turaCurata ? '' : `\n\nOWNER — NO CONFIRMATIONS: this overrides the general "confirm before irreversible actions" rule, which is for public users. When the owner asks for something, the request IS the authorisation: send, delete, merge, restart, run the runbook — DO IT, then report what you did. Never answer with "shall I proceed?", "are you sure?", "do you want me to?" or any other permission question about the thing he just asked for. Also never ask him to unlock, authenticate, or confirm his identity in chat — being in this conversation already proves he is the owner. The ONE exception is an action he did NOT ask for: if carrying out his request would additionally destroy something he never mentioned (dropping a table to fix a query, deleting files to free space, force-pushing over work), name that specific side effect in one sentence and ask about THAT alone — never about the request itself. Same for the health check: if system_health reports problems, say them briefly and repair them; don't ask permission first.`)
+        (turaCurata ? '' : `\n\nOWNER AUTHORITY: the verified Google admin session authorizes only the bounded tools actually exposed. Destructive or externally consequential operations still require their normal server-side gates. Product repair/deploy is never executed directly by the model; it is queued for the separate worker and verified by job status.`)
       // THE UPDATE CHANNEL: Kelion knows from the prompt WHAT it received at the
       // latest deploy (local file, cached on first read — zero latency cost).
       const upd = await latestUpdateSummary().catch(() => '')
@@ -2256,111 +1846,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // după ce a căutat prin voce. Invers mergea deja (calea vocală citește DB).
     systemPrompt += memorieUnificata(istoricDb, messages, 12, ro)
 
-    // ── BIOMETRICS (voice + face) — account holder vs. someone else ──────────
-    // Adrian: "nothing directly in chat, everything in parallel, so it doesn't
-    // slow down the chat". Therefore: (1) descriptors are extracted 100%
-    // client-side (zero server cost); (2) the two reference reads run IN
-    // PARALLEL (one DB round trip, not two serial ones); (3) enrollment writes
-    // are fire-and-forget (NOT awaited — `void`), so they add no ms to the
-    // reply path.
-    const vf = req.body?.voiceFeatures
-    const fd = req.body?.faceDescriptor
-    const hasVoice = !!(vf?.vector?.length && vf?.meta)
-    const hasFace = Array.isArray(fd) && fd.length >= 64
-    if (hasVoice || hasFace) {
-      const isOwnerByEmail = user.email.toLowerCase() === config.adminEmail.toLowerCase()
-      // Reference reads — in parallel (not serial).
-      const [storedVoice, storedFace] = await Promise.all([
-        hasVoice ? getVoiceprint(user.email) : Promise.resolve(null),
-        hasFace ? getFaceprint(user.email) : Promise.resolve(null),
-      ])
-
-      // VOICE — account holder vs. someone else. We compare against the
-      // holder's OWN reference (not "any nearby voiceprint in the DB"). A STABLE
-      // reference: fixes the old bug that overwrote it on every turn with the
-      // current voice → if someone else spoke, the holder's reference became
-      // corrupted. Now we save ONLY on the first voice (enrollment) or when the
-      // current voice matches (fine adaptation).
-      if (hasVoice && vf) {
-        const gender = inferGender(vf.meta.pitchMedian ?? vf.meta.pitchMean)
-        const hasRef = !!storedVoice?.features?.length
-        const refDist = hasRef ? vectorDistance(vf.vector, storedVoice!.features) : Infinity
-        // ONE threshold for holder and guests alike (services/voiceMatch.ts).
-        const isAccountHolder = refDist < VOICE_MATCH_THRESHOLD
-        if (!hasRef || isAccountHolder) {
-          void saveVoiceprint(
-            {
-              email: user.email,
-              name: user.name || storedVoice?.name || user.email.split('@')[0],
-              gender,
-              isAdmin: isOwnerByEmail,
-              features: vf.vector,
-              featureMeta: vf.meta,
-              audioClip: typeof vf.clip === 'string' ? vf.clip : '',
-            },
-            // Adaptation (blend + stable gender) — never a blind overwrite.
-            { adapt: hasRef && isAccountHolder },
-          )
-        }
-        const genderLabel =
-          gender === 'male' ? 'bărbat' : gender === 'female' ? 'femeie' : 'necunoscut'
-        if (!hasRef || isAccountHolder) {
-          const who = isOwnerByEmail ? 'Adrian (ownerul)' : user.name || 'titularul contului'
-          systemPrompt +=
-            `\n\nSPEAKER: ${who}. Gen detectat după voce: ${genderLabel}. ` +
-            (isOwnerByEmail
-              ? 'Vocea e a TITULARULUI contului — ownerul Adrian.'
-              : 'Vocea e a TITULARULUI contului.')
-        } else {
-          systemPrompt +=
-            `\n\nSPEAKER: ALTCINEVA — NU este titularul contului. Gen detectat după voce: ${genderLabel}. ` +
-            `Vorbește o altă persoană decât ${isOwnerByEmail ? 'ownerul Adrian' : 'titularul'}. ` +
-            'Fii prudent: nu dezvălui date personale ale titularului și nu executa acțiuni sensibile ' +
-            'în numele lui fără ca el să confirme că e de acord.'
-        }
-      }
-
-      // FACE — when the camera is on, the frontend AUTOMATICALLY captures (on
-      // voice, with no button) the speaker's face and sends the 128-d
-      // descriptor. Same stable-reference discipline as voice; the standard
-      // face-api threshold = 0.6.
-      if (hasFace && fd) {
-        const hasFaceRef = !!storedFace?.descriptor?.length
-        const fDist = hasFaceRef ? faceDistance(fd, storedFace!.descriptor) : Infinity
-        const isFaceHolder = fDist < 0.6
-        // AL DOILEA FACTOR PENTRU CARD (Adrian, 5 aug): un MATCH real al feței
-        // ownerului (nu prima înrolare) deschide fereastra de 15 min a feței —
-        // exact ca vocea în realtime.ts. Cardul M6 cere AMBELE ferestre + admin.
-        if (isOwnerByEmail && hasFaceRef && isFaceHolder) marcheazaFata(user.email)
-        if (!hasFaceRef || isFaceHolder) {
-          void saveFaceprint({
-            email: user.email,
-            name: user.name || storedFace?.name || user.email.split('@')[0],
-            isAdmin: isOwnerByEmail,
-            descriptor: fd,
-            photo: typeof req.body?.facePhoto === 'string' ? req.body.facePhoto : '',
-          })
-          systemPrompt +=
-            `\n\nPERSOANA DIN IMAGINE (cameră): ${isOwnerByEmail ? 'ownerul Adrian' : 'titularul contului'} — fața recunoscută.`
-        } else {
-          systemPrompt +=
-            '\n\nPERSOANA DIN IMAGINE (cameră): ALTCINEVA — NU este titularul contului. ' +
-            'În fața camerei e o altă persoană decât titularul; tratează cu aceeași prudență ca la vocea străină.'
-        }
-      }
-
-      // TOTAL DISCRETION (Adrian, Jul 14: "everything that needs calibrating
-      // Kelion does throughout the chat, automatically, without buttons or chat
-      // about it, very discreetly"). The biometric clues above are INTERNAL,
-      // SILENT context.
-      systemPrompt +=
-        '\n\nINDICII INTERNE (TĂCUTE) — DISCREȚIE ABSOLUTĂ: informația de mai sus despre voce/față ' +
-        '(cine vorbește, gen, titular/altcineva, „fața recunoscută") e DOAR pentru tine, ca să te ' +
-        'comporți potrivit. NU o pomeni NICIODATĂ cu voce tare: nu spune că recunoști vocea sau fața, ' +
-        'că identifici, calibrezi, înveți sau „vezi" cine e, nu descrie persoana și nu comenta camera. ' +
-        'Folosește-o strict discret (ex. prudență cu datele personale dacă e altcineva). Zero cuvinte despre procedură.'
-    }
-
     // CONTINUITY BETWEEN SESSIONS (#20): if the last conversation was a long
     // time ago, Kelion KNOWS this is a reunion (not a continuous thread) and
     // greets naturally with continuity. Pure DB — the timestamp read in
@@ -2438,6 +1923,48 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       }
     }
 
+    // Every non-admin account is billed under the product policy. Checkout
+    // availability is unrelated to whether already-issued credit is consumed.
+    const chatDebitRef = monetizedCustomer ? `chat:${userKey(user.email)}:${clientKey}` : ''
+    if (monetizedCustomer) {
+      const debit = await debitWalletMinorAtomar(
+        user.email,
+        config.billing.chatTurnMinor,
+        chatDebitRef,
+        'chat turn',
+      )
+      if (!debit.ok) {
+        const status = debit.code === 'insufficient' ? 402 : 503
+        const error = debit.code === 'insufficient' ? 'credit_insuficient' : 'sold_necitit'
+        await failChatTurn({
+          userEmail: user.email,
+          idempotencyKey: clientKey,
+          leaseToken: replayLeaseToken,
+          text: '',
+          code: error,
+          httpStatus: status,
+        })
+        return reply.code(status).send({ error })
+      }
+      // A duplicate charge with a newly acquired replay row is an inconsistent
+      // legacy/expired state. Fail closed instead of running tools for a turn
+      // whose previous result cannot be proven.
+      if (debit.duplicate && !replayClaim.recovered) {
+        await failChatTurn({
+          userEmail: user.email,
+          idempotencyKey: clientKey,
+          leaseToken: replayLeaseToken,
+          text: '',
+          code: 'turn_charge_already_exists',
+          httpStatus: 409,
+        })
+        return reply.code(409).send({
+          error: 'turn_result_indeterminate',
+          safeToRetry: false,
+        })
+      }
+    }
+
     // Stream the brain's reply back as SSE events, each with a sequence id so
     // the client can reconnect with Last-Event-ID and resume exactly where it left off.
     reply.hijack()
@@ -2453,8 +1980,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // events — no lost words, no regeneration, no duplication. Patching write/end
     // here covers all downstream call sites (brain text, control frames, tools,
     // agents, voice audio) without touching each one.
-    const turnId = randomUUID()
     startTurn(user.email, turnId)
+    const replayCapture = createChatReplayCapture()
     const rawWrite = reply.raw.write.bind(reply.raw)
     const rawEnd = reply.raw.end.bind(reply.raw)
     // THE JUL 10 FREEZE: while the brain thinks (legitimately 60–80s), NOT ONE
@@ -2465,6 +1992,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // through Cloudflare and does not translate into text or control frames on
     // the client.
     let lastByteAt = Date.now()
+    let lastReplayLeaseRefreshAt = lastByteAt
     // A TURN NEVER ENDS IN SILENCE (Adrian, Jul 30: "reply = nothing").
     // `sawVisible` becomes true on ANY output the human actually sees: brain
     // text, a surface frame (monitor/card/doc/app/image/build/nav/promo/
@@ -2498,6 +2026,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     reply.raw.write = ((chunk: unknown, ...rest: unknown[]) => {
       lastByteAt = Date.now()
       if (typeof chunk === 'string' && chunk.length > 0) {
+        replayCapture.append(chunk)
         if (!sawVisible) sawVisible = conteazaCaVizibil(chunk, ackInstantZbor)
         if (!surfaceShown) surfaceShown = eCadruDeSuprafata(chunk)
         const sse = appendTurn(user.email, turnId, chunk)
@@ -2508,6 +2037,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const pingTimer = setInterval(() => {
       if (reply.raw.writableEnded || reply.raw.destroyed) return
       if (Date.now() - lastByteAt >= 15_000) rawWrite(heartbeatSSE())
+      if (Date.now() - lastReplayLeaseRefreshAt >= 30_000) {
+        lastReplayLeaseRefreshAt = Date.now()
+        void refreshChatTurnLease({
+          userEmail: user.email,
+          idempotencyKey: clientKey,
+          leaseToken: replayLeaseToken,
+        })
+      }
     }, 5_000)
     reply.raw.end = ((...args: unknown[]) => {
       clearInterval(pingTimer)
@@ -2570,8 +2107,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       code: 'context_prepared',
       metadata: { source: 'chat' },
     }))
-    // (Vorbitorul — speakerRaw/guestMatch/nevalidat — e parsat SUS, înaintea
-    // construcției promptului: blocurile de OWNER se decid pe el, audit 9 aug.)
     // PROGRESS BAR ON BRAIN ENTRY — ONE {heard} for EVERYONE (admin, demo,
     // public, paying): the server confirms exactly the text handed to the brain
     // on this turn, and the UI band displays it. It is not a local echo — if
@@ -2583,47 +2118,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     if (!voceAmbianta) {
       reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
       // ușa creierului: tura reală o salvează ruta vocală, la verdict (vezi sus)
-      if (lastTurn?.role === 'user' && !eUsaCreierului) void saveMessage(user.email, 'user', lastTurn.content)
+      if (lastTurn?.role === 'user' && !eUsaCreierului) void saveChatMessageOnce({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        role: 'user',
+        content: lastTurn.content,
+      })
     }
 
-    // THE GUEST CONTEXT FOR THE BRAIN (only the model sees it — the saved
-    // bubble and the {heard} band stay the guest's clean words).
-    if (guestMatch && messages.at(-1)?.role === 'user') {
-      const last = messages[messages.length - 1]
-      last.content =
-        (guestPending
-          ? `[NOTĂ DE SISTEM — vorbitorul este un OASPETE NOU: ${guestLabel}. Amprenta lui a fost salvată NEAPROBATĂ. Prezintă-te politicos, răspunde-i la întrebare, apoi ROAGĂ-L pe titular (în aceeași cameră) să confirme dacă păstrezi vocea și relația — se confirmă cu unealta approve_guest_voice. INTERZIS: orice acțiune administrativă, financiară sau distructivă în această tură.]\n\n`
-          : `[NOTĂ DE SISTEM — vorbitorul este un OASPETE APROBAT al titularului: ${guestLabel}. Răspunde-i normal, în limba lui, dar cu drepturi de oaspete: INTERZIS orice acțiune administrativă, financiară sau distructivă; pentru așa ceva cere-i să-l cheme pe titular.]\n\n`) +
-        last.content
-      // The guest's photo: if the camera caught a face on this turn, it becomes
-      // the guest's portrait in Admin → Amprente.
-      if (guestId && typeof req.body?.facePhoto === 'string' && req.body.facePhoto)
-        void attachGuestPhoto(guestId, req.body.facePhoto)
-    }
-
-    // IN CHAT, THE ADMIN SESSION IS ENOUGH (Adrian, Jul 31: "if I logged in as
-    // admin, Kelion must no longer ask for any kind of security confirmation in
-    // chat").
-    //
-    // What it was before: the Jul 27 lock required a SECOND factor (voiceprint
-    // or typed secret, separate 12h cookie) for the admin tools to appear in
-    // chat. Without it, the signed-in admin talked to Kelion like any ordinary
-    // user — and found out only when Kelion "couldn't" read a file.
-    //
-    // What remains protected, and why it is fine for it to fall HERE: the lock
-    // still guards `/api/admin/*` (the panel) and the voice gate — voice truly
-    // needs the voiceprint, because anyone near the microphone can speak. Chat
-    // does not: to write in it as admin you must already have his session.
-    //
-    // What we lose, written down so it is not lost: a stolen session cookie now
-    // reaches the destructive chat tools directly, without a second factor.
-    // The trade-off is the owner's, explicitly requested, with the risk stated.
-    //
-    // THE GUEST EXCEPTION (Adrian, Aug 1): a turn the voice gate labelled as
-    // GUEST runs inside the holder's session, but the person at the microphone
-    // is NOT the holder — so this turn gets ZERO admin powers, whoever is
-    // logged in. (guestMatch is parsed above, before the save.)
-    const isAdmin = user.role === 'admin' && !guestMatch
+    // Authorization comes exclusively from the verified session role.
+    const isAdmin = esteAdminKelion(user.email)
 
     // The turn's model is chosen HERE (before the tool list): on the CHAT step,
     // the model also gets the ask_brain tool so it can escalate whatever it
@@ -2640,7 +2144,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const escaladare: { model?: string; reasoning?: 'low' | 'medium' | 'high' } = {}
 
     // ── SINGLE PATH: DIRECT BRAIN FOR EVERYONE ───────────────────────────────
-    // The Gemini orchestrator (chat/brain, with automatic escalation) answers
+    // The OpenAI orchestrator (chat/brain, with configured escalation) answers
     // for EVERYONE — admin, free users and paying clients (paywall guaranteed
     // above) — instantly, with all tools. The real cost is debited from paying
     // clients' credits (debitWallet at the end of the turn); the admin is exempt.
@@ -2653,10 +2157,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // rostită care avea nevoie de o unealtă grea n-avea NICIO cale de
     // escaladare. Pe faza de decizie ușa nu are sens (inventarul e deja plin).
     const escalationTools = incarcatura.faza === 'vorbire' ? [ASK_BRAIN_TOOL] : []
-    // SELF-EXTENSION: the dynamic tools APPROVED by the owner (active instantly,
-    // without redeploy) + `propose_tool` so it can propose new ones.
-    const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
-    const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const rawTools: Tool[] = isAdmin
       ? // ORDINEA CONTEAZĂ la plafonul furnizorului de 64 (Adrian, 3 aug: „nu e
         // conștient de tot inventarul lui"). Cu 80 de unelte, 16 se taie din COADĂ.
@@ -2668,7 +2168,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...googleTools,
           ...escalationTools,
           // Bază + vedere
-          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, OBSERVATII_VIZUALE_TOOL, EVENIMENTE_SONORE_TOOL, STARE_EMOTIONALA_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL,
+          SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, EVENIMENTE_SONORE_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, VEDE_VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL,
           // L1e: procesare de date tabelare (CSV/JSON) — capabilitate generală, în zona de aur.
           PROCESEAZA_DATE_TOOL,
           // Messenger Kelion↔Kelion: „apelează-l pe X" (conversațional, gold zone).
@@ -2683,38 +2183,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // la lucru direct (Adrian, 4 aug). În zona care NU se taie la plafon.
           // + crearea unui agent NOU când lipsește tipul (Adrian, 10 aug).
           CHEAMA_AGENT_TOOL, AGENT_NOU_TOOL,
-          // Sursă + putere de dezvoltator + DB/sănătate + operațiuni („de aur")
-          LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
-          REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL, CONSTRUCTOR_COMMAND_TOOL, AUTOVERIFICARE_TOOL,
-          // Jules — agentul asincron oficial Google (3 aug, cheia pusă de owner).
-          JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL,
-          DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_OPS_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL,
-          LIST_APP_VERSIONS_TOOL, LIST_DB_BACKUPS_TOOL, SAVE_APP_VERSION_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
-          LIST_UPDATES_TOOL, READ_INBOX_TOOL, PROPOSE_TOOL,
+          // Constructor boundary + bounded health. Repository, shell, raw SQL,
+          // secrets and deploy credentials never enter the web process.
+          BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL,
+          SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, CLIENT_ERRORS_TOOL,
+          LIST_UPDATES_TOOL, READ_INBOX_TOOL,
           // LEGATE LA CREIER (5 aug, ordinul repetat „leagă TOT la creier"): astea
           // aveau executor real în adminTools.ts + erau în bucla de noapte, dar
           // NU erau oferite creierului din chat/voce — deci nu le putea chema.
           // În zona de aur (memoria de proiect + vederea/schimbarea adminului +
           // observabilitatea măsurată = fix ce cerea ownerul, nu se taie la plafon).
-          ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
           MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL,
-          // SUITA DE MĂSURARE (8 aug): comandate în promptul de sistem (chat.ts
-          // „ÎNAINTE SĂ SCHIMBI COD: rulează ruleaza_portile"; „de unde știi →
-          // jurnal_masuratori"), cu executor real în adminTools.ts și oferite pe
-          // voce+bucla de noapte prin TOATE_UNELTELE_ADMIN — dar UITATE din
-          // rawTools-ul scris de mână al chatului (10 aug). Fără ruleaza_portile,
-          // repo_open_pr/repo_merge_pr REFUZAU structural pe calea chatului
-          // (dovadaPortilor() nu putea fi satisfăcută). Zona de aur, nu se taie.
-          RULEAZA_PORTILE_TOOL, JURNAL_MASURATORI_TOOL, VANEAZA_BUGURI_TOOL,
           // ── COADĂ: se taie prima la plafon (ocazionale) ──
           SET_ROLE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, EPISOADE_PROMO_TOOL,
-          SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
           CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
-          CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
-          ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, OBSERVATII_VIZUALE_TOOL, EVENIMENTE_SONORE_TOOL, STARE_EMOTIONALA_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, GET_MONITOR_TOOL, EVENIMENTE_SONORE_TOOL, GOLESTE_MONITOR_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, TARIFE_TOOL, STUDIO_TOOL, OPEN_APP_VIEW_TOOL, PROCESEAZA_DATE_TOOL, APELEAZA_USER_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -2723,19 +2207,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // the whole conversation again; (3) if the BASE alone ever reaches the
     // ceiling, we trim from the tail (the rarest tools) and log it loudly,
     // so the chat degrades instead of dying.
-    // UNELTE COMPLETE PE GEMINI (Adrian, 3 aug: „nu are unelte complete" /
-    // „leagă-i toate uneltele nativ de Gemini, tot ce are nevoie"). Plafonul 64
-    // era al API-ului VECHI (OpenRouter, 400 „at most 64 tools", 1 aug) și tăia
-    // ~16 unelte din coada adminului LA FIECARE TURĂ. Gemini acceptă 128 de
-    // declarații de funcții — pe creierul google-direct intră TOT inventarul,
-    // netăiat. Plafonul 64 rămâne doar pentru drumul OpenRouter (rezerva).
+    // Tool inventory is bounded by the capability-aware provider policy. The
+    // selected phase receives only tools relevant to that request.
     // ── FAZELE (Adrian, 8 aug): „chatul este doar chat, depistarea cerinței
     // este depistarea cerinței, decizia ce unealtă se face cu creierul" ───────
     //
     // MĂSURAT înainte de tăietura asta: la FIECARE tură plecau ~3.900 tokeni de
     // prompt + până la 128 de scheme de unelte (~11.300 tokeni) — adică ~15.000
     // de tokeni ÎNAINTE ca omul să spună un cuvânt. Se vede direct în cifre:
-    // Gemini singur răspunde în 482 ms (măsurat pe cheia lui, pe VPS), dar tura
+    // Provider latency alone can be lower than the complete application turn,
     // aplicației a durat 1619 ms. Restul e citit degeaba. Și nu doar încetinea:
     // decizia „mi se vorbește mie?" stătea îngropată printre 128 de scheme.
     //
@@ -2784,7 +2264,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // ce e asta?" forța memorie_pune/generate_image și scria `failed` fals
     // pe o descriere corectă.
     const actiuneCerutaExplicit = cereActiune && hasActionIntent(lastUserText)
-// Gemini acceptă 128 unelte; Ollama cloud / altele — plafon 64 (sigur pe tool schema).
+    // The provider-specific tool cap is enforced centrally.
     const PLAFON_FURNIZOR = plafonUnelteFurnizor(orChatModel)
     // Tura de voce e „grea" ca MODEL (decide adresarea — vezi selectedBrainModel),
     // dar rămâne UȘOARĂ ca unelte: n-are de executat nimic, are de hotărât dacă
@@ -2824,16 +2304,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       const taiate = baseTools.slice(MAX_PROVIDER_TOOLS).map((t) => t.name).join(', ')
       console.error(`[chat] ${baseTools.length} unelte > plafon ${MAX_PROVIDER_TOOLS} — tăiate din coadă: ${taiate}`)
     }
-    // Pe tura UȘOARĂ uneltele dinamice NU se lipesc (audit 9 aug: se împingeau
-    // DUPĂ filtrul permisaLaVorbire și ocoleau lista albă a fazei de vorbire) —
-    // rămân disponibile prin ask_brain, care comută pe inventarul plin.
-    for (const t of turaUsoara ? [] : dynTools) {
-      if (tools.length >= MAX_PROVIDER_TOOLS) break
-      if (!seenNames.has(t.name)) {
-        seenNames.add(t.name)
-        tools.push(t)
-      }
-    }
     // INVENTARUL PLIN pentru escaladare (Adrian, 8 aug: „din chat, fără să care
     // după el, trebuie să știe să IASĂ, să ia funcția sau unealta, să rezolve
     // și să aducă rezultatul"). Tura ușoară pleacă cu 13 unelte; când modelul
@@ -2842,7 +2312,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const uneltePline: Tool[] = (() => {
       const vazute = new Set<string>()
       const plin: Tool[] = []
-      for (const t of [...baseTools, ...dynTools]) {
+      for (const t of baseTools) {
         if (vazute.has(t.name) || t.name === 'ask_brain') continue // ușa nu se re-oferă: e deja deschisă
         vazute.add(t.name)
         if (plin.length >= PLAFON_FURNIZOR) break
@@ -2867,7 +2337,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // Preferința de voce vine din starea sesiunii (citită o dată) — era A
         // TREIA interogare pe `user_prefs` în ACEEAȘI tură, serială, chiar
         // înainte de apelul la creier. Zero drumuri la DB aici acum.
-        : createVoiceStream(reply, userLang, prefs.voicePref)
+        : createVoiceStream(reply, userLang, prefs.voicePref, user.email, clientKey, replayLeaseToken)
     let assistantText = ''
     // O TENTATIVĂ NU ESTE O FAPTĂ: păstrăm separat apelurile și rezultatele
     // normalizate. Poarta poate folosi exclusiv rezultatele reușite/verificate.
@@ -2888,13 +2358,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       'show_document', 'show_on_screen', 'open_app_view',
       'zoom_monitor', 'arata_pe_grafic',
     ])
-    // DB_QUERY: numele singur nu spune dacă e citire sau scriere (tensiunea
-    // (e), închisă pe același ordin: SQL-ul decide, cu predicatul ÎNTĂRIT din
-    // brainCapabilities — verificatorul a demonstrat că prefixul singur minte
-    // (WITH+INSERT, EXPLAIN ANALYZE, „select 1; update"). Citirea = reluabilă
-    // (cazul fondator al plasei — db_query ×18 — trăiește); scrierea = efect
-    // extern (nu se re-execută, omul e avertizat); neparsabil = scriere.
-    let dbQueryAScris = false
     // EFECT EXTERN = ce nu are voie să se execute de două ori (verdictele
     // agenților lot B: gardul anti-re-execuție pe „orice unealtă" omora cazul
     // fondator al plasei — db_query ×18 + sinteză goală rămânea fără plasă — și
@@ -2932,6 +2395,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         code: 'text_gate_no_name',
         metadata: { ambientVoice: false, nameWasHeard: false },
       }))
+      await completeChatTurn({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        leaseToken: replayLeaseToken,
+        text: replayCapture.text(),
+        code: 'text_gate_no_name',
+      })
       reply.raw.end()
       console.log(`[TEXT] tura ${turnId.slice(0, 8)}: tăcere — fără nume la început. TEXT: „${lastUserText.slice(0, 60)}"`)
       return
@@ -2949,10 +2419,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // provider (usage.cost).
     const usage = { usd: 0 }
 
-    // ── THE BRAIN — 100% Gemini direct (extirparea OpenRouter/OpenAI, 3 aug) ──
-    // One single brain: the Gemini tier chosen by selectedBrainModel. All tools
-    // + persona + memory identical; streaming → instant first word. No Gemini
-    // key = no brain → honest message in catch.
+    // ── THE BRAIN — OpenAI only ──────────────────────────────────────────────
+    // The configured ladder shares one persona, tool contract and memory path.
+    // Missing configuration is reported honestly.
     // THE TURN CLOCK (Aug 2 — the latency mission): one line at the end of the
     // turn says how long the WHOLE brain section took, on which model, in how
     // many rounds. Together with the per-round [TIMP] lines in the
@@ -2964,7 +2433,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     if (voceAmbianta) console.log(`[CONTOR-SERVER] sosire → creier: ${tCreier - tSosire} ms (pregătirea turei)`)
     let planFaraExecutieDetectat = false
     try {
-      if (!orChatModel) throw new Error('brain_not_configured: GEMINI_API_KEY missing')
+      if (!orChatModel) throw new Error('brain_not_configured: OPENAI_API_KEY missing')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
       for (const p of params) {
         const role = p.role === 'assistant' ? 'assistant' : 'user'
@@ -2972,10 +2441,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (p.content) orMsgs.push({ role, content: p.content })
           continue
         }
-        // SIGHT (Adrian, Jul 24: "I upload a picture but it doesn't see it...
-        // it doesn't call the camera"): the image blocks were in Anthropic
-        // format and this line DISCARDED the whole message (non-string content
-        // → ''). Now we convert to OpenAI multimodal format (image_url with a
+        // Convert multimodal image blocks into the OpenAI input format (image_url with a
         // data URL) — the model really sees the picture and camera frames; the
         // turn's text is preserved.
         const parts: { type: string; [k: string]: unknown }[] = []
@@ -2996,8 +2462,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       }
       let callN = 0
       const execTool = async (name: string, argsJson: string): Promise<string> => {
-        // Un singur trace, ÎNAINTEA tuturor ramurilor: unele unelte (get_monitor,
-        // propose_tool etc.) se rezolvă inline și nu ajung la runTool.
+        // Un singur trace, înaintea tuturor ramurilor, inclusiv uneltele inline.
         console.log(`[tool] ${name} (${isAdminUser ? 'admin' : 'user'})`)
         let input: unknown = {}
         try {
@@ -3031,16 +2496,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // eșuat, deci nici noi: contorizăm DUPĂ, doar dacă rezultatul nu e eroare.
         const eCautare = name === 'web_search' || name === 'youtube_search' || name === 'image_search'
         // NOTE: generate_image is NO LONGER charged a hand-typed flat rate here
-        // — its REAL cost (OpenRouter usage.cost) is booked inside runTool,
-        // where the generation's own response is known. Charging it here too
-        // would double-count and, worse, book an invented figure as fact.
-        // SELF-EXTENSION: Kelion proposes a new tool (stays 'pending' until the
-        // owner approves it with one click in admin → active instantly).
-        if (name === 'propose_tool') {
-          // SHARED executor with voice (services/adminTools.ts) — no duplication.
-          const out = await execUserScopedTool(name, input as Record<string, unknown>, user.email, isAdminUser)
-          if (out !== null) return out
-        }
+        // — provider usage is booked inside runTool, where the generation's own
+        // response is known. Charging it here too would double-count.
         // CITEȘTE MONITORUL (10 aug): întoarce conținutul REAL al ecranului,
         // trimis de client în corpul cererii — nu ghicit, nu inventat.
         if (name === 'get_monitor') {
@@ -3077,60 +2534,23 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           })
         }
 
-        // VEDEREA CONTINUĂ (22 aug): ultimele observații vizuale ale lui Kelion
-        if (name === 'observatii_vizuale') {
-          const { observatiiRecente, numarObservatii } = await import('../services/vedereContinua.js')
-          const obs = observatiiRecente()
-          const total = numarObservatii()
-          if (obs.length === 0) return JSON.stringify({ observatii: [], nota: 'Nu am observații vizuale recente — vederea continuă nu e activă sau nu a detectat mișcare.' })
-          return JSON.stringify({
-            total_observatii: total,
-            observatii: obs.map((o) => ({
-              acum: `${Math.round((Date.now() - o.ts) / 1000)}s în urmă`,
-              miscare: o.miscare,
-              locatie: o.lat ? `${o.lat.toFixed(4)}, ${o.lon?.toFixed(4)}` : 'necunoscută',
-            })),
-            nota: 'Acestea sunt observațiile vizuale continue din ultimele 5 minute — ce a văzut Kelion din mediu.',
-          })
-        }
-
         // AUZUL AMBIENTAL (22 aug): evenimentele sonore detectate de Kelion
         if (name === 'evenimente_sonore') {
-          const { evenimenteSonoreRecente, evenimenteUrgente } = await import('../services/auzAmbiental.js')
-          const ev = evenimenteSonoreRecente()
-          const urg = evenimenteUrgente()
+          const { evenimenteSonoreRecente, evenimenteNeobisnuite } = await import('../services/auzAmbiental.js')
+          const ev = evenimenteSonoreRecente(user.email)
+          const indicii = evenimenteNeobisnuite(user.email)
           if (ev.length === 0) return JSON.stringify({ evenimente: [], nota: 'Nu am evenimente sonore recente — auzul ambiental nu e activ sau nu s-a detectat nimic.' })
           return JSON.stringify({
             total: ev.length,
-            urgente: urg.length,
+            indicii_neobisnuite: indicii.length,
             evenimente: ev.map((e) => ({
               acum: `${Math.round((Date.now() - e.ts) / 1000)}s în urmă`,
               tip: e.tip,
               intensitate: e.intensitate,
               frecventa: e.frecventaDominanta,
-              urgent: ['alarma', 'spargere', 'plans'].includes(e.tip),
+              neconcludent: true,
             })),
-            nota: urg.length > 0 ? 'ATENȚIE: evenimente URGENTE detectate — alarmă, spargere sau plâns.' : 'Acestea sunt evenimentele sonore din ultimele 10 minute.',
-          })
-        }
-
-        // STAREA EMOȚIONALĂ (22 aug): emoția detectată din expresia facială
-        if (name === 'stare_emotionala') {
-          const { stariEmotionaleRecente, emotieDominanta, ultimaStareEmotionala } = await import('../services/memorieEmotionala.js')
-          const stari = stariEmotionaleRecente()
-          const dominanta = emotieDominanta()
-          const ultima = ultimaStareEmotionala()
-          if (stari.length === 0) return JSON.stringify({ stare: 'neutru', nota: 'Nu am detecții emoționale recente — camera/detecția facială nu e activă.' })
-          return JSON.stringify({
-            curenta: ultima?.emotie ?? 'neutru',
-            intensitate: ultima?.intensitate ?? 0,
-            dominanta_10min: dominanta ?? 'neutru',
-            istoric: stari.map((s) => ({
-              acum: `${Math.round((Date.now() - s.ts) / 1000)}s în urmă`,
-              emotie: s.emotie,
-              intensitate: s.intensitate,
-            })),
-            nota: 'Adaptează-ți tonul la starea emoțională: calm/empatic la supărat, energic la vesel, concis la stresat.',
+            nota: 'Indicii FFT neconcludente; nu identifica sursa și nu afirma alarmă, plâns, spargere sau urgență.',
           })
         }
 
@@ -3259,15 +2679,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (trend.length) bucati.push(`o linie de trend ${trend[0].pret1}→${trend[0].pret2}${trend[0].text ? ` (${trend[0].text})` : ''}`)
           return JSON.stringify({ succes: true, mesaj: `Am desenat pe graficul ${simbol} — ${bucati.join(' · ')}.` })
         }
-        // APPROVED DYNAMIC TOOL: generic execution through a safe HTTP call.
-        // NICIODATĂ peste un executor REAL (C4 al marii verificări): o unealtă
-        // dinamică aprobată cu numele „send_email" ar fi UMBRIT executorul
-        // adevărat — argumentele reale (destinatar, corp) plecau la un URL
-        // extern, modelul vedea schema adevărată dar execuția era alta, iar
-        // poarta faptelor o număra drept dovadă. Inventarul fix are prioritate.
-        if (dynNames.has(name) && !allCapabilityNames().includes(name)) {
-          return await runDynamicTool(name, input as Record<string, unknown>)
-        }
         // UȘA DE ESCALADARE CHIAR DESCHIDE UNELTELE (8 aug, ownerul: „nu știe
         // să escaladeze să ceară acces la unelte… dacă nu are acces la unealtă
         // sau funcție intră în blocaj"). Măsurat în cod ce era înainte: aici se
@@ -3311,23 +2722,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         if (eCautare) {
           const out = await runTool(
             block, isAdmin, token, reply, baseUrl, user.email,
+            clientKey || turnId,
             req.headers.cookie ?? '', usage,
             (speechPref || isAdminUser) && langName ? langName : '',
             deviceLoc,
           )
-          // Eroare declarată de unealtă → nu s-a căutat nimic → $0 (regula #1:
-          // nu inventăm nici măcar un cost). Orice altceva = căutare reală, taxată.
-          const aEsuat = /"error"\s*:/.test(out.slice(0, 200))
-          if (!aEsuat) {
-            usage.usd += SERPER_USD_PER_CALL
-            // REAL ACCOUNTING (QA audit Jul 24, A1): without recordCost, the
-            // Money tab never saw the cost of search/images/brain.
-            void recordCost(user.email, 'search', SERPER_USD_PER_CALL)
-          }
           return out
         }
         return runTool(
           block, isAdmin, token, reply, baseUrl, user.email,
+          clientKey || turnId,
           req.headers.cookie ?? '', usage,
           (speechPref || isAdminUser) && langName ? langName : '',
           deviceLoc,
@@ -3338,18 +2742,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // devine dovadă numai DUPĂ ce rezultatul ei a fost clasificat.
       const executaUnealtaCuDovada = async (name: string, argsJson: string): Promise<string> => {
         unelteIncercate.push(name)
-        if (name === 'db_query') {
-          let scrie = true
-          try {
-            scrie = !eSqlDeCitire(String((JSON.parse(argsJson || '{}') as { sql?: unknown }).sql ?? ''))
-          } catch {
-            /* SQL neparsabil = tratat ca scriere (direcția sigură) */
-          }
-          if (scrie) {
-            dbQueryAScris = true
-            unelteEfectIncercate.push(name)
-          }
-        } else if (eUnealtaCuEfectExtern(name)) unelteEfectIncercate.push(name)
+        const efectExtern = eUnealtaCuEfectExtern(name)
+        if (efectExtern) {
+          unelteEfectIncercate.push(name)
+        } else {
+          void refreshChatTurnLease({
+            userEmail: user.email,
+            idempotencyKey: clientKey,
+            leaseToken: replayLeaseToken,
+          })
+        }
         await scrieJurnalOperational(async () => {
           const tranzitie = await tranzitioneazaSarcinaOperationala({
             taskId: sarcinaOperationalaId,
@@ -3367,7 +2769,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           })
         })
         try {
-          const rezultat = await execTool(name, argsJson)
+          const executa = (): Promise<string> => execTool(name, argsJson)
+          const rezultat = efectExtern
+            ? await executeChatSideEffect({
+                userEmail: user.email,
+                idempotencyKey: clientKey,
+                leaseToken: replayLeaseToken,
+              }, executa)
+            : await executa()
           const dovada = clasificaRezultatUnealta(name, rezultat)
           doveziUnelte.push(dovada)
           await scrieJurnalOperational(async () => {
@@ -3406,19 +2815,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // sarcina»"). Pe tura de acțiune a adminului nu mai plecă nicio frază de
       // preluare — răspunsul e direct rezultatul real (sau un mesaj onest). Kelion
       // nu mai vorbește ca să anunțe că se apucă; execută și răspunde.
-      // GEMINI-ONLY (3 aug — extirparea totală OpenRouter): nu mai există niciun
-      // „secundar" pe alt furnizor. Modelul turei e treapta Gemini aleasă de
-      // selectedBrainModel; pe tura ușoară e deja gemini-2.5-flash (măsurat pe
-      // payload-ul real: 1.2s runda 1 + 1.0s runda 2).
+      // OpenAI-only escalation: the turn stays inside the configured model
+      // ladder and never switches to a second provider.
       // CREIER DUBLU (owner, 13 aug: „două creiere, o singură voce"). Pe turele
       // GRELE comutăm de pe fața rapidă (flash) pe creierul din spate = inteligență
-      // reală (Gemini Pro; thinking `high` se aplică automat mai jos fiindcă e
-      // google-direct). Flag STINS → rămâne fața rapidă, EXACT ca azi. Turele
+      // reală (reasoning `high` is requested explicitly). Turele
       // ușoare rămân MEREU pe fața rapidă (primul cuvânt sub 1s). Holder-ul cald +
       // orchestrarea vocii unice = etapa 2.
       // `let`, nu `const`: dacă creierul PROFUND se epuizează, plasa de mai jos îl
       // comută pe fața rapidă (orChatModel) pentru o ultimă încercare — reasignabil.
-      // creierDublu → Gemini profund; ușor → orChatModel (flash).
+      // creierDublu → treapta profundă; ușor → modelul rapid configurat.
       let orchestratorModel = alegeModelOrchestrator({
         modelChat: orChatModel,
         creierDublu: config.creierDublu,
@@ -3431,16 +2837,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         code: 'brain_started',
         metadata: { phase: incarcatura.faza, actionRequested: cereActiune },
       }))
-      // ── VEDEREA E NATIVĂ (3 aug — extirparea OpenRouter a îngropat și
-      // „vederea delegată") ────────────────────────────────────────────────────
-      // Orice creier al aplicației e Gemini (google-direct/*), care VEDE nativ:
-      // toGeminiPayload duce blocurile image_url (data-URI) ca inline_data.
-      // Pasul de „descriere pentru creierul orb" (describeScene pe un model
-      // străin, lent) a dispărut odată cu modelele oarbe din pool-ul OpenRouter.
-      // AUDIO NATIV → CREIER (Adrian, 3 aug): atașăm vocea BRUTĂ a frazei la
-      // ultimul mesaj user, ca bloc `audio_url`. Gemini o aude nativ
-      // (toGeminiPayload → inline_data audio); transcriptul Chirp rămâne în
-      // mesaj ca text — același orMsgs, creier unic.
+      // Multimodal input stays on the same OpenAI request path. Images and
+      // supported audio blocks are attached to the current user turn; the
+      // transcript remains text context for the same conversation.
       if (audio) {
         // AUDIO PE O TURĂ USER PROASPĂTĂ LA COADĂ (Adrian, 6 aug — „nu mă aude",
         // măsurat live: scrisul mergea, vocea nu). BUG-ul: `asiguraPurtatorAudio`
@@ -3572,12 +2971,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // de aici, modelul o poate chema oricum pe runda 2 (AUTO). Restrângerea e doar
       // o plasă contra „card fals în loc de execuție".
       const UNELTE_FAPTA = [
-        'build_software', 'cerinta_noua', 'repo_write', 'repo_open_pr', 'repo_merge_pr',
-        'constructor_command', 'constructor_manage', 'list_app_versions', 'list_db_backups', 'save_app_version', 'run_runbook', 'request_repair',
-        'panou_cod', 'cheama_agent', 'secret_pune', 'secret_publica', 'send_email',
+        'build_software', 'cerinta_noua', 'cheama_agent', 'send_email',
         'create_doc', 'edit_doc', 'create_sheet', 'edit_sheet', 'create_calendar_event',
         'add_task', 'browser_open', 'browser_type', 'browser_click', 'generate_image',
-        'generate_video', 'memorie_pune', 'db_query',
+        'generate_video', 'memorie_pune',
         // Vânătorul 22 aug: pe „oprește/închide monitorul" runda forțată nu
         // AVEA VOIE să cheme unealta de închidere → modelul era împins spre
         // refuzul „oprește-l manual". Golirea ecranului e faptă cerută.
@@ -3620,29 +3017,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
         orchestratorModel,
         orMsgs,
-        tools as unknown as AnthropicTool[],
+        tools as unknown as BrainTool[],
         executaUnealtaCuDovada,
         {
-          // AUTONOMIE COMPLETĂ (owner, 23 aug 2026: „trebuie să gestioneze
-          // complet, până la deploy"): pe o tură de execuție admin, flow-ul
-          // complet e: read_source → repo_write → ruleaza_portile → repo_open_pr
-          // → repo_merge_pr → runbook_status → verificare live. Asta e 6-7
-          // unelte, iar dacă porțile pică și trebuie reparat, sunt mai multe.
-          // Default de 6 runde nu ajunge → modelul se oprea la jumătate, cu
-          // cod scris dar nemerged → „nu e autonom". Pe tura de acțiune admin:
-          // 12 runde (destule pentru reparat + verificat + deploy).
+          // Multi-step admin turns may enqueue work and then read its status,
+          // but never execute repository or deployment steps in this process.
           maxRounds: (isAdmin && !turaCurata) ? 12 : 6,
           maxTokens: 5000,
           // REAL REASONING on the heavy turn (Jul 25): the work model THINKS
           // internally before answering; the thinking does not flow into text —
           // only the final reply. On the light turn: none, so the first word
           // stays instant (under 1s, the latency rule).
-          // EXTENDED THINKING (Adrian, 5 aug: „la creier adaugi Extended Thinking").
-          // Pe turele GRELE (analiză, cod, mate, raționament lung), creierul Pro
-          // gândește ADÂNC: reasoning 'high' → thinkingLevel:'high' + podea de
-          // output 8192 (geminiDirect). Pe turele ușoare rămâne fără gândire
-          // extinsă, ca prima vorbă să fie rapidă. (:free/OpenRouter nu mai există.)
-          reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) ? 'high' : 'medium') : undefined,
+          reasoning: heavyTurn ? 'high' : undefined,
           // Escaladarea la mijloc: ask_brain o setează, orchestratorul o citește pe rundă.
           escaladare,
           // THE DEED GATE (Adrian, Jul 27): on the admin's turns, if Kelion
@@ -3663,6 +3049,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // niciodată spre afișare — deci nu mai poate bifa cererea cu un card fals.
           forceToolsFirstRound: forteazaFapta,
           forceToolNames: UNELTE_FAPTA,
+          usageContext: { userEmail: user.email, surface: 'chat' },
           onText: (txt) => {
             let clean = markupStrip.push(txt)
             if (!clean) return
@@ -3729,21 +3116,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           },
         },
       )
-      // ── GEMINI-ONLY, FĂRĂ ROTAȚIE PE ALȚI FURNIZORI (3 aug — extirparea
-      // totală OpenRouter, ordinul repetat al ownerului) ────────────────────────
-      // Vechea plasă (rotația tăcută pe pool-ul :free din catalogul OpenRouter +
-      // rezerva plătită + cursa pe 3 modele) A DISPĂRUT cu totul: nu mai există
-      // alt furnizor pe care să cadă tura. Ce rămâne: până la 3 încercări pe
-      // ACELAȘI creier Gemini (slotul + coada dispecerului absorb aglomerația;
-      // eșecurile se notează pentru telemetrie), iar dacă toate pică, tura se
-      // încheie CINSTIT cu mesajul neutru din catch — niciodată pe alt creier.
+      // Retry remains inside OpenAI and is bounded. Side-effectful tool calls
+      // disable replay so external effects cannot be duplicated.
       let r: Awaited<ReturnType<typeof runBrainOnce>> | null = null
       let lastBrainErr: unknown = null
-      // (CURSA a fost EXTIRPATĂ de tot: ajunsese deja „doar Gemini, fără
-      // rivali OpenRouter" prin auditul din 3 aug, iar cu un singur concurent
-      // o cursă nu mai e cursă — calea secvențială de mai jos e ACELAȘI creier
-      // Gemini, cu unelte. services/cursa.ts a fost șters.)
-      const MAX_INCERCARI_GEMINI = 3
+      const MAX_INCERCARI_MODEL = 3
       // MODELUL EFECTIV al rundelor (registrul backend #1): `ask_brain` poate urca
       // tura LA MIJLOC prin `escaladare`, iar orchestratorul citește
       // `escaladare.model` pe FIECARE rundă — deci sloturile, telemetria eșecurilor
@@ -3766,9 +3143,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       let plasaRulata = false
       let slotTinut: string | null = null
       try {
-        for (let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt++) {
+        for (let attempt = 0; attempt < MAX_INCERCARI_MODEL && !r; attempt++) {
           resetStareStream()
-          // Take a slot on the EFFECTIVE Gemini model; if it's busy, wait in the
+          // Take a slot on the effective model; if it is busy, wait in the
           // dispatcher's queue for a slot on the SAME model.
           const modelIncercare = modelEfectiv()
           const unelteLaStart = unelteEfectIncercate.length
@@ -3807,7 +3184,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
               noteazaEsuare(modelVinovat)
             } else if (textCurat || textFlowed || sawVisible) { r = cand; break }
             // Logul nu promite o reîncercare pe care break-ul de faptă o anulează.
-            console.error(`[CHAT MUTE] ${modelVinovat} returned empty${unelteEfectIncercate.length > unelteLaStart ? ' — unelte cu efect deja chemate, NU reiau' : ` — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`}`)
+            console.error(`[CHAT MUTE] ${modelVinovat} returned empty${unelteEfectIncercate.length > unelteLaStart ? ' — unelte cu efect deja chemate, NU reiau' : ` — reîncercare ${attempt + 1}/${MAX_INCERCARI_MODEL}`}`)
             noteazaEsuare(modelVinovat)
           } catch (ge) {
             lastBrainErr = ge
@@ -3815,14 +3192,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             const errMsg = String(ge)
             const is503OrHighDemand = errMsg.includes('503') || /high demand/i.test(errMsg) || /UNAVAILABLE/i.test(errMsg)
             const modelVinovat = modelEfectiv() // sinteza a murit pe modelul efectiv de ACUM
-            const potiRelua = attempt + 1 < MAX_INCERCARI_GEMINI && unelteEfectIncercate.length === unelteLaStart
+            const potiRelua = attempt + 1 < MAX_INCERCARI_MODEL && unelteEfectIncercate.length === unelteLaStart
             if (potiRelua) {
-              console.warn(`[brain] ${modelVinovat} failed (${errMsg.slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
+              console.warn(`[brain] ${modelVinovat} failed (${errMsg.slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_MODEL}`)
               const basePauza = is503OrHighDemand ? 1000 : 800
               const pauzaMs = Math.min(basePauza * Math.pow(2, attempt) + Math.floor(Math.random() * 400), 3000)
               await new Promise((res) => setTimeout(res, pauzaMs))
             } else {
-              console.error(`[brain] ${modelVinovat} failed (${errMsg.slice(0, 120)}) — ${unelteEfectIncercate.length > unelteLaStart ? `${unelteEfectIncercate.length - unelteLaStart} unelte cu efect deja chemate în încercarea asta: NU reiau (efectele s-ar dubla)` : `încercări epuizate (${MAX_INCERCARI_GEMINI}/${MAX_INCERCARI_GEMINI})`}`)
+              console.error(`[brain] ${modelVinovat} failed (${errMsg.slice(0, 120)}) — ${unelteEfectIncercate.length > unelteLaStart ? `${unelteEfectIncercate.length - unelteLaStart} unelte cu efect deja chemate în încercarea asta: NU reiau (efectele s-ar dubla)` : `încercări epuizate (${MAX_INCERCARI_MODEL}/${MAX_INCERCARI_MODEL})`}`)
             }
             noteazaEsuare(modelVinovat)
           } finally {
@@ -3882,19 +3259,14 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       // ── PLASA OGLINDITĂ: FAȚA RAPIDĂ EPUIZATĂ → O URCARE PE CREIERUL PROFUND
       // (owner, 15 aug, prins LIVE cu captura + F12: tura lui a păginat db_query
       // de ~18 ori, apoi sinteza pe flash a STAT 37s pe server și a întors GOL —
-      // `[CHAT MUTE] gemini-3.7-flash returned empty` ×3 → omul a primit
+      // modelul rapid a întors gol de trei ori → omul a primit
       // „încearcă mai târziu"). Plasa de sus acoperă DOAR sensul profund→rapid;
       // sensul ăsta lipsea: o tură pornită pe flash care s-a dovedit GREA din
       // mers (unelte multe, context mare) murea fără să fi atins vreodată
       // inteligența reală. Urcăm O SINGURĂ dată, doar pe calea deja pierdută
       // (!r && !textFlowed) — o tură care mergea nu poate fi stricată de plasă. */
       if (!r && !textFlowed && !faptaInIncercareEsuata && !plasaRulata && config.modelCreierProfund && orchestratorModel === orChatModel) {
-        // COMUTATOR REAL: pe OpenAI nu forțăm google-direct/ profund — OpenAI
-        // n-are creierDublu Gemini. Plasă doar între treptele OpenAI (heavy→medium).
-        const eOpenAI = orChatModel.startsWith('openai/')
-        const profund = eOpenAI
-          ? `openai/${config.openai.heavy}`
-          : `google-direct/${config.modelCreierProfund}`
+        const profund = `openai/${config.modelCreierProfund}`
         if (modelEfectiv() === profund) {
           // REGISTRUL BACKEND #1 + #3: tura a rulat DEJA pe profund și a murit
           // acolo — fie a pornit GREA (orChatModel e chiar profundul: pe turele
@@ -3921,11 +3293,11 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
           // câștiga în orchestrator peste `profund` și logul de mai jos ar minți.
           escaladare.model = undefined
           escaladare.reasoning = undefined
-          console.error(`[FAȚA RAPIDĂ EPUIZATĂ] ${modelRapid} a întors gol/eroare de ${MAX_INCERCARI_GEMINI}× → urc pe creierul profund ${orchestratorModel}`)
+          console.error(`[FAȚA RAPIDĂ EPUIZATĂ] ${modelRapid} a întors gol/eroare de ${MAX_INCERCARI_MODEL}× → urc pe creierul profund ${orchestratorModel}`)
           await incearcaPlasa()
         }
       }
-      if (!r) throw (lastBrainErr ?? new Error('brain_gemini_exhausted'))
+      if (!r) throw (lastBrainErr ?? new Error('brain_openai_exhausted'))
       markupStrip.flush() // held marker fragments: logged, never shown
       // Pe voce, textul asistentului e DOAR corpul rostit — poarta a scos linia
       // „AUZIT:" și sentinela din r.text, iar ce-a rămas e deja în ecranPartial.
@@ -3982,14 +3354,11 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
           console.error('[POARTA FAPTELOR] plan fără execuție — tura de acțiune s-a oprit fără nicio unealtă')
         }
       }
-      usage.usd += r.costUsd
+      if (typeof r.costUsd === 'number') usage.usd += r.costUsd
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
       // because recordCost was not called anywhere on the chat path.
-      // COMUTATOR DE CREIER (23 aug 2026): costul merge pe provider-ul real
-      // (openai pentru openai/*, gemini pentru google-direct/*).
-      const brainCostKind = r.model.startsWith('openai/') ? 'openai' : 'gemini'
-      void recordCost(user.email, brainCostKind, r.costUsd)
+      if (typeof r.costUsd === 'number' && r.costUsd > 0) void recordCost(user.email, 'openai', r.costUsd)
       const totalMs = Date.now() - tCreier
       console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${totalMs}ms`)
       // EVIDENȚA TIMPILOR (Adrian, 3 aug): măsurabil + din el învață bucla din spate.
@@ -4035,7 +3404,7 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         assistantText = ecranPartial
         // CĂȚELUL PE REZERVA VOCALĂ (C3 al marii verificări): blocul de la
         // `if (!voceAmbianta)` sare poarta faptelor pe EXACT calea folosită
-        // când sesiunea Live e moartă (Chirp) — „am trimis emailul" rostit
+        // când sesiunea Live e închisă — „am trimis emailul" rostit
         // prin rezervă nu se demasca nicăieri. Nota intră în ISTORIC și pe
         // ecranul turei (assistantText), NU în gura care a vorbit deja —
         // varianta onestă „nu pot verifica" (§8: nota nu se rostește).
@@ -4077,6 +3446,13 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
           code: gresita ? 'voice_gate_false_negative' : 'turn_not_addressed',
           metadata: { ambientVoice: true, nameWasHeard: gresita },
         }))
+        await completeChatTurn({
+          userEmail: user.email,
+          idempotencyKey: clientKey,
+          leaseToken: replayLeaseToken,
+          text: replayCapture.text(),
+          code: gresita ? 'voice_gate_false_negative' : 'turn_not_addressed',
+        })
         reply.raw.end()
         console.log(
           gresita
@@ -4087,17 +3463,20 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         // au costat și pe tura tăcută, iar return-ul de aici sărea peste debit —
         // fundalul vorbit continuu (majoritatea turelor ambientale tac) consuma
         // pe gratis, repetabil. Ownerul nu se debitează niciodată (PR #648).
-        if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-tac:${turnId.slice(0, 8)}`)
         return
       }
       // Voce adresată: salvăm mesajul userului = ce a auzit creierul (ecou precis,
       // din voce — nu un transcript stâlcit de STT). {heard} a plecat deja în stream.
       if (voceAmbianta) {
-        void saveMessage(user.email, 'user', userEcho.trim() || (ro ? '(mesaj vocal)' : '(voice message)'))
+        void saveChatMessageOnce({
+          userEmail: user.email,
+          idempotencyKey: clientKey,
+          role: 'user',
+          content: userEcho.trim() || (ro ? '(mesaj vocal)' : '(voice message)'),
+        })
       }
     } catch (e) {
-      // The brain failed — honest, never silent. No Kimi/GLM safety net
-      // (removed).
+      // The brain failed — honest, never silent and without a second provider.
       const errMsg = e instanceof Error ? e.message : String(e)
       // COSTUL RUNDELOR DEJA PLĂTITE vine agățat de eroare (orchestrator, audit
       // 9 aug) — se adună în usage ÎNAINTE de orice ieșire de mai jos, ca și
@@ -4105,8 +3484,7 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       const costPierdut = e instanceof Error ? Number((e as Error & { costUsd?: number }).costUsd ?? 0) : 0
       if (costPierdut > 0) {
         usage.usd += costPierdut
-        const errCostKind = (orChatModel ?? '').startsWith('openai/') ? 'openai' : 'gemini'
-        void recordCost(user.email, errCostKind, costPierdut)
+        void recordCost(user.email, 'openai', costPierdut)
       }
       // Măsoară + debitează pe eroare — O SINGURĂ sursă (jscpd, 10 aug), folosită
       // pe ambele ramuri de eșec (tura ambientală și eroarea generală). Timpul se
@@ -4114,7 +3492,9 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       // debitează (nu pe gratis), dar OWNERUL niciodată (PR #648).
       const inchideEroare = (): void => {
         void recordTiming({ email: user.email, kind: 'chat', ms: Date.now() - tCreier, ok: false })
-        if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
+        if (monetizedCustomer) {
+          void grantCreditMinor(user.email, config.billing.chatTurnMinor, `${chatDebitRef}:refund`)
+        }
       }
       // TURA AMBIENTALĂ MOARE TĂCUT, CA-N CONTRACT (audit 9 aug): la o pană de
       // creier pe o frază de fundal NEADRESATĂ (poarta n-a decis), nu se scrie
@@ -4129,6 +3509,13 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
           code: 'turn_not_addressed',
           metadata: { ambientVoice: true, brainUnavailable: true },
         }))
+        await failChatTurn({
+          userEmail: user.email,
+          idempotencyKey: clientKey,
+          leaseToken: replayLeaseToken,
+          text: replayCapture.text(),
+          code: 'turn_not_addressed',
+        })
         reply.raw.end()
         console.error('[CHAT ERROR pe tură ambientală neadresată — stinsă cu {ignored}]', errMsg)
         inchideEroare()
@@ -4171,7 +3558,7 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       // e avertizat cinstit, fără niciun detaliu tehnic (regula 1 aug).
       const fapteDejaExecutate = doveziUnelte.some(
         (d) => (d.stare === 'succeeded' || d.stare === 'verified') &&
-          (d.nume === 'db_query' ? dbQueryAScris : eUnealtaCuEfectExtern(d.nume)),
+          eUnealtaCuEfectExtern(d.nume),
       )
       let spoken = ecranPartial.trim()
         ? (ro
@@ -4188,23 +3575,8 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
             : ro
               ? 'Încearcă din nou în câteva secunde.'
               : 'Try again in a few seconds.'
-      // CREDITUL MORT SPUS PE FAȚĂ, DOAR ADMINULUI (9 aug, capturile ownerului:
-      // sold AI Studio −£1.32, card refuzat la auto-reîncărcare — iar Kelion
-      // inventa scuze („nu ești logat ca admin") peste turele care mureau pe
-      // cotă). Userii plătitori RĂMÂN pe mesajul neutru (regula din 1 aug: nu
-      // citesc despre modele/cote/bani); OWNERUL are nevoie de cauza reală ca
-      // să știe CE să repare. Sonda geminiLive() (ping generateContent, cache
-      // 5 min) desparte creditul epuizat de o limită de viteză trecătoare.
-      if (isAdminUser && isRateLimit) {
-        const g = await geminiLive().catch(() => null)
-        const cauza =
-          g?.ok && !g.serving && g.reason === 'depleted'
-            ? '[CREDIT GOOGLE EPUIZAT] Google refuză generarea: soldul AI Studio e sub zero, iar cardul de auto-reîncărcare a fost refuzat. Reîncarcă la aistudio.google.com → Billing; până atunci creierul nu poate răspunde.'
-            : g?.ok && !g.serving && g.reason === 'quota'
-              ? '[COTĂ GEMINI ATINSĂ] Limita de cereri pe minut e atinsă — nu e problemă de credit; reîncearcă în circa un minut.'
-              : null
-        if (cauza) spoken = `${ecranPartial.trim() ? '\n\n' : ''}${cauza}`
-      }
+      // Eroarea providerului unic este deja clasificată de adaptor; nu pornim o
+      // sondă secundară și nu expunem solduri ori detalii de control-plane.
       reply.raw.write(spoken)
       // ȘI CU VOCE (auditul 15 aug): bula de eroare apărea DOAR ca text — omul
       // pe voce rămânea în tăcere totală, iar audio-ul deja sintetizat al
@@ -4218,8 +3590,20 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         code: 'chat_processing_failed',
         metadata: { partialResponse: Boolean(ecranPartial.trim()) },
       }))
+      await failChatTurn({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        leaseToken: replayLeaseToken,
+        text: replayCapture.text(),
+        code: 'chat_processing_failed',
+      })
       reply.raw.end()
-      void saveMessage(user.email, 'assistant', ecranPartial.trim() ? ecranPartial + spoken : spoken)
+      void saveChatMessageOnce({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        role: 'assistant',
+        content: ecranPartial.trim() ? ecranPartial + spoken : spoken,
+      })
       console.error('[CHAT ERROR]', errMsg, { isRateLimit, isQuota, isRefusal })
       // Timpul măsurat + banii pe uneltele deja rulate (nu pe gratis), ownerul
       // niciodată — aceeași sursă unică inchideEroare (vezi mai sus).
@@ -4279,7 +3663,7 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       aAratat: surfaceShown,
     })
     if (gestSituatie) {
-      const clipSituatie = GESTURE_SEMANTIC_CLIP[gestSituatie] ?? gestSituatie
+      const clipSituatie = GESTURE_TO_CLIP[gestSituatie] ?? gestSituatie
       if (!gestureOff.has(clipSituatie) && allowAutoGesture(user.email, gestSituatie)) {
         reply.raw.write(`${CTRL}${JSON.stringify({ gesture: gestSituatie })}${CTRL}`)
       }
@@ -4297,7 +3681,12 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         ? 'Încearcă din nou în câteva secunde.'
         : 'Try again in a few seconds.'
       reply.raw.write(mut)
-      void saveMessage(user.email, 'assistant', mut)
+      void saveChatMessageOnce({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        role: 'assistant',
+        content: mut,
+      })
       console.error('[CHAT MUTE] the turn ended with nothing visible', {
         model: orChatModel,
         user: user.email,
@@ -4327,13 +3716,25 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         toolResults: doveziUnelte.length,
       },
     }))
+    await completeChatTurn({
+      userEmail: user.email,
+      idempotencyKey: clientKey,
+      leaseToken: replayLeaseToken,
+      text: replayCapture.text(),
+      code: 'completed',
+    })
     reply.raw.end()
 
     // Persist the assistant's reply.
     // (ușa creierului: tura reală — transcrierea rostită — o salvează ruta
     // vocală la verdict; aici s-ar dubla și ar scăpa ture apoi suprimate.)
     if (assistantText && !eUsaCreierului) {
-      void saveMessage(user.email, 'assistant', assistantText)
+      void saveChatMessageOnce({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        role: 'assistant',
+        content: assistantText,
+      })
       // Memory agent (learn): durable facts about this user, learned from this turn.
       // Fire-and-forget — zero latency on the reply path.
       // CRITICAL FIX (Jul 24 audit): the arguments were reversed — 'kelion'
@@ -4349,38 +3750,8 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
     // (recordCost above), never DEBITED from the owner — the users' credits
     // pay, the free provider tier is his margin. This chat path had kept the
     // old rule after realtime.ts was fixed — the same hole, one screen over.
-    {
-      const cost = usage.usd
-      if (cost > 0 && !isOwnerEmail(user.email)) {
-        void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
-      }
-    }
     },
   )
-}
-
-// Pornește constructorul ÎN FUNDAL, acum — ca ordinul să nu aștepte bucla de
-// autonomie. O SINGURĂ sursă (jscpd, 10 aug): folosit la build_software ȘI la
-// retry. Best-effort: nu blochează, nu aruncă.
-function porneculLucratorulConstructor(): void {
-  // CONSTRUCTORUL E DEVIN, PUNCT (owner, 22 aug: „am cerut devin peste tot in
-  // constructor… sa-i stergi de tot [pe Aider+Ollama]") — ramura veche care
-  // trezea prin spawn lucrătorul local de pe VPS A FOST ȘTEARSĂ cu toată
-  // mașinăria lui. Fără cheia Devin, tick-ul e inert prin
-  // design și ordinul rămâne în coadă — diagnosticul o spune cu roșu, nu se
-  // construiește pe ascuns cu altceva.
-  // PORNIRE IMEDIATĂ (22 aug, „Devin full funcțional"): dispecerul Devin trăia
-  // DOAR în trecerea buclei de autonomie, iar pauza dintre treceri urcă la 60
-  // de minute pe „nimic de făcut" — ordinul owner-ului putea zăcea în coadă o
-  // ORĂ înainte ca Devin să fie măcar pornit. Ordinul e „doar la comandă", deci
-  // comanda îl și pornește: un tick în fundal, chiar acum (idempotent — UN job
-  // pe rând, tick-ul concurent cu bucla nu poate porni două sesiuni pe același
-  // ordin: claimNextBuildJob e atomic pe rând).
-  if (config.devinKey) {
-    void import('../services/devinConstructor.js')
-      .then(({ tickDispecerDevin }) => tickDispecerDevin())
-      .catch((e) => console.error('[devin] tick imediat:', String(e).slice(0, 160)))
-  }
 }
 
 // ── runTool helper (extracted from the main handler for clarity) ────────────
@@ -4391,6 +3762,8 @@ async function runTool(
   reply: { raw: { write(c: string): void } },
   baseUrl: string,
   email: string,
+  /** Stable client turn id; combined with the structured call id for billing. */
+  billingTurnKey: string,
   /** The requester's session — we pass it to the admin routes so they can do
    *  their own admin check (we do not bypass it). */
   cookie: string,
@@ -4404,6 +3777,7 @@ async function runTool(
   loc: DeviceLocation,
 ): Promise<string> {
   const args = block.input as Record<string, unknown>
+  const billingEventKey = `${billingTurnKey}:${block.id}`
   // The SHARED queue of all browser actions (open/click/type/read/back/
   // scroll/key/click_at): on success it sends the locally served SCREENSHOT to
   // the monitor (embeddable — not the external URL the iframe refused, Jul 24
@@ -4441,17 +3815,13 @@ async function runTool(
     // to the user, and the gate is "I recognized your voice now". Without
     // them, the card would always be refused, with a false reason ("I did not
     // recognize you").
-    // `cookie` goes onward for admin_vezi/admin_schimba: the tools do not
-    // bypass the admin gate, they USE it — they request the routes with his
-    // session.
     const shared = await execSharedAdminTool(block.name, args, { email, baseUrl, cookie })
     if (shared !== null) return shared
   }
 
   switch (block.name) {
-    // ── DELEGAREA: creierul pune agentul specialist la lucru (Adrian, 4 aug) ──
-    // Când creierul alege să delege, chemăm agentul respectiv (creierul Gemini
-    // cu pălăria specialistului, services/agentiKelion.ts) și întoarcem răspunsul
+    // ── DELEGAREA: creierul pune agentul specialist la lucru ──
+    // Când creierul alege să delege, chemăm agentul respectiv și întoarcem răspunsul
     // lui. Costul sub-apelului intră în usage.usd (cost REAL al turei, ca la
     // imagini). Un id necunoscut nu inventează — spune care sunt valizi.
     case 'cheama_agent': {
@@ -4459,9 +3829,9 @@ async function runTool(
       // contabilizăm costul pe tura curentă (audit 9 aug: costul se DEBITA dar
       // nu se ÎNREGISTRA — Money tab orb la agenți). isAdmin = memoria lui
       // Kelion pentru specialist doar când vorbește ownerul.
-      const r = await executaCheamaAgent(String(args.agent ?? ''), String(args.sarcina ?? ''), isAdmin)
-      usage.usd += r.costUsd
-      if (r.costUsd > 0) void recordCost(email, 'gemini', r.costUsd)
+      const r = await executaCheamaAgent(String(args.agent ?? ''), String(args.sarcina ?? ''), isAdmin, email)
+      if (typeof r.costUsd === 'number') usage.usd += r.costUsd
+      if (typeof r.costUsd === 'number' && r.costUsd > 0) void recordCost(email, 'openai', r.costUsd)
       return r.json
     }
     case 'agent_nou': {
@@ -4469,39 +3839,6 @@ async function runTool(
       // unică în agentiKelion.ts (executaAgentNou); instant, scriere în DB.
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return executaAgentNou(String(args.nume ?? ''), String(args.rol ?? ''), args.doarAdmin === true)
-    }
-    // ── THE PANEL: THREE PROPOSE, THE BRAIN CHOOSES (Adrian, Jul 31) ─────────
-    // Steps are written ON THE MONITOR as they happen, not at the end: they
-    // take minutes, and the analysis gate says clearly that the work must be
-    // SEEN while it is being done, not narrated afterward.
-    case 'panou_cod': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const sarcina = String(args.sarcina ?? '').trim()
-      if (sarcina.length < 10) return JSON.stringify({ error: 'sarcina_prea_scurta' })
-      const pasi: string[] = []
-      const peMonitor = (pas: string): void => {
-        pasi.push(`${new Date().toISOString().slice(11, 19)}  ${pas}`)
-        reply.raw.write(
-          `${CTRL}${JSON.stringify({ monitor: { kind: 'doc', title: 'Worker panel', text: pasi.join('\n') } })}${CTRL}`,
-        )
-      }
-      const r = await ruleazaPanou(sarcina, peMonitor)
-      return JSON.stringify({
-        ok: r.ok,
-        motiv: r.motiv,
-        pornit: r.pornit,
-        lipsa: r.lipsa,
-        castigator: r.castigator,
-        judecata: r.judecata,
-        pr: r.pr,
-        // Only the facts measured per worker — not the logs, which would drown
-        // the turn.
-        propuneri: r.propuneri.map((p) => ({
-          lucrator: p.lucrator, model: p.model, aSchimbat: p.aSchimbat,
-          fisiere: p.fisiere, adaugate: p.adaugate, sterse: p.sterse,
-          testeTrec: p.testeTrec, secunde: p.secunde, motiv: p.motiv, branch: p.branch,
-        })),
-      })
     }
     case 'build_software': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
@@ -4523,16 +3860,13 @@ async function runTool(
           })
         }
       }
-      // Creierul (Gemini) gândește MAI ÎNTÂI — Devin pornește cu un plan
+      // Creierul OpenAI gândește mai întâi, apoi Constructorul Codex primește planul
       // anexat, nu cu ordinul gol. Legătura bidirecțională: constructorul
       // pornește din gândirea creierului și raportează înapoi PR-ul în chat.
-      const { planificaOrdinConstructor } = await import('../services/devinConstructor.js')
+      const { planificaOrdinConstructor } = await import('../services/codexWorker.js')
       const orderCuPlan = await planificaOrdinConstructor(order)
       const jobId = await createBuildJob(email, orderCuPlan)
       if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
-
-      // Trigger the constructor worker immediately in the background so the order executes right away
-      porneculLucratorulConstructor()
 
       // OPEN THE LIVE PANEL ON THE MONITOR (Stage 4b): from the moment it is
       // taken on, Adrian sees Received→step→Done/Failed on the monitor (the
@@ -4546,6 +3880,10 @@ async function runTool(
       return JSON.stringify({
         ok: true,
         job: jobId,
+        jobId: String(jobId),
+        status: 'queued',
+        commit: null,
+        liveVersion: null,
         message: `Am preluat cerința (ordin #${jobId}).`,
         speak_rule: 'Confirmă EXACT atât: „Am preluat cerința." — nimic în plus, fără „mă apuc/verific/execut", fără explicații despre lucrător/PR/email.',
       })
@@ -4558,18 +3896,15 @@ async function runTool(
       if (!jobs) return JSON.stringify({ error: 'coada_necitibila', message: 'Nu pot citi coada ordinelor — citirea din baza de date a picat.' })
       // DIAGNOSTIC AUTONOM (owner, 19 aug: „nu are autonomie… sa faca asta"):
       // pe lângă lista ordinelor, Kelion măsoară SINGUR de ce (nu) repară — puls
-      // sesiune Devin + dispecerul backend + coada build_jobs — și raportează
+      // worker Codex + dispecerul backend + coada build_jobs — și raportează
       // verdictul, pe server, fără să depindă de owner. Rulează pe calea CHAT ȘI
       // pe voce (paritatea din brainCapabilities).
       const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
       const diagnostic = await diagnosticConstructorViu(Date.now()).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }))
       return JSON.stringify({
-        // CINE e constructorul — MĂSURAT din config, nu din memoria modelului
-        // (owner, 22 aug: a întrebat „e Devin prezent?" și modelul a răspuns cu
-        // Jules pentru că niciun răspuns de unealtă nu purta numele lui Devin).
-        constructor: config.devinKey
-          ? 'DEVIN (extern, ACTIV — cheia e pusă; ordinele pleacă prin build_software, rezultatul e un PR pe care ownerul îl aprobă)'
-          : 'NIMENI nu construiește — cheia Devin NU e pusă, dispecerul e inert (mașinăria locală a fost ȘTEARSĂ pe 22 aug)',
+        constructor: config.codexWorker.enabled
+          ? 'CODEX WORKER activ — autentificare ChatGPT separată de cheia OpenAI API'
+          : 'Constructorul Codex este dezactivat prin configurație',
         // `progress` = the constructor's current step (Stage 4) — Kelion can
         // speak it ("now compiling", "opening the PR") instead of "working…".
         // `ci` = the verdict of the INDEPENDENT verification (Stage 6): "Done,
@@ -4578,100 +3913,6 @@ async function runTool(
         diagnostic, // { sanatos, verdict, probleme[], masuratori } — DE CE (nu) repară
       })
     }
-    // STĂPÂNIREA ORDINELOR (Adrian, 3 aug): șterge / șterge-în-grup / reia
-    // (modifică) / anulează. Admin-only, ca și celelalte unelte de constructor.
-    case 'constructor_manage': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const action = String(args.action ?? '').trim()
-      switch (action) {
-        case 'delete': {
-          const id = Number(args.id)
-          if (!Number.isInteger(id) || id <= 0) return JSON.stringify({ error: 'id_lipsa' })
-          const ok = await deleteBuildJob(id)
-          return JSON.stringify(ok ? { ok: true, sters: id } : { ok: false, error: 'inexistent', id })
-        }
-        case 'delete_group': {
-          const scope = String(args.scope ?? 'failed')
-          if (!['failed', 'done', 'failed_done', 'all'].includes(scope))
-            return JSON.stringify({ error: 'scope_invalid' })
-          const n = await deleteBuildJobsByScope(scope as 'failed' | 'done' | 'failed_done' | 'all')
-          return JSON.stringify({ ok: true, sterse: n, scope })
-        }
-        case 'retry': {
-          const id = Number(args.id)
-          if (!Number.isInteger(id) || id <= 0) return JSON.stringify({ error: 'id_lipsa' })
-          const order = args.order != null ? String(args.order) : undefined
-          const job = await retryBuildJob(id, order)
-          if (job) {
-            // Trigger the constructor worker immediately in the background so the retried order executes right away
-            porneculLucratorulConstructor()
-          }
-          return JSON.stringify(
-            job
-              ? { ok: true, repus: job.id, stare: job.status, modificat: Boolean(order && order.trim()) }
-              : { ok: false, error: 'nu_poate_fi_repus', id },
-          )
-        }
-        case 'cancel': {
-          const id = Number(args.id)
-          if (!Number.isInteger(id) || id <= 0) return JSON.stringify({ error: 'id_lipsa' })
-          const ok = await cancelBuildJob(id)
-          return JSON.stringify(ok ? { ok: true, anulat: id } : { ok: false, error: 'nimic_de_oprit', id })
-        }
-        default:
-          return JSON.stringify({ error: 'actiune_necunoscuta', action })
-      }
-    }
-
-    case 'constructor_command': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const cmd = String(args.cmd ?? '').trim()
-      if (!cmd) return JSON.stringify({ error: 'comanda_goala' })
-      const { exec } = await import('child_process')
-      return new Promise<string>((resolve) => {
-        exec(cmd, { timeout: 60000 }, (error, stdout, stderr) => {
-          resolve(JSON.stringify({
-            ok: !error,
-            stdout: stdout || '',
-            stderr: stderr || '',
-            error: error ? error.message : null
-          }))
-        })
-      })
-    }
-
-    // ── AUTOVERIFICAREA LIVE, REALĂ (owner, 19 aug: „eu vreau real") ──────────
-    // Kelion se probează pe el însuși PE SERVER, cu execuție reală (citirile chiar
-    // rulează; efectele NU se execută). Întoarce totalurile MĂSURATE + doar cele
-    // care NU merg (cu de ce + recomandare) — creierul le raportează ownerului.
-    case 'autoverificare': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const { autoverificareLive, decideDinMasuratori, formatMonitorAutoverificare } = await import('../services/autoverificare.js')
-      const raport = await autoverificareLive()
-      const problematice = raport.functii
-        .filter((f) => f.verdict !== 'merge')
-        .map((f) => ({ functie: f.functie, tip: f.tip, verdict: f.verdict, deCe: f.deCe, recomandare: f.recomandare }))
-      // MĂSURĂTORILE DECIZIONALE (LEGEA 5): planul e DERIVAT din verdictele măsurate,
-      // nu inventat. Ce n-are cauză clară de cod → „măsoară întâi", cu pasul numit.
-      const plan = decideDinMasuratori(raport.functii)
-      // AFIȘARE OBLIGATORIE PE MONITOR (owner, 19 aug: „după ce-i ceri, trebuie să
-      // afișeze OBLIGATORIU rezultatele pe monitor"). O scrie EXECUTORUL, server-side,
-      // nu la alegerea modelului — deci apare garantat, nu doar rostit.
-      const doc = formatMonitorAutoverificare(raport, plan)
-      reply.raw.write(`${CTRL}${JSON.stringify({ doc: { title: doc.title, text: doc.text } })}${CTRL}`)
-      return JSON.stringify({
-        masurat: true,
-        afisatPeMonitor: true,
-        total: raport.total,
-        merg: raport.merg,
-        stricate: raport.stricate,
-        nepotverifica: raport.nepotverifica,
-        problematice,
-        plan,
-        nota: 'Rezultatele sunt DEJA afișate pe monitor (obligatoriu). Raportează DOAR aceste verdicte măsurate + planul. NU inventa cauze/reparații; pentru „masoara_intai" pasul e măsurătoarea numită, nu o reparație.',
-      })
-    }
-
     case 'show_document': {
       const title = String(args.title ?? 'Document')
       const text = String(args.text ?? '')
@@ -4820,25 +4061,19 @@ async function runTool(
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
       // ZIDUL EXTRA-SERVICIILOR (owner, 14 aug): imaginea are tarif din meniu
       // (1 credit implicit, TARIF_IMAGINE în env); pică generarea → ramburs.
-      const taxaImg = await taxeazaServiciu(email, 'imagine', isAdmin)
+      const taxaImg = await taxeazaServiciu(email, 'imagine', isAdmin, `${billingEventKey}:image`)
       if (!taxaImg.ok) return JSON.stringify({ error: 'plata_serviciului', motiv: taxaImg.motiv })
-      const result = await generateImage(prompt)
+      const result = await generateImage(prompt, email)
       if ('error' in result) {
         await taxaImg.ramburseaza().catch(() => {})
         return JSON.stringify({ error: result.error })
       }
-      // THE REAL COST, BOOKED WHERE IT IS KNOWN (the owner's rule: "show real,
-      // stop fabricating"): the generation's own usage.cost from OpenRouter,
-      // booked as 'image' — a MEASUREMENT (db.ts COSTURI_MASURATE). The flat
-      // IMAGE_USD_PER_CALL rate is reached ONLY when the provider didn't
-      // itemize, under the separate 'image_est' kind, so the masurat/estimat
-      // split never confuses an estimate with a measurement.
+      // Keep only an itemized provider amount when the API returned one.
+      // Otherwise the privileged accounting worker reconciles the expense;
+      // the web process does not invent a per-image USD price.
       if (result.costUsd > 0) {
         usage.usd += result.costUsd
         void recordCost(email, 'image', result.costUsd)
-      } else {
-        usage.usd += IMAGE_USD_PER_CALL
-        void recordCost(email, 'image_est', IMAGE_USD_PER_CALL)
       }
       const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
@@ -4852,16 +4087,15 @@ async function runTool(
       const plan = planStudio(
         String(args.idee ?? ''),
         args.reteta ? String(args.reteta) : undefined,
-        args.cale === 'platit' ? 'platit' : 'gratis',
         new Date(),
       )
       // P32 (owner, 21:44: „se preia textul automat si incepe generarea"):
       // scenariul pregătit pleacă și către CLIENT ca frame — butonul 🎬 din
       // meniul Aplicații îl preia automat, iar omul are și „Copiază".
       if (!('error' in plan)) {
-        const scenariu = plan.promptVeo ?? plan.promptFlow ?? ''
+        const scenariu = plan.videoPrompt
         if (scenariu)
-          reply.raw.write(`${CTRL}${JSON.stringify({ scenariu: { text: scenariu, nume: plan.numeFisier, cale: plan.cale } })}${CTRL}`)
+          reply.raw.write(`${CTRL}${JSON.stringify({ scenariu: { videoPrompt: scenariu, nume: plan.numeFisier, cale: plan.cale } })}${CTRL}`)
       }
       return JSON.stringify(plan)
     }
@@ -4871,7 +4105,7 @@ async function runTool(
       const meniu = meniulDeTarife().map((t) => ({ ...t, lire: lirePentru(t.cheie) }))
       return JSON.stringify({
         tarife: meniu,
-        video_activ: cheiaTarifVideo(),
+        video_activ: cheiaTarifGenerareVideo(),
         nota: 'prețurile sunt FINALE (profit inclus); video_activ e singura calitate care se generează acum',
       })
     }
@@ -4881,8 +4115,8 @@ async function runTool(
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
       // ZIDUL EXTRA-SERVICIILOR (owner, 14 aug: meniu de prețuri cu profitul
       // copt înăuntru): clipul se taxează ÎNAINTE de a costa banii ownerului
-      // la Google; dacă generarea pică DUPĂ taxare, banii se întorc singuri.
-      const taxa = await taxeazaServiciu(email, cheiaTarifVideo(), isAdmin)
+      // la OpenAI; dacă generarea pică DUPĂ taxare, banii se întorc singuri.
+      const taxa = await taxeazaServiciu(email, cheiaTarifGenerareVideo(), isAdmin, `${billingEventKey}:video`)
       if (!taxa.ok) {
         // P29 (owner, 15 aug: „eu vreau sa platesc, sau clientul, de ce nu ma
         // duce spre plata"): lipsa banilor NU mai e fundătură — pagina de
@@ -4893,22 +4127,22 @@ async function runTool(
           pas: 'Pagina de credite e DEJA pe monitorul lui — spune-i prețul serviciului și că de acolo reîncarcă (card sau cod).',
         })
       }
-      // Ecranul NU mai tace cât Google coace clipul (owner, 21:20: „nu
+      // Ecranul NU mai tace cât OpenAI coace clipul (owner, 21:20: „nu
       // afiseaza nimic pe ecran ca ar genera ceva"): pasul pornește PE LOC,
       // apoi bătaia de inimă a așteptării la fiecare 5s — bara de execuție
       // arată secundele, nu o tăcere de 1-3 minute.
-      reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: '🎬 Generez clipul la Google (durează 1-3 minute)…', procent: 5 } })}${CTRL}`)
+      reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: '🎬 Generez clipul prin OpenAI (durează 1-3 minute)…', procent: 5 } })}${CTRL}`)
       // Al treilea argument (P29 + ownerul, 21:29: „nu mai bine il faci sa
       // genereze? nu ma mai umple de butoane"): aprobarea conștientă E chiar
       // CEREREA — clientul care a plătit tariful ACUM și-a finanțat clipul,
       // iar ADMINUL care cere cu gura lui un clip și-a dat singur aprobarea
       // (mai conștientă decât orice buton). Comutatorul 🎬 rămâne DOAR peste
       // ce cheltuie nesupravegheat (timerul de promovare).
-      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8), taxa.scazutGbp > 0 || isAdmin, (sec) => {
+      const result = await genereazaVideo(prompt, email, Number(args.seconds ?? 8), taxa.scazutGbp > 0 || isAdmin, (sec) => {
         // procentul crește cu timpul tipic (~3 min), plafonat sub 95 — cinstit:
         // nu declarăm „aproape gata" ce nu putem măsura, doar că lucrează.
         const procent = Math.min(94, 5 + Math.round((sec / 180) * 90))
-        reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: `🎬 Clipul se generează la Google… ${sec}s`, procent } })}${CTRL}`)
+        reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: `🎬 Clipul se generează prin OpenAI… ${sec}s`, procent } })}${CTRL}`)
       })
       // The refusal (no key / payment not consciously enabled) travels to the
       // brain VERBATIM — it contains the measured price, so the person hears
@@ -4917,15 +4151,6 @@ async function runTool(
         await taxa.ramburseaza().catch(() => {})
         // Bara nu rămâne agățată pe un refuz — se închide cu adevărul.
         reply.raw.write(`${CTRL}${JSON.stringify({ executie: { pas: '🎬 Generarea NU a pornit — motivul, mai jos', procent: 100, gata: true } })}${CTRL}`)
-        // Refuzul de plată nu lasă omul cu mâna goală (owner: „prin google
-        // flow"): calea GRATUITĂ se dă de fiecare dată, cu pași concreți.
-        if (String(result.error).startsWith('video_platit_neaprobat'))
-          return JSON.stringify({
-            error: result.error,
-            alternativa_gratuita:
-              'Google Flow (labs.google/flow) — video GRATUIT cu contul lui Google: dă-i promptul gata scris ' +
-              'și pașii (deschide labs.google/flow → New project → lipește promptul → Generate).',
-          })
         return JSON.stringify({ error: result.error })
       }
       // The cost is the official list price × the real seconds generated —
@@ -4953,19 +4178,19 @@ async function runTool(
       const url = String(args.url ?? '')
       if (!url) return JSON.stringify({ error: 'no_url' })
       const { vedeVideoYoutube, fisaCaText } = await import('../services/vedeVideo.js')
-      const fisa = await vedeVideoYoutube(url)
+      const fisa = await vedeVideoYoutube(url, email)
       // Refuzul (link nesuportat încă / cheie / plafon) merge la creier VERBATIM —
       // omul aude motivul real și pasul următor, nu un „failed" generic.
       if ('error' in fisa) return JSON.stringify({ error: fisa.error })
       const text = fisaCaText(url, fisa)
       // Costul REAL (tokenii din usageMetadata, tariful public) — în jurnal.
-      if (fisa.costUsd > 0) {
+      if (typeof fisa.costUsd === 'number' && fisa.costUsd > 0) {
         usage.usd += fisa.costUsd
         void recordCost(email, 'video-vazut', fisa.costUsd)
       }
       // CATALOGHEAZĂ (videoteca, sub scut) + ÎNVAȚĂ (memoria de lungă durată).
       const { salveazaVideoInvatat } = await import('../db.js')
-      void salveazaVideoInvatat(email, url, fisa.titlu, text, fisa.tokeni, fisa.costUsd)
+      void salveazaVideoInvatat(email, url, fisa.titlu, text, fisa.tokeni, fisa.costUsd ?? 0)
       void learnFromTurn(email, `[a cerut să văd clipul] ${url}`, text.slice(0, 1500), 'kelion').catch(() => {})
       return JSON.stringify({ fisa: text, tokeni: fisa.tokeni, costUsd: fisa.costUsd })
     }
@@ -4994,10 +4219,11 @@ async function runTool(
     case 'browser_click_at':
       return browserResult(await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0)))
     case 'browser_close': {
-      await browserClose(email)
-      // The browser closed → clear the monitor (empty url = free screen).
+      const receipt = await browserClose(email)
+      if ('error' in receipt) return JSON.stringify(receipt)
+      // Clear the monitor only after the isolated worker confirms the close.
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
-      return JSON.stringify({ closed: true })
+      return JSON.stringify(receipt)
     }
 
     case 'save_note': {
@@ -5062,7 +4288,7 @@ async function runTool(
       if (block.name === 'youtube_urca') {
         const { youtubeUrca } = await import('../services/googleYouTube.js')
         const a = (block.input ?? {}) as Record<string, unknown>
-        return youtubeUrca(token, String(a.video_id ?? ''), String(a.title ?? ''), String(a.description ?? ''))
+        return youtubeUrca(token, email, String(a.video_id ?? ''), String(a.title ?? ''), String(a.description ?? ''))
       }
       if (block.name === 'business_vezi') {
         const { businessVezi } = await import('../services/googleBusiness.js')
@@ -5084,7 +4310,7 @@ async function runTool(
         // taxare înainte de consum, ramburs dacă crearea pică — ca la video.
         let taxaPrez: Awaited<ReturnType<typeof taxeazaServiciu>> | null = null
         if (block.name === 'create_presentation') {
-          taxaPrez = await taxeazaServiciu(email, 'prezentare', isAdmin)
+          taxaPrez = await taxeazaServiciu(email, 'prezentare', isAdmin, `${billingEventKey}:presentation`)
           if (!taxaPrez.ok) return JSON.stringify({ error: 'plata_serviciului', motiv: taxaPrez.motiv })
         }
         const result = await runGoogleTool(block.name, block.input, token)

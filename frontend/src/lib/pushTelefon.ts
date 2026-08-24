@@ -1,3 +1,5 @@
+import { apiFetch } from './transport'
+
 // Abonarea acestui browser/telefon la notificările push (Web Push, VAPID).
 // Serverul ține cheile și abonările (/api/push/*); aici e doar dansul standard:
 // permisiune → pushManager.subscribe(cheia publică) → trimite abonarea sus.
@@ -34,14 +36,14 @@ export async function activeazaPush(): Promise<StarePush> {
   const permisiune = await Notification.requestPermission()
   if (permisiune !== 'granted') return 'refuzat'
   const reg = await navigator.serviceWorker.ready
-  const r = await fetch('/api/push/cheie', { credentials: 'include' }).catch(() => null)
+  const r = await apiFetch('/api/push/cheie', { credentials: 'include' }).catch(() => null)
   if (!r?.ok) return 'inactiv'
   const { cheie } = (await r.json()) as { cheie: string }
   const sub = await reg.pushManager
     .subscribe({ userVisibleOnly: true, applicationServerKey: b64laBiti(cheie) })
     .catch(() => null)
   if (!sub) return 'inactiv'
-  const sus = await fetch('/api/push/aboneaza', {
+  const sus = await apiFetch('/api/push/aboneaza', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     credentials: 'include',
@@ -62,7 +64,7 @@ export async function dezactiveazaPush(): Promise<StarePush> {
   if (!sub) return 'inactiv'
   const endpoint = sub.endpoint
   await sub.unsubscribe().catch(() => false)
-  await fetch('/api/push/dezaboneaza', {
+  await apiFetch('/api/push/dezaboneaza', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     credentials: 'include',

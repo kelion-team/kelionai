@@ -1,16 +1,14 @@
 import type { FastifyInstance } from 'fastify'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import type { RawData } from 'ws'
 import { config } from '../config.js'
-import { getSessionUser } from '../session.js'
+import { getSessionUser, validateWebSocketSession, webSocketSessionUser } from '../session.js'
 import { creeazaOpusVoce, type OpusVoce } from '../services/opusVoce.js'
 import {
   deschideVocalLive,
   vocalLiveDisponibila,
   construiesteInstructiune,
   oraLocalaText,
-  estimareCostAudioUsd,
-  estimareCostCadreUsd,
   octetiDinBase64,
   VOCAL_LIVE_MODEL,
   VOCAL_LIVE_VOICE,
@@ -24,7 +22,8 @@ import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
-import { saveMessage, getRecentHistory, saveKv, loadKv, deleteKv, recordCost, listBuildJobs, getSpeechLang, setSpeechLangPref, citesteSold, debitWallet, recordSimptomLive, inregistreazaSarcinaOperationala, noteazaEvenimentOperational, tranzitioneazaSarcinaOperationala } from '../db.js'
+import { saveMessage, getRecentHistory, listBuildJobs, getSpeechLang, setSpeechLangPref, debitWalletMinorAtomar, grantCreditMinor, recordProviderUsage, recordSimptomLive, inregistreazaSarcinaOperationala, noteazaEvenimentOperational, tranzitioneazaSarcinaOperationala } from '../db.js'
+import { esteAdminKelion } from '../services/adminIdentity.js'
 import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
 import { trackSpeechLang } from '../services/lang.js'
 import { pareCerereVizuala } from '../services/simptomeLive.js'
@@ -33,12 +32,11 @@ import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
 // Owner: „atenție că vei avea 2 voci în același timp". Corect — de-aia asta e o
-// cale COMPLET SEPARATĂ, care ÎNLOCUIEȘTE lanțul vechi (ureche Chirp/Live →
-// creier /api/chat → gură Chirp 3 HD), NU se adaugă peste el. Frontendul pornește
-// FIE calea veche, FIE asta — niciodată amândouă. Aici, un singur glas: modelul
-// Live aude, gândește ȘI vorbește el însuși (gura veche Chirp nu intră deloc).
+// cale complet separată, care înlocuiește lanțurile seriale ASR→chat→TTS.
+// Frontendul pornește o singură cale. OpenAI Realtime aude, raționează și
+// vorbește în aceeași sesiune, cu întrerupere și transcrieri.
 //
-// 8 AUG („execută cu Gemini") — două lucruri care lipseau ca să fie drum întreg:
+// Continuitatea conversației vine din istoricul propriu al aplicației:
 //   1. MEMORIA: sesiunea pornea de la zero — Kelion era un străin politicos la
 //      fiecare apăsare de microfon. Acum instrucțiunea de setup cară ultimele
 //      schimburi (construiesteInstructiune, pură, probată).
@@ -53,7 +51,7 @@ import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type
 //                     (8 aug: „nu are acces la gps, meteo" — fără el, ușa
 //                     creierului rula meteo/hărți fără loc);
 //                     JSON { type:'cadru', data } = UN cadru de cameră (JPEG
-//                     base64 brut) → intră DIRECT în sesiunea Live ca video
+//                     base64 brut) → intră ca instantaneu de imagine, nu video
 //                     (8 aug: „trebuie să poată folosi camera").
 //                     JSON { type:'intrerupe' } = utilizatorul a tăiat tura
 //                     curentă; restul cadrelor ei nu mai ajung la difuzor.
@@ -76,14 +74,13 @@ import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type
 //   1. NEDOVEDIT: proba din 7 aug a dovedit sesiunea live cu O SINGURĂ unealtă
 //      simplă (`cauta`) — nimeni n-a văzut vreodată 58 de declarații acceptate.
 //   2. SCHEMĂ GREȘITĂ, ascunsă de cast: uneltele de admin au câmpul
-//      `input_schema`, sesiunea live cere `parameters` — deci fiecare
-//      declarație pleca spre Google cu schema UNDEFINED. Exact felul de
+//      `input_schema`, sesiunea live cere `parameters`; traducerea este explicită.
 //      nepotrivire pe care TypeScript l-ar fi prins, dacă nu-l amuțea `as any`.
 // Consecința potrivea perfect simptomul: setup refuzat → sesiunea moare → un
 // warn invizibil în consolă → cădere pe calea veche (care avea surzenia).
 // Setul de mai jos e mic, conversațional, cu scheme plate — în spiritul
 // fazelor: vocea vorbește; lucrul greu vine după ce se dovedește.
-const UNELTE_LIVE = new Set(['list_updates', 'get_real_cost', 'stare_masurata', 'memorie_ia', 'memorie_lista', 'list_memories', 'dovada_faptelor'])
+const UNELTE_LIVE_USER = new Set(['list_memories', 'dovada_faptelor'])
 
 // ── UȘA SPRE CREIERUL ÎNTREG (8 aug, ownerul, pe live: „kelion nu are acces
 // la unelte, vocea merge, și atât" + „nu are acces la gps, meteo" + „modelul
@@ -136,7 +133,7 @@ const CTRL = String.fromCharCode(31)
 export const pulsVoce = {
   sesiuniDeschise: 0,
   sesiuniTotal: 0,
-  cadreAudioDeLaGoogle: 0,
+  cadreAudioDeLaOpenAI: 0,
   cadreAudioSpreBrowser: 0,
   suprimateAdresare: 0,
   suprimateLimba: 0,
@@ -159,6 +156,8 @@ export const pulsVoce = {
   laUltimulCadru: 0,
 }
 
+const sesiuniLivePeUtilizator = new Map<string, number>()
+
 /** O tură COMPLETĂ pe creierul clasic, prin chiar ruta /api/chat (cookie-ul
  *  sesiunii omului → aceleași drepturi, aceleași unelte, aceeași
  *  contabilizare). Întoarce textul final; cadrele de control trec prin
@@ -166,6 +165,7 @@ export const pulsVoce = {
 export async function turaCreierului(
   cookie: string,
   cerere: string,
+  idempotencyKey: string,
   coords: { lat: number; lon: number } | null,
   imagini: string[],
   laControl: (frame: Record<string, unknown>) => void,
@@ -181,11 +181,12 @@ export async function turaCreierului(
   try {
     r = await fetch(`http://127.0.0.1:${config.port}/api/chat`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: config.publicOrigin },
       body: JSON.stringify({
         messages: triere ? triere.istoric : [{ role: 'user', content: cerere }],
+        idempotencyKey,
         continuareUsa: triere ? true : undefined,
-        // Glasul e al modelului live — Chirp-ul chatului rămâne stins (regula
+        // Glasul e al modelului live — sinteza serială rămâne stinsă (regula
         // vocii unice) și nu plătim o sinteză pe care n-o redă nimeni.
         serverVoiceOff: true,
         // Ușa = acțiune prin definiție: creierul primește inventarul PLIN, nu
@@ -287,37 +288,22 @@ function tradu(t: { name: string; description: string; input_schema?: Record<str
   }
 }
 
-/** Uneltele sesiunii live, pe ROL (8 aug, ownerul: „acum e doar chat bot, da?"
- *  — măsurat: DA, sesiunea căra 6 unelte de citit și atât). La Live uneltele
- *  se declară O DATĂ la setup, nu la fiecare frază — deci inventarul plin nu
- *  costă nimic pe drumul frazei. Adminul primește TOT (cu plasa din motor:
- *  dacă Google refuză setul plin la setup, sesiunea coboară singură pe setul
- *  dovedit și scrie asta în jurnal); ceilalți rămân pe setul mic de citit. */
-export function unelteleSesiuniiLive(rol: string): UnealtaVocala[] {
+/** Inventory is derived from the verified Google-admin identity, never a role
+ *  string supplied by a database row or the client. */
+export function unelteleSesiuniiLive(isAdmin: boolean): UnealtaVocala[] {
   const toate = TOATE_UNELTELE_ADMIN as Array<{ name: string; description: string; input_schema?: Record<string, unknown> }>
-  // Ușa spre creierul întreg e PRIMA, pentru TOATE rolurile — fără ea, „vocea
-  // merge, și atât" (măsurat 8 aug: sesiune acceptată, zero unelte de lume).
-  if (rol === 'admin') return [UNEALTA_CREIER, ...toate.map(tradu)]
-  return [UNEALTA_CREIER, ...toate.filter((t) => UNELTE_LIVE.has(t.name)).map(tradu)]
-}
-
-/** Setul mic DOVEDIT — rezerva pe care motorul o folosește dacă setup-ul cu
- *  inventarul plin e refuzat (vezi `unelteRezerva` în deschideVocalLive).
- *  Ușa spre creier rămâne ȘI aici — degradarea pierde uneltele de
- *  administrare, nu accesul la lume. */
-export function unelteleDovedite(): UnealtaVocala[] {
-  const toate = TOATE_UNELTELE_ADMIN as Array<{ name: string; description: string; input_schema?: Record<string, unknown> }>
-  return [UNEALTA_CREIER, ...toate.filter((t) => UNELTE_LIVE.has(t.name)).map(tradu)]
+  if (isAdmin) return [UNEALTA_CREIER, ...toate.map(tradu)]
+  return [UNEALTA_CREIER, ...toate.filter((t) => UNELTE_LIVE_USER.has(t.name)).map(tradu)]
 }
 
 const PERSONA_KELION =
-  'Ești Kelion, asistentul lui Adrian. Vorbești firesc, cald și SCURT, în română. ' +
+  'Ești Kelion, asistentul utilizatorului autentificat. Vorbești firesc, cald și SCURT, în limba sesiunii. ' +
   'Ce nu poți proba spui „nu pot verifica" — nu inventezi. Nu te prezinta la fiecare replică. ' +
   'REGULA UNELTELOR: pentru ORICE cerere care implică informație din lume sau o acțiune — căutare, ' +
   'știri, METEO, muzică, YouTube, hărți, unde mă aflu, e-mail, calendar, imagini, deschis ceva pe ' +
   'monitor — chemi unealta cere_creierului cu cererea omului formulată complet, apoi spui pe scurt ' +
   'rezultatul. NU refuza niciodată pe motiv că n-ai unealta sau accesul: ușa e cere_creierului. ' +
-  'ÎNTREBĂRILE DESPRE UNELTE, CONSTRUCTOR sau CINE-ȚI-FACE-CODUL („e Devin prezent?", „cine ' +
+  'ÎNTREBĂRILE DESPRE UNELTE, CONSTRUCTOR sau CINE-ȚI-FACE-CODUL („constructorul este disponibil?", „cine ' +
   'construiește?", „ce unelte ai?") NU se răspund din memorie sau din lista ta de funcții — ' +
   'chemi cere_creierului, care întoarce starea MĂSURATĂ, și spui exact ce zice. ' +
   'Ce apare pe monitor NU se citește cu voce tare — o propoziție scurtă și atât. ' +
@@ -326,58 +312,47 @@ const PERSONA_KELION =
   'cadrele prin ușa cere_creierului și te uiți la imaginea de ATUNCI, proaspătă. Nu spune „văd ' +
   'acum" fără să fi cerut cadrele; nu comenta imaginea nechemat, niciodată. Dacă la cerere nu vin ' +
   'cadre, camera e oprită — o spui, nu inventezi o vedere. ' +
-  'INVENTARUL TĂU COMPLET (prin cere_creierului ai TOATE astea, conectate la contul Google al ' +
-  'omului): Gmail (citit/trimis e-mail), Google Calendar (evenimente), Google Drive (fișiere), ' +
-  'Tasks, Contacts; căutare web live, știri, METEO, hărți/trasee/GPS, YouTube/muzică, traduceri, ' +
-  'Wikipedia, conversii valutare, ora pe fus, generat imagini, deschis orice pe monitor, browser ' +
-  'live pe orice site; iar pentru Adrian: constructorul (build_software — implementează cerințe), ' +
-  'sursă/DB/repo/PR-uri/runbook-uri. Când omul cere ceva din lista asta, NU spui „nu am acces" — ' +
-  'chemi cere_creierului. Ești CONȘTIENT de inventarul ăsta: la „ce știi să faci?" îl spui.'
+  'INVENTARUL REAL depinde de consimțămintele și integrările contului. Folosește doar funcțiile ' +
+  'declarate în sesiune și raportează indisponibilitatea factual, fără să promiți acces generic.'
 
-// ── ADEVĂRUL DESPRE CONSTRUCTOR PE VOCE (owner, 22 aug, măsurat pe live v7.8:
-// „Devin nu face parte din uneltele noastre; Jules este cel pregătit") ─────────
-// Instrucțiunea vocală NU pomenea Devin nicăieri și ordona modelului să-și
-// recite singur inventarul — în care Devin nu exista. Poarta anti-negare
-// (neagaUneltele) rula DOAR pe scris. Aici punem ADEVĂRUL MĂSURAT din config
-// (cheia Devin, sursă vie — legea anti-hardcodare respectată) în chiar
-// instrucțiunea sesiunii, la ambele locuri de asamblare (inclusiv amprenta,
-// altfel sesiunile reluate n-ar prinde regula nouă — lecția din 9 aug).
-// Scopat pe Adrian, ca linia constructorului din persană.
-export function ancoraConstructor(devinActiv: boolean): string {
-  return devinActiv
-    ? '\nPENTRU ADRIAN — CONSTRUCTORUL (stare măsurată din config): constructorul e DEVIN, ' +
-      'ACTIV — cheia e pusă. Ordinele de cod merg la Devin prin build_software (ușa cere_creierului). ' +
-      'Devin FACE parte din uneltele tale. Jules e doar rezervă tăcută — NU-l prezenta drept ' +
-      'constructor și nu-i lista repo-urile ca răspuns la „cine construiește / e Devin prezent".'
-    : '\nPENTRU ADRIAN — CONSTRUCTORUL: cheia Devin NU e pusă pe server, deci NU construiește nimeni ' +
-      'automat; spui exact asta, nu inventezi un constructor local.'
+export function ancoraConstructor(codexActiv: boolean): string {
+  return codexActiv
+    ? '\nPENTRU ADMIN — CONSTRUCTOR: cererile validate pot fi puse în coada workerului Codex separat. ' +
+      'Nu afirma PR, merge, deploy sau versiune live până când starea durabilă a jobului le dovedește.'
+    : '\nPENTRU ADMIN — CONSTRUCTOR: workerul Codex nu este configurat; spune setup_required și nu inventa execuție locală.'
 }
 
 export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
-  // Sonda: frontendul întreabă întâi dacă modul unificat e disponibil (are cheie
-  // Gemini). Dacă nu, rămâne pe calea veche — nu deschide un WS spre gol.
+  // Frontendul verifică disponibilitatea înainte de a deschide socketul.
   // Pulsul vocii — DOAR cifre (vezi pulsVoce, mai sus). Public: niciun conținut,
   // doar contoare; cu el, „nu merge audio" se citește de oriunde cu un curl.
-  app.get('/api/vocal-live/stare', async (_req, reply) => {
+  app.get('/api/vocal-live/stare', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    if (!esteAdminKelion(user.email)) return reply.code(403).send({ error: 'forbidden' })
     reply.header('Cache-Control', 'no-store')
     return pulsVoce
   })
 
-  app.get('/api/vocal-live/capability', async (_req, reply) => {
+  app.get('/api/vocal-live/capability', async (req, reply) => {
+    if (!getSessionUser(req)) return reply.code(401).send({ error: 'unauthorized' })
     reply.header('Cache-Control', 'no-store')
-    return { disponibil: vocalLiveDisponibila(), model: VOCAL_LIVE_MODEL, voce: VOCAL_LIVE_VOICE }
+    return { disponibil: vocalLiveDisponibila() }
   })
 
-  app.get('/api/vocal-live', { websocket: true }, (socket, req) => {
-    const user = getSessionUser(req)
-    if (!user) {
-      try {
-        socket.close(1008, 'unauthorized')
-      } catch {
-        /* deja închis */
-      }
+  app.get('/api/vocal-live', {
+    websocket: true,
+    preValidation: (req, reply) => validateWebSocketSession(req, reply, 'vocal-live'),
+  }, (socket, req) => {
+    const user = webSocketSessionUser(req, socket)
+    if (!user) return
+    const isAdminSession = esteAdminKelion(user.email)
+    const userKey = user.email.trim().toLowerCase()
+    if ((sesiuniLivePeUtilizator.get(userKey) ?? 0) >= 1) {
+      try { socket.close(1008, 'session_limit') } catch { /* already closed */ }
       return
     }
+    sesiuniLivePeUtilizator.set(userKey, 1)
     if (!vocalLiveDisponibila()) {
       try {
         socket.close(1011, 'vocal_live_indisponibil')
@@ -386,29 +361,39 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
       return
     }
-    // ── POARTA DE CREDIT PE VOCE (10 aug — gaura „−10.280 credite"): chatul
-    // scris avea paywall, sesiunea LIVE nu verifica NICIODATĂ soldul — un user
-    // nou cu Google vorbea pe contul ownerului la nesfârșit, adânc pe minus.
-    // Aceeași politică precisă ca la scris (chat.ts): adminul e scutit; fără
-    // link de plată configurat, aplicația rămâne liberă; soldul NECITIT lasă
-    // trecerea (eroarea noastră nu se plătește din buzunarul omului) — dar un
-    // sold CITIT ≤ 0 închide sesiunea. Aceeași funcție bate și la deschidere,
-    // și pe ceasul de 60s (o sesiune pornită cu credit se OPREȘTE la golire).
-    const inchideDacaFaraCredit = (laDeschidere: boolean): void => {
-      if (!config.revolut.payLink || user.role === 'admin') return
-      void citesteSold(user.email).then((s) => {
-        if (s.citit && s.sold <= 0) {
-          try {
-            socket.close(1008, 'fara_credit')
-          } catch {
-            /* deja închis */
-          }
-        } else if (laDeschidere && !s.citit) {
-          app.log.error(`[VOCE][paywall] sold NECITIT la deschidere, las trecerea: ${s.motiv}`)
-        }
-      })
+    const billingSessionId = randomUUID()
+    // Product usage is billable for every non-admin account. A missing payment
+    // link must never turn an existing customer balance into free provider use.
+    const monetizedCustomer = !isAdminSession
+    let billingTick = 0
+    let providerReady = false
+    let initialChargeRef: string | null = null
+    const chargeMinute = async (): Promise<boolean> => {
+      if (!monetizedCustomer) return true
+      const tick = ++billingTick
+      const ref = `voice:${billingSessionId}:${tick}`
+      const result = await debitWalletMinorAtomar(
+        user.email,
+        config.billing.voiceMinuteMinor,
+        ref,
+        'vocal live minute',
+      )
+      if (result.ok) {
+        if (tick === 1 && !result.duplicate) initialChargeRef = ref
+        if (!result.duplicate) return true
+        try { socket.close(1008, 'billing_tick_reused') } catch { /* closed */ }
+        return false
+      }
+      try { socket.close(1008, result.code === 'insufficient' ? 'fara_credit' : 'billing_unavailable') } catch { /* closed */ }
+      return false
     }
-    inchideDacaFaraCredit(true)
+    const refundInitialSetupCharge = async (): Promise<void> => {
+      if (providerReady || !initialChargeRef || !monetizedCustomer) return
+      const ref = initialChargeRef
+      initialChargeRef = null
+      const refunded = await grantCreditMinor(user.email, config.billing.voiceMinuteMinor, `${ref}:setup_refund`)
+      if (!refunded) app.log.error('vocal-live: setup refund could not be persisted')
+    }
 
     // Pulsul numără sesiunile REAL (audit 9 aug: contoarele existau din #947,
     // dar nimeni nu le incrementa — panoul anti-minciună raporta permanent 0).
@@ -419,6 +404,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       if (sesiuneScazuta) return
       sesiuneScazuta = true
       pulsVoce.sesiuniDeschise = Math.max(0, pulsVoce.sesiuniDeschise - 1)
+      sesiuniLivePeUtilizator.delete(userKey)
     }
 
     let inchis = false
@@ -435,6 +421,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // altfel primele cuvinte ale omului ar dispărea exact ca în bugul vechi
     // „nu mă aude la prima frază".
     const preCoada: Buffer[] = []
+    let preCoadaBytes = 0
     // Aceeași plasă pentru TEXTUL scris (JARVIS pasul 1): rândurile tastate în
     // fereastra „sesiunea încă se deschide" nu se aruncă — se varsă la deschidere.
     const preCoadaText: string[] = []
@@ -476,7 +463,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     let anuntSistemAmanat = false
     // Tura de SISTEM se declară EXPLICIT (anunțul de ordin terminat), nu se
     // mai deduce din „transcriere goală" — deducția era o poartă fail-open:
-    // transcrierea Google sosește adesea DUPĂ primul cadru audio, deci tura
+    // transcrierea providerului poate sosi după primul cadru audio, deci tura
     // ambientală trecea drept „sistem" și se REDA (audit 9 aug, critică).
     let turaDeSistem = false
     // Rostirea CURENTĂ (segmentată pe pauze >2,5s): adresarea se judecă pe
@@ -485,26 +472,20 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     let rostireCurenta = ''
     let ultimaRostireFinalizata = ''
     let ultimaTranscriereUserLa = 0
-    // ── TIMEOUT DE TĂCERE (owner, 23 aug 2026: „explica cum softul arde bani
-    //    noaptea") — sesiunea de voce Gemini Live taxează $0.35/minut ACTIV
-    //    și $0.1167/minut IDLE (tăcere). O sesiune uitată deschisă arde $7/ora
-    //    de tăcere. Măsurat: 1009 minute într-o zi (16.8h), $588 pe voce în
-    //    august — majoritatea TĂCERE. Acum: 5 minute fără nicio vorbire →
-    //    sesiunea se închide singură, cu un mesaj onest.
-    const MAX_TACERE_MS = 15_000 // 15 secunde fără transcriere = închidere (owner, 23 aug: „la 15 secunde se inchide sesiunea")
+    // Idle cleanup is configuration-driven. It releases forgotten provider
+    // sessions and tells the client the exact close reason before disconnecting.
+    const idleTimeoutMs = config.vocalLiveIdleTimeoutSeconds * 1000
     let ceasTacere: NodeJS.Timeout | null = null
-    let ultimaActivitateLa = Date.now()
     const reseteazaCeasTacere = (): void => {
-      ultimaActivitateLa = Date.now()
       if (ceasTacere) clearTimeout(ceasTacere)
       ceasTacere = setTimeout(() => {
         if (inchis) return
-        app.log.info(`vocal-live: închidere automată după ${MAX_TACERE_MS / 1000} sec de tăcere (cost idle oprit)`)
+        app.log.info(`vocal-live: idle timeout after ${config.vocalLiveIdleTimeoutSeconds}s`)
         try {
-          socket.send(JSON.stringify({ type: 'eroare', motiv: 'Sesiunea s-a închis după 15 secunde de tăcere — deschide-o din nou când vrei să vorbești.' }))
+          socket.send(JSON.stringify({ type: 'session_closed', reason: 'idle_timeout', idleTimeoutSeconds: config.vocalLiveIdleTimeoutSeconds }))
         } catch { /* socket deja mort */ }
         socket.close(1000, 'idle_timeout')
-      }, MAX_TACERE_MS)
+      }, idleTimeoutMs)
     }
     reseteazaCeasTacere() // pornește la deschiderea sesiunii
     // Verdict AMÂNAT: cadrele sosite înaintea transcrierii se țin aici — nici
@@ -770,37 +751,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       salveazaTura()
     }
 
-    // ── CONTABILIZAREA VOCII (8 aug: „creditul se consumă cu viteza luminii") ─
-    // Până azi sesiunea live nu scria NIMIC în cost_events — pastila scădea
-    // orbește pe lângă voce. Numărăm octeții chiar aici, la punctele de
-    // trecere, și vărsăm estimarea (vezi estimareCostAudioUsd) sub kind
-    // 'gemini' la fiecare 60s + la închidere — un restart de publicare pierde
-    // cel mult ultimul minut, nu sesiunea întreagă.
-    let octetiIn = 0
-    let octetiOut = 0
-    // Cadrele de cameră trimise în sesiune (8 aug: „trebuie să poată folosi
-    // camera") — numărate aici, estimate în varsaCostul.
-    let cadreTrimise = 0
-    const varsaCostul = (): void => {
-      const usd = estimareCostAudioUsd(octetiIn, octetiOut) + estimareCostCadreUsd(cadreTrimise)
-      octetiIn = 0
-      octetiOut = 0
-      cadreTrimise = 0
-      if (usd > 0) {
-        void recordCost(user.email, 'gemini', usd)
-        // DEBITAREA CLIENTULUI (10 aug, gaura „−10.280"): costul vocii live se
-        // scădea doar în jurnal, nu și din portofelul clientului — vocea era
-        // gratis pentru el, pe factura ownerului. Aceeași regulă ca la scris:
-        // clientul plătește din credit; ownerul nu se taxează singur.
-        if (user.role !== 'admin') void debitWallet(user.email, usd, 'voce-live')
-      }
-    }
-    const ceasCost = setInterval(() => {
-      varsaCostul()
-      // OPRIREA PE SOLD GOLIT (10 aug): aceeași poartă ca la deschidere, pe
-      // ritmul de 60s al vărsării costului — altfel „−10.280".
-      inchideDacaFaraCredit(false)
-    }, 60_000)
+    const ceasCost = setInterval(() => { void chargeMinute() }, 60_000)
 
     // ── ANUNȚUL „CÂND E GATA" (8 aug, ownerul: „să anunțe când e gata") ──────
     // Ordinele de constructor pornite PRIN UȘĂ din sesiunea asta se țin minte
@@ -875,8 +826,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
 
     socket.on('message', (data: RawData, isBinary: boolean) => {
       if (!isBinary) {
+        const textFrame = String(data)
+        if (Buffer.byteLength(textFrame, 'utf8') > 3 * 1024 * 1024) {
+          socket.close(1009, 'frame_too_large')
+          return
+        }
         try {
-          const m = JSON.parse(String(data)) as {
+          const m = JSON.parse(textFrame) as {
             type?: string
             lat?: number
             lon?: number
@@ -886,7 +842,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             cadre?: unknown
           }
           if (m.type === 'coords') {
-            if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) {
+            if (Number.isFinite(m.lat) && Number.isFinite(m.lon)
+              && (m.lat as number) >= -90 && (m.lat as number) <= 90
+              && (m.lon as number) >= -180 && (m.lon as number) <= 180) {
               coords = { lat: m.lat as number, lon: m.lon as number }
             }
             // CE E PE MONITOR, ținut pentru get_monitor pe VOCE (10 aug): vine
@@ -921,7 +879,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               )
             }
           } else if (m.type === 'cadre') {
-            const cadre = Array.isArray(m.cadre) ? m.cadre.filter((c): c is string => typeof c === 'string') : []
+            const cadre = Array.isArray(m.cadre)
+              ? m.cadre
+                .filter((c): c is string => typeof c === 'string' && c.length <= 700_000 && /^[A-Za-z0-9+/]+={0,2}$/.test(c))
+                .slice(-4)
+              : []
             primesteCadre?.(cadre)
             primesteCadre = null
           } else if (m.type === 'cadru' && typeof (m as { data?: unknown }).data === 'string') {
@@ -929,7 +891,6 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // intră DIRECT în sesiunea Live, ca video în flux — modelul vede
             // în timp ce vorbește, fără să treacă prin ușă.
             live?.scrieCadru((m as { data: string }).data)
-            cadreTrimise++
           } else if (m.type === 'aec') {
             // Browserul raportează dacă bucla de anulare a ecoului e vie —
             // doar atunci tăierea la vocea omului are voie să judece.
@@ -941,12 +902,17 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // JARVIS pasul 1 + §10 (tastatura opțională): input SCRIS de la client cât
             // sesiunea Live e vie → rând de user în sesiune → modelul răspunde cu VOCEA
             // lui. Așa tura scrisă NU mai trece prin /api/chat → nu se mai sintetizează
-            // Chirp → coliziunea celor două guri („2 sec și se rupe") nu mai are de unde
+            // sinteza serială → coliziunea celor două guri nu mai are de unde
             // să apară pe turele scrise. Output-ul rămâne VOCE (regula de aur §10).
             //
             // BUG CRITIC prins de agentul de logică ÎNAINTE de merge (tura scrisă ar fi
             // fost MUTĂ — două lacăte interne îi mâncau răspunsul); dezarmăm amândouă:
-            const textScris = ((m as { text: string }).text || '').trim().slice(0, 4000)
+            const textScrisBrut = ((m as { text: string }).text || '').trim()
+            if (textScrisBrut.length > 4000) {
+              trimite({ type: 'eroare', motiv: 'text_too_long' })
+              return
+            }
+            const textScris = textScrisBrut
             if (textScris) {
               // „ÎN ZBOR" se măsoară ÎNAINTE de curățare (re-verificatorul: curățarea
               // șterge chiar dovada turei în zbor → amânarea nu se mai declanșa, iar
@@ -1030,8 +996,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         return
       }
       let buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
+      if (buf.length > 128 * 1024) {
+        socket.close(1009, 'audio_frame_too_large')
+        return
+      }
       // OPUS: cât e activ, cadrul de microfon vine [octet codec: 0=PCM, 1=Opus]
-      // [payload]. Decodăm ÎNAINTE de detector și de Gemini — tot lanțul de jos
+      // [payload]. Decodăm înainte de detector și de OpenAI Realtime — tot lanțul
       // lucrează pe PCM exact ca azi. Pachet corupt → sărim cadrul, nu crăpăm.
       if (opusActiv && opus && buf.length >= 1) {
         const codec = buf[0]
@@ -1055,10 +1025,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
       if (live) {
         live.scrieAudio(buf)
-        octetiIn += buf.length
       } else {
         preCoada.push(buf)
-        if (preCoada.length > 200) preCoada.shift() // plafon ~20s, ca în motor
+        preCoadaBytes += buf.length
+        while (preCoadaBytes > 2 * 1024 * 1024 && preCoada.length) {
+          preCoadaBytes -= preCoada.shift()?.length ?? 0
+        }
       }
     })
     socket.on('close', () => {
@@ -1074,9 +1046,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         clearTimeout(ceasAsteptareVerdict)
         ceasAsteptareVerdict = null
       }
-      varsaCostul() // restul de sub un minut nu se pierde
       incheieTura() // o tură neterminată nu se pierde — dar una SUPRIMATĂ nu se salvează
       live?.inchide()
+      void refundInitialSetupCharge()
       opus?.inchide() // eliberează codecul Opus (WASM) al sesiunii
       opus = null
       app.log.info('vocal-live: WS închis')
@@ -1094,12 +1066,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         clearTimeout(ceasAsteptareVerdict)
         ceasAsteptareVerdict = null
       }
-      varsaCostul()
       incheieTura()
       live?.inchide()
+      void refundInitialSetupCharge()
     })
 
     void (async () => {
+      if (!await chargeMinute()) return
       // Memoria: ultimele schimburi din istoric intră în instrucțiunea de setup.
       // O citire picată NU blochează vocea — sesiunea pornește fără memorie și
       // spune asta în jurnal (mai bine o voce uitucă decât niciuna).
@@ -1132,13 +1105,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         // English"; ADMIN = română mereu) dă engleza — gardul de limbă era armat
         // CONTRA limbii implicite a aplicației și amuțea userii noi ne-români.
         // Aceeași regulă acum pe ambele căi.
-        if (user.role === 'admin') limbaPin = 'ro-RO' // adminul = română, mereu (regula scrisă)
+        if (isAdminSession) limbaPin = 'ro-RO'
         else if (!pref) limbaPin = 'en-US' // user nou → limba implicită a aplicației
         else if (BCP47[pref]) limbaPin = BCP47[pref]
         else if (/^[a-z]{2}-[A-Z]{2}$/.test(pref)) limbaPin = pref // ex. ja-JP întreg
         else limbaPin = undefined // necunoscută → auto-detecție, fără gard
       } catch {
-        limbaPin = user.role === 'admin' ? 'ro-RO' : 'en-US'
+        limbaPin = isAdminSession ? 'ro-RO' : 'en-US'
         app.log.warn(`vocal-live: speech_lang necitibil — pinul de limbă cade pe implicit (${limbaPin})`)
       }
       const nume = user.name || user.email.split('@')[0]
@@ -1168,61 +1141,27 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         })
       }
-      const instructiune = construiesteInstructiune(PERSONA_KELION + ancoraConstructor(Boolean(config.devinKey)), nume, istoric, ancora, limbaPin) + memorie
-
-      // CONVERSAȚIA SUPRAVIEȚUIEȘTE REPORNIRII (8 aug, ownerul: „trebuie să nu
-      // mai moară… chiar dacă se întrerupe 1 sec, e suficient să se redeschidă
-      // și să continue chatul logic"). Mânerul de reluare Google trăia doar în
-      // memoria procesului — o publicare îl pierdea și conversația murea. Acum
-      // se persistă în kv la fiecare împrospătare (frânat la 5s) și se citește
-      // aici: procesul nou reia ACEEAȘI sesiune, cu tot contextul ei. Un mâner
-      // stătut nu strică: setup-ul cu el pică înainte de `gata`, iar degradarea
-      // măsurată din motor reia curat, fără el.
-      const KV_RELUARE = `vocal-live:reluare:${user.email.toLowerCase()}`
-      // ── GENERAȚIA SESIUNII (8 aug, ownerul, după ușă: „calea către unelte e
-      // ruptă — nu gps, nu hărți, nu youtube") ───────────────────────────────
-      // MĂSURAT în jurnal: toate sesiunile de după publicarea ușii au fost
-      // RELUATE cu handle persistat — iar reluarea resuscitează sesiunea VECHE
-      // de la Google, cu uneltele și instrucțiunea din ziua nașterii ei. Ușa
-      // exista în setup-ul nou, dar sesiunea reluată n-o vedea: „zice că are
-      // alte unelte" — chiar le avea pe cele vechi. De-aia mânerul poartă acum
-      // AMPRENTA capabilităților (numele uneltelor + persona): când inventarul
-      // sau regulile se schimbă, mânerul din altă generație se ARUNCĂ și
-      // sesiunea pornește proaspăt — cu memoria din istoric (instrucțiunea o
-      // cară oricum), dar cu uneltele de AZI. O repornire de publicare fără
-      // schimbare de unelte reia în continuare conversația, ca până acum.
-      // AMPRENTA VEDE ACUM ȘI REGULILE (9 aug, revizia: CRITICĂ — „ancora
-      // întărită N-A AJUNS în sesiunile reluate"): vechea amprentă era numele
-      // uneltelor + LUNGIMEA personei, deci o regulă nouă în
-      // construiesteInstructiune (ancora limbii, trezirea) NU rotea generația —
-      // handle-ul relua sesiunea Google veche, cu instrucțiunea din ziua
-      // NAȘTERII ei. De-aia capturile de la 16:24 tot spaniolă arătau: regula
-      // nouă nici nu ajunsese la model. Acum amprenta e hash peste instrucțiunea
-      // STATICĂ completă (fără ancoră/istoric — alea se schimbă mereu): orice
-      // schimbare de REGULI aruncă mânerul vechi și sesiunea pornește proaspăt.
-      const genUnelte = createHash('sha256')
-        .update(unelteleSesiuniiLive(user.role).map((u) => u.name).join(','))
-        .update(construiesteInstructiune(PERSONA_KELION + ancoraConstructor(Boolean(config.devinKey)), 'gen', []))
-        .digest('hex')
-        .slice(0, 16)
-      let reluareInitial: string | undefined
-      try {
-        const brut = await loadKv(KV_RELUARE)
-        if (brut) {
-          const j = JSON.parse(brut) as { h?: string; t?: number; gen?: string }
-          if (j.h && typeof j.t === 'number' && Date.now() - j.t < 10 * 60_000) {
-            if (j.gen === genUnelte) {
-              reluareInitial = j.h
-              app.log.info('vocal-live: reiau sesiunea Google cu handle persistat (conversația continuă)')
-            } else {
-              app.log.info('vocal-live: handle din ALTĂ generație de unelte — sesiune proaspătă, cu uneltele de azi')
-            }
-          }
+      const instructiune = construiesteInstructiune(
+        PERSONA_KELION + (isAdminSession ? ancoraConstructor(config.codexWorker.enabled) : ''),
+        nume,
+        istoric,
+        ancora,
+        limbaPin,
+      ) + memorie
+      const liveTools = unelteleSesiuniiLive(isAdminSession)
+      const allowedLiveTools = new Set(liveTools.map((tool) => tool.name))
+      const toolCallsInFlight = new Set<string>()
+      const toolCallResults = new Map<string, { name: string; result: unknown }>()
+      const raspundeTool = (id: string, name: string, result: unknown): void => {
+        toolCallsInFlight.delete(id)
+        toolCallResults.set(id, { name, result })
+        while (toolCallResults.size > 200) {
+          const oldest = toolCallResults.keys().next().value as string | undefined
+          if (!oldest) break
+          toolCallResults.delete(oldest)
         }
-      } catch {
-        /* fără handle — sesiune proaspătă, nu blocăm vocea */
+        live?.raspundeUnealta(id, name, result)
       }
-      let ultimaSalvareHandle = 0
 
       if (inchis) return
       // ── GARDUL TREZIRII PE NUME — DETERMINIST, PE SERVER ──────────────────
@@ -1350,7 +1289,6 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
       // Judecata de limbă, într-un singur loc (rută + închiderea turei):
       // străin + necerut + omul NU vorbea el însuși limba aia → suprimare.
-      let suprimariLimba = 0
       const judecaLimba = (): { verdict: boolean; straina: string | null } => {
         const straina = continuareStraina(bufKelion)
         const limbaUser = inceputStrain(rostireCurenta.trim() || bufUser)
@@ -1385,8 +1323,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         opresteCeasLimba()
         golesteRedarea()
       }
-      live = deschideVocalLive(instructiune, unelteleSesiuniiLive(user.role), {
+      live = deschideVocalLive(instructiune, liveTools, {
         onGata: async () => {
+          providerReady = true
           // OPUS: cât sesiunea se pregătește, încercăm codecul de server O DATĂ.
           // Îl anunțăm clientului DOAR dacă flagul e pornit ȘI codecul chiar s-a
           // încărcat — altfel clientul rămâne pe PCM (fără cursă, fără regresie).
@@ -1397,9 +1336,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           trimite({ type: 'gata', opus: !!(config.voiceOpus && opus) })
         },
         onAudioIesire: (data) => {
-          pulsVoce.cadreAudioDeLaGoogle++
+          pulsVoce.cadreAudioDeLaOpenAI++
           pulsVoce.laUltimulCadru = Date.now()
-          octetiOut += octetiDinBase64(data) // Google a facturat-o oricum — se numără
           reseteazaCeasTacere() // Kelion vorbește → sesiunea e ACTIVĂ, nu idle
           if (taiereManuala) {
             pulsVoce.suprimateDupaTaiere++
@@ -1582,15 +1520,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                 // OTRAVA DIN SESIUNEA GOOGLE (auditul 15 aug): suprimarea era
                 // doar la noi — în contextul ținut de Google replica străină
                 // rămânea „ultima vorbă" și derapajul se autoîntreținea, chiar
-                // peste reconectări (handle-ul persistat o resuscita). Corecția
-                // se SPUNE sesiunii; la a doua suprimare, handle-ul se aruncă —
-                // conexiunea următoare pornește pe instrucțiunea curată.
-                suprimariLimba++
+                // Corecția se spune sesiunii curente; o conexiune nouă își
+                // reconstruiește contextul din istoricul propriu al aplicației.
                 live?.ancoreaza(`[SISTEM] Replica ta anterioară a fost respinsă: era în ${straina ?? 'altă limbă'}, necerută. Continuă EXCLUSIV în română.`)
-                if (suprimariLimba >= 2) {
-                  app.log.warn('[VOCE] a doua suprimare de limbă în sesiune — arunc handle-ul de reluare (context otrăvit)')
-                  void deleteKv(KV_RELUARE).catch(() => {})
-                }
               } else if (verdictTura === true) {
                 varsaCadreleInAsteptare() // limba tocmai s-a decis bună → ce aștepta pe ea se varsă
                 varsaTextulInAsteptare()
@@ -1613,6 +1545,25 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
         onUnealta: async (apel) => {
           reseteazaCeasTacere() // Kelion face tool calls → sesiunea e ACTIVĂ, nu idle
+          if (!allowedLiveTools.has(apel.name)) {
+            raspundeTool(apel.id, apel.name, { error: 'tool_not_allowed' })
+            return
+          }
+          const completed = toolCallResults.get(apel.id)
+          if (completed) {
+            if (completed.name !== apel.name) {
+              live?.raspundeUnealta(apel.id, apel.name, { error: 'tool_call_id_conflict' })
+            } else {
+              live?.raspundeUnealta(apel.id, apel.name, completed.result)
+            }
+            return
+          }
+          if (toolCallsInFlight.has(apel.id)) {
+            // The first execution will answer this call id; never run or emit a
+            // second result while its side effect is still in flight.
+            return
+          }
+          toolCallsInFlight.add(apel.id)
           // UȘA SPRE CREIERUL ÎNTREG: cererea trece prin /api/chat cu sesiunea
           // omului — toate uneltele chatului, aceeași contabilizare. Cadrele de
           // ECRAN se retrimit browserului; cadrele de VOCE nu trec (glasul e al
@@ -1621,7 +1572,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           if (apel.name === 'cere_creierului') {
             const cerere = String((apel.args as { cerere?: unknown }).cerere ?? '').trim()
             if (!cerere) {
-              live?.raspundeUnealta(apel.id, apel.name, { eroare: 'cerere goală' })
+              raspundeTool(apel.id, apel.name, { eroare: 'cerere goală' })
               return
             }
             // Temeiul turei trece la creierul GREU — poarta faptelor a LUI
@@ -1698,7 +1649,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                 trimite({ type: 'control', frame })
               }
             }
-            let r = await turaCreierului(req.headers.cookie ?? '', cerere, coords, cadre, laEcran, monitorLive, tranzactiiLive)
+            let r = await turaCreierului(req.headers.cookie ?? '', cerere, apel.id, coords, cadre, laEcran, monitorLive, tranzactiiLive)
             // TRIEREA ÎN DOI (§4) — CONVERGENȚA: dacă în timpul măcinării omul a
             // spus lucruri noi (întrebat de Live sau de la sine), creierul greu
             // primește încă o rundă CU ISTORICUL rundei anterioare (altfel runda
@@ -1721,6 +1672,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               const r2 = await turaCreierului(
                 req.headers.cookie ?? '',
                 cerere,
+                `${apel.id}:triage:${runde}`,
                 coords,
                 cadre,
                 laEcran,
@@ -1771,7 +1723,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               if (docPeEcranInUsa && !contineDemascare && r.text.length > PRAG_PREDARE_ECRAN) {
                 if (live) {
                   pulsVoce.predariEcran++
-                  live.raspundeUnealta(apel.id, apel.name, {
+                  raspundeTool(apel.id, apel.name, {
                     rezultat: {
                       de_rostit: 'Un document a fost trimis pe monitor în tura asta, iar textul COMPLET al răspunsului îl ai în „pe_ecran_nu_se_recita". Predă scurt: o propoziție de predare + esențialul într-o frază — nu recita textul întreg.',
                       pe_ecran_nu_se_recita: r.text,
@@ -1779,7 +1731,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                   })
                 }
               } else {
-                live?.raspundeUnealta(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
+                raspundeTool(apel.id, apel.name, { rezultat: r.text || 'creierul n-a întors niciun text' })
               }
             } else {
               app.log.warn(`vocal-live: ușa creierului a picat: ${r.motiv}`)
@@ -1787,7 +1739,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               // picat pe voce = exact „aplicația nu răspunde". Se notează ca simptom
               // ca autovindecarea să ajungă la cauză.
               void recordSimptomLive('chat-mut', `voce: ușa creierului a picat — ${r.motiv}`.slice(0, 180)).catch(() => {})
-              live?.raspundeUnealta(apel.id, apel.name, { eroare: r.motiv })
+              raspundeTool(apel.id, apel.name, { eroare: r.motiv })
             }
             } finally {
               usiGreleInZbor--
@@ -1803,25 +1755,25 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // execSharedAdminTool. Fără ramura asta răspundeau „nesuportată în
             // voce" deși pe scris merg. Exact ca bucla de noapte (autonomie.ts).
             if (USER_SCOPED_TOOLS.has(apel.name)) {
-              const r = await execUserScopedTool(apel.name, apel.args as any, user.email, user.role === 'admin')
+              const r = await execUserScopedTool(apel.name, apel.args as any, user.email, isAdminSession)
               // Dovada cățelului vocal (§5): rezultatul REAL, clasificat — o
               // pretenție de faptă rostită se acoperă doar cu o unealtă reușită.
               if (r != null) noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, String(r)))
-              live?.raspundeUnealta(apel.id, apel.name, { rezultat: r ?? 'Unealtă nesuportată în voce.' })
+              raspundeTool(apel.id, apel.name, { rezultat: r ?? 'Unealtă nesuportată în voce.' })
               return
             }
             const rezultat = await execSharedAdminTool(apel.name, apel.args as any, { email: user.email })
             if (rezultat !== null) {
               noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, String(rezultat)))
-              live?.raspundeUnealta(apel.id, apel.name, { rezultat })
+              raspundeTool(apel.id, apel.name, { rezultat })
             } else {
-              live?.raspundeUnealta(apel.id, apel.name, { rezultat: 'Unealtă nesuportată în voce.' })
+              raspundeTool(apel.id, apel.name, { rezultat: 'Unealtă nesuportată în voce.' })
             }
           } catch (err: any) {
             app.log.error(`Eroare unealtă ${apel.name}: ${err.message}`)
             // Tentativă picată = dovadă de EȘEC (nu acoperă nicio pretenție).
             noteazaDovadaVoce(clasificaRezultatUnealta(apel.name, `tool_error: ${String(err?.message ?? err)}`))
-            live?.raspundeUnealta(apel.id, apel.name, { eroare: err.message })
+            raspundeTool(apel.id, apel.name, { eroare: err.message })
           }
         },
         onIntrerupt: () => {
@@ -1919,32 +1871,42 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
           trimite({ type: 'tura_gata' })
         },
+        onUsage: (usage) => {
+          if (!usage.responseId) {
+            trimite({ type: 'eroare', motiv: 'provider_usage_missing_response_id' })
+            try { socket.close(1011, 'provider_usage_missing') } catch { /* closed */ }
+            return
+          }
+          void recordProviderUsage({
+            responseId: usage.responseId,
+            userEmail: user.email,
+            surface: 'realtime',
+            sessionId: billingSessionId,
+            model: config.openai.realtime,
+            serviceTier: null,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            inputAudioTokens: usage.inputAudioTokens,
+            outputAudioTokens: usage.outputAudioTokens,
+          }).catch((error) => {
+            app.log.error({ err: String(error).slice(0, 160) }, 'vocal-live metering failed')
+            trimite({ type: 'eroare', motiv: 'provider_usage_unavailable' })
+            try { socket.close(1011, 'provider_usage_unavailable') } catch { /* closed */ }
+          })
+        },
         onEroare: (motiv) => {
           pulsVoce.ultimaEroare = motiv.slice(0, 160)
           trimite({ type: 'eroare', motiv })
           app.log.warn(`vocal-live: ${motiv}`)
+          void refundInitialSetupCharge()
         },
         onInfo: (msg) => {
           pulsVoce.varianta = msg.slice(0, 120)
           app.log.info(`vocal-live: ${msg}`)
         },
-        onHandleReluare: (handle) => {
-          const acum = Date.now()
-          if (acum - ultimaSalvareHandle < 5_000) return
-          ultimaSalvareHandle = acum
-          // Mânerul se salvează CU generația lui de unelte — la următoarea
-          // schimbare de capabilități, un mâner din altă generație se aruncă.
-          void saveKv(KV_RELUARE, JSON.stringify({ h: handle, t: acum, gen: genUnelte })).catch(() => {})
-        },
-        onHandleProst: () => {
-          // Handle-ul a picat la setup — se ȘTERGE din KV, altfel fiecare
-          // sesiune nouă din următoarele 10 minute l-ar reîncărca și ar muri
-          // în același connect (audit 9 aug, critică).
-          app.log.warn('vocal-live: handle de reluare picat la setup — îl șterg din KV')
-          void deleteKv(KV_RELUARE).catch(() => {})
-        },
-      }, reluareInitial, user.role === 'admin' ? unelteleDovedite() : undefined, limbaPin)
+      }, limbaPin)
       if (!live) {
+        await refundInitialSetupCharge()
         try {
           socket.close(1011, 'vocal_live_indisponibil')
         } catch {
@@ -1954,8 +1916,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
       for (const b of preCoada.splice(0)) {
         live.scrieAudio(b)
-        octetiIn += b.length
       }
+      preCoadaBytes = 0
       // Rândurile SCRISE din fereastra de deschidere: fiecare e o tură adresată pe
       // față (protocolul anunțurilor) — se varsă acum, în ordinea sosirii.
       for (const t of preCoadaText.splice(0)) {

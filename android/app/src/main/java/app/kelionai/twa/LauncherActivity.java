@@ -15,18 +15,25 @@
  */
 package app.kelionai.twa;
 
+import android.content.Context;
 import android.content.pm.ActivityInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-
-
+import android.widget.Button;
 
 public class LauncherActivity
         extends com.google.androidbrowserhelper.trusted.LauncherActivity {
-    
 
-    
+    @Override
+    protected boolean shouldLaunchImmediately() {
+        // Prima pornire trebuie să poată afișa fallbackul local înainte ca PWA
+        // să fi avut ocazia să instaleze service workerul.
+        return false;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,14 +47,45 @@ public class LauncherActivity
         } else {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
         }
+        tryLaunchTwa();
+    }
+
+    private void tryLaunchTwa() {
+        if (isOnline()) {
+            // `launchTwa()` confirmă numai că intentul a fost predat
+            // browserului, nu că pagina a devenit utilizabilă. Nu persistăm o
+            // stare de succes înainte de dovada web; la rece, fallbackul local
+            // rămâne fail-closed.
+            launchTwa();
+        } else {
+            renderOfflineFallback();
+        }
+    }
+
+    private boolean isOnline() {
+        ConnectivityManager manager =
+                (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager == null) return false;
+        Network network = manager.getActiveNetwork();
+        if (network == null) return false;
+        NetworkCapabilities capabilities = manager.getNetworkCapabilities(network);
+        return capabilities != null
+                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+    }
+
+    private void renderOfflineFallback() {
+        setContentView(R.layout.activity_offline_first_twa);
+        Button retry = findViewById(R.id.retry_btn);
+        retry.setOnClickListener(view -> {
+            if (isOnline()) launchTwa();
+        });
     }
 
     @Override
     protected Uri getLaunchingUrl() {
         // Get the original launch Url.
         Uri uri = super.getLaunchingUrl();
-
-        
 
         return uri;
     }

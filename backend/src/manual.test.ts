@@ -23,24 +23,24 @@ describe('manual — the public feature list cannot rot', () => {
 
   it('buildManual() actually lists every public capability (none silently dropped)', () => {
     const doc = buildManual()
+    expect(doc.sections.every((section) => section.audience === 'public')).toBe(true)
     const listed = doc.groups.flatMap((g) => g.items).length
     const expected = CAPABILITIES.filter((c) => !c.admin && MANUAL_CAPS[c.name]).length
     expect(listed).toBe(expected)
     expect(listed).toBeGreaterThan(0)
   })
 
-  // Capitolele doar-admin (owner, 20 aug: „ce e admin se afișează tot"): un
-  // singur manual, care câștigă proiectul de chat voce când sesiunea e admin.
-  it('buildAdminChapters() dă capitolele proiectului, în română, non-goale', () => {
+  it('buildAdminChapters() returns only explicit, current admin sections', () => {
     const cap = buildAdminChapters()
     expect(cap.length).toBeGreaterThan(0)
     for (const s of cap) {
       expect(s.title, 'un capitol admin fără titlu').toBeTruthy()
       expect(s.paragraphs.length, `capitolul „${s.title}" e gol`).toBeGreaterThan(0)
+      expect(s.audience).toBe('admin')
     }
     const tot = cap.map((s) => `${s.title} ${s.paragraphs.join(' ')}`).join(' ')
-    expect(tot).toMatch(/Jarvis/)
-    expect(tot).toMatch(/100% VORBIT/i)
-    expect(tot).toMatch(/PROIECT-CHAT-VOCE\.md/)
+    expect(tot).toMatch(/debit de produs exact zero/i)
+    expect(tot).toMatch(/codex login/i)
+    expect(tot).not.toMatch(/PROIECT-CHAT-VOCE|DRAFT-PROIECT|100% VORBIT/i)
   })
 })

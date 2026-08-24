@@ -87,7 +87,7 @@ describe('faza de vorbire nu cară nimic scump', () => {
     }
     // Adminul secund TREBUIE să vadă baza de date, logurile și fișierele în ORICE
     // tură (read-only, ieftin) — nu doar după escaladare.
-    for (const u of ['db_query', 'db_tables', 'server_logs', 'client_errors', 'read_source', 'admin_vezi']) {
+    for (const u of ['db_query', 'db_tables', 'server_logs', 'client_errors', 'read_source']) {
       expect(permisaLaVorbire(u), `„${u}" trebuie disponibilă adminului pe vorbire`).toBe(true)
     }
     // …dar system_health (scumpă, ~8s: GitHub + sonde) rămâne DOAR prin ask_brain.

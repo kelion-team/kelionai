@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+RADACINA=$(git rev-parse --show-toplevel)
+exec bash "$RADACINA/scripts/verifica-secrete.sh" --git-head

@@ -1,0 +1,53 @@
+[Unit]
+Description=Kelion Constructor verified release dispatcher
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/kelion/constructor-release.enabled
+
+[Service]
+Type=oneshot
+User=kelion-release
+Group=kelion-release
+UMask=0077
+WorkingDirectory=/var/lib/kelion-release
+Environment=PATH=/usr/bin:/bin
+Environment=CONSTRUCTOR_RELEASE_STATE=/var/lib/kelion-release/state
+EnvironmentFile=/root/kelion/config/constructor-release.env
+LoadCredential=constructor-release-secret:/root/kelion/secrets/constructor-release-secret
+LoadCredential=github-release-token:/root/kelion/release-secrets/github-release-token
+ExecStartPre=/usr/bin/node /opt/kelion-constructor/constructor-release.mjs --self-test
+ExecStart=/usr/bin/node /opt/kelion-constructor/constructor-release.mjs --once
+NoNewPrivileges=true
+KeyringMode=private
+PrivateIPC=true
+PrivateDevices=true
+PrivateTmp=true
+RuntimeDirectory=kelion-release
+RuntimeDirectoryMode=0700
+ProtectProc=invisible
+ProcSubset=pid
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kelion-release /run/kelion-release
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+MemoryMax=256M
+TasksMax=64
+TimeoutStartSec=8h
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

@@ -1,53 +1,28 @@
-// ── P30a: OCHIUL VIDEO AL LUI KELION — YouTube, direct prin creier (15 aug) ──
-// (owner, verbatim: „kelion trebuie sa aibe o abilitate sa vada un videoclip
-// din youtube, tiktok sau de oriunde, in orice format, deschizind in spatiul
-// lui, propriu si sa extraga ideile principale si informatiile din clip, sa le
-// catalogheze si sa le invete")
-//
-// FELIA a (aprobată cu „start" + „propune"→plan): YouTube DIRECT — API-ul
-// Gemini acceptă un URL de YouTube ca fileData.fileUri în generateContent,
-// fără nicio descărcare; clipul se „vede" în spațiul creierului. Felia b
-// (descărcarea „de oriunde" prin yt-dlp) și felia c (legarea la Studio) vin
-// separat — ușile alea cer acordul explicit al ownerului (termenii platformelor).
-//
-// Onestitate prin construcție:
-//   • plafonul de durată e SPUS (VEDE_VIDEO_MAX_S, implicit 600s = 10 min) —
-//     peste el se vede doar începutul, iar fișa o spune;
-//   • costul = tokenii REALI din usageMetadata, la tariful de intrare al
-//     modelului — înregistrat în cost_events sub 'video-vazut', nu inventat;
-//   • un răspuns fără fișă = eroare NUMITĂ, nu succes prefăcut.
 import { config } from '../config.js'
+import { rationeazaMesaje } from './creierRationament.js'
+import type { OrMessage } from './brainContract.js'
 
-const G_BAZA = 'https://generativelanguage.googleapis.com/v1beta'
-// Modelul care vede: cel al creierului (config.geminiModel) — un singur robinet.
 export const VEDE_VIDEO_MAX_S = Math.max(60, Number(process.env.VEDE_VIDEO_MAX_S || 600))
-// Tariful de INTRARE al modelului flash (pagina de prețuri Google, citită
-// 15 aug 2026): $0.30 / 1M tokeni — video-ul se tokenizează ca intrare.
-// Estimare declarată pe tarif public; factura adevărată e la Google.
-export const USD_1M_TOKENI_VIDEO = 0.3
 
-/** E un link pe care felia P30a îl poate vedea DIRECT (YouTube)?
- *  REPARAT 15 aug seara (audit adversarial, CONFIRMAT prin execuție): regexul
- *  dintâi cerea gazda goală/www. și `v=` ca PRIM parametru — refuza linkuri
- *  YouTube AUTENTICE: m.youtube.com (forma copiată de pe telefon — exact cum
- *  testează ownerul), music.youtube.com, /embed/, watch?app=desktop&v=….
- *  Acum URL-ul se PARSEAZĂ (new URL), nu se ghicește cu regex. */
 export function eLinkYoutube(url: string): boolean {
-  let u: URL
-  try {
-    u = new URL(String(url ?? '').trim())
-  } catch {
-    return false
-  }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
-  const gazda = u.hostname.toLowerCase()
-  if (gazda === 'youtu.be') return /^\/[\w-]{5,}/.test(u.pathname)
-  if (gazda === 'youtube.com' || gazda.endsWith('.youtube.com')) {
-    const v = u.searchParams.get('v')
-    if (v && /^[\w-]{5,}$/.test(v)) return true
-    return /^\/(shorts|live|embed)\/[\w-]{5,}/.test(u.pathname)
+  let parsed: URL
+  try { parsed = new URL(String(url ?? '').trim()) } catch { return false }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false
+  const host = parsed.hostname.toLowerCase()
+  if (host === 'youtu.be') return /^\/[\w-]{5,}/.test(parsed.pathname)
+  if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+    const id = parsed.searchParams.get('v')
+    if (id && /^[\w-]{5,}$/.test(id)) return true
+    return /^\/(shorts|live|embed)\/[\w-]{5,}/.test(parsed.pathname)
   }
   return false
+}
+
+function youtubeId(url: string): string | null {
+  if (!eLinkYoutube(url)) return null
+  const parsed = new URL(url)
+  if (parsed.hostname.toLowerCase() === 'youtu.be') return parsed.pathname.split('/').filter(Boolean)[0] ?? null
+  return parsed.searchParams.get('v') ?? parsed.pathname.match(/^\/(?:shorts|live|embed)\/([\w-]+)/)?.[1] ?? null
 }
 
 export interface FisaVideo {
@@ -56,95 +31,176 @@ export interface FisaVideo {
   informatii: string[]
   momente: { la: string; ce: string }[]
   ton: string
-  /** Tokenii REALI raportați de Google pentru tura asta (usageMetadata). */
   tokeni: number
-  costUsd: number
+  costUsd?: number
   plafonAtins: boolean
 }
 
-const PROMPT_FISA =
-  `Vezi clipul și întoarce STRICT un obiect JSON (fără alt text) cu forma: ` +
-  `{"titlu": string, "idei": string[] (3-7 idei principale), ` +
-  `"informatii": string[] (fapte concrete, cifre, nume), ` +
-  `"momente": [{"la": "m:ss", "ce": string}] (5-10 momente cheie), ` +
-  `"ton": string (o propoziție: cine vorbește și pe ce ton)}. ` +
-  `Totul în ROMÂNĂ, indiferent de limba clipului.`
+interface CaptionTrack { baseUrl?: string; languageCode?: string; name?: { simpleText?: string } }
 
-/** Kelion VEDE un clip de YouTube și întoarce fișa structurată — sau eroarea
- *  numită. Nu descarcă nimic: URL-ul intră direct în creier (fileData). */
-export async function vedeVideoYoutube(url: string): Promise<FisaVideo | { error: string }> {
-  const curat = String(url ?? '').trim()
-  if (!eLinkYoutube(curat)) {
-    return {
-      error:
-        'link_nesuportat_inca: felia de azi vede DOAR YouTube (fără descărcare, direct prin creier). ' +
-        'TikTok/„de oriunde"/fișiere vin în felia următoare (P30b) — spune-i omului cinstit.',
+function jsonArrayAfter(source: string, marker: string): unknown[] | null {
+  const at = source.indexOf(marker)
+  if (at < 0) return null
+  const start = source.indexOf('[', at + marker.length)
+  if (start < 0) return null
+  let depth = 0
+  let quoted = false
+  let escaped = false
+  for (let i = start; i < source.length; i++) {
+    const char = source[i]
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') quoted = false
+      continue
+    }
+    if (char === '"') quoted = true
+    else if (char === '[') depth++
+    else if (char === ']' && --depth === 0) {
+      try { return JSON.parse(source.slice(start, i + 1)) as unknown[] } catch { return null }
     }
   }
-  if (!config.geminiKey) return { error: 'fara_cheie_gemini' }
-  let r: Response
+  return null
+}
+
+function isTrustedCaptionUrl(raw: string): boolean {
   try {
-    r = await fetch(`${G_BAZA}/models/${config.geminiModel}:generateContent`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': config.geminiKey },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                fileData: { fileUri: curat },
-                // Plafonul de durată, aplicat CHIAR în cerere: vedem primele
-                // VEDE_VIDEO_MAX_S secunde — costul rămâne mărginit și spus.
-                videoMetadata: { startOffset: '0s', endOffset: `${VEDE_VIDEO_MAX_S}s` },
-              },
-              { text: PROMPT_FISA },
-            ],
-          },
-        ],
-        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4096 },
-      }),
-      signal: AbortSignal.timeout(180_000),
+    const url = new URL(raw)
+    const host = url.hostname.toLowerCase()
+    return url.protocol === 'https:' && (
+      host === 'youtube.com' || host.endsWith('.youtube.com') ||
+      host === 'googlevideo.com' || host.endsWith('.googlevideo.com')
+    )
+  } catch { return false }
+}
+
+function plainText(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ').trim()
+}
+
+interface TranscriptResult { text: string; clipped: boolean }
+
+async function youtubeTranscript(url: string): Promise<TranscriptResult | { error: string }> {
+  let page: Response
+  try {
+    page = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; KelionAI/1.0)' },
+      signal: AbortSignal.timeout(15_000),
+      redirect: 'follow',
     })
-  } catch (e) {
-    return { error: `vede_video rețea: ${String((e as Error)?.message ?? e).slice(0, 160)}` }
+  } catch (error) {
+    return { error: `vede_video pagina: ${String(error).slice(0, 120)}` }
   }
-  const text = await r.text().catch(() => '')
-  if (!r.ok) return { error: `vede_video ${r.status}: ${text.slice(0, 200)}` }
+  if (!page.ok) return { error: `vede_video pagina ${page.status}` }
+  const html = (await page.text()).slice(0, 4_000_000)
+  const tracks = jsonArrayAfter(html, '"captionTracks":') as CaptionTrack[] | null
+  const track = tracks?.find((item) => item.languageCode === 'ro') ?? tracks?.find((item) => item.languageCode === 'en') ?? tracks?.[0]
+  if (!track?.baseUrl || !isTrustedCaptionUrl(track.baseUrl)) return { error: 'vede_video_fara_transcript' }
+  const captionUrl = new URL(track.baseUrl)
+  captionUrl.searchParams.set('fmt', 'json3')
+  let response: Response
   try {
-    const j = JSON.parse(text) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[]
-      usageMetadata?: { totalTokenCount?: number }
+    response = await fetch(captionUrl, { signal: AbortSignal.timeout(15_000), redirect: 'error' })
+  } catch (error) {
+    return { error: `vede_video transcript: ${String(error).slice(0, 120)}` }
+  }
+  if (!response.ok) return { error: `vede_video transcript ${response.status}` }
+  const raw = await response.text()
+  try {
+    const json = JSON.parse(raw) as { events?: Array<{ tStartMs?: number; segs?: Array<{ utf8?: string }> }> }
+    const lines: string[] = []
+    let clipped = false
+    for (const event of json.events ?? []) {
+      const second = Number(event.tStartMs ?? 0) / 1000
+      if (second > VEDE_VIDEO_MAX_S) { clipped = true; break }
+      const text = plainText((event.segs ?? []).map((segment) => segment.utf8 ?? '').join(''))
+      if (text) lines.push(`[${Math.floor(second / 60)}:${String(Math.floor(second % 60)).padStart(2, '0')}] ${text}`)
     }
-    const brutFisa = j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
-    const f = JSON.parse(brutFisa) as Partial<FisaVideo>
-    if (!Array.isArray(f.idei) || f.idei.length === 0) {
-      return { error: 'vede_video: creierul a răspuns fără idei — fișa nu se inventează' }
-    }
-    const tokeni = Number(j.usageMetadata?.totalTokenCount ?? 0)
-    return {
-      titlu: String(f.titlu ?? '').slice(0, 200),
-      idei: f.idei.map((x) => String(x).slice(0, 300)).slice(0, 10),
-      informatii: (Array.isArray(f.informatii) ? f.informatii : []).map((x) => String(x).slice(0, 300)).slice(0, 15),
-      momente: (Array.isArray(f.momente) ? f.momente : [])
-        .map((m) => ({ la: String((m as { la?: string }).la ?? '').slice(0, 10), ce: String((m as { ce?: string }).ce ?? '').slice(0, 200) }))
-        .slice(0, 12),
-      ton: String(f.ton ?? '').slice(0, 200),
-      tokeni,
-      costUsd: Math.round(((tokeni * USD_1M_TOKENI_VIDEO) / 1_000_000) * 10000) / 10000,
-      plafonAtins: false, // durata reală n-o știm fără metadata clipului — plafonul e în cerere; nu declarăm ce n-am măsurat
-    }
+    if (lines.length) return { text: lines.join('\n').slice(0, 120_000), clipped }
   } catch {
-    return { error: `vede_video JSON rupt (${text.length} caractere)` }
+    // Some caption endpoints ignore fmt=json3; parse the XML form below.
+  }
+  const lines = [...raw.matchAll(/<text\s+start="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g)]
+  const selected: string[] = []
+  let clipped = false
+  for (const match of lines) {
+    const second = Number(match[1])
+    if (second > VEDE_VIDEO_MAX_S) { clipped = true; break }
+    const text = plainText(match[2])
+    if (text) selected.push(`[${Math.floor(second / 60)}:${String(Math.floor(second % 60)).padStart(2, '0')}] ${text}`)
+  }
+  return selected.length ? { text: selected.join('\n').slice(0, 120_000), clipped } : { error: 'vede_video_transcript_gol' }
+}
+
+const PROMPT_FISA =
+  'Întoarce STRICT JSON cu forma {"titlu":string,"idei":string[],"informatii":string[],' +
+  '"momente":[{"la":string,"ce":string}],"ton":string}. Scrie în română. ' +
+  'Folosește numai transcriptul și miniatura furnizate; nu inventa scene sau fapte nevăzute.'
+
+function parseJsonObject(text: string): Partial<FisaVideo> | null {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  try { return JSON.parse(text.slice(start, end + 1)) as Partial<FisaVideo> } catch { return null }
+}
+
+/** Analyze a YouTube caption transcript plus its public thumbnail with Responses. */
+export async function vedeVideoYoutube(url: string, userEmail = 'system'): Promise<FisaVideo | { error: string }> {
+  const clean = String(url ?? '').trim()
+  const id = youtubeId(clean)
+  if (!id) return { error: 'link_nesuportat_inca: este acceptat doar un link YouTube valid' }
+  if (!config.openai.key) return { error: 'fara_cheie_openai' }
+  const transcript = await youtubeTranscript(clean)
+  if ('error' in transcript) return transcript
+  const messages: OrMessage[] = [{
+    role: 'user',
+    content: [
+      { type: 'text', text: `${PROMPT_FISA}\n\nTRANSCRIPT CU TIMPI:\n${transcript.text}` },
+      { type: 'image_url', image_url: { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` } },
+    ],
+  }]
+  let response
+  try {
+    response = await rationeazaMesaje(messages, {
+      ruta: 'service.vedeVideo',
+      treapta: 'lucru',
+      reasoning: 'medium',
+      maxTokens: 4096,
+      tools: [],
+      usageContext: { userEmail, surface: 'video_transcript_analysis' },
+    })
+  } catch (error) {
+    return { error: `vede_video creier: ${String(error).slice(0, 160)}` }
+  }
+  const parsed = parseJsonObject(response.text)
+  if (!parsed || !Array.isArray(parsed.idei) || parsed.idei.length === 0) {
+    return { error: 'vede_video: creierul a răspuns fără idei — fișa nu se inventează' }
+  }
+  return {
+    titlu: String(parsed.titlu ?? '').slice(0, 200),
+    idei: parsed.idei.map((item) => String(item).slice(0, 300)).slice(0, 10),
+    informatii: (Array.isArray(parsed.informatii) ? parsed.informatii : []).map((item) => String(item).slice(0, 300)).slice(0, 15),
+    momente: (Array.isArray(parsed.momente) ? parsed.momente : []).map((item) => ({
+      la: String(item?.la ?? '').slice(0, 10),
+      ce: String(item?.ce ?? '').slice(0, 200),
+    })).slice(0, 12),
+    ton: String(parsed.ton ?? '').slice(0, 200),
+    tokeni: response.inputTokens + response.outputTokens,
+    costUsd: response.costUsd,
+    plafonAtins: transcript.clipped,
   }
 }
 
-/** Fișa, gata de pus în chat/catalog — text compact, cu momente și sursă. */
-export function fisaCaText(url: string, f: FisaVideo): string {
-  const momente = f.momente.map((m) => `  ${m.la} — ${m.ce}`).join('\n')
+export function fisaCaText(url: string, fisa: FisaVideo): string {
+  const moments = fisa.momente.map((moment) => `  ${moment.la} — ${moment.ce}`).join('\n')
   return (
-    `FIȘA CLIPULUI: ${f.titlu}\nSursa: ${url}\n\nIDEI PRINCIPALE:\n${f.idei.map((i) => `  • ${i}`).join('\n')}` +
-    (f.informatii.length ? `\n\nINFORMAȚII CONCRETE:\n${f.informatii.map((i) => `  • ${i}`).join('\n')}` : '') +
-    (momente ? `\n\nMOMENTE CHEIE:\n${momente}` : '') +
-    (f.ton ? `\n\nTON: ${f.ton}` : '')
+    `FIȘA CLIPULUI: ${fisa.titlu}\nSursa: ${url}\n\nIDEI PRINCIPALE:\n${fisa.idei.map((idea) => `  • ${idea}`).join('\n')}` +
+    (fisa.informatii.length ? `\n\nINFORMAȚII CONCRETE:\n${fisa.informatii.map((info) => `  • ${info}`).join('\n')}` : '') +
+    (moments ? `\n\nMOMENTE CHEIE:\n${moments}` : '') +
+    (fisa.ton ? `\n\nTON: ${fisa.ton}` : '')
   )
 }

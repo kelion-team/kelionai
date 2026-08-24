@@ -1,5 +1,6 @@
 import type { Tool } from './brain-types.js'
 import { config } from '../config.js'
+import { rationeaza } from './creierRationament.js'
 
 // Google skills exposed to the brain as tools. The brain decides when to call them;
 // the backend executes the Google REST API with the user's OAuth access token
@@ -555,7 +556,7 @@ export async function reverseGeocodeInfo(lat: number, lon: number): Promise<GeoP
     u.searchParams.set('zoom', '18')
     u.searchParams.set('addressdetails', '1')
     const res = await tfetch(u, {
-      headers: { 'User-Agent': 'KelionAI/1.0 (kelionai.app)' },
+      headers: { 'User-Agent': config.httpUserAgent },
       signal: AbortSignal.timeout(4000),
     })
     if (!res.ok) {
@@ -741,15 +742,11 @@ async function readEmail(query: string, token: string): Promise<string> {
   body = body.replace(/&nbsp;/g, ' ').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 6000)
   return JSON.stringify({ found: true, from: h('From'), subject: h('Subject'), date: h('Date'), body: body || m.snippet || '' })
 }
-// ── SERPER (google.serper.dev) — the PRIMARY web search ──────────────────────
-// The key existed in config (SERPER_API_KEY/SERPER_KEY) since Jul 30 but NO code
-// read it — web_search went only through the OpenRouter `web` plugin, whose free
-// model returns content:null (degenerate reasoning loop, live-proven Aug 2026)
-// → the user always got search_unavailable while a paid Serper key sat unused.
-// Serper gives REAL Google results: answerBox + knowledgeGraph + peopleAlsoAsk +
+// ── SERPER — the configured web search integration ──────────────────────────
+// Serper gives Google results: answerBox + knowledgeGraph + peopleAlsoAsk +
 // organic links + fresh news + relatedSearches. On ANY failure (missing/invalid
 // key, quota, network) we answer an honest `search_unavailable` — Serper is the
-// ONLY engine (OpenRouter extirpat, 3 aug).
+// only configured engine.
 interface SerperHit {
   title?: string
   link?: string
@@ -806,7 +803,7 @@ export function composeSerperResult(j: SerperJson, n: number): string | null {
 // endpoint — cererea (cheie, headere, num plafonat 1..12, timeout) e una.
 async function serperPost(endpoint: 'search' | 'videos', query: string, n: number): Promise<Response> {
   return tfetch(
-    `https://google.serper.dev/${endpoint}`,
+    `${config.endpoints.serperApiBase}/${endpoint}`,
     {
       method: 'POST',
       headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
@@ -828,8 +825,7 @@ async function serperSearch(query: string, n: number): Promise<string | null> {
   }
 }
 
-// YouTube videos through Serper's dedicated /videos endpoint — REAL Google video
-// results (title + link), no OpenRouter dependency. Same failure contract as
+// YouTube videos through Serper's dedicated /videos endpoint. Same failure contract as
 // serperSearch: missing/invalid key, quota, non-ok or network → [] so
 // youtube_search can honestly report "search_unavailable" instead of "no videos".
 async function serperVideos(query: string, n: number): Promise<{ title: string; url: string }[]> {
@@ -846,16 +842,10 @@ async function serperVideos(query: string, n: number): Promise<{ title: string; 
   }
 }
 
-// (composeOpenrouterFallback a fost ȘTERS aici, 3 aug — extirparea totală
-// OpenRouter: nu mai există niciun fallback de căutare pe alt furnizor.
-// Serper e SINGURUL motor; dacă pică, spunem cinstit `search_unavailable`.)
-
 export async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
-  // SERPER ONLY (Adrian, 3 aug: OpenRouter scos TOTAL din aplicație). Serper dă
-  // rezultate Google reale; dacă pică (cheie lipsă / cotă / rețea), spunem cinstit
-  // că nu putem căuta acum — NU mai cădem pe pluginul web OpenRouter (eliminat).
+  // Missing credentials, quota or network failures are reported honestly.
   const viaSerper = await serperSearch(query, n)
   if (viaSerper) return viaSerper
   // P28 (auditul aplicațiilor): eticheta seacă nu spunea CE lipsește — acum
@@ -1569,13 +1559,13 @@ async function addContact(name: string, email: string, phone: string, token: str
 
 // ── Keyless / shared-key skills (no user OAuth token needed) ──
 
-const OSM_UA = 'KelionAI/1.0 (kelionai.app)'
+const OSM_UA = config.httpUserAgent
 
 // Wikimedia blocks datacenter IPs (our VPS is Contabo) UNLESS the User-Agent
 // carries real contact info, per https://meta.wikimedia.org/wiki/User-Agent_policy.
-// The bare "(kelionai.app)" form gets a hard 403 ("Contabo networks are
+// A generic user agent without contact information can receive a hard 403
 // forbidden due to abuse") → wikipedia_lookup always answered not_found.
-const WIKIPEDIA_UA = 'KelionAI/1.0 (https://kelionai.app; contact@kelion.ai)'
+const WIKIPEDIA_UA = `${config.httpUserAgent}; ${config.product.supportEmail}`
 
 interface NominatimPlace {
   display_name?: string
@@ -1847,7 +1837,7 @@ export function extractYoutubeCandidates(
 export async function youtubeSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 10)
-  // Through Serper's /videos endpoint — REAL Google video results, no OpenRouter.
+  // Through Serper's /videos endpoint.
   const sources = await serperVideos(query, 10)
   // The search backend itself failed (missing key, quota, non-ok or network →
   // no sources). "I could not search" and "no videos exist" are different truths
@@ -1875,28 +1865,17 @@ export async function youtubeSearch(query: string, max: number): Promise<string>
 }
 async function translateText(text: string, target: string): Promise<string> {
   if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
-  // GEMINI-ONLY (3 aug — ramura de rezervă OpenRouter a fost extirpată): fără
-  // cheie Gemini nu există traducător, și o spunem cinstit (regula #1 — nu
-  // simulăm un serviciu care nu e configurat).
-  if (!config.geminiKey) return JSON.stringify({ error: 'translate_not_configured' })
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
-  const res = await tfetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            { text: `Translate the following text into ${target}. Return ONLY the translation:\n\n${text}` },
-          ],
-        },
-      ],
-      generationConfig: { temperature: 0, maxOutputTokens: 1024 },
-    }),
-  })
-  if (!res.ok) return JSON.stringify({ error: `translate_http_${res.status}` })
-  const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
-  const out = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+  if (!config.openai.key) return JSON.stringify({ error: 'translate_not_configured' })
+  const out = await rationeaza(
+    `Translate the following text into ${target}. Return ONLY the translation:\n\n${text}`,
+    {
+      ruta: 'service.google.translateText',
+      treapta: 'rapid',
+      reasoning: 'low',
+      temperature: 0,
+      maxTokens: 2048,
+    },
+  ).catch(() => '')
   // An EMPTY answer is NOT a translation — the old code returned
   // { translation: "" }, which the caller could not tell apart from success.
   if (!out) return JSON.stringify({ error: 'translate_empty' })
@@ -1906,7 +1885,7 @@ async function translateText(text: string, target: string): Promise<string> {
 // BULK TRANSLATION (Adrian, Jul 10: "a button that translates into Romanian
 // instantly from any language" — in the admin conversation viewer). Translates
 // a LIST of messages into `target`, in parallel; if one translation fails
-// (Gemini unconfigured or an error), it returns the ORIGINAL text for that
+// (provider unconfigured or an error), it returns the ORIGINAL text for that
 // message — nothing is lost — and counts it in `failed`, so the admin SEES
 // that part of the "translation" is actually untranslated original, instead
 // of silently believing everything was translated.

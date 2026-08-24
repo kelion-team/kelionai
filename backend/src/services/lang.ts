@@ -216,19 +216,3 @@ export function trackSpeechLang(
   pendingSwitch.set(email, seed)
   return null
 }
-
-/**
- * The guardian verdict for a produced reply against the user's SET language.
- * Returns 'ok' (matches or nothing to judge), or 'wrong' with the detected
- * language when it is confidently a DIFFERENT language.
- */
-export function checkLang(
-  text: string,
-  setLangTag: string | null | undefined,
-): { ok: true } | { ok: false; detected: string } {
-  const want = primaryLang(setLangTag)
-  if (!want) return { ok: true } // no established language → nothing to enforce
-  const got = detectLang(text)
-  if (got && got !== want) return { ok: false, detected: got }
-  return { ok: true }
-}

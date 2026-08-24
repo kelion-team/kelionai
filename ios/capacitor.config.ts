@@ -1,17 +1,18 @@
 import type { CapacitorConfig } from '@capacitor/cli'
+import { readFileSync } from 'node:fs'
 
-// Kelionai iOS — the same thin-shell architecture as Windows/Android: the
-// native app loads the LIVE web app, so every deploy reaches iPhone users
-// instantly with no App Store re-submission. Only the shell (icon, permissions)
-// ever needs a rebuild.
+const product = JSON.parse(readFileSync(new URL('../config/product.json', import.meta.url), 'utf8')) as Record<string, unknown>
+if (typeof product.iosBundleId !== 'string' || typeof product.appName !== 'string') {
+  throw new Error('config/product.json nu definește identitatea iOS')
+}
+
+// Bundle-ul web este construit și copiat local înainte de `cap sync`. Nu seta
+// `server.url`/`allowNavigation`: acestea ar muta tot codul de încredere într-o
+// pagină remote și ar permite autentificarea Google în WKWebView.
 const config: CapacitorConfig = {
-  appId: 'app.kelionai.ios',
-  appName: 'Kelionai',
-  webDir: 'www',
-  server: {
-    url: 'https://kelionai.app',
-    allowNavigation: ['kelionai.app', 'accounts.google.com'],
-  },
+  appId: product.iosBundleId,
+  appName: product.appName,
+  webDir: 'native-dist',
   ios: {
     contentInset: 'automatic',
     backgroundColor: '#0b0a14',

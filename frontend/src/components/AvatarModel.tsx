@@ -5,7 +5,7 @@ import { LoopOnce, LoopRepeat, LoadingManager } from 'three'
 import { GLTFLoader } from 'three-stdlib'
 import type { Group, Bone, Mesh, SkinnedMesh, AnimationClip, AnimationAction } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
-import { useFacialQueue, useEmotiePersistenta, type FacialLabel } from '../lib/facialQueue'
+import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
 import { fetchDisabledGestures } from '../lib/gestures'
 
 // ── FACIAL EXPRESSIONS (ARKit blendshapes) — kept from the constructor's "avatar
@@ -74,7 +74,7 @@ const ARM_REST: Record<string, { x: number; y: number; z: number }> = {
 // written code, lesson #125). The direction picks the clip by what Kelion does NOW:
 //   • silent → "idle" looping + every now and then a variation (once), so he doesn't
 //     look like a robot repeating the same loop forever;
-//   • speaking (the REAL level of the Chirp 3 voice, not an assumption) → a talking
+//   • speaking (nivelul real al vocii redate, nu o presupunere) → animație de vorbire
 //     clip with gestures, chosen randomly on each reply, looping while he speaks;
 //   • gesture on command → the `kelion-gesture` event (detail: the clip name)
 //     runs any clip from the direction ONCE — the channel through which the brain
@@ -242,14 +242,6 @@ export default function AvatarModel() {
   useFacialQueue((label) => {
     face.current = { label, t: 0 }
   })
-  // ── EMOȚIA PERSISTENTĂ (owner, 23 aug 2026) — stratul de BAZĂ al feței.
-  //    Sta pe față cât timp emoția e activă (nu e micro-expresie de 2.45s).
-  //    Neted: trece smooth de la o expresie la alta (lerp 0.5s).
-  const emotieBase = useRef<{ label: FacialLabel | null; weight: number }>({ label: null, weight: 0 })
-  useEmotiePersistenta((label) => {
-    emotieBase.current.label = label
-  })
-
   const play = (name: string, once = false, fade = 0.35, timeScale = 1): void => {
     const lazy = lazyClips.current[name]
     const next = actions[name] ?? (lazy && root.current ? mixer.clipAction(lazy, root.current) : null)
@@ -466,7 +458,7 @@ export default function AvatarModel() {
       }
     }
 
-    // Lip-sync — the mouth follows the real amplitude of the voice playing now (Chirp
+    // Lip-sync — gura urmărește amplitudinea reală a vocii redate acum
     // 3), smoothed like the blink; MODERATE opening (Adrian once complained that
     // gura se deschide prea mult).
     // Netezire pe DELTA, nu factor fix pe cadru (owner, 13 aug — desincronizarea
@@ -503,24 +495,6 @@ export default function AvatarModel() {
       for (const k of FACE_KEYS) {
         const idx = d[k] ?? d[MORPH_ALT[k] ?? '']
         if (idx !== undefined) inf[idx] = 0
-      }
-
-      // ── EMOȚIA PERSISTENTĂ (stratul de BAZĂ) — aplicată ÎNAINTE de
-      //    micro-expresii. Sta pe față cât timp emoția e activă.
-      //    Tranziție smooth: weight urcă spre 1 cu lerp (0.5s ~ 30 frame-uri).
-      const eb = emotieBase.current
-      if (eb.label) {
-        eb.weight = Math.min(1, eb.weight + delta * 2) // smooth in ~0.5s
-        const baseTargets = FACE_EXPRESSIONS[eb.label]
-        if (baseTargets) {
-          for (const [k, v] of Object.entries(baseTargets)) {
-            if (v === undefined || k === 'jawOpen') continue
-            const idx = d[k] ?? d[MORPH_ALT[k] ?? '']
-            if (idx !== undefined) inf[idx] = v * eb.weight
-          }
-        }
-      } else {
-        eb.weight = Math.max(0, eb.weight - delta * 2) // smooth out ~0.5s
       }
 
       // Voice always has priority on the mouth; the expression only complements.

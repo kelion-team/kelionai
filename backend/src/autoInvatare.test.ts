@@ -58,9 +58,12 @@ describe('auto-învățare — cablarea (măsoară + învață în spate, invizi
     expect(/recordTiming\(\{[^}]*kind: 'chat'[^}]*ok: true/.test(chat)).toBe(true)
     expect(/recordTiming\(\{[^}]*ok: false/.test(chat)).toBe(true)
   })
-  it('registrul există în schemă, iar bucla din spate pornește la boot', () => {
-    expect(sursa('./db.ts').includes('CREATE TABLE IF NOT EXISTS task_timings')).toBe(true)
-    expect(sursa('./index.ts').includes('startAutoInvatare()')).toBe(true)
+  it('registrul există în migrarea canonică, iar bucla pornește numai cu efectele release-ului active', () => {
+    const schema = sursa('../migrations/20260824_base_schema.sql')
+    const index = sursa('./index.ts')
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS task_timings')
+    expect(index).toMatch(/const startBackgroundWork = \(\): void => \{[\s\S]*startAutoInvatare\(\)/)
+    expect(index).toContain('releaseSideEffectsEnabled()')
   })
   it('bucla scrie în spate (kv_state + memoria creierului), nu pe interfață', () => {
     const inv = sursa('./services/autoInvatare.ts')
@@ -69,7 +72,6 @@ describe('auto-învățare — cablarea (măsoară + învață în spate, invizi
   })
 
   it('bucla e ÎNCHISĂ: lecțiile intră automat în contextul creierului admin', () => {
-    // Aprobat de Adrian, 3 aug. Fără pasul ăsta, timpii nu scad singuri.
     const chat = sursa('./routes/chat.ts')
     expect(/isAdminUser[\s\S]{0,200}lectiiCurente\(\)/.test(chat)).toBe(true)
   })

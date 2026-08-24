@@ -11,9 +11,10 @@ const require = createRequire(path.join(ROOT, 'backend/package.json'))
 const jwt = require('jsonwebtoken')
 const target = process.env.KELION_LIVE_URL || 'http://127.0.0.1:8080'
 const sessionSecret = process.env.SESSION_SECRET || ''
-const adminEmail = (process.env.ADMIN_EMAIL || 'adrianenc11@gmail.com').trim()
+const adminEmail = (process.env.ADMIN_EMAIL || '').trim()
 const output = path.resolve(process.argv[2] || '/root/kelion/audit-results/chat-live-probes.json')
 if (!sessionSecret) throw new Error('SESSION_SECRET lipsește din mediul probei')
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) throw new Error('ADMIN_EMAIL valid lipsește din mediul probei')
 
 const token = jwt.sign(
   { email: adminEmail, name: 'Audit live', picture: '', role: 'admin', locale: 'ro' },

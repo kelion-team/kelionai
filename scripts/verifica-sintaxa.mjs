@@ -12,17 +12,35 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
-const SARI = new Set(['node_modules', 'dist', '.git', '.jscpd', 'coverage'])
+const SARI = new Set(['node_modules', 'dist', '.git', '.jscpd', '.gradle', 'coverage', 'target'])
 const probleme = []
 
-function fisiere(dir, ext, out = []) {
+function fisiereFallback(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (SARI.has(e.name)) continue
     const p = path.join(dir, e.name)
-    if (e.isDirectory()) fisiere(p, ext, out)
-    else if (ext.some((x) => e.name.endsWith(x))) out.push(p)
+    if (e.isDirectory()) fisiereFallback(p, out)
+    else out.push(p)
   }
   return out
+}
+
+// O singură enumerare a snapshotului Git. Versiunea veche parcurgea tot arborele
+// de patru ori și intra inclusiv în cache-uri native ignorate; pe Windows dura
+// aproape un minut. `--cached --others --exclude-standard` acoperă exact ce poate
+// ajunge într-un commit (tracked + fișiere noi neignorate), inclusiv .github.
+function listaFisiereRepo() {
+  try {
+    const raw = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
+    return raw.toString('utf8').split('\0').filter((f) => f && fs.existsSync(f) && fs.statSync(f).isFile())
+  } catch {
+    return fisiereFallback('.')
+  }
+}
+
+const FISIERE_REPO = listaFisiereRepo()
+function fisiere(_dir, ext) {
+  return FISIERE_REPO.filter((f) => ext.some((x) => f.endsWith(x)))
 }
 
 // ── JSON ─────────────────────────────────────────────────────────────────────
@@ -85,21 +103,27 @@ for (const f of fisiere('.', ['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.c
 // ── SHELL (.sh) — sintaxă REALĂ, prin `bash -n` ──────────────────────────────
 //
 // DE CE (16 aug, greșeala mea prinsă de constructor pe VPS, nu de poartă): o
-// ghilimea neînchisă în deploy/setup-ollama.sh (`echo "… ($MODEL)" verde."`) a
+// O ghilimea neînchisă într-un script shell poate invalida întregul deploy și
 // rupt instalarea creierului local — „unexpected EOF while looking for matching `"`".
 // tsc nu vede .sh, iar verificarea de echilibru simplu n-o prindea (ghilimelele
 // erau PARE). `bash -n` compilează scriptul fără să-l ruleze și prinde exact clasa
 // asta. Gardat: dacă bash lipsește din mediu, sărim (nu dăm alarme false).
-let bashDisponibil = true
-try {
-  execFileSync('bash', ['-c', 'true'], { stdio: 'ignore' })
-} catch {
-  bashDisponibil = false
+// Pe Windows, aliasul Microsoft Store/WSL pentru `bash` poate aștepta aproape
+// un minut înainte să eșueze. Shell-urile sunt compilate în CI Linux; local le
+// verificăm doar dacă operatorul indică explicit un executabil Bash real.
+const bashExecutabil = process.env.KELION_BASH_EXE || (process.platform === 'win32' ? '' : 'bash')
+let bashDisponibil = Boolean(bashExecutabil)
+if (bashDisponibil) {
+  try {
+    execFileSync(bashExecutabil, ['-c', 'true'], { stdio: 'ignore' })
+  } catch {
+    bashDisponibil = false
+  }
 }
 if (bashDisponibil) {
   for (const f of fisiere('.', ['.sh'])) {
     try {
-      execFileSync('bash', ['-n', f], { stdio: 'pipe' })
+      execFileSync(bashExecutabil, ['-n', f], { stdio: 'pipe' })
     } catch (e) {
       const msg = String(e.stderr || e.message || e)
         .replace(/\s+/g, ' ')

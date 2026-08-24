@@ -6,15 +6,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 // se scrie DOAR după ce creditul chiar a intrat.
 
 const kv = new Map<string, string>()
-const acordate: { email: string; suma: number }[] = []
+const acordate: { email: string; sumaMinor: number; ref: string }[] = []
 
 vi.mock('./db.js', () => ({
   loadKv: async (k: string) => kv.get(k) ?? null,
   saveKv: async (k: string, v: string) => {
     kv.set(k, v)
   },
-  grantCredit: async (email: string, suma: number) => {
-    acordate.push({ email, suma })
+  grantCreditMinor: async (email: string, sumaMinor: number, ref: string) => {
+    acordate.push({ email, sumaMinor, ref })
+    return true
   },
 }))
 
@@ -32,7 +33,8 @@ describe('creditul de bun-venit — o gustare, nu un robinet', () => {
     const dat = await acordaBunVenit('client@example.com')
     expect(dat).toBe(true)
     expect(acordate).toHaveLength(1)
-    expect(acordate[0].suma).toBeCloseTo(3 * config.billing.creditValue)
+    expect(acordate[0].sumaMinor).toBe(3 * config.billing.creditMinor)
+    expect(acordate[0].ref).toBe('welcome:client@example.com')
     expect(kv.has('bunvenit:client@example.com')).toBe(true)
   })
 
@@ -54,7 +56,7 @@ describe('creditul de bun-venit — o gustare, nu un robinet', () => {
   it('mărimea e reglabilă din env, fără deploy', async () => {
     process.env.CREDITE_BUN_VENIT = '10'
     await acordaBunVenit('generos@example.com')
-    expect(acordate[0].suma).toBeCloseTo(10 * config.billing.creditValue)
+    expect(acordate[0].sumaMinor).toBe(10 * config.billing.creditMinor)
   })
 
   it('ownerul NU primește cadou (e scutit de plată oricum)', async () => {

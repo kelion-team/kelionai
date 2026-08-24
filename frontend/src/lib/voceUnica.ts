@@ -3,7 +3,7 @@
 //
 // Boala, măsurată din captura ownerului: DOUĂ taburi Kelionai deschise,
 // amândouă cu microfonul aprins. Zăvorul vechi (BroadcastChannel din
-// realtimeVoice) acoperea DOAR sesiunea live: când tabul nou o prelua, tabul
+// acoperea DOAR sesiunea live: când tabul nou o prelua, tabul
 // vechi cădea pe dictarea de rezervă (alt drum, nesupravegheat) și vorbeau
 // amândouă — una cu vocea bună, una cu cea robotică. Iar revenirea singură a
 // vocii (4 aug) făcea ping-pong între taburi la nesfârșit.
@@ -15,7 +15,7 @@
 // singur. Apăsarea manuală pe microfon ridică zăvorul oriunde.
 //
 // Canalul e ACELAȘI cu al sesiunii live ('kelion-voice'): mesajul {takeover}
-// al sesiunii oprește sesiunile vechi (garda din realtimeVoice), iar panoul
+// al sesiunii oprește sesiunile vechi, iar panoul
 // îl aude și el și zăvorăște TOT lanțul vocii, nu doar sesiunea.
 
 export interface MesajVoce {
@@ -42,7 +42,7 @@ export function deschideCanalVoce(): BroadcastChannel | null {
   try {
     return new BroadcastChannel(CANAL_VOCE)
   } catch {
-    return null // browser vechi — rămâne doar garda din realtimeVoice
+    return null // browser vechi — rămâne garda clientului vocal
   }
 }
 
@@ -72,14 +72,3 @@ export function inimaAMurit(ultimaInimaLa: number, acum: number): boolean {
 export function emiteTakeover(bc: BroadcastChannel | null, eu: string): void {
   bc?.postMessage({ takeover: eu })
 }
-
-/** Emite bătaie de inimă pentru tabul activ */
-export function emiteInima(bc: BroadcastChannel | null, eu: string): void {
-  bc?.postMessage({ inima: eu })
-}
-
-/** Emite rămas bun la închiderea tabului activ */
-export function emiteRamasBun(bc: BroadcastChannel | null, eu: string): void {
-  bc?.postMessage({ ramasBun: eu })
-}
-

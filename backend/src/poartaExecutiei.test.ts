@@ -17,7 +17,7 @@ const sursa = (cale: string): string =>
 
 const orch = sursa('./services/orchestrator.ts')
 const chat = sursa('./routes/chat.ts')
-const gemini = sursa('./services/geminiDirect.ts')
+const responses = sursa('./services/openaiResponses.ts')
 
 describe('AFIȘARE ≠ FAPTĂ: gărzile se uită la execuție, nu la „a chemat ceva"', () => {
   it('orchestratorul urmărește separat uneltele de FAPTĂ (nu doar afișare)', () => {
@@ -63,8 +63,9 @@ describe('FORȚARE îngustă: obligat la o unealtă de EXECUȚIE pe turele de ac
     expect(chat).toMatch(/uneltAfisaj: UNELTE_AFISAJ/)
     expect(chat).toMatch(/actiuneCeruta: forteazaFapta/)
   })
-  it('geminiDirect trimite allowedFunctionNames pe modul ANY', () => {
-    expect(gemini).toMatch(/fcc\.allowedFunctionNames = opts\.allowedFunctionNames/)
+  it('adaptorul Responses aplică allowedFunctionNames pe modul required', () => {
+    expect(responses).toMatch(/const allowed = hasExplicitAllowlist \? new Set\(opts\.allowedFunctionNames\) : null/)
+    expect(responses).toContain('openai_required_tool_allowlist_empty')
     expect(orch).toMatch(/const allowedFunctionNames =\s*\n\s*toolChoice === 'required'/)
   })
 })

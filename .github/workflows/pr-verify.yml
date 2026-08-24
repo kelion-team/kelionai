@@ -1,68 +1,379 @@
-# VERIFICARE INFORMATIVĂ A PR-URILOR — 25 iul 2026.
-#
-# ORDINUL LUI ADRIAN („ridici absolut toate restricțiile lui Kelion"): această
-# verificare NU blochează nimic — Kelion își dă merge fără să aștepte după ea
-# (repo_merge_pr doar raportează rezultatul ei, informativ). Există ca să
-# existe FAPTE (build + teste) lângă fiecare PR, pentru Kelion și pentru Adrian.
 name: pr-verify
 
 on:
   pull_request:
     branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-verify-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   verify:
-    # OPRIT PÂNĂ SE DEBLOCHEAZĂ ACTIONS — vezi explicația măsurată din
-    # gemini-lock.yml (run 31223561134: `runner_id: 0`, 3 secunde, loguri 404 —
-    # niciun runner alocat). Aceleași porți rulează pe VPS (deploy/porti-pr.sh) și
-    # de acum urcă verdictul și ca stare de commit („porti-vps"), deci PR-ul arată
-    # ce e cu adevărat. Reaprindere: variabila de repo ACTIONS_PORNIT = true.
-    if: ${{ vars.ACTIONS_PORNIT == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - name: Backend — typecheck + teste
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Backend
         run: |
           cd backend
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run typecheck
           npm test
-      - name: Frontend — build
+          ./node_modules/.bin/oxlint --deny no-unused-vars
+
+      - name: Frontend
         run: |
           cd frontend
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run build
-      # ── CELE TREI ZERO-URI (Adrian, 30 iul: „0 cod duplicat, 0 cod abandonat" +
-      # „caut în tot softul acolade, ghilimele sau alte semne greșit puse") ──────
-      # Toate trei sunt INFORMATIVE (nu blochează merge-ul — ordinul „CI informativ"),
-      # dar se fac ROȘII imediat ce cifra se strică. Fiecare a fost DOVEDITĂ prin
-      # test cu greșeală intenționată: prinde, iar pe cod curat trece.
-      #
-      # 1. DUPLICAT = 0. Pragul 0,0001% e practic zero-toleranță (testat: o clonă
-      #    de 10 linii → exit 1; codul curat → exit 0). Un prag mai mare NU prindea
-      #    clonele mici: la 0,1%, două clone reale treceau verde.
-      - name: Cod duplicat (jscpd) — ținta 0
-        continue-on-error: true
-        run: npx --yes jscpd --threshold 0.0001
-      # 2. ABANDONAT = 0. Importuri, variabile, funcții și tipuri nefolosite —
-      #    exact ce lasă în urmă o refactorare grăbită (au fost 56 pe 30 iul).
-      - name: Cod abandonat (oxlint) — ținta 0
-        continue-on-error: true
-        run: |
-          cd backend && npx oxlint --deny no-unused-vars
+          npm run lint
+          npm test
 
-      # oxlint vede doar ÎN fișier. Codul mort care contează sunt EXPORTURILE pe
-      # care nu le importă nimeni — 16 găsite la auditul din 29 iul, toate „verzi"
-      # până atunci fiindcă nicio poartă nu se uita acolo.
-      - name: Exporturi fără utilizator — ținta 0
-        continue-on-error: true
-        run: node scripts/verifica-exporturi.mjs
-      # 3. SEMNE GREȘIT PUSE = 0. `tsc` acoperă .ts/.tsx, dar CSS-ul și JSON-ul nu
-      #    sunt verificate de nimeni: un `}` în plus în CSS strică tăcut restul
-      #    foii de stil, iar un JSON rupt oprește pornirea abia în producție.
-      - name: Sintaxă CSS + JSON (acolade, ghilimele)
-        continue-on-error: true
-        run: node scripts/verifica-sintaxa.mjs
+      - name: Teste pentru porțile statice
+        run: |
+          node --test \
+            scripts/verifica-butoane.test.mjs \
+            scripts/verifica-exporturi.test.mjs \
+            scripts/verifica-hardcodari.test.mjs \
+            scripts/verifica-migrari.test.mjs \
+            scripts/inventar-audit.test.mjs \
+            scripts/verifica-contract-deploy.test.mjs \
+            ios/appstore-build.test.mjs \
+            deploy/lib/create-migration-proof.test.mjs \
+            deploy/lib/caddy-security.test.mjs \
+            deploy/lib/codex-boundary.test.mjs \
+            deploy/lib/constructor-publication.test.mjs \
+            deploy/lib/network-config.test.mjs \
+            deploy/lib/compose-security.test.mjs \
+            deploy/lib/security-policy.test.mjs
+
+      - name: Suprafață și contracte
+        run: |
+          node scripts/verifica-exporturi.mjs
+          node scripts/identifica-teste-moarte.mjs
+          node scripts/verifica-sintaxa.mjs
+          node scripts/verifica-hardcodari.mjs
+          node scripts/verifica-creier-unic.mjs
+          node scripts/verifica-workflow-uri-sigure.mjs
+          node scripts/verifica-migrari.mjs
+          node scripts/inventar-audit.mjs
+          node scripts/verifica-contract-deploy.mjs
+          node scripts/verifica-clienti-nativi.mjs
+          node scripts/verifica-butoane.mjs
+          node deploy/codex-worker.mjs --self-test
+          node deploy/constructor-publisher.mjs --self-test
+          node deploy/constructor-release.mjs --self-test
+
+      - name: Secrete în snapshot și bundle
+        run: bash scripts/verifica-secrete.sh --worktree --dist
+
+      - name: Duplicări
+        run: npx --yes jscpd@5.0.16 --config .jscpd.json --threshold 0 --cross-formats js-ts
+
+  container-isolation:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Construiește imaginile fixate
+        run: |
+          set -euo pipefail
+          docker build --tag kelion-ci-app:${GITHUB_SHA} .
+          docker build --file Dockerfile.browser --target worker --tag kelion-ci-browser:${GITHUB_SHA} .
+          docker build --file Dockerfile.browser --target egress --tag kelion-ci-browser-egress:${GITHUB_SHA} .
+          docker build --file Dockerfile.converter --target gateway --tag kelion-ci-converter-gateway:${GITHUB_SHA} .
+          docker build --file Dockerfile.converter --target parser --tag kelion-ci-converter-parser:${GITHUB_SHA} .
+
+      - name: Trust boundary web și self-testuri
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --entrypoint sh kelion-ci-app:${GITHUB_SHA} -eu -c '
+            test ! -e /app/.github
+            test ! -e /app/deploy
+            test ! -e /app/scripts
+            test ! -e /opt/ms-playwright
+            test ! -e /usr/bin/python3
+          '
+          docker run --rm --network none kelion-ci-browser-egress:${GITHUB_SHA} node /opt/kelion/browser-egress-proxy.mjs --self-test
+          docker run --rm --network none \
+            -e BROWSER_PROXY_URL=http://172.29.10.3:3128 \
+            -e BROWSER_INTERNAL_SUBNET=172.29.10.0/24 \
+            kelion-ci-browser:${GITHUB_SHA} node /opt/kelion/browser-worker.mjs --self-test
+          docker run --rm --network none \
+            -e BROWSER_PROXY_URL=http://172.29.11.3:3128 \
+            -e BROWSER_INTERNAL_SUBNET=172.29.11.0/24 \
+            kelion-ci-browser:${GITHUB_SHA} node /opt/kelion/browser-worker.mjs --self-test
+          docker run --rm --network none kelion-ci-converter-gateway:${GITHUB_SHA} node /opt/kelion/converter-gateway.mjs --self-test
+          docker run --rm --network none kelion-ci-converter-parser:${GITHUB_SHA} python -I /opt/kelion/converter-parser.py --self-test
+
+      - name: Migrează, pornește aplicația reală și rulează probe adversariale
+        env:
+          KELION_APP_IMAGE: kelion-ci-app:${{ github.sha }}
+          KELION_BROWSER_IMAGE: kelion-ci-browser:${{ github.sha }}
+          KELION_BROWSER_EGRESS_IMAGE: kelion-ci-browser-egress:${{ github.sha }}
+          KELION_CONVERTER_GATEWAY_IMAGE: kelion-ci-converter-gateway:${{ github.sha }}
+          KELION_CONVERTER_PARSER_IMAGE: kelion-ci-converter-parser:${{ github.sha }}
+          KELION_RUNTIME_ROOT: /tmp/kelion-ci-runtime
+          KELION_RELEASE_STATE_ROOT: /tmp/kelion-ci-runtime/release-state
+          KELION_SECRET_ROOT: /tmp/kelion-ci-secrets
+          KELION_CONFIG_FILE: /tmp/kelion-ci-config/runtime.env
+          KELION_POSTGRES_SOCKET_ROOT: /tmp/kelion-ci-postgres/socket
+          KELION_SECCOMP_PROFILE: /tmp/kelion-ci-seccomp/playwright-seccomp-v1.62.1.json
+          KELION_BIND_PORT: "18080"
+          KELION_SLOT: ci
+          KELION_COMMIT_SHA: ${{ github.sha }}
+          KELION_BROWSER_SUBNET: 172.29.0.0/24
+          KELION_BROWSER_WORKER_IP: 172.29.0.2
+          KELION_BROWSER_PROXY_IP: 172.29.0.3
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose --project-name kelion-ci --file deploy/compose.production.yml down --volumes --remove-orphans || true
+            docker rm --force kelion-ci-postgres >/dev/null 2>&1 || true
+            docker network rm kelion-proxy >/dev/null 2>&1 || true
+            sudo rm -rf -- /tmp/kelion-ci-runtime /tmp/kelion-ci-secrets /tmp/kelion-ci-config /tmp/kelion-ci-seccomp /tmp/kelion-ci-postgres
+          }
+          trap cleanup EXIT
+          install -d -m 0700 /tmp/kelion-ci-secrets /tmp/kelion-ci-config /tmp/kelion-ci-postgres/backup
+          sudo install -d -o root -g 10050 -m 2770 \
+            /tmp/kelion-ci-runtime/browser-api \
+            /tmp/kelion-ci-runtime/browser-egress \
+            /tmp/kelion-ci-runtime/converter-api \
+            /tmp/kelion-ci-runtime/converter-private \
+            /tmp/kelion-ci-runtime/release-state \
+            /tmp/kelion-ci-seccomp
+          sudo install -d -o 999 -g 999 -m 0700 /tmp/kelion-ci-postgres/data
+          sudo install -d -o 999 -g 999 -m 0775 /tmp/kelion-ci-postgres/socket
+          umask 077
+          for name in session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret migration-backup-proof-key; do
+            openssl rand -hex 32 > "/tmp/kelion-ci-secrets/$name"
+          done
+          for name in revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
+            printf 'disabled-placeholder-%s\n' "$(openssl rand -hex 32)" > "/tmp/kelion-ci-secrets/$name"
+          done
+          printf 'sk-%s-%s\n' proj "$(openssl rand -hex 24)" > /tmp/kelion-ci-secrets/openai-project-key
+          printf '%s\n' 'postgresql://postgres@localhost/kelion_ci?host=/var/run/postgresql' > /tmp/kelion-ci-secrets/database-url
+          ci_model_prefix=$(printf '%s%s' g pt-ci)
+          cat > /tmp/kelion-ci-config/runtime.env <<ENV
+          NODE_ENV=production
+          PORT=8080
+          PUBLIC_APP_ORIGIN=https://ci.invalid
+          FRONTEND_ORIGIN=https://ci.invalid
+          ADMIN_EMAIL=owner@example.com
+          OPENAI_API_KEY_FILE=/run/secrets/openai-project-key
+          OPENAI_LUNA_MODEL=${ci_model_prefix}-luna
+          OPENAI_MEDIUM_MODEL=${ci_model_prefix}-medium
+          OPENAI_HEAVY_MODEL=${ci_model_prefix}-heavy
+          OPENAI_MAX_MODEL=${ci_model_prefix}-max
+          OPENAI_REALTIME_MODEL=${ci_model_prefix}-realtime
+          OPENAI_REALTIME_TRANSCRIPTION_MODEL=${ci_model_prefix}-realtime-transcription
+          OPENAI_CALL_TRANSCRIPTION_MODEL=${ci_model_prefix}-call-transcription
+          OPENAI_TTS_MODEL=${ci_model_prefix}-tts
+          OPENAI_IMAGE_MODEL=${ci_model_prefix}-image
+          OPENAI_VIDEO_MODEL=${ci_model_prefix}-video
+          OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND=100000
+          OPENAI_VIDEO_SHUTDOWN_AT=2099-01-01T00:00:00.000Z
+          DATABASE_URL_FILE=/run/secrets/database-url
+          SESSION_SECRET_FILE=/run/secrets/session-secret
+          GOOGLE_CLIENT_ID=ci-client.invalid
+          GOOGLE_CLIENT_SECRET_FILE=/run/secrets/google-client-secret
+          GOOGLE_TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/google-token-encryption-key
+          GOOGLE_TOKEN_ENCRYPTION_KEY_ID=ci
+          GOOGLE_REDIRECT_URI=https://ci.invalid/auth/google/callback
+          CODEX_WORKER_ENABLED=0
+          CODEX_WORKER_SECRET_FILE=/run/secrets/codex-worker-secret
+          CONSTRUCTOR_PUBLISHER_ENABLED=0
+          CONSTRUCTOR_PUBLISHER_SECRET_FILE=/run/secrets/constructor-publisher-secret
+          CONSTRUCTOR_RELEASE_ENABLED=0
+          CONSTRUCTOR_RELEASE_SECRET_FILE=/run/secrets/constructor-release-secret
+          BROWSER_WORKER_SOCKET=/run/kelion-browser-api/browser.sock
+          BROWSER_WORKER_SECRET_FILE=/run/secrets/browser-worker-secret
+          CONVERTER_WORKER_SOCKET=/run/kelion-converter-api/converter.sock
+          CONVERTER_WORKER_SECRET_FILE=/run/secrets/converter-worker-secret
+          VISITOR_CHAT_TTL_SECONDS=3600
+          VISITOR_ANALYTICS_RETENTION_DAYS=7
+          SESSION_ABSOLUTE_TTL_SECONDS=604800
+          SESSION_IDLE_TTL_SECONDS=86400
+          SESSION_TOUCH_INTERVAL_SECONDS=300
+          SESSION_MAX_ACTIVE_PER_ACCOUNT=5
+          SESSION_RECENT_REAUTH_SECONDS=600
+          NATIVE_AUTH_REQUEST_TTL_SECONDS=600
+          NATIVE_AUTH_EXCHANGE_TTL_SECONDS=120
+          NATIVE_CHANNEL_TICKET_TTL_SECONDS=30
+          OFFLINE_SYNC_MAX_TURNS=100
+          OFFLINE_SYNC_MAX_TEXT_CHARS=8000
+          OFFLINE_SYNC_MAX_AGE_DAYS=30
+          OFFLINE_SYNC_FUTURE_SKEW_SECONDS=300
+          VOCAL_LIVE_IDLE_TIMEOUT_SECONDS=600
+          PRIVACY_POLICY_UPDATED=2026-08-24
+          DATA_CONTROLLER_NAME=CI Operator
+          PRIVACY_BACKUP_RETENTION_DAYS=30
+          FINANCIAL_RETENTION_YEARS=6
+          JOURNAL_RETENTION_DAYS=30
+          MEDIA_RETENTION_DAYS=30
+          CREDIT_PRICE_MINOR=10
+          CHAT_TURN_PRICE_MINOR=1
+          CALL_UTTERANCE_PRICE_MINOR=1
+          VOICE_LIVE_MINUTE_PRICE_MINOR=2
+          BILLING_FIRST_TOPUP_MIN_MINOR=2000
+          BILLING_TOPUP_STEP_MINOR=500
+          BILLING_TOPUP_MIN_MINOR=500
+          BILLING_TOPUP_MAX_MINOR=50000
+          LOW_CREDIT_THRESHOLD_MINOR=200
+          LOW_CREDIT_TOPUP_MINOR=1000
+          PAYMENT_MODE=disabled
+          PAYMENT_CONTRACT_VERIFIED=false
+          REVOLUT_MERCHANT_API_VERSION=2026-04-20
+          REVOLUT_ORDER_EXPIRY=PT30M
+          REVOLUT_MERCHANT_SECRET_KEY_FILE=/run/secrets/revolut-merchant-secret-key
+          REVOLUT_WEBHOOK_SIGNING_SECRET_FILE=/run/secrets/revolut-webhook-signing-secret
+          PUSH_ENABLED=0
+          VAPID_PUBLIC_KEY=
+          VAPID_PRIVATE_KEY_FILE=/run/secrets/vapid-private-key
+          PUSH_ENDPOINT_HOSTS=
+          PUSH_MAX_SUBSCRIPTIONS=5
+          GOOGLE_TTS_ENABLED=false
+          SEARCH_ENABLED=false
+          MAIL_ENABLED=false
+          RELEASE_CANDIDATE_MODE=1
+          ENV
+          printf '%s\n' inactive > /tmp/kelion-ci-runtime/release-state/active
+          sudo chown root:10050 /tmp/kelion-ci-secrets /tmp/kelion-ci-secrets/* /tmp/kelion-ci-config/runtime.env /tmp/kelion-ci-runtime/release-state/active
+          sudo chmod 0750 /tmp/kelion-ci-secrets
+          sudo chmod 0440 /tmp/kelion-ci-secrets/*
+          sudo chmod 0640 /tmp/kelion-ci-config/runtime.env /tmp/kelion-ci-runtime/release-state/active
+          sudo KELION_SECCOMP_DESTINATION="$KELION_SECCOMP_PROFILE" bash deploy/pregateste-seccomp.sh
+
+          docker run --detach --name kelion-ci-postgres --network none --user 999:999 \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 128 --memory 1g --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,uid=999,gid=999 \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=kelion_ci \
+            -v /tmp/kelion-ci-postgres/data:/var/lib/postgresql/data \
+            -v /tmp/kelion-ci-postgres/socket:/var/run/postgresql \
+            postgres:16-bookworm@sha256:60f4761b9035e0b8d5218f701a8c3382f641bf12b1604822574cf5be3baeb537 >/dev/null
+          for attempt in $(seq 1 45); do
+            docker exec kelion-ci-postgres pg_isready --host=/var/run/postgresql --dbname=kelion_ci >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec kelion-ci-postgres pg_isready --host=/var/run/postgresql --dbname=kelion_ci >/dev/null
+          docker exec kelion-ci-postgres pg_dump --host=/var/run/postgresql --dbname=kelion_ci --format=custom --file=/tmp/pre-migration.dump
+          docker cp kelion-ci-postgres:/tmp/pre-migration.dump /tmp/kelion-ci-postgres/backup/pre-migration.dump
+          KELION_BACKUP_FILE=/tmp/kelion-ci-postgres/backup/pre-migration.dump \
+          KELION_DATABASE_URL_FILE=/tmp/kelion-ci-secrets/database-url \
+          KELION_PROOF_KEY_FILE=/tmp/kelion-ci-secrets/migration-backup-proof-key \
+          KELION_PROOF_OUTPUT_FILE=/tmp/kelion-ci-postgres/backup/proof.json \
+            sudo --preserve-env=KELION_BACKUP_FILE,KELION_DATABASE_URL_FILE,KELION_PROOF_KEY_FILE,KELION_PROOF_OUTPUT_FILE \
+            node deploy/lib/create-migration-proof.mjs
+          sudo chown root:10050 /tmp/kelion-ci-postgres/backup/proof.json
+          sudo chmod 0440 /tmp/kelion-ci-postgres/backup/proof.json
+          migration_output=$(docker run --rm --network none --user 1000:1000 --group-add 10050 \
+            --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 96 --memory 768m --cpus 1 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m,uid=1000,gid=1000 \
+            -e DATABASE_URL_FILE=/run/secrets/database-url \
+            -e MIGRATION_BACKUP_PROOF_FILE=/run/proof/backup.json \
+            -e MIGRATION_BACKUP_PROOF_KEY_FILE=/run/secrets/migration-backup-proof-key \
+            -v /tmp/kelion-ci-postgres/socket:/var/run/postgresql:ro \
+            -v /tmp/kelion-ci-secrets/database-url:/run/secrets/database-url:ro \
+            -v /tmp/kelion-ci-secrets/migration-backup-proof-key:/run/secrets/migration-backup-proof-key:ro \
+            -v /tmp/kelion-ci-postgres/backup/proof.json:/run/proof/backup.json:ro \
+            "$KELION_APP_IMAGE" node /app/backend/dist/migrate.js)
+          [ "$migration_output" = migrations_ok ]
+
+          docker network create --driver bridge kelion-proxy >/dev/null
+          docker compose --project-name kelion-ci --file deploy/compose.production.yml up \
+            --detach --no-build --remove-orphans --wait --wait-timeout 180
+          readiness=$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:18080/readyz)
+          jq -e '.ready == true and .checks.database == true and .checks.migrations == true and .checks.browserWorker == true and .checks.converterWorker == true and .release.candidate == true and .release.sideEffectsActive == false' <<<"$readiness" >/dev/null
+          [ "$(curl --fail --silent --show-error http://127.0.0.1:18080/api/version | jq -r .v)" = "${GITHUB_SHA:0:7}" ]
+
+          docker run --rm --network none --user 1000:1000 --group-add 10050 \
+            -v /tmp/kelion-ci-runtime/browser-api:/run/kelion-browser-api:ro \
+            -v /tmp/kelion-ci-secrets/browser-worker-secret:/run/secrets/browser-worker-secret:ro \
+            -v "$PWD/deploy:/probe:ro" \
+            node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 \
+            node /probe/probe-browser-ssrf.mjs
+          docker run --rm --network none --user 1000:1000 --group-add 10050 \
+            -v /tmp/kelion-ci-runtime/converter-private:/run/kelion-converter-private:ro \
+            -v "$PWD/deploy:/probe:ro" \
+            node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 \
+            node /probe/probe-converter-parser.mjs
+          docker run --rm --network none --user 1000:1000 --group-add 10050 \
+            -v /tmp/kelion-ci-runtime/converter-api:/run/kelion-converter-api:ro \
+            -v /tmp/kelion-ci-secrets/converter-worker-secret:/run/secrets/converter-worker-secret:ro \
+            -v "$PWD/deploy:/probe:ro" \
+            node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 \
+            node /probe/probe-converter-sandbox.mjs
+
+          mount_rw() {
+            docker inspect "$1" | jq -er --arg target "$2" '.[0].Mounts[] | select(.Destination == $target) | .RW'
+          }
+          for container in \
+            kelion-ci-browser-worker-1 \
+            kelion-ci-browser-egress-1 \
+            kelion-ci-converter-gateway-1 \
+            kelion-ci-converter-parser-1; do
+            container_user=$(docker inspect --format '{{.Config.User}}' "$container")
+            case "$container_user" in ''|0|0:*|*:0) echo "$container rulează ca root"; exit 1 ;; esac
+            [ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$container")" = true ]
+            [ "$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$container")" != host ]
+            docker inspect "$container" | jq -e '.[0].HostConfig.CapDrop | map(ascii_upcase) | index("ALL") != null' >/dev/null
+            docker inspect "$container" | jq -e '.[0].HostConfig.SecurityOpt | any(startswith("no-new-privileges"))' >/dev/null
+            [ "$(docker inspect --format '{{.HostConfig.PidsLimit}}' "$container")" -gt 0 ]
+            [ "$(docker inspect --format '{{.HostConfig.Memory}}' "$container")" -gt 0 ]
+            [ "$(docker inspect --format '{{.HostConfig.NanoCpus}}' "$container")" -gt 0 ]
+          done
+          [ "$(docker inspect --format '{{.HostConfig.NetworkMode}}' kelion-ci-converter-parser-1)" = none ]
+          [ "$(docker inspect --format '{{.HostConfig.NetworkMode}}' kelion-ci-converter-gateway-1)" = none ]
+          [ "$(mount_rw kelion-ci-browser-worker-1 /run/kelion-browser-api)" = true ]
+          [ "$(mount_rw kelion-ci-browser-worker-1 /run/kelion-browser-egress)" = false ]
+          [ "$(mount_rw kelion-ci-browser-worker-1 /run/secrets/browser-worker-secret)" = false ]
+          [ "$(mount_rw kelion-ci-browser-egress-1 /run/kelion-browser-egress)" = true ]
+          [ "$(mount_rw kelion-ci-converter-gateway-1 /run/kelion-converter-api)" = true ]
+          [ "$(mount_rw kelion-ci-converter-gateway-1 /run/kelion-converter-private)" = false ]
+          [ "$(mount_rw kelion-ci-converter-gateway-1 /run/secrets/converter-worker-secret)" = false ]
+          [ "$(mount_rw kelion-ci-converter-parser-1 /run/kelion-converter-private)" = true ]
+          [ "$(docker inspect --format '{{.Config.User}}' kelion-ci-app-1)" = 1000:1000 ]
+          [ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' kelion-ci-app-1)" = true ]
+          [ "$(docker inspect --format '{{.HostConfig.NetworkMode}}' kelion-ci-app-1)" != host ]
+          [ "$(docker inspect --format '{{len .NetworkSettings.Networks}}' kelion-ci-browser-worker-1)" = 1 ]
+          [ "$(docker inspect --format '{{len .NetworkSettings.Networks}}' kelion-ci-browser-egress-1)" = 2 ]
+          docker network inspect kelion-ci_browser-internal --format '{{.Internal}}' | grep -qx true
+          ! docker exec kelion-ci-browser-worker-1 node -e "fetch('https:'+'//example.com',{signal:AbortSignal.timeout(3000)}).then(()=>process.exit(0),()=>process.exit(1))"
+          ! docker exec kelion-ci-browser-worker-1 node -e "require('fs').writeFileSync('/opt/kelion/write-probe','x')"
+          ! docker exec kelion-ci-converter-parser-1 python -I -c "import socket; socket.create_connection(('example.com',443),2)"
+          ! docker exec kelion-ci-converter-parser-1 python -I -c "open('/opt/kelion/write-probe','w')"
+          ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' kelion-ci-browser-worker-1 | grep -Eq 'OPENAI|ADMIN|DATABASE|SESSION|GOOGLE|GITHUB'
+          ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' kelion-ci-converter-parser-1 | grep -Eq '^(OPENAI|ADMIN_EMAIL|DATABASE_URL|SESSION_SECRET|GOOGLE_|GITHUB_|CODEX_|BROWSER_WORKER_SECRET|CONVERTER_WORKER_SECRET)'
+          ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' kelion-ci-app-1 | grep -Eq '^OPENAI_(API|ADMIN)_KEY=|^SESSION_SECRET=|^DATABASE_URL=|^GOOGLE_CLIENT_SECRET='
+
+      - name: Validează Caddy cu upstream candidat
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
+            --env PUBLIC_APP_DOMAIN=ci.invalid \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -v "$PWD/deploy/kelion-upstream.caddy.example:/etc/caddy/kelion-upstream.caddy:ro" \
+            caddy:2@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

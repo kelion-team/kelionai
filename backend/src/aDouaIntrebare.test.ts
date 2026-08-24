@@ -92,12 +92,13 @@ describe('barge-in-ul rămâne întreg', () => {
   // precisely so the second question leaves IMMEDIATELY. Today's fix is not
   // allowed to bring it back.
   it('input nou cât lucrează = tura veche tăiată, tura nouă pornită pe loc', () => {
-    expect(panou).toMatch(/abortRef\.current\?\.abort\(\)[^\n]*superseded/)
+    expect(panou).toMatch(/if \(busyRef\.current \|\| inFlightRef\.current\) \{[\s\S]{0,240}interruptAll\('barge-in-text'\)[\s\S]{0,120}abortRef\.current\?\.abort\(\)/)
     expect(panou).toMatch(/NO return — we fall through below and start the new turn right now/)
   })
 
   it('a doua întrebare chiar pleacă spre creier, cu ea în conversație', () => {
-    expect(panou).toMatch(/const next: ChatMessage\[\] = \[\.\.\.messages, \{ role: 'user', content: outgoing/)
+    expect(panou).toMatch(/const conversationBase = online\s*\? messages\s*: combinaIstoricLocal\(messages, await istoricOfflineLocal\(\)\)/)
+    expect(panou).toMatch(/const next: ChatMessage\[\] = \[\s*\.\.\.conversationBase,\s*\{ role: 'user', content: outgoing, ts: userTs \}/)
     // Creierul (calea ONLINE) primește tot `next` (conversația cu întrebarea nouă).
     // De la faza 1 offline, apelul e într-un ternar (online = streamChat, offline =
     // creier local), iar fluxul se consumă prin `sursaFlux` — dar `next` ajunge la

@@ -12,11 +12,11 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { memorieUnificata } from './services/memorieUnificata.js'
+import { construiesteInstructiune } from './services/vocalLive.js'
 
 const aici = dirname(fileURLToPath(import.meta.url))
 const ruta = readFileSync(join(aici, 'routes/vocalLive.ts'), 'utf8')
 const chat = readFileSync(join(aici, 'routes/chat.ts'), 'utf8')
-const serviciu = readFileSync(join(aici, 'services/vocalLive.ts'), 'utf8')
 const clientVL = readFileSync(join(aici, '../../frontend/src/lib/vocalLive.ts'), 'utf8')
 const panou = readFileSync(join(aici, '../../frontend/src/components/ChatPanel.tsx'), 'utf8')
 
@@ -50,10 +50,9 @@ describe('P20 — porțile de verdict ale rutei vocale (constatările critice)',
     expect(ruta).toMatch(/gard de limbă fail-open: transcrierea răspunsului n-a sosit în 700 ms/)
   })
 
-  it('suprimarea de limbă corectează și sesiunea Google (ancoră) și aruncă handle-ul otrăvit la a 2-a', () => {
+  it('suprimarea de limbă corectează sesiunea Realtime curentă fără mecanism de reluare inventat', () => {
     expect(ruta).toMatch(/live\?\.ancoreaza\(`\[SISTEM\] Replica ta anterioară a fost respinsă/)
-    expect(ruta).toMatch(/suprimariLimba >= 2/)
-    expect(ruta).toMatch(/arunc handle-ul de reluare \(context otrăvit\)/)
+    expect(ruta).not.toMatch(/sessionResumption|reluareInitial|suprimariLimba >=/)
   })
 
   it('limba se RE-JUDECĂ pe continuare (≤240 car.) — „Bine. Não sei…" nu mai trece', () => {
@@ -85,7 +84,8 @@ describe('P20 — porțile de verdict ale rutei vocale (constatările critice)',
 
   it('userul NOU fără preferință primește limba implicită a aplicației (en-US), adminul româna', () => {
     expect(ruta).toMatch(/limbaPin = 'en-US' \/\/ user nou → limba implicită a aplicației/)
-    expect(ruta).toMatch(/if \(user\.role === 'admin'\) limbaPin = 'ro-RO'/)
+    expect(ruta).toMatch(/if \(isAdminSession\) limbaPin = 'ro-RO'/)
+    expect(ruta).not.toMatch(/user\.role === 'admin'/)
   })
 })
 
@@ -117,12 +117,24 @@ describe('P20 — calea scrisă (chat.ts)', () => {
 })
 
 describe('P20 — instrucțiunea și memoria (services)', () => {
-  it('ANCORA LIMBII se coace DOAR pe pinul românesc — userul străin nu mai primește „ROMÂNA"', () => {
-    expect(serviciu).toMatch(/if \(limbaPin === 'ro-RO'\) \{\s*\n\s*instructiune \+=\s*\n?\s*`\\nANCORA LIMBII/)
+  it('preferința de limbă din instrucțiunea Realtime urmează pinul sesiunii', () => {
+    const ro = construiesteInstructiune('Ești Kelion.', 'Ana', [], undefined, 'ro-RO')
+    const en = construiesteInstructiune('You are Kelion.', 'Ana', [], undefined, 'en-US')
+    expect(ro).toContain('Limba preferată a conversației este ro-RO')
+    expect(en).toContain('Limba preferată a conversației este en-US')
+    expect(en).not.toContain('EXCLUSIV în română')
   })
 
-  it('filtrul anti-otravă al istoricului judecă pe CONTINUARE, nu doar pe primul cuvânt', () => {
-    expect(serviciu).toMatch(/!continuareStraina\(String\(r\.content\)\)/)
+  it('istoricul recent rămâne context etichetat, iar limba este o regulă separată', () => {
+    const text = construiesteInstructiune(
+      'Ești Kelion.',
+      'Ana',
+      [{ role: 'assistant', content: 'Context păstrat din tura anterioară.' }],
+      undefined,
+      'ro-RO',
+    )
+    expect(text).toContain('Kelion: Context păstrat din tura anterioară.')
+    expect(text).toContain('schimb-o numai la cererea explicită a persoanei')
   })
 
   it('memoria unificată sare replicile străine ale lui Kelion sub lacătul românesc (comportament)', () => {
@@ -143,9 +155,9 @@ describe('P20 — instrucțiunea și memoria (services)', () => {
 
 describe('P20 — frontend: banda și poarta half-duplex', () => {
   it('banda ACUMULEAZĂ deltele pe canale, cu etichetă, și se golește la închiderea turei', () => {
-    expect(panou).toMatch(/vlAud = final \? '' : vlAud \+ text/)
-    expect(panou).toMatch(/vlSpune = final \? '' : vlSpune \+ text/)
-    expect(panou).toMatch(/onTuraInchisa: \(\) => \{/)
+    expect(panou).toMatch(/onUser: \(text, final\) => \{[\s\S]{0,180}auzit = final \? '' : auzit \+ text[\s\S]{0,80}arataBanda\('auzit'\)/)
+    expect(panou).toMatch(/onKelion: \(text, final\) => \{[\s\S]{0,180}spus = final \? '' : spus \+ text[\s\S]{0,80}arataBanda\('spus'\)/)
+    expect(panou).toMatch(/onTuraInchisa: \(\) => \{[\s\S]{0,180}auzit = ''[\s\S]{0,80}spus = ''[\s\S]{0,80}setLiveVoice\(''\)/)
   })
 
   it('clientul anunță închiderea turei pe AMBELE drumuri (tura_gata + barge-in)', () => {

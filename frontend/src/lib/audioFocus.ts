@@ -3,7 +3,7 @@
 //
 // Does NOT replace playVoice/stopVoice or vocal-live. It is the single
 // arbitration layer above them:
-//   • LIVE has priority over written-chat TTS (Chirp {audio})
+//   • LIVE are prioritate față de TTS-ul chatului scris
 //   • barge-in / user speech → interruptAll() stops every active playout now
 //   • sources register/unregister so the panel does not juggle two pipelines
 //
@@ -19,17 +19,13 @@ let active: AudioFocusSource = 'none'
 let liveInterrupt: (() => void) | null = null
 
 // Cross-tab single-voice lock (ChatPanel voceUnica). When another tab owns the
-// mouth, this tab must not play Chirp TTS even if chat frames still arrive.
+// mouth, acest tab nu redă TTS de chat dacă frame-urile vechi încă sosesc.
 let foreignVoiceLock = false
 
 /** Other tab holds the voice chain - drop local playout until released. */
 export function setForeignVoiceLock(locked: boolean): void {
   foreignVoiceLock = locked
   if (locked && isVoicePlaying()) stopVoice()
-}
-
-export function isForeignVoiceLocked(): boolean {
-  return foreignVoiceLock
 }
 
 function emit(next: AudioFocusSource): void {
@@ -42,7 +38,7 @@ export function registerLiveFocus(opts?: { onInterrupt?: () => void }): void {
   // TRUNCHEREA MĂSURATĂ (vânătoarea din 22 aug, BLOCANT, confirmată de
   // verificator): sesiunea Live cade singură des (1006 de rețea, 1000 de la
   // server, schimbare de rută audio) și ChatPanel o repornește TĂCUT în
-  // ~400ms-1s; „LIVE always wins" de aici omora atunci Chirp-ul turei SCRISE
+  // ~400ms-1s; prioritatea Live nu trebuie să întrerupă TTS-ul turei scrise.
   // fix în mijlocul propoziției — exact „chatul se trunchează audio" al
   // ownerului. Regula nouă: tura scrisă ÎN REDARE ține gura; releaseTtsFocus
   // o întoarce singură pe 'live' la final (liveInterrupt e deja setat).
@@ -64,7 +60,7 @@ export function unregisterLiveFocus(): void {
  *
  * `turaScrisa` (owner, 19 aug: „se aud 2 voci… dacă îi scriu răspunde doar
  * scris"): LIVE rostește DOAR turele VOCALE (prin WS — n-are `speak()` pentru
- * text scris). O tură SCRISĂ nu e rostită de LIVE, deci Chirp-ul ei TREBUIE
+ * text scris). O tură scrisă nu este rostită de Live, deci TTS-ul ei trebuie
  * redat chiar și cât LIVE ține focus-ul — altfel scrisul rămâne MUT sub LIVE.
  * Ăsta era gardul C care ÎNVINGEA relaxarea gardului A din ChatPanel (măsurat):
  * gardul A lăsa turele scrise să treacă, iar `requestTtsFocus()` le pica aici,
@@ -84,10 +80,10 @@ export function requestTtsFocus(opts?: { turaScrisa?: boolean }): boolean {
   }
   // O GURĂ NOUĂ OPREȘTE CELELALTE GURI (owner, 20 aug: „se aud multe voci paralele,
   // de la mai multe creiere… o singură ieșire audio"). O tură SCRISĂ care ia gura
-  // cât LIVE e activ TREBUIE să taie ÎNTÂI playout-ul LIVE (PCM-ul Gemini Live rămas
-  // în redare), altfel se aud DOUĂ voci: Chirp-ul scris PESTE vocea LIVE. Fiecare
+  // cât LIVE e activ TREBUIE să taie ÎNTÂI playout-ul OpenAI Realtime rămas
+  // în redare), altfel se aud două voci: TTS-ul scris peste vocea Live. Fiecare
   // cadru {audio} trece prin aici (ChatPanel: requestTtsFocus înainte de playVoice),
-  // deci gura LIVE e silențiată exact în clipa în care Chirp-ul primește gura.
+  // deci gura Live este silențiată exact când TTS-ul primește focusul.
   if (active === 'live' && opts?.turaScrisa) {
     try {
       liveInterrupt?.()
@@ -101,9 +97,9 @@ export function requestTtsFocus(opts?: { turaScrisa?: boolean }): boolean {
 
 export function releaseTtsFocus(): void {
   // BUG REPARAT (registrul frontend #3, blocant — „vocile paralele", owner 20 aug):
-  // după prima redare Chirp, starea cădea pe 'none' deși sesiunea LIVE era încă vie
+  // după prima redare TTS, starea nu cade pe `none` dacă sesiunea Live este vie.
   // (liveInterrupt înregistrat) → următorul requestTtsFocus nu mai intra pe ramura
-  // `active==='live'` → nu mai tăia playout-ul Live → Chirp cânta PESTE vocea Live.
+  // `active==='live'` păstrează playout-ul Live fără a suprapune TTS-ul de chat.
   // Gura se întoarce la 'live' cât timp sesiunea Live există; 'none' doar fără ea.
   if (active === 'tts') emit(isVoicePlaying() ? 'tts' : liveInterrupt ? 'live' : 'none')
 }

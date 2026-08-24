@@ -4,7 +4,7 @@
 // lui Kelion". Până acum vocea lui ajungea pe filmare DOAR dacă omul alegea
 // tab/ecran ȘI bifa „Distribuie audio" în dialogul browserului — o bifă
 // uitată = filmare fără Kelion. Dar vocea lui e redată chiar de pagina asta:
-// n-avem de ce să depindem de bifă. Fiecare gură (sesiunea live, Chirp-ul
+// nu depindem de o bifă. Fiecare gură (sesiunea Live sau TTS-ul
 // chatului) își înscrie aici fluxul de ieșire, iar recorder.ts le amestecă
 // DIRECT în pistă — vocea e pe filmare prin construcție, orice ar alege omul.
 const fluxuri = new Set<MediaStream>()

@@ -15,28 +15,6 @@
      limitations under the License.
 -->
 <resources>
-  
-
-  <!--
-    The "fullscreen" and "fullscreen-sticky" TWA manifest values correspond to "immersive" and "sticky-immersive"
-    AndroidManifest values.
-  -->
-  
-
-  <!--
-    This variable below expresses the relationship between the app and the site,
-    as documented in the TWA documentation at
-    https://developers.google.com/web/updates/2017/10/using-twa#set_up_digital_asset_links_in_an_android_app
-    and is injected into the AndroidManifest.xml
-  -->
-  <string name="assetStatements">
-    [{
-        \"relation\": [\"delegate_permission/common.handle_all_urls\"],
-        \"target\": {
-            \"namespace\": \"web\",
-            \"site\": \"https://kelionai.app\"
-        }
-    }]
-    
-  </string>  
+  <string name="offline_first_message">Kelionai needs a connection once to prepare its offline mode.</string>
+  <string name="offline_retry">Try again</string>
 </resources>

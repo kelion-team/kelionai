@@ -88,10 +88,8 @@ describe('cererea e să DESCHIDĂ MONITORUL, nu doar să execute', () => {
   })
 
   it('regula e și în promptul lui, nu doar în poartă', () => {
-    // The gate is the net. The prompt is there so we never reach the net.
-    expect(chat).toMatch(/IF YOU SAY YOU WILL ANALYSE, ANALYSE — ON SCREEN/)
-    expect(chat).toMatch(/call show_document FIRST/)
-    expect(chat).toMatch(/call show_document AGAIN with what you FOUND/)
-    expect(chat).toMatch(/Never announce an analysis you do not immediately perform and display/)
+    expect(chat).toContain('Orice afirmație despre STAREA sistemului')
+    expect(chat).toContain('trebuie să vină dintr-o măsurătoare')
+    expect(chat).toContain('Dacă unealta n-a răspuns, spune „nu pot verifica"')
   })
 })

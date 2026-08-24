@@ -9,59 +9,25 @@
 // the monitor; voice answers with speak_rule), constructor_status (different
 // formatting), server_logs / read_inbox / list_updates (chat only).
 //
-// The admin GATE is done by the CALLER beforehand (isAdmin in chat;
-// adminUnlocked via voiceprint in voice) — this function does NOT gate, it
-// only executes.
+// The admin gate is the verified Google session carried by the caller. Voice
+// and face signals are never authorization factors.
 
-import { config } from '../config.js'
-import { listSource, readSource, searchSource } from './sourceCode.js'
-import { dbTablesOverview, dbQuery, memoriePune, memorieIa, memorieLista } from '../db.js'
+import { memoriePune, memorieIa, memorieLista } from '../db.js'
 import { systemHealth } from './health.js'
 import { resurseGazda } from './resurse.js'
-import { stareCitirePlati } from './openBanking.js'
-import { stareAutonomie } from './autonomie.js'
-import { repoWrite, repoOpenPR, repoMergePR } from './github.js'
-import { runRunbook, runbookStatus, runbookLog, requestRepair } from './runbooks.js'
-import { seteazaSecret, listeazaSecrete, publicaCheile } from './secrete.js'
 import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta } from '../db.js'
-import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type CampCard } from './cardFurnizor.js'
-import { voceRecenta, minuteRamaseVoce, fataRecenta, minuteRamaseFata } from './adminLock.js'
-import { adminVezi, adminSchimba } from './adminVedere.js'
-import { julesSurse, julesSarcina, julesStare, julesServeste } from './jules.js'
-import { mediaControl } from './mediaControl.js'
 import { notifyAdmin } from './adminNotification.js'
-import { serverOps } from './serverOps.js'
-import { listRecoveryPoints, listEncryptedDbBackups, createRecoveryPoint } from './recovery.js'
+import { esteAdminKelion } from './adminIdentity.js'
 
 // The names of the shared admin tools (chat ∩ voice). The caller checks
 // membership to know whether to delegate here or handle it itself
 // (build_software, google, browser...).
 export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
-  'list_source', 'read_source', 'search_source',
-  'db_tables', 'db_query', 'system_health',
-  // MĂSURAREA (8 aug, ordinul ownerului): Kelion își rulează SINGUR porțile, cu
-  // aceleași comenzi ca omul, și își poate citi jurnalul propriilor măsurători —
-  // ca o afirmație despre starea softului să poată fi CONFRUNTATĂ cu ce a măsurat.
-  'ruleaza_portile', 'jurnal_masuratori', 'vaneaza_buguri',
-  'repo_write', 'repo_open_pr', 'repo_merge_pr',
-  'run_runbook', 'runbook_status', 'runbook_log', 'request_repair',
-  'secret_pune', 'secret_lista', 'secret_publica',
+  'system_health',
   'cerinta_noua', 'cerinte_lista', 'cerinta_prioritate',
-  // The card: the gate is IN the executor (the voice window), not here.
-  'card_stare', 'card_completeaza', 'card_gata',
-  // The whole admin panel (Jul 31, the third request): he sees what the owner
-  // sees on screen and can change what can be undone.
-  'admin_vezi', 'admin_schimba',
   // HIS OWN WISHLIST, granted (Aug 2, „implementează-i ce cere"): persistent
   // project memory + full observability of his own state, as tools.
   'memorie_pune', 'memorie_ia', 'memorie_lista', 'stare_masurata',
-  // JULES (3 aug) — agentul asincron oficial Google, pe cheia pusă de owner.
-  'jules_repos', 'jules_task', 'jules_status',
-  'media_control',
-  'server_ops',
-  // P7 (owner, 15 aug): toate datele din toate PR-urile, accesibile creierului.
-  'pr_lista',
-  'list_app_versions', 'list_db_backups', 'save_app_version',
 ])
 
 // Executes a SHARED admin tool. Returns the result (string) or `null` if the
@@ -70,49 +36,15 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
 export async function execSharedAdminTool(
   name: string,
   args: Record<string, unknown>,
-  // Who asks and from where — needed ONLY by the card tools (the browser is
-  // per user, and the gate is "I recognised your voice just now"). The rest
-  // ignore them.
+  // The actual authenticated session remains the only authority.
   ctx: { email?: string; baseUrl?: string; cookie?: string } = {},
 ): Promise<string | null> {
+  if (!SHARED_ADMIN_TOOLS.has(name)) return null
+  if (!ctx.email || !esteAdminKelion(ctx.email)) {
+    return JSON.stringify({ error: 'admin_only' })
+  }
   switch (name) {
-    case 'list_source': return listSource(String(args.dir ?? '.'))
-    case 'read_source': return readSource(String(args.path ?? ''), Number(args.from_line ?? 1) || 1)
-    case 'search_source': return searchSource(String(args.query ?? ''))
-    case 'db_tables': return dbTablesOverview()
-    case 'db_query': return dbQuery(String(args.sql ?? ''))
     case 'system_health': return systemHealth()
-    // MEDIA CONTROL (order #16) — queries OS-level media API to check/pause playback.
-    case 'media_control': return mediaControl()
-    case 'server_ops': return serverOps(String(args.cmd ?? ''))
-    // P7: sistemul informațional al PR-urilor — citirea vine din GitHub, iar o
-    // citire picată se SPUNE ({ok:false, motiv}), nu se maschează în listă goală.
-    case 'pr_lista': {
-      const s = String(args.stare ?? 'all')
-      const stare = s === 'open' || s === 'closed' ? s : 'all'
-      const { listeazaPRuri } = await import('./prInfo.js')
-      return JSON.stringify(await listeazaPRuri(stare))
-    }
-    // MĂSURAREA (8 aug) — Kelion își rulează singur porțile, exact cele pe care
-    // le rulează omul, și primește înapoi un verdict cu TREI stări. Raportul e
-    // formatat aici, nu de model: „NU POT VERIFICA" nu se poate rescrie în
-    // „trece" pe drum.
-    case 'ruleaza_portile': {
-      const cerute = Array.isArray(args.porti) ? (args.porti as unknown[]).map(String) : undefined
-      const rez = await ruleazaPortile(cerute)
-      return raportPorti(rez)
-    }
-    case 'vaneaza_buguri': {
-      const v = await vaneazaBuguri(Number(args.ore ?? 48) || 48)
-      return raportVanatoare(v)
-    }
-    case 'jurnal_masuratori': {
-      const randuri = await jurnalMasuratori(Number(args.cate ?? 30) || 30)
-      if (!randuri.length) return 'Jurnalul e GOL — nu ai măsurat nimic încă. Asta NU înseamnă că totul e bine; înseamnă că nu știi.'
-      return randuri
-        .map((r) => `${r.la}  ${r.masurat ? 'MĂSURAT' : 'NU POT VERIFICA'}  ${r.cum} (${r.ms} ms) → ${r.rezumat}`)
-        .join('\n')
-    }
     // KELION'S PROJECT MEMORY (his own request, Aug 2): keyed, persistent,
     // queryable — survives every deploy, unlike the conversation window.
     case 'memorie_pune': return memoriePune(String(args.cheie ?? ''), String(args.continut ?? ''))
@@ -131,83 +63,15 @@ export async function execSharedAdminTool(
           sanatate,
           resurse: resurse ?? 'nu pot citi /proc (memorie/încărcare)',
           costAzi: cost?.citit ? cost.valoare : `nu pot citi jurnalul de cost${cost && !cost.citit ? `: ${cost.motiv}` : ''}`,
-          citirePlati: stareCitirePlati() ?? 'cititorul de plăți n-a rulat încă în procesul ăsta',
-          autonomie: stareAutonomie() ?? 'bucla n-a trecut încă în procesul ăsta',
+          paymentCollection: {
+            status: 'setup_required',
+            automaticCredit: false,
+          },
         },
         null,
         1,
       )
     }
-    // JULES — REZERVĂ TĂCUTĂ, INVIZIBILĂ (owner, 15 aug: „Pune-l rezerva tacuta,
-    // invizibil"): pastila și banda din constructor au ieșit; uneltele astea sunt
-    // SINGURA lui ușă — se deschid doar la ordinul explicit al ownerului. Sonda
-    // julesServeste (fostul bec) trăiește aici: întâi măsurăm că servește.
-    case 'jules_repos': {
-      // ACEEAȘI POARTĂ ca jules_task (owner, 22 aug, a doua oară, pe voce:
-      // „devin nu este activ si kelion raporteaza 7 repo a lui jules" —
-      // gardul pus dimineață acoperea doar sarcinile, iar modelul răspundea
-      // la „e Devin prezent?" listând repo-urile lui Jules din unealta asta).
-      // Răspunsul o și ÎNVAȚĂ: constructorul e Devin, prin build_software.
-      if (config.devinKey) {
-        return JSON.stringify({
-          error: 'constructorul_e_devin',
-          message: 'Constructorul aplicației este DEVIN — activ, cu cheia pusă; ordinele de cod/reparație se dau prin unealta build_software (Devin deschide PR, ownerul aprobă). Jules e doar rezervă tăcută, dezactivată cât Devin e configurat — nu-i lista repo-urile drept răspuns despre constructor.',
-        })
-      }
-      const stare = await julesServeste()
-      return stare.ok ? julesSurse() : `Jules nu servește acum: ${stare.detaliu}`
-    }
-    case 'jules_task': {
-      // CONSTRUCTORUL E DEVIN (owner, 22 aug, pe live: „kelion trimite catre
-      // jules err si nu lui devin"): cât cheia Devin e pusă, ordinele de
-      // cod/reparație NU pleacă la Jules — poartă în COD, nu instrucțiune în
-      // fișă (modelul alegea singur jules_task pentru erori). Jules rămâne
-      // rezerva tăcută din 15 aug: se redeschide doar dacă ownerul scoate
-      // cheia Devin sau cere explicit ridicarea gărzii.
-      if (config.devinKey) {
-        return JSON.stringify({
-          error: 'constructorul_e_devin',
-          message: 'Ordinele de reparație/cod merg la DEVIN (unealta build_software) — Jules e rezervă tăcută cât timp cheia Devin e pusă. Reformulează ordinul prin build_software.',
-        })
-      }
-      return julesSarcina(String(args.prompt ?? ''), String(args.sursa ?? ''), args.ramura ? String(args.ramura) : 'master')
-    }
-    case 'jules_status': return julesStare(String(args.sesiune ?? ''))
-    // ── POARTA OBLIGATORIE (Adrian, 8 aug: „va trebui să folosească OBLIGATORIU
-    // toate testele și să măsoare orice răspuns") ──────────────────────────────
-    // Uneltele care SCHIMBĂ softul nu pornesc fără o rulare COMPLETĂ de porți,
-    // recentă, cu verdict TRECE. Nu e o rugăminte în prompt — e o poartă în cod,
-    // exact ca să nu se poată uita. „Am rulat testele" nu mai e o vorbă: se
-    // citește din jurnalul măsurătorilor sau nu se întâmplă nimic.
-    case 'repo_open_pr':
-    case 'repo_merge_pr': {
-      const d = await dovadaPortilor()
-      if (!d.poateImplementa) {
-        return `REFUZAT — nu implementez fără măsurătoare: ${d.motiv}\n\nProcedura: 1) ruleaza_portile  2) repari ce pică  3) abia apoi ${name}.`
-      }
-      return name === 'repo_open_pr'
-        ? repoOpenPR(String(args.branch ?? ''), String(args.title ?? ''), String(args.body ?? ''))
-        : repoMergePR(Number(args.pr ?? 0))
-    }
-    case 'repo_write': return repoWrite(String(args.branch ?? ''), String(args.path ?? ''), String(args.content ?? ''), String(args.message ?? ''))
-    case 'run_runbook': {
-      const inputs: Record<string, string> = {}
-      if (args.pachet) inputs.pachet = String(args.pachet)
-      if (args.pkg) inputs.pkg = String(args.pkg)
-      if (args.inputs && typeof args.inputs === 'object') {
-        Object.assign(inputs, args.inputs)
-      }
-      const name = String(args.name ?? '')
-      return Object.keys(inputs).length > 0 ? runRunbook(name, inputs) : runRunbook(name)
-    }
-    case 'runbook_status': return runbookStatus(args.name ? String(args.name) : undefined)
-    case 'runbook_log': return runbookLog(Number(args.run_id ?? 0))
-    case 'request_repair': return requestRepair(String(args.title ?? ''), String(args.details ?? ''))
-    // HIS SETTINGS. `valoare` never goes into any log from here — the
-    // function in secrete.ts reports only the name and the length.
-    case 'secret_pune': return seteazaSecret(String(args.nume ?? ''), String(args.valoare ?? ''))
-    case 'secret_lista': return listeazaSecrete()
-    case 'secret_publica': return publicaCheile()
     // THE OWNER'S REQUIREMENTS, caught from the conversation. Without these,
     // the `cerinte` table stayed empty and the whole management system was
     // decoration.
@@ -231,95 +95,12 @@ export async function execSharedAdminTool(
         })),
       })
     }
-    // ── THE CARD AT PROVIDERS ──────────────────────────────────────────────
-    // The value NEVER passes through the model: it only says which field and
-    // where.
-    case 'card_stare': {
-      const c = cardConfigurat()
-      // The providers come from what was MEASURED on their pages at the
-      // session's close, not from what someone said they did.
-      const furnizori = await stareFurnizori()
-      return JSON.stringify({
-        configurat: c.gata,
-        lipsesc: c.lipsesc,
-        vocea_recunoscuta: voceRecenta(ctx.email ?? ''),
-        minute_ramase_voce: minuteRamaseVoce(ctx.email ?? ''),
-        fata_recunoscuta: fataRecenta(ctx.email ?? ''),
-        minute_ramase_fata: minuteRamaseFata(ctx.email ?? ''),
-        // Cardul cere TREI factori: admin logat + voce + față (toate ACUM).
-        gata_de_card: voceRecenta(ctx.email ?? '') && fataRecenta(ctx.email ?? ''),
-        furnizori,
-        plati_automate: furnizori.some((f) => f.automat),
-        nota: 'Valorile NU se pot citi de nicăieri, nici de mine — doar se scriu în pagină.',
-      })
-    }
-    case 'card_completeaza': {
-      const r = await completeazaCard(
-        ctx.email ?? '',
-        ctx.baseUrl ?? 'https://kelionai.app',
-        String(args.camp ?? '') as CampCard,
-        Number(args.index ?? -1),
-      )
-      // The page comes back already masked by the discreet module; we add nothing.
-      return JSON.stringify({ ok: r.ok, camp: r.camp, detaliu: r.detaliu, pagina: r.pagina })
-    }
-    // ── EVERYTHING THE ADMIN CONTAINS ──────────────────────────────────────
-    // The cookie belongs to the caller: the tool does NOT bypass the admin
-    // gate, it uses it. Without an admin session, the route answers 403 and it
-    // says so.
-    case 'admin_vezi':
-      return adminVezi(String(args.sectiune ?? ''), ctx.cookie ?? '')
-    case 'admin_schimba':
-      return adminSchimba(String(args.sectiune ?? ''), args.date ?? {}, ctx.cookie ?? '')
-    case 'card_gata': {
-      const r = await terminaCard(ctx.email ?? '', ctx.baseUrl ?? 'https://kelionai.app', String(args.furnizor ?? ''))
-      return JSON.stringify({ ok: true, card_la_dosar: r.card, plata_automata: r.automat, detaliu: r.detaliu, pagina: r.pagina })
-    }
     case 'cerinta_prioritate': {
       const id = Number(args.id ?? 0)
       const p = Math.max(1, Math.min(9, Math.round(Number(args.prioritate ?? 5)) || 5))
       if (!id) return JSON.stringify({ error: 'fara_id' })
       await actualizeazaCerinta(id, { prioritate: p })
       return JSON.stringify({ ok: true, id, prioritate: p })
-    }
-
-    case 'list_app_versions': {
-      const points = await listRecoveryPoints()
-      if (points === null) {
-        return JSON.stringify({ ok: false, error: 'recovery_unreadable',
-          hint: 'GitHub token missing or API failed. Admin → Recovery may show the same.' })
-      }
-      return JSON.stringify({
-        ok: true, kind: 'app_code_versions',
-        note: 'Git tags backup-YYYY-… on master (code). Not encrypted DB dumps.',
-        count: points.length,
-        versions: points.slice(0, 30).map((p) => ({ tag: p.tag, sha: p.sha, date: p.date, note: p.note })),
-        how_to_restore: 'Admin → Recovery → Restore. New point: save_app_version. show_document when asked.',
-      })
-    }
-    case 'list_db_backups': {
-      const rows = await listEncryptedDbBackups(Number(args.limit ?? 20) || 20)
-      if (rows === null) {
-        return JSON.stringify({ ok: false, error: 'backup_dir_unreadable',
-          dir: process.env.BACKUP_DIR || '/root/kelion/backups (or /host/kelion/backups in app container)' })
-      }
-      const mb = (n: number) => Math.round((n / 1048576) * 10) / 10
-      return JSON.stringify({
-        ok: true, kind: 'encrypted_database_dumps',
-        schedule: 'Weekly Sunday 03:00 Europe/London (CRON_TZ); deploy/backup.sh',
-        dir: process.env.BACKUP_DIR || '/root/kelion/backups (or /host/kelion/backups in app container)',
-        count: rows.length,
-        backups: rows.map((r) => ({ file: r.file, mb: mb(r.bytes), mtime: r.mtime })),
-        restore_rehearsal: 'run_runbook name=proba-restaurare',
-        run_backup_now: 'run_runbook name=backup-db',
-        restore_production_warning:
-          'Production restore overwrites live data. Prefer proba-restaurare. README: gunzip after openssl decrypt.',
-      })
-    }
-    case 'save_app_version': {
-      const note = String(args.note ?? args.message ?? '').trim()
-      const r = await createRecoveryPoint(note || 'Saved from chat by Kelion')
-      return JSON.stringify(r.ok ? { ok: true, tag: r.tag } : { ok: false, error: r.error })
     }
     default: return null
   }
@@ -338,17 +119,11 @@ import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
 import { recentClientErrorRows } from '../db.js'
 import { recentClientErrors } from '../routes/clientErrors.js'
-import { getMemories, deleteMemory, cautaIstoric, logCapabilityGap, citesteRezumatCost, proposeKelionTool, dovezileFaptelor } from '../db.js'
-import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
-import { ruleazaPortile, raportPorti, jurnalMasuratori, dovadaPortilor, vaneazaBuguri, raportVanatoare } from './masurare.js'
+import { getMemories, deleteMemory, cautaIstoric, logCapabilityGap, citesteRezumatCost, dovezileFaptelor } from '../db.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   'list_updates', 'read_inbox', 'server_logs', 'client_errors', 'get_real_cost',
-  'list_memories', 'cauta_istoric', 'dovada_faptelor', 'forget_memory', 'log_unsupported_request', 'propose_tool',
-  // GUEST VOICES (Adrian, Aug 1): holder-only by construction — they act on
-  // the SESSION user's own account (every user is the holder of theirs).
-  // The names come from the single source in guestVoices.ts.
-  ...GUEST_VOICE_TOOLS,
+  'list_memories', 'cauta_istoric', 'dovada_faptelor', 'forget_memory', 'log_unsupported_request',
 ])
 
 export async function execUserScopedTool(
@@ -358,10 +133,6 @@ export async function execUserScopedTool(
   isAdmin: boolean,
 ): Promise<string | null> {
   const denied = JSON.stringify({ error: 'admin_only' })
-  // GUEST VOICES: not admin-gated — every holder manages the guests of their
-  // OWN account.
-  if (GUEST_VOICE_TOOLS.has(name))
-    return execGuestVoiceTool(name, args, email)
   switch (name) {
     case 'list_updates': {
       if (!isAdmin) return denied
@@ -461,27 +232,6 @@ export async function execUserScopedTool(
         }).catch(() => 0)
       }
       return JSON.stringify({ logged: true })
-    }
-    case 'propose_tool': {
-      // AUTO-EXTINDERE: Kelion își cere singur o unealtă nouă (ownerul o aprobă
-      // cu un click în Admin → Unelte Kelion). MUTAT AICI (5 aug): în registru e
-      // `admin:false` și e în USER_SCOPED_TOOLS — dar executorul stătea în
-      // execSharedAdminTool, gardat de SHARED_ADMIN_TOOLS care NU-l conține, deci
-      // orice apel crăpa „unknown_tool". Acum e pe calea corectă. Identic în
-      // text și în voce.
-      const p = args as Record<string, unknown>
-      const id = await proposeKelionTool({
-        name: String(p.name ?? ''),
-        description: String(p.description ?? ''),
-        paramsJson: JSON.stringify(p.params_schema ?? { type: 'object', properties: {}, required: [] }),
-        httpMethod: String(p.http_method ?? 'GET'),
-        httpUrl: String(p.http_url ?? ''),
-        httpHeaders: JSON.stringify(p.http_headers ?? {}),
-        rationale: String(p.rationale ?? ''),
-      })
-      return JSON.stringify(id
-        ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' }
-        : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
     }
     default: return null
   }

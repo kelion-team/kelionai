@@ -81,9 +81,9 @@ describe('lacătul pe sursă: createBuildJob refuză dublurile', () => {
 // de 6 ori. Legea de aici: eroarea PERMANENTĂ omoară ordinul la PRIMUL raport,
 // cu verdict pe nume, iar mortul se RAPORTEAZĂ lui Kelion — nu rămâne zombie.
 describe('P27 — erorile PERMANENTE opresc reîncercarea din prima (proba la rulare)', () => {
-  it('punga Anthropic goală (jurnalul #324) = permanentă, cu verdictul pe nume', () => {
-    expect(eEroarePermanenta('API error: {"type":"error","error":{"message":"Your credit balance is too low..."}}')).toMatch(/cont fără credit API/)
-    expect(eEroarePermanenta('fable5 FĂRĂ CREDIT API: contul Anthropic n-are credit')).toMatch(/cont fără credit API/)
+  it('un cont API fără credit = eroare permanentă, cu verdictul pe nume', () => {
+    expect(eEroarePermanenta('API error: {"type":"error","error":{"message":"Your credit balance is too low..."}}')).toMatch(/contul furnizorului nu are credit/)
+    expect(eEroarePermanenta('FĂRĂ CREDIT API: contul de runtime n-are credit')).toMatch(/configurația financiară trebuie remediată/)
   })
 
   it('cheia respinsă = permanentă; verdictul spune „config, nu codul"', () => {
@@ -92,7 +92,7 @@ describe('P27 — erorile PERMANENTE opresc reîncercarea din prima (proba la ru
   })
 
   it('panele TRECĂTOARE nu sunt permanente (au dreptul la reîncercare/vindecător)', () => {
-    // 402-ul OpenRouter are vindecătorul lui de pungă (requeueMoneyFailedBuildJobs)
+    // Un 402 tranzitoriu este reconciliat de fluxul financiar, nu de clasificator.
     expect(eEroarePermanenta('402 requires more credits')).toBeNull()
     expect(eEroarePermanenta('timeout: npm install a durat peste 10 min')).toBeNull()
     expect(eEroarePermanenta('creier 502 — indisponibil temporar')).toBeNull()
@@ -132,10 +132,8 @@ describe('P27 — lacătele pe sursă: mortul pe nume nu mai e reluat orbește �
 describe('autorul ordinului, pe față (cine e acolo?)', () => {
   it('cineACerut traduce ordered_by în etichete pe românește', async () => {
     const { cineACerut } = await import('./services/numeOrdin.js')
-    expect(cineACerut('kelion-autovindecare')).toBe('🤖 auto-vindecarea')
-    expect(cineACerut('kelion-autovindecare-live')).toBe('🤖 auto-vindecarea')
-    expect(cineACerut('kelion-autonom')).toBe('🤖 bucla autonomă')
-    expect(cineACerut('adrianenc11@gmail.com')).toBe('👤 adrianenc11')
+    expect(cineACerut('codex-worker')).toBe('codex-worker')
+    expect(cineACerut('owner@example.test')).toBe('👤 owner')
     expect(cineACerut('')).toBe('necunoscut')
   })
 
@@ -143,6 +141,6 @@ describe('autorul ordinului, pe față (cine e acolo?)', () => {
     const constructorRuta = readFileSync(fileURLToPath(new URL('./routes/constructor.ts', import.meta.url)), 'utf8')
     expect((constructorRuta.match(/cerutDe: cineACerut\(j\.orderedBy\)/g) ?? []).length).toBe(2)
     const stage = readFileSync(fileURLToPath(new URL('../../frontend/src/pages/Stage.tsx', import.meta.url)), 'utf8')
-    expect(stage).toContain('{j.cerutDe && <span className="build-ci" title="cine a cerut ordinul">{j.cerutDe}</span>}')
+    expect(stage).toMatch(/\{j\.cerutDe && \(\s*<span className="build-ci" title="cine a cerut ordinul">\s*\{j\.cerutDe\}\s*<\/span>\s*\)\}/)
   })
 })

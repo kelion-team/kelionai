@@ -1,0 +1,13 @@
+[Unit]
+Description=Poll immutable Constructor handoffs for publication
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=5s
+RandomizedDelaySec=10s
+Persistent=true
+Unit=kelion-constructor-publisher.service
+
+[Install]
+WantedBy=timers.target

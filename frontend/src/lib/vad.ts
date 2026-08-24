@@ -1,6 +1,6 @@
 // ── POARTA DE VOCE (VAD local) ───────────────────────────────────────────────
 // Owner, 20 aug: „nu se poate activa doar la voce? nu la zgomot?" + „fa profi de la
-// inceput." Măsurat în cod: sesiunea Gemini Live trimite microfonul CONTINUU spre
+// inceput." Măsurat în cod: sesiunea OpenAI Realtime trimite microfonul CONTINUU spre
 // server (vocalLive.ts, `ws.send` pe fiecare cadru), inclusiv în TĂCERE → se
 // facturează audio de intrare chiar dacă nimeni nu vorbește (~$27/11h, măsurat de
 // `CALIBRARE_LIVE`). Aici e poarta care deschide țeava DOAR când chiar se vorbește,
@@ -13,7 +13,7 @@
 //    zero (ZCR): vocea vocalizată are ZCR mic, hiss-ul are ZCR mare;
 //  • DEBOUNCE la onset (nu deschide pe pocnete scurte: ușă, click);
 //  • HANGOVER generos după ultima vorbire → NU taie coada cuvintelor ȘI lasă tăcerea
-//    de final ca serverul (Gemini) să-și detecteze sfârșitul de tură;
+//    de final ca serverul OpenAI să-și detecteze sfârșitul de tură;
 //  • warm-up scurt: la pornire doar calibrează fondul.
 // Regula de aur: la nesiguranță, poarta stă DESCHISĂ — mai bine trimitem un pic de
 // tăcere decât să înghițim vorba omului. Strat PUR, testabil, fără rețea.

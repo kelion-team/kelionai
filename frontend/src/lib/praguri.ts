@@ -4,6 +4,7 @@
 // server). Necitit = null: textele cad pe forme FĂRĂ cifre — o cifră
 // inventată în UI e exact minciuna pe care legea o interzice.
 import { setCreditePeLira } from './billing'
+import { apiFetch } from './transport'
 
 export interface Praguri {
   primaAlimentare: number
@@ -22,7 +23,7 @@ export function pragurileServerului(): Praguri | null {
 /** Citește pragurile o singură dată per sesiune de pagină (cache + dedup). */
 export async function aduPragurile(): Promise<Praguri | null> {
   if (cache) return cache
-  promisiune ??= fetch('/api/tarife')
+  promisiune ??= apiFetch('/api/tarife')
     .then((r) => (r.ok ? (r.json() as Promise<{ praguri?: Partial<Praguri>; creditePeLira?: number }>) : null))
     .then((j) => {
       // LEGEA ANTI-HARDCODARE: creditePeLira din sursă vie (userShare/creditValue)

@@ -1,47 +1,48 @@
 // ── ACTIVELE KITULUI OFFLINE, COPIATE DIN node_modules LA BUILD ─────────────
 //
-// Kitul offline (gura Piper + urechea Whisper — ordinul din 22 aug: „auto
-// download invizibil cu toate") are nevoie de runtime-urile WASM servite DE PE
-// DOMENIUL NOSTRU: implicit, piper-tts-web le-ar lua de pe cdnjs/jsdelivr la
-// fiecare pornire rece — adică exact o dependență de internet în mijlocul
-// modului OFFLINE, plus CDN-uri străine (lecția căderii ONNX din 21 aug:
-// versiuni fixate, servite de noi).
+// Runtime-urile ASR sunt servite local, din versiuni fixate în lockfile. Niciun
+// CDN nu face parte din calea modului avion.
 //
 // De ce COPIE la build și nu fișiere în git: ~50 MB de binare ar umfla repo-ul
 // pentru totdeauna; ele EXISTĂ deja în node_modules (versiuni fixate în
 // package-lock), și build-ul (local sau Docker) rulează oricum npm install.
 // Scriptul e chemat din `npm run build` (și `predev`) — dacă lipsesc sursele,
 // PICĂ TARE (exit 1), nu lasă un build fără kit.
-import { copyFile, mkdir, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { copyFile, mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const radacina = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-// Setul minim pe care backend-ul WASM al ORT 1.18 îl poate cere (simd
-// threaded/nethreaded + fallback fără simd). JSEP/training NU — Piper merge pe
-// CPU-wasm, nu pe WebGPU.
-// piper_phonemize.{wasm,data} NU mai vin de aici: pachetul-donor
-// (@diffusionstudio/piper-wasm) are 235 MB despachetat și umfla `npm ci` din
-// build-ul Docker spre plafonul de 30 min (publicarea din 22 aug a rămas în
-// urmă fix după adăugarea lui) — cele DOUĂ fișiere necesare (18,6 MB) sunt
-// COMISE în git sub public/piper/, iar dependența a fost scoasă.
+// Setul este verificat la build; lipsa unui runtime oprește buildul.
 const ACTIVE = [
-  ['node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm', 'public/ort/ort-wasm-simd-threaded.wasm'],
-  ['node_modules/onnxruntime-web/dist/ort-wasm-simd.wasm', 'public/ort/ort-wasm-simd.wasm'],
-  ['node_modules/onnxruntime-web/dist/ort-wasm.wasm', 'public/ort/ort-wasm.wasm'],
+  ...[
+    'ort-wasm-simd-threaded.asyncify.mjs',
+    'ort-wasm-simd-threaded.mjs',
+    'ort-wasm-simd-threaded.wasm',
+  ].map((name) => [
+    `node_modules/@huggingface/transformers/node_modules/onnxruntime-web/dist/${name}`,
+    `public/ort/${name}`,
+  ]),
 ]
 
-// Fișierele Piper comise: dacă lipsesc din arbore, build-ul pică TARE — un kit
-// fără fonemizator ar însemna gură offline moartă descoperită abia pe device.
-for (const f of ['public/piper/piper_phonemize.wasm', 'public/piper/piper_phonemize.data']) {
-  try {
-    await stat(join(radacina, f))
-  } catch {
-    console.error(`[kit-offline] LIPSĂ ${f} — fișier comis în git, nu se regenerează; vezi istoricul din 22 aug`)
-    process.exit(1)
-  }
+// Runtime-urile 1.18 proveneau din motorul vocal retras și sunt incompatibile
+// cu Transformers/ORT 1.26. Curățarea este limitată la aceste două ținte generate.
+for (const stale of [
+  'public/ort/ort-wasm-simd.wasm',
+  'public/ort/ort-wasm.wasm',
+  'public/ort/ort-wasm-simd-threaded.jsep.mjs',
+  'public/ort/ort-wasm-simd-threaded.jsep.wasm',
+  'public/ort/ort-wasm-simd-threaded.jspi.mjs',
+  'public/ort/ort-wasm-simd-threaded.jspi.wasm',
+  'public/ort/ort-wasm-simd-threaded.asyncify.wasm',
+]) {
+  await rm(join(radacina, stale), { force: true })
 }
+
+const kitManifest = JSON.parse(await readFile(join(radacina, 'src/offline-kit.manifest.json'), 'utf8'))
+const runtimeByPath = new Map(kitManifest.runtimeSources.map((artifact) => [artifact.sourcePath, artifact]))
 
 let copiate = 0
 for (const [sursa, tinta] of ACTIVE) {
@@ -63,5 +64,25 @@ for (const [sursa, tinta] of ACTIVE) {
   }
   await copyFile(de, la)
   copiate++
+}
+for (const [, target] of ACTIVE) {
+  const artifact = runtimeByPath.get(target.replace(/^public\//u, ''))
+  if (!artifact) throw new Error(`[kit-offline] ${target} lipsește din manifest`)
+  const data = await readFile(join(radacina, target))
+  const digest = createHash('sha256').update(data).digest('hex')
+  if (data.byteLength !== artifact.sizeBytes || digest !== artifact.sha256) {
+    throw new Error(`[kit-offline] integritate invalidă pentru ${target}`)
+  }
+}
+// Vite emite acest WASM direct din ORT către aceeași cale declarată în
+// manifest. Îl verificăm la sursă, fără a-l dubla în public/ și dist/.
+{
+  const name = 'ort-wasm-simd-threaded.asyncify.wasm'
+  const artifact = runtimeByPath.get(`ort/${name}`)
+  const data = await readFile(join(radacina, `node_modules/@huggingface/transformers/node_modules/onnxruntime-web/dist/${name}`))
+  const digest = createHash('sha256').update(data).digest('hex')
+  if (!artifact || data.byteLength !== artifact.sizeBytes || digest !== artifact.sha256) {
+    throw new Error(`[kit-offline] integritate invalidă pentru runtime-ul emis ${name}`)
+  }
 }
 console.log(`[kit-offline] active pe loc (${copiate} copiate acum, restul erau la zi)`)

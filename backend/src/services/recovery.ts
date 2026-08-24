@@ -1,5 +1,5 @@
-import { readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { GITHUB_API as API, ghToken } from './githubApi.js'
+import { config } from '../config.js'
 // ── RECOVERY POINTS (Adrian, 27 Jul: "save on the Linux server, clearly
 // recoverable" + "a recovery menu in admin, where you see the saved versions
 // with clear details") ─────────────────────────────────────────────────────
@@ -8,12 +8,9 @@ import { join } from 'node:path'
 // the backup-versiuni.sh cron, which materializes .bundle + .tar.gz for each
 // tag). Here: we list the tags (with date, sha, note) and create a new one
 // from admin.
-const REPO = 'kelion-team/kelionai'
-const API = `https://api.github.com/repos/${REPO}`
-
 function ghHeaders(): Record<string, string> {
   return {
-    Authorization: `Bearer ${(process.env.GITHUB_TOKEN ?? '').trim()}`,
+    Authorization: `Bearer ${ghToken()}`,
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
     'Content-Type': 'application/json',
@@ -105,7 +102,7 @@ export async function createRecoveryPoint(note: string): Promise<{ ok: boolean; 
         message,
         object: commitSha,
         type: 'commit',
-        tagger: { name: 'Kelion Recovery', email: 'contact@kelionai.app', date: now.toISOString() },
+        tagger: { name: 'Kelion Recovery', email: config.product.supportEmail, date: now.toISOString() },
       }),
       signal: AbortSignal.timeout(12_000),
     })
@@ -218,46 +215,3 @@ export async function restoreToPoint(
     return { ok: false, error: String((e as Error).message ?? e) }
   }
 }
-
-// ── ENCRYPTED DB DUMPS on disk (deploy/backup.sh) ───────────────────────────
-// listRecoveryPoints = CODE tags. These files = DATABASE snapshots.
-export interface EncryptedDbBackup {
-  file: string
-  path: string
-  bytes: number
-  mtime: string
-}
-
-export async function listEncryptedDbBackups(limit = 20): Promise<EncryptedDbBackup[] | null> {
-  // On the VPS host: /root/kelion/backups. In kelionai-app the host tree is mounted at /host/kelion (ro).
-  const candidates = [process.env.BACKUP_DIR, '/root/kelion/backups', '/host/kelion/backups'].filter(
-    (x): x is string => Boolean(x && String(x).trim()),
-  )
-  let dir = ''
-  for (const c of candidates) {
-    try {
-      await readdir(c)
-      dir = c
-      break
-    } catch {
-      /* try next path */
-    }
-  }
-  if (!dir) return null
-  try {
-    const names = await readdir(dir)
-    const rows: EncryptedDbBackup[] = []
-    for (const f of names) {
-      if (!f.endsWith('.sql.enc')) continue
-      const p = join(dir, f)
-      const st = await stat(p).catch(() => null)
-      if (!st || !st.isFile() || st.size <= 0) continue
-      rows.push({ file: f, path: p, bytes: st.size, mtime: st.mtime.toISOString() })
-    }
-    rows.sort((a, b) => (a.mtime < b.mtime ? 1 : -1))
-    return rows.slice(0, Math.max(1, Math.min(100, limit)))
-  } catch {
-    return null
-  }
-}
-

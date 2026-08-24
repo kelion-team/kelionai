@@ -1,19 +1,6 @@
-// ── P22: STUDIOUL DE CLIPURI (owner, 15 aug, verbatim) ──────────────────────
-// „se poate numi aplicatia Studioul de Clipuri, care cuprinde toate 6, nu?
-//  ii dai o ideie, ii spui foloseste studioul de clipuri si el face tot, nu?"
-// + „cu functie timer de promovare eventual la ore prestabilite"
-// + „orice clip se salveaza cu nume sugestiv data ora" + „in download"
-// + calea GRATIS: „prin google flow" + „fiecare user logat poate sa le
-//   foloseasca" + „exact la asta ma gindeam".
-//
-// MĂSURAT (15 aug): Google Flow (labs.google/flow) dă credite gratuite zilnice
-// oricărui cont Google, dar N-ARE API — deci calea gratis e o REȚETĂ pe care
-// omul o execută pe contul LUI (Kelion îi dă promptul șlefuit și pașii);
-// automatizarea NU apasă în Flow în locul omului (contra regulilor Google).
-// Complet-automatul rămâne pe API-ul plătit (Veo), sub comutatorul din P29.
-//
-// Serviciul e PUR (intră text, iese plan) — creierul primește planul și îl
-// urmează pas cu pas; nimic de aici nu cheltuie bani singur.
+// Deterministic clip planning. The service is pure (text in, plan out); actual
+// generation uses only the configured OpenAI video surface after explicit
+// tariff confirmation.
 
 export const RETETE_STUDIO = [
   'Clip din idee',
@@ -40,8 +27,7 @@ export function numeClip(reteta: string, subiect: string, la: Date): string {
   return `${slug(reteta)}-${slug(subiect)}-${data}`
 }
 
-/** Promptul șlefuit pentru Veo/Flow — în engleză (modelele video ascultă cel
- *  mai bine engleza), construit din ideea omului, fără să o inventeze. */
+/** Prompt video in English, built from the user's idea without inventing it. */
 export function promptVideoDinIdee(idee: string, reteta: RetetaStudio | string): string {
   const stil: Record<string, string> = {
     'Clip din idee': 'cinematic, natural lighting, smooth camera movement',
@@ -57,21 +43,17 @@ export function promptVideoDinIdee(idee: string, reteta: RetetaStudio | string):
 
 export interface PlanStudio {
   reteta: string
-  cale: 'gratis' | 'platit'
+  cale: 'openai'
   numeFisier: string
   /** Pașii pe care creierul îi URMEAZĂ și îi spune omului — planul e al
    *  studioului, nu improvizația modelului. */
   pasi: string[]
-  /** Pe calea GRATIS: promptul gata de lipit în Google Flow. */
-  promptFlow?: string
-  /** Pe calea PLĂTITĂ: promptul gata pentru generate_video. */
-  promptVeo?: string
+  videoPrompt: string
 }
 
 export function planStudio(
   idee: string,
   reteta: string | undefined,
-  cale: 'gratis' | 'platit',
   la: Date,
 ): PlanStudio | { error: string } {
   const i = (idee ?? '').trim()
@@ -79,30 +61,15 @@ export function planStudio(
   const r = (RETETE_STUDIO as readonly string[]).includes(reteta ?? '') ? (reteta as RetetaStudio) : 'Clip din idee'
   const nume = numeClip(r, i, la)
   const prompt = promptVideoDinIdee(i, r)
-  if (cale === 'gratis') {
-    return {
-      reteta: r,
-      cale,
-      numeFisier: `${nume}.mp4`,
-      promptFlow: prompt,
-      pasi: [
-        'Spune-i omului că folosește calea GRATUITĂ: Google Flow, pe contul lui Google (credite gratuite zilnice de la Google; niciun ban din aplicație).',
-        'Arată-i promptul șlefuit (promptFlow) și spune-i să-l copieze.',
-        'Pașii lui: deschide labs.google/flow → New project → lipește promptul → Generate → descarcă clipul.',
-        `Spune-i să salveze clipul cu numele sugestiv: ${nume}.mp4 (în folderul Download).`,
-        'Când îl încarcă înapoi în Kelionai (butonul + de lângă chat), analizează-l (vede_video / monitor) și ajută-l la pasul următor (montaj, narare, YouTube privat prin youtube_urca).',
-      ],
-    }
-  }
   return {
     reteta: r,
-    cale,
+    cale: 'openai',
     numeFisier: `${nume}.mp4`,
-    promptVeo: prompt,
+    videoPrompt: prompt,
     pasi: [
       'Cheamă lista_tarife și spune-i omului prețul REAL în credite pentru calitatea activă (nu inventa cifre).',
       'Cere-i confirmarea EXPLICITĂ înainte de orice generare (costă bani).',
-      `După confirmare: generate_video cu promptul pregătit (promptVeo). Un clip = maxim 8 secunde; pentru mai mult se generează mai multe clipuri, pe rând.`,
+      'După confirmare: generate_video cu videoPrompt. Respectă limita raportată de serviciul video și starea lui de lifecycle.',
       `Clipul apare pe monitor cu numele sugestiv (${nume}) — butonul „Salvează" îl pune în Download.`,
       'Dacă vrea, urcă-l pe YouTube PRIVAT cu youtube_urca (cere-i întâi titlul).',
     ],

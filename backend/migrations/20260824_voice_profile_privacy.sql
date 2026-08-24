@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE voiceprints DROP COLUMN IF EXISTS gender;
+ALTER TABLE voiceprints DROP COLUMN IF EXISTS is_admin;
+
+COMMIT;

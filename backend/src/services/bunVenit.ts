@@ -19,7 +19,7 @@
 //     (billing_events 'grant' + transactions) — nimic pe ascuns.
 
 import { config } from '../config.js'
-import { loadKv, saveKv, grantCredit } from '../db.js'
+import { loadKv, saveKv, grantCreditMinor } from '../db.js'
 
 /** Câte credite de bun-venit dă casa (0 = oprit). Reglabil fără deploy. */
 export function crediteBunVenit(): number {
@@ -36,9 +36,9 @@ export async function acordaBunVenit(email: string): Promise<boolean> {
   if (credite <= 0) return false
   const cheie = `bunvenit:${e}`
   if (await loadKv(cheie)) return false // gustarea se dă o dată, pe veci
-  const suma = credite * config.billing.creditValue
-  await grantCredit(e, suma)
+  const sumaMinor = credite * config.billing.creditMinor
+  if (!await grantCreditMinor(e, sumaMinor, `welcome:${e}`)) return false
   await saveKv(cheie, JSON.stringify({ la: new Date().toISOString(), credite }))
-  console.log(`[bun-venit] ${e}: ${credite} credite de bun-venit (£${suma.toFixed(2)})`)
+  console.log(`[bun-venit] credit acordat: ${credite}`)
   return true
 }

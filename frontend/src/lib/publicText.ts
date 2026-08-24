@@ -19,23 +19,18 @@ export const PUBLIC_TEXT = {
   emailSignIn: 'Sign in with email',
   creditsPricing: 'Credits & pricing',
   userManual: 'User manual',
-  zoomQr: 'Enlarge the code to scan it',
 
   // Signing in
   loginTitle: 'Sign in',
-  registerTitle: 'Create your account',
   magicTitle: 'Sign in with an email link',
   resetTitle: 'New password',
   continueGoogle: 'Continue with Google',
   orEmail: 'or with your email',
-  yourName: 'Your name',
   password: 'Password',
   newPassword: 'New password (at least 8 characters)',
   signIn: 'Sign in',
-  createAccount: 'Create account',
   sendLink: 'Send me the link',
   savePassword: 'Save password',
-  noAccount: 'No account? Create one',
   passwordless: 'Sign in without a password (email link)',
   forgotPassword: 'I forgot my password',
   backToSignIn: 'Back to sign in',
@@ -43,7 +38,6 @@ export const PUBLIC_TEXT = {
   // Server messages, in human terms
   errEmailInvalid: "That email doesn't look valid.",
   errPasswordShort: 'The password must be at least 8 characters.',
-  errAccountExists: 'An account already exists for this email — sign in with your password, or ask for a link.',
   errWrongCredentials: 'Wrong email or password.',
   errLinkExpired: 'That link has expired — ask for a new one.',
   errGeneric: "That didn't work — please try again.",
@@ -55,23 +49,15 @@ export const PUBLIC_TEXT = {
   // Credite
   creditsTitle: 'Kelionai credits',
   creditsBlurb: 'Credits cover everything Kelion does: conversation, voice, vision, searches.',
-  creditsRate: (perPound: number): string => `£1 = ${perPound} credits. Secure payment via Revolut.`,
   creditsUnit: (n: number): string => `${n} credits`,
-  creditsSignInFirst: 'You need to be signed in to buy — the buttons take you to sign-in.',
-  // The auto top-up checkbox, shown at payment time (Adrian, Aug 1: "auto-pay
-  // selectable with a checkbox when the user pays"). Honest wording: we
-  // PREPARE the payment, the user always confirms the money move.
-  // THE PAYMENT CODE, SHOWN (M4, Aug 2) — the /credite page used to navigate
-  // to Revolut without ever showing the code the matching depends on.
-  payCodeTitle: 'Your payment code',
-  payCodeHint: 'Add this code to the Reference / Note field on the Revolut page before paying. Without this code, payment CANNOT be automatically matched to your account!',
-  payCodeCopy: 'Copy the code',
-  payCodeCopied: 'Copied ✓',
-  payCodeOpen: 'Open Revolut and pay ↗',
-  payCodeWaiting: 'Waiting for the payment — the credits arrive by themselves a few minutes after it lands.',
-  autoTopUpLabel: 'Auto top-up: when my credit runs low, prepare my refill automatically (I confirm with one tap)',
-  autoTopUpAmount: 'Refill amount',
-  autoTopUpSaved: 'Saved ✓',
+  creditsSignInFirst: 'Sign in to view your balance, payment history and checkout options.',
+  checkoutTitle: 'Secure Revolut checkout',
+  checkoutHint: 'The amount and your account are already linked. Confirm the payment on Revolut; no reference code is needed.',
+  checkoutOpen: 'Continue securely to Revolut ↗',
+  checkoutWaiting: 'Credit is added only after Revolut confirms the completed payment.',
+  lowCreditReminderLabel: 'Low-credit reminder (payment always requires my confirmation)',
+  lowCreditReminderAmount: 'Suggested payment',
+  lowCreditReminderSaved: 'Reminder saved ✓',
   errPaymentStart: "The payment didn't start — please try again.",
   accountLink: 'Sign in',
   privacyLink: 'Privacy',
@@ -93,16 +79,11 @@ export const PUBLIC_TEXT = {
   vchatSendFailed: "Your message didn't go through — please try again.",
   vchatOffline: "We can't reach the server right now — replies may be delayed.",
 
-  // Landing page: lead form, QR, install, contact (Audit Aug 2 / I5)
+  // Landing page: lead form and contact.
   leadThanks: "Thanks — we'll get back to you soon.",
   leadTitle: "Leave your email and we'll reach out",
   leadSending: 'Sending…',
   leadSend: 'Send',
   leadNotePlaceholder: 'Short message (optional)',
-  qrHint: 'Tap a code to install — or scan it (🔍 enlarges)',
-  qrInstallLabel: (label: string): string => `Install — ${label}`,
-  qrAlt: (label: string): string => `QR — ${label}`,
-  installBtn: 'Install',
   contactLink: 'Contact',
-  qrZoomHint: 'Scan with your phone — tap anywhere to close',
 } as const

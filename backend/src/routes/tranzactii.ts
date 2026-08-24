@@ -1,8 +1,9 @@
+import { randomBytes } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { cerAdmin } from '../session.js'
 import { gasesteAgent, cheamaAgent } from '../services/agentiKelion.js'
 import { addMemory, searchMemories } from '../db.js'
-import { dateSimbol, rezumatPentruAgent } from '../services/piete.js'
+import { cererePiata, dateSimbol, rezumatPentruAgent } from '../services/piete.js'
 import { config } from '../config.js'
 
 // ── CENTRUL DE TRANZACȚIONARE (Adrian, 4 aug: „să fie reală, cu tot ce există
@@ -225,7 +226,11 @@ function adminul(req: FastifyRequest, reply: FastifyReply): { email: string } | 
   return cerAdmin(req, reply)
 }
 
-function paginaTranzactii(): string {
+function jsonPentruScript(value: string): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c')
+}
+
+function paginaTranzactii(nonce: string, parentOrigin: string, binanceWebSocketBase: string): string {
   // GRAFIC PROFESIONAL (9 aug, ownerul: „rudimentară aplicația… ieși în net și
   // construiește soluția real funcțională"): motorul open-source al graficelor
   // TradingView (lightweight-charts v5, Apache-2.0), VENDORED pe domeniul
@@ -238,7 +243,7 @@ function paginaTranzactii(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kelion — Centrul de Tranzacționare</title>
 <script src="/lwc/lightweight-charts.standalone.production.js"></script>
-<style>
+<style nonce="${nonce}">
  /* Terminal întunecat, familia #0b1020 — accente DOAR pentru direcție (verde/roșu). */
  *{box-sizing:border-box;margin:0;padding:0}
  html,body{height:100%}
@@ -275,10 +280,13 @@ function paginaTranzactii(): string {
  #leg{position:absolute;top:.5rem;left:.65rem;z-index:3;pointer-events:none;font:11px/1.55 ui-monospace,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;color:#8b93ad;white-space:pre}
  #leg .lg1{color:#e8ecf6;font-weight:700;letter-spacing:.05em}
  #leg .ma{color:#eab308}#leg .em{color:#60a5fa}
- #nivele{position:absolute;top:.5rem;right:4.4rem;z-index:4;display:none;background:#0e1428e6;border:1px solid #1c2440;border-radius:4px;padding:.4rem .55rem;font:11px/1.65 ui-monospace,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;max-width:15rem}
- .nivTitlu{color:#8b93ad;letter-spacing:.06em;margin-bottom:.1rem}
- .nivRand{display:flex;align-items:center;gap:.45rem}
- .nivRand .pic{width:.55rem;height:2px;flex:0 0 auto}
+#nivele{position:absolute;top:.5rem;right:4.4rem;z-index:4;display:none;background:#0e1428e6;border:1px solid #1c2440;border-radius:4px;padding:.4rem .55rem;font:11px/1.65 ui-monospace,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;max-width:15rem}
+#nivele.vizibil{display:block}
+.nivTitlu{color:#8b93ad;letter-spacing:.06em;margin-bottom:.1rem}
+.nivRand{display:flex;align-items:center;gap:.45rem}
+.nivRand .pic{width:.55rem;height:2px;flex:0 0 auto}
+.pic.intrare{background:#4ade80}.pic.stop{background:#f87171}.pic.tinta{background:#60a5fa}
+.pic.suport{background:#eab308}.pic.rezistenta{background:#c084fc}.pic.nota{background:#b9c2da}
  .nivVal{margin-left:auto;padding-left:.7rem}
  .btnMic{margin-top:.3rem;padding:.14rem .45rem;border:1px solid #2a3550;border-radius:3px;font-size:10px;color:#8b93ad}
  .btnMic:hover{color:#e8ecf6;border-color:#3d4c78}
@@ -365,7 +373,9 @@ function paginaTranzactii(): string {
  </div>
  <div id="anCorp" class="anCorp md" tabindex="0" aria-label="Textul analizei"><p class="notaMd">Apasă „Analiza lui Kelion" pentru analiza completă (regim, niveluri, scenarii cu invalidare, riscul întâi). Nivelurile se desenează pe grafic.</p></div>
 </aside>
-<script>
+<script nonce="${nonce}">
+ var PARENT_ORIGIN=${jsonPentruScript(parentOrigin)};
+ var BINANCE_WS_BASE=${jsonPentruScript(binanceWebSocketBase)};
  // ── Referințe + stare (var-uri simple, funcții numite — fără framework) ──────
  var s=document.getElementById('s'), p=document.getElementById('p'), va=document.getElementById('var');
  var v=document.getElementById('v'), an=document.getElementById('an'), iesire=document.getElementById('iesire');
@@ -376,7 +386,7 @@ function paginaTranzactii(): string {
  var anMeta=document.getElementById('anMeta'), anInchide=document.getElementById('anInchide');
  var voal=document.getElementById('voal'), anunt=document.getElementById('anunt');
  var schelet=document.getElementById('schelet'), scheletText=document.getElementById('scheletText');
- var interval='1h', intervalAfisat='1h', ws=null, ceas=null, pretVechi=0, simbolCurent='';
+ var interval='1h', intervalAfisat='1h', ws=null, liveFeedKey='', ceas=null, pretVechi=0, simbolCurent='';
  var primaIncarcare=true, reconectDelay=1000, primaTranzactie=false, eZilnic=false, subCrosshair=false;
  var sertarDeschis=false, cronometruAnaliza=null, ultimulAnunt='', graficMort=false;
  // Precizia dedusă din prețul REAL, aplicată peste tot (audit 9 aug: DOGE la 0.123)
@@ -410,7 +420,6 @@ function paginaTranzactii(): string {
    if(x>=1e3) return (x/1e3).toFixed(1)+'K';
    return String(Math.round(x*100)/100);
  }
- function eCripto(sim){ return /^[A-Z0-9]{5,}$/.test(sim) && sim.indexOf('.')<0 && sim.indexOf('^')<0; }
  function oraMs(t){ var d=new Date(t); function z(n,l){ return String(n).padStart(l||2,'0'); }
    return z(d.getHours())+':'+z(d.getMinutes())+':'+z(d.getSeconds())+'.'+z(d.getMilliseconds(),3); }
  function sma(l,n){ var out=[],ac=0,i; for(i=0;i<l.length;i++){ ac+=l[i].inchis; if(i>=n)ac-=l[i-n].inchis;
@@ -420,7 +429,7 @@ function paginaTranzactii(): string {
 
  // ── Ieșirea: comportamentul EXISTENT păstrat (postMessage în iframe / '/'). ──
  function inchideCentrul(){
-   if(window.top!==window.self){ try{ window.parent.postMessage({kelion:'inchide-tranzactii'},'*'); }catch(e){} }
+   if(window.top!==window.self){ try{ window.parent.postMessage({kelion:'inchide-tranzactii'},PARENT_ORIGIN); }catch(e){} }
    else { location.href='/'; }
  }
  iesire.onclick=inchideCentrul;
@@ -487,28 +496,32 @@ function paginaTranzactii(): string {
  }
 
  // ── Nivelurile lui Kelion: linii de preț + panou-legendă cu „curăță liniile" ──
+ function tipNivel(nume){
+   if(nume.indexOf('intrare')>=0||nume.indexOf('cumpar')>=0) return 'intrare';
+   if(nume.indexOf('stop')>=0) return 'stop';
+   if(nume.indexOf('tint')>=0||nume.indexOf('țint')>=0||nume.indexOf('iesire')>=0||nume.indexOf('ieșire')>=0) return 'tinta';
+   if(nume.indexOf('suport')>=0) return 'suport';
+   if(nume.indexOf('rezist')>=0) return 'rezistenta';
+   return 'nota';
+ }
  function culoareNivel(nume){
-   if(nume.indexOf('intrare')>=0||nume.indexOf('cumpar')>=0) return '#4ade80';
-   if(nume.indexOf('stop')>=0) return '#f87171';
-   if(nume.indexOf('tint')>=0||nume.indexOf('țint')>=0||nume.indexOf('iesire')>=0||nume.indexOf('ieșire')>=0) return '#60a5fa';
-   if(nume.indexOf('suport')>=0) return '#eab308';
-   if(nume.indexOf('rezist')>=0) return '#c084fc';
-   return '#b9c2da';
+   var culori={intrare:'#4ade80',stop:'#f87171',tinta:'#60a5fa',suport:'#eab308',rezistenta:'#c084fc',nota:'#b9c2da'};
+   return culori[tipNivel(nume)];
  }
  function aratNiveluri(niveluri){
    var i;
    if(serie){ for(i=0;i<liniile.length;i++){ try{serie.removePriceLine(liniile[i]);}catch(e){} } }
    liniile=[];
-   if(!niveluri||!niveluri.length){ nivelePanou.style.display='none'; nivelePanou.innerHTML=''; return; }
+   if(!niveluri||!niveluri.length){ nivelePanou.classList.remove('vizibil'); nivelePanou.innerHTML=''; return; }
    var h='<div class="nivTitlu">NIVELURILE LUI KELION</div>';
    for(i=0;i<niveluri.length;i++){
      var n=niveluri[i], cul=culoareNivel(n.nume);
      if(serie) liniile.push(serie.createPriceLine({price:n.valoare,color:cul,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:n.nume}));
-     h+='<div class="nivRand"><span class="pic" style="background:'+cul+'"></span>'+esc(n.nume)
+     h+='<div class="nivRand"><span class="pic '+tipNivel(n.nume)+'"></span>'+esc(n.nume)
        +'<span class="nivVal">'+fmtNr(n.valoare,zecimale(n.valoare))+'</span></div>';
    }
    h+='<button id="nivCurata" class="btnMic">curăță liniile</button>';
-   nivelePanou.innerHTML=h; nivelePanou.style.display='block'; // și fără grafic pornit, valorile tot se văd
+   nivelePanou.innerHTML=h; nivelePanou.classList.add('vizibil'); // și fără grafic pornit, valorile tot se văd
    document.getElementById('nivCurata').onclick=function(){ aratNiveluri([]); };
  }
 
@@ -620,11 +633,13 @@ function paginaTranzactii(): string {
      // un simbol nou, împrospătarea de 10s nu pleacă cu text pe jumătate scris.
      var r=await fetch('/api/tranzactii/date?simbol='+encodeURIComponent(simbolCurent||s.value)+'&interval='+encodeURIComponent(interval));
      var j=await r.json();
-     if(j.error){
-       p.textContent='—'; va.textContent='—'; va.className='var'; stare('rau',j.error);
-       if(primaIncarcare) scheletEsec('nu am putut citi datele: '+j.error+' — reîncerc automat la 10s');
+     if(!r.ok||j.error){
+       var cauza=String(j&&j.error?j.error:'HTTP '+r.status).slice(0,180);
+       p.textContent='—'; va.textContent='—'; va.className='var'; stare('rau',cauza);
+       if(primaIncarcare) scheletEsec('nu am putut citi datele: '+cauza+' — reîncerc automat la 10s');
        return;
      }
+     if(!j||!Array.isArray(j.lumanari)||j.lumanari.length<2||!isFinite(Number(j.pret))||!isFinite(Number(j.variatie24h))) throw new Error('serverul a trimis date de piață invalide');
      if(primaIncarcare) precizie=zecimale(j.pret);
      // Cu fluxul de tranzacții pornit, prețul îl scrie DOAR bursa — pollul nu-l calcă.
      if(!ws||!primaTranzactie) p.textContent=fmtNr(Number(j.pret),precizie);
@@ -633,15 +648,20 @@ function paginaTranzactii(): string {
      va.className='var '+(v24>=0?'sus':'jos');
      stSursa.textContent='· '+j.sursa;
      intervalAfisat=String(j.interval||interval);
-     // Autoritatea e SURSA măsurată, nu forma simbolului (lecția GOOGL/EURUSD:
-     // sursa zilnică omoară fluxul viu, altfel rămâne un socket zombi cu etichetă LIVE).
-     eZilnic=String(j.sursa||'').indexOf('Stooq')>=0;
-     if(eZilnic&&ws) opresteViu();
+     // Doar backendul care a verificat furnizorul poate autoriza un flux live.
+     // Forma simbolului nu este o dovadă (GOOGL/EURUSD nu sunt crypto).
+     var feed=j.liveFeed;
+     var feedValid=feed&&feed.provider==='binance'&&/^[A-Z0-9]{5,14}$/.test(String(feed.symbol||''));
+     var nextFeedKey=feedValid?String(feed.symbol)+'|'+interval:'';
+     if(feedValid&&(!ws||liveFeedKey!==nextFeedKey)) pornesteViu(String(feed.symbol),nextFeedKey);
+     if(!feedValid){ liveFeedKey=''; opresteViu(); }
+     eZilnic=j.intervalMode==='daily-only';
      marcheazaIntervale();
      if(eZilnic&&!ws){
        stare('zilnic','bursă clasică: lumânări ZILNICE reale (intraday cere abonament de date)');
        stOra.textContent='· actualizat '+oraMs(Date.now());
      } else if(!ws){
+       stare('gri',(j.interval==='1d'?'lumânări zilnice':'date intraday')+' · actualizare la 10s, fără flux tranzacție-cu-tranzacție');
        stOra.textContent='· actualizat '+oraMs(Date.now());
      } else if(!primaTranzactie){
        stare('gri','lumânări încărcate ('+j.sursa+') · aștept prima tranzacție din fluxul live…');
@@ -680,21 +700,23 @@ function paginaTranzactii(): string {
  }
 
  // ── LIVE crypto: un socket, două fluxuri — @trade (ms-ul bursei) + @kline ────
- function opresteViu(){ if(ws){ try{ws.close();}catch(e){} ws=null; } }
- function pornesteViu(sim){
+ function opresteViu(){ var vechi=ws; ws=null; if(vechi){ try{vechi.close();}catch(e){} } }
+ function pornesteViu(sim,key){
    opresteViu();
-   if(!eCripto(sim)) return;
+   if(!/^[A-Z0-9]{5,14}$/.test(sim)||key!==sim+'|'+interval) return;
    try{
      var st=sim.toLowerCase();
-     var w=new WebSocket('wss://stream.binance.com:9443/stream?streams='+st+'@trade/'+st+'@kline_'+interval);
-     ws=w; primaTranzactie=false; pretVechi=0;
+     var w=new WebSocket(BINANCE_WS_BASE+'/stream?streams='+st+'@trade/'+st+'@kline_'+interval);
+     ws=w; liveFeedKey=key; primaTranzactie=false; pretVechi=0;
      stare('gri','mă conectez la fluxul live Binance…');
      w.onopen=function(){ reconectDelay=1000; };
      w.onmessage=function(ev){ try{
+       if(typeof ev.data!=='string'||ev.data.length>65536) return;
        var m=JSON.parse(ev.data); var d=(m&&m.data)||{};
+       if(String(d.s||'')!==sim) return;
        if(d.e==='trade'){
          var nou=Number(d.p);
-         if(nou>0){
+         if(isFinite(nou)&&nou>0){
            primaTranzactie=true;
            p.textContent=fmtNr(nou,precizie);
            p.className='pret '+(pretVechi&&nou<pretVechi?'jos':'sus');
@@ -702,21 +724,23 @@ function paginaTranzactii(): string {
            stare('live','LIVE · flux Binance, tranzacție cu tranzacție');
            stOra.textContent='· ultima: '+oraMs(d.T)+' (ms bursă)';
          }
-       } else if(d.e==='kline'&&d.k){
-         var k=d.k, tt=Math.floor(k.t/1000);
+       } else if(d.e==='kline'&&d.k&&String(d.k.s||'')===sim&&String(d.k.i||'')===interval){
+         var k=d.k, tt=Math.floor(Number(k.t)/1000);
+         var ko=Number(k.o),kh=Number(k.h),kl=Number(k.l),kc=Number(k.c),kv=Number(k.v);
+         if(!isFinite(tt)||!isFinite(ko)||!isFinite(kh)||!isFinite(kl)||!isFinite(kc)||!isFinite(kv)||ko<=0||kh<=0||kl<=0||kc<=0||kv<0) return;
          ultimulTimp=tt; if(!timpuri.length||timpuri[timpuri.length-1]!==tt) timpuri.push(tt);
-         if(serie) serie.update({time:tt,open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)});
-         if(vol) vol.update({time:tt,value:Number(k.v),color:Number(k.c)>=Number(k.o)?CULV_SUS:CULV_JOS});
-         ultim.c={open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c)}; ultim.v=Number(k.v);
+         if(serie) serie.update({time:tt,open:ko,high:kh,low:kl,close:kc});
+         if(vol) vol.update({time:tt,value:kv,color:kc>=ko?CULV_SUS:CULV_JOS});
+         ultim.c={open:ko,high:kh,low:kl,close:kc}; ultim.v=kv;
          if(!subCrosshair) scrieLegenda(ultim.c,ultim.v,ultim.m,ultim.e);
        }
      }catch(e){} };
      w.onerror=function(){ if(ws===w) stare('rau','fluxul live a picat — rămân pe împrospătarea la 10s'); };
      // Fluxul mort nu are voie să tacă sub eticheta „LIVE": reconectare cu backoff.
      w.onclose=function(){ if(ws===w){ ws=null;
-       if(simbolCurent&&eCripto(simbolCurent)){
+       if(simbolCurent&&liveFeedKey===key){
          stare('rau','fluxul live s-a închis — reconectez în '+Math.round(reconectDelay/1000)+'s…');
-         setTimeout(function(){ if(!ws&&simbolCurent&&eCripto(simbolCurent)){ void pret(); pornesteViu(simbolCurent); } }, reconectDelay);
+         setTimeout(function(){ if(!ws&&simbolCurent&&liveFeedKey===key) void pret(); }, reconectDelay);
          reconectDelay=Math.min(reconectDelay*2,30000);
        }
      } };
@@ -732,8 +756,8 @@ function paginaTranzactii(): string {
    marcheazaChips();
    if(primaIncarcare){ arataSchelet('se încarcă '+sim+' ('+interval+')…'); stare('gri','încarc '+sim+'…'); }
    if(ceas) clearInterval(ceas);
+   liveFeedKey=''; opresteViu();
    void pret(); ceas=setInterval(pret,10000);
-   pornesteViu(sim);
  }
  v.onclick=urmareste;
  s.addEventListener('keydown',function(ev){ if(ev.key==='Enter') urmareste(); });
@@ -743,6 +767,7 @@ function paginaTranzactii(): string {
    interval=b.textContent; intervalAfisat=interval; primaIncarcare=true;
    marcheazaIntervale(); urmareste();
  }; });
+ window.addEventListener('pagehide',function(){ liveFeedKey=''; opresteViu(); if(ceas) clearInterval(ceas); });
 
  // ── Markdown SIGUR, de mână: escape întâi, apoi doar ###/**/liste. Fără biblioteci. ─
  function bold(l){ return l.replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>'); }
@@ -797,8 +822,9 @@ function paginaTranzactii(): string {
    try{
      var r=await fetch('/api/tranzactii/analiza',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({simbol:simbolAnalizat,interval:interval})});
      var j=await r.json();
-     if(j.error){ anCorp.innerHTML='<p class="rau">'+esc(j.error)+'</p>'; }
+     if(!r.ok||j.error){ anCorp.innerHTML='<p class="rau">'+esc(String(j&&j.error?j.error:'HTTP '+r.status).slice(0,180))+'</p>'; }
      else{
+       if(typeof j.analiza!=='string'||typeof j.simbol!=='string') throw new Error('serverul a trimis o analiză invalidă');
        anMeta.textContent=String(j.simbol)+' · preț la analiză: '+String(j.pret)+(j.sursa?' · '+String(j.sursa):'');
        var h=mdSigur(String(j.analiza));
        if(j.niveluri&&j.niveluri.length){
@@ -836,11 +862,12 @@ function paginaTranzactii(): string {
    try{
      window.parent.postMessage({kelion:'tranzactii-stare',simbol:simbolCurent||s.value.toUpperCase(),
        pret:(function(){var n=Number(String(p.textContent).replace(/,/g,'')); return isFinite(n)&&n>0?n:null;})(),
-       interval:interval,sursa:stSursa.textContent.replace(/^·\\s*/,''),peste:pesteCursor},'*');
+       interval:interval,sursa:stSursa.textContent.replace(/^·\\s*/,''),peste:pesteCursor},PARENT_ORIGIN);
    }catch(e){}
  }
  setInterval(raporteazaStarea,5000);
  window.addEventListener('message',function(ev){
+   if(ev.origin!==PARENT_ORIGIN||ev.source!==window.parent) return;
    var d=ev.data||{};
    if(!d||!d.date) return;
    var acelasiSimbol=String(d.date.simbol||'').toUpperCase()===String(simbolCurent).toUpperCase();
@@ -864,16 +891,26 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
   // Pagina — DOAR admin (agentul e doar-admin, panoul la fel).
   app.get('/api/tranzactii', async (req, reply) => {
     if (!adminul(req, reply)) return { error: 'forbidden' }
+    if (!config.publicOrigin) return reply.code(503).send({ error: 'PUBLIC_APP_ORIGIN lipsește sau este invalid' })
+    const nonce = randomBytes(18).toString('base64')
+    const binanceWsOrigin = new URL(config.endpoints.binanceWebSocketBase).origin
     reply.header('Content-Type', 'text/html; charset=utf-8')
     reply.header('Cache-Control', 'no-store')
-    return paginaTranzactii()
+    reply.header(
+      'Content-Security-Policy',
+      `default-src 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'nonce-${nonce}'; style-src-attr 'none'; connect-src 'self' ${binanceWsOrigin}; img-src 'self' data:; font-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; object-src 'none'`,
+    )
+    return paginaTranzactii(nonce, config.publicOrigin, config.endpoints.binanceWebSocketBase)
   })
 
   // Datele reale ale unui simbol (graficul + prețul viu). DOAR admin.
   app.get('/api/tranzactii/date', async (req, reply) => {
     if (!adminul(req, reply)) return { error: 'forbidden' }
     const q = req.query as { simbol?: string; interval?: string }
-    return dateSimbol(String(q.simbol ?? 'BTCUSDT'), String(q.interval ?? '1h'))
+    const cerere = cererePiata(q.simbol ?? 'BTCUSDT', q.interval ?? '1h')
+    if ('error' in cerere) return reply.code(400).send(cerere)
+    reply.header('Cache-Control', 'no-store')
+    return dateSimbol(cerere.simbol, cerere.interval)
   })
 
   // (Ruta /api/tranzactii/jurnal a fost SCOASĂ pe 10 aug: chatul paginii nu
@@ -886,7 +923,10 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/tranzactii/analiza', async (req, reply) => {
     if (!adminul(req, reply)) return { error: 'forbidden' }
     const b = req.body as { simbol?: string; interval?: string } | null
-    const d = await dateSimbol(String(b?.simbol ?? 'BTCUSDT'), String(b?.interval ?? '1h'))
+    const cerere = cererePiata(b?.simbol ?? 'BTCUSDT', b?.interval ?? '1h')
+    if ('error' in cerere) return reply.code(400).send(cerere)
+    reply.header('Cache-Control', 'no-store')
+    const d = await dateSimbol(cerere.simbol, cerere.interval)
     // STATUS PE MĂSURA ADEVĂRULUI (măsurat 8 aug): cele trei ieșiri de mai jos
     // răspundeau 200 cu `{error:…}` — un apelant care se uită la `res.ok`
     // primea „a mers" pentru o analiză care nu există. Al cincilea caz din
@@ -909,6 +949,7 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
           `6) JUDECATA apelurilor tale vechi (dacă există mai jos).\n` +
           `Fără promisiuni, fără „sigur". Datele:\n${rezumatPentruAgent(d)}${istoria}${CERE_NIVELURI}`,
         true,
+        config.adminEmail,
       )
       const zi = new Date().toISOString().slice(0, 16).replace('T', ' ')
       await addMemory(config.adminEmail, `[tranzactii ${zi}] ${d.simbol} [pret ${d.pret}, ${d.interval}]: ${r.text.slice(0, 900)}`, 'tranzactii')

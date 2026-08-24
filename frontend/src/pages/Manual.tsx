@@ -1,43 +1,25 @@
-// ── MANUALUL, CA O CARTE ────────────────────────────────────────────────────
-// Adrian: button on the start page → the complete manual; the user is ASKED
-// which language they want it in, SEES it on screen in the chosen language,
-// can DOWNLOAD it in that language and chooses where to save it. And: "when you open the manual it must be like a
-// a book with a page-turn effect."
-//
-// Trei lucruri reparate aici, toate raportate de el:
-//   • IT HAD NO SCROLL — `body { overflow: hidden }` (the app shell) cut the
-//     page; content grew under a body that doesn't scroll.
-//   • THE LANGUAGE DIDN'T CHANGE ON SCREEN — translating a new language took over 100
-//     seconds, the request hung and nothing happened on screen. Now
-//     the server answers INSTANTLY (English + `ready:false`) and translates in the background;
-//     the page re-asks and swaps the text when ready, with a visible sign meanwhile.
-//   • THE DOWNLOAD — now it's a real FILE, with a name, that the browser saves
-//     where the user chooses; not a new tab you have to figure out on your own.
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import BackLink from '../components/BackLink'
 import ManualIcon from '../components/ManualIcon'
 import { raporteazaPagina } from '../lib/vizita'
-// The manual's 8 languages — the SAME closed list as the server's
-// MANUAL_LANGS (backend/src/services/manual.ts). B8 (marea verificare):
-// comentariul vechi zicea „7, same as server" în timp ce serverul avea 8 —
-// koreeana era servită dar inaccesibilă din UI (doar ?lang=ko).
-const MANUAL_LANGS: { code: string; label: string }[] = [
-  { code: 'en', label: 'English' },
-  { code: 'fr', label: 'Français' },
-  { code: 'de', label: 'Deutsch' },
-  { code: 'es', label: 'Español' },
-  { code: 'it', label: 'Italiano' },
-  { code: 'ru', label: 'Русский' },
-  { code: 'ro', label: 'Română' },
-  { code: 'ko', label: '한국어' },
-]
+import { apiFetch } from '../lib/transport'
+import {
+  MANUAL_LANGUAGES,
+  manualChrome,
+  manualSectionsForAudience,
+  resolveManualLanguage,
+} from '../lib/manualPolicy'
 
 interface ManualDoc {
   lang: string
   title: string
   subtitle: string
   flow: { title: string; steps: { icon: string; label: string; note: string }[] }
-  sections: { title: string; paragraphs: string[] }[]
+  sections: {
+    title: string
+    paragraphs: string[]
+    audience?: 'public' | 'admin'
+  }[]
   abilitiesTitle: string
   abilitiesIntro: string
   columnWhat: string
@@ -108,10 +90,14 @@ function cautaInFile(file: Fila[], q: string): { idx: number; titlu: string; fra
   return out
 }
 
-export default function Manual(): React.JSX.Element {
+export default function Manual({
+  isAdmin,
+}: {
+  readonly isAdmin: boolean
+}): React.JSX.Element {
   const dinUrl = new URLSearchParams(window.location.search).get('lang') ?? 'en'
-  const [lang, setLang] = useState(dinUrl)
-  // CĂUTAREA ÎN MANUAL (10 aug, ownerul: „să se poată căuta în el cu search").
+  const [lang, setLang] = useState(() => resolveManualLanguage(dinUrl))
+  const chrome = manualChrome(lang)
   const [cauta, setCauta] = useState('')
   const [doc, setDoc] = useState<ManualDoc | null>(null)
   const [traduce, setTraduce] = useState(false)
@@ -120,14 +106,13 @@ export default function Manual(): React.JSX.Element {
   const [descarca, setDescarca] = useState(false)
   const timer = useRef<number | null>(null)
 
-  // „ce au vizitat" (owner, 13 aug): secțiunea „manual" în raportul de vizite.
   useEffect(() => raporteazaPagina('manual'), [])
 
   // Fetches the manual; if the language is still translating, re-asks until ready.
   useEffect(() => {
     let anulat = false
     const cere = (): void => {
-      fetch(`/api/manual?lang=${encodeURIComponent(lang)}`)
+      apiFetch(`/api/manual?lang=${encodeURIComponent(lang)}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((j: ManualDoc | null) => {
           if (anulat || !j) return
@@ -146,7 +131,13 @@ export default function Manual(): React.JSX.Element {
     }
   }, [lang])
 
-  const file = doc ? inFile(doc) : []
+  const visibleDoc = useMemo(
+    () => doc
+      ? { ...doc, sections: manualSectionsForAudience(doc.sections, isAdmin) }
+      : null,
+    [doc, isAdmin],
+  )
+  const file = visibleDoc ? inFile(visibleDoc) : []
   const ultima = Math.max(0, file.length - 1)
 
   const muta = useCallback(
@@ -161,9 +152,7 @@ export default function Manual(): React.JSX.Element {
     [ultima],
   )
 
-  // Arrows + space: a book is read from the keyboard, not only the mouse.
-  // NU și când omul TASTEAZĂ (10 aug — căutarea): un spațiu scris în câmpul de
-  // search nu are voie să întoarcă pagina.
+  // Tastele schimbă pagina numai când focusul nu este într-un control de editare.
   useEffect(() => {
     const pe = (e: KeyboardEvent): void => {
       const tinta = e.target as HTMLElement | null
@@ -181,7 +170,7 @@ export default function Manual(): React.JSX.Element {
   const salveaza = async (): Promise<void> => {
     setDescarca(true)
     try {
-      const r = await fetch(`/manual.html?lang=${encodeURIComponent(lang)}`)
+      const r = await apiFetch(`/manual.html?lang=${encodeURIComponent(lang)}`)
       const html = await r.text()
       const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
       const a = document.createElement('a')
@@ -198,8 +187,6 @@ export default function Manual(): React.JSX.Element {
     }
   }
 
-  const rtl = ['ar', 'he', 'fa', 'ur'].includes(doc?.lang ?? 'en')
-
   return (
     <div className="manual-page">
       <div className="manual-shell">
@@ -212,14 +199,17 @@ export default function Manual(): React.JSX.Element {
               type="search"
               value={cauta}
               onChange={(e) => setCauta(e.target.value)}
-              placeholder="Search…"
-              aria-label="Search the manual"
+              placeholder={chrome.searchPlaceholder}
+              aria-label={chrome.searchLabel}
               style={{ maxWidth: 160 }}
             />
             <label className="manual-lang">
-              <span>Language</span>
-              <select value={lang} onChange={(e) => setLang(e.target.value)}>
-                {MANUAL_LANGS.map((l) => (
+              <span>{chrome.languageLabel}</span>
+              <select
+                value={lang}
+                onChange={(e) => setLang(resolveManualLanguage(e.target.value))}
+              >
+                {MANUAL_LANGUAGES.map((l) => (
                   <option key={l.code} value={l.code}>
                     {l.label}
                   </option>
@@ -227,7 +217,7 @@ export default function Manual(): React.JSX.Element {
               </select>
             </label>
             <button type="button" className="manual-dl" onClick={() => void salveaza()} disabled={descarca}>
-              {descarca ? '…' : 'Download'}
+              {descarca ? '…' : chrome.download}
             </button>
           </div>
         </div>
@@ -236,20 +226,20 @@ export default function Manual(): React.JSX.Element {
         {traduce && (
           <div className="manual-translating" role="status">
             <span className="manual-spin" aria-hidden="true" />
-            Translating… showing English until it is ready.
+            {chrome.translating}
           </div>
         )}
 
-        {!doc && <p className="chat-hint">…</p>}
+        {!visibleDoc && <p className="chat-hint">…</p>}
 
         {/* REZULTATELE CĂUTĂRII (10 aug): cât timp e text în search, lista de
             potriviri ia locul cărții; click pe un rezultat = salt la fila lui. */}
-        {doc && cauta.trim() && (
-          <div className="manual-book" lang={doc.lang}>
+        {visibleDoc && cauta.trim() && (
+          <div className="manual-book" lang={visibleDoc.lang}>
             <div className="manual-leaf">
               {(() => {
                 const rezultate = cautaInFile(file, cauta)
-                if (rezultate.length === 0) return <p className="chat-hint">0 — no matches</p>
+                if (rezultate.length === 0) return <p className="chat-hint">0 — {chrome.noMatches}</p>
                 return (
                   <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {rezultate.map((r) => (
@@ -271,10 +261,10 @@ export default function Manual(): React.JSX.Element {
             </div>
           </div>
         )}
-        {doc && !cauta.trim() && (
+        {visibleDoc && !cauta.trim() && (
           <>
-            <div className="manual-book" lang={doc.lang} dir={rtl ? 'rtl' : 'ltr'}>
-              <div className={`manual-leaf ${intoarce ? `turn-${intoarce}` : ''}`} key={`${doc.lang}-${fila}`}>
+            <div className="manual-book" lang={visibleDoc.lang} dir="ltr">
+              <div className={`manual-leaf ${intoarce ? `turn-${intoarce}` : ''}`} key={`${visibleDoc.lang}-${fila}`}>
                 {file[fila]?.fel === 'coperta' && (
                   <div className="leaf-cover">
                     <div className="leaf-crest" aria-hidden="true">K</div>
@@ -285,7 +275,7 @@ export default function Manual(): React.JSX.Element {
                         <span key={c}>{c}</span>
                       ))}
                     </div>
-                    <p className="leaf-hint">← → turn the page</p>
+                    <p className="leaf-hint">{chrome.turnHint}</p>
                   </div>
                 )}
                 {file[fila]?.fel === 'proza' && (
@@ -346,17 +336,17 @@ export default function Manual(): React.JSX.Element {
             </div>
 
             <div className="manual-nav">
-              <button type="button" onClick={() => muta(-1)} disabled={fila === 0} aria-label="Previous page">
+              <button type="button" onClick={() => muta(-1)} disabled={fila === 0} aria-label={chrome.previousPage}>
                 ‹
               </button>
               <span className="manual-pageno">
                 {fila + 1} / {file.length}
               </span>
-              <button type="button" onClick={() => muta(1)} disabled={fila === ultima} aria-label="Next page">
+              <button type="button" onClick={() => muta(1)} disabled={fila === ultima} aria-label={chrome.nextPage}>
                 ›
               </button>
             </div>
-            <p className="manual-foot">{doc.footer}</p>
+            <p className="manual-foot">{visibleDoc.footer}</p>
           </>
         )}
       </div>

@@ -41,7 +41,7 @@ describe('P28 — RUPTURA #3: FIECARE comandă din meniul ▦ Aplicații e o AC�
   // Textele se citesc CHIAR din Stage.tsx (perechile [etichetă, comandă]) —
   // dacă cineva adaugă mâine o intrare care pică pe faza de vorbire (fără
   // unealta ei în runda 1), testul ăsta o prinde înainte de live.
-  const perechi = [...stage.matchAll(/\['(?:[^'\]]*?)',\s*'([^']{10,})'\]/g)].map((m) => m[1])
+  const perechi = [...stage.matchAll(/\[\s*'[^']+'\s*,\s*'([^']{10,})'\s*,?\s*\]/g)].map((m) => m[1])
 
   it('meniul are comenzile așteptate (plasa citirii nu s-a rupt)', () => {
     expect(perechi.length).toBeGreaterThanOrEqual(15)
@@ -78,7 +78,7 @@ describe('P28 — RUPTURA #5: prețurile au o SURSĂ (lista_tarife), nu se inven
     expect(chat).toMatch(/name: 'lista_tarife'/)
     expect(chat).toMatch(/case 'lista_tarife': \{/)
     expect(chat).toMatch(/meniulDeTarife\(\)\.map/)
-    expect(chat).toMatch(/video_activ: cheiaTarifVideo\(\)/)
+    expect(chat).toMatch(/video_activ: cheiaTarifGenerareVideo\(\)/)
   })
 
   it('e în ambele liste de unelte și e permisă pe faza de vorbire (prețul e conversație)', () => {

@@ -16,6 +16,7 @@
 // The admin tools do NOT enter: the manual is for users.
 import { CAPABILITIES } from './brainCapabilities.js'
 import { meniulDeTarife, lirePentru } from './tarife.js'
+import { config } from '../config.js'
 
 // ── THE MANUAL'S CLOSED LANGUAGE LIST (8 codes) ────────────────────────────
 // Adrian, Jul 30: "the manual will show 7 major languages, translate
@@ -39,7 +40,10 @@ export function isManualLang(v: string): boolean {
 export interface ManualSection {
   title: string
   paragraphs: string[]
+  /** Server-authoritative visibility. Clients must still filter fail-closed. */
+  audience: 'public' | 'admin'
 }
+type ManualSectionContent = Omit<ManualSection, 'audience'>
 export interface ManualGroup {
   title: string
   /** The group's key (google, vedere, browser…) — the frontend draws the
@@ -102,7 +106,7 @@ export const GROUP_ICONS: Record<string, string> = {
 const TITLE = 'Kelionai — User Manual'
 const SUBTITLE = 'Everything Kelion can do for you, and how to ask for it.'
 
-const SECTIONS: ManualSection[] = [
+const SECTIONS: ManualSectionContent[] = [
   {
     title: 'What Kelion is',
     paragraphs: [
@@ -122,15 +126,15 @@ const SECTIONS: ManualSection[] = [
       // pe sesiunea Live vocea NU poate întrerupe cât Kelion vorbește (half-
       // duplex + NO_INTERRUPTION) — întrerupi TASTÂND sau cu butonul.
       // F4: fraza restrânsă la TEXT simplu — tura cu ATAȘAMENT cât Live e viu
-      // merge pe canalul clasic și rămâne vizuală (Chirp suprimat), nu vocală.
+      // merge pe canalul clasic și rămâne vizuală (TTS separat suprimat), nu vocală.
       'Kelion listens hands-free while the voice session is on. Replies in a voice session are spoken with its one live voice, and if you type a message while the voice session is active, the answer comes back in that same voice — typing also interrupts it mid-sentence when you need to cut in. (A message with an attachment is answered on screen instead.) When you are offline, your device’s own voice reads the offline answers aloud.',
     ],
   },
   {
     title: 'What it sees',
     paragraphs: [
-      'With the camera on, Kelion can look at you and at whatever you hold up to it — a document, a part, a screen, a label. Ask "what is this?" or "read me this" and it answers from what it actually sees, not from a guess.',
-      'Kelion also recognises whether the person speaking is the account holder. If the voice or the face is not yours, it becomes careful: it will not reveal your personal data or act on your behalf without confirmation. This happens silently — there is nothing to switch on.',
+      'When you explicitly ask a visual question and provide a camera snapshot or image, Kelion can inspect a document, part, screen or label and answer from that request. It does not continuously retain camera frames as sensor history.',
+      'Camera images and voice profiles never prove identity or grant access. Account permissions come only from the authenticated session. The current product does not enrol a facial biometric profile.',
     ],
   },
   {
@@ -161,19 +165,9 @@ const SECTIONS: ManualSection[] = [
   {
     title: 'When you lose signal — the companion mode',
     paragraphs: [
-      // „talk and type" → tastare (urechea offline nu există încă — pasul 7 din
-      // proiectul voce; răspunsurile SE rostesc cu vocea dispozitivului).
-      'When your phone loses all signal — in a car, on a plane, underground — Kelion does not go dark. It switches automatically to a smaller brain that runs entirely on your device, keeps your avatar, and stays with you: you can type to it, it speaks its answers aloud, and it remembers the conversation so far. Understanding your voice offline is not available yet — the ear needs the internet. It is honest about being offline — it will not invent web results, weather or live data it cannot reach. It is a companion in that moment, not the full assistant.',
-      'It senses what your device can sense: where you are and how fast you are moving — so it can say human things like "you are doing about 90, long drive?" — and, with the camera on, that it can see you. When you ask for something that truly needs the internet, it saves the question and tells you it will answer when the signal returns. The moment you are back online it reconnects on its own, sends the offline conversation to the server so nothing is lost, resolves the saved questions and tells you civilly: "here is the answer to what you asked while you were offline…".',
-      // ADUS LA COD (lot A + registrul lot D): descărcarea e AUTOMATĂ pe ORICE
-      // net (poarta Wi-Fi scoasă la ordin) și complet INVIZIBILĂ (StatusOffline
-      // șters) — bara, butonul și „îți spune pe față" nu mai există.
-      // FĂRĂ pretenția „runs on both" (F3, regula #1): modelul cere multă
-      // memorie GPU + shader-f16, iar pe iPhone nimeni n-a măsurat-o — se spune
-      // condiționat pe capabilitatea dispozitivului, nu ca fapt.
-      'Android vs iPhone — what differs. The on-device brain needs WebGPU and enough graphics memory for the model; on capable devices the offline model downloads automatically, on any connection, on both platforms — on devices that cannot hold it, the offline companion simply is not available. Background notifications are more limited by iOS. Everything else — typing offline, location, movement speed, and the automatic reconnect and sync — works the same on both.',
-      'Preparing the offline brain is automatic and silent. While you are online, Kelion checks on its own whether your device already holds the current offline model; if not, it downloads it quietly in the background — no bar, no button, nothing to press. Once it is downloaded it stays put: an app update is still applied normally, but it no longer erases the model, and the storage is marked persistent so the browser will not evict it either — it is downloaded only once. It needs a device with WebGPU; on devices without it, the offline companion simply is not available.',
-      'Offline is also the most contained Kelion can be. With no network it reaches no server, no Google account, no stored memory and no tools — so it cannot read your saved data, send anything, or act on your behalf. It works only from the conversation on the device and what the device’s own sensors measure, and it says so honestly. Your account, its memory and its powers stay behind the connection it cannot reach until you are back online.',
+      'Offline mode is optional and must first be installed explicitly from Settings on a compatible device. The app performs a capability and storage preflight before downloading the local kit; it never installs a large model silently.',
+      'With no network, language, transcription and speech run only on the device from the installed kit. The offline assistant cannot reach the server, Google, web search, stored account memory or online tools, and it does not invent live results.',
+      'Offline turns carry stable request identifiers. After reconnection, only acknowledged turns are removed from the local queue, so a retry does not duplicate stored history or external effects.',
     ],
   },
   {
@@ -182,7 +176,7 @@ const SECTIONS: ManualSection[] = [
       // „never cut off" era mai tare decât codul (verificatorul D): bifarea doar
       // PREGĂTEȘTE plata (linkul Revolut nu poate trage bani singur) — omul tot
       // apasă plata, deci poate fi tăiat. Spus cum E.
-      'Kelion runs on prepaid credits. You top up from the credit pill in the top bar, and usage is drawn from your balance as you go. You can also turn on automatic top-up: when your balance runs low, Kelion prepares the payment and asks you to confirm it — the actual payment always stays in your hands.',
+      'Kelion runs on prepaid credits. You top up from the credit pill in the top bar, and usage is drawn from your balance as you go. An optional low-credit reminder can prompt you to open a hosted checkout; it never charges you automatically.',
       // GUSTAREA GRATIS (owner, 14 aug): the taster exists — the manual says so.
       'Your first visit comes with a small welcome credit, on the house, so you can try Kelion before paying anything. It is granted once per account.',
     ],
@@ -199,17 +193,14 @@ const SECTIONS: ManualSection[] = [
   {
     title: 'Privacy',
     paragraphs: [
-      // ADUS LA REALITATE (owner, 14 aug: „baza de utilizatori nu se șterge
-      // prin nicio comandă") — the old "delete your account at any time, from
-      // settings" promised a button that no longer exists.
-      'Your conversations, memory, notes, voice and face data belong to your account and are never shared with another user. To exercise your legal right to erasure, write to contact@kelionai.app — deletion requests are handled personally, with confirmation, not by an automatic button.',
+      'Your conversations, memories, notes and consent-based sensor data belong to your account and are isolated from other users. Account settings provide authenticated self-service deletion. The receipt identifies data erased and any legally required financial records retained in pseudonymised form until their stated expiry.',
     ],
   }, {
     title: 'Your data and continuity',
     paragraphs: [
       'Kelion keeps your account data on the application server so that conversations, memory and credits survive restarts. You can always ask Kelion in chat what it remembers about you, and you can ask it to forget a specific memory when that skill is available to your account.',
       'The service also keeps encrypted technical backups of the database on a schedule, so the platform can recover after a failure. Those backups are operational infrastructure: they are not a public download folder, and other users cannot see your data through them. Only the site owner can run restore procedures.',
-      'If something looks wrong with your balance, history or login, say so in chat or write to contact@kelionai.app. You do not need special commands — plain language is enough.',
+      `If something looks wrong with your balance, history or login, say so in chat or write to ${config.product.supportEmail}. You do not need special commands — plain language is enough.`,
     ],
   }
 ]
@@ -219,7 +210,7 @@ const ABILITIES_INTRO =
   'This list is generated from the assistant itself, so it can never fall out of date. You do not call these by name — you ask in your own words and Kelion picks the right one.'
 const COL_WHAT = 'What it does'
 const COL_SAY = 'Just say'
-const FOOTER = 'Kelionai — kelionai.app'
+const FOOTER = `${config.product.appName} — ${new URL(config.publicOrigin).hostname}`
 
 const GROUP_TITLES: Record<string, string> = {
   google: 'Google, search and everyday answers',
@@ -276,9 +267,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
 
   // Eyes and grounding
   look: { what: 'Looks through your camera at you or at what you show it', say: '"what is this part?"' },
-  observatii_vizuale: { what: 'Recalls what Kelion has seen recently from the continuous vision system', say: '"what have you noticed today?"' },
-  evenimente_sonore: { what: 'Recalls sounds Kelion heard recently from the ambient hearing system', say: '"did you hear something?"' },
-  stare_emotionala: { what: 'Reads your emotional state from your facial expression to adapt its tone', say: '"how do I seem to you?"' },
+  evenimente_sonore: { what: 'Shows coarse, inconclusive FFT hints (sudden noise / possible conversation or music), never a confirmed source or emergency', say: '"was there a possible sound change?"' },
   get_monitor: { what: 'Checks what is actually on your screen right now', say: '"what am I looking at?"' },
   click_monitor: { what: 'Clicks a precise spot on your screen', say: '"click at coordinates 300 400"' },
   zoom_monitor: { what: 'Zooms in or out on your screen', say: '"zoom in on the page"' },
@@ -294,7 +283,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   generate_image: { what: 'Draws an image from your description', say: '"draw me a red kitchen"' },
   generate_video: { what: 'Makes a short video clip from your description (paid, only if enabled)', say: '"make me a video of waves at sunset"' },
   lista_tarife: { what: 'Reads the live price list of extra services (the price you are told is the price charged)', say: '"how much does a video clip cost?"' },
-  studioul_de_clipuri: { what: 'The Clip Studio: give it an idea and it plans the whole clip — free path (Google Flow, your account) or paid (Veo)', say: '"use the Clip Studio: a 8s ad for my bakery"' },
+  studioul_de_clipuri: { what: 'The Clip Studio: give it an idea and it prepares an OpenAI video plan, tariff confirmation and prompt', say: '"use the Clip Studio: an ad for my bakery"' },
   vede_video: { what: 'Watches a YouTube video for you and pulls out the main ideas, facts and key moments (then remembers them)', say: '"watch this video and tell me the main ideas: <link>"' },
   open_app_view: { what: 'Opens a panel of the app for you', say: '"open my settings"' },
   proceseaza_date: { what: 'Reads a CSV/JSON you paste and works out totals, averages or a summary, shown on your screen', say: '"add up this CSV by region"' },
@@ -306,9 +295,6 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   list_memories: { what: 'Tells you what it remembers about you', say: '"what do you remember about me?"' },
   cauta_istoric: { what: 'Searches your full past chat history with it', say: '"what did we talk about last week?"' },
   apeleaza_user: { what: 'Calls another Kelion user — a live audio channel with translation between your languages', say: '"call Maria"' },
-  allow_guest_voice: { what: 'Lets someone you name talk to it by voice for a while', say: '"let my son talk to you"' },
-  approve_guest_voice: { what: 'Confirms keeping a guest\'s voice after their first words', say: '"yes, keep his voice"' },
-  forget_guest: { what: 'Forgets a guest\'s voice', say: '"forget my friend\'s voice"' },
   dovada_faptelor: { what: 'Shows the saved record of what it actually did for you — each task with its measured outcome', say: '"show me proof you sent that email"' },
   forget_memory: { what: 'Forgets something on request', say: '"forget what I said about the car"' },
 
@@ -325,7 +311,6 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
 
   // Deep thinking
   ask_brain: { what: 'Sends a hard question to its full reasoning brain', say: 'happens on its own when needed' },
-  propose_tool: { what: 'Asks for a new ability it does not have yet', say: 'happens on its own' },
 
   // Other
   log_unsupported_request: { what: 'Records something it cannot do yet, so it can be built', say: 'happens on its own' },
@@ -348,6 +333,7 @@ export function buildManual(): ManualDoc {
     s.title === 'Price menu'
       ? {
           ...s,
+          audience: 'public',
           paragraphs: [
             ...s.paragraphs,
             ...meniulDeTarife().map(
@@ -355,7 +341,7 @@ export function buildManual(): ManualDoc {
             ),
           ],
         }
-      : s,
+      : { ...s, audience: 'public' },
   )
   return {
     lang: 'en',
@@ -381,37 +367,43 @@ export function buildManual(): ManualDoc {
 // voce „Jarvis"). Textul întreg, canonic: `PROIECT-CHAT-VOCE.md`. E în ROMÂNĂ și
 // se adaugă DUPĂ traducere (nu trece prin traducător) — adminul = owner-ul.
 export function buildAdminChapters(): ManualSection[] {
+  const userSharePercent = config.billing.userShareBps / 100
+  const marginSharePercent = config.billing.marginShareBps / 100
   return [
     {
-      title: '🔒 Doar admin — Proiectul de chat voce „Jarvis"',
+      title: '🔒 Doar admin — Voce live și orchestrare',
+      audience: 'admin',
       paragraphs: [
-        'Bătut în cuie cu owner-ul, pas cu pas (20 aug 2026). Ținta: 100% VORBIT — o prezență vocală mereu acolo, ca un Jarvis. Ce auzi e mereu voce; nu devine niciodată chat scris.',
-        'Repară din rădăcină bug-ul măsurat „vocea pornește 2 secunde și se rupe": pe o tură vorbită se băteau DOUĂ motoare de voce (Gemini Live + Chirp). Online rămâne UN singur motor — Gemini Live; Chirp iese de pe calea vocală → coliziunea dispare.',
-        'Documentul întreg, canonic: PROIECT-CHAT-VOCE.md (versionat în cod). Istoricul deciziilor: DRAFT-PROIECT-VOCE-ONLY.md.',
+        'Vocea live folosește OpenAI Realtime și aceeași identitate, memorie și politică de unelte ca chatul. O unealtă globală sau administrativă nu este oferită unui client obișnuit.',
+        'Imaginile sunt instantanee cerute explicit, nu video continuu. Rezultatul unei unelte și meteringul poartă aceeași cheie idempotentă pentru a preveni repetarea efectelor la reconectare.',
+        'Pauza, întreruperea și erorile sunt stări vizibile ale protocolului; ruta nu pretinde că o tură a reușit dacă furnizorul sau evidența durabilă a eșuat.',
       ],
     },
     {
-      title: '🔒 Doar admin — Legile lui Kelion',
+      title: '🔒 Doar admin — Autoritate și contabilitate',
+      audience: 'admin',
       paragraphs: [
-        'Adevărul mai presus de orice: contează oricât ar costa și oricât ar dura. Nici timpul, nici banii nu scuză minciuna. Încrederea se clădește cu argumente măsurate, verificabile — și se pierde într-o clipă.',
-        'Linia roșie: Kelion nu spune ceva doar ca să placă urechii și să fie prins că a mințit — mai ales „am făcut" ceva ce nu e făcut. Verificarea e invizibilă: nu-și narează procesul („stai să măsor"), ci ori dă răspunsul verificat, ori pune o întrebare firească.',
-        'Cele patru arte: negocierea, prezentarea, discuția, gândirea. Calitatea răspunsului înaintea vitezei — nu e raliu. Monitorul NU se citește niciodată cu voce: se anunță scurt „uite pe monitor" și se arată; ecranul e pentru ochi, vocea pentru conversație.',
+        'Autoritatea de admin vine exclusiv din identitatea Google verificată și emailul configurat pe server. Roluri din baza de date, biometria, headerele și răspunsul modelului nu pot acorda privilegii.',
+        'Toate capabilitățile Kelion au debit de produs exact zero pentru admin. Consumul real OpenAI rămâne măsurat separat ca cheltuială internă și nu este ascuns ori amestecat cu portofelul.',
+        `Pentru clienți, alimentările eligibile sunt contabilizate în penny întregi cu split exact ${userSharePercent}% credit și ${marginSharePercent}% marjă. Costurile furnizorului folosesc separat USD micros.`,
       ],
     },
     {
-      title: '🔒 Doar admin — Cum lucrează (ușor/greu + cățelul)',
+      title: '🔒 Doar admin — Constructor și publicare',
+      audience: 'admin',
       paragraphs: [
-        'Ușor = Live răspunde singur, cu vocea lui. Greu = Live cheamă creierul puternic pe canal de TEXT (nu audio), primește rezultatul ca text și îl rostește el — un singur motor și la greu.',
-        'Perioada de gândire e triere în doi: Live culege date și le picură creierului greu, care cere înapoi ce-i mai lipsește; se oprește când nicio întrebare nu mai mișcă răspunsul (convergență). Întrebările către om trebuie decente, nu interogatoriu.',
-        'Cățelul anti-minciună (poarta faptelor) demască pretențiile fără unealtă reușită — pe chatul scris ȘI pe voce (pe voce nota e „nu pot verifica", pe ecran, niciodată citită cu glas). Faptele lasă dovadă salvată în jurnalul operațional, scoasă la cerere („asul din mânecă").',
+        'Web-ul validează și pune ordine în coadă; nu deține worktree, shell, credentiale Git sau tokenuri Codex. Workerul separat se autentifică prin clientul oficial codex login.',
+        'Un job are lease, heartbeat, progres și rezultate durabile. Executorul nu poate declara singur publicarea sau deploy-ul, iar un browser admin citește numai starea autorizată.',
+        'Fluxul verificabil este job, worktree izolat, codex exec, porți, PR, îmbinare și deploy separat cu backup și readiness.',
       ],
     },
     {
-      title: '🔒 Doar admin — Offline & opțiuni',
+      title: '🔒 Doar admin — Offline și limite',
+      audience: 'admin',
       paragraphs: [
-        'Offline = rezervă (online rămâne Jarvis-ul real). AZI, offline: scrii de la tastatură (urechea offline nu există încă — tastatura sare deliberat veriga slabă), creierul local răspunde, iar vocea e cea a browserului — care deocamdată NU mișcă buzele avatarului. Piper (gura cu buze) și urechea on-device sunt pasul 7 din proiect — plan, nu realitate măsurată. Camera prinde cadre, dar „a vedea" offline cere un model de viziune pe dispozitiv — nu azi.',
-        'Opțiune neobligatorie: poți scrie de la tastatură în loc să vorbești; răspunsul vine tot ca VOCE (nu afișăm text-răspuns pe ecran).',
-        'Separat, decis: constructorul aplicației = Devin (extern, pe cheia owner-ului).',
+        'Kitul offline este local, explicit și opțional. Instalarea pornește numai din Settings după preflight; modelele locale nu primesc chei și nu sunt folosite drept alternativă cloud a serverului.',
+        'Fără rețea nu există acces la Google, memoria serverului, browser sau date live. Coada locală se sincronizează numai după autentificare și confirmă identificatorii acceptați, fără coordonate persistate implicit.',
+        'Separat, decis: Constructorul aplicației folosește Codex prin autentificarea oficială ChatGPT a adminului. Funcțiile runtime ale aplicației folosesc proiectul OpenAI API separat; abonamentul ChatGPT nu este transformat într-o cheie API.',
       ],
     },
   ]

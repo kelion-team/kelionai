@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { parseConstructorStrategy } from './services/constructorStrategist.js'
 
-// ── LACĂT: strategul nu mai pică pe o cheie în plus de la Gemini ───────────────
+// ── LACĂT: strategul nu mai pică pe o cheie în plus de la model ────────────────
 // Auditul din 22 aug a raportat „proprietăți nepermise în hypotheses" → toată
 // strategia era respinsă (additionalProperties:false) și autonomia se bloca.
 // Fix: cheile străine se taie ÎNAINTE de validare (pruneToSchema). NU inventăm

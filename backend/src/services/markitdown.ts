@@ -1,60 +1,59 @@
-import { spawn } from 'node:child_process'
-import { writeFile, unlink, mkdtemp, rmdir } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { extname } from 'node:path'
+import { config } from '../config.js'
+import { requestInternalService } from './internalServiceRequest.js'
 
-// Document ingestion via Microsoft MarkItDown (installed in the image, see the
-// Dockerfile). Converts an uploaded file — PDF, Word, PowerPoint, Excel, HTML,
-// etc. — into Markdown text that Kelion (and its agents) can read. The Python
-// package does the heavy lifting; we just hand it a temp file and read stdout.
+const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
+const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
+const MAX_RESPONSE_BYTES = 2_100_000
+const MIME_BY_EXTENSION: Readonly<Record<string, string>> = Object.freeze({
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+})
 
-export async function documentToMarkdown(bytes: Buffer, filename: string): Promise<string> {
-  const safe = (filename || 'file').replace(/[^\w.\- ]/g, '_').slice(0, 120) || 'file'
-  const dir = await mkdtemp(join(tmpdir(), 'kelion-doc-'))
-  const path = join(dir, safe)
-  await writeFile(path, bytes)
-  try {
-    const md = await new Promise<string>((resolve, reject) => {
-      const py = spawn('python3', [
-        '-c',
-        'import sys;from markitdown import MarkItDown;sys.stdout.write(MarkItDown().convert(sys.argv[1]).text_content or "")',
-        path,
-      ], { detached: true })
-      // setEncoding buffers partial UTF-8 bytes across chunk boundaries —
-      // otherwise diacritics (ă ș ț) that land on a boundary corrupt into "�".
-      py.stdout.setEncoding('utf8')
-      py.stderr.setEncoding('utf8')
-      let out = ''
-      let err = ''
-      // TIMEOUT (W10 #3): a malformed PDF could hang MarkItDown forever — the
-      // process stayed stuck, the promise unresolved, the temp file leaked.
-      // At 30s we kill the whole process group and reject cleanly.
-      const killer = setTimeout(() => {
-        try {
-          if (py.pid) process.kill(-py.pid, 'SIGKILL')
-          else py.kill('SIGKILL')
-        } catch { py.kill('SIGKILL') }
-        reject(new Error('markitdown timeout 30s'))
-      }, 30_000)
-      py.stdout.on('data', (d) => {
-        out += d
-      })
-      py.stderr.on('data', (d) => {
-        err += d
-      })
-      py.on('error', (e) => { clearTimeout(killer); reject(e) })
-      py.on('close', (code) => {
-        clearTimeout(killer)
-        // Ternar folosit ca instrucțiune: analizorul îl semnala („expression not
-        // used"), iar la citit ascunde care ramură rulează. Același comportament,
-        // scris ca ce este — o ramificație.
-        if (code === 0) resolve(out)
-        else reject(new Error(err.trim().slice(0, 200) || `exit ${code}`))
-      })
-    })
-    return md.trim()
-  } finally {
-    await unlink(path).catch(() => {})
-    await rmdir(dir).catch(() => {})
+/**
+ * Converts an untrusted document only through the isolated, no-network worker.
+ * The web process never writes the document to disk or starts a parser.
+ */
+export async function documentToMarkdown(bytes: Buffer, filename: string, requestId: string = randomUUID()): Promise<string> {
+  const safeName = String(filename ?? '').replace(/[^A-Za-z0-9_. -]/g, '_').slice(0, 120)
+  const extension = extname(safeName).toLowerCase()
+  const mime = MIME_BY_EXTENSION[extension]
+  if (!safeName || !mime) throw new Error('converter_type_rejected')
+  const maxBytes = ['.docx', '.xlsx', '.pptx'].includes(extension) ? MAX_ARCHIVE_BYTES : MAX_DOCUMENT_BYTES
+  if (!Buffer.isBuffer(bytes) || bytes.length < 1 || bytes.length > maxBytes) throw new Error('converter_size_rejected')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw new Error('converter_request_id_invalid')
   }
+
+  const contentHash = createHash('sha256').update(bytes).digest('hex')
+  const response = await requestInternalService({
+    socketPath: config.converterWorker.socket,
+    secret: config.converterWorker.secret,
+    path: '/v1/convert',
+    body: bytes,
+    timeoutMs: 35_000,
+    maxResponseBytes: MAX_RESPONSE_BYTES,
+    headers: {
+      'content-type': mime,
+      'x-request-id': requestId,
+      'x-filename': safeName,
+      'x-content-sha256': contentHash,
+    },
+  })
+  if (response.status !== 200) throw new Error(`converter_rejected:${response.status}`)
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(response.body.toString('utf8'))
+  } catch {
+    throw new Error('converter_response_invalid')
+  }
+  const markdown = (decoded as { markdown?: unknown } | null)?.markdown
+  if (typeof markdown !== 'string' || markdown.length > MAX_RESPONSE_BYTES) throw new Error('converter_response_invalid')
+  return markdown.trim()
 }

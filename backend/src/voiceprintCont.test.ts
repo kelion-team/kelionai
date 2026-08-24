@@ -1,96 +1,57 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify from 'fastify'
 
+const state = vi.hoisted(() => ({ email: 'a@example.test', rows: new Map<string, unknown>() }))
+
 vi.mock('./session.js', () => ({
-  getSessionUser: vi.fn(() => ({
-    email: 'user@example.com',
-    name: 'Test User',
-    role: 'user',
-  })),
+  getSessionUser: () => state.email
+    ? { email: state.email, name: 'Customer', role: 'customer', authProvider: 'google', picture: '', locale: 'en' }
+    : null,
+}))
+vi.mock('./db.js', () => ({
+  saveVoiceprint: vi.fn(async (input: { email: string; name: string; features: number[]; featureMeta: { centroid: number } }) => {
+    state.rows.set(input.email, { email: input.email, name: input.name, features: input.features, featureMeta: input.featureMeta })
+  }),
+  getVoiceprint: vi.fn(async (email: string) => state.rows.get(email) ?? null),
+  deleteVoiceprint: vi.fn(async (email: string) => state.rows.delete(email)),
 }))
 
-vi.mock('./db.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./db.js')>()
-  const prints: Record<string, unknown> = {}
-  return {
-    ...actual,
-    saveVoiceprint: vi.fn(async (v) => {
-      prints[v.email] = {
-        email: v.email,
-        name: v.name,
-        gender: v.gender,
-        isAdmin: v.isAdmin,
-        features: v.features,
-        featureMeta: v.featureMeta,
-        audioClip: v.audioClip,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-    }),
-    getVoiceprint: vi.fn(async (email) => prints[email] || null),
-    listVoiceprints: vi.fn(async () => Object.values(prints)),
-  }
+const { voiceprintRoutes } = await import('./routes/voiceprint.js')
+
+beforeEach(() => {
+  state.email = 'a@example.test'
+  state.rows = new Map([
+    ['b@example.test', { email: 'b@example.test', features: [9, 9, 9], featureMeta: { centroid: 9 } }],
+  ])
 })
 
-import { voiceprintRoutes } from './routes/voiceprint.js'
-import { saveVoiceprint } from './db.js'
-
-describe('Voiceprint User Account Linking (Cerinta #18)', () => {
-  it('saves and associates voiceprint directly with the user profile in the database', async () => {
+describe('profil vocal user-scoped', () => {
+  it('înscrie profilul fără gender/admin și declară lipsa identificării neurale', async () => {
     const app = Fastify()
     await app.register(voiceprintRoutes)
-
-    const payload = {
-      vector: [0.1, 0.2, 0.3, 0.4, 0.5],
-      meta: {
-        pitchMean: 140,
-        pitchStd: 12,
-        pitchMin: 100,
-        pitchMax: 200,
-        centroid: 520,
-        rolloff: 800,
-        zcr: 0.1,
-        energy: 45.2,
-        jitter: 0.01,
-        shimmer: 0.02,
-      },
-      clip: 'data:audio/wav;base64,AAA...',
-    }
-
-    const res = await app.inject({
+    const response = await app.inject({
       method: 'POST',
       url: '/api/voiceprint/me',
-      payload,
+      payload: { vector: [1, 2, 3], meta: { centroid: 2_000 } },
     })
-
-    expect(res.statusCode).toBe(200)
-    const body = JSON.parse(res.body)
-    expect(body.ok).toBe(true)
-    expect(body.voiceprint).toBeDefined()
-    expect(body.voiceprint.email).toBe('user@example.com')
-    expect(saveVoiceprint).toHaveBeenCalled()
-
-    const checkRes = await app.inject({
-      method: 'GET',
-      url: '/api/voiceprint/me',
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      ok: true,
+      voiceprint: { email: 'a@example.test' },
+      availability: { method: 'spectral_profile', neuralSpeakerIdentification: false, authority: 'personalisation_only' },
     })
-
-    expect(checkRes.statusCode).toBe(200)
-    const checkBody = JSON.parse(checkRes.body)
-    expect(checkBody.voiceprint).toBeDefined()
-    expect(checkBody.voiceprint.email).toBe('user@example.com')
+    expect(response.body).not.toContain('gender')
+    expect(response.body).not.toContain('isAdmin')
   })
 
-  it('rejects invalid or empty vectors when saving voiceprint', async () => {
+  it('revocă numai profilul sesiunii și nu atinge alt cont', async () => {
+    state.rows.set('a@example.test', { email: 'a@example.test' })
     const app = Fastify()
     await app.register(voiceprintRoutes)
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/voiceprint/me',
-      payload: { vector: [] },
-    })
-
-    expect(res.statusCode).toBe(400)
+    const response = await app.inject({ method: 'DELETE', url: '/api/voiceprint/me', payload: { email: 'b@example.test' } })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ ok: true, deleted: true })
+    expect(state.rows.has('a@example.test')).toBe(false)
+    expect(state.rows.has('b@example.test')).toBe(true)
   })
 })

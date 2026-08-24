@@ -1,7 +1,5 @@
-# iOS release: builds, signs and uploads the Kelionai .ipa to App Store Connect.
-# Runs on every push that changes the iOS shell or when triggered manually.
-# The web app itself updates live (the shell loads kelionai.app), so this only
-# needs to run when the SHELL changes — same philosophy as desktop/android.
+# Release iOS manual: construiește bundle-ul web local, sincronizează Capacitor,
+# semnează și încarcă aplicația. Nu rulează la push și nu folosește WebView remote.
 #
 # Required repository secrets (see ios/CI-SETUP.md):
 #   IOS_DIST_P12_BASE64        - Kelionai-secrets/ios-dist.p12, base64
@@ -14,45 +12,126 @@ name: ios-release
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master]
-    paths: ['ios/**']
+    inputs:
+      release_sha:
+        description: Commitul integral, deja verde pe master
+        required: true
+        type: string
+      build_number:
+        description: CFBundleVersion întreg și mai mare decât App Store Connect
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
 
 jobs:
   build-upload:
-    # Pe întrerupătorul ACTIONS_PORNIT (15 aug, ca deploy.yml și gemini-lock):
-    # facturarea blocată = niciun runner alocat vreodată → orice declanșare pe
-    # push (schimbări în ios/**) murea roșu cu email către owner. Sărit ≠ picat.
-    if: ${{ vars.ACTIONS_PORNIT == 'true' }}
+    environment: app-store-production
     runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      KELION_IOS_BUILD_NUMBER: ${{ inputs.build_number }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verifică commitul master și CI-ul exact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$KELION_IOS_BUILD_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]
+          [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ]
+          git fetch --no-tags origin master
+          [ "$(git rev-parse origin/master)" = "$RELEASE_SHA" ]
+          success=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$RELEASE_SHA&status=completed&per_page=20" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
+          [ "$success" -ge 1 ] || { echo '::error::Commitul nu are pr-verify verde.'; exit 1; }
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            ios/package-lock.json
+
+      - name: Bundle web local + sincronizare Capacitor
+        env:
+          IOS_PROVISIONING_PROFILE_SPECIFIER: ${{ vars.IOS_PROVISIONING_PROFILE_SPECIFIER }}
+        run: |
+          set -euo pipefail
+          [ -n "$IOS_PROVISIONING_PROFILE_SPECIFIER" ] || { echo "::error::IOS_PROVISIONING_PROFILE_SPECIFIER lipsește."; exit 1; }
+          npm --prefix frontend ci --no-audit --no-fund
+          npm --prefix ios ci --no-audit --no-fund
+          npm --prefix ios run sync
+          npm --prefix ios run verify
+          node -e "const p=require('./config/product.json'); for (const [k,v] of Object.entries({KELION_IOS_BUNDLE_ID:p.iosBundleId,KELION_IOS_TEAM_ID:p.iosTeamId,KELION_PUBLIC_APP_ORIGIN:p.publicAppOrigin,KELION_APP_VERSION:p.appVersion})) { if (!v) process.exit(1); require('fs').appendFileSync(process.env.GITHUB_ENV, k+'='+v+'\\n') }"
+
+      - name: Verifică build number monoton în App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          ASC_KEY_B64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_FILE: ${{ runner.temp }}/appstore-build-check.p8
+          IOS_BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_B64" ]
+          trap 'rm -f -- "$ASC_KEY_FILE"' EXIT
+          printf '%s' "$ASC_KEY_B64" | base64 -D > "$ASC_KEY_FILE"
+          export IOS_BUNDLE_ID="$KELION_IOS_BUNDLE_ID"
+          node ios/appstore-build.mjs
 
       - name: Import signing certificate
         env:
           P12_BASE64: ${{ secrets.IOS_DIST_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
         run: |
+          set -euo pipefail
+          umask 077
+          [ -n "$P12_BASE64" ] && [ -n "$P12_PASSWORD" ] || { echo "::error::Certificatul iOS sau parola lui lipsesc."; exit 1; }
           KEYCHAIN=build.keychain
           KEYCHAIN_PASS=$(uuidgen)
-          security create-keychain -p "$KEYCHAIN_PASS" $KEYCHAIN
-          security default-keychain -s $KEYCHAIN
-          security unlock-keychain -p "$KEYCHAIN_PASS" $KEYCHAIN
-          security set-keychain-settings -t 3600 -u $KEYCHAIN
-          echo "$P12_BASE64" | base64 -d > /tmp/dist.p12
-          security import /tmp/dist.p12 -k $KEYCHAIN -P "$P12_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" $KEYCHAIN
-          rm /tmp/dist.p12
+          P12_FILE="$RUNNER_TEMP/dist.p12"
+          trap 'rm -f -- "$P12_FILE"' EXIT
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN"
+          printf '%s' "$P12_BASE64" | base64 -D > "$P12_FILE"
+          security import "$P12_FILE" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN"
 
       - name: Install provisioning profile
         env:
           PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
         run: |
+          set -euo pipefail
+          umask 077
+          [ -n "$PROFILE_BASE64" ] || { echo "::error::IOS_PROFILE_BASE64 lipsește."; exit 1; }
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo "$PROFILE_BASE64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/kelionai-appstore.mobileprovision
+          printf '%s' "$PROFILE_BASE64" | base64 -D > ~/Library/MobileDevice/Provisioning\ Profiles/kelionai-appstore.mobileprovision
 
       - name: Archive
         working-directory: ios/ios/App
+        env:
+          IOS_PROVISIONING_PROFILE_SPECIFIER: ${{ vars.IOS_PROVISIONING_PROFILE_SPECIFIER }}
         run: |
           xcodebuild archive \
             -project App.xcodeproj \
@@ -61,10 +140,14 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath build/Kelionai.xcarchive \
             CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM=982XP625JT \
-            PRODUCT_BUNDLE_IDENTIFIER=app.kelionai.ios \
+            DEVELOPMENT_TEAM="$KELION_IOS_TEAM_ID" \
+            KELION_IOS_BUNDLE_ID="$KELION_IOS_BUNDLE_ID" \
+            KELION_PUBLIC_APP_ORIGIN="$KELION_PUBLIC_APP_ORIGIN" \
+            MARKETING_VERSION="$KELION_APP_VERSION" \
+            CURRENT_PROJECT_VERSION="$KELION_IOS_BUILD_NUMBER" \
+            PRODUCT_BUNDLE_IDENTIFIER="$KELION_IOS_BUNDLE_ID" \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="Kelionai App Store"
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_SPECIFIER"
 
       - name: Export .ipa
         working-directory: ios/ios/App
@@ -74,13 +157,45 @@ jobs:
             -exportPath build/export \
             -exportOptionsPlist ../../ExportOptions.plist
 
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Semnează proveniența IPA-ului exact
+        run: |
+          set -euo pipefail
+          ipa=(ios/ios/App/build/export/*.ipa)
+          [ "${#ipa[@]}" -eq 1 ] && test -s "${ipa[0]}"
+          cosign sign-blob --yes --bundle ios/Kelionai.sigstore.json "${ipa[0]}"
+          shasum -a 256 "${ipa[0]}" > ios/Kelionai.sha256
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-${{ inputs.release_sha }}-${{ inputs.build_number }}
+          path: |
+            ios/ios/App/build/export/*.ipa
+            ios/Kelionai.sigstore.json
+            ios/Kelionai.sha256
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload to App Store Connect
         env:
           ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
           ASC_KEY_B64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
         run: |
+          set -euo pipefail
+          umask 077
+          [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_B64" ] || { echo "::error::Credențialele App Store Connect lipsesc."; exit 1; }
+          case "$ASC_KEY_ID" in *[!A-Za-z0-9]*) echo "::error::ASC_API_KEY_ID are format invalid."; exit 1;; esac
           mkdir -p ~/.appstoreconnect/private_keys
-          echo "$ASC_KEY_B64" | base64 -d > ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
+          KEY_FILE="$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8"
+          trap 'rm -f -- "$KEY_FILE"' EXIT
+          printf '%s' "$ASC_KEY_B64" | base64 -D > "$KEY_FILE"
           xcrun altool --upload-app -f ios/ios/App/build/export/*.ipa -t ios \
             --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Curăță materialul de semnare
+        if: ${{ always() }}
+        run: |
+          rm -f -- "$HOME/Library/MobileDevice/Provisioning Profiles/kelionai-appstore.mobileprovision"
+          security delete-keychain build.keychain 2>/dev/null || true

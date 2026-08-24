@@ -181,11 +181,3 @@ export function gestioneazaMesaj(email: string, m: unknown): void {
       break
   }
 }
-
-// Doar pentru teste: golește starea între cazuri.
-export function _reset(): void {
-  prezenta.clear()
-  apeluri.clear()
-  contorApel = 0
-  genId = () => `apel_${++contorApel}`
-}

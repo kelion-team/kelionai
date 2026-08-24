@@ -66,15 +66,6 @@ export function actualizeazaStareSesiune(email: string, camp: Partial<Omit<Stare
   sesiuni.set(email, { ...s, ...camp })
 }
 
-/**
- * Uită contul — la deconectare, sau când ceva s-a schimbat din altă parte
- * (meserie schimbată din panou, gesturi debifate de admin, amprentă ștearsă).
- * Următoarea tură recitește o dată, curat.
- */
-export function uitaStareSesiune(email: string): void {
-  sesiuni.delete(email)
-}
-
 /** Uită TOT (setare globală schimbată de admin — ex. gesturile dezactivate). */
 export function uitaToateSesiunile(): void {
   sesiuni.clear()

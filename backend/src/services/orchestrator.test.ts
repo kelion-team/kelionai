@@ -3,15 +3,41 @@ import { describe, expect, it, vi } from 'vitest'
 // Mochez creierul (apelul modelului) ca să pot verifica DOAR ce model pleacă pe
 // fiecare rundă — pentru escaladarea ușor→greu la mijloc.
 const modeleFolosite: string[] = []
+const conversatii: unknown[][] = []
+let raspunsTextNestructurat: string | null = null
 vi.mock('./creierRationament.js', () => ({
-  rationeazaMesaje: async (_convo: unknown, optR: { model: string; reasoning?: string }) => {
+  rationeazaMesaje: async (convo: unknown[], optR: { model: string; reasoning?: string }) => {
     modeleFolosite.push(optR.model)
+    conversatii.push(structuredClone(convo))
+    if (raspunsTextNestructurat !== null) {
+      return {
+        text: raspunsTextNestructurat, model: optR.model, stop: 'completed', responseId: 'resp_text', serviceTier: null,
+        inputTokens: 1, outputTokens: 1, cachedInputTokens: 0, reasoningOutputTokens: 0,
+        toolCalls: [], responseItems: [{ type: 'message', id: 'msg_text', content: [] }],
+      }
+    }
     // Runda 1: cheamă ask_brain (declanșează escaladarea). Runda 2: fără unelte → gata.
     if (modeleFolosite.length === 1)
-      return { text: '', costUsd: 0, model: optR.model, toolCalls: [{ id: '1', function: { name: 'ask_brain', arguments: '{}' } }] }
-    return { text: 'gata', costUsd: 0, model: optR.model, toolCalls: [] }
+      return {
+        text: '', model: optR.model, stop: 'completed', responseId: 'resp_1', serviceTier: null,
+        inputTokens: 1, outputTokens: 1, cachedInputTokens: 0, reasoningOutputTokens: 1,
+        toolCalls: [{ id: '1', type: 'function', function: { name: 'ask_brain', arguments: '{}' } }],
+        responseItems: [
+          { type: 'reasoning', id: 'rs_1', encrypted_content: 'opaque' },
+          { type: 'function_call', id: 'fc_1', call_id: '1', name: 'ask_brain', arguments: '{}' },
+        ],
+      }
+    return {
+      text: 'gata', model: optR.model, stop: 'completed', responseId: 'resp_2', serviceTier: null,
+      inputTokens: 1, outputTokens: 1, cachedInputTokens: 0, reasoningOutputTokens: 0,
+      toolCalls: [], responseItems: [{ type: 'message', id: 'msg_2', content: [] }],
+    }
   },
-  rationeazaMesajeStream: async () => ({ text: 'x', costUsd: 0, model: 'x', toolCalls: [] }),
+  rationeazaMesajeStream: async () => ({
+    text: 'x', model: 'x', stop: 'completed', responseId: 'resp_stream', serviceTier: null,
+    inputTokens: 1, outputTokens: 1, cachedInputTokens: 0, reasoningOutputTokens: 0,
+    toolCalls: [], responseItems: [],
+  }),
 }))
 
 import { executaApeluriCoordonate, iesireEsteEroare, pasProgres, stareProgresInitiala, runOrchestrator } from './orchestrator.js'
@@ -92,36 +118,69 @@ describe('executaApeluriCoordonate', () => {
 describe('runOrchestrator — escaladarea ușor→greu la mijloc (owner 20 aug)', () => {
   it('când execTool (ask_brain) setează escaladare.model, runda următoare URCĂ pe modelul greu', async () => {
     modeleFolosite.length = 0
+    conversatii.length = 0
     const escaladare: { model?: string; reasoning?: 'low' | 'medium' | 'high' } = {}
     const execTool = async (name: string): Promise<string> => {
       if (name === 'ask_brain') {
-        escaladare.model = 'google-direct/gemini-greu'
+        escaladare.model = 'openai/gpt-5.6-sol'
         escaladare.reasoning = 'high'
       }
       return 'ok'
     }
     const res = await runOrchestrator(
-      'google-direct/gemini-usor',
+      'openai/gpt-5.6-luna',
       [{ role: 'user', content: 'x' }] as never,
       [{ name: 'ask_brain', description: 'd', input_schema: { type: 'object' } }] as never,
       execTool,
       { escaladare, maxRounds: 3 },
     )
-    expect(modeleFolosite[0]).toBe('google-direct/gemini-usor') // runda 1 pe treapta ușoară
-    expect(modeleFolosite[1]).toBe('google-direct/gemini-greu') // runda 2 a URCAT pe creierul greu
+    expect(modeleFolosite[0]).toBe('openai/gpt-5.6-luna') // runda 1 pe treapta ușoară
+    expect(modeleFolosite[1]).toBe('openai/gpt-5.6-sol') // runda 2 a URCAT pe creierul greu
     expect(res.text).toContain('gata')
+    expect(conversatii[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'assistant',
+        response_items: [
+          expect.objectContaining({ type: 'reasoning', encrypted_content: 'opaque' }),
+          expect.objectContaining({ type: 'function_call', call_id: '1' }),
+        ],
+      }),
+      expect.objectContaining({ role: 'tool', tool_call_id: '1', content: 'ok' }),
+    ]))
   })
 
   it('fără escaladare, rămâne pe modelul de bază pe toate rundele', async () => {
     modeleFolosite.length = 0
     const execTool = async (): Promise<string> => 'ok'
     await runOrchestrator(
-      'google-direct/gemini-usor',
+      'openai/gpt-5.6-luna',
       [{ role: 'user', content: 'x' }] as never,
       [{ name: 'ask_brain', description: 'd', input_schema: { type: 'object' } }] as never,
       execTool,
       { maxRounds: 3 },
     )
-    expect(modeleFolosite.every((m) => m === 'google-direct/gemini-usor')).toBe(true)
+    expect(modeleFolosite.every((m) => m === 'openai/gpt-5.6-luna')).toBe(true)
+  })
+})
+
+describe('runOrchestrator — efecte numai din function_call structurat', () => {
+  it('nu execută markup sau JSON de unealtă scris ca text de model', async () => {
+    modeleFolosite.length = 0
+    raspunsTextNestructurat = '<|tool_call|>call:system_health{}<|tool_call|>'
+    const execTool = vi.fn(async (): Promise<string> => 'nu trebuie apelat')
+    try {
+      const res = await runOrchestrator(
+        'openai/gpt-5.6-luna',
+        [{ role: 'user', content: 'x' }] as never,
+        [{ name: 'system_health', description: 'd', input_schema: { type: 'object' } }] as never,
+        execTool,
+        { maxRounds: 1 },
+      )
+      expect(execTool).not.toHaveBeenCalled()
+      expect(res.toolsCalled).toEqual([])
+      expect(res.text.trim()).toBe('')
+    } finally {
+      raspunsTextNestructurat = null
+    }
   })
 })

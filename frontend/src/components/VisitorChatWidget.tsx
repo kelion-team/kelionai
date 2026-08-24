@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { PUBLIC_TEXT } from '../lib/publicText'
+import { apiFetch } from '../lib/transport'
 
 // Live chat widget for anonymous visitors on the landing page. A floating button
 // opens a small panel; the visitor talks to the OWNER (not the AI). Both sides
-// poll — the visitor here, the owner from the admin inbox. The thread is a random
-// conv_id kept in localStorage so it survives a refresh.
+// poll — the visitor here, the owner from the admin inbox. Conversation identity
+// is issued and kept by the server in an HttpOnly cookie; the browser never
+// chooses a conversation id or persists a capability in JavaScript storage.
 //
 // HONESTY REWRITE (frontend audit, Aug 2). Two silent failures lived here:
 //  1. a failed poll rendered the empty-state hint as fact ("no replies yet")
@@ -18,15 +20,7 @@ interface Msg {
   id: number
   role: string
   text: string
-}
-
-function convId(): string {
-  let id = localStorage.getItem('kelion_chat_conv')
-  if (!id) {
-    id = `v_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
-    localStorage.setItem('kelion_chat_conv', id)
-  }
-  return id
+  displayKey?: string
 }
 
 export default function VisitorChatWidget() {
@@ -38,33 +32,69 @@ export default function VisitorChatWidget() {
   const [offline, setOffline] = useState(false)
   const [sendFailed, setSendFailed] = useState(false)
   const lastId = useRef(0)
-  const conv = useRef('')
+  const sessionReady = useRef(false)
+  const sessionPromise = useRef<Promise<boolean> | null>(null)
+  const sessionEpoch = useRef(0)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    conv.current = convId()
-  }, [])
+  const ensureSession = async (renew = false): Promise<boolean> => {
+    if (renew) {
+      sessionReady.current = false
+      lastId.current = 0
+    }
+    if (sessionReady.current) return true
+    if (sessionPromise.current) return sessionPromise.current
+    sessionPromise.current = apiFetch('/api/visitor-chat/session', {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then((r) => {
+        if (!r.ok) return false
+        sessionReady.current = true
+        sessionEpoch.current += 1
+        return true
+      })
+      .catch(() => false)
+      .finally(() => {
+        sessionPromise.current = null
+      })
+    return sessionPromise.current
+  }
 
   // Poll for new messages while the panel is open (every 3s).
   useEffect(() => {
     if (!open) return
     let alive = true
-    const tick = async (): Promise<void> => {
+    const tick = async (retried = false): Promise<void> => {
       try {
-        const r = await fetch(
-          `/api/visitor-chat/poll?conv=${encodeURIComponent(conv.current)}&after=${lastId.current}`,
+        if (!(await ensureSession())) {
+          if (alive) setOffline(true)
+          return
+        }
+        const r = await apiFetch(
+          `/api/visitor-chat/poll?after=${lastId.current}`,
+          { credentials: 'include' },
         )
         if (!alive) return
+        if ((r.status === 401 || r.status === 410) && !retried) {
+          if (await ensureSession(true)) await tick(true)
+          return
+        }
         if (!r.ok) {
           setOffline(true)
           return
         }
-        const j = (await r.json()) as { messages: Msg[] }
+        const j = (await r.json()) as { messages?: Msg[] }
         if (!alive) return
         setOffline(false)
-        if (j.messages.length > 0) {
-          setMsgs((m) => [...m, ...j.messages])
-          lastId.current = j.messages[j.messages.length - 1].id
+        const noi = Array.isArray(j.messages) ? j.messages : []
+        if (noi.length > 0) {
+          const epoch = sessionEpoch.current
+          setMsgs((m) => [
+            ...m,
+            ...noi.map((mesaj) => ({ ...mesaj, displayKey: `${epoch}:${mesaj.id}` })),
+          ])
+          lastId.current = noi[noi.length - 1].id
         }
       } catch {
         if (alive) setOffline(true)
@@ -82,17 +112,27 @@ export default function VisitorChatWidget() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [msgs])
 
-  async function send(): Promise<void> {
+  async function send(retried = false): Promise<void> {
     const t = text.trim()
-    if (!t || sending) return
+    if (!t || (sending && !retried)) return
     setSending(true)
     setSendFailed(false)
     try {
-      const r = await fetch('/api/visitor-chat/send', {
+      if (!(await ensureSession())) {
+        setSendFailed(true)
+        return
+      }
+      const r = await apiFetch('/api/visitor-chat/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conv: conv.current, text: t }),
+        credentials: 'include',
+        body: JSON.stringify({ text: t }),
       })
+      if ((r.status === 401 || r.status === 410) && !retried) {
+        if (await ensureSession(true)) await send(true)
+        else setSendFailed(true)
+        return
+      }
       if (r.ok) {
         const j = (await r.json()) as { ok?: boolean; id: number }
         // ȘI CORPUL, nu doar statusul HTTP (auditul admin, 3 aug): serverul
@@ -102,7 +142,10 @@ export default function VisitorChatWidget() {
         if (j.ok === false || !(j.id > 0)) {
           setSendFailed(true) // the text stays in the input for a retry
         } else {
-          setMsgs((m) => [...m, { id: j.id, role: 'visitor', text: t }])
+          setMsgs((m) => [
+            ...m,
+            { id: j.id, role: 'visitor', text: t, displayKey: `${sessionEpoch.current}:${j.id}` },
+          ])
           lastId.current = Math.max(lastId.current, j.id)
           setText('')
         }
@@ -111,8 +154,9 @@ export default function VisitorChatWidget() {
       }
     } catch {
       setSendFailed(true)
+    } finally {
+      setSending(false)
     }
-    setSending(false)
   }
 
   return (
@@ -130,7 +174,7 @@ export default function VisitorChatWidget() {
               <p className="vchat-hint">{PUBLIC_TEXT.vchatHint}</p>
             )}
             {msgs.map((m) => (
-              <div key={m.id} className={`vchat-bubble ${m.role === 'owner' ? 'owner' : 'me'}`}>
+              <div key={m.displayKey ?? m.id} className={`vchat-bubble ${m.role === 'owner' ? 'owner' : 'me'}`}>
                 {m.text}
               </div>
             ))}

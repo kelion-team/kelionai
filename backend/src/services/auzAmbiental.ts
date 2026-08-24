@@ -1,57 +1,55 @@
-// ── AUZUL AMBIENTAL — BACKEND (owner, 22 aug 2026: „simte mediul") ───────────
-//
-// Stochează evenimentele sonore primite de la frontend (alarmă, sonerie,
-// ciocănit, plâns, spargere, conversație, muzică, liniște). Le ține in-memory
-// (ultimele 30), le expune creierului prin tool-ul `evenimente_sonore`.
-//
-// ALERTĂ: evenimentele critice (alarma, spargere, plâns) sunt marcate ca
-// urgente — creierul le poate folosi pentru a NOTIFICA ownerul proactiv.
+import { ScopedSensorBuffer } from './scopedSensorBuffer.js'
+
+export const TIPURI_SUNET = ['zgomot_brusc', 'conversatie_posibila', 'muzica_posibila', 'liniste'] as const
+export type TipSunet = typeof TIPURI_SUNET[number]
 
 export interface EvenimentSonorStocat {
   ts: number
-  tip: 'alarma' | 'sonerie' | 'ciocanit' | 'plans' | 'spargere' | 'zgomot_brusc' | 'conversatie' | 'muzica' | 'liniste'
+  tip: TipSunet
   intensitate: number
   durataMs: number
   frecventaDominanta: number
 }
 
-const CAP_MAXIM = 30
-const EXPIRA_MS = 10 * 60_000 // 10 minute
-const TIPURI_URGENTE: EvenimentSonorStocat['tip'][] = ['alarma', 'spargere', 'plans']
+const CAP_MAXIM = 30 // hardcod-permis: limită tehnică anti-abuz per utilizator
+const MAX_UTILIZATORI = 1_000 // hardcod-permis: limită tehnică globală
+const EXPIRA_MS = 10 * 60_000 // hardcod-permis: fereastră efemeră
+const AVANS_TS_MS = 60_000 // hardcod-permis: toleranță ceas client
+const evenimente = new ScopedSensorBuffer<EvenimentSonorStocat>(CAP_MAXIM, MAX_UTILIZATORI, EXPIRA_MS)
 
-let evenimente: EvenimentSonorStocat[] = []
+export type ValidareSunet = { ok: true; valoare: EvenimentSonorStocat } | { ok: false; error: string }
 
-/** Adaugă un eveniment sonor în buffer. */
-export function adaugaEvenimentSonor(ev: EvenimentSonorStocat): void {
-  const acum = Date.now()
-  evenimente = evenimente.filter((e) => acum - e.ts < EXPIRA_MS)
-  evenimente.push(ev)
-  if (evenimente.length > CAP_MAXIM) {
-    evenimente = evenimente.slice(-CAP_MAXIM)
+export function valideazaEvenimentSonor(input: unknown, acum = Date.now()): ValidareSunet {
+  if (!input || typeof input !== 'object') return { ok: false, error: 'corp_invalid' }
+  const corp = input as Record<string, unknown>
+  if (typeof corp.tip !== 'string' || !(TIPURI_SUNET as readonly string[]).includes(corp.tip)) return { ok: false, error: 'tip_invalid' }
+  const ts = corp.ts == null ? acum : Number(corp.ts)
+  if (!Number.isFinite(ts) || ts < acum - EXPIRA_MS || ts > acum + AVANS_TS_MS) return { ok: false, error: 'timestamp_invalid' }
+  const intensitate = Number(corp.intensitate ?? 0)
+  const durataMs = Number(corp.durataMs ?? 0)
+  const frecventaDominanta = Number(corp.frecventaDominanta ?? 0)
+  if (![intensitate, durataMs, frecventaDominanta].every(Number.isFinite)) return { ok: false, error: 'valori_invalide' }
+  return {
+    ok: true,
+    valoare: {
+      ts,
+      tip: corp.tip as TipSunet,
+      intensitate: Math.min(100, Math.max(0, intensitate)),
+      durataMs: Math.min(EXPIRA_MS, Math.max(0, durataMs)),
+      frecventaDominanta: Math.min(24_000, Math.max(0, frecventaDominanta)),
+    },
   }
 }
 
-/** Ultimele evenimente sonore (pentru creier). */
-export function evenimenteSonoreRecente(): EvenimentSonorStocat[] {
-  const acum = Date.now()
-  return evenimente.filter((e) => acum - e.ts < EXPIRA_MS)
+export function adaugaEvenimentSonor(email: string, ev: EvenimentSonorStocat): void {
+  evenimente.push(email, ev)
 }
 
-/** Evenimente URGENTE recente (alarma, spargere, plâns). */
-export function evenimenteUrgente(): EvenimentSonorStocat[] {
-  const acum = Date.now()
-  return evenimente.filter((e) => acum - e.ts < EXPIRA_MS && TIPURI_URGENTE.includes(e.tip))
+export function evenimenteSonoreRecente(email: string): EvenimentSonorStocat[] {
+  return evenimente.list(email)
 }
 
-/** Ultimul eveniment urgent (pentru notificare proactivă). */
-export function ultimulEvenimentUrgent(): EvenimentSonorStocat | null {
-  const urgente = evenimenteUrgente()
-  return urgente.length > 0 ? urgente[urgente.length - 1] : null
-}
-
-/** Contextul ambiental curent (ultimul eveniment, orice tip). */
-export function contextAmbientalCurent(): EvenimentSonorStocat | null {
-  const acum = Date.now()
-  const valide = evenimente.filter((e) => acum - e.ts < EXPIRA_MS)
-  return valide.length > 0 ? valide[valide.length - 1] : null
+/** FFT-ul oferă doar un indiciu grosier; nu identifică alarme, plâns sau spargeri. */
+export function evenimenteNeobisnuite(email: string): EvenimentSonorStocat[] {
+  return evenimente.list(email).filter((e) => e.tip === 'zgomot_brusc')
 }

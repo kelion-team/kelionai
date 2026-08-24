@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "external": {
+    "openaiApiBase": "https://api.openai.com/v1",
+    "serperApiBase": "https://google.serper.dev",
+    "appStoreConnectApiBase": "https://api.appstoreconnect.apple.com",
+    "stooqBase": "https://stooq.com",
+    "binanceRestBase": "https://api.binance.com",
+    "binanceWebSocketBase": "wss://stream.binance.com:9443",
+    "yahooFinanceBase": "https://query1.finance.yahoo.com",
+    "cartoTileBase": "https://basemaps.cartocdn.com",
+    "googleOAuthAuthorizeUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+    "googleOAuthTokenUrl": "https://oauth2.googleapis.com/token",
+    "googleUserInfoUrl": "https://www.googleapis.com/oauth2/v3/userinfo",
+    "googleApisBase": "https://www.googleapis.com",
+    "googlePlayPublisherApiBase": "https://androidpublisher.googleapis.com",
+    "nominatimApiBase": "https://nominatim.openstreetmap.org",
+    "osrmRoutingBase": "https://router.project-osrm.org/route/v1/driving",
+    "revolutMerchantProductionBase": "https://merchant.revolut.com",
+    "revolutMerchantSandboxBase": "https://sandbox-merchant.revolut.com",
+    "revolutCheckoutProductionOrigin": "https://checkout.revolut.com",
+    "revolutCheckoutSandboxOrigin": "https://sandbox-checkout.revolut.com"
+  }
+}

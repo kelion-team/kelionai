@@ -4,31 +4,16 @@
 // nu mai există. Un test care importă un modul șters = mort (o să pice la run).
 //
 // Rulare: node scripts/identifica-teste-moarte.mjs
-// Opțional: node scripts/identifica-teste-moarte.mjs --sterge   (îl șterge efectiv)
-//
-// NU șterge nimic implicit — doar raportează. Folosește --sterge doar după
-// ce verifici manual lista.
+// Poarta este intenționat doar-citire. Ștergerea automată pe baza unei analize
+// statice euristice poate elimina teste valide; remedierea se face numai după
+// verificarea manuală a fiecărui import raportat.
 
-import { readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { fisiereCod } from './lib/fisiere-cod.mjs'
 
 const RADACINA = resolve(fileURLToPath(import.meta.url), '..', '..')
-const STERGE = process.argv.includes('--sterge')
-
-function* fisiere(dir, ext) {
-  for (const nume of readdirSync(dir)) {
-    const cale = join(dir, nume)
-    const st = statSync(cale)
-    if (st.isDirectory()) {
-      if (nume === 'node_modules' || nume === 'dist' || nume === '.git') continue
-      yield* fisiere(cale, ext)
-    } else if (ext.some((e) => nume.endsWith(e))) {
-      yield cale
-    }
-  }
-}
-
 function exista(cale) {
   try {
     return statSync(cale).isFile()
@@ -44,8 +29,8 @@ const morti = []
 const total = []
 
 for (const test of [
-  ...fisiere(join(RADACINA, 'backend', 'src'), ['.test.ts']),
-  ...fisiere(join(RADACINA, 'frontend', 'src'), ['.test.ts', '.test.tsx']),
+  ...fisiereCod(join(RADACINA, 'backend', 'src'), ['.test.ts']),
+  ...fisiereCod(join(RADACINA, 'frontend', 'src'), ['.test.ts', '.test.tsx']),
 ]) {
   total.push(test)
   const text = readFileSync(test, 'utf8')
@@ -59,16 +44,18 @@ for (const test of [
       if (!spec || !spec.startsWith('.') || isAbsolute(spec)) continue
       // Resolves TS/JS: the project compiles TS to .js, but source may be .ts.
       const base = resolve(caleDir, spec)
-      const posibile = [
+      const extensie = extname(base)
+      const bazaSursa = ['.js', '.mjs', '.cjs'].includes(extensie) ? base.slice(0, -extensie.length) : base
+      const posibile = [...new Set([
         base,
-        base + '.ts',
-        base + '.tsx',
-        base + '.js',
-        base + '.mjs',
-        join(base, 'index.ts'),
-        join(base, 'index.tsx'),
-        join(base, 'index.js'),
-      ]
+        bazaSursa + '.ts',
+        bazaSursa + '.tsx',
+        bazaSursa + '.js',
+        bazaSursa + '.mjs',
+        join(bazaSursa, 'index.ts'),
+        join(bazaSursa, 'index.tsx'),
+        join(bazaSursa, 'index.js'),
+      ])]
       if (!posibile.some(exista)) {
         lipsa.push(spec)
       }
@@ -92,13 +79,5 @@ for (const { test, lipsa } of morti) {
   for (const l of lipsa) console.log(`    → import lipsă: ${l}`)
 }
 
-if (STERGE) {
-  for (const { test } of morti) {
-    const cale = join(RADACINA, test)
-    unlinkSync(cale)
-    console.log(`  Șters: ${test}`)
-  }
-  console.log(`\nȘterse ${morti.length} fișiere.`)
-} else {
-  console.log('\nRerun with --sterge pentru a șterge, DUPĂ verificare manuală.')
-}
+console.log('\nPoarta nu șterge automat; verifică manual fiecare raport înainte de remediere.')
+process.exit(1)

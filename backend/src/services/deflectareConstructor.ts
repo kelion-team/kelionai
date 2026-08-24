@@ -12,7 +12,7 @@
 // Uneltele prin care o cerere de construcție/reparație chiar E alocată. Dacă
 // vreuna a fost chemată în tură, NU e deflectare — e execuție reală.
 export const UNELTE_CONSTRUCTIE = new Set([
-  'build_software', 'repo_write', 'repo_open_pr', 'repo_merge_pr', 'request_repair', 'run_runbook',
+  'build_software',
 ])
 
 const TIPARE_DEFLECTARE: RegExp[] = [
