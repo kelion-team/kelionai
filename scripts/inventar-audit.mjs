@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, readlinkSync } from 'node:fs'
 import { extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -101,6 +101,17 @@ export function duplicariActiveNejustificate(intrari) {
     .map(([sha256, cai]) => ({ sha256, cai: [...cai].sort() }))
 }
 
+export function citesteIntrareInventar(caleAbsoluta, stat = lstatSync(caleAbsoluta)) {
+  if (stat.isSymbolicLink()) {
+    // Inventariem ținta declarată, fără să urmăm legătura. Altfel o legătură
+    // către un director produce EISDIR, iar una externă ar scoate auditul din
+    // worktree și ar putea citi conținut care nu aparține sursei verificate.
+    return Buffer.from(`legatura-simbolica\0${readlinkSync(caleAbsoluta)}`)
+  }
+  if (stat.isFile()) return readFileSync(caleAbsoluta)
+  return null
+}
+
 export function construiesteInventar(radacina = RADACINA) {
   const rezultatGit = spawnSync(
     'git',
@@ -121,8 +132,8 @@ export function construiesteInventar(radacina = RADACINA) {
       continue
     }
     const stat = lstatSync(absoluta)
-    if (!stat.isFile() && !stat.isSymbolicLink()) continue
-    const continut = readFileSync(absoluta)
+    const continut = citesteIntrareInventar(absoluta, stat)
+    if (continut === null) continue
     intrari.push({
       cale,
       categorie: clasificaFisier(cale),
