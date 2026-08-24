@@ -307,7 +307,9 @@ install -m 0644 "$BUNDLE_DIR/Caddyfile" "$temporary_proxy/Caddyfile"
 printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$inactive_slot" > "$temporary_proxy/kelion-upstream.caddy"
 chmod 0755 "$temporary_proxy"
 chmod 0644 "$temporary_proxy/kelion-upstream.caddy"
-docker run --rm --network kelion-proxy --user 1000:1000 \
+docker run --rm --network kelion-proxy --user 1000:1000 --read-only \
+  --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700 \
   -e PUBLIC_APP_DOMAIN="$PUBLIC_APP_DOMAIN" \
   -v "$temporary_proxy/Caddyfile:/etc/caddy/Caddyfile:ro" \
   -v "$temporary_proxy:/etc/caddy/upstream:ro" \

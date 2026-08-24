@@ -100,5 +100,14 @@ test('validarea Caddy non-root poate traversa și citi directorul temporar', () 
     deploy,
     /temporary_proxy=\$\(mktemp -d[^\n]+\)[\s\S]*?chmod 0755 "\$temporary_proxy"[\s\S]*?chmod 0644 "\$temporary_proxy\/kelion-upstream\.caddy"[\s\S]*?docker run --rm --network kelion-proxy --user 1000:1000/,
   )
+  assert.match(
+    prVerify,
+    /docker run --rm --network none --user 1000:1000 --read-only \\\n\s*--cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges/,
+  )
+  assert.match(
+    deploy,
+    /docker run --rm --network kelion-proxy --user 1000:1000 --read-only \\\n\s*--cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges/,
+  )
   assert.match(composeProxy, /user: "1000:1000"[\s\S]*?\/tmp:size=16m,mode=0700,uid=1000,gid=1000/)
+  assert.match(composeProxy, /cap_drop: \[ALL\][\s\S]*?cap_add: \[NET_BIND_SERVICE\]/)
 })
