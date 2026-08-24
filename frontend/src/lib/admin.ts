@@ -4,8 +4,6 @@
 // import, so it vanishes at compile time — it adds nothing to the bundle.
 import type { MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
 export type { MoneyCircuit, UserActivityRow }
-// reutilizare-permis: tipul oglindește contractul admin pentru frontend; sursa
-// backend nu este importabilă aici fără a include implementarea în bundle.
 export interface HistoryRow {
   role: string
   content: string
@@ -50,7 +48,6 @@ export async function fetchFinance(): Promise<Finance | null> {
 // citea. `bec` vine derivat de pe server (o singură logică, testată): verde =
 // are credit, roșu = fără (402/0), gri = nu pot verifica. `facturare` = pagina
 // de reîncărcare a furnizorului (click-ul becului duce acolo).
-// reutilizare-permis: tipul admin este contract UI, nu implementarea serviciului.
 export type BecCredit = 'verde' | 'rosu' | 'gri'
 export interface CreditAIFurnizor {
   furnizor: string
@@ -173,8 +170,6 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
 }
 
 // ── THE PAYMENTS PANEL (M3, Aug 2): codes + the unattributed net ────────────
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface CodNeplatit {
   code: string
   email: string
@@ -185,8 +180,6 @@ export interface CodNeplatit {
   expirata: boolean
 }
 
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface PlataIncasata {
   code: string
   email: string
@@ -196,8 +189,6 @@ export interface PlataIncasata {
   bankRef: string
 }
 
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface TotaluriPlati {
   totalAzi: number
   totalLunaAsta: number
@@ -269,8 +260,6 @@ export interface StoreRow {
   url: string
   listed: boolean
 }
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface DownloadRow {
   file: string
   user_email: string
@@ -324,8 +313,6 @@ export async function manageUser(
   }
 }
 
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface InboundEmail {
   id: number
   from_addr: string
@@ -381,8 +368,6 @@ export async function fetchMailboxLive(): Promise<MailboxLiveResult | null> {
 
 // Messages from the "Contact" form — always saved in the DB, visible even if
 // emailul nu e configurat.
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface ContactMessage {
   id: number
   name: string
@@ -420,8 +405,6 @@ export async function fetchActivity(): Promise<UserActivity | null> {
 // fără try/catch — o eroare de rețea arunca (loading blocat pe veci +
 // unhandled rejection), iar un 403/500 colapsa în [] („No history yet." /
 // „Nu a scris niciun mesaj" pentru o citire picată). null = eșec, spus ca atare.
-// reutilizare-permis: funcția face parte din clientul HTTP al panoului admin;
-// billing.ts are un client separat pentru istoricul financiar.
 export async function fetchHistory(email: string): Promise<HistoryRow[] | null> {
   try {
     const r = await fetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
@@ -615,8 +598,6 @@ export async function setCreier(activ: string, modelCustom = ''): Promise<Creier
 }
 
 // Registered voiceprints (admin only).
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface VoiceprintRow {
   email: string
   name: string
@@ -668,8 +649,6 @@ export async function fetchVoiceprintAudio(email: string): Promise<string | null
 }
 
 // ── Verificare tokenuri cu drepturi (admin only) ───────────────────────────
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface TokenCheck {
   name: string
   status: 'ok' | 'not_configured' | 'fail' | `fail_${number}`
@@ -718,8 +697,6 @@ export async function fetchTokenChecks(): Promise<TokenChecksResult | null> {
 }
 
 // ── Cereri neacoperite & Plăți neatribuite ──────────────────────────────
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface PlataNeatribuita {
   id: number
   suma: number
@@ -731,8 +708,6 @@ export interface PlataNeatribuita {
   created_at: string
 }
 
-// reutilizare-permis: tipurile sunt răspunsuri HTTP pentru panoul admin, nu
-// cod partajat runtime.
 export interface CodNeplatit {
   cod: string
   user_email: string

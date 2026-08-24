@@ -70,8 +70,6 @@ export async function expertModelLadder(): Promise<string[]> {
 }
 
 // Prefixele provider-elor (23 aug 2026 — comutator de creier).
-// reutilizare-permis: prefixul este contractul comun al transportului OpenAI;
-// orchestratorul îl recunoaște intenționat la rutarea providerului.
 export const OPENAI_PREFIX = 'openai/'
 
 // The one call every rung goes through: dispatch pe prefix.

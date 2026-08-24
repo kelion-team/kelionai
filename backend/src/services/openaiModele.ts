@@ -39,43 +39,59 @@ function scrieEroare(motiv: string, ttl: number): string[] {
   return []
 }
 
+async function citesteCatalog(): Promise<string[]> {
+  if (!config.openai?.key) return scrieEroare('cheia OpenAI lipsește', TTL_ESEC_IMPLICIT_MS)
+  try {
+    const raspuns = await fetch(`${OPENAI_BASE}/models`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${config.openai.key}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!raspuns.ok) return scrieEroare(`API-ul a răspuns HTTP ${raspuns.status}`, TTL_ESEC_IMPLICIT_MS)
+    const corp = await raspuns.json() as { data?: unknown }
+    if (!Array.isArray(corp.data)) return scrieEroare('răspunsul API nu conține lista de modele', TTL_ESEC_IMPLICIT_MS)
+    if (corp.data.some((model) => !model || typeof model !== 'object' || typeof (model as { id?: unknown }).id !== 'string' || !(model as { id: string }).id.trim())) {
+      return scrieEroare('răspunsul API conține modele fără ID valid', TTL_ESEC_IMPLICIT_MS)
+    }
+    const iduri = corp.data
+      .map((model) => (model && typeof model === 'object' ? (model as { id?: unknown }).id : null))
+      .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+      .map((id) => id.trim())
+    cache = { iduri, expiraLa: Date.now() + ttlCatalog(), eroare: '' }
+    return iduri
+  } catch (eroare) {
+    const motiv = eroare instanceof Error ? eroare.message : String(eroare)
+    return scrieEroare(motiv || 'eroare necunoscută', TTL_ESEC_IMPLICIT_MS)
+  }
+}
+
+function pornesteCitirea(): Promise<string[]> {
+  if (incarcare) return incarcare
+  const cerere = citesteCatalog().catch((eroare) => {
+    const motiv = eroare instanceof Error ? eroare.message : String(eroare)
+    return scrieEroare(motiv || 'eroare necunoscută', TTL_ESEC_IMPLICIT_MS)
+  })
+  incarcare = cerere
+  void cerere.finally(() => {
+    if (incarcare === cerere) incarcare = null
+  }).catch(() => {})
+  return cerere
+}
+
 /**
  * Citește catalogul servit de cheia OpenAI și îl ține în cache.
  * Un catalog necitibil nu este înlocuit cu un model ghicit.
  */
 export async function catalogOpenAI(): Promise<string[]> {
-  if (cache && Date.now() < cache.expiraLa) return cache.iduri
-  if (incarcare) return incarcare
-  incarcare = (async () => {
-    if (!config.openai?.key) return scrieEroare('cheia OpenAI lipsește', TTL_ESEC_IMPLICIT_MS)
-    try {
-      const raspuns = await fetch(`${OPENAI_BASE}/models`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${config.openai.key}` },
-        signal: AbortSignal.timeout(10_000),
-      })
-      if (!raspuns.ok) return scrieEroare(`API-ul a răspuns HTTP ${raspuns.status}`, TTL_ESEC_IMPLICIT_MS)
-      const corp = await raspuns.json() as { data?: unknown }
-      if (!Array.isArray(corp.data)) return scrieEroare('răspunsul API nu conține lista de modele', TTL_ESEC_IMPLICIT_MS)
-      if (corp.data.some((model) => !model || typeof model !== 'object' || typeof (model as { id?: unknown }).id !== 'string' || !(model as { id: string }).id.trim())) {
-        return scrieEroare('răspunsul API conține modele fără ID valid', TTL_ESEC_IMPLICIT_MS)
-      }
-      const iduri = corp.data
-        .map((model) => (model && typeof model === 'object' ? (model as { id?: unknown }).id : null))
-        .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-        .map((id) => id.trim())
-      cache = { iduri, expiraLa: Date.now() + ttlCatalog(), eroare: '' }
-      return iduri
-    } catch (eroare) {
-      const motiv = eroare instanceof Error ? eroare.message : String(eroare)
-      return scrieEroare(motiv || 'eroare necunoscută', TTL_ESEC_IMPLICIT_MS)
+  if (cache) {
+    if (Date.now() < cache.expiraLa) return cache.iduri
+    if (cache.iduri.length > 0) {
+      const catalogVechi = cache.iduri
+      void pornesteCitirea()
+      return catalogVechi
     }
-  })()
-  try {
-    return await incarcare
-  } finally {
-    incarcare = null
   }
+  return pornesteCitirea()
 }
 
 /** Motivul ultimei citiri eșuate, fără o nouă cerere de rețea. */

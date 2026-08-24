@@ -31,6 +31,7 @@ describe('catalogul live OpenAI', () => {
     config.openai.override = { ...overrideInitial }
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
+    vi.useRealTimers()
     reseteazaCatalogOpenAI()
   })
 
@@ -83,6 +84,30 @@ describe('catalogul live OpenAI', () => {
     reseteazaCatalogOpenAI()
     await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.8-pro'])
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('returnează catalogul expirat și reîmprospătează în fundal', async () => {
+    vi.useFakeTimers()
+    vi.stubEnv('OPENAI_CATALOG_TTL_MS', '1000')
+    vi.mocked(fetch).mockResolvedValueOnce(raspunsCatalog(['gpt-9.7-mini']))
+    await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.7-mini'])
+
+    let rezolvaCatalogulNou!: (raspuns: Response) => void
+    const citireNoua = new Promise<Response>((resolve) => {
+      rezolvaCatalogulNou = resolve
+    })
+    vi.mocked(fetch).mockReturnValueOnce(citireNoua)
+    vi.advanceTimersByTime(1001)
+
+    await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.7-mini'])
+    expect(fetch).toHaveBeenCalledTimes(2)
+
+    rezolvaCatalogulNou(raspunsCatalog(['gpt-9.8-pro']))
+    await citireNoua
+    await vi.waitFor(async () => {
+      await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.8-pro'])
+    })
+    vi.useRealTimers()
   })
 
   it('validează modelele custom numai în catalogul live', async () => {

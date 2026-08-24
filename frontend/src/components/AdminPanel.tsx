@@ -140,8 +140,6 @@ function PromoStudio() {
       })
       .catch(() => {})
   }, [])
-  // reutilizare-permis: aceeași acțiune generică este folosită de controalele
-  // de securitate ale panoului; funcția din Manual.tsx aparține altei suprafețe.
   async function salveaza(pornit: boolean): Promise<void> {
     setBusy(true)
     const ore = oreTxt

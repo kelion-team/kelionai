@@ -160,13 +160,7 @@ function cautaDuplicari(fisierTinta, semnale) {
         // Excepția se declară PE LINIE sau pe o linie de COMENTARIU deasupra (până la 3 linii)
         const idxLinie = linii.indexOf(linieCuDef)
         const linSus = idxLinie > 0 ? linii.slice(Math.max(0, idxLinie - 3), idxLinie).join('\n') : ''
-        const idxTinta = liniiTinta.findIndex((l) => new RegExp(`(?:function|const|class|interface|type)\\s+${fn}\\b`).test(l))
-        const linSusTinta = idxTinta > 0 ? liniiTinta.slice(Math.max(0, idxTinta - 3), idxTinta).join('\n') : ''
-        if (
-          linieCuDef.includes('reutilizare-permis:')
-          || linSus.includes('reutilizare-permis:')
-          || linSusTinta.includes('reutilizare-permis:')
-        ) continue
+        if (linieCuDef.includes('reutilizare-permis:') || linSus.includes('reutilizare-permis:')) continue
         abateri.push({
           tip: 'D1',
           fisier: caleRelativa,

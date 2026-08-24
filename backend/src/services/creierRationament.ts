@@ -70,8 +70,6 @@ function codModel(m: string): string {
   return m.startsWith(GEMINI_DIRECT_PREFIX) ? m.slice(GEMINI_DIRECT_PREFIX.length) : m
 }
 
-// reutilizare-permis: jurnalul local atașează treapta și modelul la contractul
-// unitar de raționament; jurnalul din rută are alt scop.
 function jurnal(ruta: string, treapta: string, extra = ''): void {
   console.log(`[CREIER-UNITAR] ruta=${ruta} treapta=${treapta}${extra ? ' ' + extra : ''}`)
 }
