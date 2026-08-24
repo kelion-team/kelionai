@@ -33,9 +33,9 @@ export const ENV_ALIASES: Record<string, string[]> = {
   // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
   // de la fostul câmp config.googleMapsKey de mai jos.)
   geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
-  // OpenAI — REINTRODUS 23 aug 2026 ca provider alternativ pentru chat/text
-  // (owner a aprobat OpenAI/ChatGPT cu scalare pe dificultate). Cheia din
-  // env (OPENAI_API_KEY); modelele pot fi suprascrise prin env.
+  // OpenAI — provider alternativ pentru chat/text. Sursa modelelor este catalogul
+  // live al cheii; env-ul poate doar suprascrie o treaptă dacă ID-ul este validat
+  // în acel catalog.
   openaiKey: ['OPENAI_API_KEY', 'OPENAI_KEY'],
   openaiLuna: ['OPENAI_LUNA_MODEL'],
   openaiMedium: ['OPENAI_MEDIUM_MODEL'],
@@ -275,22 +275,16 @@ export const config = {
   // + OSRM, cu sau fără cheie; rândul lui din env-check împingea ownerul să
   // configureze o cheie fără niciun efect — încălcarea regulii #4.)
   geminiKey: env(...ENV_ALIASES.geminiKey),
-  // OpenAI — REINTRODUS 23 aug 2026. Provider alternativ pentru chat/text,
-  // cu scalare automată pe dificultate (owner a aprobat). hardcod-permis:
-  // modelele default sunt prețuri reale OpenAI, suprascrise prin env.
+  // OpenAI — catalogul live este sursa unică a modelelor. Suprascrierile din env
+  // sunt doar preferințe și sunt acceptate numai după validarea față de catalog.
   openai: {
     key: env(...ENV_ALIASES.openaiKey),
-    // Modele GPT-5.6 (generația curentă OpenAI, documentația oficială aug 2026):
-    //   luna  = efficient, high-volume workloads (ieftin, rapid)
-    //   terra = balance of intelligence and cost
-    //   sol   = flagship capability (gpt-5.6 alias → sol)
-    // o4-mini = reasoning rapid; o3 = reasoning profund.
-    // Cheia ownerului refuză gpt-4o-mini ("invalid model ID") — modelele 5.6 sunt
-    // cele accesibile. Suprascrise prin env dacă cheia accesează alt set.
-    luna: env(...ENV_ALIASES.openaiLuna) || 'gpt-5.6-luna', // hardcod-permis: model oficial OpenAI
-    medium: env(...ENV_ALIASES.openaiMedium) || 'gpt-5.6-terra', // hardcod-permis: model oficial OpenAI
-    heavy: env(...ENV_ALIASES.openaiHeavy) || 'gpt-5.6-sol', // hardcod-permis: model oficial OpenAI
-    max: env(...ENV_ALIASES.openaiMax) || 'o4-mini', // hardcod-permis: model oficial OpenAI
+    override: {
+      luna: env(...ENV_ALIASES.openaiLuna),
+      medium: env(...ENV_ALIASES.openaiMedium),
+      heavy: env(...ENV_ALIASES.openaiHeavy),
+      max: env(...ENV_ALIASES.openaiMax),
+    },
   },
   // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.

@@ -23,6 +23,7 @@ import {
 } from './brain.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectChatStream } from './geminiDirect.js'
 import { openaiChatStream } from './openaiChat.js'
+import { modelOpenAI } from './openaiModele.js'
 import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage } from './brainContract.js'
 
 export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'ultra' | 'plan'
@@ -44,14 +45,19 @@ export interface OptiuniRationament {
 
 // COMUTATOR REAL: modelPentru respectă creier_activ. Pe OpenAI returnează
 // treptele OpenAI (luna/medium/heavy/max), pe Gemini pe cele Gemini.
-function modelPentru(treapta: TreaptaRationament, activ: string): string {
+async function modelPentru(treapta: TreaptaRationament, activ: string): Promise<string> {
   if (activ === 'openai') {
-    const o = config.openai
-    if (treapta === 'rapid') return `openai/${o.luna}`
-    if (treapta === 'lucru') return `openai/${o.medium}`
-    if (treapta === 'profund') return `openai/${o.heavy}`
-    if (treapta === 'ultra') return `openai/${o.max}`
-    return `openai/${o.medium}`
+    const treaptaOpenAI = treapta === 'rapid'
+      ? 'luna'
+      : treapta === 'lucru'
+        ? 'medium'
+        : treapta === 'profund'
+          ? 'heavy'
+          : treapta === 'ultra'
+            ? 'max'
+            : 'medium'
+    const model = await modelOpenAI(treaptaOpenAI)
+    if (model) return `openai/${model}`
   }
   if (treapta === 'rapid') return config.brain.chatDefault
   if (treapta === 'lucru') return config.brain.workDefault
@@ -64,6 +70,8 @@ function codModel(m: string): string {
   return m.startsWith(GEMINI_DIRECT_PREFIX) ? m.slice(GEMINI_DIRECT_PREFIX.length) : m
 }
 
+// reutilizare-permis: jurnalul local atașează treapta și modelul la contractul
+// unitar de raționament; jurnalul din rută are alt scop.
 function jurnal(ruta: string, treapta: string, extra = ''): void {
   console.log(`[CREIER-UNITAR] ruta=${ruta} treapta=${treapta}${extra ? ' ' + extra : ''}`)
 }
@@ -141,7 +149,7 @@ export async function rationeazaMesaje(
   const activ = opts.model
     ? (opts.model.startsWith('openai/') ? 'openai' : 'google-direct')
     : await creierActivKv()
-  const modelFull = opts.model || modelPentru(treapta, activ)
+  const modelFull = opts.model || await modelPentru(treapta, activ)
   jurnal(opts.ruta, treapta, `mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {
     maxTokens: opts.maxTokens ?? 2048,
@@ -189,7 +197,7 @@ export async function rationeazaMesajeStream(
   const activ = opts.model
     ? (opts.model.startsWith('openai/') ? 'openai' : 'google-direct')
     : await creierActivKv()
-  const modelFull = opts.model || modelPentru(treapta, activ)
+  const modelFull = opts.model || await modelPentru(treapta, activ)
   const model = codModel(modelFull)
   jurnal(opts.ruta, treapta, `stream mesaje=${messages.length} model=${modelFull}`)
   const callOpts: BrainCallOpts = {

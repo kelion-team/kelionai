@@ -1,6 +1,7 @@
 import { config } from '../config.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectAvailable } from './geminiDirect.js'
 import { openaiChat, openaiAvailable } from './openaiChat.js'
+import { modelOpenAIExista, scaraOpenAI } from './openaiModele.js'
 import type { AnthropicTool, OrChatResult, OrMessage } from './brainContract.js'
 import type { Message } from './brain-types.js'
 import { loadKv } from '../db.js'
@@ -51,15 +52,12 @@ export async function expertModelLadder(): Promise<string[]> {
   const activ = await creierActivKv()
   if (activ === 'openai') {
     const custom = await creierModelCustomKv()
-    const rungs = [
-      ...(custom ? [`openai/${custom}`] : []),
-      `openai/${config.openai.luna}`,
-      `openai/${config.openai.medium}`,
-      `openai/${config.openai.heavy}`,
-      `openai/${config.openai.max}`,
-    ]
+    const customValid = custom && await modelOpenAIExista(custom) ? [`openai/${custom.replace(/^openai\//, '')}`] : []
+    const rungs = [...customValid, ...(await scaraOpenAI()).map((m) => `openai/${m}`)]
     const unice: string[] = []
-    for (const r of rungs) { if (!unice.includes(r)) unice.push(r) }
+    for (const r of rungs) {
+      if (r && !unice.includes(r)) unice.push(r)
+    }
     return unice
   }
   // Gemini (default): 4 trepte flash → Pro → ultra
@@ -72,6 +70,8 @@ export async function expertModelLadder(): Promise<string[]> {
 }
 
 // Prefixele provider-elor (23 aug 2026 — comutator de creier).
+// reutilizare-permis: prefixul este contractul comun al transportului OpenAI;
+// orchestratorul îl recunoaște intenționat la rutarea providerului.
 export const OPENAI_PREFIX = 'openai/'
 
 // The one call every rung goes through: dispatch pe prefix.

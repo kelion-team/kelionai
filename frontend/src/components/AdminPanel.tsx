@@ -140,6 +140,8 @@ function PromoStudio() {
       })
       .catch(() => {})
   }, [])
+  // reutilizare-permis: aceeași acțiune generică este folosită de controalele
+  // de securitate ale panoului; funcția din Manual.tsx aparține altei suprafețe.
   async function salveaza(pornit: boolean): Promise<void> {
     setBusy(true)
     const ore = oreTxt
@@ -2662,7 +2664,7 @@ export default function AdminPanel({
                           {modelSelect === 'custom' && (
                             <input
                               type="text"
-                              placeholder="ex. gpt-5.6-luna"
+                              placeholder="ID din catalogul live OpenAI"
                               value={creier.modelCustom}
                               disabled={creierBusy}
                               onChange={(e) => setCreierState({ ...creier, modelCustom: e.target.value })}
@@ -2693,6 +2695,9 @@ export default function AdminPanel({
                         {creierBusy ? 'Se salvează…' : 'Salvează comutatorul'}
                       </button>
                       {creierMsg && <p className="chat-hint" style={{ marginTop: 8 }}>{creierMsg}</p>}
+                      {creier.catalogEroare && (
+                        <p className="chat-hint" style={{ marginTop: 8 }}>Catalog OpenAI: {creier.catalogEroare}</p>
+                      )}
                       <div className="chat-hint" style={{ marginTop: 12 }}>
                         OpenAI: {creier.modele.filter((m) => !m.isAuto && !m.isCustom).map((m) => m.nume).join(' → ')}.
                       </div>

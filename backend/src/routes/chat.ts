@@ -62,6 +62,7 @@ import { runOrchestrator } from '../services/orchestrator.js'
 import { memorieUnificata } from '../services/memorieUnificata.js'
 import { autoPreviewFrame } from '../services/monitorAutoPreview.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, geminiLive } from '../services/geminiDirect.js'
+import { modelOpenAI, modelOpenAIExista } from '../services/openaiModele.js'
 import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -142,12 +143,11 @@ import { bazaPublica } from '../services/bazaPublica.js'
 // THE BRAIN — Gemini direct, UNIC (extirparea totală OpenRouter + OpenAI, 3 aug).
 // The selectable chat model is read from KV (same source as /api/models/selection):
 // ── OpenAI model ladder: de la luna la sol pe dificultate ──────────────────
-function alegeOpenAIModel(difficulty: number, ownerAction: boolean): string {
-  const m = config.openai
-  if (ownerAction) return m.heavy // owner cu intenție de acțiune → reasoning
-  if (difficulty >= ESCALATE_TOP_AT) return m.max
-  if (difficulty >= ESCALATE_AT) return m.medium
-  return m.luna
+async function alegeOpenAIModel(difficulty: number, ownerAction: boolean): Promise<string> {
+  if (ownerAction) return modelOpenAI('heavy') // owner cu intenție de acțiune → reasoning
+  if (difficulty >= ESCALATE_TOP_AT) return modelOpenAI('max')
+  if (difficulty >= ESCALATE_AT) return modelOpenAI('medium')
+  return modelOpenAI('luna')
 }
 
 // the model CHOSEN by the user, otherwise the tier default. Returns NULL only if
@@ -167,8 +167,12 @@ async function selectedBrainModel(
   const creierActiv = await loadKv('creier_activ') ?? 'google-direct'
   if (creierActiv === 'openai') {
     const modelCustom = (await loadKv('creier_model')) ?? ''
-    const model = modelCustom || alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
-    return { model: `openai/${model}`, heavy: true }
+    const customValid = modelCustom && await modelOpenAIExista(modelCustom)
+    const model = customValid
+      ? modelCustom.replace(/^openai\//, '')
+      : await alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
+    if (model) return { model: `openai/${model}`, heavy: true }
+    console.error('[BRAIN] OpenAI activ, dar catalogul nu poate fi verificat → continui pe Gemini')
   }
   // Null doar pentru „chiar n-am niciun creier" — creierul e Gemini-only.
   if (!geminiDirectAvailable()) return null
@@ -1496,6 +1500,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // reply the client never read. It mirrors the client's STOP_CMD regex:
     // acknowledge briefly, zero model, zero history.
     const lastMsg = messages.at(-1)
+    // reutilizare-permis: expresia este contractul local al comenzii de oprire;
+    // clientul o oglindește intenționat pentru a opri tura înainte de server.
     const STOP_CMD =
       /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
     if (lastMsg?.role === 'user' && STOP_CMD.test(lastMsg.content)) {
@@ -3892,10 +3898,11 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
         // COMUTATOR REAL: pe OpenAI nu forțăm google-direct/ profund — OpenAI
         // n-are creierDublu Gemini. Plasă doar între treptele OpenAI (heavy→medium).
         const eOpenAI = orChatModel.startsWith('openai/')
+        const modelOpenAIHeavy = eOpenAI ? await modelOpenAI('heavy') : ''
         const profund = eOpenAI
-          ? `openai/${config.openai.heavy}`
+          ? (modelOpenAIHeavy ? `openai/${modelOpenAIHeavy}` : '')
           : `google-direct/${config.modelCreierProfund}`
-        if (modelEfectiv() === profund) {
+        if (profund && modelEfectiv() === profund) {
           // REGISTRUL BACKEND #1 + #3: tura a rulat DEJA pe profund și a murit
           // acolo — fie a pornit GREA (orChatModel e chiar profundul: pe turele
           // grele work = modelUnic = modelCreierProfund, deci plasa veche

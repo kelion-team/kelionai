@@ -63,6 +63,7 @@ import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLo
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { geminiLive, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { openaiAvailable } from '../services/openaiChat.js'
+import { catalogOpenAI, modelOpenAI, modelOpenAIExista, motivCatalogOpenAI } from '../services/openaiModele.js'
 import { getSerperBalance } from '../services/serperBalance.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { resurseGazda } from '../services/resurse.js'
@@ -115,6 +116,39 @@ async function checkStores(): Promise<StoreCheck[]> {
   )
   storeCache = { at: Date.now(), checks }
   return checks
+}
+
+async function stareCreier(activ: string, modelCustom: string): Promise<Record<string, unknown>> {
+  await catalogOpenAI()
+  const trepte = [
+    { cod: 'luna' as const, tag: 'ușor / ieftin' },
+    { cod: 'medium' as const, tag: 'mediu / reasoning' },
+    { cod: 'heavy' as const, tag: 'greu / reasoning' },
+    { cod: 'max' as const, tag: 'maxim calitate' },
+  ]
+  const modele: Array<{ id: string; nume: string; tag?: string; isAuto?: boolean; isCustom?: boolean }> = [
+    { id: 'auto', nume: 'Auto (luna → medium → heavy → max)', isAuto: true },
+  ]
+  const adaugate = new Set<string>()
+  for (const treapta of trepte) {
+    const id = await modelOpenAI(treapta.cod)
+    if (id && !adaugate.has(id)) {
+      adaugate.add(id)
+      modele.push({ id, nume: id, tag: treapta.tag })
+    }
+  }
+  modele.push({ id: 'custom', nume: 'Model custom', isCustom: true })
+  const eroare = motivCatalogOpenAI()
+  return {
+    activ,
+    modelCustom,
+    provideri: [
+      { prefix: 'google-direct', nume: 'Gemini Direct', disponibil: geminiDirectAvailable(), info: 'Default — are vedere + audio + unelte' },
+      { prefix: 'openai', nume: 'OpenAI ChatGPT', disponibil: openaiAvailable(), info: 'Chat + vedere + reasoning; cheie în env (OPENAI_API_KEY)' },
+    ],
+    modele,
+    ...(eroare ? { catalogEroare: eroare } : {}),
+  }
 }
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
@@ -701,23 +735,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return
     const activ = await loadKv('creier_activ') ?? 'google-direct'
     const modelCustom = await loadKv('creier_model') ?? ''
-    const m = config.openai
-    return reply.send({
-      activ,
-      modelCustom,
-      provideri: [
-        { prefix: 'google-direct', nume: 'Gemini Direct', disponibil: geminiDirectAvailable(), info: 'Default — are vedere + audio + unelte' },
-        { prefix: 'openai', nume: 'OpenAI ChatGPT', disponibil: openaiAvailable(), info: 'Chat + vedere + reasoning; cheie în env (OPENAI_API_KEY)' },
-      ],
-      modele: [
-        { id: 'auto', nume: 'Auto (luna → medium → heavy → max)', isAuto: true },
-        { id: m.luna, nume: m.luna, tag: 'ușor / ieftin' },
-        { id: m.medium, nume: m.medium, tag: 'mediu / reasoning' },
-        { id: m.heavy, nume: m.heavy, tag: 'greu / reasoning' },
-        { id: m.max, nume: m.max, tag: 'maxim calitate' },
-        { id: 'custom', nume: 'Model custom', isCustom: true },
-      ],
-    })
+    return reply.send(await stareCreier(activ, modelCustom))
   })
 
   // ── COMUTATOR DE CREIER — schimbă provider-ul activ. ───────────────────
@@ -729,31 +747,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!activ || !valide.includes(activ)) {
       return reply.code(400).send({ eroare: `Provider invalid. Accepta: ${valide.join(', ')}` })
     }
+    const custom = modelCustom?.trim() ?? ''
+    if (activ === 'openai' && custom && !(await modelOpenAIExista(custom))) {
+      const iduri = await catalogOpenAI()
+      const motiv = motivCatalogOpenAI()
+      const exemple = iduri.slice(0, 5).join(', ')
+      const eroare = motiv
+        ? `Nu pot verifica modelul OpenAI „${custom}": ${motiv}.`
+        : `Modelul OpenAI „${custom}" nu este servit de cheie. ID-uri servite: ${exemple || 'nu pot verifica'}.`
+      return reply.code(400).send({ eroare, ...(motiv ? { catalogEroare: motiv } : {}) })
+    }
     await saveKv('creier_activ', activ)
-    if (modelCustom !== undefined) await saveKv('creier_model', modelCustom.trim())
-    app.log.info(`admin: creier comutat pe „${activ}" (model: ${modelCustom || 'default'})`)
-    // FRONTEND: setCreier face setCreierState(r) și așteaptă același shape ca
-    // GET (cu provideri + modele). Fără ele, creier.provideri.map explodează
-    // după salvare → React crash → ecran negru (owner, 23 aug: „dupa ce dai
-    // salveaza model apare ecran negru"). Returnăm întregul obiect, ca GET.
-    const m = config.openai
-    return reply.send({
-      ok: true,
-      activ,
-      modelCustom: modelCustom?.trim() ?? '',
-      provideri: [
-        { prefix: 'google-direct', nume: 'Gemini Direct', disponibil: geminiDirectAvailable(), info: 'Default — are vedere + audio + unelte' },
-        { prefix: 'openai', nume: 'OpenAI ChatGPT', disponibil: openaiAvailable(), info: 'Chat + vedere + reasoning; cheie în env (OPENAI_API_KEY)' },
-      ],
-      modele: [
-        { id: 'auto', nume: 'Auto (luna → medium → heavy → max)', isAuto: true },
-        { id: m.luna, nume: m.luna, tag: 'ușor / ieftin' },
-        { id: m.medium, nume: m.medium, tag: 'mediu / reasoning' },
-        { id: m.heavy, nume: m.heavy, tag: 'greu / reasoning' },
-        { id: m.max, nume: m.max, tag: 'maxim calitate' },
-        { id: 'custom', nume: 'Model custom', isCustom: true },
-      ],
-    })
+    if (modelCustom !== undefined) await saveKv('creier_model', custom)
+    app.log.info(`admin: creier comutat pe „${activ}" (model: ${custom || 'default'})`)
+    // FRONTEND: răspunsul păstrează forma GET, ca panoul să nu rămână fără liste.
+    return reply.send({ ok: true, ...(await stareCreier(activ, custom)) })
   })
 
   // Verify the brain key live (admin only): pings the Gemini chat default

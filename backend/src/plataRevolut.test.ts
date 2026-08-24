@@ -26,7 +26,7 @@ vi.mock('./config.js', () => ({
     billing: { currency: 'gbp', creditValue: 0.1, userShare: 0.75, usdToCurrency: 0.8 },
     adminEmail: 'adrianenc11@gmail.com',
     openrouter: { key: '' },
-    openai: { key: '' },
+    openai: { key: '', override: { luna: '', medium: '', heavy: '', max: '' } },
     geminiKey: '',
     googleMapsKey: '',
     googleTtsKey: '',

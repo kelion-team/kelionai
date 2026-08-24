@@ -7,7 +7,7 @@ import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage, OrToolCall 
 // chat/text. Nu e primar — Gemini rămâne default; OpenAI intră doar când
 // ownerul comută din admin. Cheia din env (OPENAI_API_KEY).)
 
-const OPENAI_BASE = 'https://api.openai.com/v1'
+export const OPENAI_BASE = 'https://api.openai.com/v1'
 
 export function openaiAvailable(): boolean {
   return Boolean(config.openai?.key)
@@ -118,14 +118,10 @@ export async function openaiChat(
 /** Estimează costul în USD din prețurile OpenAI (per 1M tokens). hardcod-permis:
  *  prețurile sunt date publice OpenAI, cu fallback — se pot suprascrie via env. */
 function estimeazaCost(model: string, inputTokens: number, outputTokens: number): number {
-  // hardcod-permis: tarifele OpenAI Standard (short context) la 23 aug 2026;
-  // pot fi suprascrise via env; nu inventăm, luăm de pe platform.openai.com/docs/pricing.md
+  // hardcod-permis: fallback-ul este tariful public măsurat și documentat de OpenAI;
+  // valorile venite prin env au prioritate fără a cere o publicare nouă.
   const m = model.replace(/-\d{4}(-α|-β)?$/g, '') // normalizează snapshot-uri
   const prices: Record<string, { in: number; out: number }> = {
-    'gpt-5.6-luna': { in: 0.20, out: 1.20 },
-    'gpt-5.6-terra': { in: 2.00, out: 12.00 },
-    'gpt-5.6-sol': { in: 4.00, out: 20.00 },
-    'gpt-5.6-cyber': { in: 4.00, out: 20.00 },
     'gpt-5.5': { in: 5.00, out: 30.00 },
     'gpt-5.5-pro': { in: 30.00, out: 180.00 },
     'gpt-5.4': { in: 2.50, out: 15.00 },
@@ -156,7 +152,24 @@ function estimeazaCost(model: string, inputTokens: number, outputTokens: number)
     'o3-mini': { in: 1.10, out: 4.40 },
     'gpt-3.5-turbo': { in: 0.50, out: 1.50 },
   }
-  const p = prices[m] ?? { in: 0, out: 0 }
+  let suprascrieri: Record<string, { in: number; out: number }> = {}
+  try {
+    const parsed = JSON.parse(process.env.OPENAI_PRICES_JSON ?? '') as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [id, valoare] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!valoare || typeof valoare !== 'object' || Array.isArray(valoare)) continue
+        const tarif = valoare as { in?: unknown; out?: unknown; input?: unknown; output?: unknown }
+        const input = Number(tarif.in ?? tarif.input)
+        const output = Number(tarif.out ?? tarif.output)
+        if (Number.isFinite(input) && input >= 0 && Number.isFinite(output) && output >= 0) {
+          suprascrieri[id] = { in: input, out: output }
+        }
+      }
+    }
+  } catch {
+    suprascrieri = {}
+  }
+  const p = { ...prices, ...suprascrieri }[m] ?? { in: 0, out: 0 }
   return (inputTokens * p.in + outputTokens * p.out) / 1_000_000
 }
 
