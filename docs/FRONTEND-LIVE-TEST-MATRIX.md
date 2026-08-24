@@ -4,9 +4,9 @@ Acest document este contractul curent de verificare, nu un istoric de decizii. T
 
 ## Acoperire inventar
 
-- `frontend/src`: 163 fișiere — 113 producție și 50 teste.
-- Cod/config/stil/manifest de producție: 32.023 linii.
-- Teste frontend: 3.061 linii.
+- `frontend/src`: 170 fișiere — 116 producție și 54 teste.
+- Cod/config/stil/manifest de producție: 31.461 linii.
+- Teste frontend: 3.261 linii.
 - Configurație/build inspectată: `package.json`, lockfile, toate tsconfig-urile, `vite.config.ts`, `index.html`, `public/sw.js`, scripturile frontend și workflow-ul PR.
 - Fișiere de producție neclasificate: **0**.
 
@@ -61,7 +61,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 - `prefs.ts`: preferințe user-scoped; `productConfig.ts`: config public generat din `config/product.json`; `manualPolicy.ts`: limbi/chrome și filtrare fail-closed a capitolelor admin; `publicText.ts`, `i18n.ts`, `adminText.ts`, `languages.ts`, `langList.ts`: text și limbă fără dubluri comerciale locale.
 - `conexiune.ts`, `retea.ts`, `latency.ts`, `watchdog.ts`, `energie.ts`, `usePolledJson.ts`, `updateCheck.ts`: conectivitate, măsurare și lifecycle PWA.
 - `billing.ts`, `praguri.ts`: penny integers, politică server-side, reminder și istoric strict.
-- `admin.ts`: contractele API admin; `errorReport.ts`: raportare redactată; `vizita.ts`: vizită agregată fără fingerprint.
+- `admin.ts`: contractele API admin; `deployProgress.ts`: contract unic pentru polling/SSE de release; `errorReport.ts`: raportare redactată; `vizita.ts`: vizită agregată fără fingerprint.
 - `markdown.ts`: DOMPurify; `workspace.ts`: taskuri monitor, iframe allowlist și CSP playground; `tradingBridge.ts`: origin/source binding pentru iframe-ul Trading; `theme.ts`, `ceas.ts`, `wakelock.ts`, `notificari.ts`, `pushTelefon.ts`: utilitare UI/runtime.
 
 ### Biblioteci — chat, voce și senzori

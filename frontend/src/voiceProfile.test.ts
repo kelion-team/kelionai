@@ -35,21 +35,56 @@ describe('spectral voice profile contract', () => {
     expect(() => buildSpectralProfilePayload([], 48_000, 512)).toThrow('empty_audio_profile')
   })
 
-  it('accepts only metadata-only status and rejects a biometric vector response', () => {
-    const status = {
-      enrolled: true,
-      name: null,
-      hasAudio: false,
-      updatedAt: '2026-08-24T10:00:00.000Z',
+  it('unwraps the server response into metadata-only status without leaking the vector', () => {
+    const response = {
+      ok: true,
+      voiceprint: {
+        name: 'Customer',
+        hasAudio: false,
+        updatedAt: '2026-08-24T10:00:00.000Z',
+        features: [1, 2, 3],
+        audio: 'data:audio/webm;base64,AA==',
+      },
       availability: {
         method: 'spectral_profile',
         neuralSpeakerIdentification: false,
         authority: 'personalisation_only',
       },
     } as const
-    expect(parseSpectralProfileStatus(status)).toEqual(status)
-    const sanitized = parseSpectralProfileStatus({ ...status, vector: [1, 2, 3], audio: 'data:audio/webm;base64,AA==' })
-    expect(sanitized).toEqual(status)
+    const sanitized = parseSpectralProfileStatus(response)
+    expect(sanitized).toEqual({
+      enrolled: true,
+      name: 'Customer',
+      hasAudio: false,
+      updatedAt: '2026-08-24T10:00:00.000Z',
+      availability: response.availability,
+    })
     expect(JSON.stringify(sanitized)).not.toMatch(/vector|audio\/|base64/)
+  })
+
+  it('maps a null server voiceprint to a valid not-enrolled status', () => {
+    const availability = {
+      method: 'spectral_profile',
+      neuralSpeakerIdentification: false,
+      authority: 'personalisation_only',
+    } as const
+    expect(parseSpectralProfileStatus({ voiceprint: null, availability })).toEqual({
+      enrolled: false,
+      name: null,
+      hasAudio: false,
+      updatedAt: null,
+      availability,
+    })
+  })
+
+  it('rejects malformed nested server metadata', () => {
+    expect(parseSpectralProfileStatus({
+      voiceprint: { name: 'Customer', hasAudio: 'no', updatedAt: null },
+      availability: {
+        method: 'spectral_profile',
+        neuralSpeakerIdentification: false,
+        authority: 'personalisation_only',
+      },
+    })).toBeNull()
   })
 })

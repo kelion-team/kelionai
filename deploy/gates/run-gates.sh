@@ -31,6 +31,13 @@ ln -s /opt/kelion/frontend/node_modules "$WORK/frontend/node_modules"
 export CI=1
 export HOME=/nonexistent
 export GITLEAKS_BIN=/usr/local/bin/gitleaks
+# Sursa este copiată fără ownerul hostului într-un tmpfs controlat și devine
+# worktree-ul exact verificat de porți. Git 2.35+ îl refuză altfel ca „dubious
+# ownership”. Configurația process-locală autorizează numai acest path; nu scrie
+# config în imagine și nu autorizează global alte directoare.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0="$WORK"
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 export NO_COLOR=1
@@ -55,11 +62,13 @@ node --test \
   scripts/verifica-contract-deploy.test.mjs \
   ios/appstore-build.test.mjs \
   deploy/lib/create-migration-proof.test.mjs \
+  deploy/lib/backup-schedule.test.mjs \
   deploy/lib/caddy-security.test.mjs \
   deploy/lib/codex-boundary.test.mjs \
   deploy/lib/constructor-publication.test.mjs \
   deploy/lib/network-config.test.mjs \
   deploy/lib/compose-security.test.mjs \
+  deploy/lib/release-rollback.test.mjs \
   deploy/lib/security-policy.test.mjs
 node scripts/identifica-teste-moarte.mjs
 node scripts/verifica-exporturi.mjs

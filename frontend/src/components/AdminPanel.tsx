@@ -1531,84 +1531,35 @@ export default function AdminPanel({
               </p>
             )}
             {storesData && (
-              <>
-                <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">
-                    Magazine — verificare LIVE pe paginile publice (nu pe
-                    promisiunile dashboard-urilor), la maxim 5 minute vechime.
-                  </div>
-                  {storesData.stores.map((s) => (
-                    <div className="fin-row" key={s.key}>
-                      <span>
-                        {s.name} — {s.store}
-                      </span>
-                      <span>
-                        {s.listed ? (
-                          <a
-                            href={s.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="store-live"
-                          >
-                            ● LISTAT — deschide
-                          </a>
-                        ) : (
-                          <span className="store-missing">
-                            {A.notListedYet}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  ))}
+              <div className="fin-breakdown">
+                <div className="fin-breakdown-head">
+                  Magazine — verificare LIVE pe paginile publice (nu pe
+                  promisiunile dashboard-urilor), la maxim 5 minute vechime.
                 </div>
-                <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">
-                    Descărcări directe de pe site (numărate de serverul nostru —
-                    cifre reale). Magazinele își arată instalările doar agregat,
-                    în propriile dashboard-uri; aplicația NU le citește — aici
-                    sunt numărate doar descărcările directe.
-                  </div>
-
-                  {!storesData.downloads.dbOk && (
-                    <div className="chat-hint" style={{ color: '#e6a23c' }}>
-                      ⚠ Nu pot citi jurnalul de descărcări — baza de date nu
-                      răspunde (NU înseamnă zero descărcări).
-                    </div>
-                  )}
-                  {storesData.downloads.dbOk &&
-                    storesData.downloads.counts.length === 0 && (
-                      <div className="chat-hint">
-                        Nicio descărcare înregistrată încă (jurnalul pornește de
-                        la acest release).
-                      </div>
-                    )}
-                  {storesData.downloads.counts.map((c) => (
-                    <div className="fin-row" key={c.file}>
-                      <span>{c.file}</span>
-                      <span>{c.total} descărcări</span>
-                    </div>
-                  ))}
-                </div>
-                {storesData.downloads.recent.length > 0 && (
-                  <div className="fin-breakdown">
-                    <div className="fin-breakdown-head">{A.downloadsHead}</div>
-                    {storesData.downloads.recent.map((d, i) => (
-                      <div className="fin-row" key={i}>
-                        <span>{d.user_email || 'Vizitator nelogat'}</span>
-                        <span>
-                          {d.file} ·{' '}
-                          {new Date(d.created_at).toLocaleString('ro-RO', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                {storesData.stores.map((s) => (
+                  <div className="fin-row" key={s.key}>
+                    <span>
+                      {s.name} — {s.store}
+                    </span>
+                    <span>
+                      {s.listed ? (
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="store-live"
+                        >
+                          ● LISTAT — deschide
+                        </a>
+                      ) : (
+                        <span className="store-missing">
+                          {A.notListedYet}
                         </span>
-                      </div>
-                    ))}
+                      )}
+                    </span>
                   </div>
-                )}
-              </>
+                ))}
+              </div>
             )}
           </section>
         )}
@@ -2355,16 +2306,11 @@ export default function AdminPanel({
               {typeof creier === 'object' &&
                 creier !== null &&
                 (() => {
-                  const modele = creier.modele.filter(
-                    (model) => !model.isCustom,
-                  )
+                  const modele = creier.modele
                   return (
                     <>
                       <p className="chat-hint">
-                        Provider: <b>OpenAI</b>
-                        {creier.modelCustom
-                          ? ` · ${creier.modelCustom}`
-                          : ' · selecție automată'}
+                        Provider: <b>OpenAI</b> · selecție automată
                       </p>
                       <div className="chat-hint" style={{ marginTop: 12 }}>
                         Trepte configurate de server:{' '}

@@ -88,7 +88,6 @@ function configuratieCreier(): Record<string, unknown> {
   const m = config.openai
   return {
     activ: 'openai',
-    modelCustom: '',
     provideri: [
       { prefix: 'openai', nume: 'OpenAI', disponibil: openaiAvailable(), info: 'Responses API + Realtime; cheia runtime vine numai din OPENAI_API_KEY' },
     ],
@@ -97,7 +96,6 @@ function configuratieCreier(): Record<string, unknown> {
       { id: m.luna, nume: m.luna, tag: 'rapid' },
       { id: m.medium, nume: m.medium, tag: 'echilibrat' },
       { id: m.heavy, nume: m.heavy, tag: 'profund' },
-      { id: m.max, nume: m.max, tag: 'maxim' },
     ],
   }
 }
@@ -167,9 +165,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: r.sterse > 0, ...r })
   })
 
-  // Market control: live store presence + direct-download counts + WHO
-  // downloaded (email when signed in, else IP + country). Store installs are
-  // aggregate-only by design — no store exposes user identities.
+  // Market control: live store presence. Store installs remain aggregate-only
+  // in the external store dashboards and are not claimed as local telemetry.
   app.get('/api/admin/stores', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return

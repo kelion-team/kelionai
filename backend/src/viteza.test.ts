@@ -42,6 +42,8 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     expect(config).toContain('OPENAI_MEDIUM_MODEL')
     expect(config).toContain('OPENAI_HEAVY_MODEL')
     expect(config).not.toMatch(/luna:\s*['"]gpt-/)
+    expect(chat).not.toContain('model_choice:')
+    expect(chat).not.toMatch(/startsWith\(['"]openai\//)
   })
 
   it('uneltele dintr-o rundă pleacă ÎN PARALEL, cu rezultatele în ordinea apelurilor', () => {

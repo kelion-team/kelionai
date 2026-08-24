@@ -37,6 +37,19 @@ test('deploy-ul validează separat familia video Sora de modelele GPT', () => {
   assert.match(prVerify, /^\s*OPENAI_VIDEO_MODEL=sora-ci-video$/m)
 })
 
+test('provisionarea runtime trimite linia base64 completă către read-ul fail-closed', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/vps-set-env.yml', import.meta.url), 'utf8')
+  assert.match(
+    workflow,
+    /\{\s*printf '%s' "\$env_payload" \| base64 -w0\s*printf '\\n'\s*\} \| ssh_vps '[\s\S]{0,120}IFS= read -r encoded/,
+  )
+  assert.ok(workflow.includes("pairs = parse_qsl(url.query, keep_blank_values=True, strict_parsing=True)"))
+  assert.ok(workflow.includes("key not in {'host', 'port'} or key in query"))
+  assert.ok(workflow.includes("url.hostname != 'localhost'"))
+  assert.ok(workflow.includes("query.get('host') != '/var/run/postgresql'"))
+  assert.doesNotMatch(workflow, /case "\$DATABASE_URL" in/)
+})
+
 test('dovezile publice de deploy validează semantic readiness-ul activ', () => {
   const deploy = readFileSync(new URL('../deploy/deploy.sh', import.meta.url), 'utf8')
   const workflow = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')

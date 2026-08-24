@@ -33,6 +33,13 @@ describe('ușa CHIAR deschide inventarul — nu mai e un „expert fără mâini
     expect(chat).toContain('[FAZĂ] ESCALADARE ask_brain')
   })
 
+  it('executorul urcă modelul la treapta profundă, nu recalculează modelul ușor', () => {
+    expect(chat).toContain('const modelGreu = modelProfundDirect()')
+    expect(chat).toContain("escaladare.reasoning = 'high'")
+    expect(chat).not.toMatch(/if \(!heavyTurn && !escaladare\.model\)/)
+    expect(chat).not.toMatch(/if \(!heavyTurn && !escaladare\.model\) \{[\s\S]{0,300}alegeModelOrchestrator/)
+  })
+
   it('vechea escaladare fără unelte (brainComplete pe text) a dispărut din chat', () => {
     expect(chat).not.toContain('CHAT ESCALATION: the fast chat model handed you')
     expect(chat).not.toContain("import { brainComplete }")

@@ -89,7 +89,7 @@ test('backendul autorizează fiecare tranziție numai pe ruta domeniului său', 
   assert.match(migration, /release_lease_id UUID UNIQUE/)
 })
 
-test('workflow-ul de producție corelează idempotent cererea și rămâne approval-gated', () => {
+test('workflow-ul de producție corelează idempotent cererea și rămâne environment-scoped', () => {
   const workflow = read('.github/workflows/deploy.yml')
   assert.match(workflow, /run-name: production-\$\{\{ inputs\.release_request_id \}\}/)
   assert.match(workflow, /release_request_id:[\s\S]*required: true/)

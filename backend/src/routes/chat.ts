@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { config, roleFor, modelRapidDirect } from '../config.js'
+import { config, roleFor, modelProfundDirect, modelRapidDirect } from '../config.js'
 import type {
   Tool,
   MessageParam,
@@ -26,7 +26,6 @@ import {
   listNotes,
   deleteNote,
   getRecentHistory,
-  loadKv,
   createBuildJob,
   listBuildJobs,
   userKey,
@@ -123,6 +122,7 @@ import { executaCheamaAgent, executaAgentNou } from '../services/agentiKelion.js
 export { CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL }
 import { latestUpdateSummary } from '../services/updates.js'
 import { bazaPublica } from '../services/bazaPublica.js'
+import { inputImageBlock, parseInputImageDataUrl } from '../services/inputImage.js'
 
 const CHAT_IDEMPOTENCY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -130,37 +130,25 @@ const CHAT_IDEMPOTENCY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-
 function alegeOpenAIModel(difficulty: number, ownerAction: boolean): string {
   const m = config.openai
   if (ownerAction) return m.heavy // owner cu intenție de acțiune → reasoning
-  if (difficulty >= ESCALATE_TOP_AT) return m.max
+  if (difficulty >= ESCALATE_TOP_AT) return m.heavy
   if (difficulty >= ESCALATE_AT) return m.medium
   return m.luna
 }
 
-// A saved choice is honored only when it is an OpenAI model. Returns null when
-// the canonical runtime key is unavailable.
+// The runtime-owned Luna → Terra → Sol ladder is the only model selector.
+// Returns null when the canonical OpenAI project key is unavailable.
 async function selectedBrainModel(
   email: string,
   text: string,
-  kvRaw?: string | null,
   needsVision = false,
   decideAdresarea = false,
 ): Promise<{ model: string; heavy: boolean } | null> {
   const difficulty = taskDifficulty(text)
   const isOwner = roleFor(email) === 'admin'
   if (!config.openai.key) return null
-  let sel: { chat?: string; work?: string } = {}
-  try {
-    // FLUENCY (A5): the kv comes pre-read from the turn's Promise.all (no extra
-    // serial DB round here); fall back to a read only for old callers.
-    const raw = kvRaw !== undefined ? kvRaw : await loadKv(`model_choice:${userKey(email)}`)
-    if (raw) sel = JSON.parse(raw) as { chat?: string; work?: string }
-  } catch {
-    sel = {}
-  }
   const heavy =
     needsVision || decideAdresarea || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
-  const stored = heavy ? sel.work : sel.chat
-  const custom = stored?.startsWith('openai/') ? stored.slice('openai/'.length) : ''
-  const model = custom || alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
+  const model = alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
   return { model: `openai/${model}`, heavy }
 }
 
@@ -1031,7 +1019,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // sends 8 frames OLDEST first — we used to keep exactly the older half and
     // discard the present; Kelion was seeing the scene ~2 seconds behind.
     const camFrames = (Array.isArray(req.body?.images) ? req.body.images : [])
-      .filter((s): s is string => typeof s === 'string' && s.startsWith('data:image'))
+      .filter((s): s is string => typeof s === 'string' && parseInputImageDataUrl(s) !== null)
       .slice(-4)
     const imageIsAttachment = req.body?.imageIsAttachment === true
     // Vocea brută a acestei ture (dacă e o tură vocală cu audio nativ activat).
@@ -1184,7 +1172,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // ── PREFERINȚELE SE CITESC O DATĂ PE SESIUNE, NU LA FIECARE ÎNTREBARE ────
     // (Adrian, 7 aug: „verificarile de plati etc securitate se fac la logare si
     // atit, e clar nu se repeta deloc pe intrebari"). Limba, meseria, gesturile,
-    // alegerea de model și preferința de voce NU depind de ce a întrebat omul —
+    // preferința de voce NU depinde de ce a întrebat omul —
     // depind de CONT. Prima tură a sesiunii le citește o dată; următoarele le iau
     // din memorie (`services/stareSesiune.ts`), fără niciun drum la DB. Memoria
     // semantică (recall) și continuitatea rămân per-tură — ALEA depind de tura
@@ -1201,12 +1189,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             // GESTURES disabled by Adrian from the admin panel — anything NOT
             // checked does NOT appear at all (Adrian, Jul 13).
             getDisabledGestures().catch(() => [] as string[]),
-            loadKv(`model_choice:${userKey(user.email)}`).catch(() => null),
             getVoicePref(user.email).catch(() => null),
-          ]).then(([speechLang, mId, gestures, mKv, vPref]) => {
+          ]).then(([speechLang, mId, gestures, vPref]) => {
             const stare = {
               speechLang, meserieId: mId, disabledGestures: gestures,
-              modelChoiceKv: mKv, voicePref: vPref, balance: null,
+              voicePref: vPref, balance: null,
             }
             pastreazaStareSesiune(user.email, stare, acumMs)
             return { ...stare, laMs: acumMs }
@@ -1225,7 +1212,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const storedPref = prefs.speechLang
     const meserieId = prefs.meserieId
     const disabledGestures = prefs.disabledGestures
-    const modelChoiceKv = prefs.modelChoiceKv
     // GESTURILE DEZACTIVATE de Adrian din Admin → Gesturi: gestul ales de
     // situație (mai jos, la finalul turei) e verificat față de setul ăsta și
     // nu se joacă dacă e debifat. „Ce nu e bifat nu apare în aplicație."
@@ -1884,8 +1870,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     //      asks something visual (VISION_INTENT: "can you see me", "what do
     //      you see", "describe", etc.).
     const reqImageSource = (req.body as any)?.imageSource || (imageIsAttachment ? 'chat' : 'camera')
-    const attachedPhoto = imageIsAttachment && image ? [image] : []
-    const camView = camFrames.length > 0 ? camFrames : !imageIsAttachment && image ? [image] : []
+    const singularImage = parseInputImageDataUrl(image)?.dataUrl ?? ''
+    const attachedPhoto = imageIsAttachment && singularImage ? [singularImage] : []
+    const camView = camFrames.length > 0 ? camFrames : !imageIsAttachment && singularImage ? [singularImage] : []
     // Read by selectedBrainModel — forces the step with real sight (see there).
     let turnHasImage = false
     if (params.length > 0) {
@@ -1905,17 +1892,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           void recordSimptomLive('fara-vedere', `scris: cerere vizuală fără cadru — „${lm.content.slice(0, 100)}"`).catch(() => {})
         }
         if (toSend.length > 0) {
-          turnHasImage = true
-          const strip = (s: string): string => (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s)
+          const imageBlocks = toSend
+            .map(inputImageBlock)
+            .filter((block) => block !== null)
+          turnHasImage = imageBlocks.length > 0
           const isChatImage = attachedPhoto.length > 0 || reqImageSource === 'chat'
           const imagePrefix = isChatImage ? '[Imagine trimisă de utilizator în chat]' : '[Cadru preluat automat de cameră]'
           params[lastIdx] = {
             role: 'user',
             content: [
-              ...toSend.map((f) => ({
-                type: 'image' as const,
-                source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: strip(f) },
-              })),
+              ...imageBlocks,
               { type: 'text', text: imagePrefix + '\n' + lm.content },
             ],
           }
@@ -2133,7 +2119,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // the model also gets the ask_brain tool so it can escalate whatever it
     // judges heavy itself; on the WORK step it does not (that would be
     // recursive — it IS the brain).
-    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage, voceAmbianta)
+    const brainSel = await selectedBrainModel(user.email, lastUserText, turnHasImage, voceAmbianta)
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
     // ESCALADARE MODEL LA MIJLOCUL TUREI (owner, 20 aug: „modelul ușor/greu"):
@@ -2700,10 +2686,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           }
           // ȘI URCĂ CREIERUL, nu doar uneltele (owner, 20 aug — golul măsurat:
           // până acum `ask_brain` deschidea uneltele dar rămânea pe flash-lite).
-          // Dacă tura a pornit UȘOARĂ, escaladăm la creierul greu + gândire adâncă
-          // pentru restul turei; orchestratorul citește `escaladare` pe fiecare rundă.
-          if (!heavyTurn && !escaladare.model) {
-            const modelGreu = alegeModelOrchestrator({ modelChat: orChatModel, creierDublu: config.creierDublu, turaGrea: true, modelProfund: config.modelCreierProfund })
+          // Dacă tura nu rulează deja pe Sol, escaladăm la creierul profund +
+          // gândire adâncă; orchestratorul citește `escaladare` pe fiecare rundă.
+          if (!escaladare.model) {
+            const modelGreu = modelProfundDirect()
             if (modelGreu && modelGreu !== orchestratorModel) {
               escaladare.model = modelGreu
               escaladare.reasoning = 'high'

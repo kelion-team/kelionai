@@ -22,7 +22,7 @@ import {
 import { openaiResponsesStream } from './openaiResponses.js'
 import type { BrainTool, BrainCallOpts, OrChatResult, OrMessage } from './brainContract.js'
 
-export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'ultra' | 'plan'
+export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'plan'
 
 export interface OptiuniRationament {
   /** Cine cheamă — obligatoriu pentru jurnal unitar (rută/serviciu). */

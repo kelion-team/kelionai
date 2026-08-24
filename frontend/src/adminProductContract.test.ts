@@ -48,4 +48,11 @@ describe('admin product contract', () => {
     expect(admin).toContain('creditarea se face automat numai după webhook-ul')
     expect(admin).toContain('nu există credit anticipat sau verificare manuală')
   })
+
+  it('afișează numai scara automată OpenAI, fără ramuri custom retrase', () => {
+    const admin = source('components/AdminPanel.tsx')
+    const contract = source('lib/admin.ts')
+    expect(admin).toContain('Provider: <b>OpenAI</b> · selecție automată')
+    expect(`${admin}\n${contract}`).not.toMatch(/modelCustom|isCustom/)
+  })
 })

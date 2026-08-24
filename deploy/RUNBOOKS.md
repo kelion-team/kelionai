@@ -38,8 +38,8 @@ allowlist de domenii.
 
 1. Confirmă că SHA-ul integral este vârful `master`, `pr-verify` este verde și
    `build-images` a produs manifestul semnat pentru același SHA.
-2. Rulează `production-release`, cu `release_mode=release`, și aprobă mediul
-   `production` numai după verificarea dovezilor.
+2. După verificarea dovezilor, rulează manual `production-release`, cu
+   `release_mode=release`, în mediul `production`.
 3. Acceptă release-ul numai dacă workflow-ul confirmă versiunea publică exactă
    și `/readyz=200` după activarea efectelor.
 
@@ -47,6 +47,35 @@ Pentru rollback selectează `release_mode=rollback` și un commit integral din
 istoricul `master` al cărui artefact semnat este încă disponibil. Nu re-eticheta
 imagini și nu ocoli runnerul de migrări. Dacă schema este incompatibilă,
 rollbackul trebuie să rămână blocat; se pregătește o migrare forward de remediere.
+
+La primul cutover, rollback-ul pre-switch repornește containerele legacy
+capturate și se bazează pe bridge-ul DB bidirecțional verificat. Nu porni un
+workflow către un artefact vechi dacă migratorul raportează checksum
+incompatibil: pregătește un fix forward sau execută o restaurare controlată din
+backup după oprirea scrierilor. Nu modifica manual tabela de migrări.
+
+### Revenire manuală la stackul legacy păstrat
+
+Primul release nou oprește `kelionai-app`, `omniroute` și `kelionai-coqui` numai
+după ce versiunea publică exactă și readiness-ul cu efecte active sunt verzi.
+Containerele, imaginile și volumele nu sunt șterse. `kelion-caddy` este tratat
+separat de comutarea proxy-ului.
+
+Revenirea manuală este numai pentru incidentul în care workflow-ul de rollback
+semnat nu mai poate rula:
+
+1. Înregistrează read-only existența, imaginea și starea celor patru containere;
+   oprește procedura dacă numele sau imaginile diferă de preflight.
+2. Dezactivează efectele slotului nou prin markerul de release și confirmă că
+   procesele managed s-au oprit înainte de a porni vechiul runtime.
+3. Pornește, fără recreare, containerele existente `kelionai-coqui`,
+   `omniroute` și `kelionai-app`; confirmă că sunt `running` și că aplicația
+   legacy răspunde local.
+4. Oprește proxy-ul managed `kelion-proxy`, pornește containerul existent
+   `kelion-caddy`, apoi verifică public versiunea și endpointul de sănătate.
+5. Dacă proba publică nu trece, repornește proxy-ul managed și slotul nou;
+   păstrează toate containerele și colectează diagnosticul. Nu folosi `rm`,
+   `compose down --volumes`, prune sau ștergere de imagine în această procedură.
 
 ## Backup și migrări
 
@@ -58,6 +87,16 @@ rollbackul trebuie să rămână blocat; se pregătește o migrare forward de re
 - restaurează complet într-un cluster temporar fără rețea;
 - emite dovada de migrare legată de hashul backupului și identitatea DB;
 - copiază off-host numai către un mount configurat explicit.
+
+Retenția se citește exclusiv din `PRIVACY_BACKUP_RETENTION_DAYS` din
+`/root/kelion/config/runtime.env`. Scripturile persistente sunt versionate în
+`/opt/kelion-backup/releases`, iar timerul rulează numai selectorul `current`,
+mutat atomic după smoke public. `kelion-backup.timer` rulează zilnic. La primul cutover, crontabul root
+integral este salvat în runtime, apoi se elimină numai linia legacy exactă. Dacă
+timerul nu este enabled, activ sau nu are următoarea rulare, rollbackul automat
+restaurează selectorul `current`, unitățile și starea timerului anterioare,
+crontabul root byte-identic și markerul anterior. Snapshotul root-only rămâne
+disponibil dacă restaurarea nu poate fi confirmată fail-closed.
 
 Cheia master și backupul nu constituie disaster recovery dacă rămân pe aceeași
 gazdă. Configurează și testează o destinație off-host înainte de producție.

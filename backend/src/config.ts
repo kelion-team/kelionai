@@ -53,7 +53,6 @@ export const ENV_ALIASES: Record<string, string[]> = {
   openaiLuna: ['OPENAI_LUNA_MODEL'],
   openaiMedium: ['OPENAI_MEDIUM_MODEL'],
   openaiHeavy: ['OPENAI_HEAVY_MODEL'],
-  openaiMax: ['OPENAI_MAX_MODEL'],
   openaiRealtime: ['OPENAI_REALTIME_MODEL'],
   openaiRealtimeTranscription: ['OPENAI_REALTIME_TRANSCRIPTION_MODEL'],
   openaiCallTranscription: ['OPENAI_CALL_TRANSCRIPTION_MODEL'],
@@ -364,11 +363,8 @@ const modelUnicActiv = configuredModel('OPENAI_MEDIUM_MODEL', ENV_ALIASES.openai
 const modelProfundActiv = configuredModel('OPENAI_HEAVY_MODEL', ENV_ALIASES.openaiHeavy)
 
 export function modelProfundCod(): string { return modelProfundActiv }
-export function modelUltraCod(): string { return env(...ENV_ALIASES.openaiMax) || modelProfundActiv }
 export function modelRapidDirect(): string { return `openai/${modelRapidActiv}` }
-export function modelUnicDirect(): string { return `openai/${modelUnicActiv}` }
 export function modelProfundDirect(): string { return `openai/${modelProfundActiv}` }
-export function modelUltraDirect(): string { return `openai/${modelUltraCod()}` }
 
 export const config = {
   isProd,
@@ -494,7 +490,6 @@ export const config = {
     luna: modelRapidActiv,
     medium: modelUnicActiv,
     heavy: modelProfundActiv,
-    max: configuredModel('OPENAI_MAX_MODEL', ENV_ALIASES.openaiMax) || modelProfundActiv,
     realtime: env(...ENV_ALIASES.openaiRealtime),
     realtimeTranscription: configuredModel(
       'OPENAI_REALTIME_TRANSCRIPTION_MODEL',
@@ -619,26 +614,6 @@ export const config = {
     return timestamp
   })(),
   videoAllowPaid: process.env.VIDEO_ALLOW_PAID === '1',
-  brain: {
-    get chatDefault(): string {
-      return modelRapidDirect()
-    },
-    get workDefault(): string {
-      return modelUnicDirect()
-    },
-    // PROFUND (22 aug): treapta a 3-a — Pro pentru raționament complex, escaladat
-    // automat la dificultate mare sau prin ask_brain.
-    get profundDefault(): string {
-      return modelProfundDirect()
-    },
-    // ULTRA (22 aug): treapta a 4-a — pentru probleme maximale. Env-configurable.
-    get ultraDefault(): string {
-      return modelUltraDirect()
-    },
-    get topDefault(): string {
-      return modelProfundDirect()
-    },
-  },
   // Money policy and provider-expense accounting are separate. Customer
   // wallets use integer GBP minor units; external provider usage uses a
   // distinct USD-micros ledger and is never debited as though it were GBP.

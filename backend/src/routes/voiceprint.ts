@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { deleteVoiceprint, getVoiceprint, saveVoiceprint, type VoiceFeatureMeta } from '../db.js'
+import {
+  deleteVoiceprint,
+  getVoiceprint,
+  saveVoiceprint,
+  type VoiceFeatureMeta,
+  type VoiceprintRow,
+} from '../db.js'
 import { replaceControlCharacters } from '../shared/textSanitization.js'
 
 /**
@@ -65,6 +71,19 @@ const availability = {
   authority: 'personalisation_only' as const,
 }
 
+function metadataVoiceprint(profile: VoiceprintRow | null): null | {
+  name: string
+  hasAudio: boolean
+  updatedAt: string
+} {
+  if (!profile) return null
+  return {
+    name: profile.name,
+    hasAudio: profile.hasAudio,
+    updatedAt: profile.updatedAt,
+  }
+}
+
 export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { vector?: number[]; meta?: VoiceFeatureMeta; clip?: string; name?: string } }>(
     '/api/voiceprint/me',
@@ -80,14 +99,21 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
         featureMeta: valid.meta,
         audioClip: valid.clip,
       })
-      return reply.send({ ok: true, voiceprint: await getVoiceprint(user.email), availability })
+      return reply.send({
+        ok: true,
+        voiceprint: metadataVoiceprint(await getVoiceprint(user.email)),
+        availability,
+      })
     },
   )
 
   app.get('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    return reply.send({ voiceprint: await getVoiceprint(user.email), availability })
+    return reply.send({
+      voiceprint: metadataVoiceprint(await getVoiceprint(user.email)),
+      availability,
+    })
   })
 
   app.delete('/api/voiceprint/me', async (req, reply) => {

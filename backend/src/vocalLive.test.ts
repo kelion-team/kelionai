@@ -7,7 +7,8 @@ import {
   interpreteazaCadru,
   oraLocalaText,
 } from './services/vocalLive.js'
-import { unelteleSesiuniiLive } from './routes/vocalLive.js'
+import { cadreVedereLive, capacitateVocalLive, unelteleSesiuniiLive } from './routes/vocalLive.js'
+import { inputImageBlock, parseInputImageDataUrl } from './services/inputImage.js'
 
 describe('OpenAI Realtime — session.update', () => {
   it('configurează audio nativ full-duplex, transcriere, server VAD și barge-in', () => {
@@ -118,6 +119,29 @@ describe('OpenAI Realtime — protocol events', () => {
 })
 
 describe('OpenAI Realtime — context și autorizare', () => {
+  it('publică exact contractul de capabilitate consumat de frontend', () => {
+    expect(capacitateVocalLive()).toEqual({
+      disponibil: Boolean(config.openai.key && config.openai.realtime),
+      model: config.openai.realtime,
+      voce: config.openaiVoice,
+    })
+  })
+
+  it('acceptă un singur cadru data URL compatibil cu /api/chat și respinge base64 brut', () => {
+    const valid = 'data:image/jpeg;base64,AA=='
+    expect(cadreVedereLive([valid, 'data:image/png;base64,AA=='])).toEqual([valid])
+    expect(cadreVedereLive(['AA==', 'data:text/plain;base64,AA==', 'data:image/jpeg;base64,%%%'])).toEqual([])
+    expect(cadreVedereLive([`data:image/jpeg;base64,${'A'.repeat(2_000_000)}`])).toEqual([])
+  })
+
+  it('păstrează MIME-ul validat JPEG/PNG/WebP până în blocul multimodal', () => {
+    expect(inputImageBlock('data:image/jpeg;base64,AA==')?.source.media_type).toBe('image/jpeg')
+    expect(inputImageBlock('data:image/png;base64,AA==')?.source.media_type).toBe('image/png')
+    expect(inputImageBlock('data:image/webp;base64,AA==')?.source.media_type).toBe('image/webp')
+    expect(parseInputImageDataUrl('data:image/gif;base64,AA==')).toBeNull()
+    expect(inputImageBlock('AA==')).toBeNull()
+  })
+
   it('păstrează persoana, limba, timpul și istoricul fără context inventat', () => {
     const text = construiesteInstructiune(
       'Ești Kelion.',

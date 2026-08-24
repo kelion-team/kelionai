@@ -135,7 +135,7 @@ describe('tura de voce ajunge pe modelul bun, iar tăcerea se explică', () => {
     const linie = /const heavy =[\s\S]{0,200}/.exec(chat)?.[0] ?? ''
     expect(/decideAdresarea/.test(linie), 'steagul există, dar nu intră în calculul lui `heavy`').toBe(true)
     expect(
-      /selectedBrainModel\(user\.email, lastUserText, modelChoiceKv, turnHasImage, voceAmbianta\)/.test(chat),
+      /selectedBrainModel\(user\.email, lastUserText, turnHasImage, voceAmbianta\)/.test(chat),
       'steagul nu e trimis din tura reală — ar rămâne mort',
     ).toBe(true)
   })

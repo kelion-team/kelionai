@@ -26,7 +26,6 @@ jobs:
       OPENAI_LUNA_MODEL: ${{ vars.OPENAI_LUNA_MODEL }}
       OPENAI_MEDIUM_MODEL: ${{ vars.OPENAI_MEDIUM_MODEL }}
       OPENAI_HEAVY_MODEL: ${{ vars.OPENAI_HEAVY_MODEL }}
-      OPENAI_MAX_MODEL: ${{ vars.OPENAI_MAX_MODEL }}
       OPENAI_REALTIME_MODEL: ${{ vars.OPENAI_REALTIME_MODEL }}
       OPENAI_REALTIME_TRANSCRIPTION_MODEL: ${{ vars.OPENAI_REALTIME_TRANSCRIPTION_MODEL }}
       OPENAI_CALL_TRANSCRIPTION_MODEL: ${{ vars.OPENAI_CALL_TRANSCRIPTION_MODEL }}
@@ -98,7 +97,7 @@ jobs:
           [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
           [ -n "$PUBLIC_APP_ORIGIN" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REDIRECT_URI" ]
           [ -n "$OPENAI_LUNA_MODEL" ] && [ -n "$OPENAI_MEDIUM_MODEL" ] && [ -n "$OPENAI_HEAVY_MODEL" ]
-          [ -n "$OPENAI_MAX_MODEL" ] && [ -n "$OPENAI_REALTIME_MODEL" ]
+          [ -n "$OPENAI_REALTIME_MODEL" ]
           [ -n "$OPENAI_REALTIME_TRANSCRIPTION_MODEL" ] && [ -n "$OPENAI_CALL_TRANSCRIPTION_MODEL" ]
           [ -n "$OPENAI_TTS_MODEL" ] && [ -n "$OPENAI_IMAGE_MODEL" ] && [ -n "$OPENAI_VIDEO_MODEL" ]
           [ -n "$PRIVACY_POLICY_UPDATED" ] && [ -n "$DATA_CONTROLLER_NAME" ]
@@ -113,6 +112,48 @@ jobs:
           [ "${#CONVERTER_WORKER_SECRET}" -ge 32 ]
           [ "${#GOOGLE_TOKEN_ENCRYPTION_KEY}" -ge 32 ]
           [ -n "$DATABASE_URL" ] && [ -n "$GOOGLE_CLIENT_SECRET" ]
+          # Parsează canonic URL-ul, nu cu globuri de substring: duplicatele sau
+          # cheile necunoscute ar putea schimba hostul efectiv după validare.
+          # Mesajele de eroare nu includ niciodată valoarea secretului.
+          python3 - <<'PY'
+          import os
+          import re
+          from urllib.parse import parse_qsl, unquote, urlsplit
+
+          raw = os.environ.get('DATABASE_URL', '')
+          try:
+              url = urlsplit(raw)
+              authority_port = url.port
+              pairs = parse_qsl(url.query, keep_blank_values=True, strict_parsing=True)
+          except (TypeError, ValueError):
+              raise SystemExit('DATABASE_URL are sintaxă invalidă')
+
+          query = {}
+          for key, value in pairs:
+              if key not in {'host', 'port'} or key in query:
+                  raise SystemExit('DATABASE_URL conține parametri necunoscuți sau duplicați')
+              query[key] = value
+
+          database = unquote(url.path[1:]) if url.path.startswith('/') else ''
+          username = unquote(url.username or '')
+          password = unquote(url.password or '')
+          effective_port = query.get('port', str(authority_port or 5432))
+          values = (database, username, password, effective_port)
+          if (
+              url.scheme != 'postgresql'
+              or url.hostname != 'localhost'
+              or url.fragment
+              or query.get('host') != '/var/run/postgresql'
+              or (authority_port is not None and 'port' in query)
+              or not re.fullmatch(r'[A-Za-z0-9_.-]+', database)
+              or not username
+              or not password
+              or not effective_port.isdigit()
+              or not 1 <= int(effective_port) <= 65535
+              or any(any(character in value for character in ('\x00', '\r', '\n')) for value in values)
+          ):
+              raise SystemExit('DATABASE_URL este în afara contractului socket local')
+          PY
           [[ "$CODEX_WORKER_ENABLED" =~ ^[01]$ ]]
           [[ "$CONSTRUCTOR_PUBLISHER_ENABLED" =~ ^[01]$ ]]
           [[ "$CONSTRUCTOR_RELEASE_ENABLED" =~ ^[01]$ ]]
@@ -233,7 +274,6 @@ jobs:
             "OPENAI_LUNA_MODEL=$OPENAI_LUNA_MODEL" \
             "OPENAI_MEDIUM_MODEL=$OPENAI_MEDIUM_MODEL" \
             "OPENAI_HEAVY_MODEL=$OPENAI_HEAVY_MODEL" \
-            "OPENAI_MAX_MODEL=$OPENAI_MAX_MODEL" \
             "OPENAI_REALTIME_MODEL=$OPENAI_REALTIME_MODEL" \
             "OPENAI_REALTIME_TRANSCRIPTION_MODEL=$OPENAI_REALTIME_TRANSCRIPTION_MODEL" \
             "OPENAI_CALL_TRANSCRIPTION_MODEL=$OPENAI_CALL_TRANSCRIPTION_MODEL" \
@@ -305,7 +345,10 @@ jobs:
             'SEARCH_ENABLED=false' \
             'MAIL_ENABLED=false' \
             'RELEASE_CANDIDATE_MODE=0')
-          printf '%s' "$env_payload" | base64 -w0 | ssh_vps '
+          {
+            printf '%s' "$env_payload" | base64 -w0
+            printf '\n'
+          } | ssh_vps '
             set -euo pipefail
             umask 077
             IFS= read -r encoded

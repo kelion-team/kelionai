@@ -27,11 +27,17 @@ bloc și nu montează repository-ul sau `/root/kelion`.
 2. `build-images` acceptă numai un run `push` verde pe `master`, construiește
    imaginile din SHA-ul exact, le publică prin digest și emite manifestul
    semnat.
-3. `production-release` cere SHA integral și aprobarea mediului. Verifică runul
+3. `production-release` pornește numai prin dispatch manual autorizat, cere SHA integral și folosește mediul `production`. Verifică runul
    CI, runul de build, manifestul și semnăturile înainte de SSH.
 4. `deploy.sh` planifică migrările. Creează un backup autentificat și îl
    restaurează integral într-un Postgres temporar fără rețea. O migrare
    distructivă cere dovada HMAC legată de backup și baza exactă.
+   Scriptul este instalat într-un release persistent din `/opt/kelion-backup`;
+   după smoke-ul public, selectorul `current` este mutat atomic, iar release-ul
+   verifică și activează service-ul/timerul systemd versionate. Numai apoi
+   retrage linia cron legacy exactă, după salvarea crontabului root. Selectorul,
+   unitățile, starea timerului, markerul și crontabul sunt capturate înainte de
+   mutație și restaurate dacă orice etapă ulterioară a release-ului eșuează.
 5. Slotul inactiv pornește cu efectele singleton dezactivate. `/readyz` trebuie
    să confirme DB, registrul migrărilor și workerii browser/converter, iar
    `/api/version` trebuie să fie commitul candidat.
@@ -44,6 +50,12 @@ bloc și nu montează repository-ul sau `/root/kelion`.
 Rollbackul folosește același workflow, numai către un artefact semnat al unui
 commit din istoricul `master`. Runnerul de migrări refuză versiuni/checksumuri
 necunoscute; un rollback incompatibil cu schema se oprește înainte de trafic.
+
+La primul cutover, revenirea înainte de comutarea traficului folosește numai
+containerele legacy capturate și schema de compatibilitate bidirecțională. Un
+workflow către un artefact al cărui checksum de migrare diferă este blocat
+intenționat; recuperarea este un fix forward sau o restaurare controlată din
+backup, nu o rescriere a istoricului migrărilor.
 
 ## Readiness și limite de proces
 

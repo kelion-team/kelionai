@@ -4592,25 +4592,6 @@ export async function deleteVoiceprint(email: string): Promise<boolean> {
   return (result.rowCount ?? 0) > 0
 }
 
-export async function listVoiceprints(limit = 200): Promise<VoiceprintRow[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = await getPool().query<VoiceprintDbRow>(
-      `SELECT v.user_email, v.name, v.gender, v.is_admin, v.features, v.feature_meta,
-              (v.audio_clip <> '') AS has_audio,
-              NULLIF(f.photo, '') AS face_photo,
-              v.created_at, v.updated_at
-       FROM voiceprints v
-       LEFT JOIN faceprints f ON f.user_email = v.user_email
-       ORDER BY v.updated_at DESC LIMIT $1`,
-      [limit],
-    )
-    return r.rows.map(rowToVoiceprint)
-  } catch {
-    return []
-  }
-}
-
 // The common core of the two distances (normalized voice + raw face): the sum
 // of squared differences across components + the compared length. Single
 // source — the two functions differ ONLY in the final normalization (single,
