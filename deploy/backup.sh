@@ -14,6 +14,24 @@ POSTGRES_IMAGE=postgres:16@sha256:56f243d2355bad7d2016b1e78b80da8ac9e7967b766be2
 BACKUP_CONTAINER_UID=15050
 BACKUP_CONTAINER_GID=15050
 
+sync_file_and_parent() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+with open(path, 'rb') as handle:
+    os.fsync(handle.fileno())
+directory = os.path.dirname(path)
+flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0)
+fd = os.open(directory, flags)
+try:
+    os.fsync(fd)
+finally:
+    os.close(fd)
+PY
+}
+
 [ -f "$CONFIG_FILE" ] && [ ! -L "$CONFIG_FILE" ] \
   || { printf '%s\n' 'backup: configul runtime lipsește sau este link'; exit 1; }
 mapfile -t retention_values < <(sed -n 's/^PRIVACY_BACKUP_RETENTION_DAYS=//p' "$CONFIG_FILE")
@@ -49,11 +67,13 @@ if [ ! -s "$KEY_FILE" ]; then
   temporary_key=$(mktemp /root/kelion/backup-key.XXXXXX)
   openssl rand -hex 48 > "$temporary_key"
   install -o root -g root -m 0600 "$temporary_key" "$KEY_FILE"
+  sync_file_and_parent "$KEY_FILE"
   rm -f -- "$temporary_key"
 fi
 
 stamp=$(date -u +'%Y-%m-%d_%H%M%S')
 output="$OUT_DIR/kelion-$stamp.dump.enc"
+temporary_output=$(mktemp "$OUT_DIR/kelion-$stamp.XXXXXX.dump.enc")
 temporary_dump=$(mktemp "$OUT_DIR/kelion-$stamp.XXXXXX.dump")
 temporary_restore=$(mktemp "$OUT_DIR/kelion-$stamp.XXXXXX.restore.dump")
 temporary_proof=$(mktemp "$RUNTIME_DIR/backup-proof.XXXXXX")
@@ -62,7 +82,7 @@ temporary_manifest=$(mktemp "$OUT_DIR/kelion-$stamp.XXXXXX.mac")
 temporary_libpq_env=$(mktemp /root/kelion/backup-libpq.XXXXXX)
 temporary_passwd=$(mktemp /root/kelion/backup-passwd.XXXXXX)
 temporary_group=$(mktemp /root/kelion/backup-group.XXXXXX)
-cleanup() { rm -f -- "$temporary_dump" "$temporary_restore" "$temporary_proof" "$temporary_encryption_key" "$temporary_manifest" "$temporary_libpq_env" "$temporary_passwd" "$temporary_group"; }
+cleanup() { rm -f -- "$temporary_output" "$temporary_dump" "$temporary_restore" "$temporary_proof" "$temporary_encryption_key" "$temporary_manifest" "$temporary_libpq_env" "$temporary_passwd" "$temporary_group"; }
 trap cleanup EXIT
 printf 'kelion-backup:x:%s:%s:Kelion backup:/tmp:/usr/sbin/nologin\n' \
   "$BACKUP_CONTAINER_UID" "$BACKUP_CONTAINER_GID" > "$temporary_passwd"
@@ -144,10 +164,11 @@ chown root:root "$temporary_dump" "$temporary_libpq_env"
 chmod 0600 "$temporary_dump" "$temporary_libpq_env"
 
 [ -s "$temporary_dump" ] || { printf '%s\n' 'backup: dump gol'; exit 1; }
-openssl enc -aes-256-cbc -salt -pbkdf2 -in "$temporary_dump" -pass file:"$temporary_encryption_key" -out "$output"
-chmod 0600 "$output"
+openssl enc -aes-256-cbc -salt -pbkdf2 -in "$temporary_dump" -pass file:"$temporary_encryption_key" -out "$temporary_output"
+chown root:root "$temporary_output"
+chmod 0600 "$temporary_output"
 
-python3 - "$KEY_FILE" "$output" "$temporary_manifest" <<'PY'
+python3 - "$KEY_FILE" "$temporary_output" "$temporary_manifest" <<'PY'
 import hashlib, hmac, json, pathlib, sys
 master = pathlib.Path(sys.argv[1]).read_bytes().strip()
 ciphertext = pathlib.Path(sys.argv[2]).read_bytes()
@@ -159,12 +180,12 @@ manifest = {
 }
 pathlib.Path(sys.argv[3]).write_text(json.dumps(manifest, separators=(',', ':')) + '\n', encoding='ascii')
 PY
+chown root:root "$temporary_manifest"
 chmod 0600 "$temporary_manifest"
-mv "$temporary_manifest" "$output.mac"
 
 # Dovada înseamnă restaurare completă într-un cluster temporar fără rețea, nu
 # doar faptul că pg_restore poate lista arhiva.
-python3 - "$KEY_FILE" "$output" "$output.mac" <<'PY'
+python3 - "$KEY_FILE" "$temporary_output" "$temporary_manifest" <<'PY'
 import hashlib, hmac, json, pathlib, sys
 master = pathlib.Path(sys.argv[1]).read_bytes().strip()
 ciphertext = pathlib.Path(sys.argv[2]).read_bytes()
@@ -175,7 +196,7 @@ expected_mac = hmac.new(mac_key, ciphertext, hashlib.sha256).hexdigest()
 if manifest.get('format') != 'kelion-backup-v1' or not hmac.compare_digest(str(manifest.get('ciphertextSha256', '')), expected_hash) or not hmac.compare_digest(str(manifest.get('hmacSha256', '')), expected_mac):
     raise SystemExit('backup integrity verification failed')
 PY
-openssl enc -d -aes-256-cbc -pbkdf2 -in "$output" -pass file:"$temporary_encryption_key" -out "$temporary_restore"
+openssl enc -d -aes-256-cbc -pbkdf2 -in "$temporary_output" -pass file:"$temporary_encryption_key" -out "$temporary_restore"
 chown root:root "$temporary_restore"
 chmod 0400 "$temporary_restore"
 docker run --rm --network none --interactive \
@@ -195,6 +216,15 @@ docker run --rm --network none --interactive \
     pg_restore --exit-on-error --no-owner --no-privileges --host=/var/run/postgresql --dbname=kelion_restore_probe
   ' < "$temporary_restore"
 
+# Publicăm numai perechea deja autentificată și restaurată integral. Fsync-ul
+# fișierelor și al directorului precede dovada; astfel un jurnal durabil al
+# migratorului nu poate indica un backup rămas doar în page cache.
+backup_hash=$(sha256sum "$temporary_output" | awk '{print $1}')
+mv "$temporary_output" "$output"
+mv "$temporary_manifest" "$output.mac"
+sync_file_and_parent "$output"
+sync_file_and_parent "$output.mac"
+
 # Un director off-host este acceptat numai dacă administratorul l-a montat
 # explicit; scriptul nu conține credentiale sau destinații de rețea.
 if [ -n "${BACKUP_OFFSITE_DIR:-}" ]; then
@@ -203,7 +233,6 @@ if [ -n "${BACKUP_OFFSITE_DIR:-}" ]; then
   install -m 0600 "$output" "$output.mac" "$BACKUP_OFFSITE_DIR/"
 fi
 
-backup_hash=$(sha256sum "$output" | awk '{print $1}')
 completed_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 python3 - "$DATABASE_SECRET" "$MIGRATION_PROOF_KEY" "$backup_hash" "$completed_at" "$temporary_proof" <<'PY'
 import hashlib, hmac, json, pathlib, sys
@@ -231,8 +260,10 @@ proof = {
 }
 pathlib.Path(destination).write_text(json.dumps(proof, separators=(',', ':')) + '\n', encoding='ascii')
 PY
+chown root:root "$temporary_proof"
 chmod 0600 "$temporary_proof"
 mv "$temporary_proof" "$PROOF_FILE"
+sync_file_and_parent "$PROOF_FILE"
 
 find "$OUT_DIR" -maxdepth 1 -type f \( -name 'kelion-*.dump.enc' -o -name 'kelion-*.dump.enc.mac' \) -mtime +"$KEEP_DAYS" -delete
 printf 'backup: restaurat și verificat %s\n' "$(basename "$output")"

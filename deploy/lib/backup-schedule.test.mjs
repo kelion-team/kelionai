@@ -34,10 +34,29 @@ test('plaintextul folosește o identitate numerică absentă pe host și revine 
   assert.doesNotMatch(backup, /chown (?:1000|999):|--user (?:1000|999):/)
 })
 
+test('backupul, manifestul și dovada sunt durabile înainte de migrator', () => {
+  const scratchRestore = backup.indexOf("' < \"$temporary_restore\"")
+  const publishBackup = backup.indexOf('mv "$temporary_output" "$output"', scratchRestore)
+  const publishManifest = backup.indexOf('mv "$temporary_manifest" "$output.mac"', publishBackup)
+  const syncBackup = backup.indexOf('sync_file_and_parent "$output"', publishManifest)
+  const syncManifest = backup.indexOf('sync_file_and_parent "$output.mac"', syncBackup)
+  const publishProof = backup.indexOf('mv "$temporary_proof" "$PROOF_FILE"', syncManifest)
+  const syncProof = backup.indexOf('sync_file_and_parent "$PROOF_FILE"', publishProof)
+
+  assert.match(backup, /sync_file_and_parent\(\)[\s\S]*os\.fsync\(handle\.fileno\(\)\)[\s\S]*os\.fsync\(fd\)/)
+  assert.match(backup, /temporary_output=\$\(mktemp[\s\S]*openssl enc[^\n]*-out "\$temporary_output"/)
+  assert.ok(scratchRestore >= 0 && publishBackup > scratchRestore)
+  assert.ok(publishManifest > publishBackup && syncBackup > publishManifest && syncManifest > syncBackup)
+  assert.ok(publishProof > syncManifest && syncProof > publishProof)
+  assert.ok(backup.indexOf('sync_file_and_parent "$KEY_FILE"') < backup.indexOf('temporary_output=$(mktemp'))
+})
+
 test('release-ul instalează atomic și apelează scriptul persistent', () => {
   assert.match(deploy, /PERSISTENT_BACKUP_SCRIPT=\$BACKUP_RELEASE_ROOT\/\$COMMIT_SHA\/backup\.sh/)
   assert.match(deploy, /mktemp "\$BACKUP_RELEASE_ROOT\/\$COMMIT_SHA\/backup\.XXXXXX"[\s\S]*mv -f -- "\$candidate" "\$PERSISTENT_BACKUP_SCRIPT"/)
-  assert.match(deploy, /install_persistent_backup_script\n"\$PERSISTENT_BACKUP_SCRIPT"/)
+  const installCall = deploy.indexOf('\ninstall_persistent_backup_script\n')
+  const backupCall = deploy.indexOf('\n"$PERSISTENT_BACKUP_SCRIPT"\n', installCall)
+  assert.ok(installCall >= 0 && backupCall > installCall)
   assert.doesNotMatch(deploy, /bash "\$BUNDLE_DIR\/backup\.sh"/)
 })
 
@@ -58,7 +77,7 @@ test('timerul este verificat și cronul exact este retras numai după smoke', ()
   assert.doesNotMatch(deploy, /crontab\s+(?:-u root\s+)?-r/)
 })
 
-test('orice eșec după cutover restaurează fail-closed schedulerul anterior', () => {
+test('schedulerul este restaurat fără rollback DB după point-of-no-return', () => {
   const smoke = deploy.indexOf("[ \"$public_ok\" = 1 ] || die 'smoke-ul public")
   const snapshot = deploy.lastIndexOf('\nsnapshot_backup_schedule\n')
   const mutating = deploy.lastIndexOf('\nbackup_schedule_mutating=1\n')
@@ -66,6 +85,8 @@ test('orice eșec după cutover restaurează fail-closed schedulerul anterior', 
   const completed = deploy.lastIndexOf('\nbackup_schedule_mutating=0\n')
   assert.ok(smoke >= 0 && snapshot > smoke && mutating > snapshot && activate > mutating && completed > activate)
   assert.match(deploy, /rollback_switch\(\) \{[\s\S]*if ! rollback_backup_schedule; then[\s\S]*restart_previous_slot/)
+  assert.match(deploy, /recover_schedule_after_point_of_no_return\(\) \{[\s\S]*rollback_backup_schedule[\s\S]*cleanup_backup_schedule_snapshot/)
+  assert.match(deploy, /if \[ "\$point_of_no_return" = 1 \]; then[\s\S]*recover_schedule_after_point_of_no_return[\s\S]*else[\s\S]*rollback_switch/)
   assert.match(deploy, /rollback_backup_schedule\(\) \{[\s\S]*systemctl disable --now "\$BACKUP_TIMER"[\s\S]*readlink "\$BACKUP_CURRENT_LINK"[\s\S]*systemctl daemon-reload/)
   assert.match(deploy, /backup_previous_timer_enabled[\s\S]*systemctl enable "\$BACKUP_TIMER"/)
   assert.match(deploy, /backup_previous_timer_active[\s\S]*systemctl start "\$BACKUP_TIMER"/)

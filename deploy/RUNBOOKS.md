@@ -48,16 +48,21 @@ istoricul `master` al cărui artefact semnat este încă disponibil. Nu re-etich
 imagini și nu ocoli runnerul de migrări. Dacă schema este incompatibilă,
 rollbackul trebuie să rămână blocat; se pregătește o migrare forward de remediere.
 
-La primul cutover, rollback-ul pre-switch repornește containerele legacy
-capturate și se bazează pe bridge-ul DB bidirecțional verificat. Nu porni un
+La primul cutover, rollback-ul pre-switch oprește candidatul, restaurează
+backupul verificat și abia apoi repornește containerele legacy capturate.
+Confirmarea legacy este `/api/version` JSON egal cu versiunea capturată, nu
+`/livez` sau `/readyz`, care în imaginea veche pot fi fallback SPA. Nu porni un
 workflow către un artefact vechi dacă migratorul raportează checksum
 incompatibil: pregătește un fix forward sau execută o restaurare controlată din
 backup după oprirea scrierilor. Nu modifica manual tabela de migrări.
 
 ### Revenire manuală la stackul legacy păstrat
 
-Primul release nou oprește `kelionai-app`, `omniroute` și `kelionai-coqui` numai
-după ce versiunea publică exactă și readiness-ul cu efecte active sunt verzi.
+Pentru un plan fără migrare distructivă, primul release nou oprește
+`kelionai-app`, `omniroute` și `kelionai-coqui` numai după ce versiunea publică
+exactă și readiness-ul cu efecte active sunt verzi. Pentru un plan distructiv,
+le oprește înainte de backup/migrare, iar `kelion-caddy` răspunde 502
+fail-closed până la cutover.
 Containerele, imaginile și volumele nu sunt șterse. `kelion-caddy` este tratat
 separat de comutarea proxy-ului.
 
@@ -66,14 +71,22 @@ semnat nu mai poate rula:
 
 1. Înregistrează read-only existența, imaginea și starea celor patru containere;
    oprește procedura dacă numele sau imaginile diferă de preflight.
-2. Dezactivează efectele slotului nou prin markerul de release și confirmă că
-   procesele managed s-au oprit înainte de a porni vechiul runtime.
-3. Pornește, fără recreare, containerele existente `kelionai-coqui`,
+2. Citește jurnalul root-only
+   `/root/kelion/runtime/destructive-cutover-recovery.json`; el persistă atomic
+   faza, obligația de restore și `pointOfNoReturn` înainte de migrator și înainte
+   de expunerea posibilă. Nu îl șterge până la închiderea incidentului. Dacă
+   `pointOfNoReturn` este `true`, nu opri candidatul, nu aplica snapshotul și nu
+   porni runtime-ul vechi: păstrează candidatul/DB/proxy nemodificate și
+   pregătește fix-forward.
+3. Numai înainte de point-of-no-return, oprește procesele managed, rulează
+   helperul de restore verificat și confirmă contractul DB anterior înainte de
+   pornirea oricărui writer.
+4. Pornește, fără recreare, containerele existente `kelionai-coqui`,
    `omniroute` și `kelionai-app`; confirmă că sunt `running` și că aplicația
-   legacy răspunde local.
-4. Oprește proxy-ul managed `kelion-proxy`, pornește containerul existent
-   `kelion-caddy`, apoi verifică public versiunea și endpointul de sănătate.
-5. Dacă proba publică nu trece, repornește proxy-ul managed și slotul nou;
+   legacy răspunde cu `/api/version` JSON egal cu versiunea capturată.
+5. Oprește proxy-ul managed `kelion-proxy`, pornește containerul existent
+   `kelion-caddy`, apoi verifică public aceeași versiune JSON.
+6. Dacă proba publică nu trece, repornește proxy-ul managed și slotul nou;
    păstrează toate containerele și colectează diagnosticul. Nu folosi `rm`,
    `compose down --volumes`, prune sau ștergere de imagine în această procedură.
 
@@ -85,8 +98,15 @@ semnat nu mai poate rula:
 - derivă separat cheia de criptare și cheia HMAC;
 - verifică SHA/HMAC înainte de decriptare;
 - restaurează complet într-un cluster temporar fără rețea;
+- publică și sincronizează pe disc arhiva, manifestul și dovada înainte ca
+  deploy-ul să poată arma migratorul distructiv;
 - emite dovada de migrare legată de hashul backupului și identitatea DB;
 - copiază off-host numai către un mount configurat explicit.
+
+Pentru o migrare distructivă, `restore-verified-backup.sh --preflight` rulează
+după backup și înaintea migratorului. El validează dovada/arhiva, lockurile,
+clientul și serverul PostgreSQL 16, dreptul de `CREATEDB`/superuser, ownershipul,
+absența bazelor scratch/quarantine și spațiul necesar, fără swap al bazei live.
 
 Retenția se citește exclusiv din `PRIVACY_BACKUP_RETENTION_DAYS` din
 `/root/kelion/config/runtime.env`. Scripturile persistente sunt versionate în

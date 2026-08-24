@@ -29,9 +29,16 @@ bloc și nu montează repository-ul sau `/root/kelion`.
    semnat.
 3. `production-release` pornește numai prin dispatch manual autorizat, cere SHA integral și folosește mediul `production`. Verifică runul
    CI, runul de build, manifestul și semnăturile înainte de SSH.
-4. `deploy.sh` planifică migrările. Creează un backup autentificat și îl
-   restaurează integral într-un Postgres temporar fără rețea. O migrare
-   distructivă cere dovada HMAC legată de backup și baza exactă.
+4. `deploy.sh` planifică migrările și capturează slotul, proxy-ul, upstreamul,
+   markerul, containerele și Caddyfile-ul înainte de orice mutație DB. Pentru o
+   migrare distructivă pune proxy-ul managed în maintenance 503; la primul
+   cutover păstrează `kelion-caddy` și obține 502 fail-closed prin oprirea
+   writerului legacy. Abia apoi creează un backup autentificat, verificat prin
+   restaurare integrală într-un Postgres temporar fără rețea și sincronizat pe
+   disc împreună cu manifestul/dovada înainte de jurnalul migratorului. Înaintea
+   migratorului, helperul de recovery validează autentificat arhiva, FD-urile de
+   lock, PostgreSQL 16, rolul/ownershipul DB și spațiul pentru swap, fără să
+   schimbe baza live. Migrarea cere dovada HMAC legată de backup și baza exactă.
    Scriptul este instalat într-un release persistent din `/opt/kelion-backup`;
    după smoke-ul public, selectorul `current` este mutat atomic, iar release-ul
    verifică și activează service-ul/timerul systemd versionate. Numai apoi
@@ -44,15 +51,24 @@ bloc și nu montează repository-ul sau `/root/kelion`.
 6. Caddy validează configurația, upstreamul este schimbat atomic, apoi markerul
    activează efectele candidatului. Smoke-ul public verifică din nou versiunea
    și readiness înainte ca slotul vechi să fie oprit.
-7. Orice eșec după schimbarea upstreamului restaurează upstreamul și markerul
-   anterior. Slotul vechi rămâne disponibil până la smoke-ul reușit.
+7. Înainte ca upstreamul candidatului să poată deveni public, orice eșec oprește
+   candidatul, restaurează backupul verificat și contractul DB, apoi repornește
+   runtime-ul vechi și restaurează Caddyfile-ul/upstreamul. În clipa expunerii
+   posibile, faza și point-of-no-return sunt publicate atomic și sincronizate în
+   jurnalul root-only `destructive-cutover-recovery.json`; un eșec ulterior nu mai aplică
+   snapshotul și nu mai pornește writerul vechi, deoarece ar putea pierde
+   scrieri noi. Candidatul, DB-ul și proxy-ul rămân nemodificate pentru
+   intervenție fail-closed/fix-forward; numai schedulerul de backup își poate
+   restaura independent snapshotul. Rollbackul se dezarmează numai după ce
+   `/api/version` public confirmă repetat versiunea veche exactă.
 
 Rollbackul folosește același workflow, numai către un artefact semnat al unui
 commit din istoricul `master`. Runnerul de migrări refuză versiuni/checksumuri
 necunoscute; un rollback incompatibil cu schema se oprește înainte de trafic.
 
-La primul cutover, revenirea înainte de comutarea traficului folosește numai
-containerele legacy capturate și schema de compatibilitate bidirecțională. Un
+La primul cutover, revenirea înainte de point-of-no-return folosește numai
+containerele legacy capturate, `/api/version` JSON exact și dovada restaurării
+DB. Un
 workflow către un artefact al cărui checksum de migrare diferă este blocat
 intenționat; recuperarea este un fix forward sau o restaurare controlată din
 backup, nu o rescriere a istoricului migrărilor.
