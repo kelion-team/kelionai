@@ -20,9 +20,8 @@
 // day we run several containers, this module is the ONE place that moves to a
 // shared store — the callers never change.
 
-// How many simultaneous calls one model serves. Free models on OpenRouter
-// die around 20 RPM shared with the whole internet; 6 in-flight keeps our
-// burst under their per-minute refill.
+// Bound concurrent calls per model so a burst cannot exhaust the configured
+// provider quota or starve other users.
 const MAX_IN_FLIGHT_PER_MODEL = 6
 // Starts per model per minute (our own pacing — under every provider cap).
 const MAX_STARTS_PER_MINUTE = 18
@@ -132,21 +131,11 @@ export function noteazaEsuare(modelId: string): void {
   esecuri.set(modelId, Date.now())
 }
 
-/** True while the model has no recent failure (or the cooldown expired). */
-export function eSanatos(modelId: string): boolean {
-  const t = esecuri.get(modelId)
-  if (t === undefined) return true
-  if (Date.now() - t >= ESEC_COOLDOWN_MS) {
-    esecuri.delete(modelId)
-    return true
+function curataEsecuriExpirate(acum = Date.now()): void {
+  for (const [modelId, la] of esecuri) {
+    if (acum - la >= ESEC_COOLDOWN_MS) esecuri.delete(modelId)
   }
-  return false
 }
-
-// (PRAGUL PUNGII DE REZERVĂ — poateFolosiRezerva / REZERVA_CAP_ZILNIC — a fost
-// EXTIRPAT, 3 aug: exista doar pentru fallback-ul PLĂTIT pe modele OpenRouter,
-// întâi închis la 0 („ZERO AUTO-PLĂTIT"), apoi șters cu tot cu furnizorul.
-// Creierul e Gemini-only, pe cheia aleasă conștient de owner.)
 
 // ── TELEMETRY for system_health / the owner's eyes ──────────────────────────
 export function stareDispecer(): {
@@ -155,6 +144,7 @@ export function stareDispecer(): {
   coada: number
   bolnavi: number
 } {
+  curataEsecuriExpirate()
   const peModele: Record<string, number> = {}
   let inZbor = 0
   for (const [id, l] of loads) {
@@ -162,12 +152,4 @@ export function stareDispecer(): {
     inZbor += l.inFlight
   }
   return { inZbor, peModele, coada, bolnavi: esecuri.size }
-}
-
-// Test hook: reset all state.
-export function _resetDispecer(): void {
-  loads.clear()
-  coada = 0
-  treziri.clear()
-  esecuri.clear()
 }

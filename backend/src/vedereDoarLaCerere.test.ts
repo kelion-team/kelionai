@@ -7,9 +7,8 @@ import { fileURLToPath } from 'node:url'
 // Istoric: pasul de „descriere a imaginii pentru creierul ORB" (describeScene
 // pe un model străin) rula ~11s degeaba pe fiecare tură cu camera pornită
 // (Adrian, 3 aug: latența „ULTRA enorm"); a fost întâi îngrădit pe
-// `turnHasImage`, apoi — odată cu EXTIRPAREA totală OpenRouter — a dispărut cu
-// tot cu creierele oarbe care îl cereau: creierul e Gemini-only și VEDE nativ
-// (toGeminiPayload → inline_data). Testul păzește să nu se întoarcă.
+// `turnHasImage`, apoi a dispărut complet: OpenAI primește imaginile nativ.
+// Testul păzește să nu se întoarcă pasul duplicat.
 const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 
 describe('vederea e nativă — fără pas de descriere pe alt model', () => {

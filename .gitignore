@@ -1,13 +1,27 @@
 node_modules/
 dist/
 build/
+.gradle/
+android/.gradle/
+android/app/build/
+*.aab
+*.b64.txt
 .env
 .env.local
 *.log
 .DS_Store
 backend/dist/
+frontend/.tmp/
 frontend/dist/
+ios/native-dist/
+desktop/dist/
 desktop/src-tauri/target/
+android/twa-manifest.json
+desktop/src-tauri/tauri.conf.json
+ios/ExportOptions.plist
+ios/ios/App/App/App.entitlements
+frontend/public/.well-known/assetlinks.json
+frontend/public/.well-known/apple-app-site-association
 *.tsbuildinfo
 # generat de deploy.sh la fiecare publicare (canalul de update al lui Kelion)
 deploy/last-updates.txt

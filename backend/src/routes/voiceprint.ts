@@ -1,128 +1,125 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
 import {
+  deleteVoiceprint,
   getVoiceprint,
-  getVoiceprintAudio,
-  listVoiceprints,
   saveVoiceprint,
   type VoiceFeatureMeta,
+  type VoiceprintRow,
 } from '../db.js'
+import { replaceControlCharacters } from '../shared/textSanitization.js'
 
-// Speaker identification system by voice timbre.
-// The frontend extracts features 100% client-side (zero cost) from each
-// recorded phrase; the backend compares them with the voiceprints saved in
-// Postgres and adds the context (name, gender, admin-verified voice) to the
-// brain's prompt.
+/**
+ * This is an explicitly enrolled spectral profile used for user-scoped voice
+ * personalisation. It is not neural speaker identification and never grants
+ * permissions or an admin role.
+ */
+const MAX_VECTOR = 256
+const MAX_CLIP_BYTES = 450 * 1024
 
-export interface VoiceFeatures {
-  /** The normalized vector used for comparison. */
+type VoiceprintValid = {
+  ok: true
   vector: number[]
-  /** Interpretable metadata (Hz, ratios etc.). */
   meta: VoiceFeatureMeta
-  /** A short audio sample (webm/opus data-URL) of the phrase — for the "play" button in admin. */
-  clip?: string
+  clip: string
+  name: string
+} | { ok: false; error: string }
+
+export function valideazaVoiceprintPayload(input: unknown, fallbackName: string): VoiceprintValid {
+  if (!input || typeof input !== 'object') return { ok: false, error: 'corp_invalid' }
+  const body = input as Record<string, unknown>
+  if (!Array.isArray(body.vector) || body.vector.length < 3 || body.vector.length > MAX_VECTOR) {
+    return { ok: false, error: 'invalid_vector' }
+  }
+  const vector = body.vector.map(Number)
+  if (!vector.every((value) => Number.isFinite(value) && value >= 0 && value <= 255)) {
+    return { ok: false, error: 'invalid_vector' }
+  }
+  if (!body.meta || typeof body.meta !== 'object' || Array.isArray(body.meta)) {
+    return { ok: false, error: 'invalid_meta' }
+  }
+  const centroid = Number((body.meta as Record<string, unknown>).centroid)
+  if (!Number.isFinite(centroid) || centroid < 0 || centroid > 24_000) {
+    return { ok: false, error: 'invalid_meta' }
+  }
+  const meta: VoiceFeatureMeta = { centroid }
+
+  let clip = ''
+  if (body.clip != null && body.clip !== '') {
+    if (typeof body.clip !== 'string') return { ok: false, error: 'invalid_clip' }
+    const match = /^data:audio\/(webm|ogg|wav);base64,([A-Za-z0-9+/]+={0,2})$/.exec(body.clip)
+    if (!match) return { ok: false, error: 'invalid_clip' }
+    const bytes = Buffer.from(match[2], 'base64')
+    const type = match[1]
+    const webm = type === 'webm' && bytes.length >= 4 && bytes.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
+    const ogg = type === 'ogg' && bytes.length >= 4 && bytes.subarray(0, 4).toString('ascii') === 'OggS'
+    const wav = type === 'wav' && bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WAVE'
+    if (!bytes.length || bytes.length > MAX_CLIP_BYTES || (!webm && !ogg && !wav)) {
+      return { ok: false, error: 'invalid_clip' }
+    }
+    clip = body.clip
+  }
+  const proposed = typeof body.name === 'string'
+    ? replaceControlCharacters(body.name, '').trim()
+    : ''
+  return { ok: true, vector, meta, clip, name: (proposed || fallbackName).slice(0, 100) }
 }
 
-// The /save and /identify routes were REMOVED (the 27 Jul audit: zero
-// callers — enrolment and matching happen inline on the server, in chat.ts
-// and realtime.ts).
+const availability = {
+  method: 'spectral_profile' as const,
+  neuralSpeakerIdentification: false,
+  authority: 'personalisation_only' as const,
+}
+
+function metadataVoiceprint(profile: VoiceprintRow | null): null | {
+  name: string
+  hasAudio: boolean
+  updatedAt: string
+} {
+  if (!profile) return null
+  return {
+    name: profile.name,
+    hasAudio: profile.hasAudio,
+    updatedAt: profile.updatedAt,
+  }
+}
 
 export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
-  // Save or update the logged-in user's voiceprint, linking it permanently to their account.
-  app.post<{
-    Body: {
-      vector?: number[]
-      meta?: VoiceFeatureMeta
-      clip?: string
-      name?: string
-    }
-  }>('/api/voiceprint/me', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    const { vector, meta, clip, name } = req.body || {}
-    if (!vector || !Array.isArray(vector) || vector.length === 0) {
-      return reply.code(400).send({ error: 'invalid_vector' })
-    }
-    const metaObj: VoiceFeatureMeta = {
-      pitchMean: meta?.pitchMean ?? 0,
-      pitchMedian: meta?.pitchMedian,
-      pitchStd: meta?.pitchStd ?? 0,
-      pitchMin: meta?.pitchMin ?? 0,
-      pitchMax: meta?.pitchMax ?? 0,
-      centroid: meta?.centroid ?? 0,
-      rolloff: meta?.rolloff ?? 0,
-      zcr: meta?.zcr ?? 0,
-      energy: meta?.energy ?? 0,
-      jitter: meta?.jitter ?? 0,
-      shimmer: meta?.shimmer ?? 0,
-    }
-    const gender = inferGender(metaObj.pitchMean || 0)
-    const displayName = name || user.name || user.email.split('@')[0]
-    const isAdmin = user.role === 'admin'
+  app.post<{ Body: { vector?: number[]; meta?: VoiceFeatureMeta; clip?: string; name?: string } }>(
+    '/api/voiceprint/me',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const valid = valideazaVoiceprintPayload(req.body, user.name || user.email.split('@')[0])
+      if (!valid.ok) return reply.code(400).send({ error: valid.error })
+      await saveVoiceprint({
+        email: user.email,
+        name: valid.name,
+        features: valid.vector,
+        featureMeta: valid.meta,
+        audioClip: valid.clip,
+      })
+      return reply.send({
+        ok: true,
+        voiceprint: metadataVoiceprint(await getVoiceprint(user.email)),
+        availability,
+      })
+    },
+  )
 
-    await saveVoiceprint({
-      email: user.email,
-      name: displayName,
-      gender,
-      isAdmin,
-      features: vector,
-      featureMeta: metaObj,
-      audioClip: clip || '',
-    })
-
-    const updated = await getVoiceprint(user.email)
-    return reply.send({ ok: true, voiceprint: updated })
-  })
-
-  // Returns the logged-in user's voiceprint (or null if not enrolled yet).
   app.get('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    const v = await getVoiceprint(user.email)
-    return reply.send({ voiceprint: v })
-  })
-
-  // The list of all voiceprints — admin only.
-  app.get('/api/voiceprint/list', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
-    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const rows = await listVoiceprints(200)
-    return reply.send({ rows })
-  })
-
-  // The audio sample of a voiceprint — admin only. Returns the saved
-  // data-URL so it can be played with the panel's "play" button (Adrian,
-  // 14 Jul).
-  app.get<{ Querystring: { email?: string } }>('/api/voiceprint/audio', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' }) // sesiune moartă ≠ „nu ești admin" (9 aug)
-    if (user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const email = (req.query?.email ?? '').toLowerCase()
-    if (!email) return reply.code(400).send({ error: 'bad_request' })
-    const clip = await getVoiceprintAudio(email)
-    if (!clip) return reply.code(404).send({ error: 'no_audio' })
-    return reply.send({ clip })
-  })
-
-  // ȘTERGEREA E ÎNCHISĂ (ordinul ownerului, 14 aug: „amprentele vocale trebuie
-  // să se păstreze"). Ruta rămâne ca orice apelant vechi să primească MOTIVUL,
-  // nu un 404 mut; funcția de ștergere din db.ts a fost SCOASĂ de tot, iar
-  // triggerul scutului din Postgres refuză DELETE chiar și pentru cod viitor.
-  app.delete<{ Body: { email?: string } }>('/api/voiceprint/me', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    return reply.code(403).send({
-      ok: false,
-      error: 'amprentele_se_pastreaza',
-      motiv: 'Ordinul ownerului (14 aug): amprentele vocale se păstrează — nu se șterg prin nicio comandă.',
+    return reply.send({
+      voiceprint: metadataVoiceprint(await getVoiceprint(user.email)),
+      availability,
     })
   })
-}
 
-export function inferGender(pitchMeanHz: number): 'male' | 'female' | 'unknown' {
-  if (pitchMeanHz <= 0 || !Number.isFinite(pitchMeanHz)) return 'unknown'
-  if (pitchMeanHz < 145) return 'male'
-  if (pitchMeanHz > 175) return 'female'
-  return 'unknown'
+  app.delete('/api/voiceprint/me', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const deleted = await deleteVoiceprint(user.email)
+    return reply.send({ ok: true, deleted })
+  })
 }

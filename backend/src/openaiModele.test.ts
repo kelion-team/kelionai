@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises'
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { config } from './config.js'
 import {
   catalogOpenAI,
-  clasificaCatalogOpenAI,
   modelOpenAI,
   modelOpenAIExista,
+  motivCatalogOpenAI,
   reseteazaCatalogOpenAI,
   scaraOpenAI,
 } from './services/openaiModele.js'
@@ -15,106 +15,111 @@ function raspunsCatalog(iduri: string[]): Response {
 }
 
 describe('catalogul live OpenAI', () => {
-  const overrideInitial = { ...config.openai.override }
+  const initial = {
+    key: config.openai.key,
+    apiBaseUrl: config.openai.apiBaseUrl,
+    luna: config.openai.luna,
+    medium: config.openai.medium,
+    heavy: config.openai.heavy,
+  }
 
   beforeEach(() => {
-    vi.stubEnv('OPENAI_API_KEY', 'cheie-test')
     vi.stubEnv('OPENAI_CATALOG_TTL_MS', '60000')
-    config.openai.key = 'cheie-test'
-    config.openai.override = { luna: '', medium: '', heavy: '', max: '' }
+    config.openai.key = 'cheie-catalog-test'
+    config.openai.apiBaseUrl = 'https://catalog.example.test/v1'
+    config.openai.luna = 'model-luna'
+    config.openai.medium = 'model-terra'
+    config.openai.heavy = 'model-sol'
     reseteazaCatalogOpenAI()
     vi.stubGlobal('fetch', vi.fn())
   })
 
   afterEach(() => {
-    config.openai.key = ''
-    config.openai.override = { ...overrideInitial }
+    Object.assign(config.openai, initial)
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
     vi.useRealTimers()
     reseteazaCatalogOpenAI()
   })
 
-  it('clasifică patru trepte prezente, în ordine și fără duplicate', async () => {
-    const ids = ['gpt-9.7-max', 'gpt-9.7-mini', 'gpt-9.7-nano', 'gpt-9.7-pro', 'gpt-9.6-max']
-    vi.mocked(fetch).mockResolvedValue(raspunsCatalog(ids))
+  it('folosește numai rolurile configurate pe care cheia le servește', async () => {
+    vi.mocked(fetch).mockResolvedValue(raspunsCatalog([
+      'model-terra',
+      'model-neconfigurat-mai-nou',
+      'model-luna',
+    ]))
 
-    const scara = await scaraOpenAI()
-    expect(scara).toEqual(['gpt-9.7-nano', 'gpt-9.7-mini', 'gpt-9.7-pro', 'gpt-9.7-max'])
-    expect(new Set(scara).size).toBe(scara.length)
-    expect(scara.every((id) => ids.includes(id))).toBe(true)
-    expect(clasificaCatalogOpenAI([...ids, 'gpt-9.7-mini'])).toEqual({
-      luna: 'gpt-9.7-nano',
-      medium: 'gpt-9.7-mini',
-      heavy: 'gpt-9.7-pro',
-      max: 'gpt-9.7-max',
-    })
+    await expect(scaraOpenAI()).resolves.toEqual(['model-luna', 'model-terra'])
+    await expect(modelOpenAI('luna')).resolves.toBe('model-luna')
+    await expect(modelOpenAI('heavy')).resolves.toBe('')
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 
-  it('ignoră override-ul absent și îl onorează pe cel prezent în catalog', async () => {
-    vi.mocked(fetch).mockResolvedValue(raspunsCatalog(['gpt-9.7-mini', 'gpt-9.7-pro', 'gpt-9.7-max']))
-
-    config.openai.override.luna = 'model-care-nu-exista'
-    await expect(modelOpenAI('luna')).resolves.toBe('gpt-9.7-mini')
-    config.openai.override.luna = 'gpt-9.7-pro'
-    await expect(modelOpenAI('luna')).resolves.toBe('gpt-9.7-pro')
-  })
-
-  it('nu fabrică modele când catalogul este necitibil sau cheia lipsește', async () => {
+  it('nu fabrică modele și nu face rețea când cheia lipsește', async () => {
     config.openai.key = ''
 
-    await expect(Promise.all([
-      modelOpenAI('luna'),
-      modelOpenAI('medium'),
-      modelOpenAI('heavy'),
-      modelOpenAI('max'),
-      scaraOpenAI(),
-    ])).resolves.toEqual(['', '', '', '', []])
+    await expect(scaraOpenAI()).resolves.toEqual([])
+    await expect(modelOpenAI('luna')).resolves.toBe('')
+    expect(motivCatalogOpenAI()).toContain('cheia OpenAI lipsește')
     expect(fetch).not.toHaveBeenCalled()
   })
 
   it('folosește cache-ul în TTL și reia citirea după resetare', async () => {
     vi.mocked(fetch)
-      .mockResolvedValueOnce(raspunsCatalog(['gpt-9.7-mini']))
-      .mockResolvedValueOnce(raspunsCatalog(['gpt-9.8-pro']))
+      .mockResolvedValueOnce(raspunsCatalog(['model-luna']))
+      .mockResolvedValueOnce(raspunsCatalog(['model-terra']))
 
-    await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.7-mini'])
-    await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.7-mini'])
+    await expect(catalogOpenAI()).resolves.toEqual(['model-luna'])
+    await expect(catalogOpenAI()).resolves.toEqual(['model-luna'])
     expect(fetch).toHaveBeenCalledTimes(1)
     reseteazaCatalogOpenAI()
-    await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.8-pro'])
+    await expect(catalogOpenAI()).resolves.toEqual(['model-terra'])
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
-  it('returnează catalogul expirat și reîmprospătează în fundal', async () => {
+  it('păstrează catalogul verificat când reîmprospătarea din fundal eșuează', async () => {
     vi.useFakeTimers()
     vi.stubEnv('OPENAI_CATALOG_TTL_MS', '1000')
-    vi.mocked(fetch).mockResolvedValueOnce(raspunsCatalog(['gpt-9.7-mini']))
-    await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.7-mini'])
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(raspunsCatalog(['model-luna']))
+      .mockRejectedValueOnce(new Error('rețea indisponibilă'))
+    await expect(catalogOpenAI()).resolves.toEqual(['model-luna'])
 
-    let rezolvaCatalogulNou!: (raspuns: Response) => void
-    const citireNoua = new Promise<Response>((resolve) => {
-      rezolvaCatalogulNou = resolve
-    })
-    vi.mocked(fetch).mockReturnValueOnce(citireNoua)
     vi.advanceTimersByTime(1001)
-
-    await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.7-mini'])
-    expect(fetch).toHaveBeenCalledTimes(2)
-
-    rezolvaCatalogulNou(raspunsCatalog(['gpt-9.8-pro']))
-    await citireNoua
-    await vi.waitFor(async () => {
-      await expect(catalogOpenAI()).resolves.toEqual(['gpt-9.8-pro'])
-    })
-    vi.useRealTimers()
+    await expect(catalogOpenAI()).resolves.toEqual(['model-luna'])
+    await vi.waitFor(() => expect(motivCatalogOpenAI()).toContain('rețea indisponibilă'))
+    await expect(catalogOpenAI()).resolves.toEqual(['model-luna'])
   })
 
-  it('validează modelele custom numai în catalogul live', async () => {
-    vi.mocked(fetch).mockResolvedValue(raspunsCatalog(['gpt-9.7-pro']))
+  it('validează un model solicitat numai în catalogul live', async () => {
+    vi.mocked(fetch).mockResolvedValue(raspunsCatalog(['model-sol']))
 
-    await expect(modelOpenAIExista('gpt-9.7-pro')).resolves.toBe(true)
-    await expect(modelOpenAIExista('gpt-9.7-nu-exista')).resolves.toBe(false)
+    await expect(modelOpenAIExista('openai/model-sol')).resolves.toBe(true)
+    await expect(modelOpenAIExista('model-inexistent')).resolves.toBe(false)
+  })
+
+  it('apelează endpointul configurat fără să expună cheia în URL', async () => {
+    vi.mocked(fetch).mockResolvedValue(raspunsCatalog(['model-luna']))
+
+    await catalogOpenAI()
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://catalog.example.test/v1/models',
+      expect.objectContaining({
+        method: 'GET',
+        headers: { Authorization: 'Bearer cheie-catalog-test' },
+      }),
+    )
+    expect(vi.mocked(fetch).mock.calls[0][0]).not.toContain('cheie-catalog-test')
+  })
+
+  it('respinge integral un catalog cu ID-uri invalide', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      data: [{ id: 'model-luna' }, { id: '' }],
+    }), { status: 200 }))
+
+    await expect(catalogOpenAI()).resolves.toEqual([])
+    expect(motivCatalogOpenAI()).toContain('modele fără ID valid')
   })
 
   it('nu conține ID-uri OpenAI scrise în config', async () => {

@@ -5,7 +5,7 @@
 // conversation that must reach Kelion. Its mistakes are instantly visible to
 // the user: either it doesn't execute, or it executes over speech. Zero tests.
 //
-// The documented rules we guard (AI-HANDOFF, wave 4 / W4 #2):
+// The command rules guarded here:
 //   • monitor operations start ONLY if the requested tab is really open —
 //     otherwise the reply goes to the brain, so IT can open it;
 //   • "close the map" when the map is NOT open must not close anything else.

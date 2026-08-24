@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 
 // Directorul FALS de useri (identitatea reală e emailul; numele vin din
 // local_accounts/voiceprints). Mock-uim doar căutarea din db — restul logicii de
@@ -27,13 +27,21 @@ function conexiune(): { trimite: (m: unknown) => void; mesaje: any[] } {
   return { trimite: (m) => mesaje.push(m), mesaje }
 }
 
-describe('services/apel.ts — messenger Kelion↔Kelion (prezență + semnalizare)', () => {
-  beforeEach(() => apel._reset())
+const prezente: Array<[string, ReturnType<typeof conexiune>]> = []
+function inregistreaza(email: string, con: ReturnType<typeof conexiune>): void {
+  apel.inregistreazaPrezenta(email, con)
+  prezente.push([email, con])
+}
 
+afterEach(() => {
+  for (const [email, con] of prezente.splice(0).reverse()) apel.scoatePrezenta(email, con)
+})
+
+describe('services/apel.ts — messenger Kelion↔Kelion (prezență + semnalizare)', () => {
   it('prezența: un user devine online la înregistrare și offline când pleacă', () => {
     const c = conexiune()
     expect(apel.esteOnline('maria@x.com')).toBe(false)
-    apel.inregistreazaPrezenta('maria@x.com', c)
+    inregistreaza('maria@x.com', c)
     expect(apel.esteOnline('maria@x.com')).toBe(true)
     apel.scoatePrezenta('maria@x.com', c)
     expect(apel.esteOnline('maria@x.com')).toBe(false)
@@ -62,7 +70,7 @@ describe('services/apel.ts — messenger Kelion↔Kelion (prezență + semnaliza
 
   it('sunaUtilizator: ținta online → invitația ajunge la ea', async () => {
     const cMaria = conexiune()
-    apel.inregistreazaPrezenta('maria@x.com', cMaria)
+    inregistreaza('maria@x.com', cMaria)
     const r = await apel.sunaUtilizator('adrian@x.com', 'Maria')
     expect(r.ok).toBe(true)
     expect(r.callId).toBeTruthy()
@@ -76,8 +84,8 @@ describe('services/apel.ts — messenger Kelion↔Kelion (prezență + semnaliza
   it('accept: ambele părți primesc „accepted"', async () => {
     const cA = conexiune()
     const cM = conexiune()
-    apel.inregistreazaPrezenta('adrian@x.com', cA)
-    apel.inregistreazaPrezenta('maria@x.com', cM)
+    inregistreaza('adrian@x.com', cA)
+    inregistreaza('maria@x.com', cM)
     const r = await apel.sunaUtilizator('adrian@x.com', 'Maria')
     apel.gestioneazaMesaj('maria@x.com', { type: 'accept', callId: r.callId })
     expect(cA.mesaje.some((m) => m.type === 'accepted' && m.callId === r.callId)).toBe(true)
@@ -87,8 +95,8 @@ describe('services/apel.ts — messenger Kelion↔Kelion (prezență + semnaliza
   it('decline: doar cel SUNAT poate refuza, iar apelantul e anunțat', async () => {
     const cA = conexiune()
     const cM = conexiune()
-    apel.inregistreazaPrezenta('adrian@x.com', cA)
-    apel.inregistreazaPrezenta('maria@x.com', cM)
+    inregistreaza('adrian@x.com', cA)
+    inregistreaza('maria@x.com', cM)
     const r = await apel.sunaUtilizator('adrian@x.com', 'Maria')
     // Apelantul NU poate refuza propriul apel (nu e „cel sunat").
     apel.gestioneazaMesaj('adrian@x.com', { type: 'decline', callId: r.callId })
@@ -101,8 +109,8 @@ describe('services/apel.ts — messenger Kelion↔Kelion (prezență + semnaliza
   it('hangup: cealaltă parte primește „hangup" (nu cel care a închis)', async () => {
     const cA = conexiune()
     const cM = conexiune()
-    apel.inregistreazaPrezenta('adrian@x.com', cA)
-    apel.inregistreazaPrezenta('maria@x.com', cM)
+    inregistreaza('adrian@x.com', cA)
+    inregistreaza('maria@x.com', cM)
     const r = await apel.sunaUtilizator('adrian@x.com', 'Maria')
     apel.gestioneazaMesaj('maria@x.com', { type: 'accept', callId: r.callId })
     apel.gestioneazaMesaj('adrian@x.com', { type: 'hangup', callId: r.callId })
@@ -112,8 +120,8 @@ describe('services/apel.ts — messenger Kelion↔Kelion (prezență + semnaliza
   it('plecare bruscă: dacă un participant iese complet, celălalt e anunțat', async () => {
     const cA = conexiune()
     const cM = conexiune()
-    apel.inregistreazaPrezenta('adrian@x.com', cA)
-    apel.inregistreazaPrezenta('maria@x.com', cM)
+    inregistreaza('adrian@x.com', cA)
+    inregistreaza('maria@x.com', cM)
     const r = await apel.sunaUtilizator('adrian@x.com', 'Maria')
     apel.gestioneazaMesaj('maria@x.com', { type: 'accept', callId: r.callId })
     // Adrian închide tab-ul (fără hangup explicit) → Maria trebuie anunțată.
@@ -125,9 +133,9 @@ describe('services/apel.ts — messenger Kelion↔Kelion (prezență + semnaliza
     const cA1 = conexiune()
     const cA2 = conexiune()
     const cM = conexiune()
-    apel.inregistreazaPrezenta('adrian@x.com', cA1)
-    apel.inregistreazaPrezenta('adrian@x.com', cA2)
-    apel.inregistreazaPrezenta('maria@x.com', cM)
+    inregistreaza('adrian@x.com', cA1)
+    inregistreaza('adrian@x.com', cA2)
+    inregistreaza('maria@x.com', cM)
     const r = await apel.sunaUtilizator('adrian@x.com', 'Maria')
     apel.gestioneazaMesaj('maria@x.com', { type: 'accept', callId: r.callId })
     apel.scoatePrezenta('adrian@x.com', cA1) // mai are un tab

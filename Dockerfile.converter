@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.7
+ARG NODE_IMAGE=node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:bb3a5d38989ec658710f06b08bc23cb78d079eb852405e42b124fdf430281454
+
+FROM ${NODE_IMAGE} AS gateway
+WORKDIR /opt/kelion
+COPY deploy/converter-gateway.mjs ./converter-gateway.mjs
+COPY deploy/lib ./lib
+ENV NODE_ENV=production HOME=/home/node
+USER node
+STOPSIGNAL SIGTERM
+CMD ["node", "/opt/kelion/converter-gateway.mjs"]
+
+FROM ${PYTHON_IMAGE} AS parser
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY deploy/requirements-markitdown.txt /tmp/requirements.txt
+RUN python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt \
+    && python -I -c "from markitdown import MarkItDown; print(MarkItDown.__name__)"
+RUN groupadd --gid 10001 converter \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin converter \
+    && mkdir -p /opt/kelion \
+    && chown root:root /opt/kelion
+COPY --chown=root:root deploy/converter-parser.py deploy/converter-exec.py /opt/kelion/
+ENV HOME=/nonexistent \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+USER 10001:10001
+STOPSIGNAL SIGTERM
+CMD ["python", "-I", "/opt/kelion/converter-parser.py"]

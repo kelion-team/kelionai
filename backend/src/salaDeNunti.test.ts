@@ -13,7 +13,7 @@
 //
 // Lacătele de mai jos țin cele două reguli care sting efectul; cine le
 // schimbă decide conștient, cu istoria asta în față. Lanțul AUZULUI
-// (vocalLive.ts) are lacătul lui separat (lacat.test.ts + verifica-gemini) —
+// (vocalLive.ts) are testele sale de protocol separate —
 // aici e lanțul FILMĂRII, care nu merge la creier.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'

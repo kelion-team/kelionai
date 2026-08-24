@@ -1,0 +1,48 @@
+approval_policy = "never"
+cli_auth_credentials_store = "file"
+default_permissions = "kelion-worker"
+forced_login_method = "chatgpt"
+
+[shell_environment_policy]
+inherit = "none"
+ignore_default_excludes = false
+experimental_use_profile = false
+
+[shell_environment_policy.set]
+CI = "1"
+GIT_OPTIONAL_LOCKS = "0"
+HOME = "/nonexistent"
+LANG = "C.UTF-8"
+LC_ALL = "C.UTF-8"
+NO_COLOR = "1"
+PATH = "/usr/bin:/bin"
+
+[permissions.kelion-worker]
+description = "Kelion Codex: runtime minim, un singur worktree, fara retea sau credentiale"
+
+[permissions.kelion-worker.filesystem]
+glob_scan_max_depth = 8
+":minimal" = "read"
+":slash_tmp" = "deny"
+":tmpdir" = "deny"
+"/etc/kelion" = "deny"
+"/home" = "deny"
+"/root" = "deny"
+"/run/credentials" = "deny"
+"/run/user" = "deny"
+"/var/lib/kelion-codex-auth" = "deny"
+"/var/lib/kelion-codex/repo" = "deny"
+"/var/lib/kelion-codex/repo/.git" = "read"
+
+[permissions.kelion-worker.filesystem.":workspace_roots"]
+"." = "write"
+"**/*.env" = "deny"
+"**/*.key" = "deny"
+"**/*.p12" = "deny"
+"**/*.p8" = "deny"
+"**/.git-credentials" = "deny"
+"**/.npmrc" = "deny"
+"**/auth.json" = "deny"
+
+[permissions.kelion-worker.network]
+enabled = false

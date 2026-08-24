@@ -64,7 +64,7 @@ function stageFrom(log: string, progress: string): string {
   if (/build|compil|vite|webpack/i.test(source)) return 'build'
   if (/(?:edit|modific|patch|fără nicio modificare|nu ai scris nimic)/i.test(source)) return 'implementation'
   if (/clone|checkout|git\b|branch/i.test(source)) return 'repository'
-  if (/creier|brain|model|gemini/i.test(source)) return 'planning_brain'
+  if (/creier|brain|model|provider/i.test(source)) return 'planning_brain'
   return progress.trim() ? progress.trim().slice(0, 120) : 'unknown_stage'
 }
 
@@ -146,7 +146,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/creier|brain|r[ăa]spuns gol|model (invalid|refuzat|nu)|gemini.*(unavailable|error)|indisponibil/i.test(log)) {
+  if (/creier|brain|r[ăa]spuns gol|model (invalid|refuzat|nu)|provider.*(unavailable|error)|indisponibil/i.test(log)) {
     return {
       ...base,
       causeCode: 'brain_unavailable',
@@ -169,26 +169,4 @@ export function constructorIncidentLesson(
   verification: string,
 ): string {
   return `Cauză: ${incident.causeSummary} Prevenție: ${incident.nextAction} Verificare: ${verification}`.slice(0, 4000)
-}
-
-export function formatConstructorIncidentContext(incidents: ConstructorIncident[] | null): string {
-  if (incidents === null) {
-    return (
-      'CONSTRUCTOR INCIDENT REGISTER: UNREADABLE. This does NOT mean zero incidents. ' +
-      'Mandatory duty: call constructor_status and server_logs, report that the register could not be read, and do not claim the constructor is healthy.'
-    )
-  }
-  if (!incidents.length) return ''
-  const rows = incidents.slice(0, 8).map((incident) =>
-    `• incident #${incident.id} / order #${incident.jobId} [${incident.state}] stage=${incident.stage}; ` +
-    `cause=${incident.causeCode}: ${incident.causeSummary}; responsible=${incident.responsible}; ` +
-    `next=${incident.nextAction}; recurrence=${incident.recurrenceCount}; evidence=${incident.evidence.slice(-300)}`,
-  )
-  return (
-    'OPEN CONSTRUCTOR INCIDENTS — MANDATORY SERVICE DUTY, not optional status chatter. ' +
-    'Before claiming health or completion, advance the oldest case with real tools. Investigate evidence, record progress through ' +
-    'constructor_manage action=incident_update, repair, retry only when the cause changed, and close only after the associated order is done with CI green. ' +
-    'Do not wait for the owner to ask why it failed; do not invent a root cause; do not hide these incidents as an empty queue.\n' +
-    rows.join('\n')
-  )
 }

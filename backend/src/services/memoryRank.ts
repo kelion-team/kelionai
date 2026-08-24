@@ -5,7 +5,7 @@
 // relațional"): ce aduce PLUS la scara unui singur user NU e infrastructura de
 // vectori (pgvector la miliarde de rânduri), ci MODELUL: memorii TIPIZATE, cu
 // IMPORTANȚĂ și cu UITARE în timp, iar recall-ul le cântărește pe toate trei,
-// nu doar similaritatea. Recall-ul semantic (embeddings Gemini + cosinus) există
+// nu doar similaritatea. Recall-ul semantic (embeddings OpenAI + cosinus) există
 // deja; aici e nucleul PUR care le combină — separat + exportat ca să fie PROBAT,
 // fără rețea, fără DB. Nicio cifră de bani/prag arătată omului: sunt constante de
 // reglaj ale rangării, declarate pe linie.
@@ -57,10 +57,10 @@ export function injumatatireMsPeTip(tip: MemoryType | null): number {
   const ZI = 24 * 60 * 60 * 1000
   switch (tip) {
     case 'identity': return 3650 * ZI // hardcod-permis: ~10 ani = practic nu se uită
-    case 'preference': return 730 * ZI // hardcod-permis: ~2 ani
-    case 'relationship': return 730 * ZI // hardcod-permis: ~2 ani
+    case 'preference': return 730 * ZI // hardcod-permis: preferințele au o înjumătățire tehnică de aproximativ doi ani
+    case 'relationship': return 730 * ZI // hardcod-permis: relațiile au o înjumătățire tehnică de aproximativ doi ani
     case 'project': return 120 * ZI // hardcod-permis: ~4 luni (proiectele se schimbă)
-    case 'fact': return 365 * ZI // hardcod-permis: ~1 an
+    case 'fact': return 365 * ZI // hardcod-permis: faptele au o înjumătățire tehnică de aproximativ un an
     case 'episodic': return 30 * ZI // hardcod-permis: ~1 lună (un episod se stinge repede)
     case 'emotional': return 7 * ZI // hardcod-permis: ~1 săptămână (starea se schimbă)
     case 'temporal': return 180 * ZI // hardcod-permis: ~6 luni (rutinele se schimbă sezonier)

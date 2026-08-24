@@ -1,98 +1,193 @@
-# PIPELINE FIX DE PUBLICARE PE VPS — „AUTONOMIA LUI KELION" (AI-HANDOFF §14.b F+A), 25 iul 2026.
-#
-# Regula de fond (§1.4): un release aprobat = PR + merge în master; „publicat" se
-# declară DOAR cu dovada că versiunea live s-a schimbat. Acest workflow ESTE
-# pipeline-ul de publicare al gazdei noi (VPS 164.68.120.87): rulează automat la
-# fiecare push pe master (merge-ul lui Adrian = aprobarea) sau manual
-# (workflow_dispatch), intră pe VPS cu cheia SSH (secretul VPS_SSH_KEY) și
-# execută deploy/deploy.sh, apoi VERIFICĂ ANTI-FANTOMĂ din AFARĂ:
-# https://kelionai.app/api/version trebuie să întoarcă EXACT sha-ul curent al
-# lui origin/master (injectat în container prin GIT_COMMIT_SHA) + health 200.
-# Nu „s-a schimbat ceva" — ci „e chiar master". Fără dovadă → jobul PICĂ roșu.
-#
-# Lecția „calea rulată ≠ calea din repo" (§6): deploy.sh NU se execută din clona
-# de pe VPS (pasul lui de `git checkout` l-ar rescrie chiar în timp ce bash îl
-# citește) — se extrage versiunea din origin/master într-un fișier temporar și
-# se rulează aceea.
-name: deploy
+name: production-release
+run-name: production-${{ inputs.release_request_id }}
 
 on:
-  push:
-    branches: [master]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Commit integral din master, cu CI și imagini semnate
+        required: true
+        type: string
+      release_mode:
+        description: Release curent sau rollback la un artefact încă disponibil
+        required: true
+        default: release
+        type: choice
+        options: [release, rollback]
+      release_request_id:
+        description: UUID idempotent al cererii de release
+        required: true
+        type: string
+
+permissions: {}
 
 concurrency:
-  group: deploy-vps
+  group: production-release
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    # ── PE ÎNTRERUPĂTOR PÂNĂ SE DEBLOCHEAZĂ ACTIONS (15 aug; același tipar ca
-    # gemini-lock din 7 aug) ──────────────────────────────────────────────────
-    # Facturarea organizației e blocată: jobul se năștea, nu primea NICIODATĂ
-    # runner (runner_id: 0, loguri 404) și murea roșu → un email „Run failed:
-    # deploy" către owner la FIECARE merge în master — iar cu constructorul
-    # îmbinând la ~10 minute, inboxul lui era bombardat toată noaptea (captura
-    # lui din 15 aug, 06:51). Publicarea REALĂ nu trece pe aici de la scoaterea
-    # gazdei PaaS vechi: o face cronul auto-publicare de pe VPS (dovada: live avansează
-    # — v=f3440b9 la 05:45 — cu Actions mort). Jobul se ține, nu se șterge:
-    # când factura se deblochează, variabila de repo ACTIONS_PORNIT=true îl
-    # repornește neschimbat (Settings → Secrets and variables → Actions →
-    # Variables). Un job SĂRIT nu trimite emailuri; unul picat, da.
-    if: ${{ vars.ACTIONS_PORNIT == 'true' }}
+  verify-candidate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      ci_run_id: ${{ steps.proof.outputs.ci_run_id }}
+      build_run_id: ${{ steps.proof.outputs.build_run_id }}
+      commit_sha: ${{ steps.proof.outputs.commit_sha }}
     steps:
-      - name: Versiunea live ÎNAINTE (pentru jurnal)
-        run: |
-          echo "ÎNAINTE: $(curl -s -m 10 https://kelionai.app/api/version || echo '(necitibilă)')"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Deploy pe VPS (SSH cu cheie)
+      - name: Verifică dovada CI și build pe commitul imuabil
+        id: proof
         env:
-          KEY: ${{ secrets.VPS_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "$KEY" ]; then
-            echo "::error::Lipsește secretul VPS_SSH_KEY (Settings → Secrets → Actions)."; exit 1
-          fi
-          umask 077
-          printf '%s\n' "$KEY" > /tmp/vps_key
-          chmod 600 /tmp/vps_key
-          # ServerAliveInterval=30 + ServerAliveCountMax=10 → 5 minute toleranță fără output
-          # previne "Broken pipe" în timpul docker build (care durează 4-5 min și e silent)
-          ssh -i /tmp/vps_key \
-              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=25 -o BatchMode=yes \
-              -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-              root@164.68.120.87 'bash -s' <<'EOS'
-          set -euo pipefail
-          cd /root/kelion/repo
-          git fetch origin master
-          # Rulez versiunea din ORIGIN/MASTER a scriptului, dintr-o copie în /tmp
-          # (nu din clonă — vezi antetul workflow-ului).
-          git show origin/master:deploy/deploy.sh > /tmp/kelion-deploy-master.sh
-          KELION_DEPLOY_COPY=1 bash /tmp/kelion-deploy-master.sh master
-          EOS
-
-      - name: Verificare ANTI-FANTOMĂ (live v == sha origin/master + health 200)
-        env:
+          CANDIDATE_SHA: ${{ inputs.commit_sha }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_REQUEST_ID: ${{ inputs.release_request_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          V=""; SHA=""; H=""
-          for i in $(seq 1 24); do
-            # sha-ul lui master se recitește la fiecare încercare: dacă între timp
-            # a intrat alt push, comparația rămâne corectă față de master-ul REAL.
-            SHA=$(curl -s -m 10 -H "Authorization: Bearer $GH_TOKEN" \
-                  -H 'Accept: application/vnd.github.sha' \
-                  https://api.github.com/repos/kelion-team/kelionai/commits/master | cut -c1-7)
-            V=$(curl -s -m 10 https://kelionai.app/api/version | grep -o '"v":"[^"]*"' | cut -d'"' -f4 || true)
-            H=$(curl -s -o /dev/null -w '%{http_code}' -m 10 https://kelionai.app/health || echo 000)
-            echo "încercarea $i: live v='$V', așteptat '$SHA', health=$H"
-            if [ -n "$SHA" ] && [ "$V" = "$SHA" ] && [ "$H" = "200" ]; then
-              echo "✅ PUBLICAT CU DOVADĂ: kelionai.app rulează exact master ($SHA), health 200."
-              exit 0
-            fi
-            sleep 10
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_MODE" = release || "$RELEASE_MODE" = rollback ]]
+          [[ "$RELEASE_REQUEST_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          git cat-file -e "${CANDIDATE_SHA}^{commit}"
+          git merge-base --is-ancestor "$CANDIDATE_SHA" origin/master
+          if [ "$RELEASE_MODE" = release ]; then
+            [ "$CANDIDATE_SHA" = "$(git rev-parse origin/master)" ]
+          fi
+
+          ci_runs=$(gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/pr-verify.yml/runs" \
+            -f head_sha="$CANDIDATE_SHA" -f event=push -f status=completed -f per_page=30)
+          ci_run_id=$(jq -r '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .conclusion == "success")][0].id // empty' --arg sha "$CANDIDATE_SHA" <<<"$ci_runs")
+          [[ "$ci_run_id" =~ ^[0-9]+$ ]]
+
+          build_runs=$(gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs" \
+            -f status=completed -f per_page=50)
+          build_run_id=$(jq -r '[.workflow_runs[] | select(.head_sha == $sha and .event == "workflow_run" and .conclusion == "success")][0].id // empty' --arg sha "$CANDIDATE_SHA" <<<"$build_runs")
+          [[ "$build_run_id" =~ ^[0-9]+$ ]]
+          printf 'ci_run_id=%s\nbuild_run_id=%s\ncommit_sha=%s\n' "$ci_run_id" "$build_run_id" "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: verify-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    env:
+      CANDIDATE_SHA: ${{ needs.verify-candidate.outputs.commit_sha }}
+      CI_RUN_ID: ${{ needs.verify-candidate.outputs.ci_run_id }}
+      BUILD_RUN_ID: ${{ needs.verify-candidate.outputs.build_run_id }}
+      RELEASE_MODE: ${{ inputs.release_mode }}
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      REGISTRY_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.verify-candidate.outputs.commit_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-images-${{ needs.verify-candidate.outputs.commit_sha }}
+          path: release-manifest
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.verify-candidate.outputs.build_run_id }}
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Verifică manifestul și semnăturile keyless
+        run: |
+          set -euo pipefail
+          [ -n "$REGISTRY_TOKEN" ]
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          cleanup_registry() { docker logout ghcr.io >/dev/null 2>&1 || true; }
+          trap cleanup_registry EXIT
+          manifest=release-manifest/images.json
+          jq -e --arg sha "$CANDIDATE_SHA" --argjson source "$CI_RUN_ID" \
+            '.schema == 1 and .commit == $sha and .sourceRunId == $source and (.images | length == 5)' "$manifest" >/dev/null
+          identity="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images\\.yml@refs/heads/master$"
+          for component in app browser browser-egress converter-gateway converter-parser; do
+            ref=$(jq -er --arg component "$component" '.images[$component]' "$manifest")
+            [[ "$ref" =~ ^ghcr\.io/.+/$component@sha256:[0-9a-f]{64}$ ]]
+            cosign verify \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --annotations "git_sha=$CANDIDATE_SHA" \
+              "$ref" >/dev/null
           done
-          echo "::error::ANTI-FANTOMĂ PICĂ: live v='$V' ≠ master '$SHA' (health=$H) după 4 minute. Producția NU e declarată publicată — rulează vps-diag pentru fapte."
-          exit 1
+
+      - name: Release blue-green pe VPS
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] && [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_MODE" = release || "$RELEASE_MODE" = rollback ]]
+          [[ "$GITHUB_ACTOR" =~ ^[A-Za-z0-9-]+$ ]]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ] && [ -n "$REGISTRY_TOKEN" ]
+
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          archive=$(mktemp --suffix=.tar.gz)
+          remote_archive="/root/kelion/runtime/release-bundle.${GITHUB_RUN_ID}.tar.gz"
+          cleanup() {
+            ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
+              -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
+              'docker logout ghcr.io >/dev/null 2>&1 || true' >/dev/null 2>&1 || true
+            rm -f -- "$key_file" "$known_hosts" "$archive"
+          }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(-i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
+
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$CANDIDATE_SHA")
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -czf "$archive" deploy config/product.json release-manifest/images.json
+          printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "install -d -o root -g root -m 0700 /root/kelion/runtime && docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin" >/dev/null
+          scp "${ssh_opts[@]}" "$archive" "$VPS_USER@$VPS_HOST:$remote_archive"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$CANDIDATE_SHA" "$CI_RUN_ID" "$BUILD_RUN_ID" "$RELEASE_MODE" "$remote_archive" <<'REMOTE'
+          set -euo pipefail
+          sha=$1; ci_run=$2; build_run=$3; release_mode=$4; archive=$5
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ci_run" =~ ^[0-9]+$ ]] && [[ "$build_run" =~ ^[0-9]+$ ]]
+          [[ "$release_mode" = release || "$release_mode" = rollback ]]
+          case "$archive" in /root/kelion/runtime/release-bundle.[0-9]*.tar.gz) ;; *) exit 1 ;; esac
+          [ -f "$archive" ] && [ ! -L "$archive" ]
+          work=$(mktemp -d /root/kelion/runtime/release.XXXXXX)
+          cleanup_remote() {
+            rm -f -- "$archive"
+            case "$work" in /root/kelion/runtime/release.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
+          }
+          trap cleanup_remote EXIT
+          if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then exit 1; fi
+          tar --extract --gzip --file "$archive" --directory "$work" --no-same-owner --no-same-permissions
+          KELION_RELEASE_APPROVED=1 KELION_CI_RUN_ID="$ci_run" KELION_BUILD_RUN_ID="$build_run" \
+            bash "$work/deploy/deploy.sh" "$sha" "$work/release-manifest/images.json" "$release_mode"
+          REMOTE
+
+      - name: Dovadă externă exactă
+        run: |
+          set -euo pipefail
+          origin=$(jq -er '.publicAppOrigin' config/product.json)
+          expected=${CANDIDATE_SHA:0:7}
+          version=$(curl --fail --silent --show-error --max-time 12 "$origin/api/version" | jq -er '.v')
+          readiness=$(curl --fail --silent --show-error --max-time 12 "$origin/readyz")
+          [ "$version" = "$expected" ]
+          jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$readiness" >/dev/null

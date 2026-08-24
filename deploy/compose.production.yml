@@ -1,0 +1,300 @@
+x-kelion-labels: &kelion-labels
+  com.kelion.managed: "true"
+  com.kelion.slot: ${KELION_SLOT:?release slot is required}
+  com.kelion.commit: ${KELION_COMMIT_SHA:?immutable commit is required}
+
+services:
+  app:
+    image: ${KELION_APP_IMAGE:?immutable app image is required}
+    restart: unless-stopped
+    labels:
+      <<: *kelion-labels
+      com.kelion.role: app
+    init: true
+    user: "1000:1000"
+    group_add: ["10050"]
+    env_file:
+      - ${KELION_CONFIG_FILE:?dedicated non-secret runtime config is required}
+    environment:
+      BIND_HOST: 0.0.0.0
+      OPENAI_API_KEY_FILE: /run/secrets/openai-project-key
+      SESSION_SECRET_FILE: /run/secrets/session-secret
+      GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google-client-secret
+      GOOGLE_TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/google-token-encryption-key
+      REVOLUT_MERCHANT_SECRET_KEY_FILE: /run/secrets/revolut-merchant-secret-key
+      REVOLUT_WEBHOOK_SIGNING_SECRET_FILE: /run/secrets/revolut-webhook-signing-secret
+      VAPID_PRIVATE_KEY_FILE: /run/secrets/vapid-private-key
+      DATABASE_URL_FILE: /run/secrets/database-url
+      CODEX_WORKER_SECRET_FILE: /run/secrets/codex-worker-secret
+      CONSTRUCTOR_PUBLISHER_SECRET_FILE: /run/secrets/constructor-publisher-secret
+      CONSTRUCTOR_RELEASE_SECRET_FILE: /run/secrets/constructor-release-secret
+      BROWSER_WORKER_SOCKET: /run/kelion-browser-api/browser.sock
+      BROWSER_WORKER_SECRET_FILE: /run/secrets/browser-worker-secret
+      CONVERTER_WORKER_SOCKET: /run/kelion-converter-api/converter.sock
+      CONVERTER_WORKER_SECRET_FILE: /run/secrets/converter-worker-secret
+      RELEASE_CANDIDATE_MODE: "1"
+      RELEASE_ACTIVATION_FILE: /run/kelion-release/active
+      RELEASE_ID: ${KELION_COMMIT_SHA:?immutable commit is required}
+      GIT_COMMIT_SHA: ${KELION_COMMIT_SHA:?immutable commit is required}
+    ports:
+      - "127.0.0.1:${KELION_BIND_PORT:-18080}:8080"
+    volumes:
+      - type: bind
+        source: ${KELION_POSTGRES_SOCKET_ROOT:-/var/run/postgresql}
+        target: /var/run/postgresql
+        read_only: true
+      - type: bind
+        source: ${KELION_RUNTIME_ROOT:?slot runtime root is required}/browser-api
+        target: /run/kelion-browser-api
+        read_only: true
+      - type: bind
+        source: ${KELION_RUNTIME_ROOT:?slot runtime root is required}/converter-api
+        target: /run/kelion-converter-api
+        read_only: true
+      - type: bind
+        source: ${KELION_RELEASE_STATE_ROOT:?global release state root is required}
+        target: /run/kelion-release
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/openai-project-key
+        target: /run/secrets/openai-project-key
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/session-secret
+        target: /run/secrets/session-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/google-client-secret
+        target: /run/secrets/google-client-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/google-token-encryption-key
+        target: /run/secrets/google-token-encryption-key
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/revolut-merchant-secret-key
+        target: /run/secrets/revolut-merchant-secret-key
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/revolut-webhook-signing-secret
+        target: /run/secrets/revolut-webhook-signing-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/vapid-private-key
+        target: /run/secrets/vapid-private-key
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/database-url
+        target: /run/secrets/database-url
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/codex-worker-secret
+        target: /run/secrets/codex-worker-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/constructor-publisher-secret
+        target: /run/secrets/constructor-publisher-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/constructor-release-secret
+        target: /run/secrets/constructor-release-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/browser-worker-secret
+        target: /run/secrets/browser-worker-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/converter-worker-secret
+        target: /run/secrets/converter-worker-secret
+        read_only: true
+    depends_on:
+      browser-worker:
+        condition: service_healthy
+      converter-gateway:
+        condition: service_healthy
+    networks:
+      app-egress: {}
+      proxy:
+        aliases: ["app-${KELION_SLOT:?release slot is required}"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1770,uid=1000,gid=1000,noexec,nosuid,nodev
+      - /home/node/.cache:size=32m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 1536m
+    cpus: 2.0
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/livez').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 4
+
+  browser-worker:
+    image: ${KELION_BROWSER_IMAGE:?immutable browser image is required}
+    restart: unless-stopped
+    labels:
+      <<: *kelion-labels
+      com.kelion.role: browser-worker
+    init: true
+    user: "1001:1001"
+    group_add: ["10050"]
+    dns: [127.0.0.1]
+    environment:
+      BROWSER_PROXY_URL: http://${KELION_BROWSER_PROXY_IP:?browser proxy IP is required}:3128
+      BROWSER_INTERNAL_SUBNET: ${KELION_BROWSER_SUBNET:?browser internal subnet is required}
+    volumes:
+      - type: bind
+        source: ${KELION_RUNTIME_ROOT:?slot runtime root is required}/browser-api
+        target: /run/kelion-browser-api
+      - type: bind
+        source: ${KELION_RUNTIME_ROOT:?slot runtime root is required}/browser-egress
+        target: /run/kelion-browser-egress
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/browser-worker-secret
+        target: /run/secrets/browser-worker-secret
+        read_only: true
+    depends_on:
+      browser-egress:
+        condition: service_healthy
+    networks:
+      browser-internal:
+        ipv4_address: ${KELION_BROWSER_WORKER_IP:?browser worker IP is required}
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1770,uid=1001,gid=1001,noexec,nosuid,nodev
+      - /home/pwuser:size=64m,mode=0700,uid=1001,gid=1001,nosuid,nodev
+    shm_size: 256m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=${KELION_SECCOMP_PROFILE:-/root/kelion/runtime/playwright-seccomp-v1.62.1.json}
+    pids_limit: 256
+    mem_limit: 1024m
+    cpus: 1.5
+    healthcheck:
+      test: [CMD, node, -e, "const h=require('http');const r=h.get({socketPath:'/run/kelion-browser-api/browser.sock',path:'/healthz'},x=>process.exit(x.statusCode===200?0:1));r.on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 15s
+      start_period: 30s
+      retries: 3
+
+  browser-egress:
+    image: ${KELION_BROWSER_EGRESS_IMAGE:?immutable browser egress image is required}
+    restart: unless-stopped
+    labels:
+      <<: *kelion-labels
+      com.kelion.role: browser-egress
+    init: true
+    user: "1000:1000"
+    group_add: ["10050"]
+    volumes:
+      - type: bind
+        source: ${KELION_RUNTIME_ROOT:?slot runtime root is required}/browser-egress
+        target: /run/kelion-browser-egress
+    networks:
+      browser-internal:
+        ipv4_address: ${KELION_BROWSER_PROXY_IP:?browser proxy IP is required}
+      browser-egress: {}
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 192m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD, node, -e, "const h=require('http');const r=h.get({socketPath:'/run/kelion-browser-egress/fetch.sock',path:'/healthz'},x=>process.exit(x.statusCode===200?0:1));r.on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  converter-gateway:
+    image: ${KELION_CONVERTER_GATEWAY_IMAGE:?immutable converter gateway image is required}
+    restart: unless-stopped
+    labels:
+      <<: *kelion-labels
+      com.kelion.role: converter-gateway
+    init: true
+    user: "1000:1000"
+    group_add: ["10050"]
+    network_mode: none
+    volumes:
+      - type: bind
+        source: ${KELION_RUNTIME_ROOT:?slot runtime root is required}/converter-api
+        target: /run/kelion-converter-api
+      - type: bind
+        source: ${KELION_RUNTIME_ROOT:?slot runtime root is required}/converter-private
+        target: /run/kelion-converter-private
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/converter-worker-secret
+        target: /run/secrets/converter-worker-secret
+        read_only: true
+    depends_on:
+      converter-parser:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 96m
+    cpus: 0.25
+    healthcheck:
+      test: [CMD, node, -e, "const h=require('http');const r=h.get({socketPath:'/run/kelion-converter-api/converter.sock',path:'/healthz'},x=>process.exit(x.statusCode===200?0:1));r.on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  converter-parser:
+    image: ${KELION_CONVERTER_PARSER_IMAGE:?immutable converter parser image is required}
+    restart: unless-stopped
+    labels:
+      <<: *kelion-labels
+      com.kelion.role: converter-parser
+    init: true
+    user: "10001:10001"
+    group_add: ["10050"]
+    network_mode: none
+    volumes:
+      - type: bind
+        source: ${KELION_RUNTIME_ROOT:?slot runtime root is required}/converter-private
+        target: /run/kelion-converter-private
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=0700,uid=10001,gid=10001,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 48
+    mem_limit: 768m
+    cpus: 1.0
+    healthcheck:
+      test: [CMD, python, -I, -c, "import socket; crlf=bytes((13,10)); s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect('/run/kelion-converter-private/parser.sock'); s.sendall(crlf.join((b'GET /healthz HTTP/1.1',b'Host: local',b'Connection: close',b'',b''))); raise SystemExit(0 if b' 200 ' in s.recv(128) else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+networks:
+  app-egress:
+    driver: bridge
+  browser-egress:
+    driver: bridge
+  browser-internal:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${KELION_BROWSER_SUBNET:?browser subnet is required}
+  proxy:
+    external: true
+    name: kelion-proxy

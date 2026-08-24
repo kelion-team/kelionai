@@ -1,14 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { saveClientError } from '../db.js'
-
-// ── THE ERRORS FROM THE USER'S BROWSER (F12) — Kelion's eyes on the client ──
-// Adrian (24 Jul): "he must have access to the F12 logs". The frontend
-// catches the console errors (window.onerror, unhandledrejection,
-// console.error) and sends them here; chat.ts injects the RECENT errors into
-// Kelion's context, so that at "why doesn't X work?" he diagnoses from the
-// browser's REAL symptoms, not from guessing. In-memory ring per user —
-// diagnostics, not an archive.
+import { getOrCreateClientStorageId, saveClientError } from '../db.js'
+import { redactDiagnostic } from '../shared/diagnosticRedaction.js'
 
 interface ClientErr {
   ts: number
@@ -17,13 +10,32 @@ interface ClientErr {
 
 const rings = new Map<string, ClientErr[]>()
 const MAX_PER_USER = 50
+const MAX_RING_USERS = 1_000
+const RING_RETENTION_MS = 30 * 60_000
 
-/** The errors from the last `sinceMs` ms for the user — for the chat context. */
+function ringKey(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+function pruneRings(now: number): void {
+  for (const [key, entries] of rings) {
+    const recent = entries.filter((entry) => now - entry.ts < RING_RETENTION_MS)
+    if (recent.length) rings.set(key, recent)
+    else rings.delete(key)
+  }
+  while (rings.size >= MAX_RING_USERS) {
+    const oldest = rings.keys().next().value
+    if (oldest === undefined) break
+    rings.delete(oldest)
+  }
+}
+
+/** Recent, already-redacted errors for this account's chat context. */
 export function recentClientErrors(email: string, sinceMs = 15 * 60_000): string[] {
   const now = Date.now()
-  return (rings.get(email) ?? [])
-    .filter((e) => now - e.ts < sinceMs)
-    .map((e) => `[${new Date(e.ts).toISOString().slice(11, 19)}] ${e.msg}`)
+  return (rings.get(ringKey(email)) ?? [])
+    .filter((entry) => now - entry.ts < Math.min(sinceMs, RING_RETENTION_MS))
+    .map((entry) => `[${new Date(entry.ts).toISOString().slice(11, 19)}] ${entry.msg}`)
 }
 
 export async function clientErrorRoutes(app: FastifyInstance): Promise<void> {
@@ -31,28 +43,25 @@ export async function clientErrorRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     const list = Array.isArray(req.body?.errors) ? req.body.errors : []
-    const ring = rings.get(user.email) ?? []
+    if (list.length > 10) return reply.code(413).send({ error: 'too_many_errors' })
+
+    let accountId: string
+    try { accountId = await getOrCreateClientStorageId(user.email) }
+    catch { return reply.code(503).send({ error: 'diagnostic_store_unavailable' }) }
+
     const now = Date.now()
-    for (const raw of list.slice(0, 10)) {
-      const msg = String(raw ?? '').slice(0, 400).trim()
-      if (!msg) continue
-      // Dedup: the same error repeated in a burst doesn't fill the ring.
-      if (ring.some((e) => e.msg === msg && now - e.ts < 60_000)) continue
+    pruneRings(now)
+    const key = ringKey(user.email)
+    const ring = rings.get(key) ?? []
+    for (const raw of list) {
+      const msg = redactDiagnostic(raw, 400)
+      if (!msg || ring.some((entry) => entry.msg === msg && now - entry.ts < 60_000)) continue
       ring.push({ ts: now, msg })
-      // PERSISTENCE (audit 24 Jul, P1-3): the ring is memory only — on
-      // restart the errors disappeared and the autonomous repair had no
-      // durable source. We also save to the DB (best-effort, doesn't block
-      // the reply).
-      // PERF ≠ INTERFAȚĂ RUPTĂ (owner, 13 aug): simptomele de performanță
-      // (watchdog/ceas → marcaj `[PERF]`) primesc tipul `perf`, ca sentinela să
-      // nu le mai numere drept „erori UI rupt" (emailul fals de 23). Creierul
-      // tot le vede — ajung în inel și în client_errors ca orice altă eroare.
-      const tip = msg.includes('[PERF]') ? 'perf' : 'f12'
-      void saveClientError({ type: tip, message: `${user.email}: ${msg}`, ip: req.ip })
+      const type = msg.includes('[PERF]') ? 'perf' : 'f12'
+      void saveClientError({ type, message: msg, accountId })
     }
     while (ring.length > MAX_PER_USER) ring.shift()
-    rings.set(user.email, ring)
-    return reply.send({ ok: true })
+    rings.set(key, ring)
+    return reply.send({ ok: true, accepted: Math.min(list.length, 10) })
   })
-
 }

@@ -21,18 +21,16 @@ describe('deflectareConstructor — cablul, nu promptul', () => {
     expect(deflecteazaConstructor('This will be fixed by the team.')).toBe(true)
   })
 
-  it('NU blochează execuția reală (Kelion construiește el însuși)', () => {
-    expect(deflecteazaConstructor('Am dat ordin la constructor și am deschis PR-ul #123.')).toBe(false)
-    expect(deflecteazaConstructor('Repar acum: modific fișierul chat.ts, linia 200.')).toBe(false)
-    expect(deflecteazaConstructor('Gata, am făcut merge; se publică în câteva minute.')).toBe(false)
+  it('NU blochează depunerea reală a unui ordin la workerul separat', () => {
+    expect(deflecteazaConstructor('Am depus ordinul validat la Constructor.')).toBe(false)
     expect(deflecteazaConstructor('')).toBe(false)
   })
 
   it('alocarea e reală doar dacă o unealtă de construcție a fost chemată', () => {
     expect(aAlocatConstructie(['web_search', 'get_weather'])).toBe(false)
     expect(aAlocatConstructie(['build_software'])).toBe(true)
-    expect(aAlocatConstructie(['repo_write', 'repo_open_pr'])).toBe(true)
-    expect(aAlocatConstructie(['request_repair'])).toBe(true)
+    expect(aAlocatConstructie(['repo_write', 'repo_open_pr'])).toBe(false)
+    expect(aAlocatConstructie(['request_repair'])).toBe(false)
     expect(aAlocatConstructie([])).toBe(false)
   })
 })

@@ -1,7 +1,7 @@
 // ── THE LANGUAGE GUARD'S TESTS (Jul 30 audit: "put them all into tests") ──
 //
 // `lang.ts` decides WHICH LANGUAGE Kelion speaks. It had zero tests, although
-// it produced real bugs, documented in AI-HANDOFF:
+// it produced real bugs:
 //   • Romanian WITHOUT diacritics ("Buna ziua… multumesc") came out `null` →
 //     an English answer, against the "reply in the received language" rule;
 //   • Romanian speech heard as RUSSIAN would have pinned "ru" for the user
@@ -17,7 +17,6 @@ import {
   detectLang,
   detectSpeechLang,
   trackSpeechLang,
-  checkLang,
 } from './services/lang.js'
 
 describe('lang — normalizarea codului de limbă', () => {
@@ -93,19 +92,5 @@ describe('lang — comutarea limbii cere CONFIRMARE (două mesaje la rând)', ()
   it('mesaj în limba deja stabilită → nicio schimbare', () => {
     const email = `t4-${Date.now()}@x.y`
     expect(trackSpeechLang(email, 'Bună ziua, mulțumesc mult', 'ro-RO')).toBeNull()
-  })
-})
-
-describe('lang — verdictul asupra răspunsului produs', () => {
-  it('răspuns în limba cerută → ok', () => {
-    expect(checkLang('Bună, îți spun imediat rezultatul', 'ro-RO')).toEqual({ ok: true })
-  })
-  it('răspuns în ALTĂ limbă → prins, cu limba detectată', () => {
-    const v = checkLang('Hello, I will tell you the answer now, thanks', 'ro-RO')
-    expect(v.ok).toBe(false)
-    if (!v.ok) expect(v.detected).toBe('en')
-  })
-  it('fără limbă stabilită nu impune nimic', () => {
-    expect(checkLang('orice text', null)).toEqual({ ok: true })
   })
 })

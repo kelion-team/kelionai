@@ -1,3 +1,5 @@
+import { config } from '../config.js'
+
 // ── BAZA PUBLICĂ A LINKURILOR DE ECRAN (10 aug, ownerul: „nu poate afișa
 // hărți") ────────────────────────────────────────────────────────────────────
 // MĂSURAT: cadrele de monitor cu URL absolut se construiau din Host-ul
@@ -9,7 +11,7 @@
 // exact pe calea pe care o folosește ownerul (vocea).
 // Regula: un Host de loopback/intern nu e NICIODATĂ baza linkurilor pentru
 // browser — cade pe domeniul public.
-export const BAZA_PUBLICA_IMPLICITA = 'https://kelionai.app'
+export const BAZA_PUBLICA_IMPLICITA = config.publicOrigin
 
 export function bazaPublica(host: string | undefined | null): string {
   const h = String(host ?? '').trim().toLowerCase()

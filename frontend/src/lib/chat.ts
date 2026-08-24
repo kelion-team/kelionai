@@ -5,6 +5,8 @@ export interface ChatMessage {
   ts?: number
 }
 
+import { apiFetch } from './transport'
+
 export interface Coords {
   lat: number
   lon: number
@@ -99,16 +101,15 @@ export interface ChatControl {
   // execuție = un pas anunțat live; bara de punctulețe de pe monitor îl arată.
   // gata=true vine o singură dată, la închiderea REALĂ a turei (100%).
   executie?: { pas: string; procent: number; gata?: boolean }
-  // P32 (owner, 15 aug 21:44): scenariul pregătit de Studio — butonul 🎬 din
-  // Aplicații îl PREIA AUTOMAT („se preia textul automat si incepe
-  // generarea"), iar omul are și „Copiază scenariul".
-  scenariu?: { text: string; nume: string; cale: string }
+  /** The durable retry was safely restarted because no external effect began. */
+  replayRestarted?: boolean
+  scenariu?: { videoPrompt: string; nume: string; cale: 'openai' }
   zoomMonitor?: { level?: number; direction?: string }
   // MESSENGER KELION↔KELION (Adrian, 11 aug): „apelează-l pe X" → creierul a pornit
   // un apel; frame-ul ăsta ridică la APELANT interfața „sun pe…". Celălalt primește
   // invitația pe WS-ul lui de prezență (lib/apel.ts). Permis și în modul mașină.
   apel?: { stare: string; callId?: string; cu?: { email: string; nume: string } }
-  // THE BRAIN'S VOICE: MP3 (base64) synthesized on the server (Chirp 3) and sent over
+  // Vocea răspunsului: MP3 sintetizat server-side prin motorul OpenAI și trimis prin
   // the bridge. The app only decodes + plays it — it synthesizes nothing locally.
   audio?: string
   // Owner promo pipeline: an APPROVED clip script + shot list — arm the recorder;
@@ -125,8 +126,6 @@ export interface ChatControl {
   }
 }
 
-import type { VoiceFeatures } from './audioIO.js'
-import { moment as contorMoment } from './contorFraza'
 import { getStareTranzactii, getMonitorContent } from './workspace'
 import { getTeava } from './retea'
 
@@ -144,6 +143,12 @@ export interface ScreenTask {
   kind: string
   title: string
   active: boolean
+}
+
+function chatIdempotencyKey(requested?: string): string {
+  return requested && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requested)
+    ? requested
+    : crypto.randomUUID()
 }
 
 // ── THE HONEST CONNECTION VERDICT (Adrian, 2 aug: „raportează fals că pierde
@@ -165,7 +170,7 @@ async function diagnozaConexiune(): Promise<'offline' | 'server_down' | 'transie
     return 'offline'
   }
   try {
-    const r = await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(4000) })
+    const r = await apiFetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(4000) })
     const verdict = r.ok ? 'transient' : 'server_down'
     console.error(`[CONEXIUNE] verdict măsurat: ${verdict} (net OK, /api/health → ${r.status})`)
     return verdict
@@ -187,30 +192,13 @@ export async function* streamChat(
   // unambiguous analysis request, unlike the always-on camera frame (which
   // is analyzed only on explicit request in text). See ChatPanel.tsx.
   imageIsAttachment?: boolean,
-  // CONTINUOUS VISION (Adrian, Jul 11): the camera's last 4 frames — for
-  // ALL users (rule no. 9: same capabilities), not just the admin.
-  images?: string[],
-  // Features vocale extrase client-side pentru identificare speaker + gen.
-  voiceFeatures?: VoiceFeatures,
-  // 128-d face descriptor (face-api) + thumbnail, extracted in the background when the camera
-  // is on. Triggered by voice, no button, off-hot-path.
-  faceDescriptor?: number[],
-  facePhoto?: string,
-  // THE SINGLE VOICE RULE (Adrian, Jul 26): the full-duplex voice session is active →
-  // the server doesn't synthesize the Chirp voice for this turn (no cost, no frames).
-  serverVoiceOff?: boolean,
   // THE SPOKEN TURN (Aug 1 — one brain): this message came from the live voice
   // session's ears. The server shapes the reply for speech (clean sentences,
   // no markdown tables/links) — the client speaks it verbatim through the
   // voice session's mouth. Typed turns omit the flag.
   spoken?: boolean,
-  // THE GUEST SPEAKER (Aug 1 — the timbre gate): the voice session recognised
-  // the speaker as an approved/pending GUEST of the account — the server
-  // strips every admin power from this turn and tells the brain who's talking.
-  speaker?: string,
   // AUDIO NATIV → CREIER (Adrian, 3 aug: „deep learning legat de creier direct"):
-  // vocea BRUTĂ a frazei (WAV data-URI). Gemini 2.5 o aude nativ (ton/accent);
-  // celelalte modele primesc textul (serverul scoate blocul audio). Creier unic.
+  // vocea brută a frazei (WAV data-URI), transmisă creierului OpenAI.
   audio?: string,
   // VOCE AMBIENTALĂ (Adrian, 5 aug: „tot decis de creierul unic"): tura a venit din
   // ascultarea continuă, fără poartă de nume pe client — creierul aude audio-ul și
@@ -220,18 +208,23 @@ export async function* streamChat(
   // Serverul răspunde SCURT, voce-first — dar NU mai suprimă suprafețe: ce spune că
   // face, execută (owner: „vorbă = faptă").
   carMode?: boolean,
+  // Un request offline amânat refolosește UUID-ul persistent la fiecare retry.
+  durableRequestId?: string,
 ): AsyncGenerator<string> {
-  // FINANCIAL BUG FIXED (Jul 24 audit): there used to be another POST /api/chat
-  // whose response was NEVER read — openStream() below opened A SECOND identical
-  // POST, the only one consumed. The server therefore ran EVERY message twice:
-  // double brain cost, doubled history, the first turn's frames lost. One single
-  // POST remains: the one in openStream().
+  // Aceeași cheie este refolosită dacă fluxul trebuie redeschis, astfel încât
+  // serverul să nu debiteze aceeași tură de două ori.
+  const idempotencyKey = chatIdempotencyKey(durableRequestId)
 
   // Deduplication set: a reconnect may re-send events we already processed.
   const seenIds = new Set<string>()
   let lastEventId = ''
   let turnId: string | null = null
   let resumeTries = 0
+  let claimPolls = 0
+  let retryingDurableClaim = false
+  let terminalReplay = false
+  let terminalReplayText = ''
+  let deliveredText = ''
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
   let decoder = new TextDecoder()
   let sseBuf = '' // raw SSE text buffer, split on \n\n
@@ -294,9 +287,22 @@ export async function* streamChat(
       // described below never fired.
       let desynced = false
       try {
-        const frame = JSON.parse(json) as ChatControl & { turn?: string; desync?: boolean }
+        const frame = JSON.parse(json) as ChatControl & {
+          turn?: string
+          desync?: boolean
+          replayed?: boolean
+        }
         if (typeof frame.turn === 'string') {
           turnId = frame.turn
+          if (retryingDurableClaim) {
+            retryingDurableClaim = false
+            if (frame.replayed === true) {
+              terminalReplay = true
+            } else {
+              deliveredText = ''
+              onControl?.({ replayRestarted: true })
+            }
+          }
           // The {turn} frame is the FIRST thing the server sends — it doubles as
           // proof of receipt: the message reached the server (delivery check).
           onControl?.({ receipt: true })
@@ -321,7 +327,7 @@ export async function* streamChat(
     try {
       if (turnId && lastEventId) {
         // Reconnect after a drop: resume the same turn from the last seen id.
-        res = await fetch(
+        res = await apiFetch(
           `/api/chat/resume?turn=${encodeURIComponent(turnId)}`,
           {
             method: 'GET',
@@ -331,15 +337,15 @@ export async function* streamChat(
           },
         )
       } else {
-        res = await fetch('/api/chat', {
+        res = await apiFetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           signal,
-          body: (voceAmbianta && contorMoment('cerere trimisă'), JSON.stringify({
+          body: JSON.stringify({
+            idempotencyKey,
             messages,
             image,
-            images,
             imageIsAttachment,
             imageSource: imageIsAttachment ? 'chat' : 'camera',
             coords,
@@ -354,18 +360,13 @@ export async function* streamChat(
             // folosește"): treapta detectată, ca să poți întreba „ce țeavă am?"
             // și Kelion să răspundă REAL + să-și scurteze răspunsul pe țeavă slabă.
             retea: getTeava(),
-            voiceFeatures,
-            faceDescriptor,
-            facePhoto,
-            serverVoiceOff,
             spoken: spoken || undefined,
-            speaker,
             audio,
             voceAmbianta: voceAmbianta || undefined,
             carMode: carMode || undefined,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          })),
+          }),
         })
       }
     } catch (e) {
@@ -390,23 +391,47 @@ export async function* streamChat(
       // right recovery path (auth / paywall / rate limit) instead of a false
       // generic "brain error" on every non-200.
       let code = 'error'
+      let retryAfterMs = 0
       try {
-        const j = (await res.json()) as { error?: string }
+        const j = (await res.json()) as { error?: string; retryAfterMs?: number }
         if (typeof j.error === 'string' && j.error.trim()) code = j.error.trim()
         else if (res.status === 401 || res.status === 403) code = 'unauthorized'
         else if (res.status === 402) code = 'paywall'
         else if (res.status === 429) code = 'rate_limited'
         else if (res.status >= 500) code = 'server_down'
+        if (Number.isFinite(j.retryAfterMs)) retryAfterMs = Number(j.retryAfterMs)
       } catch {
         if (res.status === 401 || res.status === 403) code = 'unauthorized'
         else if (res.status === 402) code = 'paywall'
         else if (res.status === 429) code = 'rate_limited'
         else if (res.status >= 500) code = 'server_down'
       }
+      // The first POST may have reached the server even if its first byte did
+      // not reach us. Poll the SAME durable UUID until its lease publishes a
+      // terminal replay; never manufacture a second logical turn.
+      if (code === 'turn_in_progress' && !turnId && claimPolls < 120) {
+        claimPolls++
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = (): void => {
+            window.clearTimeout(timer)
+            reject(new DOMException('Aborted', 'AbortError'))
+          }
+          const timer = window.setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort)
+            resolve()
+          }, Math.max(250, Math.min(5_000, retryAfterMs || 750)))
+          if (signal?.aborted) {
+            window.clearTimeout(timer)
+            reject(new DOMException('Aborted', 'AbortError'))
+            return
+          }
+          signal?.addEventListener('abort', onAbort, { once: true })
+        })
+        return openStream()
+      }
       throw new Error(code)
     }
 
-    if (voceAmbianta) contorMoment('server a răspuns (headere)')
     reader = res.body.getReader()
     decoder = new TextDecoder()
   }
@@ -432,6 +457,16 @@ export async function* streamChat(
 
   await openStream()
 
+  const livreazaText = (text: string): string => {
+    if (!text) return ''
+    if (terminalReplay) {
+      terminalReplayText += text
+      return ''
+    }
+    deliveredText += text
+    return text
+  }
+
   // WATCHDOG: a dead-but-"open" connection never throws from
   // read() — the turn stayed blocked forever. The server pulses a heartbeat every
   // ≤15s, so 50s without ANY byte = certainly dead thread → resume, and if even
@@ -452,9 +487,19 @@ export async function* streamChat(
       // reconnect and isn't declared offline — its stop was requested.
       if (signal?.aborted || (e instanceof Error && e.name === 'AbortError')) throw new Error('aborted')
       if (await resume()) continue
-      throw new Error(await diagnozaConexiune())
+      // The in-memory SSE ring may be gone after a process restart. Reclaim or
+      // replay the SAME durable UUID through the persistent turn registry.
+      turnId = null
+      lastEventId = ''
+      seenIds.clear()
+      sseBuf = ''
+      textBuf = ''
+      terminalReplay = false
+      terminalReplayText = ''
+      retryingDurableClaim = true
+      await openStream()
+      continue
     } finally {
-      if (voceAmbianta) contorMoment('primul semn în stream')
       window.clearTimeout(watchdog)
     }
     if (chunk.done) break
@@ -468,7 +513,7 @@ export async function* streamChat(
       }
       if (ev.data !== undefined) {
         textBuf += ev.data
-        const out = drain(false)
+        const out = livreazaText(drain(false))
         if (out) yield out
       }
     }
@@ -483,6 +528,18 @@ export async function* streamChat(
     if (ev.data !== undefined) textBuf += ev.data
   }
   textBuf += decoder.decode()
-  const tail = drain(true)
+  const tail = livreazaText(drain(true))
   if (tail) yield tail
+  if (terminalReplay) {
+    if (terminalReplayText.startsWith(deliveredText)) {
+      const missing = terminalReplayText.slice(deliveredText.length)
+      if (missing) yield missing
+    } else if (!deliveredText.startsWith(terminalReplayText)) {
+      // The retained terminal text does not share the delivered prefix. Let the
+      // caller replace the abandoned partial response instead of concatenating
+      // two different generations.
+      onControl?.({ replayRestarted: true })
+      if (terminalReplayText) yield terminalReplayText
+    }
+  }
 }

@@ -5,7 +5,7 @@
 //
 // MĂSURAT (audit 7 aug, traseul /api/chat): pe FIECARE tură de chat se făceau
 // drumuri separate la DB pentru valori care NU depind de întrebare — preferința
-// de limbă, meseria activă, gesturile dezactivate, alegerea de model, preferința
+// de limbă, meseria activă, gesturile dezactivate, preferința
 // de voce (a TREIA citire pe aceeași tabelă `user_prefs` în aceeași tură!) și
 // soldul. Toate se schimbă rar și sunt legate de CONT, nu de ce a întrebat omul.
 //
@@ -26,7 +26,6 @@ export interface StareSesiune {
   speechLang: string | null
   meserieId: number | null
   disabledGestures: string[]
-  modelChoiceKv: string | null
   voicePref: string | null
   /** Soldul, doar pentru useri plătitori (adminul e scutit — nu se citește deloc). */
   balance: number | null
@@ -64,15 +63,6 @@ export function actualizeazaStareSesiune(email: string, camp: Partial<Omit<Stare
   const s = sesiuni.get(email)
   if (!s) return
   sesiuni.set(email, { ...s, ...camp })
-}
-
-/**
- * Uită contul — la deconectare, sau când ceva s-a schimbat din altă parte
- * (meserie schimbată din panou, gesturi debifate de admin, amprentă ștearsă).
- * Următoarea tură recitește o dată, curat.
- */
-export function uitaStareSesiune(email: string): void {
-  sesiuni.delete(email)
 }
 
 /** Uită TOT (setare globală schimbată de admin — ex. gesturile dezactivate). */

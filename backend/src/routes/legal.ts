@@ -1,184 +1,96 @@
 import type { FastifyInstance } from 'fastify'
+import { config } from '../config.js'
 
-// Public Privacy Policy + Terms of Service pages, served as plain crawler-
-// friendly HTML (no JS) at stable URLs. These are exactly what the Google OAuth
-// consent screen links to (App information → Privacy Policy URL / Terms of
-// Service URL) and what Google's app-verification + GDPR require. The Privacy
-// Policy includes the Google API Services "Limited Use" disclosure that
-// restricted scopes (Gmail/Drive/Contacts) need for verification.
+const esc = (value: unknown): string => String(value ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;')
 
-const UPDATED = '23 August 2026'
-const CONTACT = 'adrianenc11@gmail.com'
+const contact = esc(config.product.supportEmail)
+const appOrigin = esc(config.product.publicAppOrigin)
+const appName = esc(config.product.appName)
+const controller = esc(config.privacy.controllerName || config.product.appName)
+const updated = esc(config.privacy.policyUpdated || 'development')
 
 function page(title: string, body: string): string {
+  const safeTitle = esc(title)
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title} — Kelionai</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<title>${safeTitle} — ${appName}</title>
 <style>
   :root { color-scheme: dark; }
-  body { margin:0; background:#0b0d12; color:#e7ecf4; font:16px/1.65 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-  main { max-width:760px; margin:0 auto; padding:48px 22px 80px; }
-  h1 { font-size:30px; margin:0 0 6px; }
-  h2 { font-size:19px; margin:30px 0 8px; color:#cdd7ea; }
-  a { color:#6ea8fe; }
-  .muted { color:#93a0b5; font-size:14px; }
-  .brand { font-weight:600; letter-spacing:-.3px; }
-  ul { padding-left:20px; }
-  li { margin:4px 0; }
-  hr { border:0; border-top:1px solid #1e2430; margin:28px 0; }
-  .nav a { margin-right:16px; }
+  body { margin:0; background:#0b0d12; color:#e7ecf4; font:16px/1.65 system-ui,sans-serif; }
+  main { max-width:780px; margin:0 auto; padding:48px 22px 80px; }
+  h1 { font-size:30px; margin:0 0 6px; } h2 { font-size:19px; margin:30px 0 8px; color:#cdd7ea; }
+  a { color:#8ab4ff; } .muted { color:#93a0b5; font-size:14px; } ul { padding-left:20px; }
+  hr { border:0; border-top:1px solid #1e2430; margin:28px 0; } .nav a { margin-right:16px; }
 </style></head><body><main>
-<p class="brand">Kelionai</p>
-<h1>${title}</h1>
-<p class="muted">Last updated: ${UPDATED}</p>
+<p><strong>${appName}</strong></p><h1>${safeTitle}</h1>
+<p class="muted">Policy version/date: ${updated}</p>
 ${body}
-<hr>
-<p class="nav"><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a><a href="/delete-account">Delete Account</a><a href="/">Home</a></p>
-<p class="muted">Contact: <a href="mailto:${CONTACT}">${CONTACT}</a></p>
+<hr><p class="nav"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/delete-account">Delete account</a><a href="/">Home</a></p>
+<p class="muted">Data controller: ${controller}. Contact: <a href="mailto:${contact}">${contact}</a>.</p>
 </main></body></html>`
 }
 
-const PRIVACY = page(
-  'Privacy Policy',
-  `<p>Kelionai ("the app", "we") is a personal AI assistant available at
-  <a href="https://kelionai.app">kelionai.app</a>. This policy explains what data
-  we process, why, and your rights under the GDPR.</p>
+function privacyPage(): string {
+  return page('Privacy Policy', `
+  <p>${controller} operates Kelionai at <a href="${appOrigin}">${appOrigin}</a>. This notice describes the current product implementation; it does not grant hidden collection rights.</p>
 
-  <h2>Data we process</h2>
+  <h2>Data and purposes</h2>
   <ul>
-    <li><strong>Google account</strong> — your email, name, profile picture and
-      locale, received via "Sign in with Google" (we never see your password).</li>
-    <li><strong>Conversation content</strong> — the messages you type or speak and
-      Kelion's replies, so the assistant can respond and remember context.</li>
-    <li><strong>Google Workspace data you ask Kelion to act on</strong> — e.g.
-      Calendar, Gmail, Drive, Tasks, Contacts — accessed only with your explicit
-      OAuth consent and only to fulfil your request.</li>
-    <li><strong>Device signals</strong> — approximate location (GPS) and camera
-      frames, used only when those features are enabled, to answer
-      location/visual questions. Camera frames are sent per turn, not streamed.</li>
-    <li><strong>Usage + cost metering</strong> — technical counts used to operate
-      and bill the service.</li>
-    <li><strong>Visitors</strong> — when you open the site without signing in,
-      we record your IP address, approximate country/city and a device
-      fingerprint. We use these only to understand where interest comes from
-      and to secure the service — never to identify you personally.</li>
+    <li><strong>Identity and session:</strong> verified account email, display name, picture, locale and an opaque revocable session handle, used to authenticate and provide the service. Google OAuth credentials are encrypted server-side and never placed in the browser cookie.</li>
+    <li><strong>Conversations and memory:</strong> content you submit and assistant replies, plus memories or notes needed for cross-session continuity.</li>
+    <li><strong>Optional microphone, camera, location and voice personalisation:</strong> processed only after the relevant permission or explicit request. A camera image is sent only with a visual turn and is not retained as sensor history or visitor analytics. Ambient-audio hints contain bounded spectral metadata, not a raw recording, and expire after at most ten minutes. An optional spectral voice profile persists only when you explicitly enrol it and can be revoked in Settings. The current product does not enrol new facial biometric profiles; any legacy facial reference is covered by authenticated revocation and account deletion. Neither voice nor face grants administrator access.</li>
+    <li><strong>Google capabilities:</strong> only data needed for the capability you explicitly connect and invoke. Login itself requests identity scopes only.</li>
+    <li><strong>Product billing and provider metering:</strong> GBP minor-unit wallet/ledger entries and provider usage identifiers/token counts. Provider expense is accounted separately in USD micros and never treated as your wallet currency.</li>
+    <li><strong>Minimal analytics and security:</strong> anonymous visits are aggregate daily counters by safe page and coarse country code. We do not create a persistent visitor or device profile, photograph, full-IP record, city/ISP record or advertising profile.</li>
   </ul>
 
-  <h2>How we use it</h2>
+  <h2>Legal bases</h2>
+  <p>We use contract necessity to provide requested account features; consent for optional sensors, biometric personalisation and incremental Google connections; legitimate interests for proportionate service security and reliability; and legal obligation or legal claims for the minimum accounting/audit evidence that must survive account deletion.</p>
+
+  <h2>Processors and transfers</h2>
   <ul>
-    <li>To provide the assistant's replies, voice, vision and Google skills.</li>
-    <li>To keep your conversation continuous across sessions (memory).</li>
-    <li>To operate, secure and improve the service, and meter real cost.</li>
+    <li><strong>OpenAI API:</strong> online language, realtime voice, transcription, speech and media functions. Requests explicitly use <code>store:false</code> where supported. API data is not used for model training by default; OpenAI may keep limited abuse-monitoring data under its published endpoint policy.</li>
+    <li><strong>Google:</strong> sign-in and the Workspace capability you separately connect. Google data is not sold, used for advertising or used to train a general model. Use follows the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including Limited Use.</li>
+    <li><strong>Serper:</strong> receives a search query only when web search is invoked.</li>
+    <li><strong>Dedicated application/DB infrastructure:</strong> hosts encrypted account data and operational records. Offline models run locally on your device and do not require an online AI provider.</li>
   </ul>
 
-  <h2>Google API Services — Limited Use</h2>
-  <p>Kelionai's use and transfer of information received from Google APIs adheres
-  to the
-  <a href="https://developers.google.com/terms/api-services-user-data-policy">Google
-  API Services User Data Policy</a>, including the <strong>Limited Use</strong>
-  requirements. We use Google user data only to provide and improve user-facing
-  features you request; we do not sell it, use it for advertising, or allow humans
-  to read it except where required for security, to comply with law, or with your
-  consent. AI providers process the data solely to generate your response.
-  Data obtained through <strong>restricted scopes</strong> (Gmail and Drive) is
-  used only to provide the features you invoke and is <strong>never</strong> used
-  to train, develop or improve generalized or non-personalized AI/ML models, nor
-  transferred to any third party except the service providers strictly needed to
-  operate the feature at your request.</p>
+  <h2>Retention and deletion</h2>
+  <p>Account content is retained while the account is active or until you delete it. Anonymous aggregate visit counters are retained for ${config.visitor.analyticsRetentionDays} days. On self-service deletion, sessions and provider credentials are revoked, messages, memories, profiles, biometrics, sensor/presence history and pending work are erased. Financial/security rows are pseudonymised under a random, non-reversible erasure id and retained only for legal obligation/claims for up to ${config.privacy.financialRetentionYears} years. Backups are placed beyond use and rotate within ${config.privacy.backupRetentionDays} days; they are not restored to reactivate a deleted account.</p>
 
-  <h2>Sub-processors</h2>
-  <ul>
-    <li><strong>Google (Gemini API)</strong> — processes conversation content (text, and any images/audio you send) to generate replies.</li>
-    <li><strong>Google Cloud</strong> — speech-to-text and text-to-speech (voice), plus the Google skills you invoke.</li>
-    <li><strong>Serper</strong> — processes your web-search queries to return live Google results.</li>
-    <li><strong>Dedicated VPS server (EU)</strong> — hosting and database.</li>
-  </ul>
+  <h2>Your rights</h2>
+  <p>You may request access, correction, portability, restriction, objection or erasure, and withdraw consent without affecting earlier lawful processing. Delete your account in-app as described at <a href="/delete-account">Delete account</a>. You may also contact <a href="mailto:${contact}">${contact}</a> and complain to your supervisory authority. Google access can also be revoked from <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.</p>`)
+}
 
-  <h2>Retention</h2>
-  <p>Conversation history, learned memory and metering are retained while your
-  account is active. You can request deletion at any time and we will erase your
-  data without undue delay.</p>
+function termsPage(): string {
+  return page('Terms of Service', `
+  <p>By using Kelionai you ask an AI-assisted service to process your prompts and, when separately authorised, act on connected services.</p>
+  <h2>Acceptable use</h2><p>Use the service lawfully; do not abuse access controls, overload paid services or submit content you have no right to process.</p>
+  <h2>AI output</h2><p>AI output can be inaccurate. Verify high-impact medical, legal, financial or safety decisions with a qualified person.</p>
+  <h2>Payments</h2><p>Product credits and provider expenses are separate. An administrator account has zero Kelion product debit, while actual provider usage remains internally metered. A payment is credited only after an authoritative, verified settlement; a static payment link is not automatic settlement.</p>
+  <h2>Availability</h2><p>The service may change or be unavailable. Material policy changes will receive a new policy version/date.</p>`)
+}
 
-  <h2>Your rights (GDPR)</h2>
-  <p>You may request access, correction, export or deletion of your data, and may
-  withdraw OAuth consent at any time in your
-  <a href="https://myaccount.google.com/permissions">Google Account</a>. To exercise
-  any right, contact <a href="mailto:${CONTACT}">${CONTACT}</a>.</p>`,
-)
-
-const TERMS = page(
-  'Terms of Service',
-  `<p>By using Kelionai at <a href="https://kelionai.app">kelionai.app</a> you agree
-  to these terms.</p>
-
-  <h2>The service</h2>
-  <p>Kelionai is a personal AI assistant (chat, voice, vision and Google skills).
-  Access is currently restricted to invited accounts while the app is in testing.</p>
-
-  <h2>Acceptable use</h2>
-  <ul>
-    <li>Use the assistant lawfully and do not attempt to abuse, overload or break it.</li>
-    <li>You are responsible for the actions you ask Kelion to take on your accounts
-      (e.g. sending an email or creating an event).</li>
-  </ul>
-
-  <h2>AI output</h2>
-  <p>Responses are generated by AI and may be inaccurate. Verify important
-  information; do not rely on the assistant for professional, legal, medical or
-  financial advice.</p>
-
-  <h2>Availability & changes</h2>
-  <p>The service is provided "as is", without warranty, and may change or be
-  unavailable. We may update these terms; continued use means acceptance.</p>
-
-  <h2>Contact</h2>
-  <p>Questions: <a href="mailto:${CONTACT}">${CONTACT}</a>.</p>`,
-)
-
-// Account + data deletion page (Google Play Data safety requires a public URL
-// that shows the steps to delete an account and what data is removed/kept).
-const DELETE_ACCOUNT = page(
-  'Delete your account',
-  `<p>This page explains how to delete your <span class="brand">Kelionai</span>
-  account and the data associated with it. Kelionai is a personal AI assistant
-  available at <a href="https://kelionai.app">kelionai.app</a>.</p>
-
-  <h2>How to request deletion</h2>
-  <p>Email <a href="mailto:${CONTACT}">${CONTACT}</a> <strong>from the Google
-  email address you sign in with</strong>, using the subject line
-  <strong>"Delete my account"</strong>. That is all we need — sending from your
-  own account lets us verify the request is really yours.</p>
-  <p>We erase your data and reply to confirm once it is done. You do not need to
-  be signed in, pay anything, or install anything to make the request.</p>
-
-  <h2>What is deleted</h2>
-  <ul>
-    <li>Your profile — name, email, profile picture and locale.</li>
-    <li>Your conversation history and the memory Kelion learned about you.</li>
-    <li>Any stored Google OAuth tokens (your Calendar/Gmail/Drive access is revoked).</li>
-    <li>Usage and cost-metering records tied to your account.</li>
-  </ul>
-
-  <h2>What is kept, and for how long</h2>
-  <p>We delete your personal data without undue delay and, in any case, within
-  <strong>30 days</strong> of your request. Residual copies inside encrypted
-  backups are purged on our normal rotation, within <strong>90 days</strong>. We
-  keep only the minimum records the law requires (for example billing/tax); all
-  other personal data is removed.</p>
-
-  <p>You can also revoke Kelionai's access to your Google account at any time in
-  your <a href="https://myaccount.google.com/permissions">Google Account
-  permissions</a>.</p>`,
-)
+function deletionPage(): string {
+  return page('Delete your account', `
+  <p>Kelionai provides authenticated self-service account deletion.</p>
+  <h2>Steps</h2>
+  <ol><li>Sign in and, if requested, sign in again so the confirmation is recent.</li><li>Open Settings → Privacy → Delete account.</li><li>Enter the exact confirmation word <strong>DELETE</strong> and confirm.</li></ol>
+  <p>The server immediately revokes application sessions, attempts Google OAuth revocation, removes the local credential, and performs one transactional erase/pseudonymisation workflow. The response is a receipt listing deleted categories, any records retained with reason/expiry, provider-revocation status and the backup purge date.</p>
+  <h2>Retained minimum</h2><p>Settled financial and necessary security/audit evidence is not represented as fully erased. It is detached from your email under a random erasure id and retained only for the legal period shown in the receipt (up to ${config.privacy.financialRetentionYears} years). Encrypted backup copies remain beyond use only until the configured ${config.privacy.backupRetentionDays}-day rotation.</p>
+  <p>If Google could not confirm remote revocation during the request, the receipt says <code>manual_required</code>; revoke Kelionai from <a href="https://myaccount.google.com/permissions">Google Account permissions</a>. Local access is removed regardless.</p>`)
+}
 
 export async function legalRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/privacy', async (_req, reply) =>
-    reply.type('text/html; charset=utf-8').send(PRIVACY),
-  )
-  app.get('/terms', async (_req, reply) => reply.type('text/html; charset=utf-8').send(TERMS))
-  app.get('/delete-account', async (_req, reply) =>
-    reply.type('text/html; charset=utf-8').send(DELETE_ACCOUNT),
-  )
+  app.get('/privacy', async (_req, reply) => reply.type('text/html; charset=utf-8').send(privacyPage()))
+  app.get('/terms', async (_req, reply) => reply.type('text/html; charset=utf-8').send(termsPage()))
+  app.get('/delete-account', async (_req, reply) => reply.type('text/html; charset=utf-8').send(deletionPage()))
 }

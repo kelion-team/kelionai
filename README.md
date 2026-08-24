@@ -1,96 +1,95 @@
-# Kelionai
+# KelionAI
 
-KelionAI v3 — a clean, independent rewrite. 3D voice/chat AI assistant (Jarvis-style).
+KelionAI este un asistent conversațional cu text, voce, vedere la cerere, memorie
+controlată de utilizator și continuitate offline. Acest repository este sursa
+canonică pentru aplicația web, API, clienții nativi și banda Constructor.
 
-> **Canonical project location (permanent):** `C:\Users\adria\Kelionai`
-> This is a brand-new project with **zero** relationship to the old KelionAI app.
+## Limite obligatorii
 
-## Spec / contract
+- **Un singur creier online:** numai API-urile oficiale OpenAI. Google este
+  folosit pentru identitate și, când utilizatorul autorizează explicit, pentru
+  funcții Workspace; nu este furnizor AI.
+- **Offline real:** modelele locale pentru limbaj, transcriere și voce rulează
+  pe dispozitiv și nu devin fallback-uri cloud ascunse.
+- **Secrete numai pe server:** cheia OpenAI nu intră în browser, aplicații
+  native, Git, loguri sau joburi Constructor.
+- **Admin prin Google:** biometria, vocea și fața pot personaliza experiența,
+  dar nu acordă privilegii administrative.
+- **Constructor izolat:** autentificarea Codex se face prin fluxul oficial
+  `codex login` în worker-ul de încredere. Aplicația publică doar pune joburi
+  în coadă și afișează dovezile lor.
+- **Fără publicare directă:** job → worktree dedicat → `codex exec` → porți
+  blocante → PR → master → deploy verificat.
 
-The full, locked product + engineering spec lives in Claude's project memory
-(`kelion-rewrite-spec.md`). It is the authoritative contract — build to it exactly.
+Regulile complete pentru orice agent sau contribuitor sunt în
+[`AGENTS.md`](AGENTS.md).
 
-## Current status
+## Arhitectură
 
-Live: **Google login** (allowlisted to `adrianenc11@gmail.com`, the permanent sole admin),
-the **3D avatar**, and **Brain v1** — streaming chat with Claude in a text tab, plus a
-first **voice** increment (browser Web Speech API: Kelion speaks replies and listens,
-with a **continuous-listening** toggle; voice and text are delivered in parallel).
-
-Voice today: Google Chirp 3 HD + the Gemini Live full-duplex session (LiveKit
-was removed from the codebase — any mention of it is history). The `speak()`
-layer stays isolated from the chat UI.
-
-## Stack
-
-| Layer | Tech |
+| Zonă | Rol |
 | --- | --- |
-| Frontend | React + Vite + TypeScript + React Three Fiber |
-| Backend | Node + Fastify + TypeScript |
-| Auth | Google OAuth (Sign in with Google) + signed session cookie |
-| DB | PostgreSQL (later milestones) |
-| Deploy | VPS propriu, domain `kelionai.app` |
+| `frontend/` | React, Vite, avatar 3D, PWA și kitul offline |
+| `backend/` | Fastify, OpenAI Responses/Realtime, autorizare, memorie și ledger |
+| PostgreSQL | stare persistentă, consimțăminte, joburi și evidențe financiare |
+| `deploy/codex-worker.mjs` | worker privat pentru Constructor; nu este expus web |
+| `deploy/` | containere, systemd, Caddy, backup, porți PR și deploy |
+| `android/`, `ios/`, `desktop/` | clienți nativi cu politici de platformă |
 
-## Engineering rules (non-negotiable)
+## Bani și costuri
 
-1. Fix errors by **rewriting** the module, never band-aid patches.
-2. **Stop & repair** gate — no progress while typecheck/lint/tests are red.
-3. **200-only** — every endpoint check must return HTTP 200; anything else goes back to repair.
-4. **Anti-dead-code** — knip/ts-prune in CI; verify before deleting.
+- Pentru admin, debitul în produsul Kelion este întotdeauna **0**.
+- Consumul OpenAI al adminului rămâne o cheltuială internă Kelion și este
+  înregistrat într-un ledger separat, fără a pretinde că abonamentul ChatGPT
+  plătește API-ul aplicației.
+- La cumpărarea creditelor de către clienți, backend-ul conservă suma în unități
+  monetare minore și aplică exact regula **75% credit utilizabil / 25% Kelion**.
+- Tarifele, modelele și limitele vin din configurația validată sau din baza de
+  date; interfața nu inventează valori de rezervă.
 
-## Local development
+## Dezvoltare locală
+
+Cerințe: Node.js 22, PostgreSQL și npm. Copiază
+`backend/.env.example` în `backend/.env` și completează doar valorile locale;
+nu comite fișierul rezultat.
 
 ```bash
-# backend
-cd backend && npm install && npm run dev
-# frontend (separate terminal)
-cd frontend && npm install && npm run dev
+npm --prefix backend ci
+npm --prefix frontend ci
+
+# terminal 1
+npm --prefix backend run dev
+
+# terminal 2
+npm --prefix frontend run dev
 ```
 
-Create `backend/.env` from `backend/.env.example` first.
-
-## Database backup & restore
-
-English is the default language for ops docs.
-
-### Automatic schedule
-
-| Item | Detail |
-| --- | --- |
-| Script | `deploy/backup.sh` → `/root/kelion/backup.sh` |
-| When | **Sunday 03:00 Europe/London** (`CRON_TZ=Europe/London`) |
-| Files | `/root/kelion/backups/kelion-YYYY-MM-DD_HHMM.sql.enc` |
-| Pipeline | `pg_dump` → `gzip` → AES-256-CBC (PBKDF2) |
-| Key | `/root/kelion/backup.key` (root only) |
-| Retention | 60 days |
-
-**Code versions** (git tags `backup-…`) ≠ **database dumps** (`.sql.enc`). Admin → Recovery = code. Encrypted files = database.
-
-### From Kelion chat (owner)
-
-| Ask | Tool |
-| --- | --- |
-| List DB backups | `list_db_backups` |
-| List app versions | `list_app_versions` |
-| Save code checkpoint | `save_app_version` |
-| Run DB backup now | `run_runbook` → `backup-db` |
-| Rehearse restore (safe) | `run_runbook` → `proba-restaurare` |
-
-Show results with `show_document` when asked. Production DB restore is destructive — only on explicit owner order. Prefer `proba-restaurare` first.
-
-### SSH restore recipe
-
-Always **gunzip** after decrypt (dump is gzipped before encryption):
+Verificările minime înainte de PR:
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/root/kelion/backup.key \
-  -in /root/kelion/backups/kelion-YYYY-MM-DD_HHMM.sql.enc \
-  | gunzip > /tmp/kelion-restore.sql
-# Restore into a throwaway DB first; never production by default.
+npm --prefix backend run typecheck
+npm --prefix backend test
+npm --prefix backend run lint
+npm --prefix frontend run build
+npm --prefix frontend run lint
+node scripts/inventar-audit.mjs
+node scripts/verifica-creier-unic.mjs
+node scripts/verifica-hardcodari.mjs
+node scripts/verifica-exporturi.mjs
+node scripts/identifica-teste-moarte.mjs
+node scripts/verifica-sintaxa.mjs
+node scripts/verifica-workflow-uri-sigure.mjs
+bash scripts/verifica-secrete.sh --worktree --dist
 ```
 
-### User manual vs admin
+CI și worker-ul trebuie să ruleze aceleași porți în mod blocant. Inventarul
+hash-ează fiecare fișier versionat sau nou, neignorat, și eșuează dacă apare o
+familie de fișiere neclasificată.
 
-- **Users**: in-app manual section *Your data and continuity* (no paths, keys, or restore commands).
-- **Admin**: chat tools above, Admin → Recovery, this README.
-- **Default language**: English (manual translates from the English source).
+## Operare
+
+- Instalare, rollback și dovada publicării: [`deploy/DEPLOY.md`](deploy/DEPLOY.md)
+- Incidente, backup și restaurare: [`deploy/RUNBOOKS.md`](deploy/RUNBOOKS.md)
+
+Restaurarea bazei de date, rotația secretelor, rescrierea istoricului Git și
+publicarea în producție sunt operații controlate. Niciuna nu este efectuată de o
+probă locală sau de aplicația publică.

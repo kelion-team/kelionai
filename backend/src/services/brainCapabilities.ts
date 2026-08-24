@@ -1,3 +1,5 @@
+import { config } from '../config.js'
+
 // ── THE SINGLE REGISTRY OF KELION'S CAPABILITIES (SINGLE BRAIN §5) ───────────
 // Adrian, Jul 29: "if the brain doesn't REALLY store everything the software
 // has, there's no point". This is the SINGLE source of truth: every function
@@ -45,10 +47,10 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'show_document', category: 'afisare', does: 'pune un text/rezultat pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'run_web_app', category: 'afisare', does: 'rulează o pagină scrisă de el (izolat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'generate_image', category: 'afisare', does: 'generează o imagine', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'generate_video', category: 'afisare', does: 'GENERARE VIDEO: face clipul cerut (Veo, 1-3 minute)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'generate_video', category: 'afisare', does: 'generează video prin serviciul OpenAI configurat sau raportează indisponibilitatea', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'vede_video', category: 'vedere', does: 'vede un clip YouTube și extrage ideile/informațiile (fișă catalogată + învățată)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'lista_tarife', category: 'afisare', does: 'citește meniul VIU de prețuri al extra-serviciilor (cifra spusă = cifra taxată)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'studioul_de_clipuri', category: 'afisare', does: 'planul Studioului de Clipuri: rețetă + pași + prompt șlefuit + nume sugestiv; calea gratis (Google Flow) sau plătită (Veo)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'studioul_de_clipuri', category: 'afisare', does: 'plan de clip: scenariu, pași și prompt pentru generatorul OpenAI configurat', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'open_app_view', category: 'afisare', does: 'deschide panourile aplicației', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'proceseaza_date', category: 'afisare', does: 'procesează date tabelare (CSV/JSON): parse + agregări/profil, arătate pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
@@ -89,52 +91,19 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'get_time', category: 'google', does: 'ora/data', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'lookup_address', category: 'google', does: 'adresa+codul poștal din coordonate (sau invers)', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
-  // 2.3 Own code & autonomy (constructor + expert) — admin
-  { name: 'list_source', category: 'cod', does: 'listează directoare din codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'read_source', category: 'cod', does: 'citește un fișier din codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'search_source', category: 'cod', does: 'caută în tot codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'build_software', category: 'cod', does: 'dă ordinul constructorului DEVIN (sesiune izolată → PR pe master, ownerul aprobă)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  // 2.3 Constructor boundary and bounded diagnostics — admin
+  { name: 'build_software', category: 'cod', does: 'pune în coadă un ordin validat pentru workerul Codex separat', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_status', category: 'cod', does: 'starea ordinelor de construcție', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'repo_write', category: 'cod', does: 'scrie cod în repo', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'repo_open_pr', category: 'cod', does: 'deschide un PR', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'repo_merge_pr', category: 'cod', does: 'face merge unui PR', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'request_repair', category: 'cod', does: 'notează un ordin de reparație durabil', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'list_app_versions', category: 'ops', does: 'list saved app code recovery versions', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'list_db_backups', category: 'ops', does: 'list encrypted database backups on the VPS', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'save_app_version', category: 'ops', does: 'save a code recovery point on master', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'run_runbook', category: 'ops', does: 'operații VPS (diagnostic/restart/backup...)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'runbook_status', category: 'ops', does: 'starea rulărilor', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'runbook_log', category: 'ops', does: 'jurnalul unei rulări', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  // HIS SETTINGS, DONE BY HIM (Adrian, Jul 30: "he should create the secrets
-  // and put them where they belong, it's mine and I allow him full access").
-  // Until today, every new key meant hours of the human's life in portals; and
-  // I kept telling him "I don't have a tool" — a reason to BUILD the tool, not
-  // to send him off.
-  { name: 'secret_pune', category: 'ops', does: 'își pune singur o cheie în secretele repo-ului (valoarea nu se vede niciodată)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'secret_lista', category: 'ops', does: 'ce chei există (doar numele — GitHub nu dă valorile)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'secret_publica', category: 'ops', does: 'duce cheile pe server și repornește aplicația', chat: true, voice: false, voiceViaBrain: true, admin: true },
   // THE OWNER'S REQUIREMENTS (Jul 30): the table existed, but nobody filled
   // it — requirements stayed in chat and got lost. These three fill it from
   // speech.
   { name: 'cerinta_noua', category: 'ops', does: 'notează pe loc ce a cerut ownerul, cu criteriul de acceptare', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'cerinte_lista', category: 'ops', does: 'unde stă fiecare cerință (nouă/analizată/în lucru/livrată/verificată)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'cerinta_prioritate', category: 'ops', does: 'cât de urgentă e o cerință — ordinea o dă ownerul', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  // THE CARD AT PROVIDERS (Jul 31): puts the owner's card on the provider's
-  // page WITHOUT ever seeing the value, and only in the window after his voice
-  // was recognized. "That was the requirement that proved real autonomy."
-  { name: 'card_stare', category: 'ops', does: 'ce câmpuri de card sunt configurate (nu valorile) și dacă vocea e recunoscută', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'card_completeaza', category: 'ops', does: 'scrie un câmp de card în pagină fără să-i vadă valoarea', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'card_gata', category: 'ops', does: 'închide sesiunea discretă de card', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'db_tables', category: 'cod', does: 'vede tabelele bazei de date', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'db_query', category: 'cod', does: 'interoghează baza de date', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'system_health', category: 'cod', does: 'sănătatea proprie', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'server_ops', category: 'cod', does: 'rulează comenzi VPS fixe', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  // P7 (owner, 15 aug): „toate datele din toate PR-urile" — vizibile creierului.
-  { name: 'pr_lista', category: 'cod', does: 'citește toate PR-urile de pe GitHub (stare, merged, ramură, sha)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'server_logs', category: 'cod', does: 'jurnalele serverului', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'client_errors', category: 'cod', does: 'erorile din browser (F12) ale utilizatorilor', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'ask_brain', category: 'cod', does: 'raționament profund (cod/analiză)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'propose_tool', category: 'cod', does: 'își cere singur o unealtă nouă', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.4 Live browser (9) — admin
   { name: 'browser_open', category: 'browser', does: 'deschide un site', chat: true, voice: false, voiceViaBrain: true, admin: false },
@@ -155,13 +124,11 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'cauta_istoric', category: 'memorie', does: 'caută în istoricul complet de chat (voce+scris) după cuvinte-cheie', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'dovada_faptelor', category: 'memorie', does: 'scoate dovada SALVATĂ a faptelor (jurnalul operațional): obiectiv + stare finală + evenimentele măsurate ale uneltelor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'forget_memory', category: 'memorie', does: 'uită o memorie', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'read_inbox', category: 'memorie', does: 'își citește propria cutie poștală (contact@kelionai.app)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'read_inbox', category: 'memorie', does: `își citește propria cutie poștală (${config.product.supportEmail})`, chat: true, voice: false, voiceViaBrain: true, admin: true },
 
   // 2.6 Sight & place
   { name: 'look', category: 'vedere', does: 'camera (vede utilizatorul / ce i se arată)', chat: false, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'observatii_vizuale', category: 'vedere', does: 'ultimele observații vizuale continue (ce a văzut Kelion în ultimele 5 min — mișcare, locație, timestamp)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'evenimente_sonore', category: 'auz', does: 'evenimente sonore ambientale (alarmă, sonerie, ciocănit, plâns, spargere — ce a auzit Kelion în ultimele 10 min)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'stare_emotionala', category: 'emotie', does: 'starea emoțională a utilizatorului din expresia facială (vesel, supărat, surprins, trist, calm, stresat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'evenimente_sonore', category: 'auz', does: 'indicii FFT ambientale neconcludente (zgomot brusc, posibilă conversație/muzică, liniște)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'get_monitor', category: 'vedere', does: 'ce e FAPTIC pe monitor (conținutul tabului activ)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'click_monitor', category: 'vedere', does: 'dă click la coordonate x,y pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'zoom_monitor', category: 'vedere', does: 'mărește/micșorează (zoom) pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
@@ -185,10 +152,6 @@ export const CAPABILITIES: readonly Capability[] = [
   // judecă pe allCapabilityNames), iar legea sursei unice cere oricum ca
   // registrul să țină REALLY everything.
   { name: 'apeleaza_user', category: 'diverse', does: 'apelează alt utilizator Kelion (canal audio full-duplex cu traducere live)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'allow_guest_voice', category: 'diverse', does: 'deschide o fereastră limitată în care altă persoană poate vorbi cu Kelion (amprenta ei intră ca PENDING)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'approve_guest_voice', category: 'diverse', does: 'titularul confirmă păstrarea amprentei unui oaspete', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'forget_guest', category: 'diverse', does: 'uită amprenta unui oaspete', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'media_control', category: 'ops', does: 'controlează redarea media la nivel de sistem (playerctl): verifică/oprește ce rulează', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
   // LEGATE DAR NEÎNREGISTRATE (5 aug, ordinul „leagă tot la creier"): astea 15
   // erau OFERITE creierului și funcționale, dar lipseau din registru — deci
@@ -196,40 +159,12 @@ export const CAPABILITIES: readonly Capability[] = [
   // unelte"). Acum sunt în sursa unică, deci intră în inventar.
   { name: 'cheama_agent', category: 'cod', does: 'deleagă o sarcină unui agent specialist (din cei 91)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'agent_nou', category: 'cod', does: 'creează un agent specialist NOU când lipsește tipul (instant, fără publicare)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  // Suita de măsurare (8 aug): comandate în prompt, dar uitate din rawTools-ul
-  // chatului până pe 10 aug — acum și în registru ca inventarulMeu să le numere.
-  { name: 'ruleaza_portile', category: 'cod', does: 'rulează porțile reale (tsc/teste/lacăt/sintaxă/build) și întoarce rezultatul MĂSURAT', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'jurnal_masuratori', category: 'cod', does: 'ultimele măsurători făcute (metoda, ora, ce a ieșit) — dovada pentru „de unde știi"', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'vaneaza_buguri', category: 'cod', does: 'caută automat erorile reale ale userilor + tipare de bug + tipuri/teste/sintaxă', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'panou_cod', category: 'cod', does: 'deschide panoul constructorului cu un ordin de build', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'constructor_manage', category: 'cod', does: 'gestionează ordinele constructorului (reia/oprește/curăță)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'constructor_command', category: 'cod', does: 'rulează o comandă shell direct pe server (canal de comandă Kelion→constructor)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'autoverificare', category: 'cod', does: 'se probează pe el însuși, LIVE și real, pe TOATE funcțiile din registru: citirile executate real, efectele dry-run; raportează starea MĂSURATĂ (merg/stricate/nu-pot-verifica) + de ce nu merge fiecare', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'jules_repos', category: 'cod', does: 'listează repo-urile legate la Jules (agentul async Google)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'jules_task', category: 'cod', does: 'dă o sarcină lui Jules (lucrează în VM Google, deschide PR)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'jules_status', category: 'cod', does: 'starea unei sesiuni Jules', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'admin_vezi', category: 'ops', does: 'citește o secțiune din admin (finance/users/money-circuit...)', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'admin_schimba', category: 'ops', does: 'modifică ceva din admin din conversație', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'memorie_pune', category: 'memorie', does: 'scrie o cheie în memoria de proiect (persistentă)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'memorie_ia', category: 'memorie', does: 'citește o cheie din memoria de proiect', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'memorie_lista', category: 'memorie', does: 'listează memoria de proiect', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'stare_masurata', category: 'cod', does: 'observabilitatea completă măsurată (starea reală a sistemului)', chat: true, voice: false, voiceViaBrain: true, admin: true },
 ] as const
 
-/** The names of all capabilities (the single source). */
-export function allCapabilityNames(): string[] {
-  return CAPABILITIES.map((c) => c.name)
-}
-
-/** The capabilities the CHAT has. */
-export function chatCapabilityNames(): string[] {
-  return CAPABILITIES.filter((c) => c.chat).map((c) => c.name)
-}
-
-/** The capabilities the VOICE has. */
-export function voiceCapabilityNames(): string[] {
-  return CAPABILITIES.filter((c) => c.voice).map((c) => c.name)
-}
 // EXECUȚIA NU PRESUPUNE INDEPENDENȚĂ. Modelul primește rezultatele unei runde
 // împreună, dar poate cere în aceeași rundă două scrieri care se contrazic sau
 // doi pași dependenți de browser. Doar citirile enumerate explicit rămân
@@ -240,44 +175,26 @@ const UNELTE_CITIRE_PARALELE = new Set<string>([
   'translate_text', 'wikipedia_lookup', 'convert_currency', 'get_time',
   'get_recent_emails', 'read_email', 'get_calendar_events', 'get_drive_files',
   'read_drive_file', 'get_tasks', 'search_contacts',
-  'list_source', 'read_source', 'search_source', 'constructor_status',
-  'list_app_versions', 'list_db_backups', 'runbook_status', 'runbook_log',
-  'secret_lista', 'cerinte_lista', 'cerinta_prioritate', 'db_tables',
-  'system_health', 'pr_lista', 'server_logs', 'client_errors', 'stare_masurata',
-  'jurnal_masuratori', 'list_memories', 'cauta_istoric', 'dovada_faptelor', 'get_monitor',
+  'constructor_status', 'cerinte_lista', 'cerinta_prioritate',
+  'system_health', 'server_logs', 'client_errors', 'stare_masurata',
+  'list_memories', 'cauta_istoric', 'dovada_faptelor', 'get_monitor',
   'get_mouse_position', 'get_real_cost', 'list_updates', 'episoade_promo',
   'lista_tarife', 'vede_video',
   // C7 (marea verificare, 22 aug) — citiri VERIFICATE pe handler, nu pe
   // registru: youtube_search (Serper + sonde de redabilitate; screen_url e
   // doar date întoarse — cadrul de monitor se emite la locul de push, ca la
   // get_weather/maps_search de mai sus), list_notes (SELECT pe notițe),
-  // memorie_ia/memorie_lista (citiri din memoria de proiect), admin_vezi
-  // (GET pe bucla locală cu legitimație — poarta de admin rămâne poartă).
+  // memorie_ia/memorie_lista sunt citiri din memoria de proiect.
   // studioul_de_clipuri, propus tot de C7, a fost RESPINS la verificare:
   // handlerul lui scrie cadrul {scenariu} direct pe fir, iar clientul
   // salvează scenariul și re-armează butonul 🎬 (generarea pornește la
   // click-ul omului — P32) — interacțiune de browser, rămâne în coada efect.
-  'youtube_search', 'list_notes', 'memorie_ia', 'memorie_lista', 'admin_vezi',
+  'youtube_search', 'list_notes', 'memorie_ia', 'memorie_lista',
 ])
 
 /** Grupul de exclusivitate pentru o unealtă de chat. `undefined` înseamnă o
  *  citire explicit verificată drept independentă; orice altă unealtă împarte
  *  coada `efect` cu scrierile și interacțiunile de browser/monitor. */
-/** SQL-ul e o CITIRE pură? Trei condiții, toate necesare (verificatorul din
- *  22 aug a demonstrat că prefixul singur MINTE): prefix de citire, niciun
- *  cuvânt de scriere NICĂIERI (WITH poate împacheta INSERT — Postgres 9.1+;
- *  EXPLAIN ANALYZE chiar execută DML-ul; SELECT INTO creează tabel) și fără
- *  a doua instrucțiune (simple query protocol le-ar rula pe amândouă).
- *  Direcția erorii e cea sigură: un SELECT cu literalul '%delete%' pică spre
- *  „scriere" — pierde doar reluarea și primește avertisment, nu minte. */
-export function eSqlDeCitire(sql: string): boolean {
-  return (
-    /^\s*(select|with|show|explain)\b/i.test(sql) &&
-    !/\b(insert|update|delete|merge|drop|truncate|alter|create|grant|revoke|copy|call|do|vacuum|refresh|into)\b/i.test(sql) &&
-    !/;\s*\S/.test(sql)
-  )
-}
-
 export function grupaExecutieUnealta(nume: string): 'efect' | undefined {
   return UNELTE_CITIRE_PARALELE.has(nume) ? undefined : 'efect'
 }
@@ -308,8 +225,7 @@ export function inventarulMeu(doarAdmin = true): string {
     `CE POȚI, CONCRET — inventarul tău complet (${vizibile.length} capabilități, ` +
     `toate ACTIVE și apelabile direct, chiar acum):\n${randuri.join('\n')}\n` +
     `Nu ceri voie ca să folosești ce e în lista asta și nu spui „nu pot" pentru ` +
-    `ceva ce e aici. Dacă îți lipsește ceva ce NU e în listă, notează-l cu log_unsupported_request ` +
-    `sau cere-ți unealta cu propose_tool — nu te opri la „nu am".\n` +
+    `ceva ce e aici. Dacă îți lipsește ceva ce NU e în listă, notează-l cu log_unsupported_request.\n` +
     // ANTI-NEGARE (Adrian, 5 aug: „kelion îmi zice că nu are unelte" — creierul
     // își nega propriul inventar). Regula e ABSOLUTĂ și pe negativ, pentru că
     // modelul o încălca pe cea pozitivă de mai sus:
@@ -318,15 +234,4 @@ export function inventarulMeu(doarAdmin = true): string {
     `Ai ${vizibile.length} unelte REALE, conectate — negarea lor e o MINCIUNĂ către om. ` +
     `Când ești întrebat ce poți, enumeri din inventar; când sarcina cere o unealtă, O CHEMI, nu vorbești despre ea.`
   )
-}
-
-/** DORMANT ON VOICE: they exist (on chat) but voice can't reach them. The
- *  §1/§6 target is for this list to become EMPTY. We expose it, not hide it. */
-export function dormantOnVoice(): Capability[] {
-  return CAPABILITIES.filter((c) => c.chat && !c.voice && !c.voiceViaBrain)
-}
-
-/** DORMANT ON CHAT: they exist (on voice) but chat can't reach them. */
-export function dormantOnChat(): Capability[] {
-  return CAPABILITIES.filter((c) => c.voice && !c.chat)
 }

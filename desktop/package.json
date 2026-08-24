@@ -2,14 +2,16 @@
   "name": "kelionai-desktop",
   "version": "1.0.0",
   "private": true,
-  "description": "Kelionai desktop shell — native window around the live app (always up to date, no store re-upload needed for app changes).",
+  "description": "Kelionai desktop cu bundle web local și capabilități Tauri minime.",
   "scripts": {
     "icon": "node make-icon.mjs && tauri icon src-tauri/icons/source.png -o src-tauri/icons",
-    "dev": "tauri dev",
-    "build": "tauri build"
+    "bundle:web": "npm --prefix ../frontend run build && node ../scripts/genereaza-config-platforme.mjs --target desktop && node ../scripts/pregateste-bundle-nativ.mjs --target desktop",
+    "dev": "node ../scripts/genereaza-config-platforme.mjs --target desktop && tauri dev",
+    "build": "node ../scripts/genereaza-config-platforme.mjs --target desktop && tauri build",
+    "verify": "node ../scripts/verifica-clienti-nativi.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
-    "sharp": "^0.33"
+    "@tauri-apps/cli": "2.11.4",
+    "sharp": "0.35.3"
   }
 }

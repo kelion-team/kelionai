@@ -55,10 +55,9 @@ describe('jurnal operațional — legat în ciclul chatului', () => {
   })
 
   it('nu lasă ramurile rapide în afara jurnalului', () => {
-    expect(chat).toMatch(/const paywallTaskId = randomUUID\(\)/)
-    expect(chat).toMatch(/code: 'insufficient_credit'/)
     expect(chat).toMatch(/const commandTaskId = randomUUID\(\)/)
     expect(chat).toMatch(/code: 'client_ack_missing'/)
+    expect(chat).toMatch(/completeChatTurn\(\{[\s\S]*?code: `instant_\$\{frameKey\}`/)
     expect(chat).toMatch(/code: 'chat_processing_failed'/)
   })
 })

@@ -3,8 +3,7 @@
 // getAdminAccount used to convert the REAL provider costs (USD, from
 // cost_events) into £ with the hand-written USD_TO_CURRENCY rate (default
 // 0.8) before handing them to the admin panel. A converted figure is not a
-// measured one — punga.ts killed the same lie for the pocket ("OpenRouter
-// $9.99" in the header vs "Punga £7.99" in the Money tab, the SAME money).
+// measured one; the product wallet and provider expense are distinct ledgers.
 //
 // ACTUALIZAT (auditul admin, 3 aug): `getAdminAccount` a fost ȘTEARSĂ de tot —
 // `spent` era EXACT suma pe care tabul Bani o citește deja din getCostSummary

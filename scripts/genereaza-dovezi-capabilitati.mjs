@@ -112,7 +112,7 @@ if (PROBES && fs.existsSync(PROBES)) {
   probeByName = new Map(rows.map((row) => [row.capability, row]))
 }
 
-const destructive = /^(send_email|delete_|complete_task|edit_|create_|add_|repo_write|repo_open_pr|repo_merge_pr|build_software|save_|run_runbook|server_ops|secret_|cerinta_|card_|constructor_manage|constructor_command|jules_task|admin_schimba|memorie_pune|forget_|approve_|allow_)/
+const destructive = /^(send_email|delete_|complete_task|edit_|create_|add_|repo_write|repo_open_pr|repo_merge_pr|build_software|save_|run_runbook|server_ops|secret_|cerinta_|card_|constructor_manage|constructor_command|admin_schimba|memorie_pune|forget_|approve_|allow_)/
 const capabilityRows = capabilities.map((capability) => {
   const implementationRefs = [...exactRefs(codeIndex, capability.name), ...(semanticImplementations.get(capability.name) || [])]
   const directTests = exactRefs(testIndex, capability.name, 10).map((row) => row.ref)

@@ -1,10 +1,7 @@
 // ── SERPER — the web search the key was paid for ─────────────────────────────
 //
-// SERPER_API_KEY existed in env AND in config since Jul 30, but web_search went
-// ONLY through the OpenRouter `web` plugin — whose free model returns
-// content:null with a degenerate reasoning loop (live-proven). Result: the user
-// always got search_unavailable while the paid key sat unused. Serper is now the
-// PRIMARY path; these tests pin the JSON the brain receives (pure, no network),
+// Serper is the single server-side search integration. These tests pin the JSON
+// the brain receives (pure, no network),
 // the same pattern as composePlace in geocode.test.ts.
 import { describe, it, expect } from 'vitest'
 import { composeSerperResult } from './google.js'

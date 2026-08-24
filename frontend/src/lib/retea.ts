@@ -11,7 +11,7 @@
 //    `necunoscut` păstrează EXACT calitatea de azi (fără regresie nicăieri).
 //
 // CE NU E aici (ca să nu mint): banda VOCII live e PCM brut, fixă, cerută de
-// Gemini Live (16 kHz sus / 24 kHz jos) — nu se poate micșora dinamic fără să
+// OpenAI Realtime (16 kHz sus / 24 kHz jos în protocolul Kelion) — nu se poate micșora dinamic fără să
 // comprimăm cu Opus (schimbare mai mare, separată). Levierul real și sigur de
 // aici e VEDEREA (camera): dimensiune + calitate JPEG + număr de cadre.
 
@@ -111,19 +111,5 @@ export function calitateCamera(t: Teava): CalitateCamera {
       return { maxDim: 448, jpeg: 0.5, cadre: 2 }
     default:
       return { maxDim: 512, jpeg: 0.6, cadre: 4 }
-  }
-}
-
-/** Etichetă scurtă pentru om/creier („2G/țeavă slabă"). */
-export function etichetaTeava(t: Teava): string {
-  switch (t) {
-    case 'slab':
-      return 'slabă (2G/date reduse)'
-    case 'mediu':
-      return 'medie (3G)'
-    case 'bun':
-      return 'bună (4G+/Wi-Fi)'
-    default:
-      return 'necunoscută'
   }
 }

@@ -1,36 +1,95 @@
-# Deploy Kelionai pe VPS propriu
+# Contractul de producție KelionAI
 
-> ⚠ Document parțial ISTORIC (banner 21 aug): verifică orice afirmație în cod/AI-HANDOFF §16–§18 înainte s-o crezi.
+Producția se publică numai dintr-un commit integral din `master` care are
+`pr-verify` verde și imagini OCI construite din același commit, fixate prin
+digest și semnate keyless. Publicarea este manuală, în mediul GitHub
+`production`; nu există cron care urmărește și publică un `master` mobil.
 
-Producția se mută de pe originea veche (fantomă, în spatele Cloudflare) pe **VPS-ul
-propriu** (164.68.120.87), sursa unică fiind acest repo. Postgres și boții
-rulează deja pe VPS (LiveKit a fost scos din cod — istorie); aici adăugăm containerul **aplicației** + Caddy.
+## Surse de adevăr
 
-## Pași
+- `config/product.json`: identitatea și originile first-party;
+- `config/runtime-contract.json`: clasificarea configului și a secretelor;
+- `deploy/compose.production.yml`: limitele containerelor și mounturile exacte;
+- `deploy/deploy.sh`: planul de migrare, backupul, blue-green și rollbackul;
+- `.github/workflows/pr-verify.yml`, `build-images.yml` și `deploy.yml`: lanțul
+  CI, artefact și aprobare.
 
-1. **Completează env-ul** pe VPS: copiază `deploy/kelionai.env.example` în
-   `/root/kelion/kelionai.env` și umple valorile. (OpenRouter/OpenAI/Stripe au
-   fost EXTIRPATE — 3 aug; creierul e Gemini.) Cele marcate `[ADRIAN]` le pui tu:
-   - **Google OAuth** (`GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI`) — din Google Cloud Console.
-   - **`SESSION_SECRET`** — `openssl rand -hex 32`.
-   - **`DATABASE_URL`** — user/parolă/nume ale Postgres-ului de pe VPS.
-   - **`GEMINI_API_KEY`** — creierul unic (AI Studio, cheia ta Tier 2).
-   - opțional: LiveKit, Google TTS/Serper/Maps, Mail.
+`vps-set-env` scrie numai configul non-secret allowlisted în
+`/root/kelion/config/runtime.env` și fișierele de secrete individuale în
+`/root/kelion/secrets`. Directorul este `root:10050` mode `0750`, iar fișierele
+sunt `root:10050` mode `0440`. Containerul web nu primește un env legacy în
+bloc și nu montează repository-ul sau `/root/kelion`.
 
-2. **Rulează deploy-ul** — calea canonică (25 iul): GitHub → Actions → workflow
-   **`deploy`** → Run workflow (rulează și AUTOMAT la fiecare push pe master).
-   Face totul singur prin SSH + verifică anti-fantoma (live `v` == sha master).
-   Manual, prin SSH: vezi `deploy/RUNBOOKS.md` („Publicare manuală") — nu rula
-   `deploy.sh` direct din clonă, folosește forma cu copia din `/tmp`.
+## Fluxul unui release
 
-3. **Repointează Cloudflare**: în panoul Cloudflare, recordul A/AAAA pentru
-   `kelionai.app` → **164.68.120.87**. Până atunci domeniul lovește originea veche.
+1. `pr-verify` rulează porțile backend, frontend, migrări, secrete, containere și
+   inventar atât pe PR, cât și pe commitul îmbinat în `master`.
+2. `build-images` acceptă numai un run `push` verde pe `master`, construiește
+   imaginile din SHA-ul exact, le publică prin digest și emite manifestul
+   semnat.
+3. `production-release` pornește numai prin dispatch manual autorizat, cere SHA integral și folosește mediul `production`. Verifică runul
+   CI, runul de build, manifestul și semnăturile înainte de SSH.
+4. `deploy.sh` planifică migrările. Creează un backup autentificat și îl
+   restaurează integral într-un Postgres temporar fără rețea. O migrare
+   distructivă cere dovada HMAC legată de backup și baza exactă.
+   Scriptul este instalat într-un release persistent din `/opt/kelion-backup`;
+   după smoke-ul public, selectorul `current` este mutat atomic, iar release-ul
+   verifică și activează service-ul/timerul systemd versionate. Numai apoi
+   retrage linia cron legacy exactă, după salvarea crontabului root. Selectorul,
+   unitățile, starea timerului, markerul și crontabul sunt capturate înainte de
+   mutație și restaurate dacă orice etapă ulterioară a release-ului eșuează.
+5. Slotul inactiv pornește cu efectele singleton dezactivate. `/readyz` trebuie
+   să confirme DB, registrul migrărilor și workerii browser/converter, iar
+   `/api/version` trebuie să fie commitul candidat.
+6. Caddy validează configurația, upstreamul este schimbat atomic, apoi markerul
+   activează efectele candidatului. Smoke-ul public verifică din nou versiunea
+   și readiness înainte ca slotul vechi să fie oprit.
+7. Orice eșec după schimbarea upstreamului restaurează upstreamul și markerul
+   anterior. Slotul vechi rămâne disponibil până la smoke-ul reușit.
 
-4. **Verifică live**: `curl https://kelionai.app/api/version` (versiune nouă),
-   login Google, o plată de test, microfonul (auz Chirp), o tură de chat (Gemini).
+Rollbackul folosește același workflow, numai către un artefact semnat al unui
+commit din istoricul `master`. Runnerul de migrări refuză versiuni/checksumuri
+necunoscute; un rollback incompatibil cu schema se oprește înainte de trafic.
 
-## Note
-- Fără `GEMINI_API_KEY` creierul nu pornește (Gemini-only, fără fallback — OpenRouter/OpenAI extirpate, 3 aug).
-- Fără Google OAuth login-ul nu merge — e obligatoriu.
-- Baza de date: dacă folosești o bază NOUĂ, schema se creează la pornire; userii/
-  wallet-urile vechi (din originea live) NU se transferă automat.
+La primul cutover, revenirea înainte de comutarea traficului folosește numai
+containerele legacy capturate și schema de compatibilitate bidirecțională. Un
+workflow către un artefact al cărui checksum de migrare diferă este blocat
+intenționat; recuperarea este un fix forward sau o restaurare controlată din
+backup, nu o rescriere a istoricului migrărilor.
+
+## Readiness și limite de proces
+
+- `/livez` dovedește numai că procesul răspunde;
+- `/readyz` este poarta de cutover și nu se înlocuiește cu `/health`;
+- `/api/version` leagă runtime-ul de SHA-ul aprobat;
+- aplicația, browserul, convertorul și Caddy rulează non-root, cu rootfs
+  read-only, capabilități eliminate, `no-new-privileges`, limite de PID/RAM/CPU
+  și fără `network_mode: host`;
+- browserul ajunge la internet numai prin proxy-ul care fixează DNS și refuză
+  adrese private/rezervate la fiecare hop; parserul de documente nu are rețea.
+
+CSP este impus de Caddy; o politică report-only opțională poate fi mai strictă,
+dar nu înlocuiește enforcementul. Testele de release verifică loginul Google în
+browserul de sistem, media, workers, WebGL/wasm, modelele offline și embedurile
+allowlisted. Access logul Caddy rămâne oprit; raportarea CSP nu stochează IP sau
+payload personal brut.
+
+## Separarea OpenAI și Codex
+
+Fișierul `openai-project-key` conține numai cheia project-scoped folosită de
+backend pentru funcțiile OpenAI ale clienților. `OPENAI_ADMIN_KEY` nu aparține
+runtime-ului public, workerului Codex sau secret root-ului aplicației.
+
+Constructorul are trei servicii host-only separate. Web-ul deține coada și câte
+un verificator HMAC per domeniu; nu primește `CODEX_HOME`, `auth.json`, token
+ChatGPT, token Git sau shell. Workerul folosește CLI-ul oficial cu login ChatGPT
+gestionat de Codex, profil fără rețea pentru comenzile generate și o imagine
+offline fixată pentru porți. El produce numai un handoff `gates_passed`.
+Publisherul are credentiala GitHub minimă, dar nu are Codex/VPS; dispatcherul
+are numai permisiune Actions pentru commituri deja merged, fără Git/VPS.
+Flagurile, markerii și timerele celor trei identități rămân implicit oprite.
+
+App Server nu este expus de Kelion și nu este necesar pentru coada actuală.
+Ceremonia de login se face de operator în terminalul workerului; statusul public
+este numai `setup_required`, `ready`, `busy` sau `degraded`, fără URL, cod sau
+token de autentificare.

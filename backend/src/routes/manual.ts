@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { buildManual, buildAdminChapters, manualHtml, isManualLang, MANUAL_LANGS, type ManualDoc } from '../services/manual.js'
 import { translateStrings, translationReady, normalizeLang } from '../services/manualLang.js'
 import { getSessionUser } from '../session.js'
+import { esteAdminKelion } from '../services/adminIdentity.js'
 
 // ── THE MANUAL — PUBLIC BOOK + ADMIN-ONLY CHAPTERS ─────────────────────────
 // GET /api/manual?lang=xx  → the manual as data (the in-app page)
@@ -69,6 +70,7 @@ function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): M
     sections: d.sections.map((s, i) => ({
       title: g(`s${i}.t`, s.title),
       paragraphs: s.paragraphs.map((p, j) => g(`s${i}.p${j}`, p)),
+      audience: s.audience,
     })),
     groups: d.groups.map((gr, i) => ({
       title: g(`g${i}.t`, gr.title),
@@ -87,7 +89,11 @@ function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): M
 // owner-ul) și doar când sesiunea e admin. Un vizitator fără sesiune de admin
 // primește exact cartea publică.
 function cuAdmin(doc: ManualDoc, isAdmin: boolean): ManualDoc {
-  return isAdmin ? { ...doc, sections: [...doc.sections, ...buildAdminChapters()] } : doc
+  const sections = isAdmin ? [...doc.sections, ...buildAdminChapters()] : doc.sections
+  return {
+    ...doc,
+    sections: sections.filter((section) => section.audience === 'public' || (isAdmin && section.audience === 'admin')),
+  }
 }
 
 async function manualIn(lang: string, isAdmin: boolean): Promise<ManualDoc> {
@@ -152,12 +158,12 @@ export async function manualRoutes(app: FastifyInstance): Promise<void> {
   // Starts the warm-up without blocking the server's startup.
   void incalzesteTraducerile().catch(() => {})
   app.get<{ Querystring: { lang?: string } }>('/api/manual', async (req, reply) => {
-    const isAdmin = getSessionUser(req)?.role === 'admin'
+    const isAdmin = esteAdminKelion(getSessionUser(req)?.email ?? '')
     return reply.send(await manualRapid(String(req.query.lang ?? 'en'), isAdmin))
   })
 
   app.get<{ Querystring: { lang?: string } }>('/manual.html', async (req, reply) => {
-    const isAdmin = getSessionUser(req)?.role === 'admin'
+    const isAdmin = esteAdminKelion(getSessionUser(req)?.email ?? '')
     const d = await manualIn(String(req.query.lang ?? 'en'), isAdmin)
     return reply.type('text/html; charset=utf-8').send(manualHtml(d))
   })

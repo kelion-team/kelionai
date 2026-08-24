@@ -44,6 +44,7 @@ describe('voce: AEC adaptiv pe ruta audio + half-duplex doar fără AEC', () => 
   it('barge-in pe micStream există (întrerupere pe voce susținută cât e muted)', () => {
     expect(mic).toMatch(/onBargeIn/)
     expect(mic).toMatch(/BARGE_/)
+    expect(mic).toMatch(/pushPreRoll\(inp\)[\s\S]*?opts\.onBargeIn\?\.\(\)/)
   })
 })
 

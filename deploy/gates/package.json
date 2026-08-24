@@ -1,0 +1,8 @@
+{
+  "name": "kelion-codex-gates",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "jscpd": "5.0.16"
+  }
+}

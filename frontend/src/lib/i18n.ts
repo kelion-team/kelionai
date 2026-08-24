@@ -2,6 +2,7 @@
 // language we don't have a translation for. Add a new language by adding a
 // block to `dict` — nothing else changes.
 import { loadLocalLang } from './prefs'
+import { productConfig } from './productConfig'
 
 export type Lang = 'en' | 'ro' | 'es' | 'fr' | 'de' | 'it' | 'pt'
 
@@ -24,11 +25,13 @@ export interface Strings {
   execTitle: string
   disconnectCamTitle: string
   connectCamTitle: string
+  cameraConsentPrompt: string
   micBlocked: string
   micNoDevice: string
   micUnsupported: string
   brainNotActive: string
   brainError: string
+  turnIndeterminate: string
   offline: string
   // ── VERDICTE ONESTE PE COD DE EROARE (registrul frontend, lot C): sesiune
   // expirată ≠ „am pierdut netul", paywall ≠ „eroare la creier", prea multe
@@ -65,7 +68,7 @@ export interface Strings {
   errGeneric: string
   // ── THE MONITOR (Stage.tsx) — they were written directly in code, in Romanian ──
   // 20 texts that a Romanian logged-out user saw in Romanian: button titles,
-  // empty states, the admin unlock panel.
+  // empty states and failure messages.
   wsFileFailed: string
   wsOpenFile: string
   wsPageBlocked: string
@@ -124,9 +127,6 @@ export interface Strings {
   buildCiOk: string
   buildCiRunning: string
   buildThrottled: string
-  adminLocked: string
-  adminLockedHint: string
-  adminUnlock: string
   // ── THE LATENCY AND LISTENING BANDS (ChatPanel.tsx) ──────────────────────
   latencyChip: string
   /** Tooltip of the hourglass+stopwatch shown while Kelion really works. */
@@ -199,8 +199,6 @@ export interface Strings {
   creditOut: string
   creditOk: string
   contactLabel: string
-  connectGoogle: string
-  connectGoogleTitle: string
   buildQueued: string
   buildRunning: string
   buildDone: string
@@ -222,20 +220,13 @@ export interface Strings {
   /** `{n}` = numărul ordinului. Confirmarea înainte de a opri un ordin în lucru. */
   buildStopConfirm: string
   buildCiFailed: string
-  unlockWrongCode: string
-  unlockRetryError: string
-  unlockNetError: string
-  unlockPlaceholder: string
-  lockedTitle: string
   // ── THE PAYMENT CODE, SHOWN (M4, Aug 2): matching depends on the person
   // writing this code in the transfer reference — and the UI used to navigate
   // away without ever showing it. ────────────────────────────────────────────
-  payCodeTitle: string
-  payCodeHint: string
-  payCodeCopy: string
-  payCodeCopied: string
-  payCodeOpen: string
-  payCodeWaiting: string
+  checkoutTitle: string
+  checkoutHint: string
+  checkoutOpen: string
+  checkoutWaiting: string
   // ── THE HONEST CONNECTION VERDICT (Adrian, 2 aug: the app claimed „lost
   // internet" with zero measurement; now the claim is measured — see
   // diagnozaConexiune in lib/chat.ts) ──────────────────────────────────────
@@ -290,11 +281,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     execTitle: 'Live execution',
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
+    cameraConsentPrompt: 'Turn on the camera for snapshots you or Kelion explicitly request? Continuous vision, location and face storage stay off unless you enable each one separately.',
     micBlocked: 'Microphone blocked. Allow mic access in the browser, then tap the mic again.',
     micNoDevice: 'No microphone found.',
     micUnsupported: 'Speech recognition is not supported in this browser. Use Chrome.',
-    brainNotActive: 'The brain is not active yet (Gemini key missing).',
+    brainNotActive: 'The brain is not active yet (OpenAI is not configured).',
     brainError: 'Brain error. Please try again.',
+    turnIndeterminate: 'This request may already have performed an action, but its final result was lost. Check the result before trying anything again.',
     offline: "I've lost the internet connection — I'll be right back when the signal returns.",
     paywallRow: "You've reached the free plan's limit — check the options to continue.",
     rateLimited: 'Too many requests in a short time — wait a moment and try again.',
@@ -304,7 +297,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: "I'm offline. The local brain isn't downloaded yet — prepare it while you have signal and I'll work without a connection too.",
     offlineEroareLocal: 'The local brain hit a problem:',
     raspunsAmanat: 'I can now tell you the answer to what you asked while you were offline',
-    updateNouAnunt: 'New version — updating…',
+    updateNouAnunt: 'New version ready — tap to apply',
     credits: 'credits',
     topUp: 'Please top up your credit',
     lowCredit: 'Your credit is running low — please top up.',
@@ -351,8 +344,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     manualLabel: 'Manual',
     cvTitle: 'CV Tailoring',
     cvBaseTitle: '1. Your base CV',
-    cvBaseHint: 'Write it here or upload a file (text, PDF or photo). It is saved for next time.',
-    cvUpload: '\ud83d\udcce Upload CV (text / PDF / photo)',
+    cvBaseHint: 'Write it here or upload a TXT, Markdown, CSV, PDF or DOCX file. It is saved for next time.',
+    cvUpload: 'Upload CV (TXT / PDF / DOCX)',
     cvUploadBusy: 'Reading the file...',
     cvBasePlaceholder: 'Write or upload your base CV here...',
     cvSave: 'Save base CV',
@@ -392,9 +385,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildCiOk: 'Independently verified by CI (build + tests on a clean machine)',
     buildCiRunning: 'CI is still running on the pull request',
     buildThrottled: 'Waiting for quota',
-    adminLocked: 'The Admin panel is locked 🔒',
-    adminLockedHint: 'Talk to Kelion — your voiceprint opens it by itself — or type the unlock secret.',
-    adminUnlock: 'Unlock',
     latencyChip: 'sent → first word / full answer',
     workClockTitle: 'Kelion is really working on the task — live elapsed time',
     heardYouTitle: 'You — on the way to the brain',
@@ -448,8 +438,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     creditOut: 'Credit used up — top up to continue',
     creditOk: 'You have credit',
     contactLabel: 'Contact',
-    connectGoogle: 'Connect Google',
-    connectGoogleTitle: 'Grant Gmail, Calendar & Drive access so Kelion can act on them',
     buildQueued: 'Queued',
     buildRunning: 'Working',
     buildDone: 'Done',
@@ -464,17 +452,10 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildStop: 'Stop this order',
     buildStopConfirm: 'Stop order #{n}? What it has already done is kept; it just stops here.',
     buildCiFailed: 'CI failed on the PR',
-    unlockWrongCode: 'Wrong code — try again.',
-    unlockRetryError: 'Error — try again.',
-    unlockNetError: 'Network error — try again.',
-    unlockPlaceholder: 'Activation secret',
-    lockedTitle: 'Locked — talk to Kelion (your voiceprint opens it) or type the secret',
-    payCodeTitle: 'Your payment code',
-    payCodeHint: 'Add this code to the Reference / Note field on the Revolut page before paying. Without this code, payment CANNOT be automatically matched to your account!',
-    payCodeCopy: 'Copy the code',
-    payCodeCopied: 'Copied ✓',
-    payCodeOpen: 'Open Revolut and pay ↗',
-    payCodeWaiting: 'Waiting for the payment — the credits arrive by themselves a few minutes after it lands.',
+    checkoutTitle: 'Secure Revolut checkout',
+    checkoutHint: 'The amount and your account are already linked. Confirm the payment on Revolut; no reference code is needed.',
+    checkoutOpen: 'Continue securely to Revolut ↗',
+    checkoutWaiting: 'Credit is added only after Revolut confirms the completed payment.',
     serverDown:
       'The server isn’t answering right now — it is NOT your internet. I keep checking and will pick this up by myself the moment it returns.',
     requestLost: 'The request broke on the way (your internet and the server are fine) — please send it again.',
@@ -491,8 +472,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     loggingOut: 'Logging out...',
     logout: 'Log out',
     deleteAcc: 'Request data deletion',
-    deleteConfirm: 'Send a data-deletion request? Deletion is handled manually by the operator — nothing is removed automatically.',
-    deleteAccClosed: 'Automatic deletion is disabled by design. To have your data deleted, write to contact@kelionai.app — the request is handled manually.',
+    deleteConfirm: 'Permanently delete and anonymize your account data? The server may require recent Google reauthentication and will return a deletion receipt with any legally retained categories.',
+    deleteAccClosed: `The deletion service did not confirm the request. No success is assumed; contact ${productConfig.supportEmail} for support.`,
     cancel: 'Cancel',
     deleting: 'Deleting...',
   },
@@ -515,11 +496,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     execTitle: 'Execuție în direct',
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',
+    cameraConsentPrompt: 'Pornești camera pentru instantaneele cerute explicit de tine sau de Kelion? Vederea continuă, locația și stocarea facială rămân oprite până le activezi separat.',
     micBlocked: 'Microfonul e blocat. Permite accesul la microfon în browser, apoi apasă din nou pe microfon.',
     micNoDevice: 'Niciun microfon găsit.',
     micUnsupported: 'Recunoașterea vocală nu e suportată în acest browser. Folosește Chrome.',
-    brainNotActive: 'Creierul nu e încă activat (lipsește cheia Gemini).',
+    brainNotActive: 'Creierul nu e încă activat (OpenAI nu este configurat).',
     brainError: 'Eroare la creier. Încearcă din nou.',
+    turnIndeterminate: 'Cererea poate să fi executat deja o acțiune, dar rezultatul final s-a pierdut. Verifică rezultatul înainte să repeți.',
     offline: 'Am pierdut conexiunea la internet — revin de îndată ce revine semnalul.',
     paywallRow: 'Ai atins limita planului gratuit — vezi opțiunile ca să continui.',
     rateLimited: 'Prea multe cereri într-un timp scurt — așteaptă puțin și încearcă din nou.',
@@ -529,7 +512,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Sunt offline. Creierul local nu e încă descărcat — pregătește-l cât ai semnal și apoi merg și fără net.',
     offlineEroareLocal: 'Creierul local a dat de o problemă:',
     raspunsAmanat: 'Îți pot spune acum răspunsul la ce m-ai întrebat cât erai offline',
-    updateNouAnunt: 'Versiune nouă — se actualizează…',
+    updateNouAnunt: 'Versiune nouă pregătită — apasă ca s-o aplici',
     credits: 'credite',
     topUp: 'Te rog reîncarcă creditul',
     lowCredit: 'Mai ai puțin credit — te rog reîncarcă.',
@@ -573,8 +556,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     manualLabel: 'Manual',
     cvTitle: 'Adaptare CV',
     cvBaseTitle: '1. CV-ul tău de bază',
-    cvBaseHint: 'Scrie-l aici sau încarcă un fișier (text, PDF sau poză). Se salvează și rămâne pentru data viitoare.',
-    cvUpload: '\ud83d\udcce Încarcă CV (text / PDF / poză)',
+    cvBaseHint: 'Scrie-l aici sau încarcă un fișier TXT, Markdown, CSV, PDF ori DOCX. Se salvează pentru data viitoare.',
+    cvUpload: 'Încarcă CV (TXT / PDF / DOCX)',
     cvUploadBusy: 'Se citește fișierul...',
     cvBasePlaceholder: 'Scrie sau încarcă CV-ul tău de bază aici...',
     cvSave: 'Salvează CV-ul de bază',
@@ -614,9 +597,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildCiOk: 'Verificat independent de CI (build + teste pe mașină curată)',
     buildCiRunning: 'CI încă rulează pe PR',
     buildThrottled: 'Așteaptă cotă',
-    adminLocked: 'Panoul Admin e încuiat 🔒',
-    adminLockedHint: 'Vorbește cu Kelion — amprenta ta vocală îl deschide singură — sau tastează secretul de activare.',
-    adminUnlock: 'Deblochează',
     latencyChip: 'trimis → primul cuvânt / răspuns complet',
     workClockTitle: 'Kelion chiar lucrează la sarcină — timp scurs, live',
     heardYouTitle: 'Tu — înspre creier',
@@ -670,8 +650,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     creditOut: 'Credit epuizat — reîncarcă pentru a continua',
     creditOk: 'Ai credit',
     contactLabel: 'Contact',
-    connectGoogle: 'Conectează Google',
-    connectGoogleTitle: 'Dă acces la Gmail, Calendar și Drive ca Kelion să poată lucra cu ele',
     buildQueued: 'În coadă',
     buildRunning: 'Lucrează',
     buildDone: 'Gata',
@@ -686,17 +664,10 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildStop: 'Oprește acest ordin',
     buildStopConfirm: 'Oprești ordinul #{n}? Ce a făcut deja rămâne; doar se oprește aici.',
     buildCiFailed: 'CI a picat pe PR',
-    unlockWrongCode: 'Cod greșit — mai încearcă.',
-    unlockRetryError: 'Eroare — reîncearcă.',
-    unlockNetError: 'Eroare de rețea — reîncearcă.',
-    unlockPlaceholder: 'Secretul de activare',
-    lockedTitle: 'Încuiat — vorbește cu Kelion (amprenta ta îl deschide) sau tastează secretul',
-    payCodeTitle: 'Codul tău de plată',
-    payCodeHint: 'Introdu acest cod în câmpul Referință / Notă în pagina Revolut înainte de a plăti. Fără cod, plata NU se poate asocia automat contului tău!',
-    payCodeCopy: 'Copiază codul',
-    payCodeCopied: 'Copiat ✓',
-    payCodeOpen: 'Deschide Revolut și plătește ↗',
-    payCodeWaiting: 'Aștept plata — creditele intră singure la câteva minute după ce ajunge.',
+    checkoutTitle: 'Plată securizată prin Revolut',
+    checkoutHint: 'Suma și contul tău sunt deja asociate. Confirmă plata în Revolut; nu este necesar un cod de referință.',
+    checkoutOpen: 'Continuă securizat în Revolut ↗',
+    checkoutWaiting: 'Creditul se adaugă numai după ce Revolut confirmă plata finalizată.',
     serverDown:
       'Serverul nu răspunde momentan — NU e internetul tău. Verific întruna și reiau singur în clipa în care revine.',
     requestLost: 'Cererea s-a rupt pe drum (netul tău și serverul sunt bune) — mai trimite o dată.',
@@ -713,8 +684,8 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     loggingOut: 'Deconectare...',
     logout: 'Deconectare',
     deleteAcc: 'Cere ștergerea datelor',
-    deleteConfirm: 'Trimiți o cerere de ștergere a datelor? Ștergerea se face manual de operator — nimic nu se șterge automat.',
-    deleteAccClosed: 'Ștergerea automată e închisă prin construcție. Ca să-ți fie șterse datele, scrie la contact@kelionai.app — cererea se tratează manual.',
+    deleteConfirm: 'Ștergi definitiv și anonimizezi datele contului? Serverul poate cere reautentificare Google recentă și va întoarce o dovadă cu eventualele categorii păstrate legal.',
+    deleteAccClosed: `Serviciul de ștergere nu a confirmat cererea. Nu presupunem succesul; pentru ajutor scrie la ${productConfig.supportEmail}.`,
     cancel: 'Anulează',
     deleting: 'Se șterge...',
   },
@@ -737,11 +708,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     execTitle: 'Ejecución en vivo',
     disconnectCamTitle: 'Desconectar cámara',
     connectCamTitle: 'Conectar cámara',
+    cameraConsentPrompt: '¿Activar la cámara para instantáneas solicitadas explícitamente por ti o por Kelion? La visión continua, la ubicación y el almacenamiento facial siguen desactivados hasta que actives cada opción por separado.',
     micBlocked: 'Micrófono bloqueado. Permite el acceso al micrófono en el navegador y vuelve a pulsar.',
     micNoDevice: 'No se encontró ningún micrófono.',
     micUnsupported: 'El reconocimiento de voz no es compatible con este navegador. Usa Chrome.',
-    brainNotActive: 'El cerebro aún no está activo (falta la clave de Gemini).',
+    brainNotActive: 'El cerebro aún no está activo (OpenAI no está configurado).',
     brainError: 'Error del cerebro. Inténtalo de nuevo.',
+    turnIndeterminate: 'Es posible que esta solicitud ya haya realizado una acción, pero se perdió el resultado final. Comprueba el resultado antes de volver a intentarlo.',
     offline: 'He perdido la conexión a internet — vuelvo en cuanto regrese la señal.',
     paywallRow: 'Has alcanzado el límite del plan gratuito — mira las opciones para continuar.',
     rateLimited: 'Demasiadas solicitudes en poco tiempo — espera un momento e inténtalo de nuevo.',
@@ -751,7 +724,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Estoy sin conexión. El cerebro local aún no está descargado — prepáralo mientras tengas señal y funcionaré también sin conexión.',
     offlineEroareLocal: 'El cerebro local tuvo un problema:',
     raspunsAmanat: 'Ahora puedo darte la respuesta a lo que me preguntaste mientras estabas sin conexión',
-    updateNouAnunt: 'Nueva versión — actualizando…',
+    updateNouAnunt: 'Nueva versión lista — toca para aplicarla',
     credits: 'créditos',
     topUp: 'Por favor recarga tu crédito',
     lowCredit: 'Te queda poco crédito — recarga, por favor.',
@@ -806,9 +779,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildCiOk: 'Verificado de forma independiente por CI (compilación + pruebas en una máquina limpia)',
     buildCiRunning: 'CI todavía se está ejecutando en el pull request',
     buildThrottled: 'Esperando cuota',
-    adminLocked: 'El panel de Admin está bloqueado 🔒',
-    adminLockedHint: 'Habla con Kelion — tu huella de voz lo abre sola — o escribe el secreto de activación.',
-    adminUnlock: 'Desbloquear',
     latencyChip: 'enviado → primera palabra / respuesta completa',
     workClockTitle: 'Kelion realmente está trabajando en la tarea — tiempo transcurrido en vivo',
     heardYouTitle: 'Tú — camino al cerebro',
@@ -861,8 +831,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     creditOut: 'Crédito agotado — recarga para continuar',
     creditOk: 'Tienes crédito',
     contactLabel: 'Contacto',
-    connectGoogle: 'Conectar Google',
-    connectGoogleTitle: 'Concede acceso a Gmail, Calendar y Drive para que Kelion pueda actuar sobre ellos',
     buildQueued: 'En cola',
     buildRunning: 'Trabajando',
     buildDone: 'Listo',
@@ -875,17 +843,10 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildAttempt: 'intento {n}',
     buildSeePr: 'Ver el PR ↗',
     buildCiFailed: 'La CI falló en el PR',
-    unlockWrongCode: 'Código incorrecto — inténtalo de nuevo.',
-    unlockRetryError: 'Error — inténtalo de nuevo.',
-    unlockNetError: 'Error de red — inténtalo de nuevo.',
-    unlockPlaceholder: 'Secreto de activación',
-    lockedTitle: 'Bloqueado — habla con Kelion (tu huella de voz lo abre) o escribe el secreto',
-    payCodeTitle: 'Tu código de pago',
-    payCodeHint: 'Añade este código al campo Referencia / Nota en la página de Revolut antes de pagar. ¡Sin este código, el pago NO se puede asociar automáticamente a tu cuenta!',
-    payCodeCopy: 'Copiar el código',
-    payCodeCopied: 'Copiado ✓',
-    payCodeOpen: 'Abrir Revolut y pagar ↗',
-    payCodeWaiting: 'Esperando el pago — los créditos llegan solos unos minutos después de realizarlo.',
+    checkoutTitle: 'Pago seguro con Revolut',
+    checkoutHint: 'El importe y tu cuenta ya están vinculados. Confirma el pago en Revolut; no necesitas un código de referencia.',
+    checkoutOpen: 'Continuar de forma segura a Revolut ↗',
+    checkoutWaiting: 'El crédito se añade solo cuando Revolut confirma el pago completado.',
     serverDown:
       'El servidor no responde ahora mismo — NO es tu internet. Sigo comprobando y reanudaré todo en cuanto vuelva.',
     requestLost: 'La solicitud se interrumpió en el camino (tu internet y el servidor están bien) — por favor envíala de nuevo.',
@@ -909,11 +870,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     execTitle: 'Exécution en direct',
     disconnectCamTitle: 'Déconnecter la caméra',
     connectCamTitle: 'Connecter la caméra',
+    cameraConsentPrompt: 'Activer la caméra pour les instantanés explicitement demandés par vous ou Kelion ? La vision continue, la localisation et le stockage facial restent désactivés jusqu’à leur activation séparée.',
     micBlocked: 'Micro bloqué. Autorisez l’accès au micro dans le navigateur, puis réessayez.',
     micNoDevice: 'Aucun microphone trouvé.',
     micUnsupported: 'La reconnaissance vocale n’est pas prise en charge par ce navigateur. Utilisez Chrome.',
-    brainNotActive: 'Le cerveau n’est pas encore actif (clé Gemini manquante).',
+    brainNotActive: 'Le cerveau n’est pas encore actif (OpenAI n’est pas configuré).',
     brainError: 'Erreur du cerveau. Veuillez réessayer.',
+    turnIndeterminate: 'Cette demande a peut-être déjà effectué une action, mais son résultat final a été perdu. Vérifiez le résultat avant de réessayer.',
     offline: 'J’ai perdu la connexion internet — je reviens dès que le signal revient.',
     paywallRow: 'Tu as atteint la limite du plan gratuit — regarde les options pour continuer.',
     rateLimited: 'Trop de requêtes en peu de temps — attends un instant et réessaie.',
@@ -923,7 +886,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Je suis hors ligne. Le cerveau local n’est pas encore téléchargé — prépare-le tant que tu as du signal et je fonctionnerai aussi sans connexion.',
     offlineEroareLocal: 'Le cerveau local a rencontré un problème :',
     raspunsAmanat: 'Je peux maintenant te donner la réponse à ce que tu m’as demandé hors ligne',
-    updateNouAnunt: 'Nouvelle version — mise à jour…',
+    updateNouAnunt: 'Nouvelle version prête — touchez pour l’appliquer',
     credits: 'crédits',
     topUp: 'Veuillez recharger votre crédit',
     lowCredit: 'Votre crédit est presque épuisé — veuillez recharger.',
@@ -978,9 +941,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildCiOk: 'Vérifié indépendamment par la CI (build + tests sur une machine propre)',
     buildCiRunning: 'La CI tourne encore sur la pull request',
     buildThrottled: 'En attente de quota',
-    adminLocked: 'Le panneau Admin est verrouillé 🔒',
-    adminLockedHint: 'Parlez à Kelion — votre empreinte vocale l’ouvre toute seule — ou tapez le secret d’activation.',
-    adminUnlock: 'Déverrouiller',
     latencyChip: 'envoyé → premier mot / réponse complète',
     workClockTitle: 'Kelion travaille vraiment sur la tâche — temps écoulé en direct',
     heardYouTitle: 'Vous — en route vers le cerveau',
@@ -1033,8 +993,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     creditOut: 'Crédit épuisé — rechargez pour continuer',
     creditOk: 'Vous avez du crédit',
     contactLabel: 'Contact',
-    connectGoogle: 'Connecter Google',
-    connectGoogleTitle: 'Accordez l’accès à Gmail, Calendar et Drive pour que Kelion puisse agir dessus',
     buildQueued: 'En attente',
     buildRunning: 'En cours',
     buildDone: 'Terminé',
@@ -1047,17 +1005,10 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildAttempt: 'tentative {n}',
     buildSeePr: 'Voir le PR ↗',
     buildCiFailed: 'La CI a échoué sur le PR',
-    unlockWrongCode: 'Code incorrect — réessayez.',
-    unlockRetryError: 'Erreur — réessayez.',
-    unlockNetError: 'Erreur réseau — réessayez.',
-    unlockPlaceholder: 'Secret d’activation',
-    lockedTitle: 'Verrouillé — parlez à Kelion (votre empreinte vocale l’ouvre) ou tapez le secret',
-    payCodeTitle: 'Votre code de paiement',
-    payCodeHint: 'Ajoutez ce code dans le champ Référence / Note sur la page Revolut avant de payer. Sans ce code, le paiement NE PEUT PAS être associé automatiquement à votre compte !',
-    payCodeCopy: 'Copier le code',
-    payCodeCopied: 'Copié ✓',
-    payCodeOpen: 'Ouvrir Revolut et payer ↗',
-    payCodeWaiting: 'En attente du paiement — les crédits arrivent seuls quelques minutes après la réception.',
+    checkoutTitle: 'Paiement sécurisé avec Revolut',
+    checkoutHint: 'Le montant et votre compte sont déjà associés. Confirmez le paiement dans Revolut ; aucun code de référence n’est requis.',
+    checkoutOpen: 'Continuer en toute sécurité vers Revolut ↗',
+    checkoutWaiting: 'Le crédit est ajouté uniquement lorsque Revolut confirme le paiement terminé.',
     serverDown:
       'Le serveur ne répond pas pour le moment — ce n’est PAS votre internet. Je continue de vérifier et reprendrai tout dès son retour.',
     requestLost: 'La requête a été interrompue en chemin (votre internet et le serveur vont bien) — veuillez l’renvoyer.',
@@ -1081,11 +1032,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     execTitle: 'Live-Ausführung',
     disconnectCamTitle: 'Kamera trennen',
     connectCamTitle: 'Kamera verbinden',
+    cameraConsentPrompt: 'Kamera für ausdrücklich von Ihnen oder Kelion angeforderte Einzelbilder einschalten? Kontinuierliche Sicht, Standort und Gesichtsspeicherung bleiben aus, bis Sie sie getrennt aktivieren.',
     micBlocked: 'Mikrofon blockiert. Erlaube den Mikrofonzugriff im Browser und tippe erneut.',
     micNoDevice: 'Kein Mikrofon gefunden.',
     micUnsupported: 'Spracherkennung wird in diesem Browser nicht unterstützt. Nutze Chrome.',
-    brainNotActive: 'Das Gehirn ist noch nicht aktiv (Gemini-Schlüssel fehlt).',
+    brainNotActive: 'Das Gehirn ist noch nicht aktiv (OpenAI ist nicht konfiguriert).',
     brainError: 'Gehirn-Fehler. Bitte versuche es erneut.',
+    turnIndeterminate: 'Diese Anfrage hat möglicherweise bereits eine Aktion ausgeführt, aber das Endergebnis ging verloren. Prüfe das Ergebnis, bevor du es erneut versuchst.',
     offline: 'Ich habe die Internetverbindung verloren — ich bin zurück, sobald das Signal wieder da ist.',
     paywallRow: 'Du hast das Limit des Gratisplans erreicht — sieh dir die Optionen an, um weiterzumachen.',
     rateLimited: 'Zu viele Anfragen in kurzer Zeit — warte kurz und versuch es erneut.',
@@ -1095,7 +1048,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Ich bin offline. Das lokale Gehirn ist noch nicht heruntergeladen — bereite es vor, solange du Signal hast, dann funktioniere ich auch ohne Verbindung.',
     offlineEroareLocal: 'Das lokale Gehirn hatte ein Problem:',
     raspunsAmanat: 'Ich kann dir jetzt die Antwort auf deine Frage von unterwegs (offline) geben',
-    updateNouAnunt: 'Neue Version — wird aktualisiert…',
+    updateNouAnunt: 'Neue Version bereit — zum Anwenden tippen',
     credits: 'Guthaben',
     topUp: 'Bitte lade dein Guthaben auf',
     lowCredit: 'Dein Guthaben wird knapp — bitte aufladen.',
@@ -1150,9 +1103,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildCiOk: 'Unabhängig von der CI geprüft (Build + Tests auf einer sauberen Maschine)',
     buildCiRunning: 'Die CI läuft noch am Pull Request',
     buildThrottled: 'Wartet auf Kontingent',
-    adminLocked: 'Das Admin-Panel ist gesperrt 🔒',
-    adminLockedHint: 'Sprich mit Kelion — dein Stimmabdruck öffnet es von selbst — oder tippe das Freischaltgeheimnis.',
-    adminUnlock: 'Entsperren',
     latencyChip: 'gesendet → erstes Wort / vollständige Antwort',
     workClockTitle: 'Kelion arbeitet wirklich an der Aufgabe — verstrichene Zeit live',
     heardYouTitle: 'Du — unterwegs zum Gehirn',
@@ -1205,8 +1155,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     creditOut: 'Guthaben aufgebraucht — aufladen zum Fortfahren',
     creditOk: 'Du hast Guthaben',
     contactLabel: 'Kontakt',
-    connectGoogle: 'Google verbinden',
-    connectGoogleTitle: 'Gewähre Zugriff auf Gmail, Kalender & Drive, damit Kelion darauf zugreifen kann',
     buildQueued: 'In Warteschlange',
     buildRunning: 'Arbeitet',
     buildDone: 'Fertig',
@@ -1219,17 +1167,10 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildAttempt: 'Versuch {n}',
     buildSeePr: 'PR ansehen ↗',
     buildCiFailed: 'CI beim PR fehlgeschlagen',
-    unlockWrongCode: 'Falscher Code — bitte erneut versuchen.',
-    unlockRetryError: 'Fehler — bitte erneut versuchen.',
-    unlockNetError: 'Netzwerkfehler — bitte erneut versuchen.',
-    unlockPlaceholder: 'Aktivierungsgeheimnis',
-    lockedTitle: 'Gesperrt — sprich mit Kelion (dein Stimmabdruck öffnet es) oder tippe das Geheimnis',
-    payCodeTitle: 'Dein Zahlungscode',
-    payCodeHint: 'Füge diesen Code vor der Zahlung in das Feld Referenz / Hinweis auf der Revolut-Seite ein. Ohne diesen Code kann die Zahlung NICHT automatisch deinem Konto zugeordnet werden!',
-    payCodeCopy: 'Code kopieren',
-    payCodeCopied: 'Kopiert ✓',
-    payCodeOpen: 'Revolut öffnen und bezahlen ↗',
-    payCodeWaiting: 'Warten auf die Zahlung — das Guthaben trifft wenige Minuten nach Eingang von selbst ein.',
+    checkoutTitle: 'Sicherer Revolut-Checkout',
+    checkoutHint: 'Betrag und Konto sind bereits verknüpft. Bestätige die Zahlung in Revolut; ein Referenzcode ist nicht nötig.',
+    checkoutOpen: 'Sicher zu Revolut weitergehen ↗',
+    checkoutWaiting: 'Guthaben wird erst hinzugefügt, wenn Revolut die abgeschlossene Zahlung bestätigt.',
     serverDown:
       'Der Server antwortet gerade nicht — es liegt NICHT an deinem Internet. Ich prüfe weiter und mache von selbst weiter, sobald er zurück ist.',
     requestLost: 'Die Anfrage wurde unterwegs unterbrochen (dein Internet und der Server sind in Ordnung) — bitte erneut senden.',
@@ -1253,11 +1194,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     execTitle: 'Esecuzione dal vivo',
     disconnectCamTitle: 'Scollega fotocamera',
     connectCamTitle: 'Collega fotocamera',
+    cameraConsentPrompt: 'Attivare la fotocamera per istantanee richieste esplicitamente da te o da Kelion? Visione continua, posizione e archiviazione del volto restano disattivate finché non le abiliti separatamente.',
     micBlocked: 'Microfono bloccato. Consenti l’accesso al microfono nel browser e riprova.',
     micNoDevice: 'Nessun microfono trovato.',
     micUnsupported: 'Il riconoscimento vocale non è supportato in questo browser. Usa Chrome.',
-    brainNotActive: 'Il cervello non è ancora attivo (manca la chiave Gemini).',
+    brainNotActive: 'Il cervello non è ancora attivo (OpenAI non è configurato).',
     brainError: 'Errore del cervello. Riprova.',
+    turnIndeterminate: 'Questa richiesta potrebbe aver già eseguito un’azione, ma il risultato finale è andato perso. Controlla il risultato prima di riprovare.',
     offline: 'Ho perso la connessione a internet — torno appena il segnale ritorna.',
     paywallRow: 'Hai raggiunto il limite del piano gratuito — guarda le opzioni per continuare.',
     rateLimited: 'Troppe richieste in poco tempo — aspetta un attimo e riprova.',
@@ -1267,7 +1210,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Sono offline. Il cervello locale non è ancora scaricato — preparalo finché hai segnale e funzionerò anche senza connessione.',
     offlineEroareLocal: 'Il cervello locale ha avuto un problema:',
     raspunsAmanat: 'Ora posso darti la risposta a ciò che mi hai chiesto mentre eri offline',
-    updateNouAnunt: 'Nuova versione — aggiornamento…',
+    updateNouAnunt: 'Nuova versione pronta — tocca per applicarla',
     credits: 'crediti',
     topUp: 'Ricarica il tuo credito, per favore',
     lowCredit: 'Il tuo credito sta per finire — ricarica, per favore.',
@@ -1322,9 +1265,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildCiOk: 'Verificato in modo indipendente dalla CI (build + test su una macchina pulita)',
     buildCiRunning: 'La CI è ancora in esecuzione sulla pull request',
     buildThrottled: 'In attesa di quota',
-    adminLocked: 'Il pannello Admin è bloccato 🔒',
-    adminLockedHint: 'Parla con Kelion — la tua impronta vocale lo apre da sola — oppure digita il segreto di attivazione.',
-    adminUnlock: 'Sblocca',
     latencyChip: 'inviato → prima parola / risposta completa',
     workClockTitle: 'Kelion sta davvero lavorando al compito — tempo trascorso dal vivo',
     heardYouTitle: 'Tu — in viaggio verso il cervello',
@@ -1377,8 +1317,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     creditOut: 'Credito esaurito — ricarica per continuare',
     creditOk: 'Hai credito',
     contactLabel: 'Contatto',
-    connectGoogle: 'Connetti Google',
-    connectGoogleTitle: 'Concedi l’accesso a Gmail, Calendar e Drive così Kelion può agirvi',
     buildQueued: 'In coda',
     buildRunning: 'In corso',
     buildDone: 'Fatto',
@@ -1391,17 +1329,10 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildAttempt: 'tentativo {n}',
     buildSeePr: 'Vedi la PR ↗',
     buildCiFailed: 'La CI è fallita sulla PR',
-    unlockWrongCode: 'Codice errato — riprova.',
-    unlockRetryError: 'Errore — riprova.',
-    unlockNetError: 'Errore di rete — riprova.',
-    unlockPlaceholder: 'Segreto di attivazione',
-    lockedTitle: 'Bloccato — parla con Kelion (la tua impronta vocale lo apre) o digita il segreto',
-    payCodeTitle: 'Il tuo codice di pagamento',
-    payCodeHint: 'Aggiungi questo codice nel campo Riferimento / Nota sulla pagina Revolut prima di pagare. Senza questo codice, il pagamento NON può essere associato automaticamente al tuo account!',
-    payCodeCopy: 'Copia il codice',
-    payCodeCopied: 'Copiato ✓',
-    payCodeOpen: 'Apri Revolut e paga ↗',
-    payCodeWaiting: 'In attesa del pagamento — i crediti arrivano da soli pochi minuti dopo l’incasso.',
+    checkoutTitle: 'Pagamento sicuro con Revolut',
+    checkoutHint: 'L’importo e il tuo account sono già collegati. Conferma il pagamento in Revolut; non serve un codice di riferimento.',
+    checkoutOpen: 'Continua in sicurezza su Revolut ↗',
+    checkoutWaiting: 'Il credito viene aggiunto solo dopo che Revolut conferma il pagamento completato.',
     serverDown:
       'Il server non risponde al momento — NON è la tua connessione. Continuo a controllare e riprenderò da solo appena torna.',
     requestLost: 'La richiesta si è interrotta lungo il percorso (la tua connessione e il server stanno bene) — per favore inviala di nuovo.',
@@ -1425,11 +1356,13 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     execTitle: 'Execução ao vivo',
     disconnectCamTitle: 'Desconectar câmera',
     connectCamTitle: 'Conectar câmera',
+    cameraConsentPrompt: 'Ativar a câmera para instantâneos solicitados explicitamente por você ou por Kelion? Visão contínua, localização e armazenamento facial permanecem desligados até você ativar cada opção separadamente.',
     micBlocked: 'Microfone bloqueado. Permita o acesso ao microfone no navegador e toque novamente.',
     micNoDevice: 'Nenhum microfone encontrado.',
     micUnsupported: 'O reconhecimento de voz não é suportado neste navegador. Use o Chrome.',
-    brainNotActive: 'O cérebro ainda não está ativo (falta a chave Gemini).',
+    brainNotActive: 'O cérebro ainda não está ativo (a OpenAI não está configurada).',
     brainError: 'Erro do cérebro. Tente novamente.',
+    turnIndeterminate: 'Esta solicitação pode já ter realizado uma ação, mas o resultado final foi perdido. Verifique o resultado antes de tentar novamente.',
     offline: 'Perdi a conexão com a internet — volto assim que o sinal retornar.',
     paywallRow: 'Atingiste o limite do plano gratuito — vê as opções para continuar.',
     rateLimited: 'Demasiados pedidos em pouco tempo — espera um momento e tenta de novo.',
@@ -1439,7 +1372,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     offlineModelNepregatit: 'Estou offline. O cérebro local ainda não foi baixado — prepare-o enquanto tem sinal e funcionarei mesmo sem conexão.',
     offlineEroareLocal: 'O cérebro local teve um problema:',
     raspunsAmanat: 'Agora posso te dar a resposta ao que me perguntaste enquanto estavas offline',
-    updateNouAnunt: 'Nova versão — atualizando…',
+    updateNouAnunt: 'Nova versão pronta — toque para aplicar',
     credits: 'créditos',
     topUp: 'Por favor, recarregue o seu crédito',
     lowCredit: 'O seu crédito está acabando — recarregue, por favor.',
@@ -1494,9 +1427,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildCiOk: 'Verificado de forma independente pela CI (build + testes numa máquina limpa)',
     buildCiRunning: 'A CI ainda está a correr no pull request',
     buildThrottled: 'À espera de quota',
-    adminLocked: 'O painel Admin está bloqueado 🔒',
-    adminLockedHint: 'Fala com o Kelion — a tua impressão de voz abre-o sozinha — ou escreve o segredo de ativação.',
-    adminUnlock: 'Desbloquear',
     latencyChip: 'enviado → primeira palavra / resposta completa',
     workClockTitle: 'Kelion está realmente trabalhando na tarefa — tempo decorrido ao vivo',
     heardYouTitle: 'Tu — a caminho do cérebro',
@@ -1549,8 +1479,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     creditOut: 'Crédito esgotado — recarregue para continuar',
     creditOk: 'Você tem crédito',
     contactLabel: 'Contato',
-    connectGoogle: 'Conectar Google',
-    connectGoogleTitle: 'Conceda acesso ao Gmail, Agenda e Drive para que Kelion possa atuar neles',
     buildQueued: 'Na fila',
     buildRunning: 'Trabalhando',
     buildDone: 'Concluído',
@@ -1563,17 +1491,10 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildAttempt: 'tentativa {n}',
     buildSeePr: 'Ver o PR ↗',
     buildCiFailed: 'A CI falhou no PR',
-    unlockWrongCode: 'Código incorreto — tente novamente.',
-    unlockRetryError: 'Erro — tente novamente.',
-    unlockNetError: 'Erro de rede — tente novamente.',
-    unlockPlaceholder: 'Segredo de ativação',
-    lockedTitle: 'Bloqueado — fale com o Kelion (sua impressão de voz o abre) ou digite o segredo',
-    payCodeTitle: 'Seu código de pagamento',
-    payCodeHint: 'Adicione este código no campo Referência / Nota na página do Revolut antes de pagar. Sem este código, o pagamento NÃO pode ser associado automaticamente à sua conta!',
-    payCodeCopy: 'Copiar o código',
-    payCodeCopied: 'Copiado ✓',
-    payCodeOpen: 'Abrir Revolut e pagar ↗',
-    payCodeWaiting: 'Aguardando o pagamento — os créditos chegam sozinhos alguns minutos após o recebimento.',
+    checkoutTitle: 'Pagamento seguro com Revolut',
+    checkoutHint: 'O valor e a sua conta já estão associados. Confirme o pagamento no Revolut; não é necessário um código de referência.',
+    checkoutOpen: 'Continuar com segurança para o Revolut ↗',
+    checkoutWaiting: 'O crédito só é adicionado quando o Revolut confirma o pagamento concluído.',
     serverDown:
       'O servidor não está respondendo no momento — NÃO é a sua internet. Continuo verificando e retomarei sozinho assim que voltar.',
     requestLost: 'A solicitação foi interrompida no caminho (sua internet e o servidor estão bem) — por favor envie novamente.',

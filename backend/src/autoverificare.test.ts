@@ -160,24 +160,13 @@ describe('ruleazaAutoverificare — probează TOATE capabilitățile + îmbogă�
   })
 })
 
-// ── AUTOVERIFICAREA LIVE din CHAT (owner, 19 aug: „eu vreau real") ────────────
-// Kelion se probează pe el însuși REAL, pe server, dintr-o unealtă de chat — ca
-// ownerul să ceară „verifică-ți funcțiile" (scris/vorbit) și să primească starea
-// MĂSURATĂ, nu una declarată. Pinuiește cablajul în cod (o singură logică live,
-// refolosită de rută ȘI de unealtă — fără duplicare).
-describe('autoverificarea LIVE e cablată în chat + refolosită de rută', () => {
+describe('autoverificarea live este o rută admin măsurată', () => {
   const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
   const admin = readFileSync(fileURLToPath(new URL('./routes/admin.ts', import.meta.url)), 'utf8')
 
-  it('unealta autoverificare e definită, în lista admin, cu executor admin-only', () => {
-    expect(chat).toMatch(/const AUTOVERIFICARE_TOOL: Tool = \{/)
-    expect(chat).toMatch(/name: 'autoverificare'/)
-    expect(chat).toMatch(/CONSTRUCTOR_COMMAND_TOOL, AUTOVERIFICARE_TOOL/)
-    const idx = chat.indexOf("case 'autoverificare':")
-    expect(idx).toBeGreaterThanOrEqual(0)
-    const bloc = chat.slice(idx, idx + 700)
-    expect(bloc).toMatch(/if \(!isAdmin\) return JSON\.stringify\(\{ error: 'admin_only' \}\)/)
-    expect(bloc).toMatch(/autoverificareLive\(\)/)
+  it('chatul nu o poate porni ca unealtă model', () => {
+    expect(chat).not.toContain("name: 'autoverificare'")
+    expect(chat).not.toContain("case 'autoverificare':")
   })
 
   it('rularea live e ÎNTR-UN SINGUR loc — ruta admin o refolosește (fără duplicare)', () => {
@@ -185,19 +174,14 @@ describe('autoverificarea LIVE e cablată în chat + refolosită de rută', () =
     expect(admin).toMatch(/await autoverificareLive\(\)/)
   })
 
-  it('registrul are capabilitatea autoverificare (admin, prin creier pe voce)', () => {
-    const c = CAPABILITIES.find((x) => x.name === 'autoverificare')
-    expect(c, 'autoverificare lipsește din registru').toBeTruthy()
-    expect(c!.admin).toBe(true)
-    expect(c!.chat).toBe(true)
+  it('registrul nu promite o capabilitate model inexistentă', () => {
+    expect(CAPABILITIES.some((x) => x.name === 'autoverificare')).toBe(false)
   })
 
-  it('unealta întoarce PLANUL măsurat + nota anti-invenție (LEGEA 5)', () => {
-    const idx = chat.indexOf("case 'autoverificare':")
-    const bloc = chat.slice(idx, idx + 1600)
-    expect(bloc).toMatch(/decideDinMasuratori\(raport\.functii\)/)
-    expect(bloc).toMatch(/\bplan,/)
-    expect(bloc).toMatch(/NU inventa cauze/)
+  it('serviciul derivă planul numai din rezultatele măsurate', () => {
+    const serviciu = readFileSync(fileURLToPath(new URL('./services/autoverificare.ts', import.meta.url)), 'utf8')
+    expect(serviciu).toContain('decideDinMasuratori')
+    expect(serviciu).toContain('ruleazaAutoverificare')
   })
 
   it('LEGEA 5 (decizia măsurată) e în legile mereu-prezente ale adminului', () => {
@@ -314,12 +298,10 @@ describe('formatMonitorAutoverificare + afișarea server-side obligatorie', () =
     expect(doc.text).not.toMatch(/CE NU MERGE sau NU POT VERIFICA/)
   })
 
-  it('executorul SCRIE raportul pe monitor server-side (obligatoriu), nu la alegerea modelului', () => {
-    const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
-    const idx = chat.indexOf("case 'autoverificare':")
-    const bloc = chat.slice(idx, idx + 1700)
-    expect(bloc).toMatch(/formatMonitorAutoverificare\(raport, plan\)/)
-    expect(bloc).toMatch(/reply\.raw\.write\(`\$\{CTRL\}\$\{JSON\.stringify\(\{ doc: \{ title: doc\.title, text: doc\.text \} \}\)\}\$\{CTRL\}`\)/)
-    expect(bloc).toMatch(/afisatPeMonitor: true/)
+  it('formatul de monitor este derivat din raport și plan, fără efect model', () => {
+    const functii = [f('x', 'stricat', 'cauză măsurată')]
+    const doc = formatMonitorAutoverificare(raport(functii), decideDinMasuratori(functii))
+    expect(doc.text).toContain('cauză măsurată')
+    expect(doc.text).toContain('x')
   })
 })

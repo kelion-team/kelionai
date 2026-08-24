@@ -20,9 +20,6 @@ const TIPARE_NEGARE: RegExp[] = [
   // oprești manual" trecea nesancționat — goleste_monitorul există și merge).
   /nu\s+(?:pot|am\s+(?:acces|control))[^.]{0,50}(?:monitor|ecran\w*|tab\w*)/i,
   /trebuie\s+s[ăa][- ]?(?:[îi]l|o|l|le)?\s*(?:închizi|inchizi|opre[șs]ti|gole[șs]ti)\s+(?:tu\s+)?manual/i,
-  // Îngust pe FALSUL măsurat (captura: „Devin nu face parte din uneltele
-  // noastre") — nu pe orice „X nu face parte…", care poate fi un adevăr.
-  /devin\s+nu\s+face\s+parte\s+din\s+unelte/i,
   // Engleză — aceleași forme.
   /i\s+(?:do\s*n[o']t|don't|cannot|can't)\s+have\s+(?:any\s+)?(?:tools|access\s+to\s+the\s+internet|access\s+to\s+tools|browsing)/i,
   /i\s+(?:cannot|can't)\s+(?:browse|search)\s+the\s+(?:internet|web)/i,

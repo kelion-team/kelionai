@@ -78,10 +78,11 @@ describe('unealta de delegare a creierului (cheama_agent)', () => {
 describe('LEGEA UNELTEI PE JOB — agenții au unelte REALE + jurnalul dovezii', () => {
   const sursa = readFileSync(fileURLToPath(new URL('./services/agentiKelion.ts', import.meta.url)), 'utf8')
 
-  it('agenții pe căile ownerului primesc MĂSURĂTORILE (stare, jurnal, loguri, erori F12, porți)', () => {
-    for (const unealta of ['stare_masurata', 'jurnal_masuratori', 'server_logs', 'client_errors', 'ruleaza_portile']) {
+  it('agenții pe căile admin primesc numai măsurători fără execuție de cod sau shell', () => {
+    for (const unealta of ['stare_masurata', 'server_logs', 'client_errors']) {
       expect(sursa, unealta).toContain(`'${unealta}'`)
     }
+    expect(sursa).not.toContain("name: 'ruleaza_portile'")
     expect(sursa).toMatch(/\.\.\.UNELTE_MASURARE\]/)
     // executorii sunt AI CASEI (sursă unică adminTools), nu copii locale
     expect(sursa).toMatch(/execSharedAdminTool\(/)
@@ -108,14 +109,9 @@ describe('LEGEA UNELTEI PE JOB — agenții au unelte REALE + jurnalul dovezii',
     expect(sursa).toMatch(/textulDemascarii\(nedovedite\)/)
   })
 
-  it('porțile grele nu țin tura agentului captivă — doar cele rapide, restul spuse pe față', () => {
-    expect(sursa).toMatch(/PORTI_RAPIDE_AGENT = \['hardcodari', 'sintaxa', 'exporturi', 'lacat-gemini'\]/)
-    expect(sursa).toContain('Porțile grele cerute')
-  })
-
   it('instrucțiunea fiecărui agent poartă LEGEA UNELTEI PE JOB', () => {
     expect(sursa).toContain('LEGEA UNELTEI PE JOB')
-    expect(sursa).toContain('Verificare fără unealtă = fabulație')
+    expect(sursa).toContain('o pretenție fără dovadă este marcată ca neverificată')
   })
 })
 

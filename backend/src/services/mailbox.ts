@@ -99,13 +99,14 @@ export function isAutomated(headers: Map<string, unknown>, fromAddr: string): bo
   return false
 }
 
-// THE JUL 25 LOOP: the alert sent from alerts@kelionai.app landed in contact@
+// Mail from the application's own domain must never trigger an auto-reply
 // and the robot replied to it like a client ("Dear client..."). We NEVER
 // auto-reply to senders from our own domain or to technical addresses — only
 // real humans get an auto-reply.
 export function isInternalSender(from: string): boolean {
   const f = (from || '').toLowerCase()
-  if (f.includes('@kelionai.app')) return true
+  const ownDomain = config.product.supportEmail.split('@')[1]?.toLowerCase()
+  if (ownDomain && f.includes(`@${ownDomain}`)) return true
   if (/(^|<)(alerts?|no-?reply|noreply|mailer-daemon|postmaster|bounce)[@.]/.test(f)) return true
   return false
 }
@@ -122,13 +123,13 @@ export function isInternalSender(from: string): boolean {
 // not just the 7).
 async function draftReply(from: string, subject: string, body: string, langName: string | null): Promise<string | null> {
   const prompt =
-    'Ești Secretarul biroului Kelionai. Un client a scris la contact@kelionai.app. ' +
+    `Ești Secretarul biroului Kelionai. Un client a scris la ${config.product.supportEmail}. ` +
     // REAL FACTS (Jul 26, Adrian's test: the brain invented "travel companion
     // app" — without factual context, the model improvises what the firm is).
     // The reply uses ONLY the facts here, nothing invented about the product.
-    'CE ESTE Kelionai (folosește DOAR faptele astea, nu inventa altele): un asistent AI live pe kelionai.app — ' +
+    `CE ESTE Kelionai (folosește DOAR faptele astea, nu inventa altele): un asistent AI live pe ${config.publicOrigin} — ` +
     'un avatar 3D cu care vorbești prin voce sau scris, care vede prin cameră, caută pe web, ' +
-    'știe hărți/vreme/Google și răspunde mereu în limba clientului. Începi simplu: intri pe kelionai.app ' +
+    `știe hărți/vreme/Google și răspunde mereu în limba clientului. Începi simplu: intri pe ${config.publicOrigin} ` +
     'și te conectezi cu contul Google. ' +
     'Redactează DOAR corpul unui răspuns politicos, cald și profesionist, ' +
     (langName
@@ -185,7 +186,7 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, _alread
 
   // Loop guard: mark machine mail (bounces, auto-replies, lists, our own) seen
   // and drop it — replying would start an endless mail ping-pong.
-  // isInternalSender covers the JUL 25 LOOP: any @kelionai.app address (e.g.
+  // isInternalSender covers any address on the configured application domain
   // alerts@) is system, not a client — it NEVER gets an auto-reply and no
   // forward either (the admin already has it directly from the alert).
   if (isAutomated(headers, fromAddr) || isInternalSender(fromAddr)) {

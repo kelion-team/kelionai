@@ -71,9 +71,8 @@ describe('poarta faptelor — pretenția fără faptă se prinde (proba la rular
     // chiar și cu alte unelte executate (ex. documentul creat) — scanarea tot nedovedită rămâne
     expect(pretentiiFaraFapta(minciunaReala, reusite('create_doc'))).toHaveLength(1)
     expect(pretentiiFaraFapta('Am auditat codul aplicației și e curat.', [])).toHaveLength(1)
-    // scanarea REALĂ: poarta anti-hardcod rulată pe server (sau verdictul din jurnal) o acoperă
-    expect(pretentiiFaraFapta(minciunaReala, reusite('ruleaza_portile'))).toEqual([])
-    expect(pretentiiFaraFapta('Am scanat codul — verdictul din jurnal e curat.', reusite('jurnal_masuratori'))).toEqual([])
+    // scanarea REALĂ este raportată numai de workerul Constructor separat
+    expect(pretentiiFaraFapta(minciunaReala, reusite('constructor_status'))).toEqual([])
     // oferta la viitor NU e pretenție
     expect(pretentiiFaraFapta('Pot scana codul dacă vrei.', [])).toEqual([])
   })
@@ -188,24 +187,20 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
     expect(chat).toMatch(/\[POARTA FAPTELOR\] plan fără execuție/)
   })
 
-  // (Testul „poarta bootului din constructor" a fost ȘTERS pe 22 aug: fișierul
-  // pe care-l păzea, deploy/constructor-agent.mjs, nu mai există — mașinăria
-  // constructorului local a fost ștearsă integral, constructorul e DEVIN.)
+  // Constructorul local a fost eliminat; execuția aparține workerului Codex separat.
 })
 
-describe('LEGEA ANTI-HARDCODARE — poarta automată + legea în documentele oricărui AI', () => {
+describe('LEGEA ANTI-HARDCODARE — poarta automată + regula canonică', () => {
   it('poarta există, vânează banii din frontend și modelele din afara config-ului', () => {
     const poarta = sursa('../../scripts/verifica-hardcodari.mjs')
-    expect(poarta).toMatch(/R1 bani-hardcodați/)
-    expect(poarta).toMatch(/R2 model-hardcodat/)
+    expect(poarta).toMatch(/R1 bani în interfață/)
+    expect(poarta).toMatch(/R2 model AI în cod/)
     expect(poarta).toMatch(/hardcod-permis:/)
     expect(poarta).toMatch(/process\.exit\(1\)/)
   })
 
-  it('legea stă scrisă în TOATE documentele de intrare ale AI-urilor', () => {
-    for (const doc of ['../../CLAUDE.md', '../../AGENTS.md', '../../GEMINI.md']) {
-      expect(sursa(doc), doc).toMatch(/LEGEA ANTI-HARDCODARE \(owner, 16 aug 2026/)
-      expect(sursa(doc), doc).toMatch(/verifica-hardcodari\.mjs/)
-    }
+  it('AGENTS.md rămâne singurul document de reguli urmărit', () => {
+    const agents = sursa('../../AGENTS.md')
+    expect(agents).toMatch(/verifica-hardcodari\.mjs/)
   })
 })

@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify'
+import { randomBytes } from 'node:crypto'
+import { config } from '../config.js'
 import { osrmRoute } from '../services/google.js'
 
 // Renders a real, embeddable map (Leaflet + OpenStreetMap tiles) SAME-ORIGIN.
@@ -27,6 +29,50 @@ import { osrmRoute } from '../services/google.js'
 const PIESE_SURSA = 'https://basemaps.cartocdn.com/rastertiles/voyager'
 const pieseCache = new Map<string, Buffer>() // cheie z/x/y@r — LRU simplu
 const PIESE_CACHE_MAX = 600 // ~15-35 MB la 25-60 KB/piesă — plafonat conștient
+const PIESA_MAX_BYTES = 1024 * 1024
+
+/** JSON embedded in an inline script must also neutralise the HTML parser.
+ * JSON.stringify alone leaves `</script>` executable in a same-origin page. */
+export function jsonPentruScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
+export function coordonateValide(value: number[]): value is [number, number] {
+  return value.length === 2 && Number.isFinite(value[0]) && Number.isFinite(value[1]) &&
+    value[0] >= -90 && value[0] <= 90 && value[1] >= -180 && value[1] <= 180
+}
+
+async function citestePiesaCuPlafon(response: Response): Promise<Buffer | null> {
+  const announced = Number(response.headers.get('content-length') ?? 0)
+  if (announced > PIESA_MAX_BYTES) {
+    await response.body?.cancel().catch(() => undefined)
+    return null
+  }
+  const reader = response.body?.getReader()
+  if (!reader) {
+    const value = Buffer.from(await response.arrayBuffer())
+    return value.length <= PIESA_MAX_BYTES ? value : null
+  }
+  const chunks: Buffer[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > PIESA_MAX_BYTES) {
+      await reader.cancel().catch(() => undefined)
+      return null
+    }
+    chunks.push(Buffer.from(value))
+  }
+  return Buffer.concat(chunks)
+}
+
 export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
   // Proxy-ul de piese: /api/tile/12/2048/1362 sau /api/tile/12/2048/1362@2x
   // (retina). Doar cifre + opțional @2x — nimic altceva nu pleacă spre CartoDB.
@@ -34,6 +80,13 @@ export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
     const { z, x, y } = req.params
     if (!/^\d{1,2}$/.test(z) || !/^\d{1,7}$/.test(x) || !/^\d{1,7}(@2x)?$/.test(y))
       return reply.code(400).send({ error: 'bad_tile' })
+    const zoom = Number(z)
+    const tileX = Number(x)
+    const tileY = Number(y.replace(/@2x$/, ''))
+    const axisLimit = 2 ** zoom
+    if (zoom > 22 || tileX >= axisLimit || tileY >= axisLimit) {
+      return reply.code(400).send({ error: 'bad_tile' })
+    }
     const cheie = `${z}/${x}/${y}`
     const dinCache = pieseCache.get(cheie)
     if (dinCache) {
@@ -44,11 +97,18 @@ export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
     }
     try {
       const r = await fetch(`${PIESE_SURSA}/${z}/${x}/${y}.png`, {
-        headers: { 'user-agent': 'kelionai.app tile proxy (contact@kelionai.app)' },
+        headers: {
+          'user-agent': `map tile proxy (${config.product.supportEmail})`,
+        },
         signal: AbortSignal.timeout(8000),
       })
       if (!r.ok) return reply.code(502).send({ error: `tile_upstream_${r.status}` })
-      const buf = Buffer.from(await r.arrayBuffer())
+      if (!(r.headers.get('content-type') ?? '').toLowerCase().startsWith('image/')) {
+        await r.body?.cancel().catch(() => undefined)
+        return reply.code(502).send({ error: 'tile_upstream_type' })
+      }
+      const buf = await citestePiesaCuPlafon(r)
+      if (!buf) return reply.code(502).send({ error: 'tile_upstream_size' })
       pieseCache.set(cheie, buf)
       if (pieseCache.size > PIESE_CACHE_MAX) {
         // Scoatem cea mai VECHE intrare (primul element al Map-ului = LRU).
@@ -67,8 +127,8 @@ export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
       const from = (req.query.from ?? '').split(',').map(Number)
       const to = (req.query.to ?? '').split(',').map(Number)
       const punct = (req.query.punct ?? '').split(',').map(Number)
-      const areTraseu = from.length === 2 && to.length === 2 && [...from, ...to].every((n) => Number.isFinite(n))
-      const arePunct = punct.length === 2 && punct.every((n) => Number.isFinite(n))
+      const areTraseu = coordonateValide(from) && coordonateValide(to)
+      const arePunct = coordonateValide(punct)
       // Numele locului apare în popup — text pur, tăiat scurt (intră în HTML).
       const nume = (req.query.nume ?? '').slice(0, 120)
       let coords: [number, number][] = areTraseu ? [[from[0], from[1]], [to[0], to[1]]] : []
@@ -82,10 +142,17 @@ export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
         const g = j?.routes?.[0]?.geometry?.coordinates
         if (g && g.length > 1) coords = g.map(([lon, lat]) => [lat, lon])
       }
+      const nonce = randomBytes(18).toString('base64')
+      const productHost = new URL(config.product.publicAppOrigin).host
+      reply.header(
+        'Content-Security-Policy',
+        `default-src 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'`,
+      )
+      reply.header('Cache-Control', 'no-store')
       const html = `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/leaflet/leaflet.css">
-<style>html,body{height:100%;width:100%;margin:0;padding:0;background:#0b0d12;overflow:hidden}
+<style nonce="${nonce}">html,body{height:100%;width:100%;margin:0;padding:0;background:#0b0d12;overflow:hidden}
 #map{height:100vh;min-height:100vh;width:100vw;margin:0;padding:0;background:#0b0d12}
 #hud{position:absolute;z-index:1000;left:12px;bottom:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
 font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:12px;border:1px solid #2a3350}
@@ -101,21 +168,22 @@ border:1px solid #2a3350;border-radius:999px;padding:8px 14px;font:600 13px syst
 <body><div id="map"></div><div id="hud" style="display:none"></div>
 <button id="iesire">✕ Ieșire</button><button id="recenter">Urmărește mașina ↺</button>
 <script src="/leaflet/leaflet.js"></script>
-<script>
-var c=${JSON.stringify(coords)};
-var punct=${JSON.stringify(arePunct ? [punct[0], punct[1]] : null)};
-var nume=${JSON.stringify(nume)};
+<script nonce="${nonce}">
+var c=${jsonPentruScript(coords)};
+var punct=${jsonPentruScript(arePunct ? [punct[0], punct[1]] : null)};
+var nume=${jsonPentruScript(nume)};
+var productHost=${jsonPentruScript(productHost)};
 var map=L.map('map',{zoomControl:true});
 var hud=document.getElementById('hud');
 var strat=L.tileLayer('/api/tile/{z}/{x}/{y}{r}',{maxZoom:19,attribution:'© OpenStreetMap contributors © CartoDB'}).addTo(map);
 /* PIESE NEVENITE = SPUS, NU MASCAT: piesele vin acum de pe DOMENIUL NOSTRU
-   (/api/tile → proxy spre CartoDB pe server). Dacă tot nu vin, cauza e serverul
-   nostru sau rețeaua ta spre kelionai.app — HUD-ul o spune, nu lasă gri mut. */
+   (/api/tile → proxy spre sursa configurată pe server). Dacă tot nu vin, cauza e serverul
+   nostru sau rețeaua ta spre domeniul aplicației — HUD-ul o spune, nu lasă gri mut. */
 var pieseCazute=0,hudPiese=false;
 strat.on('tileerror',function(){
   pieseCazute++;
   if(pieseCazute===4){hud.style.display='block';hudPiese=true;
-    hud.textContent='Piesele de hartă nu se încarcă de la kelionai.app/api/tile — serverul nu ajunge la sursa de hărți sau rețeaua ta blochează cererea';}
+    hud.textContent='Piesele de hartă nu se încarcă de la '+productHost+'/api/tile — serverul nu ajunge la sursa de hărți sau rețeaua ta blochează cererea';}
 });
 strat.on('tileload',function(){
   if(hudPiese){hud.style.display='none';hudPiese=false;}
@@ -154,7 +222,7 @@ var btn=document.getElementById('recenter');
 // IEȘIREA (10 aug): închide tabul din aplicație (postMessage, ca Tranzacții);
 // pe pagina de sine stătătoare se întoarce acasă. Esc face la fel.
 function inchideHarta(){
-  if(window.top!==window.self){ try{ window.parent.postMessage({kelion:'inchide-monitorul'},'*'); }catch(e){} }
+  if(window.top!==window.self){ try{ window.parent.postMessage({kelion:'inchide-monitorul'},location.origin); }catch(e){} }
   else { location.href='/'; }
 }
 document.getElementById('iesire').onclick=inchideHarta;

@@ -5,7 +5,6 @@ import {
   stareSesiune,
   pastreazaStareSesiune,
   actualizeazaStareSesiune,
-  uitaStareSesiune,
   TTL_SESIUNE_MS,
 } from './services/stareSesiune.js'
 
@@ -17,41 +16,37 @@ import {
 
 const stare = (over = {}) => ({
   speechLang: 'ro', meserieId: null, disabledGestures: [],
-  modelChoiceKv: null, voicePref: null, balance: null, ...over,
+  voicePref: null, balance: null, ...over,
 })
 
+let emailSeq = 0
+let email = ''
+
 describe('starea de sesiune se citește o dată, nu la fiecare întrebare', () => {
-  beforeEach(() => uitaStareSesiune('a@b.c'))
+  beforeEach(() => { email = `session-${++emailSeq}@example.test` })
 
   it('prima întrebare nu găsește nimic (se va citi din DB), a doua o ia din memorie', () => {
-    expect(stareSesiune('a@b.c', 1000)).toBeNull()
-    pastreazaStareSesiune('a@b.c', stare(), 1000)
-    expect(stareSesiune('a@b.c', 1001)?.speechLang).toBe('ro')
+    expect(stareSesiune(email, 1000)).toBeNull()
+    pastreazaStareSesiune(email, stare(), 1000)
+    expect(stareSesiune(email, 1001)?.speechLang).toBe('ro')
   })
 
   it('starea expiră după TTL — plasă de siguranță, nu se servește la infinit', () => {
-    pastreazaStareSesiune('a@b.c', stare(), 1000)
-    expect(stareSesiune('a@b.c', 1000 + TTL_SESIUNE_MS + 1)).toBeNull()
+    pastreazaStareSesiune(email, stare(), 1000)
+    expect(stareSesiune(email, 1000 + TTL_SESIUNE_MS + 1)).toBeNull()
   })
 
   it('o valoare schimbată se actualizează în memorie, fără recitire din DB', () => {
-    pastreazaStareSesiune('a@b.c', stare(), 1000)
-    actualizeazaStareSesiune('a@b.c', { speechLang: 'en' })
-    expect(stareSesiune('a@b.c', 1001)?.speechLang).toBe('en')
-  })
-
-  it('deconectarea uită contul — următoarea sesiune recitește curat', () => {
-    pastreazaStareSesiune('a@b.c', stare(), 1000)
-    uitaStareSesiune('a@b.c')
-    expect(stareSesiune('a@b.c', 1001)).toBeNull()
+    pastreazaStareSesiune(email, stare(), 1000)
+    actualizeazaStareSesiune(email, { speechLang: 'en' })
+    expect(stareSesiune(email, 1001)?.speechLang).toBe('en')
   })
 
   it('conturile nu se amestecă între ele', () => {
-    pastreazaStareSesiune('a@b.c', stare({ speechLang: 'ro' }), 1000)
+    pastreazaStareSesiune(email, stare({ speechLang: 'ro' }), 1000)
     pastreazaStareSesiune('x@y.z', stare({ speechLang: 'en' }), 1000)
-    expect(stareSesiune('a@b.c', 1001)?.speechLang).toBe('ro')
+    expect(stareSesiune(email, 1001)?.speechLang).toBe('ro')
     expect(stareSesiune('x@y.z', 1001)?.speechLang).toBe('en')
-    uitaStareSesiune('x@y.z')
   })
 })
 
@@ -65,7 +60,10 @@ describe('chat.ts chiar folosește starea, și NU slăbește securitatea', () =>
 
   it('preferința de voce NU mai e a treia interogare pe user_prefs în aceeași tură', () => {
     // Înainte: `await getVoicePref(user.email)` chiar înainte de apelul la creier.
-    expect(chat).toMatch(/createVoiceStream\(reply, userLang, prefs\.voicePref\)/)
+    expect(chat).toMatch(/createVoiceStream\(reply, userLang, prefs\.voicePref, user\.email, clientKey, replayLeaseToken\)/)
+    expect(chat).toMatch(/usageContext: \{ userEmail, surface: 'chat_tts' \}/)
+    expect(chat.match(/synthesize\(t, lang/g)).toHaveLength(1)
+    expect(chat).toMatch(/executeChatSideEffect\(\s*\{ userEmail, idempotencyKey, leaseToken \}/)
     expect(chat).not.toMatch(/await getVoicePref\(user\.email\)/)
   })
 
@@ -73,11 +71,9 @@ describe('chat.ts chiar folosește starea, și NU slăbește securitatea', () =>
     expect(chat).toMatch(/actualizeazaStareSesiune\(user\.email, \{ speechLang: committedLang \}\)/)
   })
 
-  it('SECURITATEA rămâne per-tură: isAdmin se recalculează la fiecare cerere', () => {
-    // Regula ownerului e despre VITEZĂ (preferințe recitite degeaba), nu despre
-    // a slăbi gardul. isAdmin depinde de CINE vorbește în tura curentă (oaspete,
-    // voce nevalidată) — nu are ce căuta într-un cache de sesiune.
-    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch\n/)
+  it('SECURITATEA rămâne per-tură: adminul se derivă din emailul verificat', () => {
+    // Identitatea privilegiată nu are ce căuta într-un cache de preferințe.
+    expect(chat).toMatch(/const isAdminUser = esteAdminKelion\(user\.email\)/)
     // isAdmin nu se citește NICIODATĂ din cache (ar fi `cache.isAdmin`/`prefs.isAdmin`)
     expect(chat).not.toMatch(/(?:cache|prefs)\.isAdmin/)
   })

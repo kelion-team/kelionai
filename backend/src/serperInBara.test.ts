@@ -40,7 +40,7 @@ describe('creditul Serper există și e alimentat (în admin)', () => {
   it('nu adaugă un poller nou — merge pe cererea care exista deja în Stage', () => {
     const pollere = bara.match(/usePolledJson</g) ?? []
     expect(pollere.length).toBeLessThanOrEqual(2)
-    expect(bara).toContain("usePolledJson<BrainCredit>('/api/admin/brain-credit'")
+    expect(bara).toMatch(/usePolledJson<BrainCredit>\(\s*['"]\/api\/admin\/brain-credit['"]/)
     // AdminPanel primește datele ca prop — nu-și pornește propriul poll.
     expect(bara).toMatch(/brainCredit=\{brainCredit\}/)
     expect(admin).not.toContain('usePolledJson')
@@ -51,7 +51,7 @@ describe('lipsa se arată ca lipsă, nu ca zero', () => {
   it('citirea eșuată SAU soldul lipsă dă „⚠", nu cifre', () => {
     // Acum: „⚠" și când citirea a picat (`live:false`) ȘI când `live:true` dar
     // fără `balance` (soldul lipsă ≠ cont gol) — nu mai apare niciun „Serper 0".
-    expect(admin).toMatch(/Serper \{s\?\.live && typeof s\.balance === 'number' \? serperK\(s\.balance\) : '⚠'\}/)
+    expect(admin).toMatch(/Serper\{' '\}\s*\{s\?\.live && typeof s\.balance === 'number' \? serperK\(s\.balance\) : '⚠'\}/)
     expect(admin).toContain('citirea Serper a eșuat')
   })
 

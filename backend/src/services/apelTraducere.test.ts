@@ -1,160 +1,204 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Directorul fals + limbile. Mock-uim db, creierul UNITAR (rationeazaMesaje) ?i TTS.
-// Restul (apelul real + releul) ruleaz? adev?rat.
-const DIR = [
+const DIRECTORY = [
   { email: 'a@x.com', name: 'Ana' },
   { email: 'b@x.com', name: 'Bogdan' },
 ]
+const UTTERANCE_ID = '11111111-1111-4111-8111-111111111111'
+
+const billing = vi.hoisted(() => ({
+  debit: vi.fn(async () => ({ ok: true as const, debitedMinor: 1, duplicate: false })),
+  grant: vi.fn(async () => true),
+}))
 vi.mock('../db.js', () => ({
-  cautaUtilizatorApel: vi.fn(async (t: string) => {
-    const q = t.toLowerCase()
-    return { citit: true, valoare: DIR.filter((u) => u.email.includes(q) || u.name.toLowerCase().includes(q)) }
+  cautaUtilizatorApel: vi.fn(async (term: string) => {
+    const query = term.toLowerCase()
+    return {
+      citit: true,
+      valoare: DIRECTORY.filter((user) => user.email.includes(query) || user.name.toLowerCase().includes(query)),
+    }
   }),
   getSpeechLang: vi.fn(async () => 'ro'),
-  recordCost: vi.fn(async () => {}),
+  debitWalletMinorAtomar: billing.debit,
+  grantCreditMinor: billing.grant,
 }))
 
-const { rationeazaMesaje } = vi.hoisted(() => ({
-  rationeazaMesaje: vi.fn(async () => ({
-    text: 'Bun? (tradus ?n ro)',
+const brain = vi.hoisted(() => ({
+  reason: vi.fn(async () => ({
+    text: 'Bună (tradus în română)',
     toolCalls: [],
-    costUsd: 0.001,
-    model: 'x',
-    stop: 'end',
+    model: 'test-model',
+    stop: 'completed',
     inputTokens: 1,
     outputTokens: 1,
   })),
 }))
-vi.mock('./creierRationament.js', () => ({ rationeazaMesaje }))
+vi.mock('./creierRationament.js', () => ({ rationeazaMesaje: brain.reason }))
 
-const synthesize = vi.fn(async () => ({ ok: true, audio: Buffer.from('MP3DATA'), engine: 'google' }))
-vi.mock('./tts.js', () => ({ synthesize }))
-vi.mock('./cost.js', () => ({ ttsCost: () => 0.0001 }))
-vi.mock('../config.js', () => ({ config: { geminiModel: 'gemini-test' } }))
+const speech = vi.hoisted(() => ({
+  synthesize: vi.fn(async () => ({ ok: true as const, audio: Buffer.from('MP3DATA'), engine: 'openai' as const })),
+  transcribe: vi.fn(async () => ({ ok: true as const, transcript: 'Salut lume', providerRequestId: 'req_test' })),
+}))
+vi.mock('./tts.js', () => ({ synthesize: speech.synthesize }))
+vi.mock('./openaiCallTranscription.js', () => ({ transcribeCallAudio: speech.transcribe }))
+vi.mock('../config.js', () => ({ config: { billing: { callUtteranceMinor: 1 } } }))
 
-const apel = await import('./apel.js')
+const calls = await import('./apel.js')
 const { traduVorbire, intentApel } = await import('./apelTraducere.js')
+const registered: Array<{ email: string; connection: ReturnType<typeof connection> }> = []
 
-function con(): { trimite: (m: unknown) => void; mesaje: any[] } {
-  const mesaje: any[] = []
-  return { trimite: (m) => mesaje.push(m), mesaje }
+function connection(): { trimite: (message: unknown) => void; messages: Array<Record<string, unknown>> } {
+  const messages: Array<Record<string, unknown>> = []
+  return { trimite: (message) => messages.push(message as Record<string, unknown>), messages }
 }
 
-describe('services/apelTraducere.ts ? traducerea live ?n apel (Faza 2)', () => {
-  beforeEach(() => {
-    apel._reset()
-    rationeazaMesaje.mockClear()
-    synthesize.mockClear()
-    rationeazaMesaje.mockResolvedValue({
-      text: 'Bun? (tradus ?n ro)',
-      toolCalls: [],
-      costUsd: 0.001,
-      model: 'x',
-      stop: 'end',
-      inputTokens: 1,
-      outputTokens: 1,
+function register(email: string, value: ReturnType<typeof connection>): void {
+  calls.inregistreazaPrezenta(email, value)
+  registered.push({ email, connection: value })
+}
+
+async function connectedCall(): Promise<{
+  callId: string
+  caller: ReturnType<typeof connection>
+  callee: ReturnType<typeof connection>
+}> {
+  const caller = connection()
+  const callee = connection()
+  register('a@x.com', caller)
+  register('b@x.com', callee)
+  const result = await calls.sunaUtilizator('a@x.com', 'Bogdan')
+  const callId = result.callId ?? ''
+  calls.gestioneazaMesaj('b@x.com', { type: 'accept', callId })
+  return { callId, caller, callee }
+}
+
+async function pendingCall(): Promise<string> {
+  register('b@x.com', connection())
+  const result = await calls.sunaUtilizator('a@x.com', 'Bogdan')
+  return result.callId ?? ''
+}
+
+beforeEach(() => {
+  brain.reason.mockReset()
+  brain.reason.mockResolvedValue({
+    text: 'Bună (tradus în română)',
+    toolCalls: [],
+    model: 'test-model',
+    stop: 'completed',
+    inputTokens: 1,
+    outputTokens: 1,
+  })
+  speech.synthesize.mockReset()
+  speech.synthesize.mockResolvedValue({ ok: true, audio: Buffer.from('MP3DATA'), engine: 'openai' })
+  speech.transcribe.mockReset()
+  speech.transcribe.mockResolvedValue({ ok: true, transcript: 'Salut lume', providerRequestId: 'req_test' })
+  billing.debit.mockReset()
+  billing.debit.mockResolvedValue({ ok: true, debitedMinor: 1, duplicate: false })
+  billing.grant.mockReset()
+  billing.grant.mockResolvedValue(true)
+})
+
+afterEach(() => {
+  for (const item of registered.splice(0).reverse()) {
+    calls.scoatePrezenta(item.email, item.connection)
+  }
+})
+
+describe('call translation', () => {
+  it('charges once and delivers translated text plus OpenAI speech', async () => {
+    const { callId, callee } = await connectedCall()
+    const outcome = await traduVorbire('a@x.com', {
+      type: 'vorbire', callId, utteranceId: UTTERANCE_ID, audio: 'BASE64', mime: 'audio/webm',
     })
-  })
 
-  it('o fraz? de la A ajunge la B TRADUS? (text + voce)', async () => {
-    const cA = con()
-    const cB = con()
-    apel.inregistreazaPrezenta('a@x.com', cA)
-    apel.inregistreazaPrezenta('b@x.com', cB)
-    const r = await apel.sunaUtilizator('a@x.com', 'Bogdan')
-    expect(r.ok).toBe(true)
-    apel.gestioneazaMesaj('b@x.com', { type: 'accept', callId: r.callId })
-
-    await traduVorbire('a@x.com', { callId: r.callId, audio: 'BASE64AUDIO', mime: 'audio/webm' })
-
-    const tradus = cB.mesaje.find((m) => m.type === 'tradus')
-    expect(tradus).toBeTruthy()
-    expect(tradus.text).toBe('Bun? (tradus ?n ro)')
-    expect(tradus.audio).toBe(Buffer.from('MP3DATA').toString('base64'))
-    expect(tradus.de_la).toBe('Ana')
-    expect(rationeazaMesaje).toHaveBeenCalledTimes(1)
-    expect(synthesize).toHaveBeenCalledWith('Bun? (tradus ?n ro)', 'ro', expect.anything())
-  })
-
-  it('dac? Gemini nu scoate text (t?cere/zgomot) ? nu se trimite nimic', async () => {
-    rationeazaMesaje.mockResolvedValueOnce({
-      text: '',
-      toolCalls: [],
-      costUsd: 0,
-      model: 'x',
-      stop: 'end',
-      inputTokens: 0,
-      outputTokens: 0,
+    expect(outcome).toEqual({ ok: true, state: 'delivered' })
+    expect(billing.debit).toHaveBeenCalledWith(
+      'a@x.com', 1, `call:${callId}:${UTTERANCE_ID}`, 'call translation utterance',
+    )
+    const translated = callee.messages.find((message) => message.type === 'tradus')
+    expect(translated).toMatchObject({
+      callId,
+      utteranceId: UTTERANCE_ID,
+      text: 'Bună (tradus în română)',
+      audio: Buffer.from('MP3DATA').toString('base64'),
+      de_la: 'Ana',
     })
-    const cA = con()
-    const cB = con()
-    apel.inregistreazaPrezenta('a@x.com', cA)
-    apel.inregistreazaPrezenta('b@x.com', cB)
-    const r = await apel.sunaUtilizator('a@x.com', 'Bogdan')
-    apel.gestioneazaMesaj('b@x.com', { type: 'accept', callId: r.callId })
-    await traduVorbire('a@x.com', { callId: r.callId, audio: 'X', mime: 'audio/webm' })
-    expect(cB.mesaje.some((m) => m.type === 'tradus')).toBe(false)
+    expect(brain.reason).toHaveBeenCalledTimes(1)
+    expect(speech.synthesize).toHaveBeenCalledWith(
+      'Bună (tradus în română)',
+      'ro',
+      { usageContext: { userEmail: 'a@x.com', surface: 'call_translation_tts' } },
+    )
   })
 
-  it('cineva din AFARA apelului nu poate injecta traduceri', async () => {
-    const cA = con()
-    const cB = con()
-    apel.inregistreazaPrezenta('a@x.com', cA)
-    apel.inregistreazaPrezenta('b@x.com', cB)
-    const r = await apel.sunaUtilizator('a@x.com', 'Bogdan')
-    await traduVorbire('strain@x.com', { callId: r.callId, audio: 'X', mime: 'audio/webm' })
-    expect(rationeazaMesaje).not.toHaveBeenCalled()
-    expect(cB.mesaje.some((m) => m.type === 'tradus')).toBe(false)
+  it('does not call a provider twice for a duplicate billing reference', async () => {
+    billing.debit.mockResolvedValueOnce({ ok: true, debitedMinor: 0, duplicate: true })
+    const { callId } = await connectedCall()
+    const outcome = await traduVorbire('a@x.com', {
+      callId, utteranceId: UTTERANCE_ID, audio: 'BASE64', mime: 'audio/webm',
+    })
+    expect(outcome).toEqual({ ok: true, state: 'duplicate' })
+    expect(speech.transcribe).not.toHaveBeenCalled()
+    expect(brain.reason).not.toHaveBeenCalled()
   })
 
-  it('dac? TTS pic?, tot trimite subtitrarea (f?r? voce)', async () => {
-    synthesize.mockResolvedValueOnce({ ok: false, status: 500, error: 'tts down' } as never)
-    const cA = con()
-    const cB = con()
-    apel.inregistreazaPrezenta('a@x.com', cA)
-    apel.inregistreazaPrezenta('b@x.com', cB)
-    const r = await apel.sunaUtilizator('a@x.com', 'Bogdan')
-    apel.gestioneazaMesaj('b@x.com', { type: 'accept', callId: r.callId })
-    await traduVorbire('a@x.com', { callId: r.callId, audio: 'X', mime: 'audio/webm' })
-    const tradus = cB.mesaje.find((m) => m.type === 'tradus')
-    expect(tradus).toBeTruthy()
-    expect(tradus.text).toBe('Bun? (tradus ?n ro)')
-    expect(tradus.audio).toBe('')
+  it('refunds when transcription cannot deliver a phrase', async () => {
+    speech.transcribe.mockResolvedValueOnce({ ok: false, status: 502, error: 'provider_failed' } as never)
+    const { callId } = await connectedCall()
+    const outcome = await traduVorbire('a@x.com', {
+      callId, utteranceId: UTTERANCE_ID, audio: 'BASE64', mime: 'audio/webm',
+    })
+    expect(outcome).toEqual({ ok: false, code: 'provider_failed' })
+    expect(billing.grant).toHaveBeenCalledWith('a@x.com', 1, `call:${callId}:${UTTERANCE_ID}:refund`)
+  })
+
+  it('rejects outsiders and calls that are not connected before charging', async () => {
+    register('b@x.com', connection())
+    const result = await calls.sunaUtilizator('a@x.com', 'Bogdan')
+    const outcome = await traduVorbire('outsider@x.com', {
+      callId: result.callId, utteranceId: UTTERANCE_ID, audio: 'BASE64', mime: 'audio/webm',
+    })
+    expect(outcome).toEqual({ ok: false, code: 'not_connected' })
+    expect(billing.debit).not.toHaveBeenCalled()
+    expect(speech.transcribe).not.toHaveBeenCalled()
+  })
+
+  it('still delivers subtitles when speech synthesis fails', async () => {
+    speech.synthesize.mockResolvedValueOnce({ ok: false, status: 502, error: 'tts_failed' } as never)
+    const { callId, callee } = await connectedCall()
+    const outcome = await traduVorbire('a@x.com', {
+      callId, utteranceId: UTTERANCE_ID, audio: 'BASE64', mime: 'audio/webm',
+    })
+    expect(outcome).toEqual({ ok: true, state: 'delivered' })
+    expect(callee.messages.find((message) => message.type === 'tradus')).toMatchObject({ audio: '' })
+    expect(billing.grant).not.toHaveBeenCalled()
   })
 })
 
-describe('services/apelTraducere.ts ? hands-free ?spui r?spunde ?i se face leg?tura"', () => {
-  beforeEach(() => {
-    rationeazaMesaje.mockClear()
-    rationeazaMesaje.mockResolvedValue({
-      text: 'NONE',
+describe('hands-free call intent', () => {
+  it.each([
+    ['ANSWER', 'answer'],
+    ['DECLINE', 'decline'],
+    ['NONE', 'none'],
+    ['NOT ANSWER', 'none'],
+  ] as const)('maps the exact classifier token %s to %s', async (modelText, expected) => {
+    brain.reason.mockResolvedValueOnce({
+      text: modelText,
       toolCalls: [],
-      costUsd: 0.0001,
-      model: 'x',
-      stop: 'end',
+      model: 'test-model',
+      stop: 'completed',
       inputTokens: 1,
       outputTokens: 1,
     })
+    const callId = await pendingCall()
+    await expect(intentApel('b@x.com', callId, UTTERANCE_ID, 'BASE64', 'audio/webm')).resolves.toBe(expected)
   })
 
-  it('ANSWER din voce ? inten?ia ?answer"', async () => {
-    rationeazaMesaje.mockResolvedValueOnce({ text: 'ANSWER', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
-    expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('answer')
-  })
-
-  it('DECLINE din voce ? inten?ia ?decline"', async () => {
-    rationeazaMesaje.mockResolvedValueOnce({ text: 'DECLINE', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
-    expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('decline')
-  })
-
-  it('zgomot/neclar ? ?none" (nu accept?/refuz? din gre?eal?)', async () => {
-    rationeazaMesaje.mockResolvedValueOnce({ text: 'NONE', toolCalls: [], costUsd: 0.0001, model: 'x', stop: 'end', inputTokens: 1, outputTokens: 1 })
-    expect(await intentApel('a@x.com', 'BASE64', 'audio/webm')).toBe('none')
-  })
-
-  it('f?r? audio ? ?none" f?r? s? cheme creierul', async () => {
-    expect(await intentApel('a@x.com', '', 'audio/webm')).toBe('none')
-    expect(rationeazaMesaje).not.toHaveBeenCalled()
+  it('does not spend provider calls for empty audio or a forged call', async () => {
+    const callId = await pendingCall()
+    await expect(intentApel('b@x.com', callId, UTTERANCE_ID, '', 'audio/webm')).resolves.toBe('none')
+    await expect(intentApel('a@x.com', callId, UTTERANCE_ID, 'BASE64', 'audio/webm')).resolves.toBe('none')
+    expect(speech.transcribe).not.toHaveBeenCalled()
+    expect(brain.reason).not.toHaveBeenCalled()
   })
 })

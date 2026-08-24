@@ -20,70 +20,20 @@
 //
 // Batch A of `PROCEDURA-REFACERE-CLONE.md`.
 
-/** One row of the visitor analysis: who, from where, with what, what interested them. */
+/** One privacy-minimised daily traffic aggregate; never one person/device. */
 export interface DemoRecent {
-  kind: 'visit' | 'demo'
-  ip: string
-  country: string
-  code: string
-  city: string
-  region: string
-  isp: string
-  browser: string
-  os: string
-  device: string
-  lang: string
-  referrer: string
-  is_bot: boolean
+  kind: 'visit'
+  country_code: string
   started_at: string
-  /** On a DEMO row: the temporary email whose conversation the owner can
-   *  open (click on the row). Empty on simple visits (they never spoke). */
-  session_email: string
-  /** What interested them: the first question/topic of the demo trial. Empty on simple visits. */
-  topic: string
-  /** Their timezone (IANA, e.g. "Europe/Bucharest"). Tells you what time it
-   *  was AT THEIR PLACE when they came in — not your time. The column existed
-   *  in the table and was never read. */
-  tz: string
-  /** How many times they visited BEFORE this visit (same fingerprint).
-   *  0 = first time. A person returning for the third time is not the same
-   *  thing as one who landed on the site once. */
-  vizite_anterioare: number
-  /** URL of the photo captured during the visit (webcam snapshot). Empty if none. */
-  photo_url: string
-  /** CE AU VIZITAT (owner, 13 aug): secțiunile deschise de acest vizitator în
-   *  sesiune — listă distinctă separată prin virgulă (acasă, aplicație, credite,
-   *  manual, autentificare). Gol dacă n-a fost înregistrată nicio secțiune. */
-  pages: string
-  /** P25 (owner, 15 aug: „nu-mi trebuie pe acelasi om mai multe pozitii, o
-   *  pozitie, cu poza lui, si in cadrul aceluiasi, vizitele, toate"): rândul e
-   *  al OMULUI, nu al vizitei — aici stau TOATE vizitele lui, cea mai nouă
-   *  prima. Meta de sus (ip/oraș/browser…) e a ULTIMEI vizite. */
-  vizite?: VizitaScurta[]
-  /** Prima lui vizită (ISO) — cardul poartă și începutul relației. */
-  prima_vizita?: string
-}
-
-/** The visitor analysis, aggregated (admin-only): totals + countries + latest arrivals. */
-/** O vizită din istoricul UNUI om (P25): când a intrat + ce secțiuni a deschis. */
-export interface VizitaScurta {
-  la: string
-  pages: string
+  path: string
+  views: number
 }
 
 export interface DemoStats {
-  total: number
-  today: number
-  bots: number
   visitsTotal: number
   visitsToday: number
-  byCountry: { country: string; code: string; count: number }[]
+  byCountry: { code: string; count: number }[]
   recent: DemoRecent[]
-  /** P25, LEGEA pozei (owner, 15 aug: „daca nu are poza acceptata... nu intra"):
-   *  câți OAMENI (și câte vizite ale lor) NU apar în listă fiindcă n-au nicio
-   *  poză acceptată — cifra se spune pe față, ca totalurile să nu pară scăzute
-   *  fără explicație. */
-  faraPoza?: { persoane: number; vizite: number }
 }
 
 /** THE MONEY CIRCUIT (admin-only): the LIVE state of every payment→AI link.
@@ -120,6 +70,12 @@ export interface ExpenseLine {
 export interface MoneyCircuit {
   /** All the application's expenses, with the place they are paid from. */
   expenses?: ExpenseLine[]
+  /** Authoritative state of hosted Merchant checkout and signed settlement. */
+  paymentCollection?: {
+    status: 'active' | 'setup_required' | 'unavailable'
+    automaticCredit: boolean
+    detail: string
+  }
   /** The state of the Revolut payment reader (Adrian, 30 Jul: automatic
    *  crediting with a unique code). `ok:false` = WE COULD NOT READ the
    *  account — something other than "nobody paid", which is why it is
@@ -152,14 +108,10 @@ export interface MoneyCircuit {
   /** M7b (8 aug): când costReal e null, AICI scrie DE CE (citirea a picat) —
    *  panoul arată motivul, nu ascunde blocul în tăcere. */
   costRealMotiv?: string
-  /** The fixed voice rate ($/min) the estimate above is computed with — sent
-   *  by the server so the panel never shows a hand-written figure that has
-   *  drifted from the one actually used (env: VOICE_USD_PER_MINUTE). */
-  voiceUsdPerMin?: number
   /** The owner's lever: is autonomy stopped? A limit HE chooses is not a
    *  barrier; one set by me is. That is why it is visible, and it is his. */
   autonomiaOprita?: boolean
-  /** P29 (15 aug): comutatorul „video plătit" (Veo) — buton kv, nu env. null =
+  /** Video generation switch. null =
    *  citirea a picat (starea se spune „necitită", nu se inventează un OPRIT). */
   videoPlatit?: { pornit: boolean; sursa: 'buton' | 'env' | 'implicit' } | null
   /** 21:26 („nu vrea sa genereze"): ultima încercare de generare video, cu
@@ -168,23 +120,7 @@ export interface MoneyCircuit {
   error?: string
 }
 
-/** Per-USER activity (admin-only): who connected, last IP/place/device,
- *  total time spent and their balance. */
-/** Un DEVICE al unui utilizator: (device, browser) cu datele lui agregate —
- *  P6 (owner, 15 aug: „se pastreaza unica si se adauga doar device cu care
- *  intra cu datele aferente"). */
-export interface UserDeviceRow {
-  device: string
-  browser: string
-  sessions: number
-  seconds: number
-  last_seen: string
-  ip: string
-  city: string
-  country: string
-  code: string
-}
-
+/** Per-user activity aggregated by day, without transport/device identifiers. */
 export interface UserActivityRow {
   email: string
   sessions: number
@@ -192,25 +128,12 @@ export interface UserActivityRow {
   actions: number
   messages: number
   last_seen: string
-  last_ip: string
-  city: string
-  country: string
-  code: string
-  device: string
-  browser: string
   blocked: boolean
   balance: number
   /** Cât a COSTAT userul ăsta pe furnizori (USD, suma cost_events pe emailul
    *  lui) — monitorizarea pe user (Adrian, 10 aug: „sistemul de monitorizare
    *  pe user inexistent"). Consumul, lângă sold: se vede cine arde banii. */
   consumedUsd: number
-  /** Device-urile LUI, dedesubt (P6) — în locul listei plate de sesiuni care
-   *  repeta același om de N ori. */
-  devices: UserDeviceRow[]
-  /** P26 (owner, 15 aug: „baza de date completa cu poza cu tot… se ataseaza
-   *  inclusiv monstra de voce"): poza contului (faceprints, dată cu acord la
-   *  enrolare) — gol dacă nu există; nu se inventează siluete. */
-  foto: string
   /** Are amprentă vocală înscrisă (voiceprints)? */
   voce: boolean
   /** Amprenta lui are și mostra AUDIO ascultabilă (butonul ▶ din Amprente)? */

@@ -11,6 +11,9 @@ import { pornesteCapturaApel, type CapturaApel } from './apelMic'
 import { pornesteSonerie, opresteSonerie } from './apelSonerie'
 import { strings, resolveLang } from './i18n'
 import { loadLocalLang } from './prefs'
+import { openApiWebSocket } from './transport'
+import { vorbesteLocal } from './voceBrowser'
+import { callMediaEnvelope } from './callMedia'
 
 let ws: WebSocket | null = null
 let pornit = false
@@ -24,11 +27,6 @@ let intraCallId: string | null = null
 let hfCaptura: CapturaApel | null = null
 let hfTimeout: number | null = null
 
-function urlWs(): string {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/api/apel`
-}
-
 function emite(nume: string, detail: unknown): void {
   window.dispatchEvent(new CustomEvent(nume, { detail }))
 }
@@ -40,7 +38,9 @@ async function pornesteMic(callId: string): Promise<void> {
   if (captura) return
   captura = await pornesteCapturaApel(
     (audioB64, mime) => {
-      if (apelCurent === callId) trimite({ type: 'vorbire', callId, audio: audioB64, mime })
+      if (apelCurent === callId) {
+        trimite(callMediaEnvelope('vorbire', callId, audioB64, mime))
+      }
     },
     () => {
       /* microfon indisponibil — măcar auzi ce spune celălalt (tradus) */
@@ -68,41 +68,26 @@ function opresteHF(): void {
   intraCallId = null
 }
 
-/** Anunțul vocal — sintetizat pe server (aceeași voce Chirp), redat o dată; `gata`
+/** Anunțul vocal — sintetizat pe server prin motorul OpenAI, redat o dată; `gata`
  *  se cheamă la sfârșitul redării (SAU la eșec), ca să pornim ascultarea DUPĂ ce
  *  s-a terminat de spus „răspunde/refuză" (altfel s-ar auzi pe sine). */
-async function anunta(text: string, lang: string, gata: () => void): Promise<void> {
+function anunta(text: string, lang: string, gata: () => void): void {
   let terminat = false
   const term = (): void => {
     if (terminat) return
     terminat = true
     gata()
   }
-  try {
-    const r = await fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ text, lang }),
-    })
-    if (!r.ok) {
-      term()
-      return
-    }
-    const buf = new Uint8Array(await r.arrayBuffer())
-    let bin = ''
-    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i])
-    playVoice(btoa(bin), undefined, term) // term = onEnd
-  } catch {
-    term()
-  }
+  if (!vorbesteLocal(text, resolveLang(lang), { onEnd: term })) term()
 }
 
 async function startHFCapture(callId: string): Promise<void> {
   if (hfCaptura || intraCallId !== callId) return
   hfCaptura = await pornesteCapturaApel(
     (audioB64, mime) => {
-      if (intraCallId === callId) trimite({ type: 'comanda-apel', callId, audio: audioB64, mime })
+      if (intraCallId === callId) {
+        trimite(callMediaEnvelope('comanda-apel', callId, audioB64, mime))
+      }
     },
     () => {
       /* microfon blocat — butoanele Răspunde/Refuză rămân */
@@ -123,7 +108,7 @@ function pornesteHF(callId: string, from: unknown): void {
     opresteSonerie()
     if (intraCallId === callId) void startHFCapture(callId)
   }
-  void anunta(text, lang, dupaAnunt)
+  anunta(text, lang, dupaAnunt)
   // Plasă: dacă anunțul se blochează, pornim oricum ascultarea după 4s.
   window.setTimeout(() => {
     if (intraCallId === callId && !hfCaptura) dupaAnunt()
@@ -139,6 +124,9 @@ function laMesaj(m: {
   text?: string
   audio?: string
   de_la?: string
+  code?: string
+  utteranceId?: string
+  state?: string
 }): void {
   switch (m.type) {
     case 'gata':
@@ -171,10 +159,19 @@ function laMesaj(m: {
       emite('kelion:apel-stare', { stare: 'inchis', callId: m.callId, motiv: m.motiv })
       break
     case 'tradus':
-      // Ce a spus celălalt, TRADUS în limba mea: îl aud (vocea Chirp) + îl văd
+      // Ce a spus celălalt, tradus în limba mea: îl aud și îl văd ca text.
       // (subtitrare). Faza 2 — inima messenger-ului.
       if (m.audio) playVoice(m.audio)
       emite('kelion:apel-tradus', { callId: m.callId, text: m.text, de_la: m.de_la })
+      break
+    case 'apel-eroare':
+      emite('kelion:apel-eroare', {
+        callId: m.callId,
+        utteranceId: m.utteranceId,
+        code: m.code,
+      })
+      break
+    case 'apel-confirmat':
       break
     default:
       break
@@ -186,14 +183,14 @@ function laMesaj(m: {
 export function pornestePrezentaApel(): void {
   if (pornit) return
   pornit = true
-  deschide()
+  void deschide()
 }
 
-function deschide(): void {
+async function deschide(): Promise<void> {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
   let s: WebSocket
   try {
-    s = new WebSocket(urlWs())
+    s = await openApiWebSocket('/api/apel', 'apel')
   } catch {
     programeazaReconectare()
     return
@@ -226,13 +223,13 @@ function programeazaReconectare(): void {
   // sau o repunere din adormire). Reîncercare simplă la 4s.
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = null
-    if (pornit) deschide()
+    if (pornit) void deschide()
   }, 4000)
 }
 
 function trimite(o: unknown): boolean {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    deschide()
+    void deschide()
     return false
   }
   try {

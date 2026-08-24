@@ -3,7 +3,31 @@
 // and in the backend (98 duplicated lines). Now they come from the common source; a TYPE
 // import, so it vanishes at compile time — it adds nothing to the bundle.
 import type { MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
+import { apiFetch } from './transport'
 export type { MoneyCircuit, UserActivityRow }
+
+export const ADMIN_TABS = [
+  'finance',
+  'users',
+  'share',
+  'stores',
+  'inbox',
+  'gesturi',
+  'tokenuri',
+  'constructor',
+  'recuperare',
+  'sistem',
+  'erori',
+  'notificari',
+  'creier',
+] as const
+
+export type AdminTab = (typeof ADMIN_TABS)[number]
+
+export function isAdminTab(value: unknown): value is AdminTab {
+  return typeof value === 'string' && (ADMIN_TABS as readonly string[]).includes(value)
+}
+
 export interface HistoryRow {
   role: string
   content: string
@@ -12,8 +36,7 @@ export interface HistoryRow {
 
 // The owner's REAL money picture (admin only): real cost consumed, real
 // profit, and per-AI cost. No hand-typed figures.
-// (Stripe is fully out — 31 Jul. „Punga" — soldul OpenRouter — și cheltuiala
-// OpenAI au fost EXTIRPATE pe 3 aug, împreună cu furnizorii.)
+  // Valorile sunt raportate de backend, fără solduri fabricate în client.
 export interface Finance {
   // (`spent` și `profit` au fost SCOASE — auditul admin, 3 aug: tabul nu le
   // desena, iar sursa lor din backend inventa zerouri la eșec de DB.)
@@ -35,7 +58,7 @@ export interface Finance {
 
 export async function fetchFinance(): Promise<Finance | null> {
   try {
-    const r = await fetch('/api/admin/finance', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/finance', { credentials: 'include' })
     if (!r.ok) return null
     return (await r.json()) as Finance
   } catch {
@@ -62,7 +85,7 @@ export interface CreditAIFurnizor {
 
 export async function fetchCreditAI(): Promise<CreditAIFurnizor[] | null> {
   try {
-    const r = await fetch('/api/admin/credit-ai', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/credit-ai', { credentials: 'include' })
     if (!r.ok) return null
     const j = (await r.json()) as { furnizori: CreditAIFurnizor[] }
     return Array.isArray(j.furnizori) ? j.furnizori : null
@@ -80,7 +103,7 @@ export function clasaBec(bec: string): string {
 
 // ── Evaluarea unui ordin de constructor (owner, 13 aug) ─────────────────────
 export interface EvalRandAI {
-  cheie: 'constructor' | 'jules' | 'creier2'
+  cheie: 'openai' | 'codex_worker'
   nume: string
   descriere: string
   scor: number
@@ -92,14 +115,14 @@ export interface EvalConstructor {
   motiv: string
   capacitatiNecesare: string[]
   clasament: EvalRandAI[]
-  aiRecomandat: 'constructor' | 'jules' | 'creier2' | null
+  aiRecomandat: 'openai' | 'codex_worker' | null
 }
 
 /** Evaluează cerința ÎNAINTE de trimitere: poarta de calitate + AI-urile potrivite
  *  pe capacitate, cu credit live. `null` dacă apelul pică (nu inventăm verdict). */
 export async function evalueazaOrdinConstructor(order: string): Promise<EvalConstructor | null> {
   try {
-    const r = await fetch('/api/admin/constructor/evalueaza', {
+    const r = await apiFetch('/api/admin/constructor/evalueaza', {
       method: 'POST',
       credentials: 'include',
       headers: { 'content-type': 'application/json' },
@@ -121,138 +144,20 @@ export async function evalueazaOrdinConstructor(order: string): Promise<EvalCons
 // (pauzaAutonomie a MURIT pe 16 aug — LEGEA ownerului: autonomia pornită
 // permanent, fără off; ruta de pe server a rămas doar ca răspuns cinstit.)
 
-// P29 (15 aug): butonul „Video plătit" — pornește/oprește generarea Veo din
-// panou (kv pe server), în locul env-ului de pe VPS în care ownerul nu umblă.
-export async function setVideoPlatit(pornit: boolean): Promise<boolean> {
-  try {
-    const r = await fetch('/api/admin/video-platit', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pornit }),
-    })
-    return r.ok
-  } catch {
-    return false
-  }
-}
-
-/** A proof of autonomy, as the server reads it from the database. */
-export interface DovadaAutonomie {
-  nivel: number
-  ce: string
-  cum: string
-  dovedit: boolean
-  dovada: string
-  cand: string | null
-}
-
-/** Cele opt dovezi (Adrian, 31 iul: „trebuie 8 din 8 dovezi").
- *
- *  Not a list written by me: each level looks in the database for its concrete
- *  trace — an order, a PR, a measurement — and says "proven" ONLY if it found it. */
-export async function fetchDoveziAutonomie(): Promise<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null> {
-  try {
-    const r = await fetch('/api/admin/autonomie/dovezi', { credentials: 'include' })
-    return r.ok ? await r.json() : null
-  } catch {
-    return null
-  }
-}
-
 export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
   try {
-    const r = await fetch('/api/admin/money-circuit', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/money-circuit', { credentials: 'include' })
     return r.ok ? ((await r.json()) as MoneyCircuit) : null
   } catch {
     return null
   }
 }
 
-// ── THE PAYMENTS PANEL (M3, Aug 2): codes + the unattributed net ────────────
-export interface CodNeplatit {
-  code: string
-  email: string
-  amount: number
-  currency: string
-  status: string
-  createdAt: string
-  expirata: boolean
-}
-
-export interface PlataIncasata {
-  code: string
-  email: string
-  amount: number
-  currency: string
-  paidAt: string
-  bankRef: string
-}
-
-export interface TotaluriPlati {
-  totalAzi: number
-  totalLunaAsta: number
-  moneda: string
-}
-
-export interface PlatiAdmin {
-  rezumat: {
-    emise: number
-    platite: number
-    inAsteptare: number
-    neatribuite: number
-    recente: { code: string; email: string; amount: number; currency: string; status: string; createdAt: string; paidAt: string | null }[]
-  } | null
-  /** null = citirea plasei a EȘUAT — se scrie ca eșec, niciodată ca „Nimic în plasă"; [] = plasa e chiar goală. */
-  neatribuite: { id: number; bankRef: string; referinta: string; amount: number; currency: string; seenAt: string }[] | null
-  coduriNeplatite: CodNeplatit[] | null
-  platiIncasate: PlataIncasata[] | null
-  totaluri: TotaluriPlati | null
-}
-export async function fetchPlati(): Promise<PlatiAdmin | null> {
-  try {
-    const r = await fetch('/api/admin/plati', { credentials: 'include' })
-    return r.ok ? ((await r.json()) as PlatiAdmin) : null
-  } catch {
-    return null
-  }
-}
-/** Returns the server's verdict ('creditat' | 'deja' | 'negasit' | 'esec') —
- *  shown as-is, so a double credit REFUSED is never displayed as an error. */
-export async function atribuiePlata(id: number, email: string): Promise<string> {
-  try {
-    const r = await fetch('/api/admin/plati/neatribuite/atribuie', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id, email }),
-    })
-    const j = (await r.json().catch(() => ({}))) as { rezultat?: string }
-    return j.rezultat ?? (r.ok ? 'creditat' : 'esec')
-  } catch {
-    return 'esec'
-  }
-}
-export async function ignoraPlata(id: number): Promise<boolean> {
-  try {
-    const r = await fetch('/api/admin/plati/neatribuite/ignora', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    return r.ok
-  } catch {
-    return false
-  }
-}
-
 // Owner adds money to, or withdraws money from, the provider-credit pool.
 // Returns true on success so the caller can refresh the finance view.
 
-// Market control (admin only): LIVE presence in the four install locations
-// (checked against the real store pages, not dashboards) + the verifiable
-// download log from our own /dl (who: email when signed in, else IP+country).
+// Market control (admin only): LIVE presence in the four install locations,
+// checked against the real store pages rather than dashboard promises.
 export interface StoreRow {
   key: string
   name: string
@@ -260,31 +165,38 @@ export interface StoreRow {
   url: string
   listed: boolean
 }
-export interface DownloadRow {
-  file: string
-  user_email: string
-  ip: string
-  country: string
-  created_at: string
-}
 export interface StoresData {
   stores: StoreRow[]
-  /** `dbOk:false` = jurnalul de descărcări NU s-a putut citi (auditul admin,
-   *  3 aug) — counts goale nu înseamnă atunci „nicio descărcare". */
-  downloads: { dbOk: boolean; counts: { file: string; total: number }[]; recent: DownloadRow[] }
+}
+
+export function parseStoresData(value: unknown): StoresData | null {
+  if (!value || typeof value !== 'object') return null
+  const stores = (value as { stores?: unknown }).stores
+  if (!Array.isArray(stores)) return null
+
+  const valid = stores.every((store) => {
+    if (!store || typeof store !== 'object') return false
+    const candidate = store as Partial<StoreRow>
+    return typeof candidate.key === 'string'
+      && typeof candidate.name === 'string'
+      && typeof candidate.store === 'string'
+      && typeof candidate.url === 'string'
+      && typeof candidate.listed === 'boolean'
+  })
+  return valid ? { stores: stores as StoreRow[] } : null
 }
 
 export async function fetchStores(): Promise<StoresData | null> {
   try {
-    const r = await fetch('/api/admin/stores', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/stores', { credentials: 'include' })
     if (!r.ok) return null
-    return (await r.json()) as StoresData
+    return parseStoresData(await r.json())
   } catch {
     return null
   }
 }
 
-// Per-USER activity (admin only): who signed in, last IP/place/device, how
+// Per-USER activity (admin only): who signed in, device class and how
 // long they stayed in total — UN rând pe adresă, cu device-urile dedesubt
 // (P6, 15 aug; lista plată de sesiuni care repeta același om a fost scoasă).
 
@@ -292,19 +204,19 @@ export interface UserActivity {
   users: UserActivityRow[]
 }
 
-// Admin action on a user: block / unblock / credit (amount) / delete.
+// Admin action on a user: block / unblock / credit (minor units) / delete.
 // Returns the refreshed activity so the caller can update the list in place.
 export async function manageUser(
   email: string,
   action: 'block' | 'unblock' | 'credit' | 'delete',
-  amount?: number,
+  amountMinor?: number,
 ): Promise<UserActivity | null> {
   try {
-    const r = await fetch('/api/admin/user', {
+    const r = await apiFetch('/api/admin/user', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, action, amount }),
+      body: JSON.stringify({ email, action, amountMinor }),
     })
     if (!r.ok) return null
     return (await r.json()) as UserActivity
@@ -328,7 +240,7 @@ export interface InboundEmail {
 // simultan trei secțiuni din Inbox ca „goale" — trei ❌ dintr-un singur apel).
 export async function fetchInbound(): Promise<InboundEmail[] | null> {
   try {
-    const r = await fetch('/api/admin/inbound', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/inbound', { credentials: 'include' })
     if (!r.ok) return null
     return ((await r.json()) as { emails?: InboundEmail[] }).emails ?? []
   } catch {
@@ -357,7 +269,7 @@ export interface MailboxLiveResult {
 }
 export async function fetchMailboxLive(): Promise<MailboxLiveResult | null> {
   try {
-    const r = await fetch('/api/admin/mailbox-live', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/mailbox-live', { credentials: 'include' })
     if (!r.ok) return null
     const j = (await r.json()) as Partial<MailboxLiveResult>
     return { ok: j.ok === true, motiv: j.motiv ?? null, emails: j.emails ?? [] }
@@ -383,7 +295,7 @@ export interface ContactMessage {
 // null = citirea a EȘUAT (auditul admin, 3 aug) — nu „Niciun mesaj de contact".
 export async function fetchContactMessages(): Promise<ContactMessage[] | null> {
   try {
-    const r = await fetch('/api/admin/contact-messages', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/contact-messages', { credentials: 'include' })
     if (!r.ok) return null
     return ((await r.json()) as { messages?: ContactMessage[] }).messages ?? []
   } catch {
@@ -393,7 +305,7 @@ export async function fetchContactMessages(): Promise<ContactMessage[] | null> {
 
 export async function fetchActivity(): Promise<UserActivity | null> {
   try {
-    const r = await fetch('/api/admin/activity', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/activity', { credentials: 'include' })
     if (!r.ok) return null
     return (await r.json()) as UserActivity
   } catch {
@@ -407,7 +319,7 @@ export async function fetchActivity(): Promise<UserActivity | null> {
 // „Nu a scris niciun mesaj" pentru o citire picată). null = eșec, spus ca atare.
 export async function fetchHistory(email: string): Promise<HistoryRow[] | null> {
   try {
-    const r = await fetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
+    const r = await apiFetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
       credentials: 'include',
     })
     if (!r.ok) return null
@@ -431,7 +343,7 @@ export interface TranslateRoResult {
 export async function translateToRo(texts: string[]): Promise<TranslateRoResult> {
   if (texts.length === 0) return { translations: [], failed: 0 }
   try {
-    const r = await fetch('/api/admin/translate', {
+    const r = await apiFetch('/api/admin/translate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -475,7 +387,7 @@ export interface EroriAdmin {
 }
 export async function fetchErori(): Promise<EroriAdmin | null> {
   try {
-    const r = await fetch('/api/admin/erori', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/erori', { credentials: 'include' })
     if (!r.ok) return null
     const j = (await r.json()) as Partial<EroriAdmin>
     return { browser: j.browser ?? [], sistem: j.sistem ?? [] }
@@ -497,7 +409,7 @@ export interface NotificareAdmin {
 }
 export async function fetchNotificari(): Promise<NotificareAdmin[] | null> {
   try {
-    const r = await fetch('/api/admin/notificari', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/notificari', { credentials: 'include' })
     if (!r.ok) return null
     const j = (await r.json()) as { notificari?: NotificareAdmin[] }
     return j.notificari ?? []
@@ -507,7 +419,7 @@ export async function fetchNotificari(): Promise<NotificareAdmin[] | null> {
 }
 export async function markNotificareCitit(id: number): Promise<boolean> {
   try {
-    const r = await fetch(`/api/admin/notificari/${id}/citit`, { method: 'POST', credentials: 'include' })
+    const r = await apiFetch(`/api/admin/notificari/${id}/citit`, { method: 'POST', credentials: 'include' })
     if (!r.ok) return false
     const j = (await r.json()) as { ok?: boolean }
     return !!j.ok
@@ -516,80 +428,22 @@ export async function markNotificareCitit(id: number): Promise<boolean> {
   }
 }
 
-// ── PLAFONUL ZILNIC DE ARDERE (B8/K15) ─────────────────────────────────────────
-export interface PlafonConstructor {
-  activ: boolean
-  plafon: number
-  cheltuit: number
-  /** P10: false = citirea cheltuielii a PICAT — cifra 0 nu e „măsurat". */
-  cheltuitCitit?: boolean
-  cheltuitMotiv?: string
-  joburiAzi?: number
-  /** Joburile de azi FĂRĂ cost raportat — cifra afișată e minimul măsurat. */
-  faraCost?: number
-}
-export async function fetchPlafon(): Promise<PlafonConstructor | null> {
-  try {
-    const r = await fetch('/api/admin/plafon-constructor', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as PlafonConstructor
-  } catch {
-    return null
-  }
-}
-export async function setPlafon(body: { plafon?: number; activ?: boolean }): Promise<PlafonConstructor | null> {
-  try {
-    const r = await fetch('/api/admin/plafon-constructor', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!r.ok) return null
-    return (await r.json()) as PlafonConstructor
-  } catch {
-    return null
-  }
-}
-
-// ── COMUTATOR DE CREIER (23 aug 2026) ─────────────────────────────────────
-export interface CreierProvider {
-  prefix: string
-  nume: string
-  disponibil: boolean
-  info: string
-}
+// ── CONFIGURAȚIA CREIERULUI OPENAI ─────────────────────────────────────────
 export interface CreierModel {
   id: string
   nume: string
   tag?: string
   isAuto?: boolean
-  isCustom?: boolean
+  validat?: boolean
 }
 export interface CreierAdmin {
-  activ: string
-  modelCustom: string
-  provideri: CreierProvider[]
+  activ: 'openai'
   modele: CreierModel[]
   catalogEroare?: string
 }
 export async function fetchCreier(): Promise<CreierAdmin | null> {
   try {
-    const r = await fetch('/api/admin/creier', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as CreierAdmin
-  } catch {
-    return null
-  }
-}
-export async function setCreier(activ: string, modelCustom = ''): Promise<CreierAdmin | null> {
-  try {
-    const r = await fetch('/api/admin/creier', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ activ, modelCustom }),
-    })
+    const r = await apiFetch('/api/admin/creier', { credentials: 'include' })
     if (!r.ok) return null
     return (await r.json()) as CreierAdmin
   } catch {
@@ -597,52 +451,69 @@ export async function setCreier(activ: string, modelCustom = ''): Promise<Creier
   }
 }
 
-// Registered voiceprints (admin only).
-export interface VoiceprintRow {
-  email: string
-  name: string
-  gender: 'male' | 'female' | 'unknown'
-  isAdmin: boolean
-  hasAudio: boolean
-  hasFace: boolean
-  facePhoto: string
-  updatedAt: string
+export interface CodexAdmin {
+  worker: {
+    state: 'ready' | 'offline' | 'setup_required' | 'unknown'
+    lastHeartbeat: string | null
+  }
+  setupInstructions: string | null
+  taskUrl: string | null
+  status: string | null
+  internalCostUsd: number | null
 }
 
-// null = citirea a EȘUAT (auditul admin, 3 aug) — o pană de DB/rețea nu mai
-// arată identic cu „chiar nu există amprente" (factorul de voce al ownerului).
-export async function fetchVoiceprints(): Promise<VoiceprintRow[] | null> {
+export function codexTaskUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
   try {
-    const r = await fetch('/api/voiceprint/list', { credentials: 'include' })
-    if (!r.ok) return null
-    const j = (await r.json()) as { rows?: unknown[] }
-    return (j.rows ?? []).map((row: unknown) => {
-      const r = row as Record<string, unknown>
-      return {
-        email: String(r.email ?? ''),
-        name: String(r.name ?? ''),
-        gender: String(r.gender ?? 'unknown') as VoiceprintRow['gender'],
-        isAdmin: Boolean(r.isAdmin ?? r.is_admin),
-        hasAudio: Boolean(r.hasAudio ?? r.has_audio),
-        hasFace: Boolean(r.hasFace ?? r.has_face),
-        facePhoto: String(r.facePhoto ?? r.face_photo ?? ''),
-        updatedAt: String(r.updatedAt ?? r.updated_at ?? ''),
-      }
-    })
+    const u = new URL(value)
+    if (
+      u.protocol !== 'https:' ||
+      u.username ||
+      u.password ||
+      u.hostname !== 'chatgpt.com' ||
+      !u.pathname.startsWith('/codex/')
+    ) return null
+    return u.toString()
   } catch {
     return null
   }
 }
 
-// A voiceprint's audio sample (data-URL) — for the „play” button in the panel.
-export async function fetchVoiceprintAudio(email: string): Promise<string | null> {
+const CODEX_WORKER_STATES = new Set(['ready', 'offline', 'setup_required', 'unknown'])
+
+/** Starea workerului Codex separat. Loginul și credentialele rămân în worker. */
+export async function fetchCodexAdmin(): Promise<CodexAdmin | null> {
   try {
-    const r = await fetch(`/api/voiceprint/audio?email=${encodeURIComponent(email)}`, {
-      credentials: 'include',
-    })
+    const r = await apiFetch('/api/admin/codex', { cache: 'no-store' })
     if (!r.ok) return null
-    const j = (await r.json()) as { clip?: string }
-    return typeof j.clip === 'string' && j.clip ? j.clip : null
+    const raw = (await r.json()) as Record<string, unknown>
+    const workerRaw = raw.worker && typeof raw.worker === 'object'
+      ? raw.worker as Record<string, unknown>
+      : {}
+    const state = typeof workerRaw.state === 'string' && CODEX_WORKER_STATES.has(workerRaw.state)
+      ? workerRaw.state as CodexAdmin['worker']['state']
+      : 'unknown'
+    const internalCost = typeof raw.internalCostUsd === 'number'
+      ? raw.internalCostUsd
+      : null
+    const heartbeat = typeof workerRaw.lastHeartbeat === 'string' &&
+      Number.isFinite(Date.parse(workerRaw.lastHeartbeat))
+      ? workerRaw.lastHeartbeat.slice(0, 64)
+      : null
+    return {
+      worker: {
+        state,
+        lastHeartbeat: heartbeat,
+      },
+      setupInstructions: typeof raw.setupInstructions === 'string'
+        ? raw.setupInstructions.slice(0, 1_000)
+        : null,
+      taskUrl: codexTaskUrl(raw.taskUrl),
+      status: typeof raw.status === 'string' ? raw.status.slice(0, 240) : null,
+      internalCostUsd: internalCost !== null && Number.isFinite(internalCost) && internalCost >= 0
+        ? internalCost
+        : null,
+    }
   } catch {
     return null
   }
@@ -678,7 +549,7 @@ export interface EnvCheckResult {
 
 export async function fetchEnvCheck(): Promise<EnvCheckResult | null> {
   try {
-    const r = await fetch('/api/admin/env-check', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/env-check', { credentials: 'include' })
     if (!r.ok) return null
     return (await r.json()) as EnvCheckResult
   } catch {
@@ -688,30 +559,10 @@ export async function fetchEnvCheck(): Promise<EnvCheckResult | null> {
 
 export async function fetchTokenChecks(): Promise<TokenChecksResult | null> {
   try {
-    const r = await fetch('/api/admin/token-checks', { credentials: 'include' })
+    const r = await apiFetch('/api/admin/token-checks', { credentials: 'include' })
     if (!r.ok) return null
     return (await r.json()) as TokenChecksResult
   } catch {
     return null
   }
-}
-
-// ── Cereri neacoperite & Plăți neatribuite ──────────────────────────────
-export interface PlataNeatribuita {
-  id: number
-  suma: number
-  moneda: string
-  referinta: string | null
-  banca: string | null
-  status: string
-  detalii?: string | null
-  created_at: string
-}
-
-export interface CodNeplatit {
-  cod: string
-  user_email: string
-  suma: number
-  status: string
-  created_at: string
 }

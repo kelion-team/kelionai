@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyConstructorFailure,
   constructorIncidentLesson,
-  formatConstructorIncidentContext,
   type ConstructorCauseCode,
   type ConstructorIncident,
 } from './services/constructorIncident.js'
@@ -56,29 +55,7 @@ describe('constructor incident — clasificare deterministă', () => {
   })
 })
 
-describe('constructor incident — contextul obligatoriu al creierului', () => {
-  it('declară registrul necitibil fără să pretindă că sunt zero incidente', () => {
-    const context = formatConstructorIncidentContext(null)
-    expect(context).toContain('UNREADABLE')
-    expect(context).toContain('does NOT mean zero incidents')
-    expect(context).toContain('do not claim the constructor is healthy')
-  })
-
-  it('nu adaugă zgomot când citirea a reușit și nu există incidente', () => {
-    expect(formatConstructorIncidentContext([])).toBe('')
-  })
-
-  it('include cazul, dovada, responsabilul, acțiunea și recurența', () => {
-    const context = formatConstructorIncidentContext([incident()])
-    expect(context).toContain('incident #7 / order #42 [diagnosing]')
-    expect(context).toContain('cause=test_failure')
-    expect(context).toContain('responsible=kelion')
-    expect(context).toContain('next=Repară ruta')
-    expect(context).toContain('recurrence=2')
-    expect(context).toContain('AssertionError')
-    expect(context).toContain('close only after the associated order is done with CI green')
-  })
-
+describe('constructor incident — lecția verificată', () => {
   it('lecția persistentă păstrează cauză, prevenție și verificare', () => {
     const lesson = constructorIncidentLesson(incident(), 'order #42 done; CI verde; PR #99')
     expect(lesson).toContain('Cauză: Testul focalizat a picat.')

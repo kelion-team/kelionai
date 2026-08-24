@@ -1,24 +1,24 @@
 // ── OPUS PE VOCEA LIVE — PARTEA DE SERVER (owner, 12 aug: „fă Opus") ─────────
 //
-// Serverul stă între browser și Gemini Live. Gemini vrea/dă PCM (16 kHz sus,
-// 24 kHz jos), deci hopul server↔Google rămâne PCM (bandă de datacenter). Dar
+// Serverul stă între browser și OpenAI Realtime. Realtime folosește PCM pe
+// conexiunea upstream, iar browserul poate folosi Opus pe legătura proprie.
 // hopul browser↔server e AL NOSTRU — acolo comprimăm cu Opus (~10×), fix banda
 // care doare pe 3G-ul omului.
 //
 // Ce face serverul:
-//   - DECODE upload: pachet Opus 16 kHz de la browser → PCM 16 kHz → Gemini.
-//   - ENCODE download: PCM 24 kHz de la Gemini → pachete Opus 24 kHz → browser.
+//   - DECODE upload: pachet Opus 16 kHz de la browser → PCM 16 kHz.
+//   - ENCODE download: PCM 24 kHz de la Realtime → pachete Opus 24 kHz.
 //
 // Opus lucrează pe cadre FIXE (20 ms). La 16 kHz = 320 mostre = 640 octeți; la
-// 24 kHz = 480 mostre = 960 octeți. Fluxul de la Gemini vine în bucăți de mărimi
+// 24 kHz = 480 mostre = 960 octeți. Fluxul upstream vine în bucăți de mărimi
 // arbitrare, deci îl REÎNCADRĂM la 20 ms înainte de encode (restul se ține).
 //
 // SIGURANȚĂ: codecul (opusscript, pur-JS/WASM, fără build nativ) se încarcă LENE
 // și cu plasă — dacă nu se încarcă, `creeazaOpusVoce` întoarce null și calea
 // rămâne PCM. Nimic din asta nu pornește dacă `config.voiceOpus` e stins.
 
-const RATA_SUS = 16_000 // microfon → Gemini
-const RATA_JOS = 24_000 // Gemini → difuzor
+const RATA_SUS = 16_000 // microfon → Realtime
+const RATA_JOS = 24_000 // Realtime → difuzor
 const MS_CADRU = 20
 export const MOSTRE_JOS = (RATA_JOS * MS_CADRU) / 1000 // 480
 export const OCTETI_CADRU_JOS = MOSTRE_JOS * 2 // 960 (PCM16)
@@ -77,7 +77,7 @@ export class OpusVoce {
     }
   }
 
-  /** Pachet Opus 16 kHz (de la microfon) → PCM16 16 kHz (spre Gemini). null la
+  /** Pachet Opus 16 kHz (de la microfon) → PCM16 16 kHz (spre Realtime). null la
    *  pachet corupt — cadrul se sare, nu se prăbușește sesiunea. */
   decodeUpload(pachet: Buffer): Buffer | null {
     if (!pachet.length) return null
@@ -88,7 +88,7 @@ export class OpusVoce {
     }
   }
 
-  /** PCM16 24 kHz (de la Gemini) → pachete Opus 24 kHz (spre browser), pe cadre
+  /** PCM16 24 kHz (de la Realtime) → pachete Opus 24 kHz (spre browser), pe cadre
    *  de 20 ms; restul neîncadrat se ține pentru apelul următor. */
   encodeDownload(pcm: Buffer): Buffer[] {
     const { cadre, rest } = reincadreaza(this.restJos, pcm, OCTETI_CADRU_JOS)

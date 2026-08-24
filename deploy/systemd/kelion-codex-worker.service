@@ -1,0 +1,59 @@
+[Unit]
+Description=Kelion Constructor Codex queue and isolated executor
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/kelion/codex-worker.enabled
+
+[Service]
+Type=oneshot
+User=kelion-codex
+Group=kelion-codex
+SupplementaryGroups=kelion-handoff
+UMask=0027
+WorkingDirectory=/var/lib/kelion-codex
+Environment=PATH=/opt/kelion-codex/bin:/usr/bin:/bin
+Environment=CODEX_BIN=/opt/kelion-codex/bin/codex
+Environment=CODEX_HOME=/var/lib/kelion-codex-auth
+Environment=CODEX_WORKER_REPO=/var/lib/kelion-codex/repo
+Environment=CODEX_WORKER_JOBS=/var/lib/kelion-codex/jobs
+Environment=CODEX_WORKER_PROFILE_HOME=/opt/kelion-codex/profile-home
+Environment=CODEX_HANDOFF_READY=/var/lib/kelion-constructor-handoff/ready
+Environment=KELION_CODEX_ADVERSARIAL_SENTINEL=KELION-CODEX-ADVERSARIAL-SENTINEL-V1
+EnvironmentFile=/root/kelion/config/codex-worker.env
+LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret
+ExecStartPre=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --self-test
+ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
+NoNewPrivileges=true
+KeyringMode=private
+PrivateIPC=true
+PrivateDevices=true
+PrivateTmp=true
+RuntimeDirectory=kelion-codex
+RuntimeDirectoryMode=0700
+ProtectProc=invisible
+ProcSubset=pid
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kelion-codex /var/lib/kelion-codex-auth /var/lib/kelion-constructor-handoff /run/kelion-codex
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=user mount net pid ipc uts
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+MemoryMax=3G
+TasksMax=512
+TimeoutStartSec=45min
+KillMode=control-group
+
+
+[Install]
+WantedBy=multi-user.target

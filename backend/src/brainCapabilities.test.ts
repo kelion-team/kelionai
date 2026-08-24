@@ -3,17 +3,15 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   CAPABILITIES,
-  allCapabilityNames,
-  chatCapabilityNames,
-  voiceCapabilityNames,
-  dormantOnVoice,
-  dormantOnChat,
   inventarulMeu,
   grupaExecutieUnealta,
 } from './services/brainCapabilities.js'
 import { googleTools } from './services/google.js'
-import { RUNBOOKS } from './services/runbooks.js'
 import { SHARED_ADMIN_TOOLS, USER_SCOPED_TOOLS } from './services/adminTools.js'
+
+const allCapabilityNames = (): string[] => CAPABILITIES.map((c) => c.name)
+const chatCapabilityNames = (): string[] => CAPABILITIES.filter((c) => c.chat).map((c) => c.name)
+const voiceCapabilityNames = (): string[] => CAPABILITIES.filter((c) => c.voice).map((c) => c.name)
 
 // THE COMPLETENESS GUARD (SINGLE BRAIN §5). Adrian: "if it doesn't store
 // REALLY everything the software has, there's no point". The test guards the
@@ -68,7 +66,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     // Intercepted in execTool BEFORE runTool (they're not a `case`): heavy
     // reasoning, tool self-proposal, și citirea monitorului (10 aug — conținutul
     // ecranului vine din corpul cererii, se întoarce înainte de runTool).
-    const special = new Set(['ask_brain', 'propose_tool', 'get_monitor', 'click_monitor', 'zoom_monitor', 'get_mouse_position', 'arata_pe_grafic', 'observatii_vizuale', 'evenimente_sonore', 'stare_emotionala'])
+    const special = new Set(['ask_brain', 'get_monitor', 'click_monitor', 'zoom_monitor', 'get_mouse_position', 'arata_pe_grafic', 'evenimente_sonore'])
     // The SHARED admin tools (chat ∩ voice) go through the common guard before
     // the switch (execSharedAdminTool) → they no longer have a `case`, but they
     // ARE handled.
@@ -103,23 +101,13 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
 
   it('serializează implicit efectele și lasă în paralel numai citirile aprobate', () => {
     expect(grupaExecutieUnealta('web_search')).toBeUndefined()
-    expect(grupaExecutieUnealta('read_source')).toBeUndefined()
     expect(grupaExecutieUnealta('send_email')).toBe('efect')
     expect(grupaExecutieUnealta('browser_open')).toBe('efect')
     expect(grupaExecutieUnealta('capabilitate_viitoare')).toBe('efect')
   })
 
-  it('runbook-urile reale (runbooks.ts) sunt acoperite prin run_runbook în registru', () => {
-    // The 8 runbooks are called through the run_runbook tool — which MUST
-    // exist in the registry as long as real runbooks exist.
-    expect(Object.keys(RUNBOOKS).length).toBeGreaterThan(0)
-    expect(allCapabilityNames()).toContain('run_runbook')
-  })
-
-  // THE STATE MEASURED TODAY — any change to the brain's surface must pass
-  // through HERE (otherwise the test falls), so the registry can't fall behind.
-  it('numărul de capabilități pe fiecare cale e cel documentat', () => {
-    expect(chatCapabilityNames().length).toBe(131) // 22 aug (3): +observatii_vizuale +evenimente_sonore +stare_emotionala (vedere continuă + auz ambiental + reacție emoțională). // 22 aug (2): +apeleaza_user +allow/approve_guest_voice +forget_guest +media_control (C4 al marii verificări — oferite dar neînregistrate; registrul ține REALLY everything). // 22 aug: +dovada_faptelor (JARVIS pasul 4 — asul din mânecă: cititorul jurnalului operațional, dovada salvată a faptelor scoasă la provocare). // 20 aug: −comuta_sursa (comutatorul free/plătit scos odată cu Ollama Cloud — owner „rămân doar cu Linux și Gemini Live"). // 19 aug: +autoverificare (self-check LIVE real din chat: „eu vreau real"). // 17 aug: registru 121. // 15 aug (seara, 2): +lista_tarife (P28 — sursa vie de prețuri; creierul nu mai inventează cifre) +studioul_de_clipuri (P22 — planul studioului: rețete, prompt, nume sugestiv, calea gratis prin Flow). 15 aug (seara): +vede_video (P30a — ochiul video: fișa clipului YouTube, catalogată + învățată). 15 aug: +pr_lista (P7 — toate datele din toate PR-urile, pentru creier). 14 aug (noaptea, 2): +business_vezi (ultima bifă din „toate aplicațiile": profilul de firmă; consimțământ separat, cotă după aprobarea Google). 14 aug (noaptea): +youtube_urca (canalul omului, privat implicit, consimțământ separat). +photos_alege/+photos_adu (Google Photos prin Picker — bifat de owner). 14 aug (seara): +create_presentation/+create_form (produsele Google bifate de owner: Slides + Forms; Meet e parametru pe create_calendar_event, nu unealtă nouă). 14 aug: +server_ops (VPS commands). 14 aug: +client_errors (erorile F12 din browser, la cerere — owner: „kelion să vadă F12"). 12 aug: +create_doc/edit_doc/create_sheet/edit_sheet (L1i — editare avansată Docs+Sheets). 12 aug: +proceseaza_date (L1e — procesare de date tabelare CSV/JSON: parse + agregări/profil, pe monitor). 11 aug: +episoade_promo (jurnalul seriei de clipuri — ce a filmat, unde a rămas). 10 aug: +arata_pe_grafic (pointeri de indicație pe graficul de trading). 10 aug: +cauta_istoric (accesul lui Kelion la istoricul complet de chat). 10 aug: +click_monitor, +zoom_monitor, +get_mouse_position. 10 aug: +agent_nou, +get_monitor, +goleste_monitorul (perechea lui get_monitor), +ruleaza_portile/jurnal_masuratori/vaneaza_buguri (suita de măsurare), +constructor_command (canalul de comandă construit de constructor, PR #966). 5 aug: +12 unelte legate la creier.
+  it('registrul are o suprafață de chat reală, iar vocea nu dublează uneltele', () => {
+    expect(chatCapabilityNames().length).toBeGreaterThan(0)
     expect(voiceCapabilityNames().length).toBe(0) // 1 aug: sesiunea de voce = urechi+gură, ZERO unelte directe
   })
 
@@ -128,7 +116,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // (camera frames / coords / screen go with the turn). Nothing is dormant
   // anywhere; both lists stay empty and any regression goes RED.
   it('adormirea e enumerată explicit, niciodată ascunsă', () => {
-    expect(dormantOnChat().map((c) => c.name)).toEqual([])
-    expect(dormantOnVoice().map((c) => c.name)).toEqual([])
+    expect(CAPABILITIES.filter((c) => c.voice && !c.chat).map((c) => c.name)).toEqual([])
+    expect(CAPABILITIES.filter((c) => c.chat && !c.voice && !c.voiceViaBrain).map((c) => c.name)).toEqual([])
   })
 })

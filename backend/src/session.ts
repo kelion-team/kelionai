@@ -1,165 +1,273 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
-import jwt from 'jsonwebtoken'
+import { createHash, randomBytes } from 'node:crypto'
 import { config, roleFor } from './config.js'
+import {
+  createAuthSession,
+  consumeNativeChannelTicket,
+  readAndTouchAuthSession,
+  revokeAuthSession,
+  type AuthSessionRecord,
+} from './db.js'
 
-// ── REFRESH TOKEN-UL GOOGLE NU CĂLĂTOREȘTE ÎN CLAR (audit 9 aug) ─────────────
-// JWT-ul e doar SEMNAT (JWS), nu criptat: payload-ul e base64url, lizibil de
-// oricine capturează cookie-ul, fără SESSION_SECRET. Refresh token-ul e o
-// credencială de LUNGĂ durată pentru Gmail/Calendar/Drive — de-aia se
-// criptează AES-256-GCM (cheie derivată din SESSION_SECRET) înainte să intre
-// în payload și se decriptează la citire. Cookie-urile vechi, cu tokenul în
-// clar, rămân valabile până expiră (decriptarea le lasă cum sunt).
-const cheiaRt = (): Buffer => createHash('sha256').update(`kelionai:rt:${config.sessionSecret}`).digest()
-const cripteazaRt = (txt: string): string => {
-  const iv = randomBytes(12)
-  const c = createCipheriv('aes-256-gcm', cheiaRt(), iv)
-  const enc = Buffer.concat([c.update(txt, 'utf8'), c.final()])
-  return `enc1:${iv.toString('base64url')}:${enc.toString('base64url')}:${c.getAuthTag().toString('base64url')}`
-}
-const decripteazaRt = (val: string): string | undefined => {
-  if (!val.startsWith('enc1:')) return val // cookie vechi, în clar — acceptat până expiră
-  try {
-    const [, ivB, encB, tagB] = val.split(':')
-    const d = createDecipheriv('aes-256-gcm', cheiaRt(), Buffer.from(ivB, 'base64url'))
-    d.setAuthTag(Buffer.from(tagB, 'base64url'))
-    return Buffer.concat([d.update(Buffer.from(encB, 'base64url')), d.final()]).toString('utf8')
-  } catch {
-    return undefined // token de nedescifrat (alt secret?) = ca și absent — nu crăpăm sesiunea
-  }
-}
-
-export const SESSION_COOKIE = 'kelionai_session'
+/** Opaque browser session. The cookie never contains identity or OAuth data. */
+export const SESSION_COOKIE = config.isProd ? '__Host-kelionai_session' : 'kelionai_session'
 
 export interface SessionUser {
   email: string
   name: string
   picture: string
   role: 'admin' | 'customer'
-  // Language from the user's Google account (e.g. "ro", "en-GB"). Drives UI language.
+  /** Admin is granted only to an identity verified by Google OAuth. */
+  authProvider: 'google' | 'local'
   locale: string
-  // Google OAuth access token + expiry (ms) for calling Google skills on the
-  // user's behalf. The access token is valid ~1h; the refresh token (kept in the
-  // signed, httpOnly session cookie) lets the chat route mint a fresh access
-  // token transparently so the Google skills keep working past the first hour.
-  googleAccessToken?: string
-  googleTokenExp?: number
-  googleRefreshToken?: string
+  /** Server-derived login time, used only for recent-confirmation gates. */
+  authenticatedAt?: number
 }
 
-export function setSession(reply: FastifyReply, user: SessionUser): void {
-  // `user` may have been read back from a verified JWT (e.g. on token refresh),
-  // so it can carry reserved claims (iat/exp/nbf). jsonwebtoken refuses to sign a
-  // payload that already has `exp` together with `expiresIn`, so sign ONLY the
-  // SessionUser fields — a clean payload regardless of where `user` came from.
-  const payload: SessionUser = {
-    email: user.email,
+const SESSION_ON_REQUEST = Symbol('kelionai.auth-session')
+const SESSION_HASH_ON_REQUEST = Symbol('kelionai.auth-session-hash')
+const SESSION_TRANSPORT_ON_REQUEST = Symbol('kelionai.auth-session-transport')
+type SessionRequest = FastifyRequest & {
+  [SESSION_ON_REQUEST]?: SessionUser | null
+  [SESSION_HASH_ON_REQUEST]?: string
+  [SESSION_TRANSPORT_ON_REQUEST]?: 'cookie' | 'bearer'
+}
+
+const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex')
+const looksOpaque = (value: string): boolean => /^[A-Za-z0-9_-]{43}$/.test(value)
+
+function cookieToken(req: FastifyRequest): string {
+  let token = req.cookies?.[SESSION_COOKIE]
+  if (!token) {
+    const raw = req.headers.cookie
+    if (raw) {
+      const escaped = SESSION_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const match = raw.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`))
+      if (match) {
+        try { token = decodeURIComponent(match[1]) } catch { return '' }
+      }
+    }
+  }
+  return typeof token === 'string' ? token : ''
+}
+
+function bearerToken(req: FastifyRequest): string {
+  const value = req.headers.authorization
+  if (!value) return ''
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(value)
+  return match?.[1] ?? ''
+}
+
+export function sessionRoleFor(
+  email: string,
+  provider: SessionUser['authProvider'] | undefined,
+): SessionUser['role'] {
+  return provider === 'google' ? roleFor(email) : 'customer'
+}
+
+function fromRecord(record: AuthSessionRecord): SessionUser {
+  const authProvider = record.authProvider === 'google' ? 'google' : 'local'
+  return {
+    email: record.email.toLowerCase(),
+    name: record.name,
+    picture: record.picture,
+    authProvider,
+    locale: record.locale,
+    authenticatedAt: record.authenticatedAt,
+    role: sessionRoleFor(record.email, authProvider),
+  }
+}
+
+/** Resolve the opaque handle once, before route handlers run. */
+export async function hydrateSession(req: FastifyRequest): Promise<void> {
+  const target = req as SessionRequest
+  target[SESSION_ON_REQUEST] = null
+  const authorizationPresent = typeof req.headers.authorization === 'string'
+  const bearer = bearerToken(req)
+  const nativeOrigin = typeof req.headers.origin === 'string'
+    && config.product.nativeOrigins.includes(req.headers.origin)
+  // Native shells authenticate only with an explicit bearer. They never fall
+  // back to ambient web cookies. An invalid Authorization header also fails
+  // closed instead of silently selecting a cookie identity.
+  const token = authorizationPresent || nativeOrigin ? bearer : cookieToken(req)
+  // Historical JWTs contain dots, so they fail closed here.
+  if (!looksOpaque(token)) return
+  const hash = sha256(token)
+  try {
+    const record = await readAndTouchAuthSession(
+      hash,
+      config.session.idleTtlSeconds,
+      config.session.touchIntervalSeconds,
+    )
+    if (!record) return
+    if (bearer && record.sessionKind !== 'native') return
+    if (!bearer && record.sessionKind !== 'browser') return
+    target[SESSION_HASH_ON_REQUEST] = hash
+    target[SESSION_TRANSPORT_ON_REQUEST] = bearer ? 'bearer' : 'cookie'
+    target[SESSION_ON_REQUEST] = fromRecord(record)
+  } catch {
+    const unavailable = new Error('session_store_unavailable') as Error & { statusCode?: number }
+    unavailable.statusCode = 503
+    throw unavailable
+  }
+}
+
+export function getSessionUser(req: FastifyRequest): SessionUser | null {
+  return (req as SessionRequest)[SESSION_ON_REQUEST] ?? null
+}
+
+/** CSRF decision for a cookie-authenticated request. */
+export function trustedMutationOrigin(req: FastifyRequest): boolean {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return true
+  if (!getSessionUser(req)) return true
+  if ((req as SessionRequest)[SESSION_TRANSPORT_ON_REQUEST] === 'bearer') return true
+  const expected = config.publicOrigin || config.frontendOrigin
+  return Boolean(expected) && req.headers.origin === expected
+}
+
+/** Browser WebSocket upgrades are GET requests, so the mutation hook does not
+ * cover them. Every cookie-authenticated upgrade must call this exact-origin
+ * guard from preValidation before the HTTP connection is upgraded. */
+export function trustedWebSocketOrigin(req: FastifyRequest): boolean {
+  if ((req as SessionRequest)[SESSION_TRANSPORT_ON_REQUEST] === 'bearer') {
+    return typeof req.headers.origin === 'string' && config.product.nativeOrigins.includes(req.headers.origin)
+  }
+  const expected = config.publicOrigin || config.frontendOrigin
+  return Boolean(expected) && req.headers.origin === expected
+}
+
+export async function hydrateSessionFromChannelTicket(
+  req: FastifyRequest,
+  audience: 'vocal-live' | 'apel',
+): Promise<boolean> {
+  const raw = req.headers['sec-websocket-protocol']
+  if (typeof raw !== 'string') return false
+  const protocols = raw.split(',').map((value) => value.trim()).filter(Boolean)
+  if (!protocols.includes('kelion-native')) return false
+  const encoded = protocols.filter((value) => value.startsWith('kelion-ticket.'))
+  if (encoded.length !== 1) return false
+  const ticket = encoded[0].slice('kelion-ticket.'.length)
+  if (!looksOpaque(ticket)) return false
+  const record = await consumeNativeChannelTicket(sha256(ticket), audience)
+  if (!record) return false
+  const target = req as SessionRequest
+  target[SESSION_ON_REQUEST] = fromRecord(record)
+  target[SESSION_TRANSPORT_ON_REQUEST] = 'bearer'
+  return true
+}
+
+/** Authenticate a WebSocket upgrade through either the hydrated browser
+ * session or a one-use native channel ticket, then enforce its exact origin. */
+export async function validateWebSocketSession(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  audience: 'vocal-live' | 'apel',
+): Promise<FastifyReply | void> {
+  if (!getSessionUser(req) && req.headers['sec-websocket-protocol']) {
+    try {
+      await hydrateSessionFromChannelTicket(req, audience)
+    } catch {
+      return reply.code(503).send({ error: 'channel_ticket_unavailable' })
+    }
+  }
+  if (!getSessionUser(req)) return reply.code(401).send({ error: 'unauthorized' })
+  if (!trustedWebSocketOrigin(req)) return reply.code(403).send({ error: 'origin_forbidden' })
+}
+
+/** Re-check the session at the upgraded-handler boundary and close fail-closed
+ * if a plugin or future refactor ever reaches it without authenticated state. */
+export function webSocketSessionUser(
+  req: FastifyRequest,
+  socket: { close(code: number, reason: string): void },
+): SessionUser | null {
+  const user = getSessionUser(req)
+  if (user) return user
+  try {
+    socket.close(1008, 'unauthorized')
+  } catch {
+    // Socket already closed.
+  }
+  return null
+}
+
+export async function setSession(reply: FastifyReply, user: SessionUser): Promise<void> {
+  const authProvider = user.authProvider === 'google' ? 'google' : 'local'
+  const token = randomBytes(32).toString('base64url')
+  await createAuthSession({
+    tokenHash: sha256(token),
+    email: user.email.toLowerCase(),
     name: user.name,
     picture: user.picture,
-    role: user.role,
+    authProvider,
     locale: user.locale,
-    googleAccessToken: user.googleAccessToken,
-    googleTokenExp: user.googleTokenExp,
-    // Criptat, nu în clar — vezi antetul. (setSession poate primi userul citit
-    // dintr-un JWT vechi cu tokenul necriptat; cripteazaRt îl sigilează atunci.)
-    googleRefreshToken: user.googleRefreshToken ? cripteazaRt(user.googleRefreshToken) : undefined,
-  }
-  const token = jwt.sign(payload, config.sessionSecret, { expiresIn: '30d' })
+    sessionKind: 'browser',
+    deviceId: null,
+    absoluteTtlSeconds: config.session.absoluteTtlSeconds,
+  })
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
     httpOnly: true,
     secure: config.isProd,
     sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: config.session.absoluteTtlSeconds,
   })
 }
 
-export function getSessionUser(req: FastifyRequest): SessionUser | null {
-  // ── TEST-AUTH (owner, 23 aug 2026: „trebuie gasita modalitate prin care sa
-  //    nu mai zici doar tu poti sa faci asta") — permite agenților AI să
-  //    testeze rutele cu auth FĂRĂ cookie de admin. Mecanism:
-  //    1. Header `x-test-auth: <token>` în request
-  //    2. Token-ul vine din env `TEST_AUTH_TOKEN` (setat pe VPS via GitHub Secrets)
-  //    3. Dacă matchează → autentific ca admin (adrianenc11@gmail.com)
-  //    4. Dacă env nu e setat → mecanism INACTIV (zero risc pe producție fără token)
-  //    5. Token-ul NU e în cod, NU e în repo — doar în env pe VPS.
-  const testToken = process.env.TEST_AUTH_TOKEN
-  if (testToken && typeof req.headers['x-test-auth'] === 'string') {
-    if (req.headers['x-test-auth'] === testToken) {
-      return {
-        email: config.adminEmail,
-        name: 'Adrian (test)',
-        picture: '',
-        role: 'admin',
-        locale: 'ro',
-      }
-    }
-  }
-  // req.cookies is populated by @fastify/cookie on normal HTTP routes. On a
-  // WebSocket UPGRADE it may be unparsed (undefined) → `?.` avoids the crash and
-  // we fall back to the raw header, so session auth works over WS too.
-  let token = req.cookies?.[SESSION_COOKIE]
-  if (!token) {
-    const raw = req.headers.cookie
-    if (raw) {
-      const m = raw.match(/(?:^|;\s*)kelionai_session=([^;]+)/)
-      if (m) token = decodeURIComponent(m[1])
-    }
-  }
-  if (!token) return null
-  try {
-    const u = jwt.verify(token, config.sessionSecret) as SessionUser
-    // Re-derive the role from the email (W10 #5): the role "frozen" in the JWT
-    // stayed admin for 30 days if ADMIN_EMAIL changed — revoking admin had no effect.
-    u.role = roleFor(u.email)
-    // Refresh token-ul stă criptat în cookie — consumatorii primesc valoarea
-    // REALĂ; una de nedescifrat devine „absent", nu o sesiune moartă.
-    if (u.googleRefreshToken) u.googleRefreshToken = decripteazaRt(u.googleRefreshToken)
-    return u
-  } catch {
-    return null
-  }
+export async function createNativeSession(user: SessionUser, deviceId: string): Promise<{
+  accessToken: string
+  tokenType: 'Bearer'
+  expiresIn: number
+}> {
+  const token = randomBytes(32).toString('base64url')
+  await createAuthSession({
+    tokenHash: sha256(token),
+    email: user.email.toLowerCase(),
+    name: user.name,
+    picture: user.picture,
+    authProvider: 'google',
+    locale: user.locale,
+    sessionKind: 'native',
+    deviceId,
+    absoluteTtlSeconds: config.session.absoluteTtlSeconds,
+  })
+  return { accessToken: token, tokenType: 'Bearer', expiresIn: config.session.absoluteTtlSeconds }
 }
 
-// ── GARDUL „ești admin?" — O SINGURĂ DATĂ (jscpd, 10 aug) ────────────────────
-// Preambulul „citește sesiunea → 401 dacă e moartă → 403 dacă nu e admin" era
-// copiat identic în 54 de rute din admin.ts (poarta jscpd îl prindea). Aici, o
-// dată: întoarce userul sau `null` DUPĂ ce a trimis răspunsul de eroare. 401 pe
-// sesiune moartă ≠ 403 pe rol (regula 9 aug: un cookie expirat nu are voie să
-// arate ca „nu ești admin").
-// ── LEGITIMAȚIA DE SERVICIU A LUI KELION — ADMIN 2 (P9) ─────────────────────
-// (owner, 15 aug: „kelion in continuare nu are acces la panoul de control si
-// la restul, raporteaza de ce nu are acces ca admin 2?")
-//
-// MĂSURAT atunci: accesul lui la panou era ÎMPRUMUTAT din cookie-ul sesiunii
-// ownerului, iar pe voce (vocalLive) și în bucla autonomă (autonomie.ts)
-// cookie-ul nu se transmitea → admin_vezi primea 403 exact când lucra ca
-// admin 2. Legitimația de aici e a LUI: un token aleator pe viața procesului,
-// care NU părăsește niciodată procesul (adminVedere îl pune pe fetch-urile
-// către bucla locală) și e acceptat DOAR de pe loopback — se verifică
-// adresa REALĂ a socketului (req.socket.remoteAddress), nu req.ip, care sub
-// trustProxy ar crede antetul X-Forwarded-For al oricui.
-// Rutele care mișcă bani / restaurează baza rămân ale ownerului — poarta aia
-// stă în adminVedere (DOAR_OWNERUL) și nu se atinge de legitimația asta.
-import { randomBytes as octetiAleatori } from 'node:crypto'
-export const TOKEN_ADMIN_INTERN = octetiAleatori(32).toString('hex')
-const KELION_ADMIN_INTERN: SessionUser = {
-  email: 'kelion@kelionai.app', // apare în audit ca EL, nu ca ownerul
-  name: 'Kelion (admin 2)',
-  picture: '',
-  role: 'admin',
-  locale: 'ro',
+export function sessionTokenHash(req: FastifyRequest): string | null {
+  return (req as SessionRequest)[SESSION_HASH_ON_REQUEST] ?? null
 }
-const deLoopback = (req: FastifyRequest): boolean =>
-  /^(127\.|::1$|::ffff:127\.)/.test(String(req.socket?.remoteAddress ?? ''))
+
+export function isNativeBearerSession(req: FastifyRequest): boolean {
+  return (req as SessionRequest)[SESSION_TRANSPORT_ON_REQUEST] === 'bearer'
+}
+
+/** Revoke an opaque native bearer without disclosing whether it was active.
+ * A repeated request with the same well-formed token remains a successful
+ * no-op, which makes device logout safe to retry after a lost response. */
+export async function revokeNativeBearer(req: FastifyRequest): Promise<boolean> {
+  const token = bearerToken(req)
+  if (!looksOpaque(token)) return false
+  await revokeAuthSession(sha256(token))
+  return true
+}
+
+export async function clearSession(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const hash = (req as SessionRequest)[SESSION_HASH_ON_REQUEST]
+  try {
+    if (hash) await revokeAuthSession(hash)
+  } finally {
+    reply.clearCookie(SESSION_COOKIE, {
+      path: '/',
+      httpOnly: true,
+      secure: config.isProd,
+      sameSite: 'lax',
+    })
+  }
+}
 
 export function cerAdmin(req: FastifyRequest, reply: FastifyReply): SessionUser | null {
   const user = getSessionUser(req)
   if (!user) {
-    const intern = req.headers['x-kelion-intern']
-    if (typeof intern === 'string' && intern.length > 0 && intern === TOKEN_ADMIN_INTERN && deLoopback(req)) {
-      return KELION_ADMIN_INTERN
-    }
     void reply.code(401).send({ error: 'unauthorized' })
     return null
   }
@@ -170,16 +278,11 @@ export function cerAdmin(req: FastifyRequest, reply: FastifyReply): SessionUser 
   return user
 }
 
-// ── GARDUL „admin + :id întreg pozitiv" — O SINGURĂ DATĂ (jscpd, 3 aug) ──────
-// Șablonul „getSessionUser → 403 → Number(:id) → 400" apărea identic în trei
-// rute (constructor șterge/reia, cereri neacoperite șterge). Aici e o dată:
-// întoarce id-ul valid, sau null DUPĂ ce a scris deja răspunsul de refuz.
 export function adminSiId(
   req: FastifyRequest,
   reply: FastifyReply,
   rawId: string,
 ): number | null {
-  // Gardul de admin, o singură sursă (cerAdmin) — 401 pe sesiune moartă, 403 pe rol.
   if (!cerAdmin(req, reply)) return null
   const id = Number(rawId)
   if (!Number.isInteger(id) || id <= 0) {

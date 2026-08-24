@@ -1,0 +1,49 @@
+services:
+  caddy:
+    image: caddy:2@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a
+    container_name: kelion-proxy
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    environment:
+      PUBLIC_APP_DOMAIN: ${PUBLIC_APP_DOMAIN:?public domain is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:18079:18079"
+    volumes:
+      - type: bind
+        source: ${KELION_PROXY_CONFIG_ROOT:?proxy config root is required}/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - type: bind
+        source: ${KELION_PROXY_CONFIG_ROOT:?proxy config root is required}/upstream
+        target: /etc/caddy/upstream
+        read_only: true
+      - type: bind
+        source: ${KELION_PROXY_STATE_ROOT:?proxy state root is required}/data
+        target: /data
+      - type: bind
+        source: ${KELION_PROXY_STATE_ROOT:?proxy state root is required}/config
+        target: /config
+    networks: [proxy]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 1.0
+    healthcheck:
+      test: [CMD, caddy, validate, --config, /etc/caddy/Caddyfile]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+
+networks:
+  proxy:
+    external: true
+    name: kelion-proxy

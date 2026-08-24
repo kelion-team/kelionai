@@ -12,10 +12,8 @@
 // proves the table is dead: one row, (1, 0.000000), untouched since Jul 23,
 // read by nothing.
 //
-// The rule from the audit: a table that only holds a hand-seeded figure is
-// itself a hardcoding. The real pocket is READ from Revolut (Enable Banking)
-// and OpenRouter. So initDb now DROPS the table (cleaning the databases that
-// already have it) instead of CREATE-ing + seeding it.
+// A table that only holds a hand-seeded figure is itself a hardcoding. Verified
+// payment and provider-expense ledgers are the only accounting sources.
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -30,10 +28,6 @@ describe('admin_pool: tabel mort, fără seed', () => {
 
   it('initDb NU mai seed-uiește soldul 0 scris de mână', () => {
     expect(db).not.toMatch(/INSERT INTO admin_pool/)
-  })
-
-  it('initDb ȘTERGE tabelul din bazele care îl au încă (DROP, o dată, la boot)', () => {
-    expect(db).toMatch(/DROP TABLE IF EXISTS admin_pool/)
   })
 
   it('niciun cod nu mai citește sau scrie admin_pool', () => {

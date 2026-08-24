@@ -21,12 +21,18 @@ const citeste = (cale: string): string => readFileSync(join(aici, cale), 'utf8')
 
 describe('scutirea ownerului pe TOATE căile de debit — soldul lui nu se mai mișcă', () => {
   it('tarife: esteAdmin iese gratis înainte de orice debit', () => {
-    expect(citeste('services/tarife.ts')).toMatch(/if \(esteAdmin\) return \{ ok: true, scazutGbp: 0/)
+    const tarife = citeste('services/tarife.ts')
+    expect(tarife).toMatch(/if \(esteAdminKelion\(email\)\) return \{ ok: true, debitedMinor: 0, scazutGbp: 0/)
+    expect(tarife).not.toMatch(/if \(_esteAdmin\)/)
   })
-  it('voce live + chat: debitul e gardat pe rol/owner', () => {
-    expect(citeste('routes/vocalLive.ts')).toMatch(/if \(user\.role !== 'admin'\) void debitWallet/)
+  it('voce live + chat: debitul este derivat numai din identitatea admin centrală', () => {
+    const voce = citeste('routes/vocalLive.ts')
+    expect(voce).toMatch(/const isAdminSession = esteAdminKelion\(user\.email\)/)
+    expect(voce).toMatch(/const monetizedCustomer = !isAdminSession/)
+    expect(voce).not.toMatch(/user\.role\s*[!=]==?\s*['"]admin['"]/)
     const chat = citeste('routes/chat.ts')
-    expect((chat.match(/!isOwnerEmail\(user\.email\)\) void debitWallet/g) ?? []).length).toBeGreaterThanOrEqual(2)
+    expect(chat).toMatch(/const monetizedCustomer = !esteAdminKelion\(user\.email\)/)
+    expect(chat).not.toMatch(/user\.role\s*[!=]==?\s*['"]admin['"]/)
   })
   it('panoul spune adevărul lângă cifra istorică (scutit), nu o ascunde', () => {
     const db = citeste('db.ts')
@@ -38,24 +44,18 @@ describe('scutirea ownerului pe TOATE căile de debit — soldul lui nu se mai m
 
   it('balance API marchează scutit pe admin — wallet nu face paywall pe sold istoric', () => {
     const billing = citeste('routes/billing.ts')
-    expect(billing).toMatch(/scutit/)
-    expect(billing).toMatch(/percent: scutit \? 100 : percent/)
+    expect(billing).toMatch(/const scutit = esteAdminKelion\(user\.email\)[\s\S]*?if \(scutit\) \{[\s\S]*?credits: 0,[\s\S]*?percent: 100,[\s\S]*?debitMinor: 0/)
     const wallet = citeste('../../frontend/src/components/WalletButton.tsx')
     expect(wallet).toMatch(/!b\.scutit && b\.credits <= 0/)
   })
 })
 
-describe('plafonul: cifra vine cu contextul ei, nu ca „măsurat" pe necitit', () => {
-  it('citirea nouă separă „nu pot citi" de zero și numără joburile fără cost', () => {
-    const db = citeste('db.ts')
-    expect(db).toMatch(/cheltuialaAziConstructor/)
-    expect(db).toMatch(/COUNT\(\*\) FILTER \(WHERE cost_usd IS NULL\)/)
-    expect(db).toMatch(/\{ citit: false, motiv: String/)
-  })
-  it('plafonConstructor duce contextul mai departe, iar panoul îl afișează', () => {
-    expect(citeste('services/autonomie.ts')).toMatch(/cheltuitCitit: false, cheltuitMotiv: c\.motiv/)
-    const panou = citeste('../../frontend/src/components/AdminPanel.tsx')
-    expect(panou).toMatch(/NU POT CITI cheltuiala azi/)
-    expect(panou).toMatch(/joburi fără cost raportat — cifra e minimul măsurat/)
+describe('costul Constructorului vine numai din măsurarea workerului', () => {
+  it('contractul păstrează micro-USD și răspunde null când nu există măsurătoare', () => {
+    const worker = citeste('services/codexWorker.ts')
+    expect(worker).toContain('internalCostUsdMicros')
+    expect(worker).toContain('internalCostUsd:')
+    expect(worker).toMatch(/internalCostUsdMicros \/ 1_000_000/)
+    expect(worker).not.toMatch(/estimate|estimare/i)
   })
 })
