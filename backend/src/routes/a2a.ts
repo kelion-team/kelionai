@@ -1,27 +1,30 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { randomUUID } from 'node:crypto'
 import { rosterViu, gasesteAgentViu, carteAgent, cheamaAgent } from '../services/agentiKelion.js'
 import { getSessionUser } from '../session.js'
+import { debitWalletMinorAtomar, grantCreditMinor, recordCost } from '../db.js'
+import { config } from '../config.js'
+import { esteAdminKelion } from '../services/adminIdentity.js'
 
 // ── ENDPOINTUL AGENȚILOR A2A ────────────────────────────────────────────────
 //
 // Aici trăiesc, viu, cei 33 de agenți ai lui Kelion (services/agentiKelion.ts).
 // Cărțile A2A arătau deja spre /api/a2a/<id> — până acum 404. Acum răspund:
-// fiecare e creierul Gemini al lui Kelion purtând pălăria unui specialist.
+// fiecare este creierul OpenAI al lui Kelion purtând pălăria unui specialist.
 //
 // Acceptă DOUĂ forme pe POST, ca să meargă și cu clienții standard, și la un
 // curl de probă:
-//   • A2A JSON-RPC 2.0 (method „message/send") — ce trimit Gemini Enterprise și
+//   • A2A JSON-RPC 2.0 (method „message/send") — ce trimit clienții A2A și
 //     orice client A2A.
 //   • { "text": "..." } simplu — pentru verificarea live cu un curl scurt și
 //     pentru apelurile interne ale lui Kelion.
 //
-// Notă de cost: endpointul e public (cărțile A2A sunt publice, nu pot purta un
-// secret), deci consumă din creditul Gemini al ownerului. Traficul e mic (doar
-// agenții lui), rate-limit-ul global e activ (index.ts), iar ieșirea e plafonată
-// (maxTokens în agentiKelion.ts). E un compromis declarat, nu o scăpare.
+// Doar cărțile sunt publice. Execuția cere sesiune și trece prin billing.
+
+const MAX_TEXT = 8_000 // hardcod-permis: plafon tehnic anti-abuz pentru o sarcină A2A
 
 function mesajId(): string {
-  return `m_${Math.random().toString(36).slice(2, 10)}`
+  return `m_${randomUUID()}`
 }
 
 function rpcEroare(id: unknown, code: number, message: string): Record<string, unknown> {
@@ -70,10 +73,17 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/a2a/:id/.well-known/agent-card.json', cartea)
 
   // Endpointul care LUCREAZĂ.
-  app.post('/api/a2a/:id', async (req, reply) => {
+  app.post('/api/a2a/:id', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const user = getSessionUser(req)
     const a = await gasesteAgentViu((req.params as { id: string }).id)
     const body = (req.body ?? {}) as Record<string, unknown>
     const esteRpc = body.jsonrpc === '2.0' && typeof body.method === 'string'
+
+    if (!user) {
+      if (esteRpc) return rpcEroare(body.id, -32001, 'autentificare necesară')
+      return reply.code(401).send({ error: 'unauthorized' })
+    }
+    if (esteRpc && body.method !== 'message/send') return rpcEroare(body.id, -32601, 'metodă nesuportată')
 
     if (!a) {
       if (esteRpc) return rpcEroare(body.id, -32601, 'agent necunoscut')
@@ -85,35 +95,55 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
     // admin"): endpointul e public pentru restul rosterului, dar aceștia refuză
     // orice apel fără sesiunea ownerului — cartea se vede, munca nu.
     if (a.doarAdmin) {
-      const user = getSessionUser(req)
-      if (!user || user.role !== 'admin') {
+      if (!esteAdminKelion(user.email)) {
         // 401 pe sesiune moartă, 403 DOAR pe rol (regula din 9 aug) — și
         // mesajul spune cauza REALĂ, nu „nu ești owner" pe un cookie expirat.
-        const motiv = user ? 'doar ownerul poate chema acest agent' : 'sesiune moartă — loghează-te din nou'
+        const motiv = 'doar ownerul poate chema acest agent'
         if (esteRpc) return rpcEroare(body.id, -32003, motiv)
-        reply.code(user ? 403 : 401)
+        reply.code(403)
         return { error: motiv }
       }
     }
 
-    const sarcina = extrageText(body)
-    if (!sarcina.trim()) {
+    const sarcina = extrageText(body).trim()
+    if (!sarcina) {
       if (esteRpc) return rpcEroare(body.id, -32602, 'lipseste textul mesajului')
       reply.code(400)
       return { error: 'lipseste textul (trimite {"text":"..."})' }
+    }
+    if (sarcina.length > MAX_TEXT) {
+      if (esteRpc) return rpcEroare(body.id, -32602, 'text prea lung')
+      return reply.code(413).send({ error: 'text_prea_lung', max: MAX_TEXT })
+    }
+
+    const adminExempt = esteAdminKelion(user.email)
+    const clientEvent = String(body.id ?? req.headers['idempotency-key'] ?? '').trim()
+    if (!adminExempt && (!clientEvent || clientEvent.length > 100 || !/^[A-Za-z0-9._:-]+$/.test(clientEvent))) {
+      return reply.code(400).send({ error: 'idempotency_key_required' })
+    }
+    const debitRef = `a2a:${a.id}:${clientEvent}`
+    if (!adminExempt) {
+      const debit = await debitWalletMinorAtomar(user.email, config.billing.chatTurnMinor, debitRef, `a2a:${a.id}`)
+      if (!debit.ok) return reply.code(debit.code === 'insufficient' ? 402 : 503).send({ error: debit.code })
+      if (debit.duplicate) return reply.code(409).send({ error: 'request_already_exists', idempotencyKey: clientEvent })
     }
 
     let r
     try {
       // Blindat (4 aug): sesiunea ownerului aprinde și memoria lui Kelion;
       // un apel public primește specialistul cu căutare + citit pagini.
-      const esteOwner = getSessionUser(req)?.role === 'admin'
-      r = await cheamaAgent(a, sarcina, esteOwner)
+      r = await cheamaAgent(a, sarcina, esteAdminKelion(user.email), user.email)
     } catch (e) {
+      if (!adminExempt) await grantCreditMinor(user.email, config.billing.chatTurnMinor, `${debitRef}:refund`)
       const msg = e instanceof Error ? e.message : String(e)
-      if (esteRpc) return rpcEroare(body.id, -32000, msg)
+      if (esteRpc) return rpcEroare(body.id, -32000, 'creierul nu a răspuns')
       reply.code(502)
-      return { error: 'creierul nu a raspuns', detaliu: msg }
+      req.log.warn({ err: msg.slice(0, 200) }, 'A2A agent failure')
+      return { error: 'creierul nu a raspuns' }
+    }
+
+    if (typeof r.costUsd === 'number' && r.costUsd > 0) {
+      void recordCost(user.email, 'openai', r.costUsd)
     }
 
     if (esteRpc) {

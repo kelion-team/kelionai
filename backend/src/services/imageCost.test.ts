@@ -1,47 +1,48 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Image generation runs on the owner's Gemini key now (services/geminiDirect.ts
-// geminiImage), OpenRouter removed. The cost must still travel WITH the image:
-// these tests pin down that generateImage forwards the generator's result
-// faithfully — the bytes get stored, the mime and costUsd are passed through,
-// and an error propagates as-is without an invented cost.
-const geminiImage = vi.fn()
-vi.mock('./geminiDirect.js', () => ({ geminiImage }))
+vi.stubEnv('OPENAI_API_KEY', 'sk-proj-test-openai-key')
+vi.stubEnv('OPENAI_IMAGE_MODEL', 'gpt-image-2')
+const fetchMock = vi.fn()
+vi.stubGlobal('fetch', fetchMock)
+const mediaRows = vi.hoisted(() => new Map<string, { owner: string; mime: string; data: Buffer }>())
 vi.mock('../db.js', () => ({
-  saveGeneratedImage: vi.fn(async () => {}),
-  loadGeneratedImage: vi.fn(async () => null),
+  saveGeneratedMedia: vi.fn(async (input: { id: string; ownerEmail: string; mime: string; data: Buffer }) => {
+    mediaRows.set(input.id, { owner: input.ownerEmail, mime: input.mime, data: input.data })
+  }),
+  loadGeneratedMedia: vi.fn(async (id: string, owner: string) => {
+    const row = mediaRows.get(id)
+    return row?.owner === owner ? { mime: row.mime, data: row.data } : null
+  }),
 }))
 
-const { generateImage } = await import('./image.js')
+const { generateImage, getImage } = await import('./image.js')
 
-describe('image.ts — rezultatul generării ajunge la apelant', () => {
-  it('costUsd din răspunsul generatorului NU se mai pierde', async () => {
-    // Non-zero on purpose: proves generateImage forwards whatever cost the
-    // generator reports (it used to drop it, and the route charged a flat rate).
-    geminiImage.mockResolvedValue({
-      mime: 'image/png',
-      buf: Buffer.from('fakepng'),
-      costUsd: 0.0123,
-    })
-    const r = await generateImage('un castel pe un deal')
-    expect('error' in r).toBe(false)
-    if (!('error' in r)) {
-      expect(r.costUsd).toBeCloseTo(0.0123, 9)
-      expect(r.id).toBeTruthy()
-      expect(r.mime).toBe('image/png')
+beforeEach(() => { fetchMock.mockReset(); mediaRows.clear() })
+
+describe('image.ts — OpenAI Images', () => {
+  it('persistă octeții b64_json și păstrează contractul id/mime/cost', async () => {
+    const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('fakepng')])
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: png.toString('base64') }],
+    }), { status: 200 }))
+    const result = await generateImage('un castel pe un deal', 'owner@example.com')
+    expect('error' in result).toBe(false)
+    if (!('error' in result)) {
+      expect(result.id).toBeTruthy()
+      expect(result.mime).toBe('image/png')
+      expect(result.costUsd).toBe(0)
+      expect(await getImage(result.id, 'someone-else@example.com')).toBeNull()
+      expect(await getImage(result.id, 'owner@example.com')).toMatchObject({ mime: 'image/png' })
     }
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.openai.com/v1/images/generations')
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>
+    expect(body.model).toBe('gpt-image-2')
+    expect(body.prompt).toBe('un castel pe un deal')
   })
 
-  it('generatorul NU raportează cost → costUsd 0, iar apelantul cade pe estimare etichetată', async () => {
-    geminiImage.mockResolvedValue({ mime: 'image/png', buf: Buffer.from('x'), costUsd: 0 })
-    const r = await generateImage('o pisică')
-    expect('error' in r).toBe(false)
-    if (!('error' in r)) expect(r.costUsd).toBe(0)
-  })
-
-  it('eroarea generatorului se propagă ca atare, fără cost inventat', async () => {
-    geminiImage.mockResolvedValue({ error: 'image_not_configured' })
-    const r = await generateImage('ceva')
-    expect(r).toEqual({ error: 'image_not_configured' })
+  it('propagă eroarea providerului fără succes inventat', async () => {
+    fetchMock.mockResolvedValue(new Response('quota', { status: 429 }))
+    await expect(generateImage('ceva', 'owner@example.com')).resolves.toEqual({ error: 'image_429: quota' })
   })
 })

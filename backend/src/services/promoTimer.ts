@@ -2,12 +2,12 @@
 // eventual la ore prestabilite") ─────────────────────────────────────────────
 // Rulează DOAR sub cheile ownerului, toate la vedere: butonul lui (kv, implicit
 // OPRIT), orele lui, plafonul lui zilnic, ideea lui — și comutatorul 🎬 din P29
-// (generarea costă bani la Google). Orice refuz e PE NUME în jurnal; succesul
+// (generarea costă bani la provider). Orice refuz e PE NUME în jurnal; succesul
 // se anunță în panou cu linkul clipului. Independent de „autonomie" (e ordinul
 // LUI programat, ca publicarea — nu inițiativa lui Kelion).
 import { loadKv, saveKv, recordCost, costAziPe } from '../db.js'
 import { config } from '../config.js'
-import { genereazaVideo, videoPlatitPornit, costVideoUsd } from './video.js'
+import { genereazaVideo, videoPlatitPornit, costVideoUsd, openAIVideoModel } from './video.js'
 import {
   KV_STUDIO_PROMO, setariPromoDinKv, motivRefuzPromo, promptVideoDinIdee, numeClip,
 } from './studioClipuri.js'
@@ -36,14 +36,20 @@ export async function promoTick(acum = new Date()): Promise<{ rulat: boolean; mo
     dejaRulatOraAsta: ultima === stampilaOra,
     videoPornit: comutator.pornit,
     cheltuitAziUsd: cheltuitAzi,
-    costClipUsd: costVideoUsd(config.videoModel, 8),
+    costClipUsd: costVideoUsd(openAIVideoModel(), 8),
   })
   if (motiv) return { rulat: false, motiv }
 
   // Stampila se scrie ÎNAINTE de generare: dacă generarea durează/pică, ora
   // asta tot nu se mai încearcă a doua oară (un clip pe oră programată, LEGE).
   await saveKv(KV_ULTIMA, stampilaOra)
-  const rezultat = await genereazaVideo(promptVideoDinIdee(setari.idee, 'Spot publicitar'), 8, false)
+  if (!config.adminEmail) return { rulat: false, motiv: 'admin_neconfigurat' }
+  const rezultat = await genereazaVideo(
+    promptVideoDinIdee(setari.idee, 'Spot publicitar'),
+    config.adminEmail,
+    8,
+    false,
+  )
   if ('error' in rezultat) {
     console.error(`[promo] generarea programată a picat: ${rezultat.error.slice(0, 200)}`)
     return { rulat: false, motiv: `generare_picata: ${rezultat.error.slice(0, 160)}` }

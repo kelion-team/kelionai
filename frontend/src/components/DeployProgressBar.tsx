@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch, consumeApiEventStream } from '../lib/transport';
 
 export interface DeployState {
   status: 'idle' | 'running' | 'success' | 'failed';
@@ -27,12 +28,12 @@ export function DeployProgressBar() {
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    let es: EventSource | null = null;
+    const streamController = new AbortController();
     let pollInterval: ReturnType<typeof setInterval> | null = null;
 
     const fetchProgress = async () => {
       try {
-        const res = await fetch('/api/deploy/progress');
+        const res = await apiFetch('/api/deploy/progress');
         if (res.ok) {
           const data = await res.json();
           if (data.ok && data.state) {
@@ -47,11 +48,16 @@ export function DeployProgressBar() {
       }
     };
 
-    try {
-      es = new EventSource('/api/deploy/status');
-      es.onmessage = (event) => {
+    const startPolling = (): void => {
+      if (!pollInterval) {
+        void fetchProgress();
+        pollInterval = setInterval(() => { void fetchProgress() }, 3000);
+      }
+    };
+
+    void consumeApiEventStream('/api/deploy/status', (payload) => {
         try {
-          const data = JSON.parse(event.data) as DeployState;
+          const data = JSON.parse(payload) as DeployState;
           setState(data);
           if (data.status === 'running') {
             setDismissed(false);
@@ -59,28 +65,11 @@ export function DeployProgressBar() {
         } catch {
           // ignore parsing error
         }
-      };
-
-      es.onerror = () => {
-        if (es) {
-          es.close();
-          es = null;
-        }
-        // Fallback to polling every 3 seconds if SSE fails
-        if (!pollInterval) {
-          fetchProgress();
-          pollInterval = setInterval(fetchProgress, 3000);
-        }
-      };
-    } catch {
-      fetchProgress();
-      pollInterval = setInterval(fetchProgress, 3000);
-    }
+      }, streamController.signal)
+      .catch(() => { if (!streamController.signal.aborted) startPolling() });
 
     return () => {
-      if (es) {
-        es.close();
-      }
+      streamController.abort();
       if (pollInterval) {
         clearInterval(pollInterval);
       }

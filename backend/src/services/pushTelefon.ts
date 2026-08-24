@@ -1,84 +1,101 @@
-// NOTIFICĂRI PUSH PE TELEFON (ordinul din 14 aug: „toate aplicațiile trebuiesc"
-// — a treia bifă din listă, „notificări pe telefon"). Rostul REAL: anunțurile
-// santinelei („PR #X e verde — gata de merge") și restul notificărilor de admin
-// să-l ajungă pe owner și când NU e pe kelionai.app — pe telefon, prin Web Push.
-//
-// DE CE Web Push cu VAPID și NU un cont Firebase: protocolul standard (RFC 8030/
-// 8291/8292) e chiar canalul pe care browserele îl folosesc (Chrome îl duce prin
-// FCM pe sub, Firefox/Safari prin ale lor) — dar cu VAPID nu trebuie NICIUN cont,
-// nicio cheie de la Google, zero muncă de owner: perechea de chei se generează
-// SINGURĂ la prima folosire și trăiește în kv_state. Regula casei („nu mai bag
-// bani", zero pași manuali) e respectată prin construcție.
 import webpush from 'web-push'
-import { getPool, dbEnabled, saveKv, loadKv } from '../db.js'
+import { getPool, dbEnabled } from '../db.js'
 import { config } from '../config.js'
-
-const CHEIE_KV = 'push:vapid'
-const SUBIECT = 'mailto:contact@kelionai.app'
-
-interface CheiVapid {
-  publicKey: string
-  privateKey: string
-}
-
-let cheiInMemorie: CheiVapid | null = null
-
-/** Perechea VAPID: generată O DATĂ, păstrată în kv_state, refolosită mereu.
- *  (O cheie nouă la fiecare boot ar invalida TOATE abonările vechi — telefonul
- *  ownerului ar „amuți" tăcut după fiecare deploy.) */
-async function cheiVapid(): Promise<CheiVapid | null> {
-  if (cheiInMemorie) return cheiInMemorie
-  if (!dbEnabled()) return null
-  try {
-    const salvat = await loadKv(CHEIE_KV)
-    if (salvat) {
-      cheiInMemorie = JSON.parse(salvat) as CheiVapid
-      return cheiInMemorie
-    }
-    const noi = webpush.generateVAPIDKeys()
-    await saveKv(CHEIE_KV, JSON.stringify(noi))
-    cheiInMemorie = noi
-    return noi
-  } catch {
-    return null
-  }
-}
-
-async function tabelAbonari(): Promise<void> {
-  await getPool().query(`
-    CREATE TABLE IF NOT EXISTS push_subscriptions (
-      endpoint TEXT PRIMARY KEY,
-      email TEXT NOT NULL,
-      p256dh TEXT NOT NULL,
-      auth TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `)
-}
-
-/** Cheia publică pentru browser (pushManager.subscribe). null = „nu pot" cinstit
- *  (DB oprită), niciodată o cheie inventată. */
-export async function cheiePublicaPush(): Promise<string | null> {
-  const chei = await cheiVapid()
-  return chei?.publicKey ?? null
-}
+import { esteAdminKelion } from './adminIdentity.js'
+import { replaceControlCharacters } from '../shared/textSanitization.js'
 
 export interface AbonarePush {
   endpoint: string
   keys: { p256dh: string; auth: string }
 }
 
-/** Înregistrează (sau reînnoiește) abonarea unui browser. Endpoint-ul e cheia:
- *  același telefon re-abonat nu naște duplicate. */
-export async function aboneazaPush(email: string, abonare: AbonarePush): Promise<boolean> {
-  if (!dbEnabled()) return false
-  if (!abonare?.endpoint || !abonare.keys?.p256dh || !abonare.keys?.auth) return false
+function baza64UrlCanonica(raw: unknown, bytes: number): string | null {
+  if (typeof raw !== 'string' || !/^[A-Za-z0-9_-]+$/.test(raw)) return null
   try {
-    await tabelAbonari()
+    const decoded = Buffer.from(raw, 'base64url')
+    return decoded.length === bytes && decoded.toString('base64url') === raw ? raw : null
+  } catch {
+    return null
+  }
+}
+
+export function normalizeazaEndpointPush(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length < 12 || raw.length > 2_048) return null
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash) return null
+    const host = url.hostname.toLowerCase()
+    const permis = config.push.endpointHosts.some((allowed) => host === allowed || host.endsWith(`.${allowed}`))
+    return permis ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+export function normalizeazaAbonarePush(abonare: unknown): AbonarePush | null {
+  if (!abonare || typeof abonare !== 'object') return null
+  const value = abonare as Partial<AbonarePush>
+  const endpoint = normalizeazaEndpointPush(value.endpoint)
+  const p256dh = baza64UrlCanonica(value.keys?.p256dh, 65)
+  const auth = baza64UrlCanonica(value.keys?.auth, 16)
+  if (!endpoint || !p256dh || !auth) return null
+  const publicPoint = Buffer.from(p256dh, 'base64url')
+  if (publicPoint[0] !== 4) return null
+  return { endpoint, keys: { p256dh, auth } }
+}
+
+function pushDisponibil(): boolean {
+  return config.push.enabled && Boolean(config.push.publicKey && config.push.privateKey && config.push.endpointHosts.length)
+}
+
+/** Public application-server key. Push remains fail-closed until deployment
+ * mounts the VAPID private key and supplies an explicit endpoint allowlist. */
+export async function cheiePublicaPush(): Promise<string | null> {
+  return pushDisponibil() ? config.push.publicKey : null
+}
+
+/** Stores only a validated subscription belonging to the configured Google
+ * admin. An advisory lock makes the per-account quota deterministic even when
+ * two browsers subscribe concurrently. */
+export async function aboneazaPush(email: string, abonare: AbonarePush): Promise<boolean> {
+  const owner = email.trim().toLowerCase()
+  const validata = normalizeazaAbonarePush(abonare)
+  if (!pushDisponibil() || !dbEnabled() || !esteAdminKelion(owner) || !validata) return false
+  try {
+    const result = await getPool().query<{ endpoint: string }>(
+      `WITH locked AS MATERIALIZED (
+         SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+       ), quota AS (
+         SELECT count(*)::int AS total,
+                bool_or(endpoint=$2) AS already_owned
+         FROM push_subscriptions, locked
+         WHERE email=$1
+       )
+       INSERT INTO push_subscriptions (endpoint, email, p256dh, auth)
+       SELECT $2,$1,$3,$4 FROM quota
+       WHERE coalesce(already_owned, false) OR total < $5
+       ON CONFLICT (endpoint) DO UPDATE
+         SET p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth
+         WHERE push_subscriptions.email=EXCLUDED.email
+       RETURNING endpoint`,
+      [owner, validata.endpoint, validata.keys.p256dh, validata.keys.auth, config.push.maxSubscriptions],
+    )
+    return Boolean(result.rows[0])
+  } catch {
+    return false
+  }
+}
+
+/** Consent withdrawal is idempotent and can affect only the current admin's
+ * endpoint. A successful query is success even when the row was already gone. */
+export async function dezaboneazaPush(email: string, rawEndpoint: string): Promise<boolean> {
+  const owner = email.trim().toLowerCase()
+  const endpoint = normalizeazaEndpointPush(rawEndpoint)
+  if (!pushDisponibil() || !dbEnabled() || !esteAdminKelion(owner) || !endpoint) return false
+  try {
     await getPool().query(
-      `INSERT INTO push_subscriptions (endpoint, email, p256dh, auth) VALUES ($1,$2,$3,$4)
-       ON CONFLICT (endpoint) DO UPDATE SET email=$2, p256dh=$3, auth=$4`,
-      [abonare.endpoint, email, abonare.keys.p256dh, abonare.keys.auth],
+      'DELETE FROM push_subscriptions WHERE endpoint=$1 AND email=$2',
+      [endpoint, owner],
     )
     return true
   } catch {
@@ -86,57 +103,71 @@ export async function aboneazaPush(email: string, abonare: AbonarePush): Promise
   }
 }
 
-/** Scoate abonarea unui browser. Doar pe a ta (email + endpoint împreună). */
-export async function dezaboneazaPush(email: string, endpoint: string): Promise<boolean> {
-  if (!dbEnabled() || !endpoint) return false
-  try {
-    await tabelAbonari()
-    const r = await getPool().query(
-      'DELETE FROM push_subscriptions WHERE endpoint=$1 AND email=$2',
-      [endpoint, email],
-    )
-    return (r.rowCount ?? 0) > 0
-  } catch {
-    return false
-  }
+function textNotificare(raw: unknown, max: number): string {
+  return replaceControlCharacters(String(raw ?? ''), ' ').trim().slice(0, max)
 }
 
-/** Trimite notificarea pe toate telefoanele ownerului. Întoarce câte au primit
- *  REAL (0 = niciun abonat sau totul a picat — cifră măsurată, nu speranță).
- *  Un endpoint mort (404/410 de la browserul care și-a șters abonarea) se
- *  curăță singur — tabelul nu adună cadavre. */
+function payloadNotificare(raw: Record<string, unknown> | undefined): Record<string, string | number | boolean | null> {
+  const safe: Record<string, string | number | boolean | null> = {}
+  for (const [key, value] of Object.entries(raw ?? {}).slice(0, 12)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) continue
+    if (key === 'url') {
+      const path = typeof value === 'string' ? value : ''
+      if (/^\/[A-Za-z0-9/_-]{0,300}$/.test(path)) safe.url = path
+      continue
+    }
+    if (typeof value === 'string') safe[key] = textNotificare(value, 300)
+    else if (typeof value === 'boolean' || value === null) safe[key] = value
+    else if (typeof value === 'number' && Number.isFinite(value)) safe[key] = value
+  }
+  return safe
+}
+
+/** Sends a bounded notification only to validated subscriptions of the
+ * configured admin. Provider failures are counted as failures; dead endpoints
+ * are removed with the same owner constraint. */
 export async function trimitePushAdmin(
   titlu: string,
   mesaj: string,
   payload?: Record<string, unknown>,
 ): Promise<number> {
-  if (!dbEnabled()) return 0
-  const chei = await cheiVapid()
-  if (!chei) return 0
+  if (!pushDisponibil() || !dbEnabled() || !config.adminEmail) return 0
+  const title = textNotificare(titlu, 80)
+  const body = textNotificare(mesaj, 240)
+  if (!title || !body) return 0
   try {
-    await tabelAbonari()
-    const r = await getPool().query<{ endpoint: string; p256dh: string; auth: string }>(
+    const result = await getPool().query<{ endpoint: string; p256dh: string; auth: string }>(
       'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE email=$1',
       [config.adminEmail],
     )
-    let trimise = 0
-    for (const rand of r.rows) {
+    let delivered = 0
+    for (const row of result.rows.slice(0, config.push.maxSubscriptions)) {
+      const subscription = normalizeazaAbonarePush({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } })
+      if (!subscription) continue
       try {
         await webpush.sendNotification(
-          { endpoint: rand.endpoint, keys: { p256dh: rand.p256dh, auth: rand.auth } },
-          JSON.stringify({ titlu, mesaj, ...payload }),
-          { vapidDetails: { subject: SUBIECT, publicKey: chei.publicKey, privateKey: chei.privateKey } },
+          subscription,
+          JSON.stringify({ titlu: title, mesaj: body, ...payloadNotificare(payload) }),
+          {
+            vapidDetails: {
+              subject: `mailto:${config.product.supportEmail}`,
+              publicKey: config.push.publicKey,
+              privateKey: config.push.privateKey,
+            },
+            TTL: 300,
+          },
         )
-        trimise++
-      } catch (e) {
-        const cod = (e as { statusCode?: number })?.statusCode
-        if (cod === 404 || cod === 410)
+        delivered++
+      } catch (error) {
+        const status = (error as { statusCode?: number })?.statusCode
+        if (status === 404 || status === 410) {
           await getPool()
-            .query('DELETE FROM push_subscriptions WHERE endpoint=$1', [rand.endpoint])
+            .query('DELETE FROM push_subscriptions WHERE endpoint=$1 AND email=$2', [subscription.endpoint, config.adminEmail])
             .catch(() => undefined)
+        }
       }
     }
-    return trimise
+    return delivered
   } catch {
     return 0
   }

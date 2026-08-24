@@ -1,145 +1,159 @@
-// ── LOCAL AUTHENTICATION (Adrian, 26 Jul: "other non-Gmail login solutions?
-// ... yes, go ahead, including being able to create and buy credits") ──────
-// Three paths WITHOUT Google, with the same functions (identity = the email,
-// like with Google; wallet/history/memory are already keyed by email):
-//   1. email + password (register + login)
-//   2. magic link by email (no password; creates the account on the fly if
-//      it doesn't exist)
-//   3. password reset (link by email)
-// Passwords: scrypt from node:crypto (no new dependencies), per-account salt,
-// constant-time comparison. Link tokens: ONLY the hash in the DB.
-// Deliberately GENERIC messages on magic/reset (we don't confirm whether an
-// email exists).
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 import crypto from 'node:crypto'
-import { config, roleFor } from '../config.js'
+import { config } from '../config.js'
 import { setSession } from '../session.js'
 import {
-  getLocalAccount,
-  upsertLocalAccount,
-  saveLoginToken,
+  accountBlockStatus,
   consumeLoginToken,
+  createLocalAccount,
+  getLocalAccount,
+  revokeAllAuthSessions,
+  saveLoginToken,
+  updateLocalPassword,
 } from '../db.js'
 import { sendMail } from '../services/mail.js'
 
-const SCRYPT_N = 16384
-function hashPassword(pass: string): string {
-  const salt = crypto.randomBytes(16).toString('hex')
-  const h = crypto.scryptSync(pass, salt, 64, { N: SCRYPT_N }).toString('hex')
-  return `${salt}:${h}`
-}
-function verifyPassword(pass: string, stored: string): boolean {
-  const [salt, h] = stored.split(':')
-  if (!salt || !h) return false
-  const probe = crypto.scryptSync(pass, salt, 64, { N: SCRYPT_N })
-  const ref = Buffer.from(h, 'hex')
-  return probe.length === ref.length && crypto.timingSafeEqual(probe, ref)
-}
-const sha256 = (s: string): string => crypto.createHash('sha256').update(s).digest('hex')
-const validEmail = (e: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)
-// CRITICAL HOLE CLOSED (the security audit, 27 Jul): anyone could create a
-// LOCAL ACCOUNT with the owner's email — roleFor(email) would give them an
-// ADMIN session for 30 days, with no verification that it's really him. The
-// owner logs in ONLY with Google; his account has no business on the local
-// path, on any of the routes.
-const isOwnerEmail = (e: string): boolean => e.toLowerCase() === config.adminEmail.toLowerCase()
+const SCRYPT_N = 16_384
+const PASSWORD_MAX = 256
+const LINK_TTL_MINUTES = 20
+const validEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
+const isAdminIdentity = (email: string): boolean => email.toLowerCase() === config.adminEmail.toLowerCase()
+const sha256 = (value: string): string => crypto.createHash('sha256').update(value).digest('hex')
 
-function signIn(reply: Parameters<typeof setSession>[0], email: string, name: string): void {
-  setSession(reply, {
+function scrypt(password: string, salt: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, { N: SCRYPT_N }, (error, derived) => {
+      if (error) reject(error)
+      else resolve(derived)
+    })
+  })
+}
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.randomBytes(16).toString('hex')
+  return `${salt}:${(await scrypt(password, salt)).toString('hex')}`
+}
+
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  if (!password || password.length > PASSWORD_MAX) return false
+  const [salt, encoded] = stored.split(':')
+  if (!salt || !/^[a-f0-9]{128}$/.test(encoded ?? '')) return false
+  try {
+    const probe = await scrypt(password, salt)
+    const expected = Buffer.from(encoded, 'hex')
+    return probe.length === expected.length && crypto.timingSafeEqual(probe, expected)
+  } catch {
+    return false
+  }
+}
+
+async function signIn(reply: FastifyReply, email: string, name: string): Promise<void> {
+  await setSession(reply, {
     email: email.toLowerCase(),
     name: name || email.split('@')[0],
     picture: '',
-    role: roleFor(email),
+    role: 'customer',
+    authProvider: 'local',
     locale: '',
   })
 }
 
 async function sendLink(email: string, purpose: 'magic' | 'reset'): Promise<void> {
+  if (!config.publicOrigin) throw new Error('public_origin_required')
   const token = crypto.randomBytes(32).toString('hex')
-  await saveLoginToken(sha256(token), email, purpose, 20)
-  const base = config.frontendOrigin || 'https://kelionai.app'
-  const url =
-    purpose === 'magic'
-      ? `${base}/auth/local/magic/cb?token=${token}`
-      : `${base}/login?reset=${token}`
-  const subj = purpose === 'magic' ? 'Linkul tău de intrare în Kelionai' : 'Resetarea parolei Kelionai'
-  const body =
-    purpose === 'magic'
-      ? `Apasă linkul ca să intri în Kelionai (valabil 20 de minute):\n\n${url}\n\nDacă nu tu ai cerut asta, ignoră mesajul.`
-      : `Apasă linkul ca să îți setezi o parolă nouă (valabil 20 de minute):\n\n${url}\n\nDacă nu tu ai cerut asta, ignoră mesajul.`
-  await sendMail({ to: email, subject: subj, html: `<p style="white-space:pre-wrap">${body}</p>`, text: body })
+  await saveLoginToken(sha256(token), email, purpose, LINK_TTL_MINUTES)
+  const url = purpose === 'magic'
+    ? `${config.publicOrigin}/auth/local/magic/cb?token=${token}`
+    : `${config.publicOrigin}/login?reset=${token}`
+  const subject = purpose === 'magic' ? 'Your Kelionai sign-in link' : 'Reset your Kelionai password'
+  const text = `${subject} (valid for ${LINK_TTL_MINUTES} minutes):\n\n${url}\n\nIf you did not request this, ignore this message.`
+  await sendMail({ to: email, subject, html: `<p style="white-space:pre-wrap">${text}</p>`, text })
+}
+
+async function activeAccount(email: string): Promise<'active' | 'blocked' | 'unavailable'> {
+  const status = await accountBlockStatus(email)
+  if (!status.available) return 'unavailable'
+  return status.blocked ? 'blocked' : 'active'
 }
 
 export async function authLocalRoutes(app: FastifyInstance): Promise<void> {
-  const rl = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }
+  const limited = { config: { rateLimit: { max: 8, timeWindow: '1 minute' } } }
 
-  // New account registration (email + password) → session right away.
-  app.post<{ Body: { email?: string; password?: string; name?: string } }>(
-    '/auth/local/register',
-    rl,
-    async (req, reply) => {
-      const email = String(req.body?.email ?? '').toLowerCase().trim()
-      const pass = String(req.body?.password ?? '')
-      if (!validEmail(email)) return reply.code(400).send({ error: 'email_invalid' })
-      if (isOwnerEmail(email)) return reply.code(403).send({ error: 'cont_google_obligatoriu' })
-      if (pass.length < 8) return reply.code(400).send({ error: 'parola_scurta' })
-      if (await getLocalAccount(email)) return reply.code(409).send({ error: 'cont_existent' })
-      await upsertLocalAccount(email, String(req.body?.name ?? '').trim(), hashPassword(pass))
-      signIn(reply, email, String(req.body?.name ?? '').trim())
-      return reply.send({ ok: true })
-    },
-  )
-
-  app.post<{ Body: { email?: string; password?: string } }>(
-    '/auth/local/login',
-    rl,
-    async (req, reply) => {
-      const email = String(req.body?.email ?? '').toLowerCase().trim()
-      if (isOwnerEmail(email)) return reply.code(403).send({ error: 'cont_google_obligatoriu' })
-      const acc = await getLocalAccount(email)
-      if (!acc || !verifyPassword(String(req.body?.password ?? ''), acc.pass_hash))
-        return reply.code(401).send({ error: 'date_gresite' })
-      signIn(reply, email, acc.name)
-      return reply.send({ ok: true })
-    },
-  )
-
-  // Magic link: always a GENERIC answer; the account is created on the fly at click.
-  app.post<{ Body: { email?: string } }>('/auth/local/magic', rl, async (req, reply) => {
+  // New local identities are created only after control of the mailbox is
+  // proven by the one-use magic callback. There is no unverified password
+  // registration path that can pre-claim another provider's email.
+  app.post<{ Body: { email?: string } }>('/auth/local/magic', limited, async (req, reply) => {
     const email = String(req.body?.email ?? '').toLowerCase().trim()
-    if (validEmail(email) && !isOwnerEmail(email)) void sendLink(email, 'magic').catch(() => {})
+    if (!validEmail(email) || isAdminIdentity(email)) return reply.send({ ok: true })
+    const status = await activeAccount(email)
+    if (status === 'unavailable') return reply.code(503).send({ error: 'account_status_unavailable' })
+    if (status === 'active') await sendLink(email, 'magic').catch(() => undefined)
     return reply.send({ ok: true })
   })
 
   app.get<{ Querystring: { token?: string } }>('/auth/local/magic/cb', async (req, reply) => {
     const token = String(req.query?.token ?? '')
-    const email = token ? await consumeLoginToken(sha256(token), 'magic') : null
-    if (!email) return reply.redirect(`${config.frontendOrigin}/login?error=link_expirat`)
-    if (isOwnerEmail(email)) return reply.redirect(`${config.frontendOrigin}/login?error=cont_google_obligatoriu`)
-    const acc = await getLocalAccount(email)
-    if (!acc) await upsertLocalAccount(email, '', hashPassword(crypto.randomBytes(24).toString('hex')))
-    signIn(reply, email, acc?.name ?? '')
-    return reply.redirect(config.frontendOrigin || '/')
+    if (!/^[a-f0-9]{64}$/.test(token)) return reply.redirect(`${config.publicOrigin}/login?error=link_expired`)
+    const email = await consumeLoginToken(sha256(token), 'magic')
+    if (!email || isAdminIdentity(email)) return reply.redirect(`${config.publicOrigin}/login?error=link_expired`)
+    const status = await activeAccount(email)
+    if (status === 'unavailable') return reply.code(503).send({ error: 'account_status_unavailable' })
+    if (status === 'blocked') return reply.redirect(`${config.publicOrigin}/login?error=blocked`)
+    let account = await getLocalAccount(email)
+    if (!account) {
+      await createLocalAccount(email, '', await hashPassword(crypto.randomBytes(32).toString('base64url')))
+      account = await getLocalAccount(email)
+    }
+    if (!account) return reply.code(503).send({ error: 'account_creation_unavailable' })
+    await signIn(reply, email, account.name)
+    return reply.redirect(config.publicOrigin)
   })
 
-  app.post<{ Body: { email?: string } }>('/auth/local/reset-request', rl, async (req, reply) => {
+  // Password login/reset remains only for already verified legacy local
+  // accounts. Hashing is asynchronous so it cannot block the HTTP event loop.
+  app.post<{ Body: { email?: string; password?: string } }>('/auth/local/login', limited, async (req, reply) => {
     const email = String(req.body?.email ?? '').toLowerCase().trim()
-    if (validEmail(email) && (await getLocalAccount(email))) void sendLink(email, 'reset').catch(() => {})
+    const password = String(req.body?.password ?? '')
+    if (!validEmail(email) || isAdminIdentity(email) || password.length > PASSWORD_MAX) {
+      return reply.code(401).send({ error: 'invalid_credentials' })
+    }
+    const status = await activeAccount(email)
+    if (status === 'unavailable') return reply.code(503).send({ error: 'account_status_unavailable' })
+    if (status === 'blocked') return reply.code(401).send({ error: 'invalid_credentials' })
+    const account = await getLocalAccount(email)
+    if (!account || !await verifyPassword(password, account.pass_hash)) {
+      return reply.code(401).send({ error: 'invalid_credentials' })
+    }
+    await signIn(reply, email, account.name)
     return reply.send({ ok: true })
   })
 
-  app.post<{ Body: { token?: string; password?: string } }>(
-    '/auth/local/reset',
-    rl,
-    async (req, reply) => {
-      const pass = String(req.body?.password ?? '')
-      if (pass.length < 8) return reply.code(400).send({ error: 'parola_scurta' })
-      const email = await consumeLoginToken(sha256(String(req.body?.token ?? '')), 'reset')
-      if (!email) return reply.code(400).send({ error: 'link_expirat' })
-      const acc = await getLocalAccount(email)
-      await upsertLocalAccount(email, acc?.name ?? '', hashPassword(pass))
-      signIn(reply, email, acc?.name ?? '')
-      return reply.send({ ok: true })
-    },
-  )
+  app.post<{ Body: { email?: string } }>('/auth/local/reset-request', limited, async (req, reply) => {
+    const email = String(req.body?.email ?? '').toLowerCase().trim()
+    if (!validEmail(email) || isAdminIdentity(email)) return reply.send({ ok: true })
+    const status = await activeAccount(email)
+    if (status === 'unavailable') return reply.code(503).send({ error: 'account_status_unavailable' })
+    if (status === 'active' && await getLocalAccount(email)) await sendLink(email, 'reset').catch(() => undefined)
+    return reply.send({ ok: true })
+  })
+
+  app.post<{ Body: { token?: string; password?: string } }>('/auth/local/reset', limited, async (req, reply) => {
+    const password = String(req.body?.password ?? '')
+    const token = String(req.body?.token ?? '')
+    if (password.length < 12 || password.length > PASSWORD_MAX || !/^[a-f0-9]{64}$/.test(token)) {
+      return reply.code(400).send({ error: 'invalid_reset' })
+    }
+    const email = await consumeLoginToken(sha256(token), 'reset')
+    if (!email || isAdminIdentity(email)) return reply.code(400).send({ error: 'invalid_reset' })
+    const status = await activeAccount(email)
+    if (status === 'unavailable') return reply.code(503).send({ error: 'account_status_unavailable' })
+    if (status === 'blocked' || !await updateLocalPassword(email, await hashPassword(password))) {
+      return reply.code(400).send({ error: 'invalid_reset' })
+    }
+    await revokeAllAuthSessions(email)
+    const account = await getLocalAccount(email)
+    if (!account) return reply.code(503).send({ error: 'account_unavailable' })
+    await signIn(reply, email, account.name)
+    return reply.send({ ok: true })
+  })
 }

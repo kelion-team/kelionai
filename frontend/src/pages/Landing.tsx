@@ -1,26 +1,15 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
+import { Languages } from 'lucide-react'
 import ContactModal from '../components/ContactModal'
 import VisitorChatWidget from '../components/VisitorChatWidget'
 import { startGoogleLogin } from '../lib/api'
-import { deviceFingerprint } from '../lib/fingerprint'
+import { submissionSessionId } from '../lib/submissionSession'
 import { raporteazaPagina } from '../lib/vizita'
 import { strings, type Lang } from '../lib/i18n'
 import { PUBLIC_TEXT as PT } from '../lib/publicText'
-import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
+import { apiFetch } from '../lib/transport'
 // Avatarul 3D — încărcat leneș (three.js scos din calea critică a landing-ului).
 const LandingAvatar = lazy(() => import('../components/LandingAvatar'))
-
-// The four install codes — one per platform. Click → enlarged for scanning.
-const QR_CODES = [
-  // `href` = the INSTALL target (Adrian, Jul 26: "under each code there must be
-  // install that takes you to the install page") — the same place the code
-  // scan leads to, but on click, for someone already on the target device.
-  { key: 'win', label: '⊞ Windows', img: '/dl/qr-win.png', href: '/dl/Kelionai-Setup.exe' },
-  { key: 'linux', label: '🐧 Linux', img: '/dl/qr-linux.png', href: '/dl/Kelionai-linux.zip' },
-  { key: 'ios', label: 'iOS', img: '/dl/qr-ios.png', href: 'https://apps.apple.com/app/id6786766714' },
-  { key: 'android', label: '🤖 Android', img: '/dl/qr-apk.png', href: '/dl/Kelionai.apk' },
-] as const
-type QrCode = (typeof QR_CODES)[number]
 
 const ERR_KEY: Record<string, keyof ReturnType<typeof strings>> = {
   closed: 'errClosed',
@@ -51,25 +40,6 @@ export default function Landing({ error }: { error?: string | null }) {
   const [langOpen, setLangOpen] = useState(false)
   const t = strings(lang)
   const [contactOpen, setContactOpen] = useState(false)
-  const [qrZoom, setQrZoom] = useState<QrCode | null>(null)
-  // The live version (same source as the browser watermark) — we show it under
-  // each QR code as proof that the installed app is EXACTLY the browser
-  // version; it refreshes itself on every deploy (fetchServerVersion).
-  const [srv, setSrv] = useState<ServerVersion | null>(null)
-  useEffect(() => {
-    let alive = true
-    const refresh = (): void => {
-      void fetchServerVersion().then((j) => {
-        if (alive && j) setSrv(j)
-      })
-    }
-    refresh()
-    const id = window.setInterval(refresh, 60_000)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [])
   // Error arriving via URL (e.g. ?error=closed). Shown once; doesn't change
   // after mount (there's no probe flow left to update it).
   const [notice] = useState<string | null>(
@@ -84,12 +54,12 @@ export default function Landing({ error }: { error?: string | null }) {
   async function submitLead(): Promise<void> {
     if (leadBusy || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadEmail)) return
     setLeadBusy(true)
-    const fp = await deviceFingerprint()
+    const submissionSession = submissionSessionId()
     try {
-      const r = await fetch('/api/lead', {
+      const r = await apiFetch('/api/lead', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: leadEmail, note: leadNote, fp }),
+        body: JSON.stringify({ email: leadEmail, note: leadNote, submissionSession }),
       })
       if (r.ok) {
         setLeadSent(true)
@@ -166,42 +136,17 @@ export default function Landing({ error }: { error?: string | null }) {
           <p className="landing-sub">{t.landingSub}</p>
 
           <div className="landing-multi">
-            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M3 12h18M12 3c2.5 2.5 3.8 5.8 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.8-3.8-9S9.5 5.5 12 3z" />
-            </svg>
+            <Languages size={16} aria-hidden="true" />
             <span>{t.multilingual}</span>
           </div>
 
           {notice && <p className="error">{notice}</p>}
 
           <div className="landing-cta">
-            {/* No free trial (Adrian): the only way in is the Google account, then
-            buying credits. Nobody gets free minutes anymore. */}
             <button type="button" className="google-btn cta-primary" onClick={startGoogleLogin}>
-              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#FFC107"
-                  d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"
-                />
-                <path
-                  fill="#FF3D00"
-                  d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"
-                />
-                <path
-                  fill="#4CAF50"
-                  d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.2C29.2 35 26.7 36 24 36c-5.3 0-9.7-3.1-11.3-7.6l-6.6 5.1C9.6 39.6 16.2 44 24 44z"
-                />
-                <path
-                  fill="#1976D2"
-                  d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4 5.5l6.3 5.2C41.4 36.5 44 31 44 24c0-1.3-.1-2.3-.4-3.5z"
-                />
-              </svg>
+              <img src="/google-g-logo.svg" width="18" height="18" alt="" aria-hidden="true" />
               {t.signIn}
             </button>
-            {/* THE ORPHAN PAGES, LINKED (Jul 27 — built on the Jul 26 order but
-            never linked from the landing; the audit found them untouched by any
-            link): the email sign-in + the public prices. */}
             <div className="landing-alt-links">
               <a href="/login">{PT.emailSignIn}</a>
               <span aria-hidden>·</span>
@@ -252,39 +197,6 @@ export default function Landing({ error }: { error?: string | null }) {
             </ul>
           </div>
 
-          {/* Four platforms, four scan codes — the ONLY download UI. Clicking a
-              code opens it LARGE so any phone can scan it comfortably. Every
-              target always serves the LATEST version: the store apps are thin
-              live shells over kelionai.app, /dl/* is served no-store, and the
-              .exe self-updates. Store targets get swapped in the moment a
-              listing goes public (MS Store, Play, App Store). */}
-          <div className="landing-qr">
-            <span className="landing-qr-hint">{PT.qrHint}</span>
-            <div className="landing-qr-row">
-              {QR_CODES.map((q) => (
-                <figure key={q.key}>
-                  {/* THE CODE IS AN INSTALL BUTTON (Adrian, Jul 26: „when you press the
-                  win code the win app installs... each according to his system").
-                  Click/tap on the code → installs that platform; the enlarge-for-scanning
-                  stays on the 🔍 button. */}
-                  <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={PT.qrInstallLabel(q.label)}>
-                    <img src={q.img} alt={PT.qrAlt(q.label)} width="96" height="96" />
-                  </a>
-                  <figcaption>{q.label}</figcaption>
-                  {/* The watermark number, under EVERY code — the same as in the browser;
-                  it proves the installed app is exactly the live version. */}
-                  <span className="qr-version">{versionLabel(srv)}</span>
-                  <a className="qr-install" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
-                    {PT.installBtn}
-                  </a>
-                  <button type="button" className="qr-zoom-btn" onClick={() => setQrZoom(q)} title={PT.zoomQr}>
-                    🔍
-                  </button>
-                </figure>
-              ))}
-            </div>
-          </div>
-
           <p className="landing-legal">
             <button type="button" className="landing-contact-link" onClick={() => setContactOpen(true)}>
               {PT.contactLink}
@@ -296,25 +208,6 @@ export default function Landing({ error }: { error?: string | null }) {
         </div>
       </div>
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
-      {qrZoom && (
-        <div
-          className="qr-zoom-overlay"
-          role="button"
-          tabIndex={0}
-          onClick={() => setQrZoom(null)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape' || e.key === 'Enter') setQrZoom(null)
-          }}
-        >
-          <figure className="qr-zoom">
-            <img src={qrZoom.img} alt={PT.qrAlt(qrZoom.label)} />
-            <figcaption>
-              {qrZoom.label}
-              <span className="qr-zoom-hint">{PT.qrZoomHint}</span>
-            </figcaption>
-          </figure>
-        </div>
-      )}
       <VisitorChatWidget />
     </div>
   )

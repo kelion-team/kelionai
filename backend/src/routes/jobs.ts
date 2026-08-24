@@ -1,9 +1,22 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { getPool, citesteSold, recordCost, dbEnabled } from '../db.js'
+import { getPool, citesteSold, dbEnabled } from '../db.js'
 import { gasesteAgentViu, cheamaAgent } from '../services/agentiKelion.js'
 import { taxeazaServiciu } from '../services/tarife.js'
-import { rationeazaMesaje } from '../services/creierRationament.js'
+import { esteAdminKelion } from '../services/adminIdentity.js'
+import { documentToMarkdown } from '../services/markitdown.js'
+
+const MAX_CV_CHARS = 40_000
+const MAX_JOB_SPEC_CHARS = 9_000
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function decodeBase64Strict(value: string): Buffer | null {
+  if (!value || value.length % 4 !== 0 || value.length > Math.ceil(MAX_UPLOAD_BYTES / 3) * 4 ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return null
+  const bytes = Buffer.from(value, 'base64')
+  return bytes.length > 0 && bytes.length <= MAX_UPLOAD_BYTES && bytes.toString('base64') === value ? bytes : null
+}
 
 // ── ADAPTAREA CV — FLUXUL SIMPLU (Adrian, 10 aug, redesign) ──────────────────
 // „User introduce CV de bază, user își caută singur un job, tu primești
@@ -29,13 +42,13 @@ async function platitorul(
     reply.code(401).send({ error: 'Neautorizat' })
     return null
   }
-  if (user.role === 'admin') return { email: user.email, admin: true }
+  if (esteAdminKelion(user.email)) return { email: user.email, admin: true }
   const sold = await citesteSold(user.email)
   if (!sold.citit) {
     reply.code(503).send({ error: `nu pot verifica portofelul: ${sold.motiv}` })
     return null
   }
-  if (sold.sold <= 0) {
+  if (sold.soldMinor <= 0) {
     reply.code(402).send({ error: 'Adaptarea CV e pentru utilizatorii cu credit. Alimentează portofelul ca s-o folosești.' })
     return null
   }
@@ -72,55 +85,63 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     if (!user) return reply.status(401).send({ error: 'Neautorizat' })
     const { cv } = (req.body ?? {}) as { cv?: string }
     if (!cv?.trim()) return reply.status(400).send({ error: 'Conținutul CV-ului este obligatoriu' })
+    if (cv.length > MAX_CV_CHARS) return reply.status(413).send({ error: 'CV-ul depășește limita acceptată' })
     if (!dbEnabled()) return reply.status(503).send({ error: 'baza de date nu e configurată — CV-ul nu se poate salva' })
     await getPool().query(
       `INSERT INTO kv_state (key, value, updated_at) VALUES ($1, $2, NOW())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-      [`cv_implicit:${user.email}`, cv.slice(0, 40_000)],
+      [`cv_implicit:${user.email}`, cv.trim()],
     )
     return reply.send({ success: true, message: 'CV-ul a fost salvat.' })
   })
 
-  // ÎNCĂRCAREA CV-ULUI „în orice format": text/Markdown direct; PDF + imagini
-  // (scan/poză) prin extragerea REALĂ Gemini (multimodal nativ). DOCX nu e
-  // suportat inline — se spune cinstit (salvează ca PDF), nu se preface.
-  fastify.post('/api/jobs/cv-incarca', async (req, reply) => {
+  // Încărcarea CV-ului acceptă numai tipurile validate de convertorul izolat.
+  // Procesul web nu pornește parser, nu scrie fișierul pe disc și nu trimite
+  // documentul către un model înaintea unei taxări explicite.
+  fastify.post('/api/jobs/cv-incarca', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
     const cine = await platitorul(req, reply)
     if (!cine) return
-    const { nume = '', mime = '', base64 = '' } = (req.body ?? {}) as { nume?: string; mime?: string; base64?: string }
-    if (!base64) return reply.status(400).send({ error: 'fișierul lipsește' })
-    if (base64.length > 11_000_000) return reply.status(413).send({ error: 'fișier prea mare (max ~8MB)' })
+    const { nume = '', mime = '', base64 = '', idempotencyKey = '' } = (req.body ?? {}) as {
+      nume?: string
+      mime?: string
+      base64?: string
+      idempotencyKey?: string
+    }
+    if (!UUID_RE.test(idempotencyKey)) return reply.status(400).send({ error: 'idempotency_key_invalid' })
+    if (!nume || nume.length > 120 || /[\\/\0]/.test(nume)) return reply.status(400).send({ error: 'nume_fisier_invalid' })
+    const bytes = decodeBase64Strict(base64)
+    if (!bytes) return reply.status(400).send({ error: 'base64_invalid_sau_fisier_prea_mare' })
     const ext = (nume.split('.').pop() ?? '').toLowerCase()
 
     let text = ''
     if (mime.startsWith('text/') || ['txt', 'md', 'csv'].includes(ext)) {
-      text = Buffer.from(base64, 'base64').toString('utf8')
-    } else if (mime === 'application/pdf' || ext === 'pdf' || mime.startsWith('image/')) {
-      const mimeReal = mime || 'application/pdf'
       try {
-        const r = await rationeazaMesaje([
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: 'Extrage TEXTUL COMPLET al acestui CV, verbatim, păstrând structura (secțiuni, liste). Doar textul, fără comentarii.' },
-              { type: 'image_url', image_url: { url: `data:${mimeReal};base64,${base64}` } },
-            ],
-          },
-        ], { ruta: 'route.jobs.cv', maxTokens: 4096, temperature: 0, treapta: 'lucru', tools: [] })
-        if (r.costUsd > 0) void recordCost(cine.email, 'gemini', r.costUsd)
-        text = r.text.trim()
-      } catch (e) {
-        return reply.status(502).send({ error: `extragerea a picat: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}` })
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      } catch {
+        return reply.status(400).send({ error: 'text_utf8_invalid' })
       }
-      if (!text) return reply.status(422).send({ error: 'nu am putut extrage text din fișier (e gol sau necitibil)' })
-    } else if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) {
-      return reply.status(415).send({ error: 'formatul Word nu e suportat direct — salvează CV-ul ca PDF sau text și încarcă-l așa' })
+    } else if (ext === 'pdf' || ext === 'docx') {
+      const mimeAsteptat = ext === 'pdf'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      if (mime !== mimeAsteptat) return reply.status(415).send({ error: 'mime_nu_corespunde_extensiei' })
+      if (ext === 'pdf' ? !bytes.subarray(0, 5).equals(Buffer.from('%PDF-')) : !bytes.subarray(0, 2).equals(Buffer.from('PK'))) {
+        return reply.status(400).send({ error: 'continutul_nu_corespunde_tipului' })
+      }
+      try {
+        text = await documentToMarkdown(bytes, nume, idempotencyKey)
+      } catch {
+        return reply.status(503).send({ error: 'convertor_documente_indisponibil' })
+      }
+    } else if (mime.startsWith('image/')) {
+      return reply.status(415).send({ error: 'scanurile imagine nu sunt acceptate până când OCR-ul izolat este disponibil' })
     } else {
-      return reply.status(415).send({ error: `format necunoscut (${mime || ext || 'fără tip'}) — merge text, Markdown, PDF sau imagine` })
+      return reply.status(415).send({ error: 'format acceptat: text, Markdown, CSV, PDF sau DOCX' })
     }
 
-    text = text.trim().slice(0, 40_000)
+    text = text.trim()
     if (!text) return reply.status(422).send({ error: 'fișierul nu conține text' })
+    if (text.length > MAX_CV_CHARS) return reply.status(413).send({ error: 'textul extras depășește limita pentru CV' })
     if (!dbEnabled()) return reply.status(503).send({ error: 'baza de date nu e configurată — CV-ul nu se poate salva' })
     await getPool().query(
       `INSERT INTO kv_state (key, value, updated_at) VALUES ($1, $2, NOW())
@@ -137,8 +158,13 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/jobs/adapt', async (req, reply) => {
     const cine = await platitorul(req, reply)
     if (!cine) return
-    const { cvContent = '', jobSpec = '', applicantName = '' } =
-      (req.body ?? {}) as { cvContent?: string; jobSpec?: string; applicantName?: string }
+    const { cvContent = '', jobSpec = '', applicantName = '', idempotencyKey = '' } =
+      (req.body ?? {}) as { cvContent?: string; jobSpec?: string; applicantName?: string; idempotencyKey?: string }
+
+    if (!UUID_RE.test(idempotencyKey)) return reply.status(400).send({ error: 'idempotency_key_invalid' })
+    if (cvContent.length > MAX_CV_CHARS || jobSpec.length > MAX_JOB_SPEC_CHARS || applicantName.length > 120) {
+      return reply.status(413).send({ error: 'payload_prea_mare' })
+    }
 
     const cv = (cvContent || (await citesteCv(cine.email))).trim()
     if (!cv) return reply.status(400).send({ error: 'Nu ai un CV — încarcă-l sau scrie-l întâi în „CV-ul Tău".' })
@@ -151,8 +177,11 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     // TARIFUL DIN MENIU (owner, 14 aug): adaptarea se taxează per bucată,
     // ÎNAINTE de consum (2 credite implicit, TARIF_CV în env — prețul afișat
     // e cu profit cu tot); pică adaptarea → banii se întorc singuri.
-    const taxa = await taxeazaServiciu(cine.email, 'cv', cine.admin)
-    if (!taxa.ok) return reply.status(402).send({ error: taxa.motiv })
+    const taxa = await taxeazaServiciu(cine.email, 'cv', cine.admin, `jobs:adapt:${idempotencyKey}`)
+    if (!taxa.ok) {
+      const status = taxa.cod === 'invalid' ? 400 : taxa.cod === 'duplicate' ? 409 : taxa.cod === 'unavailable' ? 503 : 402
+      return reply.status(status).send({ error: taxa.motiv, idempotencyKey })
+    }
 
     // NIVEL INTERNAȚIONAL (ownerul, 10 aug): „paragrafat, organizat, bine
     // structurat; identifici cuvintele-cheie din cerință și le regăsim și în CV
@@ -167,12 +196,11 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
       `- CU CAP, nu din topor: NU îndesa liste de cuvinte-cheie fără context, NU inventa experiență, ani, cifre, tehnologii sau realizări care nu apar în CV-ul original — doar reformulezi, reordonezi și evidențiezi ce se potrivește REAL;\n` +
       `- păstrează limba CV-ului original.\n\n` +
       `RĂSPUNDE STRICT în formatul:\nJOB: <titlul jobului, scurt, un singur rând>\n---\n<CV-ul adaptat complet, gata de trimis>\n\n` +
-      `CV DE BAZĂ:\n${cv}\n\nSPECIFICAȚIA JOBULUI:\n${spec.slice(0, 9000)}`
+      `CV DE BAZĂ:\n${cv}\n\nSPECIFICAȚIA JOBULUI:\n${spec}`
 
     let text = ''
     try {
-      const r = await cheamaAgent({ ...agent, efort: 'high' }, sarcina, cine.admin)
-      if (r.costUsd > 0) void recordCost(cine.email, 'gemini', r.costUsd)
+      const r = await cheamaAgent({ ...agent, efort: 'high' }, sarcina, cine.admin, cine.email)
       text = r.text.trim()
     } catch (e) {
       // Nimeni nu plătește o adaptare care nu s-a născut — banii se întorc.

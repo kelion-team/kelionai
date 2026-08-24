@@ -20,7 +20,7 @@ export interface DeviceCommand {
 }
 
 // NB: Unicode lookbehind, not \b — JS \b is ASCII-only and never matches
-// before "î", so the spoken "închide" (real diacritics from Chirp STT) would
+// before "î", so the spoken "închide" (real diacritics from ASR) would
 // be dead with a plain word boundary.
 // + golește/scoate/ia (vânătorul din 22 aug, MĂSURAT: „golește monitorul" —
 // chiar verbul canonic al uneltei — pica pe model, care confabula „n-am
@@ -44,7 +44,7 @@ const CLOSE_ALL = /(?<![\p{L}\p{N}])(tot|totul|toate|everything|all)(?![\p{L}\p{
 //   "treci pe hartă"  → did NOTHING (without the diacritic it worked);
 //   "închide hartă"   → closed the ACTIVE TAB instead of the map (the very
 //                        W4 #2 regression the comment below believed fixed).
-// The same trap as "Dansează!" (20 Jul, AI-HANDOFF). The house solution,
+// The same trap as imperative gesture commands. The house solution,
 // already used by CLOSE_VERB/SWITCH_VERB in this file: an explicit Unicode
 // boundary via lookaround + the `u` flag.
 const G0 = '(?<![\\p{L}\\p{N}])' // word start, safe on diacritics
@@ -259,8 +259,8 @@ export function gestureAck(label: GestureLabel, ro: boolean): string {
 // logică — implementează o logică clară pe subiect/situație") ────────────────
 //
 // Până acum gestul autonom îl ALEGEA creierul (unealta play_avatar_gesture),
-// liber, dintr-o paletă de 15 emoții, cu un prompt „moale". Un model slab
-// (Gemini 2.5-flash, pinuit) nimerea des greșit — „victorie"/„uimire" pe o
+// liber, dintr-o paletă de 15 emoții, cu un prompt „moale". Modelul putea alege
+// greșit — „victorie"/„uimire" pe o
 // replică neutră. Ăsta era „fără logică". Acum gestul NU se mai ghicește: îl
 // decide DETERMINIST situația REALĂ a turei — ce face Kelion ACUM. O situație →
 // un gest, previzibil și testabil. Numele întors = vocabularul semantic

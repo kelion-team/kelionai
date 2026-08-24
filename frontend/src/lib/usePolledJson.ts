@@ -1,4 +1,5 @@
 import { ceas } from './ceas'
+import { apiFetch } from './transport'
 // ── PERIODIC POLLING OF AN ENDPOINT — once only ───────────────────────────
 //
 // WHY (Batch E of PROCEDURA-REFACERE-CLONE.md; Adrian: "everything must go to 0"):
@@ -36,7 +37,7 @@ export function usePolledJson<T>(
     if (!enabled) return
     let alive = true
     const load = (): void => {
-      fetch(url, { credentials: 'include' })
+      apiFetch(url, { credentials: 'include' })
         .then((r) => {
           if (!r.ok) {
             if (alive) onFail?.(r.status)

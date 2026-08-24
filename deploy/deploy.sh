@@ -1,434 +1,397 @@
 #!/usr/bin/env bash
-# ── DEPLOY Kelionai pe VPS propriu (Docker + Caddy) ──────────────────────────
-# Construiește imaginea din repo, pornește containerul aplicației pe :8080 și
-# configurează Caddy să servească kelionai.app → app (+ LiveKit pe sslip).
-# Postgres rulează pe host (127.0.0.1:5432); containerul folosește --network host
-# ca să-l atingă și să asculte pe 8080.
-#
-# Cerințe ÎNAINTE de rulare:
-#   1. /root/kelion/kelionai.env completat (vezi deploy/kelionai.env.example).
-#      OBLIGATORII care NU sunt încă pe VPS: GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI,
-#      SESSION_SECRET, DATABASE_URL, GEMINI_API_KEY (creierul unic — OpenRouter/
-#      OpenAI/Stripe au fost extirpate; cheile lor nu mai sunt citite de nimeni).
-#   2. Adrian repointează Cloudflare (A/AAAA kelionai.app) pe 164.68.120.87.
-#
-# Idempotent: rerulabil oricând (reconstruiește + repornește curat).
 set -euo pipefail
+umask 077
 
-# GARDĂ ANTI-AUTO-RESCRIERE: pasul 1 face `git checkout` peste ACEST fișier în
-# timp ce bash îl citește progresiv — dacă master aduce un deploy.sh diferit,
-# execuția continuă din mijlocul fișierului NOU (corupție). De aceea scriptul
-# se rulează întotdeauna dintr-o COPIE în /tmp, niciodată din clonă.
-if [ "${KELION_DEPLOY_COPY:-0}" != 1 ]; then
-  cp "$0" /tmp/kelion-deploy-run.sh
-  KELION_DEPLOY_COPY=1 exec bash /tmp/kelion-deploy-run.sh "$@"
-fi
+die() { printf 'release: %s\n' "$1" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "lipsește utilitarul $1"; }
 
-REPO=/root/kelion/repo
-ENVFILE=/root/kelion/kelionai.env
-BRANCH="${1:-master}"
-CADDY_DIR=/root/kelion-caddy
+[ "$(id -u)" -eq 0 ] || die 'rulează numai ca root pe gazda de release'
+[ "${KELION_RELEASE_APPROVED:-0}" = 1 ] || die 'lipsește aprobarea explicită de release'
+[[ "${KELION_CI_RUN_ID:-}" =~ ^[0-9]+$ ]] || die 'dovada CI este invalidă'
+[[ "${KELION_BUILD_RUN_ID:-}" =~ ^[0-9]+$ ]] || die 'dovada build-ului este invalidă'
 
-# LACĂT GLOBAL DE PUBLICARE (27 iul: deploy #493 roșu pe „container name already
-# in use" — Actions și auto-publicarea rulau deploy.sh ÎN PARALEL pe același
-# master; al doilea `docker run` lovea containerul tocmai pornit de primul).
-# O singură publicare odată: al doilea AȘTEAPTĂ aici, apoi (pasul 1) iese
-# devreme dacă exact sha-ul țintă e deja live — verde, fără muncă dublă.
-exec 8>/root/kelion/publicare.lock
+COMMIT_SHA=${1:-}
+MANIFEST_FILE=${2:-}
+RELEASE_MODE=${3:-release}
+[[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'commitul trebuie să fie SHA integral'
+[[ "$RELEASE_MODE" = release || "$RELEASE_MODE" = rollback ]] || die 'modul release este invalid'
+[ -f "$MANIFEST_FILE" ] || die 'manifestul OCI lipsește'
+
+need docker
+need curl
+need jq
+need flock
+need openssl
+need python3
+
+ROOT=/root/kelion
+BUNDLE_DIR=$(cd -- "$(dirname -- "$0")" && pwd -P)
+PRODUCT_FILE=$BUNDLE_DIR/../config/product.json
+COMPOSE_FILE=$BUNDLE_DIR/compose.production.yml
+PROXY_COMPOSE_FILE=$BUNDLE_DIR/compose.proxy.yml
+CONFIG_FILE=$ROOT/config/runtime.env
+SECRET_ROOT=$ROOT/secrets
+RUNTIME_ROOT=$ROOT/runtime
+RELEASE_STATE_ROOT=$RUNTIME_ROOT/release-state
+PROXY_CONFIG_ROOT=$ROOT/proxy
+PROXY_STATE_ROOT=$ROOT/proxy-state
+COMPOSE_BIN=$ROOT/bin/docker-compose
+SECCOMP_PROFILE=$RUNTIME_ROOT/playwright-seccomp-v1.62.1.json
+PROOF_FILE=$RUNTIME_ROOT/last-verified-backup.json
+PROOF_KEY=$SECRET_ROOT/migration-backup-proof-key
+
+for file in "$PRODUCT_FILE" "$COMPOSE_FILE" "$PROXY_COMPOSE_FILE" "$BUNDLE_DIR/Caddyfile" "$BUNDLE_DIR/backup.sh"; do
+  [ -f "$file" ] || die "bundle incomplet: $(basename "$file")"
+done
+
+exec 8>"$ROOT/publicare.lock"
 flock 8
 
-# (Trap-ul de restaurare a constructorului local A FOST ȘTERS — owner, 22 aug:
-# „am cerut devin peste tot in constructor… sa-i stergi de tot". Cronul
-# lucrătorului se SCOATE definitiv la pasul 6d; constructorul e DEVIN, extern.)
+PRODUCT_ORIGIN=$(jq -er '.publicAppOrigin | select(type == "string")' "$PRODUCT_FILE")
+PRODUCT_REPOSITORY=$(jq -er '.githubRepository | select(type == "string")' "$PRODUCT_FILE")
+PUBLIC_APP_DOMAIN=$(python3 - "$PRODUCT_ORIGIN" <<'PY'
+import sys
+from urllib.parse import urlsplit
+u = urlsplit(sys.argv[1])
+if u.scheme != 'https' or not u.hostname or u.username or u.password or u.path not in ('', '/') or u.query or u.fragment:
+    raise SystemExit(1)
+print(u.hostname.lower())
+PY
+) || die 'originul public din config este invalid'
+[[ "$PRODUCT_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die 'repository invalid în config'
 
-# Helper pentru afișarea barei de progres dinamice pe monitor / consolă
-show_progress() {
-  local pct="$1"
-  local msg="$2"
-  local width=30
-  local filled=$(( pct * width / 100 ))
-  local empty=$(( width - filled ))
-  local bar=""
-  local bar_empty=""
-  local i=0
-  while [ "$i" -lt "$filled" ]; do
-    bar="${bar}█"
-    i=$(( i + 1 ))
-  done
-  i=0
-  while [ "$i" -lt "$empty" ]; do
-    bar_empty="${bar_empty}░"
-    i=$(( i + 1 ))
-  done
-  printf "\n\033[1;36m[DEPLOY]\033[0m \033[1;32m[%s%s]\033[0m \033[1;33m%3d%%\033[0m — \033[1;37m%s\033[0m\n\n" "$bar" "$bar_empty" "$pct" "$msg"
-  local json="{\"percent\":$pct,\"step\":\"$msg\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)\"}"
-  printf '%s\n' "$json" > /tmp/deploy-progress.json 2>/dev/null || true
-  printf '%s\n' "$json" > /root/kelion/deploy-progress.json 2>/dev/null || true
+jq -e --arg sha "$COMMIT_SHA" '.schema == 1 and .commit == $sha and (.images | type == "object") and (.images | length == 5)' "$MANIFEST_FILE" >/dev/null \
+  || die 'manifestul OCI nu corespunde commitului'
+
+registry_repo=${PRODUCT_REPOSITORY,,}
+image_ref() {
+  local component=$1 ref
+  ref=$(jq -er --arg component "$component" '.images[$component] | select(type == "string")' "$MANIFEST_FILE")
+  case "$ref" in
+    "ghcr.io/$registry_repo/$component@sha256:"????????????????????????????????????????????????????????????????) ;;
+    *) die "referință OCI nepermisă pentru $component" ;;
+  esac
+  [[ "$ref" =~ @sha256:[0-9a-f]{64}$ ]] || die "digest OCI invalid pentru $component"
+  printf '%s' "$ref"
 }
 
-show_progress 0 "Inițializare deploy"
+KELION_APP_IMAGE=$(image_ref app)
+KELION_BROWSER_IMAGE=$(image_ref browser)
+KELION_BROWSER_EGRESS_IMAGE=$(image_ref browser-egress)
+KELION_CONVERTER_GATEWAY_IMAGE=$(image_ref converter-gateway)
+KELION_CONVERTER_PARSER_IMAGE=$(image_ref converter-parser)
+export KELION_APP_IMAGE KELION_BROWSER_IMAGE KELION_BROWSER_EGRESS_IMAGE
+export KELION_CONVERTER_GATEWAY_IMAGE KELION_CONVERTER_PARSER_IMAGE
 
-echo "== 0. Blochez ecosistemul-zombie (puntea/constructorul, șters din cod pe 23 iul) =="
-show_progress 10 "Blocare ecosistem-zombie"
-# Lanț complet descoperit la audit (24 iul): serviciile kelion-bridge/builder/
-# paznic/deployer loveau endpointuri șterse și ardeau abonamentul cu procese
-# claude; watchdog.sh + paznic-chat.sh (cron, la fiecare minut) le REPORNEAU
-# la orice oprire; timerele caiet-watch/perpetuum/qa-patrol arătau spre
-# scripturi care nu mai există. Idempotent la FIECARE deploy, în 3 straturi:
-# 1) resuscitatorii afară din crontab (backupurile rămân);
-crontab -l 2>/dev/null | grep -vE 'watchdog\.sh|paznic-chat\.sh' | crontab - 2>/dev/null || true
-# 2) serviciile: stop + disable + unit-file mutat + mask (mask-ul eșuează cât
-#    timp unit-file-ul real există — de-aia întâi îl mutăm în dead-units/);
-mkdir -p /root/kelion/dead-units
-# kelion-repairer-pool + kelion-voice adăugate 25 iul: scăpaseră din prima listă
-# și rămăseseră în buclă „activating auto-restart" (scripturile lor din bridge/
-# sunt șterse din 23 iul — systemd reîncerca la nesfârșit un fișier inexistent).
-for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer kelion-repairer-pool kelion-voice; do
-  systemctl stop "$s" 2>/dev/null || true
-  systemctl disable "$s" 2>/dev/null || true
-  mv "/etc/systemd/system/$s.service" /root/kelion/dead-units/ 2>/dev/null || true
-done
-systemctl daemon-reload 2>/dev/null || true
-for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer kelion-repairer-pool kelion-voice; do
-  systemctl mask "$s" 2>/dev/null || true
-done
-# 3) timerele moarte (scripturile lor au dispărut din repo). kelion-repo-sync
-#    e AICI din 25 iul: scăpase din prima listă și sincroniza clona la 5 min —
-#    exact vectorul „phantom deploy".
-for t in kelion-caiet-watch kelion-perpetuum kelion-qa-patrol kelion-repo-sync; do
-  systemctl stop "$t.timer" 2>/dev/null || true
-  systemctl disable "$t.timer" 2>/dev/null || true
-  mv "/etc/systemd/system/$t.timer" "/etc/systemd/system/$t.service" /root/kelion/dead-units/ 2>/dev/null || true
-done
-systemctl daemon-reload 2>/dev/null || true
-# 4) PROCESELE deja pornite (lecția din 25 iul: mask-ul oprește doar REÎNVIEREA;
-#    repairer-pool + builder-server rulau NEÎNTRERUPT din 20 iul și unul din ele
-#    trimitea alertele-fantomă de la alerts@ — buclă cu auto-reply-ul din contact@).
-pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux|kelion-voice-agent' 2>/dev/null || true
+[ -f "$CONFIG_FILE" ] || die 'configul runtime dedicat lipsește'
+[ "$(stat -c '%u:%g:%a' "$CONFIG_FILE")" = '0:10050:640' ] || die 'configul runtime trebuie root:10050 mode 0640'
 
-# 5) CONSTRUCTORUL — PAUZAT PE DURATA PUBLICĂRII (Adrian, 6 aug: publicare blocată
-#    ORE — constructorul rula build-uri în paralel la FIECARE 2 min și sufoca CPU-ul,
-#    iar `docker build`-ul publicării nu se mai termina; live rămânea în urmă cu zeci
-#    de commituri, iar reboot-ul nu ajuta pe termen lung fiindcă cronul îl reînvia).
-#    Îl scoatem din cron ACUM + îi omorâm procesele rămase. (22 aug: lucrătorul
-#    local e ȘTERS DEFINITIV — pasul 6d nu-l mai repune; curățarea de aici rămâne
-#    ca plasă pentru gazdele care încă au procese vechi.)
-crontab -l 2>/dev/null | grep -v 'constructor-worker\.sh' | crontab - 2>/dev/null || true
-# Omoară TOT arborele constructorului, nu doar părintele (Adrian, 7 aug — audit:
-# `constructor-agent.mjs` lansează prin execSync copii CPU-grei — npm/tsc/vite/
-# esbuild în /root/kelion/atelier; un `pkill` simplu prinde doar procesul-părinte,
-# iar copiii orfani ard CPU și sufocă `docker build`-ul publicării). Kill pe GRUPUL
-# de procese (kill -PGID, PID negativ) îi ia pe toți descendenții. Best-effort.
-{
-  for pid in $(pgrep -f 'constructor-worker|constructor-agent' 2>/dev/null || true); do
-    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
-    [ -n "$pgid" ] && kill -9 "-$pgid" 2>/dev/null || true
-  done
-  pkill -9 -f 'constructor-worker|constructor-agent|/root/kelion/atelier' 2>/dev/null || true
-} || true
+declare -A allowed_config=()
+for name in NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_MAX_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE; do
+  allowed_config[$name]=1
+done
+while IFS='=' read -r name _value; do
+  [ -z "$name" ] && continue
+  [[ "$name" = \#* ]] && continue
+  [[ "$name" =~ ^[A-Z][A-Z0-9_]*$ ]] || die 'nume invalid în configul runtime'
+  [ "${allowed_config[$name]:-0}" = 1 ] || die "variabilă nepermisă în configul runtime: $name"
+done < "$CONFIG_FILE"
 
-show_progress 25 "Aducere cod ($BRANCH)"
-echo "== 1. Aduc codul ($BRANCH) =="
-cd "$REPO"
-GITHUB_TOKEN="${GITHUB_TOKEN:-$(sed -n 's/^GITHUB_TOKEN=//p' "$ENVFILE" | sed -n '1p')}"
-ASKPASS="${TMPDIR:-/tmp}/kelion-deploy-git-askpass"
-cat > "$ASKPASS" <<'ASKPASS_SCRIPT'
-#!/bin/sh
-case "$1" in
-  *Username*) printf '%s\n' 'x-access-token' ;;
-  *) printf '%s\n' "$GITHUB_TOKEN" ;;
+config_value() { sed -n "s/^$1=//p" "$CONFIG_FILE" | sed -n '1p'; }
+[ "$(config_value NODE_ENV)" = production ] || die 'NODE_ENV trebuie production'
+[ "$(config_value PUBLIC_APP_ORIGIN)" = "$PRODUCT_ORIGIN" ] || die 'PUBLIC_APP_ORIGIN diferă de configul release-ului'
+[ "$(config_value FRONTEND_ORIGIN)" = "$PRODUCT_ORIGIN" ] || die 'FRONTEND_ORIGIN diferă de configul release-ului'
+[ "$(config_value GOOGLE_REDIRECT_URI)" = "$PRODUCT_ORIGIN/auth/google/callback" ] || die 'redirectul Google nu este first-party exact'
+admin_email=$(config_value ADMIN_EMAIL)
+[[ "$admin_email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]] || die 'ADMIN_EMAIL obligatoriu și normalizat'
+for name in OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_MAX_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL; do
+  [[ "$(config_value "$name")" =~ ^gpt-[a-z0-9][a-z0-9._-]*$ ]] || die "$name lipsește sau este invalid"
+done
+for name in PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME GOOGLE_TOKEN_ENCRYPTION_KEY_ID OPENAI_VIDEO_SHUTDOWN_AT; do
+  [ -n "$(config_value "$name")" ] || die "$name lipsește"
+done
+[[ "$(config_value GOOGLE_TOKEN_ENCRYPTION_KEY_ID)" =~ ^[A-Za-z0-9_-]{1,32}$ ]] || die 'GOOGLE_TOKEN_ENCRYPTION_KEY_ID invalid'
+python3 - "$(config_value OPENAI_VIDEO_SHUTDOWN_AT)" <<'PY' || die 'OPENAI_VIDEO_SHUTDOWN_AT trebuie să fie ISO-8601 cu fus orar'
+import datetime, sys
+value = sys.argv[1]
+parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+raise SystemExit(0 if parsed.tzinfo is not None else 1)
+PY
+for name in VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PUSH_MAX_SUBSCRIPTIONS; do
+  [[ "$(config_value "$name")" =~ ^[1-9][0-9]*$ ]] || die "$name trebuie să fie un întreg pozitiv"
+done
+[ "$(config_value NATIVE_CHANNEL_TICKET_TTL_SECONDS)" -le 30 ] || die 'NATIVE_CHANNEL_TICKET_TTL_SECONDS trebuie să fie cel mult 30'
+payment_mode=$(config_value PAYMENT_MODE)
+payment_contract_verified=$(config_value PAYMENT_CONTRACT_VERIFIED)
+case "$payment_mode" in
+  disabled) [ "$payment_contract_verified" = false ] || die 'modul disabled cere PAYMENT_CONTRACT_VERIFIED=false' ;;
+  sandbox|production) [ "$payment_contract_verified" = true ] || die 'plățile nu pot fi active fără contract verificat' ;;
+  *) die 'PAYMENT_MODE trebuie disabled, sandbox sau production' ;;
 esac
-ASKPASS_SCRIPT
-chmod 700 "$ASKPASS"
-git remote set-url origin https://github.com/kelion-team/kelionai.git
-GITHUB_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git fetch origin --prune
-# ── ARBORELE DE PUBLICARE NU E SPAȚIU DE LUCRU (8 aug 2026) ──────────────────
-# CE S-A ÎNTÂMPLAT, MĂSURAT: publicarea a stat oprită PESTE OPT ORE (live
-# `ee283ef` la 16:48Z, master `c4e0402`), fără niciun proces agățat, fără lacăt
-# blocat, cu mașina la load 0,68 și cu cronul rulând în fiecare minut. În
-# `auto-publicare.log`, aceeași eroare la fiecare minut:
-#     error: Your local changes to the following files would be overwritten by checkout:
-#         scripts/proba-modele.py · backend/src/routes/chat.ts ·
-#         backend/src/services/geminiDirect.ts · frontend/src/lib/micStream.ts
-#     Aborting
-# `git checkout` refuza să suprascrie modificări locale, deploy-ul renunța la
-# pasul 1, cronul relua peste un minut — LA INFINIT. Nimic nu se agăța: renunța
-# de fiecare dată, tăcut pentru oricine nu deschidea exact logul ăla.
-#
-# `/root/kelion/repo` e o copie de PUBLICARE, nu un loc unde se lucrează: ce e de
-# păstrat trăiește în git, nu acolo. Deci arborele se curăță — dar NU orbește:
-# se salvează întâi un petic cu tot ce se aruncă, și se scrie în log ce anume.
-# Un „am curățat" fără listă e exact verdictul nemăsurat pe care-l interzicem.
-if ! git diff --quiet HEAD 2>/dev/null; then
-  PETIC="/root/kelion/repo-modificari-$(date -u +%Y%m%d-%H%M%S).patch"
-  git diff HEAD > "$PETIC" 2>/dev/null || true
-  echo "!! Arborele de publicare avea modificări locale — salvate în $PETIC, apoi aruncate:"
-  git diff HEAD --stat | sed 's/^/     /'
-  git reset --hard >/dev/null 2>&1 || true
-fi
-# `-f`: chiar dacă a mai rămas ceva (fișier neurmărit care se ciocnește), publicarea
-# nu se mai oprește. Codul care ajunge la om e cel din master, întotdeauna.
-git checkout -f -B deploy "origin/$BRANCH"
-git log --oneline -1
-# Ieșire devreme sub lacăt: dacă alt publicator tocmai a dus live EXACT sha-ul
-# țintă cât am așteptat la flock, nu mai reconstruim nimic — verde, gata.
-# KELION_DEPLOY_FORCE=1 sare peste scurtătură (27 iul, cazul real BRIDGE_SECRET:
-# schimbare DOAR de env, același sha — containerul trebuie repornit ca s-o ia,
-# altfel scurtătura ar declara „deja publicat" și env-ul nou n-ar intra nicicând).
-TARGET=$(git rev-parse HEAD | cut -c1-7)
-LIVE_NOW=$(curl -s -m 8 http://127.0.0.1:8080/api/version | grep -o '"v":"[^"]*"' | cut -d'"' -f4 || true)
-if [ "${KELION_DEPLOY_FORCE:-0}" != 1 ] && [ "$LIVE_NOW" = "$TARGET" ]; then
-  echo "== Deja publicat exact $TARGET (alt publicator a terminat primul) — nimic de făcut =="
-  echo "   (pentru repornire forțată la același sha — ex. env schimbat — rulează cu KELION_DEPLOY_FORCE=1)"
-  exit 0
-fi
+[[ "$(config_value REVOLUT_MERCHANT_API_VERSION)" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]] \
+  || die 'REVOLUT_MERCHANT_API_VERSION trebuie să fie o dată versionată'
+[[ "$(config_value REVOLUT_ORDER_EXPIRY)" =~ ^PT([1-9][0-9]{0,2}M|[1-9][0-9]?H)$ ]] \
+  || die 'REVOLUT_ORDER_EXPIRY trebuie să fie o durată ISO-8601 în minute sau ore'
 
-show_progress 40 "Verificare fișier mediu (env)"
-echo "== 2. Verific env-ul =="
-# IGIENA IDENTITĂȚII (9 aug, „flux admin 403 — trebuie 200" + „nu are audio
-# voce"): un ADMIN_EMAIL stricat în env (spații, ghilimele, valoare rescrisă de
-# vreun flux) îl face pe owner „customer" cu sesiune validă → 403 pe tot adminul
-# și vocea căzută pe poarta de plată. Emailul adminului E DEJA implicit în cod
-# (config.ts) și nu are nevoie de env — ștergem orice linie ADMIN_EMAIL ca
-# implicitul din cod să domnească. La fel, un SESSION_SECRET GOL (linia există,
-# valoarea nu) invalidează tăcut toate cookie-urile — îl ștergem doar dacă e gol
-# (gate-ul de mai jos cere apoi unul real).
-if grep -q "^ADMIN_EMAIL=" "$ENVFILE" 2>/dev/null; then
-  grep -v "^ADMIN_EMAIL=" "$ENVFILE" > "$ENVFILE.tmp" && mv "$ENVFILE.tmp" "$ENVFILE" && chmod 600 "$ENVFILE"
-  echo "· ADMIN_EMAIL scos din env — implicitul din cod (ownerul) domnește"
-fi
-if grep -q "^SESSION_SECRET=$" "$ENVFILE" 2>/dev/null; then
-  grep -v "^SESSION_SECRET=$" "$ENVFILE" > "$ENVFILE.tmp" && mv "$ENVFILE.tmp" "$ENVFILE" && chmod 600 "$ENVFILE"
-  echo "· SESSION_SECRET era GOL — linia ștearsă ca gate-ul să o ceară pe față"
-fi
-for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SESSION_SECRET DATABASE_URL GEMINI_API_KEY; do
-  # `^$v=.` (cu punct), nu `^$v=`: o linie cu valoarea GOALĂ trecea drept
-  # „prezentă" — un SESSION_SECRET gol semna cookie-uri pe '' și îl deloga
-  # tăcut pe owner (9 aug).
-  if ! grep -q "^$v=." "$ENVFILE" 2>/dev/null; then
-    echo "❌ LIPSEȘTE $v (sau e GOL) din $ENVFILE — completează-l înainte de deploy."; MISS=1
+secret_files=(openai-project-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key migration-backup-proof-key)
+[ "$(stat -c '%u:%g:%a' "$SECRET_ROOT")" = '0:10050:750' ] || die 'directorul de secrete trebuie root:10050 mode 0750'
+for name in "${secret_files[@]}"; do
+  path=$SECRET_ROOT/$name
+  [ -f "$path" ] && [ ! -L "$path" ] && [ -s "$path" ] || die "secret-file lipsă: $name"
+  [ "$(stat -c '%u:%g:%a' "$path")" = '0:10050:440' ] || die "ACL invalid pentru secret-file $name"
+done
+case "$(sed -n '1p' "$SECRET_ROOT/openai-project-key")" in sk-proj-*) ;; *) die 'cheia OpenAI runtime nu este project-scoped' ;; esac
+[ ! -e "$SECRET_ROOT/openai-admin-key" ] || die 'cheia OpenAI admin nu poate exista în secret root-ul aplicației'
+for name in revolut-merchant-secret-key revolut-webhook-signing-secret; do
+  path=$SECRET_ROOT/$name
+  [ "$(wc -l < "$path")" -eq 1 ] || die "$name trebuie să conțină exact o linie"
+  [ "$(awk 'NR == 1 { print length; exit }' "$path")" -ge 32 ] || die "$name este prea scurt"
+  if [ "$payment_mode" = disabled ]; then
+    grep -q '^disabled-placeholder-' "$path" || die "$name trebuie înlocuit cu placeholder când plățile sunt dezactivate"
+  else
+    ! grep -q '^disabled-placeholder-' "$path" || die "$name este placeholder; plățile rămân blocate"
   fi
 done
-[ "${MISS:-0}" = 1 ] && { echo "Opresc: env incomplet."; exit 1; }
+push_enabled=$(config_value PUSH_ENABLED)
+case "$push_enabled" in
+  0)
+    grep -q '^disabled-placeholder-' "$SECRET_ROOT/vapid-private-key" \
+      || die 'vapid-private-key trebuie să fie placeholder când push este dezactivat'
+    ;;
+  1)
+    [[ "$(config_value VAPID_PUBLIC_KEY)" =~ ^[A-Za-z0-9_-]{87}$ ]] || die 'VAPID_PUBLIC_KEY invalidă'
+    [[ "$(sed -n '1p' "$SECRET_ROOT/vapid-private-key")" =~ ^[A-Za-z0-9_-]{43}$ ]] \
+      || die 'VAPID_PRIVATE_KEY invalidă sau placeholder'
+    push_endpoint_hosts=$(config_value PUSH_ENDPOINT_HOSTS)
+    [ -n "$push_endpoint_hosts" ] || die 'PUSH_ENDPOINT_HOSTS obligatoriu când push este activ'
+    IFS=',' read -r -a push_hosts <<< "$push_endpoint_hosts"
+    for host in "${push_hosts[@]}"; do
+      [[ "$host" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] \
+        || die 'PUSH_ENDPOINT_HOSTS conține un domeniu invalid'
+    done
+    ;;
+  *) die 'PUSH_ENABLED trebuie 0 sau 1' ;;
+esac
 
-show_progress 50 "Canalul de update al lui Kelion"
-echo "== 2b. Canalul de update al lui Kelion (ce primește la ACEST deploy) =="
-# Adrian, 25 iul: „canal de informare a lui cu tot ce primește ca update".
-# Scriem git log-ul recent în contextul de build; Dockerfile îl copiază în
-# imagine (COPY . .), iar backend-ul (services/updates.ts) îl servește lui
-# Kelion în prompt + prin unealta list_updates. Fișierul e în .gitignore.
-{
-  echo "# Update-urile lui Kelion — generat la deploy ($(TZ=Europe/London date +'%Y-%m-%d %H:%M %Z')), cele mai noi primele"
-  git -C "$REPO" log -40 --date=format:'%Y-%m-%d %H:%M' --pretty='%h | %ad | %s'
-} > "$REPO/deploy/last-updates.txt"
+install -d -o root -g 10050 -m 0750 "$RUNTIME_ROOT" "$RELEASE_STATE_ROOT"
+install -d -o root -g root -m 0755 "$PROXY_CONFIG_ROOT" "$PROXY_CONFIG_ROOT/upstream" "$PROXY_STATE_ROOT"
+install -d -o 1000 -g 1000 -m 0750 "$PROXY_STATE_ROOT/data" "$PROXY_STATE_ROOT/config"
+if [ ! -s "$RELEASE_STATE_ROOT/active" ]; then
+  printf '%s\n' legacy > "$RELEASE_STATE_ROOT/active"
+  chown root:10050 "$RELEASE_STATE_ROOT/active"
+  chmod 0640 "$RELEASE_STATE_ROOT/active"
+fi
 
-show_progress 65 "Construire imagine Docker (kelionai:latest)"
-echo "== 3. Construiesc imaginea =="
-# TIMEOUT PE BUILD (Adrian, 7 aug — audit: `docker build` n-avea limită; dacă
-# atârna, ținea lacătul de publicare la infinit → totul îngheța, exact ce s-a
-# întâmplat 6 aug). `timeout 1200` (20 min) taie un build agățat → scriptul iese
-# non-zero, lacătul se eliberează, trap-ul repune constructorul, iar auto-publicarea
-# reîncearcă la ciclul următor. Un build sănătos e sub ~8 min, deci pragul e larg.
-#
-# EXTINS LA 30 MIN (19 aug — diagnostic timeout 124 la pip install): pachetele
-# Python grele (openhands-ai/browsergym ~500MB+) pot depăși 20 min la descărcare
-# + instalare pe conexiuni mai lente. 30 min (1800s) acoperă și cazurile extreme,
-# fără a bloca publicarea la infinit. Log-ul de build e capturat complet pentru
-# diagnostic dacă pică din nou.
-BUILD_LOG="/root/kelion/docker-build.log"
-echo "$(date -u +'%Y-%m-%dT%H:%M:%SZ') — Începe build Docker" > "$BUILD_LOG"
-if timeout 1800 docker build -t kelionai:latest "$REPO" >> "$BUILD_LOG" 2>&1; then
-  echo "$(date -u +'%Y-%m-%dT%H:%M:%SZ') — Build Docker completat cu succes" >> "$BUILD_LOG"
-else
-  BUILD_RC=$?
-  echo "$(date -u +'%Y-%m-%dT%H:%M:%SZ') — Build Docker eșuat cu codul $BUILD_RC" >> "$BUILD_LOG"
-  if [ "$BUILD_RC" -eq 124 ]; then
-    echo "⚠️  TIMEOUT (124): build-ul a depășit 30 minute. Verifică $BUILD_LOG pentru etapa blocată."
-    echo "   Cauze frecvente: descărcare lentă pip (openhands-ai/browsergym), cache Docker gol."
-    echo "   Soluție: rulează manual 'docker pull' pentru imaginile de bază sau verifică conexiunea."
+KELION_SECCOMP_DESTINATION=$SECCOMP_PROFILE bash "$BUNDLE_DIR/pregateste-seccomp.sh"
+[ -x "$COMPOSE_BIN" ] || bash "$BUNDLE_DIR/pregateste-compose.sh"
+"$COMPOSE_BIN" version >/dev/null
+docker network inspect kelion-proxy >/dev/null 2>&1 || docker network create --driver bridge --label com.kelion.managed=true kelion-proxy >/dev/null
+
+for ref in "$KELION_APP_IMAGE" "$KELION_BROWSER_IMAGE" "$KELION_BROWSER_EGRESS_IMAGE" "$KELION_CONVERTER_GATEWAY_IMAGE" "$KELION_CONVERTER_PARSER_IMAGE"; do
+  docker pull "$ref" >/dev/null
+  [ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")" = "$COMMIT_SHA" ] \
+    || die 'o imagine OCI nu poartă commitul aprobat'
+done
+
+run_migrator() {
+  docker run --rm --network none --user 1000:1000 --group-add 10050 \
+    --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --pids-limit 96 --memory 768m --cpus 1 \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m,uid=1000,gid=1000 \
+    -e HOME=/tmp -e npm_config_cache=/tmp/npm \
+    -e DATABASE_URL_FILE=/run/secrets/database-url \
+    -v /var/run/postgresql:/var/run/postgresql:ro \
+    -v "$SECRET_ROOT/database-url:/run/secrets/database-url:ro" \
+    "$@"
+}
+
+migration_plan=$(run_migrator "$KELION_APP_IMAGE" npm --prefix /app/backend run --silent migrate -- --plan)
+jq -e '.kind == "migrations_plan" and (.risk == "safe" or .risk == "destructive") and (.pending | type == "array")' <<<"$migration_plan" >/dev/null \
+  || die 'planul migrărilor este invalid'
+
+bash "$BUNDLE_DIR/backup.sh"
+[ -s "$PROOF_FILE" ] || die 'backup-ul nu a produs dovada verificată'
+
+pending_count=$(jq -er '.pending | length' <<<"$migration_plan")
+if [ "$pending_count" -gt 0 ]; then
+  migration_args=(
+    --rm --network none --user 1000:1000 --group-add 10050
+    --read-only --cap-drop ALL --security-opt no-new-privileges
+    --pids-limit 96 --memory 768m --cpus 1
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m,uid=1000,gid=1000
+    -e HOME=/tmp -e npm_config_cache=/tmp/npm
+    -e DATABASE_URL_FILE=/run/secrets/database-url
+    -v /var/run/postgresql:/var/run/postgresql:ro
+    -v "$SECRET_ROOT/database-url:/run/secrets/database-url:ro"
+  )
+  if [ "$(jq -er '.risk' <<<"$migration_plan")" = destructive ]; then
+    migration_args+=(
+      -e MIGRATION_BACKUP_PROOF_FILE=/run/proof/backup.json
+      -e MIGRATION_BACKUP_PROOF_KEY_FILE=/run/secrets/migration-backup-proof-key
+      -v "$PROOF_FILE:/run/proof/backup.json:ro"
+      -v "$PROOF_KEY:/run/secrets/migration-backup-proof-key:ro"
+    )
   fi
-  exit "$BUILD_RC"
+  migration_output=$(docker run "${migration_args[@]}" "$KELION_APP_IMAGE" npm --prefix /app/backend run --silent migrate)
+  [ "$migration_output" = migrations_ok ] || die 'migrările nu au confirmat succesul'
 fi
 
-show_progress 75 "Pornire aplicație și container"
-echo "== 4. Pornesc aplicația (:8080, network host, env-file) =="
-docker rm -f kelionai-app 2>/dev/null || true
-# GIT_COMMIT_SHA intră în container ca /api/version să întoarcă EXACT sha-ul
-# publicat (backend/src/index.ts îl suportă deja) — verificarea anti-fantomă
-# devine „live == master", nu doar „s-a schimbat ceva".
-# Volumul pw-cache ține Chromium-ul DESCĂRCAT peste publicări (containerul e
-# nou la fiecare deploy; fără volum, browserul mâinilor murea la fiecare
-# publicare — măsurat 3 aug: /root/.cache/ms-playwright inexistent, deci
-# browser_open crăpa pe „Executable doesn't exist", iar comentariul din
-# Dockerfile promitea un „check la startup" pe care nu-l făcea nimeni).
-# /host/kelion (read-only, 14 aug): OCHII pe logurile gazdei. Până azi,
-# constructor.log și auto-publicare.log nu le citea NIMENI automat — blocajul
-# constructorului l-a văzut ownerul cu ochii, nu sistemul („cine monitorizează
-# toate logurile? nimeni"). Montate read-only, self-heal + server_ops le văd.
-mkdir -p /root/kelion/ops-inbox
-chmod 755 /root/kelion/ops-inbox
-docker run -d --name kelionai-app --restart unless-stopped \
-  --network host --env-file "$ENVFILE" \
-  -e PORT=8080 -e NODE_ENV=production \
-  -e OPS_INBOX_DIR=/host/ops-inbox \
-  -e GIT_COMMIT_SHA="$(git -C "$REPO" rev-parse HEAD)" \
-  -v /root/kelion/pw-cache:/root/.cache/ms-playwright \
-  -v /root/kelion:/host/kelion:ro \
-  -v /root/kelion/ops-inbox:/host/ops-inbox \
-  kelionai:latest
+UPSTREAM_FILE=$PROXY_CONFIG_ROOT/upstream/kelion-upstream.caddy
+old_upstream=''
+[ ! -f "$UPSTREAM_FILE" ] || old_upstream=$(cat "$UPSTREAM_FILE")
+case "$old_upstream" in
+  *app-blue:8080*) active_slot=blue; inactive_slot=green ;;
+  *app-green:8080*) active_slot=green; inactive_slot=blue ;;
+  *) active_slot=legacy; inactive_slot=blue ;;
+esac
 
-echo "== 4b. Browserul mâinilor (Chromium) — prezent, nu promis =="
-# Idempotent: cu volumul plin, descărcarea se sare; rămân doar bibliotecile
-# de sistem (apt), care se pierd cu containerul vechi. Eșecul NU oprește
-# publicarea — dar se spune, nu se tace.
-# TESTAT, NU DECLARAT (owner, 15 aug: „browserul acesta nu funcționează" +
-# „ce-ar fi să testezi tot ce faci și lași funcțional"): ieșirea instalării
-# NU se mai aruncă la /dev/null (merge în browser-install.log), iar verdictul
-# vine dintr-o LANSARE REALĂ a Chromium-ului, nu din codul de ieșire al
-# instalării — „install ok" nu înseamnă „browserul chiar pornește".
-# BIBLIOTECILE DE SISTEM sunt acum în Dockerfile (libnss3, libgbm1, etc.) —
-# `--with-deps` pică des pe slim-images; fără el, `playwright install chromium`
-# doar descarcă binarul, iar bibliotecile sunt deja în imagine.
-docker exec kelionai-app sh -c 'cd /app/backend && npx playwright install chromium' \
-  > /root/kelion/browser-install.log 2>&1 \
-  || echo "AVERTISMENT: instalarea Chromium a picat — vezi /root/kelion/browser-install.log"
-if docker exec kelionai-app sh -c 'cd /app/backend && timeout 30 node -e "const {chromium}=require(\"playwright\");chromium.launch({headless:true,args:[\"--no-sandbox\",\"--disable-dev-shm-usage\"]}).then(async b=>{await b.close();console.log(\"BROWSER-VIU\")}).catch(e=>{console.error(\"BROWSER-MORT:\",String(e).slice(0,300));process.exit(1)})"' 2>&1 | tee -a /root/kelion/browser-install.log | grep -q 'BROWSER-VIU'; then
-  echo "Browserul mâinilor: VIU — probat cu lansare reală de Chromium"
+case "$inactive_slot" in
+  blue)
+    KELION_BIND_PORT=18080
+    KELION_BROWSER_SUBNET=172.29.10.0/24
+    KELION_BROWSER_WORKER_IP=172.29.10.2
+    KELION_BROWSER_PROXY_IP=172.29.10.3
+    ;;
+  green)
+    KELION_BIND_PORT=18081
+    KELION_BROWSER_SUBNET=172.29.11.0/24
+    KELION_BROWSER_WORKER_IP=172.29.11.2
+    KELION_BROWSER_PROXY_IP=172.29.11.3
+    ;;
+  *) die 'slot invalid' ;;
+esac
+
+KELION_SLOT=$inactive_slot
+KELION_COMMIT_SHA=$COMMIT_SHA
+KELION_RUNTIME_ROOT=$RUNTIME_ROOT/slots/$inactive_slot
+KELION_RELEASE_STATE_ROOT=$RELEASE_STATE_ROOT
+KELION_CONFIG_FILE=$CONFIG_FILE
+KELION_SECRET_ROOT=$SECRET_ROOT
+KELION_SECCOMP_PROFILE=$SECCOMP_PROFILE
+export KELION_SLOT KELION_COMMIT_SHA KELION_RUNTIME_ROOT KELION_RELEASE_STATE_ROOT
+export KELION_CONFIG_FILE KELION_SECRET_ROOT KELION_SECCOMP_PROFILE
+export KELION_BIND_PORT KELION_BROWSER_SUBNET KELION_BROWSER_WORKER_IP KELION_BROWSER_PROXY_IP
+
+project=kelion-$inactive_slot
+"$COMPOSE_BIN" -p "$project" -f "$COMPOSE_FILE" down --remove-orphans >/dev/null 2>&1 || true
+for directory in browser-api browser-egress converter-api converter-private; do
+  install -d -o root -g 10050 -m 2770 "$KELION_RUNTIME_ROOT/$directory"
+done
+"$COMPOSE_BIN" -p "$project" -f "$COMPOSE_FILE" config --quiet
+"$COMPOSE_BIN" -p "$project" -f "$COMPOSE_FILE" up -d --no-build --remove-orphans --wait --wait-timeout 180
+
+readiness=$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:$KELION_BIND_PORT/readyz")
+jq -e '.ready == true and .release.candidate == true and .release.sideEffectsActive == false' <<<"$readiness" >/dev/null \
+  || die 'candidatul nu este ready și inactiv'
+candidate_version=$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:$KELION_BIND_PORT/api/version" | jq -er '.v')
+[ "$candidate_version" = "${COMMIT_SHA:0:7}" ] || die 'versiunea candidatului nu corespunde commitului'
+
+NODE_PROBE_IMAGE=node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066
+docker run --rm --network none --user 1000:1000 --group-add 10050 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 128m \
+  -v "$BUNDLE_DIR:/probe:ro" \
+  -v "$KELION_RUNTIME_ROOT/browser-api:/run/kelion-browser-api:ro" \
+  -v "$SECRET_ROOT/browser-worker-secret:/run/secrets/browser-worker-secret:ro" \
+  "$NODE_PROBE_IMAGE" node /probe/probe-browser-ssrf.mjs
+docker run --rm --network none --user 1000:1000 --group-add 10050 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 128m \
+  -v "$BUNDLE_DIR:/probe:ro" \
+  -v "$KELION_RUNTIME_ROOT/converter-api:/run/kelion-converter-api:ro" \
+  -v "$SECRET_ROOT/converter-worker-secret:/run/secrets/converter-worker-secret:ro" \
+  "$NODE_PROBE_IMAGE" node /probe/probe-converter-sandbox.mjs
+
+temporary_proxy=$(mktemp -d "$RUNTIME_ROOT/proxy-validation.XXXXXX")
+install -m 0644 "$BUNDLE_DIR/Caddyfile" "$temporary_proxy/Caddyfile"
+printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$inactive_slot" > "$temporary_proxy/kelion-upstream.caddy"
+docker run --rm --network kelion-proxy --user 1000:1000 \
+  -e PUBLIC_APP_DOMAIN="$PUBLIC_APP_DOMAIN" \
+  -v "$temporary_proxy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+  -v "$temporary_proxy:/etc/caddy/upstream:ro" \
+  caddy:2@sha256:98eb57b87c9be83995ff0dd16c75d3b78740046933347f939312823736326a5e \
+  caddy validate --config /etc/caddy/Caddyfile
+rm -f -- "$temporary_proxy/Caddyfile" "$temporary_proxy/kelion-upstream.caddy"
+rmdir "$temporary_proxy"
+
+old_marker=$(sed -n '1p' "$RELEASE_STATE_ROOT/active")
+legacy_proxy_running=0
+docker inspect -f '{{.State.Running}}' kelion-caddy 2>/dev/null | grep -qx true && legacy_proxy_running=1 || true
+switched=0
+rollback_switch() {
+  [ "$switched" = 1 ] || return 0
+  if [ -n "$old_upstream" ]; then
+    temporary=$(mktemp "$PROXY_CONFIG_ROOT/upstream/rollback.XXXXXX")
+    printf '%s\n' "$old_upstream" > "$temporary"
+    chmod 0644 "$temporary"
+    mv "$temporary" "$UPSTREAM_FILE"
+    docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || true
+  fi
+  temporary=$(mktemp "$RELEASE_STATE_ROOT/rollback.XXXXXX")
+  printf '%s\n' "$old_marker" > "$temporary"
+  chown root:10050 "$temporary"
+  chmod 0640 "$temporary"
+  mv "$temporary" "$RELEASE_STATE_ROOT/active"
+  if [ "$legacy_proxy_running" = 1 ]; then
+    "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" down >/dev/null 2>&1 || true
+    docker start kelion-caddy >/dev/null 2>&1 || true
+  fi
+}
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then rollback_switch; fi' EXIT
+
+install -m 0644 "$BUNDLE_DIR/Caddyfile" "$PROXY_CONFIG_ROOT/Caddyfile"
+temporary_upstream=$(mktemp "$PROXY_CONFIG_ROOT/upstream/candidate.XXXXXX")
+printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$inactive_slot" > "$temporary_upstream"
+chmod 0644 "$temporary_upstream"
+mv "$temporary_upstream" "$UPSTREAM_FILE"
+switched=1
+
+export PUBLIC_APP_DOMAIN KELION_PROXY_CONFIG_ROOT=$PROXY_CONFIG_ROOT KELION_PROXY_STATE_ROOT=$PROXY_STATE_ROOT
+"$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" config --quiet
+if docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null | grep -qx true; then
+  docker exec kelion-proxy caddy validate --config /etc/caddy/Caddyfile >/dev/null
+  docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null
 else
-  echo "AVERTISMENT: browserul mâinilor e MORT (lansarea reală a picat) — cauza în /root/kelion/browser-install.log; pașii pe mâini cu browser vor pica"
+  [ "$legacy_proxy_running" = 0 ] || docker stop --time 30 kelion-caddy >/dev/null
+  "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" up -d --no-build --wait --wait-timeout 90
 fi
 
-show_progress 85 "Repornire Caddy reverse proxy"
-echo "== 5. (Re)pornesc Caddy cu Caddyfile-ul aplicației =="
-install -D -m 644 "$REPO/deploy/Caddyfile" "$CADDY_DIR/Caddyfile"
-docker rm -f kelion-caddy 2>/dev/null || true
-docker run -d --name kelion-caddy --restart unless-stopped --network host \
-  -v "$CADDY_DIR/Caddyfile:/etc/caddy/Caddyfile" \
-  -v "$CADDY_DIR/data:/data" -v "$CADDY_DIR/config:/config" \
-  caddy:2 caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+temporary_active=$(mktemp "$RELEASE_STATE_ROOT/active.XXXXXX")
+printf '%s\n' "$COMMIT_SHA" > "$temporary_active"
+chown root:10050 "$temporary_active"
+chmod 0640 "$temporary_active"
+mv "$temporary_active" "$RELEASE_STATE_ROOT/active"
 
-# ── COQUI TTS (clonare voce, owner 23 aug 2026) ──────────────────────────────
-# Container SEPARAT pentru microserviciul Coqui TTS (XTTS v2). Necesită Python
-# + torch (~3GB) — prea greu pentru imaginea principală. Rulează pe port 5100
-# INTERN (127.0.0.1), NU e expus public. Backend-ul îl atinge prin COQUI_URL.
-# NON-FATAL: dacă Coqui nu se construiește/pornește, aplicația principală merge
-# mai departe — sinteza cu clona returnează 503, dar tot restul funcționează.
-echo "== 4b. Coqui TTS (clonare voce, port 5100 intern) =="
-if timeout 600 docker build -f "$REPO/Dockerfile.coqui" -t kelionai-coqui:latest "$REPO" >> "$BUILD_LOG" 2>&1; then
-  docker rm -f kelionai-coqui 2>/dev/null || true
-  docker run -d --name kelionai-coqui --restart unless-stopped \
-    --network host \
-    -e COQUI_PORT=5100 \
-    -e COQUI_LANGUAGE=ro \
-    kelionai-coqui:latest
-  echo "Coqui TTS: pornit (port 5100 intern) — clonare voce disponibilă"
-else
-  echo "AVERTISMENT: Coqui TTS nu s-a construit — sinteza cu clona va returna 503 (restul aplicației merge)"
-fi
+for _attempt in $(seq 1 18); do
+  active_ready=$(curl --silent --show-error --max-time 10 "http://127.0.0.1:$KELION_BIND_PORT/readyz" || true)
+  if jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$active_ready" >/dev/null 2>&1; then break; fi
+  sleep 2
+done
+jq -e '.ready == true and .release.sideEffectsActive == true' <<<"${active_ready:-}" >/dev/null \
+  || die 'activarea candidatului nu a fost observată'
 
-show_progress 90 "Configurare cronuri și servicii suport"
-echo "== 6. Backup criptat s?pt?m?nal (duminic? 03:00 ora Angliei) =="
-# Instalează/actualizează IDEMPOTENT cronul de backup criptat al DB-ului
-# (Adrian, 24 iul: „salvări periodice în zona criptată"). Zilnic la 03:15 UTC.
-install -m 700 "$REPO/deploy/backup.sh" /root/kelion/backup.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' | grep -v '^CRON_TZ=Europe/London$' | grep -v '^# kelion-backup-tz' ; echo '# kelion-backup-tz' ; echo 'CRON_TZ=Europe/London' ; echo '0 3 * * 0 /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
-
-echo "== 6c. Auto-publicarea de pe server (cron la 1 min — master ajunge live SINGUR) =="
-# Adrian, 26 iul („de ce nu le publici? de ce trebuie să-ți zic eu?"), în plină
-# pană GitHub Actions: serverul își compară singur live-ul cu vârful lui master
-# (API GitHub, nu runneri) și, dacă e în urmă, rulează CHIAR acest deploy.sh.
-# GitHub Actions nu mai e pe drumul critic al publicării.
-# CRON LA 1 MINUT (Adrian, 6 aug: „5 minute e maximul, oricât de mare ar fi").
-# Era la 3 min → până la 3 min pierdute DOAR pe așteptarea tick-ului. flock-ul din
-# auto-publicare.sh + publicare.lock previn suprapunerea, deci 1 min e sigur:
-# un ciclu care prinde un deploy în curs iese imediat pe flock, fără muncă dublă.
-install -m 700 "$REPO/deploy/auto-publicare.sh" /root/kelion/auto-publicare.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/auto-publicare.sh' ; echo '* * * * * /root/kelion/auto-publicare.sh >> /root/kelion/auto-publicare.log 2>&1' ) | crontab -
-
-echo "== 6f. Materializarea punctelor de recuperare pe VPS (cron la 10 min) =="
-# Adrian, 27 iul: „salvarea trebuie pe serverul Linux". Fiecare tag backup-*
-# (creat din meniul Recovery al adminului) primește o copie fizică pe VPS
-# (.bundle + .tar.gz), ca recuperarea să nu depindă doar de GitHub. Idempotent.
-install -m 700 "$REPO/deploy/backup-versiuni.sh" /root/kelion/backup-versiuni.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/backup-versiuni.sh' ; echo '*/10 * * * * /root/kelion/backup-versiuni.sh >> /root/kelion/backup-versiuni.log 2>&1' ) | crontab -
-
-echo "== 6d. Constructorul local: DEMONTAT DEFINITIV (constructorul e DEVIN) =="
-# Owner, 22 aug, verbatim: „am cerut devin peste tot in constructor… sa-i stergi
-# de tot". Constructorul local de pe VPS nu mai există în repo — aici îi
-# scoatem DEFINITIV cronul și fișierele de pe gazdă (idempotent; la gazdele
-# curate, comenzile nu găsesc nimic și tac).
-crontab -l 2>/dev/null | grep -v '/root/kelion/constructor-worker.sh' | crontab - 2>/dev/null || true
-rm -f /root/kelion/constructor-worker.sh /root/kelion/constructor-agent.mjs
-
-echo "== 6e. Vindecătorul de rulări roșii (cron la 10 min — roșu → verde singur) =="
-# Adrian, 27 iul: „dacă are ceva roșu să escaladeze și să repare până ajunge
-# verde". Determinist: rulările de deploy eșuate se rerulează automat (max 2)
-# DOAR când live == master (publicarea reală e sănătoasă); altfel email.
-install -m 700 "$REPO/deploy/vindecator-rulari.sh" /root/kelion/vindecator-rulari.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/vindecator-rulari.sh' ; echo '*/10 * * * * /root/kelion/vindecator-rulari.sh >> /root/kelion/vindecator.log 2>&1' ) | crontab -
-
-echo "== 6b. Sentinela locală (cron la 3 min — pulsul lui Kelion, zero cost) =="
-# Adrian, 26 iul: „verificare automată dar să nu coste". Determinist, fără AI:
-# repornește containerul mort (2 ratări la rând) + pulsul intern (DB/disc/erori)
-# cu email DOAR la anomalie. Idempotent, ca backup-ul de mai sus.
-install -m 700 "$REPO/deploy/sentinela-locala.sh" /root/kelion/sentinela-locala.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/sentinela-locala.sh' ; echo '*/3 * * * * /root/kelion/sentinela-locala.sh >> /root/kelion/sentinela.log 2>&1' ) | crontab -
-
-echo "== 6g. Veghea publicării (cron la 10 min — divergența master↔live nu mai TACE) =="
-# 7 aug, măsurat: master a stat 7+ ore înaintea live-ului și niciun semnal
-# (lacătul ținut → auto-publicare ieșea tăcut la fiecare minut). Veghea se uită
-# din AFARA lacătului: >15 min divergență → deschide issue cu diagnosticul de
-# pe mașină; la vindecare îl închide singură. Scrisă pe 7 aug dar NEinstalată
-# de nimeni (linia de cron era doar în comentariul ei — găsit 8 aug); de-aia
-# instalarea e AICI, idempotentă, ca tot restul.
-install -m 700 "$REPO/deploy/veghe-publicare.sh" /root/kelion/veghe-publicare.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/veghe-publicare.sh' ; echo '*/10 * * * * /root/kelion/veghe-publicare.sh >> /root/kelion/veghe-publicare.log 2>&1' ) | crontab -
-
-echo "== 6i. Ops-worker local (cron 1 min — Reset VPS fără GitHub Actions) =="
-# 17 aug QA: Actions mort pe billing → restart-app/caddy prin inbox pe gazdă.
-install -m 700 "$REPO/deploy/ops-worker.sh" /root/kelion/ops-worker.sh
-mkdir -p /root/kelion/ops-inbox
-( crontab -l 2>/dev/null | grep -v '/root/kelion/ops-worker.sh' ; echo '* * * * * /root/kelion/ops-worker.sh >> /root/kelion/ops-worker.log 2>&1' ) | crontab -
-
-echo "== 6f. Porțile pe VPS (cron la 10 min — verdictul PR-urilor, zero cost) =="
-# Adrian, 31 iul: „nu poți corecta modul de lucru, pică de fiecare dată" —
-# `pr-verify.yml` a picat de 31 de ori la rând, în 3-11 secunde, cu runner_id 0
-# și loguri 404 (facturare GitHub blocată la nivel de organizație). A picat pe
-# cod, pe configurare și pe un fișier de text deopotrivă, deci roșul ăla nu
-# spune nimic despre lucrare. Aceleași porți rulate aici, pe fierul deja plătit,
-# cu verdictul scris ca un comentariu pe PR. Zero AI, zero minute GitHub.
-# Sare peste rulare dacă VPS-ul e deja încărcat — producția are prioritate.
-install -m 700 "$REPO/deploy/porti-pr.sh" /root/kelion/porti-pr.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/porti-pr.sh' ; echo '*/10 * * * * /root/kelion/porti-pr.sh >> /root/kelion/porti-pr.log 2>&1' ) | crontab -
-
-echo "== 6h. Curățenia VPS-ului (cron zilnic 04:30 — discul nu se mai umple TĂCUT) =="
-# 9 aug (Adrian: „58% utilizat, cu ce e umplut?"): vps-curatenie.sh există din
-# 27 iul și își spune singur povestea (134 imagini / ~48G strânse înainte de
-# prima rulare), dar NIMENI nu-l instala în cron — exact boala veghii din 8 aug:
-# scriptul scris, instalarea uitată. Fiecare publicare construiește o imagine
-# Docker nouă și straturile vechi rămân pe disc pentru totdeauna. Instalarea e
-# AICI, idempotentă, ca tot restul. Scriptul își scrie singur logul
-# (curatenie.log) și împarte lacătul de publicare, deci nu calcă un build.
-install -m 700 "$REPO/deploy/vps-curatenie.sh" /root/kelion/vps-curatenie.sh
-( crontab -l 2>/dev/null | grep -v '/root/kelion/vps-curatenie.sh' ; echo '30 4 * * * /root/kelion/vps-curatenie.sh' ) | crontab -
-
-# (Pasul 6g — „proba modelelor free" prin curl direct la OpenRouter — a fost
-# EXTIRPAT pe 3 aug împreună cu furnizorul: creierul e Gemini-only, nu mai
-# există pool de modele free de probat.)
-
-show_progress 95 "Verificare LIVE anti-fantomă"
-echo "== 7. Verific LIVE (anti-fantomă: versiunea trebuie să fie chiar sha-ul publicat) =="
-SHA=$(git -C "$REPO" rev-parse HEAD | cut -c1-7)   # exact ca .slice(0,7) din backend
-V=""
-for _ in $(seq 1 12); do
+public_ok=0
+for _attempt in $(seq 1 18); do
+  live_version=$(curl --fail --silent --show-error --max-time 12 "$PRODUCT_ORIGIN/api/version" | jq -r '.v // empty' || true)
+  live_ready=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 12 "$PRODUCT_ORIGIN/readyz" || true)
+  if [ "$live_version" = "${COMMIT_SHA:0:7}" ] && [ "$live_ready" = 200 ]; then public_ok=1; break; fi
   sleep 5
-  V=$(curl -s -m 8 http://127.0.0.1:8080/api/version | grep -o '"v":"[^"]*"' | cut -d'"' -f4 || true)
-  [ "$V" = "$SHA" ] && break
 done
-if [ "$V" = "$SHA" ]; then
-  echo "✅ LIVE = $SHA (anti-fantomă TRECE). Verifică și https://kelionai.app/api/version."
-  show_progress 100 "Deploy finalizat cu succes! Versiunea live: $SHA"
+[ "$public_ok" = 1 ] || die 'smoke-ul public nu confirmă commitul și readiness'
+
+if [ "$active_slot" = blue || "$active_slot" = green ]; then
+  "$COMPOSE_BIN" -p "kelion-$active_slot" -f "$COMPOSE_FILE" stop --timeout 30 >/dev/null 2>&1 || true
 else
-  echo "❌ ANTI-FANTOMĂ PICĂ: local v='$V', așteptat '$SHA' — vezi 'docker logs kelionai-app'."
-  exit 1
+  for legacy in kelionai-app omniroute; do
+    docker inspect "$legacy" >/dev/null 2>&1 && docker stop --time 30 "$legacy" >/dev/null || true
+  done
 fi
+
+rm -f -- "$PROOF_FILE"
+record=$(mktemp "$RUNTIME_ROOT/release.XXXXXX")
+jq -n --arg commit "$COMMIT_SHA" --arg slot "$inactive_slot" --arg mode "$RELEASE_MODE" \
+  --argjson ciRunId "$KELION_CI_RUN_ID" --argjson buildRunId "$KELION_BUILD_RUN_ID" \
+  '{schema:1,commit:$commit,slot:$slot,mode:$mode,ciRunId:$ciRunId,buildRunId:$buildRunId,completedAt:(now|todateiso8601)}' > "$record"
+chmod 0600 "$record"
+mv "$record" "$RUNTIME_ROOT/last-release.json"
+switched=0
+trap - EXIT
+printf 'release_ok commit=%s slot=%s\n' "$COMMIT_SHA" "$inactive_slot"

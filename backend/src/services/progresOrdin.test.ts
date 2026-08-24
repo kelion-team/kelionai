@@ -16,7 +16,7 @@ describe('procentul ordinului vine din etapele raportate, nu din aer', () => {
       procentDinProgres('running', ''),
       procentDinProgres('running', 'ordin #32 (încercarea 1)'),
       procentDinProgres('running', 'atelier clonat pe c8aa7c5'),
-      procentDinProgres('running', 'pas 1/24: grep chirp'),
+      procentDinProgres('running', 'pas 1/24: verificare'),
       procentDinProgres('running', 'pas 12/24: edit backend/src/services/tts.ts'),
       procentDinProgres('running', 'pas 24/24: finish'),
       procentDinProgres('running', 'modificări: 4 files changed'),

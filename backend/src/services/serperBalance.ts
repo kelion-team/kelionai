@@ -1,3 +1,5 @@
+import { config } from '../config.js'
+
 // ── THE REAL SERPER CREDIT, READ FROM THE PROVIDER ──────────────────────────
 //
 // The standing order: "show REAL, stop fabricating". Serper powers the web
@@ -48,7 +50,7 @@ export async function getSerperBalance(force = false): Promise<SerperBalance> {
   if (!key) return { ...base, error: 'not_configured' }
   if (!force && accountCache && Date.now() - accountCache.at < ACCOUNT_TTL_MS) return accountCache.val
   try {
-    const r = await fetch('https://google.serper.dev/account', {
+    const r = await fetch(`${config.endpoints.serperApiBase}/account`, {
       headers: { 'X-API-KEY': key },
       signal: AbortSignal.timeout(12_000),
     })

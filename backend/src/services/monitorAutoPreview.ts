@@ -11,11 +11,6 @@
 // screen_url existed, and no {monitor} frame could ever be written. Two
 // deterministic helpers fix both ends of that without any extra model call:
 //
-//   needsToolForAnswer(text) — skips the tool-less race for questions that
-//     obviously need live data (weather, maps, video, search/news/prices, a
-//     pasted URL, the time elsewhere). They take the sequential path WITH
-//     tools, so the tool's screen_url reaches the monitor as designed.
-//
 //   autoPreviewFrame(text) — the end-of-turn safety net: when the brain did
 //     NOT call show_document/show_on_screen but its final answer still carries
 //     an obviously displayable payload (a URL, an image link, map coordinates,
@@ -34,51 +29,6 @@ export interface MonitorPreview {
     title: string
     items: { primary: string; secondary?: string; meta?: string }[]
   }
-}
-
-// ── THE QUESTIONS THAT NEED A TOOL ──────────────────────────────────────────
-// The light-turn race is for chit-chat only ("salut", "ce faci"). A question
-// whose honest answer is LIVE DATA must never race tool-less: it would be
-// answered from stale model memory AND the monitor would stay dark. Kept
-// deliberately tight — a false positive only costs the race's speed (the
-// model still decides whether to call a tool); a false negative is Adrian's
-// empty monitor.
-const TOOL_QUESTION_RE = new RegExp(
-  [
-    // weather — RO + EN ("Câte grade sunt afară?", "ce vreme e", "weather")
-    '\\bvrem[eiu]\\w*|prognoz\\w*|temperatur\\w*|grade\\b|plou[ăa]|[îi]nghe[țt]\\w*|ninge\\w*|senin\\b',
-    'weather|forecast|temperature\\w*|raining|sunny|snowing',
-    // maps / directions / "where am I" / "near me"
-    'hart[ăa]\\w*|drumul?\\b|rut[ăa]\\w*|naviga\\w*|unde\\s+(?:sunt|m[ăa]\\s+aflu|e\\s+)',
-    '\\bmap\\b|directions|\\broute\\b|near\\s+me|where\\s+am\\s+i',
-    // video / music — YouTube surface
-    'youtube|youtu\\.be|\\bvideo\\w*|clip(?:ul)?\\b|muzic[ăa]|melodie|pies[ăa]\\w*',
-    '\\bsong\\b|\\bmusic\\b|\\bwatch\\b',
-    // search / news / prices / exchange — live web data
-    'caut[ăa]?(?:\\s+(?:pe\\s+)?(?:net|google|web))?\\b|[șs]tiri\\w*|nout[ăa][țt]\\w*',
-    '\\bsearch\\b|\\bnews\\b|latest\\s+\\w+|pre[țt]\\w*|curs(?:ul)?\\s+(?:valutar|valutei)',
-    'cotat\\w*|burs[ăa]\\w*|bitcoin|cripto\\w*|\\bprice\\w*|\\bstock\\w*|crypto\\w*',
-    // the time elsewhere ("cât e ceasul în Tokyo")
-    'c[âa]t\\s+e\\s+ceasul|or(?:a|ul)\\s+(?:actual|local)|fus\\s+orar',
-    'what\\s+time\\s+is\\s+it|time\\s+in\\s+\\w+|time\\s*zone',
-    // IMAGE GENERATION (agenții de debug, 3 aug: „deseneaza/genereaza o imagine"
-    // nu trecea de poarta asta → cursa fără unelte → generate_image nu era
-    // chemat NICIODATĂ pe calea publică — exact „zice că n-a chemat unealta").
-    'desen[ea]\\w*|genereaz[ăa]\\s+(?:o\\s+)?(?:imagin|poz|pictur)\\w*|creeaz[ăa]\\s+(?:o\\s+)?(?:imagin|poz|logo|sigl)\\w*',
-    '(?:o\\s+)?imagine\\s+cu\\b|f[ăa]\\s*-?\\s*(?:mi|ne)?\\s+(?:o\\s+)?(?:poz[ăa]|imagine|desen|logo|sigl[ăa])',
-    '\\bdraw\\b|generate\\s+(?:an?\\s+)?(?:image|picture|photo|logo)|create\\s+(?:an?\\s+)?(?:image|picture|logo)|make\\s+(?:me\\s+)?(?:an?\\s+)?(?:image|picture|logo)',
-  ].join('|'),
-  'i',
-)
-
-/** True when the question obviously needs live data/tools — the light-turn
- *  race (which offers NO tools) must skip these and take the tool path. */
-export function needsToolForAnswer(text: string): boolean {
-  const t = String(text ?? '')
-  if (!t.trim()) return false
-  // A pasted URL is a request to open/read/show something — always a tool turn.
-  if (/https?:\/\//i.test(t)) return true
-  return TOOL_QUESTION_RE.test(t)
 }
 
 // ── THE END-OF-TURN AUTO-PREVIEW ────────────────────────────────────────────

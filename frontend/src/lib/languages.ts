@@ -1,4 +1,4 @@
-// Languages Kelion can hear (Web Speech recognition) and speak (Chirp 3 HD).
+// Limbile acceptate de interfața de auz și voce.
 // BCP-47 tags. The label is the language's own endonym so it's recognisable.
 // NB: language DETECTION happens on the server now (services/lang.ts there);
 // the client only picks a sensible starting language from the browser locale.

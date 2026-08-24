@@ -1,42 +1,64 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { citestePortofel, listTransactionsForUser, creeazaCodPlata, codPlataInAsteptare, getAutoRecharge, setAutoRecharge, type AutoRechargePrefs } from '../db.js'
+import {
+  citestePortofel,
+  citesteCrediteFolosite,
+  listTransactionsForUser,
+  getLowCreditReminder,
+  setLowCreditReminder,
+  type LowCreditReminderPrefs,
+} from '../db.js'
+import { minorToMajor, splitTopupMinor } from '../services/billingPolicy.js'
+import { esteAdminKelion } from '../services/adminIdentity.js'
+import {
+  handleRevolutWebhook,
+  REVOLUT_WEBHOOK_MAX_BYTES,
+  startRevolutCheckout,
+} from '../services/revolutMerchant.js'
 
-// AUTO TOP-UP validation — pure, so the rule is testable without a database.
-// The checkbox means: "when my credit drops below the threshold, PREPARE my
-// top-up automatically" (the Revolut link cannot pull money by itself — the
-// user always confirms the actual payment with one tap). The amount obeys the
-// same rule as any top-up: the owner's settings from config.billing
-// (multiple of topupStep, between topupMin and topupMax).
+// Low-credit reminder validation — pure, so the rule is testable without a
+// database. It only controls a payment prompt; it never creates an order or
+// pulls money. Suggested amounts obey the same server-side checkout rails.
 // The threshold's 100,000-credit cap is a SANITY BOUND against absurd input,
 // not a money value ever shown to anyone.
-export function validateAutoRecharge(input: unknown): AutoRechargePrefs | null {
-  const b = input as { enabled?: unknown; threshold?: unknown; topupAmount?: unknown } | null
+export function validateLowCreditReminder(input: unknown): LowCreditReminderPrefs | null {
+  const b = input as { enabled?: unknown; thresholdMinor?: unknown; suggestedTopupMinor?: unknown } | null
   if (!b || typeof b !== 'object') return null
-  const threshold = Math.floor(Number(b.threshold))
-  const topupAmount = Math.floor(Number(b.topupAmount))
-  const { topupMin, topupMax, topupStep } = config.billing
-  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100_000) return null
-  if (!Number.isFinite(topupAmount) || topupAmount < topupMin || topupAmount > topupMax || topupAmount % topupStep !== 0) return null
-  return { enabled: !!b.enabled, threshold, topupAmount }
+  const thresholdMinor = Number(b.thresholdMinor)
+  const suggestedTopupMinor = Number(b.suggestedTopupMinor)
+  const { topupMinMinor, topupMaxMinor, topupStepMinor } = config.billing
+  if (!Number.isSafeInteger(thresholdMinor) || thresholdMinor < 0 || thresholdMinor > topupMaxMinor) return null
+  if (
+    !Number.isSafeInteger(suggestedTopupMinor) ||
+    suggestedTopupMinor < topupMinMinor ||
+    suggestedTopupMinor > topupMaxMinor ||
+    suggestedTopupMinor % topupStepMinor !== 0
+  ) return null
+  return { enabled: b.enabled === true, thresholdMinor, suggestedTopupMinor }
 }
 
-// THE TOP-UP RULE (Adrian, 24 Jul): first top-up = £20 minimum (brain
-// activation), then any multiple of £5. The numbers are the owner's settings
-// (config.billing), validated on the server, not just in the UI. Exported so
-// the rule is testable without booting a server.
-export async function validateTopUp(citestePortofelFn: typeof citestePortofel, email: string, amount: number): Promise<string | null> {
-  const { firstTopupMin, topupMin, topupStep } = config.billing
-  if (!Number.isFinite(amount) || amount <= 0) return 'bad_amount'
-  if (amount % topupStep !== 0) return 'must_be_multiple_of_5'
-  const portofel = await citestePortofelFn(email)
-  // O ALIMENTARE NU SE VALIDEAZĂ PE UN PORTOFEL NECITIT: `topupRef` picat pe 0
-  // ar fi zis „prima alimentare, minim £20" unui om care alimentase deja.
-  if (!portofel.citit) return 'sold_necitit'
-  const { topupRef } = portofel
-  const min = topupRef <= 0 ? firstTopupMin : topupMin
-  if (amount < min) return topupRef <= 0 ? 'first_topup_min_20' : 'min_5'
+type WalletReader = typeof citestePortofel
+
+/** Validates the exact integer amount against the same wallet state and
+ * commercial rails that the UI displays. A failed wallet read never becomes
+ * "first top-up" by assumption. */
+export async function validateTopUpMinor(
+  readWallet: WalletReader,
+  email: string,
+  amountMinor: number,
+): Promise<string | null> {
+  const split = splitTopupMinor(amountMinor)
+  if (
+    !Number.isSafeInteger(amountMinor) || !split ||
+    amountMinor < config.billing.topupMinMinor || amountMinor > config.billing.topupMaxMinor
+  ) return 'bad_amount'
+  if (amountMinor % config.billing.topupStepMinor !== 0) return 'bad_topup_increment'
+  const wallet = await readWallet(email)
+  if (!wallet.citit) return 'sold_necitit'
+  if (wallet.topupRefMinor <= 0 && amountMinor < config.billing.firstTopupMinMinor) {
+    return 'first_topup_minimum'
+  }
   return null
 }
 
@@ -49,19 +71,25 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/tarife', async (_req, reply) => {
     const { meniulDeTarife, lirePentru } = await import('../services/tarife.js')
     return reply.send({
-      credit: { lire: config.billing.creditValue, moneda: config.billing.currency },
+      credit: {
+        minor: config.billing.creditMinor,
+        lire: minorToMajor(config.billing.creditMinor),
+        moneda: config.billing.currency,
+        minorUnit: config.billing.minorUnit,
+      },
       // LEGEA ANTI-HARDCODARE (16 aug): pragurile alimentării pleacă DE AICI —
       // frontendul nu mai are voie să scrie de mână „£20"/„£5"; cifra afișată
       // e cifra care chiar validează (config.billing, reglabilă din env).
-      userShare: config.billing.userShare,
-      // Credite per liră = userShare / creditValue (0.75 / 0.1 = 7.5). Sursa
-      // VIE: dacă ownerul schimbă USER_SHARE sau CREDIT_VALUE în env, cifra de
-      // pe ecran se schimbă singură — fără hardcod 7.5 în frontend.
-      creditePeLira: config.billing.userShare / config.billing.creditValue,
+      policyVersion: config.billing.policyVersion,
+      userShareBps: config.billing.userShareBps,
+      marginShareBps: config.billing.marginShareBps,
+      // Derived from the immutable, versioned receipt split and configured
+      // credit unit; the frontend never duplicates this commercial formula.
+      creditePeLira: (config.billing.userShareBps / 10_000) * (10 ** config.billing.minorUnit) / config.billing.creditMinor,
       praguri: {
-        primaAlimentare: config.billing.firstTopupMin,
-        minim: config.billing.topupMin,
-        pas: config.billing.topupStep,
+        primaAlimentare: minorToMajor(config.billing.firstTopupMinMinor),
+        minim: minorToMajor(config.billing.topupMinMinor),
+        pas: minorToMajor(config.billing.topupStepMinor),
       },
       tarife: meniulDeTarife().map((t) => ({
         cheie: t.cheie,
@@ -76,115 +104,147 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/billing/balance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const scutit = esteAdminKelion(user.email)
+    if (scutit) {
+      return reply.send({
+        credits: 0,
+        percent: 100,
+        currency: config.billing.currency,
+        firstTopUp: false,
+        lowCreditPaymentPrompt: null,
+        scutit: true,
+        debitMinor: 0,
+        creditsUsed: 0,
+        minorUnit: config.billing.minorUnit,
+        policyVersion: config.billing.policyVersion,
+      })
+    }
     const portofel = await citestePortofel(user.email)
     // NU POT CITI ≠ AI 0 CREDITE (măsurat 8 aug). Câmpul `credits` LIPSEȘTE
     // când citirea a picat; clientul verifică deja `typeof j.credits === 
     // 'number'`, deci nu mai aprinde „fără credit" pe o eroare de-a noastră.
     if (!portofel.citit)
       return reply.code(503).send({ error: 'sold_necitit', motiv: portofel.motiv, currency: config.billing.currency })
-    const { balance, topupRef } = portofel
-    const credits = Math.floor(balance / config.billing.creditValue)
-    const percent = topupRef > 0 ? Math.max(0, Math.min(100, (balance / topupRef) * 100)) : 100
+    const { balanceMinor, topupRefMinor } = portofel
+    if (
+      !Number.isSafeInteger(balanceMinor) || balanceMinor < 0 ||
+      !Number.isSafeInteger(topupRefMinor) || topupRefMinor < 0
+    ) return reply.code(503).send({ error: 'ledger_invalid', currency: config.billing.currency })
+    const credits = Math.floor(balanceMinor / config.billing.creditMinor)
+    const percent = topupRefMinor > 0 ? Math.max(0, Math.min(100, (balanceMinor / topupRefMinor) * 100)) : 100
     // firstTopUp = the user has never topped up (topup_ref is 0). The first
     // top-up is bigger (brain activation — config.billing.firstTopupMin);
     // then any multiple of config.billing.topupStep.
-    const firstTopUp = topupRef <= 0
-    // AUTO TOP-UP, DUE (Adrian, Aug 1). When the checkbox is on and the credit
-    // dropped under the user's threshold, we PREPARE the payment right here:
-    // the unique code exists (reused while pending, exactly like at checkout)
-    // and the reply carries the link — the client shows a one-tap button. The
-    // money itself moves only with the user's tap: the Revolut link cannot
-    // pull from his account by itself, and we never pretend it can. The first
-    // top-up stays manual (firstTopupMin — it activates the brain).
-    let autoTopUp: { code: string; amount: number; currency: string; url: string } | null = null
-    if (!firstTopUp && config.revolut.payLink && user.role !== 'admin') {
-      const ar = await getAutoRecharge(user.email)
-      if (ar.enabled && credits < ar.threshold) {
-        const existent = await codPlataInAsteptare(user.email)
-        const cod = existent?.amount === ar.topupAmount ? existent : await creeazaCodPlata(user.email, ar.topupAmount, config.billing.currency)
-        if (cod) autoTopUp = { code: cod.code, amount: cod.amount, currency: cod.currency, url: config.revolut.payLink }
-      }
-    }
-    // Owner/admin e scutit de taxare (PR #648): soldul negativ e ISTORIC, nu paywall.
-    // Panoul și wallet-ul trebuie să vadă steagul — altfel cifra sperie fără context.
-    const scutit =
-      user.role === 'admin' || user.email.trim().toLowerCase() === config.adminEmail
+    const firstTopUp = topupRefMinor <= 0
+    // The reminder only offers a checkout action. It never creates an order or
+    // moves money during a balance read.
+    const reminder = await getLowCreditReminder(user.email)
+    const lowCreditPaymentPrompt = reminder?.enabled && balanceMinor <= reminder.thresholdMinor
+      ? {
+          thresholdMinor: reminder.thresholdMinor,
+          suggestedTopupMinor: reminder.suggestedTopupMinor,
+          currency: config.billing.currency,
+          minorUnit: config.billing.minorUnit,
+        }
+      : null
+    const usage = await citesteCrediteFolosite(user.email)
+    if (!usage.citit) return reply.code(503).send({ error: 'ledger_unavailable' })
     return reply.send({
       credits,
-      percent: scutit ? 100 : percent,
+      percent,
       currency: config.billing.currency,
       firstTopUp,
-      autoTopUp,
-      scutit,
+      lowCreditPaymentPrompt,
+      scutit: false,
+      debitMinor: config.billing.chatTurnMinor,
+      creditsUsed: usage.valoare,
+      minorUnit: config.billing.minorUnit,
+      policyVersion: config.billing.policyVersion,
     })
   })
 
-  // THE AUTO TOP-UP CHECKBOX (Adrian, Aug 1: "auto-pay selectable with a
-  // checkbox when the user pays"). The route the Settings page had been
-  // calling without it existing — the checkbox used to save into the void.
-  app.get('/api/billing/autorecharge', async (req, reply) => {
+  // Reminder preferences never authorise or initiate a payment.
+  app.get('/api/billing/low-credit-reminder', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    return reply.send(await getAutoRecharge(user.email))
+    if (esteAdminKelion(user.email)) {
+      return reply.send({
+        enabled: false,
+        thresholdMinor: 0,
+        suggestedTopupMinor: 0,
+        adminExempt: true,
+        currency: config.billing.currency,
+        minorUnit: config.billing.minorUnit,
+      })
+    }
+    const pref = await getLowCreditReminder(user.email)
+    return reply.send({ ...pref, currency: config.billing.currency, minorUnit: config.billing.minorUnit })
   })
 
-  app.put<{ Body: { enabled?: boolean; threshold?: number; topupAmount?: number } }>(
-    '/api/billing/autorecharge',
+  app.put<{ Body: { enabled?: boolean; thresholdMinor?: number; suggestedTopupMinor?: number } }>(
+    '/api/billing/low-credit-reminder',
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user) return reply.code(401).send({ error: 'unauthorized' })
-      const prefs = validateAutoRecharge(req.body)
-      if (!prefs) return reply.code(400).send({ error: 'bad_autorecharge' })
-      await setAutoRecharge(user.email, prefs)
-      return reply.send(prefs)
+      if (esteAdminKelion(user.email)) return reply.code(409).send({ error: 'admin_exempt' })
+      const prefs = validateLowCreditReminder(req.body)
+      if (!prefs) return reply.code(400).send({ error: 'bad_low_credit_reminder' })
+      if (!await setLowCreditReminder(user.email, prefs)) return reply.code(503).send({ error: 'save_unavailable' })
+      return reply.send({ ...prefs, currency: config.billing.currency, minorUnit: config.billing.minorUnit })
     },
   )
 
-  // The top-up rule moved next to validateAutoRecharge (exported, top of
-  // file): one place for the money rules, both testable without a server.
-  const checkTopUp = (email: string, amount: number): Promise<string | null> =>
-    validateTopUp(citestePortofel, email, amount)
-
-  // ── PAYMENT GOES THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
-  // completely and Pro comes in", "a link to replace everywhere") ───────────
-  //
-  // This route stays INTACT in shape (`{ url }`), because EVERY place that
-  // takes payment goes through it: the wallet pill, the /credits page and the
-  // chat paywall. Changing the URL's source here changes all three at once —
-  // "everywhere" with a single change, not three places to remember.
-  //
-  // ── A UNIQUE CODE ON EVERY PAYMENT (Adrian, 30 Jul) ───────────────────────
-  // "every payment must come with a unique code" · "user X buys credit worth
-  // this much money, the transaction has a unique generated code assigned, at
-  // payment it automatically maps to which code/client".
-  //
-  // Revolut Pro has no webhook, so nobody notifies us the payment happened.
-  // The code is the bridge: it leaves with the person to the payment, comes
-  // back in the transaction reference, and the transaction reader matches it
-  // back to his account. Without the code, manual management would remain —
-  // exactly what he refused, rightfully.
-  //
-  // Why a CODE and not an amount with unique pennies (my first idea): the
-  // amount can be fixed by the link and can be changed by fees before it
-  // lands. The code passes untouched through both.
-  app.post<{ Body: { amount?: number } }>('/api/billing/checkout', async (req, reply) => {
+  // One customer entry point, backed by a unique Hosted Checkout order. The
+  // browser redirect never grants credit; only the signed webhook plus an
+  // authoritative order retrieval can settle the wallet.
+  app.post<{ Body: { amountMinor?: number; idempotencyKey?: string } }>(
+    '/api/billing/checkout',
+    { bodyLimit: 2_048, config: { rateLimit: { max: 8, timeWindow: '1 minute' } } },
+    async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    const link = config.revolut.payLink
-    // Without a configured link we send the user NOWHERE and we don't stay
-    // silent: the button says what's missing (rule no. 1 — a failure is not
-    // displayed as success).
-    if (!link) return reply.code(503).send({ error: 'revolut_link_lipsa' })
-    const amount = Number(req.body?.amount ?? 0)
-    const bad = await checkTopUp(user.email, amount)
-    if (bad) return reply.code(400).send({ error: bad })
-    // We REUSE an unused code (2 hours) instead of giving a new one on every
-    // click: otherwise the person clicking three times would have three valid
-    // codes and wouldn't know which to write.
-    const existent = await codPlataInAsteptare(user.email)
-    const cod = existent?.amount === amount ? existent : await creeazaCodPlata(user.email, amount, config.billing.currency)
-    if (!cod) return reply.code(503).send({ error: 'cod_indisponibil' })
-    return reply.send({ url: link, code: cod.code, amount: cod.amount, currency: cod.currency })
+    if (esteAdminKelion(user.email)) {
+      return reply.send({ status: 'admin_exempt', debitMinor: 0, currency: config.billing.currency, minorUnit: config.billing.minorUnit })
+    }
+    const amountMinor = Number(req.body?.amountMinor)
+    const idempotencyKey = String(req.body?.idempotencyKey ?? '').trim()
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+      return reply.code(400).send({ error: 'idempotency_key_invalid' })
+    }
+    const validationError = await validateTopUpMinor(citestePortofel, user.email, amountMinor)
+    if (validationError) {
+      const status = validationError === 'sold_necitit' ? 503 : 400
+      return reply.code(status).send({ error: validationError })
+    }
+    const result = await startRevolutCheckout(user.email, amountMinor, idempotencyKey)
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error })
+    return reply.code(result.status === 'paid' ? 200 : 201).send(result)
+  })
+
+  // Raw bytes are scoped to this one route so JSON parsing elsewhere remains
+  // unchanged. Signature verification happens before JSON decoding.
+  await app.register(async (webhookApp) => {
+    webhookApp.removeContentTypeParser('application/json')
+    webhookApp.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_req, body, done) => {
+      done(null, body)
+    })
+    webhookApp.post<{ Body: Buffer }>(
+      '/api/billing/revolut/webhook',
+      {
+        bodyLimit: REVOLUT_WEBHOOK_MAX_BYTES,
+        config: { rateLimit: { max: 120, timeWindow: '1 minute' } },
+      },
+      async (req, reply) => {
+        if (!Buffer.isBuffer(req.body)) return reply.code(400).send({ error: 'webhook_body_invalid' })
+        const result = await handleRevolutWebhook(
+          req.body,
+          req.headers['revolut-request-timestamp'],
+          req.headers['revolut-signature'],
+        )
+        if (result.statusCode === 204) return reply.code(204).send()
+        return reply.code(result.statusCode).send({ error: result.error ?? 'webhook_rejected' })
+      },
+    )
   })
 
   // HERE USED TO LIVE `/api/billing/payment-intent` — the second payment path,
@@ -198,6 +258,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     const history = await listTransactionsForUser(user.email, 50)
-    return reply.send({ history })
+    if (!history.citit) return reply.code(503).send({ error: 'ledger_unavailable' })
+    return reply.send({ history: history.valoare, minorUnit: config.billing.minorUnit })
   })
 }

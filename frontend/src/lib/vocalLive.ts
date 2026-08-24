@@ -7,8 +7,9 @@ import { inscrieVoceaLuiKelion } from './vociKelion'
 import { deblocheazaAudioLaGest } from './audioGraph'
 import { ensureAudioContextRunning, setupAudioContextAutoResume, startVoiceHeartbeat } from './voiceHeartbeat'
 import { faraBluetoothSigur } from './rutaAudio'
+import { apiFetch, openApiWebSocket } from './transport'
 
-// ── VOCEA LIVE FULL-DUPLEX — PARTEA DIN BROWSER (7 aug 2026) ─────────────────
+// ── OPENAI REALTIME FULL-DUPLEX — CLIENTUL DIN BROWSER ───────────────────────
 //
 // Ce lipsea: motorul (`backend/src/services/vocalLive.ts`), ruta WS
 // (`/api/vocal-live`) și uneltele de admin erau scrise și înregistrate din 4 aug,
@@ -16,11 +17,8 @@ import { faraBluetoothSigur } from './rutaAudio'
 // niciodată socketul. Șoseaua exista, nu circula nimeni pe ea. Ăsta e capătul
 // care lipsea.
 //
-// DE CE MERITĂ (măsurat de owner pe VPS-ul lui, sesiune bidi reală):
-//   gemini-3.1-flash-live-preview   90 ms handshake · 491 ms primul răspuns · unelte DA · 66 KB audio
-// Adică modelul AUDE, GÂNDEȘTE, VORBEȘTE și CHEAMĂ UNELTE într-o singură sesiune,
-// cu primul cuvânt sub jumătate de secundă. Lanțul vechi face trei drumuri
-// separate (ureche → creier → gură).
+// Backend-ul este singurul care cunoaște modelul și credentialele OpenAI. Browserul
+// păstrează doar protocolul media/control și nu expune tokenuri sau selectoare de provider.
 //
 // CONTRACTUL cu serverul (definit în `backend/src/routes/vocalLive.ts`):
 //   client → server:  cadre BINARE = PCM16 mono 16kHz de la microfon
@@ -34,8 +32,62 @@ import { faraBluetoothSigur } from './rutaAudio'
 
 const RATA_INTRARE = 16000 // ce trimitem (PCM16 mono)
 const RATA_IESIRE = 24000 // ce primim de la model (PCM 24kHz)
+const MAX_WS_BUFFERED_BYTES = 512 * 1024
+const MAX_INPUT_IMAGE_CHARS = 2_000_000
+
+/** Acceptă cel mult un instantaneu explicit, pe care backendul îl mapează la `input_image`. */
+export function instantaneeInputImage(values: string[] | undefined): string[] {
+  const image = values?.find((value) =>
+    /^data:image\/(?:jpeg|png|webp);base64,[a-zA-Z0-9+/=]+$/.test(value) && value.length <= MAX_INPUT_IMAGE_CHARS)
+  return image ? [image] : []
+}
+
+export function poateTrimiteLive(bufferedAmount: number): boolean {
+  return Number.isFinite(bufferedAmount) && bufferedAmount <= MAX_WS_BUFFERED_BYTES
+}
+
+export function golesteSurseAudio<T extends { stop(): void }>(sources: T[]): T[] {
+  for (const source of sources) {
+    try {
+      source.stop()
+    } catch {
+      // O sursă deja terminată nu împiedică golirea restului cozii.
+    }
+  }
+  return []
+}
+
+export function asteaptaDeschidereaSocket(
+  ws: Pick<WebSocket, 'onopen'>,
+  onOpen: () => void,
+  signal: AbortSignal,
+  timeoutMs = 10_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const cleanup = (): void => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+    }
+    const finish = (action: () => void): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      action()
+    }
+    const onAbort = (): void => finish(() => reject(new DOMException('socket opening cancelled', 'AbortError')))
+    const timer = setTimeout(() => finish(() => reject(new Error('timeout la deschiderea sesiunii'))), timeoutMs)
+    signal.addEventListener('abort', onAbort, { once: true })
+    ws.onopen = () => finish(() => {
+      onOpen()
+      resolve()
+    })
+  })
+}
 
 export interface VocalLiveOpts {
+  /** Starea transportului/conversației, pentru indicatorul persistent din UI. */
+  onState?(state: VocalLiveState): void
   /** Sesiunea e deschisă și modelul e gata să asculte. */
   onGata?(): void
   /** Ce AUDE (subtitrarea userului), în flux. */
@@ -60,15 +112,10 @@ export interface VocalLiveOpts {
    *  (±metri, raportată de senzor) — pleacă și ea, ca serverul să spună
    *  modelului cât de bun e locul. null = nu avem (lipsa se declară). */
   coordonate?(): { lat: number; lon: number; acc?: number } | null
-  /** Cadrele camerei, LA CEREREA serverului (8 aug: „hai și cu vedere") —
-   *  când ușa cere_creierului se deschide, tura escaladată pleacă cu ochii.
-   *  Gol/absent = fără cameră; tura pleacă fără imagini, nu se blochează. */
-  cadre?(): string[]
-  /** VEDEREA CONTINUĂ (8 aug: „trebuie să poată folosi camera"): un cadru
-   *  PROASPĂT (data-URL JPEG) sau null când camera e oprită. Cât sesiunea e
-   *  vie, un cadru pleacă la fiecare ~2,5 s direct în sesiunea Live — modelul
-   *  vede în timp ce vorbește. null = nu se trimite nimic (nu cadre stătute). */
-  cadruLive?(): string | null
+  /** Un instantaneu al camerei numai la cererea serverului și numai după
+   *  consimțământul local. Backendul îl trimite OpenAI ca `input_image`;
+   *  aceasta nu este o transmisie video continuă. */
+  instantaneeLaCerere?(): string[] | Promise<string[]>
   /** CE E PE MONITOR (10 aug, ownerul: „nu are acces la ce se afișează pe
    *  monitor" — și pe VOCE): conținutul tabului activ, ca la chatul scris.
    *  Serverul îl ține și-l retransmite prin ușa creierului la get_monitor.
@@ -95,8 +142,31 @@ export interface VocalLiveOpts {
   preampInitial?: number
 }
 
+export type VocalLiveState =
+  | 'connecting'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'interrupted'
+  | 'error'
+
+export function vocalLiveStateForServerEvent(
+  eventType: string | undefined,
+  final = false,
+): VocalLiveState | null {
+  if (eventType === 'gata' || eventType === 'tura_gata') return 'listening'
+  if (eventType === 'user') return final ? 'thinking' : 'listening'
+  if (eventType === 'kelion' || eventType === 'audio') return 'speaking'
+  if (eventType === 'intrerupt') return 'interrupted'
+  if (eventType === 'eroare') return 'error'
+  return null
+}
+
 export interface VocalLiveHandle {
   inchide(): void
+  /** Fluxul de intrare deja permis, numai pentru tap-uri locale pasive
+   * (nivel ambiental/dans). Apelantul nu îi oprește track-urile. */
+  fluxMicrofon(): MediaStream | null
   /** Oprește imediat redarea WebAudio a turei curente, fără a închide urechea live. */
   taieRedarea(): void
   /** Oprește redarea locală și cere serverului să suprime restul turei curente. */
@@ -114,27 +184,18 @@ export interface VocalLiveHandle {
    *  se redă vocea unei ture SCRISE prin audioIO — poarta half-duplex ține atunci
    *  urechea live mută (anti-ecou), ca modelul să nu se audă pe el însuși. */
   setRedareExterna(activ: boolean): void
-  /** JARVIS pasul 1 + §10 (tastatura opțională): trimite un rând SCRIS în sesiunea
-   *  Live — modelul îi răspunde cu VOCEA lui (un singur motor; fără Chirp, fără
-   *  coliziune). Întoarce true dacă rândul chiar a plecat (socket deschis). */
-  trimiteText(text: string): boolean
 }
 
 /** Serverul are cheia și modelul Live? Se întreabă ÎNAINTE de a deschide socketul,
  *  ca să nu pornim o cale vocală spre gol. */
 export async function vocalLiveDisponibila(): Promise<{ disponibil: boolean; model: string; voce: string } | null> {
   try {
-    const r = await fetch('/api/vocal-live/capability', { cache: 'no-store' })
+    const r = await apiFetch('/api/vocal-live/capability', { cache: 'no-store' })
     if (!r.ok) return null
     return (await r.json()) as { disponibil: boolean; model: string; voce: string }
   } catch {
     return null
   }
-}
-
-function urlWs(): string {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/api/vocal-live`
 }
 
 // PREAMP microfon (owner, 16 aug: „reglaj de la minim la maxim"): factor de
@@ -171,30 +232,13 @@ function clampPreamp(v: unknown): number {
 // noapte, 9 aug): gărzile apelantului sunt check-then-act peste await-uri de
 // secunde — cronometrul de reluare și apăsarea pe microfon puteau deschide
 // DOUĂ sesiuni, prima rămânând scursă cu microfonul și WS-ul vii (și factura
-// curgând). Modelul e exact cel al căii vechi (realtimeVoice.ts: activeVoice).
+// curgând). Modelul este ales exclusiv de backend din configurația OpenAI.
 let sesiuneActiva: { inchide: () => void } | null = null
 
-// ── WARM START (22 aug 2026, owner: „latență sub 1s") ───────────────────────
-// Pre-conectează WebSocket-ul în fundal când utilizatorul e pe pagina de voce,
-// ÎNAINTE să apese butonul. Când apasă, conexiunea e deja caldă → primul
-// cuvânt vine cu ~300ms mai repede (handshake-ul e deja făcut).
-let wsCalda: WebSocket | null = null
-let warmStartTimer: ReturnType<typeof setTimeout> | null = null
-void warmStartTimer // rezervat pentru warm-start viitor
-
-/** Dacă există o conexiune caldă, o folosește; altfel deschide una nouă. */
-function wsCaldSauNou(): WebSocket {
-  if (wsCalda?.readyState === WebSocket.OPEN) {
-    const ws = wsCalda
-    wsCalda = null // o predăm apelantului
-    return ws
-  }
-  wsCalda = null
-  return new WebSocket(urlWs())
-}
-
 export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveHandle | null> {
+  opts.onState?.('connecting')
   if (!navigator.mediaDevices?.getUserMedia) {
+    opts.onState?.('error')
     opts.onEroare('browserul nu dă acces la microfon')
     return null
   }
@@ -205,7 +249,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
 
   let ws: WebSocket
   try {
-    ws = wsCaldSauNou()
+    ws = await openApiWebSocket('/api/vocal-live', 'vocal-live')
   } catch (e) {
     opts.onEroare(`nu pot deschide sesiunea vocală: ${String(e).slice(0, 60)}`)
     return null
@@ -218,6 +262,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let proc: ScriptProcessorNode | null = null
   let cules: CulesPcm | null = null
   let resumeTimer: ReturnType<typeof setInterval> | null = null
+  const openController = new AbortController()
   let inchis = false
   // O SINGURĂ eroare urcă per deschidere: la un server picat, `onerror` și
   // `onclose` trag amândouă — fără frâna asta, ChatPanel ar porni DOUĂ lanțuri
@@ -226,6 +271,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   const urcaEroarea = (m: string): void => {
     if (eroareUrcata) return
     eroareUrcata = true
+    opts.onState?.('error')
     // Simptomul ajunge ȘI la Kelion, nu doar ca toast la om: console.error e
     // canalul prins de errorReport → /api/client-errors → contextul creierului.
     // Fără asta, Kelion NU știa că sesiunea vocală a picat și răspundea „încearcă
@@ -278,6 +324,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     curataAutoResumeOut?.()
     curataAutoResumeIn?.()
     if (resumeTimer) clearInterval(resumeTimer)
+    openController.abort()
     if (ceasCoords) clearInterval(ceasCoords)
     opusClient?.inchide() // eliberează encoderul/decoderul WebCodecs
     opusClient = null
@@ -316,14 +363,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   /** Barge-in: userul a vorbit peste Kelion → oprim redarea INSTANT și golim coada.
    *  Fără asta, Kelion ar continua să vorbească peste om încă câteva secunde. */
   const taieRedarea = (): void => {
-    for (const s of surseActive) {
-      try {
-        s.stop()
-      } catch {
-        /* deja oprită */
-      }
-    }
-    surseActive = []
+    surseActive = golesteSurseAudio(surseActive)
     cursorRedare = 0
     alimenteazaNivelVoce(0)
     opts.onVorbeste?.(false)
@@ -391,9 +431,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     surseActive.push(src)
     pornesteGura()
     opts.onVorbeste?.(true)
+    opts.onState?.('speaking')
     src.onended = () => {
       surseActive = surseActive.filter((s) => s !== src)
-      if (!surseActive.length) opts.onVorbeste?.(false)
+      if (!surseActive.length) {
+        opts.onVorbeste?.(false)
+        opts.onState?.('listening')
+      }
     }
   }
 
@@ -449,6 +493,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     } catch {
       return
     }
+    const nextState = vocalLiveStateForServerEvent(m.type, !!m.final)
+    if (nextState) opts.onState?.(nextState)
     switch (m.type) {
       case 'gata':
         // AUDIOCONTEXT gata ÎNAINTE să spunem „Kelion te așteaptă". Pe mobil/
@@ -470,7 +516,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
           void OpusVoceClient.creeaza(
             (octeti) => {
               // pachet Opus de microfon → [octet codec = 1][payload]
-              if (inchis || ws.readyState !== WebSocket.OPEN) return
+              if (inchis || ws.readyState !== WebSocket.OPEN || !poateTrimiteLive(ws.bufferedAmount)) return
               const cadru = new Uint8Array(octeti.length + 1)
               cadru[0] = 1
               cadru.set(octeti, 1)
@@ -498,25 +544,24 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
             try { ws.send(JSON.stringify({ type: 'opus_ready' })) } catch { /* close-ul curăță */ }
           })
         }
-        // CAMERA DOAR LA CERINȚĂ (9 aug, ownerul: „camera doar la cerință" —
-        // pentru economie). Am SCOS ceasul care trimitea un cadru la ~2,5s cât
-        // sesiunea era vie: ardea credit CONTINUU chiar și când nimeni nu cerea
-        // să vadă (cadrele video se taxează, măsurat). Vederea rămâne întreagă,
-        // dar DOAR când modelul o cere: ușa cere_creierului declanșează
-        // `cere_cadre` → atunci trimitem cadrele proaspete (vezi handlerul
-        // 'cere_cadre' mai jos). Fără cerere = zero cadre = zero cost.
+        // Camera nu publică flux video. Serverul poate cere ulterior un singur
+        // instantaneu, mapat la OpenAI `input_image`.
         break
       case 'control':
         if (m.frame) opts.onControl?.(m.frame)
         break
       case 'cere_cadre': {
-        // Serverul deschide ușa creierului și vrea ochii: trimitem cadrele
-        // camerei ACUM (gol = fără cameră — serverul nu așteaptă degeaba).
-        try {
-          ws.send(JSON.stringify({ type: 'cadre', cadre: opts.cadre?.() ?? [] }))
-        } catch {
-          /* socket picat — close-ul curăță */
-        }
+        // Cerere explicită: cel mult un instantaneu curent; fără consimțământ,
+        // callbackul întoarce gol. Protocolul existent rămâne compatibil.
+        void Promise.resolve(opts.instantaneeLaCerere?.() ?? [])
+          .then((snapshots) => {
+            if (inchis || ws.readyState !== WebSocket.OPEN || !poateTrimiteLive(ws.bufferedAmount)) return
+            const cadre = instantaneeInputImage(snapshots)
+            ws.send(JSON.stringify({ type: 'cadre', cadre }))
+          })
+          .catch(() => {
+            /* permisiune revocată, captură eșuată sau socket închis */
+          })
         break
       }
       case 'audio':
@@ -569,7 +614,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // onerror NU se raportează separat: specificația WebSocket spune că onerror e
   // întotdeauna urmat de onclose (cu codul și motivul real). Raportarea de aici
   // fura guardul eroareUrcata și ascundea cauza reală din onclose — utilizatorul
-  // vedea doar „(rețea)" în loc de codul/serverul/Google care a picat cu adevărat.
+  // vedea doar „(rețea)" în loc de codul și motivul real al serverului.
   ws.onerror = (err): void => {
     console.warn('[vocalLive] websocket error encountered:', err)
   }
@@ -615,16 +660,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
 
   // Microfonul pornește DUPĂ ce socketul e deschis: altfel primele cadre s-ar
   // pierde în gol și primele cuvinte ale omului ar dispărea.
-  await new Promise<void>((gata, esec) => {
-    ws.onopen = () => {
+  await asteaptaDeschidereaSocket(ws, () => {
       // Ancora realității pleacă PRIMA, chiar la deschidere — serverul o
       // așteaptă puțin înainte să construiască instrucțiunea sesiunii.
       trimiteCoords()
       curataHeartbeat = startVoiceHeartbeat(() => ws, 10_000)
-      gata()
-    }
-    setTimeout(() => esec(new Error('timeout la deschiderea sesiunii')), 10_000)
-  }).catch((e: Error) => {
+  }, openController.signal).catch((e: Error) => {
+    if (inchis) return
     urcaEroarea(e.message)
     inchide()
   })
@@ -833,6 +875,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // O SINGURĂ cale de trimitere (Opus dacă e activ, altfel PCM) — folosită și de
   // cadrul curent, și de pre-roll, ca să nu se dubleze logica.
   const trimiteCadru = (buf: Float32Array): void => {
+    // O coadă mare înseamnă latență veche, nu audio live. Aruncăm cadrul curent
+    // până când socketul recuperează, în loc să creștem memoria fără limită.
+    if (!poateTrimiteLive(ws.bufferedAmount)) return
     if (opusTx && opusClient) {
       if (opusClient.incarcaMic(buf)) return
       const pcm0 = float32ToPcm16([buf])
@@ -1017,6 +1062,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   console.info(`[vocalLive] sesiune deschisă — microfon ${RATA_INTRARE} Hz → server, redare ${RATA_IESIRE} Hz`)
   return {
     inchide,
+    fluxMicrofon: () => stream,
     taieRedarea,
     intrerupeRedarea: () => {
       taieRedarea()
@@ -1037,16 +1083,6 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     },
     setRedareExterna: (activ: boolean) => {
       redareExterna = activ
-    },
-    trimiteText: (text: string): boolean => {
-      const t = (text || '').trim()
-      if (!t || inchis || ws.readyState !== WebSocket.OPEN) return false
-      try {
-        ws.send(JSON.stringify({ type: 'text', text: t.slice(0, 4000) }))
-        return true
-      } catch {
-        return false
-      }
     },
   }
 }

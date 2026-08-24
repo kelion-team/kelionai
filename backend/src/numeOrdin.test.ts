@@ -1,7 +1,7 @@
 // ── P8: NUMELE ORDINULUI = FAPTA, PE ȘABLOANELE REALE ───────────────────────
 // (owner, 15 aug, cu #306 în față: „nu apare sugestiv ce face, trebuie sa fie
 // foarte clar ce executa"). Testele rulează EXACT formele de ordin pe care le
-// produc azi autonomie.ts / golurileLui / randuriDeFacut / ordinele directe —
+// produc cerințele și ordinele directe —
 // dacă un șablon se schimbă și fapta nu se mai extrage, pică aici, nu în
 // panoul ownerului.
 import { describe, expect, it } from 'vitest'
@@ -25,14 +25,6 @@ describe('numele ordinului e fapta, nu ambalajul', () => {
       `CE A CERUT OMUL ȘI N-AI PUTUT FACE: "să pot exporta conversațiile"\n` +
       `De câte ori s-a cerut: 3.\n`
     expect(numeleOrdinului(ordin)).toBe('să pot exporta conversațiile')
-  })
-
-  it('rând din RAMAS-DE-FACUT: codul + titlul rândului', () => {
-    const ordin =
-      `NIVEL DE DIFICULTATE: 3/5\n\n` +
-      `SARCINĂ LUATĂ SINGUR din RAMAS-DE-FACUT.md, rândul B8.\n\n` +
-      `Plafonul zilnic de ardere — buton de oprit în panou\n\nFă-o cap-coadă...`
-    expect(numeleOrdinului(ordin)).toBe('B8: Plafonul zilnic de ardere — buton de oprit în panou')
   })
 
   it('ordin direct al ownerului: chiar vorbele lui, fără dificultate în față', () => {

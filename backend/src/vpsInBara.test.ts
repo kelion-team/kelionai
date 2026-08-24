@@ -48,7 +48,7 @@ describe('cifrele de VPS există și sunt alimentate', () => {
     // ar fi cost fără câștig.
     const pollere = bara.match(/usePolledJson</g) ?? []
     expect(pollere.length).toBeLessThanOrEqual(2)
-    expect(bara).toContain("usePolledJson<BrainCredit>('/api/admin/brain-credit'")
+    expect(bara).toMatch(/usePolledJson<BrainCredit>\(\s*['"]\/api\/admin\/brain-credit['"]/)
   })
 })
 
@@ -70,7 +70,7 @@ describe('lipsa se arată ca lipsă, nu ca zero', () => {
   })
 })
 
-describe('panoul și mailul spun același lucru', () => {
+describe('panoul folosește pragurile măsurătorii comune', () => {
   // Dacă pragurile diferă, poți avea panou verde și email roșu pentru aceeași
   // stare — și n-ai cum să știi pe care să crezi. Le ținem legate.
   it('pragurile din panou sunt cele din services/resurse.ts', () => {
@@ -78,10 +78,5 @@ describe('panoul și mailul spun același lucru', () => {
     expect(resurse).toMatch(/PRAG_INCARCARE_PCT = 200/)
     expect(panou).toMatch(/liberPct <= \(v\.pragMemoriePct \?\? 10\)/)
     expect(panou).toMatch(/incarcarePct >= \(v\.pragIncarcarePct \?\? 200\)/)
-  })
-  it('sentinela folosește aceleași constante, nu numere copiate', () => {
-    const sentinela = sursa('./routes/ops.ts')
-    expect(sentinela).toContain('PRAG_MEMORIE_PCT')
-    expect(sentinela).toContain('PRAG_INCARCARE_PCT')
   })
 })

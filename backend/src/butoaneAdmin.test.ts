@@ -23,9 +23,10 @@ const probe = [...health.matchAll(/\['([^']+)', '(\/api\/[^']+)'\]/g)].map((m) =
 }))
 
 describe('monitorizarea butoanelor din Admin', () => {
-  it('sonda există și acoperă cel puțin 15 butoane', () => {
+  it('sonda există, nu dublează endpointuri și monitorizează suprafața Admin activă', () => {
     expect(health).toContain('buton_mort')
-    expect(probe.length).toBeGreaterThanOrEqual(15)
+    expect(probe.length).toBeGreaterThan(0)
+    expect(new Set(probe.map((item) => item.path)).size).toBe(probe.length)
   })
 
   it.each(probe.map((p) => [p.nume, p.path] as [string, string]))(

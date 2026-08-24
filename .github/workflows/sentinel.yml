@@ -1,15 +1,3 @@
-# SENTINELĂ — PROBĂ DE SĂNĂTATE PROACTIVĂ (AI-HANDOFF §14.b E), 25 iul 2026.
-#
-# La 30 de minute verifică din AFARA VPS-ului (runner GitHub) că kelionai.app
-# trăiește: /health = 200 (3 încercări la 30s distanță, ca un sughiț de rețea să
-# nu alarmeze). Problema se ridică SINGURĂ, nu când o observă Adrian.
-#
-# DOAR detectează și alertează — nu repornește nimic (Adrian NU a autorizat
-# reporniri automate nesupravegheate; căderile de container le acoperă deja
-# `docker --restart unless-stopped`). Alerta = un issue pe repo, DEDUPLICAT:
-# un singur issue deschis, eșecurile următoare comentează pe el; la revenire
-# comentează „revenit" și îl închide singur. Marcajele de timp: ora Londrei
-# (regula §1.8 pentru marcaje de sistem).
 name: sentinel
 
 on:
@@ -20,50 +8,51 @@ on:
 permissions:
   issues: write
 
+concurrency:
+  group: production-sentinel
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
     steps:
-      - name: Verifică sănătatea și alertează dacă e nevoie
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Probează liveness/readiness și menține o singură alertă
         run: |
           set -euo pipefail
-          REPO=kelion-team/kelionai
-          NOW=$(TZ=Europe/London date +'%Y-%m-%d %H:%M:%S %Z')
-          DOWN=1; H=000; V='(fără răspuns)'
-          for i in 1 2 3; do
-            H=$(curl -s -o /dev/null -w '%{http_code}' -m 15 https://kelionai.app/health || echo 000)
-            V=$(curl -s -m 15 https://kelionai.app/api/version || echo '(fără răspuns)')
-            echo "încercarea $i: health=$H, version=$V"
-            if [ "$H" = "200" ]; then DOWN=0; break; fi
+          node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.username||u.password||u.pathname!=="/"||u.search||u.hash)process.exit(1)' "$PUBLIC_APP_ORIGIN"
+          now=$(TZ=Europe/London date +'%Y-%m-%d %H:%M:%S %Z')
+          down=1
+          live=000
+          ready=000
+          for attempt in 1 2 3; do
+            live=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 "$PUBLIC_APP_ORIGIN/livez" || true)
+            ready=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 "$PUBLIC_APP_ORIGIN/readyz" || true)
+            printf 'attempt=%s livez=%s readyz=%s\n' "$attempt" "${live:-000}" "${ready:-000}"
+            if [ "$live" = 200 ] && [ "$ready" = 200 ]; then down=0; break; fi
             sleep 30
           done
-          OPEN=$(gh issue list -R "$REPO" --state open --search 'SENTINELĂ in:title' --json number --jq '.[0].number // empty' || true)
-
-          if [ "$DOWN" = "0" ]; then
-            if [ -n "$OPEN" ]; then
-              printf '✅ REVENIT (%s): health 200, version `%s`. Închid alerta.\n' "$NOW" "$V" > /tmp/body.md
-              gh issue comment "$OPEN" -R "$REPO" --body-file /tmp/body.md
-              gh issue close "$OPEN" -R "$REPO"
+          open_issue=$(gh issue list --repo "$REPOSITORY" --state open --search 'SENTINEL in:title' --json number --jq '.[0].number // empty' || true)
+          if [ "$down" = 0 ]; then
+            if [ -n "$open_issue" ]; then
+              printf 'RECOVERED (%s): /livez=200, /readyz=200.\n' "$now" > /tmp/sentinel-body.md
+              gh issue comment "$open_issue" --repo "$REPOSITORY" --body-file /tmp/sentinel-body.md
+              gh issue close "$open_issue" --repo "$REPOSITORY"
             fi
-            echo "Sănătos ($NOW)."
             exit 0
           fi
-
           {
-            printf '🔴 SENTINELĂ (%s): kelionai.app NU răspunde — 3 probe consecutive picate.\n\n' "$NOW"
-            printf -- '- `/health` = **%s** (așteptat 200)\n- `/api/version` = `%s`\n\n' "$H" "$V"
-            printf 'Pași determiniști (deploy/RUNBOOKS.md):\n'
-            printf '1. Actions → **vps-diag** → Run workflow — faptele reale de pe VPS.\n'
-            printf '2. Dacă e nevoie de republicare: Actions → **deploy** → Run workflow (pe master).\n'
-            printf '3. Repornire manuală țintită: Actions → **vps-run** → cmd: `docker restart kelionai-app`.\n'
-          } > /tmp/body.md
-
-          if [ -n "$OPEN" ]; then
-            gh issue comment "$OPEN" -R "$REPO" --body-file /tmp/body.md
+            printf 'Production readiness failed three consecutive probes (%s).\n\n' "$now"
+            printf -- '- `/livez`: `%s`\n- `/readyz`: `%s`\n\n' "${live:-000}" "${ready:-000}"
+            printf 'Run the read-only `vps-diag` workflow, then use the approved immutable release/rollback workflow.\n'
+          } > /tmp/sentinel-body.md
+          if [ -n "$open_issue" ]; then
+            gh issue comment "$open_issue" --repo "$REPOSITORY" --body-file /tmp/sentinel-body.md
           else
-            gh issue create -R "$REPO" --title '🔴 SENTINELĂ: kelionai.app nu răspunde' --body-file /tmp/body.md
+            gh issue create --repo "$REPOSITORY" --title 'SENTINEL: production is not ready' --body-file /tmp/sentinel-body.md
           fi
-          echo "::error::kelionai.app e JOS din $NOW — alerta e deschisă în Issues."
           exit 1

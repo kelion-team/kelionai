@@ -1,24 +1,23 @@
-// ── AUZUL AMBIENTAL (owner, 22 aug 2026: „simte mediul") ─────────────────────
-//
-// Kelion nu mai e SURD între sesiunile live. Acest modul analizează sunetul
-// microfonului în fundal (fără să trimitem tot la Google) și detectează:
-//   - Evenimente sonore bruște (alarmă, sonerie, ciocănit, spargere, plâns)
-//   - Nivelul de zgomot ambiental (liniște / conversație / muzică / trafic)
-//   - Recurență: dacă un sunet se repetă, devine alertă
+import { apiFetch } from './transport'
+
+// Acest modul analizează LOCAL fluxul deja deschis de sesiunea vocală. Nu cere
+// un al doilea microfon și nu trimite audio brut. FFT-ul oferă numai INDICII
+// grosiere (liniște / posibilă voce ori muzică / zgomot brusc), nu poate afirma
+// că a identificat o alarmă, plâns, sticlă spartă sau alt eveniment semantic.
 //
 // ARHITECTURĂ:
 //   - Web Audio API + AnalyserNode (FFT 1024) — gratis, 0ms, fără biblioteci
 //   - Analiză spectrală: energie pe benzi (bass pentru bubuituri, mid pentru
 //     voce, high pentru alarme/sonerii)
 //   - Detectare eveniment: salt brusc de energie > prag → eveniment
-//   - Clasificare grosieră: bass brusc = ciocănit/ușă; high sustinut = alarmă;
-//     mid ritmic = plâns; liniște prelungită = repaus
-//   - Trimite evenimente la /api/auz/eveniment cu tip + intensitate + timestamp
+//   - Clasificare grosieră, explicit euristică: liniște / posibilă conversație /
+//     posibilă muzică / zgomot brusc.
+//   - Trimite numai indiciile la /api/auz/eveniment cu intensitate + timestamp.
 //   - NU trimite audio brut — doar metadate (bandă minimă, privacy)
 
 export interface EvenimentSonor {
   ts: number
-  tip: 'alarma' | 'sonerie' | 'ciocanit' | 'plans' | 'spargere' | 'zgomot_brusc' | 'conversatie' | 'muzica' | 'liniste'
+  tip: 'zgomot_brusc' | 'conversatie_posibila' | 'muzica_posibila' | 'liniste'
   intensitate: number // 0-100
   durataMs: number
   frecventaDominanta: number // Hz
@@ -66,34 +65,26 @@ function frecventaDominanta(data: Uint8Array, sampleRate: number): number {
   return (maxIdx * sampleRate) / (2 * data.length)
 }
 
-function clasificaSunet(energieBass: number, energieMid: number, energieHigh: number, fd: number): EvenimentSonor['tip'] {
+export function clasificaIndiciuSunet(
+  energieBass: number,
+  energieMid: number,
+  energieHigh: number,
+): EvenimentSonor['tip'] {
   const total = energieBass + energieMid + energieHigh
   if (total < PRAG_LINISTE) return 'liniste'
-  // High sustinut = alarmă sau sonerie
-  if (energieHigh > PRAG_MUZICA && energieHigh > energieMid * 1.5) {
-    if (fd > 3000) return 'sonerie'
-    return 'alarma'
-  }
-  // Bass brusc = ciocănit sau ușă
-  if (energieBass > PRAG_MUZICA && energieBass > energieMid * 2) {
-    return 'ciocanit'
-  }
-  // Mid ritmic = plâns sau conversație
-  if (energieMid > PRAG_CONVERSATIE) {
-    if (fd > 800 && fd < 1200) return 'plans'
-    return 'conversatie'
-  }
-  // High + bass = spargere
-  if (energieHigh > PRAG_CONVERSATIE && energieBass > PRAG_CONVERSATIE) {
-    return 'spargere'
-  }
-  if (total > PRAG_MUZICA) return 'muzica'
-  return 'conversatie'
+  // Energie răspândită în mai multe benzi poate sugera muzică, dar nu o confirmă.
+  const benziActive = [energieBass, energieMid, energieHigh].filter((e) => e > PRAG_CONVERSATIE).length
+  if (total > PRAG_MUZICA * 2 && benziActive >= 2) return 'muzica_posibila'
+  // Banda de vorbire dominantă poate sugera conversație, fără identificare semantică.
+  if (energieMid > PRAG_CONVERSATIE && energieMid >= energieBass && energieMid >= energieHigh) return 'conversatie_posibila'
+  // Orice alt profil este doar un zgomot neclasificat.
+  if (total > PRAG_CONVERSATIE) return 'zgomot_brusc'
+  return 'conversatie_posibila'
 }
 
 async function trimiteEveniment(ev: EvenimentSonor): Promise<void> {
   try {
-    await fetch('/api/auz/eveniment', {
+    await apiFetch('/api/auz/eveniment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(ev),
@@ -136,11 +127,10 @@ function tickIntern(): void {
   // Detectare eveniment: salt brusc de energie
   if (raport > PRAG_SALT_BRUSC && acum - ultimaDetectieEveniment > 2000) {
     ultimaDetectieEveniment = acum
-    const tip = clasificaSunet(energieBass, energieMid, energieHigh, fd)
-    if (tip !== 'liniste' && tip !== 'conversatie') {
+    if (energieTotal >= PRAG_CONVERSATIE) {
       void trimiteEveniment({
         ts: acum,
-        tip,
+        tip: 'zgomot_brusc',
         intensitate: Math.min(100, Math.round(raport * 20)),
         durataMs: INTERVAL_ANALIZA_MS,
         frecventaDominanta: Math.round(fd),
@@ -148,7 +138,7 @@ function tickIntern(): void {
     }
   }
   // Clasificare continuă (pentru context ambiental)
-  const clasificare = clasificaSunet(energieBass, energieMid, energieHigh, fd)
+  const clasificare = clasificaIndiciuSunet(energieBass, energieMid, energieHigh)
   if (clasificare !== ultimaClasificare) {
     contorRecurenta++
     ultimaClasificare = clasificare
@@ -165,11 +155,13 @@ function tickIntern(): void {
   }
 }
 
-/** Pornește auzul ambiental. Necesită permisiune microfon. */
-export async function pornesteAuzulAmbiental(): Promise<boolean> {
+/** Pornește analiza ambientală pe fluxul microfonului DEJA permis și deschis de
+ * sesiunea vocală. Nu deține fluxul și nu îi oprește track-urile la cleanup. */
+export async function pornesteAuzulAmbiental(streamActiv: MediaStream): Promise<boolean> {
   if (inMers) return true
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    if (streamActiv.getAudioTracks().length === 0) return false
+    stream = streamActiv
     audioCtx = new AudioContext()
     const source = audioCtx.createMediaStreamSource(stream)
     analyser = audioCtx.createAnalyser()
@@ -192,12 +184,15 @@ export async function pornesteAuzulAmbiental(): Promise<boolean> {
 export function opresteAuzulAmbiental(): void {
   inMers = false
   if (timer) { clearInterval(timer); timer = null }
-  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null }
+  stream = null
   if (audioCtx) { void audioCtx.close(); audioCtx = null }
   analyser = null
   bufferFrecvente = null
   bufferTemporal = null
   istoricEnergie = []
+  ultimaClasificare = 'liniste'
+  ultimaDetectieEveniment = 0
+  contorRecurenta = 0
 }
 
 /** Ultima clasificare ambientală curentă. */

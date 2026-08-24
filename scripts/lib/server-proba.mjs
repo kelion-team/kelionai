@@ -26,6 +26,8 @@
 // a credențial, probele NU pornesc — ies cu 2 („nu pot verifica"). Un gard care
 // se poate strica în tăcere nu e gard.
 import path from 'node:path'
+import os from 'node:os'
+import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 
@@ -35,7 +37,7 @@ export const RADACINA = new URL('../..', import.meta.url).pathname
 const MIROASE_A_CREDENTIAL = /(TOKEN|KEY|SECRET|PASSW|CREDENTIAL|AUTH|DATABASE_URL|DSN|COOKIE|SESSION)/i
 
 /** Singurele variabile care trec. Nimic din ele nu deschide nicio ușă. */
-const PERMISE = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR']
+const PERMISE = ['PATH', 'LANG', 'LC_ALL', 'TZ', 'SystemRoot', 'WINDIR']
 
 /**
  * FALSURILE OBLIGATORII (măsurat 14 aug: porțile proba-rute/proba-scriere au
@@ -60,8 +62,21 @@ const FALSURI_PROBEI = {
  * testul de miros — toate se nasc în fișierul ăsta, nu vin din mediu, și nu
  * deschid decât ușa instanței noastre locale.
  */
-export function mediuCurat({ port, secret, email }) {
-  const env = { NODE_ENV: 'production', PORT: String(port), SESSION_SECRET: secret, ADMIN_EMAIL: email, ...FALSURI_PROBEI }
+export function mediuCurat({ port, secret, email, directorProba }) {
+  if (!directorProba) throw new Error('directorul izolat al probei lipsește')
+  const env = {
+    NODE_ENV: 'production',
+    KELION_PROBE_MODE: '1',
+    PORT: String(port),
+    SESSION_SECRET: secret,
+    ADMIN_EMAIL: email,
+    HOME: directorProba,
+    USERPROFILE: directorProba,
+    TMPDIR: directorProba,
+    TMP: directorProba,
+    TEMP: directorProba,
+    ...FALSURI_PROBEI,
+  }
   for (const n of PERMISE) if (process.env[n] != null) env[n] = process.env[n]
 
   const scutite = new Set(['SESSION_SECRET', ...Object.keys(FALSURI_PROBEI)])
@@ -76,7 +91,16 @@ export function mediuCurat({ port, secret, email }) {
 export function semneazaBilet({ secret, email }) {
   const require_ = createRequire(path.join(RADACINA, 'backend/package.json'))
   const jwt = require_('jsonwebtoken')
-  const bilet = jwt.sign({ email, role: 'admin' }, secret, { expiresIn: '10m' })
+  // Contractul real acordă admin numai identității Google verificate. Biletul
+  // local are același shape, dar este semnat cu secretul efemer al probei.
+  const bilet = jwt.sign({
+    email,
+    name: 'Admin probă',
+    picture: '',
+    role: 'admin',
+    authProvider: 'google',
+    locale: 'ro',
+  }, secret, { expiresIn: '10m' })
   return `kelionai_session=${encodeURIComponent(bilet)}`
 }
 
@@ -105,7 +129,8 @@ async function asteapta(url, secunde) {
 export async function porneste({ port, secunde = 40 }) {
   const secret = secretDeProba()
   const email = 'proba-admin@local.test'
-  const env = mediuCurat({ port, secret, email })
+  const directorProba = fs.mkdtempSync(path.join(os.tmpdir(), 'kelion-proba-'))
+  const env = mediuCurat({ port, secret, email, directorProba })
 
   const server = spawn('node', ['dist/index.js'], {
     cwd: path.join(RADACINA, 'backend'),
@@ -116,11 +141,24 @@ export async function porneste({ port, secunde = 40 }) {
   server.stdout.on('data', (d) => (iesire += String(d)))
   server.stderr.on('data', (d) => (iesire += String(d)))
 
+  let oprit = false
   const opreste = () => {
+    if (oprit) return
+    oprit = true
     try {
       server.kill('SIGKILL')
     } catch {
       /* deja oprit */
+    }
+    // Ștergem numai directorul creat de noi, verificat sub temp-ul sistemului.
+    const tinta = path.resolve(directorProba)
+    const radTemp = path.resolve(os.tmpdir()) + path.sep
+    if (tinta.startsWith(radTemp) && path.basename(tinta).startsWith('kelion-proba-')) {
+      try {
+        fs.rmSync(tinta, { recursive: true, force: true })
+      } catch {
+        /* procesul poate ține un fișier deschis câteva ms; OS-ul îl curăță ulterior */
+      }
     }
   }
   process.on('exit', opreste)

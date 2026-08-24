@@ -1,427 +1,242 @@
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
-import dns from 'node:dns/promises'
-import net from 'node:net'
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
+import { config } from '../config.js'
+import { callBrowserWorker } from './browserWorker.js'
 
-// Kelion's live browser — a real headless Chromium he can navigate, click and
-// type into, so he can actually show/read/survey sites that refuse to embed in
-// the monitor iframe (Google, banks, social media…). One session per user
-// (shared browser process, one context/page each) so state (login, scroll
-// position, current page) persists across a back-and-forth conversation.
-
-// ── screenshot store (mirrors services/image.ts's pattern) ─────────────────
 interface Shot {
-  mime: string
+  mime: 'image/jpeg'
   buf: Buffer
   ts: number
-}
-const shots = new Map<string, Shot>()
-const MAX_SHOTS = 40
-function putShot(buf: Buffer): string {
-  const id = randomUUID()
-  shots.set(id, { mime: 'image/jpeg', buf, ts: Date.now() })
-  while (shots.size > MAX_SHOTS) {
-    const oldest = shots.keys().next().value
-    if (oldest === undefined) break
-    shots.delete(oldest)
-  }
-  return id
-}
-export function getShot(id: string): Shot | null {
-  return shots.get(id) ?? null
+  owner: string
 }
 
-// ── SSRF guard — never let the browser reach internal/private addresses ────
-function isPrivateIPv4(ip: string): boolean {
-  const parts = ip.split('.').map(Number)
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return true
-  const [a, b] = parts
-  if (a === 10 || a === 127 || a === 0) return true
-  if (a === 169 && b === 254) return true // link-local + cloud metadata (169.254.169.254)
-  if (a === 172 && b >= 16 && b <= 31) return true
-  if (a === 192 && b === 168) return true
-  if (a === 100 && b >= 64 && b <= 127) return true // carrier-grade NAT
-  return false
-}
-function isPrivateIPv6(ip: string): boolean {
-  const low = ip.toLowerCase()
-  // IPv4 MAPPED INTO IPv6 (security audit 27 Jul): `::ffff:169.254.169.254`
-  // passed the filters — net.isIP sees it as IPv6, but it is a private IPv4
-  // address in disguise. We unwrap it and judge it by the IPv4 rules.
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(low)
-  if (mapped) return isPrivateIPv4(mapped[1])
-  return low === '::1' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80')
-}
-async function assertPublicUrl(raw: string): Promise<URL> {
-  const u = new URL(raw)
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('unsupported_protocol')
-  if (u.hostname === 'localhost') throw new Error('blocked_host')
-  const kind = net.isIP(u.hostname)
-  const addresses = kind
-    ? [{ address: u.hostname, family: kind }]
-    : await dns.lookup(u.hostname, { all: true })
-  for (const { address, family } of addresses) {
-    if (family === 4 && isPrivateIPv4(address)) throw new Error('blocked_address')
-    if (family === 6 && isPrivateIPv6(address)) throw new Error('blocked_address')
-  }
-  return u
-}
-
-// ── session pool ─────────────────────────────────────────────────────────
-interface Session {
-  context: BrowserContext
-  page: Page
-  lastUsed: number
-}
-const sessions = new Map<string, Session>()
-const MAX_SESSIONS = 8
-const IDLE_MS = 10 * 60_000
-
-// ── PROBA BROWSERULUI — LANSARE REALĂ, NU „instalarea a zis ok" (owner,
-// 15 aug: „browserul acesta nu funcționează" + „ce-ar fi să testezi tot ce
-// faci și lași funcțional"). system_health o cheamă ca becul „browserul
-// mâinilor" să arate starea MĂSURATĂ oricând, nu doar la publicare. Cache 10
-// minute: lansarea costă ~1s, health-ul rămâne ieftin; eșecul păstrează
-// EROAREA reală (biblioteci lipsă, binar absent), nu un „nu merge" generic.
-const PROBA_BROWSER_MS = 10 * 60_000
-let probaBrowser: { la: number; ok: boolean; motiv: string } | null = null
-export async function probaBrowserulMainilor(): Promise<{ ok: boolean; motiv: string }> {
-  if (probaBrowser && Date.now() - probaBrowser.la < PROBA_BROWSER_MS) return probaBrowser
-  try {
-    const b = await getBrowser()
-    probaBrowser = { la: Date.now(), ok: b.isConnected(), motiv: b.isConnected() ? '' : 'lansat dar deconectat' }
-  } catch (e) {
-    probaBrowser = { la: Date.now(), ok: false, motiv: String((e as Error)?.message ?? e).slice(0, 200) }
-  }
-  return probaBrowser
-}
-
-let sharedBrowser: Browser | null = null
-async function getBrowser(): Promise<Browser> {
-  if (sharedBrowser?.isConnected()) return sharedBrowser
-  sharedBrowser = await chromium.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  })
-  return sharedBrowser
-}
-
-async function closeSession(email: string): Promise<void> {
-  const s = sessions.get(email)
-  if (!s) return
-  sessions.delete(email)
-  try {
-    await s.context.close()
-  } catch {
-    /* already gone */
-  }
-}
-
-// Idle reaper — a forgotten browser session must not sit open forever.
-setInterval(() => {
-  const now = Date.now()
-  for (const [email, s] of sessions) {
-    if (now - s.lastUsed > IDLE_MS) void closeSession(email)
-  }
-}, 60_000).unref()
-
-async function ensureSession(email: string): Promise<Session> {
-  const existing = sessions.get(email)
-  if (existing) {
-    existing.lastUsed = Date.now()
-    return existing
-  }
-  if (sessions.size >= MAX_SESSIONS) {
-    let oldestKey = ''
-    let oldestTs = Infinity
-    for (const [k, v] of sessions) {
-      if (v.lastUsed < oldestTs) {
-        oldestTs = v.lastUsed
-        oldestKey = k
-      }
-    }
-    if (oldestKey) await closeSession(oldestKey)
-  }
-  const browser = await getBrowser()
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 KelionaiBot',
-  })
-  const page = await context.newPage()
-  const session: Session = { context, page, lastUsed: Date.now() }
-  sessions.set(email, session)
-  return session
-}
-
-// ── page snapshot: what Kelion "reads" after every action ──────────────────
 export interface BrowserElement {
   index: number
   tag: string
   label: string
   href: string
 }
+
 export interface BrowserSnapshot {
   url: string
   title: string
   text: string
   elements: BrowserElement[]
   shotUrl: string
-  /** Captura paginii ca jpeg base64 — OCHII modelului (9 aug, ownerul:
-   *  „sistemul nu dă lui Kelion poza reală pentru analiză"): până acum captura
-   *  ajungea DOAR pe monitor (pentru om), iar modelul primea un URL pe care
-   *  nu-l poate privi. Gol în modul discret (nimic nu iese de pe pagina de
-   *  card) și la eșecul capturii. */
+  /** Image shown to the OpenAI brain for this action. Empty in discreet mode. */
   shotB64: string
 }
+
 export type BrowserResult = BrowserSnapshot | { error: string }
 
-// Tags each visible interactive element with data-kelion-idx so a later click/
-// type by index hits exactly what was just read — a stable, reliable handle
-// without needing pixel-coordinate guessing. Passed as a STRING to evaluate()
-// (not a typed function) since this Node project has no "dom" lib in tsconfig.
-const COLLECT_SCRIPT = `(() => {
-  const sel = 'a[href], button, input, textarea, select, [role="button"], [onclick]'
-  const nodes = Array.from(document.querySelectorAll(sel))
-  const out = []
-  let i = 0
-  for (const el of nodes) {
-    if (i >= 40) break
-    const rect = el.getBoundingClientRect()
-    if (rect.width === 0 || rect.height === 0) continue
-    const style = window.getComputedStyle(el)
-    if (style.visibility === 'hidden' || style.display === 'none') continue
-    el.setAttribute('data-kelion-idx', String(i))
-    const tag = el.tagName.toLowerCase()
-    let label = (el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('alt') || el.innerText || el.value || el.getAttribute('title') || '').toString().trim().replace(/\\s+/g, ' ').slice(0, 70)
-    const href = tag === 'a' ? (el.getAttribute('href') || '') : ''
-    out.push({ index: i, tag, label, href })
-    i++
+const MAX_SHOTS = 40
+const SHOT_TTL_MS = 10 * 60_000
+const MAX_SCREENSHOT_BYTES = 1024 * 1024
+const shots = new Map<string, Shot>()
+const discreetSessions = new Set<string>()
+
+function ownerKey(email: string): string {
+  return String(email ?? '').trim().toLowerCase()
+}
+
+function sessionId(email: string): string {
+  const owner = ownerKey(email)
+  if (!owner || !config.sessionSecret) throw new Error('browser_session_invalid')
+  return createHmac('sha256', config.sessionSecret).update(`browser-session\n${owner}`).digest('base64url')
+}
+
+function pruneShots(now = Date.now()): void {
+  for (const [id, shot] of shots) {
+    if (now - shot.ts > SHOT_TTL_MS) shots.delete(id)
   }
-  return out
-})()`
-const TEXT_SCRIPT = `(() => document.body ? document.body.innerText : '')()`
-
-// Heavy Google SPAs (Play Console etc.) keep redirecting via JS well after
-// "domcontentloaded" — if evaluate()/screenshot() lands mid-navigation, the
-// old execution context is torn down and Playwright throws a navigation
-// error, not a real page-content error. Recognize that class of error so we
-// can wait it out and retry once, instead of surfacing a misleading
-// snapshot_failed for a page that would have worked a moment later.
-function isNavigationRace(e: unknown): boolean {
-  const msg = e instanceof Error ? e.message : String(e)
-  return (
-    msg.includes('context was destroyed') ||
-    msg.includes('Execution context') ||
-    msg.includes('Target closed') ||
-    msg.includes('Cannot find context')
-  )
-}
-
-// ── DISCREET MODE: the page where a card is typed goes NOWHERE ─────────────
-//
-// Adrian, 31 Jul: "it should operate for me only when I ask, using the voice
-// recognition system, as heightened security."
-//
-// The voiceprint solves WHO is allowed. The leak remains though: the browser
-// takes a screenshot at every step (which reaches the monitor) and returns the
-// page text to the model. On a payment page, both would carry the card number
-// — into images, into the turn journal, into the conversation history.
-//
-// While a session is "discreet": ZERO screenshots, and any 12-19 digit run is
-// masked out of the page text. This is not politeness — it is the difference
-// between "entered the card" and "left the card in three places".
-const discret = new Set<string>()
-export function setModDiscret(email: string, pornit: boolean): void {
-  if (pornit) discret.add(email)
-  else discret.delete(email)
-}
-/** Masks long runs of digits (card, IBAN) in a text. */
-export function mascheazaCifre(text: string): string {
-  return text.replace(/\b(?:\d[ -]?){12,19}\b/g, (m) => `«${m.replace(/\D/g, '').length} cifre ascunse»`)
-}
-
-async function takeSnapshot(page: Page, baseUrl: string, email = ''): Promise<BrowserSnapshot> {
-  const title = await page.title()
-  const url = page.url()
-  const elements = ((await page.evaluate(COLLECT_SCRIPT)) as BrowserElement[]) ?? []
-  let text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
-  if (email && discret.has(email)) {
-    // No screenshot (nothing would reach the monitor) and no digits in the text.
-    return { url, title, text: mascheazaCifre(text), elements, shotUrl: '', shotB64: '' }
+  while (shots.size > MAX_SHOTS) {
+    const oldest = shots.keys().next().value as string | undefined
+    if (!oldest) break
+    shots.delete(oldest)
   }
-  const buf = await page.screenshot({ type: 'jpeg', quality: 60 })
-  const id = putShot(buf)
-  return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}`, shotB64: buf.toString('base64') }
 }
 
-async function snapshot(page: Page, baseUrl: string, email = ''): Promise<BrowserSnapshot> {
+function putShot(email: string, buf: Buffer): string {
+  pruneShots()
+  const id = randomUUID()
+  shots.set(id, { mime: 'image/jpeg', buf, ts: Date.now(), owner: ownerKey(email) })
+  pruneShots()
+  return id
+}
+
+export function getShot(id: string, email: string): Shot | null {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return null
+  pruneShots()
+  const shot = shots.get(id)
+  return shot && shot.owner === ownerKey(email) ? shot : null
+}
+
+function publicOrigin(baseUrl: string): string {
+  const configured = config.publicOrigin.trim()
+  for (const candidate of [configured, baseUrl]) {
+    try {
+      const parsed = new URL(candidate)
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.origin
+    } catch {
+      // Try the next server-owned candidate.
+    }
+  }
+  return ''
+}
+
+function screenshotBytes(value: unknown): Buffer | null {
+  if (typeof value !== 'string' || !value || value.length > Math.ceil(MAX_SCREENSHOT_BYTES / 3) * 4 + 4) return null
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return null
+  const buf = Buffer.from(value, 'base64')
+  if (!buf.length || buf.length > MAX_SCREENSHOT_BYTES || buf[0] !== 0xff || buf[1] !== 0xd8 || buf[2] !== 0xff) return null
+  return buf
+}
+
+function text(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.slice(0, max) : ''
+}
+
+function normalizeSnapshot(value: unknown, email: string, baseUrl: string): BrowserResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { error: 'invalid_snapshot' }
+  const source = value as Record<string, unknown>
+  const elements = Array.isArray(source.elements)
+    ? source.elements.slice(0, 40).flatMap((item): BrowserElement[] => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+        const row = item as Record<string, unknown>
+        const index = Number(row.index)
+        if (!Number.isInteger(index) || index < 0 || index >= 40) return []
+        return [{
+          index,
+          tag: text(row.tag, 40),
+          label: text(row.label, 70),
+          href: text(row.href, 2_048),
+        }]
+      })
+    : []
+  const rawShot = typeof source.screenshotBase64 === 'string' ? source.screenshotBase64 : ''
+  const buf = rawShot ? screenshotBytes(rawShot) : null
+  if (rawShot && !buf) return { error: 'invalid_screenshot' }
+  const id = buf ? putShot(email, buf) : ''
+  const origin = publicOrigin(baseUrl)
+  return {
+    url: text(source.url, 2_048),
+    title: text(source.title, 300),
+    text: text(source.text, 3_000),
+    elements,
+    shotUrl: id ? `${origin}/api/browser/shot/${id}` : '',
+    shotB64: buf ? buf.toString('base64') : '',
+  }
+}
+
+function workerError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message === 'browser_worker_not_configured') return 'browser_unavailable'
+  if (message.startsWith('browser_worker_')) return message.slice('browser_worker_'.length, 100)
+  return 'browser_unavailable'
+}
+
+type BrowserAction =
+  | { type: 'open'; url: string }
+  | { type: 'click'; index: number }
+  | { type: 'type'; index: number; text: string; submit: boolean }
+  | { type: 'read' }
+  | { type: 'back' }
+  | { type: 'scroll'; direction: 'up' | 'down' }
+  | { type: 'key'; key: string }
+  | { type: 'clickAt'; x: number; y: number }
+  | { type: 'close' }
+
+async function perform(email: string, baseUrl: string, action: BrowserAction): Promise<BrowserResult> {
+  let id: string
   try {
-    return await takeSnapshot(page, baseUrl, email)
-  } catch (e) {
-    if (!isNavigationRace(e)) throw e
-    // Give the SPA's redirect cascade a moment to settle, then retry once —
-    // a single retry is enough since a real content/navigation failure will
-    // fail the same way again and should propagate as before.
-    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
-    await page.waitForTimeout(500)
-    return await takeSnapshot(page, baseUrl, email)
+    id = sessionId(email)
+  } catch {
+    return { error: 'browser_session_invalid' }
+  }
+  if (action.type === 'open') discreetSessions.delete(id)
+  if (action.type === 'type' && /\b(?:\d[ -]?){12,19}\b/.test(action.text)) discreetSessions.add(id)
+  try {
+    const response = await callBrowserWorker('/v1/browser/action', {
+      sessionId: id,
+      discreet: discreetSessions.has(id),
+      action,
+    })
+    if (action.type === 'close') return { error: 'closed' }
+    return normalizeSnapshot(response.snapshot, email, baseUrl)
+  } catch (error) {
+    return { error: workerError(error) }
   }
 }
-// ── public actions ───────────────────────────────────────────────────────
-export async function browserOpen(
-  email: string,
-  baseUrl: string,
-  rawUrl: string,
-): Promise<BrowserResult> {
-  let u: URL
+
+let healthCache: { at: number; value: { ok: boolean; motiv: string } } | null = null
+export async function probaBrowserulMainilor(): Promise<{ ok: boolean; motiv: string }> {
+  if (healthCache && Date.now() - healthCache.at < 10 * 60_000) return healthCache.value
+  const probeId = `health_${randomUUID().replaceAll('-', '')}`
   try {
-    u = await assertPublicUrl(rawUrl)
+    await callBrowserWorker('/v1/browser/action', {
+      sessionId: probeId,
+      discreet: true,
+      action: { type: 'read' },
+    })
+    void callBrowserWorker('/v1/browser/action', {
+      sessionId: probeId,
+      discreet: true,
+      action: { type: 'close' },
+    }).catch(() => undefined)
+    healthCache = { at: Date.now(), value: { ok: true, motiv: '' } }
+  } catch (error) {
+    healthCache = { at: Date.now(), value: { ok: false, motiv: workerError(error) } }
+  }
+  return healthCache.value
+}
+
+export async function browserOpen(email: string, baseUrl: string, url: string): Promise<BrowserResult> {
+  if (url.length > 2_048) return { error: 'blocked_url' }
+  try {
+    const parsed = new URL(url)
+    if (!['http:', 'https:'].includes(parsed.protocol)) return { error: 'blocked_url' }
   } catch {
     return { error: 'blocked_url' }
   }
-  let session: Session
-  try {
-    session = await ensureSession(email)
-  } catch (e) {
-    // Launch failures (missing Chromium, missing libs) must be visible in the
-    // server logs — this is the difference between diagnosable and blind.
-    console.error('[browser] chromium launch failed:', e instanceof Error ? e.message : e)
-    return { error: `launch_failed: ${e instanceof Error ? e.message.slice(0, 200) : 'unknown'}` }
-  }
-  try {
-    await session.page.goto(u.toString(), { waitUntil: 'domcontentloaded', timeout: 15000 })
-    // Heavy SPAs (e.g. Google Play Console) keep firing JS redirects after
-    // domcontentloaded; give them a chance to reach 'load' before the fixed
-    // settle wait, so the first snapshot isn't taken mid-redirect-cascade.
-    await session.page.waitForLoadState('load', { timeout: 5000 }).catch(() => {})
-    await session.page.waitForTimeout(500)
-  } catch (e) {
-    console.error('[browser] navigation failed:', e instanceof Error ? e.message.slice(0, 300) : e)
-    return { error: 'navigation_failed' }
-  }
-  try {
-    return await snapshot(session.page, baseUrl, email)
-  } catch (e) {
-    console.error('[browser] snapshot failed:', e instanceof Error ? e.message.slice(0, 300) : e)
-    return { error: 'snapshot_failed' }
-  }
+  return perform(email, baseUrl, { type: 'open', url })
 }
 
-// The routines that ACT on the page (click/type) share the same skeleton:
-// valid session → the action in try/catch (element_not_found) → wait for load
-// + 300ms → snapshot. Only `act` differs. Single source (no duplicates).
-async function withPageAction(
-  email: string,
-  baseUrl: string,
-  act: (page: Page) => Promise<void>,
-): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
+export const browserClick = (email: string, baseUrl: string, index: number): Promise<BrowserResult> =>
+  perform(email, baseUrl, { type: 'click', index })
+
+export const browserType = (email: string, baseUrl: string, index: number, value: string, submit: boolean): Promise<BrowserResult> =>
+  perform(email, baseUrl, { type: 'type', index, text: value.slice(0, 4_001), submit })
+
+export const browserRead = (email: string, baseUrl: string): Promise<BrowserResult> =>
+  perform(email, baseUrl, { type: 'read' })
+
+export const browserBack = (email: string, baseUrl: string): Promise<BrowserResult> =>
+  perform(email, baseUrl, { type: 'back' })
+
+export const browserScroll = (email: string, baseUrl: string, direction: 'up' | 'down'): Promise<BrowserResult> =>
+  perform(email, baseUrl, { type: 'scroll', direction })
+
+export const browserKey = (email: string, baseUrl: string, key: string): Promise<BrowserResult> =>
+  perform(email, baseUrl, { type: 'key', key })
+
+export const browserClickAt = (email: string, baseUrl: string, x: number, y: number): Promise<BrowserResult> =>
+  perform(email, baseUrl, { type: 'clickAt', x, y })
+
+export async function browserClose(email: string): Promise<{ closed: true } | { error: string }> {
+  let id: string
   try {
-    await act(session.page)
+    id = sessionId(email)
   } catch {
-    return { error: 'element_not_found' }
+    return { error: 'browser_session_invalid' }
   }
-  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
-  await session.page.waitForTimeout(300)
-  return snapshot(session.page, baseUrl, email)
-}
-
-export async function browserClick(
-  email: string,
-  baseUrl: string,
-  index: number,
-): Promise<BrowserResult> {
-  return withPageAction(email, baseUrl, (page) => page.click(`[data-kelion-idx="${index}"]`, { timeout: 5000 }))
-}
-
-export async function browserType(
-  email: string,
-  baseUrl: string,
-  index: number,
-  text: string,
-  submit: boolean,
-): Promise<BrowserResult> {
-  const sel = `[data-kelion-idx="${index}"]`
-  return withPageAction(email, baseUrl, async (page) => {
-    await page.fill(sel, text, { timeout: 5000 })
-    if (submit) await page.press(sel, 'Enter')
-  })
-}
-
-export async function browserRead(email: string, baseUrl: string): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
-  return snapshot(session.page, baseUrl, email)
-}
-
-export async function browserBack(email: string, baseUrl: string): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
+  discreetSessions.delete(id)
   try {
-    await session.page.goBack({ waitUntil: 'domcontentloaded', timeout: 8000 })
-  } catch {
-    /* nothing to go back to — still return the current page */
+    await callBrowserWorker('/v1/browser/action', {
+      sessionId: id,
+      discreet: false,
+      action: { type: 'close' },
+    })
+    return { closed: true }
+  } catch (error) {
+    return { error: workerError(error) }
   }
-  return snapshot(session.page, baseUrl, email)
-}
-
-export async function browserScroll(
-  email: string,
-  baseUrl: string,
-  direction: 'up' | 'down',
-): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
-  const dy = direction === 'down' ? 700 : -700
-  await session.page.evaluate(`window.scrollBy(0, ${dy})`).catch(() => {})
-  await session.page.waitForTimeout(200)
-  return snapshot(session.page, baseUrl, email)
-}
-
-// FULL COMPUTER USE (Adrian, 13 Jul): besides click/type/scroll on indexed
-// elements, Kelion can press KEYS (Tab/Escape/arrows/Enter/combinations) and
-// can click on COORDINATES (x,y) — for widgets that are not in the indexable
-// DOM (canvas, maps, custom menus). These close the gap to real "computer
-// use", keeping the same session/screenshot.
-
-// Presses a key or a combination on the current page. Playwright format:
-// 'Enter', 'Tab', 'Escape', 'ArrowDown', 'Control+A', 'Shift+Tab' etc.
-export async function browserKey(email: string, baseUrl: string, key: string): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
-  // Safety barrier: only keys/combinations of the expected shape (key names
-  // + modifiers), not arbitrary injected text.
-  if (!/^([A-Za-z0-9]+|(Control|Shift|Alt|Meta)(\+(Control|Shift|Alt|Meta))*\+[A-Za-z0-9]+|Enter|Tab|Escape|Backspace|Delete|Home|End|PageUp|PageDown|Arrow(Up|Down|Left|Right)|Space)$/.test(key)) {
-    return { error: 'bad_key' }
-  }
-  try {
-    await session.page.keyboard.press(key)
-  } catch {
-    return { error: 'key_failed' }
-  }
-  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
-  await session.page.waitForTimeout(250)
-  return snapshot(session.page, baseUrl, email)
-}
-
-// Click on coordinates (x,y) in the viewport (1280×800). For elements the
-// indexed selector cannot catch (canvas, maps, custom UI).
-export async function browserClickAt(email: string, baseUrl: string, x: number, y: number): Promise<BrowserResult> {
-  // It used to have a hand-copied skeleton (session → action → wait →
-  // snapshot), even though `withPageAction` exists exactly for that. Here
-  // there is a single source.
-  const cx = Math.max(0, Math.min(1280, Math.round(x)))
-  const cy = Math.max(0, Math.min(800, Math.round(y)))
-  return withPageAction(email, baseUrl, (page) => page.mouse.click(cx, cy))
-}
-
-export async function browserClose(email: string): Promise<void> {
-  await closeSession(email)
 }

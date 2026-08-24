@@ -1,10 +1,14 @@
 import { chromium } from '../backend/node_modules/playwright/index.mjs'
+import { readFileSync } from 'node:fs'
+
+const product = JSON.parse(readFileSync(new URL('../config/product.json', import.meta.url), 'utf8'))
+const targetOrigin = process.env.KELION_URL || product.publicAppOrigin
 
 const browser = await chromium.launch({ headless: true })
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } })
 const page = await ctx.newPage()
 await page.setExtraHTTPHeaders({ 'x-test-auth': process.env.TEST_AUTH_TOKEN })
-await page.goto('https://kelionai.app', { waitUntil: 'networkidle', timeout: 30000 })
+await page.goto(targetOrigin, { waitUntil: 'networkidle', timeout: 30000 })
 await page.waitForTimeout(3000)
 // Apasă „Refuz" pe poarta de consimțământ
 const refuzBtn = page.locator('button:has-text("Refuz")')

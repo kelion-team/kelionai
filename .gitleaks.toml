@@ -1,0 +1,93 @@
+title = "Kelionai — secrete interzise în arborele curent"
+
+[extend]
+useDefault = true
+
+# Reguli explicite pentru familiile cu impact critic. Sunt păstrate peste
+# setul implicit Gitleaks ca o schimbare upstream să nu slăbească poarta.
+[[rules]]
+id = "kelion-openai-project-or-admin"
+description = "Cheie OpenAI project/admin"
+regex = '''\b(sk-(?:proj|admin)-[A-Za-z0-9_-]{20,})\b'''
+secretGroup = 1
+keywords = ["sk-proj-", "sk-admin-"]
+
+[[rules]]
+id = "kelion-openai-legacy"
+description = "Cheie OpenAI legacy"
+regex = '''\b(sk-[A-Za-z0-9]{32,})\b'''
+secretGroup = 1
+keywords = ["sk-"]
+
+[[rules]]
+id = "kelion-anthropic"
+description = "Cheie Anthropic"
+regex = '''\b(sk-ant-[A-Za-z0-9_-]{20,})\b'''
+secretGroup = 1
+keywords = ["sk-ant-"]
+
+[[rules]]
+id = "kelion-google-api"
+description = "Cheie Google API"
+regex = '''\b(AIza[0-9A-Za-z_-]{30,})\b'''
+secretGroup = 1
+keywords = ["AIza"]
+
+[[rules]]
+id = "kelion-github-token"
+description = "Token GitHub clasic sau fine-grained"
+regex = '''\b((?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,}))\b'''
+secretGroup = 1
+keywords = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"]
+
+[[rules]]
+id = "kelion-private-key"
+description = "Cheie privată PEM/OpenSSH"
+regex = '''(-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)'''
+secretGroup = 1
+keywords = ["PRIVATE KEY-----"]
+
+[[rules]]
+id = "kelion-postgres-credential-url"
+description = "URL PostgreSQL cu parolă inclusă"
+regex = '''\b(postgres(?:ql)?://[^\s:/@]+:[^\s/@]+@[^\s'"`]+)'''
+secretGroup = 1
+keywords = ["postgres://", "postgresql://"]
+
+[[rules]]
+id = "kelion-internal-automation-secret"
+description = "Secret intern bridge/automation scris în clar"
+regex = '''(?i)(?:BRIDGE_SECRET|BRIDGE_TOKEN)\s*[:=]\s*["']?([A-Za-z0-9_-]{20,})'''
+secretGroup = 1
+keywords = ["BRIDGE_SECRET", "BRIDGE_TOKEN"]
+
+  [[rules.allowlists]]
+  description = "Referințe GitHub Actions la secret store, nu valori"
+  regexTarget = "match"
+  regexes = ['''\$\{\{\s*secrets\.''']
+
+# Fixture-urile folosesc credențiale evident imposibile; sunt limitate la
+# fișiere de test și nu permit excepții în codul de producție.
+[[allowlists]]
+description = "URL-uri PostgreSQL sintetice în teste de parsare"
+paths = [
+  '''backend/src/dbConexiune\.rabdare\.test\.ts''',
+  '''backend/src/dbConexiune\.test\.ts''',
+  '''backend/src/dbPool\.test\.ts''',
+]
+regexTarget = "match"
+regexes = [
+  '''postgres(?:ql)?://(?:user|u|test|postgres):(?:pass|p|test|secret|password)@''',
+]
+
+[[allowlists]]
+description = "Placeholder fără valoare din exemplul de configurare"
+paths = ['''deploy/kelionai\.env\.example''']
+regexTarget = "line"
+regexes = ['''DATABASE_URL=postgres://USER:PAROLA@''']
+
+[[allowlists]]
+description = "Secrete interne intenționat goale în exemplul backend"
+paths = ['''backend/\.env\.example''']
+regexTarget = "line"
+regexes = ['''^(?:CODEX_WORKER_SECRET|CONSTRUCTOR_PUBLISHER_SECRET|CONSTRUCTOR_RELEASE_SECRET)=$''']

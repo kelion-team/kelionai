@@ -1,142 +1,108 @@
-import { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
-import { config } from '../config.js';
+import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify'
+import { listBuildJobs, type BuildJob } from '../db.js'
+import { cerAdmin } from '../session.js'
 
 export interface DeployState {
-  status: 'idle' | 'running' | 'success' | 'failed';
-  step: string;
-  stepIndex: number;
-  totalSteps: number;
-  percent: number;
-  message: string;
-  startedAt: string | null;
-  updatedAt: string;
-  error?: string | null;
+  status: 'idle' | 'running' | 'success' | 'failed'
+  jobId: string | null
+  step: string
+  stepIndex: number
+  totalSteps: number
+  percent: number
+  message: string
+  startedAt: string | null
+  updatedAt: string
+  error: string | null
+  commit: string | null
+  liveVersion: string | null
 }
 
-let currentDeployState: DeployState = {
-  status: 'idle',
-  step: '',
-  stepIndex: 0,
-  totalSteps: 0,
-  percent: 0,
-  message: 'Niciun deploy în curs',
-  startedAt: null,
-  updatedAt: new Date().toISOString(),
-  error: null,
-};
+const STAGES = ['queued', 'claimed', 'accepted', 'working', 'gates_passed', 'pr_opened', 'merged', 'deployed'] as const
 
-// Maximum running time before considering deploy timed out / stale (e.g. 15 minutes)
-const DEPLOY_TIMEOUT_MS = 15 * 60 * 1000;
+function latestRelevant(jobs: BuildJob[]): BuildJob | null {
+  return jobs.find((job) => job.status === 'running' || job.status === 'queued') ?? jobs[0] ?? null
+}
 
-export function getDeployState(): DeployState {
-  if (currentDeployState.status === 'running') {
-    const elapsed = Date.now() - new Date(currentDeployState.updatedAt).getTime();
-    if (elapsed > DEPLOY_TIMEOUT_MS) {
-      currentDeployState = {
-        ...currentDeployState,
-        status: 'failed',
-        error: 'Deploy-ul a depășit timpul limită (timeout / deconectare)',
-        message: 'Procesul de deploy a expirat sau a fost întrerupt.',
-        updatedAt: new Date().toISOString(),
-      };
+function deployState(job: BuildJob | null): DeployState {
+  if (!job) {
+    return {
+      status: 'idle', jobId: null, step: '', stepIndex: 0, totalSteps: STAGES.length,
+      percent: 0, message: 'Niciun deploy în curs', startedAt: null,
+      updatedAt: new Date(0).toISOString(), error: null, commit: null, liveVersion: null,
     }
   }
-  return currentDeployState;
+  const stage = STAGES.includes(job.constructorStage as typeof STAGES[number])
+    ? job.constructorStage as typeof STAGES[number]
+    : job.status === 'queued' ? 'queued' : 'working'
+  const stageIndex = STAGES.indexOf(stage)
+  const completed = job.status === 'done' && stage === 'deployed' && Boolean(job.commit && job.liveVersion)
+  const failed = job.status === 'failed' || job.status === 'cancelled'
+  return {
+    status: completed ? 'success' : failed ? 'failed' : 'running',
+    jobId: String(job.id),
+    step: stage,
+    stepIndex: stageIndex + 1,
+    totalSteps: STAGES.length,
+    percent: completed ? 100 : Math.max(0, Math.round((stageIndex / (STAGES.length - 1)) * 100)),
+    message: String(job.progress || stage).slice(0, 500),
+    startedAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    error: failed ? 'Constructorul a raportat eșecul; detaliile sunt în jurnalul jobului autorizat.' : null,
+    commit: job.commit,
+    liveVersion: job.liveVersion,
+  }
 }
 
-export function setDeployState(newState: Partial<DeployState>): DeployState {
-  const now = new Date().toISOString();
-  const base = getDeployState();
-  const calculatedPercent =
-    typeof newState.percent === 'number'
-      ? newState.percent
-      : typeof newState.stepIndex === 'number' && typeof newState.totalSteps === 'number' && newState.totalSteps > 0
-      ? Math.min(100, Math.round((newState.stepIndex / newState.totalSteps) * 100))
-      : base.percent;
-
-  currentDeployState = {
-    ...base,
-    ...newState,
-    percent: calculatedPercent,
-    updatedAt: now,
-    startedAt: newState.status === 'running' && base.status !== 'running' ? now : (base.startedAt || now),
-  };
-
-  return currentDeployState;
+async function readDeployState(reply: FastifyReply): Promise<DeployState | null> {
+  const jobs = await listBuildJobs(20)
+  if (!jobs) {
+    reply.code(503).send({ ok: false, error: 'deploy_state_unavailable' })
+    return null
+  }
+  return deployState(latestRelevant(jobs))
 }
 
-export async function deployRoutes(
-  fastify: FastifyInstance,
-  _opts: FastifyPluginOptions
-) {
-  // Read current deploy progress (JSON)
-  fastify.get('/api/deploy/progress', async (_req: FastifyRequest, reply: FastifyReply) => {
-    return reply.send({
-      ok: true,
-      state: getDeployState(),
-    });
-  });
+export async function deployRoutes(fastify: FastifyInstance, _opts: FastifyPluginOptions): Promise<void> {
+  // Read-only projection of the durable, signed Constructor job. The web app
+  // has no endpoint that can paint a deployment state independently.
+  fastify.get('/api/deploy/progress', async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!cerAdmin(req, reply)) return
+    const state = await readDeployState(reply)
+    if (!state) return
+    return reply.send({ ok: true, state })
+  })
 
-  // Real-time SSE stream for deploy status & progress
   fastify.get('/api/deploy/status', async (req: FastifyRequest, reply: FastifyReply) => {
-    reply.raw.setHeader('Content-Type', 'text/event-stream');
-    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
-    reply.raw.setHeader('Connection', 'keep-alive');
-    reply.raw.flushHeaders?.();
+    if (!cerAdmin(req, reply)) return
+    const initial = await readDeployState(reply)
+    if (!initial) return
+    reply.raw.setHeader('Content-Type', 'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-store')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.flushHeaders?.()
 
-    const sendState = () => {
-      const state = getDeployState();
+    let closed = false
+    let busy = false
+    const send = async (): Promise<void> => {
+      if (closed || busy) return
+      busy = true
       try {
-        reply.raw.write(`data: ${JSON.stringify(state)}\n\n`);
-      } catch {
-        // stream closed
+        const jobs = await listBuildJobs(20)
+        const payload = jobs
+          ? { ok: true, state: deployState(latestRelevant(jobs)) }
+          : { ok: false, error: 'deploy_state_unavailable' }
+        reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`)
+      } finally {
+        busy = false
       }
-    };
-
-    sendState();
-    const interval = setInterval(sendState, 2000);
-
+    }
+    reply.raw.write(`data: ${JSON.stringify({ ok: true, state: initial })}\n\n`)
+    const interval = setInterval(() => { void send() }, 2_000)
     req.raw.on('close', () => {
-      clearInterval(interval);
-    });
-  });
-
-  // Update deploy progress from CI / deploy scripts / runbook.
-  // GARDAT cu x-bridge-secret (ca rutele constructorului): fără gard, ORICINE
-  // putea picta în admin un „deploy reușit" fals — exact soiul de ecran
-  // mincinos (capturi false de aplicație) pe care ownerul l-a interzis pe 14 aug.
-  fastify.post('/api/deploy/progress', async (
-    req: FastifyRequest<{
-      Body: {
-        status?: 'idle' | 'running' | 'success' | 'failed';
-        step?: string;
-        stepIndex?: number;
-        totalSteps?: number;
-        percent?: number;
-        message?: string;
-        error?: string;
-      };
-    }>,
-    reply: FastifyReply
-  ) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(401).send({ ok: false, error: 'unauthorized' });
-    const body = req.body || {};
-    const updated = setDeployState({
-      status: body.status,
-      step: body.step,
-      stepIndex: body.stepIndex,
-      totalSteps: body.totalSteps,
-      percent: body.percent,
-      message: body.message,
-      error: body.error,
-    });
-
-    return reply.send({
-      ok: true,
-      state: updated,
-    });
-  });
+      closed = true
+      clearInterval(interval)
+    })
+  })
 }
 
-export default deployRoutes;
+export default deployRoutes

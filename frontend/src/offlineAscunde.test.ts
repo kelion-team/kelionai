@@ -3,15 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-// ── LACĂTUL „OFFLINE = DOAR CE MERGE DOVEDIT" (owner, 22 aug) ────────────────
-// Ordinele verbatim: „cind este in mod ofline, funtiile dedicate de internet nu
-// trebuiesc sa se reafiseze, ele sunt afisate doar cind aplicatia e live" +
-// „vreau sa ramina ce merge dovedit". Regula mecanizată aici: fiecare intrare
-// de UI care cere serverul stă în spatele lui `online` (pingul real /health,
-// useConectat) — nu a lui navigator.onLine, care minte.
-//
-// Pinurile se fac pe COD VIU: comentariile se aruncă ÎNTÂI (lecția M6 — un
-// text din comentariu poate înghiți pinul), în ordinea // apoi /* */.
+// Suprafețele care cer serverul stau în spatele stării reale de conexiune.
 const aici = dirname(fileURLToPath(import.meta.url))
 function codViu(rel: string): string {
   return readFileSync(join(aici, rel), 'utf8')
@@ -20,6 +12,7 @@ function codViu(rel: string): string {
 }
 const chat = codViu('components/ChatPanel.tsx')
 const stage = codViu('pages/Stage.tsx')
+const wallet = codViu('components/WalletButton.tsx')
 
 describe('offline: funcțiile de internet nu se afișează (ChatPanel)', () => {
   it('microfonul offline există DOAR cu urechea locală (kitul, 22 aug) — altfel null', () => {
@@ -38,25 +31,25 @@ describe('offline: funcțiile de internet nu se afișează (ChatPanel)', () => {
   })
 
   it('ușa din dos a fișierelor e închisă: paste/drop ies devreme offline', () => {
-    expect(chat).toMatch(/function onPasteFiles\(e: ReactClipboardEvent\): void \{\s*if \(!esteConectat\(\)\) return/)
+    expect(chat).toMatch(/function onPasteFiles\(e: ReactClipboardEvent\): void \{\s*if \(!online\) return/)
     // La drop, preventDefault vine ÎNAINTE de return: onDragOver previne mereu,
     // deci fără prevenire și aici browserul NAVIGA la fișierul aruncat
     // (aplicația înlocuită, stare pierdută) — verificatorul de logică, 22 aug.
-    expect(chat).toMatch(/function onDropFiles\(e: ReactDragEvent\): void \{\s*if \(!esteConectat\(\)\) \{\s*e\.preventDefault\(\)\s*return\s*\}/)
+    expect(chat).toMatch(/function onDropFiles\(e: ReactDragEvent\): void \{\s*if \(!online\) \{\s*e\.preventDefault\(\)\s*return\s*\}/)
   })
 
   it('vocea ONLINE se ÎNCHIDE pe offline, iar urechea LOCALĂ îi ia locul (kitul, 22 aug)', () => {
     // Blocantul verificatorului rămâne acoperit: sesiunea de server se stinge
     // la căderea netului (fără micManualOff — omul n-a ales oprit), ensureMic
     // refuză pornirea offline; în plus, urechea Whisper locală pornește ea
-    // (din cache, fără rețea), cu buton viu și half-duplex față de gura Piper.
-    expect(chat).toMatch(/urecheaLocalaRef\.current\?\.stop\(\)[\s\S]{0,300}if \(!micManualOffRef\.current\) void ensureMicRef\.current\(\)/)
-    expect(chat).toMatch(/vlGeneratieRef\.current\+\+[\s\S]{0,400}micRef\.current\?\.stop\(\)/)
+    // (din cache, fără rețea), cu buton viu și half-duplex față de vocea locală.
+    expect(chat).toMatch(/if \(online\) \{[\s\S]{0,900}urecheaLocalaRef\.current\?\.stop\(\)[\s\S]{0,900}ensureMicRef\.current\(\)/)
+    expect(chat).toMatch(/vlGeneratieRef\.current\+\+[\s\S]{0,400}vlRef\.current\?\.inchide\(\)/)
     expect(chat).toMatch(/void pornesteUrecheaLocalaRef\.current\(\)/)
-    // half-duplex și față de coada Chirp rămasă să sune (verificatorul:
+    // half-duplex și față de vocea locală rămasă să sune.
     // stopVoice nu o mai taie la căderea netului — redarea e locală).
-    expect(chat).toMatch(/if \(piperVorbeste\(\) \|\| isVoicePlaying\(\)\) return/)
-    expect(chat).toMatch(/if \(!esteConectat\(\)\) return\s*\n\s*if \(micRef\.current \|\| micStartingRef\.current \|\| micManualOffRef\.current\) return/)
+    expect(chat).toMatch(/if \(voceLocalaVorbeste\(\) \|\| isVoicePlaying\(\)\) return/)
+    expect(chat).toMatch(/vlGeneratieRef\.current\+\+[\s\S]{0,300}vlRef\.current\?\.inchide\(\)[\s\S]{0,800}refreshOfflineKit\(\)/)
   })
 
   it('câmpul de scris pornește GOL garantat (mătura pe nepotrivirea DOM≠stare)', () => {
@@ -78,8 +71,10 @@ describe('offline: funcțiile de internet nu se afișează (Stage)', () => {
     expect(stage).toMatch(/\{online && \(\s*<div className="apps-wrap">/)
   })
 
-  it('portofelul și „Add credits" (sold/pachete/cod de pe server) dispar offline', () => {
-    expect(stage).toMatch(/user\.role !== 'admin' && online && \(\s*<WalletButton/)
-    expect(stage).toMatch(/user\.role !== 'admin' && online && \(\s*<button[\s\S]{0,600}kelion:wallet-open/)
+  it('portofelul dispare offline, iar cumpărarea depinde numai de scutirea serverului', () => {
+    expect(stage).toMatch(/\{online && \(\s*<WalletButton/)
+    expect(wallet).toContain('setExempt(Boolean(b.scutit))')
+    expect(wallet).toMatch(/\{exempt === false && \(\s*<>/)
+    expect(wallet).not.toMatch(/user\.role\s*[!=]==?\s*['"]admin['"]/)
   })
 })

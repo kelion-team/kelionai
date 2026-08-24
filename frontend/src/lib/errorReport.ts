@@ -1,21 +1,19 @@
-// ── REPORTING BROWSER ERRORS TO KELION (F12 → server) ─────────────────────
-// Adrian (Jul 24): "he must have access to the F12 logs". We catch console
-// errors (onerror, unhandledrejection, console.error) and send them in batches
-// to /api/client-errors; the server injects them into Kelion's context, so he
-// can ANALYZE them when asked why something doesn't work. Dedup + cap, so it
-// floods neither the network nor the context.
+import { apiFetch } from './transport'
+import { verificaConexiuneReala } from './conexiune'
+import { redactDiagnostic } from '../../../backend/src/shared/diagnosticRedaction'
+
+// Browser errors are sent in bounded, redacted batches only after connectivity
+// is verified. Offline batches remain in memory until a verified reconnect.
 
 const queue: string[] = []
 let timer: number | null = null
-// Dedup WITH EXPIRY (Jul 24 audit, P1-4): the old lifetime Set sent a
-// RECURRENT error only once per page session — after the server's 15-min
-// window, Kelion no longer saw it even though it kept happening. Now we
-// resend after 5 min.
+let onlineListenerArmed = false
+let flushing = false
 const seen = new Map<string, number>()
 const RESEND_AFTER_MS = 5 * 60_000
 
 function reportClientError(msg: string): void {
-  const m = (msg ?? '').slice(0, 400).trim()
+  const m = redactDiagnostic(msg, 400)
   if (!m) return
   const now = Date.now()
   const last = seen.get(m)
@@ -23,32 +21,55 @@ function reportClientError(msg: string): void {
   seen.set(m, now)
   if (seen.size > 200) seen.clear() // resetăm dedupul, nu memoria
   queue.push(m)
+  if (queue.length > 100) queue.splice(0, queue.length - 100)
   if (timer == null) timer = window.setTimeout(() => void flush(), 3000)
+}
+
+function armVerifiedReconnect(): void {
+  if (onlineListenerArmed || typeof window === 'undefined') return
+  onlineListenerArmed = true
+  window.addEventListener('online', onOnline, { once: true })
+}
+
+function onOnline(): void {
+  onlineListenerArmed = false
+  if (timer == null) timer = window.setTimeout(() => void flush(), 0)
 }
 
 async function flush(): Promise<void> {
   timer = null
-  const errors = queue.splice(0, 10)
-  if (errors.length === 0) return
+  if (flushing || queue.length === 0) return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    armVerifiedReconnect()
+    return
+  }
+  flushing = true
   try {
-    await fetch('/api/client-errors', {
+    if (!(await verificaConexiuneReala())) {
+      armVerifiedReconnect()
+      return
+    }
+    const errors = queue.slice(0, 10)
+    const response = await apiFetch('/api/client-errors', {
       method: 'POST',
       credentials: 'include',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ errors }),
     })
+    if (!response.ok) throw new Error(`client_errors_${response.status}`)
+    queue.splice(0, errors.length)
   } catch {
-    /* offline — errors stay only in the local console */
+    // Păstrăm lotul pentru reconnect; nu îl marcăm trimis pe un răspuns ambiguu.
+  } finally {
+    flushing = false
   }
-  if (queue.length > 0) timer = window.setTimeout(() => void flush(), 3000)
+  if (queue.length > 0 && timer == null) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) armVerifiedReconnect()
+    else timer = window.setTimeout(() => void flush(), 5000)
+  }
 }
 
-// PERF → CREIER (owner, 13 aug: „astea trebuia să apară alerte la creier, să
-// autorepare"). Watchdog-ul (fir blocat) și ceasul (ceas lent) scriau cu
-// `console.warn`, pe care reporterul NU-l prinde — deci simptomele de performanță
-// nu ajungeau NICIODATĂ la creier. Le dăm o poartă directă spre ACELAȘI canal
-// (/api/client-errors), ca blocajele mari să devină alerte pe care Kelion le vede
-// și le poate analiza. Dedup + batch ca orice altă eroare-client (nu îneacă).
+// Simptomele de performanță folosesc același canal redacted și bounded.
 export function raporteazaSimptom(msg: string): void {
   reportClientError(msg)
 }

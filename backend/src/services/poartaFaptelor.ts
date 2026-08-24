@@ -175,16 +175,12 @@ const FAMILII: readonly FamiliePretentie[] = [
     unelte: ['build_software'],
     eticheta: '„am preluat cerința" — fără build_software (niciun ordin creat, nimic nu va mișca)',
   },
-  // AUDITUL INVENTAT (owner, 16 aug 06:56, cu captura: „asta e dovada mea ca
-  // ti-ai batut joc de mine" — un „audit al codului sursă" care numea modele
-  // ce NU EXISTĂ nicăieri în repo: claude-3-5-sonnet, gpt-4o). Singura scanare
-  // REALĂ a codului e poarta anti-hardcod rulată pe server (ruleaza_portile →
-  // 'hardcodari') sau verdictul ei din jurnal (jurnal_masuratori). Un „audit"
-  // povestit fără una din ele = inventat, se demască.
+  // Procesul web nu citește sau execută repository code. Numai rezultatul
+  // măsurat al unui job Constructor poate susține o afirmație despre audit.
   {
     re: /((?<!n-)(?<!\p{L})am\s+(scanat|auditat)|[îi]n\s+urma\s+(scan|audit)[ăa]?\p{L}*)\b[^.!?\n]{0,80}\b(cod|surs)/iu,
-    unelte: ['ruleaza_portile', 'jurnal_masuratori'],
-    eticheta: '„am scanat codul sursă" — fără ruleaza_portile/jurnal_masuratori: auditul e inventat',
+    unelte: ['constructor_status'],
+    eticheta: '„am scanat codul sursă" — fără un rezultat Constructor măsurat: auditul e inventat',
   },
 ]
 

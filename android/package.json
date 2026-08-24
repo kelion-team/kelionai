@@ -3,14 +3,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "audit": "npm audit"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "@bubblewrap/cli": "^1.24.1"
-  }
+  "type": "commonjs"
 }

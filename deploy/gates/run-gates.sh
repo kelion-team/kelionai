@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE=/source
+WORK=/work/repo
+
+die() {
+  printf 'codex-gates: %s\n' "$1" >&2
+  exit 1
+}
+
+[ -f "$SOURCE/AGENTS.md" ] || die 'sursa montată lipsește'
+[ -f "$SOURCE/backend/package-lock.json" ] || die 'lockfile-ul backend lipsește'
+[ -f "$SOURCE/frontend/package-lock.json" ] || die 'lockfile-ul frontend lipsește'
+[ -f "$SOURCE/.git" ] || die 'sursa nu este worktree Git dedicat'
+[ ! -e "$SOURCE/backend/node_modules" ] || die 'worktree-ul conține node_modules backend necontrolat'
+[ ! -e "$SOURCE/frontend/node_modules" ] || die 'worktree-ul conține node_modules frontend necontrolat'
+
+cmp -s "$SOURCE/backend/package.json" /opt/kelion/locks/backend-package.json \
+  && cmp -s "$SOURCE/backend/package-lock.json" /opt/kelion/locks/backend-package-lock.json \
+  || die 'dependințele backend diferă de imaginea gate'
+cmp -s "$SOURCE/frontend/package.json" /opt/kelion/locks/frontend-package.json \
+  && cmp -s "$SOURCE/frontend/package-lock.json" /opt/kelion/locks/frontend-package-lock.json \
+  || die 'dependințele frontend diferă de imaginea gate'
+
+mkdir -p /work/tmp "$WORK"
+cp -a --no-preserve=ownership "$SOURCE/." "$WORK/"
+ln -s /opt/kelion/backend/node_modules "$WORK/backend/node_modules"
+ln -s /opt/kelion/frontend/node_modules "$WORK/frontend/node_modules"
+
+export CI=1
+export HOME=/nonexistent
+export GITLEAKS_BIN=/usr/local/bin/gitleaks
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export NO_COLOR=1
+export npm_config_audit=false
+export npm_config_fund=false
+export npm_config_offline=true
+export npm_config_update_notifier=false
+export TMPDIR=/work/tmp
+
+cd "$WORK"
+npm --prefix backend run typecheck
+npm --prefix backend test
+npm --prefix frontend run build
+npm --prefix frontend run lint
+npm --prefix frontend test
+node --test \
+  scripts/verifica-butoane.test.mjs \
+  scripts/verifica-exporturi.test.mjs \
+  scripts/verifica-hardcodari.test.mjs \
+  scripts/verifica-migrari.test.mjs \
+  scripts/inventar-audit.test.mjs \
+  scripts/verifica-contract-deploy.test.mjs \
+  ios/appstore-build.test.mjs \
+  deploy/lib/create-migration-proof.test.mjs \
+  deploy/lib/caddy-security.test.mjs \
+  deploy/lib/codex-boundary.test.mjs \
+  deploy/lib/constructor-publication.test.mjs \
+  deploy/lib/network-config.test.mjs \
+  deploy/lib/compose-security.test.mjs \
+  deploy/lib/security-policy.test.mjs
+node scripts/identifica-teste-moarte.mjs
+node scripts/verifica-exporturi.mjs
+node scripts/verifica-sintaxa.mjs
+node scripts/verifica-hardcodari.mjs
+node scripts/verifica-creier-unic.mjs
+node scripts/verifica-workflow-uri-sigure.mjs
+node scripts/verifica-migrari.mjs
+node scripts/inventar-audit.mjs
+node scripts/verifica-contract-deploy.mjs
+node deploy/codex-worker.mjs --self-test
+node deploy/constructor-publisher.mjs --self-test
+node deploy/constructor-release.mjs --self-test
+node scripts/verifica-clienti-nativi.mjs
+node scripts/verifica-butoane.mjs
+bash scripts/verifica-secrete.sh --worktree --dist
+/opt/kelion/gates/node_modules/.bin/jscpd --config .jscpd.json --threshold 0 --cross-formats js-ts
+
+printf 'codex-gates: TRECE\n'

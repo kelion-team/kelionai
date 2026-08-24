@@ -1,34 +1,37 @@
-// ── P13: SPAȚIUL DE ÎNCĂRCARE ÎN CHAT, MĂRIT ȚINTIT ─────────────────────────
-// (owner, 15 aug: „trebuie sa-i maresti spatiu de incarcare in chat")
-//
-// MĂSURAT: /api/ingest stătea pe bodyLimit-ul GLOBAL de 25MB — cu umflarea
-// base64 (4/3), un fișier de ~18MB umplea țeava, iar frontend-ul (care
-// oglindea cinstit limita serverului) îl refuza. Mărirea e ȚINTITĂ: doar
-// ruta de ingest urcă la 100MB (ca /api/chat, sub capul real Cloudflare);
-// globalul de 25MB rămâne pentru restul rutelor — nu lărgim toate ușile
-// pentru că una era strâmtă.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import {
+  DOCUMENT_UPLOAD_LIMITS,
+  documentUploadMaxBytes,
+} from './shared/documentUploadPolicy.js'
 
-const aici = dirname(fileURLToPath(import.meta.url))
-const citeste = (cale: string): string => readFileSync(join(aici, cale), 'utf8')
+const citeste = (cale: string): string =>
+  readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
-describe('spațiul de încărcare: mărit unde trebuia, neschimbat unde nu', () => {
-  it('/api/ingest are limita LUI de 100MB', () => {
-    const ingest = citeste('routes/ingest.ts')
-    expect(ingest).toMatch(/'\/api\/ingest', \{\s*\n\s*bodyLimit: 100_000_000,/)
+describe('plafonul unic de încărcare a documentelor', () => {
+  it('limitează separat documentele și arhivele comprimate', () => {
+    expect(documentUploadMaxBytes('contract.pdf')).toBe(DOCUMENT_UPLOAD_LIMITS.documentBytes)
+    expect(documentUploadMaxBytes('date.csv')).toBe(DOCUMENT_UPLOAD_LIMITS.documentBytes)
+    expect(documentUploadMaxBytes('raport.docx')).toBe(DOCUMENT_UPLOAD_LIMITS.archiveBytes)
+    expect(documentUploadMaxBytes('executabil.exe')).toBeNull()
+    expect(DOCUMENT_UPLOAD_LIMITS.archiveBytes).toBeLessThan(DOCUMENT_UPLOAD_LIMITS.documentBytes)
   })
 
-  it('globalul rămâne 25MB — restul rutelor nu se lărgesc pe furiș', () => {
-    const index = citeste('index.ts')
-    expect(index).toMatch(/bodyLimit: 25_000_000/)
+  it('ruta folosește contractul comun și păstrează o limită de corp țintită', () => {
+    const ingest = citeste('./routes/ingest.ts')
+    expect(ingest).toContain("from '../shared/documentUploadPolicy.js'")
+    expect(ingest).toContain('bodyLimit: DOCUMENT_UPLOAD_LIMITS.requestBodyBytes')
+    expect(ingest).toContain('documentUploadMaxBytes(filename)')
   })
 
-  it('oglinda din frontend urcă la fel (96MB base64 ≈ fișier ~72MB), cu refuzul cinstit păstrat', () => {
-    const panou = citeste('../../frontend/src/components/ChatPanel.tsx')
-    expect(panou).toMatch(/MAX_INGEST_B64 = 96_000_000/)
-    expect(panou).toMatch(/docTooLarge/)
+  it('browserul face preflight cu aceeași sursă înainte de FileReader', () => {
+    const panel = citeste('../../frontend/src/components/ChatPanel.tsx')
+    const inceput = panel.indexOf('async function addDocFiles')
+    const fluxDocumente = panel.slice(inceput, panel.indexOf('\n  function ', inceput + 1))
+    expect(panel).toContain("from '../../../backend/src/shared/documentUploadPolicy'")
+    expect(inceput).toBeGreaterThanOrEqual(0)
+    expect(fluxDocumente).toContain('documentUploadMaxBytes(name)')
+    expect(fluxDocumente.indexOf('if (file.size > maxBytes)')).toBeLessThan(fluxDocumente.indexOf('const r = new FileReader()'))
   })
 })

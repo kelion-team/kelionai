@@ -15,17 +15,33 @@
  */
 
 import groovy.xml.MarkupBuilder
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.net.URI
 
 plugins {
     id 'com.android.application'
 }
 
+def productConfigFile = new File(rootProject.projectDir, '../config/product.json')
+if (!productConfigFile.isFile()) throw new GradleException('config/product.json lipsește')
+def productConfig = new JsonSlurper().parse(productConfigFile)
+def configuredVersionCode = productConfig.androidVersionCode as Integer
+def releaseVersionCodeRaw = System.getenv('KELION_ANDROID_VERSION_CODE')
+def effectiveVersionCode = releaseVersionCodeRaw ? Integer.parseInt(releaseVersionCodeRaw) : configuredVersionCode
+if (effectiveVersionCode < configuredVersionCode || effectiveVersionCode > 2100000000) {
+    throw new GradleException('KELION_ANDROID_VERSION_CODE este în afara intervalului permis')
+}
+def publicOrigin = new URI(productConfig.publicAppOrigin as String)
+if (publicOrigin.scheme != 'https' || publicOrigin.path != '' || publicOrigin.query != null || publicOrigin.fragment != null) {
+    throw new GradleException('publicAppOrigin trebuie să fie un origin HTTPS exact')
+}
 def twaManifest = [
-    applicationId: 'app.kelionai.twa',
-    hostName: 'kelionai.app', // The domain being opened in the TWA.
+    applicationId: productConfig.androidApplicationId as String,
+    hostName: publicOrigin.host,
     launchUrl: '/', // The start path for the TWA. Must be relative to the domain.
-    name: 'Kelionai', // The application name.
-    launcherName: 'Kelionai', // The name shown on the Android Launcher.
+    name: productConfig.appName as String,
+    launcherName: productConfig.appName as String,
     themeColor: '#0B0A14', // The color used for the status bar.
     themeColorDark: '#000000', // The color used for the dark status bar.
     navigationColor: '#0B0A14', // The color used for the navigation bar.
@@ -52,7 +68,8 @@ def twaManifest = [
 
 android {
     compileSdkVersion 36
-    namespace "app.kelionai.twa"
+    buildToolsVersion '35.0.0'
+    namespace twaManifest.applicationId
     // SEMNARE DIN CI (GitHub Actions) — activă DOAR când există env-urile de
     // keystore (build-ul din cloud). Local (fluxul Bubblewrap de pe PC-ul lui
     // Adrian) env-urile lipsesc → blocul e inert, semnarea rămâne cea veche.
@@ -68,11 +85,11 @@ android {
         }
     }
     defaultConfig {
-        applicationId "app.kelionai.twa"
+        applicationId twaManifest.applicationId
         minSdkVersion 21
         targetSdkVersion 35
-        versionCode 3
-        versionName "1.0.0"
+        versionCode effectiveVersionCode
+        versionName productConfig.appVersion as String
 
         // The name for the application
         resValue "string", "appName", twaManifest.name
@@ -90,12 +107,12 @@ android {
             // The URL the Web Manifest for the Progressive Web App that the TWA points to. This
             // is used by Chrome OS and Meta Quest to open the Web version of the PWA instead of
             // the TWA, as it will probably give a better user experience for non-mobile devices.
-            resValue "string", "webManifestUrl", 'https://kelionai.app/manifest.webmanifest'
+            resValue "string", "webManifestUrl", productConfig.publicAppOrigin + '/manifest.webmanifest'
         
 
         
             // This is used by Meta Quest.
-            resValue "string", "fullScopeUrl", 'https://kelionai.app/'
+            resValue "string", "fullScopeUrl", productConfig.publicAppOrigin + '/'
         
 
         
@@ -103,6 +120,12 @@ android {
         // The hostname is used when building the intent-filter, so the TWA is able to
         // handle Intents to open host url of the application.
         resValue "string", "hostName", twaManifest.hostName
+
+        def assetStatements = [[
+            relation: ['delegate_permission/common.handle_all_urls'],
+            target: [namespace: 'web', site: productConfig.publicAppOrigin],
+        ]]
+        resValue "string", "assetStatements", JsonOutput.toJson(assetStatements).replace('"', '\\"')
 
         // This attribute sets the status bar color for the TWA. It can be either set here or in
         // `res/values/colors.xml`. Setting in both places is an error and the app will not
@@ -178,8 +201,9 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
-    lintOptions {
-        checkReleaseBuilds false
+    lint {
+        abortOnError true
+        checkReleaseBuilds true
     }
 }
 

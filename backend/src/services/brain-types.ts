@@ -1,8 +1,4 @@
-// Messages API wire-format types — the subset the codebase actually uses.
-// These are plain TypeScript interfaces describing the JSON that Kimi and GLM
-// (both Messages-compatible API endpoints) send and receive. No SDK
-// is involved: the native fetch client in `brain.ts` produces/consumes
-// exactly these shapes over the wire (POST /v1/messages, SSE streaming).
+// Provider-neutral message and tool types used inside the application.
 
 // ── Content blocks (in a Message response) ────────────────────────────────
 export interface TextBlock {
@@ -75,10 +71,7 @@ export interface Message {
   stop_reason: string | null
   stop_sequence: string | null
   usage: Usage
-  /** Kelion extension: the REAL cost of the call in USD, as reported by the
-   *  provider (OpenRouter `usage.cost`) on the call that produced this
-   *  Message. Present on the internal adapter path (brain.ts); undefined
-   *  means the provider did not itemize it — never assume 0. */
+  /** Provider expense in USD when measured. Undefined means unavailable and
+   *  must never be interpreted as zero. */
   costUsd?: number
 }
-

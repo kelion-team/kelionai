@@ -6,27 +6,16 @@ import { openMicGraph } from './audioGraph'
 // transcriere pe server, nu mai vine niciun transcript. Microfonul:
 //   1. ascultă cu un VAD LOCAL (prag absolut + dominanță peste podeaua de zgomot);
 //   2. când aude voce, ADUNĂ cadrele PCM 16kHz ale frazei (+ un pre-roll ca să nu
-//      piardă prima silabă) și amprenta vocală (pentru verificarea vorbitorului);
+//      piardă prima silabă);
 //   3. când vorbirea se OPREȘTE (o pauză mai lungă decât PAUZA_FRAZA), ÎNCHIDE
-//      fraza și o predă prin onPhrase('', features, audioWav) — DOAR audio, fără
-//      text. Creierul unic (Gemini 3 Pro) aude fraza brută și decide singur dacă i
+//      fraza și o predă prin onPhrase('', audioWav) — DOAR audio, fără
+//      text. Creierul configurat aude fraza brută și decide singur dacă i
 //      se vorbește; poarta de nume (regex pe transcript stâlcit) a dispărut.
 //
-// Ce rămâne neatins: pre-roll-ul, amprenta vocală (buffer-ele de features),
-// barge-in-ul local (cât Kelion vorbește, microfonul e mut și tot detectează
+// Ce rămâne neatins: pre-roll-ul, barge-in-ul local (cât Kelion vorbește,
+// microfonul e mut și tot detectează
 // vocea care-l întrerupe), mute-ul, auto-vindecarea grafului la track-ended, și
 // pornirea aproape instantă cu un stream pre-încălzit.
-
-import {
-  estimateF0,
-  estimateCentroid,
-  estimateZcr,
-  estimateEnergy,
-  estimateRolloff,
-  buildVoiceFeatures,
-  setPendingVoiceFeatures,
-  type VoiceFeatures,
-} from './audioIO.js'
 
 import { TARGET_RATE, downsample, float32ToPcm16 } from './pcm'
 // PAUZA care ÎNCHIDE fraza: o tăcere mai lungă de-atât = sfârșit de rostire →
@@ -63,6 +52,8 @@ const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe muțenia (on
 
 export interface MicStreamHandle {
   stop(): void
+  /** Fluxul deja deschis, pentru analizoare locale pasive. */
+  fluxMicrofon(): MediaStream
   setMuted(muted: boolean): void
   listening: true
 }
@@ -72,31 +63,22 @@ export interface MicStreamOpts {
   // = '🎙️', închis = '') ca banda să arate că se ascultă / s-a terminat.
   onLive: (text: string) => void
   // FRAZA ÎNTREAGĂ, la pauză → merge la creier ca AUDIO brut. `text` e mereu ''
-  // (nu mai există transcript pe client); `features` = amprenta vocală a frazei
-  // (poarta de timbru); `audio` = WAV 16kHz base64 pe care Gemini îl aude nativ.
-  onPhrase: (text: string, features: VoiceFeatures | null, audio?: string) => void
+  // (nu mai există transcript pe client); `audio` = WAV 16kHz base64 pentru
+  // procesarea senzorială locală.
+  onPhrase: (text: string, audio?: string) => void
   onError: (reason: string) => void
   getLang: () => string
   // vocea s-a auzit cât Kelion vorbea → barge-in (taie vocea lui Kelion)
   onBargeIn?: () => void
   // s-a auzit ÎNCEPUT de vorbire (VAD local) — semnalul de barge-in / anti-ecou
   onSpeechBegin?: () => void
-  // DEFAULT true: amprenta frazei ajunge și în store-ul comun (calea de dictare o
-  // consumă pe /api/chat). Calea full-duplex trece false — o ia direct din onPhrase.
-  storePendingFeatures?: boolean
   // stream pre-încălzit: la apăsarea butonului „microfon" chemăm getUserMedia
   // înainte de startMicStream, ca activarea să fie aproape instantă.
   preWarmedStream?: MediaStream
 }
 
-// COMPAT: realtimeVoice cheamă asta când urechea moare — fără STT nu mai există
-// „ureche moartă", dar păstrăm exportul ca no-op ca să nu rupem apelul.
-export function marcheazaUrechiChirpMoarte(): void {
-  /* fără STT — nimic de marcat; păstrat pentru compatibilitatea apelului */
-}
-
 // AUDIO NATIV → CREIER: împachetează cadrele PCM 16kHz (Float32) ale frazei într-un
-// WAV mono 16-bit, ca data-URI base64 — formatul dovedit că Gemini îl „aude" nativ.
+// WAV mono 16-bit pentru calea senzorială offline.
 // Întoarce '' dacă nu e destul audio; orice eroare cade grațios (fraza nu pleacă).
 const MAX_PHRASE_SAMPLES = TARGET_RATE * 20 // cap la ~20s de voce (memorie/upload mărginite)
 function wavDataUri16k(chunks: Float32Array[]): string {
@@ -145,17 +127,11 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   // GRAFUL SE POATE RECONSTRUI ÎN LOC (Aug 2): un track de microfon poate muri
   // mid-sesiune (suspend browser, device grab). Nodurile de mai jos sunt `let`, ca
   // onTrackEnded să redeschidă microfonul prin același openMicGraph și să le
-  // recableze FĂRĂ să atingă starea frazei sau buffer-ele de amprentă.
+  // recableze FĂRĂ să atingă starea frazei.
   let stream = firstGraph.stream
   let ctx = firstGraph.ctx
   let source: MediaStreamAudioSourceNode
   let proc: ScriptProcessorNode
-  let featAnalyser: AnalyserNode
-  // <ArrayBuffer> explicit: TS 5.7+ tipează un Float32Array simplu ca
-  // Float32Array<ArrayBufferLike>, pe care getterele AnalyserNode (strict
-  // Float32Array<ArrayBuffer>) îl refuză — build-ul frontend pica pe asta.
-  let featTimeBuf: Float32Array<ArrayBuffer>
-  let featFreqBuf: Float32Array<ArrayBuffer>
 
   let closed = false
   let muted = false
@@ -199,49 +175,12 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     preRoll.length = 0
   }
 
-  // Buffer-e pentru features vocale ale frazei curente.
-  const phraseF0: number[] = []
-  const phraseEnergies: number[] = []
-  let phraseCentroidSum = 0
-  let phraseCentroidCount = 0
-  let phraseRolloffSum = 0
-  let phraseZcrSum = 0
+  // Energia medie a frazei este folosită numai pentru recalibrarea VAD-ului.
   let phraseEnergySum = 0
   let phraseFrames = 0
   // Cadrele PCM 16kHz ale frazei curente — vocea BRUTĂ trimisă la creier la închidere.
   let phrasePcm: Float32Array[] = []
   let phrasePcmLen = 0
-
-  const collectFrame = (): void => {
-    featAnalyser.getFloatTimeDomainData(featTimeBuf)
-    const energy = estimateEnergy(featTimeBuf)
-    const f0 = estimateF0(featTimeBuf, ctx.sampleRate)
-    phraseEnergies.push(energy)
-    phraseEnergySum += energy
-    phraseZcrSum += estimateZcr(featTimeBuf)
-    if (f0 > 0) phraseF0.push(f0)
-    featAnalyser.getFloatFrequencyData(featFreqBuf)
-    const centroid = estimateCentroid(featFreqBuf, ctx.sampleRate, featAnalyser.fftSize)
-    if (centroid > 0) {
-      phraseCentroidSum += centroid
-      phraseCentroidCount++
-    }
-    phraseRolloffSum += estimateRolloff(featFreqBuf, ctx.sampleRate, featAnalyser.fftSize)
-    phraseFrames++
-  }
-
-  const finalizeFeatures = (): VoiceFeatures | null => {
-    if (phraseFrames < 8) return null
-    const centroid = phraseCentroidCount > 0 ? phraseCentroidSum / phraseCentroidCount : 0
-    return buildVoiceFeatures(
-      phraseF0,
-      phraseEnergies,
-      centroid,
-      phraseRolloffSum / phraseFrames,
-      phraseZcrSum / phraseFrames,
-      phraseEnergySum / phraseFrames,
-    )
-  }
 
   let plafonLivrare: ReturnType<typeof setTimeout> | null = null
 
@@ -252,18 +191,12 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     }
     phrasePcm = []
     phrasePcmLen = 0
-    phraseF0.length = 0
-    phraseEnergies.length = 0
-    phraseCentroidSum = 0
-    phraseCentroidCount = 0
-    phraseRolloffSum = 0
-    phraseZcrSum = 0
     phraseEnergySum = 0
     phraseFrames = 0
     phraseOpen = false
   }
 
-  // ÎNCHIDE fraza: împachetează audio-ul brut + amprenta și le predă creierului.
+  // ÎNCHIDE fraza: împachetează audio-ul brut și îl predă urechii locale.
   const closePhrase = (): void => {
     // Urechea închisă nu mai livrează nimic (F6 al marii verificări): fără
     // gardă, plafonul de 5s armat înaintea lui stop() trimitea fraza la
@@ -276,7 +209,6 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     if (!phraseOpen) return
     lastVoiceAt = 0
     opts.onLive('') // golește banda la sfârșit de frază
-    const features = finalizeFeatures()
     // ── O FRAZĂ ARUNCATĂ TREBUIE SĂ SE VADĂ (Adrian, 8 aug, din consola lui) ──
     // Aici fraza pleca doar `if (audio)`, iar `catch { audio = undefined }`
     // înghițea și motivul. Adică: omul vorbea, vedea în consolă doar
@@ -295,9 +227,8 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       motivAruncare = `împachetarea WAV a picat: ${e instanceof Error ? e.message : String(e)}`
     }
     if (audio) {
-      if (features && opts.storePendingFeatures !== false) setPendingVoiceFeatures(features)
-      console.info('[frază] plec la creier', { ms: durataMs, cadre: phraseFrames, octeti: audio.length, amprenta: !!features })
-      opts.onPhrase('', features, audio)
+      console.info('[frază] plec la urechea locală', { ms: durataMs, cadre: phraseFrames, octeti: audio.length })
+      opts.onPhrase('', audio)
     } else {
       console.warn('[frază] ARUNCATĂ, nu ajunge la creier —', motivAruncare)
     }
@@ -340,6 +271,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       // Prag dublu: absolut ȘI peste podeaua de zgomot — altfel un fond
       // constant peste 0.024 tăia fraza lui Kelion la fiecare răspuns.
       if (tNow - mutedSince > BARGE_GUARD_MS && rmsMut > Math.max(BARGE_RMS, noiseFloor * 3)) {
+        // Păstrăm doar semnalul care trece poarta strictă de barge-in, nu ecoul
+        // din perioada mută. Când callback-ul dezmuțește urechea, aceste ~300 ms
+        // intră în pre-roll și începutul întrebării omului nu se pierde.
+        pushPreRoll(inp)
         if (bargeSince === 0) bargeSince = tNow
         else if (tNow - bargeSince >= BARGE_HOLD_MS) {
           bargeSince = 0
@@ -421,7 +356,8 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     }
     // adunăm DOAR cât e voce sau în coada scurtă de după — nu strângem liniște
     if (!phraseOpen || !lastVoiceAt || now - lastVoiceAt > PAUZA_FRAZA_MS) return
-    collectFrame()
+    phraseEnergySum += rms
+    phraseFrames++
     const ds = downsample(input, ctx.sampleRate)
     // Copie — bufferul de intrare se reciclează între apeluri; fără copie am stoca zgomot.
     if (phrasePcmLen < MAX_PHRASE_SAMPLES) {
@@ -496,7 +432,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   }
 
   // Construiește (sau reconstruiește) tot graful audio pe un stream de microfon:
-  // source → ScriptProcessor (tap PCM) și source → analyser (tap amprentă).
+  // source → ScriptProcessor (tap PCM).
   const wireGraph = (g: { stream: MediaStream; ctx: AudioContext }): void => {
     stream = g.stream
     ctx = g.ctx
@@ -505,13 +441,6 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     // ScriptProcessor e deprecat dar universal și fără fișier separat — cel mai
     // sigur pentru „merge pur și simplu", exact ce trebuie pe calea critică a vocii.
     proc = ctx.createScriptProcessor(4096, 1, 1)
-
-    // Analizor paralel pentru features vocale (identificare speaker + gen).
-    featAnalyser = ctx.createAnalyser()
-    featAnalyser.fftSize = 2048
-    source.connect(featAnalyser)
-    featTimeBuf = new Float32Array(featAnalyser.fftSize)
-    featFreqBuf = new Float32Array(featAnalyser.frequencyBinCount)
 
     proc.onaudioprocess = onAudioProcess
     source.connect(proc)
@@ -553,6 +482,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
 
   return {
     stop,
+    fluxMicrofon: () => stream,
     setMuted: (m: boolean) => {
       muted = m
     },

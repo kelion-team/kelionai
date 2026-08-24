@@ -1,10 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
 
-// Mock environment variables before importing config
-vi.stubEnv('GOOGLE_CLIENT_ID', 'test-id')
-vi.stubEnv('GOOGLE_CLIENT_SECRET', 'test-secret')
-vi.stubEnv('GOOGLE_REDIRECT_URI', 'test-uri')
-vi.stubEnv('SESSION_SECRET', 'test-session-secret')
+vi.hoisted(() => {
+  process.env.GOOGLE_CLIENT_ID = 'test-id'
+  process.env.GOOGLE_CLIENT_SECRET = 'test-secret'
+  process.env.GOOGLE_REDIRECT_URI = 'https://example.test/auth/google/callback'
+  process.env.SESSION_SECRET = 'not-a-real-secret-for-tests'
+  process.env.ADMIN_EMAIL = 'admin@example.test'
+})
 
 import { config, isAllowed, roleFor } from './config.js'
 
@@ -17,8 +19,8 @@ describe('Config Service', () => {
   })
 
   it('should identify admin correctly', () => {
-    // Default admin is adrianenc11@gmail.com
-    expect(roleFor('adrianenc11@gmail.com')).toBe('admin')
+    expect(config.adminEmail).not.toBe('')
+    expect(roleFor(config.adminEmail.toUpperCase())).toBe('admin')
     expect(roleFor('other@gmail.com')).toBe('customer')
   })
 

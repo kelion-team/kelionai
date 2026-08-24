@@ -8,7 +8,6 @@
 // marcaje fixe, în fiecare șablon de ordin:
 //   • cerințe:  „CE A CERUT: <textul cerinței>"
 //   • goluri:   „CE A CERUT OMUL ȘI N-AI PUTUT FACE: \"<textul>\""
-//   • listă:    „SARCINĂ LUATĂ SINGUR din RAMAS-DE-FACUT.md, rândul B8." + titlul
 //   • ordinele directe ale ownerului: chiar textul lui, fără ambalaj.
 // Funcție PURĂ, folosită la CITIRE de ambele afișaje (panoul admin + monitorul)
 // — sursa (orderText) rămâne neatinsă, deci constructorul primește tot ordinul.
@@ -22,11 +21,7 @@ export function numeleOrdinului(brut: string): string {
   const ceACerut = /CE A CERUT(?: OMUL ȘI N-AI PUTUT FACE)?:\s*[„"]?([\s\S]{1,400}?)(?:["”]|\n\n|$)/.exec(text)
   if (ceACerut?.[1]?.trim()) return scurt(ceACerut[1])
 
-  // 2) Rândul luat singur din lista ownerului — codul + titlul rândului.
-  const rand = /SARCINĂ LUATĂ SINGUR din RAMAS-DE-FACUT\.md, rândul ([A-Z]\d+)\.\s*\n+([^\n]{1,300})/.exec(text)
-  if (rand) return scurt(`${rand[1]}: ${rand[2]}`)
-
-  // 3) Restul (ordinele directe ale ownerului, auto-vindecarea): prima linie de
+  // 2) Restul (ordinele directe ale ownerului): prima linie de
   // CONȚINUT, după curățarea ambalajului cunoscut (dificultate, pinul de
   // reluare, escaladarea). Ambalajul se curăță pe rând — ce rămâne e fapta.
   const curat = text
@@ -47,9 +42,6 @@ export function numeleOrdinului(brut: string): string {
 export function cineACerut(orderedBy: string): string {
   const cine = String(orderedBy ?? '').toLowerCase().trim()
   if (!cine) return 'necunoscut'
-  if (cine === 'kelion-autovindecare' || cine === 'kelion-autovindecare-live') return '🤖 auto-vindecarea'
-  if (cine === 'kelion-autonom') return '🤖 bucla autonomă'
-  if (cine.startsWith('kelion')) return `🤖 ${cine}`
   if (cine.includes('@')) return `👤 ${cine.split('@')[0]}`
   return cine
 }

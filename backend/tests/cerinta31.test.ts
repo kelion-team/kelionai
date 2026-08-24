@@ -10,9 +10,10 @@ describe('Cerința #31 - Opțiunile de schimbare a limbii din bara de admin', ()
   const stageCode = sursa('../../frontend/src/pages/Stage.tsx')
 
   it('bara de admin are meniul de limbi cu toate opțiunile vizibile', () => {
-    expect(stageCode).toContain('SELECTORUL DE LIMBĂ ÎN BARA DE ADMIN')
-    expect(stageCode).toContain('lang-menu')
-    expect(stageCode).toContain('lang-wrap')
+    expect(stageCode).toContain('className="lang-wrap"')
+    expect(stageCode).toContain('className="apps-menu lang-menu"')
+    expect(stageCode).toContain('aria-expanded={langOpen}')
+    expect(stageCode).toContain('handleAdminLangChange(l.code as Lang)')
   })
 
   it('toate opțiunile de schimbare a limbii (ro, en, es, fr, de, it, pt) sunt disponibile', () => {

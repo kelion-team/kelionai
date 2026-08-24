@@ -1,5 +1,5 @@
 // ── AUTOVEDERE: script Playwright care VERIFICĂ ce nu pot testa din terminal ──
-// Deschide kelionai.app în browser real, verifică:
+// Deschide originul configurat în browser real și verifică:
 // 1. Rendering UI (avatar 3D, chat panel, admin panel)
 // 2. Camera/webcam (permisiuni + cadre)
 // 3. Voce WebSocket (conexiune vocal-live)
@@ -9,8 +9,12 @@
 // Necesită: npx playwright install chromium (o singură dată)
 
 import { chromium } from '../backend/node_modules/playwright/index.mjs'
+import { readFileSync } from 'node:fs'
 
-const URL = process.env.KELION_URL || 'https://kelionai.app'
+const product = JSON.parse(readFileSync(new URL('../config/product.json', import.meta.url), 'utf8'))
+const configuredOrigin = new URL(product.publicAppOrigin)
+
+const URL = process.env.KELION_URL || configuredOrigin.origin
 const TEST_AUTH = process.env.TEST_AUTH_TOKEN
 const SESSION_COOKIE = process.env.KELION_SESSION
 
@@ -44,7 +48,7 @@ async function main() {
     await context.addCookies([{
       name: 'kelionai_session',
       value: SESSION_COOKIE,
-      domain: 'kelionai.app',
+      domain: new URL(URL).hostname,
       path: '/',
     }])
   }
@@ -190,8 +194,7 @@ async function main() {
       const adminRute = [
         '/api/admin/demos', '/api/admin/leads', '/api/admin/audit',
         '/api/admin/erori', '/api/admin/finance', '/api/admin/models',
-        '/api/admin/keys', '/api/admin/kelion-tools', '/api/admin/money-circuit',
-        '/api/admin/visitor-chats',
+        '/api/admin/keys', '/api/admin/money-circuit',
       ]
       let okCount = 0
       let failCount = 0
@@ -206,7 +209,7 @@ async function main() {
         }, { url: ruta, token: TEST_AUTH })
         if (r.ok) okCount++; else failCount++
       }
-      log(okCount === adminRute.length, 'Admin rute (10)', `${okCount}/${adminRute.length} OK, ${failCount} picate`)
+      log(okCount === adminRute.length, `Admin rute (${adminRute.length})`, `${okCount}/${adminRute.length} OK, ${failCount} picate`)
     } else {
       log(false, 'Admin panel', 'fără cookie de sesiune — sărit')
     }

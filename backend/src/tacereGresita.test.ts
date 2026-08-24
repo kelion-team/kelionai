@@ -8,11 +8,11 @@ import { numeStrigat, turaAdresata } from './services/numeStrigat.js'
 // ori la rând, pe două ture diferite:
 //
 //     [CHAT-IN] audio=da „"
-//     [TIMP] tura 6654183f: creier=google-direct/gemini-3.5-flash-lite, runde=1, total=1619ms
+//     [TIMP] tura 6654183f: creier=model-rapid-configurat, runde=1, total=1619ms
 //     [VOCE] tura 6654183f: creierul a decis că NU i se vorbea — tăcere
 //
 // Deci: fraza AJUNGE la creier (nu e microfonul), creierul RĂSPUNDE în 1,6s (nu
-// e cheia — apelul direct la Gemini a ieșit 200 în 482 ms), și apoi decide
+// e cheia — apelul direct la model a ieșit 200 în 482 ms), și apoi decide
 // singur că nu lui i se vorbea.
 //
 // DOUĂ CAUZE, amândouă reparate aici:

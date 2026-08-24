@@ -21,8 +21,10 @@
 // (sesiune inexistentă, omul n-a ales încă, poza nu s-a putut descărca) —
 // niciodată un „gata" neacoperit.
 
-import crypto from 'node:crypto'
-import { saveGeneratedImage } from '../db.js'
+import { randomUUID } from 'node:crypto'
+import { saveGeneratedMedia } from '../db.js'
+import { readResponseBufferLimited } from './httpBody.js'
+import { MEDIA_LIMITS, mediaMimeAllowed } from './mediaPolicy.js'
 
 const BAZA = 'https://photospicker.googleapis.com/v1'
 
@@ -35,6 +37,19 @@ interface SesiunePicker {
 
 /** Sesiunile pornite, per user — ținem doar ultima (un om alege o dată). */
 const sesiuni = new Map<string, { id: string; pickerUri: string; la: number }>()
+const PICKER_SESSION_TTL_MS = 30 * 60_000
+const MAX_PICKER_SESSIONS = 1_000
+
+function curataSesiuni(acum = Date.now()): void {
+  for (const [owner, session] of sesiuni) {
+    if (acum - session.la > PICKER_SESSION_TTL_MS) sesiuni.delete(owner)
+  }
+  while (sesiuni.size >= MAX_PICKER_SESSIONS) {
+    const oldest = sesiuni.keys().next().value
+    if (oldest === undefined) break
+    sesiuni.delete(oldest)
+  }
+}
 
 export async function photosAlege(email: string, token: string): Promise<string> {
   if (!token) return JSON.stringify({ error: 'fara_token_google', motiv: 'contul Google nu e conectat — conectează-l întâi' })
@@ -57,6 +72,7 @@ export async function photosAlege(email: string, token: string): Promise<string>
     }
     const j = (await r.json()) as SesiunePicker
     if (!j.id || !j.pickerUri) return JSON.stringify({ error: 'photos_fara_sesiune' })
+    curataSesiuni()
     sesiuni.set(email.toLowerCase(), { id: j.id, pickerUri: j.pickerUri, la: Date.now() })
     return JSON.stringify({
       ok: true,
@@ -70,6 +86,7 @@ export async function photosAlege(email: string, token: string): Promise<string>
 }
 
 export async function photosAdu(email: string, token: string, baseUrl: string): Promise<string> {
+  curataSesiuni()
   const s = sesiuni.get(email.toLowerCase())
   if (!s) return JSON.stringify({ error: 'fara_sesiune', motiv: 'nu există o alegere pornită — cheamă întâi photos_alege' })
   if (!token) return JSON.stringify({ error: 'fara_token_google' })
@@ -99,18 +116,37 @@ export async function photosAdu(email: string, token: string, baseUrl: string): 
       const bu = m.mediaFile?.baseUrl
       if (!bu) continue
       try {
-        // baseUrl cere parametri de mărime; =d aduce originalul (cu token!).
+        const providerUrl = new URL(bu)
+        if (providerUrl.protocol !== 'https:' || !providerUrl.hostname.endsWith('.googleusercontent.com')) {
+          esuate.push(m.mediaFile?.filename ?? 'poza')
+          continue
+        }
+        const declaredMime = (m.mediaFile?.mimeType ?? '').toLowerCase()
+        if (!mediaMimeAllowed('image', declaredMime)) {
+          esuate.push(m.mediaFile?.filename ?? 'poza')
+          continue
+        }
         const img = await fetch(`${bu}=w1600-h1600`, {
           headers: { Authorization: `Bearer ${token}` },
+          redirect: 'error',
           signal: AbortSignal.timeout(30_000),
         })
         if (!img.ok) {
           esuate.push(m.mediaFile?.filename ?? 'poza')
           continue
         }
-        const buf = Buffer.from(await img.arrayBuffer())
-        const id = crypto.randomBytes(16).toString('hex')
-        await saveGeneratedImage(id, m.mediaFile?.mimeType ?? 'image/jpeg', buf)
+        const responseMime = img.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? ''
+        if (responseMime !== declaredMime || !mediaMimeAllowed('image', responseMime)) {
+          esuate.push(m.mediaFile?.filename ?? 'poza')
+          continue
+        }
+        const buf = await readResponseBufferLimited(img, MEDIA_LIMITS.imageBytes)
+        if (!buf.length) {
+          esuate.push(m.mediaFile?.filename ?? 'poza')
+          continue
+        }
+        const id = randomUUID()
+        await saveGeneratedMedia({ id, ownerEmail: email, kind: 'image', mime: responseMime, data: buf })
         aduse.push({ url: `${baseUrl}/api/image/${id}`, nume: m.mediaFile?.filename ?? 'poza' })
       } catch {
         esuate.push(m.mediaFile?.filename ?? 'poza')

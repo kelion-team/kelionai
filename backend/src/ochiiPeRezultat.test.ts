@@ -44,34 +44,14 @@ describe('ochii pe rezultat — captura browserului ajunge la OCHII modelului', 
 
   it('browserul dă captura și ca base64 (ochii), nu doar ca URL (monitorul)', () => {
     const browser = readFileSync(new URL('./services/browser.ts', import.meta.url), 'utf8')
-    expect(browser).toContain('shotB64: buf.toString(')
-    // modul discret rămâne orb prin construcție — nimic nu iese de pe pagina de card
-    expect(browser).toContain("shotUrl: '', shotB64: ''")
+    expect(browser).toContain("shotB64: buf ? buf.toString('base64') : ''")
+    // Workerul izolat primește modul discret explicit și nu este ocolit local.
+    expect(browser).toContain('discreet: discreetSessions.has(id)')
   })
 
   it('browserResult scoate base64-ul din textul rezultatului și îl trimite pe marcaj', () => {
     const chat = readFileSync(new URL('./routes/chat.ts', import.meta.url), 'utf8')
     expect(chat).toContain('const { shotB64, ...faraOchi } = result')
     expect(chat).toMatch(/JSON\.stringify\(faraOchi\)\}\$\{OCHI_MARCAJ\}/)
-  })
-})
-
-// ── CREDITUL MORT SPUS PE FAȚĂ (9 aug: sold AI Studio −£1.32, card refuzat —
-// Kelion inventa scuze peste turele care mureau pe cotă). Sigiliul ține
-// detectorul în plasa de siguranță: DOAR adminul primește cauza reală, userii
-// rămân pe mesajul neutru din regula de pe 1 aug. ───────────────────────────
-describe('creditul mort — adminul află cauza reală, userii rămân pe neutru', () => {
-  const chat = readFileSync(new URL('./routes/chat.ts', import.meta.url), 'utf8')
-
-  it('detectorul e legat de admin ȘI de clasificarea de cotă', () => {
-    expect(chat).toContain('if (isAdminUser && isRateLimit)')
-    expect(chat).toContain('[CREDIT GOOGLE EPUIZAT]')
-    expect(chat).toContain('[COTĂ GEMINI ATINSĂ]')
-  })
-
-  it('desparte creditul epuizat de limita de viteză prin sonda geminiLive', () => {
-    expect(chat).toMatch(/geminiLive\(\)\.catch/)
-    expect(chat).toContain("g.reason === 'depleted'")
-    expect(chat).toContain("g.reason === 'quota'")
   })
 })

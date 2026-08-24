@@ -1,0 +1,129 @@
+name: build-release-images
+
+on:
+  workflow_run:
+    workflows: [pr-verify]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: build-release-images-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verifică sursa și construiește imaginile
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ]
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/master
+          docker build --pull --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-app .
+          docker build --pull --file Dockerfile.browser --target worker --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-browser .
+          docker build --pull --file Dockerfile.browser --target egress --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-browser-egress .
+          docker build --pull --file Dockerfile.converter --target gateway --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-converter-gateway .
+          docker build --pull --file Dockerfile.converter --target parser --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-converter-parser .
+          docker build --pull --file Dockerfile.gates --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-codex-gates .
+
+      - name: Probe fără rețea și trust boundary
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --entrypoint sh kelion-release-app -eu -c '
+            test ! -e /app/.github
+            test ! -e /app/deploy
+            test ! -e /app/scripts
+            test ! -e /opt/ms-playwright
+            test ! -e /usr/bin/python3
+          '
+          docker run --rm --network none kelion-release-browser-egress node /opt/kelion/browser-egress-proxy.mjs --self-test
+          docker run --rm --network none \
+            -e BROWSER_PROXY_URL=http://172.29.10.3:3128 \
+            -e BROWSER_INTERNAL_SUBNET=172.29.10.0/24 \
+            kelion-release-browser node /opt/kelion/browser-worker.mjs --self-test
+          docker run --rm --network none \
+            -e BROWSER_PROXY_URL=http://172.29.11.3:3128 \
+            -e BROWSER_INTERNAL_SUBNET=172.29.11.0/24 \
+            kelion-release-browser node /opt/kelion/browser-worker.mjs --self-test
+          docker run --rm --network none kelion-release-converter-gateway node /opt/kelion/converter-gateway.mjs --self-test
+          docker run --rm --network none kelion-release-converter-parser python -I /opt/kelion/converter-parser.py --self-test
+          gate_probe=$(mktemp -d)
+          cleanup_gate() { git worktree remove --force "$gate_probe/worktree" >/dev/null 2>&1 || true; rm -rf -- "$gate_probe"; }
+          trap cleanup_gate EXIT
+          git worktree add --detach "$gate_probe/worktree" "$RELEASE_SHA" >/dev/null
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 512 --memory 4g --cpus 2 \
+            --tmpfs /work:rw,nosuid,nodev,size=6g,uid=1000,gid=1000 \
+            --mount "type=bind,src=$gate_probe/worktree,dst=/source,readonly" \
+            --mount "type=bind,src=$PWD/.git,dst=$PWD/.git,readonly" \
+            kelion-release-codex-gates
+          cleanup_gate
+          trap - EXIT
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Publică și semnează digestele OCI
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          registry_repo=${GITHUB_REPOSITORY,,}
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          cleanup() { docker logout ghcr.io >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          mkdir -p release-manifest
+          printf '{"schema":1,"commit":"%s","sourceRunId":%s,"images":{' "$RELEASE_SHA" "$SOURCE_RUN_ID" > release-manifest/images.json
+          separator=''
+          for component in app browser browser-egress converter-gateway converter-parser; do
+            local_image="kelion-release-$component"
+            [ "$component" = app ] && local_image=kelion-release-app
+            remote="ghcr.io/$registry_repo/$component:$RELEASE_SHA-$GITHUB_RUN_ID"
+            docker tag "$local_image" "$remote"
+            docker push "$remote" >/dev/null
+            digest_ref=$(docker inspect --format '{{index .RepoDigests 0}}' "$remote")
+            case "$digest_ref" in "ghcr.io/$registry_repo/$component@sha256:"*) ;; *) exit 1 ;; esac
+            revision=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$remote")
+            [ "$revision" = "$RELEASE_SHA" ]
+            cosign sign --yes --annotation "git_sha=$RELEASE_SHA" "$digest_ref"
+            printf '%s"%s":"%s"' "$separator" "$component" "$digest_ref" >> release-manifest/images.json
+            separator=,
+          done
+          printf '}}\n' >> release-manifest/images.json
+          jq -e --arg sha "$RELEASE_SHA" '.schema == 1 and .commit == $sha and (.images | length == 5)' release-manifest/images.json >/dev/null
+
+          gate_remote="ghcr.io/$registry_repo/codex-gates:$RELEASE_SHA-$GITHUB_RUN_ID"
+          docker tag kelion-release-codex-gates "$gate_remote"
+          docker push "$gate_remote" >/dev/null
+          gate_digest_ref=$(docker inspect --format '{{index .RepoDigests 0}}' "$gate_remote")
+          case "$gate_digest_ref" in "ghcr.io/$registry_repo/codex-gates@sha256:"*) ;; *) exit 1 ;; esac
+          [ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$gate_remote")" = "$RELEASE_SHA" ]
+          cosign sign --yes --annotation "git_sha=$RELEASE_SHA" "$gate_digest_ref"
+          jq -n --arg commit "$RELEASE_SHA" --argjson sourceRunId "$SOURCE_RUN_ID" --arg image "$gate_digest_ref" \
+            '{schema:1,commit:$commit,sourceRunId:$sourceRunId,image:$image}' > release-manifest/codex-gates.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-images-${{ github.event.workflow_run.head_sha }}
+          path: release-manifest/
+          if-no-files-found: error
+          retention-days: 30

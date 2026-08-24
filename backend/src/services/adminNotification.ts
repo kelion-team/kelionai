@@ -35,18 +35,6 @@ export async function notifyAdmin(
   const pool = getPool()
   const payloadJson = payload ? JSON.stringify(payload) : null
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS admin_notifications (
-      id SERIAL PRIMARY KEY,
-      type VARCHAR(50) NOT NULL,
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      payload JSONB,
-      read BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    )
-  `)
-
   const res = await pool.query(
     `INSERT INTO admin_notifications (type, title, message, payload) VALUES ($1, $2, $3, $4) RETURNING id`,
     [type, title, message, payloadJson]
@@ -68,17 +56,6 @@ export async function getAdminNotifications(
 ): Promise<AdminNotification[]> {
   if (!dbEnabled()) return []
   const pool = getPool()
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS admin_notifications (
-      id SERIAL PRIMARY KEY,
-      type VARCHAR(50) NOT NULL,
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      payload JSONB,
-      read BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    )
-  `)
 
   let query = `SELECT id, type, title, message, payload, read, created_at as "createdAt" FROM admin_notifications`
   if (unreadOnly) {

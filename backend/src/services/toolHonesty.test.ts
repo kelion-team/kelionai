@@ -9,23 +9,21 @@
 //  2. translateMany counts the messages it could NOT translate (returned as
 //     the original text) in `failed`, so a half-failed translation is never
 //     mistaken for a complete one.
-// (Testele composeOpenrouterFallback au fost ȘTERSE, 3 aug — funcția a fost
-// extirpată împreună cu OpenRouter: Serper e SINGURUL motor de căutare, iar
-// eșecul lui e un `search_unavailable` onest, fără fallback pe alt furnizor.)
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
-// No network: google.ts only reads config inside functions, so a minimal shape
-// is enough. serperKey is SET so youtube_search takes the Serper path (its
-// /videos call is mocked below); geminiKey is SET so translateText takes the
-// Gemini path (its generateContent call is mocked below).
-vi.mock('../config.js', () => ({
-  config: {
-    google: { clientId: '', clientSecret: '' },
-    serperKey: 'test-serper-key',
-    geminiKey: 'test-gemini-key',
-    geminiModel: 'test-model',
-  },
-}))
+const rationeaza = vi.hoisted(() => vi.fn())
+vi.mock('../config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../config.js')>()
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      serperKey: 'test-serper-key',
+      openai: { ...actual.config.openai, key: 'test-openai-key' },
+    },
+  }
+})
+vi.mock('./creierRationament.js', () => ({ rationeaza }))
 
 import {
   extractYoutubeCandidates,
@@ -116,49 +114,38 @@ describe('youtubeSearch — backend-down is NOT "no videos found"', () => {
 describe('translateMany — a failed translation is counted, never silent', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    rationeaza.mockReset()
   })
 
-  // Traducerea merge pe Gemini direct (3 aug — ramura OpenRouter extirpată):
-  // mock-uim generateContent cu forma REALĂ a răspunsului Gemini.
-  const stubGemini = (mode: 'ok' | 'empty' | 'reject'): void => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => {
-        if (!String(url).includes('generativelanguage.googleapis.com')) return { ok: false } as Response
-        if (mode === 'reject') throw new Error('network down')
-        const text = mode === 'ok' ? 'Salut' : ''
-        return {
-          ok: true,
-          json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }),
-        } as Response
-      }),
-    )
+  const stubTranslation = (mode: 'ok' | 'empty' | 'reject'): void => {
+    if (mode === 'reject') rationeaza.mockRejectedValue(new Error('network down'))
+    else rationeaza.mockResolvedValue(mode === 'ok' ? 'Salut' : '')
   }
 
   it('counts every message the translation service failed for (original returned)', async () => {
     // The provider answers with EMPTY text → translateText errors → original kept.
-    stubGemini('empty')
+    stubTranslation('empty')
     const r = await translateMany(['Hello', 'World'], 'Romanian')
     expect(r.translations).toEqual(['Hello', 'World'])
     expect(r.failed).toBe(2)
   })
 
   it('reports failed:0 when everything translated, and keeps the real translations', async () => {
-    stubGemini('ok')
+    stubTranslation('ok')
     const r = await translateMany(['Hello', 'Hi'], 'Romanian')
     expect(r.translations).toEqual(['Salut', 'Salut'])
     expect(r.failed).toBe(0)
   })
 
   it('does not count empty input messages as failures (there was nothing to translate)', async () => {
-    stubGemini('empty')
+    stubTranslation('empty')
     const r = await translateMany(['', 'Hello'], 'Romanian')
     expect(r.translations).toEqual(['', 'Hello'])
     expect(r.failed).toBe(1)
   })
 
   it('counts a rejection from the provider as a failure, not a crash', async () => {
-    stubGemini('reject')
+    stubTranslation('reject')
     const r = await translateMany(['Hello'], 'Romanian')
     expect(r.translations).toEqual(['Hello'])
     expect(r.failed).toBe(1)

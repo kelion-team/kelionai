@@ -8,7 +8,7 @@
 // vechi rămâne, tokenul nou le acoperă pe toate (autorizare incrementală,
 // calea documentată de Google).
 //
-// Unealta urcă un clip DEJA EXISTENT în aplicație (generat cu Veo sau adus) —
+// Unealta urcă un clip DEJA EXISTENT în aplicație (generat prin OpenAI) —
 // id-ul din /api/video/<id>. Implicit PRIVATE (nimic nu devine public fără
 // decizia omului); titlul/descrierea vin de la creier, din vorbele omului.
 // Regula #1: fiecare treaptă picată → motivul exact, inclusiv „lipsește
@@ -18,16 +18,17 @@ import { getVideo } from './video.js'
 
 export async function youtubeUrca(
   token: string,
+  ownerEmail: string,
   videoId: string,
   titlu: string,
   descriere: string,
 ): Promise<string> {
   if (!token) return JSON.stringify({ error: 'fara_token_google', motiv: 'contul Google nu e conectat' })
   if (!videoId) return JSON.stringify({ error: 'fara_video', motiv: 'dă-mi id-ul clipului (din /api/video/<id>)' })
-  const v = await getVideo(videoId.replace(/^.*\/api\/video\//, ''))
+  const v = await getVideo(videoId.replace(/^.*\/api\/video\//, ''), ownerEmail)
   if (!v) return JSON.stringify({ error: 'video_negasit', motiv: `nu există niciun clip cu id-ul „${videoId}" în aplicație` })
 
-  // Multipart simplu (clipurile Veo de 4-8s au câțiva MB — sub orice prag).
+  // Multipart simplu; octeții au trecut deja plafonul media la salvare.
   const granita = `kelion-${Date.now()}`
   const meta = JSON.stringify({
     snippet: { title: (titlu || 'Clip Kelionai').slice(0, 100), description: (descriere || '').slice(0, 4500) },

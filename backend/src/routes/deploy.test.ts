@@ -1,106 +1,90 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Fastify from 'fastify';
+import Fastify from 'fastify'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// POST-ul de progres e gardat cu x-bridge-secret (fără gard, oricine putea
-// picta un „deploy reușit" fals în admin) — testul pune un secret cunoscut.
-vi.mock('../config.js', () => ({ config: { bridgeSecret: 'secret-de-test' } }));
+const { listBuildJobs } = vi.hoisted(() => ({ listBuildJobs: vi.fn() }))
 
-import deployRoutes, { getDeployState, setDeployState } from './deploy';
+vi.mock('../db.js', () => ({ listBuildJobs }))
+vi.mock('../session.js', () => ({
+  cerAdmin: (req: { headers: Record<string, unknown> }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => {
+    if (req.headers['x-test-admin'] === 'yes') return { email: 'admin@example.invalid' }
+    reply.code(401).send({ error: 'unauthorized' })
+    return null
+  },
+}))
 
-describe('Deploy Routes & Progress State', () => {
-  beforeEach(() => {
-    setDeployState({
-      status: 'idle',
-      step: '',
-      stepIndex: 0,
-      totalSteps: 0,
-      percent: 0,
-      message: 'Niciun deploy în curs',
-      startedAt: null,
-      error: null,
-    });
-  });
+const { default: deployRoutes } = await import('./deploy.js')
 
-  it('returns idle status initially', async () => {
-    const app = Fastify();
-    await app.register(deployRoutes);
+const BASE_JOB = {
+  id: 7,
+  orderedBy: 'admin@example.invalid',
+  orderText: 'deploy',
+  status: 'running',
+  attempts: 1,
+  branch: null,
+  prUrl: null,
+  tokens: 0,
+  log: null,
+  progress: 'rulează porțile',
+  ci: null,
+  brain: 'codex-worker',
+  costUsd: null,
+  codexTaskId: 'codex-task',
+  constructorStage: 'working',
+  commit: null,
+  liveVersion: null,
+  createdAt: '2026-08-24T10:00:00.000Z',
+  updatedAt: '2026-08-24T10:01:00.000Z',
+}
 
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/deploy/progress',
-    });
+describe('deploy progress is a read-only projection of durable Constructor jobs', () => {
+  beforeEach(() => listBuildJobs.mockReset())
 
-    expect(res.statusCode).toBe(200);
-    const json = res.json();
-    expect(json.ok).toBe(true);
-    expect(json.state.status).toBe('idle');
-    expect(json.state.percent).toBe(0);
+  it('does not disclose progress without an admin session', async () => {
+    const app = Fastify()
+    await app.register(deployRoutes)
+    const response = await app.inject({ method: 'GET', url: '/api/deploy/progress' })
+    expect(response.statusCode).toBe(401)
+    expect(listBuildJobs).not.toHaveBeenCalled()
+    await app.close()
+  })
 
-    await app.close();
-  });
+  it('fails visibly when durable state cannot be read', async () => {
+    listBuildJobs.mockResolvedValue(null)
+    const app = Fastify()
+    await app.register(deployRoutes)
+    const response = await app.inject({ method: 'GET', url: '/api/deploy/progress', headers: { 'x-test-admin': 'yes' } })
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ ok: false, error: 'deploy_state_unavailable' })
+    await app.close()
+  })
 
-  it('updates progress accurately via POST /deploy/progress', async () => {
-    const app = Fastify();
-    await app.register(deployRoutes);
+  it('derives running progress from the signed job instead of accepting a write endpoint', async () => {
+    listBuildJobs.mockResolvedValue([BASE_JOB])
+    const app = Fastify()
+    await app.register(deployRoutes)
+    const response = await app.inject({ method: 'GET', url: '/api/deploy/progress', headers: { 'x-test-admin': 'yes' } })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().state).toMatchObject({
+      status: 'running', jobId: '7', step: 'working', message: 'rulează porțile', commit: null, liveVersion: null,
+    })
+    const retiredWriter = await app.inject({ method: 'POST', url: '/api/deploy/progress', headers: { 'x-test-admin': 'yes' }, payload: {} })
+    expect(retiredWriter.statusCode).toBe(404)
+    await app.close()
+  })
 
-    // Fără secret → refuzat, starea NU se atinge.
-    const respins = await app.inject({
-      method: 'POST',
-      url: '/api/deploy/progress',
-      payload: { status: 'success', percent: 100, message: 'fals' },
-    });
-    expect(respins.statusCode).toBe(401);
-    expect(getDeployState().status).toBe('idle');
-
-    const updateRes = await app.inject({
-      method: 'POST',
-      url: '/api/deploy/progress',
-      headers: { 'x-bridge-secret': 'secret-de-test' },
-      payload: {
-        status: 'running',
-        step: 'Building backend & frontend',
-        stepIndex: 3,
-        totalSteps: 6,
-        message: 'Compilare în desfășurare...',
-      },
-    });
-
-    expect(updateRes.statusCode).toBe(200);
-    const updateJson = updateRes.json();
-    expect(updateJson.ok).toBe(true);
-    expect(updateJson.state.status).toBe('running');
-    expect(updateJson.state.percent).toBe(50);
-    expect(updateJson.state.step).toBe('Building backend & frontend');
-
-    const getRes = await app.inject({
-      method: 'GET',
-      url: '/api/deploy/progress',
-    });
-    expect(getRes.json().state.percent).toBe(50);
-
-    await app.close();
-  });
-
-  it('handles completion and error statuses', async () => {
-    setDeployState({
-      status: 'success',
-      step: 'Finalizat',
-      percent: 100,
-      message: 'Deploy realizat cu succes!',
-    });
-
-    const state = getDeployState();
-    expect(state.status).toBe('success');
-    expect(state.percent).toBe(100);
-
-    setDeployState({
-      status: 'failed',
-      step: 'Test suite failed',
-      error: 'Vitest tests exited with code 1',
-    });
-
-    const failedState = getDeployState();
-    expect(failedState.status).toBe('failed');
-    expect(failedState.error).toContain('Vitest');
-  });
-});
+  it('reports success only with deployed stage, commit and live version', async () => {
+    listBuildJobs.mockResolvedValue([{
+      ...BASE_JOB,
+      status: 'done',
+      constructorStage: 'deployed',
+      progress: 'live verificat',
+      commit: 'a'.repeat(40),
+      liveVersion: 'release-42',
+    }])
+    const app = Fastify()
+    await app.register(deployRoutes)
+    const response = await app.inject({ method: 'GET', url: '/api/deploy/progress', headers: { 'x-test-admin': 'yes' } })
+    expect(response.json().state).toMatchObject({ status: 'success', percent: 100, commit: 'a'.repeat(40), liveVersion: 'release-42' })
+    await app.close()
+  })
+})

@@ -1,154 +1,319 @@
-# ── CHEI NOI ÎN ENV-UL DE PE VPS, SECURIZAT ──────────────────────────────────
-# Calea SIGURĂ de a pune chei noi pe kelionai.app: valorile vin din GitHub
-# Secrets (GitHub le maschează AUTOMAT în TOATE logurile) și pleacă spre VPS
-# prin STDIN — niciodată într-o comandă care apare în jurnal. Cheia nu ajunge
-# nici în git, nici în chat, nici în logul de Actions.
-#
-# DE PE 30 IUL, NU MAI E TREABA TA. Kelion își pune singur cheile: `secret_pune`
-# le scrie criptat în secretele repo-ului, `secret_publica` pornește exact
-# workflow-ul ăsta, care le duce pe server și repornește aplicația. Îi spui ce
-# vrei configurat, el o face. (Adrian: „să creeze secretele și să le pună unde
-# trebuie, e al meu și îi permit full acces".) Restul comentariului rămâne ca să
-# poți face TU orice pas, oricând, fără el.
-#
-# LISTA DE NUME NU MAI EXISTĂ. Workflow-ul ia acum TOATE secretele de la GitHub
-# (`toJSON(secrets)`), deci o cheie nouă nu mai poate cădea în gol fiindcă a
-# uitat cineva s-o treacă într-o listă — exact ce a pățit `REVOLUT_PAY_LINK`.
-#
-# CUM SE FOLOSEȘTE MANUAL (Adrian):
-#   1. Repo → Settings → Secrets and variables → Actions → New repository secret.
-#      Numele de mai jos sunt cele pe care le CITEȘTE codul; orice cheie nouă e
-#      dusă pe server oricum, dar codul o folosește doar dacă o caută sub numele ăla:
-#        SERPER_API_KEY        (căutare web + youtube)
-#        GEMINI_API_KEY        (generare imagini)  + opțional GEMINI_MODEL
-#        GOOGLE_TTS_API_KEY    (voce TTS Google + salut landing)
-#        GOOGLE_API_KEY        (o cheie Google Cloud care poate acoperi TTS/Gemini)
-#        GOOGLE_MAPS_KEY       (opțional; harta merge și fără, pe OSM)
-#        STRIPE_PUBLISHABLE_KEY (pk_live_… de la Stripe → Developers → API keys.
-#                               NU e secretă — e făcută să stea în pagină. Cu ea
-#                               adminul vede NUMĂRUL cardului virtual direct în
-#                               panou, în cadre Stripe, fără drum prin dashboard.)
-#        REVOLUT_PAY_LINK      (linkul TĂU de plată Revolut — pe el ajunge userul
-#                               când apasă „adaugă credit". Nu e secret, dar stă
-#                               aici ca să se poată schimba fără publicare.)
-#        GITHUB_TOKEN          (fin-granulat, DOAR repo kelionai, Actions:write —
-#                               mâinile lui Kelion pe runbook-uri; + Contents/PR
-#                               write dacă vrei să și scrie cod pe ramuri)
-#   2. Actions → „vps-set-env" → Run workflow. Scrie DOAR secretele setate,
-#      apoi repornește containerul ca să le încarce. Restul rămâne neatins.
-#   Necesită și secretul VPS_SSH_KEY (deja pus).
-
-name: vps-set-env
+name: provision-production-secrets
 
 on:
-  workflow_dispatch:
-    inputs:
-      restart:
-        description: 'Repornește app-ul după scriere (ca să încarce cheile noi)?'
-        type: boolean
-        default: true
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: production-secrets
+  cancel-in-progress: false
 
 jobs:
-  set-env:
+  provision:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
+      ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      GOOGLE_REDIRECT_URI: ${{ vars.GOOGLE_REDIRECT_URI }}
+      GOOGLE_TOKEN_ENCRYPTION_KEY_ID: ${{ vars.GOOGLE_TOKEN_ENCRYPTION_KEY_ID }}
+      OPENAI_LUNA_MODEL: ${{ vars.OPENAI_LUNA_MODEL }}
+      OPENAI_MEDIUM_MODEL: ${{ vars.OPENAI_MEDIUM_MODEL }}
+      OPENAI_HEAVY_MODEL: ${{ vars.OPENAI_HEAVY_MODEL }}
+      OPENAI_MAX_MODEL: ${{ vars.OPENAI_MAX_MODEL }}
+      OPENAI_REALTIME_MODEL: ${{ vars.OPENAI_REALTIME_MODEL }}
+      OPENAI_REALTIME_TRANSCRIPTION_MODEL: ${{ vars.OPENAI_REALTIME_TRANSCRIPTION_MODEL }}
+      OPENAI_CALL_TRANSCRIPTION_MODEL: ${{ vars.OPENAI_CALL_TRANSCRIPTION_MODEL }}
+      OPENAI_TTS_MODEL: ${{ vars.OPENAI_TTS_MODEL }}
+      OPENAI_IMAGE_MODEL: ${{ vars.OPENAI_IMAGE_MODEL }}
+      OPENAI_VIDEO_MODEL: ${{ vars.OPENAI_VIDEO_MODEL }}
+      OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND: ${{ vars.OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND }}
+      OPENAI_VIDEO_SHUTDOWN_AT: ${{ vars.OPENAI_VIDEO_SHUTDOWN_AT }}
+      PRIVACY_POLICY_UPDATED: ${{ vars.PRIVACY_POLICY_UPDATED }}
+      DATA_CONTROLLER_NAME: ${{ vars.DATA_CONTROLLER_NAME }}
+      CODEX_WORKER_ENABLED: ${{ vars.CODEX_WORKER_ENABLED || '0' }}
+      CONSTRUCTOR_PUBLISHER_ENABLED: ${{ vars.CONSTRUCTOR_PUBLISHER_ENABLED || '0' }}
+      CONSTRUCTOR_RELEASE_ENABLED: ${{ vars.CONSTRUCTOR_RELEASE_ENABLED || '0' }}
+      VISITOR_CHAT_TTL_SECONDS: ${{ vars.VISITOR_CHAT_TTL_SECONDS || '3600' }}
+      VISITOR_ANALYTICS_RETENTION_DAYS: ${{ vars.VISITOR_ANALYTICS_RETENTION_DAYS || '7' }}
+      SESSION_ABSOLUTE_TTL_SECONDS: ${{ vars.SESSION_ABSOLUTE_TTL_SECONDS }}
+      SESSION_IDLE_TTL_SECONDS: ${{ vars.SESSION_IDLE_TTL_SECONDS }}
+      SESSION_TOUCH_INTERVAL_SECONDS: ${{ vars.SESSION_TOUCH_INTERVAL_SECONDS }}
+      SESSION_MAX_ACTIVE_PER_ACCOUNT: ${{ vars.SESSION_MAX_ACTIVE_PER_ACCOUNT }}
+      SESSION_RECENT_REAUTH_SECONDS: ${{ vars.SESSION_RECENT_REAUTH_SECONDS }}
+      NATIVE_AUTH_REQUEST_TTL_SECONDS: ${{ vars.NATIVE_AUTH_REQUEST_TTL_SECONDS }}
+      NATIVE_AUTH_EXCHANGE_TTL_SECONDS: ${{ vars.NATIVE_AUTH_EXCHANGE_TTL_SECONDS }}
+      NATIVE_CHANNEL_TICKET_TTL_SECONDS: ${{ vars.NATIVE_CHANNEL_TICKET_TTL_SECONDS }}
+      OFFLINE_SYNC_MAX_TURNS: ${{ vars.OFFLINE_SYNC_MAX_TURNS }}
+      OFFLINE_SYNC_MAX_TEXT_CHARS: ${{ vars.OFFLINE_SYNC_MAX_TEXT_CHARS }}
+      OFFLINE_SYNC_MAX_AGE_DAYS: ${{ vars.OFFLINE_SYNC_MAX_AGE_DAYS }}
+      OFFLINE_SYNC_FUTURE_SKEW_SECONDS: ${{ vars.OFFLINE_SYNC_FUTURE_SKEW_SECONDS }}
+      VOCAL_LIVE_IDLE_TIMEOUT_SECONDS: ${{ vars.VOCAL_LIVE_IDLE_TIMEOUT_SECONDS }}
+      PRIVACY_BACKUP_RETENTION_DAYS: ${{ vars.PRIVACY_BACKUP_RETENTION_DAYS }}
+      FINANCIAL_RETENTION_YEARS: ${{ vars.FINANCIAL_RETENTION_YEARS }}
+      JOURNAL_RETENTION_DAYS: ${{ vars.JOURNAL_RETENTION_DAYS }}
+      MEDIA_RETENTION_DAYS: ${{ vars.MEDIA_RETENTION_DAYS }}
+      CREDIT_PRICE_MINOR: ${{ vars.CREDIT_PRICE_MINOR }}
+      CHAT_TURN_PRICE_MINOR: ${{ vars.CHAT_TURN_PRICE_MINOR }}
+      CALL_UTTERANCE_PRICE_MINOR: ${{ vars.CALL_UTTERANCE_PRICE_MINOR }}
+      VOICE_LIVE_MINUTE_PRICE_MINOR: ${{ vars.VOICE_LIVE_MINUTE_PRICE_MINOR }}
+      BILLING_FIRST_TOPUP_MIN_MINOR: ${{ vars.BILLING_FIRST_TOPUP_MIN_MINOR }}
+      BILLING_TOPUP_STEP_MINOR: ${{ vars.BILLING_TOPUP_STEP_MINOR }}
+      BILLING_TOPUP_MIN_MINOR: ${{ vars.BILLING_TOPUP_MIN_MINOR }}
+      BILLING_TOPUP_MAX_MINOR: ${{ vars.BILLING_TOPUP_MAX_MINOR }}
+      LOW_CREDIT_THRESHOLD_MINOR: ${{ vars.LOW_CREDIT_THRESHOLD_MINOR }}
+      LOW_CREDIT_TOPUP_MINOR: ${{ vars.LOW_CREDIT_TOPUP_MINOR }}
+      PAYMENT_MODE: ${{ vars.PAYMENT_MODE || 'disabled' }}
+      PAYMENT_CONTRACT_VERIFIED: ${{ vars.PAYMENT_CONTRACT_VERIFIED || 'false' }}
+      REVOLUT_MERCHANT_API_VERSION: ${{ vars.REVOLUT_MERCHANT_API_VERSION || '2026-04-20' }}
+      REVOLUT_ORDER_EXPIRY: ${{ vars.REVOLUT_ORDER_EXPIRY || 'PT30M' }}
+      PUSH_ENABLED: ${{ vars.PUSH_ENABLED || '0' }}
+      VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+      PUSH_ENDPOINT_HOSTS: ${{ vars.PUSH_ENDPOINT_HOSTS }}
+      PUSH_MAX_SUBSCRIPTIONS: ${{ vars.PUSH_MAX_SUBSCRIPTIONS || '5' }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_TOKEN_ENCRYPTION_KEY: ${{ secrets.GOOGLE_TOKEN_ENCRYPTION_KEY }}
+      CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
+      CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
+      CONSTRUCTOR_RELEASE_SECRET: ${{ secrets.CONSTRUCTOR_RELEASE_SECRET }}
+      BROWSER_WORKER_SECRET: ${{ secrets.BROWSER_WORKER_SECRET }}
+      CONVERTER_WORKER_SECRET: ${{ secrets.CONVERTER_WORKER_SECRET }}
+      REVOLUT_MERCHANT_SECRET_KEY: ${{ secrets.REVOLUT_MERCHANT_SECRET_KEY }}
+      REVOLUT_WEBHOOK_SIGNING_SECRET: ${{ secrets.REVOLUT_WEBHOOK_SIGNING_SECRET }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
     steps:
-      - name: Scrie cheile în env-ul VPS (din Secrets, mascate, prin STDIN)
-        env:
-          KEY: ${{ secrets.VPS_SSH_KEY }}
-          # ── TOATE SECRETELE, NU O LISTĂ SCRISĂ DE MÂNĂ (30 iul) ─────────────
-          # Aici era o listă FIXĂ de nume. Orice cheie nouă — pusă de Adrian sau
-          # de Kelion însuși — cădea în gol: scrisă în GitHub, dar niciodată
-          # ajunsă pe server, fără niciun semn că lipsește. Exact ce a pățit
-          # `REVOLUT_PAY_LINK`. Acum lista vine de la GitHub, nu de la mine, deci
-          # nu mai poate rămâne în urmă. GitHub maschează valorile în TOATE
-          # logurile, iar noi nu tipărim niciuna.
-          SECRETS_JSON: ${{ toJSON(secrets) }}
-          GITHUB_TOKEN: ${{ secrets.KELION_GITHUB_TOKEN }}
-          RESTART: ${{ inputs.restart }}
+      - name: Scrie allowlist-ul fără restart sau deploy
         run: |
           set -euo pipefail
-          [ -n "$KEY" ] || { echo "::error::VPS_SSH_KEY lipsește (Settings → Secrets → Actions)."; exit 1; }
-          umask 077
-          printf '%s\n' "$KEY" > /tmp/vps_key
-          chmod 600 /tmp/vps_key
-          SSH="ssh -i /tmp/vps_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o BatchMode=yes root@164.68.120.87"
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ -n "$PUBLIC_APP_ORIGIN" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REDIRECT_URI" ]
+          [ -n "$OPENAI_LUNA_MODEL" ] && [ -n "$OPENAI_MEDIUM_MODEL" ] && [ -n "$OPENAI_HEAVY_MODEL" ]
+          [ -n "$OPENAI_MAX_MODEL" ] && [ -n "$OPENAI_REALTIME_MODEL" ]
+          [ -n "$OPENAI_REALTIME_TRANSCRIPTION_MODEL" ] && [ -n "$OPENAI_CALL_TRANSCRIPTION_MODEL" ]
+          [ -n "$OPENAI_TTS_MODEL" ] && [ -n "$OPENAI_IMAGE_MODEL" ] && [ -n "$OPENAI_VIDEO_MODEL" ]
+          [ -n "$PRIVACY_POLICY_UPDATED" ] && [ -n "$DATA_CONTROLLER_NAME" ]
+          [[ "$GOOGLE_TOKEN_ENCRYPTION_KEY_ID" =~ ^[A-Za-z0-9_-]{1,32}$ ]]
+          [[ "$OPENAI_VIDEO_SHUTDOWN_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]]
+          admin_email=$(printf '%s' "$ADMIN_EMAIL" | tr '[:upper:]' '[:lower:]')
+          [[ "$admin_email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]]
+          case "$OPENAI_API_KEY" in sk-proj-*) ;; *) exit 1 ;; esac
+          [ "${#SESSION_SECRET}" -ge 32 ]
+          [ "${#CODEX_WORKER_SECRET}" -ge 32 ]
+          [ "${#BROWSER_WORKER_SECRET}" -ge 32 ]
+          [ "${#CONVERTER_WORKER_SECRET}" -ge 32 ]
+          [ "${#GOOGLE_TOKEN_ENCRYPTION_KEY}" -ge 32 ]
+          [ -n "$DATABASE_URL" ] && [ -n "$GOOGLE_CLIENT_SECRET" ]
+          [[ "$CODEX_WORKER_ENABLED" =~ ^[01]$ ]]
+          [[ "$CONSTRUCTOR_PUBLISHER_ENABLED" =~ ^[01]$ ]]
+          [[ "$CONSTRUCTOR_RELEASE_ENABLED" =~ ^[01]$ ]]
+          if [ "$CONSTRUCTOR_PUBLISHER_ENABLED" = 1 ]; then
+            [ "${#CONSTRUCTOR_PUBLISHER_SECRET}" -ge 32 ]
+          else
+            CONSTRUCTOR_PUBLISHER_SECRET="disabled-placeholder-$(openssl rand -hex 32)"
+          fi
+          if [ "$CONSTRUCTOR_RELEASE_ENABLED" = 1 ]; then
+            [ "${#CONSTRUCTOR_RELEASE_SECRET}" -ge 32 ]
+          else
+            CONSTRUCTOR_RELEASE_SECRET="disabled-placeholder-$(openssl rand -hex 32)"
+          fi
+          [[ "$VISITOR_CHAT_TTL_SECONDS" =~ ^[0-9]+$ ]]
+          [[ "$VISITOR_ANALYTICS_RETENTION_DAYS" =~ ^[0-9]+$ ]]
+          for numeric in SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PUSH_MAX_SUBSCRIPTIONS; do
+            value=${!numeric}
+            [[ "$value" =~ ^[1-9][0-9]*$ ]] || { echo "::error::$numeric trebuie configurat ca întreg pozitiv."; exit 1; }
+          done
+          [ "$NATIVE_CHANNEL_TICKET_TTL_SECONDS" -le 30 ]
+          [[ "$REVOLUT_MERCHANT_API_VERSION" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]
+          [[ "$REVOLUT_ORDER_EXPIRY" =~ ^PT([1-9][0-9]{0,2}M|[1-9][0-9]?H)$ ]]
+          case "$PAYMENT_MODE" in
+            disabled)
+              [ "$PAYMENT_CONTRACT_VERIFIED" = false ]
+              REVOLUT_MERCHANT_SECRET_KEY="disabled-placeholder-$(openssl rand -hex 32)"
+              REVOLUT_WEBHOOK_SIGNING_SECRET="disabled-placeholder-$(openssl rand -hex 32)"
+              ;;
+            sandbox|production)
+              [ "$PAYMENT_CONTRACT_VERIFIED" = true ]
+              [ "${#REVOLUT_MERCHANT_SECRET_KEY}" -ge 32 ]
+              [ "${#REVOLUT_WEBHOOK_SIGNING_SECRET}" -ge 32 ]
+              case "$REVOLUT_MERCHANT_SECRET_KEY:$REVOLUT_WEBHOOK_SIGNING_SECRET" in
+                *disabled-placeholder-*) exit 1 ;;
+              esac
+              ;;
+            *) exit 1 ;;
+          esac
+          case "$PUSH_ENABLED" in
+            0)
+              VAPID_PRIVATE_KEY="disabled-placeholder-$(openssl rand -hex 32)"
+              ;;
+            1)
+              [[ "$VAPID_PUBLIC_KEY" =~ ^[A-Za-z0-9_-]{87}$ ]]
+              [[ "$VAPID_PRIVATE_KEY" =~ ^[A-Za-z0-9_-]{43}$ ]]
+              [ -n "$PUSH_ENDPOINT_HOSTS" ]
+              IFS=',' read -r -a push_hosts <<< "$PUSH_ENDPOINT_HOSTS"
+              for host in "${push_hosts[@]}"; do
+                [[ "$host" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] || exit 1
+              done
+              ;;
+            *) exit 1 ;;
+          esac
 
-          # Liniile NUME=valoare-în-base64, pentru TOATE secretele setate.
-          # Base64 la transport, ca o valoare cu spații, ghilimele sau `=` să
-          # ajungă întreagă; se decodează pe server. `VPS_SSH_KEY` e SCOASĂ
-          # dinadins — cheia de acces la mașină n-are ce căuta în env-ul
-          # aplicației. `KELION_GITHUB_TOKEN` se scrie sub numele pe care îl
-          # citește codul: `GITHUB_TOKEN`.
-          # `SESSION_SECRET` + `ADMIN_EMAIL` sunt și ele EXCLUSE (9 aug): sunt
-          # stare de IDENTITATE a serverului, nu secrete de aplicație — o rotire
-          # tăcută a lui SESSION_SECRET omoară TOATE cookie-urile (ownerul,
-          # logat, primea 403 „ca și cum nu sunt admin"), iar un ADMIN_EMAIL cu
-          # spațiu la coadă îl făcea „customer". Se schimbă doar cu mâna, pe VPS.
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_vps() {
+            ssh -i "$key_file" \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
+              -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
+              "$VPS_USER@$VPS_HOST" "$@"
+          }
+          encode() { printf '%s=%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
+
           {
-            printf '%s' "$SECRETS_JSON" | jq -r '
-              to_entries[]
-              | select(.key | test("^(VPS_SSH_KEY|github_token|KELION_GITHUB_TOKEN|SESSION_SECRET|ADMIN_EMAIL)$") | not)
-              | select(.value != null and .value != "")
-              | "\(.key)=\(.value | @base64)"'
-            if [ -n "${GITHUB_TOKEN:-}" ]; then
-              printf 'GITHUB_TOKEN=%s\n' "$(printf '%s' "$GITHUB_TOKEN" | base64 -w0)"
+            encode openai-project-key "$OPENAI_API_KEY"
+            encode database-url "$DATABASE_URL"
+            encode session-secret "$SESSION_SECRET"
+            encode google-client-secret "$GOOGLE_CLIENT_SECRET"
+            encode google-token-encryption-key "$GOOGLE_TOKEN_ENCRYPTION_KEY"
+            encode codex-worker-secret "$CODEX_WORKER_SECRET"
+            encode constructor-publisher-secret "$CONSTRUCTOR_PUBLISHER_SECRET"
+            encode constructor-release-secret "$CONSTRUCTOR_RELEASE_SECRET"
+            encode browser-worker-secret "$BROWSER_WORKER_SECRET"
+            encode converter-worker-secret "$CONVERTER_WORKER_SECRET"
+            encode revolut-merchant-secret-key "$REVOLUT_MERCHANT_SECRET_KEY"
+            encode revolut-webhook-signing-secret "$REVOLUT_WEBHOOK_SIGNING_SECRET"
+            encode vapid-private-key "$VAPID_PRIVATE_KEY"
+          } | ssh_vps '
+            set -euo pipefail
+            umask 077
+            install -d -o root -g 10050 -m 0750 /root/kelion/secrets
+            if [ ! -s /root/kelion/secrets/migration-backup-proof-key ]; then
+              temporary_proof_key=$(mktemp /root/kelion/secrets/migration-backup-proof-key.XXXXXX)
+              openssl rand -hex 32 > "$temporary_proof_key"
+              chown root:10050 "$temporary_proof_key"
+              chmod 0440 "$temporary_proof_key"
+              mv "$temporary_proof_key" /root/kelion/secrets/migration-backup-proof-key
             fi
-          } | $SSH '
-            set -e
-            f=/root/kelion/kelionai.env
-            touch "$f"; chmod 600 "$f"
-            c=0
-            while IFS= read -r line; do
-              [ -z "$line" ] && continue
-              name="${line%%=*}"
-              val=$(printf "%s" "${line#*=}" | base64 -d)
-              # O valoare pe mai multe rânduri ar rupe fișierul env — o sărim și
-              # o SPUNEM, în loc s-o scriem stricat și să pară pusă. (Testul cu
-              # wc -l, NU un pattern multi-linie în `case`: newline-ul literal
-              # din pattern ieșea la coloana 0, ieșea din blocul `run: |` și
-              # INVALIDA TOT WORKFLOW-UL — de-aia a picat la fiecare push.)
-              if [ "$(printf '%s' "$val" | wc -l)" -gt 0 ]; then
-                echo "::warning::$name are rânduri multiple — nu se poate pune în env, sărit"; continue
-              fi
-              grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
-              printf "%s=%s\n" "$name" "$val" >> "$f.tmp"
-              mv "$f.tmp" "$f"; chmod 600 "$f"
-              echo "  $name: scris (${#val} caractere) — valoarea NU se afișează"
-              c=$((c+1))
+            while IFS="=" read -r name encoded; do
+              case "$name" in
+                openai-project-key|database-url|session-secret|google-client-secret|google-token-encryption-key|codex-worker-secret|constructor-publisher-secret|constructor-release-secret|browser-worker-secret|converter-worker-secret|revolut-merchant-secret-key|revolut-webhook-signing-secret|vapid-private-key) ;;
+                *) exit 1 ;;
+              esac
+              value=$(printf "%s" "$encoded" | base64 -d)
+              [ -n "$value" ] && [ "$(printf "%s" "$value" | wc -l)" -eq 0 ]
+              temporary=$(mktemp "/root/kelion/secrets/${name}.XXXXXX")
+              printf "%s\n" "$value" > "$temporary"
+              chown root:10050 "$temporary"
+              chmod 0440 "$temporary"
+              mv "$temporary" "/root/kelion/secrets/$name"
             done
-            echo "total chei scrise/actualizate: $c"
-            if [ "$c" -eq 0 ]; then
-              echo "::warning::Niciun secret setat în GitHub. Adaugă-le în Settings → Secrets → Actions."
-            fi
           '
 
-          # (Forțarea CONSTRUCTOR_DEEPSEEK_* pe DeepInfra a fost SCOASĂ — owner, 20 aug:
-          # „tai tot ce e plătit; rămân doar cu Linux și Gemini Live". Constructorul
-          # rulează pe Aider + Ollama local free de pe VPS; DeepSeek/DeepInfra a ieșit
-          # din aplicație. Cheia veche CONSTRUCTOR_DEEPSEEK_KEY de pe VPS: de rotit/șters
-          # manual din /root/kelion/kelionai.env + din GitHub Secrets.)
-
-          if [ "${RESTART:-true}" = "true" ]; then
-            echo "== Repornesc containerul ca să încarce env-ul nou (fără rebuild) =="
-            $SSH '
-              set -e
-              docker rm -f kelionai-app >/dev/null 2>&1 || true
-              # GIT_COMMIT_SHA se păstrează și la repornirea de aici (clona
-              # `deploy` = codul imaginii) — altfel /api/version recădea pe ora
-              # bootului și verificarea anti-fantomă orbea.
-              # ACELEAȘI volume ca la deploy.sh (14 aug): pw-cache LIPSEA aici —
-              # o repornire prin secret_publica pierdea Chromium-ul (browserul
-              # mâinilor murea până la următoarea publicare completă); iar
-              # /host/kelion:ro dă self-heal-ului ochii pe logurile gazdei.
-              docker run -d --name kelionai-app --restart unless-stopped \
-                --network host --env-file /root/kelion/kelionai.env \
-                -e PORT=8080 -e NODE_ENV=production \
-                -e GIT_COMMIT_SHA="$(git -C /root/kelion/repo rev-parse HEAD 2>/dev/null || true)" \
-                -v /root/kelion/pw-cache:/root/.cache/ms-playwright \
-                -v /root/kelion:/host/kelion:ro \
-                kelionai:latest >/dev/null
-              sleep 4
-              code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/version || echo 000)
-              echo "app repornit — /api/version HTTP $code"
-            '
-          fi
+          env_payload=$(printf '%s\n' \
+            'NODE_ENV=production' \
+            'PORT=8080' \
+            "PUBLIC_APP_ORIGIN=$PUBLIC_APP_ORIGIN" \
+            "FRONTEND_ORIGIN=$PUBLIC_APP_ORIGIN" \
+            "ADMIN_EMAIL=$admin_email" \
+            'OPENAI_API_KEY_FILE=/run/secrets/openai-project-key' \
+            "OPENAI_LUNA_MODEL=$OPENAI_LUNA_MODEL" \
+            "OPENAI_MEDIUM_MODEL=$OPENAI_MEDIUM_MODEL" \
+            "OPENAI_HEAVY_MODEL=$OPENAI_HEAVY_MODEL" \
+            "OPENAI_MAX_MODEL=$OPENAI_MAX_MODEL" \
+            "OPENAI_REALTIME_MODEL=$OPENAI_REALTIME_MODEL" \
+            "OPENAI_REALTIME_TRANSCRIPTION_MODEL=$OPENAI_REALTIME_TRANSCRIPTION_MODEL" \
+            "OPENAI_CALL_TRANSCRIPTION_MODEL=$OPENAI_CALL_TRANSCRIPTION_MODEL" \
+            "OPENAI_TTS_MODEL=$OPENAI_TTS_MODEL" \
+            "OPENAI_IMAGE_MODEL=$OPENAI_IMAGE_MODEL" \
+            "OPENAI_VIDEO_MODEL=$OPENAI_VIDEO_MODEL" \
+            "OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND=$OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND" \
+            "OPENAI_VIDEO_SHUTDOWN_AT=$OPENAI_VIDEO_SHUTDOWN_AT" \
+            'DATABASE_URL_FILE=/run/secrets/database-url' \
+            'SESSION_SECRET_FILE=/run/secrets/session-secret' \
+            "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" \
+            'GOOGLE_CLIENT_SECRET_FILE=/run/secrets/google-client-secret' \
+            'GOOGLE_TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/google-token-encryption-key' \
+            "GOOGLE_TOKEN_ENCRYPTION_KEY_ID=$GOOGLE_TOKEN_ENCRYPTION_KEY_ID" \
+            "GOOGLE_REDIRECT_URI=$GOOGLE_REDIRECT_URI" \
+            "CODEX_WORKER_ENABLED=$CODEX_WORKER_ENABLED" \
+            'CODEX_WORKER_SECRET_FILE=/run/secrets/codex-worker-secret' \
+            "CONSTRUCTOR_PUBLISHER_ENABLED=$CONSTRUCTOR_PUBLISHER_ENABLED" \
+            'CONSTRUCTOR_PUBLISHER_SECRET_FILE=/run/secrets/constructor-publisher-secret' \
+            "CONSTRUCTOR_RELEASE_ENABLED=$CONSTRUCTOR_RELEASE_ENABLED" \
+            'CONSTRUCTOR_RELEASE_SECRET_FILE=/run/secrets/constructor-release-secret' \
+            'BROWSER_WORKER_SOCKET=/run/kelion-browser-api/browser.sock' \
+            'BROWSER_WORKER_SECRET_FILE=/run/secrets/browser-worker-secret' \
+            'CONVERTER_WORKER_SOCKET=/run/kelion-converter-api/converter.sock' \
+            'CONVERTER_WORKER_SECRET_FILE=/run/secrets/converter-worker-secret' \
+            'REVOLUT_MERCHANT_SECRET_KEY_FILE=/run/secrets/revolut-merchant-secret-key' \
+            'REVOLUT_WEBHOOK_SIGNING_SECRET_FILE=/run/secrets/revolut-webhook-signing-secret' \
+            "PUSH_ENABLED=$PUSH_ENABLED" \
+            "VAPID_PUBLIC_KEY=$VAPID_PUBLIC_KEY" \
+            'VAPID_PRIVATE_KEY_FILE=/run/secrets/vapid-private-key' \
+            "PUSH_ENDPOINT_HOSTS=$PUSH_ENDPOINT_HOSTS" \
+            "VISITOR_CHAT_TTL_SECONDS=$VISITOR_CHAT_TTL_SECONDS" \
+            "VISITOR_ANALYTICS_RETENTION_DAYS=$VISITOR_ANALYTICS_RETENTION_DAYS" \
+            "SESSION_ABSOLUTE_TTL_SECONDS=$SESSION_ABSOLUTE_TTL_SECONDS" \
+            "SESSION_IDLE_TTL_SECONDS=$SESSION_IDLE_TTL_SECONDS" \
+            "SESSION_TOUCH_INTERVAL_SECONDS=$SESSION_TOUCH_INTERVAL_SECONDS" \
+            "SESSION_MAX_ACTIVE_PER_ACCOUNT=$SESSION_MAX_ACTIVE_PER_ACCOUNT" \
+            "SESSION_RECENT_REAUTH_SECONDS=$SESSION_RECENT_REAUTH_SECONDS" \
+            "NATIVE_AUTH_REQUEST_TTL_SECONDS=$NATIVE_AUTH_REQUEST_TTL_SECONDS" \
+            "NATIVE_AUTH_EXCHANGE_TTL_SECONDS=$NATIVE_AUTH_EXCHANGE_TTL_SECONDS" \
+            "NATIVE_CHANNEL_TICKET_TTL_SECONDS=$NATIVE_CHANNEL_TICKET_TTL_SECONDS" \
+            "OFFLINE_SYNC_MAX_TURNS=$OFFLINE_SYNC_MAX_TURNS" \
+            "OFFLINE_SYNC_MAX_TEXT_CHARS=$OFFLINE_SYNC_MAX_TEXT_CHARS" \
+            "OFFLINE_SYNC_MAX_AGE_DAYS=$OFFLINE_SYNC_MAX_AGE_DAYS" \
+            "OFFLINE_SYNC_FUTURE_SKEW_SECONDS=$OFFLINE_SYNC_FUTURE_SKEW_SECONDS" \
+            "VOCAL_LIVE_IDLE_TIMEOUT_SECONDS=$VOCAL_LIVE_IDLE_TIMEOUT_SECONDS" \
+            "PRIVACY_POLICY_UPDATED=$PRIVACY_POLICY_UPDATED" \
+            "DATA_CONTROLLER_NAME=$DATA_CONTROLLER_NAME" \
+            "PRIVACY_BACKUP_RETENTION_DAYS=$PRIVACY_BACKUP_RETENTION_DAYS" \
+            "FINANCIAL_RETENTION_YEARS=$FINANCIAL_RETENTION_YEARS" \
+            "JOURNAL_RETENTION_DAYS=$JOURNAL_RETENTION_DAYS" \
+            "MEDIA_RETENTION_DAYS=$MEDIA_RETENTION_DAYS" \
+            "CREDIT_PRICE_MINOR=$CREDIT_PRICE_MINOR" \
+            "CHAT_TURN_PRICE_MINOR=$CHAT_TURN_PRICE_MINOR" \
+            "CALL_UTTERANCE_PRICE_MINOR=$CALL_UTTERANCE_PRICE_MINOR" \
+            "VOICE_LIVE_MINUTE_PRICE_MINOR=$VOICE_LIVE_MINUTE_PRICE_MINOR" \
+            "BILLING_FIRST_TOPUP_MIN_MINOR=$BILLING_FIRST_TOPUP_MIN_MINOR" \
+            "BILLING_TOPUP_STEP_MINOR=$BILLING_TOPUP_STEP_MINOR" \
+            "BILLING_TOPUP_MIN_MINOR=$BILLING_TOPUP_MIN_MINOR" \
+            "BILLING_TOPUP_MAX_MINOR=$BILLING_TOPUP_MAX_MINOR" \
+            "LOW_CREDIT_THRESHOLD_MINOR=$LOW_CREDIT_THRESHOLD_MINOR" \
+            "LOW_CREDIT_TOPUP_MINOR=$LOW_CREDIT_TOPUP_MINOR" \
+            "PAYMENT_MODE=$PAYMENT_MODE" \
+            "PAYMENT_CONTRACT_VERIFIED=$PAYMENT_CONTRACT_VERIFIED" \
+            "REVOLUT_MERCHANT_API_VERSION=$REVOLUT_MERCHANT_API_VERSION" \
+            "REVOLUT_ORDER_EXPIRY=$REVOLUT_ORDER_EXPIRY" \
+            "PUSH_MAX_SUBSCRIPTIONS=$PUSH_MAX_SUBSCRIPTIONS" \
+            'GOOGLE_TTS_ENABLED=false' \
+            'SEARCH_ENABLED=false' \
+            'MAIL_ENABLED=false' \
+            'RELEASE_CANDIDATE_MODE=0')
+          printf '%s' "$env_payload" | base64 -w0 | ssh_vps '
+            set -euo pipefail
+            umask 077
+            IFS= read -r encoded
+            install -d -o root -g 10050 -m 0750 /root/kelion/config
+            temporary=$(mktemp /root/kelion/config/runtime.env.XXXXXX)
+            printf "%s" "$encoded" | base64 -d > "$temporary"
+            chown root:10050 "$temporary"
+            chmod 0640 "$temporary"
+            mv "$temporary" /root/kelion/config/runtime.env
+            printf "%s\n" "runtime allowlist provisioned; no process restarted"
+          '
