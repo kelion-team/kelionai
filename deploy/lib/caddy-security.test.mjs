@@ -5,6 +5,10 @@ import { test } from 'node:test'
 
 const caddy = readFileSync(new URL('../Caddyfile', import.meta.url), 'utf8')
 const frontendIndex = readFileSync(new URL('../../frontend/index.html', import.meta.url), 'utf8')
+const prVerify = readFileSync(new URL('../../.github/workflows/pr-verify.yml', import.meta.url), 'utf8')
+const composeProxy = readFileSync(new URL('../compose.proxy.yml', import.meta.url), 'utf8')
+const deploy = readFileSync(new URL('../deploy.sh', import.meta.url), 'utf8')
+const CADDY_IMAGE = 'caddy:2@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a'
 
 function directive(policy, name) {
   return policy.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name} `)) ?? ''
@@ -73,4 +77,37 @@ test('proxy-ul nu creează un jurnal implicit de IP-uri', () => {
   assert.doesNotMatch(caddy, /^\s*log\s*\{/m)
   assert.match(caddy, /trusted_proxies_strict/)
   assert.match(caddy, /request_header -CF-IPCountry/)
+})
+
+test('validarea CI montează upstream-ul exact în calea importată de Caddy', () => {
+  assert.match(caddy, /import \/etc\/caddy\/upstream\/kelion-upstream\.caddy/)
+  assert.match(
+    prVerify,
+    /kelion-upstream\.caddy\.example:\/etc\/caddy\/upstream\/kelion-upstream\.caddy:ro/,
+  )
+})
+
+test('toate etapele folosesc același digest Caddy verificat', () => {
+  for (const [name, source] of [['CI', prVerify], ['compose proxy', composeProxy], ['deploy', deploy]]) {
+    const images = source.match(/caddy:2@sha256:[a-f0-9]{64}/g) ?? []
+    assert.ok(images.length > 0, `${name} nu fixează imaginea Caddy`)
+    assert.deepEqual([...new Set(images)], [CADDY_IMAGE], `${name} folosește alt digest Caddy`)
+  }
+})
+
+test('validarea Caddy non-root poate traversa și citi directorul temporar', () => {
+  assert.match(
+    deploy,
+    /temporary_proxy=\$\(mktemp -d[^\n]+\)[\s\S]*?chmod 0755 "\$temporary_proxy"[\s\S]*?chmod 0644 "\$temporary_proxy\/kelion-upstream\.caddy"[\s\S]*?docker run --rm --network kelion-proxy --user 1000:1000/,
+  )
+  assert.match(
+    prVerify,
+    /docker run --rm --network none --user 1000:1000 --read-only \\\n\s*--cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges/,
+  )
+  assert.match(
+    deploy,
+    /docker run --rm --network kelion-proxy --user 1000:1000 --read-only \\\n\s*--cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges/,
+  )
+  assert.match(composeProxy, /user: "1000:1000"[\s\S]*?\/tmp:size=16m,mode=0700,uid=1000,gid=1000/)
+  assert.match(composeProxy, /cap_drop: \[ALL\][\s\S]*?cap_add: \[NET_BIND_SERVICE\]/)
 })

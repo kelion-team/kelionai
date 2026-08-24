@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const compose = readFileSync(new URL('../compose.production.yml', import.meta.url), 'utf8')
+const prVerify = readFileSync(new URL('../../.github/workflows/pr-verify.yml', import.meta.url), 'utf8')
 
 function service(name) {
   const match = new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:|^networks:)`, 'm').exec(compose)
@@ -62,10 +63,70 @@ test('numai creatorul fiecărui socket are mount UDS writable', () => {
   assert.doesNotMatch(mount(converterParser, '/run/kelion-converter-private'), /read_only: true/)
 })
 
+test('tmpfs-urile writable aparțin utilizatorului non-root al serviciului', () => {
+  for (const [name, uid] of [
+    ['app', '1000'],
+    ['browser-worker', '1001'],
+    ['browser-egress', '1000'],
+    ['converter-gateway', '1000'],
+    ['converter-parser', '10001'],
+  ]) {
+    const block = service(name)
+    const tmpfs = /\n    tmpfs:\n([\s\S]*?)(?=\n    [a-z_])/m.exec(block)?.[1] ?? ''
+    assert.match(tmpfs, new RegExp(`uid=${uid},gid=${uid}`), `${name} nu deține tmpfs-ul writable`)
+    assert.doesNotMatch(tmpfs, /mode=(?:0700|1770)(?![^\n]*uid=)/, `${name} are tmpfs root-only`)
+  }
+})
+
+test('healthcheck-ul parserului păstrează CRLF în sursa Python după parsarea YAML', () => {
+  const parser = service('converter-parser')
+  assert.match(parser, /crlf=bytes\(\(13,10\)\)/)
+  assert.doesNotMatch(parser, /\\r|\\n/)
+})
+
 test('browserul nu are rută directă de egress, iar proxy-ul este singura punte', () => {
   const internalNetwork = /^  browser-internal:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:|\Z)/m.exec(compose)?.[1] ?? ''
   assert.match(internalNetwork, /\n    internal: true\n/)
   assert.doesNotMatch(service('browser-worker'), /\n      browser-egress: \{\}/)
   assert.match(service('browser-egress'), /\n      browser-egress: \{\}/)
   assert.doesNotMatch(compose, /network_mode: host/)
+})
+
+test('CI inițializează starea release deținută de root prin sudo', () => {
+  assert.match(
+    prVerify,
+    /sudo install -d -o root -g 10050 -m 2770[\s\S]*?\/tmp\/kelion-ci-runtime\/release-state/,
+  )
+  assert.match(
+    prVerify,
+    /printf '%s\\n' inactive \| sudo tee \/tmp\/kelion-ci-runtime\/release-state\/active >\/dev\/null/,
+  )
+  assert.doesNotMatch(
+    prVerify,
+    /printf '%s\\n' inactive > \/tmp\/kelion-ci-runtime\/release-state\/active/,
+  )
+  assert.match(
+    prVerify,
+    /sudo find \/tmp\/kelion-ci-secrets -mindepth 1 -maxdepth 1 -type f -exec chown root:10050 \{\} \+ -exec chmod 0440 \{\} \+/,
+  )
+  assert.doesNotMatch(prVerify, /sudo chmod 0440 \/tmp\/kelion-ci-secrets\/\*/)
+  assert.match(prVerify, /sudo chmod 0644 \/tmp\/kelion-ci-config\/runtime\.env/)
+  assert.match(prVerify, /sudo install -d -o root -g root -m 0755 \/tmp\/kelion-ci-seccomp/)
+  assert.match(prVerify, /postgres_ready_streak=0/)
+  assert.match(prVerify, /\[ "\$postgres_ready_streak" -ge 3 \]/)
+  assert.doesNotMatch(
+    prVerify,
+    /pg_isready[^\n]+&& break/,
+    'serverul temporar initdb nu trebuie confundat cu readiness stabil',
+  )
+  assert.match(
+    prVerify,
+    /docker exec kelion-ci-postgres pg_dump[^\n]+--format=custom \\\n\s*> \/tmp\/kelion-ci-postgres\/backup\/pre-migration\.dump/,
+  )
+  assert.doesNotMatch(prVerify, /docker cp kelion-ci-postgres:\/tmp\/pre-migration\.dump/)
+  assert.match(
+    prVerify,
+    /cleanup\(\) \{[\s\S]*?local rc=\$\?[\s\S]*?docker compose[^\n]+ps --all[\s\S]*?docker inspect --format 'container=\{\{\.Name\}\} status=\{\{\.State\.Status\}\} health=\{\{json \.State\.Health\}\}'[\s\S]*?docker compose[^\n]+down/,
+  )
+  assert.doesNotMatch(prVerify, /docker(?: compose)?\s+logs\b/)
 })

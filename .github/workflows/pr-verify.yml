@@ -61,6 +61,7 @@ jobs:
             deploy/lib/constructor-publication.test.mjs \
             deploy/lib/network-config.test.mjs \
             deploy/lib/compose-security.test.mjs \
+            deploy/lib/release-rollback.test.mjs \
             deploy/lib/security-policy.test.mjs
 
       - name: Suprafață și contracte
@@ -150,6 +151,13 @@ jobs:
         run: |
           set -euo pipefail
           cleanup() {
+            local rc=$?
+            if [ "$rc" -ne 0 ]; then
+              docker compose --project-name kelion-ci --file deploy/compose.production.yml ps --all || true
+              for container in kelion-ci-app-1 kelion-ci-browser-worker-1 kelion-ci-browser-egress-1 kelion-ci-converter-gateway-1 kelion-ci-converter-parser-1; do
+                docker inspect --format 'container={{.Name}} status={{.State.Status}} health={{json .State.Health}}' "$container" || true
+              done
+            fi
             docker compose --project-name kelion-ci --file deploy/compose.production.yml down --volumes --remove-orphans || true
             docker rm --force kelion-ci-postgres >/dev/null 2>&1 || true
             docker network rm kelion-proxy >/dev/null 2>&1 || true
@@ -162,8 +170,8 @@ jobs:
             /tmp/kelion-ci-runtime/browser-egress \
             /tmp/kelion-ci-runtime/converter-api \
             /tmp/kelion-ci-runtime/converter-private \
-            /tmp/kelion-ci-runtime/release-state \
-            /tmp/kelion-ci-seccomp
+            /tmp/kelion-ci-runtime/release-state
+          sudo install -d -o root -g root -m 0755 /tmp/kelion-ci-seccomp
           sudo install -d -o 999 -g 999 -m 0700 /tmp/kelion-ci-postgres/data
           sudo install -d -o 999 -g 999 -m 0775 /tmp/kelion-ci-postgres/socket
           umask 077
@@ -192,7 +200,7 @@ jobs:
           OPENAI_CALL_TRANSCRIPTION_MODEL=${ci_model_prefix}-call-transcription
           OPENAI_TTS_MODEL=${ci_model_prefix}-tts
           OPENAI_IMAGE_MODEL=${ci_model_prefix}-image
-          OPENAI_VIDEO_MODEL=${ci_model_prefix}-video
+          OPENAI_VIDEO_MODEL=sora-ci-video
           OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND=100000
           OPENAI_VIDEO_SHUTDOWN_AT=2099-01-01T00:00:00.000Z
           DATABASE_URL_FILE=/run/secrets/database-url
@@ -259,11 +267,12 @@ jobs:
           MAIL_ENABLED=false
           RELEASE_CANDIDATE_MODE=1
           ENV
-          printf '%s\n' inactive > /tmp/kelion-ci-runtime/release-state/active
-          sudo chown root:10050 /tmp/kelion-ci-secrets /tmp/kelion-ci-secrets/* /tmp/kelion-ci-config/runtime.env /tmp/kelion-ci-runtime/release-state/active
+          printf '%s\n' inactive | sudo tee /tmp/kelion-ci-runtime/release-state/active >/dev/null
+          sudo chown root:10050 /tmp/kelion-ci-secrets /tmp/kelion-ci-config/runtime.env /tmp/kelion-ci-runtime/release-state/active
+          sudo find /tmp/kelion-ci-secrets -mindepth 1 -maxdepth 1 -type f -exec chown root:10050 {} + -exec chmod 0440 {} +
           sudo chmod 0750 /tmp/kelion-ci-secrets
-          sudo chmod 0440 /tmp/kelion-ci-secrets/*
-          sudo chmod 0640 /tmp/kelion-ci-config/runtime.env /tmp/kelion-ci-runtime/release-state/active
+          sudo chmod 0644 /tmp/kelion-ci-config/runtime.env
+          sudo chmod 0640 /tmp/kelion-ci-runtime/release-state/active
           sudo KELION_SECCOMP_DESTINATION="$KELION_SECCOMP_PROFILE" bash deploy/pregateste-seccomp.sh
 
           docker run --detach --name kelion-ci-postgres --network none --user 999:999 \
@@ -273,13 +282,26 @@ jobs:
             -v /tmp/kelion-ci-postgres/data:/var/lib/postgresql/data \
             -v /tmp/kelion-ci-postgres/socket:/var/run/postgresql \
             postgres:16-bookworm@sha256:60f4761b9035e0b8d5218f701a8c3382f641bf12b1604822574cf5be3baeb537 >/dev/null
-          for attempt in $(seq 1 45); do
-            docker exec kelion-ci-postgres pg_isready --host=/var/run/postgresql --dbname=kelion_ci >/dev/null 2>&1 && break
+          postgres_ready_streak=0
+          for attempt in $(seq 1 60); do
+            if [ "$(docker inspect --format '{{.State.Running}}' kelion-ci-postgres)" != true ]; then
+              docker inspect --format 'postgres_state={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}}' kelion-ci-postgres
+              exit 1
+            fi
+            if docker exec kelion-ci-postgres pg_isready --host=/var/run/postgresql --dbname=kelion_ci >/dev/null 2>&1; then
+              postgres_ready_streak=$((postgres_ready_streak + 1))
+              [ "$postgres_ready_streak" -ge 3 ] && break
+            else
+              postgres_ready_streak=0
+            fi
             sleep 2
           done
-          docker exec kelion-ci-postgres pg_isready --host=/var/run/postgresql --dbname=kelion_ci >/dev/null
-          docker exec kelion-ci-postgres pg_dump --host=/var/run/postgresql --dbname=kelion_ci --format=custom --file=/tmp/pre-migration.dump
-          docker cp kelion-ci-postgres:/tmp/pre-migration.dump /tmp/kelion-ci-postgres/backup/pre-migration.dump
+          [ "$postgres_ready_streak" -ge 3 ] || {
+            docker inspect --format 'postgres_state={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}}' kelion-ci-postgres
+            exit 1
+          }
+          docker exec kelion-ci-postgres pg_dump --host=/var/run/postgresql --dbname=kelion_ci --format=custom \
+            > /tmp/kelion-ci-postgres/backup/pre-migration.dump
           KELION_BACKUP_FILE=/tmp/kelion-ci-postgres/backup/pre-migration.dump \
           KELION_DATABASE_URL_FILE=/tmp/kelion-ci-secrets/database-url \
           KELION_PROOF_KEY_FILE=/tmp/kelion-ci-secrets/migration-backup-proof-key \
@@ -370,10 +392,11 @@ jobs:
 
       - name: Validează Caddy cu upstream candidat
         run: |
-          docker run --rm --network none --read-only --cap-drop ALL \
-            --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
+          docker run --rm --network none --user 1000:1000 --read-only \
+            --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700 \
             --env PUBLIC_APP_DOMAIN=ci.invalid \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            -v "$PWD/deploy/kelion-upstream.caddy.example:/etc/caddy/kelion-upstream.caddy:ro" \
+            -v "$PWD/deploy/kelion-upstream.caddy.example:/etc/caddy/upstream/kelion-upstream.caddy:ro" \
             caddy:2@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a \
             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

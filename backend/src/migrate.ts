@@ -39,10 +39,52 @@ function loadMigrations(): MigrationSpec[] {
   })
 }
 
-function transactionBody(sql: string): string {
-  const withoutBegin = sql.replace(/^\s*BEGIN\s*;/i, '')
+function transactionStart(sql: string): number {
+  let offset = 0
+
+  while (offset < sql.length) {
+    const whitespace = /^\s+/.exec(sql.slice(offset))
+    if (whitespace) {
+      offset += whitespace[0].length
+      continue
+    }
+
+    if (sql.startsWith('--', offset)) {
+      const lineEnd = sql.indexOf('\n', offset + 2)
+      offset = lineEnd === -1 ? sql.length : lineEnd + 1
+      continue
+    }
+
+    if (sql.startsWith('/*', offset)) {
+      let depth = 1
+      let cursor = offset + 2
+      while (cursor < sql.length && depth > 0) {
+        if (sql.startsWith('/*', cursor)) {
+          depth += 1
+          cursor += 2
+        } else if (sql.startsWith('*/', cursor)) {
+          depth -= 1
+          cursor += 2
+        } else {
+          cursor += 1
+        }
+      }
+      if (depth > 0) throw new Error('migration_transaction_contract_invalid')
+      offset = cursor
+      continue
+    }
+
+    break
+  }
+
+  return offset
+}
+
+export function transactionBody(sql: string): string {
+  const start = transactionStart(sql)
+  const withoutBegin = sql.slice(start).replace(/^BEGIN\s*;/i, '')
   const withoutCommit = withoutBegin.replace(/COMMIT\s*;\s*$/i, '')
-  if (withoutBegin === sql || withoutCommit === withoutBegin) throw new Error('migration_transaction_contract_invalid')
+  if (withoutBegin === sql.slice(start) || withoutCommit === withoutBegin) throw new Error('migration_transaction_contract_invalid')
   return withoutCommit.trim()
 }
 

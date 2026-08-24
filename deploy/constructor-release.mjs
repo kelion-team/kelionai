@@ -129,8 +129,10 @@ async function externalProof(commit) {
   const versionResponse = await fetch(new URL('/api/version', PUBLIC_ORIGIN), { signal: AbortSignal.timeout(15_000), redirect: 'error' })
   const versionPayload = await versionResponse.json().catch(() => null)
   const readyResponse = await fetch(new URL('/readyz', PUBLIC_ORIGIN), { signal: AbortSignal.timeout(15_000), redirect: 'error' })
+  const readyPayload = await readyResponse.json().catch(() => null)
   const liveVersion = String(versionPayload?.v ?? '').toLowerCase()
-  if (!versionResponse.ok || !readyResponse.ok || liveVersion !== commit.slice(0, 7)) fail('Dovada externă nu confirmă commitul live')
+  const activeReady = readyPayload?.ready === true && readyPayload?.release?.sideEffectsActive === true
+  if (!versionResponse.ok || !readyResponse.ok || !activeReady || liveVersion !== commit.slice(0, 7)) fail('Dovada externă nu confirmă commitul live')
   return liveVersion
 }
 

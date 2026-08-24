@@ -47,7 +47,7 @@ import { deployRoutes } from './routes/deploy.js'
 import { cleanupExpiredAuthState, curataJurnaleVechi, dbEnabled, getPool, initDb, recordSimptomLive } from './db.js'
 import { hydrateSession, trustedMutationOrigin } from './session.js'
 import { makeLogTee, capturaConsole } from './services/logbuffer.js'
-import { releaseSideEffectsEnabled } from './services/releaseActivation.js'
+import { releaseSideEffectsEnabled, shutdownDeactivatedRelease } from './services/releaseActivation.js'
 import { curataTextJurnal } from './services/jurnalOperational.js'
 import { expireChatReplayResults } from './services/chatTurnReplay.js'
 
@@ -437,7 +437,7 @@ try {
       if (active && !backgroundStarted) startBackgroundWork()
       if (!active && backgroundStarted) {
         if (activationTimer) clearInterval(activationTimer)
-        void app.close().finally(() => { process.exitCode = 0 })
+        shutdownDeactivatedRelease(() => app.close())
       }
     }, 1_000)
     activationTimer.unref()

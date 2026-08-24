@@ -28,18 +28,20 @@ jobs:
           now=$(TZ=Europe/London date +'%Y-%m-%d %H:%M:%S %Z')
           down=1
           live=000
-          ready=000
+          ready_active=0
           for attempt in 1 2 3; do
             live=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 "$PUBLIC_APP_ORIGIN/livez" || true)
-            ready=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 "$PUBLIC_APP_ORIGIN/readyz" || true)
-            printf 'attempt=%s livez=%s readyz=%s\n' "$attempt" "${live:-000}" "${ready:-000}"
-            if [ "$live" = 200 ] && [ "$ready" = 200 ]; then down=0; break; fi
+            ready=$(curl --fail --silent --show-error --max-time 15 "$PUBLIC_APP_ORIGIN/readyz" || true)
+            ready_active=0
+            if jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$ready" >/dev/null 2>&1; then ready_active=1; fi
+            printf 'attempt=%s livez=%s readyz_active=%s\n' "$attempt" "${live:-000}" "$ready_active"
+            if [ "$live" = 200 ] && [ "$ready_active" = 1 ]; then down=0; break; fi
             sleep 30
           done
           open_issue=$(gh issue list --repo "$REPOSITORY" --state open --search 'SENTINEL in:title' --json number --jq '.[0].number // empty' || true)
           if [ "$down" = 0 ]; then
             if [ -n "$open_issue" ]; then
-              printf 'RECOVERED (%s): /livez=200, /readyz=200.\n' "$now" > /tmp/sentinel-body.md
+              printf 'RECOVERED (%s): /livez=200, /readyz reports active readiness.\n' "$now" > /tmp/sentinel-body.md
               gh issue comment "$open_issue" --repo "$REPOSITORY" --body-file /tmp/sentinel-body.md
               gh issue close "$open_issue" --repo "$REPOSITORY"
             fi
@@ -47,7 +49,7 @@ jobs:
           fi
           {
             printf 'Production readiness failed three consecutive probes (%s).\n\n' "$now"
-            printf -- '- `/livez`: `%s`\n- `/readyz`: `%s`\n\n' "${live:-000}" "${ready:-000}"
+            printf -- '- `/livez`: `%s`\n- `/readyz` active readiness: `%s`\n\n' "${live:-000}" "$ready_active"
             printf 'Run the read-only `vps-diag` workflow, then use the approved immutable release/rollback workflow.\n'
           } > /tmp/sentinel-body.md
           if [ -n "$open_issue" ]; then

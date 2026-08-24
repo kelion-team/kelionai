@@ -118,8 +118,8 @@ services:
         aliases: ["app-${KELION_SLOT:?release slot is required}"]
     read_only: true
     tmpfs:
-      - /tmp:size=64m,mode=1770,noexec,nosuid,nodev
-      - /home/node/.cache:size=32m,mode=0700,noexec,nosuid,nodev
+      - /tmp:size=64m,mode=1770,uid=1000,gid=1000,noexec,nosuid,nodev
+      - /home/node/.cache:size=32m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 256
@@ -166,8 +166,8 @@ services:
         ipv4_address: ${KELION_BROWSER_WORKER_IP:?browser worker IP is required}
     read_only: true
     tmpfs:
-      - /tmp:size=256m,mode=1770,noexec,nosuid,nodev
-      - /home/pwuser:size=64m,mode=0700,nosuid,nodev
+      - /tmp:size=256m,mode=1770,uid=1001,gid=1001,noexec,nosuid,nodev
+      - /home/pwuser:size=64m,mode=0700,uid=1001,gid=1001,nosuid,nodev
     shm_size: 256m
     cap_drop: [ALL]
     security_opt:
@@ -202,7 +202,7 @@ services:
       browser-egress: {}
     read_only: true
     tmpfs:
-      - /tmp:size=16m,mode=0700,noexec,nosuid,nodev
+      - /tmp:size=16m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 64
@@ -242,7 +242,7 @@ services:
         condition: service_healthy
     read_only: true
     tmpfs:
-      - /tmp:size=16m,mode=0700,noexec,nosuid,nodev
+      - /tmp:size=16m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 64
@@ -271,14 +271,14 @@ services:
         target: /run/kelion-converter-private
     read_only: true
     tmpfs:
-      - /tmp:size=256m,mode=0700,noexec,nosuid,nodev
+      - /tmp:size=256m,mode=0700,uid=10001,gid=10001,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 48
     mem_limit: 768m
     cpus: 1.0
     healthcheck:
-      test: [CMD, python, -I, -c, "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect('/run/kelion-converter-private/parser.sock'); s.sendall(b'GET /healthz HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n'); raise SystemExit(0 if b' 200 ' in s.recv(128) else 1)"]
+      test: [CMD, python, -I, -c, "import socket; crlf=bytes((13,10)); s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect('/run/kelion-converter-private/parser.sock'); s.sendall(crlf.join((b'GET /healthz HTTP/1.1',b'Host: local',b'Connection: close',b'',b''))); raise SystemExit(0 if b' 200 ' in s.recv(128) else 1)"]
       interval: 15s
       timeout: 5s
       start_period: 10s

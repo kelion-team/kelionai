@@ -104,9 +104,11 @@ config_value() { sed -n "s/^$1=//p" "$CONFIG_FILE" | sed -n '1p'; }
 [ "$(config_value GOOGLE_REDIRECT_URI)" = "$PRODUCT_ORIGIN/auth/google/callback" ] || die 'redirectul Google nu este first-party exact'
 admin_email=$(config_value ADMIN_EMAIL)
 [[ "$admin_email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]] || die 'ADMIN_EMAIL obligatoriu și normalizat'
-for name in OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_MAX_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL; do
+for name in OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_MAX_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL; do
   [[ "$(config_value "$name")" =~ ^gpt-[a-z0-9][a-z0-9._-]*$ ]] || die "$name lipsește sau este invalid"
 done
+[[ "$(config_value OPENAI_VIDEO_MODEL)" =~ ^sora-[a-z0-9][a-z0-9._-]*$ ]] \
+  || die 'OPENAI_VIDEO_MODEL lipsește sau nu este un model video Sora valid'
 for name in PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME GOOGLE_TOKEN_ENCRYPTION_KEY_ID OPENAI_VIDEO_SHUTDOWN_AT; do
   [ -n "$(config_value "$name")" ] || die "$name lipsește"
 done
@@ -240,9 +242,9 @@ UPSTREAM_FILE=$PROXY_CONFIG_ROOT/upstream/kelion-upstream.caddy
 old_upstream=''
 [ ! -f "$UPSTREAM_FILE" ] || old_upstream=$(cat "$UPSTREAM_FILE")
 case "$old_upstream" in
-  *app-blue:8080*) active_slot=blue; inactive_slot=green ;;
-  *app-green:8080*) active_slot=green; inactive_slot=blue ;;
-  *) active_slot=legacy; inactive_slot=blue ;;
+  *app-blue:8080*) active_slot=blue; active_bind_port=18080; inactive_slot=green ;;
+  *app-green:8080*) active_slot=green; active_bind_port=18081; inactive_slot=blue ;;
+  *) active_slot=legacy; active_bind_port=''; inactive_slot=blue ;;
 esac
 
 case "$inactive_slot" in
@@ -303,11 +305,15 @@ docker run --rm --network none --user 1000:1000 --group-add 10050 \
 temporary_proxy=$(mktemp -d "$RUNTIME_ROOT/proxy-validation.XXXXXX")
 install -m 0644 "$BUNDLE_DIR/Caddyfile" "$temporary_proxy/Caddyfile"
 printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$inactive_slot" > "$temporary_proxy/kelion-upstream.caddy"
-docker run --rm --network kelion-proxy --user 1000:1000 \
+chmod 0755 "$temporary_proxy"
+chmod 0644 "$temporary_proxy/kelion-upstream.caddy"
+docker run --rm --network kelion-proxy --user 1000:1000 --read-only \
+  --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700 \
   -e PUBLIC_APP_DOMAIN="$PUBLIC_APP_DOMAIN" \
   -v "$temporary_proxy/Caddyfile:/etc/caddy/Caddyfile:ro" \
   -v "$temporary_proxy:/etc/caddy/upstream:ro" \
-  caddy:2@sha256:98eb57b87c9be83995ff0dd16c75d3b78740046933347f939312823736326a5e \
+  caddy:2@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a \
   caddy validate --config /etc/caddy/Caddyfile
 rm -f -- "$temporary_proxy/Caddyfile" "$temporary_proxy/kelion-upstream.caddy"
 rmdir "$temporary_proxy"
@@ -316,20 +322,56 @@ old_marker=$(sed -n '1p' "$RELEASE_STATE_ROOT/active")
 legacy_proxy_running=0
 docker inspect -f '{{.State.Running}}' kelion-caddy 2>/dev/null | grep -qx true && legacy_proxy_running=1 || true
 switched=0
-rollback_switch() {
-  [ "$switched" = 1 ] || return 0
-  if [ -n "$old_upstream" ]; then
-    temporary=$(mktemp "$PROXY_CONFIG_ROOT/upstream/rollback.XXXXXX")
-    printf '%s\n' "$old_upstream" > "$temporary"
-    chmod 0644 "$temporary"
-    mv "$temporary" "$UPSTREAM_FILE"
-    docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || true
-  fi
+restore_release_marker() {
+  local temporary
   temporary=$(mktemp "$RELEASE_STATE_ROOT/rollback.XXXXXX")
   printf '%s\n' "$old_marker" > "$temporary"
   chown root:10050 "$temporary"
   chmod 0640 "$temporary"
   mv "$temporary" "$RELEASE_STATE_ROOT/active"
+}
+
+restart_previous_slot() {
+  local rollback_ready=''
+  local -a containers=()
+  mapfile -t containers < <(
+    docker ps -aq \
+      --filter "label=com.kelion.managed=true" \
+      --filter "label=com.kelion.slot=$active_slot"
+  )
+  [ "${#containers[@]}" -gt 0 ] || return 1
+  docker start "${containers[@]}" >/dev/null
+  restore_release_marker
+  for _attempt in $(seq 1 45); do
+    rollback_ready=$(curl --fail --silent --show-error --max-time 10 \
+      "http://127.0.0.1:$active_bind_port/readyz" || true)
+    if jq -e '.ready == true and .release.sideEffectsActive == true' \
+      <<<"$rollback_ready" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+rollback_switch() {
+  [ "$switched" = 1 ] || return 0
+  if [ "$active_slot" = blue ] || [ "$active_slot" = green ]; then
+    restart_previous_slot || {
+      printf 'release: rollback-ul nu poate confirma readiness-ul slotului %s\n' "$active_slot" >&2
+      return 1
+    }
+  else
+    restore_release_marker
+  fi
+  if [ -n "$old_upstream" ]; then
+    temporary=$(mktemp "$PROXY_CONFIG_ROOT/upstream/rollback.XXXXXX")
+    printf '%s\n' "$old_upstream" > "$temporary"
+    chmod 0644 "$temporary"
+    mv "$temporary" "$UPSTREAM_FILE"
+    docker exec kelion-proxy caddy validate --config /etc/caddy/Caddyfile >/dev/null
+    docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null
+  fi
   if [ "$legacy_proxy_running" = 1 ]; then
     "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" down >/dev/null 2>&1 || true
     docker start kelion-caddy >/dev/null 2>&1 || true
@@ -371,8 +413,12 @@ jq -e '.ready == true and .release.sideEffectsActive == true' <<<"${active_ready
 public_ok=0
 for _attempt in $(seq 1 18); do
   live_version=$(curl --fail --silent --show-error --max-time 12 "$PRODUCT_ORIGIN/api/version" | jq -r '.v // empty' || true)
-  live_ready=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 12 "$PRODUCT_ORIGIN/readyz" || true)
-  if [ "$live_version" = "${COMMIT_SHA:0:7}" ] && [ "$live_ready" = 200 ]; then public_ok=1; break; fi
+  live_ready=$(curl --fail --silent --show-error --max-time 12 "$PRODUCT_ORIGIN/readyz" || true)
+  if [ "$live_version" = "${COMMIT_SHA:0:7}" ] \
+    && jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$live_ready" >/dev/null 2>&1; then
+    public_ok=1
+    break
+  fi
   sleep 5
 done
 [ "$public_ok" = 1 ] || die 'smoke-ul public nu confirmă commitul și readiness'
