@@ -184,5 +184,6 @@ jobs:
           origin=$(jq -er '.publicAppOrigin' config/product.json)
           expected=${CANDIDATE_SHA:0:7}
           version=$(curl --fail --silent --show-error --max-time 12 "$origin/api/version" | jq -er '.v')
-          readiness=$(curl --fail --silent --output /dev/null --write-out '%{http_code}' --max-time 12 "$origin/readyz")
-          [ "$version" = "$expected" ] && [ "$readiness" = 200 ]
+          readiness=$(curl --fail --silent --show-error --max-time 12 "$origin/readyz")
+          [ "$version" = "$expected" ]
+          jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$readiness" >/dev/null

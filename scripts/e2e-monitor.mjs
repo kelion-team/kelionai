@@ -49,7 +49,9 @@ async function main() {
   for (const { path, nume, ce } of paths) {
     const r = await get(`${URL}${path}`)
     const falseOk = r.ok && r.body && typeof r.body === 'object' && r.body.error
-    const fail = !r.ok || falseOk
+    const inactiveReadiness = path === '/readyz'
+      && !(r.body?.ready === true && r.body?.release?.sideEffectsActive === true)
+    const fail = !r.ok || falseOk || inactiveReadiness
     rezultate.push({
       nume,
       ce,
@@ -57,7 +59,7 @@ async function main() {
       ok: !fail,
       status: r.status,
       eroare: r.eroare,
-      bodyError: falseOk ? r.body.error : null,
+      bodyError: falseOk ? r.body.error : inactiveReadiness ? 'readiness_inactive' : null,
       body: r.ok && typeof r.body === 'object' ? r.body : null,
     })
   }

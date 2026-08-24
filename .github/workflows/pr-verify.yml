@@ -61,6 +61,7 @@ jobs:
             deploy/lib/constructor-publication.test.mjs \
             deploy/lib/network-config.test.mjs \
             deploy/lib/compose-security.test.mjs \
+            deploy/lib/release-rollback.test.mjs \
             deploy/lib/security-policy.test.mjs
 
       - name: Suprafață și contracte
@@ -192,7 +193,7 @@ jobs:
           OPENAI_CALL_TRANSCRIPTION_MODEL=${ci_model_prefix}-call-transcription
           OPENAI_TTS_MODEL=${ci_model_prefix}-tts
           OPENAI_IMAGE_MODEL=${ci_model_prefix}-image
-          OPENAI_VIDEO_MODEL=${ci_model_prefix}-video
+          OPENAI_VIDEO_MODEL=sora-ci-video
           OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND=100000
           OPENAI_VIDEO_SHUTDOWN_AT=2099-01-01T00:00:00.000Z
           DATABASE_URL_FILE=/run/secrets/database-url
@@ -292,8 +293,8 @@ jobs:
             docker inspect --format 'postgres_state={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}}' kelion-ci-postgres
             exit 1
           }
-          docker exec kelion-ci-postgres pg_dump --host=/var/run/postgresql --dbname=kelion_ci --format=custom --file=/tmp/pre-migration.dump
-          docker cp kelion-ci-postgres:/tmp/pre-migration.dump /tmp/kelion-ci-postgres/backup/pre-migration.dump
+          docker exec kelion-ci-postgres pg_dump --host=/var/run/postgresql --dbname=kelion_ci --format=custom \
+            > /tmp/kelion-ci-postgres/backup/pre-migration.dump
           KELION_BACKUP_FILE=/tmp/kelion-ci-postgres/backup/pre-migration.dump \
           KELION_DATABASE_URL_FILE=/tmp/kelion-ci-secrets/database-url \
           KELION_PROOF_KEY_FILE=/tmp/kelion-ci-secrets/migration-backup-proof-key \
@@ -388,6 +389,6 @@ jobs:
             --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
             --env PUBLIC_APP_DOMAIN=ci.invalid \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            -v "$PWD/deploy/kelion-upstream.caddy.example:/etc/caddy/kelion-upstream.caddy:ro" \
+            -v "$PWD/deploy/kelion-upstream.caddy.example:/etc/caddy/upstream/kelion-upstream.caddy:ro" \
             caddy:2@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a \
             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

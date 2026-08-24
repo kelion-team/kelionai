@@ -32,6 +32,8 @@ test('cele trei identități nu își pot împrumuta credentialele', () => {
   assert.match(release, /actions\/workflows\/\$\{WORKFLOW\}\/dispatches/)
   assert.match(release, /successfulBuildArtifact[\s\S]*build-images\.yml[\s\S]*release-images-/)
   assert.match(release, /release_request_id: requestId/)
+  assert.match(release, /readyPayload\?\.ready === true && readyPayload\?\.release\?\.sideEffectsActive === true/)
+  assert.match(release, /!readyResponse\.ok \|\| !activeReady/)
 })
 
 test('systemd păstrează secret stores, userii și spool-ul separate', () => {

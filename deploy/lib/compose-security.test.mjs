@@ -63,6 +63,21 @@ test('numai creatorul fiecărui socket are mount UDS writable', () => {
   assert.doesNotMatch(mount(converterParser, '/run/kelion-converter-private'), /read_only: true/)
 })
 
+test('tmpfs-urile writable aparțin utilizatorului non-root al serviciului', () => {
+  for (const [name, uid] of [
+    ['app', '1000'],
+    ['browser-worker', '1001'],
+    ['browser-egress', '1000'],
+    ['converter-gateway', '1000'],
+    ['converter-parser', '10001'],
+  ]) {
+    const block = service(name)
+    const tmpfs = /\n    tmpfs:\n([\s\S]*?)(?=\n    [a-z_])/m.exec(block)?.[1] ?? ''
+    assert.match(tmpfs, new RegExp(`uid=${uid},gid=${uid}`), `${name} nu deține tmpfs-ul writable`)
+    assert.doesNotMatch(tmpfs, /mode=(?:0700|1770)(?![^\n]*uid=)/, `${name} are tmpfs root-only`)
+  }
+})
+
 test('browserul nu are rută directă de egress, iar proxy-ul este singura punte', () => {
   const internalNetwork = /^  browser-internal:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:|\Z)/m.exec(compose)?.[1] ?? ''
   assert.match(internalNetwork, /\n    internal: true\n/)
@@ -97,4 +112,9 @@ test('CI inițializează starea release deținută de root prin sudo', () => {
     /pg_isready[^\n]+&& break/,
     'serverul temporar initdb nu trebuie confundat cu readiness stabil',
   )
+  assert.match(
+    prVerify,
+    /docker exec kelion-ci-postgres pg_dump[^\n]+--format=custom \\\n\s*> \/tmp\/kelion-ci-postgres\/backup\/pre-migration\.dump/,
+  )
+  assert.doesNotMatch(prVerify, /docker cp kelion-ci-postgres:\/tmp\/pre-migration\.dump/)
 })

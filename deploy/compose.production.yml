@@ -118,8 +118,8 @@ services:
         aliases: ["app-${KELION_SLOT:?release slot is required}"]
     read_only: true
     tmpfs:
-      - /tmp:size=64m,mode=1770,noexec,nosuid,nodev
-      - /home/node/.cache:size=32m,mode=0700,noexec,nosuid,nodev
+      - /tmp:size=64m,mode=1770,uid=1000,gid=1000,noexec,nosuid,nodev
+      - /home/node/.cache:size=32m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 256
@@ -166,8 +166,8 @@ services:
         ipv4_address: ${KELION_BROWSER_WORKER_IP:?browser worker IP is required}
     read_only: true
     tmpfs:
-      - /tmp:size=256m,mode=1770,noexec,nosuid,nodev
-      - /home/pwuser:size=64m,mode=0700,nosuid,nodev
+      - /tmp:size=256m,mode=1770,uid=1001,gid=1001,noexec,nosuid,nodev
+      - /home/pwuser:size=64m,mode=0700,uid=1001,gid=1001,nosuid,nodev
     shm_size: 256m
     cap_drop: [ALL]
     security_opt:
@@ -202,7 +202,7 @@ services:
       browser-egress: {}
     read_only: true
     tmpfs:
-      - /tmp:size=16m,mode=0700,noexec,nosuid,nodev
+      - /tmp:size=16m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 64
@@ -242,7 +242,7 @@ services:
         condition: service_healthy
     read_only: true
     tmpfs:
-      - /tmp:size=16m,mode=0700,noexec,nosuid,nodev
+      - /tmp:size=16m,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 64
@@ -271,7 +271,7 @@ services:
         target: /run/kelion-converter-private
     read_only: true
     tmpfs:
-      - /tmp:size=256m,mode=0700,noexec,nosuid,nodev
+      - /tmp:size=256m,mode=0700,uid=10001,gid=10001,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 48
