@@ -39,9 +39,6 @@ const checkoutOrigins = [
 // Dev: proxy auth + health to the Fastify backend on :8080 so the
 // frontend stays single-origin (no CORS hassle, cookies just work).
 export default defineConfig({
-  // Gate/release images mount node_modules read-only. Keep every Vite cache in
-  // the writable worktree; the native config loader also avoids .vite-temp.
-  cacheDir: '.tmp/vite-cache',
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
     __BUILD_DATE__: JSON.stringify(buildDate),

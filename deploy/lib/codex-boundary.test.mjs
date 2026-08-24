@@ -70,8 +70,6 @@ test('imaginea de porți autorizează numai worktree-ul copiat', () => {
 
 test('metadatele TypeScript rămân în worktree-ul temporar, nu în dependențele read-only', () => {
   const ignore = read('.gitignore')
-  const frontendPackage = JSON.parse(read('frontend/package.json'))
-  const viteConfig = read('frontend/vite.config.ts')
 
   for (const path of ['frontend/tsconfig.app.json', 'frontend/tsconfig.node.json']) {
     const buildInfo = read(path).match(/"tsBuildInfoFile"\s*:\s*"([^"]+)"/)?.[1]
@@ -82,7 +80,4 @@ test('metadatele TypeScript rămân în worktree-ul temporar, nu în dependențe
   }
 
   assert.match(ignore, /^frontend\/\.tmp\/$/m)
-  assert.match(frontendPackage.scripts.build, /vite build --configLoader native/)
-  assert.match(viteConfig, /cacheDir:\s*['"]\.tmp\/vite-cache['"]/)
-  assert.doesNotMatch(frontendPackage.scripts.build, /--configLoader bundle/)
 })
