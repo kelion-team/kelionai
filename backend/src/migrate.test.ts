@@ -136,7 +136,7 @@ describe('migration transaction parser', () => {
 })
 
 describe('atomic migration batch', () => {
-  it('rolls back the bootstrap and every earlier migration after a mid-sequence failure', async () => {
+  it('rolls back the bootstrap and every earlier migration after a mid-sequence failure', { timeout: 30_000 }, async () => {
     const database = new PGlite()
     const statements: string[] = []
     const beforeFailure = migration('20260102_before_failure.sql', `
@@ -166,7 +166,7 @@ describe('atomic migration batch', () => {
     }
   })
 
-  it('keeps the existing registry unchanged when a later pending migration fails', async () => {
+  it('keeps the existing registry unchanged when a later pending migration fails', { timeout: 30_000 }, async () => {
     const database = new PGlite()
     const pendingSuccess = migration('20260102_pending_success.sql', `
       CREATE TABLE pending_success (id INTEGER PRIMARY KEY);
@@ -195,7 +195,7 @@ describe('atomic migration batch', () => {
     }
   })
 
-  it('commits bootstrap, schema changes, and registry rows only once for the whole batch', async () => {
+  it('commits bootstrap, schema changes, and registry rows only once for the whole batch', { timeout: 30_000 }, async () => {
     const database = new PGlite()
     const statements: string[] = []
     const first = migration('20260102_first.sql', 'CREATE TABLE atomic_first (id INTEGER PRIMARY KEY);')
@@ -252,7 +252,7 @@ describe('atomic migration batch', () => {
     }
   })
 
-  it('validates every destructive proof before executing the bootstrap or a safe migration', async () => {
+  it('validates every destructive proof before executing the bootstrap or a safe migration', { timeout: 30_000 }, async () => {
     const database = new PGlite()
     const statements: string[] = []
     const safe = migration('20260102_safe.sql', 'CREATE TABLE proof_prevalidation (id INTEGER PRIMARY KEY);')

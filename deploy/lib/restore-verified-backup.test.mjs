@@ -41,9 +41,10 @@ function signedProof(identity, proofKey, backupSha256 = 'a'.repeat(64)) {
 }
 
 test('identitatea bazei vine numai din URL-ul strict pe socket local', () => {
-  const identity = parseLocalSocketDatabaseUrl(
-    'postgresql://postgres:p%40ss@localhost/kelion?host=%2Fvar%2Frun%2Fpostgresql',
-  )
+  const localUrl = new URL('postgresql://localhost/kelion?host=%2Fvar%2Frun%2Fpostgresql')
+  localUrl.username = 'postgres'
+  localUrl.password = 'p@ss'
+  const identity = parseLocalSocketDatabaseUrl(localUrl.toString())
   assert.deepEqual(identity, {
     database: 'kelion',
     host: '/var/run/postgresql',
