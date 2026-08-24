@@ -39,6 +39,9 @@ test('deploy-ul validează separat familia video Sora de modelele GPT', () => {
 
 test('provisionarea runtime trimite linia base64 completă către read-ul fail-closed', () => {
   const workflow = readFileSync(new URL('../.github/workflows/vps-set-env.yml', import.meta.url), 'utf8')
+  assert.match(workflow, /encode\(\) \{ printf '%s:%s\\n'/)
+  assert.match(workflow, /while IFS=":" read -r name encoded/)
+  assert.doesNotMatch(workflow, /while IFS="=" read -r name encoded/)
   assert.match(
     workflow,
     /\{\s*printf '%s' "\$env_payload" \| base64 -w0\s*printf '\\n'\s*\} \| ssh_vps '[\s\S]{0,120}IFS= read -r encoded/,
