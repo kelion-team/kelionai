@@ -84,8 +84,13 @@ test('semnarea și verificarea OCI folosesc sintaxa Cosign v3 pentru annotations
   const build = readFileSync(new URL('../.github/workflows/build-images.yml', import.meta.url), 'utf8')
   const deploy = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
   const semnari = build.match(/cosign sign --yes --annotations "git_sha=\$RELEASE_SHA"/g) ?? []
+  const verificare = /- name: Verifică manifestul și semnăturile keyless([\s\S]*?)\n\s+- name: Release blue-green/.exec(deploy)?.[1] ?? ''
 
   assert.equal(semnari.length, 2)
   assert.doesNotMatch(build, /--annotation(?:\s|=)/)
   assert.match(deploy, /cosign verify[\s\S]*--annotations "git_sha=\$CANDIDATE_SHA"/)
+  assert.match(verificare, /docker login ghcr\.io --username "\$GITHUB_ACTOR" --password-stdin/)
+  assert.match(verificare, /trap cleanup_registry EXIT/)
+  assert.match(verificare, /docker logout ghcr\.io/)
+  assert.ok(verificare.indexOf('docker login ghcr.io') < verificare.indexOf('cosign verify'))
 })

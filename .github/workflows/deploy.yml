@@ -111,6 +111,10 @@ jobs:
       - name: Verifică manifestul și semnăturile keyless
         run: |
           set -euo pipefail
+          [ -n "$REGISTRY_TOKEN" ]
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          cleanup_registry() { docker logout ghcr.io >/dev/null 2>&1 || true; }
+          trap cleanup_registry EXIT
           manifest=release-manifest/images.json
           jq -e --arg sha "$CANDIDATE_SHA" --argjson source "$CI_RUN_ID" \
             '.schema == 1 and .commit == $sha and .sourceRunId == $source and (.images | length == 5)' "$manifest" >/dev/null
