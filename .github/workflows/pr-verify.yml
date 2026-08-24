@@ -167,8 +167,8 @@ jobs:
             /tmp/kelion-ci-runtime/browser-egress \
             /tmp/kelion-ci-runtime/converter-api \
             /tmp/kelion-ci-runtime/converter-private \
-            /tmp/kelion-ci-runtime/release-state \
-            /tmp/kelion-ci-seccomp
+            /tmp/kelion-ci-runtime/release-state
+          sudo install -d -o root -g root -m 0755 /tmp/kelion-ci-seccomp
           sudo install -d -o 999 -g 999 -m 0700 /tmp/kelion-ci-postgres/data
           sudo install -d -o 999 -g 999 -m 0775 /tmp/kelion-ci-postgres/socket
           umask 077

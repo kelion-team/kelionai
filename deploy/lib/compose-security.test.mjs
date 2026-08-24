@@ -105,6 +105,7 @@ test('CI inițializează starea release deținută de root prin sudo', () => {
   )
   assert.doesNotMatch(prVerify, /sudo chmod 0440 \/tmp\/kelion-ci-secrets\/\*/)
   assert.match(prVerify, /sudo chmod 0644 \/tmp\/kelion-ci-config\/runtime\.env/)
+  assert.match(prVerify, /sudo install -d -o root -g root -m 0755 \/tmp\/kelion-ci-seccomp/)
   assert.match(prVerify, /postgres_ready_streak=0/)
   assert.match(prVerify, /\[ "\$postgres_ready_streak" -ge 3 \]/)
   assert.doesNotMatch(
