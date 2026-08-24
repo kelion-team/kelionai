@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { amprentaInventar, clasificaFisier, duplicariActiveNejustificate } from './inventar-audit.mjs'
+import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { amprentaInventar, citesteIntrareInventar, clasificaFisier, duplicariActiveNejustificate } from './inventar-audit.mjs'
 
 test('clasifică toate familiile relevante fără a ascunde fișiere necunoscute', () => {
   assert.equal(clasificaFisier('backend/src/index.ts'), 'cod')
@@ -25,6 +28,20 @@ test('amprenta este deterministă și sensibilă la conținut', () => {
   const b = { cale: 'b.ts', categorie: 'cod', octeti: 1, sha256: 'b'.repeat(64) }
   assert.equal(amprentaInventar([a, b]), amprentaInventar([b, a]))
   assert.notEqual(amprentaInventar([a, b]), amprentaInventar([a, { ...b, sha256: 'c'.repeat(64) }]))
+})
+
+test('inventarul înregistrează legătura simbolică fără să urmeze directorul țintă', (t) => {
+  const radacina = mkdtempSync(join(tmpdir(), 'kelion-inventar-'))
+  t.after(() => rmSync(radacina, { recursive: true, force: true }))
+  const tinta = join(radacina, 'dependente')
+  const legatura = join(radacina, 'node_modules')
+  mkdirSync(tinta)
+  writeFileSync(join(tinta, 'nu-trebuie-citit.txt'), 'continut-din-afara-inventarului')
+  symlinkSync(tinta, legatura, process.platform === 'win32' ? 'junction' : 'dir')
+
+  const continut = citesteIntrareInventar(legatura, lstatSync(legatura)).toString('utf8')
+  assert.match(continut, /^legatura-simbolica\0/)
+  assert.doesNotMatch(continut, /continut-din-afara-inventarului/)
 })
 
 test('respinge active duplicate, exceptând variantele cerute de platformă', () => {
