@@ -6,6 +6,7 @@ interface CacheCatalogOpenAI {
   iduri: string[]
   expiraLa: number
   eroare: string
+  sursa: string
 }
 
 // hardcod-permis: TTL-ul implicit evită o cerere /models la fiecare tură.
@@ -23,40 +24,47 @@ function idConfigurat(treapta: TreaptaOpenAI): string {
   return String(config.openai[treapta] || '').trim()
 }
 
-function scrieEroare(motiv: string): string[] {
+function sursaCatalog(): string {
+  return `${config.openai.apiBaseUrl}\n${config.openai.key}`
+}
+
+function scrieEroare(motiv: string, sursa: string): string[] {
   console.error(`[OpenAI] nu pot verifica catalogul OpenAI: ${motiv}`)
   // O reîmprospătare eșuată nu șterge ultimul catalog verificat. Astfel o
   // întrerupere scurtă a /models nu oprește chatul, iar adminul vede eroarea.
-  const iduri = cache?.iduri.length ? cache.iduri : []
-  cache = { iduri, expiraLa: Date.now() + TTL_ESEC_IMPLICIT_MS, eroare: motiv }
+  const iduri = cache?.sursa === sursa && cache.iduri.length ? cache.iduri : []
+  cache = { iduri, expiraLa: Date.now() + TTL_ESEC_IMPLICIT_MS, eroare: motiv, sursa }
   return iduri
 }
 
 async function citesteCatalog(): Promise<string[]> {
-  if (!config.openai.key) return scrieEroare('cheia OpenAI lipsește')
+  const apiBaseUrl = config.openai.apiBaseUrl
+  const key = config.openai.key
+  const sursa = `${apiBaseUrl}\n${key}`
+  if (!key) return scrieEroare('cheia OpenAI lipsește', sursa)
   try {
-    const raspuns = await fetch(`${config.openai.apiBaseUrl}/models`, {
+    const raspuns = await fetch(`${apiBaseUrl}/models`, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${config.openai.key}` },
+      headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(10_000),
     })
-    if (!raspuns.ok) return scrieEroare(`API-ul a răspuns HTTP ${raspuns.status}`)
+    if (!raspuns.ok) return scrieEroare(`API-ul a răspuns HTTP ${raspuns.status}`, sursa)
     const corp = await raspuns.json() as { data?: unknown }
-    if (!Array.isArray(corp.data)) return scrieEroare('răspunsul API nu conține lista de modele')
+    if (!Array.isArray(corp.data)) return scrieEroare('răspunsul API nu conține lista de modele', sursa)
     if (corp.data.some((model) => !model
       || typeof model !== 'object'
       || typeof (model as { id?: unknown }).id !== 'string'
       || !(model as { id: string }).id.trim())) {
-      return scrieEroare('răspunsul API conține modele fără ID valid')
+      return scrieEroare('răspunsul API conține modele fără ID valid', sursa)
     }
     const iduri = Array.from(new Set(corp.data.map((model) => (
       model as { id: string }
     ).id.trim())))
-    cache = { iduri, expiraLa: Date.now() + ttlCatalog(), eroare: '' }
+    cache = { iduri, expiraLa: Date.now() + ttlCatalog(), eroare: '', sursa }
     return iduri
   } catch (eroare) {
     const motiv = eroare instanceof Error ? eroare.message : String(eroare)
-    return scrieEroare(motiv || 'eroare necunoscută')
+    return scrieEroare(motiv || 'eroare necunoscută', sursa)
   }
 }
 
@@ -64,7 +72,7 @@ function pornesteCitirea(): Promise<string[]> {
   if (incarcare) return incarcare
   const cerere = citesteCatalog().catch((eroare) => {
     const motiv = eroare instanceof Error ? eroare.message : String(eroare)
-    return scrieEroare(motiv || 'eroare necunoscută')
+    return scrieEroare(motiv || 'eroare necunoscută', sursaCatalog())
   })
   incarcare = cerere
   void cerere.finally(() => {
@@ -78,6 +86,7 @@ function pornesteCitirea(): Promise<string[]> {
  * Un catalog necitibil nu este înlocuit cu un model ghicit.
  */
 export async function catalogOpenAI(): Promise<string[]> {
+  if (cache?.sursa !== sursaCatalog()) cache = null
   if (cache) {
     if (Date.now() < cache.expiraLa) return cache.iduri
     if (cache.iduri.length > 0) {
@@ -86,6 +95,11 @@ export async function catalogOpenAI(): Promise<string[]> {
       return catalogVechi
     }
   }
+  return pornesteCitirea()
+}
+
+/** Forțează o citire live; cererile concurente împart aceeași încărcare. */
+export async function reimprospateazaCatalogOpenAI(): Promise<string[]> {
   return pornesteCitirea()
 }
 
@@ -116,9 +130,4 @@ export async function modelOpenAIExista(id: string): Promise<boolean> {
   const curat = String(id || '').trim().replace(/^openai\//i, '')
   if (!curat) return false
   return (await catalogOpenAI()).includes(curat)
-}
-
-export function reseteazaCatalogOpenAI(): void {
-  cache = null
-  incarcare = null
 }

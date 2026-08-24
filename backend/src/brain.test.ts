@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 
 import { config } from './config.js'
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
-import { reseteazaCatalogOpenAI } from './services/openaiModele.js'
 
 describe('Expertul fiabil — clasificarea erorilor', () => {
   it('recunoaște numai erorile tranzitorii de capacitate sau transport', () => {
@@ -28,7 +27,6 @@ describe('Expertul fiabil — scara de modele', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       data: [{ id: 'model-luna' }, { id: 'model-terra' }, { id: 'model-neconfigurat' }],
     }), { status: 200 })))
-    reseteazaCatalogOpenAI()
     try {
       const ladder = await expertModelLadder()
       expect(ladder).toEqual(['openai/model-luna', 'openai/model-terra'])
@@ -36,7 +34,6 @@ describe('Expertul fiabil — scara de modele', () => {
     } finally {
       Object.assign(config.openai, initial)
       vi.unstubAllGlobals()
-      reseteazaCatalogOpenAI()
     }
   })
 

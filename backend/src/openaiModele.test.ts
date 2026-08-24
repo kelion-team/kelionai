@@ -6,7 +6,7 @@ import {
   modelOpenAI,
   modelOpenAIExista,
   motivCatalogOpenAI,
-  reseteazaCatalogOpenAI,
+  reimprospateazaCatalogOpenAI,
   scaraOpenAI,
 } from './services/openaiModele.js'
 
@@ -15,6 +15,8 @@ function raspunsCatalog(iduri: string[]): Response {
 }
 
 describe('catalogul live OpenAI', () => {
+  let serialCheie = 0
+  let cheieTest = ''
   const initial = {
     key: config.openai.key,
     apiBaseUrl: config.openai.apiBaseUrl,
@@ -25,12 +27,12 @@ describe('catalogul live OpenAI', () => {
 
   beforeEach(() => {
     vi.stubEnv('OPENAI_CATALOG_TTL_MS', '60000')
-    config.openai.key = 'cheie-catalog-test'
+    cheieTest = `cheie-catalog-test-${++serialCheie}`
+    config.openai.key = cheieTest
     config.openai.apiBaseUrl = 'https://catalog.example.test/v1'
     config.openai.luna = 'model-luna'
     config.openai.medium = 'model-terra'
     config.openai.heavy = 'model-sol'
-    reseteazaCatalogOpenAI()
     vi.stubGlobal('fetch', vi.fn())
   })
 
@@ -39,7 +41,6 @@ describe('catalogul live OpenAI', () => {
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
     vi.useRealTimers()
-    reseteazaCatalogOpenAI()
   })
 
   it('folosește numai rolurile configurate pe care cheia le servește', async () => {
@@ -64,7 +65,7 @@ describe('catalogul live OpenAI', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('folosește cache-ul în TTL și reia citirea după resetare', async () => {
+  it('folosește cache-ul în TTL și permite o reîmprospătare explicită', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(raspunsCatalog(['model-luna']))
       .mockResolvedValueOnce(raspunsCatalog(['model-terra']))
@@ -72,8 +73,7 @@ describe('catalogul live OpenAI', () => {
     await expect(catalogOpenAI()).resolves.toEqual(['model-luna'])
     await expect(catalogOpenAI()).resolves.toEqual(['model-luna'])
     expect(fetch).toHaveBeenCalledTimes(1)
-    reseteazaCatalogOpenAI()
-    await expect(catalogOpenAI()).resolves.toEqual(['model-terra'])
+    await expect(reimprospateazaCatalogOpenAI()).resolves.toEqual(['model-terra'])
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
@@ -107,10 +107,10 @@ describe('catalogul live OpenAI', () => {
       'https://catalog.example.test/v1/models',
       expect.objectContaining({
         method: 'GET',
-        headers: { Authorization: 'Bearer cheie-catalog-test' },
+        headers: { Authorization: `Bearer ${cheieTest}` },
       }),
     )
-    expect(vi.mocked(fetch).mock.calls[0][0]).not.toContain('cheie-catalog-test')
+    expect(vi.mocked(fetch).mock.calls[0][0]).not.toContain(cheieTest)
   })
 
   it('respinge integral un catalog cu ID-uri invalide', async () => {

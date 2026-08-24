@@ -8,12 +8,8 @@ vi.stubGlobal('fetch', fetchMock)
 vi.mock('../db.js', () => ({ recordProviderUsage: vi.fn(async () => undefined) }))
 
 const { brain } = await import('./brain.js')
-const { reseteazaCatalogOpenAI } = await import('./openaiModele.js')
 
-beforeEach(() => {
-  fetchMock.mockReset()
-  reseteazaCatalogOpenAI()
-})
+beforeEach(() => fetchMock.mockReset())
 
 describe('brain.messages.create — adaptorul NU mai fabulează usage-ul', () => {
   it('usage vine din răspunsul REAL al providerului, nu {0,0} literal', async () => {

@@ -34,7 +34,7 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { cheltuieliAplicatiei } from '../services/cheltuieli.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { openaiAvailable } from '../services/openaiChat.js'
-import { catalogOpenAI, motivCatalogOpenAI } from '../services/openaiModele.js'
+import { motivCatalogOpenAI, reimprospateazaCatalogOpenAI } from '../services/openaiModele.js'
 import { getSerperBalance } from '../services/serperBalance.js'
 import { resurseGazda } from '../services/resurse.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
@@ -87,7 +87,7 @@ async function checkStores(): Promise<StoreCheck[]> {
 
 async function configuratieCreier(): Promise<Record<string, unknown>> {
   const m = config.openai
-  const catalog = await catalogOpenAI()
+  const catalog = await reimprospateazaCatalogOpenAI()
   const configurate = [m.luna, m.medium, m.heavy].filter(Boolean)
   const lipsa = configurate.filter((id) => !catalog.includes(id))
   const eroareCitire = motivCatalogOpenAI()
