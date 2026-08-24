@@ -138,7 +138,7 @@ docker run --rm --network none \
   -v "$temporary_libpq_env:/run/secrets/libpq-env:ro" \
   -v "$temporary_passwd:/etc/passwd:ro" \
   -v "$temporary_group:/etc/group:ro" \
-  "$POSTGRES_IMAGE" sh -eu -c '. /run/secrets/libpq-env; exec pg_dump --format=custom --no-owner --no-privileges --file=-' \
+  "$POSTGRES_IMAGE" sh -eu -c '. /run/secrets/libpq-env; exec pg_dump --format=custom --no-owner --no-privileges' \
   > "$temporary_dump"
 chown root:root "$temporary_dump" "$temporary_libpq_env"
 chmod 0600 "$temporary_dump" "$temporary_libpq_env"
