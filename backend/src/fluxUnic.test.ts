@@ -159,8 +159,10 @@ describe('bucla se rupe când modelul se învârte în loc', () => {
   // still pay eight rounds to throw away seven — and on the free models eight
   // calls in a burst hit the per-minute ceiling, so Adrian's next question
   // gets a 429, i.e. "technical problem". These two are the same fix.
-  it('nimic nou + aceleași unelte ca runda trecută → ieșire din buclă', () => {
-    expect(orch).toMatch(/rundaGoala && semnatura && semnatura === semnaturaTrecuta/)
+  // Garda e acum PURĂ (`pasRepetitie`, testată pe comportament în
+  // services/orchestrator.test.ts): aceleași apeluri + aceleași rezultate.
+  it('aceleași apeluri cu aceleași rezultate → ieșire din buclă', () => {
+    expect(orch).toMatch(/pasRepetitie\(/)
     expect(orch).toMatch(/opresc bucla/)
   })
 
