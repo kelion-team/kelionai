@@ -278,7 +278,7 @@ services:
     mem_limit: 768m
     cpus: 1.0
     healthcheck:
-      test: [CMD, python, -I, -c, "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect('/run/kelion-converter-private/parser.sock'); s.sendall(b'GET /healthz HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n'); raise SystemExit(0 if b' 200 ' in s.recv(128) else 1)"]
+      test: [CMD, python, -I, -c, "import socket; crlf=bytes((13,10)); s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect('/run/kelion-converter-private/parser.sock'); s.sendall(crlf.join((b'GET /healthz HTTP/1.1',b'Host: local',b'Connection: close',b'',b''))); raise SystemExit(0 if b' 200 ' in s.recv(128) else 1)"]
       interval: 15s
       timeout: 5s
       start_period: 10s

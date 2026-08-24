@@ -78,6 +78,12 @@ test('tmpfs-urile writable aparțin utilizatorului non-root al serviciului', () 
   }
 })
 
+test('healthcheck-ul parserului păstrează CRLF în sursa Python după parsarea YAML', () => {
+  const parser = service('converter-parser')
+  assert.match(parser, /crlf=bytes\(\(13,10\)\)/)
+  assert.doesNotMatch(parser, /\\r|\\n/)
+})
+
 test('browserul nu are rută directă de egress, iar proxy-ul este singura punte', () => {
   const internalNetwork = /^  browser-internal:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:|\Z)/m.exec(compose)?.[1] ?? ''
   assert.match(internalNetwork, /\n    internal: true\n/)
@@ -120,7 +126,7 @@ test('CI inițializează starea release deținută de root prin sudo', () => {
   assert.doesNotMatch(prVerify, /docker cp kelion-ci-postgres:\/tmp\/pre-migration\.dump/)
   assert.match(
     prVerify,
-    /cleanup\(\) \{[\s\S]*?local rc=\$\?[\s\S]*?docker compose[^\n]+ps --all[\s\S]*?docker compose[^\n]+down/,
+    /cleanup\(\) \{[\s\S]*?local rc=\$\?[\s\S]*?docker compose[^\n]+ps --all[\s\S]*?docker inspect --format 'container=\{\{\.Name\}\} status=\{\{\.State\.Status\}\} health=\{\{json \.State\.Health\}\}'[\s\S]*?docker compose[^\n]+down/,
   )
   assert.doesNotMatch(prVerify, /docker(?: compose)?\s+logs\b/)
 })

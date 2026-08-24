@@ -154,6 +154,9 @@ jobs:
             local rc=$?
             if [ "$rc" -ne 0 ]; then
               docker compose --project-name kelion-ci --file deploy/compose.production.yml ps --all || true
+              for container in kelion-ci-app-1 kelion-ci-browser-worker-1 kelion-ci-browser-egress-1 kelion-ci-converter-gateway-1 kelion-ci-converter-parser-1; do
+                docker inspect --format 'container={{.Name}} status={{.State.Status}} health={{json .State.Health}}' "$container" || true
+              done
             fi
             docker compose --project-name kelion-ci --file deploy/compose.production.yml down --volumes --remove-orphans || true
             docker rm --force kelion-ci-postgres >/dev/null 2>&1 || true
