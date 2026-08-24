@@ -19,7 +19,6 @@ import {
   registerLiveFocus,
   unregisterLiveFocus,
   setForeignVoiceLock,
-  isForeignVoiceLocked,
   interruptAll,
 } from './audioFocus'
 import * as audioIO from './audioIO'
@@ -38,7 +37,6 @@ describe('audioFocus single-voice lock', () => {
 
   it('blocks TTS while a foreign tab holds the voice lock', () => {
     setForeignVoiceLock(true)
-    expect(isForeignVoiceLocked()).toBe(true)
     expect(requestTtsFocus()).toBe(false)
   })
 
@@ -59,13 +57,13 @@ describe('audioFocus single-voice lock', () => {
 
   // Finding 1 (owner, 19 aug: „se aud 2 voci… dacă îi scriu răspunde doar scris"):
   // LIVE rostește DOAR turele vocale. O tură SCRISĂ nu e rostită de LIVE, deci
-  // Chirp-ul ei TREBUIE redat chiar și cât LIVE ține focus-ul — altfel scrisul
+  // TTS-ul ei trebuie redat chiar dacă Live ține focusul — altfel scrisul
   // rămâne mut sub LIVE (exact bugul). Gardul între taburi rămâne peste tot.
   it('a WRITTEN turn plays TTS even while LIVE holds focus', () => {
     setForeignVoiceLock(false)
     registerLiveFocus()
     expect(requestTtsFocus()).toBe(false) // tură vocală sub LIVE → LIVE vorbește
-    expect(requestTtsFocus({ turaScrisa: true })).toBe(true) // tura SCRISĂ → Chirp-ul ei se redă
+    expect(requestTtsFocus({ turaScrisa: true })).toBe(true) // tura scrisă primește TTS
     releaseTtsFocus()
     unregisterLiveFocus()
   })
@@ -77,7 +75,7 @@ describe('audioFocus single-voice lock', () => {
 
   // Owner, 20 aug: „se aud multe voci paralele… o singură ieșire audio". O tură
   // SCRISĂ care ia gura cât LIVE e activ TREBUIE să taie ÎNTÂI playout-ul LIVE
-  // (PCM-ul rămas), altfel Chirp-ul scris se aude PESTE vocea LIVE. O gură nouă
+  // (PCM-ul rămas), altfel TTS-ul scris se aude peste vocea Live. O gură nouă
   // închide celelalte guri.
   it('a WRITTEN turn CUTS the LIVE mouth before taking the mouth (one output)', () => {
     const taieLive = vi.fn()
@@ -91,11 +89,11 @@ describe('audioFocus single-voice lock', () => {
   // TRUNCHEREA MĂSURATĂ (owner, 22 aug: „chatul se truncheaza audio"; vânător +
   // verificator adversarial, BLOCANT): sesiunea Live cade singură des (1006,
   // 1000 de la server, schimbare de rută) și e repornită TĂCUT — iar
-  // registerLiveFocus omora Chirp-ul turei scrise fix în mijlocul propoziției.
+  // registerLiveFocus nu întrerupe TTS-ul turei scrise în mijlocul propoziției.
   it('re-registering LIVE while a WRITTEN turn is PLAYING does NOT kill the mouth', () => {
     expect(requestTtsFocus({ turaScrisa: true })).toBe(true)
     setPlaying(true)
-    registerLiveFocus() // sesiunea Live s-a redeschis singură sub Chirp viu
+    registerLiveFocus() // sesiunea Live s-a redeschis sub un TTS încă activ
     expect(audioIO.isVoicePlaying()).toBe(true) // redarea NU a fost tăiată
     // ...și tura scrisă următoare tot are voie la gură (starea a rămas 'tts'):
     expect(requestTtsFocus({ turaScrisa: true })).toBe(true)

@@ -1,0 +1,58 @@
+[Unit]
+Description=Kelion Constructor isolated GitHub publisher
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/kelion/constructor-publisher.enabled
+
+[Service]
+Type=oneshot
+User=kelion-publisher
+Group=kelion-publisher
+SupplementaryGroups=kelion-handoff
+UMask=0027
+WorkingDirectory=/var/lib/kelion-publisher
+Environment=PATH=/usr/bin:/bin
+Environment=CONSTRUCTOR_PUBLISHER_REPO=/var/lib/kelion-publisher/repo
+Environment=CONSTRUCTOR_PUBLISHER_STATE=/var/lib/kelion-publisher/state
+Environment=CODEX_HANDOFF_READY=/var/lib/kelion-constructor-handoff/ready
+Environment=CONSTRUCTOR_GITHUB_ASKPASS=/opt/kelion-constructor/github-askpass.sh
+EnvironmentFile=/root/kelion/config/constructor-publisher.env
+LoadCredential=constructor-publisher-secret:/root/kelion/secrets/constructor-publisher-secret
+LoadCredential=github-publisher-token:/root/kelion/publisher-secrets/github-publisher-token
+LoadCredential=github-publisher-signing-key:/root/kelion/publisher-secrets/github-publisher-signing-key
+ExecStartPre=/usr/bin/node /opt/kelion-constructor/constructor-publisher.mjs --self-test
+ExecStart=/usr/bin/node /opt/kelion-constructor/constructor-publisher.mjs --once
+NoNewPrivileges=true
+KeyringMode=private
+PrivateIPC=true
+PrivateDevices=true
+PrivateTmp=true
+RuntimeDirectory=kelion-publisher
+RuntimeDirectoryMode=0700
+ProtectProc=invisible
+ProcSubset=pid
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadOnlyPaths=/var/lib/kelion-constructor-handoff
+ReadWritePaths=/var/lib/kelion-publisher /run/kelion-publisher
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=user mount net pid ipc uts
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+MemoryMax=5G
+TasksMax=512
+TimeoutStartSec=90min
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

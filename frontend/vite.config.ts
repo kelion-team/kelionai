@@ -2,29 +2,51 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync } from 'node:fs'
 
-// Versiunea aplicației = sursa unică din tauri.conf.json (aceeași pe .exe/apk/web);
-// data build-ului se ștampilează la fiecare compilare. Filigranate în app (Adrian,
-// 7 iul: „să se vadă că update-ul s-a făcut") — apar pe TOATE shell-urile, fiindcă
-// toate încarcă aceeași kelionai.app live.
-let baseVersion = '1.0'
-try {
-  baseVersion = JSON.parse(readFileSync('../desktop/src-tauri/tauri.conf.json', 'utf8')).version || baseVersion
-} catch { /* fallback pe constanta de mai sus */ }
+const productConfig = JSON.parse(readFileSync(new URL('../config/product.json', import.meta.url), 'utf8')) as Record<string, unknown>
+const endpointConfig = JSON.parse(readFileSync(new URL('../config/endpoints.json', import.meta.url), 'utf8')) as {
+  external?: Record<string, unknown>
+}
+const productOrigin = new URL(String(productConfig.publicAppOrigin ?? ''))
+if (productOrigin.protocol !== 'https:' || productOrigin.username || productOrigin.password || productOrigin.pathname !== '/' || productOrigin.search || productOrigin.hash) {
+  throw new Error('config/product.json: publicAppOrigin invalid')
+}
+for (const field of ['appName', 'appVersion', 'githubRepository', 'supportEmail', 'nativeScheme', 'androidApplicationId', 'iosBundleId', 'iosTeamId', 'desktopBundleId']) {
+  if (typeof productConfig[field] !== 'string' || !productConfig[field]) throw new Error(`config/product.json: ${field} invalid`)
+}
+if (!Array.isArray(productConfig.nativeOrigins) || typeof productConfig.nativeRedirects !== 'object' || productConfig.nativeRedirects === null) {
+  throw new Error('config/product.json: native auth config invalid')
+}
+
 const now = new Date()
 const buildDate = now.toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
-// VERSIUNE CURATĂ, SEMANTICĂ (owner, 13 aug: „începi cu V1.0 și continuăm"). Nu mai
-// lipim id-ul de build (YYMMDD.HHMM) — versiunea o bump-ăm manual la fiecare update
-// (V1.0 → V1.1…), în tauri.conf.json (sursa unică). Ce se schimbă singur la fiecare
-// publicare e DATA/ORA din filigran (din /api/version) + poarta de update, care se
-// declanșează pe SHA-ul de deploy, nu pe string-ul versiunii.
-const appVersion = baseVersion
+const appVersion = String(productConfig.appVersion)
+const checkoutOrigins = [
+  endpointConfig.external?.revolutCheckoutProductionOrigin,
+  endpointConfig.external?.revolutCheckoutSandboxOrigin,
+].map((raw) => {
+  const url = new URL(String(raw ?? ''))
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) throw new Error('config/endpoints.json: Revolut checkout origin invalid')
+  return url.origin
+})
 
 // Dev: proxy auth + health to the Fastify backend on :8080 so the
 // frontend stays single-origin (no CORS hassle, cookies just work).
 export default defineConfig({
+  // Gate/release images mount node_modules read-only. Keep every Vite cache in
+  // the writable worktree; the native config loader also avoids .vite-temp.
+  cacheDir: '.tmp/vite-cache',
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
     __BUILD_DATE__: JSON.stringify(buildDate),
+    __PRODUCT_CONFIG__: JSON.stringify(productConfig),
+    __CHECKOUT_ORIGINS__: JSON.stringify(checkoutOrigins),
   },
   plugins: [react()],
   server: {
@@ -37,5 +59,19 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        assetFileNames: 'assets/[name]-[hash][extname]',
+        manualChunks(id) {
+          const moduleId = id.replaceAll('\\', '/')
+          if (
+            moduleId.includes('/node_modules/@mlc-ai/') ||
+            moduleId.includes('/node_modules/@huggingface/transformers/') ||
+            moduleId.includes('/node_modules/onnxruntime-')
+          ) return 'offline-runtime'
+          return undefined
+        },
+      },
+    },
   },
 })

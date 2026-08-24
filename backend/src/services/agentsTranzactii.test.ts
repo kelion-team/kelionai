@@ -22,9 +22,8 @@ const memPeAgent: Record<string, MemFalsa[]> = { tranzactii: [], kelion: [] }
 let agentiCeruti: string[] = []
 
 vi.mock('../config.js', () => ({
-  config: { brain: { chatDefault: 'model-memorie' }, geminiKey: '' },
+  config: { openai: { key: '', luna: 'model-memorie' } },
 }))
-vi.mock('./cost.js', () => ({ brainCostUsd: () => 0 }))
 vi.mock('./brain.js', () => ({
   brain: { messages: { create: async () => ({ content: [] }) } },
 }))

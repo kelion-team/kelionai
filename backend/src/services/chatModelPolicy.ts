@@ -1,7 +1,5 @@
-import { GEMINI_DIRECT_PREFIX } from './geminiDirect.js'
-
 export function plafonUnelteFurnizor(model: string | null | undefined): 64 | 128 {
-  return model?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
+  return model?.startsWith('openai/') ? 128 : 64
 }
 
 export interface OptiuniModelOrchestrator {
@@ -12,7 +10,6 @@ export interface OptiuniModelOrchestrator {
 }
 
 export function alegeModelOrchestrator(opt: OptiuniModelOrchestrator): string {
-  return opt.creierDublu && opt.turaGrea
-    ? `${GEMINI_DIRECT_PREFIX}${opt.modelProfund}`
-    : opt.modelChat
+  // OpenAI-only: selectedBrainModel has already selected the right rung.
+  return opt.modelChat
 }

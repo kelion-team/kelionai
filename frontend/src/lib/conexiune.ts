@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiFetch } from './transport'
 
 // ── PREZENȚA ONLINE ↔ OFFLINE (mod companion, faza 0) ───────────────────────
 // Separat de retea.ts (aia e CALITATEA țevii — 2G/3G/4G). Aici e un singur adevăr:
@@ -35,7 +36,7 @@ export async function verificaConexiuneReala(): Promise<boolean> {
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), 4000)
   try {
-    const r = await fetch('/health', { method: 'HEAD', cache: 'no-store', signal: ctrl.signal })
+    const r = await apiFetch('/health', { method: 'HEAD', cache: 'no-store', signal: ctrl.signal })
     seteaza(r.ok)
     return r.ok
   } catch {
@@ -66,12 +67,6 @@ function abonare(f: (o: boolean) => void): () => void {
   return () => {
     abonati.delete(f)
   }
-}
-
-/** Ultima stare cunoscută (fără să forțeze un ping). Pentru comutarea creier
- *  online/offline din fazele 1+. */
-export function esteConectat(): boolean {
-  return online
 }
 
 /** Hook React: `const online = useConectat()`. Pornește detectorul la prima folosire. */

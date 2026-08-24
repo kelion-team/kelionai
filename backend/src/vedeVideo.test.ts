@@ -44,16 +44,17 @@ describe('P30a — recunoașterea linkurilor (felia YouTube)', () => {
 })
 
 describe('P30a — onestitate prin construcție', () => {
-  it('plafonul de durată există și intră CHIAR în cerere (endOffset)', () => {
+  it('plafonul de durată există și taie transcriptul înainte de analiză', () => {
     expect(VEDE_VIDEO_MAX_S).toBeGreaterThanOrEqual(60)
     const svc = sursa('./services/vedeVideo.ts')
-    expect(svc).toMatch(/endOffset: `\$\{VEDE_VIDEO_MAX_S\}s`/)
+    expect(svc).toMatch(/second > VEDE_VIDEO_MAX_S/)
   })
 
-  it('fișa fără idei = eroare numită, nu succes prefăcut; costul = tokenii REALI', () => {
+  it('fișa fără idei = eroare numită; costul și tokenii vin din Responses', () => {
     const svc = sursa('./services/vedeVideo.ts')
     expect(svc).toMatch(/fișa nu se inventează/)
-    expect(svc).toMatch(/usageMetadata\?\.totalTokenCount/)
+    expect(svc).toMatch(/response\.inputTokens \+ response\.outputTokens/)
+    expect(svc).toMatch(/costUsd: response\.costUsd/)
   })
 
   it('fișa ca text poartă sursa și ideile (formatul pe care îl vede omul)', () => {
@@ -74,15 +75,17 @@ describe('P30a — cataloghează și învață (lanțul întreg, pe cod)', () =>
     expect(chat).toMatch(/case 'vede_video': \{/)
   })
 
-  it('fișa intră în VIDEOTECĂ (sub scut) + în memoria de lungă durată + costul în jurnal', () => {
+  it('fișa intră în videoteca migrată, în memoria userului și în jurnalul de cost', () => {
     const chat = sursa('./routes/chat.ts')
     expect(chat).toMatch(/salveazaVideoInvatat\(email, url, fisa\.titlu/)
     expect(chat).toMatch(/learnFromTurn\(email, `\[a cerut să văd clipul\] \$\{url\}`/)
     expect(chat).toMatch(/recordCost\(email, 'video-vazut'/)
     const db = sursa('./db.ts')
-    expect(db).toMatch(/CREATE TABLE IF NOT EXISTS video_invatat/)
-    expect(db).toMatch(/'video_invatat',\s*\n\] as const/) // sub scutul datelor (LEGEA P26)
+    const schema = sursa('../migrations/20260824_base_schema.sql')
+    expect(schema).toMatch(/CREATE TABLE IF NOT EXISTS video_invatat/)
+    expect(db).not.toMatch(/CREATE TABLE|ALTER TABLE/)
     expect(db).toMatch(/noteazaAudit\(cerutDe, 'video-vazut \(catalogat\)'/)
+    expect(db).toContain('DELETE FROM video_invatat WHERE lower(cerut_de) = $1')
   })
 
   it('videoteca e căutabilă („din ce clipuri știi X?")', () => {

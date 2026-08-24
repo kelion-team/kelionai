@@ -9,8 +9,7 @@
 // audio-ul se lipea de o tură user VECHE și conversația se termina cu assistant,
 // deci creierul eșua. Clientul arată ORICE răspuns non-ok de la /api/chat ca
 // „Eroare la creier" (lib/chat.ts) — de-aia părea „creierul", deși cheia și
-// modelul (gemini-3.1-pro-preview) răspund (pastila „Gemini ✓" probează chiar
-// generateContent pe model). `asiguraPurtatorAudio` garantează purtătorul turei.
+// modelul configurat răspund. `asiguraPurtatorAudio` garantează purtătorul turei.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

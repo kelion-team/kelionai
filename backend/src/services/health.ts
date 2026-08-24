@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises'
 import { getPool, dbEnabled, listBuildJobs, countClientErrorsLastHour } from '../db.js'
 import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from './resurse.js'
-import { geminiLive } from './geminiDirect.js'
+import { openaiHealth } from './openaiResponses.js'
 import { stareDispecer } from './dispecer.js'
 import { probaBrowserulMainilor } from './browser.js'
-import { config } from '../config.js'
+import { getCodexWorkerStatus } from './codexWorker.js'
+import { GITHUB_API, ghToken } from './githubApi.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -22,10 +23,9 @@ interface Problem {
   reparabil: string
 }
 
-const GH = 'https://api.github.com/repos/kelion-team/kelionai'
 function ghHeaders(): Record<string, string> {
   return {
-    Authorization: `Bearer ${(process.env.GITHUB_TOKEN ?? '').trim()}`,
+    Authorization: `Bearer ${ghToken()}`,
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
   }
@@ -39,8 +39,8 @@ export async function systemHealth(): Promise<string> {
   const liveSha = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
   info.live = liveSha || 'necunoscut'
   try {
-    if ((process.env.GITHUB_TOKEN ?? '').trim()) {
-      const r = await fetch(`${GH}/commits/master`, {
+    if (ghToken()) {
+      const r = await fetch(`${GITHUB_API}/commits/master`, {
         headers: { ...ghHeaders(), Accept: 'application/vnd.github.sha' },
         signal: AbortSignal.timeout(10_000),
       })
@@ -51,7 +51,7 @@ export async function systemHealth(): Promise<string> {
           id: 'live_in_urma',
           grav: 'critic',
           desc: `Live rulează ${liveSha}, dar master e ${master} — publicarea e în urmă.`,
-          reparabil: 'auto-publicarea o repară singură în ~3 min; dacă persistă, run_runbook publish-master',
+          reparabil: 'publisherul separat trebuie să reconcilieze master cu versiunea live; verifică jobul de deploy din panoul Constructor',
         })
     }
   } catch {
@@ -66,8 +66,8 @@ export async function systemHealth(): Promise<string> {
   try {
     if ((process.env.GITHUB_TOKEN ?? '').trim()) {
       const [rFail, rAll] = await Promise.all([
-        fetch(`${GH}/actions/runs?status=failure&per_page=15`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
-        fetch(`${GH}/actions/runs?per_page=40`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
+        fetch(`${GITHUB_API}/actions/runs?status=failure&per_page=15`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
+        fetch(`${GITHUB_API}/actions/runs?per_page=40`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
       ])
       const fail = (await rFail.json()) as { workflow_runs?: { name?: string; run_number?: number; created_at?: string; updated_at?: string }[] }
       const all = (await rAll.json()) as { workflow_runs?: { name?: string; status?: string; conclusion?: string | null; created_at?: string }[] }
@@ -104,7 +104,7 @@ export async function systemHealth(): Promise<string> {
             (toateInstant ? ' — TOATE mor în ≤20s fără să pornească pe vreun runner (măsurat din durata rulărilor): blocaj de cont GitHub (minute/facturare Actions), nu de cod' : ''),
           reparabil: toateInstant
             ? 'nu se repară din cod: ownerul → github.com/organizations/kelion-team/settings/billing (minute Actions / limită / plată); publicarea pe site NU depinde de Actions (veghea VPS publică singură)'
-            : 'vindecătorul rerulează deploy-urile singur; pe celelalte investighează cu runbook_log/server_logs',
+            : 'investighează jurnalul workerului/publisherului separat și server_logs; procesul web nu rerulează workflow-uri',
         })
       }
     }
@@ -145,13 +145,13 @@ export async function systemHealth(): Promise<string> {
           id: 'erori_client',
           grav: 'mediu',
           desc: `${n} erori de client în ultima oră — ceva e rupt în interfață pentru useri.`,
-          reparabil: 'citește-le cu db_query pe client_errors, găsește cauza în sursă și repar-o (repo_write sau build_software)',
+          reparabil: 'citește client_errors, identifică simptomul și trimite un ordin build_software workerului separat',
         })
     } else {
       problems.push({ id: 'db_neconfigurata', grav: 'critic', desc: 'Baza de date nu e configurată.', reparabil: 'verifică DATABASE_URL pe VPS' })
     }
   } catch {
-    problems.push({ id: 'db_moarta', grav: 'critic', desc: 'Baza de date NU răspunde (SELECT 1 a eșuat).', reparabil: 'run_runbook diagnostic; serviciul postgres pe VPS' })
+    problems.push({ id: 'db_moarta', grav: 'critic', desc: 'Baza de date NU răspunde (SELECT 1 a eșuat).', reparabil: 'verifică readiness și jurnalul serviciului PostgreSQL din infrastructura separată' })
   }
 
   // 5. The disk.
@@ -160,7 +160,7 @@ export async function systemHealth(): Promise<string> {
     const usedPct = 100 - Math.round((Number(s.bavail) / Number(s.blocks)) * 100)
     info.disc = `${usedPct}%`
     if (usedPct >= 90)
-      problems.push({ id: 'disc_plin', grav: 'critic', desc: `Discul e ${usedPct}% plin.`, reparabil: 'run_runbook curata-zombi sau docker system prune (cere acordul ownerului)' })
+      problems.push({ id: 'disc_plin', grav: 'critic', desc: `Discul e ${usedPct}% plin.`, reparabil: 'operatorul infrastructurii trebuie să investigheze retenția și spațiul; procesul web nu execută operații pe gazdă' })
   } catch {
     /* statfs unavailable */
   }
@@ -175,32 +175,30 @@ export async function systemHealth(): Promise<string> {
         id: 'memorie_putina',
         grav: 'critic',
         desc: `Memorie: ${res.liberGb.toFixed(1)} GB liberi din ${res.totalGb.toFixed(1)} (${res.liberPct}%). Sub pragul ăsta kernelul începe să omoare procese — aplicația e cea mai mare, deci prima victimă.`,
-        reparabil: 'run_runbook curata-zombi; docker system prune; sau oprește de pe VPS serviciile care nu sunt necesare',
+        reparabil: 'operatorul infrastructurii trebuie să investigheze memoria și serviciile; procesul web nu execută operații pe gazdă',
       })
     if (res.incarcarePct >= PRAG_INCARCARE_PCT)
       problems.push({
         id: 'incarcare_mare',
         grav: 'mediu',
         desc: `Încărcare ${res.incarcarePct}% din ${res.procesoare} procesoare, susținut pe 15 min. Nu moare nimic, dar tot ce face casa devine încet — inclusiv chatul, care are țintă sub o secundă.`,
-        reparabil: 'vezi ce rulează (run_runbook diagnostic); oprește ce nu e necesar, sau mărește VPS-ul',
+        reparabil: 'operatorul infrastructurii trebuie să investigheze încărcarea și să ajusteze serviciile ori capacitatea',
       })
   } else {
     info.resurse = 'nu se pot măsura de aici'
   }
 
-  // 6. The brain (Gemini direct — OpenRouter extirpat, 3 aug). Semnalul ONEST
-  // măsurabil: pingul live geminiLive() — verde = cheia Tier 2 servește (bani +
-  // merge), roșu = epuizat/cotă/stricat. Nu există un „sold" citibil la Google
-  // (verificat 3 aug), deci nu afișăm o cifră inventată.
+  // 6. Creierul OpenAI. Semnalul este un apel mic prin aceeași cale Responses
+  // folosită de chat; nu pretindem un sold pe care furnizorul nu îl expune.
   try {
-    const g = await geminiLive()
-    info.creier = !g.ok ? 'necitibil' : g.serving ? 'Gemini servește (Tier 2 activ)' : `Gemini NU servește (${g.reason ?? 'necunoscut'})`
+    const g = await openaiHealth()
+    info.creier = !g.ok ? 'necitibil' : g.serving ? 'OpenAI servește' : `OpenAI NU servește (${g.reason ?? 'necunoscut'})`
     if (g.ok && !g.serving)
       problems.push({
         id: 'creier_sarac',
         grav: 'critic',
-        desc: `Gemini (creierul unic) nu servește: ${g.reason ?? 'necunoscut'} — chatul se poate opri.`,
-        reparabil: 'doar ownerul poate alimenta/verifica cheia (aistudio.google.com → Billing)',
+        desc: `OpenAI (creierul unic) nu servește: ${g.reason ?? 'necunoscut'} — chatul se poate opri.`,
+        reparabil: 'doar ownerul poate alimenta/verifica proiectul în platform.openai.com → Billing',
       })
   } catch {
     /* ping unavailable */
@@ -220,11 +218,9 @@ export async function systemHealth(): Promise<string> {
     const BUTOANE: [string, string][] = [
       ['Finanțe', '/api/admin/finance'],
       ['Circuitul banilor', '/api/admin/money-circuit'],
-      ['Dovezile autonomiei', '/api/admin/autonomie/dovezi'],
       ['Magazine', '/api/admin/stores'],
       ['Vizitatori', '/api/admin/demos'],
       ['Contacte', '/api/admin/leads'],
-      ['Chaturi vizitatori', '/api/admin/visitor-chats'],
       ['Inbox secretar', '/api/admin/inbound'],
       ['Cutia reală', '/api/admin/mailbox-live'],
       ['Mesaje contact', '/api/admin/contact-messages'],
@@ -234,8 +230,6 @@ export async function systemHealth(): Promise<string> {
       ['Tokenuri live', '/api/admin/token-checks'],
       ['Constructor', '/api/admin/constructor'],
       ['Recuperare', '/api/admin/backups'],
-      ['Lacăt admin', '/api/admin/unlock/status'],
-      ['Amprente vocale', '/api/voiceprint/list'],
     ]
     const moarte: string[] = []
     await Promise.all(
@@ -260,47 +254,15 @@ export async function systemHealth(): Promise<string> {
     /* the probe itself failed — we don't invent problems */
   }
 
-  // 8. THE VOICEPRINTS SURVIVE EVERY UPGRADE (Adrian, Aug 1: "la fiecare
-  // upgrade să țină minte timbrul și vocea, să nu se mai piardă"). The prints
-  // live in Postgres, which no deploy touches — so a MISSING admin print here
-  // means it was truly lost (deleted by hand or DB rebuilt), and the voice
-  // will no longer recognise him until he re-enrols.
-  try {
-    if (dbEnabled()) {
-      const r = await getPool().query<{ n: string; admin_n: string }>(
-        `SELECT count(*) AS n,
-                count(*) FILTER (WHERE is_admin) AS admin_n
-         FROM voiceprints`,
-      )
-      const n = Number(r.rows[0]?.n ?? 0)
-      const adminN = Number(r.rows[0]?.admin_n ?? 0)
-      const g = await getPool().query<{ n: string }>('SELECT count(*) AS n FROM voice_guests WHERE approved').catch(() => null)
-      info.amprente = `${n} amprente (${adminN} admin) + ${Number(g?.rows[0]?.n ?? 0)} oaspeți aprobați`
-      if (adminN === 0)
-        problems.push({
-          id: 'amprenta_admin_lipsa',
-          grav: 'mediu',
-          desc: 'Amprenta vocală a adminului LIPSEȘTE din baza de date — vocea nu-l mai recunoaște și lacătul vocal nu se mai deschide.',
-          reparabil: 'ownerul dă Ctrl+F5 (să ia ultimul bundle) și îi vorbește lui Kelion — amprenta se re-înrolează singură la prima frază',
-        })
-    }
-  } catch {
-    /* the prints table answered nothing — the DB check above already reports */
-  }
 
   // 9. THE DISPATCHER (Adrian, Aug 1: one brain, many users). Telemetry always
   // visible. (Punga de rezervă pe modele plătite a fost EXTIRPATĂ odată cu
-  // OpenRouter, 3 aug: nu mai există niciun fallback plătit — creierul e
-  // Gemini-only, pe cheia ownerului.)
+  // Providerul cloud este unic; starea modelelor este raportată de Responses.)
   try {
     info.dispecer = stareDispecer()
   } catch {
     /* telemetry unreadable — we don't invent problems */
   }
-
-  // 10. (URECHILE CHIRP — MONITORIZARE SCOASĂ, 5 aug: STT-ul streaming a fost
-  // eliminat total odată cu voce unificată. Nu mai există ureche Chirp de
-  // supravegheat — creierul unic aude audio-ul brut și decide singur.)
 
   // 11. BROWSERUL MÂINILOR — PROBAT CU LANSARE, NU DECLARAT (owner, 15 aug:
   // „browserul acesta nu funcționează" + „ce-ar fi să testezi tot ce faci și
@@ -323,21 +285,15 @@ export async function systemHealth(): Promise<string> {
     /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
   }
 
-  // 12. DEVIN — CONSTRUCTORUL (owner, 22 aug: „am cerut devin peste tot in
-  // constructor… sa-i stergi de tot pe ce e local"). Mașinăria locală A FOST
-  // ȘTEARSĂ — constructorul e DEVIN, extern: ordin → dispecer → sesiune Devin →
-  // PR. Semnalul măsurabil de aici:
-  // cheia (fără ea dispecerul e inert prin design). Pornirile eșuate de sesiuni
-  // au diagnosticul lor (diagnosticConstructor) — nu-l dublăm aici.
-  info.constructorDevin = config.devinKey
-    ? 'DEVIN activ (cheia pusă — dispecerul duce ordinele în sesiuni Devin → PR)'
-    : 'FĂRĂ cheie — dispecerul e inert'
-  if (!config.devinKey) {
+  const codex = await getCodexWorkerStatus()
+  const codexReady = codex.worker.state === 'ready'
+  info.constructorCodex = codexReady ? `Codex worker ${codex.status ?? 'ready'}` : `Codex worker ${codex.worker.state}`
+  if (!codexReady) {
     problems.push({
-      id: 'devin_fara_cheie',
+      id: 'codex_worker_offline',
       grav: 'critic',
-      desc: 'Cheia Devin NU e pusă pe server — constructorul e inert, niciun ordin de build nu pleacă.',
-      reparabil: 'doar ownerul: pune DEVIN_API_KEY în mediul backend-ului (VPS) și repornește aplicația',
+      desc: 'Workerul Codex separat nu a trimis un heartbeat recent de stare ready; ordinele rămân în coadă.',
+      reparabil: 'rulează `codex login` numai în workerul separat și verifică semnarea cozii',
     })
   }
 

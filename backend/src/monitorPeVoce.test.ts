@@ -35,7 +35,7 @@ describe('monitorul nu se citește cu voce — mecanic, nu doar instrucție', ()
     expect(vocal).toMatch(/de_rostit: 'Un document a fost trimis pe monitor în tura asta/)
     expect(vocal).not.toMatch(/DEJA afișat pe monitor/)
     // sub prag sau fără doc, drumul vechi rămâne neatins:
-    expect(vocal).toMatch(/live\?\.raspundeUnealta\(apel\.id, apel\.name, \{ rezultat: r\.text \|\| 'creierul n-a întors niciun text' \}\)/)
+    expect(vocal).toMatch(/raspundeTool\(apel\.id, apel\.name, \{ rezultat: r\.text \|\| 'creierul n-a întors niciun text' \}\)/)
   })
   it('demascarea porții faptelor (marcajul ⚠) NU moare în câmpul nerostit: cu demascare în text, splitul se sare — adevărul rostit bate evitarea recitării', () => {
     expect(vocal).toMatch(/const contineDemascare = r\.text\.includes\('\\n\\n⚠ '\)/)
@@ -45,7 +45,7 @@ describe('monitorul nu se citește cu voce — mecanic, nu doar instrucție', ()
     expect(brut).toMatch(/PRAG_PREDARE_ECRAN = 300 \/\/ hardcod-permis: /)
     expect(vocal).toMatch(/^\s*usiCuDoc: 0,/m)
     expect(vocal).toMatch(/^\s*predariEcran: 0,/m)
-    expect(vocal).toMatch(/if \(live\) \{\s*\n\s*pulsVoce\.predariEcran\+\+\s*\n\s*live\.raspundeUnealta/)
+    expect(vocal).toMatch(/if \(live\) \{\s*\n\s*pulsVoce\.predariEcran\+\+\s*\n\s*raspundeTool/)
   })
   it('fișa ușii poartă regula predării (stratul de instrucție rămâne, peste mecanism), iar stare_masurata nu mai e fără frână pe voce', () => {
     expect(vocal).toMatch(/Când rezultatul are câmpul „pe_ecran_nu_se_recita", un document a fost trimis pe monitor/)

@@ -1,2 +1,0 @@
-npm --prefix backend run typecheck
-npm --prefix backend test

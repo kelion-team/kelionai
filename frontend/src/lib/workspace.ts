@@ -278,6 +278,7 @@ function kindForUrl(raw: string): string {
     const host = u.hostname.replace(/^www\./, '')
     if (host.includes('youtube') || host === 'youtu.be') return 'youtube'
     if (host.includes('windy') || u.pathname.includes('weather')) return 'weather'
+    if (host === 'embed.waze.com') return 'map'
     if (u.pathname.startsWith('/api/image')) return 'image'
     if (u.pathname.startsWith('/api/route')) return 'map'
     // Centrul de Tranzacționare are FELUL lui (9 aug, ownerul: „un tab care se
@@ -432,22 +433,142 @@ export function normalizeEmbedUrl(raw: string): string {
   return raw
 }
 
-// Google's normal pages (www.google.com, maps.google.com) send X-Frame-Options
-// and refuse to load in an iframe → a broken "refused to connect" panel. Detect
-// those so the UI can show an "open in a new tab" link instead of a dead frame.
-export function isEmbeddable(raw: string): boolean {
+export interface EmbedPolicy {
+  readonly src: string
+  readonly sandbox: string
+  readonly allow: string
+}
+
+export interface DocumentFramePolicy {
+  readonly src: string
+  readonly sandbox: string
+}
+
+const PLAYGROUND_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  'img-src data: blob:',
+  'media-src data: blob:',
+  'font-src data:',
+  "connect-src 'none'",
+  "form-action 'none'",
+  "frame-src 'none'",
+  "worker-src 'none'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "navigate-to 'none'",
+].join('; ')
+
+/** Adaugă CSP-ul înaintea oricărui script din pagina generată. JS/CSS inline
+ * rămân funcționale local, dar fetch/WebSocket/form/pop-up/asset extern sunt
+ * blocate; iframe-ul rămâne oricum origin opac prin lipsa allow-same-origin. */
+export function izoleazaHtmlPlayground(raw: string): string {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${PLAYGROUND_CSP}">`
+  // Împachetăm documentul întreg, nu căutăm primul <head>: un input ostil ar
+  // putea pune <script> înaintea lui și ar rula înainte ca CSP-ul să fie citit.
+  const continut = raw.replace(/<!doctype[^>]*>/gi, '')
+  return `<!doctype html><html><head>${meta}</head><body>${continut}</body></html>`
+}
+
+/** Documentele nu deschid o a doua portiță de iframe arbitrar. PDF-ul poate fi
+ * afișat direct numai din aplicația curentă (ori data/blob local), într-un
+ * sandbox fără scripturi. Documentele Office rămân descărcări locale: trimiterea
+ * URL-ului lor către un viewer terț ar divulga documentul fără consimțământ. */
+export function documentFramePolicy(
+  raw: string,
+  kind: 'pdf' | 'office',
+  base = typeof location !== 'undefined' ? location.origin : 'https://kelion.invalid',
+): DocumentFramePolicy | null {
+  const value = String(raw ?? '').trim()
+  if (kind === 'pdf' && /^data:application\/pdf(?:;[^,]*)?,/i.test(value)) {
+    return { src: value, sandbox: '' }
+  }
   let u: URL
   try {
-    u = new URL(raw)
+    u = new URL(value, base)
   } catch {
-    return true // relative URL (e.g. /api/image/…) — same-origin, safe to frame
+    return null
   }
-  // Only ever frame http(s). Block javascript:, data:, blob:, etc.
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
-  const host = u.hostname.replace(/^www\./, '')
-  if (host === 'google.com' || host === 'maps.google.com' || host.endsWith('.google.com')) {
-    // Only the keyed Maps Embed API path is frameable.
-    return u.pathname.startsWith('/maps/embed')
+  if (u.username || u.password) return null
+  if (u.protocol === 'blob:') {
+    return kind === 'pdf' && u.origin === new URL(base).origin
+      ? { src: value, sandbox: '' }
+      : null
   }
-  return true
+  if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.origin !== new URL(base).origin) return null
+
+  const ext = (u.pathname.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
+  if (kind === 'pdf') {
+    if (ext !== 'pdf') return null
+    return {
+      src: value.startsWith('/') ? `${u.pathname}${u.search}${u.hash}` : u.toString(),
+      sandbox: '',
+    }
+  }
+  if (!['xls', 'xlsx', 'doc', 'docx', 'ppt', 'pptx', 'ods', 'odt', 'odp'].includes(ext)) return null
+  return null
+}
+
+// Strict iframe allowlist. Arbitrary model/tool URLs are never framed: Stage
+// renders them through the server-side reader or offers an external link.
+export function embedPolicy(raw: string, kind: string): EmbedPolicy | null {
+  const normalized = normalizeEmbedUrl(String(raw ?? '').trim())
+  const base = typeof location !== 'undefined' ? location.origin : 'https://kelion.invalid'
+  let u: URL
+  try {
+    u = new URL(normalized, base)
+  } catch {
+    return null
+  }
+  if (u.username || u.password || (u.protocol !== 'http:' && u.protocol !== 'https:')) return null
+
+  const sameOrigin = u.origin === base
+  if (sameOrigin) {
+    const rutaHarta = kind === 'map' && u.pathname === '/api/route'
+    const rutaTranzactii = kind === 'tranzactii' && u.pathname === '/api/tranzactii'
+    if (!rutaHarta && !rutaTranzactii) return null
+    return {
+      src: `${u.pathname}${u.search}`,
+      // These two routes are fixed, application-owned surfaces. No arbitrary
+      // same-origin URL receives this capability pair.
+      sandbox: 'allow-scripts allow-same-origin allow-forms',
+      allow: rutaHarta ? 'geolocation' : '',
+    }
+  }
+
+  const host = u.hostname.toLowerCase()
+  const externalSandbox = 'allow-scripts allow-same-origin allow-forms allow-popups'
+  if (
+    kind === 'youtube' &&
+    host === 'www.youtube.com' &&
+    /^\/embed\/[\w-]{6,}$/.test(u.pathname)
+  ) {
+    return {
+      src: u.toString(),
+      sandbox: externalSandbox,
+      allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen',
+    }
+  }
+  if (kind === 'map' && host === 'embed.waze.com' && u.pathname === '/iframe') {
+    return { src: u.toString(), sandbox: externalSandbox, allow: 'geolocation' }
+  }
+  if (
+    kind === 'map' &&
+    (host === 'openstreetmap.org' || host === 'www.openstreetmap.org') &&
+    u.pathname === '/export/embed.html'
+  ) {
+    return { src: u.toString(), sandbox: externalSandbox, allow: 'geolocation' }
+  }
+  if (
+    kind === 'map' &&
+    (host === 'www.google.com' || host === 'maps.google.com') &&
+    u.pathname.startsWith('/maps/embed')
+  ) {
+    return { src: u.toString(), sandbox: externalSandbox, allow: 'geolocation' }
+  }
+  if (kind === 'weather' && host === 'embed.windy.com' && u.pathname === '/embed2.html') {
+    return { src: u.toString(), sandbox: externalSandbox, allow: 'geolocation' }
+  }
+  return null
 }

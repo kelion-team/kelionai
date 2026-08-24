@@ -33,7 +33,7 @@ vi.mock('pg', async () => {
 vi.mock('./config.js', () => ({
   config: {
     databaseUrl: 'postgres://test@localhost:5432/test?sslmode=disable',
-    geminiKey: '',
+    openai: { key: '' },
     billing: { userShare: 0.75, creditValue: 0.1, usdToCurrency: 1, currency: 'gbp' },
   },
 }))

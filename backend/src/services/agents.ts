@@ -1,11 +1,10 @@
 import type { TextBlock } from './brain-types.js'
 import { config } from '../config.js'
-import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } from '../db.js'
-import { brainCostUsd } from './cost.js'
+import { getMemories, searchMemories, semanticMemories, addMemory } from '../db.js'
 import { brain } from './brain.js'
 
-// Memory runs on the default chat model (Gemini direct — OpenRouter extirpat, 3 aug).
-const MEMORY_MODEL = config.brain.chatDefault
+// Memory extraction is a high-volume workload: keep it on Luna.
+const MEMORY_MODEL = `openai/${config.openai.luna}`
 
 /** Aduce memoriile unui agent: cele recente + (când e `hint`) cele relevante pe
  *  cuvinte + cele semantice, dedup pe conținut păstrând ordinea. Sursă UNICĂ
@@ -75,7 +74,7 @@ export async function learnFromTurn(
   assistantMsg: string,
   agent = 'kelion',
 ): Promise<void> {
-  if (!config.geminiKey || (!userMsg.trim() && !assistantMsg.trim())) return
+  if (!config.openai.key || (!userMsg.trim() && !assistantMsg.trim())) return
   const explicit = userMsg.match(
     /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
   )
@@ -117,17 +116,9 @@ export async function learnFromTurn(
         },
       ],
     })
-    // REAL COST FIRST (the owner's rule: "show real, stop fabricating"): the
-    // adapter returns the provider's own `usage.cost` for the call that
-    // answered — booked as 'memory', a MEASUREMENT (db.ts COSTURI_MASURATE).
-    // Only when the provider didn't itemize it do we estimate, and then under
-    // a different kind ('memory_est') so the ledger never mixes the two.
-    if (typeof res.costUsd === 'number' && res.costUsd > 0) {
-      void recordCost(email, 'memory', res.costUsd)
-    } else {
-      const est = await brainCostUsd(res.model || MEMORY_MODEL, res.usage.input_tokens, res.usage.output_tokens).catch(() => null)
-      if (est && est.usd > 0) void recordCost(email, 'memory_est', est.usd)
-    }
+    // Raw Responses usage is persisted by the adapter. Provider spend is
+    // reconciled separately from the privileged Costs API; this process must
+    // never turn a mutable price table into an accounting fact.
     const text = res.content
       .filter((b): b is TextBlock => b.type === 'text')
       .map((b) => b.text)
@@ -142,7 +133,7 @@ export async function learnFromTurn(
 
 /** Un fapt învățat + metadatele lui smart (tip + importanță). Toleră AMBELE forme:
  *  obiectul nou {fact,type,importance} ȘI vechiul șir simplu (dacă modelul mai
- *  întoarce string-uri, ele devin fapte generice — nimic nu se pierde). PURĂ. */
+ *  întoarce string-uri, ele sunt normalizate ca fapte generice. Funcție pură. */
 export interface FaptInvatat {
   fact: string
   tip: string | null

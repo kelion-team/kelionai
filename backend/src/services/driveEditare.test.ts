@@ -13,7 +13,7 @@ const google = readFileSync(new URL('./google.ts', import.meta.url), 'utf8')
 const auth = readFileSync(new URL('../routes/auth.ts', import.meta.url), 'utf8')
 
 describe('normalizeazaRanduri — 2D curat pentru Sheets', () => {
-  it('păstrează numerele, textul, iar null/undefined devin celulă goală', () => {
+  it('păstrează numerele și textul, iar null/undefined se transformă în celulă goală', () => {
     expect(normalizeazaRanduri([['a', 1], ['b', 2]])).toEqual([['a', 1], ['b', 2]])
     expect(normalizeazaRanduri([[null, undefined, 'x']])).toEqual([['', '', 'x']])
   })

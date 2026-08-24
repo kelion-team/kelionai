@@ -26,6 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { RADACINA, porneste } from './lib/server-proba.mjs'
+import { listaFisiereCod } from './lib/fisiere-cod.mjs'
 
 // ── PROBĂ AUTENTIFICATĂ (Adrian, 8 aug: „403 greșit, real trebuie 200") ──────
 // Un 403 dovedește doar că poarta e acolo, NU că butonul face ceva. Ca să vedem
@@ -40,33 +41,13 @@ import { RADACINA, porneste } from './lib/server-proba.mjs'
 
 const PORT = Number(process.env.PROBA_PORT || 18100)
 
-function fisiere(dir) {
-  const out = []
-  const mers = (d) => {
-    let intrari
-    try {
-      intrari = fs.readdirSync(d, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const it of intrari) {
-      if (it.name === 'node_modules' || it.name === 'dist' || it.name.startsWith('.')) continue
-      const p = path.join(d, it.name)
-      if (it.isDirectory()) mers(p)
-      else if (it.name.endsWith('.ts') && !it.name.endsWith('.test.ts')) out.push(p)
-    }
-  }
-  mers(dir)
-  return out
-}
-
 /** Rutele GET din cod. Doar GET: o probă nu are voie să scrie nimic.
  *  `\.get` simplu prindea și `getSessionUser(`, iar o fereastră largă sărea în
  *  ruta următoare și raporta adrese POST ca fiind GET. Acum se cere `.get(` sau
  *  `.get<…>(` — prins la prima rulare, pe rezultate care nu se legau. */
 function ruteGet() {
   const rute = new Set()
-  for (const f of fisiere(path.join(RADACINA, 'backend/src'))) {
+  for (const f of listaFisiereCod(path.join(RADACINA, 'backend/src'), ['.ts'], { ignoraTeste: true })) {
     let src
     try {
       src = fs.readFileSync(f, 'utf8')

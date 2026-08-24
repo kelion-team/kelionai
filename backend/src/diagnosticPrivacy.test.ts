@@ -1,0 +1,55 @@
+import Fastify from 'fastify'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { redactDiagnostic, sanitizeDiagnosticUrl } from './shared/diagnosticRedaction.js'
+
+const state = vi.hoisted(() => ({ saved: [] as Array<Record<string, unknown>> }))
+vi.mock('./session.js', () => ({
+  getSessionUser: () => ({ email: 'owner@example.com', role: 'customer', name: 'Owner', picture: '', locale: 'en', authProvider: 'local' }),
+}))
+vi.mock('./db.js', () => ({
+  getOrCreateClientStorageId: vi.fn(async () => '123e4567-e89b-42d3-a456-426614174000'),
+  saveClientError: vi.fn(async (entry: Record<string, unknown>) => { state.saved.push(entry) }),
+}))
+
+const { clientErrorRoutes, recentClientErrors } = await import('./routes/clientErrors.js')
+
+beforeEach(() => { state.saved = [] })
+
+describe('diagnostic privacy', () => {
+  it('redacts credentials, identifiers and URL queries before use', () => {
+    const raw = 'owner@example.com Bearer abcdefghijkl sk-proj-abcdefgh token=topsecret ' +
+      'https://example.com/path?access_token=bad 127.0.0.1 4242 4242 4242 4242 C:\\Users\\Adrian\\app.ts'
+    const clean = redactDiagnostic(raw)
+    expect(clean).not.toContain('owner@example.com')
+    expect(clean).not.toContain('abcdefghijkl')
+    expect(clean).not.toContain('topsecret')
+    expect(clean).not.toContain('access_token')
+    expect(clean).not.toContain('127.0.0.1')
+    expect(clean).not.toContain('4242 4242')
+    expect(clean).not.toContain('Adrian')
+    expect(clean).toContain('https://example.com/path')
+    expect(sanitizeDiagnosticUrl('https://example.com/a?token=x#secret')).toBe('https://example.com/a')
+  })
+
+  it('uses the same redacted value in memory and durable storage', async () => {
+    const app = Fastify()
+    await app.register(clientErrorRoutes)
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/client-errors',
+      payload: { errors: ['failed for owner@example.com with sk-proj-abcdefgh at 10.0.0.2'] },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(String(state.saved[0]?.message)).not.toContain('owner@example.com')
+    expect(String(state.saved[0]?.message)).not.toContain('sk-proj-')
+    expect(String(state.saved[0]?.message)).not.toContain('10.0.0.2')
+    expect(recentClientErrors('owner@example.com').join(' ')).toContain(String(state.saved[0]?.message))
+  })
+
+  it('rejects oversized batches instead of silently truncating them', async () => {
+    const app = Fastify()
+    await app.register(clientErrorRoutes)
+    const response = await app.inject({ method: 'POST', url: '/api/client-errors', payload: { errors: Array(11).fill('x') } })
+    expect(response.statusCode).toBe(413)
+  })
+})

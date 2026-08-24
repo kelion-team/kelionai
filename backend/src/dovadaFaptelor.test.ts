@@ -44,7 +44,8 @@ describe('dovada faptelor — cititorul jurnalului operațional (asul din mânec
     expect(toolDefs).toMatch(/NEVER read the raw record aloud/)
   })
   it('pe voce, asul e la UN PAS: dovada_faptelor e în setul sesiunii Live (fără să macine ușa)', () => {
-    expect(vocal).toMatch(/UNELTE_LIVE = new Set\(\[[^\]]*'dovada_faptelor'/)
+    expect(vocal).toMatch(/UNELTE_LIVE_USER = new Set\(\[[^\]]*'dovada_faptelor'/)
+    expect(vocal).toMatch(/toate\.filter\(\(t\) => UNELTE_LIVE_USER\.has\(t\.name\)\)/)
   })
 })
 
@@ -82,7 +83,7 @@ describe('tura vocală cu unelte lasă dovadă durabilă (jurnalul operațional)
   })
 })
 
-describe('originea vocală și nota porții devin durabile în chat.ts', () => {
+describe('originea vocală și nota porții sunt durabile în chat.ts', () => {
   it('sarcina ușii poartă marcajul usaCreierului/continuareUsa în metadate (dovada poate spune „asta ai cerut-o vorbind")', () => {
     expect(chat).toMatch(/usaCreierului: eUsaCreierului,\s*\n\s*continuareUsa: req\.body\?\.continuareUsa === true,/)
   })

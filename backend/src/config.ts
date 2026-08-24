@@ -1,14 +1,19 @@
 import 'dotenv/config'
+import { readFileSync, statSync } from 'node:fs'
+import { BILLING_POLICY } from './services/billingPolicy.js'
+import {
+  OFFLINE_SYNC_DEFAULT_MAX_TEXT_CHARS,
+  OFFLINE_SYNC_DEFAULT_MAX_TURNS,
+} from './shared/offlineSyncPolicy.js'
 
 // ── A KEY WRITTEN UNDER A DIFFERENT NAME IS NOT A MISSING KEY ──────────────
 //
 // Adrian, 30 Jul, twice: "all the keys have been written dozens of times."
 // He was right, and the fault was this code. Look at what used to be below:
-//   OPENAI_API_KEY     or  OPENAI_KEY      → two accepted names
-//   OPENROUTER_API_KEY or  OPENROUTER_KEY  → two accepted names
+//   OPENAI_API_KEY                         → canonical runtime key
 //   GOOGLE_TTS_API_KEY or  GOOGLE_API_KEY  → two accepted names
 //   GOOGLE_MAPS_KEY                        → ONE only, and without "_API_"
-//   SERPER_API_KEY, GEMINI_API_KEY         → one each
+//   SERPER_API_KEY                         → one canonical name
 // Someone had already hit the "I typed a different name" problem three times
 // and patched it with aliases — but exactly on the ones that didn't work, no
 // alias existed. And `MAPS` is the only one written without `_API_`, so the
@@ -19,6 +24,18 @@ function env(...names: string[]): string {
   for (const n of names) {
     const v = process.env[n]
     if (v != null && v.trim() !== '') return v.trim()
+    const secretFile = process.env[`${n}_FILE`]?.trim()
+    if (secretFile) {
+      try {
+        if (statSync(secretFile).size > 65_536) throw new Error('secret_file_too_large')
+        const fromFile = readFileSync(secretFile, 'utf8').trim()
+        if (fromFile) return fromFile
+      } catch {
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error(`${n}_FILE nu poate fi citit în siguranță`)
+        }
+      }
+    }
   }
   return ''
 }
@@ -27,36 +44,39 @@ function env(...names: string[]): string {
  *  "you typed X, I read Y" instead of "missing". */
 export const ENV_ALIASES: Record<string, string[]> = {
   databaseUrl: ['DATABASE_URL', 'POSTGRES_URL'],
-  googleServiceAccountJson: ['GOOGLE_SERVICE_ACCOUNT_JSON', 'GOOGLE_SERVICE_ACCOUNT', 'GCP_SERVICE_ACCOUNT_JSON'],
-  googleTtsKey: ['GOOGLE_TTS_API_KEY', 'GOOGLE_TTS_KEY'],
   serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
   // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
   // de la fostul câmp config.googleMapsKey de mai jos.)
-  geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
-  // (CHEIA FABLE 5 / Anthropic a fost SCOASĂ — owner, 16 aug: „fable iese total
-  // de peste tot… curata peste tot in aplicatie". Nu mai există niciun consumator
-  // Fable/Anthropic în cod; constructorul e Devin, iar creierul de raționament e
-  // Gemini.)
-  julesKey: ['JULES_API_KEY', 'JULES_KEY'],
-  // Devin — constructorul EXTERN (owner, 20 aug: „punel pe devin cu cheie").
-  // Cheia stă în secretele repo-ului → vps-set-env → env-ul VPS, ca restul.
-  // `devinOrgId` e opțional (API-ul de bază /v1/sessions merge doar cu cheia).
-  devinKey: ['DEVIN_API_KEY', 'DEVIN_KEY'],
-  devinOrgId: ['DEVIN_ORG_ID'],
+  // OpenAI is the single online AI provider. Runtime inference accepts only
+  // the project-scoped key; the Codex worker authenticates separately.
+  openaiKey: ['OPENAI_API_KEY'],
+  openaiLuna: ['OPENAI_LUNA_MODEL'],
+  openaiMedium: ['OPENAI_MEDIUM_MODEL'],
+  openaiHeavy: ['OPENAI_HEAVY_MODEL'],
+  openaiRealtime: ['OPENAI_REALTIME_MODEL'],
+  openaiRealtimeTranscription: ['OPENAI_REALTIME_TRANSCRIPTION_MODEL'],
+  openaiCallTranscription: ['OPENAI_CALL_TRANSCRIPTION_MODEL'],
+  openaiTts: ['OPENAI_TTS_MODEL'],
+  openaiImage: ['OPENAI_IMAGE_MODEL'],
+  codexWorkerSecret: ['CODEX_WORKER_SECRET'],
+  constructorPublisherSecret: ['CONSTRUCTOR_PUBLISHER_SECRET'],
+  constructorReleaseSecret: ['CONSTRUCTOR_RELEASE_SECRET'],
+  browserWorkerSecret: ['BROWSER_WORKER_SECRET'],
+  converterWorkerSecret: ['CONVERTER_WORKER_SECRET'],
+  vapidPublicKey: ['VAPID_PUBLIC_KEY'],
+  revolutMerchantSecretKey: ['REVOLUT_MERCHANT_SECRET_KEY'],
+  revolutWebhookSigningSecret: ['REVOLUT_WEBHOOK_SIGNING_SECRET'],
+  visitorChatTtlSeconds: ['VISITOR_CHAT_TTL_SECONDS'],
+  visitorAnalyticsRetentionDays: ['VISITOR_ANALYTICS_RETENTION_DAYS'],
   mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
-  bridgeSecret: ['BRIDGE_SECRET'],
   sessionSecret: ['SESSION_SECRET'],
+  googleTokenEncryptionKey: ['GOOGLE_TOKEN_ENCRYPTION_KEY'],
+  googleTokenEncryptionPreviousKey: ['GOOGLE_TOKEN_ENCRYPTION_PREVIOUS_KEY'],
   githubToken: ['GITHUB_TOKEN', 'KELION_GITHUB_TOKEN'],
-  useLocalVosk: ['USE_LOCAL_VOSK'],
-  localVoskUrl: ['LOCAL_VOSK_URL'],
-  // Coqui TTS (clonare voce, 23 aug 2026) — microserviciu Python pe port 5100 intern.
-  // Default: 127.0.0.1:5100 (container same-host). Non-fatal: dacă nu rulează,
-  // /api/voce/sintetizeaza returnează 503 cinstit.
-  coquiUrl: ['COQUI_URL'],
 }
 
 function required(name: string): string {
-  const v = process.env[name]
+  const v = env(name)
   if (!v || v.trim() === '') {
     // FAIL-FAST ÎN PRODUCȚIE (audit 9 aug): „required" care întoarce '' nu
     // cere nimic — un SESSION_SECRET lipsă lăsa serverul să booteze tăcut,
@@ -72,337 +92,547 @@ function required(name: string): string {
   return v
 }
 
-const isProd = process.env.NODE_ENV === 'production'
-
-// ── MODELUL UNIC AL CREIERULUI — SIGILAT (Adrian, 6 aug, regulă ultra-decisă:
-// „modelul decis de mine să nu se poată modifica accidental sau de altcineva fără
-// decizia mea; mereu cel mai performant model complet; când apare ceva nou, preluat
-// prin update automat, peste tot"). O SINGURĂ sursă de adevăr, în COD, FĂRĂ env
-// (nici GEMINI_MODEL_GREU, nici BRAIN_*) — ca nimic (autonomie, env pe VPS, UI) să
-// nu-l poată schimba din greșeală. Se schimbă DOAR prin auto-upgrade VALIDAT
-// (services/modelAutoUpgrade) — probă reală + doar la un Pro mai nou, niciodată la
-// flash/experimental. Config-ul îl expune prin GETTERI, deci se aplică AUTOMAT
-// peste tot (chat, agenți, memorie, fallback, scară) — schimbi într-un loc, se
-// schimbă peste tot.
-// SCHIMBAT 7 aug, PE MĂSURĂTOARE, cu acordul explicit al ownerului: slotul greu
-// pleacă de pe Pro pe `gemini-3.5-flash`. Proba de calitate (scripts/proba-calitate.py,
-// 10 sarcini cu verificare AUTOMATĂ × 2 rulări × 8 modele, gândire 'high', rulată
-// de owner pe VPS-ul lui):
-//   gemini-3.5-flash        20/20   median 2620 ms   cel mai lent  6,3 s
-//   gemini-3-flash-preview  20/20   median 2093 ms   cel mai lent  6,4 s
-//   gemini-3.1-pro-preview  20/20   median 4713 ms   cel mai lent 73,3 s
-//   gemini-pro-latest       20/20   median 4818 ms   cel mai lent 72,2 s
-//   gemini-2.5-pro          18/20   median 6553 ms   cel mai lent 75,3 s
-// La CALITATE sunt egale (20/20). Diferența e că Pro e de două ori mai lent la
-// mediană și, mai grav, are cazuri de 72-75 SECUNDE. S-a ales `3.5-flash` și nu
-// `3-flash-preview` (cu 527 ms mai rapid) fiindcă „preview" e un nume pe care
-// Google îl poate retrage; iar 3.5-flash e din aceeași familie ca slotul rapid
-// (3.5-flash-lite), deci intră pe aceeași ramură de configurare a gândirii.
-export const MODEL_UNIC_DEFAULT = 'gemini-3.5-flash'
-let modelUnicActiv = MODEL_UNIC_DEFAULT
-/** Codul modelului unic (ex: „gemini-3.1-pro-preview"). Sursa de adevăr, live. */
-export function modelUnicCod(): string {
-  return modelUnicActiv
-}
-/** Modelul unic cu prefix google-direct/ (forma treptelor creierului). */
-export function modelUnicDirect(): string {
-  return `google-direct/${modelUnicActiv}`
-}
-export function esteModelGeneralGreu(cod: string): boolean {
-  if (!cod || typeof cod !== 'string') return false
-  const curat = cod.replace(/^google-direct\//, '').trim()
-  if (!/^gemini-\d+(?:\.\d+)?-flash(?:-|$)/.test(curat) || /-lite(?:-|$)/.test(curat) || /-(?:video|audio|live|image|embed|eap|tuning|vision|thinking|realtime|grounding|robotics|custom|distill|stream|agent)(?:-|$)/i.test(curat)) {
-    return false
+/** Secrets that may be injected directly only in development/tests. Production
+ * accepts the mounted `*_FILE` form exclusively, so the value never appears in
+ * container metadata or a generic application KV. */
+function fileOnlySecret(name: string): string {
+  const direct = process.env[name]?.trim() ?? ''
+  const secretFile = process.env[`${name}_FILE`]?.trim() ?? ''
+  const production = process.env.NODE_ENV === 'production'
+  if (production && direct) throw new Error(`${name} trebuie montat exclusiv prin ${name}_FILE`)
+  if (!secretFile) return production ? '' : direct
+  try {
+    if (statSync(secretFile).size > 65_536) throw new Error('secret_file_too_large')
+    return readFileSync(secretFile, 'utf8').trim()
+  } catch {
+    if (production) throw new Error(`${name}_FILE nu poate fi citit în siguranță`)
+    return ''
   }
-  return /^gemini-\d+(?:\.\d+)?-flash(?:-(?:preview|\d{3,}))?$/i.test(curat)
 }
 
-/** Setează modelul unic — DOAR din auto-upgrade-ul validat. Acceptă NUMAI un
- *  Gemini flash general de producție/preview (niciodată lite/specializat), altfel refuză (false). Poarta
- *  care ține „mereu cel mai performant, dar niciodată degradat de o schimbare
- *  greșită". */
-export function setModelUnicValidat(m: string): boolean {
-  const cod = String(m || '').replace(/^google-direct\//, '').trim()
-  if (!esteModelGeneralGreu(cod)) return false
-  modelUnicActiv = cod
-  return true
+const isProd = process.env.NODE_ENV === 'production'
+const codexWorkerEnabled = process.env.CODEX_WORKER_ENABLED === '1'
+const constructorPublisherEnabled = process.env.CONSTRUCTOR_PUBLISHER_ENABLED === '1'
+const constructorReleaseEnabled = process.env.CONSTRUCTOR_RELEASE_ENABLED === '1'
+const pushEnabled = process.env.PUSH_ENABLED === '1'
+
+function constructorServiceSecret(name: string, enabled: boolean): string {
+  const value = fileOnlySecret(name)
+  if (isProd && enabled && value.length < 32) {
+    throw new Error(`${name}_FILE trebuie să conțină cel puțin 32 de caractere când serviciul este activ`)
+  }
+  return value
 }
 
-// ── AL DOILEA SLOT: MODELUL RAPID (Adrian, 7 aug — MĂSURAT pe cheia lui, de pe
-// VPS, cu payload real) ──────────────────────────────────────────────────────
-// Dovada care a impus separarea (rulată de owner, 3 măsurători/model):
-//   gemini-3.5-flash-lite    508–713 ms   unelte DA · vede DA · aude DA
-//   gemini-3.1-pro-preview   3.622 ms … 45.026 ms (EXPIRAT)  ← ce rula pe chat
-// Adică modelul de chat era cel mai lent DIN TOATE și, mai rău, imprevizibil
-// (3,6s → 45s pe aceeași cerere). „18 secunde să-mi spună cât e ceasul?" —
-// întrebarea ownerului, care a pornit studiul; răspunsul a fost: da, și nici
-// măcar nu știa ora.
-//
-// DE CE `gemini-3.5-flash-lite` și NU `gemini-flash-lite-latest` (care măsura
-// 511 ms, cu 100 ms mai puțin): aliasul `-latest` nu se potrivește NICIUNEIA din
-// ramurile de configurare a gândirii din geminiDirect.ts (`/gemini-2\.5/` sau
-// `/gemini-3/`) → ar pleca fără `thinkingLevel` și fără podeaua de output, exact
-// capcana din 6 aug în care 3.x consumă tot bugetul pe gândire și întoarce
-// răspuns GOL. `3.5-flash-lite` intră pe ramura `gemini-3`, primește configul
-// corect, e cel mai NOU lite, și e la 100 ms de vârf. Corectitudine peste 100 ms.
-//
-// CE RĂMÂNE PE SLOTUL GREU: `geminiModelGreu`, `workDefault`, `topDefault` —
-// gândirea grea, agenții cu efort înalt și autonomia. Iar unealta `ask_brain`
-// (oferită de chat.ts DOAR pe tura ușoară) escaladează singură de pe slotul
-// rapid pe cel greu când sarcina chiar cere gândire. [ADUS LA COD, lot D:
-// slotul greu NU mai e Pro — MODEL_UNIC_DEFAULT e `gemini-3.5-flash` (mutat de
-// pe Pro pe 7 aug, vezi mai sus); „Pro" de aici era rămășița acelei ere.]
-export const MODEL_RAPID_DEFAULT = 'gemini-3.5-flash-lite'
-let modelRapidActiv = MODEL_RAPID_DEFAULT
-/** Codul modelului rapid de conversație (ex: „gemini-3.5-flash-lite"). */
-export function modelRapidCod(): string {
-  return modelRapidActiv
-}
-/** Modelul rapid cu prefix google-direct/ (forma treptelor creierului). */
-export function modelRapidDirect(): string {
-  return `google-direct/${modelRapidActiv}`
-}
-/** Setează modelul rapid — DOAR din auto-upgrade validat. Acceptă NUMAI un Gemini
- *  `flash-lite`. STRÂNS pe 7 aug: până acum accepta și flash simplu, ceea ce n-a
- *  contat cât timp slotul greu era Pro — dar de când GREUL e flash, o poartă largă
- *  aici ar fi lăsat AMBELE sloturi pe același model, adică o singură treaptă
- *  deghizată în două. Acum sunt disjuncte prin construcție: conversația = lite,
- *  gândirea grea = flash fără lite. */
-export function setModelRapidValidat(m: string): boolean {
-  const cod = String(m || '').replace(/^google-direct\//, '').trim()
-  if (!/^gemini-\d+(?:\.\d+)?-flash-lite(?:-|$)/.test(cod)) return false
-  modelRapidActiv = cod
-  return true
+function configuredPushHosts(): string[] {
+  const hosts = (process.env.PUSH_ENDPOINT_HOSTS ?? '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean)
+  if (hosts.some((host) => !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host))) {
+    throw new Error('PUSH_ENDPOINT_HOSTS conține un domeniu invalid')
+  }
+  if (pushEnabled && hosts.length === 0) throw new Error('PUSH_ENDPOINT_HOSTS este obligatoriu când push este activ')
+  return [...new Set(hosts)]
 }
 
-// ── AL TREILEA SLOT: MODELUL PROFUND (owner, 22 aug 2026: „escaladări pe modele
-// superioare"). Scara creierului trece de la 1 treaptă la 4: flash-lite (vorbă
-// simplă) → flash (gândire + unelte) → PROFUND (Pro, raționament complex, cod,
-// strategie) → ULTRA (env-configurable, pentru modele viitoare).
-// Pro e MĂSURAT 20/20 pe calitate (proba-calitate.py), dar 2x mai lent cu outliers
-// de 72-75s — de-aia stă DOAR pe treapta a 3-a, escaladat automat la dificultate
-// mare (ESCALATE_TOP_AT) sau când modelul cere singur prin ask_brain.
-export const MODEL_PROFUND_DEFAULT = 'gemini-3.1-pro-preview'
-let modelProfundActiv = MODEL_PROFUND_DEFAULT
-/** Codul modelului profund (ex: „gemini-3.1-pro-preview"). */
-export function modelProfundCod(): string {
-  return process.env.MODEL_CREIER_PROFUND ?? modelProfundActiv
-}
-/** Modelul profund cu prefix google-direct/ (forma treptelor creierului). */
-export function modelProfundDirect(): string {
-  return `google-direct/${modelProfundCod()}`
-}
-/** Setează modelul profund — DOAR din auto-upgrade validat. Acceptă un Gemini Pro
- *  de producție/preview. */
-function setModelProfundValidat(m: string): boolean {
-  const cod = String(m || '').replace(/^google-direct\//, '').trim()
-  if (!/^gemini-\d+(?:\.\d+)?-pro(?:-|$)/.test(cod)) return false
-  modelProfundActiv = cod
-  return true
+const pushPublicKey = env(...ENV_ALIASES.vapidPublicKey)
+const pushPrivateKey = fileOnlySecret('VAPID_PRIVATE_KEY')
+const pushEndpointHosts = configuredPushHosts()
+if (pushEnabled) {
+  if (!/^[A-Za-z0-9_-]{87}$/.test(pushPublicKey)) throw new Error('VAPID_PUBLIC_KEY este invalidă')
+  if (!/^[A-Za-z0-9_-]{43}$/.test(pushPrivateKey)) throw new Error('VAPID_PRIVATE_KEY_FILE conține o cheie invalidă')
 }
 
-// ── AL PATRULEA SLOT: MODELUL ULTRA — pentru probleme maximale (strategie
-//  complexă, analiză de sistem, decizii critice). Env-configurable pentru modele
-//  viitoare; default = tot Pro (până apare ceva mai puternic măsurat).
-export function modelUltraCod(): string {
-  return process.env.MODEL_CREIER_ULTRA ?? modelProfundCod()
+type ProductConfig = {
+  appName: string
+  appVersion: string
+  publicAppOrigin: string
+  githubRepository: string
+  supportEmail: string
+  nativeScheme: string
+  nativeOrigins: string[]
+  nativeRedirects: { ios: string; desktop: string }
+  androidApplicationId: string
+  iosBundleId: string
 }
-export function modelUltraDirect(): string {
-  return `google-direct/${modelUltraCod()}`
+
+function loadProductConfig(): ProductConfig {
+  try {
+    const parsed = JSON.parse(readFileSync(new URL('../../config/product.json', import.meta.url), 'utf8')) as Partial<ProductConfig>
+    const origin = new URL(String(parsed.publicAppOrigin ?? ''))
+    if (origin.protocol !== 'https:' || origin.origin !== parsed.publicAppOrigin) throw new Error('origin_invalid')
+    if (!/^[A-Za-z][A-Za-z0-9 ._-]{1,63}$/.test(String(parsed.appName ?? ''))) throw new Error('app_name_invalid')
+    if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(String(parsed.appVersion ?? ''))) throw new Error('app_version_invalid')
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(parsed.supportEmail ?? ''))) throw new Error('support_email_invalid')
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(parsed.githubRepository ?? ''))) throw new Error('repository_invalid')
+    if (!/^[a-z][a-z0-9+.-]{1,31}$/.test(String(parsed.nativeScheme ?? ''))) throw new Error('native_scheme_invalid')
+    if (!Array.isArray(parsed.nativeOrigins) || parsed.nativeOrigins.length === 0) throw new Error('native_origins_invalid')
+    const nativeOriginStrings = parsed.nativeOrigins.map((raw) => String(raw))
+    const nativeOrigins = nativeOriginStrings.map((raw) => new URL(raw))
+    if (nativeOrigins.some((u, index) => u.origin !== 'null' && u.origin !== nativeOriginStrings[index])) {
+      throw new Error('native_origins_invalid')
+    }
+    if (nativeOrigins.some((u) => !['capacitor:', 'tauri:', 'http:'].includes(u.protocol))) {
+      throw new Error('native_origins_invalid')
+    }
+    const iosRedirect = new URL(String(parsed.nativeRedirects?.ios ?? ''))
+    const desktopRedirect = new URL(String(parsed.nativeRedirects?.desktop ?? ''))
+    if (iosRedirect.origin !== origin.origin || iosRedirect.pathname !== '/auth/native/complete' || iosRedirect.search || iosRedirect.hash) {
+      throw new Error('native_ios_redirect_invalid')
+    }
+    if (desktopRedirect.protocol !== `${parsed.nativeScheme}:` || desktopRedirect.hostname !== 'auth' || desktopRedirect.pathname !== '/native/complete') {
+      throw new Error('native_desktop_redirect_invalid')
+    }
+    if (![parsed.androidApplicationId, parsed.iosBundleId].every((v) => /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/.test(String(v ?? '')))) {
+      throw new Error('package_id_invalid')
+    }
+    return parsed as ProductConfig
+  } catch {
+    throw new Error('config/product.json lipsește sau este invalid')
+  }
 }
+
+const productConfig = loadProductConfig()
+
+type EndpointConfig = {
+  openaiApiBase: string
+  serperApiBase: string
+  stooqBase: string
+  binanceRestBase: string
+  binanceWebSocketBase: string
+  yahooFinanceBase: string
+  cartoTileBase: string
+  googleOAuthAuthorizeUrl: string
+  googleOAuthTokenUrl: string
+  googleUserInfoUrl: string
+  googleApisBase: string
+  nominatimApiBase: string
+  osrmRoutingBase: string
+  revolutMerchantProductionBase: string
+  revolutMerchantSandboxBase: string
+  revolutCheckoutProductionOrigin: string
+  revolutCheckoutSandboxOrigin: string
+}
+
+function validEndpoint(raw: string, protocols: readonly string[]): string {
+  const url = new URL(raw)
+  if (!protocols.includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('endpoint_invalid')
+  }
+  return url.toString().replace(/\/$/, '')
+}
+
+function loadEndpointConfig(): EndpointConfig {
+  try {
+    const parsed = JSON.parse(readFileSync(new URL('../../config/endpoints.json', import.meta.url), 'utf8')) as {
+      version?: unknown
+      external?: Partial<EndpointConfig>
+    }
+    if (parsed.version !== 1 || !parsed.external) throw new Error('endpoint_version_invalid')
+    const external = parsed.external
+    return {
+      openaiApiBase: validEndpoint(String(external.openaiApiBase ?? ''), ['https:']),
+      serperApiBase: validEndpoint(String(external.serperApiBase ?? ''), ['https:']),
+      stooqBase: validEndpoint(String(external.stooqBase ?? ''), ['https:']),
+      binanceRestBase: validEndpoint(String(external.binanceRestBase ?? ''), ['https:']),
+      binanceWebSocketBase: validEndpoint(String(external.binanceWebSocketBase ?? ''), ['wss:']),
+      yahooFinanceBase: validEndpoint(String(external.yahooFinanceBase ?? ''), ['https:']),
+      cartoTileBase: validEndpoint(String(external.cartoTileBase ?? ''), ['https:']),
+      googleOAuthAuthorizeUrl: validEndpoint(String(external.googleOAuthAuthorizeUrl ?? ''), ['https:']),
+      googleOAuthTokenUrl: validEndpoint(String(external.googleOAuthTokenUrl ?? ''), ['https:']),
+      googleUserInfoUrl: validEndpoint(String(external.googleUserInfoUrl ?? ''), ['https:']),
+      googleApisBase: validEndpoint(String(external.googleApisBase ?? ''), ['https:']),
+      nominatimApiBase: validEndpoint(String(external.nominatimApiBase ?? ''), ['https:']),
+      osrmRoutingBase: validEndpoint(String(external.osrmRoutingBase ?? ''), ['https:']),
+      revolutMerchantProductionBase: validEndpoint(String(external.revolutMerchantProductionBase ?? ''), ['https:']),
+      revolutMerchantSandboxBase: validEndpoint(String(external.revolutMerchantSandboxBase ?? ''), ['https:']),
+      revolutCheckoutProductionOrigin: validEndpoint(String(external.revolutCheckoutProductionOrigin ?? ''), ['https:']),
+      revolutCheckoutSandboxOrigin: validEndpoint(String(external.revolutCheckoutSandboxOrigin ?? ''), ['https:']),
+    }
+  } catch {
+    throw new Error('config/endpoints.json lipsește sau este invalid')
+  }
+}
+
+const endpointConfig = loadEndpointConfig()
+
+type PaymentMode = 'disabled' | 'sandbox' | 'production'
+
+function paymentMode(): PaymentMode {
+  const value = (process.env.PAYMENT_MODE ?? 'disabled').trim().toLowerCase()
+  if (value !== 'disabled' && value !== 'sandbox' && value !== 'production') {
+    throw new Error('PAYMENT_MODE trebuie să fie disabled, sandbox sau production')
+  }
+  return value
+}
+
+function configuredMerchantApiVersion(mode: PaymentMode): string {
+  const value = (process.env.REVOLUT_MERCHANT_API_VERSION ?? '').trim()
+  if (mode !== 'disabled' && !/^20\d{2}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error('REVOLUT_MERCHANT_API_VERSION este obligatoriu și invalid')
+  }
+  return value
+}
+
+function configuredMerchantOrderExpiry(mode: PaymentMode): string {
+  const value = (process.env.REVOLUT_ORDER_EXPIRY ?? '').trim()
+  // Hosted Checkout accepts an ISO-8601 duration. Kelion deliberately limits
+  // product orders to minutes/hours so abandoned links cannot live forever.
+  if (mode !== 'disabled' && !/^PT(?:[1-9]\d{0,2}M|[1-9]\d?H)$/.test(value)) {
+    throw new Error('REVOLUT_ORDER_EXPIRY trebuie să fie o durată ISO-8601 în minute sau ore')
+  }
+  return value
+}
+
+const merchantPaymentMode = paymentMode()
+const merchantSecretKey = env(...ENV_ALIASES.revolutMerchantSecretKey)
+const merchantWebhookSecret = env(...ENV_ALIASES.revolutWebhookSigningSecret)
+const merchantContractVerified = process.env.PAYMENT_CONTRACT_VERIFIED === 'true'
+if (merchantPaymentMode !== 'disabled') {
+  if (!merchantContractVerified) throw new Error('plățile nu pot fi active fără PAYMENT_CONTRACT_VERIFIED=true')
+  if (merchantSecretKey.length < 32) throw new Error('REVOLUT_MERCHANT_SECRET_KEY lipsește sau este prea scurtă')
+  if (merchantWebhookSecret.length < 32) throw new Error('REVOLUT_WEBHOOK_SIGNING_SECRET lipsește sau este prea scurt')
+}
+
+function endpointOverride(envName: string, fallback: string, protocols: readonly string[]): string {
+  const value = process.env[envName]?.trim()
+  if (!value) return fallback
+  try {
+    return validEndpoint(value, protocols)
+  } catch {
+    throw new Error(`${envName} este invalid`)
+  }
+}
+
+function positiveInteger(name: string, raw: string | undefined, testFallback: number): number {
+  const value = raw?.trim()
+  if (!value) {
+    if (isProd) throw new Error(`${name} este obligatoriu în producție`)
+    return testFallback
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} trebuie să fie un întreg pozitiv`)
+  }
+  return parsed
+}
+
+function configuredPublicOrigin(): string {
+  const raw = (process.env.PUBLIC_APP_ORIGIN ?? process.env.FRONTEND_ORIGIN ?? productConfig.publicAppOrigin).trim()
+  if (!raw) return ''
+  try {
+    const u = new URL(raw)
+    const localDev = !isProd && u.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(u.hostname)
+    if ((u.protocol !== 'https:' && !localDev) || u.username || u.password || u.pathname !== '/' || u.search || u.hash) return ''
+    return u.origin
+  } catch {
+    return ''
+  }
+}
+
+function configuredAdminEmail(): string {
+  const value = env('ADMIN_EMAIL')
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .trim()
+    .toLowerCase()
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  if (!valid && isProd) throw new Error('ADMIN_EMAIL este obligatoriu și trebuie să fie un email valid')
+  return valid ? value : ''
+}
+
+function runtimeOpenAIKey(): string {
+  const key = env(...ENV_ALIASES.openaiKey)
+  // Organization Admin keys are privileged control-plane credentials. They
+  // are never a fallback for runtime inference or the Codex worker.
+  return key.startsWith('sk-proj-') ? key : ''
+}
+
+// Model IDs are deployment configuration. Production refuses to boot when a
+// rung is missing; this avoids silently changing capability or accounting when
+// a vendor alias changes. Tests/development may inject models explicitly.
+function configuredModel(envName: string, aliases: string[]): string {
+  const value = env(...aliases)
+  if (!value && isProd) throw new Error(`${envName} este obligatoriu în producție`)
+  return value
+}
+
+const modelRapidActiv = configuredModel('OPENAI_LUNA_MODEL', ENV_ALIASES.openaiLuna)
+const modelUnicActiv = configuredModel('OPENAI_MEDIUM_MODEL', ENV_ALIASES.openaiMedium)
+const modelProfundActiv = configuredModel('OPENAI_HEAVY_MODEL', ENV_ALIASES.openaiHeavy)
+
+export function modelProfundCod(): string { return modelProfundActiv }
+export function modelRapidDirect(): string { return `openai/${modelRapidActiv}` }
+export function modelProfundDirect(): string { return `openai/${modelProfundActiv}` }
 
 export const config = {
   isProd,
   port: Number(process.env.PORT ?? 8080),
-  useLocalVosk: env(...ENV_ALIASES.useLocalVosk) === '1',
-  localVoskUrl: env(...ENV_ALIASES.localVoskUrl),
+  // În producție Caddy și aplicația folosesc aceeași rețea host. Ascultarea
+  // doar pe loopback împiedică ocolirea proxy-ului (și a antetelor sanitizate
+  // de el); în dezvoltare rămâne accesibilă din rețeaua locală/container.
+  bindHost: env('BIND_HOST') || (isProd ? '127.0.0.1' : '0.0.0.0'),
+  product: productConfig,
+  endpoints: {
+    ...endpointConfig,
+    binanceRestBase: endpointOverride('BINANCE_REST_BASE_URL', endpointConfig.binanceRestBase, ['https:']),
+    binanceWebSocketBase: endpointOverride('BINANCE_WS_BASE_URL', endpointConfig.binanceWebSocketBase, ['wss:']),
+    stooqBase: endpointOverride('STOOQ_BASE_URL', endpointConfig.stooqBase, ['https:']),
+    yahooFinanceBase: endpointOverride('YAHOO_FINANCE_BASE_URL', endpointConfig.yahooFinanceBase, ['https:']),
+  },
+  httpUserAgent: `${productConfig.appName}/${productConfig.appVersion} (+${productConfig.publicAppOrigin})`,
   google: {
     clientId: required('GOOGLE_CLIENT_ID'),
     clientSecret: required('GOOGLE_CLIENT_SECRET'),
     redirectUri: required('GOOGLE_REDIRECT_URI'),
   },
   sessionSecret: required('SESSION_SECRET'),
-  // OPUS PE VOCEA LIVE (owner, 12 aug: „fă Opus" — banda vocii pe 3G). OFF din
-  // start: cu flagul stins, calea vocii rămâne EXACT PCM-ul de azi (zero
-  // regresie). Pornit (`VOICE_OPUS=1`), hopul browser↔server se comprimă ~10×,
-  // cu cădere sigură pe PCM dacă browserul n-are WebCodecs sau codecul de server
-  // nu se încarcă. Serverul↔Google rămâne PCM (Gemini Live cere PCM) — dar aia e
-  // bandă de datacenter, nu 3G-ul omului.
+  /** Dedicated data-encryption secret; never derived from the cookie secret. */
+  googleTokenEncryptionKey: required('GOOGLE_TOKEN_ENCRYPTION_KEY'),
+  googleTokenEncryptionKeyId: (() => {
+    const kid = env('GOOGLE_TOKEN_ENCRYPTION_KEY_ID') || (isProd ? '' : 'local')
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(kid)) throw new Error('GOOGLE_TOKEN_ENCRYPTION_KEY_ID invalid')
+    return kid
+  })(),
+  googleTokenEncryptionPreviousKey: env(...ENV_ALIASES.googleTokenEncryptionPreviousKey),
+  googleTokenEncryptionPreviousKeyId: env('GOOGLE_TOKEN_ENCRYPTION_PREVIOUS_KEY_ID'),
+  session: {
+    absoluteTtlSeconds: positiveInteger(
+      'SESSION_ABSOLUTE_TTL_SECONDS',
+      process.env.SESSION_ABSOLUTE_TTL_SECONDS,
+      7 * 24 * 60 * 60,
+    ),
+    idleTtlSeconds: positiveInteger(
+      'SESSION_IDLE_TTL_SECONDS',
+      process.env.SESSION_IDLE_TTL_SECONDS,
+      24 * 60 * 60,
+    ),
+    touchIntervalSeconds: positiveInteger(
+      'SESSION_TOUCH_INTERVAL_SECONDS',
+      process.env.SESSION_TOUCH_INTERVAL_SECONDS,
+      5 * 60,
+    ),
+    maxActivePerAccount: positiveInteger(
+      'SESSION_MAX_ACTIVE_PER_ACCOUNT',
+      process.env.SESSION_MAX_ACTIVE_PER_ACCOUNT,
+      5,
+    ),
+    recentReauthSeconds: positiveInteger(
+      'SESSION_RECENT_REAUTH_SECONDS',
+      process.env.SESSION_RECENT_REAUTH_SECONDS,
+      10 * 60,
+    ),
+  },
+  nativeAuth: {
+    requestTtlSeconds: positiveInteger(
+      'NATIVE_AUTH_REQUEST_TTL_SECONDS',
+      process.env.NATIVE_AUTH_REQUEST_TTL_SECONDS,
+      10 * 60,
+    ),
+    exchangeTtlSeconds: positiveInteger(
+      'NATIVE_AUTH_EXCHANGE_TTL_SECONDS',
+      process.env.NATIVE_AUTH_EXCHANGE_TTL_SECONDS,
+      2 * 60,
+    ),
+    channelTicketTtlSeconds: (() => {
+      const seconds = positiveInteger(
+        'NATIVE_CHANNEL_TICKET_TTL_SECONDS',
+        process.env.NATIVE_CHANNEL_TICKET_TTL_SECONDS,
+        30,
+      )
+      if (seconds > 30) throw new Error('NATIVE_CHANNEL_TICKET_TTL_SECONDS trebuie să fie cel mult 30')
+      return seconds
+    })(),
+  },
+  offlineSync: {
+    maxTurns: positiveInteger(
+      'OFFLINE_SYNC_MAX_TURNS',
+      process.env.OFFLINE_SYNC_MAX_TURNS,
+      OFFLINE_SYNC_DEFAULT_MAX_TURNS,
+    ),
+    maxTextChars: positiveInteger(
+      'OFFLINE_SYNC_MAX_TEXT_CHARS',
+      process.env.OFFLINE_SYNC_MAX_TEXT_CHARS,
+      OFFLINE_SYNC_DEFAULT_MAX_TEXT_CHARS,
+    ),
+    maxAgeDays: positiveInteger('OFFLINE_SYNC_MAX_AGE_DAYS', process.env.OFFLINE_SYNC_MAX_AGE_DAYS, 30),
+    futureSkewSeconds: positiveInteger('OFFLINE_SYNC_FUTURE_SKEW_SECONDS', process.env.OFFLINE_SYNC_FUTURE_SKEW_SECONDS, 300),
+  },
+  // Optional Opus compression on the browser↔server hop.
   voiceOpus: (process.env.VOICE_OPUS ?? '') === '1',
-  // ── CREIER DUBLU (owner, 13 aug: „două creiere, o singură voce"; „e urgent ca
-  // kelion să lucreze real") ───────────────────────────────────────────────────
-  // Fața rapidă (flash) ține discuția caldă + primul cuvânt sub 1s; pe turele
-  // GRELE (inclusiv „ownerul cere o ACȚIUNE" — vezi `heavy` din chat.ts), creierul
-  // din spate = INTELIGENȚĂ REALĂ (Gemini Pro la thinking maxim,
-  // `gemini-3.1-pro-preview`, măsurat 20/20 pe cheia ownerului) — ăsta e leacul
-  // pentru „spune că face și nu execută / fabrică": un model care CHEAMĂ unealta,
-  // nu narează. PORNIT DIN START (owner, 13 aug): turele ușoare rămân pe flash
-  // (conversație caldă, latență mică), doar cele grele urcă pe creierul real. Se
-  // stinge cu `CREIER_DUBLU=0`; modelul e suprascriabil din env fără publicare.
-  // PLASĂ (chat.ts): dacă profundul se epuizează, tura cade O DATĂ pe flash — nu
-  // moare pe mesajul neutru. Etapa 2 (holder cald + orchestrarea vocii) rămâne.
+  vocalLiveIdleTimeoutSeconds: positiveInteger(
+    'VOCAL_LIVE_IDLE_TIMEOUT_SECONDS',
+    process.env.VOCAL_LIVE_IDLE_TIMEOUT_SECONDS,
+    10 * 60,
+  ),
+  // Model ladder (Luna → Terra → Sol) remains automatic and can be disabled
+  // only for diagnosis.
   creierDublu: (process.env.CREIER_DUBLU ?? '') !== '0',
-  // DEFAULT = modelul VALIDAT/viu (modelUnicCod), NU un ID hardcodat expirat.
-  // Owner, 13 aug: „creierul 2 nu e funcțional" — DOVADA: era `gemini-3.1-pro-preview`
-  // (versiunea 3.1), pe când modelul viu, validat automat, e 3.5. Deci pe turele
-  // grele (chat.ts) comuta pe un model EXPIRAT → pica → cădea tăcut pe flash →
-  // creierul 2 „mort", iar Kelion rămânea pe modelul slab care nu cheamă uneltele
-  // de admin. Acum profundul e MEREU un model care servește; gândirea grea vine din
-  // `reasoning:'high'` aplicat pe el. Suprascriabil din env (MODEL_CREIER_PROFUND)
-  // când există un Pro dedicat, valid.
   get modelCreierProfund(): string {
-    return process.env.MODEL_CREIER_PROFUND ?? modelUnicCod()
+    return modelProfundCod()
   },
   autonomyDailyMax: Math.max(1, Number(process.env.AUTONOMY_DAILY_MAX ?? '20') || 20),
   databaseUrl: env(...ENV_ALIASES.databaseUrl),
-  googleServiceAccountJson: env(...ENV_ALIASES.googleServiceAccountJson),
-  googleTtsKey: env(...ENV_ALIASES.googleTtsKey),
-  // Chirp 3 HD voice style — MALE in every language (Adrian, Aug 2: "voce
-  // masculina in orice limba"). Default Charon (male). services/tts.ts has a
-  // hard guard: any known FEMALE style is rewritten to Charon before the API.
-  ttsVoiceStyle: process.env.GOOGLE_TTS_VOICE ?? process.env.KELION_GOOGLE_CHIRP_TTS_STYLE ?? 'Charon',
+  openaiVoice: (process.env.OPENAI_VOICE ?? 'cedar').trim(), // hardcod-permis: voce OpenAI implicită, suprascrisă prin env
   serperKey: env(...ENV_ALIASES.serperKey),
   // (Câmpul `googleMapsKey` a fost ȘTERS — auditul admin, 3 aug: nu-l citea
   // NIMENI. mapsSearch/mapsDirections/geocode merg exclusiv pe Nominatim OSM
   // + OSRM, cu sau fără cheie; rândul lui din env-check împingea ownerul să
   // configureze o cheie fără niciun efect — încălcarea regulii #4.)
-  geminiKey: env(...ENV_ALIASES.geminiKey),
-  // (config.anthropicKey SCOS — owner, 16 aug: Fable/Anthropic a ieșit total.)
-  // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
-  julesKey: env(...ENV_ALIASES.julesKey),
-  // Devin — constructorul extern (owner, 20 aug). Cheia din env; org opțional.
-  devinKey: env(...ENV_ALIASES.devinKey),
-  devinOrgId: env(...ENV_ALIASES.devinOrgId),
-  // Creierul DIRECT (chat + VEDERE + AUDIO — Gemini e multimodal, un singur
-  // model face tot). 5 aug 2026: Adrian a RETRACTAT hibridul — „peste tot în
-  // aplicație pui modelul avansat". UN SINGUR creier = Gemini 3 Pro
-  // (`gemini-3.1-pro-preview`; `gemini-3-pro-preview` dă 404 — nu-i pe cheie).
-  // AMBELE câmpuri = Pro: NU mai citim GEMINI_MODEL (era treapta ușoară a
-  // hibridului retras — altfel env-ul vechi GEMINI_MODEL=flash de pe VPS ar
-  // readuce flash-ul pe chat). geminiDirect ridică plafonul de output pe 3.x
-  // (gândirea intră în maxOutputTokens). Vocea live rulează Pro prin CREIER
-  // (ureche→Pro→voce), deci „modelul avansat" e și pe voce. Un singur creier.
-  // GETTERI pe sursa unică (fără env): se aplică AUTOMAT peste tot; auto-upgrade-ul
-  // validat schimbă modelul într-un singur loc → se schimbă peste tot.
-  // DOUĂ SLOTURI (7 aug): `geminiModel` = conversația (RAPID, ~0,6s), iar
-  // `geminiModelGreu` = gândirea grea (azi = modelul unic `gemini-3.5-flash`,
-  // NU Pro — lot D a corectat rămășița). Bifurcația care le folosește
-  // există de mult în chat.ts (`heavy ? Greu : geminiModel`) — până azi ambele
-  // ramuri dădeau același model, deci era o bifurcație moartă. Acum e vie.
-  get geminiModel(): string {
-    return modelRapidCod()
+  // OpenAI is the only AI provider. ChatGPT/Codex subscription auth remains
+  // separate in the constructor worker and never supplies this API key.
+  openai: {
+    key: runtimeOpenAIKey(),
+    apiBaseUrl: endpointConfig.openaiApiBase,
+    // Workload roles are stable product semantics; concrete model IDs live in
+    // the deployment configuration and are validated without a source default.
+    luna: modelRapidActiv,
+    medium: modelUnicActiv,
+    heavy: modelProfundActiv,
+    realtime: env(...ENV_ALIASES.openaiRealtime),
+    realtimeTranscription: configuredModel(
+      'OPENAI_REALTIME_TRANSCRIPTION_MODEL',
+      ENV_ALIASES.openaiRealtimeTranscription,
+    ),
+    callTranscription: configuredModel(
+      'OPENAI_CALL_TRANSCRIPTION_MODEL',
+      ENV_ALIASES.openaiCallTranscription,
+    ),
+    tts: env(...ENV_ALIASES.openaiTts),
+    image: configuredModel('OPENAI_IMAGE_MODEL', ENV_ALIASES.openaiImage),
   },
-  get geminiModelGreu(): string {
-    return modelUnicCod()
+  codexWorker: {
+    enabled: codexWorkerEnabled,
+    // Secret exclusiv pentru HMAC-ul cozii interne. Nu este token Codex,
+    // ChatGPT sau GitHub și nu părăsește workerul/procesul web.
+    secret: constructorServiceSecret(ENV_ALIASES.codexWorkerSecret[0], codexWorkerEnabled),
+    taskUrl: (process.env.CODEX_TASK_URL ?? '').trim(),
+    taskId: (process.env.CODEX_WORKER_TASK_ID ?? '').trim(),
   },
-  // ── CREIERUL 2 (constructorul) = gemini-3.7-flash (DECIZIA ownerului, 14 aug:
-  // „a apărut 3.7… l-am verificat eu, pune-l la creierul 2") ─────────────────
-  // CHATUL rămâne pe modelul unic SIGILAT (3.5-flash) — auto-upgrade-ul l-a
-  // refuzat CORECT pe 3.7 acolo (poarta „toate probele sau nimic": 3.7 a picat
-  // „fără-invenție", 19/20 vs 20/20 — măsurat 14 aug cu proba-calitate).
-  // Ownerul l-a verificat el și l-a ales EXPLICIT pentru constructor, unde
-  // porțile de cod (7 porți + verdict pe mașină curată) prind oricum orice
-  // invenție. NU știe live (fără bidiGenerateContent — măsurat pe API): vocea
-  // nu-l atinge. Suprascriibil prin env (CONSTRUCTOR_GEMINI_MODEL).
-  get constructorGeminiModel(): string {
-    return process.env.CONSTRUCTOR_GEMINI_MODEL ?? 'gemini-3.7-flash'
+  constructorPublisher: {
+    enabled: constructorPublisherEnabled,
+    secret: constructorServiceSecret(
+      ENV_ALIASES.constructorPublisherSecret[0],
+      constructorPublisherEnabled,
+    ),
   },
-  // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
-  // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
-  // VIDEO_ALLOW_PAID=1, ca la constructor: nimic plătit din greșeală.
-  videoModel: process.env.VIDEO_MODEL ?? 'veo-3.1-fast-generate-preview',
+  constructorRelease: {
+    enabled: constructorReleaseEnabled,
+    secret: constructorServiceSecret(
+      ENV_ALIASES.constructorReleaseSecret[0],
+      constructorReleaseEnabled,
+    ),
+  },
+  browserWorker: {
+    socket: env('BROWSER_WORKER_SOCKET'),
+    secret: env(...ENV_ALIASES.browserWorkerSecret),
+  },
+  converterWorker: {
+    socket: env('CONVERTER_WORKER_SOCKET'),
+    secret: env(...ENV_ALIASES.converterWorkerSecret),
+  },
+  push: {
+    enabled: pushEnabled,
+    publicKey: pushPublicKey,
+    privateKey: pushPrivateKey,
+    endpointHosts: pushEndpointHosts,
+    maxSubscriptions: pushEnabled
+      ? positiveInteger('PUSH_MAX_SUBSCRIPTIONS', process.env.PUSH_MAX_SUBSCRIPTIONS, 5)
+      : 0,
+  },
+  revolutMerchant: {
+    mode: merchantPaymentMode,
+    enabled: merchantPaymentMode !== 'disabled',
+    contractVerified: merchantContractVerified,
+    secretKey: merchantSecretKey,
+    webhookSigningSecret: merchantWebhookSecret,
+    apiVersion: configuredMerchantApiVersion(merchantPaymentMode),
+    orderExpiry: configuredMerchantOrderExpiry(merchantPaymentMode),
+    apiBaseUrl: merchantPaymentMode === 'sandbox'
+      ? endpointConfig.revolutMerchantSandboxBase
+      : endpointConfig.revolutMerchantProductionBase,
+    checkoutOrigin: merchantPaymentMode === 'sandbox'
+      ? endpointConfig.revolutCheckoutSandboxOrigin
+      : endpointConfig.revolutCheckoutProductionOrigin,
+  },
+  release: {
+    candidateMode: process.env.RELEASE_CANDIDATE_MODE === '1',
+    activationFile: env('RELEASE_ACTIVATION_FILE'),
+    id: env('RELEASE_ID') || env('GIT_COMMIT_SHA'),
+  },
+  visitor: {
+    // Sunt politici de retenție/configurare operațională, nu constante ascunse
+    // în rută. În producție lipsa lor oprește boot-ul.
+    chatTtlSeconds: positiveInteger(
+      'VISITOR_CHAT_TTL_SECONDS',
+      env(...ENV_ALIASES.visitorChatTtlSeconds),
+      60 * 60,
+    ),
+    analyticsRetentionDays: positiveInteger(
+      'VISITOR_ANALYTICS_RETENTION_DAYS',
+      env(...ENV_ALIASES.visitorAnalyticsRetentionDays),
+      7,
+    ),
+  },
+  privacy: {
+    policyUpdated: required('PRIVACY_POLICY_UPDATED'),
+    controllerName: required('DATA_CONTROLLER_NAME'),
+    backupRetentionDays: positiveInteger(
+      'PRIVACY_BACKUP_RETENTION_DAYS',
+      process.env.PRIVACY_BACKUP_RETENTION_DAYS,
+      30,
+    ),
+    financialRetentionYears: positiveInteger(
+      'FINANCIAL_RETENTION_YEARS',
+      process.env.FINANCIAL_RETENTION_YEARS,
+      6,
+    ),
+    journalRetentionDays: positiveInteger(
+      'JOURNAL_RETENTION_DAYS',
+      process.env.JOURNAL_RETENTION_DAYS,
+      30,
+    ),
+    mediaRetentionDays: positiveInteger(
+      'MEDIA_RETENTION_DAYS',
+      process.env.MEDIA_RETENTION_DAYS,
+      30,
+    ),
+  },
+  videoModel: (process.env.OPENAI_VIDEO_MODEL ?? '').trim(),
+  videoPriceUsdMicrosPerSecond: positiveInteger(
+    'OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND',
+    process.env.OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND,
+    100_000,
+  ),
+  // Provider-announced permanent API shutdown. It remains configurable so a
+  // newly announced earlier cutoff can disable spend without a code release.
+  videoShutdownAt: (() => {
+    const raw = (process.env.OPENAI_VIDEO_SHUTDOWN_AT ?? '2026-09-24T00:00:00.000Z').trim()
+    const timestamp = Date.parse(raw)
+    if (!Number.isFinite(timestamp)) throw new Error('OPENAI_VIDEO_SHUTDOWN_AT trebuie să fie o dată ISO validă')
+    return timestamp
+  })(),
   videoAllowPaid: process.env.VIDEO_ALLOW_PAID === '1',
-  // ── CREIERUL = GEMINI DIRECT, UNIC (Adrian, 3 aug, ordin repetat: „openrouter
-  // și open ai scos din toată aplicația") ────────────────────────────────────
-  // OpenRouter și OpenAI au fost EXTIRPATE complet (3 aug): creierul e Gemini
-  // direct pe cheia Tier 2 a ownerului, căutarea e Serper, vocea e Google
-  // Chirp 3 (urechi + gură). Treptele de mai jos sunt SINGURELE modele ale
-  // creierului; toate poartă prefixul `google-direct/` (vezi geminiDirect.ts).
-  // LACĂT ÎN COD (Adrian, 3 aug: „blochează-le cu cod ca să nu se mai schimbe
-  // la orice update"): default sigur = Gemini, în cod, nu în env (care se poate
-  // reseta). Lacătul (scripts/verifica-gemini.mjs + lacat.test.ts) pinuiește
-  // toate trei treptele.
-  brain: {
-    // 4 aug 2026: toate treptele mutate de la generația 2.5 la 'gemini-3.6-flash'
-    // — cea mai nouă, mai rapidă, mai ieftină, și măsurat multimodală (text +
-    // apel de unealtă + imagine + audio, toate 200✓ pe cheia ownerului). „Tot pe
-    // cel mai evoluat" (ordinul ownerului, 4 aug). Rămâne Gemini direct (lacătul).
-    // 6 aug: SIGILAT pe sursa unică, FĂRĂ env — toate treptele = același model unic
-    // Nu mai există split flash/pro, nici suprascriere din env. Getteri →
-    // auto-upgrade-ul se aplică peste tot instant.
-    // 7 aug: treapta de CHAT trece pe modelul RAPID (măsurat: 0,6s vs 3,6–45s),
-    // iar `work`/`top` rămân pe modelul UNIC (azi `gemini-3.5-flash`, nu Pro —
-    // lot D) — acolo se face gândirea grea, agenții cu efort înalt, autonomia
-    // și escaladarea `ask_brain` din chat.
-    get chatDefault(): string {
-      return modelRapidDirect()
-    },
-    get workDefault(): string {
-      return modelUnicDirect()
-    },
-    // PROFUND (22 aug): treapta a 3-a — Pro pentru raționament complex, escaladat
-    // automat la dificultate mare sau prin ask_brain.
-    get profundDefault(): string {
-      return modelProfundDirect()
-    },
-    // ULTRA (22 aug): treapta a 4-a — pentru probleme maximale. Env-configurable.
-    get ultraDefault(): string {
-      return modelUltraDirect()
-    },
-    get topDefault(): string {
-      return modelProfundDirect()
-    },
-  },
-  // ── COLLECTING MONEY THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
-  // completely and Pro comes in") ────────────────────────────────────────────
-  // The Revolut Pro account has no Merchant API (that's Business only), so
-  // there's no webhook to credit the user by itself. What it DOES have is a
-  // payment link hosted by Revolut: the user pays there, and the credits are
-  // granted by the admin from the panel (`grantCredit`, which already
-  // existed).
-  //
-  // The link lives in env, not in code: it changes without publishing, and
-  // if it's missing the button SAYS it's not configured, instead of taking
-  // the user into a void.
-  revolut: {
-    payLink: (process.env.REVOLUT_PAY_LINK ?? '').trim(),
-    // The Gmail label where the owner routes Revolut payment emails; the
-    // email-reader searches ONLY here (Adrian, 3 aug: „acolo trebuie să ajungă
-    // emailurile și de acolo să se caute").
-    mailLabel: (process.env.REVOLUT_MAIL_LABEL ?? 'Revolut_kelionai_plati').trim(),
-  },
-  // ── READING TRANSACTIONS FROM THE REVOLUT ACCOUNT (Open Banking) ─────────
-  // How the app finds out a user paid, when Revolut Pro has no webhook: it
-  // looks at the account transactions and searches for the code in the
-  // reference.
-  // Provider: ENABLE BANKING (enablebanking.com) — GoCardless/Nordigen closed
-  // new accounts at the end of 2025, so it's dead for us (verified 31 Jul
-  // 2026). The Enable Banking account is free in "Restricted Production" mode
-  // (reading your own accounts). READ-ONLY ACCESS — no money moves.
-  //
-  // Authentication is via RS256 JWT: `appId` = the application id from the
-  // Control Panel, `privateKeyB64` = the RSA private key as base64 (one line
-  // — env files can't hold multi-line PEM). `accountUid` may be missing: the
-  // account is linked through PSD2 consent and saved in kv_state (see
-  // openBanking.ts).
-  enableBanking: {
-    appId: (process.env.ENABLE_BANKING_APP_ID ?? '').trim(),
-    privateKeyB64: (process.env.ENABLE_BANKING_PRIVATE_KEY_B64 ?? '').trim(),
-    accountUid: (process.env.ENABLE_BANKING_ACCOUNT_UID ?? '').trim(),
-    aspspName: (process.env.ENABLE_BANKING_ASPSP_NAME ?? 'Revolut').trim(),
-    aspspCountry: (process.env.ENABLE_BANKING_ASPSP_COUNTRY ?? 'GB').trim(),
-  },
-  // ── THE APP'S MONEY (Revolut + unique code; Stripe is HISTORY — 31 Jul
-  // 2026) ───────────────────────────────────────────────────────────────────
-  // Only the wallet math lives here: display currency, what one credit is
-  // worth, and the top-up split (75% user credits / 25% admin fund that pays
-  // the AI keys). Collection and payment detection: Revolut (payLink) + the
-  // Enable Banking reader in openBanking.ts. No processor between the user
-  // and Adrian's money.
+  // Money policy and provider-expense accounting are separate. Customer
+  // wallets use integer GBP minor units; external provider usage uses a
+  // distinct USD-micros ledger and is never debited as though it were GBP.
   billing: {
-    currency: (process.env.BILLING_CURRENCY ?? 'gbp').toLowerCase(),
-    userShare: Number(process.env.USER_SHARE ?? 0.75),
-    creditValue: Number(process.env.CREDIT_VALUE ?? 0.1),
+    // Versioned product policy. Money is represented only as integer pennies;
+    // provider expense uses a separate USD-micros ledger.
+    policyVersion: BILLING_POLICY.version,
+    currency: BILLING_POLICY.currency,
+    minorUnit: BILLING_POLICY.minorUnit,
+    userShareBps: BILLING_POLICY.userShareBps,
+    marginShareBps: BILLING_POLICY.marginShareBps,
+    creditMinor: positiveInteger('CREDIT_PRICE_MINOR', process.env.CREDIT_PRICE_MINOR, 10),
+    chatTurnMinor: positiveInteger('CHAT_TURN_PRICE_MINOR', process.env.CHAT_TURN_PRICE_MINOR, 1),
+    voiceMinuteMinor: positiveInteger('VOICE_LIVE_MINUTE_PRICE_MINOR', process.env.VOICE_LIVE_MINUTE_PRICE_MINOR, 2),
+    callUtteranceMinor: positiveInteger(
+      'CALL_UTTERANCE_PRICE_MINOR',
+      process.env.CALL_UTTERANCE_PRICE_MINOR,
+      1,
+    ),
     // ── THE TOP-UP RULES, AS OWNER SETTINGS (not buried constants) ──────────
     // Adrian, 24 Jul: "first top-up = £20 minimum (brain activation), then any
     // multiple of £5". Adrian, Aug 1 (auto top-up): the prepared pack obeys the
@@ -410,15 +640,15 @@ export const config = {
     // inside routes/billing.ts — money values written in code, invisible to
     // the man whose money they move. They are OWNER DECISIONS, so they live
     // here: documented, env-editable without a deploy.
-    firstTopupMin: Number(process.env.BILLING_FIRST_TOPUP_MIN ?? 20),
-    topupStep: Number(process.env.BILLING_TOPUP_STEP ?? 5),
-    topupMin: Number(process.env.BILLING_TOPUP_MIN ?? 5),
-    topupMax: Number(process.env.BILLING_TOPUP_MAX ?? 500),
+    firstTopupMinMinor: positiveInteger('BILLING_FIRST_TOPUP_MIN_MINOR', process.env.BILLING_FIRST_TOPUP_MIN_MINOR, 2_000),
+    topupStepMinor: positiveInteger('BILLING_TOPUP_STEP_MINOR', process.env.BILLING_TOPUP_STEP_MINOR, 500),
+    topupMinMinor: positiveInteger('BILLING_TOPUP_MIN_MINOR', process.env.BILLING_TOPUP_MIN_MINOR, 500),
+    topupMaxMinor: positiveInteger('BILLING_TOPUP_MAX_MINOR', process.env.BILLING_TOPUP_MAX_MINOR, 50_000),
     // The auto top-up DEFAULTS a brand-new user starts from (threshold in
     // CREDITS, amount in display currency). Same rule: owner settings, not
     // magic numbers inside db.ts.
-    autoRechargeThreshold: Number(process.env.AUTORECHARGE_DEFAULT_THRESHOLD ?? 20),
-    autoRechargeAmount: Number(process.env.AUTORECHARGE_DEFAULT_AMOUNT ?? 10),
+    lowCreditThresholdMinor: positiveInteger('LOW_CREDIT_THRESHOLD_MINOR', process.env.LOW_CREDIT_THRESHOLD_MINOR, 200),
+    suggestedTopupMinor: positiveInteger('LOW_CREDIT_TOPUP_MINOR', process.env.LOW_CREDIT_TOPUP_MINOR, 1_000),
     // The USD→£ hand rate was deleted: the only place that used it converted
     // REAL provider costs (USD) into £ with a hand-written rate — a converted
     // figure presented as a measured one (the exact fabrication punga.ts
@@ -429,49 +659,41 @@ export const config = {
     imapPort: Number(process.env.MAIL_IMAP_PORT ?? 993),
     smtpHost: process.env.MAIL_SMTP_HOST ?? 'mail.privateemail.com',
     smtpPort: Number(process.env.MAIL_SMTP_PORT ?? 465),
-    user: (process.env.MAIL_USER ?? 'contact@kelionai.app').trim(),
+    user: (process.env.MAIL_USER ?? productConfig.supportEmail).trim(),
     pass: env(...ENV_ALIASES.mailPass),
-    forwardTo: (process.env.MAIL_FORWARD_TO ?? process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com')
+    forwardTo: (process.env.MAIL_FORWARD_TO ?? process.env.ADMIN_EMAIL ?? '')
       .trim()
       .toLowerCase(),
   },
   openSignup: (process.env.OPEN_SIGNUP ?? '1') !== '0',
-  allowlist: (process.env.ALLOWLIST ?? 'adrianenc11@gmail.com')
+  allowlist: (process.env.ALLOWLIST ?? '')
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
-  // .trim() OBLIGATORIU (9 aug): era SINGURUL câmp de email fără trim — un
-  // spațiu la coada lui ADMIN_EMAIL (env-ul e scris de mașini) făcea tăcut din
-  // owner un „customer". Vecinii (allowlist, mail.*) trimau deja toți.
-  // + ghilimelele se dezbracă (9 aug, „flux admin 403 — trebuie 200"):
-  // `docker --env-file` NU scoate ghilimelele — ADMIN_EMAIL="adrian…" rămânea
-  // cu ele în valoare și rolul ieșea „customer" cu sesiune perfect validă.
-  adminEmail: ((): string => {
-    const curatat = (process.env.ADMIN_EMAIL ?? '')
-      .trim()
-      .replace(/^["']+|["']+$/g, '')
-      .trim()
-      .toLowerCase()
-    // GOL după curățare = implicitul domnește (audit 9 aug, măsurat cu tsx pe
-    // modulul real): `ADMIN_EMAIL=` sau `ADMIN_EMAIL=""` treceau de `??` și
-    // lăsau adminEmail='' → ownerul „customer" cu sesiune perfect validă.
-    // O valoare goală nu e o alegere de configurare — e o linie stricată.
-    return curatat || 'adrianenc11@gmail.com'
-  })(),
-  bridgeSecret: env(...ENV_ALIASES.bridgeSecret),
+  // A single normalized Google identity grants admin authority and tariff
+  // exemption. Production fails closed when it is absent or malformed.
+  adminEmail: configuredAdminEmail(),
   githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
-  githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),
+  githubRepo: (process.env.GITHUB_REPO ?? productConfig.githubRepository).trim(),
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  /** Canonical browser-facing origin used for OAuth redirects. Empty means
+   * misconfigured; callers must fail closed instead of deriving it from Host. */
+  publicOrigin: configuredPublicOrigin(),
   geo: {
-    nominatimBaseUrl: (process.env.NOMINATIM_BASE_URL ?? 'https://nominatim.openstreetmap.org').replace(/\/+$/, ''),
-    osrmRoutingUrl: (process.env.OSRM_ROUTING_URL ?? 'https://router.project-osrm.org/route/v1/driving').replace(/\/+$/, ''),
+    nominatimBaseUrl: endpointOverride('NOMINATIM_BASE_URL', endpointConfig.nominatimApiBase, ['https:']),
+    osrmRoutingUrl: endpointOverride('OSRM_ROUTING_URL', endpointConfig.osrmRoutingBase, ['https:']),
   },
-  // OLLAMA (22 aug): config servit frontend-ului prin /api/ollama/config.
-  // LEGEA ANTI-HARDCODARE: modelul + gazda vin din env, nu hardcodate în FE.
-  constructorOllamaModel: (process.env.CONSTRUCTOR_OLLAMA_MODEL ?? 'qwen3-coder:30b').trim(), // hardcod-permis: modelul free implicit pe VPS, suprascris de env
-  ollamaApiBase: (process.env.OLLAMA_API_BASE ?? 'http://127.0.0.1:11434').trim(), // hardcod-permis: gazda Ollama LOCALĂ implicită pe VPS, suprascrisă de env
 } as const
+
+if (Boolean(config.googleTokenEncryptionPreviousKey) !== Boolean(config.googleTokenEncryptionPreviousKeyId)) {
+  throw new Error('cheia Google anterioară și identificatorul ei trebuie configurate împreună')
+}
+if (config.googleTokenEncryptionPreviousKeyId
+  && (!/^[A-Za-z0-9_-]{1,32}$/.test(config.googleTokenEncryptionPreviousKeyId)
+    || config.googleTokenEncryptionPreviousKeyId === config.googleTokenEncryptionKeyId)) {
+  throw new Error('GOOGLE_TOKEN_ENCRYPTION_PREVIOUS_KEY_ID invalid')
+}
 
 export function isAllowed(email: string): boolean {
   return config.openSignup || config.allowlist.includes(email.toLowerCase())

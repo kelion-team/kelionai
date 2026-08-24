@@ -3,14 +3,14 @@
 // Din jurnalul lui, de două ori la rând, pe două ture diferite:
 //
 //     [CHAT-IN] audio=da „"
-//     [TIMP] tura …: creier=google-direct/gemini-3.5-flash-lite, total=1619ms
+//     [TIMP] tura …: creier=configured, total=1619ms
 //     [VOCE] tura …: creierul a decis că NU i se vorbea — tăcere
 //
 // Adică: fraza AJUNGE la creier, creierul RĂSPUNDE în 1,6 secunde, și apoi
 // hotărăște că nu lui i se vorbea. Omul vorbește și nu se întâmplă nimic.
 //
 // Pe 7 aug, poarta deterministă de nume a fost SCOASĂ de pe client — trezirea a
-// devenit 100% judecata modelului pe audio brut. În AI-HANDOFF §13 s-a scris
+// devenit 100% judecata modelului pe audio brut. În istoricul proiectului s-a scris
 // atunci, negru pe alb, riscul: „un fals <TAC/> poate înghiți tăcut o frază
 // adresată; proba e testul ownerului". Testul lui l-a confirmat.
 //

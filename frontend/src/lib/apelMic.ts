@@ -6,6 +6,7 @@
 // MediaRecorder pentru fiecare frază. Independent de vocea cu Kelion (aia se
 // suspendă cât ești în apel — vezi ChatPanel), deci nu se ceartă două microfoane.
 import { openMicGraph } from './audioGraph'
+import { shouldSplitCallUtterance } from './callMedia'
 
 export interface CapturaApel {
   opreste(): void
@@ -46,7 +47,7 @@ export async function pornesteCapturaApel(
   let rec: MediaRecorder | null = null
   let chunks: Blob[] = []
   let vorbeste = false
-  let startLa = 0
+  let recordingStartedAt = 0
   let ultimSunet = 0
   let raf = 0
   let oprit = false
@@ -65,11 +66,13 @@ export async function pornesteCapturaApel(
       }
     }
     const recLocal = rec
+    const startedAt = performance.now()
+    recordingStartedAt = startedAt
     recLocal.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunks.push(e.data)
     }
     recLocal.onstop = () => {
-      const durata = performance.now() - startLa
+      const durata = performance.now() - startedAt
       const tip = (recLocal.mimeType || mime || 'audio/webm').split(';')[0]
       const blob = new Blob(chunks, { type: recLocal.mimeType || mime || 'audio/webm' })
       chunks = []
@@ -82,7 +85,6 @@ export async function pornesteCapturaApel(
       }
       fr.readAsDataURL(blob)
     }
-    startLa = performance.now()
     try {
       recLocal.start()
     } catch {
@@ -114,6 +116,12 @@ export async function pornesteCapturaApel(
         porneceRec()
       }
       ultimSunet = now
+      if (rec?.state === 'recording' && shouldSplitCallUtterance(recordingStartedAt, now)) {
+        // A continuous speaker is split into bounded phrases instead of
+        // growing one unbounded WebM blob until silence finally arrives.
+        vorbeste = false
+        opresteRec()
+      }
     } else if (vorbeste && now - ultimSunet > SILENCE_MS) {
       vorbeste = false
       opresteRec()

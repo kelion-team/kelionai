@@ -1,6 +1,6 @@
 // ACADEMIC PRONUNCIATION (Adrian, 10 Jul: "academic mode — technical terms,
-// absolutely everything"). Chirp 3 HD reads the raw text and often butchers
-// technical acronyms. Here, right before synthesis, we respell a CURATED set
+// absolutely everything"). Speech engines can mispronounce technical acronyms.
+// Here, right before synthesis, we respell a CURATED set
 // of technical acronyms letter-by-letter in the target language, so they are
 // pronounced correctly, academically. It is a PURE text→voice layer: it does
 // NOT touch the microphone / voice detection, so it cannot break listening.
@@ -29,7 +29,7 @@ const LETTER_SOUNDS: Record<string, Record<string, string>> = {
   },
 }
 
-// Technical acronyms Chirp usually butchers — spoken letter by letter.
+// Technical acronyms speech engines often mispronounce — spoken letter by letter.
 // The ambiguous TWO-letter ones, normally read AS WORDS (OK, AI, IT, OS, GO,
 // ID, PC, TV) are deliberately left out, so we don't mutilate them. LIKEWISE
 // the uppercase tokens that ARE also common words (PIN, SIM, ROM, RAM, GIF,
@@ -49,7 +49,7 @@ const TECH_ACRONYMS = new Set([
 ])
 
 // ── TEMPERATURES (Adrian, Aug 2 — live bug: the mouth said „27°C" RAW) ─────
-// Chirp 3 HD reads „27°C" as a mutilated „twenty-seven-see" / drops the unit.
+// Speech engines may read „27°C" as „twenty-seven-see" or drop the unit.
 // The fix is textual: „27°C" → „27 de grade Celsius" (ro) / „27 degrees
 // Celsius" (en) BEFORE synthesis, so the model reads an ordinary sentence.
 // Romanian agreement: 1 → „grad", 2–19 → „grade", everything else (0, 20+,
@@ -84,8 +84,7 @@ function pronounceTemperatures(text: string, langBase: string): string {
 function spellOut(word: string, table: Record<string, string>): string {
   const parts: string[] = []
   for (const ch of word) {
-    // Letter → its name in the target language; digit → we leave it (Chirp
-    // reads it as a number); anything else stays in place.
+    // Letter → its name in the target language; digits and punctuation stay in place.
     parts.push(table[ch] ?? ch)
   }
   return parts.join(' ')
@@ -93,7 +92,7 @@ function spellOut(word: string, table: Record<string, string>): string {
 
 /**
  * Respell known technical acronyms letter-by-letter for the target language so
- * Chirp 3 HD pronounces them correctly. `langBase` is the 2-letter code (e.g.
+ * a speech engine can pronounce them consistently. `langBase` is the 2-letter code (e.g.
  * "ro", "en"). Whole-word, curated matches only — everything else is untouched.
  */
 export function academicPronounce(text: string, langBase: string): string {
@@ -105,8 +104,8 @@ export function academicPronounce(text: string, langBase: string): string {
   const withTemperatures = pronounceTemperatures(text, langBase)
   // Only UPPERCASE tokens (2–8 characters, letters+digits), cleanly delimited.
   return withTemperatures.replace(/\b[A-Z][A-Z0-9]{1,7}\b/g, (m) => {
-    // Common word (PIN, SIM, ROM, GIF, RAM…) → we leave it INTACT: Chirp
-    // reads it as a normal word, not letter-by-letter. Otherwise the TTS
+    // Common word (PIN, SIM, ROM, GIF, RAM…) → leave it intact so the speech
+    // engine reads it as a normal word, not letter-by-letter. Otherwise TTS
     // spoke "stray letters, cut, out of context" (reported bug).
     if (COMMON_WORDS.has(m)) return m
     const lettersOnly = m.replace(/[0-9]/g, '')

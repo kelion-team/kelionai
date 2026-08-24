@@ -1,12 +1,5 @@
-// ── GURA DE SIGURANȚĂ: vocea browserului (Web Speech API) ────────────────────
-// Owner, 20 aug: „chatul audio inexistent". Măsurat în cod: pe turele SCRISE (și
-// offline) gura reală poate rămâne MUTĂ — sesiunea live implicită (Gemini Live)
-// NU rostește textul scris (`rvLiveRef` e null, deci `feedSpeech` nu are ce cânta),
-// iar vocea Chirp de pe server vine doar dacă serverul chiar o trimite. Când NIMIC
-// nu a sunat, răspunsul rămânea tăcut. Aici e plasa: dacă, după ce răspunsul e gata,
-// n-a rostit nimeni nimic, îl rostește vocea NATIVĂ a browserului — mereu prezentă,
-// fără rețea, fără cost. Nu înlocuiește Chirp/Live; e doar ultima redută, ca omul să
-// AUDĂ răspunsul de fiecare dată. Strat pur, best-effort — nu aruncă niciodată.
+// Fallback vocal local. Folosește exclusiv voci marcate `localService` de browser;
+// o voce remote sau implicită nu este disponibilitate demonstrată în avion.
 
 import type { Lang } from './i18n'
 
@@ -28,41 +21,81 @@ function sinteza(): SpeechSynthesis | null {
   return s ?? null
 }
 
+export interface LocalSpeechHooks {
+  onStart?: () => void
+  onEnd?: () => void
+}
+
+// `speechSynthesis.cancel()` nu garantează un eveniment `end` în toate
+// browserele. Păstrăm finalizatorul separat ca urechea să fie dezmuțită sigur
+// inclusiv la barge-in, eroare sau o rostire înlocuită de alta.
+let terminaRostireaActiva: (() => void) | null = null
+
 /** Alege o voce care se potrivește limbii (ex. `ro`), altfel una cu prefixul corect,
  *  altfel `null` (motorul folosește vocea implicită). PURĂ pe lista dată — testabilă. */
 export function alegeVoce(voci: SpeechSynthesisVoice[], lang: Lang): SpeechSynthesisVoice | null {
   const eticheta = ETICHETA_VOCE[lang]
   const prefix = lang + '-'
+  const locale = voci.filter((voice) => voice.localService === true)
   return (
-    voci.find((v) => v.lang === eticheta) ||
-    voci.find((v) => v.lang?.toLowerCase().startsWith(prefix)) ||
-    voci.find((v) => v.lang?.toLowerCase().startsWith(lang)) ||
+    locale.find((v) => v.lang === eticheta) ||
+    locale.find((v) => v.lang?.toLowerCase().startsWith(prefix)) ||
+    locale.find((v) => v.lang?.toLowerCase().startsWith(lang)) ||
     null
   )
 }
 
+export function voceLocalaVorbeste(): boolean {
+  return terminaRostireaActiva !== null
+}
+
+/** Disponibilitate reală pentru limba curentă, fără a selecta o voce remote. */
+export function voceLocalaDisponibila(lang: Lang): boolean {
+  const speech = sinteza()
+  return speech ? alegeVoce(speech.getVoices(), lang) !== null : false
+}
+
 /** Rostește textul cu vocea browserului, în limba userului. Oprește orice rostire
  *  anterioară (o singură gură). Best-effort: dacă API-ul lipsește, nu face nimic. */
-export function vorbesteLocal(text: string, lang: Lang): void {
+export function vorbesteLocal(text: string, lang: Lang, hooks: LocalSpeechHooks = {}): boolean {
   const s = sinteza()
-  if (!s || !text.trim()) return
+  if (!s || !text.trim()) return false
   try {
-    s.cancel() // o singură voce — taie ce era în coadă
+    opresteVoceLocal() // o singură voce — taie ce era în coadă
     const u = new SpeechSynthesisUtterance(text)
     u.lang = ETICHETA_VOCE[lang] || 'en-US'
     const voce = alegeVoce(s.getVoices(), lang)
-    if (voce) u.voice = voce
+    if (!voce) return false
+    u.voice = voce
+    let terminata = false
+    const termina = (): void => {
+      if (terminata) return
+      terminata = true
+      if (terminaRostireaActiva === termina) terminaRostireaActiva = null
+      hooks.onEnd?.()
+    }
+    terminaRostireaActiva = termina
+    u.onstart = () => hooks.onStart?.()
+    u.onend = termina
+    u.onerror = termina
     s.speak(u)
+    return true
   } catch {
+    terminaRostireaActiva?.()
     /* motor de voce indisponibil — tăcere, nu eroare */
+    return false
   }
 }
 
 /** Taie vocea browserului (barge-in / tură nouă / stop). Best-effort. */
 export function opresteVoceLocal(): void {
+  const termina = terminaRostireaActiva
+  terminaRostireaActiva = null
   try {
     sinteza()?.cancel()
   } catch {
     /* nimic de oprit */
+  } finally {
+    termina?.()
   }
 }

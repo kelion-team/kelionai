@@ -1,12 +1,6 @@
-// ── P21: URECHEA SE DESCHIDE SINGURĂ LA PORNIREA APLICAȚIEI (owner, 15 aug,
-// verbatim: „cind porneste aplicatia si mic s-a activat se deschide imediat si
-// urechea setata pe limba default daca e user nou sau limba setata pe user,
-// e facuta asta dar nu merge, cauta si repara")
-//
-// Lanțul întreg, verigă cu verigă — fiecare a fost cândva ruptă și reparată;
-// lacătele de aici le țin pe toate pe loc. Ce NU se poate proba de aici e
-// comportamentul browserului viu (permisiunea microfonului) — aia rămâne proba
-// live a ownerului; codul de dedesubt e însă întreg și încuiat.
+// Microfonul pornește numai după intenția explicită a persoanei. După aceea,
+// revenirea în tab poate reconecta sesiunea dorită, fără a reactiva un microfon
+// oprit manual.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -19,18 +13,20 @@ const panou = sursa('../../frontend/src/components/ChatPanel.tsx')
 const vocal = sursa('../../frontend/src/lib/vocalLive.ts')
 const ruta = sursa('./routes/vocalLive.ts')
 
-describe('P21 — veriga 1: urechea se ARMEAZĂ singură la pornire', () => {
-  it('pornirea vine la kelion:avatar-ready (threadul liber), cu plasă la 4s', () => {
-    expect(panou).toMatch(/addEventListener\('kelion:avatar-ready', arm, \{ once: true \}\)/)
-    expect(panou).toMatch(/window\.setTimeout\(arm, 4000\)/)
+describe('P21 — veriga 1: urechea pornește numai după intenție', () => {
+  it('nu există auto-start la avatar sau la un temporizator de pornire', () => {
+    expect(panou).not.toMatch(/addEventListener\('kelion:avatar-ready'/)
+    expect(panou).not.toMatch(/setTimeout\(arm, 4000\)/)
+    expect(panou).toMatch(/const micManualOffRef = useRef\(true\)/)
   })
 
-  it('revenirea în tab re-armează urechea (visibilitychange)', () => {
+  it('revenirea în tab reconectează numai o ureche pornită explicit', () => {
+    expect(panou).toMatch(/document\.visibilityState === 'visible' && !micManualOffRef\.current[\s\S]{0,100}ensureMicRef\.current\(\)/)
     expect(panou).toMatch(/document\.addEventListener\('visibilitychange', onVisible\)/)
   })
 
   it('oprirea MANUALĂ e respectată — nimic nu pornește peste alegerea omului', () => {
-    expect(panou).toMatch(/if \(micRef\.current \|\| micStartingRef\.current \|\| micManualOffRef\.current\) return/)
+    expect(panou).toMatch(/async function ensureMic\(\)[\s\S]{0,260}vlRef\.current \|\|[\s\S]{0,100}micStartingRef\.current \|\|[\s\S]{0,100}micManualOffRef\.current \|\|[\s\S]{0,100}\)\s*return/)
   })
 })
 
@@ -48,7 +44,9 @@ describe('P21 — veriga 2: urechea deschisă chiar AUDE (contextul suspendat)',
 describe('P21 — veriga 3: limba urechii la deschidere (default pe user nou, a lui pe user setat)', () => {
   it('user NOU fără preferință → limba implicită a aplicației (en-US); adminul → română', () => {
     expect(ruta).toMatch(/limbaPin = 'en-US' \/\/ user nou → limba implicită a aplicației/)
-    expect(ruta).toMatch(/if \(user\.role === 'admin'\) limbaPin = 'ro-RO'/)
+    expect(ruta).toMatch(/const isAdminSession = esteAdminKelion\(user\.email\)/)
+    expect(ruta).toMatch(/if \(isAdminSession\) limbaPin = 'ro-RO'/)
+    expect(ruta).not.toMatch(/user\.role === 'admin'/)
   })
 
   it('userul cu limbă SETATĂ o primește pe a lui (preferința citită din DB)', () => {

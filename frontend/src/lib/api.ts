@@ -1,12 +1,15 @@
+import { bindClientStateToAccount, clearClientAccountScope } from './clientState'
+import { apiFetch, authUrl } from './transport'
+import { isNativeShell, logoutNativeSession, startNativeGoogleLogin } from './nativeAuth'
+
 export interface User {
   email: string
   name: string
   picture: string
   role: 'admin' | 'customer'
   locale: string
-  // True once the user has granted the heavy Google scopes via "Connect Google"
-  // (Gmail, Calendar, Drive, Tasks, Contacts). Login alone no longer grants them.
-  googleConnected?: boolean
+  /** UUID opac emis de server, folosit numai pentru izolarea stării locale. */
+  clientStorageId?: string
 }
 
 export interface MeResponse {
@@ -17,39 +20,66 @@ export interface MeResponse {
   offline?: boolean
 }
 
-// URMA ULTIMULUI USER LOGAT — ca un user care ERA logat și pierde semnalul (avion) să
-// intre în mod companion offline, nu să fie trimis la login (unde oricum nu poate,
-// n-are net). Offline NU expune date de cont (fără server/Google/memorie — vezi
-// creierLocal), iar la revenire serverul reconfirmă; deci e sigur.
+// Markerul permite numai companionul local. Nu persistă identitate, rol sau poză.
 const CHEIE_USER = 'kelion_last_user'
-function cacheazaUser(u: User | null): void {
+function cacheazaPrezenta(u: User | null): void {
   try {
-    if (u) localStorage.setItem(CHEIE_USER, JSON.stringify(u))
+    if (u) localStorage.setItem(CHEIE_USER, '1')
     else localStorage.removeItem(CHEIE_USER)
   } catch {
     /* storage indisponibil */
   }
 }
-export function userDinCache(): User | null {
+function userDinCache(): User | null {
   try {
     const raw = localStorage.getItem(CHEIE_USER)
-    return raw ? (JSON.parse(raw) as User) : null
+    if (!raw) return null
+    // Migrează orice cache vechi cu PII la markerul minimal.
+    if (raw !== '1') localStorage.setItem(CHEIE_USER, '1')
+    return {
+      email: '',
+      name: 'Offline',
+      picture: '',
+      role: 'customer',
+      locale: 'en',
+    }
   } catch {
     return null
   }
 }
 
+export async function forgetCachedUser(): Promise<void> {
+  cacheazaPrezenta(null)
+  await clearClientAccountScope()
+}
+
+/** Deschide numai companionul local, fără nicio încercare de rețea. */
+export function cachedOfflineMe(): MeResponse {
+  const cached = userDinCache()
+  return cached
+    ? { authenticated: true, user: cached, offline: true }
+    : { authenticated: false, offline: true }
+}
+
 export async function fetchMe(): Promise<MeResponse> {
   try {
-    const res = await fetch('/auth/me', { credentials: 'include' })
+    const res = await apiFetch('/auth/me')
     if (res.ok) {
       const me = (await res.json()) as MeResponse
-      cacheazaUser(me.authenticated && me.user ? me.user : null)
+      if (me.authenticated && me.user && !(await bindClientStateToAccount(me.user.clientStorageId ?? ''))) {
+        // Un răspuns incomplet nu are voie să distrugă coada contului cunoscut.
+        // Accesul online rămâne închis până când serverul furnizează UUID-ul opac.
+        cacheazaPrezenta(null)
+        return { authenticated: false }
+      }
+      cacheazaPrezenta(me.authenticated && me.user ? me.user : null)
       return me
     }
-    // Serverul a răspuns EXPLICIT „nu ești logat" → definitiv: curăță cache-ul.
+    // Sesiunea poate expira cât există ture offline. Ascundem imediat suprafețele
+    // autentificate, dar păstrăm namespace-ul opac până la logout/ștergere sau
+    // până când serverul confirmă un alt clientStorageId după reautentificare.
     if (res.status === 401 || res.status === 403) {
-      cacheazaUser(null)
+      cacheazaPrezenta(null)
       return { authenticated: false }
     }
     // Alt eșec de server (5xx/proxy) — nu e „nelogat"; cade pe cache ca la offline.
@@ -64,19 +94,19 @@ export async function fetchMe(): Promise<MeResponse> {
 }
 
 export function startGoogleLogin(): void {
-  window.location.href = '/auth/google/login'
+  if (isNativeShell()) {
+    void startNativeGoogleLogin().catch(() => window.dispatchEvent(new CustomEvent('kelion-native-auth-error')))
+    return
+  }
+  window.location.href = authUrl('/auth/google/login')
 }
-
-// "Connect Google services": incremental consent for the heavy scopes (Gmail,
-// Calendar, Drive, Tasks, Contacts). Only meaningful for a signed-in user; the
-// backend redirects to the login page otherwise.
-export function startGoogleConnect(): void {
-  window.location.href = '/auth/google/connect'
-}
-
 
 export async function logout(): Promise<void> {
-  cacheazaUser(null) // la logout, uită userul din cache (nu-l mai lăsa în companion offline)
-  await fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+  await forgetCachedUser()
+  if (await logoutNativeSession()) {
+    window.location.href = '/'
+    return
+  }
+  await apiFetch('/auth/logout', { method: 'POST' })
   window.location.href = '/'
 }

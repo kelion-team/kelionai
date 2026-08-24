@@ -87,8 +87,8 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
       // HIS VOICE, REMEMBERED ONLY FOR HIM (Adrian, 30 Jul). `null` = the
       // app's default voice.
       voice: await getVoicePref(user.email),
-      // VOCE UNICĂ CHIRP (3 aug — vocile OpenAI realtime extirpate): nu mai
-      // există listă de ales; lista goală ascunde picker-ul din UI.
+      // No selectable voice catalog is exposed. The empty list keeps older
+      // clients from rendering a non-functional picker.
       voices: [] as string[],
     })
   })
@@ -121,9 +121,8 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
 
     if (req.body?.voice !== undefined) {
       const v = req.body.voice
-      // VOCE UNICĂ CHIRP (3 aug — lista de voci OpenAI extirpată): singura
-      // valoare acceptată e null („vocea aplicației"). Un client vechi care
-      // trimite un nume de voce OpenAI primește 400, nu o preferință moartă.
+      // Only null (the application voice) is valid while no voice catalog is
+      // exposed. Reject stale client values instead of persisting dead prefs.
       if (v !== null) {
         return reply.code(400).send({ error: 'bad_request' })
       }

@@ -1,24 +1,9 @@
-import { modelUnicDirect, modelRapidDirect, modelProfundDirect, modelUltraDirect } from '../config.js'
-
 // ── CONTRACTUL CREIERULUI — tipuri + reguli PURE, fără rețea ─────────────────
-// (Extirparea totală OpenRouter + OpenAI, 3 aug — ordinul repetat al ownerului:
-// „openrouter și open ai scos din toată aplicația".)
-//
 // Aici trăiesc formele pe care TOT creierul le vorbește (mesaje, unelte,
 // rezultate) plus euristicile pure de rutare (dificultate, intenție de acțiune)
-// și rezolvarea modelului pe trepte. Istoric, formele au fost definite în
-// services/openrouter.ts (creierul de atunci); creierul e acum GEMINI DIRECT
-// unic (services/geminiDirect.ts), iar contractul — care nu a fost niciodată
-// specific unui furnizor — s-a mutat aici. Numele `Or*` rămân: sunt formatul
+// și rezolvarea modelului pe trepte. Contractul nu depinde de schema wire a
+// furnizorului. Numele `Or*` rămân: sunt formatul
 // „al casei" (stil OpenAI-chat), folosit în zeci de fișiere și teste.
-
-// 4 TREPTE (22 aug 2026, owner: „escaladări pe modele superioare"):
-//   chat = flash-lite (vorbă simplă, 0.6s)
-//   work = flash (gândire + unelte + vedere)
-//   profund = Pro (raționament complex, cod, strategie)
-//   ultra = env-configurable (probleme maximale)
-// 'top' rămâne ca alias pentru compatibilitate → profund.
-export type ModelTier = 'chat' | 'work' | 'profund' | 'ultra' | 'top'
 
 // ── THE CONTRACT OF A BRAIN CALL (Batch B) ────────────────────────────────────
 // A turn's knobs were written LITERALLY in 7 signatures. It wasn't negligence:
@@ -32,15 +17,19 @@ export interface BrainCallOpts {
   /** How "free" the response is (0 = strict, 1 = creative). */
   temperature?: number
   /** How much reasoning models think internally. */
-  reasoning?: 'low' | 'medium' | 'high'
+  reasoning?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   /** `required` = must call a tool; `auto` = decides on its own. */
   toolChoice?: 'auto' | 'required'
   /** When forcing a tool (`required`), restrict WHICH tools the model may pick
-   *  (Gemini `allowedFunctionNames`) — e.g. only the „doing" tools, never the
+   *  — e.g. only the „doing" tools, never the
    *  display-only ones, so a forced turn can't be satisfied with a fake card. */
   allowedFunctionNames?: string[]
   /** Custom timeout in milliseconds for the engine call. */
   timeoutMs?: number
+  /** Attribution for durable provider-usage metering. Product calls must carry
+   * this context; the adapter uses a system bucket only for unattributed
+   * maintenance probes. No prompt or response content is stored. */
+  usageContext?: { userEmail: string; surface: string }
 }
 
 // OCHII PE REZULTATUL UNEI UNELTE (9 aug, ownerul: „sistemul nu dă lui Kelion
@@ -54,16 +43,24 @@ export interface OrMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   // String for plain text; array for multimodal blocks in the house (OpenAI-chat)
   // format ({type:'text'|'image_url'|'audio_url'} blocks) — this is how the
-  // brain SEES pictures/camera and HEARS the raw voice (geminiDirect.ts maps
-  // them to inline_data).
+  // brain sees images. Raw audio is transcribed before the Responses call.
   content: string | { type: 'text'; text: string }[] | { type: string; [k: string]: unknown }[]
   // For the tool turn: the link to the call requested by the model.
   tool_call_id?: string
   tool_calls?: OrToolCall[]
+  /** Exact output items returned by Responses for a prior assistant turn.
+   * They are opaque transport state: forward them unchanged, never inspect,
+   * log, render or expose them to clients. This preserves encrypted reasoning
+   * when `store:false` is used and keeps function-call linkage protocol-correct. */
+  response_items?: ResponseCarryItem[]
 }
 
-// Tool in Anthropic format (as defined in chat.ts).
-export interface AnthropicTool {
+/** Opaque JSON item returned in `response.output`. The web process only
+ * carries these items to the next Responses request. */
+export type ResponseCarryItem = Record<string, unknown>
+
+// Provider-neutral function tool used by the internal orchestrator.
+export interface BrainTool {
   name: string
   description: string
   input_schema: Record<string, unknown>
@@ -73,66 +70,33 @@ export interface OrToolCall {
   id: string
   type: 'function'
   function: { name: string; arguments: string }
-  /** Semnătura de gândire Gemini 3.x (wo-msex5yey): modelul o atașează apelului
-   *  de unealtă și CERE s-o primească înapoi la replay — altfel HTTP 400
-   *  („Function call is missing a thought_signature"). Opțională: 2.5 n-o are. */
-  thoughtSignature?: string
 }
 
 export interface OrChatResult {
   text: string
   toolCalls: OrToolCall[]
-  costUsd: number
+  /** Financial cost is reconciled outside the web process from the official
+   * organization ledger. Absence means pending/unavailable, never zero. */
+  costUsd?: number
   model: string
   stop: string
+  responseId: string
+  serviceTier: string | null
   /** REAL token counts from the provider's `usage` (0 only when the provider
    *  didn't send them). Never hand-filled — an adapter that returns literal
    *  zeros here is fabricating a measurement. */
   inputTokens: number
   outputTokens: number
+  cachedInputTokens: number
+  reasoningOutputTokens: number
+  /** Exact `response.output`, retained only for the next model round. */
+  responseItems: ResponseCarryItem[]
 }
 
-// The image-generation result shape (produced by geminiImage in geminiDirect.ts;
+// The image-generation result shape (produced by the OpenAI image adapter;
 // consumed by image.ts). mime + bytes on success; a NAMED error otherwise —
 // never an invented success.
 export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: string }
-
-// ── REZOLVAREA MODELULUI PE TREPTE — GEMINI-ONLY ─────────────────────────────
-// Nu mai există catalog viu de furnizor: singurele modele ale creierului sunt
-// treptele Gemini din config.brain (toate `google-direct/…`). O alegere salvată
-// („wanted") e acceptată DOAR dacă e tot google-direct/* — orice altceva (id
-// vechi de OpenRouter rămas într-un KV, un id inventat) cade pe defaultul
-// treptei, și `fellBack` o spune (o înlocuire tăcută de creier e exact tiparul
-// interzis de regula #1).
-
-/** Defaultul treptei, garantat Gemini: dacă cineva pune în env un model care NU
- *  e google-direct/*, nu-l lăsăm să deraieze creierul — cădem pe defaultul din
- *  cod (lacătul Gemini, 3 aug). */
-function fallbackTreapta(tier: ModelTier): string {
-  // 4 TREPTE (22 aug): chat = flash-lite, work = flash, profund = Pro, ultra = top.
-  // 'top' rămâne alias pe profund pentru compatibilitate cu codul existent.
-  if (tier === 'chat') return modelRapidDirect()
-  if (tier === 'work') return modelUnicDirect()
-  if (tier === 'ultra') return modelUltraDirect()
-  // 'profund' și 'top' → Pro
-  return modelProfundDirect()
-}
-
-export async function resolveModelChecked(
-  tier: ModelTier,
-  wanted?: string | null,
-): Promise<{ model: string; fellBack: boolean }> {
-  // SIGILAT: modelul creierului e UNIC și BLOCAT — orice „wanted" (alegere salvată
-  // în KV, selector UI, id vechi din env) e IGNORAT; se întoarce mereu modelul unic.
-  // `fellBack=true` semnalează doar că s-a cerut altceva (pentru telemetrie/onestitate).
-  const model = fallbackTreapta(tier)
-  const fellBack = !!wanted && wanted !== model
-  return { model, fellBack }
-}
-
-export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {
-  return (await resolveModelChecked(tier, wanted)).model
-}
 
 // The difficulty demanded by the task (0-100), purely heuristic from text (0
 // cost/latency). Signals: length, reasoning/analysis, code/debugging, multi-step.
@@ -155,8 +119,7 @@ export function taskDifficulty(text: string): number {
 
 // Escalation threshold: above it, the request climbs from CHAT to BRAIN.
 export const ESCALATE_AT = 60
-// 3-RUNG LADDER: chat (flash) → work (flash, cu unelte + gândire) → top
-// (gemini-2.5-pro) DOAR la dificultate cu adevărat mare.
+// 3-RUNG LADDER: Luna → Terra → Sol doar la dificultate mare.
 export const ESCALATE_TOP_AT = 85
 
 // EXECUTION INTENT (Adrian, Jul 25: "escalation goes from the cheapest capable

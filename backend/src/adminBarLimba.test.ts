@@ -10,7 +10,8 @@ const bara = sursa('../../frontend/src/pages/Stage.tsx')
 
 describe('optiunile de schimbare a limbii in bara de admin', () => {
   it('bara de admin contine selectorul de limba', () => {
-    expect(bara).toContain('SELECTORUL DE LIMBĂ ÎN BARA DE ADMIN')
+    expect(bara).toContain('className="lang-wrap"')
+    expect(bara).toContain('aria-expanded={langOpen}')
     expect(bara).toContain('handleAdminLangChange')
   })
 

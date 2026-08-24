@@ -6,7 +6,7 @@
 // unitate. Regula #1: fără niciun semnal → `necunoscut` = EXACT calitatea de azi
 // (nicio regresie pe Safari/iOS/Firefox unde API-ul lipsește).
 import { describe, it, expect } from 'vitest'
-import { clasificaTeava, calitateCamera, etichetaTeava, type Teava } from './retea'
+import { clasificaTeava, calitateCamera, type Teava } from './retea'
 
 describe('clasificaTeava — treapta din semnalele browserului', () => {
   it('2G / slow-2G = slabă', () => {
@@ -58,13 +58,5 @@ describe('calitateCamera — bun/necunoscut = comportamentul de azi, slab/mediu 
       expect(c.cadre).toBeLessThanOrEqual(4)
       expect(c.cadre).toBeGreaterThanOrEqual(1)
     }
-  })
-})
-
-describe('etichetaTeava — text pentru om/creier', () => {
-  it('fiecare treaptă are o etichetă nevidă și distinctă', () => {
-    const et = (['slab', 'mediu', 'bun', 'necunoscut'] as Teava[]).map(etichetaTeava)
-    expect(new Set(et).size).toBe(4)
-    for (const e of et) expect(e.length).toBeGreaterThan(3)
   })
 })

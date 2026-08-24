@@ -1,6 +1,4 @@
 import { type ErrorObject } from 'ajv'
-import { createHash } from 'node:crypto'
-import type { ConstructorIncident } from './constructorIncident.js'
 import { compileJsonSchema } from './ajvCompat.js'
 
 export const CONSTRUCTOR_STRATEGY_ID = 'kelion.strategy/v1' as const
@@ -126,8 +124,8 @@ export const CONSTRUCTOR_STRATEGY_SCHEMA = {
   },
 } as const
 
-// hardcod-permis: sinonime validate empiric pentru enumurile pe care Gemini
-// le scoate câteodată greșit (ex. 'diagnosis' în loc de 'diagnose'). Nu sunt
+// Sinonime tolerate pentru enumurile pe care un model
+// le poate formula diferit (ex. 'diagnosis' în loc de 'diagnose'). Nu sunt
 // valori de business, ci reparație de parsing — le normalizăm înainte de schema.
 const FAZE_SINONIME: Record<string, string> = {
   diagnose: 'diagnose', diagnosis: 'diagnose', detect: 'diagnose', identify: 'diagnose',
@@ -136,11 +134,11 @@ const FAZE_SINONIME: Record<string, string> = {
 }
 const EXECUTOR_SINONIME: Record<string, string> = {
   brain_tools: 'brain_tools', brain: 'brain_tools', tools: 'brain_tools', kelion: 'brain_tools',
-  constructor: 'constructor', devin: 'constructor', builder: 'constructor',
+  constructor: 'constructor', builder: 'constructor',
   blocked: 'blocked', block: 'blocked', pause: 'blocked', await: 'blocked',
 }
 // Curăță RECURSIV cheile pe care schema le interzice (additionalProperties:false),
-// ÎNAINTE de validare. Gemini adaugă câteodată o cheie în plus (ex. un „reasoning"
+// ÎNAINTE de validare. Modelul poate adăuga o cheie în plus (ex. „reasoning"
 // pe o ipoteză) — o singură cheie străină pica TOATĂ strategia și autonomia se
 // bloca (constatat de auditul din 22 aug). Tăiem DOAR ce e interzis; nu inventăm
 // nimic care lipsește — un câmp cerut absent rămâne eroare cinstită (→ re-cerere).
@@ -218,63 +216,4 @@ export function parseConstructorStrategy(raw: string):
     return { ok: false, error: 'strategy_missing_capability_build_action_required' }
   }
   return { ok: true, strategy }
-}
-
-const hash = (value: string): string => createHash('sha256').update(value).digest('hex').slice(0, 24)
-
-export function constructorEvidenceFingerprint(evidence: string): string {
-  return hash(String(evidence ?? '').replace(/\s+/g, ' ').trim())
-}
-
-export function constructorStrategyActionFingerprint(strategy: ConstructorStrategy): string {
-  return hash(JSON.stringify({
-    phase: strategy.decision.phase,
-    executor: strategy.decision.executor,
-    action: strategy.decision.action,
-    reformulatedOrder: strategy.decision.reformulatedOrder,
-    expectedEvidence: strategy.decision.expectedEvidence,
-  }))
-}
-
-export function mayExecuteConstructorStrategy(
-  strategy: ConstructorStrategy,
-  previousActionFingerprint: string | null | undefined,
-  previousEvidenceFingerprint: string | null | undefined,
-  currentEvidence: string,
-): { allowed: boolean; reason: string; actionFingerprint: string; evidenceFingerprint: string } {
-  const actionFingerprint = constructorStrategyActionFingerprint(strategy)
-  const evidenceFingerprint = constructorEvidenceFingerprint(currentEvidence)
-  const repeatedWithoutEvidence =
-    actionFingerprint === previousActionFingerprint && evidenceFingerprint === previousEvidenceFingerprint
-  return {
-    allowed: !repeatedWithoutEvidence,
-    reason: repeatedWithoutEvidence
-      ? 'same_strategy_action_without_new_evidence'
-      : 'new_action_or_new_evidence',
-    actionFingerprint,
-    evidenceFingerprint,
-  }
-}
-
-export function buildConstructorStrategistPrompt(
-  incident: ConstructorIncident,
-  lessons: string[],
-  capabilityInventory: string,
-): string {
-  return `Ești STRATEGUL EXECUTIV al autonomiei Kelion. Nu ești un generator de ordine și nu repeți acțiuni.\n\n` +
-    `INCIDENT #${incident.id}, ORDIN #${incident.jobId}\n` +
-    `stare=${incident.state}; etapă=${incident.stage}; cauză clasificată=${incident.causeCode}\n` +
-    `rezumat cauză=${incident.causeSummary}\nresponsabil=${incident.responsible}\n` +
-    `acțiune curentă=${incident.nextAction}\nrecurențe=${incident.recurrenceCount}\n` +
-    `DOVADĂ DISPONIBILĂ:\n${incident.evidence.slice(-6000)}\n\n` +
-    (lessons.length ? `LECȚII VERIFICATE ANTERIOR:\n${lessons.join('\n')}\n\n` : '') +
-    `${capabilityInventory}\n\n` +
-    `Produce NUMAI JSON conform protocolului ${CONSTRUCTOR_STRATEGY_ID}. ` +
-    `Separă faptele de ipoteze. Nu declara o cauză fără dovadă; confidence trebuie să reflecte dovada. ` +
-    `Compară minimum două opțiuni după probabilitate, cost și risc. Definește obiectivul și criterii măsurabile. ` +
-    `Dacă lipsește o capacitate, numește-o și decide dacă poate fi construită sigur cu uneltele existente. ` +
-    `executor=brain_tools pentru diagnostic/reparație prin uneltele Kelion, constructor numai pentru un ordin de cod complet reformulat, ` +
-    `blocked pentru bani, secrete inexistente, autoritate sau lipsă de dovadă ce nu poate fi obținută. ` +
-    `Nu închide incidentul: închiderea este automată numai după order done și CI verde. ` +
-    `Nu repeta acțiunea precedentă fără dovadă nouă. incidentId trebuie să fie ${incident.id}.`
 }

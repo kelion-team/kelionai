@@ -18,8 +18,8 @@
 //     ────────────────────────────────────────────────────────────────
 //     ≈ 15.000 de tokeni ÎNAINTE ca omul să spună un cuvânt
 //
-// Se vede direct în cifre, din rularea lui de pe VPS: Gemini singur răspunde în
-// 482 ms, dar tura aplicației a durat 1619 ms. Restul era citit degeaba. Și nu
+// Măsurătorile au arătat că apelul modelului era doar o parte din latența totală;
+// restul contextului era citit degeaba. Și nu
 // doar încetinea — dilua: decizia „mi se vorbește mie?" stătea îngropată la
 // pagina 8 dintr-un regulament, printre 128 de scheme de unelte.
 //
@@ -100,7 +100,6 @@ export const UNELTE_VORBIRE: readonly string[] = [
   'list_source',
   'read_source',
   'search_source',
-  'admin_vezi',
 ]
 
 // ── CE NU ARE VOIE SĂ CALCE PE FAZA DE VORBIRE ─────────────────────────────
@@ -109,9 +108,7 @@ export const UNELTE_VORBIRE: readonly string[] = [
 //   system_health   → 2 apeluri la GitHub (timeout 10 s) + sondează endpointul
 //                     fiecărui buton din Admin (timeout 8 s) ≈ 8 s în cel mai
 //                     rău caz. SINGURA observabilitate care rămâne afară (e scumpă).
-//   repo_*/build_*  → GitHub, PR-uri, construcții (SCRIU / cheltuie)
-//   run_runbook     → declanșează workflow-uri pe VPS
-//   jules_*         → rețea la Google (pornesc sarcini)
+//   build_software  → pune un ordin în coada workerului Constructor
 // Restul rămân disponibile prin `ask_brain`.
 // NOTĂ (owner, 13 aug): db_query/db_tables/server_logs au IEȘIT de aici — sunt
 // read-only și ieftine (DB locală, loguri din memorie), iar adminul secund trebuie
@@ -121,17 +118,6 @@ export const INTERZISE_LA_VORBIRE: readonly string[] = [
   'stare_masurata',
   'constructor_status',
   'build_software',
-  'repo_write',
-  'repo_open_pr',
-  'repo_merge_pr',
-  'run_runbook',
-  'runbook_status',
-  'runbook_log',
-  'jules_repos',
-  'jules_task',
-  'jules_status',
-  'ruleaza_portile',
-  'vaneaza_buguri',
 ]
 
 /**

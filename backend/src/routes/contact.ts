@@ -1,48 +1,26 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { saveContactMessage, marcheazaContactEmailat } from '../db.js'
-import {
-  mailEnabled,
-  sendMail,
-  royalLetterHtml,
-  makeRef,
-  letterDate,
-} from '../services/mail.js'
+import { mailEnabled, sendMail } from '../services/mail.js'
+import { replaceControlCharacters } from '../shared/textSanitization.js'
 
-// Localised courtesy acknowledgement for the contact form — the sender gets an
-// immediate royal-letter reply IN THEIR LANGUAGE confirming receipt, while the
-// full enquiry is forwarded to the owner. Default English.
-const ACK: Record<string, { hi: (n: string) => string; body: string }> = {
-  en: {
-    hi: (n) => `Dear ${n},`,
-    body:
-      'We thank you most sincerely for your message, and confirm that it has been duly received.\n\nOur office shall attend to your enquiry with the utmost care and reply to you shortly, in your own language. Should the matter require the attention of our principal, it shall be forwarded to him without delay.\n\nWe remain at your entire disposal.',
-  },
-  ro: {
-    hi: (n) => `Stimate ${n},`,
-    body:
-      'Vă mulțumim din suflet pentru mesajul dumneavoastră și confirmăm că a fost primit.\n\nBiroul nostru se va ocupa de solicitarea dumneavoastră cu cea mai mare grijă și vă va răspunde în scurt timp, în limba dumneavoastră. Dacă subiectul necesită atenția conducerii, va fi transmis fără întârziere.\n\nRămânem la întreaga dumneavoastră dispoziție.',
-  },
-  fr: {
-    hi: (n) => `Cher ${n},`,
-    body:
-      'Nous vous remercions très sincèrement de votre message et confirmons sa bonne réception.\n\nNotre bureau traitera votre demande avec le plus grand soin et vous répondra sous peu, dans votre langue. Si l’affaire requiert l’attention de notre direction, elle lui sera transmise sans délai.\n\nNous restons à votre entière disposition.',
-  },
-  es: {
-    hi: (n) => `Estimado ${n},`,
-    body:
-      'Le agradecemos muy sinceramente su mensaje y confirmamos que ha sido recibido.\n\nNuestra oficina atenderá su consulta con el mayor cuidado y le responderá en breve, en su idioma. Si el asunto requiere la atención de nuestra dirección, se le remitirá sin demora.\n\nQuedamos a su entera disposición.',
-  },
-  de: {
-    hi: (n) => `Sehr geehrter ${n},`,
-    body:
-      'Wir danken Ihnen aufrichtig für Ihre Nachricht und bestätigen deren Eingang.\n\nUnser Büro wird sich Ihrer Anfrage mit größter Sorgfalt annehmen und Ihnen in Kürze in Ihrer Sprache antworten. Sollte die Angelegenheit die Aufmerksamkeit unserer Leitung erfordern, wird sie unverzüglich weitergeleitet.\n\nWir stehen Ihnen jederzeit zur Verfügung.',
-  },
+const DEPARTMENTS = new Set(['General enquiry', 'Support', 'Sales', 'Press and media', 'Legal'])
+const SUBMISSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function oneLine(value: unknown, max: number): string {
+  return replaceControlCharacters(String(value ?? ''), ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+function html(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character] ?? character)
 }
 
 export async function contactRoutes(app: FastifyInstance): Promise<void> {
   app.post<{
     Body: {
+      submissionId?: string
       department?: string
       name?: string
       email?: string
@@ -51,29 +29,26 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       lang?: string
     }
   }>('/api/contact', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const b = req.body ?? {}
-    const name = String(b.name ?? '').trim().slice(0, 120)
-    const email = String(b.email ?? '').trim().slice(0, 200)
-    const subject = String(b.subject ?? '').trim().slice(0, 200)
-    const message = String(b.message ?? '').trim().slice(0, 8000)
-    const department = String(b.department ?? 'General enquiry').trim().slice(0, 80)
-    const lang = String(b.lang ?? 'en').trim().slice(0, 5).toLowerCase()
+    const body = req.body ?? {}
+    const submissionId = String(body.submissionId ?? '').trim()
+    const name = oneLine(body.name, 120)
+    const email = oneLine(body.email, 200).toLowerCase()
+    const subject = oneLine(body.subject, 200)
+    const message = String(body.message ?? '').split(String.fromCharCode(0)).join('').trim().slice(0, 8_000)
+    const requestedDepartment = oneLine(body.department, 80)
+    const department = DEPARTMENTS.has(requestedDepartment) ? requestedDepartment : 'General enquiry'
+    const lang = /^[a-z]{2}(?:-[a-z]{2})?$/i.test(String(body.lang ?? ''))
+      ? String(body.lang).toLowerCase().slice(0, 5)
+      : 'en'
 
-    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !message) {
-      return reply.code(400).send({ error: 'bad_request', message: 'email and message required' })
+    if (!SUBMISSION_ID.test(submissionId)
+      || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)
+      || !message) {
+      return reply.code(400).send({ error: 'bad_request' })
     }
 
-    // 0) ALWAYS SAVE to the DB, BEFORE any email (bug 10 Jul: "contact
-    // messages are not sent"). The cause: if mail wasn't configured (empty
-    // MAIL_PASS) or sendMail failed silently (fire-and-forget), the message
-    // was lost completely — the UI said "sent", but it reached nowhere. Now
-    // it is persisted guaranteed and visible in the admin's Inbox; the email
-    // is just best-effort forwarding.
-    // AUDIT ADMIN (3 aug): `emailed` era scris ca `mailEnabled()` — adică
-    // „mailul e CONFIGURAT", nu „mailul a PLECAT". La un SMTP picat rândul
-    // rămânea cu ✉️ pentru un email care n-a ajuns nicăieri. Acum: salvăm cu
-    // emailed=false și marcăm true DOAR după ce sendMail chiar a întors true.
-    const storedId = await saveContactMessage({
+    const stored = await saveContactMessage({
+      submissionId,
       name,
       email,
       subject,
@@ -82,51 +57,30 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       lang,
       emailed: false,
     })
-    const stored = storedId != null
+    if (stored == null) return reply.code(503).send({ error: 'contact_store_unavailable' })
+    if (stored.emailed) return reply.send({ ok: true, stored: true, delivered: true })
 
-    if (!mailEnabled()) {
-      // Mail isn't wired, but the message IS saved — the owner sees it in the Inbox.
-      return reply.send({ ok: true, stored, delivered: false })
+    // Never send an automatic email to the anonymous address supplied in the
+    // form: without email verification that would be an outbound spam relay.
+    // The durable inbox row is the authoritative receipt. Forwarding to the
+    // configured internal address is optional and its result is reported exactly.
+    if (!mailEnabled() || !config.mail.forwardTo) {
+      return reply.send({ ok: true, stored: true, delivered: false })
     }
 
-    // 1) Forward the full enquiry to the owner. Escape EVERY interpolated
-    // field — name/subject/department come from an anonymous visitor (stored
-    // XSS in the inbox).
-    const esc = (s: string): string =>
-      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const adminHtml = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <h2 style="margin:0 0 12px;">New contact — ${esc(department)}</h2>
-      <p><strong>From:</strong> ${esc(name) || '(no name)'} &lt;${esc(email)}&gt;</p>
-      <p><strong>Language:</strong> ${esc(lang)}</p>
-      <p><strong>Subject:</strong> ${esc(subject) || '(none)'}</p>
-      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
-      <p style="white-space:pre-wrap;">${esc(message)}</p>
-    </div>`
-    // Fire-and-forget pentru VITEZA răspunsului către vizitator, dar rezultatul
-    // NU se aruncă: `emailed` devine true doar când sendMail a raportat succes.
-    void sendMail({
+    const delivered = await sendMail({
       to: config.mail.forwardTo,
       subject: `[Contact · ${department}] ${subject || 'no subject'}`,
-      html: adminHtml,
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">
+        <h2>New contact — ${html(department)}</h2>
+        <p><strong>From:</strong> ${html(name) || '(no name)'} &lt;${html(email)}&gt;</p>
+        <p><strong>Language:</strong> ${html(lang)}</p>
+        <p><strong>Subject:</strong> ${html(subject) || '(none)'}</p>
+        <hr><p style="white-space:pre-wrap">${html(message)}</p>
+      </div>`,
       replyTo: email,
-    }).then((sent) => {
-      if (sent && storedId != null) void marcheazaContactEmailat(storedId)
-    })
-
-    // 2) Send the sender a royal-letter acknowledgement in their language.
-    const a = ACK[lang] ?? ACK.en
-    void sendMail({
-      to: email,
-      subject: 'Kelionai — acknowledgement of your message',
-      html: royalLetterHtml({
-        ref: makeRef(),
-        date: letterDate(),
-        salutation: a.hi(name || 'Sir or Madam'),
-        body: a.body,
-        department: `On behalf of ${department}`,
-      }),
-    })
-
-    return reply.send({ ok: true, stored, delivered: true })
+    }).catch(() => false)
+    if (delivered) await marcheazaContactEmailat(stored.id)
+    return reply.send({ ok: true, stored: true, delivered })
   })
 }

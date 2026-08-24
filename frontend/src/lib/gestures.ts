@@ -1,4 +1,6 @@
-// Kelion's gesture catalog (Adrian, Jul 13) — the canonical key is the CLIP
+import { apiFetch } from './transport'
+
+// The canonical gesture key is the avatar clip name.
 // NAME (same as in AvatarModel + backend). The admin panel shows every gesture
 // with preview + activation checkbox; what is NOT checked is NOT used at all.
 export interface GestureItem {
@@ -76,7 +78,7 @@ export function previewGesture(clip: string): void {
 // server, ȘTERGÂND dezactivările anterioare — o scriere peste o bază necitită.
 export async function fetchDisabledGestures(): Promise<string[] | null> {
   try {
-    const r = await fetch('/api/gestures/state', { credentials: 'include' })
+    const r = await apiFetch('/api/gestures/state', { credentials: 'include' })
     if (!r.ok) return null
     const j = (await r.json()) as { disabled?: string[] }
     return Array.isArray(j.disabled) ? j.disabled : []
@@ -87,7 +89,7 @@ export async function fetchDisabledGestures(): Promise<string[] | null> {
 
 export async function saveDisabledGestures(disabled: string[]): Promise<boolean> {
   try {
-    const r = await fetch('/api/admin/gestures', {
+    const r = await apiFetch('/api/admin/gestures', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

@@ -19,7 +19,6 @@ import { loadLocalLang } from './prefs'
 
 export interface AdminStrings {
   // Taburile
-  tabEnterprise: string
   tabMoney: string
   // Becuri de credit AI (owner, 13 aug: „bec roșu/verde… click = reîncărcare")
   becuriTitlu: string
@@ -35,16 +34,18 @@ export interface AdminStrings {
   tabShare: string
   tabStores: string
   tabInbox: string
-  tabVoiceprints: string
   tabGestures: string
   tabTokens: string
   tabBuilder: string
   tabRecovery: string
+  tabSystem: string
+  tabErrors: string
+  tabNotifications: string
+  tabBrain: string
   // Common states
   loading: string
   noSpendYet: string
   noConversationsYet: string
-  noVoiceprintsYet: string
   noVersionsYet: string
   noOrdersYet: string
   noMessagesYet: string
@@ -52,26 +53,8 @@ export interface AdminStrings {
   noLettersYet: string
   // Pastilele din bara de sus (Stage.tsx, doar admin) — audit Aug 2: titlurile
   // erau scrise direct în cod, în română. `{n}` etc. = valorile măsurate.
-  // Panoul de plăți (M3, Aug 2) — codurile emise/plătite + plasa neatribuită.
-  payHead: string
-  payTotals: string
-  payReadFail: string
-  payNetHead: string
-  payNetEmpty: string
-  payAssign: string
-  payIgnore: string
-  payAssignPrompt: string
   serperPillLive: string
   serperPillDead: string
-  gemPillLive: string
-  gemPillDead: string
-  /** Bucata „cheltuit luna asta" din tooltipurile Gemini — SEPARATĂ (auditul
-   *  admin, 3 aug): când jurnalul nu se poate citi se afișează varianta
-   *  `gemSpendUnreadable`, nu un „$0.00 (măsurat)" fabricat. */
-  gemSpendMeasured: string
-  gemSpendUnreadable: string
-  /** Pastila unică 🔒 când lacătul admin (423) blochează măsurătorile. */
-  pillsLocked: string
   /** Titlu pe pastile când ultimele citiri au picat — datele afișate sunt vechi. */
   pillsStale: string
   vpsPillLive: string
@@ -79,16 +62,12 @@ export interface AdminStrings {
   // Magazine
   checkingStores: string
   notListedYet: string
-  downloadsHead: string
   // Inbox
   readingMailbox: string
   mailboxEmpty: string
   mailboxReadFail: string
   mailboxNotConfigured: string
   reply: string
-  // Amprente vocale
-  playVoiceSample: string
-  noVoiceSampleYet: string
   // Recuperare
   versionNotePlaceholder: string
   // Constructor
@@ -147,30 +126,14 @@ export interface AdminStrings {
   restoreSuccess: (sha: string) => string
   restoreFailed: (err: string) => string
   restoreNetworkError: string
-  lockSecretMinLength: string
-  lockSecretSaved: string
-  lockSecretSaveFailed: string
   gestureSaveFailed: string
   gapArchiveFailed: string
-  revolutLinkStarting: string
-  revolutLinkApprovePrompt: string
-  revolutLinkStartFailed: (err: string) => string
-  revolutLinkNetworkError: string
-  revolutLinkPromptCode: string
-  revolutLinkFinalizing: string
-  revolutLinkSuccess: (count: number) => string
-  revolutLinkFailed: (err: string) => string
-  revolutPromptAssign: (amount: number) => string
-  alertResult: (res: string) => string
   alertCouldNotPerf: string
-  promptManualCreditAmount: (email: string) => string
+  promptManualCreditAmount: (email: string, currency: string) => string
   alertInvalidAmount: (s: string) => string
   promptManualCreditReason: string
   alertNotCredited: string
   confirmDeleteGap: string
-  voiceprintKept: string
-  voiceprintKeptTitle: string
-  voiceprintFetchError: (email: string) => string
   confirmResetCounters: string
   gapDeleteFailed: string
   mailFieldsRequired: string
@@ -178,7 +141,6 @@ export interface AdminStrings {
 }
 
 const en: AdminStrings = {
-  tabEnterprise: '➕ Add agent',
   tabMoney: 'Money',
   becuriTitlu: 'AI credit — lights (click = top-up page)',
   becuriLoad: 'reading balances…',
@@ -193,47 +155,29 @@ const en: AdminStrings = {
   tabShare: 'Share',
   tabStores: 'Stores',
   tabInbox: 'Inbox',
-  tabVoiceprints: 'Voiceprints',
   tabGestures: 'Gestures',
   tabTokens: 'Tokens',
   tabBuilder: 'Builder',
   tabRecovery: 'Recovery',
+  tabSystem: 'System',
+  tabErrors: 'Errors',
+  tabNotifications: 'Notifications',
+  tabBrain: 'OpenAI brain',
   loading: 'Loading…',
   noSpendYet: 'No spend yet.',
   noConversationsYet: 'No conversations yet.',
-  noVoiceprintsYet: 'No voiceprint recorded yet.',
   noVersionsYet: 'No version saved yet.',
   noOrdersYet: 'No orders yet.',
   noMessagesYet: 'They have not written a message yet.',
   noContactMessagesYet: 'No contact message yet.',
   noLettersYet: 'No letters yet (or MAIL_PASS is not set).',
-  payHead: 'Payments with a code',
-  payTotals: '{emise} codes issued · {platite} paid · {pending} pending · {net} in the net',
-  payReadFail: 'Could not read the payments — this is a failed read, NOT an empty ledger.',
-  payNetHead: 'Unattributed payments — the net (inflows nobody matched)',
-  payNetEmpty: 'Nothing in the net.',
-  payAssign: 'Assign',
-  payIgnore: 'Ignore',
-  payAssignPrompt: 'The email of the user this payment of {amount} belongs to:',
-  // (orPill*/oaPill* removed 3 Aug — the OpenRouter/OpenAI pills died with the
-  // providers; the brain's state lives on the Gemini pill.)
   serperPillLive: 'Serper (web search): {n} real credits · click for the dashboard',
   serperPillDead: 'Cannot read the Serper credit (SERPER_API_KEY missing or the read failed)',
-  // CLICKUL SPUS CORECT (auditul admin, 3 aug): din 3 aug clickul deschide
-  // promptul de tastat creditul; pagina Google se deschide doar pe câmp gol —
-  // vechiul „Click to see the real balance on Google’s billing page" descria
-  // comportamentul dispărut. {spend} = gemSpendMeasured SAU gemSpendUnreadable.
-  gemPillLive: 'Gemini Tier 2 is live — the key is serving, so you have credit and it works. {spend}. Click opens Google’s top-up page; the pencil next to the pill sets the credit you see in AI Studio.',
-  gemPillDead: 'Gemini is not serving right now ({why}) — if the prepay credit ran out, top it up. Click opens Google’s top-up page; the pencil sets the credit you see in AI Studio. (The exact credit is only on Google’s page — no API exposes it.)',
-  gemSpendMeasured: '${n} spent this month (measured)',
-  gemSpendUnreadable: 'the month’s spend is unreadable right now (the journal read failed) — not $0', // hardcod-permis: text DESPRE cifra necitibilă („nu $0") — nu o cifră afișată ca fapt
-  pillsLocked: '🔒 measurements locked — unlock the admin (the lock blocks /api/admin/*). Click to enter the code.',
   pillsStale: '⚠ the last reads failed — the figures shown are {min} min old, not current.',
   vpsPillLive: 'VPS: {free} GB free of {total} GB · load {load}% of {cpus} processors ({avg} at 1/5/15 min)',
   vpsPillDead: 'Cannot measure the VPS resources (/proc is not answering)',
   checkingStores: 'Checking the stores live…',
   notListedYet: '○ not listed yet',
-  downloadsHead: 'Who downloaded (last 100)',
   readingMailbox: 'Reading the mailbox…',
   // TREI STĂRI, TREI TEXTE (auditul admin, 3 aug): golul real, IMAP-ul picat
   // și MAIL_PASS lipsă nu mai sunt strivite într-un singur mesaj ambiguu.
@@ -241,8 +185,6 @@ const en: AdminStrings = {
   mailboxReadFail: 'The IMAP read FAILED: {motiv} — this is a failed read, not an empty mailbox. Try again.',
   mailboxNotConfigured: 'MAIL_PASS is not set — the mailbox cannot be read at all.',
   reply: 'Reply:',
-  playVoiceSample: 'Play the voice sample',
-  noVoiceSampleYet: 'No audio sample captured yet',
   versionNotePlaceholder: 'Note (optional): what this version is',
   buildOrderPlaceholder: 'The build order: what, where, how it is verified',
   checkingTokens: 'Checking the tokens…',
@@ -294,30 +236,14 @@ const en: AdminStrings = {
   restoreSuccess: (sha: string) => `Restored ✓ master is now at ${sha} — server republish starts automatically (1-2 min).`,
   restoreFailed: (err: string) => `Restore failed: ${err}`,
   restoreNetworkError: 'Restore failed — check connection and try again.',
-  lockSecretMinLength: 'Secret must have at least 4 characters.',
-  lockSecretSaved: 'Secret saved ✓ — but lock remains DISARMED in code; secret takes effect only when lock is re-enabled.',
-  lockSecretSaveFailed: 'Could not save — try again.',
   gestureSaveFailed: 'NOT saved — server refused; toggle reverted. Try again.',
   gapArchiveFailed: 'Could not archive — try again.',
-  revolutLinkStarting: 'Starting linking…',
-  revolutLinkApprovePrompt: 'Approve in Revolut app, then press "I have return code".',
-  revolutLinkStartFailed: (err: string) => `Could not start linking: ${err}`,
-  revolutLinkNetworkError: 'Could not start linking — network down.',
-  revolutLinkPromptCode: 'Code from return URL (after Revolut approval):',
-  revolutLinkFinalizing: 'Finalizing linking…',
-  revolutLinkSuccess: (count: number) => `Account linked ✓ (${count} accounts) — payment reading starts on next run.`,
-  revolutLinkFailed: (err: string) => `Linking failed: ${err}`,
-  revolutPromptAssign: (amount: number) => `Assign £${amount} payment to user (email):`,
-  alertResult: (res: string) => `Result: ${res}`,
   alertCouldNotPerf: 'Could not perform action — server refused or session expired.',
-  promptManualCreditAmount: (email: string) => `Manual credit for ${email} — amount in POUNDS £ (e.g. 5.50 or -5.50):`,
-  alertInvalidAmount: (s: string) => `Amount "${s}" is not valid — write e.g. 5.50 (or 5,50). Nothing credited.`,
+  promptManualCreditAmount: (email: string, currency: string) => `Manual credit for ${email} — positive amount in ${currency}:`,
+  alertInvalidAmount: (s: string) => `Amount "${s}" is not a valid positive value. Nothing credited.`,
   promptManualCreditReason: 'Credit reason (ex: refund, test, loyalty):',
   alertNotCredited: 'Not credited — server refused or session expired.',
   confirmDeleteGap: 'PERMANENTLY delete request?',
-  voiceprintKept: 'kept (never deleted)',
-  voiceprintKeptTitle: "Owner's order (Aug 14): voiceprints are kept — no command can delete them (server + database both refuse).",
-  voiceprintFetchError: (email: string) => `Voice sample for ${email} could not be loaded — missing or read failed.`,
   confirmResetCounters: 'Reset consumption counters to 0?\n\nDeletes only supplier cost log.\nDoes NOT touch user credits, payment ledger or purchase history.\nAlready consumed credits are NOT refunded.',
   gapDeleteFailed: 'Could not delete request — try again.',
   mailFieldsRequired: 'Email and subject fields are required.',
@@ -325,7 +251,6 @@ const en: AdminStrings = {
 }
 
 const ro: AdminStrings = {
-  tabEnterprise: '➕ Agent nou',
   tabMoney: 'Bani',
   becuriTitlu: 'Credit AI — becuri (click = pagina de reîncărcare)',
   becuriLoad: 'se citesc soldurile…',
@@ -340,50 +265,34 @@ const ro: AdminStrings = {
   tabShare: 'Distribuie',
   tabStores: 'Magazine',
   tabInbox: 'Inbox',
-  tabVoiceprints: 'Amprente vocale',
   tabGestures: 'Gesturi',
   tabTokens: 'Tokenuri',
   tabBuilder: 'Constructor',
   tabRecovery: 'Recuperare',
+  tabSystem: 'Sistem',
+  tabErrors: 'Erori',
+  tabNotifications: 'Notificări',
+  tabBrain: 'Creier OpenAI',
   loading: 'Se încarcă…',
   noSpendYet: 'Niciun consum încă.',
   noConversationsYet: 'Nicio conversație încă.',
-  noVoiceprintsYet: 'Nicio amprentă vocală înregistrată încă.',
   noVersionsYet: 'Nicio versiune salvată încă.',
   noOrdersYet: 'Niciun ordin încă.',
   noMessagesYet: 'Nu a scris niciun mesaj încă.',
   noContactMessagesYet: 'Niciun mesaj de contact încă.',
   noLettersYet: 'Nicio scrisoare încă (sau MAIL_PASS nesetat).',
-  payHead: 'Plăți cu cod',
-  payTotals: '{emise} coduri emise · {platite} plătite · {pending} în așteptare · {net} în plasă',
-  payReadFail: 'Nu am putut citi plățile — e o citire eșuată, NU un registru gol.',
-  payNetHead: 'Plăți neatribuite — plasa (intrări pe care nu le-a potrivit nimeni)',
-  payNetEmpty: 'Nimic în plasă.',
-  payAssign: 'Atribuie',
-  payIgnore: 'Ignoră',
-  payAssignPrompt: 'Emailul userului căruia îi aparține plata de {amount}:',
-  // (orPill*/oaPill* scoase, 3 aug — pastilele OpenRouter/OpenAI au murit odată
-  // cu furnizorii; starea creierului trăiește pe pastila Gemini.)
   serperPillLive: 'Serper (căutarea web): {n} credite reale · click pentru dashboard',
   serperPillDead: 'Nu pot citi creditul Serper (SERPER_API_KEY lipsește sau citirea a picat)',
-  gemPillLive: 'Gemini Tier 2 activ — cheia servește, deci ai credit și merge. {spend}. Click: pagina de alimentare Google; creionul de lângă pastilă scrie creditul din AI Studio.',
-  gemPillDead: 'Gemini nu servește acum ({why}) — dacă s-a epuizat creditul prepay, reîncarcă-l. Click: pagina de alimentare Google; creionul scrie creditul din AI Studio. (Creditul exact e doar pe pagina Google — niciun API nu-l expune.)',
-  gemSpendMeasured: '${n} cheltuiți luna asta (măsurat)',
-  gemSpendUnreadable: 'cheltuiala lunii e necitibilă acum (citirea jurnalului a picat) — nu $0', // hardcod-permis: text DESPRE cifra necitibilă („nu $0") — nu o cifră afișată ca fapt
-  pillsLocked: '🔒 măsurători blocate — deblochează adminul (lacătul blochează /api/admin/*). Click pentru cod.',
   pillsStale: '⚠ ultimele citiri au picat — cifrele afișate sunt vechi de {min} min, nu actuale.',
   vpsPillLive: 'VPS: {free} GB liberi din {total} GB · încărcare {load}% din {cpus} procesoare ({avg} la 1/5/15 min)',
   vpsPillDead: 'Nu pot măsura resursele VPS-ului (nu răspunde /proc)',
   checkingStores: 'Se verifică magazinele live…',
   notListedYet: '○ nelistat încă',
-  downloadsHead: 'Cine a descărcat (ultimele 100)',
   readingMailbox: 'Se citește cutia…',
   mailboxEmpty: 'Folderul INBOX e gol. (Mailurile deja procesate de Secretar stau în folderele Kelion-Answered / Kelion-ToAnswer / Kelion-Automated.)',
   mailboxReadFail: 'Citirea IMAP a PICAT: {motiv} — e o citire eșuată, nu o cutie goală. Reîncearcă.',
   mailboxNotConfigured: 'MAIL_PASS nesetat — cutia nu poate fi citită deloc.',
   reply: 'Răspuns:',
-  playVoiceSample: 'Ascultă mostra vocii',
-  noVoiceSampleYet: 'Încă nu s-a captat o mostră audio',
   versionNotePlaceholder: 'Notă (opțional): ce e această versiune',
   buildOrderPlaceholder: 'Ordinul de construcție: ce, unde, cum se verifică',
   checkingTokens: 'Se verifică tokenurile…',
@@ -432,30 +341,14 @@ const ro: AdminStrings = {
   restoreSuccess: (sha: string) => `Restaurat ✓ master e acum la ${sha} — publicarea pe server pornește singură (1-2 min).`,
   restoreFailed: (err: string) => `Restaurarea a eșuat: ${err}`,
   restoreNetworkError: 'Restaurarea a eșuat — verifică conexiunea și reîncearcă.',
-  lockSecretMinLength: 'Secretul trebuie să aibă minim 4 caractere.',
-  lockSecretSaved: 'Secret salvat ✓ — dar lacătul rămâne DEZARMAT din cod (cererea ta, 31 iul); secretul intră în vigoare doar când îmi ceri să repornesc lacătul.',
-  lockSecretSaveFailed: 'Nu s-a putut salva — reîncearcă.',
   gestureSaveFailed: 'NU s-a salvat — serverul a refuzat; bifa a revenit. Reîncearcă.',
   gapArchiveFailed: 'Nu s-a putut arhiva — reîncearcă.',
-  revolutLinkStarting: 'Pornesc legarea…',
-  revolutLinkApprovePrompt: 'Aprobă în aplicația Revolut, apoi apasă „Am codul din retur”.',
-  revolutLinkStartFailed: (err: string) => `Nu s-a putut porni legarea: ${err}`,
-  revolutLinkNetworkError: 'Nu s-a putut porni legarea — rețeaua a picat.',
-  revolutLinkPromptCode: 'Codul din URL-ul de retur (după aprobare în Revolut):',
-  revolutLinkFinalizing: 'Finalizez legarea…',
-  revolutLinkSuccess: (count: number) => `Cont legat ✓ (${count} conturi) — citirea plăților pornește la următoarea trecere.`,
-  revolutLinkFailed: (err: string) => `Legarea a eșuat: ${err}`,
-  revolutPromptAssign: (amount: number) => `Atribuie plata de £${amount} userului (email):`,
-  alertResult: (res: string) => `Rezultat: ${res}`,
   alertCouldNotPerf: 'Nu s-a putut — serverul a refuzat sau sesiunea a expirat.',
-  promptManualCreditAmount: (email: string) => `Credit manual pentru ${email} — suma în LIRE £ (ex: 5.50 sau -5.50):`,
-  alertInvalidAmount: (s: string) => `Suma „${s}” nu e validă — scrie de ex. 5.50 (sau 5,50). Nu s-a creditat nimic.`,
+  promptManualCreditAmount: (email: string, currency: string) => `Credit manual pentru ${email} — suma pozitivă în ${currency}:`,
+  alertInvalidAmount: (s: string) => `Suma „${s}” nu este o valoare pozitivă validă. Nu s-a creditat nimic.`,
   promptManualCreditReason: 'Motivul creditării (ex: retur, test, fidelizare):',
   alertNotCredited: 'Nu s-a creditat — serverul a refuzat sau sesiunea a expirat.',
   confirmDeleteGap: 'Ștergi DEFINITIV cererea? (nu rămâne nici în istoric)',
-  voiceprintKept: 'se păstrează (nu se șterge)',
-  voiceprintKeptTitle: 'Ordinul ownerului (14 aug): amprentele vocale se păstrează — nicio comandă nu le poate șterge (refuză și serverul, și baza de date).',
-  voiceprintFetchError: (email: string) => `Mostra lui ${email} nu s-a putut încărca — lipsește sau citirea a picat.`,
   confirmResetCounters: 'Pui pe 0 contoarele de consum?\n\nSe șterge doar jurnalul „cât ne-a costat pe noi la furnizori”.\nNU se ating: creditele userilor, registrul plăților, istoricul de cumpărare.\nCreditele deja consumate NU se dau înapoi.',
   gapDeleteFailed: 'Nu s-a putut șterge cererea — reîncearcă.',
   mailFieldsRequired: 'Câmpurile email și subiect sunt obligatorii.',

@@ -38,11 +38,3 @@ export function formatNowContext(nowIso: unknown, tz: unknown): { human: string;
   const tzName = typeof tz === 'string' && tz ? tz : 'UTC'
   return formatDeviceTime(new Date().toISOString(), tzName) ?? { human: new Date().toUTCString(), tzName: 'UTC' }
 }
-
-/** The UTC calendar day as YYYY-MM-DD — the single "today" formatting (it
- *  used to be `new Date().toISOString().slice(0, 10)` copied in 7 spots
- *  across chat/autonomie/health/openBanking). offsetDays shifts the day
- *  (e.g. -14 for a 14-day lookback). */
-export function utcDay(offsetDays = 0): string {
-  return new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10)
-}

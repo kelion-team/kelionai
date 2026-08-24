@@ -13,11 +13,11 @@ vi.mock('../db.js', () => ({
   saveKv: async (k: string, v: string) => { kv.set(k, v) },
 }))
 
-import { esteNemultumire, noteazaRepros, lectiiReprosuri, incarcaReprosuri, _reseteazaCache } from './feedbackImplicit.js'
+import { esteNemultumire, noteazaRepros, lectiiReprosuri, incarcaReprosuri } from './feedbackImplicit.js'
 
-beforeEach(() => {
+beforeEach(async () => {
   kv.clear()
-  _reseteazaCache()
+  await incarcaReprosuri()
 })
 
 describe('esteNemultumire — prinde corecția, nu orice negație', () => {
@@ -81,8 +81,6 @@ describe('noteazaRepros → lectiiReprosuri', () => {
 
   it('persistă și se reîncarcă (supraviețuiește unei reporniri)', async () => {
     await noteazaRepros('fă X', 'am făcut Y', 'nu asta', 'nu-asta', '2026-08-12T10:00:00Z')
-    _reseteazaCache()
-    expect(lectiiReprosuri()).toHaveLength(0) // cache golit
     await incarcaReprosuri() // reîncarcă din KV
     expect(lectiiReprosuri()).toHaveLength(1)
   })

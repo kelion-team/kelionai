@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.7
+ARG NODE_IMAGE=node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066
+ARG PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+
+FROM ${NODE_IMAGE} AS browser-dependencies
+WORKDIR /build
+COPY backend/package.json backend/package-lock.json ./backend/
+RUN cd backend && npm ci --no-audit --no-fund
+
+FROM ${PLAYWRIGHT_IMAGE} AS worker
+WORKDIR /opt/kelion
+COPY --from=browser-dependencies /build/backend/node_modules/playwright ./node_modules/playwright
+COPY --from=browser-dependencies /build/backend/node_modules/playwright-core ./node_modules/playwright-core
+COPY deploy/browser-worker.mjs ./browser-worker.mjs
+COPY deploy/lib ./lib
+ENV NODE_ENV=production \
+    HOME=/home/pwuser \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+USER pwuser
+STOPSIGNAL SIGTERM
+CMD ["node", "/opt/kelion/browser-worker.mjs"]
+
+FROM ${NODE_IMAGE} AS egress
+WORKDIR /opt/kelion
+COPY deploy/browser-egress-proxy.mjs ./browser-egress-proxy.mjs
+COPY deploy/lib ./lib
+ENV NODE_ENV=production HOME=/home/node
+USER node
+EXPOSE 3128
+STOPSIGNAL SIGTERM
+CMD ["node", "/opt/kelion/browser-egress-proxy.mjs"]

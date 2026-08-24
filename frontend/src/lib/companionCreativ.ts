@@ -155,12 +155,6 @@ export function opresteMuzica(): void {
   }
 }
 
-// export-permis: folosit intern
-/** Muzica e în curs? */
-export function muzicaInMers(): boolean {
-  return inMers
-}
-
 /** Schimbă dispoziția (fără să oprești). */
 export function schimbaDispozitie(d: DispozitieMuzicala): void {
   if (inMers) {

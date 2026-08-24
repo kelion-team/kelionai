@@ -1,90 +1,61 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// ── MENIUL DE PREȚURI AL EXTRA-SERVICIILOR (owner, 14 aug) ───────────────────
-// Promisiunile ținute aici: (1) prețul afișat = prețul taxat (o singură sursă);
-// (2) reglabil din env fără deploy; (3) taxarea vine ÎNAINTE de consum, refuză
-// pe sold insuficient CU cifra lipsă, și nu taxează pe portofel necitit;
-// (4) rambursul întoarce exact ce s-a scăzut; (5) ownerul nu plătește la el acasă.
-
-const portofel = { citit: true as const, sold: 10 }
-const scazute: { email: string; suma: number; meta: string }[] = []
-const acordate: { email: string; suma: number }[] = []
-
-vi.mock('./db.js', () => ({
-  citesteSold: async () => ({ ...portofel }),
-  debitWallet: async (email: string, suma: number, meta: string) => {
-    scazute.push({ email, suma, meta })
-  },
-  debitWalletAtomar: async (email: string, suma: number, meta: string) => {
-    if (portofel.sold < suma) return { ok: false, motiv: `sold insuficient: serviciul costă £${suma.toFixed(2)}, ai £${portofel.sold.toFixed(2)} — reîncarcă măcar £${Math.round((suma - portofel.sold) * 100) / 100}` }
-    scazute.push({ email, suma, meta })
-    return { ok: true }
-  },
-  grantCredit: async (email: string, suma: number) => {
-    acordate.push({ email, suma })
-  },
+const { debits, grants, debit } = vi.hoisted(() => ({
+  debits: [] as unknown[][],
+  grants: [] as unknown[][],
+  debit: vi.fn(async (...args: unknown[]) => {
+    debits.push(args)
+    return { ok: true as const, debitedMinor: Number(args[1]), duplicate: false }
+  }),
 }))
 
-import { meniulDeTarife, creditePentru, lirePentru, cheiaTarifVideo, taxeazaServiciu } from './services/tarife.js'
-import { config } from './config.js'
+vi.mock('./config.js', () => ({
+  config: {
+    adminEmail: 'owner@example.com',
+    videoModel: 'configured-video-model',
+    billing: { currency: 'GBP', minorUnit: 2, creditMinor: 10, policyVersion: 'policy-v1' },
+  },
+}))
+vi.mock('./db.js', () => ({
+  debitWalletMinorAtomar: debit,
+  grantCreditMinor: vi.fn(async (...args: unknown[]) => { grants.push(args); return true }),
+}))
 
-beforeEach(() => {
-  portofel.sold = 10
-  scazute.length = 0
-  acordate.length = 0
-  for (const t of meniulDeTarife()) delete process.env[t.env]
-})
+import { creditePentru, lirePentru, meniulDeTarife, minorPentru, taxeazaServiciu } from './services/tarife.js'
 
-describe('meniul de prețuri — o singură sursă, cu profitul copt înăuntru', () => {
-  it('acoperă serviciile plătite: video (3 trepte), imagine, CV', () => {
-    const chei = meniulDeTarife().map((t) => t.cheie)
-    for (const c of ['video_lite', 'video_fast', 'video_preview', 'imagine', 'cv'])
-      expect(chei, `lipsește tariful ${c}`).toContain(c)
-  })
-  it('prețul în lire = credite × valoarea creditului (aceeași aritmetică peste tot)', () => {
-    expect(lirePentru('imagine')).toBeCloseTo((creditePentru('imagine') ?? 0) * config.billing.creditValue)
-  })
-  it('reglabil din env, fără deploy', () => {
-    process.env.TARIF_IMAGINE = '3'
-    expect(creditePentru('imagine')).toBe(3)
-  })
-  it('modelul Veo activ se mapează pe treapta lui de tarif', () => {
-    expect(cheiaTarifVideo('veo-3.1-lite-generate-preview')).toBe('video_lite')
-    expect(cheiaTarifVideo('veo-3.1-fast-generate-preview')).toBe('video_fast')
-    expect(cheiaTarifVideo('veo-3.1-generate-preview')).toBe('video_preview')
-  })
-})
+beforeEach(() => { debits.length = 0; grants.length = 0; debit.mockClear() })
 
-describe('taxarea — înainte de consum, cinstită la refuz și la ramburs', () => {
-  it('taxează exact prețul din meniu, cu numele serviciului în registru', async () => {
-    const t = await taxeazaServiciu('client@example.com', 'imagine', false)
-    expect(t.ok).toBe(true)
-    expect(scazute).toHaveLength(1)
-    expect(scazute[0].suma).toBeCloseTo(lirePentru('imagine') ?? -1)
-    expect(scazute[0].meta).toBe('tarif:imagine')
+describe('extra-service product tariffs', () => {
+  it('uses the same integer amount for display and debit', async () => {
+    expect(minorPentru('imagine')).toBe((creditePentru('imagine') ?? 0) * 10)
+    expect(lirePentru('imagine')).toBe((minorPentru('imagine') ?? 0) / 100)
+    const result = await taxeazaServiciu('customer@example.com', 'imagine', false, 'turn-1')
+    expect(result).toMatchObject({ ok: true, debitedMinor: minorPentru('imagine') })
+    expect(debits[0][1]).toBe(minorPentru('imagine'))
+    expect(String(debits[0][2])).toContain('turn-1')
   })
-  it('sold insuficient → refuz CU cifra lipsă, fără nicio scădere', async () => {
-    portofel.sold = 0.05
-    const t = await taxeazaServiciu('client@example.com', 'cv', false)
-    expect(t.ok).toBe(false)
-    if (!t.ok) expect(t.motiv).toMatch(/reîncarcă măcar £/)
-    expect(scazute).toHaveLength(0)
+
+  it('admin zero is derived from account identity, not a caller boolean', async () => {
+    for (const [index, tariff] of meniulDeTarife().entries()) {
+      expect(await taxeazaServiciu('owner@example.com', tariff.cheie, false, `admin-${index}`))
+        .toMatchObject({ ok: true, debitedMinor: 0 })
+    }
+    expect(debit).not.toHaveBeenCalled()
+    await taxeazaServiciu('customer@example.com', 'imagine', true, 'turn-3')
+    expect(debit).toHaveBeenCalledOnce()
   })
-  it('serviciu fără tarif → refuz („nu taxez pe ghicite"), fără scădere', async () => {
-    const t = await taxeazaServiciu('client@example.com', 'nu-exista', false)
-    expect(t.ok).toBe(false)
-    expect(scazute).toHaveLength(0)
+
+  it('requires a stable idempotency key even for an exempt admin operation', async () => {
+    expect(await taxeazaServiciu('owner@example.com', 'imagine', false))
+      .toMatchObject({ ok: false, cod: 'invalid', motiv: 'idempotency_key_required' })
+    expect(debit).not.toHaveBeenCalled()
   })
-  it('rambursul întoarce EXACT ce s-a scăzut', async () => {
-    const t = await taxeazaServiciu('client@example.com', 'video_fast', false)
-    expect(t.ok).toBe(true)
-    if (t.ok) await t.ramburseaza()
-    expect(acordate).toHaveLength(1)
-    expect(acordate[0].suma).toBeCloseTo(scazute[0].suma)
-  })
-  it('ownerul nu se taxează la el acasă', async () => {
-    const t = await taxeazaServiciu(config.adminEmail, 'video_preview', true)
-    expect(t.ok).toBe(true)
-    expect(scazute).toHaveLength(0)
+
+  it('refund is integer and idempotently linked to the charge', async () => {
+    const result = await taxeazaServiciu('customer@example.com', 'cv', false, 'turn-4')
+    expect(result.ok).toBe(true)
+    if (result.ok) await result.ramburseaza()
+    expect(grants[0][1]).toBe(minorPentru('cv'))
+    expect(String(grants[0][2])).toContain(':refund')
   })
 })

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { needsToolForAnswer, autoPreviewFrame } from './services/monitorAutoPreview.js'
+import { autoPreviewFrame } from './services/monitorAutoPreview.js'
 import { eCadruDeSuprafata } from './services/chatFrames.js'
 
 // ── TOTUL PE MONITOR (Adrian, Aug 2, 10:13 — "TOT pe monitor") ──────────────
@@ -30,46 +30,15 @@ const workspace = sursa('../../frontend/src/lib/workspace.ts')
 const orch = sursa('./services/orchestrator.ts')
 
 describe('turele NU mai pot pierde uneltele (cursa fără unelte a fost extirpată)', () => {
-  // (3 aug — extirparea OpenRouter a îngropat și cursa pe 3 modele fără
-  // unelte: acum ORICE tură merge pe calea secvențială CU unelte, pe creierul
-  // Gemini. Riscul „get_weather necallable → monitor întunecat" nu mai are
+  // Acum orice tură merge pe calea secvențială cu unelte. Riscul
+  // „get_weather necallable → monitor întunecat" nu mai are
   // codul care îl producea.)
   it('nu mai există cursă fără unelte în chat.ts', () => {
     expect(chat).not.toMatch(/runOrchestrator\(id, orMsgs, \[\], execTool/)
   })
   it('calea unică a creierului oferă uneltele turei', () => {
-    expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel,\s*orMsgs,\s*tools as unknown as AnthropicTool\[\]/)
+    expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel,\s*orMsgs,\s*tools as unknown as BrainTool\[\]/)
   })
-})
-
-describe('needsToolForAnswer — detectorul determinist', () => {
-  const trebuieUnealta = [
-    'Câte grade sunt afară?',
-    'Ce vreme e mâine la Cluj?',
-    'Plouă azi?',
-    'Pune un clip cu pisici.',
-    'Dă-mi știrile de azi.',
-    'Caută prețul la bitcoin.',
-    'Cât e ceasul în Tokyo?',
-    'Unde mă aflu?',
-    'Uite ce am găsit: https://example.com/articol',
-    'What is the weather in London?',
-  ]
-  for (const q of trebuieUnealta) {
-    it(`ia drumul cu unelte: „${q}"`, () => expect(needsToolForAnswer(q)).toBe(true))
-  }
-
-  const ramaneCursa = [
-    'Salut, ce faci?',
-    'Spune-mi o glumă.',
-    'Povestește-mi despre istoria Romei.',
-    'Mulțumesc, perfect!',
-    'Cine a fost Eminescu?',
-    'Scrie-mi o poezie despre toamnă.',
-  ]
-  for (const q of ramaneCursa) {
-    it(`rămâne în cursă (viteză): „${q}"`, () => expect(needsToolForAnswer(q)).toBe(false))
-  }
 })
 
 describe('auto-preview-ul de sfârșit de tură — EXACT un vizual, sau nimic', () => {
@@ -91,7 +60,7 @@ describe('auto-preview-ul de sfârșit de tură — EXACT un vizual, sau nimic',
     expect(f?.doc?.text).toContain('google.com/search')
   })
 
-  it('coordonate din proză devin harta NOASTRĂ same-origin (nu un iframe străin)', () => {
+  it('coordonatele din proză produc harta noastră same-origin, nu un iframe străin', () => {
     const f = autoPreviewFrame('Suntem chiar acum la 44.4268, 26.1025, lângă piață.')
     expect(f?.monitor?.url).toContain('/api/route?punct=44.4268,26.1025')
     expect(f?.monitor?.url).not.toContain('openstreetmap.org')

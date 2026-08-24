@@ -5,10 +5,10 @@
 // nu Playwright/simulare".
 //
 // Cum rulezi:
-//   1. Loghează-te în https://kelionai.app ca owner.
+//   1. Loghează-te în originul configurat ca owner.
 //   2. Copiază cookie-ul `kelionai_session` din DevTools → Application → Cookies.
 //   3. RULEAZĂ:
-//      KELION_SESSION=... URL=https://kelionai.app node scripts/testare-chat-uman.mjs
+//      KELION_SESSION=... URL=https://example.invalid node scripts/testare-chat-uman.mjs
 //
 // Teste automate (fără cost dacă le dezactivezi):
 //   - /api/version, /api/health (public)
@@ -19,9 +19,12 @@
 //
 // Teste manuale (tu, ca user uman, în browser) — lista e tipărită la final.
 
-const fetch = globalThis.fetch
+import { readFileSync } from 'node:fs'
 
-const URL = (process.env.URL || 'https://kelionai.app').replace(/\/$/, '')
+const fetch = globalThis.fetch
+const product = JSON.parse(readFileSync(new URL('../config/product.json', import.meta.url), 'utf8'))
+
+const URL = (process.env.URL || product.publicAppOrigin).replace(/\/$/, '')
 const COOKIE = process.env.KELIONAI_SESSION || process.env.KELION_SESSION
 const RUN_CHAT = !/^(0|false|no)$/i.test(process.env.KELION_CHAT_TEST ?? '0')
 const IMAGE_PATH = process.env.KELION_IMAGE_PATH || ''

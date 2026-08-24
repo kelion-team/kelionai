@@ -4,24 +4,28 @@
 // pe toate părțile, și să se noteze toate err".
 //
 // Asta e o sondă EXTERNĂ (nu înlocuiește paznicul intern). Rulează pe orice
-// mașină cu `node` și lovește kelionai.app. Ideal: pus într-un cron la fiecare
+// mașină cu `node` și lovește originul configurat. Poate rula periodic dintr-un
 // 5 minute. Raportează ce NU răspunde 200 + orice JSON care promite ok dar
 // conține `error`.
 //
 // Rulare:
-//   URL=https://kelionai.app node scripts/e2e-monitor.mjs
+//   URL=https://example.invalid node scripts/e2e-monitor.mjs
 // Sau:
 //   node scripts/e2e-monitor.mjs --json   (pentru parsing automat)
 
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 
 const fetch = globalThis.fetch
+const product = JSON.parse(readFileSync(new URL('../config/product.json', import.meta.url), 'utf8'))
 
-const URL = (process.env.URL || 'https://kelionai.app').replace(/\/$/, '')
+const URL = (process.env.URL || product.publicAppOrigin).replace(/\/$/, '')
 const JSON_MODE = process.argv.includes('--json')
 
 const paths = [
   { path: '/', nume: 'landing', ce: 'Homepage HTML' },
+  { path: '/livez', nume: 'livez', ce: 'Procesul public răspunde' },
+  { path: '/readyz', nume: 'readyz', ce: 'Serviciile obligatorii sunt pregătite' },
+  { path: '/api/ping', nume: 'ping', ce: 'Contract API minimal' },
   { path: '/api/health', nume: 'health', ce: 'Sănătate de bază' },
   { path: '/api/version', nume: 'version', ce: 'Versiunea care rulează' },
   { path: '/api/tarife', nume: 'tarife', ce: 'Meniu prețuri public' },
@@ -29,23 +33,15 @@ const paths = [
   { path: '/api/prefs', nume: 'prefs-guest', ce: 'Preferințe fără login (401 e OK)' },
 ]
 
-function get(u) {
-  return new Promise((resolve) => {
-    const t = setTimeout(() => resolve({ ok: false, status: 0, eroare: 'timeout 10s' }), 10_000)
-    fetch(u, { redirect: 'follow' }, (res) => {
-      clearTimeout(t)
-      const chunks = []
-      res.on('data', (c) => chunks.push(c))
-      res.on('end', () => {
-        const text = Buffer.concat(chunks).toString('utf8')
-        const body = (() => { try { return JSON.parse(text) } catch { return null } })()
-        resolve({ ok: res.statusCode === 200, status: res.statusCode, body, text })
-      })
-    }).on('error', (e) => {
-      clearTimeout(t)
-      resolve({ ok: false, status: 0, eroare: String(e.message) })
-    })
-  })
+async function get(u) {
+  try {
+    const response = await fetch(u, { redirect: 'follow', signal: AbortSignal.timeout(10_000) })
+    const text = await response.text()
+    const body = (() => { try { return JSON.parse(text) } catch { return null } })()
+    return { ok: response.status === 200, status: response.status, body, text }
+  } catch (error) {
+    return { ok: false, status: 0, eroare: String(error instanceof Error ? error.message : error) }
+  }
 }
 
 async function main() {
@@ -53,7 +49,9 @@ async function main() {
   for (const { path, nume, ce } of paths) {
     const r = await get(`${URL}${path}`)
     const falseOk = r.ok && r.body && typeof r.body === 'object' && r.body.error
-    const fail = !r.ok || falseOk
+    const inactiveReadiness = path === '/readyz'
+      && !(r.body?.ready === true && r.body?.release?.sideEffectsActive === true)
+    const fail = !r.ok || falseOk || inactiveReadiness
     rezultate.push({
       nume,
       ce,
@@ -61,7 +59,7 @@ async function main() {
       ok: !fail,
       status: r.status,
       eroare: r.eroare,
-      bodyError: falseOk ? r.body.error : null,
+      bodyError: falseOk ? r.body.error : inactiveReadiness ? 'readiness_inactive' : null,
       body: r.ok && typeof r.body === 'object' ? r.body : null,
     })
   }

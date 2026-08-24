@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 // fișiere, ruperea oricărei verigi compilează curat), C8 (pre-roll-ul de
 // barge-in — primul cuvânt tăiat, invizibil pentru orice poartă) și C2+C4
 // (rândurile oneste — regresia recreează exact minciuna reclamată de owner).
-// Testele citesc sursele REALE (modelul bargrafUreche/urechiChirp).
+// Testele citesc sursele reale ale barei microfonului și ale vocii live.
 
 const opus = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/opusVoce.ts', import.meta.url)), 'utf8')
 const vl = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/vocalLive.ts', import.meta.url)), 'utf8')
@@ -47,13 +47,13 @@ describe('C8 — pre-roll-ul de barge-in: primul cuvânt al întreruperii ajunge
 describe('C2 + C4 — rândurile oneste nu pot regresa la minciună', () => {
   it('C2: tura online complet goală (fără cadre, fără sunet) primește rândul onest turnEmpty', () => {
     expect(panou).toMatch(/turaAvutSemneRef\.current = true/)
-    expect(panou).toMatch(/!eTuraOffline && !turaAvutSemneRef\.current && !aSunatTuraRef\.current/)
+    expect(panou).toMatch(/!eTuraOffline\s*&&\s*!turaAvutSemneRef\.current\s*&&\s*!aSunatTuraRef\.current/)
     expect(panou).toMatch(/strings\(lang\)\.turnEmpty/)
   })
   it('C4: cele 3 verdicte HTTP au fiecare vorba LOR (nu minciunile vechi)', () => {
-    expect(panou).toMatch(/\? spoken\.sessionExpired/)
-    expect(panou).toMatch(/\? spoken\.paywallRow/)
-    expect(panou).toMatch(/\? spoken\.rateLimited/)
+    expect(panou).toMatch(/code === 'unauthorized'[\s\S]{0,500}spoken\.sessionExpired/)
+    expect(panou).toMatch(/code === 'paywall'[\s\S]{0,200}spoken\.paywallRow/)
+    expect(panou).toMatch(/code === 'rate_limited'[\s\S]{0,200}spoken\.rateLimited/)
     // formele vechi mincinoase nu mai au voie pe aceste coduri:
     expect(panou).not.toMatch(/'unauthorized'[\s\S]{0,120}spoken\.offline/)
     expect(panou).not.toMatch(/'rate_limited'[\s\S]{0,80}spoken\.requestLost/)

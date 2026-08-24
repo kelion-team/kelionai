@@ -1,7 +1,7 @@
 import nodemailer, { type Transporter } from 'nodemailer'
 import { config } from '../config.js'
 
-// Email for contact@kelionai.app (Namecheap Private Email, IMAP + SMTP). The
+// Email for the configured support mailbox (IMAP + SMTP). The
 // password lives ONLY in the deploy env (config.mail.pass) — never in code.
 // mailEnabled() gates every feature so the app runs fine before it's set.
 
@@ -126,7 +126,7 @@ export function royalLetterHtml(l: RoyalLetter): string {
     <p style="font-family:Georgia,serif;font-size:16px;line-height:1.85;color:#1a1a24;margin:0 0 6px;">Your most obedient servant,</p>
     <div style="font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;font-size:40px;color:${ink};line-height:1;margin:6px 0 2px;">Kelionai</div>
     <div style="font-size:12.5px;color:#6b6a64;">${dept}</div>
-    <div style="font-size:12.5px;color:#6b6a64;">contact@kelionai.app</div>
+    <div style="font-size:12.5px;color:#6b6a64;">${esc(config.product.supportEmail)}</div>
   </div>
 </div>`
 }

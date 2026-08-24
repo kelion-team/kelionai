@@ -1,36 +1,33 @@
-import { describe, it, expect, vi } from 'vitest'
-
-// Minimal environment so the config.js import (pulled by brain.ts) does not complain.
-vi.stubEnv('GOOGLE_CLIENT_ID', 'test-id')
-vi.stubEnv('GOOGLE_CLIENT_SECRET', 'test-secret')
-vi.stubEnv('GOOGLE_REDIRECT_URI', 'test-uri')
-vi.stubEnv('SESSION_SECRET', 'test-session-secret')
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
 
 describe('Expertul fiabil — clasificarea erorilor', () => {
-  // (3 aug — extirparea OpenRouter: mesajele de eroare sunt acum ale lui
-  // Gemini, „gemini <status>: …" — vezi geminiDirectChat.)
-  it('recunoaște 429 / rate-limit / RESOURCE_EXHAUSTED ca trecătoare (merită alt model)', () => {
-    expect(isTransientBrainError(new Error('gemini 429: rate limited'))).toBe(true)
-    expect(isTransientBrainError('Rate limit exceeded: RESOURCE_EXHAUSTED')).toBe(true)
-    expect(isTransientBrainError(new Error('gemini 503: upstream'))).toBe(true)
+  it('recunoaște numai erorile tranzitorii de capacitate sau transport', () => {
+    expect(isTransientBrainError(new Error('openai 429: rate limited'))).toBe(true)
+    expect(isTransientBrainError('Rate limit exceeded')).toBe(true)
+    expect(isTransientBrainError(new Error('openai 503: upstream'))).toBe(true)
     expect(isTransientBrainError(new Error('fetch failed'))).toBe(true)
   })
-  it('NU marchează ca trecătoare o cerere greșită (400/401) — dar tot se sare la următorul model', () => {
-    expect(isTransientBrainError(new Error('gemini 400: bad request'))).toBe(false)
-    expect(isTransientBrainError(new Error('gemini 401: invalid key'))).toBe(false)
+  it('nu clasifică drept tranzitorii erorile de cerere sau autentificare', () => {
+    expect(isTransientBrainError(new Error('openai 400: bad request'))).toBe(false)
+    expect(isTransientBrainError(new Error('openai 401: invalid key'))).toBe(false)
   })
 })
 
 describe('Expertul fiabil — scara de modele', () => {
-  it('e deduplicată, ordinea păstrată — un singur model e valid (3.6-flash face tot)', () => {
-    // 4 aug: work și top sunt același model (gemini-3.6-flash) — ownerul: „dacă e
-    // bun, ieftin și face tot, de ce 2 trepte?". Scara deduplicată are atunci o
-    // singură treaptă, ceea ce e corect; păstrăm doar garanția „fără duplicate".
-    const ladder = expertModelLadder()
-    expect(ladder.length).toBeGreaterThanOrEqual(1)
-    expect(new Set(ladder).size).toBe(ladder.length) // fără duplicate
+  it('este deduplicată și acceptă numai identificatori OpenAI validați', async () => {
+    const ladder = await expertModelLadder()
+    expect(new Set(ladder).size).toBe(ladder.length)
+    expect(ladder.every((model) => model.startsWith('openai/gpt-'))).toBe(true)
+  })
+
+  it('are exact cele trei roluri Luna, Terra și Sol, fără o treaptă duplicată', () => {
+    const source = readFileSync(new URL('./services/brain.ts', import.meta.url), 'utf8')
+    const rationament = readFileSync(new URL('./services/creierRationament.ts', import.meta.url), 'utf8')
+    expect(source).toContain('const configured = [config.openai.luna, config.openai.medium, config.openai.heavy]')
+    expect(rationament).toContain("export type TreaptaRationament = 'rapid' | 'lucru' | 'profund' | 'plan'")
   })
 })
 
@@ -43,7 +40,7 @@ describe('Expertul fiabil — runBrainLadder', () => {
       ['m1', 'm2', 'm3'],
       async (m) => {
         tried.push(m)
-        if (m === 'm1') throw new Error('gemini 429: rate limit')
+        if (m === 'm1') throw new Error('openai 429: rate limit')
         return `raspuns de la ${m}`
       },
       { sleep: noSleep },
@@ -59,7 +56,7 @@ describe('Expertul fiabil — runBrainLadder', () => {
         ['a', 'b', 'c'],
         async (m) => {
           tried.push(m)
-          throw new Error('gemini 429: saturat')
+          throw new Error('openai 429: saturat')
         },
         { sleep: noSleep },
       ),
@@ -78,6 +75,21 @@ describe('Expertul fiabil — runBrainLadder', () => {
       { sleep: noSleep },
     )
     expect(out).toBe('ok x')
+    expect(tried).toEqual(['x'])
+  })
+
+  it('oprește imediat scara la erori permanente de cheie/configurație', async () => {
+    const tried: string[] = []
+    await expect(
+      runBrainLadder(
+        ['x', 'y'],
+        async (model) => {
+          tried.push(model)
+          throw new Error('openai 401: invalid key')
+        },
+        { sleep: noSleep },
+      ),
+    ).rejects.toThrow(/401/)
     expect(tried).toEqual(['x'])
   })
 })

@@ -19,7 +19,8 @@
 // Ownerul e scutit peste tot (e casa lui).
 
 import { config } from '../config.js'
-import { citesteSold, debitWalletAtomar, grantCredit } from '../db.js'
+import { debitWalletMinorAtomar, grantCreditMinor } from '../db.js'
+import { esteAdminKelion } from './adminIdentity.js'
 
 export interface Tarif {
   /** Cheia internă (stabilă — pe ea taxează codul). */
@@ -70,43 +71,55 @@ export function creditePentru(cheie: string): number | null {
 }
 
 /** Prețul în moneda de afișaj (lire) — credite × valoarea creditului. */
-export function lirePentru(cheie: string): number | null {
+export function minorPentru(cheie: string): number | null {
   const c = creditePentru(cheie)
-  return c === null ? null : Math.round(c * config.billing.creditValue * 100) / 100
+  return c === null ? null : c * config.billing.creditMinor
 }
 
-/** Cheia de tarif video pentru modelul Veo ACTIV (config.videoModel). */
-export function cheiaTarifVideo(model = config.videoModel): string {
+export function lirePentru(cheie: string): number | null {
+  const minor = minorPentru(cheie)
+  return minor === null ? null : minor / 10 ** config.billing.minorUnit
+}
+
+/** Product-tariff key for the configured video quality tier. */
+export function cheiaTarifGenerareVideo(model = config.videoModel): string {
   if (/lite/i.test(model)) return 'video_lite'
   if (/fast/i.test(model)) return 'video_fast'
   return 'video_preview'
 }
 
 export type Taxare =
-  | { ok: true; scazutGbp: number; ramburseaza: () => Promise<void> }
-  | { ok: false; motiv: string }
+  | { ok: true; debitedMinor: number; scazutGbp: number; ramburseaza: () => Promise<void> }
+  | { ok: false; cod: 'invalid' | 'duplicate' | 'unavailable' | 'insufficient'; motiv: string }
 
 /** Taxează serviciul ÎNAINTE de consum (zidul de plată al extra-serviciilor):
  *  verifică soldul ȘI scade ATOMIC (tranzacție cu FOR UPDATE) — două comenzi
  *  simultane pe același sold nu mai trec ambele. `ramburseaza()` întoarce
  *  banii DOAR dacă generarea a picat — nimeni nu plătește un clip care nu
  *  s-a născut. Ownerul nu se taxează (casa lui); tarif 0 = serviciu inclus. */
-export async function taxeazaServiciu(email: string, cheie: string, esteAdmin: boolean): Promise<Taxare> {
-  if (esteAdmin) return { ok: true, scazutGbp: 0, ramburseaza: async () => {} }
-  const lire = lirePentru(cheie)
-  if (lire === null) return { ok: false, motiv: `serviciu fără tarif definit: ${cheie} — nu taxez pe ghicite` }
-  if (lire <= 0) return { ok: true, scazutGbp: 0, ramburseaza: async () => {} }
+export async function taxeazaServiciu(email: string, cheie: string, _esteAdmin: boolean, eventKey?: string): Promise<Taxare> {
+  if (!eventKey || eventKey.length > 180 || !/^[A-Za-z0-9._:-]+$/.test(eventKey)) {
+    return { ok: false, cod: 'invalid', motiv: 'idempotency_key_required' }
+  }
+  if (esteAdminKelion(email)) return { ok: true, debitedMinor: 0, scazutGbp: 0, ramburseaza: async () => {} }
+  const amountMinor = minorPentru(cheie)
+  if (amountMinor === null) return { ok: false, cod: 'invalid', motiv: `serviciu fără tarif definit: ${cheie}` }
+  if (amountMinor <= 0) return { ok: true, debitedMinor: 0, scazutGbp: 0, ramburseaza: async () => {} }
   // DEBIT ATOMIC: verifică soldul + scade într-o singură tranzacție (raceafe).
-  const rez = await debitWalletAtomar(email, lire, `tarif:${cheie}`)
-  if (!rez.ok) return { ok: false, motiv: rez.motiv }
+  const ref = `tarif:${cheie}:${eventKey}`
+  const rez = await debitWalletMinorAtomar(email, amountMinor, ref, `tarif:${cheie}`)
+  if (!rez.ok) return { ok: false, cod: rez.code, motiv: rez.motiv }
+  if (rez.duplicate) return { ok: false, cod: 'duplicate', motiv: 'cererea cu acest idempotency key există deja' }
+  const lire = amountMinor / 10 ** config.billing.minorUnit
   return {
     ok: true,
+    debitedMinor: rez.debitedMinor,
     scazutGbp: lire,
     // Rambursul intră prin grantCredit → ambele registre îl văd (nimic pe
     // ascuns); motivul rambursului rămâne în jurnalul serverului.
     ramburseaza: async () => {
-      console.error(`[tarife] ramburs £${lire.toFixed(2)} către ${email} — serviciul ${cheie} a picat după taxare`)
-      await grantCredit(email, lire)
+      const ok = await grantCreditMinor(email, amountMinor, `${ref}:refund`)
+      if (!ok) throw new Error(`refund_failed:${cheie}`)
     },
   }
 }

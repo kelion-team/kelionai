@@ -62,7 +62,7 @@ let cache: Repros[] = []
 export async function incarcaReprosuri(): Promise<void> {
   try {
     const raw = await loadKv(CHEIE_KV)
-    if (raw) cache = (JSON.parse(raw) as Repros[]).slice(-MAX_PASTRATE)
+    cache = raw ? (JSON.parse(raw) as Repros[]).slice(-MAX_PASTRATE) : []
   } catch {
     cache = []
   }
@@ -96,9 +96,4 @@ export function lectiiReprosuri(): string[] {
         ? `Când omul a cerut «${r.cerere}», ce ai făcut a fost RESPINS («${r.corectie}») — nu relua aceeași abordare, întreabă/țintește altfel.`
         : `Omul te-a corectat («${r.corectie}») — ține minte și nu repeta.`,
     )
-}
-
-/** Doar pentru teste: golește cache-ul între cazuri. */
-export function _reseteazaCache(): void {
-  cache = []
 }

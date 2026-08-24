@@ -114,7 +114,7 @@ interface FamiliePretentie {
 // e negație, nu pretenție) — aceeași lecție de diacritice ca la ACTION_INTENT.
 const FAMILII: readonly FamiliePretentie[] = [
   {
-    re: /(?<![-\p{L}])am\s+(generat|creat|f[ăa]cut|produs)\b[^.!?\n]{0,80}\b(clip|video)/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+(generat|creat|f[ăa]cut|produs)\b[^.!?\n]{0,80}\b(clip|video)/iu,
     unelte: ['generate_video'],
     eticheta: '„am generat clipul" — fără generate_video',
   },
@@ -124,59 +124,63 @@ const FAMILII: readonly FamiliePretentie[] = [
     eticheta: '„clipul e gata" — fără generate_video',
   },
   {
-    re: /(?<![-\p{L}])am\s+(generat|creat|desenat|f[ăa]cut)\b[^.!?\n]{0,80}\b(imagine|imaginea|poz[ăa]|poza|logo)/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+(generat|creat|desenat|f[ăa]cut)\b[^.!?\n]{0,80}\b(imagine|imaginea|poz[ăa]|poza|logo)/iu,
     unelte: ['generate_image'],
     eticheta: '„am generat imaginea" — fără generate_image',
   },
   {
-    re: /(?<![-\p{L}])am\s+trimis\b[^.!?\n]{0,60}\b(email|e-?mail)/iu,
+    // BUG REPARAT (23 aug, audit live): creierul a mințit „am trimis...către
+    // adrianenc11@gmail.com" — poarta NU l-a prins fiindcă pattern-ul vechi cerea
+    // cuvântul „email", dar textul conținea o ADRESĂ de email, nu cuvântul.
+    // Acum prinde ȘI cuvântul, ȘI adresa (x@x.x), ȘI „către"/„la" + adresă.
+    // Prinde ȘI pasivul („a fost trimis"/„s-a trimis") — a doua minciune dovedită
+    // live: creierul a chemat get_recent_emails dar a spus „a fost trimis cu succes".
+    re: /(?:(?<!n-)(?<!\p{L})am\s+trimis|[ai]\s+fost\s+trimis|s-?a\s+trimis)\b[^.!?\n]{0,60}(\b(email|e-?mail)\p{L}*|[\w.+-]+@[\w.-]+\.\w{2,}|c[ăa]tre|lucr)/iu,
     unelte: ['send_email'],
-    eticheta: '„am trimis emailul" — fără send_email',
+    eticheta: '„am trimis/a fost trimis emailul" — fără send_email',
   },
   {
-    re: /(?<![-\p{L}])am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\b(document\p{L}*|doc)\b/iu,
+    // ȘI activ (am creat), ȘI pasiv (a fost creat / s-a creat) — a doua minciune
+    // dovedită: creierul ocolea poarta prin pasiv.
+    re: /(?:(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)|[ai]\s+fost\s+(creat|f[ăa]cut)|s-?a\s+(creat|f[ăa]cut))\b[^.!?\n]{0,60}\b(document\p{L}*|doc)\b/iu,
     unelte: ['create_doc'],
-    eticheta: '„am creat documentul" — fără create_doc',
+    eticheta: '„am/a fost creat documentul" — fără create_doc',
   },
   {
-    re: /(?<![-\p{L}])am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\bprezentare/iu,
+    re: /(?:(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)|[ai]\s+fost\s+(creat|f[ăa]cut)|s-?a\s+(creat|f[ăa]cut))\b[^.!?\n]{0,60}\bprezentare/iu,
     unelte: ['create_presentation'],
-    eticheta: '„am creat prezentarea" — fără create_presentation',
+    eticheta: '„am/a fost creat prezentarea" — fără create_presentation',
   },
   {
-    re: /(?<![-\p{L}])am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\bformular/iu,
+    re: /(?:(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)|[ai]\s+fost\s+(creat|f[ăa]cut)|s-?a\s+(creat|f[ăa]cut))\b[^.!?\n]{0,60}\bformular/iu,
     unelte: ['create_form'],
-    eticheta: '„am creat formularul" — fără create_form',
+    eticheta: '„am/a fost creat formularul" — fără create_form',
   },
   {
-    re: /(?<![-\p{L}])am\s+(creat|f[ăa]cut)\b[^.!?\n]{0,60}\b(tabel|sheet)/iu,
+    re: /(?:(?<!n-)(?<!\p{L})am\s+(creat|f[ăa]cut)|[ai]\s+fost\s+(creat|f[ăa]cut)|s-?a\s+(creat|f[ăa]cut))\b[^.!?\n]{0,60}\b(tabel|sheet)/iu,
     unelte: ['create_sheet'],
-    eticheta: '„am creat tabelul" — fără create_sheet',
+    eticheta: '„am/a fost creat tabelul" — fără create_sheet',
   },
   {
-    re: /(?<![-\p{L}])am\s+urcat\b[^.!?\n]{0,60}\b(youtube|clipul)/iu,
+    re: /(?:(?<!n-)(?<!\p{L})am\s+urcat|[ai]\s+fost\s+urcat|s-?a\s+urcat)\b[^.!?\n]{0,60}\b(youtube|clipul)/iu,
     unelte: ['youtube_urca'],
-    eticheta: '„am urcat pe YouTube" — fără youtube_urca',
+    eticheta: '„am/a fost urcat pe YouTube" — fără youtube_urca',
   },
   // ÎNGHEȚUL DE 5 LUNI (owner, 16 aug 06:41, cu captura: „asa incremeneste,
   // nu face nimic mai departe... ai zis mincinos ca ai rezolvat"): fraza-ritual
   // „Am preluat cerința." poate fi SPUSĂ fără build_software — fără număr de
   // ordin, fără panou, fără lucrător. Preluarea nedovedită e minciună.
   {
-    re: /(?<![-\p{L}])am\s+preluat\b[^.!?\n]{0,40}\b(cerin|ordin)/iu,
+    re: /(?<!n-)(?<!\p{L})am\s+preluat\b[^.!?\n]{0,40}\b(cerin|ordin)/iu,
     unelte: ['build_software'],
     eticheta: '„am preluat cerința" — fără build_software (niciun ordin creat, nimic nu va mișca)',
   },
-  // AUDITUL INVENTAT (owner, 16 aug 06:56, cu captura: „asta e dovada mea ca
-  // ti-ai batut joc de mine" — un „audit al codului sursă" care numea modele
-  // ce NU EXISTĂ nicăieri în repo: claude-3-5-sonnet, gpt-4o). Singura scanare
-  // REALĂ a codului e poarta anti-hardcod rulată pe server (ruleaza_portile →
-  // 'hardcodari') sau verdictul ei din jurnal (jurnal_masuratori). Un „audit"
-  // povestit fără una din ele = inventat, se demască.
+  // Procesul web nu citește sau execută repository code. Numai rezultatul
+  // măsurat al unui job Constructor poate susține o afirmație despre audit.
   {
-    re: /((?<![-\p{L}])am\s+(scanat|auditat)|[îi]n\s+urma\s+(scan|audit)[ăa]?\p{L}*)\b[^.!?\n]{0,80}\b(cod|surs)/iu,
-    unelte: ['ruleaza_portile', 'jurnal_masuratori'],
-    eticheta: '„am scanat codul sursă" — fără ruleaza_portile/jurnal_masuratori: auditul e inventat',
+    re: /((?<!n-)(?<!\p{L})am\s+(scanat|auditat)|[îi]n\s+urma\s+(scan|audit)[ăa]?\p{L}*)\b[^.!?\n]{0,80}\b(cod|surs)/iu,
+    unelte: ['constructor_status'],
+    eticheta: '„am scanat codul sursă" — fără un rezultat Constructor măsurat: auditul e inventat',
   },
 ]
 

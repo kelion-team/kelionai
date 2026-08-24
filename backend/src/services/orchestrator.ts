@@ -1,14 +1,12 @@
 import { createHash } from 'node:crypto'
 import { rationeazaMesaje, rationeazaMesajeStream } from './creierRationament.js'
 import { OCHI_MARCAJ } from './brainContract.js'
-import type { AnthropicTool, OrMessage, OrToolCall } from './brainContract.js'
-import { GEMINI_DIRECT_PREFIX } from './geminiDirect.js'
+import type { BrainTool, OrChatResult, OrMessage, OrToolCall } from './brainContract.js'
 import { filtruRepetitie } from './fluxUnic.js'
-import { parseFakeToolCalls, stripToolMarkup } from './toolMarkup.js'
+import { stripToolMarkup } from './toolMarkup.js'
 
-// ── THE ORCHESTRATOR — one brain: GEMINI DIRECT ─────────────────────────────
-// (Extirparea OpenRouter/OpenAI, 3 aug: creierul e Gemini-ONLY.) Runs a
-// conversation WITH tool-use through the Gemini model (`google-direct/…`):
+// ── THE ORCHESTRATOR — OpenAI Responses ─────────────────────────────────────
+// Runs a conversation with tool use through the single product brain:
 // same tools, same persona (the system message), same memory (arriving in
 // `messages`). The loop: call the model → if it asks for tools, run them
 // (callback) → append the results → repeat, until the model gives a final
@@ -16,7 +14,9 @@ import { parseFakeToolCalls, stripToolMarkup } from './toolMarkup.js'
 
 export interface OrchestratorResult {
   text: string
-  costUsd: number
+  /** Reconciled financial cost when available. Raw usage is persisted per
+   * response; undefined must not be displayed as zero. */
+  costUsd?: number
   model: string
   rounds: number
   /** Numele uneltelor CHEMATE efectiv în tură (nu cele oferite) — ca gardele din
@@ -28,7 +28,7 @@ export interface OrchestratorOpts {
   maxRounds?: number
   maxTokens?: number
   temperature?: number
-  /** Internal reasoning for the thinking models (Fable/Claude/GPT-o). */
+  /** Internal reasoning effort for OpenAI Responses. */
   reasoning?: 'low' | 'medium' | 'high'
   /** ESCALADARE PE RUNDĂ (owner, 20 aug: „modelul ușor/greu"): obiect MUTABIL,
    *  ca `tools`. Când ușa `ask_brain` decide „e greu" LA MIJLOC, setează aici
@@ -58,6 +58,7 @@ export interface OrchestratorOpts {
   /** Grupează uneltele care nu au voie să își suprapună efectele. Fără grup,
    *  apelurile rămân paralele; aceeași grupă rulează în ordinea modelului. */
   grupExecutie?: (numeUnealta: string) => string | undefined
+  usageContext?: { userEmail: string; surface: string }
 }
 
 // Detects an ACTION claim ("am trimis/salvat/deschis/reparat...") — things
@@ -92,16 +93,16 @@ const ANALIZA_CLAIM_RE =
   /\b(?:o\s+s[ăa]\s+)?(?:analizez|verific|investighez|cercetez|examinez|studiez|inspectez)\b|\b(?:m[ăa]\s+uit|arunc\s+o\s+privire|dau\s+o\s+cautare|caut\s+prin|sap\s+in)\b|\b(?:let\s+me\s+)?(?:analy[sz]e|investigate|examine|inspect|look\s+into|take\s+a\s+look|check\s+the)\b|\bi(?:'|’)?ll\s+(?:analy[sz]e|check|look|investigate|examine)\b/i
 
 /**
- * @param model      Gemini-direct id (e.g. google-direct/gemini-2.5-flash)
+ * @param model      internal OpenAI id (e.g. openai/gpt-5.6-terra)
  * @param messages   the conversation (system + history + current turn)
- * @param tools      the tools in Anthropic format (the ones from chat.ts)
+ * @param tools      the canonical function-tool definitions from chat.ts
  * @param execTool   runs a tool: (name, argsJson) → text result
  */
 // OCHII PE REZULTAT (9 aug, ownerul: „sistemul nu dă lui Kelion poza reală
 // pentru analiză"): un rezultat de unealtă poate purta o captură reală după
 // OCHI_MARCAJ (browserul o lipește la fiecare pas). Textul curat intră ca
 // rezultat de unealtă, iar captura intră imediat după, ca IMAGINE într-un rând
-// user — modelul chiar O VEDE (geminiDirect o mapează pe inline_data), nu doar
+// user — modelul chiar O VEDE (Responses o mapează pe input_image), nu doar
 // primește un URL pe care nu-l poate privi.
 export function impingeRezultat(convo: OrMessage[], id: string, out: string): void {
   const taietura = out.indexOf(OCHI_MARCAJ)
@@ -122,6 +123,17 @@ export function impingeRezultat(convo: OrMessage[], id: string, out: string): vo
       },
     ],
   })
+}
+
+/** Appends the provider's exact output items. Reconstructing only text and
+ * function calls would discard encrypted reasoning required by stateless
+ * Responses tool loops. */
+function impingeRaspunsModel(convo: OrMessage[], result: OrChatResult): void {
+  if (result.responseItems.length) {
+    convo.push({ role: 'assistant', content: '', response_items: result.responseItems })
+  } else {
+    convo.push({ role: 'assistant', content: result.text ?? '', tool_calls: result.toolCalls })
+  }
 }
 
 /** Rulează apelurile independente împreună, dar păstrează ordinea pentru fiecare
@@ -236,14 +248,14 @@ function formaStabila(argsJson: string): string {
  *  să nu ținem în memorie fișiere întregi doar pentru comparație. */
 export function amprentaApeluri(apeluri: readonly ApelDeUnealta[]): string {
   if (!apeluri.length) return ''
-  const text = apeluri.map((a) => `${a.name}(${formaStabila(a.argsJson)})`).join('|')
-  return createHash('sha1').update(text).digest('hex')
+  const text = JSON.stringify(apeluri.map((a) => [a.name, formaStabila(a.argsJson)]))
+  return createHash('sha256').update(text).digest('hex')
 }
 
 /** Amprenta REZULTATELOR rundei — ce a aflat efectiv modelul. */
 export function amprentaIesiri(iesiri: readonly string[]): string {
   if (!iesiri.length) return ''
-  return createHash('sha1').update(iesiri.join('\u0000')).digest('hex')
+  return createHash('sha256').update(JSON.stringify(iesiri)).digest('hex')
 }
 
 export interface StareRepetitie {
@@ -272,13 +284,13 @@ export function pasRepetitie(
 export async function runOrchestrator(
   model: string,
   messages: OrMessage[],
-  tools: AnthropicTool[],
+  tools: BrainTool[],
   execTool: (name: string, argsJson: string) => Promise<string>,
   opts: OrchestratorOpts = {},
 ): Promise<OrchestratorResult> {
   const maxRounds = opts.maxRounds ?? 6
   const convo: OrMessage[] = [...messages]
-  let totalCost = 0
+  let totalCost: number | undefined
   let served = model
   // ALL spoken/displayed text, across all rounds (Jul 25): the intermediate
   // rounds ("wait, let me check...") flowed through onText and were SPOKEN,
@@ -310,7 +322,7 @@ export async function runOrchestrator(
   let stRepetitie = stareRepetitieInitiala()
   const rez = (text: string, rounds: number): OrchestratorResult => ({
     text,
-    costUsd: totalCost,
+    ...(typeof totalCost === 'number' ? { costUsd: totalCost } : {}),
     model: served,
     rounds,
     toolsCalled: [...uneltChemate],
@@ -359,9 +371,9 @@ export async function runOrchestrator(
       toolChoice,
       allowedFunctionNames,
     }
-    // Creierul e Gemini direct (google-direct/*). Alt prefix = eroare NUMITĂ.
-    if (!modelRunda.startsWith(GEMINI_DIRECT_PREFIX)) {
-      throw new Error(`model_necunoscut: „${modelRunda}" — aștept google-direct/*`)
+    const OPENAI_PREFIX = 'openai/'
+    if (!modelRunda.startsWith(OPENAI_PREFIX)) {
+      throw new Error(`model_necunoscut: „${modelRunda}" — este permis doar prefixul openai/`)
     }
     // PROFILING (Aug 2 — the 38-second weather turn): every brain round gets
     // its real duration in the log, so a slow turn shows WHERE the seconds go
@@ -381,6 +393,7 @@ export async function runOrchestrator(
         model: modelRunda,
         toolChoice: callOpts.toolChoice,
         allowedFunctionNames: callOpts.allowedFunctionNames,
+        usageContext: opts.usageContext,
       }
       res = onTextFiltrat
         ? await rationeazaMesajeStream(convo, onTextFiltrat, optR)
@@ -390,13 +403,13 @@ export async function runOrchestrator(
       // rundele 1..N-1 au fost apeluri REALE, plătite la Google, dar totalCost
       // era local și murea cu throw-ul — nici înregistrat, nici debitat.
       // Eroarea cară costul; catch-ul din chat.ts îl adună și îl înregistrează.
-      if (totalCost > 0 && e instanceof Error) {
+      if (typeof totalCost === 'number' && totalCost > 0 && e instanceof Error) {
         const purtator = e as Error & { costUsd?: number }
         purtator.costUsd = (purtator.costUsd ?? 0) + totalCost
       }
       throw e
     }
-    totalCost += res.costUsd
+    if (typeof res.costUsd === 'number') totalCost = (totalCost ?? 0) + res.costUsd
     served = res.model
     console.log(`[TIMP] ${served} runda ${round}: ${Date.now() - tRunda}ms (${res.toolCalls.length} apeluri de unelte)`)
     // Without streaming (background agents) the text doesn't go through the
@@ -409,7 +422,7 @@ export async function runOrchestrator(
     allText = flux.emis()
 
     // AUDIO-UL SE AUDE O SINGURĂ DATĂ (agenții de debug, 3 aug): blocul
-    // `audio_url` (sute de KB base64) rămânea în convo și se RE-URCA la Gemini
+    // `audio_url` (sute de KB base64) rămânea în convo și se reîncărca
     // la FIECARE rundă de unelte (până la 8) — lățime de bandă și latență
     // arse degeaba. După prima rundă modelul l-a auzit deja; rundele următoare
     // păstrează doar textul (transcriptul e oricum în mesaj).
@@ -433,67 +446,9 @@ export async function runOrchestrator(
     }
 
     if (res.toolCalls.length === 0) {
-      // ── THE FAKE-CALL INTERPRETER (Adrian, Aug 2) ──────────────────────────
-      //
-      // Him: "everything you give it by voice never reaches the brain; in
-      // writing it only says 'Am preluat sarcina'".
-      //
-      // Live cause (server journal): weak free models TYPE the tool call as
-      // text — `<|tool_call>call:system_health{}<tool_call|>` — instead of
-      // invoking it. The old path HID that text from the human and ended the
-      // turn empty: the ack was heard, then silence, and nothing was ever
-      // executed. Now we run what the model MEANT: parse the typed call (only
-      // names really offered this turn, only valid JSON args), execute it,
-      // hand the result back and let the turn continue — exactly as if the
-      // model had called the tool properly.
-      const fakeCalls = res.text
-        ? parseFakeToolCalls(res.text, new Set(tools.map((t) => t.name)))
-        : []
-      if (fakeCalls.length > 0) {
-        console.error(
-          `[orchestrator] runda ${round}: modelul a TASTAT apelul în loc să-l cheme ` +
-            `— îl execut eu (${fakeCalls.map((f) => f.name).join(', ')}) [${served}]`,
-        )
-        for (const f of fakeCalls) marcheazaChemata(f.name)
-        const calls: OrToolCall[] = fakeCalls.map((f, i) => ({
-          id: `fake_${round}_${i}`,
-          type: 'function',
-          function: { name: f.name, arguments: f.argsJson },
-        }))
-        // The assistant turn is kept with the markup STRIPPED — history must
-        // not teach the model that typing calls is the way to make them.
-        convo.push({ role: 'assistant', content: stripToolMarkup(res.text ?? ''), tool_calls: calls })
-        const iesiriF: string[] = []
-        for (const call of calls) {
-          let out = ''
-          try {
-            out = await execTool(call.function.name, call.function.arguments || '{}')
-          } catch (e) {
-            out = `tool_error: ${String(e).slice(0, 200)}`
-          }
-          impingeRezultat(convo, call.id, out)
-          iesiriF.push(out)
-        }
-        const rezProgF = pasProgres(stProgres, calls.map((c) => c.function.name), iesiriF)
-        stProgres = rezProgF.st
-        if (rezProgF.stop) {
-          console.error(`[orchestrator] runda ${round}: fără progres (${rezProgF.stop}) → opresc bucla (${served})`)
-          return rez(stripToolMarkup(allText), round)
-        }
-        // Aceeași gardă de învârtit în loc ca pe calea apelurilor reale: apeluri
-        // identice care întorc rezultate identice = model blocat.
-        const rezRepF = pasRepetitie(
-          stRepetitie,
-          fakeCalls.map((f) => ({ name: f.name, argsJson: f.argsJson })),
-          iesiriF,
-        )
-        stRepetitie = rezRepF.st
-        if (rezRepF.stop) {
-          console.error(`[orchestrator] runda ${round}: ${rezRepF.stop} → opresc bucla (${served})`)
-          return rez(stripToolMarkup(allText), round)
-        }
-        continue
-      }
+      // Text that resembles a tool call is untrusted model output. It may be
+      // hidden from the UI, but it is never parsed or executed. Effects are
+      // allowed only for structured Responses `function_call` items below.
       // THE DEED GATE (Adrian, Jul 27): if the model says it DID an action
       // ("am trimis/salvat/reparat...") but NEVER called any tool in the whole
       // turn, it's not a deed — it's empty talk. We force it once to execute or
@@ -505,7 +460,7 @@ export async function runOrchestrator(
         DEED_CLAIM_RE.test(res.text || '')
       ) {
         deedGateUsed = true
-        convo.push({ role: 'assistant', content: res.text ?? '' })
+        impingeRaspunsModel(convo, res)
         convo.push({
           role: 'user',
           content:
@@ -513,7 +468,7 @@ export async function runOrchestrator(
             '„Deschid Gmail", „am trimis"), dar nu ai chemat nicio unealtă de ' +
             'EXECUȚIE — a arăta ceva pe monitor (show_document) NU e execuție. ' +
             'Deci acțiunea NU s-a întâmplat. Ori cheamă ACUM unealta care execută ' +
-            'cu adevărat (build_software, repo_write, send_email, run_runbook…), ' +
+            'cu adevărat (build_software, send_email…), ' +
             'ori retrage sincer afirmația și spune clar ce nu poți face și de ce.',
         })
         continue
@@ -538,14 +493,14 @@ export async function runOrchestrator(
         ANALIZA_CLAIM_RE.test(res.text || '')
       ) {
         analizaGateUsed = true
-        convo.push({ role: 'assistant', content: res.text ?? '' })
+        impingeRaspunsModel(convo, res)
         convo.push({
           role: 'user',
           content:
             'POARTA ANALIZEI: ai spus că analizezi / te uiți / verifici, dar ' +
             'n-ai chemat NICIO unealtă — deci nu te-ai uitat la nimic. ' +
-            'Fă-o ACUM, cu uneltele tale (read_source, search_source, db_query, ' +
-            'system_health, runbook_log — ce se potrivește), și PUNE PE MONITOR ' +
+            'Fă-o ACUM cu o unealtă disponibilă și autorizată (de exemplu ' +
+            'system_health pentru stare sau build_software pentru un ordin de cod) și PUNE PE MONITOR ' +
             'ce faci, cu show_document: ce ai deschis, ce ai găsit, unde anume ' +
             '(fișier și linie). Munca se VEDE în timp ce se face, nu se ' +
             'povestește după. Dacă nu ai cu ce să analizezi, spune clar asta ' +
@@ -560,14 +515,14 @@ export async function runOrchestrator(
       // spună cinstit „nu pot". Perechea reală a lui forceToolNames.
       if (opts.actiuneCeruta && !actiuneGateUsed && !anyFaptaToolCalled) {
         actiuneGateUsed = true
-        convo.push({ role: 'assistant', content: res.text ?? '' })
+        impingeRaspunsModel(convo, res)
         convo.push({
           role: 'user',
           content:
             'POARTA ACȚIUNII: ți-am cerut să FACI ceva, dar n-ai chemat nicio ' +
             'unealtă care execută cu adevărat — a arăta un card pe monitor NU e ' +
             'execuție, e doar afișare. Cheamă ACUM unealta care chiar face lucrul ' +
-            '(ex. build_software pentru cod, repo_write, run_runbook, send_email, ' +
+            '(ex. build_software pentru cod sau send_email, ' +
             'cerinta_noua urmată de build), pe cererea de mai sus. Dacă întradevăr ' +
             'nu se poate, spune clar de ce — nu inventa un card cu „în lucru".',
         })
@@ -579,8 +534,9 @@ export async function runOrchestrator(
     }
 
     for (const c of res.toolCalls) marcheazaChemata(c.function.name)
-    // The assistant message ASKING for the tools (keeps tool_calls for linkage).
-    convo.push({ role: 'assistant', content: res.text ?? '', tool_calls: res.toolCalls })
+    // Preserve the complete provider output (including encrypted reasoning)
+    // before appending function_call_output items.
+    impingeRaspunsModel(convo, res)
     // Citirile independente rămân paralele pentru latență. Scrierile, browserul
     // și orice unealtă fără politică explicită intră în coada grupului lor, în
     // ordinea modelului — o rundă nu mai presupune că două efecte coexistă doar

@@ -1,21 +1,24 @@
 {
   "name": "ios",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Kelionai iOS cu bundle web local și autentificare în browserul sistemului.",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "bundle:web": "npm --prefix ../frontend run build && node ../scripts/genereaza-config-platforme.mjs --target ios && node ../scripts/pregateste-bundle-nativ.mjs --target ios",
+    "sync": "npm run bundle:web && cap sync ios",
+    "verify": "node ../scripts/verifica-clienti-nativi.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@capacitor/cli": "^8.4.1",
-    "@capacitor/core": "^8.4.1",
-    "@capacitor/ios": "^8.4.1"
+    "@capacitor/app": "8.1.1",
+    "@capacitor/browser": "8.0.4",
+    "@capacitor/core": "8.4.2",
+    "@capacitor/ios": "8.4.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.4.2",
     "typescript": "^6.0.3"
   }
 }

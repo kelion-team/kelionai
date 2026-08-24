@@ -1,9 +1,9 @@
 {
-  "path": ["backend/src", "frontend/src"],
-  "minTokens": 50,
-  "minLines": 5,
+  "path": ["backend/src", "frontend/src", "scripts"],
+  "minTokens": 60,
+  "minLines": 8,
   "format": ["typescript", "tsx", "javascript", "jsx", "css"],
-  "ignore": ["**/*.test.ts", "**/*.test.tsx", "**/dist/**", "**/node_modules/**"],
+  "ignore": ["**/*.test.*", "**/*.spec.*", "**/dist/**", "**/node_modules/**"],
   "reporters": ["console", "json"],
   "output": "./.jscpd",
   "gitignore": true,

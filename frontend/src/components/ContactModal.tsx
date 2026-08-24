@@ -1,5 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { LANG_OPTIONS } from '../lib/langList'
+import { productConfig } from '../lib/productConfig'
+import { apiFetch } from '../lib/transport'
+import { createRetryIdempotencyLease } from '../lib/retryIdempotency'
 
 // The public contact form. A language selector offers EVERY language; the
 // chosen one is the language Kelion replies in. The form's own labels are
@@ -47,11 +50,11 @@ const T: Record<Lang, Strings> = {
     subjectPh: 'A brief line about your enquiry',
     message: 'Message',
     messagePh: 'Dear Kelionai,',
-    secure: 'Sent securely to contact@kelionai.app',
+    secure: `Sent securely to ${productConfig.supportEmail}`,
     send: 'Send message',
     sending: 'Sending…',
     sentTitle: 'Thank you',
-    sentBody: 'Your message has been received. We will reply to you shortly, in your language.',
+    sentBody: 'Your message is stored securely for the support team.',
     close: 'Close',
     errEmail: 'Please enter a valid email and a message.',
     errSend: 'Could not send — the server did not confirm. Please try again.',
@@ -70,11 +73,11 @@ const T: Record<Lang, Strings> = {
     subjectPh: 'Un rând scurt despre solicitare',
     message: 'Mesaj',
     messagePh: 'Dragă Kelionai,',
-    secure: 'Trimis securizat la contact@kelionai.app',
+    secure: `Trimis securizat la ${productConfig.supportEmail}`,
     send: 'Trimite mesajul',
     sending: 'Se trimite…',
     sentTitle: 'Mulțumim',
-    sentBody: 'Mesajul tău a fost primit. Îți vom răspunde în scurt timp, în limba ta.',
+    sentBody: 'Mesajul tău este stocat în siguranță pentru echipa de suport.',
     close: 'Închide',
     errEmail: 'Introdu un email valid și un mesaj.',
     errSend: 'Nu s-a putut trimite — serverul n-a confirmat. Încearcă din nou.',
@@ -93,11 +96,11 @@ const T: Record<Lang, Strings> = {
     subjectPh: 'Une brève ligne sur votre demande',
     message: 'Message',
     messagePh: 'Cher Kelionai,',
-    secure: 'Envoyé en toute sécurité à contact@kelionai.app',
+    secure: `Envoyé en toute sécurité à ${productConfig.supportEmail}`,
     send: 'Envoyer le message',
     sending: 'Envoi…',
     sentTitle: 'Merci',
-    sentBody: 'Votre message a été reçu. Nous vous répondrons sous peu, dans votre langue.',
+    sentBody: 'Votre message est conservé en toute sécurité pour l’équipe d’assistance.',
     close: 'Fermer',
     errEmail: 'Veuillez saisir un e-mail valide et un message.',
     errSend: 'Échec de l’envoi — le serveur n’a pas confirmé. Réessayez.',
@@ -116,11 +119,11 @@ const T: Record<Lang, Strings> = {
     subjectPh: 'Una breve línea sobre tu consulta',
     message: 'Mensaje',
     messagePh: 'Estimado Kelionai,',
-    secure: 'Enviado de forma segura a contact@kelionai.app',
+    secure: `Enviado de forma segura a ${productConfig.supportEmail}`,
     send: 'Enviar mensaje',
     sending: 'Enviando…',
     sentTitle: 'Gracias',
-    sentBody: 'Tu mensaje ha sido recibido. Te responderemos en breve, en tu idioma.',
+    sentBody: 'Tu mensaje se ha guardado de forma segura para el equipo de soporte.',
     close: 'Cerrar',
     errEmail: 'Introduce un correo válido y un mensaje.',
     errSend: 'No se pudo enviar — el servidor no confirmó. Inténtalo de nuevo.',
@@ -139,11 +142,11 @@ const T: Record<Lang, Strings> = {
     subjectPh: 'Eine kurze Zeile zu Ihrem Anliegen',
     message: 'Nachricht',
     messagePh: 'Sehr geehrtes Kelionai,',
-    secure: 'Sicher gesendet an contact@kelionai.app',
+    secure: `Sicher gesendet an ${productConfig.supportEmail}`,
     send: 'Nachricht senden',
     sending: 'Senden…',
     sentTitle: 'Vielen Dank',
-    sentBody: 'Ihre Nachricht ist eingegangen. Wir antworten Ihnen in Kürze in Ihrer Sprache.',
+    sentBody: 'Ihre Nachricht wurde sicher für das Support-Team gespeichert.',
     close: 'Schließen',
     errEmail: 'Bitte geben Sie eine gültige E-Mail und eine Nachricht ein.',
     errSend: 'Senden fehlgeschlagen — der Server hat nicht bestätigt. Bitte erneut versuchen.',
@@ -162,11 +165,11 @@ const T: Record<Lang, Strings> = {
     subjectPh: 'Una breve riga sulla tua richiesta',
     message: 'Messaggio',
     messagePh: 'Gentile Kelionai,',
-    secure: 'Inviato in modo sicuro a contact@kelionai.app',
+    secure: `Inviato in modo sicuro a ${productConfig.supportEmail}`,
     send: 'Invia messaggio',
     sending: 'Invio…',
     sentTitle: 'Grazie',
-    sentBody: 'Il tuo messaggio è stato ricevuto. Ti risponderemo a breve, nella tua lingua.',
+    sentBody: 'Il tuo messaggio è archiviato in modo sicuro per il team di assistenza.',
     close: 'Chiudi',
     errEmail: 'Inserisci un’email valida e un messaggio.',
     errSend: 'Invio non riuscito — il server non ha confermato. Riprova.',
@@ -185,11 +188,11 @@ const T: Record<Lang, Strings> = {
     subjectPh: 'Uma breve linha sobre o seu pedido',
     message: 'Mensagem',
     messagePh: 'Caro Kelionai,',
-    secure: 'Enviado com segurança para contact@kelionai.app',
+    secure: `Enviado com segurança para ${productConfig.supportEmail}`,
     send: 'Enviar mensagem',
     sending: 'A enviar…',
     sentTitle: 'Obrigado',
-    sentBody: 'A sua mensagem foi recebida. Responderemos em breve, no seu idioma.',
+    sentBody: 'A sua mensagem foi guardada com segurança para a equipa de suporte.',
     close: 'Fechar',
     errEmail: 'Introduza um email válido e uma mensagem.',
     errSend: 'Não foi possível enviar — o servidor não confirmou. Tente novamente.',
@@ -210,6 +213,7 @@ export default function ContactModal({ onClose }: { readonly onClose: () => void
   const [message, setMessage] = useState('')
   const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle')
   const [err, setErr] = useState('')
+  const pendingSubmission = useRef(createRetryIdempotencyLease())
   const t = T[lang] ?? T.en
 
   async function submit(): Promise<void> {
@@ -220,23 +224,26 @@ export default function ContactModal({ onClose }: { readonly onClose: () => void
     }
     setState('sending')
     try {
-      const res = await fetch('/api/contact', {
+      const payload = {
+        department: T.en.depts[dept],
+        name,
+        email,
+        subject,
+        message,
+        lang,
+      }
+      const fingerprint = JSON.stringify(payload)
+      const submissionId = pendingSubmission.current.keyFor(fingerprint)
+      const res = await apiFetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          department: T.en.depts[dept], // canonical (English) for routing
-          name,
-          email,
-          subject,
-          message,
-          lang,
+          ...payload,
+          submissionId,
         }),
       })
-      // NU mai mințim „primit" (audit fake, 20 aug): fără confirmarea serverului
-      // (res.ok), mesajul S-A PIERDUT — nu există coadă/retry pe client, iar
-      // „am primit mesajul" ar fi o minciună pe un formular public. Pe eșec:
-      // rămânem pe formular și spunem cinstit să reîncerce.
       if (!res.ok) throw new Error(String(res.status))
+      pendingSubmission.current.complete(fingerprint)
       setState('sent')
     } catch {
       setState('idle')

@@ -29,35 +29,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { RADACINA, porneste } from './lib/server-proba.mjs'
+import { listaFisiereCod } from './lib/fisiere-cod.mjs'
 
 const PORT = Number(process.env.PROBA_PORT || 18101)
-
-function fisiere(dir) {
-  const out = []
-  const mers = (d) => {
-    let intrari
-    try {
-      intrari = fs.readdirSync(d, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const it of intrari) {
-      if (it.name === 'node_modules' || it.name === 'dist' || it.name.startsWith('.')) continue
-      const p = path.join(d, it.name)
-      if (it.isDirectory()) mers(p)
-      else if (it.name.endsWith('.ts') && !it.name.endsWith('.test.ts')) out.push(p)
-    }
-  }
-  mers(dir)
-  return out
-}
 
 /** Rutele care SCRIU, din cod. Aceeași lecție ca la GET: se cere `(` după verb
  *  (eventual cu generice TS între), altfel `.delete(` din `Set.delete(x)` intră
  *  în listă ca rută. */
 function ruteScriere() {
   const rute = new Map()
-  for (const f of fisiere(path.join(RADACINA, 'backend/src'))) {
+  for (const f of listaFisiereCod(path.join(RADACINA, 'backend/src'), ['.ts'], { ignoraTeste: true })) {
     let src
     try {
       src = fs.readFileSync(f, 'utf8')
@@ -81,17 +62,17 @@ const concret = (r) => r.replace(/:[A-Za-z_]+/g, 'proba')
 // Rutele astea NU au voie să răspundă 2xx fără bilet. Lista e pe prefixe, ca o
 // rută nouă de admin să intre automat sub gard — nu prin ținere de minte.
 const PRIVILEGIAT = [
-  '/api/admin/',
-  '/api/enterprise/',
-  '/api/me/',
-  '/api/prefs',
-  '/api/notes',
-  '/api/voiceprint/',
-  '/api/billing/',
-  '/api/models/',
-  '/api/tranzactii/',
+  /^\/api\/admin(?:\/|$)/,
+  /^\/api\/enterprise(?:\/|$)/,
+  /^\/api\/me(?:\/|$)/,
+  /^\/api\/prefs(?:\/|$)/,
+  /^\/api\/notes(?:\/|$)/,
+  /^\/api\/voiceprint(?:\/|$)/,
+  /^\/api\/billing(?:\/|$)/,
+  /^\/api\/models(?:\/|$)/,
+  /^\/api\/tranzactii(?:\/|$)/,
 ]
-const ePrivilegiat = (cale) => PRIVILEGIAT.some((p) => cale.startsWith(p))
+const ePrivilegiat = (cale) => PRIVILEGIAT.some((tipar) => tipar.test(cale))
 
 // ── CORPURI ──────────────────────────────────────────────────────────────────
 // Implicit `{}`: o rută care validează și răspunde 400 e SĂNĂTOASĂ — a rulat,
