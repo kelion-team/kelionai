@@ -222,7 +222,9 @@ jobs:
               -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
               "$VPS_USER@$VPS_HOST" "$@"
           }
-          encode() { printf '%s=%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
+          # ':' nu face parte din alfabetul base64. Cu '=' ca separator, Bash
+          # poate elimina paddingul final '=' când face split prin IFS.
+          encode() { printf '%s:%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 
           {
             encode openai-project-key "$OPENAI_API_KEY"
@@ -249,7 +251,7 @@ jobs:
               chmod 0440 "$temporary_proof_key"
               mv "$temporary_proof_key" /root/kelion/secrets/migration-backup-proof-key
             fi
-            while IFS="=" read -r name encoded; do
+            while IFS=":" read -r name encoded; do
               case "$name" in
                 openai-project-key|database-url|session-secret|google-client-secret|google-token-encryption-key|codex-worker-secret|constructor-publisher-secret|constructor-release-secret|browser-worker-secret|converter-worker-secret|revolut-merchant-secret-key|revolut-webhook-signing-secret|vapid-private-key) ;;
                 *) exit 1 ;;
