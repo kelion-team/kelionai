@@ -11,6 +11,7 @@ android/app/build/
 *.log
 .DS_Store
 backend/dist/
+frontend/.tmp/
 frontend/dist/
 ios/native-dist/
 desktop/dist/

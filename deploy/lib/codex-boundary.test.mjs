@@ -67,3 +67,17 @@ test('imaginea de porți autorizează numai worktree-ul copiat', () => {
   assert.match(gates, /^export GIT_CONFIG_VALUE_0="\$WORK"$/m)
   assert.doesNotMatch(gates, /safe\.directory\s*[=*]\s*\*/)
 })
+
+test('metadatele TypeScript rămân în worktree-ul temporar, nu în dependențele read-only', () => {
+  const ignore = read('.gitignore')
+
+  for (const path of ['frontend/tsconfig.app.json', 'frontend/tsconfig.node.json']) {
+    const buildInfo = read(path).match(/"tsBuildInfoFile"\s*:\s*"([^"]+)"/)?.[1]
+
+    assert.equal(typeof buildInfo, 'string')
+    assert.match(buildInfo, /^\.\/\.tmp\/[^/]+\.tsbuildinfo$/)
+    assert.doesNotMatch(buildInfo, /node_modules/)
+  }
+
+  assert.match(ignore, /^frontend\/\.tmp\/$/m)
+})
