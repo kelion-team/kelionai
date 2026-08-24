@@ -75,6 +75,11 @@ describe('ack-ul instant NU e răspunsul (cauza exactă a „am preluat sarcina"
   it('plasa anti-tăcere rămâne ultima linie: orice tură fără conținut primește mesaj onest', () => {
     expect(sursaChat).toMatch(/if \(!sawVisible\) \{[\s\S]{0,400}Încearcă din nou în câteva secunde\./)
   })
+
+  it('plasa OpenAI nu atribuie model gol când catalogul nu poate fi citit', () => {
+    expect(sursaChat).toContain('else if ((!eOpenAI || profund) && profund !== orchestratorModel) {')
+    expect(sursaChat).not.toContain('else if (profund !== orchestratorModel) {')
+  })
 })
 
 describe('jurnalul uneltelor acoperă toate ramurile executorului', () => {

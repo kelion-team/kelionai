@@ -1500,8 +1500,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // reply the client never read. It mirrors the client's STOP_CMD regex:
     // acknowledge briefly, zero model, zero history.
     const lastMsg = messages.at(-1)
-    // reutilizare-permis: expresia este contractul local al comenzii de oprire;
-    // clientul o oglindește intenționat pentru a opri tura înainte de server.
     const STOP_CMD =
       /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
     if (lastMsg?.role === 'user' && STOP_CMD.test(lastMsg.content)) {
@@ -3921,7 +3919,7 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
             console.error(`[PROFUNDUL EPUIZAT] ${profund} a picat → cad pe fața rapidă ${rapidReal}`)
             await incearcaPlasa()
           }
-        } else if (profund !== orchestratorModel) {
+        } else if ((!eOpenAI || profund) && profund !== orchestratorModel) {
           const modelRapid = orchestratorModel
           orchestratorModel = profund // runBrainOnce + reasoning citesc valoarea nouă
           // Golim escaladarea: un `escaladare.model` rămas (alt model greu) ar
