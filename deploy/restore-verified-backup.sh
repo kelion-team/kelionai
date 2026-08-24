@@ -449,17 +449,19 @@ export PGHOST=$pg_host PGPORT=$pg_port PGUSER=$database_user PGPASSFILE=$pgpass_
 export PGCONNECT_TIMEOUT=10 PGAPPNAME=kelion-verified-restore
 unset PGPASSWORD DATABASE_URL DATABASE_URL_FILE
 
-# Verify the authenticated archive without leaving a plaintext dump behind.
-# The restore path decrypts persistently only after every read-only prerequisite
-# below has passed; --preflight never writes plaintext backup material.
-set +e
-openssl enc -d -aes-256-cbc -pbkdf2 \
-  -in "$backup_path" -pass file:"$encryption_key_file" 2>>"$diagnostic_file" \
-  | pg_restore --list >/dev/null 2>>"$diagnostic_file"
-archive_pipeline_status=("${PIPESTATUS[@]}")
-set -e
-[ "${archive_pipeline_status[0]}" -eq 0 ] || fail restore_backup_decryption_failed
-[ "${archive_pipeline_status[1]}" -eq 0 ] || fail restore_dump_format_invalid
+# pg_restore can stop reading a custom archive after its TOC, which would send
+# SIGPIPE to a streaming decryptor. Decrypt exactly once into the root-only
+# work directory, validate the complete file, then reuse it for restore. In
+# --preflight the EXIT cleanup removes it without any database mutation.
+if ! openssl enc -d -aes-256-cbc -pbkdf2 \
+  -in "$backup_path" -pass file:"$encryption_key_file" -out "$plaintext_dump" \
+  2>"$diagnostic_file"; then
+  fail restore_backup_decryption_failed
+fi
+chmod 0400 "$plaintext_dump"
+if ! pg_restore --list < "$plaintext_dump" >/dev/null 2>"$diagnostic_file"; then
+  fail restore_dump_format_invalid
+fi
 
 if ! preflight=$(psql_admin \
   --set=target_database="$database" \
@@ -542,12 +544,6 @@ if [ "$operation_mode" = preflight ]; then
   exit 0
 fi
 
-if ! openssl enc -d -aes-256-cbc -pbkdf2 \
-  -in "$backup_path" -pass file:"$encryption_key_file" -out "$plaintext_dump" \
-  2>"$diagnostic_file"; then
-  fail restore_backup_decryption_failed
-fi
-chmod 0400 "$plaintext_dump"
 postgres_ready=1
 
 if ! psql_admin --set=scratch_database="$scratch_database" --set=database_owner="$database_user" \
