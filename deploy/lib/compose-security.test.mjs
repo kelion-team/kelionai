@@ -84,4 +84,10 @@ test('CI inițializează starea release deținută de root prin sudo', () => {
     prVerify,
     /printf '%s\\n' inactive > \/tmp\/kelion-ci-runtime\/release-state\/active/,
   )
+  assert.match(
+    prVerify,
+    /sudo find \/tmp\/kelion-ci-secrets -mindepth 1 -maxdepth 1 -type f -exec chown root:10050 \{\} \+ -exec chmod 0440 \{\} \+/,
+  )
+  assert.doesNotMatch(prVerify, /sudo chmod 0440 \/tmp\/kelion-ci-secrets\/\*/)
+  assert.match(prVerify, /sudo chmod 0644 \/tmp\/kelion-ci-config\/runtime\.env/)
 })
