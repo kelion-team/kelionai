@@ -16,6 +16,7 @@ BUNDLE_DIRECTORY=$(cd -- "$(dirname -- "$0")" && pwd -P)
 VALIDATOR=$BUNDLE_DIRECTORY/lib/restore-verified-backup.mjs
 
 error_code=restore_failed
+operation_mode=restore
 completed=0
 postgres_ready=0
 swap_started=0
@@ -39,6 +40,83 @@ need() {
 psql_admin() {
   PGDATABASE=postgres psql -X --no-psqlrc --quiet --no-align --tuples-only \
     --set ON_ERROR_STOP=1 "$@"
+}
+
+# Read-only contract shared by preflight on the live legacy database and by
+# recovery on the restored scratch database. A zero result proves that every
+# required object is a public table/partitioned table with the expected column.
+verify_legacy_contract() {
+  local contract_database=$1 missing_count
+  missing_count=$(PGDATABASE="$contract_database" psql \
+    -X --no-psqlrc --quiet --no-align --tuples-only --set ON_ERROR_STOP=1 <<'SQL'
+WITH required(table_name, column_name) AS (
+  VALUES
+    ('messages', 'id'), ('messages', 'user_email'), ('messages', 'role'),
+    ('messages', 'content'), ('messages', 'created_at'),
+    ('user_prefs', 'user_email'),
+    ('wallets', 'user_email'), ('wallets', 'balance'), ('wallets', 'currency'),
+    ('wallets', 'topup_ref'),
+    ('billing_events', 'id'), ('billing_events', 'user_email'),
+    ('billing_events', 'kind'), ('billing_events', 'amount'),
+    ('billing_events', 'ref'), ('billing_events', 'created_at'),
+    ('transactions', 'id'), ('transactions', 'user_id'), ('transactions', 'amount'),
+    ('transactions', 'credits'), ('transactions', 'status'),
+    ('transactions', 'payment_ref'), ('transactions', 'created_at'),
+    ('cost_events', 'id'), ('cost_events', 'user_email'), ('cost_events', 'kind'),
+    ('cost_events', 'cost_usd'), ('cost_events', 'created_at'),
+    ('memories', 'user_email'), ('memories', 'content'),
+    ('google_accounts', 'email'), ('google_accounts', 'refresh_token'),
+    ('local_accounts', 'email'), ('local_accounts', 'pass_hash'),
+    ('visits', 'id'), ('visits', 'fingerprint'), ('visits', 'ip'),
+    ('visits', 'country'), ('visits', 'country_code'), ('visits', 'city'),
+    ('visits', 'region'), ('visits', 'isp'), ('visits', 'tz'),
+    ('visits', 'browser'), ('visits', 'os'), ('visits', 'device'),
+    ('visits', 'lang'), ('visits', 'referrer'), ('visits', 'is_bot'),
+    ('visits', 'started_at'), ('visits', 'user_email'),
+    ('visits', 'last_seen_at'), ('visits', 'actions'),
+    ('visits', 'photo_url'), ('visits', 'pages'),
+    ('demo_uses', 'id'), ('demo_uses', 'fingerprint'), ('demo_uses', 'ip'),
+    ('demo_uses', 'country'), ('demo_uses', 'country_code'),
+    ('demo_uses', 'city'), ('demo_uses', 'region'), ('demo_uses', 'isp'),
+    ('demo_uses', 'tz'), ('demo_uses', 'browser'), ('demo_uses', 'os'),
+    ('demo_uses', 'device'), ('demo_uses', 'lang'),
+    ('demo_uses', 'referrer'), ('demo_uses', 'is_bot'),
+    ('demo_uses', 'started_at'), ('demo_uses', 'session_email'),
+    ('app_files', 'name'), ('app_files', 'content'),
+    ('app_files', 'content_type'), ('app_files', 'updated_at'),
+    ('app_downloads', 'id'), ('app_downloads', 'file'),
+    ('app_downloads', 'user_email'), ('app_downloads', 'ip'),
+    ('app_downloads', 'country'), ('app_downloads', 'ua'),
+    ('app_downloads', 'created_at'),
+    ('client_errors', 'id'), ('client_errors', 'type'),
+    ('client_errors', 'message'), ('client_errors', 'stack'),
+    ('client_errors', 'url'), ('client_errors', 'ip'),
+    ('client_errors', 'created_at'),
+    ('voiceprints', 'user_email'), ('voiceprints', 'name'),
+    ('voiceprints', 'gender'), ('voiceprints', 'is_admin'),
+    ('voiceprints', 'features'), ('voiceprints', 'feature_meta'),
+    ('voiceprints', 'audio_clip'), ('voiceprints', 'created_at'),
+    ('voiceprints', 'updated_at')
+), missing AS (
+  SELECT required.table_name, required.column_name
+  FROM required
+  LEFT JOIN information_schema.columns actual
+    ON actual.table_schema = 'public'
+   AND actual.table_name = required.table_name
+   AND actual.column_name = required.column_name
+  WHERE actual.column_name IS NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_class relation
+       JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+       WHERE namespace.nspname = 'public'
+         AND relation.relname = required.table_name
+         AND relation.relkind IN ('r', 'p')
+     )
+)
+SELECT count(*) FROM missing;
+SQL
+  ) || return 1
+  [ "$missing_count" = 0 ]
 }
 
 database_state() {
@@ -71,26 +149,50 @@ SELECT json_build_object(
 SQL
 }
 
+verify_lock_fd_identity() {
+  local fd=$1 path=$2 label=$3 fd_path fd_target fd_identity path_identity
+  fd_path=/proc/self/fd/$fd
+  [ -e "$fd_path" ] || fail "${label}_lock_fd_missing"
+  [ -f "$path" ] && [ ! -L "$path" ] || fail "${label}_lock_file_invalid"
+  [ -f "$fd_path" ] || fail "${label}_lock_fd_invalid"
+  fd_target=$(readlink -- "$fd_path") || fail "${label}_lock_fd_invalid"
+  [ "$fd_target" = "$path" ] || fail "${label}_lock_fd_path_mismatch"
+  fd_identity=$(stat -Lc '%d:%i' -- "$fd_path") || fail "${label}_lock_fd_invalid"
+  path_identity=$(stat -Lc '%d:%i' -- "$path") || fail "${label}_lock_file_invalid"
+  [ "$fd_identity" = "$path_identity" ] || fail "${label}_lock_fd_mismatch"
+  [ "$(stat -Lc '%h' -- "$fd_path")" = 1 ] || fail "${label}_lock_file_invalid"
+}
+
+verify_lock_fd() {
+  local fd=$1 path=$2 label=$3 lock_metadata
+  verify_lock_fd_identity "$fd" "$path" "$label"
+  lock_metadata=$(stat -Lc '%u:%g:%a:%h' -- "/proc/self/fd/$fd") \
+    || fail "${label}_lock_file_invalid"
+  [ "$lock_metadata" = '0:0:600:1' ] || fail "${label}_lock_file_invalid"
+}
+
+normalize_lock_fd() {
+  local fd=$1 path=$2 label=$3 fd_path
+  fd_path=/proc/self/fd/$fd
+  verify_lock_fd_identity "$fd" "$path" "$label"
+  chown 0:0 -- "$fd_path" || fail "${label}_lock_metadata_normalization_failed"
+  chmod 0600 -- "$fd_path" || fail "${label}_lock_metadata_normalization_failed"
+  verify_lock_fd "$fd" "$path" "$label"
+}
+
 verify_publication_lock_fd() {
-  local fd_identity path_identity lock_metadata
-  [ -e /proc/self/fd/8 ] || fail inherited_publication_lock_fd_missing
-  [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
-    || fail publication_lock_file_invalid
-  fd_identity=$(stat -Lc '%d:%i' -- /proc/self/fd/8) \
-    || fail inherited_publication_lock_fd_invalid
-  path_identity=$(stat -Lc '%d:%i' -- "$PUBLICATION_LOCK") \
-    || fail publication_lock_file_invalid
-  [ "$fd_identity" = "$path_identity" ] || fail inherited_publication_lock_fd_mismatch
-  lock_metadata=$(stat -Lc '%u:%g:%a:%h' -- "$PUBLICATION_LOCK") \
-    || fail publication_lock_file_invalid
-  [ "$lock_metadata" = '0:0:600:1' ] || fail publication_lock_file_invalid
+  verify_lock_fd 8 "$PUBLICATION_LOCK" publication
 }
 
 acquire_publication_lock() {
   case "${KELION_PUBLICATION_LOCK_HELD:-0}" in
     0)
-      exec 8>"$PUBLICATION_LOCK"
-      verify_publication_lock_fd
+      if [ -e "$PUBLICATION_LOCK" ] || [ -L "$PUBLICATION_LOCK" ]; then
+        [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
+          || fail publication_lock_file_invalid
+      fi
+      exec 8<>"$PUBLICATION_LOCK"
+      normalize_lock_fd 8 "$PUBLICATION_LOCK" publication
       ;;
     1)
       # deploy.sh owns FD 8 already. Bash children inherit the same open file
@@ -197,7 +299,7 @@ on_exit() {
   local rc=$?
   trap - EXIT HUP INT TERM
   set +e
-  if [ "$rc" -ne 0 ] && [ "$postgres_ready" = 1 ]; then
+  if [ "$rc" -ne 0 ] && [ "$postgres_ready" = 1 ] && [ "$operation_mode" = restore ]; then
     if [ "$swap_started" = 1 ]; then
       if ! rollback_swap >/dev/null 2>&1; then
         error_code=restore_rollback_failed
@@ -236,9 +338,15 @@ trap on_exit EXIT
 trap 'error_code=restore_interrupted; exit 130' HUP INT TERM
 
 [ "$(id -u)" -eq 0 ] || fail restore_requires_root
-[ "${KELION_RESTORE_APPROVED:-0}" = 1 ] || fail restore_approval_required
-[ "$#" -eq 1 ] || fail restore_proof_argument_required
-proof_file=$1
+if [ "${1:-}" = --preflight ]; then
+  [ "$#" -eq 2 ] || fail restore_preflight_proof_argument_required
+  operation_mode=preflight
+  proof_file=$2
+else
+  [ "$#" -eq 1 ] || fail restore_proof_argument_required
+  [ "${KELION_RESTORE_APPROVED:-0}" = 1 ] || fail restore_approval_required
+  proof_file=$1
+fi
 case "$proof_file" in
   /*) ;;
   *) fail restore_proof_path_must_be_absolute ;;
@@ -253,6 +361,8 @@ need psql
 need pg_restore
 need df
 need stat
+need readlink
+need chown
 need sha256sum
 
 psql_version=$(psql --version)
@@ -269,9 +379,17 @@ pg_restore_version=$(pg_restore --version)
 # the publication lock here; a child of deploy.sh explicitly reuses its verified
 # inherited FD 8 instead of opening a competing file description.
 acquire_publication_lock
-exec 7>"$BACKUP_LOCK"
+if [ -e "$BACKUP_LOCK" ] || [ -L "$BACKUP_LOCK" ]; then
+  [ -f "$BACKUP_LOCK" ] && [ ! -L "$BACKUP_LOCK" ] || fail backup_lock_file_invalid
+fi
+exec 7<>"$BACKUP_LOCK"
+normalize_lock_fd 7 "$BACKUP_LOCK" backup
 flock -n 7 || fail backup_operation_active
-exec 9>"$RESTORE_LOCK"
+if [ -e "$RESTORE_LOCK" ] || [ -L "$RESTORE_LOCK" ]; then
+  [ -f "$RESTORE_LOCK" ] && [ ! -L "$RESTORE_LOCK" ] || fail restore_lock_file_invalid
+fi
+exec 9<>"$RESTORE_LOCK"
+normalize_lock_fd 9 "$RESTORE_LOCK" restore
 flock -n 9 || fail restore_operation_active
 
 work=$(mktemp -d "$RUNTIME_DIRECTORY/verified-restore.XXXXXX")
@@ -330,17 +448,18 @@ checksum_line=$(sha256sum -- "$backup_path") || fail restore_backup_hash_unavail
 export PGHOST=$pg_host PGPORT=$pg_port PGUSER=$database_user PGPASSFILE=$pgpass_file
 export PGCONNECT_TIMEOUT=10 PGAPPNAME=kelion-verified-restore
 unset PGPASSWORD DATABASE_URL DATABASE_URL_FILE
-postgres_ready=1
 
-if ! openssl enc -d -aes-256-cbc -pbkdf2 \
-  -in "$backup_path" -pass file:"$encryption_key_file" -out "$plaintext_dump" \
-  2>"$diagnostic_file"; then
-  fail restore_backup_decryption_failed
-fi
-chmod 0400 "$plaintext_dump"
-if ! pg_restore --list < "$plaintext_dump" >/dev/null 2>"$diagnostic_file"; then
-  fail restore_dump_format_invalid
-fi
+# Verify the authenticated archive without leaving a plaintext dump behind.
+# The restore path decrypts persistently only after every read-only prerequisite
+# below has passed; --preflight never writes plaintext backup material.
+set +e
+openssl enc -d -aes-256-cbc -pbkdf2 \
+  -in "$backup_path" -pass file:"$encryption_key_file" 2>>"$diagnostic_file" \
+  | pg_restore --list >/dev/null 2>>"$diagnostic_file"
+archive_pipeline_status=("${PIPESTATUS[@]}")
+set -e
+[ "${archive_pipeline_status[0]}" -eq 0 ] || fail restore_backup_decryption_failed
+[ "${archive_pipeline_status[1]}" -eq 0 ] || fail restore_dump_format_invalid
 
 if ! preflight=$(psql_admin \
   --set=target_database="$database" \
@@ -387,16 +506,49 @@ jq -e '
 
 database_size=$(jq -er '.databaseSizeBytes' <<<"$preflight")
 [[ "$database_size" =~ ^[0-9]+$ ]] || fail restore_database_size_invalid
+[ "$database_size" -le 4611686017890516991 ] || fail restore_disk_capacity_overflow
+backup_size=$(stat -Lc '%s' -- "$backup_path") || fail restore_backup_size_unavailable
+[[ "$backup_size" =~ ^[0-9]+$ ]] && [ "$backup_size" -gt 0 ] \
+  || fail restore_backup_size_invalid
 data_directory=$(psql_admin 2>"$diagnostic_file" <<'SQL'
 SHOW data_directory;
 SQL
 ) || fail restore_data_directory_unavailable
 case "$data_directory" in /*) ;; *) fail restore_data_directory_invalid ;; esac
 [ -d "$data_directory" ] || fail restore_data_directory_invalid
-available_bytes=$(df --output=avail -B1 -- "$data_directory" | tail -n 1 | tr -d '[:space:]')
+available_bytes=$(df --output=avail -B1 -- "$data_directory" | tail -n 1 | tr -d '[:space:]') \
+  || fail restore_disk_capacity_unknown
 [[ "$available_bytes" =~ ^[0-9]+$ ]] || fail restore_disk_capacity_unknown
-required_bytes=$((database_size + 1073741824))
+# Free space must hold both the scratch cluster-sized restore and a decrypted
+# custom archive that can approach the source database size, plus a fixed
+# operational margin. The live database is already reflected in df's usage.
+required_bytes=$((database_size * 2 + 1073741824))
 [ "$available_bytes" -ge "$required_bytes" ] || fail restore_disk_capacity_insufficient
+
+if [ "$operation_mode" = preflight ]; then
+  if ! verify_legacy_contract "$database" 2>"$diagnostic_file"; then
+    fail restore_preflight_legacy_contract_invalid
+  fi
+  server_version_num=$(jq -er '.serverVersionNum' <<<"$preflight")
+  jq -cn \
+    --arg status restore_preflight_ok \
+    --arg backupSha256 "$backup_sha256" \
+    --arg database "$database" \
+    --argjson serverVersionNum "$server_version_num" \
+    --argjson requiredBytes "$required_bytes" \
+    --argjson availableBytes "$available_bytes" \
+    '{schema:1,ok:true,action:"restore_verified_backup_preflight",status:$status,backupSha256:$backupSha256,database:$database,serverVersionNum:$serverVersionNum,requiredBytes:$requiredBytes,availableBytes:$availableBytes}'
+  completed=1
+  exit 0
+fi
+
+if ! openssl enc -d -aes-256-cbc -pbkdf2 \
+  -in "$backup_path" -pass file:"$encryption_key_file" -out "$plaintext_dump" \
+  2>"$diagnostic_file"; then
+  fail restore_backup_decryption_failed
+fi
+chmod 0400 "$plaintext_dump"
+postgres_ready=1
 
 if ! psql_admin --set=scratch_database="$scratch_database" --set=database_owner="$database_user" \
   >/dev/null 2>"$diagnostic_file" <<'SQL'
@@ -417,88 +569,7 @@ if ! PGDATABASE="$scratch_database" pg_restore \
   fail restore_scratch_import_failed
 fi
 
-# These are the minimum relations and columns used by the preserved legacy
-# runtime for conversation, authentication, memory and the billing ledger.
-# The check runs against the scratch database before the live database is
-# denied connections or renamed.
-if ! PGDATABASE="$scratch_database" psql -X --no-psqlrc --quiet \
-  --set ON_ERROR_STOP=1 >/dev/null 2>"$diagnostic_file" <<'SQL'
-DO $contract$
-DECLARE
-  missing_count integer;
-BEGIN
-  WITH required(table_name, column_name) AS (
-    VALUES
-      ('messages', 'id'), ('messages', 'user_email'), ('messages', 'role'),
-      ('messages', 'content'), ('messages', 'created_at'),
-      ('user_prefs', 'user_email'),
-      ('wallets', 'user_email'), ('wallets', 'balance'), ('wallets', 'currency'),
-      ('wallets', 'topup_ref'),
-      ('billing_events', 'id'), ('billing_events', 'user_email'),
-      ('billing_events', 'kind'), ('billing_events', 'amount'),
-      ('billing_events', 'ref'), ('billing_events', 'created_at'),
-      ('transactions', 'id'), ('transactions', 'user_id'), ('transactions', 'amount'),
-      ('transactions', 'credits'), ('transactions', 'status'),
-      ('transactions', 'payment_ref'), ('transactions', 'created_at'),
-      ('cost_events', 'id'), ('cost_events', 'user_email'), ('cost_events', 'kind'),
-      ('cost_events', 'cost_usd'), ('cost_events', 'created_at'),
-      ('memories', 'user_email'), ('memories', 'content'),
-      ('google_accounts', 'email'), ('google_accounts', 'refresh_token'),
-      ('local_accounts', 'email'), ('local_accounts', 'pass_hash'),
-      ('visits', 'id'), ('visits', 'fingerprint'), ('visits', 'ip'),
-      ('visits', 'country'), ('visits', 'country_code'), ('visits', 'city'),
-      ('visits', 'region'), ('visits', 'isp'), ('visits', 'tz'),
-      ('visits', 'browser'), ('visits', 'os'), ('visits', 'device'),
-      ('visits', 'lang'), ('visits', 'referrer'), ('visits', 'is_bot'),
-      ('visits', 'started_at'), ('visits', 'user_email'),
-      ('visits', 'last_seen_at'), ('visits', 'actions'),
-      ('visits', 'photo_url'), ('visits', 'pages'),
-      ('demo_uses', 'id'), ('demo_uses', 'fingerprint'), ('demo_uses', 'ip'),
-      ('demo_uses', 'country'), ('demo_uses', 'country_code'),
-      ('demo_uses', 'city'), ('demo_uses', 'region'), ('demo_uses', 'isp'),
-      ('demo_uses', 'tz'), ('demo_uses', 'browser'), ('demo_uses', 'os'),
-      ('demo_uses', 'device'), ('demo_uses', 'lang'),
-      ('demo_uses', 'referrer'), ('demo_uses', 'is_bot'),
-      ('demo_uses', 'started_at'), ('demo_uses', 'session_email'),
-      ('app_files', 'name'), ('app_files', 'content'),
-      ('app_files', 'content_type'), ('app_files', 'updated_at'),
-      ('app_downloads', 'id'), ('app_downloads', 'file'),
-      ('app_downloads', 'user_email'), ('app_downloads', 'ip'),
-      ('app_downloads', 'country'), ('app_downloads', 'ua'),
-      ('app_downloads', 'created_at'),
-      ('client_errors', 'id'), ('client_errors', 'type'),
-      ('client_errors', 'message'), ('client_errors', 'stack'),
-      ('client_errors', 'url'), ('client_errors', 'ip'),
-      ('client_errors', 'created_at'),
-      ('voiceprints', 'user_email'), ('voiceprints', 'name'),
-      ('voiceprints', 'gender'), ('voiceprints', 'is_admin'),
-      ('voiceprints', 'features'), ('voiceprints', 'feature_meta'),
-      ('voiceprints', 'audio_clip'), ('voiceprints', 'created_at'),
-      ('voiceprints', 'updated_at')
-  ), missing AS (
-    SELECT required.table_name, required.column_name
-    FROM required
-    LEFT JOIN information_schema.columns actual
-      ON actual.table_schema = 'public'
-     AND actual.table_name = required.table_name
-     AND actual.column_name = required.column_name
-    WHERE actual.column_name IS NULL
-       OR NOT EXISTS (
-         SELECT 1 FROM pg_class relation
-         JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
-         WHERE namespace.nspname = 'public'
-           AND relation.relname = required.table_name
-           AND relation.relkind IN ('r', 'p')
-       )
-  )
-  SELECT count(*) INTO missing_count FROM missing;
-  IF missing_count <> 0 THEN
-    RAISE EXCEPTION 'legacy_restore_contract_invalid';
-  END IF;
-END
-$contract$;
-SQL
-then
+if ! verify_legacy_contract "$scratch_database" 2>"$diagnostic_file"; then
   fail restore_legacy_contract_invalid
 fi
 
